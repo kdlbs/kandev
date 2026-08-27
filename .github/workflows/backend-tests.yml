@@ -159,17 +159,22 @@ jobs:
         working-directory: ${{ github.workspace }}
         env:
           EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.base_ref }}
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
           PUSH_BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
 
-          # A merge_group run has no pull request behind it, so neither
-          # `pull_request.base.sha` nor `event.before` exists. The queue branch
+          # On `pull_request` the checkout is the merge ref, whose first parent
+          # is the current base branch tip. `pull_request.base.sha` is the base
+          # tip from when the PR event fired, so it can be stale after main
+          # advances. Use the merge ref's actual base tip to keep the diff and
+          # incremental lint scoped to this PR.
+          #
+          # A merge_group run has no pull request behind it, so the queue branch
           # is cut from `merge_group.base_sha`, which is the equivalent base.
           if [[ "${EVENT_NAME}" == "pull_request" ]]; then
-            BASE_SHA="${PR_BASE_SHA}"
+            BASE_SHA="$(git merge-base HEAD "origin/${BASE_REF}")"
           elif [[ "${EVENT_NAME}" == "merge_group" ]]; then
             BASE_SHA="${MERGE_GROUP_BASE_SHA}"
           else
