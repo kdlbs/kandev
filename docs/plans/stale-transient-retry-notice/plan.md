@@ -21,8 +21,10 @@ manual recovery card only when Cancel actually stops an active loop.
 
 In scope:
 
-- Delete every persisted session message whose metadata contains the boolean
-  value `retrying: true` when an interactive retry ends.
+- Attempt to delete every persisted session message whose metadata contains the
+  boolean value `retrying: true` when an interactive retry ends. Successful
+  cleanup removes every matching message; failures remain eligible for a later
+  authorized cleanup.
 - Resolve stale notices after an authorized late Cancel even when no retry loop
   remains.
 - Preserve the existing red Resume and Start fresh recovery message for active
@@ -49,6 +51,9 @@ Out of scope:
   service operations never run while `taskRuntimeStateMu` is held. Invoke both
   parts at every true loop-ending path: success, exhaustion, terminal state,
   stop, cancellation, and shutdown.
+- Skip the full transcript lookup on ordinary successful turns with no owned
+  retry entry. Terminal, stop, and Cancel paths force the lookup for stale
+  persisted notices.
 - Do not resolve notices from `nextTransientAttempt`; that transition only
   cancels the superseded timer while retry ownership continues.
 - Keep `authorizeTaskSessionPair` as the first operation in
@@ -127,8 +132,8 @@ Implemented and verified:
 - Focused orchestrator regression tests passed, including durable cleanup,
   late and active Cancel, denied authorization, attempt advancement, and
   swallowed store errors.
-- `rtk go test ./internal/orchestrator -count=1` passed (2,166 tests).
-- `rtk go test -race ./internal/orchestrator -run 'Test(ResetTransientRetry_ResolvesPersistedNotices|CancelTransientRetry_NoActiveLoopResolvesPersistedNotice|CancelTransientRetry_ActiveLoopResolvesNoticeAndShowsRecovery|CancelTransientRetry_DeniedPairDoesNotResolveNotice|NextTransientAttempt_DoesNotResolveCurrentNotice|ResolveTransientRetryMessages_SwallowsStoreErrors)' -count=1` passed (6 tests).
+- `rtk go test ./internal/orchestrator -count=1` passed (2,168 tests).
+- `rtk go test -race ./internal/orchestrator -run 'Test(ResetTransientRetry_ResolvesPersistedNotices|ResetTransientRetry_WithoutActiveLoopSkipsTranscriptScan|CancelTransientRetry_NoActiveLoopResolvesPersistedNotice|CancelTransientRetry_ActiveLoopResolvesNoticeAndShowsRecovery|CancelTransientRetry_DeniedPairDoesNotResolveNotice|NextTransientAttempt_DoesNotResolveCurrentNotice|ResolveTransientRetryMessages_SwallowsStoreErrors|StopSession_ResolvesPersistedNotice)' -count=1` passed (8 tests).
 - `rtk make -C apps/backend test` passed after clearing managed launcher
   configuration variables from the test process. The first unmodified run was
   affected by the workspace's injected `/root/.kandev/config.yaml` override.

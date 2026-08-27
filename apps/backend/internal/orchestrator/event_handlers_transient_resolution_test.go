@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/stretchr/testify/require"
 )
@@ -17,10 +18,12 @@ type transientRetryMessageServiceStub struct {
 	messages  []*models.Message
 	listErr   error
 	deleteErr error
+	listCalls int
 	deleted   []string
 }
 
 func (s *transientRetryMessageServiceStub) ListMessages(context.Context, string) ([]*models.Message, error) {
+	s.listCalls++
 	if s.listErr != nil {
 		return nil, s.listErr
 	}
@@ -94,6 +97,7 @@ func TestResetTransientRetry_ResolvesPersistedNotices(t *testing.T) {
 	svc, taskSvc, eventBus := newPersistentTransientRetryTestService(t)
 	createPersistedTransientRetryNotice(t, svc)
 	createPersistedTransientRetryNoticeAttempt(t, svc, 2)
+	svc.scheduleTransientRetry("t1", "s1", "", 2, time.Hour)
 	_, err := taskSvc.CreateMessage(context.Background(), &taskservice.CreateMessageRequest{
 		TaskSessionID: "s1",
 		TaskID:        "t1",
@@ -118,6 +122,16 @@ func TestResetTransientRetry_ResolvesPersistedNotices(t *testing.T) {
 		}
 	}
 	require.Equal(t, 2, deleted)
+}
+
+// @covers AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.10
+func TestResetTransientRetry_WithoutActiveLoopSkipsTranscriptScan(t *testing.T) {
+	store := &transientRetryMessageServiceStub{}
+	svc := &Service{logger: testLogger(), transientRetryMessages: store}
+
+	svc.resetTransientRetry("s1")
+
+	require.Zero(t, store.listCalls)
 }
 
 // @covers AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.11
@@ -199,4 +213,16 @@ func TestCancelTransientRetry_DeniedPairDoesNotResolveNotice(t *testing.T) {
 
 	require.False(t, svc.CancelTransientRetry(context.Background(), "t1", "s1"))
 	require.Empty(t, store.deleted)
+}
+
+// @covers AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.10
+func TestStopSession_ResolvesPersistedNotice(t *testing.T) {
+	svc, taskSvc, _ := newPersistentTransientRetryTestService(t)
+	repo, ok := svc.repo.(*sqliterepo.Repository)
+	require.True(t, ok)
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-stop")
+	createPersistedTransientRetryNotice(t, svc)
+
+	require.NoError(t, svc.StopSession(context.Background(), "s1", "operator stopped", false))
+	require.Empty(t, retryingMessages(t, taskSvc))
 }

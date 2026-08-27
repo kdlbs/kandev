@@ -16,13 +16,15 @@ requirements:
 
 ## Acceptance
 
-- Every true interactive retry ending path retires all persisted session
-  messages whose metadata has boolean `retrying: true`.
+- Every true interactive retry ending path attempts to retire all persisted
+  session messages whose metadata has boolean `retrying: true`; successful
+  cleanup removes all matches, while failures remain eligible for later
+  authorized cleanup.
 - The task service owns message listing and deletion, and each deletion is
   published as `session.message.deleted` for connected viewers.
 - Successful recovery and late authorized Cancel leave no yellow retry notice
-  in the durable transcript; the task-service-backed test proves the state
-  after the session settles and reloads the transcript.
+  in the durable transcript when cleanup succeeds; the task-service-backed test
+  proves the state after the session settles and reloads the transcript.
 - Late authorized Cancel returns false, resolves stale notices, and creates no
   red recovery message.
 - Active authorized Cancel returns true, resolves stale notices, and retains
@@ -32,6 +34,8 @@ requirements:
 - Attempt advancement does not clear the notice while retry ownership remains.
 - Transcript cleanup failures are logged and swallowed, and durable I/O does
   not run while `taskRuntimeStateMu` is held.
+- Ordinary successful turns without an owned retry entry skip the full
+  transcript scan; terminal, stop, and Cancel paths force stale-notice cleanup.
 - Desktop, mobile, and transport-loss Playwright flows prove that yellow and
   red retry cards do not become stale or coexist after cancellation.
 
@@ -136,8 +140,8 @@ any retry-state read or transcript mutation.
 
 Verification passed:
 
-- Focused retry-resolution tests: 6 passed, including race mode.
-- Full orchestrator package: 2,166 tests passed.
+- Focused retry-resolution tests: 8 passed, including race mode.
+- Full orchestrator package: 2,168 tests passed.
 - Full backend test suite passed with managed launcher configuration variables
   unset; the unmodified managed run was blocked by its injected config file.
 - Backend lint and changed-code `golangci-lint` passed.

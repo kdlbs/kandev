@@ -460,24 +460,31 @@ func transientFailureExhaustedMessage(classified *routingerr.Error) string {
 
 // clearTransientRetryState clears a session's retry entry, cancels its timer,
 // and drops the cached prompt (which may hold large/sensitive attachment data).
-func (s *Service) clearTransientRetryState(sessionID string) {
+func (s *Service) clearTransientRetryState(sessionID string) bool {
 	s.lastTurnPrompt.Delete(sessionID)
-	if v, ok := s.transientRetries.LoadAndDelete(sessionID); ok {
+	v, ok := s.transientRetries.LoadAndDelete(sessionID)
+	if ok {
 		if entry, ok := v.(*transientRetryEntry); ok && entry.cancel != nil {
 			entry.cancel()
 		}
 	}
+	return ok
 }
 
 // resetTransientRetry clears in-memory retry state and retires the persisted
 // retry notice(s). The detached context keeps durable cleanup best effort even
 // when the event that ended the retry was cancelled by its caller.
 func (s *Service) resetTransientRetry(sessionID string) {
-	s.resetTransientRetryWithContext(context.Background(), sessionID)
+	s.resetTransientRetryWithContext(context.Background(), sessionID, false)
 }
 
-func (s *Service) resetTransientRetryWithContext(ctx context.Context, sessionID string) {
-	s.clearTransientRetryState(sessionID)
+// forceResolve is used by explicit stop/cancel and terminal paths where a
+// persisted notice can outlive the in-memory retry entry. Normal successful
+// turns skip the transcript scan when no retry loop was owned.
+func (s *Service) resetTransientRetryWithContext(ctx context.Context, sessionID string, forceResolve bool) {
+	if !s.clearTransientRetryState(sessionID) && !forceResolve {
+		return
+	}
 	s.resolveTransientRetryMessages(context.WithoutCancel(ctx), sessionID)
 }
 
@@ -538,7 +545,7 @@ func (s *Service) CancelTransientRetry(ctx context.Context, taskID, sessionID st
 		return false
 	}
 	_, active := s.transientRetries.Load(sessionID)
-	s.resetTransientRetry(sessionID)
+	s.resetTransientRetryWithContext(ctx, sessionID, true)
 	if !active {
 		return false
 	}

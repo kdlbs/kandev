@@ -200,15 +200,22 @@ content includes the safe reason, provider, attempt ordinal, absolute deadline,
 and Cancel action. The backend timer owns the retry. The persisted message is a
 transcript projection of that ownership, not an independent retry state.
 
-The orchestrator resolves every outstanding transient-retry status message for
-a session whenever retry ownership ends through success, exhaustion, a
-terminal event, coordinator stop, explicit cancellation, or shutdown. It lists
-the session transcript through the task service, selects every message whose
-metadata has the boolean value `retrying: true`, and deletes each selected
-message through the task service. Task-service deletion remains the single
-mutation path and publishes `session.message.deleted`; connected clients remove
-the message from their stores, while reload and task switching read a
-transcript that no longer contains the notice.
+The orchestrator attempts to resolve every outstanding transient-retry status
+message for a session whenever retry ownership ends through success, exhaustion,
+a terminal event, coordinator stop, explicit cancellation, an ordinary session
+stop, or shutdown. It lists the session transcript through the task service,
+selects every message whose metadata has the boolean value `retrying: true`, and
+deletes each selected message through the task service. Task-service deletion
+remains the single mutation path and publishes `session.message.deleted`;
+connected clients remove each successfully deleted message from their stores,
+while reload and task switching read a transcript that no longer contains any
+notice whose cleanup succeeded. Listing or deletion failures are logged and
+swallowed, leaving a later authorized cleanup to retry remaining notices.
+
+Normal successful turns perform this durable lookup only when the orchestrator
+still owns an in-memory retry entry. Explicit stop, terminal, and Cancel paths
+force the lookup so a persisted notice can still be retired after its timer or
+process has already disappeared.
 
 Deletion is intentional. Changing only `retrying` to `false` would make the
 current task-chat renderer treat the old retry message as a generic settled
@@ -368,9 +375,11 @@ stored in policy or route state.
 - Absolute deadlines are stored in UTC. Browser clocks affect countdown display
   only.
 - A restart never repeats a dispatch whose completion is ambiguous.
-- A completed, exhausted, stopped, terminal, or cancelled interactive retry
-  has no outstanding `retrying: true` transcript message. Message deletion is
-  broadcast to all viewers through the task-service event bus.
+- A completed, exhausted, stopped, terminal, or cancelled interactive retry has
+  no outstanding `retrying: true` transcript message after successful cleanup.
+  Each successful deletion is broadcast to all viewers through the task-service
+  event bus. A failed cleanup is best effort and remains eligible for a later
+  authorized cleanup.
 
 ## Scenarios
 
