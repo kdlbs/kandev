@@ -186,12 +186,27 @@ func (a *taskCreatorAdapter) createOfficeTask(
 }
 
 // CreateOfficeTaskInWorkflow creates an office task pinned to a specific
-// workflow id, bypassing the workspace's default office_workflow_id. Used
-// for the standing coordination task that lives on the dedicated
-// Coordination workflow.
+// workflow id, bypassing the workspace's default office_workflow_id. Its
+// only production caller (as of WO-36) is the routines dispatcher, which
+// pins a materialized heavy-routine run to the dedicated Routine workflow.
 func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 	ctx context.Context, workspaceID, projectID, assigneeAgentID, workflowID, title, description string,
 ) (string, error) {
+	metadata := map[string]interface{}{
+		// The Routine workflow's start step carries on_enter:
+		// auto_start_agent, but a materialized run lands directly on that
+		// step rather than transitioning into it, so nothing would
+		// otherwise evaluate on_enter for it. This opts the task into
+		// handleTaskCreated's create-time on_enter evaluation.
+		models.MetaKeyAutoStartOnCreate: true,
+	}
+	if assigneeAgentID != "" {
+		// The Routine workflow's start step pins no agent (routine.yml), so
+		// the kanban auto-start path's fallback read of
+		// task.Metadata[MetaKeyAgentProfileID] is what lets a materialized
+		// heavy-routine task actually launch with the routine's assignee.
+		metadata[models.MetaKeyAgentProfileID] = assigneeAgentID
+	}
 	result, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
 		WorkspaceID:            workspaceID,
 		WorkflowID:             workflowID,
@@ -199,6 +214,7 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 		Description:            description,
 		ProjectID:              projectID,
 		AssigneeAgentProfileID: assigneeAgentID,
+		Metadata:               metadata,
 		Origin:                 models.TaskOriginOnboarding,
 	})
 	if err != nil {

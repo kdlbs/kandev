@@ -463,9 +463,10 @@ func TestIdleSkip_HeartbeatWithActionableTasks_Proceeds(t *testing.T) {
 
 	service.RunSchedulerTick(svc, ctx)
 
-	// Run should have proceeded to launch (mock called or at least not skipped).
-	// Since there is no task_id in the payload the scheduler logs but does not
-	// call StartTask (launchOrLog path). Verify the run was finished normally.
+	// This test only asserts the idle-skip guard did not trigger (the point
+	// of the test). Since the payload carries no task_id, launchAgent still
+	// fails the run afterward (WO-35) — that terminal outcome is covered by
+	// scheduler_taskless_launch_test.go, not here.
 	entries, err := svc.ListActivity(ctx, "ws-1", 50)
 	if err != nil {
 		t.Fatalf("list activity: %v", err)

@@ -175,6 +175,35 @@ func (r *Repository) AreAllChildrenTerminal(ctx context.Context, parentID string
 	return nonTerminal == 0, nil
 }
 
+// ChildState is a minimal id+state pair over a parent's child tasks.
+type ChildState struct {
+	TaskID string `db:"id"`
+	State  string `db:"state"`
+}
+
+// ListChildStates returns id+state for every child of a parent task,
+// ordered by id. Callers that wake a parent once AreAllChildrenTerminal
+// reports true use this to build a wake-idempotency key that changes
+// across delegation waves — a parent that fans out again after one wave
+// completes gets a distinct child set (and therefore a distinct key), so
+// it can be woken again instead of colliding with the permanently-unique
+// {reason}:{taskID}:{agentID} key QueueRunCtx mints by default.
+func (r *Repository) ListChildStates(ctx context.Context, parentID string) ([]ChildState, error) {
+	var rows []ChildState
+	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+		SELECT id, COALESCE(state, '') AS state FROM tasks
+		WHERE parent_id = ?
+		ORDER BY id
+	`), parentID)
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []ChildState{}
+	}
+	return rows, nil
+}
+
 // ChildSummary holds summary data for a completed child task.
 type ChildSummary struct {
 	TaskID                 string `db:"id" json:"id"`

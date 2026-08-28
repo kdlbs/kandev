@@ -14,18 +14,20 @@ import (
 
 // TestSessionShapedAndSessionIndependentKindsPartitionCompiledOnEnterKinds
 // asserts the two classification maps in this file are exhaustive and
-// disjoint over exactly the ActionKind values compileOnEnter (types.go) can
-// emit. It parses that function's source rather than hand-listing the
-// kinds, so a kind added to the compiler later without a deliberate
-// classification decision fails this test instead of silently defaulting
-// into double execution (dispatched from both HandleTriggerSessionShapedOnly
-// and DispatchStepEntry) or silence (dispatched from neither) — see
+// disjoint over exactly the ActionKind values CompileOnEnterAction (types.go)
+// can emit for a single on_enter declaration — the per-kind switch
+// compileOnEnter delegates to. It parses that function's source rather than
+// hand-listing the kinds, so a kind added to the compiler later without a
+// deliberate classification decision fails this test instead of silently
+// defaulting into double execution (dispatched from both
+// HandleTriggerSessionShapedOnly and DispatchStepEntry) or silence
+// (dispatched from neither) — see
 // docs/specs/office/system-design/step-entry-sequence-execution.md
 // ("The two lists together are exhaustive").
 func TestSessionShapedAndSessionIndependentKindsPartitionCompiledOnEnterKinds(t *testing.T) {
-	compiled, err := actionKindsAssignedInFunc("types.go", "compileOnEnter")
+	compiled, err := actionKindsAssignedInFunc("types.go", "CompileOnEnterAction")
 	require.NoError(t, err)
-	require.NotEmpty(t, compiled, "compileOnEnter must assign at least one ActionKind for this test to be meaningful")
+	require.NotEmpty(t, compiled, "CompileOnEnterAction must assign at least one ActionKind for this test to be meaningful")
 
 	for _, kind := range compiled {
 		shaped := isSessionShapedActionKind(kind)
@@ -38,11 +40,11 @@ func TestSessionShapedAndSessionIndependentKindsPartitionCompiledOnEnterKinds(t 
 
 	for kind := range sessionShapedActionKinds {
 		assert.Contains(t, compiled, kind,
-			"sessionShapedActionKinds lists %q, which compileOnEnter no longer emits", kind)
+			"sessionShapedActionKinds lists %q, which CompileOnEnterAction no longer emits", kind)
 	}
 	for kind := range sessionIndependentActionKinds {
 		assert.Contains(t, compiled, kind,
-			"sessionIndependentActionKinds lists %q, which compileOnEnter no longer emits", kind)
+			"sessionIndependentActionKinds lists %q, which CompileOnEnterAction no longer emits", kind)
 	}
 }
 

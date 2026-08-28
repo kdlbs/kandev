@@ -554,6 +554,34 @@ func ensureSeededTurn(ctx context.Context, repo *sqliterepo.Repository, sessionI
 	return turn.ID, nil
 }
 
+// createSeededTurn always creates a fresh turn rather than reusing the
+// session's active one, so a spec can hold a real open turn on the session
+// while seeding a second, independently-timed turn alongside it (see
+// seedMessageRequest.NewTurn). startedAt/completedAt default to "now" and
+// "open" respectively when nil.
+func createSeededTurn(ctx context.Context, repo *sqliterepo.Repository, sessionID, taskID string, startedAt, completedAt *time.Time) (string, error) {
+	now := time.Now().UTC()
+	turn := &models.Turn{
+		ID:            uuid.New().String(),
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		StartedAt:     now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if startedAt != nil {
+		turn.StartedAt = startedAt.UTC()
+	}
+	if completedAt != nil {
+		ca := completedAt.UTC()
+		turn.CompletedAt = &ca
+	}
+	if err := repo.CreateTurn(ctx, turn); err != nil {
+		return "", err
+	}
+	return turn.ID, nil
+}
+
 func publishSessionStateChanged(ctx context.Context, eventBus bus.EventBus, session *models.TaskSession, log *logger.Logger) {
 	if eventBus == nil {
 		return
@@ -592,6 +620,18 @@ type seedMessageRequest struct {
 	// message is attached to), so e2e specs can exercise the message metadata
 	// dialog's turn_metadata field end to end.
 	TurnMetadata map[string]interface{} `json:"turn_metadata,omitempty"`
+	// NewTurn, when true, creates a brand-new turn for this message instead
+	// of reusing the session's active turn. Lets a spec construct two turns
+	// on the same session (e.g. a still-open turn plus a separate,
+	// later-started lifecycle-shaped turn) to exercise current-turn-authority
+	// ordering (D1) end to end, which ensureSeededTurn's reuse-active-turn
+	// behavior cannot produce.
+	NewTurn bool `json:"new_turn,omitempty"`
+	// TurnStartedAt/TurnCompletedAt set the new turn's timestamps when
+	// NewTurn is true, so a spec can control D1's ordering directly. Ignored
+	// when NewTurn is false.
+	TurnStartedAt   *time.Time `json:"turn_started_at,omitempty"`
+	TurnCompletedAt *time.Time `json:"turn_completed_at,omitempty"`
 }
 
 // seedMessageHandler inserts a synthetic message, ensuring an active turn
@@ -621,7 +661,12 @@ func seedMessageHandler(repo *sqliterepo.Repository, eventBus bus.EventBus, log 
 			return
 		}
 
-		turnID, err := ensureSeededTurn(ctx, repo, session.ID, session.TaskID)
+		var turnID string
+		if req.NewTurn {
+			turnID, err = createSeededTurn(ctx, repo, session.ID, session.TaskID, req.TurnStartedAt, req.TurnCompletedAt)
+		} else {
+			turnID, err = ensureSeededTurn(ctx, repo, session.ID, session.TaskID)
+		}
 		if err != nil {
 			log.Error("test harness: ensure turn failed", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

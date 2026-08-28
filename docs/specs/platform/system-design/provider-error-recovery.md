@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
 created: 2026-08-08
-updated: 2026-08-17
+updated: 2026-08-27
 owners:
   - Kandev
 ---
@@ -18,7 +18,7 @@ This design preserves the technical source detail for `REQ-PLATFORM-PROVIDER-ERR
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Migrated source detail](#migrated-source-detail), [Interactive transient retry notice lifecycle](#interactive-transient-retry-notice-lifecycle) |
 
 ## Migrated source detail
 
@@ -192,6 +192,59 @@ not write legacy rule shapes.
   sessions from creating a retry herd. Expired circuits recover through one
   exclusive probe.
 
+### Interactive transient retry notice lifecycle
+
+Concrete-profile task chat persists one status message for each scheduled
+retry attempt. The message metadata contains `retrying: true`; its visible
+content includes the safe reason, provider, attempt ordinal, absolute deadline,
+and Cancel action. The backend timer owns the retry. The persisted message is a
+transcript projection of that ownership, not an independent retry state.
+
+The orchestrator attempts to resolve every outstanding transient-retry status
+message for a session whenever retry ownership ends through success, exhaustion,
+a terminal event, coordinator stop, explicit cancellation, an ordinary session
+stop, or shutdown. It lists the session transcript through the task service,
+selects every message whose metadata has the boolean value `retrying: true`, and
+deletes each selected message through the task service. Task-service deletion
+remains the single mutation path and publishes `session.message.deleted`;
+connected clients remove each successfully deleted message from their stores,
+while reload and task switching read a transcript that no longer contains any
+notice whose cleanup succeeded. Listing or deletion failures are logged and
+swallowed, leaving a later authorized cleanup to retry remaining notices.
+
+Normal successful turns perform this durable lookup only when the orchestrator
+still owns an in-memory retry entry. Explicit stop, terminal, and Cancel paths
+force the lookup so a persisted notice can still be retired after its timer or
+process has already disappeared.
+
+Deletion is intentional. Changing only `retrying` to `false` would make the
+current task-chat renderer treat the old retry message as a generic settled
+warning, preserving stale retry text and its Cancel action. The retry attempts
+remain observable through agent output and recovery history without retaining
+an actionable status projection after ownership ends.
+
+Advancing from attempt N to attempt N+1 only cancels the superseded in-memory
+timer. It does not run the retry-ending reset and therefore does not retire the
+current attempt's notice prematurely. Durable message operations do not run
+while the orchestrator's runtime-state mutex is held.
+
+`CancelTransientRetry` authorizes the task-session pair before reading or
+mutating retry state. After authorization it always retires outstanding retry
+notices. If a retry loop is active, cancellation also disarms its timer and
+creates the existing manual recovery message with Resume and Start fresh
+actions. If no loop remains, cancellation is an idempotent cleanup: it reports
+no active cancellation and creates no recovery message. Denied and foreign
+pairs remain indistinguishable.
+
+Transcript listing or individual deletion failures are logged and swallowed.
+The resolver continues after an individual deletion failure so one corrupt or
+racing message cannot prevent other notices from being retired. This cleanup
+does not turn an otherwise successful agent transition into a failure.
+
+Desktop and mobile use the same inline retry card and Cancel action. This
+change does not add a separate mobile composition; both layouts consume the
+same deletion event and must stop rendering the notice durably.
+
 ### Use across Kanban, utility calls, and Office
 
 - A dynamic profile has one policy document regardless of caller. Kanban,
@@ -308,6 +361,10 @@ stored in policy or route state.
   exhaustive registry tests fail and runtime classification is unclassified.
 - If many sessions share an open resource circuit, one probe owns recovery and
   the rest continue waiting or evaluate other candidates without stampede.
+- If transient-retry transcript cleanup cannot list or delete a message, the
+  orchestrator logs the failure without failing the successful, terminal, or
+  cancellation transition. A later authorized cleanup can retry remaining
+  notices.
 
 ## Persistence guarantees
 
@@ -318,6 +375,11 @@ stored in policy or route state.
 - Absolute deadlines are stored in UTC. Browser clocks affect countdown display
   only.
 - A restart never repeats a dispatch whose completion is ambiguous.
+- A completed, exhausted, stopped, terminal, or cancelled interactive retry has
+  no outstanding `retrying: true` transcript message after successful cleanup.
+  Each successful deletion is broadcast to all viewers through the task-service
+  event bus. A failed cleanup is best effort and remains eligible for a later
+  authorized cleanup.
 
 ## Scenarios
 
@@ -348,6 +410,14 @@ stored in policy or route state.
   candidate policy and route transition.
 - **GIVEN** a phone viewport, **WHEN** a user edits both class policies, **THEN**
   all controls remain usable in one column with no horizontal page overflow.
+- **GIVEN** an interactive transient retry succeeds, **WHEN** its session later
+  becomes idle or its task is reloaded, **THEN** no retry notice is rendered.
+- **GIVEN** an authorized user selects Cancel after the retry loop has already
+  ended, **WHEN** a stale retry notice remains, **THEN** the notice is retired
+  without creating a manual recovery message.
+- **GIVEN** an authorized user selects Cancel while a retry loop is active,
+  **WHEN** cancellation completes, **THEN** the retry notice is retired and the
+  manual Resume and Start fresh recovery message is rendered.
 
 ## Out of scope
 

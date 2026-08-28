@@ -189,6 +189,17 @@ const (
 	// that produced the launch-only runtime seed. A seed is valid only for this
 	// profile, even if task profile selection changes before the first launch.
 	MetaKeyInitialSessionRuntimeConfigProfileID = "initial_session_runtime_config_profile_id"
+	// MetaKeyAutoStartOnCreate is a positive opt-in a task creator stamps when
+	// it wants task.created to evaluate the destination step's on_enter
+	// actions immediately, as if creation were itself a transition into that
+	// step. Absence is the default and preserves existing behavior for every
+	// other producer (REST/MCP/WS create with or without start_agent /
+	// prepare_session, CreateChildTask, etc.) — those already have their own
+	// launch decision, and task.created must not second-guess it. Set today
+	// only by CreateOfficeTaskInWorkflow for materialized heavy-routine runs,
+	// whose Routine workflow start step has no other transition to carry it
+	// into an auto_start_agent evaluation.
+	MetaKeyAutoStartOnCreate = "auto_start_on_create"
 )
 
 // IsAgentTitlePending reports whether task metadata contains the durable
@@ -210,6 +221,15 @@ func AgentTitleOwnerSessionID(metadata map[string]interface{}) string {
 // IsAgentTitleOwner reports whether sessionID owns the pending title handoff.
 func IsAgentTitleOwner(metadata map[string]interface{}, sessionID string) bool {
 	return sessionID != "" && IsAgentTitlePending(metadata) && AgentTitleOwnerSessionID(metadata) == sessionID
+}
+
+// HasAutoStartOnCreateIntent reports whether task metadata carries the
+// positive MetaKeyAutoStartOnCreate opt-in. Only an explicit true value
+// counts — absence (the default for nearly every task producer) must never
+// be read as "please auto-start me".
+func HasAutoStartOnCreateIntent(metadata map[string]interface{}) bool {
+	intent, ok := metadata[MetaKeyAutoStartOnCreate].(bool)
+	return ok && intent
 }
 
 // TaskSession.Metadata key that records how the session came into existence.
@@ -289,6 +309,12 @@ const TurnMetaKeyRuntimeConfigSnapshot = "runtime_config_snapshot"
 // TurnMetaKeyWorkflowStepIDAtStart records the workflow step the turn's task
 // was in when the turn started. Absent when the task held no step.
 const TurnMetaKeyWorkflowStepIDAtStart = "workflow_step_id_at_start"
+
+// TurnMetaKeyLifecycleOnly marks a turn created only to parent a lifecycle
+// message (for example the agent_boot script_execution message on resume).
+// A lifecycle turn never reflects real agent work and must never be current-
+// turn authority, so every current-turn resolution site excludes it.
+const TurnMetaKeyLifecycleOnly = "lifecycle_only"
 
 // TurnMetaKeyPromptDispatchPending marks a successor created before agentctl
 // acknowledges its prompt. Empty marked turns are not current-turn authority

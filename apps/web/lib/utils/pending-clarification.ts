@@ -30,29 +30,58 @@ function durableTurnTimestampKey(value: string): string {
   return `${match[1]}.${(match[2] ?? "").padEnd(9, "0")}Z`;
 }
 
+// A turn counts as lifecycle-only for exactly these four encodings, mirroring
+// the backend's turnMetadataFlagPredicate (D12): boolean true, number 1,
+// string "true", string "1". Everything else - an absent key, null,
+// undefined, false, 0, "", "false", "0", "yes", an object, an array - is
+// conversational. Deliberately a value-set membership check, not a
+// truthiness test (misreads "false"/"0"/"yes"/{}/[] as lifecycle) or a
+// String() coercion (misreads ["1"]).
+const LIFECYCLE_ONLY_VALUES: ReadonlySet<unknown> = new Set([true, 1, "true", "1"]);
+
+function isLifecycleOnlyTurn(turn: Turn): boolean {
+  return LIFECYCLE_ONLY_VALUES.has(turn.metadata?.lifecycle_only);
+}
+
+// completed_at is optional on the wire, so an open turn arrives as an absent
+// key or explicit null; == null treats both alike.
+function isOpenTurn(turn: Turn): boolean {
+  return turn.completed_at == null;
+}
+
+// isNewerTurn mirrors D1's total order: an open turn always outranks a
+// completed one regardless of timestamps, then started_at, created_at, id -
+// all descending.
+function isNewerTurn(candidate: Turn, current: Turn): boolean {
+  const candidateOpen = isOpenTurn(candidate);
+  if (candidateOpen !== isOpenTurn(current)) return candidateOpen;
+  const candidateKey = [
+    durableTurnTimestampKey(candidate.started_at),
+    durableTurnTimestampKey(candidate.created_at),
+    // Mirrors the backend's final deterministic tie-break. Turn IDs do not
+    // encode creation time; exact timestamp ties have no finer ordering.
+    candidate.id,
+  ];
+  const currentKey = [
+    durableTurnTimestampKey(current.started_at),
+    durableTurnTimestampKey(current.created_at),
+    current.id,
+  ];
+  for (let part = 0; part < candidateKey.length; part++) {
+    if (candidateKey[part] === currentKey[part]) continue;
+    return candidateKey[part] > currentKey[part];
+  }
+  return false;
+}
+
 export function newestDurableTurnId(turns?: readonly Turn[]): string | null | undefined {
   if (turns === undefined) return undefined;
-  if (turns.length === 0) return null;
-  let newest = turns[0];
-  for (let index = 1; index < turns.length; index++) {
-    const candidate = turns[index];
-    const newestKey = [
-      durableTurnTimestampKey(newest.started_at),
-      durableTurnTimestampKey(newest.created_at),
-      newest.id,
-    ];
-    const candidateKey = [
-      durableTurnTimestampKey(candidate.started_at),
-      durableTurnTimestampKey(candidate.created_at),
-      // Mirrors the backend's final deterministic tie-break. Turn IDs do not
-      // encode creation time; exact timestamp ties have no finer ordering.
-      candidate.id,
-    ];
-    for (let part = 0; part < candidateKey.length; part++) {
-      if (candidateKey[part] === newestKey[part]) continue;
-      if (candidateKey[part] > newestKey[part]) newest = candidate;
-      break;
-    }
+  const eligible = turns.filter((candidate) => !isLifecycleOnlyTurn(candidate));
+  if (eligible.length === 0) return null;
+  let newest = eligible[0];
+  for (let index = 1; index < eligible.length; index++) {
+    const candidate = eligible[index];
+    if (isNewerTurn(candidate, newest)) newest = candidate;
   }
   return newest.id;
 }

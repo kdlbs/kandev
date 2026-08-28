@@ -36,5 +36,6 @@ The following specification was added after this migration and remains in the le
 
 - [Task Cost & Token Ledger](task-cost-ledger/spec.md) (draft)
 - [Startup listener before recovery](startup-listener-before-recovery/spec.md) (draft)
+- [Workflow on_enter action dispatch](workflow-on-enter-action-dispatch/spec.md) (draft)
 
 ## Authoring rule

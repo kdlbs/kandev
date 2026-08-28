@@ -131,10 +131,27 @@ func (s *Service) stampRunFinished(ctx context.Context, run *models.Run) {
 }
 
 // publishRunProcessed emits an OfficeRunProcessed bus event with the
-// per-run context the WS gateway needs to fan the update out.
+// per-run context the WS gateway needs to fan the update out. Delegates to
+// publishRunProcessedForWorkspace with no workspace_id: every existing
+// caller (transitionRunTerminal, retry.go, scheduler_staleness.go) reaches
+// this on a task-bound run, and the WS gateway's workspaceForEvent already
+// resolves those via the task_id this payload carries.
 // Best-effort: skips silently when no bus is configured.
 func (s *Service) publishRunProcessed(
 	ctx context.Context, id, status string, run *models.Run,
+) {
+	s.publishRunProcessedForWorkspace(ctx, id, status, run, "")
+}
+
+// publishRunProcessedForWorkspace is publishRunProcessed plus an explicit
+// workspace_id. A taskless run (WO-35) has no task_id for the WS gateway's
+// workspaceForEvent to resolve a workspace from, so failTasklessRun and
+// failUnlaunchableRun (scheduler_integration.go) must pass the launching
+// agent's workspace directly or the event is dropped rather than fanned out
+// (see office_notifications.go's workspaceForEvent / BroadcastToWorkspaceOrDrop).
+// Best-effort: skips silently when no bus is configured.
+func (s *Service) publishRunProcessedForWorkspace(
+	ctx context.Context, id, status string, run *models.Run, workspaceID string,
 ) {
 	if s.eb == nil {
 		return
@@ -142,6 +159,9 @@ func (s *Service) publishRunProcessed(
 	data := map[string]interface{}{
 		"run_id": id,
 		"status": status,
+	}
+	if workspaceID != "" {
+		data["workspace_id"] = workspaceID
 	}
 	if run != nil {
 		taskID, commentID := commentkeys.IdentityFromPayload(run.Payload)

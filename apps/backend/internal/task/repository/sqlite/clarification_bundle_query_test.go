@@ -32,7 +32,8 @@ func seedBundleTurn(t *testing.T, repo *Repository, turnID, sessionID, taskID st
 
 // seedBundleTurnAt creates a turn with an explicit started_at/created_at, so
 // a test can control which of two turns on the same session is newest per
-// turnAuthorityPredicate's ORDER BY (started_at DESC, created_at DESC, id DESC).
+// currentTurnAuthority's ordering: open turns (completed_at IS NULL) before
+// completed ones, then started_at DESC, created_at DESC, id DESC.
 func seedBundleTurnAt(t *testing.T, repo *Repository, turnID, sessionID, taskID string, at time.Time) {
 	t.Helper()
 	_, err := repo.db.Exec(repo.db.Rebind(`

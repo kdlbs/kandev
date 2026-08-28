@@ -3,6 +3,8 @@ status: draft
 system: office
 requirements:
   - REQ-OFFICE-AUTOMATION-RUNS-001
+  - REQ-OFFICE-AUTOMATION-CONTINUITY-003
+  - REQ-OFFICE-AUTOMATION-TARGETS-002
 created: 2026-07-31
 owners:
   - nova28
@@ -18,6 +20,8 @@ This design preserves the technical source detail for `REQ-OFFICE-AUTOMATION-RUN
 | Requirement | Design section |
 | --- | --- |
 | `REQ-OFFICE-AUTOMATION-RUNS-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-OFFICE-AUTOMATION-CONTINUITY-003` | [Data model](#data-model), [API surface](#api-surface), [Failure modes](#failure-modes) |
+| `REQ-OFFICE-AUTOMATION-TARGETS-002` | [Data model](#data-model), [API surface](#api-surface), [Failure modes](#failure-modes) |
 
 ## Migrated source detail
 
@@ -208,8 +212,21 @@ automation.run.stop
 ```
 
 `automation.run.stop` loads the stored task/session/turn binding; the client never supplies those
-identities. It succeeds only for an open run owned by `automation_id`. A terminal, missing, or
-foreign run returns the same not-found result and does not cancel any newer turn.
+identities. It succeeds only for an open run owned by `automation_id`. When the orchestrator still
+owns the exact active turn, it cancels that turn before the service marks the run failed. When the
+stored run is open but the exact turn is stale, a false stop result is successful. The service marks
+only the loaded run failed and releases its concurrency slot. It does not touch a successor turn. If
+normal completion wins the race after the open-row check, the already-terminal result is returned as
+an idempotent success. A terminal, missing, or foreign run returns the same not-found result. A hard
+stop error, or a terminal-write error while the row remains open, leaves the run open and is returned
+for retry.
+
+`AutomationRunLive` owns runtime-error normalization for restart recovery. Errors that identify a
+gone execution (`runtime.ErrNotFound`, `executor.ErrExecutionNotFound`,
+`lifecycle.ErrExecutionNotFound`, `sql.ErrNoRows`, or the task-repository task and session
+not-found sentinels, including wrapped errors) become `(false, nil)`. The automation service
+therefore settles the exact open run as stale. Other errors remain transient:
+`ReconcileOpenRuns` logs them and leaves the run open for a later retry.
 
 Both facts are answered in ONE statement. Two queries are two snapshots: a run
 created between them reads as a still-open `last_run` with `open_runs = 0`, so
@@ -264,6 +281,8 @@ The action is workspace-scoped: the caller must be authorized for `workspace_id`
 | A visible run is still reported as open while the health summary says there are no open runs | The detail rail/drawer continues reading until the visible run receives a terminal status, then moves it to Completed without a reload |
 | An open run falls outside the page's own run window | The open count comes from the server, not from the loaded window, so the page still reports work in flight and keeps polling |
 | A user stops a running reused turn | The action addresses its stored run/session/turn identity, cancels that exact turn, and marks only that run failed. |
+| A user stops an open run whose bound turn already ended | The exact open run becomes failed and releases its concurrency slot. The stale stop result does not become not-found. No successor turn is touched. |
+| Restart recovery cannot find the bound execution, task, or session | Typed runtime, executor, SQL, task, and session not-found errors normalize to not live and the exact open run becomes failed. A transient inspection error leaves the run open for a later retry. |
 
 ## Scenarios
 
