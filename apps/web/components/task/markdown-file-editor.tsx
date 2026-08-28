@@ -48,7 +48,7 @@ export type MarkdownFileEditorProps = {
   comments?: readonly MarkdownComment[];
   gutterMarkers?: readonly MarkdownGutterMarker[];
   onOpenFile?: (path: string) => void;
-  onOpenLink?: (url: string) => void;
+  onOpenLink?: (url: string) => boolean | void;
   onComment?: (comment: { text: string; start: number; endExclusive: number }) => void;
   onError?: (error: unknown) => void;
   onSourceFallback?: () => void;

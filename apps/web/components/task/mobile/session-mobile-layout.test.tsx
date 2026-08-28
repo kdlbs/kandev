@@ -526,6 +526,46 @@ describe("useMobilePanelHandlers selection state", () => {
   });
 });
 
+describe("useMobilePanelHandlers switcher navigation", () => {
+  it("guards task and workspace switcher actions until a dirty viewer is confirmed", () => {
+    const { result } = renderHandlers();
+    const switcherAction = vi.fn();
+
+    act(() => result.current.handleOpenFile(MOCK_FILE));
+    act(() => result.current.handleSelectedFileChange(DIRTY_DRAFT_CONTENT));
+    act(() => result.current.requestNavigation(switcherAction));
+
+    expect(result.current.pendingNavigation).toMatchObject({
+      panel: "files",
+      filePath: MOCK_FILE.path,
+    });
+    expect(switcherAction).not.toHaveBeenCalled();
+
+    act(() => result.current.cancelPendingNavigation());
+    expect(switcherAction).not.toHaveBeenCalled();
+    expect(result.current.selectedFile?.content).toBe(DIRTY_DRAFT_CONTENT);
+
+    act(() => result.current.requestNavigation(switcherAction));
+    act(() => result.current.confirmPendingNavigation());
+
+    expect(switcherAction).toHaveBeenCalledOnce();
+  });
+
+  it("does not run a deferred switcher action after the selected file identity changes", () => {
+    const { result } = renderHandlers();
+    const switcherAction = vi.fn();
+
+    act(() => result.current.handleOpenFile(MOCK_FILE));
+    act(() => result.current.handleSelectedFileChange(DIRTY_DRAFT_CONTENT));
+    act(() => result.current.requestNavigation(switcherAction));
+    act(() => result.current.handleOpenFile(OTHER_FILE));
+    act(() => result.current.confirmPendingNavigation());
+
+    expect(switcherAction).not.toHaveBeenCalled();
+    expect(result.current.selectedFile).toEqual(OTHER_FILE);
+  });
+});
+
 describe("useMobilePanelHandlers request cancellation", () => {
   beforeEach(() => {
     fetchAndOpenFileMock.mockReset();

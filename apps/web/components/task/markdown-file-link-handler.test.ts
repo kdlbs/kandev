@@ -30,7 +30,7 @@ describe("useMarkdownFileLinkHandler", () => {
       }),
     );
 
-    act(() => result.current("./guide.md"));
+    act(() => expect(result.current("./guide.md")).toBe(true));
 
     expect(onOpenFile).toHaveBeenCalledWith("docs/guide.md");
     expect(routerPush).not.toHaveBeenCalled();
@@ -44,7 +44,7 @@ describe("useMarkdownFileLinkHandler", () => {
       }),
     );
 
-    act(() => result.current("/t/task-42?layout=advanced"));
+    act(() => expect(result.current("/t/task-42?layout=advanced")).toBe(true));
 
     expect(routerPush).toHaveBeenCalledWith("/t/task-42?layout=advanced");
   });
@@ -58,9 +58,37 @@ describe("useMarkdownFileLinkHandler", () => {
       }),
     );
 
-    act(() => result.current("https://example.com/docs"));
+    act(() => expect(result.current("https://example.com/docs")).toBe(true));
 
     expect(openExternalLink).toHaveBeenCalledWith("https://example.com/docs");
     expect(routerPush).not.toHaveBeenCalled();
+  });
+
+  it("leaves same-document anchors to the editor's native navigation", () => {
+    const { result } = renderHook(() =>
+      useMarkdownFileLinkHandler({
+        path: "README.md",
+        onOpenFile: vi.fn(),
+      }),
+    );
+
+    act(() => expect(result.current("#installation")).toBe(false));
+
+    expect(routerPush).not.toHaveBeenCalled();
+    expect(openExternalLink).not.toHaveBeenCalled();
+  });
+
+  it("resolves a parent-relative link from a nested Markdown file", () => {
+    const onOpenFile = vi.fn();
+    const { result } = renderHook(() =>
+      useMarkdownFileLinkHandler({
+        path: "docs/nested/readme.md",
+        onOpenFile,
+      }),
+    );
+
+    act(() => expect(result.current("../guide.md")).toBe(true));
+
+    expect(onOpenFile).toHaveBeenCalledWith("docs/guide.md");
   });
 });

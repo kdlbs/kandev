@@ -198,8 +198,10 @@ describe("HybridMarkdownEditor contracts", () => {
 
     const model = upstream.state.models[0];
     const view = upstream.state.views[0];
-    const options = view.options as { onOpenLink: (url: string, event: MouseEvent) => void };
-    options.onOpenLink("https://example.com", new MouseEvent("click"));
+    const options = view.options as {
+      onOpenLink: (url: string, event: MouseEvent) => false | void;
+    };
+    expect(options.onOpenLink("https://example.com", new MouseEvent("click"))).toBeUndefined();
 
     expect(onOpenLink).toHaveBeenCalledWith("https://example.com");
     expect(model.baseline.set).toHaveBeenLastCalledWith(
@@ -213,6 +215,19 @@ describe("HybridMarkdownEditor contracts", () => {
       undefined,
     );
     expect(onComment).not.toHaveBeenCalled();
+  });
+
+  it("returns false for an unhandled link so same-document anchors stay native", () => {
+    const onOpenLink = vi.fn().mockReturnValue(false);
+    render(<HybridMarkdownEditor content="# Heading" onChange={vi.fn()} onOpenLink={onOpenLink} />);
+
+    const view = upstream.state.views[0];
+    const options = view.options as {
+      onOpenLink: (url: string, event: MouseEvent) => false | void;
+    };
+
+    expect(options.onOpenLink("#heading", new MouseEvent("click"))).toBe(false);
+    expect(onOpenLink).toHaveBeenCalledWith("#heading");
   });
 
   it("reports initialization failures and requests the Source fallback", () => {

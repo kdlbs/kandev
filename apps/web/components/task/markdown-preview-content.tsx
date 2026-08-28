@@ -148,7 +148,7 @@ interface MarkdownPreviewContentProps {
   onDownload?: () => void;
   onTogglePreview?: () => void;
   onOpenFile?: (path: string) => void;
-  onOpenLink?: (url: string) => void;
+  onOpenLink?: (url: string) => boolean | void;
 }
 
 type PositionedNode = {

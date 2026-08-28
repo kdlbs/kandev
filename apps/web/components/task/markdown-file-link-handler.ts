@@ -43,20 +43,23 @@ export function useMarkdownFileLinkHandler({
   const router = useRouter();
 
   return useCallback(
-    (href: string) => {
+    (href: string): boolean => {
       const filePath = resolveMarkdownFileHref(href, worktreePath, path);
       if (filePath) {
-        onOpenFile?.(filePath);
-        return;
+        if (!onOpenFile) return false;
+        onOpenFile(filePath);
+        return true;
       }
-      if (href.startsWith("#")) return;
+      if (href.startsWith("#")) return false;
       if (isMarkdownInternalRoute(href)) {
         router.push(href);
-        return;
+        return true;
       }
       if (isExternalMarkdownHref(href)) {
         void openExternalLink(href).catch(() => undefined);
+        return true;
       }
+      return false;
     },
     [onOpenFile, path, router, worktreePath],
   );

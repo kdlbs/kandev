@@ -47,7 +47,7 @@ export type HybridMarkdownEditorProps = {
   comments?: readonly MarkdownComment[];
   className?: string;
   onChange: (content: string) => void;
-  onOpenLink?: (url: string) => void;
+  onOpenLink?: (url: string) => boolean | void;
   onComment?: (comment: MarkdownCommentSubmission) => void;
   onError?: (error: unknown) => void;
   onSourceFallback?: () => void;
@@ -80,7 +80,7 @@ type MarkdownSourceReplacementLike = {
 
 type EditorCallbackRefs = {
   onChange: { current: (content: string) => void };
-  onOpenLink: { current: ((url: string) => void) | undefined };
+  onOpenLink: { current: ((url: string) => boolean | void) | undefined };
   onComment: { current: ((comment: MarkdownCommentSubmission) => void) | undefined };
   onError: { current: ((error: unknown) => void) | undefined };
   onSourceFallback: { current: (() => void) | undefined };
@@ -200,8 +200,9 @@ function useHybridEditorLifecycle({
         gutterMarkers,
         comments,
         onOpenLink: (url) => {
-          callbackRefs.onOpenLink.current?.(url);
-          return callbackRefs.onOpenLink.current ? undefined : false;
+          const handler = callbackRefs.onOpenLink.current;
+          if (!handler) return false;
+          return handler(url) === false ? false : undefined;
         },
         onComment: (submission) => callbackRefs.onComment.current?.(submission),
         onSourceEdit: (edit) => {
