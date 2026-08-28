@@ -2817,8 +2817,8 @@ func (s *Service) stopTaskRuntimeSession(
 // stopDeletedSessionRuntime handles a session stop that raced with task deletion.
 // A missing session is complete only when no executor row remains. If a late row
 // has an exact execution ID, stop that execution before cleanup removes the row.
-// An unidentified row remains retryable because cleanup cannot prove its process
-// is gone.
+// When the row has no execution ID, return false so the caller can apply the
+// confirmed-dead local probe before marking the session for retry.
 func (s *Service) stopDeletedSessionRuntime(
 	ctx context.Context,
 	taskID string,

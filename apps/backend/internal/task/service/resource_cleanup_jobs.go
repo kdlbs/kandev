@@ -299,14 +299,12 @@ func (s *Service) preparedTaskCleanupMutationCommitted(
 		return false, err
 	}
 	taskExists := err == nil && task != nil
+	if taskResourceCleanupDeletesTask(job.Trigger) {
+		return !taskExists, nil
+	}
 	switch job.Trigger {
 	case models.TaskResourceCleanupTriggerArchive, models.TaskResourceCleanupTriggerCascadeArchive:
 		return taskExists && task.ArchivedAt != nil, nil
-	case models.TaskResourceCleanupTriggerDelete,
-		models.TaskResourceCleanupTriggerCascadeDelete,
-		models.TaskResourceCleanupTriggerWorkspaceDelete,
-		models.TaskResourceCleanupTriggerQuickChatExpire:
-		return !taskExists, nil
 	default:
 		return false, nil
 	}

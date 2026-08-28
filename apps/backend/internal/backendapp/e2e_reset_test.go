@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -69,8 +70,15 @@ func TestWaitForE2ETaskCleanupWithReader(t *testing.T) {
 		firstRead := make(chan struct{})
 		releaseFirstRead := make(chan struct{})
 		result := make(chan error, 1)
+		done := make(chan struct{})
+		var releaseOnce sync.Once
+		t.Cleanup(func() {
+			releaseOnce.Do(func() { close(releaseFirstRead) })
+			<-done
+		})
 		readCount := 0
 		go func() {
+			defer close(done)
 			result <- waitForE2ETaskCleanupWithReader(
 				context.Background(),
 				[]string{"task-1"},
@@ -91,7 +99,7 @@ func TestWaitForE2ETaskCleanupWithReader(t *testing.T) {
 		}()
 
 		<-firstRead
-		close(releaseFirstRead)
+		releaseOnce.Do(func() { close(releaseFirstRead) })
 		if err := <-result; err != nil {
 			t.Fatalf("waitForE2ETaskCleanupWithReader: %v", err)
 		}
@@ -189,8 +197,17 @@ func TestListE2ETaskIDsIncludesAutomationOwnedTasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listE2ETaskIDs: %v", err)
 	}
-	if len(ids) != 2 || !containsE2ETaskID(ids, "ordinary-task") || !containsE2ETaskID(ids, "automation-task") {
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		seen[id] = struct{}{}
+	}
+	if len(ids) != 2 {
 		t.Fatalf("task IDs = %v, want both ws-1 tasks", ids)
+	}
+	for _, id := range []string{"ordinary-task", "automation-task"} {
+		if _, ok := seen[id]; !ok {
+			t.Fatalf("task IDs = %v, missing %s", ids, id)
+		}
 	}
 }
 
