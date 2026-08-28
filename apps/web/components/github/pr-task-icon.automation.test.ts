@@ -104,8 +104,8 @@ describe("getTaskPRAutomationSummary", () => {
       autoFixEnabled: true,
       autoMergeEnabled: true,
       details: [
-        { number: 1, autoFixEnabled: true, autoMergeEnabled: false },
-        { number: 2, autoFixEnabled: false, autoMergeEnabled: true },
+        { number: 1, repository: "o/r", autoFixEnabled: true, autoMergeEnabled: false },
+        { number: 2, repository: "o/r", autoFixEnabled: false, autoMergeEnabled: true },
       ],
     });
   });
@@ -137,5 +137,27 @@ describe("getTaskPRAutomationSummary", () => {
       autoMergeEnabled: false,
       details: [],
     });
+  });
+
+  it("retains repository identity when linked PR numbers overlap", () => {
+    const summary = getTaskPRAutomationSummary(
+      [
+        makePR({ owner: "acme", repo: "frontend", repository_id: "repo-a", pr_number: 7 }),
+        makePR({ owner: "acme", repo: "backend", repository_id: "repo-b", pr_number: 7 }),
+      ],
+      undefined,
+      {
+        ...makeOptions(),
+        pr_options: [
+          { ...makeOptions().pr_options[0], repository_id: "repo-a", pr_number: 7 },
+          { ...makeOptions().pr_options[1], repository_id: "repo-b", pr_number: 7 },
+        ],
+      },
+    );
+
+    expect(summary.details.map(({ repository, number }) => ({ repository, number }))).toEqual([
+      { repository: "acme/frontend", number: 7 },
+      { repository: "acme/backend", number: 7 },
+    ]);
   });
 });

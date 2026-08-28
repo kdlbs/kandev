@@ -108,6 +108,17 @@ func (s *Service) RetryTaskCIAutoMerge(
 	return targets[0], nil
 }
 
+// ClearTaskCIMergeRetryAuthorization removes a retry authorization that could
+// not be delivered to the automation evaluator.
+func (s *Service) ClearTaskCIMergeRetryAuthorization(
+	ctx context.Context, taskID, repositoryID string, prNumber int,
+) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.ClearTaskCIMergeRetryAuthorization(ctx, taskID, repositoryID, prNumber)
+}
+
 // resolveAuthorizedTaskWorkspace resolves ownership through the task service
 // before any user-facing CI-option read or mutation. Unit tests and legacy
 // auth-disabled embeddings without a task store retain their unscoped path;

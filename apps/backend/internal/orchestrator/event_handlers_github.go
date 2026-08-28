@@ -302,9 +302,21 @@ func (s *Service) startTaskPRCIAutomationWithRefresh(ctx context.Context, pr *gi
 	if pr == nil {
 		return
 	}
+	s.ciAutomationMu.Lock()
+	if s.ciAutomationStopped {
+		s.ciAutomationMu.Unlock()
+		return
+	}
+	if s.ciAutomationCtx == nil {
+		s.ciAutomationCtx, s.ciAutomationCancel = context.WithCancel(context.Background())
+	}
+	workerCtx := s.ciAutomationCtx
+	s.ciAutomationWorkers.Add(1)
+	s.ciAutomationMu.Unlock()
 	key := fmt.Sprintf("%s|%s|%d", pr.TaskID, pr.RepositoryID, pr.PRNumber)
 	request := ciAutomationRequest{ctx: ctx, pr: pr, refresh: refresh}
 	if !s.ciAutomationInFlight.Enqueue(key, request) {
+		s.ciAutomationWorkers.Done()
 		s.logger.Debug("CI automation follow-up coalesced",
 			zap.String("task_id", pr.TaskID),
 			zap.String("repository_id", pr.RepositoryID),
@@ -312,10 +324,12 @@ func (s *Service) startTaskPRCIAutomationWithRefresh(ctx context.Context, pr *gi
 		return
 	}
 	go func() {
+		defer s.ciAutomationWorkers.Done()
 		for {
-			automationCtx, cancel := context.WithTimeout(
-				context.WithoutCancel(request.ctx), ciAutomationDetachedTimeout,
-			)
+			if workerCtx.Err() != nil {
+				return
+			}
+			automationCtx, cancel := context.WithTimeout(workerCtx, ciAutomationDetachedTimeout)
 			err := s.handleTaskPRCIAutomationWithRefresh(automationCtx, request.pr, request.refresh)
 			cancel()
 			if err != nil {
@@ -381,16 +395,40 @@ func (c *ciAutomationCoordinator) Next(key string) (ciAutomationRequest, bool) {
 	return ciAutomationRequest{}, false
 }
 
-// Load preserves the read-only test probe used to assert worker isolation.
-func (c *ciAutomationCoordinator) Load(key any) (any, bool) {
-	keyString, ok := key.(string)
-	if !ok {
-		return nil, false
-	}
+// Has reports whether a worker is currently active for key. It is intentionally
+// read-only so tests can observe coalescing without exposing coordinator state.
+func (c *ciAutomationCoordinator) Has(key string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	work, exists := c.works[keyString]
-	return work, exists
+	_, exists := c.works[key]
+	return exists
+}
+
+func (s *Service) resetCIAutomationWorkers() {
+	s.ciAutomationMu.Lock()
+	defer s.ciAutomationMu.Unlock()
+	s.ciAutomationStopped = false
+	s.ciAutomationCtx, s.ciAutomationCancel = context.WithCancel(context.Background())
+}
+
+func (s *Service) stopCIAutomationWorkers() {
+	s.ciAutomationMu.Lock()
+	s.ciAutomationStopped = true
+	cancel := s.ciAutomationCancel
+	s.ciAutomationMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	done := make(chan struct{})
+	go func() {
+		s.ciAutomationWorkers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(sendNowClaimRecoveryTimeout):
+		s.logger.Warn("timed out waiting for CI automation workers during shutdown")
+	}
 }
 
 // handleNewReviewPR creates a task for a new PR needing review.

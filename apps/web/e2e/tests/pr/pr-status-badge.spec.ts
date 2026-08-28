@@ -256,8 +256,12 @@ test.describe("PR status badge", () => {
       ':scope > [data-testid="pr-task-automation-details"]',
     );
     await expect(automationDetails).toBeVisible();
-    await expect(automationDetails.getByText(`PR #${activePRNumber}`)).toBeVisible();
-    await expect(automationDetails.getByText(`PR #${mergedPRNumber}`)).toHaveCount(0);
+    await expect(
+      automationDetails.getByText(`testorg/testrepo PR #${activePRNumber}`),
+    ).toBeVisible();
+    await expect(automationDetails.getByText(`testorg/testrepo PR #${mergedPRNumber}`)).toHaveCount(
+      0,
+    );
     await prCapture.screenshot("sidebar-automation-indicators-desktop", {
       caption: "Task sidebar PR icon shows independent active automation indicators.",
     });

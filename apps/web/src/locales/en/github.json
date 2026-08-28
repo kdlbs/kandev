@@ -382,6 +382,7 @@
   "prTaskStatusCi": "CI",
   "prTaskStatusMerge": "Merge",
   "prTaskStatusNumber": "PR #{{number}}",
+  "prTaskStatusRepositoryNumber": "{{repository}} PR #{{number}}",
   "prTaskStatusReview": "Review",
   "prTaskStatusState": "State",
   "prepareAppOnGithub": "Prepare App on GitHub",

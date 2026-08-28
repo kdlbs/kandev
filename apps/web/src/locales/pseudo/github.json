@@ -382,6 +382,7 @@
   "prTaskStatusCi": "ĆĨ",
   "prTaskStatusMerge": "Ḿēŕĝē",
   "prTaskStatusNumber": "ƤŔ #{{number}}",
+  "prTaskStatusRepositoryNumber": "{{repository}} ƤŔ #{{number}}",
   "prTaskStatusReview": "Ŕēvĩēŵ",
   "prTaskStatusState": "Śţàţē",
   "prepareAppOnGithub": "Ƥŕēƥàŕē Àƥƥ ōń ĜĩţĤũƀ",

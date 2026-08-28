@@ -300,6 +300,7 @@ func (m *mockGitHubService) MarkTaskCIAutoFixExhausted(_ context.Context, taskID
 		PRNumber:           prNumber,
 		AutoFixExhaustedAt: &now,
 		LastError:          &message,
+		LastErrorKind:      github.TaskCIErrorKindAutoFix,
 	})
 	return nil
 }

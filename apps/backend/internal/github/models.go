@@ -752,6 +752,7 @@ const (
 	TaskCIMergeResultFailed   = "failed"
 	TaskCIMergeResultAccepted = "accepted"
 	TaskCIErrorKindAutoMerge  = "auto_merge"
+	TaskCIErrorKindAutoFix    = "auto_fix"
 )
 
 // TaskCIFixAttempt records an auto-fix prompt attempt for a task PR.

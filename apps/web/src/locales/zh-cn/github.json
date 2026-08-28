@@ -382,6 +382,7 @@
   "prTaskStatusCi": "CI",
   "prTaskStatusMerge": "合并",
   "prTaskStatusNumber": "PR #{{number}}",
+  "prTaskStatusRepositoryNumber": "{{repository}} 拉取请求 #{{number}}",
   "prTaskStatusReview": "审阅",
   "prTaskStatusState": "状态",
   "prepareAppOnGithub": "在 GitHub 上准备应用",

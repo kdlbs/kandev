@@ -17,6 +17,7 @@ function errorMessage(error: unknown): string {
 export function useTaskCIAutomationOptions(taskId: string | null) {
   const refreshRequestRef = useRef<Record<string, number>>({});
   const updateRequestRef = useRef<Record<string, number>>({});
+  const retryRequestRef = useRef<Record<string, number>>({});
   const options = useAppStore((state) =>
     taskId ? (state.taskCIAutomation.byTaskId[taskId] ?? null) : null,
   );
@@ -90,19 +91,19 @@ export function useTaskCIAutomationOptions(taskId: string | null) {
   const retryMerge = useCallback(
     async (repositoryId: string, prNumber: number): Promise<{ accepted: boolean } | null> => {
       if (!taskId) return null;
-      const requestId = (updateRequestRef.current[taskId] ?? 0) + 1;
-      updateRequestRef.current[taskId] = requestId;
+      const requestId = (retryRequestRef.current[taskId] ?? 0) + 1;
+      retryRequestRef.current[taskId] = requestId;
       setSaving(taskId, true);
       setError(taskId, null);
       try {
         return await retryTaskCIAutoMerge(taskId, repositoryId, prNumber, { cache: "no-store" });
       } catch (err) {
-        if (updateRequestRef.current[taskId] === requestId) {
+        if (retryRequestRef.current[taskId] === requestId) {
           setError(taskId, errorMessage(err));
         }
         throw err;
       } finally {
-        if (updateRequestRef.current[taskId] === requestId) {
+        if (retryRequestRef.current[taskId] === requestId) {
           setSaving(taskId, false);
         }
       }

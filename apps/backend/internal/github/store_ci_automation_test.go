@@ -744,6 +744,19 @@ func TestStoreTaskCIMergeAttemptResultRecordsFailureAtomically(t *testing.T) {
 	if state.LastError == nil || *state.LastError != message {
 		t.Fatalf("last error = %v, want %q", state.LastError, message)
 	}
+	if err := store.MarkTaskCIAutoFixExhausted(
+		ctx, "task-1", "repo-1", 42, "CI auto-fix paused after the round limit",
+	); err != nil {
+		t.Fatalf("record auto-fix exhaustion: %v", err)
+	}
+	state, err = store.GetTaskCIPRState(ctx, "task-1", "repo-1", 42)
+	if err != nil {
+		t.Fatalf("get auto-fix exhaustion state: %v", err)
+	}
+	if state.LastError == nil || *state.LastError != "CI auto-fix paused after the round limit" ||
+		state.LastErrorKind != TaskCIErrorKindAutoFix {
+		t.Fatalf("auto-fix error did not replace merge error atomically: %+v", state)
+	}
 }
 
 // @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.3

@@ -146,6 +146,52 @@ func TestProjectorRefreshesAutomationFlagsAfterCIOptionsUpdate(t *testing.T) {
 	}
 }
 
+func TestProjectorPreservesAutomationFlagsAcrossPRRefresh(t *testing.T) {
+	store := newProjectorTestStore()
+	loaderCalls := 0
+	projector := NewProjector(ProjectorConfig{
+		Store: store,
+		ResolveWorkspace: func(context.Context, string) (string, error) {
+			return "workspace-1", nil
+		},
+		LoadPullRequests: func(context.Context, string) ([]PullRequestInput, error) {
+			loaderCalls++
+			return []PullRequestInput{{
+				Key: "repo-a#41", State: prStateOpen, Number: 41,
+				AutoFixEnabled: loaderCalls > 1,
+			}}, nil
+		},
+		Now: func() time.Time { return time.Date(2026, 8, 16, 0, 30, 0, 0, time.UTC) },
+	})
+
+	prEvent := func() *bus.Event {
+		return bus.NewEvent(events.GitHubTaskPRUpdated, "test", map[string]interface{}{
+			"task_id": "task-pr-options-preserve", "workspace_id": "workspace-1",
+			"repository_id": "repo-a", "state": prStateOpen, "pr_number": 41,
+			"pr_url": "https://example.test/41",
+		})
+	}
+	if err := projector.HandleEvent(context.Background(), prEvent()); err != nil {
+		t.Fatalf("initial PR refresh: %v", err)
+	}
+	if err := projector.HandleEvent(context.Background(), bus.NewEvent(events.GitHubTaskCIOptionsUpdated, "test", map[string]interface{}{
+		"task_id": "task-pr-options-preserve", "workspace_id": "workspace-1",
+	})); err != nil {
+		t.Fatalf("CI options refresh: %v", err)
+	}
+	if err := projector.HandleEvent(context.Background(), prEvent()); err != nil {
+		t.Fatalf("subsequent PR refresh: %v", err)
+	}
+
+	got := store.summary("task-pr-options-preserve")
+	if got == nil || got.PullRequest == nil || !got.PullRequest.AutoFixEnabled {
+		t.Fatalf("PR summary after refresh = %+v, want auto-fix preserved", got)
+	}
+	if loaderCalls != 2 {
+		t.Fatalf("PR loader calls = %d, want initial load plus options refresh", loaderCalls)
+	}
+}
+
 func TestProjectorRehydratesSourceObservationsWithoutPersistedSummary(t *testing.T) {
 	store := newProjectorTestStore()
 	sessionLoaderCalls := 0

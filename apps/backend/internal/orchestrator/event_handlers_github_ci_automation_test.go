@@ -2529,6 +2529,7 @@ func TestCIAutomationMergeSignatureIncludesEveryReadinessGate(t *testing.T) {
 		name   string
 		mutate func(*github.TaskPR)
 	}{
+		{name: "PR lifecycle state", mutate: func(pr *github.TaskPR) { pr.State = "closed" }},
 		{name: "pending reviews", mutate: func(pr *github.TaskPR) { pr.PendingReviewCount++ }},
 		{name: "required review presence", mutate: func(pr *github.TaskPR) { pr.RequiredReviews = nil }},
 		{name: "required review value", mutate: func(pr *github.TaskPR) { value := 2; pr.RequiredReviews = &value }},
@@ -2879,10 +2880,10 @@ func TestHandlePRFeedbackStartsAutomationForMatchingPR(t *testing.T) {
 	if ghSvc.lastExactPRLookup.Owner != "acme" || ghSvc.lastExactPRLookup.Repo != "back" || ghSvc.lastExactPRLookup.PRNumber != 2 {
 		t.Fatalf("unexpected exact lookup: %+v", ghSvc.lastExactPRLookup)
 	}
-	if _, loaded := svc.ciAutomationInFlight.Load("task-1|repo-back|2"); !loaded {
+	if !svc.ciAutomationInFlight.Has("task-1|repo-back|2") {
 		t.Fatal("expected automation to run for matching repo-back PR")
 	}
-	if _, loaded := svc.ciAutomationInFlight.Load("task-1|repo-front|1"); loaded {
+	if svc.ciAutomationInFlight.Has("task-1|repo-front|1") {
 		t.Fatal("unexpected automation for non-matching repo-front PR")
 	}
 	close(block)
@@ -2915,10 +2916,10 @@ func TestHandleTaskCIOptionsUpdatedStartsAutomationForTaskPRs(t *testing.T) {
 		t.Fatalf("handle CI options updated: %v", err)
 	}
 	<-started
-	if _, loaded := svc.ciAutomationInFlight.Load("task-1|repo-front|1"); !loaded {
+	if !svc.ciAutomationInFlight.Has("task-1|repo-front|1") {
 		t.Fatal("expected automation to run for repo-front PR")
 	}
-	if _, loaded := svc.ciAutomationInFlight.Load("task-1|repo-back|2"); !loaded {
+	if !svc.ciAutomationInFlight.Has("task-1|repo-back|2") {
 		t.Fatal("expected automation to run for repo-back PR")
 	}
 	close(block)
@@ -3020,7 +3021,7 @@ func TestHandleTaskCIOptionsUpdatedStartsAutomationForPartialSyncResults(t *test
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("timed out waiting for CI automation to start")
 	}
-	if _, loaded := svc.ciAutomationInFlight.Load("task-1|repo-1|42"); !loaded {
+	if !svc.ciAutomationInFlight.Has("task-1|repo-1|42") {
 		t.Fatal("expected automation to run for partial sync result")
 	}
 	if len(ghSvc.ciErrors) != 0 {
@@ -3129,7 +3130,7 @@ func waitForCIAutomationIdle(t *testing.T, svc *Service, key string, timeout tim
 	ticker := time.NewTicker(time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if _, loaded := svc.ciAutomationInFlight.Load(key); !loaded {
+		if !svc.ciAutomationInFlight.Has(key) {
 			return
 		}
 		select {

@@ -250,7 +250,7 @@ describe("PRTaskIcon automation indicators", () => {
     await waitFor(() =>
       expect(screen.getAllByTestId("pr-task-automation-details").length).toBeGreaterThan(0),
     );
-    expect(screen.getAllByText("PR #1").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("o/r PR #1").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Auto-fix").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Auto-merge").length).toBeGreaterThan(0);
   });

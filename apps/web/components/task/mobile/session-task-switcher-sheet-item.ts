@@ -8,6 +8,7 @@ import { statusSummaryActiveErrorPreview } from "@/lib/task-status-summary";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { resolveTaskRepositorySlugs } from "@/lib/sidebar/sidebar-task-repositories";
 import { effectiveTaskPendingAction } from "../task-select-helpers";
+import { taskPRInfoFromSummary } from "../task-pr-info";
 
 export type SheetItemCtx = {
   repositoryPathsById: Map<string, string | undefined>;
@@ -22,27 +23,6 @@ function sheetDiffStats(summary: KanbanState["tasks"][number]["statusSummary"]) 
   const git = summary?.git;
   if (!git || ((git.additions ?? 0) <= 0 && (git.deletions ?? 0) <= 0)) return undefined;
   return { additions: git.additions ?? 0, deletions: git.deletions ?? 0 };
-}
-
-function sheetPRInfo(summary: KanbanState["tasks"][number]["statusSummary"]):
-  | {
-      number: number;
-      state: string;
-      aggregateState?: string;
-      autoFixEnabled?: boolean;
-      autoMergeEnabled?: boolean;
-    }
-  | undefined {
-  const pullRequest = summary?.pull_request;
-  if (!pullRequest?.number) return undefined;
-  const state = pullRequest.state ?? pullRequest.aggregate_state ?? "open";
-  return {
-    number: pullRequest.number,
-    state: state.length > 0 ? state[0].toUpperCase() + state.slice(1) : state,
-    aggregateState: pullRequest.aggregate_state,
-    ...(pullRequest.auto_fix_enabled ? { autoFixEnabled: true } : {}),
-    ...(pullRequest.auto_merge_enabled ? { autoMergeEnabled: true } : {}),
-  };
 }
 
 function sheetRepositoryPath(
@@ -81,7 +61,7 @@ function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
       : (task.primarySessionId ?? null),
     hasPendingClarification: pending.clarification,
     hasPendingPermission: pending.permission,
-    prInfo: sheetPRInfo(summary),
+    prInfo: taskPRInfoFromSummary(summary),
     agentErrorMessage: statusSummaryActiveErrorPreview(
       summary,
       ctx.acknowledgedAgentErrors,

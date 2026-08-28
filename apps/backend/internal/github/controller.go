@@ -430,11 +430,22 @@ func (c *Controller) httpRetryTaskCIAutoMerge(ctx *gin.Context) {
 		c.writeTaskCIOptionsError(ctx, err, "retry merge", "failed to retry automatic merge")
 		return
 	}
-	if c.service != nil && c.service.eventBus != nil {
+	var publishErr error
+	if c.service == nil || c.service.eventBus == nil {
+		publishErr = errors.New("event bus unavailable")
+	} else {
 		event := bus.NewEvent(events.GitHubTaskPRUpdated, "github", pr)
-		if err := c.service.eventBus.Publish(ctx.Request.Context(), events.GitHubTaskPRUpdated, event); err != nil {
-			c.logger.Debug("publish automatic merge retry failed", zap.String("task_id", pr.TaskID), zap.Error(err))
+		publishErr = c.service.eventBus.Publish(ctx.Request.Context(), events.GitHubTaskPRUpdated, event)
+	}
+	if publishErr != nil {
+		if clearErr := c.service.ClearTaskCIMergeRetryAuthorization(
+			ctx.Request.Context(), pr.TaskID, pr.RepositoryID, pr.PRNumber,
+		); clearErr != nil {
+			c.logger.Debug("clear automatic merge retry authorization failed",
+				zap.String("task_id", pr.TaskID), zap.Error(clearErr))
 		}
+		c.writeTaskCIOptionsError(ctx, publishErr, "publish automatic merge retry", "failed to queue automatic merge retry")
+		return
 	}
 	ctx.JSON(http.StatusAccepted, gin.H{"accepted": true})
 }

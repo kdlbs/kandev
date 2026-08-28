@@ -120,10 +120,10 @@ func (s *Service) handleTaskPRCIAutomationWithRefresh(ctx context.Context, pr *g
 	if options.AutoFixEnabled && ciAutomationCanAutoFixFromFeedback(pr) {
 		autoFixBlockedMerge, autoFixError = s.handleTaskPRCIAutoFix(ctx, pr, options)
 	}
-	ciError := ""
+	ciError := ciAutomationMergeOutcome{}
 	if !autoFixBlockedMerge && options.AutoMergeEnabled && ciAutomationReadyToMerge(pr) {
 		if !freshlySynced {
-			ciError = "PR status is not freshly synced for auto-merge"
+			ciError = ciAutomationMergeOutcome{message: "PR status is not freshly synced for auto-merge"}
 		} else {
 			ciError = s.handleTaskPRCIAutoMerge(ctx, pr)
 		}
@@ -133,8 +133,8 @@ func (s *Service) handleTaskPRCIAutomationWithRefresh(ctx context.Context, pr *g
 		s.recordCIAutomationError(ctx, pr, autoFixError)
 		s.publishTaskCIOptionsState(ctx, pr.TaskID)
 	}
-	if ciError != "" {
-		s.recordCIAutoMergeError(ctx, pr, ciError)
+	if ciError.message != "" && !ciError.journaled {
+		s.recordCIAutoMergeError(ctx, pr, ciError.message)
 		s.publishTaskCIOptionsState(ctx, pr.TaskID)
 	}
 	return nil
@@ -390,35 +390,22 @@ func (s *Service) handleTaskPRCIAutoFixEmptyDelta(ctx context.Context, pr *githu
 	return false
 }
 
-func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR) string {
+type ciAutomationMergeOutcome struct {
+	message   string
+	journaled bool
+}
+
+func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR) ciAutomationMergeOutcome {
 	if ciAutomationHasActiveMergeQueueEntry(pr) {
-		return ""
+		return ciAutomationMergeOutcome{}
 	}
 	signature := ciAutomationMergeSignature(pr)
 	state, err := s.githubService.GetTaskCIPRState(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber)
 	if err != nil {
 		s.logger.Debug("load CI automation merge state failed; durable reservation will decide", zap.String("task_id", pr.TaskID), zap.Error(err))
 	} else if state != nil {
-		if state.LastMergeSignature == signature {
-			if state.LastMergeResult == github.TaskCIMergeResultInFlight &&
-				state.LastMergeAttemptAt != nil && time.Since(*state.LastMergeAttemptAt) > ciAutomationDetachedTimeout {
-				message := "merge PR: previous automatic merge attempt did not reach a terminal state"
-				if recordErr := s.githubService.RecordTaskCIMergeAttemptResult(
-					context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber,
-					signature, github.TaskCIMergeResultFailed, message,
-				); recordErr != nil {
-					return fmt.Sprintf("%s; record expired merge attempt: %v", message, recordErr)
-				}
-				if !state.MergeRetryPending {
-					return message
-				}
-			}
-			if !state.MergeRetryPending {
-				return ""
-			}
-		}
-		if pr.HeadSHA != "" && state.LastQueueAttemptHeadSHA == pr.HeadSHA && !state.MergeRetryPending {
-			return ""
+		if outcome, handled := s.ciAutomationExistingMergeOutcome(ctx, pr, signature, state); handled {
+			return outcome
 		}
 	}
 	attempt := github.TaskCIMergeAttempt{
@@ -431,10 +418,56 @@ func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR
 	}
 	if err := s.githubService.RecordTaskCIMergeAttempt(context.WithoutCancel(ctx), attempt); err != nil {
 		if errors.Is(err, github.ErrTaskCIMergeAttemptAlreadyReserved) {
-			return ""
+			return ciAutomationMergeOutcome{}
 		}
-		return fmt.Sprintf("reserve merge PR attempt: %v", err)
+		return ciAutomationMergeOutcome{message: fmt.Sprintf("reserve merge PR attempt: %v", err)}
 	}
+	return s.executeCIAutoMerge(ctx, pr, signature)
+}
+
+func (s *Service) ciAutomationExistingMergeOutcome(
+	ctx context.Context,
+	pr *github.TaskPR,
+	signature string,
+	state *github.TaskCIPRAutomationState,
+) (ciAutomationMergeOutcome, bool) {
+	if state.LastMergeSignature != signature {
+		return ciAutomationQueueAttemptOutcome(pr, state)
+	}
+	if state.LastMergeResult == github.TaskCIMergeResultInFlight &&
+		state.LastMergeAttemptAt != nil && time.Since(*state.LastMergeAttemptAt) > ciAutomationDetachedTimeout {
+		message := "merge PR: previous automatic merge attempt did not reach a terminal state"
+		if recordErr := s.githubService.RecordTaskCIMergeAttemptResult(
+			context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber,
+			signature, github.TaskCIMergeResultFailed, message,
+		); recordErr != nil {
+			return ciAutomationMergeOutcome{message: fmt.Sprintf("%s; record expired merge attempt: %v", message, recordErr)}, true
+		}
+		if !state.MergeRetryPending {
+			return ciAutomationMergeOutcome{message: message, journaled: true}, true
+		}
+	}
+	if !state.MergeRetryPending {
+		return ciAutomationMergeOutcome{}, true
+	}
+	return ciAutomationQueueAttemptOutcome(pr, state)
+}
+
+func ciAutomationQueueAttemptOutcome(
+	pr *github.TaskPR,
+	state *github.TaskCIPRAutomationState,
+) (ciAutomationMergeOutcome, bool) {
+	if pr.HeadSHA != "" && state.LastQueueAttemptHeadSHA == pr.HeadSHA && !state.MergeRetryPending {
+		return ciAutomationMergeOutcome{}, true
+	}
+	return ciAutomationMergeOutcome{}, false
+}
+
+func (s *Service) executeCIAutoMerge(
+	ctx context.Context,
+	pr *github.TaskPR,
+	signature string,
+) ciAutomationMergeOutcome {
 	if err := s.githubService.MergePRForAutomation(
 		ctx, pr.WorkspaceID, pr.Owner, pr.Repo, pr.PRNumber, "", pr.HeadSHA,
 	); err != nil {
@@ -443,17 +476,17 @@ func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR
 			context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber,
 			signature, github.TaskCIMergeResultFailed, message,
 		); recordErr != nil {
-			return fmt.Sprintf("%s; record failed merge attempt: %v", message, recordErr)
+			return ciAutomationMergeOutcome{message: fmt.Sprintf("%s; record failed merge attempt: %v", message, recordErr)}
 		}
-		return message
+		return ciAutomationMergeOutcome{message: message, journaled: true}
 	}
 	if err := s.githubService.RecordTaskCIMergeAttemptResult(
 		context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber,
 		signature, github.TaskCIMergeResultAccepted, "",
 	); err != nil {
-		return fmt.Sprintf("record accepted merge PR attempt: %v", err)
+		return ciAutomationMergeOutcome{message: fmt.Sprintf("record accepted merge PR attempt: %v", err)}
 	}
-	return ""
+	return ciAutomationMergeOutcome{}
 }
 
 func (s *Service) recordTaskPRMergeQueueObservation(ctx context.Context, pr *github.TaskPR) {
@@ -961,16 +994,17 @@ func ciAutomationMergeSignature(pr *github.TaskPR) string {
 		requiredReviews = *pr.RequiredReviews
 	}
 	payload, _ := json.Marshal(struct {
-		TaskID, RepositoryID, HeadSHA, HeadBranch   string
-		PRNumber, Additions, Deletions              int
-		ChecksState, ReviewState, MergeableState    string
-		ReviewCount, PendingReviewCount             int
-		RequiredReviewsObserved                     bool
-		RequiredReviews, ChecksTotal, ChecksPassing int
-		UnresolvedReviewThreads                     int
+		TaskID, RepositoryID, HeadSHA, HeadBranch, State string
+		PRNumber, Additions, Deletions                   int
+		ChecksState, ReviewState, MergeableState         string
+		ReviewCount, PendingReviewCount                  int
+		RequiredReviewsObserved                          bool
+		RequiredReviews, ChecksTotal, ChecksPassing      int
+		UnresolvedReviewThreads                          int
 	}{
 		TaskID: pr.TaskID, RepositoryID: pr.RepositoryID, PRNumber: pr.PRNumber,
 		HeadSHA: pr.HeadSHA, HeadBranch: pr.HeadBranch,
+		State:     pr.State,
 		Additions: pr.Additions, Deletions: pr.Deletions,
 		ChecksState: pr.ChecksState, ReviewState: pr.ReviewState, MergeableState: pr.MergeableState,
 		ReviewCount: pr.ReviewCount, PendingReviewCount: pr.PendingReviewCount,

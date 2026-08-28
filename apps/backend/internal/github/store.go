@@ -2521,6 +2521,7 @@ func resetTaskCIAutoFixStateForTask(
 		    last_fix_enqueued_at = NULL,
 		    last_fix_session_id = NULL,
 		    last_error = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN NULL ELSE last_error END,
+		    last_error_kind = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN '' ELSE last_error_kind END,
 		    auto_fix_exhausted_at = NULL,
 		    updated_at = ?
 		WHERE task_id = ?`, now, taskID)
@@ -2749,6 +2750,7 @@ func resetTaskCIAutoFixState(
 		    last_fix_enqueued_at = NULL,
 		    last_fix_session_id = NULL,
 		    last_error = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN NULL ELSE last_error END,
+		    last_error_kind = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN '' ELSE last_error_kind END,
 		    auto_fix_exhausted_at = NULL,
 		    updated_at = ?
 		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`, now, taskID, repositoryID, prNumber)
@@ -2872,6 +2874,7 @@ func (s *Store) RecordTaskCIFixAttempt(ctx context.Context, attempt TaskCIFixAtt
 					WHEN excluded.last_queue_removal_cause <> '' THEN excluded.last_queue_removal_cause
 					ELSE github_task_ci_pr_state.last_queue_removal_cause END,
 				last_error = NULL,
+				last_error_kind = '',
 				updated_at = excluded.updated_at`,
 			attempt.TaskID, attempt.RepositoryID, attempt.PRNumber, attempt.Signature,
 			attempt.CheckpointJSON, when, nullableString(attempt.SessionID), roundCount,
@@ -2893,6 +2896,7 @@ func (s *Store) RefreshTaskCIFixCheckpoint(ctx context.Context, taskID, reposito
 				last_fix_enqueued_at = NULL,
 				last_fix_session_id = NULL,
 				last_error = NULL,
+				last_error_kind = '',
 				updated_at = excluded.updated_at`,
 			taskID, repositoryID, prNumber, signature, checkpointJSON, now, now)
 		return err
@@ -2939,6 +2943,23 @@ func (s *Store) AuthorizeTaskCIMergeRetry(
 			return ErrTaskCIMergeRetryNotAllowed
 		}
 		return nil
+	})
+}
+
+// ClearTaskCIMergeRetryAuthorization rolls back a one-shot retry authorization
+// when its follow-up event could not be published. This keeps a failed publish
+// from leaving the PR permanently blocked behind merge_retry_pending.
+func (s *Store) ClearTaskCIMergeRetryAuthorization(
+	ctx context.Context, taskID, repositoryID string, prNumber int,
+) error {
+	return s.mutateTaskCIPRState(ctx, taskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
+		_, err := tx.ExecContext(ctx, `
+			UPDATE github_task_ci_pr_state
+			SET merge_retry_pending = 0, updated_at = ?
+			WHERE task_id = ? AND repository_id = ? AND pr_number = ?
+			  AND merge_retry_pending = 1`,
+			now, taskID, repositoryID, prNumber)
+		return err
 	})
 }
 
@@ -3131,13 +3152,14 @@ func (s *Store) MarkTaskCIAutoFixExhausted(ctx context.Context, taskID, reposito
 	return s.mutateTaskCIPRState(ctx, taskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO github_task_ci_pr_state (
-				task_id, repository_id, pr_number, auto_fix_exhausted_at, last_error, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?)
+				task_id, repository_id, pr_number, auto_fix_exhausted_at, last_error, last_error_kind, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
 				auto_fix_exhausted_at = excluded.auto_fix_exhausted_at,
 				last_error = excluded.last_error,
+				last_error_kind = excluded.last_error_kind,
 				updated_at = excluded.updated_at`,
-			taskID, repositoryID, prNumber, now, strings.TrimSpace(message), now, now)
+			taskID, repositoryID, prNumber, now, strings.TrimSpace(message), TaskCIErrorKindAutoFix, now, now)
 		return err
 	})
 }
@@ -3220,6 +3242,7 @@ func (s *Store) RecordTaskPRLifecyclePrompt(ctx context.Context, prompt TaskPRLi
 				last_lifecycle_prompt_at = excluded.last_lifecycle_prompt_at,
 				last_lifecycle_session_id = excluded.last_lifecycle_session_id,
 				last_error = NULL,
+				last_error_kind = '',
 				updated_at = excluded.updated_at`,
 			prompt.TaskID, prompt.RepositoryID, prompt.PRNumber,
 			prompt.Event == "review_requested", prompt.ReviewRequested,

@@ -1047,6 +1047,15 @@ type Service struct {
 	sendNowCancel  context.CancelFunc
 	sendNowStopped bool
 	sendNowWorkers sync.WaitGroup
+
+	// ciAutomationWorkers owns the asynchronous per-PR automation loops. The
+	// service-owned context lets Stop cancel in-flight evaluations and prevents
+	// workers from outliving the orchestrator across a restart.
+	ciAutomationMu      sync.Mutex
+	ciAutomationCtx     context.Context
+	ciAutomationCancel  context.CancelFunc
+	ciAutomationStopped bool
+	ciAutomationWorkers sync.WaitGroup
 }
 
 type RouteAction string
@@ -1215,6 +1224,7 @@ func NewService(
 
 	// Create the service (watcher will be created after we have handlers)
 	sendNowCtx, sendNowCancel := context.WithCancel(context.Background())
+	ciAutomationCtx, ciAutomationCancel := context.WithCancel(context.Background())
 	s := &Service{
 		config:                       cfg,
 		logger:                       svcLogger,
@@ -1234,6 +1244,8 @@ func NewService(
 		reservedPromptCallbacks:      newReservedPromptCallbackOwner(),
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,
+		ciAutomationCtx:              ciAutomationCtx,
+		ciAutomationCancel:           ciAutomationCancel,
 		idleReaper:                   newIdleSessionReaper(),
 	}
 	// Always publish queue-status after a task-scoped queue purge so the
@@ -2365,6 +2377,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.logger.Info("starting orchestrator service")
 	s.resetReservedPromptCallbacks()
 	s.resetSendNowWorkers()
+	s.resetCIAutomationWorkers()
 
 	// Reconcile session state from persisted runtime state on startup.
 	// This does NOT launch any agent processes — sessions are recovered lazily
@@ -2498,6 +2511,7 @@ func (s *Service) Stop() error {
 	s.cancelAllClarificationWatchdogs()
 	s.cancelAllTransientRetries()
 	s.stopSendNowWorkers()
+	s.stopCIAutomationWorkers()
 
 	if len(errs) > 0 {
 		return errs[0]

@@ -144,9 +144,12 @@ pull request:
 - `last_error_kind` identifies `auto_merge` errors separately from loading,
   auto-fix, and other automation errors.
 
-The readiness signature includes the task, repository, pull request, head SHA,
-check conclusion, mergeability, review decision, review count, required-review
-presence and value, pending-check count, and unresolved-thread count.
+The readiness signature includes the task, repository, pull request, pull-request
+lifecycle state, head SHA, check conclusion, mergeability, review decision,
+review count, required-review presence and value, pending-check count, and
+unresolved-thread count. Including lifecycle state prevents a closed pull
+request from reusing an attempt reserved while it was open, including after a
+later reopen.
 
 The explicit retry endpoint is:
 
@@ -180,11 +183,16 @@ maps to `merged`. A provider failure remains retryable.
 1. The evaluator refreshes the exact linked pull request.
 2. It requires fresh state, a non-empty head SHA, and all readiness gates.
 3. It computes the complete readiness signature.
-4. It reserves an `in_flight` attempt in storage before any provider side
-   effect. An unchanged `in_flight`, `failed`, or `accepted` signature stops the
-   automatic path.
-5. It calls the provider with the exact observed head SHA.
-6. It records `failed` or `accepted` from the provider result. An accepted
+4. Before the unchanged-signature guard, it consumes a pending one-shot retry
+   authorization for this exact repository and pull request, if one exists.
+   That authorization bypasses only the unchanged-signature guard. The
+   evaluator still requires fresh state, the current head, and every readiness
+   gate. Without an authorization, an unchanged `in_flight`, `failed`, or
+   `accepted` signature stops the automatic path.
+5. It reserves an `in_flight` attempt in storage before any provider side
+   effect.
+6. It calls the provider with the exact observed head SHA.
+7. It records `failed` or `accepted` from the provider result. An accepted
    result clears a prior `auto_merge` error for that pull request.
 
 If the reservation cannot be stored, the evaluator does not call GitHub. A
@@ -201,9 +209,11 @@ unknown request fails with a diagnostic error.
 ### Explicit retry
 
 The retry command authorizes one new evaluation for the exact repository and
-pull-request number. It applies only to a failed or expired `in_flight`
-automatic attempt. It does not bypass checks, reviews, mergeability, thread, or
-head requirements.
+pull-request number. It applies only to a failed attempt or to an expired
+`in_flight` attempt. Expiration is an explicit transition:
+`expired in_flight -> failed -> authorized retry`. A retry cannot be authorized
+while the original attempt is still `in_flight`, and it does not bypass checks,
+reviews, mergeability, thread, or head requirements.
 
 The service persists the retry authorization and publishes the normal
 automation evaluation event. The evaluator then refreshes the pull request and

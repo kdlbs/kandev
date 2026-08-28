@@ -1307,8 +1307,60 @@ func TestHttpRetryMergeAcceptsLinkedFailedAttemptAndPublishesEvaluation(t *testi
 	}
 }
 
+func TestHttpRetryMergeClearsAuthorizationWhenPublishFails(t *testing.T) {
+	svc, store := setupWatchServiceTest(t)
+	svc.eventBus = &mockEventBus{err: errors.New("publish unavailable")}
+	router := gin.New()
+	useControllerTestWorkspace(router)
+	NewController(svc, newControllerTestLogger()).RegisterHTTPRoutes(router)
+	ctx := context.Background()
+	pr := &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		State: "open", CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, pr); err != nil {
+		t.Fatalf("seed task PR: %v", err)
+	}
+	if err := store.RecordTaskCIMergeAttempt(ctx, TaskCIMergeAttempt{
+		TaskID: pr.TaskID, RepositoryID: pr.RepositoryID, PRNumber: pr.PRNumber,
+		Signature: "ready-v1", AttemptedHeadSHA: "head-v1",
+	}); err != nil {
+		t.Fatalf("reserve attempt: %v", err)
+	}
+	if err := store.RecordTaskCIMergeAttemptResult(
+		ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber,
+		"ready-v1", TaskCIMergeResultFailed, "merge PR: provider unavailable",
+	); err != nil {
+		t.Fatalf("record failure: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/github/tasks/task-1/ci-automation/retry-merge",
+		bytes.NewBufferString(`{"repository_id":"repo-1","pr_number":42}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500: %s", response.Code, response.Body.String())
+	}
+	state, err := store.GetTaskCIPRState(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber)
+	if err != nil {
+		t.Fatalf("get state: %v", err)
+	}
+	if state == nil || state.MergeRetryPending {
+		t.Fatalf("retry authorization remained pending after publish failure: %+v", state)
+	}
+}
+
 func TestHttpRetryMergeRejectsUnlinkedAndDuplicateRequests(t *testing.T) {
-	router, store := setupControllerStoreTest(t)
+	svc, store := setupWatchServiceTest(t)
+	svc.eventBus = &mockEventBus{}
+	router := gin.New()
+	useControllerTestWorkspace(router)
+	NewController(svc, newControllerTestLogger()).RegisterHTTPRoutes(router)
 	ctx := context.Background()
 	pr := &TaskPR{
 		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,

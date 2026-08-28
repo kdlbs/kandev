@@ -555,6 +555,7 @@
   "prTaskStatusCi": "CI",
   "prTaskStatusMerge": "Integração",
   "prTaskStatusNumber": "PR #{{number}}",
+  "prTaskStatusRepositoryNumber": "{{repository}} PR n.º {{number}}",
   "prTaskStatusReview": "Revisão",
   "prTaskStatusState": "Estado",
   "pullRequestCiStatusAria": "Estado de CI do pull request #{{number}}{{automation}}",
