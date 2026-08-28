@@ -150,6 +150,94 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     await expect(session.sidebarSection("Turn Finished")).toBeVisible({ timeout: 15_000 });
   });
 
+  test("switches from a TUI session to the workflow step profile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    const { agents } = await apiClient.listAgents();
+    if (agents.length === 0) throw new Error("no agents available in test fixtures");
+
+    const tuiProfile = await createTUIProfile(apiClient, "TUI Profile Switch");
+    const fixedProfile = await apiClient.createAgentProfile(agents[0].id, "Fixed ACP Profile", {
+      model: "mock-fast",
+    });
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "TUI Profile Routing");
+    const startStep = await apiClient.createWorkflowStep(workflow.id, "TUI Start", 0, {
+      is_start_step: true,
+    });
+    const targetStep = await apiClient.createWorkflowStep(workflow.id, "Fixed Profile", 1);
+
+    await apiClient.updateWorkflowStep(startStep.id, {
+      agent_profile_id: tuiProfile.id,
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    });
+    await apiClient.updateWorkflowStep(targetStep.id, {
+      agent_profile_id: fixedProfile.id,
+      prompt: 'e2e:message("fixed profile step")',
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    });
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      enable_preview_on_click: false,
+    });
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "TUI Profile Routing Task",
+      tuiProfile.id,
+      {
+        workflow_id: workflow.id,
+        workflow_step_id: startStep.id,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("task creation did not return the TUI session");
+
+    const session = await openTaskSession(testPage, "TUI Profile Routing Task");
+    await session.expectPassthroughHasText("Mock Agent");
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "the TUI source session did not become ready before the profile switch",
+      timeout: 60_000,
+    });
+    await waitForSessionAgentctlReady(testPage, task.session_id);
+
+    await apiClient.moveTask(task.id, workflow.id, targetStep.id);
+
+    let destinationSessionId = "";
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          const destination = sessions.find((item) => item.agent_profile_id === fixedProfile.id);
+          destinationSessionId = destination?.id ?? "";
+          return destinationSessionId;
+        },
+        { timeout: 90_000, message: "the fixed-profile destination session was not created" },
+      )
+      .not.toBe("");
+
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "COMPLETED",
+      message: "the TUI source session did not complete after profile routing",
+      timeout: 60_000,
+    });
+
+    await expect(session.sessionTabBySessionId(destinationSessionId)).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect(session.primaryStarInSessionTab(destinationSessionId)).toBeVisible({
+      timeout: 60_000,
+    });
+  });
+
   /**
    * Seeds a 4-step workflow (Backlog → Analyze → Implement → Review).
    * Analyze and Implement both have:

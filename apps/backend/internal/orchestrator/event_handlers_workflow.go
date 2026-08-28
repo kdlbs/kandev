@@ -2276,9 +2276,9 @@ func (s *Service) completeAndStopSession(ctx context.Context, taskID string, ses
 }
 
 // prepareWorkflowStepSession resolves the session that must execute a workflow
-// step before any on_enter action runs. Passthrough sessions and steps without
-// an effective profile keep the current session. Profile changes delegate to
-// the existing reuse/create lifecycle helpers.
+// step before any on_enter action runs. Steps without an effective profile keep
+// the current session. Profile changes delegate to the existing reuse/create
+// lifecycle helpers regardless of the source session transport.
 func (s *Service) prepareWorkflowStepSession(
 	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
 ) (*models.TaskSession, bool, error) {
@@ -2287,9 +2287,6 @@ func (s *Service) prepareWorkflowStepSession(
 	}
 	if step == nil {
 		return nil, false, fmt.Errorf("workflow step is nil")
-	}
-	if s.agentManager.IsPassthroughSession(ctx, session.ID) {
-		return session, false, nil
 	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
 	if effectiveProfile == "" || effectiveProfile == session.AgentProfileID {
@@ -2322,7 +2319,7 @@ func (s *Service) preflightWorkflowStepCredentials(
 	currentSession *models.TaskSession,
 	targetStep *wfmodels.WorkflowStep,
 ) error {
-	if currentSession == nil || targetStep == nil || s.agentManager.IsPassthroughSession(ctx, currentSession.ID) {
+	if currentSession == nil || targetStep == nil {
 		return nil
 	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, targetStep)
