@@ -59,13 +59,13 @@ create mapping returns `internal_error` with the foreign-key message.
 
 ## Dependencies
 
-- Task 04 must expose `repoerrors.ErrTaskNotFound` from the write boundary.
+- Task 04 must expose `repository.ErrTaskNotFound` from the write boundary.
 
 ## Results
 
 Implemented the shared missing-task mapping for create and update plan
-responses. Browser and MCP creation tests now verify the stable `not_found`
-message and reject leaked database constraint details.
+responses. Browser and MCP creation and update tests now verify the stable
+`not_found` message and reject leaked database constraint details.
 
 Verification:
 
@@ -74,5 +74,5 @@ cd apps/backend && go test ./internal/task/planws -run TestMappersCoverEverySent
 Go test: 14 passed in 1 packages
 
 cd apps/backend && go test ./internal/task/handlers ./internal/mcp/handlers -run 'Test.*Plan.*MissingTask' -count=1
-Go test: 12 passed in 2 packages
+Go test: 14 passed in 2 packages
 ```

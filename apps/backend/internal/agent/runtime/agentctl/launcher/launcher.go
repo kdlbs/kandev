@@ -518,11 +518,9 @@ func (l *Launcher) pipeOutput(name string, scanner *bufio.Scanner) {
 	}
 }
 
-// childLogLevel extracts the level token from a line emitted by the agentctl
-// child's console-format zap logger: "<ts>\t<LEVEL>\t<caller>\t<msg>", where
-// LEVEL is capitalized and may be wrapped in ANSI color codes. It returns the
-// uppercased level ("INFO"/"WARN"/…) or "" when the line does not match that
-// shape.
+// childLogLevel extracts a recognized level from the agentctl child's trusted
+// structured log formats. It returns the uppercased level ("INFO"/"WARN"/…)
+// or "" when the line does not match one of those formats.
 func childLogLevel(line string) string {
 	// A well-formed console record is "<ts>\t<LEVEL>\t<caller>\t<msg>", so the
 	// level token must be bounded by at least a following caller field. Requiring
@@ -535,21 +533,75 @@ func childLogLevel(line string) string {
 		}
 	}
 
-	// Go's slog TextHandler writes records as key/value fields beginning with
-	// time and level, followed by optional attributes and a msg field. Requiring
-	// those anchors prevents a message containing "level=INFO" from changing
-	// the parent's severity.
-	slogFields := strings.Fields(line)
-	if len(slogFields) < 3 || !strings.HasPrefix(slogFields[0], "time=") ||
-		!strings.HasPrefix(slogFields[1], "level=") {
+	if level := childSlogTextLevel(line); level != "" {
+		return level
+	}
+
+	// slog.Default uses the standard log package's date/time prefix followed by
+	// the level and message, for example "2026/08/12 10:00:00 INFO message".
+	defaultFields := strings.Fields(line)
+	if len(defaultFields) < 3 {
 		return ""
 	}
-	for _, field := range slogFields[2:] {
+	if _, err := time.Parse("2006/01/02 15:04:05", defaultFields[0]+" "+defaultFields[1]); err != nil {
+		return ""
+	}
+	return recognizedChildLogLevel(stripANSI(defaultFields[2]))
+}
+
+func childSlogTextLevel(line string) string {
+	fields, ok := splitSlogTextFields(line)
+	if !ok || len(fields) < 3 || !strings.HasPrefix(fields[0], "time=") ||
+		!strings.HasPrefix(fields[1], "level=") {
+		return ""
+	}
+	for _, field := range fields[2:] {
 		if strings.HasPrefix(field, "msg=") {
-			return recognizedChildLogLevel(stripANSI(strings.TrimPrefix(slogFields[1], "level=")))
+			return recognizedChildLogLevel(stripANSI(strings.TrimPrefix(fields[1], "level=")))
 		}
 	}
 	return ""
+}
+
+func splitSlogTextFields(line string) ([]string, bool) {
+	fields := make([]string, 0, 4)
+	start := -1
+	inQuotes := false
+	escaped := false
+	for i := 0; i < len(line); i++ {
+		ch := line[i]
+		if start < 0 {
+			if ch == ' ' || ch == '\t' {
+				continue
+			}
+			start = i
+		}
+		if inQuotes {
+			switch {
+			case escaped:
+				escaped = false
+			case ch == '\\':
+				escaped = true
+			case ch == '"':
+				inQuotes = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inQuotes = true
+		case ' ', '\t':
+			fields = append(fields, line[start:i])
+			start = -1
+		}
+	}
+	if inQuotes || escaped {
+		return nil, false
+	}
+	if start >= 0 {
+		fields = append(fields, line[start:])
+	}
+	return fields, true
 }
 
 func recognizedChildLogLevel(level string) string {

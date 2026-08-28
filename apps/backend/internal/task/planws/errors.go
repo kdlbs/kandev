@@ -48,6 +48,7 @@ var (
 	// plan or revision failure.
 	allMappings = []mapping{
 		taskIDRequired,
+		taskNotFound,
 		sessionIDRequired,
 		sessionTaskMismatch,
 		planNotFound,

@@ -29,7 +29,9 @@ errors. Unknown child stderr remains visible at warning level.
 The forwarder accepts these anchored child record formats:
 
 - Zap console records with a tab-separated level field.
-- Go `slog` text records with `time`, `level`, and message fields.
+- Go `slog` `TextHandler` records with `time`, `level`, and a message field.
+- Go `slog.Default` records with the standard log date/time prefix, level, and
+  message.
 
 The parser returns only recognized levels. The forwarder maps `DEBUG`, `INFO`,
 `WARN`, and error-class levels to the equivalent parent logger method.

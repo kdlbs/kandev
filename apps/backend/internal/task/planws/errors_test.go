@@ -103,6 +103,7 @@ func TestErrorCoversFullVocabulary(t *testing.T) {
 		message string
 	}{
 		{service.ErrTaskIDRequired, ws.ErrorCodeValidation, wantTaskIDRequired},
+		{repository.ErrTaskNotFound, ws.ErrorCodeNotFound, wantTaskNotFound},
 		{service.ErrSessionIDRequired, ws.ErrorCodeValidation, "session_id is required"},
 		{service.ErrSessionTaskMismatch, ws.ErrorCodeValidation, "Session does not belong to task"},
 		{service.ErrTaskPlanNotFound, ws.ErrorCodeNotFound, wantTaskPlanNotFound},

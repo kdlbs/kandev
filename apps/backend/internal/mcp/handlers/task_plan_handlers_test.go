@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -37,6 +38,11 @@ const (
 // newMCPPlanTestHandlers builds Handlers with only the plan service wired —
 // the plan actions touch nothing else.
 func newMCPPlanTestHandlers(t *testing.T) *Handlers {
+	h, _ := newMCPPlanTestHandlersWithRepo(t)
+	return h
+}
+
+func newMCPPlanTestHandlersWithRepo(t *testing.T) (*Handlers, *sqliterepo.Repository) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -92,7 +98,7 @@ func newMCPPlanTestHandlers(t *testing.T) *Handlers {
 		}
 	}
 
-	return &Handlers{planService: service.NewPlanService(repo, eventBus, log), logger: log}
+	return &Handlers{planService: service.NewPlanService(repo, eventBus, log), logger: log}, repo
 }
 
 func mcpPlanMsg(t *testing.T, action string, payload string) *ws.Message {
@@ -211,6 +217,37 @@ func TestMCPPlanCreateReportsMissingTask(t *testing.T) {
 	if strings.Contains(strings.ToLower(string(out.Payload)), "constraint") {
 		t.Fatalf("error payload leaks storage details: %s", out.Payload)
 	}
+}
+
+func TestMCPPlanUpdateReportsMissingTask(t *testing.T) {
+	h, repo := newMCPPlanTestHandlersWithRepo(t)
+	ctx := context.Background()
+	if _, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
+		TaskID: mcpPlanTaskID, Content: "initial", CreatedBy: "agent",
+	}); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+	h.planService = service.NewPlanService(&missingTaskOnPlanWriteRepo{Repository: repo}, nil, h.logger)
+
+	out, err := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan,
+		`{"task_id":"`+mcpPlanTaskID+`","content":"updated"}`))
+	assertMCPPlanError(t, out, err, ws.ErrorCodeNotFound, "Task not found")
+	if strings.Contains(strings.ToLower(string(out.Payload)), "constraint") {
+		t.Fatalf("error payload leaks storage details: %s", out.Payload)
+	}
+}
+
+type missingTaskOnPlanWriteRepo struct {
+	*sqliterepo.Repository
+}
+
+func (r *missingTaskOnPlanWriteRepo) WritePlanRevision(
+	context.Context,
+	*models.TaskPlan,
+	*models.TaskPlanRevision,
+	*string,
+) error {
+	return repository.ErrTaskNotFound
 }
 
 // TestMCPPlanActionsSucceed pins the success payloads across a full CRUD round

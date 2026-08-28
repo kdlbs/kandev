@@ -10,11 +10,13 @@ spec: "../../specs/platform/requirements/expected-runtime-log-severity.md"
 
 # Task 01: Preserve child log severity
 
-Extend the agentctl launcher parser to recognize Go `slog` text records.
+Extend the agentctl launcher parser to recognize the Go `slog` formats used by
+the child process.
 
 ## Scope
 
-- Extend `childLogLevel` with an anchored Go `slog` text-record parser.
+- Extend `childLogLevel` with anchored Go `slog` TextHandler and default-handler
+  parsers.
 - Keep the existing Zap console parser and ANSI handling.
 - Keep unrecognized stderr on the warning fallback.
 
@@ -37,6 +39,8 @@ Extend the agentctl launcher parser to recognize Go `slog` text records.
 
 - Recognized Go `slog` `DEBUG`, `INFO`, `WARN`, and `ERROR` records use the
   matching parent severity.
+- Both `slog.TextHandler` key/value output and the default handler's standard
+  log date/time output are recognized.
 - Existing Zap console records keep their current classification.
 - Malformed and unstructured stderr remains at warning level.
 
@@ -60,13 +64,15 @@ None.
 
 ## Results
 
-Implemented the anchored Go `slog` text-record parser while preserving the
-existing Zap parser and warning fallback. Added coverage for all standard
-`slog` levels and malformed/unstructured records.
+Implemented anchored Go `slog.TextHandler` and default-handler parsing while
+preserving the existing Zap parser and warning fallback. The text parser is
+quote-aware so a `msg=` substring inside an attribute cannot change severity.
+Added coverage for actual `slog.Default()` output, all standard TextHandler
+levels, and malformed/unstructured records.
 
 Verification:
 
 ```text
 cd apps/backend && go test ./internal/agent/runtime/agentctl/launcher -run 'Test(ChildLogLevel|PipeOutput)' -count=1
-Go test: 23 passed in 1 packages
+Go test: 28 passed in 1 packages
 ```
