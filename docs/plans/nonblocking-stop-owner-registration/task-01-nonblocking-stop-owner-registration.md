@@ -25,11 +25,12 @@ guard. Preserve existing registration behavior when the guard is available.
 - Add a failing concurrency regression test for contended registration.
 - Replace the blocking registration lock with a non-blocking lock attempt.
 - Preserve reference release, teardown claims, and force escalation.
+- Make overlapping Docker removal requests converge successfully.
 
 ## Out of scope
 
 - Change guard ownership in queue or cancellation operations.
-- Change runtime stop scheduling or durable cleanup retries.
+- Change runtime stop scheduling or durable cleanup retry policy.
 - Add browser or end-to-end coverage.
 
 ## Acceptance
@@ -52,6 +53,8 @@ Run these commands from `apps/backend`.
 
 - `apps/backend/internal/orchestrator/event_handlers_agent.go`
 - `apps/backend/internal/orchestrator/execution_teardown_ownership_test.go`
+- `apps/backend/internal/agent/docker/client.go`
+- `apps/backend/internal/agent/docker/storage_test.go`
 
 ## Dependencies
 
@@ -83,3 +86,6 @@ None.
 - Applied the CodeRabbit follow-up by registering guard cleanup with `t.Cleanup`.
 - Reproduced the unrelated CI failure in `TestPortProxyCapabilityRoundTrip`;
   the local `-race` run passed, so the gateway code remains unchanged.
+- Reproduced the containers E2E archive cleanup failure with overlapping Docker
+  removal owners. `Client.RemoveContainer` now treats Docker's conflict for an
+  already-in-progress removal as successful convergence, with focused coverage.
