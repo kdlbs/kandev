@@ -436,7 +436,9 @@ func (c *MCPClient) SearchTickets(ctx context.Context, jql, pageToken string, ma
 }
 
 // SearchTicketsForWatch uses the same MCP search tool because the remote MCP
-// service owns the result field selection.
+// service owns the result field selection. Description may be empty when the
+// MCP service does not include it by default; see
+// docs/specs/integrations/system-design/jira-watcher-task-prompts.md.
 func (c *MCPClient) SearchTicketsForWatch(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
 	return c.SearchTickets(ctx, jql, pageToken, maxResults)
 }

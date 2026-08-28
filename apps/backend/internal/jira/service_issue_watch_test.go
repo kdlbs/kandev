@@ -341,7 +341,7 @@ func TestService_CheckIssueWatch_StampsLastPolledOnError(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("set config: %v", err)
 	}
-	f.client.searchFn = func(_ string) (*SearchResult, error) {
+	f.client.watchSearchFn = func(_ string) (*SearchResult, error) {
 		return nil, errors.New("upstream 500")
 	}
 	w, _ := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
