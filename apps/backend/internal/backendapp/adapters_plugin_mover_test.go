@@ -160,6 +160,25 @@ func TestPluginsTaskWriter_MoveGetTaskNotFoundDuringResolution(t *testing.T) {
 	require.Equal(t, 0, svc.moveCalls, "MoveTaskWithOptions must not be reached when the task can't be loaded")
 }
 
+// TestPluginsTaskWriter_MoveUnexpectedWorkflowReadErrorIsSanitized pins the
+// plugin boundary contract for inherited-workflow resolution: an unexpected
+// repository failure must not expose storage details or task identifiers to a
+// plugin caller.
+func TestPluginsTaskWriter_MoveUnexpectedWorkflowReadErrorIsSanitized(t *testing.T) {
+	internalErr := errors.New("database is locked while reading task task-secret")
+	svc := &fakePluginTaskWriteService{getTaskErr: internalErr}
+	a := pluginsTaskWriterAdapter{svc: svc}
+
+	_, err := a.MoveTask(context.Background(), plugins.TaskMoveInput{
+		TaskID: "task-secret", WorkflowStepID: "step-2",
+	})
+
+	require.Equal(t, codes.Internal, status.Code(err))
+	require.Equal(t, "failed to move task", status.Convert(err).Message())
+	require.NotContains(t, status.Convert(err).Message(), internalErr.Error())
+	require.Equal(t, 0, svc.moveCalls, "MoveTaskWithOptions must not run after workflow resolution fails")
+}
+
 // TestPluginsTaskWriter_MovePositionCastAndResultMapping pins that Position
 // is forwarded as int and the response's Transitioned/FromStepID come
 // straight from MoveTaskResult (not re-derived).
@@ -211,6 +230,8 @@ func TestClassifyPluginMoveError(t *testing.T) {
 		{"different workspace, AC-001.6", errors.New("target workflow is in a different workspace"), codes.InvalidArgument, "invalid move_task request: unknown or mismatched workflow, step, or workspace"},
 		{"step not in workflow, AC-001.6", errors.New("target workflow step does not belong to target workflow"), codes.InvalidArgument, "invalid move_task request: unknown or mismatched workflow, step, or workspace"},
 		{"task not found sentinel, AC-005.6", fmt.Errorf("%w: task-1", repoerrors.ErrTaskNotFound), codes.NotFound, "task not found"},
+		{"context canceled", fmt.Errorf("read task: %w", context.Canceled), codes.Canceled, "move task canceled"},
+		{"context deadline", fmt.Errorf("read task: %w", context.DeadlineExceeded), codes.DeadlineExceeded, "move task deadline exceeded"},
 		{"workflow resolution conflict, SEC-001", fmt.Errorf("%w: resolved %q, task is now in %q", taskservice.ErrWorkflowResolutionConflict, "wf-home", "wf-away"), codes.Aborted, "task workflow changed concurrently, retry the move"},
 		{"unmapped error falls back to Internal", errors.New("something unexpected"), codes.Internal, "failed to move task"},
 	}

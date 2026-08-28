@@ -1392,7 +1392,10 @@ func (a pluginsTaskWriterAdapter) resolvePluginMoveWorkflowID(ctx context.Contex
 			// that never runs for this branch.
 			return "", classifyPluginMoveError(err)
 		}
-		return "", err
+		// Do not forward repository or driver details across the plugin gRPC
+		// boundary. The classifier preserves cancellation codes and maps every
+		// other unexpected lookup failure to a fixed Internal status.
+		return "", classifyPluginMoveError(err)
 	}
 	return task.WorkflowID, nil
 }
@@ -1413,6 +1416,12 @@ func (a pluginsTaskWriterAdapter) resolvePluginMoveWorkflowID(ctx context.Contex
 func classifyPluginMoveError(err error) error {
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, context.Canceled) {
+		return status.Error(codes.Canceled, "move task canceled")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return status.Error(codes.DeadlineExceeded, "move task deadline exceeded")
 	}
 	if errors.Is(err, repoerrors.ErrTaskNotFound) {
 		return status.Error(codes.NotFound, "task not found")

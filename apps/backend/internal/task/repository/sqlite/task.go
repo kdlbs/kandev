@@ -650,8 +650,10 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	task.WorkflowStepTransitionID = transitionID
 	entryID = formatEntryID(transitionID)
 	if transitionID != 0 {
+		task.FromWorkflowID = fromWorkflowID
 		task.FromStepID = fromStepID
 	} else {
+		task.FromWorkflowID = ""
 		task.FromStepID = ""
 	}
 
@@ -1360,8 +1362,10 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	task.WorkflowStepTransitionID = transitionID
 	entryID := formatEntryID(transitionID)
 	if transitionID != 0 {
+		task.FromWorkflowID = fromWorkflowID
 		task.FromStepID = fromStepID
 	} else {
+		task.FromWorkflowID = ""
 		task.FromStepID = ""
 	}
 	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
@@ -1468,8 +1472,10 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	task.WorkflowStepTransitionID = transitionID
 	entryID := formatEntryID(transitionID)
 	if transitionID != 0 {
+		task.FromWorkflowID = fromWorkflowID
 		task.FromStepID = fromStepID
 	} else {
+		task.FromWorkflowID = ""
 		task.FromStepID = ""
 	}
 	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
@@ -2773,8 +2779,10 @@ func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 	task.WorkflowStepTransitionID = transitionID
 	entryID := formatEntryID(transitionID)
 	if transitionID != 0 {
+		task.FromWorkflowID = fromWorkflowID
 		task.FromStepID = fromStepID
 	} else {
+		task.FromWorkflowID = ""
 		task.FromStepID = ""
 	}
 	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {

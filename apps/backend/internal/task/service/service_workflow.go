@@ -620,17 +620,25 @@ func (s *Service) MoveTaskWithOptions(
 		return nil, err
 	}
 
-	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, oldWorkflowID)
+	// Captured now, before the post-commit GetTask refresh below replaces
+	// task with a plain read that carries neither transient field (see
+	// models.Task.FromStepID and FromWorkflowID) — these are the write
+	// transaction's own result, not the pre-move snapshot computed above.
+	resultFromWorkflowID := task.FromWorkflowID
+	resultFromStepID := task.FromStepID
+	resultTransitioned := task.WorkflowStepTransitionID != 0
+	if resultTransitioned && resultFromWorkflowID == "" {
+		// Keep compatibility with repository implementations that predate the
+		// transient source-workflow field. SQLite populates it from the write
+		// transaction; this fallback preserves the previous event value for any
+		// external test or adapter implementation that does not.
+		resultFromWorkflowID = oldWorkflowID
+	}
+
+	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, resultFromWorkflowID)
 	if oldState != task.State {
 		s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
 	}
-
-	// Captured now, before the post-commit GetTask refresh below replaces
-	// task with a plain read that carries neither transient field (see
-	// models.Task.FromStepID's doc) — these are the write transaction's own
-	// result, not the pre-move oldStepID/stepChanged computed above.
-	resultFromStepID := task.FromStepID
-	resultTransitioned := task.WorkflowStepTransitionID != 0
 
 	// Publish task.moved event so the orchestrator can process on_exit/on_enter
 	// actions. Gated on resultTransitioned (the write transaction's own
@@ -641,11 +649,12 @@ func (s *Service) MoveTaskWithOptions(
 	// because this call's read already matched its own target, but the commit's
 	// in-transaction read found a different actual "from" step). Every write
 	// path reachable here (UpdateTask, UpdateTaskIfWorkflowMatches, and the
-	// admission-with-state variant) sets WorkflowStepTransitionID/FromStepID
-	// off the same in-transaction read, so resultFromStepID is always the
-	// step the task actually left on this commit.
+	// admission-with-state variant) sets WorkflowStepTransitionID, FromStepID,
+	// and FromWorkflowID off the same in-transaction read, so the result fields
+	// are always the source step and workflow the task actually left on this
+	// commit.
 	if resultTransitioned {
-		s.publishTaskMovedEvent(ctx, task, oldWorkflowID, resultFromStepID, workflowStepID, sessionID)
+		s.publishTaskMovedEvent(ctx, task, resultFromWorkflowID, resultFromStepID, workflowStepID, sessionID)
 		historySessionID := opts.StepHistorySessionID
 		if historySessionID == "" {
 			historySessionID = sessionID
