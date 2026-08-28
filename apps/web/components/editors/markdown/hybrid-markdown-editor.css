@@ -1,0 +1,105 @@
+/* The Kandev host owns vertical scrolling for the hybrid editor. */
+.kandev-hybrid-markdown-editor-root {
+  display: block;
+  height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  color: var(--foreground);
+  background: var(--background);
+}
+
+.kandev-hybrid-markdown-editor-root > .md-editor {
+  min-height: 100%;
+}
+
+/* Keep the upstream Markdown engine's semantic structure, but use Kandev's
+   active, source-control, selection, and editor colors in both app themes. */
+.md-editor.kandev-hybrid-markdown-editor {
+  color-scheme: light;
+  color: var(--foreground);
+  background: var(--background);
+  --md-block-active-background: color-mix(in oklab, var(--accent) 18%, var(--background));
+  --md-cursor-background: var(--primary);
+  --md-html-comment-foreground: var(--muted-foreground);
+  --md-html-comment-hover-foreground: var(--foreground);
+  --md-gutter-added: rgb(var(--git-addition));
+  --md-gutter-modified: var(--primary);
+  --md-gutter-deleted: rgb(var(--git-deletion));
+}
+
+.dark .md-editor.kandev-hybrid-markdown-editor {
+  color-scheme: dark;
+}
+
+.kandev-hybrid-markdown-editor .md-code-block {
+  color: var(--foreground);
+  background: color-mix(in oklab, var(--muted) 82%, var(--background));
+  border: 1px solid color-mix(in oklab, var(--border) 88%, var(--foreground));
+}
+
+.kandev-hybrid-markdown-editor .md-code-block code,
+.kandev-hybrid-markdown-editor :not(pre) > code {
+  color: var(--foreground);
+}
+
+.kandev-hybrid-markdown-editor :not(pre) > code {
+  background: color-mix(in oklab, var(--muted) 72%, var(--background));
+}
+
+.kandev-hybrid-markdown-editor .md-code-block .tok-keyword,
+.kandev-hybrid-markdown-editor .md-code-block .tok-type,
+.kandev-hybrid-markdown-editor .md-code-block .tok-annotation {
+  color: var(--primary);
+}
+
+.kandev-hybrid-markdown-editor .md-code-block .tok-string,
+.kandev-hybrid-markdown-editor .md-code-block .tok-regexp {
+  color: var(--success);
+}
+
+.kandev-hybrid-markdown-editor .md-code-block .tok-comment {
+  color: var(--muted-foreground);
+}
+
+.kandev-hybrid-markdown-editor .md-code-block .tok-number,
+.kandev-hybrid-markdown-editor .md-code-block .tok-tag,
+.kandev-hybrid-markdown-editor .md-code-block .tok-attribute {
+  color: var(--accent);
+}
+
+.kandev-hybrid-markdown-editor .md-code-block .tok-delimiter {
+  color: var(--foreground);
+}
+
+.kandev-hybrid-markdown-editor .md-table th,
+.kandev-hybrid-markdown-editor .md-table td {
+  border-color: var(--border);
+}
+
+.kandev-hybrid-markdown-editor .md-table th,
+.kandev-hybrid-markdown-editor .md-table tbody tr:nth-child(even) {
+  background: color-mix(in oklab, var(--muted) 68%, var(--background));
+}
+
+.kandev-hybrid-markdown-editor .md-table.md-block-active th,
+.kandev-hybrid-markdown-editor .md-table.md-block-active tbody tr:nth-child(even) {
+  background: transparent;
+}
+
+.kandev-hybrid-markdown-editor .md-selection-path {
+  fill: color-mix(in oklab, var(--primary) 28%, transparent);
+}
+
+.kandev-hybrid-markdown-editor .md-diff-highlight-layer {
+  pointer-events: none;
+}
+
+.kandev-hybrid-markdown-editor .md-diff-ins-rect {
+  background: color-mix(in oklab, rgb(var(--git-addition)) 28%, transparent);
+}
+
+.kandev-hybrid-markdown-editor .md-diff-del-rect {
+  background: color-mix(in oklab, rgb(var(--git-deletion)) 28%, transparent);
+}

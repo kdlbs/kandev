@@ -12,13 +12,9 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { PanelBody, PanelRoot } from "../panel-primitives";
-import { FileViewerContent } from "../file-viewer-content";
 import { HtmlPreviewContent } from "../html-preview-content";
-import { MarkdownPreviewContent } from "../markdown-preview-content";
-import { FileImageViewer } from "../file-image-viewer";
-import { FileBinaryViewer } from "../file-binary-viewer";
 import { FileViewerDownloadButton } from "../file-viewer-header";
-import { HybridMarkdownEditor } from "@/components/editors/markdown/hybrid-markdown-editor";
+import { MobileViewerBody, type MobileViewerKind } from "./mobile-markdown-viewer-body";
 import {
   getFileCategory,
   getFilePreviewKind,
@@ -36,12 +32,14 @@ import {
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { updateFileContent } from "@/lib/ws/workspace-files";
 import { generateUnifiedDiff } from "@/lib/utils/file-diff";
+import { useMarkdownEditorCommentState } from "../markdown-editor-comment-bridge";
 import {
   useHtmlPreviewPublisher,
   type HtmlPreviewPublishState,
 } from "@/hooks/use-html-preview-publisher";
 import {
   capitalize,
+  defaultMarkdownFileMode,
   isMarkdownFileModeSupported,
   type MarkdownFileMode,
 } from "../markdown-file-mode";
@@ -68,8 +66,6 @@ type MobileFileViewerPanelProps = {
   onReloadFromAgent?: () => void;
 };
 
-type ViewerKind = "image" | "binary" | "text";
-
 const MARKDOWN_MODE_ORDER: readonly MarkdownFileMode[] = ["preview", "edit", "source"];
 
 const MARKDOWN_MODE_ICONS = {
@@ -78,7 +74,7 @@ const MARKDOWN_MODE_ICONS = {
   source: IconCode,
 } as const;
 
-function resolveViewerKind(file: OpenFileTab): ViewerKind {
+function resolveViewerKind(file: OpenFileTab): MobileViewerKind {
   if (!file.isBinary) return "text";
   return getFileCategory(file.path) === "image" ? "image" : "binary";
 }
@@ -90,10 +86,13 @@ function resolveInitialMarkdownMode(
   initialRenderedPreview?: boolean,
 ): MarkdownFileMode | undefined {
   if (!isMarkdownFile(file.path)) return undefined;
-  const requestedMode =
-    file.markdownMode ??
-    initialMarkdownMode ??
-    (initialMarkdownPreview === true || initialRenderedPreview === true ? "preview" : "source");
+  let legacyMode: MarkdownFileMode;
+  if (initialMarkdownPreview === undefined && initialRenderedPreview !== true) {
+    legacyMode = defaultMarkdownFileMode(file.path) ?? "source";
+  } else {
+    legacyMode = initialMarkdownPreview || initialRenderedPreview ? "preview" : "source";
+  }
+  const requestedMode = file.markdownMode ?? initialMarkdownMode ?? legacyMode;
   return isMarkdownFileModeSupported(file.path, requestedMode) ? requestedMode : "source";
 }
 
@@ -170,7 +169,7 @@ function MobileFileViewerHeader({
   sessionId: string | null;
   repositoryId?: string;
   markdownMode?: MarkdownFileMode;
-  viewerKind: ViewerKind;
+  viewerKind: MobileViewerKind;
   previewKind: FilePreviewKind;
   renderedPreview: boolean;
   htmlPreview: Pick<HtmlPreviewPublishState, "status" | "url" | "error"> & {
@@ -286,168 +285,6 @@ function MobileFileViewerHeader({
         </Button>
       </div>
     </div>
-  );
-}
-
-function MobileViewerBody({
-  file,
-  viewerKind,
-  previewKind,
-  renderedPreview,
-  markdownMode,
-  keepHybridMounted,
-  worktreePath,
-  sessionId,
-  taskId,
-  repositoryId,
-  draftContent,
-  baselineContent,
-  onChange,
-  onSourceFallback,
-  onTogglePreview,
-  onRetryHtmlPreview,
-  htmlPreview,
-}: {
-  file: OpenFileTab;
-  viewerKind: ViewerKind;
-  previewKind: FilePreviewKind;
-  renderedPreview: boolean;
-  markdownMode?: MarkdownFileMode;
-  keepHybridMounted: boolean;
-  worktreePath?: string;
-  sessionId: string | null;
-  taskId: string | null;
-  repositoryId?: string;
-  draftContent: string;
-  baselineContent: string;
-  onChange: (content: string) => void;
-  onSourceFallback?: () => void;
-  onTogglePreview: () => void;
-  onRetryHtmlPreview: () => void;
-  htmlPreview: Pick<HtmlPreviewPublishState, "status" | "url" | "error"> & {
-    isPublishing: boolean;
-  };
-}) {
-  const markdownFile = isMarkdownFile(file.path);
-  return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="mobile-file-viewer-content">
-      {viewerKind === "image" && (
-        <FileImageViewer path={file.path} content={draftContent} worktreePath={worktreePath} />
-      )}
-      {viewerKind === "binary" && <FileBinaryViewer path={file.path} worktreePath={worktreePath} />}
-      {viewerKind === "text" && markdownFile && (
-        <MobileMarkdownSurface
-          file={file}
-          markdownMode={markdownMode}
-          keepHybridMounted={keepHybridMounted}
-          worktreePath={worktreePath}
-          sessionId={sessionId}
-          taskId={taskId}
-          repositoryId={repositoryId}
-          draftContent={draftContent}
-          baselineContent={baselineContent}
-          onChange={onChange}
-          onSourceFallback={onSourceFallback}
-        />
-      )}
-      {viewerKind === "text" && !markdownFile && renderedPreview && previewKind === "html" && (
-        <HtmlPreviewContent
-          path={file.path}
-          worktreePath={worktreePath}
-          sessionId={sessionId ?? undefined}
-          taskId={taskId}
-          repositoryId={repositoryId}
-          repositoryName={file.repo}
-          showExternalVcsLink={false}
-          previewUrl={htmlPreview.url}
-          isLoading={htmlPreview.isPublishing}
-          error={htmlPreview.error}
-          onRetry={onRetryHtmlPreview}
-          onTogglePreview={onTogglePreview}
-        />
-      )}
-      {viewerKind === "text" &&
-        !markdownFile &&
-        !(renderedPreview && previewKind === "html") && (
-          <FileViewerContent
-            path={file.path}
-            repo={file.repo}
-            content={draftContent}
-            sessionId={sessionId ?? undefined}
-            editable={false}
-          />
-        )}
-    </div>
-  );
-}
-
-function MobileMarkdownSurface({
-  file,
-  markdownMode,
-  keepHybridMounted,
-  worktreePath,
-  sessionId,
-  taskId,
-  repositoryId,
-  draftContent,
-  baselineContent,
-  onChange,
-  onSourceFallback,
-}: {
-  file: OpenFileTab;
-  markdownMode?: MarkdownFileMode;
-  keepHybridMounted: boolean;
-  worktreePath?: string;
-  sessionId: string | null;
-  taskId: string | null;
-  repositoryId?: string;
-  draftContent: string;
-  baselineContent: string;
-  onChange: (content: string) => void;
-  onSourceFallback?: () => void;
-}) {
-  return (
-    <>
-      {markdownMode === "preview" && (
-        <MarkdownPreviewContent
-          path={file.path}
-          content={draftContent}
-          worktreePath={worktreePath}
-          sessionId={sessionId ?? undefined}
-          taskId={taskId}
-          repositoryId={repositoryId}
-          repositoryName={file.repo}
-          enableComments={!!sessionId}
-          showExternalVcsLink={false}
-          onTogglePreview={undefined}
-        />
-      )}
-      {keepHybridMounted && (
-        <div
-          className={markdownMode === "edit" ? "min-h-0 flex-1 overflow-hidden" : "hidden"}
-          aria-hidden={markdownMode !== "edit"}
-          data-testid="mobile-markdown-hybrid-editor-host"
-        >
-          <HybridMarkdownEditor
-            content={draftContent}
-            baseline={baselineContent}
-            readOnly={false}
-            onChange={onChange}
-            onSourceFallback={onSourceFallback}
-          />
-        </div>
-      )}
-      {markdownMode === "source" && (
-        <FileViewerContent
-          path={file.path}
-          repo={file.repo}
-          content={draftContent}
-          sessionId={sessionId ?? undefined}
-          editable
-          onChange={onChange}
-        />
-      )}
-    </>
   );
 }
 
@@ -654,7 +491,8 @@ export function MobileFileViewerPanel({
   const fileIdentity = getMobileFileIdentity(file);
   const [lastFileIdentity, setLastFileIdentity] = useState(fileIdentity);
   const initialLegacyMarkdownPreview =
-    initialMarkdownPreview || (initialRenderedPreview && previewKind === "markdown");
+    initialMarkdownPreview ??
+    (initialRenderedPreview && previewKind === "markdown" ? true : undefined);
   const [renderedPreview, setRenderedPreview] = useState(
     false,
   );
@@ -686,6 +524,13 @@ export function MobileFileViewerPanel({
     isDirty: buffer.isDirty,
     markSaved: buffer.markSaved,
     onFileSaved,
+  });
+  const { hybridComments, handleHybridComment } = useMarkdownEditorCommentState({
+    path: file.path,
+    content: buffer.draftContent,
+    sessionId,
+    repositoryId,
+    enableComments: isMarkdownFile(file.path) && !!sessionId,
   });
   const hasRemoteUpdate = file.hasRemoteUpdate ?? false;
 
@@ -727,7 +572,9 @@ export function MobileFileViewerPanel({
           repositoryId={repositoryId}
           draftContent={buffer.draftContent}
           baselineContent={buffer.baselineContent}
+          comments={hybridComments}
           onChange={buffer.handleChange}
+          onComment={handleHybridComment}
           onSourceFallback={buffer.handleSourceFallback}
           onTogglePreview={() => setRenderedPreview((current) => !current)}
           onRetryHtmlPreview={publishCurrentHtmlPreview}

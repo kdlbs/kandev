@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const upstream = vi.hoisted(() => {
@@ -117,7 +117,7 @@ beforeEach(() => {
   upstream.state.failView = false;
 });
 
-describe("HybridMarkdownEditor", () => {
+describe("HybridMarkdownEditor lifecycle", () => {
   it("mounts one source-preserving model, view, controller, and local history", () => {
     const source = "# Keep this source\n\n<div>Unsupported</div>\n";
     const onChange = vi.fn();
@@ -138,7 +138,13 @@ describe("HybridMarkdownEditor", () => {
     expect(controller.options).toEqual(
       expect.objectContaining({ historyStrategy: expect.anything() }),
     );
+    expect((view.options as { classNames: string[] }).classNames).toEqual(
+      expect.arrayContaining(["kandev-hybrid-markdown-editor"]),
+    );
     expect(view.element.parentElement).toBeTruthy();
+    expect(screen.getByTestId("hybrid-markdown-editor").className).toContain(
+      "kandev-hybrid-markdown-editor-root",
+    );
 
     model.listener?.({
       edit: {
@@ -171,7 +177,9 @@ describe("HybridMarkdownEditor", () => {
       expect.objectContaining({ value: "# After" }),
     );
   });
+});
 
+describe("HybridMarkdownEditor contracts", () => {
   it("passes link, baseline, gutter, and comment contracts through the adapter", () => {
     const onOpenLink = vi.fn();
     const onComment = vi.fn();

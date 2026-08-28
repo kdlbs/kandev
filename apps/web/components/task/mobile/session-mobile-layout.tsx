@@ -26,6 +26,7 @@ import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import type { OpenFileTab } from "@/lib/types/backend";
 import type { MarkdownFileMode } from "@/lib/types/workspace-files";
 import { isMarkdownFile } from "@/lib/utils/file-types";
+import { defaultMarkdownFileMode } from "../markdown-file-mode";
 import type { MobileFileSavedSnapshot } from "./mobile-selected-file-state";
 import {
   useMobileFileSessionLifecycle,
@@ -591,7 +592,7 @@ export function useMobilePanelHandlers({
       latestRequestIdRef.current += 1;
       openFileAbortRef.current?.abort();
       openFileAbortRef.current = null;
-      const markdownMode = isMarkdownFile(file.path) ? (file.markdownMode ?? "source") : undefined;
+      const markdownMode = file.markdownMode ?? defaultMarkdownFileMode(file.path);
       setSelectedFile(markdownMode ? { ...file, markdownMode } : file);
       setSelectedFileMode(markdownMode);
       handlePanelChange("files");

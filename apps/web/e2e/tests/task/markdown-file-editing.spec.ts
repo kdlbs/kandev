@@ -11,10 +11,17 @@ const MARKDOWN_CONTENT = `# Markdown lifecycle
 
 This paragraph stays in the canonical source.
 
+\`\`\`ts
+const ready = true;
+\`\`\`
+
 | Area | State |
 | --- | --- |
 | Preview | Ready |
+
+<div data-unsupported="true">Unsupported source</div>
 `;
+const UNSUPPORTED_MARKDOWN_SOURCE = '<div data-unsupported="true">Unsupported source</div>';
 
 async function seedMarkdownSession({
   testPage,
@@ -70,24 +77,36 @@ async function openFile(session: SessionPage, testPage: Page, fileName: string):
   await expect(testPage.getByTestId("markdown-file-editor")).toBeVisible({ timeout: 15_000 });
 }
 
-async function appendToMonaco(testPage: Page, marker: string): Promise<void> {
-  const editor = testPage.locator(".monaco-editor:visible").first();
+async function appendToHybrid(testPage: Page, marker: string): Promise<void> {
+  const editor = testPage.getByTestId("hybrid-markdown-editor");
   await expect(editor).toBeVisible({ timeout: 15_000 });
-  const nativeEditContext = editor.locator(".native-edit-context");
-  const input =
-    (await nativeEditContext.count()) > 0
-      ? nativeEditContext.first()
-      : editor.locator("textarea.inputarea").first();
-  await input.focus();
+  const paragraph = editor.locator(".md-paragraph").last();
+  await expect(paragraph).toBeVisible({ timeout: 15_000 });
+  await paragraph.click();
   await testPage.keyboard.press(process.platform === "darwin" ? "Meta+End" : "Control+End");
   await testPage.keyboard.type(`\n\n${marker}`);
-  await expect(editor.locator(".view-lines")).toContainText(marker);
+  await expect(editor).toContainText(marker);
+}
+
+async function hybridPalette(testPage: Page) {
+  return testPage.locator(".md-editor.kandev-hybrid-markdown-editor").evaluate((editor) => {
+    const activeBlock = editor.querySelector<HTMLElement>(".md-block-active");
+    const codeBlock = editor.querySelector<HTMLElement>(".md-code-block");
+    const styles = getComputedStyle(editor);
+    return {
+      editorColor: styles.color,
+      editorBackground: styles.backgroundColor,
+      activeBackground: activeBlock ? getComputedStyle(activeBlock).backgroundColor : "",
+      codeColor: codeBlock ? getComputedStyle(codeBlock).color : "",
+      codeBackground: codeBlock ? getComputedStyle(codeBlock).backgroundColor : "",
+    };
+  });
 }
 
 test.describe("Markdown file editing", () => {
   test.describe.configure({ retries: 1, timeout: 120_000 });
 
-  test("opens in Preview, edits the exact Source buffer, saves, and restores Edit mode", async ({
+  test("opens in Preview, edits the rendered hybrid buffer, saves, and restores Edit mode", async ({
     testPage,
     apiClient,
     seedData,
@@ -117,8 +136,17 @@ test.describe("Markdown file editing", () => {
 
     await editor.getByTestId("markdown-mode-edit").click();
     await expect(testPage.getByTestId("hybrid-markdown-editor")).toBeVisible({ timeout: 15_000 });
-    await editor.getByTestId("markdown-mode-source").click();
-    await appendToMonaco(testPage, marker);
+    await appendToHybrid(testPage, marker);
+
+    const lightPalette = await hybridPalette(testPage);
+    expect(lightPalette.editorColor).not.toBe(lightPalette.codeBackground);
+    expect(lightPalette.activeBackground).not.toBe("");
+    await testPage.evaluate(() => document.documentElement.classList.add("dark"));
+    await expect.poll(() => hybridPalette(testPage), { timeout: 5_000 }).not.toEqual(lightPalette);
+    const darkPalette = await hybridPalette(testPage);
+    expect(darkPalette.editorColor).not.toBe(darkPalette.codeBackground);
+    expect(darkPalette.editorBackground).not.toBe(lightPalette.editorBackground);
+    expect(darkPalette.codeBackground).not.toBe(lightPalette.codeBackground);
 
     const saveButton = editor.getByTestId("markdown-file-save");
     await expect(saveButton).toBeEnabled();
@@ -126,6 +154,7 @@ test.describe("Markdown file editing", () => {
     await expect
       .poll(() => fs.readFileSync(filePath, "utf8"), { timeout: 15_000 })
       .toContain(marker);
+    expect(fs.readFileSync(filePath, "utf8")).toContain(UNSUPPORTED_MARKDOWN_SOURCE);
     await expect(saveButton).toBeDisabled();
 
     await editor.getByTestId("markdown-mode-preview").click();

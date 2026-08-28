@@ -17,6 +17,7 @@ import {
 } from "@vscode/markdown-editor";
 import "@vscode/markdown-editor/editor.css";
 import "@vscode/markdown-editor/themes/default.css";
+import "./hybrid-markdown-editor.css";
 import {
   applyMarkdownSourceEdit,
   type MarkdownSourceReplacement,
@@ -138,7 +139,17 @@ export function HybridMarkdownEditor({
     comments,
   });
 
-  return <div ref={rootRef} className={className} data-testid="hybrid-markdown-editor" />;
+  return (
+    <div
+      ref={rootRef}
+      className={
+        className
+          ? `kandev-hybrid-markdown-editor-root ${className}`
+          : "kandev-hybrid-markdown-editor-root"
+      }
+      data-testid="hybrid-markdown-editor"
+    />
+  );
 }
 
 type LifecycleHookOptions = {

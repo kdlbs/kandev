@@ -165,6 +165,9 @@ describe("MarkdownFileEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Change hybrid" }));
     expect(onChange).toHaveBeenCalledWith("# hybrid edit");
     expect((screen.getByTestId("markdown-file-save") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("markdown-hybrid-editor-host").className).toContain(
+      "overflow-hidden",
+    );
   });
 
   it("keeps the hybrid editor mounted while switching to another presentation", () => {

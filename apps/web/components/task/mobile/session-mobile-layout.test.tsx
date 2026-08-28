@@ -200,14 +200,14 @@ describe("useMobilePanelHandlers", () => {
     expect(handlePanelChange).toHaveBeenCalledWith("files");
   });
 
-  it("opens a Markdown file from the Files panel in Source mode", () => {
+  it("opens a Markdown file from the Files panel in Preview mode", () => {
     const { result } = renderHandlers();
     act(() =>
       result.current.handleOpenFile({ ...MOCK_FILE, path: "README.md", name: "README.md" }),
     );
 
-    expect(result.current.selectedFileMode).toBe("source");
-    expect(result.current.selectedFile?.markdownMode).toBe("source");
+    expect(result.current.selectedFileMode).toBe("preview");
+    expect(result.current.selectedFile?.markdownMode).toBe("preview");
   });
 
   it("updates the selected mobile buffer and mode without changing file identity", () => {
@@ -287,7 +287,7 @@ describe("useMobilePanelHandlers", () => {
       ...MOCK_FILE,
       path: "README.md",
       name: "README.md",
-      markdownMode: "source",
+      markdownMode: "preview",
     });
   });
 

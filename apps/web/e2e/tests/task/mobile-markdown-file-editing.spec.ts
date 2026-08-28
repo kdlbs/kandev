@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -14,7 +14,16 @@ Edit this file from the phone Files surface.
 | Area | State | Notes |
 | --- | --- | --- |
 | Preview | Ready | The table remains contained |
+
+${Array.from(
+  { length: 56 },
+  (_, index) => `Long mobile paragraph ${index + 1} keeps the editor content below the fold.`,
+).join("\n\n")}
+
+<div data-unsupported="true">Unsupported mobile source</div>
 `;
+const UNSUPPORTED_MOBILE_MARKDOWN_SOURCE =
+  '<div data-unsupported="true">Unsupported mobile source</div>';
 
 async function seedMobileMarkdownSession({
   testPage,
@@ -53,10 +62,21 @@ async function seedMobileMarkdownSession({
   return { session, filePath: path.join(repoDir, fileName) };
 }
 
+async function appendToHybrid(testPage: Page, viewer: Locator, marker: string): Promise<void> {
+  const editor = viewer.getByTestId("hybrid-markdown-editor");
+  await expect(editor).toBeVisible({ timeout: 15_000 });
+  const paragraph = editor.locator(".md-paragraph").last();
+  await expect(paragraph).toBeVisible({ timeout: 15_000 });
+  await paragraph.tap();
+  await testPage.keyboard.press("Control+End");
+  await testPage.keyboard.type(`\n\n${marker}`);
+  await expect(editor).toContainText(marker);
+}
+
 test.describe("Mobile Markdown file editing", () => {
   test.describe.configure({ retries: 1, timeout: 120_000 });
 
-  test("edits and saves Source, switches to Preview, and keeps phone controls reachable", async ({
+  test("edits and saves the hybrid document below the fold and keeps phone controls reachable", async ({
     testPage,
     apiClient,
     seedData,
@@ -81,25 +101,34 @@ test.describe("Mobile Markdown file editing", () => {
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");
     await expect(viewer).toBeVisible({ timeout: 15_000 });
     const controls = viewer.getByTestId("mobile-markdown-mode-controls");
-    const sourceButton = viewer.getByTestId("mobile-markdown-mode-source");
     const editButton = viewer.getByTestId("mobile-markdown-mode-edit");
     const previewButton = viewer.getByTestId("mobile-markdown-mode-preview");
     await expect(controls).toBeVisible();
-    await expect(sourceButton).toHaveAttribute("aria-pressed", "true");
+    await expect(previewButton).toHaveAttribute("aria-pressed", "true");
 
-    for (const button of [sourceButton, editButton, previewButton]) {
+    for (const button of [
+      viewer.getByTestId("mobile-markdown-mode-source"),
+      editButton,
+      previewButton,
+    ]) {
       const box = await button.boundingBox();
       expect(box).not.toBeNull();
       expect(box!.width).toBeGreaterThanOrEqual(44);
       expect(box!.height).toBeGreaterThanOrEqual(44);
     }
 
-    const source = viewer.locator(".cm-content").first();
-    await expect(source).toHaveAttribute("contenteditable", "true");
-    await source.tap();
-    await testPage.keyboard.press("Control+End");
-    await testPage.keyboard.type(`\n\n${marker}`);
-    await expect(viewer.locator(".cm-line").filter({ hasText: marker })).toBeVisible();
+    await editButton.tap();
+    const hybrid = viewer.getByTestId("hybrid-markdown-editor");
+    await expect(hybrid).toBeVisible({ timeout: 15_000 });
+    const scrollMetrics = await hybrid.evaluate((element) => {
+      const scroller = element as HTMLElement;
+      const before = { scrollHeight: scroller.scrollHeight, clientHeight: scroller.clientHeight };
+      scroller.scrollTop = scroller.scrollHeight;
+      return { ...before, scrollTop: scroller.scrollTop };
+    });
+    expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
+    expect(scrollMetrics.scrollTop).toBeGreaterThan(0);
+    await appendToHybrid(testPage, viewer, marker);
 
     const saveButton = viewer.getByTestId("mobile-file-save");
     await expect(saveButton).toBeEnabled();
@@ -108,6 +137,7 @@ test.describe("Mobile Markdown file editing", () => {
     await expect
       .poll(() => fs.readFileSync(filePath, "utf8"), { timeout: 15_000 })
       .toContain(marker);
+    expect(fs.readFileSync(filePath, "utf8")).toContain(UNSUPPORTED_MOBILE_MARKDOWN_SOURCE);
     await expect(saveButton).toBeDisabled();
 
     await previewButton.tap();
@@ -115,6 +145,7 @@ test.describe("Mobile Markdown file editing", () => {
     await expect(preview).toBeVisible();
     await expect(preview).toContainText(marker);
     await expect(preview.locator("table")).toBeVisible();
+    await expect(preview).toContainText("Long mobile paragraph 56");
     await prCapture.screenshot("mobile-markdown-preview", {
       caption: "Mobile Markdown Preview with contained table content",
     });
@@ -122,6 +153,12 @@ test.describe("Mobile Markdown file editing", () => {
       await testPage.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
       ),
+    ).toBe(true);
+    expect(
+      await testPage.evaluate(() => {
+        const root = document.documentElement;
+        return root.scrollHeight <= root.clientHeight + 1;
+      }),
     ).toBe(true);
 
     await editButton.tap();
