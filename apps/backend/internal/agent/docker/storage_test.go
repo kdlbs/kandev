@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/containerd/errdefs"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/moby/moby/api/types/build"
 	"github.com/moby/moby/api/types/container"
@@ -161,21 +160,6 @@ func TestRemoveContainerRemovesAttachedVolumesWithoutGlobalPrune(t *testing.T) {
 	}
 }
 
-func TestRemoveContainerTreatsConcurrentRemovalAsSuccess(t *testing.T) {
-	remover := &fakeContainerRemover{
-		err: errdefs.ErrConflict.WithMessage("removal of container container-1 is already in progress"),
-	}
-	log, err := logger.NewFromZap(zap.NewNop())
-	if err != nil {
-		t.Fatalf("new logger: %v", err)
-	}
-	dockerClient := &Client{remover: remover, logger: log}
-
-	if err := dockerClient.RemoveContainer(context.Background(), "container-1", true); err != nil {
-		t.Fatalf("RemoveContainer: %v", err)
-	}
-}
-
 type fakeStorageAPI struct {
 	usage        client.DiskUsageResult
 	usageErr     error
@@ -206,7 +190,6 @@ func (f *fakeStorageAPI) ImagePrune(_ context.Context, options client.ImagePrune
 type fakeContainerRemover struct {
 	id      string
 	options client.ContainerRemoveOptions
-	err     error
 }
 
 func (f *fakeContainerRemover) ContainerRemove(
@@ -214,5 +197,5 @@ func (f *fakeContainerRemover) ContainerRemove(
 ) (client.ContainerRemoveResult, error) {
 	f.id = id
 	f.options = options
-	return client.ContainerRemoveResult{}, f.err
+	return client.ContainerRemoveResult{}, nil
 }

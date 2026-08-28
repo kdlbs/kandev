@@ -264,6 +264,10 @@ func handleE2EReset(
 		}
 		var deletedTasks int64
 		deletedTaskIDs := append([]string(nil), taskIDsForCleanup...)
+		deletedTaskIDSet := make(map[string]struct{}, len(deletedTaskIDs))
+		for _, taskID := range deletedTaskIDs {
+			deletedTaskIDSet[taskID] = struct{}{}
+		}
 		for _, t := range tasks {
 			if err := taskSvc.DeleteTask(ctx, t.ID); err != nil {
 				// Abort: leaving an undeleted task with its workflow gone
@@ -274,7 +278,8 @@ func handleE2EReset(
 				return
 			}
 			deletedTasks++
-			if !containsE2ETaskID(deletedTaskIDs, t.ID) {
+			if _, exists := deletedTaskIDSet[t.ID]; !exists {
+				deletedTaskIDSet[t.ID] = struct{}{}
 				deletedTaskIDs = append(deletedTaskIDs, t.ID)
 			}
 		}
@@ -283,6 +288,8 @@ func handleE2EReset(
 		// removes worktrees asynchronously. The next test reuses the worker's
 		// repository, so returning before those jobs finish lets an old cleanup
 		// race with the next test's repository setup and file-tree read.
+		// This wait covers the durable cleanup path. E2E startup wires
+		// resourceCleanups, so the fire-and-forget fallback is not expected here.
 		if err := waitForE2ETaskCleanup(ctx, repo.DB(), deletedTaskIDs); err != nil {
 			log.Error("e2e reset: task cleanup did not finish", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
@@ -452,15 +459,6 @@ func listE2ETaskIDs(ctx context.Context, database *sql.DB, workspaceID string) (
 		return nil, err
 	}
 	return ids, nil
-}
-
-func containsE2ETaskID(taskIDs []string, taskID string) bool {
-	for _, id := range taskIDs {
-		if id == taskID {
-			return true
-		}
-	}
-	return false
 }
 
 func resetGitHubAppRegistrationsForE2E(

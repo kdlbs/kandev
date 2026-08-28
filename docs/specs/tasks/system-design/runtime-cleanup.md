@@ -139,6 +139,25 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
   worktree by updating any soft-deleted row with the same environment,
   repository, and branch identity.
 
+## Archive cleanup disposition
+
+Direct and cascade archive use the same cleanup disposition. A caller-specific
+Boolean must not change it:
+
+- Stop the task runtimes and remove executor-specific runtime resources.
+- Remove the physical worktree directory and mark its repository row deleted.
+- Preserve the owning `task_environments` row, every
+  `task_environment_repos` row (including worktree ID, path, branch, and slug),
+  and the local Git branch ref.
+
+If a worktree appears in both snapshots, every pass uses this disposition and
+must not delete a branch preserved earlier.
+
+Unarchive keeps the preserved environment link. If its repository row is not
+live, normal preparation reactivates it and uses the preserved local branch
+before remote or pull-request recovery. Delete remains separate and may remove
+owner rows after capturing its cleanup snapshot.
+
 ## Data Model
 
 ### `executors_running`
@@ -377,6 +396,8 @@ The durable cleanup job wraps that resource lifecycle:
   not classified as orphaned.
 - Historical worktree rows for archived tasks remain available to unarchive branch
   recovery even after their on-disk directories are removed.
+- Archive cleanup preserves the task environment owner and the local branch ref.
+  Cleanup retries and duplicate teardown passes keep the same disposition.
 - Orphaned OS processes without any durable `executors_running` row are outside
   normal cleanup guarantees; they may be handled by an explicit operator recovery
   tool, but automatic task cleanup must not rely on process-name scanning.
@@ -500,6 +521,9 @@ The durable cleanup job wraps that resource lifecycle:
 - **GIVEN** archive cleanup removed a local worktree, **WHEN** the task is
   unarchived, **THEN** its historical worktree branch metadata remains available
   for local/remote recovery.
+- **GIVEN** a direct or cascade archive removes a task worktree, **WHEN** the
+  remote branch is also absent, **THEN** the task environment, repository row,
+  and local branch ref remain available for normal resume preparation.
 - **GIVEN** an unarchived task environment whose worktree repository row is
   deleted, failed, or tombstoned, **WHEN** its session resumes, **THEN** the
   executor selects normal worktree preparation and recreates or reactivates the
@@ -522,3 +546,4 @@ The durable cleanup job wraps that resource lifecycle:
 
 - [Backend failure containment](../../../plans/backend-failure-containment/plan.md)
 - [Worktree resume after unarchive](../../../plans/worktree-resume-after-unarchive/plan.md)
+- [Archive resume identity](../../../plans/archive-resume-identity/plan.md)
