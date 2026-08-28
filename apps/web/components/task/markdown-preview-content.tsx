@@ -23,6 +23,7 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconCode, IconMessagePlus } from "@tabler/icons-react";
 import {
+  MarkdownFileLinkContext,
   MarkdownTaskContext,
   rehypePlugins,
   remarkPlugins,
@@ -146,6 +147,8 @@ interface MarkdownPreviewContentProps {
   showExternalVcsLink?: boolean;
   onDownload?: () => void;
   onTogglePreview?: () => void;
+  onOpenFile?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
 }
 
 type PositionedNode = {
@@ -427,6 +430,8 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
   showExternalVcsLink = true,
   onDownload,
   onTogglePreview,
+  onOpenFile,
+  onOpenLink,
 }: MarkdownPreviewContentProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -483,11 +488,24 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
         onDownload={onDownload}
         onTogglePreview={onTogglePreview}
       />
-      <div ref={scrollRef} className="flex-1 overflow-auto p-6">
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-auto p-6"
+        data-testid="markdown-preview-scroll-container"
+      >
         <div ref={rootRef} className="markdown-body max-w-3xl" tabIndex={commentsEnabled ? 0 : -1}>
-          <PreviewCommentContext.Provider value={previewCommentContextValue}>
-            <MarkdownPreviewRenderer content={content} taskId={taskId} />
-          </PreviewCommentContext.Provider>
+          <MarkdownFileLinkContext.Provider
+            value={{
+              worktreePath,
+              currentFilePath: path,
+              onOpenFile,
+              onOpenLink,
+            }}
+          >
+            <PreviewCommentContext.Provider value={previewCommentContextValue}>
+              <MarkdownPreviewRenderer content={content} taskId={taskId} />
+            </PreviewCommentContext.Provider>
+          </MarkdownFileLinkContext.Provider>
         </div>
       </div>
       <MarkdownPreviewCommentOverlays

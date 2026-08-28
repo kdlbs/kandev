@@ -482,6 +482,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
             onFileSave={handleFileSave}
             onFileDelete={handleFileDelete}
             onTogglePreview={() => handleRenderedPreviewToggle(getFileTabKey(tab))}
+            onOpenFile={handleOpenFileFromChat}
             onMarkdownModeChange={(mode) => handleMarkdownModeChange(getFileTabKey(tab), mode)}
           />
         ))}

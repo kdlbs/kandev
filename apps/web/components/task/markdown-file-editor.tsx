@@ -47,6 +47,7 @@ export type MarkdownFileEditorProps = {
   onDelete?: () => void;
   comments?: readonly MarkdownComment[];
   gutterMarkers?: readonly MarkdownGutterMarker[];
+  onOpenFile?: (path: string) => void;
   onOpenLink?: (url: string) => void;
   onComment?: (comment: { text: string; start: number; endExclusive: number }) => void;
   onError?: (error: unknown) => void;
@@ -77,6 +78,7 @@ export function MarkdownFileEditor({
   onDelete,
   comments,
   gutterMarkers,
+  onOpenFile,
   onOpenLink,
   onComment,
   onError,
@@ -87,6 +89,7 @@ export function MarkdownFileEditor({
   );
   const safeMode = supportedModes.includes(mode) ? mode : "source";
   const [hybridMounted, setHybridMounted] = useState(mode === "edit");
+  const [previewMounted, setPreviewMounted] = useState(mode === "preview");
   const { hybridComments, handleHybridComment } = useMarkdownEditorCommentState({
     path,
     content,
@@ -103,6 +106,7 @@ export function MarkdownFileEditor({
 
   useEffect(() => {
     if (safeMode === "edit") setHybridMounted(true);
+    if (safeMode === "preview") setPreviewMounted(true);
   }, [safeMode]);
 
   const handleKeyDown = useCallback(
@@ -136,11 +140,13 @@ export function MarkdownFileEditor({
       gutterMarkers={gutterMarkers}
       comments={hybridComments}
       keepHybridMounted={hybridMounted && isMarkdownFileModeSupported(path, "edit")}
+      keepPreviewMounted={previewMounted}
       onModeChange={onModeChange}
       onChange={onChange}
       onSave={onSave}
       onReloadFromAgent={onReloadFromAgent}
       onDelete={onDelete}
+      onOpenFile={onOpenFile}
       onOpenLink={onOpenLink}
       onComment={handleHybridComment}
       onError={onError}
@@ -155,6 +161,7 @@ type MarkdownFileEditorLayoutProps = Omit<MarkdownFileEditorProps, "mode" | "com
   supportedModes: readonly MarkdownFileMode[];
   comments: readonly MarkdownComment[];
   keepHybridMounted: boolean;
+  keepPreviewMounted: boolean;
   onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void;
 };
 
@@ -177,11 +184,13 @@ function MarkdownFileEditorLayout({
   supportedModes,
   comments,
   keepHybridMounted,
+  keepPreviewMounted,
   onModeChange,
   onChange,
   onSave,
   onReloadFromAgent,
   onDelete,
+  onOpenFile,
   onOpenLink,
   onComment,
   onError,
@@ -228,10 +237,12 @@ function MarkdownFileEditorLayout({
         gutterMarkers={gutterMarkers}
         comments={comments}
         keepHybridMounted={keepHybridMounted}
+        keepPreviewMounted={keepPreviewMounted}
         onChange={onChange}
         onSave={onSave}
         onReloadFromAgent={onReloadFromAgent}
         onDelete={onDelete}
+        onOpenFile={onOpenFile}
         onOpenLink={onOpenLink}
         onComment={onComment}
         onError={onError}
@@ -262,11 +273,12 @@ type MarkdownFilePresentationProps = Pick<
   | "onSave"
   | "onReloadFromAgent"
   | "onDelete"
+  | "onOpenFile"
   | "onOpenLink"
   | "onComment"
   | "onError"
   | "onSourceFallback"
-> & { keepHybridMounted: boolean; mode: MarkdownFileMode };
+> & { keepHybridMounted: boolean; keepPreviewMounted: boolean; mode: MarkdownFileMode };
 
 function MarkdownFilePresentation({
   mode,
@@ -286,10 +298,12 @@ function MarkdownFilePresentation({
   gutterMarkers,
   comments,
   keepHybridMounted,
+  keepPreviewMounted,
   onChange,
   onSave,
   onReloadFromAgent,
   onDelete,
+  onOpenFile,
   onOpenLink,
   onComment,
   onError,
@@ -317,18 +331,26 @@ function MarkdownFilePresentation({
           />
         </div>
       )}
-      {mode === "preview" && (
-        <MarkdownPreviewContent
-          path={path}
-          content={content}
-          worktreePath={worktreePath}
-          sessionId={sessionId ?? undefined}
-          taskId={taskId}
-          repositoryId={repositoryId}
-          repositoryName={repo}
-          enableComments={enableComments}
-          onTogglePreview={undefined}
-        />
+      {keepPreviewMounted && (
+        <div
+          className={mode === "preview" ? "h-full min-h-0" : "hidden"}
+          aria-hidden={mode !== "preview"}
+          data-testid="markdown-preview-host"
+        >
+          <MarkdownPreviewContent
+            path={path}
+            content={content}
+            worktreePath={worktreePath}
+            sessionId={sessionId ?? undefined}
+            taskId={taskId}
+            repositoryId={repositoryId}
+            repositoryName={repo}
+            enableComments={enableComments}
+            onTogglePreview={undefined}
+            onOpenFile={onOpenFile}
+            onOpenLink={onOpenLink}
+          />
+        </div>
       )}
       {mode === "source" && (
         <FileEditorContent

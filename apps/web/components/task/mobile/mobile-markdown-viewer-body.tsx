@@ -25,6 +25,7 @@ export function MobileViewerBody({
   renderedPreview,
   markdownMode,
   keepHybridMounted,
+  keepPreviewMounted,
   worktreePath,
   sessionId,
   taskId,
@@ -38,6 +39,8 @@ export function MobileViewerBody({
   onTogglePreview,
   onRetryHtmlPreview,
   htmlPreview,
+  onOpenFile,
+  onOpenLink,
 }: {
   file: OpenFileTab;
   viewerKind: MobileViewerKind;
@@ -45,6 +48,7 @@ export function MobileViewerBody({
   renderedPreview: boolean;
   markdownMode?: MarkdownFileMode;
   keepHybridMounted: boolean;
+  keepPreviewMounted: boolean;
   worktreePath?: string;
   sessionId: string | null;
   taskId: string | null;
@@ -60,6 +64,8 @@ export function MobileViewerBody({
   htmlPreview: Pick<HtmlPreviewPublishState, "status" | "url" | "error"> & {
     isPublishing: boolean;
   };
+  onOpenFile?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
 }) {
   const markdownFile = isMarkdownFile(file.path);
   return (
@@ -73,6 +79,7 @@ export function MobileViewerBody({
           file={file}
           markdownMode={markdownMode}
           keepHybridMounted={keepHybridMounted}
+          keepPreviewMounted={keepPreviewMounted}
           worktreePath={worktreePath}
           sessionId={sessionId}
           taskId={taskId}
@@ -83,6 +90,8 @@ export function MobileViewerBody({
           onChange={onChange}
           onComment={onComment}
           onSourceFallback={onSourceFallback}
+          onOpenFile={onOpenFile}
+          onOpenLink={onOpenLink}
         />
       )}
       {viewerKind === "text" && !markdownFile && renderedPreview && previewKind === "html" && (
@@ -120,6 +129,7 @@ function MobileMarkdownSurface({
   file,
   markdownMode,
   keepHybridMounted,
+  keepPreviewMounted,
   worktreePath,
   sessionId,
   taskId,
@@ -130,10 +140,13 @@ function MobileMarkdownSurface({
   onChange,
   onComment,
   onSourceFallback,
+  onOpenFile,
+  onOpenLink,
 }: {
   file: OpenFileTab;
   markdownMode?: MarkdownFileMode;
   keepHybridMounted: boolean;
+  keepPreviewMounted: boolean;
   worktreePath?: string;
   sessionId: string | null;
   taskId: string | null;
@@ -144,22 +157,32 @@ function MobileMarkdownSurface({
   onChange: (content: string) => void;
   onComment: (comment: MarkdownCommentSubmission) => void;
   onSourceFallback?: () => void;
+  onOpenFile?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
 }) {
   return (
     <>
-      {markdownMode === "preview" && (
-        <MarkdownPreviewContent
-          path={file.path}
-          content={draftContent}
-          worktreePath={worktreePath}
-          sessionId={sessionId ?? undefined}
-          taskId={taskId}
-          repositoryId={repositoryId}
-          repositoryName={file.repo}
-          enableComments={!!sessionId}
-          showExternalVcsLink={false}
-          onTogglePreview={undefined}
-        />
+      {keepPreviewMounted && (
+        <div
+          className={markdownMode === "preview" ? "h-full min-h-0" : "hidden"}
+          aria-hidden={markdownMode !== "preview"}
+          data-testid="mobile-markdown-preview-host"
+        >
+          <MarkdownPreviewContent
+            path={file.path}
+            content={draftContent}
+            worktreePath={worktreePath}
+            sessionId={sessionId ?? undefined}
+            taskId={taskId}
+            repositoryId={repositoryId}
+            repositoryName={file.repo}
+            enableComments={!!sessionId}
+            showExternalVcsLink={false}
+            onTogglePreview={undefined}
+            onOpenFile={onOpenFile}
+            onOpenLink={onOpenLink}
+          />
+        </div>
       )}
       {keepHybridMounted && (
         <div
@@ -173,6 +196,7 @@ function MobileMarkdownSurface({
             readOnly={false}
             comments={comments}
             onChange={onChange}
+            onOpenLink={onOpenLink}
             onComment={onComment}
             onSourceFallback={onSourceFallback}
           />

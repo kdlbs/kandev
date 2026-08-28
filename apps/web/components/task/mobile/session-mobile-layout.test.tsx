@@ -107,6 +107,7 @@ const OTHER_FILE: OpenFileTab = {
 
 const CHAT_LINK_PATH = "src/chat-link.ts";
 const REPO = "frontend";
+const DIRTY_DRAFT_CONTENT = "draft content";
 
 describe("mobilePanelTopNavHeight", () => {
   it("reserves the fixed header only when no earlier page feedback owns the offset", () => {
@@ -429,6 +430,50 @@ describe("useMobilePanelHandlers selection state", () => {
 
     expect(result.current.selectedFile).toBeNull();
     expect(handlePanelChange).toHaveBeenCalledWith("plan");
+  });
+
+  it("keeps a dirty viewer until the shared navigation discard is confirmed", () => {
+    const { result, handlePanelChange } = renderHandlers();
+    act(() => result.current.handleOpenFile(MOCK_FILE));
+    act(() => result.current.handleSelectedFileChange(DIRTY_DRAFT_CONTENT));
+    handlePanelChange.mockClear();
+
+    act(() => result.current.handlePanelChangeAndClearSheet("plan"));
+
+    expect(result.current.selectedFile).toMatchObject({
+      path: MOCK_FILE.path,
+      content: DIRTY_DRAFT_CONTENT,
+      isDirty: true,
+    });
+    expect(result.current.pendingNavigation).toMatchObject({
+      panel: "plan",
+      filePath: MOCK_FILE.path,
+    });
+    expect(handlePanelChange).not.toHaveBeenCalled();
+
+    act(() => result.current.confirmPendingNavigation());
+
+    expect(result.current.selectedFile).toBeNull();
+    expect(result.current.pendingNavigation).toBeNull();
+    expect(handlePanelChange).toHaveBeenCalledWith("plan");
+  });
+
+  it("keeps the dirty viewer and cancels a pending navigation", () => {
+    const { result, handlePanelChange } = renderHandlers();
+    act(() => result.current.handleOpenFile(MOCK_FILE));
+    act(() => result.current.handleSelectedFileChange(DIRTY_DRAFT_CONTENT));
+    handlePanelChange.mockClear();
+
+    act(() => result.current.handlePanelChangeAndClearSheet("files"));
+    act(() => result.current.cancelPendingNavigation());
+
+    expect(result.current.selectedFile).toMatchObject({
+      path: MOCK_FILE.path,
+      content: DIRTY_DRAFT_CONTENT,
+      isDirty: true,
+    });
+    expect(result.current.pendingNavigation).toBeNull();
+    expect(handlePanelChange).not.toHaveBeenCalled();
   });
 
   it("clears selectedFile when effectiveSessionId changes", () => {

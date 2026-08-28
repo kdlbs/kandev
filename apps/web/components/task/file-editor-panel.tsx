@@ -24,6 +24,7 @@ import { useTranslation } from "react-i18next";
 import { MarkdownFileEditor } from "./markdown-file-editor";
 import type { MarkdownFileMode } from "./markdown-file-mode";
 import { defaultMarkdownFileMode } from "./markdown-file-mode";
+import { useMarkdownFileLinkHandler } from "./markdown-file-link-handler";
 
 type FileCategory = "image" | "binary" | "text";
 
@@ -409,6 +410,8 @@ type LoadedFilePanelProps = {
   editorProps: FileEditorContentProps;
   markdownMode?: MarkdownFileMode;
   onMarkdownModeChange: (mode: MarkdownFileMode) => void;
+  onOpenFile?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
 };
 
 function LoadedFilePanel({
@@ -423,6 +426,8 @@ function LoadedFilePanel({
   editorProps,
   markdownMode,
   onMarkdownModeChange,
+  onOpenFile,
+  onOpenLink,
 }: LoadedFilePanelProps) {
   if (category !== "text") {
     return (
@@ -462,6 +467,8 @@ function LoadedFilePanel({
             onSave={editorProps.onSave}
             onReloadFromAgent={editorProps.onReloadFromAgent}
             onDelete={editorProps.onDelete}
+            onOpenFile={onOpenFile}
+            onOpenLink={onOpenLink}
             onSourceFallback={() => onMarkdownModeChange("source")}
           />
         ) : (
@@ -534,6 +541,8 @@ type LoadedFileEditorPanelProps = {
   >;
   markdownMode?: MarkdownFileMode;
   onMarkdownModeChange: (mode: MarkdownFileMode) => void;
+  onOpenFile?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
 };
 
 function LoadedFileEditorPanel({
@@ -545,6 +554,8 @@ function LoadedFileEditorPanel({
   actions,
   markdownMode,
   onMarkdownModeChange,
+  onOpenFile,
+  onOpenLink,
 }: LoadedFileEditorPanelProps) {
   return (
     <LoadedFilePanel
@@ -555,6 +566,8 @@ function LoadedFileEditorPanel({
       editorProps={{ ...buffer, ...options, ...actions }}
       markdownMode={markdownMode}
       onMarkdownModeChange={onMarkdownModeChange}
+      onOpenFile={onOpenFile}
+      onOpenLink={onOpenLink}
     />
   );
 }
@@ -578,8 +591,9 @@ export const FileEditorPanel = memo(function FileEditorPanel({
   );
   const gitStatus = useSessionGitStatus(activeSessionId);
   const vcsDiff = gitStatus?.files?.[path]?.diff;
-  const { savingFiles, handleFileChange, saveFile, deleteFile, applyRemoteUpdate } =
+  const { savingFiles, openFile, handleFileChange, saveFile, deleteFile, applyRemoteUpdate } =
     useFileEditors();
+  const worktreePath = getSessionWorkspacePath(activeSession);
   useFileLoader({ hasFile: file.hasFile, activeSessionId, fileKey, path, setFileState, repo });
   useResyncOnTabActivate({
     panelId,
@@ -606,6 +620,13 @@ export const FileEditorPanel = memo(function FileEditorPanel({
       },
     });
   const onDownload = useLoadedFileDownloadForBuffer(file, path);
+  const onOpenFile = useCallback(
+    (targetPath: string) => {
+      void openFile(targetPath, repo);
+    },
+    [openFile, repo],
+  );
+  const onOpenLink = useMarkdownFileLinkHandler({ path, worktreePath, onOpenFile });
   const onMarkdownModeChange = useCallback(
     (nextMode: MarkdownFileMode) => updateFileState(fileKey, { markdownMode: nextMode }),
     [updateFileState, fileKey],
@@ -659,6 +680,8 @@ export const FileEditorPanel = memo(function FileEditorPanel({
       }}
       markdownMode={file.markdownMode}
       onMarkdownModeChange={onMarkdownModeChange}
+      onOpenFile={onOpenFile}
+      onOpenLink={onOpenLink}
     />
   );
 });

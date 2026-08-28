@@ -38,13 +38,23 @@ vi.mock("./markdown-file-editor", () => ({
   MarkdownFileEditor: ({
     mode,
     onModeChange,
+    onSourceFallback,
+    onOpenLink,
   }: {
     mode: "preview" | "edit" | "source";
     onModeChange: (mode: "preview" | "edit" | "source") => void;
+    onSourceFallback?: () => void;
+    onOpenLink?: (url: string) => void;
   }) => (
     <div data-testid="markdown-file-editor" data-markdown-mode={mode}>
       <button type="button" onClick={() => onModeChange("source")}>
         Toggle mode
+      </button>
+      <button type="button" onClick={onSourceFallback}>
+        Fallback to source
+      </button>
+      <button type="button" onClick={() => onOpenLink?.("./guide.md")}>
+        Open Markdown link
       </button>
     </div>
   ),
@@ -97,6 +107,50 @@ describe("FileTabContent Markdown preview", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Toggle mode" }));
     expect(onToggleMarkdownPreview).toHaveBeenCalledWith("source");
+  });
+
+  it("wires the Task Center Markdown fallback back to the mode owner", () => {
+    const onMarkdownModeChange = vi.fn();
+
+    render(
+      <FileTabContent
+        tab={file}
+        activeSession={null}
+        activeSessionId="session-1"
+        taskId="task-1"
+        isSaving={false}
+        onFileChange={vi.fn()}
+        onFileSave={vi.fn()}
+        onFileDelete={vi.fn()}
+        onMarkdownModeChange={onMarkdownModeChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Fallback to source" }));
+
+    expect(onMarkdownModeChange).toHaveBeenCalledWith("source");
+  });
+
+  it("routes Edit-mode Markdown links through the Task Center file opener", () => {
+    const onOpenFile = vi.fn();
+
+    render(
+      <FileTabContent
+        tab={{ ...file, path: "docs/readme.md", name: "readme.md" }}
+        activeSession={{ workspace_path: "/tmp/task-root" }}
+        activeSessionId="session-1"
+        taskId="task-1"
+        isSaving={false}
+        onFileChange={vi.fn()}
+        onFileSave={vi.fn()}
+        onFileDelete={vi.fn()}
+        onOpenFile={onOpenFile}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Markdown link" }));
+
+    expect(onOpenFile).toHaveBeenCalledWith("docs/guide.md", undefined);
   });
 
   it("uses the effective workspace path for desktop file viewers", () => {

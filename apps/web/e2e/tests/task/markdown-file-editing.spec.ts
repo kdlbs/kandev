@@ -19,6 +19,11 @@ const ready = true;
 | --- | --- |
 | Preview | Ready |
 
+${Array.from(
+  { length: 56 },
+  (_, index) => `Long desktop paragraph ${index + 1} keeps the preview scrollable.`,
+).join("\n\n")}
+
 <div data-unsupported="true">Unsupported source</div>
 `;
 const UNSUPPORTED_MARKDOWN_SOURCE = '<div data-unsupported="true">Unsupported source</div>';
@@ -154,14 +159,27 @@ test.describe("Markdown file editing", () => {
     await expect
       .poll(() => fs.readFileSync(filePath, "utf8"), { timeout: 15_000 })
       .toContain(marker);
+    expect(fs.readFileSync(filePath, "utf8")).toBe(`${MARKDOWN_CONTENT}\n\n${marker}`);
     expect(fs.readFileSync(filePath, "utf8")).toContain(UNSUPPORTED_MARKDOWN_SOURCE);
     await expect(saveButton).toBeDisabled();
 
     await editor.getByTestId("markdown-mode-preview").click();
     await expect(preview).toContainText(marker);
+    const previewScroll = preview.getByTestId("markdown-preview-scroll-container");
+    const previewScrollTop = await previewScroll.evaluate((element) => {
+      const scroller = element as HTMLElement;
+      scroller.scrollTop = scroller.scrollHeight;
+      return scroller.scrollTop;
+    });
+    expect(previewScrollTop).toBeGreaterThan(0);
     await prCapture.screenshot("desktop-markdown-preview", {
       caption: "Desktop Markdown Preview with the saved source change",
     });
+    await editor.getByTestId("markdown-mode-edit").click();
+    await editor.getByTestId("markdown-mode-preview").click();
+    await expect
+      .poll(() => previewScroll.evaluate((element) => (element as HTMLElement).scrollTop))
+      .toBe(previewScrollTop);
     await editor.getByTestId("markdown-mode-edit").click();
     await expect(testPage.getByTestId("hybrid-markdown-editor")).toBeVisible({ timeout: 15_000 });
 

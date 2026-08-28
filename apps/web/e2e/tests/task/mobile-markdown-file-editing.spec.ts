@@ -133,10 +133,11 @@ test.describe("Mobile Markdown file editing", () => {
     const saveButton = viewer.getByTestId("mobile-file-save");
     await expect(saveButton).toBeEnabled();
     await expect(saveButton).toBeInViewport();
-    await saveButton.tap();
+    await testPage.keyboard.press(process.platform === "darwin" ? "Meta+S" : "Control+S");
     await expect
       .poll(() => fs.readFileSync(filePath, "utf8"), { timeout: 15_000 })
       .toContain(marker);
+    expect(fs.readFileSync(filePath, "utf8")).toBe(`${MOBILE_MARKDOWN_CONTENT}\n\n${marker}`);
     expect(fs.readFileSync(filePath, "utf8")).toContain(UNSUPPORTED_MOBILE_MARKDOWN_SOURCE);
     await expect(saveButton).toBeDisabled();
 
@@ -146,6 +147,13 @@ test.describe("Mobile Markdown file editing", () => {
     await expect(preview).toContainText(marker);
     await expect(preview.locator("table")).toBeVisible();
     await expect(preview).toContainText("Long mobile paragraph 56");
+    const previewScroll = viewer.getByTestId("markdown-preview-scroll-container");
+    const previewScrollTop = await previewScroll.evaluate((element) => {
+      const scroller = element as HTMLElement;
+      scroller.scrollTop = scroller.scrollHeight;
+      return scroller.scrollTop;
+    });
+    expect(previewScrollTop).toBeGreaterThan(0);
     await prCapture.screenshot("mobile-markdown-preview", {
       caption: "Mobile Markdown Preview with contained table content",
     });
@@ -166,5 +174,28 @@ test.describe("Mobile Markdown file editing", () => {
       timeout: 15_000,
     });
     await expect(viewer.getByTestId("hybrid-markdown-editor")).toBeVisible({ timeout: 15_000 });
+    await previewButton.tap();
+    await expect
+      .poll(() => previewScroll.evaluate((element) => (element as HTMLElement).scrollTop))
+      .toBe(previewScrollTop);
+
+    await editButton.tap();
+    const discardedMarker = `mobile discarded marker ${Date.now()}`;
+    await appendToHybrid(testPage, viewer, discardedMarker);
+    await viewer.getByRole("button", { name: "Back" }).tap();
+    const discardDialog = testPage.getByTestId("discard-local-changes-dialog");
+    await expect(discardDialog).toBeVisible();
+    await discardDialog.getByTestId("discard-local-changes-cancel").tap();
+    await expect(viewer).toContainText(discardedMarker);
+
+    await testPage.getByRole("button", { name: "Plan" }).tap();
+    await expect(discardDialog).toBeVisible();
+    await discardDialog.getByTestId("discard-local-changes-cancel").tap();
+    await expect(viewer).toContainText(discardedMarker);
+
+    await viewer.getByRole("button", { name: "Back" }).tap();
+    await expect(discardDialog).toBeVisible();
+    await discardDialog.getByTestId("discard-local-changes-confirm").tap();
+    await expect(session.fileTreeNode(fileName)).toBeVisible({ timeout: 15_000 });
   });
 });

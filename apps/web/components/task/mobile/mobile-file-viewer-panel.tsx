@@ -33,6 +33,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { updateFileContent } from "@/lib/ws/workspace-files";
 import { generateUnifiedDiff } from "@/lib/utils/file-diff";
 import { useMarkdownEditorCommentState } from "../markdown-editor-comment-bridge";
+import { useMarkdownFileLinkHandler } from "../markdown-file-link-handler";
 import {
   useHtmlPreviewPublisher,
   type HtmlPreviewPublishState,
@@ -64,6 +65,7 @@ type MobileFileViewerPanelProps = {
   onFileSaved?: (snapshot: MobileFileSavedSnapshot) => void;
   onModeChange?: (mode: MarkdownFileMode) => void;
   onReloadFromAgent?: () => void;
+  onOpenFile?: (path: string, repo?: string) => void;
 };
 
 const MARKDOWN_MODE_ORDER: readonly MarkdownFileMode[] = ["preview", "edit", "source"];
@@ -309,6 +311,7 @@ function useMobileFileBuffer({
   const fileContentSnapshotRef = useRef({ identity: fileIdentity, content: file.content });
   const [markdownMode, setMarkdownMode] = useState<MarkdownFileMode | undefined>(initialMode);
   const [hybridMounted, setHybridMounted] = useState(initialMode === "edit");
+  const [previewMounted, setPreviewMounted] = useState(initialMode === "preview");
   const [draftContent, setDraftContent] = useState(file.content);
   const [baselineContent, setBaselineContent] = useState(file.originalContent);
   const [originalHash, setOriginalHash] = useState(file.originalHash);
@@ -317,6 +320,7 @@ function useMobileFileBuffer({
     setLastFileIdentity(fileIdentity);
     setMarkdownMode(initialMode);
     setHybridMounted(initialMode === "edit");
+    setPreviewMounted(initialMode === "preview");
     setDraftContent(file.content);
     setBaselineContent(file.originalContent);
     setOriginalHash(file.originalHash);
@@ -345,6 +349,7 @@ function useMobileFileBuffer({
     (mode: MarkdownFileMode) => {
       if (!isMarkdownFileModeSupported(file.path, mode)) return;
       if (mode === "edit") setHybridMounted(true);
+      if (mode === "preview") setPreviewMounted(true);
       setMarkdownMode(mode);
       onModeChange?.(mode);
     },
@@ -363,6 +368,7 @@ function useMobileFileBuffer({
   return {
     markdownMode,
     keepHybridMounted: hybridMounted && isMarkdownFileModeSupported(file.path, "edit"),
+    keepPreviewMounted: previewMounted,
     draftContent,
     baselineContent,
     originalHash,
@@ -457,6 +463,41 @@ function useMobileFileSave({
   return { isSaving, handleSave };
 }
 
+function useMobileFileViewerActions({
+  file,
+  worktreePath,
+  markdownMode,
+  onOpenFile,
+  handleSave,
+}: {
+  file: OpenFileTab;
+  worktreePath?: string;
+  markdownMode?: MarkdownFileMode;
+  onOpenFile?: (path: string, repo?: string) => void;
+  handleSave: () => Promise<void>;
+}) {
+  const openLinkedFile = useCallback(
+    (path: string) => onOpenFile?.(path, file.repo),
+    [file.repo, onOpenFile],
+  );
+  const handleOpenLink = useMarkdownFileLinkHandler({
+    path: file.path,
+    worktreePath,
+    onOpenFile: onOpenFile ? openLinkedFile : undefined,
+  });
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (markdownMode !== "edit" && markdownMode !== "source") return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        void handleSave();
+      }
+    },
+    [handleSave, markdownMode],
+  );
+  return { openLinkedFile, handleOpenLink, handleKeyDown };
+}
+
 export function MobileFileViewerPanel({
   file,
   sessionId,
@@ -468,6 +509,7 @@ export function MobileFileViewerPanel({
   onFileSaved,
   onModeChange,
   onReloadFromAgent,
+  onOpenFile,
 }: MobileFileViewerPanelProps) {
   const activeSession = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
@@ -525,6 +567,13 @@ export function MobileFileViewerPanel({
     markSaved: buffer.markSaved,
     onFileSaved,
   });
+  const { openLinkedFile, handleOpenLink, handleKeyDown } = useMobileFileViewerActions({
+    file,
+    worktreePath,
+    markdownMode: buffer.markdownMode,
+    onOpenFile,
+    handleSave: save.handleSave,
+  });
   const { hybridComments, handleHybridComment } = useMarkdownEditorCommentState({
     path: file.path,
     content: buffer.draftContent,
@@ -535,7 +584,7 @@ export function MobileFileViewerPanel({
   const hasRemoteUpdate = file.hasRemoteUpdate ?? false;
 
   return (
-    <PanelRoot data-testid="mobile-file-viewer-panel">
+    <PanelRoot data-testid="mobile-file-viewer-panel" onKeyDown={handleKeyDown}>
       <MobileFileViewerHeader
         file={file}
         fileStatus={fileStatus}
@@ -566,6 +615,7 @@ export function MobileFileViewerPanel({
           renderedPreview={renderedPreview}
           markdownMode={buffer.markdownMode}
           keepHybridMounted={buffer.keepHybridMounted}
+          keepPreviewMounted={buffer.keepPreviewMounted}
           worktreePath={worktreePath}
           sessionId={sessionId}
           taskId={activeTaskId}
@@ -579,6 +629,8 @@ export function MobileFileViewerPanel({
           onTogglePreview={() => setRenderedPreview((current) => !current)}
           onRetryHtmlPreview={publishCurrentHtmlPreview}
           htmlPreview={htmlPreview}
+          onOpenFile={onOpenFile ? openLinkedFile : undefined}
+          onOpenLink={onOpenFile ? handleOpenLink : undefined}
         />
       </PanelBody>
     </PanelRoot>

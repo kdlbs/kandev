@@ -8,6 +8,8 @@ import {
   sourceOffsetAtLine,
 } from "./markdown-file-editor";
 
+const MARKDOWN_PREVIEW_CONTENT_TEST_ID = vi.hoisted(() => "markdown-preview-content");
+
 const commentMocks = vi.hoisted(() => ({
   addComment: vi.fn(),
   comments: [] as Array<{
@@ -63,7 +65,7 @@ vi.mock("./file-editor-content", () => ({
 
 vi.mock("./markdown-preview-content", () => ({
   MarkdownPreviewContent: ({ content }: { content: string }) => (
-    <div data-testid="markdown-preview-content">{content}</div>
+    <div data-testid={MARKDOWN_PREVIEW_CONTENT_TEST_ID}>{content}</div>
   ),
 }));
 
@@ -151,7 +153,7 @@ describe("MarkdownFileEditor", () => {
   it("renders Preview and changes mode through one visible mode control", () => {
     render(<MarkdownFileEditor {...baseProps} mode="preview" />);
 
-    expect(screen.getByTestId("markdown-preview-content")).toBeTruthy();
+    expect(screen.getByTestId(MARKDOWN_PREVIEW_CONTENT_TEST_ID)).toBeTruthy();
     expect(screen.queryByTestId(HYBRID_EDITOR_TEST_ID)).toBeNull();
     fireEvent.click(screen.getByTestId("markdown-mode-edit"));
     expect(baseProps.onModeChange).toHaveBeenCalledWith("edit");
@@ -177,7 +179,19 @@ describe("MarkdownFileEditor", () => {
     rerender(<MarkdownFileEditor {...baseProps} mode="preview" />);
 
     expect(screen.getByTestId("markdown-hybrid-editor-host").className).toContain("hidden");
-    expect(screen.getByTestId("markdown-preview-content")).toBeTruthy();
+    expect(screen.getByTestId(MARKDOWN_PREVIEW_CONTENT_TEST_ID)).toBeTruthy();
+  });
+
+  it("keeps the Preview surface and its reading position mounted across mode changes", () => {
+    const { rerender } = render(<MarkdownFileEditor {...baseProps} mode="preview" />);
+    const preview = screen.getByTestId(MARKDOWN_PREVIEW_CONTENT_TEST_ID) as HTMLElement;
+    preview.scrollTop = 160;
+
+    rerender(<MarkdownFileEditor {...baseProps} mode="edit" />);
+    rerender(<MarkdownFileEditor {...baseProps} mode="preview" />);
+
+    expect(screen.getByTestId(MARKDOWN_PREVIEW_CONTENT_TEST_ID)).toBe(preview);
+    expect(preview.scrollTop).toBe(160);
   });
 
   it("passes existing comments to Edit mode and stores new source ranges", () => {

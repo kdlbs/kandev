@@ -1,9 +1,12 @@
+/* eslint-disable max-lines -- this suite covers the complete mobile Markdown surface. */
+
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 
 const getWebSocketClientMock = vi.hoisted(() => vi.fn(() => ({})));
 const updateFileContentMock = vi.hoisted(() => vi.fn());
+const MOBILE_SOURCE_CHANGE_LABEL = vi.hoisted(() => "Change mobile source");
 const commentMocks = vi.hoisted(() => ({
   addComment: vi.fn(),
   comments: [] as Array<{
@@ -117,7 +120,7 @@ vi.mock("../file-viewer-content", () => ({
   }) => (
     <div data-testid="file-content" data-editable={String(editable)}>
       <button type="button" onClick={() => onChange?.(MOBILE_EDIT_CONTENT)}>
-        Change mobile source
+        {MOBILE_SOURCE_CHANGE_LABEL}
       </button>
       <button type="button" onClick={() => onChange?.(MOBILE_NEWER_EDIT_CONTENT)}>
         Change mobile source again
@@ -136,11 +139,13 @@ vi.mock("@/components/editors/markdown/hybrid-markdown-editor", () => ({
     onComment,
     onChange,
     onSourceFallback,
+    onOpenLink,
   }: {
     comments?: readonly unknown[];
     onComment?: (comment: { text: string; start: number; endExclusive: number }) => void;
     onChange: (content: string) => void;
     onSourceFallback?: () => void;
+    onOpenLink?: (url: string) => void;
   }) => (
     <div
       data-testid="mobile-hybrid-editor"
@@ -158,6 +163,9 @@ vi.mock("@/components/editors/markdown/hybrid-markdown-editor", () => ({
       </button>
       <button type="button" onClick={() => onSourceFallback?.()}>
         Fallback to source
+      </button>
+      <button type="button" onClick={() => onOpenLink?.("./guide.md")}>
+        Open mobile Markdown link
       </button>
     </div>
   ),
@@ -282,6 +290,32 @@ describe("MobileFileViewerPanel Markdown editing", () => {
     expect(screen.getByTestId(MOBILE_PREVIEW_TEST_ID)).toBeTruthy();
   });
 
+  it("keeps the mobile Preview surface and reading position across mode changes", () => {
+    render(
+      <MobileFileViewerPanel
+        file={{
+          path: MOBILE_MARKDOWN_PATH,
+          name: MOBILE_MARKDOWN_PATH,
+          content: MOBILE_MARKDOWN_CONTENT,
+          originalContent: MOBILE_MARKDOWN_CONTENT,
+          originalHash: "hash",
+          isDirty: false,
+          markdownMode: "preview",
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+      />,
+    );
+    const preview = screen.getByTestId(MOBILE_PREVIEW_TEST_ID) as HTMLElement;
+    preview.scrollTop = 160;
+
+    fireEvent.click(screen.getByTestId("mobile-markdown-mode-edit"));
+    fireEvent.click(screen.getByTestId(MOBILE_MARKDOWN_PREVIEW_MODE_TEST_ID));
+
+    expect(screen.getByTestId(MOBILE_PREVIEW_TEST_ID)).toBe(preview);
+    expect(preview.scrollTop).toBe(160);
+  });
+
   it("maps existing comments and stores a submitted hybrid selection", () => {
     commentMocks.comments = [
       {
@@ -329,6 +363,30 @@ describe("MobileFileViewerPanel Markdown editing", () => {
     );
   });
 
+  it("routes Edit-mode Markdown links through the mobile file opener", () => {
+    const onOpenFile = vi.fn();
+    render(
+      <MobileFileViewerPanel
+        file={{
+          path: "docs/readme.md",
+          name: "readme.md",
+          content: MOBILE_MARKDOWN_CONTENT,
+          originalContent: MOBILE_MARKDOWN_CONTENT,
+          originalHash: "hash",
+          isDirty: false,
+          markdownMode: "edit",
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+        onOpenFile={onOpenFile}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open mobile Markdown link" }));
+
+    expect(onOpenFile).toHaveBeenCalledWith("docs/guide.md", undefined);
+  });
+
   it("saves the canonical mobile buffer and clears the dirty state", async () => {
     updateFileContentMock.mockResolvedValue({
       path: MOBILE_MARKDOWN_PATH,
@@ -353,7 +411,7 @@ describe("MobileFileViewerPanel Markdown editing", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Change mobile source" }));
+    fireEvent.click(screen.getByRole("button", { name: MOBILE_SOURCE_CHANGE_LABEL }));
     fireEvent.click(screen.getByTestId(MOBILE_SAVE_TEST_ID));
 
     await waitFor(() =>
@@ -382,6 +440,43 @@ describe("MobileFileViewerPanel Markdown editing", () => {
     });
   });
 
+  it("saves an editable mobile buffer from the platform keyboard shortcut", async () => {
+    updateFileContentMock.mockResolvedValue({
+      path: MOBILE_MARKDOWN_PATH,
+      success: TRUE_VALUE,
+      new_hash: SAVED_HASH,
+    });
+    render(
+      <MobileFileViewerPanel
+        file={{
+          path: MOBILE_MARKDOWN_PATH,
+          name: MOBILE_MARKDOWN_PATH,
+          content: MOBILE_MARKDOWN_CONTENT,
+          originalContent: MOBILE_MARKDOWN_CONTENT,
+          originalHash: "hash",
+          isDirty: false,
+          markdownMode: "source",
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: MOBILE_SOURCE_CHANGE_LABEL }));
+    fireEvent.keyDown(screen.getByTestId("mobile-file-viewer-panel"), {
+      key: "s",
+      ctrlKey: true,
+    });
+
+    await waitFor(() =>
+      expect(updateFileContentMock).toHaveBeenCalledWith(
+        {},
+        "session-1",
+        expect.objectContaining({ desiredContent: MOBILE_EDIT_CONTENT }),
+      ),
+    );
+  });
+
   it("preserves edits made after a mobile save starts", async () => {
     let resolveSave!: (value: { path: string; success: boolean; new_hash: string }) => void;
     updateFileContentMock.mockImplementationOnce(
@@ -406,7 +501,7 @@ describe("MobileFileViewerPanel Markdown editing", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Change mobile source" }));
+    fireEvent.click(screen.getByRole("button", { name: MOBILE_SOURCE_CHANGE_LABEL }));
     fireEvent.click(screen.getByTestId(MOBILE_SAVE_TEST_ID));
     await waitFor(() => expect(updateFileContentMock).toHaveBeenCalledOnce());
 
@@ -458,7 +553,7 @@ describe("MobileFileViewerPanel Markdown editing", () => {
         onClose={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Change mobile source" }));
+    fireEvent.click(screen.getByRole("button", { name: MOBILE_SOURCE_CHANGE_LABEL }));
     fireEvent.click(screen.getByTestId(MOBILE_SAVE_TEST_ID));
     await waitFor(() => expect(updateFileContentMock).toHaveBeenCalledOnce());
 
