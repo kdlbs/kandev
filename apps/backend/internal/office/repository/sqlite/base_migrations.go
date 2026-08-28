@@ -39,6 +39,8 @@ func (r *Repository) runMigrations() {
 	// schemas include the columns inline; ALTERs converge existing databases.
 	r.migrateProviderRouting()
 	r.migrateContinuationScope()
+	r.migrateParentWakeIndexes()
+	r.migrateParentWakeReceiptColumns()
 }
 
 // migrateContinuationScope adds runs.continuation_scope for databases
@@ -124,6 +126,34 @@ func (r *Repository) migrateRunPayloadIndexes() {
 	r.migrate.Apply(
 		"runs.idx_run_payload_comment_id",
 		runPayloadCommentIDIndexSQL(r.db.DriverName()),
+	)
+}
+
+// migrateParentWakeIndexes adds the tasks(parent_id) index
+// ListStuckParents' three parent_id-correlated subqueries (has-a-live-
+// child, no-non-terminal-child, the child-set-key GROUP_CONCAT) need to
+// avoid a full tasks scan on every 30-second reconciler tick. Also
+// benefits AreAllChildrenTerminal and GetChildSummaries (blockers.go),
+// which query the same shape. Applied via r.migrate (non-fatal) rather
+// than createParentChildWakeReceiptsTable's r.db.Exec: tasks belongs to
+// a different package's schema, so a plain Exec against it is fatal in
+// the minimal single-domain test repos that don't create tasks until
+// after NewWithDB returns.
+func (r *Repository) migrateParentWakeIndexes() {
+	r.migrate.Apply(
+		"idx_tasks_parent_id",
+		`CREATE INDEX IF NOT EXISTS idx_tasks_parent_id ON tasks(parent_id)`,
+	)
+}
+
+// migrateParentWakeReceiptColumns adds operation identity for receipts
+// created by workflow-engine dispatch. Existing direct-run receipts keep
+// their delivered_run_id and receive the empty operation id default.
+func (r *Repository) migrateParentWakeReceiptColumns() {
+	r.migrate.Apply(
+		"parent_child_wake_receipts.delivery_operation_id",
+		`ALTER TABLE parent_child_wake_receipts
+		 ADD COLUMN delivery_operation_id TEXT NOT NULL DEFAULT ''`,
 	)
 }
 

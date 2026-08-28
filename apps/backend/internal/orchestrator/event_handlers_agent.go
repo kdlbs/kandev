@@ -1540,7 +1540,10 @@ func (s *Service) RegisterExecutionStopOwner(sessionID, executionID string, forc
 		return
 	}
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
-	lock.Lock()
+	if !lock.TryLock() {
+		release()
+		return
+	}
 	defer func() {
 		lock.Unlock()
 		release()

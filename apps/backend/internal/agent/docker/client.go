@@ -422,11 +422,9 @@ func (c *Client) RemoveContainer(ctx context.Context, containerID string, force 
 			// removed the container already, which is the desired end state.
 			return nil
 		}
-		if errdefs.IsConflict(err) && strings.Contains(strings.ToLower(err.Error()), "already in progress") {
-			// Docker rejects a concurrent ContainerRemove with a conflict while
-			// the first removal is still completing. The other owner has already
-			// taken responsibility for this container's teardown, so treat this
-			// response as the same converged end state as a not-found response.
+		if containerRemovalInProgress(err) {
+			// A concurrent cleanup owner is already removing the container. Treat
+			// this conflict as success because both callers converge on removal.
 			return nil
 		}
 		c.logger.Error("Failed to remove container", zap.String("container_id", containerID), zap.Error(err))
@@ -435,6 +433,16 @@ func (c *Client) RemoveContainer(ctx context.Context, containerID string, force 
 
 	c.logger.Info("Container removed", zap.String("container_id", containerID))
 	return nil
+}
+
+func containerRemovalInProgress(err error) bool {
+	if !errdefs.IsConflict(err) {
+		return false
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "removal of container") &&
+		strings.Contains(message, "already in progress")
 }
 
 func (c *Client) containerRemover() containerRemover {

@@ -261,6 +261,60 @@ func TestListBlockersForTasks(t *testing.T) {
 	}
 }
 
+// TestGetTaskAssigneeTx_ReflectsCurrentRunner covers the primitive
+// ParentWakeReconciler.recordReceipt (scheduler_wake_reconciler.go) uses to close the
+// TOCTOU race between ListStuckParents' SELECT and its own transactional run
+// insert: a runner reassignment committed on a separate connection before
+// the transaction begins must be visible inside it, matching GetTaskAssignee
+// (the non-transactional analog this method mirrors) rather than some stale
+// snapshot taken before the reassignment.
+func TestGetTaskAssigneeTx_ReflectsCurrentRunner(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	insertTask(t, repo, ctx, "parent-1", "ws-1", "Parent", "", "")
+	seedWakeAgentProfile(t, repo, ctx, "agent-a", "idle")
+	seedWakeAgentProfile(t, repo, ctx, "agent-b", "idle")
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO workflow_step_participants (id, step_id, task_id, role, agent_profile_id)
+		VALUES ('p-runner-parent-1', '', 'parent-1', 'runner', 'agent-a')
+	`); err != nil {
+		t.Fatalf("seed runner: %v", err)
+	}
+
+	got, err := repo.GetTaskAssignee(ctx, "parent-1")
+	if err != nil {
+		t.Fatalf("GetTaskAssignee: %v", err)
+	}
+	if got != "agent-a" {
+		t.Fatalf("GetTaskAssignee = %q, want agent-a", got)
+	}
+
+	// Reassign on a separate, already-committed statement, simulating a
+	// reassignment that lands between a candidate's capture (the earlier
+	// ListStuckParents SELECT) and the transaction recordReceipt() opens to record it.
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE workflow_step_participants SET agent_profile_id = 'agent-b'
+		WHERE task_id = 'parent-1' AND role = 'runner'
+	`); err != nil {
+		t.Fatalf("reassign runner: %v", err)
+	}
+
+	tx, err := repo.Writer().BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	gotTx, err := repo.GetTaskAssigneeTx(ctx, tx, "parent-1")
+	if err != nil {
+		t.Fatalf("GetTaskAssigneeTx: %v", err)
+	}
+	if gotTx != "agent-b" {
+		t.Fatalf("GetTaskAssigneeTx = %q, want agent-b (the reassigned runner, not the stale agent-a)", gotTx)
+	}
+}
+
 func TestTaskBlocker_SelfReferenceBlocked(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()

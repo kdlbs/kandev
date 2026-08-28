@@ -1529,11 +1529,13 @@ func startSchedulingRuntime(
 		officeRoutines = services.OfficeSvcs.Routines
 	}
 	var officeRecovery schedulercron.Handler
+	var parentWakeReconciler schedulercron.Handler
 	if services.Office != nil {
 		officeRecovery = officeservice.NewOfficeRecoveryHandler(orchScheduler)
+		parentWakeReconciler = officeservice.NewParentWakeReconciler(orchScheduler)
 	}
 	cronLoop := startCronScheduler(
-		ctx, repos, engineDispatcher, officeRoutines, officeRecovery, log,
+		ctx, repos, engineDispatcher, officeRoutines, officeRecovery, parentWakeReconciler, log,
 	)
 	return &schedulingRuntime{runs: runScheduler, cron: cronLoop}
 }
