@@ -11,7 +11,7 @@ owners:
 
 ## Purpose
 
-The UI system owns web presentation for desktop/mobile surfaces.
+The UI system owns web presentation.
 
 ## Ownership
 
@@ -19,8 +19,8 @@ This system owns navigation, settings, boards, task/review surfaces,
 walkthroughs, chat controls, visual feedback, and responsive interaction
 contracts without backend-state ownership.
 
-Controls that configure or display provider/task state remain owned by that
-system. The UI system owns only independent, reusable presentation contracts.
+Controls for provider/task state remain owned by that system.
+The UI system owns reusable presentation contracts.
 
 ## Exclusions
 
@@ -55,7 +55,7 @@ system. The UI system owns only independent, reusable presentation contracts.
 - [Command-panel Sidebar Task Reveal](requirements/command-panel-sidebar-task-reveal.md)
 - [Compact Workflow Step Navigation](requirements/compact-workflow-step-navigation.md)
 - [Comment Markdown Rendering](requirements/comment-markdown.md)
-- [Composer Mention Recency](requirements/composer-mention-recency.md)
+- [Mention recency](requirements/composer-mention-recency.md)
 - [Composer Suggestion Overlays](requirements/composer-suggestion-overlays.md)
 - [Context Compaction Count](requirements/context-compaction-count.md)
 - [Context Window Reset Freshness](requirements/context-window-reset-freshness.md)
@@ -152,7 +152,7 @@ system. The UI system owns only independent, reusable presentation contracts.
 - [Agent Todo List Panel](system-design/agent-todo-list-panel.md)
 - [App Status Bar](system-design/app-status-bar.md)
 - [Changes File Row Containment](system-design/changes-file-row-containment.md)
-- [Composer Mention Recency](system-design/composer-mention-recency.md)
+- [Mention recency](system-design/composer-mention-recency.md)
 - [Composer Suggestion Overlays](system-design/composer-suggestion-overlays.md)
 - [Compact Workflow Step Navigation](system-design/compact-workflow-step-navigation.md)
 - [Per-workflow column visibility on the kanban board System Design Part 1](system-design/board-step-visibility-filter-01.md)
