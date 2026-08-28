@@ -55,6 +55,12 @@ func (b *joinCleanupBarrier) CleanupWorktrees(ctx context.Context, _ []*worktree
 	return ctx.Err()
 }
 
+func (b *joinCleanupBarrier) CleanupWorktreesPreservingBranches(
+	ctx context.Context, worktrees []*worktree.Worktree,
+) error {
+	return b.CleanupWorktrees(ctx, worktrees)
+}
+
 type recordingLegacyCleanup struct {
 	calls int
 }
@@ -222,6 +228,12 @@ func (b *activityCleanupBarrier) CleanupWorktrees(ctx context.Context, _ []*work
 	}
 }
 
+func (b *activityCleanupBarrier) CleanupWorktreesPreservingBranches(
+	ctx context.Context, worktrees []*worktree.Worktree,
+) error {
+	return b.CleanupWorktrees(ctx, worktrees)
+}
+
 func TestClaimedCleanupDrainsMaintenanceAndHoldsActivityThroughDestructiveWork(t *testing.T) {
 	taskSvc, repo := setupOfficeTest(t)
 	coordinator := activity.NewCoordinator(activity.Options{})
@@ -306,6 +318,12 @@ func (c *cancellableCleanupBarrier) CleanupWorktrees(ctx context.Context, _ []*w
 	case <-c.release:
 		return nil
 	}
+}
+
+func (c *cancellableCleanupBarrier) CleanupWorktreesPreservingBranches(
+	ctx context.Context, worktrees []*worktree.Worktree,
+) error {
+	return c.CleanupWorktrees(ctx, worktrees)
 }
 
 func TestUnarchiveCancelsAndJoinsClaimedArchiveCleanup(t *testing.T) {

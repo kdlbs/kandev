@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-RUNTIME-CLEANUP-001
 created: 2026-06-22
-updated: 2026-08-24
+updated: 2026-08-27
 owners:
   - cfl
 ---
@@ -134,6 +134,35 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
   `deleted_at`. If no historical ID is available, creation persists the new
   worktree by updating any soft-deleted row with the same environment,
   repository, and branch identity.
+
+## Archive cleanup disposition
+
+The cleanup job trigger defines the resource disposition. Direct archive and
+cascade archive use the same disposition. A caller-specific Boolean must not
+change that disposition.
+
+Archive cleanup performs these actions:
+
+- Stop the task runtimes and remove executor-specific runtime resources.
+- Remove the physical worktree directory and mark its repository row deleted.
+- Preserve the owning `task_environments` row.
+- Preserve every `task_environment_repos` row, including its worktree ID,
+  path, branch, and branch slug.
+- Preserve the local Git branch ref. This keeps committed work recoverable when
+  a hosting provider deletes the remote branch after merge.
+
+The worktree can appear in both the environment snapshot and the batch
+worktree snapshot. Both cleanup passes must use the archive disposition. A
+later pass must not delete a branch that an earlier pass preserved.
+
+Unarchive does not invent a new workspace owner. It keeps the preserved
+environment link. When the repository row is not live, resume enters normal
+preparation and reactivates that row. The recreated worktree uses the preserved
+local branch first, then the existing remote or pull-request recovery paths.
+
+Delete behavior remains separate. A delete trigger can remove durable owner
+rows after it captures the cleanup snapshot. This archive rule does not weaken
+delete cleanup.
 
 ## Data Model
 
@@ -367,6 +396,8 @@ The durable cleanup job wraps that resource lifecycle:
   not classified as orphaned.
 - Historical worktree rows for archived tasks remain available to unarchive branch
   recovery even after their on-disk directories are removed.
+- Archive cleanup preserves the task environment owner and the local branch ref.
+  Cleanup retries and duplicate teardown passes keep the same disposition.
 - Orphaned OS processes without any durable `executors_running` row are outside
   normal cleanup guarantees; they may be handled by an explicit operator recovery
   tool, but automatic task cleanup must not rely on process-name scanning.
@@ -490,6 +521,9 @@ The durable cleanup job wraps that resource lifecycle:
 - **GIVEN** archive cleanup removed a local worktree, **WHEN** the task is
   unarchived, **THEN** its historical worktree branch metadata remains available
   for local/remote recovery.
+- **GIVEN** a direct or cascade archive removes a task worktree, **WHEN** the
+  remote branch is also absent, **THEN** the task environment, repository row,
+  and local branch ref remain available for normal resume preparation.
 - **GIVEN** an unarchived task environment whose worktree repository row is
   deleted, failed, or tombstoned, **WHEN** its session resumes, **THEN** the
   executor selects normal worktree preparation and recreates or reactivates the
@@ -512,3 +546,4 @@ The durable cleanup job wraps that resource lifecycle:
 
 - [Backend failure containment](../../../plans/backend-failure-containment/plan.md)
 - [Worktree resume after unarchive](../../../plans/worktree-resume-after-unarchive/plan.md)
+- [Archive resume identity](../../../plans/archive-resume-identity/plan.md)

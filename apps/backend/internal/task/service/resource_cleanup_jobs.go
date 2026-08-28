@@ -435,7 +435,10 @@ func (s *Service) executeTaskResourceCleanupJob(
 		return err
 	}
 	errs := s.performTaskCleanup(ctx, job.TaskID, snapshot.Sessions, snapshot.Worktrees, targets,
-		taskEnvironmentCleanup{env: snapshot.TaskEnvironment, deleteRow: snapshot.DeleteEnvironmentRow},
+		taskEnvironmentCleanup{
+			env: snapshot.TaskEnvironment, deleteRow: snapshot.DeleteEnvironmentRow,
+			preserveBranches: job.IsArchive(),
+		},
 		taskCleanupPreserveRows(stopOutcome))
 	if cause := context.Cause(ctx); cause != nil {
 		return errors.Join(append(errs, cause)...)
