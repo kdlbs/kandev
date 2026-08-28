@@ -945,9 +945,9 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeConfig)
 	tools := getRegisteredToolNames(s)
-	// 13 workflow (incl. list_repositories + import_workflow + export_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 interaction = 34
+	// 13 workflow (incl. list_repositories + import_workflow + export_workflow) + 4 agent + 4 mcp + 2 saved prompts + 5 executor + 7 task (incl. list_task_sessions) + 1 interaction = 36
 	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev requires a live task session; must NOT register in config mode")
-	assert.Equal(t, 34, len(tools))
+	assert.Equal(t, 36, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {
@@ -1121,9 +1121,9 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
-	// 13 workflow (incl. list_repositories + import_workflow + export_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 create_task + 2 task-dependency + 2 question-answering (list_pending_questions + answer_question) + 2 agent permission (list_pending_agent_permissions + resolve_agent_permission) = 40.
+	// 13 workflow (incl. list_repositories + import_workflow + export_workflow) + 4 agent + 4 mcp + 2 saved prompts + 5 executor + 7 task (incl. list_task_sessions) + 1 create_task + 2 task-dependency + 2 question-answering (list_pending_questions + answer_question) + 2 agent permission (list_pending_agent_permissions + resolve_agent_permission) = 42.
 	// add_branch_to_task_kandev is task-mode only — external coding agents have no live session to attach a worktree to.
-	assert.Equal(t, 40, len(tools))
+	assert.Equal(t, 42, len(tools))
 	assert.NotContains(t, tools, "add_branch_to_task_kandev")
 }
 
