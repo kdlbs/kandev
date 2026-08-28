@@ -54,18 +54,21 @@ async function dragQuickChatTab(page: Page, source: Locator, target: Locator) {
 }
 
 test.describe("Quick Chat", () => {
-  test("adds elevation when opened over the page", async ({ testPage }) => {
+  // @covers AC-UI-QUICK-CHAT-ELEVATION-001.1 AC-UI-QUICK-CHAT-ELEVATION-001.2 AC-UI-QUICK-CHAT-ELEVATION-001.5 AC-UI-QUICK-CHAT-ELEVATION-001.6
+  test("adds a stronger elevation backdrop when opened over the page", async ({ testPage }) => {
     const dialog = await openQuickChatSetup(testPage);
     const overlay = testPage.locator('[data-slot="dialog-overlay"]');
 
     await expect(overlay).toBeVisible();
     const styles = await Promise.all([
       overlay.evaluate((element) => getComputedStyle(element).backgroundColor),
+      overlay.evaluate((element) => getComputedStyle(element).backdropFilter),
       dialog.evaluate((element) => getComputedStyle(element).boxShadow),
     ]);
     expect(styles[0]).not.toBe("rgba(0, 0, 0, 0)");
     expect(styles[0]).not.toBe("transparent");
     expect(styles[1]).not.toBe("none");
+    expect(styles[2]).not.toBe("none");
 
     await testPage.keyboard.press("Escape");
     await expect(dialog).not.toBeVisible();
