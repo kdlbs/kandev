@@ -40,9 +40,10 @@ func (r *Repository) initCoordinatorAuthoritySchema() error {
 			revoked_at TIMESTAMP,
 			revoked_by_user_id TEXT NOT NULL DEFAULT ''
 		);
-		CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_task_coordinator_grants_scope
+		DROP INDEX IF EXISTS uniq_active_task_coordinator_grants_scope;
+		CREATE UNIQUE INDEX uniq_active_task_coordinator_grants_scope
 			ON task_coordinator_grants(coordinator_task_id, scope_kind, scope_id)
-			WHERE revoked_at IS NULL;
+			WHERE revoked_at IS NULL AND coordinator_task_id != '';
 		CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_principal_coordinator_grants_scope
 			ON task_coordinator_grants(principal_id, scope_kind, scope_id)
 			WHERE revoked_at IS NULL AND principal_id != '';

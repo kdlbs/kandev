@@ -527,15 +527,13 @@ by the plugin. There is no Host cleanup callback. Typical calls are
 `host.InvokeUtilityAgent(ctx, prompt)`; each fails with `PermissionDenied`
 when its manifest capability is absent.
 
-When a plugin declares both `agent_conversation: true` and
-`api_read: [workspace_agent_principals]`, the existing
-`host.AgentConversations().Ensure` and `.Dispatch` calls are principal-bound
-run operations. The host checks the active durable principal and its operator
-`orchestrate` grant immediately before the operation and rebinds a successful
-Ensure to the replacement backing run. A missing principal is
-`configuration_required`; a revoked or ungranted principal is
-`PermissionDenied`. Do not cache task/session IDs as identity. There is no
-generic arbitrary-action RPC yet: plugins must use an existing capability
+`workspace_agent_principals` is a read-only projection capability. Declaring it
+does not change `host.AgentConversations().Ensure` or `.Dispatch`; those retain
+the generic managed-conversation contract until an operator provisioning and
+grant-management surface is available. Plugins can inspect their opaque
+principal status and redacted audit history, but cannot create, grant, revoke,
+or bind a principal. There is no generic arbitrary-action RPC yet:
+plugins must use an existing capability
 surface whose host authorization contract explicitly covers that action.
 
 ## Task-oriented recipes

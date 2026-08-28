@@ -264,27 +264,13 @@ revoke, delete, and actor rebind are host/operator lifecycle operations, not
 plugin RPCs. Revocation is fail-closed and legacy task-only grants never match
 or migrate implicitly.
 
-**Principal-bound runs.** The existing `AgentConversations().Ensure` and
-`.Dispatch` calls are the smallest generic workspace-agent run primitive. A
-plugin that declares both `agent_conversation` and
-`api_read:workspace_agent_principals` has each Ensure/Dispatch resolved by
-the host against its active `(workspace, installation, logical key)`
-principal and an explicit `orchestrate` grant. Missing principal returns the
-existing `configuration_required` result before task/session creation;
-revocation or missing grant returns `PermissionDenied` before dispatch. On a
-successful Ensure the host rebinds the principal to the server-created
-replacement task/session; a revocation racing creation deletes only a newly
-created backing run. Plugins without the new principal capability retain the
-source-compatible managed-conversation contract. An arbitrary
-`ExecuteWorkspaceAgentAction` RPC is intentionally deferred: its action and
-scope vocabulary must be generic and host-owned rather than encoding a
-Coordinator policy into this protocol.
+**Principal-run binding (deferred).** `api_read:workspace_agent_principals` is currently a read-only projection capability. It does not change the generic `AgentConversations().Ensure` or `.Dispatch` authorization path until an operator provisioning and grant-management surface exists. An arbitrary `ExecuteWorkspaceAgentAction` RPC remains intentionally deferred: its action and scope vocabulary must be generic and host-owned rather than encoding a Coordinator policy into this protocol.
 
 **Lifecycle.** Disable and recognized package upgrade preserve the principal,
-its grants, and its audit identity; a repaired/replaced run is re-bound by the
-host without changing the opaque principal. Uninstall stops the plugin and
-revokes every principal for that plugin installation before removing its
-record. Revocation failure is visible and aborts uninstall; no legacy
+its grants, and its audit identity. Managed conversations follow their generic
+lifecycle independently of this read-only projection. Uninstall stops the
+plugin and revokes every principal for that plugin installation before removing
+its record. Revocation failure is visible and aborts uninstall; no legacy
 task-bound grant is migrated or inherited by reinstall.
 
 **Writes.** `CreateTask`, `UpdateTask`, and `SendMessage` are implemented.

@@ -111,7 +111,7 @@ func TestAgentConversationsStampCallingPluginID(t *testing.T) {
 	}
 }
 
-func TestAgentConversationsPrincipalBoundRunFailsClosedAndRebinds(t *testing.T) {
+func TestAgentConversationsPrincipalReadCapabilityDoesNotBlockGenericRuns(t *testing.T) {
 	svc := &stubAgentConversationService{}
 	h := agentConversationHost(true, svc)
 	h.capabilities.APIRead = []string{resourceWorkspaceAgentPrincipals}
@@ -119,27 +119,13 @@ func TestAgentConversationsPrincipalBoundRunFailsClosedAndRebinds(t *testing.T) 
 	h.workspaceAgentPrincipals = func() workspaceAgentPrincipalSource { return principals }
 
 	_, result, err := h.AgentConversations().Ensure(context.Background(), pluginsdk.AgentConversationSpec{WorkspaceID: "ws1", ConversationKey: "agent"})
-	if err != nil || result != "configuration_required" {
-		t.Fatalf("missing principal Ensure = result %q err %v, want configuration_required nil", result, err)
-	}
-	if svc.lastPluginID != "" {
-		t.Fatal("missing principal must not create a managed conversation")
-	}
-
-	principals.runErr = nil
-	_, result, err = h.AgentConversations().Ensure(context.Background(), pluginsdk.AgentConversationSpec{WorkspaceID: "ws1", ConversationKey: "agent"})
 	if err != nil || result != "created" {
-		t.Fatalf("authorized Ensure = result %q err %v", result, err)
+		t.Fatalf("Ensure = result %q err %v, want created nil", result, err)
 	}
-	if svc.lastPluginID != "p1" || principals.pluginID != "p1" || principals.workspaceID != "ws1" || principals.logicalKey != "agent" {
-		t.Fatalf("run context plugin/workspace/key = %q/%q/%q, service plugin=%q", principals.pluginID, principals.workspaceID, principals.logicalKey, svc.lastPluginID)
+	if svc.lastPluginID != "p1" {
+		t.Fatal("principal read capability must not block a generic managed conversation")
 	}
-
-	principals.runErr = status.Error(codes.PermissionDenied, "principal revoked")
-	svc.lastPluginID = ""
-	_, err = h.AgentConversations().Dispatch(context.Background(), "ws1", "agent", "wake", "occurrence")
-	assertGRPCCode(t, err, codes.PermissionDenied)
-	if svc.lastPluginID != "" {
-		t.Fatal("revoked principal must block dispatch before side effects")
+	if principals.pluginID != "" {
+		t.Fatal("a read-only principal capability must not trigger run authorization")
 	}
 }

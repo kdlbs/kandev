@@ -475,8 +475,9 @@ func (s *Server) stopTaskHandler() server.ToolHandlerFunc {
 		// Build a fresh payload so callers cannot override trusted sender
 		// attribution or supply runtime-level session, reason, or force controls.
 		payload := map[string]interface{}{
-			mcpKeyTaskID:     taskID,
-			"sender_task_id": s.taskID,
+			mcpKeyTaskID:        taskID,
+			"sender_task_id":    s.taskID,
+			"sender_session_id": s.sessionID,
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPStopTask, payload, &result); err != nil {

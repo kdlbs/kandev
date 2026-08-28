@@ -63,6 +63,22 @@ func TestWorkspaceAgentPrincipalRepository_LegacyTaskGrantCannotMatchPrincipal(t
 	require.Empty(t, grants)
 }
 
+func TestWorkspaceAgentPrincipalRepository_AllowsSameScopeForDistinctPrincipals(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-distinct-principals")
+	for _, principal := range []*models.WorkspaceAgentPrincipal{
+		{ID: "principal-one", WorkspaceID: "ws-distinct-principals", PluginInstallationID: "plugin-one", LogicalKey: "agent"},
+		{ID: "principal-two", WorkspaceID: "ws-distinct-principals", PluginInstallationID: "plugin-two", LogicalKey: "agent"},
+	} {
+		require.NoError(t, repo.CreateWorkspaceAgentPrincipal(ctx, principal))
+		require.NoError(t, repo.CreateCoordinatorGrant(ctx, &models.CoordinatorGrant{
+			ID: principal.ID + "-grant", PrincipalID: principal.ID, WorkspaceID: "ws-distinct-principals",
+			ScopeKind: "workspace", ScopeID: "ws-distinct-principals", Capabilities: "orchestrate",
+		}))
+	}
+}
+
 func TestWorkspaceAgentPrincipalRepository_TypedErrorsRejectLegacyInstallAndPreservePrincipalGrantLookup(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()
