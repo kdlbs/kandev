@@ -1,5 +1,16 @@
 # Screenshots
 
+## Table of contents
+
+- [Core workflow](#core-workflow)
+- [Native features](#native-features)
+- [Automations](#automations)
+- [Plugins](#plugins)
+- [Workspace & agent settings](#workspace--agent-settings)
+- [Mobile](#mobile)
+- [Preferences](#preferences)
+- [System settings](#system-settings)
+
 ## Core workflow
 
 <table>
@@ -33,7 +44,31 @@
   </tr>
   <tr>
     <td align="center"><strong>Quick Chats</strong><br><img src="screenshots/quick chats.png" alt="Quick Chats"></td>
-    <td align="center"><strong>Stats</strong><br><img src="screenshots/stats.png" alt="Stats"></td>
+    <td align="center" valign="top">
+      <strong>Stats</strong><br>
+      Review task, session, Git activity, provider, GitHub, workload, and telemetry metrics.<br><br>
+      <img src="screenshots/stats-overview.png" alt="Statistics overview showing tasks, time spent, Git activity, signal, telemetry, and top models" width="520"><br><br>
+      <img src="screenshots/stats-github-workload.png" alt="Statistics dashboard showing GitHub activity and workload metrics" width="520">
+    </td>
+  </tr>
+</table>
+
+## Native features
+
+Kandev includes built-in pull-request automation and agent runtime update notifications.
+
+<table>
+  <tr>
+    <td align="center" valign="top" width="50%">
+      <strong>PR auto-fix</strong><br>
+      Automate CI fixes, review-comment follow-up, and optional auto-merge or requeue when ready.<br><br>
+      <img src="screenshots/pr-auto-fix.png" alt="PR automation panel with auto-fix and auto-merge enabled" width="520">
+    </td>
+    <td align="center" valign="top" width="50%">
+      <strong>Agent updates and version notifications</strong><br>
+      Get a visible prompt when a managed agent runtime has a newer version.<br><br>
+      <img src="screenshots/agent-updates.png" alt="Agent update notification showing a newer Codey version" width="520">
+    </td>
   </tr>
 </table>
 
@@ -64,8 +99,7 @@
 ## Plugins
 
 Kandev plugins and companion tools add focused views for exploring MCP servers,
-monitoring service health, keeping agent runtimes current, tracking usage, and
-automating pull-request follow-up.
+monitoring service health, and tracking usage.
 
 <table>
   <tr>
@@ -91,18 +125,6 @@ automating pull-request follow-up.
       See GitHub health at a glance, then open detailed component and incident status.<br><br>
       <img src="screenshots/plugin-github-status.png" alt="GitHub Status showing service health and an active incident" width="520"><br><br>
       <img src="screenshots/plugin-github-status-bar.png" alt="GitHub Status indicator in the Kandev status bar" width="520">
-    </td>
-  </tr>
-  <tr>
-    <td align="center" valign="top">
-      <strong>PR auto-fix</strong><br>
-      Automate CI fixes, review-comment follow-up, and optional auto-merge or requeue when ready.<br><br>
-      <img src="screenshots/plugin-pr-auto-fix.png" alt="PR automation panel with auto-fix and auto-merge enabled" width="520">
-    </td>
-    <td align="center" valign="top">
-      <strong>Agent updates and version notifications</strong><br>
-      Get a visible prompt when a managed agent runtime has a newer version.<br><br>
-      <img src="screenshots/plugin-agent-updates.png" alt="Agent update notification showing a newer Codey version" width="520">
     </td>
   </tr>
   <tr>
