@@ -66,14 +66,15 @@ func TestRegisterExecutionStopOwner_ContendedGuardDoesNotBlock(t *testing.T) {
 		executionID = "execution-contended"
 	)
 	guard, release := svc.acquireCancelInFlightGuard(sessionID)
-	guard.Lock()
-	guardLocked := true
-	defer func() {
+	guardLocked := false
+	t.Cleanup(func() {
 		if guardLocked {
 			guard.Unlock()
 		}
 		release()
-	}()
+	})
+	guard.Lock()
+	guardLocked = true
 
 	started := make(chan struct{})
 	done := make(chan struct{})

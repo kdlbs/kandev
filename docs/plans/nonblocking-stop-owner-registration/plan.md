@@ -56,6 +56,10 @@ return before the guard is released.
 
 - `go test -tags fts5 -run 'TestRegisterExecutionStopOwner_' ./internal/orchestrator -count=1 -v`: passed, 2 tests.
 - `go test -race -tags fts5 -run 'TestRegisterExecutionStopOwner_' ./internal/orchestrator -count=1`: passed, 2 tests.
+- CodeRabbit follow-up: registered the test guard cleanup with `t.Cleanup`; the
+  focused normal and race tests still pass.
+- CI-only `TestPortProxyCapabilityRoundTrip` failure was reproduced locally with
+  `-race` and passed, so no unrelated gateway change was made.
 
 ## Risks
 

@@ -80,3 +80,6 @@ None.
 - The focused test failed before the production change and passed after it.
 - Both work-order verification commands passed. The race command reported no
   data races.
+- Applied the CodeRabbit follow-up by registering guard cleanup with `t.Cleanup`.
+- Reproduced the unrelated CI failure in `TestPortProxyCapabilityRoundTrip`;
+  the local `-race` run passed, so the gateway code remains unchanged.
