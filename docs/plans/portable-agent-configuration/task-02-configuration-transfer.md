@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-portable-config-catalog"]
 plan: "plan.md"
-spec: "../../specs/portable-agent-configuration/spec.md"
+spec: "../../specs/agents/requirements/portable-agent-configuration.md"
 ---
 
 # Task 02: Transfer selected configuration bundles

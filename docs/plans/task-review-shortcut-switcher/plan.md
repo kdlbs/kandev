@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/task-review-shortcut.md
+spec: docs/specs/ui/requirements/task-review-shortcut.md
 created: 2026-07-31
 status: completed
 ---

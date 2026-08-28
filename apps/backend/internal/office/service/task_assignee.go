@@ -23,8 +23,10 @@ import (
 // them when rendering reviewer/ship-stage prompts. The engine emits
 // the same string values from workflow_steps.stage_type.
 const (
-	stageTypeWork = "work"
-	stageTypeShip = "ship"
+	stageTypeWork     = "work"
+	stageTypeReview   = "review"
+	stageTypeApproval = "approval"
+	stageTypeShip     = "ship"
 )
 
 // participantTypeAgent identifies an agent (vs user) actor in event

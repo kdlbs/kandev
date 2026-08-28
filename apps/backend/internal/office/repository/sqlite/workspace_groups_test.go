@@ -221,6 +221,25 @@ func TestMarkWorkspaceMaterialized_GroupNotFound(t *testing.T) {
 	}
 }
 
+func TestMarkWorkspaceMaterializedRejectsDifferentEnvironmentAfterElection(t *testing.T) {
+	repo := newWorkspaceGroupTestRepo(t)
+	ctx := context.Background()
+	g := &models.WorkspaceGroup{WorkspaceID: "ws-race", OwnerTaskID: "owner", MaterializedKind: models.WorkspaceGroupKindSingleRepo}
+	if err := repo.CreateWorkspaceGroup(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MarkWorkspaceMaterialized(ctx, g.ID, models.MaterializedWorkspace{EnvironmentID: "env-a", Kind: models.WorkspaceGroupKindSingleRepo, OwnedByKandev: true}); err != nil {
+		t.Fatalf("elect first environment: %v", err)
+	}
+	if err := repo.MarkWorkspaceMaterialized(ctx, g.ID, models.MaterializedWorkspace{EnvironmentID: "env-b", Kind: models.WorkspaceGroupKindSingleRepo, OwnedByKandev: true}); err == nil {
+		t.Fatal("different environment overwrote materialized group")
+	}
+	got, err := repo.GetWorkspaceGroup(ctx, g.ID)
+	if err != nil || got.MaterializedEnvironmentID != "env-a" {
+		t.Fatalf("elected environment = %+v, %v", got, err)
+	}
+}
+
 func TestWorkspaceGroupMembers_AddListRelease(t *testing.T) {
 	repo := newWorkspaceGroupTestRepo(t)
 	ctx := context.Background()

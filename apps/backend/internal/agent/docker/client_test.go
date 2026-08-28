@@ -1,11 +1,20 @@
 package docker
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/moby/moby/api/types/network"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestNormalizeDockerHostIP(t *testing.T) {
@@ -129,4 +138,31 @@ func TestParseHostPort(t *testing.T) {
 			t.Errorf("parseHostPort(%q) = nil error, want an error", in)
 		}
 	}
+}
+
+func TestContainerTeardownTreatsMissingContainersAsSuccess(t *testing.T) {
+	dockerDaemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead && r.URL.Path == "/_ping" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"No such container: missing-container"}`))
+	}))
+	t.Cleanup(dockerDaemon.Close)
+
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("new logger: %v", err)
+	}
+	client, err := NewClient(config.DockerConfig{
+		Host:       "tcp://" + strings.TrimPrefix(dockerDaemon.URL, "http://"),
+		APIVersion: "1.44",
+	}, log)
+	require.NoError(t, err)
+
+	require.NoError(t, client.StopContainer(context.Background(), "missing-container", time.Second))
+	require.NoError(t, client.KillContainer(context.Background(), "missing-container", "SIGKILL"))
+	require.NoError(t, client.RemoveContainer(context.Background(), "missing-container", true))
 }

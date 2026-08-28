@@ -67,6 +67,11 @@ type pluginHost struct {
 	agentProfiles    agentProfileDataSource
 	sessionCodeStats sessionCodeStatsSource
 	messageData      messageDataSource
+	interactionData  interactionDataSource
+	taskPRs          taskPRSource
+	// taskPRsDep resolves the source at read time so a host created before
+	// SetTaskPRSource still observes the late wiring.
+	taskPRsDep func() taskPRSource
 
 	// taskWriter backs the CreateTask/UpdateTask write RPCs (ADR 0043
 	// phase 2, capability api_write:tasks). Wired via SetDataSources like the
@@ -80,6 +85,15 @@ type pluginHost struct {
 	// constructed after boot-active plugins spawn — same rationale as
 	// utilityDeps. nil on a bare test host. See host_write.go.
 	writeDeps func() (taskMessenger, taskStarter)
+
+	// interactionDeps returns the live interaction responder behind the
+	// api_write:interactions RPCs (ADR 0052). Read live, not snapshotted at
+	// hostForPlugin time, for the same reason as writeDeps: the orchestrator
+	// and the clarification handler are both constructed after boot-active
+	// plugins spawn, so a snapshot would strand those hosts with a nil
+	// responder for their whole lifetime. nil on a bare test host.
+	// See host_interactions.go.
+	interactionDeps func() interactionResponder
 
 	// utilityDeps returns the live utility-agent dependencies (ADR 0048) at
 	// call time rather than a spawn-time snapshot. hostUtilityMgr is
@@ -96,7 +110,7 @@ var _ pluginsdk.Host = (*pluginHost)(nil)
 
 // permissionDenied builds the gRPC error RemotePlugin/Host RPCs return for
 // an undeclared capability, matching the wire-level message from
-// docs/specs/plugins/spec.md ("Permissions"): "capability '<name>' not
+// docs/specs/plugins/requirements/plugins.md ("Permissions"): "capability '<name>' not
 // declared".
 func permissionDenied(capability string) error {
 	return status.Errorf(codes.PermissionDenied, "capability '%s' not declared", capability)

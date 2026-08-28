@@ -92,7 +92,7 @@ func TestResolveAutomationRepository_SkipsUnloadableID(t *testing.T) {
 	}
 }
 
-func TestResolveAutomationRepository_EmptyListFallsBackToWorkspace(t *testing.T) {
+func TestResolveAutomationRepository_EmptyListUsesNoRepository(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedAutomationWorkspaceRepos(t, repo, "ws-1", []string{"repo-only"})
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -102,9 +102,30 @@ func TestResolveAutomationRepository_EmptyListFallsBackToWorkspace(t *testing.T)
 
 	resolved := svc.resolveAutomationRepository(context.Background(), a, evt)
 
-	if len(resolved) != 1 || resolved[0].RepositoryID != "repo-only" {
-		t.Fatalf("expected fallback to the workspace's only repository, got %+v", resolved)
+	if len(resolved) != 0 {
+		t.Fatalf("expected no repository, got %+v", resolved)
 	}
+}
+
+// @covers AC-OFFICE-AUTOMATION-TARGETS-001.10
+func TestResolveAutomationRepository_UsesSavedBaseBranches(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedAutomationWorkspaceRepos(t, repo, "ws-1", []string{"repo-a"})
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	a := &automation.Automation{
+		WorkspaceID: "ws-1",
+		Repositories: []automation.AutomationRepository{
+			{RepositoryID: "repo-a", BaseBranch: "release/2"},
+		},
+	}
+
+	resolved := svc.resolveAutomationRepository(context.Background(), a, &automation.AutomationTriggeredEvent{
+		TriggerType: automation.TriggerTypeScheduled,
+	})
+
+	require.Len(t, resolved, 1)
+	require.Equal(t, "release/2", resolved[0].BaseBranch)
+	require.Equal(t, "release/2", resolved[0].CheckoutBranch)
 }
 
 func TestResolveAutomationTaskTitleTruncatesRenderedTitle(t *testing.T) {
@@ -120,6 +141,96 @@ func TestResolveAutomationTaskTitleTruncatesRenderedTitle(t *testing.T) {
 	if got != strings.Repeat("x", taskservice.TaskTitleMaxLength-1)+"…" {
 		t.Fatalf("resolved title = %q, want rendered title truncated with ellipsis", got)
 	}
+}
+
+func TestFindAutomationContinuationRejectsChangedLaunchIdentity(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedAutomationWorkspaceRepos(t, repo, "ws-1", []string{"repo-a"})
+	now := time.Now().UTC()
+	ctx := context.Background()
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:             "continuation-task",
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "workflow-a",
+		WorkflowStepID: "step-a",
+		Origin:         models.TaskOriginAutomationRun,
+		Metadata: map[string]interface{}{
+			models.MetaKeyAgentProfileID:    "agent-a",
+			models.MetaKeyExecutorProfileID: "executor-a",
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "continuation-repo", TaskID: "continuation-task", RepositoryID: "repo-a", Position: 0,
+		CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "continuation-session", TaskID: "continuation-task",
+		State: models.TaskSessionStateWaitingForInput, StartedAt: now, UpdatedAt: now,
+	}))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	a := &automation.Automation{
+		ContinuationTaskID: "continuation-task", WorkspaceID: "ws-1",
+		WorkflowID: "workflow-b", WorkflowStepID: "step-a",
+		AgentProfileID: "agent-a", ExecutorProfileID: "executor-a",
+		RepositoryIDs: []string{"repo-a"},
+	}
+
+	task, session, reason := svc.findAutomationContinuation(ctx, a, &automation.AutomationTriggeredEvent{
+		TriggerType: automation.TriggerTypeScheduled,
+	})
+	require.Nil(t, task)
+	require.Nil(t, session)
+	require.Equal(t, "previous continuation task uses a different workflow", reason)
+}
+
+func TestFindAutomationContinuationKeepsImplicitStepAndRotatesRepositoryMode(t *testing.T) {
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	ctx := context.Background()
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:             "implicit-step-task",
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "workflow-a",
+		WorkflowStepID: "resolved-start-step",
+		Origin:         models.TaskOriginAutomationRun,
+		Metadata: map[string]interface{}{
+			models.MetaKeyAgentProfileID:           "agent-a",
+			models.MetaKeyExecutorProfileID:        "executor-a",
+			models.MetaKeyAutomationTaskMode:       string(automation.TaskModeAutomationRun),
+			models.MetaKeyAutomationRepositoryMode: string(automation.RepositoryModeNone),
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "implicit-step-session", TaskID: "implicit-step-task",
+		State: models.TaskSessionStateWaitingForInput, StartedAt: now, UpdatedAt: now,
+	}))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	a := &automation.Automation{
+		ContinuationTaskID: "implicit-step-task", WorkspaceID: "ws-1",
+		WorkflowID: "workflow-a", AgentProfileID: "agent-a", ExecutorProfileID: "executor-a",
+		TaskMode: automation.TaskModeAutomationRun, RepositoryMode: automation.RepositoryModeNone,
+	}
+
+	task, session, reason := svc.findAutomationContinuation(ctx, a, &automation.AutomationTriggeredEvent{
+		TriggerType: automation.TriggerTypeScheduled,
+	})
+	require.Equal(t, "implicit-step-task", task.ID)
+	require.Equal(t, "implicit-step-session", session.ID)
+	require.Equal(t, "continued the previous task and session", reason)
+
+	a.RepositoryMode = automation.RepositoryModeWorkspaceDefault
+	task, session, reason = svc.findAutomationContinuation(ctx, a, &automation.AutomationTriggeredEvent{
+		TriggerType: automation.TriggerTypeScheduled,
+	})
+	require.Nil(t, task)
+	require.Nil(t, session)
+	require.Equal(t, "previous continuation task uses a different repository mode", reason)
 }
 
 // TestResolveAutomationRepository_GitHubPRIgnoresConfiguredRepositoryIDs is
@@ -354,6 +465,58 @@ func TestCreateAutomationTask_WorksWithoutWorkflowOrStep(t *testing.T) {
 	require.Empty(t, creator.got.WorkflowID)
 	require.Empty(t, creator.got.WorkflowStepID)
 	require.Equal(t, models.TaskOriginAutomationRun, creator.got.Origin)
+}
+
+func TestPrepareAutomationTask_AllowsRepositoryFreeHiddenRun(t *testing.T) {
+	repo := setupTestRepo(t)
+	creator := &stubReviewTaskCreator{task: &models.Task{ID: "t-scratch"}}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.reviewTaskCreator = creator
+	a := &automation.Automation{
+		ID: "a-scratch", WorkspaceID: "ws-1", Name: "scratch", Enabled: true,
+		TaskMode:       automation.TaskModeAutomationRun,
+		RepositoryMode: automation.RepositoryModeNone,
+	}
+
+	task, session, action, _, err := svc.prepareAutomationTask(
+		context.Background(), a,
+		&automation.AutomationTriggeredEvent{TriggerType: automation.TriggerTypeScheduled},
+		"Scratch", "report", map[string]interface{}{},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	require.Nil(t, session)
+	require.Equal(t, automation.ThreadActionCreated, action)
+	require.Empty(t, creator.got.Repositories)
+	require.Equal(t, models.TaskOriginAutomationRun, creator.got.Origin)
+}
+
+func TestPrepareAutomationTaskCreatesVisibleNormalTaskWithoutRepository(t *testing.T) {
+	repo := setupTestRepo(t)
+	creator := &stubReviewTaskCreator{task: &models.Task{ID: "t-visible"}}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.reviewTaskCreator = creator
+	a := &automation.Automation{
+		ID: "a-visible", WorkspaceID: "ws-1", Name: "visible", Enabled: true,
+		TaskMode:       automation.TaskModeNormalTask,
+		RepositoryMode: automation.RepositoryModeNone,
+		WorkflowID:     "workflow-1",
+		WorkflowStepID: "step-1",
+	}
+
+	task, _, _, _, err := svc.prepareAutomationTask(
+		context.Background(), a,
+		&automation.AutomationTriggeredEvent{TriggerType: automation.TriggerTypeScheduled},
+		"Visible", "report", map[string]interface{}{},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	require.Empty(t, creator.got.Repositories)
+	require.Equal(t, "automation_task", creator.got.Origin)
+	require.Equal(t, "workflow-1", creator.got.WorkflowID)
+	require.Equal(t, "step-1", creator.got.WorkflowStepID)
 }
 
 // The deadlock the execution-mode split caused: a non-ephemeral automation

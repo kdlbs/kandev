@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-unified-frontend-sessions", "03-clarification-responsive-ux"]
 plan: "plan.md"
-spec: "../../specs/tasks/quick-chat-expiration.md"
+spec: "../../specs/tasks/requirements/quick-chat-expiration.md"
 ---
 
 # Task 04: E2E and Verification

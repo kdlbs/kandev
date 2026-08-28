@@ -20,7 +20,7 @@ async function expandIntegrationsSection(testPage: Page) {
   await expect(integrationsToggle).toHaveAttribute("aria-expanded", "true");
 }
 
-// Covers docs/specs/integrations/enable-disable-toggle.md's nav-visibility
+// Covers docs/specs/integrations/requirements/enable-disable-toggle.md's nav-visibility
 // scenarios: with "Hide disabled integrations from left panel navigation"
 // off (the default), a disabled-but-configured integration still shows in
 // the sidebar; turning the setting on hides it; turning it back off (or

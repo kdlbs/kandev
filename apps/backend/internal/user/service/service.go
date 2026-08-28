@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -96,7 +97,9 @@ type UpdateUserSettingsRequest struct {
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch
 	AppStatusBarEnabled               *bool
 	AppStatusBarOrder                 *models.AppStatusBarOrder
+	QuickChatTabOrderByWorkspace      *map[string][]string
 	KanbanHiddenStepIDs               *map[string][]string
+	WorkflowIDsWithAutoHideEmptySteps *[]string
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -312,6 +315,12 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	if req.AppStatusBarOrder != nil {
 		settings.AppStatusBarOrder = *req.AppStatusBarOrder
 	}
+	if req.QuickChatTabOrderByWorkspace != nil {
+		if err := validateQuickChatTabOrder(*req.QuickChatTabOrderByWorkspace); err != nil {
+			return err
+		}
+		settings.QuickChatTabOrderByWorkspace = store.CloneStringSliceMap(*req.QuickChatTabOrderByWorkspace)
+	}
 	if err := applyTerminalFontPreferences(settings, req); err != nil {
 		return err
 	}
@@ -360,12 +369,24 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 		}
 		settings.KanbanHiddenStepIDs = *req.KanbanHiddenStepIDs
 	}
+	if req.WorkflowIDsWithAutoHideEmptySteps != nil {
+		workflowIDs, err := normalizeWorkflowIDsWithAutoHideEmptySteps(
+			*req.WorkflowIDsWithAutoHideEmptySteps,
+		)
+		if err != nil {
+			return err
+		}
+		settings.WorkflowIDsWithAutoHideEmptySteps = workflowIDs
+	}
 	return nil
 }
 
 const (
-	maxKanbanHiddenStepWorkflows      = 200
-	maxKanbanHiddenStepIDsPerWorkflow = 200
+	maxQuickChatTabOrderWorkspaces             = 200
+	maxQuickChatTabOrderReferencesPerWorkspace = 200
+	maxQuickChatTabOrderTotalBytes             = maxUserPreferenceBlobBytes
+	maxKanbanHiddenStepWorkflows               = 200
+	maxKanbanHiddenStepIDsPerWorkflow          = 200
 	// maxKanbanHiddenStepIDsTotalBytes matches maxUserPreferenceBlobBytes, the
 	// sibling cap for other free-form settings blobs. The count caps above
 	// bound shape (how many entries), not size (how long each string is); an
@@ -375,8 +396,68 @@ const (
 	// validateKanbanHiddenStepIDs, which both the REST and WebSocket update
 	// paths call, so it isn't bypassable by whichever transport skips a
 	// transport-level guard.
-	maxKanbanHiddenStepIDsTotalBytes = maxUserPreferenceBlobBytes
+	maxKanbanHiddenStepIDsTotalBytes     = maxUserPreferenceBlobBytes
+	maxWorkflowIDsWithAutoHideEmptySteps = 200
 )
+
+// validateQuickChatTabOrder bounds the client-supplied mixed-tab order before
+// it is copied into the settings model. The shape limits keep map and slice
+// allocation bounded, while the serialized limit also bounds long opaque ids.
+func validateQuickChatTabOrder(orderByWorkspace map[string][]string) error {
+	if len(orderByWorkspace) > maxQuickChatTabOrderWorkspaces {
+		return fmt.Errorf(
+			"quick_chat_tab_order_by_workspace: max %d workspaces allowed",
+			maxQuickChatTabOrderWorkspaces,
+		)
+	}
+	for workspaceID, references := range orderByWorkspace {
+		if len(references) > maxQuickChatTabOrderReferencesPerWorkspace {
+			return fmt.Errorf(
+				"quick_chat_tab_order_by_workspace[%s]: max %d tab references allowed",
+				workspaceID,
+				maxQuickChatTabOrderReferencesPerWorkspace,
+			)
+		}
+	}
+	serialized, err := json.Marshal(orderByWorkspace)
+	if err != nil {
+		return fmt.Errorf("quick_chat_tab_order_by_workspace: must be serializable: %w", err)
+	}
+	if len(serialized) > maxQuickChatTabOrderTotalBytes {
+		return fmt.Errorf(
+			"quick_chat_tab_order_by_workspace: max %d bytes allowed",
+			maxQuickChatTabOrderTotalBytes,
+		)
+	}
+	return nil
+}
+
+func normalizeWorkflowIDsWithAutoHideEmptySteps(workflowIDs []string) ([]string, error) {
+	unique := make(map[string]struct{}, len(workflowIDs))
+	for _, workflowID := range workflowIDs {
+		unique[workflowID] = struct{}{}
+	}
+	if len(unique) > maxWorkflowIDsWithAutoHideEmptySteps {
+		return nil, fmt.Errorf(
+			"workflow_ids_with_auto_hide_empty_steps: max %d workflow ids allowed",
+			maxWorkflowIDsWithAutoHideEmptySteps,
+		)
+	}
+	totalBytes := 0
+	normalized := make([]string, 0, len(unique))
+	for workflowID := range unique {
+		totalBytes += len(workflowID)
+		if totalBytes > maxUserPreferenceBlobBytes {
+			return nil, fmt.Errorf(
+				"workflow_ids_with_auto_hide_empty_steps: max %d bytes allowed",
+				maxUserPreferenceBlobBytes,
+			)
+		}
+		normalized = append(normalized, workflowID)
+	}
+	sort.Strings(normalized)
+	return normalized, nil
+}
 
 // validateKanbanHiddenStepIDs bounds the per-workflow hidden-step-id map so a
 // single settings write cannot grow the users.settings JSON blob unboundedly
@@ -883,6 +964,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
 		"app_status_bar_order":                     settings.AppStatusBarOrder,
 		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
+		"workflow_ids_with_auto_hide_empty_steps":  settings.WorkflowIDsWithAutoHideEmptySteps,
 		"revision":                                 settings.Revision,
 		"updated_at":                               settings.UpdatedAt.Format(time.RFC3339),
 	}

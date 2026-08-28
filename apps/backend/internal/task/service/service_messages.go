@@ -673,7 +673,13 @@ func (s *Service) applyToolCallMessageUpdate(message *models.Message, status, re
 
 // UpdatePermissionMessage updates a permission request message's status.
 // It includes retry logic to handle race conditions.
-func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) error {
+//
+// The lookup is qualified by the full (task, session, request, pending)
+// identity rather than pending_id alone: a provider may reuse a pending_id
+// for a later, unrelated request once the original is resolved, and a
+// delayed event about the old request must not be able to expire the new
+// one's message.
+func (s *Service) UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error {
 	const maxRetries = 5
 	const retryDelay = 100 * time.Millisecond
 
@@ -682,7 +688,7 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 
 	// Retry loop to handle race condition
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		message, err = s.messages.GetMessageByPendingID(ctx, sessionID, pendingID)
+		message, err = s.messages.GetPermissionMessageByIdentity(ctx, taskID, sessionID, requestID, pendingID)
 		if err == nil {
 			break
 		}
@@ -694,6 +700,7 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 		if attempt < maxRetries-1 {
 			s.logger.Debug("permission message not found, retrying",
 				zap.String("session_id", sessionID),
+				zap.String("request_id", requestID),
 				zap.String("pending_id", pendingID),
 				zap.Int("attempt", attempt+1),
 				zap.Int("max_retries", maxRetries))
@@ -745,6 +752,49 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 		zap.String("status", string(status)))
 
 	return nil
+}
+
+// ClaimPermissionResolution durably serializes the first resolver before any
+// option is delivered to the live agent process.
+func (s *Service) ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
+	result, err := s.messages.ClaimPermissionResolution(ctx, request)
+	if err != nil {
+		s.logger.Error("failed to claim permission resolution",
+			zap.String("task_id", request.TaskID),
+			zap.String("session_id", request.SessionID),
+			zap.String("request_id", request.Audit.RequestID),
+			zap.String("pending_id", request.Audit.PendingID),
+			zap.Error(err))
+		return nil, err
+	}
+	if result.Outcome == models.PermissionClaimed && result.Message != nil {
+		_ = s.publishMessageEvent(ctx, events.MessageUpdated, result.Message)
+	}
+	return result, nil
+}
+
+// FinalizePermissionResolution records the outcome for the exact durable
+// claim. Only successful writes publish the existing message update event.
+func (s *Service) FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error) {
+	result, err := s.messages.FinalizePermissionResolution(ctx, request)
+	if err != nil {
+		s.logger.Error("failed to finalize permission resolution",
+			zap.String("task_id", request.TaskID),
+			zap.String("session_id", request.SessionID),
+			zap.String("request_id", request.RequestID),
+			zap.String("pending_id", request.PendingID),
+			zap.String("result", string(request.Result)),
+			zap.Error(err))
+		return nil, err
+	}
+	if result.Outcome == models.PermissionFinalized && result.Message != nil {
+		_ = s.publishMessageEvent(ctx, events.MessageUpdated, result.Message)
+	}
+	return result, nil
+}
+
+func (s *Service) GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error) {
+	return s.messages.GetPermissionResolutionAudit(ctx, taskID, sessionID, requestID, pendingID)
 }
 
 // UpdateClarificationMessageForQuestion updates a single clarification message

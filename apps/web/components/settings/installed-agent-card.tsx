@@ -22,7 +22,7 @@ import { AgentLogo } from "@/components/agent-logo";
 import { AgentLoginDialog } from "@/components/settings/agent-login-dialog";
 import { AgentRuntimeUpdateControl } from "@/components/settings/agent-runtime-update-control";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
-import type { AgentUpdateJob, AgentUpdatePreview, InstallJob } from "@/lib/api";
+import type { AgentUpdateJob, AgentUpdatePreview, AgentUpdateStatus, InstallJob } from "@/lib/api";
 import type { Agent, AgentDiscovery, RuntimeUpdate } from "@/lib/types/http";
 
 type Props = {
@@ -32,10 +32,19 @@ type Props = {
   /** Capability status from the host utility probe ("ok", "auth_required", etc.). */
   capabilityStatus?: string;
   runtimeUpdate?: RuntimeUpdate;
+  runtimeUpdateStatus?: AgentUpdateStatus;
   updateJob?: AgentUpdateJob;
   installJob?: InstallJob;
-  onPreview?: (agentName: string) => Promise<AgentUpdatePreview>;
-  onUpdate?: (agentName: string, targetVersion: string) => Promise<AgentUpdateJob>;
+  onPreview?: (
+    agentName: string,
+    targetVersion?: string,
+    useDefault?: boolean,
+  ) => Promise<AgentUpdatePreview>;
+  onUpdate?: (
+    agentName: string,
+    targetVersion: string,
+    useDefault?: boolean,
+  ) => Promise<AgentUpdateJob>;
   /**
    * Called when the auth/shell dialog closes so the page can refresh
    * discovery + availability. Without this the yellow lock stays put even
@@ -240,6 +249,7 @@ export function InstalledAgentCard({
   displayName,
   capabilityStatus,
   runtimeUpdate,
+  runtimeUpdateStatus,
   updateJob,
   installJob,
   onPreview,
@@ -304,6 +314,7 @@ export function InstalledAgentCard({
               agentName={agent.name}
               displayName={displayName}
               runtimeUpdate={runtimeUpdate}
+              runtimeUpdateStatus={runtimeUpdateStatus}
               job={updateJob}
               installJob={installJob}
               onPreview={onPreview}

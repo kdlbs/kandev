@@ -38,8 +38,9 @@ const (
 var ciAutomationSnapshotFieldReplacer = strings.NewReplacer("\r", " ", "\n", " ", "<", "", ">", "")
 
 type ciAutomationCheckpoint struct {
-	FailedChecks []ciAutomationCheckSnapshot   `json:"failed_checks"`
-	Comments     []ciAutomationCommentSnapshot `json:"comments"`
+	FailedChecks  []ciAutomationCheckSnapshot            `json:"failed_checks"`
+	Comments      []ciAutomationCommentSnapshot          `json:"comments"`
+	QueueRemovals []ciAutomationQueueRemovalSnapshotData `json:"queue_removals,omitempty"`
 }
 
 type ciAutomationCheckSnapshot struct {
@@ -54,6 +55,25 @@ type ciAutomationCommentSnapshot struct {
 	Body string `json:"body,omitempty"`
 	Path string `json:"path,omitempty"`
 	Line int    `json:"line,omitempty"`
+}
+
+const (
+	ciAutomationQueueRemovalCauseChecksFailed     = "checks_failed"
+	ciAutomationQueueRemovalCauseChecksTimedOut   = "checks_timed_out"
+	ciAutomationQueueRemovalCauseConflict         = "conflict"
+	ciAutomationQueueRemovalCauseManual           = "manual"
+	ciAutomationQueueRemovalCauseBranchProtection = "branch_protection"
+	ciAutomationQueueRemovalCauseUnknown          = "unknown"
+)
+
+type ciAutomationQueueRemovalSnapshotData struct {
+	EventID      string    `json:"event_id"`
+	Cause        string    `json:"cause"`
+	Reason       string    `json:"reason,omitempty"`
+	RemovedAt    time.Time `json:"removed_at,omitempty"`
+	BeforeCommit string    `json:"before_commit,omitempty"`
+	CheckCommit  string    `json:"check_commit,omitempty"`
+	Conflict     bool      `json:"conflict,omitempty"`
 }
 
 func (s *Service) handleTaskPRCIAutomation(ctx context.Context, pr *github.TaskPR) error {
@@ -91,6 +111,9 @@ func (s *Service) handleTaskPRCIAutomationWithRefresh(ctx context.Context, pr *g
 		}
 		pr = refreshed
 		freshlySynced = synced
+	}
+	if options.AutoFixEnabled || options.AutoMergeEnabled {
+		s.recordTaskPRMergeQueueObservation(ctx, pr)
 	}
 	autoFixBlockedMerge := false
 	autoFixError := ""
@@ -279,8 +302,13 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	previous := decodeCIAutomationCheckpoint(state)
 	delta := ciAutomationBuildDelta(feedback, previous)
 	checkpoint := ciAutomationCurrentCheckpoint(feedback)
+	queueRemoval, queueRecovery := ciAutomationNewQueueRemoval(pr, state)
+	if queueRecovery {
+		delta.QueueRemovals = append(delta.QueueRemovals, *queueRemoval)
+		checkpoint.QueueRemovals = append(checkpoint.QueueRemovals, *queueRemoval)
+	}
 	checkpointJSON, signature := encodeCIAutomationCheckpoint(checkpoint)
-	if len(delta.FailedChecks) == 0 && len(delta.Comments) == 0 {
+	if ciAutomationCheckpointEmpty(delta) {
 		return s.handleTaskPRCIAutoFixEmptyDelta(ctx, pr, state, previous, signature, checkpointJSON), ""
 	}
 	if state != nil && state.LastFixSignature == signature {
@@ -304,15 +332,22 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	if err != nil {
 		return true, err.Error()
 	}
+	queueRemovalEventID, queueRemovalCause := "", ""
+	if queueRecovery {
+		queueRemovalEventID = queueRemoval.EventID
+		queueRemovalCause = queueRemoval.Cause
+	}
 	if err := s.githubService.RecordTaskCIFixAttempt(context.WithoutCancel(ctx), github.TaskCIFixAttempt{
-		TaskID:         pr.TaskID,
-		RepositoryID:   pr.RepositoryID,
-		PRNumber:       pr.PRNumber,
-		Signature:      signature,
-		CheckpointJSON: checkpointJSON,
-		SessionID:      session.ID,
-		EnqueuedAt:     time.Now().UTC(),
-		IncrementRound: result.consumesRound(),
+		TaskID:              pr.TaskID,
+		RepositoryID:        pr.RepositoryID,
+		PRNumber:            pr.PRNumber,
+		Signature:           signature,
+		CheckpointJSON:      checkpointJSON,
+		SessionID:           session.ID,
+		EnqueuedAt:          time.Now().UTC(),
+		IncrementRound:      queueRecovery || result.consumesRound(),
+		QueueRemovalEventID: queueRemovalEventID,
+		QueueRemovalCause:   queueRemovalCause,
 	}); err != nil {
 		s.logger.Debug("record CI auto-fix attempt failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 	} else {
@@ -356,19 +391,28 @@ func (s *Service) handleTaskPRCIAutoFixEmptyDelta(ctx context.Context, pr *githu
 }
 
 func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR) string {
+	if ciAutomationHasActiveMergeQueueEntry(pr) {
+		return ""
+	}
 	signature := ciAutomationMergeSignature(pr)
 	state, err := s.githubService.GetTaskCIPRState(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber)
 	if err != nil {
 		s.logger.Debug("load CI automation merge state failed; attempting merge without dedupe", zap.String("task_id", pr.TaskID), zap.Error(err))
-	} else if state != nil && state.LastMergeSignature == signature {
-		return ""
+	} else if state != nil {
+		if state.LastMergeSignature == signature {
+			return ""
+		}
+		if pr.HeadSHA != "" && state.LastQueueAttemptHeadSHA == pr.HeadSHA {
+			return ""
+		}
 	}
 	attempt := github.TaskCIMergeAttempt{
-		TaskID:       pr.TaskID,
-		RepositoryID: pr.RepositoryID,
-		PRNumber:     pr.PRNumber,
-		Signature:    signature,
-		AttemptedAt:  time.Now().UTC(),
+		TaskID:           pr.TaskID,
+		RepositoryID:     pr.RepositoryID,
+		PRNumber:         pr.PRNumber,
+		Signature:        signature,
+		AttemptedAt:      time.Now().UTC(),
+		AttemptedHeadSHA: pr.HeadSHA,
 	}
 	if err := s.githubService.MergePRForAutomation(
 		ctx, pr.WorkspaceID, pr.Owner, pr.Repo, pr.PRNumber, "",
@@ -378,6 +422,34 @@ func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR
 	_ = s.githubService.RecordTaskCIMergeAttempt(context.WithoutCancel(ctx), attempt)
 	_ = s.githubService.ClearTaskCIError(context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber)
 	return ""
+}
+
+func (s *Service) recordTaskPRMergeQueueObservation(ctx context.Context, pr *github.TaskPR) {
+	if pr == nil || (pr.MergeQueueLastRemovalID == "" && !ciAutomationHasActiveMergeQueueEntry(pr)) {
+		return
+	}
+	removal, _ := ciAutomationQueueRemovalSnapshot(pr)
+	observation := github.TaskCIMergeQueueObservation{
+		TaskID:                 pr.TaskID,
+		RepositoryID:           pr.RepositoryID,
+		PRNumber:               pr.PRNumber,
+		RemovalEventID:         pr.MergeQueueLastRemovalID,
+		RemovalObservedHeadSHA: pr.HeadSHA,
+	}
+	if ciAutomationHasActiveMergeQueueEntry(pr) {
+		observation.ActiveQueueHeadSHA = pr.MergeQueueEntryHeadSHA
+		if observation.ActiveQueueHeadSHA == "" {
+			observation.ActiveQueueHeadSHA = pr.HeadSHA
+		}
+		observation.MergeSignature = ciAutomationMergeSignature(pr)
+	}
+	if removal != nil {
+		observation.RemovalCause = removal.Cause
+	}
+	if err := s.githubService.RecordTaskCIMergeQueueObservation(context.WithoutCancel(ctx), observation); err != nil {
+		s.logger.Debug("record merge queue observation failed",
+			zap.String("task_id", pr.TaskID), zap.Int("pr_number", pr.PRNumber), zap.Error(err))
+	}
 }
 
 // dispatchCIAutomationPromptForPR adapts the provider-agnostic
@@ -632,6 +704,115 @@ func ciAutomationCurrentCheckpoint(feedback *github.PRFeedback) ciAutomationChec
 	return ciAutomationBuildDelta(feedback, ciAutomationCheckpoint{})
 }
 
+func ciAutomationCheckpointEmpty(checkpoint ciAutomationCheckpoint) bool {
+	return len(checkpoint.FailedChecks) == 0 && len(checkpoint.Comments) == 0 && len(checkpoint.QueueRemovals) == 0
+}
+
+func ciAutomationNewQueueRemoval(pr *github.TaskPR, state *github.TaskCIPRAutomationState) (*ciAutomationQueueRemovalSnapshotData, bool) {
+	snapshot, actionable := ciAutomationQueueRemovalSnapshot(pr)
+	if !actionable || snapshot == nil || !ciAutomationQueueRemovalBelongsToCurrentHead(pr, state) {
+		return nil, false
+	}
+	if state != nil && state.LastQueueFixEventID == snapshot.EventID {
+		return nil, false
+	}
+	return snapshot, true
+}
+
+func ciAutomationQueueRemovalBelongsToCurrentHead(pr *github.TaskPR, state *github.TaskCIPRAutomationState) bool {
+	if pr == nil || strings.TrimSpace(pr.HeadSHA) == "" || state == nil {
+		return false
+	}
+	attemptHead := strings.TrimSpace(state.LastQueueAttemptHeadSHA)
+	// A removal-only observation may establish a current-head baseline, but it
+	// does not prove that Kandev ever queued this head. Require the merge
+	// signature written by an actual merge attempt or active-entry adoption so
+	// an old removal cannot spend a repair round after automation is enabled.
+	return attemptHead != "" && attemptHead == strings.TrimSpace(pr.HeadSHA) && strings.TrimSpace(state.LastMergeSignature) != ""
+}
+
+func ciAutomationHasActiveMergeQueueEntry(pr *github.TaskPR) bool {
+	if pr == nil || (pr.State != "" && !strings.EqualFold(strings.TrimSpace(pr.State), "open")) {
+		return false
+	}
+	return strings.TrimSpace(pr.MergeQueueState) != ""
+}
+
+func ciAutomationQueueRemovalSnapshot(pr *github.TaskPR) (*ciAutomationQueueRemovalSnapshotData, bool) {
+	if pr == nil || strings.TrimSpace(pr.MergeQueueLastRemovalID) == "" {
+		return nil, false
+	}
+	cause := ciAutomationQueueRemovalCause(pr.MergeQueueLastRemovalReason, pr)
+	return &ciAutomationQueueRemovalSnapshotData{
+		EventID:      pr.MergeQueueLastRemovalID,
+		Cause:        cause,
+		Reason:       ciAutomationSanitizeSnapshotField(pr.MergeQueueLastRemovalReason),
+		RemovedAt:    valueOrZeroTime(pr.MergeQueueLastRemovedAt),
+		BeforeCommit: ciAutomationSanitizeSnapshotField(pr.MergeQueueLastRemovalBeforeSHA),
+		Conflict:     ciAutomationQueueRemovalConflictEvidence(pr),
+	}, ciAutomationQueueRemovalCauseActionable(cause)
+}
+
+func valueOrZeroTime(value *time.Time) time.Time {
+	if value == nil {
+		return time.Time{}
+	}
+	return value.UTC()
+}
+
+func ciAutomationQueueRemovalCause(reason string, pr *github.TaskPR) string {
+	normalized := normalizeCIAutomationQueueRemovalReason(reason)
+	switch normalized {
+	case "checks_failed", "check_failed", "checks_failure", "ci_checks_failed", "ci_check_failed", "checks_failed_on_merge_group", "checks_failed_on_merge_queue":
+		return ciAutomationQueueRemovalCauseChecksFailed
+	case "checks_timed_out", "check_timed_out", "checks_timeout", "timeout", "timed_out", "checks_timed_out_on_merge_group":
+		return ciAutomationQueueRemovalCauseChecksTimedOut
+	case "merge_conflict", "merge_conflicts", "conflict", "unmergeable":
+		return ciAutomationQueueRemovalCauseConflict
+	case "manual", "removed_manually", "user_removed":
+		return ciAutomationQueueRemovalCauseManual
+	case "branch_protection", "branch_protection_failed", "required_branch_protection":
+		return ciAutomationQueueRemovalCauseBranchProtection
+	}
+	if ciAutomationQueueRemovalConflictEvidence(pr) {
+		return ciAutomationQueueRemovalCauseConflict
+	}
+	return ciAutomationQueueRemovalCauseUnknown
+}
+
+func normalizeCIAutomationQueueRemovalReason(reason string) string {
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range strings.ToLower(strings.TrimSpace(reason)) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	return strings.Trim(b.String(), "_")
+}
+
+func ciAutomationQueueRemovalConflictEvidence(pr *github.TaskPR) bool {
+	if pr == nil {
+		return false
+	}
+	mergeable := strings.ToLower(strings.TrimSpace(pr.MergeableState))
+	queueState := strings.ToLower(strings.TrimSpace(pr.MergeQueueState))
+	return mergeable == "dirty" || strings.Contains(mergeable, "conflict") ||
+		queueState == "unmergeable" || strings.Contains(queueState, "unmergeable")
+}
+
+func ciAutomationQueueRemovalCauseActionable(cause string) bool {
+	return cause == ciAutomationQueueRemovalCauseChecksFailed ||
+		cause == ciAutomationQueueRemovalCauseChecksTimedOut ||
+		cause == ciAutomationQueueRemovalCauseConflict
+}
+
 func ciAutomationRenderPrompt(base string, pr *github.TaskPR, delta ciAutomationCheckpoint) string {
 	if base = strings.TrimSpace(base); base != "" {
 		return ciAutomationRenderPromptTemplate(base, ciAutomationRenderSnapshot(pr, delta))
@@ -680,6 +861,31 @@ func ciAutomationRenderSnapshot(pr *github.TaskPR, delta ciAutomationCheckpoint)
 			b.WriteString(fmt.Sprintf("\n- %s:%d %s", ciAutomationSanitizeSnapshotField(comment.Path), comment.Line, ciAutomationSanitizeSnapshotField(strings.TrimSpace(comment.Body))))
 		}
 	}
+	if len(delta.QueueRemovals) > 0 {
+		b.WriteString("\n\nMerge queue removal recovery:")
+		for _, removal := range delta.QueueRemovals {
+			b.WriteString("\n- event ")
+			b.WriteString(ciAutomationSanitizeSnapshotField(removal.EventID))
+			b.WriteString(": cause ")
+			b.WriteString(ciAutomationSanitizeSnapshotField(removal.Cause))
+			if removal.Reason != "" {
+				b.WriteString("; reason ")
+				b.WriteString(ciAutomationSanitizeSnapshotField(removal.Reason))
+			}
+			if removal.Conflict {
+				b.WriteString("; conflict state observed")
+			}
+			if !removal.RemovedAt.IsZero() {
+				b.WriteString("; removed at ")
+				b.WriteString(removal.RemovedAt.UTC().Format(time.RFC3339))
+			}
+			if removal.BeforeCommit != "" {
+				b.WriteString("; beforeCommit ")
+				b.WriteString(ciAutomationSanitizeSnapshotField(removal.BeforeCommit))
+				b.WriteString(" (not used as check identity)")
+			}
+		}
+	}
 	return b.String()
 }
 
@@ -703,7 +909,7 @@ func encodeCIAutomationCheckpoint(checkpoint ciAutomationCheckpoint) (string, st
 }
 
 func ciAutomationMergeSignature(pr *github.TaskPR) string {
-	payload := fmt.Sprintf("%s|%s|%d|%s|%d|%d|%s|%s|%s|%d|%d", pr.TaskID, pr.RepositoryID, pr.PRNumber, pr.HeadBranch, pr.Additions, pr.Deletions, pr.ChecksState, pr.ReviewState, pr.MergeableState, pr.ReviewCount, pr.UnresolvedReviewThreads)
+	payload := fmt.Sprintf("%s|%s|%d|%s|%s|%d|%d|%s|%s|%s|%d|%d", pr.TaskID, pr.RepositoryID, pr.PRNumber, pr.HeadSHA, pr.HeadBranch, pr.Additions, pr.Deletions, pr.ChecksState, pr.ReviewState, pr.MergeableState, pr.ReviewCount, pr.UnresolvedReviewThreads)
 	sum := sha256.Sum256([]byte(payload))
 	return hex.EncodeToString(sum[:])
 }

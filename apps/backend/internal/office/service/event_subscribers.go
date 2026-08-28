@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	commoncosts "github.com/kandev/kandev/internal/common/costs"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/costs"
@@ -93,22 +94,15 @@ type ApprovalResolvedData struct {
 
 // AgentLifecycleData is the subset of agent lifecycle event data needed by office.
 //
-// AgentID is populated by the lifecycle manager for taskless runs
-// (heartbeats, lightweight routines) so the office completion handler
-// can attribute the run without a task lookup. It stays empty for the
-// task-bound path that already uses TaskID. Today no caller emits
-// taskless lifecycle events; the field is reserved for PR 2 of
-// office-heartbeat-rework. Note that AgentID carries the underlying agent
-// TYPE (e.g. "claude-acp"), not an office agent identity — it is unrelated
-// to AgentProfileID below despite the similar name.
+// AgentID is the underlying agent type (for example, "claude-acp"). It is
+// not an Office agent identity and must not be used to look up runs or
+// continuation summaries.
 //
 // AgentProfileID is the office agent instance's own identity
 // (lifecycle.AgentEventPayload's "agent_profile_id", sourced from
-// AgentExecution.officeProfileID()) and is always populated on the
-// task-bound path. runs.agent_profile_id is keyed on this same identity, so
-// callers that need to resolve the specific run a lifecycle event belongs
-// to — as opposed to "some claimed run on this task" — must match on this
-// field, not AgentID (Review round 4, BLOCKING FINDING 2).
+// AgentExecution.officeProfileID()). runs.agent_profile_id is keyed on this
+// same identity, so taskless fallback resolution and summary writes use this
+// field, not AgentID.
 type AgentLifecycleData struct {
 	TaskID         string                 `json:"task_id"`
 	RunID          string                 `json:"run_id"`
@@ -141,7 +135,12 @@ func (s *Service) resolveLifecycleRun(ctx context.Context, data AgentLifecycleDa
 	if data.TaskID != "" {
 		return s.repo.GetClaimedRunByTaskAndAgent(ctx, data.TaskID, data.AgentProfileID)
 	}
-	return s.repo.GetClaimedTasklessRunForAgent(ctx, data.AgentID)
+	agentProfileID := data.AgentProfileID
+	if agentProfileID == "" {
+		// Legacy taskless events used AgentID for the Office identity.
+		agentProfileID = data.AgentID
+	}
+	return s.repo.GetClaimedTasklessRunForAgent(ctx, agentProfileID)
 }
 
 type PromptUsageData struct {
@@ -329,10 +328,15 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	if err != nil {
 		return nil
 	}
-	// Taskless completion (PR 1 of office-heartbeat-rework): heartbeat
-	// or lightweight-routine fires that don't carry a task_id. Today no
-	// caller emits these, so this branch is dead until PR 2 lands the
-	// agent_heartbeat cron handler.
+	// Taskless completion: heartbeat or lightweight-routine fires that
+	// don't carry a task_id. Lightweight routines are already created
+	// today (wakeup/dispatcher.go's createFreshRun runs on every
+	// coordinator heartbeat fire), but the scheduler cannot yet launch a
+	// taskless run (WO-35: SchedulerIntegration.launchAgent fails it
+	// instead), so no agent ever completes one and no production caller
+	// emits this event yet. Once a taskless launch seam lands (tracked
+	// as a follow-up feature, not part of WO-35), this branch is what
+	// will finish those runs.
 	if data.TaskID == "" {
 		return s.handleTasklessAgentCompleted(ctx, data)
 	}
@@ -350,6 +354,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	})
 	s.markRoutingSuccess(ctx, run)
 	s.recordRunOutputSummary(ctx, run, *data)
+	s.warnIfReviewDecisionMissing(ctx, run)
 	// resolveLifecycleRun prefers the immutable run ID from the event and
 	// falls back to task plus agent only for legacy events. Releasing here
 	// (rather than unconditionally inside transitionRunTerminal) is safe —
@@ -365,6 +370,49 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	s.releaseTaskCheckoutForRun(ctx, run)
 	s.stampRunFinished(ctx, run)
 	return nil
+}
+
+// warnIfReviewDecisionMissing flags a review or approval run that finished
+// without the agent ever calling record_step_decision_kandev. A reviewer can
+// post a full critique and reject the work in a comment, but if that comment
+// never becomes a recorded decision the workflow engine has nothing to act
+// on and the task strands in its current step forever. This does not fix
+// the missing decision — it only surfaces it as a warn-level run event so
+// the stall is visible instead of silent.
+func (s *Service) warnIfReviewDecisionMissing(ctx context.Context, run *models.Run) {
+	if run == nil {
+		return
+	}
+	parsed := ParseRunPayload(run.Payload)
+	taskID, stepID, stageType := s.resolveReviewStage(ctx, run.Reason, parsed)
+	if !isReviewOrApprovalStage(stageType) {
+		return
+	}
+	if taskID == "" || stepID == "" {
+		return
+	}
+	has, err := s.repo.HasActiveStepDecision(ctx, taskID, stepID, run.AgentProfileID)
+	if err != nil {
+		s.logger.Warn("failed to check step decision presence",
+			zap.String("task_id", taskID),
+			zap.String("run_id", run.ID),
+			zap.Error(err))
+		return
+	}
+	if has {
+		return
+	}
+	s.logger.Warn("review/approval run finished without a recorded step decision",
+		zap.String("task_id", taskID),
+		zap.String("run_id", run.ID),
+		zap.String("stage_type", stageType),
+		zap.String("step_id", stepID),
+		zap.String("agent_profile_id", run.AgentProfileID))
+	s.AppendRunEvent(ctx, run.ID, "decision.missing", string(models.RunEventLevelWarn), map[string]interface{}{
+		"task_id":    taskID,
+		"stage_type": stageType,
+		"step_id":    stepID,
+	})
 }
 
 // markRoutingSuccess delegates to the routing dispatcher (when wired)
@@ -385,8 +433,8 @@ func (s *Service) markRoutingSuccess(ctx context.Context, run *models.Run) {
 }
 
 // handleTasklessAgentCompleted attributes a taskless run completion,
-// finishes the run, and refreshes the per-(agent, "heartbeat")
-// continuation summary so the next fire has bridge context. The
+// finishes the run, and refreshes the per-agent, per-scope continuation
+// summary so the next fire has bridge context. The
 // summary is built deterministically from the run's result_json,
 // workspace activity, and the prior summary — see the office/summary
 // package.
@@ -397,7 +445,7 @@ func (s *Service) markRoutingSuccess(ctx context.Context, run *models.Run) {
 func (s *Service) handleTasklessAgentCompleted(
 	ctx context.Context, data *AgentLifecycleData,
 ) error {
-	if data == nil || (data.AgentID == "" && data.RunID == "") {
+	if data == nil || (data.AgentID == "" && data.AgentProfileID == "" && data.RunID == "") {
 		return nil
 	}
 	run, err := s.resolveLifecycleRun(ctx, *data)
@@ -411,7 +459,7 @@ func (s *Service) handleTasklessAgentCompleted(
 		"agent_id":   data.AgentID,
 		"session_id": data.SessionID,
 	})
-	s.refreshContinuationSummary(ctx, run, data.AgentID)
+	s.refreshContinuationSummary(ctx, run, run.AgentProfileID)
 	s.recordRunOutputSummary(ctx, run, *data)
 	// run came from GetClaimedTasklessRunForAgent: it is the run that
 	// actually launched. Taskless runs typically carry no task_id, so this
@@ -429,27 +477,28 @@ func (s *Service) handleTasklessAgentCompleted(
 }
 
 // refreshContinuationSummary rebuilds the continuation summary for the
-// given agent and upserts it under a scope keyed off the wakeup that
-// produced the run. Errors are logged at warn — the prior row stays
-// intact (last-good wins) and the run completion proceeds.
+// given agent and upserts it under run.ContinuationScope — the scope key
+// models.ContinuationScopeForRun computed once, at run-creation time, and
+// persisted onto the row (see runs/repository/sqlite.CreateRun). Errors
+// are logged at warn — the prior row stays intact (last-good wins) and
+// the run completion proceeds.
 //
-// Scope rules (office-heartbeat-as-routine):
-//   - run came from a routine wakeup (payload has routine_id) →
-//     "routine:<routine_id>" so each routine bridges its own context.
-//   - any other source (self / user / direct dispatch) →
-//     "agent:<agent_id>" so the agent still has somewhere to land its
-//     summary even when no routine is in play.
-//
-// The legacy "heartbeat" scope is retired alongside the agent-level
-// heartbeat cron — every scheduled wake now flows through a routine.
+// This deliberately reads the persisted field rather than recomputing it:
+// run here comes from resolveLifecycleRun's fresh DB fetch, which can
+// observe a context_snapshot a routine wakeup coalesced into this run
+// after it was claimed (MarkWakeupRequestCoalesced patches only
+// context_snapshot). Recomputing against that drifted snapshot could
+// disagree with the scope the claim-time scheduler used when it read the
+// prior continuation summary into the prompt — the persisted column is
+// the single source of truth both sides read.
 func (s *Service) refreshContinuationSummary(
-	ctx context.Context, run *models.Run, agentID string,
+	ctx context.Context, run *models.Run, agentProfileID string,
 ) {
-	if s.repo == nil || run == nil || agentID == "" {
+	if s.repo == nil || run == nil || agentProfileID == "" {
 		return
 	}
-	scope := summaryScopeForRun(run, agentID)
-	inputs, err := summaryLoadInputs(ctx, s.repo, run, agentID, scope)
+	scope := run.ContinuationScope
+	inputs, err := summaryLoadInputs(ctx, s.repo, run, agentProfileID, scope)
 	if err != nil {
 		s.logger.Warn("continuation-summary load inputs failed",
 			zap.String("run_id", run.ID), zap.Error(err))
@@ -457,7 +506,7 @@ func (s *Service) refreshContinuationSummary(
 	}
 	body := summaryBuild(inputs)
 	upsertErr := s.repo.UpsertContinuationSummary(ctx, sqlite.AgentContinuationSummary{
-		AgentProfileID: agentID,
+		AgentProfileID: agentProfileID,
 		Scope:          scope,
 		Content:        body,
 		ContentTokens:  approxTokenCount(body),
@@ -474,37 +523,6 @@ func (s *Service) refreshContinuationSummary(
 // — the summary is capped at 8 KB so the absolute number is small.
 func approxTokenCount(s string) int {
 	return (len(s) + 3) / 4
-}
-
-// summaryScopeForRun returns the (agent_profile_id, scope) scope value
-// for the continuation-summary upsert. Reads run.ContextSnapshot for a
-// routine_id (set by the wakeup dispatcher when source="routine") and
-// returns "routine:<id>" when present; falls back to "agent:<id>" so
-// non-routine fires still have a stable upsert key.
-func summaryScopeForRun(run *models.Run, agentID string) string {
-	if run == nil {
-		return "agent:" + agentID
-	}
-	if id := extractRoutineID(run.ContextSnapshot); id != "" {
-		return "routine:" + id
-	}
-	return "agent:" + agentID
-}
-
-// extractRoutineID pulls routine_id out of a JSON snapshot. Returns ""
-// for missing / malformed payloads so the caller falls back to the
-// agent-scoped summary key.
-func extractRoutineID(snapshot string) string {
-	if snapshot == "" {
-		return ""
-	}
-	var p struct {
-		RoutineID string `json:"routine_id"`
-	}
-	if err := json.Unmarshal([]byte(snapshot), &p); err != nil {
-		return ""
-	}
-	return p.RoutineID
 }
 
 // recordRunOutputSummary persists the agent's final message as the run's
@@ -595,8 +613,37 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	// Office failure path (v1): every agent error is terminal. The
 	// retry-by-classifier path lives behind HandleRunFailure for
 	// rate-limit-retry callers; we deliberately do NOT call into it
-	// here. See docs/specs/office-agent-error-handling.
-	return s.HandleAgentFailure(ctx, run, enrichModelFailureMessage(run, data.ErrorMessage))
+	// here. See docs/specs/office/requirements/runtime.md.
+	errMsg := enrichModelFailureMessage(run, data.ErrorMessage)
+	if err := s.HandleAgentFailure(ctx, run, errMsg); err != nil {
+		return err
+	}
+	s.dispatchAgentErrorTrigger(ctx, run, data.TaskID, data.SessionID, errMsg)
+	return nil
+}
+
+// dispatchAgentErrorTrigger wakes the workspace CEO agent (WO-05) after a
+// terminal agent-session failure. This is Path A in the office failure
+// model; Path B (HandleRunFailure -> escalateFailure, pre-launch retry
+// exhaustion) queues its own CEO run directly and never reaches this
+// dispatcher, so the two mechanisms cannot double-fire for one failure.
+// A dispatch error is logged rather than returned: it must not mask the
+// failure bookkeeping HandleAgentFailure already committed.
+func (s *Service) dispatchAgentErrorTrigger(
+	ctx context.Context, run *models.Run, taskID, sessionID, errMsg string,
+) {
+	key := fmt.Sprintf("agent_error:%s", run.ID)
+	if err := s.dispatchEngineTrigger(ctx, taskID, engine.TriggerOnAgentError,
+		engine.OnAgentErrorPayload{
+			FailedAgentID:   run.AgentProfileID,
+			FailedSessionID: sessionID,
+			ErrorMessage:    errMsg,
+		}, key); err != nil {
+		s.logger.Error("engine trigger on_agent_error failed",
+			zap.String("task_id", taskID),
+			zap.String("run_id", run.ID),
+			zap.Error(err))
+	}
 }
 
 // enrichModelFailureMessage prepends the actionable "change the model" copy
@@ -654,7 +701,7 @@ func (s *Service) tryPostStartFallback(
 
 // handlePromptUsage records a cost event from a session/prompt usage
 // update. Cost resolution follows the two-layer order from
-// docs/specs/office/costs.md, and CostSource on the row records which
+// docs/specs/office/requirements/costs.md, and CostSource on the row records which
 // layer actually produced the dollar amount (see resolveCostForUsage in
 // prompt_usage_cost.go — distinct from Estimated, a usage-authority flag):
 //
@@ -672,14 +719,18 @@ func (s *Service) tryPostStartFallback(
 //
 // buildCostEvent (prompt_usage_cost.go) also records the cache read/write
 // split when the usage frame reports cache data, and turn_id /
-// usage_event_id threaded from the publish site. The ledger insert and the
-// task_sessions rollup increment (tokens_in / tokens_cached_in / tokens_out /
-// cost_subcents) are written atomically by recordCostEventAndRollup — see its
-// doc comment for why non-atomic writes here are a real defect, not a
-// theoretical one — and any applicable budget policy is evaluated afterward.
-// Estimated rows count toward budget totals at face value. Every early
-// return and the insert path record a writer-health metric (cost_metrics.go)
-// so a silently-stopped writer is observable.
+// usage_event_id threaded from the publish site. This function only inserts
+// the office_cost_events row; it no longer increments the task_sessions
+// rollup columns (docs/specs/task-cost-ledger/spec.md AC-21):
+// internal/task/usage's writer is now the sole writer of those columns
+// (AC-10), inserting task_usage_events and incrementing task_sessions
+// atomically in its own transaction (internal/task/repository/sqlite's
+// insertUsageEventAndRollup). Before this change, Office incremented the
+// same columns here too, so an Office-enabled install (the dev/e2e default)
+// double-counted every turn. Any applicable budget policy is evaluated
+// after the insert. Estimated rows count toward budget totals at face
+// value. Every early return and the insert path record a writer-health
+// metric (cost_metrics.go) so a silently-stopped writer is observable.
 func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[PromptUsageData](event)
 	if err != nil {
@@ -719,10 +770,7 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 		*data, fields, s.projectIDForTask(ctx, data.TaskID), provider, resolution, sessionAgentProfileID,
 	)
 
-	if err := s.recordCostEventAndRollup(
-		ctx, costEvent, data.SessionID,
-		data.Usage.InputTokens, costEvent.TokensCachedIn, data.Usage.OutputTokens, resolution.costSubcents,
-	); err != nil {
+	if err := s.repo.CreateCostEvent(ctx, costEvent); err != nil {
 		if errors.Is(err, sqlite.ErrDuplicateUsageEvent) {
 			s.recordCostEventDropped(costDropReasonDuplicate, data.TaskID)
 			return nil
@@ -741,61 +789,6 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 		}
 	}
 	return nil
-}
-
-// recordCostEventAndRollup inserts costEvent and increments the
-// task_sessions rollup atomically when the wired sessionUsageWriter
-// supports it (shared.SessionUsageWriterTx) — every production wiring does
-// (backendapp's SetSessionUsageWriter(repos.Task)).
-//
-// Atomicity matters because of how this card's own usage_event_id
-// idempotency guard interacts with a partial failure: without a shared
-// transaction, a rollup-increment failure after a successful ledger insert
-// was logged and swallowed, and a later redelivery of the same completion
-// (see ErrDuplicateUsageEvent's doc comment for why redelivery is real, not
-// hypothetical) would hit the unique index and be dropped as a duplicate
-// before the rollup ever got a second chance — task_sessions permanently
-// behind office_cost_events with no recovery path (PR #2606 review). Wrapping
-// both writes in one transaction closes that: any failure, including the
-// rollup increment, rolls back the ledger insert too, so nothing is
-// committed and a redelivered completion with the same usage_event_id
-// retries the whole operation cleanly instead of colliding with a
-// half-landed row.
-//
-// Falls back to the pre-existing non-atomic two-step write when the wired
-// writer doesn't implement SessionUsageWriterTx (e.g. a simplified test
-// double that doesn't need transactional coupling, or sessionUsageWriter
-// left unset).
-func (s *Service) recordCostEventAndRollup(
-	ctx context.Context, costEvent *models.CostEvent, sessionID string,
-	tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
-) error {
-	txWriter, ok := s.sessionUsageWriter.(shared.SessionUsageWriterTx)
-	if !ok {
-		if err := s.repo.CreateCostEvent(ctx, costEvent); err != nil {
-			return err
-		}
-		s.incrementSessionUsageTotals(ctx, sessionID, tokensIn, tokensCachedIn, tokensOut, costSubcents)
-		return nil
-	}
-
-	tx, err := s.repo.BeginTx(ctx)
-	if err != nil {
-		return err
-	}
-	if err := s.repo.CreateCostEventTx(ctx, tx, costEvent); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := txWriter.IncrementTaskSessionUsageTx(
-		ctx, tx, sessionID, tokensIn, tokensCachedIn, tokensOut, costSubcents,
-	); err != nil {
-		_ = tx.Rollback()
-		s.logger.Warn("increment task_session usage failed, rolled back cost event insert",
-			zap.String("session_id", sessionID), zap.Error(err))
-		return err
-	}
-	return tx.Commit()
 }
 
 // resolveProvider derives the provider id for the cost row. AgentType
@@ -819,31 +812,11 @@ func resolveProvider(data PromptUsageData) string {
 
 // providerFromCLI maps the upstream CLI id (the agent_id stream field)
 // to a provider name. Used because claude-acp emits logical model
-// aliases (sonnet / haiku) that can't be matched on prefix.
+// aliases (sonnet / haiku) that can't be matched on prefix. Delegates to
+// internal/common/costs, the single source of truth shared with the task
+// usage ledger writer (docs/specs/task-cost-ledger/spec.md).
 func providerFromCLI(cli string) string {
-	switch cli {
-	case "claude-acp":
-		return "anthropic"
-	case "codex-acp", "openai-acp":
-		return "openai"
-	case "gemini", "gemini-acp":
-		return "google"
-	}
-	return ""
-}
-
-func (s *Service) incrementSessionUsageTotals(
-	ctx context.Context, sessionID string, tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
-) {
-	if s.sessionUsageWriter == nil || sessionID == "" {
-		return
-	}
-	if err := s.sessionUsageWriter.IncrementTaskSessionUsage(
-		ctx, sessionID, tokensIn, tokensCachedIn, tokensOut, costSubcents,
-	); err != nil {
-		s.logger.Warn("increment task_session usage failed",
-			zap.String("session_id", sessionID), zap.Error(err))
-	}
+	return commoncosts.ProviderFromCLI(cli)
 }
 
 func (s *Service) projectIDForTask(ctx context.Context, taskID string) string {

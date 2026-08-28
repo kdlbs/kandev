@@ -8,6 +8,7 @@ import type { ViewContentProps } from "@/lib/kanban/view-registry";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import { useTranslation } from "react-i18next";
+import { areAllEmptyStepsAutoHidden } from "@/lib/kanban/auto-hide-empty-columns";
 
 export function getGraph2DisplayState(
   tasks: Task[],
@@ -25,6 +26,7 @@ export function getGraph2DisplayState(
 export function SwimlaneGraph2Content({
   workflowId,
   steps,
+  moveTargetSteps,
   tasks,
   onPreviewTask,
   onOpenTask,
@@ -46,6 +48,10 @@ export function SwimlaneGraph2Content({
     () => getGraph2DisplayState(tasks, steps, t("kanban:needsReassignment")),
     [tasks, steps, t],
   );
+  const pipelineMoveTargetSteps = useMemo(() => {
+    const orphan = displaySteps.find((step) => step.id === ORPHAN_STEP_ID);
+    return orphan ? [...moveTargetSteps, orphan] : moveTargetSteps;
+  }, [displaySteps, moveTargetSteps]);
 
   const sortedTasks = useMemo(
     () =>
@@ -70,7 +76,18 @@ export function SwimlaneGraph2Content({
   if (displayTasks.length === 0) {
     return (
       <div className="px-3 pb-3">
-        <div className="text-xs text-muted-foreground text-center py-4">{t("kanban:noTasks")}</div>
+        <div
+          className="text-xs text-muted-foreground text-center py-4"
+          data-testid={
+            areAllEmptyStepsAutoHidden(steps, moveTargetSteps)
+              ? "pipeline-auto-hidden-empty-state"
+              : undefined
+          }
+        >
+          {areAllEmptyStepsAutoHidden(steps, moveTargetSteps)
+            ? t("kanban:allEmptyStepsAutoHidden")
+            : t("kanban:noTasks")}
+        </div>
       </div>
     );
   }
@@ -83,6 +100,7 @@ export function SwimlaneGraph2Content({
             key={task.id}
             task={task}
             steps={displaySteps}
+            moveTargetSteps={pipelineMoveTargetSteps}
             onMoveTask={handleMoveTask}
             onPreviewTask={onPreviewTask}
             onOpenTask={onOpenTask}

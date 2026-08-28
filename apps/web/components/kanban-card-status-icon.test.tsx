@@ -8,6 +8,7 @@ import {
   IconShieldQuestion,
 } from "@tabler/icons-react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import { renderSubagentCountChip, renderTaskStatusIcon } from "./kanban-card-content";
 import { AutoStartFailedTaskIcon } from "@/lib/ui/state-icons";
 import type { Task } from "./kanban-card";
@@ -23,6 +24,9 @@ function task(overrides: Partial<Task>): Task {
 
 function iconType(node: ReactNode) {
   if (!isValidElement(node)) throw new Error("Expected React element");
+  if (node.type === CompositorSpin) {
+    return iconType((node.props as { children: ReactNode }).children);
+  }
   return node.type;
 }
 

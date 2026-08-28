@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-ssh-workspace-lifecycle", "02-ssh-container-regression"]
 plan: "plan.md"
-spec: "../../specs/ssh-executor/spec.md"
+spec: "../../specs/executors/requirements/ssh-executor.md"
 ---
 
 # Task 03: Public Documentation Alignment

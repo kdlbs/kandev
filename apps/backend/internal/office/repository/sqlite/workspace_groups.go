@@ -182,8 +182,9 @@ func (r *Repository) MarkWorkspaceMaterialized(ctx context.Context, id string, m
 			restore_config_json = ?,
 			updated_at = ?
 		WHERE id = ?
+		  AND (materialized_environment_id = '' OR materialized_environment_id = ?)
 	`), m.Path, m.EnvironmentID, m.Kind, m.OwnedByKandev, policy,
-		m.RestoreConfig, time.Now().UTC(), id)
+		m.RestoreConfig, time.Now().UTC(), id, m.EnvironmentID)
 	if err != nil {
 		return err
 	}
@@ -192,7 +193,16 @@ func (r *Repository) MarkWorkspaceMaterialized(ctx context.Context, id string, m
 		return err
 	}
 	if n == 0 {
-		return fmt.Errorf("workspace group %s: not found", id)
+		var existingEnvironmentID string
+		if err := tx.QueryRowContext(ctx, tx.Rebind(`
+			SELECT materialized_environment_id FROM task_workspace_groups WHERE id = ?
+		`), id).Scan(&existingEnvironmentID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("workspace group %s: not found", id)
+			}
+			return err
+		}
+		return fmt.Errorf("workspace group %s already materialized by a different environment", id)
 	}
 	return tx.Commit()
 }

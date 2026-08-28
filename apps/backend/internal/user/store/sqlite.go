@@ -562,6 +562,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 	if keyboardShortcuts == nil {
 		keyboardShortcuts = map[string]interface{}{}
 	}
+	quickChatTabOrderByWorkspace := CloneStringSliceMap(settings.QuickChatTabOrderByWorkspace)
 	return json.Marshal(map[string]interface{}{
 		"workspace_id":                             settings.WorkspaceID,
 		"kanban_view_mode":                         settings.KanbanViewMode,
@@ -618,7 +619,9 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
 		"app_status_bar_order":                     normalizeAppStatusBarOrder(settings.AppStatusBarOrder),
+		"quick_chat_tab_order_by_workspace":        quickChatTabOrderByWorkspace,
 		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
+		"workflow_ids_with_auto_hide_empty_steps":  settings.WorkflowIDsWithAutoHideEmptySteps,
 	})
 }
 
@@ -697,7 +700,9 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		SidebarTaskPrefs:                  normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
 		AppStatusBarEnabled:               false,
 		AppStatusBarOrder:                 normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
+		QuickChatTabOrderByWorkspace:      map[string][]string{},
 		KanbanHiddenStepIDs:               map[string][]string{},
+		WorkflowIDsWithAutoHideEmptySteps: []string{},
 	}
 }
 
@@ -710,6 +715,7 @@ func DefaultSidebarViews() []models.SidebarView {
 		Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},
 		Group:           "repository",
 		CollapsedGroups: []string{},
+		TaskRow:         models.DefaultSidebarTaskRowPresentation(),
 	}}
 }
 
@@ -780,7 +786,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		SystemMetricsDisplay              models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 		AppStatusBarEnabled               *bool                               `json:"app_status_bar_enabled"`
 		AppStatusBarOrder                 models.AppStatusBarOrder            `json:"app_status_bar_order"`
+		QuickChatTabOrderByWorkspace      map[string][]string                 `json:"quick_chat_tab_order_by_workspace"`
 		KanbanHiddenStepIDs               json.RawMessage                     `json:"kanban_hidden_step_ids"`
+		WorkflowIDsWithAutoHideEmptySteps json.RawMessage                     `json:"workflow_ids_with_auto_hide_empty_steps"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -905,6 +913,10 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.AppStatusBarEnabled = *payload.AppStatusBarEnabled
 	}
 	settings.AppStatusBarOrder = normalizeAppStatusBarOrder(payload.AppStatusBarOrder)
+	settings.QuickChatTabOrderByWorkspace = payload.QuickChatTabOrderByWorkspace
+	if settings.QuickChatTabOrderByWorkspace == nil {
+		settings.QuickChatTabOrderByWorkspace = map[string][]string{}
+	}
 	if payload.ChangesPanelLayout == "flat" {
 		settings.ChangesPanelLayout = "flat"
 	} else {
@@ -912,7 +924,19 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	settings.LastSeenDisplay = normalizeLastSeenDisplayStored(payload.LastSeenDisplay)
 	settings.KanbanHiddenStepIDs = decodeKanbanHiddenStepIDs(payload.KanbanHiddenStepIDs)
+	settings.WorkflowIDsWithAutoHideEmptySteps = decodeStringIDs(payload.WorkflowIDsWithAutoHideEmptySteps)
 	return settings, nil
+}
+
+func decodeStringIDs(raw json.RawMessage) []string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return []string{}
+	}
+	var ids []string
+	if err := json.Unmarshal(raw, &ids); err != nil || ids == nil {
+		return []string{}
+	}
+	return ids
 }
 
 // normalizeLastSeenDisplayStored maps a stored JSON value to the canonical
@@ -962,6 +986,20 @@ func normalizeSidebarTaskPrefs(prefs models.SidebarTaskPrefs) models.SidebarTask
 		prefs.SubtaskOrderByParentID = map[string][]string{}
 	}
 	return prefs
+}
+
+// CloneStringSliceMap copies a per-workspace string-list map before it is
+// encoded or assigned so callers cannot mutate the settings model through the
+// payload.
+func CloneStringSliceMap(source map[string][]string) map[string][]string {
+	if source == nil {
+		return map[string][]string{}
+	}
+	clone := make(map[string][]string, len(source))
+	for key, values := range source {
+		clone[key] = append([]string{}, values...)
+	}
+	return clone
 }
 
 // normalizeAppStatusBarOrder defaults nil status bar item lists so the stored

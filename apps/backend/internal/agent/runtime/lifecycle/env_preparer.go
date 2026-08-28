@@ -2,13 +2,54 @@ package lifecycle
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+// RepositoryPreparationError identifies the repository whose preparation
+// prevented a multi-repository launch. Its wrapped cause remains available for
+// errors.Is/errors.As, while Error() exposes only bounded, credential-safe
+// detail to launch and task error surfaces.
+type RepositoryPreparationError struct {
+	RepositoryID     string
+	TaskRepositoryID string
+	RepositoryName   string
+	Cause            error
+}
+
+func (e *RepositoryPreparationError) Error() string {
+	if e == nil {
+		return "repository preparation failed"
+	}
+	name := strings.TrimSpace(e.RepositoryName)
+	identity := strings.TrimSpace(e.RepositoryID)
+	label := identity
+	if name != "" && identity != "" {
+		label = fmt.Sprintf("%s (%s)", name, identity)
+	} else if name != "" {
+		label = name
+	}
+	if label == "" {
+		label = "unknown repository"
+	}
+	if e.Cause == nil {
+		return fmt.Sprintf("repository %s preparation failed", label)
+	}
+	return fmt.Sprintf("repository %s preparation failed: %s", label, routingerr.Sanitize(e.Cause.Error()))
+}
+
+func (e *RepositoryPreparationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
 
 // PrepareStepStatus represents the status of a preparation step.
 type PrepareStepStatus string
@@ -26,22 +67,29 @@ const (
 // carried at the top level. When EnvPrepareRequest.Repositories is non-empty,
 // each entry produces one prepared worktree under the shared TaskDirName.
 type RepoPrepareSpec struct {
-	TaskRepositoryID        string
-	RepositoryID            string
-	RepositoryPath          string
-	RepoName                string
-	BaseBranch              string
-	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch          string
-	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution      *models.RemoteContribution
-	WorktreeID              string
-	WorktreeBranch          string
-	WorktreeBranchPrefix    string
-	WorktreeBranchTemplate  string
-	WorktreeBranchTicket    string
-	PullBeforeWorktree      bool
-	RemoteSyncHandled       bool
+	TaskRepositoryID   string
+	RepositoryID       string
+	RepositoryPath     string
+	RepoName           string
+	BaseBranch         string
+	DefaultBranch      string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch     string
+	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution *models.RemoteContribution
+	WorktreeID         string
+	// WorkspaceReuseRequired makes preparation attach to the exact canonical
+	// environment. It forbids worktree creation/recreation and all repository
+	// mutating setup paths.
+	WorkspaceReuseRequired bool
+	WorktreeBranch         string
+	WorktreeBranchPrefix   string
+	WorktreeBranchTemplate string
+	WorktreeBranchTicket   string
+	PullBeforeWorktree     bool
+	RemoteSyncHandled      bool
+	// RefreshRepository is an optional provider-authenticated refresh deferred
+	// until worktree materialization. A valid reusable worktree bypasses it.
+	RefreshRepository       func(context.Context) error
 	RepoSetupScript         string
 	ContributionDestination *models.ContributionDestination
 	// BranchSlug, when set, suffixes the worktree path as
@@ -59,6 +107,7 @@ type EnvPrepareRequest struct {
 	TaskID                  string
 	WorkspaceID             string
 	SessionID               string
+	TaskEnvironmentID       string
 	TaskTitle               string
 	ExecutionID             string
 	ExecutorType            executor.Name
@@ -77,12 +126,19 @@ type EnvPrepareRequest struct {
 	ContributionDestination *models.ContributionDestination
 	WorktreeID              string
 	WorktreeBranch          string
+	// WorkspaceReuseRequired applies attach-only semantics to every repository
+	// in this request. RepoPrepareSpec carries the same value so multi-repo
+	// callers can retain it while requests are split.
+	WorkspaceReuseRequired bool
 
 	WorktreeBranchPrefix   string
 	WorktreeBranchTemplate string
 	WorktreeBranchTicket   string
 	PullBeforeWorktree     bool
 	RemoteSyncHandled      bool
+	// RefreshRepository is an optional provider-authenticated refresh deferred
+	// until worktree materialization. A valid reusable worktree bypasses it.
+	RefreshRepository func(context.Context) error
 
 	TaskDirName string // Per-task directory name within the workspace (e.g. "task-abc123")
 	RepoName    string // Repository slug used with TaskDirName to locate checkouts
@@ -123,12 +179,14 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		PRNumber:                r.PRNumber,
 		RemoteContribution:      r.RemoteContribution,
 		WorktreeID:              r.WorktreeID,
+		WorkspaceReuseRequired:  r.WorkspaceReuseRequired,
 		WorktreeBranch:          r.WorktreeBranch,
 		WorktreeBranchPrefix:    r.WorktreeBranchPrefix,
 		WorktreeBranchTemplate:  r.WorktreeBranchTemplate,
 		WorktreeBranchTicket:    r.WorktreeBranchTicket,
 		PullBeforeWorktree:      r.PullBeforeWorktree,
 		RemoteSyncHandled:       r.RemoteSyncHandled,
+		RefreshRepository:       r.RefreshRepository,
 		RepoSetupScript:         r.RepoSetupScript,
 		BranchSlug:              r.BranchSlug,
 		BranchIdentitySlug:      r.BranchIdentitySlug,

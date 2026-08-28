@@ -43,6 +43,42 @@ func TestClonerExposesExactScopeWorkspaceClone(t *testing.T) {
 	}
 }
 
+func TestClonerBuildCloneURLUsesCurrentProtocol(t *testing.T) {
+	resolver := &mutableGitProtocolResolver{protocol: ProtocolHTTPS}
+	cloner := NewClonerWithProtocolResolver(
+		Config{BasePath: t.TempDir()}, resolver, "", logger.Default(),
+	)
+
+	got, err := cloner.BuildCloneURLWithHost(
+		context.Background(), "github", "https://github.com", "acme", "widgets",
+	)
+	if err != nil {
+		t.Fatalf("BuildCloneURLWithHost() initial error = %v", err)
+	}
+	if got != "https://github.com/acme/widgets.git" {
+		t.Fatalf("initial clone URL = %q, want HTTPS", got)
+	}
+
+	resolver.protocol = ProtocolSSH
+	got, err = cloner.BuildCloneURLWithHost(
+		context.Background(), "github", "https://github.com", "acme", "widgets",
+	)
+	if err != nil {
+		t.Fatalf("BuildCloneURLWithHost() updated error = %v", err)
+	}
+	if got != "git@github.com:acme/widgets.git" {
+		t.Fatalf("updated clone URL = %q, want SSH", got)
+	}
+}
+
+type mutableGitProtocolResolver struct {
+	protocol string
+}
+
+func (r *mutableGitProtocolResolver) ResolveGitProtocol(context.Context, string) string {
+	return r.protocol
+}
+
 func TestProviderRepoPathSeparatesProviderHosts(t *testing.T) {
 	t.Parallel()
 

@@ -14,6 +14,8 @@ import { linkToTask } from "@/lib/links";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useTranslation } from "react-i18next";
 
 type StepPhase = "past" | "current" | "future";
 
@@ -31,6 +33,10 @@ export type Graph2StepNodeProps = {
   onPreviewTask: (task: Task) => void;
   prevStepId?: string;
   nextStepId?: string;
+  prevStepTitle?: string;
+  nextStepTitle?: string;
+  prevStepHidden?: boolean;
+  nextStepHidden?: boolean;
   isMoving?: boolean;
 };
 
@@ -62,17 +68,22 @@ function FutureNode({ step }: { step: WorkflowStep }) {
 function MoveButton({
   direction,
   isMoving,
+  label,
+  showTooltip,
   onClick,
 }: {
   direction: "left" | "right";
   isMoving?: boolean;
+  label: string;
+  showTooltip: boolean;
   onClick: (e: React.MouseEvent) => void;
 }) {
   const posClass = direction === "left" ? "-left-3" : "-right-3";
   const Icon = direction === "left" ? IconChevronLeft : IconChevronRight;
-  return (
+  const button = (
     <button
       type="button"
+      aria-label={label}
       disabled={isMoving}
       onClick={onClick}
       className={cn(
@@ -86,6 +97,13 @@ function MoveButton({
       <Icon className="h-3 w-3" />
     </button>
   );
+  if (!showTooltip) return button;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
 }
 
 export function Graph2StepNode({
@@ -97,10 +115,16 @@ export function Graph2StepNode({
   onMoveTask,
   prevStepId,
   nextStepId,
+  prevStepTitle,
+  nextStepTitle,
+  prevStepHidden = false,
+  nextStepHidden = false,
   isMoving,
 }: Graph2StepNodeProps) {
+  const { t } = useTranslation();
   const router = useRouter();
   const [isHovered, setIsHovered] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
   const pendingInput = useTaskPendingInput(task.primarySessionId, {
     taskId: task.id,
     taskPendingAction: task.taskPendingAction,
@@ -118,16 +142,26 @@ export function Graph2StepNode({
     router.push(linkToTask(task.id));
   };
 
+  const showMoveControls = isHovered || isFocused;
+
   return (
     <div
       className="relative shrink-0"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      onFocusCapture={() => setIsFocused(true)}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setIsFocused(false);
+        }
+      }}
     >
-      {isHovered && hasPrev && prevStepId && (
+      {showMoveControls && hasPrev && prevStepId && (
         <MoveButton
           direction="left"
           isMoving={isMoving}
+          label={t("kanban:moveToStep", { step: prevStepTitle ?? prevStepId })}
+          showTooltip={prevStepHidden}
           onClick={(e) => {
             e.stopPropagation();
             onMoveTask(task, prevStepId);
@@ -158,10 +192,12 @@ export function Graph2StepNode({
         </div>
       </button>
 
-      {isHovered && hasNext && nextStepId && (
+      {showMoveControls && hasNext && nextStepId && (
         <MoveButton
           direction="right"
           isMoving={isMoving}
+          label={t("kanban:moveToStep", { step: nextStepTitle ?? nextStepId })}
+          showTooltip={nextStepHidden}
           onClick={(e) => {
             e.stopPropagation();
             onMoveTask(task, nextStepId);

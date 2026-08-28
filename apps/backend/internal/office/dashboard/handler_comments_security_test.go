@@ -15,9 +15,11 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/agents"
 	"github.com/kandev/kandev/internal/office/dashboard"
-	"github.com/kandev/kandev/internal/office/models"
+	officemodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
+	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 )
 
@@ -28,6 +30,41 @@ type commentSecurityFixture struct {
 	router    *gin.Engine
 	agentsSvc *agents.AgentService
 	repo      *sqlite.Repository
+	handoff   *taskservice.HandoffService
+}
+
+// commentWindowReaderAdapter bridges the office repo's Office-model comment
+// window read to the task service's neutral CommentReader contract — the
+// same conversion internal/backendapp's officeCommentReaderAdapter performs
+// in production, duplicated here because that adapter is unexported outside
+// its package.
+type commentWindowReaderAdapter struct {
+	repo *sqlite.Repository
+}
+
+func (a *commentWindowReaderAdapter) ListTaskCommentsWindow(
+	ctx context.Context, taskID string, limit int,
+) ([]taskservice.CommentRecord, int, error) {
+	rows, total, err := a.repo.ListTaskCommentsWindow(ctx, taskID, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	records := make([]taskservice.CommentRecord, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		records = append(records, taskservice.CommentRecord{
+			ID:         row.ID,
+			TaskID:     row.TaskID,
+			AuthorType: row.AuthorType,
+			AuthorID:   row.AuthorID,
+			Source:     row.Source,
+			Body:       row.Body,
+			CreatedAt:  row.CreatedAt,
+		})
+	}
+	return records, total, nil
 }
 
 func newCommentSecurityFixture(t *testing.T) *commentSecurityFixture {
@@ -58,6 +95,7 @@ func newCommentSecurityFixture(t *testing.T) *commentSecurityFixture {
 			description TEXT DEFAULT '',
 			state TEXT DEFAULT 'todo',
 			priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('critical','high','medium','low')),
+			position INTEGER DEFAULT 0,
 			parent_id TEXT DEFAULT '',
 			project_id TEXT DEFAULT '',
 			assignee_agent_profile_id TEXT DEFAULT '',
@@ -80,7 +118,16 @@ func newCommentSecurityFixture(t *testing.T) *commentSecurityFixture {
 	}
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS workspaces (
 		id TEXT PRIMARY KEY,
-		office_workflow_id TEXT DEFAULT ''
+		name TEXT NOT NULL DEFAULT '',
+		description TEXT DEFAULT '',
+		owner_id TEXT DEFAULT '',
+		default_executor_id TEXT DEFAULT '',
+		default_environment_id TEXT DEFAULT '',
+		default_agent_profile_id TEXT DEFAULT '',
+		default_config_agent_profile_id TEXT DEFAULT '',
+		office_workflow_id TEXT DEFAULT '',
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`)
 	if err != nil {
 		t.Fatalf("create workspaces table: %v", err)
@@ -103,22 +150,53 @@ func newCommentSecurityFixture(t *testing.T) *commentSecurityFixture {
 	agentsSvc.SetAuth(agents.NewAgentAuth("test-key"))
 	svc := dashboard.NewDashboardService(repo, log, activity, agentsSvc, &stubCostChecker{})
 
+	taskRepo, err := tasksqlite.NewWithDB(db, db, log)
+	if err != nil {
+		t.Fatalf("new task repo: %v", err)
+	}
+	// The task repo's migrations leave PRAGMA foreign_keys=ON on this shared
+	// connection. Restore the fixture's pre-existing FK-disabled behavior —
+	// tests here seed agents/tasks minimally and don't register the CLI
+	// tool rows agent_profiles.agent_id's FK points at.
+	if _, err := db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+		t.Fatalf("disable foreign_keys: %v", err)
+	}
+	handoffDocSvc := taskservice.NewDocumentService(taskRepo, log)
+	handoff := taskservice.NewHandoffService(taskRepo, taskRepo, handoffDocSvc, repo, repo, log)
+	handoff.SetCommentReader(&commentWindowReaderAdapter{repo: repo})
+
 	r := gin.New()
 	r.Use(agents.AgentAuthMiddleware(agentsSvc))
 	group := r.Group("/api/v1/office")
-	dashboard.RegisterRoutes(group, svc, repo, nil, log)
+	dashboard.RegisterRoutes(group, svc, repo, nil, handoff, log)
 
-	return &commentSecurityFixture{router: r, agentsSvc: agentsSvc, repo: repo}
+	return &commentSecurityFixture{router: r, agentsSvc: agentsSvc, repo: repo, handoff: handoff}
 }
 
-func seedCommentAgent(t *testing.T, svc *agents.AgentService, id, workspaceID string) *models.AgentInstance {
+// seedCommentWorkspace inserts a minimal workspace row. Required because the
+// fixture shares its sqlite connection with a task/repository/sqlite
+// instance, whose migrations leave PRAGMA foreign_keys=ON on that
+// connection — agents and tasks referencing an unseeded workspace_id now
+// fail their FK constraint instead of silently succeeding.
+func seedCommentWorkspace(t *testing.T, repo *sqlite.Repository, id string) {
 	t.Helper()
-	a := &models.AgentInstance{
+	_, err := repo.ExecRaw(context.Background(),
+		`INSERT OR IGNORE INTO workspaces (id, name) VALUES (?, ?)`, id, id,
+	)
+	if err != nil {
+		t.Fatalf("seed workspace %q: %v", id, err)
+	}
+}
+
+func seedCommentAgent(t *testing.T, svc *agents.AgentService, repo *sqlite.Repository, id, workspaceID string) *officemodels.AgentInstance {
+	t.Helper()
+	seedCommentWorkspace(t, repo, workspaceID)
+	a := &officemodels.AgentInstance{
 		ID:          id,
 		WorkspaceID: workspaceID,
 		Name:        id,
-		Role:        models.AgentRoleWorker,
-		Status:      models.AgentStatusIdle,
+		Role:        officemodels.AgentRoleWorker,
+		Status:      officemodels.AgentStatusIdle,
 		Permissions: shared.DefaultPermissions(shared.AgentRoleWorker),
 	}
 	if err := svc.CreateAgentInstance(context.Background(), a); err != nil {
@@ -153,7 +231,7 @@ func postCommentReq(taskID, token, body string) *http.Request {
 
 func TestCreateComment_AgentCallerMustUseRuntimeEndpoint(t *testing.T) {
 	f := newCommentSecurityFixture(t)
-	agent := seedCommentAgent(t, f.agentsSvc, "agent-a", "ws-1")
+	agent := seedCommentAgent(t, f.agentsSvc, f.repo, "agent-a", "ws-1")
 	seedCommentTask(t, f.repo, "task-1", "ws-1", agent.ID)
 	seedCommentTask(t, f.repo, "task-2", "ws-1", "")
 

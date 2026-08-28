@@ -87,6 +87,17 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	if err != nil {
 		return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: err.Error(), Error: err, Duration: time.Since(start)}, nil
 	}
+	if req.WorkspaceReuseRequired {
+		return &EnvPrepareResult{
+			Success:        true,
+			Steps:          steps,
+			WorkspacePath:  wt.Path,
+			Duration:       time.Since(start),
+			WorktreeID:     wt.ID,
+			WorktreeBranch: wt.Branch,
+			MainRepoGitDir: filepath.Join(req.RepositoryPath, ".git"),
+		}, nil
+	}
 
 	if len(wt.CopiedFiles) > 0 || len(wt.CopyFilesWarnings) > 0 {
 		totalSteps++
@@ -277,6 +288,7 @@ func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 		TaskID:                  req.TaskID,
 		WorkspaceID:             req.WorkspaceID,
 		SessionID:               req.SessionID,
+		TaskEnvironmentID:       req.TaskEnvironmentID,
 		TaskTitle:               req.TaskTitle,
 		RepositoryID:            req.RepositoryID,
 		RepositoryPath:          req.RepositoryPath,
@@ -290,7 +302,9 @@ func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 		WorktreeBranchTicket:    req.WorktreeBranchTicket,
 		PullBeforeWorktree:      req.PullBeforeWorktree,
 		RemoteSyncHandled:       req.RemoteSyncHandled,
+		RefreshRepository:       req.RefreshRepository,
 		WorktreeID:              req.WorktreeID,
+		ReuseRequired:           req.WorkspaceReuseRequired,
 		TaskDirName:             req.TaskDirName,
 		RepoName:                req.RepoName,
 		BranchSlug:              req.BranchSlug,
@@ -404,6 +418,12 @@ func (p *WorktreePreparer) prepareMultiRepo(
 		steps = newSteps
 		stepIdx = nextIdx
 		if err != nil {
+			err = &RepositoryPreparationError{
+				RepositoryID:     spec.RepositoryID,
+				TaskRepositoryID: spec.TaskRepositoryID,
+				RepositoryName:   spec.RepoName,
+				Cause:            err,
+			}
 			p.rollbackWorktrees(ctx, createdIDs)
 			return &EnvPrepareResult{
 				Success:      false,
@@ -509,11 +529,13 @@ func (p *WorktreePreparer) prepareOneRepo(
 	subReq.RemoteContribution = spec.RemoteContribution
 	subReq.ContributionDestination = spec.ContributionDestination
 	subReq.WorktreeID = spec.WorktreeID
+	subReq.WorkspaceReuseRequired = req.WorkspaceReuseRequired || spec.WorkspaceReuseRequired
 	subReq.WorktreeBranchPrefix = spec.WorktreeBranchPrefix
 	subReq.WorktreeBranchTemplate = spec.WorktreeBranchTemplate
 	subReq.WorktreeBranchTicket = spec.WorktreeBranchTicket
 	subReq.PullBeforeWorktree = spec.PullBeforeWorktree
 	subReq.RemoteSyncHandled = spec.RemoteSyncHandled
+	subReq.RefreshRepository = spec.RefreshRepository
 	subReq.BranchSlug = spec.BranchSlug
 	subReq.BranchIdentitySlug = repoBranchIdentitySlug(spec)
 	// Strip the multi-repo list to avoid re-entering the multi-repo branch.
@@ -522,6 +544,9 @@ func (p *WorktreePreparer) prepareOneRepo(
 	wt, steps, stepIdx, err := p.createWorktreeWithSync(ctx, &subReq, stepIdx, totalSteps, onProgress, steps)
 	if err != nil {
 		return nil, steps, stepIdx, err
+	}
+	if subReq.WorkspaceReuseRequired {
+		return wt, steps, stepIdx, nil
 	}
 
 	// PR fetch step (mirrors single-repo path).
@@ -590,5 +615,7 @@ func applySyncProgressEvent(step *PrepareStep, event worktree.SyncProgressEvent)
 		now := time.Now()
 		step.Status = PrepareStepCompleted
 		step.EndedAt = &now
+	case worktree.SyncProgressFailed:
+		completeStepError(step, event.Error)
 	}
 }

@@ -5,7 +5,7 @@ status: completed
 wave: 5
 depends_on: ["05-desktop-mobile-drift-e2e"]
 plan: "plan.md"
-spec: "../../specs/tasks/remote-contribution-tasks.md"
+spec: "../../specs/tasks/system-design/remote-contribution-tasks.md"
 ---
 
 # Task 06: Branch-Scoped Drift UX Correction

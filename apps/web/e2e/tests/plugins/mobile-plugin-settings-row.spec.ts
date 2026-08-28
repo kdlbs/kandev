@@ -39,6 +39,21 @@ test("mobile plugin row: whole card opens settings, controls still act", async (
   expect(linkBox.width).toBeGreaterThanOrEqual(rowBox.width - 2);
   expect(linkBox.height).toBeGreaterThanOrEqual(rowBox.height - 2);
 
+  // Uninstall keeps its confirmation inside the row on a coarse pointer.
+  // Cancel first so the same fixture can cover the existing disable action
+  // and the detail-surface confirmation below.
+  const rowUninstall = pluginRow.getByRole("button", { name: "Uninstall" });
+  expect((await rowUninstall.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  await rowUninstall.tap();
+  const rowConfirmation = pluginRow.getByTestId("plugin-uninstall-inline-confirmation");
+  await expect(rowConfirmation).toBeVisible();
+  await expect(testPage.locator('[data-slot="dialog-overlay"]')).toHaveCount(0);
+  expect(
+    (await rowConfirmation.getByTestId("plugin-uninstall-confirm").boundingBox())?.height,
+  ).toBeGreaterThanOrEqual(44);
+  await rowConfirmation.getByRole("button", { name: "Cancel" }).tap();
+  await expect(rowConfirmation).toHaveCount(0);
+
   // Every control sits above the overlay. If one slipped below it the tap would
   // navigate instead of acting, and on a phone there is no hover state to
   // reveal which is which.
@@ -52,5 +67,21 @@ test("mobile plugin row: whole card opens settings, controls still act", async (
   // change; keep clear of the row's own controls.
   await pluginRow.tap({ position: { x: 12, y: 12 } });
   await expect(testPage).toHaveURL(new RegExp(`/settings/plugins/${PLUGIN_ID}$`));
-  await expect(testPage.getByTestId(`plugin-detail-${PLUGIN_ID}`)).toBeVisible();
+  const detail = testPage.getByTestId(`plugin-detail-${PLUGIN_ID}`);
+  await expect(detail).toBeVisible();
+
+  // The detail danger zone uses the same phone-native inline confirmation and
+  // keeps both actions at the 44px touch target minimum.
+  const detailUninstall = detail.getByRole("button", { name: "Uninstall" });
+  expect((await detailUninstall.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  await detailUninstall.tap();
+  const detailConfirmation = testPage.getByTestId("plugin-uninstall-inline-confirmation");
+  await expect(detailConfirmation).toBeVisible();
+  await expect(testPage.locator('[data-slot="dialog-overlay"]')).toHaveCount(0);
+  expect(
+    (await detailConfirmation.getByTestId("plugin-uninstall-confirm").boundingBox())?.height,
+  ).toBeGreaterThanOrEqual(44);
+  await detailConfirmation.getByTestId("plugin-uninstall-confirm").tap();
+  await expect(testPage).toHaveURL(/\/settings\/plugins$/);
+  await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toHaveCount(0);
 });

@@ -9,7 +9,7 @@ depends_on:
   - "04-toast-reporting"
   - "08-browser-logs-and-bundle-ui"
 plan: "plan.md"
-spec: "../../specs/platform/diagnostic-logging.md"
+spec: "../../specs/platform/requirements/diagnostic-logging.md"
 ---
 
 # Task 11: Merge-risk hardening

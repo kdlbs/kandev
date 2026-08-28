@@ -7,7 +7,9 @@ import {
   getAgentUpdateJob,
   getInstallJob,
   previewAgentUpdate,
+  previewAgentUpdateUseDefault,
   updateAgent,
+  updateAgentUseDefault,
   type AgentUpdateJob,
 } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
@@ -52,9 +54,11 @@ export function useAgentRuntimeUpdates() {
   );
 
   const startUpdate = useCallback(
-    async (agentName: string, targetVersion: string) => {
+    async (agentName: string, targetVersion: string, useDefault = false) => {
       try {
-        const job = await updateAgent(agentName, targetVersion);
+        const job = useDefault
+          ? await updateAgentUseDefault(agentName)
+          : await updateAgent(agentName, targetVersion);
         store.getState().upsertAgentUpdateJob(job);
         return job;
       } catch (error) {
@@ -69,8 +73,10 @@ export function useAgentRuntimeUpdates() {
   );
 
   const previewUpdate = useCallback(
-    (agentName: string, targetVersion?: string) =>
-      previewAgentUpdate(agentName, targetVersion, { cache: "no-store" }),
+    (agentName: string, targetVersion?: string, useDefault = false) =>
+      useDefault
+        ? previewAgentUpdateUseDefault(agentName, { cache: "no-store" })
+        : previewAgentUpdate(agentName, targetVersion, { cache: "no-store" }),
     [],
   );
 

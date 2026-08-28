@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agent-stall-recovery/spec.md
+spec: docs/specs/agents/requirements/agent-stall-recovery.md
 decision: docs/decisions/2026-08-07-allowlisted-provider-action-links.md
 created: 2026-08-07
 status: implemented

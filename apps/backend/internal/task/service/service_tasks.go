@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -61,13 +62,13 @@ var ErrInvalidTaskWorkflow = errors.New("invalid task workflow")
 // aborting the whole operation.
 var ErrTaskAlreadyArchived = errors.New("task is already archived")
 
-// ErrAutoTitlePromptRequired is returned when prompt-first creation has no
-// prompt from which to derive a provisional title.
-var ErrAutoTitlePromptRequired = errors.New("description is required when auto_title is enabled")
+// ErrAutoTitlePromptRequired is returned when auto-title creation has neither
+// a prompt nor a usable provisional title.
+var ErrAutoTitlePromptRequired = errors.New("description or title is required when auto_title is enabled")
 
-// ErrAutoTitleUnsupportedForOffice is returned when prompt-first title
-// generation is requested for an Office task. Office agents use a restricted
-// MCP surface that does not expose the one-shot title tool.
+// ErrAutoTitleUnsupportedForOffice is returned when auto-title generation is
+// requested for an Office task. Office agents use a restricted MCP surface
+// that does not expose the one-shot title tool.
 var ErrAutoTitleUnsupportedForOffice = errors.New("auto_title is not supported for Office tasks")
 
 type pendingTaskTitleSetter interface {
@@ -120,7 +121,7 @@ func isOfficeRequest(req *CreateTaskRequest) bool {
 
 // CreateTaskOutcome distinguishes why Service.CreateTask returned the task it
 // did, per the create-idempotency contract
-// (docs/specs/tasks/external-id-idempotency/spec.md). Only meaningful when
+// (docs/specs/tasks/requirements/external-id-idempotency.md). Only meaningful when
 // the request carried an external_id; a request without one always reports
 // CreateTaskOutcomeCreated. The fourth contract outcome, CreatedIdentityLost,
 // is not produced here — it is decided by the handler during settlement,
@@ -162,7 +163,7 @@ func foundOutcomeFor(task *models.Task) CreateTaskOutcome {
 // CreateTask creates a new task and publishes a task.created event, or —
 // when the request carries an external_id already held by a task — returns
 // that task instead, per the create-idempotency contract
-// (docs/specs/tasks/external-id-idempotency/spec.md). WorkflowID is required
+// (docs/specs/tasks/requirements/external-id-idempotency.md). WorkflowID is required
 // for non-ephemeral kanban tasks. Office tasks (project_id set, or origin is
 // agent_created/routine) auto-resolve to the workspace's office workflow.
 // Ephemeral tasks (quick chat, config chat) must NOT have a workflow.
@@ -249,6 +250,12 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	// parent's worktree (the UI omits repositories expecting this). Mirrors the
 	// MCP create_task path so UI- and agent-created subtasks behave identically.
 	if err := s.inheritParentRepositories(ctx, req); err != nil {
+		return nil, err
+	}
+	if err := s.preflightRepositorySelections(ctx, req); err != nil {
+		return nil, err
+	}
+	if err := s.validateTaskRepositoryPolicies(ctx, req.WorkspaceID, req.Repositories); err != nil {
 		return nil, err
 	}
 
@@ -422,6 +429,19 @@ func prepareAutoTitle(req *CreateTaskRequest) error {
 	}
 	if isOfficeRequest(req) {
 		return ErrAutoTitleUnsupportedForOffice
+	}
+	if isConfigTaskMetadata(req.Metadata) {
+		return nil
+	}
+	if req.IsEphemeral && strings.TrimSpace(req.Description) == "" {
+		if strings.TrimSpace(req.Title) == "" {
+			return ErrAutoTitlePromptRequired
+		}
+		if req.Metadata == nil {
+			req.Metadata = make(map[string]interface{})
+		}
+		req.Metadata[models.MetaKeyAgentTitlePending] = true
+		return nil
 	}
 	title, err := deriveProvisionalTaskTitle(req.Description)
 	if err != nil {
@@ -662,14 +682,32 @@ func (s *Service) resolveOfficeWorkflow(ctx context.Context, req *CreateTaskRequ
 }
 
 // resolveWorkflowStep resolves the starting workflow step for a new task.
+//
+// Three destinations, picked by what the caller is asking for:
+//
+//   - plan mode → the first step by position. Planning happens before the work,
+//     so the task belongs at the head of the board even when a later step is
+//     marked as the start step.
+//   - starting an agent now → the first step that runs agents
+//     (on_enter: auto_start_agent). A task that is about to run does not belong
+//     in a parking column that was never configured to run anything.
+//   - everything else → the workflow's start step (is_start_step).
+//
+// The middle case is the one that is easy to get wrong: `is_start_step` and
+// `auto_start_agent` are separate settings, and routing an agent start through
+// the start step silently made the two synonymous. It went unnoticed because
+// every built-in template puts both on the same step.
 func (s *Service) resolveWorkflowStep(ctx context.Context, req *CreateTaskRequest) string {
 	workflowStepID := req.WorkflowStepID
 	if workflowStepID == "" && req.WorkflowID != "" && s.startStepResolver != nil {
 		var resolvedID string
 		var err error
-		if req.PlanMode {
+		switch {
+		case req.PlanMode:
 			resolvedID, err = s.startStepResolver.ResolveFirstStep(ctx, req.WorkflowID)
-		} else {
+		case req.StartAgent:
+			resolvedID, err = s.startStepResolver.ResolveAutoStartStep(ctx, req.WorkflowID)
+		default:
 			resolvedID, err = s.startStepResolver.ResolveStartStep(ctx, req.WorkflowID)
 		}
 		if err != nil {
@@ -812,6 +850,19 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 		if repositoryID == "" {
 			return fmt.Errorf("repository_id is required")
 		}
+		policy, err := s.resolveTaskRepositoryPolicy(ctx, repositoryID, repoInput)
+		if err != nil {
+			return err
+		}
+		if policy != nil {
+			if repoInput.RemoteContribution != nil {
+				if policy.BaseBranch != repoInput.RemoteContribution.BaseBranch {
+					return fmt.Errorf("remote contribution base branch %q does not match branch policy base branch %q", repoInput.RemoteContribution.BaseBranch, policy.BaseBranch)
+				}
+			} else if !repoInput.PreserveBaseBranch {
+				baseBranch = policy.BaseBranch
+			}
+		}
 		// Multi-branch validation: the same repository may appear multiple
 		// times in a task on different branches. Identity is
 		// (repository_id, base_branch, checkout_branch) — base_branch matters
@@ -854,6 +905,13 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 			CheckoutBranch: repoInput.CheckoutBranch,
 			Position:       i,
 			Metadata:       metadata,
+		}
+		if policy != nil {
+			taskRepo.BranchPolicyID = policy.ID
+			taskRepo.BranchPolicyName = policy.Name
+			taskRepo.BranchPolicyBaseBranch = policy.BaseBranch
+			taskRepo.BranchPolicyBranchTemplate = policy.BranchTemplate
+			taskRepo.BranchPolicyPullRequestTarget = policy.PullRequestTarget
 		}
 		if err := s.taskRepos.CreateTaskRepository(ctx, taskRepo); err != nil {
 			s.logger.Error("failed to create task repository", zap.Error(err))
@@ -925,6 +983,9 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		return s.resolveRepoInputID(ctx, workspaceID, repositoryID, baseBranch)
 	}
 
+	// Only the plugin Host Tasks.Create path can set this internal marker.
+	// REST, WebSocket, and MCP callers must go through the built-in resolver;
+	// they cannot assert ownership of a plugin descriptor in request data.
 	if repoInput.TrustedProviderDescriptor {
 		return s.resolveTrustedRemoteRepository(ctx, workspaceID, repoInput, baseBranch)
 	}
@@ -1268,6 +1329,9 @@ func validateTrustedRemoteRepository(input TaskRepositoryInput) error {
 	if _, err := validateProviderScope(input.ProviderScope); err != nil {
 		return errors.New("trusted remote repository provider_scope is invalid")
 	}
+	if err := repoclone.ValidateHTTPSCloneOrigin(input.RemoteURL, input.ProviderHost); err != nil {
+		return fmt.Errorf("trusted remote repository clone origin: %w", err)
+	}
 	parsed, _, err := normalizeRemoteRepositoryURL(input.RemoteURL)
 	if err != nil {
 		return err
@@ -1497,6 +1561,15 @@ func (s *Service) ReplaceTaskRepositories(ctx context.Context, taskID, workspace
 
 // replaceTaskRepositories deletes all existing task-repository associations and recreates them.
 func (s *Service) replaceTaskRepositories(ctx context.Context, taskID, workspaceID string, repositories []TaskRepositoryInput) error {
+	existing, err := s.taskRepos.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		s.logger.Error("failed to load existing task repositories", zap.Error(err))
+		return err
+	}
+	preserveTaskRepositoryPolicySnapshots(repositories, existing)
+	if err := s.validateTaskRepositoryPolicies(ctx, workspaceID, repositories); err != nil {
+		return err
+	}
 	if err := s.taskRepos.DeleteTaskRepositoriesByTask(ctx, taskID); err != nil {
 		s.logger.Error("failed to delete task repositories", zap.Error(err))
 		return err
@@ -1547,6 +1620,11 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if req.Repositories != nil {
+		if err := s.preflightRepositoryInputs(ctx, task.WorkspaceID, req.Repositories); err != nil {
+			return nil, err
+		}
 	}
 	oldWorkflowStepID := task.WorkflowStepID
 	var oldState *v1.TaskState
@@ -1666,7 +1744,7 @@ func (s *Service) reloadTaskAfterMutation(ctx context.Context, id string, fallba
 	return fallback
 }
 
-// SetPendingAgentTitle replaces a prompt-first provisional title exactly once.
+// SetPendingAgentTitle replaces a pending provisional title exactly once.
 // Only the atomically claimed owner session may resolve it. A missing pending
 // marker is an idempotent no-op so a human rename or an earlier agent call
 // always wins a late request.
@@ -3305,7 +3383,11 @@ func parsePRQuery(query string) (int, bool) {
 // `json_extract(metadata, '$.config_mode') IS NOT 1` filter). JSON-decoded
 // numbers arrive as float64, so accept both numeric 1 and bool true.
 func isConfigTask(task *models.Task) bool {
-	switch v := task.Metadata["config_mode"].(type) {
+	return isConfigTaskMetadata(task.Metadata)
+}
+
+func isConfigTaskMetadata(metadata map[string]interface{}) bool {
+	switch v := metadata["config_mode"].(type) {
 	case float64:
 		return v == 1
 	case int:

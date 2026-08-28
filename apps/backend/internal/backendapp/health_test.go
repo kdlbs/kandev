@@ -14,7 +14,7 @@ import (
 )
 
 // setReadyForTest flips the package-level readiness flag consulted by
-// healthHandler and restores its prior value on cleanup, so tests don't leak
+// readyHandler and restores its prior value on cleanup, so tests don't leak
 // state into each other or into TestMain-driven suites.
 func setReadyForTest(t *testing.T, value bool) {
 	t.Helper()
@@ -23,94 +23,121 @@ func setReadyForTest(t *testing.T, value bool) {
 	t.Cleanup(func() { ready.Store(prev) })
 }
 
-// TestHealthHandlerReadyBodyIncludesVersion covers AC-1..4: once ready, the
-// handler returns 200 with a version key equal to the configured build
-// version, alongside the unchanged status/service/mode fields, and no other
-// keys.
-func TestHealthHandlerReadyBodyIncludesVersion(t *testing.T) {
+// TestHealthHandlerBodyIncludesVersionRegardlessOfReadiness covers AC-19/20
+// of the 2026-08-22 liveness/readiness-split amendment
+// (docs/specs/health-endpoint-version/spec.md): /health is a pure liveness
+// probe, so its 200 body (status/service/mode/version, no other keys) is
+// identical whether or not the `ready` flag has flipped. The old ready/
+// starting two-shape split (superseded AC-1..7) now lives on readyHandler,
+// covered by TestReadyHandlerBodyShapesByReadiness below.
+func TestHealthHandlerBodyIncludesVersionRegardlessOfReadiness(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	setReadyForTest(t, true)
 
-	router := gin.New()
-	router.GET("/health", healthHandler(routeParams{version: "1.2.3"}))
+	for _, readyState := range []bool{true, false} {
+		setReadyForTest(t, readyState)
 
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health", nil))
+		router := gin.New()
+		router.GET("/health", healthHandler(routeParams{version: "1.2.3"}))
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
-	}
-	var body map[string]interface{}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	if body[versionFieldKey] != "1.2.3" {
-		t.Fatalf("version = %v, want 1.2.3", body[versionFieldKey])
-	}
-	if body["status"] != "ok" || body["service"] != kandevName || body["mode"] != "websocket+http" {
-		t.Fatalf("unexpected ready body: %#v", body)
-	}
-	if len(body) != 4 {
-		t.Fatalf("ready body keys = %#v, want exactly status/service/mode/version", body)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health", nil))
+
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("ready=%v: status = %d, want %d", readyState, recorder.Code, http.StatusOK)
+		}
+		var body map[string]interface{}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+			t.Fatalf("ready=%v: decode body: %v", readyState, err)
+		}
+		if body[versionFieldKey] != "1.2.3" {
+			t.Fatalf("ready=%v: version = %v, want 1.2.3", readyState, body[versionFieldKey])
+		}
+		if body["status"] != "ok" || body["service"] != kandevName || body["mode"] != "websocket+http" {
+			t.Fatalf("ready=%v: unexpected body: %#v", readyState, body)
+		}
+		if len(body) != 4 {
+			t.Fatalf("ready=%v: body keys = %#v, want exactly status/service/mode/version", readyState, body)
+		}
 	}
 }
 
-// TestHealthHandlerStartingBodyIncludesVersion covers AC-5..7: before ready,
-// the handler still returns the version alongside status/service, with no
-// other keys (mode is ready-path only).
-func TestHealthHandlerStartingBodyIncludesVersion(t *testing.T) {
+// TestReadyHandlerBodyShapesByReadiness covers AC-16..19: readyHandler now
+// owns the two-shape ready/starting split that healthHandler used to have —
+// 503 with status="starting" (no mode key) before ready, 200 with
+// status="ok" (no mode key) once ready — always carrying version either way.
+func TestReadyHandlerBodyShapesByReadiness(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	setReadyForTest(t, false)
 
 	router := gin.New()
-	router.GET("/health", healthHandler(routeParams{version: "1.2.3"}))
+	router.GET("/ready", readyHandler(routeParams{version: "1.2.3"}))
 
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health", nil))
+	startingRec := httptest.NewRecorder()
+	router.ServeHTTP(startingRec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if startingRec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("starting status = %d, want %d", startingRec.Code, http.StatusServiceUnavailable)
+	}
+	var startingBody map[string]interface{}
+	if err := json.Unmarshal(startingRec.Body.Bytes(), &startingBody); err != nil {
+		t.Fatalf("decode starting body: %v", err)
+	}
+	if startingBody[versionFieldKey] != "1.2.3" {
+		t.Fatalf("starting version = %v, want 1.2.3", startingBody[versionFieldKey])
+	}
+	if startingBody["status"] != startingStatus || startingBody["service"] != kandevName {
+		t.Fatalf("unexpected starting body: %#v", startingBody)
+	}
+	if len(startingBody) != 3 {
+		t.Fatalf("starting body keys = %#v, want exactly status/service/version", startingBody)
+	}
 
-	if recorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusServiceUnavailable)
+	setReadyForTest(t, true)
+	readyRec := httptest.NewRecorder()
+	router.ServeHTTP(readyRec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if readyRec.Code != http.StatusOK {
+		t.Fatalf("ready status = %d, want %d", readyRec.Code, http.StatusOK)
 	}
-	var body map[string]interface{}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode body: %v", err)
+	var readyBody map[string]interface{}
+	if err := json.Unmarshal(readyRec.Body.Bytes(), &readyBody); err != nil {
+		t.Fatalf("decode ready body: %v", err)
 	}
-	if body[versionFieldKey] != "1.2.3" {
-		t.Fatalf("version = %v, want 1.2.3", body[versionFieldKey])
+	if readyBody[versionFieldKey] != "1.2.3" {
+		t.Fatalf("ready version = %v, want 1.2.3", readyBody[versionFieldKey])
 	}
-	if body["status"] != startingStatus || body["service"] != kandevName {
-		t.Fatalf("unexpected starting body: %#v", body)
+	if readyBody["status"] != "ok" || readyBody["service"] != kandevName {
+		t.Fatalf("unexpected ready body: %#v", readyBody)
 	}
-	if len(body) != 3 {
-		t.Fatalf("starting body keys = %#v, want exactly status/service/version", body)
+	if len(readyBody) != 3 {
+		t.Fatalf("ready body keys = %#v, want exactly status/service/version", readyBody)
 	}
 }
 
-// TestHealthHandlerDesktopTokenHeaderOnlyOnReadyPath guards a pre-existing
-// behavior the spec restates as a must-not-regress ("## What": the desktop
-// health-token header SHALL continue to be set on the 200 path only,
-// unchanged) but that had no direct test before this change extracted the
-// handler body into healthHandler. Confirms the refactor didn't move the
-// header write outside its original branch.
-func TestHealthHandlerDesktopTokenHeaderOnlyOnReadyPath(t *testing.T) {
+// TestHealthHandlerDesktopTokenHeaderAlwaysSetReadyEndpointNever covers AC-21:
+// the desktop health-token header is a /health-only concern, unaffected by
+// the liveness/readiness split — /health sets it on every request regardless
+// of readiness, and /ready never sets it at all.
+func TestHealthHandlerDesktopTokenHeaderAlwaysSetReadyEndpointNever(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv(desktopHealthTokenEnv, "  desktop-token  ")
 
 	router := gin.New()
 	router.GET("/health", healthHandler(routeParams{version: "1.2.3"}))
+	router.GET("/ready", readyHandler(routeParams{version: "1.2.3"}))
 
-	setReadyForTest(t, false)
-	startingRec := httptest.NewRecorder()
-	router.ServeHTTP(startingRec, httptest.NewRequest(http.MethodGet, "/health", nil))
-	if got := startingRec.Header().Get(desktopHealthTokenHeader); got != "" {
-		t.Fatalf("starting-path %s header = %q, want absent", desktopHealthTokenHeader, got)
-	}
+	for _, readyState := range []bool{false, true} {
+		setReadyForTest(t, readyState)
 
-	setReadyForTest(t, true)
-	readyRec := httptest.NewRecorder()
-	router.ServeHTTP(readyRec, httptest.NewRequest(http.MethodGet, "/health", nil))
-	if got := readyRec.Header().Get(desktopHealthTokenHeader); got != "desktop-token" {
-		t.Fatalf("ready-path %s header = %q, want desktop-token", desktopHealthTokenHeader, got)
+		healthRec := httptest.NewRecorder()
+		router.ServeHTTP(healthRec, httptest.NewRequest(http.MethodGet, "/health", nil))
+		if got := healthRec.Header().Get(desktopHealthTokenHeader); got != "desktop-token" {
+			t.Fatalf("ready=%v: /health %s header = %q, want desktop-token", readyState, desktopHealthTokenHeader, got)
+		}
+
+		readyRec := httptest.NewRecorder()
+		router.ServeHTTP(readyRec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+		if got := readyRec.Header().Get(desktopHealthTokenHeader); got != "" {
+			t.Fatalf("ready=%v: /ready %s header = %q, want absent", readyState, desktopHealthTokenHeader, got)
+		}
 	}
 }
 
@@ -253,6 +280,42 @@ func TestHealthHandlerAuthEnabledServesVersionWithoutCredential(t *testing.T) {
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d (no auth challenge on /health)", recorder.Code, http.StatusOK)
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body[versionFieldKey] != "1.2.3" {
+		t.Fatalf("version = %v, want 1.2.3", body[versionFieldKey])
+	}
+	if body["status"] != "ok" {
+		t.Fatalf("status field = %v, want ok", body["status"])
+	}
+}
+
+// TestReadyHandlerAuthEnabledServesWithoutCredential covers AC-22: /ready
+// must be on the unauthenticated allowlist (mirrored at the middleware layer
+// by TestEnabledModeAllowlistMatrix/ready), so it never returns 401/403 to
+// an unauthenticated k8s readinessProbe or e2e fixture poll even with the
+// auth feature flag on.
+func TestReadyHandlerAuthEnabledServesWithoutCredential(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setReadyForTest(t, true)
+
+	svc := newSSOTestAuthService(t)
+	if _, _, err := svc.Setup(context.Background(), "admin@example.com", "adminpass123", "Admin", "", ""); err != nil {
+		t.Fatalf("Setup admin: %v", err)
+	}
+
+	router := gin.New()
+	router.Use(authhttpmw.Middleware(svc))
+	router.GET("/ready", readyHandler(routeParams{version: "1.2.3"}))
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/ready", nil))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (no auth challenge on /ready)", recorder.Code, http.StatusOK)
 	}
 	var body map[string]interface{}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {

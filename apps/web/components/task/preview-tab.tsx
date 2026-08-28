@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { PreviewType } from "@/lib/state/dockview-panel-actions";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
+import { useTabContextActions } from "./use-tab-context-actions";
 import { useTranslation } from "react-i18next";
 
 /**
@@ -33,25 +34,6 @@ export function useMiddleClickClose(
     },
     [api, containerApi],
   );
-}
-
-function useTabContextActions(
-  api: IDockviewPanelHeaderProps["api"],
-  containerApi: IDockviewPanelHeaderProps["containerApi"],
-) {
-  const handleClose = useCallback(() => {
-    const panel = containerApi.getPanel(api.id);
-    if (panel) containerApi.removePanel(panel);
-  }, [api, containerApi]);
-
-  const handleCloseOthers = useCallback(() => {
-    const toClose = api.group.panels.filter(
-      (p) => p.id !== api.id && p.id !== "chat" && !p.id.startsWith("session:"),
-    );
-    for (const panel of toClose) containerApi.removePanel(panel);
-  }, [api, containerApi]);
-
-  return { handleClose, handleCloseOthers };
 }
 
 /**

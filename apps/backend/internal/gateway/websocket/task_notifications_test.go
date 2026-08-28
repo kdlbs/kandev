@@ -111,7 +111,7 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 	//
 	// Update this number when adding or removing event subscriptions in
 	// RegisterTaskNotifications — it is intentionally exact.
-	const wantSubscriptions = 67
+	const wantSubscriptions = 70
 	if got := len(b.subscriptions); got != wantSubscriptions {
 		t.Errorf("RegisterTaskNotifications created %d subscriptions, want %d — "+
 			"did an event get subscribed twice?", got, wantSubscriptions)
@@ -266,6 +266,64 @@ func TestTaskEventBroadcaster_DropsUnscopedGitHubCIOptionsWhenAuthIsEnforced(t *
 	select {
 	case leaked := <-hub.broadcast:
 		t.Fatalf("unscoped GitHub CI options update was globally broadcast: %s", leaked.Action)
+	default:
+	}
+}
+
+func TestTaskEventBroadcaster_ScopesTypedGitHubTaskPRUpdateToOwningWorkspace(t *testing.T) {
+	hub := newTestHub(t)
+	hub.setAuthPolicy(AuthPolicy{
+		Enforced: func() bool { return true },
+		WorkspaceOwner: func(_ context.Context, workspaceID string) (string, error) {
+			if workspaceID == "workspace-a" {
+				return "user-a", nil
+			}
+			return "", errors.New("unknown workspace")
+		},
+	})
+	clientA := newTestClient("client-a")
+	clientA.identity = authn.Identity{UserID: "user-a", Role: authn.RoleMember}
+	clientB := newTestClient("client-b")
+	clientB.identity = authn.Identity{UserID: "user-b", Role: authn.RoleMember}
+	registerTestClient(hub, clientA)
+	registerTestClient(hub, clientB)
+
+	payload := &githubsvc.TaskPR{
+		ID:          "association-a",
+		WorkspaceID: "workspace-a",
+		TaskID:      "task-a",
+	}
+	broadcaster := &TaskEventBroadcaster{hub: hub, logger: testLogger()}
+	msg := bus.NewEvent(events.GitHubTaskPRUpdated, "test", payload)
+
+	require.NoError(t, broadcaster.broadcastEvent(context.Background(), msg, ws.ActionGitHubTaskPRUpdated))
+	if !clientReceived(clientA) {
+		t.Fatal("owner of workspace-a did not receive task PR update")
+	}
+	if clientReceived(clientB) {
+		t.Fatal("task PR update crossed the workspace boundary")
+	}
+	select {
+	case leaked := <-hub.broadcast:
+		t.Fatalf("task PR update used the global broadcast path: %s", leaked.Action)
+	default:
+	}
+}
+
+func TestTaskEventBroadcaster_DropsUnscopedGitHubTaskPRUpdateWhenAuthIsEnforced(t *testing.T) {
+	hub := newTestHub(t)
+	hub.setAuthPolicy(AuthPolicy{Enforced: func() bool { return true }})
+	broadcaster := &TaskEventBroadcaster{hub: hub, logger: testLogger()}
+	payload := &githubsvc.TaskPR{TaskID: "task-without-workspace"}
+
+	require.NoError(t, broadcaster.broadcastEvent(
+		context.Background(),
+		bus.NewEvent(events.GitHubTaskPRUpdated, "test", payload),
+		ws.ActionGitHubTaskPRUpdated,
+	))
+	select {
+	case leaked := <-hub.broadcast:
+		t.Fatalf("unscoped task PR update was globally broadcast: %s", leaked.Action)
 	default:
 	}
 }

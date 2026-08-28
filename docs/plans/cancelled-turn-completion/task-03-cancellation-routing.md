@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-step-contract-and-template"]
 plan: "plan.md"
-spec: "../../specs/workflow/cancelled-turn-completion/spec.md"
+spec: "../../specs/tasks/requirements/workflow-cancelled-turn-completion.md"
 ---
 
 # Task 03: Explicit cancellation workflow routing

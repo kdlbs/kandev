@@ -119,8 +119,38 @@ function addQuickChatSession(set: ImmerSet) {
     });
 }
 
+function buildQuickChatOrderActions(set: ImmerSet) {
+  return {
+    setQuickChatTabOrder: (workspaceId: string, order: string[]) =>
+      set((draft) => {
+        draft.quickChat.tabOrderByWorkspace[workspaceId] = [...order];
+      }),
+    clearQuickChatTabOrder: (workspaceId: string, expectedOrder: string[]) =>
+      set((draft) => {
+        const current = draft.quickChat.tabOrderByWorkspace[workspaceId];
+        if (
+          !current ||
+          current.length !== expectedOrder.length ||
+          current.some((reference, index) => reference !== expectedOrder[index])
+        ) {
+          return;
+        }
+        delete draft.quickChat.tabOrderByWorkspace[workspaceId];
+      }),
+    setQuickChatTabOrderSyncState: (
+      workspaceId: string,
+      state: { pending: boolean; error: string | null },
+    ) =>
+      set((draft) => {
+        draft.quickChat.tabOrderSyncPendingByWorkspace[workspaceId] = state.pending;
+        draft.quickChat.tabOrderSyncErrorByWorkspace[workspaceId] = state.error;
+      }),
+  };
+}
+
 export function buildQuickChatActions(set: ImmerSet) {
   return {
+    ...buildQuickChatOrderActions(set),
     addQuickChatSession: addQuickChatSession(set),
     openQuickChat: openQuickChat(set),
     closeQuickChat: () =>

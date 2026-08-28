@@ -37,6 +37,7 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/stepentry"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -95,8 +96,11 @@ type MessageCreator interface {
 	// parentToolCallID is the parent Task tool call ID for subagent nesting (empty for top-level).
 	UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, parentToolCallID, status, result, agentSessionID, title, turnID, msgType string, normalized *streams.NormalizedPayload) error
 	CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error
-	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
-	UpdatePermissionMessage(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) error
+	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
+	UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error
+	ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
+	FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
+	GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error)
 	// CreateAgentMessageStreaming creates a new agent message with a pre-generated ID for streaming updates
 	CreateAgentMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error
 	// AppendAgentMessage appends additional content to an existing streaming message
@@ -110,11 +114,19 @@ type MessageCreator interface {
 	InvalidateModelCache(sessionID string)
 }
 
+// TransientRetryMessageService is the narrow task-service seam used to retire
+// persisted retry status messages. The task service owns authorization and
+// event-bus publication for both operations.
+type TransientRetryMessageService interface {
+	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
+	DeleteMessage(ctx context.Context, id string) error
+}
+
 // SubagentContextRecorder persists a durable relational record of a subagent
 // (Task tool) invocation observed on a tool-call frame. It returns nothing —
 // a repository failure never fails the enclosing message write, turn, or
 // agent stream (AC-27 in
-// docs/specs/subagent-context-persistence/spec.md). Implemented by
+// docs/specs/agents/requirements/subagent-context-persistence.md). Implemented by
 // taskservice.Service via an adapter; optional, so an installation that
 // never wires it behaves exactly as before.
 type SubagentContextRecorder interface {
@@ -263,6 +275,7 @@ type sessionExecutorStore interface {
 	GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
+	SetSessionPrimaryIfNonterminal(ctx context.Context, sessionID string) (bool, error)
 	RenameTaskSession(ctx context.Context, id, name string) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionIfCurrentState(ctx context.Context, session *models.TaskSession, expected models.TaskSessionState) (bool, error)
@@ -336,6 +349,22 @@ type sessionExecutorStore interface {
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	// Step-entry CAS markers (see internal/workflow/stepentry) — claim/complete
+	// an engine-owned on_enter action at most once per step-entry.
+	ClaimStepEntryMarker(ctx context.Context, entryID int64, position int, kind, operationID string, claimedAt time.Time) (bool, error)
+	CompleteStepEntryMarker(ctx context.Context, entryID int64, position int, state stepentry.MarkerState, cause string, completedAt time.Time) error
+	// GetStepEntryMarkerState reads back a marker's terminal (or in-progress)
+	// state after a lost CAS claim, so the caller can tell "already failed"
+	// apart from "already done" or "still in progress elsewhere."
+	GetStepEntryMarkerState(ctx context.Context, entryID int64, position int) (state stepentry.MarkerState, cause string, found bool, err error)
+	// ClearStepDecisionsAndCompleteMarker satisfies AC-B6: clears every
+	// decision for (taskID, stepID) and completes the clear_decisions
+	// marker in one database transaction, so a crash between the two can
+	// never leave the marker showing in_progress after the delete already
+	// committed. Only usable when the DecisionStore backing clear_decisions
+	// shares this repository's writer DB — see the capability check at
+	// dispatchClearDecisionsAtomic's call site.
+	ClearStepDecisionsAndCompleteMarker(ctx context.Context, taskID, stepID string, entryID int64, position int, now time.Time) (int64, error)
 }
 
 // ClaimTaskTitleSession claims the first-turn generated-title handoff for a
@@ -470,12 +499,13 @@ func (o *reservedPromptCallbackOwner) stop() {
 
 // Service is the main orchestrator service
 type Service struct {
-	config       ServiceConfig
-	logger       *logger.Logger
-	eventBus     bus.EventBus
-	taskRepo     scheduler.TaskRepository
-	repo         sessionExecutorStore
-	agentManager executor.AgentManagerClient
+	config        ServiceConfig
+	logger        *logger.Logger
+	eventBus      bus.EventBus
+	taskRepo      scheduler.TaskRepository
+	repo          sessionExecutorStore
+	promptTargets taskPullRequestTargetStore
+	agentManager  executor.AgentManagerClient
 
 	// Components
 	queue     *queue.TaskQueue
@@ -488,6 +518,10 @@ type Service struct {
 
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
+
+	// transientRetryMessages owns durable cleanup of persisted retry notices.
+	// It is optional for focused tests and pre-composition callers.
+	transientRetryMessages TransientRetryMessageService
 
 	// subagentContexts optionally persists a relational record of subagent
 	// (Task tool) invocations recognized on the tool-call frame paths. Nil is
@@ -603,6 +637,22 @@ type Service struct {
 	// Phase 8 dependencies — also nil-safe.
 	engineTaskCreator      engine.TaskCreator
 	engineWorkflowSwitcher engine.WorkflowSwitcher
+
+	// Review participant seats (REQ-OFFICE-REVIEW-SEATS-001) dependencies —
+	// also nil-safe. buildWorkflowCallbacks registers ensure_participant_seat
+	// once engineParticipantSeatWriter is set; engineParticipantSeatCaster
+	// may still be nil at that point (wired separately once the Office seat
+	// caster exists), in which case EnsureParticipantSeatCallback itself
+	// reports ErrActionNotYetWired only for entries that actually need to
+	// cast a new seat.
+	engineParticipantSeatWriter engine.ParticipantSeatWriter
+	engineParticipantSeatCaster engine.ParticipantSeatCaster
+
+	// engineAgentProfiles wires the quorum guard's AgentProfileResolver
+	// (REQ-OFFICE-REVIEW-SEATS-004.3): dropping a required seat whose agent
+	// profile was deleted after the seat was cast. Also nil-safe — an
+	// unwired resolver leaves every seat counted, matching prior behavior.
+	engineAgentProfiles engine.AgentProfileResolver
 
 	// Native code review. When set, buildWorkflowCallbacks registers the
 	// run_code_review on_enter action. Nil-safe: without it the action kind
@@ -874,6 +924,33 @@ type Service struct {
 	// Entries are not deleted: deleting a lock can let a new caller create a
 	// second mutex while an existing waiter still owns the old one.
 	sessionLifecycleLocks sync.Map // map[sessionID]*sync.Mutex
+	// turnCompletionLocks serializes processOnTurnCompleteViaEngineWithCause
+	// per session. Several independent event sources (normal agent turn
+	// completion, agent-exit, step_complete_kandev's out-of-band signal,
+	// user cancellation) can each call it for the same session; without
+	// serialization, two concurrent calls can both read the same
+	// pre-transition engine state and each call applyEngineTransition,
+	// allocating two independent workflow_step_entries rows for what should
+	// be a single logical transition and double-dispatching that entry's
+	// on_enter actions (clear_decisions, queue_run_for_each_participant).
+	// Entries are not deleted — see sessionLifecycleLocks above for why.
+	turnCompletionLocks sync.Map // map[sessionID]*sync.Mutex
+	// turnCompletionConsumedGeneration records, per session, the
+	// TaskSession.UpdatedAt of the most recent session snapshot that was
+	// already let past acquireTurnCompletionCriticalSection. It closes the
+	// gap turnCompletionLocks' contention signal cannot: two calls whose
+	// entire lifetimes are fully sequential (the second's own pre-lock
+	// GetTask already reflects the first's commit, so the WorkflowStepID
+	// comparison passes trivially) never contend on the mutex at all. A
+	// caller's session argument only carries a newer UpdatedAt than the
+	// stored generation when something legitimately touched the session
+	// (a new turn starting, cancellation reconciliation, ...) after the
+	// last transition was consumed; a stale or identical snapshot — the
+	// hallmark of a duplicate delivery for the same physical turn — is
+	// rejected instead of being re-evaluated against the step the winner
+	// already moved to. See acquireTurnCompletionCriticalSection.
+	// Entries are not deleted — see sessionLifecycleLocks above for why.
+	turnCompletionConsumedGeneration sync.Map // map[sessionID]time.Time
 	// contextWindowGuards serializes live context usage writes and gives each
 	// session a generation boundary that reset_agent_context can invalidate.
 	contextWindowGuards sync.Map
@@ -1144,6 +1221,7 @@ func NewService(
 		eventBus:                     eventBus,
 		taskRepo:                     taskRepo,
 		repo:                         repo,
+		promptTargets:                repo,
 		agentManager:                 agentManager,
 		queue:                        taskQueue,
 		executor:                     exec,
@@ -1241,6 +1319,7 @@ func NewService(
 		OnContextWindowUpdated: s.handleContextWindowUpdated,
 		OnTaskMoved:            s.handleTaskMoved,
 		OnTaskQueuePromoted:    s.handleTaskQueuePromoted,
+		OnTaskCreated:          s.handleTaskCreated,
 	}
 	s.watcher = watcher.NewWatcher(eventBus, handlers, cfg.QueueGroup, log)
 
@@ -1264,6 +1343,12 @@ func NewService(
 // If not set: Agent messages won't be saved to the database (events will still be published).
 func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
+}
+
+// SetTransientRetryMessageService wires the task service used to retire
+// persisted transient-retry status messages.
+func (s *Service) SetTransientRetryMessageService(service TransientRetryMessageService) {
+	s.transientRetryMessages = service
 }
 
 // SetSubagentContextRecorder wires the optional subagent-context writer.
@@ -1711,6 +1796,31 @@ func (s *Service) SetEngineTaskCreator(creator engine.TaskCreator) {
 func (s *Service) SetEngineWorkflowSwitcher(switcher engine.WorkflowSwitcher) {
 	s.engineWorkflowSwitcher = switcher
 	s.engineOptions = append(s.engineOptions, engine.WithWorkflowSwitcher(switcher))
+	s.reinitWorkflowEngine()
+}
+
+// SetEngineParticipantSeatWriter wires the engine's ParticipantSeatWriter
+// for the ensure_participant_seat action. Unlike ParticipantStore/
+// DecisionStore, this is a pure callback-construction dependency — nothing
+// else in the engine reads it — so it is not also appended as an
+// engine.Option.
+func (s *Service) SetEngineParticipantSeatWriter(writer engine.ParticipantSeatWriter) {
+	s.engineParticipantSeatWriter = writer
+	s.reinitWorkflowEngine()
+}
+
+// SetEngineParticipantSeatCaster wires the engine's ParticipantSeatCaster
+// for the ensure_participant_seat action (REQ-002's casting resolution).
+func (s *Service) SetEngineParticipantSeatCaster(caster engine.ParticipantSeatCaster) {
+	s.engineParticipantSeatCaster = caster
+	s.reinitWorkflowEngine()
+}
+
+// SetEngineAgentProfileResolver wires the engine's AgentProfileResolver for
+// the quorum guard's REQ-OFFICE-REVIEW-SEATS-004.3 skip.
+func (s *Service) SetEngineAgentProfileResolver(resolver engine.AgentProfileResolver) {
+	s.engineAgentProfiles = resolver
+	s.engineOptions = append(s.engineOptions, engine.WithAgentProfileResolver(resolver))
 	s.reinitWorkflowEngine()
 }
 
@@ -2203,6 +2313,32 @@ func (s *Service) acquireSessionLifecycleLock(sessionID string) func() {
 	return lock.Unlock
 }
 
+// acquireTurnCompletionLock serializes on_turn_complete processing for a
+// single session — see turnCompletionLocks' field comment for the race it
+// closes. A caller with no session ID (defensive callers pass "" rather than
+// skip the lock call) gets a no-op unlock and contended=false.
+//
+// contended reports whether another caller already held this session's lock
+// at the moment this call tried to acquire it — i.e. another
+// processOnTurnCompleteViaEngineWithCause call for the same session is (or
+// very recently was) actively executing right now. That is a direct,
+// timing-independent duplicate signal: unlike comparing two DB reads taken
+// at different times (which a sufficiently late duplicate can pass
+// trivially — see acquireTurnCompletionCriticalSection), lock contention can
+// only be true when two calls for the same session genuinely overlapped.
+func (s *Service) acquireTurnCompletionLock(sessionID string) (unlock func(), contended bool) {
+	if sessionID == "" {
+		return func() {}, false
+	}
+	value, _ := s.turnCompletionLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	if lock.TryLock() {
+		return lock.Unlock, false
+	}
+	lock.Lock()
+	return lock.Unlock, true
+}
+
 func (s *Service) isSessionResetInProgress(sessionID string) bool {
 	if sessionID == "" {
 		return false
@@ -2311,6 +2447,9 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Reconcile queued tasks when WIP limits or feeder settings change.
 	s.subscribeWorkflowQueueEvents()
+
+	// Invalidate the compiled-step cache when workflow steps change.
+	s.subscribeWorkflowStepCacheEvents()
 
 	// Restore durable dynamic policy waits after the route and lifecycle
 	// services are ready. Only un-dispatched pending states are scheduled.

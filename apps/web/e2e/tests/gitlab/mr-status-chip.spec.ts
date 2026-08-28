@@ -71,10 +71,14 @@ async function openTask(
   await session.waitForLoad();
   // The shell hydrates the workspace MR map once per document. A link created
   // immediately before navigation can miss that first snapshot even though
-  // the task details already show the association. Reload once so the chip
-  // observes the same persisted link as the rest of the task page.
-  await testPage.reload();
-  await session.waitForLoad();
+  // the task details already show the association. Re-drive document
+  // hydration until the linked-MR chip observes the persisted map; one fixed
+  // reload can race the same snapshot again under CI load.
+  await expect(async () => {
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(session.mrStatusChip()).toBeVisible({ timeout: 5_000 });
+  }).toPass({ timeout: 30_000 });
 }
 
 test.describe("GitLab MR status chip", () => {
@@ -229,6 +233,68 @@ test.describe("GitLab MR status chip", () => {
     await expect(autoFixBadge).toBeVisible();
     await expect(autoFixBadge).toContainText("0/10");
     await expect(autoFixBadge).toHaveAttribute("data-auto-fix-exhausted", "false");
+    await expect(chip.getByTestId("mr-status-auto-merge-chip")).toBeVisible();
+  });
+
+  // The switches are per MR, so the response's top-level booleans are an
+  // aggregate ("on for every linked MR"). The chip used to read that
+  // aggregate, so enabling automation on one of two linked MRs rendered no
+  // badge row at all (mr-status-chip-trigger.tsx returns null when both
+  // flags are false) while auto-fix was genuinely running on that MR.
+  test("renders the badges when only one of two linked MRs has automation on", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const ARMED_IID = 410;
+    const IDLE_IID = 411;
+    // Configure once, then seed both MRs: each configureGitLab call rebuilds
+    // the workspace's cached mock client and discards MRs seeded before it.
+    await apiClient.configureGitLab(seedData.workspaceId, GITLAB_HOST);
+    await apiClient.mockGitLabAddMRs(seedData.workspaceId, GITLAB_PROJECT, [
+      mrSeed(ARMED_IID, "Armed MR"),
+      mrSeed(IDLE_IID, "Idle MR"),
+    ]);
+    await apiClient.mockGitLabAddPipelines(seedData.workspaceId, GITLAB_PROJECT, [
+      pipelineSeed(ARMED_IID, "success"),
+    ]);
+    await apiClient.mockGitLabAddApprovals(seedData.workspaceId, GITLAB_PROJECT, ARMED_IID, [], 1);
+    await apiClient.mockGitLabAddApprovals(seedData.workspaceId, GITLAB_PROJECT, IDLE_IID, [], 1);
+
+    const task = await createTask(apiClient, seedData, "MR chip per-MR badges");
+    await linkMR(apiClient, seedData, task.id, ARMED_IID);
+    await linkMR(apiClient, seedData, task.id, IDLE_IID);
+
+    await apiClient.updateTaskMRAutomationOptions(task.id, {
+      repository_id: seedData.repositoryId,
+      project_path: GITLAB_PROJECT,
+      mr_iid: ARMED_IID,
+      auto_fix_enabled: true,
+      auto_merge_enabled: true,
+    });
+
+    // Pin the precondition: the aggregate the chip used to read is false,
+    // so a passing assertion below cannot come from the old code path.
+    const options = await apiClient.getTaskMRAutomationOptions(task.id);
+    expect(options.auto_fix_enabled).toBe(false);
+    expect(options.auto_merge_enabled).toBe(false);
+    expect(options.mr_options?.find((o) => o.mr_iid === ARMED_IID)?.auto_fix_enabled).toBe(true);
+    expect(options.mr_options?.find((o) => o.mr_iid === IDLE_IID)?.auto_fix_enabled).toBe(false);
+
+    const session = new SessionPage(testPage);
+    await openTask(testPage, session, task.id);
+
+    const chip = session.mrStatusChip();
+    await expect(chip).toBeVisible({ timeout: 15_000 });
+    // The shared workspace MR map hydrates after the task page mounts. Wait
+    // for the persisted two-MR state rather than treating the first visible
+    // chip render as complete.
+    await expect(chip).toHaveAttribute("data-mr-count", "2", { timeout: 15_000 });
+    const autoFixBadge = chip.getByTestId("mr-status-auto-fix-chip");
+    await expect(autoFixBadge).toBeVisible();
+    // The round comes from the armed MR, which has no fix rounds yet.
+    await expect(autoFixBadge).toContainText("0/10");
     await expect(chip.getByTestId("mr-status-auto-merge-chip")).toBeVisible();
   });
 

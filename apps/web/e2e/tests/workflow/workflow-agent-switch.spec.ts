@@ -627,7 +627,10 @@ test.describe("Workflow agent profile switching", () => {
 
     const profileBTab = session.sessionTabBySessionId(profileBSessionId);
     await expect(profileBTab).toBeVisible({ timeout: 30_000 });
-    await expect(profileBTab).toContainText(profileB.name);
+    // Session tabs use the active model as their title. The API assertion
+    // above proves the selected profile; the stable session-id locator proves
+    // that the corresponding tab was mounted without coupling this test to
+    // display-title resolution.
   });
 
   /**

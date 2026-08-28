@@ -9,6 +9,7 @@ import "@xterm/xterm/css/xterm.css";
 import { PanelLoadingState } from "@/components/panel-loading-state";
 import { useAppStore } from "@/components/state-provider";
 import { useSession } from "@/hooks/domains/session/use-session";
+import { useTheme } from "@/components/theme/app-theme";
 import type { TaskSessionState } from "@/app/office/tasks/[id]/types";
 import { getBackendConfig } from "@/lib/config";
 import { useTerminalLinkHandler } from "@/hooks/use-terminal-link-handler";
@@ -28,6 +29,7 @@ import { useTerminalSearch } from "./use-terminal-search";
 import { TerminalSearchBar } from "./terminal-search-bar";
 import { usePanelSearch } from "@/hooks/use-panel-search";
 import { useTerminalBusyTracking } from "./use-terminal-busy-tracking";
+import { useTerminalTheme } from "./use-terminal-theme";
 import { useTranslation } from "react-i18next";
 
 type BaseProps = {
@@ -221,6 +223,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     onWsReady,
     enableTouchScroll,
   } = props;
+  const { resolvedTheme } = useTheme();
   const terminalId = mode === "shell" ? props.terminalId : undefined;
   const environmentId = mode === "shell" ? props.environmentId : undefined;
   const refs = useTerminalRefs();
@@ -296,10 +299,17 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     fontFamily: buildTerminalFontFamily(terminalFontFamily),
     fontSize: terminalFontSize ?? undefined,
     disableWebgl,
+    resolvedTheme,
     onToggleBottomTerminal: toggleBottomTerminal,
     sendInput,
     keyboardShortcutsRef,
     onFindInPanelRef,
+  });
+  useTerminalTheme({
+    terminalRef: xtermRef,
+    containerRef: terminalRef,
+    isTerminalReady,
+    resolvedTheme,
   });
   useTerminalBusyTracking(terminalId, xtermRef, mode === "shell", isTerminalReady);
 

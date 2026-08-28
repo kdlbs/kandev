@@ -67,13 +67,23 @@ test.describe("mobile: session deletion", () => {
     await expect(actionsMenu).toBeVisible({ timeout: 5_000 });
     await actionsMenu.getByRole("menuitem", { name: "Delete" }).tap();
 
-    const dialog = testPage.getByRole("alertdialog");
-    await expect(dialog).toBeVisible();
-    // The native mobile dialog states the conversation-deletion contract and
+    const confirmation = secondaryRow.getByTestId("mobile-session-delete-confirmation");
+    await expect(confirmation).toBeVisible();
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    // The row-local confirmation states the conversation-deletion contract and
     // explicitly says the task workspace and files are retained.
-    await expect(dialog).toContainText("permanently delete the conversation history");
-    await expect(dialog).toContainText("task workspace and its files are kept");
-    await dialog.getByRole("button", { name: "Delete" }).tap();
+    await expect(confirmation).toContainText("permanently delete the conversation history");
+    await expect(confirmation).toContainText("task workspace and its files are kept");
+
+    await confirmation.getByRole("button", { name: "Cancel" }).tap();
+    await expect(confirmation).not.toBeVisible();
+    await expect(secondaryRow).toBeVisible();
+
+    await secondaryRow.getByRole("button", { name: "Session actions" }).click();
+    const reopenedActionsMenu = testPage.getByRole("menu");
+    await expect(reopenedActionsMenu).toBeVisible({ timeout: 5_000 });
+    await reopenedActionsMenu.getByRole("menuitem", { name: "Delete" }).tap();
+    await secondaryRow.getByTestId("mobile-session-delete-confirm").tap();
 
     await expect(secondaryRow).not.toBeVisible({ timeout: 15_000 });
     await expect(sheet.getByTestId(`mobile-session-row-${primarySessionId}`)).toBeVisible();

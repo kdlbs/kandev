@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/background-work-liveness.md"
+spec: "../../specs/platform/requirements/background-work-liveness.md"
 ---
 
 # Task 01: Correct the Reopen-Menu Input Indicator
@@ -65,9 +65,9 @@ must share one RED-GREEN cycle.
 
 ## Inputs
 
-- `docs/specs/platform/background-work-liveness.md`, especially the status
+- `docs/specs/platform/requirements/background-work-liveness.md`, especially the status
   semantics and new add-panel scenarios.
-- `docs/specs/platform/notifications.md`, which establishes that generic
+- `docs/specs/platform/requirements/notifications.md`, which establishes that generic
   `WAITING_FOR_INPUT` is not an explicit request for an answer.
 - `apps/web/hooks/use-task-pending-input.ts` for the authoritative
   message-derived pending clarification and permission flags.

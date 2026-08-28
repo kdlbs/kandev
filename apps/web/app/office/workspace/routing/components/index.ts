@@ -4,4 +4,5 @@ export { ProviderOrderEditor, providerLabel } from "./provider-order-editor";
 export { ProviderTierMapping } from "./provider-tier-mapping";
 export { AgentPreviewTable } from "./agent-preview-table";
 export { ProviderHealthBanner } from "./provider-health-banner";
-export { WakeReasonTierCard } from "./wake-reason-tier-card";
+export { WakeReasonTierCard, firstProviderWithTier } from "./wake-reason-tier-card";
+export { RoleTierCard } from "./role-tier-card";

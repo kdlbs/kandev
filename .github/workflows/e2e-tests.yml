@@ -179,7 +179,7 @@ jobs:
       - name: Build Docker E2E helper binaries
         run: make build-backend-linux-helpers
 
-      - name: Locate latest successful main timing profile
+      - name: Locate latest successful main timing profile artifact
         id: main-timing-run
         env:
           GH_TOKEN: ${{ github.token }}
@@ -190,16 +190,17 @@ jobs:
           const fs = require("node:fs");
 
           (async () => {
-            const url =
+            const runsUrl =
               process.env.GITHUB_API_URL +
               "/repos/" +
               process.env.GITHUB_REPOSITORY +
-              "/actions/workflows/e2e-tests.yml/runs?branch=main&status=success&per_page=20";
-            const response = await fetch(url, {
-              headers: {
-                accept: "application/vnd.github+json",
-                authorization: "Bearer " + process.env.GH_TOKEN,
-              },
+              "/actions/workflows/e2e-tests.yml/runs?branch=main&status=success&per_page=50";
+            const headers = {
+              accept: "application/vnd.github+json",
+              authorization: "Bearer " + process.env.GH_TOKEN,
+            };
+            const response = await fetch(runsUrl, {
+              headers,
             });
             if (!response.ok) {
               console.log(
@@ -211,14 +212,45 @@ jobs:
               return;
             }
             const payload = await response.json();
-            const run = (payload.workflow_runs ?? []).find(
-              (candidate) => candidate.head_branch === "main" && candidate.conclusion === "success",
-            );
+            let run;
+            for (const candidate of payload.workflow_runs ?? []) {
+              if (candidate.head_branch !== "main" || candidate.conclusion !== "success") continue;
+              const artifactsResponse = await fetch(
+                process.env.GITHUB_API_URL +
+                  "/repos/" +
+                  process.env.GITHUB_REPOSITORY +
+                  "/actions/runs/" +
+                  candidate.id +
+                  "/artifacts?per_page=100",
+                { headers },
+              );
+              if (!artifactsResponse.ok) {
+                console.log(
+                  "::warning::Unable to inspect artifacts for main E2E run " +
+                    candidate.id +
+                    " (" +
+                    artifactsResponse.status +
+                    "); trying an older run.",
+                );
+                continue;
+              }
+              const artifactsPayload = await artifactsResponse.json();
+              const hasTimingProfile = (artifactsPayload.artifacts ?? []).some(
+                (artifact) => artifact.name === "e2e-timing-profile" && !artifact.expired,
+              );
+              if (hasTimingProfile) {
+                run = candidate;
+                break;
+              }
+              console.log(
+                "Skipping main E2E run " + candidate.id + ": no usable timing profile artifact.",
+              );
+            }
             fs.appendFileSync(process.env.GITHUB_OUTPUT, "run_id=" + (run?.id ?? "") + "\n");
             console.log(
               run
-                ? "Using successful main E2E run " + run.id + " for timing history."
-                : "No successful main E2E run found; using count fallback.",
+                ? "Using successful main E2E run " + run.id + " with a timing profile artifact."
+                : "No successful main E2E run with a timing profile artifact found; using count fallback.",
             );
           })().catch((error) => {
             console.error(error);
@@ -226,7 +258,7 @@ jobs:
           });
           NODE
 
-      - name: Download latest main timing profile
+      - name: Download selected main timing profile
         if: steps.main-timing-run.outputs.run_id != ''
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -252,7 +284,7 @@ jobs:
           set -euo pipefail
           rm -rf "$GITHUB_WORKSPACE/e2e-manifests"
           if [[ -f "$GITHUB_WORKSPACE/e2e/previous-profile/timing-profile.json" ]]; then
-            echo "Planning from the latest successful main timing profile."
+            echo "Planning from the selected successful main timing profile."
             pnpm exec tsx e2e/scripts/plan-shards.ts \
               --web-root "$GITHUB_WORKSPACE/apps/web" \
               --output-dir "$GITHUB_WORKSPACE/e2e-manifests" \
@@ -315,10 +347,10 @@ jobs:
     container:
       image: ghcr.io/kdlbs/kandev-ci:runtime-latest
       options: --ipc=host
-    # 25 min (was 22) — leaves room for the worst-case "every shard hits a few
-    # flake-retries" combination without blowing past the cap. Average shard
-    # runs ~10 min, so this only kicks in when something is going wrong.
-    timeout-minutes: 25
+    # 35 min covers the serial count-fallback tail and setup overhead. The
+    # first queue runs reached the old 25-minute cap with a healthy 167-test
+    # shard before the main timing profile had bootstrapped.
+    timeout-minutes: 35
     # Container jobs default to `sh`; pin to bash.
     defaults:
       run:

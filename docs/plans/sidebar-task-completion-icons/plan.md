@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/sidebar-task-completion-icons.md
+spec: docs/specs/ui/requirements/sidebar-task-completion-icons.md
 created: 2026-07-30
 status: completed
 ---
@@ -105,6 +105,6 @@ cd apps/web && pnpm run typecheck
 ## Documentation Impact
 
 No public documentation changes are required. This plan adds the internal product spec
-`docs/specs/ui/sidebar-task-completion-icons.md`; the change does not alter commands, settings,
+`docs/specs/ui/requirements/sidebar-task-completion-icons.md`; the change does not alter commands, settings,
 APIs, workflows, or public terminology. No ADR is warranted because the implementation reuses
 existing frontend state and establishes no new architectural boundary.

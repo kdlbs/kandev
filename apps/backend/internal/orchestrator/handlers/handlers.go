@@ -348,7 +348,9 @@ func (h *Handlers) wsStopTask(ctx context.Context, msg *ws.Message) (*ws.Message
 }
 
 type wsPermissionRespondRequest struct {
+	TaskID    string `json:"task_id"`
 	SessionID string `json:"session_id"`
+	RequestID string `json:"request_id"`
 	PendingID string `json:"pending_id"`
 	OptionID  string `json:"option_id,omitempty"`
 	Cancelled bool   `json:"cancelled,omitempty"`
@@ -367,6 +369,12 @@ func (h *Handlers) wsRespondToPermission(ctx context.Context, msg *ws.Message) (
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	if req.RequestID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "request_id is required", nil)
+	}
 	if req.PendingID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "pending_id is required", nil)
 	}
@@ -381,7 +389,7 @@ func (h *Handlers) wsRespondToPermission(ctx context.Context, msg *ws.Message) (
 		zap.Bool("cancelled", req.Cancelled),
 		zap.Bool("rejected", req.Rejected))
 
-	if err := h.service.RespondToPermission(ctx, req.SessionID, req.PendingID, req.OptionID, req.Cancelled, req.Rejected); err != nil {
+	if err := h.service.RespondToPermission(ctx, req.TaskID, req.SessionID, req.RequestID, req.PendingID, req.OptionID, req.Cancelled, req.Rejected); err != nil {
 		h.logger.Error("failed to respond to permission", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to respond to permission: "+err.Error(), nil)
 	}

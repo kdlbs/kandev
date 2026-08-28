@@ -3,6 +3,7 @@ import type {
   OfficeTaskStatus,
   ProjectStatus,
   Tier,
+  TierSource,
 } from "@/lib/state/slices/office/types";
 
 /**
@@ -56,6 +57,18 @@ export const TIER_NAME_KEYS: Record<Tier, string> = {
   frontier: "office:tierNameFrontier",
   balanced: "office:tierNameBalanced",
   economy: "office:tierNameEconomy",
+};
+
+/**
+ * Names the precedence level that supplied an agent's effective tier: a
+ * matching wake-reason policy, a per-agent override, the agent's role entry,
+ * or the workspace default. Wire values are never shown raw (AC-16, AC-16a).
+ */
+export const TIER_SOURCE_LABEL_KEYS: Record<TierSource, string> = {
+  wake_reason: "office:tierSourceWakeReason",
+  override: "office:tierSourceOverride",
+  role: "office:tierSourceRole",
+  workspace: "office:tierSourceWorkspace",
 };
 
 /**

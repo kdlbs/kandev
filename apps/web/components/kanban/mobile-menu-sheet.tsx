@@ -72,6 +72,8 @@ export type MobileColumnsSection = {
   steps: ColumnsMenuStep[];
   hiddenStepIds: string[];
   onToggle: (workflowId: string, stepId: string) => void;
+  autoHideEmpty: boolean;
+  onToggleAutoHide: (workflowId: string) => void;
 };
 
 function MobileDisplaySelects({

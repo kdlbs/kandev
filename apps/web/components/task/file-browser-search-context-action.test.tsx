@@ -23,6 +23,7 @@ vi.mock("./file-context-menu", () => ({
       {children}
     </div>
   ),
+  useFileDeleteAction: () => null,
   useFileRename: () => ({
     isRenaming: false,
     renameValue: "",

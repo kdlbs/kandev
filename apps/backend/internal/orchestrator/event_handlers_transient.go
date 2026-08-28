@@ -458,14 +458,64 @@ func transientFailureExhaustedMessage(classified *routingerr.Error) string {
 	return condition + " after several retries. Resume to try again, or start a fresh session."
 }
 
-// resetTransientRetry clears a session's retry entry, cancels its timer, and
-// drops the cached prompt (which may hold large/sensitive attachment data).
-// Called on a successful turn, on cancel, and on exhaustion.
-func (s *Service) resetTransientRetry(sessionID string) {
+// clearTransientRetryState clears a session's retry entry, cancels its timer,
+// and drops the cached prompt (which may hold large/sensitive attachment data).
+func (s *Service) clearTransientRetryState(sessionID string) bool {
 	s.lastTurnPrompt.Delete(sessionID)
-	if v, ok := s.transientRetries.LoadAndDelete(sessionID); ok {
+	v, ok := s.transientRetries.LoadAndDelete(sessionID)
+	if ok {
 		if entry, ok := v.(*transientRetryEntry); ok && entry.cancel != nil {
 			entry.cancel()
+		}
+	}
+	return ok
+}
+
+// resetTransientRetry clears in-memory retry state and retires the persisted
+// retry notice(s). The detached context keeps durable cleanup best effort even
+// when the event that ended the retry was cancelled by its caller.
+func (s *Service) resetTransientRetry(sessionID string) {
+	s.resetTransientRetryWithContext(context.Background(), sessionID, false)
+}
+
+// forceResolve is used by explicit stop/cancel and terminal paths where a
+// persisted notice can outlive the in-memory retry entry. Normal successful
+// turns skip the transcript scan when no retry loop was owned.
+func (s *Service) resetTransientRetryWithContext(ctx context.Context, sessionID string, forceResolve bool) {
+	if !s.clearTransientRetryState(sessionID) && !forceResolve {
+		return
+	}
+	s.resolveTransientRetryMessages(context.WithoutCancel(ctx), sessionID)
+}
+
+// resolveTransientRetryMessages removes every persisted retry status message
+// for a session. The task service owns the durable write and MessageDeleted
+// publication. Cleanup is intentionally non-fatal to the transition that
+// ended the retry loop.
+func (s *Service) resolveTransientRetryMessages(ctx context.Context, sessionID string) {
+	if s.transientRetryMessages == nil || sessionID == "" {
+		return
+	}
+	messages, err := s.transientRetryMessages.ListMessages(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to list transient retry status messages",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	for _, message := range messages {
+		if message == nil || message.Metadata == nil {
+			continue
+		}
+		retrying, ok := message.Metadata["retrying"].(bool)
+		if !ok || !retrying {
+			continue
+		}
+		if err := s.transientRetryMessages.DeleteMessage(ctx, message.ID); err != nil {
+			s.logger.Warn("failed to delete transient retry status message",
+				zap.String("session_id", sessionID),
+				zap.String("message_id", message.ID),
+				zap.Error(err))
 		}
 	}
 }
@@ -495,7 +545,7 @@ func (s *Service) CancelTransientRetry(ctx context.Context, taskID, sessionID st
 		return false
 	}
 	_, active := s.transientRetries.Load(sessionID)
-	s.resetTransientRetry(sessionID)
+	s.resetTransientRetryWithContext(ctx, sessionID, true)
 	if !active {
 		return false
 	}

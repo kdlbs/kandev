@@ -59,7 +59,7 @@ export async function seedForkPRComparisonTask(
   execFileSync(
     "git",
     ["config", "--global", `url.file://${comparisonTargetPath}.insteadOf`, targetURL],
-    { env: gitEnv },
+    { cwd: backend.tmpDir, env: gitEnv },
   );
 
   await apiClient.updateRepository(seedData.repositoryId, {
@@ -69,24 +69,6 @@ export async function seedForkPRComparisonTask(
     provider_owner: "contributor",
     provider_name: "widget-fork",
   });
-
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    "Fork PR comparison target",
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repositories: [
-        {
-          repository_id: seedData.repositoryId,
-          base_branch: "main",
-          checkout_branch: "feature/fork",
-        },
-      ],
-    },
-  );
 
   await apiClient.mockGitHubReset();
   await apiClient.mockGitHubSetUser("contributor");
@@ -127,11 +109,32 @@ export async function seedForkPRComparisonTask(
       stats_available: true,
     },
   ]);
+
+  const task = await apiClient.createTask(seedData.workspaceId, "Fork PR comparison target", {
+    description: "/e2e:simple-message",
+    agent_profile_id: seedData.agentProfileId,
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+    repositories: [
+      {
+        repository_id: seedData.repositoryId,
+        base_branch: "main",
+        checkout_branch: "feature/fork",
+      },
+    ],
+  });
+
   await apiClient.associateGitHubTaskPR({
     workspace_id: seedData.workspaceId,
     task_id: task.id,
     repository_id: seedData.repositoryId,
     pr_url: "https://github.com/upstream/widget/pull/1701",
+  });
+  await apiClient.launchSession({
+    task_id: task.id,
+    agent_profile_id: seedData.agentProfileId,
+    workflow_step_id: seedData.startStepId,
+    prompt: "/e2e:simple-message",
   });
 
   return { task, headSHA };

@@ -61,6 +61,7 @@ type GitHubService interface {
 	RecordTaskCIFixAttempt(ctx context.Context, attempt github.TaskCIFixAttempt) error
 	RefreshTaskCIFixCheckpoint(ctx context.Context, taskID, repositoryID string, prNumber int, signature, checkpointJSON string) error
 	RecordTaskCIMergeAttempt(ctx context.Context, attempt github.TaskCIMergeAttempt) error
+	RecordTaskCIMergeQueueObservation(ctx context.Context, observation github.TaskCIMergeQueueObservation) error
 	RecordTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error
 	MarkTaskCIAutoFixExhausted(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error
 	ClearTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int) error

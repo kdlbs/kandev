@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["02-creator-session-resolution", "03-explain-session-default"]
 plan: "plan.md"
-spec: "../../specs/tasks/mcp-task-agent-profile-default/spec.md"
+spec: "../../specs/tasks/requirements/mcp-task-agent-profile-default.md"
 ---
 
 # Task 04: End-to-end inheritance

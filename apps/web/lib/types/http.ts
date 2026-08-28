@@ -3,7 +3,11 @@
 import type { ExecutorType } from "./executor";
 import type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
 import type { UserSettings } from "./http-user-settings";
-import type { TaskRepository, WorkspaceFolder } from "./http-workspace-sources";
+import type {
+  RepositoryBranchPolicy,
+  TaskRepository,
+  WorkspaceFolder,
+} from "./http-workspace-sources";
 import type {
   AgentProfileId,
   RepositoryId,
@@ -38,6 +42,7 @@ export type {
 export type {
   AttachTaskWorkspaceSourcesRequest,
   AttachTaskWorkspaceSourcesResponse,
+  RepositoryBranchPolicy,
   TaskRepository,
   WorkspaceFolder,
   WorkspaceFolderSourceRequest,
@@ -419,7 +424,13 @@ export type Task = ActiveSubagentCountFields & {
 };
 
 // Task origin values mirror models.TaskOrigin* constants in the Go backend.
-export type TaskOrigin = "manual" | "agent_created" | "routine" | "onboarding";
+export type TaskOrigin =
+  | "manual"
+  | "agent_created"
+  | "routine"
+  | "onboarding"
+  | "automation_run"
+  | "automation_task";
 
 // isFromOffice reads the backend-computed flag (predicate lives in SQL at
 // apps/backend/internal/task/repository/sqlite/task.go). Use to gate
@@ -633,6 +644,11 @@ export type ListTasksResponse = {
 
 export type ListRepositorySetsResponse = {
   repository_sets: RepositorySet[];
+  total: number;
+};
+
+export type ListRepositoryBranchPoliciesResponse = {
+  repository_branch_policies: RepositoryBranchPolicy[];
   total: number;
 };
 

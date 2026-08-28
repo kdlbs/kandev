@@ -9,6 +9,7 @@ test.describe("Mobile task status summary", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     test.setTimeout(90_000);
 
@@ -21,7 +22,10 @@ test.describe("Mobile task status summary", () => {
       "Mobile summary navigation",
       stepOptions,
     );
-    const targetTask = await apiClient.seedTask(seedData.workspaceId, TARGET_TITLE, stepOptions);
+    const targetTask = await apiClient.seedTask(seedData.workspaceId, TARGET_TITLE, {
+      ...stepOptions,
+      state: "IN_PROGRESS",
+    });
     await apiClient.seedTaskSession(navTask.task_id, {
       state: "WAITING_FOR_INPUT",
       agentProfileId: seedData.agentProfileId,
@@ -40,6 +44,21 @@ test.describe("Mobile task status summary", () => {
       hasText: TARGET_TITLE,
     });
     await expect(targetRow).toBeVisible({ timeout: 15_000 });
+
+    await apiClient.seedTaskSession(targetTask.task_id, {
+      sessionId: targetSession.session_id,
+      state: "RUNNING",
+    });
+    const runningStatus = targetRow.getByTestId("task-state-running");
+    await expect(runningStatus).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(async () =>
+        runningStatus.evaluate((element) => ({
+          tagName: element.tagName,
+          svgAnimated: element.querySelector("svg")?.classList.contains("animate-spin") ?? false,
+        })),
+      )
+      .toEqual({ tagName: "SPAN", svgAnimated: false });
 
     await apiClient.seedSessionMessage(targetSession.session_id, {
       type: "clarification_request",
@@ -98,5 +117,14 @@ test.describe("Mobile task status summary", () => {
     // The passive PR icon must not steal the row's native touch target.
     await targetRow.tap();
     await expect(testPage).toHaveURL(new RegExp(`/t/${targetTask.task_id}$`));
+    await session.waitForLoad();
+    await expect(session.prStatusChip()).toBeVisible({ timeout: 15_000 });
+    await session.tapPRStatusChip();
+    const author = session.prStatusChipDrawer().getByTestId("pr-popover-author");
+    await expect(author).toBeInViewport({ ratio: 1 });
+    await expect(author).toHaveText("by e2e");
+    await prCapture.screenshot("mobile-task-status-summary-author", {
+      caption: "Mobile PR status drawer with the linked author identity",
+    });
   });
 });

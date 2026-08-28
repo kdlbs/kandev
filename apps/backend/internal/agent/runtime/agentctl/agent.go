@@ -23,7 +23,21 @@ type (
 	PermissionOption          = streams.PermissionOption
 	PermissionRespondRequest  = streams.PermissionRespondRequest
 	PermissionRespondResponse = streams.PermissionRespondResponse
+	PendingAgentPermission    = streams.PendingAgentPermission
+	PermissionResolveResponse = streams.PermissionResolveResponse
+	PermissionCancelResponse  = streams.PermissionCancelResponse
 )
+
+// PermissionOperationError preserves the stable agentctl permission code for
+// authorization-safe translation by higher service layers.
+type PermissionOperationError struct {
+	Code    string
+	Message string
+}
+
+func (e *PermissionOperationError) Error() string { return e.Message }
+
+func (e *PermissionOperationError) PermissionCode() string { return e.Code }
 
 // AgentInfo contains information about the connected agent.
 type AgentInfo struct {
@@ -765,4 +779,76 @@ func (c *Client) RespondToPermission(ctx context.Context, pendingID, optionID st
 		return fmt.Errorf("permission response failed: %s", result.Error)
 	}
 	return nil
+}
+
+// ListPendingPermissions returns safe snapshots from the live agent process.
+func (c *Client) ListPendingPermissions(ctx context.Context) ([]PendingAgentPermission, error) {
+	resp, err := c.sendStreamRequest(ctx, "agent.permissions.list", nil)
+	if err != nil {
+		return nil, fmt.Errorf("permission list request failed: %w", err)
+	}
+	if resp.Type == ws.MessageTypeError {
+		return nil, permissionOperationError(resp, "permission list failed")
+	}
+	var result streams.PermissionListResponse
+	if err := resp.ParsePayload(&result); err != nil {
+		return nil, fmt.Errorf("failed to parse permission list response: %w", err)
+	}
+	return result.Permissions, nil
+}
+
+// ResolvePermission selects one exact provider-offered option on one exact
+// request generation.
+func (c *Client) ResolvePermission(ctx context.Context, requestID, pendingID, optionID string) (*PermissionResolveResponse, error) {
+	payload := streams.PermissionResolveRequest{
+		RequestID: requestID,
+		PendingID: pendingID,
+		OptionID:  optionID,
+	}
+	resp, err := c.sendStreamRequest(ctx, "agent.permissions.resolve", payload)
+	if err != nil {
+		return nil, fmt.Errorf("permission resolution request failed: %w", err)
+	}
+	if resp.Type == ws.MessageTypeError {
+		return nil, permissionOperationError(resp, "permission resolution failed")
+	}
+	var result PermissionResolveResponse
+	if err := resp.ParsePayload(&result); err != nil {
+		return nil, fmt.Errorf("failed to parse permission resolution response: %w", err)
+	}
+	return &result, nil
+}
+
+// CancelPermission dismisses one exact live request generation for internal UI
+// compatibility. External MCP callers are not given this operation.
+func (c *Client) CancelPermission(ctx context.Context, requestID, pendingID string) (*PermissionCancelResponse, error) {
+	payload := streams.PermissionCancelRequest{RequestID: requestID, PendingID: pendingID}
+	resp, err := c.sendStreamRequest(ctx, "agent.permissions.cancel", payload)
+	if err != nil {
+		return nil, fmt.Errorf("permission cancellation request failed: %w", err)
+	}
+	if resp.Type == ws.MessageTypeError {
+		return nil, permissionOperationError(resp, "permission cancellation failed")
+	}
+	var result PermissionCancelResponse
+	if err := resp.ParsePayload(&result); err != nil {
+		return nil, fmt.Errorf("failed to parse permission cancellation response: %w", err)
+	}
+	return &result, nil
+}
+
+func permissionOperationError(resp *ws.Message, fallback string) error {
+	var payload ws.ErrorPayload
+	if err := resp.ParsePayload(&payload); err != nil {
+		return fmt.Errorf("%s: unable to parse error", fallback)
+	}
+	code, _ := payload.Details["permission_code"].(string)
+	if code == "" {
+		code = payload.Code
+	}
+	message := payload.Message
+	if message == "" {
+		message = fallback
+	}
+	return &PermissionOperationError{Code: code, Message: message}
 }

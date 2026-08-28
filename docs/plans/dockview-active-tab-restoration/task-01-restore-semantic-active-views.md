@@ -6,7 +6,7 @@ wave: 1
 depends_on: []
 parallelism: sequential
 plan: "plan.md"
-spec: "../../specs/ui/task-layout-profiles.md"
+spec: "../../specs/ui/requirements/task-layout-profiles.md"
 ---
 
 # Task 01: Restore Semantic Dockview Active Views
@@ -82,7 +82,7 @@ in a single Red-Green-Refactor cycle.
 
 ## Inputs
 
-- `docs/specs/ui/task-layout-profiles.md`, especially desktop restoration,
+- `docs/specs/ui/requirements/task-layout-profiles.md`, especially desktop restoration,
   persistence guarantees, and the Agent/PR Details round-trip scenarios.
 - `docs/plans/dockview-active-tab-restoration/plan.md`.
 - `apps/web/lib/state/dockview-env-switch.ts`, including
