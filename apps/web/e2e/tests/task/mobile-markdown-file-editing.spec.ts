@@ -69,7 +69,7 @@ async function appendToHybrid(testPage: Page, viewer: Locator, marker: string): 
   await expect(paragraph).toBeVisible({ timeout: 15_000 });
   await paragraph.tap();
   await testPage.keyboard.press("Control+End");
-  await testPage.keyboard.type(`\n\n${marker}`);
+  await testPage.keyboard.insertText(`\n\n${marker}`);
   await expect(editor).toContainText(marker);
 }
 

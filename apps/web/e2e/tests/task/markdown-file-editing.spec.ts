@@ -89,7 +89,7 @@ async function appendToHybrid(testPage: Page, marker: string): Promise<void> {
   await expect(paragraph).toBeVisible({ timeout: 15_000 });
   await paragraph.click();
   await testPage.keyboard.press(process.platform === "darwin" ? "Meta+End" : "Control+End");
-  await testPage.keyboard.type(`\n\n${marker}`);
+  await testPage.keyboard.insertText(`\n\n${marker}`);
   await expect(editor).toContainText(marker);
 }
 
