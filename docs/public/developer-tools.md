@@ -193,9 +193,9 @@ Desktop editor discovery and custom commands run on the Kandev backend host. The
 
 ## Language servers
 
-Language-server settings are part of **Settings > Preferences > Terminal & Editors**. Kandev currently registers servers for:
-
 ![Settings > Preferences > Terminal & Editors showing language-server cards, auto-start controls, status location, and server configuration.](../screenshots/settings-terminal-editors.png)
+
+Language-server settings are part of **Settings > Preferences > Terminal & Editors**. Kandev currently registers servers for:
 
 - TypeScript and JavaScript;
 - Go;
@@ -241,9 +241,9 @@ On desktop, select **+ > Terminals > New Terminal**. Parked terminal sessions ca
 
 Do not confuse a user terminal with a CLI-passthrough agent tab: both use PTYs, but only the agent tab is the agent's native interface. `Cmd/Ctrl+J` toggles the bottom terminal area.
 
-Open **Settings > Preferences > Terminal & Editors** (`/settings/preferences/terminal-editors`) to configure:
-
 ![Settings > Preferences > Terminal & Editors showing shell, terminal font, font size, and link settings.](../screenshots/settings-terminal.png)
+
+Open **Settings > Preferences > Terminal & Editors** (`/settings/preferences/terminal-editors`) to configure:
 
 - preferred shell, which defaults to the system shell; the built-in choices are zsh, bash, and sh on macOS/Linux, and PowerShell (`pwsh`), Windows PowerShell, and cmd on Windows, plus a custom executable;
 - terminal font, with a default Menlo/Monaco-style stack;
