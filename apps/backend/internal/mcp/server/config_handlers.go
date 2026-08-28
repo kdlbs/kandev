@@ -230,6 +230,7 @@ func (s *Server) registerConfigPromptTools() {
 		"List saved prompts without their content. Each summary includes the prompt name, whether it is built in, and its UTF-8 content size.",
 		json.RawMessage(`{"type":"object","properties":{}}`),
 	)
+	// NewToolWithRawSchema does not accept option functions, so set annotations directly.
 	listTool.Annotations.ReadOnlyHint = mcp.ToBoolPtr(true)
 	listTool.Annotations.DestructiveHint = mcp.ToBoolPtr(false)
 	listTool.Annotations.IdempotentHint = mcp.ToBoolPtr(true)

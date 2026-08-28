@@ -67,6 +67,8 @@ func (h *Handlers) handleGetSharedPrompt(ctx context.Context, msg *ws.Message) (
 	}
 
 	prompt, err := h.promptReader.GetPromptByName(ctx, name)
+	// Keep the nil-result guard for alternate PromptReader implementations. The
+	// production service maps nil results to ErrPromptNotFound.
 	if errors.Is(err, promptservice.ErrPromptNotFound) || (err == nil && prompt == nil) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Shared prompt not found", nil)
 	}

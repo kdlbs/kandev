@@ -9,7 +9,7 @@ import (
 
 func TestService_GetPromptByName_TrimsNameAndMapsMissingRows(t *testing.T) {
 	svc, cleanup := createService(t)
-	defer cleanup()
+	t.Cleanup(cleanup)
 
 	prompt, err := svc.GetPromptByName(context.Background(), "  code-review  ")
 	require.NoError(t, err)
