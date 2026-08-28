@@ -141,6 +141,34 @@ func TestHandleGetSharedPrompt_RejectsBlankAndMapsNotFound(t *testing.T) {
 	assert.NotContains(t, string(missing.Payload), "content")
 }
 
+func TestHandleGetSharedPrompt_MapsNilResultToNotFound(t *testing.T) {
+	reader := &sharedPromptReaderStub{}
+	h := &Handlers{promptReader: reader, logger: testLogger(t)}
+
+	resp, err := h.handleGetSharedPrompt(context.Background(), makeWSMessage(t, ws.ActionMCPGetSharedPrompt, map[string]string{
+		"name": "missing",
+	}))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeNotFound)
+	assert.NotContains(t, string(resp.Payload), "content")
+}
+
+func TestHandleGetSharedPrompt_HidesRepositoryErrors(t *testing.T) {
+	reader := &sharedPromptReaderStub{
+		prompt: &promptmodels.Prompt{Content: "secret prompt content"},
+		getErr: errors.New("database details"),
+	}
+	h := &Handlers{promptReader: reader, logger: testLogger(t)}
+
+	resp, err := h.handleGetSharedPrompt(context.Background(), makeWSMessage(t, ws.ActionMCPGetSharedPrompt, map[string]string{
+		"name": "code-review",
+	}))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	assert.NotContains(t, string(resp.Payload), "database details")
+	assert.NotContains(t, string(resp.Payload), "secret prompt content")
+}
+
 func TestHandleSharedPrompts_HidesRepositoryErrors(t *testing.T) {
 	reader := &sharedPromptReaderStub{listErr: errors.New("database details")}
 	h := &Handlers{promptReader: reader, logger: testLogger(t)}
