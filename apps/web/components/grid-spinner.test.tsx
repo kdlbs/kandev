@@ -16,14 +16,14 @@ afterEach(() => {
   }
 });
 
-function installComputedAnimationStyles() {
+function installComputedAnimationStyles(easing = "ease-in-out") {
   vi.spyOn(window, "getComputedStyle").mockImplementation((element) => {
     const cubeIndex = Array.from(element.parentElement?.children ?? []).indexOf(element);
     return {
       animationDelay: delays[cubeIndex] ?? "0s",
       animationDuration: "1.3s",
       animationName: "spinner-grid",
-      animationTimingFunction: "ease-in-out",
+      animationTimingFunction: easing,
     } as CSSStyleDeclaration;
   });
 }
@@ -81,6 +81,33 @@ describe("GridSpinner", () => {
     const cubes = Array.from(container.querySelectorAll<HTMLElement>(".spinner-grid-cube"));
     expect(cubes).toHaveLength(9);
     expect(cubes.every((cube) => cube.style.animation === "")).toBe(true);
+  });
+
+  it("preserves commas inside CSS easing functions", () => {
+    installComputedAnimationStyles("cubic-bezier(0.4, 0, 0.6, 1)");
+    const animate = installAnimate();
+
+    render(<GridSpinner />);
+
+    expect(animate.mock.calls[0]?.[1]).toEqual({
+      delay: 200,
+      duration: 1_300,
+      easing: "cubic-bezier(0.4, 0, 0.6, 1)",
+      iterations: Infinity,
+    });
+  });
+
+  it("keeps the animation phase when its presentation class changes", () => {
+    installComputedAnimationStyles();
+    const animations = Array.from({ length: 9 }, () => makeAnimation());
+    let animationIndex = 0;
+    const animate = installAnimate(() => animations[animationIndex++]);
+
+    const { rerender } = render(<GridSpinner className="opacity-50" />);
+    rerender(<GridSpinner className="opacity-75" />);
+
+    expect(animate).toHaveBeenCalledTimes(9);
+    for (const animation of animations) expect(animation.cancel).not.toHaveBeenCalled();
   });
 
   it("restores one consistent CSS fallback when setup fails partway", () => {

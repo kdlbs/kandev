@@ -71,6 +71,7 @@ the Web Animations path and a forced CSS-fallback control.
 
 - `apps/web/components/grid-spinner.tsx`
 - `apps/web/components/grid-spinner.test.tsx`
+- `apps/packages/ui/src/animation-utils.tsx`
 - `apps/web/app/globals.css`
 - `apps/web/e2e/tests/chat/quick-chat-idle-dot.spec.ts`
 - `apps/web/e2e/tests/chat/mobile-quick-chat-idle-dot.spec.ts`
@@ -110,5 +111,6 @@ None.
   mobile flow also confirms no document overflow.
 - The combined 8.34-second trace recorded zero recurring style, layerization,
   layout, paint, or target-invalidation events for the compositor targets. The
-  forced CSS fallback recorded 47 `UpdateLayoutTree`, 45 `Layerize`, and 893
-  target invalidations in the same interval.
+  initial forced CSS fallback recorded 47 `UpdateLayoutTree`, 45 `Layerize`,
+  and 893 target invalidations; the review-remediation rerun recorded 45, 45,
+  and 855 respectively.

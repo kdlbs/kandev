@@ -1,6 +1,7 @@
 "use client";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
+import { firstAnimationListValue, parseCssTime } from "@kandev/ui/animation-utils";
 
 type GridSpinnerProps = {
   className?: string;
@@ -32,7 +33,7 @@ export function GridSpinner({ className }: GridSpinnerProps) {
       for (const animation of animations) animation.cancel();
       for (const cube of cubes) cube.style.removeProperty("animation");
     };
-  }, [className]);
+  }, []);
 
   return (
     <span
@@ -58,12 +59,13 @@ function startGridAnimations(cubes: HTMLElement[]): Animation[] | null {
   if (cubes.length !== 9 || cubes.some((cube) => typeof cube.animate !== "function")) return null;
 
   const timing = cubes.map(readAnimationTiming);
-  if (timing.some((value) => value === null)) return null;
+  const validTiming = timing.filter((value): value is KeyframeAnimationOptions => value !== null);
+  if (validTiming.length !== cubes.length) return null;
 
   const animations: Animation[] = [];
   try {
     for (let index = 0; index < cubes.length; index += 1) {
-      animations.push(cubes[index].animate(gridKeyframes, timing[index] ?? undefined));
+      animations.push(cubes[index].animate(gridKeyframes, validTiming[index]));
     }
     return animations;
   } catch {
@@ -74,21 +76,12 @@ function startGridAnimations(cubes: HTMLElement[]): Animation[] | null {
 
 function readAnimationTiming(cube: HTMLElement): KeyframeAnimationOptions | null {
   const computedStyle = window.getComputedStyle(cube);
-  if (computedStyle.animationName === "none") return null;
+  if (firstAnimationListValue(computedStyle.animationName) === "none") return null;
 
   const duration = parseCssTime(computedStyle.animationDuration);
   const delay = parseCssTime(computedStyle.animationDelay);
-  const easing = computedStyle.animationTimingFunction.split(",")[0]?.trim();
+  const easing = firstAnimationListValue(computedStyle.animationTimingFunction);
   if (duration === null || duration <= 0 || delay === null || !easing) return null;
 
   return { delay, duration, easing, iterations: Infinity };
-}
-
-function parseCssTime(value: string): number | null {
-  const firstValue = value.split(",")[0]?.trim();
-  if (!firstValue) return null;
-
-  const numericValue = Number.parseFloat(firstValue);
-  if (!Number.isFinite(numericValue)) return null;
-  return firstValue.endsWith("ms") ? numericValue : numericValue * 1_000;
 }

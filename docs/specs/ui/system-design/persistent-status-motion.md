@@ -94,16 +94,20 @@ continue to decide when each target mounts; the primitive owns only motion.
 ## Animation lifecycle and fallback
 
 Each Web Animations effect starts after mount and is cancelled during effect
-cleanup or before replacement. A class, duration, or active-state change first
-restores the CSS declaration, reads the new computed timing, and then replaces
-the live effect. This prevents stale inline `animation: none` from suppressing
-later motion.
+cleanup or before replacement. A duration or active-state change first restores
+the CSS declaration, reads the new computed timing, and then replaces the live
+effect. Grid presentation-class changes leave the existing effects in place so
+they do not reset the visible stagger. This prevents stale inline `animation:
+none` from suppressing later motion.
 
 If `Element.animate` is unavailable, CSS keeps the existing animation. If the
 computed animation name is `none`, including under a surface's existing
 reduced-motion media rule, the compositor path does not start a replacement
-effect. This preserves current reduced-motion behavior without creating a new
-setting.
+effect. A mounted target also subscribes to `prefers-reduced-motion` changes:
+enabling reduced motion cancels the Web Animations effect and restores the CSS
+declaration, while disabling it allows the target to establish the compositor
+effect again. This preserves current reduced-motion behavior without creating a
+new setting.
 
 ## Status surfaces
 

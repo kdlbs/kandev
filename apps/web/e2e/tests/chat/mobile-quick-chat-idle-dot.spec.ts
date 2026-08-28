@@ -1,6 +1,6 @@
-import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { watchWs } from "../../helpers/causal-waits";
+import { expectCompositorGridMotion } from "../../helpers/animation-assertions";
 import { SessionPage } from "../../pages/session-page";
 import {
   sendQuickChatMessage,
@@ -8,25 +8,6 @@ import {
   waitForSessionSettled,
   waitForSessionSettledBaseline,
 } from "./quick-chat-helpers";
-
-async function expectCompositorGridMotion(status: Locator) {
-  await expect(status.locator(".spinner-grid-cube")).toHaveCount(9);
-  await expect
-    .poll(() =>
-      status.locator(".spinner-grid-cube").evaluateAll((cubes) =>
-        cubes.every((cube) => {
-          const animations = cube.getAnimations();
-          return (
-            animations.length === 1 &&
-            animations[0].playState === "running" &&
-            animations[0].effect?.getTiming().iterations === Infinity &&
-            animations[0].constructor.name === "Animation"
-          );
-        }),
-      ),
-    )
-    .toBe(true);
-}
 
 test.describe("quick chat activity indicators", () => {
   test("shows the mobile header running and finished states through touch", async ({

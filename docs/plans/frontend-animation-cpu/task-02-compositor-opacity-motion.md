@@ -60,8 +60,8 @@ attributed independently.
 ```bash
 cd apps
 pnpm install --frozen-lockfile
-pnpm --filter @kandev/web exec vitest run lib/ui/compositor-pulse.test.tsx components/task/chat/chat-input-body.test.tsx components/task/simple/chat-activity-tabs.test.tsx --reporter=dot
-pnpm --filter @kandev/web exec eslint ../packages/ui/src/compositor-pulse.tsx web/lib/ui/compositor-pulse.test.tsx web/components/task/chat/chat-input-body.tsx web/components/task/chat/chat-input-body.test.tsx web/components/task/simple/chat-activity-tabs.tsx web/components/task/simple/chat-activity-tabs.test.tsx
+pnpm --filter @kandev/web exec vitest run lib/ui/compositor-pulse.test.tsx components/task/chat/chat-input-body.test.tsx components/task/simple/chat-activity-tabs.test.tsx app/office/agents/components/agent-status-dot.test.tsx app/office/components/execution-indicator.test.tsx --reporter=dot
+pnpm --filter @kandev/web exec eslint ../packages/ui/src/compositor-pulse.tsx lib/ui/compositor-pulse.test.tsx components/task/chat/chat-input-body.tsx components/task/chat/chat-input-body.test.tsx components/task/simple/chat-activity-tabs.tsx components/task/simple/chat-activity-tabs.test.tsx app/office/agents/components/agent-status-dot.tsx app/office/agents/components/agent-status-dot.test.tsx app/office/components/execution-indicator.tsx app/office/components/execution-indicator.test.tsx
 pnpm --filter @kandev/web typecheck
 cd web
 pnpm e2e:run --project chromium tests/chat/persistent-animation-motion.spec.ts
@@ -77,6 +77,7 @@ fallback controls with React DevTools disabled.
 ## Files likely touched
 
 - `apps/packages/ui/src/compositor-pulse.tsx`
+- `apps/packages/ui/src/animation-utils.tsx`
 - `apps/web/lib/ui/compositor-pulse.test.tsx`
 - `apps/web/components/task/chat/chat-input-body.tsx`
 - `apps/web/components/task/chat/chat-input-body.test.tsx`
@@ -87,6 +88,7 @@ fallback controls with React DevTools disabled.
   audit.
 - `apps/web/e2e/tests/chat/persistent-animation-motion.spec.ts`
 - `apps/web/e2e/tests/chat/mobile-persistent-animation-motion.spec.ts`
+- `apps/web/e2e/helpers/animation-assertions.ts`
 
 ## Dependencies
 
@@ -124,15 +126,16 @@ fallback controls with React DevTools disabled.
   integration check status, and connection status unchanged because their
   lifetime or ownership is outside persistent task, session, agent, and run
   motion.
-- The six focused component suites pass 29 tests, including exact timing,
-  endpoint phase, unsupported fallback, reduced-motion suppression, cleanup,
-  state precedence, and static-state behavior. Focused ESLint and the direct
-  web TypeScript check pass.
+- The six focused component suites pass 32 tests, including exact timing,
+  endpoint phase, unsupported fallback, reduced-motion suppression and
+  preference changes, cleanup, state precedence, and static-state behavior.
+  Focused ESLint and the direct web TypeScript check pass.
 - Desktop Chromium and mobile Chrome production E2E pass the composer
   running-to-settled flow; the mobile flow also confirms no horizontal
   overflow.
 - The gated 8.34-second production trace recorded zero `UpdateLayoutTree`,
   `Layerize`, `Layout`, `Paint`, or target-invalidation events for the
-  compositor path. Its forced CSS fallback control recorded 47
+  compositor path. Its initial forced CSS fallback control recorded 47
   `UpdateLayoutTree`, 45 `Layerize`, zero `Layout`, zero `Paint`, and 893 target
-  invalidations.
+  invalidations; the review-remediation rerun recorded 45 `UpdateLayoutTree`,
+  45 `Layerize`, zero `Layout`, zero `Paint`, and 855 target invalidations.

@@ -108,8 +108,8 @@ running-to-settled outcome and no document horizontal overflow.
   one-shot attention cues, integration check status, and connection status
   remain on their existing paths because they are not persistent domain motion.
 - Focused component coverage passes: 63 tests for the grid integration set and
-  29 tests for the final opacity/status integration set. Focused ESLint and the
-  direct web TypeScript check pass.
+  32 targeted opacity/status and grid tests after review remediation. Focused
+  ESLint and the direct web TypeScript check pass.
 - Desktop Chromium and mobile Chrome production E2E pass for both Quick Chat
   grid motion and composer running-to-settled motion. Mobile checks also confirm
   that the animation targets do not introduce horizontal document overflow.
@@ -117,7 +117,9 @@ running-to-settled outcome and no document horizontal overflow.
   `UpdateLayoutTree`, `Layerize`, `Layout`, `Paint`, or target-invalidation
   events for the compositor path. The forced CSS fallback recorded 47
   `UpdateLayoutTree`, 45 `Layerize`, zero `Layout`, zero `Paint`, and 893 target
-  invalidations over the same interval.
+  invalidations in the initial capture; the remediation rerun recorded 45
+  `UpdateLayoutTree`, 45 `Layerize`, zero `Layout`, zero `Paint`, and 855 target
+  invalidations.
 
 ## Risks
 

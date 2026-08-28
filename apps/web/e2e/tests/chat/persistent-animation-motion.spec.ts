@@ -1,24 +1,6 @@
-import type { Locator } from "@playwright/test";
-
 import { test, expect } from "../../fixtures/test-base";
+import { expectCompositorPulse } from "../../helpers/animation-assertions";
 import { SessionPage } from "../../pages/session-page";
-
-async function expectCompositorPulse(pulse: Locator) {
-  await expect(pulse).toBeVisible();
-  await expect
-    .poll(() =>
-      pulse.evaluate((element) => {
-        const animations = element.getAnimations();
-        return (
-          animations.length === 1 &&
-          animations[0].playState === "running" &&
-          animations[0].effect?.getTiming().iterations === Infinity &&
-          animations[0].constructor.name === "Animation"
-        );
-      }),
-    )
-    .toBe(true);
-}
 
 test("keeps the busy task composer glow animated until the turn settles", async ({
   testPage,

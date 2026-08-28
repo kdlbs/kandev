@@ -135,31 +135,41 @@ async function installCssFallbackControl(page: Page) {
 
 async function captureTrace(page: Page, testInfo: TestInfo, label: string): Promise<TraceMetrics> {
   const client = await page.context().newCDPSession(page);
-  await client.send("Emulation.setScriptExecutionDisabled", { value: true });
-  await dwell(
-    1_000,
-    "clock-separation",
-    "the browser does not publish an event when pending application tasks are drained",
-  );
-  const stream = traceStream(client);
-  await client.send("Tracing.start", {
-    categories: [
-      "devtools.timeline",
-      "disabled-by-default-devtools.timeline",
-      "disabled-by-default-devtools.timeline.invalidationTracking",
-      "blink.user_timing",
-    ].join(","),
-    transferMode: "ReturnAsStream",
-  });
-  await dwell(
-    TRACE_WINDOW_MS,
-    "clock-separation",
-    "the fixed acceptance trace window has no completion event",
-  );
-  await client.send("Tracing.end");
-  const trace = await readTraceStream(client, await stream);
-  await client.send("Emulation.setScriptExecutionDisabled", { value: false });
-  await client.detach();
+  let trace = "";
+  let tracingStarted = false;
+  try {
+    await client.send("Emulation.setScriptExecutionDisabled", { value: true });
+    await dwell(
+      1_000,
+      "clock-separation",
+      "the browser does not publish an event when pending application tasks are drained",
+    );
+    const stream = traceStream(client);
+    await client.send("Tracing.start", {
+      categories: [
+        "devtools.timeline",
+        "disabled-by-default-devtools.timeline",
+        "disabled-by-default-devtools.timeline.invalidationTracking",
+        "blink.user_timing",
+      ].join(","),
+      transferMode: "ReturnAsStream",
+    });
+    tracingStarted = true;
+    await dwell(
+      TRACE_WINDOW_MS,
+      "clock-separation",
+      "the fixed acceptance trace window has no completion event",
+    );
+    await client.send("Tracing.end");
+    tracingStarted = false;
+    trace = await readTraceStream(client, await stream);
+  } finally {
+    if (tracingStarted) await client.send("Tracing.end").catch(() => undefined);
+    await client
+      .send("Emulation.setScriptExecutionDisabled", { value: false })
+      .catch(() => undefined);
+    await client.detach().catch(() => undefined);
+  }
   await testInfo.attach(`${label}.json`, {
     body: Buffer.from(trace),
     contentType: "application/json",
@@ -185,7 +195,7 @@ async function readTraceStream(client: CDPSession, stream: string): Promise<stri
   let eof = false;
   while (!eof) {
     const chunk = await client.send("IO.read", { handle: stream });
-    trace += chunk.data;
+    trace += chunk.base64Encoded ? Buffer.from(chunk.data, "base64").toString("utf8") : chunk.data;
     eof = chunk.eof;
   }
   await client.send("IO.close", { handle: stream });

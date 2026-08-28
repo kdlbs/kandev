@@ -3,6 +3,7 @@ import { CompositorPulse } from "@kandev/ui/compositor-pulse";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+const originalMatchMedia = Object.getOwnPropertyDescriptor(window, "matchMedia");
 
 afterEach(() => {
   cleanup();
@@ -11,6 +12,11 @@ afterEach(() => {
     Object.defineProperty(HTMLElement.prototype, "animate", originalAnimate);
   } else {
     Reflect.deleteProperty(HTMLElement.prototype, "animate");
+  }
+  if (originalMatchMedia) {
+    Object.defineProperty(window, "matchMedia", originalMatchMedia);
+  } else {
+    Reflect.deleteProperty(window, "matchMedia");
   }
 });
 
@@ -32,6 +38,29 @@ function installAnimate() {
     value: animate,
   });
   return { animate, animation };
+}
+
+function installReducedMotionMediaQuery(initialMatches = false) {
+  let listener: ((event: MediaQueryListEvent) => void) | undefined;
+  const mediaQuery = {
+    matches: initialMatches,
+    addEventListener: vi.fn((_type: string, nextListener: (event: MediaQueryListEvent) => void) => {
+      listener = nextListener;
+    }),
+    removeEventListener: vi.fn(),
+  } as unknown as MediaQueryList;
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn(() => mediaQuery),
+  });
+
+  return {
+    mediaQuery,
+    setMatches(matches: boolean) {
+      Object.defineProperty(mediaQuery, "matches", { configurable: true, value: matches });
+      listener?.({ matches } as MediaQueryListEvent);
+    },
+  };
 }
 
 describe("CompositorPulse", () => {
@@ -92,6 +121,29 @@ describe("CompositorPulse", () => {
 
     expect(animate).not.toHaveBeenCalled();
     expect(getByTestId("pulse").style.animation).toBe("");
+  });
+
+  it("cancels and recreates its effect when reduced motion changes", () => {
+    installComputedAnimationStyles();
+    const { animate, animation } = installAnimate();
+    const { mediaQuery, setMatches } = installReducedMotionMediaQuery();
+
+    const { getByTestId, unmount } = render(
+      <CompositorPulse data-testid="pulse" className="animate-pulse" />,
+    );
+    const pulse = getByTestId("pulse");
+
+    expect(mediaQuery.addEventListener).toHaveBeenCalledWith("change", expect.any(Function));
+    setMatches(true);
+    expect(animation.cancel).toHaveBeenCalledOnce();
+    expect(pulse.style.animation).toBe("");
+
+    setMatches(false);
+    expect(animate).toHaveBeenCalledTimes(2);
+    expect(pulse.style.animation).toBe("none");
+
+    unmount();
+    expect(mediaQuery.removeEventListener).toHaveBeenCalledWith("change", expect.any(Function));
   });
 
   it("cancels its effect and restores CSS on cleanup", () => {
