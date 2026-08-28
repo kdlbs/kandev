@@ -26,6 +26,9 @@ func TestPostgresContinuationScopeMigration(t *testing.T) {
 		t.Fatalf("init current office schema: %v", err)
 	}
 
+	if _, err := db.ExecContext(ctx, `DROP INDEX IF EXISTS idx_run_failure_scope_status`); err != nil {
+		t.Fatalf("drop continuation scope index from legacy schema: %v", err)
+	}
 	if _, err := db.ExecContext(ctx, `ALTER TABLE runs DROP COLUMN continuation_scope`); err != nil {
 		t.Fatalf("drop continuation_scope from legacy schema: %v", err)
 	}

@@ -167,6 +167,7 @@ system. The UI system owns only independent, reusable presentation contracts.
 - [Sidebar Task Focus](system-design/sidebar-task-focus.md)
 - [PR Task Status Summary](system-design/pr-task-status-summary.md)
 - [Prompt History Panel](system-design/prompt-history-panel.md)
+- [Quick Chat and terminal elevation](system-design/quick-chat-elevation.md)
 - [Quick Chat and Terminal Tabs](system-design/quick-terminal.md)
 - [Responsive Plan Formatting](system-design/responsive-plan-formatting.md)
 - [Task Confirmation Warning Hierarchy](system-design/confirmation-warning-hierarchy.md)

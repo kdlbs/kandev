@@ -2,7 +2,8 @@ import { type Locator, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
-import { attachAvailableCommandsCapture } from "../../helpers/ws-capture";
+import { attachAvailableCommandsCapture, attachShellInputCapture } from "../../helpers/ws-capture";
+import { SHORTCUTS } from "@/lib/keyboard/constants";
 import {
   openQuickChatSetup,
   openQuickChatWithAgent,
@@ -53,18 +54,21 @@ async function dragQuickChatTab(page: Page, source: Locator, target: Locator) {
 }
 
 test.describe("Quick Chat", () => {
-  test("adds elevation when opened over the page", async ({ testPage }) => {
+  // @covers AC-UI-QUICK-CHAT-ELEVATION-001.1 AC-UI-QUICK-CHAT-ELEVATION-001.2 AC-UI-QUICK-CHAT-ELEVATION-001.5 AC-UI-QUICK-CHAT-ELEVATION-001.6
+  test("adds a stronger elevation backdrop when opened over the page", async ({ testPage }) => {
     const dialog = await openQuickChatSetup(testPage);
     const overlay = testPage.locator('[data-slot="dialog-overlay"]');
 
     await expect(overlay).toBeVisible();
     const styles = await Promise.all([
       overlay.evaluate((element) => getComputedStyle(element).backgroundColor),
+      overlay.evaluate((element) => getComputedStyle(element).backdropFilter),
       dialog.evaluate((element) => getComputedStyle(element).boxShadow),
     ]);
     expect(styles[0]).not.toBe("rgba(0, 0, 0, 0)");
     expect(styles[0]).not.toBe("transparent");
     expect(styles[1]).not.toBe("none");
+    expect(styles[2]).not.toBe("none");
 
     await testPage.keyboard.press("Escape");
     await expect(dialog).not.toBeVisible();
@@ -130,6 +134,66 @@ test.describe("Quick Chat", () => {
     await expect(dialog).not.toBeVisible();
     await expect(origin).toBeFocused();
     await expect(origin).not.toHaveAttribute("data-quick-chat-silent-focus");
+  });
+
+  test("@covers AC-UI-QUICK-TERMINAL-001.10 AC-UI-QUICK-TERMINAL-001.11 passthrough Escape stays in the TUI and the shortcut closes Quick Chat", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const capture = attachShellInputCapture(testPage);
+    const { agents } = await apiClient.listAgents();
+    const profileOwner = agents.find((agent) =>
+      agent.profiles?.some((profile) => profile.id === seedData.agentProfileId),
+    );
+    if (!profileOwner) throw new Error("Seed agent profile owner was not found");
+
+    let profileId: string | null = null;
+
+    try {
+      const profile = await apiClient.createAgentProfile(profileOwner.id, "Quick Chat Escape TUI", {
+        model: "mock-fast",
+        cli_passthrough: true,
+      });
+      profileId = profile.id;
+      await apiClient.updateWorkspace(seedData.workspaceId, {
+        default_agent_profile_id: profile.id,
+      });
+
+      const dialog = await openQuickChatSetup(testPage);
+      await dialog.getByTestId("quick-chat-start").click();
+
+      const terminal = dialog.getByTestId("passthrough-terminal");
+      await expect(terminal).toBeVisible({ timeout: 15_000 });
+      await expect(terminal.getByTestId("passthrough-loading")).not.toBeVisible({
+        timeout: 30_000,
+      });
+      await terminal.click();
+      await expect(terminal.locator(".xterm-helper-textarea")).toBeFocused();
+
+      capture.frames.length = 0;
+      await testPage.keyboard.press("Escape");
+
+      await expect(dialog).toBeVisible();
+      await expect
+        .poll(() => capture.frames.some((frame) => frame.data === "\x1b"), {
+          message: "Expected xterm to forward Escape to the passthrough terminal WebSocket",
+        })
+        .toBe(true);
+
+      const modifier = process.platform === "darwin" ? "Meta" : "Control";
+      const quickChatShortcut = `${modifier}+Shift+${SHORTCUTS.QUICK_CHAT.key}`;
+      await testPage.keyboard.press(quickChatShortcut);
+      await expect(dialog).not.toBeVisible();
+    } finally {
+      try {
+        await apiClient.updateWorkspace(seedData.workspaceId, {
+          default_agent_profile_id: seedData.agentProfileId,
+        });
+      } finally {
+        if (profileId) await apiClient.cleanupTestProfiles([profileId]);
+      }
+    }
   });
 
   test("clarification shortcuts work after clicking the message surface", async ({ testPage }) => {

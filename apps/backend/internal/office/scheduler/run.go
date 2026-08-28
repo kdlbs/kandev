@@ -107,6 +107,18 @@ type RunContext struct {
 	// changes_requested decision so the assignee receiving
 	// task_changes_requested has the context inline.
 	DecisionComment string `json:"decision_comment,omitempty"`
+
+	// IdempotencyKey, when non-empty, overrides the default
+	// "{reason}:{taskID}:{agentID}" key QueueRunCtx mints. The default
+	// key is permanently unique per (reason, task, agent) — fine for
+	// reasons that fire at most once per task, wrong for a reason that
+	// can legitimately recur (e.g. task_children_completed across
+	// repeated delegation waves). Callers that recur build their own
+	// key that changes with the thing that makes each occurrence
+	// distinct. Excluded from the JSON payload: it must never change
+	// encodeRunContext's output shape, which CoalesceRun compares for
+	// equality and taskIDFromPayload parses.
+	IdempotencyKey string `json:"-"`
 }
 
 // Run status constants.
@@ -293,9 +305,10 @@ func (ss *SchedulerService) QueueRun(
 // QueueRunCtx is the typed variant of QueueRun that takes a
 // structured RunContext. The context is JSON-encoded into the
 // payload column so the agent runtime can deserialise it. The
-// idempotencyKey is derived as "{reason}:{taskID}:{agentID}" so the
-// same agent never gets two runs for the same task+reason within
-// the idempotency window.
+// idempotency key is c.IdempotencyKey when the caller set one;
+// otherwise it defaults to "{reason}:{taskID}:{agentID}" so the same
+// agent never gets two runs for the same task+reason within the
+// idempotency window.
 func (ss *SchedulerService) QueueRunCtx(
 	ctx context.Context, agentInstanceID string, c RunContext,
 ) error {
@@ -303,7 +316,10 @@ func (ss *SchedulerService) QueueRunCtx(
 	if err != nil {
 		return fmt.Errorf("encode run context: %w", err)
 	}
-	idempotencyKey := fmt.Sprintf("%s:%s:%s", c.Reason, c.TaskID, agentInstanceID)
+	idempotencyKey := c.IdempotencyKey
+	if idempotencyKey == "" {
+		idempotencyKey = fmt.Sprintf("%s:%s:%s", c.Reason, c.TaskID, agentInstanceID)
+	}
 	return ss.QueueRun(ctx, agentInstanceID, c.Reason, payload, idempotencyKey)
 }
 

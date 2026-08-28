@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { watchWs } from "../../helpers/causal-waits";
+import { expectCompositorGridMotion } from "../../helpers/animation-assertions";
 import {
   openQuickChatWithAgent,
   sendQuickChatMessage,
@@ -33,7 +34,9 @@ test.describe("quick chat activity indicators", () => {
     });
     const settled = waitForSessionSettled(ws, sessionId);
     await sendQuickChatMessage(dialog, testPage, "/slow 8s");
-    await expect(tab.getByRole("status")).toBeVisible();
+    const gridStatus = tab.getByRole("status");
+    await expect(gridStatus).toBeVisible();
+    await expectCompositorGridMotion(gridStatus);
 
     await testPage.keyboard.press("Escape");
     await expect(indicator).toHaveAttribute("data-state", "running");
@@ -74,7 +77,9 @@ test.describe("quick chat activity indicators", () => {
     });
     const settled = waitForSessionSettled(ws, sessionId);
     await sendQuickChatMessage(dialog, tabletTestPage, "/slow 8s");
-    await expect(tab.getByRole("status")).toBeVisible();
+    const gridStatus = tab.getByRole("status");
+    await expect(gridStatus).toBeVisible();
+    await expectCompositorGridMotion(gridStatus);
 
     await tabletTestPage.keyboard.press("Escape");
     await expect(indicator).toHaveAttribute("data-state", "running");

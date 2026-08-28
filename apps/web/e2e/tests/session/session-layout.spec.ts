@@ -47,6 +47,9 @@ test.describe("Session layout", () => {
     const session = await seedTaskWithSession(testPage, apiClient, seedData, "Maximize Test");
 
     // Default layout: all panels visible
+    // Git updates can focus Changes while the task settles. Select Files
+    // before asserting the default right-column panel.
+    await session.clickTab("Files");
     await session.expectDefaultLayout();
 
     // Type a command in the terminal

@@ -498,6 +498,7 @@ test.beforeEach(async ({ apiClient, seedData }) => {
     lsp_auto_install_languages: [],
     lsp_server_configs: {},
     kanban_view_mode: "",
+    tasks_list_show_details: false,
     startup_page: "task_overview",
     show_anchored_prompt_bar: false,
     show_scroll_to_last_prompt: true,

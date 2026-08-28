@@ -121,6 +121,7 @@ signals, and task-scoped scheduling contracts.
 - [Task model unification](system-design/model-unification.md)
 - [Remote Contribution Tasks](system-design/remote-contribution-tasks.md)
 - [Task Archive Confirmation](system-design/archive-confirmation.md)
+- [Task plan write lifecycle](system-design/plan-write-lifecycle.md)
 - [Task Runtime Cleanup](system-design/runtime-cleanup.md)
 - [Queued Run Scheduling](system-design/run-scheduling.md)
 - [Session Delete Preserves Task Workspaces](system-design/session-delete-resource-cleanup.md)
@@ -128,6 +129,7 @@ signals, and task-scoped scheduling contracts.
 - [Task Launch Failure Recovery](system-design/task-launch-failure-recovery.md)
 - [WIP Limits and Visible Overflow Queues](system-design/wip-limit-pull-system.md)
 - [Workflow quorum decision recording](system-design/workflow-quorum-decision-recording.md)
+- [Workflow Step Fixed-Profile Routing](system-design/workflow-step-fixed-profile-routing.md)
 - [Workflow task-step transition ledger](system-design/workflow-task-step-transition-ledger.md)
 
 ## Migration record

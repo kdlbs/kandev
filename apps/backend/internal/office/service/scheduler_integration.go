@@ -336,20 +336,14 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 		Env:       env,
 		ProfileID: profileID,
 	}
-	if !si.launchOrLog(ctx, run, agent, taskID, execCfg.Type, launchCtx) {
-		return
-	}
-	// When a real task starter launched the agent, leave the run
-	// `claimed` and let the AgentCompleted/AgentStopped event subscribers
-	// in event_subscribers.go finish it. This serves as the "agent is
+	// launchAgent only returns true when the adapter was actually
+	// invoked. Leave the run `claimed` and let the
+	// AgentCompleted/AgentStopped event subscribers in
+	// event_subscribers.go finish it. This serves as the "agent is
 	// busy on this task" lock that ClaimNextEligibleRun respects, so
 	// new runs (comments, status changes) for the same agent + task
 	// queue up rather than racing the active turn.
-	if taskID != "" && si.svc.taskStarter != nil {
-		return
-	}
-
-	si.finishRun(ctx, run, agent, taskID)
+	si.launchAgent(ctx, run, agent, taskID, execCfg.Type, launchCtx)
 }
 
 // assembleAgentPrompt builds the wake-context prompt, decides whether the
@@ -396,6 +390,13 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 // - taskID is non-empty (task-bound runs don't use the summary doc)
 // - the summary table has no row yet (first wake ever for the scope)
 // - the lookup errors out (best-effort, fall back to no-summary)
+//
+// wakeup/dispatcher.go's createFreshRun passes taskID=="" on every
+// lightweight-routine fire (the pre-installed coordinator heartbeat,
+// among others), so this branch runs on a real cadence today. The
+// assembled prompt is still built for these runs even though
+// launchAgent cannot currently launch one (WO-35) — see that function's
+// doc comment.
 //
 // The scope read here is run.ContinuationScope — the same key
 // models.ContinuationScopeForRun computed once, at run-creation time, and
@@ -517,25 +518,38 @@ func (si *SchedulerIntegration) isTaskTreeGated(ctx context.Context, runID, task
 	return true
 }
 
-// launchOrLog starts the agent via the orchestrator or logs the run when
-// no task starter is configured. Returns false if the launch failed and the
-// caller should abort (the failure is already handled).
-func (si *SchedulerIntegration) launchOrLog(
+// launchAgent starts the agent via the orchestrator. Returns false if the
+// run could not be launched — either because it is structurally
+// unlaunchable (no task_id, no task starter wired) or because the adapter
+// invocation itself errored — and the caller should abort; the failure is
+// already handled (run marked failed, checkout released, WO-35).
+func (si *SchedulerIntegration) launchAgent(
 	ctx context.Context, run *models.Run,
 	agent *models.AgentInstance, taskID, executorType string,
 	launch LaunchContext,
 ) bool {
 	runID := run.ID
 
-	if taskID == "" || si.svc.taskStarter == nil {
-		si.logger.Info("processing run (no task starter or task ID)",
+	if taskID == "" {
+		si.logger.Error("cannot launch taskless run",
 			zap.String("run_id", runID),
 			zap.String("agent", agent.Name),
 			zap.String("reason", run.Reason),
 			zap.String("executor_type", executorType),
-			zap.Int("prompt_len", len(launch.Prompt)),
 		)
-		return true
+		si.failTasklessRun(ctx, run, agent,
+			"scheduler cannot launch a taskless run: run payload carries no task_id")
+		return false
+	}
+	if si.svc.taskStarter == nil {
+		si.logger.Error("cannot launch run: no task starter configured",
+			zap.String("run_id", runID),
+			zap.String("agent", agent.Name),
+			zap.String("task_id", taskID),
+		)
+		si.failUnlaunchableRun(ctx, run, agent,
+			"scheduler cannot launch run: no task starter is configured")
+		return false
 	}
 
 	si.logger.Info("launching agent for run",
@@ -578,6 +592,114 @@ func (si *SchedulerIntegration) launchOrLog(
 		return false
 	}
 	return true
+}
+
+// failTasklessRun terminally fails a run that launchAgent determined has
+// no task_id. This is a scheduler capability gap, not an agent failure, so
+// it must NOT go through HandleAgentFailure's consecutive-failure/
+// auto-pause accounting. The pre-installed "Coordinator heartbeat" routine
+// is taskless by design and fires every 5 minutes, so counting these toward
+// auto-pause paused every default install's coordinator within ~15
+// minutes; once paused, every subsequent run — including task-bound
+// event-driven ones that work today — was silently finished with no
+// launch (WO-35 Review round 1, Finding 1).
+//
+// SCOPE-1 decision: docs/specs/office/requirements/scheduler.md and
+// docs/specs/office/system-design/scheduler-01.md say a
+// lightweight (taskless) routine fire is meant to produce a real agent
+// run. This card does not implement that launch: doing so requires a
+// taskless session seam (task_sessions.task_id is currently NOT NULL),
+// which is a schema/contract change — New Feature Dev work, not a small
+// contained fix. What this card ships instead is the honest interim
+// state: fail loud and visible rather than silently reporting success
+// with no agent ever launched (the card's original SYMPTOM).
+//
+// A bare MarkRunFailed still leaves a visible failed row (surfaces via
+// ListFailedRunsForInbox, since the agent is never auto-paused here), so
+// it also publishes OfficeRunProcessed with the agent's workspace_id
+// (the run has no task_id for the WS gateway to resolve a workspace from
+// otherwise — WO-35 Review round 2, Finding 1) — restoring live UI
+// updates for this path (the pre-fix `finishRun` published on every
+// terminal run, including this one). Because the "Coordinator heartbeat"
+// routine fires every 5 minutes forever, every fire after the first would
+// otherwise add a permanent, non-actionable inbox row and evict real
+// failures from ListFailedRunsForInbox's LIMIT 200 window within ~17
+// hours; only the agent's first taskless failure stays visible; the rest
+// are auto-dismissed via the existing "_auto" sentinel (WO-35 Review
+// round 2, Finding 2).
+func (si *SchedulerIntegration) failTasklessRun(
+	ctx context.Context, run *models.Run, agent *models.AgentInstance, msg string,
+) {
+	si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
+		"phase":         "scheduler.launch",
+		"error_message": msg,
+	})
+	si.releaseCheckoutIfNeeded(ctx, run)
+	if err := si.svc.repo.MarkRunFailed(ctx, run.ID, msg); err != nil {
+		si.logger.Error("failed to mark taskless run as failed",
+			zap.String("run_id", run.ID), zap.Error(err))
+		return // don't publish a terminal event when persistence failed
+	}
+	run.ErrorMessage = msg
+
+	// Settle the auto-dismiss decision before publishing: the frontend
+	// refetches the inbox off this event (see office.ts), so the dismissal
+	// row must already exist by the time that refetch lands or the UI
+	// would show a repeat taskless failure that a later event never
+	// corrects (PR Fixup round 1, WO-35).
+	hasPrior, err := si.svc.repo.HasPriorTasklessFailedRun(
+		ctx, agent.ID, run.ContinuationScope, run.ID,
+	)
+	if err != nil {
+		si.logger.Error("failed to check prior taskless failures for scope",
+			zap.String("run_id", run.ID),
+			zap.String("agent_id", agent.ID),
+			zap.String("continuation_scope", run.ContinuationScope),
+			zap.Error(err))
+	} else if hasPrior {
+		if err := si.svc.repo.DismissInboxItem(ctx, autoDismissUserID, InboxKindAgentRunFailed, run.ID); err != nil {
+			si.logger.Error("failed to auto-dismiss repeat taskless failure",
+				zap.String("run_id", run.ID),
+				zap.String("agent_id", agent.ID),
+				zap.String("continuation_scope", run.ContinuationScope),
+				zap.Error(err))
+		}
+	}
+
+	si.svc.publishRunProcessedForWorkspace(ctx, run.ID, RunStatusFailed, run, agent.WorkspaceID)
+}
+
+// failUnlaunchableRun terminally fails a run that launchAgent determined
+// can never reach the adapter because the office service was constructed
+// without a task starter. Unlike a taskless run (failTasklessRun above),
+// this is a genuine wiring fault present for the process's whole
+// lifetime — the deployment cannot launch anything until it is fixed —
+// so auto-pausing the agent via HandleAgentFailure (immediate fail +
+// auto-pause accounting) is defensible here, unlike for a taskless run.
+// HandleRunFailure's retry-with-backoff is not used either: retrying a
+// condition that cannot change would just multiply the noise (WO-35).
+//
+// This run carries a real task_id (only the taskStarter is missing, not
+// the task), so the pre-fix `finishRun` published OfficeRunProcessed for
+// it and the WS gateway resolved its workspace via task_id — publish here
+// too (with the agent's workspace_id directly, since HandleAgentFailure
+// itself does not) to restore that live UI update (WO-35 Review round 2,
+// Finding 1).
+func (si *SchedulerIntegration) failUnlaunchableRun(
+	ctx context.Context, run *models.Run, agent *models.AgentInstance, msg string,
+) {
+	si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
+		"phase":         "scheduler.launch",
+		"error_message": msg,
+	})
+	si.releaseCheckoutIfNeeded(ctx, run)
+	if err := si.svc.HandleAgentFailure(ctx, run, msg); err != nil {
+		si.logger.Error("failed to handle agent failure for unlaunchable run",
+			zap.String("run_id", run.ID), zap.Error(err))
+		return // don't publish a terminal event when persistence failed
+	}
+	run.ErrorMessage = msg
+	si.svc.publishRunProcessedForWorkspace(ctx, run.ID, RunStatusFailed, run, agent.WorkspaceID)
 }
 
 // tryRoutingDispatch routes through the provider-routing dispatcher when
@@ -713,31 +835,6 @@ func (si *SchedulerIntegration) checkBudget(
 		return false
 	}
 	return true
-}
-
-// finishRun marks the run as finished, releases checkout, records
-// cooldown timestamp, and logs activity.
-func (si *SchedulerIntegration) finishRun(
-	ctx context.Context, run *models.Run,
-	agent *models.AgentInstance, taskID string,
-) {
-	if err := si.svc.FinishRun(ctx, run.ID); err != nil {
-		si.logger.Error("failed to finish run",
-			zap.String("run_id", run.ID), zap.Error(err))
-		return
-	}
-
-	si.releaseCheckoutIfNeeded(ctx, run)
-	si.svc.stampRunFinished(ctx, run)
-
-	si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
-		"scheduler", "office-scheduler",
-		"run_processed", "run", run.ID,
-		mustJSON(map[string]string{
-			"agent":    agent.Name,
-			"agent_id": agent.ID,
-			"reason":   run.Reason,
-		}), run.ID, "")
 }
 
 // releaseCheckoutIfNeeded releases the task checkout the given run may hold.

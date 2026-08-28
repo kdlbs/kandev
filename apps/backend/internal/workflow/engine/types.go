@@ -311,47 +311,72 @@ func CompileStep(step *wfmodels.WorkflowStep) StepSpec {
 func compileOnEnter(step *wfmodels.WorkflowStep) []Action {
 	actions := make([]Action, 0, len(step.Events.OnEnter))
 	for _, action := range step.Events.OnEnter {
-		switch action.Type {
-		case wfmodels.OnEnterEnablePlanMode:
-			actions = append(actions, Action{Kind: ActionEnablePlanMode})
-		case wfmodels.OnEnterAutoStartAgent:
-			actions = append(actions, Action{Kind: ActionAutoStartAgent, AutoStartAgent: &AutoStartAgentAction{QueueIfBusy: true}})
-		case wfmodels.OnEnterResetAgentContext:
-			actions = append(actions, Action{Kind: ActionResetAgentContext})
-		case wfmodels.OnEnterSetSessionMode:
-			mode := readSessionMode(action.Config)
-			if mode == "" {
-				continue // skip set_session_mode actions with no target mode
-			}
-			actions = append(actions, Action{Kind: ActionSetSessionMode, SetSessionMode: &SetSessionModeAction{Mode: mode}})
-		case wfmodels.OnEnterRunCodeReview:
-			actions = append(actions, Action{
-				Kind:          ActionRunCodeReview,
-				RunCodeReview: &RunCodeReviewAction{AgentProfileID: readReviewAgentProfileID(action.Config)},
-			})
-		case wfmodels.OnEnterClearDecisions:
-			actions = append(actions, Action{
-				Kind:           ActionClearDecisions,
-				ClearDecisions: &ClearDecisionsAction{},
-			})
-		case wfmodels.OnEnterQueueRunForEachParticipant:
-			actions = append(actions, Action{
-				Kind:                       ActionQueueRunForEachParticipant,
-				QueueRunForEachParticipant: readQueueRunForEachParticipantConfig(action.Config),
-			})
-		case wfmodels.OnEnterQueueRun:
-			actions = append(actions, Action{
-				Kind:     ActionQueueRun,
-				QueueRun: readQueueRunConfig(action.Config),
-			})
-		case wfmodels.OnEnterEnsureParticipantSeat:
-			actions = append(actions, Action{
-				Kind:                  ActionEnsureParticipantSeat,
-				EnsureParticipantSeat: readEnsureParticipantSeatConfig(action.Config),
-			})
+		if compiled, ok := CompileOnEnterAction(action); ok {
+			actions = append(actions, compiled)
 		}
 	}
 	return actions
+}
+
+// CompileOnEnterAction compiles a single on_enter declaration into its
+// engine Action, or (Action{}, false) when the declaration produces no
+// action (an unrecognised type, or a recognised type with config that
+// doesn't resolve to anything runnable — e.g. set_session_mode with no
+// target mode).
+//
+// Exported so callers outside the engine's own on_enter evaluation loop —
+// specifically internal/orchestrator's processOnEnter, which dispatches
+// clear_decisions/queue_run_for_each_participant directly via a step-entry
+// marker rather than through Engine.HandleTrigger — can reuse the exact
+// same per-kind config parsing instead of duplicating it. See
+// docs/specs/workflow-on-enter-action-dispatch/spec.md.
+func CompileOnEnterAction(action wfmodels.OnEnterAction) (Action, bool) {
+	switch action.Type {
+	case wfmodels.OnEnterEnablePlanMode:
+		return Action{Kind: ActionEnablePlanMode}, true
+	case wfmodels.OnEnterAutoStartAgent:
+		return Action{Kind: ActionAutoStartAgent, AutoStartAgent: &AutoStartAgentAction{QueueIfBusy: true}}, true
+	case wfmodels.OnEnterResetAgentContext:
+		return Action{Kind: ActionResetAgentContext}, true
+	case wfmodels.OnEnterSetSessionMode:
+		mode := readSessionMode(action.Config)
+		if mode == "" {
+			return Action{}, false // no target mode: nothing to run
+		}
+		return Action{Kind: ActionSetSessionMode, SetSessionMode: &SetSessionModeAction{Mode: mode}}, true
+	case wfmodels.OnEnterRunCodeReview:
+		return Action{
+			Kind:          ActionRunCodeReview,
+			RunCodeReview: &RunCodeReviewAction{AgentProfileID: readReviewAgentProfileID(action.Config)},
+		}, true
+	case wfmodels.OnEnterClearDecisions:
+		return Action{
+			Kind:           ActionClearDecisions,
+			ClearDecisions: &ClearDecisionsAction{},
+		}, true
+	case wfmodels.OnEnterQueueRunForEachParticipant:
+		return Action{
+			Kind:                       ActionQueueRunForEachParticipant,
+			QueueRunForEachParticipant: readQueueRunForEachParticipantConfig(action.Config),
+		}, true
+	case wfmodels.OnEnterQueueRun:
+		return Action{
+			Kind:     ActionQueueRun,
+			QueueRun: readQueueRunConfig(action.Config),
+		}, true
+	case wfmodels.OnEnterEnsureParticipantSeat:
+		// Carried across the CompileOnEnterAction refactor from #3043's
+		// open-coded switch. Without this case the compiler silently drops
+		// every ensure_participant_seat action, which is the whole point of
+		// that PR: nothing else creates reviewer/approver seats, so the slate
+		// stays empty and queue_run_for_each_participant has nobody to queue.
+		return Action{
+			Kind:                  ActionEnsureParticipantSeat,
+			EnsureParticipantSeat: readEnsureParticipantSeatConfig(action.Config),
+		}, true
+	default:
+		return Action{}, false
+	}
 }
 
 func compileOnTurnStart(step *wfmodels.WorkflowStep) []Action {

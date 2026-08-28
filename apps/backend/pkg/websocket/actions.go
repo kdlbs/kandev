@@ -474,6 +474,8 @@ const (
 	ActionMCPDeleteAgentProfile = "mcp.delete_agent_profile"
 	ActionMCPGetMcpConfig       = "mcp.get_mcp_config"
 	ActionMCPUpdateMcpConfig    = "mcp.update_mcp_config"
+	ActionMCPListSharedPrompts  = "mcp.list_shared_prompts"
+	ActionMCPGetSharedPrompt    = "mcp.get_shared_prompt"
 
 	ActionMCPListExecutors         = "mcp.list_executors"
 	ActionMCPListExecutorProfiles  = "mcp.list_executor_profiles"

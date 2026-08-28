@@ -452,7 +452,7 @@ func (s *Service) runWorkspaceDeleteTaskCleanup(cleanup workspaceDeleteTaskClean
 		return
 	}
 	envCleanup := taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}
-	s.runTaskCleanup(cleanup.task.ID, cleanup.sessions, cleanup.worktrees, cleanup.stopTargets, envCleanup,
+	s.runTaskCleanup(cleanup.task.ID, cleanup.sessions, cleanup.worktrees, cleanup.stopTargets, envCleanup, true,
 		"task deleted", "failed to stop session on task delete", "task cleanup completed")
 }
 

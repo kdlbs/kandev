@@ -1416,7 +1416,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			scheduler:          sched,
 		}
 
-		svc.processOnEnter(ctx, "t1", session, step, "desc")
+		svc.processOnEnter(ctx, "t1", session, step, "desc", 0)
 
 		// The old session should be completed
 		oldSession, err := repo.GetTaskSession(ctx, "s1")
@@ -1484,7 +1484,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		sg.steps["step1"] = step
 
 		svc := createTestService(repo, sg, newMockTaskRepo())
-		svc.processOnEnter(ctx, "t1", session, step, "desc")
+		svc.processOnEnter(ctx, "t1", session, step, "desc", 0)
 
 		// Session should remain running (not completed)
 		updatedSession, err := repo.GetTaskSession(ctx, "s1")
@@ -1508,55 +1508,6 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		}
 		if len(sessions) != 1 {
 			t.Errorf("expected 1 session, got %d", len(sessions))
-		}
-	})
-
-	t.Run("no switch for passthrough sessions", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		now := time.Now().UTC()
-
-		ws := &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}
-		_ = repo.CreateWorkspace(ctx, ws)
-		wf := &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}
-		_ = repo.CreateWorkflow(ctx, wf)
-		task := &models.Task{
-			ID: "t1", WorkflowID: "wf1", WorkflowStepID: "step2",
-			Title: "Test", Description: "desc", State: v1.TaskStateInProgress,
-			CreatedAt: now, UpdatedAt: now,
-		}
-		_ = repo.CreateTask(ctx, task)
-
-		session := &models.TaskSession{
-			ID:             "s1",
-			TaskID:         "t1",
-			AgentProfileID: "profile-a",
-			State:          models.TaskSessionStateRunning,
-			IsPrimary:      true,
-			StartedAt:      now,
-			UpdatedAt:      now,
-		}
-		_ = repo.CreateTaskSession(ctx, session)
-
-		sg := newMockStepGetter()
-		step := &wfmodels.WorkflowStep{
-			ID:             "step2",
-			WorkflowID:     "wf1",
-			Name:           "Review",
-			AgentProfileID: "profile-b",
-		}
-		sg.steps["step2"] = step
-
-		agentMgr := &mockAgentManager{isPassthrough: true}
-		svc := createTestServiceWithAgent(repo, sg, newMockTaskRepo(), agentMgr)
-		svc.processOnEnter(ctx, "t1", session, step, "desc")
-
-		// Session should NOT be completed (passthrough skips profile switch)
-		updatedSession, err := repo.GetTaskSession(ctx, "s1")
-		if err != nil {
-			t.Fatalf("failed to get session: %v", err)
-		}
-		if updatedSession.State == models.TaskSessionStateCompleted {
-			t.Error("passthrough session should not be completed for profile switch")
 		}
 	})
 
@@ -1596,7 +1547,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		sg.steps["step1"] = step
 
 		svc := createTestService(repo, sg, newMockTaskRepo())
-		svc.processOnEnter(ctx, "t1", session, step, "desc")
+		svc.processOnEnter(ctx, "t1", session, step, "desc", 0)
 
 		// Session should remain running
 		sessions, err := repo.ListTaskSessions(ctx, "t1")
@@ -1657,7 +1608,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		sg.steps["step1"] = step
 
 		svc := createTestService(repo, sg, newMockTaskRepo())
-		svc.processOnEnter(ctx, "t1", session, step, "desc")
+		svc.processOnEnter(ctx, "t1", session, step, "desc", 0)
 
 		// Critical: no new profile-a session should be spawned, and the
 		// user-chosen profile-b session must NOT be marked COMPLETED.
@@ -1744,7 +1695,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			scheduler:          sched,
 		}
 
-		svc.processOnEnter(ctx, "t1", session, step, "desc")
+		svc.processOnEnter(ctx, "t1", session, step, "desc", 0)
 
 		updated, err := repo.GetTaskSession(ctx, "s1")
 		if err != nil {

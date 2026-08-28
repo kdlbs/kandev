@@ -32,6 +32,7 @@ func startCronScheduler(
 	dispatcher *officeenginedispatcher.Dispatcher,
 	routineSvc *officeroutines.RoutineService,
 	officeRecovery schedulercron.Handler,
+	parentWakeReconciler schedulercron.Handler,
 	log *logger.Logger,
 ) *schedulercron.Loop {
 	heartbeat := buildHeartbeatHandler(repos, dispatcher, log)
@@ -46,7 +47,7 @@ func startCronScheduler(
 	}
 	routines := schedulercron.NewRoutinesHandler(routineTicker, nil, log)
 	loop := schedulercron.NewLoop(schedulercron.DefaultTickInterval, log,
-		heartbeat, budget, routines, officeRecovery)
+		heartbeat, budget, routines, officeRecovery, parentWakeReconciler)
 	loop.Start(ctx)
 	log.Info("phase 5 cron loop started",
 		zap.Duration("interval", schedulercron.DefaultTickInterval))

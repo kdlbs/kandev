@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-03
-updated: 2026-08-27
+updated: 2026-08-28
 owners:
   - kandev
 ---
@@ -29,11 +29,15 @@ Quick Chat and Quick Terminal are both short-lived utilities reached from the sa
 - **AC-UI-QUICK-TERMINAL-001.7:** Renameable conversation tabs expose **Rename** from a context menu on fine-pointer devices and from a visible tab action on coarse-pointer devices. The backing-task rename persistence remains unchanged. Terminal labels stay fixed.
 - **AC-UI-QUICK-TERMINAL-001.8:** Multiple terminal tabs can run concurrently. Input, output, resize, exit, and error state belong to the selected terminal and must not affect sibling terminals.
 - **AC-UI-QUICK-TERMINAL-001.9:** When Escape closes the shared dialog, the system shall return focus to the launcher without a visible focus indicator. When focus later returns through ordinary keyboard navigation, the launcher shall show its normal focus indicator.
+- **AC-UI-QUICK-TERMINAL-001.10:** The user-configurable Quick Chat keyboard shortcut shall toggle the shared dialog. Activating the configured shortcut while the dialog is closed opens ordinary Quick Chat; activating it while the dialog is open closes the dialog without removing its chat or terminal sessions.
+- **AC-UI-QUICK-TERMINAL-001.11:** When a connected agent passthrough terminal owns keyboard focus inside the shared dialog, with its xterm AttachAddon installed on an open terminal WebSocket, unmodified Escape shall reach the agent TUI and the dialog shall remain open. Escape from non-terminal focus targets, or while that terminal connection is unavailable, retains the existing dialog and nested-widget behavior.
+- **AC-UI-QUICK-TERMINAL-001.12:** Phone and coarse-pointer users shall retain the existing visible Quick Chat close action and touch dismissal paths without depending on a hardware keyboard shortcut.
 
 ## Out of scope
 
 - Changing pointer dismissal, tooltip behavior, or focus indicators on unrelated controls.
 - Changing the Quick Chat layout or its mobile touch controls.
+- Adding a separate preference for whether Escape closes Quick Chat. Focus ownership determines the behavior.
 
 ### REQ-UI-QUICK-TERMINAL-002: Quick Chat Tab Organization
 

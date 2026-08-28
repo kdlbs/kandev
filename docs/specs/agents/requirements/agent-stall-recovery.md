@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-07-29
-updated: 2026-08-18
+updated: 2026-08-27
 owners:
   - Kandev
 ---
@@ -79,6 +79,29 @@ mere inactivity so a failed turn is not presented as healthy work.
   session and task to `FAILED`.
 - The backend logs the first stall detected for a prompt generation and does
   not emit another notice or log entry on every watchdog check.
+
+### Explicit completion signal recovery
+
+- An accepted `step_complete_kandev` signal is stronger evidence than
+  inactivity alone. It records that the agent requested the current step
+  transition.
+- If the signal is at least ten minutes old and the session is still
+  `RUNNING` or `STARTING`, Kandev checks current prompt activity before it
+  reclaims the session. It excludes Office and passthrough sessions.
+- The watchdog cancels the captured execution, closes only the captured
+  turn, changes the session to `WAITING_FOR_INPUT`, and uses the normal
+  signal reconciler to apply the workflow transition.
+- The watchdog validates the execution ID, prompt generation, and activity
+  epoch that it captured. It does not cancel a replacement execution or
+  close a successor turn.
+- If cancellation finds no execution, Kandev may continue because no live
+  process remains. Other lifecycle or storage errors stop the reclaim and
+  leave the durable signal for a later retry.
+- A failed reconciliation does not lose the signal. Later watchdog ticks
+  retry a `WAITING_FOR_INPUT` session while the matching signal remains.
+
+This is the only automatic state-changing exception to the advisory inactivity
+rule. Silence without an accepted explicit completion signal remains advisory.
 
 ### Correlated terminal diagnostics
 
@@ -174,6 +197,9 @@ sanitized diagnostic message for the collapsed technical-details surface.
   one terminal event settles the prompt generation.
 - If sanitization removes all usable provider text, Kandev surfaces a generic
   OpenCode provider failure without exposing the raw diagnostic.
+- If an explicit completion signal remains after a reclaim, the session stays
+  input-ready and the watchdog retries the normal reconciliation path on a
+  later tick.
 
 ## Persistence guarantees
 
@@ -219,6 +245,18 @@ sanitized diagnostic message for the collapsed technical-details surface.
 - **GIVEN** a quiet but legitimate long-running turn, **WHEN** the inactivity
   threshold passes and the user does not cancel, **THEN** Kandev leaves the
   turn and process running.
+- **GIVEN** a current-step completion signal is at least ten minutes old and
+  the tracked prompt has also been inactive for ten minutes, **WHEN** the
+  session is still `RUNNING` or `STARTING`, **THEN** the watchdog settles the
+  captured turn, moves the session to `WAITING_FOR_INPUT`, and applies the
+  signal through the normal workflow engine path.
+- **GIVEN** the watchdog moves a signalled session to `WAITING_FOR_INPUT` but
+  a storage or workflow lookup fails, **WHEN** a later tick runs and the
+  signal is still pending, **THEN** Kandev retries reconciliation and does not
+  create a second turn completion.
+- **GIVEN** a new execution or turn appears while the watchdog is cancelling
+  the captured one, **WHEN** the watchdog resumes, **THEN** it does not cancel
+  or close the successor and leaves the signal pending for a later retry.
 - **GIVEN** the active OpenCode prompt emits a `stream error` for its own ACP
   session, **WHEN** the diagnostic says the model's five-hour usage limit was
   reached, **THEN** Kandev ends the running state and shows a localized

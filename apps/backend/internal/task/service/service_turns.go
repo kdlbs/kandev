@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -276,6 +277,8 @@ func (s *Service) createCompletedTurn(ctx context.Context, session *models.TaskS
 		return nil, errors.New("cannot create completed turn without a session")
 	}
 	now := time.Now().UTC()
+	metadata := turnStartRuntimeMetadata(session)
+	metadata[models.TurnMetaKeyLifecycleOnly] = true
 	turn := &models.Turn{
 		ID:                 uuid.New().String(),
 		TaskSessionID:      session.ID,
@@ -284,7 +287,7 @@ func (s *Service) createCompletedTurn(ctx context.Context, session *models.TaskS
 		RouteGeneration:    session.RouteGeneration,
 		StartedAt:          now,
 		CompletedAt:        &now,
-		Metadata:           turnStartRuntimeMetadata(session),
+		Metadata:           metadata,
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}
@@ -850,10 +853,16 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	if session.TaskEnvironmentID != "" {
 		env, envErr := s.taskEnvironments.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
 		if envErr != nil {
-			s.logger.Warn("failed to get task environment for session",
+			logFields := []zap.Field{
 				zap.String("session_id", sessionID),
 				zap.String("task_environment_id", session.TaskEnvironmentID),
-				zap.Error(envErr))
+				zap.Error(envErr),
+			}
+			if errors.Is(envErr, taskrepo.ErrTaskEnvironmentNotFound) {
+				s.logger.Debug("failed to get task environment for session", logFields...)
+			} else {
+				s.logger.Warn("failed to get task environment for session", logFields...)
+			}
 		} else {
 			taskEnv = env
 		}
