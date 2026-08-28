@@ -3,7 +3,6 @@
 ## Table of contents
 
 - [Core workflow](#core-workflow)
-- [Native features](#native-features)
 - [Automations](#automations)
 - [Plugins](#plugins)
 - [Workspace & agent settings](#workspace--agent-settings)
@@ -39,6 +38,18 @@
     <td align="center"><strong>Review Dialog</strong><br><img src="screenshots/review dialog.png" alt="Review Dialog"></td>
   </tr>
   <tr>
+    <td align="center" valign="top">
+      <strong>PR auto-fix</strong><br>
+      Automate CI fixes, review-comment follow-up, and optional auto-merge or requeue when ready.<br><br>
+      <img src="screenshots/pr-auto-fix.png" alt="PR automation panel with auto-fix and auto-merge enabled" width="520">
+    </td>
+    <td align="center" valign="top">
+      <strong>Agent updates and version notifications</strong><br>
+      Get a visible prompt when a managed agent runtime has a newer version.<br><br>
+      <img src="screenshots/agent-updates.png" alt="Agent update notification showing a newer Codey version" width="520">
+    </td>
+  </tr>
+  <tr>
     <td align="center"><strong>Plan Comments</strong><br><img src="screenshots/plan comments.png" alt="Plan Comments"></td>
     <td align="center"><strong>CLI Agent</strong><br><img src="screenshots/cli agent.png" alt="CLI Agent"></td>
   </tr>
@@ -49,25 +60,6 @@
       Review task, session, Git activity, provider, GitHub, workload, and telemetry metrics.<br><br>
       <img src="screenshots/stats-overview.png" alt="Statistics overview showing tasks, time spent, Git activity, signal, telemetry, and top models" width="520"><br><br>
       <img src="screenshots/stats-github-workload.png" alt="Statistics dashboard showing GitHub activity and workload metrics" width="520">
-    </td>
-  </tr>
-</table>
-
-## Native features
-
-Kandev includes built-in pull-request automation and agent runtime update notifications.
-
-<table>
-  <tr>
-    <td align="center" valign="top" width="50%">
-      <strong>PR auto-fix</strong><br>
-      Automate CI fixes, review-comment follow-up, and optional auto-merge or requeue when ready.<br><br>
-      <img src="screenshots/pr-auto-fix.png" alt="PR automation panel with auto-fix and auto-merge enabled" width="520">
-    </td>
-    <td align="center" valign="top" width="50%">
-      <strong>Agent updates and version notifications</strong><br>
-      Get a visible prompt when a managed agent runtime has a newer version.<br><br>
-      <img src="screenshots/agent-updates.png" alt="Agent update notification showing a newer Codey version" width="520">
     </td>
   </tr>
 </table>
