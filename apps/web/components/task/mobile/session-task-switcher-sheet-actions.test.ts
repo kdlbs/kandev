@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Task } from "@/lib/types/http";
 
 const mocks = vi.hoisted(() => {
   const targetTaskId = "target-task";
@@ -43,6 +44,7 @@ const mocks = vi.hoisted(() => {
   return {
     targetTaskId,
     targetSessionId,
+    targetTask,
     state,
     store,
     setActiveTask: vi.fn(),
@@ -53,6 +55,9 @@ const mocks = vi.hoisted(() => {
     routerReplace: vi.fn(),
     archiveAndSwitch: vi.fn(),
     deleteTaskById: vi.fn(),
+    runTaskRemoval: vi.fn(
+      async (_kind: string, operation: { mutate: () => Promise<unknown> }) => operation.mutate(),
+    ),
     removeTaskFromBoard: vi.fn(),
     navigationRequest: vi.fn(),
   };
@@ -76,7 +81,7 @@ vi.mock("@/hooks/use-task-actions", () => ({
 vi.mock("@/hooks/use-task-removal", () => ({
   useTaskRemoval: () => ({
     loadTaskSessionsForTask: mocks.loadTaskSessionsForTask,
-    runTaskRemoval: vi.fn(),
+    runTaskRemoval: mocks.runTaskRemoval,
     removeTaskFromBoard: mocks.removeTaskFromBoard,
   }),
   useTaskRemovalSuccessNotifier: () => vi.fn(),
@@ -117,23 +122,40 @@ vi.mock("react-i18next", () => ({
 import { useSheetActions } from "./session-task-switcher-sheet-hooks";
 import { createTaskSheetSelectionController } from "./session-task-switcher-sheet-selection";
 
+const WORKSPACE_ID = "workspace-1";
+const CREATED_TASK_ID = "created-task";
+const CREATED_SESSION_ID = "created-session";
+
+function resetMocks() {
+  mocks.state.tasks.activeTaskId = "current-task";
+  mocks.state.kanban.tasks = [mocks.targetTask];
+  mocks.setActiveTask.mockReset();
+  mocks.setActiveSession.mockReset();
+  mocks.loadTaskSessionsForTask.mockReset();
+  mocks.loadTaskSessionsForTask.mockResolvedValue([]);
+  mocks.listWorkflows.mockReset();
+  mocks.listWorkflows.mockResolvedValue({ workflows: [] });
+  mocks.routerReplace.mockReset();
+  mocks.archiveAndSwitch.mockReset().mockResolvedValue(undefined);
+  mocks.deleteTaskById.mockReset().mockResolvedValue(undefined);
+  mocks.runTaskRemoval
+    .mockReset()
+    .mockImplementation(
+      async (_kind: string, operation: { mutate: () => Promise<unknown> }) => operation.mutate(),
+    );
+  mocks.removeTaskFromBoard.mockReset().mockResolvedValue(undefined);
+  mocks.store.setState.mockClear();
+  mocks.navigationRequest.mockReset();
+}
+
 describe("useSheetActions dirty-navigation boundary", () => {
-  beforeEach(() => {
-    mocks.setActiveTask.mockReset();
-    mocks.setActiveSession.mockReset();
-    mocks.loadTaskSessionsForTask.mockReset();
-    mocks.loadTaskSessionsForTask.mockResolvedValue([]);
-    mocks.listWorkflows.mockReset();
-    mocks.listWorkflows.mockResolvedValue({ workflows: [] });
-    mocks.routerReplace.mockReset();
-    mocks.navigationRequest.mockReset();
-  });
+  beforeEach(resetMocks);
 
   it("defers task selection until the dirty-navigation boundary confirms it", () => {
     const onOpenChange = vi.fn();
     const { result } = renderHook(() =>
       useSheetActions(
-        "workspace-1",
+        WORKSPACE_ID,
         onOpenChange,
         createTaskSheetSelectionController(),
         mocks.navigationRequest,
@@ -157,7 +179,7 @@ describe("useSheetActions dirty-navigation boundary", () => {
     const onOpenChange = vi.fn();
     const { result } = renderHook(() =>
       useSheetActions(
-        "workspace-1",
+        WORKSPACE_ID,
         onOpenChange,
         createTaskSheetSelectionController(),
         mocks.navigationRequest,
@@ -178,5 +200,99 @@ describe("useSheetActions dirty-navigation boundary", () => {
       cache: "no-store",
       includeHidden: true,
     });
+  });
+});
+
+describe("useSheetActions task mutation navigation", () => {
+  beforeEach(resetMocks);
+
+  it("keeps a created task upserted but defers activation until navigation confirms", () => {
+    const onOpenChange = vi.fn();
+    const { result } = renderHook(() =>
+      useSheetActions(
+        WORKSPACE_ID,
+        onOpenChange,
+        createTaskSheetSelectionController(),
+        mocks.navigationRequest,
+      ),
+    );
+    const createdTask = {
+      ...mocks.targetTask,
+      id: CREATED_TASK_ID,
+      title: "Created task",
+      primary_session_id: CREATED_SESSION_ID,
+    } as unknown as Task;
+
+    act(() =>
+      result.current.handleTaskCreated(createdTask, "create", {
+        taskSessionId: CREATED_SESSION_ID,
+      }),
+    );
+
+    expect(mocks.store.setState).toHaveBeenCalledOnce();
+    expect(mocks.navigationRequest).toHaveBeenCalledOnce();
+    expect(mocks.setActiveTask).not.toHaveBeenCalled();
+    expect(mocks.routerReplace).not.toHaveBeenCalled();
+
+    // A cancelled discard dialog does not invoke the deferred activation.
+    expect(onOpenChange).not.toHaveBeenCalled();
+
+    const deferredAction = mocks.navigationRequest.mock.calls[0]?.[0] as () => void;
+    act(() => deferredAction());
+
+    expect(mocks.setActiveTask).toHaveBeenCalledWith(CREATED_TASK_ID);
+    expect(mocks.setActiveSession).toHaveBeenCalledWith(CREATED_TASK_ID, CREATED_SESSION_ID);
+    expect(mocks.routerReplace).toHaveBeenCalledWith("/t/created-task");
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("defers archive of the active task until the dirty-navigation boundary confirms it", async () => {
+    mocks.state.tasks.activeTaskId = mocks.targetTaskId;
+    const { result } = renderHook(() =>
+      useSheetActions(
+        WORKSPACE_ID,
+        vi.fn(),
+        createTaskSheetSelectionController(),
+        mocks.navigationRequest,
+      ),
+    );
+
+    act(() => result.current.handleArchiveTask(mocks.targetTaskId, { cascade: false }));
+
+    expect(mocks.navigationRequest).toHaveBeenCalledOnce();
+    expect(mocks.archiveAndSwitch).not.toHaveBeenCalled();
+    const deferredAction = mocks.navigationRequest.mock.calls[0]?.[0] as () => Promise<void>;
+
+    await act(async () => deferredAction());
+
+    expect(mocks.archiveAndSwitch).toHaveBeenCalledWith(mocks.targetTaskId, { cascade: false });
+  });
+
+  it("defers delete of the active task until the dirty-navigation boundary confirms it", async () => {
+    mocks.state.tasks.activeTaskId = mocks.targetTaskId;
+    const { result } = renderHook(() =>
+      useSheetActions(
+        WORKSPACE_ID,
+        vi.fn(),
+        createTaskSheetSelectionController(),
+        mocks.navigationRequest,
+      ),
+    );
+
+    act(() => result.current.handleDeleteTask(mocks.targetTaskId));
+    await act(async () => result.current.handleDeleteConfirm({ cascade: false }));
+
+    expect(mocks.navigationRequest).toHaveBeenCalledOnce();
+    expect(mocks.deleteTaskById).not.toHaveBeenCalled();
+    const deferredAction = mocks.navigationRequest.mock.calls[0]?.[0] as () => Promise<void>;
+
+    await act(async () => deferredAction());
+
+    expect(mocks.deleteTaskById).toHaveBeenCalledWith(mocks.targetTaskId, { cascade: false });
+    expect(mocks.runTaskRemoval).toHaveBeenCalledWith(
+      "delete",
+      expect.objectContaining({ taskId: mocks.targetTaskId }),
+      { cascade: false },
+    );
   });
 });

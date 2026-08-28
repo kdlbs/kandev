@@ -248,6 +248,21 @@ export async function loadWorkspaceTaskSessions(
   }
 }
 
+type SheetAction = () => void | Promise<void>;
+
+function requestActiveTaskAction(
+  store: ReturnType<typeof useAppStoreApi>,
+  taskId: string,
+  action: SheetAction,
+  onRequestNavigation?: (action: SheetAction) => void,
+): void | Promise<void> {
+  if (onRequestNavigation && store.getState().tasks.activeTaskId === taskId) {
+    onRequestNavigation(action);
+    return;
+  }
+  return action();
+}
+
 // eslint-disable-next-line max-lines-per-function -- workspace switching keeps its generation guard around every async phase
 async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
   const { store, loadTaskSessionsForTask, setActiveSession, setActiveTask, onOpenChange } = opts;
@@ -562,14 +577,21 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
         onOpenChange(false);
         return;
       }
-      setActiveTask(task.id);
-      if (meta?.taskSessionId) {
-        setActiveSession(task.id, meta.taskSessionId);
+      const activateCreatedTask = () => {
+        setActiveTask(task.id);
+        if (meta?.taskSessionId) {
+          setActiveSession(task.id, meta.taskSessionId);
+        }
+        navigate(task.id);
+        onOpenChange(false);
+      };
+      if (onRequestNavigation) {
+        onRequestNavigation(activateCreatedTask);
+        return;
       }
-      navigate(task.id);
-      onOpenChange(false);
+      activateCreatedTask();
     },
-    [store, setActiveTask, setActiveSession, onOpenChange, navigate],
+    [store, setActiveTask, setActiveSession, onOpenChange, navigate, onRequestNavigation],
   );
 
   return { handleWorkspaceChange, handleTaskCreated };
@@ -578,6 +600,7 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
 function useSheetDeleteActions(
   store: ReturnType<typeof useAppStoreApi>,
   runTaskRemoval: ReturnType<typeof useTaskRemoval>["runTaskRemoval"],
+  onRequestNavigation?: (action: SheetAction) => void,
 ) {
   const { t } = useTranslation();
   const { deleteTaskById } = useTaskActions();
@@ -601,10 +624,8 @@ function useSheetDeleteActions(
     [store, t],
   );
 
-  const handleDeleteConfirm = useCallback(
-    async (opts?: TaskActionOptions) => {
-      if (!deletingTask || isDeleting) return;
-      const taskId = deletingTask.id;
+  const runDelete = useCallback(
+    async (taskId: string, opts?: TaskActionOptions) => {
       setIsDeleting(true);
       try {
         await runTaskRemoval(
@@ -619,7 +640,21 @@ function useSheetDeleteActions(
         setDeletingTask(null);
       }
     },
-    [deletingTask, isDeleting, deleteTaskById, runTaskRemoval],
+    [deleteTaskById, runTaskRemoval],
+  );
+
+  const requestDelete = useCallback(
+    (taskId: string, opts?: TaskActionOptions) =>
+      requestActiveTaskAction(store, taskId, () => runDelete(taskId, opts), onRequestNavigation),
+    [onRequestNavigation, runDelete, store],
+  );
+
+  const handleDeleteConfirm = useCallback(
+    async (opts?: TaskActionOptions) => {
+      if (!deletingTask || isDeleting) return;
+      await requestDelete(deletingTask.id, opts);
+    },
+    [deletingTask, isDeleting, requestDelete],
   );
 
   const deletingTaskId = isDeleting ? (deletingTask?.id ?? null) : null;
@@ -645,6 +680,7 @@ function useSheetNestTask() {
 export function useSheetArchiveActions(
   store: ReturnType<typeof useAppStoreApi>,
   archiveAndSwitch: ReturnType<typeof useArchiveAndSwitchTask>,
+  onRequestNavigation?: (action: SheetAction) => void,
 ) {
   const { t } = useTranslation();
   const [archivingTask, setArchivingTask] = useState<{
@@ -672,10 +708,16 @@ export function useSheetArchiveActions(
     [archiveAndSwitch],
   );
 
+  const requestArchive = useCallback(
+    (taskId: string, opts?: { cascade?: boolean }) =>
+      requestActiveTaskAction(store, taskId, () => runArchive(taskId, opts), onRequestNavigation),
+    [onRequestNavigation, runArchive, store],
+  );
+
   const handleArchiveTask = useCallback(
     (taskId: string, opts?: TaskActionOptions) => {
       if (opts) {
-        void runArchive(taskId, opts);
+        void requestArchive(taskId, opts);
         return;
       }
       const task = findSheetTask(store.getState(), taskId);
@@ -685,15 +727,15 @@ export function useSheetArchiveActions(
         executorType: task?.primaryExecutorType,
       });
     },
-    [runArchive, store, t],
+    [requestArchive, store, t],
   );
 
   const handleArchiveConfirm = useCallback(
     async (opts?: TaskActionOptions) => {
       if (!archivingTask) return;
-      await runArchive(archivingTask.id, opts);
+      await requestArchive(archivingTask.id, opts);
     },
-    [archivingTask, runArchive],
+    [archivingTask, requestArchive],
   );
 
   return {
@@ -728,13 +770,13 @@ export function useSheetActions(
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const store = useAppStoreApi();
   const archiveAndSwitch = useArchiveAndSwitchTask();
-  const archiveActions = useSheetArchiveActions(store, archiveAndSwitch);
+  const archiveActions = useSheetArchiveActions(store, archiveAndSwitch, onRequestNavigation);
   const notifySuccess = useTaskRemovalSuccessNotifier();
   const { runTaskRemoval, loadTaskSessionsForTask } = useTaskRemoval({
     store,
     notifySuccess,
   });
-  const deleteActions = useSheetDeleteActions(store, runTaskRemoval);
+  const deleteActions = useSheetDeleteActions(store, runTaskRemoval, onRequestNavigation);
   const detachActions = useTaskDetachDialog(store);
   const handleNestTask = useSheetNestTask();
   const handleSelectTask = useCallback(
