@@ -2,9 +2,11 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const openQuickChat = vi.fn();
+const closeQuickChat = vi.fn();
 const WORKSPACE_ID = "workspace-1";
 const ACTIVE_CONFIG_ID = "config-active";
 let activeSessionId: string | null = null;
+let isOpen = false;
 let sessions: Array<{
   sessionId: string;
   workspaceId: string;
@@ -13,7 +15,7 @@ let sessions: Array<{
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
-    selector({ openQuickChat, quickChat: { sessions, activeSessionId } }),
+    selector({ openQuickChat, closeQuickChat, quickChat: { isOpen, sessions, activeSessionId } }),
 }));
 
 import { useQuickChatLauncher } from "./use-quick-chat-launcher";
@@ -21,10 +23,34 @@ import { useQuickChatLauncher } from "./use-quick-chat-launcher";
 beforeEach(() => {
   sessions = [];
   activeSessionId = null;
+  isOpen = false;
   openQuickChat.mockReset();
+  closeQuickChat.mockReset();
 });
 
 describe("useQuickChatLauncher typed sessions", () => {
+  it("@covers AC-UI-QUICK-TERMINAL-001.10 closes an open dialog when toggle behavior is enabled", () => {
+    isOpen = true;
+    const { result } = renderHook(() =>
+      useQuickChatLauncher(WORKSPACE_ID, "chat", { toggleWhenOpen: true }),
+    );
+
+    act(() => result.current());
+
+    expect(closeQuickChat).toHaveBeenCalledTimes(1);
+    expect(openQuickChat).not.toHaveBeenCalled();
+  });
+
+  it("keeps ordinary launchers open-only when the dialog is already open", () => {
+    isOpen = true;
+    const { result } = renderHook(() => useQuickChatLauncher(WORKSPACE_ID));
+
+    act(() => result.current());
+
+    expect(closeQuickChat).not.toHaveBeenCalled();
+    expect(openQuickChat).toHaveBeenCalledWith("", WORKSPACE_ID, undefined, "chat");
+  });
+
   it("opens an ordinary session from the generic quick chat launcher", () => {
     sessions = [
       { sessionId: "chat-1", workspaceId: WORKSPACE_ID, kind: "chat" },

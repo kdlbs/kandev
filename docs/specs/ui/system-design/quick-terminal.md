@@ -5,7 +5,7 @@ requirements:
   - REQ-UI-QUICK-TERMINAL-001
   - REQ-UI-QUICK-TERMINAL-002
 created: 2026-08-03
-updated: 2026-08-27
+updated: 2026-08-28
 owners:
   - kandev
 ---
@@ -20,7 +20,7 @@ records and Quick Terminal descriptors remain owned by their existing backend se
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-UI-QUICK-TERMINAL-001` | [Migrated source detail](#migrated-source-detail), [Launcher focus return](#launcher-focus-return) |
+| `REQ-UI-QUICK-TERMINAL-001` | [Migrated source detail](#migrated-source-detail), [Launcher focus return](#launcher-focus-return), [Launcher toggle and terminal Escape routing](#launcher-toggle-and-terminal-escape-routing) |
 | `REQ-UI-QUICK-TERMINAL-002` | [Tab order and editing](#tab-order-and-editing) |
 
 ## Tab order and editing
@@ -225,6 +225,32 @@ does not add the marker or move focus.
 
 This contract applies to Quick Chat and Quick Terminal launchers that use the shared provider. It
 does not change pointer dismissal, Configuration Chat focus ownership, or unrelated controls.
+
+## Launcher toggle and terminal Escape routing
+
+The configurable `QUICK_CHAT` binding uses a toggle-capable ordinary-chat launcher. The launcher
+reads the live `quickChat.isOpen` state: it calls `closeQuickChat` when the shared dialog is open and
+otherwise follows the existing workspace- and kind-scoped `openQuickChat` selection flow. Only the
+global keyboard/command action enables toggle behavior. Pointer and touch launchers continue to
+open or select their matching content, and the existing shortcut override remains the single
+settings and persistence contract. The global binding listens in capture phase and stops a matched
+toggle chord before focus-trapped controls such as xterm can consume it as terminal input.
+
+`PassthroughTerminal` registers a memoized predicate with the existing
+`ClarificationEscapeGuardProvider`. The predicate claims only an unmodified `Escape` whose event
+target, or current focus fallback, is xterm's helper textarea. Radix consults the predicate from its
+document capture listener. A match calls `preventDefault()` to stop dialog dismissal but does not
+stop propagation, so xterm's normal keyboard handler emits the Escape byte and `AttachAddon`
+forwards it on the dedicated terminal WebSocket.
+
+The guard hook remains a no-op outside a provider. Bottom-panel and mobile terminal embeddings
+therefore keep their current behavior, and focus on a Quick Chat tab, composer, setup control, or
+terminal search control does not arm the terminal guard. Existing clarification, suggestion, and
+reverse-search guards keep their two-stage behavior.
+
+This change adds no setting, persisted state, or mobile composition. The phone dialog retains its
+full-height surface and visible close action; the existing mobile Quick Chat entry test remains the
+touch-dismissal evidence.
 
 ## Data model
 

@@ -31,6 +31,7 @@ import { usePanelSearch } from "@/hooks/use-panel-search";
 import { useTerminalBusyTracking } from "./use-terminal-busy-tracking";
 import { useTerminalTheme } from "./use-terminal-theme";
 import { useTranslation } from "react-i18next";
+import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 
 type BaseProps = {
   autoFocus?: boolean;
@@ -153,6 +154,17 @@ export function isSessionEnded(state: TaskSessionState | null | undefined): bool
   return state != null && SESSION_TERMINAL_STATES.has(state);
 }
 
+export function shouldGuardPassthroughEscape(
+  event: KeyboardEvent,
+  textarea: HTMLTextAreaElement | undefined,
+): boolean {
+  if (event.key !== "Escape" || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+    return false;
+  }
+  const activeElement = typeof document === "undefined" ? null : document.activeElement;
+  return event.target === textarea || activeElement === textarea;
+}
+
 /**
  * Whether every session sharing this environment has ended.
  *
@@ -228,6 +240,11 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const environmentId = mode === "shell" ? props.environmentId : undefined;
   const refs = useTerminalRefs();
   const { terminalRef, xtermRef, fitAddonRef, wsRef, attachAddonRef } = refs;
+  const passthroughEscapeGuard = useCallback(
+    (event: KeyboardEvent) => shouldGuardPassthroughEscape(event, xtermRef.current?.textarea),
+    [xtermRef],
+  );
+  useClarificationEscapeGuard(passthroughEscapeGuard);
 
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const environmentSessionId = useEnvironmentSessionId();
