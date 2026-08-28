@@ -101,15 +101,21 @@ None.
 
 ## Results
 
-Implemented the surface-local `bg-black/40 backdrop-blur-sm` treatment in
-`QuickChatModal` and extended the desktop rendered regression to assert the
-backdrop filter. The existing mobile coverage remains unchanged.
+Implemented the responsive surface-local
+`bg-black/20 sm:bg-black/40 sm:backdrop-blur-sm` treatment in `QuickChatModal`,
+extended the desktop rendered regression to assert the backdrop filter, and
+added a mobile regression for the lighter no-filter phone treatment.
 
 Verification passed:
 
 - `pnpm --filter @kandev/web run typecheck`
 - Desktop elevation E2E: 1 test passed.
 - Mobile Quick Chat E2E: 4 tests passed.
+- Focused mobile backdrop E2E: 1 test passed.
 
 The desktop regression was confirmed RED before the production class change:
 the computed overlay filter was `none`.
+
+The mobile regression was confirmed RED against the unscoped treatment: the
+computed backdrop was `oklab(0 0 0 / 0.4)` with `blur(8px)` instead of the
+lighter phone treatment.

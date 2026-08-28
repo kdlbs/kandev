@@ -39,9 +39,10 @@ unchanged.
 ## Technical approach
 
 Update [`quick-chat-modal.tsx`](../../../apps/web/components/quick-chat/quick-chat-modal.tsx)
-to use a stronger local overlay class, for example
-`bg-black/40 backdrop-blur-sm`, while retaining the existing `shadow-2xl` and
-responsive classes. Extend the existing elevation test in
+to retain `bg-black/20` on phones and use the stronger local overlay class
+`sm:bg-black/40 sm:backdrop-blur-sm` from the `sm` breakpoint upward, while
+retaining the existing `shadow-2xl` and responsive classes. Extend the existing
+elevation test in
 [`quick-chat.spec.ts`](../../../apps/web/e2e/tests/chat/quick-chat.spec.ts) to
 assert the rendered backdrop filter in addition to its non-transparent
 background and the panel shadow. Keep
@@ -81,6 +82,11 @@ Task 01 completed.
   tests/chat/mobile-quick-chat-entry.spec.ts` - passed, 4 tests.
 - RED proof: the desktop test failed before the production class change because
   the overlay computed `backdrop-filter` to `none`.
+- Review follow-up: phones retain `bg-black/20` with no filter, while the
+  stronger `sm:bg-black/40 sm:backdrop-blur-sm` treatment starts at `sm`.
+- Review follow-up RED proof: the mobile assertion failed against the unscoped
+  treatment with `oklab(0 0 0 / 0.4)` and `blur(8px)`.
+- Focused mobile style regression - passed, 1 test.
 
 ## Risks
 

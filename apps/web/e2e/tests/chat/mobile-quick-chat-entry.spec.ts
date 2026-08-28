@@ -17,6 +17,7 @@ import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-asserti
 const TASK_LISTING_VIEW_STORAGE_KEY = "kandev.taskListing.view.v1";
 
 test.describe("Quick Chat entry points on mobile", () => {
+  // @covers AC-UI-QUICK-CHAT-ELEVATION-001.4 AC-UI-QUICK-CHAT-ELEVATION-001.7
   test("opens from the home header and closes with the touch control", async ({ testPage }) => {
     await testPage.goto("/");
     await testPage.waitForLoadState("networkidle");
@@ -26,6 +27,17 @@ test.describe("Quick Chat entry points on mobile", () => {
 
     const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 10_000 });
+    const overlay = testPage.locator('[data-slot="dialog-overlay"]');
+    await expect(overlay).toBeAttached();
+    const mobileBackdropStyles = await overlay.evaluate((element) => {
+      const styles = getComputedStyle(element);
+      return {
+        backgroundColor: styles.backgroundColor,
+        backdropFilter: styles.backdropFilter,
+      };
+    });
+    expect(mobileBackdropStyles.backgroundColor).toMatch(/\/\s*0\.2\)/);
+    expect(mobileBackdropStyles.backdropFilter).toBe("none");
     await assertNoDocumentHorizontalOverflow(testPage);
 
     await dialog.getByTestId("quick-chat-close").tap();

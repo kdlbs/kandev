@@ -40,8 +40,10 @@ picker is not part of this design.
 
 `QuickChatModal` continues to render the shared `DialogContent` with its
 existing responsive geometry and `shadow-2xl` panel elevation. It supplies a
-surface-local overlay class that combines a stronger dark layer with a light
-background blur, such as `bg-black/40 backdrop-blur-sm`.
+surface-local responsive overlay class that keeps the existing lighter phone
+layer and combines a stronger dark layer with a light background blur from the
+`sm` breakpoint upward, such as
+`bg-black/20 sm:bg-black/40 sm:backdrop-blur-sm`.
 
 The class is applied only through this `DialogContent` instance. The shared
 `DialogOverlay` default and unrelated dialogs remain unchanged. The overlay
