@@ -47,6 +47,13 @@ Quick Chat supports multiple tabs, tab renaming, and **+** to open another ordin
 
 Your chats and their names are shared by every browser and device signed in to the same Kandev instance. Starting, renaming, or closing a chat on one device updates the others, and a device that was offline catches up when it reconnects.
 
+When **Settings > Preferences > Task Behavior > Agent-generated task titles** is enabled, an ordinary
+Quick Chat starts with its normal provisional label and its owner agent can replace that label with a
+short title based on your first request. Structured and CLI-passthrough chats receive the title
+instruction through their existing first-turn path. The new title appears on every connected device
+and survives reload. Configuration Chat and Quick Terminal are excluded. If you disable the setting,
+or rename the chat first, the provisional or user-selected title remains authoritative.
+
 Closing a real chat tab permanently deletes its conversation, hidden backing task data, and associated worktree. There is no undo. Kandev also deletes abandoned chats after seven days; cleanup runs when the backend starts and then once per day. Only chats whose session is `RUNNING` or `IDLE` are protected from age-based cleanup. Old `CREATED`, `STARTING`, or `WAITING_FOR_INPUT` chats can expire, so do not use Quick Chat for durable work.
 
 If **Start chat** is disabled, select a profile and finish every repository/branch row. If a repository is missing, confirm that it belongs to the current workspace and refresh the repository configuration. Use a normal task when the result must remain visible on a board or become a reviewed PR.
@@ -80,7 +87,7 @@ The same settings page configures the **Configuration Chat Agent** for each work
 
 Open Configuration Chat from the floating chat button on Settings pages, turn on **Configuration chat** while creating a Quick Chat, or run **Configuration Chat** from the `Cmd/Ctrl+K` command menu. A workspace currently has one configuration conversation. The Settings panel shows that conversation without tabs; **Open in Quick Chat** moves the same setup or session into the larger tabbed dialog without copying it.
 
-Configuration Chat uses a repository-less ephemeral task. Its configuration-mode MCP can inspect and change workflows, agent profiles, and MCP configuration. The selected profile's model, credentials, permissions, and external MCP settings apply. Review requested configuration mutations before approving them.
+Configuration Chat uses a repository-less ephemeral task. Its configuration-mode MCP can inspect and change workflows, agent profiles, and MCP configuration, and can list and read saved prompts by exact name. The selected profile's model, credentials, permissions, and external MCP settings apply. Review requested configuration mutations before approving them.
 
 Closing the floating Settings panel preserves the conversation. To delete it, open it in Quick Chat, close its tab, and confirm deletion. Configuration tasks are excluded from the seven-day Quick Chat sweeper and remain available until explicitly deleted or their workspace is deleted.
 
@@ -166,7 +173,7 @@ Open the context menu on any file or folder in the Files tree: right-click on de
 
 Use the workbench top bar's split-editor action to open the selected session worktree in the default editor. Its menu lets you choose another configured editor. A file's **Open with** menu can also open a specific editor, copy the path, or ask the operating system to show the folder.
 
-Open **Settings > General > Editors** (`/settings/general/editors`) to set a default and configure integrations. Kandev discovers these built-in desktop editors when installed:
+Open **Settings > Preferences > Terminal & Editors** (`/settings/preferences/terminal-editors`) to set a default and configure integrations. Kandev discovers these built-in desktop editors when installed:
 
 - Visual Studio Code
 - Zed
@@ -186,7 +193,9 @@ Desktop editor discovery and custom commands run on the Kandev backend host. The
 
 ## Language servers
 
-Language-server settings are part of **Settings > General > Editors**. Kandev currently registers servers for:
+![Settings > Preferences > Terminal & Editors showing language-server cards, auto-start controls, status location, and server configuration.](../screenshots/settings-terminal-editors.png)
+
+Language-server settings are part of **Settings > Preferences > Terminal & Editors**. Kandev currently registers servers for:
 
 - TypeScript and JavaScript;
 - Go;
@@ -232,7 +241,9 @@ On desktop, select **+ > Terminals > New Terminal**. Parked terminal sessions ca
 
 Do not confuse a user terminal with a CLI-passthrough agent tab: both use PTYs, but only the agent tab is the agent's native interface. `Cmd/Ctrl+J` toggles the bottom terminal area.
 
-Open **Settings > General > Terminal** (`/settings/general/terminal`) to configure:
+![Settings > Preferences > Terminal & Editors showing shell, terminal font, font size, and link settings.](../screenshots/settings-terminal.png)
+
+Open **Settings > Preferences > Terminal & Editors** (`/settings/preferences/terminal-editors`) to configure:
 
 - preferred shell, which defaults to the system shell; the built-in choices are zsh, bash, and sh on macOS/Linux, and PowerShell (`pwsh`), Windows PowerShell, and cmd on Windows, plus a custom executable;
 - terminal font, with a default Menlo/Monaco-style stack;

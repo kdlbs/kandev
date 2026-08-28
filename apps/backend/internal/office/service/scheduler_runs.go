@@ -44,7 +44,7 @@ func (s *Service) FinishRun(ctx context.Context, id, outcome string) error {
 // FailRun marks a claimed run as failed and publishes an
 // OfficeRunProcessed event. outcome is written as NULL: a failed run is
 // bucketed by RunCountsByDayForAgent on status alone and never reaches the
-// outcome-derived buckets, so no value from the eight-value vocabulary is
+// outcome-derived buckets, so no value from the five-value vocabulary is
 // invented for it. See FinishRun for the lifecycle contract.
 func (s *Service) FailRun(ctx context.Context, id string) error {
 	return s.transitionRunTerminal(ctx, id, RunStatusFailed, nil)
@@ -90,10 +90,9 @@ func (s *Service) transitionRunTerminal(ctx context.Context, id, status string, 
 // releaseTaskCheckoutForRun releases the run's task checkout. Call this
 // only when the caller knows run genuinely held the checkout (a launched
 // run that reached checkoutTask) — see transitionRunTerminal's doc for why
-// it is not called unconditionally on every terminal transition. Safe to
-// call redundantly alongside SchedulerIntegration's own synchronous
-// finishRun/checkBudget call sites (releaseCheckoutIfNeeded): idempotent,
-// owner-scoped SET NULL.
+// it is not called unconditionally on every terminal transition. Safe to call
+// redundantly alongside the scheduler's checkout and terminal paths: the
+// update is idempotent and owner-scoped.
 //
 // Owner-scoped by run ID and run.AgentProfileID: a run that never
 // held the checkout (the loser of a checkout-contention race escalating via
@@ -118,12 +117,10 @@ func (s *Service) releaseTaskCheckoutForRun(ctx context.Context, run *models.Run
 }
 
 // stampRunFinished records the cooldown timestamp for the agent that ran
-// this run. Shared by the synchronous SchedulerIntegration.finishRun path
-// and the async AgentCompleted/AgentStopped event subscribers so the two
-// completion paths cannot drift apart again — see releaseTaskCheckoutForRun
-// for the same split. run.AgentProfileID is the launching agent's own
-// identity (processRun resolves the agent from the run), so no extra
-// agent load is needed here.
+// this run. It is shared by the AgentCompleted/AgentStopped event subscribers
+// so their completion paths cannot drift apart. run.AgentProfileID is the
+// launching agent's own identity (processRun resolves the agent from the run),
+// so no extra agent load is needed here.
 func (s *Service) stampRunFinished(ctx context.Context, run *models.Run) {
 	if run == nil || run.AgentProfileID == "" {
 		return
@@ -137,10 +134,27 @@ func (s *Service) stampRunFinished(ctx context.Context, run *models.Run) {
 }
 
 // publishRunProcessed emits an OfficeRunProcessed bus event with the
-// per-run context the WS gateway needs to fan the update out.
+// per-run context the WS gateway needs to fan the update out. Delegates to
+// publishRunProcessedForWorkspace with no workspace_id: every existing
+// caller (transitionRunTerminal, retry.go, scheduler_staleness.go) reaches
+// this on a task-bound run, and the WS gateway's workspaceForEvent already
+// resolves those via the task_id this payload carries.
 // Best-effort: skips silently when no bus is configured.
 func (s *Service) publishRunProcessed(
 	ctx context.Context, id, status string, run *models.Run,
+) {
+	s.publishRunProcessedForWorkspace(ctx, id, status, run, "")
+}
+
+// publishRunProcessedForWorkspace is publishRunProcessed plus an explicit
+// workspace_id. A taskless run (WO-35) has no task_id for the WS gateway's
+// workspaceForEvent to resolve a workspace from, so failTasklessRun and
+// failUnlaunchableRun (scheduler_integration.go) must pass the launching
+// agent's workspace directly or the event is dropped rather than fanned out
+// (see office_notifications.go's workspaceForEvent / BroadcastToWorkspaceOrDrop).
+// Best-effort: skips silently when no bus is configured.
+func (s *Service) publishRunProcessedForWorkspace(
+	ctx context.Context, id, status string, run *models.Run, workspaceID string,
 ) {
 	if s.eb == nil {
 		return
@@ -148,6 +162,9 @@ func (s *Service) publishRunProcessed(
 	data := map[string]interface{}{
 		"run_id": id,
 		"status": status,
+	}
+	if workspaceID != "" {
+		data["workspace_id"] = workspaceID
 	}
 	if run != nil {
 		taskID, commentID := commentkeys.IdentityFromPayload(run.Payload)

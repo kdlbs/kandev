@@ -211,6 +211,48 @@ describe("useDialogFormState — remoteRepos mode", () => {
   });
 });
 
+describe("useDialogFormState — repository policy snapshots", () => {
+  it("restores a policy-backed repository row without marking it as edited", () => {
+    const { result } = renderHook(() =>
+      useDialogFormState(true, "ws-1", null, {
+        title: "Existing task",
+        repositories: [
+          {
+            id: "task-repo-1",
+            task_id: "task-1",
+            repository_id: "repo-1",
+            base_branch: "main",
+            checkout_branch: "feature/existing",
+            branch_policy_id: "policy-1",
+            branch_policy_name: "Feature branches",
+            branch_policy_base_branch: "main",
+            branch_policy_branch_template: "feature/{title}-{suffix}",
+            branch_policy_pull_request_target: "main",
+            position: 0,
+            created_at: "2026-08-24T10:00:00Z",
+            updated_at: "2026-08-24T10:00:00Z",
+          },
+        ],
+      }),
+    );
+
+    expect(result.current.repositories).toEqual([
+      expect.objectContaining({
+        repositoryId: "repo-1",
+        branch: "main",
+        branchPolicyId: "policy-1",
+      }),
+    ]);
+    expect(result.current.repositoriesDirty).toBe(false);
+
+    act(() => {
+      result.current.updateRepository(result.current.repositories[0]!.key, { branch: "develop" });
+    });
+
+    expect(result.current.repositoriesDirty).toBe(true);
+  });
+});
+
 describe("useDialogFormState — provider-neutral initial values", () => {
   it("seeds an authorized provider descriptor before asynchronous URL inspection", () => {
     const initialValues = {

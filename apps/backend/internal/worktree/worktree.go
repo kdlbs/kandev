@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -13,6 +14,7 @@ type SyncProgressStatus string
 const (
 	SyncProgressRunning   SyncProgressStatus = "running"
 	SyncProgressCompleted SyncProgressStatus = "completed"
+	SyncProgressFailed    SyncProgressStatus = "failed"
 )
 
 // SyncProgressEvent reports pre-worktree base-branch synchronization progress.
@@ -37,6 +39,11 @@ type Worktree struct {
 	// TaskID is the ID of the task this worktree is associated with.
 	// Multiple worktrees can exist for the same task (one per agent session).
 	TaskID string `json:"task_id"`
+
+	// TaskDirName is the stable task-root identity used by filesystem
+	// ownership checks. It remains unchanged when a task environment changes
+	// owners, so it is intentionally not part of the public JSON contract.
+	TaskDirName string `json:"-"`
 
 	// TaskEnvironmentID is the task environment that owns this worktree.
 	// Physical worktree records live on task_environment_repos; sessions
@@ -203,6 +210,12 @@ type CreateRequest struct {
 	// authenticated provider seam. Worktree creation must use local/remote-
 	// tracking refs only and must not perform another network operation.
 	RemoteSyncHandled bool
+
+	// RefreshRepository is an optional provider-authenticated refresh deferred
+	// until this request needs to materialize or recreate a worktree. A valid
+	// reusable worktree must bypass it. On success, Create marks the refresh as
+	// handled before selecting local refs.
+	RefreshRepository func(context.Context) error
 
 	// WorktreeID is the ID of an existing worktree to reuse (optional).
 	// If provided and valid, the existing worktree is returned instead of creating a new one.

@@ -3,6 +3,7 @@ package delivery
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -212,6 +213,9 @@ func (s *Sweep) evaluatePair(ctx context.Context, pair CandidatePair) error {
 		Classification: classification, EvaluatedAt: evaluatedAt,
 	})
 	if err != nil {
+		if errors.Is(err, errRepositoryNotLive) {
+			return nil
+		}
 		recordWriteError()
 		return err
 	}

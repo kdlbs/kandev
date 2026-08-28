@@ -369,6 +369,10 @@ type TaskResourceCleanupRepository interface {
 	CreateTaskResourceCleanupJob(ctx context.Context, job *models.TaskResourceCleanupJob) error
 	HasActiveTaskResourceCleanupJob(ctx context.Context, taskID string) (bool, error)
 	UpdateTaskResourceCleanupSnapshot(ctx context.Context, operationID, snapshot string) error
+	// UpdateClaimedTaskResourceCleanupSnapshot persists outcomes produced by one
+	// exact running cleanup attempt. A newer retry or cancellation wins when
+	// the claim no longer matches.
+	UpdateClaimedTaskResourceCleanupSnapshot(ctx context.Context, id string, attempt int, snapshot string) (bool, error)
 	GetTaskResourceCleanupJob(ctx context.Context, id string) (*models.TaskResourceCleanupJob, error)
 	GetTaskResourceCleanupJobByOperationID(ctx context.Context, operationID string) (*models.TaskResourceCleanupJob, error)
 	ListPreparedTaskResourceCleanupJobs(ctx context.Context) ([]*models.TaskResourceCleanupJob, error)
@@ -440,6 +444,19 @@ type RepositorySetRepository interface {
 	// cannot land apart. A nil repositoryIDs leaves membership untouched.
 	UpdateRepositorySet(ctx context.Context, set *models.RepositorySet, repositoryIDs *[]string) error
 	DeleteRepositorySet(ctx context.Context, id string) (bool, error)
+}
+
+// RepositoryBranchPolicyRepository stores reusable branch workflows owned by
+// a repository. The batch method is an atomic, one-time Gitflow starter.
+type RepositoryBranchPolicyRepository interface {
+	CreateRepositoryBranchPolicy(ctx context.Context, policy *models.RepositoryBranchPolicy) error
+	GetRepositoryBranchPolicy(ctx context.Context, id string) (*models.RepositoryBranchPolicy, error)
+	GetRepositoryBranchPolicyByName(ctx context.Context, repositoryID, name string) (*models.RepositoryBranchPolicy, error)
+	ListRepositoryBranchPolicies(ctx context.Context, repositoryID string) ([]*models.RepositoryBranchPolicy, error)
+	ListRepositoryBranchPoliciesByWorkspace(ctx context.Context, workspaceID string) ([]*models.RepositoryBranchPolicy, error)
+	UpdateRepositoryBranchPolicy(ctx context.Context, policy *models.RepositoryBranchPolicy) error
+	DeleteRepositoryBranchPolicy(ctx context.Context, id string) (bool, error)
+	CreateRepositoryBranchPoliciesIfEmpty(ctx context.Context, repositoryID string, policies []*models.RepositoryBranchPolicy) error
 }
 
 // RepositorySecretBindingRepository stores normalized repository environment

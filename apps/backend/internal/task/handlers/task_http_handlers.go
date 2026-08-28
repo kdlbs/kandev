@@ -41,6 +41,8 @@ type workspaceSourceJSON struct {
 	GitHubURL      string `json:"github_url"`
 	RemoteURL      string `json:"remote_url"`
 	Provider       string `json:"provider"`
+	ProviderHost   string `json:"provider_host"`
+	ProviderScope  string `json:"provider_scope"`
 	ProviderRepoID string `json:"provider_repo_id"`
 	ProviderOwner  string `json:"provider_owner"`
 	ProviderName   string `json:"provider_name"`
@@ -85,7 +87,7 @@ func parseHTTPWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSource
 		allowed := map[string]bool{"kind": true, "local_path": true}
 		switch kind {
 		case string(service.WorkspaceSourceRepository):
-			for _, key := range []string{"repository_id", "remote_url", "github_url", "provider", "provider_repo_id", "provider_owner", "provider_name", "base_branch", "checkout_branch"} {
+			for _, key := range []string{"repository_id", "remote_url", "github_url", "provider", "provider_host", "provider_scope", "provider_repo_id", "provider_owner", "provider_name", "base_branch", "checkout_branch"} {
 				allowed[key] = true
 			}
 		case string(service.WorkspaceSourceFolder):
@@ -102,7 +104,7 @@ func parseHTTPWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSource
 		if err := json.Unmarshal(item, &source); err != nil {
 			return nil, err
 		}
-		sources = append(sources, service.WorkspaceSourceInput{Kind: service.WorkspaceSourceKind(source.Kind), RepositoryID: source.RepositoryID, LocalPath: source.LocalPath, GitHubURL: source.GitHubURL, RemoteURL: source.RemoteURL, Provider: source.Provider, ProviderRepoID: source.ProviderRepoID, ProviderOwner: source.ProviderOwner, ProviderName: source.ProviderName, BaseBranch: source.BaseBranch, CheckoutBranch: source.CheckoutBranch, DisplayName: source.DisplayName})
+		sources = append(sources, service.WorkspaceSourceInput{Kind: service.WorkspaceSourceKind(source.Kind), RepositoryID: source.RepositoryID, LocalPath: source.LocalPath, GitHubURL: source.GitHubURL, RemoteURL: source.RemoteURL, Provider: source.Provider, ProviderHost: source.ProviderHost, ProviderScope: source.ProviderScope, ProviderRepoID: source.ProviderRepoID, ProviderOwner: source.ProviderOwner, ProviderName: source.ProviderName, BaseBranch: source.BaseBranch, CheckoutBranch: source.CheckoutBranch, DisplayName: source.DisplayName})
 	}
 	return sources, nil
 }
@@ -693,6 +695,7 @@ type httpTaskRepositoryInput struct {
 	RepositoryID   string `json:"repository_id"`
 	BaseBranch     string `json:"base_branch"`
 	CheckoutBranch string `json:"checkout_branch"`
+	BranchPolicyID string `json:"branch_policy_id,omitempty"`
 	PRNumber       int    `json:"pr_number,omitempty"`
 	LocalPath      string `json:"local_path"`
 	Name           string `json:"name"`
@@ -700,6 +703,8 @@ type httpTaskRepositoryInput struct {
 	GitHubURL      string `json:"github_url"`
 	RemoteURL      string `json:"remote_url"`
 	Provider       string `json:"provider"`
+	ProviderHost   string `json:"provider_host"`
+	ProviderScope  string `json:"provider_scope"`
 	ProviderRepoID string `json:"provider_repo_id"`
 	ProviderOwner  string `json:"provider_owner"`
 	ProviderName   string `json:"provider_name"`
@@ -1197,7 +1202,7 @@ func (h *TaskHandlers) commitFreshBranch(
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve task repository"})
 		return false
 	}
-	if !h.applyFreshBranch(c, title, inputs, repos, task.Repositories) {
+	if !h.applyFreshBranch(c, title, task, inputs, repos, task.Repositories) {
 		h.rollbackFreshBranchTask(c.Request.Context(), taskID)
 		return false
 	}
@@ -1237,6 +1242,7 @@ func (h *TaskHandlers) rollbackFreshBranchTask(ctx context.Context, taskID strin
 func (h *TaskHandlers) applyFreshBranch(
 	c *gin.Context,
 	taskTitle string,
+	task *models.Task,
 	inputs []httpTaskRepositoryInput,
 	repos []dto.TaskRepositoryInput,
 	persisted []*models.TaskRepository,
@@ -1256,7 +1262,7 @@ func (h *TaskHandlers) applyFreshBranch(
 			// User didn't pick one — fall back to the repo's checked-out branch.
 			baseBranch, _ = h.service.RepositoryCurrentBranch(ctx, repositoryID)
 		}
-		newBranch := resolveFreshBranchName(raw.NewBranchName, taskTitle)
+		newBranch := resolveFreshBranchNameForTask(raw.NewBranchName, taskTitle, task, persisted[i])
 		err := h.service.PerformFreshBranch(ctx, service.FreshBranchRequest{
 			RepositoryID:        repositoryID,
 			BaseBranch:          baseBranch,
@@ -1270,6 +1276,7 @@ func (h *TaskHandlers) applyFreshBranch(
 		}
 		repos[i].BaseBranch = newBranch
 		repos[i].CheckoutBranch = ""
+		repos[i].PreserveBaseBranch = true
 	}
 	return true
 }
@@ -1284,6 +1291,25 @@ func resolveFreshBranchName(rawNewBranch, taskTitle string) string {
 		return name
 	}
 	return worktree.SemanticWorktreeName(taskTitle, worktree.SmallSuffix(3))
+}
+
+func resolveFreshBranchNameForTask(rawNewBranch, taskTitle string, task *models.Task, taskRepository *models.TaskRepository) string {
+	if name := strings.TrimSpace(rawNewBranch); name != "" {
+		return name
+	}
+	if task != nil && taskRepository != nil && taskRepository.BranchPolicyBranchTemplate != "" {
+		branch, err := worktree.RenderTaskBranchName(worktree.BranchNameTemplateInput{
+			Template: taskRepository.BranchPolicyBranchTemplate,
+			TaskID:   task.ID,
+			Title:    taskTitle,
+			Ticket:   worktree.TicketForBranchName(task.Identifier, task.Metadata),
+			Suffix:   worktree.SmallSuffix(3),
+		})
+		if err == nil {
+			return branch
+		}
+	}
+	return resolveFreshBranchName("", taskTitle)
 }
 
 func (h *TaskHandlers) respondFreshBranchError(c *gin.Context, err error) {
@@ -1332,6 +1358,7 @@ func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryIn
 			RepositoryID:   r.RepositoryID,
 			BaseBranch:     r.BaseBranch,
 			CheckoutBranch: r.CheckoutBranch,
+			BranchPolicyID: r.BranchPolicyID,
 			PRNumber:       r.PRNumber,
 			LocalPath:      r.LocalPath,
 			Name:           r.Name,
@@ -1339,6 +1366,8 @@ func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryIn
 			GitHubURL:      r.GitHubURL,
 			RemoteURL:      r.RemoteURL,
 			Provider:       r.Provider,
+			ProviderHost:   r.ProviderHost,
+			ProviderScope:  r.ProviderScope,
 			ProviderRepoID: r.ProviderRepoID,
 			ProviderOwner:  r.ProviderOwner,
 			ProviderName:   r.ProviderName,
@@ -1559,6 +1588,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 				RepositoryID:   r.RepositoryID,
 				BaseBranch:     r.BaseBranch,
 				CheckoutBranch: r.CheckoutBranch,
+				BranchPolicyID: r.BranchPolicyID,
 				PRNumber:       r.PRNumber,
 				LocalPath:      r.LocalPath,
 				Name:           r.Name,
@@ -1566,6 +1596,8 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 				GitHubURL:      r.GitHubURL,
 				RemoteURL:      r.RemoteURL,
 				Provider:       r.Provider,
+				ProviderHost:   r.ProviderHost,
+				ProviderScope:  r.ProviderScope,
 				ProviderRepoID: r.ProviderRepoID,
 				ProviderOwner:  r.ProviderOwner,
 				ProviderName:   r.ProviderName,
@@ -1829,6 +1861,7 @@ type httpStartQuickChatRequest struct {
 	AgentProfileID    string                         `json:"agent_profile_id,omitempty"`
 	ExecutorID        string                         `json:"executor_id,omitempty"`
 	Prompt            string                         `json:"prompt,omitempty"`
+	AutoTitle         bool                           `json:"auto_title,omitempty"`
 	LocalPath         string                         `json:"local_path,omitempty"`
 	RepositoryName    string                         `json:"repository_name,omitempty"`
 	DefaultBranch     string                         `json:"default_branch,omitempty"`
@@ -1970,6 +2003,7 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		WorkspaceID:  workspaceID,
 		Title:        params.title,
 		Description:  body.Prompt,
+		AutoTitle:    body.AutoTitle,
 		Repositories: params.repos,
 		IsEphemeral:  true,
 		Metadata:     params.metadata,

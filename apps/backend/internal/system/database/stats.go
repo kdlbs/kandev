@@ -35,12 +35,13 @@ const (
 // exists. Serialising a zero time.Time as "0001-01-01T00:00:00Z" would
 // defeat the frontend's "Never" fallback in database-stats-card.tsx.
 type Stats struct {
-	Driver        string     `json:"driver"`
-	Path          string     `json:"path"`
-	SizeBytes     int64      `json:"size_bytes"`
-	WALSizeBytes  int64      `json:"wal_size_bytes"`
-	SchemaVersion string     `json:"schema_version"`
-	LastBackupAt  *time.Time `json:"last_backup_at"`
+	Driver          string     `json:"driver"`
+	Path            string     `json:"path"`
+	BackupDirectory string     `json:"backup_directory"`
+	SizeBytes       int64      `json:"size_bytes"`
+	WALSizeBytes    int64      `json:"wal_size_bytes"`
+	SchemaVersion   string     `json:"schema_version"`
+	LastBackupAt    *time.Time `json:"last_backup_at"`
 }
 
 // ResetDirs lists the on-disk directories factory-reset wipes. The Service
@@ -70,6 +71,9 @@ type Service struct {
 	// OrchestratorShutdown stops the orchestrator and active executions before
 	// the factory-reset job runs. Wired by cmd/kandev. Tests pass a no-op.
 	OrchestratorShutdown func()
+	// DatabaseQuiesce stops database-backed workers before the factory-reset
+	// job snapshots or changes the shared schema. Wired by cmd/kandev.
+	DatabaseQuiesce func() error
 }
 
 // NewService constructs a Service for the configured SQLite database path.
@@ -89,6 +93,15 @@ func (s *Service) backupsDir() string {
 	return filepath.Join(filepath.Dir(s.databasePath), "backups")
 }
 
+func (s *Service) absoluteBackupsDir() (string, error) {
+	backupDir := s.backupsDir()
+	absolute, err := filepath.Abs(backupDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve backup directory %q: %w", backupDir, err)
+	}
+	return absolute, nil
+}
+
 // Stats returns the current database stats. SQLite size is computed from
 // PRAGMA page_count * page_size (cheaper than os.Stat on hot writes and more
 // accurate during a VACUUM that creates a sibling file). Postgres size is
@@ -96,8 +109,15 @@ func (s *Service) backupsDir() string {
 func (s *Service) Stats() (Stats, error) {
 	driver := s.databaseDriver()
 	out := Stats{Driver: driver}
+	backupDir := ""
 	if driver == databaseDriverSQLite {
+		resolved, err := s.absoluteBackupsDir()
+		if err != nil {
+			return Stats{}, err
+		}
+		backupDir = resolved
 		out.Path = s.databasePath
+		out.BackupDirectory = backupDir
 	}
 
 	if s.pool != nil {
@@ -119,7 +139,7 @@ func (s *Service) Stats() (Stats, error) {
 			out.WALSizeBytes = wal
 		}
 
-		if last := lastBackupAt(s.backupsDir()); !last.IsZero() {
+		if last := lastBackupAt(backupDir); !last.IsZero() {
 			out.LastBackupAt = &last
 		}
 	}

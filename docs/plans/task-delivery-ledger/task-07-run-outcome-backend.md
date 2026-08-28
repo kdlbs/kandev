@@ -11,7 +11,7 @@ spec: "../../specs/task-delivery-ledger/spec.md"
 # Task 07: Office run outcome: column, writers and rollup
 
 The run-grain form of the same defect the ledger fixes: a terminal status is not
-an outcome. `FinishRun` writes `status='finished'` on seven paths, six of which
+an outcome. `FinishRun` writes `status='finished'` on six paths, four of which
 did no work, and `RunCountsByDayForAgent` counts every `finished` row as a
 success.
 
@@ -40,7 +40,7 @@ dependency and land the column first; do not use the upsert `writeKey`, which
 would rewrite the instant on every boot.
 
 Vocabulary: `processed | budget_blocked | idle_skipped | agent_inactive |
-task_tree_held | checkout_unavailable | checkout_error`, as typed constants in
+task_tree_held`, as typed constants in
 `internal/office/models`.
 
 ## Writers
@@ -50,35 +50,34 @@ Add `FinishRunWithOutcome(ctx, id string, outcome models.RunOutcome) error` to
 `FinishRun(ctx, id)` delegating with `OutcomeProcessed` so existing callers are
 unchanged.
 
-The seven call sites in `internal/office/service/scheduler_integration.go`:
+The four scheduler call sites in `internal/office/service/scheduler_integration.go`:
 
 | Line | Path | Outcome |
 |---|---|---|
-| `:196` | agent not active | `agent_inactive` |
-| `:218` | idle skipped | `idle_skipped` |
-| `:479` | task-tree hold | `task_tree_held` |
-| `:589` | checkout error | `checkout_error` |
-| `:596` | checkout unavailable | `checkout_unavailable` |
-| `:619` | budget blocked | `budget_blocked` |
-| `:639` | processed | `processed` |
+| `:218` | agent not active | `agent_inactive` |
+| `:247` | idle skipped | `idle_skipped` |
+| `:517` | task-tree hold | `task_tree_held` |
+| `:829` | pre-execution budget block | `budget_blocked` |
 
-The two other callers (`internal/office/service/event_subscribers.go:312` and
-`:360`) are agent-completion paths and keep `processed`.
+The two agent-completion callers (`internal/office/service/event_subscribers.go:408`
+and `:512`) keep `processed`. Checkout errors use the normal retry or failure
+path, and checkout contention requeues the run; neither path finishes a run or
+records completed work.
 
 `runs.status` is unchanged. A blocked run still reaches `finished`, so every
 existing reader of `status` keeps working — that is what keeps this change
 contained.
 
-Note that only three of the seven paths write an `office_activity_log` row
-(`run_idle_skipped` at `:213`, `run_budget_blocked` at `:622`, `run_processed` at
-`:654`). The agent-inactive, task-tree-hold, checkout-error and
-checkout-unavailable paths log nothing, which is why the activity log cannot
-carry this distinction and a column is needed.
+Note that only three of the six total paths write an `office_activity_log` row
+(`run_idle_skipped`, `run_budget_blocked`, `run_processed`). The agent-inactive
+and task-tree-hold paths log nothing, which is why the activity log cannot carry
+this distinction and a column is needed. Taskless or unlaunchable runs fail
+before a finished outcome is written.
 
 ## Rollup
 
 `internal/office/repository/sqlite/agent_summary.go:36` —
-`RunCountsByDayForAgent` returns four buckets instead of three:
+`RunCountsByDayForAgent` returns five buckets instead of three:
 
 ```sql
 SUM(CASE WHEN status = 'finished' AND outcome = 'processed'  THEN 1 ELSE 0 END) AS succeeded,
@@ -104,7 +103,7 @@ The success rate will **fall** for agents whose runs were being blocked. That is
 the fix landing, not a regression: those runs were never successes.
 
 - **Acceptance:**
-  1. Each of the seven `FinishRun` paths writes its documented outcome while
+  1. Each of the six `FinishRun` paths writes its documented outcome while
      `runs.status` stays `finished`, including the agent-inactive path that
      writes no activity-log row.
   2. The migration applies to a pre-existing database, `outcome` reads NULL on
@@ -151,10 +150,10 @@ the fix landing, not a regression: those runs were never successes.
 (`outcome` column, nullable, no default), `internal/office/repository/sqlite/run_outcome_migration_test.go`,
 `internal/office/repository/sqlite/agent_summary.go` + `agent_summary_test.go`,
 `internal/office/models/models.go` (`Run.Outcome *string`),
-`internal/office/service/run.go` (the 8-value `RunOutcome*` vocabulary),
+`internal/office/service/run.go` (the 5-value `RunOutcome*` vocabulary),
 `internal/office/service/scheduler_runs.go` (`FinishRun`/`FailRun`/
 `transitionRunTerminal`), `internal/office/service/scheduler_integration.go`
-(the six non-subscriber `FinishRun` call sites), `internal/office/service/event_subscribers.go`
+(the four non-subscriber `FinishRun` call sites), `internal/office/service/event_subscribers.go`
 (the two `processed` call sites), `internal/office/dashboard/agent_summary.go`
 + `agent_summary_test.go`.
 
@@ -169,9 +168,8 @@ the fix landing, not a regression: those runs were never successes.
 **Acceptance verification:** #1 (each `FinishRun` path writes its
 documented outcome, `runs.status` stays `finished`) — confirmed by reading
 every call site directly: `scheduler_integration.go` covers
-`agent_inactive`, `idle_skipped`, `task_tree_held`, `checkout_error`,
-`checkout_unavailable`, `budget_blocked`, `no_agent_launched` (7 of the 8
-values), `event_subscribers.go` covers `processed` (the 8th, written by the
+`agent_inactive`, `idle_skipped`, `task_tree_held` and `budget_blocked`
+(4 of the 5 values), `event_subscribers.go` covers `processed` (the 5th, written by the
 agent-completed subscriber). Review round 2's `TestFailRun_WritesFailedStatusAndNullOutcome`
 (added this Build round, finding #1) additionally pins the failed path
 (`status='failed'`, `outcome IS NULL`) at the service level, since
@@ -188,8 +186,9 @@ run → `succeeded=1, skipped=1, failed=1, unclassified=1`) —
 `Total = Succeeded + Skipped + Unclassified + Failed + Other`.
 
 **Expected success-rate drop:** confirmed in the task's own framing — agents
-whose runs were previously miscounted (budget-blocked, checkout-unavailable,
-etc. silently landing in `succeeded`) will show a lower `AgentSuccessRateDay`
+whose runs were previously miscounted (budget-blocked, idle-skipped,
+agent-inactive, task-tree-held, or never-launched runs silently landing in
+`succeeded`) will show a lower `AgentSuccessRateDay`
 after this lands. This is the fix taking effect, not a regression: those
 runs were never real successes.
 

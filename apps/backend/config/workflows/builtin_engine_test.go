@@ -80,20 +80,29 @@ func TestOfficeDefault_TriggersCompileThroughEngine(t *testing.T) {
 	}
 	reviewSpec := engine.CompileStep(stepFromDefinition(*review))
 	enterActions := reviewSpec.Events[engine.TriggerOnEnter]
-	if len(enterActions) != 2 {
-		t.Fatalf("Review.on_enter compiled to %d actions, want 2", len(enterActions))
+	if len(enterActions) != 3 {
+		t.Fatalf("Review.on_enter compiled to %d actions, want 3", len(enterActions))
 	}
 	if enterActions[0].Kind != engine.ActionClearDecisions {
 		t.Errorf("Review.on_enter[0].Kind = %q, want clear_decisions", enterActions[0].Kind)
 	}
-	if enterActions[1].Kind != engine.ActionQueueRunForEachParticipant {
-		t.Errorf("Review.on_enter[1].Kind = %q, want queue_run_for_each_participant", enterActions[1].Kind)
+	if enterActions[1].Kind != engine.ActionEnsureParticipantSeat {
+		t.Errorf("Review.on_enter[1].Kind = %q, want ensure_participant_seat", enterActions[1].Kind)
 	}
-	if enterActions[1].QueueRunForEachParticipant == nil {
-		t.Fatal("Review.on_enter[1].QueueRunForEachParticipant is nil")
+	if enterActions[1].EnsureParticipantSeat == nil {
+		t.Fatal("Review.on_enter[1].EnsureParticipantSeat is nil")
 	}
-	if enterActions[1].QueueRunForEachParticipant.Role != "reviewer" {
-		t.Errorf("Review.on_enter[1] role = %q, want reviewer", enterActions[1].QueueRunForEachParticipant.Role)
+	if enterActions[1].EnsureParticipantSeat.Role != "reviewer" {
+		t.Errorf("Review.on_enter[1] role = %q, want reviewer", enterActions[1].EnsureParticipantSeat.Role)
+	}
+	if enterActions[2].Kind != engine.ActionQueueRunForEachParticipant {
+		t.Errorf("Review.on_enter[2].Kind = %q, want queue_run_for_each_participant", enterActions[2].Kind)
+	}
+	if enterActions[2].QueueRunForEachParticipant == nil {
+		t.Fatal("Review.on_enter[2].QueueRunForEachParticipant is nil")
+	}
+	if enterActions[2].QueueRunForEachParticipant.Role != "reviewer" {
+		t.Errorf("Review.on_enter[2] role = %q, want reviewer", enterActions[2].QueueRunForEachParticipant.Role)
 	}
 
 	completeActions := reviewSpec.Events[engine.TriggerOnTurnComplete]

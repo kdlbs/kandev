@@ -101,12 +101,14 @@ func TestWorkspaceSourceHTTPStatusMapsRepositoryNotFound(t *testing.T) {
 }
 
 func TestParseHTTPWorkspaceSourcesPreservesSnakeCaseFields(t *testing.T) {
-	sources, err := parseHTTPWorkspaceSources([]json.RawMessage{json.RawMessage(`{"kind":"repository","repository_id":"repo-1","base_branch":"main","checkout_branch":"feature/x"}`)})
+	sources, err := parseHTTPWorkspaceSources([]json.RawMessage{json.RawMessage(`{"kind":"repository","repository_id":"repo-1","base_branch":"main","checkout_branch":"feature/x","provider_host":"https://provider.example.test","provider_scope":"account-1"}`)})
 	require.NoError(t, err)
 	require.Len(t, sources, 1)
 	assert.Equal(t, "repo-1", sources[0].RepositoryID)
 	assert.Equal(t, "main", sources[0].BaseBranch)
 	assert.Equal(t, "feature/x", sources[0].CheckoutBranch)
+	assert.Equal(t, "https://provider.example.test", sources[0].ProviderHost)
+	assert.Equal(t, "account-1", sources[0].ProviderScope)
 }
 
 func TestQuickChatResolveParamsForcesWorktreeForRepositoryContext(t *testing.T) {
@@ -125,6 +127,7 @@ func TestQuickChatResolveParamsForcesWorktreeForRepositoryContext(t *testing.T) 
 type quickChatHandlerRepo struct {
 	mockRepository
 	taskRepos []*models.TaskRepository
+	task      *models.Task
 }
 
 func (r *quickChatHandlerRepo) GetWorkspace(_ context.Context, id string) (*models.Workspace, error) {
@@ -141,6 +144,11 @@ func (r *quickChatHandlerRepo) GetRepository(_ context.Context, id string) (*mod
 	return &models.Repository{ID: id, WorkspaceID: "ws-1", Name: id, DefaultBranch: "main"}, nil
 }
 
+func (r *quickChatHandlerRepo) CreateTask(_ context.Context, task *models.Task) error {
+	r.task = task
+	return nil
+}
+
 func (r *quickChatHandlerRepo) CreateTaskRepository(_ context.Context, taskRepo *models.TaskRepository) error {
 	r.taskRepos = append(r.taskRepos, taskRepo)
 	return nil
@@ -150,7 +158,7 @@ func (r *quickChatHandlerRepo) ListTaskRepositories(_ context.Context, _ string)
 	return r.taskRepos, nil
 }
 
-func newQuickChatHandlerForTest(t *testing.T) (*TaskHandlers, *captureOrchestrator) {
+func newQuickChatHandlerForTest(t *testing.T) (*TaskHandlers, *captureOrchestrator, *quickChatHandlerRepo) {
 	t.Helper()
 	log := newTestLogger(t)
 	repo := &quickChatHandlerRepo{}
@@ -162,7 +170,7 @@ func newQuickChatHandlerForTest(t *testing.T) (*TaskHandlers, *captureOrchestrat
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
 	orch := &captureOrchestrator{}
-	return &TaskHandlers{service: svc, orchestrator: orch, logger: log}, orch
+	return &TaskHandlers{service: svc, orchestrator: orch, logger: log}, orch, repo
 }
 
 func TestHTTPStartQuickChatRejectsInvalidRepositoryShapes(t *testing.T) {
@@ -191,7 +199,7 @@ func TestHTTPStartQuickChatRejectsInvalidRepositoryShapes(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			h, orch := newQuickChatHandlerForTest(t)
+			h, orch, _ := newQuickChatHandlerForTest(t)
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/workspaces/ws-1/quick-chat", strings.NewReader(tc.body))
@@ -204,6 +212,49 @@ func TestHTTPStartQuickChatRejectsInvalidRepositoryShapes(t *testing.T) {
 			assert.Empty(t, orch.requests)
 		})
 	}
+}
+
+func TestHTTPStartQuickChatForwardsAutoTitleAndKeepsProvisionalTitle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, orch, repo := newQuickChatHandlerForTest(t)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/workspaces/ws-1/quick-chat", strings.NewReader(`{
+		"title":"Agent A - Chat 1",
+		"agent_profile_id":"profile-1",
+		"auto_title":true
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+
+	h.httpStartQuickChat(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	require.NotNil(t, repo.task)
+	assert.Equal(t, "Agent A - Chat 1", repo.task.Title)
+	assert.True(t, models.IsAgentTitlePending(repo.task.Metadata))
+	assert.Len(t, orch.requests, 1)
+}
+
+func TestHTTPStartQuickChatWithoutAutoTitleDoesNotMarkPendingTitle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, orch, repo := newQuickChatHandlerForTest(t)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/workspaces/ws-1/quick-chat", strings.NewReader(`{
+		"title":"Ordinary quick chat",
+		"agent_profile_id":"profile-1",
+		"auto_title":false
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+
+	h.httpStartQuickChat(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	require.NotNil(t, repo.task)
+	assert.False(t, models.IsAgentTitlePending(repo.task.Metadata))
+	assert.Len(t, orch.requests, 1)
 }
 
 // TestStartAgentForNewTask_SetsDeferredStart pins the call-site half of the
@@ -1209,6 +1260,7 @@ func TestHandleSelectedMoveError(t *testing.T) {
 		name             string
 		err              error
 		want             int
+		wantCode         string
 		wantBodyContains string
 	}{
 		{
@@ -1217,9 +1269,10 @@ func TestHandleSelectedMoveError(t *testing.T) {
 			want: http.StatusNotFound,
 		},
 		{
-			name: "move conflict",
-			err:  errors.New("task task-1 cannot be moved: task has an active session (running)"),
-			want: http.StatusConflict,
+			name:     "move conflict",
+			err:      errors.New("task task-1 cannot be moved: task has an active session (running)"),
+			want:     http.StatusConflict,
+			wantCode: moveConflictCodeActiveSession,
 		},
 		{
 			name: "bad request validation",
@@ -1242,6 +1295,11 @@ func TestHandleSelectedMoveError(t *testing.T) {
 			handleSelectedMoveError(c, log, tc.err)
 
 			assert.Equal(t, tc.want, rec.Code)
+			if tc.wantCode != "" {
+				var body map[string]any
+				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+				assert.Equal(t, tc.wantCode, body["code"])
+			}
 			if tc.wantBodyContains != "" {
 				assert.Contains(t, rec.Body.String(), tc.wantBodyContains)
 			}
@@ -1654,6 +1712,22 @@ func TestResolveFreshBranchName(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.assert(t, resolveFreshBranchName(tc.raw, tc.taskTitle))
 		})
+	}
+}
+
+func TestResolveFreshBranchNameForTaskUsesPolicySnapshot(t *testing.T) {
+	task := &models.Task{
+		ID:         "task-123",
+		Identifier: "KAN-7",
+		Metadata:   map[string]interface{}{},
+	}
+	taskRepository := &models.TaskRepository{
+		BranchPolicyBranchTemplate: "bugfix/{ticket}-{title}-{suffix}",
+	}
+
+	got := resolveFreshBranchNameForTask("", "Fix login", task, taskRepository)
+	if !strings.HasPrefix(got, "bugfix/kan-7-fix-login-") {
+		t.Fatalf("policy branch = %q, want bugfix/kan-7-fix-login-*", got)
 	}
 }
 

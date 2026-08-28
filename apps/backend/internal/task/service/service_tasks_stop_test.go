@@ -229,6 +229,7 @@ type stubStopper struct {
 	stopExecutionErr   error
 	stopSessionCalls   int
 	stopExecutionCalls int
+	onStopSession      func()
 }
 
 func (s *stubStopper) StopTask(_ context.Context, _, _ string, _ bool) error { return nil }
@@ -239,6 +240,9 @@ func (s *stubStopper) StopExecution(_ context.Context, _, _ string, _ bool) erro
 func (s *stubStopper) RegisterExecutionStopOwner(string, string, bool) {}
 func (s *stubStopper) StopSession(_ context.Context, _, _ string, _ bool) error {
 	s.stopSessionCalls++
+	if s.onStopSession != nil {
+		s.onStopSession()
+	}
 	return s.stopSessionErr
 }
 
@@ -317,6 +321,107 @@ func TestStopTaskRuntimeTargets_SessionRuntimeAbsenceRemainsRetryable(t *testing
 	).failed
 	if _, ok := failed["sess-running"]; !ok {
 		t.Errorf("session-level absence must remain retryable; got %v", failed)
+	}
+}
+
+func TestStopTaskRuntimeTargetsAfterTaskDeletionWithoutRuntimeIsComplete(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	svc.executors = &stubExecutors{}
+	stopper := &stubStopper{
+		stopSessionErr: fmt.Errorf("session deleted: %w", runtimeapi.ErrNotFound),
+	}
+	svc.executionStopper = stopper
+
+	outcome := svc.stopTaskRuntimeTargetsWithTaskDeleted(
+		context.Background(),
+		"task-deleted",
+		[]taskStopTarget{{sessionID: "sess-deleted"}},
+		"task deleted",
+		"stop failed",
+		true,
+	)
+	if len(outcome.failed) != 0 {
+		t.Fatalf("deleted task with no runtime must not retry cleanup: %v", outcome.failed)
+	}
+	if stopper.stopSessionCalls != 1 {
+		t.Fatalf("stop session calls = %d, want 1", stopper.stopSessionCalls)
+	}
+}
+
+func TestStopTaskRuntimeTargetsAfterTaskDeletionKeepsUnidentifiedRuntimeRetryable(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	svc.executors = &stubExecutors{
+		runningBySession: &models.ExecutorRunning{SessionID: "sess-unknown"},
+	}
+	svc.executionStopper = &stubStopper{
+		stopSessionErr: fmt.Errorf("session deleted: %w", runtimeapi.ErrNotFound),
+	}
+
+	outcome := svc.stopTaskRuntimeTargetsWithTaskDeleted(
+		context.Background(),
+		"task-deleted",
+		[]taskStopTarget{{sessionID: "sess-unknown"}},
+		"task deleted",
+		"stop failed",
+		true,
+	)
+	if _, ok := outcome.failed["sess-unknown"]; !ok {
+		t.Fatalf("unidentified runtime row must remain retryable: %v", outcome.failed)
+	}
+}
+
+func TestStopTaskRuntimeTargetsAfterTaskDeletionStopsLateExactRuntime(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	execs := &stubExecutors{}
+	stopper := &stubStopper{
+		stopSessionErr: fmt.Errorf("session deleted: %w", runtimeapi.ErrNotFound),
+		onStopSession: func() {
+			execs.runningBySession = &models.ExecutorRunning{
+				SessionID:        "sess-late",
+				AgentExecutionID: "exec-late",
+			}
+		},
+	}
+	svc.executors = execs
+	svc.executionStopper = stopper
+
+	outcome := svc.stopTaskRuntimeTargetsWithTaskDeleted(
+		context.Background(),
+		"task-deleted",
+		[]taskStopTarget{{sessionID: "sess-late"}},
+		"task deleted",
+		"stop failed",
+		true,
+	)
+	if len(outcome.failed) != 0 {
+		t.Fatalf("late exact runtime should be stopped, not retried: %v", outcome.failed)
+	}
+	if stopper.stopExecutionCalls != 1 {
+		t.Fatalf("stop execution calls = %d, want 1", stopper.stopExecutionCalls)
+	}
+}
+
+func TestTaskResourceCleanupDeletesTask(t *testing.T) {
+	tests := []struct {
+		trigger models.TaskResourceCleanupTrigger
+		want    bool
+	}{
+		{models.TaskResourceCleanupTriggerArchive, false},
+		{models.TaskResourceCleanupTriggerDelete, true},
+		{models.TaskResourceCleanupTriggerCascadeArchive, false},
+		{models.TaskResourceCleanupTriggerCascadeDelete, true},
+		{models.TaskResourceCleanupTriggerWorkspaceDelete, true},
+		{models.TaskResourceCleanupTriggerQuickChatExpire, true},
+		{models.TaskResourceCleanupTriggerReconcile, false},
+		{models.TaskResourceCleanupTrigger("unknown"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.trigger), func(t *testing.T) {
+			if got := taskResourceCleanupDeletesTask(tt.trigger); got != tt.want {
+				t.Fatalf("taskResourceCleanupDeletesTask(%q) = %t, want %t", tt.trigger, got, tt.want)
+			}
+		})
 	}
 }
 

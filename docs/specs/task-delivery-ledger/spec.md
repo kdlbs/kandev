@@ -32,12 +32,11 @@ is consumed only by the automation engine
 `GitHubPushReceived` subscription), never for merge inference.
 
 Separately, Kandev's own success metric is wrong in a way that lands in the same
-analysis. `FinishRun` writes `status='finished'` on nine distinct call sites,
-**seven** of which did no work, and `agent_summary.go` counts every `finished` row as
-a success. Only two of the nine — the agent-completed subscribers — follow an agent
-actually running; the `scheduler_integration.go:639` site is reached only when no agent
-was launched at all, which is easy to misread and is spelled out under
-**Office run outcome**.
+analysis. `FinishRun` writes `status='finished'` on six terminal call sites,
+**four** of which did no work, and `agent_summary.go` counts every `finished` row as
+a success. Only two of the six — the agent-completed subscribers — follow an agent
+actually running. The four scheduler guards record the reason that work did not
+run, as spelled out under **Office run outcome**.
 
 This spec defines a **delivery ledger** that records how, and whether, each
 `(task, repository)` pair delivered; and a **run outcome** that stops Office from
@@ -149,7 +148,7 @@ This spec defines two contracts that share no build-order dependency. They are
 specified together because they are the same defect at two grains, and they are
 **built in this order**, each closing on its own:
 
-- **Slice A — Office run outcome.** One nullable column, nine call sites, **one new
+- **Slice A — Office run outcome.** One nullable column, six call sites, **one new
   field on `models.Run`**, one reshaped repository query and the two dashboard response
   shapes it feeds. Depends on nothing in Slice B.
 
@@ -315,16 +314,11 @@ evidence** relies on.
 ### `runs.outcome` (new column)
 
 Nullable TEXT on the existing `runs` table:
-`processed | budget_blocked | idle_skipped | agent_inactive | task_tree_held | checkout_unavailable | checkout_error | no_agent_launched`.
-
-`no_agent_launched` records a run the scheduler finished **without ever starting an
-agent** — see the `:639` row of the call-site table under **Office run outcome**, which
-is reached only when no launch was attempted. It is a non-work outcome and buckets with
-the other non-work values.
+`processed | budget_blocked | idle_skipped | agent_inactive | task_tree_held`.
 
 `NULL` for every row written before activation, for any run that never reaches a terminal
 status, and for every run that reaches `status = 'failed'` (see **Office run outcome**,
-the `FailRun` bullet). On the **finished** path the writer writes one of the eight values
+the `FailRun` bullet). On the **finished** path the writer writes one of the five values
 above; it never writes `''`. No database constraint is added —
 the reader is total over every possible value (see **Office run outcome**), so
 an unrecognised value degrades to `skipped` rather than breaking a query.
@@ -1491,39 +1485,25 @@ line number is a pointer (see **Citation convention**).
 
 | Call site | Outcome |
 |---|---|
-| `office/service/scheduler_integration.go:196` — agent not active | `agent_inactive` |
-| `office/service/scheduler_integration.go:218` — idle skip | `idle_skipped` |
-| `office/service/scheduler_integration.go:479` — task-tree hold | `task_tree_held` |
-| `office/service/scheduler_integration.go:589` — checkout failed | `checkout_error` |
-| `office/service/scheduler_integration.go:596` — task already checked out | `checkout_unavailable` |
-| `office/service/scheduler_integration.go:619` — pre-execution budget block | `budget_blocked` |
-| `office/service/scheduler_integration.go:639` — `finishRun`, reached only when **no agent was launched** | `no_agent_launched` |
-| `office/service/event_subscribers.go:312` — agent-completed for a task-bearing run | `processed` |
-| `office/service/event_subscribers.go:360` — `handleTasklessAgentCompleted` | `processed` |
+| `office/service/scheduler_integration.go:218` — agent not active | `agent_inactive` |
+| `office/service/scheduler_integration.go:247` — idle skip | `idle_skipped` |
+| `office/service/scheduler_integration.go:517` — task-tree hold | `task_tree_held` |
+| `office/service/scheduler_integration.go:829` — pre-execution budget block | `budget_blocked` |
+| `office/service/event_subscribers.go:408` — agent-completed for a task-bearing run | `processed` |
+| `office/service/event_subscribers.go:512` — `handleTasklessAgentCompleted` | `processed` |
 
-**Why `:639` is not `processed`.** This is the one row a reader is most likely to get
-wrong, so the reasoning is recorded rather than left to inspection. `prepareAndLaunch`
-calls `launchOrLog`, which starts an agent **only** when `taskID != "" &&
-taskStarter != nil`; in every other case it logs `processing run (no task starter or
-task ID)` and returns `true` **without launching anything**. `prepareAndLaunch` then
-returns early on exactly the launched condition, leaving the run `claimed` for the
-subscribers below. So `si.finishRun` — which holds the `:639` call — is reached **if and
-only if** `launchOrLog` did not launch: a taskless run, or a deployment with no task
-starter configured. Recording that as `processed` would count a run in which no agent
-ran as `succeeded`, which is precisely the defect this slice exists to remove. Per
-`### Citation convention` the semantic label is authoritative: a builder who finds the
-line number has drifted must follow "reached only when no agent was launched", not the
-number.
+Checkout errors and checkout contention do not finish a run. A checkout error
+uses the normal retry and failure path. A contention result requeues the run
+and retries it. Neither path reports work that did not run.
 
-**Reachability of `:360`.** `handleTasklessAgentCompleted` resolves its run through
+**Reachability of `:512`.** `handleTasklessAgentCompleted` resolves its run through
 `GetClaimedTasklessRunForAgent`, which requires `status = 'claimed'` and an empty
-`payload.task_id`. Because taskless runs are finished synchronously at `:639`, that
-lookup normally returns `sql.ErrNoRows` and the site is a no-op. It is mapped to
-`processed` because an `AgentCompleted` event genuinely fired for it, and it is retained
-so the mapping is total over the call sites that exist — but no acceptance criterion
-asserts it fires, because in normal operation it does not.
+`payload.task_id`. Taskless runs fail before they can remain claimed, so the lookup
+normally returns `sql.ErrNoRows` and the site is a no-op. It is mapped to `processed`
+because an `AgentCompleted` event may still arrive for a legacy claimed run, and it is
+retained so the mapping is total over the call sites that exist.
 
-`:312` is the path where an agent actually ran to completion and is the ordinary source
+`:408` is the path where an agent actually ran to completion and is the ordinary source
 of `processed`. Leaving any terminal site unset would grow `unclassified` forever after
 activation and falsify the guarantee that the activation point tells a consumer when
 `unclassified` stops growing.
@@ -1551,15 +1531,15 @@ transaction or a guard, because it must not change `runs.status` semantics:
   (`:44`) passes `NULL`. `NULL` is correct rather than a placeholder — a run that reached
   `status = 'failed'` is bucketed by `RunCountsByDayForAgent` on its status alone and never
   reaches the `succeeded` / `skipped` / `unclassified` buckets, so no value from the
-  eight-value vocabulary would ever be read, and inventing one would assert a classification
+  five-value vocabulary would ever be read, and inventing one would assert a classification
   nothing consumes. This also makes the sentence under `### runs.outcome` exact: the
-  eight-value claim describes the **finished** path; the failed path writes `NULL` in the
+  five-value claim describes the **finished** path; the failed path writes `NULL` in the
   same statement.
 - **The second caller pair of the shared repository method, and what it passes.** Changing
   that signature necessarily reaches
   `office/scheduler.SchedulerService.FinishRun` and `.FailRun`
   (`internal/office/scheduler/run_processing.go`), which call the same
-  `repo.FinishRun` **without** going through `transitionRunTerminal` or the nine-site table.
+  `repo.FinishRun` **without** going through `transitionRunTerminal` or the six-site table.
   Both **pass `NULL`**, and neither is added to the call-site table. The reasoning, so a
   builder does not have to guess and does not "improve" it into a vocabulary value:
   - `SchedulerService.FailRun` writes `RunStatusFailed`. It is reached in production (via
@@ -1572,7 +1552,7 @@ transaction or a guard, because it must not change `runs.status` semantics:
     remove — a run in which nothing is known to have happened counted as a success. `NULL`
     routes it to `unclassified`, which is the honest bucket for a path whose meaning is
     unestablished.
-  - Consequently the activation guarantee below is scoped to the nine sites and is **not**
+  - Consequently the activation guarantee below is scoped to the six sites and is **not**
     weakened by these two: neither is a terminal site this card classifies, and if
     `SchedulerService.FinishRun` is ever wired to something real, the card that wires it
     owns choosing its outcome and adding it to the table. Deleting the dormant method is
@@ -1582,13 +1562,13 @@ transaction or a guard, because it must not change `runs.status` semantics:
   If two terminal callers ever reach the same row, **last writer wins** for status and
   outcome together. This is the existing contract for `status`, extended unchanged.
 - A zero-row update (the run was deleted) is **not** an error and is not retried.
-- Six of the nine sites discard `FinishRun`'s error (`_ = si.svc.FinishRun(...)`). That
+- Four of the six sites discard `FinishRun`'s error (`_ = si.svc.FinishRun(...)`). That
   is unchanged by this card. A discarded failure leaves the row non-terminal with
   `outcome` `NULL`; if it later reaches `finished` by another path it is bucketed by
   whatever that path wrote, and if it never does it is not `finished` and so never
   reaches the `succeeded` / `skipped` / `unclassified` buckets at all.
 - Consequently the activation guarantee is stated precisely: after activation,
-  `unclassified` stops growing **for runs that reach `finished` through one of the nine
+  `unclassified` stops growing **for runs that reach `finished` through one of the six
   sites above**. It is not a claim that no `finished` row can ever carry a `NULL`
   outcome, because this card does not add error handling to paths that discard errors
   today.
@@ -2111,29 +2091,29 @@ consulting `kandev_meta` — the activation instant remains the authoritative an
 - **GIVEN** a run skipped because the agent is not active, **WHEN** it finishes,
   **THEN** `runs.outcome = 'agent_inactive'` — even though that path writes no
   `office_activity_log` row.
-- **GIVEN** a run held by an active task-tree hold, a run whose task checkout
-  failed, and a run whose task was already checked out, **WHEN** each finishes,
-  **THEN** their outcomes are `task_tree_held`, `checkout_error` and
-  `checkout_unavailable` respectively.
+- **GIVEN** a run held by an active task-tree hold, **WHEN** it finishes,
+  **THEN** its outcome is `task_tree_held`.
+- **GIVEN** a run whose task checkout fails transiently, **WHEN** the scheduler
+  handles it, **THEN** it is retried or escalated after the retry budget and is
+  not finished as completed work.
+- **GIVEN** a run whose task is already checked out, **WHEN** the scheduler
+  handles it, **THEN** it is requeued for retry and is not finished as completed
+  work.
 - **GIVEN** a task-bearing run whose agent was launched by the task starter, **WHEN** the
   agent-completed subscriber finishes it, **THEN** `runs.outcome = 'processed'` and it is
   not left `NULL` after activation.
-- **GIVEN** a taskless run, **WHEN** the scheduler finishes it without launching an agent,
-  **THEN** `runs.outcome = 'no_agent_launched'` and **not** `processed`.
+- **GIVEN** a taskless run, **WHEN** the scheduler cannot launch it, **THEN** it is
+  marked `failed` with a diagnostic error and does not report completed work.
 - **GIVEN** a task-bearing run in a deployment with no task starter configured, **WHEN**
-  the scheduler finishes it after logging rather than launching, **THEN**
-  `runs.outcome = 'no_agent_launched'` — the outcome follows whether an agent ran, not
-  whether the run carried a task.
-- **GIVEN** a day containing one such `no_agent_launched` run and one `processed` run,
-  **WHEN** `RunCountsByDayForAgent` reports that day, **THEN** `succeeded = 1` and
-  `skipped = 1` — a run in which no agent ran is never counted as a success.
+  the scheduler handles it, **THEN** it is marked `failed` with a diagnostic error,
+  its checkout is released, and the agent is not launched.
 - **GIVEN** two terminal callers reaching the same run row, **WHEN** both write, **THEN**
   the row's `status` and `outcome` both come from the later write — they are set in one
   statement and can never disagree.
 - **GIVEN** a run that fails, **WHEN** `FailRun` transitions it through the shared
   `transitionRunTerminal` statement, **THEN** `runs.status = 'failed'` and
   `runs.outcome IS NULL` — the failed path writes `NULL` in the same statement, and no
-  value from the eight-value vocabulary is invented for it.
+  value from the five-value vocabulary is invented for it.
 - **GIVEN** a day containing one failed run written that way, **WHEN**
   `RunCountsByDayForAgent` reports that day, **THEN** it counts in `failed` and in
   neither `unclassified` nor `skipped` — the `NULL` outcome is never read, because the
@@ -2155,8 +2135,8 @@ consulting `kandev_meta` — the activation instant remains the authoritative an
   **WHEN** `RunCountsByDayForAgent` reports that day, **THEN** it returns
   `succeeded = 1`, `skipped = 1`, `unclassified = 1`, `failed = 1` and
   `other = 0`.
-- **GIVEN** a `finished` run whose `outcome` holds a value outside the eight
-  named ones, **WHEN** that day is reported, **THEN** it counts in `skipped` —
+- **GIVEN** a `finished` run whose `outcome` holds a value outside the five
+ named ones, **WHEN** that day is reported, **THEN** it counts in `skipped` —
   the bucketing is total and no query errors.
 - **GIVEN** that same day, **WHEN** the agent dashboard renders it, **THEN**
   `AgentRunActivityDay.total` equals

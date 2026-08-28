@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-func runInstalled(ctx context.Context, opts Options) int {
+func runInstalled(ctx context.Context, opts Options, build BuildInfo) int {
 	startupConfig, err := loadBootstrapConfig()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
@@ -46,6 +46,7 @@ func runInstalled(ctx context.Context, opts Options) int {
 	}
 	return launchManaged(ctx, managedAppConfig{
 		Header:     "release: " + releaseTag,
+		Version:    normalizedBuildVersion(build.Version),
 		Mode:       "run",
 		Backend:    bundle.Launcher,
 		BackendCWD: filepath.Dir(bundle.Launcher),

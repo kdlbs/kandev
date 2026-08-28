@@ -116,10 +116,11 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 	log, observed := newObservedTestLogger(t)
 	cmd := exec.Command(os.Args[0], "-test.run=TestManagerProcessExitHelper")
 	cmd.Env = append(os.Environ(), "KANDEV_MANAGER_PROCESS_EXIT_HELPER=1")
-	stderr, err := cmd.StderrPipe()
+	stderr, stderrWriter, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("stderr pipe: %v", err)
 	}
+	cmd.Stderr = stderrWriter
 	m := &Manager{
 		cmd:       cmd,
 		stderr:    stderr,
@@ -132,8 +133,19 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 		groupAliveFn: func(int) bool { return false },
 	}
 	m.status.Store(StatusRunning)
+	t.Cleanup(func() {
+		if cmd.ProcessState == nil && cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = stderrWriter.Close()
+		_ = stderr.Close()
+		m.wg.Wait()
+	})
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start process: %v", err)
+	}
+	if err := stderrWriter.Close(); err != nil {
+		t.Fatalf("close parent stderr pipe: %v", err)
 	}
 	stderrDone := make(chan struct{})
 	m.wg.Add(2)
@@ -273,8 +285,11 @@ func TestStartProcessPipes_CreatesAllPipes(t *testing.T) {
 	assert.NotNil(t, m.stdout, "stdout pipe should be created")
 	assert.NotNil(t, m.stderr, "stderr pipe should be created")
 
-	// Clean up
-	_ = m.stdin.Close()
+	t.Cleanup(func() {
+		_ = m.stdin.Close()
+		_ = m.stdout.Close()
+		_ = m.closeStderrPipe()
+	})
 }
 
 func TestStartProcessPipes_FailsAfterProcessStarted(t *testing.T) {

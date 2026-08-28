@@ -1,7 +1,12 @@
 import { createRef } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, cleanup, fireEvent, screen } from "@testing-library/react";
-import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
+import {
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type ClarificationRequestMetadata,
+  type Message,
+} from "@/lib/types/http";
 import {
   ClarificationEscapeGuardProvider,
   type ClarificationEscapeGuardEntry,
@@ -340,6 +345,55 @@ describe("ClarificationInputOverlay — labelled Skip button", () => {
     expect(JSON.parse(String(init.body))).toEqual({
       rejected: true,
       reject_reason: "User skipped",
+    });
+  });
+});
+
+describe("ClarificationInputOverlay — lightweight Markdown", () => {
+  it("renders question fields without changing the selected option payload", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    const message = clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 });
+    const metadata = message.metadata as ClarificationRequestMetadata;
+    metadata.context = "Keep `context` literal";
+    metadata.question = {
+      id: "q1",
+      title: "Use `fast` mode",
+      prompt: "Choose **one**:\n\n1. First\n2. Second",
+      options: [
+        {
+          option_id: "fast-mode",
+          label: "Run in `fast` mode",
+          description: "Best for **small** changes",
+        },
+      ],
+    };
+    renderOverlay([message]);
+
+    const card = screen.getByTestId("clarification-question-card");
+    const title = Array.from(card.querySelectorAll("span")).find(
+      (element) => element.textContent === "Use fast mode" && element.querySelector("code"),
+    );
+    expect(title).toBeDefined();
+    expect(card.querySelector("ol")?.textContent).toContain("First");
+
+    const optionLabel = screen.getByTestId("clarification-option-label");
+    const optionDescription = screen.getByTestId("clarification-option-description");
+    expect(optionLabel.querySelector("code")?.textContent).toBe("fast");
+    expect(optionDescription.querySelector("strong")?.textContent).toBe("small");
+
+    const context = screen.getByTestId("clarification-context");
+    expect(context.textContent).toBe("Keep `context` literal");
+    expect(context.querySelector("code")).toBeNull();
+
+    fireEvent.click(optionLabel.querySelector("code")!);
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init.body))).toEqual({
+      answers: [{ question_id: "q1", selected_options: ["fast-mode"] }],
+      rejected: false,
     });
   });
 });

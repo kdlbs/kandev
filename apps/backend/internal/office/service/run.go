@@ -24,6 +24,7 @@ const (
 	RunReasonTaskBlockersResolved  = "task_blockers_resolved"
 	RunReasonTaskChildrenCompleted = "task_children_completed"
 	RunReasonApprovalResolved      = "approval_resolved"
+	RunReasonTaskReviewRequested   = "task_review_requested"
 	RunReasonRoutineTrigger        = "routine_trigger"
 	// RunReasonHeartbeat aliases shared.RunReasonHeartbeat so this package's
 	// local constant and the shared idle-skip classifier cannot drift apart
@@ -54,18 +55,16 @@ const (
 
 // Run outcome constants (docs/specs/task-delivery-ledger/spec.md, "Office run
 // outcome"). Written into runs.outcome alongside status='finished' at each of
-// the nine call sites; NULL on the failed path and on every pre-activation
-// row. RunOutcomeProcessed is the only value RunCountsByDayForAgent counts as
-// succeeded — every other value buckets into skipped.
+// the six terminal call sites; NULL on the failed path and on every
+// pre-activation row. RunOutcomeProcessed is the only value
+// RunCountsByDayForAgent counts as succeeded. Every other value buckets into
+// skipped.
 const (
-	RunOutcomeProcessed           = "processed"
-	RunOutcomeBudgetBlocked       = "budget_blocked"
-	RunOutcomeIdleSkipped         = "idle_skipped"
-	RunOutcomeAgentInactive       = "agent_inactive"
-	RunOutcomeTaskTreeHeld        = "task_tree_held"
-	RunOutcomeCheckoutUnavailable = "checkout_unavailable"
-	RunOutcomeCheckoutError       = "checkout_error"
-	RunOutcomeNoAgentLaunched     = "no_agent_launched"
+	RunOutcomeProcessed     = "processed"
+	RunOutcomeBudgetBlocked = "budget_blocked"
+	RunOutcomeIdleSkipped   = "idle_skipped"
+	RunOutcomeAgentInactive = "agent_inactive"
+	RunOutcomeTaskTreeHeld  = "task_tree_held"
 )
 
 // CoalesceWindowSeconds is the default coalescing window.
@@ -90,11 +89,12 @@ func (s *Service) QueueRun(
 	}
 
 	if s.runsService != nil {
-		return s.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
+		_, err := s.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
 			Reason:         reason,
 			IdempotencyKey: idempotencyKey,
 			Payload:        payloadWithAgent(payload, agentInstanceID),
 		})
+		return err
 	}
 	return s.queueRunInline(ctx, agentInstanceID, reason, payload, idempotencyKey)
 }

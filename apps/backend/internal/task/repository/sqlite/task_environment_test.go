@@ -188,6 +188,42 @@ func TestFinalizeTaskEnvironmentMaterializationPublishesInventoryAtomically(t *t
 	}
 }
 
+func TestFinalizeTaskEnvironmentMaterializationAllowsEmptyInventoryForRepoLessTask(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-finalize-repoless")
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-finalize-repoless", WorkspaceID: "workspace-finalize-repoless", Title: "Repo-less"}); err != nil {
+		t.Fatal(err)
+	}
+	env := &models.TaskEnvironment{
+		ID:                       "env-finalize-repoless",
+		TaskID:                   "task-finalize-repoless",
+		ExecutorType:             string(models.ExecutorTypeLocal),
+		Status:                   models.TaskEnvironmentStatusCreating,
+		MaterializationSessionID: "session-materializer-repoless",
+	}
+	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	env.Status = models.TaskEnvironmentStatusReady
+	env.MaterializationSessionID = ""
+	if err := repo.FinalizeTaskEnvironmentMaterialization(ctx, env, nil, "session-materializer-repoless"); err != nil {
+		t.Fatalf("FinalizeTaskEnvironmentMaterialization: %v", err)
+	}
+
+	persisted, err := repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if persisted.Status != models.TaskEnvironmentStatusReady || persisted.MaterializationSessionID != "" {
+		t.Fatalf("environment = status %q owner %q, want ready with no owner", persisted.Status, persisted.MaterializationSessionID)
+	}
+	if len(persisted.Repos) != 0 {
+		t.Fatalf("canonical inventory = %#v, want empty for repo-less task", persisted.Repos)
+	}
+}
+
 func TestCreateTaskSessionWithWorkspaceBindingElectsAndAttaches(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()
@@ -498,5 +534,152 @@ func TestTransferTaskEnvironmentMissingReturnsSentinel(t *testing.T) {
 
 	if !errors.Is(err, ErrTaskEnvironmentNotFound) {
 		t.Fatalf("TransferTaskEnvironmentToTask error = %v, want ErrTaskEnvironmentNotFound", err)
+	}
+}
+
+// seedRepoBackedTask creates a task with one linked task_repositories row, so
+// the task reads as repo-backed to the ready-requires-inventory guards below.
+func seedRepoBackedTask(t *testing.T, repo *Repository, workspaceID, taskID string) {
+	t.Helper()
+	ctx := context.Background()
+	seedWorkspace(t, repo, workspaceID)
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: workspaceID, Title: taskID}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: taskID + "-repo", WorkspaceID: workspaceID, Name: taskID + "-repo"}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{TaskID: taskID, RepositoryID: taskID + "-repo", BaseBranch: "main"}); err != nil {
+		t.Fatalf("CreateTaskRepository: %v", err)
+	}
+}
+
+// Regression test for the "failed prepare leaves a permanently bricked
+// workspace" defect: a launch whose prepare step fails produces an empty
+// repos slice, and the materializer must not be allowed to publish that as
+// ready inventory for a repo-backed task. FinalizeTaskEnvironmentMaterialization
+// hardcodes the ready status in its UPDATE, so this must be enforced inside
+// the function itself, not by the caller.
+func TestFinalizeTaskEnvironmentMaterializationRefusesEmptyInventoryForRepoBackedTask(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedRepoBackedTask(t, repo, "workspace-finalize-empty-inventory", "task-finalize-empty-inventory")
+
+	env := &models.TaskEnvironment{
+		ID:                       "env-finalize-empty-inventory",
+		TaskID:                   "task-finalize-empty-inventory",
+		ExecutorType:             string(models.ExecutorTypeSSH),
+		Status:                   models.TaskEnvironmentStatusCreating,
+		MaterializationSessionID: "session-materializer-empty",
+	}
+	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	env.Status = models.TaskEnvironmentStatusReady
+	env.MaterializationSessionID = ""
+	if err := repo.FinalizeTaskEnvironmentMaterialization(ctx, env, nil, "session-materializer-empty"); err == nil {
+		t.Fatal("FinalizeTaskEnvironmentMaterialization published ready with empty inventory for a repo-backed task, want error")
+	}
+
+	persisted, err := repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if persisted.Status != models.TaskEnvironmentStatusCreating {
+		t.Fatalf("environment after refused finalize = status %q, want unchanged creating", persisted.Status)
+	}
+	if len(persisted.Repos) != 0 {
+		t.Fatalf("environment after refused finalize has inventory = %#v, want none", persisted.Repos)
+	}
+}
+
+func TestUpdateTaskEnvironmentRefusesReadyWithEmptyInventoryForRepoBackedTask(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedRepoBackedTask(t, repo, "workspace-update-empty-inventory", "task-update-empty-inventory")
+
+	env := &models.TaskEnvironment{
+		ID:           "env-update-empty-inventory",
+		TaskID:       "task-update-empty-inventory",
+		ExecutorType: string(models.ExecutorTypeSSH),
+		Status:       models.TaskEnvironmentStatusCreating,
+	}
+	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	env.Status = models.TaskEnvironmentStatusReady
+	if err := repo.UpdateTaskEnvironment(ctx, env); err == nil {
+		t.Fatal("UpdateTaskEnvironment published ready with empty inventory for repo-backed task, want error")
+	}
+
+	persisted, err := repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if persisted.Status != models.TaskEnvironmentStatusCreating {
+		t.Fatalf("environment after refused update = status %q, want unchanged creating", persisted.Status)
+	}
+}
+
+func TestUpdateTaskEnvironmentAllowsExistingReadyEnvironmentWithoutInventory(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	workspaceID := "workspace-update-existing-ready"
+	taskID := "task-update-existing-ready"
+	seedWorkspace(t, repo, workspaceID)
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: workspaceID, Title: taskID}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	env := &models.TaskEnvironment{
+		ID:           "env-update-existing-ready",
+		TaskID:       taskID,
+		ExecutorType: string(models.ExecutorTypeSSH),
+		Status:       models.TaskEnvironmentStatusReady,
+	}
+	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: taskID + "-repo", WorkspaceID: workspaceID, Name: taskID + "-repo"}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{TaskID: taskID, RepositoryID: taskID + "-repo", BaseBranch: "main"}); err != nil {
+		t.Fatalf("CreateTaskRepository: %v", err)
+	}
+	env.WorkspacePath = "/workspace/task-update-existing-ready"
+	if err := repo.UpdateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("UpdateTaskEnvironment on existing ready environment: %v", err)
+	}
+
+	persisted, err := repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if persisted.Status != models.TaskEnvironmentStatusReady || persisted.WorkspacePath != env.WorkspacePath {
+		t.Fatalf("persisted environment = %+v, want ready with updated workspace path", persisted)
+	}
+}
+
+// Same defect, direct-create path: CreateTaskEnvironment must not persist a
+// ready environment with zero repo rows for a repo-backed task either.
+func TestCreateTaskEnvironmentRefusesReadyWithEmptyInventoryForRepoBackedTask(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedRepoBackedTask(t, repo, "workspace-create-empty-inventory", "task-create-empty-inventory")
+
+	env := &models.TaskEnvironment{
+		ID:           "env-create-empty-inventory",
+		TaskID:       "task-create-empty-inventory",
+		ExecutorType: string(models.ExecutorTypeSSH),
+		Status:       models.TaskEnvironmentStatusReady,
+	}
+	if err := repo.CreateTaskEnvironment(ctx, env); err == nil {
+		t.Fatal("CreateTaskEnvironment published ready with empty inventory for a repo-backed task, want error")
+	}
+
+	if _, err := repo.GetTaskEnvironment(ctx, env.ID); !errors.Is(err, ErrTaskEnvironmentNotFound) {
+		t.Fatalf("GetTaskEnvironment after refused create = %v, want ErrTaskEnvironmentNotFound", err)
 	}
 }

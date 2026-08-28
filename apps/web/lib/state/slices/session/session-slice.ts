@@ -70,6 +70,17 @@ function mergeMessageFields(target: Record<string, unknown>, source: Record<stri
   }
 }
 
+function mergeMessageAtIndex(messages: Message[], message: Message): void {
+  const index = messages.findIndex((candidate) => candidate.id === message.id);
+  if (index === -1) return;
+  const merged = { ...messages[index] };
+  mergeMessageFields(
+    merged as unknown as Record<string, unknown>,
+    message as unknown as Record<string, unknown>,
+  );
+  messages[index] = merged;
+}
+
 /** Return a new messages array with the message matching `messageId` removed. */
 function removeMessageByID(messages: Message[], messageId: string) {
   return messages.filter((message) => message.id !== messageId);
@@ -311,14 +322,14 @@ function buildMessageActions(set: ImmerSet) {
       set((draft) => {
         const messages = draft.messages.bySession[message.session_id];
         if (!messages) return;
-        const index = messages.findIndex((m) => m.id === message.id);
-        if (index === -1) return;
-        const merged = { ...messages[index] };
-        mergeMessageFields(
-          merged as unknown as Record<string, unknown>,
-          message as unknown as Record<string, unknown>,
-        );
-        messages[index] = merged;
+        mergeMessageAtIndex(messages, message);
+      }),
+    updateMessages: (messages: Parameters<SessionSlice["updateMessages"]>[0]) =>
+      set((draft) => {
+        for (const message of messages) {
+          const sessionMessages = draft.messages.bySession[message.session_id];
+          if (sessionMessages) mergeMessageAtIndex(sessionMessages, message);
+        }
       }),
     removeMessage: (
       sessionId: Parameters<SessionSlice["removeMessage"]>[0],

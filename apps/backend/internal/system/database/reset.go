@@ -32,9 +32,10 @@ var ErrResetNotConfirmed = errors.New("factory reset requires confirm=\"RESET\""
 //
 // The job:
 //  1. Calls s.OrchestratorShutdown (if set) to stop running executions.
-//  2. Snapshots the live DB to the sibling backups directory.
-//  3. Drops every user table from the SQLite schema (kandev_meta is kept).
-//  4. os.RemoveAll on worktrees/repos/sessions/tasks/quick-chat subdirs.
+//  2. Calls s.DatabaseQuiesce (if set) to stop database-backed workers.
+//  3. Snapshots the live DB to the sibling backups directory.
+//  4. Drops every user table from the SQLite schema (kandev_meta is kept).
+//  5. os.RemoveAll on worktrees/repos/sessions/tasks/quick-chat subdirs.
 //
 // On success the result map exposes {"snapshot_path", "tables_dropped",
 // "restart_required": true}. The frontend dialog uses restart_required to
@@ -55,6 +56,11 @@ func (s *Service) runFactoryReset(_ context.Context) (map[string]interface{}, er
 
 	if s.OrchestratorShutdown != nil {
 		s.OrchestratorShutdown()
+	}
+	if s.DatabaseQuiesce != nil {
+		if err := s.DatabaseQuiesce(); err != nil {
+			return nil, fmt.Errorf("quiesce database workers: %w", err)
+		}
 	}
 
 	snapshotPath, err := s.createPreResetSnapshot()

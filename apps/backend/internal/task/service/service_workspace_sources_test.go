@@ -327,18 +327,17 @@ func TestAttachWorkspaceSources_BoundsLiveProviderRefresh(t *testing.T) {
 		done <- attachResult{result: result, err: attachErr}
 	}()
 	select {
-	case <-refresher.started:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("AttachWorkspaceSources did not invoke the provider refresher")
-	}
-
-	select {
 	case attached := <-done:
 		if attached.err != nil {
 			t.Fatalf("AttachWorkspaceSources: %v", attached.err)
 		}
 		if attached.result == nil || attached.result.Task == nil {
 			t.Fatalf("AttachWorkspaceSources result = %#v", attached.result)
+		}
+		select {
+		case <-refresher.started:
+		default:
+			t.Fatal("AttachWorkspaceSources did not invoke the provider refresher")
 		}
 	case <-time.After(500 * time.Millisecond):
 		refresher.stop()

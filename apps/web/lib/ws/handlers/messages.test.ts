@@ -49,11 +49,13 @@ function makeUpdated(sessionId: string, messageId: string, content: string): Upd
 
 function makeStore(currentMessages: Record<string, unknown[]> = {}, completedTurn = false) {
   const updateMessage = vi.fn();
+  const updateMessages = vi.fn();
   const addMessage = vi.fn();
   const removeMessage = vi.fn();
   const setTaskSessionPendingAction = vi.fn();
   const state = {
     updateMessage,
+    updateMessages,
     addMessage,
     removeMessage,
     setTaskSessionPendingAction,
@@ -69,6 +71,7 @@ function makeStore(currentMessages: Record<string, unknown[]> = {}, completedTur
   return {
     store: { getState: () => state } as unknown as StoreApi<AppState>,
     updateMessage,
+    updateMessages,
     addMessage,
     removeMessage,
     setTaskSessionPendingAction,
@@ -97,7 +100,7 @@ function makeFrameScheduler() {
 
 describe("session message frame scheduler", () => {
   it("applies hundreds of same-key updates once with the newest full payload", () => {
-    const { store, updateMessage } = makeStore();
+    const { store, updateMessage, updateMessages } = makeStore();
     const frame = makeFrameScheduler();
     const registration = createMessagesHandlerRegistration(store, frame);
     const handler = registration.handlers["session.message.updated"]!;
@@ -110,19 +113,20 @@ describe("session message frame scheduler", () => {
     expect(frame.schedule).toHaveBeenCalledTimes(1);
     frame.runFrame();
 
-    expect(updateMessage).toHaveBeenCalledTimes(1);
-    expect(updateMessage).toHaveBeenLastCalledWith(
+    expect(updateMessage).not.toHaveBeenCalled();
+    expect(updateMessages).toHaveBeenCalledTimes(1);
+    expect(updateMessages).toHaveBeenLastCalledWith([
       expect.objectContaining({
         id: "message-1",
         session_id: "session-1",
         content: "content-299",
       }),
-    );
+    ]);
     registration.dispose();
   });
 
-  it("updates different message keys once each in insertion order", () => {
-    const { store, updateMessage } = makeStore();
+  it("applies different message keys with one bulk store action", () => {
+    const { store, updateMessage, updateMessages } = makeStore();
     const frame = makeFrameScheduler();
     const registration = createMessagesHandlerRegistration(store, frame);
     const handler = registration.handlers["session.message.updated"]!;
@@ -132,13 +136,16 @@ describe("session message frame scheduler", () => {
     handler(makeUpdated("session-1", "message-a", "a2"));
     frame.runFrame();
 
-    expect(updateMessage).toHaveBeenCalledTimes(2);
-    expect(updateMessage.mock.calls.map(([message]) => message.content)).toEqual(["a2", "b1"]);
+    expect(updateMessage).not.toHaveBeenCalled();
+    expect(updateMessages).toHaveBeenCalledTimes(1);
+    expect(
+      updateMessages.mock.calls[0]?.[0].map((message: { content: string }) => message.content),
+    ).toEqual(["a2", "b1"]);
     registration.dispose();
   });
 
   it("flushes pending updates before add and delete barriers", () => {
-    const { store, updateMessage, addMessage, removeMessage } = makeStore();
+    const { store, updateMessage, updateMessages, addMessage, removeMessage } = makeStore();
     const frame = makeFrameScheduler();
     const registration = createMessagesHandlerRegistration(store, frame);
     const handlers = registration.handlers;
@@ -151,10 +158,11 @@ describe("session message frame scheduler", () => {
       payload: makePayload("session-1", "message-1", "ignored"),
       timestamp: TEST_TIMESTAMP,
     });
-    expect(updateMessage).toHaveBeenCalledTimes(1);
+    expect(updateMessage).not.toHaveBeenCalled();
+    expect(updateMessages).toHaveBeenCalledTimes(1);
     expect(removeMessage).toHaveBeenCalledWith("session-1", "message-1");
     frame.runFrame();
-    expect(updateMessage).toHaveBeenCalledTimes(1);
+    expect(updateMessages).toHaveBeenCalledTimes(1);
 
     handlers["session.message.updated"]!(makeUpdated("session-1", "message-2", "before-add"));
     handlers[ADD_ACTION]!({
@@ -164,15 +172,15 @@ describe("session message frame scheduler", () => {
       payload: makePayload("session-1", "message-3", "added"),
       timestamp: TEST_TIMESTAMP,
     });
-    expect(updateMessage).toHaveBeenCalledTimes(2);
+    expect(updateMessages).toHaveBeenCalledTimes(2);
     expect(addMessage).toHaveBeenCalledTimes(1);
     frame.runFrame();
-    expect(updateMessage).toHaveBeenCalledTimes(2);
+    expect(updateMessages).toHaveBeenCalledTimes(2);
     registration.dispose();
   });
 
   it("clears scheduled work when the handler registration is disposed", () => {
-    const { store, updateMessage } = makeStore();
+    const { store, updateMessage, updateMessages } = makeStore();
     const frame = makeFrameScheduler();
     const registration = createMessagesHandlerRegistration(store, frame);
     registration.handlers["session.message.updated"]!(
@@ -183,18 +191,22 @@ describe("session message frame scheduler", () => {
     expect(frame.cancel).toHaveBeenCalledTimes(1);
     frame.runFrame();
     expect(updateMessage).not.toHaveBeenCalled();
+    expect(updateMessages).not.toHaveBeenCalled();
   });
 
   it("flushes a pending update as a turn-settle barrier", () => {
-    const { store, updateMessage } = makeStore();
+    const { store, updateMessage, updateMessages } = makeStore();
     const frame = makeFrameScheduler();
     const scheduler = createMessageUpdateScheduler(store, frame);
     scheduler.enqueue(makePayload("session-1", "message-1", "settled"));
 
     scheduler.flush();
 
-    expect(updateMessage).toHaveBeenCalledTimes(1);
-    expect(updateMessage).toHaveBeenLastCalledWith(expect.objectContaining({ content: "settled" }));
+    expect(updateMessage).not.toHaveBeenCalled();
+    expect(updateMessages).toHaveBeenCalledTimes(1);
+    expect(updateMessages).toHaveBeenLastCalledWith([
+      expect.objectContaining({ content: "settled" }),
+    ]);
     scheduler.dispose();
   });
 });
@@ -222,7 +234,7 @@ describe("session message prompt_index mapping", () => {
   });
 
   it("maps prompt_index from a session.message.updated payload", () => {
-    const { store, updateMessage } = makeStore();
+    const { store, updateMessage, updateMessages } = makeStore();
     const registration = createMessagesHandlerRegistration(store);
 
     const payload = makePayload("session-1", "message-1", "edited", {
@@ -235,9 +247,10 @@ describe("session message prompt_index mapping", () => {
     });
     registration.scheduler.flush();
 
-    expect(updateMessage).toHaveBeenLastCalledWith(
+    expect(updateMessage).not.toHaveBeenCalled();
+    expect(updateMessages).toHaveBeenLastCalledWith([
       expect.objectContaining({ id: "message-1", prompt_index: 5 }),
-    );
+    ]);
     registration.dispose();
   });
 
@@ -385,7 +398,7 @@ describe("session message pending-action ordering", () => {
 
 describe("session message snapshot ordering", () => {
   it("does not apply a batched update older than a refetched snapshot", () => {
-    const { store, updateMessage } = makeStore({
+    const { store, updateMessage, updateMessages } = makeStore({
       "session-1": [
         {
           id: "message-1",
@@ -402,6 +415,7 @@ describe("session message snapshot ordering", () => {
     frame.runFrame();
 
     expect(updateMessage).not.toHaveBeenCalled();
+    expect(updateMessages).not.toHaveBeenCalled();
     registration.dispose();
   });
 });
@@ -431,7 +445,7 @@ describe("late tool messages", () => {
   });
 
   it("does not let a late running update reintroduce a spinner", () => {
-    const { store, updateMessage } = makeStore({}, true);
+    const { store, updateMessage, updateMessages } = makeStore({}, true);
     const registration = createMessagesHandlerRegistration(store);
 
     registration.handlers["session.message.updated"]!(
@@ -449,11 +463,12 @@ describe("late tool messages", () => {
     } as never);
     registration.scheduler.flush();
 
-    expect(updateMessage).toHaveBeenLastCalledWith(
+    expect(updateMessage).not.toHaveBeenCalled();
+    expect(updateMessages).toHaveBeenLastCalledWith([
       expect.objectContaining({
         metadata: { tool_call_id: "call-1", status: "complete" },
       }),
-    );
+    ]);
     registration.dispose();
   });
 });

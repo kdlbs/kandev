@@ -1,7 +1,7 @@
 package service_test
 
 // Covers docs/specs/task-delivery-ledger/spec.md, "Office run outcome":
-// drives each of the six non-"processed" FinishRun call sites in
+// drives each of the four non-"processed" FinishRun call sites in
 // scheduler_integration.go through its real triggering condition (not a
 // hardcoded FinishRun call) and asserts the resulting runs.outcome value.
 // Existing tests in scheduler_features_test.go already exercise these
@@ -50,7 +50,7 @@ func assertOutcome(t *testing.T, run *models.Run, want string) {
 	}
 }
 
-// TestSchedulerOutcome_AgentInactive_WritesOutcome covers scheduler_integration.go:196.
+// TestSchedulerOutcome_AgentInactive_WritesOutcome covers scheduler_integration.go:218.
 // isAgentActive's guard exists for the race window between claim and
 // processing, so the agent is paused after the run is claimed rather than
 // before — ClaimNextRun's own query already excludes non-idle/working agents,
@@ -89,7 +89,7 @@ func TestSchedulerOutcome_AgentInactive_WritesOutcome(t *testing.T) {
 	assertOutcome(t, got, service.RunOutcomeAgentInactive)
 }
 
-// TestSchedulerOutcome_IdleSkipped_WritesOutcome covers scheduler_integration.go:218.
+// TestSchedulerOutcome_IdleSkipped_WritesOutcome covers scheduler_integration.go:247.
 func TestSchedulerOutcome_IdleSkipped_WritesOutcome(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -116,7 +116,7 @@ func TestSchedulerOutcome_IdleSkipped_WritesOutcome(t *testing.T) {
 	assertOutcome(t, run, service.RunOutcomeIdleSkipped)
 }
 
-// TestSchedulerOutcome_TaskTreeHeld_WritesOutcome covers scheduler_integration.go:479.
+// TestSchedulerOutcome_TaskTreeHeld_WritesOutcome covers scheduler_integration.go:517.
 func TestSchedulerOutcome_TaskTreeHeld_WritesOutcome(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -170,14 +170,9 @@ func assertRetriedNotFinished(t *testing.T, run *models.Run, wantRetryCount int)
 // run is claimed (so ClaimNextRun itself is unaffected) and driving the
 // claimed run through processRun directly.
 //
-// Documented deviation from docs/specs/task-delivery-ledger/spec.md's
-// literal call-site mapping: this call site used to FinishRun with
-// RunOutcomeCheckoutError, but adopting upstream's already-shipped
-// retry-then-escalate fix (df4dd7998, "dropped contended runs") during
-// this PR's rebase retired that outcome value from this call site — a
-// transient checkout error is retried like any other run failure via
-// HandleRunFailure, not finished. RunOutcomeCheckoutError is no longer
-// reachable in production; see its doc comment.
+// A transient checkout error is retried like any other run failure via
+// HandleRunFailure, not finished. This preserves the retry-then-escalate
+// behavior already present on the base branch.
 func TestSchedulerOutcome_CheckoutError_RetriesInsteadOfFinishing(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -236,10 +231,8 @@ func TestSchedulerOutcome_CheckoutError_RetriesInsteadOfFinishing(t *testing.T) 
 // TestSchedulerOutcome_CheckoutUnavailable_RetriesInsteadOfFinishing covers
 // scheduler_integration.go's requeueContendedCheckout path.
 //
-// Documented deviation, same as TestSchedulerOutcome_CheckoutError_RetriesInsteadOfFinishing:
-// a lost checkout race used to FinishRun with RunOutcomeCheckoutUnavailable;
-// it is now requeued via requeueContendedCheckout instead, retiring that
-// outcome value from this call site.
+// A lost checkout race is requeued via requeueContendedCheckout instead of
+// being finished, because the run did not acquire the task checkout.
 func TestSchedulerOutcome_CheckoutUnavailable_RetriesInsteadOfFinishing(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -268,7 +261,7 @@ func TestSchedulerOutcome_CheckoutUnavailable_RetriesInsteadOfFinishing(t *testi
 	assertRetriedNotFinished(t, run, 1)
 }
 
-// TestSchedulerOutcome_BudgetBlocked_WritesOutcome covers scheduler_integration.go:619.
+// TestSchedulerOutcome_BudgetBlocked_WritesOutcome covers scheduler_integration.go:829.
 func TestSchedulerOutcome_BudgetBlocked_WritesOutcome(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -304,12 +297,11 @@ func TestSchedulerOutcome_BudgetBlocked_WritesOutcome(t *testing.T) {
 	assertOutcome(t, run, service.RunOutcomeBudgetBlocked)
 }
 
-// TestSchedulerOutcome_NoAgentLaunched_WritesOutcome covers scheduler_integration.go:642.
-// No TaskStarter is wired, so launchOrLog logs rather than launches and
-// prepareAndLaunch reaches finishRun (see spec.md, "Office run outcome",
-// "Why :639 is not processed" — the outcome is no_agent_launched, never
-// processed, because no agent actually ran).
-func TestSchedulerOutcome_NoAgentLaunched_WritesOutcome(t *testing.T) {
+// TestSchedulerOutcome_NoTaskStarter_FailsRun covers the fail-fast wiring
+// guard in scheduler_integration.go. A missing TaskStarter is a permanent
+// process capability gap, so the run must be visible as failed instead of
+// being reported as completed work.
+func TestSchedulerOutcome_NoTaskStarter_FailsRun(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
@@ -328,11 +320,19 @@ func TestSchedulerOutcome_NoAgentLaunched_WritesOutcome(t *testing.T) {
 	service.RunSchedulerTick(svc, ctx)
 
 	run := findRunForAgent(t, svc, ctx, "ws-1", agent.ID, service.RunReasonTaskAssigned)
-	assertOutcome(t, run, service.RunOutcomeNoAgentLaunched)
+	if run.Status != service.RunStatusFailed {
+		t.Fatalf("status = %q, want %q", run.Status, service.RunStatusFailed)
+	}
+	if run.Outcome != nil {
+		t.Fatalf("outcome = %v, want NULL on failed run", *run.Outcome)
+	}
+	if run.ErrorMessage == "" {
+		t.Fatal("expected failed run to include a diagnostic error message")
+	}
 }
 
 // TestSchedulerOutcome_Processed_WritesOutcome covers
-// event_subscribers.go:312 (handleAgentCompleted), the only path that
+// event_subscribers.go:408 (handleAgentCompleted), the only path that
 // yields "processed" — every other FinishRun call site in this file is
 // driven through its own real trigger, but until now nothing drove the
 // agent-completed subscriber itself and checked runs.outcome: existing

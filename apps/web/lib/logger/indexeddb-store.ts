@@ -1,4 +1,4 @@
-import type { LogEntry } from "./buffer";
+import type { LogEntry, PreparedLogEntry } from "./buffer";
 
 const DATABASE_NAME = "kandev-diagnostic-logs-v1";
 const DATABASE_VERSION = 2;
@@ -26,18 +26,17 @@ const EMPTY_TOTALS: RetentionTotals = { count: 0, bytes: 0 };
 export class IndexedDBLogStore {
   private database: Promise<IDBDatabase> | null = null;
 
-  async append(entries: LogEntry[]): Promise<void> {
-    const persistedEntries = entries.flatMap((entry) => {
+  async append(entries: readonly PreparedLogEntry[]): Promise<void> {
+    const persistedEntries = entries.flatMap(({ entry, bytes }) => {
       const identity = entry.identity_scope;
       if (!identity) return [];
 
-      const serialized = JSON.stringify(entry);
       const timestamp = Date.parse(entry.timestamp);
       return [
         {
           identity_scope: identity,
           timestamp_ms: Number.isNaN(timestamp) ? Date.now() : timestamp,
-          bytes: new TextEncoder().encode(serialized).byteLength,
+          bytes,
           entry,
         } satisfies PersistedEntry,
       ];

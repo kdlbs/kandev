@@ -93,6 +93,35 @@ func TestUpsert_FreshInsert(t *testing.T) {
 	}
 }
 
+func TestUpsert_SoftDeletedRepositoryDoesNotWrite(t *testing.T) {
+	repo, db, taskID, repoID, wsID := setupPair(t)
+	if _, err := db.Exec(db.Rebind(`UPDATE repositories SET deleted_at = ? WHERE id = ?`),
+		time.Now().UTC(), repoID); err != nil {
+		t.Fatalf("soft delete repository: %v", err)
+	}
+
+	_, err := repo.Upsert(context.Background(), delivery.UpsertInput{
+		TaskID: taskID, RepositoryID: repoID, WorkspaceID: wsID,
+		Classification: delivery.Classification{
+			Outcome: delivery.OutcomeUnknown, Basis: delivery.BasisNoObservations, Rank: 2,
+		},
+		EvaluatedAt: time.Now().UTC(),
+	})
+	if err == nil {
+		t.Fatal("upsert should report that a soft-deleted repository was not written")
+	}
+
+	var count int
+	if err := db.QueryRow(db.Rebind(`
+		SELECT COUNT(*) FROM task_delivery_ledger WHERE task_id = ? AND repository_id = ?
+	`), taskID, repoID).Scan(&count); err != nil {
+		t.Fatalf("count ledger rows: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("ledger rows = %d, want 0 for a soft-deleted repository", count)
+	}
+}
+
 func TestUpsert_IdempotentReevaluationLeavesColumnsUnchanged(t *testing.T) {
 	repo, db, taskID, repoID, wsID := setupPair(t)
 	ctx := context.Background()

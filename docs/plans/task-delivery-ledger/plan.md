@@ -22,7 +22,7 @@ schema, its evaluator, and a 5-minute sweep; it classifies each
 `(task, repository)` pair as `pr_merge | direct_commit | no_delivery_observed |
 unknown` and separately records whether the pair's work was observed reaching the
 repository's default branch. The **Office run outcome** is a nullable
-`runs.outcome` column written at the seven `FinishRun` call sites, so a
+`runs.outcome` column written at the six active `FinishRun` call sites, so a
 budget-blocked or idle-skipped run stops being counted as a success.
 
 Order is dependency-driven: shared migration/meta primitives first, then the
@@ -387,26 +387,24 @@ keeps every existing caller honest: add
 `FinishRunWithOutcome(ctx, id string, outcome models.RunOutcome) error` to
 `internal/office/service/scheduler_runs.go` and
 `internal/office/repository/sqlite`, and leave `FinishRun(ctx, id)` delegating
-with `OutcomeProcessed`. The seven call sites in
+with `OutcomeProcessed`. The four scheduler call sites in
 `internal/office/service/scheduler_integration.go`:
 
 | Line | Outcome |
 |---|---|
-| `:196` agent not active | `agent_inactive` |
-| `:218` idle skipped | `idle_skipped` |
-| `:479` task-tree hold | `task_tree_held` |
-| `:589` checkout error | `checkout_error` |
-| `:596` checkout unavailable | `checkout_unavailable` |
-| `:619` budget blocked | `budget_blocked` |
-| `:639` processed | `processed` |
+| `:218` agent not active | `agent_inactive` |
+| `:247` idle skipped | `idle_skipped` |
+| `:517` task-tree hold | `task_tree_held` |
+| `:829` pre-execution budget block | `budget_blocked` |
 
 `runs.status` is untouched: a blocked run still reaches `finished`, so every
-existing reader of `status` keeps working. The other two `FinishRun` callers
-(`event_subscribers.go:312`, `:360`) are agent-completion paths and keep
-`processed`.
+existing reader of `status` keeps working. The two agent-completion callers
+`event_subscribers.go:408` and `:512` keep `processed`. Checkout errors use the
+normal retry or failure path, and checkout contention requeues the run; neither
+path finishes a run or records completed work.
 
 **Reader.** `internal/office/repository/sqlite/agent_summary.go:36` —
-`RunCountsByDayForAgent` returns four buckets instead of three:
+`RunCountsByDayForAgent` returns five buckets instead of three:
 
 ```sql
 SUM(CASE WHEN status = 'finished' AND outcome = 'processed'  THEN 1 ELSE 0 END) AS succeeded,
@@ -550,7 +548,7 @@ plain punctuation (no U+2014).
 
 ### Backend — Office run outcome
 
-- **What:** each of the seven `FinishRun` paths writes its documented outcome
+- **What:** each of the six active `FinishRun` paths writes its documented outcome
   while `status` stays `finished`.
   **File:** `apps/backend/internal/office/service/scheduler_integration_test.go`
   **How:** drive each path and read the `runs` row. The agent-inactive path is
@@ -561,7 +559,7 @@ plain punctuation (no U+2014).
   **File:** `apps/backend/internal/office/repository/sqlite/runs_outcome_migration_test.go`
   **How:** the `task_external_id_migration_test.go` pattern; new file, not an
   append, per the 800-effective-line file limit.
-- **What:** the four-bucket day rollup — one processed, one budget-blocked, one
+- **What:** the five-bucket day rollup — one processed, one budget-blocked, one
   failed and one pre-activation NULL row return
   `succeeded=1, skipped=1, failed=1, unclassified=1`.
   **File:** `apps/backend/internal/office/repository/sqlite/agent_summary_test.go`

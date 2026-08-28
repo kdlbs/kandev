@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -161,6 +162,51 @@ func TestFactoryReset_DeletesDeliveryLedgerActivationKeys(t *testing.T) {
 	if version != "v0.99.0" {
 		t.Errorf("kandev_version = %q, want unchanged v0.99.0", version)
 	}
+}
+
+func TestFactoryReset_WaitsForDatabaseWorkersBeforeMaintenance(t *testing.T) {
+	svc, _, _, _ := newTestService(t)
+
+	quiesceStarted := make(chan struct{})
+	releaseQuiesce := make(chan struct{})
+	svc.DatabaseQuiesce = func() error {
+		close(quiesceStarted)
+		<-releaseQuiesce
+		return nil
+	}
+
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := svc.runFactoryReset(context.Background())
+		resultCh <- err
+	}()
+
+	select {
+	case <-quiesceStarted:
+	case <-time.After(time.Second):
+		t.Fatal("factory reset did not quiesce database workers")
+	}
+
+	var usersTable int
+	if err := svc.pool.Reader().QueryRow(`
+		SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'users'
+	`).Scan(&usersTable); err != nil {
+		t.Fatalf("check users table while quiescing: %v", err)
+	}
+	if usersTable != 1 {
+		t.Fatalf("users table count while quiescing = %d, want 1", usersTable)
+	}
+
+	close(releaseQuiesce)
+	select {
+	case err := <-resultCh:
+		if err != nil {
+			t.Fatalf("factory reset: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("factory reset did not finish after database workers stopped")
+	}
+
 }
 
 // TestFactoryReset_ActivationKeyDeleteFailureLeavesUserTablesIntact is

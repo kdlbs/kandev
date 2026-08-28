@@ -1419,7 +1419,7 @@ func (s *Service) shouldDropSessionFailure(
 		return dropWhenUnavailable, ""
 	}
 	if isTerminalSessionState(session.State) {
-		s.resetTransientRetry(data.SessionID)
+		s.resetTransientRetryWithContext(ctx, data.SessionID, true)
 		s.logger.Debug("dropping session failure for terminal session",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
@@ -1540,7 +1540,10 @@ func (s *Service) RegisterExecutionStopOwner(sessionID, executionID string, forc
 		return
 	}
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
-	lock.Lock()
+	if !lock.TryLock() {
+		release()
+		return
+	}
 	defer func() {
 		lock.Unlock()
 		release()

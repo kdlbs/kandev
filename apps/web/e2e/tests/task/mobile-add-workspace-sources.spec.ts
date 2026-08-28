@@ -20,7 +20,7 @@ async function chooseDirectory(
   const picker = page.locator('[data-testid="folder-picker-popover"][data-state="open"]');
   await expect(picker).toBeVisible();
   for (const segment of relativeDirectory.split(path.sep).filter(Boolean)) {
-    await picker.getByTestId("folder-picker-entry").filter({ hasText: segment }).tap();
+    await picker.getByRole("button", { name: segment, exact: true }).tap();
   }
   await picker.getByTestId("folder-picker-choose").tap();
 }
@@ -35,6 +35,11 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   test.setTimeout(120_000);
   const gitEnv = makeGitEnv(backend.tmpDir);
   const repositoryPath = path.join(backend.tmpDir, "mobile-sources", "mobile-local-repository");
+  const originPath = path.join(
+    backend.tmpDir,
+    "mobile-sources",
+    "mobile-local-repository-origin.git",
+  );
   const folderPath = path.join(backend.tmpDir, "mobile-sources", "mobile-local-folder");
   fs.mkdirSync(repositoryPath, { recursive: true });
   fs.mkdirSync(folderPath, { recursive: true });
@@ -43,6 +48,17 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   execFileSync("git", ["init", "-b", "main"], { cwd: repositoryPath, env: gitEnv });
   execFileSync("git", ["add", "."], { cwd: repositoryPath, env: gitEnv });
   execFileSync("git", ["commit", "-m", "initial source"], { cwd: repositoryPath, env: gitEnv });
+  // Source worktrees perform a required refresh. Use a local bare origin so
+  // this fixture remains offline while satisfying that production contract.
+  execFileSync("git", ["init", "--bare", "-b", "main", originPath], { env: gitEnv });
+  execFileSync("git", ["remote", "add", "origin", originPath], {
+    cwd: repositoryPath,
+    env: gitEnv,
+  });
+  execFileSync("git", ["push", "--set-upstream", "origin", "main"], {
+    cwd: repositoryPath,
+    env: gitEnv,
+  });
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     "Mobile attach local sources",

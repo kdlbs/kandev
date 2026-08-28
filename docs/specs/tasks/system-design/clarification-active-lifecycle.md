@@ -34,8 +34,12 @@ No schema change.
 - Clarification questions remain `task_session_messages` rows with
   `type = "clarification_request"`.
 - Rows in one bundle share `metadata.pending_id`; terminal status remains in `metadata.status`.
-- `task_session_messages.turn_id` associates a question with its turn. The newest authoritative durable
-  `task_session_turns` record for the session identifies the current turn; deleting messages does not
+- `task_session_messages.turn_id` associates a question with its turn. The newest durable
+  **conversational** `task_session_turns` record for the session identifies the current turn — a
+  turn whose `metadata.lifecycle_only` flag is not set; a lifecycle turn (for example the
+  agent-boot-on-resume record) is never current-turn authority, however recent. Ranking among
+  conversational turns is: an open turn (`completed_at IS NULL`) before any completed turn regardless
+  of timestamps, then `started_at`, `created_at`, and `id`, all descending. Deleting messages does not
   delete that parent turn or move ownership backward.
 - A pre-acknowledgement successor carries `metadata.prompt_dispatch_pending=true` plus the source
   clarification turn, pending ID, and exact claimed message IDs. An empty row carrying only the pending
@@ -66,11 +70,15 @@ No new route. Task-session responses add `pending_action_revision` beside the ex
   decimal epoch is a database-backed, monotonically allocated backend generation; sequence orders
   reads within that generation. Clients compare both fields and reject any older result, including
   an unseen pre-restart epoch delivered after client state has been rebuilt.
-- `GET /api/v1/task-sessions/:sessionId/turns` continues to expose durable turn history;
-  unpublished reservations stay hidden until publication or durable message evidence, including while
-  an attempt marker makes them internal current-turn authority. Attempted reservations are preserved
-  across restart because their dispatch outcome is ambiguous. Visible history is ordered ascending by
-  `started_at`, `created_at`, then `id`, matching the reverse ordering used to select the current turn.
+- `GET /api/v1/task-sessions/:sessionId/turns` continues to expose durable turn history, including
+  lifecycle turns and their `metadata.lifecycle_only` marker; unpublished reservations stay hidden
+  until publication or durable message evidence, including while an attempt marker makes them internal
+  current-turn authority. Attempted reservations are preserved across restart because their dispatch
+  outcome is ambiguous. Visible history is ordered ascending by `started_at`, `created_at`, then `id`
+  across every visible turn, lifecycle or conversational. That is the reverse of the tie-break keys
+  used to select the current turn, but not the full current-turn ordering: current-turn selection also
+  excludes lifecycle turns entirely and ranks an open turn ahead of any completed one regardless of
+  timestamp, neither of which visible history does.
 - Task list, workflow snapshot, and boot payloads continue to expose task-level `pending_action` in
   the status summary and legacy fallback fields.
 - `POST /api/v1/clarification/:pendingId/respond` uses one state-based contract:
@@ -240,7 +248,7 @@ session they can already access. Session selection does not broaden task visibil
 - Message history remains durable and is not destructively rewritten merely because a newer turn
   exists.
 - Active clarification state is reconstructable after restart from message status plus the newest
-  authoritative durable turn.
+  durable conversational turn (a lifecycle turn is never authoritative, however recent).
 - Current-turn ownership is reconstructable from durable turn rows even when a turn has no remaining
   messages.
 - Unpublished detached-answer reservations carry enough recovery identity to restore only their own

@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-RUNTIME-CLEANUP-001
 created: 2026-06-22
-updated: 2026-08-24
+updated: 2026-08-28
 owners:
   - cfl
 ---
@@ -114,6 +114,8 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
 - Archive, delete, cascade, workspace-delete, and quick-chat expiration persist a
   cleanup intent and resource snapshot before mutating or deleting task state.
   Cleanup is performed by a durable worker rather than a detached goroutine.
+- Advisory stop-owner registration skips a contended `cancelInFlightGuard` claim
+  without blocking; the requested stop and durable cleanup continue.
 - A durable cleanup job makes at most eight attempts. Failed attempts back off
   for 1 minute, 5 minutes, 15 minutes, 1 hour, 3 hours, 6 hours, and 12 hours
   before the next claim. An eighth failed attempt becomes terminal `failed`
@@ -134,6 +136,25 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
   `deleted_at`. If no historical ID is available, creation persists the new
   worktree by updating any soft-deleted row with the same environment,
   repository, and branch identity.
+
+## Archive cleanup disposition
+
+Direct and cascade archive use the same cleanup disposition. A caller-specific
+Boolean must not change it:
+
+- Stop the task runtimes and remove executor-specific runtime resources.
+- Remove the physical worktree directory and mark its repository row deleted.
+- Preserve the owning `task_environments` row, every
+  `task_environment_repos` row (including worktree ID, path, branch, and slug),
+  and the local Git branch ref.
+
+If a worktree appears in both snapshots, every pass uses this disposition and
+must not delete a branch preserved earlier.
+
+Unarchive keeps the preserved environment link. If its repository row is not
+live, normal preparation reactivates it and uses the preserved local branch
+before remote or pull-request recovery. Delete remains separate and may remove
+owner rows after capturing its cleanup snapshot.
 
 ## Data Model
 
@@ -231,6 +252,10 @@ type ExecutorRunningRepository interface {
 primary stop operation when `agent_execution_id` is available. Fallback cleanup is
 runtime-specific and must be bounded by context.
 
+`TaskExecutionStopper.RegisterExecutionStopOwner(sessionID, executionID, force)`
+must not wait for the session guard; it may skip a contended claim and never
+replaces `StopExecution`.
+
 ## State Machine
 
 Runtime cleanup for a task follows this lifecycle:
@@ -272,12 +297,15 @@ The durable cleanup job wraps that resource lifecycle:
   the task only if existing product behavior requires it, but destructive runtime
   cleanup must fail closed: do not remove runtime rows or worktrees based on an
   empty or partial inventory.
+- A contended owner claim is skipped; explicit stop continues and durable cleanup
+  preserves retryable work.
 - If stopping a runtime execution times out, the process manager escalates to a
   process-group kill and waits for confirmation. If confirmation still fails, the
   runtime row remains retryable.
 - If a runtime row points at a missing in-memory execution, cleanup attempts the
   runtime-specific persisted handle when available. If no handle can be used, the
   row is preserved with a warning instead of being silently dropped.
+- Keep `models.ErrExecutionRotated` (newer won); warn on other errors.
 - If a stop operation reports the execution or session is not found and the owned
   row is a confirmed-dead local runtime, cleanup records the stop as successful,
   prunes or repairs the row under the resume-safety invariant, proceeds with any
@@ -367,6 +395,8 @@ The durable cleanup job wraps that resource lifecycle:
   not classified as orphaned.
 - Historical worktree rows for archived tasks remain available to unarchive branch
   recovery even after their on-disk directories are removed.
+- Archive cleanup preserves the task environment owner and the local branch ref.
+  Cleanup retries and duplicate teardown passes keep the same disposition.
 - Orphaned OS processes without any durable `executors_running` row are outside
   normal cleanup guarantees; they may be handled by an explicit operator recovery
   tool, but automatic task cleanup must not rely on process-name scanning.
@@ -445,6 +475,8 @@ The durable cleanup job wraps that resource lifecycle:
   a not-found stop is reclassified as successful, **THEN** the row is repaired in
   place (token and worktree preserved) rather than deleted, per
   `RowMustBePreserved`.
+- **WHEN** compare-and-set returns `models.ErrExecutionRotated`, **THEN** keep
+  the newer row silently.
 - **GIVEN** agentctl is stopped while an ACP child process ignores stdin EOF,
   **WHEN** the stop timeout expires, **THEN** the ACP process group is killed and
   no ACP child is reparented to PID 1.
@@ -490,6 +522,9 @@ The durable cleanup job wraps that resource lifecycle:
 - **GIVEN** archive cleanup removed a local worktree, **WHEN** the task is
   unarchived, **THEN** its historical worktree branch metadata remains available
   for local/remote recovery.
+- **GIVEN** a direct or cascade archive removes a task worktree, **WHEN** the
+  remote branch is also absent, **THEN** the task environment, repository row,
+  and local branch ref remain available for normal resume preparation.
 - **GIVEN** an unarchived task environment whose worktree repository row is
   deleted, failed, or tombstoned, **WHEN** its session resumes, **THEN** the
   executor selects normal worktree preparation and recreates or reactivates the
@@ -512,3 +547,4 @@ The durable cleanup job wraps that resource lifecycle:
 
 - [Backend failure containment](../../../plans/backend-failure-containment/plan.md)
 - [Worktree resume after unarchive](../../../plans/worktree-resume-after-unarchive/plan.md)
+- [Archive resume identity](../../../plans/archive-resume-identity/plan.md)

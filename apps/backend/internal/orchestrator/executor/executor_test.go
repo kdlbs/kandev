@@ -604,6 +604,54 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 	}
 }
 
+func TestLaunchPreparedSession_PropagatesTaskEnvironmentPersistenceFailure(t *testing.T) {
+	repo := newMockRepository()
+	persistErr := errors.New("inventory write failed")
+	repo.createTaskEnvironmentRepoErr = persistErr
+	repo.executors[models.ExecutorIDLocal] = &models.Executor{
+		ID: models.ExecutorIDLocal, Type: models.ExecutorTypeLocal, Status: models.ExecutorStatusActive,
+	}
+	repo.repositories["repo-1"] = &models.Repository{
+		ID: "repo-1", WorkspaceID: "workspace-1", SourceType: sourceTypeLocal, LocalPath: "/repo-1", Name: "repo-1",
+	}
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{
+		ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1", Position: 0,
+	}
+	repo.taskEnvironments["env-1"] = &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady,
+	}
+	repo.sessions["session-1"] = &models.TaskSession{
+		ID: "session-1", TaskID: "task-1", AgentProfileID: "profile-1", ExecutorID: models.ExecutorIDLocal,
+		TaskEnvironmentID: "env-1", State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	stopped := false
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-new",
+				Worktrees:        []RepoWorktreeResult{{RepositoryID: "repo-1", WorktreeID: "wt-1"}},
+			}, nil
+		},
+		stopAgentFunc: func(_ context.Context, executionID string, _ bool) error {
+			if executionID == "exec-new" {
+				stopped = true
+			}
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+
+	_, err := exec.LaunchPreparedSession(context.Background(), &v1.Task{
+		ID: "task-1", WorkspaceID: "workspace-1", Title: "Task 1",
+	}, "session-1", LaunchOptions{AgentProfileID: "profile-1", ExecutorID: models.ExecutorIDLocal})
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("LaunchPreparedSession error = %v, want %v", err, persistErr)
+	}
+	if !stopped {
+		t.Fatal("persistence failure did not stop the unstarted execution")
+	}
+}
+
 func TestLaunchPreparedSession_RejectsNilLaunchResponse(t *testing.T) {
 	repo := newMockRepository()
 	repo.sessions["session-nil-response"] = &models.TaskSession{
@@ -2900,7 +2948,7 @@ func (c *recordingAuthenticatedCloner) SetOriginURL(context.Context, string, str
 	return nil
 }
 
-func (c *recordingAuthenticatedCloner) BuildCloneURLWithHost(_, _, _, _ string) (string, error) {
+func (c *recordingAuthenticatedCloner) BuildCloneURLWithHost(_ context.Context, _, _, _, _ string) (string, error) {
 	return "", nil
 }
 

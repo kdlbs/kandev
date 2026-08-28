@@ -9,13 +9,18 @@ owners:
 
 ## Overview
 
-Model-generated Markdown tables often choose column proportions that are valid but inconvenient for the current chat width. Automatic wrapping must remain the safe default, but desktop users need a quick way to rebalance a table without editing the source Markdown or opening another view.
+Model-generated Markdown tables often choose column proportions that are valid
+but inconvenient for the current chat, rendered file preview, or editable Plan
+view. Automatic wrapping must remain the safe default, but fine-pointer users
+need a quick way to rebalance a table without editing its Markdown source.
 
 ## Requirements
 
 ### REQ-UI-RESIZABLE-MARKDOWN-TABLES-001: Resizable Markdown Table Columns
 
-**Intent:** Model-generated Markdown tables often choose column proportions that are valid but inconvenient for the current chat width. Automatic wrapping must remain the safe default, but desktop users need a quick way to rebalance a table without editing the source Markdown or opening another view.
+**Intent:** Provide consistent, source-preserving Markdown table resizing across
+task-focused reading and planning surfaces without weakening responsive
+readability.
 
 #### Acceptance criteria
 
@@ -27,6 +32,24 @@ Model-generated Markdown tables often choose column proportions that are valid b
 - **AC-UI-RESIZABLE-MARKDOWN-TABLES-001.6:** Double-clicking any separator clears every custom width on that table and returns it to the current automatic layout. It does not restore a stale pixel snapshot.
 - **AC-UI-RESIZABLE-MARKDOWN-TABLES-001.7:** A focused separator supports `ArrowLeft` and `ArrowRight` in 8-pixel steps. `Enter` resets the whole table. Each control has `role="separator"`, an accessible name identifying its adjacent one-based column numbers, `aria-orientation="vertical"`, `aria-valuemin="64"`, `aria-valuenow` equal to the rounded current left-column width, and `aria-valuemax` equal to the adjacent pair total minus the 64-pixel right-column minimum.
 - **AC-UI-RESIZABLE-MARKDOWN-TABLES-001.8:** Hover, keyboard focus, and active dragging make the complete boundary line visible. Normal links, selection, and scrolling remain interactive outside the separator's narrow hit area.
+- **AC-UI-RESIZABLE-MARKDOWN-TABLES-001.9:** A rendered Markdown file preview
+  uses the shared resize separators while preserving source-line identity,
+  comment selection and badges, links, and one table-local horizontal scroll
+  owner.
+- **AC-UI-RESIZABLE-MARKDOWN-TABLES-001.10:** An editable Plan table exposes
+  internal-boundary dragging on an eligible fine-pointer layout, enforces the
+  same 64 CSS-pixel minimum, remains contained by its local wrapper, and leaves
+  the Plan Markdown unchanged.
+- **AC-UI-RESIZABLE-MARKDOWN-TABLES-001.11:** Resize state remains ephemeral
+  across unmounts, reloads, and render locations and is never written to
+  Markdown, task-plan data, browser storage, or backend state.
+- **AC-UI-RESIZABLE-MARKDOWN-TABLES-001.12:** Phone and coarse-pointer layouts
+  expose no resize affordance and preserve content access through automatic
+  wrapping or one table-local horizontal scroll region without document-level
+  horizontal overflow.
+- **AC-UI-RESIZABLE-MARKDOWN-TABLES-001.13:** If resize capability disappears,
+  the active interaction ends, cursor and selection overrides clear, and the
+  table returns to a readable responsive layout without losing Plan draft text.
 
 ## Migrated source detail
 

@@ -9,6 +9,15 @@ import type { KanbanState } from "@/lib/state/slices";
 import { issueFieldsFromMetadata } from "@/lib/metadata-utils";
 import { repositorySlug } from "@/lib/repository-slug";
 
+const EMPTY_REPOSITORIES: Repository[] = [];
+
+export function selectWorkspaceRepositories(
+  itemsByWorkspaceId: Record<string, Repository[]>,
+  workspaceId: string | null | undefined,
+): Repository[] {
+  return (workspaceId && itemsByWorkspaceId[workspaceId]) || EMPTY_REPOSITORIES;
+}
+
 type ACPDebugInfo = {
   sessionId: unknown;
   updatedAt: unknown;
@@ -217,23 +226,64 @@ export function syncActiveTaskSession(params: {
 }
 
 export function resolveTaskIds(task: Task | null) {
+  const taskValues = task ?? ({} as Task);
+  const primaryRepository = taskValues.repositories?.[0];
   return {
-    taskId: task?.id ?? null,
-    workflowId: task?.workflow_id ?? null,
-    workspaceId: task?.workspace_id ?? null,
-    projectId: task?.project_id ?? null,
-    workflowStepId: task?.workflow_step_id ?? null,
-    baseBranch: task?.repositories?.[0]?.base_branch,
-    isArchived: !!task?.archived_at,
+    taskId: taskValues.id ?? null,
+    workflowId: taskValues.workflow_id ?? null,
+    workspaceId: taskValues.workspace_id ?? null,
+    projectId: taskValues.project_id ?? null,
+    workflowStepId: taskValues.workflow_step_id ?? null,
+    baseBranch: primaryRepository?.base_branch,
+    pullRequestTarget: primaryRepository?.branch_policy_pull_request_target || undefined,
+    isArchived: !!taskValues.archived_at,
   };
 }
 
-export function resolveTaskProps(task: Task | null, repository: Repository | null) {
+function buildPullRequestTargetsByRepository(
+  task: Pick<Task, "repositories"> | null,
+  repositories: Repository[],
+): Record<string, string> {
+  const targets: Record<string, string> = {};
+  for (const taskRepository of task?.repositories ?? []) {
+    const target = taskRepository.branch_policy_pull_request_target?.trim();
+    if (!target) continue;
+    targets[taskRepository.repository_id] = target;
+    const workspaceRepository = repositories.find(
+      (candidate) => candidate.id === taskRepository.repository_id,
+    );
+    if (!workspaceRepository) continue;
+    targets[workspaceRepository.id] = target;
+    if (workspaceRepository.name) targets[workspaceRepository.name] = target;
+    const slug = repositorySlug(workspaceRepository);
+    if (slug) targets[slug] = target;
+  }
+  return targets;
+}
+
+export function resolveTaskPullRequestProps(
+  task: Pick<Task, "title" | "repositories"> | null,
+  repositories: Repository[] = [],
+) {
+  const primaryRepository = task?.repositories?.[0];
+  return {
+    baseBranch: primaryRepository?.base_branch,
+    pullRequestTarget: primaryRepository?.branch_policy_pull_request_target || undefined,
+    pullRequestTargetsByRepository: buildPullRequestTargetsByRepository(task, repositories),
+    taskTitle: task?.title,
+  };
+}
+
+export function resolveTaskProps(
+  task: Task | null,
+  repository: Repository | null,
+  repositories: Repository[] = [],
+) {
   const ids = resolveTaskIds(task);
   const issue = issueFieldsFromMetadata(task?.metadata);
+  const pullRequestProps = resolveTaskPullRequestProps(task, repositories);
   return {
     ...ids,
-    taskTitle: task?.title,
     taskDescription: task?.description,
     issueUrl: issue.issueUrl,
     issueNumber: issue.issueNumber,
@@ -245,6 +295,7 @@ export function resolveTaskProps(task: Task | null, repository: Repository | nul
      * repository filter use, never the local clone path.
      */
     repositoryLabel: repository ? repositorySlug(repository) : null,
+    ...pullRequestProps,
     /**
      * Total number of repositories linked to the task. Used by the top-bar
      * breadcrumb to render a "+N" chip next to the primary repo name when

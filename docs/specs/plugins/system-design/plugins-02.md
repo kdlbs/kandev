@@ -60,18 +60,17 @@ record, and state.
 
 ### Authenticated plugin actions (browser -> kandev -> plugin)
 
-`POST /api/plugins/{id}/actions/{key}` is the only browser action route. Kandev first
-applies ordinary HTTP authentication, then rejects inactive plugins or undeclared keys
-and authorizes every referenced workspace, task, or repository. It derives a task's
-workspace relation server-side, passes verified actor/resource context separately from
-bounded untrusted JSON, invokes `Plugin.HandleAction` with a hard timeout and
-cancellation, and relays only an allowlisted response-header set. Provider callback
-routes under `/webhooks/` stay public and must not serve authenticated browser actions.
-Task-scoped actions require a verified task and may optionally select one persisted
-repository attached to that task; Kandev rejects unattached repository IDs and passes
-the accepted repository separately in `VerifiedActionContext`.
-The manifest's canonical action field is `scope`; `resource_scope` remains a read-only
-compatibility alias for packages produced during the prerelease contract rollout.
+`POST /api/plugins/{id}/actions/{key}` is the only browser action route. Kandev
+authenticates the caller, rejects inactive plugins and undeclared keys, and authorizes
+each referenced workspace, task, or repository. It derives a task's workspace
+server-side. `access` defaults to `authenticated`. `admin` requires
+`min_kandev_version: "0.91.1"` or later; validation rejects older/missing
+minimums. Non-admins are rejected before envelope parsing or plugin invocation.
+Verified context is separate from untrusted JSON; calls are bounded/cancellable and
+response headers allowlisted. Public `/webhooks/` callbacks cannot serve browser
+actions. A task action may select one attached persisted repository; other IDs are
+rejected, and the accepted repository is separate in `VerifiedActionContext`.
+Canonical field: `scope`; `resource_scope` is a read-only prerelease alias.
 
 ### Dynamic composer reference sources (plugin -> kandev)
 

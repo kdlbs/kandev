@@ -19,8 +19,8 @@ This catalog is the entry point for the system-oriented specification layout. Ea
 | Release | [README](release/README.md) | complete | 5 requirements, 0 designs |
 | System page | [README](system-page/README.md) | complete | 3 requirements, 5 designs |
 | Tasks | [README](tasks/README.md) | complete | 69 requirements, 12 designs |
-| UI | [README](ui/README.md) | complete | 96 requirements, 11 designs |
-| Workspaces | [README](workspaces/README.md) | complete | 10 requirements, 2 designs |
+| UI | [README](ui/README.md) | complete | 96 requirements, 12 designs |
+| Workspaces | [README](workspaces/README.md) | complete | 11 requirements, 3 designs |
 
 ## Migration record
 
@@ -36,6 +36,7 @@ The following specifications were added after this migration and remain in the l
 
 - [Task Cost & Token Ledger](task-cost-ledger/spec.md) (draft)
 - [Startup listener before recovery](startup-listener-before-recovery/spec.md) (draft)
+- [Workflow on_enter action dispatch](workflow-on-enter-action-dispatch/spec.md) (draft)
 - [Task Delivery Ledger](task-delivery-ledger/spec.md) (draft)
 
 ## Authoring rule

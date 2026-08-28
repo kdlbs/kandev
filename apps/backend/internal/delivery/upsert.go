@@ -3,9 +3,13 @@ package delivery
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 // The rank-guarded classification columns. Repeated verbatim in both the
@@ -73,13 +77,15 @@ INSERT INTO task_delivery_ledger (
 	reached_default_at, reached_default_basis, reached_default_ref,
 	observed_branch_commits, first_classified_at,
 	last_evaluated_at, evaluation_seq, created_at, updated_at
-) VALUES (
-	?, ?, ?, ?,
+)
+SELECT
+	?, ?, repositories.id, ?,
 	?, ?, ?, ?,
 	?, ?, ?,
 	?, ?,
 	?, ?, ?, ?
-)
+FROM repositories
+WHERE repositories.id = ? AND repositories.deleted_at IS NULL
 ON CONFLICT (task_id, repository_id) DO UPDATE SET
 	workspace_id = excluded.workspace_id,
 	delivery_outcome = ` + rankGuardOutcome + `,
@@ -97,6 +103,12 @@ ON CONFLICT (task_id, repository_id) DO UPDATE SET
 RETURNING evidence_rank, delivery_outcome, delivery_basis, delivery_ref,
 	observed_branch_commits, reached_default_at, updated_at, evaluation_seq
 `
+
+// errRepositoryNotLive means the repository disappeared or became soft
+// deleted before the ledger write. It is a no-op for a sweep evaluation, not
+// a database failure, so the caller must leave the pair due without advancing
+// its ledger row.
+var errRepositoryNotLive = errors.New("delivery ledger repository is not live")
 
 // UpsertInput is everything one persisted evaluation writes for a pair.
 // EvaluatedAt is T0, the instant this evaluation began reading its
@@ -171,7 +183,14 @@ func (r *Repository) Upsert(ctx context.Context, in UpsertInput) (UpsertResult, 
 		reachedRef = refPtr(in.ReachedRef)
 	}
 
-	query := r.db.Rebind(upsertSQL)
+	queryText := upsertSQL
+	if dialect.IsPostgres(r.db.DriverName()) {
+		// PostgreSQL must lock the source row while the INSERT ... SELECT is
+		// evaluated. This serializes the final liveness check with a concurrent
+		// soft delete; SQLite serializes both writers when the INSERT starts.
+		queryText = strings.Replace(queryText, "\nON CONFLICT", "\nFOR UPDATE\nON CONFLICT", 1)
+	}
+	query := r.db.Rebind(queryText)
 	var after existingRow
 	var afterBasis, afterRef sql.NullString
 	var afterObserved sql.NullInt64
@@ -179,15 +198,19 @@ func (r *Repository) Upsert(ctx context.Context, in UpsertInput) (UpsertResult, 
 	var afterUpdatedAt time.Time
 	var afterSeq int
 	err := r.db.QueryRowxContext(ctx, query,
-		id, in.TaskID, in.RepositoryID, in.WorkspaceID,
+		id, in.TaskID, in.WorkspaceID,
 		outcome, basis, in.Ref, in.Rank,
 		reachedAt, reachedBasis, reachedRef,
 		in.ObservedBranchCommits, in.EvaluatedAt,
 		in.EvaluatedAt, 1, now, now,
+		in.RepositoryID,
 	).Scan(
 		&after.EvidenceRank, &after.Outcome, &afterBasis, &afterRef,
 		&afterObserved, &afterReachedAt, &afterUpdatedAt, &afterSeq,
 	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return UpsertResult{}, errRepositoryNotLive
+	}
 	if err != nil {
 		return UpsertResult{}, err
 	}

@@ -683,6 +683,8 @@
   "runStatusFailed": "失敗",
   "runStatusReceived": "已接收",
   "runStatusSkipped": "已跳過",
+  "runSkipped": "已跳過",
+  "runUnclassified": "未分類",
   "runStatusTaskCreated": "任務已建立",
   "runtime": "執行時",
   "runtimeCapabilities": "執行時能力",

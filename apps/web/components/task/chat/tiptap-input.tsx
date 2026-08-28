@@ -47,6 +47,8 @@ import { EntityReferenceSuggestionPluginKey } from "./tiptap-entity-reference-su
 import type { ImagePasteIssue } from "./clipboard-attachments";
 import { useTranslation } from "react-i18next";
 
+const RAW_DRAIN = { rawPagination: true } as const;
+
 export type { TipTapInputHandle } from "./use-tiptap-editor";
 
 // ── Props ───────────────────────────────────────────────────────────
@@ -441,7 +443,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     editorRef,
   );
   const { history, getHistory } = useChatHistory(sessionId);
-  const { isDraining } = useDrainOlderMessages(sessionId, overlay.isReverseSearchOpen);
+  const { isDraining } = useDrainOlderMessages(sessionId, overlay.isReverseSearchOpen, RAW_DRAIN);
   const { editor, applyHistoryEntry } = useTipTapEditor({
     value,
     onChange,

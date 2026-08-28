@@ -4,9 +4,11 @@ system: platform
 requirements:
   - REQ-PLATFORM-DIAGNOSTIC-LOGGING-001
 created: 2026-07-30
+updated: 2026-08-27
 owners:
   - tbd
 ---
+
 # Diagnostic logging System Design Part 1
 
 ## Purpose and boundaries
@@ -15,8 +17,8 @@ This design preserves the technical source detail for `REQ-PLATFORM-DIAGNOSTIC-L
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
+| Requirement                           | Design section                                    |
+| ------------------------------------- | ------------------------------------------------- |
 | `REQ-PLATFORM-DIAGNOSTIC-LOGGING-001` | [Migrated source detail](#migrated-source-detail) |
 
 ## Migrated source detail
@@ -161,6 +163,13 @@ paired [system design](../system-design/browser-console-retention.md).
   synchronously in the intercepted console call. A full staging queue drops
   lower-priority `debug`/`info` entries first and records loss metadata; it
   never delays the original console call.
+- A browser debug producer that scans a growing collection coalesces its own
+  derived payload before it calls `console.debug`. The
+  `messages:process` producer keeps the latest inputs and emits one trailing
+  sample at most once per 250 ms. Later updates replace the pending sample.
+  This bounds message counting, grouping summaries, console formatting, and
+  browser-log staging during a stream without removing the final latest-state
+  diagnostic.
 - Bundle collection, JSONL writing, cleanup, and download preparation run
   outside the route handler. An identity owns at most one active job, at most
   eight jobs may collect or wait process-wide, and one archive build runs
