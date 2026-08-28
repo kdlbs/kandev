@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, type MutableRefObject, type RefObject } from "react";
-import { reviewFileKey, splitReviewFileKey, type ReviewFile } from "@/components/review/types";
+import { hashDiff, reviewFileKey, type ReviewFile } from "@/components/review/types";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
 import type { GitChangeLayer } from "@/lib/state/slices/session-runtime/types";
 
@@ -123,6 +123,50 @@ function projectReviewFileLayer(file: ReviewFile, layer: GitChangeLayer): Review
   };
 }
 
+type PersistedReviewState = { reviewed: boolean; diffHash: string };
+
+function reviewStateFiles(files: ReviewFile[]): ReviewFile[] {
+  const stateFiles: ReviewFile[] = [];
+  for (const file of files) {
+    stateFiles.push(file);
+    if (
+      file.source !== "uncommitted" ||
+      file.change_layer ||
+      !file.staged_change ||
+      !file.unstaged_change
+    ) {
+      continue;
+    }
+    for (const layer of ["staged", "unstaged"] as const) {
+      const projected = projectReviewFileLayer(file, layer);
+      if (projected) stateFiles.push(projected);
+    }
+  }
+  return stateFiles;
+}
+
+export function computeChangesReviewSets(
+  files: ReviewFile[],
+  reviews: ReadonlyMap<string, PersistedReviewState>,
+): { reviewedFiles: Set<string>; staleFiles: Set<string> } {
+  const reviewedFiles = new Set<string>();
+  const staleFiles = new Set<string>();
+  for (const file of reviewStateFiles(files)) {
+    const key = reviewFileKey(file);
+    const reviewState = reviews.get(key);
+    if (!reviewState?.reviewed) continue;
+    const currentHash = hashDiff(file.diff);
+    if (reviewState.diffHash && reviewState.diffHash !== currentHash) staleFiles.add(key);
+    else reviewedFiles.add(key);
+  }
+  return { reviewedFiles, staleFiles };
+}
+
+export function reviewDiffHashForKey(files: ReviewFile[], key: string): string {
+  const file = reviewStateFiles(files).find((candidate) => reviewFileKey(candidate) === key);
+  return file ? hashDiff(file.diff) : "";
+}
+
 function projectRequestedLayer(
   files: ReviewFile[],
   mode: FilterVisibleFilesOpts["mode"],
@@ -198,20 +242,17 @@ export function useVisibleDiffState(opts: {
       }),
     [allFiles, mode, filePath, fileRepositoryName, sourceFilter, rawPRFiles, prKey, changeLayer],
   );
-  const repositoryFilter = prKey && sourceFilter === "pr" ? undefined : fileRepositoryName;
   const visibleFileRefs = useMemo(() => {
     if (mode !== "file" || !filePath) return fileRefs;
     const refs = new Map<string, RefObject<HTMLDivElement | null>>();
-    for (const [key, ref] of fileRefs.entries()) {
-      const split = splitReviewFileKey(key);
-      if (split.path !== filePath) continue;
-      if (repositoryFilter !== undefined && (split.repositoryName || "") !== repositoryFilter) {
-        continue;
-      }
-      refs.set(key, ref);
+    for (const file of visibleFiles) {
+      const visibleKey = reviewFileKey(file);
+      const rawKey = reviewFileKey({ path: file.path, repository_name: file.repository_name });
+      const ref = fileRefs.get(visibleKey) ?? fileRefs.get(rawKey);
+      if (ref) refs.set(visibleKey, ref);
     }
     return refs;
-  }, [mode, filePath, fileRefs, repositoryFilter]);
+  }, [mode, filePath, fileRefs, visibleFiles]);
   const reviewedCount = useMemo(
     () =>
       visibleFiles.reduce((count, file) => {

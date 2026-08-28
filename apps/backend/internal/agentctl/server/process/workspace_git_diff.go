@@ -500,6 +500,16 @@ func (wt *WorkspaceTracker) enrichMixedUnstagedDiffsBudget(
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	hasMixedFacet := false
+	for _, fileInfo := range update.Files {
+		if fileInfo.UnstagedChange != nil {
+			hasMixedFacet = true
+			break
+		}
+	}
+	if !hasMixedFacet {
+		return nil
+	}
 	numstatOut, err := wt.runGitOutput(ctx, "diff", "--numstat")
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {

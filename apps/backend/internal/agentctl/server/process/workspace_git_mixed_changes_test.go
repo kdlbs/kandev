@@ -3,11 +3,35 @@ package process
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 )
+
+func TestEnrichMixedUnstagedDiffsSkipsGitWithoutMixedFacets(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	tracker := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	tracePath := filepath.Join(t.TempDir(), "git.trace")
+	t.Setenv("GIT_TRACE", tracePath)
+	update := &types.GitStatusUpdate{Files: map[string]types.FileInfo{
+		"plain.txt": {Path: "plain.txt", Status: fileStatusModified},
+	}}
+	budget := diffBudget{}
+
+	if err := tracker.enrichMixedUnstagedDiffsBudget(
+		context.Background(), update, types.GitStatusUpdate{}, &budget,
+	); err != nil {
+		t.Fatalf("enrichMixedUnstagedDiffsBudget() error = %v", err)
+	}
+	if _, err := os.Stat(tracePath); !os.IsNotExist(err) {
+		t.Fatalf("git trace exists after non-mixed update: %v", err)
+	}
+}
 
 type mixedChangeFacetWire struct {
 	Status    string `json:"status"`
