@@ -713,10 +713,11 @@ func (r *Repository) createAgentWakeupRequestTable() error {
 func (r *Repository) createParentChildWakeReceiptsTable() error {
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS parent_child_wake_receipts (
-		parent_task_id   TEXT PRIMARY KEY,
-		child_set_key    TEXT NOT NULL,
-		delivered_run_id TEXT NOT NULL DEFAULT '',
-		delivered_at     TIMESTAMP NOT NULL
+		parent_task_id        TEXT PRIMARY KEY,
+		child_set_key         TEXT NOT NULL,
+		delivered_run_id      TEXT NOT NULL DEFAULT '',
+		delivery_operation_id TEXT NOT NULL DEFAULT '',
+		delivered_at          TIMESTAMP NOT NULL
 	);
 	`)
 	return err

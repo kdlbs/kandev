@@ -165,7 +165,7 @@ func (r *Repository) GetTaskAssignee(ctx context.Context, taskID string) (string
 // GetTaskAssigneeTx is GetTaskAssignee scoped to a caller-owned transaction,
 // for a caller that must read the effective runner immediately before an
 // insert whose validity depends on it not having changed since an earlier,
-// separate read (ParentWakeReconciler.emit, scheduler_wake_reconciler.go:
+// separate read (ParentWakeReconciler.recordReceipt, scheduler_wake_reconciler.go:
 // closing the race between ListStuckParents' SELECT and this transaction's
 // run insert, where a reassignment in between would otherwise queue a run
 // for a runner that is no longer this parent's assignee).

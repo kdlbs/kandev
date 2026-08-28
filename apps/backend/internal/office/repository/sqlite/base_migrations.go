@@ -40,6 +40,7 @@ func (r *Repository) runMigrations() {
 	r.migrateProviderRouting()
 	r.migrateContinuationScope()
 	r.migrateParentWakeIndexes()
+	r.migrateParentWakeReceiptColumns()
 }
 
 // migrateContinuationScope adds runs.continuation_scope for databases
@@ -142,6 +143,17 @@ func (r *Repository) migrateParentWakeIndexes() {
 	r.migrate.Apply(
 		"idx_tasks_parent_id",
 		`CREATE INDEX IF NOT EXISTS idx_tasks_parent_id ON tasks(parent_id)`,
+	)
+}
+
+// migrateParentWakeReceiptColumns adds operation identity for receipts
+// created by workflow-engine dispatch. Existing direct-run receipts keep
+// their delivered_run_id and receive the empty operation id default.
+func (r *Repository) migrateParentWakeReceiptColumns() {
+	r.migrate.Apply(
+		"parent_child_wake_receipts.delivery_operation_id",
+		`ALTER TABLE parent_child_wake_receipts
+		 ADD COLUMN delivery_operation_id TEXT NOT NULL DEFAULT ''`,
 	)
 }
 

@@ -58,15 +58,15 @@ func (s *Service) recordWakeCandidate(parentTaskID string) {
 	s.logger.Debug(metricWakeCandidate, zap.String("parent_task_id", parentTaskID))
 }
 
-// recordWakeEmitted bumps the count of task_children_completed runs the
-// reconciler inserted directly via CreateRunTx.
-func (s *Service) recordWakeEmitted(parentTaskID, runID string) {
+// recordWakeEmitted bumps the count of task_children_completed operations
+// the reconciler dispatched through the workflow engine.
+func (s *Service) recordWakeEmitted(parentTaskID, operationID string) {
 	parentWakeEmittedTotal.Add(1)
 	if s.logger == nil {
 		return
 	}
 	s.logger.Info(metricWakeEmitted,
-		zap.String("parent_task_id", parentTaskID), zap.String("run_id", runID))
+		zap.String("parent_task_id", parentTaskID), zap.String("operation_id", operationID))
 }
 
 // recordWakeAssigneeUnresolved bumps the count of candidates skipped

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -38,8 +39,8 @@ type StuckParentCandidate struct {
 // somewhere has adopted Office — it says nothing about this parent's own
 // task or workspace, so without this predicate a Kanban-only parent in an
 // unrelated workspace, or in the same workspace as an Office project it has
-// no connection to, could still match every other filter and receive a
-// directly-inserted, unrequested autonomous run. ListUnstartedTasks
+// no connection to, could still match every other filter and receive an
+// unrequested autonomous run. ListUnstartedTasks
 // (tasks.go, the sibling query this reconciler mirrors) applies the same
 // predicate for the same reason.
 //
@@ -55,30 +56,26 @@ type StuckParentCandidate struct {
 // Every remaining filter runs in SQL, ahead of LIMIT, not in the caller
 // afterward:
 //   - the LEFT JOIN against parent_child_wake_receipts drops a candidate
-//     whose stored receipt already matches its current child set AND whose
-//     receipt-referenced run actually finished — the receipt is purely this
-//     "has the child set changed, and did that delivery land" discriminator.
-//     A receipt's run can still be 'queued'/'claimed' (in flight; the
-//     second bullet below is what actually excludes that case) or can have
-//     ended 'failed'/'cancelled' — emit (scheduler_wake_reconciler.go)
-//     writes the receipt in the same transaction as the run it describes,
-//     before that run's eventual outcome is known, so a receipt alone is
-//     never proof of delivery. Without the finished-run check, a reconciler
-//     run that later fails or is cancelled leaves a receipt that matches
-//     the (unchanged) current child set forever, permanently blocking every
-//     future sweep for that parent — the exact "wake permanently lost, no
-//     recovery path" failure mode this reconciler exists to fix, recreated
-//     one layer up by its own bookkeeping.
+//     whose stored receipt already matches its current child set and whose
+//     delivery evidence still exists. A receipt created by the workflow
+//     engine stores a child-set operation id. A legacy receipt stores a run
+//     id, and any existing run is evidence that the wake entered the queue.
+//     Terminal execution failures stay terminal under the Office runtime
+//     contract; they require an explicit user retry and must not become a
+//     cron retry loop. A missing referenced run remains eligible because a
+//     cleanup or migration can remove the delivery evidence.
 //   - the NOT EXISTS against runs drops a candidate with a queued or
 //     claimed task_children_completed run (still in flight, regardless of
 //     which child set it was requested for — wait for it to resolve rather
-//     than race a duplicate) or a finished one requested at or after
-//     newest_child_updated_at (it already reflects the current child set).
-//     A finished run requested *before* the newest child update does NOT
-//     block: that run saw a stale child set, so it must not be treated as
-//     having delivered this one — this is R3-A's fix, replacing a plain
-//     "any finished run ever" check that let one finished run permanently
-//     immunize a parent against every later child-set change.
+//     than race a duplicate) or a terminal one requested at or after
+//     newest_child_updated_at (it already reflects the current child set,
+//     including a failed or cancelled wake that must remain terminal under
+//     the Office runtime contract). A terminal run requested *before* the
+//     newest child update does NOT block: that run saw a stale child set, so
+//     it must not be treated as having delivered this one — this is R3-A's
+//     fix, replacing a plain "any terminal run ever" check that let one
+//     finished run permanently immunize a parent against every later
+//     child-set change.
 //     queueChildrenCompletedRun and cascadeChildrenCompleted (the
 //     edge-triggered delivery paths) never write a receipt, so the receipt
 //     alone cannot tell a healthy edge-delivered wake from a lost one;
@@ -145,10 +142,12 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 		  AND ap.status NOT IN ('paused', 'stopped', 'pending_approval')
 		  AND (
 		      r.child_set_key IS NOT s.child_set_key
-		      OR NOT EXISTS (
-		          SELECT 1 FROM runs delivered
-		          WHERE delivered.id = r.delivered_run_id
-		            AND delivered.status = 'finished'
+		      OR (
+		          NOT EXISTS (
+		              SELECT 1 FROM runs delivered
+		              WHERE delivered.id = r.delivered_run_id
+		          )
+		          AND COALESCE(r.delivery_operation_id, '') = ''
 		      )
 		  )
 		  AND NOT EXISTS (
@@ -157,7 +156,10 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 		        AND w.reason = ?
 		        AND (
 		            w.status IN ('queued', 'claimed')
-		            OR (w.status = 'finished' AND w.requested_at >= s.newest_child_updated_at)
+		            OR (
+		                w.status IN ('finished', 'failed', 'cancelled')
+		                AND w.requested_at >= s.newest_child_updated_at
+		            )
 		        )
 		  )
 		ORDER BY s.parent_task_id
@@ -175,10 +177,11 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 // WakeReceipt is the last-delivered task_children_completed wake for a
 // parent task, keyed by the child set it was delivered for.
 type WakeReceipt struct {
-	ParentTaskID   string    `db:"parent_task_id"`
-	ChildSetKey    string    `db:"child_set_key"`
-	DeliveredRunID string    `db:"delivered_run_id"`
-	DeliveredAt    time.Time `db:"delivered_at"`
+	ParentTaskID        string    `db:"parent_task_id"`
+	ChildSetKey         string    `db:"child_set_key"`
+	DeliveredRunID      string    `db:"delivered_run_id"`
+	DeliveryOperationID string    `db:"delivery_operation_id"`
+	DeliveredAt         time.Time `db:"delivered_at"`
 }
 
 // GetWakeReceipt returns the receipt for a parent task, or nil if none
@@ -186,7 +189,8 @@ type WakeReceipt struct {
 func (r *Repository) GetWakeReceipt(ctx context.Context, parentTaskID string) (*WakeReceipt, error) {
 	var rec WakeReceipt
 	err := r.ro.GetContext(ctx, &rec, r.ro.Rebind(`
-		SELECT parent_task_id, child_set_key, delivered_run_id, delivered_at
+		SELECT parent_task_id, child_set_key, delivered_run_id,
+		       delivery_operation_id, delivered_at
 		FROM parent_child_wake_receipts
 		WHERE parent_task_id = ?
 	`), parentTaskID)
@@ -200,20 +204,77 @@ func (r *Repository) GetWakeReceipt(ctx context.Context, parentTaskID string) (*
 }
 
 // UpsertWakeReceiptTx records (or updates) the delivery receipt for a
-// parent task's current child set, using a transaction the caller owns so
-// the receipt write commits atomically with the run insert it accompanies.
+// parent task's current child set, using a transaction the caller owns.
+// deliveredRunID is populated by legacy direct-run callers. The workflow
+// engine path uses deliveryOperationID because one trigger can fan out to
+// several runs and the engine owns their admission.
 func (r *Repository) UpsertWakeReceiptTx(
 	ctx context.Context, tx *sqlx.Tx,
-	parentTaskID, childSetKey, deliveredRunID string, deliveredAt time.Time,
+	parentTaskID, childSetKey, deliveredRunID, deliveryOperationID string,
+	deliveredAt time.Time,
 ) error {
 	_, err := tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO parent_child_wake_receipts (
-			parent_task_id, child_set_key, delivered_run_id, delivered_at
-		) VALUES (?, ?, ?, ?)
+			parent_task_id, child_set_key, delivered_run_id,
+			delivery_operation_id, delivered_at
+		) VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT (parent_task_id) DO UPDATE SET
 			child_set_key = excluded.child_set_key,
 			delivered_run_id = excluded.delivered_run_id,
+			delivery_operation_id = excluded.delivery_operation_id,
 			delivered_at = excluded.delivered_at
-	`), parentTaskID, childSetKey, deliveredRunID, deliveredAt)
+	`), parentTaskID, childSetKey, deliveredRunID, deliveryOperationID, deliveredAt)
 	return err
+}
+
+type childSetKeyRow struct {
+	ID    string `db:"id"`
+	State string `db:"state"`
+}
+
+// GetChildSetKey returns the deterministic key for the parent's current
+// active child set. It reads child ids and states separately from the
+// aggregate query so the same logic works on SQLite and PostgreSQL.
+func (r *Repository) GetChildSetKey(ctx context.Context, parentTaskID string) (string, error) {
+	var rows []childSetKeyRow
+	if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+		SELECT id, state
+		FROM tasks
+		WHERE parent_id = ? AND archived_at IS NULL
+		ORDER BY id
+	`), parentTaskID); err != nil {
+		return "", err
+	}
+	return formatChildSetKey(rows), nil
+}
+
+// GetChildSetKeyTx is the transaction-scoped counterpart to GetChildSetKey.
+// Reconciler admission uses it immediately before recording a receipt, so a
+// child-set change does not get hidden by a receipt for the old generation.
+func (r *Repository) GetChildSetKeyTx(
+	ctx context.Context, tx *sqlx.Tx, parentTaskID string,
+) (string, error) {
+	var rows []childSetKeyRow
+	if err := tx.SelectContext(ctx, &rows, tx.Rebind(`
+		SELECT id, state
+		FROM tasks
+		WHERE parent_id = ? AND archived_at IS NULL
+		ORDER BY id
+	`), parentTaskID); err != nil {
+		return "", err
+	}
+	return formatChildSetKey(rows), nil
+}
+
+func formatChildSetKey(rows []childSetKeyRow) string {
+	var b strings.Builder
+	for i, row := range rows {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(row.ID)
+		b.WriteByte(':')
+		b.WriteString(row.State)
+	}
+	return b.String()
 }

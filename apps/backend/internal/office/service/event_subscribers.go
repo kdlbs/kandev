@@ -52,6 +52,47 @@ func (s *Service) dispatchEngineTrigger(
 	return nil
 }
 
+// dispatchEngineTriggerForRecovery dispatches a level-triggered wake through
+// the workflow engine and reports whether the engine accepted the trigger.
+// A missing session is a normal no-op: recording a receipt in that case would
+// suppress a later delivery after the session is created.
+//
+// The production dispatcher exposes HandleTriggerHandled so this path can
+// distinguish a missing session from a valid no-action step. Small test
+// dispatchers only implement WorkflowEngineDispatcher, so they use the
+// existing error-only contract and count a successful call as accepted.
+func (s *Service) dispatchEngineTriggerForRecovery(
+	ctx context.Context, taskID string, trigger engine.Trigger, payload any, opID string,
+) (bool, error) {
+	if s.engineDispatcher == nil {
+		return false, nil
+	}
+
+	type handledDispatcher interface {
+		HandleTriggerHandled(
+			context.Context, string, engine.Trigger, any, string,
+		) (bool, error)
+	}
+	if d, ok := s.engineDispatcher.(handledDispatcher); ok {
+		_, err := d.HandleTriggerHandled(ctx, taskID, trigger, payload, opID)
+		if errors.Is(err, shared.ErrEngineNoSession) {
+			s.logger.Debug("engine recovery trigger skipped: no active session",
+				zap.String("task_id", taskID),
+				zap.String("trigger", string(trigger)))
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
+	if err := s.dispatchEngineTrigger(ctx, taskID, trigger, payload, opID); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // TaskMovedData represents the payload of a task.moved event.
 type TaskMovedData struct {
 	TaskID                 string `json:"task_id"`

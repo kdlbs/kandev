@@ -2,22 +2,22 @@ package service
 
 import (
 	"context"
-	"encoding/json"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
 // maxWakeReconcilePerTick caps the number of stuck parents processed in one
 // tick, mirroring maxRecoveryPerTick (scheduler_recovery.go). ListStuckParents
 // filters out every sticky non-actionable candidate — stale-or-missing
-// receipt, active/finished run, unresolved or paused/stopped/pending-approval
+// receipt, active/terminal run, unresolved or paused/stopped/pending-approval
 // assignee — in SQL before this cap is applied, so it bounds real work, not
 // resting or permanently-blocked parents.
 const maxWakeReconcilePerTick = 5
@@ -25,17 +25,9 @@ const maxWakeReconcilePerTick = 5
 // ParentWakeReconciler is a level-triggered backstop for the
 // task_children_completed wake: queueChildrenCompletedRun
 // (event_subscribers.go) fires it edge-triggered off the child-completion
-// event, and that insert can be silently lost (the permanent
-// idx_run_idempotency unique index conflicting with the courtesy 24h
-// dedup window, a crash between the check and the insert, ...) with no
-// re-delivery. This handler instead re-derives "is this parent stuck"
-// from current task state every tick, so a lost wake self-heals on the
-// next sweep instead of staying lost until an operator notices.
-//
-// It writes runs directly via CreateRunTx (bypassing QueueRun/CoalesceRun
-// entirely, with a NULL idempotency key) so CoalesceRun's empty-key
-// coalescing can never swallow the re-delivery the way it would if this
-// went through QueueRun.
+// event, and that dispatch can be lost without re-delivery. This handler
+// re-derives "is this parent stuck" from current task state every tick, then
+// sends the trigger through the same workflow engine used by the edge path.
 type ParentWakeReconciler struct {
 	scheduler *SchedulerIntegration
 	logger    *logger.Logger
@@ -94,21 +86,9 @@ func (h *ParentWakeReconciler) reconcile(ctx context.Context) {
 }
 
 // reconcileOne re-delivers the wake for a single stuck parent, unless its
-// assignee cannot accept a run right now. ListStuckParents' SQL already
-// guarantees every candidate it returns has a stale-or-missing receipt (its
-// LEFT JOIN excludes an exact child-set-key match), no active/finished wake
-// run covering it (its NOT EXISTS against runs), and a resolvable,
-// non-paused/stopped/pending-approval assignee (its own filters plus a LEFT
-// JOIN against agent_profiles) — a second, Go-side receipt fetch-and-compare,
-// or a check for an empty AssigneeAgentProfileID, would both be structurally
-// unreachable here: nothing but this reconciler ever writes
-// parent_child_wake_receipts, ticks run sequentially, and the assignee ID is
-// computed in the same SELECT that filtered it. Do not re-add either check
-// without a reason the SQL guarantee no longer holds; see the doc comment on
-// ListStuckParents. guardAgentStatus is the one exception, kept deliberately:
-// unlike a receipt, an agent's status can change from any caller at any
-// time, so this closes the narrow race window between that SELECT and this
-// read rather than duplicating a guarantee SQL already gives.
+// assignee cannot accept a run right now. It re-reads the child-set key before
+// dispatch and again before recording the receipt. This keeps a child update
+// from making an old candidate look delivered for the new generation.
 func (h *ParentWakeReconciler) reconcileOne(
 	ctx context.Context, svc *Service, c sqlite.StuckParentCandidate,
 ) {
@@ -117,7 +97,7 @@ func (h *ParentWakeReconciler) reconcileOne(
 		return
 	}
 
-	payload, err := h.buildPayload(ctx, svc, c.ParentTaskID, c.WorkflowStepID)
+	payload, err := h.buildPayload(ctx, svc, c.ParentTaskID)
 	if err != nil {
 		if ctx.Err() != nil {
 			return
@@ -127,76 +107,79 @@ func (h *ParentWakeReconciler) reconcileOne(
 		return
 	}
 
-	h.emit(ctx, svc, c, payload)
-}
-
-// childrenCompletedPayload mirrors the shape enrichChildrenContext
-// (scheduler_integration.go) expects on a task_children_completed run's
-// payload column. TaskID and WorkflowStepID are declared first so they
-// marshal first in the JSON text: ParseRunPayload decodes this payload
-// into a map[string]string for its task_id/workflow_step_id lookups, and
-// a later type mismatch on the children array must not stop either from
-// having already been set. WorkflowStepID lets evaluateRunStaleness
-// (scheduler_staleness.go) cancel a re-delivered wake if the parent has
-// since moved to another workflow step — the exact situation this
-// reconciler's re-delivered runs are most likely to hit, since it only
-// exists to redeliver a wake after time has already passed.
-type childrenCompletedPayload struct {
-	TaskID         string                     `json:"task_id"`
-	WorkflowStepID string                     `json:"workflow_step_id"`
-	Children       []childSummaryPayloadEntry `json:"children"`
-	Truncated      bool                       `json:"truncated"`
-}
-
-type childSummaryPayloadEntry struct {
-	Identifier  string `json:"identifier"`
-	Title       string `json:"title"`
-	State       string `json:"state"`
-	LastComment string `json:"last_comment"`
-}
-
-// buildPayload assembles the run payload independently of the workflow
-// engine's own children-completed dispatch (event_subscribers.go), since
-// this reconciler inserts directly via CreateRunTx and never reaches the
-// engine. GetChildSummaries counts *all* children (it has no archived_at
-// filter), so a child archived after this parent's receipt was last
-// written can still appear here; that's fine, this is prompt context, not
-// the stuck-parent predicate the sweep itself uses.
-func (h *ParentWakeReconciler) buildPayload(
-	ctx context.Context, svc *Service, parentTaskID, workflowStepID string,
-) (string, error) {
-	children, truncated, err := svc.repo.GetChildSummaries(ctx, parentTaskID)
+	currentKey, err := svc.repo.GetChildSetKey(ctx, c.ParentTaskID)
 	if err != nil {
-		return "", fmt.Errorf("get child summaries: %w", err)
+		if ctx.Err() != nil {
+			return
+		}
+		h.logger.Error("wake sweep: revalidate child set failed",
+			zap.String("parent_task_id", c.ParentTaskID), zap.Error(err))
+		return
+	}
+	if currentKey != c.ChildSetKey {
+		return
 	}
 
-	entries := make([]childSummaryPayloadEntry, 0, len(children))
+	operationID := wakeOperationID(c.ParentTaskID, c.ChildSetKey)
+	accepted, err := svc.dispatchEngineTriggerForRecovery(
+		ctx,
+		c.ParentTaskID,
+		engine.TriggerOnChildrenCompleted,
+		payload,
+		operationID,
+	)
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		h.logger.Error("wake sweep: engine dispatch failed",
+			zap.String("parent_task_id", c.ParentTaskID), zap.Error(err))
+		return
+	}
+	if !accepted {
+		return
+	}
+
+	h.recordReceipt(ctx, svc, c, operationID)
+}
+
+// buildPayload assembles the typed payload expected by the workflow engine's
+// on_children_completed trigger. GetChildSummaries counts all children, and
+// the candidate query separately excludes archived children from readiness.
+func (h *ParentWakeReconciler) buildPayload(
+	ctx context.Context, svc *Service, parentTaskID string,
+) (engine.OnChildrenCompletedPayload, error) {
+	children, truncated, err := svc.repo.GetChildSummaries(ctx, parentTaskID)
+	if err != nil {
+		return engine.OnChildrenCompletedPayload{}, fmt.Errorf("get child summaries: %w", err)
+	}
+
+	prsByTask := svc.lookupChildPRLinks(ctx, children)
+	summaries := make([]engine.ChildSummary, 0, len(children))
 	for _, c := range children {
-		entries = append(entries, childSummaryPayloadEntry{
-			Identifier:  c.Identifier,
-			Title:       c.Title,
-			State:       c.State,
-			LastComment: c.LastComment,
+		summaries = append(summaries, engine.ChildSummary{
+			TaskID:  c.TaskID,
+			Status:  c.State,
+			Summary: c.LastComment,
+			PRLinks: prsByTask[c.TaskID],
 		})
 	}
 
-	out, err := json.Marshal(childrenCompletedPayload{
-		TaskID:         parentTaskID,
-		WorkflowStepID: workflowStepID,
-		Children:       entries,
-		Truncated:      truncated,
-	})
-	if err != nil {
-		return "", fmt.Errorf("marshal payload: %w", err)
+	if truncated {
+		// The engine payload has no truncation field. The list is already
+		// capped by the repository, so the available summaries remain the
+		// same as the normal edge-triggered path.
+		h.logger.Debug("wake sweep: child summaries truncated",
+			zap.String("parent_task_id", parentTaskID))
 	}
-	return string(out), nil
+	return engine.OnChildrenCompletedPayload{ChildSummaries: summaries}, nil
 }
 
-// emit inserts the re-delivered run and upserts the wake receipt in a
-// single transaction, so a failure between the two never leaves a receipt
-// claiming delivery of a wake that was never actually queued.
-func (h *ParentWakeReconciler) emit(
-	ctx context.Context, svc *Service, c sqlite.StuckParentCandidate, payload string,
+// recordReceipt stores the operation-backed receipt after the workflow engine
+// accepts the trigger. The engine owns run admission and can fan out to more
+// than one target, so a single delivered run id cannot represent this wake.
+func (h *ParentWakeReconciler) recordReceipt(
+	ctx context.Context, svc *Service, c sqlite.StuckParentCandidate, operationID string,
 ) {
 	tx, err := svc.repo.Writer().BeginTxx(ctx, nil)
 	if err != nil {
@@ -209,50 +192,23 @@ func (h *ParentWakeReconciler) emit(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Re-read the parent's effective runner inside this transaction, closing
-	// the race between ListStuckParents' SELECT and this insert: a
-	// reassignment landing in between would otherwise queue this run for a
-	// runner that is no longer the parent's assignee, and the receipt this
-	// transaction writes would then block a correct re-sweep for the actual
-	// new runner. Unlike the receipt (reconciler-exclusive) or the SQL-side
-	// filters (guaranteed by ListStuckParents), the assignee can change from
-	// any caller at any time, so this is a live recheck, not a duplicated
-	// guarantee — the same rationale as guardAgentStatus above, just closing
-	// the window at the write instead of at read time.
-	current, err := svc.repo.GetTaskAssigneeTx(ctx, tx, c.ParentTaskID)
+	currentKey, err := svc.repo.GetChildSetKeyTx(ctx, tx, c.ParentTaskID)
 	if err != nil {
 		if ctx.Err() != nil {
 			return
 		}
-		h.logger.Error("wake sweep: revalidate assignee failed",
+		h.logger.Error("wake sweep: revalidate child set in receipt tx failed",
 			zap.String("parent_task_id", c.ParentTaskID), zap.Error(err))
 		return
 	}
-	if current != c.AssigneeAgentProfileID {
-		svc.recordWakeAssigneeUnresolved(c.ParentTaskID, "runner reassigned before delivery")
-		return
-	}
-
-	runReq := &models.Run{
-		ID:             uuid.New().String(),
-		AgentProfileID: c.AssigneeAgentProfileID,
-		Reason:         RunReasonTaskChildrenCompleted,
-		Payload:        payload,
-		Status:         RunStatusQueued,
-		CoalescedCount: 1,
-		IdempotencyKey: nil,
-	}
-	if err := svc.repo.CreateRunTx(ctx, tx, runReq); err != nil {
-		if ctx.Err() != nil {
-			return
-		}
-		h.logger.Error("wake sweep: create run failed",
-			zap.String("parent_task_id", c.ParentTaskID), zap.Error(err))
+	if currentKey != c.ChildSetKey {
 		return
 	}
 
 	deliveredAt := time.Now().UTC()
-	if err := svc.repo.UpsertWakeReceiptTx(ctx, tx, c.ParentTaskID, c.ChildSetKey, runReq.ID, deliveredAt); err != nil {
+	if err := svc.repo.UpsertWakeReceiptTx(
+		ctx, tx, c.ParentTaskID, c.ChildSetKey, "", operationID, deliveredAt,
+	); err != nil {
 		if ctx.Err() != nil {
 			return
 		}
@@ -270,5 +226,10 @@ func (h *ParentWakeReconciler) emit(
 		return
 	}
 
-	svc.recordWakeEmitted(c.ParentTaskID, runReq.ID)
+	svc.recordWakeEmitted(c.ParentTaskID, operationID)
+}
+
+func wakeOperationID(parentTaskID, childSetKey string) string {
+	sum := sha256.Sum256([]byte(parentTaskID + "\x00" + childSetKey))
+	return fmt.Sprintf("task_children_completed:%s:%s", parentTaskID, hex.EncodeToString(sum[:]))
 }

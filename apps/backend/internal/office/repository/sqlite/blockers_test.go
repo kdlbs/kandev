@@ -262,7 +262,7 @@ func TestListBlockersForTasks(t *testing.T) {
 }
 
 // TestGetTaskAssigneeTx_ReflectsCurrentRunner covers the primitive
-// ParentWakeReconciler.emit (scheduler_wake_reconciler.go) uses to close the
+// ParentWakeReconciler.recordReceipt (scheduler_wake_reconciler.go) uses to close the
 // TOCTOU race between ListStuckParents' SELECT and its own transactional run
 // insert: a runner reassignment committed on a separate connection before
 // the transaction begins must be visible inside it, matching GetTaskAssignee
@@ -292,7 +292,7 @@ func TestGetTaskAssigneeTx_ReflectsCurrentRunner(t *testing.T) {
 
 	// Reassign on a separate, already-committed statement, simulating a
 	// reassignment that lands between a candidate's capture (the earlier
-	// ListStuckParents SELECT) and the transaction emit() opens to record it.
+	// ListStuckParents SELECT) and the transaction recordReceipt() opens to record it.
 	if _, err := repo.ExecRaw(ctx, `
 		UPDATE workflow_step_participants SET agent_profile_id = 'agent-b'
 		WHERE task_id = 'parent-1' AND role = 'runner'

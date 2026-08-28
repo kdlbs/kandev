@@ -3,7 +3,6 @@ package service_test
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/models"
@@ -65,6 +64,8 @@ func TestParentWakeReconciler_SkipsWithoutOfficeAdoption(t *testing.T) {
 func TestParentWakeReconciler_EmitsRunForStuckParent(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
+	dispatcher := &fakeDispatcher{}
+	svc.SetWorkflowEngineDispatcher(dispatcher)
 
 	adoptOffice(t, svc, "ws-1")
 	seedStuckParent(t, svc, "ws-1", "parent-1", "worker-1")
@@ -78,21 +79,29 @@ func TestParentWakeReconciler_EmitsRunForStuckParent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	if len(runs) != 1 {
-		t.Fatalf("want exactly one run after tick 1, got %d: %#v", len(runs), runs)
+	if len(runs) != 0 {
+		t.Fatalf("reconciler inserted a run instead of dispatching through the workflow engine: %#v", runs)
 	}
-	run := runs[0]
-	if run.Reason != service.RunReasonTaskChildrenCompleted {
-		t.Fatalf("run reason = %q, want %q", run.Reason, service.RunReasonTaskChildrenCompleted)
+	calls := dispatcher.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("want exactly one engine dispatch after tick 1, got %d: %#v", len(calls), calls)
 	}
-	if run.IdempotencyKey != nil {
-		t.Fatalf("run idempotency key = %q, want nil (NULL)", *run.IdempotencyKey)
+	if calls[0].taskID != "parent-1" {
+		t.Fatalf("engine dispatch task = %q, want parent-1", calls[0].taskID)
+	}
+	if calls[0].opID == "" {
+		t.Fatal("engine dispatch operation id is empty")
+	}
+	receipt, err := svc.GetWakeReceiptForTest(ctx, "parent-1")
+	if err != nil {
+		t.Fatalf("get wake receipt: %v", err)
+	}
+	if receipt == nil || receipt.DeliveryOperationID == "" {
+		t.Fatalf("engine dispatch did not persist an operation-backed receipt: %#v", receipt)
 	}
 
-	// Tick 2: the tick-1 run is still queued, so ListStuckParents' NOT
-	// EXISTS-against-runs filter excludes parent-1 from the candidate set
-	// entirely (see wake_receipts_test.go for a dedicated test of that
-	// filter) — the sweep must be a no-op, with no second run.
+	// Tick 2: the operation-backed receipt excludes parent-1 for the same
+	// child set, so the sweep must be a no-op.
 	if err := handler.Tick(ctx); err != nil {
 		t.Fatalf("tick 2: %v", err)
 	}
@@ -100,8 +109,39 @@ func TestParentWakeReconciler_EmitsRunForStuckParent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list runs after tick 2: %v", err)
 	}
-	if len(runsAfter) != 1 {
-		t.Fatalf("tick 2 created a new run: %#v", runsAfter)
+	if len(runsAfter) != 0 {
+		t.Fatalf("tick 2 created an unexpected run: %#v", runsAfter)
+	}
+	if got := len(dispatcher.Calls()); got != 1 {
+		t.Fatalf("tick 2 dispatched a duplicate engine operation: got %d calls", got)
+	}
+}
+
+func TestParentWakeReconciler_SkipsWithoutEngineDispatcher(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	adoptOffice(t, svc, "ws-1")
+	seedStuckParent(t, svc, "ws-1", "parent-1", "worker-1")
+
+	handler := service.NewParentWakeReconciler(service.NewSchedulerIntegration(svc, 0))
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("reconciler inserted a run without an engine dispatcher: %#v", runs)
+	}
+	receipt, err := svc.GetWakeReceiptForTest(ctx, "parent-1")
+	if err != nil {
+		t.Fatalf("get wake receipt: %v", err)
+	}
+	if receipt != nil {
+		t.Fatalf("missing dispatcher left a delivery receipt: %#v", receipt)
 	}
 }
 
@@ -241,6 +281,8 @@ func seedStuckParentDanglingAssignee(t *testing.T, svc *service.Service, wsID, p
 func TestParentWakeReconciler_UnresolvedAndPausedDoNotStarveHealthyParent(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
+	dispatcher := &fakeDispatcher{}
+	svc.SetWorkflowEngineDispatcher(dispatcher)
 
 	adoptOffice(t, svc, "ws-1")
 
@@ -273,14 +315,10 @@ func TestParentWakeReconciler_UnresolvedAndPausedDoNotStarveHealthyParent(t *tes
 		}
 	}
 
-	runs, err := svc.ListRuns(ctx, "ws-1")
-	if err != nil {
-		t.Fatalf("list runs: %v", err)
-	}
-	for _, run := range runs {
-		if run.Reason == service.RunReasonTaskChildrenCompleted && strings.Contains(run.Payload, "zz-healthy-parent") {
+	for _, call := range dispatcher.Calls() {
+		if call.taskID == "zz-healthy-parent" {
 			return
 		}
 	}
-	t.Fatalf("zz-healthy-parent was never woken across 3 ticks behind 10 sticky candidates: %#v", runs)
+	t.Fatalf("zz-healthy-parent was never dispatched across 3 ticks behind 10 sticky candidates: %#v", dispatcher.Calls())
 }

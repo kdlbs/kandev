@@ -58,15 +58,11 @@ func seedWakeAgentProfile(t *testing.T, repo *sqlite.Repository, ctx context.Con
 	}
 }
 
-// seedWakeReceipt records a receipt for parentID as already delivered for
-// childSetKey, the same shape UpsertWakeReceiptTx writes. It also seeds a
-// backing 'finished' run for the receipt's delivered_run_id: in production
-// a receipt's delivered_run_id always names a run inserted in the same
-// transaction (emit, scheduler_wake_reconciler.go), so ListStuckParents'
-// receipt check requires that run to exist and have finished before
-// treating the receipt as proof of delivery — a dangling delivered_run_id
-// is indistinguishable from a never-delivered wake and must not suppress
-// re-sweep.
+// seedWakeReceipt records a legacy run-backed receipt for parentID as already
+// delivered for childSetKey. It also seeds a backing 'finished' run for the
+// receipt's delivered_run_id. Workflow-engine receipts use the operation-id
+// column instead; this helper keeps the legacy shape covered because existing
+// databases can still contain those rows.
 func seedWakeReceipt(t *testing.T, repo *sqlite.Repository, ctx context.Context, parentID, childSetKey string) {
 	t.Helper()
 	runID := "prior-run-" + parentID
@@ -146,6 +142,39 @@ func seedRunner(t *testing.T, repo *sqlite.Repository, ctx context.Context, pare
 	}
 }
 
+func TestGetChildSetKey_UsesActiveChildren(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	insertTask(t, repo, ctx, "parent-1", "ws-1", "Parent", "", "")
+	insertTask(t, repo, ctx, "child-b", "ws-1", "Child B", "", "")
+	insertTask(t, repo, ctx, "child-a", "ws-1", "Child A", "", "")
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE tasks SET parent_id = ?, state = ? WHERE id = ?
+	`, "parent-1", "COMPLETED", "child-b"); err != nil {
+		t.Fatalf("set child-b: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE tasks SET parent_id = ?, state = ?, archived_at = CURRENT_TIMESTAMP WHERE id = ?
+	`, "parent-1", "FAILED", "child-a"); err != nil {
+		t.Fatalf("archive child-a: %v", err)
+	}
+	insertTask(t, repo, ctx, "child-c", "ws-1", "Child C", "", "")
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE tasks SET parent_id = ?, state = ? WHERE id = ?
+	`, "parent-1", "CANCELLED", "child-c"); err != nil {
+		t.Fatalf("set child-c: %v", err)
+	}
+
+	got, err := repo.GetChildSetKey(ctx, "parent-1")
+	if err != nil {
+		t.Fatalf("GetChildSetKey: %v", err)
+	}
+	if got != "child-b:COMPLETED,child-c:CANCELLED" {
+		t.Fatalf("child set key = %q, want child-b:COMPLETED,child-c:CANCELLED", got)
+	}
+}
+
 // TestListStuckParents_LimitDoesNotStarveLaterCandidates is R1-A's
 // regression test: candidates with an already-current receipt (nothing to
 // do) must not consume LIMIT slots ahead of candidates that genuinely need
@@ -189,23 +218,24 @@ func TestListStuckParents_LimitDoesNotStarveLaterCandidates(t *testing.T) {
 	}
 }
 
-// TestListStuckParents_ExcludesParentWithActiveOrFinishedRun is R1-B's
+// TestListStuckParents_ExcludesParentWithCoveredRun is R1-B's
 // regression test: a parent whose wake was already delivered via the
 // edge-triggered path (queueChildrenCompletedRun / cascadeChildrenCompleted)
 // never gets a receipt written for it — those paths don't write one — so
-// only a runs-backed check, not the receipt, can tell the sweep the wake
-// was already delivered.
-func TestListStuckParents_ExcludesParentWithActiveOrFinishedRun(t *testing.T) {
+// only a runs-backed check, not the receipt, can tell the sweep the wake was
+// already delivered. Terminal failures are covered too: the runtime contract
+// requires an explicit user retry, so the reconciler must not retry them.
+func TestListStuckParents_ExcludesParentWithCoveredRun(t *testing.T) {
 	const reason = "task_children_completed"
 
-	blocking := []string{"queued", "claimed", "finished"}
+	blocking := []string{"queued", "claimed", "finished", "failed", "cancelled"}
 	for _, status := range blocking {
 		t.Run(status, func(t *testing.T) {
 			repo := newSearchTestRepo(t)
 			ctx := context.Background()
 
 			seedWakeCandidate(t, repo, ctx, "ws-1", "parent-1")
-			seedWakeRun(t, repo, ctx, "run-1", "parent-1", reason, status)
+			seedWakeRunAt(t, repo, ctx, "run-1", "parent-1", reason, status, "datetime('now', '+1 second')")
 
 			candidates, err := repo.ListStuckParents(ctx, reason, 5)
 			if err != nil {
@@ -216,38 +246,13 @@ func TestListStuckParents_ExcludesParentWithActiveOrFinishedRun(t *testing.T) {
 			}
 		})
 	}
-
-	nonBlocking := []string{"failed", "cancelled"}
-	for _, status := range nonBlocking {
-		t.Run(status, func(t *testing.T) {
-			repo := newSearchTestRepo(t)
-			ctx := context.Background()
-
-			seedWakeCandidate(t, repo, ctx, "ws-1", "parent-1")
-			seedWakeRun(t, repo, ctx, "run-1", "parent-1", reason, status)
-
-			candidates, err := repo.ListStuckParents(ctx, reason, 5)
-			if err != nil {
-				t.Fatalf("ListStuckParents: %v", err)
-			}
-			if len(candidates) != 1 {
-				t.Fatalf("status %q: expected the parent to still be a candidate (no successful delivery on record), got %#v", status, candidates)
-			}
-		})
-	}
 }
 
-// TestListStuckParents_RecoversAfterDeliveredRunFails is the fixup
-// regression test for the "receipt outlives failed wake" defect: emit
-// (scheduler_wake_reconciler.go) writes the receipt in the same transaction
-// as the run it describes, before that run's eventual status is known, so a
-// receipt matching the current (unchanged) child set is not on its own
-// proof of delivery. Before this fix, a reconciler-emitted run that later
-// failed or was cancelled left behind a receipt that permanently excluded
-// the parent from every future sweep, even though the wake was never
-// actually delivered — recreating, in the reconciler's own bookkeeping, the
-// exact permanently-lost-wake failure mode this reconciler exists to fix.
-func TestListStuckParents_RecoversAfterDeliveredRunFails(t *testing.T) {
+// TestListStuckParents_TerminalRunDoesNotRetry verifies that a receipt whose
+// delivered run failed or was cancelled still suppresses automatic retries.
+// The Office runtime contract makes adapter failures terminal until an
+// explicit user action starts a new run.
+func TestListStuckParents_TerminalRunDoesNotRetry(t *testing.T) {
 	const reason = "task_children_completed"
 
 	terminal := []string{"failed", "cancelled"}
@@ -269,8 +274,8 @@ func TestListStuckParents_RecoversAfterDeliveredRunFails(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ListStuckParents: %v", err)
 			}
-			if len(candidates) != 1 || candidates[0].ParentTaskID != "parent-1" {
-				t.Fatalf("status %q: RECEIPT OUTLIVED FAILED WAKE: candidates = %#v, want exactly [parent-1]", status, candidates)
+			if len(candidates) != 0 {
+				t.Fatalf("status %q: terminal run must not be retried automatically: candidates = %#v", status, candidates)
 			}
 		})
 	}
@@ -298,6 +303,27 @@ func TestListStuckParents_RecoversAfterDeliveredRunFails(t *testing.T) {
 			t.Fatalf("finished delivery: candidates = %#v, want none", candidates)
 		}
 	})
+
+	// An edge-triggered terminal run has no reconciler receipt, but it still
+	// represents an attempted wake for the current child set. It must not be
+	// retried on every tick.
+	for _, status := range terminal {
+		t.Run("edge_"+status, func(t *testing.T) {
+			repo := newSearchTestRepo(t)
+			ctx := context.Background()
+
+			seedWakeCandidate(t, repo, ctx, "ws-1", "parent-1")
+			seedWakeRunAt(t, repo, ctx, "run-1", "parent-1", reason, status, "datetime('now', '+1 second')")
+
+			candidates, err := repo.ListStuckParents(ctx, reason, 5)
+			if err != nil {
+				t.Fatalf("ListStuckParents: %v", err)
+			}
+			if len(candidates) != 0 {
+				t.Fatalf("status %q: edge-triggered terminal run must not be retried: candidates = %#v", status, candidates)
+			}
+		})
+	}
 }
 
 // TestListStuckParents_ExcludesNonOfficeParent is the fixup regression test
@@ -307,9 +333,8 @@ func TestListStuckParents_RecoversAfterDeliveredRunFails(t *testing.T) {
 // Office task, so ListStuckParents must apply its own row-level check —
 // mirroring ListUnstartedTasks (tasks.go), the sibling query this
 // reconciler mirrors. Without it, an ordinary Kanban parent with terminal
-// children and a resolvable runner would receive a directly-inserted,
-// unrequested autonomous run merely because Office happens to be adopted
-// somewhere in the install.
+// children and a resolvable runner would receive an unrequested autonomous
+// run merely because Office happens to be adopted somewhere in the install.
 func TestListStuckParents_ExcludesNonOfficeParent(t *testing.T) {
 	repo := newSearchTestRepo(t)
 	ctx := context.Background()
