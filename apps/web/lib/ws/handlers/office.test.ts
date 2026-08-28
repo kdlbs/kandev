@@ -375,6 +375,38 @@ describe("office WS handler — costs refetch gating on office.task.updated", ()
       expect(setOfficeRefetchTrigger).not.toHaveBeenCalledWith("costs");
     }
   });
+
+  it("refreshes tasks when a task project changes", () => {
+    const { store, setOfficeRefetchTrigger } = makeStore(ACTIVE_WS);
+    const handlers = registerOfficeHandlers(store);
+    const handler = handlers[ACTION_TASK_UPDATED]!;
+
+    handler({
+      type: "notification",
+      action: ACTION_TASK_UPDATED,
+      payload: { workspace_id: ACTIVE_WS, task_id: "t-1", fields: ["project_id"] },
+    } as Parameters<typeof handler>[0]);
+
+    expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("tasks");
+  });
+
+  it("maps a project_id update to the task store field", () => {
+    const { store, patchTaskInStore } = makeStore(ACTIVE_WS);
+    const handlers = registerOfficeHandlers(store);
+    const handler = handlers[ACTION_TASK_UPDATED]!;
+
+    handler({
+      type: "notification",
+      action: ACTION_TASK_UPDATED,
+      payload: {
+        workspace_id: ACTIVE_WS,
+        task_id: "t-1",
+        project_id: "project-2",
+      },
+    } as Parameters<typeof handler>[0]);
+
+    expect(patchTaskInStore).toHaveBeenCalledWith("t-1", { projectId: "project-2" });
+  });
 });
 
 describe("office WS handler — approval flow events", () => {

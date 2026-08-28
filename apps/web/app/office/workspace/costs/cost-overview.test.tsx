@@ -142,3 +142,32 @@ describe("CostOverview", () => {
     screen.getByText("$2.00");
   });
 });
+
+describe("CostOverview workspace isolation", () => {
+  it("does not show the previous workspace after the next workspace fails to load", async () => {
+    getCostsBreakdownMock
+      .mockResolvedValueOnce({ ...EMPTY_BREAKDOWN, total_subcents: 10000 })
+      .mockRejectedValueOnce(new Error("workspace unavailable"));
+
+    const view = render(
+      <StateProvider initialState={{ workspaces: { activeId: "ws-1", items: [] } }}>
+        <CostOverview workspaceId="ws-1" />
+      </StateProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("$1.00")).toBeTruthy();
+    });
+
+    view.rerender(
+      <StateProvider initialState={{ workspaces: { activeId: "ws-2", items: [] } }}>
+        <CostOverview workspaceId="ws-2" />
+      </StateProvider>,
+    );
+
+    await waitFor(() => {
+      expect(getCostsBreakdownMock).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.queryByText("$1.00")).toBeNull();
+  });
+});

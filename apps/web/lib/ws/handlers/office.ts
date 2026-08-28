@@ -74,7 +74,10 @@ function buildTaskHandlers(
       // generic kanban task.updated forward — which carries no `fields` —
       // doesn't refetch costs on every unrelated task touch.
       const fields = p.fields as string[] | undefined;
-      if (Array.isArray(fields) && fields.includes("project_id")) triggerRefetch("costs");
+      if (Array.isArray(fields) && fields.includes("project_id")) {
+        triggerRefetch("costs");
+        triggerRefetch("tasks");
+      }
     },
 
     "office.task.created": (message) => {
@@ -307,6 +310,7 @@ function normalizeIssueFields(p: Record<string, unknown>): Record<string, unknow
   if (p.status != null) out.status = p.status;
   if (p.new_status != null) out.status = p.new_status;
   if (p.priority != null) out.priority = p.priority;
+  if (p.project_id != null) out.projectId = p.project_id;
   if (p.updated_at != null) out.updatedAt = p.updated_at;
   if (p.assignee_agent_profile_id != null) out.assigneeAgentProfileId = p.assignee_agent_profile_id;
   return out;

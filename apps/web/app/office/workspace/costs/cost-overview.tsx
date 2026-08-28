@@ -24,14 +24,30 @@ import { t as staticT } from "@/lib/i18n";
 
 type DateRange = "mtd" | "30d";
 
+type CostOverviewData = {
+  totalSubcents: number;
+  byAgent: CostBreakdownItem[];
+  byProject: CostBreakdownItem[];
+  byModel: CostBreakdownItem[];
+  byProvider: CostBreakdownItem[];
+};
+
+const EMPTY_COST_OVERVIEW: CostOverviewData = {
+  totalSubcents: 0,
+  byAgent: [],
+  byProject: [],
+  byModel: [],
+  byProvider: [],
+};
+
 export function CostOverview({ workspaceId }: { workspaceId: string }) {
-  const { t } = useTranslation();
   const [range, setRange] = useState<DateRange>("mtd");
   const [totalSubcents, setTotalSubcents] = useState(0);
   const [byAgent, setByAgent] = useState<CostBreakdownItem[]>([]);
   const [byProject, setByProject] = useState<CostBreakdownItem[]>([]);
   const [byModel, setByModel] = useState<CostBreakdownItem[]>([]);
   const [byProvider, setByProvider] = useState<CostBreakdownItem[]>([]);
+  const [loadedWorkspaceId, setLoadedWorkspaceId] = useState<string | null>(null);
 
   // Range changes, workspace changes, and WS-triggered refetches (below) can
   // all call fetchCosts in overlapping succession; guard against an older
@@ -44,6 +60,7 @@ export function CostOverview({ workspaceId }: { workspaceId: string }) {
     getCostsBreakdown(workspaceId)
       .then((res) => {
         if (current !== requestId.current) return;
+        setLoadedWorkspaceId(workspaceId);
         setTotalSubcents(res.total_subcents ?? 0);
         setByAgent((res.by_agent ?? []) as CostBreakdownItem[]);
         setByProject((res.by_project ?? []) as CostBreakdownItem[]);
@@ -66,6 +83,32 @@ export function CostOverview({ workspaceId }: { workspaceId: string }) {
   // already-open tab.
   useOfficeRefetch("costs", fetchCosts);
 
+  // Do not render a previous workspace's response while a new workspace is
+  // loading. This also keeps the old values hidden when the new request
+  // fails, instead of showing them under the wrong workspace.
+  const displayData =
+    loadedWorkspaceId === workspaceId
+      ? { totalSubcents, byAgent, byProject, byModel, byProvider }
+      : EMPTY_COST_OVERVIEW;
+
+  return <CostOverviewContent range={range} onRangeChange={setRange} {...displayData} />;
+}
+
+type CostOverviewContentProps = CostOverviewData & {
+  range: DateRange;
+  onRangeChange: (range: DateRange) => void;
+};
+
+function CostOverviewContent({
+  range,
+  onRangeChange,
+  totalSubcents,
+  byAgent,
+  byProject,
+  byModel,
+  byProvider,
+}: CostOverviewContentProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-6">
       <div className="flex gap-2">
@@ -73,7 +116,7 @@ export function CostOverview({ workspaceId }: { workspaceId: string }) {
           variant={range === "mtd" ? "secondary" : "outline"}
           size="sm"
           className="cursor-pointer"
-          onClick={() => setRange("mtd")}
+          onClick={() => onRangeChange("mtd")}
         >
           MTD
         </Button>
@@ -81,7 +124,7 @@ export function CostOverview({ workspaceId }: { workspaceId: string }) {
           variant={range === "30d" ? "secondary" : "outline"}
           size="sm"
           className="cursor-pointer"
-          onClick={() => setRange("30d")}
+          onClick={() => onRangeChange("30d")}
         >
           {t("office:last30Days")}
         </Button>
