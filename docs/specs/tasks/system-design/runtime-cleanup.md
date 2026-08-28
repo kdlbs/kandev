@@ -137,32 +137,22 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
 
 ## Archive cleanup disposition
 
-The cleanup job trigger defines the resource disposition. Direct archive and
-cascade archive use the same disposition. A caller-specific Boolean must not
-change that disposition.
-
-Archive cleanup performs these actions:
+Direct and cascade archive use the same cleanup disposition. A caller-specific
+Boolean must not change it:
 
 - Stop the task runtimes and remove executor-specific runtime resources.
 - Remove the physical worktree directory and mark its repository row deleted.
-- Preserve the owning `task_environments` row.
-- Preserve every `task_environment_repos` row, including its worktree ID,
-  path, branch, and branch slug.
-- Preserve the local Git branch ref. This keeps committed work recoverable when
-  a hosting provider deletes the remote branch after merge.
+- Preserve the owning `task_environments` row, every
+  `task_environment_repos` row (including worktree ID, path, branch, and slug),
+  and the local Git branch ref.
 
-The worktree can appear in both the environment snapshot and the batch
-worktree snapshot. Both cleanup passes must use the archive disposition. A
-later pass must not delete a branch that an earlier pass preserved.
+If a worktree appears in both snapshots, every pass uses this disposition and
+must not delete a branch preserved earlier.
 
-Unarchive does not invent a new workspace owner. It keeps the preserved
-environment link. When the repository row is not live, resume enters normal
-preparation and reactivates that row. The recreated worktree uses the preserved
-local branch first, then the existing remote or pull-request recovery paths.
-
-Delete behavior remains separate. A delete trigger can remove durable owner
-rows after it captures the cleanup snapshot. This archive rule does not weaken
-delete cleanup.
+Unarchive keeps the preserved environment link. If its repository row is not
+live, normal preparation reactivates it and uses the preserved local branch
+before remote or pull-request recovery. Delete remains separate and may remove
+owner rows after capturing its cleanup snapshot.
 
 ## Data Model
 
