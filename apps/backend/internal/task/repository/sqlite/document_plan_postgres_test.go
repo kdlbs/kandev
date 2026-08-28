@@ -203,3 +203,27 @@ func TestPostgresWritePlanRevisionUpsertAndImplementationMarker(t *testing.T) {
 		t.Errorf("GetTaskPlan(missing) = %+v, %v; want nil, nil", missing, err)
 	}
 }
+
+func TestPostgresWritePlanRevisionMissingTask(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	taskID := "task-plan-pg-missing"
+
+	err = repo.WritePlanRevision(ctx,
+		&models.TaskPlan{ID: "plan-pg-missing", TaskID: taskID, Title: "Plan", Content: "body"},
+		&models.TaskPlanRevision{TaskID: taskID, Title: "Plan", Content: "body", AuthorKind: "agent"},
+		nil)
+	if !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("WritePlanRevision error = %v, want ErrTaskNotFound", err)
+	}
+	if got := countRows(t, repo, `SELECT COUNT(1) FROM task_plans WHERE task_id = ?`, taskID); got != 0 {
+		t.Fatalf("plan HEAD rows = %d, want 0 after rollback", got)
+	}
+	if got := countRows(t, repo, `SELECT COUNT(1) FROM task_plan_revisions WHERE task_id = ?`, taskID); got != 0 {
+		t.Fatalf("plan revision rows = %d, want 0 after rollback", got)
+	}
+}

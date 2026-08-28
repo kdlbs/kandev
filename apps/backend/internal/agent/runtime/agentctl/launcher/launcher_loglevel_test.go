@@ -78,6 +78,59 @@ func TestChildLogLevel(t *testing.T) {
 	}
 }
 
+func TestChildLogLevelSlogTextRecords(t *testing.T) {
+	tests := []struct {
+		name  string
+		level string
+		want  string
+	}{
+		{name: "debug", level: "DEBUG", want: "DEBUG"},
+		{name: "info", level: "INFO", want: "INFO"},
+		{name: "warn", level: "WARN", want: "WARN"},
+		{name: "error", level: "ERROR", want: "ERROR"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			line := "time=2026-08-12T10:00:00.000Z level=" + tt.level +
+				" source=main.go:97 msg=\"agentctl record\""
+			if got := childLogLevel(line); got != tt.want {
+				t.Fatalf("childLogLevel(%q) = %q, want %q", line, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestChildLogLevelRejectsMalformedSlogTextRecords(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+	}{
+		{
+			name: "missing time anchor",
+			line: "level=INFO source=main.go:97 msg=\"agentctl record\"",
+		},
+		{
+			name: "missing level anchor",
+			line: "time=2026-08-12T10:00:00.000Z msg=\"level=INFO\"",
+		},
+		{
+			name: "missing message field",
+			line: "time=2026-08-12T10:00:00.000Z level=INFO source=main.go:97",
+		},
+		{
+			name: "level anchor is not second field",
+			line: "time=2026-08-12T10:00:00.000Z source=main.go:97 level=INFO msg=\"record\"",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := childLogLevel(tt.line); got != "" {
+				t.Fatalf("childLogLevel(%q) = %q, want no recognized level", tt.line, got)
+			}
+		})
+	}
+}
+
 func TestStripANSI(t *testing.T) {
 	tests := []struct {
 		name string

@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-RUNTIME-CLEANUP-001
 created: 2026-06-22
-updated: 2026-08-24
+updated: 2026-08-28
 owners:
   - cfl
 ---
@@ -278,6 +278,9 @@ The durable cleanup job wraps that resource lifecycle:
 - If a runtime row points at a missing in-memory execution, cleanup attempts the
   runtime-specific persisted handle when available. If no handle can be used, the
   row is preserved with a warning instead of being silently dropped.
+- If dead-row repair returns `models.ErrExecutionRotated`, a newer execution
+  identity won the compare-and-set. Reconciliation preserves that row and does
+  not emit a warning. Other repair errors remain warnings.
 - If a stop operation reports the execution or session is not found and the owned
   row is a confirmed-dead local runtime, cleanup records the stop as successful,
   prunes or repairs the row under the resume-safety invariant, proceeds with any
@@ -445,6 +448,9 @@ The durable cleanup job wraps that resource lifecycle:
   a not-found stop is reclassified as successful, **THEN** the row is repaired in
   place (token and worktree preserved) rather than deleted, per
   `RowMustBePreserved`.
+- **GIVEN** dead-row repair races a newer execution identity, **WHEN** the
+  compare-and-set returns `models.ErrExecutionRotated`, **THEN** reconciliation
+  preserves the newer row and emits no warning.
 - **GIVEN** agentctl is stopped while an ACP child process ignores stdin EOF,
   **WHEN** the stop timeout expires, **THEN** the ACP process group is killed and
   no ACP child is reparented to PID 1.

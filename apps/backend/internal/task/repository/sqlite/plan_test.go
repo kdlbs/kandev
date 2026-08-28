@@ -582,6 +582,26 @@ func TestWritePlanRevisionCreatesHeadAndFirstRevision(t *testing.T) {
 	assertPlanRevisionEqual(t, gotRev, rev)
 }
 
+func TestWritePlanRevisionMissingTask(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	taskID := "task-writeplan-missing"
+
+	err := repo.WritePlanRevision(ctx,
+		&models.TaskPlan{ID: "plan-missing", TaskID: taskID, Title: "Plan", Content: "body"},
+		&models.TaskPlanRevision{TaskID: taskID, Title: "Plan", Content: "body", AuthorKind: "agent"},
+		nil)
+	if !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("WritePlanRevision error = %v, want ErrTaskNotFound", err)
+	}
+	if got := countRows(t, repo, `SELECT COUNT(1) FROM task_plans WHERE task_id = ?`, taskID); got != 0 {
+		t.Fatalf("plan HEAD rows = %d, want 0 after rollback", got)
+	}
+	if got := countRows(t, repo, `SELECT COUNT(1) FROM task_plan_revisions WHERE task_id = ?`, taskID); got != 0 {
+		t.Fatalf("plan revision rows = %d, want 0 after rollback", got)
+	}
+}
+
 func TestWritePlanRevisionUpsertsHeadAndAppendsRevisions(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()

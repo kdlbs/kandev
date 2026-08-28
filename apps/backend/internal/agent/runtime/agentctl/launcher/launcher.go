@@ -529,10 +529,31 @@ func childLogLevel(line string) string {
 	// three segments rejects truncated lines (e.g. "<ts>\t<token>") whose second
 	// field is not actually a level, so they fall back to WARN.
 	fields := strings.SplitN(line, "\t", 4)
-	if len(fields) < 3 {
+	if len(fields) >= 3 {
+		if level := recognizedChildLogLevel(stripANSI(fields[1])); level != "" {
+			return level
+		}
+	}
+
+	// Go's slog TextHandler writes records as key/value fields beginning with
+	// time and level, followed by optional attributes and a msg field. Requiring
+	// those anchors prevents a message containing "level=INFO" from changing
+	// the parent's severity.
+	slogFields := strings.Fields(line)
+	if len(slogFields) < 3 || !strings.HasPrefix(slogFields[0], "time=") ||
+		!strings.HasPrefix(slogFields[1], "level=") {
 		return ""
 	}
-	level := strings.ToUpper(stripANSI(fields[1]))
+	for _, field := range slogFields[2:] {
+		if strings.HasPrefix(field, "msg=") {
+			return recognizedChildLogLevel(stripANSI(strings.TrimPrefix(slogFields[1], "level=")))
+		}
+	}
+	return ""
+}
+
+func recognizedChildLogLevel(level string) string {
+	level = strings.ToUpper(level)
 	switch level {
 	case "DEBUG", "INFO", "WARN", "ERROR", "FATAL", "PANIC", "DPANIC":
 		return level

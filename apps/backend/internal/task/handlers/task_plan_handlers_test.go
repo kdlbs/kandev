@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -184,6 +185,16 @@ func TestPlanWSActionsReportMissingPlan(t *testing.T) {
 			`{"task_id":"`+planlessID+`"}`))
 		assertPlanError(t, out, err, ws.ErrorCodeNotFound, "Task plan not found")
 	})
+}
+
+func TestPlanWSCreateReportsMissingTask(t *testing.T) {
+	h := newPlanTestHandlers(t)
+	out, err := h.wsCreateTaskPlan(context.Background(), planMsg(t, ws.ActionTaskPlanCreate,
+		`{"task_id":"task-plan-ws-missing","content":"body"}`))
+	assertPlanError(t, out, err, ws.ErrorCodeNotFound, "Task not found")
+	if strings.Contains(strings.ToLower(string(out.Payload)), "constraint") {
+		t.Fatalf("error payload leaks storage details: %s", out.Payload)
+	}
 }
 
 // TestPlanWSActionsSucceed pins the success payloads across a full CRUD round

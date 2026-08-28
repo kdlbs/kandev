@@ -238,7 +238,12 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest) (*m
 	}
 
 	if err := s.repo.WritePlanRevision(ctx, plan, rev, coalesceID); err != nil {
-		s.logger.Error("write plan revision", zap.String("task_id", req.TaskID), zap.Error(err))
+		fields := []zap.Field{zap.String("task_id", req.TaskID), zap.Error(err)}
+		if errors.Is(err, repository.ErrTaskNotFound) {
+			s.logger.Debug("write plan revision", fields...)
+		} else {
+			s.logger.Error("write plan revision", fields...)
+		}
 		return nil, err
 	}
 

@@ -2,6 +2,7 @@
 status: active
 system: platform
 created: 2026-08-23
+updated: 2026-08-28
 owners:
   - kandev
 ---
@@ -9,7 +10,8 @@ owners:
 
 ## Overview
 
-Normal review and first-launch timing conditions currently look like backend failures in the logs. This obscures actionable errors and makes diagnostic bundles harder to triage.
+Expected runtime conditions and forwarded child logs can use the wrong severity.
+This behavior obscures actionable errors and makes diagnostic bundles harder to triage.
 
 ## Requirements
 
@@ -27,6 +29,14 @@ Normal review and first-launch timing conditions currently look like backend fai
 - **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.6:** **GIVEN** an active session and a dependency failure unrelated to a missing file, **WHEN** `workspace.file.get` requests a path, **THEN** the response has the `internal_error` error code and an error-level entry is emitted.
 - **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.7:** **GIVEN** a physical worktree has been materialized before its task environment row exists, **WHEN** worktree persistence receives `ErrEnvironmentNotResolved`, **THEN** the call succeeds, emits a debug-level deferred-persistence entry, and does not remove the physical worktree.
 - **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.8:** **GIVEN** worktree persistence receives any other store error, **WHEN** the manager handles it, **THEN** the existing error and cleanup behavior remains unchanged.
+- **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.9:** The launcher shall preserve a recognized child log level from Zap console records and Go `slog` text records.
+- **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.10:** The launcher shall record unrecognized child stderr at warning level so that unstructured panics and tracebacks remain visible.
+- **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.11:** A missing task environment referenced by a session shall use the existing task fallback without a warning entry.
+- **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.12:** A task-environment lookup error that is not a typed not-found condition shall retain its warning entry.
+- **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.13:** **GIVEN** a child emits a recognized `INFO` record, **WHEN** the launcher forwards stderr, **THEN** the parent records the line at info level.
+- **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.14:** **GIVEN** a child emits unstructured stderr, **WHEN** the launcher forwards the line, **THEN** the parent records it at warning level.
+- **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.15:** **GIVEN** a session references a missing task environment, **WHEN** workspace information is loaded, **THEN** the task fallback succeeds without a warning entry.
+- **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.16:** **GIVEN** a task-environment lookup returns another error, **WHEN** workspace information is loaded, **THEN** the existing fallback and warning behavior remains unchanged.
 
 ## Migrated source detail
 
@@ -49,6 +59,10 @@ bundles harder to triage.
   owns persistence of its record.
 - Other worktree persistence failures keep their existing return, cleanup, and
   logging behavior.
+- Forwarded child stderr keeps recognized Zap and Go `slog` levels. Unknown
+  stderr stays at warning level.
+- A missing session task environment uses the existing task fallback without a
+  warning. Other lookup errors keep their warning.
 
 ## API surface
 
@@ -71,6 +85,12 @@ status and message path.
   remove the newly created physical worktree.
 - Any other worktree store failure remains an actual persistence failure and
   follows the current cleanup and retry boundary.
+- The launcher accepts only anchored child log formats. Unrecognized stderr
+  remains visible at warning level.
+- A typed missing task environment is an expected stale-reference condition.
+  The task fallback remains authoritative for workspace information.
+- Other task-environment lookup errors can indicate a storage problem and
+  remain warnings.
 
 ## Persistence guarantees
 
@@ -95,10 +115,21 @@ persistence, or cleanup behavior across backend restarts.
 - **GIVEN** worktree persistence receives any other store error, **WHEN** the
   manager handles it, **THEN** the existing error and cleanup behavior remains
   unchanged.
+- **GIVEN** a child emits a recognized `INFO` record, **WHEN** the launcher
+  forwards stderr, **THEN** the parent records the line at info level.
+- **GIVEN** a child emits unstructured stderr, **WHEN** the launcher forwards
+  the line, **THEN** the parent records it at warning level.
+- **GIVEN** a session references a missing task environment, **WHEN** workspace
+  information is loaded, **THEN** the task fallback succeeds without a warning
+  entry.
+- **GIVEN** a task-environment lookup returns another error, **WHEN** workspace
+  information is loaded, **THEN** the existing fallback and warning behavior
+  remains unchanged.
 
 ## Out of scope
 
 - Changing frontend diff rendering or review-file status behavior.
 - Changing worktree ownership, task-environment transactions, cleanup policy,
   or startup reconciliation.
-- Reclassifying unrelated integration, ACP, or startup warnings.
+- Reclassifying integration failures, raw ACP frames, host-utility idle repair,
+  network disconnects, or authentication warnings.

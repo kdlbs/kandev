@@ -121,6 +121,7 @@ signals, and task-scoped scheduling contracts.
 - [Task model unification](system-design/model-unification.md)
 - [Remote Contribution Tasks](system-design/remote-contribution-tasks.md)
 - [Task Archive Confirmation](system-design/archive-confirmation.md)
+- [Task plan write lifecycle](system-design/plan-write-lifecycle.md)
 - [Task Runtime Cleanup](system-design/runtime-cleanup.md)
 - [Queued Run Scheduling](system-design/run-scheduling.md)
 - [Session Delete Preserves Task Workspaces](system-design/session-delete-resource-cleanup.md)

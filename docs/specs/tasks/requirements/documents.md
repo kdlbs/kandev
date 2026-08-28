@@ -2,6 +2,7 @@
 status: active
 system: tasks
 created: 2026-04-29
+updated: 2026-08-28
 owners:
   - cfl
 ---
@@ -20,6 +21,7 @@ This document is the migrated task-system source for the capability. The source 
 #### Acceptance criteria
 
 - **AC-TASKS-DOCUMENTS-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
+- **AC-TASKS-DOCUMENTS-001.2:** When a plan write targets a missing task, the system shall return `not_found`, create no plan data, and expose no storage constraint details. This expected rejection shall create a debug entry and no error-level entry.
 
 ## Migrated source detail
 
@@ -102,6 +104,8 @@ POST   /tasks/:id/documents/:key/revisions/:revId/restore → restore from prior
 - **GIVEN** a task, **WHEN** an agent runs `kandev doc upload TASK-1 screenshot /tmp/bug.png`, **THEN** an attachment document is created with key "screenshot", the file is stored on disk, and the task detail shows it in the Documents section with a download link.
 
 - **GIVEN** the existing MCP tool `plan_create`, **WHEN** called with a task ID and content, **THEN** it creates/updates the document with `key=plan` (backward compatible, no behavior change).
+
+- **GIVEN** a missing or deleted task, **WHEN** a consumer writes its plan, **THEN** the response is `not_found`, no plan data exists, and no storage error is exposed.
 
 ## Out of scope
 

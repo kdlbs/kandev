@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	internaldb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -333,6 +334,9 @@ func upsertPlanHead(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, head *models.
 			created_by = excluded.created_by,
 			updated_at = excluded.updated_at
 	`), head.ID, head.TaskID, head.Title, head.Content, head.CreatedBy, head.CreatedAt, head.UpdatedAt); err != nil {
+		if internaldb.IsForeignKeyViolation(err) {
+			return fmt.Errorf("upsert task plan head for task %s: %w", head.TaskID, ErrTaskNotFound)
+		}
 		return fmt.Errorf("upsert task plan head: %w", err)
 	}
 	return nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -200,6 +201,16 @@ func TestMCPPlanActionsReportMissingPlan(t *testing.T) {
 			`{"task_id":"`+mcpPlanlessID+`"}`))
 		assertMCPPlanError(t, out, err, ws.ErrorCodeNotFound, "Task plan not found")
 	})
+}
+
+func TestMCPPlanCreateReportsMissingTask(t *testing.T) {
+	h := newMCPPlanTestHandlers(t)
+	out, err := h.handleCreateTaskPlan(context.Background(), mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan,
+		`{"task_id":"task-plan-mcp-missing","content":"body"}`))
+	assertMCPPlanError(t, out, err, ws.ErrorCodeNotFound, "Task not found")
+	if strings.Contains(strings.ToLower(string(out.Payload)), "constraint") {
+		t.Fatalf("error payload leaks storage details: %s", out.Payload)
+	}
 }
 
 // TestMCPPlanActionsSucceed pins the success payloads across a full CRUD round
