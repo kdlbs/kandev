@@ -43,7 +43,7 @@ Make fixed workflow-step profile routing independent of the active session trans
 ## Verification
 
 ```bash
-go test ./internal/orchestrator -run '^(TestPrepareWorkflowStepSessionSwitchesPassthroughProfile|TestApplyEngineTransitionRejectsPassthroughTargetProfileBeforePersistingStep|TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession)$' -count=1
+cd apps/backend && go test ./internal/orchestrator -run '^(TestPrepareWorkflowStepSessionSwitchesPassthroughProfile|TestApplyEngineTransitionRejectsPassthroughTargetProfileBeforePersistingStep|TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession)$' -count=1
 cd apps/web && pnpm e2e:run tests/terminal/terminal-agent.spec.ts -- --grep "switches from a TUI session to the workflow step profile"
 ```
 
@@ -82,6 +82,6 @@ None.
 - Removed the passthrough exemptions from workflow-step session preparation and credential preflight.
 - Added backend regressions for destination-session routing and fail-closed credential admission.
 - Added a browser regression for TUI-to-fixed-profile routing, destination tab visibility, and primary ownership.
-- `go test ./internal/orchestrator -run '^(TestPrepareWorkflowStepSessionSwitchesPassthroughProfile|TestApplyEngineTransitionRejectsPassthroughTargetProfileBeforePersistingStep|TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession)$' -count=1` — passed, 3 tests in 1 package.
+- `cd apps/backend && go test ./internal/orchestrator -run '^(TestPrepareWorkflowStepSessionSwitchesPassthroughProfile|TestApplyEngineTransitionRejectsPassthroughTargetProfileBeforePersistingStep|TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession)$' -count=1` — passed, 3 tests in 1 package.
 - `cd apps/web && pnpm e2e:run tests/terminal/terminal-agent.spec.ts -- --grep "switches from a TUI session to the workflow step profile"` — passed, 1 test in 16.3 seconds.
 - `python3 scripts/lint-spec-files.py --all` — passed.

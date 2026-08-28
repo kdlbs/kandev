@@ -14,7 +14,11 @@ import { errors, type Page } from "@playwright/test";
 /** Create a passthrough (TUI) agent profile for the mock agent. */
 async function createTUIProfile(apiClient: ApiClient, name: string) {
   const { agents } = await apiClient.listAgents();
-  return apiClient.createAgentProfile(agents[0].id, name, {
+  const agent =
+    agents.find((candidate) => candidate.name === "mock-agent") ??
+    agents.find((candidate) => candidate.id !== "dynamic");
+  if (!agent) throw new Error("no launchable agents available in test fixtures");
+  return apiClient.createAgentProfile(agent.id, name, {
     model: "mock-fast",
     auto_approve: true,
     cli_passthrough: true,
@@ -156,11 +160,13 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     seedData,
   }) => {
     test.setTimeout(180_000);
-    const { agents } = await apiClient.listAgents();
-    if (agents.length === 0) throw new Error("no agents available in test fixtures");
-
     const tuiProfile = await createTUIProfile(apiClient, "TUI Profile Switch");
-    const fixedProfile = await apiClient.createAgentProfile(agents[0].id, "Fixed ACP Profile", {
+    const { agents } = await apiClient.listAgents();
+    const fixedAgent =
+      agents.find((candidate) => candidate.name === "mock-agent") ??
+      agents.find((candidate) => candidate.id !== "dynamic");
+    if (!fixedAgent) throw new Error("no launchable agents available in test fixtures");
+    const fixedProfile = await apiClient.createAgentProfile(fixedAgent.id, "Fixed ACP Profile", {
       model: "mock-fast",
     });
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "TUI Profile Routing");
@@ -189,6 +195,7 @@ test.describe("Terminal agent (TUI passthrough)", () => {
       "TUI Profile Routing Task",
       tuiProfile.id,
       {
+        description: "switch to the fixed profile",
         workflow_id: workflow.id,
         workflow_step_id: startStep.id,
         repository_ids: [seedData.repositoryId],

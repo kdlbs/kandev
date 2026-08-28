@@ -80,7 +80,7 @@ Use the visible session tab to validate primary ownership.
 
 ## Verification results
 
-- `go test ./internal/orchestrator -run '^(TestPrepareWorkflowStepSessionSwitchesPassthroughProfile|TestApplyEngineTransitionRejectsPassthroughTargetProfileBeforePersistingStep|TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession)$' -count=1` — passed, 3 tests in 1 package.
+- `cd apps/backend && go test ./internal/orchestrator -run '^(TestPrepareWorkflowStepSessionSwitchesPassthroughProfile|TestApplyEngineTransitionRejectsPassthroughTargetProfileBeforePersistingStep|TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession)$' -count=1` — passed, 3 tests in 1 package.
 - `cd apps/web && pnpm e2e:run tests/terminal/terminal-agent.spec.ts -- --grep "switches from a TUI session to the workflow step profile"` — passed, 1 test in 16.3 seconds.
 - `python3 scripts/lint-spec-files.py --all` — passed.
 

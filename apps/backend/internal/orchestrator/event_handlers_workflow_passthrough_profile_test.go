@@ -158,7 +158,10 @@ func TestApplyEngineTransitionRejectsPassthroughTargetProfileBeforePersistingSte
 	}
 	log := testLogger()
 	exec := executor.NewExecutor(agentManager, repo, log, executor.ExecutorConfig{})
-	exec.SetGitHubCredentialBroker(fakePassthroughCredentialIssuer{}, "https://kandev.example/api/v1/github/credentials/resolve")
+	// The custom forge host has no persisted provider_host identity, so
+	// preflightWorkflowStepCredentials rejects it before the transition is
+	// committed. The credential broker is not called on this failure path.
+	exec.SetGitHubCredentialBroker(fakeCredentialIssuer{}, "https://kandev.example/api/v1/github/credentials/resolve")
 	svc := &Service{
 		logger: log, repo: repo, workflowStepGetter: steps, taskRepo: taskRepo, agentManager: agentManager,
 		messageQueue: messagequeue.NewServiceMemory(log), executor: exec,
@@ -187,9 +190,9 @@ func TestApplyEngineTransitionRejectsPassthroughTargetProfileBeforePersistingSte
 	}
 }
 
-type fakePassthroughCredentialIssuer struct{}
+type fakeCredentialIssuer struct{}
 
-func (fakePassthroughCredentialIssuer) Issue(
+func (fakeCredentialIssuer) Issue(
 	context.Context, gitcredentials.Scope,
 ) (gitcredentials.Lease, error) {
 	return gitcredentials.Lease{Token: "opaque-lease"}, nil
