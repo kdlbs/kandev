@@ -59,7 +59,7 @@ A temporary regression test used an HTTP test server that honored the requested 
 ### Regression coverage
 
 - Add a table-driven REST client test in `cloud_client_test.go` for Cloud and Server or Data Center.
-- Make the test server return a description only when the request asks for that field.
+- Record the requested REST field list and assert watcher searches request a description while compact searches do not.
 - Add a service test in `service_issue_watch_test.go` that distinguishes compact search from watcher search.
 - Extend `TestInterpolateJiraPrompt` in `event_handlers_jira_test.go` with the description placeholder.
 
