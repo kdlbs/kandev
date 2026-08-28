@@ -632,15 +632,26 @@ func (s *Service) MoveTaskWithOptions(
 	resultFromStepID := task.FromStepID
 	resultTransitioned := task.WorkflowStepTransitionID != 0
 
-	// Publish task.moved event so the orchestrator can process on_exit/on_enter actions
-	if stepChanged {
-		s.publishTaskMovedEvent(ctx, task, oldWorkflowID, oldStepID, workflowStepID, sessionID)
+	// Publish task.moved event so the orchestrator can process on_exit/on_enter
+	// actions. Gated on resultTransitioned (the write transaction's own
+	// outcome), not the pre-write stepChanged: a concurrent same-workflow move
+	// can land between this call's read and its write, so stepChanged/oldStepID
+	// can name a step the task never actually left (stepChanged=true but the
+	// commit was a no-op transition) or miss one it did leave (stepChanged=false
+	// because this call's read already matched its own target, but the commit's
+	// in-transaction read found a different actual "from" step). Every write
+	// path reachable here (UpdateTask, UpdateTaskIfWorkflowMatches, and the
+	// admission-with-state variant) sets WorkflowStepTransitionID/FromStepID
+	// off the same in-transaction read, so resultFromStepID is always the
+	// step the task actually left on this commit.
+	if resultTransitioned {
+		s.publishTaskMovedEvent(ctx, task, oldWorkflowID, resultFromStepID, workflowStepID, sessionID)
 		historySessionID := opts.StepHistorySessionID
 		if historySessionID == "" {
 			historySessionID = sessionID
 		}
-		s.recordManualStepTransition(ctx, historySessionID, oldStepID, workflowStepID, opts.StepHistoryTrigger, opts.StepHistoryActor)
-		s.pullNextTaskOnVacate(ctx, oldStepID, task.ID)
+		s.recordManualStepTransition(ctx, historySessionID, resultFromStepID, workflowStepID, opts.StepHistoryTrigger, opts.StepHistoryActor)
+		s.pullNextTaskOnVacate(ctx, resultFromStepID, task.ID)
 		s.pullTasksFromNewFeederWork(ctx, workflowID, workflowStepID)
 		refreshed, err := s.tasks.GetTask(ctx, task.ID)
 		if err != nil {
