@@ -435,6 +435,12 @@ func (c *MCPClient) SearchTickets(ctx context.Context, jql, pageToken string, ma
 	return parseMCPSearchResult(result, c.siteURL)
 }
 
+// SearchTicketsForWatch uses the same MCP search tool because the remote MCP
+// service owns the result field selection.
+func (c *MCPClient) SearchTicketsForWatch(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
+	return c.SearchTickets(ctx, jql, pageToken, maxResults)
+}
+
 // mcpIssue mirrors the subset of the Jira issue payload from the MCP tool.
 type mcpIssue struct {
 	ID     string `json:"id"`
