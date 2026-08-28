@@ -1,3 +1,4 @@
+import path from "node:path";
 import { defineConfig, mergeConfig } from "vitest/config";
 
 import viteConfig from "./vite.config";
@@ -13,6 +14,14 @@ const maxWorkers = resolveMaxWorkers(configuredMaxWorkers, Boolean(process.env.C
 export default mergeConfig(
   viteConfig,
   defineConfig({
+    resolve: {
+      alias: [
+        {
+          find: /^monaco-editor$/,
+          replacement: path.resolve(__dirname, "vitest.monaco-editor.ts"),
+        },
+      ],
+    },
     test: {
       environment: "happy-dom",
       environmentOptions: {
