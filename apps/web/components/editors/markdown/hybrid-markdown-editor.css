@@ -14,12 +14,19 @@
   min-height: 100%;
 }
 
-/* Keep the upstream Markdown engine's semantic structure, but use Kandev's
-   active, source-control, selection, and editor colors in both app themes. */
+/* Match Kandev's Preview reading measure and typography while retaining the
+   upstream editor's source markers, cursor, and block lifecycle. */
 .md-editor.kandev-hybrid-markdown-editor {
   color-scheme: light;
   color: var(--foreground);
   background: var(--background);
+  max-width: none;
+  overflow-wrap: anywhere;
+  font-family:
+    -apple-system, "system-ui", "Segoe UI", "Noto Sans", Helvetica, Arial, "NerdFontLocalGlyphs",
+    "NerdFontBundledGlyphs", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  font-size: 13px;
+  line-height: 1.625;
   --md-block-active-background: color-mix(in oklab, var(--accent) 18%, var(--background));
   --md-cursor-background: var(--primary);
   --md-html-comment-foreground: var(--muted-foreground);
@@ -27,6 +34,93 @@
   --md-gutter-added: rgb(var(--git-addition));
   --md-gutter-modified: var(--primary);
   --md-gutter-deleted: rgb(var(--git-deletion));
+}
+
+.kandev-hybrid-markdown-editor .md-editor-content {
+  box-sizing: content-box;
+  max-width: 48rem;
+  margin-inline: 0;
+  padding: 1.5rem 1.5rem 0;
+}
+
+.kandev-hybrid-markdown-editor .md-heading {
+  color: var(--foreground);
+  margin-top: 1.25rem;
+  margin-bottom: 0.375rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.kandev-hybrid-markdown-editor .md-document > .md-heading:first-child {
+  margin-top: 0;
+}
+
+.kandev-hybrid-markdown-editor h1.md-heading {
+  font-size: 1.25rem;
+}
+
+.kandev-hybrid-markdown-editor h2.md-heading {
+  font-size: 1.0625rem;
+}
+
+.kandev-hybrid-markdown-editor h3.md-heading {
+  font-size: 0.9375rem;
+}
+
+.kandev-hybrid-markdown-editor :is(h4, h5, h6).md-heading {
+  font-size: 0.8125rem;
+}
+
+.kandev-hybrid-markdown-editor .md-paragraph {
+  margin: 0;
+  line-height: 1.625;
+}
+
+.kandev-hybrid-markdown-editor .md-paragraph + .md-paragraph {
+  margin-top: 0.5em;
+}
+
+.kandev-hybrid-markdown-editor .md-blockquote {
+  margin: 0.5rem 0;
+  border-left: 3px solid var(--primary);
+  padding-left: 0.75rem;
+  color: var(--muted-foreground);
+  font-style: italic;
+  --md-blockquote-pad: 0.75rem;
+}
+
+.kandev-hybrid-markdown-editor .md-list {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  padding-left: 1.25rem;
+  --md-list-indent-step: 1.25rem;
+}
+
+.kandev-hybrid-markdown-editor .md-list li {
+  margin-top: 0.125rem;
+  margin-bottom: 0.125rem;
+}
+
+.kandev-hybrid-markdown-editor .md-list .md-list {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.kandev-hybrid-markdown-editor a {
+  color: var(--primary);
+  text-decoration-line: underline;
+  text-underline-offset: 2px;
+}
+
+.kandev-hybrid-markdown-editor strong {
+  color: var(--foreground);
+  font-weight: 700;
+}
+
+.kandev-hybrid-markdown-editor .md-thematic-break {
+  margin: 1.5rem 0;
+  border: 0;
+  border-top: 1px solid var(--border);
 }
 
 .dark .md-editor.kandev-hybrid-markdown-editor {
@@ -37,15 +131,30 @@
   color: var(--foreground);
   background: color-mix(in oklab, var(--muted) 82%, var(--background));
   border: 1px solid color-mix(in oklab, var(--border) 88%, var(--foreground));
+  border-radius: 0.375rem;
+  margin: 1rem 0;
+  padding: 0.5rem 0.75rem;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .kandev-hybrid-markdown-editor .md-code-block code,
 .kandev-hybrid-markdown-editor :not(pre) > code {
   color: var(--foreground);
+  font-family: var(--font-mono);
+}
+
+.kandev-hybrid-markdown-editor .md-code-block code {
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .kandev-hybrid-markdown-editor :not(pre) > code {
-  background: color-mix(in oklab, var(--muted) 72%, var(--background));
+  background: color-mix(in oklch, var(--foreground) 10%, var(--muted));
+  border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.375rem;
+  font-size: 0.9em;
 }
 
 .kandev-hybrid-markdown-editor .md-code-block .tok-keyword,
@@ -76,6 +185,22 @@
 .kandev-hybrid-markdown-editor .md-table th,
 .kandev-hybrid-markdown-editor .md-table td {
   border-color: var(--border);
+  padding: 0.25rem 0.5rem;
+  font-size: 13px;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.kandev-hybrid-markdown-editor .md-table-wrapper {
+  margin: 0.75rem 0;
+  overflow-x: auto;
+}
+
+.kandev-hybrid-markdown-editor .md-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
 }
 
 .kandev-hybrid-markdown-editor .md-table th,
@@ -102,4 +227,10 @@
 
 .kandev-hybrid-markdown-editor .md-diff-del-rect {
   background: color-mix(in oklab, rgb(var(--git-deletion)) 28%, transparent);
+}
+
+@media (max-width: 640px) {
+  .kandev-hybrid-markdown-editor .md-editor-content {
+    padding-inline: 1rem;
+  }
 }

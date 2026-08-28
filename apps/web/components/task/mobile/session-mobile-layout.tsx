@@ -52,6 +52,7 @@ import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summa
 import { LaunchQueueStatus } from "../launch-queue-status";
 import { WipQueueStatus } from "../wip-queue-status";
 import type { TaskTopbarRepository } from "../task-page-content-helpers";
+import { SessionTaskSwitcherSheet } from "./session-task-switcher-sheet";
 
 export { resolveMobilePluginPanel } from "./mobile-plugin-panel-lifecycle";
 
@@ -876,6 +877,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     handlePanelChange,
     isTaskSwitcherOpen,
     handleMenuClick,
+    setMobileSessionTaskSwitcherOpen,
   } = useSessionLayoutState({ sessionId: props.sessionId });
   const {
     selectedFile,

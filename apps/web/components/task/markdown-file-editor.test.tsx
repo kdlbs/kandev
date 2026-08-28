@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import {
@@ -40,19 +40,17 @@ vi.mock("@/lib/state/slices/comments", () => ({
 vi.mock("./file-editor-content", () => ({
   FileEditorContent: ({
     markdownPreview,
+    toolbarModeControl,
     onChange,
     onSave,
   }: {
     markdownPreview?: boolean;
+    toolbarModeControl?: ReactNode;
     onChange: (value: string) => void;
     onSave: () => void;
   }) => (
-    <div
-      data-testid="source-editor"
-      {...(markdownPreview === undefined
-        ? {}
-        : { "data-markdown-preview": String(markdownPreview) })}
-    >
+    <div data-testid="source-editor" data-markdown-preview={String(markdownPreview)}>
+      <div data-testid="source-toolbar-mode-control">{toolbarModeControl}</div>
       <button type="button" onClick={() => onChange("# edited")}>
         Change
       </button>
@@ -64,8 +62,19 @@ vi.mock("./file-editor-content", () => ({
 }));
 
 vi.mock("./markdown-preview-content", () => ({
-  MarkdownPreviewContent: ({ content }: { content: string }) => (
-    <div data-testid={MARKDOWN_PREVIEW_CONTENT_TEST_ID}>{content}</div>
+  MarkdownPreviewContent: ({
+    content,
+    toolbarModeControl,
+    showToolbar = true,
+  }: {
+    content: string;
+    toolbarModeControl?: ReactNode;
+    showToolbar?: boolean;
+  }) => (
+    <div data-testid={MARKDOWN_PREVIEW_CONTENT_TEST_ID}>
+      {showToolbar && <div data-testid="preview-toolbar-mode-control">{toolbarModeControl}</div>}
+      {content}
+    </div>
   ),
 }));
 
@@ -110,6 +119,7 @@ vi.mock("@kandev/ui/tooltip", () => ({
 }));
 
 const HYBRID_EDITOR_TEST_ID = "hybrid-editor";
+const MARKDOWN_EDIT_MODE_TEST_ID = "markdown-mode-edit";
 
 afterEach(() => {
   cleanup();
@@ -153,9 +163,11 @@ describe("MarkdownFileEditor", () => {
   it("renders Preview and changes mode through one visible mode control", () => {
     render(<MarkdownFileEditor {...baseProps} mode="preview" />);
 
-    expect(screen.getByTestId(MARKDOWN_PREVIEW_CONTENT_TEST_ID)).toBeTruthy();
+    const preview = screen.getByTestId(MARKDOWN_PREVIEW_CONTENT_TEST_ID);
+    expect(preview).toBeTruthy();
     expect(screen.queryByTestId(HYBRID_EDITOR_TEST_ID)).toBeNull();
-    fireEvent.click(screen.getByTestId("markdown-mode-edit"));
+    expect(within(preview).getAllByTestId(MARKDOWN_EDIT_MODE_TEST_ID)).toHaveLength(1);
+    fireEvent.click(within(preview).getByTestId(MARKDOWN_EDIT_MODE_TEST_ID));
     expect(baseProps.onModeChange).toHaveBeenCalledWith("edit");
   });
 
@@ -229,9 +241,19 @@ describe("MarkdownFileEditor", () => {
   it("uses the existing source editor and keeps Save available in Source mode", () => {
     render(<MarkdownFileEditor {...baseProps} mode="source" isDirty />);
 
-    expect(screen.getByTestId("source-editor").getAttribute("data-markdown-preview")).toBeNull();
-    expect(screen.getByTestId("markdown-mode-source").getAttribute("aria-pressed")).toBe("true");
-    expect((screen.getByTestId("markdown-file-save") as HTMLButtonElement).disabled).toBe(false);
+    const sourceEditor = screen.getByTestId("source-editor");
+    expect(sourceEditor.getAttribute("data-markdown-preview")).toBe("false");
+    expect(
+      within(sourceEditor).getByTestId("markdown-mode-source").getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(screen.queryByTestId("markdown-mode-toolbar")).toBeNull();
+  });
+
+  it("uses compact desktop mode buttons that match the existing toolbar controls", () => {
+    render(<MarkdownFileEditor {...baseProps} mode="edit" />);
+
+    expect(screen.getByTestId(MARKDOWN_EDIT_MODE_TEST_ID).className).toContain("h-8");
+    expect(screen.getByTestId(MARKDOWN_EDIT_MODE_TEST_ID).className).not.toContain("h-9");
   });
 
   it("leaves Source-mode keyboard save to the source editor", () => {
@@ -246,7 +268,7 @@ describe("MarkdownFileEditor", () => {
   it("omits Edit for MDX while keeping Preview and Source", () => {
     render(<MarkdownFileEditor {...baseProps} path="README.mdx" mode="preview" />);
 
-    expect(screen.queryByTestId("markdown-mode-edit")).toBeNull();
+    expect(screen.queryByTestId(MARKDOWN_EDIT_MODE_TEST_ID)).toBeNull();
     expect(screen.getByTestId("markdown-mode-preview")).toBeTruthy();
     expect(screen.getByTestId("markdown-mode-source")).toBeTruthy();
   });

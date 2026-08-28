@@ -16,7 +16,6 @@ import {
   type EditorViewOptions,
 } from "@vscode/markdown-editor";
 import "@vscode/markdown-editor/editor.css";
-import "@vscode/markdown-editor/themes/default.css";
 import "./hybrid-markdown-editor.css";
 import {
   applyMarkdownSourceEdit,
@@ -329,7 +328,7 @@ function createEditorLifecycle({
     setObservable(model.gutterMarkers, toGutterMarkers(gutterMarkers));
 
     const viewOptions: EditorViewOptions = {
-      classNames: ["md-theme-default", "kandev-hybrid-markdown-editor"],
+      classNames: ["kandev-hybrid-markdown-editor"],
       showReadonlyToggle: false,
       onOpenLink,
     };

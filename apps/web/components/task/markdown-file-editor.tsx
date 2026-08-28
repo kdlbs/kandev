@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { IconDeviceFloppy, IconRefresh, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { FileViewerExternalLink } from "./file-viewer-header";
 import { FileEditorContent } from "./file-editor-content";
 import { MarkdownPreviewContent } from "./markdown-preview-content";
@@ -17,6 +18,8 @@ import {
   type MarkdownFileMode,
 } from "./markdown-file-mode";
 import { useMarkdownEditorCommentState } from "./markdown-editor-comment-bridge";
+import { PanelHeaderBarSplit } from "./panel-primitives";
+import { toRelativePath } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 
 export {
@@ -203,22 +206,6 @@ function MarkdownFileEditorLayout({
       data-testid="markdown-file-editor"
       onKeyDown={onKeyDown}
     >
-      <MarkdownModeToolbar
-        path={path}
-        mode={mode}
-        supportedModes={supportedModes}
-        onModeChange={onModeChange}
-        isDirty={isDirty}
-        isSaving={isSaving}
-        hasRemoteUpdate={hasRemoteUpdate ?? false}
-        onSave={onSave}
-        onReloadFromAgent={onReloadFromAgent}
-        onDelete={onDelete}
-        sessionId={sessionId}
-        taskId={taskId}
-        repositoryId={repositoryId}
-        repositoryName={repo}
-      />
       <MarkdownFilePresentation
         mode={mode}
         path={path}
@@ -236,6 +223,7 @@ function MarkdownFileEditorLayout({
         enableComments={enableComments ?? false}
         gutterMarkers={gutterMarkers}
         comments={comments}
+        supportedModes={supportedModes}
         keepHybridMounted={keepHybridMounted}
         keepPreviewMounted={keepPreviewMounted}
         onChange={onChange}
@@ -247,6 +235,7 @@ function MarkdownFileEditorLayout({
         onComment={onComment}
         onError={onError}
         onSourceFallback={onSourceFallback}
+        onModeChange={onModeChange}
       />
     </div>
   );
@@ -278,180 +267,231 @@ type MarkdownFilePresentationProps = Pick<
   | "onComment"
   | "onError"
   | "onSourceFallback"
-> & { keepHybridMounted: boolean; keepPreviewMounted: boolean; mode: MarkdownFileMode };
+  | "onModeChange"
+> & {
+  keepHybridMounted: boolean;
+  keepPreviewMounted: boolean;
+  mode: MarkdownFileMode;
+  supportedModes: readonly MarkdownFileMode[];
+};
 
-function MarkdownFilePresentation({
-  mode,
-  path,
-  content,
-  originalContent,
-  isDirty,
-  hasRemoteUpdate,
-  vcsDiff,
-  isSaving,
-  sessionId,
-  taskId,
-  repositoryId,
-  worktreePath,
-  repo,
-  enableComments,
-  gutterMarkers,
-  comments,
-  keepHybridMounted,
-  keepPreviewMounted,
-  onChange,
-  onSave,
-  onReloadFromAgent,
-  onDelete,
-  onOpenFile,
-  onOpenLink,
-  onComment,
-  onError,
-  onSourceFallback,
-}: MarkdownFilePresentationProps) {
+type MarkdownSurfaceProps = MarkdownFilePresentationProps & {
+  modeControl: ReactNode;
+  fileActions: ReactNode;
+};
+
+function MarkdownFilePresentation(props: MarkdownFilePresentationProps) {
+  const modeControl = (
+    <MarkdownModeControl
+      mode={props.mode}
+      supportedModes={props.supportedModes}
+      onModeChange={props.onModeChange}
+    />
+  );
+  const fileActions = (
+    <MarkdownFileActions
+      isDirty={props.isDirty}
+      isSaving={props.isSaving}
+      hasRemoteUpdate={props.hasRemoteUpdate ?? false}
+      onSave={props.onSave}
+      onReloadFromAgent={props.onReloadFromAgent}
+      onDelete={props.onDelete}
+    />
+  );
   return (
     <div className="min-h-0 flex-1">
-      {keepHybridMounted && (
-        <div
-          className={mode === "edit" ? "h-full min-h-0 overflow-hidden" : "hidden"}
-          aria-hidden={mode !== "edit"}
-          data-testid="markdown-hybrid-editor-host"
-        >
-          <HybridMarkdownEditor
-            content={content}
-            baseline={originalContent}
-            readOnly={false}
-            gutterMarkers={gutterMarkers}
-            comments={comments}
-            onChange={onChange}
-            onOpenLink={onOpenLink}
-            onComment={onComment}
-            onError={onError}
-            onSourceFallback={onSourceFallback}
-          />
-        </div>
-      )}
-      {keepPreviewMounted && (
-        <div
-          className={mode === "preview" ? "h-full min-h-0" : "hidden"}
-          aria-hidden={mode !== "preview"}
-          data-testid="markdown-preview-host"
-        >
-          <MarkdownPreviewContent
-            path={path}
-            content={content}
-            worktreePath={worktreePath}
-            sessionId={sessionId ?? undefined}
-            taskId={taskId}
-            repositoryId={repositoryId}
-            repositoryName={repo}
-            enableComments={enableComments}
-            onTogglePreview={undefined}
-            onOpenFile={onOpenFile}
-            onOpenLink={onOpenLink}
-          />
-        </div>
-      )}
-      {mode === "source" && (
-        <FileEditorContent
-          path={path}
-          content={content}
-          originalContent={originalContent}
-          isDirty={isDirty}
-          hasRemoteUpdate={hasRemoteUpdate}
-          vcsDiff={vcsDiff}
-          isSaving={isSaving}
-          sessionId={sessionId ?? undefined}
-          taskId={taskId}
-          repositoryId={repositoryId}
-          worktreePath={worktreePath}
-          repo={repo}
-          enableComments={enableComments}
-          onChange={onChange}
-          onSave={onSave}
-          onReloadFromAgent={onReloadFromAgent}
-          onDelete={onDelete}
-        />
-      )}
+      <MarkdownEditSurface {...props} modeControl={modeControl} fileActions={fileActions} />
+      <MarkdownPreviewSurface {...props} modeControl={modeControl} fileActions={fileActions} />
+      <MarkdownSourceSurface {...props} modeControl={modeControl} fileActions={fileActions} />
     </div>
   );
 }
 
-type MarkdownModeToolbarProps = {
-  path: string;
+function MarkdownEditSurface({
+  mode,
+  keepHybridMounted,
+  path,
+  worktreePath,
+  modeControl,
+  fileActions,
+  sessionId,
+  taskId,
+  repositoryId,
+  repo,
+  content,
+  originalContent,
+  gutterMarkers,
+  comments,
+  onChange,
+  onOpenLink,
+  onComment,
+  onError,
+  onSourceFallback,
+}: MarkdownSurfaceProps) {
+  if (!keepHybridMounted) return null;
+  return (
+    <div
+      className={mode === "edit" ? "flex h-full min-h-0 flex-col overflow-hidden" : "hidden"}
+      aria-hidden={mode !== "edit"}
+      data-testid="markdown-hybrid-editor-host"
+    >
+      {mode === "edit" && (
+        <MarkdownEditToolbar
+          path={path}
+          worktreePath={worktreePath}
+          modeControl={modeControl}
+          fileActions={fileActions}
+          sessionId={sessionId}
+          taskId={taskId}
+          repositoryId={repositoryId}
+          repositoryName={repo}
+        />
+      )}
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <HybridMarkdownEditor
+          content={content}
+          baseline={originalContent}
+          readOnly={false}
+          gutterMarkers={gutterMarkers}
+          comments={comments}
+          onChange={onChange}
+          onOpenLink={onOpenLink}
+          onComment={onComment}
+          onError={onError}
+          onSourceFallback={onSourceFallback}
+        />
+      </div>
+    </div>
+  );
+}
+
+function MarkdownPreviewSurface({
+  mode,
+  keepPreviewMounted,
+  path,
+  content,
+  worktreePath,
+  sessionId,
+  taskId,
+  repositoryId,
+  repo,
+  enableComments,
+  onOpenFile,
+  onOpenLink,
+  modeControl,
+  fileActions,
+}: MarkdownSurfaceProps) {
+  if (!keepPreviewMounted) return null;
+  return (
+    <div
+      className={mode === "preview" ? "h-full min-h-0" : "hidden"}
+      aria-hidden={mode !== "preview"}
+      data-testid="markdown-preview-host"
+    >
+      <MarkdownPreviewContent
+        path={path}
+        content={content}
+        worktreePath={worktreePath}
+        sessionId={sessionId ?? undefined}
+        taskId={taskId}
+        repositoryId={repositoryId}
+        repositoryName={repo}
+        enableComments={enableComments}
+        onOpenFile={onOpenFile}
+        onOpenLink={onOpenLink}
+        toolbarModeControl={modeControl}
+        toolbarActions={fileActions}
+        showToolbar={mode === "preview"}
+      />
+    </div>
+  );
+}
+
+function MarkdownSourceSurface(props: MarkdownSurfaceProps) {
+  if (props.mode !== "source") return null;
+  return (
+    <FileEditorContent
+      path={props.path}
+      content={props.content}
+      originalContent={props.originalContent}
+      isDirty={props.isDirty}
+      hasRemoteUpdate={props.hasRemoteUpdate}
+      vcsDiff={props.vcsDiff}
+      isSaving={props.isSaving}
+      sessionId={props.sessionId ?? undefined}
+      taskId={props.taskId}
+      repositoryId={props.repositoryId}
+      worktreePath={props.worktreePath}
+      repo={props.repo}
+      enableComments={props.enableComments}
+      markdownPreview={false}
+      toolbarModeControl={props.modeControl}
+      onChange={props.onChange}
+      onSave={props.onSave}
+      onReloadFromAgent={props.onReloadFromAgent}
+      onDelete={props.onDelete}
+    />
+  );
+}
+
+type MarkdownModeControlProps = {
   mode: MarkdownFileMode;
   supportedModes: readonly MarkdownFileMode[];
   onModeChange: (mode: MarkdownFileMode) => void;
+};
+
+function MarkdownModeControl({ mode, supportedModes, onModeChange }: MarkdownModeControlProps) {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="flex shrink-0 items-center gap-0.5"
+      role="group"
+      aria-label={t("task:markdownModes")}
+    >
+      {supportedModes.map((candidate) => (
+        <Button
+          key={candidate}
+          type="button"
+          size="sm"
+          variant={candidate === mode ? "secondary" : "ghost"}
+          className="h-8 cursor-pointer px-2 text-xs"
+          data-testid={`markdown-mode-${candidate}`}
+          aria-pressed={candidate === mode}
+          onClick={() => onModeChange(candidate)}
+        >
+          {t(`task:markdownMode${capitalize(candidate)}`)}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+type MarkdownFileActionsProps = {
   isDirty: boolean;
   isSaving: boolean;
   hasRemoteUpdate: boolean;
   onSave: () => void;
   onReloadFromAgent?: () => void;
   onDelete?: () => void;
-  sessionId?: string | null;
-  taskId?: string | null;
-  repositoryId?: string | null;
-  repositoryName?: string;
 };
 
-function MarkdownModeToolbar({
-  path,
-  mode,
-  supportedModes,
-  onModeChange,
+function MarkdownFileActions({
   isDirty,
   isSaving,
   hasRemoteUpdate,
   onSave,
   onReloadFromAgent,
   onDelete,
-  sessionId,
-  taskId,
-  repositoryId,
-  repositoryName,
-}: MarkdownModeToolbarProps) {
+}: MarkdownFileActionsProps) {
   const { t } = useTranslation();
   return (
-    <div
-      className="flex min-h-11 shrink-0 items-center gap-2 border-b border-foreground/10 px-2"
-      data-testid="markdown-mode-toolbar"
-    >
-      <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
-        {path}
-      </span>
-      <div
-        className="flex shrink-0 items-center gap-1"
-        role="group"
-        aria-label={t("task:markdownModes")}
-      >
-        {supportedModes.map((candidate) => (
-          <Button
-            key={candidate}
-            type="button"
-            size="sm"
-            variant={candidate === mode ? "secondary" : "ghost"}
-            className="h-9 cursor-pointer px-2 text-xs"
-            data-testid={`markdown-mode-${candidate}`}
-            aria-pressed={candidate === mode}
-            onClick={() => onModeChange(candidate)}
-          >
-            {t(`task:markdownMode${capitalize(candidate)}`)}
-          </Button>
-        ))}
-      </div>
-      <FileViewerExternalLink
-        path={path}
-        sessionId={sessionId}
-        taskId={taskId}
-        repositoryId={repositoryId}
-        repositoryName={repositoryName}
-      />
+    <>
       {hasRemoteUpdate && onReloadFromAgent && (
         <Button
           type="button"
           variant="outline"
           size="sm"
-          className="h-9 cursor-pointer gap-1 px-2 text-xs"
+          className="h-8 cursor-pointer gap-1 px-2 text-xs"
           onClick={onReloadFromAgent}
           data-testid="markdown-file-reload"
         >
@@ -464,7 +504,7 @@ function MarkdownModeToolbar({
           type="button"
           variant="ghost"
           size="sm"
-          className="h-9 w-9 cursor-pointer p-0"
+          className="h-8 w-8 cursor-pointer p-0"
           onClick={onDelete}
           aria-label={t("task:delete")}
           data-testid="markdown-file-delete"
@@ -476,7 +516,7 @@ function MarkdownModeToolbar({
         type="button"
         variant="default"
         size="sm"
-        className="h-9 cursor-pointer gap-1 px-2 text-xs"
+        className="h-8 cursor-pointer gap-1 px-2 text-xs"
         disabled={!isDirty || isSaving}
         onClick={onSave}
         data-testid="markdown-file-save"
@@ -484,6 +524,52 @@ function MarkdownModeToolbar({
         <IconDeviceFloppy className="h-3.5 w-3.5" />
         {isSaving ? t("task:saving") : t("common:save")}
       </Button>
-    </div>
+    </>
+  );
+}
+
+type MarkdownEditToolbarProps = {
+  path: string;
+  worktreePath?: string;
+  modeControl: ReactNode;
+  fileActions: ReactNode;
+  sessionId?: string | null;
+  taskId?: string | null;
+  repositoryId?: string | null;
+  repositoryName?: string;
+};
+
+function MarkdownEditToolbar({
+  path,
+  worktreePath,
+  modeControl,
+  fileActions,
+  sessionId,
+  taskId,
+  repositoryId,
+  repositoryName,
+}: MarkdownEditToolbarProps) {
+  return (
+    <PanelHeaderBarSplit
+      className="markdown-file-toolbar"
+      left={
+        <ScrollOnOverflow className="min-w-0 font-mono text-xs text-muted-foreground">
+          {toRelativePath(path, worktreePath)}
+        </ScrollOnOverflow>
+      }
+      right={
+        <div className="flex items-center gap-1">
+          {modeControl}
+          <FileViewerExternalLink
+            path={path}
+            sessionId={sessionId}
+            taskId={taskId}
+            repositoryId={repositoryId}
+            repositoryName={repositoryName}
+          />
+          {fileActions}
+        </div>
+      }
+    />
   );
 }

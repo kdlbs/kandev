@@ -11,6 +11,8 @@ const MARKDOWN_CONTENT = `# Markdown lifecycle
 
 This paragraph stays in the canonical source.
 
+> The rendered editor should match Preview typography.
+
 \`\`\`ts
 const ready = true;
 \`\`\`
@@ -108,6 +110,70 @@ async function hybridPalette(testPage: Page) {
   });
 }
 
+async function presentationMetrics(testPage: Page, mode: "preview" | "edit") {
+  const root =
+    mode === "preview"
+      ? testPage.getByTestId("markdown-preview-scroll-container")
+      : testPage.locator(".md-editor.kandev-hybrid-markdown-editor");
+  return root.evaluate(
+    (element, selectors) => {
+      const query = (selector: string) => element.querySelector<HTMLElement>(selector);
+      const elementStyle = (selector: string) => {
+        const node = query(selector);
+        if (!node) throw new Error(`Missing Markdown element: ${selector}`);
+        return { node, computed: getComputedStyle(node) };
+      };
+      const heading = elementStyle(selectors.heading);
+      const blockquote = elementStyle(selectors.blockquote);
+      const code = elementStyle(selectors.code);
+      return {
+        heading: {
+          x: heading.node.getBoundingClientRect().x,
+          fontSize: heading.computed.fontSize,
+          fontWeight: heading.computed.fontWeight,
+          lineHeight: heading.computed.lineHeight,
+          marginTop: heading.computed.marginTop,
+          marginBottom: heading.computed.marginBottom,
+        },
+        blockquote: {
+          borderLeftWidth: blockquote.computed.borderLeftWidth,
+          paddingLeft: blockquote.computed.paddingLeft,
+          marginTop: blockquote.computed.marginTop,
+          marginBottom: blockquote.computed.marginBottom,
+          fontStyle: blockquote.computed.fontStyle,
+        },
+        code: {
+          fontSize: code.computed.fontSize,
+        },
+      };
+    },
+    {
+      heading: mode === "preview" ? "h1" : "h1.md-heading",
+      blockquote: mode === "preview" ? "blockquote" : "blockquote.md-blockquote",
+      code:
+        mode === "preview"
+          ? ":is(.monaco-editor, .cm-editor, .shiki-code-block, pre)"
+          : "pre.md-code-block code",
+    },
+  );
+}
+
+async function expectSingleCompactToolbar(testPage: Page) {
+  const editor = testPage.getByTestId("markdown-file-editor");
+  const editorBox = await editor.boundingBox();
+  const visibleSurface = editor.locator(
+    ":scope > .min-h-0.flex-1 :is(.monaco-editor:visible, [data-testid='markdown-preview-scroll-container']:visible, [data-testid='hybrid-markdown-editor']:visible)",
+  );
+  const surfaceBox = await visibleSurface.first().boundingBox();
+  const modeButton = editor.locator("[data-testid^='markdown-mode-']:visible").first();
+  const buttonBox = await modeButton.boundingBox();
+  expect(editorBox).not.toBeNull();
+  expect(surfaceBox).not.toBeNull();
+  expect(buttonBox).not.toBeNull();
+  expect(surfaceBox!.y - editorBox!.y).toBeLessThanOrEqual(40);
+  expect(buttonBox!.height).toBeLessThanOrEqual(32);
+}
+
 test.describe("Markdown file editing", () => {
   test.describe.configure({ retries: 1, timeout: 120_000 });
 
@@ -138,9 +204,16 @@ test.describe("Markdown file editing", () => {
       "true",
     );
     await expect(preview.locator("h1")).toHaveText("Markdown lifecycle");
+    await expectSingleCompactToolbar(testPage);
+    const previewMetrics = await presentationMetrics(testPage, "preview");
 
     await editor.getByTestId("markdown-mode-edit").click();
     await expect(testPage.getByTestId("hybrid-markdown-editor")).toBeVisible({ timeout: 15_000 });
+    await expectSingleCompactToolbar(testPage);
+    const editMetrics = await presentationMetrics(testPage, "edit");
+    expect(editMetrics.heading).toEqual(previewMetrics.heading);
+    expect(editMetrics.blockquote).toEqual(previewMetrics.blockquote);
+    expect(editMetrics.code).toEqual(previewMetrics.code);
     await appendToHybrid(testPage, marker);
 
     const lightPalette = await hybridPalette(testPage);
@@ -225,6 +298,7 @@ test.describe("Markdown file editing", () => {
     await expect(testPage.locator(".monaco-editor:visible").first()).toBeVisible({
       timeout: 15_000,
     });
+    await expectSingleCompactToolbar(testPage);
     await expect(testPage.getByTestId("hybrid-markdown-editor")).toHaveCount(0);
   });
 });
