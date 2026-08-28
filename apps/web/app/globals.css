@@ -710,10 +710,9 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
 /* Chat-input "running" affordance.
  *
  * The colored border is a static border-color (painted once). The pulsing glow
- * lives on a pseudo-element that animates only `opacity`, which the compositor
- * handles on the GPU without a per-frame main-thread paint. The glow is driven
- * from the OUTER `.relative` wrapper (`.chat-input-glow*`) because the inner
- * input box has `overflow-hidden`, which would clip a child's outer box-shadow. */
+ * lives on an absolute HTML target that animates only `opacity`. The target is
+ * a child of the OUTER `.relative` wrapper because the inner input box has
+ * `overflow-hidden`, which would clip its outer box-shadow. */
 .chat-input-running,
 .chat-input-running-plan {
   border-color: color-mix(in oklab, var(--primary) 55%, var(--border));
@@ -721,16 +720,6 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
 
 .chat-input-starting {
   border-color: color-mix(in oklab, var(--primary) 50%, var(--border));
-}
-
-/* The glow pseudo-element sits at `z-index: -1` so the input content paints on
- * top of it. `isolation: isolate` makes the wrapper its own stacking context so
- * that negative z-index stays local instead of dropping behind ancestor
- * backgrounds (which would hide the glow entirely). */
-.chat-input-glow-running,
-.chat-input-glow-starting {
-  position: relative;
-  isolation: isolate;
 }
 
 @keyframes chat-input-glow-pulse {
@@ -743,9 +732,8 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   }
 }
 
-.chat-input-glow-running::after,
-.chat-input-glow-starting::after {
-  content: "";
+.chat-input-glow-running,
+.chat-input-glow-starting {
   position: absolute;
   inset: 0;
   border-radius: 0.25rem;
@@ -754,13 +742,13 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   animation: chat-input-glow-pulse 3s ease-in-out infinite;
 }
 
-.chat-input-glow-running::after {
+.chat-input-glow-running {
   box-shadow:
     0 0 20px 4px color-mix(in oklab, var(--primary) 20%, transparent),
     0 0 50px 8px color-mix(in oklab, var(--primary) 10%, transparent);
 }
 
-.chat-input-glow-starting::after {
+.chat-input-glow-starting {
   box-shadow:
     0 0 12px 3px color-mix(in oklab, var(--primary) 15%, transparent),
     0 0 30px 6px color-mix(in oklab, var(--primary) 8%, transparent);
@@ -769,8 +757,8 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
 
 @media (prefers-reduced-motion: reduce) {
   .animate-changes-flash,
-  .chat-input-glow-running::after,
-  .chat-input-glow-starting::after,
+  .chat-input-glow-running,
+  .chat-input-glow-starting,
   .border-flash-animation::after,
   .node-border-running::after,
   .search-flash,

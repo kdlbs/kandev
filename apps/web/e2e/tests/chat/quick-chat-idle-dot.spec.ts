@@ -1,3 +1,4 @@
+import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { watchWs } from "../../helpers/causal-waits";
 import {
@@ -6,6 +7,25 @@ import {
   waitForSessionSettled,
   waitForSessionSettledBaseline,
 } from "./quick-chat-helpers";
+
+async function expectCompositorGridMotion(status: Locator) {
+  await expect(status.locator(".spinner-grid-cube")).toHaveCount(9);
+  await expect
+    .poll(() =>
+      status.locator(".spinner-grid-cube").evaluateAll((cubes) =>
+        cubes.every((cube) => {
+          const animations = cube.getAnimations();
+          return (
+            animations.length === 1 &&
+            animations[0].playState === "running" &&
+            animations[0].effect?.getTiming().iterations === Infinity &&
+            animations[0].constructor.name === "Animation"
+          );
+        }),
+      ),
+    )
+    .toBe(true);
+}
 
 test.describe("quick chat activity indicators", () => {
   test("shows tab and sidebar running state, then clears a finished state when opened", async ({
@@ -33,7 +53,9 @@ test.describe("quick chat activity indicators", () => {
     });
     const settled = waitForSessionSettled(ws, sessionId);
     await sendQuickChatMessage(dialog, testPage, "/slow 8s");
-    await expect(tab.getByRole("status")).toBeVisible();
+    const gridStatus = tab.getByRole("status");
+    await expect(gridStatus).toBeVisible();
+    await expectCompositorGridMotion(gridStatus);
 
     await testPage.keyboard.press("Escape");
     await expect(indicator).toHaveAttribute("data-state", "running");
@@ -74,7 +96,9 @@ test.describe("quick chat activity indicators", () => {
     });
     const settled = waitForSessionSettled(ws, sessionId);
     await sendQuickChatMessage(dialog, tabletTestPage, "/slow 8s");
-    await expect(tab.getByRole("status")).toBeVisible();
+    const gridStatus = tab.getByRole("status");
+    await expect(gridStatus).toBeVisible();
+    await expectCompositorGridMotion(gridStatus);
 
     await tabletTestPage.keyboard.press("Escape");
     await expect(indicator).toHaveAttribute("data-state", "running");

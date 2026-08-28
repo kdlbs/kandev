@@ -1,3 +1,4 @@
+import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { watchWs } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
@@ -7,6 +8,25 @@ import {
   waitForSessionSettled,
   waitForSessionSettledBaseline,
 } from "./quick-chat-helpers";
+
+async function expectCompositorGridMotion(status: Locator) {
+  await expect(status.locator(".spinner-grid-cube")).toHaveCount(9);
+  await expect
+    .poll(() =>
+      status.locator(".spinner-grid-cube").evaluateAll((cubes) =>
+        cubes.every((cube) => {
+          const animations = cube.getAnimations();
+          return (
+            animations.length === 1 &&
+            animations[0].playState === "running" &&
+            animations[0].effect?.getTiming().iterations === Infinity &&
+            animations[0].constructor.name === "Animation"
+          );
+        }),
+      ),
+    )
+    .toBe(true);
+}
 
 test.describe("quick chat activity indicators", () => {
   test("shows the mobile header running and finished states through touch", async ({
@@ -40,7 +60,12 @@ test.describe("quick chat activity indicators", () => {
     });
     const settled = waitForSessionSettled(ws, sessionId);
     await sendQuickChatMessage(dialog, testPage, "/slow 8s");
-    await expect(tab.getByRole("status")).toBeVisible();
+    const gridStatus = tab.getByRole("status");
+    await expect(gridStatus).toBeVisible();
+    await expectCompositorGridMotion(gridStatus);
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
 
     await dialog.getByTestId("quick-chat-close").tap();
     await expect(indicator).toHaveAttribute("data-state", "running");
