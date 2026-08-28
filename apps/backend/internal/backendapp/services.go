@@ -1384,7 +1384,13 @@ func (a pluginsTaskWriterAdapter) resolvePluginMoveWorkflowID(ctx context.Contex
 	task, err := a.svc.GetTask(ctx, in.TaskID)
 	if err != nil {
 		if errors.Is(err, repoerrors.ErrTaskNotFound) {
-			return "", status.Errorf(codes.NotFound, "task %q not found", in.TaskID)
+			// classifyPluginMoveError's fixed "task not found" message, not a
+			// %q-interpolated one: MoveTask returns this error directly to the
+			// plugin without routing it through that classifier (see the
+			// caller), so building the status here has to match its no-leaked-
+			// identifiers convention itself rather than relying on a wrapper
+			// that never runs for this branch.
+			return "", classifyPluginMoveError(err)
 		}
 		return "", err
 	}
