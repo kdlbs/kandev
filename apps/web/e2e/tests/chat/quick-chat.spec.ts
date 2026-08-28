@@ -145,15 +145,18 @@ test.describe("Quick Chat", () => {
     );
     if (!profileOwner) throw new Error("Seed agent profile owner was not found");
 
-    const profile = await apiClient.createAgentProfile(profileOwner.id, "Quick Chat Escape TUI", {
-      model: "mock-fast",
-      cli_passthrough: true,
-    });
-    await apiClient.updateWorkspace(seedData.workspaceId, {
-      default_agent_profile_id: profile.id,
-    });
+    let profileId: string | null = null;
 
     try {
+      const profile = await apiClient.createAgentProfile(profileOwner.id, "Quick Chat Escape TUI", {
+        model: "mock-fast",
+        cli_passthrough: true,
+      });
+      profileId = profile.id;
+      await apiClient.updateWorkspace(seedData.workspaceId, {
+        default_agent_profile_id: profile.id,
+      });
+
       const dialog = await openQuickChatSetup(testPage);
       await dialog.getByTestId("quick-chat-start").click();
 
@@ -180,10 +183,13 @@ test.describe("Quick Chat", () => {
       await testPage.keyboard.press(quickChatShortcut);
       await expect(dialog).not.toBeVisible();
     } finally {
-      await apiClient.updateWorkspace(seedData.workspaceId, {
-        default_agent_profile_id: seedData.agentProfileId,
-      });
-      await apiClient.cleanupTestProfiles([profile.id]);
+      try {
+        await apiClient.updateWorkspace(seedData.workspaceId, {
+          default_agent_profile_id: seedData.agentProfileId,
+        });
+      } finally {
+        if (profileId) await apiClient.cleanupTestProfiles([profileId]);
+      }
     }
   });
 

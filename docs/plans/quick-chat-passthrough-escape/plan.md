@@ -23,7 +23,8 @@ path.
 
 - Toggle the shared Quick Chat dialog from the existing configurable `QUICK_CHAT` action.
 - Keep other Quick Chat launchers open/select-only.
-- Prevent Radix dismissal only while xterm's helper textarea owns unmodified Escape.
+- Prevent Radix dismissal only while a connected xterm terminal with an installed AttachAddon and
+  open WebSocket owns unmodified Escape.
 - Preserve xterm's normal Escape-byte delivery to the agent terminal WebSocket.
 - Preserve nested Quick Chat escape guards and the existing mobile close action.
 
@@ -39,8 +40,9 @@ path.
 ### Configurable dialog toggle
 
 Extend `useQuickChatLauncher` with an explicit toggle option. When enabled and the live shared
-dialog state is open, call `closeQuickChat`; otherwise retain the current kind-scoped session/setup
-selection. Enable this option only for the ordinary Quick Chat action registered by
+dialog state is open, request the registered modal close handler and fall back to `closeQuickChat`
+when no handler exists; otherwise retain the current kind-scoped session/setup selection. Enable
+this option only for the ordinary Quick Chat action registered by
 `GlobalCommands`, which already resolves the user's `QUICK_CHAT` override.
 Register that binding in capture phase with propagation stopped after a match so it wins before
 xterm and remains an application command rather than terminal input.
@@ -48,7 +50,8 @@ xterm and remains an application command rather than terminal input.
 ### Focus-scoped terminal Escape
 
 Add a stable Escape predicate to `PassthroughTerminal` and register it through
-`useClarificationEscapeGuard`. Match only unmodified Escape directed at xterm's helper textarea.
+`useClarificationEscapeGuard`. Arm it only while the terminal is connected, its AttachAddon is
+installed, and its WebSocket is open; then match only unmodified Escape directed at xterm's helper textarea.
 The dialog prevents its own dismissal while allowing the same keyboard event to continue to xterm
 and `AttachAddon`.
 
@@ -64,6 +67,9 @@ mobile composition or touch target changes are required.
 
 - `apps/web/hooks/use-quick-chat-launcher.test.ts`: cover opt-in close behavior, retained default
   open behavior, and session preservation through the existing close action.
+- `apps/web/components/quick-chat/quick-chat-focus.test.ts` and
+  `apps/web/components/quick-chat/use-quick-chat-modal.test.ts`: cover the registered close
+  lifecycle and cancellation of a deferred agent start.
 - `apps/web/components/global-commands.test.tsx`: prove the configurable ordinary Quick Chat action
   opts into toggle behavior while Configuration Chat does not, and that the keyboard listener has
   capture-phase precedence over xterm.
@@ -87,7 +93,8 @@ mobile composition or touch target changes are required.
 
 ## Verification results
 
-- Focused Vitest suites: 4 files and 41 tests passed.
+- Focused Vitest suites: 6 files and 71 tests passed, including the registered close lifecycle and
+  deferred-start cancellation regression.
 - Desktop Chromium E2E: passthrough Escape delivery and Quick Chat shortcut dismissal passed.
 - Mobile Chrome E2E: Home-header launch and explicit touch dismissal passed.
 - Targeted ESLint, specification lint, and `git diff --check` passed.

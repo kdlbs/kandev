@@ -229,19 +229,23 @@ does not change pointer dismissal, Configuration Chat focus ownership, or unrela
 ## Launcher toggle and terminal Escape routing
 
 The configurable `QUICK_CHAT` binding uses a toggle-capable ordinary-chat launcher. The launcher
-reads the live `quickChat.isOpen` state: it calls `closeQuickChat` when the shared dialog is open and
-otherwise follows the existing workspace- and kind-scoped `openQuickChat` selection flow. Only the
-global keyboard/command action enables toggle behavior. Pointer and touch launchers continue to
-open or select their matching content, and the existing shortcut override remains the single
-settings and persistence contract. The global binding listens in capture phase and stops a matched
-toggle chord before focus-trapped controls such as xterm can consume it as terminal input.
+reads the live `quickChat.isOpen` state: it requests the mounted modal's close lifecycle, falling
+back to `closeQuickChat` when no modal handler is registered, and otherwise follows the existing
+workspace- and kind-scoped `openQuickChat` selection flow. Only the global keyboard/command action
+enables toggle behavior for ordinary Quick Chat. The Settings Configuration Chat floating launcher
+is an explicit pointer/touch exception: it also closes its controlled panel on reactivation. Other
+pointer and touch launchers continue to open or select their matching content, and the existing
+shortcut override remains the single settings and persistence contract. The global binding listens
+in capture phase and stops a matched toggle chord before focus-trapped controls such as xterm can
+consume it as terminal input.
 
 `PassthroughTerminal` registers a memoized predicate with the existing
-`ClarificationEscapeGuardProvider`. The predicate claims only an unmodified `Escape` whose event
-target, or current focus fallback, is xterm's helper textarea. Radix consults the predicate from its
-document capture listener. A match calls `preventDefault()` to stop dialog dismissal but does not
-stop propagation, so xterm's normal keyboard handler emits the Escape byte and `AttachAddon`
-forwards it on the dedicated terminal WebSocket.
+`ClarificationEscapeGuardProvider`. The predicate is armed only while the terminal is connected,
+its `AttachAddon` is installed, and its dedicated WebSocket is open; then it claims only an
+unmodified `Escape` whose event target, or current focus fallback, is xterm's helper textarea.
+Radix consults the predicate from its document capture listener. A match calls `preventDefault()` to
+stop dialog dismissal but does not stop propagation, so xterm's normal keyboard handler emits the
+Escape byte and `AttachAddon` forwards it on the dedicated terminal WebSocket.
 
 The guard hook remains a no-op outside a provider. Bottom-panel and mobile terminal embeddings
 therefore keep their current behavior, and focus on a Quick Chat tab, composer, setup control, or

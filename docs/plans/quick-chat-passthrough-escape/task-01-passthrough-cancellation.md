@@ -27,7 +27,8 @@ the dialog stays open, and that the configured action remains a reliable close p
 
 - Add and test the toggle option on `useQuickChatLauncher`.
 - Enable the option for the global ordinary Quick Chat action only.
-- Register a focus-scoped, unmodified Escape predicate from `PassthroughTerminal`.
+- Register a focus-scoped, unmodified Escape predicate from `PassthroughTerminal` only while its
+  AttachAddon and terminal WebSocket are connected.
 - Add desktop browser evidence for terminal delivery, dialog retention, and shortcut dismissal.
 - Re-run the existing mobile touch-close scenario.
 
@@ -42,8 +43,9 @@ the dialog stays open, and that the configured action remains a reliable close p
 
 - The configured Quick Chat action closes an open shared dialog and keeps its sessions intact; all
   non-toggle launchers retain their current selection behavior.
-- Unmodified Escape from xterm's helper textarea is forwarded on the agent terminal WebSocket and
-  does not close Quick Chat; other focus targets retain existing escape behavior.
+- Unmodified Escape from a connected xterm helper textarea is forwarded on the agent terminal
+  WebSocket and does not close Quick Chat; disconnected terminals and other focus targets retain
+  existing escape behavior.
 - Existing nested-widget and mobile touch-dismissal paths remain green.
 
 ## Verification
@@ -90,10 +92,12 @@ None.
 ## Results
 
 - Added opt-in toggle semantics to the shared Quick Chat launcher and enabled them only for the
-  configurable global Quick Chat command. The capture-phase command closes an open dialog before
-  xterm can consume the configured chord.
-- Registered a focused, unmodified-Escape guard from `PassthroughTerminal`. Radix keeps the dialog
-  open while xterm forwards the same key as `\x1b` through `AttachAddon`.
+  configurable global Quick Chat command. The launcher requests the mounted modal close lifecycle,
+  falling back to the store action only when no handler is registered. The capture-phase command
+  closes an open dialog before xterm can consume the configured chord.
+- Registered a focused, unmodified-Escape guard from `PassthroughTerminal` only while its
+  AttachAddon is installed on an open WebSocket. Radix keeps the dialog open while xterm forwards
+  the same key as `\x1b` through `AttachAddon`.
 - Extended the E2E WebSocket observer to capture AttachAddon's raw text frames in addition to the
   existing JSON gateway and binary terminal frames.
 - RED evidence: the focused unit tests initially failed on the missing toggle, shortcut options,

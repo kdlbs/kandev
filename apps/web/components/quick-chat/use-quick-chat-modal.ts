@@ -400,10 +400,11 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
     tabOrder: tabOrder.order,
     setSetupKey,
   });
-  useEffect(
-    () => registerQuickChatCloseHandler(tabActions.handleOpenChange),
+  const closeFromLauncher = useCallback(
+    () => tabActions.handleOpenChange(false),
     [tabActions.handleOpenChange],
   );
+  useEffect(() => registerQuickChatCloseHandler(closeFromLauncher), [closeFromLauncher]);
 
   const handleSelectAgent = useCallback(
     (agentId: string, repositories: QuickChatRepositoryInput[] = []) =>
