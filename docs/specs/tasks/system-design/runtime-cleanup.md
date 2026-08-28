@@ -135,6 +135,35 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
   worktree by updating any soft-deleted row with the same environment,
   repository, and branch identity.
 
+## Archive cleanup disposition
+
+The cleanup job trigger defines the resource disposition. Direct archive and
+cascade archive use the same disposition. A caller-specific Boolean must not
+change that disposition.
+
+Archive cleanup performs these actions:
+
+- Stop the task runtimes and remove executor-specific runtime resources.
+- Remove the physical worktree directory and mark its repository row deleted.
+- Preserve the owning `task_environments` row.
+- Preserve every `task_environment_repos` row, including its worktree ID,
+  path, branch, and branch slug.
+- Preserve the local Git branch ref. This keeps committed work recoverable when
+  a hosting provider deletes the remote branch after merge.
+
+The worktree can appear in both the environment snapshot and the batch
+worktree snapshot. Both cleanup passes must use the archive disposition. A
+later pass must not delete a branch that an earlier pass preserved.
+
+Unarchive does not invent a new workspace owner. It keeps the preserved
+environment link. When the repository row is not live, resume enters normal
+preparation and reactivates that row. The recreated worktree uses the preserved
+local branch first, then the existing remote or pull-request recovery paths.
+
+Delete behavior remains separate. A delete trigger can remove durable owner
+rows after it captures the cleanup snapshot. This archive rule does not weaken
+delete cleanup.
+
 ## Data Model
 
 ### `executors_running`
@@ -278,9 +307,8 @@ The durable cleanup job wraps that resource lifecycle:
 - If a runtime row points at a missing in-memory execution, cleanup attempts the
   runtime-specific persisted handle when available. If no handle can be used, the
   row is preserved with a warning instead of being silently dropped.
-- If dead-row repair returns `models.ErrExecutionRotated`, a newer execution
-  identity won the compare-and-set. Reconciliation preserves that row and does
-  not emit a warning. Other repair errors remain warnings.
+- `models.ErrExecutionRotated` means a newer execution won. Keep it;
+  warn on other errors.
 - If a stop operation reports the execution or session is not found and the owned
   row is a confirmed-dead local runtime, cleanup records the stop as successful,
   prunes or repairs the row under the resume-safety invariant, proceeds with any
@@ -370,6 +398,8 @@ The durable cleanup job wraps that resource lifecycle:
   not classified as orphaned.
 - Historical worktree rows for archived tasks remain available to unarchive branch
   recovery even after their on-disk directories are removed.
+- Archive cleanup preserves the task environment owner and the local branch ref.
+  Cleanup retries and duplicate teardown passes keep the same disposition.
 - Orphaned OS processes without any durable `executors_running` row are outside
   normal cleanup guarantees; they may be handled by an explicit operator recovery
   tool, but automatic task cleanup must not rely on process-name scanning.
@@ -448,9 +478,8 @@ The durable cleanup job wraps that resource lifecycle:
   a not-found stop is reclassified as successful, **THEN** the row is repaired in
   place (token and worktree preserved) rather than deleted, per
   `RowMustBePreserved`.
-- **GIVEN** dead-row repair races a newer execution identity, **WHEN** the
-  compare-and-set returns `models.ErrExecutionRotated`, **THEN** reconciliation
-  preserves the newer row and emits no warning.
+- **WHEN** compare-and-set returns `models.ErrExecutionRotated`, **THEN** keep
+  the newer row silently.
 - **GIVEN** agentctl is stopped while an ACP child process ignores stdin EOF,
   **WHEN** the stop timeout expires, **THEN** the ACP process group is killed and
   no ACP child is reparented to PID 1.
@@ -496,6 +525,9 @@ The durable cleanup job wraps that resource lifecycle:
 - **GIVEN** archive cleanup removed a local worktree, **WHEN** the task is
   unarchived, **THEN** its historical worktree branch metadata remains available
   for local/remote recovery.
+- **GIVEN** a direct or cascade archive removes a task worktree, **WHEN** the
+  remote branch is also absent, **THEN** the task environment, repository row,
+  and local branch ref remain available for normal resume preparation.
 - **GIVEN** an unarchived task environment whose worktree repository row is
   deleted, failed, or tombstoned, **WHEN** its session resumes, **THEN** the
   executor selects normal worktree preparation and recreates or reactivates the
@@ -518,3 +550,4 @@ The durable cleanup job wraps that resource lifecycle:
 
 - [Backend failure containment](../../../plans/backend-failure-containment/plan.md)
 - [Worktree resume after unarchive](../../../plans/worktree-resume-after-unarchive/plan.md)
+- [Archive resume identity](../../../plans/archive-resume-identity/plan.md)

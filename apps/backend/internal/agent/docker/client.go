@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -419,6 +420,13 @@ func (c *Client) RemoveContainer(ctx context.Context, containerID string, force 
 		if errdefs.IsNotFound(err) {
 			// Remove is a convergence operation. Another cleanup owner may have
 			// removed the container already, which is the desired end state.
+			return nil
+		}
+		if errdefs.IsConflict(err) && strings.Contains(strings.ToLower(err.Error()), "already in progress") {
+			// Docker rejects a concurrent ContainerRemove with a conflict while
+			// the first removal is still completing. The other owner has already
+			// taken responsibility for this container's teardown, so treat this
+			// response as the same converged end state as a not-found response.
 			return nil
 		}
 		c.logger.Error("Failed to remove container", zap.String("container_id", containerID), zap.Error(err))

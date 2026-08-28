@@ -166,3 +166,29 @@ func TestContainerTeardownTreatsMissingContainersAsSuccess(t *testing.T) {
 	require.NoError(t, client.KillContainer(context.Background(), "missing-container", "SIGKILL"))
 	require.NoError(t, client.RemoveContainer(context.Background(), "missing-container", true))
 }
+
+func TestRemoveContainerTreatsConcurrentRemovalAsSuccess(t *testing.T) {
+	dockerDaemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead && r.URL.Path == "/_ping" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"message":"removal of container abc is already in progress"}`))
+	}))
+	t.Cleanup(dockerDaemon.Close)
+
+	log, err := logger.NewFromZap(zap.NewNop())
+	require.NoError(t, err)
+	client, err := NewClient(config.DockerConfig{
+		Host:       "tcp://" + strings.TrimPrefix(dockerDaemon.URL, "http://"),
+		APIVersion: "1.44",
+	}, log)
+	require.NoError(t, err)
+
+	// Docker reports a conflict when another owner is already removing the
+	// same container. Removal is a convergence operation, so the in-flight
+	// owner has already taken responsibility for reaching the desired state.
+	require.NoError(t, client.RemoveContainer(context.Background(), "abc", true))
+}

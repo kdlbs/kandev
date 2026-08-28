@@ -17,7 +17,8 @@ Translate a plan foreign-key rejection to the shared missing-task sentinel.
 - Use `internal/db.IsForeignKeyViolation` at the plan-head write boundary.
 - Return `repoerrors.ErrTaskNotFound` with wrapped operation context.
 - Preserve transaction rollback for the plan head and revision.
-- Record the expected service rejection at debug level.
+- Record the expected service rejection at debug level for both the upsert and
+  revert write paths.
 - Add SQLite coverage and environment-gated PostgreSQL parity coverage.
 
 ## Exclusions
@@ -37,14 +38,15 @@ Translate a plan foreign-key rejection to the shared missing-task sentinel.
 - A plan write for a missing task returns an error that matches
   `repoerrors.ErrTaskNotFound` on SQLite and PostgreSQL.
 - The rejected transaction creates no plan head or revision.
-- The plan service emits a debug entry for that sentinel. Other write errors
-  retain their error-level entry.
+- The plan service emits a debug entry for that sentinel from both
+  `upsertPlan` and `RevertPlan`. Other write errors retain
+  their error-level entry. Existing create/update coverage remains intact.
 
 ## Verification
 
 ```bash
 cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestWritePlanRevisionMissingTask|TestPostgresWritePlanRevisionMissingTask' -count=1
-cd apps/backend && go test ./internal/task/service -run TestPlanServiceMissingTaskWriteLogSeverity -count=1
+cd apps/backend && go test ./internal/task/service -run 'TestPlanService(MissingTaskWriteLogSeverity|OtherWriteErrorLogSeverity|RevertMissingTaskWriteLogSeverity|RevertOtherWriteErrorLogSeverity)' -count=1
 ```
 
 The repository test must fail before the production change because the current
@@ -70,8 +72,10 @@ None.
 Implemented dialect-aware foreign-key classification at the plan-head write
 boundary. Missing-task writes now return `repoerrors.ErrTaskNotFound`, roll
 back both plan tables, and log at debug in `PlanService`; unrelated write
-errors retain error-level logging. Added SQLite, environment-gated PostgreSQL,
-and service severity coverage.
+errors retain error-level logging. Both `upsertPlan` and `RevertPlan` use
+the same classifier, with observer-backed coverage for the missing-task and
+unrelated-error paths. Added SQLite, environment-gated PostgreSQL, and service
+severity coverage without removing create/update coverage.
 
 Verification:
 
@@ -79,6 +83,6 @@ Verification:
 cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestWritePlanRevisionMissingTask|TestPostgresWritePlanRevisionMissingTask' -count=1
 Go test: 1 passed in 1 packages
 
-cd apps/backend && go test ./internal/task/service -run TestPlanServiceMissingTaskWriteLogSeverity -count=1
-Go test: 1 passed in 1 packages
+cd apps/backend && go test ./internal/task/service -run 'TestPlanService(MissingTaskWriteLogSeverity|OtherWriteErrorLogSeverity|RevertMissingTaskWriteLogSeverity|RevertOtherWriteErrorLogSeverity)' -count=1
+Go test: 4 passed in 1 packages
 ```

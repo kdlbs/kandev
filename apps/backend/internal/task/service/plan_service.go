@@ -238,12 +238,7 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest) (*m
 	}
 
 	if err := s.repo.WritePlanRevision(ctx, plan, rev, coalesceID); err != nil {
-		fields := []zap.Field{zap.String("task_id", req.TaskID), zap.Error(err)}
-		if errors.Is(err, repository.ErrTaskNotFound) {
-			s.logger.Debug("write plan revision", fields...)
-		} else {
-			s.logger.Error("write plan revision", fields...)
-		}
+		s.logPlanWriteError(req.TaskID, err)
 		return nil, err
 	}
 
@@ -502,6 +497,7 @@ func (s *PlanService) RevertPlan(ctx context.Context, req RevertPlanRequest) (*m
 		RevertOfRevisionID: &targetID,
 	}
 	if err := s.repo.WritePlanRevision(ctx, plan, rev, nil); err != nil {
+		s.logPlanWriteError(req.TaskID, err)
 		return nil, err
 	}
 
@@ -516,6 +512,15 @@ func (s *PlanService) RevertPlan(ctx context.Context, req RevertPlanRequest) (*m
 	s.publishRevisionEvent(ctx, rev, false)
 	s.publishReverted(ctx, rev)
 	return rev, nil
+}
+
+func (s *PlanService) logPlanWriteError(taskID string, err error) {
+	fields := []zap.Field{zap.String("task_id", taskID), zap.Error(err)}
+	if errors.Is(err, repository.ErrTaskNotFound) {
+		s.logger.Debug("write plan revision", fields...)
+		return
+	}
+	s.logger.Error("write plan revision", fields...)
 }
 
 func (s *PlanService) publishPlanEvent(ctx context.Context, eventType string, plan *models.TaskPlan) {

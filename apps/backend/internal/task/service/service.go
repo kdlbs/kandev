@@ -60,6 +60,13 @@ type WorktreeBatchCleaner interface {
 	CleanupWorktrees(ctx context.Context, worktrees []*worktree.Worktree) error
 }
 
+// WorktreeArchiveBatchCleaner removes archived task worktrees without deleting
+// the local branches required for later recovery.
+type WorktreeArchiveBatchCleaner interface {
+	WorktreeBatchCleaner
+	CleanupWorktreesPreservingBranches(ctx context.Context, worktrees []*worktree.Worktree) error
+}
+
 type worktreeReferenceGuard interface {
 	CountActiveWorktreeReferences(ctx context.Context, worktreeID string, excludeSessionIDs []string) (int, error)
 	ReleaseWorktreeReference(ctx context.Context, wt *worktree.Worktree) error

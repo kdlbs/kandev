@@ -85,8 +85,9 @@ type taskStopTarget struct {
 }
 
 type taskEnvironmentCleanup struct {
-	env       *models.TaskEnvironment
-	deleteRow bool
+	env              *models.TaskEnvironment
+	deleteRow        bool
+	preserveBranches bool
 }
 
 type taskEnvironmentSessionUsageChecker interface {
@@ -2041,7 +2042,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("lookup task environment for archive: %w", err)
 	}
-	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: true}
+	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: false, preserveBranches: true}
 	cleanupJob, err := s.persistTaskResourceCleanup(
 		ctx, id, models.TaskResourceCleanupTriggerArchive, "",
 		sessions, worktrees, stopTargets, envCleanup, true,
@@ -2367,6 +2368,9 @@ func (s *Service) deleteTaskStopTargets(ctx context.Context, id string) ([]taskS
 // for delete cascade, false for archive — archive preserves the row). Runtime
 // inventory failures abort cleanup so durable stop handles remain retryable.
 func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, deleteEnvRow bool) {
+	// Capture the lifecycle disposition before borrower ownership transfer can
+	// change whether the environment row itself is deleted.
+	preserveBranches := !deleteEnvRow
 	taskDeleted := deleteEnvRow
 	if deleteEnvRow && s.attachmentSvc != nil {
 		if err := s.attachmentSvc.DeleteByTask(context.WithoutCancel(ctx), taskID); err != nil {
@@ -2419,7 +2423,9 @@ func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, delet
 				zap.String("new_owner_task_id", taskEnv.TaskID))
 		}
 	}
-	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: deleteEnvRow}
+	envCleanup := taskEnvironmentCleanup{
+		env: taskEnv, deleteRow: deleteEnvRow, preserveBranches: preserveBranches,
+	}
 	if len(sessions) == 0 && len(worktrees) == 0 && len(stopTargets) == 0 && taskEnv == nil {
 		return
 	}
@@ -3131,18 +3137,24 @@ func (s *Service) cleanupDestructiveTaskResources(
 		}
 		return errs
 	}
-	cleaner, ok := s.worktreeCleanup.(WorktreeBatchCleaner)
-	if !ok {
-		return errs
-	}
 	if cause := context.Cause(ctx); cause != nil {
 		return append(errs, cause)
 	}
-	if err := cleaner.CleanupWorktrees(ctx, worktrees); err != nil {
-		s.logger.Warn("failed to cleanup worktrees after delete",
+	var cleanupErr error
+	if envCleanup.preserveBranches {
+		cleaner, ok := s.worktreeCleanup.(WorktreeArchiveBatchCleaner)
+		if !ok {
+			return append(errs, errors.New("worktree cleaner cannot preserve branches during archive cleanup"))
+		}
+		cleanupErr = cleaner.CleanupWorktreesPreservingBranches(ctx, worktrees)
+	} else if cleaner, ok := s.worktreeCleanup.(WorktreeBatchCleaner); ok {
+		cleanupErr = cleaner.CleanupWorktrees(ctx, worktrees)
+	}
+	if cleanupErr != nil {
+		s.logger.Warn("failed to cleanup task worktrees",
 			zap.String("task_id", taskID),
-			zap.Error(err))
-		errs = append(errs, fmt.Errorf("cleanup worktrees: %w", err))
+			zap.Error(cleanupErr))
+		errs = append(errs, fmt.Errorf("cleanup worktrees: %w", cleanupErr))
 	}
 	return errs
 }
