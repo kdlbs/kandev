@@ -335,11 +335,11 @@ AC-005.1 needs no shared-path change at all and leaves AC-001.8 a truthful
 `FailedPrecondition` here is not a bare failure — it is the signal that this
 task already has a live session, which for a redelivery is precisely the
 information the caller wanted: the first delivery landed and the agent is
-running, so do not retry. It is distinguishable from every other rejection by
-code plus a re-read of the task's step: same step and a live session means the
-move already happened. The cost is that a plugin cannot treat move-and-forget as
-unconditionally idempotent; it must handle this code. That cost is stated here
-and in AC-005.1 rather than discovered at build time.
+running, so do not retry. A re-read to "same step, live session" cannot prove
+this move caused it — a pre-existing session looks identical, so certainty
+needs the plugin's own delivery state. The cost is that a plugin cannot treat
+move-and-forget as unconditionally idempotent; it must handle this code. That
+cost is stated here and in AC-005.1 rather than discovered at build time.
 
 The narrower promise still holds where it matters: a redelivery arriving after
 the agent finished, or against a step with no `auto_start_agent`, finds no live
