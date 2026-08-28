@@ -420,5 +420,7 @@ function disposeEditorParts(parts: Partial<EditorLifecycle>): void {
   parts.commentsView?.dispose();
   parts.controller?.dispose();
   parts.view?.dispose();
+  // The pinned package exposes EditorModel.dispose() at runtime, but its public
+  // declaration does not include the lifecycle method.
   (parts.model as unknown as { dispose?: () => void } | undefined)?.dispose?.();
 }

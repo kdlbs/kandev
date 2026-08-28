@@ -30,6 +30,10 @@ export function isMarkdownFileModeSupported(path: string, mode: MarkdownFileMode
   return !path.toLowerCase().endsWith(".mdx") || mode !== "edit";
 }
 
+export function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
 function isMarkdownFileMode(value: string): value is MarkdownFileMode {
   return value === "preview" || value === "edit" || value === "source";
 }

@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- these tests cover the complete mobile session composition. */
+
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, renderHook, act, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
@@ -59,7 +61,10 @@ vi.mock("../review-item-selector", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({ tasks: { activeTaskId: "task-1", activeSessionId: "session-1" } }),
+    selector({
+      tasks: { activeTaskId: "task-1", activeSessionId: "session-1" },
+      connection: { status: "connected" },
+    }),
 }));
 
 vi.mock("../review-detail-panel", async () => {
@@ -219,6 +224,70 @@ describe("useMobilePanelHandlers", () => {
       content: "# changed",
       isDirty: true,
       markdownMode: "edit",
+    });
+  });
+
+  it("keeps newer mobile edits when an older save completes", () => {
+    const { result } = renderHandlers();
+    act(() =>
+      result.current.handleOpenFile({
+        ...MOCK_FILE,
+        path: "README.md",
+        name: "README.md",
+        content: "# base",
+        originalContent: "# base",
+      }),
+    );
+
+    act(() => result.current.handleSelectedFileChange("# first"));
+    act(() =>
+      result.current.handleSelectedFileSaved({
+        path: "README.md",
+        sessionId: "s1",
+        content: "# first",
+        originalContent: "# first",
+        originalHash: "first-hash",
+      }),
+    );
+    act(() => result.current.handleSelectedFileChange("# second"));
+    act(() =>
+      result.current.handleSelectedFileSaved({
+        path: "README.md",
+        sessionId: "s1",
+        content: "# first",
+        originalContent: "# first",
+        originalHash: "first-hash",
+      }),
+    );
+
+    expect(result.current.selectedFile).toMatchObject({
+      content: "# second",
+      originalContent: "# first",
+      originalHash: "first-hash",
+      isDirty: true,
+    });
+  });
+
+  it("ignores a completed mobile save for another selected file", () => {
+    const { result } = renderHandlers();
+    act(() =>
+      result.current.handleOpenFile({ ...MOCK_FILE, path: "README.md", name: "README.md" }),
+    );
+    act(() =>
+      result.current.handleSelectedFileSaved({
+        path: "other.md",
+        sessionId: "s1",
+        content: "# other",
+        originalContent: "# other",
+        originalHash: "other-hash",
+      }),
+    );
+
+    expect(result.current.selectedFile).toEqual({
+      ...MOCK_FILE,
+      path: "README.md",
+      name: "README.md",
+      markdownMode: "source",
     });
   });
 

@@ -1,10 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 
 const getWebSocketClientMock = vi.hoisted(() => vi.fn(() => ({})));
 const updateFileContentMock = vi.hoisted(() => vi.fn());
 const MOBILE_EDIT_CONTENT = "# mobile edit";
+const MOBILE_NEWER_EDIT_CONTENT = "# newer mobile edit";
 const MOBILE_MARKDOWN_PATH = "README.md";
 const MOBILE_MARKDOWN_CONTENT = "# README";
 const TRUE_VALUE = true;
@@ -91,6 +92,9 @@ vi.mock("../file-viewer-content", () => ({
       <button type="button" onClick={() => onChange?.(MOBILE_EDIT_CONTENT)}>
         Change mobile source
       </button>
+      <button type="button" onClick={() => onChange?.(MOBILE_NEWER_EDIT_CONTENT)}>
+        Change mobile source again
+      </button>
     </div>
   ),
 }));
@@ -142,7 +146,17 @@ vi.mock("../file-binary-viewer", () => ({
 
 import { MobileFileViewerPanel } from "./mobile-file-viewer-panel";
 
+const MOBILE_SAVE_TEST_ID = "mobile-file-save";
+const MOBILE_PREVIEW_TEST_ID = "markdown-preview";
+const SAVED_HASH = "saved-hash";
+
 afterEach(cleanup);
+
+beforeEach(() => {
+  getWebSocketClientMock.mockReset();
+  getWebSocketClientMock.mockReturnValue({});
+  updateFileContentMock.mockReset();
+});
 
 describe("MobileFileViewerPanel workspace path", () => {
   it("uses the effective workspace path for binary file viewers", () => {
@@ -216,14 +230,17 @@ describe("MobileFileViewerPanel Markdown editing", () => {
     expect(screen.getByTestId("mobile-hybrid-editor")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Change mobile hybrid" }));
     expect(onFileChange).toHaveBeenCalledWith("# hybrid mobile edit");
-    expect((screen.getByTestId("mobile-file-save") as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId(MOBILE_SAVE_TEST_ID) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByTestId("mobile-markdown-mode-preview"));
+    expect(screen.getByTestId("mobile-markdown-hybrid-editor-host").className).toBe("hidden");
+    expect(screen.getByTestId(MOBILE_PREVIEW_TEST_ID)).toBeTruthy();
   });
 
   it("saves the canonical mobile buffer and clears the dirty state", async () => {
     updateFileContentMock.mockResolvedValue({
       path: MOBILE_MARKDOWN_PATH,
       success: TRUE_VALUE,
-      new_hash: "saved-hash",
+      new_hash: SAVED_HASH,
     });
     const onFileSaved = vi.fn();
     render(
@@ -244,7 +261,7 @@ describe("MobileFileViewerPanel Markdown editing", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Change mobile source" }));
-    fireEvent.click(screen.getByTestId("mobile-file-save"));
+    fireEvent.click(screen.getByTestId(MOBILE_SAVE_TEST_ID));
 
     await waitFor(() =>
       expect(updateFileContentMock).toHaveBeenCalledWith(
@@ -258,15 +275,120 @@ describe("MobileFileViewerPanel Markdown editing", () => {
       ),
     );
     await waitFor(() =>
-      expect((screen.getByTestId("mobile-file-save") as HTMLButtonElement).disabled).toBe(
+      expect((screen.getByTestId(MOBILE_SAVE_TEST_ID) as HTMLButtonElement).disabled).toBe(
         TRUE_VALUE,
       ),
     );
     expect(onFileSaved).toHaveBeenCalledWith({
+      path: MOBILE_MARKDOWN_PATH,
+      repo: undefined,
+      sessionId: "session-1",
       content: MOBILE_EDIT_CONTENT,
       originalContent: MOBILE_EDIT_CONTENT,
-      originalHash: "saved-hash",
+      originalHash: SAVED_HASH,
     });
+  });
+
+  it("preserves edits made after a mobile save starts", async () => {
+    let resolveSave!: (value: { path: string; success: boolean; new_hash: string }) => void;
+    updateFileContentMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    render(
+      <MobileFileViewerPanel
+        file={{
+          path: MOBILE_MARKDOWN_PATH,
+          name: MOBILE_MARKDOWN_PATH,
+          content: MOBILE_MARKDOWN_CONTENT,
+          originalContent: MOBILE_MARKDOWN_CONTENT,
+          originalHash: "hash",
+          isDirty: false,
+          markdownMode: "source",
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Change mobile source" }));
+    fireEvent.click(screen.getByTestId(MOBILE_SAVE_TEST_ID));
+    await waitFor(() => expect(updateFileContentMock).toHaveBeenCalledOnce());
+
+    fireEvent.click(screen.getByRole("button", { name: "Change mobile source again" }));
+    resolveSave({ path: MOBILE_MARKDOWN_PATH, success: true, new_hash: SAVED_HASH });
+
+    await waitFor(() =>
+      expect((screen.getByTestId(MOBILE_SAVE_TEST_ID) as HTMLButtonElement).disabled).toBe(false),
+    );
+
+    updateFileContentMock.mockResolvedValue({
+      path: MOBILE_MARKDOWN_PATH,
+      success: true,
+      new_hash: "newer-saved-hash",
+    });
+    fireEvent.click(screen.getByTestId(MOBILE_SAVE_TEST_ID));
+    await waitFor(() =>
+      expect(updateFileContentMock).toHaveBeenCalledWith(
+        expect.anything(),
+        "session-1",
+        expect.objectContaining({
+          desiredContent: MOBILE_NEWER_EDIT_CONTENT,
+          originalHash: SAVED_HASH,
+        }),
+      ),
+    );
+  });
+
+  it("does not apply a completed save to a newly selected file", async () => {
+    let resolveSave!: (value: { path: string; success: boolean; new_hash: string }) => void;
+    updateFileContentMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    const { rerender } = render(
+      <MobileFileViewerPanel
+        file={{
+          path: MOBILE_MARKDOWN_PATH,
+          name: MOBILE_MARKDOWN_PATH,
+          content: MOBILE_MARKDOWN_CONTENT,
+          originalContent: MOBILE_MARKDOWN_CONTENT,
+          originalHash: "hash",
+          isDirty: false,
+          markdownMode: "source",
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Change mobile source" }));
+    fireEvent.click(screen.getByTestId(MOBILE_SAVE_TEST_ID));
+    await waitFor(() => expect(updateFileContentMock).toHaveBeenCalledOnce());
+
+    rerender(
+      <MobileFileViewerPanel
+        file={{
+          path: "other.md",
+          name: "other.md",
+          content: "# other",
+          originalContent: "# other",
+          originalHash: "other-hash",
+          isDirty: false,
+          markdownMode: "source",
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+      />,
+    );
+    resolveSave({ path: MOBILE_MARKDOWN_PATH, success: true, new_hash: SAVED_HASH });
+
+    await waitFor(() =>
+      expect((screen.getByTestId(MOBILE_SAVE_TEST_ID) as HTMLButtonElement).disabled).toBe(true),
+    );
   });
 
   it("keeps Preview available for MDX but does not expose Edit", () => {
@@ -366,7 +488,7 @@ describe("MobileFileViewerPanel external file action", () => {
       />,
     );
 
-    expect(screen.getByTestId("markdown-preview")).toBeTruthy();
+    expect(screen.getByTestId(MOBILE_PREVIEW_TEST_ID)).toBeTruthy();
     expect(screen.queryByTestId(FILE_CONTENT_TEST_ID)).toBeNull();
   });
 
@@ -387,8 +509,8 @@ describe("MobileFileViewerPanel external file action", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("markdown-preview-toggle"));
-    expect(screen.getByTestId("markdown-preview")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("mobile-markdown-mode-preview"));
+    expect(screen.getByTestId(MOBILE_PREVIEW_TEST_ID)).toBeTruthy();
 
     rerender(
       <MobileFileViewerPanel
@@ -407,7 +529,7 @@ describe("MobileFileViewerPanel external file action", () => {
     );
 
     expect(screen.getByTestId(FILE_CONTENT_TEST_ID)).toBeTruthy();
-    expect(screen.queryByTestId("markdown-preview")).toBeNull();
+    expect(screen.queryByTestId(MOBILE_PREVIEW_TEST_ID)).toBeNull();
   });
 });
 

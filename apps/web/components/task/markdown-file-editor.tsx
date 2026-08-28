@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconDeviceFloppy, IconRefresh, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { FileViewerExternalLink } from "./file-viewer-header";
@@ -9,10 +9,17 @@ import { MarkdownPreviewContent } from "./markdown-preview-content";
 import {
   HybridMarkdownEditor,
   type MarkdownComment,
+  type MarkdownCommentSubmission,
   type MarkdownGutterMarker,
 } from "@/components/editors/markdown/hybrid-markdown-editor";
-import type { MarkdownFileMode } from "./markdown-file-mode";
-import { isMarkdownFileModeSupported } from "./markdown-file-mode";
+import { buildDiffComment } from "@/lib/diff/comment-utils";
+import { useDiffFileComments } from "@/hooks/domains/comments/use-diff-comments";
+import { useCommentsStore } from "@/lib/state/slices/comments";
+import {
+  capitalize,
+  isMarkdownFileModeSupported,
+  type MarkdownFileMode,
+} from "./markdown-file-mode";
 import { useTranslation } from "react-i18next";
 
 export type MarkdownFileEditorProps = {
@@ -45,6 +52,119 @@ export type MarkdownFileEditorProps = {
 
 const MODE_ORDER: readonly MarkdownFileMode[] = ["preview", "edit", "source"];
 
+function clampSourceOffset(content: string, offset: number): number {
+  return Math.max(0, Math.min(content.length, offset));
+}
+
+export function sourceOffsetAtLine(content: string, line: number): number {
+  const targetLine = Math.max(1, line);
+  if (targetLine === 1) return 0;
+  let currentLine = 1;
+  for (let offset = 0; offset < content.length; offset += 1) {
+    if (content[offset] !== "\n") continue;
+    currentLine += 1;
+    if (currentLine === targetLine) return offset + 1;
+  }
+  return content.length;
+}
+
+export function sourceLineEndOffset(content: string, line: number): number {
+  const start = sourceOffsetAtLine(content, line);
+  const newline = content.indexOf("\n", start);
+  if (newline === -1) return content.length;
+  return newline > start && content[newline - 1] === "\r" ? newline - 1 : newline;
+}
+
+export function sourceLinesAtOffsets(
+  content: string,
+  start: number,
+  endExclusive: number,
+): { startLine: number; endLine: number; selectedText: string } {
+  const safeStart = clampSourceOffset(content, start);
+  const safeEnd = Math.max(safeStart, clampSourceOffset(content, endExclusive));
+  const lineAt = (offset: number) => {
+    let line = 1;
+    for (let index = 0; index < offset; index += 1) {
+      if (content[index] === "\n") line += 1;
+    }
+    return line;
+  };
+  return {
+    startLine: lineAt(safeStart),
+    endLine: lineAt(Math.max(safeStart, safeEnd - 1)),
+    selectedText: content.slice(safeStart, safeEnd),
+  };
+}
+
+function sourceCommentRange(content: string, startLine: number, endLine: number) {
+  const start = sourceOffsetAtLine(content, startLine);
+  const end = Math.max(start, sourceLineEndOffset(content, endLine));
+  return { start, endExclusive: end };
+}
+
+function useMarkdownEditorCommentState({
+  path,
+  content,
+  sessionId,
+  repositoryId,
+  enableComments,
+  providedComments,
+  onComment,
+}: {
+  path: string;
+  content: string;
+  sessionId?: string | null;
+  repositoryId?: string | null;
+  enableComments: boolean;
+  providedComments?: readonly MarkdownComment[];
+  onComment?: (comment: MarkdownCommentSubmission) => void;
+}) {
+  const fileComments = useDiffFileComments(sessionId ?? "", path, repositoryId ?? undefined);
+  const addComment = useCommentsStore((state) => state.addComment);
+  const hybridComments = useMemo<MarkdownComment[]>(
+    () =>
+      providedComments
+        ? [...providedComments]
+        : fileComments.map((comment) => {
+            const range = sourceCommentRange(content, comment.startLine, comment.endLine);
+            return {
+              id: comment.id,
+              start: range.start,
+              endExclusive: range.endExclusive,
+              body: comment.text,
+            };
+          }),
+    [content, fileComments, providedComments],
+  );
+
+  const handleHybridComment = useCallback(
+    (submission: MarkdownCommentSubmission) => {
+      if (enableComments && sessionId) {
+        const sourceLines = sourceLinesAtOffsets(
+          content,
+          submission.start,
+          submission.endExclusive,
+        );
+        const comment = buildDiffComment({
+          filePath: path,
+          sessionId,
+          startLine: sourceLines.startLine,
+          endLine: sourceLines.endLine,
+          side: "additions",
+          text: submission.text,
+          codeContent: sourceLines.selectedText,
+        });
+        if (repositoryId) comment.repositoryId = repositoryId;
+        addComment(comment);
+      }
+      onComment?.(submission);
+    },
+    [addComment, content, enableComments, onComment, path, repositoryId, sessionId],
+  );
+
+  return { hybridComments, handleHybridComment };
+}
+
 export function MarkdownFileEditor({
   path,
   content,
@@ -76,35 +196,122 @@ export function MarkdownFileEditor({
     isMarkdownFileModeSupported(path, candidate),
   );
   const safeMode = supportedModes.includes(mode) ? mode : "source";
+  const [hybridMounted, setHybridMounted] = useState(mode === "edit");
+  const { hybridComments, handleHybridComment } = useMarkdownEditorCommentState({
+    path,
+    content,
+    sessionId,
+    repositoryId,
+    enableComments,
+    providedComments: comments,
+    onComment,
+  });
 
   useEffect(() => {
     if (safeMode !== mode) onModeChange(safeMode);
   }, [mode, onModeChange, safeMode]);
 
+  useEffect(() => {
+    if (safeMode === "edit") setHybridMounted(true);
+  }, [safeMode]);
+
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (safeMode !== "edit") return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
         onSave();
       }
     },
-    [onSave],
+    [onSave, safeMode],
   );
 
+  return (
+    <MarkdownFileEditorLayout
+      path={path}
+      content={content}
+      originalContent={originalContent}
+      isDirty={isDirty}
+      hasRemoteUpdate={hasRemoteUpdate}
+      vcsDiff={vcsDiff}
+      isSaving={isSaving}
+      sessionId={sessionId}
+      taskId={taskId}
+      repositoryId={repositoryId}
+      worktreePath={worktreePath}
+      repo={repo}
+      enableComments={enableComments}
+      mode={safeMode}
+      supportedModes={supportedModes}
+      gutterMarkers={gutterMarkers}
+      comments={hybridComments}
+      keepHybridMounted={hybridMounted && isMarkdownFileModeSupported(path, "edit")}
+      onModeChange={onModeChange}
+      onChange={onChange}
+      onSave={onSave}
+      onReloadFromAgent={onReloadFromAgent}
+      onDelete={onDelete}
+      onOpenLink={onOpenLink}
+      onComment={handleHybridComment}
+      onError={onError}
+      onSourceFallback={onSourceFallback}
+      onKeyDown={handleKeyDown}
+    />
+  );
+}
+
+type MarkdownFileEditorLayoutProps = Omit<MarkdownFileEditorProps, "mode" | "comments"> & {
+  mode: MarkdownFileMode;
+  supportedModes: readonly MarkdownFileMode[];
+  comments: readonly MarkdownComment[];
+  keepHybridMounted: boolean;
+  onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void;
+};
+
+function MarkdownFileEditorLayout({
+  path,
+  content,
+  originalContent,
+  isDirty,
+  hasRemoteUpdate,
+  vcsDiff,
+  isSaving,
+  sessionId,
+  taskId,
+  repositoryId,
+  worktreePath,
+  repo,
+  enableComments,
+  gutterMarkers,
+  mode,
+  supportedModes,
+  comments,
+  keepHybridMounted,
+  onModeChange,
+  onChange,
+  onSave,
+  onReloadFromAgent,
+  onDelete,
+  onOpenLink,
+  onComment,
+  onError,
+  onSourceFallback,
+  onKeyDown,
+}: MarkdownFileEditorLayoutProps) {
   return (
     <div
       className="flex h-full min-h-0 flex-col"
       data-testid="markdown-file-editor"
-      onKeyDown={handleKeyDown}
+      onKeyDown={onKeyDown}
     >
       <MarkdownModeToolbar
         path={path}
-        mode={safeMode}
+        mode={mode}
         supportedModes={supportedModes}
         onModeChange={onModeChange}
         isDirty={isDirty}
         isSaving={isSaving}
-        hasRemoteUpdate={hasRemoteUpdate}
+        hasRemoteUpdate={hasRemoteUpdate ?? false}
         onSave={onSave}
         onReloadFromAgent={onReloadFromAgent}
         onDelete={onDelete}
@@ -114,12 +321,12 @@ export function MarkdownFileEditor({
         repositoryName={repo}
       />
       <MarkdownFilePresentation
-        mode={safeMode}
+        mode={mode}
         path={path}
         content={content}
         originalContent={originalContent}
         isDirty={isDirty}
-        hasRemoteUpdate={hasRemoteUpdate}
+        hasRemoteUpdate={hasRemoteUpdate ?? false}
         vcsDiff={vcsDiff}
         isSaving={isSaving}
         sessionId={sessionId}
@@ -127,9 +334,10 @@ export function MarkdownFileEditor({
         repositoryId={repositoryId}
         worktreePath={worktreePath}
         repo={repo}
-        enableComments={enableComments}
+        enableComments={enableComments ?? false}
         gutterMarkers={gutterMarkers}
         comments={comments}
+        keepHybridMounted={keepHybridMounted}
         onChange={onChange}
         onSave={onSave}
         onReloadFromAgent={onReloadFromAgent}
@@ -168,7 +376,7 @@ type MarkdownFilePresentationProps = Pick<
   | "onComment"
   | "onError"
   | "onSourceFallback"
-> & { mode: MarkdownFileMode };
+> & { keepHybridMounted: boolean; mode: MarkdownFileMode };
 
 function MarkdownFilePresentation({
   mode,
@@ -187,6 +395,7 @@ function MarkdownFilePresentation({
   enableComments,
   gutterMarkers,
   comments,
+  keepHybridMounted,
   onChange,
   onSave,
   onReloadFromAgent,
@@ -198,6 +407,26 @@ function MarkdownFilePresentation({
 }: MarkdownFilePresentationProps) {
   return (
     <div className="min-h-0 flex-1">
+      {keepHybridMounted && (
+        <div
+          className={mode === "edit" ? "h-full min-h-0" : "hidden"}
+          aria-hidden={mode !== "edit"}
+          data-testid="markdown-hybrid-editor-host"
+        >
+          <HybridMarkdownEditor
+            content={content}
+            baseline={originalContent}
+            readOnly={false}
+            gutterMarkers={gutterMarkers}
+            comments={comments}
+            onChange={onChange}
+            onOpenLink={onOpenLink}
+            onComment={onComment}
+            onError={onError}
+            onSourceFallback={onSourceFallback}
+          />
+        </div>
+      )}
       {mode === "preview" && (
         <MarkdownPreviewContent
           path={path}
@@ -209,20 +438,6 @@ function MarkdownFilePresentation({
           repositoryName={repo}
           enableComments={enableComments}
           onTogglePreview={undefined}
-        />
-      )}
-      {mode === "edit" && (
-        <HybridMarkdownEditor
-          content={content}
-          baseline={originalContent}
-          readOnly={false}
-          gutterMarkers={gutterMarkers}
-          comments={comments}
-          onChange={onChange}
-          onOpenLink={onOpenLink}
-          onComment={onComment}
-          onError={onError}
-          onSourceFallback={onSourceFallback}
         />
       )}
       {mode === "source" && (
@@ -359,8 +574,4 @@ function MarkdownModeToolbar({
       </Button>
     </div>
   );
-}
-
-function capitalize(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
 }

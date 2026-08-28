@@ -125,7 +125,9 @@ test.describe("Mobile Markdown file editing", () => {
     ).toBe(true);
 
     await editButton.tap();
-    await expect(viewer.getByTestId("mobile-markdown-edit")).toBeVisible({ timeout: 15_000 });
+    await expect(viewer.getByTestId("mobile-markdown-hybrid-editor-host")).toBeVisible({
+      timeout: 15_000,
+    });
     await expect(viewer.getByTestId("hybrid-markdown-editor")).toBeVisible({ timeout: 15_000 });
   });
 });

@@ -40,16 +40,17 @@ import {
   useHtmlPreviewPublisher,
   type HtmlPreviewPublishState,
 } from "@/hooks/use-html-preview-publisher";
-import { isMarkdownFileModeSupported, type MarkdownFileMode } from "../markdown-file-mode";
+import {
+  capitalize,
+  isMarkdownFileModeSupported,
+  type MarkdownFileMode,
+} from "../markdown-file-mode";
+import { getMobileFileIdentity, type MobileFileSavedSnapshot } from "./mobile-selected-file-state";
 import { useToast } from "@/components/toast-provider";
 import { useTranslation } from "react-i18next";
 import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
 
-export type MobileFileSavedSnapshot = {
-  content: string;
-  originalContent: string;
-  originalHash: string;
-};
+export type { MobileFileSavedSnapshot } from "./mobile-selected-file-state";
 
 type MobileFileViewerPanelProps = {
   file: OpenFileTab;
@@ -109,7 +110,6 @@ function MobileMarkdownModeControls({
   const supportedModes = MARKDOWN_MODE_ORDER.filter((candidate) =>
     isMarkdownFileModeSupported(path, candidate),
   );
-  const legacyToggleMode = mode === "preview" ? "source" : "preview";
 
   return (
     <div
@@ -131,20 +131,8 @@ function MobileMarkdownModeControls({
             onClick={() => onModeChange(candidate)}
           >
             <span className="inline-flex items-center gap-1">
-              {candidate === legacyToggleMode ? (
-                <span
-                  data-testid="markdown-preview-toggle"
-                  className="inline-flex items-center gap-1"
-                >
-                  <Icon className="h-4 w-4" aria-hidden="true" />
-                  <span>{t(`task:markdownMode${capitalize(candidate)}`)}</span>
-                </span>
-              ) : (
-                <>
-                  <Icon className="h-4 w-4" aria-hidden="true" />
-                  <span>{t(`task:markdownMode${capitalize(candidate)}`)}</span>
-                </>
-              )}
+              <Icon className="h-4 w-4" aria-hidden="true" />
+              <span>{t(`task:markdownMode${capitalize(candidate)}`)}</span>
             </span>
           </Button>
         );
@@ -307,6 +295,7 @@ function MobileViewerBody({
   previewKind,
   renderedPreview,
   markdownMode,
+  keepHybridMounted,
   worktreePath,
   sessionId,
   taskId,
@@ -324,6 +313,7 @@ function MobileViewerBody({
   previewKind: FilePreviewKind;
   renderedPreview: boolean;
   markdownMode?: MarkdownFileMode;
+  keepHybridMounted: boolean;
   worktreePath?: string;
   sessionId: string | null;
   taskId: string | null;
@@ -345,30 +335,20 @@ function MobileViewerBody({
         <FileImageViewer path={file.path} content={draftContent} worktreePath={worktreePath} />
       )}
       {viewerKind === "binary" && <FileBinaryViewer path={file.path} worktreePath={worktreePath} />}
-      {viewerKind === "text" && markdownFile && markdownMode === "preview" && (
-        <MarkdownPreviewContent
-          path={file.path}
-          content={draftContent}
+      {viewerKind === "text" && markdownFile && (
+        <MobileMarkdownSurface
+          file={file}
+          markdownMode={markdownMode}
+          keepHybridMounted={keepHybridMounted}
           worktreePath={worktreePath}
-          sessionId={sessionId ?? undefined}
+          sessionId={sessionId}
           taskId={taskId}
           repositoryId={repositoryId}
-          repositoryName={file.repo}
-          enableComments={!!sessionId}
-          showExternalVcsLink={false}
-          onTogglePreview={onTogglePreview}
+          draftContent={draftContent}
+          baselineContent={baselineContent}
+          onChange={onChange}
+          onSourceFallback={onSourceFallback}
         />
-      )}
-      {viewerKind === "text" && markdownFile && markdownMode === "edit" && (
-        <div className="min-h-0 flex-1 overflow-hidden" data-testid="mobile-markdown-edit">
-          <HybridMarkdownEditor
-            content={draftContent}
-            baseline={baselineContent}
-            readOnly={false}
-            onChange={onChange}
-            onSourceFallback={onSourceFallback}
-          />
-        </div>
       )}
       {viewerKind === "text" && !markdownFile && renderedPreview && previewKind === "html" && (
         <HtmlPreviewContent
@@ -387,23 +367,88 @@ function MobileViewerBody({
         />
       )}
       {viewerKind === "text" &&
-        ((!markdownFile && !(renderedPreview && previewKind === "html")) ||
-          markdownMode === "source") && (
+        !markdownFile &&
+        !(renderedPreview && previewKind === "html") && (
+          <FileViewerContent
+            path={file.path}
+            repo={file.repo}
+            content={draftContent}
+            sessionId={sessionId ?? undefined}
+            editable={false}
+          />
+        )}
+    </div>
+  );
+}
+
+function MobileMarkdownSurface({
+  file,
+  markdownMode,
+  keepHybridMounted,
+  worktreePath,
+  sessionId,
+  taskId,
+  repositoryId,
+  draftContent,
+  baselineContent,
+  onChange,
+  onSourceFallback,
+}: {
+  file: OpenFileTab;
+  markdownMode?: MarkdownFileMode;
+  keepHybridMounted: boolean;
+  worktreePath?: string;
+  sessionId: string | null;
+  taskId: string | null;
+  repositoryId?: string;
+  draftContent: string;
+  baselineContent: string;
+  onChange: (content: string) => void;
+  onSourceFallback?: () => void;
+}) {
+  return (
+    <>
+      {markdownMode === "preview" && (
+        <MarkdownPreviewContent
+          path={file.path}
+          content={draftContent}
+          worktreePath={worktreePath}
+          sessionId={sessionId ?? undefined}
+          taskId={taskId}
+          repositoryId={repositoryId}
+          repositoryName={file.repo}
+          enableComments={!!sessionId}
+          showExternalVcsLink={false}
+          onTogglePreview={undefined}
+        />
+      )}
+      {keepHybridMounted && (
+        <div
+          className={markdownMode === "edit" ? "min-h-0 flex-1 overflow-hidden" : "hidden"}
+          aria-hidden={markdownMode !== "edit"}
+          data-testid="mobile-markdown-hybrid-editor-host"
+        >
+          <HybridMarkdownEditor
+            content={draftContent}
+            baseline={baselineContent}
+            readOnly={false}
+            onChange={onChange}
+            onSourceFallback={onSourceFallback}
+          />
+        </div>
+      )}
+      {markdownMode === "source" && (
         <FileViewerContent
           path={file.path}
           repo={file.repo}
           content={draftContent}
           sessionId={sessionId ?? undefined}
-          editable={markdownFile}
-          onChange={markdownFile ? onChange : undefined}
+          editable
+          onChange={onChange}
         />
       )}
-    </div>
+    </>
   );
-}
-
-function capitalize(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function useMobileFileBuffer({
@@ -419,11 +464,14 @@ function useMobileFileBuffer({
   onFileChange?: (content: string) => void;
   onModeChange?: (mode: MarkdownFileMode) => void;
 }) {
-  const fileIdentity = `${file.repo ?? ""}\u0000${file.path}`;
+  const fileIdentity = getMobileFileIdentity(file);
   const initialMode = resolveInitialMarkdownMode(file, initialMarkdownMode, initialMarkdownPreview);
   const [lastFileIdentity, setLastFileIdentity] = useState(fileIdentity);
+  const fileIdentityRef = useRef(fileIdentity);
+  fileIdentityRef.current = fileIdentity;
   const fileContentSnapshotRef = useRef({ identity: fileIdentity, content: file.content });
   const [markdownMode, setMarkdownMode] = useState<MarkdownFileMode | undefined>(initialMode);
+  const [hybridMounted, setHybridMounted] = useState(initialMode === "edit");
   const [draftContent, setDraftContent] = useState(file.content);
   const [baselineContent, setBaselineContent] = useState(file.originalContent);
   const [originalHash, setOriginalHash] = useState(file.originalHash);
@@ -431,6 +479,7 @@ function useMobileFileBuffer({
   if (lastFileIdentity !== fileIdentity) {
     setLastFileIdentity(fileIdentity);
     setMarkdownMode(initialMode);
+    setHybridMounted(initialMode === "edit");
     setDraftContent(file.content);
     setBaselineContent(file.originalContent);
     setOriginalHash(file.originalHash);
@@ -458,6 +507,7 @@ function useMobileFileBuffer({
   const handleModeChange = useCallback(
     (mode: MarkdownFileMode) => {
       if (!isMarkdownFileModeSupported(file.path, mode)) return;
+      if (mode === "edit") setHybridMounted(true);
       setMarkdownMode(mode);
       onModeChange?.(mode);
     },
@@ -467,13 +517,15 @@ function useMobileFileBuffer({
     setMarkdownMode("source");
     onModeChange?.("source");
   }, [onModeChange]);
-  const markSaved = useCallback((content: string, hash: string) => {
+  const markSaved = useCallback((expectedFileIdentity: string, content: string, hash: string) => {
+    if (fileIdentityRef.current !== expectedFileIdentity) return;
     setBaselineContent(content);
     setOriginalHash(hash);
   }, []);
 
   return {
     markdownMode,
+    keepHybridMounted: hybridMounted && isMarkdownFileModeSupported(file.path, "edit"),
     draftContent,
     baselineContent,
     originalHash,
@@ -488,6 +540,7 @@ function useMobileFileBuffer({
 function useMobileFileSave({
   file,
   sessionId,
+  fileIdentity,
   draftContent,
   baselineContent,
   originalHash,
@@ -497,11 +550,12 @@ function useMobileFileSave({
 }: {
   file: OpenFileTab;
   sessionId: string | null;
+  fileIdentity: string;
   draftContent: string;
   baselineContent: string;
   originalHash: string;
   isDirty: boolean;
-  markSaved: (content: string, hash: string) => void;
+  markSaved: (expectedFileIdentity: string, content: string, hash: string) => void;
   onFileSaved?: (snapshot: MobileFileSavedSnapshot) => void;
 }) {
   const { t } = useTranslation();
@@ -522,8 +576,11 @@ function useMobileFileSave({
         repo: file.repo,
       });
       if (response.success && response.new_hash) {
-        markSaved(contentToSave, response.new_hash);
+        markSaved(fileIdentity, contentToSave, response.new_hash);
         onFileSaved?.({
+          path: file.path,
+          repo: file.repo,
+          sessionId,
           content: contentToSave,
           originalContent: contentToSave,
           originalHash: response.new_hash,
@@ -547,6 +604,7 @@ function useMobileFileSave({
   }, [
     baselineContent,
     draftContent,
+    fileIdentity,
     file.path,
     file.repo,
     isDirty,
@@ -593,7 +651,7 @@ export function MobileFileViewerPanel({
       }),
     [file.content, file.isBinary, file.path],
   );
-  const fileIdentity = `${file.repo ?? ""}\u0000${file.path}`;
+  const fileIdentity = getMobileFileIdentity(file);
   const [lastFileIdentity, setLastFileIdentity] = useState(fileIdentity);
   const initialLegacyMarkdownPreview =
     initialMarkdownPreview || (initialRenderedPreview && previewKind === "markdown");
@@ -621,6 +679,7 @@ export function MobileFileViewerPanel({
   const save = useMobileFileSave({
     file,
     sessionId,
+    fileIdentity: getMobileFileIdentity(file),
     draftContent: buffer.draftContent,
     baselineContent: buffer.baselineContent,
     originalHash: buffer.originalHash,
@@ -661,6 +720,7 @@ export function MobileFileViewerPanel({
           previewKind={previewKind}
           renderedPreview={renderedPreview}
           markdownMode={buffer.markdownMode}
+          keepHybridMounted={buffer.keepHybridMounted}
           worktreePath={worktreePath}
           sessionId={sessionId}
           taskId={activeTaskId}
