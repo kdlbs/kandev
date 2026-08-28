@@ -24,6 +24,7 @@ Make fixed workflow-step profile routing independent of the active session trans
 
 - Remove the passthrough routing exemption from workflow-step session preparation.
 - Remove the passthrough credential-preflight exemption.
+- Apply fixed-profile validation to explicit workflow-step launches before task advancement or prompt delivery.
 - Replace obsolete skip coverage with destination-session and fail-closed regression tests.
 - Add a focused Playwright scenario for TUI-to-fixed-profile routing.
 
@@ -81,6 +82,7 @@ None.
 
 - Removed the passthrough exemptions from workflow-step session preparation and credential preflight.
 - Added backend regressions for destination-session routing and fail-closed credential admission.
+- Added a passthrough regression for explicit workflow-step launches that verifies mismatch rejection before task advancement or prompt delivery.
 - Added a browser regression for TUI-to-fixed-profile routing, destination tab visibility, and primary ownership.
 - `cd apps/backend && go test ./internal/orchestrator -run '^(TestPrepareWorkflowStepSessionSwitchesPassthroughProfile|TestApplyEngineTransitionRejectsPassthroughTargetProfileBeforePersistingStep|TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession)$' -count=1` — passed, 3 tests in 1 package.
 - `cd apps/web && pnpm e2e:run tests/terminal/terminal-agent.spec.ts -- --grep "switches from a TUI session to the workflow step profile"` — passed, 1 test in 16.3 seconds.

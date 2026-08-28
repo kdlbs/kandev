@@ -35,6 +35,7 @@ All diagnostic edits were removed after the test.
 ### In scope
 
 - Resolve and apply fixed step profiles when the active session uses CLI passthrough.
+- Validate the effective profile on explicit workflow-step launches before advancing the task or sending a prompt.
 - Run the existing managed Git credential preflight before persisting such a transition.
 - Preserve the existing session reuse, task-environment inheritance, queue transfer, primary-session promotion, and source-session completion behavior.
 - Add backend and browser regression coverage for a passthrough-to-fixed-profile transition.
@@ -56,6 +57,9 @@ Add focused tests in a new orchestrator test file.
 The current workflow profile test file exceeds the preferred size.
 Cover destination-session creation and pre-transition credential rejection for a passthrough source session.
 
+Keep the explicit `StartSessionForWorkflowStep` launch path transport-neutral.
+Reject a fixed-profile mismatch before task-step advancement or prompt delivery.
+
 Extend the existing TUI passthrough Playwright spec.
 Use a CLI-passthrough source profile and a different fixed destination profile.
 Start the task through the terminal UI, then move the task.
@@ -66,6 +70,7 @@ Use the visible session tab to validate primary ownership.
 
 - `AC-TASKS-WORKFLOW-SESSION-SETTINGS-001.2`: add `TestPrepareWorkflowStepSessionSwitchesPassthroughProfile` in `apps/backend/internal/orchestrator/event_handlers_workflow_passthrough_profile_test.go`.
 - `AC-TASKS-WORKFLOW-SESSION-SETTINGS-001.3`: add `TestApplyEngineTransitionRejectsPassthroughTargetProfileBeforePersistingStep` in the same file.
+- `AC-TASKS-WORKFLOW-SESSION-SETTINGS-001.3`: add `TestStartSessionForWorkflowStepRejectsPassthroughProfileMismatchBeforePrompt` in `apps/backend/internal/orchestrator/task_operations_passthrough_test.go`.
 - Preserve the existing ACP destination-session dispatcher and profile reuse tests.
 
 ## E2E tests
@@ -81,6 +86,7 @@ Use the visible session tab to validate primary ownership.
 ## Verification results
 
 - `cd apps/backend && go test ./internal/orchestrator -run '^(TestPrepareWorkflowStepSessionSwitchesPassthroughProfile|TestApplyEngineTransitionRejectsPassthroughTargetProfileBeforePersistingStep|TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession)$' -count=1` — passed, 3 tests in 1 package.
+- `cd apps/backend && go test ./internal/orchestrator -run '^(TestStartSessionForWorkflowStepRejectsProfileMismatchBeforePrompt|TestStartSessionForWorkflowStepRejectsPassthroughProfileMismatchBeforePrompt)$' -count=1` — passed, 2 tests in 1 package.
 - `cd apps/web && pnpm e2e:run tests/terminal/terminal-agent.spec.ts -- --grep "switches from a TUI session to the workflow step profile"` — passed, 1 test in 16.3 seconds.
 - `python3 scripts/lint-spec-files.py --all` — passed.
 
