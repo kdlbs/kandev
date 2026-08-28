@@ -20,7 +20,7 @@ walkthroughs, chat controls, visual feedback, and responsive interaction
 contracts without backend-state ownership.
 
 Controls for provider/task state remain owned by that system.
-The UI system owns reusable presentation contracts.
+The UI system owns reusable contracts.
 
 ## Exclusions
 
