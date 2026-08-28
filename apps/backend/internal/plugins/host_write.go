@@ -286,9 +286,10 @@ func (r taskReader) Move(ctx context.Context, in pluginsdk.MoveTaskInput) (*plug
 		q := result.Task.QueuedForStepID
 		queuedForStepID = &q
 	}
-	dto := taskModelToDTO(result.Task)
+	items := []pluginsdk.Task{taskModelToDTO(result.Task)}
+	r.host.attachPullRequests(ctx, items)
 	return &pluginsdk.MoveTaskOutcome{
-		Task:            &dto,
+		Task:            &items[0],
 		Transitioned:    result.Transitioned,
 		QueuedForStepID: queuedForStepID,
 		FromStepID:      result.FromStepID,
