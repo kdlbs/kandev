@@ -30,15 +30,23 @@ function capitalize(value: string): string {
   return value.length > 0 ? value[0].toUpperCase() + value.slice(1) : value;
 }
 
-function summaryPRInfo(
-  summary: TaskStatusSummary | null | undefined,
-): { number: number; state: string; aggregateState?: string } | undefined {
+function summaryPRInfo(summary: TaskStatusSummary | null | undefined):
+  | {
+      number: number;
+      state: string;
+      aggregateState?: string;
+      autoFixEnabled?: boolean;
+      autoMergeEnabled?: boolean;
+    }
+  | undefined {
   const pullRequest = summary?.pull_request;
   if (!pullRequest?.number) return undefined;
   return {
     number: pullRequest.number,
     state: capitalize(pullRequest.state ?? pullRequest.aggregate_state ?? "open"),
     aggregateState: pullRequest.aggregate_state,
+    ...(pullRequest.auto_fix_enabled ? { autoFixEnabled: true } : {}),
+    ...(pullRequest.auto_merge_enabled ? { autoMergeEnabled: true } : {}),
   };
 }
 

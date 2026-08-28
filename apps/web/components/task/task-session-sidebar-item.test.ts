@@ -159,6 +159,34 @@ describe("buildSidebarItem", () => {
   });
 });
 
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.10
+describe("buildSidebarItem automation indicators", () => {
+  it("carries bounded automation indicators into the row PR info", () => {
+    const item = buildSidebarItem(
+      task({
+        statusSummary: {
+          revision: 2,
+          updated_at: UPDATED_AT,
+          pull_request: {
+            number: 42,
+            state: "open",
+            auto_fix_enabled: true,
+            auto_merge_enabled: true,
+          },
+        },
+      }),
+      emptyContext(),
+    );
+
+    expect(item.prInfo).toEqual({
+      number: 42,
+      state: "Open",
+      autoFixEnabled: true,
+      autoMergeEnabled: true,
+    });
+  });
+});
+
 describe("buildSidebarItem activity", () => {
   it("maps summary activity and falls back through task update to creation", () => {
     const projected = buildSidebarItem(

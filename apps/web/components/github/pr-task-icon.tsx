@@ -1,6 +1,15 @@
 "use client";
 
 import { IconGitPullRequest } from "@tabler/icons-react";
+import { useCallback, type ReactNode, useState } from "react";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
@@ -17,6 +26,9 @@ import {
   type TaskPRTooltipHydrationStatus,
 } from "@/hooks/domains/github/use-task-pr-tooltip-hydration";
 import type { TaskPR } from "@/lib/types/github";
+import type { TaskCIAutomationOptions } from "@/lib/types/github";
+import { automationForPR } from "./pr-status-automation-badges";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { derivePRTaskStatusSummary, PRTaskStatusSummary } from "./pr-task-status-summary";
 
 const MUTED_FOREGROUND = CHANGE_REQUEST_STATUS_COLORS.muted;
@@ -242,11 +254,80 @@ export type TaskPRInfo = {
   number: number;
   state: string;
   aggregateState?: string;
+  autoFixEnabled?: boolean;
+  autoMergeEnabled?: boolean;
 };
+
+export type TaskPRAutomationDetail = {
+  number: number;
+  autoFixEnabled: boolean;
+  autoMergeEnabled: boolean;
+};
+
+export type TaskPRAutomationSummary = {
+  autoFixEnabled: boolean;
+  autoMergeEnabled: boolean;
+  details: TaskPRAutomationDetail[];
+};
+
+export function getTaskPRAutomationSummary(
+  prs: TaskPR[],
+  prInfo?: TaskPRInfo,
+  options?: TaskCIAutomationOptions | null,
+): TaskPRAutomationSummary {
+  const activePRs = prs.filter((pr) => pr.state.trim().toLowerCase() === "open");
+  // The bounded task-row projection is the source of truth until the full PR
+  // list is hydrated. Keep its flags visible even when a previously hydrated
+  // options response is present but the scoped PR records are not.
+  if (!options || prs.length === 0) {
+    return {
+      autoFixEnabled: prInfo?.autoFixEnabled === true,
+      autoMergeEnabled: prInfo?.autoMergeEnabled === true,
+      details: [],
+    };
+  }
+  const details = activePRs.map((pr) => {
+    const automation = automationForPR(options, pr);
+    return {
+      number: pr.pr_number,
+      autoFixEnabled: automation.autoFix,
+      autoMergeEnabled: automation.autoMerge,
+    };
+  });
+  return {
+    autoFixEnabled: details.some((detail) => detail.autoFixEnabled),
+    autoMergeEnabled: details.some((detail) => detail.autoMergeEnabled),
+    details,
+  };
+}
+
+export function AutomationIndicatorDots({
+  autoFixEnabled,
+  autoMergeEnabled,
+}: Pick<TaskPRAutomationSummary, "autoFixEnabled" | "autoMergeEnabled">) {
+  return (
+    <>
+      {autoFixEnabled && (
+        <span
+          data-testid="pr-task-automation-auto-fix"
+          className="absolute left-0 top-0 h-1.5 w-1.5 rounded-full bg-yellow-400 ring-1 ring-background"
+          aria-hidden="true"
+        />
+      )}
+      {autoMergeEnabled && (
+        <span
+          data-testid="pr-task-automation-auto-merge"
+          className="absolute right-0 top-0 h-1.5 w-1.5 rounded-full bg-purple-500 ring-1 ring-background"
+          aria-hidden="true"
+        />
+      )}
+    </>
+  );
+}
 
 export function PRTaskIcon({ taskId, prInfo }: { taskId: string; prInfo?: TaskPRInfo }) {
   const prs = useAppStore((state) => getTaskPRsForCurrentWorkspace(state, taskId));
-  const hydration = useTaskPRTooltipHydration(taskId);
+  const hydration = useTaskPRTooltipHydration(taskId, { includeAutomation: true });
   const fullPRs = Array.isArray(prs) && prs.length > 0 ? prs : [];
 
   // Defensive: an upstream payload may briefly seed byTaskId[taskId] with a
@@ -254,7 +335,15 @@ export function PRTaskIcon({ taskId, prInfo }: { taskId: string; prInfo?: TaskPR
   // instead of falling through into a full-data summary, where for-of throws.
   if (fullPRs.length === 0 && !prInfo) return null;
 
-  return <PRTaskIconView taskId={taskId} prInfo={prInfo} prs={fullPRs} hydration={hydration} />;
+  return (
+    <PRTaskIconView
+      taskId={taskId}
+      prInfo={prInfo}
+      prs={fullPRs}
+      hydration={hydration}
+      automationOptions={hydration.automationOptions}
+    />
+  );
 }
 
 type TaskPRIconPresentation = {
@@ -289,21 +378,27 @@ function PRTaskIconView({
   prInfo,
   prs,
   hydration,
+  automationOptions,
 }: {
   taskId: string;
   prInfo?: TaskPRInfo;
   prs: TaskPR[];
   hydration: ReturnType<typeof useTaskPRTooltipHydration>;
+  automationOptions: TaskCIAutomationOptions | null;
 }) {
   const { t } = useTranslation();
+  const { hydrate } = hydration;
   const hasFullData = prs.length > 0;
-  const tooltip = useChangeRequestTaskTooltipState(
-    !hasFullData && prInfo
-      ? () => {
-          void hydration.hydrate();
-        }
-      : undefined,
-  );
+  const usesTouchDrawer = useTouchDrawer();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const automation = getTaskPRAutomationSummary(prs, prInfo, automationOptions);
+  const needsHydration =
+    !hasFullData ||
+    ((automation.autoFixEnabled || automation.autoMergeEnabled) && !automationOptions);
+  const hydrateOnDisclosure = useCallback(() => {
+    if (needsHydration) void hydrate();
+  }, [hydrate, needsHydration]);
+  const tooltip = useChangeRequestTaskTooltipState(hydrateOnDisclosure);
   const {
     singlePR,
     readyToMerge,
@@ -314,52 +409,271 @@ function PRTaskIconView({
     displayCount,
   } = getTaskPRIconPresentation(prs, prInfo);
 
-  const ariaLabel =
+  const statusAriaLabel =
     prs.length > 1
       ? t("github:pullRequestStatuses", { count: prs.length })
       : t("github:pullRequestStatus", { number: singlePR?.pr_number ?? prInfo?.number });
+  const automationAria = [
+    automation.autoFixEnabled ? t("github:autoFixEnabledAria") : null,
+    automation.autoMergeEnabled ? t("github:autoMergeEnabledAria") : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const ariaLabel = automationAria ? `${statusAriaLabel}, ${automationAria}` : statusAriaLabel;
 
+  const disclosureProps: PRTaskIconDisclosureProps = {
+    taskId,
+    prInfo,
+    prs,
+    hasFullData,
+    singlePR,
+    readyToMerge,
+    allReadyToMerge,
+    displayState,
+    displayCount,
+    iconColor,
+    ariaLabel,
+    icon: <PRTaskIconGlyph automation={automation} />,
+    content: hasFullData ? (
+      <>
+        <PRTaskStatusSummary summaries={summaries} />
+        <TaskPRAutomationDetails summary={automation} />
+      </>
+    ) : (
+      <>
+        <CompactPRTooltipContent status={hydration.status} />
+        <TaskPRAutomationDetails summary={automation} status={hydration.status} />
+      </>
+    ),
+  };
+
+  return usesTouchDrawer ? (
+    <PRTaskIconDrawer
+      {...disclosureProps}
+      open={drawerOpen}
+      onOpenChange={(nextOpen) => {
+        setDrawerOpen(nextOpen);
+        if (nextOpen) hydrateOnDisclosure();
+      }}
+      t={t}
+    />
+  ) : (
+    <PRTaskIconTooltip {...disclosureProps} tooltip={tooltip} />
+  );
+}
+
+type PRTaskIconDisclosureProps = {
+  taskId: string;
+  prInfo?: TaskPRInfo;
+  prs: TaskPR[];
+  hasFullData: boolean;
+  singlePR: TaskPR | null;
+  readyToMerge: boolean;
+  allReadyToMerge: boolean;
+  displayState: string | undefined;
+  displayCount: number;
+  iconColor: string;
+  ariaLabel: string;
+  icon: ReactNode;
+  content: ReactNode;
+};
+
+function PRTaskIconGlyph({ automation }: { automation: TaskPRAutomationSummary }) {
+  return (
+    <span className="relative inline-flex h-3.5 w-3.5 shrink-0">
+      <IconGitPullRequest aria-hidden="true" className="h-3.5 w-3.5" />
+      <AutomationIndicatorDots
+        autoFixEnabled={automation.autoFixEnabled}
+        autoMergeEnabled={automation.autoMergeEnabled}
+      />
+    </span>
+  );
+}
+
+function PRTaskIconDrawer({
+  open,
+  onOpenChange,
+  t,
+  ...props
+}: PRTaskIconDisclosureProps & {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  t: ReturnType<typeof useTranslation>["t"];
+}) {
+  const { prs, prInfo, singlePR, content } = props;
+  return (
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      <DrawerTrigger asChild>
+        <PRTaskIconTrigger
+          {...props}
+          touch
+          open={open}
+          onClick={(event) => event.stopPropagation()}
+        />
+      </DrawerTrigger>
+      <DrawerContent
+        data-testid={`pr-task-automation-drawer-${props.taskId}`}
+        className="max-h-[80dvh] flex flex-col"
+      >
+        <DrawerHeader className="shrink-0 border-b py-2">
+          <DrawerTitle className="text-sm">
+            {prs.length > 1
+              ? t("github:pullRequestCount", { count: prs.length })
+              : t("github:pullRequestStatus", { number: singlePR?.pr_number ?? prInfo?.number })}
+          </DrawerTitle>
+          <DrawerDescription className="sr-only">
+            {t("github:pullRequestCiStatusReviewsAnd")}
+          </DrawerDescription>
+        </DrawerHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto p-3" data-vaul-no-drag>
+          {content}
+        </div>
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
+function PRTaskIconTooltip({
+  tooltip,
+  ...props
+}: PRTaskIconDisclosureProps & {
+  tooltip: ReturnType<typeof useChangeRequestTaskTooltipState>;
+}) {
   return (
     <Tooltip open={tooltip.open}>
       <TooltipTrigger asChild>
-        <span
-          data-testid={`pr-task-icon-${taskId}`}
-          data-pr-state={displayState}
-          data-pr-count={displayCount}
-          data-pr-ready-to-merge={
-            hasFullData ? String(prs.length === 1 ? readyToMerge : allReadyToMerge) : undefined
-          }
-          role="img"
-          tabIndex={0}
-          aria-label={ariaLabel}
+        <PRTaskIconTrigger
+          {...props}
           onPointerEnter={tooltip.onPointerEnter}
           onPointerLeave={tooltip.onPointerLeave}
           onFocus={tooltip.onFocus}
           onBlur={tooltip.onBlur}
-          className={cn(
-            "inline-flex items-center shrink-0",
-            prs.length > 1 && "gap-0.5",
-            iconColor,
-          )}
-        >
-          <IconGitPullRequest aria-hidden="true" className="h-3.5 w-3.5" />
-          {prs.length > 1 ? (
-            <span className="text-[9px] font-semibold leading-none tabular-nums">{prs.length}</span>
-          ) : null}
-        </span>
+        />
       </TooltipTrigger>
       <TooltipContent
         sideOffset={6}
         onEscapeKeyDown={tooltip.onEscapeKeyDown}
         className="w-80 max-w-[calc(100vw-1rem)] p-3"
       >
-        {hasFullData ? (
-          <PRTaskStatusSummary summaries={summaries} />
-        ) : (
-          <CompactPRTooltipContent status={hydration.status} />
-        )}
+        {props.content}
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+function PRTaskIconTrigger({
+  touch = false,
+  open = false,
+  onClick,
+  ...props
+}: PRTaskIconDisclosureProps & {
+  touch?: boolean;
+  open?: boolean;
+  onClick?: React.MouseEventHandler<HTMLButtonElement>;
+  onPointerEnter?: React.PointerEventHandler<HTMLSpanElement>;
+  onPointerLeave?: React.PointerEventHandler<HTMLSpanElement>;
+  onFocus?: React.FocusEventHandler<HTMLSpanElement>;
+  onBlur?: React.FocusEventHandler<HTMLSpanElement>;
+}) {
+  const { prs, icon, taskId, hasFullData, readyToMerge, allReadyToMerge } = props;
+  const commonAttributes = {
+    "data-testid": `pr-task-icon-${taskId}`,
+    "data-pr-state": props.displayState,
+    "data-pr-count": props.displayCount,
+    "data-pr-ready-to-merge": hasFullData
+      ? String(prs.length === 1 ? readyToMerge : allReadyToMerge)
+      : undefined,
+    "aria-label": props.ariaLabel,
+  };
+  const contents = (
+    <span className="inline-flex items-center gap-0.5">
+      {icon}
+      {prs.length > 1 ? (
+        <span className="text-[9px] font-semibold leading-none tabular-nums">{prs.length}</span>
+      ) : null}
+    </span>
+  );
+  if (touch) {
+    return (
+      <button
+        type="button"
+        {...commonAttributes}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        className={cn(
+          "inline-flex h-11 w-11 items-center justify-center shrink-0",
+          props.iconColor,
+        )}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={onClick}
+      >
+        {contents}
+      </button>
+    );
+  }
+  return (
+    <span
+      {...commonAttributes}
+      role="img"
+      tabIndex={0}
+      className={cn(
+        "inline-flex items-center shrink-0",
+        prs.length > 1 && "gap-0.5",
+        props.iconColor,
+      )}
+      onPointerEnter={props.onPointerEnter}
+      onPointerLeave={props.onPointerLeave}
+      onFocus={props.onFocus}
+      onBlur={props.onBlur}
+    >
+      {contents}
+    </span>
+  );
+}
+
+function TaskPRAutomationDetails({
+  summary,
+  status,
+}: {
+  summary: TaskPRAutomationSummary;
+  status?: TaskPRTooltipHydrationStatus;
+}) {
+  const { t } = useTranslation();
+  const hasAutomation = summary.autoFixEnabled || summary.autoMergeEnabled;
+  if (!hasAutomation && summary.details.length === 0) return null;
+  const detailContent =
+    summary.details.length > 0 ? (
+      <div className="mt-1 space-y-1">
+        {summary.details.map((detail, index) => (
+          <div
+            key={`${detail.number}-${index}`}
+            className="flex flex-wrap items-center gap-x-2 gap-y-1"
+          >
+            <span className="font-medium">
+              {t("github:prTaskStatusNumber", { number: detail.number })}
+            </span>
+            {detail.autoFixEnabled && (
+              <span className="text-yellow-500">{t("github:autoFix")}</span>
+            )}
+            {detail.autoMergeEnabled && (
+              <span className="text-purple-400">{t("github:autoMerge")}</span>
+            )}
+          </div>
+        ))}
+      </div>
+    ) : null;
+  const loadingContent =
+    status === "loading" || status === "idle" ? (
+      <p className="mt-1 text-muted-foreground">{t("github:taskPrDetailsLoading")}</p>
+    ) : null;
+  return (
+    <section
+      data-testid="pr-task-automation-details"
+      className="mt-2 border-t border-border/60 pt-2 text-xs"
+    >
+      <h4 className="font-medium text-foreground">{t("github:automation")}</h4>
+      {detailContent ?? loadingContent}
+    </section>
   );
 }
 

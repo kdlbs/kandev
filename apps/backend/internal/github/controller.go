@@ -86,6 +86,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.DELETE("/tasks/:taskId/issue", c.httpUnlinkTaskIssue)
 	api.GET("/tasks/:taskId/ci-options", c.httpGetTaskCIOptions)
 	api.PATCH("/tasks/:taskId/ci-options", c.httpPatchTaskCIOptions)
+	api.POST("/tasks/:taskId/ci-automation/retry-merge", c.httpRetryTaskCIAutoMerge)
 
 	api.GET("/prs/:owner/:repo/:number", c.httpGetPRFeedback)
 	api.GET("/prs/:owner/:repo/:number/info", c.httpGetPRInfo)
@@ -405,6 +406,37 @@ func (c *Controller) httpPatchTaskCIOptions(ctx *gin.Context) {
 	}
 	c.publishTaskCIOptionsUpdated(ctx.Request.Context(), resp)
 	ctx.JSON(http.StatusOK, resp)
+}
+
+type retryTaskCIAutoMergeRequest struct {
+	RepositoryID string `json:"repository_id"`
+	PRNumber     int    `json:"pr_number"`
+}
+
+func (c *Controller) httpRetryTaskCIAutoMerge(ctx *gin.Context) {
+	var request retryTaskCIAutoMergeRequest
+	if err := ctx.ShouldBindJSON(&request); err != nil || strings.TrimSpace(request.RepositoryID) == "" || request.PRNumber <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "repository_id and pr_number are required"})
+		return
+	}
+	pr, err := c.service.RetryTaskCIAutoMerge(
+		ctx.Request.Context(), ctx.Param("taskId"), strings.TrimSpace(request.RepositoryID), request.PRNumber,
+	)
+	if err != nil {
+		if errors.Is(err, ErrTaskCIMergeRetryNotAllowed) {
+			ctx.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		c.writeTaskCIOptionsError(ctx, err, "retry merge", "failed to retry automatic merge")
+		return
+	}
+	if c.service != nil && c.service.eventBus != nil {
+		event := bus.NewEvent(events.GitHubTaskPRUpdated, "github", pr)
+		if err := c.service.eventBus.Publish(ctx.Request.Context(), events.GitHubTaskPRUpdated, event); err != nil {
+			c.logger.Debug("publish automatic merge retry failed", zap.String("task_id", pr.TaskID), zap.Error(err))
+		}
+	}
+	ctx.JSON(http.StatusAccepted, gin.H{"accepted": true})
 }
 
 func (c *Controller) writeTaskCIOptionsError(ctx *gin.Context, err error, operation, message string) {

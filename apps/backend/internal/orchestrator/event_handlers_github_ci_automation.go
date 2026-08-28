@@ -134,7 +134,7 @@ func (s *Service) handleTaskPRCIAutomationWithRefresh(ctx context.Context, pr *g
 		s.publishTaskCIOptionsState(ctx, pr.TaskID)
 	}
 	if ciError != "" {
-		s.recordCIAutomationError(ctx, pr, ciError)
+		s.recordCIAutoMergeError(ctx, pr, ciError)
 		s.publishTaskCIOptionsState(ctx, pr.TaskID)
 	}
 	return nil
@@ -397,12 +397,27 @@ func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR
 	signature := ciAutomationMergeSignature(pr)
 	state, err := s.githubService.GetTaskCIPRState(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber)
 	if err != nil {
-		s.logger.Debug("load CI automation merge state failed; attempting merge without dedupe", zap.String("task_id", pr.TaskID), zap.Error(err))
+		s.logger.Debug("load CI automation merge state failed; durable reservation will decide", zap.String("task_id", pr.TaskID), zap.Error(err))
 	} else if state != nil {
 		if state.LastMergeSignature == signature {
-			return ""
+			if state.LastMergeResult == github.TaskCIMergeResultInFlight &&
+				state.LastMergeAttemptAt != nil && time.Since(*state.LastMergeAttemptAt) > ciAutomationDetachedTimeout {
+				message := "merge PR: previous automatic merge attempt did not reach a terminal state"
+				if recordErr := s.githubService.RecordTaskCIMergeAttemptResult(
+					context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber,
+					signature, github.TaskCIMergeResultFailed, message,
+				); recordErr != nil {
+					return fmt.Sprintf("%s; record expired merge attempt: %v", message, recordErr)
+				}
+				if !state.MergeRetryPending {
+					return message
+				}
+			}
+			if !state.MergeRetryPending {
+				return ""
+			}
 		}
-		if pr.HeadSHA != "" && state.LastQueueAttemptHeadSHA == pr.HeadSHA {
+		if pr.HeadSHA != "" && state.LastQueueAttemptHeadSHA == pr.HeadSHA && !state.MergeRetryPending {
 			return ""
 		}
 	}
@@ -414,18 +429,35 @@ func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR
 		AttemptedAt:      time.Now().UTC(),
 		AttemptedHeadSHA: pr.HeadSHA,
 	}
-	if err := s.githubService.MergePRForAutomation(
-		ctx, pr.WorkspaceID, pr.Owner, pr.Repo, pr.PRNumber, "",
-	); err != nil {
-		return fmt.Sprintf("merge PR: %v", err)
+	if err := s.githubService.RecordTaskCIMergeAttempt(context.WithoutCancel(ctx), attempt); err != nil {
+		if errors.Is(err, github.ErrTaskCIMergeAttemptAlreadyReserved) {
+			return ""
+		}
+		return fmt.Sprintf("reserve merge PR attempt: %v", err)
 	}
-	_ = s.githubService.RecordTaskCIMergeAttempt(context.WithoutCancel(ctx), attempt)
-	_ = s.githubService.ClearTaskCIError(context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber)
+	if err := s.githubService.MergePRForAutomation(
+		ctx, pr.WorkspaceID, pr.Owner, pr.Repo, pr.PRNumber, "", pr.HeadSHA,
+	); err != nil {
+		message := fmt.Sprintf("merge PR: %v", err)
+		if recordErr := s.githubService.RecordTaskCIMergeAttemptResult(
+			context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber,
+			signature, github.TaskCIMergeResultFailed, message,
+		); recordErr != nil {
+			return fmt.Sprintf("%s; record failed merge attempt: %v", message, recordErr)
+		}
+		return message
+	}
+	if err := s.githubService.RecordTaskCIMergeAttemptResult(
+		context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber,
+		signature, github.TaskCIMergeResultAccepted, "",
+	); err != nil {
+		return fmt.Sprintf("record accepted merge PR attempt: %v", err)
+	}
 	return ""
 }
 
 func (s *Service) recordTaskPRMergeQueueObservation(ctx context.Context, pr *github.TaskPR) {
-	if pr == nil || (pr.MergeQueueLastRemovalID == "" && !ciAutomationHasActiveMergeQueueEntry(pr)) {
+	if pr == nil || (pr.MergeQueueLastRemovalID == "" && !ciAutomationHasActiveMergeQueueEntry(pr) && pr.State != githubPRStateMerged) {
 		return
 	}
 	removal, _ := ciAutomationQueueRemovalSnapshot(pr)
@@ -435,6 +467,7 @@ func (s *Service) recordTaskPRMergeQueueObservation(ctx context.Context, pr *git
 		PRNumber:               pr.PRNumber,
 		RemovalEventID:         pr.MergeQueueLastRemovalID,
 		RemovalObservedHeadSHA: pr.HeadSHA,
+		Accepted:               pr.State == githubPRStateMerged,
 	}
 	if ciAutomationHasActiveMergeQueueEntry(pr) {
 		observation.ActiveQueueHeadSHA = pr.MergeQueueEntryHeadSHA
@@ -515,6 +548,19 @@ func (s *Service) recordCIAutomationError(ctx context.Context, pr *github.TaskPR
 		zap.String("error", message))
 	if err := s.githubService.RecordTaskCIError(context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber, message); err != nil {
 		s.logger.Debug("record CI automation error failed", zap.String("task_id", pr.TaskID), zap.Error(err))
+	}
+}
+
+func (s *Service) recordCIAutoMergeError(ctx context.Context, pr *github.TaskPR, message string) {
+	s.logger.Warn("CI auto-merge error",
+		zap.String("task_id", pr.TaskID),
+		zap.String("repository_id", pr.RepositoryID),
+		zap.Int("pr_number", pr.PRNumber),
+		zap.String("error", message))
+	if err := s.githubService.RecordTaskCIAutoMergeError(
+		context.WithoutCancel(ctx), pr.TaskID, pr.RepositoryID, pr.PRNumber, message,
+	); err != nil {
+		s.logger.Debug("record CI auto-merge error failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 	}
 }
 
@@ -909,7 +955,29 @@ func encodeCIAutomationCheckpoint(checkpoint ciAutomationCheckpoint) (string, st
 }
 
 func ciAutomationMergeSignature(pr *github.TaskPR) string {
-	payload := fmt.Sprintf("%s|%s|%d|%s|%s|%d|%d|%s|%s|%s|%d|%d", pr.TaskID, pr.RepositoryID, pr.PRNumber, pr.HeadSHA, pr.HeadBranch, pr.Additions, pr.Deletions, pr.ChecksState, pr.ReviewState, pr.MergeableState, pr.ReviewCount, pr.UnresolvedReviewThreads)
-	sum := sha256.Sum256([]byte(payload))
+	requiredReviews := 0
+	requiredReviewsObserved := pr.RequiredReviews != nil
+	if pr.RequiredReviews != nil {
+		requiredReviews = *pr.RequiredReviews
+	}
+	payload, _ := json.Marshal(struct {
+		TaskID, RepositoryID, HeadSHA, HeadBranch   string
+		PRNumber, Additions, Deletions              int
+		ChecksState, ReviewState, MergeableState    string
+		ReviewCount, PendingReviewCount             int
+		RequiredReviewsObserved                     bool
+		RequiredReviews, ChecksTotal, ChecksPassing int
+		UnresolvedReviewThreads                     int
+	}{
+		TaskID: pr.TaskID, RepositoryID: pr.RepositoryID, PRNumber: pr.PRNumber,
+		HeadSHA: pr.HeadSHA, HeadBranch: pr.HeadBranch,
+		Additions: pr.Additions, Deletions: pr.Deletions,
+		ChecksState: pr.ChecksState, ReviewState: pr.ReviewState, MergeableState: pr.MergeableState,
+		ReviewCount: pr.ReviewCount, PendingReviewCount: pr.PendingReviewCount,
+		RequiredReviewsObserved: requiredReviewsObserved, RequiredReviews: requiredReviews,
+		ChecksTotal: pr.ChecksTotal, ChecksPassing: pr.ChecksPassing,
+		UnresolvedReviewThreads: pr.UnresolvedReviewThreads,
+	})
+	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
 }

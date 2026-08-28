@@ -102,6 +102,50 @@ func TestProjectorRehydratesPullRequestObservationsAfterRestartWithoutAggregate(
 	}
 }
 
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.10
+func TestProjectorRefreshesAutomationFlagsAfterCIOptionsUpdate(t *testing.T) {
+	store := newProjectorTestStore()
+	store.rows["task-pr-options-refresh"] = &StoredTaskStatusSummary{
+		TaskID:      "task-pr-options-refresh",
+		WorkspaceID: "workspace-1",
+		Summary: TaskStatusSummary{
+			Revision: 1,
+			PullRequest: &PullRequestSummary{
+				Count: 1, OpenCount: 1, State: prStateOpen, Number: 41,
+				AutoFixEnabled: true,
+			},
+		},
+	}
+	loaderCalls := 0
+	projector := NewProjector(ProjectorConfig{
+		Store: store,
+		ResolveWorkspace: func(context.Context, string) (string, error) {
+			return "workspace-1", nil
+		},
+		LoadPullRequests: func(context.Context, string) ([]PullRequestInput, error) {
+			loaderCalls++
+			return []PullRequestInput{{
+				Key: "repo-a#41", State: prStateOpen, Number: 41,
+				AutoFixEnabled: loaderCalls == 1,
+			}}, nil
+		},
+		Now: func() time.Time { return time.Date(2026, 8, 16, 0, 30, 0, 0, time.UTC) },
+	})
+
+	if err := projector.HandleEvent(context.Background(), bus.NewEvent(events.GitHubTaskCIOptionsUpdated, "test", map[string]interface{}{
+		"task_id": "task-pr-options-refresh", "workspace_id": "workspace-1",
+	})); err != nil {
+		t.Fatalf("replay CI options event: %v", err)
+	}
+	updated := store.summary("task-pr-options-refresh")
+	if updated == nil || updated.PullRequest == nil || updated.PullRequest.AutoFixEnabled {
+		t.Fatalf("updated summary = %+v, want auto-fix disabled", updated)
+	}
+	if loaderCalls != 2 {
+		t.Fatalf("PR loader calls = %d, want initial load plus options refresh", loaderCalls)
+	}
+}
+
 func TestProjectorRehydratesSourceObservationsWithoutPersistedSummary(t *testing.T) {
 	store := newProjectorTestStore()
 	sessionLoaderCalls := 0

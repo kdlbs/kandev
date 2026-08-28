@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -61,12 +62,14 @@ type GitHubService interface {
 	RecordTaskCIFixAttempt(ctx context.Context, attempt github.TaskCIFixAttempt) error
 	RefreshTaskCIFixCheckpoint(ctx context.Context, taskID, repositoryID string, prNumber int, signature, checkpointJSON string) error
 	RecordTaskCIMergeAttempt(ctx context.Context, attempt github.TaskCIMergeAttempt) error
+	RecordTaskCIMergeAttemptResult(ctx context.Context, taskID, repositoryID string, prNumber int, signature, result, message string) error
 	RecordTaskCIMergeQueueObservation(ctx context.Context, observation github.TaskCIMergeQueueObservation) error
 	RecordTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error
+	RecordTaskCIAutoMergeError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error
 	MarkTaskCIAutoFixExhausted(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error
 	ClearTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int) error
 	GetPRFeedbackForAutomation(ctx context.Context, workspaceID, owner, repo string, number int) (*github.PRFeedback, error)
-	MergePRForAutomation(ctx context.Context, workspaceID, owner, repo string, number int, mergeMethod string) error
+	MergePRForAutomation(ctx context.Context, workspaceID, owner, repo string, number int, mergeMethod, expectedHeadSHA string) error
 	ListActivePRWatches(ctx context.Context) ([]*github.PRWatch, error)
 	ReserveReviewPRTask(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, prURL string) (bool, error)
 	AssignReviewPRTaskID(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, taskID string) error
@@ -300,21 +303,94 @@ func (s *Service) startTaskPRCIAutomationWithRefresh(ctx context.Context, pr *gi
 		return
 	}
 	key := fmt.Sprintf("%s|%s|%d", pr.TaskID, pr.RepositoryID, pr.PRNumber)
-	if _, loaded := s.ciAutomationInFlight.LoadOrStore(key, struct{}{}); loaded {
-		s.logger.Debug("CI automation already in flight",
+	request := ciAutomationRequest{ctx: ctx, pr: pr, refresh: refresh}
+	if !s.ciAutomationInFlight.Enqueue(key, request) {
+		s.logger.Debug("CI automation follow-up coalesced",
 			zap.String("task_id", pr.TaskID),
 			zap.String("repository_id", pr.RepositoryID),
 			zap.Int("pr_number", pr.PRNumber))
 		return
 	}
 	go func() {
-		defer s.ciAutomationInFlight.Delete(key)
-		automationCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ciAutomationDetachedTimeout)
-		defer cancel()
-		if err := s.handleTaskPRCIAutomationWithRefresh(automationCtx, pr, refresh); err != nil {
-			s.logger.Debug("CI automation handling failed", zap.String("task_id", pr.TaskID), zap.Error(err))
+		for {
+			automationCtx, cancel := context.WithTimeout(
+				context.WithoutCancel(request.ctx), ciAutomationDetachedTimeout,
+			)
+			err := s.handleTaskPRCIAutomationWithRefresh(automationCtx, request.pr, request.refresh)
+			cancel()
+			if err != nil {
+				s.logger.Debug("CI automation handling failed", zap.String("task_id", request.pr.TaskID), zap.Error(err))
+			}
+			var ok bool
+			request, ok = s.ciAutomationInFlight.Next(key)
+			if !ok {
+				return
+			}
 		}
 	}()
+}
+
+type ciAutomationRequest struct {
+	ctx     context.Context
+	pr      *github.TaskPR
+	refresh bool
+}
+
+type ciAutomationWork struct {
+	pending *ciAutomationRequest
+}
+
+// ciAutomationCoordinator owns the per-PR worker lifecycle. Enqueue returns
+// true only to the caller that must start the worker. Later requests replace
+// the single pending follow-up while preserving the strongest refresh need.
+type ciAutomationCoordinator struct {
+	mu    sync.Mutex
+	works map[string]*ciAutomationWork
+}
+
+func (c *ciAutomationCoordinator) Enqueue(key string, request ciAutomationRequest) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.works == nil {
+		c.works = make(map[string]*ciAutomationWork)
+	}
+	if work, ok := c.works[key]; ok {
+		if work.pending != nil && work.pending.refresh {
+			request.refresh = true
+		}
+		work.pending = &request
+		return false
+	}
+	c.works[key] = &ciAutomationWork{}
+	return true
+}
+
+func (c *ciAutomationCoordinator) Next(key string) (ciAutomationRequest, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	work, ok := c.works[key]
+	if !ok {
+		return ciAutomationRequest{}, false
+	}
+	if work.pending != nil {
+		request := *work.pending
+		work.pending = nil
+		return request, true
+	}
+	delete(c.works, key)
+	return ciAutomationRequest{}, false
+}
+
+// Load preserves the read-only test probe used to assert worker isolation.
+func (c *ciAutomationCoordinator) Load(key any) (any, bool) {
+	keyString, ok := key.(string)
+	if !ok {
+		return nil, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	work, exists := c.works[keyString]
+	return work, exists
 }
 
 // handleNewReviewPR creates a task for a new PR needing review.

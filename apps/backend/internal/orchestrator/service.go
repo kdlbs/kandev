@@ -661,9 +661,9 @@ type Service struct {
 
 	// GitHub service for PR auto-detection on push
 	githubService GitHubService
-	// ciAutomationInFlight prevents PR feedback and task-PR update events from
-	// racing duplicate auto-fix prompts or merge calls for the same PR.
-	ciAutomationInFlight sync.Map
+	// ciAutomationInFlight serializes each PR's evaluation and coalesces one
+	// follow-up request instead of dropping an event that arrives mid-run.
+	ciAutomationInFlight ciAutomationCoordinator
 
 	// GitLab MR lifecycle notification automation. Nil-safe: without it,
 	// gitlab.task_mr.updated events are observed but no lifecycle prompt is

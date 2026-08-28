@@ -154,6 +154,34 @@ describe("toSheetItem", () => {
   });
 });
 
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.10
+describe("toSheetItem automation indicators", () => {
+  it("carries bounded automation indicators onto the mobile sheet row", () => {
+    const item = toSheetItem(
+      task({
+        statusSummary: {
+          revision: 1,
+          updated_at: UPDATED_AT,
+          pull_request: {
+            number: 42,
+            state: "open",
+            auto_fix_enabled: true,
+            auto_merge_enabled: true,
+          },
+        },
+      }),
+      emptyCtx(),
+    );
+
+    expect(item.prInfo).toEqual({
+      number: 42,
+      state: "Open",
+      autoFixEnabled: true,
+      autoMergeEnabled: true,
+    });
+  });
+});
+
 describe("toSheetItem queued prompt count", () => {
   it("carries the queued prompt count from the task status summary", () => {
     const item = toSheetItem(

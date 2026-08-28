@@ -24,6 +24,27 @@ function sheetDiffStats(summary: KanbanState["tasks"][number]["statusSummary"]) 
   return { additions: git.additions ?? 0, deletions: git.deletions ?? 0 };
 }
 
+function sheetPRInfo(summary: KanbanState["tasks"][number]["statusSummary"]):
+  | {
+      number: number;
+      state: string;
+      aggregateState?: string;
+      autoFixEnabled?: boolean;
+      autoMergeEnabled?: boolean;
+    }
+  | undefined {
+  const pullRequest = summary?.pull_request;
+  if (!pullRequest?.number) return undefined;
+  const state = pullRequest.state ?? pullRequest.aggregate_state ?? "open";
+  return {
+    number: pullRequest.number,
+    state: state.length > 0 ? state[0].toUpperCase() + state.slice(1) : state,
+    aggregateState: pullRequest.aggregate_state,
+    ...(pullRequest.auto_fix_enabled ? { autoFixEnabled: true } : {}),
+    ...(pullRequest.auto_merge_enabled ? { autoMergeEnabled: true } : {}),
+  };
+}
+
 function sheetRepositoryPath(
   task: KanbanState["tasks"][number],
   ctx: SheetItemCtx,
@@ -60,6 +81,7 @@ function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
       : (task.primarySessionId ?? null),
     hasPendingClarification: pending.clarification,
     hasPendingPermission: pending.permission,
+    prInfo: sheetPRInfo(summary),
     agentErrorMessage: statusSummaryActiveErrorPreview(
       summary,
       ctx.acknowledgedAgentErrors,
