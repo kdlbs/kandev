@@ -457,3 +457,89 @@ func TestSharedMovePath_EphemeralTaskAdmitsWithoutConsumingCapacity(t *testing.T
 		t.Fatalf("WorkflowStepID = %s, want step-full", result.Task.WorkflowStepID)
 	}
 }
+
+// TestSharedMovePath_CASGuardedSameStepMoveSucceeds pins the
+// UpdateTaskIfWorkflowMatches happy path: AC-005.1's headline scenario, a
+// plugin repeating an identical move (no explicit workflow_id — the caller
+// resolved "the task's current workflow" from its own pre-read and sets
+// MoveTaskOptions.ExpectedWorkflowID, exactly as
+// pluginsTaskWriterAdapter.MoveTask does when in.WorkflowID is nil, see
+// backendapp/services.go) after the task already sits on the named step.
+// Every other same-step test in this file leaves ExpectedWorkflowID nil, so
+// none of them reach updateMovedTaskSameStep's CAS branch
+// (UpdateTaskIfWorkflowMatches) at all — this is the only one that does.
+func TestSharedMovePath_CASGuardedSameStepMoveSucceeds(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-source": {ID: "step-source", WorkflowID: "wf-source", Name: "Source", Position: 0},
+	}})
+	createMoveTask(t, ctx, repo, "task-stationary", "wf-source", "step-source", nil)
+
+	expectedWorkflowID := "wf-source"
+	opts := pluginMoveOptions()
+	opts.ExpectedWorkflowID = &expectedWorkflowID
+
+	result, err := svc.MoveTaskWithOptions(pluginMoveContext("plugin:acme"), "task-stationary", "wf-source", "step-source", 0, opts)
+	if err != nil {
+		t.Fatalf("MoveTaskWithOptions (CAS-guarded same-step move): %v", err)
+	}
+	if result.Transitioned {
+		t.Fatalf("Transitioned = true, want false for a same-step move (no ledger row)")
+	}
+	if result.FromStepID != "" {
+		t.Fatalf("FromStepID = %q, want empty when Transitioned is false", result.FromStepID)
+	}
+
+	// The genesis task_created row is the only ledger row — the no-op move
+	// must not have appended a second one.
+	triggers := stepTransitionTriggers(t, repo, "task-stationary")
+	if len(triggers) != 1 {
+		t.Fatalf("ledger rows for task-stationary = %d (%v), want exactly 1 (genesis only)", len(triggers), triggers)
+	}
+
+	task, err := repo.GetTask(ctx, "task-stationary")
+	if err != nil {
+		t.Fatalf("GetTask(task-stationary): %v", err)
+	}
+	if task.WorkflowID != "wf-source" || task.WorkflowStepID != "step-source" {
+		t.Fatalf("task-stationary after CAS-guarded same-step move: workflow=%q step=%q, want wf-source/step-source unchanged",
+			task.WorkflowID, task.WorkflowStepID)
+	}
+}
+
+// TestSharedMovePath_CrossStepMoveReportsActualOriginStepNotDestination pins
+// MoveTaskResult.FromStepID's positive value against a real write
+// transaction: system-design.md's "both outcome fields come from the write
+// transaction" requires FromStepID name the step the task actually left, not
+// the step it landed on. Every other test in this file either only asserts
+// the negative/empty case (SameStepMoveReportsNoTransitionAndEmptyFromStepID)
+// or a cross-step move's Transitioned flag without ever reading FromStepID's
+// value (PluginMoveRecordsIntegrationActorOnLedgerRow) — so a mutation
+// swapping the assignment from the origin step to the destination step (e.g.
+// task.FromStepID = task.WorkflowStepID) would still pass every existing
+// package. Source and destination step IDs are deliberately distinguishable
+// strings so that mutation cannot pass by coincidence.
+func TestSharedMovePath_CrossStepMoveReportsActualOriginStepNotDestination(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-source": {ID: "step-source", WorkflowID: "wf-source", Name: "Source", Position: 0},
+		"step-target": {ID: "step-target", WorkflowID: "wf-source", Name: "Target", Position: 1},
+	}})
+	createMoveTask(t, ctx, repo, "task-crossing", "wf-source", "step-source", nil)
+
+	result, err := svc.MoveTaskWithOptions(pluginMoveContext("plugin:acme"), "task-crossing", "wf-source", "step-target", 0, pluginMoveOptions())
+	if err != nil {
+		t.Fatalf("MoveTaskWithOptions: %v", err)
+	}
+	if !result.Transitioned {
+		t.Fatalf("Transitioned = false, want true for a cross-step move")
+	}
+	if result.FromStepID != "step-source" {
+		t.Fatalf("FromStepID = %q, want %q (the step actually left, not the destination %q)",
+			result.FromStepID, "step-source", "step-target")
+	}
+}

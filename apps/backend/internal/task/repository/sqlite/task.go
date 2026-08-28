@@ -578,9 +578,18 @@ func (r *Repository) UpdateTaskIfWorkflowMatches(ctx context.Context, task *mode
 }
 
 func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task, metadata []byte, expectedWorkflowID string) (entryID string, err error) {
-	fromWorkflowID, fromStepID, _, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	fromWorkflowID, fromStepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
 	if err != nil {
 		return "", err
+	}
+	if !found {
+		// A concurrently deleted task must surface as ErrTaskNotFound, not
+		// fall through to the CAS comparison below: with fromWorkflowID=""
+		// (never equal to a non-empty expectedWorkflowID) that branch would
+		// misreport the deletion as a workflow-resolution conflict. NotFound
+		// is reserved for the addressed resource and wins the precedence
+		// ladder over every other case (design's error-mapping table).
+		return "", fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
 	if expectedWorkflowID != "" && fromWorkflowID != expectedWorkflowID {
 		// Checked here, immediately before the UPDATE below and using the
