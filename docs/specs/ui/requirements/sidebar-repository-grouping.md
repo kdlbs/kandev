@@ -43,4 +43,3 @@ The UI system owns this presentation contract. The task system supplies the orde
 - Changes to repository attachment order.
 - Changes to saved-view persistence or group-collapse persistence.
 - Changes to group-header layout, truncation, or touch behavior.
-

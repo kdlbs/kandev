@@ -103,6 +103,46 @@ func TestGetPromptGenerationForSessionUnknownSession(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoExecutionForSession)
 }
 
+// TestGetPromptActivityForSessionReturnsTrackedSnapshot is the codex P1 gap
+// flagged during WO-38 Build round 7: GetPromptActivityForSession (the
+// primitive the stuck-signal watchdog reads to gate reclaims on real elapsed
+// inactivity, orchestrator/stuck_signal_watchdog.go) had no direct unit test
+// of its own — only indirect coverage through the watchdog's mock. This pins
+// its two branches: a tracked execution returns the execution ID, prompt
+// generation, activity epoch, and lastActivityAt that markAgentActivity last
+// recorded; an untracked session returns ErrNoExecutionForSession.
+func TestGetPromptActivityForSessionReturnsTrackedSnapshot(t *testing.T) {
+	mgr := newTestManager(t)
+	exec := &AgentExecution{ID: "exec-1", SessionID: "session-1"}
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	generation, err := mgr.BeginPrompt("exec-1")
+	require.NoError(t, err)
+	exec.markAgentActivity()
+	wantActivityAt, _, wantEpoch := exec.promptActivitySnapshot()
+
+	executionID, gotGeneration, gotEpoch, gotActivityAt, err := mgr.GetPromptActivityForSession(context.Background(), "session-1")
+
+	require.NoError(t, err)
+	require.Equal(t, "exec-1", executionID)
+	require.Equal(t, generation, gotGeneration)
+	require.Equal(t, wantEpoch, gotEpoch)
+	require.True(t, wantActivityAt.Equal(gotActivityAt),
+		"expected the session-scoped read to observe the same lastActivityAt markAgentActivity recorded")
+}
+
+func TestGetPromptActivityForSessionUnknownSession(t *testing.T) {
+	mgr := newTestManager(t)
+
+	executionID, generation, epoch, activityAt, err := mgr.GetPromptActivityForSession(context.Background(), "session-absent")
+
+	require.ErrorIs(t, err, ErrNoExecutionForSession)
+	require.Empty(t, executionID)
+	require.Zero(t, generation)
+	require.Zero(t, epoch)
+	require.True(t, activityAt.IsZero())
+}
+
 func TestBeginPromptUnknownExecution(t *testing.T) {
 	mgr := newTestManager(t)
 

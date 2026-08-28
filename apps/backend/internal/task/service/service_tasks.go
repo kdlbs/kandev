@@ -2095,7 +2095,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 				zap.String("job_id", cleanupJob.ID), zap.String("task_id", id), zap.Error(err))
 		}
 	} else if len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || taskEnv != nil {
-		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup,
+		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup, false,
 			"task archived", "failed to stop session on task archive", "task archive cleanup completed")
 	}
 
@@ -2328,7 +2328,7 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 				zap.String("job_id", cleanupJob.ID), zap.String("task_id", id), zap.Error(err))
 		}
 	} else if hasCleanup {
-		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup,
+		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup, true,
 			"task deleted", "failed to stop session on task delete", "task cleanup completed")
 	}
 
@@ -2371,6 +2371,7 @@ func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, delet
 	// Capture the lifecycle disposition before borrower ownership transfer can
 	// change whether the environment row itself is deleted.
 	preserveBranches := !deleteEnvRow
+	taskDeleted := deleteEnvRow
 	if deleteEnvRow && s.attachmentSvc != nil {
 		if err := s.attachmentSvc.DeleteByTask(context.WithoutCancel(ctx), taskID); err != nil {
 			s.logger.Warn("failed to remove task attachment bytes during resource cleanup",
@@ -2432,7 +2433,7 @@ func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, delet
 	if deleteEnvRow {
 		reason = "cascade delete"
 	}
-	s.runAsyncTaskCleanup(taskID, sessions, worktrees, stopTargets, envCleanup,
+	s.runAsyncTaskCleanup(taskID, sessions, worktrees, stopTargets, envCleanup, taskDeleted,
 		reason, "failed to stop session on cascade cleanup", "cascade cleanup completed")
 }
 
@@ -2479,9 +2480,10 @@ func (s *Service) runAsyncTaskCleanup(
 	worktrees []*worktree.Worktree,
 	stopTargets []taskStopTarget,
 	envCleanup taskEnvironmentCleanup,
+	taskDeleted bool,
 	stopReason, stopFailMsg, cleanupMsg string,
 ) {
-	go s.runTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup, stopReason, stopFailMsg, cleanupMsg)
+	go s.runTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup, taskDeleted, stopReason, stopFailMsg, cleanupMsg)
 }
 
 func (s *Service) runTaskCleanup(
@@ -2490,6 +2492,7 @@ func (s *Service) runTaskCleanup(
 	worktrees []*worktree.Worktree,
 	stopTargets []taskStopTarget,
 	envCleanup taskEnvironmentCleanup,
+	taskDeleted bool,
 	stopReason, stopFailMsg, cleanupMsg string,
 ) {
 	cleanupStart := time.Now()
@@ -2506,7 +2509,7 @@ func (s *Service) runTaskCleanup(
 	stopTargets = refreshedTargets
 	s.registerTaskRuntimeStopOwners(stopTargets, true)
 
-	stopOutcome := s.stopTaskRuntimeTargets(cleanupCtx, id, stopTargets, stopReason, stopFailMsg)
+	stopOutcome := s.stopTaskRuntimeTargetsWithTaskDeleted(cleanupCtx, id, stopTargets, stopReason, stopFailMsg, taskDeleted)
 
 	cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, stopTargets, envCleanup,
 		taskCleanupPreserveRows(stopOutcome))
@@ -2710,6 +2713,16 @@ func taskCleanupPreserveRows(outcome taskRuntimeStopOutcome) map[string]struct{}
 }
 
 func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, stopTargets []taskStopTarget, stopReason, stopFailMsg string) taskRuntimeStopOutcome {
+	return s.stopTaskRuntimeTargetsWithTaskDeleted(ctx, taskID, stopTargets, stopReason, stopFailMsg, false)
+}
+
+func (s *Service) stopTaskRuntimeTargetsWithTaskDeleted(
+	ctx context.Context,
+	taskID string,
+	stopTargets []taskStopTarget,
+	stopReason, stopFailMsg string,
+	taskDeleted bool,
+) taskRuntimeStopOutcome {
 	outcome := taskRuntimeStopOutcome{
 		failed:   make(map[string]struct{}),
 		preserve: make(map[string]struct{}),
@@ -2721,54 +2734,154 @@ func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, sto
 		if context.Cause(ctx) != nil {
 			return outcome
 		}
-		if target.executionID != "" {
-			if err := s.executionStopper.StopExecution(ctx, target.executionID, stopReason, true); err != nil {
-				if runtimeStopAlreadyComplete(err) {
-					continue
-				}
-				if target.terminal {
-					s.logger.Debug("stop failed for terminal session execution (expected), proceeding with cleanup",
-						zap.String("task_id", taskID),
-						zap.String("session_id", target.sessionID),
-						zap.Error(err))
-					continue
-				}
-				outcome.failed[target.sessionID] = struct{}{}
-				s.logger.Warn(stopFailMsg,
-					zap.String("task_id", taskID),
-					zap.String("session_id", target.sessionID),
-					zap.String("execution_id", target.executionID),
-					zap.Error(err))
-			}
-			continue
-		}
-		if err := s.executionStopper.StopSession(ctx, target.sessionID, stopReason, true); err != nil {
-			if target.terminal {
-				s.logger.Debug("stop failed for terminal session (expected), proceeding with cleanup",
-					zap.String("task_id", taskID),
-					zap.String("session_id", target.sessionID),
-					zap.Error(err))
-				continue
-			}
-			// A session-level not-found is retryable by default (the execution may
-			// simply not be registered yet). But when the owned row is a
-			// confirmed-dead LOCAL runtime, the runtime really is gone — treat the
-			// stop as already complete so the durable cleanup job stops retrying a
-			// runtime that will never come back.
-			if runtimeStopAlreadyComplete(err) {
-				if running := s.confirmedDeadLocalRow(ctx, target.sessionID); running != nil {
-					s.reconcileConfirmedDeadRow(ctx, taskID, target.sessionID, running, &outcome)
-					continue
-				}
-			}
-			outcome.failed[target.sessionID] = struct{}{}
-			s.logger.Warn(stopFailMsg,
-				zap.String("task_id", taskID),
-				zap.String("session_id", target.sessionID),
-				zap.Error(err))
-		}
+		s.stopTaskRuntimeTarget(ctx, taskID, target, stopReason, stopFailMsg, taskDeleted, &outcome)
 	}
 	return outcome
+}
+
+func (s *Service) stopTaskRuntimeTarget(
+	ctx context.Context,
+	taskID string,
+	target taskStopTarget,
+	stopReason, stopFailMsg string,
+	taskDeleted bool,
+	outcome *taskRuntimeStopOutcome,
+) {
+	if target.executionID != "" {
+		s.stopTaskRuntimeExecution(ctx, taskID, target, stopReason, stopFailMsg, outcome)
+		return
+	}
+	s.stopTaskRuntimeSession(ctx, taskID, target, stopReason, stopFailMsg, taskDeleted, outcome)
+}
+
+func (s *Service) stopTaskRuntimeExecution(
+	ctx context.Context,
+	taskID string,
+	target taskStopTarget,
+	stopReason, stopFailMsg string,
+	outcome *taskRuntimeStopOutcome,
+) {
+	err := s.executionStopper.StopExecution(ctx, target.executionID, stopReason, true)
+	if err == nil || runtimeStopAlreadyComplete(err) {
+		return
+	}
+	if target.terminal {
+		s.logger.Debug("stop failed for terminal session execution (expected), proceeding with cleanup",
+			zap.String("task_id", taskID),
+			zap.String("session_id", target.sessionID),
+			zap.Error(err))
+		return
+	}
+	outcome.failed[target.sessionID] = struct{}{}
+	s.logger.Warn(stopFailMsg,
+		zap.String("task_id", taskID),
+		zap.String("session_id", target.sessionID),
+		zap.String("execution_id", target.executionID),
+		zap.Error(err))
+}
+
+func (s *Service) stopTaskRuntimeSession(
+	ctx context.Context,
+	taskID string,
+	target taskStopTarget,
+	stopReason, stopFailMsg string,
+	taskDeleted bool,
+	outcome *taskRuntimeStopOutcome,
+) {
+	err := s.executionStopper.StopSession(ctx, target.sessionID, stopReason, true)
+	if err == nil {
+		return
+	}
+	if target.terminal {
+		s.logger.Debug("stop failed for terminal session (expected), proceeding with cleanup",
+			zap.String("task_id", taskID),
+			zap.String("session_id", target.sessionID),
+			zap.Error(err))
+		return
+	}
+	// A session-level not-found is retryable by default (the execution may
+	// simply not be registered yet). But when the owned row is a
+	// confirmed-dead LOCAL runtime, the runtime really is gone — treat the
+	// stop as already complete so the durable cleanup job stops retrying a
+	// runtime that will never come back.
+	if runtimeStopAlreadyComplete(err) {
+		if taskDeleted && s.stopDeletedSessionRuntime(ctx, taskID, target, stopReason) {
+			return
+		}
+		if running := s.confirmedDeadLocalRow(ctx, target.sessionID); running != nil {
+			s.reconcileConfirmedDeadRow(ctx, taskID, target.sessionID, running, outcome)
+			return
+		}
+	}
+	outcome.failed[target.sessionID] = struct{}{}
+	s.logger.Warn(stopFailMsg,
+		zap.String("task_id", taskID),
+		zap.String("session_id", target.sessionID),
+		zap.Error(err))
+}
+
+// stopDeletedSessionRuntime handles a session stop that raced with task deletion.
+// A missing session is complete only when no executor row remains. If a late row
+// has an exact execution ID, stop that execution before cleanup removes the row.
+// When the row has no execution ID, return false so the caller can apply the
+// confirmed-dead local probe before marking the session for retry.
+func (s *Service) stopDeletedSessionRuntime(
+	ctx context.Context,
+	taskID string,
+	target taskStopTarget,
+	stopReason string,
+) bool {
+	if s.executors == nil || s.executionStopper == nil {
+		return false
+	}
+	running, err := s.executors.GetExecutorRunningBySessionID(ctx, target.sessionID)
+	if err != nil {
+		if errors.Is(err, models.ErrExecutorRunningNotFound) {
+			s.logger.Debug("deleted task session has no registered runtime",
+				zap.String("task_id", taskID),
+				zap.String("session_id", target.sessionID))
+			return true
+		}
+		s.logger.Warn("failed to inspect deleted task session runtime",
+			zap.String("task_id", taskID),
+			zap.String("session_id", target.sessionID),
+			zap.Error(err))
+		return false
+	}
+	if running == nil {
+		return true
+	}
+	executionID := strings.TrimSpace(running.AgentExecutionID)
+	if executionID == "" {
+		return false
+	}
+
+	s.executionStopper.RegisterExecutionStopOwner(target.sessionID, executionID, true)
+	if err := s.executionStopper.StopExecution(ctx, executionID, stopReason, true); err != nil {
+		if runtimeStopAlreadyComplete(err) {
+			s.logger.Debug("late deleted task execution was already stopped",
+				zap.String("task_id", taskID),
+				zap.String("session_id", target.sessionID),
+				zap.String("execution_id", executionID),
+				zap.Error(err))
+			return true
+		}
+		if target.terminal {
+			s.logger.Debug("stop failed for late terminal task execution (expected), proceeding with cleanup",
+				zap.String("task_id", taskID),
+				zap.String("session_id", target.sessionID),
+				zap.String("execution_id", executionID),
+				zap.Error(err))
+			return true
+		}
+		s.logger.Warn("failed to stop late deleted task execution",
+			zap.String("task_id", taskID),
+			zap.String("session_id", target.sessionID),
+			zap.String("execution_id", executionID),
+			zap.Error(err))
+		return false
+	}
+	return true
 }
 
 // reconcileConfirmedDeadRow applies the resume-safety deletion invariant to a

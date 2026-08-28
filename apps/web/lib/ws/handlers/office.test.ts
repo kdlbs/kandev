@@ -503,3 +503,54 @@ describe("office WS handler — provider routing events", () => {
     expect(upsertProviderHealth).not.toHaveBeenCalled();
   });
 });
+
+describe("office WS handler — office.run.processed inbox refetch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("triggers an inbox refetch when a run finishes with status failed", () => {
+    const { store, setOfficeRefetchTrigger } = makeStore(ACTIVE_WS);
+    const handlers = registerOfficeHandlers(store);
+    const handler = handlers["office.run.processed"]!;
+
+    handler({
+      type: "notification",
+      action: "office.run.processed",
+      payload: { workspace_id: ACTIVE_WS, status: "failed", run_id: "run-1" },
+    } as Parameters<typeof handler>[0]);
+
+    expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("inbox");
+    expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("runs");
+    expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("agents");
+  });
+
+  it("does NOT trigger an inbox refetch when a run finishes with a non-failed status", () => {
+    const { store, setOfficeRefetchTrigger } = makeStore(ACTIVE_WS);
+    const handlers = registerOfficeHandlers(store);
+    const handler = handlers["office.run.processed"]!;
+
+    handler({
+      type: "notification",
+      action: "office.run.processed",
+      payload: { workspace_id: ACTIVE_WS, status: "finished", run_id: "run-1" },
+    } as Parameters<typeof handler>[0]);
+
+    expect(setOfficeRefetchTrigger).not.toHaveBeenCalledWith("inbox");
+    expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("runs");
+  });
+
+  it("does NOT trigger any refetch for a failed run in another workspace", () => {
+    const { store, setOfficeRefetchTrigger } = makeStore(ACTIVE_WS);
+    const handlers = registerOfficeHandlers(store);
+    const handler = handlers["office.run.processed"]!;
+
+    handler({
+      type: "notification",
+      action: "office.run.processed",
+      payload: { workspace_id: "ws-other", status: "failed", run_id: "run-1" },
+    } as Parameters<typeof handler>[0]);
+
+    expect(setOfficeRefetchTrigger).not.toHaveBeenCalled();
+  });
+});

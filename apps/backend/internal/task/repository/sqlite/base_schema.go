@@ -24,6 +24,7 @@ func (r *Repository) initSchema() error {
 		r.initSessionSchema,
 		r.initDynamicRoutingSchema,
 		r.initStepTransitionsSchema,
+		r.initStepEntriesSchema,
 		r.initTaskUsageEventsSchema,
 		r.initAttachmentsSchema,
 		r.initTaskResourceCleanupSchema,
@@ -825,10 +826,7 @@ func (r *Repository) initSubagentContextSchema() error {
 // workflows get deleted, and the historical fact that a card was in a
 // now-deleted step must survive that deletion.
 func (r *Repository) initStepTransitionsSchema() error {
-	idCol := "id INTEGER PRIMARY KEY AUTOINCREMENT"
-	if dialect.IsPostgres(r.db.DriverName()) {
-		idCol = "id BIGSERIAL PRIMARY KEY"
-	}
+	idCol := dialect.AutoIncrementIDColumn(r.db.DriverName())
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS task_step_transitions (
 		` + idCol + `,
