@@ -1,6 +1,13 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const requestQuickChatClose = vi.hoisted(() => vi.fn());
+
+vi.mock("@/components/quick-chat/quick-chat-focus", () => ({
+  captureQuickChatLauncherFocus: vi.fn(),
+  requestQuickChatClose,
+}));
+
 const openQuickChat = vi.fn();
 const closeQuickChat = vi.fn();
 const WORKSPACE_ID = "workspace-1";
@@ -26,18 +33,22 @@ beforeEach(() => {
   isOpen = false;
   openQuickChat.mockReset();
   closeQuickChat.mockReset();
+  requestQuickChatClose.mockReset();
+  requestQuickChatClose.mockReturnValue(false);
 });
 
 describe("useQuickChatLauncher typed sessions", () => {
   it("@covers AC-UI-QUICK-TERMINAL-001.10 closes an open dialog when toggle behavior is enabled", () => {
     isOpen = true;
+    requestQuickChatClose.mockReturnValue(true);
     const { result } = renderHook(() =>
       useQuickChatLauncher(WORKSPACE_ID, "chat", { toggleWhenOpen: true }),
     );
 
     act(() => result.current());
 
-    expect(closeQuickChat).toHaveBeenCalledTimes(1);
+    expect(requestQuickChatClose).toHaveBeenCalledTimes(1);
+    expect(closeQuickChat).not.toHaveBeenCalled();
     expect(openQuickChat).not.toHaveBeenCalled();
   });
 

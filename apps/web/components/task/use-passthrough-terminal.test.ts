@@ -42,6 +42,16 @@ describe("shouldGuardPassthroughEscape", () => {
     button.focus();
     expect(shouldGuardPassthroughEscape(keyboardEvent("Escape", button), textarea)).toBe(false);
   });
+
+  it("lets the dialog handle Escape after the passthrough connection ends", () => {
+    const textarea = document.createElement("textarea");
+    document.body.append(textarea);
+    textarea.focus();
+
+    expect(shouldGuardPassthroughEscape(keyboardEvent("Escape", textarea), textarea, false)).toBe(
+      false,
+    );
+  });
 });
 
 describe("computeCanConnect", () => {

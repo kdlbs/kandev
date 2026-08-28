@@ -1,6 +1,9 @@
 import { useCallback } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { captureQuickChatLauncherFocus } from "@/components/quick-chat/quick-chat-focus";
+import {
+  captureQuickChatLauncherFocus,
+  requestQuickChatClose,
+} from "@/components/quick-chat/quick-chat-focus";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
 
 type QuickChatLauncherOptions = {
@@ -28,7 +31,7 @@ export function useQuickChatLauncher(
   const handleOpenQuickChat = useCallback(() => {
     if (!workspaceId) return;
     if (toggleWhenOpen && isQuickChatOpen) {
-      closeQuickChat();
+      if (!requestQuickChatClose()) closeQuickChat();
       return;
     }
     captureQuickChatLauncherFocus({ silent: silentFocusReturn });

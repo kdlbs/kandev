@@ -36,6 +36,7 @@ vi.mock("@/lib/api/domains/quick-terminal-api", () => ({
 }));
 
 import { useAgentSelection, useQuickChatModal } from "./use-quick-chat-modal";
+import { requestQuickChatClose } from "./quick-chat-focus";
 import { getQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 
 const WORKSPACE_ID = "ws-1";
@@ -266,6 +267,38 @@ describe("useQuickChatModal — setup lifecycle", () => {
       SESSION_ONE_ID,
       WORKSPACE_ID,
     );
+  });
+
+  it("invalidates an in-flight agent start when an external launcher closes the modal", async () => {
+    let resolveStart!: (value: { task_id: string; session_id: string }) => void;
+    mockStartQuickChat.mockImplementationOnce(
+      () =>
+        new Promise<{ task_id: string; session_id: string }>((resolve) => {
+          resolveStart = resolve;
+        }),
+    );
+    const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
+
+    act(() => {
+      void result.current.handleSelectAgent("agent-a");
+    });
+    expect(result.current.pendingAgentId).toBe("agent-a");
+
+    expect(requestQuickChatClose()).toBe(true);
+
+    await act(async () => {
+      resolveStart({ task_id: "task-a", session_id: "sess-a" });
+      await flushPromises();
+    });
+
+    expect(mockAppState.openQuickChat).not.toHaveBeenCalledWith(
+      "sess-a",
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(mockDeleteTask).toHaveBeenCalledWith("task-a");
   });
 });
 

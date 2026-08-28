@@ -157,11 +157,20 @@ export function isSessionEnded(state: TaskSessionState | null | undefined): bool
 export function shouldGuardPassthroughEscape(
   event: KeyboardEvent,
   textarea: HTMLTextAreaElement | undefined,
+  isConnected = true,
 ): boolean {
-  if (event.key !== "Escape" || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+  if (
+    !isConnected ||
+    event.key !== "Escape" ||
+    event.altKey ||
+    event.ctrlKey ||
+    event.metaKey ||
+    event.shiftKey
+  ) {
     return false;
   }
   const activeElement = typeof document === "undefined" ? null : document.activeElement;
+  // The activeElement fallback covers synthetic events whose target and focus diverge.
   return event.target === textarea || activeElement === textarea;
 }
 
@@ -240,11 +249,6 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const environmentId = mode === "shell" ? props.environmentId : undefined;
   const refs = useTerminalRefs();
   const { terminalRef, xtermRef, fitAddonRef, wsRef, attachAddonRef } = refs;
-  const passthroughEscapeGuard = useCallback(
-    (event: KeyboardEvent) => shouldGuardPassthroughEscape(event, xtermRef.current?.textarea),
-    [xtermRef],
-  );
-  useClarificationEscapeGuard(passthroughEscapeGuard);
 
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const environmentSessionId = useEnvironmentSessionId();
@@ -268,6 +272,18 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const [connectedTargetId, setConnectedTargetId] = useState<string | null>(null);
   const isConnected = connectionID != null && connectedTargetId === connectionID;
   const paneState = computeTerminalPaneState(mode, environmentEnded, isConnected);
+  const passthroughEscapeGuard = useCallback(
+    (event: KeyboardEvent) =>
+      shouldGuardPassthroughEscape(
+        event,
+        xtermRef.current?.textarea,
+        isConnected &&
+          attachAddonRef.current !== null &&
+          wsRef.current?.readyState === WebSocket.OPEN,
+      ),
+    [attachAddonRef, isConnected, wsRef, xtermRef],
+  );
+  useClarificationEscapeGuard(passthroughEscapeGuard);
   const onConnected = useCallback(() => {
     setConnectedTargetId(connectionID ?? null);
     if (autoFocus) refs.xtermRef.current?.textarea?.focus({ preventScroll: true });

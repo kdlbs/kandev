@@ -11,6 +11,7 @@ import { ApiError } from "@/lib/api/client";
 import { type PtyTerminalState } from "@/components/settings/pty-terminal-view";
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import { persistQuickChatRename } from "@/lib/quick-chat/rename";
+import { registerQuickChatCloseHandler } from "./quick-chat-focus";
 import type { QuickChatSessionKind, QuickTerminalTab } from "@/lib/state/slices/ui/types";
 import { useQuickChatCloseActions, resolveQuickChatTaskId } from "./use-quick-chat-close-actions";
 import { useQuickChatTabOrder } from "./use-quick-chat-tab-order";
@@ -399,6 +400,10 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
     tabOrder: tabOrder.order,
     setSetupKey,
   });
+  useEffect(
+    () => registerQuickChatCloseHandler(tabActions.handleOpenChange),
+    [tabActions.handleOpenChange],
+  );
 
   const handleSelectAgent = useCallback(
     (agentId: string, repositories: QuickChatRepositoryInput[] = []) =>

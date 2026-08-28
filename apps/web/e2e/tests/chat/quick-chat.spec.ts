@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { attachAvailableCommandsCapture, attachShellInputCapture } from "../../helpers/ws-capture";
+import { SHORTCUTS } from "@/lib/keyboard/constants";
 import {
   openQuickChatSetup,
   openQuickChatWithAgent,
@@ -175,7 +176,8 @@ test.describe("Quick Chat", () => {
         .toBe(true);
 
       const modifier = process.platform === "darwin" ? "Meta" : "Control";
-      await testPage.keyboard.press(`${modifier}+Shift+q`);
+      const quickChatShortcut = `${modifier}+Shift+${SHORTCUTS.QUICK_CHAT.key}`;
+      await testPage.keyboard.press(quickChatShortcut);
       await expect(dialog).not.toBeVisible();
     } finally {
       await apiClient.updateWorkspace(seedData.workspaceId, {
