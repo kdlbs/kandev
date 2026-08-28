@@ -10,6 +10,8 @@
     "template": 8192
   },
   "legacy_size_exceptions": {
-    "docs/specs/task-cost-ledger/spec.md": 91931
+    "docs/specs/office-task-content-editing/spec.md": 84103,
+    "docs/specs/task-cost-ledger/spec.md": 91931,
+    "docs/specs/workflow-on-enter-action-dispatch/spec.md": 116869
   }
 }

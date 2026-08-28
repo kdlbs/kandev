@@ -459,7 +459,7 @@ func testProcessOnEnterTerminalizedAfterPromptClaim(t *testing.T, terminalState 
 
 	done := make(chan struct{})
 	go func() {
-		svc.processOnEnter(ctx, source.TaskID, source, step, "Test")
+		svc.processOnEnter(ctx, source.TaskID, source, step, "Test", 0)
 		close(done)
 	}()
 
@@ -756,7 +756,7 @@ func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(
 
 	done := make(chan struct{})
 	go func() {
-		svc.processOnEnter(ctx, source.TaskID, source, step, "Test")
+		svc.processOnEnter(ctx, source.TaskID, source, step, "Test", 0)
 		close(done)
 	}()
 

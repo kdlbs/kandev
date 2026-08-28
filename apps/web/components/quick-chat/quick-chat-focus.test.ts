@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { captureQuickChatLauncherFocus, restoreQuickChatLauncherFocus } from "./quick-chat-focus";
 
+const SILENT_FOCUS_ATTRIBUTE = "data-quick-chat-silent-focus";
+
 afterEach(() => {
   vi.unstubAllGlobals();
   document.body.replaceChildren();
 });
 
 describe("quick chat launcher focus", () => {
+  // @covers AC-UI-QUICK-TERMINAL-001.9
   it("restores focus through the animation frame after closing", () => {
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
       callback(0);
@@ -21,6 +24,28 @@ describe("quick chat launcher focus", () => {
     restoreQuickChatLauncherFocus();
 
     expect(document.activeElement).toBe(launcher);
+    expect(launcher.getAttribute(SILENT_FOCUS_ATTRIBUTE)).toBe("true");
+
+    launcher.blur();
+
+    expect(launcher.getAttribute(SILENT_FOCUS_ATTRIBUTE)).toBeNull();
+  });
+
+  it("restores focus from a non-launcher origin without a silent marker", () => {
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 0;
+    });
+    const origin = document.createElement("input");
+    document.body.append(origin);
+    origin.focus();
+
+    captureQuickChatLauncherFocus({ silent: false });
+    origin.blur();
+    restoreQuickChatLauncherFocus();
+
+    expect(document.activeElement).toBe(origin);
+    expect(origin.getAttribute(SILENT_FOCUS_ATTRIBUTE)).toBeNull();
   });
 
   it("does not focus a launcher that was removed while the dialog was open", () => {
@@ -37,5 +62,6 @@ describe("quick chat launcher focus", () => {
     restoreQuickChatLauncherFocus();
 
     expect(document.activeElement).not.toBe(launcher);
+    expect(launcher.getAttribute(SILENT_FOCUS_ATTRIBUTE)).toBeNull();
   });
 });

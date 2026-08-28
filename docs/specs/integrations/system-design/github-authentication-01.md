@@ -108,6 +108,12 @@ automation under different GitHub Apps without operating separate Kandev deploym
   construction boundary. The long-lived cloner and review-repository adapter do not store a
   resolved protocol. Origin reconciliation is serialized per managed checkout. It compares the
   current and desired canonical URLs, and performs no write when they already match.
+- Every launch or resume entry point prepares repositories before the agent starts. This includes
+  the prepared-workspace path that reuses a running executor. Repository preparation resolves each
+  attached repository once for that operation. The full launch path reuses the result for primary
+  and multi-repository configuration and credential routing. Origin reconciliation is serialized
+  per managed checkout. It compares the current and desired canonical URLs and performs no write
+  when they already match.
 - Repository preparation validates any contribution destination before issuing credentials, adds a
   collision-resistant dedicated fork remote, and reconstructs it on launch and resume. It never
   accepts a fork inferred from the checkout's current remotes or a caller-provided repository name.

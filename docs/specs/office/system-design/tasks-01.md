@@ -70,7 +70,7 @@ This spec consolidates the office task surface: lifecycle, parent/child handoffs
 
 ### D. Inline editable properties
 
-- Every property row that holds an enumerable, lookup-able, or free-text value is editable inline by clicking the value: Status, Priority, Assignee, Project, Parent task, Blocked by, Reviewers, Approvers, Labels.
+- Every property row that holds an enumerable, lookup-able, or free-text value is editable inline by clicking the value: Status, Priority, Assignee, Project, Parent task, Blocked by, Reviewers, Approvers, Labels, Title, Description.
 - Read-only rows stay read-only: Created by, Started, Completed, Created, Updated, Tree cost metrics. They reflect events, not user intent.
 - Edits are **optimistic**: the new value renders immediately; on API failure the row reverts to the prior value and a toast surfaces the error.
 - Pickers are searchable when the candidate list could exceed roughly 10 items (Assignee, Project, Parent, Blocked-by). Status and Priority pickers use a fixed list. The threshold for switching to a search input is around 8 candidates.
@@ -241,7 +241,7 @@ Multiple rows per `(task, decider, role)` in `office_task_approval_decisions` ar
 - `POST /tasks/:id/approve { comment?: string }` - caller approves. 403 if caller is not in reviewers or approvers. Returns the created decision row.
 - `POST /tasks/:id/request-changes { comment: string }` - caller requests changes. Comment required. Same 403 rule. Returns the decision row.
 - `GET /tasks/:id/decisions` - current (non-superseded) decisions. Also surfaced on the task detail endpoint as a `decisions: TaskDecision[]` field.
-- `PATCH /tasks/:id` - inline property edits (status, priority, assignee, project, parent, blocked-by, reviewers, approvers, labels). Returns the updated task.
+- `PATCH /tasks/:id` - inline property edits (status, priority, assignee, project, parent, blocked-by, reviewers, approvers, labels). Returns the updated task. Title and description are not fields of this endpoint; they are edited through `PATCH /api/v1/tasks/:id`.
 - `POST /tasks/:id/blockers { blocker_task_id }` - returns 400 with a body carrying the cycle path when the addition would create a cycle.
 - `DELETE /tasks/:id/reviewers/:agentId` / `DELETE /tasks/:id/approvers/:agentId` - removes the participant AND terminates that agent's session for the task.
 

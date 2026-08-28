@@ -407,6 +407,44 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
     expect(scrollContainer.scrollTop).toBe(123);
   });
 
+  it("pins an appended message without reading content size", () => {
+    const { rerender } = render(
+      <AutoScrollHarness isWorking={false} hasUnreadDivider={false} messages={TEST_MESSAGES} />,
+    );
+    const scrollContainer = screen.getByTestId("auto-scroll-container");
+    let scrollTop = 600;
+    let writes = 0;
+    Object.defineProperties(scrollContainer, {
+      scrollHeight: {
+        configurable: true,
+        get: () => {
+          throw new Error("pinned append must not read scrollHeight");
+        },
+      },
+      clientHeight: { configurable: true, value: 400 },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => {
+          writes += 1;
+          scrollTop = value;
+        },
+      },
+    });
+
+    expect(() => {
+      rerender(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          messages={[...TEST_MESSAGES, {} as Message]}
+        />,
+      );
+    }).not.toThrow();
+    expect(writes).toBe(1);
+    expect(scrollTop).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
   it("restores the disabled offset after a transient layout clamp", () => {
     const { rerender } = render(
       <AutoScrollHarness isWorking={false} hasUnreadDivider={false} enabled />,

@@ -13,6 +13,10 @@ import (
 // ErrExecutionNotFound is returned when an execution doesn't exist in the store.
 var ErrExecutionNotFound = errors.New("execution not found")
 
+// ErrPromptActivityNotOwned means a cancellation snapshot no longer belongs
+// to the execution and prompt that were captured.
+var ErrPromptActivityNotOwned = errors.New("prompt activity no longer owned")
+
 // ErrExecutionAlreadyExistsForSession is returned by Add when the session
 // already maps to a different execution. The previous behavior was to silently
 // overwrite the bySession index, which orphaned the prior execution: the
@@ -167,6 +171,32 @@ func (s *ExecutionStore) OwnsPromptActivity(
 		return false
 	}
 	return execution.promptActivityEpochSnapshot() == activityEpoch
+}
+
+// ClaimPromptActivity validates a captured prompt identity while the store
+// lock is held and returns that exact execution for a lifecycle operation.
+// Callers must use the returned execution instead of looking it up by session
+// again, because a session can acquire a replacement execution while the
+// operation waits for the agent to settle.
+func (s *ExecutionStore) ClaimPromptActivity(
+	sessionID, executionID string,
+	generation, activityEpoch uint64,
+) (*AgentExecution, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	currentExecutionID, exists := s.bySession[sessionID]
+	if !exists {
+		return nil, ErrExecutionNotFound
+	}
+	execution, exists := s.executions[currentExecutionID]
+	if !exists {
+		return nil, ErrExecutionNotFound
+	}
+	if currentExecutionID != executionID || generation == 0 || activityEpoch == 0 || execution.promptGeneration != generation || execution.promptActivityEpochSnapshot() != activityEpoch {
+		return nil, ErrPromptActivityNotOwned
+	}
+	return execution, nil
 }
 
 // ActivePromptGeneration returns the generation of the prompt that is dispatched

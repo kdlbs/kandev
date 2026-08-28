@@ -49,6 +49,8 @@ func (r *Repository) migrateContinuationScope() {
 	r.migrate.Apply("runs.continuation_scope",
 		`ALTER TABLE runs ADD COLUMN continuation_scope TEXT NOT NULL DEFAULT ''`)
 	r.backfillContinuationScopes()
+	r.migrate.Apply("runs.failure_scope_status_index",
+		`CREATE INDEX IF NOT EXISTS idx_run_failure_scope_status ON runs(agent_profile_id, continuation_scope, status)`)
 }
 
 func (r *Repository) backfillContinuationScopes() {

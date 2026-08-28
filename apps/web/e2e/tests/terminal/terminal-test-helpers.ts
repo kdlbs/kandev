@@ -1,4 +1,4 @@
-import { expect, type Locator } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 export type TerminalThemeSnapshot = {
   background?: string;
@@ -97,4 +97,23 @@ export async function readTerminalHostTheme(host: Locator): Promise<TerminalThem
     };
     return (element as XtermHost).__xtermReadTheme?.() ?? null;
   });
+}
+
+/**
+ * Close a Quick Chat terminal through the control exposed for the active
+ * pointer precision. Coarse-pointer tabs intentionally replace the direct
+ * close button with the 44px actions trigger, so tests must cover that path.
+ */
+export async function closeQuickTerminalTab(page: Page, tab: Locator): Promise<void> {
+  const sequence = await tab.getAttribute("data-terminal-sequence");
+  if (!sequence) throw new Error("Quick terminal tab is missing its sequence");
+
+  const closeButton = tab.getByRole("button", { name: `Close Terminal ${sequence}` });
+  if (await closeButton.isVisible().catch(() => false)) {
+    await closeButton.click();
+    return;
+  }
+
+  await tab.getByRole("button", { name: `Actions for Terminal ${sequence}` }).tap();
+  await page.getByRole("menuitem", { name: `Close Terminal ${sequence}`, exact: true }).tap();
 }

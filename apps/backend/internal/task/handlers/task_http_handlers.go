@@ -1861,6 +1861,7 @@ type httpStartQuickChatRequest struct {
 	AgentProfileID    string                         `json:"agent_profile_id,omitempty"`
 	ExecutorID        string                         `json:"executor_id,omitempty"`
 	Prompt            string                         `json:"prompt,omitempty"`
+	AutoTitle         bool                           `json:"auto_title,omitempty"`
 	LocalPath         string                         `json:"local_path,omitempty"`
 	RepositoryName    string                         `json:"repository_name,omitempty"`
 	DefaultBranch     string                         `json:"default_branch,omitempty"`
@@ -2002,6 +2003,7 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		WorkspaceID:  workspaceID,
 		Title:        params.title,
 		Description:  body.Prompt,
+		AutoTitle:    body.AutoTitle,
 		Repositories: params.repos,
 		IsEphemeral:  true,
 		Metadata:     params.metadata,

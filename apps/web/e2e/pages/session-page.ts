@@ -1345,6 +1345,46 @@ export class SessionPage {
   }
 
   /**
+   * Move the task to a workflow step through whichever stepper presentation
+   * the responsive top bar selected. Narrow layouts expose the target in the
+   * compact disclosure instead of rendering every step in the top bar.
+   */
+  async moveToWorkflowStep(step: { id: string; name: string }): Promise<void> {
+    const fullStep = this.page
+      .locator(`[data-testid=${JSON.stringify(`workflow-step-${step.name}`)}]:visible`)
+      .first();
+    const compactStepper = this.page.getByTestId("workflow-stepper-minimal");
+    let presentation: "full" | "compact" | undefined;
+    await expect
+      .poll(
+        async () => {
+          if (await fullStep.isVisible()) {
+            presentation = "full";
+            return true;
+          }
+          if (await compactStepper.isVisible()) {
+            presentation = "compact";
+            return true;
+          }
+          return false;
+        },
+        { timeout: 10_000, message: `Waiting for workflow step presentation for ${step.name}` },
+      )
+      .toBe(true);
+
+    if (presentation === "full") {
+      await fullStep.hover();
+      await this.page.getByRole("button", { name: "Move here", exact: true }).click();
+      return;
+    }
+
+    await compactStepper.click();
+    const moveButton = this.page.getByTestId(`workflow-step-disclosure-move-${step.id}`);
+    await expect(moveButton).toBeVisible();
+    await moveButton.click();
+  }
+
+  /**
    * Assert the layout is in the default (non-maximized) state:
    * chat, terminal, files, and sidebar are all visible, and layout fills the viewport.
    */
