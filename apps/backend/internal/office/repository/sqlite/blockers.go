@@ -162,6 +162,23 @@ func (r *Repository) GetTaskAssignee(ctx context.Context, taskID string) (string
 	return assignee, nil
 }
 
+// GetTaskAssigneeTx is GetTaskAssignee scoped to a caller-owned transaction,
+// for a caller that must read the effective runner immediately before an
+// insert whose validity depends on it not having changed since an earlier,
+// separate read (ParentWakeReconciler.emit, scheduler_wake_reconciler.go:
+// closing the race between ListStuckParents' SELECT and this transaction's
+// run insert, where a reassignment in between would otherwise queue a run
+// for a runner that is no longer this parent's assignee).
+func (r *Repository) GetTaskAssigneeTx(ctx context.Context, tx *sqlx.Tx, taskID string) (string, error) {
+	var assignee string
+	err := tx.QueryRowxContext(ctx, tx.Rebind(
+		`SELECT `+RunnerProjection("tasks")+` FROM tasks WHERE id = ?`), taskID).Scan(&assignee)
+	if err != nil {
+		return "", err
+	}
+	return assignee, nil
+}
+
 // AreAllChildrenTerminal checks if all child tasks of a parent are in
 // terminal state. Unlike ListStuckParents (wake_receipts.go), this counts
 // every child regardless of archived_at, so an archived child stuck

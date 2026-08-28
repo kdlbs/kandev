@@ -11,13 +11,20 @@ import (
 // seedWakeCandidate creates a parent task with one non-archived, terminal
 // (COMPLETED) child and a resolvable runner backed by a real agent_profiles
 // row, so it satisfies every one of ListStuckParents' predicates on its
-// own — including the assignee filter (R2-A) and the INNER JOIN against
-// agent_profiles (R3-B) — and would actually be woken end-to-end by the
+// own — including the assignee filter (R2-A), the INNER JOIN against
+// agent_profiles (R3-B), and the authoritative-Office-task predicate
+// (project_id set, matching scheduler_recovery_test.go's own
+// 'office-project' marker) — and would actually be woken end-to-end by the
 // full reconciler, not just accepted by this SQL layer in isolation.
 // Returns the child_set_key ListStuckParents will compute for it.
 func seedWakeCandidate(t *testing.T, repo *sqlite.Repository, ctx context.Context, wsID, parentID string) string {
 	t.Helper()
 	insertTask(t, repo, ctx, parentID, wsID, "Parent", "", "")
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET project_id = 'office-project' WHERE id = ?`, parentID,
+	); err != nil {
+		t.Fatalf("mark parent as Office task: %v", err)
+	}
 	childID := parentID + "-child-0"
 	insertTask(t, repo, ctx, childID, wsID, "Child", "", "")
 	if _, err := repo.ExecRaw(ctx,
@@ -52,13 +59,22 @@ func seedWakeAgentProfile(t *testing.T, repo *sqlite.Repository, ctx context.Con
 }
 
 // seedWakeReceipt records a receipt for parentID as already delivered for
-// childSetKey, the same shape UpsertWakeReceiptTx writes.
+// childSetKey, the same shape UpsertWakeReceiptTx writes. It also seeds a
+// backing 'finished' run for the receipt's delivered_run_id: in production
+// a receipt's delivered_run_id always names a run inserted in the same
+// transaction (emit, scheduler_wake_reconciler.go), so ListStuckParents'
+// receipt check requires that run to exist and have finished before
+// treating the receipt as proof of delivery — a dangling delivered_run_id
+// is indistinguishable from a never-delivered wake and must not suppress
+// re-sweep.
 func seedWakeReceipt(t *testing.T, repo *sqlite.Repository, ctx context.Context, parentID, childSetKey string) {
 	t.Helper()
+	runID := "prior-run-" + parentID
+	seedWakeRun(t, repo, ctx, runID, parentID, "task_children_completed", "finished")
 	if _, err := repo.ExecRaw(ctx, `
 		INSERT INTO parent_child_wake_receipts (parent_task_id, child_set_key, delivered_run_id, delivered_at)
-		VALUES (?, ?, 'prior-run', datetime('now'))
-	`, parentID, childSetKey); err != nil {
+		VALUES (?, ?, ?, datetime('now'))
+	`, parentID, childSetKey, runID); err != nil {
 		t.Fatalf("seed receipt: %v", err)
 	}
 }
@@ -221,6 +237,109 @@ func TestListStuckParents_ExcludesParentWithActiveOrFinishedRun(t *testing.T) {
 	}
 }
 
+// TestListStuckParents_RecoversAfterDeliveredRunFails is the fixup
+// regression test for the "receipt outlives failed wake" defect: emit
+// (scheduler_wake_reconciler.go) writes the receipt in the same transaction
+// as the run it describes, before that run's eventual status is known, so a
+// receipt matching the current (unchanged) child set is not on its own
+// proof of delivery. Before this fix, a reconciler-emitted run that later
+// failed or was cancelled left behind a receipt that permanently excluded
+// the parent from every future sweep, even though the wake was never
+// actually delivered — recreating, in the reconciler's own bookkeeping, the
+// exact permanently-lost-wake failure mode this reconciler exists to fix.
+func TestListStuckParents_RecoversAfterDeliveredRunFails(t *testing.T) {
+	const reason = "task_children_completed"
+
+	terminal := []string{"failed", "cancelled"}
+	for _, status := range terminal {
+		t.Run(status, func(t *testing.T) {
+			repo := newSearchTestRepo(t)
+			ctx := context.Background()
+
+			key := seedWakeCandidate(t, repo, ctx, "ws-1", "parent-1")
+			seedWakeRun(t, repo, ctx, "run-1", "parent-1", reason, status)
+			if _, err := repo.ExecRaw(ctx, `
+				INSERT INTO parent_child_wake_receipts (parent_task_id, child_set_key, delivered_run_id, delivered_at)
+				VALUES ('parent-1', ?, 'run-1', datetime('now'))
+			`, key); err != nil {
+				t.Fatalf("seed receipt: %v", err)
+			}
+
+			candidates, err := repo.ListStuckParents(ctx, reason, 5)
+			if err != nil {
+				t.Fatalf("ListStuckParents: %v", err)
+			}
+			if len(candidates) != 1 || candidates[0].ParentTaskID != "parent-1" {
+				t.Fatalf("status %q: RECEIPT OUTLIVED FAILED WAKE: candidates = %#v, want exactly [parent-1]", status, candidates)
+			}
+		})
+	}
+
+	// Control: a receipt whose referenced run actually finished must still
+	// permanently exclude the parent for that unchanged child set.
+	t.Run("finished_stays_excluded", func(t *testing.T) {
+		repo := newSearchTestRepo(t)
+		ctx := context.Background()
+
+		key := seedWakeCandidate(t, repo, ctx, "ws-1", "parent-1")
+		seedWakeRun(t, repo, ctx, "run-1", "parent-1", reason, "finished")
+		if _, err := repo.ExecRaw(ctx, `
+			INSERT INTO parent_child_wake_receipts (parent_task_id, child_set_key, delivered_run_id, delivered_at)
+			VALUES ('parent-1', ?, 'run-1', datetime('now'))
+		`, key); err != nil {
+			t.Fatalf("seed receipt: %v", err)
+		}
+
+		candidates, err := repo.ListStuckParents(ctx, reason, 5)
+		if err != nil {
+			t.Fatalf("ListStuckParents: %v", err)
+		}
+		if len(candidates) != 0 {
+			t.Fatalf("finished delivery: candidates = %#v, want none", candidates)
+		}
+	})
+}
+
+// TestListStuckParents_ExcludesNonOfficeParent is the fixup regression test
+// for the missing authoritative-Office-task predicate: HasOfficeAdoption
+// (the Tick-level gate in ParentWakeReconciler) only proves some workspace
+// somewhere has adopted Office, not that this parent's own task is an
+// Office task, so ListStuckParents must apply its own row-level check —
+// mirroring ListUnstartedTasks (tasks.go), the sibling query this
+// reconciler mirrors. Without it, an ordinary Kanban parent with terminal
+// children and a resolvable runner would receive a directly-inserted,
+// unrequested autonomous run merely because Office happens to be adopted
+// somewhere in the install.
+func TestListStuckParents_ExcludesNonOfficeParent(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	// A Kanban-only parent: seedWakeCandidate's shape, minus the project_id
+	// marker, so it satisfies every other ListStuckParents predicate.
+	insertTask(t, repo, ctx, "parent-kanban", "ws-1", "Parent", "", "")
+	childID := "parent-kanban-child-0"
+	insertTask(t, repo, ctx, childID, "ws-1", "Child", "", "")
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET parent_id = ?, state = 'COMPLETED' WHERE id = ?`, "parent-kanban", childID,
+	); err != nil {
+		t.Fatalf("set child state: %v", err)
+	}
+	seedWakeAgentProfile(t, repo, ctx, "parent-kanban-agent", "idle")
+	seedRunner(t, repo, ctx, "parent-kanban")
+
+	// Control: a genuine Office candidate, so an empty result can't be
+	// mistaken for a broken query.
+	seedWakeCandidate(t, repo, ctx, "ws-1", "parent-office")
+
+	candidates, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].ParentTaskID != "parent-office" {
+		t.Fatalf("candidates = %#v, want exactly [parent-office] (parent-kanban is not an Office task)", candidates)
+	}
+}
+
 // TestListStuckParents_ExcludesArchivedOnlyChildren is R1-C's regression
 // test: a parent whose only children are archived (including one that
 // never reached a terminal state) must not be swept with a spurious empty
@@ -328,6 +447,11 @@ func TestListStuckParents_RecoversAfterChildSetChangesPastFinishedRun(t *testing
 	)
 
 	insertTaskAt(t, repo, ctx, parentID, wsID, oldTime)
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET project_id = 'office-project' WHERE id = ?`, parentID,
+	); err != nil {
+		t.Fatalf("mark parent as Office task: %v", err)
+	}
 	child0 := parentID + "-child-0"
 	insertTaskAt(t, repo, ctx, child0, wsID, oldTime)
 	setChildStateAt(t, repo, ctx, parentID, child0, "COMPLETED", oldTime)

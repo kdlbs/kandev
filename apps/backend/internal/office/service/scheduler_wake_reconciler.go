@@ -209,6 +209,30 @@ func (h *ParentWakeReconciler) emit(
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Re-read the parent's effective runner inside this transaction, closing
+	// the race between ListStuckParents' SELECT and this insert: a
+	// reassignment landing in between would otherwise queue this run for a
+	// runner that is no longer the parent's assignee, and the receipt this
+	// transaction writes would then block a correct re-sweep for the actual
+	// new runner. Unlike the receipt (reconciler-exclusive) or the SQL-side
+	// filters (guaranteed by ListStuckParents), the assignee can change from
+	// any caller at any time, so this is a live recheck, not a duplicated
+	// guarantee — the same rationale as guardAgentStatus above, just closing
+	// the window at the write instead of at read time.
+	current, err := svc.repo.GetTaskAssigneeTx(ctx, tx, c.ParentTaskID)
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		h.logger.Error("wake sweep: revalidate assignee failed",
+			zap.String("parent_task_id", c.ParentTaskID), zap.Error(err))
+		return
+	}
+	if current != c.AssigneeAgentProfileID {
+		svc.recordWakeAssigneeUnresolved(c.ParentTaskID, "runner reassigned before delivery")
+		return
+	}
+
 	runReq := &models.Run{
 		ID:             uuid.New().String(),
 		AgentProfileID: c.AssigneeAgentProfileID,

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
 // StuckParentCandidate is a parent task whose non-archived children are
@@ -29,6 +31,18 @@ type StuckParentCandidate struct {
 // non-terminal state — and that have not yet had a task_children_completed
 // wake delivered for their current child set, by anyone.
 //
+// The p.archived_at/is_ephemeral/state filters run over every task row
+// regardless of Office adoption; taskrepo.IsFromOfficePredicate narrows
+// that down to parents this reconciler may actually act on. HasOfficeAdoption
+// (the Tick-level gate in ParentWakeReconciler) only proves some workspace
+// somewhere has adopted Office — it says nothing about this parent's own
+// task or workspace, so without this predicate a Kanban-only parent in an
+// unrelated workspace, or in the same workspace as an Office project it has
+// no connection to, could still match every other filter and receive a
+// directly-inserted, unrequested autonomous run. ListUnstartedTasks
+// (tasks.go, the sibling query this reconciler mirrors) applies the same
+// predicate for the same reason.
+//
 // Archived children are deliberately excluded from both the "has a child"
 // and "any non-terminal" checks below — this is a divergence from
 // AreAllChildrenTerminal (blockers.go), which counts every child
@@ -41,8 +55,20 @@ type StuckParentCandidate struct {
 // Every remaining filter runs in SQL, ahead of LIMIT, not in the caller
 // afterward:
 //   - the LEFT JOIN against parent_child_wake_receipts drops a candidate
-//     whose stored receipt already matches its current child set — the
-//     receipt is purely this "has the child set changed" discriminator.
+//     whose stored receipt already matches its current child set AND whose
+//     receipt-referenced run actually finished — the receipt is purely this
+//     "has the child set changed, and did that delivery land" discriminator.
+//     A receipt's run can still be 'queued'/'claimed' (in flight; the
+//     second bullet below is what actually excludes that case) or can have
+//     ended 'failed'/'cancelled' — emit (scheduler_wake_reconciler.go)
+//     writes the receipt in the same transaction as the run it describes,
+//     before that run's eventual outcome is known, so a receipt alone is
+//     never proof of delivery. Without the finished-run check, a reconciler
+//     run that later fails or is cancelled leaves a receipt that matches
+//     the (unchanged) current child set forever, permanently blocking every
+//     future sweep for that parent — the exact "wake permanently lost, no
+//     recovery path" failure mode this reconciler exists to fix, recreated
+//     one layer up by its own bookkeeping.
 //   - the NOT EXISTS against runs drops a candidate with a queued or
 //     claimed task_children_completed run (still in flight, regardless of
 //     which child set it was requested for — wait for it to resolve rather
@@ -99,6 +125,7 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 			WHERE p.archived_at IS NULL
 			  AND p.is_ephemeral = 0
 			  AND p.state NOT IN ('COMPLETED', 'CANCELLED')
+			  AND `+taskrepo.IsFromOfficePredicate("p")+`
 			  AND EXISTS (
 			      SELECT 1 FROM tasks c
 			      WHERE c.parent_id = p.id AND c.archived_at IS NULL
@@ -116,7 +143,14 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 		INNER JOIN agent_profiles ap ON ap.id = s.assignee_agent_profile_id
 		WHERE s.assignee_agent_profile_id != ''
 		  AND ap.status NOT IN ('paused', 'stopped', 'pending_approval')
-		  AND r.child_set_key IS NOT s.child_set_key
+		  AND (
+		      r.child_set_key IS NOT s.child_set_key
+		      OR NOT EXISTS (
+		          SELECT 1 FROM runs delivered
+		          WHERE delivered.id = r.delivered_run_id
+		            AND delivered.status = 'finished'
+		      )
+		  )
 		  AND NOT EXISTS (
 		      SELECT 1 FROM runs w
 		      WHERE json_extract(w.payload, '$.task_id') = s.parent_task_id

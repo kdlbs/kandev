@@ -21,11 +21,16 @@ func adoptOffice(t *testing.T, svc *service.Service, wsID string) {
 }
 
 // seedStuckParent creates a parent task with three terminal (non-archived)
-// children and an assignee, satisfying ListStuckParents' predicate.
+// children and an assignee, satisfying ListStuckParents' predicate. The
+// project_id marker (matching scheduler_recovery_test.go's own
+// 'office-project' marker) satisfies the authoritative-Office-task
+// predicate ListStuckParents applies alongside adoptOffice's workspace-level
+// HasOfficeAdoption signal — the two are independent checks.
 func seedStuckParent(t *testing.T, svc *service.Service, wsID, parentID, agentID string) {
 	t.Helper()
 	createTestAgent(t, svc, wsID, agentID)
 	insertTestTask(t, svc, parentID, wsID)
+	svc.ExecSQL(t, `UPDATE tasks SET project_id = 'office-project' WHERE id = ?`, parentID)
 	setTestTaskAssignee(t, svc, parentID, agentID)
 
 	states := []string{"COMPLETED", "COMPLETED", "CANCELLED"}
@@ -176,10 +181,11 @@ func TestParentWakeReconciler_SkipsPausedAssigneeWithoutPartialReceipt(t *testin
 	}
 }
 
-// seedStuckParentNoAssignee is seedStuckParent without the runner
-// participant row, producing a candidate ListStuckParents' SQL still
-// returns (it has terminal children and no receipt) but whose
-// AssigneeAgentProfileID resolves to "".
+// seedStuckParentNoAssignee creates a parent task with terminal children
+// but no runner participant row, so RunnerProjection returns an empty
+// string and ListStuckParents' assignee_agent_profile_id != ” guard
+// filters it out. Used to verify that unresolvable candidates cannot
+// starve the LIMIT ahead of a healthy parent.
 func seedStuckParentNoAssignee(t *testing.T, svc *service.Service, wsID, parentID string) {
 	t.Helper()
 	insertTestTask(t, svc, parentID, wsID)
