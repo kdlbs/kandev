@@ -39,6 +39,8 @@ See [Tasks and workflows](tasks-and-workflows.md) for event configuration and de
 
 Open **Settings > Workspaces > _Workspace_ > Automations** (`/settings/workspace/{workspaceId}/automations`) and select **New Automation**. The top-level `/settings/automations` route redirects to, or asks you to select, a workspace.
 
+![Settings > Workspaces > Default > Automations showing enabled scheduled and webhook automations, export, new automation, and run actions.](../screenshots/automation-list.png)
+
 1. Enter a required name and optional description.
 2. Select an agent profile and executor profile. Passthrough profiles are not offered. Worktree and Local-compatible profiles can run without a repository in a task-owned scratch workspace.
 3. Choose the run destination:
@@ -52,6 +54,8 @@ Open **Settings > Workspaces > _Workspace_ > Automations** (`/settings/workspace
 7. Keep the default maximum concurrency of 1 unless parallel work is safe. Reused sessions always use one active run.
 8. Choose a schedule and optional GitHub condition, or switch to webhook mode.
 9. Save, use **Run now** on the automation's page, then read what it said before widening credentials or scope.
+
+![Automation editor showing repository access, run destination, context between runs, concurrency, and Save changes.](../screenshots/automation-editor.png)
 
 The form can save an empty agent or executor selection, but launch still needs a usable profile. Scheduled, manual, webhook, and provider-triggered runs can remain repository-free. When a provider event supplies an exact repository through its established contract, Kandev uses that event context. A GitHub pull-request run with configured repository access checks out that PR's head branch and uses its base branch.
 
@@ -173,6 +177,8 @@ Trigger payloads are untrusted input. Do not let a PR body or webhook field sile
 ## Read what an automation has been doing
 
 **Automations** in the sidebar lists the workspace's automations with a health dot. Picking one opens it. **`/automations`** is the agenda across all of them, what fires next, and the recent runs of every automation in one feed. **`/automations/<id>`** is one automation's conversation: it opens on the newest run's transcript, carries the run's title snapshot and a reply box, and groups runs as Running / Completed in a rail or mobile drawer. A selected open run exposes **Stop current run**, which cancels its exact task, session, and turn without touching another run in a shared session. Configuration is behind **Details**, because an automation is configured once and read continuously.
+
+![Kandev sidebar showing the Automations section with workspace automation shortcuts.](../screenshots/automation-sidebar.png)
 
 `/runs` still resolves to the same places, so older links keep working.
 

@@ -47,7 +47,7 @@ Quick Chat supports multiple tabs, tab renaming, and **+** to open another ordin
 
 Your chats and their names are shared by every browser and device signed in to the same Kandev instance. Starting, renaming, or closing a chat on one device updates the others, and a device that was offline catches up when it reconnects.
 
-When **Settings > General > Task Actions > Agent-generated task titles** is enabled, an ordinary
+When **Settings > Preferences > Task Behavior > Agent-generated task titles** is enabled, an ordinary
 Quick Chat starts with its normal provisional label and its owner agent can replace that label with a
 short title based on your first request. Structured and CLI-passthrough chats receive the title
 instruction through their existing first-turn path. The new title appears on every connected device
@@ -173,7 +173,7 @@ Open the context menu on any file or folder in the Files tree: right-click on de
 
 Use the workbench top bar's split-editor action to open the selected session worktree in the default editor. Its menu lets you choose another configured editor. A file's **Open with** menu can also open a specific editor, copy the path, or ask the operating system to show the folder.
 
-Open **Settings > General > Editors** (`/settings/general/editors`) to set a default and configure integrations. Kandev discovers these built-in desktop editors when installed:
+Open **Settings > Preferences > Terminal & Editors** (`/settings/preferences/terminal-editors`) to set a default and configure integrations. Kandev discovers these built-in desktop editors when installed:
 
 - Visual Studio Code
 - Zed
@@ -193,7 +193,9 @@ Desktop editor discovery and custom commands run on the Kandev backend host. The
 
 ## Language servers
 
-Language-server settings are part of **Settings > General > Editors**. Kandev currently registers servers for:
+Language-server settings are part of **Settings > Preferences > Terminal & Editors**. Kandev currently registers servers for:
+
+![Settings > Preferences > Terminal & Editors showing language-server cards, auto-start controls, status location, and server configuration.](../screenshots/settings-terminal-editors.png)
 
 - TypeScript and JavaScript;
 - Go;
@@ -239,7 +241,9 @@ On desktop, select **+ > Terminals > New Terminal**. Parked terminal sessions ca
 
 Do not confuse a user terminal with a CLI-passthrough agent tab: both use PTYs, but only the agent tab is the agent's native interface. `Cmd/Ctrl+J` toggles the bottom terminal area.
 
-Open **Settings > General > Terminal** (`/settings/general/terminal`) to configure:
+Open **Settings > Preferences > Terminal & Editors** (`/settings/preferences/terminal-editors`) to configure:
+
+![Settings > Preferences > Terminal & Editors showing shell, terminal font, font size, and link settings.](../screenshots/settings-terminal.png)
 
 - preferred shell, which defaults to the system shell; the built-in choices are zsh, bash, and sh on macOS/Linux, and PowerShell (`pwsh`), Windows PowerShell, and cmd on Windows, plus a custom executable;
 - terminal font, with a default Menlo/Monaco-style stack;
