@@ -507,6 +507,85 @@ func TestUnarchiveCancellationPreservesCleanupResourcesAfterBlockedCleaner(t *te
 	}
 }
 
+func TestArchiveCleanupNormalizesLegacyEnvironmentDeletionFlag(t *testing.T) {
+	ctx := context.Background()
+	svc, _, repo := createTestService(t)
+	const taskID = "task-legacy-archive-snapshot"
+	seedCleanupTaskAndSession(t, repo, taskID, "session-legacy-archive-snapshot")
+	env := &models.TaskEnvironment{
+		ID: "env-legacy-archive-snapshot", TaskID: taskID,
+		ExecutorType: "worktree", ContainerID: "legacy-container",
+		WorkspacePath: "/tmp/legacy-archive", Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "env-repo-legacy-archive", RepositoryID: "repo-legacy-archive",
+			WorktreeID: "worktree-legacy-archive", WorktreePath: "/tmp/legacy-archive/repo",
+			WorktreeBranch: "feature/legacy-archive", Status: "deleted",
+		}},
+	}
+	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.ArchiveTask(ctx, taskID); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+	snapshot, err := json.Marshal(taskResourceCleanupSnapshot{
+		TaskEnvironment:      env,
+		DeleteEnvironmentRow: true, // legacy archive snapshot written before the fix
+	})
+	if err != nil {
+		t.Fatalf("marshal legacy snapshot: %v", err)
+	}
+	job := &models.TaskResourceCleanupJob{
+		ID: "archive-legacy-snapshot", OperationID: "archive:" + taskID,
+		TaskID: taskID, Trigger: models.TaskResourceCleanupTriggerArchive,
+		State: models.TaskResourceCleanupStatePending, ResourceSnapshot: string(snapshot),
+	}
+	if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+	}
+	svc.SetEnvironmentDestroyer(&stubDestroyer{})
+	if err := svc.processTaskResourceCleanupJob(ctx, job.ID); err != nil {
+		t.Fatalf("processTaskResourceCleanupJob: %v", err)
+	}
+	got, err := repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment after legacy archive cleanup: %v", err)
+	}
+	if got.TaskID != taskID || len(got.Repos) != 1 || got.Repos[0].WorktreeID != env.Repos[0].WorktreeID {
+		t.Fatalf("legacy archive environment = %+v, want retained owner and repository identity", got)
+	}
+}
+
+func TestArchiveCleanupSkipsLegacyDestructiveFallback(t *testing.T) {
+	ctx := context.Background()
+	svc, _, repo := createTestService(t)
+	const taskID = "task-legacy-archive-fallback"
+	seedCleanupTaskAndSession(t, repo, taskID, "session-legacy-archive-fallback")
+	if err := repo.ArchiveTask(ctx, taskID); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+	snapshot, err := json.Marshal(taskResourceCleanupSnapshot{LegacyWorktreeCleanup: true})
+	if err != nil {
+		t.Fatalf("marshal legacy fallback snapshot: %v", err)
+	}
+	job := &models.TaskResourceCleanupJob{
+		ID: "archive-legacy-fallback", OperationID: "archive:" + taskID,
+		TaskID: taskID, Trigger: models.TaskResourceCleanupTriggerArchive,
+		State: models.TaskResourceCleanupStatePending, ResourceSnapshot: string(snapshot),
+	}
+	if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+	}
+	legacy := &recordingLegacyCleanup{}
+	svc.SetWorktreeCleanup(legacy)
+	if err := svc.processTaskResourceCleanupJob(ctx, job.ID); err != nil {
+		t.Fatalf("processTaskResourceCleanupJob: %v", err)
+	}
+	if legacy.calls != 0 {
+		t.Fatalf("legacy archive cleanup calls = %d, want 0", legacy.calls)
+	}
+}
+
 func TestExecuteTaskResourceCleanupJob_CancellationSkipsLegacyCleanup(t *testing.T) {
 	taskSvc, _, _ := createTestService(t)
 	legacy := &recordingLegacyCleanup{}

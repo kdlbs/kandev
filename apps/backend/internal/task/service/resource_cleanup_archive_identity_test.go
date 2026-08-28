@@ -110,7 +110,7 @@ func TestArchiveTaskCleanupPreservesTaskEnvironmentIdentity(t *testing.T) {
 	}
 
 	svc.SetWorktreeCleanup(mgr)
-	svc.SetEnvironmentDestroyer(&managerEnvironmentDestroyer{mgr: mgr})
+	svc.SetEnvironmentDestroyer(&archiveManagerEnvironmentDestroyer{mgr: mgr})
 	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
 	if err := svc.ArchiveTask(ctx, taskID); err != nil {
 		t.Fatalf("ArchiveTask: %v", err)
@@ -258,7 +258,8 @@ func TestCleanupTaskResources_CascadeArchivePreservesBranches(t *testing.T) {
 // compatibility method.
 func TestArchiveCleanupFailsClosedWithoutBranchPreservingCleaner(t *testing.T) {
 	svc, _, _ := createTestService(t)
-	svc.SetWorktreeCleanup(&recordingWorktreeCleanup{})
+	cleanup := &recordingWorktreeCleanup{}
+	svc.SetWorktreeCleanup(cleanup)
 
 	errs := svc.cleanupDestructiveTaskResources(
 		context.Background(), "task-archive-fail-closed", nil,
@@ -269,5 +270,8 @@ func TestArchiveCleanupFailsClosedWithoutBranchPreservingCleaner(t *testing.T) {
 	joined := errors.Join(errs...)
 	if joined == nil || !strings.Contains(joined.Error(), "cannot preserve branches") {
 		t.Fatalf("archive cleanup error = %v, want branch-preservation failure", joined)
+	}
+	if got := cleanup.cleanedIDs(); len(got) != 0 {
+		t.Fatalf("branch-deleting cleanup calls = %v, want none", got)
 	}
 }
