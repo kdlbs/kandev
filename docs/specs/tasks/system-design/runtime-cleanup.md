@@ -114,10 +114,8 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
 - Archive, delete, cascade, workspace-delete, and quick-chat expiration persist a
   cleanup intent and resource snapshot before mutating or deleting task state.
   Cleanup is performed by a durable worker rather than a detached goroutine.
-- Stop-owner registration is advisory. It uses a non-blocking attempt to acquire
-  the per-session `cancelInFlightGuard` before it records teardown ownership.
-- If that guard is in use, registration skips the claim and the requested stop
-  continues. Durable cleanup and idempotent runtime teardown handle later races.
+- Advisory stop-owner registration skips a contended `cancelInFlightGuard` claim
+  without blocking; the requested stop and durable cleanup continue.
 - A durable cleanup job makes at most eight attempts. Failed attempts back off
   for 1 minute, 5 minutes, 15 minutes, 1 hour, 3 hours, 6 hours, and 12 hours
   before the next claim. An eighth failed attempt becomes terminal `failed`
@@ -255,8 +253,8 @@ primary stop operation when `agent_execution_id` is available. Fallback cleanup 
 runtime-specific and must be bounded by context.
 
 `TaskExecutionStopper.RegisterExecutionStopOwner(sessionID, executionID, force)`
-must not wait for the per-session cancellation guard. Registration can skip a
-contended claim because it is advisory and does not replace the stop operation.
+must not wait for the session guard; it may skip a contended claim and never
+replaces `StopExecution`.
 
 ## State Machine
 
@@ -299,16 +297,15 @@ The durable cleanup job wraps that resource lifecycle:
   the task only if existing product behavior requires it, but destructive runtime
   cleanup must fail closed: do not remove runtime rows or worktrees based on an
   empty or partial inventory.
-- If stop-owner registration finds the session guard in use, it skips the claim.
-  The explicit stop continues, and durable cleanup preserves any retryable work.
+- A contended owner claim is skipped; explicit stop continues and durable cleanup
+  preserves retryable work.
 - If stopping a runtime execution times out, the process manager escalates to a
   process-group kill and waits for confirmation. If confirmation still fails, the
   runtime row remains retryable.
 - If a runtime row points at a missing in-memory execution, cleanup attempts the
   runtime-specific persisted handle when available. If no handle can be used, the
   row is preserved with a warning instead of being silently dropped.
-- `models.ErrExecutionRotated` means a newer execution won. Keep it;
-  warn on other errors.
+- Keep `models.ErrExecutionRotated` (newer won); warn on other errors.
 - If a stop operation reports the execution or session is not found and the owned
   row is a confirmed-dead local runtime, cleanup records the stop as successful,
   prunes or repairs the row under the resume-safety invariant, proceeds with any
