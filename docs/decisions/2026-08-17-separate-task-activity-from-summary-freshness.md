@@ -27,7 +27,7 @@ rebuildable summary.
 - a conversational agent turn start or completion
 
 A turn with `metadata.lifecycle_only=true` is not conversational. The
-synthetic `agent_boot` turn on resume does not advance task activity.
+synthetic turn named `agent_boot` on resume does not advance task activity.
 
 The timestamp does not advance for task focus, session subscription, Git or
 pull-request polling, queue bookkeeping, status-summary repair, or session
