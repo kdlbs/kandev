@@ -714,15 +714,24 @@ test.describe("Sidebar filter — repository dimension (#1213)", () => {
 });
 
 test.describe("Sidebar filter — task-row presentation", () => {
-  test("previews, saves, discards, and reloads an independent task row layout", async ({
+  test("previews, saves, discards, and reloads task row presentation with compact trailing content", async ({
     testPage,
     apiClient,
     seedData,
     prCapture,
   }) => {
     const taskTitle = "Desktop task row layout";
-    const { session, filters } = await openWithSeed(testPage, apiClient, seedData, [taskTitle]);
-    const row = session.sidebar.getByTestId("sidebar-task-item").filter({ hasText: taskTitle });
+    const secondTaskTitle = "Desktop task row layout second";
+    const { session, filters } = await openWithSeed(testPage, apiClient, seedData, [
+      taskTitle,
+      secondTaskTitle,
+    ]);
+    const row = session.sidebar
+      .getByTestId("sidebar-task-item")
+      .filter({ has: testPage.getByText(taskTitle, { exact: true }) });
+    const secondRow = session.sidebar
+      .getByTestId("sidebar-task-item")
+      .filter({ has: testPage.getByText(secondTaskTitle, { exact: true }) });
     await expect(row).toBeVisible();
     await expect(row.getByTestId("sidebar-task-time")).toBeVisible();
 
@@ -811,7 +820,19 @@ test.describe("Sidebar filter — task-row presentation", () => {
 
     await filters.setTaskRowTrailing("Relative time");
     await filters.saveOverwrite();
-    await expect(row.getByTestId("sidebar-task-trailing-time")).toBeVisible();
+    const trailingTime = row.getByTestId("sidebar-task-trailing-time");
+    const secondTrailingTime = secondRow.getByTestId("sidebar-task-trailing-time");
+    await expect(trailingTime).toBeVisible();
+    await expect(secondTrailingTime).toBeVisible();
+    await expect(trailingTime).not.toContainText(/ago|yesterday/i);
+    await expect(trailingTime.locator(".sr-only")).toHaveText(/\S/);
+    const [timeBox, secondTimeBox] = await Promise.all([
+      trailingTime.boundingBox(),
+      secondTrailingTime.boundingBox(),
+    ]);
+    expect(timeBox).not.toBeNull();
+    expect(secondTimeBox).not.toBeNull();
+    expect(Math.abs(timeBox!.width - secondTimeBox!.width)).toBeLessThanOrEqual(1);
 
     await filters.openTaskRowSettings();
     await detailsToggle.click();
@@ -823,12 +844,14 @@ test.describe("Sidebar filter — task-row presentation", () => {
 
     await filters.selectViewByName("All tasks");
     await expect(
-      session.sidebar.getByTestId("sidebar-task-item").filter({ hasText: taskTitle }),
+      session.sidebar
+        .getByTestId("sidebar-task-item")
+        .filter({ has: testPage.getByText(taskTitle, { exact: true }) }),
     ).toBeVisible();
     await expect(
       session.sidebar
         .getByTestId("sidebar-task-item")
-        .filter({ hasText: taskTitle })
+        .filter({ has: testPage.getByText(taskTitle, { exact: true }) })
         .getByTestId("sidebar-task-time"),
     ).toBeVisible();
 
@@ -837,7 +860,7 @@ test.describe("Sidebar filter — task-row presentation", () => {
       .poll(async () => {
         const compactRow = session.sidebar
           .getByTestId("sidebar-task-item")
-          .filter({ hasText: taskTitle });
+          .filter({ has: testPage.getByText(taskTitle, { exact: true }) });
         return (await compactRow.getByTestId("sidebar-task-trailing-time").count()) === 1;
       })
       .toBe(true);
@@ -846,7 +869,9 @@ test.describe("Sidebar filter — task-row presentation", () => {
     await new SessionPage(testPage).waitForLoad();
     const reloadedFilters = new SidebarFilterPopoverPage(testPage);
     await reloadedFilters.expectActiveViewChip("Compact task rows");
-    const reloadedRow = testPage.getByTestId("sidebar-task-item").filter({ hasText: taskTitle });
+    const reloadedRow = testPage
+      .getByTestId("sidebar-task-item")
+      .filter({ has: testPage.getByText(taskTitle, { exact: true }) });
     await expect(reloadedRow.getByTestId("sidebar-task-time")).toHaveCount(0);
     await expect(reloadedRow.getByTestId("sidebar-task-trailing-time")).toBeVisible();
     await expect(

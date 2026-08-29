@@ -16,6 +16,7 @@ import type {
 } from "@/lib/types/http";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
+import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 import type { UISliceActions as UIA } from "./slices/ui/types";
 import type * as UISliceTypes from "./slices/ui/types";
 import type { AgentUpdateJob, InstallJob } from "./slices/settings/types";
@@ -70,6 +71,8 @@ import {
   type SettingsDataState,
   type SleepInhibitionStoreState,
   type UserSettingsState,
+  type AgentProfileRecentUseState,
+  type AgentProfileRecentUseRecord,
   type ProcessStatusEntry,
   type Worktree,
   type GitStatusEntry,
@@ -135,6 +138,7 @@ export type AppState = KanbanSlice & {
   settingsData: (typeof defaultSettingsState)["settingsData"];
   sleepInhibition: (typeof defaultSettingsState)["sleepInhibition"];
   userSettings: (typeof defaultSettingsState)["userSettings"];
+  agentProfileRecentUse: (typeof defaultSettingsState)["agentProfileRecentUse"];
 
   // Session slice
   messages: (typeof defaultSessionState)["messages"];
@@ -327,6 +331,11 @@ export type AppState = KanbanSlice & {
   setSleepInhibitionLoading: (loading: boolean) => void;
   setSleepInhibitionError: (error: boolean) => void;
   setUserSettings: (settings: UserSettingsState) => void;
+  setAgentProfileRecentUse: (state: AgentProfileRecentUseState) => void;
+  applyAgentProfileRecentUse: (
+    context: AgentProfileRecentUseContext,
+    record: AgentProfileRecentUseRecord,
+  ) => void;
   setTerminalOutput: (terminalId: string, data: string) => void;
   appendShellOutput: (sessionId: string, data: string) => void;
   setShellStatus: (
@@ -386,6 +395,9 @@ export type AppState = KanbanSlice & {
   clearQuickChatUnseenIdle: UIA["clearQuickChatUnseenIdle"];
   recordQuickChatSettled: UIA["recordQuickChatSettled"];
   removeQuickChatSession: UIA["removeQuickChatSession"];
+  setQuickChatTabOrder: UIA["setQuickChatTabOrder"];
+  clearQuickChatTabOrder: UIA["clearQuickChatTabOrder"];
+  setQuickChatTabOrderSyncState: UIA["setQuickChatTabOrderSyncState"];
   closeQuickChat: () => void;
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string, workspaceId: string) => void;
@@ -427,6 +439,7 @@ export type AppState = KanbanSlice & {
   /** Records that the session's full persisted turn history is in the store. */
   markTurnsLoaded: (sessionId: string) => void;
   updateMessage: (message: Message) => void;
+  updateMessages: (messages: Message[]) => void;
   removeMessage: (sessionId: string, messageId: string) => void;
   prependMessages: (
     sessionId: string,

@@ -61,12 +61,14 @@ test.describe("Task List", () => {
       .fill("Hierarchy");
 
     const taskList = testPage.getByTestId("tasks-list");
-    const parentRow = taskList.getByTestId("tasks-list-row").filter({
-      hasText: "Hierarchy Parent Task",
-    });
-    const childRow = taskList.getByTestId("tasks-list-row").filter({
-      hasText: "Hierarchy Child Task",
-    });
+    const parentRow = taskList
+      .getByTestId("tasks-list-row-title")
+      .filter({ hasText: /^Hierarchy Parent Task$/ })
+      .locator("xpath=ancestor::*[@data-testid='tasks-list-row']");
+    const childRow = taskList
+      .getByTestId("tasks-list-row-title")
+      .filter({ hasText: /^Hierarchy Child Task$/ })
+      .locator("xpath=ancestor::*[@data-testid='tasks-list-row']");
 
     // Wait for the filtered list to settle before reading row attributes. SSR
     // and the client list can briefly overlap while the search result mounts.

@@ -18,6 +18,16 @@ const SETTLED_SESSION_STATES = new Set([
 ]);
 const ACTIVE_SESSION_STATES = new Set(["STARTING", "RUNNING"]);
 
+export function quickChatTabReferences(dialog: Locator): Promise<string[]> {
+  return dialog
+    .getByTestId("quick-chat-sortable-tab")
+    .evaluateAll((tabs) =>
+      tabs
+        .map((tab) => tab.getAttribute("data-tab-reference"))
+        .filter((reference): reference is string => Boolean(reference)),
+    );
+}
+
 /**
  * Establish a backend-confirmed settle point before arming waits for the next
  * turn. The WS watcher does not replay notifications, so the startup settle

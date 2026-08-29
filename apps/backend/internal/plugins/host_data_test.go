@@ -187,6 +187,10 @@ type fakeTaskWriter struct {
 	updateErr   error
 	deletedIDs  []string
 	deleteErr   error
+	lastMove    TaskMoveInput
+	moveCalls   int
+	moveResult  *TaskMoveResult
+	moveErr     error
 }
 
 func (f *fakeTaskWriter) CreateTask(_ context.Context, in TaskCreateInput) (*taskmodels.Task, error) {
@@ -211,6 +215,22 @@ func (f *fakeTaskWriter) UpdateTask(_ context.Context, in TaskUpdateInput) (*tas
 		return f.updated, nil
 	}
 	return &taskmodels.Task{ID: in.ID, Title: "updated"}, nil
+}
+
+func (f *fakeTaskWriter) MoveTask(_ context.Context, in TaskMoveInput) (*TaskMoveResult, error) {
+	f.moveCalls++
+	f.lastMove = in
+	if f.moveErr != nil {
+		return nil, f.moveErr
+	}
+	if f.moveResult != nil {
+		return f.moveResult, nil
+	}
+	return &TaskMoveResult{
+		Task:         &taskmodels.Task{ID: in.TaskID, WorkflowStepID: in.WorkflowStepID},
+		Transitioned: true,
+		FromStepID:   "step-from",
+	}, nil
 }
 
 func (f *fakeTaskWriter) DeleteTask(_ context.Context, id string) error {

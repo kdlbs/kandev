@@ -17,9 +17,29 @@ This design preserves the technical source detail for `REQ-OFFICE-AUTOMATIONS-SE
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-OFFICE-AUTOMATIONS-SETTINGS-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-OFFICE-AUTOMATIONS-SETTINGS-001` | [Migrated source detail](#migrated-source-detail), [Deletion confirmation](#deletion-confirmation) |
 
 ## Migrated source detail
+
+## Deletion confirmation
+
+The workspace automation list and the automation editor share an
+`AutomationDeleteConfirmDialog` built on the existing `@kandev/ui/alert-dialog`
+primitive. The dialog owns the warning copy and accessible Cancel/Delete
+actions; its caller owns the selected automation and the mutation callback.
+
+The list page records the row selected by its action cell and calls
+`useAutomations.remove` only from the dialog's confirmation callback. The editor
+opens the same dialog from `EditorFooter` and keeps the existing
+`useRemoveAutomation` callback, including its navigation-blocker bypass and
+redirect, behind confirmation. Closing or cancelling the dialog only clears its
+open state.
+
+The modal remains short and viewport-contained on phones, so a centered alert
+dialog is preferred over a drawer. Its footer actions use the existing
+responsive alert-dialog layout, full-width touch-sized controls on coarse
+pointers, and the destructive action styling already used by automation run
+deletion.
 
 ## Migration
 

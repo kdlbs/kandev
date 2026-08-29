@@ -30,6 +30,8 @@ A task can therefore display a pull or merge request while its worktree cannot p
 
 Select **Settings > Workspaces > _Workspace_ > Integrations**, then choose a provider. The direct routes are:
 
+![Settings > Workspaces > Default > Integrations showing Azure DevOps, GitHub, GitLab, Jira, Linear, and Sentry connections.](../screenshots/settings-integrations.png)
+
 - `/settings/workspace/{workspaceId}/integrations/github`
 - `/settings/workspace/{workspaceId}/integrations/gitlab`
 - `/settings/workspace/{workspaceId}/integrations/azure-devops`
@@ -319,6 +321,12 @@ This is a GitHub-only lifecycle feature. Kandev reuses the existing lightweight 
 When GitHub puts a linked pull request in a merge queue, the PR status control shows its queue state. It also shows the queue position and estimated merge time when GitHub provides them. The same status appears in the task summary, the mobile PR chip, and Review.
 
 The existing two automation switches also control merge-queue recovery. Auto-fix sends one actionable queue removal to the linked task agent and counts it as one auto-fix round. Auto-merge submits an eligible pull request through GitHub's queue-aware merge action. If GitHub removes a queue attempt, Kandev records the reason and waits for a new pull-request head before it submits another attempt; it never retries the same head automatically. An active queue entry is adopted when auto-merge is enabled, so enabling the option does not submit a duplicate request. Unknown, manual, and branch-protection removals remain visible but do not start automatic repair.
+
+Each automatic merge request uses the pull-request head that passed the readiness checks. If GitHub reports a different head, Kandev stops the request. After a failed request, Kandev does not automatically repeat the same readiness state.
+
+Use **Retry** to request one new evaluation for the selected linked pull request. Kandev refreshes the pull request and applies all current readiness and GitHub policy rules. **Retry** accepts the evaluation request. It does not report a completed merge.
+
+Use **Refresh** for a state-loading error or another automation error. Refresh loads state only and does not authorize a merge. If GitHub shows an active queue entry or a merged pull request, Kandev marks the attempt accepted. It removes only the obsolete automatic-merge error.
 
 **Your review is requested** matches the GitHub account connected to the task's workspace. The first observation is a quiet baseline. Any later transition to a request for that account wakes the agent, including the first new request after baselining and a re-review request after changes. Clearing a request rearms the next transition. If the workspace's connected GitHub account changes, Kandev quietly rebinds the task and re-establishes every linked PR's baseline; switching accounts does not itself create a prompt.
 

@@ -80,6 +80,7 @@ func bootInitialState(
 			state["agentRuntime"] = snapshot
 		}
 	}
+	builder.addAgentProfileRecentUseState(ctx, state)
 
 	if route.Route == webapp.RouteSettings {
 		// Resolve an active workspace rather than emitting null. The SPA derives
@@ -241,6 +242,30 @@ func (b bootStateBuilder) addUserSettingsState(ctx context.Context, state map[st
 		return
 	}
 	state["userSettings"] = mapUserSettingsState(response, workspaceID)
+}
+
+func (b bootStateBuilder) addAgentProfileRecentUseState(ctx context.Context, state map[string]any) {
+	if b.p.userCtrl == nil {
+		return
+	}
+	records, err := b.p.userCtrl.GetAgentProfileRecentUse(ctx)
+	if err != nil {
+		b.logBootError("get agent profile recent use", err)
+		return
+	}
+	state["agentProfileRecentUse"] = mapAgentProfileRecentUseState(records)
+}
+
+func mapAgentProfileRecentUseState(records []userdto.AgentProfileRecentUseDTO) map[string]any {
+	byContext := make(map[string]any, len(records))
+	for _, record := range records {
+		byContext[string(record.Context)] = map[string]any{
+			"profileIds": append([]string{}, record.ProfileIDs...),
+			"revision":   record.Revision,
+			"updatedAt":  record.UpdatedAt,
+		}
+	}
+	return map[string]any{"records": byContext, "loaded": true}
 }
 
 func (b bootStateBuilder) addSettingsRouteState(ctx context.Context, state map[string]any, path string) {

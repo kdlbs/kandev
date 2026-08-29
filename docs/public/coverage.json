@@ -361,7 +361,12 @@
         "apps/backend/internal/mcp/server/server_test.go"
       ],
       "settingsRoutes": ["/settings/automations", "/settings/external-mcp"],
-      "mcpTools": ["get_mcp_config_kandev", "update_mcp_config_kandev"]
+      "mcpTools": [
+        "get_mcp_config_kandev",
+        "update_mcp_config_kandev",
+        "list_shared_prompts_kandev",
+        "get_shared_prompt_kandev"
+      ]
     },
     {
       "id": "personal-settings-and-secrets",

@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { deleteTaskPR, listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
-import { getWebSocketClient } from "@/lib/ws/connection";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getTaskPRsForCurrentWorkspace } from "./use-task-pr-tooltip-hydration";
+import { getTaskPRSyncResource, type TaskPRSyncScope } from "./task-pr-sync-resource";
 import type { TaskPR } from "@/lib/types/github";
 
 /** Fetch all PR associations for a workspace. */
@@ -40,9 +40,6 @@ export function useWorkspacePRs(workspaceId: string | null) {
   }, [workspaceContextGeneration, setTaskPRs, workspaceId]);
 }
 
-const SYNC_RETRY_DELAY = 5_000; // 5 seconds
-const SYNC_MAX_RETRIES = 6; // Up to 30 seconds of retries
-
 /**
  * Returns the primary PR (first by created_at) for a task. Multi-repo tasks
  * may have additional PRs — use `useTaskPRs` to get the full list.
@@ -51,190 +48,51 @@ export function getPrimaryTaskPR(prs: TaskPR[] | undefined): TaskPR | null {
   return prs && prs.length > 0 ? prs[0] : null;
 }
 
-/**
- * Normalises the WS sync response into an array of TaskPR rows. Backend
- * returns `{prs: TaskPR[]}` (current shape) for multi-repo support, but we
- * accept the legacy bare-TaskPR shape too in case an older backend is
- * still running. Empty / null / unknown shapes return an empty array.
- */
-function normalizeSyncResponse(result: SyncResponse): TaskPR[] {
-  if (!result) return [];
-  const envelope = result as { prs?: TaskPR[] };
-  if (Array.isArray(envelope.prs)) return envelope.prs;
-  const single = result as TaskPR;
-  if (single.task_id) return [single];
-  return [];
-}
-
-/**
- * Response shape from the `github.task_pr.sync` WS action. `permanent`
- * is true when every watch on the task points at a repository the
- * backend has classified as unresolvable (missing, deleted, or
- * inaccessible). When set, the 5s retry interval stops — without this
- * the frontend kept hammering a dead repo every 5s for the lifetime of
- * the task. Older backends omit the field, so it's optional.
- */
-type SyncResponse = { prs?: TaskPR[]; permanent?: boolean } | TaskPR | null | undefined;
-
 /** Fetch a single task's PR associations, with on-demand sync via WS. */
 export function useTaskPR(taskId: string | null) {
+  const store = useAppStoreApi();
   const prs = useAppStore((state) =>
     taskId ? getTaskPRsForCurrentWorkspace(state, taskId) : null,
   );
   const pr = getPrimaryTaskPR(prs ?? undefined);
-  const setTaskPR = useAppStore((state) => state.setTaskPR);
   const removeTaskPR = useAppStore((state) => state.removeTaskPR);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const workspaceContextGeneration = useAppStore((state) => state.workspaceContextGeneration);
-  const connectionStatus = useAppStore((state) => state.connection.status);
-  const retryRef = useRef(0);
-  const permanentRef = useRef(false);
-  // Tracks the previous connection status so the resync effect below only
-  // fires on the transition edge into `connected`, not on every re-render
-  // while already connected.
-  const prevConnectionStatusRef = useRef(connectionStatus);
-  // Bumped on each reconnect transition so the retry-polling effect below
-  // tears down and recreates its interval (see that effect's dependency list).
-  const [reconnectGeneration, setReconnectGeneration] = useState(0);
-  const [loadedTaskId, setLoadedTaskId] = useState<string | null>(null);
-  // Monotonic counter incremented before each WS request, snapshotted in
-  // the .then() closure. Mirrors useWorkspacePRs above. Without this, a
-  // stale response from a previous taskId can land after the user
-  // navigates to a new task and flip permanentRef.current = true for the
-  // active task, killing its retry loop. The reset effect below clears
-  // retry/permanent state on taskId change, but a still-in-flight WS
-  // call from the previous task can race that reset.
-  const requestRef = useRef(0);
-
-  // Resolves when the sync settles (or immediately when it can't be sent), so
-  // callers can show an "updating" affordance for exactly as long as the
-  // summary is actually stale. Never rejects — failures are absorbed below.
-  const refresh = useCallback((): Promise<void> => {
-    if (!taskId) return Promise.resolve();
-    const client = getWebSocketClient();
-    if (!client) return Promise.resolve();
-
-    // Backend returns `{prs: TaskPR[], permanent?: boolean}` — multi-repo
-    // tasks have one row per repo. We push each into the store so the
-    // per-repo PR icon stays in sync. Empty array means no watches yet
-    // (the freshness retry below handles the polling cadence). Legacy
-    // single-PR shape (`TaskPR` only) is detected via the absence of
-    // `.prs`. When `permanent` is true (every watch's repo is dead),
-    // exhaust the retry counter so the 5s interval below clears itself.
-    const requestId = ++requestRef.current;
-    const requestedTaskId = taskId;
-    return client
-      .request<SyncResponse>("github.task_pr.sync", { task_id: requestedTaskId })
-      .then((result) => {
-        // Drop responses that aren't the latest in-flight request for
-        // this hook instance — they'd otherwise corrupt permanentRef /
-        // retryRef for whatever task the user is now viewing. The
-        // taskId-change effect below bumps requestRef.current too, so
-        // requestId alone covers both stale-by-sequence and
-        // stale-by-task-change.
-        if (requestRef.current !== requestId) return;
-        const envelope = (result ?? {}) as { permanent?: boolean };
-        if (envelope.permanent) {
-          permanentRef.current = true;
-          retryRef.current = SYNC_MAX_RETRIES;
-        }
-        const list = normalizeSyncResponse(result);
-        setLoadedTaskId(requestedTaskId);
-        if (list.length === 0) return;
-        const scope = { workspaceId, workspaceContextGeneration };
-        for (const pr of list) {
-          if (pr.task_id) setTaskPR(requestedTaskId, pr, scope);
-        }
-        retryRef.current = 0;
-      })
-      .catch(() => {
-        if (requestRef.current !== requestId) return;
-        // Keep transient failures pending while retries remain, then settle the
-        // loading state so review-panel cleanup cannot be blocked forever.
-        if (retryRef.current >= SYNC_MAX_RETRIES) {
-          setLoadedTaskId(requestedTaskId);
-        }
-      });
-  }, [taskId, setTaskPR, workspaceContextGeneration, workspaceId]);
+  const resource = getTaskPRSyncResource(store);
+  const scope = useMemo<TaskPRSyncScope | null>(
+    () => (taskId ? { taskId, workspaceId, workspaceContextGeneration } : null),
+    [taskId, workspaceContextGeneration, workspaceId],
+  );
+  const subscribe = useCallback(
+    (listener: () => void) => (scope ? resource.subscribe(scope, listener) : () => undefined),
+    [resource, scope],
+  );
+  const getSnapshot = useCallback(
+    () => (scope ? resource.getSnapshot(scope) : false),
+    [resource, scope],
+  );
+  const resourceLoaded = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const refresh = useCallback(
+    () => (scope ? resource.refresh(scope) : Promise.resolve()),
+    [resource, scope],
+  );
 
   const unlink = useCallback(
     async (associationId: string) => {
       if (!taskId || !workspaceId) throw new Error("No active workspace is selected.");
       await deleteTaskPR(associationId, workspaceId);
       removeTaskPR(taskId, associationId, { workspaceId, workspaceContextGeneration });
+      if (scope) resource.invalidate(scope);
     },
-    [removeTaskPR, taskId, workspaceContextGeneration, workspaceId],
+    [removeTaskPR, resource, scope, taskId, workspaceContextGeneration, workspaceId],
   );
-
-  // Reset retry/permanent state when taskId changes. Bumping requestRef
-  // here invalidates any still-in-flight .then() closure from the prior
-  // taskId so it can't write to the new task's refs.
-  useEffect(() => {
-    retryRef.current = 0;
-    permanentRef.current = false;
-    requestRef.current++;
-    setLoadedTaskId(null);
-  }, [taskId]);
-
-  // Sync once when the task becomes active (freshness check).
-  // Intentionally excludes `pr` so WS-driven store updates don't re-trigger.
-  useEffect(() => {
-    if (!taskId) return;
-    refresh();
-  }, [taskId, refresh]);
-
-  // Retry polling when no PR is in the store yet. permanentRef short-circuits
-  // the interval entirely so a task whose repos are all dead doesn't tie up
-  // the backend's gh throttle on every 5s tick.
-  //
-  // Depends on `reconnectGeneration` so a reconnect (see the effect below,
-  // which zeroes retryRef/permanentRef and bumps the generation on the
-  // transition edge) tears down and recreates the interval, starting a fresh
-  // 30s retry window. Without that dep, once the budget is exhausted the
-  // interval clears itself and merely resetting the refs never recreates it —
-  // a single empty resync would then leave the store empty and the
-  // "Pull Request" tab missing.
-  useEffect(() => {
-    if (!taskId || pr || permanentRef.current) return;
-
-    const interval = setInterval(() => {
-      if (retryRef.current >= SYNC_MAX_RETRIES || permanentRef.current) {
-        clearInterval(interval);
-        return;
-      }
-      retryRef.current++;
-      refresh();
-    }, SYNC_RETRY_DELAY);
-
-    return () => clearInterval(interval);
-  }, [taskId, pr, refresh, reconnectGeneration]);
-
-  // Reconnect-driven resync. A task can be opened while the WS is down (e.g. a
-  // transient dev HMR disconnect, or a task auto-created by the PR-review
-  // watcher that the user navigates to directly). In that window the freshness
-  // sync and every 5s retry queue/time out with nothing, so the store never
-  // learns about the PR and the auto "Pull Request" tab is never offered. When
-  // the socket comes back up, clear the exhausted retry/permanent state, refire
-  // the sync, and bump reconnectGeneration so the polling effect above restarts
-  // its (possibly already self-cleared) interval and runs a fresh 30s retry
-  // window. Guarded on the transition edge into `connected` so unrelated store
-  // updates don't refire.
-  useEffect(() => {
-    const prev = prevConnectionStatusRef.current;
-    prevConnectionStatusRef.current = connectionStatus;
-    if (!taskId || connectionStatus !== "connected" || prev === "connected") return;
-    retryRef.current = 0;
-    permanentRef.current = false;
-    refresh();
-    setReconnectGeneration((g) => g + 1);
-  }, [taskId, connectionStatus, refresh]);
 
   return {
     pr,
     prs: prs ?? [],
     refresh,
     unlink,
-    loaded: loadedTaskId === taskId || prs !== null,
+    loaded: resourceLoaded || prs !== null,
   } as {
     pr: TaskPR | null;
     prs: TaskPR[];

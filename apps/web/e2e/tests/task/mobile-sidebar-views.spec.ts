@@ -14,6 +14,11 @@ import type { Page, Locator } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import { dwell } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
+import {
+  repositoryName,
+  seedSidebarCombinationRepository,
+  SIDEBAR_COMBINATION_REPOSITORY_NAME,
+} from "./sidebar-repository-grouping-helpers";
 
 async function seedAndOpenSheet(
   testPage: Page,
@@ -104,6 +109,66 @@ async function touchDrag(page: Page, source: Locator, target: Locator): Promise<
 }
 
 test.describe("Mobile sidebar — view system", () => {
+  test("multi-repository group shows the complete ordered label", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+    prCapture,
+  }) => {
+    const secondRepository = await seedSidebarCombinationRepository(
+      apiClient,
+      seedData.workspaceId,
+      backend.tmpDir,
+    );
+    const primaryRepositoryName = await repositoryName(
+      apiClient,
+      seedData.workspaceId,
+      seedData.repositoryId,
+    );
+    const expectedLabel = `${primaryRepositoryName}, ${SIDEBAR_COMBINATION_REPOSITORY_NAME}`;
+    const multiRepositoryTask = await apiClient.createTask(
+      seedData.workspaceId,
+      "Mobile multi-repository task",
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repositories: [
+          { repository_id: seedData.repositoryId },
+          { repository_id: secondRepository.id },
+        ],
+      },
+    );
+    await apiClient.createTask(seedData.workspaceId, "Mobile primary repository task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, []);
+    const combinationHeader = sheet.locator(
+      `[data-testid="sidebar-group-header"][data-group-label="${expectedLabel}"]`,
+    );
+    await expect(combinationHeader).toHaveCount(1);
+    const combinationGroup = combinationHeader.locator("..");
+    await expect(
+      combinationGroup.locator(`[data-task-row-id="${multiRepositoryTask.id}"]`),
+    ).toBeVisible();
+
+    const primaryGroup = sheet
+      .locator(`[data-testid="sidebar-group-header"][data-group-key="${primaryRepositoryName}"]`)
+      .locator("..");
+    await expect(primaryGroup).toHaveCount(1);
+    await expect(
+      primaryGroup.locator(`[data-task-row-id="${multiRepositoryTask.id}"]`),
+    ).toHaveCount(0);
+
+    await combinationHeader.scrollIntoViewIfNeeded();
+    await prCapture.screenshot("multi-repository-group-mobile", {
+      caption: "Mobile task drawer uses the same complete repository combination group.",
+    });
+  });
+
   test("direct creation stays touch-reachable, viewport-safe, and persists", async ({
     testPage,
     apiClient,
@@ -455,6 +520,9 @@ test.describe("Mobile sidebar — view system", () => {
   }) => {
     const taskTitle = "Mobile task row layout";
     const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, [taskTitle]);
+    const listedTasks = await apiClient.listTasks(seedData.workspaceId);
+    const task = listedTasks.tasks.find((candidate) => candidate.title === taskTitle);
+    expect(task?.id).toBeTruthy();
     const gear = sheet.getByTestId("sidebar-filter-gear");
     await gear.tap();
 
@@ -550,8 +618,14 @@ test.describe("Mobile sidebar — view system", () => {
 
     const row = compactRow;
     await expect(row).toBeVisible();
-    await expect(row.getByTestId("sidebar-task-trailing-time")).toBeVisible();
+    const trailingTime = row.getByTestId("sidebar-task-trailing-time");
+    await expect(trailingTime).toBeVisible();
     await expect(row.getByTestId("sidebar-task-time")).toHaveCount(0);
+    await expect(trailingTime).not.toContainText(/ago|yesterday/i);
+    await expect(trailingTime.locator(".sr-only")).toHaveText(/\S/);
+    const mobileTimeBox = await trailingTime.boundingBox();
+    expect(mobileTimeBox).not.toBeNull();
+    expect(mobileTimeBox!.width).toBeGreaterThanOrEqual(40);
     await prCapture.screenshot("mobile-task-row-settings", {
       caption: "Mobile task-row settings in the inset bottom drawer",
     });
@@ -569,6 +643,24 @@ test.describe("Mobile sidebar — view system", () => {
     ).toBe(true);
     await testPage.keyboard.press("Escape");
     await expect(popover).toBeHidden();
+    const taskAction = row.getByRole("button", { name: "Task actions" });
+    await expect(taskAction).toBeVisible();
+    const taskActionBox = await taskAction.boundingBox();
+    expect(taskActionBox).not.toBeNull();
+    expect(taskActionBox!.width).toBeGreaterThanOrEqual(44);
+    expect(taskActionBox!.height).toBeGreaterThanOrEqual(44);
+    const rowBoxWithAction = await row.boundingBox();
+    expect(rowBoxWithAction).not.toBeNull();
+    expect(taskActionBox!.x).toBeGreaterThanOrEqual(rowBoxWithAction!.x - 1);
+    expect(taskActionBox!.x + taskActionBox!.width).toBeLessThanOrEqual(
+      rowBoxWithAction!.x + rowBoxWithAction!.width + 1,
+    );
+    expect(taskActionBox!.x).toBeGreaterThanOrEqual(drawerBox!.x - 1);
+    expect(taskActionBox!.x + taskActionBox!.width).toBeLessThanOrEqual(
+      drawerBox!.x + drawerBox!.width + 1,
+    );
+    await row.tap();
+    await expect(testPage).toHaveURL((url) => url.pathname === `/t/${task!.id}`);
 
     await testPage.reload();
     await new SessionPage(testPage).waitForLoad();

@@ -222,6 +222,53 @@ func (s *Server) registerConfigMcpTools() {
 	)
 }
 
+// --- Saved prompt tools ---
+
+func (s *Server) registerConfigPromptTools() {
+	listTool := mcp.NewToolWithRawSchema(
+		"list_shared_prompts_kandev",
+		"List saved prompts without their content. Each summary includes the prompt name, whether it is built in, and its UTF-8 content size.",
+		json.RawMessage(`{"type":"object","properties":{}}`),
+	)
+	// NewToolWithRawSchema does not accept option functions, so set annotations directly.
+	listTool.Annotations.ReadOnlyHint = mcp.ToBoolPtr(true)
+	listTool.Annotations.DestructiveHint = mcp.ToBoolPtr(false)
+	listTool.Annotations.IdempotentHint = mcp.ToBoolPtr(true)
+	listTool.Annotations.OpenWorldHint = mcp.ToBoolPtr(false)
+	s.mcpServer.AddTool(
+		listTool,
+		s.wrapHandler("list_shared_prompts_kandev", s.listSharedPromptsHandler()),
+	)
+
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_shared_prompt_kandev",
+			mcp.WithDescription("Read one saved prompt by its exact, case-sensitive name. Surrounding whitespace is ignored."),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithString("name", mcp.Required(), mcp.MinLength(1), mcp.Description("Saved prompt name.")),
+		),
+		s.wrapHandler("get_shared_prompt_kandev", s.getSharedPromptHandler()),
+	)
+}
+
+func (s *Server) listSharedPromptsHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return s.forwardToBackend(ctx, ws.ActionMCPListSharedPrompts, nil)
+	}
+}
+
+func (s *Server) getSharedPromptHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		name := strings.TrimSpace(req.GetString("name", ""))
+		if name == "" {
+			return mcp.NewToolResultError("name is required"), nil
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPGetSharedPrompt, map[string]interface{}{"name": name})
+	}
+}
+
 // --- Executor config tools ---
 
 func (s *Server) registerConfigExecutorTools() {

@@ -3,8 +3,9 @@ status: draft
 system: ui
 requirements:
   - REQ-UI-QUICK-TERMINAL-001
+  - REQ-UI-QUICK-TERMINAL-002
 created: 2026-08-03
-updated: 2026-08-26
+updated: 2026-08-28
 owners:
   - kandev
 ---
@@ -12,14 +13,134 @@ owners:
 
 ## Purpose and boundaries
 
-This design preserves the technical source detail for `REQ-UI-QUICK-TERMINAL-001` during migration.
+This design owns the shared Quick Chat tab presentation and interaction contract. Quick Chat task
+records and Quick Terminal descriptors remain owned by their existing backend services.
 
 ## Requirement mapping
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-UI-QUICK-TERMINAL-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-UI-QUICK-TERMINAL-001` | [Migrated source detail](#migrated-source-detail), [Launcher focus return](#launcher-focus-return), [Launcher toggle and terminal Escape routing](#launcher-toggle-and-terminal-escape-routing) |
+| `REQ-UI-QUICK-TERMINAL-002` | [Tab order and editing](#tab-order-and-editing) |
 
+## Tab order and editing
+
+### Components and responsibilities
+
+- The Quick Chat tab-strip component builds one list of persisted conversation and terminal tabs.
+  It resolves that list against the saved workspace order before it renders sortable items.
+- The Quick Chat UI state owns the optimistic order and serializes user-settings saves. Existing
+  Quick Chat reconciliation still owns conversation membership. Quick Terminal reconciliation
+  still owns terminal membership and lifecycle.
+- The backend user-settings model stores one order list per user and workspace. The existing boot
+  payload and partial user-settings update path carry that preference. This feature adds no new
+  endpoint or WebSocket action.
+- Conversation listing uses creation time, then task ID, as its stable baseline. Quick Terminal
+  descriptors keep their existing `sequence` baseline. The renderer places conversation tabs
+  before terminal tabs when no saved order changes that baseline.
+
+### Data and contracts
+
+User settings add this portable preference:
+
+```text
+quick_chat_tab_order_by_workspace: map<workspace-id, tab-reference[]>
+```
+
+A tab reference uses a type prefix and a stable persisted identifier:
+
+- `conversation:<sessionId>` identifies an ordinary or configuration conversation.
+- `terminal:<tabId>` identifies a Quick Terminal descriptor.
+
+The prefix prevents a future collision between identifier domains. The preference controls only
+presentation order. It does not add, remove, rename, or change the lifecycle of a tab.
+
+The order resolver applies these rules:
+
+1. Build the stable baseline from current persisted descriptors.
+2. Keep each known saved reference once and in its saved position.
+3. Ignore saved references that are unknown, duplicated, stale, or in another workspace.
+4. Append baseline references that do not appear in the saved order.
+5. Append temporary setup tabs after all persisted tabs. Do not save setup tab references.
+
+Closing a persisted tab removes its reference from the optimistic order. Membership deletion stays
+on the existing conversation or terminal path. A later reconciliation also ignores any stale saved
+reference, so cleanup and membership deletion do not need one transaction.
+
+Decision: [Store Quick Chat Tab Order as a User Preference](../../../decisions/2026-08-26-quick-chat-tab-order.md)
+
+### Control flow
+
+1. Boot hydration loads conversation sessions, terminal descriptors, and the user's workspace
+   order preference.
+2. The tab strip resolves all three inputs into one rendered list.
+3. A completed drag, keyboard move, or menu move updates the list optimistically.
+4. The client writes the full persisted-reference list for that workspace through the existing
+   partial user-settings update API. A serialized save queue prevents an older local save from
+   overtaking a newer one.
+5. The next boot or settings refresh uses the last backend-accepted list. Other clients receive the
+   preference through the existing user-settings distribution path.
+
+### Interaction and accessibility
+
+The sortable strip uses the existing dnd-kit packages. The tab surface is the pointer and touch
+drag activator; it has no separate visible drag-handle control. A mouse drag starts after 8 CSS
+pixels of movement. A touch drag starts after a 250 millisecond hold with 5 CSS pixels of movement
+tolerance. The touch delay preserves horizontal swipe scrolling and ordinary tab activation. The
+keyboard sensor uses horizontal sortable coordinates.
+
+Fine-pointer tabs keep direct close, double-click rename, and context-menu actions. Coarse-pointer
+tabs expose a visible action button. Its responsive menu contains **Rename** for conversation tabs,
+directional move actions, and **Close**. Directional move actions also provide a precise fallback
+when touch drag is difficult. Terminal tabs omit **Rename**.
+
+Rename mode presents a distinct tab background and border plus a clear input border, background,
+caret, focus ring, and selected text. It omits inline **Save** and **Cancel** actions while editing.
+The input uses at least 16 CSS pixels of text on coarse-pointer devices to prevent automatic mobile
+zoom. Enter commits through the same path as blur. Escape restores the previous name. Blur cannot
+cause a second commit.
+
+The working-state grid spinner and title use an explicit gap of at least 6 CSS pixels. The gap does
+not depend on the title text or spinner animation.
+
+### Mobile design contract
+
+- **Entry point:** The existing Quick Chat launchers open the same responsive dialog.
+- **Phone surface:** The existing full-height dynamic-viewport dialog remains in place. Tablet and
+  desktop keep the existing large floating dialog.
+- **Interaction:** Mouse uses distance-activated drag from the tab surface. Touch uses hold-activated
+  drag from the tab surface. The visible coarse-pointer menu provides rename, move, and close
+  actions without hover or a hidden gesture.
+- **Scrolling:** The tab strip owns horizontal overflow. The selected chat or terminal owns the
+  remaining content scroll region. The document must not gain horizontal overflow.
+- **Parity:** All viewports use the same order resolver, optimistic state, and persistence path.
+  Responsive code changes only the action presentation and target sizing.
+- **Nearest exemplar:** `sidebar-view-chips.tsx` supplies the horizontal mouse and touch sensor
+  pattern. The current Quick Chat dialog supplies the full-height mobile surface and scroll owner.
+
+### Failure and recovery
+
+A settings save failure keeps the optimistic visual order, active tab, and all membership state.
+The client reports the failure through the existing error presentation. A reload can restore the
+last backend-accepted order. The next successful move sends a complete current list and can recover
+without a special repair endpoint.
+
+A rename failure keeps the editor available with the user's attempted name and reports the existing
+task rename error. It does not close or reorder the tab. Closing or adding a tab while an order save
+is pending uses the latest optimistic list as the next serialized save input.
+
+### Verification contract
+
+Unit tests cover order resolution, stale and duplicate references, stable append behavior, save
+serialization, rename commit and cancel paths, and the active-tab invariant. Component tests assert
+the spinner-to-title gap, tab-surface drag activation, and the visually distinct edit state without
+inline Save or Cancel controls.
+
+Desktop Playwright coverage drags mixed chat and terminal tabs, reloads, and checks the same order.
+It replaces the current test that expects activity-based reorder after reload. Mobile Playwright
+coverage uses the `mobile-chrome` project and a `mobile-*.spec.ts` file. It proves touch reorder or
+the visible move fallback, rename discovery, 44 CSS pixel targets, tab-strip overflow containment,
+and persistence after reload.
 ## Migrated source detail
 
 ## Why
@@ -52,12 +173,12 @@ them without losing work, and return to the most recent terminal without managin
 - Choosing **New Agent** preserves the current ordinary/configuration setup flow. Choosing
   **New Terminal** always creates and activates a distinct host-shell terminal, even when another
   terminal exists.
-- Chat and terminal tabs share one horizontal tab strip. Conversation ordering and configuration
-  indicators remain unchanged; terminal tabs are ordered by creation and use a terminal icon with
-  workspace-local labels such as `Terminal 1`, `Terminal 2`.
-- Renameable conversation tabs expose **Rename** from a context menu on desktop right-click and
-  the equivalent touch long-press gesture. The existing inline editor and backing-task rename
-  persistence remain unchanged; terminal labels stay fixed.
+- Chat and terminal tabs share one horizontal tab strip. The order resolver above controls their
+  combined order. Configuration indicators and workspace-local labels such as `Terminal 1` and
+  `Terminal 2` remain unchanged.
+- Renameable conversation tabs expose **Rename** from a fine-pointer context menu and a visible
+  coarse-pointer action. The backing-task rename persistence remains unchanged. Terminal labels
+  stay fixed.
 - Multiple terminal tabs can run concurrently. Input, output, resize, exit, and error state belong
   to the selected terminal and must not affect sibling terminals.
 - Switching to another tab or dismissing the shared dialog detaches the terminal presentation but
@@ -86,6 +207,54 @@ them without losing work, and return to the most recent terminal without managin
   terminal owns the remaining content region.
 - The terminal on **Settings → Agents** retains its existing single-dialog presentation and
   stop-on-close behavior.
+
+## Launcher focus return
+
+`captureQuickChatLauncherFocus` records the element that opens the shared dialog.
+`restoreQuickChatLauncherFocus` returns focus to that element after the dialog closes.
+
+Launcher activations request a transient silent-focus marker before focus returns. A scoped style in
+`apps/web/app/globals.css` removes the outline, ring, shadow, and focus border while this marker is
+active. The marker does not change the focused element or the tooltip state. Global keyboard
+shortcuts and command-palette actions capture their origin for focus restoration but do not request
+the marker, so unrelated controls keep their normal focus appearance.
+
+The helper removes the marker when the launcher loses focus. Ordinary keyboard navigation can then
+show the normal focus indicator. If the launcher leaves the document before restoration, the helper
+does not add the marker or move focus.
+
+This contract applies to Quick Chat and Quick Terminal launchers that use the shared provider. It
+does not change pointer dismissal, Configuration Chat focus ownership, or unrelated controls.
+
+## Launcher toggle and terminal Escape routing
+
+The configurable `QUICK_CHAT` binding uses a toggle-capable ordinary-chat launcher. The launcher
+reads the live `quickChat.isOpen` state: it requests the mounted modal's close lifecycle, falling
+back to `closeQuickChat` when no modal handler is registered, and otherwise follows the existing
+workspace- and kind-scoped `openQuickChat` selection flow. Only the global keyboard/command action
+enables toggle behavior for ordinary Quick Chat. The Settings Configuration Chat floating launcher
+is an explicit pointer/touch exception: it also closes its controlled panel on reactivation. Other
+pointer and touch launchers continue to open or select their matching content, and the existing
+shortcut override remains the single settings and persistence contract. The global binding listens
+in capture phase and stops a matched toggle chord before focus-trapped controls such as xterm can
+consume it as terminal input.
+
+`PassthroughTerminal` registers a memoized predicate with the existing
+`ClarificationEscapeGuardProvider`. The predicate is armed only while the terminal is connected,
+its `AttachAddon` is installed, and its dedicated WebSocket is open; then it claims only an
+unmodified `Escape` whose event target, or current focus fallback, is xterm's helper textarea.
+Radix consults the predicate from its document capture listener. A match calls `preventDefault()` to
+stop dialog dismissal but does not stop propagation, so xterm's normal keyboard handler emits the
+Escape byte and `AttachAddon` forwards it on the dedicated terminal WebSocket.
+
+The guard hook remains a no-op outside a provider. Bottom-panel and mobile terminal embeddings
+therefore keep their current behavior, and focus on a Quick Chat tab, composer, setup control, or
+terminal search control does not arm the terminal guard. Existing clarification, suggestion, and
+reverse-search guards keep their two-stage behavior.
+
+This change adds no setting, persisted state, or mobile composition. The phone dialog retains its
+full-height surface and visible close action; the existing mobile Quick Chat entry test remains the
+touch-dismissal evidence.
 
 ## Data model
 
@@ -205,14 +374,18 @@ checks, and Agents-page authorization behavior remain unchanged.
 - A descriptor create/update failure is visible on the affected tab and never causes a shell to be
   started without a durable tab record. Sibling tabs remain usable.
 - Server Quick Chat reconciliation may add or remove persisted conversation tabs, but it must not
-  discard server-owned terminal tabs or change the active terminal.
+  discard server-owned terminal tabs, overwrite the saved order, or change the active terminal.
 - Restoring focus after dialog dismissal must not reopen the sidebar terminal tooltip; pointer hover
   continues to show it.
+- A silent-focus marker must stay on the launcher only until focus leaves it. Later keyboard focus
+  must use the launcher's normal focus indicator.
 
 ## Persistence guarantees
 
 - Ordinary and configuration chat persistence, cross-device synchronization, renaming, and
   expiration remain unchanged.
+- The backend user-settings record stores tab presentation order per workspace. It follows the
+  authenticated user across clients. Missing preferences use the stable baseline order.
 - Terminal tab descriptors survive page reloads, browser restarts, and access from another client
   for the same authenticated user and workspace. The backend is the durable source of descriptor
   membership, sequence, lifecycle snapshot, and latest session association.
@@ -235,9 +408,14 @@ checks, and Agents-page authorization behavior remain unchanged.
   plus menu, **THEN** a distinct terminal tab and host-shell session are created and activated.
 - **GIVEN** the plus menu is open, **WHEN** it renders, **THEN** it shows only **New Agent** under
   **Agents** and **New Terminal** under **Terminals**; existing tabs remain in the tab strip.
-- **GIVEN** a renameable conversation tab is present, **WHEN** the user right-clicks it or
-  long-presses it and chooses **Rename**, **THEN** the inline editor opens and a submitted name
-  continues to persist through the existing conversation rename path.
+- **GIVEN** a renameable conversation tab is present, **WHEN** the user chooses **Rename** from an
+  available tab action, **THEN** a clear editor with **Save** and **Cancel** opens and a submitted
+  name continues to persist through the existing conversation rename path.
+- **GIVEN** mixed persisted conversation and terminal tabs, **WHEN** the user moves a tab and
+  reloads the page, **THEN** all current tabs return in the saved order and the active tab remains
+  valid.
+- **GIVEN** a saved order with stale references, **WHEN** a new tab is discovered, **THEN** stale
+  references are ignored and the new tab appears after the known persisted tabs.
 - **GIVEN** two running terminal tabs, **WHEN** the user executes different marker commands in each
   and switches between them, **THEN** each tab displays only its own PTY output.
 - **GIVEN** a running terminal tab, **WHEN** the user closes and later reopens the shared dialog,
@@ -276,7 +454,9 @@ checks, and Agents-page authorization behavior remain unchanged.
 - **GIVEN** the user opens the terminal on **Settings → Agents**, **WHEN** that dialog closes,
   **THEN** its PTY still stops immediately and no Quick Chat terminal tab is created.
 - **GIVEN** the shared dialog closes from a sidebar launcher, **WHEN** focus returns, **THEN** the
-  launcher is focused without an automatically reopened tooltip.
+  launcher is focused without a visible focus indicator or an automatically reopened tooltip.
+- **GIVEN** focus returned silently to a launcher, **WHEN** focus leaves and later returns through
+  keyboard navigation, **THEN** the launcher shows its normal focus indicator.
 
 ## Out of scope
 
@@ -290,7 +470,7 @@ checks, and Agents-page authorization behavior remain unchanged.
   existing PTY subscription and rolling buffer behavior.
 - Task-workspace terminals, repository working-directory selection, or moving terminals between
   workspaces.
-- Terminal tab renaming, drag reordering, split panes, or a command-palette action.
+- Terminal tab renaming, split panes, or a command-palette action.
 - Changing Quick Chat task persistence, configuration-chat uniqueness, or ordinary-chat expiration.
 - Changing the Agents-page terminal geometry or its stop-on-close lifecycle.
 
@@ -301,3 +481,5 @@ checks, and Agents-page authorization behavior remain unchanged.
 [Quick Terminal refresh persistence repair](../../../plans/quick-terminal-refresh-persistence/plan.md)
 
 [Quick Terminal durable session lifecycle and menu alignment](../../../plans/quick-terminal-durable-lifecycle/plan.md)
+
+[Quick Chat tab order and editing](../../../plans/quick-chat-tab-order/plan.md)

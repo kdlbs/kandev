@@ -42,3 +42,9 @@ var ErrExternalIDConflict = repoerrors.ErrExternalIDConflict
 // (task_id, agent_profile_id) pair. Callers should re-read and reuse the
 // winning row rather than treating this as a hard failure.
 var ErrOfficeSessionRaceConflict = errors.New("office task session race conflict")
+
+// ErrWorkflowResolutionConflict is returned by UpdateTaskIfWorkflowMatches and
+// the workflow-step admission writers when a caller-supplied expected
+// workflow id no longer matches the row's persisted workflow_id, checked
+// atomically inside the write transaction. See repoerrors.ErrWorkflowResolutionConflict.
+var ErrWorkflowResolutionConflict = repoerrors.ErrWorkflowResolutionConflict

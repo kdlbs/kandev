@@ -8,6 +8,7 @@ import type {
   TaskCreateLastUsedApi,
   MCPTaskAgentProfileDefault,
   RepositoryBranchPolicy,
+  AgentProfileRecentUseApiRecord,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
@@ -546,6 +547,10 @@ export class ApiClient {
   async deleteAgentProfile(profileId: string, force?: boolean): Promise<void> {
     const qs = force ? "?force=true" : "";
     await this.request("DELETE", `/api/v1/agent-profiles/${profileId}${qs}`);
+  }
+
+  async listAgentProfileRecentUse(): Promise<AgentProfileRecentUseApiRecord[]> {
+    return this.request("GET", "/api/v1/user/agent-profile-recent-use");
   }
 
   /**
@@ -1324,6 +1329,13 @@ export class ApiClient {
    * metadata dialog's `turn_metadata` field. `authorType` defaults to agent;
    * "user" seeds a prompt row whose prompt_index is computed server-side.
    * `createdAt` (RFC3339) pins the row's timestamp for deterministic ordering.
+   *
+   * `newTurn` creates a brand-new turn for this message instead of reusing
+   * the session's active turn, so a spec can hold a real open turn on the
+   * session while seeding a second, independently-timed turn alongside it
+   * (e.g. a lifecycle-shaped turn that must not shadow the open one).
+   * `turnStartedAt`/`turnCompletedAt` (RFC3339) set that new turn's
+   * timestamps; both are ignored unless `newTurn` is true.
    */
   async seedSessionMessage(
     sessionId: string,
@@ -1334,6 +1346,9 @@ export class ApiClient {
       turnMetadata?: Record<string, unknown>;
       authorType?: "user" | "agent";
       createdAt?: string;
+      newTurn?: boolean;
+      turnStartedAt?: string;
+      turnCompletedAt?: string;
     },
   ): Promise<void> {
     const body: Record<string, unknown> = { session_id: sessionId, type: opts.type };
@@ -1342,6 +1357,9 @@ export class ApiClient {
     if (opts.turnMetadata !== undefined) body.turn_metadata = opts.turnMetadata;
     if (opts.authorType !== undefined) body.author_type = opts.authorType;
     if (opts.createdAt !== undefined) body.created_at = opts.createdAt;
+    if (opts.newTurn !== undefined) body.new_turn = opts.newTurn;
+    if (opts.turnStartedAt !== undefined) body.turn_started_at = opts.turnStartedAt;
+    if (opts.turnCompletedAt !== undefined) body.turn_completed_at = opts.turnCompletedAt;
     await this.request("POST", "/api/v1/_test/messages", body);
   }
 
@@ -1534,7 +1552,7 @@ export class ApiClient {
     owner: string,
     repo: string,
     number: number,
-    outcome: "merged" | "queued",
+    outcome: "merged" | "queued" | "failed" | "pending" | "head_mismatch",
   ): Promise<void> {
     await this.request("PUT", "/api/v1/github/mock/merge-outcomes", {
       owner,
@@ -1572,10 +1590,22 @@ export class ApiClient {
   }
 
   async mockGitHubGetMergeAttempts(): Promise<
-    Array<{ owner: string; repo: string; number: number; merge_method: string }>
+    Array<{
+      owner: string;
+      repo: string;
+      number: number;
+      merge_method: string;
+      expected_head_sha: string;
+    }>
   > {
     const response = await this.request<{
-      attempts?: Array<{ owner: string; repo: string; number: number; merge_method: string }>;
+      attempts?: Array<{
+        owner: string;
+        repo: string;
+        number: number;
+        merge_method: string;
+        expected_head_sha: string;
+      }>;
     }>("GET", "/api/v1/github/mock/merge-attempts");
     return response.attempts ?? [];
   }

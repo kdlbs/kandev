@@ -50,6 +50,7 @@ surface shared by task and Office consumers.
 - [No Silent Model Fallback](requirements/no-silent-model-fallback.md)
 - [Copy agent configuration to isolated executors](requirements/portable-agent-configuration.md)
 - [Disable an Agent Profile](requirements/profile-disable.md)
+- [Agent Profile Recent Use](requirements/profile-recent-use.md)
 - [Duplicate an Agent Profile](requirements/profile-duplicate.md)
 - [Agent Roles — Security, QA, and DevOps](requirements/roles.md)
 - [Managed npm runtime recovery](requirements/managed-npm-runtime-recovery.md)
@@ -63,6 +64,7 @@ surface shared by task and Office consumers.
 
 - [Dynamic Agent Routing System Design Part 1](system-design/dynamic-agent-routing-01.md)
 - [Dynamic Agent Routing System Design Part 2](system-design/dynamic-agent-routing-02.md)
+- [Agent Profile Recent Use](system-design/profile-recent-use.md)
 - [No Silent Model Fallback System Design Part 1](system-design/no-silent-model-fallback-01.md)
 - [No Silent Model Fallback System Design Part 2](system-design/no-silent-model-fallback-02.md)
 - [Managed Agent Runtime Versions and Updates System Design Part 1](system-design/runtime-updates-01.md)

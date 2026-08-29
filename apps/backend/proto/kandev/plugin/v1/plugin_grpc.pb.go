@@ -439,6 +439,7 @@ const (
 	Host_InvokeUtilityAgent_FullMethodName         = "/kandev.plugin.v1.Host/InvokeUtilityAgent"
 	Host_CreateTask_FullMethodName                 = "/kandev.plugin.v1.Host/CreateTask"
 	Host_UpdateTask_FullMethodName                 = "/kandev.plugin.v1.Host/UpdateTask"
+	Host_MoveTask_FullMethodName                   = "/kandev.plugin.v1.Host/MoveTask"
 	Host_SendMessage_FullMethodName                = "/kandev.plugin.v1.Host/SendMessage"
 	Host_PreviewPluginOwnedTaskTree_FullMethodName = "/kandev.plugin.v1.Host/PreviewPluginOwnedTaskTree"
 	Host_DeletePluginOwnedTaskTree_FullMethodName  = "/kandev.plugin.v1.Host/DeletePluginOwnedTaskTree"
@@ -544,6 +545,11 @@ type HostClient interface {
 	// session is running, resume/start it otherwise).
 	CreateTask(ctx context.Context, in *CreateTaskRequest, opts ...grpc.CallOption) (*CreateTaskResponse, error)
 	UpdateTask(ctx context.Context, in *UpdateTaskRequest, opts ...grpc.CallOption) (*UpdateTaskResponse, error)
+	// MoveTask transitions a task to a workflow step through the same path the
+	// board's own move uses (validation, WIP admission, task.moved publication,
+	// auto-start gates, queue reconciliation) — unlike UpdateTask, which rejects
+	// workflow_step_id. Requires api_write:tasks.
+	MoveTask(ctx context.Context, in *MoveTaskRequest, opts ...grpc.CallOption) (*MoveTaskResponse, error)
 	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error)
 	PreviewPluginOwnedTaskTree(ctx context.Context, in *PreviewPluginOwnedTaskTreeRequest, opts ...grpc.CallOption) (*PreviewPluginOwnedTaskTreeResponse, error)
 	DeletePluginOwnedTaskTree(ctx context.Context, in *DeletePluginOwnedTaskTreeRequest, opts ...grpc.CallOption) (*DeletePluginOwnedTaskTreeResponse, error)
@@ -828,6 +834,16 @@ func (c *hostClient) UpdateTask(ctx context.Context, in *UpdateTaskRequest, opts
 	return out, nil
 }
 
+func (c *hostClient) MoveTask(ctx context.Context, in *MoveTaskRequest, opts ...grpc.CallOption) (*MoveTaskResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MoveTaskResponse)
+	err := c.cc.Invoke(ctx, Host_MoveTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostClient) SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SendMessageResponse)
@@ -985,6 +1001,11 @@ type HostServer interface {
 	// session is running, resume/start it otherwise).
 	CreateTask(context.Context, *CreateTaskRequest) (*CreateTaskResponse, error)
 	UpdateTask(context.Context, *UpdateTaskRequest) (*UpdateTaskResponse, error)
+	// MoveTask transitions a task to a workflow step through the same path the
+	// board's own move uses (validation, WIP admission, task.moved publication,
+	// auto-start gates, queue reconciliation) — unlike UpdateTask, which rejects
+	// workflow_step_id. Requires api_write:tasks.
+	MoveTask(context.Context, *MoveTaskRequest) (*MoveTaskResponse, error)
 	SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error)
 	PreviewPluginOwnedTaskTree(context.Context, *PreviewPluginOwnedTaskTreeRequest) (*PreviewPluginOwnedTaskTreeResponse, error)
 	DeletePluginOwnedTaskTree(context.Context, *DeletePluginOwnedTaskTreeRequest) (*DeletePluginOwnedTaskTreeResponse, error)
@@ -1086,6 +1107,9 @@ func (UnimplementedHostServer) CreateTask(context.Context, *CreateTaskRequest) (
 }
 func (UnimplementedHostServer) UpdateTask(context.Context, *UpdateTaskRequest) (*UpdateTaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateTask not implemented")
+}
+func (UnimplementedHostServer) MoveTask(context.Context, *MoveTaskRequest) (*MoveTaskResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MoveTask not implemented")
 }
 func (UnimplementedHostServer) SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SendMessage not implemented")
@@ -1594,6 +1618,24 @@ func _Host_UpdateTask_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Host_MoveTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MoveTaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).MoveTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_MoveTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).MoveTask(ctx, req.(*MoveTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Host_SendMessage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SendMessageRequest)
 	if err := dec(in); err != nil {
@@ -1812,6 +1854,10 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateTask",
 			Handler:    _Host_UpdateTask_Handler,
+		},
+		{
+			MethodName: "MoveTask",
+			Handler:    _Host_MoveTask_Handler,
 		},
 		{
 			MethodName: "SendMessage",

@@ -159,12 +159,13 @@ describe("copy the guard cannot see, under the pseudo-locale", () => {
    * accents and they do not.
    */
   it("keeps the backup SQL command and path literal inside a translated frame", () => {
+    const path = "/var/lib/kandev/backups";
     const description = t("system:backupsPageDescription", {
       command: "VACUUM INTO",
-      path: "<data-dir>/backups/",
+      path,
     });
     expect(description).toContain("VACUUM INTO");
-    expect(description).toContain("<data-dir>/backups/");
+    expect(description).toContain(path);
     // The surrounding sentence is still translated.
     expect(description).toMatch(ACCENTED);
   });

@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { t } from "@/lib/i18n";
 import { IconAlertTriangle, IconGitBranch, IconTerminal2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
@@ -33,6 +34,11 @@ import { AgentLogo } from "@/components/agent-logo";
 import { getCapabilityWarning } from "@/lib/capability-warning";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { buildBranchKeywords } from "./task-create-dialog-branch-options";
+import {
+  ensureAgentProfileRecentUseLoaded,
+  orderAgentProfilesByRecentUse,
+} from "@/lib/agent-profile-recent-use";
+import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 
 type OptionItem = {
   value: string;
@@ -185,17 +191,32 @@ function advertisedModelIDs(availableAgents: AvailableAgent[], agentName: string
   return agent?.model_config?.available_models?.map((m) => m.id) ?? [];
 }
 
-export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): OptionItem[] {
+export function useAgentProfileOptions(
+  agentProfiles: AgentProfileOption[],
+  context?: AgentProfileRecentUseContext,
+): OptionItem[] {
   const { t } = useTranslation();
   const { items: availableAgents } = useAvailableAgents();
   const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
+  const storeApi = useAppStoreApi();
+  const recentUseLoaded = useAppStore((state) => !context || state.agentProfileRecentUse.loaded);
+  const recentProfileIds = useAppStore((state) =>
+    context ? state.agentProfileRecentUse?.records[context]?.profileIds : undefined,
+  );
+  useEffect(() => {
+    if (!context || recentUseLoaded) return;
+    void ensureAgentProfileRecentUseLoaded(storeApi);
+  }, [context, recentUseLoaded, storeApi]);
   return useMemo(() => {
     // Disabled profiles stay in the store (existing sessions keep their
     // labels) but are never offered as a choice for new work.
     const selectable = agentProfiles.filter((profile) =>
       isSelectableAgentProfile(profile, dynamicRoutingEnabled),
     );
-    return selectable.map((profile: AgentProfileOption) => {
+    const orderedProfiles = context
+      ? orderAgentProfilesByRecentUse(selectable, recentProfileIds)
+      : selectable;
+    return orderedProfiles.map((profile: AgentProfileOption) => {
       const parts = profile.label.split(" \u2022 ");
       const agentLabel = parts[0] ?? profile.label;
       const profileLabel = parts[1] ?? "";
@@ -251,7 +272,7 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
           ),
       };
     });
-  }, [agentProfiles, availableAgents, dynamicRoutingEnabled, t]);
+  }, [agentProfiles, availableAgents, context, dynamicRoutingEnabled, recentProfileIds, t]);
 }
 
 export function useExecutorOptions(executors: Executor[]): OptionItem[] {

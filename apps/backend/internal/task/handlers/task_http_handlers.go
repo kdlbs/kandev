@@ -41,6 +41,8 @@ type workspaceSourceJSON struct {
 	GitHubURL      string `json:"github_url"`
 	RemoteURL      string `json:"remote_url"`
 	Provider       string `json:"provider"`
+	ProviderHost   string `json:"provider_host"`
+	ProviderScope  string `json:"provider_scope"`
 	ProviderRepoID string `json:"provider_repo_id"`
 	ProviderOwner  string `json:"provider_owner"`
 	ProviderName   string `json:"provider_name"`
@@ -85,7 +87,7 @@ func parseHTTPWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSource
 		allowed := map[string]bool{"kind": true, "local_path": true}
 		switch kind {
 		case string(service.WorkspaceSourceRepository):
-			for _, key := range []string{"repository_id", "remote_url", "github_url", "provider", "provider_repo_id", "provider_owner", "provider_name", "base_branch", "checkout_branch"} {
+			for _, key := range []string{"repository_id", "remote_url", "github_url", "provider", "provider_host", "provider_scope", "provider_repo_id", "provider_owner", "provider_name", "base_branch", "checkout_branch"} {
 				allowed[key] = true
 			}
 		case string(service.WorkspaceSourceFolder):
@@ -102,7 +104,7 @@ func parseHTTPWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSource
 		if err := json.Unmarshal(item, &source); err != nil {
 			return nil, err
 		}
-		sources = append(sources, service.WorkspaceSourceInput{Kind: service.WorkspaceSourceKind(source.Kind), RepositoryID: source.RepositoryID, LocalPath: source.LocalPath, GitHubURL: source.GitHubURL, RemoteURL: source.RemoteURL, Provider: source.Provider, ProviderRepoID: source.ProviderRepoID, ProviderOwner: source.ProviderOwner, ProviderName: source.ProviderName, BaseBranch: source.BaseBranch, CheckoutBranch: source.CheckoutBranch, DisplayName: source.DisplayName})
+		sources = append(sources, service.WorkspaceSourceInput{Kind: service.WorkspaceSourceKind(source.Kind), RepositoryID: source.RepositoryID, LocalPath: source.LocalPath, GitHubURL: source.GitHubURL, RemoteURL: source.RemoteURL, Provider: source.Provider, ProviderHost: source.ProviderHost, ProviderScope: source.ProviderScope, ProviderRepoID: source.ProviderRepoID, ProviderOwner: source.ProviderOwner, ProviderName: source.ProviderName, BaseBranch: source.BaseBranch, CheckoutBranch: source.CheckoutBranch, DisplayName: source.DisplayName})
 	}
 	return sources, nil
 }
@@ -701,6 +703,8 @@ type httpTaskRepositoryInput struct {
 	GitHubURL      string `json:"github_url"`
 	RemoteURL      string `json:"remote_url"`
 	Provider       string `json:"provider"`
+	ProviderHost   string `json:"provider_host"`
+	ProviderScope  string `json:"provider_scope"`
 	ProviderRepoID string `json:"provider_repo_id"`
 	ProviderOwner  string `json:"provider_owner"`
 	ProviderName   string `json:"provider_name"`
@@ -763,6 +767,7 @@ type createTaskResponse struct {
 	dto.TaskDTO
 	TaskSessionID    string `json:"session_id,omitempty"`
 	AgentExecutionID string `json:"agent_execution_id,omitempty"`
+	AgentProfileID   string `json:"agent_profile_id,omitempty"`
 	// Deduplicated and CreationComplete are required booleans (not
 	// presence-only markers) on every create-idempotency outcome, per
 	// docs/specs/tasks/requirements/external-id-idempotency.md. Deduplicated is true
@@ -903,28 +908,29 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	}
 
 	result, err := h.service.CreateTask(c.Request.Context(), &service.CreateTaskRequest{
-		WorkspaceID:        body.WorkspaceID,
-		WorkflowID:         body.WorkflowID,
-		WorkflowStepID:     body.WorkflowStepID,
-		Title:              title,
-		Description:        description,
-		AutoTitle:          body.AutoTitle,
-		Autopilot:          body.Autopilot,
-		Priority:           body.Priority,
-		State:              body.State,
-		Repositories:       convertToServiceRepos(repos),
-		Position:           body.Position,
-		Metadata:           metadata,
-		DeferredLaunch:     deferredLaunch,
-		PlanMode:           body.PlanMode,
-		StartAgent:         body.StartAgent,
-		ParentID:           body.ParentID,
-		WorkspacePath:      body.WorkspacePath,
-		BlockedBy:          body.BlockedBy,
-		StartWhenUnblocked: body.StartWhenUnblocked,
-		ProjectID:          body.ProjectID,
-		Labels:             labels,
-		ExternalID:         body.ExternalID,
+		WorkspaceID:                 body.WorkspaceID,
+		WorkflowID:                  body.WorkflowID,
+		WorkflowStepID:              body.WorkflowStepID,
+		Title:                       title,
+		Description:                 description,
+		AutoTitle:                   body.AutoTitle,
+		Autopilot:                   body.Autopilot,
+		Priority:                    body.Priority,
+		State:                       body.State,
+		Repositories:                convertToServiceRepos(repos),
+		Position:                    body.Position,
+		Metadata:                    metadata,
+		DeferredLaunch:              deferredLaunch,
+		RecordAgentProfileRecentUse: true,
+		PlanMode:                    body.PlanMode,
+		StartAgent:                  body.StartAgent,
+		ParentID:                    body.ParentID,
+		WorkspacePath:               body.WorkspacePath,
+		BlockedBy:                   body.BlockedBy,
+		StartWhenUnblocked:          body.StartWhenUnblocked,
+		ProjectID:                   body.ProjectID,
+		Labels:                      labels,
+		ExternalID:                  body.ExternalID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not created")
@@ -1029,7 +1035,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		return
 	}
 
-	h.dispatchTaskSession(taskDTO.ID, taskDTO.Description, body, dispatch)
+	h.dispatchTaskSession(c.Request.Context(), taskDTO.ID, taskDTO.Description, body, dispatch)
 	h.recordTaskCreateLastUsed(c.Request.Context(), body, repos)
 
 	// Associate PR with task if any repository input contains a PR URL
@@ -1337,6 +1343,8 @@ func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryIn
 			GitHubURL:      r.GitHubURL,
 			RemoteURL:      r.RemoteURL,
 			Provider:       r.Provider,
+			ProviderHost:   r.ProviderHost,
+			ProviderScope:  r.ProviderScope,
 			ProviderRepoID: r.ProviderRepoID,
 			ProviderOwner:  r.ProviderOwner,
 			ProviderName:   r.ProviderName,
@@ -1419,6 +1427,7 @@ func (h *TaskHandlers) prepareTaskSession(
 			h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", taskID))
 		} else {
 			response.TaskSessionID = resp.SessionID
+			response.AgentProfileID = firstNonEmpty(resp.AgentProfileID, body.AgentProfileID)
 		}
 		return nil
 	}
@@ -1458,6 +1467,9 @@ func (h *TaskHandlers) prepareStartAgentSession(
 	}
 	sessionID := prepResp.SessionID
 	response.TaskSessionID = sessionID
+	// The follow-up start resolves workflow and dynamic-profile overrides. Do
+	// not expose the requested profile as effective in this response; the async
+	// launch records the profile returned by the successful start.
 	if updatedTask, updateErr := h.service.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); updateErr != nil {
 		h.logger.Warn("failed to mark task scheduling after preparing start session",
 			zap.Error(updateErr),
@@ -1472,7 +1484,12 @@ func (h *TaskHandlers) prepareStartAgentSession(
 // dispatchTaskSession launches the agent asynchronously (create-sequence
 // step 8). Callers MUST only invoke this after settlement has succeeded —
 // dispatch is nil whenever there was nothing prepared to dispatch.
-func (h *TaskHandlers) dispatchTaskSession(taskID, description string, body httpCreateTaskRequest, dispatch *startAgentDispatch) {
+func (h *TaskHandlers) dispatchTaskSession(
+	ctx context.Context,
+	taskID, description string,
+	body httpCreateTaskRequest,
+	dispatch *startAgentDispatch,
+) {
 	if dispatch == nil {
 		return
 	}
@@ -1480,7 +1497,7 @@ func (h *TaskHandlers) dispatchTaskSession(taskID, description string, body http
 	// Launch agent asynchronously so the HTTP request can return immediately.
 	// The frontend will receive WebSocket updates when the agent actually starts.
 	go func() {
-		startCtx, cancel := context.WithTimeout(context.Background(), constants.AgentLaunchTimeout)
+		startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.AgentLaunchTimeout)
 		defer cancel()
 		launchResp, err := h.orchestrator.LaunchSession(startCtx, &orchestrator.LaunchSessionRequest{
 			TaskID:            taskID,
@@ -1496,11 +1513,31 @@ func (h *TaskHandlers) dispatchTaskSession(taskID, description string, body http
 			h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", taskID), zap.String("session_id", sessionID))
 			return
 		}
+		if launchResp == nil || !launchResp.Success {
+			h.logger.Warn("agent start returned no successful launch response",
+				zap.String("task_id", taskID), zap.String("session_id", sessionID))
+			return
+		}
 		h.logger.Info("agent started for task (async)",
 			zap.String("task_id", taskID),
 			zap.String("session_id", launchResp.SessionID),
 			zap.String("execution_id", launchResp.AgentExecutionID))
+		h.recordSuccessfulTaskCreateProfile(startCtx, launchResp.AgentProfileID)
 	}()
+}
+
+func (h *TaskHandlers) recordSuccessfulTaskCreateProfile(ctx context.Context, profileID string) {
+	if h.agentProfileRecentUseRecorder == nil || profileID == "" {
+		return
+	}
+	if _, err := h.agentProfileRecentUseRecorder.RecordAgentProfileRecentUse(
+		ctx,
+		usermodels.AgentProfileRecentUseTaskCreate,
+		profileID,
+	); err != nil {
+		h.logger.Warn("failed to record agent profile recent use after successful task launch",
+			zap.String("profile_id", profileID), zap.Error(err))
+	}
 }
 
 type httpUpdateTaskRequest struct {
@@ -1565,6 +1602,8 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 				GitHubURL:      r.GitHubURL,
 				RemoteURL:      r.RemoteURL,
 				Provider:       r.Provider,
+				ProviderHost:   r.ProviderHost,
+				ProviderScope:  r.ProviderScope,
 				ProviderRepoID: r.ProviderRepoID,
 				ProviderOwner:  r.ProviderOwner,
 				ProviderName:   r.ProviderName,
@@ -1828,6 +1867,7 @@ type httpStartQuickChatRequest struct {
 	AgentProfileID    string                         `json:"agent_profile_id,omitempty"`
 	ExecutorID        string                         `json:"executor_id,omitempty"`
 	Prompt            string                         `json:"prompt,omitempty"`
+	AutoTitle         bool                           `json:"auto_title,omitempty"`
 	LocalPath         string                         `json:"local_path,omitempty"`
 	RepositoryName    string                         `json:"repository_name,omitempty"`
 	DefaultBranch     string                         `json:"default_branch,omitempty"`
@@ -1864,8 +1904,9 @@ func (body *httpStartQuickChatRequest) validateRepositories() error {
 
 // httpStartQuickChatResponse is returned when a quick chat session is created.
 type httpStartQuickChatResponse struct {
-	TaskID    string `json:"task_id"`
-	SessionID string `json:"session_id"`
+	TaskID         string `json:"task_id"`
+	SessionID      string `json:"session_id"`
+	AgentProfileID string `json:"agent_profile_id,omitempty"`
 }
 
 // quickChatParams holds resolved parameters for creating a quick chat session.
@@ -1969,6 +2010,7 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		WorkspaceID:  workspaceID,
 		Title:        params.title,
 		Description:  body.Prompt,
+		AutoTitle:    body.AutoTitle,
 		Repositories: params.repos,
 		IsEphemeral:  true,
 		Metadata:     params.metadata,
@@ -2013,8 +2055,9 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		zap.String("workspace_id", workspaceID))
 
 	c.JSON(http.StatusOK, httpStartQuickChatResponse{
-		TaskID:    task.ID,
-		SessionID: resp.SessionID,
+		TaskID:         task.ID,
+		SessionID:      resp.SessionID,
+		AgentProfileID: firstNonEmpty(resp.AgentProfileID, params.agentProfileID),
 	})
 }
 
@@ -2167,8 +2210,9 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 		zap.String("workspace_id", workspaceID))
 
 	c.JSON(http.StatusOK, httpStartQuickChatResponse{
-		TaskID:    task.ID,
-		SessionID: sessionID,
+		TaskID:         task.ID,
+		SessionID:      sessionID,
+		AgentProfileID: firstNonEmpty(resp.AgentProfileID, agentProfileID),
 	})
 }
 

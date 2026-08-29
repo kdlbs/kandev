@@ -129,6 +129,17 @@ const (
 	// its own intents and keeps a WIP-only intent from being read as a chain
 	// step (and vice versa).
 	DeferredLaunchStartWhenUnblockedKey = "start_when_unblocked"
+	// DeferredLaunchUserIDKey preserves the authenticated creator so a
+	// selector-backed deferred task-create launch can update that user's
+	// task_create history after the launch is promoted by the workflow engine.
+	// It is server-owned state inside the protected deferred launch record and
+	// must not be accepted from task metadata request surfaces.
+	DeferredLaunchUserIDKey = "user_id"
+	// DeferredLaunchRecordRecentUseKey marks a deferred launch that originated
+	// from a selector-backed task-create surface and is therefore eligible to
+	// update task_create profile history after promotion. It is server-owned
+	// state and is omitted from task DTOs.
+	DeferredLaunchRecordRecentUseKey = "record_recent_use"
 	// MetaKeyWorkspacePath is the optional host folder for repo-less tasks
 	// (set by CreateTask, read by the orchestrator when building a session).
 	// Centralised here so the set/read sites can't drift apart.
@@ -159,8 +170,8 @@ const (
 	// key when a session of the task next enters STARTING/RUNNING (mirrors
 	// MetaKeyInterruptedAt).
 	MetaKeyAutoStartFailed = "auto_start_failed"
-	// MetaKeyAgentTitlePending marks tasks created in prompt-first mode whose
-	// provisional title still needs the first eligible agent session to replace it.
+	// MetaKeyAgentTitlePending marks tasks whose provisional title still needs
+	// the first eligible agent session to replace it.
 	MetaKeyAgentTitlePending = "agent_title_pending"
 	// MetaKeyAgentTitleOwnerSessionID records the one session that atomically
 	// claimed the first-turn title handoff for a pending task.
@@ -189,10 +200,21 @@ const (
 	// that produced the launch-only runtime seed. A seed is valid only for this
 	// profile, even if task profile selection changes before the first launch.
 	MetaKeyInitialSessionRuntimeConfigProfileID = "initial_session_runtime_config_profile_id"
+	// MetaKeyAutoStartOnCreate is a positive opt-in a task creator stamps when
+	// it wants task.created to evaluate the destination step's on_enter
+	// actions immediately, as if creation were itself a transition into that
+	// step. Absence is the default and preserves existing behavior for every
+	// other producer (REST/MCP/WS create with or without start_agent /
+	// prepare_session, CreateChildTask, etc.) — those already have their own
+	// launch decision, and task.created must not second-guess it. Set today
+	// only by CreateOfficeTaskInWorkflow for materialized heavy-routine runs,
+	// whose Routine workflow start step has no other transition to carry it
+	// into an auto_start_agent evaluation.
+	MetaKeyAutoStartOnCreate = "auto_start_on_create"
 )
 
 // IsAgentTitlePending reports whether task metadata contains the durable
-// prompt-first title marker. JSON rehydration produces bool values, while a
+// pending title marker. JSON rehydration produces bool values, while a
 // few in-process callers may provide typed metadata, so only an explicit true
 // value enables the capability.
 func IsAgentTitlePending(metadata map[string]interface{}) bool {
@@ -210,6 +232,15 @@ func AgentTitleOwnerSessionID(metadata map[string]interface{}) string {
 // IsAgentTitleOwner reports whether sessionID owns the pending title handoff.
 func IsAgentTitleOwner(metadata map[string]interface{}, sessionID string) bool {
 	return sessionID != "" && IsAgentTitlePending(metadata) && AgentTitleOwnerSessionID(metadata) == sessionID
+}
+
+// HasAutoStartOnCreateIntent reports whether task metadata carries the
+// positive MetaKeyAutoStartOnCreate opt-in. Only an explicit true value
+// counts — absence (the default for nearly every task producer) must never
+// be read as "please auto-start me".
+func HasAutoStartOnCreateIntent(metadata map[string]interface{}) bool {
+	intent, ok := metadata[MetaKeyAutoStartOnCreate].(bool)
+	return ok && intent
 }
 
 // TaskSession.Metadata key that records how the session came into existence.
@@ -289,6 +320,12 @@ const TurnMetaKeyRuntimeConfigSnapshot = "runtime_config_snapshot"
 // TurnMetaKeyWorkflowStepIDAtStart records the workflow step the turn's task
 // was in when the turn started. Absent when the task held no step.
 const TurnMetaKeyWorkflowStepIDAtStart = "workflow_step_id_at_start"
+
+// TurnMetaKeyLifecycleOnly marks a turn created only to parent a lifecycle
+// message (for example the agent_boot script_execution message on resume).
+// A lifecycle turn never reflects real agent work and must never be current-
+// turn authority, so every current-turn resolution site excludes it.
+const TurnMetaKeyLifecycleOnly = "lifecycle_only"
 
 // TurnMetaKeyPromptDispatchPending marks a successor created before agentctl
 // acknowledges its prompt. Empty marked turns are not current-turn authority
@@ -827,6 +864,16 @@ type Task struct {
 	// latest workflow-step write. Repositories populate it after a transition;
 	// it is transient and is not stored in the tasks table.
 	WorkflowStepTransitionID int64 `json:"-"`
+	// FromStepID is the workflow_step_id the task left on the same write that
+	// set WorkflowStepTransitionID, read inside that write's own transaction
+	// (readTaskStepInTx) rather than from any earlier snapshot. Empty when no
+	// transition occurred (WorkflowStepTransitionID == 0) or on task creation.
+	// Transient and is not stored in the tasks table.
+	FromStepID string `json:"-"`
+	// FromWorkflowID is the workflow_id the task left on the same write that
+	// set WorkflowStepTransitionID, read inside that write's own transaction.
+	// It is transient and is not stored in the tasks table.
+	FromWorkflowID string `json:"-"`
 
 	// Office extensions.
 	//
@@ -2394,7 +2441,7 @@ func (t *Task) ToAPI() *v1.Task {
 		Repositories:    repositories,
 		CreatedAt:       t.CreatedAt,
 		UpdatedAt:       t.UpdatedAt,
-		Metadata:        t.Metadata,
+		Metadata:        PublicTaskMetadata(t.Metadata),
 		Interrupted:     t.Metadata[MetaKeyInterruptedAt] != nil,
 		AutoStartFailed: t.Metadata[MetaKeyAutoStartFailed] != nil,
 		IsEphemeral:     t.IsEphemeral,

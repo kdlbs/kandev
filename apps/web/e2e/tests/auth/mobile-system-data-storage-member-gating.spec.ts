@@ -110,7 +110,20 @@ test.describe.serial("Data & storage member gating (mobile)", () => {
     await page.goto(DATA_STORAGE_ROUTE);
 
     await expect(page.getByTestId("system-backups-create")).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId("system-backups-delete").first()).toBeVisible();
+    const row = page.getByTestId("system-backups-row").first();
+    await expect(row.getByTestId("system-backups-delete")).toBeVisible();
+    for (const testId of [
+      "system-backups-download",
+      "system-backups-restore",
+      "system-backups-delete",
+    ]) {
+      const action = row.getByTestId(testId);
+      await expect(action).toBeVisible();
+      const box = await action.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.width).toBeGreaterThanOrEqual(44);
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+    }
     await expect(page.getByTestId("system-backups-admin-only")).toHaveCount(0);
     await expect(page.getByTestId("storage-analyze")).toBeEnabled();
 

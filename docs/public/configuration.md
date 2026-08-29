@@ -93,6 +93,21 @@ SQLite is the supported default and enables WAL mode. PostgreSQL deployments mus
 
 `database.path` is an advanced SQLite file-path override. The **Settings → System → Database** and **Backups** pages use that exact file, its WAL files, and the sibling `backups/` directory. Restore stages `<configured-database-path>.new`, quiesces scheduling and active workers, validates the checkpoint result, closes the SQLite pool, and uses rollback-capable quarantine replacement for the configured file and WAL sidecars. Restart Kandev immediately after a successful restore. When the override is empty, the default path remains `<home>/data/kandev.db` and the backup directory remains `<home>/data/backups/`. Kandev does not move snapshots from another directory automatically. The System restore endpoint is SQLite-only; use PostgreSQL recovery tools for PostgreSQL.
 
+### Default SQLite continuity
+
+When `database.path` is empty, startup checks both `<home>/data/kandev.db` and
+the legacy default `<home>/kandev.db` before it opens a writable database. If
+only the legacy database exists and is valid, Kandev copies it to the current
+default with a validated SQLite snapshot. The legacy database and its `-wal`
+and `-shm` files remain available for recovery.
+
+If the current default has no task history but the legacy default has task
+history, startup stops and names both paths. Kandev does not modify either
+database. Preserve both files, then select the intended database explicitly
+with `database.path` or `KANDEV_DATABASE_PATH` before restarting. If both
+defaults contain task history, Kandev keeps the current default and does not
+merge the databases. An explicit database path bypasses legacy discovery.
+
 One backend owns a Kandev home at a time. When SQLite uses a custom path outside that home, the backend also owns that database path, so separate homes alone do not permit concurrent backends against one SQLite file. Use a separate home and database for an intentional second instance. Ownership is released when the backend exits.
 
 Database-only snapshots also omit `<home>/data/master.key`, the AES-256 key used to decrypt stored secrets. Preserve that owner-only key with an independently secured home/data backup; restoring the database without its matching key leaves encrypted credentials unreadable. See [Operations](operations.md).
@@ -478,7 +493,7 @@ Plugins are part of the base product and are not a runtime toggle.
 The source checkout's `make dev` activates the embedded development profile, which enables Office, debug surfaces, ACP logging, and a mock agent; authentication and Claude background prompt handoff remain opt-in. Installed `run`/desktop builds select the safe production profile unless the environment explicitly opts in. E2E mock variables and routes are test-only and must never be enabled on a public deployment.
 
 ## Credentials and product settings
-The **Unread Messages** preference in **Settings > General > Task Actions** controls the Slack-style **New** divider in session transcripts. It defaults off for each user, persists with user settings, and takes effect immediately. Enabling it also allows that user's active transcript view to advance the session read cursor.
+The **Unread Messages** preference in **Settings > Preferences > Task Behavior** controls the Slack-style **New** divider in session transcripts. It defaults off for each user, persists with user settings, and takes effect immediately. Enabling it also allows that user's active transcript view to advance the session read cursor.
 
 
 Most integrations, executor profiles, agent profiles, MCP servers, repository settings, and UI preferences are persistent database records edited under **Settings**. They are not fields in `config.yaml`. Secret values use an encrypted secret store backed by `<home>/data/master.key`; filesystem permissions, database backups, and key backup are part of the security boundary.
