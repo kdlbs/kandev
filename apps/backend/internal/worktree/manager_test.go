@@ -287,8 +287,9 @@ func TestManager_IsValid_RejectsMismatchedLinkedWorktreeBacklink(t *testing.T) {
 
 func TestManager_Create_RefusesInvalidNonEmptyCheckoutWithoutRemovingIt(t *testing.T) {
 	ctx := context.Background()
+	cfg := newTestConfig(t)
 	repoPath := initGitRepoForWorktreeTest(t)
-	worktreePath := filepath.Join(t.TempDir(), "linked-worktree")
+	worktreePath := filepath.Join(cfg.TasksBasePath, "linked-worktree")
 	runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
 	uniqueFile := filepath.Join(worktreePath, "untracked-preserve-me.txt")
 	if err := os.WriteFile(uniqueFile, []byte("unique content\n"), 0600); err != nil {
@@ -309,14 +310,14 @@ func TestManager_Create_RefusesInvalidNonEmptyCheckoutWithoutRemovingIt(t *testi
 		ID: "wt-1", SessionID: "session-1", TaskID: "task-1", RepositoryID: "repo-1",
 		RepositoryPath: repoPath, Path: worktreePath, Branch: "feature/pr-branch", Status: StatusActive,
 	}
-	mgr, err := NewManager(newTestConfig(t), store, newTestLogger())
+	mgr, err := NewManager(cfg, store, newTestLogger())
 	if err != nil {
 		t.Fatalf("NewManager failed: %v", err)
 	}
 
 	_, err = mgr.Create(ctx, CreateRequest{
 		TaskID: "task-1", SessionID: "session-1", RepositoryID: "repo-1", RepositoryPath: repoPath,
-		BaseBranch: "main", TaskDirName: "task-1", RepoName: "repo-1",
+		BaseBranch: "main", WorktreeID: "wt-1", TaskDirName: "task-1", RepoName: "repo-1",
 	})
 	if !errors.Is(err, ErrWorktreeCorrupted) {
 		t.Fatalf("Create() error = %v, want ErrWorktreeCorrupted", err)
@@ -327,6 +328,53 @@ func TestManager_Create_RefusesInvalidNonEmptyCheckoutWithoutRemovingIt(t *testi
 	}
 	if recoveryErr.TaskID != "task-1" || recoveryErr.Checkout != worktreePath || !strings.Contains(recoveryErr.Reason, adminPath) {
 		t.Fatalf("recovery error = %+v, want owning task, checkout, and missing admin target", recoveryErr)
+	}
+	if content, readErr := os.ReadFile(uniqueFile); readErr != nil || string(content) != "unique content\n" {
+		t.Fatalf("unique checkout content changed after refusal: content=%q err=%v", content, readErr)
+	}
+}
+
+func TestManager_Create_RefusesMissingAdminWhenRecordedBranchIsUnreachable(t *testing.T) {
+	ctx := context.Background()
+	cfg := newTestConfig(t)
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(cfg.TasksBasePath, "linked-worktree")
+	runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
+	uniqueFile := filepath.Join(worktreePath, "untracked-preserve-me.txt")
+	if err := os.WriteFile(uniqueFile, []byte("unique content\n"), 0600); err != nil {
+		t.Fatalf("write unique file: %v", err)
+	}
+
+	gitPointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read linked worktree pointer: %v", err)
+	}
+	adminPath := strings.TrimSpace(strings.TrimPrefix(string(gitPointer), "gitdir:"))
+	runGit(t, repoPath, "update-ref", "-d", "refs/heads/feature/pr-branch")
+	if err := os.RemoveAll(adminPath); err != nil {
+		t.Fatalf("remove linked worktree admin directory: %v", err)
+	}
+
+	store := newMockStore()
+	store.worktrees["wt-1"] = &Worktree{
+		ID: "wt-1", SessionID: "session-1", TaskID: "task-1", RepositoryID: "repo-1",
+		RepositoryPath: repoPath, Path: worktreePath, Branch: "feature/pr-branch", Status: StatusActive,
+	}
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	_, err = mgr.Create(ctx, CreateRequest{
+		TaskID: "task-1", SessionID: "session-1", RepositoryID: "repo-1", RepositoryPath: repoPath,
+		BaseBranch: "main", WorktreeID: "wt-1", TaskDirName: "task-1", RepoName: "repo-1",
+	})
+	var recoveryErr *WorktreeRecoveryError
+	if !errors.As(err, &recoveryErr) {
+		t.Fatalf("Create() error = %T, want WorktreeRecoveryError", err)
+	}
+	if !strings.Contains(recoveryErr.Reason, "content-only") || !strings.Contains(recoveryErr.Reason, "feature/pr-branch") {
+		t.Fatalf("recovery reason = %q, want content-only unreachable branch refusal", recoveryErr.Reason)
 	}
 	if content, readErr := os.ReadFile(uniqueFile); readErr != nil || string(content) != "unique content\n" {
 		t.Fatalf("unique checkout content changed after refusal: content=%q err=%v", content, readErr)

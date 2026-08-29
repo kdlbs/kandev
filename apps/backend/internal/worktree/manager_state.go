@@ -327,3 +327,25 @@ func linkedWorktreeIntegrityReason(path string) string {
 	}
 	return "linked-worktree metadata is invalid"
 }
+
+// linkedWorktreeRecoveryReason distinguishes a recoverable missing admin entry
+// from content that has no validated Git commit to attach to. A branch name
+// stored in the worktree row is not enough: reconstructing HEAD when its ref
+// is gone would create an unborn branch and make the preserved checkout appear
+// entirely deleted or untracked.
+func (m *Manager) linkedWorktreeRecoveryReason(ctx context.Context, wt *Worktree) string {
+	reason := linkedWorktreeIntegrityReason(wt.Path)
+	if !strings.Contains(reason, "admin target") || !strings.Contains(reason, "is missing") ||
+		wt.RepositoryPath == "" || wt.Branch == "" {
+		return reason + "; checkout preserved"
+	}
+
+	exists, err := m.branchExists(ctx, wt.RepositoryPath, "refs/heads/"+wt.Branch)
+	if err != nil {
+		return reason + "; branch validation unavailable; checkout preserved"
+	}
+	if !exists {
+		return fmt.Sprintf("%s; recorded branch %q has no reachable ref; content-only preservation required", reason, wt.Branch)
+	}
+	return reason + "; checkout preserved"
+}
