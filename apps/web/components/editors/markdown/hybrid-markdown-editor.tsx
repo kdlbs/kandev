@@ -17,10 +17,6 @@ import {
 } from "@vscode/markdown-editor";
 import "@vscode/markdown-editor/editor.css";
 import "./hybrid-markdown-editor.css";
-import {
-  applyMarkdownSourceEdit,
-  type MarkdownSourceReplacement,
-} from "./markdown-source-preservation";
 
 export type MarkdownSourceRange = {
   start: number;
@@ -66,15 +62,6 @@ type EditorLifecycle = {
   commentsView: CommentsView;
   commentMode: CommentModeController;
   sourceEditSubscription: { dispose: () => void };
-};
-
-type SourceEditLike = {
-  replacements: readonly MarkdownSourceReplacementLike[];
-};
-
-type MarkdownSourceReplacementLike = {
-  replaceRange: MarkdownSourceRange;
-  newText: string;
 };
 
 type EditorCallbackRefs = {
@@ -204,12 +191,8 @@ function useHybridEditorLifecycle({
           return handler(url) === false ? false : undefined;
         },
         onComment: (submission) => callbackRefs.onComment.current?.(submission),
-        onSourceEdit: (edit) => {
+        onSourceEdit: (nextContent) => {
           try {
-            const nextContent = applyMarkdownSourceEdit(
-              canonicalContentRef.current,
-              toSourceReplacements(edit),
-            );
             canonicalContentRef.current = nextContent;
             callbackRefs.onChange.current(nextContent);
           } catch (error) {
@@ -298,7 +281,7 @@ type CreateEditorLifecycleOptions = {
   comments: readonly MarkdownComment[];
   onOpenLink: NonNullable<EditorViewOptions["onOpenLink"]>;
   onComment: (submission: MarkdownCommentSubmission) => void;
-  onSourceEdit: (edit: SourceEditLike) => void;
+  onSourceEdit: (content: string) => void;
 };
 
 function createEditorLifecycle({
@@ -343,7 +326,7 @@ function createEditorLifecycle({
     commentMode = new CommentModeController(model, view, {
       onSubmit: (submission) => onComment(toCommentSubmission(submission)),
     });
-    sourceEditSubscription = model.onWillApplySourceEdit((event) => onSourceEdit(event.edit));
+    sourceEditSubscription = subscribeToAppliedSourceEdits(model, onSourceEdit);
 
     return {
       model,
@@ -380,12 +363,28 @@ function reportEditorFailure(
   callbackRefs.onSourceFallback.current?.();
 }
 
-function toSourceReplacements(edit: SourceEditLike): MarkdownSourceReplacement[] {
-  return edit.replacements.map(({ replaceRange, newText }) => ({
-    start: replaceRange.start,
-    endExclusive: replaceRange.endExclusive,
-    newText,
-  }));
+function subscribeToAppliedSourceEdits(
+  model: EditorModel,
+  onSourceEdit: (content: string) => void,
+): { dispose: () => void } {
+  let active = true;
+  let notificationScheduled = false;
+  const subscription = model.onWillApplySourceEdit(() => {
+    if (notificationScheduled) return;
+    notificationScheduled = true;
+    queueMicrotask(() => {
+      notificationScheduled = false;
+      if (!active) return;
+      onSourceEdit(model.sourceText.get().value);
+    });
+  });
+
+  return {
+    dispose: () => {
+      active = false;
+      subscription.dispose();
+    },
+  };
 }
 
 function setObservable<T>(

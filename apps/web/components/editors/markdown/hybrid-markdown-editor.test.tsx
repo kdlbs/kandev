@@ -1,8 +1,15 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// The faithful upstream lifecycle mock keeps its model, view, and controller state together.
+// eslint-disable-next-line max-lines-per-function
 const upstream = vi.hoisted(() => {
-  type SourceEditListener = (event: { edit: { replacements: readonly unknown[] } }) => void;
+  type SourceReplacement = {
+    replaceRange: { start: number; endExclusive: number };
+    newText: string;
+  };
+  type SourceEdit = { replacements: readonly SourceReplacement[] };
+  type SourceEditListener = (event: { edit: SourceEdit }) => void;
   const state: {
     models: MockEditorModel[];
     views: MockEditorView[];
@@ -43,6 +50,20 @@ const upstream = vi.hoisted(() => {
       this.listener = listener;
       return this.sourceEditSubscription;
     });
+    applyUserEdit(edit: SourceEdit) {
+      this.listener?.({ edit });
+      const source = this.sourceText.get().value;
+      const nextSource = [...edit.replacements]
+        .sort((left, right) => right.replaceRange.start - left.replaceRange.start)
+        .reduce(
+          (next, replacement) =>
+            `${next.slice(0, replacement.replaceRange.start)}${replacement.newText}${next.slice(
+              replacement.replaceRange.endExclusive,
+            )}`,
+          source,
+        );
+      this.sourceText.set(new MockStringValue(nextSource));
+    }
     dispose = vi.fn();
 
     constructor() {
@@ -118,7 +139,7 @@ beforeEach(() => {
 });
 
 describe("HybridMarkdownEditor lifecycle", () => {
-  it("mounts one source-preserving model, view, controller, and local history", () => {
+  it("mounts one source-preserving model, view, controller, and local history", async () => {
     const source = "# Keep this source\n\n<div>Unsupported</div>\n";
     const onChange = vi.fn();
     const { unmount } = render(
@@ -146,23 +167,43 @@ describe("HybridMarkdownEditor lifecycle", () => {
       "kandev-hybrid-markdown-editor-root",
     );
 
-    model.listener?.({
-      edit: {
-        replacements: [
-          {
-            replaceRange: { start: 2, endExclusive: 6 },
-            newText: "Edited",
-          },
-        ],
-      },
+    model.applyUserEdit({
+      replacements: [
+        {
+          replaceRange: { start: 2, endExclusive: 6 },
+          newText: "Edited",
+        },
+      ],
     });
-    expect(onChange).toHaveBeenCalledWith("# Edited this source\n\n<div>Unsupported</div>\n");
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith("# Edited this source\n\n<div>Unsupported</div>\n"),
+    );
 
     unmount();
     expect(model.dispose).toHaveBeenCalledOnce();
     expect(view.dispose).toHaveBeenCalledOnce();
     expect(controller.dispose).toHaveBeenCalledOnce();
     expect(model.sourceEditSubscription.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("notifies the host after the editor applies an inline source edit", async () => {
+    const onChange = vi.fn();
+    render(
+      <HybridMarkdownEditor content="Before opening a PR" readOnly={false} onChange={onChange} />,
+    );
+    const model = upstream.state.models[0];
+
+    model.applyUserEdit({
+      replacements: [
+        {
+          replaceRange: { start: 6, endExclusive: 6 },
+          newText: "!",
+        },
+      ],
+    });
+
+    expect(onChange).not.toHaveBeenCalled();
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith("Before! opening a PR"));
   });
 
   it("replaces the model source for clean host updates without echoing an edit", () => {

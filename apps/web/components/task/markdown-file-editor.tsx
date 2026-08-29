@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { IconDeviceFloppy, IconRefresh, IconTrash } from "@tabler/icons-react";
+import { IconDeviceFloppy, IconLoader2, IconRefresh, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { FileViewerExternalLink } from "./file-viewer-header";
 import { FileEditorContent } from "./file-editor-content";
 import { MarkdownPreviewContent } from "./markdown-preview-content";
@@ -58,6 +59,8 @@ export type MarkdownFileEditorProps = {
 };
 
 const MODE_ORDER: readonly MarkdownFileMode[] = ["preview", "edit", "source"];
+const SAVE_SHORTCUT =
+  typeof navigator !== "undefined" && navigator.platform.includes("Mac") ? "\u2318" : "Ctrl";
 
 export function MarkdownFileEditor({
   path,
@@ -454,7 +457,7 @@ function MarkdownModeControl({ mode, supportedModes, onModeChange }: MarkdownMod
           type="button"
           size="sm"
           variant={candidate === mode ? "secondary" : "ghost"}
-          className="h-8 cursor-pointer px-2 text-xs"
+          className="h-6 cursor-pointer rounded-sm px-1.5 text-xs"
           data-testid={`markdown-mode-${candidate}`}
           aria-pressed={candidate === mode}
           onClick={() => onModeChange(candidate)}
@@ -487,42 +490,62 @@ function MarkdownFileActions({
   return (
     <>
       {hasRemoteUpdate && onReloadFromAgent && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-8 cursor-pointer gap-1 px-2 text-xs"
-          onClick={onReloadFromAgent}
-          data-testid="markdown-file-reload"
-        >
-          <IconRefresh className="h-3.5 w-3.5" />
-          {t("common:reload")}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 cursor-pointer gap-1 px-2 text-xs"
+              onClick={onReloadFromAgent}
+              data-testid="markdown-file-reload"
+            >
+              <IconRefresh className="h-3.5 w-3.5" />
+              {t("editors:reload")}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("editors:applyLatestAgentChangesToFile")}</TooltipContent>
+        </Tooltip>
       )}
       {onDelete && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-8 w-8 cursor-pointer p-0"
-          onClick={onDelete}
-          aria-label={t("task:delete")}
-          data-testid="markdown-file-delete"
-        >
-          <IconTrash className="h-4 w-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 cursor-pointer p-0 hover:text-destructive"
+              onClick={onDelete}
+              aria-label={t("editors:deleteFile")}
+              data-testid="markdown-file-delete"
+            >
+              <IconTrash className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("editors:deleteFile")}</TooltipContent>
+        </Tooltip>
       )}
       <Button
         type="button"
         variant="default"
         size="sm"
-        className="h-8 cursor-pointer gap-1 px-2 text-xs"
+        className="cursor-pointer gap-2"
         disabled={!isDirty || isSaving}
         onClick={onSave}
         data-testid="markdown-file-save"
       >
-        <IconDeviceFloppy className="h-3.5 w-3.5" />
-        {isSaving ? t("task:saving") : t("common:save")}
+        {isSaving ? (
+          <>
+            <IconLoader2 className="h-4 w-4 animate-spin" />
+            {t("editors:saving")}
+          </>
+        ) : (
+          <>
+            <IconDeviceFloppy className="h-4 w-4" />
+            {t("common:save")}
+            <span className="text-xs text-muted-foreground">({SAVE_SHORTCUT}+S)</span>
+          </>
+        )}
       </Button>
     </>
   );

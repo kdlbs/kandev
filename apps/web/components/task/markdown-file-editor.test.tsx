@@ -252,8 +252,11 @@ describe("MarkdownFileEditor", () => {
   it("uses compact desktop mode buttons that match the existing toolbar controls", () => {
     render(<MarkdownFileEditor {...baseProps} mode="edit" />);
 
-    expect(screen.getByTestId(MARKDOWN_EDIT_MODE_TEST_ID).className).toContain("h-8");
-    expect(screen.getByTestId(MARKDOWN_EDIT_MODE_TEST_ID).className).not.toContain("h-9");
+    expect(screen.getByTestId(MARKDOWN_EDIT_MODE_TEST_ID).className).toContain("h-6");
+    expect(screen.getByTestId(MARKDOWN_EDIT_MODE_TEST_ID).className).not.toContain("h-8");
+    expect(screen.getByTestId("markdown-file-save").textContent).toMatch(
+      /Save\s*\((?:Ctrl|⌘)\+S\)/,
+    );
   });
 
   it("leaves Source-mode keyboard save to the source editor", () => {

@@ -95,6 +95,40 @@ async function appendToHybrid(testPage: Page, marker: string): Promise<void> {
   await expect(editor).toContainText(marker);
 }
 
+async function editExistingHybridParagraph(testPage: Page): Promise<void> {
+  const editor = testPage.getByTestId("hybrid-markdown-editor");
+  const paragraph = editor.locator(".md-paragraph", {
+    hasText: "This paragraph stays in the canonical source.",
+  });
+  await expect(paragraph).toHaveCount(1);
+  const caretPoint = await paragraph.evaluate((element) => {
+    const target = "canonical";
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const offset = node.textContent?.indexOf(target) ?? -1;
+      if (offset < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, offset);
+      range.setEnd(node, offset + target.length);
+      const rect = range.getBoundingClientRect();
+      return { x: rect.right - 1, y: rect.top + rect.height / 2 };
+    }
+    return null;
+  });
+  expect(caretPoint).not.toBeNull();
+  await testPage.mouse.click(caretPoint!.x, caretPoint!.y);
+  await testPage.keyboard.insertText("!");
+  await expect(
+    editor.locator(".md-paragraph", {
+      hasText: "This paragraph stays in the canonical! source.",
+    }),
+  ).toHaveCount(1);
+  await expect(
+    editor.getByText("This paragraph stays in the canonical source.", { exact: true }),
+  ).toHaveCount(0);
+}
+
 async function hybridPalette(testPage: Page) {
   return testPage.locator(".md-editor.kandev-hybrid-markdown-editor").evaluate((editor) => {
     const activeBlock = editor.querySelector<HTMLElement>(".md-block-active");
@@ -160,7 +194,9 @@ async function presentationMetrics(testPage: Page, mode: "preview" | "edit") {
 
 async function expectSingleCompactToolbar(testPage: Page) {
   const editor = testPage.getByTestId("markdown-file-editor");
+  const toolbar = editor.locator(".markdown-file-toolbar:visible");
   const editorBox = await editor.boundingBox();
+  const toolbarBox = await toolbar.boundingBox();
   const visibleSurface = editor.locator(
     ":scope > .min-h-0.flex-1 :is(.monaco-editor:visible, [data-testid='markdown-preview-scroll-container']:visible, [data-testid='hybrid-markdown-editor']:visible)",
   );
@@ -168,10 +204,12 @@ async function expectSingleCompactToolbar(testPage: Page) {
   const modeButton = editor.locator("[data-testid^='markdown-mode-']:visible").first();
   const buttonBox = await modeButton.boundingBox();
   expect(editorBox).not.toBeNull();
+  expect(toolbarBox).not.toBeNull();
   expect(surfaceBox).not.toBeNull();
   expect(buttonBox).not.toBeNull();
   expect(surfaceBox!.y - editorBox!.y).toBeLessThanOrEqual(40);
-  expect(buttonBox!.height).toBeLessThanOrEqual(32);
+  expect(buttonBox!.height).toBeLessThanOrEqual(24);
+  expect(buttonBox!.height).toBeLessThan(toolbarBox!.height);
 }
 
 test.describe("Markdown file editing", () => {
@@ -214,6 +252,7 @@ test.describe("Markdown file editing", () => {
     expect(editMetrics.heading).toEqual(previewMetrics.heading);
     expect(editMetrics.blockquote).toEqual(previewMetrics.blockquote);
     expect(editMetrics.code).toEqual(previewMetrics.code);
+    await editExistingHybridParagraph(testPage);
     await appendToHybrid(testPage, marker);
 
     const lightPalette = await hybridPalette(testPage);
@@ -227,12 +266,18 @@ test.describe("Markdown file editing", () => {
     expect(darkPalette.codeBackground).not.toBe(lightPalette.codeBackground);
 
     const saveButton = editor.getByTestId("markdown-file-save");
+    await expect(saveButton).toContainText(/Save\s*\((?:Ctrl|⌘)\+S\)/);
     await expect(saveButton).toBeEnabled();
     await saveButton.click();
     await expect
       .poll(() => fs.readFileSync(filePath, "utf8"), { timeout: 15_000 })
       .toContain(marker);
-    expect(fs.readFileSync(filePath, "utf8")).toBe(`${MARKDOWN_CONTENT}\n\n${marker}`);
+    expect(fs.readFileSync(filePath, "utf8")).toBe(
+      `${MARKDOWN_CONTENT.replace(
+        "This paragraph stays in the canonical source.",
+        "This paragraph stays in the canonical! source.",
+      )}\n\n${marker}`,
+    );
     expect(fs.readFileSync(filePath, "utf8")).toContain(UNSUPPORTED_MARKDOWN_SOURCE);
     await expect(saveButton).toBeDisabled();
 
