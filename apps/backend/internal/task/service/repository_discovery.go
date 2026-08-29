@@ -317,6 +317,8 @@ func resolveMetadataPathValue(value, relativeTo string) (string, error) {
 
 func parseGitConfigCoreWorktree(config string) (string, error) {
 	inCore := false
+	var worktree string
+	var foundWorktree bool
 	for _, line := range strings.Split(config, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
@@ -333,13 +335,16 @@ func parseGitConfigCoreWorktree(config string) (string, error) {
 		if !found || !strings.EqualFold(strings.TrimSpace(key), "worktree") {
 			continue
 		}
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return "", errors.New("core.worktree is empty")
-		}
-		return value, nil
+		worktree = strings.TrimSpace(value)
+		foundWorktree = true
 	}
-	return "", errors.New("core.worktree is missing")
+	if !foundWorktree {
+		return "", errors.New("core.worktree is missing")
+	}
+	if worktree == "" {
+		return "", errors.New("core.worktree is empty")
+	}
+	return worktree, nil
 }
 
 func sameCanonicalPath(left, right string) bool {
