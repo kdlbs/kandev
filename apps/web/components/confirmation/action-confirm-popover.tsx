@@ -29,6 +29,7 @@ export type ActionConfirmPopoverProps = {
   anchorRef: RefObject<HTMLElement | null>;
   focusReturnRef?: RefObject<HTMLElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
+  shouldPreventOutsideInteraction?: (target: EventTarget | null) => boolean;
   title: ReactNode;
   description?: ReactNode;
   cancelLabel: ReactNode;
@@ -57,6 +58,7 @@ export function ActionConfirmPopover({
   anchorRef,
   focusReturnRef,
   focusBoundaryRef,
+  shouldPreventOutsideInteraction,
   title,
   description,
   cancelLabel,
@@ -133,6 +135,7 @@ export function ActionConfirmPopover({
         cancelRef={cancelRef}
         focusReturnRef={focusReturnRef}
         focusBoundaryRef={focusBoundaryRef}
+        shouldPreventOutsideInteraction={shouldPreventOutsideInteraction}
         confirmedRef={confirmedRef}
         anchorRef={anchorRef}
         onCancel={handleCancel}
@@ -159,6 +162,7 @@ type ActionConfirmPopoverContentProps = {
   cancelRef: RefObject<HTMLButtonElement | null>;
   focusReturnRef?: RefObject<HTMLElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
+  shouldPreventOutsideInteraction?: (target: EventTarget | null) => boolean;
   confirmedRef: { current: boolean };
   anchorRef: RefObject<HTMLElement | null>;
   onCancel: () => void;
@@ -182,6 +186,7 @@ const ActionConfirmPopoverContent = memo(function ActionConfirmPopoverContent({
   cancelRef,
   focusReturnRef,
   focusBoundaryRef,
+  shouldPreventOutsideInteraction,
   confirmedRef,
   anchorRef,
   onCancel,
@@ -198,30 +203,18 @@ const ActionConfirmPopoverContent = memo(function ActionConfirmPopoverContent({
       align="end"
       sideOffset={8}
       className={cn("gap-3 p-3", size === "wide" ? "w-72 max-w-[calc(100vw-1rem)]" : "w-64")}
-      onOpenAutoFocus={(event) => {
-        event.preventDefault();
-        cancelRef.current?.focus();
-      }}
+      onOpenAutoFocus={(event) => preventAndFocusCancel(event, cancelRef)}
       onFocusOutside={(event) => {
-        // If focus moved to/from the Radix context menu content (which is
-        // being removed because the popover opening shifted focus), keep the
-        // popover open. The menu content is rendered in a portal, so it is
-        // outside the focus boundary check below.
-        if ((event.target as Element)?.closest?.("[data-radix-menu-content]")) {
+        if (shouldPreventOutsideInteraction?.(event.target)) {
           event.preventDefault();
           return;
         }
-        // Only prevent close when focus stays within the boundary. If the
-        // boundary element has been replaced (React reconciliation), the old
-        // disconnected element's contains() returns false, so the check works
-        // correctly with a live triggerRef.
+        // A replaced boundary fails contains(), so the live trigger ref stays correct.
         if (focusBoundaryRef?.current?.contains(event.target as Node)) event.preventDefault();
       }}
       onInteractOutside={(event) => {
         const target = event.target as Node;
-        // If the interaction target is inside the Radix context menu content
-        // (which is being removed in a portal), keep the popover open.
-        if ((target as Element)?.closest?.("[data-radix-menu-content]")) {
+        if (shouldPreventOutsideInteraction?.(target)) {
           event.preventDefault();
           return;
         }
@@ -278,6 +271,11 @@ const ActionConfirmPopoverContent = memo(function ActionConfirmPopoverContent({
     </PopoverContent>
   );
 });
+
+function preventAndFocusCancel(event: Event, cancelRef: RefObject<HTMLButtonElement | null>) {
+  event.preventDefault();
+  cancelRef.current?.focus();
+}
 
 function closeActionConfirm(
   confirmedRef: { current: boolean },

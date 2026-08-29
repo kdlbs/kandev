@@ -30,6 +30,7 @@ export type SessionTabMenuActions = {
   handleSetPrimary: () => void;
   handleStop: () => void;
   handleResume: () => void;
+  hideSessionPanel: () => void;
   handleCloseOthers: () => void;
 };
 
@@ -101,6 +102,9 @@ export function DeleteSessionPopover({
       open={open}
       anchorRef={anchorRef}
       focusBoundaryRef={focusBoundaryRef}
+      shouldPreventOutsideInteraction={(target) =>
+        target instanceof Element && target.closest("[data-radix-menu-content]") !== null
+      }
       title={t("task:deleteSession")}
       description={
         <SessionDeleteDescription isPrimary={isPrimary} isOnlySession={sessionCount === 1} />
@@ -164,6 +168,9 @@ export function SessionContextMenuItems({
           {t("task:resume")}
         </ContextMenuItem>
       )}
+      <ContextMenuItem className="cursor-pointer" onSelect={actions.hideSessionPanel}>
+        {t("task:hide")}
+      </ContextMenuItem>
       {sessionState && isDeletable(sessionState) && (
         <ContextMenuItem
           className="cursor-pointer text-destructive"

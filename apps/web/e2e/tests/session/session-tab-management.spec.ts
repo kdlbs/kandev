@@ -100,7 +100,7 @@ function starInTab(session: SessionPage, sessionId: string) {
 }
 
 test.describe("Session tab management — close behavior", () => {
-  test("tab close button hides the panel without deleting the session and allows reopening", async ({
+  test("tab close button confirms then permanently deletes the session", async ({
     testPage,
     apiClient,
     seedData,
@@ -111,7 +111,7 @@ test.describe("Session tab management — close behavior", () => {
       testPage,
       apiClient,
       seedData,
-      "Tab Close Hides Panel",
+      "Tab Close Deletes Session",
     );
 
     await session.sessionTabBySessionId(session1Id).click();
@@ -119,10 +119,36 @@ test.describe("Session tab management — close behavior", () => {
 
     await session.sessionTabCloseButton(session1Id).click();
 
-    await expect(session.alertDialog()).not.toBeVisible();
+    await expect(session.alertDialog()).toBeVisible();
+    await session.alertDialog().getByRole("button", { name: "Delete" }).click();
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 5_000 });
     await expect(session.sessionTabBySessionId(session2Id)).toBeVisible();
     await expect(session.sessionTabCloseButton(session2Id)).not.toBeVisible();
+
+    await expect
+      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.map((s) => s.id))
+      .toEqual([session2Id]);
+  });
+
+  test("Hide closes the panel without deleting the session and allows reopening", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const { task, session, session1Id, session2Id } = await createTaskWithTwoSessions(
+      testPage,
+      apiClient,
+      seedData,
+      "Hide Session Panel",
+    );
+
+    await session.sessionTabBySessionId(session1Id).click({ button: "right" });
+    await session.contextMenuItem("Hide").click();
+    await expect(session.alertDialog()).not.toBeVisible();
+    await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 5_000 });
+    await expect(session.sessionTabBySessionId(session2Id)).toBeVisible();
 
     const { sessions } = await apiClient.listTaskSessions(task.id);
     expect(sessions.map((s) => s.id).sort()).toEqual([session1Id, session2Id].sort());

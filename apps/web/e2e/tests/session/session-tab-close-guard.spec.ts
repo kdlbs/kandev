@@ -78,7 +78,8 @@ test.describe("Session tab close guard", () => {
     if (!firstSessionId || !secondSessionId) return;
 
     await expect(session.sessionTabCloseButton(firstSessionId)).toBeVisible({ timeout: 10_000 });
-    await session.sessionTabCloseButton(firstSessionId).click();
+    await session.sessionTabBySessionId(firstSessionId).click({ button: "right" });
+    await session.contextMenuItem("Hide").click();
 
     await expect(session.sessionTabBySessionId(firstSessionId)).not.toBeVisible({ timeout: 5_000 });
     await expect(session.sessionTabBySessionId(secondSessionId)).toBeVisible();

@@ -55,6 +55,45 @@ afterEach(() => {
 });
 
 describe("SessionContextMenuItems", () => {
+  it("hides the panel without starting the delete flow", () => {
+    const hideSessionPanel = vi.fn();
+    const onDelete = vi.fn<(event: Event) => void>();
+    render(
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <button type="button">Session</button>
+        </ContextMenuTrigger>
+        <SessionContextMenuItems
+          sessionState="COMPLETED"
+          isPrimary={false}
+          canShare={false}
+          taskId={null}
+          sessionId={undefined}
+          actions={{
+            handleSetPrimary: vi.fn(),
+            handleStop: vi.fn(),
+            handleResume: vi.fn(),
+            hideSessionPanel,
+            handleCloseOthers: vi.fn(),
+          }}
+          onDelete={onDelete}
+          onShare={vi.fn()}
+          onHandoffProfile={vi.fn()}
+          onStartRename={vi.fn()}
+        />
+      </ContextMenu>,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Session" }), {
+      clientX: 100,
+      clientY: 100,
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Hide" }));
+
+    expect(hideSessionPanel).toHaveBeenCalledTimes(1);
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+
   it("keeps the delete menu action open for its local confirmation", () => {
     const onDelete = vi.fn<(event: Event) => void>();
     render(
@@ -72,6 +111,7 @@ describe("SessionContextMenuItems", () => {
             handleSetPrimary: vi.fn(),
             handleStop: vi.fn(),
             handleResume: vi.fn(),
+            hideSessionPanel: vi.fn(),
             handleCloseOthers: vi.fn(),
           }}
           onDelete={onDelete}

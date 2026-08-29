@@ -54,14 +54,15 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 | **Set as Primary** | Makes a stoppable session the task's primary target                                                                                                                        |
 | **Stop**           | Cancels the active agent turn for this session                                                                                                                             |
 | **Resume**         | Attempts to continue a completed, failed, or cancelled session                                                                                                             |
+| **Hide**           | Closes this agent panel without deleting its conversation; reopen it from **+ > Agents**                                                                                  |
 | **Delete**         | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept; a later session reuses them |
 | **Share**          | Opens the publishing preview for an eligible session                                                                                                                       |
 | **Handoff**        | Starts another session with a generated summary of this conversation                                                                                                       |
 | **Close Others**   | Closes other visible agent panels in that tab group without deleting their sessions                                                                                        |
 
-On desktop, the X on an agent tab closes only that panel. Reopen the same conversation from
-**+ > Agents**. Use **Delete** from the tab menu only when you intend to permanently remove the
-session. The final visible agent panel cannot be closed with an X.
+On desktop, the X on an agent tab asks for confirmation before permanently deleting its session.
+Use **Hide** from the tab menu when you want to close only the panel, then reopen the same
+conversation from **+ > Agents**. The final visible agent panel cannot be deleted with an X.
 
 Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. The failure banner offers **Start fresh** when continuation is unavailable.
 

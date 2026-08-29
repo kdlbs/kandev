@@ -24,6 +24,28 @@ import { t } from "@/lib/i18n";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
+const hiddenSessionIdsByApi = new WeakMap<DockviewApi, Set<string>>();
+
+function hiddenSessionIdsFor(api: DockviewApi): Set<string> {
+  const existing = hiddenSessionIdsByApi.get(api);
+  if (existing) return existing;
+  const hiddenSessionIds = new Set<string>();
+  hiddenSessionIdsByApi.set(api, hiddenSessionIds);
+  return hiddenSessionIds;
+}
+
+/** Hide a session tab without changing its persisted session lifecycle. */
+export function hideSessionPanel(api: DockviewApi, sessionId: string): void {
+  hiddenSessionIdsFor(api).add(sessionId);
+  const panel = api.getPanel(`session:${sessionId}`);
+  if (panel) api.removePanel(panel);
+}
+
+/** Forget a prior hide when a session is reopened or deleted. */
+export function clearHiddenSessionPanel(api: DockviewApi, sessionId: string): void {
+  hiddenSessionIdsFor(api).delete(sessionId);
+}
+
 /**
  * Decide whether `onDidActivePanelChange` should write `setActiveSession`.
  *
@@ -289,8 +311,14 @@ export function ensureSessionTabPrecedesNonSessionTabs(api: DockviewApi, session
 
 type AutoSessionTabRefs = {
   sessionTabCreatedRef: MutableRefObject<Set<string>>;
+  hiddenSessionIdsRef: MutableRefObject<Set<string>>;
   prevTaskIdRef: MutableRefObject<string | null>;
   prevSessionIdRef: MutableRefObject<string | null>;
+};
+
+type SessionPanelVisibility = {
+  createdSet: Set<string>;
+  hiddenSessionIds: Set<string>;
 };
 
 /**
@@ -351,8 +379,9 @@ function ensureSiblingPanels(
   currentSessionIds: string[],
   effectiveSessionId: string,
   siblingAnchor: AddPanelOptions["position"],
-  createdSet: Set<string>,
+  visibility: SessionPanelVisibility,
 ): string[] {
+  const { createdSet, hiddenSessionIds } = visibility;
   const created: string[] = [];
   for (const sid of currentSessionIds) {
     if (sid === effectiveSessionId) continue;
@@ -361,10 +390,7 @@ function ensureSiblingPanels(
       createdSet.add(sid);
       continue;
     }
-    // The created set records sessions that this mounted layout already
-    // materialized. If one is now missing, the user closed that panel; keep it
-    // hidden until they explicitly reopen it from the add-panel menu.
-    if (createdSet.has(sid)) continue;
+    if (hiddenSessionIds.has(sid)) continue;
     if (isDebug()) created.push(sid);
     ensureSessionPanel(api, sid, siblingAnchor, true, createdSet);
   }
@@ -523,11 +549,22 @@ export function runAutoSessionTabEffect(
     effectiveSessionId ?? "",
   );
 
+  const currentSessionIdSet = new Set(currentSessionIds);
+  for (const hiddenSessionId of refs.hiddenSessionIdsRef.current) {
+    if (!currentSessionIdSet.has(hiddenSessionId)) {
+      refs.hiddenSessionIdsRef.current.delete(hiddenSessionId);
+    }
+  }
+
   if (!effectiveSessionId) {
     if (isDebug()) debug("useAutoSessionTab: no effectiveSessionId, returning");
     updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
     return;
   }
+
+  // Selecting a hidden session through the reopen menu (or another explicit
+  // session-selection path) restores its panel and clears the hide intent.
+  refs.hiddenSessionIdsRef.current.delete(effectiveSessionId);
 
   if (
     shouldSkipPanelEnsure(
@@ -595,7 +632,10 @@ export function runAutoSessionTabEffect(
     currentSessionIds,
     effectiveSessionId,
     siblingAnchor,
-    refs.sessionTabCreatedRef.current,
+    {
+      createdSet: refs.sessionTabCreatedRef.current,
+      hiddenSessionIds: refs.hiddenSessionIdsRef.current,
+    },
   );
 
   logAutoSessionTabEffectExit(api, effectiveSessionId, siblingsCreated, activePanel);
@@ -617,10 +657,21 @@ export function runAutoSessionTabEffect(
  */
 export function useAutoSessionTab(effectiveSessionId: string | null) {
   const sessionTabCreatedRef = useRef<Set<string>>(new Set());
+  const hiddenSessionIdsRef = useRef<Set<string>>(new Set());
   const prevTaskIdRef = useRef<string | null>(null);
   const prevSessionIdRef = useRef<string | null>(null);
   const appStore = useAppStoreApi();
   const dockviewApi = useDockviewStore((state) => state.api);
+
+  useEffect(() => {
+    if (!dockviewApi) return;
+    const registered = hiddenSessionIdsByApi.get(dockviewApi);
+    if (registered) {
+      hiddenSessionIdsRef.current = registered;
+      return;
+    }
+    hiddenSessionIdsByApi.set(dockviewApi, hiddenSessionIdsRef.current);
+  }, [dockviewApi]);
 
   // Key-based dependency so the effect re-runs when the task's session list
   // changes (add/remove). Inside the effect we re-read the real array from
@@ -636,6 +687,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
   useEffect(() => {
     runAutoSessionTabEffect(effectiveSessionId, appStore, {
       sessionTabCreatedRef,
+      hiddenSessionIdsRef,
       prevTaskIdRef,
       prevSessionIdRef,
     });

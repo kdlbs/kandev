@@ -14,7 +14,7 @@ export function useSessionTabDelete(
   const [deleteOrigin, setDeleteOrigin] = useState<DeleteOrigin>(null);
   const [isDeletingFromTab, setIsDeletingFromTab] = useState(false);
 
-  const handleCloseTab = useCallback(() => {
+  const handleTabDelete = useCallback(() => {
     setDeleteOrigin("tab");
     setConfirmDelete(true);
   }, [setConfirmDelete]);
@@ -46,7 +46,7 @@ export function useSessionTabDelete(
 
   return {
     deleteOrigin,
-    handleCloseTab,
+    handleTabDelete,
     handleDeleteDialogOpenChange,
     handleConfirmDelete,
     handleMenuDelete,

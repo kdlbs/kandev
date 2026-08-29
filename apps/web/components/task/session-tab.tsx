@@ -33,6 +33,7 @@ import { TabRenameInput } from "./tab-rename-input";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import { SessionTabCloseAction } from "./session-tab-close-action";
 import { useSessionTabDelete } from "./use-session-tab-delete";
+import { clearHiddenSessionPanel, hideSessionPanel } from "./dockview-session-tabs";
 import { useTranslation } from "react-i18next";
 
 function useSessionTabState(sessionId: string | undefined) {
@@ -173,7 +174,7 @@ function useSessionTabActions(
   api: IDockviewPanelHeaderProps["api"],
   containerApi: IDockviewPanelHeaderProps["containerApi"],
 ) {
-  const handleCloseTab = useCallback(() => {
+  const removePanelAfterDelete = useCallback(() => {
     const panel = containerApi.getPanel(api.id);
     if (!panel) return;
 
@@ -201,19 +202,31 @@ function useSessionTabActions(
     stop: handleStop,
     resume: handleResume,
     remove: handleDelete,
-  } = useSessionActions({ sessionId, taskId, onDeleted: handleCloseTab });
+  } = useSessionActions({
+    sessionId,
+    taskId,
+    onDeleted: () => {
+      if (sessionId) clearHiddenSessionPanel(containerApi, sessionId);
+      removePanelAfterDelete();
+    },
+  });
+  const hideCurrentSessionPanel = useCallback(() => {
+    if (sessionId) hideSessionPanel(containerApi, sessionId);
+  }, [containerApi, sessionId]);
   const handleCloseOthers = useCallback(() => {
     const toClose = api.group.panels.filter(
       (panel) => panel.id !== api.id && panel.id.startsWith("session:"),
     );
-    for (const panel of toClose) containerApi.removePanel(panel);
+    for (const panel of toClose) {
+      hideSessionPanel(containerApi, panel.id.slice("session:".length));
+    }
   }, [api.id, containerApi]);
   return {
     handleSetPrimary,
     handleStop,
     handleResume,
     handleDelete,
-    handleCloseTab,
+    hideSessionPanel: hideCurrentSessionPanel,
     handleCloseOthers,
   };
 }
@@ -564,7 +577,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
             sessionState={sessionState}
             isActive={isActive}
             showCloseAction={showCloseAction}
-            onCloseTab={actions.handleCloseTab}
+            onCloseTab={deleteState.handleTabDelete}
           />
         </ContextMenuTrigger>
         <SessionContextMenuItems

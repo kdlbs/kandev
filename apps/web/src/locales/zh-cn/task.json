@@ -575,6 +575,7 @@
   "groupWorkflowStepDescription": "按工作流步骤分开任务。",
   "handOffToTarget": "移交给 <1>{{label}}</1>",
   "handoff": "移交",
+  "hide": "隐藏",
   "hardReset": "硬重置",
   "helpsPreserveCommittedWorkUncommittedChanges": "有助于保留已提交的工作。未提交的更改无法推送。",
   "hiddenMessagesInPreview_one": "… 此预览中还有 {{count}} 条消息被隐藏（仍包含在分享中）…",

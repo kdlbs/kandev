@@ -17,7 +17,7 @@ describe("useSessionTabDelete", () => {
     const handleDelete = vi.fn(() => pending.promise);
     const { result } = renderHook(() => useSessionTabDelete(setConfirmDelete, handleDelete));
 
-    act(() => result.current.handleCloseTab());
+    act(() => result.current.handleTabDelete());
     expect(setConfirmDelete).toHaveBeenCalledWith(true);
 
     let deletePromise!: Promise<void>;
@@ -41,7 +41,7 @@ describe("useSessionTabDelete", () => {
     const handleDelete = vi.fn().mockResolvedValue(false);
     const { result } = renderHook(() => useSessionTabDelete(setConfirmDelete, handleDelete));
 
-    act(() => result.current.handleCloseTab());
+    act(() => result.current.handleTabDelete());
     await act(async () => {
       await result.current.handleConfirmDelete();
     });
