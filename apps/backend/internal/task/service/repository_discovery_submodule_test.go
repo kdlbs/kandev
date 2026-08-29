@@ -113,6 +113,8 @@ func TestParseGitConfigCoreWorktree(t *testing.T) {
 	}{
 		{"case and whitespace", "[Core]\n WorkTree = ../module \n", "../module", false},
 		{"compact", "[core]\nworktree=module\n", "module", false},
+		{"quoted value with inline comment", "[core]\nworktree = \"../module#hash\" ; keep hash\n", "../module#hash", false},
+		{"partially quoted value", "[core]\nworktree = \"../module\"suffix\n", "../modulesuffix", false},
 		{"duplicate uses effective last value", "[core]\nworktree=selected\nworktree=other\n", "other", false},
 		{"outside core", "worktree=wrong\n[other]\nworktree=also-wrong\n", "", true},
 		{"empty", "[core]\nworktree = \n", "", true},

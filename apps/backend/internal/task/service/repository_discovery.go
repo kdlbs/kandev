@@ -354,19 +354,63 @@ func parseGitConfigCoreWorktree(config string) (string, error) {
 
 func parseGitConfigValue(value string) (string, error) {
 	value = strings.TrimSpace(value)
-	if strings.HasPrefix(value, "\"") {
-		unquoted, err := strconv.Unquote(value)
-		if err != nil {
-			return "", err
+	var parsed strings.Builder
+	for len(value) > 0 {
+		if value[0] == '"' {
+			end, err := gitConfigQuotedValueEnd(value)
+			if err != nil {
+				return "", err
+			}
+			unquoted, err := strconv.Unquote(value[:end+1])
+			if err != nil {
+				return "", err
+			}
+			parsed.WriteString(unquoted)
+			value = value[end+1:]
+			continue
 		}
-		return unquoted, nil
+		quoteIndex := strings.IndexByte(value, '"')
+		commentIndex := gitConfigCommentStart(value)
+		if commentIndex >= 0 && (quoteIndex < 0 || commentIndex < quoteIndex) {
+			parsed.WriteString(value[:commentIndex])
+			return strings.TrimSpace(parsed.String()), nil
+		}
+		if quoteIndex >= 0 {
+			parsed.WriteString(value[:quoteIndex])
+			value = value[quoteIndex:]
+			continue
+		}
+		parsed.WriteString(value)
+		break
 	}
+	return strings.TrimSpace(parsed.String()), nil
+}
+
+func gitConfigCommentStart(value string) int {
 	for index, character := range value {
 		if (character == '#' || character == ';') && index > 0 && isGitConfigWhitespace(value[index-1]) {
-			return strings.TrimSpace(value[:index]), nil
+			return index
 		}
 	}
-	return strings.TrimSpace(value), nil
+	return -1
+}
+
+func gitConfigQuotedValueEnd(value string) (int, error) {
+	escaped := false
+	for index := 1; index < len(value); index++ {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if value[index] == '\\' {
+			escaped = true
+			continue
+		}
+		if value[index] == '"' {
+			return index, nil
+		}
+	}
+	return 0, errors.New("unterminated quoted Git config value")
 }
 
 func isGitConfigWhitespace(character byte) bool {
