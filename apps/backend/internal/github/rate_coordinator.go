@@ -33,6 +33,51 @@ type rateAdmissionState struct {
 	changed            chan struct{}
 }
 
+func (a *RateAdmission) snapshot(resource Resource, now time.Time) rateAdmissionDecision {
+	if a == nil || a.principal == nil || a.principal.tracker == nil {
+		return rateAdmissionDecision{interactiveAllowed: true, backgroundAllowed: true}
+	}
+	decision := rateAdmissionDecision{interactiveAllowed: true, backgroundAllowed: true}
+	if secondary := a.principal.tracker.Secondary(resource); secondary.RetryAt.After(now) {
+		decision.interactiveAllowed = false
+		decision.backgroundAllowed = false
+		decision.interactiveReason = rateLimitBlockSecondary
+		decision.backgroundReason = rateLimitBlockSecondary
+		return decision
+	}
+	if rate, known := a.principal.tracker.Snapshot(resource); known && rate.ResetAt.After(now) {
+		if rate.Remaining <= 0 {
+			decision.interactiveAllowed = false
+			decision.backgroundAllowed = false
+			decision.interactiveReason = rateLimitBlockPrimary
+			decision.backgroundReason = rateLimitBlockPrimary
+			return decision
+		}
+		if rate.Limit > 0 && rate.Remaining*10 <= rate.Limit {
+			decision.backgroundAllowed = false
+			decision.backgroundReason = rateLimitBlockPrimaryReserve
+		}
+	}
+
+	a.principal.mu.Lock()
+	state := a.principal.resources[resource]
+	if state != nil && decision.backgroundAllowed {
+		switch {
+		case state.waitingInteractive > 0:
+			decision.backgroundAllowed = false
+			decision.backgroundReason = rateLimitBlockInteractiveWaiting
+		case state.backgroundBusy:
+			decision.backgroundAllowed = false
+			decision.backgroundReason = rateLimitBlockBackgroundBusy
+		case state.nextBackgroundAt.After(now):
+			decision.backgroundAllowed = false
+			decision.backgroundReason = rateLimitBlockBackgroundPacing
+		}
+	}
+	a.principal.mu.Unlock()
+	return decision
+}
+
 const defaultBackgroundPace = time.Second
 
 type RateAdmission struct {

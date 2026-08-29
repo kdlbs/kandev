@@ -1,7 +1,7 @@
 ---
 id: 04-agent-rate-snapshot
 title: Agent rate-state snapshot
-status: in_progress
+status: done
 wave: 4
 depends_on: [03-workflow-sync-backoff]
 plan: plan.md
@@ -26,4 +26,19 @@ system_design: ../../specs/integrations/system-design/github-rate-limit-coordina
 
 ## Results
 
-Pending.
+Implemented `get_github_rate_limit_kandev` for Kanban and Office task
+surfaces. The server binds the request to its current task, the backend derives
+the workspace from that authorized task, and the GitHub service reads only
+persisted connection metadata plus principal-coordinator memory. The response
+reports non-secret principal identity, known/fresh core and GraphQL buckets,
+Kandev-observed secondary state with `retry_source`, and current interactive
+and background admission decisions. Active secondary states use the latest
+resource retry boundary that Kandev is enforcing; an accepted response can
+still clear that local upper bound early.
+
+Validation passed:
+
+- `go test ./internal/mcp/handlers ./internal/mcp/server ./internal/backendapp -run 'Test.*(GitHubRate|ToolMetadata|Profile|MCP)' -count=1`
+- `go test ./internal/github -run 'TestService.*RateLimitSnapshot' -count=1`
+- `go test -race ./internal/github -run 'Test(ServiceGetWorkspaceRateLimitSnapshot|ObservedSecondarySnapshot)' -count=1`
+- `go test ./internal/github ./internal/mcp/handlers ./internal/mcp/server ./internal/backendapp -count=1`
