@@ -14,19 +14,22 @@ import (
 func TestRetryPolicyDelayUsesEqualJitterAndCapsPreJitterDelay(t *testing.T) {
 	tests := []struct {
 		name     string
+		interval int
 		failures int
 		jitter   func(time.Duration) time.Duration
 		want     time.Duration
 	}{
-		{name: "first lower bound", failures: 1, jitter: func(time.Duration) time.Duration { return 0 }, want: 30 * time.Second},
-		{name: "first upper bound", failures: 1, jitter: func(max time.Duration) time.Duration { return max }, want: time.Minute},
-		{name: "second doubles", failures: 2, jitter: func(time.Duration) time.Duration { return 0 }, want: time.Minute},
-		{name: "cap lower bound", failures: 20, jitter: func(time.Duration) time.Duration { return 0 }, want: 30 * time.Minute},
-		{name: "cap upper bound", failures: 20, jitter: func(max time.Duration) time.Duration { return max }, want: time.Hour},
+		{name: "first lower bound", interval: 60, failures: 1, jitter: func(time.Duration) time.Duration { return 0 }, want: 30 * time.Second},
+		{name: "first upper bound", interval: 60, failures: 1, jitter: func(max time.Duration) time.Duration { return max }, want: time.Minute},
+		{name: "second doubles", interval: 60, failures: 2, jitter: func(time.Duration) time.Duration { return 0 }, want: time.Minute},
+		{name: "cap lower bound", interval: 60, failures: 20, jitter: func(time.Duration) time.Duration { return 0 }, want: 30 * time.Minute},
+		{name: "cap upper bound", interval: 60, failures: 20, jitter: func(max time.Duration) time.Duration { return max }, want: time.Hour},
+		{name: "oversized interval lower bound", interval: 30 * 24 * 60 * 60, failures: 1, jitter: func(time.Duration) time.Duration { return 0 }, want: 30 * time.Minute},
+		{name: "oversized interval upper bound", interval: 30 * 24 * 60 * 60, failures: 1, jitter: func(max time.Duration) time.Duration { return max }, want: time.Hour},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.want, retryPolicyDelay(60, test.failures, test.jitter))
+			assert.Equal(t, test.want, retryPolicyDelay(test.interval, test.failures, test.jitter))
 		})
 	}
 }

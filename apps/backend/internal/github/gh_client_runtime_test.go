@@ -125,6 +125,7 @@ func TestGHClient_FetchRateLimit(t *testing.T) {
 				"search":{"limit":30,"remaining":29,"reset":` + strconv.FormatInt(reset.Unix(), 10) + `}}}`,
 		})
 		tracker := NewRateTracker(nil, nil)
+		tracker.ObserveSecondary(ResourceCore, time.Now().Add(time.Hour), RetrySourceConservativeFallback, "secondary")
 		if err := NewGHClient().WithRateTracker(tracker).FetchRateLimit(context.Background()); err != nil {
 			t.Fatalf("FetchRateLimit: %v", err)
 		}
@@ -150,6 +151,9 @@ func TestGHClient_FetchRateLimit(t *testing.T) {
 			if !snap.ResetAt.Equal(reset) {
 				t.Errorf("%s reset = %v, want %v", want.resource, snap.ResetAt, reset)
 			}
+		}
+		if secondary := tracker.Secondary(ResourceCore); !secondary.Active {
+			t.Fatalf("rate-limit probe success cleared active secondary throttle: %+v", secondary)
 		}
 	})
 	// An all-zero bucket means gh reported nothing for that resource; recording

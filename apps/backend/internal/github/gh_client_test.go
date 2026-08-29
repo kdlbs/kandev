@@ -662,6 +662,21 @@ func TestResourceForGHArgs(t *testing.T) {
 	}
 }
 
+func TestIsGitHubRateLimitProbe(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{args: []string{"api", "rate_limit"}, want: true},
+		{args: []string{"api", "user"}, want: false},
+		{args: []string{"pr", "list"}, want: false},
+	} {
+		if got := isGitHubRateLimitProbe(tc.args); got != tc.want {
+			t.Errorf("isGitHubRateLimitProbe(%v) = %v, want %v", tc.args, got, tc.want)
+		}
+	}
+}
+
 func TestBuildUserReposGHArgs(t *testing.T) {
 	cases := []struct {
 		name  string

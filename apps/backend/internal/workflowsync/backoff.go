@@ -79,6 +79,9 @@ func retryPolicyDelay(
 	if delay < time.Minute {
 		delay = time.Minute
 	}
+	if delay > maxRetryDelay {
+		delay = maxRetryDelay
+	}
 	for i := 1; i < consecutiveFailures && delay < maxRetryDelay; i++ {
 		delay *= 2
 		if delay > maxRetryDelay {

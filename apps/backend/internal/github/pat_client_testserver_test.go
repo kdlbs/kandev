@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestTokenClientFetchRateLimitSeedsAllBuckets(t *testing.T) {
@@ -41,6 +42,23 @@ func TestTokenClientFetchRateLimitSeedsAllBuckets(t *testing.T) {
 		if snapshot.Remaining != wantRemaining {
 			t.Errorf("%s remaining = %d, want %d", resource, snapshot.Remaining, wantRemaining)
 		}
+	}
+}
+
+func TestTokenClientFetchRateLimitPreservesSecondaryThrottle(t *testing.T) {
+	client, _ := newRecordingPATServer(t, map[string]string{
+		"/rate_limit": `{"resources":{"core":{"limit":5000,"remaining":5000,"reset":2000000000}}}`,
+	})
+	tracker := NewRateTracker(nil, nil)
+	client.WithRateTracker(tracker)
+	retryAt := time.Now().Add(time.Hour)
+	tracker.ObserveSecondary(ResourceCore, retryAt, RetrySourceConservativeFallback, "secondary")
+
+	if err := client.FetchRateLimit(context.Background()); err != nil {
+		t.Fatalf("FetchRateLimit: %v", err)
+	}
+	if got := tracker.Secondary(ResourceCore); !got.Active {
+		t.Fatalf("rate-limit probe success cleared active secondary throttle: %+v", got)
 	}
 }
 

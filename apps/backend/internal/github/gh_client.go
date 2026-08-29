@@ -135,6 +135,10 @@ func resourceForGHArgs(args []string) Resource {
 	}
 }
 
+func isGitHubRateLimitProbe(args []string) bool {
+	return len(args) >= 2 && args[0] == "api" && args[1] == "rate_limit"
+}
+
 // GHAvailable checks if the gh CLI is installed and accessible.
 func GHAvailable() bool {
 	_, err := exec.LookPath("gh")
@@ -1309,7 +1313,7 @@ func (c *GHClient) runGH(ctx context.Context, stdin []byte, args ...string) (str
 		}
 		return stdout.String(), fmt.Errorf("gh %s: %w: %s", firstArg(args), runErr, stderr.String())
 	}
-	if c.rateTracker != nil {
+	if c.rateTracker != nil && !isGitHubRateLimitProbe(args) {
 		c.rateTracker.ObserveSuccess(resourceForGHArgs(args))
 	}
 	return stdout.String(), nil
