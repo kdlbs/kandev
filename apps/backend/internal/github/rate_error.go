@@ -69,12 +69,14 @@ func classifyGitHubResponse(resp *http.Response, endpoint string, body []byte, n
 func classifyFailureKind(status int, body, remainingHeader string) FailureKind {
 	lower := strings.ToLower(body)
 	rateSignal := status == http.StatusTooManyRequests || strings.Contains(lower, "rate limit") ||
-		strings.Contains(lower, "abuse detection") || strings.Contains(lower, "secondary rate")
+		strings.Contains(lower, "abuse detection") || strings.Contains(lower, "secondary rate") ||
+		strings.Contains(lower, "rate_limited")
 	remaining, remainingErr := strconv.Atoi(strings.TrimSpace(remainingHeader))
 	if rateSignal && remainingErr == nil && remaining <= 0 {
 		return FailurePrimaryRateLimit
 	}
-	if rateSignal && (status == http.StatusForbidden || status == http.StatusTooManyRequests) {
+	if rateSignal && (status == http.StatusForbidden || status == http.StatusTooManyRequests ||
+		strings.Contains(lower, "rate_limited")) {
 		return FailureSecondaryRateLimit
 	}
 	if invalidCredentialFailure(status, lower) {

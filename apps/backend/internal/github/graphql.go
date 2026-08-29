@@ -275,6 +275,27 @@ type graphQLError struct {
 	Path    []string `json:"path"`
 }
 
+// graphQLPayloadRateLimited detects GitHub's application-level throttling
+// response. Unlike REST, GraphQL can return HTTP 200 with a RATE_LIMITED
+// error, which must not be treated as an accepted response by the coordinator.
+func graphQLPayloadRateLimited(body []byte) bool {
+	var payload struct {
+		Errors []graphQLError `json:"errors"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false
+	}
+	for _, item := range payload.Errors {
+		kind := strings.ToLower(item.Type)
+		message := strings.ToLower(item.Message)
+		if strings.Contains(kind, "rate_limited") || strings.Contains(message, "rate limit") ||
+			strings.Contains(message, "secondary rate") || strings.Contains(message, "abuse detection") {
+			return true
+		}
+	}
+	return false
+}
+
 // repoRef is a minimal (owner, repo) pair used by the batched GraphQL
 // helpers to surface which repositories the response flagged as
 // unresolvable. Service.SyncWatchesBatched feeds these into the negative
@@ -673,6 +694,9 @@ func (c *PATClient) ExecuteGraphQL(ctx context.Context, query string, variables 
 	if resp.StatusCode >= 400 {
 		return c.apiError(resp, "/graphql", respBody)
 	}
+	if graphQLPayloadRateLimited(respBody) {
+		return c.apiError(resp, "/graphql", respBody)
+	}
 	c.observeSuccess("/graphql")
 	if err := json.Unmarshal(respBody, out); err != nil {
 		return fmt.Errorf("decode graphql response: %w", err)
@@ -722,6 +746,21 @@ func (c *GHClient) ExecuteGraphQL(ctx context.Context, query string, variables m
 	stdout, err := c.run(ctx, args...)
 	if err != nil {
 		return fmt.Errorf("gh graphql: %w", err)
+	}
+	if graphQLPayloadRateLimited([]byte(stdout)) {
+		failure := classifyGitHubResponse(
+			&http.Response{StatusCode: http.StatusOK, Header: make(http.Header)},
+			"/graphql", []byte(stdout), time.Now().UTC(),
+		)
+		incGitHubResponseClassification(failure.Kind, failure.Resource, failure.RetrySource)
+		if c.rateTracker != nil {
+			c.rateTracker.ObserveSecondary(failure.Resource, failure.RetryAt, failure.RetrySource, stdout)
+		}
+		return fmt.Errorf("gh graphql: %w", &GitHubAPIError{
+			StatusCode: http.StatusOK, Endpoint: "/graphql", Body: stdout,
+			FailureKind: failure.Kind, Resource: failure.Resource,
+			RetryAt: failure.RetryAt, RetrySource: failure.RetrySource,
+		})
 	}
 	if err := json.Unmarshal([]byte(stdout), out); err != nil {
 		return fmt.Errorf("decode graphql response: %w", err)

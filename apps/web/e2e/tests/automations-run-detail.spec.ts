@@ -384,7 +384,9 @@ test.describe("Automation concurrency note", () => {
     await expect(testPage.getByTestId("runs-rail-empty")).toBeVisible({ timeout: 15_000 });
 
     await testPage.getByTestId("automation-run-now").click();
-    await expect(testPage.getByText(/Triggered|Skipped/)).toBeVisible({ timeout: 15_000 });
+    await expect(
+      testPage.getByRole("region", { name: "Notifications alt+T" }).getByText(/Triggered|Skipped/),
+    ).toBeVisible({ timeout: 15_000 });
 
     // The run row is written after the fire returns, so a page that only polls
     // while it can already see something open never learns the run happened.

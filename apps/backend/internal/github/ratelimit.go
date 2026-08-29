@@ -59,6 +59,12 @@ func (s RateSnapshot) Exhausted() bool {
 	return s.Remaining <= 0 && s.ResetAt.After(time.Now())
 }
 
+// interactiveReserveReached reports whether only the ten-percent interactive
+// reserve remains in a known primary bucket.
+func interactiveReserveReached(snap RateSnapshot) bool {
+	return snap.Limit > 0 && snap.Remaining*10 <= snap.Limit
+}
+
 // RateLimitUpdatedEvent is published when a snapshot changes, either because
 // new headers arrived or because exhaustion state flipped.
 //
@@ -237,7 +243,7 @@ func (r *RateTracker) BackgroundWaitDuration(resource Resource) time.Duration {
 	r.mu.RLock()
 	snap, known := r.snapshots[resource]
 	r.mu.RUnlock()
-	if known && snap.Limit > 0 && snap.Remaining*10 <= snap.Limit {
+	if known && interactiveReserveReached(snap) {
 		if wait := time.Until(snap.ResetAt); wait > 0 {
 			return wait
 		}

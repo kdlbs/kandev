@@ -55,7 +55,7 @@ func (a *RateAdmission) snapshot(resource Resource, now time.Time) rateAdmission
 			decision.backgroundReason = rateLimitBlockPrimary
 			return decision
 		}
-		if rate.Limit > 0 && rate.Remaining*10 <= rate.Limit {
+		if interactiveReserveReached(rate) {
 			decision.backgroundAllowed = false
 			decision.backgroundReason = rateLimitBlockPrimaryReserve
 		}

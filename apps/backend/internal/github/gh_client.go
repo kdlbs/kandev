@@ -1313,10 +1313,15 @@ func (c *GHClient) runGH(ctx context.Context, stdin []byte, args ...string) (str
 		}
 		return stdout.String(), fmt.Errorf("gh %s: %w: %s", firstArg(args), runErr, stderr.String())
 	}
-	if c.rateTracker != nil && !isGitHubRateLimitProbe(args) {
+	if c.rateTracker != nil && !isGitHubRateLimitProbe(args) &&
+		(!isGraphQLGHArgs(args) || !graphQLPayloadRateLimited(stdout.Bytes())) {
 		c.rateTracker.ObserveSuccess(resourceForGHArgs(args))
 	}
 	return stdout.String(), nil
+}
+
+func isGraphQLGHArgs(args []string) bool {
+	return len(args) >= 2 && args[0] == "api" && args[1] == "graphql"
 }
 
 // firstArg returns args[0] when present, else "<no-args>". Used for error
