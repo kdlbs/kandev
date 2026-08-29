@@ -53,8 +53,8 @@ type GitOperator struct {
 	contributionDestinationErr error
 	// prCreateRetryAttempts is the number of times to attempt PR creation after a
 	// successful branch push. GitHub's eventual consistency can briefly return
-	// "no commits between base and head" (or similar) for a ref it has not yet
-	// indexed, so we retry instead of surfacing that transient failure to the user.
+	// "no commits between base and head" for a ref it has not yet indexed, so we
+	// retry that known transient failure instead of surfacing it to the user.
 	// Set to 1 to disable the backoff (push, then one create attempt).
 	prCreateRetryAttempts int
 	// prCreateRetryBaseDelay is the initial backoff between create attempts. Each
@@ -1305,17 +1305,17 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 
 	switch provider {
 	case prProviderAzureRepos:
-		return g.createPRWithRetryAfterPush(ctx, result, title, body, baseBranch, draft,
+		return g.createPRWithRetryAfterPush(ctx, result, title, body,
 			func() (*PRCreateResult, error) {
 				return g.createAzureReposPR(ctx, result, remoteURL, branch, title, body, baseBranch, draft)
 			})
 	case prProviderGitHub:
-		return g.createPRWithRetryAfterPush(ctx, result, title, body, baseBranch, draft,
+		return g.createPRWithRetryAfterPush(ctx, result, title, body,
 			func() (*PRCreateResult, error) {
 				return g.createGitHubPR(ctx, result, branch, title, body, baseBranch, draft)
 			})
 	case prProviderGitLab:
-		return g.createPRWithRetryAfterPush(ctx, result, title, body, baseBranch, draft,
+		return g.createPRWithRetryAfterPush(ctx, result, title, body,
 			func() (*PRCreateResult, error) {
 				return g.createGitLabPR(ctx, result, gitLabInfo, branch, title, body, baseBranch, draft)
 			})
@@ -1357,53 +1357,101 @@ func (g *GitOperator) createManagedContributionPR(
 	}
 	result.Provider = string(prProviderGitHub)
 	result.BranchPushed = true
-	return g.createPRWithRetryAfterPush(ctx, result, title, body, baseBranch, draft,
+	return g.createPRWithRetryAfterPush(ctx, result, title, body,
 		func() (*PRCreateResult, error) {
 			return g.createGitHubPR(ctx, result, branch, title, body, baseBranch, draft)
 		})
 }
 
-
-// createPRWithRetryAfterPush runs a single provider create call with bounded
-// backoff. The branch has already been pushed by the caller, so a transient
-// provider-side failure (e.g. GitHub's eventual consistency returning "no
-// commits between base and head" before it has indexed the new ref) should be
-// retried rather than surfaced to the user as the generic "Branch was pushed;
-// retry creation" prompt. The first success wins; once attempts are exhausted
-// the final partial failure is finalized into that user-facing prompt.
+// createPRWithRetryAfterPush runs a provider create call with bounded backoff.
+// The branch has already been pushed by the caller, so only the known
+// eventual-consistency response is retried. Other failures can be ambiguous
+// after a non-idempotent create request, so they are finalized immediately.
+// The first success wins; once attempts are exhausted the final partial failure
+// is finalized into the existing user-facing prompt.
 func (g *GitOperator) createPRWithRetryAfterPush(
 	ctx context.Context,
 	result *PRCreateResult,
-	title, body, baseBranch string,
-	draft bool,
+	title, body string,
 	attempt func() (*PRCreateResult, error),
 ) (*PRCreateResult, error) {
 	attempts := g.prCreateRetryAttempts
 	if attempts < 1 {
 		attempts = 1
 	}
-	var last *PRCreateResult
+	if result == nil {
+		result = &PRCreateResult{}
+	}
+	var last = result
 	var lastErr error
 	for attemptIdx := range attempts {
 		i := attemptIdx + 1
 		if attemptIdx > 0 {
-			delay := g.prCreateRetryBaseDelay * time.Duration(i)
+			delay := prCreateRetryDelay(g.prCreateRetryBaseDelay, attemptIdx)
 			if !sleepCtx(ctx, delay) {
 				return finalizePRCreationAfterPush(last, lastErr)
 			}
 		}
-		last, lastErr = attempt()
+		resetPRCreateAttemptResult(result)
+		attemptResult, attemptErr := attempt()
+		if attemptResult == nil {
+			attemptResult = result
+		}
+		if attemptResult.Provider == "" {
+			attemptResult.Provider = result.Provider
+		}
+		if result.BranchPushed {
+			attemptResult.BranchPushed = true
+		}
+		last, lastErr = attemptResult, attemptErr
 		if lastErr == nil && last != nil && last.Success {
 			return last, nil
+		}
+		if !isRetryablePRCreationFailure(lastErr, last) || attemptIdx == attempts-1 {
+			return finalizePRCreationAfterPush(last, lastErr)
 		}
 		g.logger.Warn("PR creation attempt failed after push; retrying",
 			zap.Int("attempt", i),
 			zap.Int("total_attempts", attempts),
-			zap.String("error", errOrEmpty(lastErr, last)),
+			zap.String("error", g.sanitizePRFailure(errOrEmpty(lastErr, last), title, body)),
 		)
 	}
 	return finalizePRCreationAfterPush(last, lastErr)
 }
+
+func prCreateRetryDelay(base time.Duration, retryIndex int) time.Duration {
+	if retryIndex < 1 {
+		return 0
+	}
+	return base * time.Duration(retryIndex)
+}
+
+func resetPRCreateAttemptResult(result *PRCreateResult) {
+	if result == nil {
+		return
+	}
+	result.Success = false
+	result.PRURL = ""
+	result.Output = ""
+	result.Error = ""
+}
+
+func isRetryablePRCreationFailure(err error, result *PRCreateResult) bool {
+	if result == nil {
+		return false
+	}
+	message := strings.ToLower(errOrEmpty(err, result))
+	if !strings.Contains(message, "no commits between") {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(result.Provider)) {
+	case string(prProviderGitHub), string(prProviderGitLab), string(prProviderAzureRepos):
+		return true
+	default:
+		return false
+	}
+}
+
 func sleepCtx(ctx context.Context, d time.Duration) bool {
 	t := time.NewTimer(d)
 	defer t.Stop()
@@ -1422,7 +1470,14 @@ func errOrEmpty(err error, result *PRCreateResult) string {
 		return err.Error()
 	}
 	if result != nil {
-		return result.Error
+		switch {
+		case result.Error != "" && result.Output != "":
+			return result.Error + "\n" + result.Output
+		case result.Error != "":
+			return result.Error
+		default:
+			return result.Output
+		}
 	}
 	return ""
 }
