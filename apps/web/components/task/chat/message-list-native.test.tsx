@@ -407,7 +407,6 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
     expect(scrollContainer.scrollTop).toBe(123);
   });
 
-  // @covers AC-UI-TRANSCRIPT-AUTO-SCROLL-001.5, AC-UI-TRANSCRIPT-AUTO-SCROLL-001.7
   it("uses a WebKit-safe maximum offset for pinned appends", () => {
     const { rerender } = render(
       <AutoScrollHarness isWorking={false} hasUnreadDivider={false} messages={TEST_MESSAGES} />,

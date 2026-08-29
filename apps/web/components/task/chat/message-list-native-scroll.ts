@@ -25,6 +25,7 @@ import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const paginationDebug = createDebugLogger("messages:pagination");
 
+// INT32_MAX: WebKit resolves Number.MAX_SAFE_INTEGER to 0 (not bottom).
 const NATIVE_BOTTOM_SCROLL_TOP = 2_147_483_647;
 
 /** Writes a clamped maximum so the browser resolves the native bottom without
