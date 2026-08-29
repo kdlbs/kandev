@@ -22,29 +22,19 @@ test.describe("Archiving a task freezes its runtime state", () => {
     test.setTimeout(90_000);
 
     const taskTitle = "Archive Freezes State";
-    const created = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      taskTitle,
-      seedData.agentProfileId,
-      {
-        // Keep the turn alive long enough for a loaded CI shard to observe
-        // IN_PROGRESS and archive it. The cancellation-aware delay exits as
-        // soon as the test sends agent.cancel.
-        description: 'e2e:message("still going")\ne2e:delay(60000)',
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-      },
-    );
-    const taskId = created.id;
+    const { task_id: taskId } = await apiClient.seedTask(seedData.workspaceId, taskTitle, {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      state: "IN_PROGRESS",
+    });
     const { session_id: sessionId } = await apiClient.seedTaskSession(taskId, {
       state: "RUNNING",
       agentProfileId: seedData.agentProfileId,
     });
-    await apiClient.updateTaskState(taskId, "IN_PROGRESS");
 
     // Confirm the seeded task is in the exact state that an in-flight agent
-    // turn would have reached before archiving. This is the state we assert
-    // stays frozen for the rest of the test.
+    // turn would have reached before archiving. The test harness seeds this
+    // state directly so entering the workflow step cannot launch an agent.
     await expect
       .poll(async () => (await apiClient.getTask(taskId)).state, {
         timeout: 30_000,
@@ -52,8 +42,7 @@ test.describe("Archiving a task freezes its runtime state", () => {
       })
       .toBe("IN_PROGRESS");
 
-    // Archive while the agent turn is still in flight (60s delay keeps the
-    // mock agent from finishing on its own during this test).
+    // Archive while the seeded session reports an in-flight agent turn.
     await apiClient.archiveTask(taskId);
 
     // Cancel the now-archived task's turn — the same `agent.cancel` WS

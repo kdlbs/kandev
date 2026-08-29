@@ -75,6 +75,14 @@ type RunCanceller interface {
 	CancelTaskExecution(ctx context.Context, taskID, reason string, force bool) error
 }
 
+// activeTaskSessionCanceller finalizes active task sessions independently of
+// runtime teardown. The sqlite task repository implements this surface; it is
+// intentionally optional so handoff tests and legacy wiring do not need the
+// full session repository.
+type activeTaskSessionCanceller interface {
+	CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) ([]*models.TaskSession, error)
+}
+
 // SetRunCanceller wires the run-canceller used by ArchiveTaskTree /
 // DeleteTaskTree to terminate active descendants before archive.
 func (s *HandoffService) SetRunCanceller(c RunCanceller) {
@@ -221,6 +229,14 @@ type HandoffService struct {
 type TaskEventPublisher interface {
 	PublishTaskUpdated(ctx context.Context, task *models.Task, oldWorkflowIDs ...string)
 	PublishTaskDeleted(ctx context.Context, task *models.Task)
+}
+
+// taskSessionCancellationPublisher is the optional event side effect paired
+// with activeTaskSessionCanceller. Cascade archive/delete paths do not call
+// Service.ArchiveTask, so they must publish the session transition themselves
+// when a DB-only cancellation is needed.
+type taskSessionCancellationPublisher interface {
+	PublishTaskSessionsCancelled(ctx context.Context, taskID string, cancelledSessions []*models.TaskSession, reason string)
 }
 
 // SetSessionReader wires the session/worktree lookup used by the

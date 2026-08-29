@@ -433,6 +433,72 @@ func (f *fakeRunCanceller) CancelTaskExecution(_ context.Context, taskID, _ stri
 	return f.failOn[taskID]
 }
 
+type cancellableCascadeSessionReader struct {
+	*fakeSessionReader
+	cancelCalls  []string
+	cancelReason []string
+}
+
+func (f *cancellableCascadeSessionReader) CancelActiveTaskSessionsByTaskID(
+	_ context.Context,
+	taskID, reason string,
+) ([]*models.TaskSession, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cancelCalls = append(f.cancelCalls, taskID)
+	f.cancelReason = append(f.cancelReason, reason)
+
+	now := time.Now().UTC()
+	var cancelled []*models.TaskSession
+	for _, session := range f.sessions[taskID] {
+		if session == nil {
+			continue
+		}
+		switch session.State {
+		case models.TaskSessionStateCreated,
+			models.TaskSessionStateStarting,
+			models.TaskSessionStateRunning,
+			models.TaskSessionStateWaitingForInput:
+			session.State = models.TaskSessionStateCancelled
+			session.ErrorMessage = reason
+			session.CompletedAt = &now
+			session.UpdatedAt = now
+			cancelled = append(cancelled, session)
+		}
+	}
+	return cancelled, nil
+}
+
+func TestArchiveTaskTree_FinalizesActiveSessionWhenRuntimeCancelFails(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	sessions := &cancellableCascadeSessionReader{fakeSessionReader: newFakeSessionReader()}
+	sessions.sessions["root"] = []*models.TaskSession{
+		{ID: "session-root", TaskID: "root", State: models.TaskSessionStateRunning},
+	}
+
+	tr := newCascadeRepo(tasks)
+	svc := NewHandoffService(tr, nil, nil, nil, newCascadeWSGroupRepo(), nil)
+	svc.SetSessionReader(sessions)
+	svc.SetRunCanceller(&fakeRunCanceller{
+		failOn: map[string]error{"root": errors.New("runtime missing")},
+	})
+
+	if _, err := svc.ArchiveTaskTree(context.Background(), "root", false); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+
+	if got := sessions.sessions["root"][0].State; got != models.TaskSessionStateCancelled {
+		t.Fatalf("session state = %q, want CANCELLED", got)
+	}
+	if len(sessions.cancelCalls) != 1 || sessions.cancelCalls[0] != "root" {
+		t.Fatalf("cancel calls = %v, want [root]", sessions.cancelCalls)
+	}
+	if len(sessions.cancelReason) != 1 || sessions.cancelReason[0] != models.SessionArchiveTreeCancelReason {
+		t.Fatalf("cancel reasons = %v, want [%q]", sessions.cancelReason, models.SessionArchiveTreeCancelReason)
+	}
+}
+
 // fakeDeleteRepo extends fakeCascadeRepo with DeleteTask support so the
 // delete cascade test can verify rows are actually removed.
 type fakeDeleteRepo struct {

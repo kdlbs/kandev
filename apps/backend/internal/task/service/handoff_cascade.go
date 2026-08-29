@@ -613,18 +613,39 @@ func (s *HandoffService) cancelCascadeResourceCleanup(ctx context.Context, opera
 }
 
 // cancelActiveRuns invokes the configured RunCanceller for every task
-// in the cascade set. Failures are logged and skipped — the cascade
-// proceeds even if a single cancellation fails so the user's archive /
-// delete intent is honoured.
+// in the cascade set, then finalizes the task's active session rows in the
+// database. Runtime teardown can fail when the process disappeared during a
+// restart; the DB transition is independent of that failure and makes the
+// archived/deleted task's cleanup snapshot terminal and retry-safe.
 func (s *HandoffService) cancelActiveRuns(ctx context.Context, taskIDs []string, reason string) {
-	if s.runCanceller == nil {
+	for _, id := range taskIDs {
+		if s.runCanceller != nil {
+			if err := s.runCanceller.CancelTaskExecution(ctx, id, reason, false); err != nil {
+				s.logf().Warn("cascade: cancel task execution failed",
+					zap.String("task_id", id), zap.Error(err))
+			}
+		}
+		s.finalizeActiveSessions(ctx, id, reason)
+	}
+}
+
+func (s *HandoffService) finalizeActiveSessions(ctx context.Context, taskID, reason string) {
+	canceller, ok := s.sessions.(activeTaskSessionCanceller)
+	if !ok {
 		return
 	}
-	for _, id := range taskIDs {
-		if err := s.runCanceller.CancelTaskExecution(ctx, id, reason, false); err != nil {
-			s.logf().Warn("cascade: cancel task execution failed",
-				zap.String("task_id", id), zap.Error(err))
-		}
+	finalizeCtx := context.WithoutCancel(ctx)
+	cancelled, err := canceller.CancelActiveTaskSessionsByTaskID(finalizeCtx, taskID, reason)
+	if err != nil {
+		s.logf().Warn("cascade: finalize active task sessions failed",
+			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	if len(cancelled) == 0 {
+		return
+	}
+	if publisher, ok := s.eventPublisher.(taskSessionCancellationPublisher); ok {
+		publisher.PublishTaskSessionsCancelled(finalizeCtx, taskID, cancelled, reason)
 	}
 }
 

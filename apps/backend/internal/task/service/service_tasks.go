@@ -2628,7 +2628,20 @@ func (s *Service) refreshTaskRuntimeStopTargets(
 	if err != nil {
 		return nil, err
 	}
-	return mergeTaskStopTargets(taskStopTargetsFromRunningRows(runningRows), snapshot), nil
+	targets := mergeTaskStopTargets(taskStopTargetsFromRunningRows(runningRows), snapshot)
+	// Archive captures active sessions before it marks them CANCELLED. Refresh
+	// the terminal disposition after that transition so a missing runtime is
+	// treated as an expected teardown result instead of a retryable stop failure.
+	for i := range targets {
+		if targets[i].terminal || targets[i].sessionID == "" || s.sessions == nil {
+			continue
+		}
+		session, sessionErr := s.sessions.GetTaskSession(ctx, targets[i].sessionID)
+		if sessionErr == nil && session != nil && isCleanableSessionState(session.State) {
+			targets[i].terminal = true
+		}
+	}
+	return targets, nil
 }
 
 func taskStopTargetsFromRunningRows(runningRows []*models.ExecutorRunning) []taskStopTarget {

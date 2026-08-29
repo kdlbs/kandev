@@ -182,6 +182,43 @@ func TestRefreshTaskRuntimeStopTargets_MergesLateExecutionBeforeSnapshot(t *test
 	}
 }
 
+func TestRefreshTaskRuntimeStopTargetsUsesCurrentTerminalSessionState(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	svc.executionStopper = &stubStopper{}
+	svc.executors = &stubExecutors{}
+	ctx := context.Background()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-refresh", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-refresh", WorkspaceID: "ws-refresh", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-refresh", WorkspaceID: "ws-refresh", WorkflowID: "wf-refresh", Title: "Task", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-refresh", TaskID: "task-refresh", State: models.TaskSessionStateCancelled,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	targets, err := svc.refreshTaskRuntimeStopTargets(ctx, "task-refresh", []taskStopTarget{
+		{sessionID: "session-refresh"},
+	})
+	if err != nil {
+		t.Fatalf("refreshTaskRuntimeStopTargets: %v", err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("targets = %#v, want one target", targets)
+	}
+	if !targets[0].terminal {
+		t.Fatal("refreshed target must be terminal when the current session is CANCELLED")
+	}
+}
+
 func TestRefreshTaskRuntimeStopTargets_ExactRuntimeSupersedesEmptySessionFallback(t *testing.T) {
 	svc, _, _ := createTestService(t)
 	stopper := &stubStopper{
