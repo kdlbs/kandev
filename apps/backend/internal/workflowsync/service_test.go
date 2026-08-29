@@ -367,6 +367,16 @@ func TestPermanentFailureSuspendsPollingUntilManualRecovery(t *testing.T) {
 	now := time.Date(2026, 8, 29, 7, 0, 0, 0, time.UTC)
 	svc.now = func() time.Time { return now }
 	configureWorkspace(t, svc, "ws-1")
+	suspendedLabel := workflowSyncMetricLabel(
+		"transition", "suspended", "provider", ProviderGitHub,
+		"failure_class", string(github.FailureMissingResource), "retry_source", "",
+	)
+	recoveredLabel := workflowSyncMetricLabel(
+		"transition", "recovered", "provider", ProviderGitHub,
+		"failure_class", string(github.FailureMissingResource), "retry_source", "",
+	)
+	suspendedBefore := workflowSyncCounterValue(t, suspendedLabel)
+	recoveredBefore := workflowSyncCounterValue(t, recoveredLabel)
 
 	svc.SyncDueConfigs(context.Background())
 	require.Equal(t, 1, provider.callCount())
@@ -375,10 +385,13 @@ func TestPermanentFailureSuspendsPollingUntilManualRecovery(t *testing.T) {
 	assert.True(t, cfg.PollSuspended)
 	assert.Equal(t, string(github.FailureMissingResource), cfg.LastErrorClass)
 	assert.NotEmpty(t, cfg.PollSuspensionReason)
+	assert.Equal(t, int64(1), workflowSyncCounterValue(t, suspendedLabel)-suspendedBefore)
 
 	now = now.Add(24 * time.Hour)
 	svc.SyncDueConfigs(context.Background())
 	require.Equal(t, 1, provider.callCount(), "suspended tick repeated the provider request")
+	assert.Equal(t, int64(1), workflowSyncCounterValue(t, suspendedLabel)-suspendedBefore,
+		"skipped suspended ticks must not repeat transition telemetry")
 
 	provider.setError(nil)
 	_, err = svc.SyncWorkspace(context.Background(), "ws-1")
@@ -390,6 +403,7 @@ func TestPermanentFailureSuspendsPollingUntilManualRecovery(t *testing.T) {
 	assert.Zero(t, cfg.ConsecutiveFailures)
 	assert.Nil(t, cfg.NextAttemptAt)
 	assert.Empty(t, cfg.LastErrorClass)
+	assert.Equal(t, int64(1), workflowSyncCounterValue(t, recoveredLabel)-recoveredBefore)
 }
 
 func TestDeleteConfigForWorkspace_ReleasesSyncedWorkflows(t *testing.T) {

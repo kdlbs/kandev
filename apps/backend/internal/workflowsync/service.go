@@ -232,6 +232,8 @@ func (s *Service) syncWorkspace(
 	if cfg == nil {
 		return nil, ErrNotConfigured
 	}
+	wasRecovering := cfg.ConsecutiveFailures > 0 || cfg.PollSuspended
+	previousFailureClass := cfg.LastErrorClass
 	if mode == syncManual {
 		if err := s.store.ResetRecoveryState(ctx, workspaceID, s.now().UTC()); err != nil {
 			return nil, err
@@ -261,6 +263,13 @@ func (s *Service) syncWorkspace(
 	if err := s.store.RecordSyncStatus(ctx, workspaceID, true, "", warnings, contentHash(files), s.now().UTC()); err != nil {
 		return nil, err
 	}
+	if wasRecovering {
+		incWorkflowSyncTransition("recovered", cfg.Provider, previousFailureClass, "")
+		s.logger.Info("workflow sync polling recovered",
+			zap.String("workspace_id", workspaceID),
+			zap.String("provider", cfg.Provider),
+			zap.String("previous_failure_class", previousFailureClass))
+	}
 	return &SyncResult{
 		Created:   applied.Created,
 		Updated:   applied.Updated,
@@ -288,6 +297,13 @@ func (s *Service) recordFailure(ctx context.Context, cfg *Config, syncErr error)
 	}
 	if directive.nextAttemptAt != nil {
 		fields = append(fields, zap.Time("next_attempt_at", *directive.nextAttemptAt))
+	}
+	if directive.suspended && !cfg.PollSuspended {
+		incWorkflowSyncTransition(
+			"suspended", cfg.Provider, directive.class, string(directive.retrySource),
+		)
+		s.logger.Warn("workflow sync polling suspended", fields...)
+		return
 	}
 	s.logger.Warn("workflow sync attempt failed", fields...)
 }

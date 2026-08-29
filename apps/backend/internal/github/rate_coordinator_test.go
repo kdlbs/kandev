@@ -9,6 +9,8 @@ import (
 
 func TestRateCoordinatorAdmissionSerializesBackgroundPerPrincipalResource(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
+		label := outcomeMetricLabel("resource", string(ResourceCore), "reason", rateLimitBlockBackgroundBusy)
+		before := readOutcomeCounter(t, githubBackgroundDeferralsTotal, label)
 		coordinator := NewRateCoordinator(nil, nil)
 		_, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
 			Kind: AuthPrincipalHuman, Login: "shared-user",
@@ -33,7 +35,6 @@ func TestRateCoordinatorAdmissionSerializesBackgroundPerPrincipalResource(t *tes
 			t.Fatal("second background request entered an occupied principal/resource slot")
 		default:
 		}
-
 		firstRelease()
 		synctest.Wait()
 		select {
@@ -47,6 +48,9 @@ func TestRateCoordinatorAdmissionSerializesBackgroundPerPrincipalResource(t *tes
 		case <-secondAdmitted:
 		default:
 			t.Fatal("second background request remained blocked after the pacing interval")
+		}
+		if delta := readOutcomeCounter(t, githubBackgroundDeferralsTotal, label) - before; delta != 1 {
+			t.Fatalf("background deferral counter delta = %d, want 1", delta)
 		}
 	})
 }

@@ -88,6 +88,7 @@ func (c *GHClient) inspectRateStderr(args []string, stderr string) *GitHubAPIErr
 	}
 	resource := resourceForGHArgs(args)
 	if snap, ok := c.rateTracker.Snapshot(resource); ok && snap.Exhausted() {
+		incGitHubResponseClassification(FailurePrimaryRateLimit, resource, RetrySourcePrimaryReset)
 		return &GitHubAPIError{
 			StatusCode: http.StatusForbidden, Endpoint: firstArg(args), Body: stderr,
 			FailureKind: FailurePrimaryRateLimit, Resource: resource,
@@ -100,6 +101,9 @@ func (c *GHClient) inspectRateStderr(args []string, stderr string) *GitHubAPIErr
 		retryAt,
 		RetrySourceConservativeFallback,
 		stderr,
+	)
+	incGitHubResponseClassification(
+		FailureSecondaryRateLimit, resource, RetrySourceConservativeFallback,
 	)
 	return &GitHubAPIError{
 		StatusCode: http.StatusForbidden, Endpoint: firstArg(args), Body: stderr,

@@ -171,6 +171,7 @@ history and remains immutable.
 ### Observability
 
 - In dev mode (`KANDEV_MOCK_AGENT=true` or `debug.pprofEnabled`), `/debug/vars` exposes the stdlib expvar handler. Office provider-routing metrics live under `routing_*` (route attempts, fallbacks, parked runs, provider degraded/recovered counters). The metrics are also still emitted as structured `routing.metric.*` zap logs for human debugging.
+- GitHub rate coordination publishes `github_provider_response_classifications_total`, `github_rate_limit_background_deferrals_total`, and `github_rate_limit_secondary_recoveries_total`. Workflow Sync publishes suspension/recovery events under `workflow_sync_recovery_transitions_total`; transition logs carry the workspace and provider while skipped backoff/suspension ticks stay silent.
 - ADR 0015's step-completion-signal telemetry lives under `workflow_*`: `workflow_step_completion_signal_received_total` (`internal/workflow/signalmetrics/`), labelled by `source` and `agent_type`, counts accepted `step_complete_kandev` signals. Its separate `workflow_step_completion_signal_fallback_used_total` counter is labelled by `agent_type` and counts manual fallback uses. The fallback button does not have a production increment site yet, so the counter remains zero until that UI ships.
 
 ### GitHub Operations

@@ -253,12 +253,19 @@ func (r *RateTracker) ObserveSecondary(resource Resource, retryAt time.Time, sou
 	}
 	now := time.Now().UTC()
 	r.mu.Lock()
+	previous := r.secondary[resource]
 	r.secondary[resource] = SecondaryRateLimitState{
 		Resource: resource, Active: retryAt.After(now), RetryAt: retryAt,
 		ObservedAt: now, RetrySource: source, Reason: reason,
 	}
 	r.signalChangedLocked()
 	r.mu.Unlock()
+	if !previous.RetryAt.After(now) && r.log != nil {
+		r.log.Info("github secondary rate limit observed",
+			zap.String("resource", string(resource)),
+			zap.Time("retry_at", retryAt),
+			zap.String("retry_source", string(source)))
+	}
 }
 
 // Secondary returns the current observed secondary state for a resource.
@@ -273,10 +280,24 @@ func (r *RateTracker) Secondary(resource Resource) SecondaryRateLimitState {
 // ObserveSuccess clears a secondary estimate early after GitHub accepts a
 // real request. A primary snapshot remains unchanged.
 func (r *RateTracker) ObserveSuccess(resource Resource) {
+	now := time.Now().UTC()
 	r.mu.Lock()
+	previous, observed := r.secondary[resource]
+	if !observed {
+		r.mu.Unlock()
+		return
+	}
 	delete(r.secondary, resource)
 	r.signalChangedLocked()
 	r.mu.Unlock()
+	early := previous.RetryAt.After(now)
+	incGitHubSecondaryRecovery(resource, previous.RetrySource, early)
+	if r.log != nil {
+		r.log.Info("github secondary rate limit cleared by accepted response",
+			zap.String("resource", string(resource)),
+			zap.String("retry_source", string(previous.RetrySource)),
+			zap.Bool("early", early))
+	}
 }
 
 func (r *RateTracker) publish(all map[Resource]RateSnapshot, trigger Resource, transition string) {

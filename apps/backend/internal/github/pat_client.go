@@ -83,6 +83,7 @@ func (c *PATClient) recordRateHeaders(resp *http.Response, endpoint string) {
 
 func (c *PATClient) apiError(resp *http.Response, endpoint string, body []byte) *GitHubAPIError {
 	failure := classifyGitHubResponse(resp, endpoint, body, time.Now().UTC())
+	incGitHubResponseClassification(failure.Kind, failure.Resource, failure.RetrySource)
 	if c.rateTracker != nil && failure.Kind == FailureSecondaryRateLimit {
 		c.rateTracker.ObserveSecondary(failure.Resource, failure.RetryAt, failure.RetrySource, string(body))
 	}

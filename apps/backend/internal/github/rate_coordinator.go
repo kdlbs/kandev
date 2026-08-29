@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"go.uber.org/zap"
 )
 
 // RateCoordinator owns rate observations by GitHub's upstream quota identity,
@@ -22,6 +23,7 @@ type RateCoordinator struct {
 
 type ratePrincipalState struct {
 	tracker   *RateTracker
+	logger    *logger.Logger
 	mu        sync.Mutex
 	resources map[Resource]*rateAdmissionState
 }
@@ -128,6 +130,7 @@ func (c *RateCoordinator) coordinate(
 	}
 	state := &ratePrincipalState{
 		tracker:   preferred,
+		logger:    c.logger,
 		resources: make(map[Resource]*rateAdmissionState),
 	}
 	c.principals[key] = state
@@ -161,7 +164,9 @@ func (a *RateAdmission) acquireInteractive(ctx context.Context, resource Resourc
 
 func (a *RateAdmission) acquireBackground(ctx context.Context, resource Resource) (func(), error) {
 	state := a.resourceState(resource)
+	deferralRecorded := false
 	for {
+		decision := a.snapshot(resource, time.Now())
 		wait := a.principal.tracker.BackgroundWaitDuration(resource)
 		a.principal.mu.Lock()
 		if paceWait := time.Until(state.nextBackgroundAt); paceWait > wait {
@@ -172,6 +177,28 @@ func (a *RateAdmission) acquireBackground(ctx context.Context, resource Resource
 			state.backgroundBusy = true
 			a.principal.mu.Unlock()
 			return func() { a.releaseBackground(resource, state) }, nil
+		}
+		if !deferralRecorded {
+			reason := decision.backgroundReason
+			switch {
+			case reason != "":
+			case state.waitingInteractive > 0:
+				reason = rateLimitBlockInteractiveWaiting
+			case state.backgroundBusy:
+				reason = rateLimitBlockBackgroundBusy
+			case state.nextBackgroundAt.After(time.Now()):
+				reason = rateLimitBlockBackgroundPacing
+			default:
+				reason = "provider_retry"
+			}
+			incGitHubBackgroundDeferral(resource, reason)
+			if a.principal.logger != nil {
+				a.principal.logger.Debug("github background request deferred",
+					zap.String("resource", string(resource)),
+					zap.String("reason", reason),
+					zap.Duration("wait", wait))
+			}
+			deferralRecorded = true
 		}
 		stateChanged := state.changed
 		a.principal.mu.Unlock()

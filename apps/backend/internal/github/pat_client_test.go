@@ -529,6 +529,12 @@ func TestPATClient_RateLimit403WithFullPrimaryPreservesPrimarySnapshot(t *testin
 	c := newPATClientPointingAt(t, srv.URL)
 	tracker := NewRateTracker(nil, nil)
 	c.WithRateTracker(tracker)
+	classificationLabel := outcomeMetricLabel(
+		"kind", string(FailureSecondaryRateLimit),
+		"resource", string(ResourceCore),
+		"retry_source", string(RetrySourceConservativeFallback),
+	)
+	classificationBefore := readOutcomeCounter(t, githubResponseClassificationsTotal, classificationLabel)
 
 	var out struct{}
 	if err := c.get(context.Background(), "/user", &out); err == nil {
@@ -543,6 +549,9 @@ func TestPATClient_RateLimit403WithFullPrimaryPreservesPrimarySnapshot(t *testin
 	}
 	if wait := tracker.WaitDuration(ResourceCore); wait <= 0 {
 		t.Fatalf("secondary refusal did not establish a retry window: %s", wait)
+	}
+	if delta := readOutcomeCounter(t, githubResponseClassificationsTotal, classificationLabel) - classificationBefore; delta != 1 {
+		t.Fatalf("secondary classification counter delta = %d, want 1", delta)
 	}
 }
 
@@ -654,6 +663,12 @@ func TestPATClient_SuccessClearsSecondaryBeforeEstimatedRetry(t *testing.T) {
 	c := newPATClientPointingAt(t, srv.URL)
 	tracker := NewRateTracker(nil, nil)
 	c.WithRateTracker(tracker)
+	recoveryLabel := outcomeMetricLabel(
+		"resource", string(ResourceCore),
+		"retry_source", string(RetrySourceConservativeFallback),
+		"early", "true",
+	)
+	recoveryBefore := readOutcomeCounter(t, githubSecondaryRecoveriesTotal, recoveryLabel)
 	var out struct {
 		Login string `json:"login"`
 	}
@@ -668,6 +683,9 @@ func TestPATClient_SuccessClearsSecondaryBeforeEstimatedRetry(t *testing.T) {
 	}
 	if secondary := tracker.Secondary(ResourceCore); secondary.Active {
 		t.Fatalf("successful response did not clear secondary state: %+v", secondary)
+	}
+	if delta := readOutcomeCounter(t, githubSecondaryRecoveriesTotal, recoveryLabel) - recoveryBefore; delta != 1 {
+		t.Fatalf("secondary recovery counter delta = %d, want 1", delta)
 	}
 }
 

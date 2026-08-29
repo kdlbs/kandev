@@ -310,7 +310,12 @@
       "id": "provider-integrations",
       "audiences": ["user", "operator"],
       "stability": "stable",
-      "docs": ["integrations", "configuration"],
+      "docs": [
+        "integrations",
+        "configuration",
+        "automation-and-mcp",
+        "workflow-sync"
+      ],
       "sources": [
         "apps/web/components/app-sidebar/sections/integrations-section.tsx",
         "apps/backend/internal/integrations/workspacescope/workspacescope.go",
@@ -318,6 +323,8 @@
         "apps/web/app/azure-devops/azure-devops-page-client.tsx",
         "apps/backend/internal/github/app_registration_lifecycle_service.go",
         "apps/backend/internal/github/app_registration_import.go",
+        "apps/backend/internal/github/service_rate_limit.go",
+        "apps/backend/internal/mcp/handlers/github_rate_limit.go",
         "apps/web/lib/api/domains/github-auth-api.ts",
         "apps/backend/internal/mcp/server/server.go"
       ],
@@ -328,6 +335,8 @@
         "apps/web/e2e/tests/integrations/azure-devops.spec.ts",
         "apps/backend/internal/github/controller_app_registration_test.go",
         "apps/backend/internal/github/app_registration_import_test.go",
+        "apps/backend/internal/github/service_rate_limit_test.go",
+        "apps/backend/internal/mcp/handlers/github_rate_limit_test.go",
         "apps/web/e2e/tests/settings/github-app-registration.spec.ts",
         "apps/backend/internal/mcp/server/handlers_test.go"
       ],
@@ -341,6 +350,7 @@
         "/settings/integrations/sentry"
       ],
       "mcpTools": [
+        "get_github_rate_limit_kandev",
         "get_task_mr_automation_kandev",
         "get_task_pr_automation_kandev",
         "update_task_mr_automation_kandev",

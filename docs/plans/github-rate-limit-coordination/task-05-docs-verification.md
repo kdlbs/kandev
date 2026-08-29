@@ -1,7 +1,7 @@
 ---
 id: 05-docs-verification
 title: Documentation and verification
-status: pending
+status: in_progress
 wave: 5
 depends_on: [04-agent-rate-snapshot]
 plan: plan.md
@@ -32,4 +32,25 @@ system_design: ../../specs/integrations/system-design/github-rate-limit-coordina
 
 ## Results
 
-Pending.
+Implemented the public Workflow Sync recovery guidance, the zero-call agent
+snapshot reference, structured classification/deferral/suspension/recovery
+telemetry, and transition-only logging. Focused GitHub and Workflow Sync tests,
+including their race suites, pass.
+
+Passing repository gates:
+
+- `make -C apps/backend lint`
+- `python3 scripts/lint-spec-files.py --all`
+- `node --test scripts/validate-public-docs.test.mjs` (61 tests)
+- `node scripts/validate-public-docs.mjs` (41 pages)
+- `python3 .github/scripts/lint-harness-files.py AGENTS.md`
+- `git diff --check`
+
+`make -C apps/backend test` remains blocked by deterministic runtime failures
+outside this plan's packages. Focused reruns reproduce process-parent and
+process-group failures in `internal/agent/runtime/agentctl/launcher` and
+`internal/agentctl/server/process`; the current Kandev process exports
+`KANDEV_HEALTH_TIMEOUT_MS=180000`, which overrides the fixture expected by
+`internal/common/config`; and the guarded filesystem rejects the parent-chain
+inspection exercised by local-directory tests in `internal/task/service`.
+The task does not bypass that guard or modify these unrelated packages.
