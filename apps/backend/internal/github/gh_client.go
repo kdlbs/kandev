@@ -33,6 +33,7 @@ const ghAccessibleReposPathFmt = "/user/repos?affiliation=%s&sort=pushed&per_pag
 // GHClient implements Client using the gh CLI.
 type GHClient struct {
 	rateTracker   *RateTracker
+	rateAdmission *RateAdmission
 	mergePollWait func(context.Context, time.Duration) error
 }
 
@@ -46,6 +47,11 @@ func NewGHClient() *GHClient {
 // chaining; safe to call before any commands run.
 func (c *GHClient) WithRateTracker(t *RateTracker) *GHClient {
 	c.rateTracker = t
+	return c
+}
+
+func (c *GHClient) withRateAdmission(admission *RateAdmission) *GHClient {
+	c.rateAdmission = admission
 	return c
 }
 
@@ -1267,6 +1273,13 @@ func (c *GHClient) runWithStdin(ctx context.Context, stdin []byte, args ...strin
 // inspection, and the same error wrap. The only delta is whether stdin
 // is wired (`stdin != nil`).
 func (c *GHClient) runGH(ctx context.Context, stdin []byte, args ...string) (string, error) {
+	if c.rateAdmission != nil {
+		release, err := c.rateAdmission.acquire(ctx, resourceForGHArgs(args))
+		if err != nil {
+			return "", fmt.Errorf("gh %s admission: %w", firstArg(args), err)
+		}
+		defer release()
+	}
 	var stdout, stderr bytes.Buffer
 	execTimeout := resolveGHExecTimeout(ctx)
 	runErr, execCtxErr := subproc.RunGHAfterAcquire(ctx, execTimeout, func(execCtx context.Context) *exec.Cmd {

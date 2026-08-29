@@ -1,7 +1,7 @@
 ---
 id: 03-workflow-sync-backoff
 title: Workflow Sync retry persistence
-status: pending
+status: in_progress
 wave: 3
 depends_on: [02-rate-coordinator]
 plan: plan.md

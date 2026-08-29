@@ -82,6 +82,7 @@ type RateTracker struct {
 	exhausted   map[Resource]bool
 	lastEmitted map[Resource]time.Time
 	secondary   map[Resource]SecondaryRateLimitState
+	changed     chan struct{}
 	refreshMu   sync.Mutex
 	refreshDone chan struct{}
 	bus         bus.EventBus
@@ -95,6 +96,7 @@ func NewRateTracker(eventBus bus.EventBus, log *logger.Logger) *RateTracker {
 		exhausted:   make(map[Resource]bool),
 		lastEmitted: make(map[Resource]time.Time),
 		secondary:   make(map[Resource]SecondaryRateLimitState),
+		changed:     make(chan struct{}),
 		bus:         eventBus,
 		log:         log,
 	}
@@ -116,6 +118,7 @@ func (r *RateTracker) Record(snap RateSnapshot) {
 	now := snap.Exhausted()
 	r.snapshots[snap.Resource] = snap
 	r.exhausted[snap.Resource] = now
+	r.signalChangedLocked()
 
 	transition := ""
 	switch {
@@ -142,6 +145,17 @@ func (r *RateTracker) Record(snap RateSnapshot) {
 		return
 	}
 	r.publish(allSnap, snap.Resource, transition)
+}
+
+func (r *RateTracker) Changed() <-chan struct{} {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.changed
+}
+
+func (r *RateTracker) signalChangedLocked() {
+	close(r.changed)
+	r.changed = make(chan struct{})
 }
 
 // Snapshot returns a copy of the current snapshot for resource.
@@ -217,6 +231,20 @@ func (r *RateTracker) WaitDuration(resource Resource) time.Duration {
 	return d
 }
 
+// BackgroundWaitDuration adds the interactive quota reserve to provider
+// retry windows. Exactly ten percent of a known primary budget is retained.
+func (r *RateTracker) BackgroundWaitDuration(resource Resource) time.Duration {
+	r.mu.RLock()
+	snap, known := r.snapshots[resource]
+	r.mu.RUnlock()
+	if known && snap.Limit > 0 && snap.Remaining*10 <= snap.Limit {
+		if wait := time.Until(snap.ResetAt); wait > 0 {
+			return wait
+		}
+	}
+	return r.WaitDuration(resource)
+}
+
 // ObserveSecondary records a provider refusal independently from primary
 // resource snapshots.
 func (r *RateTracker) ObserveSecondary(resource Resource, retryAt time.Time, source RetrySource, reason string) {
@@ -229,6 +257,7 @@ func (r *RateTracker) ObserveSecondary(resource Resource, retryAt time.Time, sou
 		Resource: resource, Active: retryAt.After(now), RetryAt: retryAt,
 		ObservedAt: now, RetrySource: source, Reason: reason,
 	}
+	r.signalChangedLocked()
 	r.mu.Unlock()
 }
 
@@ -246,6 +275,7 @@ func (r *RateTracker) Secondary(resource Resource) SecondaryRateLimitState {
 func (r *RateTracker) ObserveSuccess(resource Resource) {
 	r.mu.Lock()
 	delete(r.secondary, resource)
+	r.signalChangedLocked()
 	r.mu.Unlock()
 }
 

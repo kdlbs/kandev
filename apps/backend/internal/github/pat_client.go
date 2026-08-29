@@ -50,6 +50,18 @@ func (c *PATClient) WithRateTracker(t *RateTracker) *PATClient {
 	return c
 }
 
+func (c *PATClient) withRateAdmission(admission *RateAdmission) *PATClient {
+	c.rateAdmission = admission
+	return c
+}
+
+func (c *PATClient) admit(ctx context.Context, endpoint string) (func(), error) {
+	if c.rateAdmission == nil {
+		return func() {}, nil
+	}
+	return c.rateAdmission.acquire(ctx, resourceForEndpoint(endpoint))
+}
+
 // recordRateHeaders feeds rate-limit data from a response into the tracker.
 // endpoint is used to pick the default resource bucket when the response
 // omits the X-RateLimit-Resource header.
@@ -825,6 +837,11 @@ type gistFileDTO struct {
 // switch to wrapping in `GitHubAPIError`) if the caller needs per-status
 // mapping like the merge endpoint does.
 func (c *PATClient) post(ctx context.Context, endpoint string, body []byte) error {
+	release, err := c.admit(ctx, endpoint)
+	if err != nil {
+		return err
+	}
+	defer release()
 	u := githubAPIBase + endpoint
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
 	if err != nil {
@@ -861,6 +878,11 @@ func (c *PATClient) requestJSON(
 	body []byte,
 	result interface{},
 ) error {
+	release, err := c.admit(ctx, endpoint)
+	if err != nil {
+		return err
+	}
+	defer release()
 	u := githubAPIBase + endpoint
 	req, err := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(body))
 	if err != nil {
@@ -890,6 +912,11 @@ func (c *PATClient) requestJSON(
 // delete sends a DELETE request. 2xx and 404 both return nil-or-typed-error per caller intent.
 // Here we return a typed error on any non-2xx so callers can inspect for 404.
 func (c *PATClient) delete(ctx context.Context, endpoint string) error {
+	release, err := c.admit(ctx, endpoint)
+	if err != nil {
+		return err
+	}
+	defer release()
 	u := githubAPIBase + endpoint
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
 	if err != nil {
@@ -921,6 +948,11 @@ func (c *PATClient) putJSON(ctx context.Context, endpoint string, body []byte, r
 }
 
 func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}) error {
+	release, err := c.admit(ctx, endpoint)
+	if err != nil {
+		return err
+	}
+	defer release()
 	url := githubAPIBase + endpoint
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -945,6 +977,11 @@ func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}
 
 // getPaginated is like get but also returns the "next" link from the Link header, if any.
 func (c *PATClient) getPaginated(ctx context.Context, endpoint string, result interface{}) (string, error) {
+	release, err := c.admit(ctx, endpoint)
+	if err != nil {
+		return "", err
+	}
+	defer release()
 	u := githubAPIBase + endpoint
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {

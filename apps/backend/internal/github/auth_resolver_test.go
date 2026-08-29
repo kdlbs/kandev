@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -323,6 +325,84 @@ func TestCredentialResolverNamedCLIUsesSelectedLogin(t *testing.T) {
 	}
 	if resolved.Principal.Source != ConnectionSourceGHCLI {
 		t.Fatalf("principal = %+v", resolved.Principal)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-RATE-002.1
+func TestCredentialResolverSameHumanPrincipalSharesRateTrackerAcrossWorkspaces(t *testing.T) {
+	connections := &fakeConnectionReader{workspaces: map[string]*WorkspaceConnection{
+		"first": {
+			WorkspaceID: "first", Source: ConnectionSourceGHCLI, GitHubHost: "github.com",
+			Login: "Shared-User", Status: ConnectionStatusActive, CredentialGeneration: 1,
+		},
+		"second": {
+			WorkspaceID: "second", Source: ConnectionSourceGHCLI, GitHubHost: "GITHUB.COM",
+			Login: "shared-user", Status: ConnectionStatusActive, CredentialGeneration: 9,
+		},
+	}}
+	resolver := NewCredentialResolver(connections, nil)
+	resolver.ghToken = func(context.Context, string, string) (string, error) {
+		return "token", nil
+	}
+
+	first, err := resolver.Resolve(context.Background(), ResolveCredentialRequest{
+		WorkspaceID: "first", Purpose: CredentialPurposeAutomation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := resolver.Resolve(context.Background(), ResolveCredentialRequest{
+		WorkspaceID: "second", Purpose: CredentialPurposeAutomation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if first.RateTracker != second.RateTracker {
+		t.Fatalf("same upstream login received different trackers: %p != %p", first.RateTracker, second.RateTracker)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-RATE-002.2
+func TestCredentialResolverAdmissionBlocksProviderCallDuringRetryWindow(t *testing.T) {
+	connections := &fakeConnectionReader{workspaces: map[string]*WorkspaceConnection{
+		"work": {
+			WorkspaceID: "work", Source: ConnectionSourceGHCLI, GitHubHost: defaultGitHubHost,
+			Login: "shared-user", Status: ConnectionStatusActive, CredentialGeneration: 1,
+		},
+	}}
+	resolver := NewCredentialResolver(connections, nil)
+	resolver.ghToken = func(context.Context, string, string) (string, error) { return "token", nil }
+	resolved, err := resolver.Resolve(context.Background(), ResolveCredentialRequest{
+		WorkspaceID: "work", Purpose: CredentialPurposeAutomation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"login":"shared-user"}`))
+	}))
+	t.Cleanup(server.Close)
+	client := resolved.Client.(*TokenClient)
+	client.httpClient = &http.Client{
+		Transport: &rewriteTransport{base: server.URL},
+		Timeout:   2 * time.Second,
+	}
+	resolved.RateTracker.ObserveSecondary(
+		ResourceCore, time.Now().Add(time.Hour), RetrySourceConservativeFallback, "fixture",
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+
+	_, err = client.GetAuthenticatedUser(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("GetAuthenticatedUser error = %v, want admission deadline", err)
+	}
+	if requests != 0 {
+		t.Fatalf("provider received %d requests during retry window", requests)
 	}
 }
 

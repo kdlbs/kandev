@@ -646,6 +646,11 @@ func summarizeReviewState(nodes []reviewNode) string {
 
 // PATClient.ExecuteGraphQL satisfies GraphQLExecutor by POSTing to /graphql.
 func (c *PATClient) ExecuteGraphQL(ctx context.Context, query string, variables map[string]any, out any) error {
+	release, admissionErr := c.admit(ctx, "/graphql")
+	if admissionErr != nil {
+		return admissionErr
+	}
+	defer release()
 	body, err := json.Marshal(map[string]any{"query": query, "variables": variables})
 	if err != nil {
 		return fmt.Errorf("marshal graphql: %w", err)

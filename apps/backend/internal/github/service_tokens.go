@@ -147,7 +147,7 @@ func (s *Service) retryClientCreation(ctx context.Context) {
 		s.logger.Debug("GitHub client retry failed", zap.Error(err))
 		return
 	}
-	attachRateTracker(client, s.rateTracker, s.logger)
+	s.coordinateLegacyClient(client, "")
 	s.client = client
 	s.authMethod = authMethod
 	s.logger.Info("GitHub client recovered after retry",
@@ -182,6 +182,7 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 		return fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
 	s.logger.Info("validated GitHub token", zap.String("user", user))
+	s.coordinateLegacyClient(testClient, user)
 
 	// Check if a GITHUB_TOKEN secret already exists
 	existingID, exists := s.findGitHubTokenSecret(ctx)

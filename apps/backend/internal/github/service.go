@@ -132,6 +132,7 @@ type Service struct {
 	forkParentCache      *ttlCache
 	protectionCache      *branchProtectionCache
 	rateTracker          *RateTracker
+	rateCoordinator      *RateCoordinator
 	promptResolver       PromptResolver
 	tokenClientFactory   func(string) Client
 	ghAccountLister      func(context.Context) ([]GHAccount, error)
@@ -186,6 +187,8 @@ func (s *Service) authorizeWorkspaceAccess(ctx context.Context, workspaceID stri
 // NewService creates a new GitHub service.
 func NewService(client Client, authMethod string, secrets SecretProvider, store *Store, eventBus bus.EventBus, log *logger.Logger) *Service {
 	stopCtx, stopCancel := context.WithCancel(context.Background())
+	rateTracker := NewRateTracker(eventBus, log)
+	rateCoordinator := NewRateCoordinator(eventBus, log)
 	service := &Service{
 		client:                  client,
 		authMethod:              authMethod,
@@ -201,7 +204,8 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		repoErrorCache:          newRepoErrorCache(),
 		forkParentCache:         newForkParentCache(),
 		protectionCache:         newBranchProtectionCache(),
-		rateTracker:             NewRateTracker(eventBus, log),
+		rateTracker:             rateTracker,
+		rateCoordinator:         rateCoordinator,
 		tokenClientFactory:      func(token string) Client { return NewPATClient(token) },
 		ghAccountLister:         ListGHAccounts,
 		cleanupFailureCounts:    make(map[string]int),
@@ -212,6 +216,7 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 	if store != nil {
 		service.resolver = NewCredentialResolver(store, secrets)
 		service.resolver.SetRateTracker(service.rateTracker)
+		service.resolver.SetRateCoordinator(service.rateCoordinator)
 		service.resolver.SetLegacyFactory(func(ctx context.Context) (Client, string, error) {
 			return NewClient(ctx, secrets, log)
 		})
@@ -219,6 +224,7 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 			return newLegacyGitTransportCredential(ctx, secrets, log)
 		})
 	}
+	service.coordinateLegacyClient(client, "")
 	return service
 }
 
@@ -270,8 +276,27 @@ func (s *Service) getPromptResolver() PromptResolver {
 // invisible to the rate-limit UI, health checks, and poller throttling.
 func (s *Service) newPATClient(token string) *PATClient {
 	c := NewPATClient(token)
-	attachRateTracker(c, s.rateTracker, s.logger)
+	s.coordinateLegacyClient(c, "")
 	return c
+}
+
+func (s *Service) coordinateLegacyClient(client Client, login string) {
+	if client == nil {
+		return
+	}
+	if s.rateTracker == nil {
+		s.rateTracker = NewRateTracker(nil, s.logger)
+	}
+	if s.rateCoordinator == nil {
+		s.rateCoordinator = NewRateCoordinator(nil, s.logger)
+	}
+	principal := AuthPrincipal{
+		Kind: AuthPrincipalHuman, Source: ConnectionSourceLegacyShared,
+		Login: login, WorkspaceID: "legacy",
+	}
+	tracker, admission := s.rateCoordinator.coordinate(defaultGitHubHost, principal, s.rateTracker)
+	wireRateTracker(client, tracker)
+	wireRateAdmission(client, admission)
 }
 
 // SetTaskDeleter sets the task deletion dependency for cleanup operations.

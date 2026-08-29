@@ -75,6 +75,21 @@ func seedTask(t *testing.T, store *Store, taskID string, archived bool) {
 	}
 }
 
+// @covers AC-INTEGRATIONS-GITHUB-RATE-002.2
+func TestPollerRateTrackerStopsBackgroundAtPrimaryReserve(t *testing.T) {
+	poller, service, _, _ := setupPollerTest(t)
+	service.rateTracker.Record(RateSnapshot{
+		Resource: ResourceGraphQL, Limit: 5000, Remaining: 500,
+		ResetAt: time.Now().Add(time.Hour), UpdatedAt: time.Now(),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if poller.waitForRateLimit(ctx, ResourceGraphQL, "reserve") {
+		t.Fatal("background poller proceeded after reaching the ten-percent reserve")
+	}
+}
+
 func TestCheckSinglePRWatch_MergedPR_SyncsThenResets(t *testing.T) {
 	poller, _, mockClient, store := setupPollerTest(t)
 	ctx := context.Background()

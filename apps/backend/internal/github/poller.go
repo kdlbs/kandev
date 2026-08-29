@@ -46,7 +46,7 @@ func (p *Poller) waitForRateLimit(ctx context.Context, resource Resource, loop s
 	if p.service == nil || p.service.rateTracker == nil {
 		return true
 	}
-	d := p.service.rateTracker.WaitDuration(resource)
+	d := p.service.rateTracker.BackgroundWaitDuration(resource)
 	if d <= 0 {
 		return true
 	}
@@ -117,6 +117,7 @@ func (p *Poller) Start(ctx context.Context) {
 	}
 	p.started = true
 	ctx, p.cancel = context.WithCancel(ctx)
+	ctx = WithGitHubWorkClass(ctx, WorkClassBackground)
 
 	p.wg.Add(3) //nolint:mnd
 	go p.prMonitorLoop(ctx)

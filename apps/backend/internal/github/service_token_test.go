@@ -281,4 +281,7 @@ func TestService_NewPATClient_AttachesRateTracker(t *testing.T) {
 	if c.rateTracker != svc.rateTracker {
 		t.Fatalf("expected rate tracker to be wired onto the new PAT client")
 	}
+	if c.rateAdmission == nil {
+		t.Fatal("expected principal admission to be wired onto the new PAT client")
+	}
 }

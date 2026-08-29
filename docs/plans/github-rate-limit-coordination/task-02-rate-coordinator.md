@@ -1,7 +1,7 @@
 ---
 id: 02-rate-coordinator
 title: Principal-wide request admission
-status: in_progress
+status: done
 wave: 2
 depends_on: [01-rate-classification]
 plan: plan.md
@@ -26,4 +26,11 @@ system_design: ../../specs/integrations/system-design/github-rate-limit-coordina
 
 ## Results
 
-Pending.
+- Shared observations and admission by normalized human login or App
+  registration/installation, independently of workspace and credential
+  generation.
+- Direct HTTP, GraphQL, and `gh` execution now enforce retry windows before
+  transport work; automated GitHub pollers use the background work class.
+- Background calls serialize and pace per resource, retain a ten-percent
+  primary reserve, and remain behind active interactive work.
+- Focused and race validation passed with task-local Go caches.
