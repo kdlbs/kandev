@@ -115,6 +115,7 @@ signals, and task-scoped scheduling contracts.
 
 - [Attach Workspace Sources](system-design/attach-workspace-sources.md)
 - [Quick Chat Agent Titles](system-design/quick-chat-agent-titles.md)
+- [Quick Chat Session Resumption](system-design/quick-chat-session-resumption.md)
 - [Active clarification lifecycle](system-design/clarification-active-lifecycle.md)
 - [External task ID idempotency operations](system-design/external-id-idempotency-operations.md)
 - [External task ID idempotency](system-design/external-id-idempotency.md)
