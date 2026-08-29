@@ -21,6 +21,34 @@ const DEFAULT_SIDEBAR_VIEW = {
 const AGENT_PROFILE_READY_TIMEOUT_MS = 30_000;
 const AGENT_PROFILE_READY_POLL_MS = 250;
 
+async function maybeRecoverSeedBackend(
+  backend: BackendContext,
+  consecutiveFailures: number,
+  recoveryAttempted: boolean,
+  observation: string,
+): Promise<{
+  consecutiveFailures: number;
+  recoveryAttempted: boolean;
+  observation: string;
+}> {
+  if (consecutiveFailures < 3 || recoveryAttempted) {
+    return { consecutiveFailures, recoveryAttempted, observation };
+  }
+
+  try {
+    await backend.restart();
+    return { consecutiveFailures: 0, recoveryAttempted: true, observation };
+  } catch (error) {
+    return {
+      consecutiveFailures,
+      recoveryAttempted: true,
+      observation: `${observation}; backend recovery failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+}
+
 export type SeedData = {
   workspaceId: string;
   workflowId: string;
@@ -43,11 +71,14 @@ async function waitForSeedAgentProfile(
 ): Promise<string> {
   const deadline = Date.now() + AGENT_PROFILE_READY_TIMEOUT_MS;
   let lastObservation = "no response";
+  let consecutiveFailures = 0;
+  let recoveryAttempted = false;
 
   while (Date.now() < deadline) {
     try {
       await backend.ensureReady();
       const { agents } = await apiClient.listAgents();
+      consecutiveFailures = 0;
       const profiles = agents.flatMap((agent) => agent.profiles ?? []);
       const profile = profiles.find((candidate) => candidate.id === profileId);
 
@@ -83,6 +114,19 @@ async function waitForSeedAgentProfile(
         `(available profiles: ${profiles.map((candidate) => candidate.id).join(", ") || "none"})`;
     } catch (error) {
       lastObservation = error instanceof Error ? error.message : String(error);
+      consecutiveFailures += 1;
+      // A backend restart can leave an old keep-alive socket in the test
+      // runner. After several consecutive transport failures, restart the
+      // isolated worker backend once so the next poll uses a fresh listener.
+      const recovery = await maybeRecoverSeedBackend(
+        backend,
+        consecutiveFailures,
+        recoveryAttempted,
+        lastObservation,
+      );
+      consecutiveFailures = recovery.consecutiveFailures;
+      recoveryAttempted = recovery.recoveryAttempted;
+      lastObservation = recovery.observation;
     }
 
     await dwell(
@@ -132,12 +176,16 @@ export const test = backendFixture.extend<
       let lastStatus = 0;
       let lastText = "";
       while (Date.now() < probeDeadline) {
-        const probe = await client.rawRequest("GET", "/api/v1/_test/health");
-        lastStatus = probe.status;
-        if (probe.ok) break;
-        if (probe.status !== 404 && probe.status !== 503) {
-          lastText = await probe.text();
-          break;
+        try {
+          const probe = await client.rawRequest("GET", "/api/v1/_test/health");
+          lastStatus = probe.status;
+          if (probe.ok) break;
+          if (probe.status !== 404 && probe.status !== 503) {
+            lastText = await probe.text();
+            break;
+          }
+        } catch (error) {
+          lastText = error instanceof Error ? error.message : String(error);
         }
         await dwell(
           250,
