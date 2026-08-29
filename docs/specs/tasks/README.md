@@ -123,6 +123,7 @@ signals, and task-scoped scheduling contracts.
 - [Task Archive Confirmation](system-design/archive-confirmation.md)
 - [Task plan write lifecycle](system-design/plan-write-lifecycle.md)
 - [Task Runtime Cleanup](system-design/runtime-cleanup.md)
+- [Runtime Task-State Publication Order](system-design/runtime-state-publication-order.md)
 - [Queued Run Scheduling](system-design/run-scheduling.md)
 - [Session Delete Preserves Task Workspaces](system-design/session-delete-resource-cleanup.md)
 - [Task Dependencies and Auto-Start Chains](system-design/task-dependencies.md)

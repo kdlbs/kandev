@@ -5,6 +5,7 @@ import {
   hasPendingPermissionRequest,
 } from "@/lib/utils/pending-clarification";
 import { aggregateTaskPendingInput } from "@/lib/utils/task-pending-input";
+import { pickFreshestStatusSummary } from "@/lib/task-status-summary";
 
 /** Flat per-session pending flags keyed for shallow comparison so the sidebar
  *  only re-renders when a clarification/permission flag actually flips, not on
@@ -97,15 +98,29 @@ function activeTaskIsNewer(
   active: KanbanState["tasks"][number],
   projected: KanbanState["tasks"][number],
 ): boolean {
-  const activeRevision = active.statusSummary?.revision;
-  const projectedRevision = projected.statusSummary?.revision;
-  if (activeRevision !== undefined || projectedRevision !== undefined) {
-    return (activeRevision ?? -1) > (projectedRevision ?? -1);
-  }
-
   const activeTime = active.updatedAt ? Date.parse(active.updatedAt) : 0;
   const projectedTime = projected.updatedAt ? Date.parse(projected.updatedAt) : 0;
   return activeTime >= projectedTime;
+}
+
+function reconcileTaskProjection(
+  active: KanbanState["tasks"][number],
+  projected: AggregatedSidebarTasks["allTasks"][number],
+  activeWorkflowId: string,
+): AggregatedSidebarTasks["allTasks"][number] {
+  const activeTask = {
+    ...active,
+    // Autopilot is immutable after creation. The active slice can be fed by
+    // a partial WS event, so do not let it erase the value from the full
+    // workflow projection.
+    autopilot: active.autopilot ?? projected.autopilot,
+    _workflowId: activeWorkflowId,
+  };
+  const task = activeTaskIsNewer(active, projected) ? activeTask : projected;
+  return {
+    ...task,
+    statusSummary: pickFreshestStatusSummary(active.statusSummary, projected.statusSummary),
+  };
 }
 
 function applyActiveKanbanFallback(
@@ -129,21 +144,14 @@ function applyActiveKanbanFallback(
   for (const t of activeTasks) {
     if (activeStepIds.size > 0 && !activeStepIds.has(t.workflowStepId)) continue;
     const existingIndex = acc.tasks.findIndex((task) => task.id === t.id);
-    const projectedTask = existingIndex >= 0 ? acc.tasks[existingIndex] : undefined;
-    const activeTask = {
-      ...t,
-      // Autopilot is immutable after creation. The active slice can be fed by
-      // a partial WS event, so do not let it erase the value from the full
-      // workflow projection.
-      autopilot: t.autopilot ?? projectedTask?.autopilot,
-      _workflowId: activeWorkflowId,
-    };
     if (existingIndex >= 0) {
-      if (activeTaskIsNewer(t, acc.tasks[existingIndex])) {
-        acc.tasks[existingIndex] = activeTask;
-      }
+      acc.tasks[existingIndex] = reconcileTaskProjection(
+        t,
+        acc.tasks[existingIndex],
+        activeWorkflowId,
+      );
     } else {
-      acc.tasks.push(activeTask);
+      acc.tasks.push({ ...t, _workflowId: activeWorkflowId });
     }
     acc.seen.add(t.id);
   }
