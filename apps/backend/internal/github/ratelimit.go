@@ -59,10 +59,18 @@ func (s RateSnapshot) Exhausted() bool {
 	return s.Remaining <= 0 && s.ResetAt.After(time.Now())
 }
 
+// BackgroundReserve returns the quota retained for interactive requests.
+func (s RateSnapshot) BackgroundReserve() int {
+	if s.Limit <= 0 {
+		return 0
+	}
+	return (s.Limit + 9) / 10
+}
+
 // interactiveReserveReached reports whether only the ten-percent interactive
 // reserve remains in a known primary bucket.
 func interactiveReserveReached(snap RateSnapshot) bool {
-	return snap.Limit > 0 && snap.Remaining*10 <= snap.Limit
+	return snap.Remaining <= snap.BackgroundReserve() && snap.BackgroundReserve() > 0
 }
 
 // RateLimitUpdatedEvent is published when a snapshot changes, either because

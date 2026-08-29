@@ -252,7 +252,7 @@ func (a *RateAdmission) releaseInteractive(state *rateAdmissionState) {
 func (a *RateAdmission) backgroundPace(resource Resource) time.Duration {
 	pace := defaultBackgroundPace
 	if snap, ok := a.principal.tracker.Snapshot(resource); ok {
-		reserve := (snap.Limit + 9) / 10
+		reserve := snap.BackgroundReserve()
 		spendable := snap.Remaining - reserve
 		if window := time.Until(snap.ResetAt); spendable > 0 && window > 0 {
 			if derived := window / time.Duration(spendable); derived > pace {
