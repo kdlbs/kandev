@@ -418,6 +418,8 @@ const createTablesSQL = `
 		auto_fix_exhausted_at DATETIME,
 		last_merge_signature TEXT NOT NULL DEFAULT '',
 		last_merge_attempt_at DATETIME,
+		last_merge_result TEXT NOT NULL DEFAULT '',
+		merge_retry_pending BOOLEAN NOT NULL DEFAULT 0,
 		last_queue_attempt_head_sha TEXT NOT NULL DEFAULT '',
 		last_queue_fix_event_id TEXT NOT NULL DEFAULT '',
 		last_queue_removal_cause TEXT NOT NULL DEFAULT '',
@@ -428,6 +430,7 @@ const createTablesSQL = `
 		last_lifecycle_prompt_at DATETIME,
 		last_lifecycle_session_id TEXT,
 		last_error TEXT,
+		last_error_kind TEXT NOT NULL DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
 		PRIMARY KEY (task_id, repository_id, pr_number)
@@ -1072,6 +1075,9 @@ func (s *Store) addTaskPRAgentAutomationColumns() error {
 			{"closed_prompt_override", "ALTER TABLE github_task_ci_options ADD COLUMN closed_prompt_override TEXT"},
 		},
 		"github_task_ci_pr_state": {
+			{"last_merge_result", "ALTER TABLE github_task_ci_pr_state ADD COLUMN last_merge_result TEXT NOT NULL DEFAULT ''"},
+			{"merge_retry_pending", "ALTER TABLE github_task_ci_pr_state ADD COLUMN merge_retry_pending BOOLEAN NOT NULL DEFAULT 0"},
+			{"last_error_kind", "ALTER TABLE github_task_ci_pr_state ADD COLUMN last_error_kind TEXT NOT NULL DEFAULT ''"},
 			{"last_queue_attempt_head_sha", "ALTER TABLE github_task_ci_pr_state ADD COLUMN last_queue_attempt_head_sha TEXT NOT NULL DEFAULT ''"},
 			{"last_queue_fix_event_id", "ALTER TABLE github_task_ci_pr_state ADD COLUMN last_queue_fix_event_id TEXT NOT NULL DEFAULT ''"},
 			{"last_queue_removal_cause", "ALTER TABLE github_task_ci_pr_state ADD COLUMN last_queue_removal_cause TEXT NOT NULL DEFAULT ''"},
@@ -1096,6 +1102,20 @@ func (s *Store) addTaskPRAgentAutomationColumns() error {
 				return fmt.Errorf("add %s.%s: %w", table, field.name, err)
 			}
 		}
+	}
+	return s.backfillTaskCIAutoMergeErrorKinds()
+}
+
+func (s *Store) backfillTaskCIAutoMergeErrorKinds() error {
+	_, err := s.db.Exec(`
+		UPDATE github_task_ci_pr_state
+		SET last_error_kind = ?
+		WHERE last_error_kind = ''
+		  AND (last_error LIKE 'merge PR:%'
+		    OR last_error LIKE 'PR status is not freshly synced for auto-merge%')`,
+		TaskCIErrorKindAutoMerge)
+	if err != nil {
+		return fmt.Errorf("backfill CI auto-merge error kinds: %w", err)
 	}
 	return nil
 }
@@ -2501,6 +2521,7 @@ func resetTaskCIAutoFixStateForTask(
 		    last_fix_enqueued_at = NULL,
 		    last_fix_session_id = NULL,
 		    last_error = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN NULL ELSE last_error END,
+		    last_error_kind = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN '' ELSE last_error_kind END,
 		    auto_fix_exhausted_at = NULL,
 		    updated_at = ?
 		WHERE task_id = ?`, now, taskID)
@@ -2556,6 +2577,34 @@ func (s *Store) ListTaskPRAutomationOptions(ctx context.Context, taskID string) 
 		out = append(out, &rows[i])
 	}
 	return out, nil
+}
+
+// ListTaskPRAutomationOptionsByTaskIDs returns stored per-PR automation rows
+// grouped by task. It is used by bounded task-summary hydration so a task list
+// does not issue one options query for each visible row.
+func (s *Store) ListTaskPRAutomationOptionsByTaskIDs(
+	ctx context.Context, taskIDs []string,
+) (map[string][]*TaskPRAutomationOptions, error) {
+	if len(taskIDs) == 0 {
+		return make(map[string][]*TaskPRAutomationOptions), nil
+	}
+	query, args, err := sqlx.In(
+		`SELECT * FROM github_task_pr_automation_options WHERE task_id IN (?) ORDER BY task_id ASC, repository_id ASC, pr_number ASC`,
+		taskIDs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	query = s.ro.Rebind(query)
+	var rows []TaskPRAutomationOptions
+	if err := s.ro.SelectContext(ctx, &rows, query, args...); err != nil {
+		return nil, err
+	}
+	result := make(map[string][]*TaskPRAutomationOptions)
+	for i := range rows {
+		result[rows[i].TaskID] = append(result[rows[i].TaskID], &rows[i])
+	}
+	return result, nil
 }
 
 // UpdateTaskPRAutomationOptions applies a partial update to one PR's
@@ -2701,6 +2750,7 @@ func resetTaskCIAutoFixState(
 		    last_fix_enqueued_at = NULL,
 		    last_fix_session_id = NULL,
 		    last_error = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN NULL ELSE last_error END,
+		    last_error_kind = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN '' ELSE last_error_kind END,
 		    auto_fix_exhausted_at = NULL,
 		    updated_at = ?
 		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`, now, taskID, repositoryID, prNumber)
@@ -2824,6 +2874,7 @@ func (s *Store) RecordTaskCIFixAttempt(ctx context.Context, attempt TaskCIFixAtt
 					WHEN excluded.last_queue_removal_cause <> '' THEN excluded.last_queue_removal_cause
 					ELSE github_task_ci_pr_state.last_queue_removal_cause END,
 				last_error = NULL,
+				last_error_kind = '',
 				updated_at = excluded.updated_at`,
 			attempt.TaskID, attempt.RepositoryID, attempt.PRNumber, attempt.Signature,
 			attempt.CheckpointJSON, when, nullableString(attempt.SessionID), roundCount,
@@ -2845,35 +2896,162 @@ func (s *Store) RefreshTaskCIFixCheckpoint(ctx context.Context, taskID, reposito
 				last_fix_enqueued_at = NULL,
 				last_fix_session_id = NULL,
 				last_error = NULL,
+				last_error_kind = '',
 				updated_at = excluded.updated_at`,
 			taskID, repositoryID, prNumber, signature, checkpointJSON, now, now)
 		return err
 	})
 }
 
-// RecordTaskCIMergeAttempt records an auto-merge attempt signature.
+var ErrTaskCIMergeAttemptAlreadyReserved = errors.New("CI auto-merge attempt already reserved")
+var ErrTaskCIMergeAttemptNotFound = errors.New("CI auto-merge attempt not found")
+var ErrTaskCIMergeRetryNotAllowed = errors.New("CI auto-merge retry is not available")
+
+const taskCIMergeRetryInFlightTTL = 2 * time.Minute
+
+// AuthorizeTaskCIMergeRetry persists one single-use authorization to
+// reevaluate a failed or expired automatic merge attempt.
+func (s *Store) AuthorizeTaskCIMergeRetry(
+	ctx context.Context, taskID, repositoryID string, prNumber int, requestedAt time.Time,
+) error {
+	if requestedAt.IsZero() {
+		requestedAt = time.Now().UTC()
+	}
+	expiredBefore := requestedAt.Add(-taskCIMergeRetryInFlightTTL)
+	return s.mutateTaskCIPRState(ctx, taskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
+		result, err := tx.ExecContext(ctx, `
+			UPDATE github_task_ci_pr_state SET
+				merge_retry_pending = 1,
+				updated_at = ?
+			WHERE task_id = ? AND repository_id = ? AND pr_number = ?
+			  AND merge_retry_pending = 0
+			  AND (
+				(last_merge_result = ? AND last_error_kind = ?)
+				OR (last_merge_result = ? AND last_merge_attempt_at <= ?)
+			  )`,
+			now, taskID, repositoryID, prNumber,
+			TaskCIMergeResultFailed, TaskCIErrorKindAutoMerge,
+			TaskCIMergeResultInFlight, expiredBefore)
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return ErrTaskCIMergeRetryNotAllowed
+		}
+		return nil
+	})
+}
+
+// ClearTaskCIMergeRetryAuthorization rolls back a one-shot retry authorization
+// when its follow-up event could not be published. This keeps a failed publish
+// from leaving the PR permanently blocked behind merge_retry_pending.
+func (s *Store) ClearTaskCIMergeRetryAuthorization(
+	ctx context.Context, taskID, repositoryID string, prNumber int,
+) error {
+	return s.mutateTaskCIPRState(ctx, taskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
+		_, err := tx.ExecContext(ctx, `
+			UPDATE github_task_ci_pr_state
+			SET merge_retry_pending = 0, updated_at = ?
+			WHERE task_id = ? AND repository_id = ? AND pr_number = ?
+			  AND merge_retry_pending = 1`,
+			now, taskID, repositoryID, prNumber)
+		return err
+	})
+}
+
+// RecordTaskCIMergeAttempt reserves an auto-merge attempt signature before
+// the provider side effect. An unchanged signature cannot replace an existing
+// reservation or terminal result.
 func (s *Store) RecordTaskCIMergeAttempt(ctx context.Context, attempt TaskCIMergeAttempt) error {
 	when := attempt.AttemptedAt
 	if when.IsZero() {
 		when = time.Now().UTC()
 	}
 	return s.mutateTaskCIPRState(ctx, attempt.TaskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
-		_, err := tx.ExecContext(ctx, `
+		result, err := tx.ExecContext(ctx, `
 			INSERT INTO github_task_ci_pr_state (
 				task_id, repository_id, pr_number, last_merge_signature, last_merge_attempt_at,
-				last_queue_attempt_head_sha, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+				last_merge_result, merge_retry_pending, last_queue_attempt_head_sha, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
 			ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
 				last_merge_signature = excluded.last_merge_signature,
 				last_merge_attempt_at = excluded.last_merge_attempt_at,
+				last_merge_result = excluded.last_merge_result,
+				merge_retry_pending = 0,
 				last_queue_attempt_head_sha = CASE
 					WHEN excluded.last_queue_attempt_head_sha <> '' THEN excluded.last_queue_attempt_head_sha
 					ELSE github_task_ci_pr_state.last_queue_attempt_head_sha END,
-				last_error = NULL,
-				updated_at = excluded.updated_at`,
+				last_error = CASE WHEN github_task_ci_pr_state.last_error_kind = ?
+					THEN NULL ELSE github_task_ci_pr_state.last_error END,
+				last_error_kind = CASE WHEN github_task_ci_pr_state.last_error_kind = ?
+					THEN '' ELSE github_task_ci_pr_state.last_error_kind END,
+				updated_at = excluded.updated_at
+			WHERE github_task_ci_pr_state.last_merge_signature <> excluded.last_merge_signature
+			   OR github_task_ci_pr_state.merge_retry_pending = 1`,
 			attempt.TaskID, attempt.RepositoryID, attempt.PRNumber, attempt.Signature, when,
-			attempt.AttemptedHeadSHA, now, now)
-		return err
+			TaskCIMergeResultInFlight, attempt.AttemptedHeadSHA, now, now,
+			TaskCIErrorKindAutoMerge, TaskCIErrorKindAutoMerge)
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return ErrTaskCIMergeAttemptAlreadyReserved
+		}
+		return nil
+	})
+}
+
+// RecordTaskCIMergeAttemptResult completes a reserved attempt and updates its
+// typed error in the same transaction.
+func (s *Store) RecordTaskCIMergeAttemptResult(
+	ctx context.Context,
+	taskID, repositoryID string,
+	prNumber int,
+	signature, result, message string,
+) error {
+	if result != TaskCIMergeResultFailed && result != TaskCIMergeResultAccepted {
+		return fmt.Errorf("invalid CI auto-merge result %q", result)
+	}
+	return s.mutateTaskCIPRState(ctx, taskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
+		outcome, err := tx.ExecContext(ctx, `
+			UPDATE github_task_ci_pr_state SET
+				last_merge_result = ?,
+				last_error = CASE
+					WHEN ? = ? THEN ?
+					WHEN ? = ? AND last_error_kind = ? THEN NULL
+					ELSE last_error END,
+				last_error_kind = CASE
+					WHEN ? = ? THEN ?
+					WHEN ? = ? AND last_error_kind = ? THEN ''
+					ELSE last_error_kind END,
+				updated_at = ?
+			WHERE task_id = ? AND repository_id = ? AND pr_number = ?
+			  AND last_merge_signature = ?`,
+			result,
+			result, TaskCIMergeResultFailed, strings.TrimSpace(message),
+			result, TaskCIMergeResultAccepted, TaskCIErrorKindAutoMerge,
+			result, TaskCIMergeResultFailed, TaskCIErrorKindAutoMerge,
+			result, TaskCIMergeResultAccepted, TaskCIErrorKindAutoMerge,
+			now, taskID, repositoryID, prNumber, signature)
+		if err != nil {
+			return err
+		}
+		rows, err := outcome.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return ErrTaskCIMergeAttemptNotFound
+		}
+		return nil
 	})
 }
 
@@ -2885,18 +3063,28 @@ func (s *Store) RecordTaskCIMergeAttempt(ctx context.Context, attempt TaskCIMerg
 func (s *Store) RecordTaskCIMergeQueueObservation(ctx context.Context, observation TaskCIMergeQueueObservation) error {
 	return s.mutateTaskCIPRState(ctx, observation.TaskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
 		baselineHead := ""
+		mergeResult := ""
+		if observation.ActiveQueueHeadSHA != "" || observation.Accepted {
+			mergeResult = TaskCIMergeResultAccepted
+		}
 		if observation.ActiveQueueHeadSHA == "" {
 			baselineHead = observation.RemovalObservedHeadSHA
 		}
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO github_task_ci_pr_state (
-				task_id, repository_id, pr_number, last_merge_signature,
+				task_id, repository_id, pr_number, last_merge_signature, last_merge_result,
 				last_queue_attempt_head_sha, last_queue_removal_cause, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
 				last_merge_signature = CASE
 					WHEN excluded.last_merge_signature <> '' THEN excluded.last_merge_signature
 					ELSE github_task_ci_pr_state.last_merge_signature END,
+				last_merge_result = CASE
+					WHEN excluded.last_merge_result <> '' THEN excluded.last_merge_result
+					ELSE github_task_ci_pr_state.last_merge_result END,
+				merge_retry_pending = CASE
+					WHEN excluded.last_merge_result = ? THEN 0
+					ELSE github_task_ci_pr_state.merge_retry_pending END,
 				last_queue_attempt_head_sha = CASE
 					WHEN excluded.last_queue_attempt_head_sha <> ''
 						THEN excluded.last_queue_attempt_head_sha
@@ -2905,10 +3093,19 @@ func (s *Store) RecordTaskCIMergeQueueObservation(ctx context.Context, observati
 					WHEN excluded.last_queue_removal_cause <> ''
 						THEN excluded.last_queue_removal_cause
 					ELSE github_task_ci_pr_state.last_queue_removal_cause END,
+				last_error = CASE
+					WHEN excluded.last_merge_result = ? AND github_task_ci_pr_state.last_error_kind = ?
+						THEN NULL ELSE github_task_ci_pr_state.last_error END,
+				last_error_kind = CASE
+					WHEN excluded.last_merge_result = ? AND github_task_ci_pr_state.last_error_kind = ?
+						THEN '' ELSE github_task_ci_pr_state.last_error_kind END,
 				updated_at = excluded.updated_at`,
 			observation.TaskID, observation.RepositoryID, observation.PRNumber,
-			observation.MergeSignature,
-			observation.ActiveQueueHeadSHA, observation.RemovalCause, now, now)
+			observation.MergeSignature, mergeResult,
+			observation.ActiveQueueHeadSHA, observation.RemovalCause, now, now,
+			TaskCIMergeResultAccepted,
+			TaskCIMergeResultAccepted, TaskCIErrorKindAutoMerge,
+			TaskCIMergeResultAccepted, TaskCIErrorKindAutoMerge)
 		if err != nil {
 			return err
 		}
@@ -2927,15 +3124,25 @@ func (s *Store) RecordTaskCIMergeQueueObservation(ctx context.Context, observati
 
 // RecordTaskCIError stores the latest user-visible CI automation error for a task PR.
 func (s *Store) RecordTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error {
+	return s.recordTaskCIError(ctx, taskID, repositoryID, prNumber, "", message)
+}
+
+// RecordTaskCIAutoMergeError stores an error produced by the automatic merge path.
+func (s *Store) RecordTaskCIAutoMergeError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error {
+	return s.recordTaskCIError(ctx, taskID, repositoryID, prNumber, TaskCIErrorKindAutoMerge, message)
+}
+
+func (s *Store) recordTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int, kind, message string) error {
 	return s.mutateTaskCIPRState(ctx, taskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO github_task_ci_pr_state (
-				task_id, repository_id, pr_number, last_error, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?)
+				task_id, repository_id, pr_number, last_error, last_error_kind, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
 				last_error = excluded.last_error,
+				last_error_kind = excluded.last_error_kind,
 				updated_at = excluded.updated_at`,
-			taskID, repositoryID, prNumber, strings.TrimSpace(message), now, now)
+			taskID, repositoryID, prNumber, strings.TrimSpace(message), kind, now, now)
 		return err
 	})
 }
@@ -2945,13 +3152,14 @@ func (s *Store) MarkTaskCIAutoFixExhausted(ctx context.Context, taskID, reposito
 	return s.mutateTaskCIPRState(ctx, taskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO github_task_ci_pr_state (
-				task_id, repository_id, pr_number, auto_fix_exhausted_at, last_error, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?)
+				task_id, repository_id, pr_number, auto_fix_exhausted_at, last_error, last_error_kind, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
 				auto_fix_exhausted_at = excluded.auto_fix_exhausted_at,
 				last_error = excluded.last_error,
+				last_error_kind = excluded.last_error_kind,
 				updated_at = excluded.updated_at`,
-			taskID, repositoryID, prNumber, now, strings.TrimSpace(message), now, now)
+			taskID, repositoryID, prNumber, now, strings.TrimSpace(message), TaskCIErrorKindAutoFix, now, now)
 		return err
 	})
 }
@@ -2960,7 +3168,7 @@ func (s *Store) MarkTaskCIAutoFixExhausted(ctx context.Context, taskID, reposito
 func (s *Store) ClearTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int) error {
 	return s.mutateTaskCIPRState(ctx, taskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
 		_, err := tx.ExecContext(ctx, `
-			UPDATE github_task_ci_pr_state SET last_error = NULL, updated_at = ?
+			UPDATE github_task_ci_pr_state SET last_error = NULL, last_error_kind = '', updated_at = ?
 			WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
 			now, taskID, repositoryID, prNumber)
 		return err
@@ -3034,6 +3242,7 @@ func (s *Store) RecordTaskPRLifecyclePrompt(ctx context.Context, prompt TaskPRLi
 				last_lifecycle_prompt_at = excluded.last_lifecycle_prompt_at,
 				last_lifecycle_session_id = excluded.last_lifecycle_session_id,
 				last_error = NULL,
+				last_error_kind = '',
 				updated_at = excluded.updated_at`,
 			prompt.TaskID, prompt.RepositoryID, prompt.PRNumber,
 			prompt.Event == "review_requested", prompt.ReviewRequested,

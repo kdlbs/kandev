@@ -11,6 +11,8 @@ import { ApiError } from "@/lib/api/client";
 import { type PtyTerminalState } from "@/components/settings/pty-terminal-view";
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import { persistQuickChatRename } from "@/lib/quick-chat/rename";
+import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
+import { registerQuickChatCloseHandler } from "./quick-chat-focus";
 import type { QuickChatSessionKind, QuickTerminalTab } from "@/lib/state/slices/ui/types";
 import { useQuickChatCloseActions, resolveQuickChatTaskId } from "./use-quick-chat-close-actions";
 import { useQuickChatTabOrder } from "./use-quick-chat-tab-order";
@@ -41,6 +43,7 @@ function useQuickChatStore(workspaceId: string) {
       removeQuickTerminal: s.removeQuickTerminal,
       renameQuickChatSession: s.renameQuickChatSession,
       openQuickChat: s.openQuickChat,
+      applyAgentProfileRecentUse: s.applyAgentProfileRecentUse,
       agentProfiles: s.agentProfiles.items ?? [],
       agentGeneratedTaskTitles: s.userSettings.agentGeneratedTaskTitles,
       taskSessions: s.taskSessions.items || {},
@@ -162,7 +165,12 @@ async function startQuickChatForAgent(
     ...(store.agentGeneratedTaskTitles ? { auto_title: true } : {}),
     repositories: repositories.length > 0 ? repositories : undefined,
   });
-  return { sessionId: response.session_id, name: initialName, taskId: response.task_id };
+  return {
+    sessionId: response.session_id,
+    name: initialName,
+    taskId: response.task_id,
+    agentProfileId: response.agent_profile_id ?? agentId,
+  };
 }
 
 /** Manages the eager agent-init lifecycle for the picker.
@@ -203,10 +211,19 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
           );
           return;
         }
+        recordAgentProfileRecentUseBestEffort("quick_chat", result.agentProfileId, (record) =>
+          store.applyAgentProfileRecentUse("quick_chat", record),
+        );
         if (setupSessionId && isQuickChatSetupSessionId(setupSessionId)) {
           store.closeQuickChatSession(setupSessionId);
         }
-        store.openQuickChat(result.sessionId, workspaceId, agentId, "chat", result.taskId);
+        store.openQuickChat(
+          result.sessionId,
+          workspaceId,
+          result.agentProfileId,
+          "chat",
+          result.taskId,
+        );
         store.renameQuickChatSession(result.sessionId, result.name);
       } catch (error) {
         if (latestRequestId.current !== requestId) return;
@@ -399,6 +416,11 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
     tabOrder: tabOrder.order,
     setSetupKey,
   });
+  const closeFromLauncher = useCallback(
+    () => tabActions.handleOpenChange(false),
+    [tabActions.handleOpenChange],
+  );
+  useEffect(() => registerQuickChatCloseHandler(closeFromLauncher), [closeFromLauncher]);
 
   const handleSelectAgent = useCallback(
     (agentId: string, repositories: QuickChatRepositoryInput[] = []) =>

@@ -46,6 +46,7 @@ import { useEntityReferenceComposer } from "./use-entity-reference-composer";
 import { EntityReferenceSuggestionPluginKey } from "./tiptap-entity-reference-suggestion";
 import type { ImagePasteIssue } from "./clipboard-attachments";
 import { useTranslation } from "react-i18next";
+import { rankMentionItems, recordChatMentionSelection } from "@/lib/chat-mention-recency";
 
 const RAW_DRAIN = { rawPagination: true } as const;
 
@@ -75,24 +76,6 @@ type TipTapInputProps = {
   onImagePaste?: (files: File[], issue?: ImagePasteIssue) => void;
   onPlanModeChange?: (enabled: boolean) => void;
 };
-
-// ── Filter items ────────────────────────────────────────────────────
-function filterItems(items: MentionItem[], query: string): MentionItem[] {
-  if (!query) return items;
-  const lq = query.toLowerCase();
-  return items
-    .map((item) => {
-      const label = item.label.toLowerCase();
-      let score = 0;
-      if (label.startsWith(lq)) score = 100;
-      else if (label.split(/[\s\-_/]/).some((w) => w.startsWith(lq))) score = 50;
-      else if (label.includes(lq)) score = 25;
-      return { item, score };
-    })
-    .filter(({ score }) => score > 0)
-    .sort((a, b) => b.score - a.score)
-    .map(({ item }) => item);
-}
 
 // ── Menu keyboard navigation helper ──────────────────────────────
 
@@ -139,13 +122,18 @@ async function fetchFileResults(
   return results;
 }
 
-function useMentionItems(sessionId: string | null, taskId: string | null) {
+function useMentionItems(
+  sessionId: string | null,
+  taskId: string | null,
+  workspaceId: string | null,
+) {
   const { t } = useTranslation();
   const { prompts } = useCustomPrompts();
   const storeApi = useAppStoreApi();
   const promptsRef = useRef(prompts);
   const sessionIdRef = useRef(sessionId);
   const taskIdRef = useRef(taskId);
+  const workspaceIdRef = useRef(workspaceId);
   const lastFileSearchRef = useRef<{ query: string; results: string[] }>({
     query: "",
     results: [],
@@ -154,6 +142,7 @@ function useMentionItems(sessionId: string | null, taskId: string | null) {
     promptsRef.current = prompts;
     sessionIdRef.current = sessionId;
     taskIdRef.current = taskId;
+    workspaceIdRef.current = workspaceId;
   });
 
   return useCallback(
@@ -193,7 +182,7 @@ function useMentionItems(sessionId: string | null, taskId: string | null) {
           // ignore
         }
       }
-      return filterItems(allItems, query);
+      return rankMentionItems(allItems, query, workspaceIdRef.current);
     },
     [storeApi],
   );
@@ -204,6 +193,7 @@ function useMentionItems(sessionId: string | null, taskId: string | null) {
 type SuggestionConfigsInput = {
   sessionId: string | null;
   taskId: string | null;
+  workspaceId: string | null;
   onMentionKeyDown: (event: KeyboardEvent) => boolean;
   onSlashKeyDown: (event: KeyboardEvent) => boolean;
   setMentionMenu: React.Dispatch<React.SetStateAction<MenuState<MentionItem>>>;
@@ -213,6 +203,7 @@ type SuggestionConfigsInput = {
 function useSuggestionConfigs({
   sessionId,
   taskId,
+  workspaceId,
   onMentionKeyDown,
   onSlashKeyDown,
   setMentionMenu,
@@ -235,9 +226,17 @@ function useSuggestionConfigs({
       }));
   }, [agentCommands]);
 
-  const getMentionItems = useMentionItems(sessionId, taskId);
+  const workspaceIdRef = useRef(workspaceId);
+  useLayoutEffect(() => {
+    workspaceIdRef.current = workspaceId;
+  });
+
+  const getMentionItems = useMentionItems(sessionId, taskId, workspaceId);
   const mentionCallbacks = useMemo(
-    (): MentionSuggestionCallbacks => ({ getItems: getMentionItems }),
+    (): MentionSuggestionCallbacks => ({
+      getItems: getMentionItems,
+      onSelect: (item) => recordChatMentionSelection(item, workspaceIdRef.current),
+    }),
     [getMentionItems],
   );
 
@@ -424,6 +423,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
   const { mentionSuggestion, slashSuggestion, slashCommands } = useSuggestionConfigs({
     sessionId,
     taskId: taskId ?? null,
+    workspaceId,
     onMentionKeyDown: menu.onMentionKeyDown,
     onSlashKeyDown: menu.onSlashKeyDown,
     setMentionMenu: menu.setMentionMenu,
@@ -471,10 +471,9 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     ref,
   });
   useEditorRefSync(editorRef, editor);
-  const { closeReverseSearch } = overlay;
   const handleReverseSearchSelect = useReverseSearchSelectHandler(
     applyHistoryEntry,
-    closeReverseSearch,
+    overlay.closeReverseSearch,
     editor,
   );
   return (

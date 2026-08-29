@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001
 created: 2026-08-01
-updated: 2026-08-27
+updated: 2026-08-28
 owners:
   - kandev
 ---
@@ -74,7 +74,7 @@ The initial contract is:
 | `pending_action`                               | `permission`, `clarification`, or absent                                              | Constant                                    |
 | `active_error`                                 | Optional session and task-repository IDs, stamp, time, preview, category, and actions | One preview and at most three known actions |
 | `git`                                          | Aggregate additions, deletions, changed files, ahead, and behind                      | Numeric totals only                         |
-| `pull_request`                                 | Count, bounded representative identity, and aggregate display state                   | Constant regardless of PR count             |
+| `pull_request`                                 | Count, bounded representative identity, aggregate display state, and active GitHub automation flags | Constant regardless of PR count             |
 
 `pull_request.aggregate_state` is one of `failure`, `blocked`, `pending`,
 `awaiting_review`, `ready`, `passing`, `draft`, `merged`, `closed`, or
@@ -136,6 +136,11 @@ remain during migration, but switchers use the summary when present.
   GitHub domain and are loaded only by surfaces that need them. On projector
   restart or compare-and-set rebase, configured keyed pull-request observations
   are rehydrated even when the persisted aggregate is absent.
+- Pull-request automation flags aggregate only active linked pull requests.
+  The summary can state whether any active pull request has auto-fix or
+  auto-merge enabled, but it never carries the per-pull-request option list.
+  Integration option updates refresh the authoritative keyed pull-request
+  observations through the existing task-summary projector.
 - A semantic no-op does not increment `revision` or emit an update.
 - Clients ignore a summary delta whose revision is not newer than the stored
   revision.
@@ -294,6 +299,10 @@ intermediate replacement.
   changes its Git tree, or receives a PR update, **WHEN** its summary revision
   arrives, **THEN** desktop and mobile rows update without a session
   subscription.
+- **GIVEN** an active linked pull request changes its auto-fix or auto-merge
+  setting, **WHEN** its summary revision arrives, **THEN** desktop and mobile
+  task rows update their bounded automation indicators without a per-row
+  automation request.
 - **GIVEN** an idle task receives Git or pull-request summary changes, **WHEN**
   its replacement summary arrives, **THEN** `updated_at` can advance while
   `last_activity_at` remains unchanged.

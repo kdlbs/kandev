@@ -28,6 +28,34 @@ Users want to operate on Kandev workspaces, workflows, agents, and tasks from co
 - **AC-INTEGRATIONS-EXTERNAL-MCP-001.7:** The Settings UI shows the URL and ready-to-paste config snippets for popular agents.
 - **AC-INTEGRATIONS-EXTERNAL-MCP-001.8:** The existing per-`agentctl` MCP behavior is unchanged — the same tool definitions back both endpoints.
 
+### REQ-INTEGRATIONS-EXTERNAL-MCP-002: Saved prompt reads
+
+**Intent:** Configuration agents need the saved prompt content that workflow
+steps reference. This content lets an agent audit the complete effective prompt
+without operator copy and paste.
+
+#### Acceptance criteria
+
+- **AC-INTEGRATIONS-EXTERNAL-MCP-002.1:** When a configuration or external MCP
+  client lists tools, the catalog shall include `list_shared_prompts_kandev`
+  and `get_shared_prompt_kandev`.
+- **AC-INTEGRATIONS-EXTERNAL-MCP-002.2:** When a client calls
+  `list_shared_prompts_kandev`, the result shall enumerate the saved prompts
+  without their content.
+- **AC-INTEGRATIONS-EXTERNAL-MCP-002.3:** Each prompt summary shall include the
+  exact name, built-in status, and content size in bytes.
+- **AC-INTEGRATIONS-EXTERNAL-MCP-002.4:** When a client calls
+  `get_shared_prompt_kandev` with an exact saved prompt name, the result shall
+  include the full content and prompt metadata.
+- **AC-INTEGRATIONS-EXTERNAL-MCP-002.5:** When the name is empty or unknown, the
+  tool shall return an error without prompt content.
+- **AC-INTEGRATIONS-EXTERNAL-MCP-002.6:** The tools shall use the authenticated
+  MCP request context and the saved prompt collection for that Kandev instance.
+- **AC-INTEGRATIONS-EXTERNAL-MCP-002.7:** Task, Office, and automation MCP
+  catalogs shall not include the saved prompt tools.
+- **AC-INTEGRATIONS-EXTERNAL-MCP-002.8:** Saved prompt reads shall not change
+  prompt content or the current `@name` expansion behavior.
+
 ## Migrated source detail
 
 ## Why
@@ -100,6 +128,9 @@ The tool does not return a workflow from another user's workspace. Authenticatio
 - A workspace-level `export_workflows_kandev` batch tool.
 - Changes to the portable workflow format or the 1 MiB import limit.
 - Changes to the existing HTTP export endpoints or workflow export UI.
+- Saved prompt create, update, or delete tools over MCP.
+- Automatic expansion of saved prompt references in workflow-step list results.
+- Changes to saved prompt persistence, reference matching, or expansion depth.
 
 ## Implementation plan
 

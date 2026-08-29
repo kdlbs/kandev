@@ -9,6 +9,8 @@ const mockSummarize = vi.fn();
 const mockBuildStartRequest = vi.fn();
 const mockLaunchSession = vi.fn();
 const mockSetActiveSession = vi.fn();
+const mockApplyAgentProfileRecentUse = vi.fn();
+const mockRecordRecentUse = vi.fn();
 let mockAgentSelectorValue: string | undefined;
 let mockAgentSelectorOnChange: ((value: string) => void) | undefined;
 let mockExecutorProfile: ExecutorProfile | null = null;
@@ -39,6 +41,7 @@ const mockState = {
     activeSessionId: "session-1",
   },
   setActiveSession: mockSetActiveSession,
+  applyAgentProfileRecentUse: mockApplyAgentProfileRecentUse,
   taskSessions: {
     items: {
       "session-1": {
@@ -97,6 +100,10 @@ vi.mock("@/lib/services/session-launch-helpers", () => ({
 
 vi.mock("@/lib/services/session-launch-service", () => ({
   launchSession: (...args: unknown[]) => mockLaunchSession(...args),
+}));
+
+vi.mock("@/lib/agent-profile-recent-use", () => ({
+  recordAgentProfileRecentUseBestEffort: (...args: unknown[]) => mockRecordRecentUse(...args),
 }));
 
 vi.mock("@/components/task-create-dialog-selectors", async () => {
@@ -252,6 +259,8 @@ describe("NewSessionDialog", () => {
     mockSummarize.mockResolvedValue({ summary: "summary text" });
     mockBuildStartRequest.mockReturnValue({ request: { task_id: "task-1" } });
     mockLaunchSession.mockResolvedValue({ session_id: "session-2" });
+    mockRecordRecentUse.mockReset();
+    mockApplyAgentProfileRecentUse.mockReset();
   });
 
   it("copies the initial prompt on the first copy_prompt action after opening", async () => {

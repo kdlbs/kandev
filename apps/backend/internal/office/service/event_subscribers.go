@@ -52,6 +52,47 @@ func (s *Service) dispatchEngineTrigger(
 	return nil
 }
 
+// dispatchEngineTriggerForRecovery dispatches a level-triggered wake through
+// the workflow engine and reports whether the engine accepted the trigger.
+// A missing session is a normal no-op: recording a receipt in that case would
+// suppress a later delivery after the session is created.
+//
+// The production dispatcher exposes HandleTriggerHandled so this path can
+// distinguish a missing session from a valid no-action step. Small test
+// dispatchers only implement WorkflowEngineDispatcher, so they use the
+// existing error-only contract and count a successful call as accepted.
+func (s *Service) dispatchEngineTriggerForRecovery(
+	ctx context.Context, taskID string, trigger engine.Trigger, payload any, opID string,
+) (bool, error) {
+	if s.engineDispatcher == nil {
+		return false, nil
+	}
+
+	type handledDispatcher interface {
+		HandleTriggerHandled(
+			context.Context, string, engine.Trigger, any, string,
+		) (bool, error)
+	}
+	if d, ok := s.engineDispatcher.(handledDispatcher); ok {
+		_, err := d.HandleTriggerHandled(ctx, taskID, trigger, payload, opID)
+		if errors.Is(err, shared.ErrEngineNoSession) {
+			s.logger.Debug("engine recovery trigger skipped: no active session",
+				zap.String("task_id", taskID),
+				zap.String("trigger", string(trigger)))
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
+	if err := s.dispatchEngineTrigger(ctx, taskID, trigger, payload, opID); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // TaskMovedData represents the payload of a task.moved event.
 type TaskMovedData struct {
 	TaskID                 string `json:"task_id"`
@@ -364,7 +405,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	// must stay held so ReapStaleCheckouts (not a same-agent race) is what
 	// eventually reclaims it, instead of releasing a lock for a run that
 	// never actually reached a terminal state.
-	if err := s.FinishRun(ctx, run.ID); err != nil {
+	if err := s.FinishRun(ctx, run.ID, RunOutcomeProcessed); err != nil {
 		return err
 	}
 	s.releaseTaskCheckoutForRun(ctx, run)
@@ -468,7 +509,7 @@ func (s *Service) handleTasklessAgentCompleted(
 	//
 	// Finish before releasing, same as handleAgentCompleted: a failed
 	// FinishRun must not still give up the checkout.
-	if err := s.FinishRun(ctx, run.ID); err != nil {
+	if err := s.FinishRun(ctx, run.ID, RunOutcomeProcessed); err != nil {
 		return err
 	}
 	s.releaseTaskCheckoutForRun(ctx, run)
@@ -779,6 +820,7 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 		return err
 	}
 	s.recordCostEventWritten(string(resolution.source), provider)
+	s.publishCostRecorded(ctx, fields.WorkspaceID, costEvent)
 
 	if fields.WorkspaceID != "" {
 		if err := s.CheckBudget(
@@ -789,6 +831,30 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 		}
 	}
 	return nil
+}
+
+// publishCostRecorded emits the durable cost write as an Office notification.
+// The database insert is authoritative; a publish failure is logged and does
+// not turn a successful cost write into a failed prompt-usage event.
+func (s *Service) publishCostRecorded(ctx context.Context, workspaceID string, costEvent *models.CostEvent) {
+	if s.eb == nil || workspaceID == "" || costEvent == nil {
+		return
+	}
+	data := map[string]interface{}{
+		"workspace_id":     workspaceID,
+		"task_id":          costEvent.TaskID,
+		"session_id":       costEvent.SessionID,
+		"agent_profile_id": costEvent.AgentProfileID,
+		"project_id":       costEvent.ProjectID,
+		"model":            costEvent.Model,
+		"provider":         costEvent.Provider,
+		"cost_subcents":    costEvent.CostSubcents,
+	}
+	event := bus.NewEvent(events.OfficeCostRecorded, "office-service", data)
+	if err := s.eb.Publish(ctx, events.OfficeCostRecorded, event); err != nil {
+		s.logger.Debug("publish cost recorded event failed",
+			zap.String("task_id", costEvent.TaskID), zap.Error(err))
+	}
 }
 
 // resolveProvider derives the provider id for the cost row. AgentType

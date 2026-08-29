@@ -118,6 +118,7 @@ func (r *Repository) initSchema() error {
 		return err
 	}
 	r.runMigrations()
+	r.activateRunOutcome()
 	return nil
 }
 
@@ -183,6 +184,9 @@ func (r *Repository) createExtensionTables() error {
 		return err
 	}
 	if err := r.createAgentWakeupRequestTable(); err != nil {
+		return err
+	}
+	if err := r.createParentChildWakeReceiptsTable(); err != nil {
 		return err
 	}
 	return nil
@@ -342,6 +346,11 @@ func (r *Repository) createRunTables() error {
 		scheduled_retry_at TIMESTAMP,
 		error_message TEXT NOT NULL DEFAULT '',
 		cancel_reason TEXT,
+		-- outcome (task-delivery-ledger): nullable, one of the eight
+		-- Office run outcome values on the finished path, NULL on failed
+		-- and on every pre-activation row. See migrateRunOutcome for the
+		-- ADD COLUMN that converges existing databases.
+		outcome TEXT,
 		-- Provider routing (office-provider-routing).
 		logical_provider_order TEXT,
 		requested_tier TEXT,
@@ -689,6 +698,33 @@ func (r *Repository) createAgentWakeupRequestTable() error {
 	CREATE INDEX IF NOT EXISTS idx_wakeup_agent_status ON agent_wakeup_requests(agent_profile_id, status);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_wakeup_idempotency ON agent_wakeup_requests(idempotency_key)
 		WHERE idempotency_key IS NOT NULL AND idempotency_key != '';
+	`)
+	return err
+}
+
+// createParentChildWakeReceiptsTable creates the table backing
+// ParentWakeReconciler's level-triggered sweep (see
+// scheduler_wake_reconciler.go). One row per parent task records the
+// child set (sorted child IDs + terminal states, compared directly — no
+// hashing) a task_children_completed run was last delivered for, so a
+// healthy steady state costs one indexed lookup per tick and emits
+// nothing.
+//
+// The companion tasks(parent_id) index ListStuckParents needs lives in
+// runMigrations (migrateParentWakeIndexes) via r.migrate.Apply, not here:
+// tasks is a table this package doesn't own (see runMigrations' doc
+// comment), so a plain r.db.Exec against it is fatal in the minimal
+// single-domain test repos under internal/office/repository/sqlite,
+// which build a tasks table only after NewWithDB returns.
+func (r *Repository) createParentChildWakeReceiptsTable() error {
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS parent_child_wake_receipts (
+		parent_task_id        TEXT PRIMARY KEY,
+		child_set_key         TEXT NOT NULL,
+		delivered_run_id      TEXT NOT NULL DEFAULT '',
+		delivery_operation_id TEXT NOT NULL DEFAULT '',
+		delivered_at          TIMESTAMP NOT NULL
+	);
 	`)
 	return err
 }

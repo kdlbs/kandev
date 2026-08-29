@@ -80,7 +80,11 @@ type CreateTaskRequest struct {
 	Position       int                    `json:"position"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 	DeferredLaunch map[string]interface{} `json:"deferred_launch,omitempty"`
-	PlanMode       bool                   `json:"plan_mode,omitempty"`
+	// RecordAgentProfileRecentUse opts this deferred launch into task_create
+	// profile-history attribution. Only the authenticated HTTP/WS selector
+	// surfaces set it; programmatic callers such as MCP must leave it false.
+	RecordAgentProfileRecentUse bool `json:"-"`
+	PlanMode                    bool `json:"plan_mode,omitempty"`
 
 	// StartAgent reports that the caller intends to launch an agent for this
 	// task right away. It only steers step resolution (see resolveWorkflowStep)

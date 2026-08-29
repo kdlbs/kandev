@@ -528,6 +528,10 @@ type Service struct {
 	// safe: both call sites guard on it. See SetSubagentContextRecorder.
 	subagentContexts SubagentContextRecorder
 
+	// agentProfileRecentUseRecorder optionally persists the task_create profile
+	// selected by a deferred launch after its agent starts successfully.
+	agentProfileRecentUseRecorder AgentProfileRecentUseRecorder
+
 	// Turn service for managing session turns
 	turnService TurnService
 
@@ -661,9 +665,9 @@ type Service struct {
 
 	// GitHub service for PR auto-detection on push
 	githubService GitHubService
-	// ciAutomationInFlight prevents PR feedback and task-PR update events from
-	// racing duplicate auto-fix prompts or merge calls for the same PR.
-	ciAutomationInFlight sync.Map
+	// ciAutomationInFlight serializes each PR's evaluation and coalesces one
+	// follow-up request instead of dropping an event that arrives mid-run.
+	ciAutomationInFlight ciAutomationCoordinator
 
 	// GitLab MR lifecycle notification automation. Nil-safe: without it,
 	// gitlab.task_mr.updated events are observed but no lifecycle prompt is
@@ -1047,6 +1051,15 @@ type Service struct {
 	sendNowCancel  context.CancelFunc
 	sendNowStopped bool
 	sendNowWorkers sync.WaitGroup
+
+	// ciAutomationWorkers owns the asynchronous per-PR automation loops. The
+	// service-owned context lets Stop cancel in-flight evaluations and prevents
+	// workers from outliving the orchestrator across a restart.
+	ciAutomationMu      sync.Mutex
+	ciAutomationCtx     context.Context
+	ciAutomationCancel  context.CancelFunc
+	ciAutomationStopped bool
+	ciAutomationWorkers sync.WaitGroup
 }
 
 type RouteAction string
@@ -1215,6 +1228,7 @@ func NewService(
 
 	// Create the service (watcher will be created after we have handlers)
 	sendNowCtx, sendNowCancel := context.WithCancel(context.Background())
+	ciAutomationCtx, ciAutomationCancel := context.WithCancel(context.Background())
 	s := &Service{
 		config:                       cfg,
 		logger:                       svcLogger,
@@ -1234,6 +1248,8 @@ func NewService(
 		reservedPromptCallbacks:      newReservedPromptCallbackOwner(),
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,
+		ciAutomationCtx:              ciAutomationCtx,
+		ciAutomationCancel:           ciAutomationCancel,
 		idleReaper:                   newIdleSessionReaper(),
 	}
 	// Always publish queue-status after a task-scoped queue purge so the
@@ -2365,6 +2381,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.logger.Info("starting orchestrator service")
 	s.resetReservedPromptCallbacks()
 	s.resetSendNowWorkers()
+	s.resetCIAutomationWorkers()
 
 	// Reconcile session state from persisted runtime state on startup.
 	// This does NOT launch any agent processes — sessions are recovered lazily
@@ -2498,6 +2515,7 @@ func (s *Service) Stop() error {
 	s.cancelAllClarificationWatchdogs()
 	s.cancelAllTransientRetries()
 	s.stopSendNowWorkers()
+	s.stopCIAutomationWorkers()
 
 	if len(errs) > 0 {
 		return errs[0]

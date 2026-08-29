@@ -683,6 +683,8 @@
   "runStatusFailed": "failed",
   "runStatusReceived": "received",
   "runStatusSkipped": "skipped",
+  "runSkipped": "Skipped",
+  "runUnclassified": "Unclassified",
   "runStatusTaskCreated": "task created",
   "runtime": "Runtime",
   "runtimeCapabilities": "Runtime capabilities",

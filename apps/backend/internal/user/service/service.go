@@ -22,9 +22,10 @@ import (
 
 // ErrUserSettingsConflict marks an exhausted conditional settings update.
 var (
-	ErrUserNotFound         = errors.New("user not found")
-	ErrValidation           = errors.New("validation error")
-	ErrUserSettingsConflict = store.ErrUserSettingsRevisionConflict
+	ErrUserNotFound                  = errors.New("user not found")
+	ErrValidation                    = errors.New("validation error")
+	ErrUserSettingsConflict          = store.ErrUserSettingsRevisionConflict
+	ErrAgentProfileRecentUseConflict = store.ErrAgentProfileRecentUseRevisionConflict
 )
 
 const (
@@ -35,10 +36,11 @@ const (
 )
 
 type Service struct {
-	repo        store.Repository
-	eventBus    bus.EventBus
-	logger      *logger.Logger
-	defaultUser string
+	repo          store.Repository
+	recentUseRepo store.AgentProfileRecentUseRepository
+	eventBus      bus.EventBus
+	logger        *logger.Logger
+	defaultUser   string
 }
 
 type UpdateUserSettingsRequest struct {
@@ -110,11 +112,18 @@ type SystemMetricsDisplaySettingsPatch struct {
 // NewService builds the user settings service with its repository, event bus,
 // and logger.
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
+	recentUseRepo, _ := repo.(store.AgentProfileRecentUseRepository)
+	if recentUseLogger, ok := repo.(interface {
+		SetAgentProfileRecentUseLogger(*logger.Logger)
+	}); ok {
+		recentUseLogger.SetAgentProfileRecentUseLogger(log.WithFields(zap.String("component", "user-store")))
+	}
 	return &Service{
-		repo:        repo,
-		eventBus:    eventBus,
-		logger:      log.WithFields(zap.String("component", "user-service")),
-		defaultUser: store.DefaultUserID,
+		repo:          repo,
+		recentUseRepo: recentUseRepo,
+		eventBus:      eventBus,
+		logger:        log.WithFields(zap.String("component", "user-service")),
+		defaultUser:   store.DefaultUserID,
 	}
 }
 

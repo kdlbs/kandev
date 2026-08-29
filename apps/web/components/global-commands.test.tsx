@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => {
     push: vi.fn(),
     quickChat: vi.fn(),
     quickChatLauncherCalls: [] as unknown[][],
+    keyboardShortcutCalls: [] as unknown[][],
     setTheme: vi.fn(),
   };
 });
@@ -42,7 +43,9 @@ vi.mock("@/hooks/use-app-destinations", () => ({
   useStaticDestinations: () => mocks.destinations.map((destination) => ({ ...destination })),
 }));
 vi.mock("@/hooks/use-app-shortcuts", () => ({ useAppShortcuts: vi.fn() }));
-vi.mock("@/hooks/use-keyboard-shortcut", () => ({ useKeyboardShortcut: vi.fn() }));
+vi.mock("@/hooks/use-keyboard-shortcut", () => ({
+  useKeyboardShortcut: (...args: unknown[]) => mocks.keyboardShortcutCalls.push(args),
+}));
 vi.mock("@/hooks/use-plugin-shortcuts", () => ({ usePluginShortcuts: vi.fn() }));
 vi.mock("@/hooks/use-quick-chat-launcher", () => ({
   useQuickChatLauncher: (...args: unknown[]) => {
@@ -72,6 +75,7 @@ function navigationCommand(): CommandItem {
 beforeEach(async () => {
   mocks.commands = [];
   mocks.quickChatLauncherCalls = [];
+  mocks.keyboardShortcutCalls = [];
   mocks.push.mockReset();
   await activateLocale(DEFAULT_LOCALE);
 });
@@ -101,9 +105,19 @@ describe("GlobalCommands navigation commands", () => {
     render(<GlobalCommands />);
 
     expect(mocks.quickChatLauncherCalls).toEqual([
-      ["workspace-1", "chat", { silentFocusReturn: false }],
+      ["workspace-1", "chat", { silentFocusReturn: false, toggleWhenOpen: true }],
       ["workspace-1", "config", { silentFocusReturn: false }],
     ]);
+  });
+
+  it("@covers AC-UI-QUICK-TERMINAL-001.10 captures the toggle before xterm can consume it", () => {
+    render(<GlobalCommands />);
+
+    expect(mocks.keyboardShortcutCalls).toHaveLength(1);
+    expect(mocks.keyboardShortcutCalls[0]?.[2]).toEqual({
+      capture: true,
+      stopPropagation: true,
+    });
   });
 
   // Drives a real locale switch rather than a stubbed `t`. The point of the

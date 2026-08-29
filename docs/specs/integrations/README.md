@@ -60,6 +60,7 @@ outcomes that expose those contracts.
 
 
 
+- [External MCP Saved Prompt Reads](system-design/external-mcp-shared-prompts.md)
 - [Azure DevOps Integration System Design Part 1](system-design/azure-devops-integration-01.md)
 - [Azure DevOps Integration System Design Part 2](system-design/azure-devops-integration-02.md)
 - [Bitbucket Connector Plugin System Design Part 1](system-design/bitbucket-plugin-01.md)

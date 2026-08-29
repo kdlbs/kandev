@@ -2,6 +2,7 @@
 status: draft
 system: integrations
 requirements:
+  - REQ-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002
   - REQ-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-RECOVERY-001
   - REQ-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-RECOVERY-002
   - REQ-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-RECOVERY-003
@@ -24,6 +25,7 @@ Kandev keeps the existing one-minute poll interval and queue-aware merge API.
 
 | Requirement | Design section |
 | --- | --- |
+| `REQ-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002` | [Requeue flow](#requeue-flow), [Failure and recovery](#failure-and-recovery) |
 | `REQ-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-RECOVERY-001` | [Provider observation](#provider-observation), [Persistence](#persistence) |
 | `REQ-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-RECOVERY-002` | [Auto-fix flow](#auto-fix-flow) |
 | `REQ-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-RECOVERY-003` | [Requeue flow](#requeue-flow) |
@@ -88,6 +90,10 @@ publishes them to current automation and UI consumers.
   removal. Values are `checks_failed`, `checks_timed_out`, `conflict`,
   `manual`, `branch_protection`, and `unknown`.
 
+The main merge-queue design owns the automatic attempt journal, typed error
+kind, and explicit retry authorization. Recovery reads that journal but does not
+define a second attempt state machine.
+
 ## Auto-fix flow
 
 `handleTaskPRCIAutomationWithRefresh` evaluates queue evidence before normal PR
@@ -143,6 +149,10 @@ This observation also handles a user who enables auto-merge while the pull
 request is already queued. The evaluator adopts the active entry and returns
 without calling the merge API.
 
+Adoption records the attempt as `accepted`. It clears a stale error only when
+the stored error kind is `auto_merge`. A merged observation applies the same
+reconciliation rule.
+
 When Kandev first observes a removal without an earlier active observation, it
 records a conservative baseline for the current head. This fallback prevents
 an immediate same-head requeue.
@@ -176,6 +186,8 @@ The option combinations produce these outcomes:
 - If removal evidence is not actionable, Kandev records the status only.
 - If the current head SHA is absent, Kandev does not requeue automatically.
 - If GitHub rejects a requeue request, the existing error row shows the error.
+- If an `in_flight` attempt survives a restart, Kandev reconciles queue and
+  merged state before it fails the attempt and offers explicit retry.
 - If a repair produces no new head, Kandev waits. A user can repair or requeue
   the pull request on GitHub.
 
@@ -198,6 +210,7 @@ reads, dispatches, and queue requests to the automation surface.
 
 ## Related decisions and designs
 
+- [Bind automatic merge attempts to the reviewed head](../../../decisions/2026-08-28-bind-github-auto-merge-attempts-to-reviewed-head.md)
 - [GitHub PR Merge Queue requirements](../requirements/github-pr-merge-queue.md)
 - [Task PR Automation Controls design](../../ui/system-design/ci-pr-automation-01.md)
 - [PR agent notification decision](../../../decisions/0051-pr-agent-notifications-extend-task-pr-automation.md)

@@ -31,6 +31,8 @@ func applyPullRequestInputs(state *projectionState, inputs []PullRequestInput) {
 			requiredReviews:       maxInt(input.RequiredReviews, 0),
 			checksTotal:           maxInt(input.ChecksTotal, 0),
 			checksPassing:         maxInt(input.ChecksPassing, 0),
+			autoFixEnabled:        input.AutoFixEnabled,
+			autoMergeEnabled:      input.AutoMergeEnabled,
 		}
 	}
 }
@@ -52,6 +54,12 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 		summary.Count++
 		if strings.EqualFold(observation.state, prStateOpen) {
 			summary.OpenCount++
+			if observation.autoFixEnabled {
+				summary.AutoFixEnabled = true
+			}
+			if observation.autoMergeEnabled {
+				summary.AutoMergeEnabled = true
+			}
 		}
 		if pullRequestNeedsAttention(observation) {
 			summary.Attention = true
@@ -69,6 +77,13 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 	summary.URL = truncateString(representative.url, maxPullRequestURLBytes)
 	summary.AggregateState = aggregatePullRequestState(state.prs)
 	return &summary
+}
+
+func equalPullRequestSummary(left, right *PullRequestSummary) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
 
 func pullRequestNeedsAttention(pr pullRequestObservation) bool {

@@ -176,7 +176,8 @@ const (
 
 // Event types for users
 const (
-	UserSettingsUpdated = "user.settings.updated"
+	UserSettingsUpdated              = "user.settings.updated"
+	UserAgentProfileRecentUseUpdated = "user.agent_profile_recent_use.updated"
 )
 
 // PluginUserStateUpdated fires after a successful write/delete on a

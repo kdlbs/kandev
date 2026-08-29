@@ -8,6 +8,7 @@ import type {
   TaskCreateLastUsedApi,
   MCPTaskAgentProfileDefault,
   RepositoryBranchPolicy,
+  AgentProfileRecentUseApiRecord,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
@@ -546,6 +547,10 @@ export class ApiClient {
   async deleteAgentProfile(profileId: string, force?: boolean): Promise<void> {
     const qs = force ? "?force=true" : "";
     await this.request("DELETE", `/api/v1/agent-profiles/${profileId}${qs}`);
+  }
+
+  async listAgentProfileRecentUse(): Promise<AgentProfileRecentUseApiRecord[]> {
+    return this.request("GET", "/api/v1/user/agent-profile-recent-use");
   }
 
   /**
@@ -1547,7 +1552,7 @@ export class ApiClient {
     owner: string,
     repo: string,
     number: number,
-    outcome: "merged" | "queued",
+    outcome: "merged" | "queued" | "failed" | "pending" | "head_mismatch",
   ): Promise<void> {
     await this.request("PUT", "/api/v1/github/mock/merge-outcomes", {
       owner,
@@ -1585,10 +1590,22 @@ export class ApiClient {
   }
 
   async mockGitHubGetMergeAttempts(): Promise<
-    Array<{ owner: string; repo: string; number: number; merge_method: string }>
+    Array<{
+      owner: string;
+      repo: string;
+      number: number;
+      merge_method: string;
+      expected_head_sha: string;
+    }>
   > {
     const response = await this.request<{
-      attempts?: Array<{ owner: string; repo: string; number: number; merge_method: string }>;
+      attempts?: Array<{
+        owner: string;
+        repo: string;
+        number: number;
+        merge_method: string;
+        expected_head_sha: string;
+      }>;
     }>("GET", "/api/v1/github/mock/merge-attempts");
     return response.attempts ?? [];
   }

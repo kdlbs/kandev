@@ -22,6 +22,7 @@ import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
 import type { HydrationState } from "./store";
 import { seedSettledSessionBoundaries } from "@/lib/state/slices/session/turn-actions";
 import { migrateSidebarViewDraft, migrateView } from "./slices/ui/ui-slice";
+import { mergeAgentProfileRecentUseState } from "@/lib/agent-profile-recent-use";
 
 export const defaultState = {
   kanban: defaultKanbanState.kanban,
@@ -47,6 +48,7 @@ export const defaultState = {
   settingsData: defaultSettingsState.settingsData,
   sleepInhibition: defaultSettingsState.sleepInhibition,
   userSettings: defaultSettingsState.userSettings,
+  agentProfileRecentUse: defaultSettingsState.agentProfileRecentUse,
   messages: defaultSessionState.messages,
   turns: defaultSessionState.turns,
   taskSessions: defaultSessionState.taskSessions,
@@ -350,6 +352,10 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     settingsData: { ...defaultState.settingsData, ...initialState.settingsData },
     sleepInhibition: { ...defaultState.sleepInhibition, ...initialState.sleepInhibition },
     userSettings: { ...defaultState.userSettings, ...initialState.userSettings },
+    agentProfileRecentUse: mergeAgentProfileRecentUseState(
+      defaultState.agentProfileRecentUse,
+      initialState.agentProfileRecentUse ?? {},
+    ),
     messages: { ...defaultState.messages, ...initialState.messages },
     turns: mergeTurnsState(defaultState.turns, initialState.turns, initialState.taskSessions),
     taskSessions: { ...defaultState.taskSessions, ...initialState.taskSessions },

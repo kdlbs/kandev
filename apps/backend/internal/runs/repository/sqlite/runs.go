@@ -9,13 +9,18 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 )
 
-// CreateRun creates a new run queue entry.
+// CreateRunTx creates a new run queue entry using a transaction the caller
+// owns. Callers that need to combine the insert with other transactional
+// writes (for example the parent-wake reconciler's receipt upsert) use
+// this directly; CreateRun wraps it with a private transaction for the
+// common single-statement case.
 //
 // ContinuationScope is decided here, once, before the row exists to be
 // coalesced into — never at read or write time downstream. A routine
@@ -23,7 +28,7 @@ import (
 // only ever patches context_snapshot, so every later reader/writer of
 // this run's continuation summary reads the value persisted here instead
 // of re-deriving it against a snapshot that may have drifted.
-func (r *Repository) CreateRun(ctx context.Context, req *models.Run) error {
+func (r *Repository) CreateRunTx(ctx context.Context, tx *sqlx.Tx, req *models.Run) error {
 	if req.ID == "" {
 		req.ID = uuid.New().String()
 	}
@@ -31,7 +36,7 @@ func (r *Repository) CreateRun(ctx context.Context, req *models.Run) error {
 	req.RequestedAt = time.Now().UTC()
 	req.ContinuationScope = models.ContinuationScopeForRun(req, req.AgentProfileID)
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err := tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO runs (
 			id, agent_profile_id, reason, payload, status, coalesced_count,
 			idempotency_key, context_snapshot, capabilities, input_snapshot,
@@ -44,6 +49,21 @@ func (r *Repository) CreateRun(ctx context.Context, req *models.Run) error {
 		req.SessionID, req.RetryCount, req.ScheduledRetryAt, req.RequestedAt,
 		req.ErrorMessage, req.CancelReason, req.ContinuationScope)
 	return err
+}
+
+// CreateRun creates a new run queue entry in a transaction owned by this
+// method. See CreateRunTx for the field-defaulting / continuation-scope
+// derivation this delegates to.
+func (r *Repository) CreateRun(ctx context.Context, req *models.Run) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.CreateRunTx(ctx, tx, req); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func ensureRunDefaults(req *models.Run) {
@@ -164,12 +184,16 @@ func (r *Repository) ClaimRun(ctx context.Context, agentInstanceID string) (*mod
 	return &req, nil
 }
 
-// FinishRun marks a run as finished.
-func (r *Repository) FinishRun(ctx context.Context, id, status string) error {
+// FinishRun marks a run as terminal (status) and records its outcome in the
+// same statement, so the row can never hold a terminal status with a stale
+// outcome from a different transition. outcome is nil for the failed path
+// and for callers with no established semantic label (docs/specs/
+// task-delivery-ledger/spec.md, "Office run outcome").
+func (r *Repository) FinishRun(ctx context.Context, id, status string, outcome *string) error {
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE runs SET status = ?, finished_at = ? WHERE id = ?
-	`), status, now, id)
+		UPDATE runs SET status = ?, outcome = ?, finished_at = ? WHERE id = ?
+	`), status, outcome, now, id)
 	return err
 }
 
@@ -686,16 +710,29 @@ func (r *Repository) SetRunRequestedAtForTest(
 // SetRunStatusForTest forces the status + timing fields for a seeded
 // run. Test-only: lets the E2E harness land non-queued rows
 // (claimed/finished/failed/cancelled) without going through the
-// production state machine.
+// production state machine. A "finished" status defaults outcome to
+// "processed", mirroring the ordinary production call site
+// (event_subscribers.go's agent-completed path) that "finished" almost
+// always represents — the same default already applied by
+// office/dashboard's seedSummaryRun test helper (docs/specs/
+// task-delivery-ledger/spec.md, "Office run outcome"). Every other
+// status writes a NULL outcome, matching FailRun and the dormant
+// SchedulerService paths. Existing callers that only cared about
+// status keep reading as succeeded under the outcome-aware bucketing
+// with no call-site changes.
 func (r *Repository) SetRunStatusForTest(
 	ctx context.Context, runID, status string,
 	claimedAt, finishedAt *time.Time,
 ) error {
+	var outcome interface{}
+	if status == "finished" {
+		outcome = "processed"
+	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE runs
-		SET status = ?, claimed_at = ?, finished_at = ?
+		SET status = ?, outcome = ?, claimed_at = ?, finished_at = ?
 		WHERE id = ?
-	`), status, claimedAt, finishedAt, runID)
+	`), status, outcome, claimedAt, finishedAt, runID)
 	return err
 }
 

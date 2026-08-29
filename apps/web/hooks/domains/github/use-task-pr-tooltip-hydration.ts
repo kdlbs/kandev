@@ -3,17 +3,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { StoreApi } from "zustand";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { listTaskPRs } from "@/lib/api/domains/github-api";
+import { getTaskCIAutomationOptions, listTaskPRs } from "@/lib/api/domains/github-api";
 import type { AppState } from "@/lib/state/store";
 import { isCurrentWorkspaceContext } from "@/lib/state/workspace-context";
 import type { TaskPRScope } from "@/lib/state/slices/github/types";
-import type { TaskPR } from "@/lib/types/github";
+import type { TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
 
 export type TaskPRTooltipHydrationStatus = "idle" | "loading" | "unavailable";
 
 type TaskPRRequestRegistry = Map<string, Promise<TaskPR[]>>;
+type TaskAutomationRequestRegistry = Map<string, Promise<TaskCIAutomationOptions | null>>;
 
 const requestRegistryByStore = new WeakMap<StoreApi<AppState>, TaskPRRequestRegistry>();
+const automationRequestRegistryByStore = new WeakMap<
+  StoreApi<AppState>,
+  TaskAutomationRequestRegistry
+>();
 
 function hasTaskPRs(value: unknown): value is TaskPR[] {
   return Array.isArray(value) && value.length > 0;
@@ -34,6 +39,14 @@ function getRequestRegistry(store: StoreApi<AppState>): TaskPRRequestRegistry {
   if (existing) return existing;
   const registry: TaskPRRequestRegistry = new Map();
   requestRegistryByStore.set(store, registry);
+  return registry;
+}
+
+function getAutomationRequestRegistry(store: StoreApi<AppState>): TaskAutomationRequestRegistry {
+  const existing = automationRequestRegistryByStore.get(store);
+  if (existing) return existing;
+  const registry: TaskAutomationRequestRegistry = new Map();
+  automationRequestRegistryByStore.set(store, registry);
   return registry;
 }
 
@@ -104,14 +117,57 @@ function requestTaskPRs(
   return request;
 }
 
-export function useTaskPRTooltipHydration(taskId: string): {
+function requestTaskAutomationOptions(
+  store: StoreApi<AppState>,
+  scope: TaskPRScope & { workspaceId: string },
+  taskId: string,
+): Promise<TaskCIAutomationOptions | null> {
+  if (typeof getTaskCIAutomationOptions !== "function") return Promise.resolve(null);
+  const registry = getAutomationRequestRegistry(store);
+  const key = requestKey(scope.workspaceId, scope.workspaceContextGeneration, taskId);
+  const existing = registry.get(key);
+  if (existing) return existing;
+
+  const request = Promise.resolve(getTaskCIAutomationOptions(taskId, { cache: "no-store" }));
+  registry.set(key, request);
+  request.then(
+    () => {
+      if (registry.get(key) === request) registry.delete(key);
+    },
+    () => {
+      if (registry.get(key) === request) registry.delete(key);
+    },
+  );
+  return request;
+}
+
+function automationOptionsForScope(
+  options: TaskCIAutomationOptions | null | undefined,
+  workspaceId: string | null,
+): TaskCIAutomationOptions | null {
+  if (!options) return null;
+  if (options.workspace_id && workspaceId && options.workspace_id !== workspaceId) return null;
+  return options;
+}
+
+export function useTaskPRTooltipHydration(
+  taskId: string,
+  hydrationOptions: { includeAutomation?: boolean } = {},
+): {
   status: TaskPRTooltipHydrationStatus;
   hydrate: () => Promise<TaskPR[]>;
+  automationOptions: TaskCIAutomationOptions | null;
 } {
   const store = useAppStoreApi();
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const workspaceContextGeneration = useAppStore((state) => state.workspaceContextGeneration);
+  const storedAutomationOptions = useAppStore((state) =>
+    automationOptionsForScope(state.taskCIAutomation?.byTaskId?.[taskId], workspaceId),
+  );
   const [status, setStatus] = useState<TaskPRTooltipHydrationStatus>("idle");
+  const [hydratedAutomationOptions, setHydratedAutomationOptions] =
+    useState<TaskCIAutomationOptions | null>(null);
+  const includeAutomation = hydrationOptions.includeAutomation === true;
   const scopeKey = `${workspaceId ?? ""}\u0000${workspaceContextGeneration}\u0000${taskId}`;
   const scopeRef = useRef({ key: scopeKey, generation: 0 });
   if (scopeRef.current.key !== scopeKey) {
@@ -122,6 +178,7 @@ export function useTaskPRTooltipHydration(taskId: string): {
   }
   useEffect(() => {
     setStatus("idle");
+    setHydratedAutomationOptions(null);
   }, [scopeKey]);
 
   const hydrate = useCallback(() => {
@@ -141,26 +198,50 @@ export function useTaskPRTooltipHydration(taskId: string): {
     }
     const current = store.getState();
     const cached = getTaskPRsForScope(current, taskId, scope);
-    if (cached) {
-      if (isCurrentScope()) setStatus("idle");
+    const cachedAutomation = automationOptionsForScope(
+      current.taskCIAutomation?.byTaskId?.[taskId],
+      scope.workspaceId,
+    );
+    if (cached && (!includeAutomation || cachedAutomation)) {
+      if (isCurrentScope()) {
+        setHydratedAutomationOptions(cachedAutomation);
+        setStatus("idle");
+      }
       return Promise.resolve(cached);
     }
 
     if (isCurrentScope()) setStatus("loading");
-    return requestTaskPRs(store, scope, taskId).then(
-      (prs) => {
-        if (isCurrentScope()) {
-          mergeMissingTaskPRs(store, taskId, prs, scope);
-          setStatus(getTaskPRsForScope(store.getState(), taskId, scope) ? "idle" : "unavailable");
+    const prRequest = cached ? Promise.resolve(cached) : requestTaskPRs(store, scope, taskId);
+    let automationRequest: Promise<TaskCIAutomationOptions | null> = Promise.resolve(null);
+    if (includeAutomation) {
+      automationRequest = cachedAutomation
+        ? Promise.resolve(cachedAutomation)
+        : requestTaskAutomationOptions(store, scope, taskId);
+    }
+    return Promise.allSettled([prRequest, automationRequest]).then((results) => {
+      const prResult = results[0];
+      const automationResult = results[1];
+      const prs = prResult.status === "fulfilled" ? prResult.value : [];
+      const automation = automationResult.status === "fulfilled" ? automationResult.value : null;
+      if (isCurrentScope()) {
+        if (prs.length > 0) mergeMissingTaskPRs(store, taskId, prs, scope);
+        if (automation) {
+          store.getState().setTaskCIAutomationOptions(taskId, automation);
+          setHydratedAutomationOptions(automation);
         }
-        return prs;
-      },
-      () => {
-        if (isCurrentScope()) setStatus("unavailable");
-        return [];
-      },
-    );
-  }, [store, taskId, workspaceContextGeneration, workspaceId]);
+        setStatus(getTaskPRsForScope(store.getState(), taskId, scope) ? "idle" : "unavailable");
+      }
+      return prs;
+    });
+  }, [includeAutomation, store, taskId, workspaceContextGeneration, workspaceId]);
 
-  return { status, hydrate };
+  return {
+    status,
+    hydrate,
+    // Prefer the store entry because WebSocket updates replace the fetched
+    // snapshot while the disclosure remains mounted. Fall back to the local
+    // snapshot for compatibility with callers/tests that provide no store
+    // entry (for example, a request that completed before state hydration).
+    automationOptions: storedAutomationOptions ?? hydratedAutomationOptions,
+  };
 }

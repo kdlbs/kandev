@@ -39,6 +39,8 @@ See [Tasks and workflows](tasks-and-workflows.md) for event configuration and de
 
 Open **Settings > Workspaces > _Workspace_ > Automations** (`/settings/workspace/{workspaceId}/automations`) and select **New Automation**. The top-level `/settings/automations` route redirects to, or asks you to select, a workspace.
 
+![Settings > Workspaces > Default > Automations showing enabled scheduled and webhook automations, export, new automation, and run actions.](../screenshots/automation-list.png)
+
 1. Enter a required name and optional description.
 2. Select an agent profile and executor profile. Passthrough profiles are not offered. Worktree and Local-compatible profiles can run without a repository in a task-owned scratch workspace.
 3. Choose the run destination:
@@ -52,6 +54,8 @@ Open **Settings > Workspaces > _Workspace_ > Automations** (`/settings/workspace
 7. Keep the default maximum concurrency of 1 unless parallel work is safe. Reused sessions always use one active run.
 8. Choose a schedule and optional GitHub condition, or switch to webhook mode.
 9. Save, use **Run now** on the automation's page, then read what it said before widening credentials or scope.
+
+![Automation editor showing repository access, run destination, context between runs, concurrency, and Save changes.](../screenshots/automation-editor.png)
 
 The form can save an empty agent or executor selection, but launch still needs a usable profile. Scheduled, manual, webhook, and provider-triggered runs can remain repository-free. When a provider event supplies an exact repository through its established contract, Kandev uses that event context. A GitHub pull-request run with configured repository access checks out that PR's head branch and uses its base branch.
 
@@ -173,6 +177,8 @@ Trigger payloads are untrusted input. Do not let a PR body or webhook field sile
 ## Read what an automation has been doing
 
 **Automations** in the sidebar lists the workspace's automations with a health dot. Picking one opens it. **`/automations`** is the agenda across all of them, what fires next, and the recent runs of every automation in one feed. **`/automations/<id>`** is one automation's conversation: it opens on the newest run's transcript, carries the run's title snapshot and a reply box, and groups runs as Running / Completed in a rail or mobile drawer. A selected open run exposes **Stop current run**, which cancels its exact task, session, and turn without touching another run in a shared session. Configuration is behind **Details**, because an automation is configured once and read continuously.
+
+![Kandev sidebar showing the Automations section with workspace automation shortcuts.](../screenshots/automation-sidebar.png)
 
 `/runs` still resolves to the same places, so older links keep working.
 
@@ -686,14 +692,40 @@ http://127.0.0.1:<backend-port>/mcp
 
 SSE compatibility uses `/mcp/sse` with messages sent to `/mcp/message`. A reverse proxy must support long-lived streaming connections.
 
-External MCP exposes 40 tools in these groups:
+External MCP exposes 42 tools in these groups:
 
 - workspace/workflow configuration: list workspaces, workflows, repositories, and workflow steps; create, update, delete, import, or export workflows; create, update, delete, or reorder steps;
 - agents and profiles: list/update agents; create/delete profiles; list/update profiles; get/update profile MCP configuration;
 - executors: list executors and profiles; create, update, or delete executor profiles;
+- saved prompts: list prompt summaries without content or read one prompt by its exact, case-sensitive name; saved prompt tools are read-only;
 - tasks: list, create, move, delete, archive, or update task state; list a task's sessions; read task conversation; discover or answer pending clarification questions; and discover or resolve live agent permission requests.
 
 `export_workflow_kandev` takes `workflow_id` and returns one version 1 `kandev_workflow` JSON document. It omits instance IDs and timestamps. Pass its JSON text unchanged as `document` to `import_workflow_kandev` when it is within the existing 1 MiB import limit.
+
+### Read a saved prompt
+
+Use `list_shared_prompts_kandev` without arguments to discover saved prompt names. The result
+contains summaries only, so it does not include prompt content:
+
+```json
+{
+  "shared_prompts": [
+    { "name": "code-review", "builtin": true, "content_bytes": 1234 }
+  ],
+  "total": 1
+}
+```
+
+Use `get_shared_prompt_kandev` with one saved prompt name to read its full content:
+
+```json
+{ "name": "code-review" }
+```
+
+Names are case-sensitive. Kandev trims surrounding whitespace before lookup. The result contains
+`name`, `content`, `builtin`, `content_bytes`, `created_at`, and `updated_at`; it does not expose the
+internal prompt ID. An empty or unknown name returns an error without prompt content. These tools
+only read saved prompts. They do not create, update, delete, or expand `@name` references.
 
 ### Answer a pending clarification question
 

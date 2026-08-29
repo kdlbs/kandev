@@ -37,6 +37,7 @@ import type {
 import type { TaskMR } from "@/lib/types/gitlab";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
+import type { AgentProfileRecentUseApiRecord } from "@/lib/types/http-agent-profile-recent-use";
 import type { SystemMetricsSnapshot } from "./system";
 import type { AgentRuntimeAvailability } from "./agent-runtime";
 import type {
@@ -464,6 +465,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "agent.profile.created": BackendMessage<"agent.profile.created", AgentProfileChangedPayload>;
     "agent.profile.updated": BackendMessage<"agent.profile.updated", AgentProfileChangedPayload>;
     "user.settings.updated": BackendMessage<"user.settings.updated", UserSettingsUpdatedPayload>;
+    "user.agent_profile_recent_use.updated": BackendMessage<
+      "user.agent_profile_recent_use.updated",
+      AgentProfileRecentUseApiRecord
+    >;
 
     "secrets.created": BackendMessage<"secrets.created", SecretListItem>;
     "secrets.updated": BackendMessage<"secrets.updated", SecretListItem>;

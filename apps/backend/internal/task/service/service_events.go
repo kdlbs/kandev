@@ -429,7 +429,7 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 	}
 	s.addTaskWorkspaceFoldersToEvent(ctx, task, data)
 	if task.Metadata != nil {
-		data["metadata"] = task.Metadata
+		data["metadata"] = models.PublicTaskMetadata(task.Metadata)
 	}
 	if oldState != nil {
 		data["old_state"] = string(*oldState)

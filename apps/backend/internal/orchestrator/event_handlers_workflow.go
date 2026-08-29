@@ -1428,6 +1428,8 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 		AgentProfileID    string                 `json:"agent_profile_id"`
 		ExecutorID        string                 `json:"executor_id"`
 		ExecutorProfileID string                 `json:"executor_profile_id"`
+		UserID            string                 `json:"user_id"`
+		RecordRecentUse   bool                   `json:"record_recent_use"`
 		Prompt            string                 `json:"prompt"`
 		PlanMode          bool                   `json:"plan_mode"`
 		Attachments       []v1.MessageAttachment `json:"attachments"`
@@ -1446,19 +1448,25 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 		if !claimOK {
 			return
 		}
-		_, launchErr := s.LaunchSession(launchCtx, &LaunchSessionRequest{
+		launchResp, launchErr := s.LaunchSession(launchCtx, &LaunchSessionRequest{
 			TaskID: task.ID, Intent: launchIntent, AgentProfileID: intent.AgentProfileID,
 			ExecutorID: intent.ExecutorID, ExecutorProfileID: intent.ExecutorProfileID,
 			WorkflowStepID: task.WorkflowStepID, Prompt: intent.Prompt,
 			PlanMode: intent.PlanMode, Attachments: intent.Attachments, LaunchWorkspace: true,
 		})
-		if launchErr != nil {
+		if launchErr != nil || launchResp == nil || !launchResp.Success {
+			if launchErr == nil {
+				launchErr = errors.New("deferred launch returned an unsuccessful response")
+			}
 			s.logger.Error(eventName+": failed to launch deferred task", zap.String("task_id", task.ID), zap.Error(launchErr))
 			s.restoreDeferredLaunch(launchCtx, task.ID, raw, eventName, metadataClaimed)
 			if restoreQueuePromotion {
 				s.restoreTaskLifecycleToken(launchCtx, task.ID, models.MetaKeyQueuePromotionPending, eventName)
 			}
 			return
+		}
+		if intent.RecordRecentUse {
+			s.recordSuccessfulDeferredTaskProfileAsync(launchCtx, intent.UserID, launchResp.AgentProfileID)
 		}
 		delete(task.Metadata, models.MetaKeyDeferredLaunch)
 		if metadataClaimed {
@@ -2276,9 +2284,9 @@ func (s *Service) completeAndStopSession(ctx context.Context, taskID string, ses
 }
 
 // prepareWorkflowStepSession resolves the session that must execute a workflow
-// step before any on_enter action runs. Passthrough sessions and steps without
-// an effective profile keep the current session. Profile changes delegate to
-// the existing reuse/create lifecycle helpers.
+// step before any on_enter action runs. Steps without an effective profile keep
+// the current session. Profile changes delegate to the existing reuse/create
+// lifecycle helpers regardless of the source session transport.
 func (s *Service) prepareWorkflowStepSession(
 	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
 ) (*models.TaskSession, bool, error) {
@@ -2287,9 +2295,6 @@ func (s *Service) prepareWorkflowStepSession(
 	}
 	if step == nil {
 		return nil, false, fmt.Errorf("workflow step is nil")
-	}
-	if s.agentManager.IsPassthroughSession(ctx, session.ID) {
-		return session, false, nil
 	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
 	if effectiveProfile == "" || effectiveProfile == session.AgentProfileID {
@@ -2322,7 +2327,7 @@ func (s *Service) preflightWorkflowStepCredentials(
 	currentSession *models.TaskSession,
 	targetStep *wfmodels.WorkflowStep,
 ) error {
-	if currentSession == nil || targetStep == nil || s.agentManager.IsPassthroughSession(ctx, currentSession.ID) {
+	if currentSession == nil || targetStep == nil {
 		return nil
 	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, targetStep)

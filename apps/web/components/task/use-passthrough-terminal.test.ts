@@ -4,11 +4,55 @@ import {
   computeCanConnect,
   computeTerminalPaneState,
   isEnvironmentEnded,
+  shouldGuardPassthroughEscape,
 } from "./passthrough-terminal";
 import { reconnectDelayMs, startReconnectLoop } from "./ws-reconnect";
 import type { Terminal } from "@xterm/xterm";
 
 const WS_BASE_URL = "ws://localhost:38429";
+
+function keyboardEvent(key: string, target: EventTarget, modifiers: KeyboardEventInit = {}) {
+  const event = new KeyboardEvent("keydown", { key, ...modifiers });
+  Object.defineProperty(event, "target", { value: target });
+  return event;
+}
+
+describe("shouldGuardPassthroughEscape", () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("@covers AC-UI-QUICK-TERMINAL-001.11 claims unmodified Escape from xterm", () => {
+    const textarea = document.createElement("textarea");
+    document.body.append(textarea);
+    textarea.focus();
+
+    expect(shouldGuardPassthroughEscape(keyboardEvent("Escape", textarea), textarea)).toBe(true);
+  });
+
+  it("does not claim modified Escape or Escape from another focused control", () => {
+    const textarea = document.createElement("textarea");
+    const button = document.createElement("button");
+    document.body.append(textarea, button);
+
+    expect(
+      shouldGuardPassthroughEscape(keyboardEvent("Escape", textarea, { ctrlKey: true }), textarea),
+    ).toBe(false);
+
+    button.focus();
+    expect(shouldGuardPassthroughEscape(keyboardEvent("Escape", button), textarea)).toBe(false);
+  });
+
+  it("lets the dialog handle Escape after the passthrough connection ends", () => {
+    const textarea = document.createElement("textarea");
+    document.body.append(textarea);
+    textarea.focus();
+
+    expect(shouldGuardPassthroughEscape(keyboardEvent("Escape", textarea), textarea, false)).toBe(
+      false,
+    );
+  });
+});
 
 describe("computeCanConnect", () => {
   it("lets the backend wait for an agent passthrough session that is not cached as ready", () => {

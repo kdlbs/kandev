@@ -15,6 +15,7 @@ import { t } from "@/lib/i18n";
 import { useFreshBranchConsent } from "@/components/task-create-dialog-fresh-branch-consent";
 import { queueTaskCreateLastUsedFromPayload } from "@/components/task-create-dialog-handlers";
 import { ApiError } from "@/lib/api/client";
+import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
 
 const GENERIC_ERROR_KEY = "common:anErrorOccurred";
 
@@ -40,6 +41,15 @@ function notifyQueuedTask(
     title: t("task:taskQueued"),
     description: t("task:taskQueuedWipLimit"),
   });
+}
+
+function shouldNavigateAfterTaskCreate(
+  withAgent: boolean,
+  isPassthroughProfile: boolean,
+  planMode: boolean | undefined,
+  sessionId: string | null,
+) {
+  return (withAgent && isPassthroughProfile) || !!(planMode && sessionId);
 }
 
 type NoAgentTaskRequirements = {
@@ -142,6 +152,7 @@ export function useTaskSubmitHandlers({
   const { toast } = useToast();
   const setActiveDocument = useAppStore((state) => state.setActiveDocument);
   const setPlanMode = useAppStore((state) => state.setPlanMode);
+  const applyAgentProfileRecentUse = useAppStore((state) => state.applyAgentProfileRecentUse);
   const isStartedEdit = computeIsTaskStarted(isEditMode, editingTask);
 
   const isFreshBranchActive =
@@ -316,7 +327,14 @@ export function useTaskSubmitHandlers({
         prompt: trimmedDescription,
         attachments: toMessageAttachments(attachments),
       });
-      await launchSession(request);
+      const response = await launchSession(request);
+      if (response.session_id) {
+        recordAgentProfileRecentUseBestEffort(
+          "task_session",
+          response.agent_profile_id ?? agentProfileId,
+          (record) => applyAgentProfileRecentUse("task_session", record),
+        );
+      }
 
       onOpenChange(false);
       router.push(linkToTask(taskId));
@@ -340,6 +358,7 @@ export function useTaskSubmitHandlers({
     toast,
     descriptionInputRef,
     setIsCreatingSession,
+    applyAgentProfileRecentUse,
   ]);
 
   const performTaskUpdate = useCallback(async () => {
@@ -389,6 +408,13 @@ export function useTaskSubmitHandlers({
           });
           const response = await launchSession(request);
           taskSessionId = response?.session_id ?? null;
+          if (taskSessionId) {
+            recordAgentProfileRecentUseBestEffort(
+              "task_session",
+              response.agent_profile_id ?? agentProfileId,
+              (record) => applyAgentProfileRecentUse("task_session", record),
+            );
+          }
         } catch (error) {
           console.error("[TaskCreateDialog] failed to start agent:", error);
         }
@@ -419,6 +445,7 @@ export function useTaskSubmitHandlers({
     refreshStaleBranchPolicies,
     toast,
     setIsCreatingTask,
+    applyAgentProfileRecentUse,
   ]);
 
   const handleUpdateWithoutAgent = useCallback(async () => {
@@ -493,8 +520,12 @@ export function useTaskSubmitHandlers({
       if (!taskResponse) return;
       notifyQueuedTask(taskResponse, toast);
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
-      const willNavigate =
-        (opts.withAgent && isPassthroughProfile) || !!(opts.planMode && newSessionId);
+      const willNavigate = shouldNavigateAfterTaskCreate(
+        opts.withAgent,
+        isPassthroughProfile,
+        opts.planMode,
+        newSessionId,
+      );
       onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId, willNavigate });
       clearDraft();
       queueTaskCreateLastUsedFromPayload(submittedPayload);
@@ -566,6 +597,13 @@ export function useTaskSubmitHandlers({
     });
     const response = await launchSession(request);
     const newSessionId = response?.session_id ?? null;
+    if (newSessionId) {
+      recordAgentProfileRecentUseBestEffort(
+        "task_session",
+        response.agent_profile_id ?? agentProfileId,
+        (record) => applyAgentProfileRecentUse("task_session", record),
+      );
+    }
     onSuccess?.(updatedTask, "edit", { taskSessionId: newSessionId });
     onOpenChange(false);
     if (newSessionId) {
@@ -587,6 +625,7 @@ export function useTaskSubmitHandlers({
     setActiveDocument,
     setPlanMode,
     router,
+    applyAgentProfileRecentUse,
   ]);
 
   const handleCreateWithPlanMode = useCallback(async () => {

@@ -2,6 +2,9 @@ package github
 
 import (
 	"context"
+	"errors"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -21,6 +24,7 @@ func TestStoreTaskPRAgentAutomationSchema(t *testing.T) {
 			"pr_scope_migrated_at",
 		},
 		"github_task_ci_pr_state": {
+			"merge_retry_pending",
 			"review_request_initialized",
 			"last_review_requested",
 			"last_observed_pr_state",
@@ -50,6 +54,114 @@ func TestStoreTaskPRAgentAutomationSchema(t *testing.T) {
 				t.Errorf("%s.%s is missing", table, column)
 			}
 		}
+	}
+}
+
+func TestStoreRetryMergeAuthorizesOneSameSignatureAttempt(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	attempt := TaskCIMergeAttempt{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+		Signature: "ready-v1", AttemptedHeadSHA: "head-v1", AttemptedAt: time.Now().UTC(),
+	}
+	if err := store.RecordTaskCIMergeAttempt(ctx, attempt); err != nil {
+		t.Fatalf("reserve initial attempt: %v", err)
+	}
+	if err := store.RecordTaskCIMergeAttemptResult(
+		ctx, attempt.TaskID, attempt.RepositoryID, attempt.PRNumber,
+		attempt.Signature, TaskCIMergeResultFailed, "merge PR: provider unavailable",
+	); err != nil {
+		t.Fatalf("record failed attempt: %v", err)
+	}
+
+	if err := store.AuthorizeTaskCIMergeRetry(
+		ctx, attempt.TaskID, attempt.RepositoryID, attempt.PRNumber, time.Now().UTC(),
+	); err != nil {
+		t.Fatalf("authorize retry: %v", err)
+	}
+	state, err := store.GetTaskCIPRState(ctx, attempt.TaskID, attempt.RepositoryID, attempt.PRNumber)
+	if err != nil {
+		t.Fatalf("get authorized state: %v", err)
+	}
+	if state == nil || !state.MergeRetryPending {
+		t.Fatalf("retry authorization not persisted: %+v", state)
+	}
+
+	if err := store.RecordTaskCIMergeAttempt(ctx, attempt); err != nil {
+		t.Fatalf("consume retry authorization: %v", err)
+	}
+	state, err = store.GetTaskCIPRState(ctx, attempt.TaskID, attempt.RepositoryID, attempt.PRNumber)
+	if err != nil {
+		t.Fatalf("get consumed state: %v", err)
+	}
+	if state == nil || state.MergeRetryPending {
+		t.Fatalf("retry authorization was not consumed: %+v", state)
+	}
+	if err := store.RecordTaskCIMergeAttempt(ctx, attempt); !errors.Is(err, ErrTaskCIMergeAttemptAlreadyReserved) {
+		t.Fatalf("second same-signature retry error = %v, want %v", err, ErrTaskCIMergeAttemptAlreadyReserved)
+	}
+}
+
+func TestStoreRetryMergeRejectsAcceptedAndDuplicateRequests(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	attempt := TaskCIMergeAttempt{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+		Signature: "ready-v1", AttemptedHeadSHA: "head-v1", AttemptedAt: time.Now().UTC(),
+	}
+	if err := store.RecordTaskCIMergeAttempt(ctx, attempt); err != nil {
+		t.Fatalf("reserve attempt: %v", err)
+	}
+	if err := store.RecordTaskCIMergeAttemptResult(
+		ctx, attempt.TaskID, attempt.RepositoryID, attempt.PRNumber,
+		attempt.Signature, TaskCIMergeResultFailed, "merge PR: provider unavailable",
+	); err != nil {
+		t.Fatalf("record failure: %v", err)
+	}
+	if err := store.AuthorizeTaskCIMergeRetry(
+		ctx, attempt.TaskID, attempt.RepositoryID, attempt.PRNumber, time.Now().UTC(),
+	); err != nil {
+		t.Fatalf("authorize first retry: %v", err)
+	}
+	if err := store.AuthorizeTaskCIMergeRetry(
+		ctx, attempt.TaskID, attempt.RepositoryID, attempt.PRNumber, time.Now().UTC(),
+	); !errors.Is(err, ErrTaskCIMergeRetryNotAllowed) {
+		t.Fatalf("duplicate authorization error = %v, want %v", err, ErrTaskCIMergeRetryNotAllowed)
+	}
+
+	if err := store.RecordTaskCIMergeAttempt(ctx, TaskCIMergeAttempt{
+		TaskID: attempt.TaskID, RepositoryID: attempt.RepositoryID, PRNumber: 43,
+		Signature: "ready-v2", AttemptedHeadSHA: "head-v2", AttemptedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("reserve accepted attempt: %v", err)
+	}
+	if err := store.RecordTaskCIMergeAttemptResult(
+		ctx, attempt.TaskID, attempt.RepositoryID, 43,
+		"ready-v2", TaskCIMergeResultAccepted, "",
+	); err != nil {
+		t.Fatalf("record accepted attempt: %v", err)
+	}
+	if err := store.AuthorizeTaskCIMergeRetry(
+		ctx, attempt.TaskID, attempt.RepositoryID, 43, time.Now().UTC(),
+	); !errors.Is(err, ErrTaskCIMergeRetryNotAllowed) {
+		t.Fatalf("accepted authorization error = %v, want %v", err, ErrTaskCIMergeRetryNotAllowed)
+	}
+}
+
+func TestStoreRetryMergeAllowsExpiredInFlightAttempt(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	attempt := TaskCIMergeAttempt{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+		Signature: "ready-v1", AttemptedHeadSHA: "head-v1", AttemptedAt: time.Now().UTC().Add(-3 * time.Minute),
+	}
+	if err := store.RecordTaskCIMergeAttempt(ctx, attempt); err != nil {
+		t.Fatalf("reserve stale attempt: %v", err)
+	}
+	if err := store.AuthorizeTaskCIMergeRetry(
+		ctx, attempt.TaskID, attempt.RepositoryID, attempt.PRNumber, time.Now().UTC(),
+	); err != nil {
+		t.Fatalf("authorize expired retry: %v", err)
 	}
 }
 
@@ -508,6 +620,244 @@ func TestStoreTaskCIMergeQueueRecoveryState(t *testing.T) {
 	}
 	if state.LastQueueFixEventID != "removal-a" || state.LastQueueRemovalCause != "checks_failed" || state.AutoFixRoundCount != 1 {
 		t.Fatalf("queue repair state = %+v, want removal checkpoint and one round", state)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.2
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.8
+func TestStoreTaskCIMergeAttemptJournalSchema(t *testing.T) {
+	store := newTestStore(t)
+	columns, err := store.tableColumns("github_task_ci_pr_state")
+	if err != nil {
+		t.Fatalf("read journal columns: %v", err)
+	}
+	for _, name := range []string{"last_merge_result", "last_error_kind"} {
+		if _, ok := columns[name]; !ok {
+			t.Errorf("missing journal column %q", name)
+		}
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.2
+func TestStoreTaskCIMergeAttemptReservationBlocksUnchangedAttempt(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	first := time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)
+	attempt := TaskCIMergeAttempt{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+		Signature: "ready-head-a", AttemptedHeadSHA: "head-a", AttemptedAt: first,
+	}
+	if err := store.RecordTaskCIMergeAttempt(ctx, attempt); err != nil {
+		t.Fatalf("reserve first merge attempt: %v", err)
+	}
+	attempt.AttemptedAt = first.Add(time.Minute)
+	if err := store.RecordTaskCIMergeAttempt(ctx, attempt); err == nil ||
+		!strings.Contains(err.Error(), "already reserved") {
+		t.Fatalf("reserve unchanged attempt error = %v, want already reserved", err)
+	}
+
+	state, err := store.GetTaskCIPRState(ctx, "task-1", "repo-1", 42)
+	if err != nil {
+		t.Fatalf("get merge attempt: %v", err)
+	}
+	if state.LastMergeResult != TaskCIMergeResultInFlight {
+		t.Fatalf("merge result = %q, want in_flight", state.LastMergeResult)
+	}
+	if state.LastMergeAttemptAt == nil || !state.LastMergeAttemptAt.Equal(first) {
+		t.Fatalf("attempt time = %v, want first reservation %v", state.LastMergeAttemptAt, first)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.5
+func TestStoreTaskCIMergeQueueObservationReconcilesOnlyAutoMergeError(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if _, err := store.db.Exec(`
+		INSERT INTO github_task_ci_pr_state (
+			task_id, repository_id, pr_number, last_merge_signature, last_merge_result,
+			last_error, last_error_kind, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"task-1", "repo-1", 42, "merge-a", TaskCIMergeResultFailed,
+		"merge PR: provider status was lost", TaskCIErrorKindAutoMerge, now, now); err != nil {
+		t.Fatalf("seed failed merge attempt: %v", err)
+	}
+	if err := store.RecordTaskCIMergeQueueObservation(ctx, TaskCIMergeQueueObservation{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+		ActiveQueueHeadSHA: "head-a", MergeSignature: "merge-a",
+	}); err != nil {
+		t.Fatalf("record queue observation: %v", err)
+	}
+	state, err := store.GetTaskCIPRState(ctx, "task-1", "repo-1", 42)
+	if err != nil {
+		t.Fatalf("get reconciled attempt: %v", err)
+	}
+	if state.LastMergeResult != TaskCIMergeResultAccepted || state.LastError != nil || state.LastErrorKind != "" {
+		t.Fatalf("reconciled state = %+v, want accepted with cleared merge error", state)
+	}
+
+	if _, err := store.db.Exec(`
+		UPDATE github_task_ci_pr_state
+		SET last_error = ?, last_error_kind = ?
+		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
+		"auto-fix failed", "auto_fix", "task-1", "repo-1", 42); err != nil {
+		t.Fatalf("seed unrelated error: %v", err)
+	}
+	if err := store.RecordTaskCIMergeQueueObservation(ctx, TaskCIMergeQueueObservation{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+		ActiveQueueHeadSHA: "head-a", MergeSignature: "merge-a",
+	}); err != nil {
+		t.Fatalf("record repeated queue observation: %v", err)
+	}
+	state, err = store.GetTaskCIPRState(ctx, "task-1", "repo-1", 42)
+	if err != nil {
+		t.Fatalf("get unrelated error state: %v", err)
+	}
+	if state.LastError == nil || *state.LastError != "auto-fix failed" || state.LastErrorKind != "auto_fix" {
+		t.Fatalf("unrelated error was cleared: %+v", state)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.2
+func TestStoreTaskCIMergeAttemptResultRecordsFailureAtomically(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	if err := store.RecordTaskCIMergeAttempt(ctx, TaskCIMergeAttempt{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+		Signature: "ready-head-a", AttemptedHeadSHA: "head-a",
+	}); err != nil {
+		t.Fatalf("reserve merge attempt: %v", err)
+	}
+	message := "merge PR: GitHub response was lost"
+	if err := store.RecordTaskCIMergeAttemptResult(
+		ctx, "task-1", "repo-1", 42, "ready-head-a", TaskCIMergeResultFailed, message,
+	); err != nil {
+		t.Fatalf("record failed merge attempt: %v", err)
+	}
+	state, err := store.GetTaskCIPRState(ctx, "task-1", "repo-1", 42)
+	if err != nil {
+		t.Fatalf("get failed merge attempt: %v", err)
+	}
+	if state.LastMergeResult != TaskCIMergeResultFailed || state.LastErrorKind != TaskCIErrorKindAutoMerge {
+		t.Fatalf("failed merge state = %+v", state)
+	}
+	if state.LastError == nil || *state.LastError != message {
+		t.Fatalf("last error = %v, want %q", state.LastError, message)
+	}
+	if err := store.MarkTaskCIAutoFixExhausted(
+		ctx, "task-1", "repo-1", 42, "CI auto-fix paused after the round limit",
+	); err != nil {
+		t.Fatalf("record auto-fix exhaustion: %v", err)
+	}
+	state, err = store.GetTaskCIPRState(ctx, "task-1", "repo-1", 42)
+	if err != nil {
+		t.Fatalf("get auto-fix exhaustion state: %v", err)
+	}
+	if state.LastError == nil || *state.LastError != "CI auto-fix paused after the round limit" ||
+		state.LastErrorKind != TaskCIErrorKindAutoFix {
+		t.Fatalf("auto-fix error did not replace merge error atomically: %+v", state)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.3
+func TestStoreTaskCIMergeAttemptResultIsSignatureBound(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	for _, signature := range []string{"ready-head-a", "ready-head-b"} {
+		if err := store.RecordTaskCIMergeAttempt(ctx, TaskCIMergeAttempt{
+			TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+			Signature: signature, AttemptedHeadSHA: strings.TrimPrefix(signature, "ready-"),
+		}); err != nil {
+			t.Fatalf("reserve %s: %v", signature, err)
+		}
+	}
+	err := store.RecordTaskCIMergeAttemptResult(
+		ctx, "task-1", "repo-1", 42, "ready-head-a", TaskCIMergeResultAccepted, "",
+	)
+	if !errors.Is(err, ErrTaskCIMergeAttemptNotFound) {
+		t.Fatalf("stale result error = %v, want attempt not found", err)
+	}
+	state, err := store.GetTaskCIPRState(ctx, "task-1", "repo-1", 42)
+	if err != nil {
+		t.Fatalf("get current attempt: %v", err)
+	}
+	if state.LastMergeSignature != "ready-head-b" || state.LastMergeResult != TaskCIMergeResultInFlight {
+		t.Fatalf("current attempt was overwritten: %+v", state)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.2
+func TestStoreTaskCIMergeAttemptReservationIsConcurrentSafe(t *testing.T) {
+	store := newTestStore(t)
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	attempt := TaskCIMergeAttempt{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+		Signature: "ready-head-a", AttemptedHeadSHA: "head-a",
+	}
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			results <- store.RecordTaskCIMergeAttempt(context.Background(), attempt)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	reserved, blocked := 0, 0
+	for err := range results {
+		switch {
+		case err == nil:
+			reserved++
+		case errors.Is(err, ErrTaskCIMergeAttemptAlreadyReserved):
+			blocked++
+		default:
+			t.Fatalf("reserve merge attempt: %v", err)
+		}
+	}
+	if reserved != 1 || blocked != 1 {
+		t.Fatalf("reserved=%d blocked=%d, want one each", reserved, blocked)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.8
+func TestStoreTaskCIAutoMergeErrorKindBackfillIsNarrow(t *testing.T) {
+	store := newTestStore(t)
+	now := time.Now().UTC()
+	for _, row := range []struct {
+		repositoryID string
+		message      string
+	}{
+		{repositoryID: "known", message: "merge PR: GitHub unavailable"},
+		{repositoryID: "unknown", message: "review prompt failed"},
+	} {
+		if _, err := store.db.Exec(`
+			INSERT INTO github_task_ci_pr_state (
+				task_id, repository_id, pr_number, last_error, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?)`,
+			"task-1", row.repositoryID, 42, row.message, now, now); err != nil {
+			t.Fatalf("seed %s error: %v", row.repositoryID, err)
+		}
+	}
+	if err := store.backfillTaskCIAutoMergeErrorKinds(); err != nil {
+		t.Fatalf("backfill error kinds: %v", err)
+	}
+	known, err := store.GetTaskCIPRState(context.Background(), "task-1", "known", 42)
+	if err != nil {
+		t.Fatalf("get known error: %v", err)
+	}
+	unknown, err := store.GetTaskCIPRState(context.Background(), "task-1", "unknown", 42)
+	if err != nil {
+		t.Fatalf("get unknown error: %v", err)
+	}
+	if known.LastErrorKind != TaskCIErrorKindAutoMerge {
+		t.Fatalf("known error kind = %q, want auto_merge", known.LastErrorKind)
+	}
+	if unknown.LastErrorKind != "" {
+		t.Fatalf("unknown error kind = %q, want empty", unknown.LastErrorKind)
 	}
 }
 

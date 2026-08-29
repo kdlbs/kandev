@@ -31,21 +31,27 @@ type handlerRepo interface {
 }
 
 type TaskHandlers struct {
-	service                    *service.Service
-	orchestrator               OrchestratorStarter
-	foregroundActivity         dto.ForegroundActivityProvider
-	cancellationPending        dto.CancellationPendingProvider
-	repo                       handlerRepo
-	planService                *service.PlanService
-	handoffSvc                 *service.HandoffService
-	workspaceRestorer          WorkspaceQuarantineRestorer
-	unarchiveRecoveryTimeout   time.Duration
-	taskCreateLastUsedRecorder taskCreateLastUsedRecorder
-	onTaskCreatedWithPR        func(ctx context.Context, taskID, sessionID, prURL, branch string)
-	logger                     *logger.Logger
+	service                       *service.Service
+	orchestrator                  OrchestratorStarter
+	foregroundActivity            dto.ForegroundActivityProvider
+	cancellationPending           dto.CancellationPendingProvider
+	repo                          handlerRepo
+	planService                   *service.PlanService
+	handoffSvc                    *service.HandoffService
+	workspaceRestorer             WorkspaceQuarantineRestorer
+	unarchiveRecoveryTimeout      time.Duration
+	taskCreateLastUsedRecorder    taskCreateLastUsedRecorder
+	agentProfileRecentUseRecorder agentProfileRecentUseRecorder
+	onTaskCreatedWithPR           func(ctx context.Context, taskID, sessionID, prURL, branch string)
+	logger                        *logger.Logger
 }
 
 const defaultUnarchiveRecoveryTimeout = 30 * time.Second
+
+// agentProfileRecentUseTimeout bounds detached preference persistence. The
+// launch response does not wait for this best-effort write, and a stuck store
+// must not leave an unbounded background goroutine behind.
+const agentProfileRecentUseTimeout = 5 * time.Second
 
 func (h *TaskHandlers) detachedRecoveryTimeout() time.Duration {
 	if h.unarchiveRecoveryTimeout > 0 {
@@ -60,6 +66,14 @@ type WorkspaceQuarantineRestorer interface {
 
 type taskCreateLastUsedRecorder interface {
 	RecordTaskCreateLastUsed(ctx context.Context, patch usermodels.TaskCreateLastUsed) error
+}
+
+type agentProfileRecentUseRecorder interface {
+	RecordAgentProfileRecentUse(
+		ctx context.Context,
+		contextValue usermodels.AgentProfileRecentUseContext,
+		profileID string,
+	) (*usermodels.AgentProfileRecentUse, error)
 }
 
 // SetHandoffService wires the office task-handoffs service used by the
@@ -88,6 +102,21 @@ func (h *TaskHandlers) SetWorkspaceQuarantineRestorer(restorer WorkspaceQuaranti
 
 func (h *TaskHandlers) SetTaskCreateLastUsedRecorder(recorder taskCreateLastUsedRecorder) {
 	h.taskCreateLastUsedRecorder = recorder
+}
+
+func (h *TaskHandlers) SetAgentProfileRecentUseRecorder(recorder agentProfileRecentUseRecorder) {
+	h.agentProfileRecentUseRecorder = recorder
+}
+
+func (h *TaskHandlers) recordSuccessfulTaskCreateProfileAsync(ctx context.Context, profileID string) {
+	if h.agentProfileRecentUseRecorder == nil || profileID == "" {
+		return
+	}
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), agentProfileRecentUseTimeout)
+	go func() {
+		defer cancel()
+		h.recordSuccessfulTaskCreateProfile(recordCtx, profileID)
+	}()
 }
 
 // SetOnTaskCreatedWithPR sets a callback invoked when a task is created with a PR URL

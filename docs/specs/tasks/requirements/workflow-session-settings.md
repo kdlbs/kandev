@@ -20,6 +20,8 @@ This document is the migrated task-system source for the capability. The source 
 #### Acceptance criteria
 
 - **AC-TASKS-WORKFLOW-SESSION-SETTINGS-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
+- **AC-TASKS-WORKFLOW-SESSION-SETTINGS-001.2:** When a fixed step profile differs from the active session profile, Kandev shall create or activate a session for that profile. Kandev shall route the step entry actions to this session. This rule applies to an active CLI passthrough session.
+- **AC-TASKS-WORKFLOW-SESSION-SETTINGS-001.3:** When Kandev cannot validate or prepare a fixed-profile session, it shall not run the destination step on the previous profile. Kandev shall leave the previous session recoverable.
 
 ## Migrated source detail
 

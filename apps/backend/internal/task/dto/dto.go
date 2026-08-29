@@ -882,7 +882,7 @@ func FromTaskWithSessionInfo(
 		ArchivedAt:                  task.ArchivedAt,
 		CreatedAt:                   task.CreatedAt,
 		UpdatedAt:                   task.UpdatedAt,
-		Metadata:                    task.Metadata,
+		Metadata:                    models.PublicTaskMetadata(task.Metadata),
 		Interrupted:                 task.Metadata[models.MetaKeyInterruptedAt] != nil,
 		AutoStartFailed:             task.Metadata[models.MetaKeyAutoStartFailed] != nil,
 		// Office extensions. AssigneeAgentProfileID is a read-time

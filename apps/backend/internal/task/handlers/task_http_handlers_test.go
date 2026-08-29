@@ -38,10 +38,12 @@ import (
 // LaunchSession to short-circuit the two-phase create flow before its async
 // start goroutine spawns (keeping assertions race-free).
 type captureOrchestrator struct {
-	mu                 sync.Mutex
-	requests           []*orchestrator.LaunchSessionRequest
-	prepErr            error
-	startCreatedCalled chan struct{}
+	mu                   sync.Mutex
+	requests             []*orchestrator.LaunchSessionRequest
+	prepErr              error
+	startCreatedErr      error
+	startCreatedResponse *orchestrator.LaunchSessionResponse
+	startCreatedCalled   chan struct{}
 }
 
 func (m *captureOrchestrator) LaunchSession(_ context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
@@ -54,10 +56,31 @@ func (m *captureOrchestrator) LaunchSession(_ context.Context, req *orchestrator
 		default:
 		}
 	}
+	if req.Intent == orchestrator.IntentStartCreated {
+		if m.startCreatedErr != nil {
+			return nil, m.startCreatedErr
+		}
+		if m.startCreatedResponse != nil {
+			return m.startCreatedResponse, nil
+		}
+	}
 	if m.prepErr != nil {
 		return nil, m.prepErr
 	}
 	return &orchestrator.LaunchSessionResponse{SessionID: "sess-1"}, nil
+}
+
+type captureAgentProfileRecentUseRecorder struct {
+	profileIDs chan string
+}
+
+func (r *captureAgentProfileRecentUseRecorder) RecordAgentProfileRecentUse(
+	_ context.Context,
+	_ usermodels.AgentProfileRecentUseContext,
+	profileID string,
+) (*usermodels.AgentProfileRecentUse, error) {
+	r.profileIDs <- profileID
+	return &usermodels.AgentProfileRecentUse{ProfileIDs: []string{profileID}}, nil
 }
 
 func (m *captureOrchestrator) EnsureSession(_ context.Context, _ string, _ ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error) {
@@ -273,7 +296,7 @@ func TestStartAgentForNewTask_SetsDeferredStart(t *testing.T) {
 	body := httpCreateTaskRequest{StartAgent: true, AgentProfileID: "profile-1"}
 	dispatch := h.prepareStartAgentSession(context.Background(), resp, "task-1", body, "step-1")
 	require.Nil(t, dispatch, "a prepare failure must not produce a dispatch")
-	h.dispatchTaskSession("task-1", "do the thing", body, dispatch)
+	h.dispatchTaskSession(context.Background(), "task-1", "do the thing", body, dispatch)
 
 	orch.mu.Lock()
 	defer orch.mu.Unlock()
@@ -282,6 +305,61 @@ func TestStartAgentForNewTask_SetsDeferredStart(t *testing.T) {
 	assert.Equal(t, orchestrator.IntentPrepare, prep.Intent)
 	assert.True(t, prep.DeferredStart,
 		"sync prepare must defer the start so the passthrough PTY is launched with the prompt by the follow-up IntentStartCreated")
+}
+
+func TestDispatchTaskSessionRecordsOnlyTheSuccessfulEffectiveProfile(t *testing.T) {
+	t.Run("successful launch uses the resolved profile", func(t *testing.T) {
+		recorder := &captureAgentProfileRecentUseRecorder{profileIDs: make(chan string, 1)}
+		orch := &captureOrchestrator{startCreatedResponse: &orchestrator.LaunchSessionResponse{
+			Success:        true,
+			SessionID:      "session-1",
+			AgentProfileID: "workflow-profile",
+		}}
+		h := &TaskHandlers{
+			orchestrator:                  orch,
+			agentProfileRecentUseRecorder: recorder,
+			logger:                        newTestLogger(t),
+		}
+
+		h.dispatchTaskSession(
+			context.Background(),
+			"task-1",
+			"do the thing",
+			httpCreateTaskRequest{AgentProfileID: "requested-profile"},
+			&startAgentDispatch{sessionID: "session-1"},
+		)
+
+		select {
+		case profileID := <-recorder.profileIDs:
+			assert.Equal(t, "workflow-profile", profileID)
+		case <-time.After(time.Second):
+			t.Fatal("successful launch did not record profile recency")
+		}
+	})
+
+	t.Run("failed launch does not record recency", func(t *testing.T) {
+		recorder := &captureAgentProfileRecentUseRecorder{profileIDs: make(chan string, 1)}
+		orch := &captureOrchestrator{startCreatedErr: errors.New("launch failed")}
+		h := &TaskHandlers{
+			orchestrator:                  orch,
+			agentProfileRecentUseRecorder: recorder,
+			logger:                        newTestLogger(t),
+		}
+
+		h.dispatchTaskSession(
+			context.Background(),
+			"task-1",
+			"do the thing",
+			httpCreateTaskRequest{AgentProfileID: "requested-profile"},
+			&startAgentDispatch{sessionID: "session-1"},
+		)
+
+		select {
+		case profileID := <-recorder.profileIDs:
+			t.Fatalf("failed launch recorded profile %q", profileID)
+		case <-time.After(50 * time.Millisecond):
+		}
+	})
 }
 
 // configChatRepo returns a non-nil workspace so resolveConfigChatDefaults does

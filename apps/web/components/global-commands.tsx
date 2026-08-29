@@ -118,6 +118,7 @@ export function GlobalCommands() {
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const handleOpenQuickChat = useQuickChatLauncher(activeWorkspaceId, "chat", {
     silentFocusReturn: false,
+    toggleWhenOpen: true,
   });
   const handleOpenConfigChat = useQuickChatLauncher(activeWorkspaceId, "config", {
     silentFocusReturn: false,
@@ -172,11 +173,15 @@ export function GlobalCommands() {
   );
 
   useRegisterCommands(commands);
-  useKeyboardShortcut(quickChatShortcut, handleOpenQuickChat);
   // Order matters: useAppShortcuts (core) must register its capture-phase
-  // keydown listener before usePluginShortcuts so core shortcuts win when a
-  // combo matches both — see the precedence note on each hook.
+  // keydown listener before the Quick Chat toggle and plugin shortcuts. This
+  // preserves core precedence, while the toggle still runs before xterm can
+  // consume a configured shortcut.
   useAppShortcuts();
+  useKeyboardShortcut(quickChatShortcut, handleOpenQuickChat, {
+    capture: true,
+    stopPropagation: true,
+  });
   usePluginShortcuts();
 
   return <SettingsDiscoveryCommands />;

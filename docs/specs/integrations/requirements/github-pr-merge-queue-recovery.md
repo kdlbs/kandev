@@ -111,6 +111,8 @@ same-head retry loop or reversing an intentional queue removal.
 ## Related requirements
 
 - [GitHub PR Merge Queue](github-pr-merge-queue.md)
+  `REQ-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002` owns attempt reservation,
+  explicit retry, and stale auto-merge error reconciliation.
 - [Task PR Automation Controls](../../ui/requirements/ci-pr-automation.md)
 - [Merge Queue Recovery Controls](../../ui/requirements/ci-pr-merge-queue-recovery-controls.md)
 

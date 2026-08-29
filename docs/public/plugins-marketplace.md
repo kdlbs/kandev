@@ -47,6 +47,8 @@ Open **Settings > Plugins > Browse**. Each plugin shows as a card with its
 name, description, author, categories, source repository link, latest version,
 and GitHub star count. To narrow the list:
 
+![Settings > Plugins > Browse showing the plugin marketplace with search, category, sort, install status, and repository links.](../screenshots/plugin-browse.png)
+
 - **Search**: type in the search box to match plugin name or description.
 - **Category**: filter to a single category with the category dropdown.
 - **Sort**: **Most stars** (default), **Recently updated** (by latest release

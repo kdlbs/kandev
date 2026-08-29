@@ -132,9 +132,9 @@ func (s *stubClient) RequestReviewers(ctx context.Context, owner, repo string, n
 	}
 	return nil
 }
-func (s *stubClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) (MergeOutcome, error) {
+func (s *stubClient) MergePR(ctx context.Context, owner, repo string, number int, request MergePRRequest) (MergeOutcome, error) {
 	if s.mergePRFn != nil {
-		return s.mergePRFn(ctx, owner, repo, number, mergeMethod)
+		return s.mergePRFn(ctx, owner, repo, number, request.MergeMethod)
 	}
 	return MergeOutcomeMerged, nil
 }
@@ -1247,6 +1247,161 @@ func TestHttpTaskCIOptions_DefaultAndPatch(t *testing.T) {
 	}
 	if got.AutoFixPromptOverride != nil || !got.UsingDefaultPrompt {
 		t.Fatalf("expected reset to default prompt, got %+v", got)
+	}
+}
+
+func TestHttpRetryMergeAcceptsLinkedFailedAttemptAndPublishesEvaluation(t *testing.T) {
+	svc, store := setupWatchServiceTest(t)
+	eventBus := &mockEventBus{}
+	svc.eventBus = eventBus
+	router := gin.New()
+	useControllerTestWorkspace(router)
+	NewController(svc, newControllerTestLogger()).RegisterHTTPRoutes(router)
+	ctx := context.Background()
+	pr := &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		State: "open", CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, pr); err != nil {
+		t.Fatalf("seed task PR: %v", err)
+	}
+	if err := store.RecordTaskCIMergeAttempt(ctx, TaskCIMergeAttempt{
+		TaskID: pr.TaskID, RepositoryID: pr.RepositoryID, PRNumber: pr.PRNumber,
+		Signature: "ready-v1", AttemptedHeadSHA: "head-v1",
+	}); err != nil {
+		t.Fatalf("reserve attempt: %v", err)
+	}
+	if err := store.RecordTaskCIMergeAttemptResult(
+		ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber,
+		"ready-v1", TaskCIMergeResultFailed, "merge PR: provider unavailable",
+	); err != nil {
+		t.Fatalf("record failure: %v", err)
+	}
+
+	body := bytes.NewBufferString(`{"repository_id":"repo-1","pr_number":42}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/tasks/task-1/ci-automation/retry-merge", body)
+	req.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202: %s", response.Code, response.Body.String())
+	}
+	state, err := store.GetTaskCIPRState(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber)
+	if err != nil {
+		t.Fatalf("get state: %v", err)
+	}
+	if state == nil || !state.MergeRetryPending {
+		t.Fatalf("retry authorization not persisted: %+v", state)
+	}
+	if eventBus.publishedCount() != 1 {
+		t.Fatalf("published events = %d, want 1", eventBus.publishedCount())
+	}
+	event := eventBus.events[0]
+	if event.Type != "github.task_pr.updated" {
+		t.Fatalf("event type = %q, want github.task_pr.updated", event.Type)
+	}
+	published, ok := event.Data.(*TaskPR)
+	if !ok || published.RepositoryID != pr.RepositoryID || published.PRNumber != pr.PRNumber {
+		t.Fatalf("published PR = %#v, want exact linked PR", event.Data)
+	}
+}
+
+func TestHttpRetryMergeClearsAuthorizationWhenPublishFails(t *testing.T) {
+	svc, store := setupWatchServiceTest(t)
+	svc.eventBus = &mockEventBus{err: errors.New("publish unavailable")}
+	router := gin.New()
+	useControllerTestWorkspace(router)
+	NewController(svc, newControllerTestLogger()).RegisterHTTPRoutes(router)
+	ctx := context.Background()
+	pr := &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		State: "open", CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, pr); err != nil {
+		t.Fatalf("seed task PR: %v", err)
+	}
+	if err := store.RecordTaskCIMergeAttempt(ctx, TaskCIMergeAttempt{
+		TaskID: pr.TaskID, RepositoryID: pr.RepositoryID, PRNumber: pr.PRNumber,
+		Signature: "ready-v1", AttemptedHeadSHA: "head-v1",
+	}); err != nil {
+		t.Fatalf("reserve attempt: %v", err)
+	}
+	if err := store.RecordTaskCIMergeAttemptResult(
+		ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber,
+		"ready-v1", TaskCIMergeResultFailed, "merge PR: provider unavailable",
+	); err != nil {
+		t.Fatalf("record failure: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/github/tasks/task-1/ci-automation/retry-merge",
+		bytes.NewBufferString(`{"repository_id":"repo-1","pr_number":42}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500: %s", response.Code, response.Body.String())
+	}
+	state, err := store.GetTaskCIPRState(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber)
+	if err != nil {
+		t.Fatalf("get state: %v", err)
+	}
+	if state == nil || state.MergeRetryPending {
+		t.Fatalf("retry authorization remained pending after publish failure: %+v", state)
+	}
+}
+
+func TestHttpRetryMergeRejectsUnlinkedAndDuplicateRequests(t *testing.T) {
+	svc, store := setupWatchServiceTest(t)
+	svc.eventBus = &mockEventBus{}
+	router := gin.New()
+	useControllerTestWorkspace(router)
+	NewController(svc, newControllerTestLogger()).RegisterHTTPRoutes(router)
+	ctx := context.Background()
+	pr := &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		State: "open", CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, pr); err != nil {
+		t.Fatalf("seed task PR: %v", err)
+	}
+	if err := store.RecordTaskCIMergeAttempt(ctx, TaskCIMergeAttempt{
+		TaskID: pr.TaskID, RepositoryID: pr.RepositoryID, PRNumber: pr.PRNumber,
+		Signature: "ready-v1", AttemptedHeadSHA: "head-v1",
+	}); err != nil {
+		t.Fatalf("reserve attempt: %v", err)
+	}
+	if err := store.RecordTaskCIMergeAttemptResult(
+		ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber,
+		"ready-v1", TaskCIMergeResultFailed, "merge PR: provider unavailable",
+	); err != nil {
+		t.Fatalf("record failure: %v", err)
+	}
+
+	request := func(body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/github/tasks/task-1/ci-automation/retry-merge", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		return response
+	}
+
+	unlinked := request(`{"repository_id":"repo-1","pr_number":99}`)
+	if unlinked.Code != http.StatusBadRequest {
+		t.Fatalf("unlinked status = %d, want 400: %s", unlinked.Code, unlinked.Body.String())
+	}
+	first := request(`{"repository_id":"repo-1","pr_number":42}`)
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("first status = %d, want 202: %s", first.Code, first.Body.String())
+	}
+	duplicate := request(`{"repository_id":"repo-1","pr_number":42}`)
+	if duplicate.Code != http.StatusConflict {
+		t.Fatalf("duplicate status = %d, want 409: %s", duplicate.Code, duplicate.Body.String())
 	}
 }
 
