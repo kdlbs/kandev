@@ -22,7 +22,7 @@ import (
 var ErrTaskNotFound = errors.New("task not found")
 
 // Automation runs never appear in a task list: they are hidden by their
-// provenance, not by ephemerality (docs/specs/office/automations-settings.md).
+// provenance, not by ephemerality (docs/specs/office/requirements/automations-settings.md).
 // is_ephemeral keeps its original quick-chat meaning, so every list read here
 // pairs the two.
 const (

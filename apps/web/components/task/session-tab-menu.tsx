@@ -1,5 +1,6 @@
 "use client";
 
+import type { RefObject } from "react";
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@kandev/ui/context-menu";
 import {
   AlertDialog,
@@ -11,6 +12,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
+import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import {
   isSessionStoppable as isStoppable,
   isSessionDeletable as isDeletable,
@@ -21,6 +23,7 @@ import { HandoffContextMenuSub } from "@/components/task/handoff-profile-menu-it
 import { NewSessionDialog, type HandoffPreset } from "@/components/task/new-session-dialog";
 import type { TaskSessionState } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
+import { SessionDeleteDescription } from "./session-delete-description";
 
 /** Lifecycle callbacks the context menu needs from the owning tab. */
 export type SessionTabMenuActions = {
@@ -51,13 +54,7 @@ export function DeleteSessionDialog({
           <AlertDialogTitle>{t("task:deleteSession")}</AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div>
-              <p>{t("task:thisWillPermanentlyDeleteTheConversation")}</p>
-              {isPrimary && sessionCount > 1 && (
-                <p className="mt-2 font-medium">{t("task:thisIsThePrimarySessionAnother")}</p>
-              )}
-              {sessionCount === 1 && (
-                <p className="mt-2 font-medium">{t("task:thisIsTheOnlySessionFor")}</p>
-              )}
+              <SessionDeleteDescription isPrimary={isPrimary} isOnlySession={sessionCount === 1} />
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -75,6 +72,47 @@ export function DeleteSessionDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+export function DeleteSessionPopover({
+  open,
+  anchorRef,
+  focusBoundaryRef,
+  onOpenChange,
+  isPrimary,
+  sessionCount,
+  targetName,
+  onConfirm,
+}: {
+  open: boolean;
+  anchorRef: RefObject<HTMLElement | null>;
+  focusBoundaryRef?: RefObject<HTMLElement | null>;
+  onOpenChange: (open: boolean) => void;
+  isPrimary: boolean;
+  sessionCount: number;
+  targetName?: string | null;
+  onConfirm: () => void | Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const name = targetName || t("task:session");
+  return (
+    <ActionConfirmPopover
+      open={open}
+      anchorRef={anchorRef}
+      focusBoundaryRef={focusBoundaryRef}
+      title={t("task:deleteSession")}
+      description={
+        <SessionDeleteDescription isPrimary={isPrimary} isOnlySession={sessionCount === 1} />
+      }
+      cancelLabel={t("common:cancel")}
+      confirmLabel={t("task:delete")}
+      confirmAriaLabel={t("task:delete2", { name })}
+      confirmTestId="session-delete-confirm"
+      testId="session-delete-confirm-popover"
+      onOpenChange={onOpenChange}
+      onConfirm={onConfirm}
+    />
   );
 }
 
@@ -96,7 +134,8 @@ export function SessionContextMenuItems({
   taskId: string | null;
   sessionId: string | undefined;
   actions: SessionTabMenuActions;
-  onDelete: () => void;
+  /** Passes the Radix selection event so the owner can capture its currentTarget as an anchor. */
+  onDelete: (event: Event) => void;
   onShare: () => void;
   onHandoffProfile: (profileId: string) => void;
   onStartRename: () => void;
@@ -126,7 +165,14 @@ export function SessionContextMenuItems({
         </ContextMenuItem>
       )}
       {sessionState && isDeletable(sessionState) && (
-        <ContextMenuItem className="cursor-pointer text-destructive" onSelect={onDelete}>
+        <ContextMenuItem
+          className="cursor-pointer text-destructive"
+          onSelect={(event) => {
+            // Keep the context menu mounted so the confirmation popover can stay anchored here.
+            event.preventDefault();
+            onDelete(event);
+          }}
+        >
           {t("task:delete")}
         </ContextMenuItem>
       )}
@@ -155,10 +201,14 @@ export function SessionContextMenuItems({
 /** Delete / share / handoff dialogs rendered alongside the tab. */
 export function SessionTabDialogs({
   confirmDelete,
+  menuDeleteOpen,
+  menuDeleteAnchorRef,
+  menuDeleteFocusBoundaryRef,
   setConfirmDelete,
   isPrimary,
   sessionCount,
   onConfirmDelete,
+  targetName,
   taskId,
   sessionId,
   shareOpen,
@@ -170,10 +220,14 @@ export function SessionTabDialogs({
   groupId,
 }: {
   confirmDelete: boolean;
+  menuDeleteOpen: boolean;
+  menuDeleteAnchorRef: RefObject<HTMLElement | null>;
+  menuDeleteFocusBoundaryRef?: RefObject<HTMLElement | null>;
   setConfirmDelete: (open: boolean) => void;
   isPrimary: boolean;
   sessionCount: number;
   onConfirmDelete: () => void;
+  targetName?: string | null;
   taskId: string | null;
   sessionId: string | undefined;
   shareOpen: boolean;
@@ -187,10 +241,20 @@ export function SessionTabDialogs({
   return (
     <>
       <DeleteSessionDialog
-        open={confirmDelete}
+        open={confirmDelete && !menuDeleteOpen}
         onOpenChange={setConfirmDelete}
         isPrimary={isPrimary}
         sessionCount={sessionCount}
+        onConfirm={onConfirmDelete}
+      />
+      <DeleteSessionPopover
+        open={menuDeleteOpen}
+        anchorRef={menuDeleteAnchorRef}
+        focusBoundaryRef={menuDeleteFocusBoundaryRef}
+        onOpenChange={setConfirmDelete}
+        isPrimary={isPrimary}
+        sessionCount={sessionCount}
+        targetName={targetName}
         onConfirm={onConfirmDelete}
       />
       {taskId && sessionId && (

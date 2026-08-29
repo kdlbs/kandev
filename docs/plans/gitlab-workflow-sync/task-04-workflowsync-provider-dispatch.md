@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["02-workflowsync-config-provider"]
 plan: "plan.md"
-spec: "../../specs/gitlab-workflow-sync/spec.md"
+spec: "../../specs/integrations/requirements/gitlab-workflow-sync.md"
 ---
 
 # Task 04: Workflow Sync Provider Dispatch

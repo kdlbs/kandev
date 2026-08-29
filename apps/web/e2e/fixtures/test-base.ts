@@ -387,6 +387,10 @@ export const test = backendFixture.extend<
         apiClient.mockGitLabReset(seedData.workspaceId).catch(() => undefined),
         apiClient.clearGitLabRepositoryRemote(seedData.repositoryId).catch(() => undefined),
       ]);
+      // GitLab reset removes origin from the shared seed checkout. Restore the
+      // fixture's offline origin before the test so pull-enabled worktree
+      // preparation starts from the same valid repository state every time.
+      restoreSeedRepositoryOrigin(seedData);
       try {
         await use();
       } finally {
@@ -446,6 +450,28 @@ export function pointSeedRepositoryAtUnresolvedOrigin(seedData: SeedData, tmpDir
   }
 }
 
+/** Points the seed repository at a valid cached checkout with an unreachable origin. */
+export function pointSeedRepositoryAtFailingOrigin(seedData: SeedData, tmpDir: string) {
+  const remoteDir = path.join(
+    tmpDir,
+    "repos",
+    `e2e-failing-remote-${Date.now()}-${process.pid}.git`,
+  );
+  try {
+    execFileSync(
+      "git",
+      ["-C", seedData.repositoryPath, "remote", "set-url", "origin", `file://${remoteDir}`],
+      { env: makeGitEnv(tmpDir), stdio: "ignore" },
+    );
+  } catch {
+    execFileSync(
+      "git",
+      ["-C", seedData.repositoryPath, "remote", "add", "origin", `file://${remoteDir}`],
+      { env: makeGitEnv(tmpDir), stdio: "ignore" },
+    );
+  }
+}
+
 // Reset the active workspace pointer before every test so that specs which
 // do not use the testPage fixture (e.g. API-only routing tests) start from
 // a known workspace_id instead of whatever a previous test's completeOnboarding
@@ -472,6 +498,7 @@ test.beforeEach(async ({ apiClient, seedData }) => {
     lsp_auto_install_languages: [],
     lsp_server_configs: {},
     kanban_view_mode: "",
+    tasks_list_show_details: false,
     startup_page: "task_overview",
     show_anchored_prompt_bar: false,
     show_scroll_to_last_prompt: true,

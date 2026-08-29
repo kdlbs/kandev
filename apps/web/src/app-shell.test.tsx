@@ -51,6 +51,7 @@ describe("AppShell plugin modal topology", () => {
   afterEach(() => {
     cleanup();
     pluginModalManager.closeAllForPlugin("bitbucket");
+    Reflect.deleteProperty(navigator, "windowControlsOverlay");
   });
 
   it("renders host task-link forms inside the shared toast provider", () => {
@@ -73,5 +74,25 @@ describe("AppShell plugin modal topology", () => {
 
     expect(screen.getByLabelText("Pull request")).not.toBeNull();
     expect(screen.getByRole("button", { name: "Save" })).not.toBeNull();
+  });
+
+  it("publishes visible window-controls-overlay geometry on the root shell", () => {
+    Object.defineProperty(navigator, "windowControlsOverlay", {
+      configurable: true,
+      value: {
+        visible: true,
+        getTitlebarAreaRect: () => ({ x: 72, y: 0, width: 1448, height: 40 }),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    });
+
+    render(<AppShell>App content</AppShell>);
+
+    const shell = screen.getByTestId("app-shell");
+    expect(shell.getAttribute("data-window-controls-overlay")).toBe("visible");
+    expect(shell.style.getPropertyValue("--titlebar-area-x")).toBe("72px");
+    expect(shell.style.getPropertyValue("--titlebar-area-width")).toBe("1448px");
+    expect(shell.style.getPropertyValue("--titlebar-area-height")).toBe("40px");
   });
 });

@@ -9,13 +9,22 @@ type Props = {
   setPath: (path: string) => void;
   onOpen: () => void;
   pending: boolean;
+  /** Overrides the default pending explanation, e.g. for the admin gate. */
+  pendingReason?: string;
   enabled: boolean;
 };
 
-export function StorageAdoptionField({ path, setPath, onOpen, pending, enabled }: Props) {
+export function StorageAdoptionField({
+  path,
+  setPath,
+  onOpen,
+  pending,
+  pendingReason,
+  enabled,
+}: Props) {
   const { t } = useTranslation();
   let disabledReason: string | undefined;
-  if (pending) disabledReason = t("system:storageActionPending");
+  if (pending) disabledReason = pendingReason ?? t("system:storageActionPending");
   else if (!enabled) disabledReason = t("system:storageEnableGoCacheFirst");
   else if (!path.trim()) disabledReason = t("system:storageEnterCachePathFirst");
   const fieldLabel = t("system:storageExternalGoCache");

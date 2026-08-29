@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -276,6 +277,8 @@ func (s *Service) createCompletedTurn(ctx context.Context, session *models.TaskS
 		return nil, errors.New("cannot create completed turn without a session")
 	}
 	now := time.Now().UTC()
+	metadata := turnStartRuntimeMetadata(session)
+	metadata[models.TurnMetaKeyLifecycleOnly] = true
 	turn := &models.Turn{
 		ID:                 uuid.New().String(),
 		TaskSessionID:      session.ID,
@@ -284,7 +287,7 @@ func (s *Service) createCompletedTurn(ctx context.Context, session *models.TaskS
 		RouteGeneration:    session.RouteGeneration,
 		StartedAt:          now,
 		CompletedAt:        &now,
-		Metadata:           turnStartRuntimeMetadata(session),
+		Metadata:           metadata,
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}
@@ -850,10 +853,16 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	if session.TaskEnvironmentID != "" {
 		env, envErr := s.taskEnvironments.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
 		if envErr != nil {
-			s.logger.Warn("failed to get task environment for session",
+			logFields := []zap.Field{
 				zap.String("session_id", sessionID),
 				zap.String("task_environment_id", session.TaskEnvironmentID),
-				zap.Error(envErr))
+				zap.Error(envErr),
+			}
+			if errors.Is(envErr, taskrepo.ErrTaskEnvironmentNotFound) {
+				s.logger.Debug("failed to get task environment for session", logFields...)
+			} else {
+				s.logger.Warn("failed to get task environment for session", logFields...)
+			}
 		} else {
 			taskEnv = env
 		}
@@ -960,11 +969,15 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 	branchPlans := worktree.BuildBranchIdentityPlans(workspaceBranchIdentityInputs(projections))
 	for index, projection := range projections {
 		taskRepository, repository := projection.taskRepository, projection.repository
+		branchTemplate := repository.WorktreeBranchTemplate
+		if taskRepository.BranchPolicyBranchTemplate != "" {
+			branchTemplate = taskRepository.BranchPolicyBranchTemplate
+		}
 		spec := lifecycle.WorkspaceRepositorySpec{
 			RepositoryID: taskRepository.RepositoryID, RepositoryPath: repository.LocalPath, RepoName: projection.repoName,
 			BaseBranch: taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
 			CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
-			WorktreeBranchTemplate: repository.WorktreeBranchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
+			WorktreeBranchTemplate: branchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
 		}
 		if worktree := worktreesByIdentity[workspaceWorktreeKey{repositoryID: taskRepository.RepositoryID, branchSlug: branchPlans[index].IdentitySlug}]; worktree != nil {
 			spec.WorktreeID = worktree.WorktreeID
@@ -1119,6 +1132,15 @@ func applyTaskEnvironmentToWorkspaceInfo(info *lifecycle.WorkspaceInfo, env *mod
 	}
 	if env.ContainerID != "" {
 		ensureWorkspaceMetadata(info)[lifecycle.MetadataKeyContainerID] = env.ContainerID
+	}
+	if env.ContainerControlAuthTokenSecretID != "" {
+		ensureWorkspaceMetadata(info)[lifecycle.MetadataKeyContainerControlAuthSecret] = env.ContainerControlAuthTokenSecretID
+	}
+	if env.ContainerBootstrapNonceSecretID != "" {
+		ensureWorkspaceMetadata(info)[lifecycle.MetadataKeyBootstrapNonceSecret] = env.ContainerBootstrapNonceSecretID
+	}
+	if env.ExecutorType == string(models.ExecutorTypeSSH) && env.WorkspacePath != "" {
+		ensureWorkspaceMetadata(info)[lifecycle.MetadataKeySSHRemoteTaskDir] = env.WorkspacePath
 	}
 	if env.SandboxID != "" {
 		ensureWorkspaceMetadata(info)["sprite_name"] = env.SandboxID

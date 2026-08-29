@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/multi-branch/spec.md"
+spec: "../../specs/tasks/requirements/multi-branch.md"
 ---
 
 # Task 01: Repository tooltip containment and disclosure
@@ -38,7 +38,7 @@ None.
 
 ## Inputs
 
-- `docs/specs/tasks/multi-branch/spec.md` task-creation scenarios.
+- `docs/specs/tasks/requirements/multi-branch.md` task-creation scenarios.
 - `docs/plans/creation-flow-reliability/plan.md` frontend and mobile design sections.
 - Existing `useTooltipMountGate` behavior and Radix tooltip guidance in `apps/web/AGENTS.md`.
 

@@ -1,7 +1,13 @@
 import React, { act } from "react";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileTreeNode } from "@/lib/types/backend";
+
+const responsive = vi.hoisted(() => ({ isFinePointer: true }));
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => responsive,
+}));
 
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: vi.fn() }),
@@ -13,9 +19,11 @@ vi.mock("@/components/toast-provider", () => ({
 // raw `ns:key` and the assertions then only prove the stub works.
 
 import { FileContextMenu, TreeNodeName, useFileRename } from "./file-context-menu";
+import { FileTreeNodeTouchActions } from "./file-browser-parts";
 
 const FILE_NODE: FileTreeNode = { name: "README.md", path: "README.md", is_dir: false, size: 0 };
 const DIR_NODE: FileTreeNode = { name: "src", path: "src", is_dir: true, size: 0 };
+const DELETE_CONFIRM_POPOVER_ID = "file-delete-confirm-popover";
 const RENAME_ROW = "rename-row";
 const FOCUS_ANCHOR = "focus-anchor";
 const BULK_TREE: FileTreeNode = {
@@ -31,6 +39,7 @@ const BULK_TREE: FileTreeNode = {
 
 afterEach(() => {
   cleanup();
+  responsive.isFinePointer = true;
   vi.useRealTimers();
 });
 
@@ -323,6 +332,60 @@ describe("FileContextMenu chat context item", () => {
 });
 
 describe("FileContextMenu bulk deletion", () => {
+  it.each([
+    ["file", FILE_NODE],
+    ["folder", DIR_NODE],
+  ] as const)("uses local confirmation for one %s", async (_kind, node) => {
+    const onDeleteFile = vi.fn().mockResolvedValue(true);
+    render(
+      <FileContextMenu
+        node={node}
+        tree={node}
+        setTree={() => {}}
+        onDeleteFile={onDeleteFile}
+        onStartRename={() => {}}
+      >
+        <div data-testid="single-delete-row">row</div>
+      </FileContextMenu>,
+    );
+
+    openMenu("single-delete-row");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+
+    expect(onDeleteFile).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    await waitFor(() => expect(screen.getByTestId(DELETE_CONFIRM_POPOVER_ID)).toBeTruthy());
+    const confirmation = screen.getByTestId(DELETE_CONFIRM_POPOVER_ID);
+    if (node.is_dir) {
+      expect(confirmation.textContent).toContain("This will permanently delete src");
+    } else {
+      expect(confirmation.textContent).toContain("This will permanently delete README.md");
+      expect(confirmation.textContent).not.toContain("file inside it");
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByTestId(DELETE_CONFIRM_POPOVER_ID)).toBeNull());
+    expect(onDeleteFile).not.toHaveBeenCalled();
+
+    openMenu("single-delete-row");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    await waitFor(() => expect(screen.getByTestId("file-delete-confirm")).toBeTruthy());
+    fireEvent.click(screen.getByTestId("file-delete-confirm"));
+
+    await waitFor(() => expect(onDeleteFile).toHaveBeenCalledWith(node.path));
+  });
+
+  it("keeps a multi-selection in the scope-explaining modal", () => {
+    const onDeleteFile = vi.fn().mockResolvedValue(true);
+    render(<BulkDeleteHarness onDeleteFile={onDeleteFile} />);
+
+    openMenu("bulk-row");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete 2 items" }));
+
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    expect(screen.queryByTestId(DELETE_CONFIRM_POPOVER_ID)).toBeNull();
+  });
+
   it("keeps failed paths visible after a partial deletion failure", async () => {
     const onDeleteFile = vi.fn(async (path: string) => path === "a.txt");
     render(<BulkDeleteHarness onDeleteFile={onDeleteFile} />);
@@ -334,5 +397,42 @@ describe("FileContextMenu bulk deletion", () => {
     await waitFor(() => expect(onDeleteFile).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.getByTestId("tree-paths").textContent).toBe("b.txt"));
     expect(screen.getByTestId("tree-paths").textContent).not.toContain("a.txt");
+  });
+});
+
+describe("FileContextMenu touch actions", () => {
+  it("exposes Delete in the touch menu and replaces it with 44px inline actions", async () => {
+    responsive.isFinePointer = false;
+    const onDeleteFile = vi.fn().mockResolvedValue(true);
+    render(
+      <FileContextMenu
+        node={FILE_NODE}
+        tree={FILE_NODE}
+        setTree={() => {}}
+        onDeleteFile={onDeleteFile}
+        onStartRename={() => {}}
+      >
+        <div data-testid="touch-delete-row">
+          <FileTreeNodeTouchActions node={FILE_NODE} showTouchActions />
+        </div>
+      </FileContextMenu>,
+    );
+
+    fireEvent.pointerDown(screen.getByTestId("file-tree-node-actions"));
+    fireEvent.click(screen.getByTestId("file-tree-touch-delete"));
+
+    await waitFor(() => expect(screen.getByTestId("file-delete-inline-confirmation")).toBeTruthy());
+    expect(screen.queryByTestId(DELETE_CONFIRM_POPOVER_ID)).toBeNull();
+    expect(onDeleteFile).not.toHaveBeenCalled();
+    expect(
+      screen.getByTestId("file-delete-inline-confirmation").querySelectorAll("button"),
+    ).toHaveLength(2);
+
+    fireEvent.click(
+      within(screen.getByTestId("file-delete-inline-confirmation")).getByTestId(
+        "file-delete-confirm",
+      ),
+    );
+    await waitFor(() => expect(onDeleteFile).toHaveBeenCalledWith(FILE_NODE.path));
   });
 });

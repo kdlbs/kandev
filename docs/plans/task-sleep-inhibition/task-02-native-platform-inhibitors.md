@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-lifecycle-service"]
 plan: "plan.md"
-spec: "../../specs/platform/task-sleep-inhibition.md"
+spec: "../../specs/platform/requirements/task-sleep-inhibition.md"
 ---
 
 # Task 02: Native platform inhibitors

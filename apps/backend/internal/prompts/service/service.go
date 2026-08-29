@@ -36,6 +36,24 @@ func (s *Service) ListPrompts(ctx context.Context) ([]*models.Prompt, error) {
 	return s.repo.ListPrompts(ctx)
 }
 
+// GetPromptByName returns one saved prompt by its exact name after trimming
+// surrounding whitespace. Missing or blank names map to ErrPromptNotFound so
+// callers do not need to depend on the repository's sql.ErrNoRows result.
+func (s *Service) GetPromptByName(ctx context.Context, name string) (*models.Prompt, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, ErrPromptNotFound
+	}
+	prompt, err := s.repo.GetPromptByName(ctx, name)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && prompt == nil) {
+		return nil, ErrPromptNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return prompt, nil
+}
+
 func (s *Service) CreatePrompt(ctx context.Context, name, content string) (*models.Prompt, error) {
 	name = strings.TrimSpace(name)
 	content = strings.TrimSpace(content)

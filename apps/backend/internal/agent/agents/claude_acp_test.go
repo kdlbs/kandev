@@ -8,7 +8,7 @@ import (
 
 func TestClaudeACPUsesManagedRuntime(t *testing.T) {
 	a := NewClaudeACP()
-	want := []string{"npx", "--yes", "--prefer-offline", "@agentclientprotocol/claude-agent-acp"}
+	want := a.ManagedNPMRuntime().CachedACPCommand().Args()
 
 	if got := a.BuildCommand(CommandOptions{}).Args(); !slices.Equal(got, want) {
 		t.Fatalf("BuildCommand = %#v, want %#v", got, want)

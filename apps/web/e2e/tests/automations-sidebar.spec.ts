@@ -1,6 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../fixtures/test-base";
 import type { ApiClient } from "../helpers/api-client";
+import { watchWs } from "../helpers/causal-waits";
 
 /**
  * The Automations section of the app sidebar.
@@ -120,5 +121,42 @@ test.describe("Automations section in the app sidebar", () => {
     // An automation that has never run says nothing rather than "never".
     await expect(testPage.getByTestId(`sidebar-automation-${neverRan.id}`)).toBeVisible();
     await expect(testPage.getByTestId(`sidebar-automation-last-run-${neverRan.id}`)).toHaveCount(0);
+  });
+
+  test("refreshes an open row when a run starts without navigation", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const [automation] = await seedAutomations(apiClient, seedData, ["Nightly drift"]);
+    const ws = watchWs(testPage);
+
+    await testPage.goto("/");
+    const header = automationsHeader(testPage);
+    await expect(header).toBeVisible({ timeout: 15_000 });
+
+    const initialSummary = ws.waitForResponse("automation.summaries");
+    await header.click();
+    await initialSummary;
+
+    const row = testPage.getByTestId(`sidebar-automation-${automation.id}`);
+    await expect(row).toBeVisible();
+    await expect(row.getByTestId(`sidebar-automation-running-${automation.id}`)).toHaveCount(0);
+    const urlBeforeRun = testPage.url();
+
+    const liveSummary = ws.waitForResponse("automation.summaries");
+    await apiClient.seedAutomationRun(automation.id, "triggered");
+    await liveSummary;
+
+    const runningIndicator = row.getByTestId(`sidebar-automation-running-${automation.id}`);
+    await expect(runningIndicator).toBeVisible();
+    await expect(runningIndicator).toHaveClass(/animate-spin/);
+    await expect(runningIndicator).toHaveAttribute("aria-hidden", "true");
+    await expect(row.getByText("Running.")).toBeAttached();
+    await expect(testPage).toHaveURL(urlBeforeRun);
+    await prCapture.screenshot("automation-sidebar-running", {
+      caption: "Expanded desktop Automations sidebar with a running automation indicator",
+    });
   });
 });

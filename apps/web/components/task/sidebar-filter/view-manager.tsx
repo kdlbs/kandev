@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Input } from "@kandev/ui/input";
 import { Button } from "@kandev/ui/button";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
@@ -150,9 +150,18 @@ function NameInput({
     inputRef.current?.select();
   }, []);
 
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
   return (
     <Input
       ref={inputRef}
+      autoFocus
       aria-label={mode === "rename" ? t("task:viewName") : t("task:newViewName")}
       value={value}
       onChange={(e) => onChange(e.target.value)}

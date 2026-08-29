@@ -108,8 +108,10 @@ type mockGitHubService struct {
 	fixAttempts          []github.TaskCIFixAttempt
 	fixCheckpointRefresh []github.TaskCIFixAttempt
 	mergeAttempts        []github.TaskCIMergeAttempt
+	mergeAttemptErr      error
 	mergeCalls           int
 	mergeErr             error
+	mergeExpectedHeadSHA string
 	ciErrors             []github.TaskCIPRAutomationState
 	ciExhausted          []github.TaskCIPRAutomationState
 	lifecyclePrompts     []github.TaskPRLifecyclePrompt
@@ -217,7 +219,61 @@ func (m *mockGitHubService) RefreshTaskCIFixCheckpoint(_ context.Context, taskID
 	return nil
 }
 func (m *mockGitHubService) RecordTaskCIMergeAttempt(_ context.Context, attempt github.TaskCIMergeAttempt) error {
+	if m.mergeAttemptErr != nil {
+		return m.mergeAttemptErr
+	}
+	if m.ciPRState != nil && m.ciPRState.LastMergeSignature == attempt.Signature && !m.ciPRState.MergeRetryPending {
+		return github.ErrTaskCIMergeAttemptAlreadyReserved
+	}
 	m.mergeAttempts = append(m.mergeAttempts, attempt)
+	if m.ciPRState == nil {
+		m.ciPRState = &github.TaskCIPRAutomationState{
+			TaskID: attempt.TaskID, RepositoryID: attempt.RepositoryID, PRNumber: attempt.PRNumber,
+		}
+	}
+	m.ciPRState.LastMergeSignature = attempt.Signature
+	m.ciPRState.LastMergeResult = github.TaskCIMergeResultInFlight
+	m.ciPRState.MergeRetryPending = false
+	m.ciPRState.LastMergeAttemptAt = &attempt.AttemptedAt
+	return nil
+}
+func (m *mockGitHubService) RecordTaskCIMergeAttemptResult(
+	_ context.Context, taskID, repositoryID string, prNumber int, signature, result, message string,
+) error {
+	if m.ciPRState == nil {
+		m.ciPRState = &github.TaskCIPRAutomationState{
+			TaskID: taskID, RepositoryID: repositoryID, PRNumber: prNumber,
+		}
+	}
+	if m.ciPRState.LastMergeSignature != "" && m.ciPRState.LastMergeSignature != signature {
+		return github.ErrTaskCIMergeAttemptNotFound
+	}
+	m.ciPRState.LastMergeResult = result
+	if result == github.TaskCIMergeResultFailed {
+		m.ciPRState.LastError = &message
+		m.ciPRState.LastErrorKind = github.TaskCIErrorKindAutoMerge
+	}
+	return nil
+}
+func (m *mockGitHubService) RecordTaskCIMergeQueueObservation(_ context.Context, observation github.TaskCIMergeQueueObservation) error {
+	if m.ciPRState == nil {
+		m.ciPRState = &github.TaskCIPRAutomationState{
+			TaskID: observation.TaskID, RepositoryID: observation.RepositoryID, PRNumber: observation.PRNumber,
+		}
+	}
+	if observation.ActiveQueueHeadSHA != "" {
+		m.ciPRState.LastQueueAttemptHeadSHA = observation.ActiveQueueHeadSHA
+	}
+	if observation.ActiveQueueHeadSHA != "" || observation.Accepted {
+		m.ciPRState.LastMergeResult = github.TaskCIMergeResultAccepted
+		if m.ciPRState.LastErrorKind == github.TaskCIErrorKindAutoMerge {
+			m.ciPRState.LastError = nil
+			m.ciPRState.LastErrorKind = ""
+		}
+	}
+	if observation.RemovalCause != "" {
+		m.ciPRState.LastQueueRemovalCause = observation.RemovalCause
+	}
 	return nil
 }
 func (m *mockGitHubService) RecordTaskCIError(_ context.Context, taskID, repositoryID string, prNumber int, message string) error {
@@ -229,6 +285,13 @@ func (m *mockGitHubService) RecordTaskCIError(_ context.Context, taskID, reposit
 	})
 	return nil
 }
+func (m *mockGitHubService) RecordTaskCIAutoMergeError(_ context.Context, taskID, repositoryID string, prNumber int, message string) error {
+	m.ciErrors = append(m.ciErrors, github.TaskCIPRAutomationState{
+		TaskID: taskID, RepositoryID: repositoryID, PRNumber: prNumber,
+		LastError: &message, LastErrorKind: github.TaskCIErrorKindAutoMerge,
+	})
+	return nil
+}
 func (m *mockGitHubService) MarkTaskCIAutoFixExhausted(_ context.Context, taskID, repositoryID string, prNumber int, message string) error {
 	now := time.Now().UTC()
 	m.ciExhausted = append(m.ciExhausted, github.TaskCIPRAutomationState{
@@ -237,6 +300,7 @@ func (m *mockGitHubService) MarkTaskCIAutoFixExhausted(_ context.Context, taskID
 		PRNumber:           prNumber,
 		AutoFixExhaustedAt: &now,
 		LastError:          &message,
+		LastErrorKind:      github.TaskCIErrorKindAutoFix,
 	})
 	return nil
 }
@@ -301,8 +365,9 @@ func (m *mockGitHubService) MergePR(context.Context, string, string, int, string
 }
 
 func (m *mockGitHubService) MergePRForAutomation(
-	ctx context.Context, _, owner, repo string, number int, method string,
+	ctx context.Context, _, owner, repo string, number int, method, expectedHeadSHA string,
 ) error {
+	m.mergeExpectedHeadSHA = expectedHeadSHA
 	return m.MergePR(ctx, owner, repo, number, method)
 }
 func (m *mockGitHubService) EnsurePRWatch(_ context.Context, _, _, _, _, _, branch string) (*github.PRWatch, error) {
@@ -545,6 +610,15 @@ func TestCheckSessionPR(t *testing.T) {
 		if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 			ID: "env1", TaskID: "t1", ExecutorType: "worktree",
 			WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+			Repos: []*models.TaskEnvironmentRepo{
+				{
+					ID:             "wt1",
+					WorktreeID:     "wtree1",
+					RepositoryID:   "repo1",
+					WorktreeBranch: branch,
+					CreatedAt:      now,
+				},
+			},
 		}); err != nil {
 			t.Fatalf("failed to create environment: %v", err)
 		}
@@ -555,17 +629,6 @@ func TestCheckSessionPR(t *testing.T) {
 		session.TaskEnvironmentID = "env1"
 		if err := repo.UpdateTaskSession(ctx, session); err != nil {
 			t.Fatalf("link session to environment: %v", err)
-		}
-		wt := &models.TaskEnvironmentRepo{
-			ID:                "wt1",
-			TaskEnvironmentID: "env1",
-			WorktreeID:        "wtree1",
-			RepositoryID:      "repo1",
-			WorktreeBranch:    branch,
-			CreatedAt:         now,
-		}
-		if err := repo.CreateTaskEnvironmentRepo(ctx, wt); err != nil {
-			t.Fatalf("failed to create worktree: %v", err)
 		}
 
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -1191,6 +1254,10 @@ func TestListTasksNeedingPRWatch(t *testing.T) {
 		if err := testRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 			ID: "env-s1", TaskID: "t1", ExecutorType: "worktree",
 			WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+			Repos: []*models.TaskEnvironmentRepo{
+				{ID: "wt-1", WorktreeID: "wtree-1", RepositoryID: "repo-front", WorktreeBranch: "feat/frontend", CreatedAt: now},
+				{ID: "wt-2", WorktreeID: "wtree-2", RepositoryID: "repo-back", WorktreeBranch: "feat/backend", CreatedAt: now},
+			},
 		}); err != nil {
 			t.Fatalf("create environment: %v", err)
 		}
@@ -1201,15 +1268,6 @@ func TestListTasksNeedingPRWatch(t *testing.T) {
 		session.TaskEnvironmentID = "env-s1"
 		if err := testRepo.UpdateTaskSession(ctx, session); err != nil {
 			t.Fatalf("link session to environment: %v", err)
-		}
-		worktrees := []*models.TaskEnvironmentRepo{
-			{ID: "wt-1", TaskEnvironmentID: "env-s1", WorktreeID: "wtree-1", RepositoryID: "repo-front", WorktreeBranch: "feat/frontend", CreatedAt: now},
-			{ID: "wt-2", TaskEnvironmentID: "env-s1", WorktreeID: "wtree-2", RepositoryID: "repo-back", WorktreeBranch: "feat/backend", CreatedAt: now},
-		}
-		for _, wt := range worktrees {
-			if err := testRepo.CreateTaskEnvironmentRepo(ctx, wt); err != nil {
-				t.Fatalf("worktree %s: %v", wt.ID, err)
-			}
 		}
 
 		svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
@@ -1286,6 +1344,10 @@ func TestEnsureSessionPRWatch_MultiRepo(t *testing.T) {
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 		ID: "env-s1", TaskID: "t1", ExecutorType: "worktree",
 		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{
+			{ID: "wt-1", WorktreeID: "wtree-1", RepositoryID: "repo-front", WorktreeBranch: "feat/frontend", CreatedAt: now},
+			{ID: "wt-2", WorktreeID: "wtree-2", RepositoryID: "repo-back", WorktreeBranch: "feat/backend", CreatedAt: now},
+		},
 	}); err != nil {
 		t.Fatalf("create environment: %v", err)
 	}
@@ -1296,14 +1358,6 @@ func TestEnsureSessionPRWatch_MultiRepo(t *testing.T) {
 	session.TaskEnvironmentID = "env-s1"
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("link session to environment: %v", err)
-	}
-	for _, wt := range []*models.TaskEnvironmentRepo{
-		{ID: "wt-1", TaskEnvironmentID: "env-s1", WorktreeID: "wtree-1", RepositoryID: "repo-front", WorktreeBranch: "feat/frontend", CreatedAt: now},
-		{ID: "wt-2", TaskEnvironmentID: "env-s1", WorktreeID: "wtree-2", RepositoryID: "repo-back", WorktreeBranch: "feat/backend", CreatedAt: now},
-	} {
-		if err := repo.CreateTaskEnvironmentRepo(ctx, wt); err != nil {
-			t.Fatalf("worktree: %v", err)
-		}
 	}
 
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())

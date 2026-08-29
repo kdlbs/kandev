@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-initialization-stage"]
 plan: "plan.md"
-spec: "../../specs/lsp-file-intelligence/spec.md"
+spec: "../../specs/platform/requirements/lsp-file-intelligence.md"
 ---
 
 # Task 02: Portable Placement Setting

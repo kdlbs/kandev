@@ -207,3 +207,31 @@ func TestWorktreePreparerMultiRepoFailureCarriesError(t *testing.T) {
 	require.False(t, result.Success)
 	require.Error(t, result.Error)
 }
+
+func TestLaunchRequiredPreparationFailureDoesNotCreateRuntime(t *testing.T) {
+	profileResolver := &countingProfileResolver{info: &AgentProfileInfo{
+		ProfileID: "profile-refresh-failure",
+		AgentName: "auggie",
+	}}
+	mgr, backend := newEnvironmentExecutionTestManagerWithProfileResolver(t, nil, profileResolver)
+	mgr.preparerRegistry = NewPreparerRegistry(mgr.logger)
+	mgr.preparerRegistry.Register("worktree", &directErrorPreparer{err: &RepositoryPreparationError{
+		RepositoryID:     "repo-back",
+		TaskRepositoryID: "tr-back",
+		RepositoryName:   "backend",
+		Cause:            worktree.ErrGitCommandFailed,
+	}})
+
+	_, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         "task-refresh-failure",
+		SessionID:      "session-refresh-failure",
+		AgentProfileID: "profile-refresh-failure",
+		ExecutorType:   "worktree",
+		RepositoryPath: "/tmp/repo",
+		UseWorktree:    true,
+		BaseBranch:     "main",
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, worktree.ErrGitCommandFailed)
+	require.Equal(t, int32(0), backend.createCount.Load(), "runtime must not be created after preparation failure")
+}

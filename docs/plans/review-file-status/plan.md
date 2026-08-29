@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/review-file-status.md
+spec: docs/specs/ui/requirements/review-file-status.md
 created: 2026-07-14
 status: building
 ---

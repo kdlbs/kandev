@@ -254,7 +254,9 @@ test("mobile board opens a focused column editor without horizontal overflow", a
   await testPage.getByTestId("azure-watch-editor-close").click();
   await workItemWatch.getByRole("button", { name: "Run now" }).click();
   await expect(testPage.getByText(/\d+ new match/)).toBeVisible();
-  await testPage.once("dialog", (dialog) => dialog.accept());
   await workItemWatch.getByRole("button", { name: "Reset" }).click();
+  const resetDialog = testPage.getByTestId("reset-watch-dialog");
+  await expect(resetDialog).toBeVisible();
+  await resetDialog.getByTestId("reset-watch-dialog-confirm").tap();
   await expect(testPage.getByText("Watch reset.")).toBeVisible();
 });

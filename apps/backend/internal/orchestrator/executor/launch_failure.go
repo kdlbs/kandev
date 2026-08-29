@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -81,10 +82,15 @@ func (e *Executor) buildLastAgentError(
 		}
 	}
 	occurredAt := time.Now().UTC()
+	details := ""
+	if launchErr != nil {
+		details = routingerr.Sanitize(launchErr.Error())
+	}
 	return models.LastAgentError{
 		Message:    classification.message,
 		OccurredAt: occurredAt,
 		Code:       classification.code,
+		Details:    details,
 		RecoveryActions: func() []string {
 			if classification.noRetry {
 				return nil

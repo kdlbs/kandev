@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-coalesce-agent-stream-ingress"]
 plan: "plan.md"
-spec: "../../specs/platform/bounded-task-status-delivery.md"
+spec: "../../specs/platform/requirements/bounded-task-status-delivery.md"
 ---
 
 # Task 02: Isolate Replaceable Session Delivery

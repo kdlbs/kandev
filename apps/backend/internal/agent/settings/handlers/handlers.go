@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,6 +70,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.POST("/agent-models/:agentName/resolve", h.httpResolveAgentModelConfig)
 	api.POST("/agent-command-preview/:agentName", h.httpPreviewAgentCommand)
 	api.POST("/agent-install/:agentName", h.interlock, h.httpInstallAgent)
+	api.GET("/agent-update/status", h.httpListAgentUpdateStatuses)
 	api.GET("/agent-update/:agentName/preview", h.httpPreviewAgentUpdate)
 	api.GET("/agent-install/jobs", h.httpListInstallJobs)
 	api.GET("/agent-install/jobs/:id", h.httpGetInstallJob)
@@ -131,11 +133,18 @@ func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
 		return
 	}
 	request.TargetVersion = strings.TrimSpace(request.TargetVersion)
-	if request.TargetVersion == "" {
+	if request.UseDefault && request.TargetVersion != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target version and use_default cannot be combined"})
+		return
+	}
+	if !request.UseDefault && request.TargetVersion == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version is required"})
 		return
 	}
 	h.enqueueMaintenance(c, name, "update", func() (any, error) {
+		if request.UseDefault {
+			return h.controller.EnqueueAgentUpdateUseDefault(c.Request.Context(), name)
+		}
 		return h.controller.EnqueueAgentUpdate(c.Request.Context(), name, request.TargetVersion)
 	}, classifyUpdateError)
 }
@@ -145,11 +154,27 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 	if !ok {
 		return
 	}
-	preview, err := h.controller.PreviewAgentUpdate(
-		c.Request.Context(),
-		name,
-		strings.TrimSpace(c.Query("target_version")),
-	)
+	targetVersion := strings.TrimSpace(c.Query("target_version"))
+	useDefault := false
+	if raw := strings.TrimSpace(c.Query("use_default")); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "use_default must be a boolean"})
+			return
+		}
+		useDefault = parsed
+	}
+	if useDefault && targetVersion != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target version and use_default cannot be combined"})
+		return
+	}
+	var preview *dto.AgentUpdatePreviewDTO
+	var err error
+	if useDefault {
+		preview, err = h.controller.PreviewAgentUpdateUseDefault(c.Request.Context(), name)
+	} else {
+		preview, err = h.controller.PreviewAgentUpdate(c.Request.Context(), name, targetVersion)
+	}
 	if err == nil {
 		c.JSON(http.StatusOK, preview)
 		return
@@ -160,6 +185,16 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 	}
 	h.logger.Error("failed to preview agent runtime update", zap.String("agent", name), zap.Error(err))
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to preview agent update"})
+}
+
+func (h *Handlers) httpListAgentUpdateStatuses(c *gin.Context) {
+	resp, err := h.controller.ListAgentUpdateStatuses(c.Request.Context())
+	if err != nil {
+		h.logger.Error("failed to list agent runtime update statuses", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list agent update statuses"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 func requireAgentName(c *gin.Context) (string, bool) {

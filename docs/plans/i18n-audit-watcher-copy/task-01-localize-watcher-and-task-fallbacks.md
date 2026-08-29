@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/i18n-audit-watcher-copy/spec.md"
+spec: "../../specs/platform/requirements/i18n-audit-watcher-copy.md"
 ---
 
 # Task 01: Localize Watcher And Task Fallbacks

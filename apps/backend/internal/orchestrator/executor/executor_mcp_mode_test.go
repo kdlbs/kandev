@@ -69,6 +69,14 @@ func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *tes
 			wantParentQuestion: false,
 		},
 		{
+			name:               "automation task",
+			task:               &models.Task{ID: "task", Origin: models.TaskOriginAutomationRun},
+			session:            &models.TaskSession{ID: "session", TaskID: "task"},
+			wantSurface:        mcpprofile.SurfaceAutomation,
+			wantUserQuestion:   false,
+			wantParentQuestion: false,
+		},
+		{
 			name:               "configuration session",
 			task:               &models.Task{ID: "task"},
 			session:            &models.TaskSession{ID: "session", TaskID: "task", Metadata: map[string]interface{}{"config_mode": true}},

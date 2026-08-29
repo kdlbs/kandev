@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { IconDotsVertical, IconPlus, IconStar } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -10,17 +10,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@kandev/ui/alert-dialog";
 import { AgentLogo } from "@/components/agent-logo";
+import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
 import { useAppStore } from "@/components/state-provider";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import {
@@ -41,6 +32,7 @@ import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/ty
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { SessionDeleteDescription } from "../session-delete-description";
 
 type SessionRow = {
   id: string;
@@ -212,51 +204,36 @@ function SessionActionsMenu({
   );
 }
 
-function DeleteSessionConfirmDialog({
-  open,
-  onOpenChange,
+function SessionDeleteInlineConfirmation({
   isPrimary,
   isOnlySession,
+  targetName,
+  onCancel,
+  onClose,
   onConfirm,
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
   isPrimary: boolean;
   isOnlySession: boolean;
-  onConfirm: () => void;
+  targetName: string;
+  onCancel: () => void;
+  onClose: () => void;
+  onConfirm: () => void | Promise<void>;
 }) {
   const { t } = useTranslation();
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t("task:deleteSession")}</AlertDialogTitle>
-          <AlertDialogDescription asChild>
-            <div>
-              <p>{t("task:thisWillPermanentlyDeleteTheConversation")}</p>
-              {isPrimary && !isOnlySession && (
-                <p className="mt-2 font-medium">{t("task:thisIsThePrimarySessionAnother")}</p>
-              )}
-              {isOnlySession && (
-                <p className="mt-2 font-medium">{t("task:thisIsTheOnlySessionFor")}</p>
-              )}
-            </div>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={() => {
-              onOpenChange(false);
-              onConfirm();
-            }}
-            className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
-          >
-            {t("task:delete")}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <InlineConfirmActions
+      density="touch"
+      testId="mobile-session-delete-confirmation"
+      ariaLabel={t("task:deleteSession")}
+      description={<SessionDeleteDescription isPrimary={isPrimary} isOnlySession={isOnlySession} />}
+      cancelLabel={t("common:cancel")}
+      confirmLabel={t("task:delete")}
+      confirmAriaLabel={t("task:delete2", { name: targetName })}
+      confirmTestId="mobile-session-delete-confirm"
+      onCancel={onCancel}
+      onClose={onClose}
+      onConfirm={onConfirm}
+    />
   );
 }
 
@@ -281,19 +258,23 @@ function SessionRowItem({
   taskId,
   isActive,
   totalSessions,
+  isConfirming,
+  onAskDelete,
+  onCancelDelete,
   onSelect,
 }: {
   row: SessionRow;
   taskId: string;
   isActive: boolean;
   totalSessions: number;
+  isConfirming: boolean;
+  onAskDelete: () => void;
+  onCancelDelete: () => void;
   onSelect: (sessionId: string) => void;
 }) {
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [handoffOpen, setHandoffOpen] = useState(false);
   const [handoffPreset, setHandoffPreset] = useState<HandoffPreset | null>(null);
   const actions = useSessionActions({ sessionId: row.id, taskId });
-  const isOnly = totalSessions === 1;
   const showBadges = totalSessions > 1;
   const handleHandoffProfile = useCallback(
     (profileId: string) => {
@@ -337,16 +318,27 @@ function SessionRowItem({
           foregroundActivity={row.foregroundActivity}
           testId={`mobile-session-state-${row.id}`}
         />
-        <SessionActionsMenu
-          taskId={taskId}
-          state={row.state}
-          isPrimary={row.isPrimary}
-          onSetPrimary={() => void actions.setPrimary()}
-          onStop={() => void actions.stop()}
-          onResume={() => void actions.resume()}
-          onAskDelete={() => setConfirmDelete(true)}
-          onHandoffProfile={handleHandoffProfile}
-        />
+        {isConfirming ? (
+          <SessionDeleteInlineConfirmation
+            isPrimary={row.isPrimary}
+            isOnlySession={totalSessions === 1}
+            targetName={row.agentLabel}
+            onCancel={onCancelDelete}
+            onClose={onCancelDelete}
+            onConfirm={() => void actions.remove()}
+          />
+        ) : (
+          <SessionActionsMenu
+            taskId={taskId}
+            state={row.state}
+            isPrimary={row.isPrimary}
+            onSetPrimary={() => void actions.setPrimary()}
+            onStop={() => void actions.stop()}
+            onResume={() => void actions.resume()}
+            onAskDelete={onAskDelete}
+            onHandoffProfile={handleHandoffProfile}
+          />
+        )}
       </div>
       {handoffPreset && (
         <NewSessionDialog
@@ -359,13 +351,6 @@ function SessionRowItem({
           handoff={handoffPreset}
         />
       )}
-      <DeleteSessionConfirmDialog
-        open={confirmDelete}
-        onOpenChange={setConfirmDelete}
-        isPrimary={row.isPrimary}
-        isOnlySession={isOnly}
-        onConfirm={() => void actions.remove()}
-      />
     </>
   );
 }
@@ -407,20 +392,28 @@ function useSessionRows(taskId: string | null) {
 const MobileSessionsList = memo(function MobileSessionsList({
   taskId,
   activeSessionId,
+  open,
   onClose,
 }: {
   taskId: string | null;
   activeSessionId: string | null;
+  open: boolean;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
   const setActiveSession = useAppStore((s) => s.setActiveSession);
   const { rows, isLoading } = useSessionRows(taskId);
   const [launchOpen, setLaunchOpen] = useState(false);
+  const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) setConfirmDeleteSessionId(null);
+  }, [open]);
 
   const handleSelect = useCallback(
     (sessionId: string) => {
       if (!taskId) return;
+      setConfirmDeleteSessionId(null);
       setActiveSession(taskId, sessionId);
       onClose();
     },
@@ -470,6 +463,9 @@ const MobileSessionsList = memo(function MobileSessionsList({
             taskId={taskId}
             isActive={row.id === activeSessionId}
             totalSessions={rows.length}
+            isConfirming={row.id === confirmDeleteSessionId}
+            onAskDelete={() => setConfirmDeleteSessionId(row.id)}
+            onCancelDelete={() => setConfirmDeleteSessionId(null)}
             onSelect={handleSelect}
           />
         ))}
@@ -559,6 +555,7 @@ export const MobileSessionsPicker = memo(function MobileSessionsPicker({
         <MobileSessionsList
           taskId={taskId}
           activeSessionId={effectiveSessionId}
+          open={open}
           onClose={() => setOpen(false)}
         />
       </MobilePickerSheet>

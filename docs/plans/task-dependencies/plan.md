@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/task-dependencies/spec.md
+spec: docs/specs/tasks/system-design/task-dependencies.md
 created: 2026-08-09
 status: not_started
 ---

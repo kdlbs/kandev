@@ -6,7 +6,9 @@ import {
 import type { KanbanState } from "@/lib/state/slices";
 import { statusSummaryActiveErrorPreview } from "@/lib/task-status-summary";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
+import { resolveTaskRepositorySlugs } from "@/lib/sidebar/sidebar-task-repositories";
 import { effectiveTaskPendingAction } from "../task-select-helpers";
+import { taskPRInfoFromSummary } from "../task-pr-info";
 
 export type SheetItemCtx = {
   repositoryPathsById: Map<string, string | undefined>;
@@ -50,6 +52,7 @@ function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
       : (task.primarySessionState as TaskSessionState | undefined),
     foregroundActivity: hasSummary ? summary?.foreground_activity : task.foregroundActivity,
     repositoryPath: sheetRepositoryPath(task, ctx),
+    repositories: resolveTaskRepositorySlugs(task.repositories, ctx.repositoryPathsById),
     diffStats: sheetDiffStats(summary),
     comparisonUnavailable: summary?.git?.comparison_unavailable === true,
     updatedAt: hasSummary ? summary?.updated_at : task.updatedAt,
@@ -58,6 +61,7 @@ function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
       : (task.primarySessionId ?? null),
     hasPendingClarification: pending.clarification,
     hasPendingPermission: pending.permission,
+    prInfo: taskPRInfoFromSummary(summary),
     agentErrorMessage: statusSummaryActiveErrorPreview(
       summary,
       ctx.acknowledgedAgentErrors,
@@ -89,6 +93,7 @@ export function toSheetItem(
     isRemoteExecutor: task.isRemoteExecutor,
     remoteExecutorType: task.primaryExecutorType ?? undefined,
     remoteExecutorName: task.primaryExecutorName ?? undefined,
+    repositoryLinks: task.repositories,
     queuedCount: task.statusSummary?.queued_prompt_count,
     wipQueue: ctx.wipQueueByTaskId?.get(task.id),
   };

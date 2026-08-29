@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { StateProvider, useAppStore } from "@/components/state-provider";
 import { defaultState } from "@/lib/state/default-state";
+import { expectCompactWarning } from "./task-confirm-dialog.test-helpers";
 
 const mockGetSubtaskCount = vi.fn();
 
@@ -126,6 +127,50 @@ describe("TaskArchiveConfirmDialog preference", () => {
   });
 });
 
+describe("TaskArchiveConfirmDialog classification safety", () => {
+  it("disables archive while descendant classification is pending", () => {
+    const onConfirm = vi.fn();
+
+    renderDialog(
+      <TaskArchiveConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        subtaskClassification={{ status: "loading", total: 0 }}
+        confirmTestId="archive-confirm"
+        onConfirm={onConfirm}
+      />,
+    );
+
+    const confirm = screen.getByTestId("archive-confirm");
+    expect(confirm.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(confirm);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("keeps the safe fallback actionable when classification fails", () => {
+    const onConfirm = vi.fn();
+
+    renderDialog(
+      <TaskArchiveConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        subtaskClassification={{ status: "error", total: 0 }}
+        confirmTestId="archive-confirm"
+        onConfirm={onConfirm}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("archive-confirm"));
+    expect(onConfirm).toHaveBeenCalledWith({ cascade: false });
+  });
+});
+
 describe("TaskArchiveConfirmDialog cleanup copy", () => {
   it("renders local-executor reassurance about untouched repo", () => {
     renderDialog(
@@ -220,6 +265,22 @@ describe("TaskArchiveConfirmDialog cleanup copy", () => {
 });
 
 describe("TaskArchiveConfirmDialog still-working guard", () => {
+  it("keeps the in-flight warning visually subordinate to confirmation copy", () => {
+    renderWithTasks(
+      <TaskArchiveConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        onConfirm={() => {}}
+      />,
+      [{ id: "task-1", foregroundActivity: "generating" }],
+    );
+
+    expectCompactWarning(screen.getByTestId(WARNING_TESTID));
+  });
+
   it("warns when the task is generating", () => {
     renderWithTasks(
       <TaskArchiveConfirmDialog

@@ -103,10 +103,23 @@ type lifecycleAdapter struct {
 // guard and the reset-failure reconcile permanently inert against a defunct
 // or dead-wrong ACP session id. Pin the exact shape here so drift is a build
 // error, not a silently-dead production guard.
+//
+// OwnsPromptActivity and GetPromptActivityForSession are pinned for the same
+// reason: the stuck-signal watchdog (internal/orchestrator/stuck_signal_watchdog.go)
+// and handleAgentStalled (internal/orchestrator/event_handlers_stall.go) both
+// select their activity guards by asserting the agent manager to narrow
+// unexported interfaces shaped like these two methods. Before this pin
+// existed, lifecycleAdapter forwarded neither method, so both assertions
+// failed silently in production: the watchdog's inactivity gate never
+// engaged (WO-38 review), and handleAgentStalled's ActivityEpoch check
+// always bailed out whenever a payload carried a nonzero epoch.
 var _ interface {
 	OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
 	GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error)
 	GetACPSessionIDForSession(sessionID string) (string, bool)
+	OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool
+	GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error)
+	CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error
 } = (*lifecycleAdapter)(nil)
 
 // newLifecycleAdapter creates a new lifecycle adapter
@@ -209,6 +222,7 @@ func buildLifecycleLaunchRequest(
 		WorkspaceID:                   req.WorkspaceID,
 		SessionID:                     req.SessionID,
 		TaskEnvironmentID:             req.TaskEnvironmentID,
+		WorkspaceReuseRequired:        req.WorkspaceReuseRequired,
 		TaskTitle:                     req.TaskTitle,
 		AgentProfileID:                officeProfileID,
 		ExecutionProfileID:            req.AgentProfileID,
@@ -251,6 +265,7 @@ func buildLifecycleLaunchRequest(
 		WorktreeBranchTicket:          req.WorktreeBranchTicket,
 		PullBeforeWorktree:            req.PullBeforeWorktree,
 		RemoteSyncHandled:             req.RemoteSyncHandled,
+		RefreshRepository:             req.RefreshRepository,
 		TaskDirName:                   req.TaskDirName,
 		RepoName:                      req.RepoName,
 		BranchSlug:                    req.BranchSlug,
@@ -313,6 +328,7 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 			WorktreeBranchTicket:    r.WorktreeBranchTicket,
 			PullBeforeWorktree:      r.PullBeforeWorktree,
 			RemoteSyncHandled:       r.RemoteSyncHandled,
+			RefreshRepository:       r.RefreshRepository,
 			RepoSetupScript:         r.RepoSetupScript,
 			RepoCleanupScript:       r.RepoCleanupScript,
 			CopyFiles:               r.CopyFiles,
@@ -474,6 +490,18 @@ func (a *lifecycleAdapter) GetPromptGenerationForSession(ctx context.Context, se
 	return a.mgr.GetPromptGenerationForSession(ctx, sessionID)
 }
 
+func (a *lifecycleAdapter) OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool {
+	return a.mgr.OwnsPromptActivity(sessionID, executionID, generation, activityEpoch)
+}
+
+func (a *lifecycleAdapter) GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error) {
+	return a.mgr.GetPromptActivityForSession(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error {
+	return a.mgr.CancelAgentForPrompt(ctx, sessionID, executionID, generation, activityEpoch)
+}
+
 // GetACPSessionIDForSession forwards to the lifecycle manager so
 // orchestrator.Service.currentACPSessionID observes the live execution's
 // actual ACP session identity in production, not just in tests against
@@ -572,6 +600,18 @@ func (a *lifecycleAdapter) SetSessionModeBySessionID(ctx context.Context, sessio
 // RespondToPermissionBySessionID sends a response to a permission request for a session
 func (a *lifecycleAdapter) RespondToPermissionBySessionID(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error {
 	return a.mgr.RespondToPermissionBySessionID(sessionID, pendingID, optionID, cancelled)
+}
+
+func (a *lifecycleAdapter) ListPendingPermissionsBySessionID(ctx context.Context, sessionID string) ([]streams.PendingAgentPermission, error) {
+	return a.mgr.ListPendingPermissionsBySessionID(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) ResolvePermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error) {
+	return a.mgr.ResolvePermissionBySessionID(ctx, sessionID, requestID, pendingID, optionID)
+}
+
+func (a *lifecycleAdapter) CancelPermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error) {
+	return a.mgr.CancelPermissionBySessionID(ctx, sessionID, requestID, pendingID)
 }
 
 // IsAgentRunningForSession checks if an agent is actually running for a session
@@ -982,8 +1022,9 @@ func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID
 }
 
 // CreatePermissionRequestMessage creates a message for a permission request
-func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
+func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
 	metadata := map[string]interface{}{
+		"request_id":     requestID,
 		"pending_id":     pendingID,
 		"tool_call_id":   toolCallID,
 		"options":        options,
@@ -1007,8 +1048,20 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 }
 
 // UpdatePermissionMessage updates a permission message's status
-func (a *messageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) error {
-	return a.svc.UpdatePermissionMessage(ctx, sessionID, pendingID, status)
+func (a *messageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error {
+	return a.svc.UpdatePermissionMessage(ctx, taskID, sessionID, requestID, pendingID, status)
+}
+
+func (a *messageCreatorAdapter) ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
+	return a.svc.ClaimPermissionResolution(ctx, request)
+}
+
+func (a *messageCreatorAdapter) FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error) {
+	return a.svc.FinalizePermissionResolution(ctx, request)
+}
+
+func (a *messageCreatorAdapter) GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error) {
+	return a.svc.GetPermissionResolutionAudit(ctx, taskID, sessionID, requestID, pendingID)
 }
 
 // CreateClarificationRequestMessages emits one chat message per question in a
@@ -1087,9 +1140,19 @@ func (a *messageCreatorAdapter) rollbackPartialBundle(ctx context.Context, ids [
 	}
 }
 
-// UpdateClarificationMessage updates a clarification message's status and answer
-// for a specific (pending_id, question_id) pair within the session.
+// UpdateClarificationMessage updates a clarification message's status and
+// answer.
+//
+// A nil answer must be forwarded as an untyped nil, not as a nil
+// *clarification.Answer boxed into the service method's interface{}
+// parameter (COR-001): a typed nil pointer boxed into an interface produces
+// a non-nil interface value, so the service's own `answer != nil` check
+// would fire and write a literal "response": null into every rejected or
+// cancelled clarification message's metadata.
 func (a *messageCreatorAdapter) UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, questionID, status string, answer *clarification.Answer) error {
+	if answer == nil {
+		return a.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, questionID, status, nil)
+	}
 	return a.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, questionID, status, answer)
 }
 

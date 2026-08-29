@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-session-cookie-port-scope-backend", "04-workspace-cookie-port-scope-frontend"]
 plan: "plan.md"
-spec: "../../specs/fix-multi-instance-cookie-isolation/spec.md"
+spec: "../../specs/auth/requirements/fix-multi-instance-cookie-isolation.md"
 ---
 
 # Task 06: Deployment note and stale cookie-name references
@@ -47,7 +47,7 @@ spec: "../../specs/fix-multi-instance-cookie-isolation/spec.md"
   - `apps/web/app/office/layout.tsx` (comment ~lines 154-157: the office
     cookie "is set by the setup wizard and workspace rail" — now writes the
     port-scoped name)
-  - `docs/specs/plugins/spec.md` (~lines 223-234, external-login section)
+  - `docs/specs/plugins/requirements/plugins.md` (~lines 223-234, external-login section)
   - `docs/decisions/0050-plugin-external-auth-capability.md`
   - `docs/decisions/2026-07-24-opt-in-authentication.md`
   - `apps/backend/AGENTS.md`
@@ -57,7 +57,7 @@ spec: "../../specs/fix-multi-instance-cookie-isolation/spec.md"
   - `apps/backend/internal/plugins/auth_login.go` (comment)
   - `apps/backend/internal/auth/store/models.go` (comment)
 - **No-op verification targets** (already amended by this package; keep in
-  the audit grep, do NOT edit): `docs/specs/auth/spec.md` (already states
+  the audit grep, do NOT edit): `docs/specs/auth/requirements/auth.md` (already states
   base name + request-host-derived effective names) and
   `docs/decisions/2026-08-15-office-mode-follows-active-workspace.md`
   (already states the legacy office cookie is read-only fallback and writes
@@ -68,7 +68,7 @@ spec: "../../specs/fix-multi-instance-cookie-isolation/spec.md"
 ## Verification
 
 ```bash
-rg -n "kandev_session" docs/specs/auth/spec.md docs/specs/plugins/spec.md docs/decisions/0050-plugin-external-auth-capability.md docs/decisions/2026-07-24-opt-in-authentication.md apps/backend/AGENTS.md apps/backend/internal/auth apps/backend/internal/plugins apps/backend/internal/backendapp/auth.go apps/web/e2e/helpers/auth.ts apps/web/components/app-sidebar/app-sidebar-workspace-navigation.ts apps/web/app/office/layout.tsx
+rg -n "kandev_session" docs/specs/auth/requirements/auth.md docs/specs/plugins/requirements/plugins.md docs/decisions/0050-plugin-external-auth-capability.md docs/decisions/2026-07-24-opt-in-authentication.md apps/backend/AGENTS.md apps/backend/internal/auth apps/backend/internal/plugins apps/backend/internal/backendapp/auth.go apps/web/e2e/helpers/auth.ts apps/web/components/app-sidebar/app-sidebar-workspace-navigation.ts apps/web/app/office/layout.tsx
 rg -n "office-active-workspace" docs/decisions/0023-active-workspace-cookie.md docs/decisions/2026-08-15-office-mode-follows-active-workspace.md docs/decisions/2026-07-24-opt-in-authentication.md
 # every path listed in the stale-reference acceptance must appear above; remaining hits must be intentional (e.g. the legacy-cookie no-fallback note in the fix spec)
 cd apps/backend && go build ./...
@@ -78,7 +78,7 @@ cd apps/backend && go build ./...
 
 - `docs/public/authentication.md`
 - `docs/public/configuration.md` (new `auth.cookieName` row + env name)
-- `docs/specs/plugins/spec.md`
+- `docs/specs/plugins/requirements/plugins.md`
 - `apps/web/e2e/helpers/auth.ts` (doc comment)
 - `apps/web/components/app-sidebar/app-sidebar-workspace-navigation.ts`
 - `apps/web/app/office/layout.tsx`
@@ -91,7 +91,7 @@ cd apps/backend && go build ./...
 - `apps/backend/internal/auth/store/models.go`
 
 Audit-only (do NOT edit; already amended by this package, keep in the
-verification grep): `docs/specs/auth/spec.md`,
+verification grep): `docs/specs/auth/requirements/auth.md`,
 `docs/decisions/2026-08-15-office-mode-follows-active-workspace.md`.
 
 ## Dependencies

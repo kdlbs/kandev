@@ -180,6 +180,67 @@ func TestPrepareSession_Success(t *testing.T) {
 	}
 }
 
+func TestPrepareSession_SharedGroupUsesTransactionalWorkspaceBinding(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	task := &v1.Task{
+		ID:          "task-shared",
+		WorkspaceID: "workspace-shared",
+		Metadata: map[string]interface{}{
+			"workspace": map[string]interface{}{"mode": "shared_group", "group_id": "group-1"},
+		},
+	}
+
+	sessionID, err := exec.PrepareSession(context.Background(), task, "profile-123", "executor-123", "", "")
+	if err != nil {
+		t.Fatalf("PrepareSession: %v", err)
+	}
+	if len(repo.sharedWorkspaceBindingCalls) != 1 {
+		t.Fatalf("shared workspace binding calls = %d, want 1", len(repo.sharedWorkspaceBindingCalls))
+	}
+	call := repo.sharedWorkspaceBindingCalls[0]
+	if call.GroupID != "group-1" || call.Session.ID != sessionID || call.Session.TaskEnvironmentID == "" {
+		t.Fatalf("shared binding = %+v, want group-1 and a bound session", call)
+	}
+}
+
+func TestPrepareSessionForExistingEnvironmentRejectsFailedWorkspaceBeforeCreatingSession(t *testing.T) {
+	repo := newMockRepository()
+	repo.taskEnvironments["environment-failed"] = &models.TaskEnvironment{
+		ID: "environment-failed", Status: models.TaskEnvironmentStatusFailed,
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	task := &v1.Task{ID: "task-workflow", WorkspaceID: "workspace-workflow"}
+
+	_, err := exec.PrepareSessionForExistingEnvironment(context.Background(), task, "profile-123", "executor-123", "", "", "environment-failed")
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("PrepareSessionForExistingEnvironment error = %v, want workspace reuse unsafe", err)
+	}
+	if len(repo.createTaskSessionCalls) != 0 {
+		t.Fatalf("replacement session creations = %d, want 0", len(repo.createTaskSessionCalls))
+	}
+}
+
+func TestPrepareSessionForExistingEnvironmentRejectsIncompleteWorkspaceInventory(t *testing.T) {
+	repo := newMockRepository()
+	repo.taskEnvironments["environment-ready"] = &models.TaskEnvironment{
+		ID: "environment-ready", Status: models.TaskEnvironmentStatusReady,
+	}
+	repo.taskRepositories["task-repo-workflow"] = &models.TaskRepository{
+		ID: "task-repo-workflow", TaskID: "task-workflow", RepositoryID: "repository-workflow",
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	task := &v1.Task{ID: "task-workflow", WorkspaceID: "workspace-workflow"}
+
+	_, err := exec.PrepareSessionForExistingEnvironment(context.Background(), task, "profile-123", "executor-123", "", "", "environment-ready")
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("PrepareSessionForExistingEnvironment error = %v, want workspace reuse unsafe", err)
+	}
+	if len(repo.createTaskSessionCalls) != 0 {
+		t.Fatalf("replacement session creations = %d, want 0", len(repo.createTaskSessionCalls))
+	}
+}
+
 func TestPrepareSessionSnapshotsProfileRuntimeConfig(t *testing.T) {
 	repo := newMockRepository()
 	agentManager := &mockAgentManager{
@@ -543,6 +604,80 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 	}
 }
 
+func TestLaunchPreparedSession_PropagatesTaskEnvironmentPersistenceFailure(t *testing.T) {
+	repo := newMockRepository()
+	persistErr := errors.New("inventory write failed")
+	repo.createTaskEnvironmentRepoErr = persistErr
+	repo.executors[models.ExecutorIDLocal] = &models.Executor{
+		ID: models.ExecutorIDLocal, Type: models.ExecutorTypeLocal, Status: models.ExecutorStatusActive,
+	}
+	repo.repositories["repo-1"] = &models.Repository{
+		ID: "repo-1", WorkspaceID: "workspace-1", SourceType: sourceTypeLocal, LocalPath: "/repo-1", Name: "repo-1",
+	}
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{
+		ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1", Position: 0,
+	}
+	repo.taskEnvironments["env-1"] = &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady,
+	}
+	repo.sessions["session-1"] = &models.TaskSession{
+		ID: "session-1", TaskID: "task-1", AgentProfileID: "profile-1", ExecutorID: models.ExecutorIDLocal,
+		TaskEnvironmentID: "env-1", State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	stopped := false
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-new",
+				Worktrees:        []RepoWorktreeResult{{RepositoryID: "repo-1", WorktreeID: "wt-1"}},
+			}, nil
+		},
+		stopAgentFunc: func(_ context.Context, executionID string, _ bool) error {
+			if executionID == "exec-new" {
+				stopped = true
+			}
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+
+	_, err := exec.LaunchPreparedSession(context.Background(), &v1.Task{
+		ID: "task-1", WorkspaceID: "workspace-1", Title: "Task 1",
+	}, "session-1", LaunchOptions{AgentProfileID: "profile-1", ExecutorID: models.ExecutorIDLocal})
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("LaunchPreparedSession error = %v, want %v", err, persistErr)
+	}
+	if !stopped {
+		t.Fatal("persistence failure did not stop the unstarted execution")
+	}
+}
+
+func TestLaunchPreparedSession_RejectsNilLaunchResponse(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-nil-response"] = &models.TaskSession{
+		ID:             "session-nil-response",
+		TaskID:         "task-nil-response",
+		AgentProfileID: "profile-123",
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+	exec := newTestExecutor(t, &mockAgentManager{
+		launchAgentFunc: func(context.Context, *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return nil, nil
+		},
+	}, repo)
+
+	_, err := exec.LaunchPreparedSession(context.Background(), &v1.Task{
+		ID:          "task-nil-response",
+		WorkspaceID: "workspace-123",
+		Title:       "Test Task",
+	}, "session-nil-response", LaunchOptions{AgentProfileID: "profile-123", StartAgent: true})
+	if err == nil {
+		t.Fatal("LaunchPreparedSession succeeded with a nil launch response")
+	}
+}
+
 func TestLaunchPreparedSession_PersistsResolvedExecutorID(t *testing.T) {
 	repo := newMockRepository()
 	now := time.Now().UTC()
@@ -816,6 +951,46 @@ func TestLaunchPreparedSession_InheritsEnvFromSessionEnvironmentID(t *testing.T)
 	if len(repo.createTaskEnvironmentCalls) != 0 {
 		t.Errorf("expected zero CreateTaskEnvironment calls (env inherited); got %d",
 			len(repo.createTaskEnvironmentCalls))
+	}
+}
+
+func TestLaunchPreparedSession_RejectsUnavailableInheritedEnvironment(t *testing.T) {
+	repo := newMockRepository()
+	session := &models.TaskSession{
+		ID:                "session-child",
+		TaskID:            "task-child",
+		AgentProfileID:    "profile-123",
+		TaskEnvironmentID: "env-parent",
+		State:             models.TaskSessionStateCreated,
+		StartedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+	}
+	repo.sessions[session.ID] = session
+	repo.getTaskEnvironmentFunc = func(_ context.Context, id string) (*models.TaskEnvironment, error) {
+		if id != session.TaskEnvironmentID {
+			t.Fatalf("GetTaskEnvironment id = %q, want %q", id, session.TaskEnvironmentID)
+		}
+		return nil, errors.New("environment row disappeared")
+	}
+
+	launched := false
+	executor := newTestExecutor(t, &mockAgentManager{
+		launchAgentFunc: func(context.Context, *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			launched = true
+			return nil, nil
+		},
+	}, repo)
+
+	_, err := executor.LaunchPreparedSession(context.Background(), &v1.Task{ID: session.TaskID, WorkspaceID: "ws-1"}, session.ID,
+		LaunchOptions{AgentProfileID: session.AgentProfileID, Prompt: "test", StartAgent: true})
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("LaunchPreparedSession() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+	if launched {
+		t.Fatal("LaunchAgent was called for an unavailable inherited environment")
+	}
+	if len(repo.createTaskEnvironmentCalls) != 0 {
+		t.Fatalf("created %d task environments for an unavailable inherited environment", len(repo.createTaskEnvironmentCalls))
 	}
 }
 
@@ -2773,7 +2948,7 @@ func (c *recordingAuthenticatedCloner) SetOriginURL(context.Context, string, str
 	return nil
 }
 
-func (c *recordingAuthenticatedCloner) BuildCloneURLWithHost(_, _, _, _ string) (string, error) {
+func (c *recordingAuthenticatedCloner) BuildCloneURLWithHost(_ context.Context, _, _, _, _ string) (string, error) {
 	return "", nil
 }
 

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/archive-confirmation.md
+spec: docs/specs/tasks/requirements/archive-confirmation.md
 created: 2026-07-15
 status: completed
 ---

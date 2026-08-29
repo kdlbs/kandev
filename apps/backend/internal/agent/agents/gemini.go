@@ -82,7 +82,7 @@ func (a *Gemini) BuildCommand(opts CommandOptions) Command {
 }
 
 func (a *Gemini) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
-	return ManagedNPMRuntimeSpec{Package: geminiPackage, ACPArgs: []string{"--acp"}}
+	return newManagedNPMRuntimeSpec(geminiPackage, "--acp")
 }
 
 func (a *Gemini) Runtime() *RuntimeConfig {

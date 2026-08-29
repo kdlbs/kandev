@@ -178,6 +178,11 @@ function mapTaskRepositories(
     repository_id: r.repository_id,
     base_branch: r.base_branch,
     checkout_branch: r.checkout_branch,
+    branch_policy_id: r.branch_policy_id,
+    branch_policy_name: r.branch_policy_name,
+    branch_policy_base_branch: r.branch_policy_base_branch,
+    branch_policy_branch_template: r.branch_policy_branch_template,
+    branch_policy_pull_request_target: r.branch_policy_pull_request_target,
     position: r.position,
   }));
 }
@@ -403,16 +408,80 @@ function useSheetNestTask() {
   return useNestTaskByDrag();
 }
 
+export function useSheetArchiveActions(
+  store: ReturnType<typeof useAppStoreApi>,
+  archiveAndSwitch: ReturnType<typeof useArchiveAndSwitchTask>,
+) {
+  const { t } = useTranslation();
+  const [archivingTask, setArchivingTask] = useState<{
+    id: string;
+    title: string;
+    executorType?: string | null;
+  } | null>(null);
+  const [isArchiving, setIsArchiving] = useState(false);
+  const [archivingTaskId, setArchivingTaskId] = useState<string | null>(null);
+
+  const runArchive = useCallback(
+    async (taskId: string, opts?: { cascade?: boolean }) => {
+      setIsArchiving(true);
+      setArchivingTaskId(taskId);
+      try {
+        await archiveAndSwitch(taskId, opts);
+      } catch (error) {
+        console.error("Failed to archive task:", error);
+      } finally {
+        setIsArchiving(false);
+        setArchivingTaskId((current) => (current === taskId ? null : current));
+        setArchivingTask((current) => (current?.id === taskId ? null : current));
+      }
+    },
+    [archiveAndSwitch],
+  );
+
+  const handleArchiveTask = useCallback(
+    (taskId: string, opts?: { cascade?: boolean }) => {
+      if (opts) {
+        void runArchive(taskId, opts);
+        return;
+      }
+      const task = findSheetTask(store.getState(), taskId);
+      setArchivingTask({
+        id: taskId,
+        title: task?.title ?? t("task:thisTask"),
+        executorType: task?.primaryExecutorType,
+      });
+    },
+    [runArchive, store, t],
+  );
+
+  const handleArchiveConfirm = useCallback(
+    async (opts?: { cascade?: boolean }) => {
+      if (!archivingTask) return;
+      await runArchive(archivingTask.id, opts);
+    },
+    [archivingTask, runArchive],
+  );
+
+  return {
+    handleArchiveTask,
+    archivingTask,
+    archivingTaskId,
+    setArchivingTask,
+    isArchiving,
+    handleArchiveConfirm,
+  };
+}
+
 export function useSheetActions(
   workspaceId: string | null,
   onOpenChange: (open: boolean) => void,
   selection: TaskSheetSelectionController,
 ) {
-  const { t } = useTranslation();
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const store = useAppStoreApi();
   const archiveAndSwitch = useArchiveAndSwitchTask();
+  const archiveActions = useSheetArchiveActions(store, archiveAndSwitch);
   const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({ store });
   const deleteActions = useSheetDeleteActions(store, removeTaskFromBoard);
   const detachActions = useTaskDetachDialog(store);
@@ -443,42 +512,6 @@ export function useSheetActions(
     [loadTaskSessionsForTask, setActiveSession, setActiveTask, store, onOpenChange, selection],
   );
 
-  const [archivingTask, setArchivingTask] = useState<{
-    id: string;
-    title: string;
-    executorType?: string | null;
-  } | null>(null);
-  const [isArchiving, setIsArchiving] = useState(false);
-
-  const handleArchiveTask = useCallback(
-    (taskId: string) => {
-      const state = store.getState();
-      const task = findSheetTask(state, taskId);
-      setArchivingTask({
-        id: taskId,
-        title: task?.title ?? t("task:thisTask"),
-        executorType: task?.primaryExecutorType,
-      });
-    },
-    [store, t],
-  );
-
-  const handleArchiveConfirm = useCallback(
-    async (opts?: { cascade?: boolean }) => {
-      if (!archivingTask) return;
-      setIsArchiving(true);
-      try {
-        await archiveAndSwitch(archivingTask.id, opts);
-      } catch (error) {
-        console.error("Failed to archive task:", error);
-      } finally {
-        setIsArchiving(false);
-        setArchivingTask(null);
-      }
-    },
-    [archivingTask, archiveAndSwitch],
-  );
-
   const { handleWorkspaceChange, handleTaskCreated } = useWorkspaceAndTaskCreatedActions({
     workspaceId,
     store,
@@ -490,14 +523,10 @@ export function useSheetActions(
 
   return {
     handleSelectTask,
-    handleArchiveTask,
+    ...archiveActions,
     handleWorkspaceChange,
     handleTaskCreated,
     handleNestTask,
-    archivingTask,
-    setArchivingTask,
-    isArchiving,
-    handleArchiveConfirm,
     ...deleteActions,
     ...detachActions,
   };

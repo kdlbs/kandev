@@ -44,7 +44,7 @@ type SetAutoUpdateRequest struct {
 // SyncResult is the body of a successful POST /api/plugins/sync (and the
 // return value of Service.Sync / Service.bootScan): what the filesystem
 // scan under the plugins directory found and did this run, per
-// docs/specs/plugins/spec.md ("Filesystem sideloading & sync").
+// docs/specs/plugins/requirements/plugins.md ("Filesystem sideloading & sync").
 type SyncResult struct {
 	// Added lists the plugin ids of directory sideloads
 	// (<pluginsDir>/<id>/<version>/manifest.yaml found with no existing

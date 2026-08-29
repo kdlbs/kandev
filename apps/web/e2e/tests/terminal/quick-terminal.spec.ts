@@ -1,6 +1,7 @@
 import { type Locator, type Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { assertLocatorWithinViewportX } from "../../helpers/layout-assertions";
+import { closeQuickTerminalTab } from "./terminal-test-helpers";
 
 const QUICK_CHAT_TITLE = "Quick Chat";
 
@@ -50,10 +51,7 @@ async function closeSurvivingQuickTerminals(page: Page, launcherTestId: string) 
   for (let attempts = 0; attempts < 8; attempts += 1) {
     const count = await tabs.count();
     if (count === 0) return;
-    await tabs
-      .nth(count - 1)
-      .getByRole("button", { name: /^Close Terminal \d+$/ })
-      .click();
+    await closeQuickTerminalTab(page, tabs.nth(count - 1));
     await expect(tabs).toHaveCount(count - 1, { timeout: 10_000 });
   }
 }
@@ -144,7 +142,7 @@ test.describe("quick terminal tabs", () => {
       await runCommandAndWaitForOutput(testPage, "echo $KANDEV_QT_TWO", "QUICK_TERMINAL_TWO");
 
       // Closing one tab stops/removes only that tab and falls back to its sibling.
-      await secondTab.getByRole("button", { name: "Close Terminal 2" }).click();
+      await closeQuickTerminalTab(testPage, secondTab);
       await expect(dialog.locator('[data-testid="quick-terminal-tab"]')).toHaveCount(1);
       await runCommandAndWaitForOutput(testPage, "echo $KANDEV_QT_ONE", "QUICK_TERMINAL_ONE");
 

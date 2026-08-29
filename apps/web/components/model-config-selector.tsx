@@ -1,25 +1,15 @@
 "use client";
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { IconCheck, IconChevronDown, IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
+import { IconChevronDown } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
 import { settingsControlClassName } from "@/components/settings/settings-control";
+import { ModelConfigSelectorContent } from "@/components/model-config-selector-content";
 import { Button } from "@kandev/ui/button";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@kandev/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
-import { ScrollArea } from "@kandev/ui/scroll-area";
-import { Separator } from "@kandev/ui/separator";
-import { Spinner } from "@kandev/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 
 export type ModelSelectorOption = {
@@ -27,8 +17,7 @@ export type ModelSelectorOption = {
   name: string;
   description?: string;
   usageMultiplier?: string;
-  /** When true the model is unavailable ("gone") — rendered greyed out and
-   * not selectable, with `disabledReason` shown in a tooltip. */
+  /** Unavailable models are dimmed and non-selectable with a reason tooltip. */
   disabled?: boolean;
   disabledReason?: string;
 };
@@ -184,286 +173,6 @@ function triggerDetails(
   );
 }
 
-function ModelRow({
-  model,
-  selected,
-  loading,
-  onSelect,
-}: {
-  model: ModelSelectorOption;
-  selected: boolean;
-  loading: boolean;
-  onSelect: (value: string) => void;
-}) {
-  const item = (
-    <CommandItem
-      value={model.id}
-      keywords={[model.name, model.description ?? "", model.id]}
-      onSelect={() => !model.disabled && onSelect(model.id)}
-      disabled={model.disabled}
-      data-testid={selected ? "model-config-selected-row" : undefined}
-      className={cn("relative pr-7", model.disabled && "opacity-40 cursor-not-allowed")}
-    >
-      <div className="flex min-w-0 flex-1 items-center">
-        <div className="min-w-0 flex-1">
-          <div className="truncate">{model.name}</div>
-          {model.description && (
-            <div className="truncate text-xs text-muted-foreground" title={model.description}>
-              {model.description}
-            </div>
-          )}
-        </div>
-        {model.usageMultiplier && (
-          <span className="shrink-0 text-xs text-muted-foreground">{model.usageMultiplier}</span>
-        )}
-      </div>
-      {selected && loading ? (
-        <Spinner aria-hidden="true" className="absolute right-2" />
-      ) : (
-        <IconCheck
-          className={cn("absolute right-2 h-4 w-4", selected ? "opacity-100" : "opacity-0")}
-        />
-      )}
-    </CommandItem>
-  );
-  // cmdk's CommandItem swallows pointer events with no native tooltip slot;
-  // keep disabled items in a focusable wrapper so their gone reason is reachable.
-  if (model.disabled && model.disabledReason) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div
-            tabIndex={0}
-            aria-label={`${model.name}: ${model.disabledReason}`}
-            className="rounded outline-none focus-visible:ring-2 focus-visible:ring-ring/35"
-          >
-            {item}
-          </div>
-        </TooltipTrigger>
-        <TooltipContent side="right">{model.disabledReason}</TooltipContent>
-      </Tooltip>
-    );
-  }
-  return item;
-}
-
-function ConfigOptionTrigger({
-  option,
-  onSelect,
-  triggerRef,
-}: {
-  option: SelectConfigOption;
-  onSelect: () => void;
-  triggerRef?: (element: HTMLButtonElement | null) => void;
-}) {
-  return (
-    <button
-      type="button"
-      ref={triggerRef}
-      data-testid={`config-option-trigger-${option.id}`}
-      className="flex min-h-9 w-full cursor-pointer items-center justify-between gap-3 rounded-md px-2.5 py-2 text-left text-xs/relaxed hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/35 focus-visible:outline-none"
-      onClick={onSelect}
-    >
-      <span className="min-w-0 flex-1">
-        <span className="block font-medium">{option.name}</span>
-      </span>
-      <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
-        <span className="truncate">{currentOptionName(option)}</span>
-        <IconChevronRight className="h-3.5 w-3.5 shrink-0" />
-      </span>
-    </button>
-  );
-}
-
-function ConfigOptionSubSelector({
-  option,
-  onBack,
-  onChange,
-}: {
-  option: SelectConfigOption;
-  onBack: () => void;
-  onChange?: (configId: string, value: string) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex min-h-0 flex-col gap-2">
-      <button
-        type="button"
-        aria-label={t("agents:backToModelSettings", { name: option.name })}
-        autoFocus
-        className="flex min-h-9 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-xs/relaxed hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/35 focus-visible:outline-none"
-        onClick={onBack}
-      >
-        <IconChevronLeft className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="min-w-0">
-          <span className="block truncate font-medium">{option.name}</span>
-          {option.description && (
-            <span className="block whitespace-normal text-muted-foreground">
-              {option.description}
-            </span>
-          )}
-        </span>
-      </button>
-      <div
-        className="max-h-[min(18rem,calc(100dvh-8rem))] overflow-y-auto overscroll-contain pr-2"
-        data-testid={`config-option-section-${option.id}`}
-      >
-        <div className="space-y-1">
-          {option.options.map((item, index) => {
-            const descriptionId = item.description
-              ? `config-option-value-description-${option.id}-${index}`
-              : undefined;
-            return (
-              <Button
-                key={item.value}
-                type="button"
-                aria-label={item.name}
-                aria-describedby={descriptionId}
-                variant={item.value === option.currentValue ? "secondary" : "ghost"}
-                size="sm"
-                className="h-auto min-h-9 w-full min-w-0 cursor-pointer justify-start px-2 py-2 text-left"
-                disabled={!onChange}
-                onClick={() => {
-                  onChange?.(option.id, item.value);
-                  onBack();
-                }}
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate">{item.name}</span>
-                  {item.description && (
-                    <span
-                      id={descriptionId}
-                      className="block whitespace-normal text-xs text-muted-foreground"
-                    >
-                      {item.description}
-                    </span>
-                  )}
-                </span>
-                <IconCheck
-                  className={cn(
-                    "ml-auto h-4 w-4 shrink-0",
-                    item.value === option.currentValue ? "opacity-100" : "opacity-0",
-                  )}
-                />
-              </Button>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-type ModelConfigSelectorContentProps = {
-  activeConfig: SelectConfigOption | undefined;
-  modelOptions: ModelSelectorOption[];
-  currentModelValue: string;
-  extraConfigOptions: SelectConfigOption[];
-  onModelSelect: (value: string) => void;
-  onConfigSelect: (configId: string) => void;
-  onConfigBack: () => void;
-  onConfigChange?: (configId: string, value: string) => void;
-  configOptionsLoading: boolean;
-};
-
-function ModelConfigSelectorContent({
-  activeConfig,
-  modelOptions,
-  currentModelValue,
-  extraConfigOptions,
-  onModelSelect,
-  onConfigSelect,
-  onConfigBack,
-  onConfigChange,
-  configOptionsLoading,
-}: ModelConfigSelectorContentProps) {
-  const { t } = useTranslation();
-  const pendingFocusConfigId = useRef<string | null>(null);
-  const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const showModelFilter = modelOptions.length > 5;
-
-  useEffect(() => {
-    if (activeConfig) return;
-    const configId = pendingFocusConfigId.current;
-    if (!configId) return;
-    pendingFocusConfigId.current = null;
-    triggerRefs.current[configId]?.focus();
-  }, [activeConfig]);
-
-  const returnToConfigTrigger = () => {
-    if (activeConfig) {
-      pendingFocusConfigId.current = activeConfig.id;
-    }
-    onConfigBack();
-  };
-
-  if (activeConfig) {
-    return (
-      <ConfigOptionSubSelector
-        option={activeConfig}
-        onBack={returnToConfigTrigger}
-        onChange={onConfigChange}
-      />
-    );
-  }
-
-  return (
-    <>
-      <Command>
-        {showModelFilter && <CommandInput placeholder={t("agents:filterModels")} className="h-8" />}
-        <CommandList className="max-h-60">
-          <CommandEmpty>{t("agents:noModelsFound")}</CommandEmpty>
-          <CommandGroup heading={t("agents:modelHeading")}>
-            {modelOptions.map((model) => (
-              <ModelRow
-                key={model.id}
-                model={model}
-                selected={model.id === currentModelValue}
-                loading={configOptionsLoading}
-                onSelect={onModelSelect}
-              />
-            ))}
-          </CommandGroup>
-        </CommandList>
-      </Command>
-      {configOptionsLoading ? (
-        <>
-          <Separator />
-          <div
-            className="flex min-h-9 items-center gap-2 px-2 text-xs text-muted-foreground"
-            data-testid="model-config-options-loading"
-            role="status"
-            aria-label={t("agents:resolvingModelOptions")}
-          >
-            <Spinner aria-hidden="true" className="h-3.5 w-3.5" />
-            <span aria-hidden="true">{t("agents:resolvingModelOptions")}</span>
-          </div>
-        </>
-      ) : (
-        extraConfigOptions.length > 0 && (
-          <>
-            <Separator />
-            <ScrollArea className="max-h-40 pr-2">
-              <div className="space-y-1">
-                {extraConfigOptions.map((option) => (
-                  <ConfigOptionTrigger
-                    key={option.id}
-                    option={option}
-                    onSelect={() => onConfigSelect(option.id)}
-                    triggerRef={(element) => {
-                      triggerRefs.current[option.id] = element;
-                    }}
-                  />
-                ))}
-              </div>
-            </ScrollArea>
-          </>
-        )
-      )}
-    </>
-  );
-}
-
 export type ModelConfigSelectorProps = {
   modelOptions: ModelSelectorOption[];
   currentModel: string | null;
@@ -474,6 +183,8 @@ export type ModelConfigSelectorProps = {
   placeholder?: string;
   ariaLabel?: string;
   variant?: "compact" | "field";
+  /** Aligns the picker with the trigger edge for context-specific settings surfaces. */
+  popoverAlign?: "start" | "center" | "end";
   popoverSide?: "top" | "bottom";
   triggerClassName?: string;
   triggerSummary?: "all" | "changed";
@@ -565,6 +276,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   placeholder,
   ariaLabel,
   variant = "field",
+  popoverAlign = "end",
   popoverSide = "bottom",
   triggerClassName: customTriggerClassName,
   triggerSummary = "all",
@@ -592,9 +304,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
     triggerSummary === "changed"
       ? triggerDetails(modelOptions, currentModel, modelConfig, extraConfigOptions, t)
       : undefined;
-  // The (fallback) marker is a live WS signal, not replayed on reload. When
-  // it is active, explain on the trigger that the note is transient so users
-  // are not surprised when the marker disappears after a refresh.
+  // The fallback marker is live-only, so explain when it is active.
   const triggerTitle = currentModelSuffix ? t("settings:fallbackNoteLive") : undefined;
 
   const hasExtraConfigOptions = extraConfigOptions.length > 0;
@@ -626,7 +336,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
         variant={variant}
       />
       <PopoverContent
-        align="end"
+        align={popoverAlign}
         side={popoverSide}
         className="w-[min(24rem,calc(100vw-1rem))] max-h-[min(32rem,calc(100vh-1rem))] gap-2 overflow-hidden p-2"
       >

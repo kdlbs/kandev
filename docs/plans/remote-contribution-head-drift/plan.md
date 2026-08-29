@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/remote-contribution-tasks.md
+spec: docs/specs/tasks/system-design/remote-contribution-tasks.md
 created: 2026-08-10
 status: approved
 ---
@@ -21,7 +21,7 @@ show an inline warning and two separately titled commit lists. No observation au
 rebases, merges, or deletes local work.
 
 This plan implements the amended
-[Remote Contribution Tasks spec](../../specs/tasks/remote-contribution-tasks.md) and
+[Remote Contribution Tasks spec](../../specs/tasks/system-design/remote-contribution-tasks.md) and
 [ADR-2026-08-10](../../decisions/2026-08-10-remote-contribution-head-drift.md).
 
 ## Implementation status

@@ -23,9 +23,6 @@ var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 var actionKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 var referenceIdentityPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._:-]{0,127}$`)
 
-// supportedAPIVersion is the only api_version this kandev build accepts.
-const supportedAPIVersion = 1
-
 // validCategories are the allowed values for Manifest.Categories entries.
 var validCategories = map[string]bool{
 	"connector":  true,
@@ -123,7 +120,7 @@ func buildShiftAlteredKeySet() map[string]bool {
 }
 
 // Validate checks the manifest against the plugin registration rules
-// described in docs/specs/plugins/spec.md. It returns nil if the manifest
+// described in docs/specs/plugins/requirements/plugins.md. It returns nil if the manifest
 // is well-formed, or a joined error describing every violation found.
 func (m *Manifest) Validate() error {
 	var errs []error
@@ -260,8 +257,11 @@ func (m *Manifest) validateIdentity() []error {
 	} else if strings.HasSuffix(m.ID, dotConfigSuffix) {
 		errs = append(errs, fmt.Errorf("invalid plugin id %q: must not end in %q", m.ID, dotConfigSuffix))
 	}
-	if m.APIVersion != supportedAPIVersion {
-		errs = append(errs, fmt.Errorf("unsupported api_version %d: only %d is supported", m.APIVersion, supportedAPIVersion))
+	if m.APIVersion < LegacyAPIVersion || m.APIVersion > CurrentAPIVersion {
+		errs = append(errs, fmt.Errorf(
+			"unsupported api_version %d: supported versions are %d through %d",
+			m.APIVersion, LegacyAPIVersion, CurrentAPIVersion,
+		))
 	}
 	return errs
 }
@@ -525,13 +525,13 @@ func (m *Manifest) validateWebhooks() []error {
 	seen := make(map[string]bool, len(m.Webhooks))
 	var errs []error
 	for _, wh := range m.Webhooks {
-		if access := wh.EffectiveAccess(); access != WebhookAccessPublic && access != WebhookAccessAuthenticated {
+		if access := wh.EffectiveAccess(m.APIVersion); access != WebhookAccessPublic && access != WebhookAccessAuthenticated {
 			errs = append(errs, fmt.Errorf("webhook %q access %q is invalid", wh.Key, wh.Access))
 		}
 		if wh.MaxBodyBytes < 0 || wh.MaxBodyBytes > MaximumWebhookMaxBodyBytes {
 			errs = append(errs, fmt.Errorf("webhook %q max_body_bytes must be between 1 and %d when set", wh.Key, MaximumWebhookMaxBodyBytes))
 		}
-		if wh.EffectiveAccess() == WebhookAccessPublic && wh.MaxBodyBytes > DefaultWebhookMaxBodyBytes {
+		if wh.EffectiveAccess(m.APIVersion) == WebhookAccessPublic && wh.MaxBodyBytes > DefaultWebhookMaxBodyBytes {
 			errs = append(errs, fmt.Errorf("webhook %q must use authenticated access when max_body_bytes exceeds %d", wh.Key, DefaultWebhookMaxBodyBytes))
 		}
 		if seen[wh.Key] {
@@ -544,6 +544,9 @@ func (m *Manifest) validateWebhooks() []error {
 }
 
 func (m *Manifest) validateActions() []error {
+	const minimumAdminActionKandevVersion = "0.91.1"
+	minimum, validMinimum := NormalizeReleaseVersion(m.MinKandevVersion)
+	adminAccessSupported := validMinimum && CompareVersions(minimum, minimumAdminActionKandevVersion) >= 0
 	seen := make(map[string]bool, len(m.Actions))
 	var errs []error
 	for _, action := range m.Actions {
@@ -558,6 +561,15 @@ func (m *Manifest) validateActions() []error {
 		if action.ResourceScope != ActionScopeWorkspace && action.ResourceScope != ActionScopeTask &&
 			action.ResourceScope != ActionScopeRepository {
 			errs = append(errs, fmt.Errorf("action %q has invalid scope %q", action.Key, action.ResourceScope))
+		}
+		if access := action.EffectiveAccess(); access != ActionAccessAuthenticated && access != ActionAccessAdmin {
+			errs = append(errs, fmt.Errorf("action %q has invalid access %q", action.Key, action.Access))
+		} else if access == ActionAccessAdmin && !adminAccessSupported {
+			errs = append(errs, fmt.Errorf(
+				"action %q with admin access requires min_kandev_version >= %s",
+				action.Key,
+				minimumAdminActionKandevVersion,
+			))
 		}
 		if action.MaxBodyBytes <= 0 || action.MaxBodyBytes > MaxActionBodyBytes {
 			errs = append(errs, fmt.Errorf("action %q max_body_bytes must be between 1 and %d", action.Key, MaxActionBodyBytes))

@@ -51,12 +51,14 @@ type BuildInfo struct {
 
 // Wiring supplies the runtime hooks and repositories owned by the wider
 // application. OrchestratorShutdown stops in-flight agent executions before
-// destructive resets. RestoreQuiesce stops the complete database-backed
-// runtime before a SQLite restore closes the shared pool. TaskSessions is the
-// authoritative session reader used by the install-wide sleep-inhibition
-// service.
+// destructive resets. DatabaseQuiesce stops database-backed workers before a
+// factory reset mutates the shared schema. RestoreQuiesce stops the complete
+// database-backed runtime before a SQLite restore closes the shared pool.
+// TaskSessions is the authoritative session reader used by the install-wide
+// sleep-inhibition service.
 type Wiring struct {
 	OrchestratorShutdown func()
+	DatabaseQuiesce      func() error
 	RestoreQuiesce       func() error
 	MessageQueue         queuesettings.Target
 	MessageQueueConfig   queuesettings.Configuration
@@ -107,6 +109,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 	}
 	dbSvc := database.NewService(pool, databasePath, resetDirs, tracker, log)
 	dbSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
+	dbSvc.DatabaseQuiesce = wiring.DatabaseQuiesce
 
 	backupsSvc := backups.NewService(databasePath, pool, tracker, log)
 	backupsSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
@@ -185,7 +188,7 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 
 	g.GET("/info", info.Handler(s.Info))
 	if s.Storage != nil {
-		storage.RegisterRoutes(g, s.Storage)
+		storage.RegisterRoutes(g, admin, s.Storage)
 	}
 
 	g.GET("/disk-usage", disk.HandleGet(s.Disk))
@@ -197,7 +200,7 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	admin.POST("/database/optimize", database.HandleOptimize(s.Database))
 	admin.POST("/database/reset", database.HandleReset(s.Database))
 
-	backups.RegisterRoutes(g, s.Backups)
+	backups.RegisterRoutes(g, admin, s.Backups)
 
 	if s.FrontendErrors != nil {
 		g.POST("/logs/frontend-errors", frontenderrors.Handle(s.FrontendErrors))

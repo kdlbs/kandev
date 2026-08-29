@@ -287,7 +287,7 @@ var ValidProjectStatuses = map[ProjectStatus]bool{
 }
 
 // CostContractVersion is the in-band activation point for the cache-split /
-// cost-provenance / turn-attribution columns (docs/specs/office/costs.md).
+// cost-provenance / turn-attribution columns (docs/specs/office/requirements/costs.md).
 // The Rill cost extract has no schema versioning of its own, so a row
 // written under a prior contract is distinguished by comparing
 // cost_contract_version, not by a date an analyst has to be told out of
@@ -332,7 +332,7 @@ const CostContractVersion int64 = 3
 // turn. The JSON cost-list representation includes this field as null so API
 // consumers can make the same distinction. NULL is never backfilled to 0;
 // TokensCachedIn keeps its original read+write sum semantics on every row so
-// existing consumers of that column are unaffected. See docs/specs/office/costs.md.
+// existing consumers of that column are unaffected. See docs/specs/office/requirements/costs.md.
 type CostEvent struct {
 	ID                        string      `json:"id" db:"id"`
 	SessionID                 string      `json:"session_id" db:"session_id"`
@@ -410,10 +410,28 @@ type Run struct {
 	// SummaryInjected is the continuation-summary content prepended
 	// to the prompt at dispatch time, snapshot for inspection. Empty
 	// when no summary was injected (today: every run, until PR 2).
-	SummaryInjected string     `json:"summary_injected,omitempty" db:"summary_injected"`
-	RequestedAt     time.Time  `json:"requested_at" db:"requested_at"`
-	ClaimedAt       *time.Time `json:"claimed_at" db:"claimed_at"`
-	FinishedAt      *time.Time `json:"finished_at" db:"finished_at"`
+	SummaryInjected string `json:"summary_injected,omitempty" db:"summary_injected"`
+	// ContinuationScope is the continuation-summary scope key
+	// (ContinuationScopeForRun's output) computed once at run creation
+	// and persisted here so every later reader/writer of this run's
+	// continuation summary uses the same value. Computing this at
+	// creation time — before any wakeup can coalesce into this row —
+	// closes a race where a routine wakeup patches context_snapshot
+	// after claim but a re-derivation against the freshly re-fetched
+	// row would disagree with the derivation the claiming scheduler is
+	// still holding in memory.
+	ContinuationScope string     `json:"continuation_scope,omitempty" db:"continuation_scope"`
+	RequestedAt       time.Time  `json:"requested_at" db:"requested_at"`
+	ClaimedAt         *time.Time `json:"claimed_at" db:"claimed_at"`
+	FinishedAt        *time.Time `json:"finished_at" db:"finished_at"`
+
+	// Outcome records why a finished run ended (docs/specs/
+	// task-delivery-ledger/spec.md, "Office run outcome"): one of eight
+	// values on the finished path, NULL on failed and on every
+	// pre-activation row. Pointer-typed so StructScan reads the NULL
+	// every pre-activation row carries, same idiom as the provider-
+	// routing columns below.
+	Outcome *string `json:"outcome,omitempty" db:"outcome"`
 
 	// Provider-routing columns (office-provider-routing spec). All
 	// optional and ignored when workspace routing is disabled. The TEXT
@@ -459,22 +477,28 @@ type Run struct {
 // Persisted by the routing scheduler dispatcher in
 // internal/office/scheduler/dispatch_routing.go.
 type RouteAttempt struct {
-	RunID              string              `json:"run_id" db:"run_id"`
-	Seq                int                 `json:"seq" db:"seq"`
-	ExecutionProfileID string              `json:"execution_profile_id" db:"execution_profile_id"`
-	ProviderID         string              `json:"provider_id" db:"provider_id"`
-	Model              string              `json:"model" db:"model"`
-	Tier               string              `json:"tier" db:"tier"`
-	Outcome            RouteAttemptOutcome `json:"outcome" db:"outcome"`
-	ErrorCode          string              `json:"error_code,omitempty" db:"error_code"`
-	ErrorConfidence    ErrorConfidence     `json:"error_confidence,omitempty" db:"error_confidence"`
-	AdapterPhase       AdapterPhase        `json:"adapter_phase,omitempty" db:"adapter_phase"`
-	ClassifierRule     string              `json:"classifier_rule,omitempty" db:"classifier_rule"`
-	ExitCode           *int                `json:"exit_code,omitempty" db:"exit_code"`
-	RawExcerpt         string              `json:"raw_excerpt,omitempty" db:"raw_excerpt"`
-	ResetHint          *time.Time          `json:"reset_hint,omitempty" db:"reset_hint"`
-	StartedAt          time.Time           `json:"started_at" db:"started_at"`
-	FinishedAt         *time.Time          `json:"finished_at,omitempty" db:"finished_at"`
+	RunID              string `json:"run_id" db:"run_id"`
+	Seq                int    `json:"seq" db:"seq"`
+	ExecutionProfileID string `json:"execution_profile_id" db:"execution_profile_id"`
+	ProviderID         string `json:"provider_id" db:"provider_id"`
+	Model              string `json:"model" db:"model"`
+	Tier               string `json:"tier" db:"tier"`
+	// TierSource names the precedence level that supplied Tier: one of
+	// "wake_reason", "override", "role", "workspace". Empty means "not
+	// recorded" — either a pre-migration row (Tier non-empty) or an
+	// attempt that never resolved a tier (both empty, e.g. a
+	// max-attempts-exceeded row) — never interpreted as "workspace".
+	TierSource      string              `json:"tier_source,omitempty" db:"tier_source"`
+	Outcome         RouteAttemptOutcome `json:"outcome" db:"outcome"`
+	ErrorCode       string              `json:"error_code,omitempty" db:"error_code"`
+	ErrorConfidence ErrorConfidence     `json:"error_confidence,omitempty" db:"error_confidence"`
+	AdapterPhase    AdapterPhase        `json:"adapter_phase,omitempty" db:"adapter_phase"`
+	ClassifierRule  string              `json:"classifier_rule,omitempty" db:"classifier_rule"`
+	ExitCode        *int                `json:"exit_code,omitempty" db:"exit_code"`
+	RawExcerpt      string              `json:"raw_excerpt,omitempty" db:"raw_excerpt"`
+	ResetHint       *time.Time          `json:"reset_hint,omitempty" db:"reset_hint"`
+	StartedAt       time.Time           `json:"started_at" db:"started_at"`
+	FinishedAt      *time.Time          `json:"finished_at,omitempty" db:"finished_at"`
 }
 
 // ProviderHealth records the health state of one (workspace, provider,
