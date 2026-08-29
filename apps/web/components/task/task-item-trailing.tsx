@@ -64,7 +64,6 @@ export function TaskItemTrailing({
         <span
           data-testid="sidebar-task-trailing-time"
           data-time-value={relativeTime}
-          aria-label={accessibleRelativeTime}
           title={accessibleRelativeTime}
           className={cn(
             "flex w-11 shrink-0 justify-end text-right text-[11px] text-muted-foreground/50 tabular-nums transition-opacity duration-100",
@@ -73,7 +72,8 @@ export function TaskItemTrailing({
               "[@media(hover:hover)]:group-hover:opacity-0 group-focus-within/actions:opacity-0",
           )}
         >
-          {compactRelativeTime}
+          <span aria-hidden="true">{compactRelativeTime}</span>
+          <span className="sr-only">{accessibleRelativeTime}</span>
         </span>
         <div className="mobile-task-actions-slot absolute inset-0 flex items-center justify-end">
           <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} />

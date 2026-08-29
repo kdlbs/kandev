@@ -17,8 +17,10 @@ describe("TaskItemTrailing relative time", () => {
     );
 
     const relativeTime = screen.getByTestId("sidebar-task-trailing-time");
-    expect(relativeTime.textContent).toBe("2d");
-    expect(relativeTime.getAttribute("aria-label")).toBe("2 days ago");
+    expect(relativeTime.querySelector('[aria-hidden="true"]')?.textContent).toBe("2d");
+    expect(relativeTime.querySelector(".sr-only")?.textContent).toBe("2 days ago");
+    expect(relativeTime.getAttribute("aria-label")).toBeNull();
+    expect(relativeTime.getAttribute("title")).toBe("2 days ago");
     expect(relativeTime.className).toContain("w-11");
     expect(relativeTime.className).toContain("text-right");
     expect(relativeTime.className).toContain("tabular-nums");
@@ -70,6 +72,7 @@ describe("TaskItemTrailing change-request status", () => {
     const menuSlot = screen.getByTestId("sidebar-task-change-request-menu-slot");
 
     expect(status).not.toBeNull();
+    expect(status.className).toContain("empty:hidden");
     expect(menuSlot?.className).toContain("w-0");
     expect(menuSlot?.className).toContain("min-w-0");
     expect(menuSlot?.className).toContain("group-hover:w-6");

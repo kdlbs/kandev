@@ -731,7 +731,7 @@ test.describe("Sidebar filter — task-row presentation", () => {
       .filter({ has: testPage.getByText(taskTitle, { exact: true }) });
     const secondRow = session.sidebar
       .getByTestId("sidebar-task-item")
-      .filter({ hasText: secondTaskTitle });
+      .filter({ has: testPage.getByText(secondTaskTitle, { exact: true }) });
     await expect(row).toBeVisible();
     await expect(row.getByTestId("sidebar-task-time")).toBeVisible();
 
@@ -825,7 +825,7 @@ test.describe("Sidebar filter — task-row presentation", () => {
     await expect(trailingTime).toBeVisible();
     await expect(secondTrailingTime).toBeVisible();
     await expect(trailingTime).not.toContainText(/ago|yesterday/i);
-    await expect(trailingTime).toHaveAttribute("aria-label", /\S/);
+    await expect(trailingTime.locator(".sr-only")).toHaveText(/\S/);
     const [timeBox, secondTimeBox] = await Promise.all([
       trailingTime.boundingBox(),
       secondTrailingTime.boundingBox(),

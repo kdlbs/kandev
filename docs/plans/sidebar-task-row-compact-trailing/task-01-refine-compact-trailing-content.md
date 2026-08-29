@@ -46,12 +46,13 @@ idle change-request action space and standardizes right-side elapsed time.
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps && pnpm --filter @kandev/web exec vitest run lib/i18n/formats.test.ts components/task/task-item-trailing.test.tsx components/task/task-item.test.tsx
-cd apps/web && pnpm run typecheck
-cd apps/web && pnpm run i18n:check
-cd apps/web && pnpm e2e:run tests/task/sidebar-filter.spec.ts tests/pr/pr-status-badge.spec.ts -- --grep "compact trailing|task row presentation"
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-sidebar-views.spec.ts -- --grep "task row settings"
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps && pnpm --filter @kandev/web exec vitest run lib/i18n/formats.test.ts components/task/task-item-trailing.test.tsx components/task/task-item.test.tsx)
+(cd apps/web && pnpm run lint)
+(cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm run i18n:check)
+(cd apps/web && pnpm e2e:run tests/task/sidebar-filter.spec.ts tests/pr/pr-status-badge.spec.ts -- --grep "compact trailing|task row presentation")
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-sidebar-views.spec.ts -- --grep "task row settings")
 python3 scripts/lint-spec-files.py --all
 git diff --check -- apps/web docs/specs docs/plans
 ```

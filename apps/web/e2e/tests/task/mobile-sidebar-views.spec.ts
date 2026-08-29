@@ -622,7 +622,7 @@ test.describe("Mobile sidebar — view system", () => {
     await expect(trailingTime).toBeVisible();
     await expect(row.getByTestId("sidebar-task-time")).toHaveCount(0);
     await expect(trailingTime).not.toContainText(/ago|yesterday/i);
-    await expect(trailingTime).toHaveAttribute("aria-label", /\S/);
+    await expect(trailingTime.locator(".sr-only")).toHaveText(/\S/);
     const mobileTimeBox = await trailingTime.boundingBox();
     expect(mobileTimeBox).not.toBeNull();
     expect(mobileTimeBox!.width).toBeGreaterThanOrEqual(40);
