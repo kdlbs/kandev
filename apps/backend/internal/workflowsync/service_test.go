@@ -406,6 +406,33 @@ func TestPermanentFailureSuspendsPollingUntilManualRecovery(t *testing.T) {
 	assert.Equal(t, int64(1), workflowSyncCounterValue(t, recoveredLabel)-recoveredBefore)
 }
 
+func TestConfigSaveRearmsSuspendedPolling(t *testing.T) {
+	store := setupTestStore(t)
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	require.NoError(t, err)
+	provider := &countingGitHubClients{err: &github.GitHubAPIError{
+		StatusCode: 404, Endpoint: "/repos/acme/flows/contents", FailureKind: github.FailureMissingResource,
+	}}
+	svc := NewService(store, provider, nil, &fakeApplier{}, log)
+	now := time.Date(2026, 8, 29, 7, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+	configureWorkspace(t, svc, "ws-1")
+
+	svc.SyncDueConfigs(context.Background())
+	cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
+	require.NoError(t, err)
+	require.True(t, cfg.PollSuspended)
+
+	_, err = svc.SetConfigForWorkspace(context.Background(), "ws-1", &SetConfigRequest{
+		RepoOwner: "acme", RepoName: "flows",
+	})
+	require.NoError(t, err)
+	cfg, err = svc.GetConfigForWorkspace(context.Background(), "ws-1")
+	require.NoError(t, err)
+	assert.False(t, cfg.PollSuspended)
+	assert.Zero(t, cfg.ConsecutiveFailures)
+}
+
 func TestDeleteConfigForWorkspace_ReleasesSyncedWorkflows(t *testing.T) {
 	svc, applier := setupTestService(t, seededMockClient())
 	configureWorkspace(t, svc, "ws-1")

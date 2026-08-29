@@ -54,6 +54,10 @@ func TestClassifyGitHubResponse(t *testing.T) {
 			body: `{"message":"Bad credentials"}`, wantKind: FailureInvalidCredentials,
 		},
 		{
+			name: "generic forbidden suspends on invalid credentials", status: http.StatusForbidden,
+			body: `{"message":"Forbidden"}`, wantKind: FailureInvalidCredentials,
+		},
+		{
 			name: "missing resource", status: http.StatusNotFound,
 			body: `{"message":"Not Found"}`, wantKind: FailureMissingResource,
 		},

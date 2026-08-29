@@ -178,30 +178,33 @@ func (a *RateAdmission) acquireBackground(ctx context.Context, resource Resource
 			a.principal.mu.Unlock()
 			return func() { a.releaseBackground(resource, state) }, nil
 		}
+		var deferralReason string
 		if !deferralRecorded {
-			reason := decision.backgroundReason
+			deferralReason = decision.backgroundReason
 			switch {
-			case reason != "":
+			case deferralReason != "":
 			case state.waitingInteractive > 0:
-				reason = rateLimitBlockInteractiveWaiting
+				deferralReason = rateLimitBlockInteractiveWaiting
 			case state.backgroundBusy:
-				reason = rateLimitBlockBackgroundBusy
+				deferralReason = rateLimitBlockBackgroundBusy
 			case state.nextBackgroundAt.After(time.Now()):
-				reason = rateLimitBlockBackgroundPacing
+				deferralReason = rateLimitBlockBackgroundPacing
 			default:
-				reason = "provider_retry"
-			}
-			incGitHubBackgroundDeferral(resource, reason)
-			if a.principal.logger != nil {
-				a.principal.logger.Debug("github background request deferred",
-					zap.String("resource", string(resource)),
-					zap.String("reason", reason),
-					zap.Duration("wait", wait))
+				deferralReason = "provider_retry"
 			}
 			deferralRecorded = true
 		}
 		stateChanged := state.changed
 		a.principal.mu.Unlock()
+		if deferralReason != "" {
+			incGitHubBackgroundDeferral(resource, deferralReason)
+			if a.principal.logger != nil {
+				a.principal.logger.Debug("github background request deferred",
+					zap.String("resource", string(resource)),
+					zap.String("reason", deferralReason),
+					zap.Duration("wait", wait))
+			}
+		}
 		if err := waitForAdmissionChange(ctx, wait, a.principal.tracker.Changed(), stateChanged); err != nil {
 			return nil, err
 		}
