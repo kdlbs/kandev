@@ -133,13 +133,14 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	}
 	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.AgentID, req.Prompt, model, modelConfigOptions, req.Mode, req.AutoApprovePermissions, mcpServers)
 	if err != nil {
+		responseError := withGuardDenyDiagnostic(err, stderr.tail())
 		e.logger.Error("ACP inference failed",
 			zap.String("agent_id", req.AgentID),
 			zap.Error(err),
 			zap.String("stderr", stderr.tail()))
 		return &PromptResponse{
 			Success:    false,
-			Error:      err.Error(),
+			Error:      responseError,
 			DurationMs: int(time.Since(startTime).Milliseconds()),
 		}, nil
 	}
@@ -150,6 +151,20 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		Model:      model,
 		DurationMs: int(time.Since(startTime).Milliseconds()),
 	}, nil
+}
+
+// withGuardDenyDiagnostic includes a guard rejection in the utility response
+// without exposing arbitrary child stderr, which may contain provider output.
+// The guard's deny helper emits this fixed prefix before it exits.
+func withGuardDenyDiagnostic(err error, stderr string) string {
+	message := err.Error()
+	for _, line := range strings.Split(stderr, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "ERROR: kandev-agent-guard:") {
+			return message + "; " + line
+		}
+	}
+	return message
 }
 
 // executeACPSession performs the ACP handshake, creates a session, optionally

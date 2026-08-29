@@ -65,6 +65,26 @@ func TestDescribeACPFailureKeepsGenuineErrors(t *testing.T) {
 	}
 }
 
+func TestWithGuardDenyDiagnosticIncludesOnlyGuardDenyLine(t *testing.T) {
+	t.Parallel()
+
+	err := errors.New("ACP initialize failed: peer disconnected before response")
+	got := withGuardDenyDiagnostic(err, "provider output\nERROR: kandev-agent-guard: no agent command supplied\nTOKEN=must-not-leak")
+	want := "ACP initialize failed: peer disconnected before response; ERROR: kandev-agent-guard: no agent command supplied"
+	if got != want {
+		t.Fatalf("withGuardDenyDiagnostic() = %q, want %q", got, want)
+	}
+}
+
+func TestWithGuardDenyDiagnosticDoesNotExposeOtherStderr(t *testing.T) {
+	t.Parallel()
+
+	err := errors.New("ACP initialize failed: peer disconnected before response")
+	if got := withGuardDenyDiagnostic(err, "provider output\nTOKEN=must-not-leak"); got != err.Error() {
+		t.Fatalf("withGuardDenyDiagnostic() = %q, want original error", got)
+	}
+}
+
 func TestStderrBufferTailKeepsTheEnd(t *testing.T) {
 	t.Parallel()
 
