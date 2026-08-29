@@ -251,23 +251,78 @@ func (m *Manager) GetAllByTaskID(ctx context.Context, taskID string) ([]*Worktre
 
 // IsValid checks if a worktree directory is valid and usable.
 func (m *Manager) IsValid(path string) bool {
-	// Check directory exists
 	info, err := os.Stat(path)
 	if err != nil || !info.IsDir() {
 		return false
 	}
 
-	// Check .git file exists (worktrees have .git file, not directory)
 	gitFile := filepath.Join(path, ".git")
+	gitInfo, err := os.Lstat(gitFile)
+	if err != nil || !gitInfo.Mode().IsRegular() {
+		return false
+	}
 	content, err := os.ReadFile(gitFile)
 	if err != nil {
 		return false
 	}
+	adminPath, found := strings.CutPrefix(strings.TrimSpace(string(content)), "gitdir:")
+	if !found {
+		return false
+	}
+	adminPath = strings.TrimSpace(adminPath)
+	if adminPath == "" || !filepath.IsAbs(adminPath) {
+		return false
+	}
+	adminInfo, err := os.Stat(adminPath)
+	if err != nil || !adminInfo.IsDir() {
+		return false
+	}
 
-	// .git file should contain "gitdir: <path>"
-	if !strings.HasPrefix(string(content), "gitdir:") {
+	backlink, err := os.ReadFile(filepath.Join(adminPath, "gitdir"))
+	if err != nil {
+		return false
+	}
+	backlinkPath := strings.TrimSpace(string(backlink))
+	if backlinkPath == "" {
+		return false
+	}
+	expectedBacklink, err := filepath.Abs(gitFile)
+	if err != nil {
+		return false
+	}
+	actualBacklink, err := filepath.Abs(backlinkPath)
+	if err != nil || actualBacklink != expectedBacklink {
 		return false
 	}
 
 	return true
+}
+
+func linkedWorktreeIntegrityReason(path string) string {
+	gitFile := filepath.Join(path, ".git")
+	content, err := os.ReadFile(gitFile)
+	if err != nil {
+		return fmt.Sprintf("cannot read git pointer %q", gitFile)
+	}
+	adminPath, found := strings.CutPrefix(strings.TrimSpace(string(content)), "gitdir:")
+	if !found {
+		return fmt.Sprintf("git pointer %q has no gitdir target", gitFile)
+	}
+	adminPath = strings.TrimSpace(adminPath)
+	if adminPath == "" {
+		return fmt.Sprintf("git pointer %q has an empty gitdir target", gitFile)
+	}
+	if info, statErr := os.Stat(adminPath); statErr != nil || !info.IsDir() {
+		return fmt.Sprintf("linked-worktree admin target %q is missing", adminPath)
+	}
+	backlink, err := os.ReadFile(filepath.Join(adminPath, "gitdir"))
+	if err != nil {
+		return fmt.Sprintf("linked-worktree admin target %q has no reciprocal gitdir backlink", adminPath)
+	}
+	expected, expectedErr := filepath.Abs(gitFile)
+	actual, actualErr := filepath.Abs(strings.TrimSpace(string(backlink)))
+	if expectedErr != nil || actualErr != nil || expected != actual {
+		return fmt.Sprintf("linked-worktree admin target %q backlink mismatch: expected %q, actual %q", adminPath, expected, strings.TrimSpace(string(backlink)))
+	}
+	return "linked-worktree metadata is invalid"
 }

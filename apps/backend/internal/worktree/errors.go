@@ -7,6 +7,22 @@ import (
 	"strings"
 )
 
+// WorktreeRecoveryError reports an existing checkout that must be preserved
+// instead of passing through destructive recreation.
+type WorktreeRecoveryError struct {
+	TaskID   string
+	Checkout string
+	Reason   string
+}
+
+func (e *WorktreeRecoveryError) Error() string {
+	return fmt.Sprintf("%s: task %q checkout %q: %s", ErrWorktreeCorrupted, e.TaskID, e.Checkout, e.Reason)
+}
+
+func (e *WorktreeRecoveryError) Unwrap() error {
+	return ErrWorktreeCorrupted
+}
+
 var (
 	// ErrWorktreeExists is returned when attempting to create a worktree that already exists.
 	ErrWorktreeExists = errors.New("worktree already exists for task")

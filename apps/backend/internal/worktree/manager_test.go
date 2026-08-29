@@ -224,14 +224,112 @@ func TestManager_IsValid(t *testing.T) {
 		t.Error("expected false for directory without .git file")
 	}
 
-	// With proper .git file
+	// A pointer without a real linked-worktree admin entry is invalid.
 	gitFile := filepath.Join(worktreePath, ".git")
 	if err := os.WriteFile(gitFile, []byte("gitdir: /some/path/.git/worktrees/test"), 0644); err != nil {
 		t.Fatalf("failed to create .git file: %v", err)
 	}
 
-	if !mgr.IsValid(worktreePath) {
-		t.Error("expected true for valid worktree directory")
+	if mgr.IsValid(worktreePath) {
+		t.Error("expected false for a pointer whose admin directory is missing")
+	}
+}
+
+func TestManager_IsValid_RejectsMissingLinkedWorktreeAdminDirectory(t *testing.T) {
+	cfg := newTestConfig(t)
+	mgr, err := NewManager(cfg, newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(t.TempDir(), "linked-worktree")
+	runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
+
+	gitPointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read linked worktree pointer: %v", err)
+	}
+	adminPath := strings.TrimSpace(strings.TrimPrefix(string(gitPointer), "gitdir:"))
+	if err := os.RemoveAll(adminPath); err != nil {
+		t.Fatalf("remove linked worktree admin directory: %v", err)
+	}
+
+	if mgr.IsValid(worktreePath) {
+		t.Fatal("IsValid accepted a checkout whose linked-worktree admin directory is missing")
+	}
+}
+
+func TestManager_IsValid_RejectsMismatchedLinkedWorktreeBacklink(t *testing.T) {
+	cfg := newTestConfig(t)
+	mgr, err := NewManager(cfg, newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(t.TempDir(), "linked-worktree")
+	runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
+	gitPointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read linked worktree pointer: %v", err)
+	}
+	adminPath := strings.TrimSpace(strings.TrimPrefix(string(gitPointer), "gitdir:"))
+	wrongBacklink := filepath.Join(t.TempDir(), "other-checkout", ".git")
+	if err := os.WriteFile(filepath.Join(adminPath, "gitdir"), []byte(wrongBacklink+"\n"), 0644); err != nil {
+		t.Fatalf("write mismatched backlink: %v", err)
+	}
+
+	if mgr.IsValid(worktreePath) {
+		t.Fatal("IsValid accepted a checkout whose reciprocal gitdir backlink points elsewhere")
+	}
+}
+
+func TestManager_Create_RefusesInvalidNonEmptyCheckoutWithoutRemovingIt(t *testing.T) {
+	ctx := context.Background()
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(t.TempDir(), "linked-worktree")
+	runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
+	uniqueFile := filepath.Join(worktreePath, "untracked-preserve-me.txt")
+	if err := os.WriteFile(uniqueFile, []byte("unique content\n"), 0600); err != nil {
+		t.Fatalf("write unique file: %v", err)
+	}
+
+	gitPointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read linked worktree pointer: %v", err)
+	}
+	adminPath := strings.TrimSpace(strings.TrimPrefix(string(gitPointer), "gitdir:"))
+	if err := os.RemoveAll(adminPath); err != nil {
+		t.Fatalf("remove linked worktree admin directory: %v", err)
+	}
+
+	store := newMockStore()
+	store.worktrees["wt-1"] = &Worktree{
+		ID: "wt-1", SessionID: "session-1", TaskID: "task-1", RepositoryID: "repo-1",
+		RepositoryPath: repoPath, Path: worktreePath, Branch: "feature/pr-branch", Status: StatusActive,
+	}
+	mgr, err := NewManager(newTestConfig(t), store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	_, err = mgr.Create(ctx, CreateRequest{
+		TaskID: "task-1", SessionID: "session-1", RepositoryID: "repo-1", RepositoryPath: repoPath,
+		BaseBranch: "main", TaskDirName: "task-1", RepoName: "repo-1",
+	})
+	if !errors.Is(err, ErrWorktreeCorrupted) {
+		t.Fatalf("Create() error = %v, want ErrWorktreeCorrupted", err)
+	}
+	var recoveryErr *WorktreeRecoveryError
+	if !errors.As(err, &recoveryErr) {
+		t.Fatalf("Create() error = %T, want WorktreeRecoveryError", err)
+	}
+	if recoveryErr.TaskID != "task-1" || recoveryErr.Checkout != worktreePath || !strings.Contains(recoveryErr.Reason, adminPath) {
+		t.Fatalf("recovery error = %+v, want owning task, checkout, and missing admin target", recoveryErr)
+	}
+	if content, readErr := os.ReadFile(uniqueFile); readErr != nil || string(content) != "unique content\n" {
+		t.Fatalf("unique checkout content changed after refusal: content=%q err=%v", content, readErr)
 	}
 }
 
