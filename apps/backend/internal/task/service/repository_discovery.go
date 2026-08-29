@@ -200,7 +200,55 @@ func validateExplicitGitMetadata(repoPath string) error {
 	if !info.Mode().IsRegular() {
 		return errors.New(".git metadata must be a directory or linked-worktree pointer")
 	}
-	return validateLinkedWorktreeMetadata(repoPath, gitPath)
+	return validateGitFileMetadata(repoPath, gitPath)
+}
+
+func validateGitFileMetadata(repoPath, gitPath string) error {
+	linkedWorktreeErr := validateLinkedWorktreeMetadata(repoPath, gitPath)
+	if linkedWorktreeErr == nil {
+		return nil
+	}
+	submoduleErr := validateSubmoduleMetadata(repoPath)
+	if submoduleErr == nil {
+		return nil
+	}
+	return errors.Join(linkedWorktreeErr, submoduleErr)
+}
+
+func validateSubmoduleMetadata(repoPath string) error {
+	gitDir, err := resolveGitDir(repoPath)
+	if err != nil {
+		return err
+	}
+	canonicalGitDir, err := filepath.EvalSymlinks(gitDir)
+	if err != nil {
+		return err
+	}
+	canonicalRepoPath, err := filepath.EvalSymlinks(repoPath)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Lstat(filepath.Join(canonicalGitDir, "commondir")); err == nil {
+		return errors.New("submodule metadata must not redirect its common directory")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	config, err := os.ReadFile(filepath.Join(canonicalGitDir, "config"))
+	if err != nil {
+		return err
+	}
+	worktree, err := parseGitConfigCoreWorktree(string(config))
+	if err != nil {
+		return err
+	}
+	resolvedWorktree, err := resolveMetadataPathValue(worktree, canonicalGitDir)
+	if err != nil {
+		return err
+	}
+	if !sameCanonicalPath(resolvedWorktree, canonicalRepoPath) {
+		return errors.New("submodule metadata does not point back to the selected repository")
+	}
+	return nil
 }
 
 func validateStandaloneGitMetadata(gitPath string) error {
@@ -257,10 +305,41 @@ func readMetadataPath(path, relativeTo string) (string, error) {
 	if metadataPath == "" {
 		return "", errors.New("metadata path is empty")
 	}
-	if !filepath.IsAbs(metadataPath) {
-		metadataPath = filepath.Join(relativeTo, metadataPath)
+	return resolveMetadataPathValue(metadataPath, relativeTo)
+}
+
+func resolveMetadataPathValue(value, relativeTo string) (string, error) {
+	if !filepath.IsAbs(value) {
+		value = filepath.Join(relativeTo, value)
 	}
-	return filepath.EvalSymlinks(filepath.Clean(metadataPath))
+	return filepath.EvalSymlinks(filepath.Clean(value))
+}
+
+func parseGitConfigCoreWorktree(config string) (string, error) {
+	inCore := false
+	for _, line := range strings.Split(config, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			inCore = strings.EqualFold(strings.TrimSpace(line[1:len(line)-1]), "core")
+			continue
+		}
+		if !inCore {
+			continue
+		}
+		key, value, found := strings.Cut(line, "=")
+		if !found || !strings.EqualFold(strings.TrimSpace(key), "worktree") {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return "", errors.New("core.worktree is empty")
+		}
+		return value, nil
+	}
+	return "", errors.New("core.worktree is missing")
 }
 
 func sameCanonicalPath(left, right string) bool {
