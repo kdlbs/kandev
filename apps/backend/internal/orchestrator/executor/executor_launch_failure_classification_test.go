@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 func TestClassifyLaunchFailureUsesTypedBaseBranchCategory(t *testing.T) {
@@ -56,6 +57,40 @@ func TestWorktreeRecoveryFailureIsActionableWithoutRetryActions(t *testing.T) {
 	}
 	if len(errorValue.RecoveryActions) != 0 {
 		t.Fatalf("recovery actions = %#v, want no retry actions", errorValue.RecoveryActions)
+	}
+}
+
+func TestPrepareSessionBlocksWorktreeRecoveryBeforePersistingSession(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	admission, ok := any(exec).(interface {
+		SetWorktreeRecoveryAdmission(WorktreeRecoveryAdmissionFunc)
+	})
+	if !ok {
+		t.Fatal("executor has no worktree recovery admission seam")
+	}
+
+	recoveryErr := &worktree.WorktreeRecoveryError{
+		TaskID: "task-1", Checkout: "/tasks/task-1/repo", Reason: "recovery is active",
+	}
+	checks := 0
+	admission.SetWorktreeRecoveryAdmission(WorktreeRecoveryAdmissionFunc(func(_ context.Context, taskID string) error {
+		checks++
+		if taskID != "task-1" {
+			t.Fatalf("admission task ID = %q, want task-1", taskID)
+		}
+		return recoveryErr
+	}))
+
+	_, err := exec.PrepareSession(context.Background(), &v1.Task{ID: "task-1"}, "profile-1", "", "", "")
+	if !errors.Is(err, worktree.ErrWorktreeCorrupted) {
+		t.Fatalf("PrepareSession() error = %v, want worktree recovery error", err)
+	}
+	if checks != 1 {
+		t.Fatalf("admission checks = %d, want 1", checks)
+	}
+	if len(repo.createTaskSessionCalls) != 0 {
+		t.Fatalf("CreateTaskSession calls = %d, want 0", len(repo.createTaskSessionCalls))
 	}
 }
 

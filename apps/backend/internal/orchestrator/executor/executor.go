@@ -723,6 +723,12 @@ type LaunchFailedFunc func(ctx context.Context, taskID, sessionID, repositoryID 
 // lookups; an error omits the action without blocking failure persistence.
 type LaunchFailureReviewEligibilityFunc func(ctx context.Context, taskID string) (bool, error)
 
+// WorktreeRecoveryAdmissionFunc decides whether a task may create or launch a
+// session. A recovery implementation uses this seam to coalesce a task-owned
+// repair operation and to keep a known-broken checkout away from setup scripts
+// and agent processes.
+type WorktreeRecoveryAdmissionFunc func(ctx context.Context, taskID string) error
+
 // PrimarySessionSetFunc is called when the first session for a task is marked
 // primary. This lets the orchestrator publish a task.updated event so the
 // frontend receives the primary_session_id.
@@ -819,6 +825,10 @@ type Executor struct {
 	onLaunchFailed LaunchFailedFunc
 	// Optional resolver for the mark-review-done recovery action.
 	launchFailureReviewEligibility LaunchFailureReviewEligibilityFunc
+	// Optional task-scoped gate for linked-worktree recovery. It is checked
+	// before session persistence and again immediately before launch so a
+	// recovery that begins between those boundaries cannot boot an agent.
+	worktreeRecoveryAdmission WorktreeRecoveryAdmissionFunc
 
 	// Callback when the first session for a task is marked primary.
 	onPrimarySessionSet PrimarySessionSetFunc
@@ -1002,6 +1012,12 @@ func (e *Executor) SetOnTaskRuntimeStateReconcile(fn TaskRuntimeStateReconcileFu
 // callback for environment-preparation failures.
 func (e *Executor) SetOnEarlyLaunchTaskStateReconcile(fn TaskRuntimeStateReconcileFunc) {
 	e.onEarlyLaunchTaskStateReconcile = fn
+}
+
+// SetWorktreeRecoveryAdmission installs the task-scoped linked-worktree
+// admission gate. Nil disables the optional integration for legacy callers.
+func (e *Executor) SetWorktreeRecoveryAdmission(fn WorktreeRecoveryAdmissionFunc) {
+	e.worktreeRecoveryAdmission = fn
 }
 
 // SetOnSessionStateChange sets a callback for session state changes.
