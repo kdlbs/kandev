@@ -47,13 +47,18 @@ Passing repository gates:
 - `git diff --check`
 
 `make -C apps/backend test` remains blocked by deterministic runtime failures
-outside this plan's packages. Focused reruns reproduce process-parent and
-process-group failures in `internal/agent/runtime/agentctl/launcher` and
-`internal/agentctl/server/process`; the current Kandev process exports
-`KANDEV_HEALTH_TIMEOUT_MS=180000`, which overrides the fixture expected by
-`internal/common/config`; and the guarded filesystem rejects the parent-chain
-inspection exercised by local-directory tests in `internal/task/service`.
-The task does not bypass that guard or modify these unrelated packages.
+outside this plan's packages. Targeted package reruns reproduce all four:
+
+- `internal/agent/runtime/agentctl/launcher`: process-group child PID failures.
+- `internal/agentctl/server/process`: parent PID and stale process-group
+  failures, with `GetParentPID` returning `-1`.
+- `internal/common/config`: the Kandev process injects
+  `KANDEV_HEALTH_TIMEOUT_MS=180000`, overriding the fixture expectation.
+- `internal/task/service`: guarded execution denies the `os.OpenRoot`
+  parent-chain inspection used by local-directory tests.
+
+All four failures are environment-sensitive and unrelated to this change. The
+task does not bypass the guard or edit these unrelated packages.
 
 The guard-sensitive filesystem result was independently reproduced on three
 unrelated branches. Re-running the seven local-repository tests with `TMPDIR`
