@@ -2031,6 +2031,48 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   animation: sidebar-section-collapse 160ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
+/* Installed desktop PWAs can place app chrome inside the native title bar.
+ * The live geometry variables come from navigator.windowControlsOverlay, so
+ * controls remain clear of either platform's left- or right-side buttons. */
+[data-window-controls-overlay="visible"] [data-window-controls-overlay-region] {
+  -webkit-app-region: drag;
+  height: max(2.5rem, var(--titlebar-area-height));
+  min-height: max(2.5rem, var(--titlebar-area-height));
+}
+
+[data-window-controls-overlay="visible"]
+  [data-window-controls-overlay-region]
+  :is(a, button, input, select, textarea, [role="button"], [tabindex]) {
+  -webkit-app-region: no-drag;
+}
+
+[data-window-controls-overlay="visible"] [data-window-controls-overlay-region="sidebar"] {
+  padding-left: calc(var(--titlebar-area-x) + 0.75rem);
+}
+
+[data-window-controls-overlay="visible"]
+  [data-testid="app-sidebar"][data-collapsed="true"]
+  [data-window-controls-overlay-region="sidebar"] {
+  width: calc(var(--titlebar-area-x) + 4rem);
+  flex-direction: row;
+  gap: 0.25rem;
+  padding-top: 0;
+  padding-right: 0;
+  padding-bottom: 0;
+}
+
+[data-window-controls-overlay="visible"]:has([data-testid="app-sidebar"][data-collapsed="true"])
+  [data-window-controls-overlay-region="content"] {
+  padding-left: calc(var(--titlebar-area-x) + 0.5rem);
+}
+
+[data-window-controls-overlay="visible"] [data-window-controls-overlay-region="content"] {
+  padding-right: max(
+    0.75rem,
+    calc(100vw - var(--titlebar-area-x) - var(--titlebar-area-width) + 0.75rem)
+  );
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sidebar-fade-in,
   .sidebar-section-content[data-state="open"],

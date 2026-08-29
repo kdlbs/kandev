@@ -1552,7 +1552,7 @@ export class ApiClient {
     owner: string,
     repo: string,
     number: number,
-    outcome: "merged" | "queued",
+    outcome: "merged" | "queued" | "failed" | "pending" | "head_mismatch",
   ): Promise<void> {
     await this.request("PUT", "/api/v1/github/mock/merge-outcomes", {
       owner,
@@ -1590,10 +1590,22 @@ export class ApiClient {
   }
 
   async mockGitHubGetMergeAttempts(): Promise<
-    Array<{ owner: string; repo: string; number: number; merge_method: string }>
+    Array<{
+      owner: string;
+      repo: string;
+      number: number;
+      merge_method: string;
+      expected_head_sha: string;
+    }>
   > {
     const response = await this.request<{
-      attempts?: Array<{ owner: string; repo: string; number: number; merge_method: string }>;
+      attempts?: Array<{
+        owner: string;
+        repo: string;
+        number: number;
+        merge_method: string;
+        expected_head_sha: string;
+      }>;
     }>("GET", "/api/v1/github/mock/merge-attempts");
     return response.attempts ?? [];
   }

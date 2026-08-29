@@ -407,7 +407,7 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
     expect(scrollContainer.scrollTop).toBe(123);
   });
 
-  it("pins an appended message without reading content size", () => {
+  it("uses a WebKit-safe maximum offset for pinned appends", () => {
     const { rerender } = render(
       <AutoScrollHarness isWorking={false} hasUnreadDivider={false} messages={TEST_MESSAGES} />,
     );
@@ -442,7 +442,7 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
       );
     }).not.toThrow();
     expect(writes).toBe(1);
-    expect(scrollTop).toBe(Number.MAX_SAFE_INTEGER);
+    expect(scrollTop).toBe(2_147_483_647);
   });
 
   it("restores the disabled offset after a transient layout clamp", () => {

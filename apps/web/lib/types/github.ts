@@ -330,6 +330,7 @@ export type TaskCIPRAutomationState = {
   auto_fix_exhausted_at: string | null;
   last_merge_signature: string;
   last_merge_attempt_at: string | null;
+  last_merge_result: "" | "in_flight" | "failed" | "accepted";
   last_queue_attempt_head_sha?: string;
   last_queue_fix_event_id?: string;
   last_queue_removal_cause?: CIAutomationQueueRemovalCause | string;
@@ -340,6 +341,7 @@ export type TaskCIPRAutomationState = {
   last_lifecycle_prompt_at?: string | null;
   last_lifecycle_session_id?: string | null;
   last_error: string | null;
+  last_error_kind: string;
   created_at: string;
   updated_at: string;
 };

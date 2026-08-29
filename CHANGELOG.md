@@ -2,6 +2,26 @@
 
 All notable changes to Kandev.
 
+## 0.92.1 - 2026-08-29
+
+### Features
+
+- rank chat mentions by recency ([#3099](https://github.com/kdlbs/kandev/pull/3099))
+- fuse desktop PWA title bar ([#3087](https://github.com/kdlbs/kandev/pull/3087)) by @sonicLee
+- track whether work reached the repo, fix success metric ([#2764](https://github.com/kdlbs/kandev/pull/2764)) by @nova28
+- remember recent agent profile use ([#3095](https://github.com/kdlbs/kandev/pull/3095))
+
+### Bug Fixes
+
+- retry PR creation after push to absorb GitHub eventual consistency ([#3134](https://github.com/kdlbs/kandev/pull/3134)) by @99hats
+- remove shared-worker cleanup races ([#3133](https://github.com/kdlbs/kandev/pull/3133))
+- preserve Jira watcher descriptions ([#3130](https://github.com/kdlbs/kandev/pull/3130)) ([#3132](https://github.com/kdlbs/kandev/pull/3132))
+- keep chat transcript pinned in WebKit ([#3135](https://github.com/kdlbs/kandev/pull/3135))
+- confirm automation deletion ([#3129](https://github.com/kdlbs/kandev/pull/3129))
+- harden auto-merge and surface task automation ([#3128](https://github.com/kdlbs/kandev/pull/3128))
+- route plugin task moves through the shared step-transition path ([#3123](https://github.com/kdlbs/kandev/pull/3123)) by @nova28
+- refresh an open costs page after a task project changes ([#2908](https://github.com/kdlbs/kandev/pull/2908)) by @nova28
+
 ## 0.92.0 - 2026-08-28
 
 ### Features

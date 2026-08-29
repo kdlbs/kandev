@@ -1,10 +1,17 @@
 import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-import { seedForkPRComparisonTask } from "./fork-pr-comparison-target-helpers";
+import {
+  resetForkPRComparisonRepository,
+  seedForkPRComparisonTask,
+} from "./fork-pr-comparison-target-helpers";
 
 test.describe("Fork pull-request comparison target", () => {
   test.describe.configure({ timeout: 120_000 });
+
+  test.afterEach(async ({ seedData, backend }) => {
+    resetForkPRComparisonRepository(seedData, backend);
+  });
 
   test("uses the upstream target for one fork commit and three files", async ({
     testPage,

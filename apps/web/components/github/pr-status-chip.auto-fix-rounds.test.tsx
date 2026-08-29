@@ -143,7 +143,9 @@ function makeCIPrState(roundCount: number, exhausted = false) {
     auto_fix_exhausted_at: exhausted ? "2026-06-18T11:00:00Z" : null,
     last_merge_signature: "",
     last_merge_attempt_at: null,
+    last_merge_result: "" as const,
     last_error: exhausted ? "CI auto-fix paused after 10 rounds for this PR" : null,
+    last_error_kind: "",
     created_at: "2026-06-18T10:00:00Z",
     updated_at: "2026-06-18T10:00:00Z",
   };

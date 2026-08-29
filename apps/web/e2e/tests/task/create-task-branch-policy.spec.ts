@@ -15,20 +15,26 @@ test.describe("Task creation with branch policies", () => {
     backend,
     seedData,
   }) => {
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    // The seed repository is shared by every test in a worker. Review tests
+    // can leave tracked changes and branch-creation tests can leave the
+    // checkout on a feature branch, so normalize both before exercising the
+    // clean-tree path.
+    execSync("git checkout -f main", {
+      cwd: seedData.repositoryPath,
+      env: gitEnv,
+    });
+    execSync("git reset --hard main", {
+      cwd: seedData.repositoryPath,
+      env: gitEnv,
+    });
     execSync("git clean -fd", {
       cwd: seedData.repositoryPath,
-      env: makeGitEnv(backend.tmpDir),
+      env: gitEnv,
     });
     execSync("git branch -f develop", {
       cwd: seedData.repositoryPath,
-      env: makeGitEnv(backend.tmpDir),
-    });
-    const policy = await apiClient.createRepositoryBranchPolicy(seedData.repositoryId, {
-      name: `Feature policy ${Date.now()}`,
-      description: "Task creation policy",
-      base_branch: "main",
-      branch_template: "feature/{title}-{suffix}",
-      pull_request_target: "develop",
+      env: gitEnv,
     });
     const { executors } = await apiClient.listExecutors();
     const localExecutor = executors.find((executor) => executor.type === "local");
@@ -36,12 +42,20 @@ test.describe("Task creation with branch policies", () => {
       test.skip(true, "No local executor available");
       return;
     }
-    const localProfile = await apiClient.createExecutorProfile(
-      localExecutor.id,
-      `E2E Branch Policy Local ${Date.now()}`,
-    );
+    const policy = await apiClient.createRepositoryBranchPolicy(seedData.repositoryId, {
+      name: `Feature policy ${Date.now()}`,
+      description: "Task creation policy",
+      base_branch: "main",
+      branch_template: "feature/{title}-{suffix}",
+      pull_request_target: "develop",
+    });
+    let localProfile: { id: string; name: string } | undefined;
 
     try {
+      localProfile = await apiClient.createExecutorProfile(
+        localExecutor.id,
+        `E2E Branch Policy Local ${Date.now()}`,
+      );
       await testPage.goto("/");
       await testPage.getByTestId("create-task-button").first().click();
       const dialog = testPage.getByTestId("create-task-dialog");
@@ -117,7 +131,16 @@ test.describe("Task creation with branch policies", () => {
         .trim();
       expect(currentBranch).toMatch(/^feature\/policy-task-/);
     } finally {
-      await apiClient.deleteExecutorProfile(localProfile.id).catch(() => {});
+      if (localProfile) await apiClient.deleteExecutorProfile(localProfile.id).catch(() => {});
+      await apiClient.deleteRepositoryBranchPolicy(policy.id).catch(() => {});
+      execSync("git checkout -f main", {
+        cwd: seedData.repositoryPath,
+        env: gitEnv,
+      });
+      execSync("git clean -fd", {
+        cwd: seedData.repositoryPath,
+        env: gitEnv,
+      });
     }
   });
 
@@ -127,6 +150,12 @@ test.describe("Task creation with branch policies", () => {
     backend,
     seedData,
   }) => {
+    const { executors } = await apiClient.listExecutors();
+    const localExecutor = executors.find((executor) => executor.type === "local");
+    if (!localExecutor) {
+      test.skip(true, "No local executor available");
+      return;
+    }
     const secondRepositoryPath = path.join(
       backend.tmpDir,
       "repos",
@@ -151,18 +180,13 @@ test.describe("Task creation with branch policies", () => {
       branch_template: "feature/{title}-{suffix}",
       pull_request_target: "main",
     });
-    const { executors } = await apiClient.listExecutors();
-    const localExecutor = executors.find((executor) => executor.type === "local");
-    if (!localExecutor) {
-      test.skip(true, "No local executor available");
-      return;
-    }
-    const localProfile = await apiClient.createExecutorProfile(
-      localExecutor.id,
-      `E2E Multi-repo Branch Policy Local ${Date.now()}`,
-    );
+    let localProfile: { id: string; name: string } | undefined;
 
     try {
+      localProfile = await apiClient.createExecutorProfile(
+        localExecutor.id,
+        `E2E Multi-repo Branch Policy Local ${Date.now()}`,
+      );
       await testPage.goto("/");
       await testPage.getByTestId("create-task-button").first().click();
       const dialog = testPage.getByTestId("create-task-dialog");
@@ -190,7 +214,8 @@ test.describe("Task creation with branch policies", () => {
         /single repository/,
       );
     } finally {
-      await apiClient.deleteExecutorProfile(localProfile.id).catch(() => {});
+      if (localProfile) await apiClient.deleteExecutorProfile(localProfile.id).catch(() => {});
+      await apiClient.deleteRepositoryBranchPolicy(policy.id).catch(() => {});
     }
   });
 });

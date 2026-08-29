@@ -215,7 +215,7 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 		si.logger.Info("run skipped (agent not active)",
 			zap.String("run_id", runID),
 			zap.String("agent_status", string(agent.Status)))
-		_ = si.svc.FinishRun(ctx, runID)
+		_ = si.svc.FinishRun(ctx, runID, RunOutcomeAgentInactive)
 		return
 	}
 
@@ -244,7 +244,7 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 				"agent":    agent.Name,
 				"agent_id": agent.ID,
 			}), runID, "")
-		_ = si.svc.FinishRun(ctx, runID)
+		_ = si.svc.FinishRun(ctx, runID, RunOutcomeIdleSkipped)
 		return
 	}
 
@@ -514,7 +514,7 @@ func (si *SchedulerIntegration) isTaskTreeGated(ctx context.Context, runID, task
 		zap.String("task_id", taskID),
 		zap.String("hold_id", hold.ID),
 		zap.String("mode", hold.Mode))
-	_ = si.svc.FinishRun(ctx, runID)
+	_ = si.svc.FinishRun(ctx, runID, RunOutcomeTaskTreeHeld)
 	return true
 }
 
@@ -765,7 +765,8 @@ func (si *SchedulerIntegration) tryCheckout(
 		// successful completion: route it through the same
 		// retry-then-escalate path as every other run failure in this
 		// file, rather than FinishRun, which would silently mark a run
-		// that never executed as finished.
+		// that never executed as finished. Checkout errors therefore remain
+		// on the retry/failure path.
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return false
 	}
@@ -773,6 +774,8 @@ func (si *SchedulerIntegration) tryCheckout(
 		si.logger.Info("run skipped (task checked out by another agent)",
 			zap.String("run_id", run.ID),
 			zap.String("task_id", taskID))
+		// Requeue rather than FinishRun: a run that did not acquire the
+		// checkout must not be reported as completed work.
 		si.requeueContendedCheckout(ctx, run, taskID)
 		return false
 	}
@@ -823,7 +826,7 @@ func (si *SchedulerIntegration) checkBudget(
 		si.logger.Info("run skipped (budget exceeded)",
 			zap.String("run_id", run.ID), zap.String("reason", reason))
 		si.releaseCheckoutIfNeeded(ctx, run)
-		_ = si.svc.FinishRun(ctx, run.ID)
+		_ = si.svc.FinishRun(ctx, run.ID, RunOutcomeBudgetBlocked)
 		si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
 			"scheduler", "office-scheduler",
 			"run_budget_blocked", "run", run.ID,

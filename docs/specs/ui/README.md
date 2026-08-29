@@ -11,7 +11,7 @@ owners:
 
 ## Purpose
 
-The UI owns desktop and mobile web presentation.
+The UI system owns web presentation.
 
 ## Ownership
 
@@ -19,8 +19,8 @@ This system owns navigation, settings, boards, task/review surfaces,
 walkthroughs, chat controls, visual feedback, and responsive interaction
 contracts without backend-state ownership.
 
-Controls that configure or display provider/task state remain owned by that
-system. The UI system owns only independent, reusable presentation contracts.
+Controls for provider/task state remain owned by that system.
+The UI system owns reusable contracts.
 
 ## Exclusions
 
@@ -55,6 +55,7 @@ system. The UI system owns only independent, reusable presentation contracts.
 - [Command-panel Sidebar Task Reveal](requirements/command-panel-sidebar-task-reveal.md)
 - [Compact Workflow Step Navigation](requirements/compact-workflow-step-navigation.md)
 - [Comment Markdown Rendering](requirements/comment-markdown.md)
+- [Mention recency](requirements/composer-mention-recency.md)
 - [Composer Suggestion Overlays](requirements/composer-suggestion-overlays.md)
 - [Context Compaction Count](requirements/context-compaction-count.md)
 - [Context Window Reset Freshness](requirements/context-window-reset-freshness.md)
@@ -151,10 +152,11 @@ system. The UI system owns only independent, reusable presentation contracts.
 - [Agent Todo List Panel](system-design/agent-todo-list-panel.md)
 - [App Status Bar](system-design/app-status-bar.md)
 - [Changes File Row Containment](system-design/changes-file-row-containment.md)
+- [Mention recency](system-design/composer-mention-recency.md)
 - [Composer Suggestion Overlays](system-design/composer-suggestion-overlays.md)
 - [Compact Workflow Step Navigation](system-design/compact-workflow-step-navigation.md)
-- [Per-workflow column visibility on the kanban board System Design Part 1](system-design/board-step-visibility-filter-01.md)
-- [Per-workflow column visibility on the kanban board System Design Part 2](system-design/board-step-visibility-filter-02.md)
+- [Workflow column visibility (Part 1)](system-design/board-step-visibility-filter-01.md)
+- [Workflow column visibility (Part 2)](system-design/board-step-visibility-filter-02.md)
 - [Task PR Automation Controls System Design Part 1](system-design/ci-pr-automation-01.md)
 - [Task PR Automation Controls System Design Part 2](system-design/ci-pr-automation-02.md)
 - [Task PR Automation Controls System Design Part 3](system-design/ci-pr-automation-03.md)
@@ -165,7 +167,7 @@ system. The UI system owns only independent, reusable presentation contracts.
 - [Persistent status motion](system-design/persistent-status-motion.md)
 - [Repository Groups](system-design/sidebar-repository-grouping.md)
 - [Sidebar Task Focus](system-design/sidebar-task-focus.md)
-- [Sidebar Task Row Presentation](system-design/sidebar-task-row-presentation.md)
+- [Sidebar task row](system-design/sidebar-task-row-presentation.md)
 - [PR Task Status Summary](system-design/pr-task-status-summary.md)
 - [Prompt History Panel](system-design/prompt-history-panel.md)
 - [Quick Chat and terminal elevation](system-design/quick-chat-elevation.md)

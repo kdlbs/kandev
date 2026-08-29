@@ -530,7 +530,7 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	entryID, err := r.updateTaskTx(ctx, tx, task, metadata)
+	entryID, err := r.updateTaskTx(ctx, tx, task, metadata, "")
 	if err != nil {
 		return err
 	}
@@ -542,10 +542,63 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 	return nil
 }
 
-func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task, metadata []byte) (entryID string, err error) {
-	fromWorkflowID, fromStepID, _, err := r.readTaskStepInTx(ctx, tx, task.ID)
+// UpdateTaskIfWorkflowMatches is the same-step counterpart of the
+// expectedWorkflowID guard threaded through updateTaskWithWorkflowStepAdmission:
+// it performs the same write as UpdateTask, but first rechecks — inside the
+// same write transaction, via the readTaskStepInTx row lock — that the task's
+// persisted workflow_id still equals expectedWorkflowID. This closes the
+// same-step half of the plugin-move TOCTOU window: a caller that resolved
+// "the task's current workflow" via a separate pre-read (see
+// service.MoveTaskOptions.ExpectedWorkflowID) can otherwise silently overwrite
+// a concurrent legitimate reassignment landing between that pre-read and this
+// write. A mismatch returns repoerrors.ErrWorkflowResolutionConflict and the
+// transaction rolls back untouched.
+func (r *Repository) UpdateTaskIfWorkflowMatches(ctx context.Context, task *models.Task, expectedWorkflowID string) error {
+	metadata, err := json.Marshal(task.Metadata)
+	if err != nil {
+		metadata = []byte("{}")
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	entryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID)
+	if err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	r.dispatchStepEntry(ctx, task.ID, task.WorkflowID, task.WorkflowStepID, entryID)
+	return nil
+}
+
+func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task, metadata []byte, expectedWorkflowID string) (entryID string, err error) {
+	fromWorkflowID, fromStepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
 	if err != nil {
 		return "", err
+	}
+	if !found {
+		// A concurrently deleted task must surface as ErrTaskNotFound, not
+		// fall through to the CAS comparison below: with fromWorkflowID=""
+		// (never equal to a non-empty expectedWorkflowID) that branch would
+		// misreport the deletion as a workflow-resolution conflict. NotFound
+		// is reserved for the addressed resource and wins the precedence
+		// ladder over every other case (design's error-mapping table).
+		return "", fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
+	}
+	if expectedWorkflowID != "" && fromWorkflowID != expectedWorkflowID {
+		// Checked here, immediately before the UPDATE below and using the
+		// same in-transaction, lock-protected read the ledger's "from" value
+		// already comes from — this is the narrowest possible point to close
+		// the race a caller-side pre-read (GetTask, well before this write)
+		// cannot rule out on its own. See ErrWorkflowResolutionConflict (errors.go).
+		return "", fmt.Errorf("%w: expected %q, task is now in %q",
+			ErrWorkflowResolutionConflict, expectedWorkflowID, fromWorkflowID)
 	}
 	// Stamped after the transactional read/lock above, not before BeginTx: on
 	// Postgres, readTaskStepInTx's FOR UPDATE blocks until this transaction's
@@ -596,6 +649,13 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	}
 	task.WorkflowStepTransitionID = transitionID
 	entryID = formatEntryID(transitionID)
+	if transitionID != 0 {
+		task.FromWorkflowID = fromWorkflowID
+		task.FromStepID = fromStepID
+	} else {
+		task.FromWorkflowID = ""
+		task.FromStepID = ""
+	}
 
 	// Both sides kept. pr-2907's allocateStepEntryIfPending is a write with its
 	// own concern; #3043's entryID is a pure format of transitionID (line above),
@@ -620,7 +680,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmission(
 	targetStepID string,
 	limit int,
 ) (bool, error) {
-	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit, nil, false, "")
+	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit, nil, false, "", "")
 	return admitted, err
 }
 
@@ -628,6 +688,12 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmission(
 // UpdateTaskWithWorkflowStepAdmission. It keeps the destination admission,
 // the state that applies after admission, and the queued source-exit marker
 // in one transaction so a later full-row update cannot strand the move.
+//
+// expectedWorkflowID, when non-empty, is rechecked atomically inside this
+// transaction (see updateTaskTx) immediately before the row is written,
+// closing the step-changed half of the plugin-move TOCTOU window — see
+// UpdateTaskIfWorkflowMatches for the same-step half. Pass "" for callers that
+// do not carry a pre-resolved expected workflow (e.g. queue promotion/pull).
 func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndState(
 	ctx context.Context,
 	task *models.Task,
@@ -635,9 +701,10 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndState(
 	limit int,
 	admittedState *v1.TaskState,
 	queueExitPending bool,
+	expectedWorkflowID string,
 ) (bool, error) {
 	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, targetStepID, limit, admittedState, queueExitPending, "",
+		ctx, task, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID,
 	)
 	return admitted, err
 }
@@ -658,7 +725,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStep(
 	targetStepID string,
 	limit int,
 ) (applied bool, err error) {
-	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit, nil, false, expectedStepID)
+	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit, nil, false, expectedStepID, "")
 	return applied, err
 }
 
@@ -756,6 +823,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	admittedState *v1.TaskState,
 	queueExitPending bool,
 	expectedStepID string,
+	expectedWorkflowID string,
 ) (admitted bool, applied bool, err error) {
 	now := time.Now().UTC()
 	task.UpdatedAt = now
@@ -837,7 +905,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	if err != nil {
 		metadata = []byte("{}")
 	}
-	entryID, err := r.updateTaskTx(ctx, tx, task, metadata)
+	entryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID)
 	if err != nil {
 		return false, false, err
 	}
@@ -1293,6 +1361,13 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	}
 	task.WorkflowStepTransitionID = transitionID
 	entryID := formatEntryID(transitionID)
+	if transitionID != 0 {
+		task.FromWorkflowID = fromWorkflowID
+		task.FromStepID = fromStepID
+	} else {
+		task.FromWorkflowID = ""
+		task.FromStepID = ""
+	}
 	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return err
 	}
@@ -1396,6 +1471,13 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	}
 	task.WorkflowStepTransitionID = transitionID
 	entryID := formatEntryID(transitionID)
+	if transitionID != 0 {
+		task.FromWorkflowID = fromWorkflowID
+		task.FromStepID = fromStepID
+	} else {
+		task.FromWorkflowID = ""
+		task.FromStepID = ""
+	}
 	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return false, err
 	}
@@ -2696,6 +2778,13 @@ func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 	}
 	task.WorkflowStepTransitionID = transitionID
 	entryID := formatEntryID(transitionID)
+	if transitionID != 0 {
+		task.FromWorkflowID = fromWorkflowID
+		task.FromStepID = fromStepID
+	} else {
+		task.FromWorkflowID = ""
+		task.FromStepID = ""
+	}
 	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return false, err
 	}

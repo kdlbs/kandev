@@ -2,6 +2,7 @@
 import {
   pointSeedRepositoryAtFailingOrigin,
   pointSeedRepositoryAtUnresolvedOrigin,
+  resetSeedRepositoryCheckout,
   restoreSeedRepositoryOrigin,
   test,
   expect,
@@ -32,6 +33,7 @@ test.describe("mobile task launch failure recovery", () => {
     backend,
   }, testInfo) => {
     test.setTimeout(150_000);
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
 
     const workflow = await apiClient.createWorkflow(
       seedData.workspaceId,
@@ -142,6 +144,7 @@ test.describe("mobile task launch failure recovery", () => {
       });
     } finally {
       restoreSeedRepositoryOrigin(seedData);
+      resetSeedRepositoryCheckout(seedData, backend.tmpDir);
       await apiClient.updateRepository(seedData.repositoryId, {
         default_branch: "main",
         pull_before_worktree: true,
@@ -156,6 +159,7 @@ test.describe("mobile task launch failure recovery", () => {
     backend,
   }, testInfo) => {
     test.setTimeout(150_000);
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
 
     const workflow = await apiClient.createWorkflow(
       seedData.workspaceId,
@@ -257,6 +261,7 @@ test.describe("mobile task launch failure recovery", () => {
       });
     } finally {
       restoreSeedRepositoryOrigin(seedData);
+      resetSeedRepositoryCheckout(seedData, backend.tmpDir);
     }
   });
 });

@@ -167,6 +167,138 @@ test.describe("PR status badge", () => {
     }
   });
 
+  test("shows sidebar automation indicators and refreshes them for active PRs", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+
+    const { task } = await seedBadgeTest(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      "Sidebar automation indicators",
+    );
+    const activePRNumber = 188;
+    const mergedPRNumber = 189;
+    const basePR = {
+      task_id: task.id,
+      workspace_id: seedData.workspaceId,
+      repository_id: seedData.repositoryId,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_url: "",
+      pr_title: "Sidebar automation indicator PR",
+      head_branch: "feat/sidebar-automation-indicators",
+      base_branch: "main",
+      author_login: "test-user",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "clean",
+    } as const;
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      ...basePR,
+      pr_number: activePRNumber,
+      pr_url: `https://github.com/testorg/testrepo/pull/${activePRNumber}`,
+      state: "open",
+    });
+    await apiClient.mockGitHubAssociateTaskPR({
+      ...basePR,
+      pr_number: mergedPRNumber,
+      pr_url: `https://github.com/testorg/testrepo/pull/${mergedPRNumber}`,
+      state: "merged",
+    });
+    await apiClient.updateTaskCIAutomationOptions(task.id, {
+      repository_id: seedData.repositoryId,
+      pr_number: activePRNumber,
+      auto_fix_enabled: true,
+      auto_merge_enabled: false,
+    });
+    await apiClient.updateTaskCIAutomationOptions(task.id, {
+      repository_id: seedData.repositoryId,
+      pr_number: mergedPRNumber,
+      auto_fix_enabled: false,
+      auto_merge_enabled: true,
+    });
+
+    await expect
+      .poll(async () => {
+        const response = await apiClient.listTasks(seedData.workspaceId);
+        const pullRequest = response.tasks.find((candidate) => candidate.id === task.id)
+          ?.status_summary?.pull_request;
+        return {
+          auto_fix_enabled: pullRequest?.auto_fix_enabled ?? false,
+          auto_merge_enabled: pullRequest?.auto_merge_enabled ?? false,
+        };
+      })
+      .toMatchObject({
+        auto_fix_enabled: true,
+        auto_merge_enabled: false,
+      });
+
+    await testPage.goto("/tasks");
+    await expect(testPage.getByTestId("tasks-list")).toBeVisible();
+    const sidebar = testPage.getByTestId("app-sidebar");
+    const taskRow = sidebar.getByTestId("sidebar-task-item").filter({ hasText: task.title });
+    const icon = taskRow.getByTestId(`pr-task-icon-${task.id}`);
+    await expect(icon).toBeVisible();
+    await expect(icon.getByTestId("pr-task-automation-auto-fix")).toBeVisible();
+    await expect(icon.getByTestId("pr-task-automation-auto-merge")).toHaveCount(0);
+    await expect(icon).toHaveAttribute("aria-label", /auto-fix enabled/);
+
+    await icon.hover();
+    const tooltip = testPage.locator('div[data-slot="tooltip-content"]:not([data-state="closed"])');
+    const automationDetails = tooltip.locator(
+      ':scope > [data-testid="pr-task-automation-details"]',
+    );
+    await expect(automationDetails).toBeVisible();
+    await expect(
+      automationDetails.getByText(`testorg/testrepo PR #${activePRNumber}`),
+    ).toBeVisible();
+    await expect(automationDetails.getByText(`testorg/testrepo PR #${mergedPRNumber}`)).toHaveCount(
+      0,
+    );
+    await prCapture.screenshot("sidebar-automation-indicators-desktop", {
+      caption: "Task sidebar PR icon shows independent active automation indicators.",
+    });
+
+    await apiClient.updateTaskCIAutomationOptions(task.id, {
+      repository_id: seedData.repositoryId,
+      pr_number: activePRNumber,
+      auto_merge_enabled: true,
+    });
+    await expect
+      .poll(async () => {
+        const response = await apiClient.listTasks(seedData.workspaceId);
+        const pullRequest = response.tasks.find((candidate) => candidate.id === task.id)
+          ?.status_summary?.pull_request;
+        return pullRequest?.auto_merge_enabled === true;
+      })
+      .toBe(true);
+    await expect(icon.getByTestId("pr-task-automation-auto-merge")).toBeVisible();
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      ...basePR,
+      pr_number: activePRNumber,
+      pr_url: `https://github.com/testorg/testrepo/pull/${activePRNumber}`,
+      state: "closed",
+    });
+    await expect
+      .poll(async () => {
+        const response = await apiClient.listTasks(seedData.workspaceId);
+        const pullRequest = response.tasks.find((candidate) => candidate.id === task.id)
+          ?.status_summary?.pull_request;
+        return pullRequest?.auto_fix_enabled === true || pullRequest?.auto_merge_enabled === true;
+      })
+      .toBe(false);
+    await expect(icon.getByTestId("pr-task-automation-auto-fix")).toHaveCount(0);
+    await expect(icon.getByTestId("pr-task-automation-auto-merge")).toHaveCount(0);
+  });
+
   /**
    * Regression for the "CI pending" bug: GitHub reports all checks passed
    * (one skipped, many successful). We used to compute "pending" because

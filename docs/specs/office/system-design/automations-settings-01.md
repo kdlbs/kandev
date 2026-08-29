@@ -18,7 +18,7 @@ This design preserves the technical source detail for `REQ-OFFICE-AUTOMATIONS-SE
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-OFFICE-AUTOMATIONS-SETTINGS-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-OFFICE-AUTOMATIONS-SETTINGS-001` | [Migrated source detail](#migrated-source-detail), [Deletion confirmation](automations-settings-02.md#deletion-confirmation) |
 
 ## Migrated source detail
 

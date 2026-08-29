@@ -118,6 +118,7 @@ func (r *Repository) initSchema() error {
 		return err
 	}
 	r.runMigrations()
+	r.activateRunOutcome()
 	return nil
 }
 
@@ -345,6 +346,11 @@ func (r *Repository) createRunTables() error {
 		scheduled_retry_at TIMESTAMP,
 		error_message TEXT NOT NULL DEFAULT '',
 		cancel_reason TEXT,
+		-- outcome (task-delivery-ledger): nullable, one of the eight
+		-- Office run outcome values on the finished path, NULL on failed
+		-- and on every pre-activation row. See migrateRunOutcome for the
+		-- ADD COLUMN that converges existing databases.
+		outcome TEXT,
 		-- Provider routing (office-provider-routing).
 		logical_provider_order TEXT,
 		requested_tier TEXT,

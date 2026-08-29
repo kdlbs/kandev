@@ -69,19 +69,22 @@ test.describe("Workflow steps", () => {
       return;
     }
 
-    const task = await apiClient.createTaskWithAgent(
+    const { task_id: taskId } = await apiClient.seedTask(
       seedData.workspaceId,
       "Workflow Move Feedback Task",
-      seedData.agentProfileId,
       {
-        description: "e2e:delay(5000)",
+        state: "IN_PROGRESS",
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
       },
     );
+    await apiClient.seedTaskSession(taskId, {
+      state: "RUNNING",
+      agentProfileId: seedData.agentProfileId,
+      repositoryId: seedData.repositoryId,
+    });
 
-    await testPage.route(`**/api/v1/tasks/${task.id}/move`, async (route) => {
+    await testPage.route(`**/api/v1/tasks/${taskId}/move`, async (route) => {
       await route.fulfill({
         status: 409,
         contentType: "application/json",
@@ -92,7 +95,7 @@ test.describe("Workflow steps", () => {
       });
     });
 
-    await testPage.goto(`/t/${task.id}`);
+    await testPage.goto(`/t/${taskId}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await expect(session.stepper).toBeVisible();
@@ -118,19 +121,22 @@ test.describe("Workflow steps", () => {
       return;
     }
 
-    const task = await apiClient.createTaskWithAgent(
+    const { task_id: taskId } = await apiClient.seedTask(
       seedData.workspaceId,
       "Workflow Sidebar Move Feedback Task",
-      seedData.agentProfileId,
       {
-        description: "e2e:delay(5000)",
+        state: "IN_PROGRESS",
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
       },
     );
+    await apiClient.seedTaskSession(taskId, {
+      state: "RUNNING",
+      agentProfileId: seedData.agentProfileId,
+      repositoryId: seedData.repositoryId,
+    });
 
-    await testPage.route(`**/api/v1/tasks/${task.id}/move`, async (route) => {
+    await testPage.route(`**/api/v1/tasks/${taskId}/move`, async (route) => {
       await route.fulfill({
         status: 409,
         contentType: "application/json",
@@ -141,7 +147,7 @@ test.describe("Workflow steps", () => {
       });
     });
 
-    await testPage.goto(`/t/${task.id}`);
+    await testPage.goto(`/t/${taskId}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 

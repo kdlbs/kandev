@@ -8,6 +8,7 @@ import { statusSummaryActiveErrorPreview } from "@/lib/task-status-summary";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { resolveTaskRepositorySlugs } from "@/lib/sidebar/sidebar-task-repositories";
 import { effectiveTaskPendingAction } from "../task-select-helpers";
+import { taskPRInfoFromSummary } from "../task-pr-info";
 
 export type SheetItemCtx = {
   repositoryPathsById: Map<string, string | undefined>;
@@ -60,6 +61,7 @@ function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
       : (task.primarySessionId ?? null),
     hasPendingClarification: pending.clarification,
     hasPendingPermission: pending.permission,
+    prInfo: taskPRInfoFromSummary(summary),
     agentErrorMessage: statusSummaryActiveErrorPreview(
       summary,
       ctx.acknowledgedAgentErrors,

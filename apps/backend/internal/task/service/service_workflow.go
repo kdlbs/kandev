@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -393,6 +394,11 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 type MoveTaskResult struct {
 	Task         *models.Task
 	WorkflowStep *wfmodels.WorkflowStep
+	// FromStepID and Transitioned are read off Task's own write-transaction
+	// result (Task.FromStepID / Task.WorkflowStepTransitionID != 0), not from
+	// this call's earlier pre-move snapshot — see Task.FromStepID's doc.
+	FromStepID   string
+	Transitioned bool
 }
 
 // MoveTaskOptions controls non-default move behavior for trusted callers.
@@ -420,7 +426,29 @@ type MoveTaskOptions struct {
 	// StepHistoryActor identifies the caller. Agent moves must not inherit the
 	// owner identity that MCP uses for authorization.
 	StepHistoryActor wfmodels.StepTransitionActor
+	// ExpectedWorkflowID guards a caller that resolved "the task's current
+	// workflow" via a separate pre-read (rather than passing an explicit,
+	// intentional target workflow) against a concurrent reassignment landing
+	// between that read and this call. When set, MoveTaskWithOptions compares
+	// it to the task's WorkflowID from the fresh GetTask this method already
+	// performs and fails with ErrWorkflowResolutionConflict on a mismatch,
+	// instead of silently reverting whatever the concurrent move just did.
+	ExpectedWorkflowID *string
 }
+
+// ErrWorkflowResolutionConflict indicates a caller's pre-resolved "current
+// workflow" (see MoveTaskOptions.ExpectedWorkflowID) no longer matches the
+// task's actual workflow — a concurrent reassignment won the race. The move
+// is rejected rather than silently reverting that reassignment.
+//
+// This is an alias for repoerrors.ErrWorkflowResolutionConflict, not a
+// separate sentinel: the same check now also runs atomically inside the
+// repository's write transaction (UpdateTaskIfWorkflowMatches,
+// UpdateTaskWithWorkflowStepAdmissionAndState), which returns the repoerrors
+// value directly. Keeping one sentinel means callers using errors.Is against
+// either name catch both the pre-write fast-fail below and the write-time
+// guard that actually closes the race.
+var ErrWorkflowResolutionConflict = repoerrors.ErrWorkflowResolutionConflict
 
 type workflowMoveLimitsRepository interface {
 	CountTasksByWorkflowStepExcludingTask(ctx context.Context, stepID, excludeTaskID string) (int, error)
@@ -446,7 +474,19 @@ type workflowMoveAdmissionWithStateRepository interface {
 		limit int,
 		admittedState *v1.TaskState,
 		queueExitPending bool,
+		expectedWorkflowID string,
 	) (bool, error)
+}
+
+// workflowMoveConflictRepository is the same-step counterpart of
+// workflowMoveAdmissionWithStateRepository's expectedWorkflowID guard: when a
+// move does not change workflow step, updateMovedTask writes through plain
+// UpdateTask, which has no expected-workflow parameter (it is called from
+// many unrelated, non-move sites). A caller that set
+// MoveTaskOptions.ExpectedWorkflowID must instead route through this
+// narrower method so the atomic in-transaction recheck still applies.
+type workflowMoveConflictRepository interface {
+	UpdateTaskIfWorkflowMatches(ctx context.Context, task *models.Task, expectedWorkflowID string) error
 }
 
 type workflowQueuedTaskPromoter interface {
@@ -486,6 +526,17 @@ func (s *Service) MoveTaskWithOptions(
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if opts.ExpectedWorkflowID != nil && task.WorkflowID != *opts.ExpectedWorkflowID {
+		// Cheap fast-fail only: this GetTask is not inside a lock, so it
+		// cannot by itself rule out a race landing between this read and the
+		// eventual write below. That race is closed by the atomic,
+		// in-transaction recheck updateMovedTask now performs at write time
+		// (UpdateTaskIfWorkflowMatches / UpdateTaskWithWorkflowStepAdmissionAndState).
+		// This early check only spares validateTaskMove and the session/state
+		// lookups below when the mismatch is already visible from a plain read.
+		return nil, fmt.Errorf("%w: resolved %q, task is now in %q",
+			ErrWorkflowResolutionConflict, *opts.ExpectedWorkflowID, task.WorkflowID)
 	}
 
 	targetStep, err := s.validateTaskMove(ctx, task, workflowID, workflowStepID, opts)
@@ -568,26 +619,53 @@ func (s *Service) MoveTaskWithOptions(
 		})
 	}
 
-	_, err = s.updateMovedTask(moveCtx, task, oldStepID, targetStep, admittedState)
+	_, err = s.updateMovedTask(moveCtx, task, oldStepID, targetStep, admittedState, opts)
 	if err != nil {
 		s.logger.Error("failed to move task", zap.String("task_id", id), zap.Error(err))
 		return nil, err
 	}
 
-	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, oldWorkflowID)
+	// Captured now, before the post-commit GetTask refresh below replaces
+	// task with a plain read that carries neither transient field (see
+	// models.Task.FromStepID and FromWorkflowID) — these are the write
+	// transaction's own result, not the pre-move snapshot computed above.
+	resultFromWorkflowID := task.FromWorkflowID
+	resultFromStepID := task.FromStepID
+	resultTransitioned := task.WorkflowStepTransitionID != 0
+	if resultTransitioned && resultFromWorkflowID == "" {
+		// Keep compatibility with repository implementations that predate the
+		// transient source-workflow field. SQLite populates it from the write
+		// transaction; this fallback preserves the previous event value for any
+		// external test or adapter implementation that does not.
+		resultFromWorkflowID = oldWorkflowID
+	}
+
+	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, resultFromWorkflowID)
 	if oldState != task.State {
 		s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
 	}
 
-	// Publish task.moved event so the orchestrator can process on_exit/on_enter actions
-	if stepChanged {
-		s.publishTaskMovedEvent(ctx, task, oldWorkflowID, oldStepID, workflowStepID, sessionID)
+	// Publish task.moved event so the orchestrator can process on_exit/on_enter
+	// actions. Gated on resultTransitioned (the write transaction's own
+	// outcome), not the pre-write stepChanged: a concurrent same-workflow move
+	// can land between this call's read and its write, so stepChanged/oldStepID
+	// can name a step the task never actually left (stepChanged=true but the
+	// commit was a no-op transition) or miss one it did leave (stepChanged=false
+	// because this call's read already matched its own target, but the commit's
+	// in-transaction read found a different actual "from" step). Every write
+	// path reachable here (UpdateTask, UpdateTaskIfWorkflowMatches, and the
+	// admission-with-state variant) sets WorkflowStepTransitionID, FromStepID,
+	// and FromWorkflowID off the same in-transaction read, so the result fields
+	// are always the source step and workflow the task actually left on this
+	// commit.
+	if resultTransitioned {
+		s.publishTaskMovedEvent(ctx, task, resultFromWorkflowID, resultFromStepID, workflowStepID, sessionID)
 		historySessionID := opts.StepHistorySessionID
 		if historySessionID == "" {
 			historySessionID = sessionID
 		}
-		s.recordManualStepTransition(ctx, historySessionID, oldStepID, workflowStepID, opts.StepHistoryTrigger, opts.StepHistoryActor)
-		s.pullNextTaskOnVacate(ctx, oldStepID, task.ID)
+		s.recordManualStepTransition(ctx, historySessionID, resultFromStepID, workflowStepID, opts.StepHistoryTrigger, opts.StepHistoryActor)
+		s.pullNextTaskOnVacate(ctx, resultFromStepID, task.ID)
 		s.pullTasksFromNewFeederWork(ctx, workflowID, workflowStepID)
 		refreshed, err := s.tasks.GetTask(ctx, task.ID)
 		if err != nil {
@@ -606,7 +684,7 @@ func (s *Service) MoveTaskWithOptions(
 		zap.String("workflow_step_id", workflowStepID),
 		zap.Int("position", position))
 
-	result := &MoveTaskResult{Task: task}
+	result := &MoveTaskResult{Task: task, FromStepID: resultFromStepID, Transitioned: resultTransitioned}
 
 	// Fetch the workflow step info if getter is available
 	if s.workflowStepGetter != nil {
@@ -1071,21 +1149,79 @@ func skippedTaskIDs(skipped map[string]struct{}) []string {
 	return ids
 }
 
-func (s *Service) updateMovedTask(ctx context.Context, task *models.Task, oldStepID string, targetStep *wfmodels.WorkflowStep, admittedState *v1.TaskState) (bool, error) {
+func (s *Service) updateMovedTask(
+	ctx context.Context,
+	task *models.Task,
+	oldStepID string,
+	targetStep *wfmodels.WorkflowStep,
+	admittedState *v1.TaskState,
+	opts MoveTaskOptions,
+) (bool, error) {
 	if targetStep == nil || oldStepID == targetStep.ID {
-		if err := s.tasks.UpdateTask(ctx, task); err != nil {
+		return s.updateMovedTaskSameStep(ctx, task, opts)
+	}
+	return s.updateMovedTaskCrossStep(ctx, task, targetStep, admittedState, opts)
+}
+
+// updateMovedTaskSameStep handles the no-step-change branch of updateMovedTask
+// (a reorder, or a plugin move that names the task's current step): it writes
+// through the plain repository UpdateTask, not one of the WIP-admission call
+// sites, since there is no admission decision to make when the step is
+// unchanged.
+func (s *Service) updateMovedTaskSameStep(ctx context.Context, task *models.Task, opts MoveTaskOptions) (bool, error) {
+	if opts.ExpectedWorkflowID != nil {
+		// Same-step writes go through plain UpdateTask, which has no
+		// expected-workflow parameter (it is the general-purpose writer
+		// used by many unrelated call sites). A caller carrying a CAS
+		// guard must route through the narrower method instead, or the
+		// guard would silently stop applying for the same-step case —
+		// see workflowMoveConflictRepository's doc.
+		conflictRepo, ok := s.tasks.(workflowMoveConflictRepository)
+		if !ok {
+			return false, fmt.Errorf("workflow conflict guard repository unavailable for task %s", task.ID)
+		}
+		if err := conflictRepo.UpdateTaskIfWorkflowMatches(ctx, task, *opts.ExpectedWorkflowID); err != nil {
 			return false, err
 		}
 		return task.WIPAdmitted, nil
 	}
+	if err := s.tasks.UpdateTask(ctx, task); err != nil {
+		return false, err
+	}
+	return task.WIPAdmitted, nil
+}
+
+// updateMovedTaskCrossStep handles the step-changing branch of
+// updateMovedTask: it runs the target step's WIP admission decision (queuing
+// the task instead of moving it when the step is at capacity) and persists
+// the result.
+func (s *Service) updateMovedTaskCrossStep(
+	ctx context.Context,
+	task *models.Task,
+	targetStep *wfmodels.WorkflowStep,
+	admittedState *v1.TaskState,
+	opts MoveTaskOptions,
+) (bool, error) {
 	admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository)
 	if !ok {
 		return false, fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)
 	}
+	expectedWorkflowID := ""
+	if opts.ExpectedWorkflowID != nil {
+		expectedWorkflowID = *opts.ExpectedWorkflowID
+	}
 	if admissionWithState, ok := s.tasks.(workflowMoveAdmissionWithStateRepository); ok {
 		return admissionWithState.UpdateTaskWithWorkflowStepAdmissionAndState(
-			ctx, task, targetStep.ID, targetStep.WIPLimit, admittedState, true,
+			ctx, task, targetStep.ID, targetStep.WIPLimit, admittedState, true, expectedWorkflowID,
 		)
+	}
+	if expectedWorkflowID != "" {
+		// The CAS-guarded caller (plugin moves) always runs against a
+		// production repository, which implements the atomic variant above.
+		// A repository that only exposes the legacy admission method has no
+		// way to honor the guard, so fail closed instead of silently
+		// dropping it.
+		return false, fmt.Errorf("workflow conflict guard unavailable on legacy admission repository for step %s", targetStep.ID)
 	}
 
 	// Keep compatibility with narrow test/dry-run repositories that expose

@@ -10,6 +10,8 @@ export class AutomationsPage {
   readonly nameInput: Locator;
   readonly saveButton: Locator;
   readonly deleteButton: Locator;
+  readonly deleteConfirmation: Locator;
+  readonly deleteConfirmButton: Locator;
   readonly frequencySelector: Locator;
   readonly customScheduleInput: Locator;
   readonly timeInput: Locator;
@@ -33,6 +35,8 @@ export class AutomationsPage {
       .getByTestId("settings-floating-save")
       .getByRole("button", { name: /save changes/i });
     this.deleteButton = page.getByTestId("automation-delete-button");
+    this.deleteConfirmation = page.getByTestId("automation-delete-confirm-dialog");
+    this.deleteConfirmButton = this.deleteConfirmation.getByTestId("automation-delete-confirm");
     this.frequencySelector = page.getByTestId("schedule-frequency");
     this.customScheduleInput = page.getByTestId("schedule-custom-input");
     this.timeInput = page.getByTestId("schedule-time");

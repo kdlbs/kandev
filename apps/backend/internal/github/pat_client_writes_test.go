@@ -75,7 +75,7 @@ func TestPATClient_MergePR(t *testing.T) {
 		c, requests := newRecordingPATServerFunc(t, func(*http.Request) (int, string) {
 			return http.StatusOK, `{"status":"merged"}`
 		})
-		if _, err := c.MergePR(context.Background(), "acme", "widget", 42, "squash"); err != nil {
+		if _, err := c.MergePR(context.Background(), "acme", "widget", 42, MergePRRequest{MergeMethod: "squash"}); err != nil {
 			t.Fatalf("MergePR: %v", err)
 		}
 		got := (*requests)[0]
@@ -93,12 +93,24 @@ func TestPATClient_MergePR(t *testing.T) {
 		c, requests := newRecordingPATServerFunc(t, func(*http.Request) (int, string) {
 			return http.StatusOK, `{"status":"merged"}`
 		})
-		if _, err := c.MergePR(context.Background(), "acme", "widget", 42, ""); err != nil {
+		if _, err := c.MergePR(context.Background(), "acme", "widget", 42, MergePRRequest{}); err != nil {
 			t.Fatalf("MergePR: %v", err)
 		}
 		if (*requests)[0].Body != `{"merge_action":"default"}` {
 			t.Errorf("body = %q, want GitHub to choose direct or queued merge",
 				(*requests)[0].Body)
+		}
+	})
+	t.Run("sends the expected head SHA", func(t *testing.T) {
+		c, requests := newRecordingPATServerFunc(t, func(*http.Request) (int, string) {
+			return http.StatusOK, `{"status":"merged"}`
+		})
+		request := MergePRRequest{MergeMethod: "squash", ExpectedHeadSHA: "abc123"}
+		if _, err := c.MergePR(context.Background(), "acme", "widget", 42, request); err != nil {
+			t.Fatalf("MergePR: %v", err)
+		}
+		if got := (*requests)[0].Body; got != `{"merge_action":"default","merge_method":"squash","sha":"abc123"}` {
+			t.Errorf("body = %q, want expected head SHA", got)
 		}
 	})
 }
@@ -111,7 +123,7 @@ func TestPATClient_MergePR_StatusIsRecoverable(t *testing.T) {
 			c, _ := newRecordingPATServerFunc(t, func(*http.Request) (int, string) {
 				return status, `{"message":"Pull Request is not mergeable"}`
 			})
-			_, err := c.MergePR(context.Background(), "acme", "widget", 42, "merge")
+			_, err := c.MergePR(context.Background(), "acme", "widget", 42, MergePRRequest{MergeMethod: "merge"})
 			var apiErr *GitHubAPIError
 			if !errors.As(err, &apiErr) {
 				t.Fatalf("err = %v, want a *GitHubAPIError", err)
@@ -132,13 +144,67 @@ func TestPATClient_MergePR_StatusIsRecoverable(t *testing.T) {
 func TestPATClient_MergePR_AlreadyQueuedIsIdempotent(t *testing.T) {
 	c, _ := newRecordingPATServerFunc(t, func(r *http.Request) (int, string) {
 		if r.Method == http.MethodGet {
-			return http.StatusOK, `{"status":"enqueued","uuid":"request-1"}`
+			return http.StatusOK, `{"status":"enqueued","details":{"message":"Pull request was added to the merge queue."}}`
 		}
-		return http.StatusConflict, `{"status":"pending","uuid":"request-1"}`
+		return http.StatusConflict, `{"status":"pending","details":{"message":"Merge request enqueued.","uuid":"request-1","merge_method":"squash","merge_action":"default","expected_head_sha":"abc123"}}`
 	})
-	outcome, err := c.MergePR(context.Background(), "acme", "widget", 42, "squash")
+	outcome, err := c.MergePR(context.Background(), "acme", "widget", 42, MergePRRequest{MergeMethod: "squash"})
 	if err != nil || outcome != MergeOutcomeQueued {
 		t.Fatalf("outcome = %q, err = %v, want queued", outcome, err)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001.3
+func TestPATClient_MergePR_PollsNestedPendingResponse(t *testing.T) {
+	c, requests := newRecordingPATServerFunc(t, func(r *http.Request) (int, string) {
+		if r.Method == http.MethodGet {
+			return http.StatusOK, `{"status":"merged","details":{"sha":"abc123"}}`
+		}
+		return http.StatusAccepted, `{"status":"pending","details":{"message":"Merge request enqueued.","uuid":"request-1","merge_method":"squash","merge_action":"default","expected_head_sha":"abc123"}}`
+	})
+
+	outcome, err := c.MergePR(context.Background(), "acme", "widget", 42, MergePRRequest{MergeMethod: "squash"})
+	if err != nil || outcome != MergeOutcomeMerged {
+		t.Fatalf("outcome = %q, err = %v, want merged", outcome, err)
+	}
+	if len(*requests) != 2 || (*requests)[1].Path != "/repos/acme/widget/pulls/42/merge-async/request-1" {
+		t.Fatalf("requests = %#v, want a poll for request-1", *requests)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.7
+func TestPATClient_MergePR_PendingPollHonorsContextBeforeNextRequest(t *testing.T) {
+	c, requests := newRecordingPATServerFunc(t, func(*http.Request) (int, string) {
+		return http.StatusAccepted, `{"status":"pending","details":{"uuid":"request-1"}}`
+	})
+	var gotDelay time.Duration
+	c.mergePollWait = func(_ context.Context, delay time.Duration) error {
+		gotDelay = delay
+		return context.DeadlineExceeded
+	}
+
+	_, err := c.MergePR(context.Background(), "acme", "widget", 42, MergePRRequest{MergeMethod: "squash"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("MergePR error = %v, want context deadline", err)
+	}
+	if got := len(*requests); got != 1 {
+		t.Fatalf("request count = %d, want only the initial request before cancellation", got)
+	}
+	if gotDelay != time.Second {
+		t.Fatalf("poll delay = %s, want one second", gotDelay)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001.13
+func TestPATClient_MergePR_ReportsNestedFailureMessage(t *testing.T) {
+	c, _ := newRecordingPATServerFunc(t, func(*http.Request) (int, string) {
+		return http.StatusOK, `{"status":"failed","details":{"message":"Branch protection blocked the merge.","expected_head_sha":"abc123"}}`
+	})
+
+	_, err := c.MergePR(context.Background(), "acme", "widget", 42, MergePRRequest{MergeMethod: "squash"})
+	if err == nil || !strings.Contains(err.Error(), "Branch protection blocked the merge.") ||
+		!strings.Contains(err.Error(), "abc123") {
+		t.Fatalf("err = %v, want the nested provider message and expected head", err)
 	}
 }
 

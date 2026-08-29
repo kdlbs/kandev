@@ -730,6 +730,8 @@ type TaskCIPRAutomationState struct {
 	AutoFixExhaustedAt       *time.Time `json:"auto_fix_exhausted_at" db:"auto_fix_exhausted_at"`
 	LastMergeSignature       string     `json:"last_merge_signature" db:"last_merge_signature"`
 	LastMergeAttemptAt       *time.Time `json:"last_merge_attempt_at,omitempty" db:"last_merge_attempt_at"`
+	LastMergeResult          string     `json:"last_merge_result" db:"last_merge_result"`
+	MergeRetryPending        bool       `json:"-" db:"merge_retry_pending"`
 	LastQueueAttemptHeadSHA  string     `json:"last_queue_attempt_head_sha" db:"last_queue_attempt_head_sha"`
 	LastQueueFixEventID      string     `json:"last_queue_fix_event_id" db:"last_queue_fix_event_id"`
 	LastQueueRemovalCause    string     `json:"last_queue_removal_cause" db:"last_queue_removal_cause"`
@@ -740,9 +742,18 @@ type TaskCIPRAutomationState struct {
 	LastLifecyclePromptAt    *time.Time `json:"last_lifecycle_prompt_at,omitempty" db:"last_lifecycle_prompt_at"`
 	LastLifecycleSessionID   *string    `json:"last_lifecycle_session_id,omitempty" db:"last_lifecycle_session_id"`
 	LastError                *string    `json:"last_error,omitempty" db:"last_error"`
+	LastErrorKind            string     `json:"last_error_kind" db:"last_error_kind"`
 	CreatedAt                time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt                time.Time  `json:"updated_at" db:"updated_at"`
 }
+
+const (
+	TaskCIMergeResultInFlight = "in_flight"
+	TaskCIMergeResultFailed   = "failed"
+	TaskCIMergeResultAccepted = "accepted"
+	TaskCIErrorKindAutoMerge  = "auto_merge"
+	TaskCIErrorKindAutoFix    = "auto_fix"
+)
 
 // TaskCIFixAttempt records an auto-fix prompt attempt for a task PR.
 type TaskCIFixAttempt struct {
@@ -779,6 +790,7 @@ type TaskCIMergeQueueObservation struct {
 	RemovalEventID         string
 	RemovalCause           string
 	RemovalObservedHeadSHA string
+	Accepted               bool
 }
 
 // TaskPRLifecyclePrompt records an accepted lifecycle prompt checkpoint.

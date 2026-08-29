@@ -39,6 +39,7 @@ func (r *Repository) runMigrations() {
 	// schemas include the columns inline; ALTERs converge existing databases.
 	r.migrateProviderRouting()
 	r.migrateContinuationScope()
+	r.migrateRunOutcome()
 	r.migrateParentWakeIndexes()
 	r.migrateParentWakeReceiptColumns()
 }

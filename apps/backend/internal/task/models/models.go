@@ -864,6 +864,16 @@ type Task struct {
 	// latest workflow-step write. Repositories populate it after a transition;
 	// it is transient and is not stored in the tasks table.
 	WorkflowStepTransitionID int64 `json:"-"`
+	// FromStepID is the workflow_step_id the task left on the same write that
+	// set WorkflowStepTransitionID, read inside that write's own transaction
+	// (readTaskStepInTx) rather than from any earlier snapshot. Empty when no
+	// transition occurred (WorkflowStepTransitionID == 0) or on task creation.
+	// Transient and is not stored in the tasks table.
+	FromStepID string `json:"-"`
+	// FromWorkflowID is the workflow_id the task left on the same write that
+	// set WorkflowStepTransitionID, read inside that write's own transaction.
+	// It is transient and is not stored in the tasks table.
+	FromWorkflowID string `json:"-"`
 
 	// Office extensions.
 	//

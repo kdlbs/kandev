@@ -154,10 +154,14 @@ test.describe("Office workflow quorum-guarded transitions", () => {
     // auto_start_agent on-enter action, so EnsureSession would otherwise
     // resolve intent=start and launch through startTask, which requires
     // office-scheduler-injected KANDEV_* runtime env this external HTTP call
-    // has no way to supply. On Review, EnsureSession resolves intent=prepare
-    // instead, which only needs a DB row.
+    // has no way to supply. Wait for the persisted move before EnsureSession;
+    // the move also publishes an asynchronous workflow event. On Review,
+    // EnsureSession resolves intent=prepare instead, which only needs a DB row.
     const reviewStepId = await findStepId(apiClient, officeSeed.workflowId, "review");
     await apiClient.moveTask(task.id, officeSeed.workflowId, reviewStepId);
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id)
+      .toBe(reviewStepId);
 
     // AddTaskParticipant binds the new row to the task's CURRENT
     // workflow_step_id (workflow_step_participants.step_id), not a
@@ -278,10 +282,13 @@ test.describe("Office workflow quorum-guarded transitions", () => {
     // auto_start_agent on-enter action, so EnsureSession would otherwise
     // resolve intent=start and launch through startTask, which requires
     // office-scheduler-injected KANDEV_* runtime env this external HTTP call
-    // has no way to supply. On Review, EnsureSession resolves intent=prepare
-    // instead, which only needs a DB row.
+    // has no way to supply. Wait for the persisted move before registering
+    // the reviewer; participant rows are scoped to the current step.
     const reviewStepId = await findStepId(apiClient, officeSeed.workflowId, "review");
     await apiClient.moveTask(task.id, officeSeed.workflowId, reviewStepId);
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id)
+      .toBe(reviewStepId);
 
     // AddTaskParticipant binds to the task's CURRENT step id, so the
     // reviewer must be registered after the move lands the task on Review

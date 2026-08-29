@@ -51,6 +51,8 @@
   "cronExpressionLabel": "Cron expression",
   "cronHelp": "Standard 5-field cron or shortcuts ({{shortcuts}})",
   "delete": "Delete",
+  "deleteAutomationTitle": "Delete automation?",
+  "deleteAutomationDescription": "This will permanently delete {{name}}. This action cannot be undone.",
   "deleteAll": "Delete all",
   "deleteAllRuns": "Delete all runs",
   "deleteAllRunsDescription": "This will permanently remove all run records for this automation; including any not currently loaded; and their associated tasks. This cannot be undone.",

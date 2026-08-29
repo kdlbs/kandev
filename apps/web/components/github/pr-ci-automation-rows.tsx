@@ -104,13 +104,14 @@ export function CIAutomationRow({
 export function CIAutomationErrorRow({
   error,
   loading,
-  onRetry,
+  actionLabel,
+  onAction,
 }: {
   error: string;
   loading: boolean;
-  onRetry: () => void;
+  actionLabel: string;
+  onAction: () => void;
 }) {
-  const { t } = useTranslation();
   return (
     <div
       role="alert"
@@ -121,12 +122,12 @@ export function CIAutomationErrorRow({
         type="button"
         variant="ghost"
         size="sm"
-        className="h-6 cursor-pointer gap-1 px-2 text-[11px]"
+        className="h-11 min-w-11 cursor-pointer gap-1 px-2 text-[11px] sm:h-6 sm:min-w-0"
         disabled={loading}
-        onClick={onRetry}
+        onClick={onAction}
       >
         <IconRefresh className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} />
-        {t("github:retry")}
+        {actionLabel}
       </Button>
     </div>
   );

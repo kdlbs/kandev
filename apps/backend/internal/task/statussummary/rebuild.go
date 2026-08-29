@@ -41,6 +41,8 @@ type PullRequestInput struct {
 	RequiredReviews       int
 	ChecksTotal           int
 	ChecksPassing         int
+	AutoFixEnabled        bool
+	AutoMergeEnabled      bool
 }
 
 // RebuildInput contains the authoritative bounded facts available from

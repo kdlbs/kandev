@@ -75,6 +75,7 @@ describe("registerGitHubHandlers CI options", () => {
       auto_fix_exhausted_at: null,
       last_merge_signature: "",
       last_merge_attempt_at: null,
+      last_merge_result: "",
       review_request_initialized: false,
       last_review_requested: false,
       last_observed_pr_state: "open",
@@ -82,6 +83,7 @@ describe("registerGitHubHandlers CI options", () => {
       last_lifecycle_prompt_at: null,
       last_lifecycle_session_id: null,
       last_error: "Tests are failing",
+      last_error_kind: "",
       created_at: NEWER_UPDATED_AT,
       updated_at: NEWER_UPDATED_AT,
     };

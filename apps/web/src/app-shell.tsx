@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
@@ -19,6 +20,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { WorkspaceScopeProvider } from "@/components/workspace-scope-provider";
 import { WebSocketConnector } from "@/components/ws-connector";
+import { useWindowControlsOverlay } from "@/hooks/use-window-controls-overlay";
 import { CommandRegistryProvider } from "@/lib/commands/command-registry";
 import { I18nProvider } from "@/lib/i18n/provider";
 import { Toaster as SonnerToaster } from "@kandev/ui/sonner";
@@ -49,6 +51,14 @@ function AppToaster() {
 }
 
 export function AppShell({ children }: AppShellProps) {
+  const titlebar = useWindowControlsOverlay();
+  const shellStyle = {
+    "--titlebar-area-x": `${titlebar.x}px`,
+    "--titlebar-area-y": `${titlebar.y}px`,
+    "--titlebar-area-width": `${titlebar.width}px`,
+    "--titlebar-area-height": `${titlebar.height}px`,
+  } as CSSProperties;
+
   return (
     <I18nProvider>
       <ThemeProvider>
@@ -74,7 +84,12 @@ export function AppShell({ children }: AppShellProps) {
                         the active workspace, and Office-vs-kanban chrome comes
                         from it rather than from the URL. */}
                     <WorkspaceScopeProvider>
-                      <div className="flex h-dvh min-h-0 w-full overflow-hidden">
+                      <div
+                        className="flex h-dvh min-h-0 w-full overflow-hidden"
+                        data-testid="app-shell"
+                        data-window-controls-overlay={titlebar.visible ? "visible" : "hidden"}
+                        style={shellStyle}
+                      >
                         <AppSidebar />
                         <AppStatusSurfaceProvider>
                           <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>

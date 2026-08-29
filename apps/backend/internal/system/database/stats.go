@@ -71,6 +71,9 @@ type Service struct {
 	// OrchestratorShutdown stops the orchestrator and active executions before
 	// the factory-reset job runs. Wired by cmd/kandev. Tests pass a no-op.
 	OrchestratorShutdown func()
+	// DatabaseQuiesce stops database-backed workers before the factory-reset
+	// job snapshots or changes the shared schema. Wired by cmd/kandev.
+	DatabaseQuiesce func() error
 }
 
 // NewService constructs a Service for the configured SQLite database path.
