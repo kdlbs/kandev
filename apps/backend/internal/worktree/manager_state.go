@@ -328,6 +328,19 @@ func linkedWorktreeIntegrityReason(path string) string {
 	return "linked-worktree metadata is invalid"
 }
 
+func isAdminDirectoryMissing(worktreePath string) bool {
+	content, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		return false
+	}
+	adminPath, found := strings.CutPrefix(strings.TrimSpace(string(content)), "gitdir:")
+	if !found {
+		return false
+	}
+	info, statErr := os.Stat(strings.TrimSpace(adminPath))
+	return statErr != nil || !info.IsDir()
+}
+
 // linkedWorktreeRecoveryReason distinguishes a recoverable missing admin entry
 // from content that has no validated Git commit to attach to. A branch name
 // stored in the worktree row is not enough: reconstructing HEAD when its ref
@@ -335,7 +348,7 @@ func linkedWorktreeIntegrityReason(path string) string {
 // entirely deleted or untracked.
 func (m *Manager) linkedWorktreeRecoveryReason(ctx context.Context, wt *Worktree) string {
 	reason := linkedWorktreeIntegrityReason(wt.Path)
-	if !strings.Contains(reason, "admin target") || !strings.Contains(reason, "is missing") ||
+	if !isAdminDirectoryMissing(wt.Path) ||
 		wt.RepositoryPath == "" || wt.Branch == "" {
 		return reason + "; checkout preserved"
 	}

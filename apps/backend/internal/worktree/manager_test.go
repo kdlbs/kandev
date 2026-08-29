@@ -373,11 +373,35 @@ func TestManager_Create_RefusesMissingAdminWhenRecordedBranchIsUnreachable(t *te
 	if !errors.As(err, &recoveryErr) {
 		t.Fatalf("Create() error = %T, want WorktreeRecoveryError", err)
 	}
+	if !errors.Is(err, ErrWorktreeCorrupted) {
+		t.Fatalf("Create() error = %v, want ErrWorktreeCorrupted", err)
+	}
 	if !strings.Contains(recoveryErr.Reason, "content-only") || !strings.Contains(recoveryErr.Reason, "feature/pr-branch") {
 		t.Fatalf("recovery reason = %q, want content-only unreachable branch refusal", recoveryErr.Reason)
 	}
 	if content, readErr := os.ReadFile(uniqueFile); readErr != nil || string(content) != "unique content\n" {
 		t.Fatalf("unique checkout content changed after refusal: content=%q err=%v", content, readErr)
+	}
+}
+
+func TestIsAdminDirectoryMissing(t *testing.T) {
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(t.TempDir(), "linked-worktree")
+	runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
+	if isAdminDirectoryMissing(worktreePath) {
+		t.Fatal("valid linked worktree reported a missing admin directory")
+	}
+
+	gitPointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read linked worktree pointer: %v", err)
+	}
+	adminPath := strings.TrimSpace(strings.TrimPrefix(string(gitPointer), "gitdir:"))
+	if err := os.RemoveAll(adminPath); err != nil {
+		t.Fatalf("remove linked worktree admin directory: %v", err)
+	}
+	if !isAdminDirectoryMissing(worktreePath) {
+		t.Fatal("missing linked worktree admin directory was not detected")
 	}
 }
 
