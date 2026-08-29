@@ -78,9 +78,9 @@ type pendingTaskTitleSetter interface {
 type taskStopTarget struct {
 	sessionID   string
 	executionID string
-	// terminal indicates the session is already in a terminal state (CANCELLED,
-	// COMPLETED, FAILED, IDLE). Stop failures for terminal sessions are expected
-	// and must not block environment cleanup — the agent is already gone.
+	// terminal records the session state observed when the cleanup snapshot was
+	// taken. It is retained for snapshot compatibility, but it must never
+	// suppress a non-not-found runtime stop failure.
 	terminal bool
 }
 
@@ -2628,20 +2628,7 @@ func (s *Service) refreshTaskRuntimeStopTargets(
 	if err != nil {
 		return nil, err
 	}
-	targets := mergeTaskStopTargets(taskStopTargetsFromRunningRows(runningRows), snapshot)
-	// Archive captures active sessions before it marks them CANCELLED. Refresh
-	// the terminal disposition after that transition so a missing runtime is
-	// treated as an expected teardown result instead of a retryable stop failure.
-	for i := range targets {
-		if targets[i].terminal || targets[i].sessionID == "" || s.sessions == nil {
-			continue
-		}
-		session, sessionErr := s.sessions.GetTaskSession(ctx, targets[i].sessionID)
-		if sessionErr == nil && session != nil && isCleanableSessionState(session.State) {
-			targets[i].terminal = true
-		}
-	}
-	return targets, nil
+	return mergeTaskStopTargets(taskStopTargetsFromRunningRows(runningRows), snapshot), nil
 }
 
 func taskStopTargetsFromRunningRows(runningRows []*models.ExecutorRunning) []taskStopTarget {
@@ -2785,13 +2772,6 @@ func (s *Service) stopTaskRuntimeExecution(
 	if err == nil || runtimeStopAlreadyComplete(err) {
 		return
 	}
-	if target.terminal {
-		s.logger.Debug("stop failed for terminal session execution (expected), proceeding with cleanup",
-			zap.String("task_id", taskID),
-			zap.String("session_id", target.sessionID),
-			zap.Error(err))
-		return
-	}
 	outcome.failed[target.sessionID] = struct{}{}
 	s.logger.Warn(stopFailMsg,
 		zap.String("task_id", taskID),
@@ -2810,13 +2790,6 @@ func (s *Service) stopTaskRuntimeSession(
 ) {
 	err := s.executionStopper.StopSession(ctx, target.sessionID, stopReason, true)
 	if err == nil {
-		return
-	}
-	if target.terminal {
-		s.logger.Debug("stop failed for terminal session (expected), proceeding with cleanup",
-			zap.String("task_id", taskID),
-			zap.String("session_id", target.sessionID),
-			zap.Error(err))
 		return
 	}
 	// A session-level not-found is retryable by default (the execution may
@@ -2880,14 +2853,6 @@ func (s *Service) stopDeletedSessionRuntime(
 	if err := s.executionStopper.StopExecution(ctx, executionID, stopReason, true); err != nil {
 		if runtimeStopAlreadyComplete(err) {
 			s.logger.Debug("late deleted task execution was already stopped",
-				zap.String("task_id", taskID),
-				zap.String("session_id", target.sessionID),
-				zap.String("execution_id", executionID),
-				zap.Error(err))
-			return true
-		}
-		if target.terminal {
-			s.logger.Debug("stop failed for late terminal task execution (expected), proceeding with cleanup",
 				zap.String("task_id", taskID),
 				zap.String("session_id", target.sessionID),
 				zap.String("execution_id", executionID),

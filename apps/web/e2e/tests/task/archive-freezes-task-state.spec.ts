@@ -37,7 +37,7 @@ test.describe("Archiving a task freezes its runtime state", () => {
     // state directly so entering the workflow step cannot launch an agent.
     await expect
       .poll(async () => (await apiClient.getTask(taskId)).state, {
-        timeout: 30_000,
+        timeout: 5_000,
         message: "waiting for task to reach IN_PROGRESS before archiving",
       })
       .toBe("IN_PROGRESS");

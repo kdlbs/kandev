@@ -499,6 +499,41 @@ func TestArchiveTaskTree_FinalizesActiveSessionWhenRuntimeCancelFails(t *testing
 	}
 }
 
+type archiveErrorCascadeRepo struct {
+	*fakeCascadeRepo
+	err error
+}
+
+func (r *archiveErrorCascadeRepo) ArchiveTaskIfActive(context.Context, string, string) (bool, error) {
+	return false, r.err
+}
+
+func TestArchiveTaskTree_DoesNotFinalizeSessionWhenArchiveFails(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	sessions := &cancellableCascadeSessionReader{fakeSessionReader: newFakeSessionReader()}
+	sessions.sessions["root"] = []*models.TaskSession{
+		{ID: "session-root", TaskID: "root", State: models.TaskSessionStateRunning},
+	}
+
+	archiveErr := errors.New("archive unavailable")
+	svc := NewHandoffService(&archiveErrorCascadeRepo{
+		fakeCascadeRepo: newCascadeRepo(tasks),
+		err:             archiveErr,
+	}, nil, nil, nil, newCascadeWSGroupRepo(), nil)
+	svc.SetSessionReader(sessions)
+
+	if _, err := svc.ArchiveTaskTree(context.Background(), "root", false); !errors.Is(err, archiveErr) {
+		t.Fatalf("archive error = %v, want %v", err, archiveErr)
+	}
+	if got := sessions.sessions["root"][0].State; got != models.TaskSessionStateRunning {
+		t.Fatalf("session state = %q, want RUNNING after failed archive", got)
+	}
+	if len(sessions.cancelCalls) != 0 {
+		t.Fatalf("cancel calls = %v, want none after failed archive", sessions.cancelCalls)
+	}
+}
+
 // fakeDeleteRepo extends fakeCascadeRepo with DeleteTask support so the
 // delete cascade test can verify rows are actually removed.
 type fakeDeleteRepo struct {
@@ -514,6 +549,41 @@ func (r *fakeDeleteRepo) DeleteTask(_ context.Context, id string) error {
 
 func (r *fakeDeleteRepo) DeleteExpiredQuickChatTask(context.Context, string, time.Time) (bool, error) {
 	panic("DeleteExpiredQuickChatTask should not be used by delete cascade tests")
+}
+
+type deleteErrorCascadeRepo struct {
+	*fakeDeleteRepo
+	err error
+}
+
+func (r *deleteErrorCascadeRepo) DeleteTask(context.Context, string) error {
+	return r.err
+}
+
+func TestDeleteTaskTree_DoesNotFinalizeSessionWhenDeleteFails(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	sessions := &cancellableCascadeSessionReader{fakeSessionReader: newFakeSessionReader()}
+	sessions.sessions["root"] = []*models.TaskSession{
+		{ID: "session-root", TaskID: "root", State: models.TaskSessionStateRunning},
+	}
+
+	deleteErr := errors.New("delete unavailable")
+	svc := NewHandoffService(&deleteErrorCascadeRepo{
+		fakeDeleteRepo: &fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)},
+		err:            deleteErr,
+	}, nil, nil, nil, nil, nil)
+	svc.SetSessionReader(sessions)
+
+	if _, err := svc.DeleteTaskTree(context.Background(), "root", false); !errors.Is(err, deleteErr) {
+		t.Fatalf("delete error = %v, want %v", err, deleteErr)
+	}
+	if got := sessions.sessions["root"][0].State; got != models.TaskSessionStateRunning {
+		t.Fatalf("session state = %q, want RUNNING after failed delete", got)
+	}
+	if len(sessions.cancelCalls) != 0 {
+		t.Fatalf("cancel calls = %v, want none after failed delete", sessions.cancelCalls)
+	}
 }
 
 // REGRESSION (post-review #4): a parent with already-archived children

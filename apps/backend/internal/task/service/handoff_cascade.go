@@ -213,7 +213,8 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 
 	// Cancel active runs first. Failures are logged and skipped — a
 	// stuck cancel must not block the archive cascade; the orchestrator
-	// will reconcile any orphan execution on its next tick.
+	// will reconcile any orphan execution on its next tick. Session rows
+	// are finalized only after the matching archive mutation commits below.
 	s.cancelActiveRuns(ctx, all, models.SessionArchiveTreeCancelReason)
 
 	// Archive deepest first so parent_id pointers stay valid through
@@ -227,6 +228,9 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 		}
 		if ok {
 			out.ArchivedTaskIDs = append(out.ArchivedTaskIDs, all[i])
+			// The archive mutation committed, so it is now safe to finalize
+			// any session that the runtime canceller could not update.
+			s.finalizeActiveSessions(context.WithoutCancel(ctx), all[i], models.SessionArchiveTreeCancelReason)
 			// Re-read the row so the published event carries the freshly
 			// stamped archived_at; the WS handler removes archived tasks
 			// from the kanban board by checking that field. Service.ArchiveTask
@@ -343,6 +347,9 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 			}
 			return out, deleteErr
 		}
+		// The delete mutation committed, so it is now safe to finalize
+		// any session row that was not removed with the task.
+		s.finalizeActiveSessions(context.WithoutCancel(ctx), all[i], "task tree deleted")
 		if operationID := cleanupOps[all[i]]; operationID != "" {
 			s.startCascadeResourceCleanup(ctx, operationID)
 		} else if s.resourceCleaner != nil {
@@ -612,11 +619,10 @@ func (s *HandoffService) cancelCascadeResourceCleanup(ctx context.Context, opera
 	}
 }
 
-// cancelActiveRuns invokes the configured RunCanceller for every task
-// in the cascade set, then finalizes the task's active session rows in the
-// database. Runtime teardown can fail when the process disappeared during a
-// restart; the DB transition is independent of that failure and makes the
-// archived/deleted task's cleanup snapshot terminal and retry-safe.
+// cancelActiveRuns invokes the configured RunCanceller for every task in the
+// cascade set. Session rows are finalized after the matching archive/delete
+// mutation commits, because finalizing them here could leave a task active in
+// the database when the caller's lifecycle mutation is cancelled.
 func (s *HandoffService) cancelActiveRuns(ctx context.Context, taskIDs []string, reason string) {
 	for _, id := range taskIDs {
 		if s.runCanceller != nil {
@@ -625,7 +631,6 @@ func (s *HandoffService) cancelActiveRuns(ctx context.Context, taskIDs []string,
 					zap.String("task_id", id), zap.Error(err))
 			}
 		}
-		s.finalizeActiveSessions(ctx, id, reason)
 	}
 }
 
