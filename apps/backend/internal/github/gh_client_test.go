@@ -598,18 +598,30 @@ func TestGHStderrIndicatesRateLimit(t *testing.T) {
 func TestGHClient_InspectRateStderr_MarksGraphQL(t *testing.T) {
 	tracker := NewRateTracker(nil, nil)
 	c := NewGHClient().WithRateTracker(tracker)
-	c.inspectRateStderr([]string{"pr", "view", "1"}, "GraphQL: API rate limit already exceeded")
-	if !tracker.IsExhausted(ResourceGraphQL) {
-		t.Errorf("expected graphql exhausted")
+	apiErr := c.inspectRateStderr([]string{"pr", "view", "1"}, "GraphQL: API rate limit already exceeded")
+	if apiErr == nil || apiErr.FailureKind != FailureSecondaryRateLimit {
+		t.Fatalf("typed error = %+v", apiErr)
+	}
+	if tracker.IsExhausted(ResourceGraphQL) {
+		t.Error("stderr without a zero primary snapshot must not exhaust graphql")
+	}
+	if secondary := tracker.Secondary(ResourceGraphQL); !secondary.Active {
+		t.Errorf("expected observed graphql secondary throttle: %+v", secondary)
 	}
 }
 
 func TestGHClient_InspectRateStderr_MarksSearchForSearchEndpoints(t *testing.T) {
 	tracker := NewRateTracker(nil, nil)
 	c := NewGHClient().WithRateTracker(tracker)
-	c.inspectRateStderr([]string{"api", "search/issues"}, "API rate limit exceeded")
-	if !tracker.IsExhausted(ResourceSearch) {
-		t.Errorf("expected search exhausted")
+	apiErr := c.inspectRateStderr([]string{"api", "search/issues"}, "API rate limit exceeded")
+	if apiErr == nil || apiErr.FailureKind != FailureSecondaryRateLimit {
+		t.Fatalf("typed error = %+v", apiErr)
+	}
+	if tracker.IsExhausted(ResourceSearch) {
+		t.Error("stderr without a zero primary snapshot must not exhaust search")
+	}
+	if secondary := tracker.Secondary(ResourceSearch); !secondary.Active {
+		t.Errorf("expected observed search secondary throttle: %+v", secondary)
 	}
 }
 
@@ -783,14 +795,20 @@ func TestBuildUserReposGHArgs_LimitClamping(t *testing.T) {
 	}
 }
 
-// Regression: a 429 on `gh api repos/...` (REST) must mark Core, not GraphQL.
-// Previously this would pause the GraphQL PR monitor incorrectly.
+// Regression: a rate refusal on `gh api repos/...` is a Core secondary
+// observation unless a real zero-remaining primary snapshot exists.
 func TestGHClient_InspectRateStderr_RestEndpointMarksCore(t *testing.T) {
 	tracker := NewRateTracker(nil, nil)
 	c := NewGHClient().WithRateTracker(tracker)
-	c.inspectRateStderr([]string{"api", "repos/o/r/pulls/1"}, "API rate limit exceeded")
-	if !tracker.IsExhausted(ResourceCore) {
-		t.Errorf("expected core bucket exhausted for REST endpoint")
+	apiErr := c.inspectRateStderr([]string{"api", "repos/o/r/pulls/1"}, "API rate limit exceeded")
+	if apiErr == nil || apiErr.FailureKind != FailureSecondaryRateLimit {
+		t.Fatalf("typed error = %+v", apiErr)
+	}
+	if tracker.IsExhausted(ResourceCore) {
+		t.Error("stderr without a zero primary snapshot must not exhaust core")
+	}
+	if secondary := tracker.Secondary(ResourceCore); !secondary.Active {
+		t.Errorf("expected observed core secondary throttle: %+v", secondary)
 	}
 	if tracker.IsExhausted(ResourceGraphQL) {
 		t.Errorf("REST 429 must not pause graphql bucket")

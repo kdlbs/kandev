@@ -666,9 +666,9 @@ func (c *PATClient) ExecuteGraphQL(ctx context.Context, query string, variables 
 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
 	if resp.StatusCode >= 400 {
-		c.maybeMarkRateExhaustedFromBody("/graphql", resp.StatusCode, respBody)
-		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: "/graphql", Body: string(respBody)}
+		return c.apiError(resp, "/graphql", respBody)
 	}
+	c.observeSuccess("/graphql")
 	if err := json.Unmarshal(respBody, out); err != nil {
 		return fmt.Errorf("decode graphql response: %w", err)
 	}

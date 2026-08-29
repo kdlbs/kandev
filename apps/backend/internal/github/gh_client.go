@@ -68,18 +68,38 @@ func ghStderrIndicatesRateLimit(stderr string) bool {
 }
 
 // inspectRateStderr inspects the stderr from a failed `gh` invocation and
-// flags the appropriate resource bucket as exhausted. `gh api <path>` is REST
+// records a secondary throttle unless a real primary snapshot already reports
+// zero remaining. `gh api <path>` is REST
 // (Core) by default, with `api graphql` and `api search/*` as the documented
 // exceptions; non-`api` subcommands like `pr`, `issue`, and `repo` are
 // implemented against GraphQL by gh itself, so they map to the GraphQL bucket.
-func (c *GHClient) inspectRateStderr(args []string, stderr string) {
+func (c *GHClient) inspectRateStderr(args []string, stderr string) *GitHubAPIError {
 	if c.rateTracker == nil {
-		return
+		return nil
 	}
 	if !ghStderrIndicatesRateLimit(stderr) {
-		return
+		return nil
 	}
-	c.rateTracker.markRateExhausted(resourceForGHArgs(args), time.Time{})
+	resource := resourceForGHArgs(args)
+	if snap, ok := c.rateTracker.Snapshot(resource); ok && snap.Exhausted() {
+		return &GitHubAPIError{
+			StatusCode: http.StatusForbidden, Endpoint: firstArg(args), Body: stderr,
+			FailureKind: FailurePrimaryRateLimit, Resource: resource,
+			RetryAt: snap.ResetAt, RetrySource: RetrySourcePrimaryReset, Rate: &snap,
+		}
+	}
+	retryAt := time.Now().Add(secondaryFallbackDelay).UTC()
+	c.rateTracker.ObserveSecondary(
+		resource,
+		retryAt,
+		RetrySourceConservativeFallback,
+		stderr,
+	)
+	return &GitHubAPIError{
+		StatusCode: http.StatusForbidden, Endpoint: firstArg(args), Body: stderr,
+		FailureKind: FailureSecondaryRateLimit, Resource: resource,
+		RetryAt: retryAt, RetrySource: RetrySourceConservativeFallback,
+	}
 }
 
 // resourceForGHArgs maps a `gh` argv to the rate-limit bucket the call hits.
@@ -1267,8 +1287,13 @@ func (c *GHClient) runGH(ctx context.Context, stdin []byte, args ...string) (str
 		if execCtxErr != nil && (errors.Is(execCtxErr, context.DeadlineExceeded) || errors.Is(execCtxErr, context.Canceled)) {
 			return stdout.String(), fmt.Errorf("gh %s: %w", firstArg(args), execCtxErr)
 		}
-		c.inspectRateStderr(args, stderr.String())
+		if apiErr := c.inspectRateStderr(args, stderr.String()); apiErr != nil {
+			return stdout.String(), fmt.Errorf("gh %s: %w", firstArg(args), apiErr)
+		}
 		return stdout.String(), fmt.Errorf("gh %s: %w: %s", firstArg(args), runErr, stderr.String())
+	}
+	if c.rateTracker != nil {
+		c.rateTracker.ObserveSuccess(resourceForGHArgs(args))
 	}
 	return stdout.String(), nil
 }

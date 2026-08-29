@@ -41,6 +41,17 @@ type RateSnapshot struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// SecondaryRateLimitState is Kandev's observed and locally enforced view of a
+// GitHub secondary throttle. GitHub exposes no authoritative status endpoint.
+type SecondaryRateLimitState struct {
+	Resource    Resource    `json:"resource"`
+	Active      bool        `json:"active"`
+	RetryAt     time.Time   `json:"retry_at"`
+	ObservedAt  time.Time   `json:"observed_at"`
+	RetrySource RetrySource `json:"retry_source"`
+	Reason      string      `json:"reason,omitempty"`
+}
+
 // Exhausted returns true when the bucket has no quota left and ResetAt is in
 // the future. Limit may be unknown (0) when the snapshot was synthesized from
 // an out-of-band signal (e.g. `gh` stderr).
@@ -70,6 +81,7 @@ type RateTracker struct {
 	snapshots   map[Resource]RateSnapshot
 	exhausted   map[Resource]bool
 	lastEmitted map[Resource]time.Time
+	secondary   map[Resource]SecondaryRateLimitState
 	refreshMu   sync.Mutex
 	refreshDone chan struct{}
 	bus         bus.EventBus
@@ -82,6 +94,7 @@ func NewRateTracker(eventBus bus.EventBus, log *logger.Logger) *RateTracker {
 		snapshots:   make(map[Resource]RateSnapshot),
 		exhausted:   make(map[Resource]bool),
 		lastEmitted: make(map[Resource]time.Time),
+		secondary:   make(map[Resource]SecondaryRateLimitState),
 		bus:         eventBus,
 		log:         log,
 	}
@@ -190,14 +203,50 @@ func (r *RateTracker) IsExhausted(resource Resource) bool {
 func (r *RateTracker) WaitDuration(resource Resource) time.Duration {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if !r.exhausted[resource] {
-		return 0
+	retryAt := time.Time{}
+	if r.exhausted[resource] {
+		retryAt = r.snapshots[resource].ResetAt
 	}
-	d := time.Until(r.snapshots[resource].ResetAt)
+	if secondary := r.secondary[resource]; secondary.RetryAt.After(retryAt) {
+		retryAt = secondary.RetryAt
+	}
+	d := time.Until(retryAt)
 	if d < 0 {
 		return 0
 	}
 	return d
+}
+
+// ObserveSecondary records a provider refusal independently from primary
+// resource snapshots.
+func (r *RateTracker) ObserveSecondary(resource Resource, retryAt time.Time, source RetrySource, reason string) {
+	if resource == "" || retryAt.IsZero() {
+		return
+	}
+	now := time.Now().UTC()
+	r.mu.Lock()
+	r.secondary[resource] = SecondaryRateLimitState{
+		Resource: resource, Active: retryAt.After(now), RetryAt: retryAt,
+		ObservedAt: now, RetrySource: source, Reason: reason,
+	}
+	r.mu.Unlock()
+}
+
+// Secondary returns the current observed secondary state for a resource.
+func (r *RateTracker) Secondary(resource Resource) SecondaryRateLimitState {
+	r.mu.RLock()
+	state := r.secondary[resource]
+	r.mu.RUnlock()
+	state.Active = state.RetryAt.After(time.Now())
+	return state
+}
+
+// ObserveSuccess clears a secondary estimate early after GitHub accepts a
+// real request. A primary snapshot remains unchanged.
+func (r *RateTracker) ObserveSuccess(resource Resource) {
+	r.mu.Lock()
+	delete(r.secondary, resource)
+	r.mu.Unlock()
 }
 
 func (r *RateTracker) publish(all map[Resource]RateSnapshot, trigger Resource, transition string) {
@@ -222,6 +271,10 @@ func (r *RateTracker) publish(all map[Resource]RateSnapshot, trigger Resource, t
 // parseRateHeaders extracts a snapshot from a GitHub HTTP response. Returns
 // false when the response carries no rate-limit headers.
 func parseRateHeaders(resp *http.Response, defaultResource Resource) (RateSnapshot, bool) {
+	return parseRateHeadersAt(resp, defaultResource, time.Now().UTC())
+}
+
+func parseRateHeadersAt(resp *http.Response, defaultResource Resource, now time.Time) (RateSnapshot, bool) {
 	if resp == nil {
 		return RateSnapshot{}, false
 	}
@@ -244,7 +297,7 @@ func parseRateHeaders(resp *http.Response, defaultResource Resource) (RateSnapsh
 		Limit:     limit,
 		Remaining: remaining,
 		ResetAt:   time.Unix(reset, 0).UTC(),
-		UpdatedAt: time.Now().UTC(),
+		UpdatedAt: now,
 	}, true
 }
 
