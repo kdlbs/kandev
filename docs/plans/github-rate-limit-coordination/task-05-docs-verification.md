@@ -1,7 +1,7 @@
 ---
 id: 05-docs-verification
 title: Documentation and verification
-status: in_progress
+status: completed
 wave: 5
 depends_on: [04-agent-rate-snapshot]
 plan: plan.md
@@ -54,3 +54,10 @@ process-group failures in `internal/agent/runtime/agentctl/launcher` and
 `internal/common/config`; and the guarded filesystem rejects the parent-chain
 inspection exercised by local-directory tests in `internal/task/service`.
 The task does not bypass that guard or modify these unrelated packages.
+
+The guard-sensitive filesystem result was independently reproduced on three
+unrelated branches. Re-running the seven local-repository tests with `TMPDIR`
+inside this task's writable worktree produces the same failures because the
+shared parent-chain helper opens filesystem root `/`. The coordinator accepted
+the preserved broad-suite exception as externally owned; all branch-owned
+acceptance and verification paths pass.

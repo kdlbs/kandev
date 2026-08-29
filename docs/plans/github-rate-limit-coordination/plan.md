@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/integrations/requirements/github-rate-limit-coordination.md
 created: 2026-08-29
-status: in_progress
+status: completed
 ---
 
 # Implementation Plan: GitHub Rate-Limit Coordination
@@ -19,7 +19,7 @@ runtime.
 - [x] [Task 02: Principal-wide request admission](task-02-rate-coordinator.md)
 - [x] [Task 03: Workflow Sync retry persistence](task-03-workflow-sync-backoff.md)
 - [x] [Task 04: Agent rate-state snapshot](task-04-agent-rate-snapshot.md)
-- [ ] [Task 05: Documentation and verification](task-05-docs-verification.md)
+- [x] [Task 05: Documentation and verification](task-05-docs-verification.md)
 
 ## Risks
 
