@@ -48,24 +48,31 @@ calls.
 ### Shared Quick Chat session view
 
 Update `apps/web/components/quick-chat/quick-chat-session-view.tsx` to resolve the backing task ID
-from `QuickChatSession.taskId` or `taskSessions.items[sessionId].task_id`. Mount
-`useSessionResumption` before the persisted session view selects its presentation. The existing
-hook owns connection gating, status checks, preference handling, resume fallback, and stale-result
-guards.
+from `QuickChatSession.taskId` or `taskSessions.items[sessionId].task_id`, but pass no task ID to
+the resumption hook until the task-session row is hydrated. This prevents the status request from
+racing the authoritative row fetch. Mount `useSessionResumption` before the persisted session view
+selects its presentation. The existing hook owns connection gating, status checks, preference
+handling, resume fallback, and stale-result guards.
+
+Keep interrupted task-session hydration retryable when the active Quick Chat tab changes before its
+request settles. If another status path inserts a placeholder row first, merge the eventual
+authoritative HTTP response instead of cancelling it when the placeholder becomes visible.
 
 ### Regression evidence
 
-Create `quick-chat-session-view.test.tsx` with focused mocks that prove direct descriptor identity,
-hydrated-row fallback, and no invalid task ID. Add a backend-restart scenario to
-`e2e/tests/chat/quick-chat.spec.ts`. The scenario reopens the restored conversation and observes the
-resumed-agent boot message. It also verifies that dynamic session model settings are available.
+Create `quick-chat-session-view.test.tsx` with focused mocks that prove descriptor precedence,
+hydrated-row fallback, and no resumption before hydration. Add deferred-response coverage to
+`use-ensure-task-session.test.ts` for placeholder merging and active-tab cancellation. Add a
+backend-restart scenario to `e2e/tests/chat/quick-chat.spec.ts`. The scenario reopens the restored
+conversation and observes the resumed-agent boot message. It also verifies that dynamic session
+model settings are available.
 
 ## Tests
 
-| Acceptance criterion | Evidence |
-| --- | --- |
-| `AC-TASKS-QUICK-CHAT-EXPIRATION-001.2` | `quick-chat-session-view.test.tsx` proves the active persisted tab mounts shared resumption with current and fallback task identity. |
-| `AC-TASKS-QUICK-CHAT-EXPIRATION-001.2` | Existing `use-session-resumption.test.ts` proves automatic-start preference and resume behavior remain shared. |
+| Acceptance criterion                   | Evidence                                                                                                                                             |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AC-TASKS-QUICK-CHAT-EXPIRATION-001.2` | `quick-chat-session-view.test.tsx` proves the active persisted tab mounts shared resumption with current and fallback task identity after hydration. |
+| `AC-TASKS-QUICK-CHAT-EXPIRATION-001.2` | Existing `use-session-resumption.test.ts` proves automatic-start preference and resume behavior remain shared.                                       |
 
 ## E2E tests
 
@@ -82,8 +89,8 @@ duplicate mobile restart test.
 
 ## Verification results
 
-- `pnpm exec vitest run components/quick-chat/quick-chat-session-view.test.tsx`: 3 tests passed.
-- `pnpm exec vitest run components/quick-chat/quick-chat-session-view.test.tsx hooks/domains/session/use-session-resumption.test.ts`: 21 tests passed.
+- `pnpm exec vitest run components/quick-chat/quick-chat-session-view.test.tsx`: 4 tests passed.
+- `pnpm exec vitest run components/quick-chat/quick-chat-session-view.test.tsx hooks/use-ensure-task-session.test.ts hooks/domains/session/use-session-resumption.test.ts`: 28 tests passed.
 - `pnpm run typecheck`: passed.
 - `pnpm e2e:run tests/chat/quick-chat.spec.ts -- --grep "resumes a restored session after backend restart" --retries=0`: 1 test passed against the production Vite build.
 

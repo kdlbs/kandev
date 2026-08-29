@@ -30,9 +30,8 @@ export function QuickChatSessionView({ session, onInitialPromptSent }: QuickChat
   // A tab can arrive from a task event, which carries no session payload.
   // Fetch the row on open so such a tab is usable, not just visible.
   useEnsureTaskSession(session.sessionId);
-  const taskId = useAppStore(
-    (state) => session.taskId ?? state.taskSessions.items[session.sessionId]?.task_id ?? null,
-  );
+  const taskSession = useAppStore((state) => state.taskSessions.items[session.sessionId] ?? null);
+  const taskId = taskSession ? (session.taskId ?? taskSession.task_id ?? null) : null;
   useSessionResumption(taskId, session.sessionId);
   const isPassthrough = useIsQuickChatPassthrough(session.sessionId);
   if (isPassthrough) {

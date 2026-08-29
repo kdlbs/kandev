@@ -44,6 +44,9 @@ vi.mock("react-i18next", () => ({
 
 import { QuickChatSessionView } from "./quick-chat-session-view";
 
+const DESCRIPTOR_TASK_ID = "task-from-descriptor";
+const HYDRATED_TASK_ID = "task-from-hydrated-row";
+
 const session = {
   kind: "chat" as const,
   sessionId: "session-1",
@@ -58,18 +61,33 @@ afterEach(() => {
 
 // @covers AC-TASKS-QUICK-CHAT-EXPIRATION-001.2
 describe("QuickChatSessionView session resumption", () => {
-  it("mounts resumption with the task id stored on the Quick Chat descriptor", () => {
-    render(<QuickChatSessionView session={{ ...session, taskId: "task-from-descriptor" }} />);
+  it("prefers the descriptor task id over a conflicting hydrated row", () => {
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
 
-    expect(useSessionResumption).toHaveBeenCalledWith("task-from-descriptor", session.sessionId);
+    render(<QuickChatSessionView session={{ ...session, taskId: DESCRIPTOR_TASK_ID }} />);
+
+    expect(useSessionResumption).toHaveBeenCalledWith(DESCRIPTOR_TASK_ID, session.sessionId);
+  });
+
+  it("waits for session hydration before resuming a descriptor task", () => {
+    const view = render(
+      <QuickChatSessionView session={{ ...session, taskId: DESCRIPTOR_TASK_ID }} />,
+    );
+
+    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId);
+
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
+    view.rerender(<QuickChatSessionView session={{ ...session, taskId: DESCRIPTOR_TASK_ID }} />);
+
+    expect(useSessionResumption).toHaveBeenLastCalledWith(DESCRIPTOR_TASK_ID, session.sessionId);
   });
 
   it("falls back to the hydrated task-session row when the descriptor has no task id", () => {
-    sessionRows[session.sessionId] = { task_id: "task-from-hydrated-row" };
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
 
     render(<QuickChatSessionView session={session} />);
 
-    expect(useSessionResumption).toHaveBeenCalledWith("task-from-hydrated-row", session.sessionId);
+    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId);
   });
 
   it("passes a null task id until session hydration provides one", () => {

@@ -25,6 +25,8 @@ recovery, and restored session models.
 
 - Resolve the backing task ID for a persisted Quick Chat from its descriptor or hydrated session
   row.
+- Wait for the task-session row before starting resumption, preserve authoritative hydration when a
+  placeholder arrives first, and retry hydration after an interrupted tab switch.
 - Mount `useSessionResumption` for ordinary, configuration, and passthrough conversation tabs.
 - Add component coverage for direct and fallback task identity.
 - Add a backend-restart Quick Chat Playwright scenario that proves agent and model recovery.
@@ -47,14 +49,15 @@ recovery, and restored session models.
 ## Verification
 
 ```bash
-cd apps/web && pnpm exec vitest run components/quick-chat/quick-chat-session-view.test.tsx hooks/domains/session/use-session-resumption.test.ts
-cd apps/web && pnpm run typecheck
-cd apps/web && pnpm e2e:run tests/chat/quick-chat.spec.ts -- --grep "resumes a restored session after backend restart" --retries=0
+cd apps/web
+pnpm exec vitest run components/quick-chat/quick-chat-session-view.test.tsx hooks/use-ensure-task-session.test.ts hooks/domains/session/use-session-resumption.test.ts
+pnpm run typecheck
+pnpm e2e:run tests/chat/quick-chat.spec.ts -- --grep "resumes a restored session after backend restart" --retries=0
 ```
 
-All verification commands pass. The component suite covers descriptor and hydrated-row task
-identity, the typecheck passes, and the production-build restart E2E confirms resumed runtime
-evidence and restored dynamic model controls.
+All verification commands pass. The component and hydration suites cover descriptor precedence,
+hydrated-row task identity, placeholder merging, and tab-switch retry. The typecheck passes, and the
+production-build restart E2E confirms resumed runtime evidence and restored dynamic model controls.
 
 ## Files likely touched
 
@@ -70,6 +73,8 @@ None.
 
 - Mount the hook before presentation selection. A later placement violates React hook ordering and
   omits passthrough recovery.
+- Do not start resumption from a descriptor task ID until the task-session row is present; otherwise
+  the status response can replace the authoritative hydration request with a placeholder row.
 - A test that waits only for transcript text can race the runtime state transition. Use backend
   session state and resumed boot or capability evidence.
 
@@ -86,7 +91,7 @@ None.
 
 ## Results
 
-- `pnpm exec vitest run components/quick-chat/quick-chat-session-view.test.tsx`: 3 tests passed.
-- `pnpm exec vitest run components/quick-chat/quick-chat-session-view.test.tsx hooks/domains/session/use-session-resumption.test.ts`: 21 tests passed.
+- `pnpm exec vitest run components/quick-chat/quick-chat-session-view.test.tsx`: 4 tests passed.
+- `pnpm exec vitest run components/quick-chat/quick-chat-session-view.test.tsx hooks/use-ensure-task-session.test.ts hooks/domains/session/use-session-resumption.test.ts`: 28 tests passed.
 - `pnpm run typecheck`: passed.
 - `pnpm e2e:run tests/chat/quick-chat.spec.ts -- --grep "resumes a restored session after backend restart" --retries=0`: 1 test passed against the production Vite build.

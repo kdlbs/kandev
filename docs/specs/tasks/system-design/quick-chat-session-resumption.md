@@ -20,8 +20,8 @@ the responsive dialog composition, session protocol, or backend resume semantics
 
 ## Requirement mapping
 
-| Requirement | Design sections |
-| --- | --- |
+| Requirement                           | Design sections                                                              |
+| ------------------------------------- | ---------------------------------------------------------------------------- |
 | `REQ-TASKS-QUICK-CHAT-EXPIRATION-001` | Session identity, open-time control flow, failure and recovery, verification |
 
 ## Session identity
@@ -34,9 +34,11 @@ session view.
 
 ## Open-time control flow
 
-`QuickChatSessionView` first ensures that the persisted task-session row is available. It then
-resolves the backing task ID from the Quick Chat descriptor or the hydrated task-session row and
-mounts the shared `useSessionResumption(taskId, sessionId)` hook for the visible conversation.
+`QuickChatSessionView` first ensures that the persisted task-session row is available. While the row
+is absent, it passes a null task ID to the shared resumption hook so a status request cannot race the
+authoritative HTTP hydration. Once the row exists, it resolves the backing task ID from the Quick
+Chat descriptor or the hydrated task-session row and mounts the shared
+`useSessionResumption(taskId, sessionId)` lifecycle for the visible conversation.
 
 The shared hook owns the remaining lifecycle:
 
@@ -58,9 +60,12 @@ newly visible session once.
 ## Failure and recovery
 
 If the descriptor lacks a task ID, session hydration can supply it and trigger the status check on a
-later render. If neither source supplies a task ID, no resume request is sent. The existing tab
-resync then reconciles a deleted or inaccessible conversation. Stale status responses remain
-subject to the shared monotonic session-state guards.
+later render. If neither source supplies a task ID, no resume request is sent. If the active tab
+changes while hydration is in flight, the request is cancelled and its session ID becomes retryable
+when the tab is revisited. If a status path inserts a placeholder row before the HTTP response,
+hydration still merges the authoritative row. The existing tab resync then reconciles a deleted or
+inaccessible conversation. Stale status responses remain subject to the shared monotonic
+session-state guards.
 
 The change adds no new error copy. Existing session resumption and workspace-restoration errors
 retain their current handling.
@@ -75,7 +80,10 @@ exemplar and receives the same restored runtime state as desktop.
 ## Verification
 
 - A focused component test proves that a persisted Quick Chat resolves its backing task identity
-  and mounts shared session resumption, including the hydrated-row fallback.
+  and mounts shared session resumption only after hydration, including descriptor precedence and the
+  hydrated-row fallback.
+- Deferred hydration tests prove that placeholder status rows do not cancel the authoritative row
+  and that a switched-away tab can retry hydration when revisited.
 - Existing `useSessionResumption` tests continue to prove status, automatic-resume preference,
   workspace fallback, and stale-state behavior.
 - A desktop Playwright scenario restarts the backend, reloads the application, opens the restored

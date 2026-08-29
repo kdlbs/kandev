@@ -36,8 +36,6 @@ signals, and task-scoped scheduling contracts.
 
 ### Requirements
 
-
-
 - [Agent-Generated Task Titles](requirements/agent-generated-titles.md)
 - [Additional Session Workspace Reuse](requirements/additional-session-workspace-reuse.md)
 - [Task Archive Confirmation](requirements/archive-confirmation.md)
@@ -111,8 +109,6 @@ signals, and task-scoped scheduling contracts.
 
 ### System design
 
-
-
 - [Attach Workspace Sources](system-design/attach-workspace-sources.md)
 - [Quick Chat Agent Titles](system-design/quick-chat-agent-titles.md)
 - [Quick Chat Session Resumption](system-design/quick-chat-session-resumption.md)
@@ -135,7 +131,7 @@ signals, and task-scoped scheduling contracts.
 
 ## Migration record
 
-Migration remains in progress. The three requirements above now have
+Migration remains in progress. The four requirements above now have
 authoritative, wrapper-free requirement/design pairs. Other migrated files still
 need the same extraction before this system can return to a complete migration
 state.
