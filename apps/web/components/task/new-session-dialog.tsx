@@ -263,7 +263,7 @@ function useSessionProfileSelection({
     handoff,
   );
   useEnforceCompatibleProfile(compatibleAgentProfiles, selectedProfileId, setSelectedProfileId);
-  const profileOptions = useAgentProfileOptions(compatibleAgentProfiles);
+  const profileOptions = useAgentProfileOptions(compatibleAgentProfiles, "task_session");
   const hasProfiles = profileOptions.length > 0;
   const noCompatibleProfiles = isMissingCompatibleProfile(
     executorProfile,

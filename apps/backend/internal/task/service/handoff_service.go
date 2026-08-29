@@ -203,6 +203,7 @@ type HandoffService struct {
 	resourceCleaner      TaskResourceCleaner
 	taskAccessCheck      func(ctx context.Context, taskID string) error
 	coordinatorAuthority *coordinator.Authority
+	comments             CommentReader
 	logger               *logger.Logger
 	parentLock           parentMutex
 	workspaceGroupLock   parentMutex
@@ -297,6 +298,15 @@ func (s *HandoffService) SetTaskAccessChecker(check func(ctx context.Context, ta
 
 func (s *HandoffService) SetCoordinatorAuthority(authority *coordinator.Authority) {
 	s.coordinatorAuthority = authority
+}
+
+// SetCommentReader wires the read-only comment store queried by
+// ListCommentsForCaller. Optional — when nil, ListCommentsForCaller reports
+// an internal error rather than falling back to an empty list (AC-005.2:
+// an unconfigured dependency must never look like "the task has no
+// comments").
+func (s *HandoffService) SetCommentReader(r CommentReader) {
+	s.comments = r
 }
 
 // authorizeTask applies the configured per-user task check. No-op when unwired.

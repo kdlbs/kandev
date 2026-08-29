@@ -77,6 +77,7 @@ signals, and task-scoped scheduling contracts.
 - [Prevent Agent Auto-Start On Open](requirements/prevent-agent-autostart-on-open.md)
 - [Prompt attachments](requirements/prompt-attachments.md)
 - [Quick Chat Sessions, Persistence, and Expiration](requirements/quick-chat-expiration.md)
+- [Quick Chat Agent Titles](requirements/quick-chat-agent-titles.md)
 - [Quick Chat Repository Context](requirements/quick-chat-repository-context.md)
 - [Remote Contribution Tasks](requirements/remote-contribution-tasks.md)
 - [Rich task title previews](requirements/rich-task-title-previews.md)
@@ -126,6 +127,7 @@ signals, and task-scoped scheduling contracts.
 
 
 - [Attach Workspace Sources](system-design/attach-workspace-sources.md)
+- [Quick Chat Agent Titles](system-design/quick-chat-agent-titles.md)
 - [Active clarification lifecycle](system-design/clarification-active-lifecycle.md)
 - [Coordinator task authority](system-design/coordinator-task-authority.md)
 - [External task ID idempotency](system-design/external-id-idempotency.md)
@@ -134,6 +136,7 @@ signals, and task-scoped scheduling contracts.
 - [Task model unification](system-design/model-unification.md)
 - [Remote Contribution Tasks](system-design/remote-contribution-tasks.md)
 - [Task Archive Confirmation](system-design/archive-confirmation.md)
+- [Task plan write lifecycle](system-design/plan-write-lifecycle.md)
 - [Task Runtime Cleanup](system-design/runtime-cleanup.md)
 - [Queued Run Scheduling](system-design/run-scheduling.md)
 - [Session Delete Preserves Task Workspaces](system-design/session-delete-resource-cleanup.md)
@@ -141,6 +144,7 @@ signals, and task-scoped scheduling contracts.
 - [Task Launch Failure Recovery](system-design/task-launch-failure-recovery.md)
 - [WIP Limits and Visible Overflow Queues](system-design/wip-limit-pull-system.md)
 - [Workflow quorum decision recording](system-design/workflow-quorum-decision-recording.md)
+- [Workflow Step Fixed-Profile Routing](system-design/workflow-step-fixed-profile-routing.md)
 - [Workflow task-step transition ledger](system-design/workflow-task-step-transition-ledger.md)
 
 ## Migration record

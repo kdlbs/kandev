@@ -1,18 +1,31 @@
-import { encodedBytes, getLogBuffer, snapshotLogs, type LogEntry, type LogLevel } from "./buffer";
+import {
+  getLogBuffer,
+  prepareLogEntry,
+  snapshotLogs,
+  type LogEntry,
+  type LogLevel,
+  type PreparedLogEntry,
+} from "./buffer";
 import { IndexedDBLogStore } from "./indexeddb-store";
 
 const DRAIN_ENTRY_LIMIT = 50;
 const DRAIN_BYTE_LIMIT = 256 * 1024;
 const STAGING_ENTRY_LIMIT = 500;
 const STAGING_BYTE_LIMIT = 2 * 1024 * 1024;
+const COLLECTION_WINDOW_MS = 250;
+const IDLE_DEADLINE_MS = 1_000;
+const POST_COLLECTION_IDLE_TIMEOUT_MS = IDLE_DEADLINE_MS - COLLECTION_WINDOW_MS;
 
-type Staged = { entry: LogEntry; bytes: number };
+type Staged = PreparedLogEntry;
 
 const store = new IndexedDBLogStore();
 let identityScope: string | null = "default-user";
 let staging: Staged[] = [];
 let stagingBytes = 0;
-let scheduled = false;
+let collectionTimer: ReturnType<typeof setTimeout> | null = null;
+let idleCallbackHandle: number | null = null;
+let idleFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+let idleGeneration = 0;
 let drainPromise: Promise<void> | null = null;
 let storageMode: "indexeddb" | "memory" = "indexeddb";
 let persistenceFailures = 0;
@@ -24,15 +37,15 @@ export function setLogIdentity(scope: string | null): void {
 
 export function stageLogEntry(entry: Omit<LogEntry, "identity_scope">): void {
   const scoped = { ...entry, identity_scope: identityScope ?? undefined };
-  if (!getLogBuffer().push(scoped)) return;
+  const prepared = prepareLogEntry(scoped);
+  if (!getLogBuffer().pushPrepared(prepared)) return;
   if (!identityScope || storageMode === "memory") return;
-  const bytes = encodedBytes(scoped);
-  if (!makeStagingRoom(entry.level, bytes)) {
+  if (!makeStagingRoom(prepared.entry.level, prepared.bytes)) {
     stagingDropped += 1;
     return;
   }
-  staging.push({ entry: scoped, bytes });
-  stagingBytes += bytes;
+  staging.push(prepared);
+  stagingBytes += prepared.bytes;
   scheduleDrain();
 }
 
@@ -86,17 +99,43 @@ function makeStagingRoom(level: LogLevel, bytes: number): boolean {
 }
 
 function scheduleDrain(): void {
-  if (scheduled || drainPromise) return;
-  scheduled = true;
+  if (
+    collectionTimer !== null ||
+    idleCallbackHandle !== null ||
+    idleFallbackTimer !== null ||
+    drainPromise
+  ) {
+    return;
+  }
+  collectionTimer = setTimeout(() => {
+    collectionTimer = null;
+    schedulePostWindowDrain();
+  }, COLLECTION_WINDOW_MS);
+}
+
+function schedulePostWindowDrain(): void {
+  if (drainPromise || storageMode === "memory" || staging.length === 0) return;
+  if (typeof requestIdleCallback !== "function") {
+    void requestDrain();
+    return;
+  }
+
+  const generation = ++idleGeneration;
   const drain = () => {
-    scheduled = false;
+    if (generation !== idleGeneration) return;
+    idleCallbackHandle = null;
+    cancelIdleFallbackTimer();
     void requestDrain();
   };
-  if (typeof requestIdleCallback === "function") {
-    requestIdleCallback(drain, { timeout: 1_000 });
-  } else {
-    setTimeout(drain, 250);
-  }
+  idleCallbackHandle = requestIdleCallback(drain, {
+    timeout: POST_COLLECTION_IDLE_TIMEOUT_MS,
+  });
+  idleFallbackTimer = setTimeout(() => {
+    if (generation !== idleGeneration) return;
+    idleFallbackTimer = null;
+    cancelIdleCallback();
+    void requestDrain();
+  }, POST_COLLECTION_IDLE_TIMEOUT_MS);
 }
 
 function requestDrain(): Promise<void> {
@@ -128,7 +167,7 @@ async function drainBatch(): Promise<boolean> {
     bytes += next.bytes;
   }
   try {
-    await store.append(batch.map(({ entry }) => entry));
+    await store.append(batch);
   } catch {
     for (const item of batch.reverse()) {
       staging.unshift(item);
@@ -141,12 +180,39 @@ async function drainBatch(): Promise<boolean> {
 }
 
 async function flushStaging(): Promise<void> {
+  cancelCollectionTimer();
+  cancelIdleCallback();
   while (drainPromise || (storageMode === "indexeddb" && staging.length > 0)) {
     await requestDrain();
   }
 }
 
+function cancelCollectionTimer(): void {
+  if (collectionTimer === null) return;
+  clearTimeout(collectionTimer);
+  collectionTimer = null;
+}
+
+function cancelIdleFallbackTimer(): void {
+  if (idleFallbackTimer === null) return;
+  clearTimeout(idleFallbackTimer);
+  idleFallbackTimer = null;
+}
+
+function cancelIdleCallback(): void {
+  idleGeneration += 1;
+  if (idleCallbackHandle !== null) {
+    if (typeof globalThis.cancelIdleCallback === "function") {
+      globalThis.cancelIdleCallback(idleCallbackHandle);
+    }
+    idleCallbackHandle = null;
+  }
+  cancelIdleFallbackTimer();
+}
+
 function degradePersistence(): void {
+  cancelCollectionTimer();
+  cancelIdleCallback();
   persistenceFailures += 1;
   storageMode = "memory";
   staging = [];
@@ -162,10 +228,11 @@ function randomID(): string {
 }
 
 export function _resetRuntimeForTesting(): void {
+  cancelCollectionTimer();
+  cancelIdleCallback();
   identityScope = "default-user";
   staging = [];
   stagingBytes = 0;
-  scheduled = false;
   drainPromise = null;
   storageMode = "indexeddb";
   persistenceFailures = 0;

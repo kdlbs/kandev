@@ -1299,20 +1299,12 @@ export class SessionPage {
       .waitFor({ state: "hidden", timeout });
   }
 
-  /**
-   * Wait for the terminal shell to be connected (buffer has content from
-   * the prompt), then type a command and press Enter.
-   */
+  /** Wait for the terminal WebSocket to connect, then type a command and press Enter. */
   async typeInTerminal(command: string): Promise<void> {
     await this.expectTerminalConnected();
-    await expect
-      .poll(async () => (await this.readXtermBuffer("terminal-panel")).length > 0, {
-        timeout: TERMINAL_READY_TIMEOUT,
-        message: "Waiting for terminal shell to connect",
-      })
-      .toBe(true);
 
     const xterm = this.activePanel("terminal-panel").locator(".xterm");
+    await expect(xterm).toBeVisible();
     await xterm.click();
     await this.page.keyboard.type(command);
     await this.page.keyboard.press("Enter");
@@ -1350,6 +1342,46 @@ export class SessionPage {
     await expect(this.sidebar).toBeVisible();
     await expect(this.chat).not.toBeVisible({ timeout: 5_000 });
     await expect(this.files).not.toBeVisible({ timeout: 5_000 });
+  }
+
+  /**
+   * Move the task to a workflow step through whichever stepper presentation
+   * the responsive top bar selected. Narrow layouts expose the target in the
+   * compact disclosure instead of rendering every step in the top bar.
+   */
+  async moveToWorkflowStep(step: { id: string; name: string }): Promise<void> {
+    const fullStep = this.page
+      .locator(`[data-testid=${JSON.stringify(`workflow-step-${step.name}`)}]:visible`)
+      .first();
+    const compactStepper = this.page.getByTestId("workflow-stepper-minimal");
+    let presentation: "full" | "compact" | undefined;
+    await expect
+      .poll(
+        async () => {
+          if (await fullStep.isVisible()) {
+            presentation = "full";
+            return true;
+          }
+          if (await compactStepper.isVisible()) {
+            presentation = "compact";
+            return true;
+          }
+          return false;
+        },
+        { timeout: 10_000, message: `Waiting for workflow step presentation for ${step.name}` },
+      )
+      .toBe(true);
+
+    if (presentation === "full") {
+      await fullStep.hover();
+      await this.page.getByRole("button", { name: "Move here", exact: true }).click();
+      return;
+    }
+
+    await compactStepper.click();
+    const moveButton = this.page.getByTestId(`workflow-step-disclosure-move-${step.id}`);
+    await expect(moveButton).toBeVisible();
+    await moveButton.click();
   }
 
   /**

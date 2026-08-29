@@ -14,6 +14,12 @@ func New(backend Backend) Runtime {
 	return &facade{backend: backend}
 }
 
+// IsNotFound reports whether err identifies runtime execution state that no
+// longer exists, including the lifecycle sentinel behind the runtime facade.
+func IsNotFound(err error) bool {
+	return errors.Is(err, ErrNotFound) || errors.Is(err, lifecycle.ErrExecutionNotFound)
+}
+
 // facade is the default Runtime implementation: a thin adapter over
 // the lifecycle Manager (or any Backend).
 type facade struct {

@@ -91,6 +91,50 @@ func TestTaskReviewRun_CreateGetUpdate(t *testing.T) {
 	}
 }
 
+// TestTaskReviewRun_CreateDuplicateEntryIDReturnsConflictSentinel locks in
+// the documented behavior of ErrTaskReviewRunEntryConflict: a second insert
+// with the same non-empty EntryID is rejected via the sentinel, matching the
+// unique index idx_task_review_runs_entry_id, and the first row's EntryID
+// remains resolvable by FindTaskReviewRunByEntryID.
+func TestTaskReviewRun_CreateDuplicateEntryIDReturnsConflictSentinel(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedReviewTask(t, ctx, repo, "task-entry-conflict")
+
+	first := &models.TaskReviewRun{
+		TaskID:    "task-entry-conflict",
+		SessionID: "sess-1",
+		Trigger:   models.ReviewTriggerWorkflowStep,
+		AgentID:   "claude-acp",
+		Model:     "claude-haiku-4-5",
+		EntryID:   "entry-conflict-1",
+	}
+	if err := repo.CreateTaskReviewRun(ctx, first); err != nil {
+		t.Fatalf("CreateTaskReviewRun (first): %v", err)
+	}
+
+	second := &models.TaskReviewRun{
+		TaskID:    "task-entry-conflict",
+		SessionID: "sess-1",
+		Trigger:   models.ReviewTriggerWorkflowStep,
+		AgentID:   "claude-acp",
+		Model:     "claude-haiku-4-5",
+		EntryID:   "entry-conflict-1",
+	}
+	err := repo.CreateTaskReviewRun(ctx, second)
+	if !errors.Is(err, ErrTaskReviewRunEntryConflict) {
+		t.Fatalf("expected ErrTaskReviewRunEntryConflict, got %v", err)
+	}
+
+	got, err := repo.FindTaskReviewRunByEntryID(ctx, "entry-conflict-1")
+	if err != nil {
+		t.Fatalf("FindTaskReviewRunByEntryID: %v", err)
+	}
+	if got == nil || got.ID != first.ID {
+		t.Fatalf("expected the winner's row (%s) to remain resolvable by entry id, got %+v", first.ID, got)
+	}
+}
+
 func TestTaskReviewRun_GetMissingReturnsSentinel(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

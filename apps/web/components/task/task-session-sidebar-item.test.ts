@@ -27,7 +27,40 @@ function task(overrides: Partial<SidebarTask> = {}): SidebarTask {
   } as SidebarTask;
 }
 
+function repositoryProjectionTask(): SidebarTask {
+  return task({
+    repositoryId: "repo-a",
+    repositories: [
+      { id: "link-b", repository_id: "repo-b", base_branch: "main", position: 2 },
+      { id: "link-a", repository_id: "repo-a", base_branch: "main", position: 1 },
+      {
+        id: "link-a-duplicate",
+        repository_id: "repo-a",
+        base_branch: "main",
+        position: 3,
+      },
+    ],
+  });
+}
+
+function repositoryProjectionContext(): SidebarContext {
+  return {
+    ...emptyContext(),
+    repositorySlugById: new Map([
+      ["repo-a", "owner/repo-a"],
+      ["repo-b", "owner/repo-b"],
+    ]),
+  };
+}
+
 describe("buildSidebarItem", () => {
+  it("projects unique repository slugs in attachment order", () => {
+    const item = buildSidebarItem(repositoryProjectionTask(), repositoryProjectionContext());
+
+    expect(item.repositories).toEqual(["owner/repo-a", "owner/repo-b"]);
+    expect(item.repositoryLinks).toHaveLength(3);
+  });
+
   it("keeps the PR aggregate state for the row icon", () => {
     const item = buildSidebarItem(
       task({
@@ -123,6 +156,34 @@ describe("buildSidebarItem", () => {
 
     expect(item.wipQueue).toEqual(wipQueue);
     expect(item.queuedCount).toBeUndefined();
+  });
+});
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.10
+describe("buildSidebarItem automation indicators", () => {
+  it("carries bounded automation indicators into the row PR info", () => {
+    const item = buildSidebarItem(
+      task({
+        statusSummary: {
+          revision: 2,
+          updated_at: UPDATED_AT,
+          pull_request: {
+            number: 42,
+            state: "open",
+            auto_fix_enabled: true,
+            auto_merge_enabled: true,
+          },
+        },
+      }),
+      emptyContext(),
+    );
+
+    expect(item.prInfo).toEqual({
+      number: 42,
+      state: "Open",
+      autoFixEnabled: true,
+      autoMergeEnabled: true,
+    });
   });
 });
 

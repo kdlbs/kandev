@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/plugins"
+	promptmodels "github.com/kandev/kandev/internal/prompts/models"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -60,6 +61,8 @@ type workspaceSourceJSON struct {
 	GitHubURL      string `json:"github_url"`
 	RemoteURL      string `json:"remote_url"`
 	Provider       string `json:"provider"`
+	ProviderHost   string `json:"provider_host"`
+	ProviderScope  string `json:"provider_scope"`
 	ProviderRepoID string `json:"provider_repo_id"`
 	ProviderOwner  string `json:"provider_owner"`
 	ProviderName   string `json:"provider_name"`
@@ -237,6 +240,13 @@ type PromptReferenceResolver interface {
 	ResolvePromptReferences(ctx context.Context, content string) ([]promptservice.PromptReferenceExpansion, error)
 }
 
+// PromptReader provides the read-only saved prompt access exposed by
+// configuration and external MCP surfaces.
+type PromptReader interface {
+	ListPrompts(ctx context.Context) ([]*promptmodels.Prompt, error)
+	GetPromptByName(ctx context.Context, name string) (*promptmodels.Prompt, error)
+}
+
 // UserSettingsProvider supplies the single portable preference used when an
 // MCP-created task omits agent_profile_id.
 type UserSettingsProvider interface {
@@ -262,6 +272,7 @@ type Handlers struct {
 	stopTaskGetter       func(context.Context, string) (*models.Task, error)
 	messageQueue         MessageQueuer
 	promptResolver       PromptReferenceResolver
+	promptReader         PromptReader
 	userSettingsProvider UserSettingsProvider
 	logger               *logger.Logger
 
@@ -363,6 +374,11 @@ func (h *Handlers) SetClarificationInputPauser(pauser ClarificationInputPauser) 
 
 func (h *Handlers) SetPromptReferenceResolver(resolver PromptReferenceResolver) {
 	h.promptResolver = resolver
+}
+
+// SetPromptReader wires read-only saved prompt access into config-mode MCP.
+func (h *Handlers) SetPromptReader(reader PromptReader) {
+	h.promptReader = reader
 }
 
 // SetTaskStopper wires the orchestrator-owned halt operation.
@@ -491,6 +507,9 @@ func (h *Handlers) registerTaskQuestionHandlers(d *guardedMCPDispatcher) {
 }
 
 func (h *Handlers) registerConfigModeHandlers(d *guardedMCPDispatcher) {
+	if h.promptReader != nil {
+		h.registerPromptHandlers(d)
+	}
 	if h.workflowSvc != nil {
 		h.registerWorkflowHandlers(d)
 	}
@@ -2087,7 +2106,7 @@ func parseWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSourceInpu
 		allowed := map[string]bool{"kind": true, "local_path": true}
 		switch kind {
 		case string(service.WorkspaceSourceRepository):
-			for _, key := range []string{"repository_id", "remote_url", "github_url", "provider", "provider_repo_id", "provider_owner", "provider_name", "base_branch", "checkout_branch"} {
+			for _, key := range []string{"repository_id", "remote_url", "github_url", "provider", "provider_host", "provider_scope", "provider_repo_id", "provider_owner", "provider_name", "base_branch", "checkout_branch"} {
 				allowed[key] = true
 			}
 		case string(service.WorkspaceSourceFolder):
@@ -2104,7 +2123,7 @@ func parseWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSourceInpu
 		if err := json.Unmarshal(item, &source); err != nil {
 			return nil, err
 		}
-		sources = append(sources, service.WorkspaceSourceInput{Kind: service.WorkspaceSourceKind(source.Kind), RepositoryID: source.RepositoryID, LocalPath: source.LocalPath, GitHubURL: source.GitHubURL, RemoteURL: source.RemoteURL, Provider: source.Provider, ProviderRepoID: source.ProviderRepoID, ProviderOwner: source.ProviderOwner, ProviderName: source.ProviderName, BaseBranch: source.BaseBranch, CheckoutBranch: source.CheckoutBranch, DisplayName: source.DisplayName})
+		sources = append(sources, service.WorkspaceSourceInput{Kind: service.WorkspaceSourceKind(source.Kind), RepositoryID: source.RepositoryID, LocalPath: source.LocalPath, GitHubURL: source.GitHubURL, RemoteURL: source.RemoteURL, Provider: source.Provider, ProviderHost: source.ProviderHost, ProviderScope: source.ProviderScope, ProviderRepoID: source.ProviderRepoID, ProviderOwner: source.ProviderOwner, ProviderName: source.ProviderName, BaseBranch: source.BaseBranch, CheckoutBranch: source.CheckoutBranch, DisplayName: source.DisplayName})
 	}
 	return sources, nil
 }

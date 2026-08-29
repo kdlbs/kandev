@@ -147,6 +147,42 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
     expect(await list.evaluate((el) => el.scrollTop)).toBeGreaterThan(targetScrollTop - 10);
   });
 
+  test("enabled auto-scroll stays at the bottom for live messages on mobile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedOverflowingTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Auto-scroll Toggle Enabled Live Message",
+    );
+    const activeChat = session.activeChat();
+    const list = activeChat.locator(".chat-message-list");
+    await expect
+      .poll(async () => list.evaluate((el) => el.scrollHeight - el.clientHeight), {
+        timeout: 15_000,
+        message: "Waiting for chat to overflow",
+      })
+      .toBeGreaterThan(200);
+
+    const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+    const marker = "New content while enabled on mobile";
+    await session.sendMessageViaButton(`e2e:message("${marker}")`);
+    await expect(activeChat.getByText(marker, { exact: false }).last()).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect
+      .poll(async () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight), {
+        timeout: 5_000,
+        message: "enabled mobile auto-scroll should stay at the bottom after live content",
+      })
+      .toBeLessThan(10);
+  });
+
   test("disabling from the bottom freezes the view when new content arrives", async ({
     testPage,
     apiClient,

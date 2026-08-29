@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"errors"
 
 	"github.com/kandev/kandev/internal/workflow/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -54,7 +53,7 @@ func (h *Handlers) wsHandleStringField(
 	resp, err := fn(ctx, fieldValue)
 	if err != nil {
 		h.logger.Error(logErrMsg, zap.Error(err))
-		if errors.Is(err, service.ErrNotVisible) {
+		if service.IsNotFound(err) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, notFoundMessage, nil)
 		}
 

@@ -32,12 +32,11 @@ type QuickChatSession struct {
 	AgentProfileID string
 	Session        *models.TaskSession
 
-	createdAt      time.Time
-	lastActivityAt time.Time
+	createdAt time.Time
 }
 
 // ListQuickChatSessions returns the workspace's restorable quick-chat sessions,
-// most recently active first. It is the single source of truth for the quick
+// oldest created first. It is the single source of truth for the quick
 // chat tab strip: the boot payload and the runtime resync endpoint both read it,
 // so a client that reloads and a client that resyncs converge on the same list.
 //
@@ -92,7 +91,6 @@ func newQuickChatSession(task *models.Task, primary *models.TaskSession) QuickCh
 		AgentProfileID: quickChatAgentProfileID(task, primary),
 		Session:        primary,
 		createdAt:      task.CreatedAt,
-		lastActivityAt: quickChatLastActivityAt(task, primary),
 	}
 	if task.Title != "" && task.Title != quickChatDefaultTitle {
 		item.Name = task.Title
@@ -100,13 +98,10 @@ func newQuickChatSession(task *models.Task, primary *models.TaskSession) QuickCh
 	return item
 }
 
-// sortQuickChatSessions orders tabs by most recent activity, falling back to
-// creation order and then task ID so the sequence is stable across clients.
+// sortQuickChatSessions orders tabs by creation time and then task ID. Activity
+// updates task data but must not move a tab in the presentation baseline.
 func sortQuickChatSessions(items []QuickChatSession) {
 	sort.SliceStable(items, func(i, j int) bool {
-		if !items[i].lastActivityAt.Equal(items[j].lastActivityAt) {
-			return items[i].lastActivityAt.After(items[j].lastActivityAt)
-		}
 		if !items[i].createdAt.Equal(items[j].createdAt) {
 			return items[i].createdAt.Before(items[j].createdAt)
 		}
@@ -138,13 +133,6 @@ func IsRestorableQuickChatTask(task *models.Task) bool {
 		task.IsEphemeral &&
 		task.WorkflowID == "" &&
 		task.Origin != models.TaskOriginAutomationRun
-}
-
-func quickChatLastActivityAt(task *models.Task, primary *models.TaskSession) time.Time {
-	if primary.UpdatedAt.After(task.UpdatedAt) {
-		return primary.UpdatedAt
-	}
-	return task.UpdatedAt
 }
 
 func quickChatSessionKind(task *models.Task) string {

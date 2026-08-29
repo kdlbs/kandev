@@ -1,36 +1,26 @@
 "use client";
 
 import { useMemo } from "react";
-import {
-  IconPlus,
-  IconX,
-  IconCode,
-  IconGitBranch,
-  IconFolderPlus,
-  IconCheck,
-} from "@tabler/icons-react";
+import { IconPlus, IconX, IconCheck } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useBranches, type BranchSource } from "@/hooks/domains/workspace/use-repository-branches";
-import type { LocalRepository, Repository } from "@/lib/types/http";
+import type { LocalRepository, Repository, RepositoryBranchPolicy } from "@/lib/types/http";
 import type { TaskRepoRow } from "@/components/task-create-dialog-types";
 import { cn, formatUserHomePath } from "@/lib/utils";
-import { scoreBranch } from "@/lib/utils/branch-filter";
-import { scoreRepo } from "@/lib/utils/repo-filter";
-import { Pill, type PillAction, type PillOption } from "@/components/task-create-dialog-pill";
-import {
-  branchToOption,
-  computeBranchPlaceholder,
-  sortBranches,
-} from "@/components/task-create-dialog-branch-options";
+import { type PillOption } from "@/components/task-create-dialog-pill";
+import { branchToOption, sortBranches } from "@/components/task-create-dialog-branch-options";
 import {
   computeBranchIntent,
-  computeBranchPrefix,
-  computeBranchTooltip,
-  computeBranchDisabledReason,
   type BranchIntent,
 } from "@/components/task-create-dialog-branch-utils";
 import { useRepoBranchAutoselect } from "@/components/task-create-dialog-repo-branch-autoselect";
+import { useRepositoryBranchPolicies } from "@/hooks/domains/workspace/use-repository-branch-policies";
+import {
+  RepoChipBranchPill,
+  RepoChipRepositoryPill,
+  useRepoChipBranchPicker,
+} from "@/components/task-create-dialog-repo-chip-parts";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 
@@ -44,6 +34,8 @@ type WorkspaceRepoChipsProps = {
   currentLocalBranch?: string;
   currentLocalBranchLoading?: boolean;
   freshBranchEnabled?: boolean;
+  branchPolicyDisabledReason?: string;
+  showBranchPolicies?: boolean;
   canAddMore: boolean;
   addHint?: string;
   addLabel?: string;
@@ -53,6 +45,8 @@ type WorkspaceRepoChipsProps = {
   onRemove: (key: string) => void;
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
+  onRowPolicyChange?: (key: string, policyId: string, baseBranch: string) => void;
+  onPolicySelected?: () => void;
   onCreateRepository?: (key: string) => void;
   onRefreshRepositories?: () => void;
   repositoriesRefreshing?: boolean;
@@ -75,6 +69,8 @@ export function WorkspaceRepoChips({
   currentLocalBranch,
   currentLocalBranchLoading,
   freshBranchEnabled,
+  branchPolicyDisabledReason,
+  showBranchPolicies = false,
   canAddMore,
   addHint,
   addLabel,
@@ -84,6 +80,8 @@ export function WorkspaceRepoChips({
   onRemove,
   onRowRepositoryChange,
   onRowBranchChange,
+  onRowPolicyChange,
+  onPolicySelected,
   onCreateRepository,
   onRefreshRepositories,
   repositoriesRefreshing,
@@ -119,8 +117,16 @@ export function WorkspaceRepoChips({
             currentLocalBranch: currentLocalBranch ?? "",
             freshBranchEnabled: !!freshBranchEnabled,
           })}
+          branchPolicyDisabledReason={branchPolicyDisabledReason}
           onRepositoryChange={(value) => onRowRepositoryChange(row.key, value)}
           onBranchChange={(value) => onRowBranchChange(row.key, value)}
+          onPolicyChange={
+            onRowPolicyChange
+              ? (policyId, baseBranch) => onRowPolicyChange(row.key, policyId, baseBranch)
+              : undefined
+          }
+          onPolicySelected={onPolicySelected}
+          showBranchPolicies={showBranchPolicies}
           onCreateRepository={
             rows.length === 1 && onCreateRepository ? () => onCreateRepository(row.key) : undefined
           }
@@ -253,11 +259,62 @@ type RepoChipProps = {
   branchIntent?: BranchIntent;
   onRepositoryChange: (value: string) => void;
   onBranchChange: (value: string) => void;
+  onPolicyChange?: (policyId: string, baseBranch: string) => void;
+  onPolicySelected?: () => void;
+  branchPolicyDisabledReason?: string;
+  showBranchPolicies?: boolean;
   onRemove: () => void;
   onCreateRepository?: () => void;
   onRefreshRepositories?: () => void;
   repositoriesRefreshing?: boolean;
 };
+
+function useRepoChipBranchData({
+  row,
+  workspaceId,
+  onBranchChange,
+  preferredDefaultBranch,
+  preferredDefaultBranchLoading,
+  lastUsedBranch,
+  userSettingsLoaded,
+}: Pick<
+  RepoChipProps,
+  | "row"
+  | "workspaceId"
+  | "onBranchChange"
+  | "preferredDefaultBranch"
+  | "preferredDefaultBranchLoading"
+  | "lastUsedBranch"
+  | "userSettingsLoaded"
+>) {
+  const branchSource = useMemo<BranchSource | null>(() => {
+    if (!workspaceId) return null;
+    if (row.repositoryId) {
+      return { kind: "id", workspaceId, repositoryId: row.repositoryId };
+    }
+    if (row.localPath) {
+      return { kind: "path", workspaceId, path: row.localPath };
+    }
+    return null;
+  }, [workspaceId, row.repositoryId, row.localPath]);
+  const {
+    branches,
+    isLoading: branchesLoading,
+    refresh: refreshBranches,
+  } = useBranches(branchSource, !!branchSource);
+  useRepoBranchAutoselect({
+    branchSource,
+    branchesLoading,
+    branches,
+    rowBranch: row.branch,
+    onBranchChange,
+    preferredDefaultBranch,
+    preferredDefaultBranchLoading,
+    lastUsedBranch,
+    userSettingsLoaded,
+  });
+  return { branches, branchesLoading, refreshBranches };
+}
 
 function useRepoChipData({
   row,
@@ -302,27 +359,9 @@ function useRepoChipData({
         (!excludedRepoIds.has(r.path) || r.path === row.localPath),
     );
   }, [filteredRepos, discoveredRepositories, excludedRepoIds, row.localPath]);
-
-  const branchSource = useMemo<BranchSource | null>(() => {
-    if (!workspaceId) return null;
-    if (row.repositoryId) {
-      return { kind: "id", workspaceId, repositoryId: row.repositoryId };
-    }
-    if (row.localPath) {
-      return { kind: "path", workspaceId, path: row.localPath };
-    }
-    return null;
-  }, [workspaceId, row.repositoryId, row.localPath]);
-  const {
-    branches,
-    isLoading: branchesLoading,
-    refresh: refreshBranches,
-  } = useBranches(branchSource, !!branchSource);
-  useRepoBranchAutoselect({
-    branchSource,
-    branchesLoading,
-    branches,
-    rowBranch: row.branch,
+  const { branches, branchesLoading, refreshBranches } = useRepoChipBranchData({
+    row,
+    workspaceId,
     onBranchChange,
     preferredDefaultBranch,
     preferredDefaultBranchLoading,
@@ -359,7 +398,7 @@ function useRepoChipData({
     () => sortBranches(branches).map(branchToOption),
     [branches],
   );
-  return { repoOptions, branchOptions, branchesLoading, refreshBranches };
+  return { repoOptions, branchOptions, branches, branchesLoading, refreshBranches };
 }
 
 function computeRepoChipDisplay(
@@ -377,37 +416,24 @@ function computeRepoChipDisplay(
   return { repoLabel, repoTooltip };
 }
 
-function buildCreateRepositoryAction(onSelect?: () => void): PillAction | undefined {
-  if (!onSelect) return undefined;
-  return {
-    label: t("task:createNewRepository"),
-    icon: <IconFolderPlus className="h-3.5 w-3.5" />,
-    onSelect,
-  };
-}
+type RepoChipData = ReturnType<typeof useRepoChipData>;
 
-function RepoChip({
-  row,
-  workspaceId,
-  repositories,
-  discoveredRepositories,
-  excludedRepoIds,
-  selectedElsewhere,
-  branchLocked,
-  preferredDefaultBranch,
-  preferredDefaultBranchLoading,
-  lastUsedBranch,
-  userSettingsLoaded,
-  branchIntent,
-  onRepositoryChange,
-  onBranchChange,
-  onRemove,
-  onCreateRepository,
-  onRefreshRepositories,
-  repositoriesRefreshing,
-}: RepoChipProps) {
-  const { t } = useTranslation();
-  const { repoOptions, branchOptions, branchesLoading, refreshBranches } = useRepoChipData({
+function RepoChip(props: RepoChipProps) {
+  const {
+    row,
+    workspaceId,
+    repositories,
+    discoveredRepositories,
+    excludedRepoIds,
+    selectedElsewhere,
+    onBranchChange,
+    showBranchPolicies,
+    preferredDefaultBranch,
+    preferredDefaultBranchLoading,
+    lastUsedBranch,
+    userSettingsLoaded,
+  } = props;
+  const data = useRepoChipData({
     row,
     workspaceId,
     repositories,
@@ -420,18 +446,58 @@ function RepoChip({
     lastUsedBranch,
     userSettingsLoaded,
   });
+  if (showBranchPolicies) {
+    return <RepoChipWithPolicies {...props} data={data} />;
+  }
+  return <RepoChipContent {...props} data={data} branchPolicies={[]} />;
+}
+
+function RepoChipWithPolicies({ data, ...props }: RepoChipProps & { data: RepoChipData }) {
+  const { row } = props;
+  const { policies: branchPolicies } = useRepositoryBranchPolicies(
+    row.repositoryId ?? null,
+    !!row.repositoryId,
+  );
+  return <RepoChipContent {...props} data={data} branchPolicies={branchPolicies} />;
+}
+
+function RepoChipContent({
+  data,
+  branchPolicies,
+  row,
+  repositories,
+  discoveredRepositories,
+  branchLocked,
+  preferredDefaultBranchLoading,
+  branchIntent,
+  onRepositoryChange,
+  onBranchChange,
+  onPolicyChange,
+  onPolicySelected,
+  branchPolicyDisabledReason,
+  onRemove,
+  onCreateRepository,
+  onRefreshRepositories,
+  repositoriesRefreshing,
+}: RepoChipProps & { data: RepoChipData; branchPolicies: RepositoryBranchPolicy[] }) {
+  const { repoOptions, branchOptions, branches, branchesLoading, refreshBranches } = data;
   const { repoLabel, repoTooltip } = computeRepoChipDisplay(
     row,
     repositories,
     discoveredRepositories,
   );
-  const hasRepo = !!(row.repositoryId || row.localPath);
-  const branchValue = preferredDefaultBranchLoading ? "" : row.branch;
-  const branchPlaceholder = computeBranchPlaceholder(
-    hasRepo,
-    branchesLoading || !!preferredDefaultBranchLoading,
-    branchOptions.length,
-  );
+  const branchPicker = useRepoChipBranchPicker({
+    row,
+    branchPolicies,
+    branches,
+    branchOptions,
+    branchesLoading,
+    preferredDefaultBranchLoading,
+    policyDisabledReason: branchPolicyDisabledReason,
+    onBranchChange,
+    onPolicyChange,
+    onPolicySelected,
+  });
   return (
     <span
       className="inline-flex items-center rounded-md border border-input bg-input/20 dark:bg-input/30 pr-0.5"
@@ -439,46 +505,22 @@ function RepoChip({
       data-repository-id={row.repositoryId || row.localPath || ""}
       data-repo-row-key={row.key}
     >
-      <Pill
-        icon={<IconCode className="h-3 w-3 shrink-0 text-muted-foreground" />}
-        value={repoLabel}
-        selectedValue={row.repositoryId || row.localPath || ""}
-        placeholder={t("task:repository")}
-        options={repoOptions}
-        onSelect={onRepositoryChange}
-        searchPlaceholder={t("task:searchRepositories")}
-        emptyMessage={t("task:noRepositories")}
-        testId="repo-chip-trigger"
-        tooltip={repoTooltip}
-        filter={scoreRepo}
-        action={buildCreateRepositoryAction(onCreateRepository)}
-        onRefresh={onRefreshRepositories}
-        refreshing={repositoriesRefreshing}
-        refreshLabel="repositories"
-        flat
+      <RepoChipRepositoryPill
+        repoLabel={repoLabel}
+        repoTooltip={repoTooltip}
+        repositoryValue={row.repositoryId || row.localPath || ""}
+        repoOptions={repoOptions}
+        onRepositoryChange={onRepositoryChange}
+        onCreateRepository={onCreateRepository}
+        onRefreshRepositories={onRefreshRepositories}
+        repositoriesRefreshing={repositoriesRefreshing}
       />
-      <Pill
-        icon={<IconGitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />}
-        value={branchValue}
-        placeholder={branchPlaceholder}
-        prefix={computeBranchPrefix(branchIntent ?? "none")}
-        options={branchOptions}
-        onSelect={onBranchChange}
-        disabled={branchLocked || !hasRepo || branchesLoading || branchOptions.length === 0}
-        disabledReason={computeBranchDisabledReason({
-          branchLocked: !!branchLocked,
-          hasRepo,
-          branchesLoading,
-          optionCount: branchOptions.length,
-        })}
-        searchPlaceholder={t("task:searchBranches")}
-        emptyMessage={t("task:noBranches")}
-        testId="branch-chip-trigger"
-        tooltip={computeBranchTooltip(branchIntent)}
-        onRefresh={refreshBranches}
-        refreshing={branchesLoading}
-        filter={scoreBranch}
-        flat
+      <RepoChipBranchPill
+        branchPicker={branchPicker}
+        branchIntent={branchIntent}
+        branchLocked={branchLocked}
+        branchesLoading={branchesLoading}
+        refreshBranches={refreshBranches}
       />
       <RepoChipRemoveButton onRemove={onRemove} />
     </span>

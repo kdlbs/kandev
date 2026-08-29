@@ -421,30 +421,25 @@ func TestClient_FirstBootMissesGracefully(t *testing.T) {
 	dir := t.TempDir()
 	cachePath := filepath.Join(dir, "models-dev.json")
 
-	// A cold-boot lookup schedules a background refresh against the
-	// configured URL. Block that refresh at the server so it can't
-	// populate the cache before the lookup reads it — otherwise the
-	// "miss" we're asserting races a fast background fetch and flakes
-	// into a hit. The request exits when the lookup context is canceled,
-	// before TempDir cleanup can race a cache write.
-	ctx, cancel := context.WithCancel(context.Background())
-	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		<-r.Context().Done()
-	}))
-	t.Cleanup(func() {
-		cancel()
-		srv.Close()
-	})
+	// A cold-boot lookup schedules a detached background refresh. Hold that
+	// request at the gate so it cannot populate the cache before the lookup
+	// reads it, then release and join the refresh before TempDir cleanup.
+	gate := newRequestGate(t, sampleDataset)
 	c := modelsdev.New(modelsdev.Config{
 		CachePath:  cachePath,
-		URL:        srv.URL,
+		URL:        gate.server.URL,
 		TTL:        time.Hour,
-		HTTPClient: srv.Client(),
+		HTTPClient: gate.server.Client(),
 	}, logger.Default())
 
 	// No Refresh — simulating cold boot before any HTTP fetch.
-	if _, ok := c.LookupForModel(ctx, "claude-opus-4-7"); ok {
+	if _, ok := c.LookupForModel(context.Background(), "claude-opus-4-7"); ok {
 		t.Error("expected miss on cold-boot lookup")
+	}
+	gate.waitForFirstRequest(t)
+	gate.releaseAll()
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("join background refresh: %v", err)
 	}
 }
 

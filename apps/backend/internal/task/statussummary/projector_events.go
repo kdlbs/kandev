@@ -777,6 +777,21 @@ func (p *Projector) applyPREventLocked(state *projectionState, data map[string]i
 		checksTotal:           intValueOrZero(data["checks_total"]),
 		checksPassing:         intValueOrZero(data["checks_passing"]),
 	}
+	// PR refresh events do not carry the per-PR automation switches. Preserve
+	// the last authoritative values from the CI-options projection instead of
+	// treating an omitted field as an explicit disable. A future producer may
+	// include either field; in that case its bool is authoritative, including
+	// false.
+	if existing, ok := state.prs[key]; ok {
+		observation.autoFixEnabled = existing.autoFixEnabled
+		observation.autoMergeEnabled = existing.autoMergeEnabled
+	}
+	if value, ok := data["auto_fix_enabled"].(bool); ok {
+		observation.autoFixEnabled = value
+	}
+	if value, ok := data["auto_merge_enabled"].(bool); ok {
+		observation.autoMergeEnabled = value
+	}
 	if value, ok := intValue(data["required_reviews"]); ok {
 		observation.requiredReviews = maxInt(value, 0)
 	}

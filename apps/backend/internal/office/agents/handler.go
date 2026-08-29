@@ -108,9 +108,13 @@ func CallerFromContext(c *gin.Context) *models.AgentInstance {
 }
 
 // ClaimsFromContext exposes the validated agent JWT claims (or nil for UI
-// requests). The workspace claim is what AgentAuthMiddleware compares against
-// `:wsId`; the HTTP scope guard needs the same value to confine a token to
-// its own workspace on by-ID routes, where there is no `:wsId` to compare.
+// requests) to other office packages, without depending on the agents
+// package's internal context-key constants. The workspace claim is what
+// AgentAuthMiddleware compares against `:wsId`; the HTTP scope guard needs
+// the same value to confine a token to its own workspace on by-ID routes,
+// where there is no `:wsId` to compare. The task claim is the only source
+// of caller task identity, used by callers such as the dashboard comment
+// read guard to authorize an agent against the target task.
 func ClaimsFromContext(c *gin.Context) *AgentClaims {
 	val, ok := c.Get(ctxKeyAgentClaims)
 	if !ok {

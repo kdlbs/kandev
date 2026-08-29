@@ -439,6 +439,9 @@ type LaunchAgentRequest struct {
 	WorktreeBranchTicket    string // External ticket value for branch templates
 	PullBeforeWorktree      bool   // Whether to pull from remote before creating the worktree
 	RemoteSyncHandled       bool   // Provider-authenticated origin refresh already completed
+	// RefreshRepository is an optional provider-authenticated refresh deferred
+	// until worktree materialization. A valid reusable worktree bypasses it.
+	RefreshRepository func(context.Context) error
 
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
@@ -487,9 +490,12 @@ type RepoSpec struct {
 	WorktreeBranchTicket    string
 	PullBeforeWorktree      bool
 	RemoteSyncHandled       bool
-	RepoSetupScript         string
-	RepoCleanupScript       string
-	CopyFiles               string
+	// RefreshRepository is an optional provider-authenticated refresh deferred
+	// until worktree materialization. A valid reusable worktree bypasses it.
+	RefreshRepository func(context.Context) error
+	RepoSetupScript   string
+	RepoCleanupScript string
+	CopyFiles         string
 	// BranchSlug, when non-empty, suffixes the repo dir so the same repo can
 	// host multiple branch worktrees as siblings within one task. Set by the
 	// orchestrator when buildRepoSpecs detects multiple rows sharing a
@@ -870,7 +876,7 @@ type RepoCloner interface {
 	// SetOriginURL updates a Kandev-managed checkout remote without exposing credentials.
 	SetOriginURL(ctx context.Context, repositoryPath, originURL string) error
 	// BuildCloneURL constructs a protocol-aware clone URL for the given provider/owner/name.
-	BuildCloneURLWithHost(provider, host, owner, name string) (string, error)
+	BuildCloneURLWithHost(ctx context.Context, provider, host, owner, name string) (string, error)
 }
 
 type authenticatedRepoCloner interface {
@@ -878,6 +884,13 @@ type authenticatedRepoCloner interface {
 		ctx context.Context, workspaceID, provider, providerHost,
 		cloneURL, owner, name, username, password string,
 	) (string, error)
+}
+
+type strictAuthenticatedRepoCloner interface {
+	RefreshWorkspaceRepositoryWithBasicAuth(
+		ctx context.Context, workspaceID, provider, providerHost,
+		cloneURL, owner, name, repositoryPath, username, password string,
+	) error
 }
 
 const providerAzureDevOps = "azure_devops"

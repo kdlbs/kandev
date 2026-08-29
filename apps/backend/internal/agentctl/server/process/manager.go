@@ -108,6 +108,9 @@ type Manager struct {
 	stdin              io.WriteCloser
 	stdout             io.ReadCloser
 	stderr             io.ReadCloser
+	stderrPipeMu       sync.Mutex
+	stderrReader       io.ReadCloser
+	stderrWriter       io.WriteCloser
 	status             atomic.Value // Status
 	exitCode           atomic.Int32
 	exitErr            atomic.Value // error
@@ -1179,12 +1182,17 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	// Start the subprocess now that pipes are connected
 	if err := m.cmd.Start(); err != nil {
+		_ = m.closeStderrPipe()
 		m.status.Store(StatusError)
 		return formatAgentStartError(err, m.cfg.AgentEnv)
+	}
+	if err := m.closeStderrWriter(); err != nil {
+		m.logger.Debug("failed to close parent stderr pipe", zap.Error(err))
 	}
 	processLifecycle, err := installProcessLifecycle(m.cmd)
 	if err != nil {
 		reapErr := killAndWaitStartedCommand(m.cmd)
+		_ = m.closeStderrReader()
 		m.status.Store(StatusError)
 		return errors.Join(fmt.Errorf("failed to install agent process lifecycle: %w", err), reapErr)
 	}
@@ -1206,6 +1214,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		default:
 			reapErr = killAndWaitStartedCommand(m.cmd)
 		}
+		_ = m.closeStderrReader()
 		m.status.Store(StatusError)
 		return errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
 	}
@@ -1473,13 +1482,45 @@ func (m *Manager) startProcessPipes() error {
 		_ = m.stdin.Close()
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
-	m.stderr, err = m.cmd.StderrPipe()
+	stderrReader, stderrWriter, err := os.Pipe()
 	if err != nil {
 		_ = m.stdin.Close()
 		_ = m.stdout.Close()
 		return fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
+	m.stderr = stderrReader
+	m.stderrPipeMu.Lock()
+	m.stderrReader = stderrReader
+	m.stderrWriter = stderrWriter
+	m.stderrPipeMu.Unlock()
+	m.cmd.Stderr = stderrWriter
 	return nil
+}
+
+func (m *Manager) closeStderrReader() error {
+	m.stderrPipeMu.Lock()
+	reader := m.stderrReader
+	m.stderrReader = nil
+	m.stderrPipeMu.Unlock()
+	if reader == nil {
+		return nil
+	}
+	return reader.Close()
+}
+
+func (m *Manager) closeStderrWriter() error {
+	m.stderrPipeMu.Lock()
+	writer := m.stderrWriter
+	m.stderrWriter = nil
+	m.stderrPipeMu.Unlock()
+	if writer == nil {
+		return nil
+	}
+	return writer.Close()
+}
+
+func (m *Manager) closeStderrPipe() error {
+	return errors.Join(m.closeStderrWriter(), m.closeStderrReader())
 }
 
 // startAgentShell auto-creates a shell session when ShellEnabled is configured.
@@ -2303,6 +2344,7 @@ func (m *Manager) waitForStderrDrain(stderrDone <-chan struct{}) {
 	case <-stderrDone:
 	case <-timer.C:
 		m.logger.Warn("timed out waiting for agent stderr to drain")
+		_ = m.closeStderrReader()
 	}
 }
 
@@ -2352,12 +2394,13 @@ func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 	defer close(m.doneCh)
 
 	pid := m.agentPID()
-	// StderrPipe must be drained before Wait closes its parent-side pipe. The
-	// second bounded wait covers a reader that was still blocked when the
-	// process-exit wait began and was released by Wait closing the pipe.
-	m.waitForStderrDrain(stderrDone)
+	// The manager owns stderr's read/write pipe, so Wait can reap the process
+	// without closing the reader. The reader drains the pipe concurrently.
 	err := m.cmd.Wait()
+	// Wait has observed process exit; now bound the reader drain in case a child
+	// process inherited the stderr writer and kept the pipe open.
 	m.waitForStderrDrain(stderrDone)
+	_ = m.closeStderrReader()
 	intentionalStop := m.Status() == StatusStopping
 
 	switch {

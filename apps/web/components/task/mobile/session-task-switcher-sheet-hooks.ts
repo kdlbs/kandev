@@ -178,6 +178,11 @@ function mapTaskRepositories(
     repository_id: r.repository_id,
     base_branch: r.base_branch,
     checkout_branch: r.checkout_branch,
+    branch_policy_id: r.branch_policy_id,
+    branch_policy_name: r.branch_policy_name,
+    branch_policy_base_branch: r.branch_policy_base_branch,
+    branch_policy_branch_template: r.branch_policy_branch_template,
+    branch_policy_pull_request_target: r.branch_policy_pull_request_target,
     position: r.position,
   }));
 }

@@ -97,6 +97,7 @@ func runFixture(spec string) {
 			os.Exit(2)
 		}
 		signal.Ignore(os.Interrupt)
+		fmt.Println("fixture ready")
 		time.Sleep(time.Duration(secs) * time.Second)
 	case "echo":
 		fmt.Println(strings.Join(parts[1:], " "))

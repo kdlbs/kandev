@@ -905,6 +905,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "configuration-workflows", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigWorkflowTools() }},
 		{name: "configuration-agents", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigAgentTools() }},
 		{name: "configuration-mcp", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigMcpTools() }},
+		{name: "configuration-prompts", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigPromptTools() }},
 		{name: "configuration-executors", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigExecutorTools() }},
 		{name: "configuration-tasks", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigTaskTools() }},
 		{name: "external-create-task", enabled: external, register: func(s *Server) { s.registerCreateTaskTool() }},

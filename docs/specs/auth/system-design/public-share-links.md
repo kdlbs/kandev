@@ -2,6 +2,7 @@
 status: draft
 system: auth
 requirements:
+  - REQ-AUTH-AUTH-001
   - REQ-AUTH-PUBLIC-SHARE-LINKS-001
 created: 2026-05-21
 owners:
@@ -11,12 +12,19 @@ owners:
 
 ## Purpose and boundaries
 
-This design preserves the technical source detail for `REQ-AUTH-PUBLIC-SHARE-LINKS-001` during migration.
+This design defines the public-share surface and its authorization boundary.
+The auth system owns this contract because a share exposes a task-session
+transcript and provider-backed publication controls.
+
+The task service owns workspace authorization. The GitHub integration owns
+credential selection and provider operations. A provider authorization check
+is defense in depth. It is not the share service authorization boundary.
 
 ## Requirement mapping
 
 | Requirement | Design section |
 | --- | --- |
+| `REQ-AUTH-AUTH-001` | [Authorization boundary](#authorization-boundary) |
 | `REQ-AUTH-PUBLIC-SHARE-LINKS-001` | [Migrated source detail](#migrated-source-detail) |
 
 ## Migrated source detail
@@ -150,10 +158,10 @@ no user IDs. It is intentionally portable.
 
 ## API surface
 
-Endpoints live under the `/api/v1` prefix to match the rest of the kandev
-HTTP surface. kandev's HTTP layer has no per-request user middleware
-today — authorisation is "this kandev instance can reach this task in its
-local store", same as every other task endpoint.
+Endpoints live under the `/api/v1` prefix to match the other Kandev HTTP
+routes. The global auth middleware supplies the caller identity. The share
+service applies object-level authorization before it reads transcript or share
+data.
 
 ```http
 POST   /api/v1/tasks/:taskId/sessions/:sessionId/shares
@@ -189,17 +197,45 @@ type Service struct{ /* unexported */ }
 
 func BuildSnapshot(ctx context.Context, repo TaskReader, taskSessionID, kandevVersion string) (*Snapshot, error)
 
-func (s *Service) CreateShare(ctx context.Context, taskSessionID string) (*Share, error)
+func (s *Service) CheckBackendAccess(ctx context.Context, taskID, taskSessionID string) error
+func (s *Service) CreateShare(ctx context.Context, taskID, taskSessionID, locale string) (*Share, error)
 func (s *Service) RevokeShare(ctx context.Context, shareID string) error
-func (s *Service) ListBySession(ctx context.Context, taskSessionID string) ([]*Share, error)
-func (s *Service) PreviewSnapshot(ctx context.Context, taskSessionID string) (*Snapshot, error)
+func (s *Service) ListBySession(ctx context.Context, taskID, taskSessionID string) ([]*Share, error)
+func (s *Service) PreviewSnapshot(ctx context.Context, taskID, taskSessionID string) (*Snapshot, error)
 
 type Backend interface {
     Name() string
-    Upload(ctx context.Context, snap *Snapshot) (externalID, externalURL string, err error)
-    Delete(ctx context.Context, externalID string) error
+    CheckAccess(ctx context.Context, workspaceID string) error
+    Upload(ctx context.Context, workspaceID string, snap *Snapshot, locale string) (externalID, externalURL string, err error)
+    Delete(ctx context.Context, workspaceID, externalID string) error
 }
 ```
+
+## Authorization boundary
+
+`share.Service` receives a narrow task access authorizer during startup. The
+production authorizer is `task.Service`. The share package can keep the raw
+task reader for snapshot construction after authorization succeeds.
+
+Create, preview, list, and backend-access probes accept both route IDs. Each
+method calls `AuthorizeTaskSessionAccess` before it reads a task, session,
+message, or share row. This check proves ownership and proves that the session
+belongs to the supplied task.
+
+Revoke first loads the share row to resolve its session ID. It then calls
+`AuthorizeSessionAccess` before it checks `revoked_at`, calls the provider, or
+updates the row. This order prevents an already-revoked share from becoming an
+existence oracle.
+
+A foreign task, a foreign session, and a mismatched task-session pair return
+the same `404 Not Found` response. The response does not contain transcript,
+share, workspace, or provider details. An authorization denial stops all
+provider calls and share mutations.
+
+A synthetic identity keeps the auth-disabled single-user behavior. An internal
+caller with no identity also keeps the existing unscoped service behavior.
+The GitHub workspace authorizer remains a second authorization layer for
+provider operations.
 
 ### Share URL format
 
@@ -250,18 +286,18 @@ There is no "draft" or "scheduled" state; publish is synchronous.
 
 ## Permissions
 
-- kandev's HTTP layer has no per-request user identity today; the
-  authorisation contract for share endpoints is the same as for every
-  other task endpoint — "this kandev instance can see this task in its
-  local store." If/when kandev grows multi-user, the same row filter that
-  scopes tasks scopes shares.
-- The GitHub credential used for the upload is the credential bound to
-  the running kandev instance. Shares are owned by that GitHub account,
-  not by a kandev service account.
+- When auth is enabled, users can preview, publish, list, and revoke shares
+  only for sessions in their own workspaces.
+- A route that contains a task ID and a session ID must authorize both IDs and
+  their relationship.
+- The GitHub credential comes from the authorized workspace. The workspace
+  automation principal owns the published gist.
 - No "team share" or "delegate to another user" surface in v0.
 
 ## Failure modes
 
+- **Foreign or mismatched task-session access** returns `404 Not Found` before
+  snapshot construction, share listing, provider access, or local mutation.
 - **Session has no shareable content yet** (state is `CREATED` or
   `STARTING` — i.e., the agent hasn't run) when POSTing a share → API
   returns `409 Conflict` with `code: "session_not_shareable"`. The Share
@@ -272,6 +308,11 @@ There is no "draft" or "scheduled" state; publish is synchronous.
 - **No GitHub credential** on the kandev instance → API returns
   `412 Precondition Failed` with `code: "github_credential_missing"`.
   The UI surfaces a CTA to the GitHub settings page.
+- **Authorization infrastructure failure** during task or session access
+  resolution → API returns `500 Internal Server Error` with
+  `error: "failed to authorize share access"` and no error code. The underlying
+  error is logged server-side and is not exposed as a missing GitHub credential
+  or a gist-provider failure.
 - **GitHub API failure during upload** (network, rate limit, 5xx) → API
   returns `502 Bad Gateway` with the upstream message. No row is
   written. The user can retry; no partial state is left behind.
@@ -306,6 +347,18 @@ There is no "draft" or "scheduled" state; publish is synchronous.
   v0 does not attempt to reconcile orphaned gists.
 
 ## Scenarios
+
+- **GIVEN** users A and B and a session in B's workspace, **WHEN** A previews,
+  publishes, or lists shares for that session, **THEN** the API returns 404 and
+  does not expose B's transcript or share metadata.
+
+- **GIVEN** users A and B and an active or revoked share for B's session,
+  **WHEN** A revokes that share, **THEN** the API returns 404 and does not call
+  the provider or update the share row.
+
+- **GIVEN** an owned task and a different owned session, **WHEN** a caller uses
+  both IDs in one share route, **THEN** the API returns 404 before any share
+  operation.
 
 - **GIVEN** a session past the pre-history states (anything other than
   `CREATED` / `STARTING`), **WHEN** the task chat panel renders, **THEN**
@@ -388,3 +441,7 @@ There is no "draft" or "scheduled" state; publish is synchronous.
   with no kandev row).
 - Embedding rich workspace context (file tree, repo HEAD SHA, agent
   config). v0 captures only what is needed to render the conversation.
+
+## Related decisions
+
+- [Opt-in Authentication and Per-User Workspace Scoping](../../../decisions/2026-07-24-opt-in-authentication.md)

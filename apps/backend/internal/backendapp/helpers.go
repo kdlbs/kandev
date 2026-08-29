@@ -508,18 +508,36 @@ func appendSessionModelsMessage(sessionID string, session *models.TaskSession, l
 	if lifecycleMgr == nil {
 		return result
 	}
-	modelState := lifecycleMgr.GetModelStateForSession(sessionID)
-	if modelState == nil || (modelState.CurrentModelID == "" && len(modelState.Models) == 0) {
+	return appendSessionModelsMessageFromState(
+		sessionID,
+		session,
+		lifecycleMgr.GetModelStateForSession(sessionID),
+		result,
+	)
+}
+
+func appendSessionModelsMessageFromState(sessionID string, session *models.TaskSession, modelState *lifecycle.CachedModelState, result []*ws.Message) []*ws.Message {
+	if modelState == nil {
 		return result
 	}
 	snapshot, _ := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
+	replayState := *modelState
+	if len(replayState.Models) == 0 &&
+		len(replayState.ConfigOptions) == 0 &&
+		!replayState.ConfigOptionsSettled &&
+		len(snapshot.Models) > 0 {
+		replayState.Models = snapshot.Models
+	}
+	if replayState.CurrentModelID == "" && len(replayState.Models) == 0 {
+		return result
+	}
 	notification, err := ws.NewNotification(ws.ActionSessionModelsUpdated, lifecycle.SessionModelsEventPayload{
 		TaskID:               session.TaskID,
 		SessionID:            sessionID,
-		CurrentModelID:       modelState.CurrentModelID,
-		Models:               modelState.Models,
-		ConfigOptions:        modelState.ConfigOptions,
-		ConfigOptionsSettled: modelState.ConfigOptionsSettled || snapshot.ConfigOptionsSettled,
+		CurrentModelID:       replayState.CurrentModelID,
+		Models:               replayState.Models,
+		ConfigOptions:        replayState.ConfigOptions,
+		ConfigOptionsSettled: replayState.ConfigOptionsSettled || snapshot.ConfigOptionsSettled,
 		ConfigBaseline:       sessionACPConfigBaseline(session),
 	})
 	if err == nil {
@@ -631,6 +649,7 @@ func registerRoutes(p routeParams) {
 	handoffSvc.SetCoordinatorAuthority(coordinator.New(p.taskRepo, func() bool {
 		return p.features.CoordinatorTaskAuthority
 	}))
+	handoffSvc.SetCommentReader(&officeCommentReaderAdapter{reader: p.officeRepo})
 	// Phase 6 wirings — materializer hook + disk cleaner. The
 	// SessionWorktreeReader and WorkspaceCleaner interfaces are both
 	// satisfied by adapters that delegate to existing services.
@@ -1102,6 +1121,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	taskH := taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
 	if p.services != nil && p.services.User != nil {
 		taskH.SetTaskCreateLastUsedRecorder(p.services.User)
+		taskH.SetAgentProfileRecentUseRecorder(p.services.User)
 	}
 	if handoffSvc != nil {
 		taskH.SetHandoffService(handoffSvc)
@@ -1132,6 +1152,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	taskhandlers.RegisterRepositoryRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterRepositorySetRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterCoordinatorGrantRoutes(p.router, p.taskRepo, p.taskSvc, p.log)
+	taskhandlers.RegisterRepositoryBranchPolicyRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterExecutorRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterExecutorProfileRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.agentList, p.log)
 	taskhandlers.RegisterEnvironmentRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
@@ -1372,7 +1393,7 @@ func registerSecondaryRoutes(
 
 	// Register office routes
 	if p.services.OfficeSvcs != nil {
-		mountOfficeRoutes(p.router, p.services.OfficeSvcs, p.authSvc, p.taskSvc, p.officeRepo, p.log)
+		mountOfficeRoutes(p.router, p.services.OfficeSvcs, p.authSvc, p.taskSvc, p.officeRepo, handoffSvc, p.log)
 		p.log.Debug("Registered Office handlers (HTTP)")
 	}
 }
@@ -1454,6 +1475,29 @@ func dockerSessionAuthorizer(taskSvc *taskservice.Service) docker.SessionAuthori
 		return nil
 	}
 	return taskSvc
+}
+
+// lifecycleAccessAuthorizer is the task-service surface the lifecycle manager's
+// per-user visibility checks are wired to. Narrowed to an interface so the
+// wiring itself is testable: the three single-ID checkers take the same
+// signature, so a crossed wire (session visibility installed in the task slot,
+// say) compiles and silently authorizes the wrong resource.
+type lifecycleAccessAuthorizer interface {
+	AuthorizeSessionAccess(ctx context.Context, sessionID string) error
+	AuthorizeEnvironmentAccess(ctx context.Context, taskEnvironmentID string) error
+	AuthorizeTaskAccess(ctx context.Context, taskID string) error
+	AuthorizeTaskEnvironmentAccess(ctx context.Context, taskID, taskEnvironmentID string) error
+}
+
+// wireLifecycleAccessCheckers installs every per-user visibility check on the
+// lifecycle manager. Kept together so a surface that needs a new kind of check
+// has one place to add it, rather than another setter call somewhere else in
+// startup that nothing asserts on.
+func wireLifecycleAccessCheckers(lifecycleMgr *lifecycle.Manager, authz lifecycleAccessAuthorizer) {
+	lifecycleMgr.SetSessionAccessChecker(authz.AuthorizeSessionAccess)
+	lifecycleMgr.SetEnvironmentAccessChecker(authz.AuthorizeEnvironmentAccess)
+	lifecycleMgr.SetTaskAccessChecker(authz.AuthorizeTaskAccess)
+	lifecycleMgr.SetTaskEnvironmentAccessChecker(authz.AuthorizeTaskEnvironmentAccess)
 }
 
 func dockerTaskTitleProvider(taskRepo *sqliterepo.Repository, log *logger.Logger) docker.TaskTitleProvider {
@@ -1617,6 +1661,7 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
+	mcpHandlers.SetPromptReader(p.services.Prompts)
 	mcpHandlers.SetTaskStopper(p.orchestratorSvc)
 	mcpHandlers.SetAgentPermissionService(p.orchestratorSvc)
 	mcpHandlers.SetTaskTitleBranchRenamer(p.orchestratorSvc)

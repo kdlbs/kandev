@@ -36,6 +36,8 @@ import { buildArchivedSidebarItem } from "./task-session-sidebar-archived-item";
 import { useSidebarTaskLinking } from "./task-session-sidebar-task-linking";
 import { buildSidebarItem } from "./task-session-sidebar-item";
 import { useSidebarTaskEdit } from "./task-session-sidebar-edit";
+import { TaskMoveErrorBanner } from "./task-move-error-banner";
+import { useMoveToStep } from "./task-session-sidebar-move";
 
 type TaskSessionSidebarProps = {
   workspaceId: string | null;
@@ -131,62 +133,6 @@ function useSidebarData(workspaceId: string | null) {
 }
 
 type StoreApi = ReturnType<typeof useAppStoreApi>;
-
-function useMoveToStep(store: StoreApi) {
-  const { moveTaskById } = useTaskActions();
-
-  return useCallback(
-    async (taskId: string, workflowId: string, targetStepId: string) => {
-      const state = store.getState();
-      const snapshot = state.kanbanMulti.snapshots[workflowId];
-      if (!snapshot) return;
-
-      const originalTask = snapshot.tasks.find((t) => t.id === taskId);
-      if (!originalTask) return;
-
-      const targetTasks = snapshot.tasks
-        .filter((t) => t.workflowStepId === targetStepId && t.id !== taskId)
-        .sort((a, b) => a.position - b.position);
-      const nextPosition = targetTasks.length;
-
-      // Optimistic update
-      state.setWorkflowSnapshot(workflowId, {
-        ...snapshot,
-        tasks: snapshot.tasks.map((t) =>
-          t.id === taskId ? { ...t, workflowStepId: targetStepId, position: nextPosition } : t,
-        ),
-      });
-
-      try {
-        await moveTaskById(taskId, {
-          workflow_id: workflowId,
-          workflow_step_id: targetStepId,
-          position: nextPosition,
-        });
-      } catch (error) {
-        // Rollback only the moved task, and only if it still has the optimistic values
-        const cur = store.getState().kanbanMulti.snapshots[workflowId];
-        const curTask = cur?.tasks.find((t) => t.id === taskId);
-        if (cur && curTask?.workflowStepId === targetStepId && curTask.position === nextPosition) {
-          store.getState().setWorkflowSnapshot(workflowId, {
-            ...cur,
-            tasks: cur.tasks.map((t) =>
-              t.id === taskId
-                ? {
-                    ...t,
-                    workflowStepId: originalTask.workflowStepId,
-                    position: originalTask.position,
-                  }
-                : t,
-            ),
-          });
-        }
-        console.error("Failed to move task:", error);
-      }
-    },
-    [store, moveTaskById],
-  );
-}
 
 function useArchiveActions(store: StoreApi) {
   const { t } = useTranslation();
@@ -418,6 +364,11 @@ export function useSidebarActions(store: StoreApi) {
   const [creatingSubtask, setCreatingSubtask] = useState<{ id: string; title: string } | null>(
     null,
   );
+  const [taskMoveError, setTaskMoveError] = useState<unknown>(null);
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  useEffect(() => {
+    setTaskMoveError(null);
+  }, [activeTaskId]);
 
   const handleRenameTask = useCallback((taskId: string, currentTitle: string) => {
     setRenamingTask({ id: taskId, title: currentTitle });
@@ -440,10 +391,13 @@ export function useSidebarActions(store: StoreApi) {
     [renamingTask, renameTaskById],
   );
 
-  const handleMoveToStep = useMoveToStep(store);
+  const clearTaskMoveError = useCallback(() => setTaskMoveError(null), []);
+  const reportTaskMoveError = useCallback((error: unknown) => setTaskMoveError(error), []);
+  const handleMoveToStep = useMoveToStep(store, clearTaskMoveError, reportTaskMoveError);
 
   return {
     preparingTaskId,
+    taskMoveError,
     handleSelectTask,
     handleMoveToStep,
     handleNestTask,
@@ -490,7 +444,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   const highlightedSelectedTaskId = onTaskRoute ? selectedTaskId : null;
 
   const sidebarActions = useSidebarActions(store);
-  const { preparingTaskId } = sidebarActions;
+  const { preparingTaskId, taskMoveError } = sidebarActions;
   const taskLinkHandlers = useSidebarTaskLinking(workspaceId, sidebarActions);
   const repositories =
     useAppStore((state) =>
@@ -550,6 +504,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   return (
     <PanelRoot data-testid="task-sidebar">
       {!hideFilterBar && <SidebarFilterBar />}
+      {taskMoveError !== null && <TaskMoveErrorBanner error={taskMoveError} />}
       <TaskSidebarScrollArea>
         <TaskSwitcher {...switcherProps} />
         <PluginSlot name="task-sidebar" />

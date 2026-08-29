@@ -614,6 +614,7 @@ export function KanbanCardShell({
       ref={setNodeRef}
       style={style}
       data-testid={`task-card-${task.id}`}
+      data-kanban-card=""
       className={cn(
         "group max-h-48 bg-card rounded-sm data-[size=sm]:py-1 cursor-pointer mb-2 w-full py-0 relative border border-border overflow-visible shadow-none ring-0",
         "touch-none md:touch-auto",

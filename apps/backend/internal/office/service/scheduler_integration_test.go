@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,7 +44,7 @@ func TestSchedulerIntegration_TickProcessesRun(t *testing.T) {
 	}
 
 	// Finish the run.
-	if err := svc.FinishRun(ctx, run.ID); err != nil {
+	if err := svc.FinishRun(ctx, run.ID, service.RunOutcomeProcessed); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
 
@@ -235,7 +236,7 @@ func TestSchedulerIntegration_AtCapacityStaysQueued(t *testing.T) {
 	}
 
 	// Finish the first run.
-	if err := svc.FinishRun(ctx, first.ID); err != nil {
+	if err := svc.FinishRun(ctx, first.ID, service.RunOutcomeProcessed); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
 
@@ -313,7 +314,7 @@ func TestSchedulerIntegration_PromptBuiltCorrectly(t *testing.T) {
 				t.Errorf("prompt should contain %q, got: %s", tt.contains, prompt)
 			}
 
-			_ = svc.FinishRun(ctx, run.ID)
+			_ = svc.FinishRun(ctx, run.ID, service.RunOutcomeProcessed)
 		})
 	}
 }
@@ -369,6 +370,55 @@ func TestSchedulerIntegration_BuildPromptContext_ApprovalStageIncludesRecentComm
 	prompt := service.BuildPrompt(pc)
 	if !containsIgnoreCase(prompt, "Recent task comments:") {
 		t.Errorf("approval prompt should label comments as recent task comments, got: %s", prompt)
+	}
+}
+
+func TestSchedulerIntegration_BuildPromptContext_UsesAuthoritativeStageType(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	insertTaskForPrompt(t, svc, "task-authoritative-stage", "ws-1", "Approve release", "Confirm the release is safe", 3)
+	svc.ExecSQL(t, `UPDATE tasks SET workflow_step_id = ? WHERE id = ?`, "step-authoritative", "task-authoritative-stage")
+	svc.ExecSQL(t, `INSERT INTO workflow_steps (id, stage_type) VALUES (?, ?)`, "step-authoritative", "approval")
+
+	pc := service.BuildPromptContextForTest(
+		svc,
+		ctx,
+		service.RunReasonTaskAssigned,
+		`{"task_id":"task-authoritative-stage","workflow_step_id":"step-authoritative","stage_type":"work"}`,
+	)
+
+	if pc.StageType != "approval" {
+		t.Fatalf("StageType = %q, want authoritative approval stage", pc.StageType)
+	}
+	if prompt := service.BuildPrompt(pc); !strings.HasPrefix(prompt, "You are approving") {
+		t.Fatalf("prompt = %q, want approver framing", prompt)
+	}
+}
+
+func TestSchedulerIntegration_BuildPromptContext_TaskReviewRequestedUsesRole(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	insertTaskForPrompt(t, svc, "task-review-requested", "ws-1", "Review release", "Check the release", 3)
+	svc.ExecSQL(t, `UPDATE tasks SET workflow_step_id = ? WHERE id = ?`, "step-review-requested", "task-review-requested")
+	svc.ExecSQL(t, `INSERT INTO workflow_steps (id, stage_type) VALUES (?, ?)`, "step-review-requested", "custom")
+
+	pc := service.BuildPromptContextForTest(
+		svc,
+		ctx,
+		service.RunReasonTaskReviewRequested,
+		`{"task_id":"task-review-requested","role":"approver"}`,
+	)
+
+	if pc.StageID != "step-review-requested" {
+		t.Fatalf("StageID = %q, want current task workflow step", pc.StageID)
+	}
+	if pc.StageType != "approval" {
+		t.Fatalf("StageType = %q, want approval from participant role", pc.StageType)
+	}
+	if prompt := service.BuildPrompt(pc); !strings.HasPrefix(prompt, "You are approving") {
+		t.Fatalf("prompt = %q, want approver framing", prompt)
 	}
 }
 

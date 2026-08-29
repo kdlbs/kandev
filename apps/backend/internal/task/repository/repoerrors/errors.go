@@ -25,6 +25,13 @@ var ErrRepositoryNotFound = errors.New("repository not found")
 // ErrRepositorySetNotFound reports that no repository set row matched the supplied id.
 var ErrRepositorySetNotFound = errors.New("repository set not found")
 
+// ErrRepositoryBranchPolicyNotFound reports that no policy row matched the id.
+var ErrRepositoryBranchPolicyNotFound = errors.New("repository branch policy not found")
+
+// ErrRepositoryBranchPoliciesExist reports that a Gitflow starter cannot seed
+// a repository that already has one or more policies.
+var ErrRepositoryBranchPoliciesExist = errors.New("repository branch policies already exist")
+
 // ErrTaskEnvironmentNotFound reports that no task environment row matched the supplied id.
 var ErrTaskEnvironmentNotFound = errors.New("task environment not found")
 
@@ -60,3 +67,12 @@ var ErrCoordinatorGrantNotFound = errors.New("coordinator grant not found")
 // race on the principal-scoped partial unique index - the principal already
 // holds an active grant for the same (scope_kind, scope_id).
 var ErrCoordinatorGrantConflict = errors.New("coordinator grant already exists for scope")
+
+// ErrWorkflowResolutionConflict reports that a caller's expected current
+// workflow (passed to guard a write against a concurrent reassignment) no
+// longer matches the task's persisted workflow_id, checked atomically inside
+// the write transaction immediately before the row is updated. The write is
+// rejected rather than silently reverting whatever the concurrent move just
+// did. See task/service.MoveTaskOptions.ExpectedWorkflowID for the caller
+// contract.
+var ErrWorkflowResolutionConflict = errors.New("task workflow changed since resolution")

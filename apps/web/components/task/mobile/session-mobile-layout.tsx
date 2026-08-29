@@ -227,9 +227,7 @@ export function MobilePanelArea({
         </div>
       )}
       {currentMobilePanel === "plan" && (
-        <div className="flex-1 min-h-0 flex flex-col p-2">
-          <TaskPlanPanel taskId={activeTaskId} visible={true} />
-        </div>
+        <MobilePlanPanel taskId={activeTaskId} bottomNavHeight={bottomNavHeight} />
       )}
       {currentMobilePanel === "changes" && (
         <div className="flex-1 min-h-0 flex flex-col p-2">
@@ -273,6 +271,20 @@ export function MobilePanelArea({
         onSelectReview={onSelectReview}
       />
       <MobilePluginPanel currentMobilePanel={currentMobilePanel} />
+    </div>
+  );
+}
+
+function MobilePlanPanel({
+  taskId,
+  bottomNavHeight,
+}: {
+  taskId: string | null;
+  bottomNavHeight: string;
+}) {
+  return (
+    <div className="flex-1 min-h-0 flex flex-col p-2">
+      <TaskPlanPanel taskId={taskId} visible={true} mobileBottomOffset={bottomNavHeight} />
     </div>
   );
 }

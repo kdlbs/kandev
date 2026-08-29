@@ -102,8 +102,9 @@ type TaskItemProps = {
   onToggleSubtasks?: () => void;
   /**
    * The task's repository as a stable slug (or name). A multi-repository task
-   * carries its primary repository here; enumerating the rest is deferred,
-   * since `TaskSwitcherItem.repositories` is not populated from live data.
+   * carries its primary repository here for compatibility. The complete
+   * ordered repository combination is projected through
+   * `TaskSwitcherItem.repositories` for sidebar grouping.
    */
   repositoryPath?: string;
   /**
@@ -166,13 +167,17 @@ function taskItemRowClassName(
   isRoot: boolean,
   hasDetails: boolean,
 ): string {
+  const rowSurfaceClass = isSelected
+    ? "border-y border-primary/50 bg-primary/15 hover:bg-primary/20"
+    : "hover:bg-foreground/[0.05]";
+
   return cn(
     "group relative flex w-full gap-2 py-2 pr-3 text-left text-sm outline-none cursor-pointer",
     hasDetails ? "items-start" : "items-center",
-    "transition-colors duration-75 hover:bg-foreground/[0.05]",
-    isSelected && "bg-primary/10",
-    // When a row is both the active task and multi-selected, keep the stronger
-    // active background and just add the selection ring on top.
+    "transition-colors duration-75",
+    rowSurfaceClass,
+    // When a row is multi-selected, keep the active background when applicable
+    // and add only the existing selection ring for the multi-selection state.
     isMultiSelected && !isSelected && "bg-primary/5",
     isMultiSelected && "ring-1 ring-inset ring-primary/40",
     isRoot && "pl-3",
@@ -328,7 +333,7 @@ function TaskStateIcon({
 }
 
 function TaskItemTitle({ title }: { title: string }) {
-  return <ScrollOnOverflow className="min-w-0 w-full">{title}</ScrollOnOverflow>;
+  return <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>;
 }
 
 function TaskItemContent({
@@ -604,22 +609,14 @@ function RowConnector({ depth, leftPx }: { depth: number; leftPx: number }) {
 }
 
 function SelectionBar({ isSelected, color }: { isSelected: boolean; color: TaskColor | null }) {
-  if (color) {
-    return (
-      <div
-        className={cn(
-          "absolute left-0 top-0 bottom-0 w-[3px] transition-opacity",
-          TASK_COLOR_BAR_CLASS[color],
-          isSelected ? "opacity-100" : "opacity-60",
-        )}
-      />
-    );
-  }
+  if (!color) return null;
+
   return (
     <div
       className={cn(
-        "absolute left-0 top-0 bottom-0 w-[2px] bg-primary transition-opacity",
-        isSelected ? "opacity-100" : "opacity-0",
+        "absolute left-0 top-0 bottom-0 w-[3px] transition-opacity",
+        TASK_COLOR_BAR_CLASS[color],
+        isSelected ? "opacity-100" : "opacity-60",
       )}
     />
   );

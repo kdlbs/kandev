@@ -8,7 +8,7 @@ import (
 
 func TestPRFieldsBlockRequestsMergeQueueEntry(t *testing.T) {
 	block := prFieldsBlock()
-	if !strings.Contains(block, "mergeQueueEntry { state position estimatedTimeToMerge }") {
+	if !strings.Contains(block, "mergeQueueEntry { id state position estimatedTimeToMerge headCommit { oid } }") {
 		t.Fatalf("prFieldsBlock() = %s, want merge queue fields", block)
 	}
 }
@@ -24,7 +24,7 @@ func TestConvertBatchedPRResultPreservesMergeQueueObservation(t *testing.T) {
 	}{
 		{
 			name:         "queued with metadata",
-			entry:        `{"state":"QUEUED","position":3,"estimatedTimeToMerge":125}`,
+			entry:        `{"id":"entry-a","state":"QUEUED","position":3,"estimatedTimeToMerge":125,"headCommit":{"oid":"head-a"}}`,
 			wantState:    "queued",
 			wantPosition: intPtr(3),
 			wantEstimate: intPtr(125),
@@ -68,6 +68,11 @@ func TestConvertBatchedPRResultPreservesMergeQueueObservation(t *testing.T) {
 			}
 			if !intPtrEqual(status.MergeQueueEstimatedTimeToMergeSeconds, test.wantEstimate) {
 				t.Errorf("MergeQueueEstimatedTimeToMergeSeconds = %v, want %v", status.MergeQueueEstimatedTimeToMergeSeconds, test.wantEstimate)
+			}
+			if test.name == "queued with metadata" {
+				if status.MergeQueueEntryID != "entry-a" || status.MergeQueueEntryHeadSHA != "head-a" {
+					t.Errorf("merge queue entry = %q/%q, want entry-a/head-a", status.MergeQueueEntryID, status.MergeQueueEntryHeadSHA)
+				}
 			}
 			if status.mergeQueuePopulated != test.wantObserved {
 				t.Errorf("mergeQueuePopulated = %v, want %v", status.mergeQueuePopulated, test.wantObserved)

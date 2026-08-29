@@ -40,9 +40,25 @@ func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *L
 	// Reuse setup below consumes this same inventory, avoiding a second query
 	// and keeping cancellation attached to the caller's context.
 	env.Repos = rows
+	// Zero recorded rows means the canonical inventory was never captured at
+	// all (for example: a launch whose prepare step failed before writing
+	// any repo rows). That is recoverable — letting this launch through lets
+	// reuseExistingRepositoryWorktrees fall through its own empty-inventory
+	// check and rebuild fresh worktree/repo specs. A non-empty but wrong
+	// inventory below is the guard's actual purpose and must still refuse.
+	if len(rows) == 0 {
+		req.WorkspaceReuseRequired = workspaceReuseAllowed(
+			env,
+			req.ExecutorType,
+			req.WorkspaceReuseRequired,
+			e.taskIsRepoBacked(ctx, req.TaskID),
+		)
+		return nil
+	}
 	for _, spec := range specs {
 		if canonicalInventoryMatches(spec, rows, req.UseWorktree) != 1 {
-			return fmt.Errorf("%w: canonical workspace repository inventory is incomplete", models.ErrWorkspaceReuseUnsafe)
+			return fmt.Errorf("%w: canonical workspace repository inventory has no matching entry for repository %q branch %q",
+				models.ErrWorkspaceReuseUnsafe, spec.RepositoryID, launchRepoBranchIdentitySlug(spec))
 		}
 	}
 	return nil
@@ -97,14 +113,24 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 			zap.String("req_executor_type", req.ExecutorType))
 		return
 	}
+	// A repo-backed environment with no canonical rows is being freshly
+	// materialized. Do not forward any environment or sibling runtime handle:
+	// those handles could reconnect to the incomplete workspace, and
+	// PreviousExecutionID would route the new session through the resume path.
+	if !req.WorkspaceReuseRequired && e.taskIsRepoBacked(ctx, req.TaskID) && len(env.Repos) == 0 {
+		return
+	}
 
 	if env.TaskDirName != "" && req.UseWorktree {
 		req.TaskDirName = env.TaskDirName
 	}
 	// SSH uses the remote task directory as an environment-scoped attachment
 	// handle. It is distinct from the per-session agentctl directory and must
-	// therefore be forwarded for a sibling session without adopting its runtime.
-	if req.ExecutorType == string(models.ExecutorTypeSSH) && env.WorkspacePath != "" {
+	// therefore be forwarded for a sibling session without adopting its
+	// runtime. Only forward it when reuse is actually required: a launch that
+	// fell through to full materialization (see workspaceReuseAllowed) must
+	// not see the old, possibly incomplete or stale, workspace path.
+	if req.ExecutorType == string(models.ExecutorTypeSSH) && env.WorkspacePath != "" && req.WorkspaceReuseRequired {
 		ensureLaunchMetadata(req)[lifecycle.MetadataKeySSHRemoteTaskDir] = env.WorkspacePath
 	}
 
@@ -307,6 +333,7 @@ func topLevelLaunchRepoSpec(req *LaunchAgentRequest) (RepoSpec, bool) {
 		WorktreeBranchTicket:   req.WorktreeBranchTicket,
 		PullBeforeWorktree:     req.PullBeforeWorktree,
 		RemoteSyncHandled:      req.RemoteSyncHandled,
+		RefreshRepository:      req.RefreshRepository,
 		CopyFiles:              req.CopyFiles,
 		BranchIdentitySlug:     topLevelBranchIdentitySlug(req),
 	}, true

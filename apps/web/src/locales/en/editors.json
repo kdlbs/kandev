@@ -45,6 +45,7 @@
   "openTaskSessionBeforeSending": "Open a task session before sending to the agent.",
   "openWith": "Open with...",
   "pasteLink": "Paste link...",
+  "planFormattingToolbar": "Plan formatting toolbar",
   "pleaseTryAgain": "Please try again.",
   "previewMarkdown": "Preview markdown",
   "queuedForTheAgent": "Queued for the agent.",
