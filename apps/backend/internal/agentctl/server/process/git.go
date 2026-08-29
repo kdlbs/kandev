@@ -51,6 +51,15 @@ type GitOperator struct {
 	remoteContributionErr      error
 	contributionDestination    *models.ContributionDestination
 	contributionDestinationErr error
+	// prCreateRetryAttempts is the number of times to attempt PR creation after a
+	// successful branch push. GitHub's eventual consistency can briefly return
+	// "no commits between base and head" (or similar) for a ref it has not yet
+	// indexed, so we retry instead of surfacing that transient failure to the user.
+	// Set to 1 to disable the backoff (push, then one create attempt).
+	prCreateRetryAttempts int
+	// prCreateRetryBaseDelay is the initial backoff between create attempts. Each
+	// attempt waits baseDelay*attempt (linear backoff) before retrying.
+	prCreateRetryBaseDelay time.Duration
 
 	mu         sync.Mutex // Prevents concurrent git operations
 	inProgress bool
@@ -60,10 +69,12 @@ type GitOperator struct {
 // NewGitOperator creates a new GitOperator for the given workspace directory.
 func NewGitOperator(workDir string, log *logger.Logger, workspaceTracker *WorkspaceTracker) *GitOperator {
 	return &GitOperator{
-		workDir:          workDir,
-		logger:           log.WithFields(zap.String("component", "git-operator")),
-		workspaceTracker: workspaceTracker,
-		environment:      os.Environ,
+		workDir:                workDir,
+		logger:                 log.WithFields(zap.String("component", "git-operator")),
+		workspaceTracker:       workspaceTracker,
+		environment:            os.Environ,
+		prCreateRetryAttempts:  3,
+		prCreateRetryBaseDelay: 2 * time.Second,
 	}
 }
 
@@ -1294,14 +1305,20 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 
 	switch provider {
 	case prProviderAzureRepos:
-		created, createErr := g.createAzureReposPR(ctx, result, remoteURL, branch, title, body, baseBranch, draft)
-		return finalizePRCreationAfterPush(created, createErr)
+		return g.createPRWithRetryAfterPush(ctx, result, title, body, baseBranch, draft,
+			func() (*PRCreateResult, error) {
+				return g.createAzureReposPR(ctx, result, remoteURL, branch, title, body, baseBranch, draft)
+			})
 	case prProviderGitHub:
-		created, createErr := g.createGitHubPR(ctx, result, branch, title, body, baseBranch, draft)
-		return finalizePRCreationAfterPush(created, createErr)
+		return g.createPRWithRetryAfterPush(ctx, result, title, body, baseBranch, draft,
+			func() (*PRCreateResult, error) {
+				return g.createGitHubPR(ctx, result, branch, title, body, baseBranch, draft)
+			})
 	case prProviderGitLab:
-		created, createErr := g.createGitLabPR(ctx, result, gitLabInfo, branch, title, body, baseBranch, draft)
-		return finalizePRCreationAfterPush(created, createErr)
+		return g.createPRWithRetryAfterPush(ctx, result, title, body, baseBranch, draft,
+			func() (*PRCreateResult, error) {
+				return g.createGitLabPR(ctx, result, gitLabInfo, branch, title, body, baseBranch, draft)
+			})
 	default:
 		result.Error = "unsupported git remote for PR creation"
 		return result, nil
@@ -1340,8 +1357,74 @@ func (g *GitOperator) createManagedContributionPR(
 	}
 	result.Provider = string(prProviderGitHub)
 	result.BranchPushed = true
-	created, createErr := g.createGitHubPR(ctx, result, branch, title, body, baseBranch, draft)
-	return finalizePRCreationAfterPush(created, createErr)
+	return g.createPRWithRetryAfterPush(ctx, result, title, body, baseBranch, draft,
+		func() (*PRCreateResult, error) {
+			return g.createGitHubPR(ctx, result, branch, title, body, baseBranch, draft)
+		})
+}
+
+
+// createPRWithRetryAfterPush runs a single provider create call with bounded
+// backoff. The branch has already been pushed by the caller, so a transient
+// provider-side failure (e.g. GitHub's eventual consistency returning "no
+// commits between base and head" before it has indexed the new ref) should be
+// retried rather than surfaced to the user as the generic "Branch was pushed;
+// retry creation" prompt. The first success wins; once attempts are exhausted
+// the final partial failure is finalized into that user-facing prompt.
+func (g *GitOperator) createPRWithRetryAfterPush(
+	ctx context.Context,
+	result *PRCreateResult,
+	title, body, baseBranch string,
+	draft bool,
+	attempt func() (*PRCreateResult, error),
+) (*PRCreateResult, error) {
+	attempts := g.prCreateRetryAttempts
+	if attempts < 1 {
+		attempts = 1
+	}
+	var last *PRCreateResult
+	var lastErr error
+	for attemptIdx := range attempts {
+		i := attemptIdx + 1
+		if attemptIdx > 0 {
+			delay := g.prCreateRetryBaseDelay * time.Duration(i)
+			if !sleepCtx(ctx, delay) {
+				return finalizePRCreationAfterPush(last, lastErr)
+			}
+		}
+		last, lastErr = attempt()
+		if lastErr == nil && last != nil && last.Success {
+			return last, nil
+		}
+		g.logger.Warn("PR creation attempt failed after push; retrying",
+			zap.Int("attempt", i),
+			zap.Int("total_attempts", attempts),
+			zap.String("error", errOrEmpty(lastErr, last)),
+		)
+	}
+	return finalizePRCreationAfterPush(last, lastErr)
+}
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
+// errOrEmpty renders a create failure as a single string for logging: the
+// explicit error if present, otherwise the result's Error field.
+func errOrEmpty(err error, result *PRCreateResult) string {
+	if err != nil {
+		return err.Error()
+	}
+	if result != nil {
+		return result.Error
+	}
+	return ""
 }
 
 func finalizePRCreationAfterPush(result *PRCreateResult, createErr error) (*PRCreateResult, error) {
