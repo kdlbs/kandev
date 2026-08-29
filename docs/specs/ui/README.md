@@ -11,7 +11,7 @@ owners:
 
 ## Purpose
 
-The UI system owns web presentation behavior for desktop and mobile surfaces.
+The UI owns desktop and mobile web presentation.
 
 ## Ownership
 
@@ -165,6 +165,7 @@ system. The UI system owns only independent, reusable presentation contracts.
 - [Persistent status motion](system-design/persistent-status-motion.md)
 - [Repository Groups](system-design/sidebar-repository-grouping.md)
 - [Sidebar Task Focus](system-design/sidebar-task-focus.md)
+- [Sidebar Task Row Presentation](system-design/sidebar-task-row-presentation.md)
 - [PR Task Status Summary](system-design/pr-task-status-summary.md)
 - [Prompt History Panel](system-design/prompt-history-panel.md)
 - [Quick Chat and terminal elevation](system-design/quick-chat-elevation.md)

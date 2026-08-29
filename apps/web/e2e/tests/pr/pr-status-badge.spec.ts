@@ -420,7 +420,12 @@ test.describe("PR status badge", () => {
     await expect(icon).not.toHaveClass(/text-green-500/);
   });
 
-  test("renders readable task PR summary", async ({ testPage, apiClient, seedData, prCapture }) => {
+  test("renders readable task PR summary and compact trailing actions", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
     test.setTimeout(120_000);
 
     const taskTitle = "Readable PR Summary Task";
@@ -475,8 +480,33 @@ test.describe("PR status badge", () => {
     await expect(taskRow).toBeVisible({ timeout: 15_000 });
     const trailingStatus = taskRow.getByTestId("sidebar-task-change-request-status");
     await expect(trailingStatus).toBeVisible();
+    const trailingActions = taskRow.getByTestId("sidebar-task-change-request-actions");
+    const [rowBox, statusBox, actionsBox] = await Promise.all([
+      taskRow.boundingBox(),
+      trailingStatus.boundingBox(),
+      trailingActions.boundingBox(),
+    ]);
+    expect(rowBox).not.toBeNull();
+    expect(statusBox).not.toBeNull();
+    expect(actionsBox).not.toBeNull();
+    expect(Math.abs(actionsBox!.width - statusBox!.width)).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(statusBox!.x + statusBox!.width - (rowBox!.x + rowBox!.width - 12)),
+    ).toBeLessThanOrEqual(1);
     const icon = taskRow.getByTestId(`pr-task-icon-${task.id}`);
     await expect(icon).toHaveAttribute("data-pr-ready-to-merge", "true");
+    const taskActions = taskRow.getByRole("button", { name: "Task actions" });
+    await taskRow.hover();
+    await expect(taskActions).toBeVisible();
+    const menuSlot = taskRow.getByTestId("sidebar-task-change-request-menu-slot");
+    await expect(menuSlot).toHaveCSS("width", "24px");
+    const expandedStatusBox = await trailingStatus.boundingBox();
+    const taskActionsBox = await taskActions.boundingBox();
+    expect(expandedStatusBox).not.toBeNull();
+    expect(taskActionsBox).not.toBeNull();
+    expect(taskActionsBox!.x).toBeGreaterThanOrEqual(
+      expandedStatusBox!.x + expandedStatusBox!.width - 1,
+    );
     await icon.hover();
 
     const summary = visibleTaskPRSummary(testPage);

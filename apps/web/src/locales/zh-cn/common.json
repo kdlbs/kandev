@@ -514,5 +514,18 @@
   "relativeMinutesAgo_other": "{{count}} 分钟前",
   "relativeSecondsAgo_one": "{{count}} 秒前",
   "relativeSecondsAgo_other": "{{count}} 秒前",
-  "relativeYesterday": "昨天"
+  "relativeYesterday": "昨天",
+  "sidebarSeconds_one": "{{count}}秒",
+  "sidebarSeconds_other": "{{count}}秒",
+  "sidebarMinutes_one": "{{count}}分",
+  "sidebarMinutes_other": "{{count}}分",
+  "sidebarHours_one": "{{count}}小时",
+  "sidebarHours_other": "{{count}}小时",
+  "sidebarDays_one": "{{count}}天",
+  "sidebarDays_other": "{{count}}天",
+  "sidebarWeeks_one": "{{count}}周",
+  "sidebarWeeks_other": "{{count}}周",
+  "sidebarYears_one": "{{count}}年",
+  "sidebarYears_other": "{{count}}年",
+  "sidebarYearsMax": "99+年"
 }
