@@ -25,7 +25,7 @@ import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const paginationDebug = createDebugLogger("messages:pagination");
 
-const NATIVE_BOTTOM_SCROLL_TOP = Number.MAX_SAFE_INTEGER;
+const NATIVE_BOTTOM_SCROLL_TOP = 2_147_483_647;
 
 /** Writes a clamped maximum so the browser resolves the native bottom without
  * forcing a synchronous scrollHeight layout read. */
