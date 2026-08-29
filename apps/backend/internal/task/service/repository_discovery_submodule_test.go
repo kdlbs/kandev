@@ -83,6 +83,9 @@ func TestResolveExplicitLocalRepositoryPath_RejectsMismatchedSubmoduleWorktree(t
 	if err := os.MkdirAll(filepath.Join(gitDir, "refs", "heads"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(repoPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
