@@ -23,6 +23,8 @@ Users need to connect repositories already present on the machine running Kandev
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-001.1:** A user can add a local Git repository by entering or selecting an absolute path that the Kandev process can access.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-001.2:** Manual selection is valid independently of `repositoryDiscovery.roots`; those roots govern only automatic discovery scans.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-001.3:** Kandev validates and canonicalizes a non-empty local repository path before saving it. A saved repository records the exact canonical path the user selected.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-001.3a:** An initialized Git submodule with reciprocal canonical `core.worktree` metadata can be registered as its selected local repository path.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-001.3b:** A regular-file `.git` pointer without reciprocal ownership proof, including a missing, empty, or mismatched `core.worktree`, is rejected and not persisted.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-001.4:** Trusting one repository does not trust its parent directory, filesystem volume, or sibling repositories.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-001.5:** Saved repositories remain usable for branch listing, current status, refresh, task creation, and fresh-branch workflows after restart.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-001.6:** A saved repository without an `origin` remote supports Merge and Rebase when the selected base branch exists locally.
