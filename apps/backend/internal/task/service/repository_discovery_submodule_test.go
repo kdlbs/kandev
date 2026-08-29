@@ -3,7 +3,9 @@ package service
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -43,6 +45,64 @@ func TestResolveExplicitLocalRepositoryPath_AcceptsReciprocalSubmoduleMetadata(t
 	}
 	if branch != "main" {
 		t.Fatalf("default branch = %q, want main", branch)
+	}
+}
+
+func TestResolveExplicitLocalRepositoryPath_AcceptsGitQuotedSubmoduleWorktree(t *testing.T) {
+	parent := canonicalTempDir(t)
+	sourcePath := filepath.Join(parent, "source")
+	superprojectPath := filepath.Join(parent, "superproject")
+	for _, repositoryPath := range []string{sourcePath, superprojectPath} {
+		if err := os.MkdirAll(repositoryPath, 0o755); err != nil {
+			t.Fatalf("MkdirAll %q: %v", repositoryPath, err)
+		}
+		gitCommand(t, repositoryPath, "init", "-b", "main")
+		gitCommand(t, repositoryPath, "config", "user.email", "test@example.com")
+		gitCommand(t, repositoryPath, "config", "user.name", "Test User")
+	}
+	if err := os.WriteFile(filepath.Join(sourcePath, "README.md"), []byte("source\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile source README: %v", err)
+	}
+	gitCommand(t, sourcePath, "add", "README.md")
+	gitCommand(t, sourcePath, "commit", "-m", "initial commit")
+
+	moduleName := "module#hash\"quote"
+	modulePath := filepath.Join(superprojectPath, moduleName)
+	gitCommand(t, superprojectPath, "-c", "protocol.file.allow=always", "submodule", "add", sourcePath, moduleName)
+	gitDir, err := resolveGitDir(modulePath)
+	if err != nil {
+		t.Fatalf("resolveGitDir: %v", err)
+	}
+	config, err := os.ReadFile(filepath.Join(gitDir, "config"))
+	if err != nil {
+		t.Fatalf("ReadFile submodule config: %v", err)
+	}
+	if !strings.Contains(string(config), "worktree = \"") {
+		t.Fatalf("Git-generated config does not quote core.worktree: %s", config)
+	}
+	if !strings.Contains(string(config), `\"`) {
+		t.Fatalf("Git-generated config does not escape core.worktree quote: %s", config)
+	}
+
+	resolved, _, err := resolveExplicitLocalRepositoryPath(modulePath)
+	if err != nil {
+		t.Fatalf("resolveExplicitLocalRepositoryPath: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(modulePath)
+	if err != nil {
+		t.Fatalf("EvalSymlinks module path: %v", err)
+	}
+	if resolved != want {
+		t.Fatalf("resolved path = %q, want %q", resolved, want)
+	}
+}
+
+func gitCommand(t *testing.T, repositoryPath string, args ...string) {
+	t.Helper()
+	commandArgs := append([]string{"-C", repositoryPath}, args...)
+	output, err := exec.Command("git", commandArgs...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, output)
 	}
 }
 

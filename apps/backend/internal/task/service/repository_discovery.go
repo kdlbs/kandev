@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/kandev/kandev/internal/common/gitref"
@@ -335,7 +336,11 @@ func parseGitConfigCoreWorktree(config string) (string, error) {
 		if !found || !strings.EqualFold(strings.TrimSpace(key), "worktree") {
 			continue
 		}
-		worktree = strings.TrimSpace(value)
+		parsedWorktree, err := parseGitConfigValue(value)
+		if err != nil {
+			return "", fmt.Errorf("parse core.worktree: %w", err)
+		}
+		worktree = parsedWorktree
 		foundWorktree = true
 	}
 	if !foundWorktree {
@@ -345,6 +350,27 @@ func parseGitConfigCoreWorktree(config string) (string, error) {
 		return "", errors.New("core.worktree is empty")
 	}
 	return worktree, nil
+}
+
+func parseGitConfigValue(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "\"") {
+		unquoted, err := strconv.Unquote(value)
+		if err != nil {
+			return "", err
+		}
+		return unquoted, nil
+	}
+	for index, character := range value {
+		if (character == '#' || character == ';') && index > 0 && isGitConfigWhitespace(value[index-1]) {
+			return strings.TrimSpace(value[:index]), nil
+		}
+	}
+	return strings.TrimSpace(value), nil
+}
+
+func isGitConfigWhitespace(character byte) bool {
+	return character == ' ' || character == '\t'
 }
 
 func sameCanonicalPath(left, right string) bool {
