@@ -403,7 +403,8 @@ export const test = backendFixture.extend<
   },
 
   integrationCleanup: [
-    async ({ apiClient, seedData }, use) => {
+    async ({ apiClient, backend, seedData }, use) => {
+      await backend.ensureReady();
       const scoped = `workspace_id=${encodeURIComponent(seedData.workspaceId)}`;
       await apiClient.rawRequest("DELETE", `/api/v1/jira/config?${scoped}`).catch(() => undefined);
       await apiClient
@@ -422,12 +423,14 @@ export const test = backendFixture.extend<
         // Provider-focused specs reuse and mutate the worker-scoped seed row.
         // Restore its local-only identity before the next test; otherwise a
         // removed mock remote plus stale provider metadata breaks workspace prep.
-        apiClient.updateRepository(seedData.repositoryId, {
-          provider: "",
-          provider_host: "",
-          provider_owner: "",
-          provider_name: "",
-        }),
+        apiClient
+          .updateRepository(seedData.repositoryId, {
+            provider: "",
+            provider_host: "",
+            provider_owner: "",
+            provider_name: "",
+          })
+          .catch(() => undefined),
         apiClient.mockJiraReset().catch(() => undefined),
         apiClient.mockLinearReset().catch(() => undefined),
         apiClient.mockSentryReset().catch(() => undefined),
@@ -467,6 +470,23 @@ export function restoreSeedRepositoryOrigin(seedData: SeedData) {
     });
   }
   execFileSync("git", ["-C", seedData.repositoryPath, "fetch", "--no-tags", "origin"], {
+    stdio: "ignore",
+  });
+}
+
+/** Restores the shared seed checkout to its clean main branch. */
+export function resetSeedRepositoryCheckout(seedData: SeedData, tmpDir: string) {
+  const env = makeGitEnv(tmpDir);
+  execFileSync("git", ["-C", seedData.repositoryPath, "checkout", "-f", "main"], {
+    env,
+    stdio: "ignore",
+  });
+  execFileSync("git", ["-C", seedData.repositoryPath, "reset", "--hard", "main"], {
+    env,
+    stdio: "ignore",
+  });
+  execFileSync("git", ["-C", seedData.repositoryPath, "clean", "-fd"], {
+    env,
     stdio: "ignore",
   });
 }
