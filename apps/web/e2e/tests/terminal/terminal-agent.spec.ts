@@ -307,6 +307,15 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     // The mock TUI prints "Processed: <prompt>" for each stdin line it receives.
     await session.expectPassthroughHasText("Analyze", 30_000);
     await session.expectPassthroughHasText("Processed: Implement", 30_000);
+    // Terminal output arrives before the lifecycle manager records the turn as
+    // complete. Wait for that state before asserting the workflow transition.
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id as string,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "the cascade turn did not settle before the final workflow step",
+      timeout: 30_000,
+    });
     await waitForWorkflowStep(
       apiClient,
       task.id,
@@ -389,6 +398,15 @@ test.describe("Terminal agent (TUI passthrough)", () => {
 
     // After context reset, the fresh process completes the Implement step prompt.
     await session.expectPassthroughHasText("Processed: Implement", 30_000);
+    // Terminal output arrives before the lifecycle manager records the turn as
+    // complete. Wait for that state before asserting the workflow transition.
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id as string,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "the reset cascade turn did not settle before the final workflow step",
+      timeout: 30_000,
+    });
     await waitForWorkflowStep(
       apiClient,
       task.id,
