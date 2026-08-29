@@ -1,7 +1,7 @@
 ---
 id: 03-workflow-sync-backoff
 title: Workflow Sync retry persistence
-status: in_progress
+status: done
 wave: 3
 depends_on: [02-rate-coordinator]
 plan: plan.md
@@ -28,4 +28,13 @@ system_design: ../../specs/integrations/system-design/github-rate-limit-coordina
 
 ## Results
 
-Pending.
+- Added idempotent recovery columns and round-trip coverage for fresh,
+  upgraded, and replayed Workflow Sync schemas.
+- Automatic failures persist equal-jitter exponential backoff, honor provider
+  retry lower bounds, and skip provider resolution before `next_attempt_at`.
+- Invalid GitHub credentials/access and missing targets suspend polling after
+  one attempt; skipped ticks stay silent. GitLab failures retain generic
+  transient recovery.
+- Config saves and explicit Sync now re-arm recovery state, while successful
+  explicit sync clears failures and suspension.
+- Package and race suites passed with task-local Go caches.

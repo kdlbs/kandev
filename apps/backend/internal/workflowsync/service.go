@@ -87,7 +87,16 @@ type Service struct {
 	// the periodic poller) means unscoped, matching every other integration
 	// service's default before auth is wired up.
 	workspaceAuthorizer func(context.Context, string) error
+	now                 func() time.Time
+	jitter              func(time.Duration) time.Duration
 }
+
+type syncMode uint8
+
+const (
+	syncManual syncMode = iota
+	syncAutomatic
+)
 
 // SetWorkspaceAuthorizer installs the per-user workspace access boundary
 // applied before every user-facing config read/write and force sync.
@@ -123,6 +132,8 @@ func NewService(
 		gitlabClients: gitlabClients,
 		applier:       applier,
 		logger:        log.WithFields(zap.String("component", "workflowsync-service")),
+		now:           time.Now,
+		jitter:        defaultJitter,
 	}
 }
 
@@ -200,6 +211,14 @@ type fetchedFile struct {
 // silent. The outcome (including failures) is recorded on the config row so
 // the UI can surface it.
 func (s *Service) SyncWorkspace(ctx context.Context, workspaceID string) (*SyncResult, error) {
+	return s.syncWorkspace(ctx, workspaceID, syncManual)
+}
+
+func (s *Service) syncWorkspace(
+	ctx context.Context,
+	workspaceID string,
+	mode syncMode,
+) (*SyncResult, error) {
 	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
 		return nil, err
 	}
@@ -213,21 +232,33 @@ func (s *Service) SyncWorkspace(ctx context.Context, workspaceID string) (*SyncR
 	if cfg == nil {
 		return nil, ErrNotConfigured
 	}
+	if mode == syncManual {
+		if err := s.store.ResetRecoveryState(ctx, workspaceID, s.now().UTC()); err != nil {
+			return nil, err
+		}
+		cfg.ConsecutiveFailures = 0
+		cfg.NextAttemptAt = nil
+		cfg.PollSuspended = false
+		cfg.PollSuspensionReason = ""
+	}
+	if mode == syncAutomatic && cfg.Provider == ProviderGitHub {
+		ctx = github.WithGitHubWorkClass(ctx, github.WorkClassBackground)
+	}
 
 	files, err := s.fetchFiles(ctx, cfg)
 	if err != nil {
-		s.recordFailure(ctx, workspaceID, err)
+		s.recordFailure(ctx, cfg, err)
 		return nil, err
 	}
 
 	parsed, warnings := parseFiles(files)
 	applied, err := s.applier.ApplySyncedWorkflows(ctx, workspaceID, parsed)
 	if err != nil {
-		s.recordFailure(ctx, workspaceID, err)
+		s.recordFailure(ctx, cfg, err)
 		return nil, err
 	}
 	warnings = append(warnings, applied.Warnings...)
-	if err := s.store.RecordSyncStatus(ctx, workspaceID, true, "", warnings, contentHash(files), time.Now().UTC()); err != nil {
+	if err := s.store.RecordSyncStatus(ctx, workspaceID, true, "", warnings, contentHash(files), s.now().UTC()); err != nil {
 		return nil, err
 	}
 	return &SyncResult{
@@ -239,12 +270,26 @@ func (s *Service) SyncWorkspace(ctx context.Context, workspaceID string) (*SyncR
 	}, nil
 }
 
-func (s *Service) recordFailure(ctx context.Context, workspaceID string, syncErr error) {
-	// Clear the hash so the next successful fetch re-applies from scratch.
-	if err := s.store.RecordSyncStatus(ctx, workspaceID, false, syncErr.Error(), nil, "", time.Now().UTC()); err != nil {
+func (s *Service) recordFailure(ctx context.Context, cfg *Config, syncErr error) {
+	now := s.now().UTC()
+	directive := buildFailureDirective(cfg, syncErr, now, s.jitter)
+	if err := s.store.RecordSyncFailure(ctx, cfg.WorkspaceID, syncErr.Error(), directive, now); err != nil {
 		s.logger.Warn("failed to record sync failure",
-			zap.String("workspace_id", workspaceID), zap.Error(err))
+			zap.String("workspace_id", cfg.WorkspaceID), zap.Error(err))
+		return
 	}
+	fields := []zap.Field{
+		zap.String("workspace_id", cfg.WorkspaceID),
+		zap.String("provider", cfg.Provider),
+		zap.String("failure_class", directive.class),
+		zap.Bool("poll_suspended", directive.suspended),
+		zap.String("retry_source", string(directive.retrySource)),
+		zap.Error(syncErr),
+	}
+	if directive.nextAttemptAt != nil {
+		fields = append(fields, zap.Time("next_attempt_at", *directive.nextAttemptAt))
+	}
+	s.logger.Warn("workflow sync attempt failed", fields...)
 }
 
 // fetchFiles lists the configured directory and downloads every workflow
@@ -377,7 +422,7 @@ func (s *Service) SyncDueConfigs(ctx context.Context) {
 		s.logger.Warn("failed to list workflow sync configs", zap.Error(err))
 		return
 	}
-	now := time.Now().UTC()
+	now := s.now().UTC()
 	for _, cfg := range configs {
 		if ctx.Err() != nil {
 			return
@@ -385,16 +430,16 @@ func (s *Service) SyncDueConfigs(ctx context.Context) {
 		if !isSyncDue(cfg, now) {
 			continue
 		}
-		if _, err := s.SyncWorkspace(ctx, cfg.WorkspaceID); err != nil {
-			s.logger.Warn("periodic workflow sync failed",
-				zap.String("workspace_id", cfg.WorkspaceID), zap.Error(err))
-		}
+		_, _ = s.syncWorkspace(ctx, cfg.WorkspaceID, syncAutomatic)
 	}
 }
 
 func isSyncDue(cfg *Config, now time.Time) bool {
-	if !cfg.PollEnabled {
+	if !cfg.PollEnabled || cfg.PollSuspended {
 		return false
+	}
+	if cfg.NextAttemptAt != nil {
+		return !now.Before(*cfg.NextAttemptAt)
 	}
 	if cfg.LastSyncedAt == nil {
 		return true

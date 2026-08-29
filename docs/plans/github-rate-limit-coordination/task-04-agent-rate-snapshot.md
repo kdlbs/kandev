@@ -1,7 +1,7 @@
 ---
 id: 04-agent-rate-snapshot
 title: Agent rate-state snapshot
-status: pending
+status: in_progress
 wave: 4
 depends_on: [03-workflow-sync-backoff]
 plan: plan.md
