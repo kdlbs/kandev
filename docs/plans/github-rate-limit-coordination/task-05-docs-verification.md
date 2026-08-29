@@ -46,23 +46,24 @@ Passing repository gates:
 - `python3 .github/scripts/lint-harness-files.py AGENTS.md`
 - `git diff --check`
 
-`make -C apps/backend test` remains blocked by deterministic runtime failures
-outside this plan's packages. Targeted package reruns reproduce all four:
+`make -C apps/backend test` fails only in four environment-sensitive or
+externally-owned packages, none touched by this change. Targeted package
+reruns reproduce all four:
 
-- `internal/agent/runtime/agentctl/launcher`: process-group child PID failures.
+- `internal/agent/runtime/agentctl/launcher`: process-group child PID failures
+  are observed and reproducible under the guarded runtime.
 - `internal/agentctl/server/process`: parent PID and stale process-group
-  failures, with `GetParentPID` returning `-1`.
-- `internal/common/config`: the Kandev process injects
-  `KANDEV_HEALTH_TIMEOUT_MS=180000`, overriding the fixture expectation.
-- `internal/task/service`: guarded execution denies the `os.OpenRoot`
-  parent-chain inspection used by local-directory tests.
+  failures, with `GetParentPID` returning `-1`, are observed and reproducible
+  under the guarded runtime.
+- `internal/common/config`: proven environmental by an
+  `env -u KANDEV_HEALTH_TIMEOUT_MS` control, which passes with the injected
+  `KANDEV_HEALTH_TIMEOUT_MS=180000` removed.
+- `internal/task/service`: reproduced by three independent tasks on unrelated
+  branches. Temp-directory location, sandbox denial of `os.OpenRoot`, and
+  parent-chain traversal from `/` were tested and eliminated as causes. The
+  externally-owned defect remains under investigation as Kandev Support
+  request `c67824e3-6eca-4c57-96b3-7a205885dd83`.
 
-All four failures are environment-sensitive and unrelated to this change. The
-task does not bypass the guard or edit these unrelated packages.
-
-The guard-sensitive filesystem result was independently reproduced on three
-unrelated branches. Re-running the seven local-repository tests with `TMPDIR`
-inside this task's writable worktree produces the same failures because the
-shared parent-chain helper opens filesystem root `/`. The coordinator accepted
-the preserved broad-suite exception as externally owned; all branch-owned
-acceptance and verification paths pass.
+The task does not bypass the guard or edit these unrelated packages. The
+coordinator accepted the preserved broad-suite exception as externally owned;
+all branch-owned acceptance and verification paths pass.
