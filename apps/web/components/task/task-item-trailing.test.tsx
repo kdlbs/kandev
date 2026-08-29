@@ -1,6 +1,14 @@
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TaskItemTrailing } from "./task-item-trailing";
+
+vi.mock("./task-contribution-icons", () => ({
+  TaskContributionIcons: () => null,
+}));
+
+vi.mock("@/components/integrations/registered-change-request-task-icon", () => ({
+  RegisteredChangeRequestTaskIcon: () => null,
+}));
 
 afterEach(cleanup);
 
@@ -24,6 +32,7 @@ describe("TaskItemTrailing relative time", () => {
     expect(relativeTime.className).toContain("w-11");
     expect(relativeTime.className).toContain("text-right");
     expect(relativeTime.className).toContain("tabular-nums");
+    expect(relativeTime.parentElement?.className).toContain("[@media(max-width:639px)]:w-auto");
   });
 
   it("uses the outer task-row menu disclosure hover and focus selectors", () => {
@@ -90,5 +99,25 @@ describe("TaskItemTrailing change-request status", () => {
 
     expect(screen.queryByTestId("sidebar-task-change-request-status")).toBeNull();
     expect(screen.getByRole("button", { name: "Task actions" })).not.toBeNull();
+  });
+
+  it("keeps the menu-only layout when a task has no change-request status", () => {
+    render(
+      <TaskItemTrailing
+        trailing="change_request_status"
+        menuOpen={false}
+        effectiveMenuOpen={false}
+        taskId="task-without-change-request"
+      />,
+    );
+
+    const status = screen.getByTestId("sidebar-task-change-request-status");
+    const actions = screen.getByTestId("sidebar-task-change-request-actions");
+    const menuSlot = screen.getByTestId("sidebar-task-change-request-menu-slot");
+
+    expect(status.childElementCount).toBe(0);
+    expect(status.className).toContain("empty:hidden");
+    expect(actions.contains(screen.getByRole("button", { name: "Task actions" }))).toBe(true);
+    expect(menuSlot.className).toContain("w-0");
   });
 });

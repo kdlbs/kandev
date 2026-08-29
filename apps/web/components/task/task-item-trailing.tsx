@@ -60,7 +60,7 @@ export function TaskItemTrailing({
 
   if (trailing === "relative_time" && compactRelativeTime) {
     return (
-      <div className="group/actions relative flex w-11 shrink-0 items-center self-center">
+      <div className="group/actions relative flex w-11 shrink-0 items-center self-center [@media(max-width:639px)]:w-auto">
         <span
           data-testid="sidebar-task-trailing-time"
           data-time-value={relativeTime}

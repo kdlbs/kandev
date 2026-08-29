@@ -649,6 +649,16 @@ test.describe("Mobile sidebar — view system", () => {
     expect(taskActionBox).not.toBeNull();
     expect(taskActionBox!.width).toBeGreaterThanOrEqual(44);
     expect(taskActionBox!.height).toBeGreaterThanOrEqual(44);
+    const rowBoxWithAction = await row.boundingBox();
+    expect(rowBoxWithAction).not.toBeNull();
+    expect(taskActionBox!.x).toBeGreaterThanOrEqual(rowBoxWithAction!.x - 1);
+    expect(taskActionBox!.x + taskActionBox!.width).toBeLessThanOrEqual(
+      rowBoxWithAction!.x + rowBoxWithAction!.width + 1,
+    );
+    expect(taskActionBox!.x).toBeGreaterThanOrEqual(drawerBox!.x - 1);
+    expect(taskActionBox!.x + taskActionBox!.width).toBeLessThanOrEqual(
+      drawerBox!.x + drawerBox!.width + 1,
+    );
     await row.tap();
     await expect(testPage).toHaveURL((url) => url.pathname === `/t/${task!.id}`);
 
