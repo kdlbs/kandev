@@ -71,6 +71,11 @@ The sidebar aggregator compares task update times before it compares status
 summary revisions. It selects the freshest status summary independently, so a
 new task state cannot erase newer summary data.
 
+When status-summary revisions are equal, the workflow snapshot is treated as
+the incoming reading. Snapshot responses can re-stamp `queued_prompt_count`
+from a fresh queue read without incrementing the revision; the active summary
+remains the fallback when the snapshot omits the summary.
+
 The active `kanban` hydration path already rejects an older task by task update
 time. The workflow snapshot path must apply the same task-state ordering before
 it writes `kanbanMulti.snapshots`.
@@ -115,8 +120,9 @@ is not required for this state-only change.
 The test applies a newer live task state before it resolves the old response.
 
 `task-session-sidebar-aggregate.test.ts` covers equal status-summary revisions
-with different task update times. It also keeps an independently newer status
-summary while it selects the newer task state.
+with different task update times and preserves the snapshot's re-stamped queue
+count. It also covers equal task timestamps and keeps an independently newer
+status summary while it selects the newer task state.
 
 The existing clarification Playwright scenario proves that State grouping
 moves a running task without a reload.

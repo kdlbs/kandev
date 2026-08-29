@@ -71,10 +71,12 @@ parity rule for state-only normalization.
   `IN_PROGRESS` with a newer update time.
 - **AC-TASKS-RUNTIME-STATE-PUBLICATION-ORDER-001.4:** Add aggregation tests in
   `apps/web/components/task/task-session-sidebar-aggregate.test.ts`. Equal
-  status-summary revisions must not make an older `REVIEW` snapshot win.
+  status-summary revisions must not make an older `REVIEW` snapshot win, and
+  equal task timestamps must retain the active projection.
 - **AC-TASKS-RUNTIME-STATE-PUBLICATION-ORDER-001.6:** The same aggregation tests
   cover the data path that the desktop sidebar and mobile task switcher share.
 - Add the inverse freshness case so a newer snapshot remains authoritative.
+- Add failed-refresh coverage for both placeholder and resolved snapshots.
 
 ## E2E tests
 
@@ -92,7 +94,7 @@ for the mobile-parity state-normalization exception.
 
 ## Verification results
 
-- Focused Vitest suite: 27 tests passed.
+- Focused Vitest suite: 29 tests passed.
 - Focused ESLint: passed with no warnings.
 - Web TypeScript typecheck: passed.
 - Existing clarification Playwright scenario: 1 Chromium test passed.

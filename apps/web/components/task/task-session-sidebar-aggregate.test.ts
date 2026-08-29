@@ -237,16 +237,45 @@ describe("aggregateSidebarTasks active precedence", () => {
 
 describe("aggregateSidebarTasks task lifecycle freshness", () => {
   it("uses newer task state when status-summary revisions are equal", () => {
-    // @covers AC-RUNTIME-STATE-PUBLICATION-ORDER-001.4
+    // @covers AC-TASKS-RUNTIME-STATE-PUBLICATION-ORDER-001.4
     const projected = makeTask("t1", "s1", {
       state: "REVIEW",
       updatedAt: "2026-08-29T09:14:01Z",
-      statusSummary: { revision: 4, updated_at: "2026-08-29T09:14:01Z" },
+      statusSummary: {
+        revision: 4,
+        updated_at: "2026-08-29T09:14:01Z",
+        queued_prompt_count: 5,
+      },
     });
     const active = makeTask("t1", "s1", {
       state: "IN_PROGRESS",
       updatedAt: ACTIVE_TASK_UPDATED_AT,
-      statusSummary: { revision: 4, updated_at: ACTIVE_TASK_UPDATED_AT },
+      statusSummary: {
+        revision: 4,
+        updated_at: ACTIVE_TASK_UPDATED_AT,
+        queued_prompt_count: 0,
+      },
+    });
+
+    const result = aggregateSidebarTasks(
+      { "wf-1": makeSnapshot([makeStep("s1", 0)], [projected]) },
+      "wf-1",
+      [active],
+      [makeStep("s1", 0)],
+    );
+
+    expect(result.allTasks[0].state).toBe("IN_PROGRESS");
+    expect(result.allTasks[0].statusSummary?.queued_prompt_count).toBe(5);
+  });
+
+  it("prefers the active task when task timestamps are equal", () => {
+    const projected = makeTask("t1", "s1", {
+      state: "REVIEW",
+      updatedAt: ACTIVE_TASK_UPDATED_AT,
+    });
+    const active = makeTask("t1", "s1", {
+      state: "IN_PROGRESS",
+      updatedAt: ACTIVE_TASK_UPDATED_AT,
     });
 
     const result = aggregateSidebarTasks(

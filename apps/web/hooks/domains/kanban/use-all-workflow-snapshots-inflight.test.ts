@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 
 type Workflow = { id: string; workspaceId: string; name: string };
 type SnapshotTask = {
@@ -248,7 +248,7 @@ describe("useAllWorkflowSnapshots in-flight websocket tasks", () => {
 
 describe("useAllWorkflowSnapshots task state races", () => {
   it("keeps a newer live task state when an older snapshot finishes later", async () => {
-    // @covers AC-RUNTIME-STATE-PUBLICATION-ORDER-001.3
+    // @covers AC-TASKS-RUNTIME-STATE-PUBLICATION-ORDER-001.3
     resetState();
     let resolveFetch: (value: unknown) => void = () => {};
     mocks.fetchWorkflowSnapshot.mockReturnValueOnce(
@@ -351,7 +351,7 @@ describe("useAllWorkflowSnapshots task state races", () => {
 
 describe("useAllWorkflowSnapshots failed refreshes", () => {
   it("keeps the current task projection usable when a snapshot refresh fails", async () => {
-    // @covers AC-RUNTIME-STATE-PUBLICATION-ORDER-001.7
+    // @covers AC-TASKS-RUNTIME-STATE-PUBLICATION-ORDER-001.7
     resetState();
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     setLightweightSnapshot({
@@ -379,6 +379,37 @@ describe("useAllWorkflowSnapshots failed refreshes", () => {
         ],
       }),
     );
+    errorSpy.mockRestore();
+  });
+
+  it("keeps a resolved task projection when a snapshot refresh fails", async () => {
+    resetState();
+    const resolvedSnapshot: MockState["kanbanMulti"]["snapshots"][string] = {
+      workflowId: WORKFLOW_ID,
+      workflowName: "A",
+      steps: [],
+      tasks: [
+        {
+          id: LIVE_STATE_TASK_ID,
+          workflowStepId: STEP_ID,
+          title: "Current resolved state",
+          position: 0,
+          state: "IN_PROGRESS" as const,
+          updatedAt: LIVE_TASK_UPDATED_AT,
+        },
+      ],
+      isPlaceholder: false,
+    };
+    mocks.state!.kanbanMulti.snapshots[WORKFLOW_ID] = resolvedSnapshot;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.fetchWorkflowSnapshot.mockRejectedValueOnce(new Error("snapshot unavailable"));
+
+    renderHook(() => useAllWorkflowSnapshots(WORKSPACE_ID));
+    act(() => window.dispatchEvent(new Event("focus")));
+
+    await waitFor(() => expect(errorSpy).toHaveBeenCalled());
+    expect(mocks.setWorkflowSnapshot).not.toHaveBeenCalled();
+    expect(mocks.state!.kanbanMulti.snapshots[WORKFLOW_ID]).toBe(resolvedSnapshot);
     errorSpy.mockRestore();
   });
 });

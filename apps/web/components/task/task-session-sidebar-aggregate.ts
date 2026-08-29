@@ -119,7 +119,10 @@ function reconcileTaskProjection(
   const task = activeTaskIsNewer(active, projected) ? activeTask : projected;
   return {
     ...task,
-    statusSummary: pickFreshestStatusSummary(active.statusSummary, projected.statusSummary),
+    // Workflow snapshots can re-stamp queued_prompt_count at an equal
+    // revision, so treat the snapshot as the incoming reading and the live
+    // projection as the cached fallback.
+    statusSummary: pickFreshestStatusSummary(projected.statusSummary, active.statusSummary),
   };
 }
 

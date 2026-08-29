@@ -41,7 +41,8 @@ sidebar aggregator select task state and status summary with separate clocks.
 
 - A delayed `REVIEW` snapshot cannot replace a newer live `IN_PROGRESS` state.
 - A newer snapshot can replace an older active task state.
-- Equal summary revisions do not override task update-time ordering.
+- Equal summary revisions do not override task update-time ordering, and equal
+  task timestamps retain the active projection.
 
 ## Verification
 
@@ -94,6 +95,6 @@ None.
   authoritative.
 - Changed sidebar aggregation to select task-level fields by `updatedAt` and
   status summary by its independent revision.
-- Verified the shared desktop/mobile data path with 27 focused unit tests,
+- Verified the shared desktop/mobile data path with 29 focused unit tests,
   focused ESLint, web typecheck, and the existing clarification Playwright
   scenario.
