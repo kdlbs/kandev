@@ -346,11 +346,10 @@ func TestWorktreePreparer_MultiRepo_RollbackKeepsReusedWorktrees(t *testing.T) {
 
 	preparer, mgr, store := newPreparerForTestWithStore(t)
 	existingPath := filepath.Join(t.TempDir(), "existing-worktree")
-	if err := os.MkdirAll(existingPath, 0755); err != nil {
-		t.Fatalf("mkdir existing worktree: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(existingPath, ".git"), []byte("gitdir: /tmp/existing.git\n"), 0644); err != nil {
-		t.Fatalf("write existing .git file: %v", err)
+	cmd := exec.Command("git", "worktree", "add", "--detach", existingPath, "HEAD")
+	cmd.Dir = repoExisting
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("create existing worktree: %v\n%s", err, output)
 	}
 	if err := store.CreateWorktree(context.Background(), &worktree.Worktree{
 		ID:           "wt-existing",
