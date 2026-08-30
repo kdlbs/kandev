@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: ui
 requirements:
   - REQ-UI-CLARIFICATION-SUBMIT-FEEDBACK-001
@@ -29,13 +29,13 @@ design changes no backend contract, persisted state, or WebSocket event.
   it to the existing shared header and question controls.
 - `ClarificationHeaderActions` renders one design-system `Spinner` immediately
   before `ClarificationSkipButton` while `isSubmitting` is true. This position
-  exists for both single-question and multi-question bundles. The spinner
-  remains exposed to assistive technology for a single-question bundle; for a
-  multi-question bundle it is `aria-hidden` because the Submit button already
-  announces the same pending label.
+  exists for both single-question and multi-question bundles, and the spinner
+  remains exposed to assistive technology for both bundle types.
 - The multi-question Submit button retains its translated pending label and
-  disabled behavior, but does not render a second spinner. Its idle completion
-  check is absent while the request is pending.
+  disabled behavior, but keeps the normal translated submit label as its
+  accessible name while the pending label changes visually. It does not render
+  a second spinner, and its idle completion check is absent while the request
+  is pending.
 - Task chat and Quick Chat continue to compose the same
   `ClarificationPanelSection`, so they receive identical behavior without
   surface-specific state or handlers.
@@ -47,11 +47,11 @@ No wire or persistence contract changes. The presentation consumes the existing
 `isSubmitting` boolean.
 
 The header spinner receives the existing translated `task:submitting` value as
-its accessible name. Single-question status remains announced; multi-question
-status is visual-only because the disabled Submit button announces the pending
-label. A stable `clarification-submitting-status` test identifier anchors
-component and Playwright assertions without using translated text as a
-selector.
+its accessible name and remains announced for every bundle. The multi-question
+Submit button receives the normal translated `task:submit` value as a stable
+accessible name while its visible label changes to the pending value. A stable
+`clarification-submitting-status` test identifier anchors component and
+Playwright assertions without using translated text as a selector.
 
 ## Control flow
 
@@ -78,12 +78,11 @@ The status occupies its own flex item immediately before Skip and must not
 become a touch target.
 
 The design-system spinner keeps `role="status"`, and its accessible name uses
-the translated submitting label. Single-question bundles keep the status
-exposed because they have no other submitting label in the header. Multi-
-question bundles set `aria-hidden="true"` on the visual status to avoid
-duplicating the Submit button's pending announcement. Rendered desktop and
-Pixel 5 tests verify its order, containment, and absence of document-level
-horizontal overflow.
+the translated submitting label for every bundle. The multi-question Submit
+button keeps a stable accessible name with the normal translated submit label,
+so the visible pending-label change does not compete with the header status
+announcement. Rendered desktop and Pixel 5 tests verify its order,
+containment, and absence of document-level horizontal overflow.
 
 ## Failure and recovery
 
@@ -102,7 +101,7 @@ surface.
   the status appears before Skip, uses the translated accessible label, and is
   removed outside the in-flight state.
 - A focused component test verifies that a multi-question status remains
-  visible while its duplicate live-region announcement is hidden, and that a
+  announced and that its Submit button keeps a stable accessible name while a
   failed request removes the status and re-enables Skip.
 - Desktop Playwright coverage holds a single-question response to prove the
   status is visible in the expanded header before the Skip control, then

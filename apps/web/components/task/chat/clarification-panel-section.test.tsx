@@ -170,7 +170,7 @@ describe("ClarificationPanelSection — collapse affordance", () => {
 });
 
 describe("ClarificationPanelSection — submitting feedback", () => {
-  it("hides the multi-question header status from assistive technology", () => {
+  it("keeps the multi-question header status announced with a stable Submit name", () => {
     render(
       <ClarificationHeaderActions
         total={3}
@@ -182,8 +182,10 @@ describe("ClarificationPanelSection — submitting feedback", () => {
     );
 
     const status = screen.getByTestId(SUBMITTING_STATUS_TESTID);
+    const submit = screen.getByTestId("clarification-submit");
     expect(status.getAttribute("aria-label")).toBe(i18n.t("task:submitting"));
-    expect(status.getAttribute("aria-hidden")).toBe("true");
+    expect(status.getAttribute("aria-hidden")).toBeNull();
+    expect(submit.getAttribute("aria-label")).toBe(i18n.t("task:submit"));
   });
 
   it("shows the translated submitting status before Skip while a single answer is in flight", async () => {

@@ -40,13 +40,15 @@ submission feedback, so that I know my answer was accepted for processing.
   shall appear for option and custom-text answers in both single-question and
   multi-question clarification bundles.
 - **AC-UI-CLARIFICATION-SUBMIT-FEEDBACK-001.3:** The header submitting status
-  shall carry the existing translated submitting label as its accessible name.
-  For single-question bundles it shall remain exposed to assistive technology;
-  for multi-question bundles it shall be hidden from assistive technology
-  because the disabled Submit button already announces the same pending label.
+  shall carry the existing translated submitting label as its accessible name
+  and remain exposed to assistive technology for both single-question and
+  multi-question bundles. For multi-question bundles, the Submit button shall
+  keep the normal translated submit label as its accessible name while its
+  visible label changes to the translated submitting label.
 - **AC-UI-CLARIFICATION-SUBMIT-FEEDBACK-001.4:** While a multi-question answer
-  request is in flight, the Submit button shall remain disabled, retain its
-  translated submitting label, omit its idle completion check, and defer the
+  request is in flight, the Submit button shall remain disabled, keep the
+  normal translated submit label as its accessible name, show its translated
+  submitting label visibly, omit its idle completion check, and defer the
   animated status indicator to the header position.
 - **AC-UI-CLARIFICATION-SUBMIT-FEEDBACK-001.5:** When no answer request is in
   flight, the header submitting status shall not be visible and the existing

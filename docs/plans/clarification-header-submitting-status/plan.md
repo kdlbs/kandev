@@ -47,12 +47,12 @@ status contract.
   immediately before `ClarificationSkipButton`.
 - Give the spinner `data-testid="clarification-submitting-status"` and the
   translated `task:submitting` value as its accessible label. Keep it exposed
-  to assistive technology for single-question auto-submit, which has no other
-  pending label; set `aria-hidden` for multi-question bundles because the
-  disabled Submit button already announces that label.
-- Keep the multi-question button's pending text and disabled state. Replace its
-  in-button pending spinner branch with no icon so only the header status
-  animates, while the idle `IconCheck` remains unchanged.
+  to assistive technology for every bundle.
+- Keep the multi-question button's pending text and disabled state, and give it
+  the normal translated `task:submit` value as a stable accessible name while
+  its visible label changes. Replace its in-button pending spinner branch with
+  no icon so only the header status animates, while the idle `IconCheck` remains
+  unchanged.
 - Do not add viewport-specific state or composition. The current action group
   already positions new siblings before Skip on desktop and in the mobile
   action row.
@@ -90,7 +90,7 @@ status contract.
 - `AC-UI-CLARIFICATION-SUBMIT-FEEDBACK-001.1` through `.7`: focused component
   coverage in `clarification-panel-section.test.tsx` proves immediate
   single-question state mapping, ordering, accessible naming, multi-question
-  announcement deduplication, and failure recovery.
+  stable button naming, and failure recovery.
 - `AC-UI-CLARIFICATION-SUBMIT-FEEDBACK-001.1` through `.8`: desktop Playwright
   coverage proves both auto-submit and explicit multi-question submit against a
   held response.
@@ -113,7 +113,7 @@ status contract.
 Implementation and focused verification passed:
 
 - Dependencies bootstrapped with `pnpm install --frozen-lockfile` from `apps/`.
-- Focused clarification component tests passed: 12 tests.
+- Focused clarification component tests passed: 14 tests.
 - Web typecheck passed.
 - Focused ESLint and Prettier checks passed for the changed web and E2E files.
 - Focused Chromium E2E passed: 2 tests covering single-question header status
@@ -126,10 +126,10 @@ Implementation and focused verification passed:
 
 - The design-system spinner defaults to an English accessible label. The
   implementation must override it with the existing translated submitting
-  value instead of hiding it, because single-question flows have no other
-  pending label.
+  value instead of hiding it. Multi-question Submit must keep a stable
+  translated accessible name while its visible pending label changes.
 - Multi-question tests currently scope the spinner inside Submit; they must be
   updated together with the component so assertions cannot pass on a stale or
-  duplicate indicator.
+  duplicate indicator or unstable button name.
 - Held-response tests must always release their route in cleanup to avoid
   hanging the managed Playwright worker.

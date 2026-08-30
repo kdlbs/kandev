@@ -1089,7 +1089,8 @@ test.describe("Multi-question clarification carousel", () => {
       await expect(submit).toBeDisabled();
       await expect(status).toBeVisible();
       await expect(status).toHaveAttribute("aria-label", "Submitting…");
-      await expect(status).toHaveAttribute("aria-hidden", "true");
+      await expect(status).not.toHaveAttribute("aria-hidden");
+      await expect(submit).toHaveAttribute("aria-label", "Submit");
       await expect(submit.locator('[role="status"]')).toHaveCount(0);
       await expect(submit.locator("svg.tabler-icon-check")).toHaveCount(0);
 

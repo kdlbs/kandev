@@ -85,6 +85,7 @@ export function ClarificationHeaderActions({
               type="button"
               onClick={onSubmit}
               disabled={!allAnswered || isSubmitting}
+              aria-label={t("task:submit")}
               data-testid="clarification-submit"
               className={cn(
                 "inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-1 text-xs font-medium transition-[color,background-color,transform] duration-150 active:scale-[0.96] md:w-auto md:gap-1 md:rounded md:px-3 [@media(pointer:coarse)]:min-h-11",
@@ -102,7 +103,6 @@ export function ClarificationHeaderActions({
       {isSubmitting && (
         <Spinner
           aria-label={t("task:submitting")}
-          aria-hidden={total > 1 ? true : undefined}
           data-testid="clarification-submitting-status"
           className="size-3 shrink-0"
         />

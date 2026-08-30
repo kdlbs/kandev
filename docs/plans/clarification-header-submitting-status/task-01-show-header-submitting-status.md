@@ -51,11 +51,10 @@ lifecycle and responsive geometry.
 
 - A held single-question or multi-question answer request shows exactly one
   animated status in the expanded header immediately before Skip, and idle
-  state shows none. The single-question status is announced; the
-  multi-question status is hidden from assistive technology because Submit
-  announces its pending label.
+  state shows none. The status remains announced for both bundle types.
 - The status has the translated submitting accessible name; multi-question
-  Submit remains disabled with its pending label and without an idle check.
+  Submit remains disabled with its visible pending label, stable normal submit
+  accessible name, and no idle check.
 - Desktop and Pixel 5 flows retain existing control order, touch targets,
   containment, lack of horizontal overflow, successful resolution, and retry
   behavior.
@@ -114,8 +113,8 @@ None.
 ## Results
 
 Implemented the shared expanded-header submitting status. The multi-question
-Submit button retains its pending label and disabled state without a duplicate
-spinner or live-region announcement, while single- and multi-question desktop
+Submit button retains its visible pending label and disabled state with a
+stable normal submit accessible name, while single- and multi-question desktop
 and mobile coverage verifies the shared header location, accessible label,
 control order, touch targets, containment, overflow, and successful resolution.
 Focused component coverage also verifies failure recovery. Held-response tests
