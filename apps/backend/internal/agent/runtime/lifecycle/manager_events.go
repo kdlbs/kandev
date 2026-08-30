@@ -222,6 +222,11 @@ func (m *Manager) claimPromptCompletion(
 ) (promptCompletionClaim, bool) {
 	claim := promptCompletionClaim{}
 	if event.PromptGeneration == 0 {
+		if execution.dispatchedPromptPending.Load() {
+			m.logger.Debug("ignoring unnumbered completion while a dispatched prompt is pending",
+				zap.String("execution_id", execution.ID))
+			return claim, false
+		}
 		return claim, true
 	}
 

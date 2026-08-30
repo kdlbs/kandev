@@ -4,6 +4,7 @@ import { render, cleanup, fireEvent, screen } from "@testing-library/react";
 import { i18n } from "@/lib/i18n";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 import { ClarificationPanelSection } from "./clarification-panel-section";
+import { ClarificationHeaderActions } from "./clarification-overlay-header";
 
 vi.mock("@/lib/config", () => ({
   getBackendConfig: () => ({ apiBaseUrl: "https://api.test" }),
@@ -91,6 +92,7 @@ afterEach(async () => {
 const SCROLL_REGION_TESTID = "clarification-scroll-region";
 const CONTAINER_TESTID = "clarification-overlay-container";
 const QUESTION_COUNT_TESTID = "clarification-question-count";
+const SUBMITTING_STATUS_TESTID = "clarification-submitting-status";
 
 describe("ClarificationPanelSection — collapse affordance", () => {
   it("keeps the expanded question controls in one header row", () => {
@@ -164,6 +166,93 @@ describe("ClarificationPanelSection — collapse affordance", () => {
     );
 
     expect(screen.getByTestId(SCROLL_REGION_TESTID).className).not.toContain("hidden");
+  });
+});
+
+describe("ClarificationPanelSection — submitting feedback", () => {
+  it("keeps the multi-question header status announced with a stable Submit name", () => {
+    render(
+      <ClarificationHeaderActions
+        total={3}
+        allAnswered={true}
+        isSubmitting={true}
+        onSubmit={vi.fn()}
+        onSkip={vi.fn()}
+      />,
+    );
+
+    const status = screen.getByTestId(SUBMITTING_STATUS_TESTID);
+    const submit = screen.getByTestId("clarification-submit");
+    expect(status.getAttribute("aria-label")).toBe(i18n.t("task:submitting"));
+    expect(status.getAttribute("aria-hidden")).toBeNull();
+    expect(submit.getAttribute("aria-label")).toBe(i18n.t("task:submit"));
+  });
+
+  it("shows the translated submitting status before Skip while a single answer is in flight", async () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    let releaseResponse!: (response: Response) => void;
+    const heldResponse = new Promise<Response>((resolve) => {
+      releaseResponse = resolve;
+    });
+    fetchMock.mockReturnValueOnce(heldResponse);
+    renderSection(true, messages);
+
+    expect(screen.queryByTestId(SUBMITTING_STATUS_TESTID)).toBeNull();
+
+    try {
+      fireEvent.click(screen.getByTestId("clarification-option"));
+
+      const status = await screen.findByTestId(SUBMITTING_STATUS_TESTID);
+      const skip = screen.getByTestId("clarification-skip");
+      expect(status.getAttribute("aria-label")).toBe(i18n.t("task:submitting"));
+      expect(status.getAttribute("aria-hidden")).toBeNull();
+      expect(status.compareDocumentPosition(skip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect((skip as HTMLButtonElement).disabled).toBe(true);
+
+      releaseResponse(
+        new Response("{}", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      await vi.waitFor(() => expect(screen.queryByTestId(SUBMITTING_STATUS_TESTID)).toBeNull());
+    } finally {
+      releaseResponse(
+        new Response("{}", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
+  });
+
+  it("removes the submitting status and re-enables Skip when the answer request fails", async () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    let rejectResponse!: (error: Error) => void;
+    const heldResponse = new Promise<Response>((_, reject) => {
+      rejectResponse = reject;
+    });
+    fetchMock.mockReturnValueOnce(heldResponse);
+    renderSection(true, messages);
+
+    try {
+      fireEvent.click(screen.getByTestId("clarification-option"));
+      await screen.findByTestId(SUBMITTING_STATUS_TESTID);
+
+      rejectResponse(new Error("network"));
+      await vi.waitFor(() => {
+        expect(screen.queryByTestId(SUBMITTING_STATUS_TESTID)).toBeNull();
+        expect((screen.getByTestId("clarification-skip") as HTMLButtonElement).disabled).toBe(
+          false,
+        );
+      });
+    } finally {
+      rejectResponse(new Error("network"));
+    }
   });
 });
 

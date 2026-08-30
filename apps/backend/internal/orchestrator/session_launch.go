@@ -40,9 +40,10 @@ type LaunchSessionRequest struct {
 	Intent         SessionIntent `json:"intent,omitempty"`
 	SessionID      string        `json:"session_id,omitempty"`
 	AgentProfileID string        `json:"agent_profile_id,omitempty"`
-	// ProfileExplicit marks a non-empty profile selected by the manual New Agent
-	// picker. It bypasses workflow-step profile resolution for IntentStart only;
-	// IntentStartCreated keeps its existing profile resolution behavior.
+	// ProfileExplicit marks a non-empty profile selected through an explicit
+	// selector-backed choice. It bypasses workflow-step profile resolution for
+	// IntentStart only; IntentStartCreated keeps its existing profile resolution
+	// behavior.
 	ProfileExplicit   bool   `json:"profile_explicit,omitempty"`
 	ExecutorID        string `json:"executor_id,omitempty"`
 	ExecutorProfileID string `json:"executor_profile_id,omitempty"`

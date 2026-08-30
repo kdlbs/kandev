@@ -706,15 +706,15 @@ test.describe("PR status badge", () => {
       mergeable_state: "dirty",
     });
     await expect(icon).toHaveAttribute("data-pr-count", "2", { timeout: 15_000 });
-    // The association update replaces the icon while the pointer can still be
-    // over its prior DOM node. Re-enter through the keyboard path so this
-    // assertion exercises the stable focus disclosure rather than relying on
-    // a synthetic pointer-enter during that replacement.
-    await taskRow.focus();
-    await testPage.keyboard.press("Tab");
-    await expect(icon).toBeFocused();
+    await taskRow.hover();
+    await expect(taskActions).toBeVisible();
+    await expect(menuSlot).toHaveCSS("width", "24px");
+    // Re-enter from a neutral point after the PR update to deliver a fresh hover transition.
+    await testPage.mouse.move(viewport!.width - 1, viewport!.height - 1);
+    await icon.hover();
 
     const multiSummary = visibleTaskPRSummary(testPage);
+    await expect(multiSummary).toBeVisible();
     const entries = multiSummary.getByTestId("pr-task-status-entry");
     await expect(entries).toHaveCount(2);
     await expect(entries.nth(0).getByTestId("pr-task-status-number")).toHaveText("PR #2966");

@@ -37,6 +37,7 @@ var (
 	errDeferredMoveAlreadyApplied           = errors.New("deferred move already applied")
 	errReusableSessionNoLongerActive        = errors.New("reusable session is no longer active")
 	errWorkflowAutoStartSessionTerminalized = errors.New("workflow auto-start session terminalized")
+	errContextResetCancellationConflict     = errors.New("context reset cancellation is already in progress")
 )
 
 type workflowAutoStartSessionTerminalizedError struct {
@@ -3015,11 +3016,40 @@ func legacyPendingMoveID(sessionID string, move *messagequeue.PendingMove) strin
 	return fmt.Sprintf("legacy-%x", sum[:])
 }
 
-func (s *Service) removePendingMoveHandoffPrompt(ctx context.Context, sessionID, taskID, moveID string) {
+// removePendingMoveHandoffPrompt reports whether cleanup is complete. A false
+// result means queue storage failed and a durable caller must preserve enough
+// correlation state to retry.
+func (s *Service) removePendingMoveHandoffPrompt(ctx context.Context, sessionID, taskID, moveID string) bool {
 	if s.messageQueue == nil {
-		return
+		return true
 	}
-	for _, entry := range s.messageQueue.GetStatus(ctx, sessionID).Entries {
+	entryID, listed := s.pendingMoveHandoffPromptID(ctx, sessionID, taskID, moveID)
+	if !listed {
+		return false
+	}
+	if entryID == "" {
+		return true
+	}
+	_, removed, err := s.messageQueue.TakeQueuedEntry(ctx, sessionID, entryID)
+	if err != nil {
+		s.logger.Warn("failed to remove pending-move hand-off prompt",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return false
+	}
+	if removed {
+		s.pendingMoveHandoffPromptRemoved(ctx, sessionID, taskID, moveID, entryID)
+	}
+	return true
+}
+
+func (s *Service) pendingMoveHandoffPromptID(ctx context.Context, sessionID, taskID, moveID string) (string, bool) {
+	entries, _, err := s.messageQueue.SnapshotSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to list pending-move hand-off prompts",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return "", false
+	}
+	for _, entry := range entries {
 		if entry.TaskID != taskID || entry.QueuedBy != messagequeue.QueuedByMoveTask {
 			continue
 		}
@@ -3031,19 +3061,21 @@ func (s *Service) removePendingMoveHandoffPrompt(ctx context.Context, sessionID,
 		if !matches {
 			continue
 		}
-		_, removed, err := s.messageQueue.TakeQueuedEntry(ctx, sessionID, entry.ID)
-		if err != nil {
-			s.logger.Warn("failed to remove stale pending-move hand-off prompt",
-				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
-			return
-		}
-		if removed {
-			s.publishQueueStatusEvent(ctx, sessionID)
-			s.logger.Warn("dropped stale pending-move hand-off prompt",
-				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.String("move_id", moveID))
-		}
+		return entry.ID, true
+	}
+	return "", true
+}
+
+func (s *Service) pendingMoveHandoffPromptRemoved(
+	ctx context.Context,
+	sessionID, taskID, moveID, entryID string,
+) {
+	if entryID == "" {
 		return
 	}
+	s.publishQueueStatusEvent(ctx, sessionID)
+	s.logger.Warn("dropped pending-move hand-off prompt",
+		zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.String("move_id", moveID))
 }
 
 func (s *Service) syncTaskStateForPendingMove(ctx context.Context, taskID, fromStepID, toStepID string) {
@@ -4046,8 +4078,23 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
+	resetGuard := s.lockCancelInFlightGuard(sessionID)
 	s.setSessionResetInProgress(sessionID, true)
-	defer s.setSessionResetInProgress(sessionID, false)
+	defer func() {
+		// Publish the end of reset while the same guard is still held. A prompt
+		// that acquires the guard after this point observes a settled marker.
+		s.setSessionResetInProgress(sessionID, false)
+		resetGuard.release()
+	}()
+
+	if err := s.quiesceActiveResetTurn(ctx, taskID, sessionID, stepName, resetGuard); err != nil {
+		s.logger.Error("failed to quiesce active turn before context reset",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("step_name", stepName),
+			zap.Error(err))
+		return false
+	}
 
 	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	if err != nil || executionID == "" {
@@ -4112,6 +4159,66 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 	// after the provider reset succeeds. The token is handled explicitly above.
 	s.clearPersistedResetState(ctx, sessionID, session)
 	return true
+}
+
+// quiesceActiveResetTurn stops an in-flight turn through the internal silent
+// cancellation coordinator before the provider conversation is replaced. It
+// deliberately does not call Service.CancelAgent: that path evaluates the
+// user's configured cancellation completion and creates a visible message.
+func (s *Service) quiesceActiveResetTurn(
+	ctx context.Context,
+	taskID, sessionID, stepName string,
+	resetGuard *lockedCancelInFlightGuard,
+) error {
+	turnID, err := s.activeResetTurnID(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("inspect active turn for context reset: %w", err)
+	}
+	if turnID == "" {
+		if s.currentCancellation(sessionID) != nil {
+			return errContextResetCancellationConflict
+		}
+		return nil
+	}
+	if s.turnService == nil {
+		// The in-memory cache is the only available identity when no durable
+		// turn service is wired. The lifecycle capture then applies its own
+		// best-effort cancellation behavior without an expected durable ID.
+		turnID = ""
+	}
+	if _, err := s.cancelAgentSilentWithGuardActionKindExclusiveConflict(
+		ctx, taskID, sessionID, resetGuard.unlock, resetGuard.relock,
+		nil, cancellationKindInternal, turnID, errContextResetCancellationConflict,
+	); err != nil {
+		return fmt.Errorf("cancel active turn for context reset at %s: %w", stepName, err)
+	}
+	return nil
+}
+
+// hasActiveResetTurn combines the in-memory admission records with the
+// durable turn service. Either record is enough to fail closed before a
+// provider context replacement; missing an active turn could let the old
+// provider stream race the new conversation.
+func (s *Service) hasActiveResetTurn(ctx context.Context, sessionID string) (bool, error) {
+	turnID, err := s.activeResetTurnID(ctx, sessionID)
+	return turnID != "", err
+}
+
+func (s *Service) activeResetTurnID(ctx context.Context, sessionID string) (string, error) {
+	if s.turnService != nil {
+		turnID, err := s.peekActiveTurnID(ctx, sessionID)
+		if err != nil {
+			return "", err
+		}
+		if turnID != "" {
+			return turnID, nil
+		}
+	}
+	if value, ok := s.activeTurns.Load(sessionID); ok {
+		turnID, _ := value.(string)
+		return turnID, nil
+	}
+	return s.reservedPromptTurnID(sessionID), nil
 }
 
 // reconcileFailedContextReset handles a reset that moved the live ACP session

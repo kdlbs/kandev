@@ -6,7 +6,11 @@ import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { AppState } from "@/lib/state/store";
-import type { FileInfo, GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
+import type {
+  FileChangeFacet,
+  FileInfo,
+  GitStatusEntry,
+} from "@/lib/state/slices/session-runtime/types";
 import { djb2Hash } from "@/lib/utils/hash";
 
 type DockviewPanel = NonNullable<ReturnType<DockviewApi["getPanel"]>>;
@@ -54,6 +58,18 @@ export function autoActivateChangesPanel(): ActivateChangesPanelResult {
 const fileFingerprintCache = new WeakMap<FileInfo, string>();
 const gitStatusFingerprintCache = new WeakMap<GitStatusEntry, GitStatusFingerprintCacheEntry>();
 
+function changeFacetFingerprint(facet: FileChangeFacet | undefined): string {
+  if (!facet) return "";
+  return [
+    facet.status,
+    facet.additions ?? 0,
+    facet.deletions ?? 0,
+    facet.old_path ?? "",
+    djb2Hash(facet.diff ?? ""),
+    facet.diff_skip_reason ?? "",
+  ].join(":");
+}
+
 function fileFingerprint(file: FileInfo): string {
   const cached = fileFingerprintCache.get(file);
   if (cached !== undefined) return cached;
@@ -67,6 +83,8 @@ function fileFingerprint(file: FileInfo): string {
     file.old_path ?? "",
     djb2Hash(file.diff ?? ""),
     file.diff_skip_reason ?? "",
+    changeFacetFingerprint(file.staged_change),
+    changeFacetFingerprint(file.unstaged_change),
     file.repository_name ?? "",
   ].join(":");
   fileFingerprintCache.set(file, fingerprint);

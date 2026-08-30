@@ -53,6 +53,7 @@ Git state.
 - [Copy and Move Secrets Between Scopes](system-design/secret-scope-transfer.md)
 - [Branch Policies](system-design/branch-policies.md)
 - [Worktree Base Refresh](system-design/worktree-base-refresh.md)
+- [Local Workspace Repositories](system-design/local-repositories.md)
 
 ## Migration record
 

@@ -56,6 +56,7 @@ import { taskId, sessionId } from "@/lib/types/ids";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockState.mergeMessages.mockReset();
   mockListSessionTurns.mockResolvedValue({ turns: [], total: 0 });
   mockWebSocketClient.request.mockResolvedValue({ messages: [], has_more: false });
   mockWebSocketClient.subscribeSession.mockReturnValue(vi.fn());
@@ -287,6 +288,64 @@ function deferred<T>() {
 }
 
 describe("session subscription hydration ordering", () => {
+  // @covers AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.10
+  it("replaces a disjoint stale cache while preserving rows received during the fetch", async () => {
+    const readiness = deferred<void>();
+    const response = deferred<{ messages: Message[]; has_more: boolean }>();
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness.promise);
+    mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
+      ready: readiness.promise,
+      unsubscribe: vi.fn(),
+    });
+    mockWebSocketClient.request.mockReturnValue(response.promise);
+
+    const staleOldest = makeMessage({
+      id: "stale-1",
+      created_at: "2026-08-30T09:00:00Z",
+    });
+    const staleNewest = makeMessage({
+      id: "stale-2",
+      created_at: "2026-08-30T09:01:00Z",
+    });
+    mockState.messages.bySession["sess-1"] = [staleOldest, staleNewest];
+
+    const { unmount } = renderHook(() => useSessionMessages("sess-1"));
+
+    await act(async () => {
+      readiness.resolve();
+      await readiness.promise;
+    });
+
+    const liveDuringFetch = makeMessage({
+      id: "live-5",
+      author_type: "agent",
+      created_at: "2026-08-30T09:05:00Z",
+    });
+    mockState.messages.bySession["sess-1"] = [staleOldest, staleNewest, liveDuringFetch];
+
+    const fetchedNewest = makeMessage({
+      id: "fetched-4",
+      author_type: "agent",
+      created_at: "2026-08-30T09:04:00Z",
+    });
+    const fetchedOldest = makeMessage({
+      id: "fetched-3",
+      author_type: "agent",
+      created_at: "2026-08-30T09:03:00Z",
+    });
+    await act(async () => {
+      response.resolve({ messages: [fetchedNewest, fetchedOldest], has_more: true });
+      await response.promise;
+    });
+
+    expect(mockState.mergeMessages).toHaveBeenCalledWith(
+      "sess-1",
+      [fetchedOldest, fetchedNewest, liveDuringFetch],
+      { hasMore: true, oldestCursor: "fetched-3" },
+    );
+    unmount();
+  });
+
   it("does not request messages before subscription acknowledgement", async () => {
     const readiness = deferred<void>();
     mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness.promise);
@@ -429,5 +488,70 @@ describe("turn loading for sessions without hydrated turns", () => {
 
     expect(mockListSessionTurns).toHaveBeenCalledWith("sess-1", expect.anything());
     unmount();
+  });
+});
+
+describe("deduplicated message request baselines", () => {
+  it("uses the first caller's cache baseline for a concurrent fetch", async () => {
+    const readiness = deferred<void>();
+    const response = deferred<{ messages: Message[]; has_more: boolean }>();
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness.promise);
+    mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
+      ready: readiness.promise,
+      unsubscribe: vi.fn(),
+    });
+    mockWebSocketClient.request.mockReturnValue(response.promise);
+
+    const staleOldest = makeMessage({
+      id: "stale-1",
+      created_at: "2026-08-30T09:00:00Z",
+    });
+    const staleNewest = makeMessage({
+      id: "stale-2",
+      created_at: "2026-08-30T09:01:00Z",
+    });
+    const liveDuringFetch = makeMessage({
+      id: "live-5",
+      author_type: "agent",
+      created_at: "2026-08-30T09:05:00Z",
+    });
+    mockState.messages.bySession["sess-1"] = [staleOldest, staleNewest];
+    mockState.mergeMessages.mockImplementation((_sessionId, messages) => {
+      mockState.messages.bySession["sess-1"] = messages;
+    });
+
+    const first = renderHook(() => useSessionMessages("sess-1"));
+    await act(async () => {
+      readiness.resolve();
+      await readiness.promise;
+    });
+    expect(mockWebSocketClient.request).toHaveBeenCalledTimes(1);
+
+    mockState.messages.bySession["sess-1"] = [staleOldest, staleNewest, liveDuringFetch];
+    const second = renderHook(() => useSessionMessages("sess-1"));
+
+    const fetchedOldest = makeMessage({
+      id: "fetched-3",
+      author_type: "agent",
+      created_at: "2026-08-30T09:03:00Z",
+    });
+    const fetchedNewest = makeMessage({
+      id: "fetched-4",
+      author_type: "agent",
+      created_at: "2026-08-30T09:04:00Z",
+    });
+    await act(async () => {
+      response.resolve({ messages: [fetchedNewest, fetchedOldest], has_more: true });
+      await response.promise;
+      await Promise.resolve();
+    });
+
+    expect(mockState.mergeMessages).toHaveBeenLastCalledWith(
+      "sess-1",
+      [fetchedOldest, fetchedNewest, liveDuringFetch],
+      { hasMore: true, oldestCursor: "fetched-3" },
+    );
+    first.unmount();
+    second.unmount();
   });
 });

@@ -28,6 +28,7 @@ The transcript can lose the original task prompt after a reload. Long activity g
 - **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.7:** Stop automatic loading in these cases:
 - **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.8:** Older content moves the load boundary above the preload region.
 - **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.9:** When the first user prompt of a session is loaded, the transcript shall not show an older-page control.
+- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.10:** When a previously opened session is revisited after more than one message page was persisted while it was inactive, the transcript shall reconcile to a contiguous newest window and upward pagination shall reach every persisted user prompt without gaps or duplicate rows.
 
 ## Migrated source detail
 
@@ -63,6 +64,8 @@ prompt. This requirement includes sessions with more than 100 tool events.
   response.
 - Show the first prompt at the start after all older history is loaded.
 - Apply the same transcript rule on desktop and mobile.
+- Reconcile a revisited session to one contiguous newest window before older
+  pagination resumes. Stale cached rows must not create an unreachable gap.
 
 ## Scenarios
 
@@ -104,6 +107,15 @@ prompt. This requirement includes sessions with more than 100 tool events.
 - **THEN** the first prompt is visible at the start of the transcript.
 - **THEN** no older-page control remains.
 
+### Revisit after inactive-session activity
+
+- **GIVEN** a session was opened and its older rows remain cached.
+- **GIVEN** more than one newest-page window is persisted while that session is
+  inactive.
+- **WHEN** the user revisits the session and navigates upward.
+- **THEN** the transcript exposes every persisted user prompt in chronological
+  order without a skipped middle range or duplicate row.
+
 ## Out of scope
 
 - Backfill or repair missing message records in the database.
@@ -114,4 +126,5 @@ prompt. This requirement includes sessions with more than 100 tool events.
 
 ## Implementation plan
 
-See [the implementation plan](../../../plans/hide-redundant-older-messages-control/plan.md).
+- [Hide redundant older-message controls](../../../plans/hide-redundant-older-messages-control/plan.md)
+- [Reconcile inactive-session transcript windows](../../../plans/inactive-session-transcript-reconciliation/plan.md)

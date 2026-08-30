@@ -847,12 +847,16 @@ func (wt *WorkspaceTracker) applyPorcelainLine(line string, update *types.GitSta
 
 	// For renames the format is "old -> new" (each part may be independently
 	// quoted), so we must split first and unquote each part separately.
-	filePath := rawPath
-	if indexStatus != 'R' {
-		filePath = unquoteGitPath(rawPath)
+	filePath := unquoteGitPath(rawPath)
+	oldPath := ""
+	if indexStatus == 'R' {
+		if idx := strings.Index(rawPath, " -> "); idx != -1 {
+			oldPath = unquoteGitPath(rawPath[:idx])
+			filePath = unquoteGitPath(rawPath[idx+4:])
+		}
 	}
 
-	fileInfo := types.FileInfo{Path: filePath}
+	fileInfo := types.FileInfo{Path: filePath, OldPath: oldPath}
 
 	// Determine staged status based on index and worktree status.
 	// Prioritize worktree changes as they represent the current state.
@@ -889,14 +893,35 @@ func (wt *WorkspaceTracker) applyPorcelainLine(line string, update *types.GitSta
 	case indexStatus == 'R':
 		fileInfo.Status = "renamed"
 		fileInfo.Staged = true
-		// Renamed files have format "old -> new"; each part may be quoted independently.
-		if idx := strings.Index(rawPath, " -> "); idx != -1 {
-			fileInfo.OldPath = unquoteGitPath(rawPath[:idx])
-			filePath = unquoteGitPath(rawPath[idx+4:])
-			fileInfo.Path = filePath
-		}
 		update.Renamed = append(update.Renamed, filePath)
 	}
 
+	// A path can have both an index and a working-tree change (for example MM
+	// or AM). Keep the flattened compatibility projection above, but preserve
+	// both independently for consumers that understand mixed paths.
+	if stagedChange := porcelainChangeFacet(indexStatus, oldPath); stagedChange != nil {
+		if unstagedChange := porcelainChangeFacet(workTreeStatus, ""); unstagedChange != nil {
+			fileInfo.StagedChange = stagedChange
+			fileInfo.UnstagedChange = unstagedChange
+		}
+	}
+
 	update.Files[filePath] = fileInfo
+}
+
+func porcelainChangeFacet(status byte, oldPath string) *types.FileChangeFacet {
+	change := &types.FileChangeFacet{OldPath: oldPath}
+	switch status {
+	case 'M':
+		change.Status = fileStatusModified
+	case 'A':
+		change.Status = "added"
+	case 'D':
+		change.Status = fileStatusDeleted
+	case 'R':
+		change.Status = "renamed"
+	default:
+		return nil
+	}
+	return change
 }
