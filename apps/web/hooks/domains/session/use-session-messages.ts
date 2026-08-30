@@ -10,6 +10,7 @@ import {
   useUnknownSessionSubscriptionRetryEffect,
 } from "./use-session-subscription-retry";
 import { doFetchMessages } from "./use-session-message-fetch";
+import { reconcileLatestMessageWindow } from "./message-window-reconciliation";
 import { t } from "@/lib/i18n";
 
 export { shouldRetryUnknownSessionSubscription } from "./use-session-subscription-retry";
@@ -227,24 +228,17 @@ async function fetchAndStoreMessages(
   // after subscription acknowledgement so the REST snapshot cannot race the
   // initial WebSocket subscription registration.
   void ensureSessionTurnsLoaded(sessionId, store, { readiness });
+  const cachedAtRequest = store.getState().messages.bySession[sessionId] ?? [];
   const seq = nextFetchSeq();
   const response = await requestSessionMessages(client, sessionId, readiness);
   if (isActive && !isActive()) return [];
   const fetched = [...(response.messages ?? [])].reverse();
   logFetchSummary(sessionId, fetched, response, INITIAL_FETCH_LIMIT);
-  // Merge: keep WS-delivered messages that aren't in the fetch response.
-  // This prevents a slow fetch (sent before messages existed) from wiping
-  // messages that arrived via real-time notifications while the fetch was
-  // in flight.
-  const existing = store.getState().messages.bySession[sessionId] ?? [];
-  const fetchedIds = new Set(fetched.map((m) => m.id));
-  const extras = existing.filter((m) => !fetchedIds.has(m.id));
-  const merged =
-    extras.length > 0
-      ? [...fetched, ...extras].sort(
-          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-        )
-      : fetched;
+  const { messages: merged, oldestCursor } = reconcileLatestMessageWindow({
+    cachedAtRequest,
+    cachedAtResponse: store.getState().messages.bySession[sessionId] ?? [],
+    fetched,
+  });
 
   // Stale-fetch guard: if a newer fetch for this session already merged while
   // this one was in flight, skip the merge so the older snapshot can't drop
@@ -259,7 +253,7 @@ async function fetchAndStoreMessages(
   // refetch doesn't re-render the whole chat (see reconcileMessages).
   store.getState().mergeMessages(sessionId, merged, {
     hasMore: response.has_more ?? false,
-    oldestCursor: merged[0]?.id ?? null,
+    oldestCursor,
   });
   // The store now holds the identity-reconciled array; callers only read length
   // and message content from the return, so `merged` is equivalent.

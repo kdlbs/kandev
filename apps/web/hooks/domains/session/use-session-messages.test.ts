@@ -287,6 +287,64 @@ function deferred<T>() {
 }
 
 describe("session subscription hydration ordering", () => {
+  // @covers AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.10
+  it("replaces a disjoint stale cache while preserving rows received during the fetch", async () => {
+    const readiness = deferred<void>();
+    const response = deferred<{ messages: Message[]; has_more: boolean }>();
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness.promise);
+    mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
+      ready: readiness.promise,
+      unsubscribe: vi.fn(),
+    });
+    mockWebSocketClient.request.mockReturnValue(response.promise);
+
+    const staleOldest = makeMessage({
+      id: "stale-1",
+      created_at: "2026-08-30T09:00:00Z",
+    });
+    const staleNewest = makeMessage({
+      id: "stale-2",
+      created_at: "2026-08-30T09:01:00Z",
+    });
+    mockState.messages.bySession["sess-1"] = [staleOldest, staleNewest];
+
+    const { unmount } = renderHook(() => useSessionMessages("sess-1"));
+
+    await act(async () => {
+      readiness.resolve();
+      await readiness.promise;
+    });
+
+    const liveDuringFetch = makeMessage({
+      id: "live-5",
+      author_type: "agent",
+      created_at: "2026-08-30T09:05:00Z",
+    });
+    mockState.messages.bySession["sess-1"] = [staleOldest, staleNewest, liveDuringFetch];
+
+    const fetchedNewest = makeMessage({
+      id: "fetched-4",
+      author_type: "agent",
+      created_at: "2026-08-30T09:04:00Z",
+    });
+    const fetchedOldest = makeMessage({
+      id: "fetched-3",
+      author_type: "agent",
+      created_at: "2026-08-30T09:03:00Z",
+    });
+    await act(async () => {
+      response.resolve({ messages: [fetchedNewest, fetchedOldest], has_more: true });
+      await response.promise;
+    });
+
+    expect(mockState.mergeMessages).toHaveBeenCalledWith(
+      "sess-1",
+      [fetchedOldest, fetchedNewest, liveDuringFetch],
+      { hasMore: true, oldestCursor: "fetched-3" },
+    );
+    unmount();
+  });
+
   it("does not request messages before subscription acknowledgement", async () => {
     const readiness = deferred<void>();
     mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness.promise);

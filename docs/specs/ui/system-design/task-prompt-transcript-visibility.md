@@ -20,13 +20,16 @@ The design changes no backend query, message order, persistence rule, or API fie
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001` | [Opening boundary](#opening-boundary), [Pagination boundary](#pagination-boundary), [Failure and compatibility](#failure-and-compatibility) |
+| `REQ-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001` | [Opening boundary](#opening-boundary), [Latest-window reconciliation](#latest-window-reconciliation), [Pagination boundary](#pagination-boundary), [Failure and compatibility](#failure-and-compatibility) |
 
 ## Components and responsibilities
 
 - `useLazyLoadMessages` owns the visible pagination boundary for transcript consumers.
 - The session message fetch owns one bounded initial request for the newest message window.
 - `messages.metaBySession[sessionId].hasMore` keeps the raw backend `has_more` value.
+- `messages.metaBySession[sessionId].oldestCursor` names the oldest row in the
+  contiguous loaded window, never an older row separated from the newest
+  snapshot by an unloaded gap.
 - `messages.bySession[sessionId]` supplies the loaded messages and their prompt ordinals.
 - The native transcript and Prompt History panel consume the shared hook result.
 - The native transcript owns the upward-navigation intent and the visible top-boundary key.
@@ -44,6 +47,27 @@ The session message fetch requests only the newest bounded window when a task op
 `TaskChatPanel` does not load older pages to find the last prompt. The last-prompt action becomes available after the prompt enters the loaded window.
 
 If the newest window has no user message, the transcript shows the task-description fallback. Upward navigation then loads older pages through visible pagination.
+
+## Latest-window reconciliation
+
+The frontend represents each session transcript as one contiguous loaded
+window. A latest-message fetch reconciles its bounded newest suffix with the
+rows already cached for that session:
+
+- If the fetched suffix overlaps the cached window, deduplicate and retain the
+  complete joined window. The oldest cursor remains the oldest row in that
+  joined window.
+- If the fetched suffix does not overlap the cached window, the older cached
+  rows cannot be joined under one pagination cursor. Replace that disjoint
+  cache with the fetched suffix. Retain only live rows that arrived after the
+  fetch started and therefore follow the response snapshot.
+- Set the oldest cursor from the actual contiguous boundary. A disjoint cached
+  row must never become the cursor for the newest fetched suffix.
+
+The dropped browser cache is not data loss. Persisted messages remain
+authoritative and are loaded again through normal upward pagination. This rule
+also preserves the bounded opening behavior: revisiting a session does not
+subscribe to inactive siblings or eagerly load its complete transcript.
 
 ## Pagination boundary
 
@@ -79,20 +103,27 @@ Scroll restoration remains part of the same cycle. The transcript restores one s
 ## Control flow
 
 1. The initial message request stores one newest suffix and raw pagination metadata.
-2. The shared hook reports visible older history while prompt `#1` is absent.
-3. The user reaches the oldest loaded point.
-4. An older-page request prepends messages through the existing coordinator.
-5. The native transcript preserves a stable message-row position across the complete request.
-6. The transcript compares the committed visible top boundary with the request baseline.
-7. If the boundary changed, the current load cycle stops.
-8. If only a collapsed activity group changed, the same cycle can request another page.
-9. If the page contains prompt `#1`, the shared hook changes its visible value to false.
-10. The transcript removes its sentinel, loading state, and older-page control.
-11. Explicit reverse search uses raw pagination when it must backfill a backend search hit.
+2. The fetch reconciles that suffix with any cached rows as one contiguous
+   window and records its true oldest cursor.
+3. The shared hook reports visible older history while prompt `#1` is absent.
+4. The user reaches the oldest loaded point.
+5. An older-page request prepends messages through the existing coordinator.
+6. The native transcript preserves a stable message-row position across the complete request.
+7. The transcript compares the committed visible top boundary with the request baseline.
+8. If the boundary changed, the current load cycle stops.
+9. If only a collapsed activity group changed, the same cycle can request another page.
+10. If the page contains prompt `#1`, the shared hook changes its visible value to false.
+11. The transcript removes its sentinel, loading state, and older-page control.
+12. Explicit reverse search uses raw pagination when it must backfill a backend search hit.
 
 ## Failure and compatibility
 
 If a request fails before prompt `#1` is known, the explicit older-page control remains available. A zero-result response keeps the existing retry behavior.
+
+If a latest fetch is disjoint from a stale cache, the UI temporarily stops
+rendering the stale prefix rather than presenting a false contiguous window.
+The older-page control remains available from the fetched suffix and reloads
+that durable history from the correct cursor.
 
 An initial tool-only window completes without an older-page request. The task-description fallback remains visible until upward pagination loads a stored user prompt.
 
@@ -121,6 +152,12 @@ The existing full-height mobile task layout remains the nearest mobile exemplar.
 - Desktop and mobile browser tests seed hidden pre-prompt rows and prove that no older-page control remains.
 - Desktop and mobile browser tests prove that task opening makes no request with an older-page cursor.
 - A message-fetch test proves that a tool-only initial window completes without automatic backfill.
+- Latest-window reconciliation tests cover overlapping windows, a disjoint
+  stale cache, and live rows received while the fetch is in flight.
+- A same-task sibling-session browser test caches an older receiver window,
+  persists a peer prompt plus more than one page while the receiver is
+  inactive, revisits it, and reaches the attributed prompt through upward
+  pagination.
 - Separate desktop and mobile browser tests preserve the prepend anchor while loading older pages.
 - Desktop and mobile browser tests prove that one upward action loads only one page when that page adds visible entries.
 - A collapsed-activity browser scenario proves that the same load cycle continues until a new visible top entry appears.
