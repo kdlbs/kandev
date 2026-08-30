@@ -149,6 +149,7 @@ type DockviewStore = {
       source?: string;
       repositoryName?: string;
       prKey?: string;
+      changeLayer?: import("@/components/task/changes-diff-target").ChangeLayer;
     },
   ) => void;
   addCommitDetailPanel: (

@@ -709,6 +709,8 @@ test.describe("PR status badge", () => {
     await taskRow.hover();
     await expect(taskActions).toBeVisible();
     await expect(menuSlot).toHaveCSS("width", "24px");
+    // Re-enter from a neutral point after the PR update to deliver a fresh hover transition.
+    await testPage.mouse.move(viewport!.width - 1, viewport!.height - 1);
     await icon.hover();
 
     const multiSummary = visibleTaskPRSummary(testPage);

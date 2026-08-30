@@ -8,6 +8,7 @@ import type { Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import { waitForDiffText, waitForDiffTextAbsent } from "./diff-update-helpers";
 
 // ---------------------------------------------------------------------------
 // Git helper for E2E tests - runs git commands in the test repository
@@ -204,6 +205,71 @@ test.describe("Git Changes Panel", () => {
     await expect(testPage.getByTestId("unstaged-files-section")).toBeVisible({ timeout: 15_000 });
     // Scope the file search to the changes panel to avoid matching Files panel
     await expect(session.changes.getByText("test-file.txt")).toBeVisible({ timeout: 15_000 });
+  });
+
+  // @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.10
+  test("shows same path in staged and unstaged sections", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const profile = await createStandardProfile(apiClient, "Git Mixed Change Profile");
+
+    await apiClient.createTaskWithAgent(seedData.workspaceId, "Git Mixed Change Test", profile.id, {
+      description: "Testing mixed staged and unstaged changes",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    const session = await openTaskSession(testPage, "Git Mixed Change Test");
+    await session.waitForChatIdle();
+
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const git = new GitHelper(repoDir, {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    });
+
+    git.createFile("mixed-layer.txt", "base\n");
+    git.stageFile("mixed-layer.txt");
+    git.commit("Add mixed layer fixture");
+    git.modifyFile("mixed-layer.txt", "base\nSTAGED_LAYER_MARKER\n");
+    git.stageFile("mixed-layer.txt");
+    git.modifyFile("mixed-layer.txt", "base\nSTAGED_LAYER_MARKER\nUNSTAGED_LAYER_MARKER\n");
+
+    await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible({ timeout: 10_000 });
+    await session.expandChangesSection("unstaged-files-section");
+    await session.expandChangesSection("staged-files-section");
+
+    const unstagedRow = testPage
+      .getByTestId("unstaged-files-section")
+      .getByTestId("file-row-mixed-layer.txt");
+    const stagedRow = testPage
+      .getByTestId("staged-files-section")
+      .getByTestId("file-row-mixed-layer.txt");
+    await expect(unstagedRow).toBeVisible();
+    await expect(stagedRow).toBeVisible();
+    await expect(unstagedRow.getByText("+1", { exact: true })).toBeVisible();
+    await expect(stagedRow.getByText("+1", { exact: true })).toBeVisible();
+
+    await unstagedRow.click();
+    await waitForDiffText(testPage, "UNSTAGED_LAYER_MARKER");
+
+    await stagedRow.click();
+    await waitForDiffText(testPage, "STAGED_LAYER_MARKER");
+    await waitForDiffTextAbsent(testPage, "UNSTAGED_LAYER_MARKER");
+
+    await stagedRow.getByTitle("Unstage file").click();
+    await expect(stagedRow).toHaveCount(0);
+    await expect(unstagedRow).toBeVisible();
+    await expect(unstagedRow.getByText("+2", { exact: true })).toBeVisible();
   });
 
   /**

@@ -26,10 +26,28 @@ import (
 )
 
 const (
-	modelConfigOptionID      = "model"
-	attachmentDeliveryPath   = "path"
-	attachmentDeliveryPrompt = "prompt"
+	modelConfigOptionID                = "model"
+	attachmentDeliveryPath             = "path"
+	attachmentDeliveryPrompt           = "prompt"
+	pendingDispatchedPromptWaitTimeout = 10 * time.Second
 )
+
+// PendingDispatchedPromptTimeoutError reports that a successor prompt could
+// not observe completion of an earlier dispatch-only prompt within the
+// bounded admission interval. The pending gate remains set so cancellation
+// escalation remains the only path that can release the predecessor.
+type PendingDispatchedPromptTimeoutError struct {
+	ExecutionID string
+	Timeout     time.Duration
+}
+
+func (e *PendingDispatchedPromptTimeoutError) Error() string {
+	return fmt.Sprintf(
+		"pending dispatched prompt completion timed out for execution %q after %s",
+		e.ExecutionID,
+		e.Timeout,
+	)
+}
 
 // SessionManager handles ACP session initialization and management
 type SessionManager struct {
@@ -1530,12 +1548,27 @@ func waitForPendingDispatchedPrompt(ctx context.Context, execution *AgentExecuti
 	if !execution.dispatchedPromptPending.Load() {
 		return nil
 	}
+	timer := time.NewTimer(pendingDispatchedPromptWaitTimeout)
+	defer timer.Stop()
 	select {
 	case <-execution.promptDoneCh:
 		execution.dispatchedPromptPending.Store(false)
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-timer.C:
+		// Prefer a completion that arrived at the timeout boundary. If no
+		// signal is available, retain the gate for cancellation escalation.
+		select {
+		case <-execution.promptDoneCh:
+			execution.dispatchedPromptPending.Store(false)
+			return nil
+		default:
+			return &PendingDispatchedPromptTimeoutError{
+				ExecutionID: execution.ID,
+				Timeout:     pendingDispatchedPromptWaitTimeout,
+			}
+		}
 	}
 }
 

@@ -162,6 +162,10 @@ func isTransientPromptError(err error) bool {
 	if err == nil {
 		return false
 	}
+	var pendingCompletionTimeout *lifecycle.PendingDispatchedPromptTimeoutError
+	if errors.As(err, &pendingCompletionTimeout) {
+		return true
+	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "agent stream disconnected") ||
 		strings.Contains(msg, "use of closed network connection")
@@ -860,8 +864,9 @@ func (s *Service) StartTaskWithEnv(ctx context.Context, taskID string, agentProf
 // some callers supply. Keeping them in one struct avoids growing startTask's
 // already long positional parameter list for every new orthogonal concern.
 type startTaskOptions struct {
-	// ProfileExplicit marks a non-empty profile selected by the manual New Agent
-	// picker. It bypasses workflow-step profile resolution for this new session.
+	// ProfileExplicit marks a non-empty profile selected through an explicit
+	// selector-backed choice. It bypasses workflow-step profile resolution for
+	// this new session.
 	ProfileExplicit bool
 	// Env holds launch-scoped environment variables for the agent runtime.
 	Env map[string]string
@@ -993,7 +998,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// require a different agent (e.g., Codex on "In Progress", Auggie on "Review").
 	callerProfileID := agentProfileID
 	if opts.ProfileExplicit && agentProfileID != "" {
-		s.logger.Info("manual agent profile selection takes precedence over workflow step",
+		s.logger.Info("explicit selector-backed agent profile selection takes precedence over workflow step",
 			zap.String("task_id", taskID),
 			zap.String("agent_profile_id", agentProfileID))
 	} else {
@@ -4673,6 +4678,9 @@ func (s *Service) claimSessionRunningForPrompt(
 	if err := s.waitForCancellationWithGuard(ctx, sessionID, lock.Unlock, lock.Lock); err != nil {
 		return nil, "", "", false, nil, err
 	}
+	if s.isSessionResetInProgress(sessionID) {
+		return nil, "", "", false, nil, ErrSessionResetInProgress
+	}
 	if expectedCurrentTurnID != "" {
 		if s.turnService == nil {
 			return nil, "", "", false, nil, errors.New("cannot verify expected prompt turn without turn service")
@@ -4772,6 +4780,9 @@ func (s *Service) claimLifecycleSessionRunning(
 	defer lock.Unlock()
 	if err := s.waitForCancellationWithGuard(ctx, sessionID, lock.Unlock, lock.Lock); err != nil {
 		return nil, "", err
+	}
+	if s.isSessionResetInProgress(sessionID) {
+		return nil, "", ErrSessionResetInProgress
 	}
 
 	if claimEntryID != "" && !s.isCurrentQueuedDispatch(sessionID, claimEntryID) {
