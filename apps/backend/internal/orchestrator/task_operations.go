@@ -4675,6 +4675,12 @@ func (s *Service) claimSessionRunningForPrompt(
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	// A reset-owned cancellation must not make prompt admission wait for the
+	// reset that already forbids it. Keep the second check below for a reset
+	// that starts while this prompt is waiting on an unrelated cancellation.
+	if s.isSessionResetInProgress(sessionID) {
+		return nil, "", "", false, nil, ErrSessionResetInProgress
+	}
 	if err := s.waitForCancellationWithGuard(ctx, sessionID, lock.Unlock, lock.Lock); err != nil {
 		return nil, "", "", false, nil, err
 	}

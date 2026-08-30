@@ -205,6 +205,42 @@ func TestResetAgentContext_CancelFailureStopsProviderReset(t *testing.T) {
 	}
 }
 
+// TestResetAgentContext_ResetMarkerPrecedesCancellationWait fixes the ordering
+// that made TestResetAgentContext_SerializesPromptAdmission flaky. Once reset
+// has published its marker and yielded the session guard for cancellation, a
+// prompt must reject the reset before it considers waiting on that cancellation.
+func TestResetAgentContext_ResetMarkerPrecedesCancellationWait(t *testing.T) {
+	ctx := context.Background()
+	svc, _, manager, session := newActiveResetTestService(t)
+	cancelEntered := make(chan struct{}, 1)
+	cancelRelease := make(chan struct{})
+	manager.cancelAgentEntered = cancelEntered
+	manager.cancelAgentBlock = cancelRelease
+	var releaseCancellation sync.Once
+	releaseCancel := func() { releaseCancellation.Do(func() { close(cancelRelease) }) }
+	t.Cleanup(releaseCancel)
+
+	resetDone := make(chan bool, 1)
+	go func() {
+		resetDone <- svc.resetAgentContext(ctx, session.TaskID, session, "Successor")
+	}()
+	<-cancelEntered
+
+	cancelledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	_, _, _, _, _, err := svc.claimSessionRunningForPrompt(
+		cancelledCtx, session.TaskID, session.ID, "", false, nil, nil, "", false,
+	)
+	if !errors.Is(err, ErrSessionResetInProgress) {
+		t.Fatalf("prompt admission error = %v, want %v", err, ErrSessionResetInProgress)
+	}
+
+	releaseCancel()
+	if resetOK := <-resetDone; !resetOK {
+		t.Fatal("resetAgentContext returned false")
+	}
+}
+
 // TestResetAgentContext_SerializesPromptAdmission stages a prompt immediately
 // before its final guarded claim, then starts reset while that claim is paused.
 // If reset wins the shared guard, the marker rejects the prompt while reset is
