@@ -109,6 +109,7 @@ signals, and task-scoped scheduling contracts.
 
 ### System design
 
+- [Additional Session Workspace Reuse](system-design/additional-session-workspace-reuse.md)
 - [Attach Workspace Sources](system-design/attach-workspace-sources.md)
 - [Quick Chat Agent Titles](system-design/quick-chat-agent-titles.md)
 - [Quick Chat Session Resumption](system-design/quick-chat-session-resumption.md)
