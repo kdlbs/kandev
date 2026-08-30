@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useEnsureTaskSession } from "@/hooks/use-ensure-task-session";
 import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
@@ -14,6 +14,18 @@ import {
 } from "@/components/task/chat/chat-input-area";
 import { routePanelMouseDown } from "@/components/task/chat/route-panel-mouse-down";
 
+export function focusRunTranscriptTurn(root: HTMLElement | null, turnId?: string): boolean {
+  if (!root || !turnId) return false;
+  const target = Array.from(root.querySelectorAll<HTMLElement>("[data-turn-id]")).find(
+    (element) => element.dataset.turnId === turnId,
+  );
+  if (!target) return false;
+
+  target.focus({ preventScroll: true });
+  target.scrollIntoView?.({ behavior: "auto", block: "center" });
+  return true;
+}
+
 /**
  * A run's conversation, in place.
  *
@@ -24,10 +36,19 @@ import { routePanelMouseDown } from "@/components/task/chat/route-panel-mouse-do
  * mounting the full task panel: this surface wants the transcript and the
  * composer, not the sessions dropdown, plan mode, or the file editors.
  */
-export function RunTranscript({ sessionId, taskId }: { sessionId: string; taskId: string | null }) {
+export function RunTranscript({
+  sessionId,
+  taskId,
+  turnId,
+}: {
+  sessionId: string;
+  taskId: string | null;
+  turnId?: string;
+}) {
   const { t } = useTranslation();
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
   const scopeRef = useRef<HTMLDivElement>(null);
+  const focusedTurnKeyRef = useRef<string | null>(null);
   const [clarificationKey, setClarificationKey] = useState(0);
 
   useSettingsData(true);
@@ -45,6 +66,15 @@ export function RunTranscript({ sessionId, taskId }: { sessionId: string; taskId
   });
   const { isSending, handleSubmit } = useSubmitHandler(panelState, undefined);
   const { handleCancelTurn } = useChatPanelHandlers(panelState.resolvedSessionId, chatInputRef);
+
+  useEffect(() => {
+    if (!turnId) return;
+    const turnKey = `${sessionId}:${turnId}`;
+    if (focusedTurnKeyRef.current === turnKey) return;
+    if (focusRunTranscriptTurn(scopeRef.current, turnId)) {
+      focusedTurnKeyRef.current = turnKey;
+    }
+  }, [panelState.groupedItems, sessionId, turnId]);
 
   // An automation run is not a session anyone is sitting in: replying starts
   // the agent, it works the prompt, and it shuts down again. Controls that talk
@@ -70,11 +100,13 @@ export function RunTranscript({ sessionId, taskId }: { sessionId: string; taskId
       onMouseDown={handleScopeMouseDown}
       className="flex min-h-0 flex-1 flex-col outline-none"
       data-testid="run-transcript"
+      data-session-id={sessionId}
+      data-turn-id={turnId ?? ""}
     >
       <div className="min-h-0 flex-1 overflow-hidden">
         <MessageList
           items={panelState.groupedItems}
-          messages={panelState.allMessages}
+          messages={panelState.messages}
           permissionsByToolCallId={panelState.permissionsByToolCallId}
           childrenByParentToolCallId={panelState.childrenByParentToolCallId}
           taskId={panelState.taskId ?? undefined}

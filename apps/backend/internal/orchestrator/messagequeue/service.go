@@ -1032,19 +1032,30 @@ func (s *Service) SetPendingMove(ctx context.Context, sessionID string, move *Pe
 		zap.String("workflow_step_id", move.WorkflowStepID))
 }
 
+// GetPendingMoveWithError retrieves the pending move for a session without
+// removing it. It distinguishes an empty queue from a storage failure so
+// callers that must preserve deferred workflow state can fail closed.
+func (s *Service) GetPendingMoveWithError(ctx context.Context, sessionID string) (*PendingMove, bool, error) {
+	move, err := s.repo.GetPendingMove(ctx, sessionID)
+	if err != nil {
+		return nil, false, err
+	}
+	if move == nil {
+		return nil, false, nil
+	}
+	return move, true, nil
+}
+
 // GetPendingMove retrieves the pending move for a session without removing it.
 func (s *Service) GetPendingMove(ctx context.Context, sessionID string) (*PendingMove, bool) {
-	move, err := s.repo.GetPendingMove(ctx, sessionID)
+	move, exists, err := s.GetPendingMoveWithError(ctx, sessionID)
 	if err != nil {
 		s.logger.Error("get pending move failed",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return nil, false
 	}
-	if move == nil {
-		return nil, false
-	}
-	return move, true
+	return move, exists
 }
 
 // TakePendingMove retrieves and removes the pending move for a session.

@@ -1,0 +1,107 @@
+{
+  "pr": {
+    "number": 314,
+    "title": "Add bounded retries to webhook delivery",
+    "url": "https://github.com/example-org/parcel-service/pull/314",
+    "repo": "example-org/parcel-service",
+    "base": "main",
+    "head": "feature/webhook-retry-budget",
+    "files_changed": 5,
+    "added": 148,
+    "removed": 21,
+    "tldr": "Webhook delivery now retries transient failures with bounded backoff. Permanent failures stop immediately, which protects downstream services from repeated invalid requests."
+  },
+  "why": {
+    "problem": "The delivery worker treats every send failure the same. A short network interruption loses a webhook, while repeated retries of a rejected payload waste worker capacity.",
+    "what": [
+      "Classify transient and permanent send failures.",
+      "Retry transient failures with three attempts and exponential backoff.",
+      "Record a terminal failure after the retry budget is exhausted.",
+      "Add tests for recovery, permanent failure, and exhausted retries."
+    ]
+  },
+  "architecture": {
+    "caption": "The worker checks the retry policy before each send. Exhausted jobs move to the dead-letter queue.",
+    "mermaid": "flowchart LR\n  Worker[Delivery worker] --> Policy[Retry policy]\n  Policy --> Sender[Webhook sender]\n  Sender --> Endpoint[Remote endpoint]\n  Policy -- exhausted --> DeadLetter[(Dead-letter queue)]"
+  },
+  "changes": [
+    {
+      "id": "n1",
+      "title": "Retry-aware delivery worker",
+      "file": "src/webhooks/delivery-service.ts",
+      "group": "Delivery worker",
+      "sig": "async deliver(job: DeliveryJob): Promise<DeliveryResult>",
+      "why": "The worker applies the retry policy around each webhook send and returns a terminal result when the budget ends.",
+      "blocks": [
+        {
+          "label": "Delivery loop",
+          "lang": "typescript",
+          "code": "async deliver(job: DeliveryJob): Promise<DeliveryResult> {\n  let attempt = job.attempts;\n\n  while (true) {\n    const result = await this.sender.send(job.payload);\n    if (result.ok) return { status: \"delivered\" };\n\n    attempt += 1;\n    job.lastError = result.error;\n    if (!this.policy.canRetry(attempt, job.lastError)) break;\n    await this.policy.wait(attempt);\n  }\n\n  return { status: \"failed\", reason: \"retry budget exhausted\" };\n}"
+        }
+      ]
+    },
+    {
+      "id": "n2",
+      "title": "Bounded retry policy",
+      "file": "src/webhooks/retry-policy.ts",
+      "group": "Delivery worker",
+      "sig": "canRetry(attempt: number, error?: DeliveryError): boolean",
+      "why": "The policy retries only transient errors and caps attempts with a short exponential delay.",
+      "blocks": [
+        {
+          "label": "Policy",
+          "lang": "typescript",
+          "diff": true,
+          "code": "export class RetryPolicy {\n  constructor(private readonly maxAttempts = 3) {}\n\n  canRetry(attempt: number, error?: DeliveryError): boolean {\n    return error?.kind === \"transient\" && attempt < this.maxAttempts;\n  }\n\n  delay(attempt: number): number {\n    return Math.min(1000 * 2 ** attempt, 8000);\n  }\n}"
+        }
+      ]
+    },
+    {
+      "id": "n3",
+      "title": "Failure classification",
+      "file": "src/webhooks/webhook-sender.ts",
+      "group": "Delivery worker",
+      "sig": "async send(payload: WebhookPayload): Promise<SendResult>",
+      "why": "The sender turns response status into a retryable or permanent error before the worker decides what to do next.",
+      "blocks": [
+        {
+          "label": "Send result",
+          "lang": "typescript",
+          "code": "async send(payload: WebhookPayload): Promise<SendResult> {\n  const response = await this.http.post(payload.url, payload.body);\n  if (response.status === 429 || response.status >= 500) {\n    return { ok: false, error: { kind: \"transient\", status: response.status } };\n  }\n  if (!response.ok) {\n    return { ok: false, error: { kind: \"permanent\", status: response.status } };\n  }\n  return { ok: true };\n}"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    { "from": "n1", "to": "n2", "label": "checks budget" },
+    { "from": "n1", "to": "n3", "label": "sends payload" },
+    { "from": "n3", "to": "n1", "label": "returns outcome" }
+  ],
+  "data": {
+    "caption": "Each delivery record stores retry state so a resumed worker can continue from the last attempt.",
+    "fields": [
+      { "field": "attempts", "type": "integer", "note": "number of sends already made" },
+      { "field": "status", "type": "enum", "note": "pending, delivered, or failed" },
+      { "field": "last_error", "type": "json", "note": "classified error from the latest send" }
+    ]
+  },
+  "risk": {
+    "score": 4,
+    "reasons": [
+      "A policy mistake could delay delivery or drop a transient failure.",
+      "The attempt cap bounds extra traffic to the remote endpoint.",
+      "Existing successful deliveries keep the same single-send path."
+    ]
+  },
+  "review": {
+    "tradeoffs": [
+      "Exponential backoff improves recovery but increases delivery time during an outage.",
+      "Permanent failures stop early but require accurate response classification."
+    ],
+    "focus": [
+      "Check that status classification matches the endpoint contract.",
+      "Confirm the attempt count is persisted before a worker restart.",
+      "Verify exhausted jobs receive a clear terminal status."
+    ]
+  }
+}

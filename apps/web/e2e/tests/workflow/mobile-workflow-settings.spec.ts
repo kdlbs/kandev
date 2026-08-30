@@ -2,6 +2,69 @@ import { test, expect } from "../../fixtures/test-base";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 test.describe("Workflow settings on mobile", () => {
+  test("remove sync confirmation keeps 44px inline actions", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.configureGitLab(seedData.workspaceId);
+    const configResponse = await apiClient.rawRequest(
+      "POST",
+      `/api/v1/workflow-sync/config?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+      {
+        provider: "gitlab",
+        project_path: "platform/kandev",
+        branch: "main",
+        path: ".kandev/workflows",
+        interval_seconds: 300,
+        poll_enabled: true,
+      },
+    );
+    expect(configResponse.ok).toBe(true);
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    const dialog = testPage.getByTestId("workflow-sync-dialog");
+    await testPage.getByTestId("workflow-sync-open").tap();
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId("workflow-sync-remove").tap();
+    const confirmation = dialog.getByTestId("workflow-sync-remove-confirmation");
+    await expect(confirmation).toBeVisible();
+
+    for (const control of [
+      confirmation.getByRole("button", { name: "Cancel" }),
+      confirmation.getByTestId("workflow-sync-remove-confirm"),
+    ]) {
+      const box = await control.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(
+        await testPage.evaluate(() => window.innerWidth),
+      );
+    }
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+    ).toBe(false);
+
+    await testPage.keyboard.press("Escape");
+    await expect(confirmation).not.toBeVisible();
+    await expect(dialog.getByTestId("workflow-sync-remove")).toBeVisible();
+
+    await dialog.getByTestId("workflow-sync-remove").tap();
+    await dialog.getByTestId("workflow-sync-remove-confirm").tap();
+    await expect(dialog).not.toBeVisible();
+    expect(
+      (
+        await apiClient.rawRequest(
+          "GET",
+          `/api/v1/workflow-sync/config?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+        )
+      ).status,
+    ).toBe(204);
+  });
+
   test("configures original-session rules with touch-sized controls", async ({
     testPage,
     apiClient,

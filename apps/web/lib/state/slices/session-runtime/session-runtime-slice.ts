@@ -5,6 +5,7 @@ import type {
   SessionPollMode,
   GitStatusEntry,
   FileInfo,
+  FileChangeFacet,
 } from "./types";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { normalizeGitStatusEntry } from "./git-status-normalizer";
@@ -50,9 +51,23 @@ const COMPARABLE_FILE_FIELDS = [
   "old_path",
   "diff",
   "diff_skip_reason",
+  "staged_change",
+  "unstaged_change",
   "repository_name",
   "is_submodule",
 ] as const;
+
+function comparableChangeFacet(facet: FileChangeFacet | undefined): string {
+  if (!facet) return "";
+  return [
+    facet.status,
+    facet.additions ?? 0,
+    facet.deletions ?? 0,
+    facet.old_path ?? "",
+    facet.diff ?? "",
+    facet.diff_skip_reason ?? "",
+  ].join("\0");
+}
 
 function comparableFileInfo(file: FileInfo) {
   return {
@@ -64,6 +79,8 @@ function comparableFileInfo(file: FileInfo) {
     old_path: file.old_path ?? "",
     diff: file.diff ?? "",
     diff_skip_reason: file.diff_skip_reason ?? "",
+    staged_change: comparableChangeFacet(file.staged_change),
+    unstaged_change: comparableChangeFacet(file.unstaged_change),
     repository_name: file.repository_name ?? "",
     is_submodule: file.is_submodule ?? false,
   };

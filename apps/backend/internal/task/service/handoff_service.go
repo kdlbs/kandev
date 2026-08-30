@@ -75,6 +75,14 @@ type RunCanceller interface {
 	CancelTaskExecution(ctx context.Context, taskID, reason string, force bool) error
 }
 
+// activeTaskSessionCanceller finalizes active task sessions independently of
+// runtime teardown. The sqlite task repository implements this surface; it is
+// intentionally optional so handoff tests and legacy wiring do not need the
+// full session repository.
+type activeTaskSessionCanceller interface {
+	CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) ([]*models.TaskSession, error)
+}
+
 // SetRunCanceller wires the run-canceller used by ArchiveTaskTree /
 // DeleteTaskTree to terminate active descendants before archive.
 func (s *HandoffService) SetRunCanceller(c RunCanceller) {
@@ -201,6 +209,7 @@ type HandoffService struct {
 	eventPublisher     TaskEventPublisher
 	resourceCleaner    TaskResourceCleaner
 	taskAccessCheck    func(ctx context.Context, taskID string) error
+	comments           CommentReader
 	logger             *logger.Logger
 	parentLock         parentMutex
 	workspaceGroupLock parentMutex
@@ -220,6 +229,14 @@ type HandoffService struct {
 type TaskEventPublisher interface {
 	PublishTaskUpdated(ctx context.Context, task *models.Task, oldWorkflowIDs ...string)
 	PublishTaskDeleted(ctx context.Context, task *models.Task)
+}
+
+// taskSessionCancellationPublisher is the optional event side effect paired
+// with activeTaskSessionCanceller. Cascade archive/delete paths do not call
+// Service.ArchiveTask, so they must publish the session transition themselves
+// when a DB-only cancellation is needed.
+type taskSessionCancellationPublisher interface {
+	PublishTaskSessionsCancelled(ctx context.Context, taskID string, cancelledSessions []*models.TaskSession, reason string)
 }
 
 // SetSessionReader wires the session/worktree lookup used by the
@@ -291,6 +308,15 @@ func (s *HandoffService) SetTaskResourceCleaner(c TaskResourceCleaner) {
 // of every archive and delete route.
 func (s *HandoffService) SetTaskAccessChecker(check func(ctx context.Context, taskID string) error) {
 	s.taskAccessCheck = check
+}
+
+// SetCommentReader wires the read-only comment store queried by
+// ListCommentsForCaller. Optional — when nil, ListCommentsForCaller reports
+// an internal error rather than falling back to an empty list (AC-005.2:
+// an unconfigured dependency must never look like "the task has no
+// comments").
+func (s *HandoffService) SetCommentReader(r CommentReader) {
+	s.comments = r
 }
 
 // authorizeTask applies the configured per-user task check. No-op when unwired.

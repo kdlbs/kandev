@@ -16,6 +16,7 @@ import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agent
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { setSessionMode } from "@/lib/api/domains/session-api";
 import { cn } from "@/lib/utils";
+import { prioritizeSelectedOption } from "@/lib/utils/selector-options";
 import type { Agent, AgentProfile, AvailableAgent } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 
@@ -84,7 +85,10 @@ function buildModeState(
   }
   if (availableModes.length <= 1) return undefined;
   if (availableModes.some((m) => m.id === currentModeId)) {
-    return { currentModeId, availableModes };
+    return {
+      currentModeId,
+      availableModes: prioritizeSelectedOption(availableModes, currentModeId, (mode) => mode.id),
+    };
   }
   return {
     currentModeId,
@@ -199,7 +203,11 @@ export const ModeSelector = memo(function ModeSelector({
           <DropdownMenuItem
             key={mode.id}
             onClick={() => handleModeChange(mode.id)}
-            className={`cursor-pointer relative pr-7 ${mode.id === modeState.currentModeId ? "bg-muted" : ""}`}
+            className={cn(
+              "relative min-h-11 cursor-pointer border border-transparent pr-7 sm:min-h-8",
+              mode.id === modeState.currentModeId &&
+                "border-primary/50 bg-card font-medium hover:bg-card",
+            )}
           >
             <div className="min-w-0 flex-1">
               <div>{mode.name}</div>

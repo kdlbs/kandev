@@ -256,10 +256,6 @@ type Service struct {
 	// misses and rows get cost_subcents=0 + estimated=true.
 	pricingLookup shared.PricingLookup
 
-	// sessionUsageWriter accumulates tokens / cost onto task_sessions
-	// when a cost event lands. Optional in tests.
-	sessionUsageWriter shared.SessionUsageWriter
-
 	// budgetChecker evaluates budget policies. Wired to the
 	// costs.CostService at startup; nil in tests that don't exercise
 	// the budget pathways. Both CheckBudget and CheckPreExecutionBudget
@@ -286,9 +282,6 @@ func (s *Service) SetBudgetChecker(b BudgetEvaluator) { s.budgetChecker = b }
 
 // SetPricingLookup wires the models.dev pricing lookup.
 func (s *Service) SetPricingLookup(p shared.PricingLookup) { s.pricingLookup = p }
-
-// SetSessionUsageWriter wires the task-session usage incrementer.
-func (s *Service) SetSessionUsageWriter(w shared.SessionUsageWriter) { s.sessionUsageWriter = w }
 
 // SetAgentTokenMinter wires the runtime token minter after feature services are constructed.
 func (s *Service) SetAgentTokenMinter(minter AgentTokenMinter) {
@@ -338,9 +331,15 @@ func (s *Service) SetSyncHandlers(sync bool) {
 // NewService creates a new office service. All dependencies are provided via
 // ServiceOptions for compile-time completeness; only Repo and Logger are required.
 func NewService(opts ServiceOptions) *Service {
+	log := opts.Logger.WithFields(zap.String("component", "office-service"))
+	if opts.TaskStarter == nil {
+		log.Warn("office service constructed without a TaskStarter; " +
+			"every run the scheduler claims will fail immediately " +
+			"instead of launching an agent (WO-35)")
+	}
 	svc := &Service{
 		repo:                    opts.Repo,
-		logger:                  opts.Logger.WithFields(zap.String("component", "office-service")),
+		logger:                  log,
 		cfgLoader:               opts.CfgLoader,
 		cfgWriter:               opts.CfgWriter,
 		gitManager:              opts.GitManager,

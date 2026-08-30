@@ -386,7 +386,7 @@ func (a *Actions) PostComment(ctx context.Context, runCtx RunContext, taskID, bo
 		AuthorID:   runCtx.AgentID,
 		Body:       body,
 		Source:     "agent",
-		CreatedAt:  time.Now(),
+		CreatedAt:  time.Now().UTC(),
 	}
 	return a.deps.Comments.CreateComment(ctx, comment)
 }

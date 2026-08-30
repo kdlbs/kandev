@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
-import { expect, test } from "../../fixtures/test-base";
+import { expect, resetSeedRepositoryCheckout, test } from "../../fixtures/test-base";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
@@ -40,8 +40,13 @@ test("@search keeps workspace modes out of non-task routes", async ({ testPage }
 
   await testPage.keyboard.press(`${MODIFIER}+k`);
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("tablist", { name: "Command palette mode" })).toHaveCount(0);
-  await expect(dialog).not.toContainText("Switch mode");
+  // Commands and Tasks read no worktree, so they stay reachable off a task
+  // route; Files and Contents are the ones that must not appear.
+  await expect(
+    dialog.getByRole("tablist", { name: "Command palette mode" }).getByRole("tab"),
+  ).toHaveText(["Commands", "Tasks"]);
+  await expect(dialog.getByRole("tab", { name: "Files" })).toHaveCount(0);
+  await expect(dialog.getByRole("tab", { name: "Contents" })).toHaveCount(0);
 });
 
 test("@search searches all task repositories and opens the selected match", async ({
@@ -51,6 +56,10 @@ test("@search searches all task repositories and opens the selected match", asyn
   backend,
 }) => {
   test.setTimeout(120_000);
+
+  // The worker reuses this checkout across specs. Content search must index
+  // the commit created below from main, not a branch left by an earlier test.
+  resetSeedRepositoryCheckout(seedData, backend.tmpDir);
 
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const sharedPath = `src/content-search-${suffix}.ts`;
@@ -70,7 +79,7 @@ test("@search searches all task repositories and opens the selected match", asyn
     seedData.workspaceId,
     extraRepoDir,
     "main",
-    { name: EXTRA_REPOSITORY_NAME },
+    { name: EXTRA_REPOSITORY_NAME, pull_before_worktree: false },
   );
 
   const task = await apiClient.createTaskWithAgent(
@@ -113,6 +122,7 @@ test("@search searches all task repositories and opens the selected match", asyn
   ).toHaveCount(1);
 
   const commandsTab = dialog.getByRole("tab", { name: "Commands" });
+  const tasksTab = dialog.getByRole("tab", { name: "Tasks" });
   const filesTab = dialog.getByRole("tab", { name: "Files" });
   const contentsTab = dialog.getByRole("tab", { name: "Contents" });
   await expect(contentsTab).toHaveAttribute("aria-selected", "true");
@@ -121,6 +131,10 @@ test("@search searches all task repositories and opens the selected match", asyn
   await expect(input).toBeFocused();
   await expect(input).toHaveValue(SEARCH_TERM);
   await expect(commandsTab).toHaveAttribute("aria-selected", "true");
+
+  await testPage.keyboard.press("Tab");
+  await expect(tasksTab).toHaveAttribute("aria-selected", "true");
+  await expect(input).toHaveValue(SEARCH_TERM);
 
   await testPage.keyboard.press("Tab");
   await expect(filesTab).toHaveAttribute("aria-selected", "true");

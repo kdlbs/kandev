@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
@@ -23,10 +24,24 @@ const (
 	RunReasonTaskBlockersResolved  = "task_blockers_resolved"
 	RunReasonTaskChildrenCompleted = "task_children_completed"
 	RunReasonApprovalResolved      = "approval_resolved"
+	RunReasonTaskReviewRequested   = "task_review_requested"
 	RunReasonRoutineTrigger        = "routine_trigger"
-	RunReasonHeartbeat             = "heartbeat"
-	RunReasonBudgetAlert           = "budget_alert"
-	RunReasonAgentError            = "agent_error"
+	// RunReasonHeartbeat aliases shared.RunReasonHeartbeat so this package's
+	// local constant and the shared idle-skip classifier cannot drift apart
+	// the way the un-aliased pair did before WO-46 (Review round 1, S2).
+	RunReasonHeartbeat   = shared.RunReasonHeartbeat
+	RunReasonBudgetAlert = "budget_alert"
+	RunReasonAgentError  = "agent_error"
+)
+
+// These reasons were persisted by earlier workflow templates. Keep them
+// readable so existing materialized workflows continue to wake the correct
+// prompt after the built-in template changes.
+const (
+	legacyRunReasonBlockersResolved  = "blockers_resolved"
+	legacyRunReasonChildrenCompleted = "children_completed"
+	legacyRunReasonReviewStarted     = "review_started"
+	legacyRunReasonApprovalStarted   = "approval_started"
 )
 
 // Run status constants.
@@ -36,6 +51,20 @@ const (
 	RunStatusFinished  = "finished"
 	RunStatusFailed    = "failed"
 	RunStatusCancelled = "cancelled"
+)
+
+// Run outcome constants (docs/specs/task-delivery-ledger/spec.md, "Office run
+// outcome"). Written into runs.outcome alongside status='finished' at each of
+// the six terminal call sites; NULL on the failed path and on every
+// pre-activation row. RunOutcomeProcessed is the only value
+// RunCountsByDayForAgent counts as succeeded. Every other value buckets into
+// skipped.
+const (
+	RunOutcomeProcessed     = "processed"
+	RunOutcomeBudgetBlocked = "budget_blocked"
+	RunOutcomeIdleSkipped   = "idle_skipped"
+	RunOutcomeAgentInactive = "agent_inactive"
+	RunOutcomeTaskTreeHeld  = "task_tree_held"
 )
 
 // CoalesceWindowSeconds is the default coalescing window.
@@ -60,11 +89,12 @@ func (s *Service) QueueRun(
 	}
 
 	if s.runsService != nil {
-		return s.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
+		_, err := s.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
 			Reason:         reason,
 			IdempotencyKey: idempotencyKey,
 			Payload:        payloadWithAgent(payload, agentInstanceID),
 		})
+		return err
 	}
 	return s.queueRunInline(ctx, agentInstanceID, reason, payload, idempotencyKey)
 }

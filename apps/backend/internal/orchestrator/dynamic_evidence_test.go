@@ -6,29 +6,41 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 )
 
+// Contract coverage: a recognized provider failure still cannot override the
+// dynamic route's pre-result and effect-safety gate.
 func TestDynamicPreResultRequiresExplicitKnownEvidence(t *testing.T) {
-	if dynamicPreResultSafe(watcher.AgentEventData{DynamicRouteAttempt: true}) {
-		t.Fatal("unknown dynamic attempt was treated as pre-result safe")
-	}
-	if !dynamicPreResultSafe(watcher.AgentEventData{
+	usageLimitFailure := watcher.AgentEventData{
+		AgentID:             "codex-acp",
+		ErrorMessage:        `{"code":-32603,"message":"Internal error","data":{"codexErrorInfo":"usageLimitExceeded","message":"You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 1st, 2026 3:14 PM."}}`,
 		DynamicRouteAttempt: true,
 		EvidenceKnown:       true,
-	}) {
-		t.Fatal("known no-output/no-effect attempt was not pre-result safe")
 	}
-	if dynamicPreResultSafe(watcher.AgentEventData{
-		DynamicRouteAttempt: true,
-		EvidenceKnown:       true,
-		OutputObserved:      true,
-	}) {
-		t.Fatal("output-producing attempt was treated as pre-result safe")
+	if !dynamicPreResultSafe(usageLimitFailure) {
+		t.Fatal("pre-result usage-limit failure was not safe to route")
 	}
-	if dynamicPreResultSafe(watcher.AgentEventData{
-		DynamicRouteAttempt: true,
-		EvidenceKnown:       true,
-		EffectObserved:      true,
-	}) {
-		t.Fatal("effect-producing attempt was treated as pre-result safe")
+
+	unsafeCases := []struct {
+		name string
+		data watcher.AgentEventData
+	}{
+		{name: "unknown evidence", data: watcher.AgentEventData{DynamicRouteAttempt: true}},
+		{name: "assistant output", data: func() watcher.AgentEventData {
+			data := usageLimitFailure
+			data.OutputObserved = true
+			return data
+		}()},
+		{name: "tool effect", data: func() watcher.AgentEventData {
+			data := usageLimitFailure
+			data.EffectObserved = true
+			return data
+		}()},
+	}
+	for _, test := range unsafeCases {
+		t.Run(test.name, func(t *testing.T) {
+			if dynamicPreResultSafe(test.data) {
+				t.Fatalf("case %q was incorrectly treated as pre-result safe", test.name)
+			}
+		})
 	}
 }
 

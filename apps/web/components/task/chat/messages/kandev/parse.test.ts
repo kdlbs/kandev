@@ -97,6 +97,25 @@ describe("extractMcpResult", () => {
     ).toEqual({ version: 1, resolved_charts: [] });
   });
 
+  it("falls back to text content when structuredContent is null", () => {
+    expect(
+      extractMcpResult({
+        _meta: null,
+        content: [{ type: "text", text: '{"total":2,"workspaces":[{"id":"w1"}]}' }],
+        structuredContent: null,
+      }),
+    ).toEqual({ total: 2, workspaces: [{ id: "w1" }] });
+  });
+
+  it("falls back to text content when structured_content is null", () => {
+    expect(
+      extractMcpResult({
+        content: [{ type: "text", text: '{"total":1}' }],
+        structured_content: null,
+      }),
+    ).toEqual({ total: 1 });
+  });
+
   it("unwraps the raw result wrapper emitted by ACP clients", () => {
     expect(extractMcpResult({ result: '{"version":1,"resolved_charts":[]}' })).toEqual({
       version: 1,

@@ -76,8 +76,8 @@ func seedQuickChatTask(t *testing.T, svc *Service, sqlxDB *sqlx.DB, fixture quic
 
 // TestListQuickChatSessionsIsWorkspaceScopedAndOrdered pins the contract the
 // boot payload and the resync endpoint share: only restorable quick chats for
-// the requested workspace, newest activity first. Both clients read this list,
-// so any divergence here shows up as different tabs on different devices.
+// the requested workspace, in a stable creation baseline. Both clients read
+// this list, so activity cannot reorder tabs on different devices.
 func TestListQuickChatSessionsIsWorkspaceScopedAndOrdered(t *testing.T) {
 	svc, sqlxDB := createOfficeIntegrationServiceWithDB(t)
 	ctx := context.Background()
@@ -136,7 +136,7 @@ func TestListQuickChatSessionsIsWorkspaceScopedAndOrdered(t *testing.T) {
 		gotIDs = append(gotIDs, item.SessionID)
 	}
 	wantIDs := []string{
-		"task-config-session", "task-new-session", "task-old-session", "task-unnamed-session",
+		"task-unnamed-session", "task-old-session", "task-new-session", "task-config-session",
 	}
 	if len(gotIDs) != len(wantIDs) {
 		t.Fatalf("session ids = %v, want %v", gotIDs, wantIDs)
@@ -146,17 +146,17 @@ func TestListQuickChatSessionsIsWorkspaceScopedAndOrdered(t *testing.T) {
 			t.Fatalf("session ids = %v, want %v", gotIDs, wantIDs)
 		}
 	}
-	if items[0].Kind != QuickChatKindConfig || items[1].Kind != QuickChatKindChat {
-		t.Fatalf("kinds = %q/%q, want config/chat", items[0].Kind, items[1].Kind)
+	if items[3].Kind != QuickChatKindConfig || items[1].Kind != QuickChatKindChat {
+		t.Fatalf("kinds = %q/%q, want config/chat", items[3].Kind, items[1].Kind)
 	}
-	if items[0].Name != "Config" || items[0].AgentProfileID != "agent-config" {
-		t.Fatalf("config tab = %#v, want title and agent profile preserved", items[0])
+	if items[3].Name != "Config" || items[3].AgentProfileID != "agent-config" {
+		t.Fatalf("config tab = %#v, want title and agent profile preserved", items[3])
 	}
-	if items[3].Name != "" {
-		t.Fatalf("placeholder-titled tab name = %q, want empty", items[3].Name)
+	if items[0].Name != "" {
+		t.Fatalf("placeholder-titled tab name = %q, want empty", items[0].Name)
 	}
-	if items[0].WorkspaceID != "ws-qc" || items[0].Session == nil {
-		t.Fatalf("tab payload = %#v, want workspace and session attached", items[0])
+	if items[3].WorkspaceID != "ws-qc" || items[3].Session == nil {
+		t.Fatalf("tab payload = %#v, want workspace and session attached", items[3])
 	}
 }
 

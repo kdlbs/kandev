@@ -51,7 +51,7 @@ func (a *Adapter) SupportsSteering() bool {
 // Delivery is opportunistic. Whether the agent folds this prompt into the
 // running turn or runs it as the next turn is the agent's decision and is not
 // advertised over the protocol, so both outcomes must be correct. See
-// docs/specs/platform/mid-turn-steering.md.
+// docs/specs/platform/requirements/mid-turn-steering.md.
 func (a *Adapter) PromptSteer(
 	ctx context.Context,
 	message string,
@@ -265,7 +265,6 @@ func (a *Adapter) sendPrompt(
 	}
 
 	// Emit complete event via the stream, including the StopReason from the agent.
-	// This normalizes ACP behavior to match other adapters (stream-json, amp, copilot, opencode).
 	a.logger.Debug("emitting complete event after prompt",
 		zap.String("session_id", sessionID),
 		zap.String("stop_reason", stopReason))

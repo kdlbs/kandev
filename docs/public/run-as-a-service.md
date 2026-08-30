@@ -52,13 +52,13 @@ kandev service status
 kandev service logs
 ```
 
-The installer writes the managed unit or plist and starts the process. It does **not** poll `/health`; use `status` and `logs` first. The logs print the actual listener URL because the launcher selects a free fallback port when `38429` is unavailable. Copy that URL and append `/health`; for example, if the log reports port `43127`:
+The installer writes the managed unit or plist and starts the process. It does **not** poll `/health`; use `status` and `logs` first. The logs print the actual listener URL because the launcher selects a free fallback port when `38429` is unavailable. Copy that URL and append `/ready`; for example, if the log reports port `43127`:
 
 ```bash
-curl --fail http://127.0.0.1:43127/health
+curl --fail http://127.0.0.1:43127/ready
 ```
 
-`/health` reports backend readiness after routes and the agent registry are initialized and the HTTP listener is accepting connections. It is not a deep health check of the database, message bus, executors, or remote providers.
+`/ready` reports backend readiness after routes and the agent registry are initialized and the HTTP listener is accepting connections. It is not a deep health check of the database, message bus, executors, or remote providers.
 
 ### System service
 

@@ -9,14 +9,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// RegisterRoutes wires the backups endpoints onto g (typically the
-// /api/v1/system group).
-func RegisterRoutes(g *gin.RouterGroup, svc *Service) {
-	g.GET("/backups", HandleList(svc))
-	g.POST("/backups", HandleCreate(svc))
-	g.GET("/backups/:name/download", HandleDownload(svc))
-	g.POST("/backups/:name/restore", HandleRestore(svc))
-	g.DELETE("/backups/:name", HandleDelete(svc))
+// RegisterRoutes wires the backups endpoints onto the /api/v1/system groups.
+// Only the metadata listing is readable by any authenticated caller. Creating,
+// downloading, restoring, and deleting a snapshot act on the whole install:
+// a snapshot is a copy of the multi-user database, so the download route is an
+// export of every user's data and belongs behind the admin role along with the
+// destructive mutations.
+func RegisterRoutes(read, admin *gin.RouterGroup, svc *Service) {
+	read.GET("/backups", HandleList(svc))
+	admin.POST("/backups", HandleCreate(svc))
+	admin.GET("/backups/:name/download", HandleDownload(svc))
+	admin.POST("/backups/:name/restore", HandleRestore(svc))
+	admin.DELETE("/backups/:name", HandleDelete(svc))
 }
 
 // HandleList returns GET /api/v1/system/backups -> { snapshots: [...] }.

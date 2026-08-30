@@ -4,7 +4,7 @@
  * - `pat` — Jira Server / Data Center only (Personal Access Token, sent as Bearer).
  * - `session_cookie` — works on both Cloud and Server (wraps the session JWT cookie).
  */
-export type JiraAuthMethod = "api_token" | "pat" | "session_cookie";
+export type JiraAuthMethod = "api_token" | "pat" | "session_cookie" | "oauth";
 
 /**
  * Jira deployment kind. Cloud uses REST v3 and the token-paginated search
@@ -21,6 +21,12 @@ export interface JiraConfig {
   instanceType: JiraInstanceType;
   defaultProjectKey: string;
   hasSecret: boolean;
+  /** OAuth client_id (only for authMethod === "oauth"). */
+  clientId?: string;
+  /** Atlassian cloudId (only for authMethod === "oauth"). */
+  cloudId?: string;
+  /** OAuth access token expiry ISO timestamp (only for authMethod === "oauth"). */
+  tokenExpiresAt?: string | null;
   /** ISO timestamp when the session cookie's JWT expires, or null for api_token / opaque cookies. */
   secretExpiresAt?: string | null;
   /** Last time the backend probed credentials, or null if never probed. */
@@ -40,6 +46,8 @@ export interface SetJiraConfigRequest {
   instanceType: JiraInstanceType;
   defaultProjectKey?: string;
   secret?: string;
+  /** OAuth client_id (only for authMethod === "oauth", dynamically registered). */
+  clientId?: string;
 }
 
 export interface TestJiraConnectionResult {

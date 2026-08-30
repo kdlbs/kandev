@@ -34,6 +34,8 @@ func provideLifecycleManager(
 	baseBranchProvider lifecycle.BaseBranchProvider,
 	comparisonTargetProvider lifecycle.ComparisonTargetProvider,
 	managedRuntimeSelections managedruntime.SelectionReader,
+	mcpIdentityScoper lifecycle.MCPIdentityScoper,
+	mcpPrincipalScoper lifecycle.MCPPrincipalScoper,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
 
@@ -147,6 +149,16 @@ func provideLifecycleManager(
 	// Wire the comparison-target provider before Start so recovered executions
 	// hydrate the exact provider-qualified ref before their first status poll.
 	lifecycleMgr.SetComparisonTargetProvider(comparisonTargetProvider)
+	// Recovered executions can dispatch MCP calls as soon as Start resumes
+	// their streams. Install both trusted scopes before Start, not after route
+	// registration, so the first recovered call has the same authority boundary
+	// as every later call.
+	if mcpIdentityScoper != nil {
+		lifecycleMgr.SetMCPIdentityScoper(mcpIdentityScoper)
+	}
+	if mcpPrincipalScoper != nil {
+		lifecycleMgr.SetMCPPrincipalScoper(mcpPrincipalScoper)
+	}
 
 	if err := lifecycleMgr.Start(ctx); err != nil {
 		return nil, err

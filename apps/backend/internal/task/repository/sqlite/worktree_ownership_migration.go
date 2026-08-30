@@ -43,8 +43,11 @@ func finalTaskEnvironmentsDDL(tableName string) string {
 			executor_profile_id TEXT DEFAULT '',
 			control_port INTEGER DEFAULT 0,
 			status TEXT NOT NULL DEFAULT 'creating',
+			materialization_session_id TEXT DEFAULT '',
 			workspace_path TEXT DEFAULT '',
 			container_id TEXT DEFAULT '',
+			container_bootstrap_nonce_secret_id TEXT DEFAULT '',
+			container_control_auth_token_secret_id TEXT DEFAULT '',
 			sandbox_id TEXT DEFAULT '',
 			task_dir_name TEXT DEFAULT '',
 			created_at TIMESTAMP NOT NULL,
@@ -166,8 +169,11 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 }
 
 func (r *Repository) cutoverLegacyEnvironmentColumns(tx *sqlx.Tx) (map[string]bool, error) {
-	columns := make(map[string]bool, 4)
-	for _, column := range []string{"repository_id", "worktree_id", "worktree_path", "worktree_branch"} {
+	columns := make(map[string]bool, 6)
+	for _, column := range []string{
+		"repository_id", "worktree_id", "worktree_path", "worktree_branch",
+		"container_bootstrap_nonce_secret_id", "container_control_auth_token_secret_id",
+	} {
 		has, err := r.columnExists(tx, "task_environments", column)
 		if err != nil {
 			return nil, err

@@ -3,8 +3,10 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/office/models"
 )
 
@@ -336,6 +338,40 @@ func (r *Repository) ListAutoPausedAgentsForInbox(
 		out = append(out, &row)
 	}
 	return out, rows.Err()
+}
+
+// HasPriorTasklessFailedRun reports whether the same continuation scope for
+// an agent already has a failed run with no task_id in its payload, other
+// than excludeRunID. Used to cap inbox noise from routines that are taskless
+// by design (the pre-installed "Coordinator heartbeat" fires every 5 minutes,
+// WO-35). Agent-scoped callers also match legacy rows with an empty scope.
+func (r *Repository) HasPriorTasklessFailedRun(
+	ctx context.Context, agentID, continuationScope, excludeRunID string,
+) (bool, error) {
+	taskIDExpr := dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id")
+	if continuationScope == "" {
+		continuationScope = "agent:" + agentID
+	}
+	scopeClause := "continuation_scope = ?"
+	if continuationScope == "agent:"+agentID {
+		// Rows created before continuation_scope was introduced have an
+		// empty value. Treat those rows as agent-scoped legacy failures.
+		scopeClause = "(continuation_scope = ? OR continuation_scope = '')"
+	}
+	var found int
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(fmt.Sprintf(`
+		SELECT 1 FROM runs
+		WHERE agent_profile_id = ?
+		  AND status = 'failed'
+		  AND id != ?
+		  AND COALESCE(%s, '') = ''
+		  AND %s
+		LIMIT 1
+	`, taskIDExpr, scopeClause)), agentID, excludeRunID, continuationScope).Scan(&found)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // ListFailedRunsForAgent returns the runs for an agent whose

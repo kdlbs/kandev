@@ -665,8 +665,15 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// avoid racing on_enter against the running turn. Apply it now: the move
 	// is the explicit transition the agent requested, so skip the regular
 	// on_turn_complete evaluation against the (still old) step.
-	if pendingMove, exists := s.messageQueue.TakePendingMove(ctx, data.SessionID); exists {
-		s.applyPendingMove(ctx, data.TaskID, data.SessionID, session, pendingMove)
+	//
+	// A move that has been armed longer than the TTL is not applied: the board
+	// state it was authored against is long gone, and applying it would
+	// relocate the card behind the user's back. discardStalePendingMove drops
+	// it (and its hand-off prompt), so this turn falls through to the normal
+	// on_turn_complete handling below, exactly as if no move had been armed.
+	// Fresh moves are claimed with an exact-row comparison before application.
+	// See pending_move_reaper.go.
+	if s.handlePendingMoveAtAgentReady(ctx, data.TaskID, data.SessionID, session) {
 		return
 	}
 
@@ -1419,7 +1426,7 @@ func (s *Service) shouldDropSessionFailure(
 		return dropWhenUnavailable, ""
 	}
 	if isTerminalSessionState(session.State) {
-		s.resetTransientRetry(data.SessionID)
+		s.resetTransientRetryWithContext(ctx, data.SessionID, true)
 		s.logger.Debug("dropping session failure for terminal session",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
@@ -1540,7 +1547,10 @@ func (s *Service) RegisterExecutionStopOwner(sessionID, executionID string, forc
 		return
 	}
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
-	lock.Lock()
+	if !lock.TryLock() {
+		release()
+		return
+	}
 	defer func() {
 		lock.Unlock()
 		release()
@@ -1689,7 +1699,7 @@ func (s *Service) handleRecoverableFailureLocked(ctx context.Context, data watch
 	// working" and the topbar spinner clears. Kanban / quick-chat tasks
 	// keep the legacy WAITING_FOR_INPUT path so the user can resume via
 	// the Resume / Start fresh recovery buttons in the existing chat
-	// surface. (See docs/specs/office-agent-error-handling.)
+	// surface. (See docs/specs/office/requirements/runtime.md.)
 	nextState := models.TaskSessionStateWaitingForInput
 	if s.isOfficeSession(ctx, data.SessionID) {
 		nextState = models.TaskSessionStateFailed
@@ -1697,7 +1707,33 @@ func (s *Service) handleRecoverableFailureLocked(ctx context.Context, data watch
 	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, nextState, data.ErrorMessage, false)
 
 	// Ensure task is in REVIEW state unless another session is still working.
+	// Unlike the success path (processOnTurnCompleteViaEngine runs first and
+	// skips this write entirely on a transition), REVIEW is written before the
+	// reconciliation below runs. A pending signal that reconciles into a
+	// transition here is a transient REVIEW flash a watching client could
+	// observe; that's accepted as the price of keeping this failure path
+	// simple, since the agent genuinely did fail.
 	s.writeTaskReviewState(ctx, data.TaskID, data.SessionID)
+
+	// Give the ADR 0015 reconciler a second chance: a step_complete_kandev
+	// call that landed mid-turn (session still RUNNING) is never picked up
+	// by processOnTurnCompleteViaEngine when the turn fails instead of
+	// completing successfully, so the signal would otherwise sit inert in
+	// the session's metadata bag until it's silently cleared on resume.
+	// Office sessions go FAILED, not WAITING_FOR_INPUT, and must not
+	// advance the step here.
+	if nextState == models.TaskSessionStateWaitingForInput && data.SessionID != "" {
+		session, err := s.repo.GetTaskSession(ctx, data.SessionID)
+		if err != nil {
+			s.logger.Warn("failed to reload session for step-completion reconciliation; "+
+				"a pending signal may be dropped",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.Error(err))
+		} else if signal, ok := models.LoadPendingStepSignal(session.Metadata); ok {
+			s.reconcileStepCompletionSignalLocked(ctx, data.TaskID, data.SessionID, signal.StepID)
+		}
+	}
 
 	// Clean up the agent execution.
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)

@@ -12,6 +12,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/user/models"
@@ -26,9 +27,10 @@ const (
 )
 
 type sqliteRepository struct {
-	db     *sqlx.DB // writer
-	ro     *sqlx.DB // reader
-	ownsDB bool
+	db              *sqlx.DB // writer
+	ro              *sqlx.DB // reader
+	ownsDB          bool
+	recentUseLogger *commonlogger.Logger
 }
 
 var _ Repository = (*sqliteRepository)(nil)
@@ -69,6 +71,15 @@ func (r *sqliteRepository) initSchema() error {
 		settings_revision BIGINT NOT NULL DEFAULT 0,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS user_agent_profile_recent_use (
+		user_id TEXT NOT NULL,
+		context TEXT NOT NULL,
+		profile_ids TEXT NOT NULL DEFAULT '[]',
+		revision BIGINT NOT NULL DEFAULT 0,
+		updated_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (user_id, context),
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 	);
 	`
 	if _, err := r.db.Exec(schema); err != nil {
@@ -121,6 +132,13 @@ func (r *sqliteRepository) Close() error {
 		return nil
 	}
 	return r.db.Close()
+}
+
+// SetAgentProfileRecentUseLogger wires diagnostics for malformed persisted
+// profile-history rows. The user service installs its scoped logger during
+// construction; the repository remains usable without one in low-level tests.
+func (r *sqliteRepository) SetAgentProfileRecentUseLogger(log *commonlogger.Logger) {
+	r.recentUseLogger = log
 }
 
 const userColumns = "id, email, display_name, role, status, created_at, updated_at"
@@ -562,6 +580,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 	if keyboardShortcuts == nil {
 		keyboardShortcuts = map[string]interface{}{}
 	}
+	quickChatTabOrderByWorkspace := CloneStringSliceMap(settings.QuickChatTabOrderByWorkspace)
 	return json.Marshal(map[string]interface{}{
 		"workspace_id":                             settings.WorkspaceID,
 		"kanban_view_mode":                         settings.KanbanViewMode,
@@ -618,7 +637,9 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
 		"app_status_bar_order":                     normalizeAppStatusBarOrder(settings.AppStatusBarOrder),
+		"quick_chat_tab_order_by_workspace":        quickChatTabOrderByWorkspace,
 		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
+		"workflow_ids_with_auto_hide_empty_steps":  settings.WorkflowIDsWithAutoHideEmptySteps,
 	})
 }
 
@@ -697,7 +718,9 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		SidebarTaskPrefs:                  normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
 		AppStatusBarEnabled:               false,
 		AppStatusBarOrder:                 normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
+		QuickChatTabOrderByWorkspace:      map[string][]string{},
 		KanbanHiddenStepIDs:               map[string][]string{},
+		WorkflowIDsWithAutoHideEmptySteps: []string{},
 	}
 }
 
@@ -710,6 +733,7 @@ func DefaultSidebarViews() []models.SidebarView {
 		Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},
 		Group:           "repository",
 		CollapsedGroups: []string{},
+		TaskRow:         models.DefaultSidebarTaskRowPresentation(),
 	}}
 }
 
@@ -780,7 +804,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		SystemMetricsDisplay              models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 		AppStatusBarEnabled               *bool                               `json:"app_status_bar_enabled"`
 		AppStatusBarOrder                 models.AppStatusBarOrder            `json:"app_status_bar_order"`
+		QuickChatTabOrderByWorkspace      map[string][]string                 `json:"quick_chat_tab_order_by_workspace"`
 		KanbanHiddenStepIDs               json.RawMessage                     `json:"kanban_hidden_step_ids"`
+		WorkflowIDsWithAutoHideEmptySteps json.RawMessage                     `json:"workflow_ids_with_auto_hide_empty_steps"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -905,6 +931,10 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.AppStatusBarEnabled = *payload.AppStatusBarEnabled
 	}
 	settings.AppStatusBarOrder = normalizeAppStatusBarOrder(payload.AppStatusBarOrder)
+	settings.QuickChatTabOrderByWorkspace = payload.QuickChatTabOrderByWorkspace
+	if settings.QuickChatTabOrderByWorkspace == nil {
+		settings.QuickChatTabOrderByWorkspace = map[string][]string{}
+	}
 	if payload.ChangesPanelLayout == "flat" {
 		settings.ChangesPanelLayout = "flat"
 	} else {
@@ -912,7 +942,19 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	settings.LastSeenDisplay = normalizeLastSeenDisplayStored(payload.LastSeenDisplay)
 	settings.KanbanHiddenStepIDs = decodeKanbanHiddenStepIDs(payload.KanbanHiddenStepIDs)
+	settings.WorkflowIDsWithAutoHideEmptySteps = decodeStringIDs(payload.WorkflowIDsWithAutoHideEmptySteps)
 	return settings, nil
+}
+
+func decodeStringIDs(raw json.RawMessage) []string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return []string{}
+	}
+	var ids []string
+	if err := json.Unmarshal(raw, &ids); err != nil || ids == nil {
+		return []string{}
+	}
+	return ids
 }
 
 // normalizeLastSeenDisplayStored maps a stored JSON value to the canonical
@@ -962,6 +1004,20 @@ func normalizeSidebarTaskPrefs(prefs models.SidebarTaskPrefs) models.SidebarTask
 		prefs.SubtaskOrderByParentID = map[string][]string{}
 	}
 	return prefs
+}
+
+// CloneStringSliceMap copies a per-workspace string-list map before it is
+// encoded or assigned so callers cannot mutate the settings model through the
+// payload.
+func CloneStringSliceMap(source map[string][]string) map[string][]string {
+	if source == nil {
+		return map[string][]string{}
+	}
+	clone := make(map[string][]string, len(source))
+	for key, values := range source {
+		clone[key] = append([]string{}, values...)
+	}
+	return clone
 }
 
 // normalizeAppStatusBarOrder defaults nil status bar item lists so the stored

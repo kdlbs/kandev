@@ -40,9 +40,10 @@ type LaunchSessionRequest struct {
 	Intent         SessionIntent `json:"intent,omitempty"`
 	SessionID      string        `json:"session_id,omitempty"`
 	AgentProfileID string        `json:"agent_profile_id,omitempty"`
-	// ProfileExplicit marks a non-empty profile selected by the manual New Agent
-	// picker. It bypasses workflow-step profile resolution for IntentStart only;
-	// IntentStartCreated keeps its existing profile resolution behavior.
+	// ProfileExplicit marks a non-empty profile selected through an explicit
+	// selector-backed choice. It bypasses workflow-step profile resolution for
+	// IntentStart only; IntentStartCreated keeps its existing profile resolution
+	// behavior.
 	ProfileExplicit   bool   `json:"profile_explicit,omitempty"`
 	ExecutorID        string `json:"executor_id,omitempty"`
 	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
@@ -240,10 +241,12 @@ func (s *Service) isPassthroughProfile(ctx context.Context, profileID string) bo
 
 // launchStart creates a new session and launches the agent.
 // If the request is an auto-start and the task's current workflow step does not
-// have auto_start_agent, the request is downgraded to a prepare (workspace-only,
-// no agent) to prevent unwanted auto-starts from the frontend's useAutoStartSession hook.
+// have auto_start_agent, or the task has unresolved dependencies, the request
+// is downgraded to a prepare (workspace-only, no agent) to prevent unwanted
+// auto-starts from the frontend's useAutoStartSession hook.
 func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
-	if req.AutoStart && s.shouldBlockAutoStart(ctx, req) {
+	if req.AutoStart && (s.shouldBlockAutoStart(ctx, req) ||
+		s.dependencyBlocksAutoStart(ctx, req.TaskID, "session.launch")) {
 		req.LaunchWorkspace = true
 		return s.launchPrepare(ctx, req)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -186,6 +187,10 @@ type fakeTaskWriter struct {
 	updateErr   error
 	deletedIDs  []string
 	deleteErr   error
+	lastMove    TaskMoveInput
+	moveCalls   int
+	moveResult  *TaskMoveResult
+	moveErr     error
 }
 
 func (f *fakeTaskWriter) CreateTask(_ context.Context, in TaskCreateInput) (*taskmodels.Task, error) {
@@ -210,6 +215,22 @@ func (f *fakeTaskWriter) UpdateTask(_ context.Context, in TaskUpdateInput) (*tas
 		return f.updated, nil
 	}
 	return &taskmodels.Task{ID: in.ID, Title: "updated"}, nil
+}
+
+func (f *fakeTaskWriter) MoveTask(_ context.Context, in TaskMoveInput) (*TaskMoveResult, error) {
+	f.moveCalls++
+	f.lastMove = in
+	if f.moveErr != nil {
+		return nil, f.moveErr
+	}
+	if f.moveResult != nil {
+		return f.moveResult, nil
+	}
+	return &TaskMoveResult{
+		Task:         &taskmodels.Task{ID: in.TaskID, WorkflowStepID: in.WorkflowStepID},
+		Transitioned: true,
+		FromStepID:   "step-from",
+	}, nil
 }
 
 func (f *fakeTaskWriter) DeleteTask(_ context.Context, id string) error {
@@ -275,6 +296,9 @@ type testDataHost struct {
 	taskWriter *fakeTaskWriter
 	messenger  *fakeMessenger
 	starter    *fakeTaskStarter
+
+	interactions *fakeInteractionDataSource
+	responder    *fakeInteractionResponder
 }
 
 // newTestDataHost builds a fully-wired pluginHost (every Host data API
@@ -293,6 +317,9 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		taskWriter: &fakeTaskWriter{},
 		messenger:  &fakeMessenger{},
 		starter:    &fakeTaskStarter{},
+
+		interactions: &fakeInteractionDataSource{},
+		responder:    &fakeInteractionResponder{},
 	}
 	d.host = &pluginHost{
 		pluginID:         "p1",
@@ -303,6 +330,7 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		agentProfiles:    d.profiles,
 		sessionCodeStats: d.codeStats,
 		messageData:      d.messages,
+		interactionData:  d.interactions,
 		taskWriter:       d.taskWriter,
 		configs:          &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "utility-agent-42"}},
 		utilityDeps: func() (utilityAgentSource, utilityRunner) {
@@ -311,6 +339,7 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		writeDeps: func() (taskMessenger, taskStarter) {
 			return d.messenger, d.starter
 		},
+		interactionDeps: func() interactionResponder { return d.responder },
 	}
 	return d
 }
@@ -505,7 +534,18 @@ func TestPluginHost_Workflows_SucceedsWithCapability(t *testing.T) {
 		"ws-1": {{ID: "wf-1", WorkspaceID: "ws-1", Name: "Default"}},
 	}
 	d.steps.steps = map[string][]*wfmodels.WorkflowStep{
-		"wf-1": {{ID: "step-1", WorkflowID: "wf-1", Name: "Todo", Position: 0, StageType: wfmodels.StageType("work")}},
+		"wf-1": {
+			{ID: "step-1", WorkflowID: "wf-1", Name: "Todo", Position: 0, StageType: wfmodels.StageType("work")},
+			{
+				ID: "step-2", WorkflowID: "wf-1", Name: "Work", Position: 1, StageType: wfmodels.StageType("custom"),
+				Events: wfmodels.StepEvents{
+					OnEnter: []wfmodels.OnEnterAction{
+						{Type: wfmodels.OnEnterAutoStartAgent},
+						{Type: wfmodels.OnEnterRunCodeReview, Config: map[string]interface{}{"agent_profile_id": "profile-1"}},
+					},
+				},
+			},
+		},
 	}
 
 	workflows, _, err := d.host.Workflows().List(context.Background(), "ws-1", pluginsdk.Page{})
@@ -520,8 +560,15 @@ func TestPluginHost_Workflows_SucceedsWithCapability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSteps() unexpected error: %v", err)
 	}
-	if len(steps) != 1 || steps[0].StageType != "work" {
-		t.Fatalf("ListSteps() = %+v, want one step with StageType=work", steps)
+	if len(steps) != 2 || steps[0].StageType != "work" {
+		t.Fatalf("ListSteps() = %+v, want two steps, first with StageType=work", steps)
+	}
+	if steps[0].OnEnterActionTypes != nil {
+		t.Fatalf("steps[0].OnEnterActionTypes = %+v, want nil for a step with no on_enter actions", steps[0].OnEnterActionTypes)
+	}
+	wantTypes := []string{"auto_start_agent", "run_code_review"}
+	if !reflect.DeepEqual(steps[1].OnEnterActionTypes, wantTypes) {
+		t.Fatalf("steps[1].OnEnterActionTypes = %+v, want %+v", steps[1].OnEnterActionTypes, wantTypes)
 	}
 }
 

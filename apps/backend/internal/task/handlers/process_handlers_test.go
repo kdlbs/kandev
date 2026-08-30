@@ -264,6 +264,9 @@ func (m *mockRepository) FindActiveClarificationMessagesBySessionID(ctx context.
 func (m *mockRepository) GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error) {
 	return make(map[string]models.TaskPendingAction), nil
 }
+func (m *mockRepository) ListPendingInteractions(context.Context, models.PendingInteractionFilter) ([]*models.Message, error) {
+	return nil, nil
+}
 func (m *mockRepository) CompleteActiveClarificationBundle(
 	context.Context,
 	string,
@@ -290,6 +293,18 @@ func (m *mockRepository) RestoreActiveClarificationBundle(
 }
 func (m *mockRepository) UpdateMessage(ctx context.Context, message *models.Message) error {
 	return nil
+}
+func (m *mockRepository) ClaimPermissionResolution(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
+	return &models.PermissionResolutionClaimResult{Outcome: models.PermissionClaimNotFound}, nil
+}
+func (m *mockRepository) FinalizePermissionResolution(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error) {
+	return &models.PermissionResolutionFinalizeResult{Outcome: models.PermissionFinalizeNotFound}, nil
+}
+func (m *mockRepository) GetPermissionResolutionAudit(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetPermissionMessageByIdentity(context.Context, string, string, string, string) (*models.Message, error) {
+	return nil, nil
 }
 func (m *mockRepository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	return nil, nil

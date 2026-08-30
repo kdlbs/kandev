@@ -1,6 +1,31 @@
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("Configuration Chat on mobile", () => {
+  test("keeps the floating launcher visible and operable while open", async ({ testPage }) => {
+    await testPage.goto("/settings/agents");
+    await testPage.getByRole("button", { name: "Configuration Chat" }).tap();
+
+    const popover = testPage.getByTestId("config-chat-popover");
+    const launcher = testPage.getByRole("button", { name: "Configuration Chat", exact: true });
+    await expect(popover).toBeVisible({ timeout: 10_000 });
+    await expect(launcher).toBeVisible();
+    await expect(launcher).toBeEnabled();
+    await expect(launcher).not.toHaveAttribute("aria-hidden", "true");
+    await expect(launcher).not.toHaveAttribute("tabindex", "-1");
+
+    const viewport = testPage.viewportSize();
+    const launcherBox = await launcher.boundingBox();
+    expect(viewport).not.toBeNull();
+    expect(launcherBox).not.toBeNull();
+    expect(launcherBox!.x).toBeGreaterThanOrEqual(0);
+    expect(launcherBox!.x + launcherBox!.width).toBeLessThanOrEqual(viewport!.width);
+    expect(launcherBox!.y).toBeGreaterThanOrEqual(0);
+    expect(launcherBox!.y + launcherBox!.height).toBeLessThanOrEqual(viewport!.height);
+
+    await launcher.tap();
+    await expect(popover).not.toBeVisible();
+  });
+
   test("starts floating, expands full-screen, and answers a clarification", async ({
     testPage,
     apiClient,

@@ -167,6 +167,7 @@ func TestScanUserSettingsSidebarDefaults(t *testing.T) {
 		Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},
 		Group:           "repository",
 		CollapsedGroups: []string{},
+		TaskRow:         models.DefaultSidebarTaskRowPresentation(),
 	}
 
 	tests := []struct {
@@ -885,6 +886,56 @@ func TestSQLiteRepositoryKanbanHiddenStepIDsDefaultAndRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepositoryWorkflowIDsWithAutoHideEmptyStepsDefaultAndRoundTrip(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	if settings.WorkflowIDsWithAutoHideEmptySteps == nil || len(settings.WorkflowIDsWithAutoHideEmptySteps) != 0 {
+		t.Fatalf("default WorkflowIDsWithAutoHideEmptySteps = %#v, want non-nil empty", settings.WorkflowIDsWithAutoHideEmptySteps)
+	}
+	settings.WorkflowIDsWithAutoHideEmptySteps = []string{"wf-a", "wf-b"}
+	upsertUserSettingsForTest(t, repo, ctx, settings)
+	got, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	if !reflect.DeepEqual(got.WorkflowIDsWithAutoHideEmptySteps, settings.WorkflowIDsWithAutoHideEmptySteps) {
+		t.Fatalf("WorkflowIDsWithAutoHideEmptySteps = %#v, want %#v", got.WorkflowIDsWithAutoHideEmptySteps, settings.WorkflowIDsWithAutoHideEmptySteps)
+	}
+}
+
+func TestDecodeWorkflowIDsWithAutoHideEmptyStepsFallsBackToEmpty(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  json.RawMessage
+	}{
+		{name: "missing", raw: nil},
+		{name: "null", raw: json.RawMessage(`null`)},
+		{name: "non-array", raw: json.RawMessage(`{"workflow":"wf-a"}`)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := decodeStringIDs(tt.raw)
+			if got == nil || len(got) != 0 {
+				t.Fatalf("decodeStringIDs(%s) = %#v, want non-nil empty", tt.raw, got)
+			}
+		})
+	}
+}
+
 // TestScanUserSettingsKanbanHiddenStepIDsCorruptFallsBackToEmpty verifies corrupt kanban_hidden_step_ids values fall back to empty while sibling fields still load.
 func TestScanUserSettingsKanbanHiddenStepIDsCorruptFallsBackToEmpty(t *testing.T) {
 	tests := []struct {
@@ -1223,6 +1274,20 @@ func TestSQLiteRepositorySidebarViewStateRoundTrip(t *testing.T) {
 		t.Fatalf("get defaults: %v", err)
 	}
 	settings.SidebarActiveViewID = "view-1"
+	settings.SidebarViews = []models.SidebarView{{
+		ID:              "view-1",
+		Name:            "Custom",
+		Filters:         []models.SidebarViewClause{},
+		Sort:            models.SidebarViewSort{Key: "updatedAt", Direction: "desc"},
+		Group:           "workflow",
+		CollapsedGroups: []string{},
+		TaskRow: &models.SidebarTaskRowPresentation{
+			DetailsEnabled: false,
+			DetailOrder:    []string{"repository", "relative_time", "pull_request_number"},
+			VisibleDetails: []string{"repository"},
+			Trailing:       "none",
+		},
+	}}
 	settings.SidebarTaskPrefs = models.SidebarTaskPrefs{
 		PinnedTaskIDs:          []string{"task-1"},
 		OrderedTaskIDs:         []string{"task-2", "task-1"},
@@ -1254,6 +1319,9 @@ func TestSQLiteRepositorySidebarViewStateRoundTrip(t *testing.T) {
 	}
 	if got.SidebarActiveViewID != "view-1" {
 		t.Fatalf("expected active view to round-trip, got %q", got.SidebarActiveViewID)
+	}
+	if got.SidebarViews[0].TaskRow == nil || got.SidebarViews[0].TaskRow.Trailing != "none" {
+		t.Fatalf("expected sidebar view task row to round-trip, got %+v", got.SidebarViews)
 	}
 	if got.SidebarDraft == nil || got.SidebarDraft.Group != "workflow" {
 		t.Fatalf("expected sidebar draft to round-trip, got %+v", got.SidebarDraft)

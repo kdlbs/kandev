@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/workflow-duplication/spec.md"
+spec: "../../specs/tasks/requirements/workflow-duplication.md"
 ---
 
 # Task 01: Build Duplication Drafts

@@ -354,6 +354,17 @@ func TestResolveRepositoryIDForSubpathMatchesSanitizedRepositoryName(t *testing.
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 		ID: "env-1", TaskID: "task-1", ExecutorType: "worktree",
 		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{
+			{
+				ID:             "session-worktree-1",
+				RepositoryID:   "repo-1",
+				WorktreeID:     "worktree-1",
+				WorktreePath:   "/tmp/worktree",
+				WorktreeBranch: "feature/test",
+				BranchSlug:     "test",
+				Position:       0,
+			},
+		},
 	}); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
 	}
@@ -361,18 +372,6 @@ func TestResolveRepositoryIDForSubpathMatchesSanitizedRepositoryName(t *testing.
 		`UPDATE task_sessions SET task_environment_id = ? WHERE id = ?`),
 		"env-1", "session-1"); err != nil {
 		t.Fatalf("link session to env: %v", err)
-	}
-	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
-		ID:                "session-worktree-1",
-		TaskEnvironmentID: "env-1",
-		RepositoryID:      "repo-1",
-		WorktreeID:        "worktree-1",
-		WorktreePath:      "/tmp/worktree",
-		WorktreeBranch:    "feature/test",
-		BranchSlug:        "test",
-		Position:          0,
-	}); err != nil {
-		t.Fatalf("CreateTaskSessionWorktree: %v", err)
 	}
 
 	got := resolveRepositoryIDForSessionSubpath(ctx, repo, "session-1", "kdlbs-kandev", log)
@@ -1530,16 +1529,16 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 	if len(sessions) != 3 {
 		t.Fatalf("quickChat sessions = %#v, want 3 restored sessions", sessions)
 	}
-	if got := sessions[0].SessionID; got != "task-config-session" {
-		t.Fatalf("first restored session = %q, want newest task-config-session", got)
+	if got := sessions[0].SessionID; got != "task-old-session" {
+		t.Fatalf("first restored session = %q, want oldest task-old-session", got)
 	}
-	if sessions[0].Kind != "config" || sessions[1].Kind != "chat" || sessions[2].Kind != "chat" {
-		t.Fatalf("restored session kinds = %#v, want config, chat, chat", sessions)
+	if sessions[0].Kind != "chat" || sessions[1].Kind != "chat" || sessions[2].Kind != "config" {
+		t.Fatalf("restored session kinds = %#v, want two chat sessions and one config session", sessions)
 	}
-	if sessions[0].WorkspaceID != "ws-qc" || sessions[0].Name != "Config" {
-		t.Fatalf("config session identity = %#v, want workspace and task title preserved", sessions[0])
+	if sessions[2].WorkspaceID != "ws-qc" || sessions[2].Name != "Config" {
+		t.Fatalf("config session identity = %#v, want workspace and task title preserved", sessions[2])
 	}
-	if sessions[0].AgentProfileID != "agent-config" || sessions[1].AgentProfileID != "agent-new" || sessions[2].AgentProfileID != "agent-old" {
+	if sessions[0].AgentProfileID != "agent-old" || sessions[1].AgentProfileID != "agent-new" || sessions[2].AgentProfileID != "agent-config" {
 		t.Fatalf("agent profile IDs = %#v", sessions)
 	}
 	if got := decoded.InitialState.TaskSessions.Items["task-config-session"].TaskID; got != "task-config" {
@@ -1627,8 +1626,8 @@ func TestBootPayloadRestoresQuickChatsFromTaskRouteWorkspace(t *testing.T) {
 			if len(sessions) != 2 {
 				t.Fatalf("quickChat sessions = %#v, want 2 task-workspace sessions", sessions)
 			}
-			if sessions[0].SessionID != "task-route-second-session" || sessions[1].SessionID != "task-route-first-session" {
-				t.Fatalf("quickChat sessions = %#v, want task-workspace activity order", sessions)
+			if sessions[0].SessionID != "task-route-first-session" || sessions[1].SessionID != "task-route-second-session" {
+				t.Fatalf("quickChat sessions = %#v, want task-workspace creation order", sessions)
 			}
 			for _, session := range sessions {
 				if session.WorkspaceID != "ws-task" {

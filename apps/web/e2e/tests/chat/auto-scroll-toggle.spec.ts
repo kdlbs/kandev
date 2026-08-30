@@ -173,6 +173,35 @@ test.describe("Transcript auto-scroll toggle", () => {
     expect(await list.evaluate((el) => el.scrollTop)).toBeGreaterThan(targetScrollTop - 10);
   });
 
+  test("enabled auto-scroll stays at the bottom for live messages", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedOverflowingTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Auto-scroll Toggle Enabled Live Message",
+    );
+    await waitForOverflow(testPage);
+
+    const list = chatList(testPage);
+    const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+    await session.sendMessage('e2e:message("New content while enabled")');
+    await expect(session.chat.getByText("New content while enabled").last()).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect
+      .poll(async () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight), {
+        timeout: 5_000,
+        message: "enabled auto-scroll should stay at the bottom after live content",
+      })
+      .toBeLessThan(10);
+  });
+
   test("disabling while genuinely at the bottom still freezes the view when new content arrives", async ({
     testPage,
     apiClient,

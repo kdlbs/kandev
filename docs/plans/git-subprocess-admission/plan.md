@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/git-subprocess-admission.md
+spec: docs/specs/platform/requirements/git-subprocess-admission.md
 created: 2026-08-02
 status: implemented
 ---

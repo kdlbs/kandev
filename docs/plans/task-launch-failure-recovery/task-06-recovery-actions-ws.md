@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["01-failure-taxonomy-contracts", "02-gitref-default-hardening", "03-worktree-live-default-fallback", "04-launch-failure-classification", "05-pr-review-autostart-gating", "10-task-base-self-heal", "12-remove-legacy-launch-guidance"]
 plan: "plan.md"
-spec: "../../specs/task-launch-failure-recovery/spec.md"
+spec: "../../specs/tasks/requirements/task-launch-failure-recovery.md"
 ---
 
 # Task 06: Task launch recovery action

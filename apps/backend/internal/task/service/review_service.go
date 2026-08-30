@@ -46,6 +46,7 @@ type reviewRepo interface {
 	GetTaskReviewRun(ctx context.Context, runID string) (*models.TaskReviewRun, error)
 	ListTaskReviewRuns(ctx context.Context, taskID string, limit int) ([]*models.TaskReviewRun, error)
 	ListActiveTaskReviewRuns(ctx context.Context, taskID string) ([]*models.TaskReviewRun, error)
+	FindTaskReviewRunByEntryID(ctx context.Context, entryID string) (*models.TaskReviewRun, error)
 	CreateTaskReviewFindings(ctx context.Context, findings []*models.TaskReviewFinding) error
 	ListTaskReviewFindings(ctx context.Context, taskID string) ([]*models.TaskReviewFinding, error)
 	GetTaskReviewFinding(ctx context.Context, findingID string) (*models.TaskReviewFinding, error)
@@ -100,6 +101,10 @@ type CreateRunRequest struct {
 	WorkflowStepID string
 	AgentID        string
 	Model          string
+	// EntryID is the step-transition ledger row identifier of the step entry
+	// that requested this run, when triggered by the run_code_review
+	// step-entry action. Empty for manual/MCP-triggered runs.
+	EntryID string
 }
 
 // CreateRun records a pending run and publishes it so the UI can show progress
@@ -115,6 +120,7 @@ func (s *ReviewService) CreateRun(ctx context.Context, req CreateRunRequest) (*m
 		WorkflowStepID: req.WorkflowStepID,
 		AgentID:        req.AgentID,
 		Model:          req.Model,
+		EntryID:        req.EntryID,
 		Status:         models.ReviewRunPending,
 	}
 	if err := s.repo.CreateTaskReviewRun(ctx, run); err != nil {
@@ -140,6 +146,17 @@ func (s *ReviewService) ActiveRun(ctx context.Context, taskID string) (*models.T
 		return nil, nil
 	}
 	return runs[0], nil
+}
+
+// FindRunByEntryID returns the run created by the given step-entry ledger row,
+// or nil when no run has been created for it yet. Satisfies review.Store so a
+// redelivered run_code_review entry rejoins the run it already created instead
+// of launching a duplicate (AC-OFFICE-STEP-ENTRY-001.10).
+func (s *ReviewService) FindRunByEntryID(ctx context.Context, entryID string) (*models.TaskReviewRun, error) {
+	if entryID == "" {
+		return nil, nil
+	}
+	return s.repo.FindTaskReviewRunByEntryID(ctx, entryID)
 }
 
 // MarkRunRunning moves a run from pending to running.

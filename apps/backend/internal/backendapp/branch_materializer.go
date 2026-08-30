@@ -169,7 +169,7 @@ func (b *branchMaterializer) prepareMaterializeRequest(
 		FallbackBaseBranch:     repo.DefaultBranch,
 		CheckoutBranch:         tr.CheckoutBranch,
 		WorktreeBranchPrefix:   repo.WorktreeBranchPrefix,
-		WorktreeBranchTemplate: repo.WorktreeBranchTemplate,
+		WorktreeBranchTemplate: taskRepositoryBranchTemplate(repo, tr),
 		WorktreeBranchTicket:   worktree.TicketForBranchName(task.Identifier, task.Metadata),
 		PullBeforeWorktree:     repo.PullBeforeWorktree,
 		TaskDirName:            env.TaskDirName,
@@ -177,6 +177,16 @@ func (b *branchMaterializer) prepareMaterializeRequest(
 		BranchSlug:             slug,
 	}
 	return req, env, session, slug, true, nil
+}
+
+func taskRepositoryBranchTemplate(repo *models.Repository, taskRepo *models.TaskRepository) string {
+	if taskRepo != nil && taskRepo.BranchPolicyBranchTemplate != "" {
+		return taskRepo.BranchPolicyBranchTemplate
+	}
+	if repo == nil {
+		return ""
+	}
+	return repo.WorktreeBranchTemplate
 }
 
 // finalizeMaterialize handles the post-Create plumbing: promote the task

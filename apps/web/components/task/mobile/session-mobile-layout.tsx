@@ -80,6 +80,8 @@ type SessionMobileLayoutProps = {
   baseBranch?: string;
   worktreeBranch?: string | null;
   taskTitle?: string;
+  /** `owner/repo` (or the repository name) of the task's primary repository. */
+  repositoryLabel?: string | null;
   isRemoteExecutor?: boolean;
   remoteExecutorType?: string | null;
   remoteExecutorName?: string | null;
@@ -225,9 +227,7 @@ export function MobilePanelArea({
         </div>
       )}
       {currentMobilePanel === "plan" && (
-        <div className="flex-1 min-h-0 flex flex-col p-2">
-          <TaskPlanPanel taskId={activeTaskId} visible={true} />
-        </div>
+        <MobilePlanPanel taskId={activeTaskId} bottomNavHeight={bottomNavHeight} />
       )}
       {currentMobilePanel === "changes" && (
         <div className="flex-1 min-h-0 flex flex-col p-2">
@@ -271,6 +271,20 @@ export function MobilePanelArea({
         onSelectReview={onSelectReview}
       />
       <MobilePluginPanel currentMobilePanel={currentMobilePanel} />
+    </div>
+  );
+}
+
+function MobilePlanPanel({
+  taskId,
+  bottomNavHeight,
+}: {
+  taskId: string | null;
+  bottomNavHeight: string;
+}) {
+  return (
+    <div className="flex-1 min-h-0 flex flex-col p-2">
+      <TaskPlanPanel taskId={taskId} visible={true} mobileBottomOffset={bottomNavHeight} />
     </div>
   );
 }
@@ -352,6 +366,8 @@ type MobileTopBarStickyProps = {
   activeTaskId: string | null;
   workspaceId: string | null;
   taskTitle?: string;
+  /** `owner/repo` (or the repository name) of the task's primary repository. */
+  repositoryLabel?: string | null;
   effectiveSessionId: string | null;
   baseBranch?: string;
   worktreeBranch?: string | null;
@@ -378,6 +394,7 @@ function MobileTopBarSticky(props: MobileTopBarStickyProps) {
         taskId={props.activeTaskId}
         workspaceId={props.workspaceId}
         taskTitle={props.taskTitle}
+        repositoryLabel={props.repositoryLabel}
         sessionId={props.effectiveSessionId}
         baseBranch={props.baseBranch}
         worktreeBranch={props.worktreeBranch}

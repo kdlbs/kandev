@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/office/models"
 )
 
 // runMigrations applies idempotent schema migrations for office tables
@@ -36,11 +38,58 @@ func (r *Repository) runMigrations() {
 	// Provider routing tables and replayable column migrations. Fresh
 	// schemas include the columns inline; ALTERs converge existing databases.
 	r.migrateProviderRouting()
+	r.migrateContinuationScope()
+	r.migrateRunOutcome()
+	r.migrateParentWakeIndexes()
+	r.migrateParentWakeReceiptColumns()
+}
+
+// migrateContinuationScope adds runs.continuation_scope for databases
+// created before WO-16's claim-time scope persistence. Existing rows receive
+// a scope from their stored context snapshot so queued or claimed taskless
+// runs keep their continuation chain after an upgrade.
+func (r *Repository) migrateContinuationScope() {
+	r.migrate.Apply("runs.continuation_scope",
+		`ALTER TABLE runs ADD COLUMN continuation_scope TEXT NOT NULL DEFAULT ''`)
+	r.backfillContinuationScopes()
+	r.migrate.Apply("runs.failure_scope_status_index",
+		`CREATE INDEX IF NOT EXISTS idx_run_failure_scope_status ON runs(agent_profile_id, continuation_scope, status)`)
+}
+
+func (r *Repository) backfillContinuationScopes() {
+	var legacyRuns []struct {
+		ID              string `db:"id"`
+		AgentProfileID  string `db:"agent_profile_id"`
+		ContextSnapshot string `db:"context_snapshot"`
+	}
+	if err := r.db.Select(&legacyRuns,
+		`SELECT id, agent_profile_id, context_snapshot
+		 FROM runs WHERE continuation_scope = ''`); err != nil {
+		if r.log != nil {
+			r.log.Warn("continuation scope backfill query failed", zap.Error(err))
+		}
+		return
+	}
+	for _, legacyRun := range legacyRuns {
+		scope := models.ContinuationScopeForRun(
+			&models.Run{ContextSnapshot: legacyRun.ContextSnapshot},
+			legacyRun.AgentProfileID,
+		)
+		if _, err := r.db.Exec(r.db.Rebind(`
+			UPDATE runs SET continuation_scope = ?
+			WHERE id = ? AND continuation_scope = ''
+		`), scope, legacyRun.ID); err != nil {
+			if r.log != nil {
+				r.log.Warn("continuation scope backfill update failed",
+					zap.String("run_id", legacyRun.ID), zap.Error(err))
+			}
+		}
+	}
 }
 
 // migrateCostEventContract adds the cache read/write split, turn
 // attribution, and cost-provenance columns to office_cost_events for
-// databases created before this contract (docs/specs/office/costs.md). Every
+// databases created before this contract (docs/specs/office/requirements/costs.md). Every
 // ALTER is nullable with no DEFAULT: a legacy row must read NULL, never 0,
 // because a merged tokens_cached_in cannot be decomposed and an unversioned
 // "0" would be indistinguishable from "no cache activity". Keep this column
@@ -81,6 +130,34 @@ func (r *Repository) migrateRunPayloadIndexes() {
 	)
 }
 
+// migrateParentWakeIndexes adds the tasks(parent_id) index
+// ListStuckParents' three parent_id-correlated subqueries (has-a-live-
+// child, no-non-terminal-child, the child-set-key GROUP_CONCAT) need to
+// avoid a full tasks scan on every 30-second reconciler tick. Also
+// benefits AreAllChildrenTerminal and GetChildSummaries (blockers.go),
+// which query the same shape. Applied via r.migrate (non-fatal) rather
+// than createParentChildWakeReceiptsTable's r.db.Exec: tasks belongs to
+// a different package's schema, so a plain Exec against it is fatal in
+// the minimal single-domain test repos that don't create tasks until
+// after NewWithDB returns.
+func (r *Repository) migrateParentWakeIndexes() {
+	r.migrate.Apply(
+		"idx_tasks_parent_id",
+		`CREATE INDEX IF NOT EXISTS idx_tasks_parent_id ON tasks(parent_id)`,
+	)
+}
+
+// migrateParentWakeReceiptColumns adds operation identity for receipts
+// created by workflow-engine dispatch. Existing direct-run receipts keep
+// their delivered_run_id and receive the empty operation id default.
+func (r *Repository) migrateParentWakeReceiptColumns() {
+	r.migrate.Apply(
+		"parent_child_wake_receipts.delivery_operation_id",
+		`ALTER TABLE parent_child_wake_receipts
+		 ADD COLUMN delivery_operation_id TEXT NOT NULL DEFAULT ''`,
+	)
+}
+
 // migrateProviderRouting creates the office_workspace_routing,
 // office_run_route_attempts, and office_provider_health tables. The
 // routing columns are also added with replayable ALTER statements so
@@ -94,6 +171,7 @@ func (r *Repository) migrateProviderRouting() {
 		provider_order    TEXT    NOT NULL DEFAULT '[]',
 		provider_profiles TEXT    NOT NULL DEFAULT '{}',
 		tier_per_reason   TEXT    NOT NULL DEFAULT '{}',
+		role_tiers        TEXT    NOT NULL DEFAULT '{}',
 		updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`)
 
@@ -105,6 +183,7 @@ func (r *Repository) migrateProviderRouting() {
 		provider_id      TEXT NOT NULL,
 		model            TEXT NOT NULL,
 		tier             TEXT NOT NULL,
+		tier_source      TEXT NOT NULL DEFAULT '',
 		outcome          TEXT NOT NULL,
 		error_code       TEXT,
 		error_confidence TEXT,
@@ -123,6 +202,10 @@ func (r *Repository) migrateProviderRouting() {
 		`ALTER TABLE runs ADD COLUMN resolved_execution_profile_id TEXT`)
 	r.migrate.Apply("office_run_route_attempts.execution_profile_id",
 		`ALTER TABLE office_run_route_attempts ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("office_workspace_routing.role_tiers",
+		`ALTER TABLE office_workspace_routing ADD COLUMN role_tiers TEXT NOT NULL DEFAULT '{}'`)
+	r.migrate.Apply("office_run_route_attempts.tier_source",
+		`ALTER TABLE office_run_route_attempts ADD COLUMN tier_source TEXT NOT NULL DEFAULT ''`)
 
 	_, _ = r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS office_provider_health (
@@ -362,7 +445,7 @@ func (r *Repository) runTaskPriorityRecreate() error {
 	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN queued_at TIMESTAMP`)
 	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN autopilot_enabled INTEGER NOT NULL DEFAULT 0`)
 	// Same defensive add for external_id/external_id_settled_at
-	// (docs/specs/tasks/external-id-idempotency): real installs already have
+	// (docs/specs/tasks/system-design/external-id-idempotency.md): real installs already have
 	// these from task/repository/sqlite/base.go runMigrations(), but older
 	// priority-migration fixtures predate them too.
 	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN external_id TEXT COLLATE BINARY`)
@@ -470,7 +553,7 @@ func taskPriorityMigrationStatements() []string {
 		// per-task assignee moved to workflow_step_participants.
 		//
 		// uniq_tasks_external_id enforces task create-idempotency
-		// (docs/specs/tasks/external-id-idempotency). DROP TABLE tasks above
+		// (docs/specs/tasks/system-design/external-id-idempotency.md). DROP TABLE tasks above
 		// silently drops every index on the old table, this one included —
 		// unlike a plain ALTER TABLE ADD COLUMN, recreating the table means
 		// every index must be explicitly relisted here or it is gone from

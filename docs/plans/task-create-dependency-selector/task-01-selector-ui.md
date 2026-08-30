@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/task-dependencies/create-dialog-dependency-selector.md"
+spec: "../../specs/tasks/requirements/task-dependencies-create-dialog-dependency-selector.md"
 ---
 
 # Task 01: Implement the selector and layout
@@ -59,7 +59,7 @@ must be verified together.
 
 ## Inputs
 
-- Spec: `docs/specs/task-dependencies/create-dialog-dependency-selector.md`
+- Spec: `docs/specs/tasks/requirements/task-dependencies-create-dialog-dependency-selector.md`
 - Plan: `docs/plans/task-create-dependency-selector/plan.md`, Frontend and
   Mobile parity sections
 - Existing candidate derivation and payload behavior in

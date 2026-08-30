@@ -93,6 +93,42 @@ func TestEngineAppliesCandidateErrorActions(t *testing.T) {
 	}
 }
 
+// Contract coverage: Codex's complete usage-limit envelope must reach the
+// existing hard-error policy without adding a provider branch to the engine.
+func TestEngineRoutesCodexUsageLimitThroughHardPolicy(t *testing.T) {
+	failure := routingerr.Classify(routingerr.Input{
+		Phase:      routingerr.PhasePromptSend,
+		ProviderID: "codex-acp",
+		Stderr:     `{"code":-32603,"message":"Internal error","data":{"codexErrorInfo":"usageLimitExceeded","message":"You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 1st, 2026 3:14 PM."}}`,
+	})
+	if failure.Code != routingerr.CodeQuotaLimited || failure.Class != routingerr.ClassHard {
+		t.Fatalf("classification = %+v, want hard quota_limited", failure)
+	}
+
+	profile := Profile{
+		ID: "dynamic-1", Version: 1,
+		Candidates: []Candidate{
+			{ID: "codex", Enabled: true, BindingKey: "codex", Policies: routingpolicy.DefaultDocument()},
+			{ID: "fallback", Enabled: true, BindingKey: "fallback", Policies: routingpolicy.DefaultDocument()},
+		},
+	}
+	engine := NewEngine()
+	initial, err := engine.Select("session-1", profile, 0, "")
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+
+	decision, err := engine.ApplyFailure(
+		"session-1", profile, initial.Generation, initial.ExecutionProfileID, failure,
+	)
+	if err != nil {
+		t.Fatalf("ApplyFailure: %v", err)
+	}
+	if decision.ExecutionProfileID != "fallback" || decision.Reason != "policy_skip" {
+		t.Fatalf("decision = %#v, want fallback selected by hard policy", decision)
+	}
+}
+
 func TestEngineRetrySameKeepsTheFailedCandidate(t *testing.T) {
 	profile := Profile{
 		ID: "dynamic-1", Version: 1,

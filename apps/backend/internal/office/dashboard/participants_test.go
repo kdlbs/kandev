@@ -284,7 +284,7 @@ func newParticipantTestRouter(t *testing.T, caller *models.AgentInstance) *testD
 	// Use the underlying stubAgentReader replaced with caller-aware reader
 	// only when caller is non-nil.
 	deps.svc = newServiceForParticipantsTest(t, deps, caller)
-	dashboard.RegisterRoutes(group, deps.svc, deps.repo, nil, logger.Default())
+	dashboard.RegisterRoutes(group, deps.svc, deps.repo, nil, nil, logger.Default())
 	deps.router = router
 	return deps
 }

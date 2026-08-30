@@ -5,7 +5,7 @@ import { Button } from "@kandev/ui/button";
 import { IconAlertCircle, IconX } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import type { Message, TaskSessionState } from "@/lib/types/http";
-import type { RenderItem } from "@/hooks/use-processed-messages";
+import { TASK_DESCRIPTION_SYNTHETIC_ID, type RenderItem } from "@/hooks/use-processed-messages";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { TurnGroupMessage } from "@/components/task/chat/messages/turn-group-message";
 import { PrepareProgress } from "@/components/session/prepare-progress";
@@ -94,9 +94,13 @@ export function getEffectiveActiveTurnId(
 }
 
 /** Index of the most recent user-authored message, or -1 when there is none. */
+function isStoredUserMessage(message: Message): boolean {
+  return message.author_type === "user" && message.id !== TASK_DESCRIPTION_SYNTHETIC_ID;
+}
+
 function findLastUserMessageIndex(messages: Message[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].author_type === "user") return i;
+    if (isStoredUserMessage(messages[i])) return i;
   }
   return -1;
 }
@@ -112,24 +116,8 @@ export function getLastUserMessageId(messages: Message[]): string | null {
  * the task description). Used to power the transcript's scroll-to-start
  * affordance. */
 export function getFirstUserMessageId(messages: Message[]): string | null {
-  const first = messages.find((message) => message.author_type === "user");
+  const first = messages.find(isStoredUserMessage);
   return first ? first.id : null;
-}
-
-export type TranscriptNavigationTarget = "last_prompt" | "start";
-
-/**
- * Whether resolving a transcript-navigation target needs another older page.
- * The latest prompt may sit before a long agent response; the true start can
- * only be known after the pagination cursor is exhausted.
- */
-export function shouldLoadMoreForTranscriptTarget(
-  target: TranscriptNavigationTarget,
-  messages: Message[],
-  hasMore: boolean,
-): boolean {
-  if (!hasMore) return false;
-  return target === "start" || getLastUserMessageId(messages) === null;
 }
 
 /**

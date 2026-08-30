@@ -25,11 +25,14 @@ func applyPullRequestInputs(state *projectionState, inputs []PullRequestInput) {
 			reviewState:           input.ReviewState,
 			checksState:           input.ChecksState,
 			mergeableState:        input.MergeableState,
+			mergeQueueState:       input.MergeQueueState,
 			unresolvedReviewCount: maxInt(input.UnresolvedReviewCount, 0),
 			pendingReviewCount:    maxInt(input.PendingReviewCount, 0),
 			requiredReviews:       maxInt(input.RequiredReviews, 0),
 			checksTotal:           maxInt(input.ChecksTotal, 0),
 			checksPassing:         maxInt(input.ChecksPassing, 0),
+			autoFixEnabled:        input.AutoFixEnabled,
+			autoMergeEnabled:      input.AutoMergeEnabled,
 		}
 	}
 }
@@ -51,6 +54,12 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 		summary.Count++
 		if strings.EqualFold(observation.state, prStateOpen) {
 			summary.OpenCount++
+			if observation.autoFixEnabled {
+				summary.AutoFixEnabled = true
+			}
+			if observation.autoMergeEnabled {
+				summary.AutoMergeEnabled = true
+			}
 		}
 		if pullRequestNeedsAttention(observation) {
 			summary.Attention = true
@@ -68,6 +77,13 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 	summary.URL = truncateString(representative.url, maxPullRequestURLBytes)
 	summary.AggregateState = aggregatePullRequestState(state.prs)
 	return &summary
+}
+
+func equalPullRequestSummary(left, right *PullRequestSummary) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
 
 func pullRequestNeedsAttention(pr pullRequestObservation) bool {
@@ -121,6 +137,12 @@ func pullRequestAggregateState(pr pullRequestObservation) string {
 	mergeable := strings.ToLower(strings.TrimSpace(pr.mergeableState))
 	checks := strings.ToLower(strings.TrimSpace(pr.checksState))
 	review := strings.ToLower(strings.TrimSpace(pr.reviewState))
+	if state == prStateMerged || state == prStateClosed {
+		return pullRequestLifecycleState(state, mergeable)
+	}
+	if strings.TrimSpace(pr.mergeQueueState) != "" {
+		return prStateQueued
+	}
 	if lifecycle := pullRequestLifecycleState(state, mergeable); lifecycle != "" {
 		return lifecycle
 	}
@@ -186,6 +208,8 @@ func pullRequestStateRank(state string) int {
 		return 70
 	case prStateReady:
 		return 60
+	case prStateQueued:
+		return 55
 	case prStatePassing:
 		return 50
 	case prStateDraft:

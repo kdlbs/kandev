@@ -14,6 +14,8 @@ import type { SubmitHandlersDeps } from "@/components/task-create-dialog-types";
 import { t } from "@/lib/i18n";
 import { useFreshBranchConsent } from "@/components/task-create-dialog-fresh-branch-consent";
 import { queueTaskCreateLastUsedFromPayload } from "@/components/task-create-dialog-handlers";
+import { ApiError } from "@/lib/api/client";
+import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
 
 const GENERIC_ERROR_KEY = "common:anErrorOccurred";
 
@@ -41,27 +43,58 @@ function notifyQueuedTask(
   });
 }
 
+function shouldNavigateAfterTaskCreate(
+  withAgent: boolean,
+  isPassthroughProfile: boolean,
+  planMode: boolean | undefined,
+  sessionId: string | null,
+) {
+  return (withAgent && isPassthroughProfile) || !!(planMode && sessionId);
+}
+
 type NoAgentTaskRequirements = {
   description: string;
-  workflowStepId: string;
   workspaceId: string;
   workflowId: string;
 };
 
 function hasNoAgentTaskRequirements(input: {
   description: string;
-  workflowStepId: string | null;
   workspaceId: string | null;
   workflowId: string | null;
 }): input is NoAgentTaskRequirements {
-  return Boolean(
-    input.description && input.workflowStepId && input.workspaceId && input.workflowId,
-  );
+  return Boolean(input.description && input.workspaceId && input.workflowId);
 }
 
 function resolveWorkspacePath(noRepository: boolean, workspacePath: string): string | undefined {
   if (!noRepository) return undefined;
   return workspacePath.trim() || undefined;
+}
+
+function isStaleBranchPolicyError(error: unknown): boolean {
+  return (
+    error instanceof ApiError && error.status === 400 && error.errorCode === "branch_policy_stale"
+  );
+}
+
+const REPOSITORY_SELECTION_ERROR_KEYS: Record<string, string> = {
+  repository_selection_invalid: "task:repositorySelectionInvalid",
+  repository_selection_not_found: "task:repositorySelectionNotFound",
+  repository_selection_unavailable: "task:repositorySelectionUnavailable",
+};
+
+export function taskSubmitErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    const key = REPOSITORY_SELECTION_ERROR_KEYS[error.errorCode ?? ""];
+    if (key) return t(key);
+  }
+  return error instanceof Error ? error.message : t(GENERIC_ERROR_KEY);
+}
+
+function isRepositorySelectionError(error: unknown): boolean {
+  return (
+    error instanceof ApiError && Boolean(REPOSITORY_SELECTION_ERROR_KEYS[error.errorCode ?? ""])
+  );
 }
 
 // eslint-disable-next-line max-lines-per-function
@@ -75,8 +108,8 @@ export function useTaskSubmitHandlers({
   workspaceId,
   workflowId,
   effectiveWorkflowId,
-  effectiveDefaultStepId,
   repositories,
+  repositoriesDirty,
   discoveredRepositories,
   workspaceRepositories,
   useRemote,
@@ -90,6 +123,7 @@ export function useTaskSubmitHandlers({
   onCreateSession,
   onOpenChange,
   createTask,
+  refreshBranchPolicies,
   preserveTaskCreateLastUsedOnClose,
   taskId,
   parentTaskId,
@@ -118,6 +152,7 @@ export function useTaskSubmitHandlers({
   const { toast } = useToast();
   const setActiveDocument = useAppStore((state) => state.setActiveDocument);
   const setPlanMode = useAppStore((state) => state.setPlanMode);
+  const applyAgentProfileRecentUse = useAppStore((state) => state.applyAgentProfileRecentUse);
   const isStartedEdit = computeIsTaskStarted(isEditMode, editingTask);
 
   const isFreshBranchActive =
@@ -130,6 +165,15 @@ export function useTaskSubmitHandlers({
       toast,
       createTask,
     });
+
+  const refreshStaleBranchPolicies = useCallback(
+    async (error: unknown) => {
+      if (!isStaleBranchPolicyError(error)) return false;
+      if (refreshBranchPolicies) await refreshBranchPolicies().catch(() => undefined);
+      return true;
+    },
+    [refreshBranchPolicies],
+  );
 
   const buildFreshBranchPayload = (consentedDirtyFiles: string[]) =>
     isFreshBranchActive ? { confirmDiscard: true, consentedDirtyFiles } : undefined;
@@ -283,14 +327,21 @@ export function useTaskSubmitHandlers({
         prompt: trimmedDescription,
         attachments: toMessageAttachments(attachments),
       });
-      await launchSession(request);
+      const response = await launchSession(request);
+      if (response.session_id) {
+        recordAgentProfileRecentUseBestEffort(
+          "task_session",
+          response.agent_profile_id ?? agentProfileId,
+          (record) => applyAgentProfileRecentUse("task_session", record),
+        );
+      }
 
       onOpenChange(false);
       router.push(linkToTask(taskId));
     } catch (error) {
       toast({
         title: t("task:failedToCreateSession"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -307,6 +358,7 @@ export function useTaskSubmitHandlers({
     toast,
     descriptionInputRef,
     setIsCreatingSession,
+    applyAgentProfileRecentUse,
   ]);
 
   const performTaskUpdate = useCallback(async () => {
@@ -317,22 +369,30 @@ export function useTaskSubmitHandlers({
       ? (editingTask.description ?? "")
       : (descriptionInputRef.current?.getValue() ?? "");
     const trimmedDescription = description.trim();
-    const repositoriesPayload = isStartedEdit ? [] : getRepositoriesPayload();
+    const repositoriesPayload = !isStartedEdit && repositoriesDirty ? getRepositoriesPayload() : [];
     const titleChanged = trimmedTitle !== editingTask.title;
 
     const updatePayload: Parameters<typeof updateTask>[1] = {
       ...(titleChanged && { title: trimmedTitle }),
       ...(!isStartedEdit && { description: trimmedDescription }),
-      ...(repositoriesPayload.length > 0 && { repositories: repositoriesPayload }),
+      ...(!isStartedEdit && repositoriesDirty && { repositories: repositoriesPayload }),
     };
 
     const updatedTask = await updateTask(editingTask.id, updatePayload);
     return { updatedTask, trimmedDescription };
-  }, [editingTask, taskName, descriptionInputRef, getRepositoriesPayload, isStartedEdit]);
+  }, [
+    editingTask,
+    taskName,
+    descriptionInputRef,
+    getRepositoriesPayload,
+    isStartedEdit,
+    repositoriesDirty,
+  ]);
 
   const handleEditSubmit = useCallback(async () => {
     if (checkRemoteResolution()) return;
     setIsCreatingTask(true);
+    let closeDialog = true;
     try {
       const result = await performTaskUpdate();
       if (!result) return;
@@ -348,6 +408,13 @@ export function useTaskSubmitHandlers({
           });
           const response = await launchSession(request);
           taskSessionId = response?.session_id ?? null;
+          if (taskSessionId) {
+            recordAgentProfileRecentUseBestEffort(
+              "task_session",
+              response.agent_profile_id ?? agentProfileId,
+              (record) => applyAgentProfileRecentUse("task_session", record),
+            );
+          }
         } catch (error) {
           console.error("[TaskCreateDialog] failed to start agent:", error);
         }
@@ -355,13 +422,16 @@ export function useTaskSubmitHandlers({
 
       onSuccess?.(updatedTask, "edit", { taskSessionId });
     } catch (error) {
+      closeDialog = !(
+        isRepositorySelectionError(error) || (await refreshStaleBranchPolicies(error))
+      );
       toast({
         title: t("task:failedToUpdateTask"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
-      onOpenChange(false);
+      if (closeDialog) onOpenChange(false);
       setIsCreatingTask(false);
     }
   }, [
@@ -372,28 +442,42 @@ export function useTaskSubmitHandlers({
     executorProfileId,
     onSuccess,
     onOpenChange,
+    refreshStaleBranchPolicies,
     toast,
     setIsCreatingTask,
+    applyAgentProfileRecentUse,
   ]);
 
   const handleUpdateWithoutAgent = useCallback(async () => {
     if (checkRemoteResolution()) return;
     setIsCreatingTask(true);
+    let closeDialog = true;
     try {
       const result = await performTaskUpdate();
       if (!result) return;
       onSuccess?.(result.updatedTask, "edit");
     } catch (error) {
+      closeDialog = !(
+        isRepositorySelectionError(error) || (await refreshStaleBranchPolicies(error))
+      );
       toast({
         title: t("task:failedToUpdateTask"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
-      onOpenChange(false);
+      if (closeDialog) onOpenChange(false);
       setIsCreatingTask(false);
     }
-  }, [checkRemoteResolution, performTaskUpdate, onSuccess, onOpenChange, toast, setIsCreatingTask]);
+  }, [
+    checkRemoteResolution,
+    performTaskUpdate,
+    onSuccess,
+    onOpenChange,
+    refreshStaleBranchPolicies,
+    toast,
+    setIsCreatingTask,
+  ]);
 
   const performCreate = useCallback(
     async (opts: {
@@ -436,8 +520,12 @@ export function useTaskSubmitHandlers({
       if (!taskResponse) return;
       notifyQueuedTask(taskResponse, toast);
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
-      const willNavigate =
-        (opts.withAgent && isPassthroughProfile) || !!(opts.planMode && newSessionId);
+      const willNavigate = shouldNavigateAfterTaskCreate(
+        opts.withAgent,
+        isPassthroughProfile,
+        opts.planMode,
+        newSessionId,
+      );
       onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId, willNavigate });
       clearDraft();
       queueTaskCreateLastUsedFromPayload(submittedPayload);
@@ -509,6 +597,13 @@ export function useTaskSubmitHandlers({
     });
     const response = await launchSession(request);
     const newSessionId = response?.session_id ?? null;
+    if (newSessionId) {
+      recordAgentProfileRecentUseBestEffort(
+        "task_session",
+        response.agent_profile_id ?? agentProfileId,
+        (record) => applyAgentProfileRecentUse("task_session", record),
+      );
+    }
     onSuccess?.(updatedTask, "edit", { taskSessionId: newSessionId });
     onOpenChange(false);
     if (newSessionId) {
@@ -530,6 +625,7 @@ export function useTaskSubmitHandlers({
     setActiveDocument,
     setPlanMode,
     router,
+    applyAgentProfileRecentUse,
   ]);
 
   const handleCreateWithPlanMode = useCallback(async () => {
@@ -538,9 +634,10 @@ export function useTaskSubmitHandlers({
       try {
         await performEditWithPlanMode();
       } catch (error) {
+        await refreshStaleBranchPolicies(error);
         toast({
           title: t("task:failedToStartTaskPlanMode"),
-          description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+          description: taskSubmitErrorMessage(error),
           variant: "error",
         });
       } finally {
@@ -569,9 +666,10 @@ export function useTaskSubmitHandlers({
         attachments,
       });
     } catch (error) {
+      await refreshStaleBranchPolicies(error);
       toast({
         title: t("task:failedToStartTaskPlanMode"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -585,6 +683,7 @@ export function useTaskSubmitHandlers({
     hasRemoteSubmitBlocker,
     ensureFreshBranchConsent,
     performCreate,
+    refreshStaleBranchPolicies,
     toast,
     descriptionInputRef,
     setIsCreatingTask,
@@ -637,9 +736,10 @@ export function useTaskSubmitHandlers({
     try {
       await submitCreateTask({ trimmedTitle, trimmedDescription, consent, attachments });
     } catch (error) {
+      await refreshStaleBranchPolicies(error);
       toast({
         title: t("task:failedToCreateTask"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -651,6 +751,7 @@ export function useTaskSubmitHandlers({
     hasRemoteSubmitBlocker,
     ensureFreshBranchConsent,
     submitCreateTask,
+    refreshStaleBranchPolicies,
     toast,
     descriptionInputRef,
     setIsCreatingTask,
@@ -665,7 +766,6 @@ export function useTaskSubmitHandlers({
     if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
     const requirements = {
       description: trimmedDescription,
-      workflowStepId: effectiveDefaultStepId,
       workspaceId,
       workflowId: effectiveWorkflowId,
     };
@@ -694,7 +794,6 @@ export function useTaskSubmitHandlers({
           autopilot,
           blockedBy,
         });
-        p.workflow_step_id = requirements.workflowStepId;
         submittedPayload = p;
         return p;
       };
@@ -707,9 +806,10 @@ export function useTaskSubmitHandlers({
       preserveTaskCreateLastUsedOnClose?.();
       onOpenChange(false);
     } catch (error) {
+      await refreshStaleBranchPolicies(error);
       toast({
         title: t("task:failedToCreateTask"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -721,7 +821,6 @@ export function useTaskSubmitHandlers({
     workspaceId,
     effectiveWorkflowId,
     agentProfileId,
-    effectiveDefaultStepId,
     executorId,
     executorProfileId,
     noRepository,
@@ -732,6 +831,7 @@ export function useTaskSubmitHandlers({
     getRepositoriesPayload,
     ensureFreshBranchConsent,
     createTaskWithFreshBranchRetry,
+    refreshStaleBranchPolicies,
     onSuccess,
     onOpenChange,
     preserveTaskCreateLastUsedOnClose,

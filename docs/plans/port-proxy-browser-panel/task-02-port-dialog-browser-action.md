@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-dockview-browser-navigation"]
 plan: "plan.md"
-spec: "../../specs/port-proxy-browser-panel/spec.md"
+spec: "../../specs/ui/requirements/port-proxy-browser-panel.md"
 ---
 
 # Task 02: Port dialog browser action

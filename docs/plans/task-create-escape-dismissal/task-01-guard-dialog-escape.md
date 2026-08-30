@@ -5,7 +5,7 @@ status: complete
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/task-create-escape-dismissal.md"
+spec: "../../specs/tasks/requirements/task-create-escape-dismissal.md"
 ---
 
 # Task 01: Guard Create Task Escape Dismissal
@@ -17,7 +17,7 @@ Keep nested autocomplete dismissal and non-create dialog behavior unchanged.
 
 ## Inputs
 
-- `docs/specs/tasks/task-create-escape-dismissal.md`
+- `docs/specs/tasks/requirements/task-create-escape-dismissal.md`
 - `docs/plans/task-create-escape-dismissal/plan.md`
 - `apps/web/components/task-create-dialog.tsx`
 - `apps/web/components/task-create-dialog.test.tsx`

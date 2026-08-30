@@ -287,6 +287,7 @@
   "workflowThatReceivesNewTasks": "Fluxo de trabalho que recebe as novas tarefas.",
   "yourTokenMayStillBeValid": "O seu token pode continuar válido; isto parece um problema de rede ou do serviço.",
   "mrAutomationClosedLabel": "MR fechado sem merge",
+  "mrAutomationAppliesToMR": "Aplica-se a !{{iid}}",
   "mrAutomationDescription": "Acorda o agente desta tarefa quando a sua revisão é pedida num merge request associado ou quando um deles é integrado ou fechado. As notificações vão para a fila de sessão que estiver ativa nesta tarefa.",
   "mrAutomationMergedLabel": "MR integrado",
   "mrAutomationRetry": "Tentar novamente",

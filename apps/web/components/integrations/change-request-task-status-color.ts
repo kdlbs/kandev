@@ -7,6 +7,7 @@ export const CHANGE_REQUEST_STATUS_COLORS = {
   warning: "text-yellow-500",
   review: "text-sky-400",
   ready: "text-emerald-400",
+  queued: "text-[#966600]",
   passing: "text-green-500",
 } as const;
 
@@ -23,6 +24,8 @@ export function getChangeRequestAggregateStatusColor(state: string | null | unde
       return CHANGE_REQUEST_STATUS_COLORS.review;
     case "ready":
       return CHANGE_REQUEST_STATUS_COLORS.ready;
+    case "queued":
+      return CHANGE_REQUEST_STATUS_COLORS.queued;
     case "passing":
       return CHANGE_REQUEST_STATUS_COLORS.passing;
     case "draft":
@@ -39,6 +42,7 @@ export const CHANGE_REQUEST_STATUS_RANK: Readonly<Record<string, number>> = {
   [CHANGE_REQUEST_STATUS_COLORS.warning]: 4,
   [CHANGE_REQUEST_STATUS_COLORS.review]: 3,
   [CHANGE_REQUEST_STATUS_COLORS.ready]: 2,
+  [CHANGE_REQUEST_STATUS_COLORS.queued]: 1.5,
   [CHANGE_REQUEST_STATUS_COLORS.passing]: 1,
   [CHANGE_REQUEST_STATUS_COLORS.merged]: 0,
   [CHANGE_REQUEST_STATUS_COLORS.muted]: 0,

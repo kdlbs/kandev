@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/session-config-cross-agent-reconcile/spec.md"
+spec: "../../specs/platform/requirements/session-config-cross-agent-reconcile.md"
 parallelism: sequential
 ---
 

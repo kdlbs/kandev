@@ -26,10 +26,12 @@ import (
 
 const (
 	// errKey is the JSON field used for error responses from the E2E endpoints.
-	errKey            = "error"
-	statusKey         = "status"
-	e2eResetSourceKey = "source"
-	e2eResetTypeKey   = "type"
+	errKey                     = "error"
+	statusKey                  = "status"
+	e2eResetSourceKey          = "source"
+	e2eResetTypeKey            = "type"
+	e2eTaskCleanupWaitTimeout  = 30 * time.Second
+	e2eTaskCleanupPollInterval = 25 * time.Millisecond
 )
 
 // registerE2EResetRoutes registers the E2E test-only endpoints.
@@ -59,7 +61,7 @@ func registerE2EResetRoutes(
 	// through the WS API (works on any Node version).
 	if automationSvc != nil {
 		api.POST("/automations", handleE2ECreateAutomation(automationSvc, repo, log))
-		api.POST("/automation-runs", handleE2ECreateAutomationRun(automationSvc, log))
+		api.POST("/automation-runs", handleE2ECreateAutomationRun(automationSvc, repo, log))
 		api.POST("/automation-triggers", handleE2EAddTrigger(automationSvc, log))
 		// Fire a fake github_pr_merged event into the in-process event bus so
 		// E2E tests can exercise the automation subscriber without real GitHub
@@ -106,6 +108,16 @@ func handleE2EReset(
 		}
 
 		ctx := c.Request.Context()
+
+		// Capture every task before deleting review watches or automations. Those
+		// owners delete their tasks as part of their own cleanup, so a later task
+		// list cannot discover the resource-cleanup jobs they leave behind.
+		taskIDsForCleanup, err := listE2ETaskIDs(ctx, repo.DB(), workspaceID)
+		if err != nil {
+			log.Error("e2e reset: failed to capture task IDs", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
+		}
 
 		// Wipe routing state so the office-routing-* specs don't leak
 		// degraded health rows / route attempts / parked runs between
@@ -222,6 +234,17 @@ func handleE2EReset(
 			return
 		}
 
+		// Automation deletion must run while its bound tasks still exist. It
+		// stops live turns before removing run rows and owns cleanup of hidden
+		// automation tasks. Deleting tasks first can strand an open run on a
+		// missing task and make the next test's reset fail.
+		deletedAutomations, autoErr := deleteAutomationsForReset(ctx, automationSvc, workspaceID)
+		if autoErr != nil {
+			log.Error("e2e reset: failed to delete automations", zap.Error(autoErr))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: autoErr.Error()})
+			return
+		}
+
 		// Route through the task service (rather than a raw SQL DELETE) so
 		// each delete spawns the async cleanup goroutine that stops the
 		// agentctl instance and releases its port. Without this, instances
@@ -245,6 +268,11 @@ func handleE2EReset(
 			return
 		}
 		var deletedTasks int64
+		deletedTaskIDs := append([]string(nil), taskIDsForCleanup...)
+		deletedTaskIDSet := make(map[string]struct{}, len(deletedTaskIDs))
+		for _, taskID := range deletedTaskIDs {
+			deletedTaskIDSet[taskID] = struct{}{}
+		}
 		for _, t := range tasks {
 			if err := taskSvc.DeleteTask(ctx, t.ID); err != nil {
 				// Abort: leaving an undeleted task with its workflow gone
@@ -255,19 +283,28 @@ func handleE2EReset(
 				return
 			}
 			deletedTasks++
+			if _, exists := deletedTaskIDSet[t.ID]; !exists {
+				deletedTaskIDSet[t.ID] = struct{}{}
+				deletedTaskIDs = append(deletedTaskIDs, t.ID)
+			}
+		}
+
+		// DeleteTask removes the task row synchronously but stops agents and
+		// removes worktrees asynchronously. The next test reuses the worker's
+		// repository, so returning before those jobs finish lets an old cleanup
+		// race with the next test's repository setup and file-tree read.
+		// This wait covers the durable cleanup path. E2E startup wires
+		// resourceCleanups, so the fire-and-forget fallback is not expected here.
+		if err := waitForE2ETaskCleanup(ctx, repo.DB(), deletedTaskIDs); err != nil {
+			log.Error("e2e reset: task cleanup did not finish", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
 		}
 
 		deletedWorkflows, err := repo.DeleteWorkflowsByWorkspace(ctx, workspaceID, keepWorkflowIDs)
 		if err != nil {
 			log.Error("e2e reset: failed to delete workflows", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
-			return
-		}
-
-		deletedAutomations, autoErr := deleteAutomationsForReset(ctx, automationSvc, workspaceID)
-		if autoErr != nil {
-			log.Error("e2e reset: failed to delete automations", zap.Error(autoErr))
-			c.JSON(http.StatusInternalServerError, gin.H{errKey: autoErr.Error()})
 			return
 		}
 
@@ -280,6 +317,153 @@ func handleE2EReset(
 			"deleted_gitlab_issue_watches":  gitLabReset.IssueWatches,
 		})
 	}
+}
+
+func waitForE2ETaskCleanup(ctx context.Context, database *sql.DB, taskIDs []string) error {
+	if database == nil || len(taskIDs) == 0 {
+		return nil
+	}
+	return waitForE2ETaskCleanupWithReader(
+		ctx,
+		taskIDs,
+		e2eTaskCleanupPollInterval,
+		func(ctx context.Context, ids []string) ([]e2eTaskCleanupStatus, error) {
+			return queryE2ETaskCleanupStatuses(ctx, database, ids)
+		},
+	)
+}
+
+type e2eTaskCleanupStatus struct {
+	taskID    string
+	state     taskmodels.TaskResourceCleanupState
+	lastError string
+}
+
+type e2eTaskCleanupStatusReader func(context.Context, []string) ([]e2eTaskCleanupStatus, error)
+
+func waitForE2ETaskCleanupWithReader(
+	ctx context.Context,
+	taskIDs []string,
+	pollInterval time.Duration,
+	readStatuses e2eTaskCleanupStatusReader,
+) error {
+	if len(taskIDs) == 0 {
+		return nil
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, e2eTaskCleanupWaitTimeout)
+	defer cancel()
+	for {
+		statuses, err := readStatuses(waitCtx, taskIDs)
+		if err != nil {
+			return fmt.Errorf("query task cleanup status: %w", err)
+		}
+		activeTaskIDs, err := activeE2ETaskCleanupIDs(statuses)
+		if err != nil {
+			return err
+		}
+		if len(activeTaskIDs) == 0 {
+			return nil
+		}
+
+		timer := time.NewTimer(pollInterval)
+		select {
+		case <-waitCtx.Done():
+			timer.Stop()
+			return fmt.Errorf("wait for task cleanup (%s): %w", strings.Join(activeTaskIDs, ", "), waitCtx.Err())
+		case <-timer.C:
+		}
+	}
+}
+
+func queryE2ETaskCleanupStatuses(
+	ctx context.Context,
+	database *sql.DB,
+	taskIDs []string,
+) ([]e2eTaskCleanupStatus, error) {
+	const taskIDBatchSize = 100
+	statuses := make([]e2eTaskCleanupStatus, 0)
+	for start := 0; start < len(taskIDs); start += taskIDBatchSize {
+		end := start + taskIDBatchSize
+		if end > len(taskIDs) {
+			end = len(taskIDs)
+		}
+		batch := taskIDs[start:end]
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")
+		query := `SELECT task_id, state, last_error
+			FROM task_resource_cleanup_jobs
+			WHERE task_id IN (` + placeholders + `)
+			  AND state IN (?, ?, ?, ?, ?)`
+		args := make([]any, 0, len(batch)+5)
+		for _, taskID := range batch {
+			args = append(args, taskID)
+		}
+		args = append(args,
+			taskmodels.TaskResourceCleanupStatePrepared,
+			taskmodels.TaskResourceCleanupStatePending,
+			taskmodels.TaskResourceCleanupStateRunning,
+			taskmodels.TaskResourceCleanupStateRetryWait,
+			taskmodels.TaskResourceCleanupStateFailed,
+		)
+
+		rows, err := database.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var status e2eTaskCleanupStatus
+			if err := rows.Scan(&status.taskID, &status.state, &status.lastError); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			statuses = append(statuses, status)
+		}
+		rowsErr := rows.Err()
+		_ = rows.Close()
+		if rowsErr != nil {
+			return nil, rowsErr
+		}
+	}
+	return statuses, nil
+}
+
+func activeE2ETaskCleanupIDs(statuses []e2eTaskCleanupStatus) ([]string, error) {
+	activeTaskIDs := make([]string, 0, len(statuses))
+	seen := make(map[string]struct{}, len(statuses))
+	for _, status := range statuses {
+		if status.state == taskmodels.TaskResourceCleanupStateFailed {
+			if status.lastError == "" {
+				return nil, fmt.Errorf("task cleanup failed for %s", status.taskID)
+			}
+			return nil, fmt.Errorf("task cleanup failed for %s: %s", status.taskID, status.lastError)
+		}
+		if _, ok := seen[status.taskID]; ok {
+			continue
+		}
+		seen[status.taskID] = struct{}{}
+		activeTaskIDs = append(activeTaskIDs, status.taskID)
+	}
+	return activeTaskIDs, nil
+}
+
+func listE2ETaskIDs(ctx context.Context, database *sql.DB, workspaceID string) ([]string, error) {
+	rows, err := database.QueryContext(ctx, `SELECT id FROM tasks WHERE workspace_id = ?`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 func resetGitHubAppRegistrationsForE2E(
@@ -345,7 +529,7 @@ func deleteAutomationsForReset(
 	if automationSvc == nil {
 		return 0, nil
 	}
-	return automationSvc.Store().DeleteAutomationsByWorkspace(ctx, workspaceID)
+	return automationSvc.DeleteAutomationsByWorkspace(ctx, workspaceID)
 }
 
 type e2eHiddenWorkflowRequest struct {
@@ -380,10 +564,14 @@ func handleE2ECreateHiddenWorkflow(taskSvc *taskservice.Service, log *logger.Log
 }
 
 type e2eCreateAutomationRequest struct {
-	WorkspaceID    string `json:"workspace_id"`
-	Name           string `json:"name"`
-	WorkflowID     string `json:"workflow_id"`
-	WorkflowStepID string `json:"workflow_step_id"`
+	WorkspaceID    string                            `json:"workspace_id"`
+	Name           string                            `json:"name"`
+	WorkflowID     string                            `json:"workflow_id"`
+	WorkflowStepID string                            `json:"workflow_step_id"`
+	TaskMode       automation.TaskMode               `json:"task_mode"`
+	RepositoryMode automation.RepositoryMode         `json:"repository_mode"`
+	RepositoryIDs  []string                          `json:"repository_ids"`
+	Repositories   []automation.AutomationRepository `json:"repositories"`
 	// Prompt is the automation's standing instruction. Optional, but the run
 	// view only renders the instruction card when there is one, so a spec
 	// asserting on where that card lives has to seed it.
@@ -426,6 +614,10 @@ func handleE2ECreateAutomation(
 			Name:              body.Name,
 			WorkflowID:        body.WorkflowID,
 			WorkflowStepID:    body.WorkflowStepID,
+			TaskMode:          body.TaskMode,
+			RepositoryMode:    body.RepositoryMode,
+			RepositoryIDs:     body.RepositoryIDs,
+			Repositories:      body.Repositories,
 			Prompt:            body.Prompt,
 			AgentProfileID:    body.AgentProfileID,
 			ExecutorProfileID: body.ExecutorProfileID,
@@ -457,10 +649,14 @@ type e2eCreateAutomationRunRequest struct {
 	// exercise task-lifecycle interactions (e.g. archiving the task and
 	// asserting the run's displayed status/concurrency accounting reacts).
 	TaskID string `json:"task_id"`
+	// When a task is supplied, the endpoint derives the current session and
+	// open turn so E2E tests can exercise exact-run actions such as stop.
+	SessionID string `json:"session_id,omitempty"`
+	TurnID    string `json:"turn_id,omitempty"`
 }
 
 // handleE2ECreateAutomationRun seeds an automation run row for E2E tests.
-func handleE2ECreateAutomationRun(svc *automation.Service, log *logger.Logger) gin.HandlerFunc {
+func handleE2ECreateAutomationRun(svc *automation.Service, repo *sqliterepo.Repository, log *logger.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body e2eCreateAutomationRunRequest
 		if err := c.ShouldBindJSON(&body); err != nil || body.AutomationID == "" {
@@ -476,7 +672,17 @@ func handleE2ECreateAutomationRun(svc *automation.Service, log *logger.Logger) g
 			TriggerType:  automation.TriggerTypeScheduled,
 			Status:       status,
 			TaskID:       body.TaskID,
+			SessionID:    body.SessionID,
+			TurnID:       body.TurnID,
 			TriggerData:  []byte(`{}`),
+		}
+		if run.TaskID != "" && (run.SessionID == "" || run.TurnID == "") {
+			if session, sessionErr := repo.GetActiveTaskSessionByTaskID(c.Request.Context(), run.TaskID); sessionErr == nil && session != nil {
+				run.SessionID = session.ID
+				if turn, turnErr := repo.GetActiveTurnBySessionID(c.Request.Context(), session.ID); turnErr == nil && turn != nil {
+					run.TurnID = turn.ID
+				}
+			}
 		}
 		if err := svc.RecordRun(c.Request.Context(), run); err != nil {
 			log.Error("e2e: failed to create automation run", zap.Error(err))
@@ -485,6 +691,7 @@ func handleE2ECreateAutomationRun(svc *automation.Service, log *logger.Logger) g
 		}
 		c.JSON(http.StatusCreated, gin.H{
 			"id": run.ID, "automation_id": run.AutomationID, statusKey: run.Status, taskIDPayloadKey: run.TaskID,
+			"session_id": run.SessionID, "turn_id": run.TurnID,
 		})
 	}
 }
@@ -734,8 +941,10 @@ func handleE2EAutomationManualTrigger(svc *automation.Service, log *logger.Logge
 	}
 }
 
-// e2ePollNewRun blocks until a new run (with a different id than beforeID) appears
-// for automationID, or until 5 seconds elapse. Returns the new run's TaskID.
+// e2ePollNewRun blocks until a new run (with a different id than beforeID) has
+// a task binding for automationID, or until 5 seconds elapse. The trigger row
+// is admitted before the event handler creates/binds its task, so observing the
+// row alone can return an empty task ID to an E2E caller.
 func e2ePollNewRun(ctx context.Context, svc *automation.Service, automationID, beforeID string) (string, error) {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -744,7 +953,7 @@ func e2ePollNewRun(ctx context.Context, svc *automation.Service, automationID, b
 		if err != nil || len(runs) == 0 {
 			continue
 		}
-		if runs[0].ID != beforeID {
+		if runs[0].ID != beforeID && runs[0].TaskID != "" {
 			return runs[0].TaskID, nil
 		}
 	}

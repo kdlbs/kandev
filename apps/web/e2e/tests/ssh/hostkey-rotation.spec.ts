@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/ssh-test-base";
 import { regenerateHostKey } from "../../helpers/ssh";
+import { waitForSessionDone } from "../../helpers/session";
 
 /**
  * Host-key rotation: regenerate the container's host key and assert
@@ -148,5 +149,13 @@ test.describe("ssh executor — host key rotation", () => {
         timeout: 60_000,
       })
       .toBe("ssh");
+
+    if (!task.session_id) throw new Error("SSH re-trust task did not return a session_id");
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      task.session_id,
+      "SSH re-trust task should finish before teardown",
+    );
   });
 });

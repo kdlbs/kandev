@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { waitForSessionDone } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { createRecentUseProfiles, seedTaskSessionRecency } from "./new-session-recency-helpers";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 const PROMPT_NAME = "e2e-new-agent-prompt";
@@ -19,6 +20,56 @@ test.describe("New session dialog", () => {
       if (!prompt.builtin && prompt.name === PROMPT_NAME) {
         await apiClient.deletePrompt(prompt.id);
       }
+    }
+  });
+
+  test("uses task-session recency for the Add Agent default", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(300_000);
+    const { profileA, profileB } = await createRecentUseProfiles(apiClient);
+
+    try {
+      const { targetTaskId } = await seedTaskSessionRecency({
+        testPage,
+        apiClient,
+        seedData,
+        profileA,
+        profileB,
+      });
+      await testPage.goto(`/t/${targetTaskId}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 30_000 });
+      await session.openNewSessionDialog();
+
+      const selector = session.newSessionDialogPage.agentSelector();
+      await expect(selector).toContainText(profileB.name);
+      await selector.click();
+      const options = session.newSessionDialogPage.agentOptions();
+      await expect(options.filter({ hasText: profileB.name })).toHaveCount(1);
+      await expect(options.first()).toContainText(profileB.name);
+      await testPage.keyboard.press("Escape");
+
+      await session.newSessionPromptInput().fill("/e2e:simple-message");
+      await session.newSessionStartButton().click();
+      await expect(session.newSessionDialog()).not.toBeVisible({ timeout: 10_000 });
+
+      await expect
+        .poll(
+          async () => {
+            const { sessions } = await apiClient.listTaskSessions(targetTaskId);
+            return sessions.find((candidate) => candidate.agent_profile_id === profileB.id)
+              ?.agent_profile_id;
+          },
+          { timeout: 30_000, message: "Waiting for the recent profile session" },
+        )
+        .toBe(profileB.id);
+    } finally {
+      await apiClient.deleteAgentProfile(profileA.id, true).catch(() => undefined);
+      await apiClient.deleteAgentProfile(profileB.id, true).catch(() => undefined);
     }
   });
 

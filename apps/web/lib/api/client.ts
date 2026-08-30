@@ -17,12 +17,20 @@ export type ApiRequestOptions = {
 export class ApiError extends Error {
   readonly status: number;
   readonly body: unknown;
+  readonly errorCode?: string;
   readonly retryAfterSeconds?: number;
   constructor(message: string, status: number, body: unknown, retryAfterSeconds?: number) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.body = body;
+    this.errorCode =
+      body &&
+      typeof body === "object" &&
+      "error_code" in body &&
+      typeof (body as { error_code?: unknown }).error_code === "string"
+        ? (body as { error_code: string }).error_code
+        : undefined;
     this.retryAfterSeconds = retryAfterSeconds;
   }
 }

@@ -6,6 +6,8 @@ import type { DestinationIcon } from "@/lib/navigation/types";
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { QuickChatActivityIndicator } from "@/components/quick-chat/quick-chat-activity-indicator";
+import type { QuickChatActivityState } from "@/lib/state/slices/ui/quick-chat-activity-selectors";
 import { SIDEBAR_ITEM_ACTIVE, SIDEBAR_ITEM_INACTIVE } from "./app-sidebar-constants";
 
 type AppSidebarNavItemProps = {
@@ -14,7 +16,7 @@ type AppSidebarNavItemProps = {
   href?: string;
   badge?: number;
   badgeVariant?: "primary" | "muted";
-  dot?: boolean;
+  activity?: QuickChatActivityState;
   onClick?: () => void;
   collapsed: boolean;
   /** Override the auto-derived active-state from pathname. */
@@ -77,17 +79,6 @@ function isPathActive(pathname: string, href: string | undefined, exactMatch: bo
   return hrefPathname !== "/" && pathname.startsWith(`${hrefPathname}/`);
 }
 
-function renderUnseenDot(dot: boolean) {
-  if (!dot) return null;
-  return (
-    <span
-      aria-hidden="true"
-      className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-background"
-      data-testid="quick-chat-unseen-dot"
-    />
-  );
-}
-
 function sidebarBadgeClass(variant: NonNullable<AppSidebarNavItemProps["badgeVariant"]>) {
   return cn(
     "rounded-full px-1.5 py-0.5 text-xs",
@@ -108,7 +99,7 @@ export function AppSidebarNavItem({
   disabled = false,
   testId,
   className,
-  dot = false,
+  activity = null,
 }: AppSidebarNavItemProps) {
   const pathname = usePathname();
   const active = isActive ?? isPathActive(pathname, href, exactMatch);
@@ -126,7 +117,7 @@ export function AppSidebarNavItem({
     <>
       <span className="relative flex">
         <Icon className="h-4 w-4 shrink-0" />
-        {renderUnseenDot(dot)}
+        <QuickChatActivityIndicator activity={activity} />
       </span>
       {!collapsed && (
         <>
