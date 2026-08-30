@@ -40,7 +40,8 @@
   box-sizing: content-box;
   max-width: 48rem;
   margin-inline: 0;
-  padding: 1.5rem 1.5rem 0;
+  padding-block: 1.5rem 0;
+  padding-inline: var(--md-editor-content-inline-start-padding) 1.5rem;
 }
 
 .kandev-hybrid-markdown-editor .md-heading {
@@ -231,6 +232,6 @@
 
 @media (max-width: 640px) {
   .kandev-hybrid-markdown-editor .md-editor-content {
-    padding-inline: 1rem;
+    padding-inline: var(--md-editor-content-inline-start-padding) 1rem;
   }
 }

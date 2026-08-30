@@ -322,7 +322,6 @@ function MarkdownEditSurface({
   repositoryId,
   repo,
   content,
-  originalContent,
   gutterMarkers,
   comments,
   onChange,
@@ -353,7 +352,6 @@ function MarkdownEditSurface({
       <div className="min-h-0 flex-1 overflow-hidden">
         <HybridMarkdownEditor
           content={content}
-          baseline={originalContent}
           readOnly={false}
           gutterMarkers={gutterMarkers}
           comments={comments}
@@ -457,7 +455,7 @@ function MarkdownModeControl({ mode, supportedModes, onModeChange }: MarkdownMod
           type="button"
           size="sm"
           variant={candidate === mode ? "secondary" : "ghost"}
-          className="h-6 cursor-pointer rounded-sm px-1.5 text-xs"
+          className="h-5 cursor-pointer rounded-sm px-1.5 text-xs"
           data-testid={`markdown-mode-${candidate}`}
           aria-pressed={candidate === mode}
           onClick={() => onModeChange(candidate)}
@@ -496,7 +494,7 @@ function MarkdownFileActions({
               type="button"
               variant="outline"
               size="sm"
-              className="h-8 cursor-pointer gap-1 px-2 text-xs"
+              className="h-6 cursor-pointer gap-1 px-2 text-xs"
               onClick={onReloadFromAgent}
               data-testid="markdown-file-reload"
             >
@@ -514,7 +512,7 @@ function MarkdownFileActions({
               type="button"
               variant="ghost"
               size="sm"
-              className="h-8 w-8 cursor-pointer p-0 hover:text-destructive"
+              className="h-6 w-6 cursor-pointer p-0 hover:text-destructive"
               onClick={onDelete}
               aria-label={t("editors:deleteFile")}
               data-testid="markdown-file-delete"
@@ -529,19 +527,19 @@ function MarkdownFileActions({
         type="button"
         variant="default"
         size="sm"
-        className="cursor-pointer gap-2"
+        className="h-6 cursor-pointer gap-1 px-2 text-xs"
         disabled={!isDirty || isSaving}
         onClick={onSave}
         data-testid="markdown-file-save"
       >
         {isSaving ? (
           <>
-            <IconLoader2 className="h-4 w-4 animate-spin" />
+            <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
             {t("editors:saving")}
           </>
         ) : (
           <>
-            <IconDeviceFloppy className="h-4 w-4" />
+            <IconDeviceFloppy className="h-3.5 w-3.5" />
             {t("common:save")}
             <span className="text-xs text-muted-foreground">({SAVE_SHORTCUT}+S)</span>
           </>

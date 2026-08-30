@@ -135,12 +135,14 @@ vi.mock("@kandev/ui/tooltip", () => ({
 }));
 vi.mock("@/components/editors/markdown/hybrid-markdown-editor", () => ({
   HybridMarkdownEditor: ({
+    baseline,
     comments,
     onComment,
     onChange,
     onSourceFallback,
     onOpenLink,
   }: {
+    baseline?: string;
     comments?: readonly unknown[];
     onComment?: (comment: { text: string; start: number; endExclusive: number }) => void;
     onChange: (content: string) => void;
@@ -149,6 +151,7 @@ vi.mock("@/components/editors/markdown/hybrid-markdown-editor", () => ({
   }) => (
     <div
       data-testid="mobile-hybrid-editor"
+      data-baseline={baseline}
       className="h-full min-h-0 overflow-y-auto overscroll-contain"
     >
       <span data-testid="mobile-hybrid-comment-count">{comments?.length ?? 0}</span>
@@ -280,6 +283,7 @@ describe("MobileFileViewerPanel Markdown editing", () => {
 
     fireEvent.click(screen.getByTestId("mobile-markdown-mode-edit"));
     expect(screen.getByTestId("mobile-hybrid-editor")).toBeTruthy();
+    expect(screen.getByTestId("mobile-hybrid-editor").getAttribute("data-baseline")).toBeNull();
     expect(screen.getByTestId("mobile-hybrid-editor").className).toContain("overflow-y-auto");
     fireEvent.click(screen.getByRole("button", { name: "Change mobile hybrid" }));
     expect(onFileChange).toHaveBeenCalledWith("# hybrid mobile edit");

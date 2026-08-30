@@ -81,11 +81,13 @@ vi.mock("./markdown-preview-content", () => ({
 vi.mock("@/components/editors/markdown/hybrid-markdown-editor", () => ({
   HybridMarkdownEditor: ({
     content,
+    baseline,
     onChange,
     comments,
     onComment,
   }: {
     content: string;
+    baseline?: string;
     onChange: (value: string) => void;
     comments?: readonly unknown[];
     onComment?: (comment: { text: string; start: number; endExclusive: number }) => void;
@@ -93,6 +95,7 @@ vi.mock("@/components/editors/markdown/hybrid-markdown-editor", () => ({
     <div
       data-testid="hybrid-editor"
       data-content={content}
+      data-baseline={baseline}
       data-comment-count={String(comments?.length ?? 0)}
     >
       <button type="button" onClick={() => onChange("# hybrid edit")}>
@@ -156,6 +159,22 @@ describe("Markdown source comment offsets", () => {
       endLine: 3,
       selectedText: "\r\nseco",
     });
+  });
+});
+
+describe("Markdown comparison presentation", () => {
+  it("does not turn the ordinary saved buffer into a stacked comparison", () => {
+    render(
+      <MarkdownFileEditor
+        {...baseProps}
+        mode="edit"
+        content="# locally edited"
+        originalContent="# saved source"
+        isDirty
+      />,
+    );
+
+    expect(screen.getByTestId(HYBRID_EDITOR_TEST_ID).getAttribute("data-baseline")).toBeNull();
   });
 });
 
@@ -252,8 +271,11 @@ describe("MarkdownFileEditor", () => {
   it("uses compact desktop mode buttons that match the existing toolbar controls", () => {
     render(<MarkdownFileEditor {...baseProps} mode="edit" />);
 
-    expect(screen.getByTestId(MARKDOWN_EDIT_MODE_TEST_ID).className).toContain("h-6");
+    expect(screen.getByTestId(MARKDOWN_EDIT_MODE_TEST_ID).className).toContain("h-5");
+    expect(screen.getByTestId(MARKDOWN_EDIT_MODE_TEST_ID).className).not.toContain("h-6");
     expect(screen.getByTestId(MARKDOWN_EDIT_MODE_TEST_ID).className).not.toContain("h-8");
+    expect(screen.getByTestId("markdown-file-delete").className).toContain("h-6");
+    expect(screen.getByTestId("markdown-file-save").className).toContain("h-6");
     expect(screen.getByTestId("markdown-file-save").textContent).toMatch(
       /Save\s*\((?:Ctrl|⌘)\+S\)/,
     );

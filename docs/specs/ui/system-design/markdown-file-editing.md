@@ -151,9 +151,9 @@ flags keep their current names because they represent a different interaction.
 ### Hybrid adapter contract
 
 The adapter accepts source text, read-only state, language services, comments,
-baseline content, and host callbacks. It emits minimal source changes where the
-upstream API supplies them. The parent still receives a complete current string
-for compatibility with the file buffer.
+optional comparison baseline content, and host callbacks. It emits minimal
+source changes where the upstream API supplies them. The parent still receives
+a complete current string for compatibility with the file buffer.
 
 The adapter keeps its transient model alive while Preview hides the editing
 view. This preserves local hybrid undo history. A Source edit replaces the
@@ -206,9 +206,11 @@ Comment ranges remain source-line ranges. Preview source-line attributes and
 Edit source offsets map to those same ranges. Creating or selecting a comment
 does not change Markdown bytes.
 
-When `originalContent` exists, the adapter supplies it as the comparison
-baseline. Added and changed lines receive gutter markers. Kandev's existing
-version-control data remains authoritative.
+An explicit comparison surface can supply baseline content to the adapter. The
+ordinary Files editor does not treat its saved `originalContent` buffer as a
+comparison baseline because that would stack the old and edited blocks during
+normal input. Added and changed lines in an explicit comparison receive gutter
+markers. Kandev's existing version-control data remains authoritative.
 
 ## Responsive interaction contract
 

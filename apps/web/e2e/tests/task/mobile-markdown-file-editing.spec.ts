@@ -11,6 +11,8 @@ const MOBILE_MARKDOWN_CONTENT = `# Mobile Markdown
 
 Edit this file from the phone Files surface.
 
+#### Mobile source markers
+
 | Area | State | Notes |
 | --- | --- | --- |
 | Preview | Ready | The table remains contained |
@@ -120,6 +122,15 @@ test.describe("Mobile Markdown file editing", () => {
     await editButton.tap();
     const hybrid = viewer.getByTestId("hybrid-markdown-editor");
     await expect(hybrid).toBeVisible({ timeout: 15_000 });
+    const subheader = hybrid.locator("h4.md-heading", { hasText: "Mobile source markers" });
+    await subheader.tap();
+    const [hybridBox, markerBox] = await Promise.all([
+      hybrid.boundingBox(),
+      subheader.locator(".md-marker-headingMarker").boundingBox(),
+    ]);
+    expect(hybridBox).not.toBeNull();
+    expect(markerBox).not.toBeNull();
+    expect(markerBox!.x).toBeGreaterThanOrEqual(hybridBox!.x);
     const scrollMetrics = await hybrid.evaluate((element) => {
       const scroller = element as HTMLElement;
       const before = { scrollHeight: scroller.scrollHeight, clientHeight: scroller.clientHeight };

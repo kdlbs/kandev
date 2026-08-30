@@ -93,7 +93,8 @@ workflow, so that switching presentation does not risk my work.
   Edit modes shall map selections and comment ranges to the same source lines.
 - **AC-UI-MARKDOWN-FILE-EDITING-002.7:** When a comparison baseline exists,
   Edit mode shall show added and changed regions without making the rendered
-  view the source of truth.
+  view the source of truth. The normal saved file buffer shall not become a
+  comparison baseline or duplicate edited blocks.
 - **AC-UI-MARKDOWN-FILE-EDITING-002.8:** When Edit mode fails to initialize or
   update, the system shall keep the current content and offer Source mode.
 

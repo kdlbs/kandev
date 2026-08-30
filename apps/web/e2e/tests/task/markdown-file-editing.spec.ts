@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -29,6 +29,8 @@ ${Array.from(
 <div data-unsupported="true">Unsupported source</div>
 `;
 const UNSUPPORTED_MARKDOWN_SOURCE = '<div data-unsupported="true">Unsupported source</div>';
+const LONG_EDIT_PARAGRAPH =
+  "Kandev should read as a restrained developer workbench. The shell is dense and quiet, with panels, command surfaces, and state indicators arranged so users can keep their place across tasks, sessions, repositories, and integrations.";
 
 async function seedMarkdownSession({
   testPage,
@@ -129,6 +131,25 @@ async function editExistingHybridParagraph(testPage: Page): Promise<void> {
   ).toHaveCount(0);
 }
 
+async function clickAfterText(testPage: Page, block: Locator, target: string) {
+  const point = await block.evaluate((element, text) => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const offset = node.textContent?.indexOf(text) ?? -1;
+      if (offset < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, offset);
+      range.setEnd(node, offset + text.length);
+      const rect = range.getBoundingClientRect();
+      return { x: rect.right - 1, y: rect.top + rect.height / 2 };
+    }
+    return null;
+  }, target);
+  expect(point).not.toBeNull();
+  await testPage.mouse.click(point!.x, point!.y);
+}
+
 async function hybridPalette(testPage: Page) {
   return testPage.locator(".md-editor.kandev-hybrid-markdown-editor").evaluate((editor) => {
     const activeBlock = editor.querySelector<HTMLElement>(".md-block-active");
@@ -202,14 +223,21 @@ async function expectSingleCompactToolbar(testPage: Page) {
   );
   const surfaceBox = await visibleSurface.first().boundingBox();
   const modeButton = editor.locator("[data-testid^='markdown-mode-']:visible").first();
+  const saveButton = editor.getByTestId("markdown-file-save");
   const buttonBox = await modeButton.boundingBox();
+  const saveButtonBox = (await saveButton.count()) > 0 ? await saveButton.boundingBox() : null;
+  await expect(toolbar).toHaveCount(1);
   expect(editorBox).not.toBeNull();
   expect(toolbarBox).not.toBeNull();
   expect(surfaceBox).not.toBeNull();
   expect(buttonBox).not.toBeNull();
   expect(surfaceBox!.y - editorBox!.y).toBeLessThanOrEqual(40);
-  expect(buttonBox!.height).toBeLessThanOrEqual(24);
+  expect(buttonBox!.height).toBeLessThanOrEqual(20);
   expect(buttonBox!.height).toBeLessThan(toolbarBox!.height);
+  if (saveButtonBox) {
+    expect(saveButtonBox.height).toBeLessThanOrEqual(24);
+    expect(saveButtonBox.height).toBeLessThan(toolbarBox!.height);
+  }
 }
 
 test.describe("Markdown file editing", () => {
@@ -315,6 +343,67 @@ test.describe("Markdown file editing", () => {
       "true",
     );
     await expect(testPage.getByTestId("hybrid-markdown-editor")).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("keeps normal block editing single, exposes heading markers, and creates blocks with Enter", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const fileName = `markdown-block-input-${Date.now()}.md`;
+    const { session } = await seedMarkdownSession({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      fileName,
+      content: `# Direction\n\n${LONG_EDIT_PARAGRAPH}\n\n#### Existing subheader\n`,
+      taskTitle: "Markdown block input",
+    });
+
+    await openFile(session, testPage, fileName);
+    const editor = testPage.getByTestId("markdown-file-editor");
+    await editor.getByTestId("markdown-mode-source").click();
+    const sourceInput = testPage.getByRole("textbox", { name: "Editor content" });
+    await expect(sourceInput).toBeAttached({ timeout: 15_000 });
+    await sourceInput.focus();
+    await testPage.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+    await testPage.keyboard.insertText(
+      `# Direction\n\n${LONG_EDIT_PARAGRAPH.replace("quiet", "quiet!abcde")}\n\n#### Existing subheader\n`,
+    );
+    await editor.getByTestId("markdown-mode-edit").click();
+    const hybrid = testPage.getByTestId("hybrid-markdown-editor");
+    const paragraph = hybrid.locator(".md-paragraph", {
+      hasText: "The shell is dense and quiet!abcde",
+    });
+    await clickAfterText(testPage, paragraph, "quiet!abcde");
+    await testPage.keyboard.type("z");
+
+    const repeatedPrefixCount = await hybrid.evaluate((element) => {
+      const prefix = "Kandev should read as a restrained developer workbench.";
+      return element.textContent?.split(prefix).length - 1;
+    });
+    expect(repeatedPrefixCount).toBe(1);
+
+    const subheader = hybrid.locator("h4.md-heading", { hasText: "Existing subheader" });
+    await subheader.click();
+    const marker = subheader.locator(".md-marker-headingMarker");
+    const [rootBox, markerBox] = await Promise.all([hybrid.boundingBox(), marker.boundingBox()]);
+    expect(rootBox).not.toBeNull();
+    expect(markerBox).not.toBeNull();
+    expect(markerBox!.x).toBeGreaterThanOrEqual(rootBox!.x);
+
+    const editedParagraph = hybrid.locator(".md-paragraph", {
+      hasText: "The shell is dense and quiet!abcdez",
+    });
+    await clickAfterText(testPage, editedParagraph, "quiet!abcdez");
+    await testPage.keyboard.press("Enter");
+    await testPage.keyboard.type("A new block created with Enter. ");
+
+    await expect(
+      hybrid.locator(".md-paragraph", { hasText: "A new block created with Enter." }),
+    ).toHaveCount(1);
   });
 
   test("keeps MDX on the safe Preview and exact Source paths", async ({
