@@ -153,6 +153,12 @@ class DesktopE2EWorkflowContractTest(unittest.TestCase):
             'docker buildx imagetools inspect "$image"',
             container_job,
         )
+        self.assertIn("for attempt in 1 2 3; do", container_job)
+        self.assertIn(
+            'if candidate="$(docker buildx imagetools inspect "$image"',
+            container_job,
+        )
+        self.assertIn('sleep "$((attempt * 2))"', container_job)
         self.assertIn("path: /tmp/ms-playwright", container_job)
         self.assertIn(
             "key: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ steps.playwright_image.outputs.digest }}-${{ github.run_id }}-${{ github.run_attempt }}",

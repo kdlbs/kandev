@@ -543,7 +543,19 @@ jobs:
         run: |
           set -euo pipefail
           image=ghcr.io/kdlbs/kandev-ci:runtime-latest
-          digest="$(docker buildx imagetools inspect "$image" | awk '$1 == "Digest:" { print $2; exit }')"
+          digest=""
+          for attempt in 1 2 3; do
+            candidate=""
+            if candidate="$(docker buildx imagetools inspect "$image" | awk '$1 == "Digest:" { print $2; exit }')" \
+              && [[ "$candidate" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              digest="$candidate"
+              break
+            fi
+            if (( attempt < 3 )); then
+              echo "::warning::Could not resolve $image on attempt $attempt/3; retrying"
+              sleep "$((attempt * 2))"
+            fi
+          done
           if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "::error::Could not resolve an immutable digest for $image"
             exit 1
