@@ -103,6 +103,7 @@ test.describe("Mobile plugin updates", () => {
     expect(settingsBox).not.toBeNull();
     expect(settingsBox!.height).toBeGreaterThanOrEqual(44);
     expect(updateBox!.x + updateBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width + 1);
+    expect(settingsBox!.x + settingsBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width + 1);
     expect(
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
