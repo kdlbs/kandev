@@ -12,10 +12,11 @@ const DefaultUserID = "default-user"
 type CredentialPurpose string
 
 const (
-	CredentialPurposeAutomation    CredentialPurpose = "automation"
-	CredentialPurposePersonalRead  CredentialPurpose = "personal_read"
-	CredentialPurposePersonalWrite CredentialPurpose = "personal_write"
-	CredentialPurposeGitTransport  CredentialPurpose = "git_transport"
+	CredentialPurposeAutomation         CredentialPurpose = "automation"
+	CredentialPurposePersonalRead       CredentialPurpose = "personal_read"
+	CredentialPurposePersonalWrite      CredentialPurpose = "personal_write"
+	CredentialPurposeGitTransport       CredentialPurpose = "git_transport"
+	CredentialPurposeScopedActionsWrite CredentialPurpose = "scoped_actions_write"
 )
 
 type AuthPrincipalKind string

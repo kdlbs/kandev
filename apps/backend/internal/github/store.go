@@ -421,6 +421,72 @@ const createTablesSQL = `
 	);
 `
 
+const ciRunTablesSQL = `
+	CREATE TABLE IF NOT EXISTS github_ci_run_grants (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		actor_task_id TEXT NOT NULL,
+		target_task_id TEXT NOT NULL,
+		workflow_id TEXT NOT NULL,
+		workflow_step_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL,
+		created_by_user_id TEXT NOT NULL,
+		revoked_at DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_github_ci_run_grants_scope
+		ON github_ci_run_grants (
+			workspace_id, actor_task_id, target_task_id, workflow_id, workflow_step_id, repository_id
+		) WHERE revoked_at IS NULL;
+
+	CREATE TABLE IF NOT EXISTS github_ci_run_requests (
+		id TEXT PRIMARY KEY,
+		grant_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		actor_task_id TEXT NOT NULL,
+		actor_session_id TEXT NOT NULL,
+		target_task_id TEXT NOT NULL,
+		workflow_id TEXT NOT NULL,
+		workflow_step_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL,
+		pr_number INTEGER NOT NULL,
+		expected_head_sha TEXT NOT NULL,
+		source_run_id BIGINT NOT NULL,
+		expected_source_attempt INTEGER NOT NULL,
+		evidence_kind TEXT NOT NULL CHECK (evidence_kind IN ('pr_head', 'current_merge')),
+		idempotency_hash TEXT NOT NULL,
+		status TEXT NOT NULL CHECK (status IN ('pending', 'reconciling', 'succeeded', 'failed')),
+		operation TEXT NOT NULL DEFAULT '',
+		provider_call_started_at DATETIME,
+		provider_run_id BIGINT NOT NULL DEFAULT 0,
+		provider_workflow_id BIGINT NOT NULL DEFAULT 0,
+		provider_workflow_name TEXT NOT NULL DEFAULT '',
+		provider_workflow_path TEXT NOT NULL DEFAULT '',
+		provider_attempt INTEGER NOT NULL DEFAULT 0,
+		provider_head_repo TEXT NOT NULL DEFAULT '',
+		provider_head_ref TEXT NOT NULL DEFAULT '',
+		provider_head_sha TEXT NOT NULL DEFAULT '',
+		failure_class TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		UNIQUE (grant_id, actor_task_id, idempotency_hash),
+		UNIQUE (target_task_id, repository_id, pr_number, source_run_id, expected_source_attempt, evidence_kind)
+	);
+
+	CREATE TABLE IF NOT EXISTS github_ci_run_audit_events (
+		id TEXT PRIMARY KEY,
+		request_id TEXT NOT NULL,
+		event_type TEXT NOT NULL,
+		failure_class TEXT NOT NULL DEFAULT '',
+		details_json TEXT NOT NULL DEFAULT '{}',
+		created_at DATETIME NOT NULL,
+		FOREIGN KEY (request_id) REFERENCES github_ci_run_requests(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_github_ci_run_audit_request
+		ON github_ci_run_audit_events(request_id, created_at);
+`
+
 const appRegistrationTablesSQL = `
 	CREATE TABLE IF NOT EXISTS github_app_registrations (
 		id TEXT PRIMARY KEY CHECK (id <> ''),
@@ -877,7 +943,10 @@ func (s *Store) initCoreSchema() error {
 	if err := s.initAppRegistrationSchema(); err != nil {
 		return err
 	}
-	_, err := s.db.Exec(createTablesSQL)
+	if _, err := s.db.Exec(createTablesSQL); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(ciRunTablesSQL)
 	return err
 }
 
@@ -3731,9 +3800,24 @@ func (s *Store) DeleteWorkspaceSettings(ctx context.Context, workspaceID string)
 	if workspaceID == "" {
 		return fmt.Errorf("workspace_id is required")
 	}
-	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM github_workspace_settings WHERE workspace_id = ?`, workspaceID)
-	return err
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, statement := range []string{
+		`DELETE FROM github_ci_run_audit_events WHERE request_id IN (
+			SELECT id FROM github_ci_run_requests WHERE workspace_id = ?
+		)`,
+		`DELETE FROM github_ci_run_requests WHERE workspace_id = ?`,
+		`DELETE FROM github_ci_run_grants WHERE workspace_id = ?`,
+		`DELETE FROM github_workspace_settings WHERE workspace_id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(statement), workspaceID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) listWorkspaceIDs(ctx context.Context) ([]string, error) {

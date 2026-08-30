@@ -259,10 +259,18 @@ For full Kandev behavior, request the smallest applicable repository/organizatio
 | Issues | Read and write | Issue browsing and updates. |
 | Checks | Read | Check runs and conclusions. |
 | Commit statuses | Read | Commit status reporting. |
-| Actions | Read | Workflow-run status. |
+| Actions | Read and write | Workflow-run status and the scoped coordinator fresh-run recovery action. |
 | Administration | Read | Branch-protection details. |
 | Members | Read | Organization/team membership lookups. |
 | Workflows | Write | Changes under `.github/workflows`; omit when agents must not edit workflow files. |
+
+Actions write does not give task agents a general Actions client. Kandev keeps
+the installation token server-side and exposes only the task-bound recovery
+operation described in [Automation and MCP](automation-and-mcp.md#request-a-fresh-ci-run-for-a-linked-pull-request).
+An existing App installation must approve the upgraded Actions permission
+before that operation can succeed. A missing permission is reported as
+`installation_permission_denied`; Kandev does not fall back to a PAT, GitHub
+CLI account, user token, or legacy shared credential.
 
 Subscribe to `push` and `check_run`. GitHub sends `installation`, `installation_repositories`, and `github_app_authorization` lifecycle events automatically; they do not appear as selectable subscriptions. Kandev uses the lifecycle events to track installation suspension/deletion, repository access changes, and revoked personal authorizations. PR, issue, and review watches continue to poll and do not require their corresponding webhooks. GitHub's [registration guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app), [App permission reference](https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps), and [webhook guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/using-webhooks-with-github-apps) describe the provider-side settings.
 

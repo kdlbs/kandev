@@ -531,6 +531,46 @@ The HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sour
 
 `step_complete_kandev` is registered and discoverable in every task-mode session. Kandev includes its completion instruction, and acts on its signal, only on Kanban steps whose auto-advance action explicitly requires that signal. A user message arriving before transition can cancel that automatic move.
 
+### Request a fresh CI run for a linked pull request
+
+`request_fresh_ci_run_kandev` is a narrow recovery tool for the case where a
+task reaches CI Fixup after a shared prerequisite changes but GitHub did not
+create a new run for the unchanged pull-request head. The tool is discoverable
+in task mode, but a request succeeds only when a workspace administrator has
+created an active grant for the calling coordinator task, target task,
+workflow, current CI Fixup step, and task repository.
+
+The caller supplies only the target task and repository IDs, linked pull
+request number, exact expected head SHA, expected current step, source run and
+attempt, evidence kind, and an idempotency key. Kandev injects the caller's
+task/session identity. Owner, repository name, ref, workflow, dispatch inputs,
+and credentials are not tool arguments.
+
+Kandev verifies the linked open PR and live head, then verifies that the source
+run belongs to the canonical base repository and exact PR head. This also works
+when GitHub omits the run's `pull_requests` array: the base repository, head
+repository, head ref, and head SHA must all match. The server first asks GitHub
+to rerun failed jobs from the named attempt. If GitHub says the run is not
+rerunnable, Kandev can dispatch only a reviewed same-repository PR-head
+workflow with server-fixed inputs. It never dispatches a fork ref.
+
+`current_merge` requests currently return `merge_evidence_unavailable` because
+GitHub's REST run record does not expose enough runtime merge-SHA evidence to
+prove that semantic safely. Kandev does not synthesize a check or relabel an old
+run. Other stable failures include `not_authorized`, `head_drift`,
+`source_run_mismatch`, `workflow_dispatch_denied`,
+`installation_permission_denied`, `provider_rate_limited`,
+`provider_unavailable`, and `provider_call_ambiguous`.
+
+Each logical request is durably claimed before the provider mutation. Repeated
+or concurrent calls reuse the same receipt, and an interrupted provider call
+is reconciled from GitHub rather than blindly sent again. Receipts and audit
+events contain task/run/workflow/head identities and a failure class, never an
+installation token, private key, authorization header, or raw provider body.
+This behavior is part of the canonical server implementation. A
+deployment-local script, broad token, proxy customization, Docker access, or
+operator shortcut does not implement the platform contract.
+
 When `create_task_kandev.repositories[].repository_url` is a canonical GitHub pull request URL or a GitLab merge request URL on the configured host, Kandev resolves the contribution before creating the task. The contribution must still be open, have a valid source branch and head commit, and permit the target project to contribute; Kandev keeps the target repository as `origin`, fetches the exact source commit, and routes commits to the contributor's existing source branch. The existing pull request or merge request is associated with the task and reused for later changes, so Kandev does not open a duplicate. Provider-authored title, description, comments, and diff content are not copied into trusted task context. Configure the task's Git credentials as described in [task Git credentials](integrations.md#choose-task-git-credentials); Kandev runs a write preflight before starting the agent.
 
 The task server runs inside agentctl's local runtime boundary. Its MCP routes do not use a separate bearer token. Do not expose agentctl ports; rely on the executor's process/network isolation and Kandev's session scoping.

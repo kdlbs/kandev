@@ -152,6 +152,7 @@ Per-workspace credentials and triage triggers for external services.
 | [mcp-tool-argument-validation](integrations/mcp-tool-argument-validation.md) | shipped |
 | [provider-aware-review-automation](integrations/provider-aware-review-automation.md) | approved |
 | [github-authentication](integrations/github-authentication.md) | draft |
+| [scoped-coordinator-ci-runs](integrations/scoped-coordinator-ci-runs.md) | building |
 | [gitlab-integration](gitlab-integration/spec.md) | shipped |
 | [gitlab-mr-status-chip](gitlab-mr-status-chip/spec.md) | draft |
 | [gitlab-mr-task-list-badges](gitlab-mr-task-list-badges/spec.md) | draft |
