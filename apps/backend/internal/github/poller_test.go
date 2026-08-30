@@ -61,6 +61,16 @@ func setupPollerTest(t *testing.T) (*Poller, *Service, *MockClient, *Store) {
 	return poller, svc, mockClient, store
 }
 
+func TestPollerContextUsesNonBlockingBackgroundAdmission(t *testing.T) {
+	ctx := pollerContext(context.Background())
+	if githubWorkClass(ctx) != WorkClassBackground {
+		t.Fatalf("work class = %v, want background", githubWorkClass(ctx))
+	}
+	if !nonBlockingGitHubAdmission(ctx) {
+		t.Fatal("poller context must use non-blocking admission")
+	}
+}
+
 // seedTask inserts a minimal task row for JOIN-based queries. Pass archived=true
 // to seed an archived task (archived_at set to now).
 func seedTask(t *testing.T, store *Store, taskID string, archived bool) {

@@ -196,6 +196,7 @@ func (a *RateAdmission) acquire(ctx context.Context, resource Resource) (func(),
 }
 
 func (a *RateAdmission) tryAcquireBackground(_ context.Context, resource Resource) (func(), error) {
+	trackerChanged := a.principal.tracker.Changed()
 	decision := a.snapshot(resource, time.Now())
 	state := a.resourceState(resource)
 	wait := a.principal.tracker.BackgroundWaitDuration(resource)
@@ -229,7 +230,7 @@ func (a *RateAdmission) tryAcquireBackground(_ context.Context, resource Resourc
 	incGitHubBackgroundDeferral(resource, reason)
 	return nil, &AdmissionDeferredError{
 		Resource: resource, Delay: wait, Changed: changed,
-		TrackerChanged: a.principal.tracker.Changed(), Reason: reason,
+		TrackerChanged: trackerChanged, Reason: reason,
 	}
 }
 
@@ -252,6 +253,7 @@ func (a *RateAdmission) acquireBackground(ctx context.Context, resource Resource
 	state := a.resourceState(resource)
 	deferralRecorded := false
 	for {
+		trackerChanged := a.principal.tracker.Changed()
 		decision := a.snapshot(resource, time.Now())
 		wait := a.principal.tracker.BackgroundWaitDuration(resource)
 		a.principal.mu.Lock()
@@ -291,7 +293,7 @@ func (a *RateAdmission) acquireBackground(ctx context.Context, resource Resource
 					zap.Duration("wait", wait))
 			}
 		}
-		if err := waitForAdmissionChange(ctx, wait, a.principal.tracker.Changed(), stateChanged); err != nil {
+		if err := waitForAdmissionChange(ctx, wait, trackerChanged, stateChanged); err != nil {
 			return nil, err
 		}
 	}
@@ -299,11 +301,12 @@ func (a *RateAdmission) acquireBackground(ctx context.Context, resource Resource
 
 func (a *RateAdmission) waitForProviderWindow(ctx context.Context, resource Resource) (func(), error) {
 	for {
+		trackerChanged := a.principal.tracker.Changed()
 		wait := a.principal.tracker.WaitDuration(resource)
 		if wait <= 0 {
 			return func() {}, nil
 		}
-		if err := waitForAdmissionChange(ctx, wait, a.principal.tracker.Changed(), nil); err != nil {
+		if err := waitForAdmissionChange(ctx, wait, trackerChanged, nil); err != nil {
 			return nil, err
 		}
 	}

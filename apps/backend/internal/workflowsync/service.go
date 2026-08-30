@@ -55,8 +55,9 @@ type GitLabClientProvider interface {
 // interfaces above, so drift in either package's workspace-routed methods
 // breaks the build rather than surfacing only at DI-wiring time.
 var (
-	_ GitHubClientProvider = (*github.Service)(nil)
-	_ GitLabClientProvider = (*gitlab.Service)(nil)
+	_                      GitHubClientProvider = (*github.Service)(nil)
+	_                      GitLabClientProvider = (*gitlab.Service)(nil)
+	errAutomaticSyncNotDue                      = errors.New("automatic workflow sync is no longer due")
 )
 
 // dirEntry is a provider-neutral directory listing entry. It exists only to
@@ -245,20 +246,17 @@ func (s *Service) syncWorkspace(
 	if cfg == nil {
 		return nil, ErrNotConfigured
 	}
+	if !s.shouldRunAutomaticSync(cfg, mode) {
+		return nil, errAutomaticSyncNotDue
+	}
 	wasRecovering := cfg.ConsecutiveFailures > 0 || cfg.PollSuspended
 	previousFailureClass := cfg.LastErrorClass
 	if mode == syncManual {
-		if err := s.store.ResetRecoveryState(ctx, workspaceID, s.now().UTC()); err != nil {
+		if err := s.prepareManualSync(ctx, workspaceID, cfg); err != nil {
 			return nil, err
 		}
-		cfg.ConsecutiveFailures = 0
-		cfg.NextAttemptAt = nil
-		cfg.PollSuspended = false
-		cfg.PollSuspensionReason = ""
 	}
-	if mode == syncAutomatic && cfg.Provider == ProviderGitHub {
-		ctx = github.WithGitHubWorkClass(ctx, github.WorkClassBackground)
-	}
+	ctx = syncContext(ctx, cfg, mode)
 
 	files, err := s.fetchFiles(ctx, cfg)
 	if err != nil {
@@ -516,6 +514,10 @@ func (s *Service) runAutomaticJob(ctx context.Context, job automaticJob) automat
 		github.WithGitHubWorkClass(ctx, github.WorkClassBackground),
 	)
 	_, err := s.syncWorkspace(jobCtx, job.workspaceID, syncAutomatic)
+	if errors.Is(err, errAutomaticSyncNotDue) {
+		s.finishAutomaticJob(job.workspaceID)
+		return automaticJobResult{}
+	}
 	var deferred *github.AdmissionDeferredError
 	if errors.As(err, &deferred) {
 		return automaticJobResult{
@@ -547,6 +549,31 @@ func (s *Service) waitAutomaticSyncs() {
 	if pool != nil {
 		pool.stop()
 	}
+}
+
+func (s *Service) prepareManualSync(ctx context.Context, workspaceID string, cfg *Config) error {
+	if err := s.store.ResetRecoveryState(ctx, workspaceID, s.now().UTC()); err != nil {
+		return err
+	}
+	cfg.ConsecutiveFailures = 0
+	cfg.NextAttemptAt = nil
+	cfg.PollSuspended = false
+	cfg.PollSuspensionReason = ""
+	return nil
+}
+
+func syncContext(ctx context.Context, cfg *Config, mode syncMode) context.Context {
+	if mode == syncAutomatic && cfg.Provider == ProviderGitHub {
+		return github.WithGitHubWorkClass(ctx, github.WorkClassBackground)
+	}
+	return ctx
+}
+
+func (s *Service) shouldRunAutomaticSync(cfg *Config, mode syncMode) bool {
+	if mode != syncAutomatic {
+		return true
+	}
+	return isSyncDue(cfg, s.now().UTC())
 }
 
 func isSyncDue(cfg *Config, now time.Time) bool {

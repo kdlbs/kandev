@@ -117,7 +117,7 @@ func (p *Poller) Start(ctx context.Context) {
 	}
 	p.started = true
 	ctx, p.cancel = context.WithCancel(ctx)
-	ctx = WithGitHubWorkClass(ctx, WorkClassBackground)
+	ctx = pollerContext(ctx)
 
 	p.wg.Add(3) //nolint:mnd
 	go p.prMonitorLoop(ctx)
@@ -125,6 +125,12 @@ func (p *Poller) Start(ctx context.Context) {
 	go p.issueWatchLoop(ctx)
 
 	p.logger.Info("GitHub poller started")
+}
+
+func pollerContext(ctx context.Context) context.Context {
+	return WithNonBlockingGitHubAdmission(
+		WithGitHubWorkClass(ctx, WorkClassBackground),
+	)
 }
 
 // Stop cancels the polling loops and waits for them to finish.

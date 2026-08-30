@@ -113,6 +113,24 @@ func (c *GHClient) inspectRateStderr(args []string, stderr string) *GitHubAPIErr
 	}
 }
 
+func inspectAuthStderr(args []string, stderr string) *GitHubAPIError {
+	lower := strings.ToLower(stderr)
+	status := 0
+	switch {
+	case strings.Contains(lower, "http 401"), strings.Contains(lower, "401 unauthorized"), strings.Contains(lower, "status: 401"):
+		status = http.StatusUnauthorized
+	case strings.Contains(lower, "http 403"), strings.Contains(lower, "403 forbidden"), strings.Contains(lower, "status: 403"):
+		status = http.StatusForbidden
+	}
+	if status == 0 || ghStderrIndicatesRateLimit(stderr) {
+		return nil
+	}
+	return &GitHubAPIError{
+		StatusCode: status, Endpoint: firstArg(args), Body: stderr,
+		FailureKind: FailureInvalidCredentials, Resource: resourceForGHArgs(args),
+	}
+}
+
 // resourceForGHArgs maps a `gh` argv to the rate-limit bucket the call hits.
 // Exposed at package scope so the table-driven test can pin every branch.
 func resourceForGHArgs(args []string) Resource {
@@ -1308,6 +1326,9 @@ func (c *GHClient) runGH(ctx context.Context, stdin []byte, args ...string) (str
 		// which loses both classifier signals that pre-fix code relied on.
 		if execCtxErr != nil && (errors.Is(execCtxErr, context.DeadlineExceeded) || errors.Is(execCtxErr, context.Canceled)) {
 			return stdout.String(), fmt.Errorf("gh %s: %w", firstArg(args), execCtxErr)
+		}
+		if apiErr := inspectAuthStderr(args, stderr.String()); apiErr != nil {
+			return stdout.String(), fmt.Errorf("gh %s: %w", firstArg(args), apiErr)
 		}
 		if apiErr := c.inspectRateStderr(args, stderr.String()); apiErr != nil {
 			return stdout.String(), fmt.Errorf("gh %s: %w", firstArg(args), apiErr)

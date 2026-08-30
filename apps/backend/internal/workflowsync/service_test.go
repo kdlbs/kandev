@@ -296,6 +296,19 @@ func TestSyncDueConfigs_SkipsPollingDisabled(t *testing.T) {
 	assert.Len(t, applier.calls, 1)
 }
 
+func TestRunAutomaticJob_RechecksCurrentDueStateBeforeFetching(t *testing.T) {
+	svc, _ := setupTestService(t, seededMockClient())
+	disabled := false
+	_, err := svc.SetConfigForWorkspace(context.Background(), "ws-1", &SetConfigRequest{
+		RepoOwner: "acme", RepoName: "flows", PollEnabled: &disabled,
+	})
+	require.NoError(t, err)
+
+	result := svc.runAutomaticJob(context.Background(), automaticJob{workspaceID: "ws-1"})
+	assert.Nil(t, result.wait)
+	assert.Nil(t, result.discard)
+}
+
 func TestIsSyncDueSkipsSuspendedAndFutureBackoff(t *testing.T) {
 	now := time.Date(2026, 8, 29, 7, 0, 0, 0, time.UTC)
 	cfg := &Config{PollEnabled: true, IntervalSeconds: 60}
