@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -123,6 +124,8 @@ type Server struct {
 	pluginToolsReady    bool
 }
 
+type mcpAttachmentAttemptContextKey struct{}
+
 // New creates a new MCP server for agentctl.
 // port is the HTTP server port used to build the SSE base URL (http://localhost:<port>).
 // mcpLogFile is an optional file path for MCP debug logging; pass "" to disable.
@@ -143,6 +146,7 @@ func New(backend BackendClient, sessionID, taskID string, port int, log *logger.
 	// Create Streamable HTTP server for Codex
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
 		server.WithEndpointPath("/mcp"),
+		server.WithHTTPContextFunc(s.mcpHTTPContext),
 	)
 
 	return s
@@ -162,6 +166,7 @@ func NewWithProfile(backend BackendClient, sessionID, taskID string, port int, l
 	)
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
 		server.WithEndpointPath("/mcp"),
+		server.WithHTTPContextFunc(s.mcpHTTPContext),
 	)
 	return s
 }
@@ -185,6 +190,7 @@ func NewExternal(backend BackendClient, log *logger.Logger, mcpLogFile string) *
 	// Streamable HTTP transport handler — mounted at /mcp on the backend.
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
 		server.WithEndpointPath("/mcp"),
+		server.WithHTTPContextFunc(s.mcpHTTPContext),
 	)
 
 	return s
@@ -300,6 +306,22 @@ func (s *Server) SetAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
 	s.attachmentAttempt = attempt
 }
 
+// mcpHTTPContext snapshots the backend-owned attachment attempt before the MCP
+// transport dispatches a request. Modern requests are stateless, so their
+// hooks must retain the attempt that accepted the request even if a later
+// lifecycle operation rolls the server over to a new attempt.
+func (s *Server) mcpHTTPContext(ctx context.Context, _ *http.Request) context.Context {
+	s.attachmentMu.RLock()
+	attempt := s.attachmentAttempt
+	s.attachmentMu.RUnlock()
+	return context.WithValue(ctx, mcpAttachmentAttemptContextKey{}, attempt)
+}
+
+func mcpAttachmentAttemptFromContext(ctx context.Context) (streams.MCPAttachmentAttempt, bool) {
+	attempt, ok := ctx.Value(mcpAttachmentAttemptContextKey{}).(streams.MCPAttachmentAttempt)
+	return attempt, ok
+}
+
 func (s *Server) observeMCPConnection(connectionID string, kind streams.MCPAttachmentEvidenceKind, toolCount int, summary string) {
 	s.observeMCPConnectionWithTools(connectionID, kind, toolCount, summary, nil)
 }
@@ -381,7 +403,7 @@ func (s *Server) observeMCPRequestWithTools(
 		s.attachmentMu.RLock()
 		attempt, ok := s.attachmentAttempts[connectionID]
 		reporter := s.attachmentReporter
-		if !ok && connectionID != "" {
+		if !ok && connectionID != "" && kind == streams.MCPAttachmentEvidenceInitializeObserved {
 			// Streamable HTTP registers a legacy POST initialize session after
 			// handling the request. Attribute its initialize evidence to the
 			// current attempt until the registration hook records the connection.
@@ -396,8 +418,11 @@ func (s *Server) observeMCPRequestWithTools(
 		return
 	}
 
+	attempt, hasSnapshot := mcpAttachmentAttemptFromContext(ctx)
 	s.attachmentMu.RLock()
-	attempt := s.attachmentAttempt
+	if !hasSnapshot {
+		attempt = s.attachmentAttempt
+	}
 	reporter := s.attachmentReporter
 	s.attachmentMu.RUnlock()
 	if reporter == nil || attempt.AttemptID == "" {

@@ -417,7 +417,9 @@ func (s *MCPServerAttachment) applyInitializeObserved(when time.Time) {
 }
 
 func (s *MCPServerAttachment) applyProtocolAccepted(when time.Time) {
-	s.ConnectedAt = &when
+	if s.ConnectedAt == nil {
+		s.ConnectedAt = &when
+	}
 	if s.Status != MCPAttachmentStatusActive && s.Status != MCPAttachmentStatusFailed {
 		s.Status = MCPAttachmentStatusConnected
 	}

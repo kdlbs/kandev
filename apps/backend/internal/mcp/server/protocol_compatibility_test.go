@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/mark3labs/mcp-go/mcp"
+	mcpserver "github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -215,25 +216,40 @@ func TestMCPProtocolCompatibility_LegacyDeleteKeepsConnectionOwnedEvidence(t *te
 func TestMCPProtocolCompatibility_ModernAndLegacyRequestsCanRunConcurrently(t *testing.T) {
 	s := newProtocolCompatibilityServer(t)
 
-	var waitGroup sync.WaitGroup
-	waitGroup.Add(2)
+	modernStarted := make(chan struct{})
+	releaseModern := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseModern) }) }
+	defer release()
+	s.mcpServer.GetHooks().AddBeforeListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest) {
+		if !mcpserver.IsModernRequest(ctx) {
+			return
+		}
+		close(modernStarted)
+		<-releaseModern
+	})
+
 	modernResponse := make(chan *httptest.ResponseRecorder, 1)
 	legacyResponse := make(chan *httptest.ResponseRecorder, 1)
 
 	go func() {
-		defer waitGroup.Done()
 		modernResponse <- postMCPRequest(t, s.httpServer, map[string]any{
 			"jsonrpc": "2.0",
 			"id":      20,
-			"method":  "server/discover",
+			"method":  "tools/list",
 			"params":  map[string]any{"_meta": modernRequestMeta()},
 		}, map[string]string{
 			protocolVersionHeader: modernProtocolVersion,
-			methodHeader:          "server/discover",
+			methodHeader:          "tools/list",
 		})
 	}()
+	select {
+	case <-modernStarted:
+	case <-time.After(time.Second):
+		t.Fatal("modern request did not reach the deterministic overlap barrier")
+	}
+
 	go func() {
-		defer waitGroup.Done()
 		legacyResponse <- postMCPRequest(t, s.httpServer, map[string]any{
 			"jsonrpc": "2.0",
 			"id":      21,
@@ -248,13 +264,123 @@ func TestMCPProtocolCompatibility_ModernAndLegacyRequestsCanRunConcurrently(t *t
 		})
 	}()
 
-	waitGroup.Wait()
-	modern := <-modernResponse
-	legacy := <-legacyResponse
+	var legacy *httptest.ResponseRecorder
+	select {
+	case legacy = <-legacyResponse:
+	case <-time.After(time.Second):
+		t.Fatal("legacy request did not complete while modern request was blocked")
+	}
+	release()
+
+	var modern *httptest.ResponseRecorder
+	select {
+	case modern = <-modernResponse:
+	case <-time.After(time.Second):
+		t.Fatal("modern request did not complete after the overlap barrier was released")
+	}
 	require.Equal(t, http.StatusOK, modern.Code)
 	require.Equal(t, http.StatusOK, legacy.Code)
-	require.NotContains(t, decodeProtocolResponse(t, modern), "error")
-	require.NotContains(t, decodeProtocolResponse(t, legacy), "error")
+	modernMessage := decodeProtocolResponse(t, modern)
+	require.NotContains(t, modernMessage, "error")
+	modernResult, ok := modernMessage["result"].(map[string]any)
+	require.True(t, ok, "modern tools/list response = %v", modernMessage)
+	assert.Equal(t, float64(0), modernResult["ttlMs"])
+	assert.Equal(t, string(mcp.CacheScopePrivate), modernResult["cacheScope"])
+
+	legacyMessage := decodeProtocolResponse(t, legacy)
+	require.NotContains(t, legacyMessage, "error")
+	legacyResult, ok := legacyMessage["result"].(map[string]any)
+	require.True(t, ok, "legacy initialize response = %v", legacyMessage)
+	assert.Equal(t, legacyProtocolVersion, legacyResult["protocolVersion"])
+}
+
+func TestMCPProtocolCompatibility_ModernEvidenceUsesRequestAttemptSnapshotAcrossRollover(t *testing.T) {
+	s := newProtocolCompatibilityServer(t)
+	s.SetAttachmentAttempt(streams.MCPAttachmentAttempt{AttemptID: "attempt-before-rollover"})
+	events := make(chan streams.MCPAttachmentEvidence, 4)
+	s.SetAttachmentReporter(func(evidence streams.MCPAttachmentEvidence) { events <- evidence })
+
+	modernStarted := make(chan struct{})
+	releaseModern := make(chan struct{})
+	s.mcpServer.GetHooks().AddBeforeListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest) {
+		if !mcpserver.IsModernRequest(ctx) {
+			return
+		}
+		close(modernStarted)
+		<-releaseModern
+	})
+
+	responseCh := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		responseCh <- postMCPRequest(t, s.httpServer, map[string]any{
+			"jsonrpc": "2.0",
+			"id":      22,
+			"method":  "tools/list",
+			"params":  map[string]any{"_meta": modernRequestMeta()},
+		}, map[string]string{
+			protocolVersionHeader: modernProtocolVersion,
+			methodHeader:          "tools/list",
+		})
+	}()
+
+	select {
+	case <-modernStarted:
+	case <-time.After(time.Second):
+		close(releaseModern)
+		t.Fatal("modern request did not reach the rollover barrier")
+	}
+	s.SetAttachmentAttempt(streams.MCPAttachmentAttempt{AttemptID: "attempt-after-rollover"})
+	close(releaseModern)
+
+	response := <-responseCh
+	require.Equal(t, http.StatusOK, response.Code)
+	accepted := nextMCPObservation(t, events)
+	list := nextMCPObservation(t, events)
+	assert.Equal(t, streams.MCPAttachmentEvidenceProtocolAccepted, accepted.Kind)
+	assert.Equal(t, "attempt-before-rollover", accepted.AttemptID)
+	assert.Equal(t, streams.MCPAttachmentEvidenceToolsListObserved, list.Kind)
+	assert.Equal(t, "attempt-before-rollover", list.AttemptID)
+}
+
+func TestMCPProtocolCompatibility_UnregisteredLegacyRequestDoesNotUseAttemptFallback(t *testing.T) {
+	s := newProtocolCompatibilityServer(t)
+	s.SetAttachmentAttempt(streams.MCPAttachmentAttempt{AttemptID: "attempt-current"})
+	initializeResponse := postMCPRequest(t, s.httpServer, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      23,
+		"method":  "initialize",
+		"params": map[string]any{
+			"protocolVersion": legacyProtocolVersion,
+			"capabilities":    map[string]any{},
+			"clientInfo":      map[string]any{"name": "legacy", "version": "1"},
+		},
+	}, map[string]string{protocolVersionHeader: legacyProtocolVersion})
+	require.Equal(t, http.StatusOK, initializeResponse.Code)
+	sessionID := initializeResponse.Header().Get("Mcp-Session-Id")
+	require.NotEmpty(t, sessionID)
+
+	events := make(chan streams.MCPAttachmentEvidence, 4)
+	s.SetAttachmentReporter(func(evidence streams.MCPAttachmentEvidence) { events <- evidence })
+	s.attachmentMu.Lock()
+	delete(s.attachmentAttempts, sessionID)
+	s.attachmentMu.Unlock()
+
+	response := postMCPRequest(t, s.httpServer, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      24,
+		"method":  "tools/list",
+		"params":  map[string]any{},
+	}, map[string]string{
+		protocolVersionHeader: legacyProtocolVersion,
+		"Mcp-Session-Id":      sessionID,
+	})
+	require.Equal(t, http.StatusOK, response.Code)
+
+	select {
+	case evidence := <-events:
+		t.Fatalf("unregistered legacy request emitted evidence: %+v", evidence)
+	case <-time.After(50 * time.Millisecond):
+	}
 }
 
 func TestMCPProtocolCompatibility_InvalidModernMetadataIsNotDowngradedToLegacy(t *testing.T) {

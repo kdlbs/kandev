@@ -84,5 +84,7 @@ work order and `plan.md` with the result.
 - Modern discovery, tools/list, and tools/call evidence uses the current attachment attempt and an empty connection ID.
 - Modern requests do not create connection-close evidence.
 - Legacy initialize evidence remains connection-owned. The v1 transport registers a legacy initialize session after handling the request, so initialization falls back to the current attempt until registration records the connection.
+- Modern request hooks snapshot the attachment attempt before dispatch, so rollover during an in-flight request cannot move its evidence to a successor attempt.
+- Legacy fallback is limited to initialize evidence, and `ConnectedAt` is retained from the first protocol acceptance.
 - Legacy DELETE cleanup still emits connection-close evidence, and existing initialize history remains valid.
-- Verification passed: `go test -race ./internal/agentctl/types/streams ./internal/mcp/server ./internal/agent/runtime/lifecycle` with 2,492 tests, plus the scoped diff check.
+- Verification passed: focused rollover, fallback-scope, and write-once tests, followed by `go test -race ./internal/agentctl/types/streams ./internal/mcp/server ./internal/agent/runtime/lifecycle` and the scoped diff check.
