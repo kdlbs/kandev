@@ -28,6 +28,15 @@ function stripMarkdown(text: string): string {
   );
 }
 
+function firstMeaningfulLine(text: string): string {
+  for (const line of text.split(/\r?\n/)) {
+    const plainText = stripMarkdown(line);
+    if (plainText) return plainText;
+  }
+
+  return "";
+}
+
 export const ThinkingMessage = memo(function ThinkingMessage({
   comment,
   worktreePath,
@@ -48,16 +57,25 @@ export const ThinkingMessage = memo(function ThinkingMessage({
   // Short = no newlines and less than 100 characters
   const isShort = !text.includes("\n") && text.length <= 100;
   const displayText = isShort ? stripMarkdown(text) : text;
+  const preview = isShort ? "" : firstMeaningfulLine(text);
 
   return (
     <ExpandableRow
       icon={<IconBrain className="h-4 w-4 text-muted-foreground" />}
       header={
-        <div className="flex items-center gap-2 text-xs">
-          <span className="inline-flex items-center gap-1.5">
+        <div className="flex min-w-0 items-center gap-2 text-xs">
+          <span className="inline-flex shrink-0 items-center gap-1.5">
             <span className="font-mono text-xs text-muted-foreground">{t("task:thinking")}</span>
             {isShort && <span className="text-xs text-muted-foreground/80">{displayText}</span>}
           </span>
+          {!isShort && preview && (
+            <span
+              data-testid="thinking-message-preview"
+              className="min-w-0 flex-1 truncate text-xs text-muted-foreground/80"
+            >
+              {preview}
+            </span>
+          )}
         </div>
       }
       hasExpandableContent={!isShort && !!text}

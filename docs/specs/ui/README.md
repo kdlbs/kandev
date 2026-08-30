@@ -11,24 +11,20 @@ owners:
 
 ## Purpose
 
-The UI system owns web presentation.
+UI owns web presentation and reusable interaction contracts.
 
 ## Ownership
 
-This system owns navigation, settings, boards, task/review surfaces,
-walkthroughs, chat controls, visual feedback, and responsive interaction
-contracts without backend-state ownership.
-
-Controls for provider/task state remain owned by that system.
-The UI system owns reusable contracts.
+UI owns navigation, settings, boards, task/review surfaces, walkthroughs, chat
+controls, and visual feedback. Provider and task state remain with their owning
+systems.
 
 ## Exclusions
 
-- Durable task behavior belongs to the [task system](../tasks/README.md).
-- Agent profile behavior belongs to the [agent system](../agents/README.md).
-- Plugin contribution contracts belong to the [plugin system](../plugins/README.md).
-- Provider-specific state and actions belong to the
-  [integration system](../integrations/README.md).
+- Durable task behavior: [Tasks](../tasks/README.md).
+- Agent profile behavior: [Agents](../agents/README.md).
+- Plugin contribution contracts: [Plugins](../plugins/README.md).
+- Provider-specific state and actions: [Integrations](../integrations/README.md).
 
 ## Specification map
 
@@ -137,6 +133,7 @@ The UI system owns reusable contracts.
 - [Task Workspace Content Search](requirements/task-workspace-content-search.md)
 - [Terminal close feedback](requirements/terminal-close-feedback.md)
 - [Terminal Rendering](requirements/terminal-rendering.md)
+- [Thinking Message Preview](requirements/thinking-message-preview.md)
 - [Transcript Auto-scroll Stability](requirements/transcript-auto-scroll.md)
 - [Transcript Navigation Settings](requirements/transcript-navigation-settings.md)
 - [Voice Mode In Task Behavior](requirements/voice-mode-task-behavior.md)
@@ -179,6 +176,7 @@ The UI system owns reusable contracts.
 - [Task Agent Tab Reconciliation](system-design/task-agent-tab-reconciliation.md)
 - [Command-panel Sidebar Task Reveal](system-design/command-panel-sidebar-task-reveal.md)
 - [Terminal Rendering](system-design/terminal-rendering.md)
+- [Thinking Message Preview](system-design/thinking-message-preview.md)
 - [Task Transcript History Visibility](system-design/task-prompt-transcript-visibility.md)
 - [Transcript Auto-scroll Stability](system-design/transcript-auto-scroll.md)
 

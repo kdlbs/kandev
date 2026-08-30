@@ -123,4 +123,58 @@ test.describe("mobile: Markdown table wrapping", () => {
       ),
     ).toBe(true);
   });
+
+  test("thinking preview stays visible and contained before expansion", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const firstLine =
+      "First meaningful reasoning summary stays visible while this long subject is truncated to the available mobile row width";
+    const laterLine = "Later reasoning detail remains available after expansion";
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile Thinking Message Preview",
+      seedData.agentProfileId,
+      {
+        description: `e2e:thinking("${["", "## ", `**${firstLine}**`, "", laterLine].join("\\n")}")`,
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    const chat = session.activeChat();
+    const preview = chat.getByTestId("thinking-message-preview");
+    await expect(preview).toBeVisible({ timeout: 30_000 });
+    await expect(preview).toHaveText(firstLine, { exact: true });
+    await expect(chat.getByText(laterLine, { exact: true })).toHaveCount(0);
+
+    const previewMetrics = await preview.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      clientHeight: element.clientHeight,
+      lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
+    }));
+    expect(previewMetrics.clientWidth).toBeGreaterThan(0);
+    expect(previewMetrics.scrollWidth).toBeGreaterThan(previewMetrics.clientWidth);
+    expect(previewMetrics.clientHeight).toBeLessThanOrEqual(previewMetrics.lineHeight + 1);
+    expect(await chat.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+      true,
+    );
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+      ),
+    ).toBe(true);
+
+    await chat.getByText("Thinking", { exact: true }).tap();
+    await expect(chat.getByText(laterLine, { exact: true })).toBeVisible();
+  });
 });
