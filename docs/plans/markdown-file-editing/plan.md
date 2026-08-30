@@ -75,24 +75,24 @@ file surfaces before proving both flows with production-build E2E tests.
 
 ## Tests
 
-| Acceptance criteria | Evidence |
-| --- | --- |
-| `AC-UI-MARKDOWN-FILE-EDITING-001.2`, `.3`, `.6` | `components/editors/markdown/hybrid-markdown-editor.test.tsx` and `markdown-source-preservation.test.ts` |
-| `AC-UI-MARKDOWN-FILE-EDITING-001.1`, `.4`, `.5`, `.7` | `components/task/markdown-file-editor.test.tsx` |
-| `AC-UI-MARKDOWN-FILE-EDITING-002.1`, `.2` | Existing `components/task/markdown-preview-content*.test.tsx` plus coordinator regression cases |
-| `AC-UI-MARKDOWN-FILE-EDITING-002.3`, `.4`, `.5`, `.8` | `components/task/markdown-file-editor.test.tsx` and existing file-state tests |
-| `AC-UI-MARKDOWN-FILE-EDITING-002.6`, `.7` | Hybrid adapter comment and baseline cases |
-| `AC-UI-MARKDOWN-FILE-EDITING-003.1`, `.5` | Desktop mode-control component tests |
-| `AC-UI-MARKDOWN-FILE-EDITING-003.2`, `.3`, `.4` | `components/task/mobile/mobile-file-viewer-panel.test.tsx` |
-| `AC-UI-MARKDOWN-FILE-EDITING-003.6` | Desktop and mobile Playwright flows below |
+| Acceptance criteria                                   | Evidence                                                                                                 |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `AC-UI-MARKDOWN-FILE-EDITING-001.2`, `.3`, `.6`       | `components/editors/markdown/hybrid-markdown-editor.test.tsx` and `markdown-source-preservation.test.ts` |
+| `AC-UI-MARKDOWN-FILE-EDITING-001.1`, `.4`, `.5`, `.7` | `components/task/markdown-file-editor.test.tsx`                                                          |
+| `AC-UI-MARKDOWN-FILE-EDITING-002.1`, `.2`             | Existing `components/task/markdown-preview-content*.test.tsx` plus coordinator regression cases          |
+| `AC-UI-MARKDOWN-FILE-EDITING-002.3`, `.4`, `.5`, `.8` | `components/task/markdown-file-editor.test.tsx` and existing file-state tests                            |
+| `AC-UI-MARKDOWN-FILE-EDITING-002.6`, `.7`             | Hybrid adapter comment and baseline cases                                                                |
+| `AC-UI-MARKDOWN-FILE-EDITING-003.1`, `.5`             | Desktop mode-control component tests                                                                     |
+| `AC-UI-MARKDOWN-FILE-EDITING-003.2`, `.3`, `.4`       | `components/task/mobile/mobile-file-viewer-panel.test.tsx`                                               |
+| `AC-UI-MARKDOWN-FILE-EDITING-003.6`                   | Desktop and mobile Playwright flows below                                                                |
 
 ## E2E tests
 
-| Flow | Acceptance criteria | Playwright evidence |
-| --- | --- | --- |
-| Desktop open, edit, save, reload, Preview, Source, comments, and restored mode | `AC-UI-MARKDOWN-FILE-EDITING-001.1` through `.5`, `002.3` through `.8`, `003.1`, `.5`, `.6` | `apps/web/e2e/tests/task/markdown-file-editing.spec.ts` on `chromium` |
-| Unsafe preview and unsupported-source fallback | `AC-UI-MARKDOWN-FILE-EDITING-001.6`, `.7`, `002.1`, `.2`, `.8` | New cases plus existing `apps/web/e2e/tests/chat/markdown-preview.spec.ts` |
-| Phone edit, save, reload, keyboard, controls, and overflow | `AC-UI-MARKDOWN-FILE-EDITING-003.2` through `.6` | `apps/web/e2e/tests/task/mobile-markdown-file-editing.spec.ts` on `mobile-chrome` |
+| Flow                                                                           | Acceptance criteria                                                                         | Playwright evidence                                                               |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Desktop open, edit, save, reload, Preview, Source, comments, and restored mode | `AC-UI-MARKDOWN-FILE-EDITING-001.1` through `.5`, `002.3` through `.8`, `003.1`, `.5`, `.6` | `apps/web/e2e/tests/task/markdown-file-editing.spec.ts` on `chromium`             |
+| Unsafe preview and unsupported-source fallback                                 | `AC-UI-MARKDOWN-FILE-EDITING-001.6`, `.7`, `002.1`, `.2`, `.8`                              | New cases plus existing `apps/web/e2e/tests/chat/markdown-preview.spec.ts`        |
+| Phone edit, save, reload, keyboard, controls, and overflow                     | `AC-UI-MARKDOWN-FILE-EDITING-003.2` through `.6`                                            | `apps/web/e2e/tests/task/mobile-markdown-file-editing.spec.ts` on `mobile-chrome` |
 
 ## Work orders
 
@@ -100,6 +100,7 @@ file surfaces before proving both flows with production-build E2E tests.
 - [x] [Task 02: Integrate Desktop Markdown Modes](task-02-desktop-markdown-modes.md)
 - [x] [Task 03: Add Mobile Markdown Editing](task-03-mobile-markdown-editing.md)
 - [x] [Task 04: Prove Markdown Editing End to End](task-04-markdown-editor-e2e.md)
+- [x] [Task 05: Polish Code and Table Editing](task-05-polish-code-and-table-editing.md)
 
 ## Verification results
 
@@ -110,6 +111,11 @@ file surfaces before proving both flows with production-build E2E tests.
 - Web i18n checks passed with complete five-locale catalogs and no new copy violations.
 - Focused web tests passed 3,264 tests with 4 skips.
 - Production-build E2E passed for desktop Chromium (2/2) and mobile-chrome (1/1). Existing desktop Markdown regression passed 8/8 and existing mobile file-viewer regression passed 9/9.
+- The code-and-table polish follow-up passed 14 focused adapter tests, web
+  typecheck, focused ESLint, i18n checks, specification lint, and the Vite
+  production build. Production-build E2E passed 4/4 desktop Chromium cases and
+  1/1 mobile-chrome case, including real syntax tokens, bordered tables,
+  source-preserving row and column edits, and mobile touch targets.
 
 ## Risks
 

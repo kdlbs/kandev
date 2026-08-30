@@ -81,6 +81,11 @@
   margin-top: 0.5em;
 }
 
+.kandev-hybrid-markdown-editor .md-block-active,
+.kandev-hybrid-markdown-editor .md-table-wrapper:has(> .md-table.md-block-active) {
+  border-radius: 2px;
+}
+
 /* Keep block-separating newlines in the editor's source mapping without
    painting the upstream return-arrow decoration at the end of active blocks. */
 .kandev-hybrid-markdown-editor :is(.md-ws-newline-glyph, .md-ws-blockbreak-glyph) {
@@ -191,7 +196,7 @@
 
 .kandev-hybrid-markdown-editor .md-table th,
 .kandev-hybrid-markdown-editor .md-table td {
-  border-color: var(--border);
+  border: 1px solid color-mix(in oklab, var(--border) 70%, var(--foreground));
   padding: 0.25rem 0.5rem;
   font-size: 13px;
   vertical-align: top;
@@ -220,6 +225,37 @@
   background: transparent;
 }
 
+.kandev-hybrid-markdown-editor .md-table.md-block-active td {
+  border-color: color-mix(in oklab, var(--border) 70%, var(--foreground));
+}
+
+.kandev-markdown-table-controls-host {
+  position: sticky;
+  z-index: 12;
+  top: 0.25rem;
+  left: 100%;
+  width: 0;
+  height: 0;
+  overflow: visible;
+}
+
+.kandev-markdown-table-controls {
+  display: flex;
+  width: max-content;
+  gap: 2px;
+  padding: 2px;
+  pointer-events: none;
+  background: color-mix(in oklab, var(--background) 90%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  box-shadow: var(--shadow-sm);
+  transform: translateX(calc(-100% - 0.25rem));
+}
+
+.kandev-markdown-table-control {
+  pointer-events: auto;
+}
+
 .kandev-hybrid-markdown-editor .md-selection-path {
   fill: color-mix(in oklab, var(--primary) 28%, transparent);
 }
@@ -239,5 +275,12 @@
 @media (max-width: 640px) {
   .kandev-hybrid-markdown-editor .md-editor-content {
     padding-inline: var(--md-editor-content-inline-start-padding) 1rem;
+  }
+}
+
+@media (pointer: coarse) {
+  .kandev-markdown-table-control {
+    width: 44px;
+    height: 44px;
   }
 }

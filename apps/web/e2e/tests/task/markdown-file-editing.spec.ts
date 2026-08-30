@@ -409,6 +409,72 @@ test.describe("Markdown file editing", () => {
     ).toHaveCount(1);
   });
 
+  test("highlights fenced code and edits bordered tables with source-preserving controls", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const fileName = `markdown-table-controls-${Date.now()}.md`;
+    const content = `# Code and table
+
+\`\`\`ts
+const ready = true;
+\`\`\`
+
+| Area | State |
+| --- | --- |
+| Preview | Ready |
+`;
+    const { session, filePath } = await seedMarkdownSession({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      fileName,
+      content,
+      taskTitle: "Markdown table controls",
+    });
+
+    await openFile(session, testPage, fileName);
+    const editor = testPage.getByTestId("markdown-file-editor");
+    const previewCell = testPage.getByTestId("markdown-preview").locator("td").first();
+    await expect(previewCell).toBeVisible();
+    expect(await previewCell.evaluate((cell) => getComputedStyle(cell).borderTopWidth)).toBe("1px");
+
+    await editor.getByTestId("markdown-mode-edit").click();
+    const hybrid = testPage.getByTestId("hybrid-markdown-editor");
+    const keyword = hybrid.locator(".md-code-block .tok-keyword", { hasText: "const" });
+    await expect(keyword).toBeVisible({ timeout: 15_000 });
+    await keyword.click();
+    await expect(hybrid.locator(".md-code-block")).toHaveClass(/md-block-active/);
+    await expect(keyword).toBeVisible();
+    const table = hybrid.locator(".md-table");
+    await table.locator("td").first().click();
+    await expect(table).toHaveClass(/md-block-active/);
+    expect(await table.evaluate((element) => getComputedStyle(element).borderRadius)).toBe("2px");
+    expect(
+      await table
+        .locator("td")
+        .first()
+        .evaluate((cell) => getComputedStyle(cell).borderTopWidth),
+    ).toBe("1px");
+
+    await testPage.getByRole("button", { name: "Add row below" }).click();
+    await testPage.getByRole("button", { name: "Add column right" }).click();
+    await editor.getByTestId("markdown-file-save").click();
+
+    await expect
+      .poll(() => fs.readFileSync(filePath, "utf8"), { timeout: 15_000 })
+      .toContain("| Area | State |  |");
+    expect(fs.readFileSync(filePath, "utf8")).toBe(
+      content.replace(
+        "| Area | State |\n| --- | --- |\n| Preview | Ready |\n",
+        "| Area | State |  |\n| --- | --- | --- |\n| Preview | Ready |  |\n|  |  |  |\n",
+      ),
+    );
+  });
+
   test("keeps MDX on the safe Preview and exact Source paths", async ({
     testPage,
     apiClient,

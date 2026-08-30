@@ -56,11 +56,11 @@ Primary references:
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
-| `REQ-UI-MARKDOWN-FILE-EDITING-001` | [Mode model](#mode-model), [Hybrid editor adapter](#hybrid-editor-adapter) |
+| Requirement                        | Design section                                                                                                                   |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `REQ-UI-MARKDOWN-FILE-EDITING-001` | [Mode model](#mode-model), [Hybrid editor adapter](#hybrid-editor-adapter)                                                       |
 | `REQ-UI-MARKDOWN-FILE-EDITING-002` | [Buffer and file lifecycle](#buffer-and-file-lifecycle), [Preview and integration contracts](#preview-and-integration-contracts) |
-| `REQ-UI-MARKDOWN-FILE-EDITING-003` | [Responsive interaction contract](#responsive-interaction-contract), [Validation strategy](#validation-strategy) |
+| `REQ-UI-MARKDOWN-FILE-EDITING-003` | [Responsive interaction contract](#responsive-interaction-contract), [Validation strategy](#validation-strategy)                 |
 
 ## Components and responsibilities
 
@@ -133,7 +133,7 @@ fallback, not a hidden recovery path.
 Replace the Boolean presentation flag with this UI type:
 
 ```ts
-type MarkdownFileMode = "preview" | "edit" | "source"
+type MarkdownFileMode = "preview" | "edit" | "source";
 ```
 
 Open-file records and restored file tabs store `markdownMode` explicitly. The
@@ -162,6 +162,20 @@ starts from the exact Source result.
 
 The adapter maps line and column positions to source offsets. It does not store
 rendered DOM positions in file or comment state.
+
+The adapter supplies the upstream editor with Kandev's existing Monaco Monarch
+runtime and a bounded set of bundled language grammars. The upstream
+incremental highlighter owns tokenization for supported fenced code blocks;
+Kandev's scoped theme maps those tokens to application colors. Unknown
+languages remain readable plain text.
+
+The upstream engine does not provide table-structure commands. Kandev therefore
+owns two narrow table actions at the adapter boundary: append row and append
+column. Each action locates the active table AST, constructs one source edit,
+records it in the adapter's local history, and places the selection in the new
+cell. The helper preserves line endings, leading and trailing pipe style, and
+all existing cell bytes. It never converts the table into another document
+model.
 
 ## Control flow
 
@@ -202,6 +216,12 @@ block-gap and block-break newlines. Their source spans remain in layout so
 source-offset mapping, selection geometry, and canonical line-ending bytes do
 not change.
 
+The same scoped theme gives active blocks a two-pixel radius. It restores a
+one-pixel themed border on every table cell in both active and inactive table
+states because the upstream active-table theme otherwise makes cell borders
+transparent. Preview continues to use the shared bordered Markdown table
+renderer.
+
 Unsupported blocks remain visible as editable source. Raw HTML never bypasses
 Kandev sanitization. Edit mode must not use arbitrary `innerHTML` for Markdown
 or Mermaid output. Links route through Kandev's existing task, file, and
@@ -226,6 +246,10 @@ the eye/code toggle. Preview is the initial mode, Edit is the prominent action,
 and Source remains available beside it. The existing toolbar continues to own
 Save, Delete, Reload, Comments, and external file actions.
 
+When a table is active, compact icon actions attach to the table itself for
+appending a row or column. They do not create a second file toolbar and do not
+cover editable cells.
+
 ### Phone
 
 The Files entry point opens one focused `100dvh` editor surface. Its fixed
@@ -236,6 +260,10 @@ Controls have at least 44-pixel touch targets. The header and editing surface
 respect safe-area insets. The body keeps enough keyboard clearance for the
 active line and selection handles. Wide tables keep their existing local
 horizontal scroller and do not widen the document.
+
+Table actions use the same icons and labels as desktop, but coarse-pointer hit
+areas expand to 44 pixels. They stay inside the table-local wrapper so the file
+surface retains one vertical scroll owner.
 
 The nearest implementation exemplar is the current `MobileFileViewerPanel`.
 It already owns file identity, back navigation, preview comments, and contained
@@ -289,6 +317,11 @@ emphasis, nested lists, task lists, tables, code fences, frontmatter, footnotes,
 math, raw HTML, links, images, comments, and unsupported syntax. Tests prove
 that focus, blur, mode changes, and external updates do not change untouched
 bytes.
+
+Focused adapter tests also prove supported-code tokenization is connected,
+table row and column edits preserve existing source bytes and line endings,
+table controls are keyboard accessible, and those edits participate in local
+undo history.
 
 Desktop Playwright tests open a Markdown file, edit rendered content, save,
 reload, check Preview output, use Source mode, and verify persisted mode. Mobile

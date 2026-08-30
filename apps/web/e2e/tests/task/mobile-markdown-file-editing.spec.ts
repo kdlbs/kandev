@@ -122,6 +122,17 @@ test.describe("Mobile Markdown file editing", () => {
     await editButton.tap();
     const hybrid = viewer.getByTestId("hybrid-markdown-editor");
     await expect(hybrid).toBeVisible({ timeout: 15_000 });
+    const table = hybrid.locator(".md-table");
+    await table.scrollIntoViewIfNeeded();
+    await table.locator("td").first().tap();
+    for (const name of ["Add row below", "Add column right"]) {
+      const tableAction = testPage.getByRole("button", { name });
+      await expect(tableAction).toBeVisible();
+      const box = await tableAction.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.width).toBeGreaterThanOrEqual(44);
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+    }
     const subheader = hybrid.locator("h4.md-heading", { hasText: "Mobile source markers" });
     await subheader.tap();
     await expect(

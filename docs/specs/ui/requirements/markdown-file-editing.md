@@ -67,6 +67,9 @@ change.
 - **AC-UI-MARKDOWN-FILE-EDITING-001.8:** When Edit mode reveals an active
   block, the system shall keep block-separating line endings in canonical
   source without showing return or newline glyphs after the block.
+- **AC-UI-MARKDOWN-FILE-EDITING-001.9:** Edit mode shall apply theme-aware
+  syntax highlighting to supported fenced code blocks while keeping code
+  fences and code content in canonical Markdown source.
 
 ### REQ-UI-MARKDOWN-FILE-EDITING-002: Safe file workflow integration
 
@@ -100,6 +103,10 @@ workflow, so that switching presentation does not risk my work.
   comparison baseline or duplicate edited blocks.
 - **AC-UI-MARKDOWN-FILE-EDITING-002.8:** When Edit mode fails to initialize or
   update, the system shall keep the current content and offer Source mode.
+- **AC-UI-MARKDOWN-FILE-EDITING-002.9:** Preview and Edit modes shall show
+  visible table cell boundaries. When an editable table is active, Edit mode
+  shall provide accessible actions to append a row and append a column through
+  undoable canonical-source edits.
 
 ### REQ-UI-MARKDOWN-FILE-EDITING-003: Responsive and accessible editing
 
@@ -124,6 +131,9 @@ the Files surface, so that I can complete the same task without a desktop.
   accessible names, keyboard operation, selected state, and focus feedback.
 - **AC-UI-MARKDOWN-FILE-EDITING-003.6:** Desktop and mobile automated tests
   shall prove editing, saving, reloading, previewing, and source fallback.
+- **AC-UI-MARKDOWN-FILE-EDITING-003.7:** Table editing actions shall use the
+  surrounding file-surface density on fine pointers and at least 44-pixel hit
+  targets on coarse pointers without adding another scroll owner.
 
 ## Out of scope
 

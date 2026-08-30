@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The faithful upstream lifecycle mock keeps its model, view, and controller state together.
@@ -14,8 +14,17 @@ const upstream = vi.hoisted(() => {
     models: MockEditorModel[];
     views: MockEditorView[];
     controllers: MockEditorController[];
+    histories: MockLocalHistoryStrategy[];
+    syntaxHighlighters: { dispose: ReturnType<typeof vi.fn> }[];
     failView: boolean;
-  } = { models: [], views: [], controllers: [], failView: false };
+  } = {
+    models: [],
+    views: [],
+    controllers: [],
+    histories: [],
+    syntaxHighlighters: [],
+    failView: false,
+  };
 
   function observable<T>(initial: T) {
     let value = initial;
@@ -43,6 +52,13 @@ const upstream = vi.hoisted(() => {
     readonlyMode = observable(false);
     baseline = observable<MockStringValue | undefined>(undefined);
     gutterMarkers = observable<readonly unknown[]>([]);
+    document = observable<{ content: readonly { kind: string; length: number }[] }>({
+      content: [],
+    });
+    activeBlock = observable<
+      { kind: string; length: number; headerRow?: { cells: unknown[] } } | undefined
+    >(undefined);
+    selection = observable<unknown>(undefined);
     listener: SourceEditListener | undefined;
     sourceEditSubscription = { dispose: vi.fn() };
     replaceSourceText = vi.fn((value: MockStringValue) => this.sourceText.set(value));
@@ -64,6 +80,10 @@ const upstream = vi.hoisted(() => {
         );
       this.sourceText.set(new MockStringValue(nextSource));
     }
+    applyEdit = vi.fn((edit: SourceEdit, selection?: unknown) => {
+      this.applyUserEdit(edit);
+      this.selection.set(selection);
+    });
     dispose = vi.fn();
 
     constructor() {
@@ -107,14 +127,39 @@ const upstream = vi.hoisted(() => {
     dispose = vi.fn();
   }
 
+  class MockLocalHistoryStrategy {
+    record = vi.fn((operation: () => void) => operation());
+
+    constructor(readonly model: MockEditorModel) {
+      state.histories.push(this);
+    }
+  }
+
+  class MockStringEdit {
+    static replace(replaceRange: { start: number; endExclusive: number }, newText: string) {
+      return { replacements: [{ replaceRange, newText }] };
+    }
+  }
+
+  class MockSelection {
+    static collapsed(offset: number) {
+      return { anchor: offset, active: offset };
+    }
+  }
+
   return {
     state,
     EditorModel: MockEditorModel,
     EditorView: MockEditorView,
     EditorController: MockEditorController,
-    LocalHistoryStrategy: class MockLocalHistoryStrategy {
-      constructor(readonly model: MockEditorModel) {}
-    },
+    LocalHistoryStrategy: MockLocalHistoryStrategy,
+    StringEdit: MockStringEdit,
+    Selection: MockSelection,
+    createDefaultMonacoSyntaxHighlighter: vi.fn(() => {
+      const highlighter = { dispose: vi.fn(), create: vi.fn() };
+      state.syntaxHighlighters.push(highlighter);
+      return highlighter;
+    }),
     StringValue: MockStringValue,
     OffsetRange: MockOffsetRange,
     CommentsModel: MockCommentsModel,
@@ -135,6 +180,8 @@ beforeEach(() => {
   upstream.state.models.length = 0;
   upstream.state.views.length = 0;
   upstream.state.controllers.length = 0;
+  upstream.state.histories.length = 0;
+  upstream.state.syntaxHighlighters.length = 0;
   upstream.state.failView = false;
 });
 
@@ -162,6 +209,9 @@ describe("HybridMarkdownEditor lifecycle", () => {
     expect((view.options as { classNames: string[] }).classNames).toEqual(
       expect.arrayContaining(["kandev-hybrid-markdown-editor"]),
     );
+    expect((view.options as { syntaxHighlighter: unknown }).syntaxHighlighter).toBe(
+      upstream.state.syntaxHighlighters[0],
+    );
     expect(view.element.parentElement).toBeTruthy();
     expect(screen.getByTestId("hybrid-markdown-editor").className).toContain(
       "kandev-hybrid-markdown-editor-root",
@@ -184,6 +234,7 @@ describe("HybridMarkdownEditor lifecycle", () => {
     expect(view.dispose).toHaveBeenCalledOnce();
     expect(controller.dispose).toHaveBeenCalledOnce();
     expect(model.sourceEditSubscription.dispose).toHaveBeenCalledOnce();
+    expect(upstream.state.syntaxHighlighters[0].dispose).toHaveBeenCalledOnce();
   });
 
   it("notifies the host after the editor applies an inline source edit", async () => {
@@ -221,6 +272,40 @@ describe("HybridMarkdownEditor lifecycle", () => {
 });
 
 describe("HybridMarkdownEditor contracts", () => {
+  it("appends rows and columns through local history when a table is active", async () => {
+    const source = "| A | B |\n| --- | --- |\n| 1 | 2 |\n";
+    const onChange = vi.fn();
+    render(<HybridMarkdownEditor content={source} readOnly={false} onChange={onChange} />);
+
+    const model = upstream.state.models[0];
+    const view = upstream.state.views[0];
+    const table = { kind: "table", length: source.length, headerRow: { cells: [{}, {}] } };
+    model.document.set({ content: [table] });
+    model.activeBlock.set(table);
+    view.element.innerHTML =
+      '<div class="md-table-wrapper"><table class="md-table md-block-active"></table></div>';
+
+    const addRow = await screen.findByRole("button", { name: "Add row below" });
+    fireEvent.click(addRow);
+
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith("| A | B |\n| --- | --- |\n| 1 | 2 |\n|  |  |\n"),
+    );
+    expect(upstream.state.histories[0].record).toHaveBeenCalledOnce();
+
+    model.sourceText.set(new upstream.StringValue(source));
+    model.document.set({ content: [table] });
+    model.activeBlock.set(table);
+    fireEvent.click(screen.getByRole("button", { name: "Add column right" }));
+
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith(
+        "| A | B |  |\n| --- | --- | --- |\n| 1 | 2 |  |\n",
+      ),
+    );
+    expect(upstream.state.histories[0].record).toHaveBeenCalledTimes(2);
+  });
+
   it("passes link, baseline, gutter, and comment contracts through the adapter", () => {
     const onOpenLink = vi.fn();
     const onComment = vi.fn();

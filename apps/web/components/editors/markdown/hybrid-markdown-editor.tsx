@@ -1,21 +1,42 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { Button } from "@kandev/ui/button";
+import { IconColumnInsertRight, IconRowInsertBottom } from "@tabler/icons-react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import {
   CommentModeController,
   CommentsModel,
   CommentsView,
+  createDefaultMonacoSyntaxHighlighter,
   EditorController,
   EditorModel,
   EditorView,
   LocalHistoryStrategy,
   OffsetRange,
+  Selection,
+  StringEdit,
   StringValue,
   type Comment,
   type CommentSubmission,
   type EditorViewOptions,
+  type IMonarchApi,
+  type MonacoSyntaxHighlighter,
+  type TableAstNode,
 } from "@vscode/markdown-editor";
+import { language as cssLanguage } from "monaco-editor/esm/vs/basic-languages/css/css.js";
+import { language as htmlLanguage } from "monaco-editor/esm/vs/basic-languages/html/html.js";
+import { language as javascriptLanguage } from "monaco-editor/esm/vs/basic-languages/javascript/javascript.js";
+import { language as pythonLanguage } from "monaco-editor/esm/vs/basic-languages/python/python.js";
+import { language as rustLanguage } from "monaco-editor/esm/vs/basic-languages/rust/rust.js";
+import { language as shellLanguage } from "monaco-editor/esm/vs/basic-languages/shell/shell.js";
+import { language as typescriptLanguage } from "monaco-editor/esm/vs/basic-languages/typescript/typescript.js";
+import { language as yamlLanguage } from "monaco-editor/esm/vs/basic-languages/yaml/yaml.js";
+import { compile } from "monaco-editor/esm/vs/editor/standalone/common/monarch/monarchCompile.js";
+import { MonarchTokenizer } from "monaco-editor/esm/vs/editor/standalone/common/monarch/monarchLexer.js";
 import "@vscode/markdown-editor/editor.css";
+import { appendMarkdownTableColumn, appendMarkdownTableRow } from "./markdown-table-edit";
 import "./hybrid-markdown-editor.css";
 
 export type MarkdownSourceRange = {
@@ -61,6 +82,8 @@ type EditorLifecycle = {
   commentsModel: CommentsModel;
   commentsView: CommentsView;
   commentMode: CommentModeController;
+  historyStrategy: LocalHistoryStrategy;
+  syntaxHighlighter: MonacoSyntaxHighlighter;
   sourceEditSubscription: { dispose: () => void };
 };
 
@@ -124,18 +147,124 @@ export function HybridMarkdownEditor({
     gutterMarkers,
     comments,
   });
+  const tableControlsHost = useActiveTableControlsHost(rootRef, !readOnly);
 
   return (
-    <div
-      ref={rootRef}
-      className={
-        className
-          ? `kandev-hybrid-markdown-editor-root ${className}`
-          : "kandev-hybrid-markdown-editor-root"
-      }
-      data-testid="hybrid-markdown-editor"
-    />
+    <>
+      <div
+        ref={rootRef}
+        className={
+          className
+            ? `kandev-hybrid-markdown-editor-root ${className}`
+            : "kandev-hybrid-markdown-editor-root"
+        }
+        data-testid="hybrid-markdown-editor"
+      />
+      <MarkdownTableControls host={tableControlsHost} lifecycleRef={lifecycleRef} />
+    </>
   );
+}
+
+function MarkdownTableControls({
+  host,
+  lifecycleRef,
+}: {
+  host: HTMLDivElement | null;
+  lifecycleRef: MutableRef<EditorLifecycle | null>;
+}) {
+  const { t } = useTranslation();
+  if (!host) return null;
+
+  return createPortal(
+    <div
+      className="kandev-markdown-table-controls"
+      role="toolbar"
+      aria-label={t("common:tableEditingActions")}
+    >
+      <Button
+        type="button"
+        variant="secondary"
+        size="icon-sm"
+        className="kandev-markdown-table-control cursor-pointer"
+        aria-label={t("common:addTableRowBelow")}
+        title={t("common:addTableRowBelow")}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          applyActiveTableEdit(lifecycleRef, "row");
+        }}
+      >
+        <IconRowInsertBottom />
+      </Button>
+      <Button
+        type="button"
+        variant="secondary"
+        size="icon-sm"
+        className="kandev-markdown-table-control cursor-pointer"
+        aria-label={t("common:addTableColumnRight")}
+        title={t("common:addTableColumnRight")}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          applyActiveTableEdit(lifecycleRef, "column");
+        }}
+      >
+        <IconColumnInsertRight />
+      </Button>
+    </div>,
+    host,
+  );
+}
+
+function useActiveTableControlsHost(
+  rootRef: MutableRef<HTMLDivElement | null>,
+  enabled: boolean,
+): HTMLDivElement | null {
+  const [host, setHost] = useState<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || !enabled) {
+      setHost(null);
+      return;
+    }
+
+    let currentHost: HTMLDivElement | null = null;
+    const reconcile = () => {
+      const activeTable = root.querySelector<HTMLElement>(".md-table.md-block-active");
+      const wrapper = activeTable?.closest<HTMLElement>(".md-table-wrapper");
+      if (!wrapper || !root.contains(wrapper)) {
+        currentHost?.remove();
+        currentHost = null;
+        setHost(null);
+        return;
+      }
+
+      const existing = Array.from(wrapper.children).find(
+        (child): child is HTMLDivElement =>
+          child instanceof HTMLDivElement && child.dataset.kandevTableControls === "true",
+      );
+      const nextHost = existing ?? document.createElement("div");
+      if (!existing) {
+        nextHost.dataset.kandevTableControls = "true";
+        nextHost.className = "kandev-markdown-table-controls-host";
+        wrapper.prepend(nextHost);
+      }
+      if (currentHost && currentHost !== nextHost) currentHost.remove();
+      currentHost = nextHost;
+      setHost((current) => (current === nextHost ? current : nextHost));
+    };
+
+    reconcile();
+    const observer = new MutationObserver(reconcile);
+    observer.observe(root, { attributes: true, childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      currentHost?.remove();
+    };
+  }, [enabled, rootRef]);
+
+  return host;
 }
 
 type LifecycleHookOptions = {
@@ -301,6 +430,8 @@ function createEditorLifecycle({
   let commentsModel: CommentsModel | undefined;
   let commentsView: CommentsView | undefined;
   let commentMode: CommentModeController | undefined;
+  let historyStrategy: LocalHistoryStrategy | undefined;
+  let syntaxHighlighter: MonacoSyntaxHighlighter | undefined;
   let sourceEditSubscription: { dispose: () => void } | undefined;
 
   try {
@@ -309,16 +440,19 @@ function createEditorLifecycle({
     setObservable(model.readonlyMode, readOnly);
     setObservable(model.baseline, baseline === undefined ? undefined : new StringValue(baseline));
     setObservable(model.gutterMarkers, toGutterMarkers(gutterMarkers));
+    syntaxHighlighter = createMarkdownSyntaxHighlighter();
 
     const viewOptions: EditorViewOptions = {
       classNames: ["kandev-hybrid-markdown-editor"],
       showReadonlyToggle: false,
       onOpenLink,
+      syntaxHighlighter,
     };
     view = new EditorView(model, viewOptions);
     root.replaceChildren(view.element);
+    historyStrategy = new LocalHistoryStrategy(model);
     controller = new EditorController(model, view, {
-      historyStrategy: new LocalHistoryStrategy(model),
+      historyStrategy,
     });
     commentsModel = new CommentsModel();
     commentsModel.set(toComments(comments));
@@ -335,6 +469,8 @@ function createEditorLifecycle({
       commentsModel,
       commentsView,
       commentMode,
+      historyStrategy,
+      syntaxHighlighter,
       sourceEditSubscription,
     };
   } catch (error) {
@@ -345,6 +481,8 @@ function createEditorLifecycle({
       commentsModel,
       commentsView,
       commentMode,
+      historyStrategy,
+      syntaxHighlighter,
       sourceEditSubscription,
     });
     throw error;
@@ -430,7 +568,65 @@ function disposeEditorParts(parts: Partial<EditorLifecycle>): void {
   parts.commentsView?.dispose();
   parts.controller?.dispose();
   parts.view?.dispose();
+  parts.syntaxHighlighter?.dispose();
   // The pinned package exposes EditorModel.dispose() at runtime, but its public
   // declaration does not include the lifecycle method.
   (parts.model as unknown as { dispose?: () => void } | undefined)?.dispose?.();
+}
+
+function createMarkdownSyntaxHighlighter(): MonacoSyntaxHighlighter {
+  return createDefaultMonacoSyntaxHighlighter(
+    { compile, MonarchTokenizer } as unknown as IMonarchApi,
+    {
+      typescript: typescriptLanguage,
+      javascript: javascriptLanguage,
+      css: cssLanguage,
+      html: htmlLanguage,
+      python: pythonLanguage,
+      rust: rustLanguage,
+      shell: shellLanguage,
+      yaml: yamlLanguage,
+    },
+  );
+}
+
+function applyActiveTableEdit(
+  lifecycleRef: MutableRef<EditorLifecycle | null>,
+  operation: "row" | "column",
+): void {
+  const lifecycle = lifecycleRef.current;
+  if (!lifecycle) return;
+  const activeBlock = lifecycle.model.activeBlock.get();
+  if (!activeBlock || activeBlock.kind !== "table") return;
+
+  const range = findActiveTableRange(lifecycle.model, activeBlock);
+  if (!range) return;
+  const source = lifecycle.model.sourceText.get().value;
+  const tableSource = source.slice(range.start, range.endExclusive);
+  const result =
+    operation === "row"
+      ? appendMarkdownTableRow(tableSource, activeBlock.headerRow?.cells.length ?? 0)
+      : appendMarkdownTableColumn(tableSource);
+  if (result.source === tableSource) return;
+
+  const edit = StringEdit.replace(new OffsetRange(range.start, range.endExclusive), result.source);
+  lifecycle.historyStrategy.record(
+    () =>
+      lifecycle.model.applyEdit(edit, Selection.collapsed(range.start + result.selectionOffset)),
+    edit,
+  );
+}
+
+function findActiveTableRange(
+  model: EditorModel,
+  activeTable: TableAstNode,
+): MarkdownSourceRange | undefined {
+  let start = 0;
+  for (const node of model.document.get().content) {
+    if (node === activeTable) {
+      return { start, endExclusive: start + node.length };
+    }
+    start += node.length;
+  }
+  return undefined;
 }
