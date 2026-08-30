@@ -118,7 +118,7 @@ export class PluginMarketplaceReleaseFixture {
     const manifest = fs.readFileSync(manifestPath, "utf8");
     fs.writeFileSync(
       manifestPath,
-      manifest.replace(`version: "${INITIAL_VERSION}"`, `version: "${version}"`),
+      manifest.replace(/^version:\s*[^\n]+$/m, `version: "${version}"`),
     );
     const checksumPath = path.join(stage, "checksums.txt");
     fs.rmSync(checksumPath, { force: true });
