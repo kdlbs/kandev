@@ -74,11 +74,11 @@ persisted while the session was inactive.
 ## Exact verification commands
 
 ```bash
-cd apps && pnpm --filter @kandev/web exec vitest run hooks/domains/session/message-window-reconciliation.test.ts
-cd apps/web && pnpm e2e:run --project chromium tests/chat/inactive-session-transcript-reconciliation.spec.ts
-cd apps && pnpm --filter @kandev/web run typecheck
-cd apps && pnpm --filter @kandev/web lint
-cd apps && pnpm --filter @kandev/web run i18n:ratchet
+(cd apps && pnpm --filter @kandev/web exec vitest run hooks/domains/session/message-window-reconciliation.test.ts)
+(cd apps/web && pnpm e2e:run --project chromium tests/chat/inactive-session-transcript-reconciliation.spec.ts)
+(cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm run lint)
+(cd apps/web && pnpm run i18n:ratchet)
 ```
 
 ## Results
@@ -90,8 +90,12 @@ cd apps && pnpm --filter @kandev/web run i18n:ratchet
 - GREEN implementation: `reconcileLatestMessageWindow` joins overlapping
   windows, replaces disjoint prefixes, preserves in-flight live additions, and
   returns the cursor for the actual contiguous boundary.
+- PR fixup: the deduplicated request owns the first cache baseline, timestamp
+  ordering preserves the backend's normalized-microsecond precision, and older
+  out-of-order live rows remain for the next page instead of preceding the
+  cursor boundary.
 - GREEN verification:
-  - `pnpm --filter @kandev/web exec vitest run hooks/domains/session/message-window-reconciliation.test.ts hooks/domains/session/use-session-messages.test.ts` (23 passed)
+  - `pnpm --filter @kandev/web exec vitest run hooks/domains/session/message-window-reconciliation.test.ts hooks/domains/session/use-session-messages.test.ts` (27 passed)
   - `pnpm e2e:run --project chromium tests/chat/inactive-session-transcript-reconciliation.spec.ts` (1 passed)
   - `pnpm e2e:run --project mobile-chrome tests/chat/mobile-message-pagination.spec.ts` (5 passed)
   - `pnpm run typecheck`

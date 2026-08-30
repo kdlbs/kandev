@@ -157,6 +157,10 @@ test.describe("inactive session transcript reconciliation", () => {
           .messages.bySession[sid]?.some((message) => message.content === marker);
       },
       { sid: receiverId, marker: RECENT_RECEIVER_MARKER },
+      {
+        message:
+          "RECENT_RECEIVER_MARKER should arrive in the inactive receiver cache via live delivery",
+      },
     );
     await restoreCachedMessages(testPage, receiverId, staleReceiverCache);
     await testPage.evaluate(() => window.dispatchEvent(new Event("focus")));
@@ -168,6 +172,9 @@ test.describe("inactive session transcript reconciliation", () => {
           .messages.bySession[sid]?.some((message) => message.content === marker);
       },
       { sid: receiverId, marker: RECENT_RECEIVER_MARKER },
+      {
+        message: "Foreground recovery should reconcile the receiver's latest message window",
+      },
     );
 
     const persisted = await apiClient.listSessionMessages(receiverId);
@@ -186,9 +193,11 @@ test.describe("inactive session transcript reconciliation", () => {
 
     await scrollToOldestLoadedEdge(list, RECENT_RECEIVER_MARKER);
 
-    const peerPrompt = chat.getByText(PEER_PROMPT_MARKER, { exact: true });
-    await expect(peerPrompt).toBeVisible({ timeout: 15_000 });
-    await expect(peerPrompt).toHaveCount(1);
-    await expect(chat.getByTestId("sender-task-badge")).toHaveCount(1);
+    const peerRow = chat.locator("[id^='msg-']").filter({ hasText: PEER_PROMPT_MARKER });
+    await expect(peerRow).toHaveCount(1);
+    await expect(peerRow.getByText(PEER_PROMPT_MARKER, { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(peerRow.getByTestId("sender-task-badge")).toHaveCount(1);
   });
 });

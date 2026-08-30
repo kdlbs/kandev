@@ -124,7 +124,8 @@ reconciliation is changed.
 
 Run the focused unit test first, then the production-build Chromium scenario.
 Finish with frontend type, lint, and localization ratchet checks. The backend is
-unchanged.
+unchanged. Use a subshell for each command so the documented paths are safe to
+copy as one shell block.
 
 ## Results
 
@@ -134,7 +135,11 @@ unchanged.
   fetch without changing backend, WebSocket, or store contracts.
 - Added unit coverage for all reconciliation branches and a two-session browser
   regression that reproduces the previously unreachable attributed prompt.
-- Verified the focused unit suite (23 tests), desktop Chromium regression,
+- The PR fixup stores the cache baseline on the deduplicated request, compares
+  RFC3339 timestamps at the backend's normalized-microsecond precision, and
+  excludes out-of-order older live rows from a disjoint window until pagination
+  reaches them.
+- Verified the focused unit suite (27 tests), desktop Chromium regression,
   existing mobile pagination suite (5 tests), frontend typecheck and lint,
   i18n ratchet, and specification lint.
 

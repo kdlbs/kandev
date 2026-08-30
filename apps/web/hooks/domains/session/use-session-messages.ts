@@ -139,6 +139,7 @@ type MessageListResponse = { messages: Message[]; has_more?: boolean; cursor?: s
 type InFlightMessageRequest = {
   readiness: Promise<void>;
   promise: Promise<MessageListResponse>;
+  cachedAtRequest: Message[];
 };
 
 const EMPTY_MESSAGES: Message[] = [];
@@ -175,9 +176,10 @@ function requestSessionMessages(
   client: NonNullable<ReturnType<typeof getWebSocketClient>>,
   sessionId: string,
   readiness: Promise<void>,
-): Promise<MessageListResponse> {
+  cachedAtRequest: Message[],
+): InFlightMessageRequest {
   const existing = inFlightMessageRequests.get(sessionId);
-  if (existing?.readiness === readiness) return existing.promise;
+  if (existing?.readiness === readiness) return existing;
 
   const requestParams = {
     session_id: sessionId,
@@ -185,7 +187,7 @@ function requestSessionMessages(
     sort: "desc" as const,
   };
   const promise = client.request<MessageListResponse>("message.list", requestParams, 10000);
-  const entry = { readiness, promise };
+  const entry = { readiness, promise, cachedAtRequest: [...cachedAtRequest] };
   inFlightMessageRequests.set(sessionId, entry);
   void promise.then(
     () => {
@@ -203,7 +205,7 @@ function requestSessionMessages(
       }, 0);
     },
   );
-  return promise;
+  return entry;
 }
 
 /** Fetch latest messages via WS and merge with any that arrived via live notifications. */
@@ -230,12 +232,16 @@ async function fetchAndStoreMessages(
   void ensureSessionTurnsLoaded(sessionId, store, { readiness });
   const cachedAtRequest = store.getState().messages.bySession[sessionId] ?? [];
   const seq = nextFetchSeq();
-  const response = await requestSessionMessages(client, sessionId, readiness);
+  // Keep the snapshot on the deduplicated request. Concurrent callers may
+  // observe different cache contents, but reconciliation must use the
+  // baseline captured by the caller that actually issued the network request.
+  const request = requestSessionMessages(client, sessionId, readiness, cachedAtRequest);
+  const response = await request.promise;
   if (isActive && !isActive()) return [];
   const fetched = [...(response.messages ?? [])].reverse();
   logFetchSummary(sessionId, fetched, response, INITIAL_FETCH_LIMIT);
   const { messages: merged, oldestCursor } = reconcileLatestMessageWindow({
-    cachedAtRequest,
+    cachedAtRequest: request.cachedAtRequest,
     cachedAtResponse: store.getState().messages.bySession[sessionId] ?? [],
     fetched,
   });
