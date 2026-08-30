@@ -321,9 +321,10 @@ func (a *RateAdmission) resourceState(resource Resource) *rateAdmissionState {
 }
 
 func (a *RateAdmission) releaseBackground(resource Resource, state *rateAdmissionState) {
+	pace := a.backgroundPace(resource)
 	a.principal.mu.Lock()
 	state.backgroundBusy = false
-	state.nextBackgroundAt = time.Now().Add(a.backgroundPace(resource))
+	state.nextBackgroundAt = time.Now().Add(pace)
 	a.signalStateLocked(state)
 	a.principal.mu.Unlock()
 }
