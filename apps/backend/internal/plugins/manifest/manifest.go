@@ -199,14 +199,26 @@ func (w Webhook) EffectiveMaxBodyBytes() int64 {
 type Action struct {
 	Key           string `yaml:"key" json:"key"`
 	ResourceScope string `yaml:"scope" json:"scope"`
+	Access        string `yaml:"access,omitempty" json:"access,omitempty"`
 	MaxBodyBytes  int    `yaml:"max_body_bytes" json:"max_body_bytes"`
 }
 
 const (
-	ActionScopeWorkspace  = "workspace"
-	ActionScopeTask       = "task"
-	ActionScopeRepository = "repository"
+	ActionScopeWorkspace      = "workspace"
+	ActionScopeTask           = "task"
+	ActionScopeRepository     = "repository"
+	ActionAccessAuthenticated = "authenticated"
+	ActionAccessAdmin         = "admin"
 )
+
+// EffectiveAccess preserves the original action contract: actions are
+// available to any authenticated caller unless a manifest opts into admin.
+func (a Action) EffectiveAccess() string {
+	if a.Access == "" {
+		return ActionAccessAuthenticated
+	}
+	return a.Access
+}
 
 // UnmarshalYAML accepts the frozen manifest field name (scope) and the
 // pre-release resource_scope spelling so stored local plugin records remain
@@ -216,6 +228,7 @@ func (a *Action) UnmarshalYAML(value *yaml.Node) error {
 		Key                 string `yaml:"key"`
 		Scope               string `yaml:"scope"`
 		LegacyResourceScope string `yaml:"resource_scope"`
+		Access              string `yaml:"access"`
 		MaxBodyBytes        int    `yaml:"max_body_bytes"`
 	}
 	if err := value.Decode(&raw); err != nil {
@@ -229,6 +242,7 @@ func (a *Action) UnmarshalYAML(value *yaml.Node) error {
 	if a.ResourceScope == "" {
 		a.ResourceScope = raw.LegacyResourceScope
 	}
+	a.Access = raw.Access
 	a.MaxBodyBytes = raw.MaxBodyBytes
 	return nil
 }

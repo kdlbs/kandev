@@ -42,6 +42,8 @@ const AUTO_SAVE_DELAY = 1500;
 type TaskPlanPanelProps = {
   taskId: string | null;
   visible?: boolean;
+  /** Internal mobile layout offset for the docked formatting strip. */
+  mobileBottomOffset?: string;
 };
 
 function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
@@ -147,6 +149,7 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
 export const TaskPlanPanel = memo(function TaskPlanPanel({
   taskId,
   visible = true,
+  mobileBottomOffset,
 }: TaskPlanPanelProps) {
   const { t } = useTranslation();
   const state = useTaskPlanPanelState(taskId, visible);
@@ -176,15 +179,17 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
     );
   }
 
-  return <PlanPanelContent taskId={taskId} state={state} />;
+  return <PlanPanelContent taskId={taskId} state={state} mobileBottomOffset={mobileBottomOffset} />;
 });
 
 function PlanPanelContent({
   taskId,
   state,
+  mobileBottomOffset,
 }: {
   taskId: string;
   state: ReturnType<typeof useTaskPlanPanelState>;
+  mobileBottomOffset?: string;
 }) {
   const { t } = useTranslation();
   const { editorWrapperRef, editorInstanceRef, editorInstance, selectionState } = state;
@@ -230,6 +235,7 @@ function PlanPanelContent({
           value={state.draftContent}
           onChange={state.setDraftContent}
           placeholder={t("task:startTypingYourPlan")}
+          mobileBottomOffset={mobileBottomOffset}
           onSelectionChange={state.activeSessionId ? setTextSelection : undefined}
           comments={state.commentHighlights}
           onCommentClick={selectionState.handleCommentHighlightClick}

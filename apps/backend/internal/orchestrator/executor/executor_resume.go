@@ -12,8 +12,10 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/gitref"
+	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -75,6 +77,7 @@ type repoInfo struct {
 	WorktreeBranchTemplate  string
 	PullBeforeWorktree      bool
 	RemoteSyncHandled       bool
+	RefreshRepository       func(context.Context) error
 	Repository              *models.Repository
 }
 
@@ -219,22 +222,68 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 	info.RepositoryPath = repo.LocalPath
 	info.WorktreeBranchPrefix = repo.WorktreeBranchPrefix
 	info.WorktreeBranchTemplate = repo.WorktreeBranchTemplate
+	if tr.BranchPolicyBranchTemplate != "" {
+		info.WorktreeBranchTemplate = tr.BranchPolicyBranchTemplate
+	}
 	info.PullBeforeWorktree = repo.PullBeforeWorktree
 	if info.BaseBranch == "" && repo.DefaultBranch != "" {
 		info.BaseBranch = repo.DefaultBranch
 	}
-	if info.PullBeforeWorktree && isPluginManagedRepository(repo) {
-		if err := e.refreshPluginRepositoryForSession(ctx, tr.TaskID, sessionID, repo); err != nil {
-			return nil, err
+	if info.PullBeforeWorktree {
+		refreshRequired, refreshErr := e.shouldRefreshRepositoryForSession(ctx, repo)
+		if refreshErr != nil {
+			return nil, refreshErr
 		}
-		info.PullBeforeWorktree = false
-		info.RemoteSyncHandled = true
+		if !refreshRequired {
+			return info, nil
+		}
+		prNumber, checkoutBranch := info.PRNumber, info.CheckoutBranch
+		info.RefreshRepository = func(refreshCtx context.Context) error {
+			return e.refreshManagedRepositoryForSession(
+				refreshCtx, tr.TaskID, sessionID, repo, prNumber, checkoutBranch,
+			)
+		}
 	}
 	return info, nil
 }
 
+func hasProviderRepositoryIdentity(repo *models.Repository) bool {
+	if repo == nil {
+		return false
+	}
+	return (strings.TrimSpace(repo.ProviderOwner) != "" && strings.TrimSpace(repo.ProviderName) != "") ||
+		(strings.TrimSpace(repo.ProviderScope) != "" && strings.TrimSpace(repo.ProviderRepoID) != "")
+}
+
+func (e *Executor) shouldRefreshRepositoryForSession(
+	ctx context.Context, repo *models.Repository,
+) (bool, error) {
+	if repo == nil || repo.SourceType == sourceTypeLocal {
+		return false, nil
+	}
+	provider := strings.ToLower(strings.TrimSpace(repo.Provider))
+	if provider == gitLabProviderID {
+		return hasProviderRepositoryIdentity(repo), nil
+	}
+	if provider == providerAzureDevOps {
+		return strings.TrimSpace(repo.ProviderOwner) != "" && strings.TrimSpace(repo.ProviderName) != "", nil
+	}
+	if !isGitHubRepository(repo) {
+		return isPluginManagedRepository(repo), nil
+	}
+	policy := TaskGitCredentialPolicy{Mode: taskGitCredentialsModeManaged}
+	if e.githubCredentialPolicyResolver != nil {
+		resolved, err := e.githubCredentialPolicyResolver.ResolveTaskGitCredentialPolicy(ctx, repo.WorkspaceID)
+		if err != nil {
+			return false, fmt.Errorf("resolve task Git credential policy: %w", err)
+		}
+		policy = resolved
+	}
+	return policy.Mode != taskGitCredentialsModeExecutor, nil
+}
+
 func isPluginManagedRepository(repo *models.Repository) bool {
-	if repo == nil || repo.SourceType == sourceTypeLocal || repo.ProviderOwner == "" || repo.ProviderName == "" {
+	if repo == nil || repo.SourceType == sourceTypeLocal || !hasProviderRepositoryIdentity(repo) {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(repo.Provider)) {
@@ -245,26 +294,65 @@ func isPluginManagedRepository(repo *models.Repository) bool {
 	}
 }
 
-func (e *Executor) refreshPluginRepositoryForSession(
-	ctx context.Context, taskID, sessionID string, repo *models.Repository,
+func (e *Executor) refreshManagedRepositoryForSession(
+	ctx context.Context, taskID, sessionID string, repo *models.Repository, prNumber int, checkoutBranch string,
 ) error {
 	if e.repoCloner == nil || repo.LocalPath == "" {
-		return errors.New("plugin repository refresh is unavailable")
+		return errors.New("managed repository refresh is unavailable")
 	}
 	cloneURL := repositoryCloneURL(repo)
 	if cloneURL == "" {
 		var err error
 		cloneURL, err = e.repoCloner.BuildCloneURLWithHost(
-			repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
+			ctx, repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
 		)
 		if err != nil || cloneURL == "" {
 			return ErrNoCloneURL
 		}
 	}
+	credentialOrigin, token := "", ""
+	provider := strings.ToLower(strings.TrimSpace(repo.Provider))
+	if provider == gitLabProviderID && e.gitlabCredentials != nil {
+		var err error
+		credentialOrigin, token, err = e.gitlabCredentials.ResolveGitLabExecutionCredentials(ctx, repo.WorkspaceID)
+		if err != nil {
+			return fmt.Errorf("resolve GitLab refresh credentials: %w", err)
+		}
+	}
+	if provider == providerAzureDevOps && strings.HasPrefix(strings.ToLower(cloneURL), "https://") {
+		return e.refreshAzureDevOpsRepositoryForSession(
+			ctx, repo, cloneURL,
+		)
+	}
+	request := repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL)
+	if isGitHubRepository(repo) {
+		request.PRNumber = prNumber
+		request.CheckoutBranch = checkoutBranch
+	}
 	if err := e.repoCloner.RefreshWorkspaceRepositoryWithCredentialRequest(
-		ctx, repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL), repo.LocalPath, "", "",
+		ctx, request, repo.LocalPath, credentialOrigin, token,
 	); err != nil {
-		return fmt.Errorf("refresh plugin repository before worktree: %w", err)
+		return fmt.Errorf("refresh repository before worktree: %w", err)
+	}
+	return nil
+}
+
+func (e *Executor) refreshAzureDevOpsRepositoryForSession(
+	ctx context.Context, repo *models.Repository, cloneURL string,
+) error {
+	authCloner, ok := e.repoCloner.(strictAuthenticatedRepoCloner)
+	if !ok || e.secretStore == nil {
+		return errors.New("azure DevOps repository refresh authentication is unavailable")
+	}
+	pat, err := e.secretStore.Reveal(ctx, cloneauth.AzureDevOpsPATKey(repo.WorkspaceID))
+	if err != nil {
+		return fmt.Errorf("read Azure DevOps refresh credential: %w", err)
+	}
+	if err := authCloner.RefreshWorkspaceRepositoryWithBasicAuth(
+		ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost, cloneURL,
+		repo.ProviderOwner, repo.ProviderName, repo.LocalPath, "kandev", pat,
+	); err != nil {
+		return fmt.Errorf("refresh Azure DevOps repository before worktree: %w", err)
 	}
 	return nil
 }
@@ -286,7 +374,7 @@ func (e *Executor) ensureRepoLocalPath(ctx context.Context, repo *models.Reposit
 func (e *Executor) ensureRepoLocalPathForSession(
 	ctx context.Context, taskID, sessionID string, repo *models.Repository,
 ) error {
-	if repo.SourceType == sourceTypeLocal || repo.ProviderOwner == "" || repo.ProviderName == "" {
+	if repo.SourceType == sourceTypeLocal || !hasProviderRepositoryIdentity(repo) {
 		return nil
 	}
 	if repo.LocalPath != "" && isLocalGitRepo(repo.LocalPath) &&
@@ -328,7 +416,7 @@ func (e *Executor) ensureRepoClonedForSession(
 	if cloneURL == "" {
 		var urlErr error
 		cloneURL, urlErr = e.repoCloner.BuildCloneURLWithHost(
-			repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
+			ctx, repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
 		)
 		if urlErr != nil || cloneURL == "" {
 			return "", ErrNoCloneURL
@@ -386,7 +474,7 @@ func (e *Executor) reconcileGitHubCheckoutOrigin(
 		}
 		policy = resolved
 	}
-	originURL, err := gitHubCheckoutOriginURL(repo, policy, e.repoCloner)
+	originURL, err := gitHubCheckoutOriginURL(ctx, repo, policy, e.repoCloner)
 	if err != nil {
 		return err
 	}
@@ -406,11 +494,11 @@ func isGitHubRepository(repo *models.Repository) bool {
 }
 
 func gitHubCheckoutOriginURL(
-	repo *models.Repository, policy TaskGitCredentialPolicy, cloner RepoCloner,
+	ctx context.Context, repo *models.Repository, policy TaskGitCredentialPolicy, cloner RepoCloner,
 ) (string, error) {
 	if policy.Mode == taskGitCredentialsModeExecutor {
 		originURL, err := cloner.BuildCloneURLWithHost(
-			repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
+			ctx, repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
 		)
 		if err != nil {
 			return "", fmt.Errorf("build executor GitHub checkout origin: %w", err)
@@ -661,7 +749,15 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 			return nil, err
 		}
 	}
-	e.persistTaskEnvironment(ctx, task.ID, session, existingEnv, req, resp, execCfg)
+	if err := e.persistTaskEnvironment(ctx, task.ID, session, existingEnv, req, resp, execCfg); err != nil {
+		e.cleanupUnstartedExecutionAfterPersistError(ctx, session.ID, resp.AgentExecutionID, err)
+		e.markTaskEnvironmentMaterializationFailed(ctx, existingEnv, session.ID)
+		if startAgent {
+			e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeInitialState, err,
+				resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot))
+		}
+		return nil, err
+	}
 
 	worktreePath := resp.WorktreePath
 	worktreeBranch := resp.WorktreeBranch
@@ -935,6 +1031,7 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 		existingEnv,
 		req.ExecutorType,
 		existingEnv != nil && existingEnv.MaterializationSessionID != session.ID,
+		e.taskIsRepoBacked(ctx, task.ID),
 	)
 
 	allRepos, err := e.resolveAllRepoInfoForSession(ctx, task.ID, session.ID)
@@ -949,6 +1046,10 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 	if len(allRepos) > 0 {
 		req.PullBeforeWorktree = allRepos[0].PullBeforeWorktree
 		req.RemoteSyncHandled = allRepos[0].RemoteSyncHandled
+		req.RefreshRepository = allRepos[0].RefreshRepository
+	}
+	if err := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); err != nil {
+		return nil, "", execConfig, existingEnv, nil, err
 	}
 
 	e.reuseExistingEnvironment(ctx, req, existingEnv)
@@ -1024,6 +1125,30 @@ func (e *Executor) resolveResumeTaskEnvironment(ctx context.Context, taskID stri
 		return nil, fmt.Errorf("lookup existing task environment: %w", err)
 	}
 	if env == nil {
+		// Inherited-environment fallback: a child task created by an office
+		// task-handoff may have had session.TaskEnvironmentID rewritten to point
+		// at the parent's / shared group's env row, which is owned by a
+		// *different* task. GetTaskEnvironmentByTaskID misses that row because it
+		// indexes by the child task id, so without this lookup the resume path
+		// treats the env as absent and persistTaskEnvironment tries to CREATE a
+		// new row using the inherited ID — which already exists, producing
+		// "UNIQUE constraint failed: task_environments.id".
+		//
+		// Unlike the launch path (executor_execute.go), which hard-errors with
+		// ErrWorkspaceReuseUnsafe when the referenced row is absent, resume
+		// falls through to (nil, nil): the ID is then free, so the create path
+		// produces a valid fresh environment rather than a failing resume. A
+		// missing row surfaces as ErrTaskEnvironmentNotFound, which is a miss,
+		// not a fatal error; any other lookup error still propagates.
+		if session.TaskEnvironmentID != "" {
+			inherited, inhErr := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+			if inhErr != nil && !errors.Is(inhErr, repoerrors.ErrTaskEnvironmentNotFound) {
+				return nil, fmt.Errorf("lookup inherited task environment: %w", inhErr)
+			}
+			if inherited != nil {
+				return inherited, nil
+			}
+		}
 		return nil, nil
 	}
 	if session.TaskEnvironmentID != env.ID {
@@ -1347,6 +1472,9 @@ func (e *Executor) applyResumeWorktreeConfig(
 	}
 	req.WorktreeBranchPrefix = repository.WorktreeBranchPrefix
 	req.WorktreeBranchTemplate = repository.WorktreeBranchTemplate
+	if primaryTaskRepo != nil && primaryTaskRepo.RepositoryID == repositoryID && primaryTaskRepo.BranchPolicyBranchTemplate != "" {
+		req.WorktreeBranchTemplate = primaryTaskRepo.BranchPolicyBranchTemplate
+	}
 	req.PullBeforeWorktree = repository.PullBeforeWorktree
 	// Worktree manager requires TaskDirName and RepoName. Mirror the
 	// initial-launch path (applyRepositoryConfig) so resumes of single-repo

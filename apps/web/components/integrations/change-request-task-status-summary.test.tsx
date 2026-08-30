@@ -48,4 +48,21 @@ describe("ChangeRequestTaskStatusSummary layout", () => {
     expect(label.className).toContain("min-w-0");
     expect(label.className).toContain("[overflow-wrap:anywhere]");
   });
+
+  it("renders the author below the title and omits a blank identity", () => {
+    const { rerender } = render(
+      <ChangeRequestTaskStatusSummary
+        summaries={[{ number: 8, title: "Author summary", author: "octocat", rows: [] }]}
+      />,
+    );
+
+    expect(screen.getByTestId("pr-task-status-title-author").textContent).toBe("by octocat");
+
+    rerender(
+      <ChangeRequestTaskStatusSummary
+        summaries={[{ number: 8, title: "Author summary", author: "  ", rows: [] }]}
+      />,
+    );
+    expect(screen.queryByTestId("pr-task-status-title-author")).toBeNull();
+  });
 });

@@ -12,7 +12,7 @@ export function TaskItemChangeRequestStatus({
   return (
     <span
       data-testid="sidebar-task-change-request-status"
-      className="inline-flex shrink-0 items-center gap-1"
+      className="inline-flex shrink-0 items-center gap-1 empty:hidden"
     >
       <TaskContributionIcons taskId={taskId} prInfo={prInfo} />
       {taskId ? <RegisteredChangeRequestTaskIcon taskId={taskId} /> : null}

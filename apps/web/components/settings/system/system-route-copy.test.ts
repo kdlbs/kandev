@@ -1,6 +1,30 @@
-import { describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { t } from "@/lib/i18n";
-import { BACKUP_DIR, BACKUP_SQL_COMMAND } from "./system-route-shell";
+import { DataStorageSettings } from "./data-storage-settings";
+import { BACKUP_SQL_COMMAND } from "./system-route-shell";
+
+const databaseState = vi.hoisted(() => ({ value: null as unknown }));
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: { system: { database: unknown } }) => unknown) =>
+    selector({ system: { database: databaseState.value } }),
+}));
+vi.mock("@/components/settings/settings-target", () => ({
+  SettingsTarget: ({ children }: { children?: ReactNode }) => children ?? null,
+}));
+vi.mock("./backups-table", () => ({ BackupsTable: () => null }));
+vi.mock("./database-stats-card", () => ({ DatabaseStatsCard: () => null }));
+vi.mock("./log-viewer", () => ({ LogViewer: () => null }));
+vi.mock("./storage/storage-maintenance-settings", () => ({
+  StorageMaintenanceSettings: () => null,
+}));
+
+afterEach(() => {
+  cleanup();
+  databaseState.value = null;
+});
 
 /**
  * Byte-for-byte English for the nine System route headers, as `SETTINGS_ROUTES`
@@ -89,10 +113,36 @@ describe("System route headers keep their pre-migration English", () => {
    * pseudo-localized into dead pointers.
    */
   it("backups", () => {
+    const path = "/var/lib/kandev/backups";
     expect(t("system:navBackups")).toBe("Backups");
-    expect(
-      t("system:backupsPageDescription", { command: BACKUP_SQL_COMMAND, path: BACKUP_DIR }),
-    ).toBe("VACUUM INTO snapshots stored under <data-dir>/backups/.");
+    expect(t("system:backupsPageDescription", { command: BACKUP_SQL_COMMAND, path })).toBe(
+      `VACUUM INTO snapshots stored under ${path}.`,
+    );
+  });
+});
+
+describe("Data & Storage backup location copy", () => {
+  it("renders the resolved SQLite backup directory", () => {
+    const path = "/var/lib/kandev/backups";
+    databaseState.value = { backup_directory: path };
+
+    render(createElement(DataStorageSettings));
+
+    expect(screen.getByText(`VACUUM INTO snapshots stored under ${path}.`)).toBeTruthy();
+  });
+
+  it("omits the location when database information is unavailable", () => {
+    render(createElement(DataStorageSettings));
+
+    expect(screen.queryByText(/VACUUM INTO snapshots stored under/)).toBeNull();
+  });
+
+  it("omits the location when the backend has no backup directory", () => {
+    databaseState.value = { backup_directory: "" };
+
+    render(createElement(DataStorageSettings));
+
+    expect(screen.queryByText(/VACUUM INTO snapshots stored under/)).toBeNull();
   });
 });
 

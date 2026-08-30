@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
-import { expect, test } from "../../fixtures/test-base";
+import { expect, resetSeedRepositoryCheckout, test } from "../../fixtures/test-base";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
@@ -57,6 +57,10 @@ test("@search searches all task repositories and opens the selected match", asyn
 }) => {
   test.setTimeout(120_000);
 
+  // The worker reuses this checkout across specs. Content search must index
+  // the commit created below from main, not a branch left by an earlier test.
+  resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const sharedPath = `src/content-search-${suffix}.ts`;
   const gitEnv = makeGitEnv(backend.tmpDir);
@@ -75,7 +79,7 @@ test("@search searches all task repositories and opens the selected match", asyn
     seedData.workspaceId,
     extraRepoDir,
     "main",
-    { name: EXTRA_REPOSITORY_NAME },
+    { name: EXTRA_REPOSITORY_NAME, pull_before_worktree: false },
   );
 
   const task = await apiClient.createTaskWithAgent(

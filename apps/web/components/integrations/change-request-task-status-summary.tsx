@@ -64,6 +64,7 @@ export type ChangeRequestTaskSummaryRow = {
 export type ChangeRequestTaskStatusSummaryData = {
   number: number | string;
   title: string;
+  author?: string;
   rows: ChangeRequestTaskSummaryRow[];
 };
 
@@ -253,6 +254,14 @@ export function ChangeRequestTaskStatusSummary({
               >
                 {summary.title}
               </div>
+              {summary.author?.trim() ? (
+                <div
+                  data-testid={`${presentation.titleTestId}-author`}
+                  className="mt-0.5 text-[11px] leading-snug text-muted-foreground"
+                >
+                  {t("task:byAuthor", { author: summary.author.trim() })}
+                </div>
+              ) : null}
             </div>
           </div>
           {summary.rows.length > 0 && (

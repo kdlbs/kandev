@@ -1,13 +1,24 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DockerfileBuildCard } from "./docker-sections";
+import type { AuthMode } from "@/lib/state/slices/auth/types";
 
-const roleMock: { value: string | undefined } = { value: undefined };
+const authMock: { mode: AuthMode | undefined; role: string | undefined } = {
+  mode: "enabled",
+  role: undefined,
+};
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: { auth: { user?: { role?: string } } }) => unknown) =>
+  useAppStore: (
+    selector: (state: {
+      auth: { mode: AuthMode | undefined; user?: { role?: string } };
+    }) => unknown,
+  ) =>
     selector({
-      auth: { user: roleMock.value === undefined ? undefined : { role: roleMock.value } },
+      auth: {
+        mode: authMock.mode,
+        user: authMock.role === undefined ? undefined : { role: authMock.role },
+      },
     }),
 }));
 
@@ -20,8 +31,9 @@ vi.mock("./script-editor", () => ({
 const BUILD_BUTTON = /build image/i;
 const ADMIN_ONLY_COPY = "Only administrators can build images.";
 
-function renderCard(role: string | undefined) {
-  roleMock.value = role;
+function renderCard(role: string | undefined, mode: AuthMode | undefined = "enabled") {
+  authMock.mode = mode;
+  authMock.role = role;
   render(
     <DockerfileBuildCard
       dockerfile="FROM scratch"
@@ -34,11 +46,13 @@ function renderCard(role: string | undefined) {
 
 afterEach(() => {
   cleanup();
-  roleMock.value = undefined;
+  authMock.mode = "enabled";
+  authMock.role = undefined;
 });
 
-// canBuildDockerImage is unit-tested separately; these cover the hop from that
-// decision into the rendered control, which a leaf-only test would miss.
+// isAdminIdentity is unit-tested in lib/auth/is-admin.test.ts; these cover the
+// hop from that decision into the rendered control, which a leaf-only test
+// would miss.
 describe("DockerfileBuildCard build permissions", () => {
   it("disables the build button and explains why for a member", () => {
     renderCard("member");
@@ -55,9 +69,16 @@ describe("DockerfileBuildCard build permissions", () => {
   });
 
   it("leaves the build button usable when authentication is disabled", () => {
-    renderCard(undefined);
+    renderCard(undefined, "disabled");
 
     expect(screen.getByRole("button", { name: BUILD_BUTTON }).hasAttribute("disabled")).toBe(false);
     expect(screen.queryByText(ADMIN_ONLY_COPY)).toBeNull();
+  });
+
+  it("disables the build button for a cleared enabled session", () => {
+    renderCard(undefined, "enabled");
+
+    expect(screen.getByRole("button", { name: BUILD_BUTTON }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(ADMIN_ONLY_COPY)).not.toBeNull();
   });
 });

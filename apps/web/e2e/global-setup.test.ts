@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import globalSetup, { assertBackendArtifactsFresh } from "./global-setup";
+import globalSetup, { assertBackendArtifactsFresh, isContainerRun } from "./global-setup";
 
 let backendDir: string;
 let binPath: string;
@@ -244,6 +244,15 @@ describe("assertBackendBinaryFresh", () => {
 });
 
 describe("globalSetup", () => {
+  it.each([
+    ["containers", ["node", "playwright", "test", "--project=containers"]],
+    ["docker", ["node", "playwright", "test", "--project=docker"]],
+    ["containers", ["node", "playwright", "test", "--project", "containers"]],
+    ["docker", ["node", "playwright", "test", "--project", "docker"]],
+  ])("recognizes the direct %s project selection", (_project, argv) => {
+    expect(isContainerRun({}, argv)).toBe(true);
+  });
+
   it("checks the selected custom backend path instead of the default backend", () => {
     const customBackend = path.join(backendDir, "custom", "kandev");
     vi.stubEnv("KANDEV_E2E_BIN", customBackend);

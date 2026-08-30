@@ -55,11 +55,11 @@ type Config struct {
 
 // Cloner handles git clone and fetch operations.
 type Cloner struct {
-	config      Config
-	protocol    string
-	logger      *logger.Logger
-	credentials GitCredentialProvider
-	repoMus     sync.Map
+	config           Config
+	protocolResolver GitProtocolResolver
+	logger           *logger.Logger
+	credentials      GitCredentialProvider
+	repoMus          sync.Map
 }
 
 // GitCredentialProvider resolves the workspace automation identity selected
@@ -84,14 +84,37 @@ type GitCredentialRequest struct {
 	CloneURL             string
 	Owner                string
 	Name                 string
+	CheckoutBranch       string
+	PRNumber             int
+}
+
+type staticGitProtocolResolver string
+
+func (r staticGitProtocolResolver) ResolveGitProtocol(context.Context, string) string {
+	return string(r)
 }
 
 // NewCloner creates a new Cloner with the given configuration.
 func NewCloner(cfg Config, protocol string, dataDir string, log *logger.Logger) *Cloner {
+	return newCloner(cfg, staticGitProtocolResolver(protocol), dataDir, log)
+}
+
+// NewClonerWithProtocolResolver creates a Cloner that resolves Git protocols
+// when protocol-aware clone URLs are built.
+func NewClonerWithProtocolResolver(
+	cfg Config, resolver GitProtocolResolver, dataDir string, log *logger.Logger,
+) *Cloner {
+	if resolver == nil {
+		resolver = NewGitProtocolResolver()
+	}
+	return newCloner(cfg, resolver, dataDir, log)
+}
+
+func newCloner(cfg Config, resolver GitProtocolResolver, dataDir string, log *logger.Logger) *Cloner {
 	if cfg.BasePath == "" && dataDir != "" {
 		cfg.BasePath = filepath.Join(dataDir, "repos")
 	}
-	return &Cloner{config: cfg, protocol: protocol, logger: log}
+	return &Cloner{config: cfg, protocolResolver: resolver, logger: log}
 }
 
 // SetGitCredentialProvider configures workspace-scoped Git transport auth.
@@ -118,13 +141,40 @@ func (c *Cloner) ExpandedBasePath() (string, error) {
 }
 
 // BuildCloneURL constructs a protocol-aware clone URL for a provider repository.
-func (c *Cloner) BuildCloneURL(provider, owner, name string) (string, error) {
-	return CloneURL(provider, owner, name, c.protocol)
+func (c *Cloner) BuildCloneURL(ctx context.Context, provider, owner, name string) (string, error) {
+	host, err := providerHost(provider)
+	if err != nil {
+		return "", err
+	}
+	return CloneURL(provider, owner, name, c.resolveProtocol(ctx, host))
 }
 
 // BuildCloneURLWithHost constructs a clone URL using a persisted provider origin.
-func (c *Cloner) BuildCloneURLWithHost(provider, host, owner, name string) (string, error) {
-	return CloneURLWithHost(provider, host, owner, name, c.protocol)
+func (c *Cloner) BuildCloneURLWithHost(
+	ctx context.Context, provider, host, owner, name string,
+) (string, error) {
+	resolvedHost, _, err := normalizeGitProviderHost(host)
+	if err != nil {
+		return "", err
+	}
+	if resolvedHost == "" {
+		resolvedHost, err = providerHost(provider)
+		if err != nil {
+			return "", err
+		}
+	}
+	return CloneURLWithHost(provider, host, owner, name, c.resolveProtocol(ctx, resolvedHost))
+}
+
+func (c *Cloner) resolveProtocol(ctx context.Context, host string) string {
+	if c.protocolResolver == nil {
+		return ProtocolSSH
+	}
+	protocol := strings.ToLower(strings.TrimSpace(c.protocolResolver.ResolveGitProtocol(ctx, host)))
+	if protocol == ProtocolHTTPS {
+		return ProtocolHTTPS
+	}
+	return ProtocolSSH
 }
 
 // RepoPath returns the legacy owner/name clone path.
@@ -416,7 +466,34 @@ func (c *Cloner) RefreshWorkspaceRepositoryWithCredentialRequest(
 	if err != nil {
 		return err
 	}
+	return c.refreshWorkspaceRepository(ctx, targetPath, cloneURL, auth, request.PRNumber)
+}
 
+// RefreshWorkspaceRepositoryWithBasicAuth strictly refreshes one existing
+// workspace-managed checkout with the same basic-auth contract as cloning.
+func (c *Cloner) RefreshWorkspaceRepositoryWithBasicAuth(
+	ctx context.Context, workspaceID, provider, providerHost,
+	cloneURL, owner, name, repositoryPath, username, password string,
+) error {
+	targetPath, err := c.WorkspaceProviderRepoPath(workspaceID, provider, providerHost, owner, name)
+	if err != nil {
+		return err
+	}
+	if !sameFilesystemPath(targetPath, repositoryPath) {
+		return errors.New("repository path does not match the workspace checkout")
+	}
+	origin, err := gitCredentialOrigin(cloneURL)
+	if err != nil {
+		return err
+	}
+	return c.refreshWorkspaceRepository(ctx, targetPath, cloneURL, &cloneAuth{
+		origin: origin, username: username, password: password,
+	}, 0)
+}
+
+func (c *Cloner) refreshWorkspaceRepository(
+	ctx context.Context, targetPath, cloneURL string, auth *cloneAuth, prNumber int,
+) error {
 	mu := c.repoMu(targetPath)
 	mu.Lock()
 	defer mu.Unlock()
@@ -426,15 +503,31 @@ func (c *Cloner) RefreshWorkspaceRepositoryWithCredentialRequest(
 	if err := c.setOriginURLLocked(ctx, targetPath, cloneURL); err != nil {
 		return err
 	}
-	cmd := subproc.NewGitCommand(ctx, "-C", targetPath, "fetch", "--prune", "--force", gitNoTags, "origin")
-	cleanup, err := configureGitCommand(cmd, auth)
-	if err != nil {
+	runFetch := func(refspec string) error {
+		args := []string{"-C", targetPath, "fetch", "--prune", "--force", gitNoTags, "origin"}
+		if refspec != "" {
+			args = append(args, refspec)
+		}
+		cmd := subproc.NewGitCommand(ctx, args...)
+		cleanup, err := configureGitCommand(cmd, auth)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		if out, runErr := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); runErr != nil {
+			return fmt.Errorf("refresh scoped workspace repository: %s: %w",
+				redactCloneOutput(string(out), authToken(auth)), runErr)
+		}
+		return nil
+	}
+	if err := runFetch(""); err != nil {
 		return err
 	}
-	defer cleanup()
-	if out, runErr := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); runErr != nil {
-		return fmt.Errorf("refresh scoped workspace repository: %s: %w",
-			redactCloneOutput(string(out), authToken(auth)), runErr)
+	if prNumber > 0 {
+		prRefspec := fmt.Sprintf("pull/%d/head:refs/remotes/origin/pr/%d", prNumber, prNumber)
+		if err := runFetch(prRefspec); err != nil {
+			return fmt.Errorf("refresh scoped workspace pull request: %w", err)
+		}
 	}
 	return nil
 }

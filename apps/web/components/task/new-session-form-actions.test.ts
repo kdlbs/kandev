@@ -9,6 +9,16 @@ const mockLaunchSession = vi.fn();
 const mockBuildStartRequest = vi.fn();
 const mockToMessageAttachments = vi.fn();
 const mockHasPendingAttachmentUploads = vi.fn();
+const mockApplyAgentProfileRecentUse = vi.fn();
+const mockRecordRecentUse = vi.fn();
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (
+    selector: (state: {
+      applyAgentProfileRecentUse: typeof mockApplyAgentProfileRecentUse;
+    }) => unknown,
+  ) => selector({ applyAgentProfileRecentUse: mockApplyAgentProfileRecentUse }),
+}));
 
 vi.mock("@/lib/services/session-launch-service", () => ({
   launchSession: (...args: Parameters<typeof mockLaunchSession>) => mockLaunchSession(...args),
@@ -24,6 +34,10 @@ vi.mock("@/components/task-create-dialog-helpers", () => ({
     mockHasPendingAttachmentUploads(...args),
   toMessageAttachments: (...args: Parameters<typeof mockToMessageAttachments>) =>
     mockToMessageAttachments(...args),
+}));
+
+vi.mock("@/lib/agent-profile-recent-use", () => ({
+  recordAgentProfileRecentUseBestEffort: (...args: unknown[]) => mockRecordRecentUse(...args),
 }));
 
 import { useSessionContextChange, useSessionLaunchSubmit } from "./new-session-form-actions";
@@ -253,6 +267,8 @@ describe("useSessionLaunchSubmit", () => {
     });
     mockToMessageAttachments.mockReturnValue(MESSAGE_ATTACHMENTS);
     mockLaunchSession.mockResolvedValue({ session_id: SESSION_ID });
+    mockRecordRecentUse.mockReset();
+    mockApplyAgentProfileRecentUse.mockReset();
   });
 
   it("creates a session and activates it with the typed prompt", async () => {
@@ -307,6 +323,11 @@ describe("useSessionLaunchSubmit", () => {
       mockSetActiveSession,
     );
     expect(mockOnClose).toHaveBeenCalled();
+    expect(mockRecordRecentUse).toHaveBeenCalledWith(
+      "task_session",
+      PROFILE_ID,
+      expect.any(Function),
+    );
     expect(mockSetIsCreating).toHaveBeenNthCalledWith(1, true);
     expect(mockSetIsCreating).toHaveBeenLastCalledWith(false);
   });
@@ -355,6 +376,11 @@ describe("useSessionLaunchSubmit", () => {
       AGENT_PROFILE_B.label,
       undefined,
       mockSetActiveSession,
+    );
+    expect(mockRecordRecentUse).toHaveBeenCalledWith(
+      "task_session",
+      AGENT_PROFILE_B.id,
+      expect.any(Function),
     );
   });
 
@@ -518,6 +544,7 @@ describe("useSessionLaunchSubmit", () => {
       description: "launch failed",
       variant: "error",
     });
+    expect(mockRecordRecentUse).not.toHaveBeenCalled();
     expect(mockActivateSession).not.toHaveBeenCalled();
     expect(mockSetIsCreating).toHaveBeenLastCalledWith(false);
   });

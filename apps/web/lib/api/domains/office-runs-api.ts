@@ -157,6 +157,8 @@ export type AgentLatestRun = {
 export type AgentRunActivityDay = {
   date: string;
   succeeded: number;
+  skipped: number;
+  unclassified: number;
   failed: number;
   other: number;
   total: number;
@@ -184,6 +186,7 @@ export type AgentTaskStatusDay = {
 export type AgentSuccessRateDay = {
   date: string;
   succeeded: number;
+  unclassified: number;
   total: number;
 };
 

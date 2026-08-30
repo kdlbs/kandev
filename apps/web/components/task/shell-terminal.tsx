@@ -9,10 +9,13 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useSession } from "@/hooks/domains/session/use-session";
 import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
-import { getTerminalTheme } from "@/lib/theme/terminal-theme";
+import { useTheme } from "@/components/theme/app-theme";
+import type { ResolvedTheme } from "@/components/theme/app-theme";
+import { getTerminalTheme, TERMINAL_MINIMUM_CONTRAST_RATIO } from "@/lib/theme/terminal-theme";
 import { useTerminalLinkHandler } from "@/hooks/use-terminal-link-handler";
 import { buildTerminalFontFamily } from "@/lib/terminal/terminal-font";
-import { exposeBufferReader } from "./terminal-buffer-reader";
+import { clearBufferReader, exposeBufferReader } from "./terminal-buffer-reader";
+import { useTerminalTheme } from "./use-terminal-theme";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { matchesShortcut } from "@/lib/keyboard/utils";
 import { useTerminalSearch } from "./use-terminal-search";
@@ -48,6 +51,7 @@ type ShellTerminalInitOptions = {
   fontFamily?: string;
   fontSize?: number;
   onReady?: () => void;
+  resolvedTheme: ResolvedTheme;
 };
 
 function useTerminalInit({
@@ -59,11 +63,17 @@ function useTerminalInit({
   fontFamily,
   fontSize,
   onReady,
+  resolvedTheme,
 }: ShellTerminalInitOptions) {
   const { terminalRef, xtermRef, fitAddonRef, lastOutputLengthRef, outputRef } = refs;
+  const resolvedThemeRef = useRef(resolvedTheme);
+  resolvedThemeRef.current = resolvedTheme;
 
+  // Theme changes update the existing xterm through useTerminalTheme; this
+  // initialization effect intentionally does not rerun for them.
   useEffect(() => {
-    if (!terminalRef.current || xtermRef.current) return;
+    const container = terminalRef.current;
+    if (!container || xtermRef.current) return;
     const terminal = new Terminal({
       cursorBlink: !isReadOnlyMode,
       disableStdin: isReadOnlyMode,
@@ -72,15 +82,16 @@ function useTerminalInit({
       // i18n-exempt: CSS font stack.
       fontFamily: fontFamily || 'Menlo, Monaco, "Courier New", monospace',
       macOptionIsMeta: true,
-      theme: getTerminalTheme(terminalRef.current),
+      minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
+      theme: getTerminalTheme(container, resolvedThemeRef.current),
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     const webLinksAddon = new WebLinksAddon(linkHandler);
     terminal.loadAddon(webLinksAddon);
-    terminal.open(terminalRef.current);
-    suppressIOSKeyboardAssists(terminalRef.current);
-    exposeBufferReader(terminalRef.current, terminal);
+    terminal.open(container);
+    suppressIOSKeyboardAssists(container);
+    exposeBufferReader(container, terminal);
     fitAddon.fit();
     xtermRef.current = terminal;
     fitAddonRef.current = fitAddon;
@@ -97,7 +108,7 @@ function useTerminalInit({
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit();
     });
-    resizeObserver.observe(terminalRef.current);
+    resizeObserver.observe(container);
     const intersectionObserver = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
@@ -110,13 +121,14 @@ function useTerminalInit({
       },
       { threshold: 0.1 },
     );
-    intersectionObserver.observe(terminalRef.current);
+    intersectionObserver.observe(container);
     if (!isReadOnlyMode) lastOutputLengthRef.current = 0;
 
     return () => {
       clearTimeout(initialFitTimeout);
       resizeObserver.disconnect();
       intersectionObserver.disconnect();
+      clearBufferReader(container);
       terminal.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;
@@ -402,6 +414,7 @@ export function ShellTerminal({
   isStopping = false,
 }: ShellTerminalProps) {
   const { t } = useTranslation();
+  const { resolvedTheme } = useTheme();
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -451,6 +464,13 @@ export function ShellTerminal({
     fontFamily: buildTerminalFontFamily(terminalFontFamily),
     fontSize: terminalFontSize ?? undefined,
     onReady: onTerminalReady,
+    resolvedTheme,
+  });
+  useTerminalTheme({
+    terminalRef: xtermRef,
+    containerRef: terminalRef,
+    isTerminalReady,
+    resolvedTheme,
   });
 
   const search = useTerminalSearch({ xtermRef, isTerminalReady });

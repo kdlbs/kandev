@@ -363,6 +363,17 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("OPENCODE_API_KEY", self.link)
         self.assertTrue(PR_BODY_HELPER.is_file())
 
+    def test_link_job_retries_transient_github_api_responses(self) -> None:
+        for value in (
+            "pr_response_ok=false",
+            "for attempt in 1 2 3; do",
+            "python3 -c 'import json; json.load(open(\"pr-response.json\", encoding=\"utf-8\"))'",
+            'test "$pr_response_ok" = true',
+            "patch_ok=false",
+            'test "$patch_ok" = true',
+        ):
+            self.assertIn(value, self.link)
+
     def test_lint_workflow_runs_contract_and_body_helper_tests(self) -> None:
         lint_workflow = LINT_WORKFLOW.read_text(encoding="utf-8")
         for command in (

@@ -27,6 +27,7 @@ An automation that produces a report — a nightly drift sweep, a dependency aud
 - **AC-OFFICE-AUTOMATION-RUNS-001.6:** Reasons an enabled automation will not fire, each shown in place of a time: a run is still open and `max_concurrent_runs` is reached; no schedule is set; the trigger itself is switched off. An automation that will not fire stays in the agenda holding its reason — dropping it would make the agenda look complete when it is not.
 - **AC-OFFICE-AUTOMATION-RUNS-001.7:** A standing constraint sits under the agenda, which is exactly what it qualifies: scheduled automations only fire while kandev is running.
 - **AC-OFFICE-AUTOMATION-RUNS-001.8:** **Recent runs** — the cross-automation feed inline, newest first, each entry naming its automation. "Did anything go wrong overnight" is the other half of why someone opens this page; behind a link, they would have to ask for it twice. The filtered lens stays one click away for digging.
+- **AC-OFFICE-AUTOMATION-RUNS-001.9:** While the Automations section is visible, a scheduled or manually triggered run shall update its sidebar row without a page reload. An open run replaces the health dot with an animated running indicator and exposes the localized Running state to assistive technology; after the last open run finishes, the row returns to its non-running health indicator. The section shall stop refreshing its health summaries when it is folded, the desktop rail is collapsed, or the rail is not rendered.
 
 ## System design
 

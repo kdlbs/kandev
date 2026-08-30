@@ -4,16 +4,21 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	usermodels "github.com/kandev/kandev/internal/user/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -47,6 +52,25 @@ type launchCounter struct {
 	mu    sync.Mutex
 	calls int
 	fired chan struct{}
+}
+
+type deferredRecentUseCall struct {
+	profileID string
+	userID    string
+}
+
+type deferredRecentUseRecorder struct {
+	calls chan deferredRecentUseCall
+}
+
+func (r *deferredRecentUseRecorder) RecordAgentProfileRecentUse(
+	ctx context.Context,
+	_ usermodels.AgentProfileRecentUseContext,
+	profileID string,
+) (*usermodels.AgentProfileRecentUse, error) {
+	identity, _ := authn.IdentityFromContext(ctx)
+	r.calls <- deferredRecentUseCall{profileID: profileID, userID: identity.UserID}
+	return nil, nil
 }
 
 func newLaunchCounter() *launchCounter {
@@ -83,6 +107,99 @@ func (l *launchCounter) awaitLaunch(alreadySeen int) bool {
 		case <-deadline:
 			return l.count() > alreadySeen
 		}
+	}
+}
+
+func TestDeferredTaskCreateLaunchRecordsThePersistedCreatorAfterSuccess(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedChainStepTask(t, repo, deferredChainTaskID)
+	task, err := repo.GetTask(ctx, deferredChainTaskID)
+	require.NoError(t, err)
+	launch := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	launch[models.DeferredLaunchUserIDKey] = "creator-1"
+	launch[models.DeferredLaunchRecordRecentUseKey] = true
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	recorder := &deferredRecentUseRecorder{calls: make(chan deferredRecentUseCall, 1)}
+	svc := newDeferredLaunchTestService(t, repo, newLaunchCounter())
+	svc.SetAgentProfileRecentUseRecorder(recorder)
+
+	require.True(t, svc.launchDeferredTask(ctx, task, "test.deferred_launch", false))
+	select {
+	case call := <-recorder.calls:
+		assert.Equal(t, "profile1", call.profileID)
+		assert.Equal(t, "creator-1", call.userID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("successful deferred task-create launch did not record profile recency")
+	}
+	awaitLaunchedSession(t, repo, deferredChainTaskID)
+}
+
+// A deferred launch without the selector attribution marker models an MCP
+// create: the agent profile is operational launch input, not a UI selection.
+// It must not reorder task_create history even if an old or forged record also
+// contains a user ID.
+func TestDeferredMCPLaunchDoesNotRecordRecencyWithoutSelectorAttribution(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedChainStepTask(t, repo, deferredChainTaskID)
+	task, err := repo.GetTask(ctx, deferredChainTaskID)
+	require.NoError(t, err)
+	launch := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	launch[models.DeferredLaunchUserIDKey] = "mcp-user"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	recorder := &deferredRecentUseRecorder{calls: make(chan deferredRecentUseCall, 1)}
+	svc := newDeferredLaunchTestService(t, repo, newLaunchCounter())
+	svc.SetAgentProfileRecentUseRecorder(recorder)
+
+	require.True(t, svc.launchDeferredTask(ctx, task, "test.deferred_mcp_launch", false))
+	awaitLaunchedSession(t, repo, deferredChainTaskID)
+	select {
+	case call := <-recorder.calls:
+		t.Fatalf("MCP deferred launch recorded profile %q for user %q", call.profileID, call.userID)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestFailedDeferredTaskCreateLaunchDoesNotRecordRecency(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedChainStepTask(t, repo, deferredChainTaskID)
+	task, err := repo.GetTask(ctx, deferredChainTaskID)
+	require.NoError(t, err)
+	launch := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	launch[models.DeferredLaunchUserIDKey] = "creator-1"
+	launch[models.DeferredLaunchRecordRecentUseKey] = true
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[deferredChainTaskID] = &v1.Task{
+		ID: deferredChainTaskID, WorkflowID: "wf1", Title: "Chain step", Description: "desc", State: v1.TaskStateCreated,
+	}
+	launchReturned := make(chan struct{})
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			close(launchReturned)
+			return nil, errors.New("executor refused the deferred launch")
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	recorder := &deferredRecentUseRecorder{calls: make(chan deferredRecentUseCall, 1)}
+	svc.SetAgentProfileRecentUseRecorder(recorder)
+
+	require.True(t, svc.launchDeferredTask(ctx, task, "test.deferred_launch", false))
+	select {
+	case <-launchReturned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("deferred launch did not reach the failing agent boundary")
+	}
+	select {
+	case call := <-recorder.calls:
+		t.Fatalf("failed deferred launch recorded profile %q", call.profileID)
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 
@@ -373,6 +490,195 @@ func TestFailedLaunchReleasesTheClaimedIntent(t *testing.T) {
 	assert.Equal(t, "profile1", launch["agent_profile_id"])
 	if flag, _ := launch[models.DeferredLaunchStartWhenUnblockedKey].(bool); !flag {
 		t.Fatal("the restored intent must keep its start-when-unblocked flag or the gate stops recognising it")
+	}
+}
+
+func TestQueuePromotionOfBlockedWIPOverflowDoesNotLaunch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "wip-occupant", "wip-occupant-session", "step-limited")
+	seedChainStepTask(t, repo, deferredChainTaskID)
+	createdTask, err := repo.GetTask(ctx, deferredChainTaskID)
+	require.NoError(t, err)
+	createdLaunch := createdTask.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	createdLaunch[models.DeferredLaunchUserIDKey] = "creator-1"
+	createdLaunch[models.DeferredLaunchRecordRecentUseKey] = true
+	require.NoError(t, repo.UpdateTask(ctx, createdTask))
+
+	counter := newLaunchCounter()
+	steps := newMockStepGetter()
+	steps.steps["step-source"] = &wfmodels.WorkflowStep{
+		ID: "step-source", WorkflowID: "wf1", Name: "Source", Position: 0,
+	}
+	steps.steps["step-limited"] = &wfmodels.WorkflowStep{
+		ID: "step-limited", WorkflowID: "wf1", Name: "Limited", Position: 1, WIPLimit: 1,
+	}
+	steps.steps["step-next"] = &wfmodels.WorkflowStep{
+		ID: "step-next", WorkflowID: "wf1", Name: "Next", Position: 2,
+	}
+
+	svc := newDeferredLaunchTestService(t, repo, counter)
+	svc.SetWorkflowStepGetter(steps)
+	recorder := &deferredRecentUseRecorder{calls: make(chan deferredRecentUseCall, 1)}
+	svc.SetAgentProfileRecentUseRecorder(recorder)
+	// Model an unresolved blocked_by edge. Promotion is deliberately allowed;
+	// only the deferred agent launch must remain gated.
+	dependencies := &launchDependencyReader{blocked: true}
+	svc.SetTaskDependencyReader(dependencies)
+	store := newWorkflowStore(repo, steps, svc.agentManager, noopPublisher, testLogger(),
+		func(eventCtx context.Context, task *models.Task) {
+			svc.handleTaskQueuePromoted(eventCtx, watcher.TaskEventData{TaskID: task.ID})
+		})
+
+	// First overflow the limited step while its only WIP slot is occupied.
+	require.NoError(t, store.ApplyTransition(
+		ctx, deferredChainTaskID, "", "step-source", "step-limited", "manual_move",
+	))
+	queued, err := repo.GetTask(ctx, deferredChainTaskID)
+	require.NoError(t, err)
+	require.False(t, queued.WIPAdmitted)
+	require.Equal(t, "step-limited", queued.QueuedForStepID)
+
+	// Vacating the slot promotes the same-step queue entry and synchronously
+	// delivers task.queue_promoted to the handler under test.
+	require.NoError(t, store.ApplyTransition(
+		ctx, "wip-occupant", "wip-occupant-session", "step-limited", "step-next", "on_turn_complete",
+	))
+	promoted, err := repo.GetTask(ctx, deferredChainTaskID)
+	require.NoError(t, err)
+	require.True(t, promoted.WIPAdmitted)
+	require.Empty(t, promoted.QueuedForStepID)
+	_, promotionPending := promoted.Metadata[models.MetaKeyQueuePromotionPending]
+	require.True(t, promotionPending, "blocked promotion must retain its retry token")
+	_, launchPending := promoted.Metadata[models.MetaKeyDeferredLaunch]
+	require.True(t, launchPending, "blocked promotion must retain its deferred launch intent")
+
+	select {
+	case <-counter.fired:
+		t.Fatal("dependency-blocked WIP promotion launched an agent")
+	case <-time.After(100 * time.Millisecond):
+	}
+	require.Equal(t, 0, sessionCount(t, repo, deferredChainTaskID))
+
+	// Dependency resolution enters the normal auto-start chokepoint. It must
+	// resume the still-pending promotion lifecycle rather than leave the token
+	// stranded after launching directly.
+	dependencies.blocked = false
+	svc.autoStartTaskForStep(ctx, deferredChainTaskID, "step-limited", "task.dependencies_resolved", 0)
+	require.True(t, counter.awaitLaunch(0), "resolved dependency did not launch the promoted task")
+	awaitLaunchedSession(t, repo, deferredChainTaskID)
+	started, err := repo.GetTask(ctx, deferredChainTaskID)
+	require.NoError(t, err)
+	_, promotionPending = started.Metadata[models.MetaKeyQueuePromotionPending]
+	require.False(t, promotionPending, "resolved promotion left its lifecycle token behind")
+	select {
+	case call := <-recorder.calls:
+		assert.Equal(t, "profile1", call.profileID)
+		assert.Equal(t, "creator-1", call.userID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("WIP-promoted task-create launch did not record profile recency")
+	}
+}
+
+func TestFailedPromotedDeferredLaunchRestoresTokenAndRetries(t *testing.T) {
+	ctx := context.Background()
+	baseRepo := setupTestRepo(t)
+	seedChainStepTask(t, baseRepo, deferredChainTaskID)
+	require.NoError(t, baseRepo.SetTaskMetadataKey(
+		ctx, deferredChainTaskID, models.MetaKeyQueuePromotionPending, true,
+	))
+	task, err := baseRepo.GetTask(ctx, deferredChainTaskID)
+	require.NoError(t, err)
+	launch := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	launch[models.DeferredLaunchUserIDKey] = "creator-1"
+	launch[models.DeferredLaunchRecordRecentUseKey] = true
+	task.WorkflowStepID = "step-draft"
+	task.WIPAdmitted = true
+	require.NoError(t, baseRepo.UpdateTask(ctx, task))
+
+	steps := newMockStepGetter()
+	steps.steps["step-draft"] = &wfmodels.WorkflowStep{
+		ID: "step-draft", WorkflowID: "wf1", Name: "Draft", Position: 0,
+	}
+	steps.steps["step-review"] = &wfmodels.WorkflowStep{
+		ID: "step-review", WorkflowID: "wf1", Name: "Review", Position: 1,
+	}
+	// Fail the scheduler's task projection lookup on the first attempt. This
+	// injects a transient LaunchSession failure before any session or workspace
+	// is created, making a successful retry safe and deterministic.
+	taskRepo := newMockTaskRepo()
+	taskRepo.getTaskErr = errors.New("transient scheduler projection failure")
+	var agentLaunches atomic.Int32
+	launchAttempted := make(chan struct{}, 1)
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: baseRepo,
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			agentLaunches.Add(1)
+			launchAttempted <- struct{}{}
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-retry"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(baseRepo, steps, taskRepo, agentMgr)
+	svc.SetTaskDependencyReader(&resolvedDependencyReader{})
+	recorder := &deferredRecentUseRecorder{calls: make(chan deferredRecentUseCall, 1)}
+	svc.SetAgentProfileRecentUseRecorder(recorder)
+
+	svc.handleTaskQueuePromoted(ctx, watcher.TaskEventData{TaskID: deferredChainTaskID})
+
+	// The failure is handled in the detached launch goroutine. Wait until both
+	// durable retry inputs have been restored before running startup recovery.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		stored, loadErr := baseRepo.GetTask(ctx, deferredChainTaskID)
+		require.NoError(t, loadErr)
+		_, deferredRestored := stored.Metadata[models.MetaKeyDeferredLaunch]
+		_, promotionRestored := stored.Metadata[models.MetaKeyQueuePromotionPending]
+		if deferredRestored && promotionRestored {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("launch retry metadata was not restored: %#v", stored.Metadata)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	require.Equal(t, 0, sessionCount(t, baseRepo, deferredChainTaskID))
+	select {
+	case call := <-recorder.calls:
+		t.Fatalf("failed promoted launch recorded profile %q", call.profileID)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// Repair the transient scheduler projection failure, then exercise the same
+	// startup sweep that retries durable queue-promotion lifecycle tokens.
+	taskRepo.mu.Lock()
+	taskRepo.getTaskErr = nil
+	taskRepo.tasks[deferredChainTaskID] = &v1.Task{
+		ID: deferredChainTaskID, WorkflowID: "wf1",
+		Title: "Chain step", Description: "desc", State: v1.TaskStateCreated,
+	}
+	taskRepo.mu.Unlock()
+
+	svc.reconcileTaskLifecycleTokens(ctx)
+	select {
+	case <-launchAttempted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("startup lifecycle recovery did not retry the promoted launch")
+	}
+	awaitLaunchedSession(t, baseRepo, deferredChainTaskID)
+
+	stored, err := baseRepo.GetTask(ctx, deferredChainTaskID)
+	require.NoError(t, err)
+	_, deferredPending := stored.Metadata[models.MetaKeyDeferredLaunch]
+	assert.False(t, deferredPending)
+	_, promotionPending := stored.Metadata[models.MetaKeyQueuePromotionPending]
+	assert.False(t, promotionPending)
+	assert.Equal(t, int32(1), agentLaunches.Load())
+	select {
+	case call := <-recorder.calls:
+		assert.Equal(t, "profile1", call.profileID)
+		assert.Equal(t, "creator-1", call.userID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("retried promoted task-create launch did not record profile recency")
 	}
 }
 

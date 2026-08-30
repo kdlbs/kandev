@@ -67,3 +67,15 @@ Verification:
 - `rtk go test -tags fts5 ./internal/orchestrator -run 'TestUserCancelCompletion_SilentCancelDoesNotTrigger' -count=1` — 1 test passed.
 - `rtk go test -tags fts5 ./internal/orchestrator -run 'TestCancelAgent_(TriggersConfiguredTurnComplete|KeepsDisabledStep|BypassesAgentSignal|BlocksPendingClarification|SkipsIneligibleTask|HandlesReconciledRuntime|LeavesQueuedMessageParked|CannotDoubleTransition)|TestUserCancelCompletion_' -count=1` — 18 tests passed.
 - `rtk go test -tags fts5 ./internal/orchestrator -run 'Test(CancelAgent|ReconcileCancelledTurn|UserCancelCompletion)' -count=1` — 30 tests passed, including injected session-state and turn-close failures and terminal-state ordering.
+
+### Regression remediation: 2026-08-29
+
+An existing terminal workflow step suppressed the `REVIEW` state after cancellation. The suppression now requires a workflow transition during the cancelled turn.
+
+Added `TestCancelAgent_ExistingTerminalStepReconcilesReviewState` in a separate test file. The test failed before the correction because no `REVIEW` state write occurred.
+
+Verification:
+
+- `rtk go test -tags fts5 ./internal/orchestrator -run '^TestCancelAgent_ExistingTerminalStepReconcilesReviewState$' -count=1` passed 1 test.
+- The work-order cancellation command passed 18 tests.
+- The review and terminal-state command passed 3 tests.

@@ -150,6 +150,17 @@ func RunSchedulerTick(svc *Service, ctx context.Context) {
 	si.tick(ctx)
 }
 
+// ProcessRunForTest exposes processRun directly for external test packages
+// that need to drive a specific run through the pipeline after mutating
+// state RunSchedulerTick's atomic claim+process cannot isolate — e.g. the
+// agent-inactive race window, where ClaimNextRun's own query already
+// excludes non-idle/working agents so the run must be claimed first and the
+// agent paused afterward, then handed to processRun directly.
+func ProcessRunForTest(svc *Service, ctx context.Context, run *models.Run) {
+	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
+	si.processRun(ctx, run)
+}
+
 // BuildEnvVarsForTest exposes buildEnvVars for external test packages.
 func BuildEnvVarsForTest(
 	si *SchedulerIntegration,
@@ -182,3 +193,10 @@ func BuildSkillManifestForTest(
 // Skill delivery test helpers were removed in ADR 0005 Wave E along
 // with the office-tier delivery code. Coverage moved into
 // internal/agent/runtime/lifecycle/skill.
+
+// GetWakeReceiptForTest exposes the repo's parent_child_wake_receipts read
+// so ParentWakeReconciler tests can assert a paused/unresolved-assignee
+// skip leaves no partial receipt behind.
+func (s *Service) GetWakeReceiptForTest(ctx context.Context, parentTaskID string) (*sqlite.WakeReceipt, error) {
+	return s.repo.GetWakeReceipt(ctx, parentTaskID)
+}

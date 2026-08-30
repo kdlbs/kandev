@@ -4,10 +4,11 @@ system: platform
 requirements:
   - REQ-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001
 created: 2026-08-01
-updated: 2026-08-19
+updated: 2026-08-29
 owners:
   - kandev
 ---
+
 # Bounded Task Status Delivery System Design
 
 ## Purpose and boundaries
@@ -16,8 +17,8 @@ This design preserves the technical source detail for `REQ-PLATFORM-BOUNDED-TASK
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
+| Requirement                                     | Design section                                    |
+| ----------------------------------------------- | ------------------------------------------------- |
 | `REQ-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001` | [Migrated source detail](#migrated-source-detail) |
 
 ## Migrated source detail
@@ -64,16 +65,16 @@ detail surface.
 The wire field is `status_summary`; the frontend maps it to `statusSummary`.
 The initial contract is:
 
-| Field                                          | Meaning                                                             | Bound                                |
-| ---------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------ |
-| `revision`, `updated_at`                       | Monotonic task-local version and projection time                    | Constant                             |
-| `last_activity_at`                             | Latest durable task, user-prompt, or turn milestone                 | Constant                             |
-| `primary_session`                              | Primary session ID and lifecycle state                              | One session                          |
-| `foreground_activity`, `active_subagent_count` | Existing task-level busy aggregate                                  | Constant                             |
-| `pending_action`                               | `permission`, `clarification`, or absent                            | Constant                             |
+| Field                                          | Meaning                                                                               | Bound                                       |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `revision`, `updated_at`                       | Monotonic task-local version and projection time                                      | Constant                                    |
+| `last_activity_at`                             | Latest durable task, user-prompt, or conversational-turn milestone                    | Constant                                    |
+| `primary_session`                              | Primary session ID and lifecycle state                                                | One session                                 |
+| `foreground_activity`, `active_subagent_count` | Existing task-level busy aggregate                                                    | Constant                                    |
+| `pending_action`                               | `permission`, `clarification`, or absent                                              | Constant                                    |
 | `active_error`                                 | Optional session and task-repository IDs, stamp, time, preview, category, and actions | One preview and at most three known actions |
-| `git`                                          | Aggregate additions, deletions, changed files, ahead, and behind    | Numeric totals only                  |
-| `pull_request`                                 | Count, bounded representative identity, and aggregate display state | Constant regardless of PR count      |
+| `git`                                          | Aggregate additions, deletions, changed files, ahead, and behind                      | Numeric totals only                         |
+| `pull_request`                                 | Count, bounded representative identity, aggregate display state, and active GitHub automation flags | Constant regardless of PR count             |
 
 `pull_request.aggregate_state` is one of `failure`, `blocked`, `pending`,
 `awaiting_review`, `ready`, `passing`, `draft`, `merged`, `closed`, or
@@ -135,13 +136,22 @@ remain during migration, but switchers use the summary when present.
   GitHub domain and are loaded only by surfaces that need them. On projector
   restart or compare-and-set rebase, configured keyed pull-request observations
   are rehydrated even when the persisted aggregate is absent.
+- Pull-request automation flags aggregate only active linked pull requests.
+  The summary can state whether any active pull request has auto-fix or
+  auto-merge enabled, but it never carries the per-pull-request option list.
+  Integration option updates refresh the authoritative keyed pull-request
+  observations through the existing task-summary projector.
 - A semantic no-op does not increment `revision` or emit an update.
 - Clients ignore a summary delta whose revision is not newer than the stored
   revision.
 - `last_activity_at` is separate from projection freshness. Task creation,
-  persisted task mutations, user-authored prompts, and turn start or completion
-  advance it by source time. Focus, subscriptions, Git or pull-request polling,
-  queue bookkeeping, summary repair, and streamed chunks do not advance it.
+  persisted task mutations, user-authored prompts, and conversational-turn
+  start or completion advance it by source time. Focus, subscriptions, Git or
+  pull-request polling, queue bookkeeping, summary repair, and streamed chunks
+  do not advance it.
+- A turn with `metadata.lifecycle_only=true` is not conversational. The live
+  projector and the durable batch loader exclude these turns. This rule covers
+  the synthetic `agent_boot` turn that records an agent resume.
 - Missing and older summaries rebuild `last_activity_at` in one batch from
   task, user-message, and turn records. Live and rebuilt values use a monotonic
   maximum, so replay and repair cannot move activity backward. See
@@ -233,11 +243,17 @@ delivered because the database remains authoritative.
 
 The frontend applies the same defense at the render boundary. It keeps only the
 newest `session.message.updated` payload for each message during one animation
-frame and performs one store update per changed message when the frame flushes.
-Message add/delete and turn-settle events remain ordered barriers. Intentional
-multi-session detail surfaces may subscribe to every session they display, but
-rerendering or refetching equivalent session objects must not tear down and
-recreate unchanged subscription membership.
+frame. The frame flush converts every accepted payload first, then applies all
+message replacements in one Zustand and Immer transaction. The transaction
+preserves first-key insertion order and changes only the affected session
+arrays and message objects. This produces at most one subscriber notification
+for the frame, so derived transcript processing also runs at most once.
+
+Message add/delete and turn-settle events remain ordered barriers. A barrier
+flushes the pending replacement batch before it applies its semantic action.
+Intentional multi-session detail surfaces may subscribe to every session they
+display, but rerendering or refetching equivalent session objects must not tear
+down and recreate unchanged subscription membership.
 
 Overload handling is observable. Structured metrics/logs identify the client,
 session, action, queue class, coalesced chunk count, replacement count, and
@@ -287,8 +303,15 @@ intermediate replacement.
   changes its Git tree, or receives a PR update, **WHEN** its summary revision
   arrives, **THEN** desktop and mobile rows update without a session
   subscription.
+- **GIVEN** an active linked pull request changes its auto-fix or auto-merge
+  setting, **WHEN** its summary revision arrives, **THEN** desktop and mobile
+  task rows update their bounded automation indicators without a per-row
+  automation request.
 - **GIVEN** an idle task receives Git or pull-request summary changes, **WHEN**
   its replacement summary arrives, **THEN** `updated_at` can advance while
+  `last_activity_at` remains unchanged.
+- **GIVEN** an idle task after a backend restart, **WHEN** opening the task
+  resumes its agent and creates only a lifecycle turn, **THEN**
   `last_activity_at` remains unchanged.
 - **GIVEN** a recoverable error is dismissed or followed by a newer agent
   response, **WHEN** the projector processes that occurrence, **THEN** the

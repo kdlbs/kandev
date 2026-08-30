@@ -2,8 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { IconMessageQuestion, IconInfoCircle } from "@tabler/icons-react";
-import ReactMarkdown from "react-markdown";
-import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
 import type {
   Message,
   ClarificationRequestMetadata,
@@ -21,6 +19,7 @@ import {
   countRunes,
 } from "./clarification-overlay-parts";
 import { ClarificationHeaderActions } from "./clarification-overlay-header";
+import { ClarificationMarkdown } from "./clarification-markdown";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 
@@ -154,18 +153,21 @@ function ClarificationCard(props: CardProps) {
             </span>
           )}
           {metadata.question.title && (
-            <span className="text-muted-foreground/70">
+            <span data-testid="clarification-question-title" className="text-muted-foreground/70">
               {total > 1 ? "· " : ""}
-              {metadata.question.title}
+              <ClarificationMarkdown variant="inline">
+                {metadata.question.title}
+              </ClarificationMarkdown>
             </span>
           )}
         </div>
       )}
-      <div className="markdown-body max-w-none text-sm font-medium [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 mb-3">
-        <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
-          {question.prompt}
-        </ReactMarkdown>
-      </div>
+      <ClarificationMarkdown
+        variant="block"
+        className="mb-3 max-w-none text-sm font-medium [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+      >
+        {question.prompt}
+      </ClarificationMarkdown>
       <ClarificationOptions
         options={question.options}
         selectedOption={selectedOption}

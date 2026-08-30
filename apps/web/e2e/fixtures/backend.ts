@@ -510,7 +510,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         let recovery: Promise<void> | null = null;
         const ensureReady = async () => {
           try {
-            await waitForHealth(`${baseUrl}/ready`, 5_000);
+            await waitForHealth(`${baseUrl}/ready`, 5_000, backendProc);
             return;
           } catch {
             // A worker can outlive a backend process that a prior test left

@@ -53,6 +53,7 @@ const DISK_USAGE: DiskUsageResponse = {
 const DB_STATS: DatabaseStats = {
   driver: "sqlite",
   path: "/data/kandev.db",
+  backup_directory: "/data/backups",
   size_bytes: 12345,
   wal_size_bytes: 678,
   schema_version: "1.0.0",

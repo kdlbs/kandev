@@ -103,6 +103,8 @@ describe("SwimlaneGraphContent — waiting-for-input variants", () => {
 describe("moveTaskAcrossSwimlaneSteps — move failure reporting", () => {
   const WORKFLOW_ID = "wf-1";
   const TASK_ID = "task-1";
+  const PLAIN_STRING_REJECTION = "plain string rejection";
+  const UNKNOWN_REJECTION = {};
 
   function harness() {
     const snapshot = {
@@ -132,24 +134,20 @@ describe("moveTaskAcrossSwimlaneSteps — move failure reporting", () => {
     return errors;
   }
 
-  it("reports the localized fallback when the rejection is not an Error", async () => {
-    // Asserted under PSEUDO, not English. `toBe(t(key))` in English cannot tell a
-    // `t()` call from the identical hardcoded literal — a mutation putting
-    // "Failed to move task" back survived that version of this test. Under a
-    // locale that transliterates, only a real catalog lookup comes out accented.
+  it("reports the localized fallback for an unknown rejection", async () => {
     await i18n.changeLanguage("pseudo");
     try {
-      const [error] = await move("plain string rejection");
-      expect(error.message).toBe(t("task:failedToMoveTask"));
+      const [error] = await move(UNKNOWN_REJECTION);
+      expect(error.message).toBe(t("task:taskMoveErrorGeneric"));
       expect(error.message).toMatch(/[^\x20-\x7E]/);
     } finally {
       await i18n.changeLanguage("en");
     }
   });
 
-  it("reports the fallback with the task identity attached", async () => {
-    expect(await move("plain string rejection")).toEqual([
-      { message: t("task:failedToMoveTask"), taskId: TASK_ID, sessionId: null },
+  it("attaches task identity to a string rejection", async () => {
+    expect(await move(PLAIN_STRING_REJECTION)).toEqual([
+      { message: PLAIN_STRING_REJECTION, taskId: TASK_ID, sessionId: null },
     ]);
   });
 

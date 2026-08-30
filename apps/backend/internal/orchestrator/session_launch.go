@@ -240,10 +240,12 @@ func (s *Service) isPassthroughProfile(ctx context.Context, profileID string) bo
 
 // launchStart creates a new session and launches the agent.
 // If the request is an auto-start and the task's current workflow step does not
-// have auto_start_agent, the request is downgraded to a prepare (workspace-only,
-// no agent) to prevent unwanted auto-starts from the frontend's useAutoStartSession hook.
+// have auto_start_agent, or the task has unresolved dependencies, the request
+// is downgraded to a prepare (workspace-only, no agent) to prevent unwanted
+// auto-starts from the frontend's useAutoStartSession hook.
 func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
-	if req.AutoStart && s.shouldBlockAutoStart(ctx, req) {
+	if req.AutoStart && (s.shouldBlockAutoStart(ctx, req) ||
+		s.dependencyBlocksAutoStart(ctx, req.TaskID, "session.launch")) {
 		req.LaunchWorkspace = true
 		return s.launchPrepare(ctx, req)
 	}

@@ -259,6 +259,7 @@ describe("PRStatusChip mobile branch", () => {
     expect(document.querySelector("[data-testid='pr-topbar-popover-inner']")).not.toBeNull();
     expect(document.querySelector("[data-testid='pr-status-chip-drawer-close']")).not.toBeNull();
     expect(screen.getByTestId("pr-popover-title").textContent).toBe("#42 Test PR");
+    expect(screen.getByTestId("pr-popover-author").textContent).toBe("by alice");
     expect(drawer?.textContent).not.toContain("Open PR details");
   });
 
@@ -533,7 +534,7 @@ describe("PRStatusChip CI automation mobile parity", () => {
 
     const drawer = document.querySelector(DRAWER_SELECTOR);
     expect(drawer?.textContent).toContain("Auto-fix CI and address comments");
-    expect(drawer?.textContent).toContain("Auto-merge when ready");
+    expect(drawer?.textContent).toContain("Auto-merge or requeue when ready");
 
     act(() => {
       fireEvent.click(screen.getByLabelText("Edit auto-fix prompt for this task"));

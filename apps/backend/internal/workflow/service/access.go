@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
@@ -134,7 +135,13 @@ func (s *Service) AuthorizeTask(ctx context.Context, taskID string) error {
 // only thing the caller supplied — but nothing is disclosed: every rejection,
 // including a step that does not exist at all, returns ErrNotVisible.
 func (s *Service) AuthorizeStep(ctx context.Context, stepID string) error {
-	if !callerIsScoped(ctx) || s.workflowAccessChecker == nil {
+	if !callerIsScoped(ctx) {
+		return nil
+	}
+	if stepID == "" {
+		return ErrNotVisible
+	}
+	if s.workflowAccessChecker == nil {
 		return nil
 	}
 	step, err := s.repo.GetStep(ctx, stepID)
@@ -188,13 +195,19 @@ func normalizeAccessError(err error) error {
 // helpers, so a sentinel-only test would classify "this workflow does not
 // exist" as a server error while "this workflow is not yours" answered 404 —
 // which is the existence leak this guard exists to close.
+//
+// Every sentinel a caller relies on belongs in the typed set below even when
+// its message would also satisfy the textual fallback: the fallback is a net
+// for the formatted misses, not a contract, and a sentinel matched only by its
+// wording silently stops being classified the moment somebody rewords it.
 func isNotFoundError(err error) bool {
 	if err == nil {
 		return false
 	}
 	if errors.Is(err, ErrNotVisible) ||
 		errors.Is(err, repoerrors.ErrWorkspaceNotFound) ||
-		errors.Is(err, repoerrors.ErrTaskNotFound) {
+		errors.Is(err, repoerrors.ErrTaskNotFound) ||
+		errors.Is(err, taskmodels.ErrTaskSessionNotFound) {
 		return true
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "not found")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -36,6 +38,11 @@ const (
 // newPlanTestHandlers builds TaskHandlers with only the plan service wired —
 // the plan actions touch nothing else.
 func newPlanTestHandlers(t *testing.T) *TaskHandlers {
+	h, _ := newPlanTestHandlersWithRepo(t)
+	return h
+}
+
+func newPlanTestHandlersWithRepo(t *testing.T) (*TaskHandlers, *sqliterepo.Repository) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -91,7 +98,7 @@ func newPlanTestHandlers(t *testing.T) *TaskHandlers {
 		}
 	}
 
-	return &TaskHandlers{planService: service.NewPlanService(repo, eventBus, log), logger: log}
+	return &TaskHandlers{planService: service.NewPlanService(repo, eventBus, log), logger: log}, repo
 }
 
 func planMsg(t *testing.T, action string, payload string) *ws.Message {
@@ -184,6 +191,47 @@ func TestPlanWSActionsReportMissingPlan(t *testing.T) {
 			`{"task_id":"`+planlessID+`"}`))
 		assertPlanError(t, out, err, ws.ErrorCodeNotFound, "Task plan not found")
 	})
+}
+
+func TestPlanWSCreateReportsMissingTask(t *testing.T) {
+	h := newPlanTestHandlers(t)
+	out, err := h.wsCreateTaskPlan(context.Background(), planMsg(t, ws.ActionTaskPlanCreate,
+		`{"task_id":"task-plan-ws-missing","content":"body"}`))
+	assertPlanError(t, out, err, ws.ErrorCodeNotFound, "Task not found")
+	if strings.Contains(strings.ToLower(string(out.Payload)), "constraint") {
+		t.Fatalf("error payload leaks storage details: %s", out.Payload)
+	}
+}
+
+func TestPlanWSUpdateReportsMissingTask(t *testing.T) {
+	h, repo := newPlanTestHandlersWithRepo(t)
+	ctx := context.Background()
+	if _, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
+		TaskID: planTaskID, Content: "initial", CreatedBy: "user",
+	}); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+	h.planService = service.NewPlanService(&missingTaskOnPlanWriteRepo{Repository: repo}, nil, h.logger)
+
+	out, err := h.wsUpdateTaskPlan(ctx, planMsg(t, ws.ActionTaskPlanUpdate,
+		`{"task_id":"`+planTaskID+`","content":"updated"}`))
+	assertPlanError(t, out, err, ws.ErrorCodeNotFound, "Task not found")
+	if strings.Contains(strings.ToLower(string(out.Payload)), "constraint") {
+		t.Fatalf("error payload leaks storage details: %s", out.Payload)
+	}
+}
+
+type missingTaskOnPlanWriteRepo struct {
+	*sqliterepo.Repository
+}
+
+func (r *missingTaskOnPlanWriteRepo) WritePlanRevision(
+	context.Context,
+	*models.TaskPlan,
+	*models.TaskPlanRevision,
+	*string,
+) error {
+	return repository.ErrTaskNotFound
 }
 
 // TestPlanWSActionsSucceed pins the success payloads across a full CRUD round

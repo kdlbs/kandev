@@ -239,18 +239,24 @@ func TestEnsureOfficeDefaultWorkflow_ReviewClearsAndFansOut(t *testing.T) {
 	if review == nil {
 		t.Fatalf("Review step not found")
 	}
-	if len(review.Events.OnEnter) != 2 {
-		t.Fatalf("Review.on_enter len = %d, want 2 (clear_decisions + queue_run_for_each_participant)", len(review.Events.OnEnter))
+	if len(review.Events.OnEnter) != 3 {
+		t.Fatalf("Review.on_enter len = %d, want 3 (clear_decisions + ensure_participant_seat + queue_run_for_each_participant)", len(review.Events.OnEnter))
 	}
 	if review.Events.OnEnter[0].Type != wfmodels.OnEnterClearDecisions {
 		t.Errorf("Review.on_enter[0] = %q, want clear_decisions", review.Events.OnEnter[0].Type)
 	}
-	if review.Events.OnEnter[1].Type != wfmodels.OnEnterQueueRunForEachParticipant {
-		t.Errorf("Review.on_enter[1] = %q, want queue_run_for_each_participant", review.Events.OnEnter[1].Type)
+	if review.Events.OnEnter[1].Type != wfmodels.OnEnterEnsureParticipantSeat {
+		t.Errorf("Review.on_enter[1] = %q, want ensure_participant_seat", review.Events.OnEnter[1].Type)
 	}
-	role, _ := review.Events.OnEnter[1].Config["role"].(string)
+	if seatRole, _ := review.Events.OnEnter[1].Config["role"].(string); seatRole != "reviewer" {
+		t.Errorf("Review.on_enter[1] role = %q, want reviewer", seatRole)
+	}
+	if review.Events.OnEnter[2].Type != wfmodels.OnEnterQueueRunForEachParticipant {
+		t.Errorf("Review.on_enter[2] = %q, want queue_run_for_each_participant", review.Events.OnEnter[2].Type)
+	}
+	role, _ := review.Events.OnEnter[2].Config["role"].(string)
 	if role != "reviewer" {
-		t.Errorf("Review.on_enter[1] role = %q, want reviewer", role)
+		t.Errorf("Review.on_enter[2] role = %q, want reviewer", role)
 	}
 
 	// on_turn_complete must have two guarded transitions.

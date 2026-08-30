@@ -27,10 +27,17 @@ vi.mock("@/hooks/use-prompt-result-delivery", () => ({
 }));
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({
+    getState: () => ({
+      repositoryBranchPolicies: { revisionByRepositoryId: {} },
+    }),
+  }),
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
       userSettings: { agentGeneratedTaskTitles: mocks.agentGeneratedTaskTitles },
       upsertRepository: vi.fn(),
+      setRepositoryBranchPolicies: vi.fn(),
+      setRepositoryBranchPoliciesLoading: vi.fn(),
       repositorySets: {
         itemsByWorkspaceId: {},
         loadingByWorkspaceId: {},

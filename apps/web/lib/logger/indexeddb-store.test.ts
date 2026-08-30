@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { LogEntry } from "./buffer";
+import { prepareLogEntry, type LogEntry, type PreparedLogEntry } from "./buffer";
 import { IndexedDBLogStore, retentionPlan } from "./indexeddb-store";
 
 const DATABASE_NAME = "kandev-diagnostic-logs-v1";
@@ -89,15 +89,17 @@ describe("IndexedDB log retention planning and schema", () => {
     const store = new IndexedDBLogStore();
 
     try {
-      await expect(store.append([logEntry("a", Date.now(), "blocked")])).rejects.toThrow(
-        "IndexedDB upgrade blocked",
-      );
+      await expect(
+        store.append(prepareEntries([logEntry("a", Date.now(), "blocked")])),
+      ).rejects.toThrow("IndexedDB upgrade blocked");
     } finally {
       blocker.close();
     }
 
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    await expect(store.append([logEntry("a", Date.now(), "retried")])).resolves.toBeUndefined();
+    await expect(
+      store.append(prepareEntries([logEntry("a", Date.now(), "retried")])),
+    ).resolves.toBeUndefined();
     await expect(store.snapshot("a")).resolves.toEqual([
       expect.objectContaining({ message: "retried" }),
     ]);
@@ -105,6 +107,16 @@ describe("IndexedDB log retention planning and schema", () => {
 });
 
 describe("IndexedDB log retention writes", () => {
+  it("persists the prepared entry byte count without re-encoding it", async () => {
+    const store = new IndexedDBLogStore();
+    const prepared = prepareLogEntry(logEntry("a", Date.now(), "prepared"));
+
+    await store.append([prepared]);
+
+    const records = await readEntries();
+    expect(records[0]?.bytes).toBe(prepared.bytes);
+  });
+
   it("retains the newest entries and records exact transactional totals", async () => {
     const now = Date.now();
     const store = new IndexedDBLogStore();
@@ -115,7 +127,7 @@ describe("IndexedDB log retention writes", () => {
       ),
     ];
 
-    await store.append(entries);
+    await store.append(prepareEntries(entries));
 
     const records = await readEntries();
     expect(records).toHaveLength(MAX_ENTRIES);
@@ -135,7 +147,7 @@ describe("IndexedDB log retention writes", () => {
       logEntry("a", now - 4_300 + index, `${index}-${"x".repeat(5_000)}`),
     );
 
-    await store.append(entries);
+    await store.append(prepareEntries(entries));
 
     const records = await readEntries();
     const metadata = await readMetadata();
@@ -149,10 +161,12 @@ describe("IndexedDB log retention writes", () => {
 
   it("keeps identity snapshots partitioned while sharing the global caps", async () => {
     const store = new IndexedDBLogStore();
-    await store.append([
-      logEntry("identity-a", Date.now(), "a"),
-      logEntry("identity-b", Date.now() + 1, "b"),
-    ]);
+    await store.append(
+      prepareEntries([
+        logEntry("identity-a", Date.now(), "a"),
+        logEntry("identity-b", Date.now() + 1, "b"),
+      ]),
+    );
 
     await expect(store.snapshot("identity-a")).resolves.toHaveLength(1);
     await expect(store.snapshot("identity-b")).resolves.toHaveLength(1);
@@ -162,10 +176,10 @@ describe("IndexedDB log retention writes", () => {
 describe("IndexedDB log retention repair and concurrency", () => {
   it("repairs missing or invalid totals during the next write", async () => {
     const store = new IndexedDBLogStore();
-    await store.append([logEntry("a", Date.now(), "before repair")]);
+    await store.append(prepareEntries([logEntry("a", Date.now(), "before repair")]));
     await overwriteMetadata({ key: RETENTION_KEY, count: -1, bytes: Number.NaN });
 
-    await store.append([logEntry("a", Date.now() + 1, "after repair")]);
+    await store.append(prepareEntries([logEntry("a", Date.now() + 1, "after repair")]));
 
     const records = await readEntries();
     await expect(readMetadata()).resolves.toEqual({
@@ -177,7 +191,7 @@ describe("IndexedDB log retention repair and concurrency", () => {
 
   it("clears entries and resets totals in one transaction", async () => {
     const store = new IndexedDBLogStore();
-    await store.append([logEntry("a", Date.now(), "to clear")]);
+    await store.append(prepareEntries([logEntry("a", Date.now(), "to clear")]));
 
     await store.clear();
 
@@ -201,7 +215,9 @@ describe("IndexedDB log retention repair and concurrency", () => {
       ),
     );
 
-    await Promise.all(batches.map((batch, index) => stores[index % stores.length].append(batch)));
+    await Promise.all(
+      batches.map((batch, index) => stores[index % stores.length].append(prepareEntries(batch))),
+    );
 
     const records = await readEntries();
     const metadata = await readMetadata();
@@ -215,13 +231,13 @@ describe("IndexedDB log retention repair and concurrency", () => {
 
   it("uses only the bounded timestamp cursor for a within-limit append", async () => {
     const store = new IndexedDBLogStore();
-    await store.append([logEntry("a", Date.now(), "first")]);
+    await store.append(prepareEntries([logEntry("a", Date.now(), "first")]));
 
     const objectStoreCursor = vi.spyOn(IDBObjectStore.prototype, "openCursor");
     const timestampCursor = vi.spyOn(IDBIndex.prototype, "openCursor");
 
     try {
-      await store.append([logEntry("a", Date.now() + 1, "second")]);
+      await store.append(prepareEntries([logEntry("a", Date.now() + 1, "second")]));
 
       expect(objectStoreCursor).not.toHaveBeenCalled();
       expect(timestampCursor).toHaveBeenCalledTimes(1);
@@ -244,6 +260,10 @@ function logEntry(identityScope: string, timestamp: number, message: string): Lo
     message,
     identity_scope: identityScope,
   };
+}
+
+function prepareEntries(entries: LogEntry[]): PreparedLogEntry[] {
+  return entries.map(prepareLogEntry);
 }
 
 function persisted(entry: LogEntry, timestamp: number, bytes: number): PersistedTestEntry {
