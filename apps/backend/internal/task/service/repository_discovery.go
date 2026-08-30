@@ -317,31 +317,36 @@ func resolveMetadataPathValue(value, relativeTo string) (string, error) {
 }
 
 func parseGitConfigCoreWorktree(config string) (string, error) {
-	inCore := false
+	section := ""
 	var worktree string
 	var foundWorktree bool
-	for _, line := range strings.Split(config, "\n") {
-		line = strings.TrimSpace(line)
+	for _, rawLine := range strings.Split(config, "\n") {
+		line := strings.TrimSpace(rawLine)
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
 			continue
 		}
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			inCore = strings.EqualFold(strings.TrimSpace(line[1:len(line)-1]), "core")
+		if parsedSection, ok := parseGitConfigSection(line); ok {
+			if err := rejectGitConfigAlternateSection(parsedSection); err != nil {
+				return "", err
+			}
+			section = parsedSection
 			continue
 		}
-		if !inCore {
-			continue
+		switch {
+		case strings.EqualFold(section, "extensions"):
+			if err := rejectGitConfigWorktreeConfig(line); err != nil {
+				return "", err
+			}
+		case strings.EqualFold(section, "core"):
+			parsedWorktree, found, err := parseGitConfigWorktreeLine(line)
+			if err != nil {
+				return "", err
+			}
+			if found {
+				worktree = parsedWorktree
+				foundWorktree = true
+			}
 		}
-		key, value, found := strings.Cut(line, "=")
-		if !found || !strings.EqualFold(strings.TrimSpace(key), "worktree") {
-			continue
-		}
-		parsedWorktree, err := parseGitConfigValue(value)
-		if err != nil {
-			return "", fmt.Errorf("parse core.worktree: %w", err)
-		}
-		worktree = parsedWorktree
-		foundWorktree = true
 	}
 	if !foundWorktree {
 		return "", errors.New("core.worktree is missing")
@@ -350,6 +355,97 @@ func parseGitConfigCoreWorktree(config string) (string, error) {
 		return "", errors.New("core.worktree is empty")
 	}
 	return worktree, nil
+}
+
+func rejectGitConfigAlternateSection(section string) error {
+	sectionName := strings.ToLower(section)
+	if separator := strings.IndexAny(sectionName, " \t"); separator >= 0 {
+		sectionName = sectionName[:separator]
+	}
+	if sectionName == "include" || sectionName == "includeif" {
+		return errors.New("git config includes are not allowed")
+	}
+	return nil
+}
+
+func rejectGitConfigWorktreeConfig(line string) error {
+	key, value, found := strings.Cut(line, "=")
+	if !found {
+		if strings.EqualFold(strings.TrimSpace(line), "worktreeConfig") {
+			return errors.New("git worktree configuration is not allowed")
+		}
+		return nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(key), "worktreeConfig") {
+		return nil
+	}
+	enabled, err := parseGitConfigBoolean(value)
+	if err != nil {
+		return fmt.Errorf("parse extensions.worktreeConfig: %w", err)
+	}
+	if enabled {
+		return errors.New("git worktree configuration is not allowed")
+	}
+	return nil
+}
+
+func parseGitConfigWorktreeLine(line string) (string, bool, error) {
+	key, value, found := strings.Cut(line, "=")
+	if !found || !strings.EqualFold(strings.TrimSpace(key), "worktree") {
+		return "", false, nil
+	}
+	parsedWorktree, err := parseGitConfigValue(value)
+	if err != nil {
+		return "", false, fmt.Errorf("parse core.worktree: %w", err)
+	}
+	return parsedWorktree, true, nil
+}
+
+func parseGitConfigSection(line string) (string, bool) {
+	if !strings.HasPrefix(line, "[") {
+		return "", false
+	}
+	inQuote := false
+	escaped := false
+	for index := 1; index < len(line); index++ {
+		character := line[index]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if character == '\\' && inQuote {
+			escaped = true
+			continue
+		}
+		if character == '"' {
+			inQuote = !inQuote
+			continue
+		}
+		if character != ']' || inQuote {
+			continue
+		}
+		remainder := strings.TrimSpace(line[index+1:])
+		if remainder != "" && remainder[0] != '#' && remainder[0] != ';' {
+			return "", false
+		}
+		return strings.TrimSpace(line[1:index]), true
+	}
+	return "", false
+}
+
+func parseGitConfigBoolean(value string) (bool, error) {
+	parsed, err := parseGitConfigValue(value)
+	if err != nil {
+		return false, err
+	}
+	switch strings.ToLower(parsed) {
+	case "true", "yes", "on", "1":
+		return true, nil
+	case "false", "no", "off", "0":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid boolean value %q", parsed)
+	}
 }
 
 func parseGitConfigValue(value string) (string, error) {
@@ -388,7 +484,7 @@ func parseGitConfigValue(value string) (string, error) {
 
 func gitConfigCommentStart(value string) int {
 	for index, character := range value {
-		if (character == '#' || character == ';') && index > 0 && isGitConfigWhitespace(value[index-1]) {
+		if character == '#' || character == ';' {
 			return index
 		}
 	}
@@ -411,10 +507,6 @@ func gitConfigQuotedValueEnd(value string) (int, error) {
 		}
 	}
 	return 0, errors.New("unterminated quoted Git config value")
-}
-
-func isGitConfigWhitespace(character byte) bool {
-	return character == ' ' || character == '\t'
 }
 
 func sameCanonicalPath(left, right string) bool {

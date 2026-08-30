@@ -17,12 +17,15 @@ linked-worktree reciprocal proof succeeds or an initialized submodule proves
 ownership through `core.worktree` in its canonical module metadata directory.
 The resolved worktree must canonically equal the selected directory. Metadata
 with `commondir` remains a linked-worktree-only shape and cannot use the
-submodule proof.
+submodule proof. Submodule metadata that enables Git includes or
+`extensions.worktreeConfig` is rejected because this validator does not
+evaluate those alternate configuration sources.
 
 ## Consequences
 
 Initialized submodules can be registered explicitly while arbitrary pointers,
-missing or empty `core.worktree`, and mismatched paths fail closed.
+missing or empty `core.worktree`, alternate configuration sources, and
+mismatched paths fail closed.
 
 ## Alternatives Considered
 

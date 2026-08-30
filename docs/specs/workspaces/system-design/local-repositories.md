@@ -20,7 +20,10 @@ independent reciprocal validators: linked worktrees require `gitdir`,
 `commondir`, and placement under `<common>/worktrees`; initialized submodules
 require a non-empty `[core] worktree` value in module metadata. Relative values
 resolve from the canonical metadata directory and must canonically equal the
-selected repository. A `commondir` file excludes the submodule validator.
+selected repository. A `commondir` file excludes the submodule validator. Git
+include sections and `extensions.worktreeConfig` are rejected for submodule
+metadata because the validator does not evaluate alternate configuration
+sources.
 
 When neither validator succeeds, their errors are joined to retain diagnostics.
 

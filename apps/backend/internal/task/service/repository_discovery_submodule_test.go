@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -114,6 +115,7 @@ func TestParseGitConfigCoreWorktree(t *testing.T) {
 		{"case and whitespace", "[Core]\n WorkTree = ../module \n", "../module", false},
 		{"compact", "[core]\nworktree=module\n", "module", false},
 		{"quoted value with inline comment", "[core]\nworktree = \"../module#hash\" ; keep hash\n", "../module#hash", false},
+		{"unquoted value with inline comment", "[core]\nworktree = ../module#hash\n", "../module", false},
 		{"partially quoted value", "[core]\nworktree = \"../module\"suffix\n", "../modulesuffix", false},
 		{"duplicate uses effective last value", "[core]\nworktree=selected\nworktree=other\n", "other", false},
 		{"outside core", "worktree=wrong\n[other]\nworktree=also-wrong\n", "", true},
@@ -164,5 +166,77 @@ func TestResolveExplicitLocalRepositoryPath_RejectsMismatchedSubmoduleWorktree(t
 	_, _, err = resolveExplicitLocalRepositoryPath(repoPath)
 	if !errors.Is(err, ErrInvalidRepositoryPath) {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestResolveExplicitLocalRepositoryPath_RejectsSubmoduleAlternateConfigSources(t *testing.T) {
+	for _, test := range []struct {
+		name             string
+		config           string
+		additionalConfig map[string]string
+	}{
+		{
+			name:   "include override",
+			config: "[core]\nworktree = %s\n[include]\npath = override.conf\n",
+			additionalConfig: map[string]string{
+				"override.conf": "[core]\nworktree = %s\n",
+			},
+		},
+		{
+			name:   "include override with header comment",
+			config: "[core]\nworktree = %s\n[include] # load override\npath = override.conf\n",
+			additionalConfig: map[string]string{
+				"override.conf": "[core]\nworktree = %s\n",
+			},
+		},
+		{
+			name:   "worktree config override",
+			config: "[core]\nworktree = %s\n[extensions]\nworktreeConfig = true\n",
+			additionalConfig: map[string]string{
+				"config.worktree": "[core]\nworktree = %s\n",
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			parent := canonicalTempDir(t)
+			repoPath := filepath.Join(parent, "module")
+			gitDir := filepath.Join(parent, "metadata", "modules", "module")
+			other := filepath.Join(parent, "other")
+			selectedWorktree, err := filepath.Rel(gitDir, repoPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			otherWorktree, err := filepath.Rel(gitDir, other)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range []string{repoPath, other, filepath.Join(gitDir, "refs", "heads")} {
+				if err := os.MkdirAll(path, 0o755); err != nil {
+					t.Fatalf("MkdirAll %q: %v", path, err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(repoPath, ".git"), []byte("gitdir: "+gitDir), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(gitDir, "config"), []byte(fmt.Sprintf(test.config, selectedWorktree)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for name, config := range test.additionalConfig {
+				if err := os.WriteFile(filepath.Join(gitDir, name), []byte(fmt.Sprintf(config, otherWorktree)), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/main"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(gitDir, "refs", "heads", "main"), []byte("0000000000000000000000000000000000000000"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, _, err = resolveExplicitLocalRepositoryPath(repoPath)
+			if !errors.Is(err, ErrInvalidRepositoryPath) {
+				t.Fatalf("error = %v", err)
+			}
+		})
 	}
 }
