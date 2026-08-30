@@ -15,7 +15,7 @@ Any agent runtime that sandboxes its own file edits via user namespaces therefor
 
 Empirical probe results on the target host confirmed two independent blocking layers:
 
-1. **seccomp** — Docker's default profile gates `clone` on a `SCMP_CMP_MASKED_EQ` check over the namespace flags and puts `unshare`, `mount`, `umount2`, `pivot_root`, `setns` in a `CAP_SYS_ADMIN`-gated group.
+1. **seccomp** — Docker's default profile gates `clone` on a `SCMP_CMP_MASKED_EQ` check over the namespace flags and puts `unshare`, `mount`, `umount2`, and `setns` in a `CAP_SYS_ADMIN`-gated group. It does not name `pivot_root`, so the default action denies it.
 2. **AppArmor** — the host runs `apparmor_restrict_unprivileged_userns=1` (Ubuntu 24.04 kernel), and `docker-default` carries no `userns` allow rule plus an explicit `deny mount,`.
 
 Relaxing only one is not enough: seccomp alone fails because AppArmor blocks mount operations inside user namespaces, and AppArmor alone fails because seccomp blocks namespace creation.

@@ -42,6 +42,19 @@ func rejectOperatorConfigKeys(config map[string]string) error {
 	return nil
 }
 
+func preserveOperatorConfigKeys(config, current map[string]string) map[string]string {
+	preserved := make(map[string]string, len(config)+len(operatorOnlyConfigKeys))
+	for key, value := range config {
+		preserved[key] = value
+	}
+	for _, key := range operatorOnlyConfigKeys {
+		if value, ok := current[key]; ok {
+			preserved[key] = value
+		}
+	}
+	return preserved
+}
+
 func (h *Handlers) handleListExecutors(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	executors, err := h.taskSvc.ListExecutors(ctx)
 	if err != nil {
@@ -143,6 +156,14 @@ func (h *Handlers) handleUpdateExecutorProfile(ctx context.Context, msg *ws.Mess
 
 	if err := rejectOperatorConfigKeys(req.Config); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+	if req.Config != nil {
+		current, err := h.taskSvc.GetExecutorProfile(ctx, req.ProfileID)
+		if err != nil {
+			h.logger.Error("failed to load executor profile before MCP update", zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update executor profile: "+err.Error(), nil)
+		}
+		req.Config = preserveOperatorConfigKeys(req.Config, current.Config)
 	}
 
 	profile, err := h.taskSvc.UpdateExecutorProfile(ctx, req.ProfileID, &service.UpdateExecutorProfileRequest{

@@ -439,13 +439,18 @@ export function UserNamespacesCard({
         title={t("executors:allowUserNamespacesTitle")}
         description={t("executors:allowUserNamespacesDescription")}
         actions={
-          <Switch
-            id="allow-user-namespaces"
-            aria-label={t("executors:allowUserNamespacesTitle")}
-            checked={enabled}
-            onCheckedChange={onChange}
-            data-settings-dirty={isDirty}
-          />
+          <label
+            htmlFor="allow-user-namespaces"
+            className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center md:min-h-0 md:min-w-0"
+          >
+            <Switch
+              id="allow-user-namespaces"
+              aria-label={t("executors:allowUserNamespacesTitle")}
+              checked={enabled}
+              onCheckedChange={onChange}
+              data-settings-dirty={isDirty}
+            />
+          </label>
         }
       />
       <CardContent>

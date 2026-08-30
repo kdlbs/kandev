@@ -105,3 +105,35 @@ func TestHandleCreateExecutorProfileAcceptsNormalConfig(t *testing.T) {
 	require.Len(t, profiles, 1)
 	assert.Equal(t, "kandev-agent:e2e", profiles[0].Config["image_tag"])
 }
+
+func TestHandleUpdateExecutorProfilePreservesOperatorConfigDuringOrdinaryConfigUpdate(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newTestTaskService(t)
+	executor, err := svc.CreateExecutor(ctx, &service.CreateExecutorRequest{
+		Name: "Docker", Type: models.ExecutorTypeLocalDocker, Status: models.ExecutorStatusActive, Resumable: true,
+	})
+	require.NoError(t, err)
+	profile, err := svc.CreateExecutorProfile(ctx, &service.CreateExecutorProfileRequest{
+		ExecutorID: executor.ID,
+		Name:       "Operator",
+		Config: map[string]string{
+			allowUserNamespacesProfileConfigKey: "true",
+			"image_tag":                         "kandev-agent:old",
+		},
+	})
+	require.NoError(t, err)
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+
+	response, err := h.handleUpdateExecutorProfile(ctx, makeWSMessage(
+		t, ws.ActionMCPUpdateExecutorProfile, map[string]any{
+			"profile_id": profile.ID,
+			"config":     map[string]string{"image_tag": "kandev-agent:new"},
+		},
+	))
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeResponse, response.Type)
+	stored, err := svc.GetExecutorProfile(ctx, profile.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "true", stored.Config[allowUserNamespacesProfileConfigKey])
+	assert.Equal(t, "kandev-agent:new", stored.Config["image_tag"])
+}
