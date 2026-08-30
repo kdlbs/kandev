@@ -59,6 +59,7 @@ type WorkspaceRateLimitSnapshot struct {
 	Principal          RateLimitPrincipalSnapshot         `json:"principal"`
 	Core               RateLimitBucketSnapshot            `json:"core"`
 	GraphQL            RateLimitBucketSnapshot            `json:"graphql"`
+	Search             RateLimitBucketSnapshot            `json:"search"`
 	Secondary          ObservedSecondaryRateLimitSnapshot `json:"observed_secondary"`
 	InteractiveAllowed bool                               `json:"interactive_allowed"`
 	BackgroundAllowed  bool                               `json:"background_allowed"`
@@ -98,13 +99,16 @@ func (s *Service) GetWorkspaceRateLimitSnapshot(
 	now := time.Now().UTC()
 	coreDecision := admission.snapshot(ResourceCore, now)
 	graphqlDecision := admission.snapshot(ResourceGraphQL, now)
+	searchDecision := admission.snapshot(ResourceSearch, now)
 	interactiveAllowed, interactiveReason := combineRateAdmission(
 		coreDecision.interactiveAllowed, coreDecision.interactiveReason,
 		graphqlDecision.interactiveAllowed, graphqlDecision.interactiveReason,
+		searchDecision.interactiveAllowed, searchDecision.interactiveReason,
 	)
 	backgroundAllowed, backgroundReason := combineRateAdmission(
 		coreDecision.backgroundAllowed, coreDecision.backgroundReason,
 		graphqlDecision.backgroundAllowed, graphqlDecision.backgroundReason,
+		searchDecision.backgroundAllowed, searchDecision.backgroundReason,
 	)
 	blockingReason := interactiveReason
 	if blockingReason == "" {
@@ -120,6 +124,7 @@ func (s *Service) GetWorkspaceRateLimitSnapshot(
 		},
 		Core:               rateLimitBucketSnapshot(tracker, ResourceCore, now),
 		GraphQL:            rateLimitBucketSnapshot(tracker, ResourceGraphQL, now),
+		Search:             rateLimitBucketSnapshot(tracker, ResourceSearch, now),
 		Secondary:          observedSecondarySnapshot(tracker, now),
 		InteractiveAllowed: interactiveAllowed,
 		BackgroundAllowed:  backgroundAllowed,
@@ -168,6 +173,7 @@ func observedSecondarySnapshot(tracker *RateTracker, now time.Time) ObservedSeco
 	states := []SecondaryRateLimitState{
 		tracker.Secondary(ResourceCore),
 		tracker.Secondary(ResourceGraphQL),
+		tracker.Secondary(ResourceSearch),
 	}
 	var selected SecondaryRateLimitState
 	for _, state := range states {
@@ -190,7 +196,7 @@ func observedSecondarySnapshot(tracker *RateTracker, now time.Time) ObservedSeco
 	return ObservedSecondaryRateLimitSnapshot{
 		Active: selected.Active, Resource: selected.Resource,
 		RetryAt: &retryAt, ObservedAt: &observedAt,
-		RetrySource: selected.RetrySource, Reason: selected.Reason,
+		RetrySource: selected.RetrySource, Reason: rateLimitBlockSecondary,
 	}
 }
 
@@ -199,12 +205,17 @@ func combineRateAdmission(
 	firstReason string,
 	secondAllowed bool,
 	secondReason string,
+	thirdAllowed bool,
+	thirdReason string,
 ) (bool, string) {
 	if !firstAllowed {
 		return false, firstReason
 	}
 	if !secondAllowed {
 		return false, secondReason
+	}
+	if !thirdAllowed {
+		return false, thirdReason
 	}
 	return true, ""
 }

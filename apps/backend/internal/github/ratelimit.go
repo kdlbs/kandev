@@ -34,11 +34,13 @@ const rateUpdateDebounce = 5 * time.Second
 
 // RateSnapshot captures the rate-limit state for one bucket at a point in time.
 type RateSnapshot struct {
-	Resource  Resource  `json:"resource"`
-	Remaining int       `json:"remaining"`
-	Limit     int       `json:"limit"`
-	ResetAt   time.Time `json:"reset_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Resource          Resource  `json:"resource"`
+	Remaining         int       `json:"remaining"`
+	RemainingObserved bool      `json:"-"`
+	ParsedFromHeaders bool      `json:"-"`
+	Limit             int       `json:"limit"`
+	ResetAt           time.Time `json:"reset_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // SecondaryRateLimitState is Kandev's observed and locally enforced view of a
@@ -56,7 +58,8 @@ type SecondaryRateLimitState struct {
 // the future. Limit may be unknown (0) when the snapshot was synthesized from
 // an out-of-band signal (e.g. `gh` stderr).
 func (s RateSnapshot) Exhausted() bool {
-	return s.Remaining <= 0 && s.ResetAt.After(time.Now())
+	return s.Remaining <= 0 && s.ResetAt.After(time.Now()) &&
+		(s.RemainingObserved || !s.ParsedFromHeaders)
 }
 
 // BackgroundReserve returns the quota retained for interactive requests.
@@ -358,11 +361,13 @@ func parseRateHeadersAt(resp *http.Response, defaultResource Resource, now time.
 		resource = Resource(strings.ToLower(r))
 	}
 	return RateSnapshot{
-		Resource:  resource,
-		Limit:     limit,
-		Remaining: remaining,
-		ResetAt:   time.Unix(reset, 0).UTC(),
-		UpdatedAt: now,
+		Resource:          resource,
+		Limit:             limit,
+		Remaining:         remaining,
+		RemainingObserved: remainingStr != "",
+		ParsedFromHeaders: true,
+		ResetAt:           time.Unix(reset, 0).UTC(),
+		UpdatedAt:         now,
 	}, true
 }
 
@@ -379,10 +384,11 @@ func (r *RateTracker) markRateExhausted(resource Resource, resetAt time.Time) {
 	}
 	prev, _ := r.Snapshot(resource)
 	r.Record(RateSnapshot{
-		Resource:  resource,
-		Limit:     prev.Limit,
-		Remaining: 0,
-		ResetAt:   resetAt,
-		UpdatedAt: time.Now().UTC(),
+		Resource:          resource,
+		Limit:             prev.Limit,
+		Remaining:         0,
+		RemainingObserved: true,
+		ResetAt:           resetAt,
+		UpdatedAt:         time.Now().UTC(),
 	})
 }

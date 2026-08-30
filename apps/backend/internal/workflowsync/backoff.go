@@ -60,7 +60,9 @@ func failureKind(provider string, syncErr error) github.FailureKind {
 	if provider == ProviderGitLab {
 		return github.FailureTransient
 	}
-	if errors.Is(syncErr, github.ErrNoClient) {
+	if errors.Is(syncErr, github.ErrNoClient) ||
+		errors.Is(syncErr, github.ErrGitHubNotConfigured) ||
+		errors.Is(syncErr, github.ErrGitHubConnectionInvalid) {
 		return github.FailureInvalidCredentials
 	}
 	kind := github.FailureKindOf(syncErr)

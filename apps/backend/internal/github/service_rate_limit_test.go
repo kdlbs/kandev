@@ -140,3 +140,45 @@ func TestObservedSecondarySnapshotUsesOverallEnforcedRetryBoundary(t *testing.T)
 		t.Fatalf("secondary snapshot = %+v", snapshot)
 	}
 }
+
+func TestServiceGetWorkspaceRateLimitSnapshotIncludesSearchBucket(t *testing.T) {
+	store := newTestStore(t)
+	seedConnectionWorkspaces(t, store, "workspace-1")
+	if err := store.UpsertWorkspaceConnection(context.Background(), &WorkspaceConnection{
+		WorkspaceID: "workspace-1", Source: ConnectionSourcePAT,
+		GitHubHost: defaultGitHubHost, Login: "yattdev", Status: ConnectionStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(nil, AuthMethodPAT, nil, store, nil, testLogger(t))
+	t.Cleanup(svc.Stop)
+	tracker, _ := svc.rateCoordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Source: ConnectionSourcePAT, Login: "yattdev",
+	}, nil)
+	now := time.Now().UTC()
+	tracker.Record(RateSnapshot{Resource: ResourceCore, Limit: 5000, Remaining: 5000, ResetAt: now.Add(time.Hour), UpdatedAt: now})
+	tracker.Record(RateSnapshot{Resource: ResourceGraphQL, Limit: 5000, Remaining: 5000, ResetAt: now.Add(time.Hour), UpdatedAt: now})
+	tracker.Record(RateSnapshot{Resource: ResourceSearch, Limit: 30, Remaining: 0, RemainingObserved: true, ResetAt: now.Add(time.Hour), UpdatedAt: now})
+
+	snapshot, err := svc.GetWorkspaceRateLimitSnapshot(context.Background(), "workspace-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Search.Resource != ResourceSearch || snapshot.Search.Remaining != 0 {
+		t.Fatalf("search snapshot = %+v", snapshot.Search)
+	}
+	if snapshot.InteractiveAllowed || snapshot.BackgroundAllowed || snapshot.BlockingReason != "primary_rate_limit" {
+		t.Fatalf("search admission snapshot = %+v", snapshot)
+	}
+}
+
+func TestObservedSecondarySnapshotSanitizesProviderReason(t *testing.T) {
+	tracker := NewRateTracker(nil, nil)
+	tracker.ObserveSecondary(ResourceCore, time.Now().Add(time.Hour), RetrySourceRetryAfter,
+		"repository=private-org/private-repo token=secret")
+
+	snapshot := observedSecondarySnapshot(tracker, time.Now())
+	if snapshot.Reason != rateLimitBlockSecondary {
+		t.Fatalf("reason = %q, want sanitized classification", snapshot.Reason)
+	}
+}

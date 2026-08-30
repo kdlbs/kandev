@@ -71,6 +71,14 @@ func TestBuildFailureDirectiveSuspendsOnlyPermanentGitHubFailures(t *testing.T) 
 	assert.NotNil(t, gitLab.nextAttemptAt)
 }
 
+func TestFailureKindTreatsMissingAndInvalidGitHubConnectionsAsPermanent(t *testing.T) {
+	for _, err := range []error{github.ErrGitHubNotConfigured, github.ErrGitHubConnectionInvalid} {
+		if got := failureKind(ProviderGitHub, err); got != github.FailureInvalidCredentials {
+			t.Errorf("failureKind(%v) = %q, want invalid_credentials", err, got)
+		}
+	}
+}
+
 func TestEqualJitterSeamCanSpreadWorkspaceRetries(t *testing.T) {
 	now := time.Date(2026, 8, 29, 7, 0, 0, 0, time.UTC)
 	seen := map[time.Time]bool{}

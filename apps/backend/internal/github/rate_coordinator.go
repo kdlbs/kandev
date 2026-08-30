@@ -48,7 +48,7 @@ func (a *RateAdmission) snapshot(resource Resource, now time.Time) rateAdmission
 		return decision
 	}
 	if rate, known := a.principal.tracker.Snapshot(resource); known && rate.ResetAt.After(now) {
-		if rate.Remaining <= 0 {
+		if primaryRateExhausted(rate) {
 			decision.interactiveAllowed = false
 			decision.backgroundAllowed = false
 			decision.interactiveReason = rateLimitBlockPrimary
@@ -78,6 +78,10 @@ func (a *RateAdmission) snapshot(resource Resource, now time.Time) rateAdmission
 	}
 	a.principal.mu.Unlock()
 	return decision
+}
+
+func primaryRateExhausted(rate RateSnapshot) bool {
+	return rate.Remaining <= 0 && (rate.RemainingObserved || !rate.ParsedFromHeaders)
 }
 
 const defaultBackgroundPace = time.Second

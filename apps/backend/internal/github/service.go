@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -290,6 +291,9 @@ func (s *Service) coordinateLegacyClient(client Client, login string) {
 	if s.rateCoordinator == nil {
 		s.rateCoordinator = NewRateCoordinator(nil, s.logger)
 	}
+	if strings.TrimSpace(login) == "" {
+		login = resolvedLegacyLogin(client)
+	}
 	principal := AuthPrincipal{
 		Kind: AuthPrincipalHuman, Source: ConnectionSourceLegacyShared,
 		Login: login, WorkspaceID: "legacy",
@@ -297,6 +301,30 @@ func (s *Service) coordinateLegacyClient(client Client, login string) {
 	tracker, admission := s.rateCoordinator.coordinate(defaultGitHubHost, principal, s.rateTracker)
 	wireRateTracker(client, tracker)
 	wireRateAdmission(client, admission)
+}
+
+func resolvedLegacyLogin(client Client) string {
+	// Only startup clients with a real authenticated identity should make this
+	// probe. Test/fallback clients may embed nil implementations.
+	switch typedClient := client.(type) {
+	case *GHClient:
+		if typedClient == nil {
+			return ""
+		}
+		login, err := typedClient.GetAuthenticatedUser(context.Background())
+		if err == nil {
+			return strings.TrimSpace(login)
+		}
+	case *TokenClient:
+		if typedClient == nil {
+			return ""
+		}
+		login, err := typedClient.GetAuthenticatedUser(context.Background())
+		if err == nil {
+			return strings.TrimSpace(login)
+		}
+	}
+	return ""
 }
 
 // SetTaskDeleter sets the task deletion dependency for cleanup operations.

@@ -727,11 +727,12 @@ func recordGraphQLRateFromPayload(tracker *RateTracker, body []byte) {
 		return
 	}
 	tracker.Record(RateSnapshot{
-		Resource:  ResourceGraphQL,
-		Limit:     rl.Limit,
-		Remaining: rl.Remaining,
-		ResetAt:   rl.ResetAt,
-		UpdatedAt: time.Now().UTC(),
+		Resource:          ResourceGraphQL,
+		Limit:             rl.Limit,
+		Remaining:         rl.Remaining,
+		RemainingObserved: true,
+		ResetAt:           rl.ResetAt,
+		UpdatedAt:         time.Now().UTC(),
 	})
 }
 

@@ -82,6 +82,18 @@ func newWorkspaceAuthenticatedTestService(
 	return service
 }
 
+func TestNewServiceCoordinatesLegacyClientByResolvedLogin(t *testing.T) {
+	client := &PATClient{username: "test-user"}
+	service := NewService(client, AuthMethodPAT, nil, nil, nil, testLogger(t))
+	t.Cleanup(service.Stop)
+	resolvedTracker, _ := service.rateCoordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Source: ConnectionSourceLegacyShared, Login: "test-user",
+	}, nil)
+	if service.rateTracker != resolvedTracker {
+		t.Fatal("startup legacy client was not registered under its resolved login")
+	}
+}
+
 func withTestWorkspace(watch *PRWatch) *PRWatch {
 	if watch.WorkspaceID == "" {
 		watch.WorkspaceID = testWorkspaceID
