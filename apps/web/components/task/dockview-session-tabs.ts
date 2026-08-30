@@ -132,6 +132,16 @@ export function setupChatPanelSafetyNet(
           if (isDebug()) debug("setupChatPanelSafetyNet: skip recreate (no active session)");
           return;
         }
+        // An explicit Hide is also valid when it removes the last visible
+        // session panel. Do not undo that user intent from the safety net.
+        if (hiddenSessionIdsFor(api).has(activeSessionId)) {
+          if (isDebug()) {
+            debug("setupChatPanelSafetyNet: skip recreate (session explicitly hidden)", {
+              activeSessionId,
+            });
+          }
+          return;
+        }
         // Don't recreate a panel for a session that no longer exists in the
         // store — this guards against handleDelete racing with the safety net.
         const activeTaskId = appStore.getState().tasks.activeTaskId;

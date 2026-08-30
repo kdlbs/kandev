@@ -132,6 +132,20 @@ test.describe("Session tab management — close behavior", () => {
     await expect(session.sessionReopenItem(session1Id)).toBeVisible();
     await session.sessionReopenItem(session1Id).click();
     await expect(session.sessionTabBySessionId(session1Id)).toBeVisible({ timeout: 5_000 });
+
+    // Hide both panels in sequence. The second hide removes the sole visible
+    // session panel and must not be undone by the chat safety net.
+    await session.sessionTabBySessionId(session1Id).click({ button: "right" });
+    await session.contextMenuItem("Hide").click();
+    await session.sessionTabBySessionId(session2Id).click({ button: "right" });
+    await session.contextMenuItem("Hide").click();
+    await expect(session.sessionTabBySessionId(session2Id)).not.toBeVisible({ timeout: 5_000 });
+    await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible();
+
+    await session.addPanelButton().click();
+    await expect(session.sessionReopenItem(session2Id)).toBeVisible();
+    await session.sessionReopenItem(session2Id).click();
+    await expect(session.sessionTabBySessionId(session2Id)).toBeVisible({ timeout: 5_000 });
   });
 
   test("Hide closes the panel without deleting the session and allows reopening", async ({
