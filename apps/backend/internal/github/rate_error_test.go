@@ -33,6 +33,15 @@ func TestClassifyGitHubResponse(t *testing.T) {
 			wantKind: FailurePrimaryRateLimit, wantSource: RetrySourcePrimaryReset, wantRetry: reset,
 		},
 		{
+			name: "generic forbidden with zero remaining is primary", status: http.StatusForbidden,
+			body: `{"message":"Forbidden"}`,
+			headers: http.Header{
+				"X-Ratelimit-Remaining": {"0"},
+				"X-Ratelimit-Reset":     {strconv.FormatInt(reset.Unix(), 10)},
+			},
+			wantKind: FailurePrimaryRateLimit, wantSource: RetrySourcePrimaryReset, wantRetry: reset,
+		},
+		{
 			name: "live incident full primary plus refusal", status: http.StatusForbidden,
 			body: `{"message":"API rate limit exceeded for user ID 79718216"}`,
 			headers: http.Header{

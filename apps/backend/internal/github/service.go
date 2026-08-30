@@ -291,9 +291,6 @@ func (s *Service) coordinateLegacyClient(client Client, login string) {
 	if s.rateCoordinator == nil {
 		s.rateCoordinator = NewRateCoordinator(nil, s.logger)
 	}
-	if strings.TrimSpace(login) == "" {
-		login = resolvedLegacyLogin(client)
-	}
 	principal := AuthPrincipal{
 		Kind: AuthPrincipalHuman, Source: ConnectionSourceLegacyShared,
 		Login: login, WorkspaceID: "legacy",
@@ -301,6 +298,15 @@ func (s *Service) coordinateLegacyClient(client Client, login string) {
 	tracker, admission := s.rateCoordinator.coordinate(defaultGitHubHost, principal, s.rateTracker)
 	wireRateTracker(client, tracker)
 	wireRateAdmission(client, admission)
+	if strings.TrimSpace(login) == "" {
+		login = resolvedLegacyLogin(client)
+		if login != "" {
+			principal.Login = login
+			tracker, admission = s.rateCoordinator.coordinate(defaultGitHubHost, principal, s.rateTracker)
+			wireRateTracker(client, tracker)
+			wireRateAdmission(client, admission)
+		}
+	}
 }
 
 func resolvedLegacyLogin(client Client) string {

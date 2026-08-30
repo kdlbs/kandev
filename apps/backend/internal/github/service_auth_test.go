@@ -2,7 +2,10 @@ package github
 
 import (
 	"context"
+	"net/http"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 const testWorkspaceID = "workspace-test"
@@ -92,6 +95,65 @@ func TestNewServiceCoordinatesLegacyClientByResolvedLogin(t *testing.T) {
 	if service.rateTracker != resolvedTracker {
 		t.Fatal("startup legacy client was not registered under its resolved login")
 	}
+}
+
+func TestCoordinateLegacyClientGatesIdentityProbe(t *testing.T) {
+	tracker := NewRateTracker(nil, nil)
+	reset := time.Now().Add(time.Hour)
+	tracker.Record(RateSnapshot{
+		Resource: ResourceCore, Remaining: 0, RemainingObserved: true,
+		Limit: 5000, ResetAt: reset, UpdatedAt: time.Now().UTC(),
+	})
+	var requests atomic.Int32
+	client := &PATClient{
+		token: "token",
+		httpClient: &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			requests.Add(1)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       http.NoBody,
+			}, nil
+		})},
+	}
+	service := &Service{
+		rateTracker:     tracker,
+		rateCoordinator: NewRateCoordinator(nil, testLogger(t)),
+		logger:          testLogger(t),
+	}
+
+	done := make(chan struct{})
+	go func() {
+		service.coordinateLegacyClient(client, "")
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("identity probe completed while the primary bucket was exhausted")
+	case <-time.After(25 * time.Millisecond):
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("identity probe requests = %d, want zero while admission is blocked", got)
+	}
+
+	tracker.Record(RateSnapshot{
+		Resource: ResourceCore, Remaining: 100, RemainingObserved: true,
+		Limit: 5000, ResetAt: reset, UpdatedAt: time.Now().UTC(),
+	})
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("identity probe did not complete after admission recovered")
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("identity probe requests = %d, want one", got)
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func withTestWorkspace(watch *PRWatch) *PRWatch {

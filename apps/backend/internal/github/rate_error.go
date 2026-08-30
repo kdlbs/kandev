@@ -71,8 +71,7 @@ func classifyFailureKind(status int, body, remainingHeader string) FailureKind {
 	rateSignal := status == http.StatusTooManyRequests || strings.Contains(lower, "rate limit") ||
 		strings.Contains(lower, "abuse detection") || strings.Contains(lower, "secondary rate") ||
 		strings.Contains(lower, "rate_limited")
-	remaining, remainingErr := strconv.Atoi(strings.TrimSpace(remainingHeader))
-	if rateSignal && remainingErr == nil && remaining <= 0 {
+	if primaryRateLimitResponse(status, remainingHeader) {
 		return FailurePrimaryRateLimit
 	}
 	if rateSignal && (status == http.StatusForbidden || status == http.StatusTooManyRequests ||
@@ -89,6 +88,14 @@ func classifyFailureKind(status int, body, remainingHeader string) FailureKind {
 		return FailureTransient
 	}
 	return FailureUnknown
+}
+
+func primaryRateLimitResponse(status int, remainingHeader string) bool {
+	if status != http.StatusForbidden && status != http.StatusTooManyRequests {
+		return false
+	}
+	remaining, err := strconv.Atoi(strings.TrimSpace(remainingHeader))
+	return err == nil && remaining <= 0
 }
 
 func invalidCredentialFailure(status int, lowerBody string) bool {
