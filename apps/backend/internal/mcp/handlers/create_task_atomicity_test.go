@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -21,6 +22,7 @@ const unknownReferenceUUID = "1f63b0c4-892d-44ea-a30c-f2a0300298bb"
 
 type atomicityFixture struct {
 	svc         *service.Service
+	blockers    *memBlockerRepo
 	repo        *sqliterepo.Repository
 	handlers    *Handlers
 	workspaceID string
@@ -30,7 +32,8 @@ type atomicityFixture struct {
 func newAtomicityFixture(t *testing.T) *atomicityFixture {
 	t.Helper()
 	svc, repo := newTestTaskService(t)
-	svc.SetBlockerRepository(&memBlockerRepo{})
+	blockers := &memBlockerRepo{}
+	svc.SetBlockerRepository(blockers)
 	ctx := context.Background()
 	workspaces, err := svc.ListWorkspaces(ctx)
 	require.NoError(t, err)
@@ -38,6 +41,7 @@ func newAtomicityFixture(t *testing.T) *atomicityFixture {
 	require.NoError(t, err)
 	return &atomicityFixture{
 		svc:         svc,
+		blockers:    blockers,
 		repo:        repo,
 		handlers:    NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t)),
 		workspaceID: workspaces[0].ID,
@@ -54,6 +58,18 @@ func (f *atomicityFixture) newRepository(t *testing.T, name string) *models.Repo
 	repository := &models.Repository{WorkspaceID: f.workspaceID, Name: name}
 	require.NoError(t, f.repo.CreateRepository(context.Background(), repository))
 	return repository
+}
+
+// createdTaskID creates a task through the handler and returns its id.
+func (f *atomicityFixture) createdTaskID(t *testing.T, title string) string {
+	t.Helper()
+	resp := f.create(t, map[string]interface{}{"title": title})
+	require.NotEqual(t, ws.MessageTypeError, resp.Type, "setup create failed: %s", string(resp.Payload))
+	var created map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+	id, _ := created["id"].(string)
+	require.NotEmpty(t, id)
+	return id
 }
 
 func (f *atomicityFixture) taskCount(t *testing.T) int {
@@ -87,10 +103,32 @@ func (f *atomicityFixture) create(t *testing.T, overrides map[string]interface{}
 // tests only need edges to be creatable and readable back.
 type memBlockerRepo struct {
 	edges []*orchmodels.TaskBlocker
+	// failCreateAfter makes the (failCreateAfter+1)-th CreateTaskBlocker fail,
+	// standing in for a blocker deleted between pre-insert validation and the
+	// post-insert write. Zero disables the injection.
+	failCreateAfter int
+	creates         int
 }
 
 func (m *memBlockerRepo) CreateTaskBlocker(_ context.Context, blocker *orchmodels.TaskBlocker) error {
+	m.creates++
+	if m.failCreateAfter > 0 && m.creates > m.failCreateAfter {
+		return errors.New("blocker vanished")
+	}
 	m.edges = append(m.edges, blocker)
+	return nil
+}
+
+// DeleteTaskBlockersForTask satisfies the optional taskDependencyCleaner seam
+// the service uses to tear down edges for a deleted task.
+func (m *memBlockerRepo) DeleteTaskBlockersForTask(_ context.Context, taskID string) error {
+	kept := m.edges[:0]
+	for _, edge := range m.edges {
+		if edge.TaskID != taskID && edge.BlockerTaskID != taskID {
+			kept = append(kept, edge)
+		}
+	}
+	m.edges = kept
 	return nil
 }
 
@@ -253,4 +291,31 @@ func TestHandleCreateTask_BlockedByWithDeferredLaunchStillSucceeds(t *testing.T)
 	blockers, err := f.svc.GetBlockers(context.Background(), taskID)
 	require.NoError(t, err)
 	require.Equal(t, []string{blockerID}, blockers, "blocker edge must still be created")
+}
+
+// TestHandleCreateTask_RollbackAlsoRemovesDependencyEdges covers the residual
+// TOCTOU path, where a blocker passes pre-insert validation and is gone by the
+// time the edge is written.
+//
+// blocked_by is written one edge at a time, so failing on the second entry
+// leaves the first already persisted. task_blockers predates the tasks foreign
+// key and nothing cascades, so a rollback that deleted only the task row would
+// swap an orphan task for an orphan edge pointing at a task that no longer
+// exists.
+func TestHandleCreateTask_RollbackAlsoRemovesDependencyEdges(t *testing.T) {
+	f := newAtomicityFixture(t)
+	first := f.createdTaskID(t, "Blocker one")
+	second := f.createdTaskID(t, "Blocker two")
+
+	before := f.taskCount(t)
+	f.blockers.failCreateAfter = 1
+
+	resp := f.create(t, map[string]interface{}{
+		"title":      "Blocked child",
+		"blocked_by": []string{first, second},
+	})
+
+	errorPayload(t, resp)
+	require.Equal(t, before, f.taskCount(t), "failed create must leave no orphan task row")
+	require.Empty(t, f.blockers.edges, "rollback must also remove the edge that was already written")
 }
