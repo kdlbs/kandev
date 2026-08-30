@@ -69,6 +69,7 @@ func (p *Poller) Stop() {
 // the GitHub API, then syncs due configs on every tick.
 func (p *Poller) loop(ctx context.Context) {
 	defer p.wg.Done()
+	defer p.svc.waitAutomaticSyncs()
 	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
 	for {

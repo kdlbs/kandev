@@ -18,6 +18,22 @@ type shutdownBlockingGitHubClients struct {
 	release chan struct{}
 }
 
+type contextAwareGitHubClients struct {
+	started  chan struct{}
+	canceled chan struct{}
+}
+
+func (f *contextAwareGitHubClients) ListRepoDirectoryForWorkspace(ctx context.Context, _ string, _ string, _ string, _ string, _ string) ([]github.RepoContentEntry, error) {
+	close(f.started)
+	<-ctx.Done()
+	close(f.canceled)
+	return nil, ctx.Err()
+}
+
+func (f *contextAwareGitHubClients) GetRepoFileContentForWorkspace(context.Context, string, string, string, string, string) ([]byte, error) {
+	return nil, nil
+}
+
 func (f *shutdownBlockingGitHubClients) ListRepoDirectoryForWorkspace(
 	context.Context, string, string, string, string, string,
 ) ([]github.RepoContentEntry, error) {
@@ -107,5 +123,36 @@ func TestPoller_StopWaitsForAutomaticSyncs(t *testing.T) {
 	case <-stopped:
 	case <-time.After(time.Second):
 		t.Fatal("poller did not stop after the automatic sync completed")
+	}
+}
+
+func TestPoller_ParentCancellationStopsAutomaticSyncs(t *testing.T) {
+	clients := &contextAwareGitHubClients{
+		started:  make(chan struct{}),
+		canceled: make(chan struct{}),
+	}
+	store := setupTestStore(t)
+	applier := &fakeApplier{}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	require.NoError(t, err)
+	svc := NewService(store, clients, nil, applier, log)
+	configureWorkspace(t, svc, "ws-1")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	p := NewPoller(svc, log)
+	p.interval = time.Millisecond
+	p.Start(ctx)
+
+	select {
+	case <-clients.started:
+	case <-time.After(time.Second):
+		t.Fatal("automatic sync did not start")
+	}
+	cancel()
+
+	select {
+	case <-clients.canceled:
+	case <-time.After(time.Second):
+		t.Fatal("parent cancellation did not stop the automatic sync")
 	}
 }
