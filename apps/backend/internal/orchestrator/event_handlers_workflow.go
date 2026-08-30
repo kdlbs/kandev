@@ -37,6 +37,7 @@ var (
 	errDeferredMoveAlreadyApplied           = errors.New("deferred move already applied")
 	errReusableSessionNoLongerActive        = errors.New("reusable session is no longer active")
 	errWorkflowAutoStartSessionTerminalized = errors.New("workflow auto-start session terminalized")
+	errContextResetCancellationConflict     = errors.New("context reset cancellation is already in progress")
 )
 
 type workflowAutoStartSessionTerminalizedError struct {
@@ -4131,15 +4132,21 @@ func (s *Service) quiesceActiveResetTurn(
 	ctx context.Context,
 	taskID, sessionID, stepName string,
 ) error {
-	active, err := s.hasActiveResetTurn(ctx, sessionID)
+	turnID, err := s.activeResetTurnID(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("inspect active turn for context reset: %w", err)
 	}
-	if !active {
+	if turnID == "" {
 		return nil
 	}
-	if _, err := s.cancelAgentSilentActionWithKind(
-		ctx, taskID, sessionID, nil, cancellationKindInternal,
+	if s.turnService == nil {
+		// The in-memory cache is the only available identity when no durable
+		// turn service is wired. The lifecycle capture then applies its own
+		// best-effort cancellation behavior without an expected durable ID.
+		turnID = ""
+	}
+	if _, err := s.cancelAgentSilentActionWithKindExclusiveConflict(
+		ctx, taskID, sessionID, nil, cancellationKindInternal, turnID, errContextResetCancellationConflict,
 	); err != nil {
 		return fmt.Errorf("cancel active turn for context reset at %s: %w", stepName, err)
 	}
@@ -4151,19 +4158,25 @@ func (s *Service) quiesceActiveResetTurn(
 // provider context replacement; missing an active turn could let the old
 // provider stream race the new conversation.
 func (s *Service) hasActiveResetTurn(ctx context.Context, sessionID string) (bool, error) {
+	turnID, err := s.activeResetTurnID(ctx, sessionID)
+	return turnID != "", err
+}
+
+func (s *Service) activeResetTurnID(ctx context.Context, sessionID string) (string, error) {
 	if s.turnService != nil {
 		turnID, err := s.peekActiveTurnID(ctx, sessionID)
 		if err != nil {
-			return false, err
+			return "", err
 		}
 		if turnID != "" {
-			return true, nil
+			return turnID, nil
 		}
 	}
-	if _, ok := s.activeTurns.Load(sessionID); ok {
-		return true, nil
+	if value, ok := s.activeTurns.Load(sessionID); ok {
+		turnID, _ := value.(string)
+		return turnID, nil
 	}
-	return s.reservedPromptTurnID(sessionID) != "", nil
+	return s.reservedPromptTurnID(sessionID), nil
 }
 
 // reconcileFailedContextReset handles a reset that moved the live ACP session

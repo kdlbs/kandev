@@ -18,7 +18,7 @@ Context reset needs one owner for turn quiescence. The owner must preserve workf
 
 A workflow context reset is a system-owned turn-replacement operation when the target session has an active turn.
 
-The orchestrator sets the reset marker before quiescence. Then it uses the existing internal cancellation coordinator to stop and reconcile the active turn.
+The orchestrator sets the reset marker before quiescence. Then it claims the session's cancellation coordinator exclusively for an internal cancellation operation and uses the existing bounded path to stop and reconcile the active turn. If another cancellation already owns the session, reset fails closed rather than inheriting that source's reconciliation semantics.
 
 This cancellation does not create a user-cancellation message. It does not evaluate `cancel_triggers_turn_complete` or `on_turn_complete`.
 
@@ -28,7 +28,7 @@ A successor that waits for an unresolved dispatch-only completion has a 10-secon
 
 Existing deferred cleanup releases prompt serialization and the session dispatch guard. The normal cancellation escalation path remains the only owner that clears the stale gate.
 
-Prompt generations remain the authority for terminal events. A completion from the replaced turn cannot finish a later generation.
+Prompt generations remain the authority for terminal events. A completion from the replaced turn cannot finish a later generation. An unnumbered completion also cannot release a pending numbered dispatch-only prompt. Synthetic or delayed completion events without ownership identity are ignored at that boundary.
 
 ## Consequences
 

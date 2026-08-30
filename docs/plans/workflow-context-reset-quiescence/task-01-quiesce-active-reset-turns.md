@@ -46,7 +46,7 @@ Stop and reconcile an active turn before workflow context replacement. Keep this
 ## Verification
 
 ```bash
-go test ./internal/orchestrator -run 'TestResetAgentContext_(QuiescesActiveTurnBeforeProviderReset|ActiveTurnAllowsSuccessorPrompt|CancelFailureStopsProviderReset)' -count=1
+go test ./internal/orchestrator -run 'Test(ResetAgentContext_(QuiescesActiveTurnBeforeProviderReset|CancellationConflictStopsProviderReset|ActiveTurnAllowsSuccessorPrompt|CancelFailureStopsProviderReset)|HasActiveResetTurn_ReservedPromptOnly)' -count=1
 ```
 
 ## Files likely touched
@@ -80,7 +80,8 @@ Implemented.
 
 - Added active-turn detection using durable and in-memory turn ownership records.
 - Routed reset quiescence through the internal silent cancellation coordinator before provider reset.
+- Made reset quiescence use an exclusive internal cancellation claim and fail closed when another cancellation already owns the session.
 - Preserved the reset marker through cancellation and provider replacement, and failed closed when cancellation failed.
-- Added ordering, successor-prompt, and cancellation-failure regressions in `event_handlers_workflow_reset_quiescence_test.go`.
+- Added ordering, cancellation-conflict, reservation-only, successor-prompt, and cancellation-failure regressions in `event_handlers_workflow_reset_quiescence_test.go`.
 - Red: the pre-fix tests observed provider reset without cancellation and allowed reset after cancellation failure.
-- Green: the exact verification command passed 3 tests.
+- Green: the exact verification command passed 5 tests.

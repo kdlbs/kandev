@@ -61,12 +61,12 @@ Keep `lifecycle.Manager.CancelAgent` as the only path that clears the stale pend
 
 | Acceptance criterion | Evidence |
 | --- | --- |
-| `AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.1` | `TestResetAgentContext_QuiescesActiveTurnBeforeProviderReset` in `event_handlers_workflow_reset_quiescence_test.go` |
+| `AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.1` | `TestResetAgentContext_QuiescesActiveTurnBeforeProviderReset`, `TestResetAgentContext_CancellationConflictStopsProviderReset`, and `TestHasActiveResetTurn_ReservedPromptOnly` in `event_handlers_workflow_reset_quiescence_test.go` |
 | `AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.2` | The same test asserts internal cancellation and no explicit completion path. |
 | `AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.3` | `TestResetAgentContext_ActiveTurnAllowsSuccessorPrompt` in `event_handlers_workflow_reset_quiescence_test.go` |
 | `AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.4` | `TestResetAgentContext_CancelFailureStopsProviderReset` in `event_handlers_workflow_reset_quiescence_test.go` |
 | `AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.5` | `TestWaitForPendingDispatchedPrompt_TimesOutWithoutClearingGate` in `session_pending_prompt_test.go` and transient classification coverage in `errors_test.go` |
-| `AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.6` | Existing generation tests in `manager_events_test.go` and `execution_store_test.go` remain green. |
+| `AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.6` | `TestHandleAgentEvent_UnnumberedCompleteCannotReleasePendingPrompt` in `manager_events_test.go`, plus existing generation tests in `manager_events_test.go` and `execution_store_test.go`, remain green. |
 
 ## Work orders
 
@@ -88,3 +88,9 @@ Implemented and verified.
 - Internal cancellation can race with natural completion. The existing cancellation identity and reconciliation rules must make both outcomes idempotent.
 - Reset-related ready events can re-enter workflow handling. The reset marker must remain active until provider and persistence work finishes.
 - The timeout must not clear a predecessor gate. Only cancellation can safely release that ownership.
+
+## PR fixup results
+
+- Reset quiescence now claims cancellation exclusively and fails closed on an existing cancellation operation.
+- Added reservation-only active-turn coverage and rejected unnumbered completion events while a numbered dispatch-only prompt is pending.
+- Stabilized the fake-time timeout assertion and corrected the lifecycle test file manifest.

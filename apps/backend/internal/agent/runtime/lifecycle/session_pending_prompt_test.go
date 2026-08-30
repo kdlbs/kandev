@@ -22,7 +22,7 @@ func TestWaitForPendingDispatchedPrompt_TimesOutWithoutClearingGate(t *testing.T
 		execution := pendingPromptExecution()
 		result := make(chan error, 1)
 		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		t.Cleanup(cancel)
 		go func() {
 			result <- waitForPendingDispatchedPrompt(ctx, execution)
 		}()
@@ -41,7 +41,7 @@ func TestWaitForPendingDispatchedPrompt_TimesOutWithoutClearingGate(t *testing.T
 			if !execution.dispatchedPromptPending.Load() {
 				t.Fatal("timeout cleared the pending prompt gate")
 			}
-		case <-time.After(time.Second):
+		default:
 			t.Fatal("pending prompt wait did not return at its timeout")
 		}
 	})

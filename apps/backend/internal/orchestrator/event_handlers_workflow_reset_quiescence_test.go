@@ -84,6 +84,39 @@ func TestResetAgentContext_QuiescesActiveTurnBeforeProviderReset(t *testing.T) {
 	}
 }
 
+func TestResetAgentContext_CancellationConflictStopsProviderReset(t *testing.T) {
+	svc, _, manager, session := newActiveResetTestService(t)
+	operation, owner := svc.claimCancellation("session1", cancellationKindExplicit)
+	if !owner {
+		t.Fatal("test setup failed to claim explicit cancellation")
+	}
+	t.Cleanup(func() {
+		svc.finishCancellation("session1", operation, nil)
+	})
+
+	if svc.resetAgentContext(context.Background(), "task1", session, "Successor") {
+		t.Fatal("resetAgentContext returned true while explicit cancellation owned the session")
+	}
+	select {
+	case event := <-manager.events:
+		t.Fatalf("provider operation %q started despite cancellation conflict", event)
+	default:
+	}
+}
+
+func TestHasActiveResetTurn_ReservedPromptOnly(t *testing.T) {
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	svc.reservedPromptTurns.Store("session1", newReservedPromptTurn("reserved-turn"))
+
+	active, err := svc.hasActiveResetTurn(context.Background(), "session1")
+	if err != nil {
+		t.Fatalf("hasActiveResetTurn: %v", err)
+	}
+	if !active {
+		t.Fatal("reserved prompt turn was not treated as active")
+	}
+}
+
 func TestResetAgentContext_ActiveTurnAllowsSuccessorPrompt(t *testing.T) {
 	svc, repo, manager, session := newActiveResetTestService(t)
 	manager.isAgentRunning = true

@@ -47,7 +47,7 @@ The workflow reset takes the session lifecycle lock. Then it sets the session re
 
 The reset marker rejects new prompt admission. Existing prompt claims also recheck the marker before agentctl dispatch.
 
-If the session owns an active turn, the orchestrator starts an internal cancellation operation. This operation uses the existing bounded lifecycle cancellation and escalation path.
+If the session owns an active turn, the orchestrator starts an exclusive internal cancellation operation. If another cancellation already owns the session, reset fails closed instead of inheriting that operation's source-specific reconciliation. The accepted internal operation uses the existing bounded lifecycle cancellation and escalation path.
 
 The internal operation reconciles the active turn and session state. It does not create the visible user-cancellation message or evaluate `cancel_triggers_turn_complete`.
 
@@ -72,6 +72,8 @@ After guard release, cancellation can use its existing escalation path. That pat
 ## Completion ownership
 
 Provider completion events keep their `(agent_execution_id, prompt_generation)` identity. The lifecycle manager rejects a completion that does not own the current generation.
+
+An unnumbered completion cannot release a pending numbered dispatch-only prompt. This prevents a delayed synthetic completion from being consumed as the predecessor's completion.
 
 Internal cancellation finishes or escalates the old generation before provider replacement. The reset does not drain a completion signal from an active generation.
 

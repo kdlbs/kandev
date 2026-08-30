@@ -83,5 +83,7 @@ Implemented.
 - Preserved `dispatchedPromptPending` on timeout and caller cancellation; completion signals still clear it.
 - Classified the typed timeout as transient so queued workflow prompts remain retryable.
 - Added lifecycle barrier tests in `session_pending_prompt_test.go` and orchestrator classification coverage in `errors_test.go`.
+- Rejected unnumbered completion events while a numbered dispatch-only prompt is pending, so delayed synthetic completion cannot release its gate.
+- Made the timeout test use a nonblocking post-`synctest.Wait` assertion and `t.Cleanup` for cancellation.
 - Red: the pre-fix stale barrier did not return and the typed timeout was not transient.
 - Green: the exact verification command passed 4 tests.

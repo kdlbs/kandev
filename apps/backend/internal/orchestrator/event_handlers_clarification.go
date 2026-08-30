@@ -775,15 +775,29 @@ func (s *Service) cancelAgentSilentActionWithKind(
 }
 
 // cancelAgentSilentActionWithKindExclusive is the non-joining cancellation
-// path used by Send Now. A second Send Now click or an explicit cancellation
-// that already owns the session is reported as a conflict instead of joining
-// and inheriting the first operation's reconciliation semantics.
+// path used by Send Now and workflow context reset. A second Send Now click or
+// another cancellation that already owns the session is reported as a conflict
+// instead of joining and inheriting the first operation's reconciliation
+// semantics.
 func (s *Service) cancelAgentSilentActionWithKindExclusive(
 	ctx context.Context,
 	taskID, sessionID string,
 	action func(context.Context) (bool, error),
 	kind cancellationKind,
 	expectedTurnID string,
+) (bool, error) {
+	return s.cancelAgentSilentActionWithKindExclusiveConflict(
+		ctx, taskID, sessionID, action, kind, expectedTurnID, ErrSendNowConflict,
+	)
+}
+
+func (s *Service) cancelAgentSilentActionWithKindExclusiveConflict(
+	ctx context.Context,
+	taskID, sessionID string,
+	action func(context.Context) (bool, error),
+	kind cancellationKind,
+	expectedTurnID string,
+	conflictErr error,
 ) (bool, error) {
 	if s.repo == nil {
 		return false, errors.New("cancel agent silently: repository is not configured")
@@ -798,7 +812,7 @@ func (s *Service) cancelAgentSilentActionWithKindExclusive(
 		sessionID, kind, registeredAction,
 	)
 	if !accepted {
-		return false, ErrSendNowConflict
+		return false, conflictErr
 	}
 	if owner {
 		s.setCancellationExpectedTurn(sessionID, operation, expectedTurnID)
