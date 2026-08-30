@@ -2,7 +2,7 @@
 status: draft
 system: ui
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-08-29
 owners:
   - kandev
 ---
@@ -70,8 +70,8 @@ Decision:
 | Task creation | `tasks.created_at` |
 | Persisted task mutation | `tasks.updated_at` |
 | User-authored prompt, including a queued prompt | message `created_at` |
-| Agent turn starts | turn `started_at` |
-| Agent turn completes | turn `completed_at` |
+| Conversational agent turn starts | turn `started_at` |
+| Conversational agent turn completes | turn `completed_at` |
 
 The following events do not advance activity:
 
@@ -80,6 +80,7 @@ The following events do not advance activity:
 - queued-prompt count changes and other queue bookkeeping
 - status-summary rebuilds or transport delivery
 - session metadata maintenance without a user prompt or agent turn
+- synthetic lifecycle turns, including the `agent_boot` turn on resume
 - streamed agent chunks inside an already-started turn
 
 A task-state or workflow-placement change counts because it is a persisted task
