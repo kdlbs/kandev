@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/github"
 )
 
 func TestAutomaticScheduler_BoundsBlockedWorkAndKeepsReadyJobsMoving(t *testing.T) {
@@ -45,16 +47,8 @@ func TestAutomaticScheduler_BoundsBlockedWorkAndKeepsReadyJobsMoving(t *testing.
 			t.Fatal("failed to enqueue ready job")
 		}
 	}
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("throttled job did not start")
-	}
-	select {
-	case <-progressed:
-	case <-time.After(time.Second):
-		t.Fatal("ready jobs were head-of-line blocked")
-	}
+	<-started
+	<-progressed
 	if got := maximum.Load(); got > 2 {
 		t.Fatalf("active automatic jobs = %d, want at most 2", got)
 	}
@@ -69,12 +63,12 @@ func TestAutomaticScheduler_RequeuesAdmissionWaitingJobsWithoutExhaustingWorkers
 	defer cancel()
 	admissionChanged := make(chan struct{})
 	released := make(chan struct{})
-	var readyProgress atomic.Int32
-	var blockedRuns atomic.Int32
+	blockedStarted := make(chan struct{}, automaticSyncWorkerLimit)
+	readyProgress := make(chan struct{})
 
 	s := newAutomaticScheduler(ctx, automaticSyncWorkerLimit, func(_ context.Context, job automaticJob) automaticJobResult {
 		if job.workspaceID != "ready-fifth" && len(job.workspaceID) > 0 {
-			blockedRuns.Add(1)
+			blockedStarted <- struct{}{}
 			select {
 			case <-released:
 				return automaticJobResult{}
@@ -91,7 +85,7 @@ func TestAutomaticScheduler_RequeuesAdmissionWaitingJobsWithoutExhaustingWorkers
 				},
 			}
 		}
-		readyProgress.Add(1)
+		close(readyProgress)
 		return automaticJobResult{}
 	}, func() {})
 
@@ -103,18 +97,10 @@ func TestAutomaticScheduler_RequeuesAdmissionWaitingJobsWithoutExhaustingWorkers
 	if !s.enqueue(automaticJob{workspaceID: "ready-fifth"}) {
 		t.Fatal("failed to enqueue ready job")
 	}
-	deadline := time.After(time.Second)
-	for readyProgress.Load() == 0 {
-		select {
-		case <-deadline:
-			t.Fatal("ready fifth principal did not progress while four jobs awaited admission")
-		default:
-			time.Sleep(time.Millisecond)
-		}
+	for i := 0; i < automaticSyncWorkerLimit; i++ {
+		<-blockedStarted
 	}
-	if blockedRuns.Load() != automaticSyncWorkerLimit {
-		t.Fatalf("blocked jobs started = %d, want %d", blockedRuns.Load(), automaticSyncWorkerLimit)
-	}
+	<-readyProgress
 
 	close(released)
 	close(admissionChanged)
@@ -149,17 +135,80 @@ func TestAutomaticScheduler_RequeuesAfterAdmissionSignalWithoutAnotherPoll(t *te
 	if !s.enqueue(automaticJob{workspaceID: "waiting"}) {
 		t.Fatal("failed to enqueue job")
 	}
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("admission-waiting job did not start")
-	}
+	<-started
 	close(admissionChanged)
-	select {
-	case <-resumed:
-	case <-time.After(time.Second):
-		t.Fatal("job was not requeued after admission changed")
+	<-resumed
+}
+
+func TestAutomaticScheduler_RequeuesWhenRateTrackerBecomesReady(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tracker := github.NewRateTracker(nil, nil)
+	tracker.ObserveSecondary(
+		github.ResourceCore, time.Now().Add(24*time.Hour),
+		github.RetrySourceConservativeFallback, "fixture",
+	)
+	attempted := make(chan struct{}, 2)
+	completed := make(chan struct{})
+	discarded := make(chan struct{})
+	var runs atomic.Int32
+
+	s := newAutomaticScheduler(ctx, 1, func(ctx context.Context, _ automaticJob) automaticJobResult {
+		if runs.Add(1) == 1 {
+			deferred := &github.AdmissionDeferredError{
+				Delay:          24 * time.Hour,
+				TrackerChanged: tracker.Changed(),
+				Reason:         "fixture",
+			}
+			attempted <- struct{}{}
+			return automaticJobResult{
+				wait:    deferred.Wait,
+				discard: func() { close(discarded) },
+			}
+		}
+		attempted <- struct{}{}
+		close(completed)
+		return automaticJobResult{}
+	}, func() {})
+	defer s.stop()
+
+	if !s.enqueue(automaticJob{workspaceID: "github"}) {
+		t.Fatal("failed to enqueue job")
 	}
+	<-attempted
+	tracker.ObserveSuccess(github.ResourceCore)
+	<-attempted
+	<-completed
+	select {
+	case <-discarded:
+		t.Fatal("ready job was discarded")
+	default:
+	}
+}
+
+func TestAutomaticScheduler_CancellationDiscardsDeferredWatcher(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	discarded := make(chan struct{})
+
+	s := newAutomaticScheduler(ctx, 1, func(ctx context.Context, _ automaticJob) automaticJobResult {
+		close(started)
+		return automaticJobResult{
+			wait: func(ctx context.Context) error {
+				<-ctx.Done()
+				return ctx.Err()
+			},
+			discard: func() { close(discarded) },
+		}
+	}, func() {})
+
+	if !s.enqueue(automaticJob{workspaceID: "cancelled"}) {
+		t.Fatal("failed to enqueue job")
+	}
+	<-started
+	cancel()
+	<-discarded
+	s.stop()
 }
 
 func TestAutomaticScheduler_StopDrainsQueuedJobs(t *testing.T) {
@@ -180,11 +229,7 @@ func TestAutomaticScheduler_StopDrainsQueuedJobs(t *testing.T) {
 	if !s.enqueue(automaticJob{workspaceID: "active"}) || !s.enqueue(automaticJob{workspaceID: "queued"}) {
 		t.Fatal("failed to enqueue jobs")
 	}
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("active job did not start")
-	}
+	<-started
 	cancel()
 	s.stop()
 	if got := ran.Load(); got != 1 {

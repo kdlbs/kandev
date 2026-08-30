@@ -2,6 +2,7 @@ package workflowsync
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,16 +16,20 @@ import (
 )
 
 type blockingGitHubClients struct {
-	started       chan struct{}
-	release       chan struct{}
-	unblockedCall chan struct{}
+	started        chan struct{}
+	release        chan struct{}
+	unblockedCall  chan struct{}
+	throttledCalls atomic.Int32
 }
 
 func (f *blockingGitHubClients) ListRepoDirectoryForWorkspace(
 	ctx context.Context, workspaceID, _, _, _, _ string,
 ) ([]github.RepoContentEntry, error) {
 	if workspaceID == "a-throttled" {
-		close(f.started)
+		call := f.throttledCalls.Add(1)
+		if call == 1 {
+			close(f.started)
+		}
 		select {
 		case <-f.release:
 			return nil, nil
@@ -210,6 +215,32 @@ func TestSyncDueConfigs_DoesNotHeadOfLineBlockAcrossProviders(t *testing.T) {
 	case <-githubClients.unblockedCall:
 	case <-time.After(time.Second):
 		t.Fatal("unblocked GitHub sync was delayed by the blocked GitHub config")
+	}
+}
+
+func TestSyncDueConfigs_CoalescesWorkspaceWhileSyncIsInFlight(t *testing.T) {
+	githubClients := &blockingGitHubClients{
+		started:       make(chan struct{}),
+		release:       make(chan struct{}),
+		unblockedCall: make(chan struct{}),
+	}
+	store := setupTestStore(t)
+	applier := &fakeApplier{}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	require.NoError(t, err)
+	svc := NewService(store, githubClients, nil, applier, log)
+	configureWorkspace(t, svc, "a-throttled")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.SyncDueConfigs(ctx)
+	<-githubClients.started
+	svc.SyncDueConfigs(ctx)
+
+	close(githubClients.release)
+	svc.waitAutomaticSyncs()
+	if got := githubClients.throttledCalls.Load(); got != 1 {
+		t.Fatalf("automatic sync calls = %d, want one coalesced call", got)
 	}
 }
 
