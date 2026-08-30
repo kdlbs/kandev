@@ -82,6 +82,13 @@ type Service struct {
 	// than racing an in-flight apply.
 	locks sync.Map // workspaceID → *sync.Mutex
 
+	// automaticMu bounds periodic dispatch to one in-flight sync per
+	// workspace. Automatic provider admission may wait for a long retry
+	// window, so the poller must not hold up dispatch for other workspaces or
+	// providers while that wait is in progress.
+	automaticMu       sync.Mutex
+	automaticInFlight map[string]struct{}
+
 	// workspaceAuthorizer enforces per-user workspace scoping. Nil (unit
 	// tests, or a caller with no identity in context — internal callers like
 	// the periodic poller) means unscoped, matching every other integration
@@ -127,13 +134,14 @@ func NewService(
 	applier Applier, log *logger.Logger,
 ) *Service {
 	return &Service{
-		store:         store,
-		githubClients: githubClients,
-		gitlabClients: gitlabClients,
-		applier:       applier,
-		logger:        log.WithFields(zap.String("component", "workflowsync-service")),
-		now:           time.Now,
-		jitter:        defaultJitter,
+		store:             store,
+		githubClients:     githubClients,
+		gitlabClients:     gitlabClients,
+		applier:           applier,
+		logger:            log.WithFields(zap.String("component", "workflowsync-service")),
+		now:               time.Now,
+		jitter:            defaultJitter,
+		automaticInFlight: make(map[string]struct{}),
 	}
 }
 
@@ -446,8 +454,27 @@ func (s *Service) SyncDueConfigs(ctx context.Context) {
 		if !isSyncDue(cfg, now) {
 			continue
 		}
-		_, _ = s.syncWorkspace(ctx, cfg.WorkspaceID, syncAutomatic)
+		s.dispatchAutomaticSync(ctx, cfg.WorkspaceID)
 	}
+}
+
+func (s *Service) dispatchAutomaticSync(ctx context.Context, workspaceID string) {
+	s.automaticMu.Lock()
+	if _, ok := s.automaticInFlight[workspaceID]; ok {
+		s.automaticMu.Unlock()
+		return
+	}
+	s.automaticInFlight[workspaceID] = struct{}{}
+	s.automaticMu.Unlock()
+
+	go func() {
+		defer func() {
+			s.automaticMu.Lock()
+			delete(s.automaticInFlight, workspaceID)
+			s.automaticMu.Unlock()
+		}()
+		_, _ = s.syncWorkspace(ctx, workspaceID, syncAutomatic)
+	}()
 }
 
 func isSyncDue(cfg *Config, now time.Time) bool {

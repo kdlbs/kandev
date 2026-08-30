@@ -269,6 +269,8 @@ func TestSyncDueConfigs_HonorsInterval(t *testing.T) {
 	configureWorkspace(t, svc, "ws-1")
 
 	svc.SyncDueConfigs(context.Background())
+	assert.Eventually(t, func() bool { return applier.callCount() == 1 }, time.Second, time.Millisecond,
+		"first sync runs immediately (never synced)")
 	require.Len(t, applier.calls, 1, "first sync runs immediately (never synced)")
 
 	svc.SyncDueConfigs(context.Background())
@@ -318,6 +320,10 @@ func TestSyncDueConfigsPersistsEqualJitterBackoff(t *testing.T) {
 	before := time.Now().UTC()
 
 	svc.SyncDueConfigs(context.Background())
+	assert.Eventually(t, func() bool {
+		cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
+		return err == nil && cfg != nil && cfg.ConsecutiveFailures > 0
+	}, time.Second, time.Millisecond)
 
 	cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
 	require.NoError(t, err)
@@ -343,6 +349,7 @@ func TestSyncDueConfigsSkipsProviderUntilNextAttempt(t *testing.T) {
 	configureWorkspace(t, svc, "ws-1")
 
 	svc.SyncDueConfigs(context.Background())
+	assert.Eventually(t, func() bool { return provider.callCount() == 1 }, time.Second, time.Millisecond)
 	require.Equal(t, 1, provider.callCount())
 	cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
 	require.NoError(t, err)
@@ -350,9 +357,11 @@ func TestSyncDueConfigsSkipsProviderUntilNextAttempt(t *testing.T) {
 	require.Equal(t, now.Add(150*time.Second), *cfg.NextAttemptAt)
 
 	svc.SyncDueConfigs(context.Background())
+	assert.Eventually(t, func() bool { return provider.callCount() == 1 }, time.Second, time.Millisecond)
 	require.Equal(t, 1, provider.callCount(), "same-tick retry reached the provider")
 	now = *cfg.NextAttemptAt
 	svc.SyncDueConfigs(context.Background())
+	assert.Eventually(t, func() bool { return provider.callCount() == 2 }, time.Second, time.Millisecond)
 	require.Equal(t, 2, provider.callCount(), "retry did not run at next_attempt_at")
 }
 
@@ -379,6 +388,10 @@ func TestPermanentFailureSuspendsPollingUntilManualRecovery(t *testing.T) {
 	recoveredBefore := workflowSyncCounterValue(t, recoveredLabel)
 
 	svc.SyncDueConfigs(context.Background())
+	assert.Eventually(t, func() bool {
+		cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
+		return err == nil && cfg != nil && cfg.PollSuspended
+	}, time.Second, time.Millisecond)
 	require.Equal(t, 1, provider.callCount())
 	cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
 	require.NoError(t, err)
@@ -419,6 +432,10 @@ func TestConfigSaveRearmsSuspendedPolling(t *testing.T) {
 	configureWorkspace(t, svc, "ws-1")
 
 	svc.SyncDueConfigs(context.Background())
+	assert.Eventually(t, func() bool {
+		cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
+		return err == nil && cfg != nil && cfg.PollSuspended
+	}, time.Second, time.Millisecond)
 	cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
 	require.NoError(t, err)
 	require.True(t, cfg.PollSuspended)
