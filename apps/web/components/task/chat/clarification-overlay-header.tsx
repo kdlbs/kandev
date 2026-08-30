@@ -102,6 +102,7 @@ export function ClarificationHeaderActions({
       {isSubmitting && (
         <Spinner
           aria-label={t("task:submitting")}
+          aria-hidden={total > 1 ? true : undefined}
           data-testid="clarification-submitting-status"
           className="size-3 shrink-0"
         />

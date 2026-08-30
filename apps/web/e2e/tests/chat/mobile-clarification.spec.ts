@@ -363,6 +363,7 @@ test.describe("Mobile clarification multiline answer", () => {
       const status = session.clarificationSubmittingStatus();
       await expect(status).toBeVisible();
       await expect(status).toHaveAttribute("aria-label", "Submitting…");
+      await expect(status).toHaveAttribute("aria-hidden", "true");
       await expect(submit.locator('[role="status"]')).toHaveCount(0);
       await expect(submit.locator("svg.tabler-icon-check")).toHaveCount(0);
       const statusPrecedesSkip = await header.evaluate((node) => {

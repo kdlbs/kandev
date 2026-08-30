@@ -46,9 +46,10 @@ status contract.
   `ClarificationHeaderActions` conditionally renders `Spinner` as a sibling
   immediately before `ClarificationSkipButton`.
 - Give the spinner `data-testid="clarification-submitting-status"` and the
-  translated `task:submitting` value as its accessible label. Do not hide it
-  from assistive technology because single-question auto-submit has no Submit
-  button label.
+  translated `task:submitting` value as its accessible label. Keep it exposed
+  to assistive technology for single-question auto-submit, which has no other
+  pending label; set `aria-hidden` for multi-question bundles because the
+  disabled Submit button already announces that label.
 - Keep the multi-question button's pending text and disabled state. Replace its
   in-button pending spinner branch with no icon so only the header status
   animates, while the idle `IconCheck` remains unchanged.
@@ -88,7 +89,8 @@ status contract.
 
 - `AC-UI-CLARIFICATION-SUBMIT-FEEDBACK-001.1` through `.7`: focused component
   coverage in `clarification-panel-section.test.tsx` proves immediate
-  single-question state mapping, ordering, accessible naming, and recovery.
+  single-question state mapping, ordering, accessible naming, multi-question
+  announcement deduplication, and failure recovery.
 - `AC-UI-CLARIFICATION-SUBMIT-FEEDBACK-001.1` through `.8`: desktop Playwright
   coverage proves both auto-submit and explicit multi-question submit against a
   held response.

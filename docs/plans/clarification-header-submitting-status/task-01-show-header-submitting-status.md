@@ -51,7 +51,9 @@ lifecycle and responsive geometry.
 
 - A held single-question or multi-question answer request shows exactly one
   animated status in the expanded header immediately before Skip, and idle
-  state shows none.
+  state shows none. The single-question status is announced; the
+  multi-question status is hidden from assistive technology because Submit
+  announces its pending label.
 - The status has the translated submitting accessible name; multi-question
   Submit remains disabled with its pending label and without an idle check.
 - Desktop and Pixel 5 flows retain existing control order, touch targets,
@@ -113,15 +115,16 @@ None.
 
 Implemented the shared expanded-header submitting status. The multi-question
 Submit button retains its pending label and disabled state without a duplicate
-spinner, while single- and multi-question desktop and mobile coverage verifies
-the shared header location, accessible label, control order, touch targets,
-containment, overflow, and successful resolution. Held-response tests release
-their routes in cleanup, including assertion failure paths.
+spinner or live-region announcement, while single- and multi-question desktop
+and mobile coverage verifies the shared header location, accessible label,
+control order, touch targets, containment, overflow, and successful resolution.
+Focused component coverage also verifies failure recovery. Held-response tests
+release their routes in cleanup, including assertion failure paths.
 
 Verification passed:
 
 - `pnpm install --frozen-lockfile` from `apps/`.
-- Focused clarification component tests: 12 tests passed.
+- Focused clarification component tests: 14 tests passed.
 - Web typecheck passed.
 - Focused ESLint and Prettier checks passed.
 - Focused Chromium E2E: 2 tests passed.

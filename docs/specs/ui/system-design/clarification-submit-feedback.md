@@ -29,7 +29,10 @@ design changes no backend contract, persisted state, or WebSocket event.
   it to the existing shared header and question controls.
 - `ClarificationHeaderActions` renders one design-system `Spinner` immediately
   before `ClarificationSkipButton` while `isSubmitting` is true. This position
-  exists for both single-question and multi-question bundles.
+  exists for both single-question and multi-question bundles. The spinner
+  remains exposed to assistive technology for a single-question bundle; for a
+  multi-question bundle it is `aria-hidden` because the Submit button already
+  announces the same pending label.
 - The multi-question Submit button retains its translated pending label and
   disabled behavior, but does not render a second spinner. Its idle completion
   check is absent while the request is pending.
@@ -44,8 +47,10 @@ No wire or persistence contract changes. The presentation consumes the existing
 `isSubmitting` boolean.
 
 The header spinner receives the existing translated `task:submitting` value as
-its accessible name. A stable `clarification-submitting-status` test identifier
-anchors component and Playwright assertions without using translated text as a
+its accessible name. Single-question status remains announced; multi-question
+status is visual-only because the disabled Submit button announces the pending
+label. A stable `clarification-submitting-status` test identifier anchors
+component and Playwright assertions without using translated text as a
 selector.
 
 ## Control flow
@@ -73,10 +78,12 @@ The status occupies its own flex item immediately before Skip and must not
 become a touch target.
 
 The design-system spinner keeps `role="status"`, and its accessible name uses
-the translated submitting label. It is not hidden from assistive technology,
-because single-question bundles have no other submitting label in the header.
-Rendered desktop and Pixel 5 tests verify its order, containment, and absence of
-document-level horizontal overflow.
+the translated submitting label. Single-question bundles keep the status
+exposed because they have no other submitting label in the header. Multi-
+question bundles set `aria-hidden="true"` on the visual status to avoid
+duplicating the Submit button's pending announcement. Rendered desktop and
+Pixel 5 tests verify its order, containment, and absence of document-level
+horizontal overflow.
 
 ## Failure and recovery
 
@@ -94,6 +101,9 @@ surface.
 - A focused component test holds a single-question response and verifies that
   the status appears before Skip, uses the translated accessible label, and is
   removed outside the in-flight state.
+- A focused component test verifies that a multi-question status remains
+  visible while its duplicate live-region announcement is hidden, and that a
+  failed request removes the status and re-enables Skip.
 - Desktop Playwright coverage holds a single-question response to prove the
   status is visible in the expanded header before the Skip control, then
   releases the response and verifies normal resolution.
