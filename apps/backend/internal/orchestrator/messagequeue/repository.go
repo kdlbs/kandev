@@ -215,10 +215,12 @@ type Repository interface {
 	// nothing will ever replay.
 	ListPendingMoves(ctx context.Context) ([]PendingMoveRecord, error)
 
-	// DeletePendingMove removes the deferred move for a session without
-	// returning it. Reports whether a row was actually removed; a missing row
-	// is a successful no-op, not an error.
-	DeletePendingMove(ctx context.Context, sessionID string) (bool, error)
+	// DeletePendingMoveIfMatch removes the deferred move only when the stored
+	// row still matches the exact record previously returned by
+	// ListPendingMoves. When handoffEntryID is non-empty, the correlated queue
+	// entry is removed in the same transaction. Reports whether the move row was
+	// removed; a missing or replaced row is a successful no-op, not an error.
+	DeletePendingMoveIfMatch(ctx context.Context, expected PendingMoveRecord, handoffEntryID string) (bool, error)
 }
 
 // applyMetadataUpdates merges metadata key updates into current; a nil value removes the key.

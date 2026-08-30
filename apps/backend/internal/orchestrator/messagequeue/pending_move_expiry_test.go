@@ -131,14 +131,15 @@ func TestRepository_ListPendingMoves(t *testing.T) {
 	}
 }
 
-func TestRepository_DeletePendingMove(t *testing.T) {
+func TestRepository_DeletePendingMoveIfMatch(t *testing.T) {
 	for name, repo := range pendingMoveRepos(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 
 			// A missing row is a successful no-op, not an error: the sweep
 			// races takes and transfers, and losing that race is normal.
-			removed, err := repo.DeletePendingMove(ctx, "sess-absent")
+			absent := PendingMoveRecord{SessionID: "sess-absent", Move: PendingMove{MoveID: "absent", QueuedAt: time.Now().UTC()}}
+			removed, err := repo.DeletePendingMoveIfMatch(ctx, absent, "")
 			if err != nil {
 				t.Fatalf("delete absent row: %v", err)
 			}
@@ -154,7 +155,12 @@ func TestRepository_DeletePendingMove(t *testing.T) {
 				}
 			}
 
-			removed, err = repo.DeletePendingMove(ctx, "sess-a")
+			moveA, err := repo.GetPendingMove(ctx, "sess-a")
+			if err != nil || moveA == nil {
+				t.Fatalf("load sess-a before delete: move=%+v err=%v", moveA, err)
+			}
+			recordA := PendingMoveRecord{SessionID: "sess-a", Move: *moveA}
+			removed, err = repo.DeletePendingMoveIfMatch(ctx, recordA, "")
 			if err != nil {
 				t.Fatalf("delete sess-a: %v", err)
 			}
@@ -175,7 +181,7 @@ func TestRepository_DeletePendingMove(t *testing.T) {
 			}
 
 			// Deleting twice is idempotent.
-			removed, err = repo.DeletePendingMove(ctx, "sess-a")
+			removed, err = repo.DeletePendingMoveIfMatch(ctx, recordA, "")
 			if err != nil {
 				t.Fatalf("second delete of sess-a: %v", err)
 			}
@@ -183,5 +189,113 @@ func TestRepository_DeletePendingMove(t *testing.T) {
 				t.Fatal("second delete reported a removal")
 			}
 		})
+	}
+}
+
+func TestRepository_DeletePendingMoveIfMatchPreservesReplacement(t *testing.T) {
+	for name, repo := range pendingMoveRepos(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			queuedAtA := time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC)
+			moveA := &PendingMove{
+				MoveID: "move-a", TaskID: "task-a", WorkflowID: "wf-a",
+				WorkflowStepID: "step-a", QueuedAt: queuedAtA,
+			}
+			if err := repo.SetPendingMove(ctx, "sess", moveA); err != nil {
+				t.Fatalf("arm move A: %v", err)
+			}
+
+			records, err := repo.ListPendingMoves(ctx)
+			if err != nil {
+				t.Fatalf("list move A: %v", err)
+			}
+			if len(records) != 1 {
+				t.Fatalf("listed %d records, want 1", len(records))
+			}
+
+			moveB := &PendingMove{
+				MoveID: "move-b", TaskID: "task-b", WorkflowID: "wf-b",
+				WorkflowStepID: "step-b", QueuedAt: queuedAtA.Add(time.Hour),
+			}
+			if err := repo.SetPendingMove(ctx, "sess", moveB); err != nil {
+				t.Fatalf("replace with move B: %v", err)
+			}
+
+			removed, err := repo.DeletePendingMoveIfMatch(ctx, records[0], "")
+			if err != nil {
+				t.Fatalf("delete inspected move A: %v", err)
+			}
+			if removed {
+				t.Fatal("delete of inspected move A removed replacement move B")
+			}
+
+			got, err := repo.GetPendingMove(ctx, "sess")
+			if err != nil {
+				t.Fatalf("get replacement move B: %v", err)
+			}
+			if got == nil || got.MoveID != moveB.MoveID || !got.QueuedAt.Equal(moveB.QueuedAt) {
+				t.Fatalf("replacement move B was not preserved: got %+v, want %+v", got, moveB)
+			}
+		})
+	}
+}
+
+func TestSQLiteRepository_DeletePendingMoveIfMatchRollsBackPromptFailure(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	sqlRepo := repo.(*sqliteRepository)
+	ctx := context.Background()
+	queuedAt := time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC)
+	move := &PendingMove{
+		MoveID: "move-a", TaskID: "task-a", WorkflowID: "wf-a",
+		WorkflowStepID: "step-a", QueuedAt: queuedAt,
+	}
+	if err := repo.SetPendingMove(ctx, "sess", move); err != nil {
+		t.Fatalf("arm pending move: %v", err)
+	}
+	prompt := &QueuedMessage{
+		ID: "handoff", SessionID: "sess", TaskID: "task-a", Content: "target-step hand-off",
+		QueuedAt: queuedAt, QueuedBy: QueuedByMoveTask,
+	}
+	if err := repo.Insert(ctx, prompt, 10); err != nil {
+		t.Fatalf("queue hand-off prompt: %v", err)
+	}
+	records, err := repo.ListPendingMoves(ctx)
+	if err != nil || len(records) != 1 {
+		t.Fatalf("list pending move: records=%+v err=%v", records, err)
+	}
+	if _, err := sqlRepo.db.Exec(`
+		CREATE TRIGGER fail_handoff_delete
+		BEFORE DELETE ON queued_messages
+		WHEN OLD.id = 'handoff'
+		BEGIN
+			SELECT RAISE(ABORT, 'injected prompt delete failure');
+		END
+	`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	removed, err := repo.DeletePendingMoveIfMatch(ctx, records[0], prompt.ID)
+	if err == nil {
+		t.Fatal("expected correlated prompt delete failure")
+	}
+	if removed {
+		t.Fatal("failed transaction reported pending move removed")
+	}
+	if got, getErr := repo.GetPendingMove(ctx, "sess"); getErr != nil || got == nil {
+		t.Fatalf("pending move was not rolled back: move=%+v err=%v", got, getErr)
+	}
+	if entries, listErr := repo.ListBySession(ctx, "sess"); listErr != nil || len(entries) != 1 {
+		t.Fatalf("hand-off prompt was not preserved: entries=%+v err=%v", entries, listErr)
+	}
+
+	if _, err := sqlRepo.db.Exec(`DROP TRIGGER fail_handoff_delete`); err != nil {
+		t.Fatalf("drop failure trigger: %v", err)
+	}
+	removed, err = repo.DeletePendingMoveIfMatch(ctx, records[0], prompt.ID)
+	if err != nil || !removed {
+		t.Fatalf("retry exact delete: removed=%v err=%v", removed, err)
+	}
+	if entries, listErr := repo.ListBySession(ctx, "sess"); listErr != nil || len(entries) != 0 {
+		t.Fatalf("hand-off prompt survived retry: entries=%+v err=%v", entries, listErr)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // Stale pending-move expiry.
@@ -75,7 +76,15 @@ func (s *Service) reapStalePendingMovesOnce(ctx context.Context) {
 		if !drop {
 			continue
 		}
-		removed, err := s.messageQueue.DeletePendingMove(ctx, record.SessionID)
+		move := record.Move
+		moveID := normalizedPendingMoveID(record.SessionID, &move)
+		handoffEntryID, listed := s.pendingMoveHandoffPromptID(ctx, record.SessionID, move.TaskID, moveID)
+		if !listed {
+			s.logger.Warn("pending-move sweep: prompt cleanup failed; row preserved for next tick",
+				zap.String("session_id", record.SessionID))
+			continue
+		}
+		removed, err := s.messageQueue.DeletePendingMoveIfMatch(ctx, record, handoffEntryID)
 		if err != nil {
 			s.logger.Warn("pending-move sweep: delete failed; row preserved for next tick",
 				zap.String("session_id", record.SessionID),
@@ -83,14 +92,13 @@ func (s *Service) reapStalePendingMovesOnce(ctx context.Context) {
 			continue
 		}
 		if !removed {
-			// Raced a take or a transfer between the list and the delete.
-			// Whoever won owns the row now.
+			// Raced a take, transfer, or replacement between the list and the
+			// compare-and-delete. Whoever won owns the current row now.
 			continue
 		}
-		move := record.Move
 		s.logger.Warn("reaped stale pending move",
-			append(pendingMoveLogFields(record.SessionID, &move), zap.String("reason", reason))...)
-		s.removePendingMoveHandoffPrompt(ctx, record.SessionID, move.TaskID, normalizedPendingMoveID(record.SessionID, &move))
+			append(pendingMoveLogFields(record.SessionID, &move, moveID), zap.String("reason", reason))...)
+		s.pendingMoveHandoffPromptRemoved(ctx, record.SessionID, move.TaskID, moveID, handoffEntryID)
 	}
 }
 
@@ -122,25 +130,81 @@ func (s *Service) pendingMoveReapReason(
 }
 
 // discardStalePendingMove is the replay-time guard, called by handleAgentReady
-// between TakePendingMove and applyPendingMove. Returns true when the move was
-// discarded, in which case the caller falls through to its normal
-// on_turn_complete handling — the correct semantics for "as if no pending move
-// existed".
+// before the move is claimed for application. stale reports that the move must
+// not apply. retryPending additionally reports that the move or a replacement
+// remains armed, so the caller must return without draining its target-step
+// prompt through the source step. A fully discarded stale move falls through
+// to normal on_turn_complete handling, exactly as if no move had been armed.
 //
-// The row is already gone (TakePendingMove removed it), so discarding is just
-// declining to apply it, plus dropping the correlated hand-off prompt.
-func (s *Service) discardStalePendingMove(ctx context.Context, taskID, sessionID string, move *messagequeue.PendingMove) bool {
+// The prompt lookup precedes an atomic exact-row delete. A lookup failure
+// leaves the durable move for retry; a replacement deletes neither row; and a
+// prompt-delete failure rolls back the move delete with the transaction.
+func (s *Service) discardStalePendingMove(
+	ctx context.Context,
+	taskID, sessionID string,
+	move *messagequeue.PendingMove,
+) (stale, retryPending bool) {
 	if move == nil {
-		return false
+		return false, false
 	}
 	if !move.IsStaleAt(time.Now().UTC(), messagequeue.PendingMoveTTL) {
-		return false
+		return false, false
 	}
 	moveID := normalizedPendingMoveID(sessionID, move)
-	move.MoveID = moveID
-	s.logger.Warn("dropping expired pending move instead of applying it",
-		append(pendingMoveLogFields(sessionID, move), zap.Duration("ttl", messagequeue.PendingMoveTTL))...)
-	s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, moveID)
+	handoffEntryID, listed := s.pendingMoveHandoffPromptID(ctx, sessionID, taskID, moveID)
+	if !listed {
+		s.logger.Warn("expired pending move preserved after prompt cleanup failure",
+			append(pendingMoveLogFields(sessionID, move, moveID), zap.Duration("ttl", messagequeue.PendingMoveTTL))...)
+		return true, true
+	}
+	expected := messagequeue.PendingMoveRecord{SessionID: sessionID, Move: *move}
+	removed, err := s.messageQueue.DeletePendingMoveIfMatch(ctx, expected, handoffEntryID)
+	if err != nil {
+		s.logger.Warn("expired pending move preserved after delete failure",
+			append(pendingMoveLogFields(sessionID, move, moveID), zap.Error(err))...)
+		return true, true
+	}
+	if removed {
+		s.logger.Warn("dropping expired pending move instead of applying it",
+			append(pendingMoveLogFields(sessionID, move, moveID), zap.Duration("ttl", messagequeue.PendingMoveTTL))...)
+		s.pendingMoveHandoffPromptRemoved(ctx, sessionID, taskID, moveID, handoffEntryID)
+		return true, false
+	}
+	return true, true
+}
+
+// handlePendingMoveAtAgentReady returns true when normal turn-complete queue
+// handling must stop. A fully discarded stale move returns false so the caller
+// continues exactly as if no move had been armed.
+func (s *Service) handlePendingMoveAtAgentReady(
+	ctx context.Context,
+	taskID, sessionID string,
+	session *models.TaskSession,
+) bool {
+	move, exists := s.messageQueue.GetPendingMove(ctx, sessionID)
+	if !exists {
+		return false
+	}
+	stale, retryPending := s.discardStalePendingMove(ctx, taskID, sessionID, move)
+	if retryPending {
+		return true
+	}
+	if stale {
+		return false
+	}
+	record := messagequeue.PendingMoveRecord{SessionID: sessionID, Move: *move}
+	removed, err := s.messageQueue.DeletePendingMoveIfMatch(ctx, record, "")
+	if err != nil {
+		s.logger.Warn("failed to claim pending move; row preserved for retry",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return true
+	}
+	if !removed {
+		// A replacement raced the read. Leave the current move and its prompt
+		// for a later ready event instead of draining it in the source step.
+		return true
+	}
+	s.applyPendingMove(ctx, taskID, sessionID, session, move)
 	return true
 }
 
@@ -157,13 +221,13 @@ func normalizedPendingMoveID(sessionID string, move *messagequeue.PendingMove) s
 // pendingMoveLogFields renders the whole dropped row. The log line is the only
 // record an expired move leaves, so it carries every field needed to work out
 // after the fact what was dropped and where it came from.
-func pendingMoveLogFields(sessionID string, move *messagequeue.PendingMove) []zap.Field {
+func pendingMoveLogFields(sessionID string, move *messagequeue.PendingMove, moveID string) []zap.Field {
 	return []zap.Field{
 		zap.String("session_id", sessionID),
 		zap.String("task_id", move.TaskID),
 		zap.String("workflow_id", move.WorkflowID),
 		zap.String("target_step_id", move.WorkflowStepID),
-		zap.String("move_id", normalizedPendingMoveID(sessionID, move)),
+		zap.String("move_id", moveID),
 		zap.String("actor", move.Actor),
 		zap.String("sender_session_id", move.SenderSessionID),
 		zap.Time("queued_at", move.QueuedAt),

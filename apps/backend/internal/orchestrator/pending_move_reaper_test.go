@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -11,6 +12,44 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type failOncePendingMoveDeleteRepository struct {
+	messagequeue.Repository
+	err error
+}
+
+type replaceBeforePendingMoveDeleteRepository struct {
+	messagequeue.Repository
+	replacement *messagequeue.PendingMove
+}
+
+func (r *replaceBeforePendingMoveDeleteRepository) DeletePendingMoveIfMatch(
+	ctx context.Context,
+	expected messagequeue.PendingMoveRecord,
+	handoffEntryID string,
+) (bool, error) {
+	if r.replacement != nil {
+		replacement := *r.replacement
+		r.replacement = nil
+		if err := r.SetPendingMove(ctx, expected.SessionID, &replacement); err != nil {
+			return false, err
+		}
+	}
+	return r.Repository.DeletePendingMoveIfMatch(ctx, expected, handoffEntryID)
+}
+
+func (r *failOncePendingMoveDeleteRepository) DeletePendingMoveIfMatch(
+	ctx context.Context,
+	expected messagequeue.PendingMoveRecord,
+	handoffEntryID string,
+) (bool, error) {
+	if r.err != nil {
+		err := r.err
+		r.err = nil
+		return false, err
+	}
+	return r.Repository.DeletePendingMoveIfMatch(ctx, expected, handoffEntryID)
+}
 
 // watcherAgentReady builds the agent.ready event handleAgentReady receives
 // when the review session's turn ends.
@@ -76,6 +115,43 @@ func TestPendingMove_ExpiredMoveIsNotReplayed(t *testing.T) {
 	}
 }
 
+func TestPendingMove_ExpiredReplayRetriesAfterPromptRemovalFailure(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	sc.stepGetter.steps[stepInReviewID].Events.OnTurnComplete = nil
+	entries, _, err := sc.svc.messageQueue.SnapshotSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("snapshot scenario queue: %v", err)
+	}
+	queueRepo := &failOncePendingMoveDeleteRepository{
+		Repository: messagequeue.NewMemoryRepository(),
+		err:        errors.New("queue storage unavailable"),
+	}
+	sc.svc.messageQueue = messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
+	staleMove := &messagequeue.PendingMove{
+		MoveID: "move-retry", TaskID: "task-1", WorkflowID: "wf1",
+		WorkflowStepID: stepInProgressID, QueuedAt: staleQueuedAt(),
+	}
+	for i := range entries {
+		if entries[i].QueuedBy == messagequeue.QueuedByMoveTask {
+			entries[i].Metadata = map[string]interface{}{messagequeue.MetadataDeferredMoveID: staleMove.MoveID}
+		}
+	}
+	if err := sc.svc.messageQueue.RestoreSession(sc.ctx, sc.reviewSessionID, entries, staleMove); err != nil {
+		t.Fatalf("restore scenario queue: %v", err)
+	}
+
+	sc.svc.handleAgentReady(sc.ctx, watcherAgentReady(sc.reviewSessionID))
+
+	if move, exists := sc.svc.messageQueue.GetPendingMove(sc.ctx, sc.reviewSessionID); !exists {
+		t.Fatal("expired move was lost after replay-time prompt cleanup failure")
+	} else if move.MoveID != staleMove.MoveID {
+		t.Fatalf("preserved move id = %q, want %q", move.MoveID, staleMove.MoveID)
+	}
+	if got := sc.svc.messageQueue.GetStatus(sc.ctx, sc.reviewSessionID).Count; got != len(entries) {
+		t.Fatalf("queue count after replay-time cleanup failure = %d, want %d", got, len(entries))
+	}
+}
+
 // TestPendingMove_FreshMoveStillReplays guards the happy path against the new
 // TTL check: a move armed moments ago must still apply exactly as before.
 func TestPendingMove_FreshMoveStillReplays(t *testing.T) {
@@ -104,25 +180,29 @@ func TestDiscardStalePendingMove(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("nil move is not discarded", func(t *testing.T) {
-		if svc.discardStalePendingMove(ctx, "task-1", "sess-1", nil) {
+		stale, retryPending := svc.discardStalePendingMove(ctx, "task-1", "sess-1", nil)
+		if stale || retryPending {
 			t.Fatal("nil move reported as discarded")
 		}
 	})
 
 	t.Run("fresh move is not discarded", func(t *testing.T) {
 		move := &messagequeue.PendingMove{TaskID: "task-1", QueuedAt: time.Now().UTC()}
-		if svc.discardStalePendingMove(ctx, "task-1", "sess-1", move) {
+		stale, retryPending := svc.discardStalePendingMove(ctx, "task-1", "sess-1", move)
+		if stale || retryPending {
 			t.Fatal("fresh move reported as discarded")
 		}
 	})
 
-	t.Run("stale move is discarded and gets a correlation id", func(t *testing.T) {
+	t.Run("stale move is discarded without mutating the caller", func(t *testing.T) {
 		move := &messagequeue.PendingMove{TaskID: "task-1", QueuedAt: staleQueuedAt()}
-		if !svc.discardStalePendingMove(ctx, "task-1", "sess-1", move) {
+		svc.messageQueue.SetPendingMove(ctx, "sess-1", move)
+		stale, retryPending := svc.discardStalePendingMove(ctx, "task-1", "sess-1", move)
+		if !stale || retryPending {
 			t.Fatal("stale move was not discarded")
 		}
-		if move.MoveID == "" {
-			t.Fatal("discarded move left without a correlation id")
+		if move.MoveID != "" {
+			t.Fatalf("discard mutated caller move id to %q", move.MoveID)
 		}
 	})
 }
@@ -247,6 +327,78 @@ func TestReapStalePendingMoves_NoQueueIsNoOp(t *testing.T) {
 	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
 	svc.messageQueue = nil
 	svc.reapStalePendingMovesOnce(context.Background())
+}
+
+func TestReapStalePendingMoves_RetriesAfterPromptRemovalFailure(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	queueRepo := &failOncePendingMoveDeleteRepository{
+		Repository: messagequeue.NewMemoryRepository(),
+		err:        errors.New("queue storage unavailable"),
+	}
+	svc.messageQueue = messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
+	ctx := context.Background()
+	const sessionID = "sess-retry"
+	const taskID = "task-retry"
+	const moveID = "move-retry"
+
+	if _, err := svc.messageQueue.QueueMessageWithMetadata(
+		ctx, sessionID, taskID, "target-step hand-off", "", messagequeue.QueuedByMoveTask,
+		false, nil, map[string]interface{}{messagequeue.MetadataDeferredMoveID: moveID},
+	); err != nil {
+		t.Fatalf("queue hand-off prompt: %v", err)
+	}
+	svc.messageQueue.SetPendingMove(ctx, sessionID, &messagequeue.PendingMove{
+		MoveID: moveID, TaskID: taskID, WorkflowID: "wf", WorkflowStepID: "target",
+		QueuedAt: staleQueuedAt(),
+	})
+
+	svc.reapStalePendingMovesOnce(ctx)
+
+	assertArmed(t, svc, sessionID, true)
+	if got := svc.messageQueue.GetStatus(ctx, sessionID).Count; got != 1 {
+		t.Fatalf("prompt count after failed cleanup = %d, want 1", got)
+	}
+
+	svc.reapStalePendingMovesOnce(ctx)
+
+	assertArmed(t, svc, sessionID, false)
+	if got := svc.messageQueue.GetStatus(ctx, sessionID).Count; got != 0 {
+		t.Fatalf("prompt count after retry = %d, want 0", got)
+	}
+}
+
+// Reviewer-requested contract coverage: inject a replacement after the sweep
+// has listed stale move A but before its delete. The exact-row claim must lose
+// that race and preserve fresh move B.
+func TestReapStalePendingMoves_PreservesReplacementBetweenListAndDelete(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	queuedAtB := time.Now().UTC().Add(-time.Minute)
+	queueRepo := &replaceBeforePendingMoveDeleteRepository{
+		Repository: messagequeue.NewMemoryRepository(),
+		replacement: &messagequeue.PendingMove{
+			MoveID: "move-b", TaskID: "task-b", WorkflowID: "wf-b",
+			WorkflowStepID: "step-b", QueuedAt: queuedAtB,
+		},
+	}
+	svc.messageQueue = messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
+	ctx := context.Background()
+	const sessionID = "sess-replaced"
+	svc.messageQueue.SetPendingMove(ctx, sessionID, &messagequeue.PendingMove{
+		MoveID: "move-a", TaskID: "task-a", WorkflowID: "wf-a",
+		WorkflowStepID: "step-a", QueuedAt: staleQueuedAt(),
+	})
+
+	svc.reapStalePendingMovesOnce(ctx)
+
+	got, exists := svc.messageQueue.GetPendingMove(ctx, sessionID)
+	if !exists {
+		t.Fatal("fresh replacement move B was removed by stale move A's sweep")
+	}
+	if got.MoveID != "move-b" || got.TaskID != "task-b" || !got.QueuedAt.Equal(queuedAtB) {
+		t.Fatalf("replacement move B changed: %+v", got)
+	}
 }
 
 func armPendingMoveInWorkflow(svc *Service, sessionID, taskID, workflowID string, queuedAt time.Time) {

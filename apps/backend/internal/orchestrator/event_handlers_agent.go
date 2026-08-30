@@ -669,12 +669,11 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// A move that has been armed longer than the TTL is not applied: the board
 	// state it was authored against is long gone, and applying it would
 	// relocate the card behind the user's back. discardStalePendingMove drops
-	// it (and its hand-off prompt) and returns true, so this turn falls through
-	// to the normal on_turn_complete handling below, exactly as if no move had
-	// been armed. See pending_move_reaper.go.
-	if pendingMove, exists := s.messageQueue.TakePendingMove(ctx, data.SessionID); exists &&
-		!s.discardStalePendingMove(ctx, data.TaskID, data.SessionID, pendingMove) {
-		s.applyPendingMove(ctx, data.TaskID, data.SessionID, session, pendingMove)
+	// it (and its hand-off prompt), so this turn falls through to the normal
+	// on_turn_complete handling below, exactly as if no move had been armed.
+	// Fresh moves are claimed with an exact-row comparison before application.
+	// See pending_move_reaper.go.
+	if s.handlePendingMoveAtAgentReady(ctx, data.TaskID, data.SessionID, session) {
 		return
 	}
 
