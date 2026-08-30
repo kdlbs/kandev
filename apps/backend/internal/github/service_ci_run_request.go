@@ -417,8 +417,10 @@ func sameRepositoryPR(pr *PR, binding *ciRunBinding) bool {
 		strings.EqualFold(pr.HeadRepoName, binding.Repo)
 }
 
+const reviewedDispatchWorkflow = ".github/workflows/e2e-tests.yml"
+
 func reviewedWorkflowDispatchInputs(path string) (map[string]string, bool) {
-	if path != ".github/workflows/e2e-tests.yml" {
+	if path != reviewedDispatchWorkflow {
 		return nil, false
 	}
 	return map[string]string{"fail_on_flaky": "false"}, true

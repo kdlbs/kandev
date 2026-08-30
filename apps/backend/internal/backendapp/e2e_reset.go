@@ -138,6 +138,11 @@ func handleE2EReset(
 				log.Warn("e2e reset: repository set cleanup failed", zap.String("sql", q), zap.Error(err))
 			}
 		}
+		if err := deleteGitHubCIRunStateForReset(ctx, repo.DB(), workspaceID); err != nil {
+			log.Error("e2e reset: GitHub CI run cleanup failed", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: "GitHub CI run cleanup failed"})
+			return
+		}
 		if _, err := repo.DB().ExecContext(ctx, `DELETE FROM github_workspace_settings WHERE workspace_id = ?`, workspaceID); err != nil {
 			log.Warn("e2e reset: GitHub workspace settings cleanup failed", zap.Error(err))
 		}
@@ -309,6 +314,25 @@ func deleteGitHubAuthForReset(ctx context.Context, database *sql.DB, workspaceID
 		WHERE id = ? OR substr(id, 1, length(?)) = ?`,
 		github.WorkspacePATSecretKey(workspaceID), userSecretPrefix, userSecretPrefix); err != nil {
 		return err
+	}
+	return tx.Commit()
+}
+
+func deleteGitHubCIRunStateForReset(ctx context.Context, database *sql.DB, workspaceID string) error {
+	tx, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, query := range []string{
+		`DELETE FROM github_ci_run_audit_events WHERE request_id IN
+			(SELECT id FROM github_ci_run_requests WHERE workspace_id = ?)`,
+		`DELETE FROM github_ci_run_requests WHERE workspace_id = ?`,
+		`DELETE FROM github_ci_run_grants WHERE workspace_id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, query, workspaceID); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

@@ -524,7 +524,8 @@ func TestRequestFreshCIRunReconcilesAmbiguousMutationWithoutResending(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if receipt.Status != CIRunRequestSucceeded || receipt.Attempt != 2 {
+	if receipt.Status != CIRunRequestSucceeded || receipt.Attempt != 2 ||
+		receipt.WorkflowName != "E2E" || receipt.WorkflowPath != reviewedDispatchWorkflow {
 		t.Fatalf("receipt = %+v", receipt)
 	}
 	if client.reruns != 1 {
