@@ -113,13 +113,15 @@ None.
 Implemented a model-agnostic first-meaningful-line helper and rendered its
 plain-text result beside the localized Thinking label for expandable rows.
 Compact single-line messages and expanded Markdown content keep their existing
-behavior. The header uses shrink-safe flex regions and one-line truncation.
+behavior. The header uses shrink-safe flex regions and one-line truncation;
+structural Markdown-only lines are skipped and identifier punctuation is
+preserved in previews.
 
 Verification:
 
-- `cd apps && pnpm --filter @kandev/web test -- components/task/chat/messages/thinking-message.test.tsx` — 5 passed.
+- `cd apps && pnpm --filter @kandev/web test -- components/task/chat/messages/thinking-message.test.tsx` — 7 passed.
 - `cd apps/web && pnpm run typecheck` — passed.
 - Targeted ESLint and Prettier checks — passed.
 - `python3 scripts/lint-spec-files.test.py` and `python3 scripts/lint-spec-files.py --all` — passed.
-- `cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/chat/mobile-markdown-wrap.spec.ts -- --grep "thinking preview" --retries=0` — 1 passed.
+- `cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/chat/mobile-markdown-wrap.spec.ts -- --grep "thinking preview" --retries=0` — 2 passed.
 - Disposable PR capture E2E — 1 passed; desktop and 393px mobile screenshots were inspected and compressed.

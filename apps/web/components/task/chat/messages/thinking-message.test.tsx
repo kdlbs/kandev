@@ -5,6 +5,8 @@ import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/li
 
 afterEach(cleanup);
 
+const PREVIEW_TEST_ID = "thinking-message-preview";
+
 function thinkingMessage(content: string): Message {
   return {
     id: "thinking-1",
@@ -44,7 +46,25 @@ describe("ThinkingMessage", () => {
     render(<ThinkingMessage comment={thinkingMessage("\n**\n## ")} />);
 
     expect(screen.getByText("Thinking", { exact: true })).toBeTruthy();
-    expect(screen.queryByTestId("thinking-message-preview")).toBeNull();
+    expect(screen.queryByTestId(PREVIEW_TEST_ID)).toBeNull();
+  });
+
+  // @covers AC-UI-THINKING-MESSAGE-PREVIEW-001.2
+  it("skips fenced and thematic Markdown-only lines", () => {
+    render(
+      <ThinkingMessage
+        comment={thinkingMessage("```\n---\n**First visible reasoning**\n\nLater detail.")}
+      />,
+    );
+
+    expect(screen.getByTestId(PREVIEW_TEST_ID).textContent).toBe("First visible reasoning");
+  });
+
+  // @covers AC-UI-THINKING-MESSAGE-PREVIEW-001.1
+  it("preserves identifier punctuation in the preview", () => {
+    render(<ThinkingMessage comment={thinkingMessage("foo_bar_baz\n\nLater detail.")} />);
+
+    expect(screen.getByTestId(PREVIEW_TEST_ID).textContent).toBe("foo_bar_baz");
   });
 
   // @covers AC-UI-THINKING-MESSAGE-PREVIEW-001.3
@@ -59,7 +79,7 @@ describe("ThinkingMessage", () => {
       />,
     );
 
-    expect(screen.getByTestId("thinking-message-preview").textContent).toBe("Original subject");
+    expect(screen.getByTestId(PREVIEW_TEST_ID).textContent).toBe("Original subject");
     expect(screen.queryByText("A later subject", { exact: true })).toBeNull();
   });
 
@@ -83,7 +103,7 @@ describe("ThinkingMessage", () => {
     );
 
     expect(screen.getByText("Compact thought", { exact: true })).toBeTruthy();
-    expect(screen.queryByTestId("thinking-message-preview")).toBeNull();
+    expect(screen.queryByTestId(PREVIEW_TEST_ID)).toBeNull();
     expect(container.querySelector(".markdown-body")).toBeNull();
   });
 });

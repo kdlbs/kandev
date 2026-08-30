@@ -51,8 +51,9 @@ therefore disappears from the collapsed row.
 
 The helper does not parse provider metadata, translate agent content, generate
 new copy, or persist the preview. Markdown links contribute their visible
-label, emphasis and code delimiters are removed, and React renders the result
-as escaped text rather than Markdown or HTML.
+label, balanced emphasis and code delimiters are removed, structural-only
+Markdown lines are skipped, and identifier punctuation is preserved. React
+renders the result as escaped text rather than Markdown or HTML.
 
 Compact single-line detection remains unchanged. Its complete stripped text
 continues to render inline, and the row remains non-expandable. Expandable
@@ -110,10 +111,10 @@ Focused component tests cover leading blank lines, Markdown stripping, the
 label-only fallback, compact single-line preservation, later appended content,
 expansion, and the truncating header classes.
 
-A `mobile-chrome` Playwright scenario seeds a Codex-shaped multiline thinking
-message, verifies that its first meaningful line appears before expansion,
-confirms later content appears after expansion, and checks that the preview,
-chat, and document remain horizontally contained.
+A `mobile-chrome` Playwright scenario seeds Codex-shaped multiline and compact
+thinking messages, waits for their persisted content, verifies the meaningful
+preview and expansion behavior, and checks that the preview, chat, and document
+remain horizontally contained.
 
 No production telemetry is added. This is a deterministic presentation rule
 with component and browser evidence.

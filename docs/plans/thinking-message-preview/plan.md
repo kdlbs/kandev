@@ -117,10 +117,10 @@ mobile overflow proof share one component contract.
 
 Implementation is complete. The exact task verification commands passed:
 
-- Thinking-message component tests: 5 passed.
+- Thinking-message component tests: 7 passed.
 - Web typecheck, targeted ESLint, and Prettier checks passed.
 - Specification tests and all specification files passed lint.
-- Mobile Pixel 5 thinking-preview E2E: 1 passed with no chat or document overflow.
+- Mobile Pixel 5 thinking-preview E2E: 2 passed with no chat or document overflow.
 - Fresh desktop and 393px mobile PR screenshots captured, inspected, and compressed.
 
 ## Risks
