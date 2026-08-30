@@ -84,6 +84,10 @@ type Worktree struct {
 	// managed branch after archive/unarchive.
 	RecoveryHeadSHA string `json:"-"`
 
+	// BranchCompactedAt records that exact-SHA local-ref deletion completed.
+	// A nil value keeps an interrupted archived candidate eligible for retry.
+	BranchCompactedAt *time.Time `json:"-"`
+
 	// Status indicates the current state of the worktree.
 	// Valid values: active, merged, deleted
 	Status string `json:"status"`

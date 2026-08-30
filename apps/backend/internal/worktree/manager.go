@@ -127,6 +127,7 @@ type MultiRepoStore interface {
 type BranchMetadataStore interface {
 	CountWorktreeBranchOwners(ctx context.Context, repositoryID, branch string) (int, error)
 	PersistBranchRecoveryHead(ctx context.Context, worktreeID, expected, recoveryHead string) (bool, error)
+	PersistBranchCompactionComplete(ctx context.Context, worktreeID, expectedRecoveryHead string) (bool, error)
 }
 
 // ArchivedBranchMaintenanceStore supplies only durable archived worktree
@@ -137,6 +138,9 @@ type ArchivedBranchMaintenanceStore interface {
 	IsArchivedBranchCandidate(ctx context.Context, worktreeID string) (bool, error)
 	PersistArchivedBranchRecoveryHead(
 		ctx context.Context, worktreeID, expected, recoveryHead string,
+	) (bool, error)
+	PersistArchivedBranchCompactionComplete(
+		ctx context.Context, worktreeID, expectedRecoveryHead string,
 	) (bool, error)
 	TouchArchivedBranchCandidate(ctx context.Context, worktreeID string) error
 }

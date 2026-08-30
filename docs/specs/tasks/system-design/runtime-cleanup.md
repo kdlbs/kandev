@@ -152,7 +152,9 @@ Archive makes the first compaction attempt. Storage maintenance later selects
 at most 100 managed, deleted rows for still-archived tasks, without scanning
 branch names. The worktree manager alone owns safety policy and rechecks archive
 state before `git update-ref -d refs/heads/<branch> <expected-head-sha>`.
-Unarchive or head races retain retryable refs; success keeps the recovery SHA.
+Recovery and completion are separate: interrupted rows stay selectable until
+the completion timestamp. A post-delete live race restores the exact ref by
+zero-OID compare-and-set.
 
 ## Data Model
 

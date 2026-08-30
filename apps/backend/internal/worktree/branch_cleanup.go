@@ -2,11 +2,14 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"expvar"
 	"fmt"
+	"os/exec"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -114,6 +117,16 @@ func (m *Manager) compactManagedBranchWithMode(
 		receipt.retain(reason)
 		return receipt
 	}
+	completed, reason := m.reconcileInterruptedArchivedCompaction(ctx, metadataStore, wt, requireArchived)
+	if reason != "" {
+		receipt.retain(reason)
+		return receipt
+	}
+	if completed {
+		receipt.Deleted = 1
+		branchCleanupMetrics.Add("deleted", 1)
+		return receipt
+	}
 	branchHead, reason := m.verifiedIntegratedBranchHead(ctx, wt)
 	if reason != "" {
 		receipt.retain(reason)
@@ -174,19 +187,28 @@ func (m *Manager) verifiedIntegratedBranchHead(
 	if err != nil {
 		return "", RetainedMissingRef
 	}
+	if reason := m.verifyHeadAgainstIntegration(ctx, wt, branchHead); reason != "" {
+		return "", reason
+	}
+	return branchHead, ""
+}
+
+func (m *Manager) verifyHeadAgainstIntegration(
+	ctx context.Context, wt *Worktree, branchHead string,
+) BranchRetentionReason {
 	integrationRef := normalizeIntegrationRef(wt.IntegrationRef)
 	integrationHead, err := m.resolveCommit(ctx, wt.RepositoryPath, integrationRef)
 	if err != nil {
-		return "", RetainedMissingRef
+		return RetainedMissingRef
 	}
 	integrated, err := m.refContains(ctx, wt.RepositoryPath, integrationHead, branchHead)
 	if err != nil {
-		return "", RetainedAncestryProbeFailed
+		return RetainedAncestryProbeFailed
 	}
 	if !integrated {
-		return "", RetainedNotIntegrated
+		return RetainedNotIntegrated
 	}
-	return branchHead, ""
+	return ""
 }
 
 func (m *Manager) persistRecoveryAndDeleteBranch(
@@ -209,7 +231,11 @@ func (m *Manager) persistRecoveryAndDeleteBranch(
 	if !persisted {
 		return RetainedRecoveryPersistFailed
 	}
-	return m.deleteExpectedBranchRef(ctx, metadataStore, wt, branchHead)
+	reason = m.deleteExpectedBranchRef(ctx, metadataStore, wt, branchHead)
+	if reason == "" {
+		m.recordBranchCompactionComplete(ctx, metadataStore, wt, branchHead, requireArchived)
+	}
+	return reason
 }
 
 func (m *Manager) persistBranchRecoveryHead(
@@ -245,7 +271,10 @@ func (m *Manager) persistBranchRecoveryHead(
 func (m *Manager) archivedBranchMutationStillAllowed(
 	ctx context.Context, metadataStore BranchMetadataStore, wt *Worktree, branchHead string,
 ) bool {
-	maintenanceStore := m.store.(ArchivedBranchMaintenanceStore)
+	maintenanceStore, ok := m.store.(ArchivedBranchMaintenanceStore)
+	if !ok {
+		return false
+	}
 	eligible, err := maintenanceStore.IsArchivedBranchCandidate(ctx, wt.ID)
 	if err == nil && eligible {
 		return true
@@ -258,10 +287,19 @@ func (m *Manager) deleteExpectedBranchRef(
 	ctx context.Context, metadataStore BranchMetadataStore, wt *Worktree, branchHead string,
 ) BranchRetentionReason {
 	branchRef := "refs/heads/" + wt.Branch
+	live, err := branchCheckedOutInWorktree(ctx, wt.RepositoryPath, branchRef)
+	if err != nil {
+		m.clearBranchRecoveryHead(ctx, metadataStore, wt, branchHead)
+		return RetainedAncestryProbeFailed
+	}
+	if live {
+		m.clearBranchRecoveryHead(ctx, metadataStore, wt, branchHead)
+		return RetainedLiveWorktree
+	}
 	cmd := m.newNonInteractiveGitCmd(ctx, wt.RepositoryPath, "update-ref", "-d", branchRef, branchHead)
 	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err == nil {
-		return ""
+		return m.verifyDeletionDidNotRaceLiveness(ctx, metadataStore, wt, branchRef, branchHead)
 	}
 	currentHead, resolveErr := m.resolveCommit(ctx, wt.RepositoryPath, branchRef)
 	if resolveErr == nil {
@@ -272,6 +310,147 @@ func (m *Manager) deleteExpectedBranchRef(
 	}
 	m.logger.Debug("exact managed branch deletion refused", zap.String("output", strings.TrimSpace(string(output))))
 	return RetainedSafeDeleteRefused
+}
+
+func (m *Manager) verifyDeletionDidNotRaceLiveness(
+	ctx context.Context,
+	metadataStore BranchMetadataStore,
+	wt *Worktree,
+	branchRef string,
+	branchHead string,
+) BranchRetentionReason {
+	safetyCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), m.inspectTimeout)
+	defer cancel()
+	live, err := branchCheckedOutInWorktree(safetyCtx, wt.RepositoryPath, branchRef)
+	if err == nil && !live {
+		return ""
+	}
+	restoreReason := m.restoreDeletedBranchRef(safetyCtx, wt, branchRef, branchHead)
+	if restoreReason != "" {
+		return restoreReason
+	}
+	m.clearBranchRecoveryHead(safetyCtx, metadataStore, wt, branchHead)
+	if err != nil {
+		return RetainedAncestryProbeFailed
+	}
+	return RetainedLiveWorktree
+}
+
+func (m *Manager) restoreDeletedBranchRef(
+	ctx context.Context, wt *Worktree, branchRef, branchHead string,
+) BranchRetentionReason {
+	zeroOID := strings.Repeat("0", len(branchHead))
+	cmd := m.newNonInteractiveGitCmd(ctx, wt.RepositoryPath, "update-ref", branchRef, branchHead, zeroOID)
+	if _, err := runGitCmdCombinedOutput(ctx, cmd); err == nil {
+		return ""
+	}
+	currentHead, err := m.resolveCommit(ctx, wt.RepositoryPath, branchRef)
+	if err != nil {
+		return RetainedSafeDeleteRefused
+	}
+	if currentHead != branchHead {
+		return RetainedHeadChanged
+	}
+	return ""
+}
+
+func (m *Manager) recordBranchCompactionComplete(
+	ctx context.Context,
+	metadataStore BranchMetadataStore,
+	wt *Worktree,
+	branchHead string,
+	requireArchived bool,
+) {
+	var persisted bool
+	var err error
+	if requireArchived {
+		maintenanceStore, ok := m.store.(ArchivedBranchMaintenanceStore)
+		if ok {
+			persisted, err = maintenanceStore.PersistArchivedBranchCompactionComplete(ctx, wt.ID, branchHead)
+		}
+	} else {
+		persisted, err = metadataStore.PersistBranchCompactionComplete(ctx, wt.ID, branchHead)
+	}
+	if err != nil || !persisted {
+		m.logger.Warn("managed branch deletion completion was not persisted", zap.Error(err))
+		return
+	}
+	now := time.Now().UTC()
+	wt.BranchCompactedAt = &now
+}
+
+func (m *Manager) reconcileInterruptedArchivedCompaction(
+	ctx context.Context,
+	metadataStore BranchMetadataStore,
+	wt *Worktree,
+	requireArchived bool,
+) (bool, BranchRetentionReason) {
+	if !requireArchived || strings.TrimSpace(wt.RecoveryHeadSHA) == "" {
+		return false, ""
+	}
+	branchRef := "refs/heads/" + wt.Branch
+	exists, err := m.localBranchRefExists(ctx, wt.RepositoryPath, branchRef)
+	if err != nil {
+		return true, RetainedAncestryProbeFailed
+	}
+	if exists {
+		return false, ""
+	}
+	return m.completeInterruptedArchivedCompaction(ctx, metadataStore, wt, branchRef)
+}
+
+func (m *Manager) completeInterruptedArchivedCompaction(
+	ctx context.Context,
+	metadataStore BranchMetadataStore,
+	wt *Worktree,
+	branchRef string,
+) (bool, BranchRetentionReason) {
+	live, err := branchCheckedOutInWorktree(ctx, wt.RepositoryPath, branchRef)
+	if err != nil {
+		return true, RetainedAncestryProbeFailed
+	}
+	if live {
+		reason := m.restoreDeletedBranchRef(ctx, wt, branchRef, wt.RecoveryHeadSHA)
+		if reason == "" {
+			m.clearBranchRecoveryHead(ctx, metadataStore, wt, wt.RecoveryHeadSHA)
+			reason = RetainedLiveWorktree
+		}
+		return true, reason
+	}
+	if protectedBranchName(wt.Branch, wt.BaseBranch) || protectedBranchName(wt.Branch, wt.IntegrationRef) {
+		return true, RetainedProtectedRef
+	}
+	branchHead, err := m.resolveCommit(ctx, wt.RepositoryPath, wt.RecoveryHeadSHA)
+	if err != nil || branchHead != strings.ToLower(wt.RecoveryHeadSHA) {
+		return true, RetainedMissingRef
+	}
+	if reason := m.verifyHeadAgainstIntegration(ctx, wt, branchHead); reason != "" {
+		return true, reason
+	}
+	maintenanceStore, ok := m.store.(ArchivedBranchMaintenanceStore)
+	if !ok {
+		return true, RetainedArchiveStateChanged
+	}
+	persisted, err := maintenanceStore.PersistArchivedBranchCompactionComplete(ctx, wt.ID, branchHead)
+	if err != nil {
+		return true, RetainedRecoveryPersistFailed
+	}
+	if !persisted {
+		return true, RetainedArchiveStateChanged
+	}
+	return true, ""
+}
+
+func (m *Manager) localBranchRefExists(ctx context.Context, repoPath, branchRef string) (bool, error) {
+	_, err := m.runBoundedGitInspect(ctx, repoPath, "show-ref", "--verify", "--quiet", branchRef)
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
 }
 
 func (m *Manager) clearBranchRecoveryHead(

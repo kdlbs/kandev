@@ -2044,23 +2044,24 @@ func (te *TaskEnvironment) RepoFor(repositoryID string) *TaskEnvironmentRepo {
 // physical-worktree truth — identity, path, branch, status, and lifecycle
 // timestamps.
 type TaskEnvironmentRepo struct {
-	ID                      string     `json:"id"`
-	TaskEnvironmentID       string     `json:"task_environment_id"`
-	RepositoryID            string     `json:"repository_id"`
-	BranchSlug              string     `json:"branch_slug,omitempty"`
-	WorktreeID              string     `json:"worktree_id,omitempty"`
-	WorktreePath            string     `json:"worktree_path,omitempty"`
-	WorktreeBranch          string     `json:"worktree_branch,omitempty"`
-	WorktreeBranchOwner     string     `json:"-"`
-	WorktreeIntegrationRef  string     `json:"-"`
-	WorktreeRecoveryHeadSHA string     `json:"-"`
-	Position                int        `json:"position"`
-	ErrorMessage            string     `json:"error_message,omitempty"`
-	Status                  string     `json:"status,omitempty"`
-	CreatedAt               time.Time  `json:"created_at"`
-	UpdatedAt               time.Time  `json:"updated_at"`
-	MergedAt                *time.Time `json:"merged_at,omitempty"`
-	DeletedAt               *time.Time `json:"deleted_at,omitempty"`
+	ID                        string     `json:"id"`
+	TaskEnvironmentID         string     `json:"task_environment_id"`
+	RepositoryID              string     `json:"repository_id"`
+	BranchSlug                string     `json:"branch_slug,omitempty"`
+	WorktreeID                string     `json:"worktree_id,omitempty"`
+	WorktreePath              string     `json:"worktree_path,omitempty"`
+	WorktreeBranch            string     `json:"worktree_branch,omitempty"`
+	WorktreeBranchOwner       string     `json:"-"`
+	WorktreeIntegrationRef    string     `json:"-"`
+	WorktreeRecoveryHeadSHA   string     `json:"-"`
+	WorktreeBranchCompactedAt *time.Time `json:"-"`
+	Position                  int        `json:"position"`
+	ErrorMessage              string     `json:"error_message,omitempty"`
+	Status                    string     `json:"status,omitempty"`
+	CreatedAt                 time.Time  `json:"created_at"`
+	UpdatedAt                 time.Time  `json:"updated_at"`
+	MergedAt                  *time.Time `json:"merged_at,omitempty"`
+	DeletedAt                 *time.Time `json:"deleted_at,omitempty"`
 }
 
 // ToAPI converts internal TaskEnvironment to API map.

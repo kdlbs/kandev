@@ -136,6 +136,18 @@ func (s *mockStore) PersistBranchRecoveryHead(_ context.Context, worktreeID, exp
 	return true, nil
 }
 
+func (s *mockStore) PersistBranchCompactionComplete(
+	_ context.Context, worktreeID, expectedRecoveryHead string,
+) (bool, error) {
+	wt := s.worktrees[worktreeID]
+	if wt == nil || wt.RecoveryHeadSHA != expectedRecoveryHead || wt.BranchCompactedAt != nil {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	wt.BranchCompactedAt = &now
+	return true, nil
+}
+
 // GetWorktreesBySessionID — MultiRepoStore.
 func (s *mockStore) GetWorktreesBySessionID(_ context.Context, sessionID string) ([]*Worktree, error) {
 	var out []*Worktree

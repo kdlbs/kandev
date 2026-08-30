@@ -50,6 +50,7 @@ const worktreeSelectCols = `
 	COALESCE(ter.worktree_branch_owner, 'unknown'),
 	COALESCE(ter.worktree_integration_ref, ''),
 	COALESCE(ter.worktree_recovery_head_sha, ''),
+	ter.worktree_branch_compacted_at,
 	ter.status,
 	ter.created_at,
 	ter.updated_at,
@@ -66,7 +67,7 @@ type rowScanner interface {
 // scanWorktreeRow scans one environment-repository row into a Worktree value.
 func scanWorktreeRow(row rowScanner) (*Worktree, error) {
 	wt := &Worktree{}
-	var mergedAt, deletedAt sql.NullTime
+	var compactedAt, mergedAt, deletedAt sql.NullTime
 	var repositoryPath, baseBranch sql.NullString
 
 	err := row.Scan(
@@ -83,6 +84,7 @@ func scanWorktreeRow(row rowScanner) (*Worktree, error) {
 		&wt.BranchOwner,
 		&wt.IntegrationRef,
 		&wt.RecoveryHeadSHA,
+		&compactedAt,
 		&wt.Status,
 		&wt.CreatedAt,
 		&wt.UpdatedAt,
@@ -105,6 +107,10 @@ func scanWorktreeRow(row rowScanner) (*Worktree, error) {
 	}
 	if mergedAt.Valid {
 		wt.MergedAt = &mergedAt.Time
+	}
+	if compactedAt.Valid {
+		t := compactedAt.Time
+		wt.BranchCompactedAt = &t
 	}
 	if deletedAt.Valid {
 		wt.DeletedAt = &deletedAt.Time
@@ -159,6 +165,10 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 		wt.Status = StatusActive
 	}
 	now := time.Now().UTC()
+	// A materialized worktree means the local branch is present again. Clear
+	// the prior compaction completion marker so a later archive can be
+	// evaluated independently after new commits.
+	wt.BranchCompactedAt = nil
 	if wt.CreatedAt.IsZero() {
 		wt.CreatedAt = now
 	}
@@ -186,9 +196,10 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 		INSERT INTO task_environment_repos (
 			id, task_environment_id, repository_id, branch_slug,
 			worktree_id, worktree_path, worktree_branch,
-			worktree_branch_owner, worktree_integration_ref, worktree_recovery_head_sha, position,
+			worktree_branch_owner, worktree_integration_ref, worktree_recovery_head_sha,
+			worktree_branch_compacted_at, position,
 			error_message, status, created_at, updated_at, merged_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_environment_id, repository_id, branch_slug) DO UPDATE SET
 			worktree_id = excluded.worktree_id,
 			worktree_path = excluded.worktree_path,
@@ -196,12 +207,14 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 			worktree_branch_owner = excluded.worktree_branch_owner,
 			worktree_integration_ref = excluded.worktree_integration_ref,
 			worktree_recovery_head_sha = excluded.worktree_recovery_head_sha,
+			worktree_branch_compacted_at = excluded.worktree_branch_compacted_at,
 			status = excluded.status,
 			updated_at = excluded.updated_at,
 			merged_at = excluded.merged_at,
 			deleted_at = excluded.deleted_at
 	`), uuid.New().String(), envID, wt.RepositoryID, wt.BranchSlug,
-		wt.ID, wt.Path, wt.Branch, wt.BranchOwner, wt.IntegrationRef, wt.RecoveryHeadSHA, 0,
+		wt.ID, wt.Path, wt.Branch, wt.BranchOwner, wt.IntegrationRef, wt.RecoveryHeadSHA,
+		wt.BranchCompactedAt, 0,
 		"", wt.Status,
 		wt.CreatedAt, wt.UpdatedAt, wt.MergedAt, wt.DeletedAt)
 	if err != nil {
@@ -341,6 +354,7 @@ func (s *SQLiteStore) UpdateWorktree(ctx context.Context, wt *Worktree) error {
 		UPDATE task_environment_repos SET
 			worktree_path = ?, worktree_branch = ?,
 			worktree_branch_owner = ?, worktree_integration_ref = ?, worktree_recovery_head_sha = ?,
+			worktree_branch_compacted_at = ?,
 			status = ?, updated_at = ?, merged_at = ?, deleted_at = ?
 		WHERE worktree_id = ?
 	`
@@ -350,6 +364,7 @@ func (s *SQLiteStore) UpdateWorktree(ctx context.Context, wt *Worktree) error {
 		wt.BranchOwner,
 		wt.IntegrationRef,
 		wt.RecoveryHeadSHA,
+		wt.BranchCompactedAt,
 		wt.Status,
 		wt.UpdatedAt,
 		wt.MergedAt,
@@ -505,6 +520,24 @@ func (s *SQLiteStore) PersistBranchRecoveryHead(
 	return rows == 1, err
 }
 
+func (s *SQLiteStore) PersistBranchCompactionComplete(
+	ctx context.Context, worktreeID, expectedRecoveryHead string,
+) (bool, error) {
+	now := time.Now().UTC()
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE task_environment_repos
+		SET worktree_branch_compacted_at = ?, updated_at = ?
+		WHERE worktree_id = ?
+		  AND worktree_recovery_head_sha = ?
+		  AND worktree_branch_compacted_at IS NULL
+	`), now, now, worktreeID, expectedRecoveryHead)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}
+
 func (s *SQLiteStore) ListArchivedBranchCandidates(
 	ctx context.Context, limit int,
 ) ([]*Worktree, error) {
@@ -519,7 +552,7 @@ func (s *SQLiteStore) ListArchivedBranchCandidates(
 		  AND ter.status = ?
 		  AND ter.deleted_at IS NOT NULL
 		  AND ter.worktree_branch_owner = ?
-		  AND COALESCE(ter.worktree_recovery_head_sha, '') = ''
+		  AND ter.worktree_branch_compacted_at IS NULL
 		  AND COALESCE(ter.worktree_id, '') <> ''
 		ORDER BY ter.updated_at ASC, ter.worktree_id ASC
 		LIMIT ?
@@ -544,6 +577,7 @@ func (s *SQLiteStore) IsArchivedBranchCandidate(ctx context.Context, worktreeID 
 			  AND ter.status = ?
 			  AND ter.deleted_at IS NOT NULL
 			  AND ter.worktree_branch_owner = ?
+			  AND ter.worktree_branch_compacted_at IS NULL
 		)
 	`), worktreeID, StatusDeleted, BranchOwnerManaged).Scan(&eligible)
 	return eligible, err
@@ -559,6 +593,7 @@ func (s *SQLiteStore) PersistArchivedBranchRecoveryHead(
 		  AND status = ?
 		  AND deleted_at IS NOT NULL
 		  AND worktree_branch_owner = ?
+		  AND worktree_branch_compacted_at IS NULL
 		  AND (COALESCE(worktree_recovery_head_sha, '') = ? OR worktree_recovery_head_sha = ?)
 		  AND EXISTS (
 			SELECT 1
@@ -569,6 +604,34 @@ func (s *SQLiteStore) PersistArchivedBranchRecoveryHead(
 		  )
 	`), recoveryHead, time.Now().UTC(), worktreeID, StatusDeleted, BranchOwnerManaged,
 		expected, recoveryHead)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}
+
+func (s *SQLiteStore) PersistArchivedBranchCompactionComplete(
+	ctx context.Context, worktreeID, expectedRecoveryHead string,
+) (bool, error) {
+	now := time.Now().UTC()
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE task_environment_repos
+		SET worktree_branch_compacted_at = ?, updated_at = ?
+		WHERE worktree_id = ?
+		  AND status = ?
+		  AND deleted_at IS NOT NULL
+		  AND worktree_branch_owner = ?
+		  AND worktree_recovery_head_sha = ?
+		  AND worktree_branch_compacted_at IS NULL
+		  AND EXISTS (
+			SELECT 1
+			FROM task_environments te
+			INNER JOIN tasks t ON te.task_id = t.id
+			WHERE te.id = task_environment_repos.task_environment_id
+			  AND t.archived_at IS NOT NULL
+		  )
+	`), now, now, worktreeID, StatusDeleted, BranchOwnerManaged, expectedRecoveryHead)
 	if err != nil {
 		return false, err
 	}
@@ -594,7 +657,7 @@ func (s *SQLiteStore) scanWorktrees(rows *sql.Rows) ([]*Worktree, error) {
 	seen := make(map[string]bool)
 	for rows.Next() {
 		wt := &Worktree{}
-		var mergedAt, deletedAt sql.NullTime
+		var compactedAt, mergedAt, deletedAt sql.NullTime
 		var repositoryPath, baseBranch sql.NullString
 
 		err := rows.Scan(
@@ -611,6 +674,7 @@ func (s *SQLiteStore) scanWorktrees(rows *sql.Rows) ([]*Worktree, error) {
 			&wt.BranchOwner,
 			&wt.IntegrationRef,
 			&wt.RecoveryHeadSHA,
+			&compactedAt,
 			&wt.Status,
 			&wt.CreatedAt,
 			&wt.UpdatedAt,
@@ -630,6 +694,10 @@ func (s *SQLiteStore) scanWorktrees(rows *sql.Rows) ([]*Worktree, error) {
 		}
 		if mergedAt.Valid {
 			wt.MergedAt = &mergedAt.Time
+		}
+		if compactedAt.Valid {
+			t := compactedAt.Time
+			wt.BranchCompactedAt = &t
 		}
 		if deletedAt.Valid {
 			wt.DeletedAt = &deletedAt.Time

@@ -377,6 +377,13 @@ func TestMaintainArchivedBranches_CompactsAfterIntegrationAndRestoresExactHead(t
 	if got := strings.TrimSpace(runGit(t, restored.Path, "rev-parse", "HEAD")); got != wantHead {
 		t.Fatalf("restored HEAD = %q, want exact archived head %q", got, wantHead)
 	}
+	persistedRestored, err := store.GetWorktreeByID(ctx, restored.ID)
+	if err != nil {
+		t.Fatalf("load restored worktree: %v", err)
+	}
+	if persistedRestored.BranchCompactedAt != nil {
+		t.Fatalf("restored worktree kept stale compaction marker: %v", persistedRestored.BranchCompactedAt)
+	}
 }
 
 func TestMaintainArchivedBranches_UnarchiveAfterSelectionRetainsBranch(t *testing.T) {

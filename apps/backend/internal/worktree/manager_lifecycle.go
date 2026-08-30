@@ -1806,6 +1806,7 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	existing.Path = worktreePath
 	existing.Status = StatusActive
 	existing.DeletedAt = nil
+	existing.BranchCompactedAt = nil
 	existing.UpdatedAt = now
 
 	if m.store != nil {

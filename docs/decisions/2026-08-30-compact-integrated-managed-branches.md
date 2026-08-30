@@ -20,12 +20,13 @@ safely removed integrated branch must remain locally recoverable.
 
 ## Decision
 
-Capture three internal fields on each `task_environment_repos` worktree row:
+Capture four internal fields on each `task_environment_repos` worktree row:
 
 - branch owner: `kandev`, `external`, or `unknown`;
 - intended integration ref, resolved from the task branch policy target before
   falling back to the task repository base branch;
 - exact recovery head SHA, initially empty.
+- branch-compaction completion timestamp, initially empty.
 
 Legacy and incomplete rows default to `unknown` and empty refs. They are retained
 without inference.
@@ -44,6 +45,9 @@ Delete it only when all of these conditions hold:
    re-read immediately before deletion.
 6. `git update-ref -d refs/heads/<branch> <expected-head-sha>` atomically removes
    the single explicit local ref only if its head is unchanged.
+7. A post-delete liveness probe restores the exact ref with zero-OID
+   compare-and-set if a Git worktree appeared during deletion; only a completed
+   deletion records the separate completion timestamp.
 
 Any missing metadata, ambiguous owner, active/shared reference, protected ref,
 failed probe, unique commit, compare-and-set loss, head race, or refused
@@ -70,7 +74,10 @@ same manager policy and contains no branch-name scan or deletion logic. The
 manager conditionally persists the recovery head while the task is archived,
 rechecks archived state immediately before ref mutation, and rotates retained
 candidates by durable update time so bounded runs make progress. A safely
-compacted row keeps its recovery head and is no longer selected.
+compacted row keeps its recovery head, records its completion timestamp, and is
+no longer selected. A crash after recovery persistence but before deletion
+leaves the timestamp empty, so a later bounded pass revalidates and retries it.
+Rematerializing the worktree clears the completion timestamp.
 
 ## Consequences
 

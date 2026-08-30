@@ -56,4 +56,8 @@ and safe when runtimes or task rows are already gone.
   most a fixed number of archived, inactive worktree rows per run. It shall
   revalidate that the task remains archived immediately before invoking the
   worktree manager's existing safety policy. A later unarchive shall restore a
-  safely compacted branch from its exact recorded head.
+  safely compacted branch from its exact recorded head. Persisting that head
+  without completing deletion shall remain retryable after interruption, while
+  a durable completion marker shall prevent completed rows from being selected
+  again. A branch that becomes live during deletion shall be restored at the
+  exact recorded head and retained.

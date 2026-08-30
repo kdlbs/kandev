@@ -220,7 +220,9 @@ func TestCutover_FreshSchemaHasFinalShape(t *testing.T) {
 		}
 	}
 	repoCols := tableColumnSet(t, sqlxDB, tableTaskEnvRepos)
-	for _, required := range []string{"status", "merged_at", "deleted_at"} {
+	for _, required := range []string{
+		"status", "merged_at", "deleted_at", "worktree_branch_compacted_at",
+	} {
 		if !repoCols[required] {
 			t.Fatalf("fresh task_environment_repos missing %s", required)
 		}
