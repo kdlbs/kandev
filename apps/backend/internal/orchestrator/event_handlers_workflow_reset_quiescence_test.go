@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -104,6 +105,39 @@ func TestResetAgentContext_CancellationConflictStopsProviderReset(t *testing.T) 
 	}
 }
 
+func TestResetAgentContext_CancellationConflictWithoutActiveTurnStopsProviderReset(t *testing.T) {
+	svc, _, manager, session := newActiveResetTestService(t)
+	turnIDValue, ok := svc.activeTurns.Load(session.ID)
+	if !ok {
+		t.Fatal("test setup did not create an active turn")
+	}
+	turnID, ok := turnIDValue.(string)
+	if !ok || turnID == "" {
+		t.Fatalf("active turn cache value = %#v, want turn ID", turnIDValue)
+	}
+	if err := svc.turnService.CompleteTurn(context.Background(), turnID); err != nil {
+		t.Fatalf("complete active turn: %v", err)
+	}
+	svc.activeTurns.Delete(session.ID)
+
+	operation, owner := svc.claimCancellation(session.ID, cancellationKindExplicit)
+	if !owner {
+		t.Fatal("test setup failed to claim explicit cancellation")
+	}
+	t.Cleanup(func() {
+		svc.finishCancellation(session.ID, operation, nil)
+	})
+
+	if svc.resetAgentContext(context.Background(), session.TaskID, session, "Successor") {
+		t.Fatal("resetAgentContext returned true while explicit cancellation owned an idle session")
+	}
+	select {
+	case event := <-manager.events:
+		t.Fatalf("provider operation %q started despite cancellation conflict", event)
+	default:
+	}
+}
+
 func TestHasActiveResetTurn_ReservedPromptOnly(t *testing.T) {
 	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
 	svc.reservedPromptTurns.Store("session1", newReservedPromptTurn("reserved-turn"))
@@ -169,4 +203,83 @@ func TestResetAgentContext_CancelFailureStopsProviderReset(t *testing.T) {
 	if got := len(manager.restartProcessCalls); got != 0 {
 		t.Fatalf("provider reset calls = %d, want 0", got)
 	}
+}
+
+// TestResetAgentContext_SerializesPromptAdmission stages a prompt immediately
+// before its final guarded claim, then starts reset while that claim is paused.
+// If reset wins the shared guard, the marker rejects the prompt while reset is
+// waiting on cancellation. If the prompt wins, reset must observe that turn
+// and cancel it before replacing the provider session.
+func TestResetAgentContext_SerializesPromptAdmission(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, manager, session := newActiveResetTestService(t)
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("set session waiting for input: %v", err)
+	}
+	cancelEntered := make(chan struct{}, 1)
+	cancelRelease := make(chan struct{})
+	manager.cancelAgentEntered = cancelEntered
+	manager.cancelAgentBlock = cancelRelease
+	var releaseCancellation sync.Once
+	releaseCancel := func() { releaseCancellation.Do(func() { close(cancelRelease) }) }
+	t.Cleanup(releaseCancel)
+
+	guard, releaseGuard := svc.acquireCancelInFlightGuard(session.ID)
+	guard.Lock()
+	promptStarted := make(chan struct{})
+	promptDone := make(chan error, 1)
+	go func() {
+		close(promptStarted)
+		_, _, _, _, _, err := svc.claimSessionRunningForPrompt(
+			ctx, session.TaskID, session.ID, "", false, nil, nil, "", false,
+		)
+		promptDone <- err
+	}()
+	<-promptStarted
+
+	resetStarted := make(chan struct{})
+	resetDone := make(chan bool, 1)
+	go func() {
+		close(resetStarted)
+		resetDone <- svc.resetAgentContext(ctx, session.TaskID, session, "Successor")
+	}()
+	<-resetStarted
+
+	guard.Unlock()
+	releaseGuard()
+
+	var promptErr error
+	resetWonGuard := false
+	select {
+	case promptErr = <-promptDone:
+	case <-cancelEntered:
+		// Reset won the admission guard and is now waiting for its internal
+		// cancellation. The prompt must observe the still-published marker.
+		resetWonGuard = true
+		select {
+		case promptErr = <-promptDone:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for reset-blocked prompt admission")
+		}
+	}
+	if resetWonGuard && !errors.Is(promptErr, ErrSessionResetInProgress) {
+		t.Fatalf("prompt admission after reset won guard = %v, want %v", promptErr, ErrSessionResetInProgress)
+	}
+	releaseCancel()
+	select {
+	case resetOK := <-resetDone:
+		if !resetOK {
+			t.Fatal("resetAgentContext returned false")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for context reset")
+	}
+
+	if !resetWonGuard && promptErr != nil && !errors.Is(promptErr, ErrSessionResetInProgress) {
+		t.Fatalf("prompt admission error = %v, want reset sentinel or successful claim", promptErr)
+	}
+	// A prompt that won the guard must have been visible as the active turn to
+	// reset. The provider replacement is therefore ordered after cancellation.
+	requireResetEvents(t, manager.events, "cancel", "reset")
 }

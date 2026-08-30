@@ -4047,10 +4047,16 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
+	resetGuard := s.lockCancelInFlightGuard(sessionID)
 	s.setSessionResetInProgress(sessionID, true)
-	defer s.setSessionResetInProgress(sessionID, false)
+	defer func() {
+		// Publish the end of reset while the same guard is still held. A prompt
+		// that acquires the guard after this point observes a settled marker.
+		s.setSessionResetInProgress(sessionID, false)
+		resetGuard.release()
+	}()
 
-	if err := s.quiesceActiveResetTurn(ctx, taskID, sessionID, stepName); err != nil {
+	if err := s.quiesceActiveResetTurn(ctx, taskID, sessionID, stepName, resetGuard); err != nil {
 		s.logger.Error("failed to quiesce active turn before context reset",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
@@ -4131,12 +4137,16 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 func (s *Service) quiesceActiveResetTurn(
 	ctx context.Context,
 	taskID, sessionID, stepName string,
+	resetGuard *lockedCancelInFlightGuard,
 ) error {
 	turnID, err := s.activeResetTurnID(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("inspect active turn for context reset: %w", err)
 	}
 	if turnID == "" {
+		if s.currentCancellation(sessionID) != nil {
+			return errContextResetCancellationConflict
+		}
 		return nil
 	}
 	if s.turnService == nil {
@@ -4145,8 +4155,9 @@ func (s *Service) quiesceActiveResetTurn(
 		// best-effort cancellation behavior without an expected durable ID.
 		turnID = ""
 	}
-	if _, err := s.cancelAgentSilentActionWithKindExclusiveConflict(
-		ctx, taskID, sessionID, nil, cancellationKindInternal, turnID, errContextResetCancellationConflict,
+	if _, err := s.cancelAgentSilentWithGuardActionKindExclusiveConflict(
+		ctx, taskID, sessionID, resetGuard.unlock, resetGuard.relock,
+		nil, cancellationKindInternal, turnID, errContextResetCancellationConflict,
 	); err != nil {
 		return fmt.Errorf("cancel active turn for context reset at %s: %w", stepName, err)
 	}

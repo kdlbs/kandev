@@ -18,11 +18,11 @@ Context reset needs one owner for turn quiescence. The owner must preserve workf
 
 A workflow context reset is a system-owned turn-replacement operation when the target session has an active turn.
 
-The orchestrator sets the reset marker before quiescence. Then it claims the session's cancellation coordinator exclusively for an internal cancellation operation and uses the existing bounded path to stop and reconcile the active turn. If another cancellation already owns the session, reset fails closed rather than inheriting that source's reconciliation semantics.
+The orchestrator takes the shared per-session cancellation guard before it sets the reset marker. It then claims the session's cancellation coordinator exclusively for an internal cancellation operation and uses the existing bounded path to stop and reconcile the active turn. The guard is released while that operation waits and reacquired before provider replacement. If another cancellation already owns the session, reset fails closed rather than inheriting that source's reconciliation semantics. A reset with no active turn also fails closed when a cancellation is already in flight.
 
 This cancellation does not create a user-cancellation message. It does not evaluate `cancel_triggers_turn_complete` or `on_turn_complete`.
 
-The lifecycle manager replaces the provider session only after internal cancellation finishes. The reset marker prevents new prompt admission until provider state and persisted reset state are settled.
+The lifecycle manager replaces the provider session only after internal cancellation finishes. Normal and lifecycle prompt claims perform their final marker check under the same guard. The reset marker prevents new prompt admission until provider state and persisted reset state are settled.
 
 A successor that waits for an unresolved dispatch-only completion has a 10-second bound. Timeout returns a typed transient error without clearing the predecessor gate.
 

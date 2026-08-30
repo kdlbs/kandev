@@ -25,7 +25,7 @@ The design preserves runtime configuration through the existing reset contract. 
 
 ## Components and responsibilities
 
-`orchestrator.Service.resetAgentContext` owns workflow reset semantics. It also owns the session reset marker and the session lifecycle lock.
+`orchestrator.Service.resetAgentContext` owns workflow reset semantics. It also owns the session reset marker, the session lifecycle lock, and the shared per-session cancellation guard that closes prompt-admission races.
 
 The cancellation coordinator owns active-turn quiescence. It uses the internal cancellation path, not the explicit user cancellation path.
 
@@ -43,11 +43,11 @@ An active session has a current turn. The workflow reset uses the active-turn fl
 
 ## Active-turn reset flow
 
-The workflow reset takes the session lifecycle lock. Then it sets the session reset marker before it starts quiescence.
+The workflow reset takes the session lifecycle lock and the shared per-session cancellation guard. It sets the session reset marker while holding that guard before it starts quiescence.
 
-The reset marker rejects new prompt admission. Existing prompt claims also recheck the marker before agentctl dispatch.
+The reset marker rejects new prompt admission. Normal and lifecycle prompt claims recheck the marker immediately before their final guarded claim. This check and marker publication use the same guard.
 
-If the session owns an active turn, the orchestrator starts an exclusive internal cancellation operation. If another cancellation already owns the session, reset fails closed instead of inheriting that operation's source-specific reconciliation. The accepted internal operation uses the existing bounded lifecycle cancellation and escalation path.
+If the session owns an active turn, the orchestrator starts an exclusive internal cancellation operation, then releases the guard while it waits for the bounded lifecycle cancellation and escalation path. It reacquires the guard before provider replacement. If another cancellation already owns the session, reset fails closed instead of inheriting that operation's source-specific reconciliation. A reset with no active turn also fails closed when a cancellation operation is already in flight.
 
 The internal operation reconciles the active turn and session state. It does not create the visible user-cancellation message or evaluate `cancel_triggers_turn_complete`.
 
@@ -55,7 +55,7 @@ The orchestrator calls `lifecycle.Manager.ResetAgentContext` only after the inte
 
 After a successful reset, the existing entry flow marks the session idle. Then `auto_start_agent` dispatches the step prompt into the new provider session.
 
-The reset marker stays active through quiescence, provider replacement, configuration restoration, and reset-state persistence. This interval prevents successor admission races.
+The reset marker stays active through quiescence, provider replacement, configuration restoration, and reset-state persistence. The guard and marker together prevent successor admission races.
 
 ## Bounded predecessor wait
 

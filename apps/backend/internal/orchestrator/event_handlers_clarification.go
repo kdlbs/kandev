@@ -799,8 +799,34 @@ func (s *Service) cancelAgentSilentActionWithKindExclusiveConflict(
 	expectedTurnID string,
 	conflictErr error,
 ) (bool, error) {
+	operation, registered, err := s.startExclusiveSilentCancellation(
+		ctx, taskID, sessionID, action, kind, expectedTurnID, conflictErr,
+	)
+	if err != nil {
+		return false, err
+	}
+	if err := operation.wait(ctx); err != nil {
+		return false, err
+	}
+	if registered == nil {
+		return false, nil
+	}
+	return registered.wait(ctx)
+}
+
+// startExclusiveSilentCancellation registers an exclusive cancellation before
+// the caller releases a session guard. Reset uses this hand-off to make its
+// reset marker and cancellation claim one admission boundary.
+func (s *Service) startExclusiveSilentCancellation(
+	ctx context.Context,
+	taskID, sessionID string,
+	action func(context.Context) (bool, error),
+	kind cancellationKind,
+	expectedTurnID string,
+	conflictErr error,
+) (*cancelOperation, *cancellationAction, error) {
 	if s.repo == nil {
-		return false, errors.New("cancel agent silently: repository is not configured")
+		return nil, nil, errors.New("cancel agent silently: repository is not configured")
 	}
 	var registeredAction func(context.Context, *cancelOperation) (bool, error)
 	if action != nil {
@@ -812,19 +838,13 @@ func (s *Service) cancelAgentSilentActionWithKindExclusiveConflict(
 		sessionID, kind, registeredAction,
 	)
 	if !accepted {
-		return false, conflictErr
+		return nil, nil, conflictErr
 	}
 	if owner {
 		s.setCancellationExpectedTurn(sessionID, operation, expectedTurnID)
 		go s.runSilentCancellation(ctx, taskID, sessionID, operation)
 	}
-	if err := operation.wait(ctx); err != nil {
-		return false, err
-	}
-	if registered == nil {
-		return false, nil
-	}
-	return registered.wait(ctx)
+	return operation, registered, nil
 }
 
 func (s *Service) runSilentCancellation(requestCtx context.Context, taskID, sessionID string, operation *cancelOperation) {
@@ -988,6 +1008,40 @@ func (s *Service) cancelAgentSilentWithGuardActionKindExclusive(
 		defer relockGuard()
 	}
 	return s.cancelAgentSilentActionWithKindExclusive(ctx, taskID, sessionID, action, kind, expectedTurnID)
+}
+
+// cancelAgentSilentWithGuardActionKindExclusiveConflict claims cancellation
+// while the caller still owns the session guard, then releases that guard
+// while the lifecycle cancellation waits. This is the reset variant: a
+// prompt cannot enter between reset-marker publication and the exclusive
+// cancellation claim, and the cancellation owner can still reacquire the
+// guard for its lifecycle reconciliation.
+func (s *Service) cancelAgentSilentWithGuardActionKindExclusiveConflict(
+	ctx context.Context,
+	taskID, sessionID string,
+	unlockGuard, relockGuard func(),
+	action func(context.Context) (bool, error),
+	kind cancellationKind,
+	expectedTurnID string,
+	conflictErr error,
+) (bool, error) {
+	operation, registered, err := s.startExclusiveSilentCancellation(
+		ctx, taskID, sessionID, action, kind, expectedTurnID, conflictErr,
+	)
+	if err != nil {
+		return false, err
+	}
+	if unlockGuard != nil {
+		unlockGuard()
+		defer relockGuard()
+	}
+	if err := operation.wait(ctx); err != nil {
+		return false, err
+	}
+	if registered == nil {
+		return false, nil
+	}
+	return registered.wait(ctx)
 }
 
 func (s *Service) logSilentCancelReconciled(taskID, sessionID string, err error) {

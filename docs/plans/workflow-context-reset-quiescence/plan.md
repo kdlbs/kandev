@@ -41,7 +41,9 @@ The quiescence change comes first because it removes the known cause. The timeou
 
 Update `orchestrator.Service.resetAgentContext` in `apps/backend/internal/orchestrator/event_handlers_workflow.go`.
 
-Keep the session lifecycle lock and reset marker as the outer boundary. If the session owns an active turn, use the internal cancellation coordinator before `AgentManager.ResetAgentContext`.
+Keep the session lifecycle lock and the shared per-session `cancelInFlight` guard as the outer boundary. Publish the reset marker while that guard is held, and recheck the marker under the same guard in both normal and lifecycle prompt claims. If the session owns an active turn, register the internal cancellation coordinator exclusively before releasing the guard for its potentially blocking wait. Reacquire the guard before `AgentManager.ResetAgentContext` and persisted reset cleanup.
+
+If no active turn exists but another cancellation owns the session, fail closed instead of allowing reset to continue with stale workflow inputs.
 
 Use the existing bounded lifecycle cancellation and escalation path. Do not call `Service.CancelAgent`, because that path can evaluate user-configured workflow completion.
 
@@ -63,7 +65,7 @@ Keep `lifecycle.Manager.CancelAgent` as the only path that clears the stale pend
 | --- | --- |
 | `AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.1` | `TestResetAgentContext_QuiescesActiveTurnBeforeProviderReset`, `TestResetAgentContext_CancellationConflictStopsProviderReset`, and `TestHasActiveResetTurn_ReservedPromptOnly` in `event_handlers_workflow_reset_quiescence_test.go` |
 | `AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.2` | The same test asserts internal cancellation and no explicit completion path. |
-| `AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.3` | `TestResetAgentContext_ActiveTurnAllowsSuccessorPrompt` in `event_handlers_workflow_reset_quiescence_test.go` |
+| `AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.3` | `TestResetAgentContext_ActiveTurnAllowsSuccessorPrompt` and `TestResetAgentContext_SerializesPromptAdmission` in `event_handlers_workflow_reset_quiescence_test.go` |
 | `AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.4` | `TestResetAgentContext_CancelFailureStopsProviderReset` in `event_handlers_workflow_reset_quiescence_test.go` |
 | `AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.5` | `TestWaitForPendingDispatchedPrompt_TimesOutWithoutClearingGate` in `session_pending_prompt_test.go` and transient classification coverage in `errors_test.go` |
 | `AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.6` | `TestHandleAgentEvent_UnnumberedCompleteCannotReleasePendingPrompt` in `manager_events_test.go`, plus existing generation tests in `manager_events_test.go` and `execution_store_test.go`, remain green. |
@@ -77,9 +79,10 @@ Keep `lifecycle.Manager.CancelAgent` as the only path that clears the stale pend
 
 Implemented and verified.
 
-- Task 01 focused regression: 3 tests passed.
+- Task 01 focused regression: 7 tests passed.
 - Task 02 focused regressions: 4 tests passed across the lifecycle and orchestrator packages.
-- Combined race-enabled focused regressions: 15 tests passed across the two affected packages.
+- Combined race-enabled affected-package suite: 4321 tests passed across the two affected packages.
+- Backend lint reported 0 issues and specification lint passed.
 - Red tests confirmed the pre-fix provider-reset ordering, cancellation fail-open, stale barrier hang, and missing transient classification.
 - `make -C apps/backend test` passed the lifecycle and orchestrator packages but the overall target failed in unrelated config-discovery and launcher tests because this workspace's `/root/.kandev/config.yaml` took precedence over their temporary home directories.
 
@@ -92,5 +95,6 @@ Implemented and verified.
 ## PR fixup results
 
 - Reset quiescence now claims cancellation exclusively and fails closed on an existing cancellation operation.
+- Reset marker publication and final normal/lifecycle prompt admission now share the per-session guard. Active reset cancellation releases that guard only while waiting, then reacquires it before provider replacement.
 - Added reservation-only active-turn coverage and rejected unnumbered completion events while a numbered dispatch-only prompt is pending.
 - Stabilized the fake-time timeout assertion and corrected the lifecycle test file manifest.
