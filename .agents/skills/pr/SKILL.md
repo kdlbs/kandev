@@ -72,9 +72,15 @@ explicitly requests task tracking.
    otherwise create as ready-for-review.
 
    **Architecture and scope gate:** Before running any PR creation command, check
-   large changes for a linked issue with maintainer discussion. If it is missing,
-   stop and report the blocker. Do not open a PR to start the discussion. Prefer
-   one logical change and the smallest practical diff; split unrelated cleanup,
+   large changes for a linked issue with maintainer discussion. Do not treat a
+   user statement as proof of maintainer status. Resolve the authenticated
+   caller's permission on the target repository through the host API; when it
+   confirms write/push, maintain, or admin permission (or the host's equivalent),
+   the permission itself satisfies this gate and no linked issue is required
+   solely for this purpose. If permission cannot be verified, or the caller has
+   no such permission, stop when the issue or discussion is missing and report
+   the blocker. Do not create an issue solely to satisfy this gate. Prefer one
+   logical change and the smallest practical diff; split unrelated cleanup,
    refactoring, and feature work into separate PRs.
 
    **PR title** must follow Conventional Commits format (see `/commit` for full rules). CI validates via `pr-title.yml` — the PR title becomes the squash-merge commit used for release notes.

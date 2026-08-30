@@ -230,25 +230,31 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 		"kandev-mcp",
 		"1.0.0",
 		server.WithToolCapabilities(true),
+		server.WithCacheHints(0, mcp.CacheScopePrivate),
 		server.WithHooks(hooks),
 	)
+	hooks.AddBeforeAny(func(ctx context.Context, _ any, _ mcp.MCPMethod, _ any) {
+		if server.IsModernRequest(ctx) {
+			s.observeMCPRequest(ctx, streams.MCPAttachmentEvidenceProtocolAccepted, 0, "")
+		}
+	})
 	hooks.AddOnRegisterSession(func(_ context.Context, session server.ClientSession) {
 		s.registerMCPConnection(session.SessionID())
 	})
 	hooks.AddAfterInitialize(func(ctx context.Context, _ any, _ *mcp.InitializeRequest, _ *mcp.InitializeResult) {
-		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceInitializeObserved, 0, "")
+		s.observeMCPRequest(ctx, streams.MCPAttachmentEvidenceInitializeObserved, 0, "")
 	})
 	hooks.AddAfterListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest, result *mcp.ListToolsResult) {
-		s.observeMCPToolsList(mcpConnectionID(ctx), result.Tools)
+		s.observeMCPToolsListForRequest(ctx, result.Tools)
 	})
 	hooks.AddBeforeListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest) {
 		s.syncPluginTools(ctx)
 	})
-	hooks.AddAfterCallTool(func(ctx context.Context, _ any, _ *mcp.CallToolRequest, _ *mcp.CallToolResult) {
-		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceToolCallObserved, 0, "")
+	hooks.AddAfterCallTool(func(ctx context.Context, _ any, _ *mcp.CallToolRequest, _ any) {
+		s.observeMCPRequest(ctx, streams.MCPAttachmentEvidenceToolCallObserved, 0, "")
 	})
 	hooks.AddOnError(func(ctx context.Context, _ any, _ mcp.MCPMethod, _ any, err error) {
-		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceExplicitError, 0, err.Error())
+		s.observeMCPRequest(ctx, streams.MCPAttachmentEvidenceExplicitError, 0, err.Error())
 	})
 	hooks.AddOnUnregisterSession(func(_ context.Context, session server.ClientSession) {
 		s.unregisterMCPConnection(session.SessionID())
@@ -298,12 +304,24 @@ func (s *Server) observeMCPConnection(connectionID string, kind streams.MCPAttac
 	s.observeMCPConnectionWithTools(connectionID, kind, toolCount, summary, nil)
 }
 
+func (s *Server) observeMCPRequest(ctx context.Context, kind streams.MCPAttachmentEvidenceKind, toolCount int, summary string) {
+	s.observeMCPRequestWithTools(ctx, kind, toolCount, summary, nil)
+}
+
 func (s *Server) observeMCPToolsList(connectionID string, tools []mcp.Tool) {
 	summaries := make([]streams.MCPToolSummary, 0, len(tools))
 	for _, tool := range tools {
 		summaries = append(summaries, summarizeMCPTool(tool))
 	}
 	s.observeMCPConnectionWithTools(connectionID, streams.MCPAttachmentEvidenceToolsListObserved, len(tools), "", summaries)
+}
+
+func (s *Server) observeMCPToolsListForRequest(ctx context.Context, tools []mcp.Tool) {
+	summaries := make([]streams.MCPToolSummary, 0, len(tools))
+	for _, tool := range tools {
+		summaries = append(summaries, summarizeMCPTool(tool))
+	}
+	s.observeMCPRequestWithTools(ctx, streams.MCPAttachmentEvidenceToolsListObserved, len(tools), "", summaries)
 }
 
 func summarizeMCPTool(tool mcp.Tool) streams.MCPToolSummary {
@@ -349,6 +367,43 @@ func (s *Server) observeMCPConnectionWithTools(
 		return
 	}
 	s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, tools)
+}
+
+func (s *Server) observeMCPRequestWithTools(
+	ctx context.Context,
+	kind streams.MCPAttachmentEvidenceKind,
+	toolCount int,
+	summary string,
+	tools []streams.MCPToolSummary,
+) {
+	if !server.IsModernRequest(ctx) {
+		connectionID := mcpConnectionID(ctx)
+		s.attachmentMu.RLock()
+		attempt, ok := s.attachmentAttempts[connectionID]
+		reporter := s.attachmentReporter
+		if !ok && connectionID != "" {
+			// Streamable HTTP registers a legacy POST initialize session after
+			// handling the request. Attribute its initialize evidence to the
+			// current attempt until the registration hook records the connection.
+			attempt = s.attachmentAttempt
+			ok = attempt.AttemptID != ""
+		}
+		s.attachmentMu.RUnlock()
+		if !ok || reporter == nil || attempt.AttemptID == "" {
+			return
+		}
+		s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, tools)
+		return
+	}
+
+	s.attachmentMu.RLock()
+	attempt := s.attachmentAttempt
+	reporter := s.attachmentReporter
+	s.attachmentMu.RUnlock()
+	if reporter == nil || attempt.AttemptID == "" {
+		return
+	}
+	s.reportMCPConnectionWithTools(reporter, attempt, "", kind, toolCount, summary, tools)
 }
 
 func (s *Server) registerMCPConnection(connectionID string) {
