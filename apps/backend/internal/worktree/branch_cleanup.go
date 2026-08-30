@@ -296,6 +296,19 @@ func (m *Manager) deleteExpectedBranchRef(
 		m.clearBranchRecoveryHead(ctx, metadataStore, wt, branchHead)
 		return RetainedLiveWorktree
 	}
+	// Recheck immediately before the destructive ref mutation. A worktree can
+	// be attached after the initial eligibility probe without changing the
+	// branch head, and update-ref does not enforce Git's checked-out-branch
+	// protection.
+	live, err = branchCheckedOutInWorktree(ctx, wt.RepositoryPath, branchRef)
+	if err != nil {
+		m.clearBranchRecoveryHead(ctx, metadataStore, wt, branchHead)
+		return RetainedAncestryProbeFailed
+	}
+	if live {
+		m.clearBranchRecoveryHead(ctx, metadataStore, wt, branchHead)
+		return RetainedLiveWorktree
+	}
 	cmd := m.newNonInteractiveGitCmd(ctx, wt.RepositoryPath, "update-ref", "-d", branchRef, branchHead)
 	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err == nil {
