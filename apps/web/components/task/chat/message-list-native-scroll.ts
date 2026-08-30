@@ -25,6 +25,15 @@ import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const paginationDebug = createDebugLogger("messages:pagination");
 
+// INT32_MAX: WebKit resolves Number.MAX_SAFE_INTEGER to 0 (not bottom).
+const NATIVE_BOTTOM_SCROLL_TOP = 2_147_483_647;
+
+/** Writes a clamped maximum so the browser resolves the native bottom without
+ * forcing a synchronous scrollHeight layout read. */
+export function scrollNativeToBottom(element: HTMLElement): void {
+  element.scrollTop = NATIVE_BOTTOM_SCROLL_TOP;
+}
+
 type PaginationRequest = {
   boundaryBefore: string | null;
   debug?: {
@@ -429,7 +438,7 @@ export function useAutoScroll(params: {
     ) {
       const el = scrollRef.current;
       if (el) {
-        el.scrollTop = el.scrollHeight;
+        scrollNativeToBottom(el);
         isNearBottomRef.current = true;
       }
     }
@@ -449,7 +458,7 @@ export function useAutoScroll(params: {
       }) &&
       enabled
     ) {
-      el.scrollTop = el.scrollHeight;
+      scrollNativeToBottom(el);
     }
   }, [messages, scrollRef, enabled, isProgrammaticScrollLocked]);
 
@@ -539,7 +548,7 @@ function useCatchUpOnReEnable(
         isAtBottom,
       })
     ) {
-      el.scrollTop = el.scrollHeight;
+      scrollNativeToBottom(el);
       isNearBottomRef.current = true;
     }
   }, [enabled, scrollRef, messages]);

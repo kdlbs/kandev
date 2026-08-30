@@ -115,7 +115,7 @@ See [`configuration.md`](configuration.md) for the full reference (including the
 
 > **File-mode note:** when `KANDEV_LOGGING_OUTPUTPATH` is a file path, the active log file is created with mode `0600` (owner read/write only). Run any log shipper or sidecar as the same user, or use `stdout`/`stderr` and let the container runtime collect logs.
 
-> **Upgrading from a pre-`KANDEV_HOME_DIR` image?** The SQLite DB path moved from `/data/kandev.db` to `/data/data/kandev.db`. The backend auto-migrates the legacy `kandev.db` (plus any `-wal`/`-shm` files) on first boot — look for `Migrated SQLite database from pre-KANDEV_HOME_DIR location` in the logs. If you prefer to pin the old location instead, set `-e KANDEV_DATABASE_PATH=/data/kandev.db`. If you previously set `KANDEV_DATA_DIR`, replace it with `KANDEV_HOME_DIR`.
+> **Upgrading from a pre-`KANDEV_HOME_DIR` image?** The SQLite DB path moved from `/data/kandev.db` to `/data/data/kandev.db`. When no explicit database path is set, the backend checks the legacy `kandev.db` and, when valid, installs a validated snapshot at the current path while retaining the legacy database and its `-wal`/`-shm` files. Look for the `SQLite database selected` diagnostic with outcome `legacy_adopted`. If both candidates need operator review, startup stops and names both paths; preserve them and select the intended file with `KANDEV_DATABASE_PATH`. To keep the old location explicitly, set `-e KANDEV_DATABASE_PATH=/data/kandev.db`. If you previously set `KANDEV_DATA_DIR`, replace it with `KANDEV_HOME_DIR`.
 
 ### PostgreSQL
 

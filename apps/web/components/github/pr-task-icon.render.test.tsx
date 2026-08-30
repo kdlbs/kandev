@@ -7,13 +7,16 @@ import { TaskContributionIcons } from "@/components/task/task-contribution-icons
 import { PRTaskIcon } from "./pr-task-icon";
 import type { AppState } from "@/lib/state/store";
 import type { TaskPR } from "@/lib/types/github";
+import type { TaskCIAutomationOptions } from "@/lib/types/github";
 
 const listTaskPRsMock = vi.hoisted(() => vi.fn());
+const getTaskCIAutomationOptionsMock = vi.hoisted(() => vi.fn());
 const TASK_ID = "task-1";
 const WORKSPACE_ID = "workspace-1";
 
 vi.mock("@/lib/api/domains/github-api", () => ({
   listTaskPRs: listTaskPRsMock,
+  getTaskCIAutomationOptions: getTaskCIAutomationOptionsMock,
 }));
 
 function renderWithStore(initialState: Partial<AppState> | undefined, ui: ReactNode) {
@@ -58,8 +61,40 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   };
 }
 
+function makeAutomationOptions(
+  overrides: Partial<TaskCIAutomationOptions> = {},
+): TaskCIAutomationOptions {
+  return {
+    task_id: TASK_ID,
+    workspace_id: WORKSPACE_ID,
+    auto_fix_enabled: true,
+    auto_merge_enabled: true,
+    auto_fix_prompt_override: null,
+    effective_auto_fix_prompt: "",
+    using_default_prompt: true,
+    updated_at: "2026-08-01T00:00:00Z",
+    pr_states: [],
+    pr_options: [
+      {
+        task_id: TASK_ID,
+        repository_id: "repo-1",
+        pr_number: 1,
+        auto_fix_enabled: true,
+        auto_merge_enabled: true,
+        prompt_on_review_requested: false,
+        prompt_on_merged: false,
+        prompt_on_closed: false,
+        created_at: "",
+        updated_at: "",
+      },
+    ],
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   listTaskPRsMock.mockReset().mockReturnValue(new Promise(() => {}));
+  getTaskCIAutomationOptionsMock.mockReset().mockResolvedValue(undefined);
 });
 
 afterEach(() => cleanup());
@@ -175,5 +210,48 @@ describe("PRTaskIcon corrupted store entry", () => {
       expect(screen.getAllByTestId("pr-task-status-summary").length).toBeGreaterThan(0),
     );
     expect(document.activeElement).toBe(screen.getByTestId(`pr-task-icon-${TASK_ID}`));
+  });
+});
+
+describe("PRTaskIcon automation indicators", () => {
+  // @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.10
+  it("renders independent automation dots from the bounded row projection", () => {
+    renderWithStore(
+      { workspaces: { items: [], activeId: WORKSPACE_ID } },
+      <TaskContributionIcons
+        taskId={TASK_ID}
+        prInfo={{ number: 7, state: "open", autoFixEnabled: true, autoMergeEnabled: true }}
+      />,
+    );
+
+    expect(screen.getByTestId("pr-task-automation-auto-fix")).not.toBeNull();
+    expect(screen.getByTestId("pr-task-automation-auto-merge")).not.toBeNull();
+  });
+
+  // @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.11
+  it("shows per-PR automation details after the icon disclosure hydrates", async () => {
+    const response = Promise.resolve({
+      task_prs: { [TASK_ID]: [makePR({ repository_id: "repo-1" })] },
+    });
+    listTaskPRsMock.mockReturnValue(response);
+    getTaskCIAutomationOptionsMock.mockResolvedValue(makeAutomationOptions());
+    renderWithStore(
+      { workspaces: { items: [], activeId: WORKSPACE_ID } },
+      <TaskContributionIcons taskId={TASK_ID} prInfo={{ number: 1, state: "open" }} />,
+    );
+
+    fireEvent.pointerEnter(screen.getByTestId(`pr-task-icon-${TASK_ID}`), {
+      pointerType: "mouse",
+    });
+    await act(async () => {
+      await response;
+    });
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId("pr-task-automation-details").length).toBeGreaterThan(0),
+    );
+    expect(screen.getAllByText("o/r PR #1").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Auto-fix").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Auto-merge").length).toBeGreaterThan(0);
   });
 });

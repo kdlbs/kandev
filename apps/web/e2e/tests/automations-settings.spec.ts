@@ -151,7 +151,7 @@ test.describe("Automations settings page", () => {
     await expect(testPage.getByText("Updated Name")).toBeVisible();
   });
 
-  test("delete automation from editor", async ({ testPage, seedData }) => {
+  test("delete automation from editor requires confirmation", async ({ testPage, seedData }) => {
     const automations = new AutomationsPage(testPage, seedData.workspaceId);
 
     // Create an automation first
@@ -168,14 +168,67 @@ test.describe("Automations settings page", () => {
     await automations.openByName("To Be Deleted");
     await expect(testPage).toHaveURL(/automations\/[a-f0-9-]+$/, { timeout: 10_000 });
 
-    // Delete it
+    // The confirmation must identify the persisted automation, not an
+    // unsaved draft name from the editor.
+    await automations.nameInput.fill("Unsaved Draft Name");
     await automations.deleteButton.click();
+    await expect(automations.deleteConfirmation).toBeVisible();
+    await expect(automations.deleteConfirmation).toContainText(
+      "This will permanently delete To Be Deleted. This action cannot be undone.",
+    );
+    await expect(automations.deleteConfirmation).not.toContainText("Unsaved Draft Name");
+
+    // Cancelling must leave the editor and the automation untouched.
+    await automations.deleteConfirmation.getByRole("button", { name: "Cancel" }).click();
+    await expect(automations.deleteConfirmation).not.toBeVisible();
+    await expect(testPage).toHaveURL(/automations\/[a-f0-9-]+$/, { timeout: 5_000 });
+    await expect(automations.deleteButton).toBeVisible();
+
+    // Confirming performs the existing delete flow.
+    await automations.deleteButton.click();
+    await expect(automations.deleteConfirmation).toBeVisible();
+    await automations.deleteConfirmButton.click();
 
     // Should redirect to list page
     await expect(testPage).toHaveURL(/automations$/, { timeout: 10_000 });
 
     // The deleted automation should not appear in the list
     await expect(testPage.getByText("To Be Deleted")).not.toBeVisible({ timeout: 10_000 });
+  });
+
+  test("delete automation from list requires confirmation", async ({
+    testPage,
+    seedData,
+    apiClient,
+    prCapture,
+  }) => {
+    const automation = await apiClient.seedAutomation({
+      workspaceId: seedData.workspaceId,
+      name: "List Delete Automation",
+      workflowId: seedData.workflowId,
+      workflowStepId: seedData.startStepId,
+    });
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.goto();
+
+    const row = automations.automationRow(automation.id);
+    const deleteButton = row.getByTestId(`automation-delete-button-${automation.id}`);
+    await deleteButton.click();
+
+    await expect(automations.deleteConfirmation).toBeVisible();
+    await expect(automations.deleteConfirmation).toContainText(
+      "This will permanently delete List Delete Automation. This action cannot be undone.",
+    );
+    await prCapture.screenshot("automation-delete-confirmation-desktop", {
+      caption: "Desktop automation deletion confirmation",
+    });
+    await automations.deleteConfirmation.getByRole("button", { name: "Cancel" }).click();
+    await expect(automations.deleteConfirmation).not.toBeVisible();
+    await expect(row).toBeVisible();
+
+    await deleteButton.click();
+    await automations.deleteConfirmButton.click();
+    await expect(row).toHaveCount(0, { timeout: 10_000 });
   });
 
   test("create webhook automation shows reveal dialog with URL and secret", async ({

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	promptcfg "github.com/kandev/kandev/config/prompts"
 )
@@ -80,6 +81,42 @@ func (s *Service) UpdateTaskCIOptions(ctx context.Context, taskID string, patch 
 		response.WorkspaceID = workspaceID
 	}
 	return response, err
+}
+
+// RetryTaskCIAutoMerge authorizes one new evaluation of a failed automatic
+// merge for the exact linked PR. The caller publishes the returned PR through
+// the normal PR-updated event path; this method never calls GitHub.
+func (s *Service) RetryTaskCIAutoMerge(
+	ctx context.Context, taskID, repositoryID string, prNumber int,
+) (*TaskPR, error) {
+	if s.store == nil {
+		return nil, errStoreUnavailable
+	}
+	if _, err := s.resolveAuthorizedTaskWorkspace(ctx, taskID); err != nil {
+		return nil, err
+	}
+	targets, err := s.resolveTaskPRAutomationTargets(ctx, taskID, &repositoryID, &prNumber)
+	if err != nil {
+		return nil, err
+	}
+	if len(targets) != 1 {
+		return nil, ErrTaskPRNotLinked
+	}
+	if err := s.store.AuthorizeTaskCIMergeRetry(ctx, taskID, repositoryID, prNumber, time.Now().UTC()); err != nil {
+		return nil, err
+	}
+	return targets[0], nil
+}
+
+// ClearTaskCIMergeRetryAuthorization removes a retry authorization that could
+// not be delivered to the automation evaluator.
+func (s *Service) ClearTaskCIMergeRetryAuthorization(
+	ctx context.Context, taskID, repositoryID string, prNumber int,
+) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.ClearTaskCIMergeRetryAuthorization(ctx, taskID, repositoryID, prNumber)
 }
 
 // resolveAuthorizedTaskWorkspace resolves ownership through the task service
@@ -240,6 +277,16 @@ func (s *Service) RecordTaskCIMergeAttempt(ctx context.Context, attempt TaskCIMe
 	return s.store.RecordTaskCIMergeAttempt(ctx, attempt)
 }
 
+// RecordTaskCIMergeAttemptResult completes a reserved auto-merge attempt.
+func (s *Service) RecordTaskCIMergeAttemptResult(
+	ctx context.Context, taskID, repositoryID string, prNumber int, signature, result, message string,
+) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.RecordTaskCIMergeAttemptResult(ctx, taskID, repositoryID, prNumber, signature, result, message)
+}
+
 // RecordTaskCIMergeQueueObservation persists active queue membership and the
 // latest removal cause so automation can recover safely after a restart.
 func (s *Service) RecordTaskCIMergeQueueObservation(ctx context.Context, observation TaskCIMergeQueueObservation) error {
@@ -255,6 +302,14 @@ func (s *Service) RecordTaskCIError(ctx context.Context, taskID, repositoryID st
 		return errStoreUnavailable
 	}
 	return s.store.RecordTaskCIError(ctx, taskID, repositoryID, prNumber, message)
+}
+
+// RecordTaskCIAutoMergeError records a typed automatic-merge error.
+func (s *Service) RecordTaskCIAutoMergeError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.RecordTaskCIAutoMergeError(ctx, taskID, repositoryID, prNumber, message)
 }
 
 // MarkTaskCIAutoFixExhausted records that auto-fix reached its per-PR round cap.

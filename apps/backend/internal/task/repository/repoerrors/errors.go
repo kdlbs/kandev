@@ -63,3 +63,12 @@ var ErrCoordinatorGrantNotFound = errors.New("coordinator grant not found")
 // ErrCoordinatorGrantConflict reports that a principal already has an active
 // grant for the same scope.
 var ErrCoordinatorGrantConflict = errors.New("coordinator grant already exists for scope")
+
+// ErrWorkflowResolutionConflict reports that a caller's expected current
+// workflow (passed to guard a write against a concurrent reassignment) no
+// longer matches the task's persisted workflow_id, checked atomically inside
+// the write transaction immediately before the row is updated. The write is
+// rejected rather than silently reverting whatever the concurrent move just
+// did. See task/service.MoveTaskOptions.ExpectedWorkflowID for the caller
+// contract.
+var ErrWorkflowResolutionConflict = errors.New("task workflow changed since resolution")

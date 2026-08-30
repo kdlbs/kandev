@@ -154,9 +154,16 @@ type TaskReader interface {
 	Create(ctx context.Context, in CreateTaskInput) (*Task, error)
 
 	// Update mutates a conservative field surface of an existing task
-	// (title/description/state/workflow_step_id) and returns the updated task.
-	// Requires api_write:tasks.
+	// (title/description/state) and returns the updated task. Requires
+	// api_write:tasks. WorkflowStepID is rejected when present — use Move to
+	// transition a task between workflow steps.
 	Update(ctx context.Context, in UpdateTaskInput) (*Task, error)
+
+	// Move transitions a task to a workflow step through the same path the
+	// board's own move uses (validation, WIP admission, task.moved
+	// publication, auto-start gates, queue reconciliation) — unlike Update,
+	// which rejects a workflow step change. Requires api_write:tasks.
+	Move(ctx context.Context, in MoveTaskInput) (*MoveTaskOutcome, error)
 }
 
 // TaskRelationsReader is the compact relation-graph accessor behind
@@ -604,6 +611,14 @@ func (r grpcTaskReader) Update(ctx context.Context, in UpdateTaskInput) (*Task, 
 		return nil, err
 	}
 	return &task, nil
+}
+
+func (r grpcTaskReader) Move(ctx context.Context, in MoveTaskInput) (*MoveTaskOutcome, error) {
+	resp, err := r.client.MoveTask(ctx, in.toProto())
+	if err != nil {
+		return nil, err
+	}
+	return moveTaskOutcomeFromProto(resp)
 }
 
 // grpcSessionReader implements SessionReader on the plugin side.
@@ -1144,6 +1159,17 @@ func (s *grpcHostServer) UpdateTask(ctx context.Context, req *pluginv1.UpdateTas
 	return &pluginv1.UpdateTaskResponse{Task: protoTask}, nil
 }
 
+func (s *grpcHostServer) MoveTask(ctx context.Context, req *pluginv1.MoveTaskRequest) (*pluginv1.MoveTaskResponse, error) {
+	outcome, err := s.impl.Tasks().Move(ctx, moveTaskInputFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	if outcome == nil {
+		return nil, status.Error(codes.Internal, "MoveTask returned nil outcome")
+	}
+	return outcome.toProto()
+}
+
 func (s *grpcHostServer) SendMessage(ctx context.Context, req *pluginv1.SendMessageRequest) (*pluginv1.SendMessageResponse, error) {
 	dispatch, err := s.impl.Messages().Send(ctx, req.GetTaskId(), req.GetSessionId(), req.GetText())
 	if err != nil {
@@ -1352,6 +1378,10 @@ func (unimplementedWorkspaceAgentPrincipalReader) Status(context.Context, string
 
 func (unimplementedWorkspaceAgentPrincipalReader) ListAudit(context.Context, string, string, Page) ([]WorkspaceAgentPrincipalAuditEvent, *PageInfo, error) {
 	return nil, nil, errUnimplementedHostData("workspace_agent_principals")
+}
+
+func (unimplementedTaskReader) Move(context.Context, MoveTaskInput) (*MoveTaskOutcome, error) {
+	return nil, errUnimplementedHostData("tasks")
 }
 
 type unimplementedSessionReader struct{}

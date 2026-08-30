@@ -60,6 +60,13 @@ type WorktreeBatchCleaner interface {
 	CleanupWorktrees(ctx context.Context, worktrees []*worktree.Worktree) error
 }
 
+// WorktreeArchiveBatchCleaner removes archived task worktrees without deleting
+// the local branches required for later recovery.
+type WorktreeArchiveBatchCleaner interface {
+	WorktreeBatchCleaner
+	CleanupWorktreesPreservingBranches(ctx context.Context, worktrees []*worktree.Worktree) error
+}
+
 type worktreeReferenceGuard interface {
 	CountActiveWorktreeReferences(ctx context.Context, worktreeID string, excludeSessionIDs []string) (int, error)
 	ReleaseWorktreeReference(ctx context.Context, wt *worktree.Worktree) error
@@ -351,6 +358,7 @@ type Service struct {
 	sshTaskDirReclaimer             SSHTaskDirReclaimer
 	sessionRunningChecker           SessionRunningChecker
 	remoteBranchLister              RemoteBranchLister
+	repositorySelectionResolver     RepositorySelectionResolver
 	repoCloneLocation               RepoCloneLocation
 	blockers                        BlockerRepository
 	// dependencyEdgeMu serializes validate-then-insert for dependency edges so
@@ -642,6 +650,13 @@ type RemoteBranchLister interface {
 // SetRemoteBranchLister wires the provider-neutral remote branch source.
 func (s *Service) SetRemoteBranchLister(lister RemoteBranchLister) {
 	s.remoteBranchLister = lister
+}
+
+// SetRepositorySelectionResolver wires server-side inspection for first-use
+// plugin repository selections. The resolver is optional for focused callers;
+// plugin selections fail closed when it is not wired.
+func (s *Service) SetRepositorySelectionResolver(resolver RepositorySelectionResolver) {
+	s.repositorySelectionResolver = resolver
 }
 
 // RepoCloneLocation reports the base path the orchestrator clones repos into

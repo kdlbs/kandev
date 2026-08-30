@@ -116,8 +116,13 @@ export function GlobalCommands() {
   const router = useRouter();
   const { resolvedTheme, setTheme } = useTheme();
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
-  const handleOpenQuickChat = useQuickChatLauncher(activeWorkspaceId);
-  const handleOpenConfigChat = useQuickChatLauncher(activeWorkspaceId, "config");
+  const handleOpenQuickChat = useQuickChatLauncher(activeWorkspaceId, "chat", {
+    silentFocusReturn: false,
+    toggleWhenOpen: true,
+  });
+  const handleOpenConfigChat = useQuickChatLauncher(activeWorkspaceId, "config", {
+    silentFocusReturn: false,
+  });
 
   const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
   const quickChatShortcut = getShortcut("QUICK_CHAT", keyboardShortcuts);
@@ -168,11 +173,15 @@ export function GlobalCommands() {
   );
 
   useRegisterCommands(commands);
-  useKeyboardShortcut(quickChatShortcut, handleOpenQuickChat);
   // Order matters: useAppShortcuts (core) must register its capture-phase
-  // keydown listener before usePluginShortcuts so core shortcuts win when a
-  // combo matches both — see the precedence note on each hook.
+  // keydown listener before the Quick Chat toggle and plugin shortcuts. This
+  // preserves core precedence, while the toggle still runs before xterm can
+  // consume a configured shortcut.
   useAppShortcuts();
+  useKeyboardShortcut(quickChatShortcut, handleOpenQuickChat, {
+    capture: true,
+    stopPropagation: true,
+  });
   usePluginShortcuts();
 
   return <SettingsDiscoveryCommands />;

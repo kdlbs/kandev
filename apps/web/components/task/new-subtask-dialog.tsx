@@ -386,7 +386,7 @@ function NewSubtaskForm({
   const handlers = useDialogHandlers(fs, availableRepositories);
   useGitHubUrlErrorEffect(fs, isOpen);
   useDiscoverReposEffect(fs, isOpen, workspaceId, false, toast);
-  const profileOptions = useAgentProfileOptions(agentProfiles);
+  const profileOptions = useAgentProfileOptions(agentProfiles, "task_create");
   const sessionOptions = useSessionOptions(parentTaskId);
   const allExecutorProfiles = useExecutorProfiles(executors);
   const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles);

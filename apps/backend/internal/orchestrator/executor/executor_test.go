@@ -2948,7 +2948,7 @@ func (c *recordingAuthenticatedCloner) SetOriginURL(context.Context, string, str
 	return nil
 }
 
-func (c *recordingAuthenticatedCloner) BuildCloneURLWithHost(_, _, _, _ string) (string, error) {
+func (c *recordingAuthenticatedCloner) BuildCloneURLWithHost(_ context.Context, _, _, _, _ string) (string, error) {
 	return "", nil
 }
 

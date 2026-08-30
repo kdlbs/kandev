@@ -264,6 +264,7 @@ type StartQuickChatCommon = {
   agent_profile_id?: string;
   executor_id?: string;
   prompt?: string;
+  auto_title?: boolean;
 };
 
 type StartQuickChatLegacyRepository = {
@@ -295,6 +296,7 @@ export type QuickChatRepositoryInput = {
 export type StartQuickChatResponse = {
   task_id: string;
   session_id: string;
+  agent_profile_id?: string;
 };
 
 export async function startQuickChat(
@@ -346,6 +348,7 @@ export type StartConfigChatRequest = {
 export type StartConfigChatResponse = {
   task_id: string;
   session_id: string;
+  agent_profile_id?: string;
 };
 
 export async function startConfigChat(

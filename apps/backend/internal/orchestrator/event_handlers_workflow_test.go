@@ -207,6 +207,36 @@ func TestQueuePromotionTokenRemainsPendingWhenTargetLookupFails(t *testing.T) {
 	}
 }
 
+func TestQueuePromotionWithoutSessionCompletesDestinationEntry(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "promotion-no-session", WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: "destination-step",
+		Title: "Promotion without session", State: v1.TaskStateTODO, WIPAdmitted: true,
+		Metadata: map[string]interface{}{models.MetaKeyQueuePromotionPending: true},
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	steps := newMockStepGetter()
+	steps.steps["destination-step"] = &wfmodels.WorkflowStep{
+		ID: "destination-step", WorkflowID: "wf1", Name: "Destination", Position: 0,
+	}
+	steps.steps["next-step"] = &wfmodels.WorkflowStep{
+		ID: "next-step", WorkflowID: "wf1", Name: "Next", Position: 1,
+	}
+	svc := createTestService(repo, steps, newMockTaskRepo())
+	svc.handleTaskQueuePromoted(ctx, watcher.TaskEventData{TaskID: "promotion-no-session"})
+
+	stored, err := repo.GetTask(ctx, "promotion-no-session")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if _, pending := stored.Metadata[models.MetaKeyQueuePromotionPending]; pending {
+		t.Fatal("queue promotion token remained after destination entry completed without a session")
+	}
+}
+
 func TestQueuedMoveWithoutSessionCompletesSourceExitBarrier(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

@@ -2600,6 +2600,11 @@ type recordingTaskExecutionStopper struct {
 	claimExecutionFunc   func(sessionID, executionID string, force bool) bool
 }
 
+// Durable cleanup runs on a worker and can be delayed by race-instrumented
+// SQLite setup under CI load. Keep asynchronous cleanup assertions bounded
+// without coupling them to a sub-second scheduler window.
+const asyncTaskCleanupTestTimeout = 5 * time.Second
+
 func newRecordingTaskExecutionStopper() *recordingTaskExecutionStopper {
 	return &recordingTaskExecutionStopper{stopExecutionCh: make(chan stopExecutionCall, 8)}
 }
@@ -2634,7 +2639,7 @@ func (s *recordingTaskExecutionStopper) waitForStopExecution(t *testing.T) stopE
 	select {
 	case call := <-s.stopExecutionCh:
 		return call
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(asyncTaskCleanupTestTimeout):
 		t.Fatal("timed out waiting for StopExecution")
 		return stopExecutionCall{}
 	}
@@ -2752,7 +2757,7 @@ func waitForCleanupDone(t *testing.T, svc *Service) {
 	t.Helper()
 	select {
 	case <-svc.cleanupDoneForTest:
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(asyncTaskCleanupTestTimeout):
 		t.Fatal("timed out waiting for async task cleanup")
 	}
 }

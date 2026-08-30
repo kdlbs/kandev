@@ -15,6 +15,7 @@ import { t } from "@/lib/i18n";
 import { useFreshBranchConsent } from "@/components/task-create-dialog-fresh-branch-consent";
 import { queueTaskCreateLastUsedFromPayload } from "@/components/task-create-dialog-handlers";
 import { ApiError } from "@/lib/api/client";
+import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
 
 const GENERIC_ERROR_KEY = "common:anErrorOccurred";
 
@@ -42,6 +43,15 @@ function notifyQueuedTask(
   });
 }
 
+function shouldNavigateAfterTaskCreate(
+  withAgent: boolean,
+  isPassthroughProfile: boolean,
+  planMode: boolean | undefined,
+  sessionId: string | null,
+) {
+  return (withAgent && isPassthroughProfile) || !!(planMode && sessionId);
+}
+
 type NoAgentTaskRequirements = {
   description: string;
   workspaceId: string;
@@ -64,6 +74,26 @@ function resolveWorkspacePath(noRepository: boolean, workspacePath: string): str
 function isStaleBranchPolicyError(error: unknown): boolean {
   return (
     error instanceof ApiError && error.status === 400 && error.errorCode === "branch_policy_stale"
+  );
+}
+
+const REPOSITORY_SELECTION_ERROR_KEYS: Record<string, string> = {
+  repository_selection_invalid: "task:repositorySelectionInvalid",
+  repository_selection_not_found: "task:repositorySelectionNotFound",
+  repository_selection_unavailable: "task:repositorySelectionUnavailable",
+};
+
+export function taskSubmitErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    const key = REPOSITORY_SELECTION_ERROR_KEYS[error.errorCode ?? ""];
+    if (key) return t(key);
+  }
+  return error instanceof Error ? error.message : t(GENERIC_ERROR_KEY);
+}
+
+function isRepositorySelectionError(error: unknown): boolean {
+  return (
+    error instanceof ApiError && Boolean(REPOSITORY_SELECTION_ERROR_KEYS[error.errorCode ?? ""])
   );
 }
 
@@ -122,6 +152,7 @@ export function useTaskSubmitHandlers({
   const { toast } = useToast();
   const setActiveDocument = useAppStore((state) => state.setActiveDocument);
   const setPlanMode = useAppStore((state) => state.setPlanMode);
+  const applyAgentProfileRecentUse = useAppStore((state) => state.applyAgentProfileRecentUse);
   const isStartedEdit = computeIsTaskStarted(isEditMode, editingTask);
 
   const isFreshBranchActive =
@@ -296,14 +327,21 @@ export function useTaskSubmitHandlers({
         prompt: trimmedDescription,
         attachments: toMessageAttachments(attachments),
       });
-      await launchSession(request);
+      const response = await launchSession(request);
+      if (response.session_id) {
+        recordAgentProfileRecentUseBestEffort(
+          "task_session",
+          response.agent_profile_id ?? agentProfileId,
+          (record) => applyAgentProfileRecentUse("task_session", record),
+        );
+      }
 
       onOpenChange(false);
       router.push(linkToTask(taskId));
     } catch (error) {
       toast({
         title: t("task:failedToCreateSession"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -320,6 +358,7 @@ export function useTaskSubmitHandlers({
     toast,
     descriptionInputRef,
     setIsCreatingSession,
+    applyAgentProfileRecentUse,
   ]);
 
   const performTaskUpdate = useCallback(async () => {
@@ -369,6 +408,13 @@ export function useTaskSubmitHandlers({
           });
           const response = await launchSession(request);
           taskSessionId = response?.session_id ?? null;
+          if (taskSessionId) {
+            recordAgentProfileRecentUseBestEffort(
+              "task_session",
+              response.agent_profile_id ?? agentProfileId,
+              (record) => applyAgentProfileRecentUse("task_session", record),
+            );
+          }
         } catch (error) {
           console.error("[TaskCreateDialog] failed to start agent:", error);
         }
@@ -376,10 +422,12 @@ export function useTaskSubmitHandlers({
 
       onSuccess?.(updatedTask, "edit", { taskSessionId });
     } catch (error) {
-      closeDialog = !(await refreshStaleBranchPolicies(error));
+      closeDialog = !(
+        isRepositorySelectionError(error) || (await refreshStaleBranchPolicies(error))
+      );
       toast({
         title: t("task:failedToUpdateTask"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -397,6 +445,7 @@ export function useTaskSubmitHandlers({
     refreshStaleBranchPolicies,
     toast,
     setIsCreatingTask,
+    applyAgentProfileRecentUse,
   ]);
 
   const handleUpdateWithoutAgent = useCallback(async () => {
@@ -408,10 +457,12 @@ export function useTaskSubmitHandlers({
       if (!result) return;
       onSuccess?.(result.updatedTask, "edit");
     } catch (error) {
-      closeDialog = !(await refreshStaleBranchPolicies(error));
+      closeDialog = !(
+        isRepositorySelectionError(error) || (await refreshStaleBranchPolicies(error))
+      );
       toast({
         title: t("task:failedToUpdateTask"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -469,8 +520,12 @@ export function useTaskSubmitHandlers({
       if (!taskResponse) return;
       notifyQueuedTask(taskResponse, toast);
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
-      const willNavigate =
-        (opts.withAgent && isPassthroughProfile) || !!(opts.planMode && newSessionId);
+      const willNavigate = shouldNavigateAfterTaskCreate(
+        opts.withAgent,
+        isPassthroughProfile,
+        opts.planMode,
+        newSessionId,
+      );
       onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId, willNavigate });
       clearDraft();
       queueTaskCreateLastUsedFromPayload(submittedPayload);
@@ -542,6 +597,13 @@ export function useTaskSubmitHandlers({
     });
     const response = await launchSession(request);
     const newSessionId = response?.session_id ?? null;
+    if (newSessionId) {
+      recordAgentProfileRecentUseBestEffort(
+        "task_session",
+        response.agent_profile_id ?? agentProfileId,
+        (record) => applyAgentProfileRecentUse("task_session", record),
+      );
+    }
     onSuccess?.(updatedTask, "edit", { taskSessionId: newSessionId });
     onOpenChange(false);
     if (newSessionId) {
@@ -563,6 +625,7 @@ export function useTaskSubmitHandlers({
     setActiveDocument,
     setPlanMode,
     router,
+    applyAgentProfileRecentUse,
   ]);
 
   const handleCreateWithPlanMode = useCallback(async () => {
@@ -574,7 +637,7 @@ export function useTaskSubmitHandlers({
         await refreshStaleBranchPolicies(error);
         toast({
           title: t("task:failedToStartTaskPlanMode"),
-          description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+          description: taskSubmitErrorMessage(error),
           variant: "error",
         });
       } finally {
@@ -606,7 +669,7 @@ export function useTaskSubmitHandlers({
       await refreshStaleBranchPolicies(error);
       toast({
         title: t("task:failedToStartTaskPlanMode"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -676,7 +739,7 @@ export function useTaskSubmitHandlers({
       await refreshStaleBranchPolicies(error);
       toast({
         title: t("task:failedToCreateTask"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -746,7 +809,7 @@ export function useTaskSubmitHandlers({
       await refreshStaleBranchPolicies(error);
       toast({
         title: t("task:failedToCreateTask"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {

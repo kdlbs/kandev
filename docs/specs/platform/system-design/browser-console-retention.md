@@ -72,6 +72,24 @@ loop before a diagnostic snapshot. It does not create a parallel writer.
 The console interception path remains synchronous and bounded. It only adds a
 reference-free entry to staging and schedules the loop.
 
+### Burst collection and entry preparation
+
+The first staged entry opens one 250 ms collection window. Browser idle time
+cannot start persistence before that window closes. When the window closes,
+the runtime starts one drain and fills each transaction up to the existing
+50-entry or 256 KiB limit. A diagnostic snapshot cancels the collection wait
+and joins the same drain immediately.
+
+The runtime prepares each accepted entry once after it adds the identity
+scope. This preparation creates the detached entry and its exact encoded byte
+size. The memory buffer, staging queue, and IndexedDB store reuse that prepared
+entry and byte size. They do not repeat `JSON.stringify()` or UTF-8 encoding at
+each layer.
+
+The 500-entry and 2 MiB staging limits remain exact. The collection window
+does not delay the original console call, increase the staging limits, or
+change which log levels a diagnostic bundle contains.
+
 ## Migration and recovery
 
 The version-2 upgrade transaction creates the metadata store and walks the
@@ -97,7 +115,10 @@ real IndexedDB request and transaction behavior without a product dependency.
 
 Runtime tests hold the first append promise while more entries arrive. They
 confirm that append concurrency stays at one and that a snapshot waits for the
-same drain.
+same drain. Fake-time tests also prove that browser idle time cannot split one
+collection window into one-entry transactions, and that a snapshot bypasses
+the wait. Entry-preparation tests prove that the memory and IndexedDB paths use
+the same encoded byte count.
 
 ## Related decisions
 

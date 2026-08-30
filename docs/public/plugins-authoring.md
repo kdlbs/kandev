@@ -490,24 +490,26 @@ subscription vocabulary and wildcard rules are in the
 
 ### Host API matrix
 
-| Host surface   | Methods                                          | Required manifest capability                                                | Notes                                                                                                                                                                                       |
-| -------------- | ------------------------------------------------ | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| State          | GetState, SetState, DeleteState, ListState       | state: true                                                                 | Plugin-scoped JSON objects keyed by scope/scopeID/key; no transactions                                                                                                                      |
-| Config         | GetConfig                                        | None                                                                        | Reads this plugin's validated config_schema; secret fields are cleartext in the subprocess; config updates restart active plugins                                                           |
-| Secrets        | RevealSecret, GetSecret, SetSecret, DeleteSecret | secrets: true                                                               | Encrypted vault; plugin-owned keys are namespaced; never log values                                                                                                                         |
-| Tasks          | Tasks().List, Tasks().Get                        | api_read: tasks                                                             | Typed DTOs and opaque pagination cursor                                                                                                                                                     |
-| Task relations | TaskRelations().Get                              | api_read: task_relations                                                    | Workspace-scoped compact parent, child, sibling, blocker, and blocked-task graph; no descriptions, documents, metadata, or repository fields                                               |
-| Automations    | Automations().List, Automations().Get             | api_read: automations                                                       | Workspace-scoped trigger configuration projection: prompt, selected agent/executor profiles, state, and concurrency; no secrets, repository bindings, or run history                         |
-| Workspace-agent principals | WorkspaceAgentPrincipals().Get, .Status, .ListAudit | api_read: workspace_agent_principals | Calling-installation, workspace-scoped durable identity/status and redacted audit codes; no backing task/session, user, target, grant-scope, or credential fields |
-| Tasks writes   | Tasks().Create, Tasks().Update                   | api_write: tasks                                                            | Implemented; routed through Kandev services so events/WS updates fire                                                                                                                       |
-| Sessions       | Sessions().List, Sessions().CodeStats            | api_read: sessions                                                          | Typed session and computed code-stat records                                                                                                                                                |
-| Workspaces     | Workspaces().List                                | api_read: workspaces                                                        | Instance-visible workspaces                                                                                                                                                                 |
-| Workflows      | Workflows().List, Workflows().ListSteps          | api_read: workflows                                                         | List steps by workflow id                                                                                                                                                                   |
-| Agent profiles | AgentProfiles().List                             | api_read: agent_profiles                                                    | Global agent profiles exposed by the Host data API                                                                                                                                          |
-| Repositories   | Repositories().List                              | api_read: repositories                                                      | List by workspace id                                                                                                                                                                        |
-| Messages       | Messages().List                                  | api_read: messages                                                          | Historical user/agent content; Kandev system blocks are stripped                                                                                                                            |
-| Message send   | Messages().Send                                  | api_write: messages                                                         | Sends a prompt to a task session and records plugin:<id> author                                                                                                                             |
-| Utility agent  | InvokeUtilityAgent(ctx, prompt)                  | agent_invoke: true plus config_schema.utility_agent (format: utility-agent) | One-shot completion using the selected utility-agent ID; Kandev resolves that utility's enabled profile, permissions, and launch settings. Missing or stale bindings are FailedPrecondition |
+| Host surface          | Methods                                                                        | Required manifest capability                                                | Notes                                                                                                                                                                                       |
+| --------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| State                 | GetState, SetState, DeleteState, ListState                                     | state: true                                                                 | Plugin-scoped JSON objects keyed by scope/scopeID/key; no transactions                                                                                                                      |
+| Config                | GetConfig                                                                      | None                                                                        | Reads this plugin's validated config_schema; secret fields are cleartext in the subprocess; config updates restart active plugins                                                           |
+| Secrets               | RevealSecret, GetSecret, SetSecret, DeleteSecret                               | secrets: true                                                               | Encrypted vault; plugin-owned keys are namespaced; never log values                                                                                                                         |
+| Tasks                 | Tasks().List, Tasks().Get                                                      | api_read: tasks                                                             | Typed DTOs and opaque pagination cursor                                                                                                                                                     |
+| Task relations        | TaskRelations().Get                                                            | api_read: task_relations                                                    | Workspace-scoped compact parent, child, sibling, blocker, and blocked-task graph; no descriptions, documents, metadata, or repository fields                                               |
+| Automations           | Automations().List, Automations().Get                                          | api_read: automations                                                       | Workspace-scoped trigger configuration projection; no secrets, repository bindings, or run history                                                                                         |
+| Workspace-agent principals | WorkspaceAgentPrincipals().Get, .Status, .ListAudit                       | api_read: workspace_agent_principals                                        | Calling-installation, workspace-scoped durable identity/status and redacted audit codes; no backing task/session, user, target, grant-scope, or credential fields                         |
+| Tasks writes          | Tasks().Create, Tasks().Update, Tasks().Move                                   | api_write: tasks                                                            | Implemented; routed through Kandev services so events/WS updates fire. Update rejects a workflow step change; Move is the only path that moves a task between steps                         |
+| Sessions              | Sessions().List, Sessions().CodeStats                                          | api_read: sessions                                                          | Typed session and computed code-stat records                                                                                                                                                |
+| Workspaces            | Workspaces().List                                                              | api_read: workspaces                                                        | Instance-visible workspaces                                                                                                                                                                 |
+| Workflows             | Workflows().List, Workflows().ListSteps                                        | api_read: workflows                                                         | List steps by workflow id                                                                                                                                                                   |
+| Agent profiles        | AgentProfiles().List                                                           | api_read: agent_profiles                                                    | Global agent profiles exposed by the Host data API                                                                                                                                          |
+| Repositories          | Repositories().List                                                            | api_read: repositories                                                      | List by workspace id                                                                                                                                                                        |
+| Messages              | Messages().List                                                                | api_read: messages                                                          | Historical user/agent content; Kandev system blocks are stripped                                                                                                                            |
+| Message send          | Messages().Send                                                                | api_write: messages                                                         | Sends a prompt to a task session and records plugin:<id> author                                                                                                                             |
+| Interactions          | Interactions().ListPending, Interactions().Get                                 | api_read: interactions                                                      | Durable record of agent requests still owed a human answer; Get resolves resolved ones too                                                                                                  |
+| Interaction responses | Interactions().RespondToPermission, .AnswerClarification, .CancelClarification | api_write: interactions                                                     | Routed through the services the native UI drives; first terminal response wins                                                                                                              |
+| Utility agent         | InvokeUtilityAgent(ctx, prompt)                                                | agent_invoke: true plus config_schema.utility_agent (format: utility-agent) | One-shot completion using the selected utility-agent ID; Kandev resolves that utility's enabled profile, permissions, and launch settings. Missing or stale bindings are FailedPrecondition |
 
 The Go signatures, filters, DTOs, and pagination types live in
 apps/backend/pkg/pluginsdk/host.go and data_types.go. api_write task/message
@@ -654,7 +656,7 @@ type Host interface {
 
 	// Tasks/TaskRelations/Automations/WorkspaceAgentPrincipals/Sessions/Workspaces/Workflows/AgentProfiles/Repositories return
 	// Host data accessors. List/Get operations require their own api_read
-	// resource; task Create/Update require api_write:tasks.
+	// resource; task Create/Update/Move require api_write:tasks.
 	Tasks() TaskReader
 	TaskRelations() TaskRelationsReader
 	Automations() AutomationReader
@@ -773,19 +775,27 @@ with a message naming the missing capability; declare what you use.
 ### Live Host writes
 
 `api_write` is live, not advisory. Declare only the exact resource you mutate:
-`api_write: ["tasks"]` enables `host.Tasks().Create(ctx, CreateTaskInput{...})`
-and `.Update(ctx, UpdateTaskInput{...})`; `api_write: ["messages"]` enables
-`host.Messages().Send(ctx, taskID, sessionID, text)`. A blank `sessionID`
-targets the task's primary session. Send queues behind a running session or
-resumes/starts it when appropriate, returning `queued`, `sent`, or `started`.
+`api_write: ["tasks"]` enables `host.Tasks().Create(ctx, CreateTaskInput{...})`,
+`.Update(ctx, UpdateTaskInput{...})`, and `.Move(ctx, MoveTaskInput{...})`;
+`api_write: ["messages"]` enables
+`host.Messages().Send(ctx, taskID, sessionID, text)`;
+`api_write: ["interactions"]` enables the interaction response methods above. A blank
+`sessionID` targets the task's primary session. Send queues behind a running
+session or resumes/starts it when appropriate, returning `queued`, `sent`, or
+`started`.
 
 Task writes use Kandev's first-party service layer, so normal task events and
 browser updates occur. Kandev stamps the source as `plugin:<id>` and reserves
-the `metadata.source` key; plugin metadata is stored under that source. A task
-write can update only title, description, state, and workflow step. Creating a
-task can select an existing repository or provide a complete, credential-free
-remote descriptor only when the plugin owns that `repository_providers` id.
-Treat all write calls as user-visible mutations and honor `ctx.Done()`.
+the `metadata.source` key; plugin metadata is stored under that source. `.Update`
+writes only title, description, and state: it rejects a workflow step change.
+Moving a task between workflow steps goes through `.Move` instead, which routes
+through the same path the board's own drag-and-drop move uses (validation, WIP
+admission, `task.moved` publication, auto-start gates, queue reconciliation),
+so a plugin-driven move triggers `on_enter`/`on_exit` step actions the same way
+a manual move does. Creating a task can select an existing repository or
+provide a complete, credential-free remote descriptor only when the plugin
+owns that `repository_providers` id. Treat all write calls as user-visible
+mutations and honor `ctx.Done()`.
 
 ## Authenticated declared actions
 
@@ -878,6 +888,58 @@ workspace-scoped `inspectURL`; return `null` for a URL the configured provider
 does not own. Exactly one structured inspection may succeed. Multiple successes
 are rejected as ambiguous instead of selecting registration order, while a real
 inspection failure is surfaced when no provider establishes ownership.
+
+### First-use repository task creation
+
+The browser `inspectURL` callback supports the repository picker. Its result is
+display data and is not trusted for a native task write. To support a native task
+that uses a repository not yet saved in the workspace, declare this action:
+
+```yaml
+actions:
+  - key: "repositories.inspect"
+    scope: "workspace"
+    max_body_bytes: 16384
+```
+
+Kandev invokes the active manifest owner from the backend. It supplies a verified
+workspace context and a body with only the submitted URL:
+
+```json
+{"url":"https://code.example.com/owner/repository"}
+```
+
+The preferred response nests the complete descriptor under `repository`:
+
+```json
+{
+  "repository": {
+    "provider_id": "acme",
+    "provider_host": "https://code.example.com",
+    "provider_scope": "workspace-a",
+    "provider_repository_id": "owner/repository",
+    "owner_or_project": "owner",
+    "name": "repository",
+    "clone_url": "https://code.example.com/owner/repository.git",
+    "default_branch": "main"
+  }
+}
+```
+
+The host also accepts the descriptor fields at the top level for compatibility.
+Return `{"matched":false}` when the provider does not own the URL. The host
+requires a matching `provider_id`, a valid HTTPS provider origin, a scope of at
+most 512 bytes, and complete repository identity fields. The clone URL must be
+HTTPS, contain no credentials, and use the same origin as `provider_host`.
+Provider and repository identity fields must not contain NUL bytes. The host
+also checks any provider scope or repository ID hint that came from the picker.
+
+The action has a 15-second deadline and a 1 MiB response limit. Do not return
+credentials or provider error details. Invalid output maps to a validation error,
+`{"matched":false}` maps to not found, and provider or transport failures map to
+an unavailable error. After successful inspection, Kandev persists the validated
+descriptor with the normal native task flow. Existing repository IDs and built-in
+provider URLs continue to use their existing paths.
 
 A code-host review provider may publish normalized task chrome on each snapshot:
 

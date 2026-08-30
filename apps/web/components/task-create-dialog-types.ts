@@ -13,6 +13,7 @@ import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by
 import type { RepositoryInspection } from "@/lib/plugins/types";
 import type { UtilityGenerationResult } from "@/hooks/use-utility-agent-generator";
 import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
+import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 import type {
   KanbanMultiState,
   WorkflowSnapshotData,
@@ -276,6 +277,7 @@ export type DialogComputedArgs = {
   lastUsedWorkflowIdsByWorkspace: Record<string, string>;
   userSettingsLoaded?: boolean;
   snapshots: Record<string, WorkflowSnapshotData>;
+  agentProfileRecentUseContext?: AgentProfileRecentUseContext;
 };
 
 export type TaskCreateEffectsArgs = {

@@ -32,7 +32,8 @@ const ghAccessibleReposPathFmt = "/user/repos?affiliation=%s&sort=pushed&per_pag
 
 // GHClient implements Client using the gh CLI.
 type GHClient struct {
-	rateTracker *RateTracker
+	rateTracker   *RateTracker
+	mergePollWait func(context.Context, time.Duration) error
 }
 
 // NewGHClient creates a new gh CLI-based client.
@@ -919,55 +920,86 @@ func (c *GHClient) RequestReviewers(ctx context.Context, owner, repo string, num
 	return nil
 }
 
-func (c *GHClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) (MergeOutcome, error) {
+func (c *GHClient) MergePR(ctx context.Context, owner, repo string, number int, request MergePRRequest) (MergeOutcome, error) {
 	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/merge-async", owner, repo, number)
 	args := []string{"api", endpoint, "-X", "PUT", "-f", "merge_action=default"}
-	if mergeMethod != "" {
-		args = append(args, "-f", "merge_method="+mergeMethod)
+	if request.MergeMethod != "" {
+		args = append(args, "-f", "merge_method="+request.MergeMethod)
+	}
+	if request.ExpectedHeadSHA != "" {
+		args = append(args, "-f", "sha="+request.ExpectedHeadSHA)
 	}
 	out, err := c.run(ctx, args...)
-	conflictBody := false
+	response, err := decodeInitialMergeAsyncResponse(endpoint, number, out, err)
 	if err != nil {
+		return "", err
+	}
+	response, err = c.pollMergeAsyncResponse(ctx, endpoint, number, response)
+	if err != nil {
+		return "", err
+	}
+	if response.Status == mergeStatusFailed {
+		return "", newMergeFailureError(response.Details)
+	}
+	return normalizeMergeOutcome(response.Status)
+}
+
+func decodeInitialMergeAsyncResponse(endpoint string, number int, out string, runErr error) (mergeAsyncResponse, error) {
+	conflictBody := false
+	if runErr != nil {
 		// Surface status-based errors as GitHubAPIError so httpMergePR can
 		// translate merge rejections for gh CLI users, matching the PAT path.
-		if code, ok := ghMergeStatusCode(err); ok {
+		if code, ok := ghMergeStatusCode(runErr); ok {
 			if code != http.StatusConflict {
-				return "", &GitHubAPIError{StatusCode: code, Endpoint: endpoint, Body: err.Error()}
+				return mergeAsyncResponse{}, &GitHubAPIError{StatusCode: code, Endpoint: endpoint, Body: runErr.Error()}
 			}
-			out = err.Error()
+			out = runErr.Error()
 			conflictBody = true
 		} else {
-			return "", fmt.Errorf("merge PR #%d: %w", number, err)
+			return mergeAsyncResponse{}, fmt.Errorf("merge PR #%d: %w", number, runErr)
 		}
 	}
-	var response mergeAsyncResponse
 	jsonBody := out
 	if start := strings.Index(jsonBody, "{"); start >= 0 {
 		if end := strings.LastIndex(jsonBody, "}"); end >= start {
 			jsonBody = jsonBody[start : end+1]
 		}
 	} else if conflictBody {
-		return "", &GitHubAPIError{StatusCode: http.StatusConflict, Endpoint: endpoint, Body: out}
+		return mergeAsyncResponse{}, &GitHubAPIError{StatusCode: http.StatusConflict, Endpoint: endpoint, Body: out}
 	}
+	var response mergeAsyncResponse
 	if unmarshalErr := json.Unmarshal([]byte(jsonBody), &response); unmarshalErr != nil {
-		return "", fmt.Errorf("decode GitHub merge response: %w", unmarshalErr)
+		return mergeAsyncResponse{}, fmt.Errorf("decode GitHub merge response: %w", unmarshalErr)
 	}
+	return response, nil
+}
+
+func (c *GHClient) pollMergeAsyncResponse(
+	ctx context.Context,
+	endpoint string,
+	number int,
+	response mergeAsyncResponse,
+) (mergeAsyncResponse, error) {
 	for response.Status == "pending" {
-		if response.UUID == "" {
-			return "", fmt.Errorf("GitHub merge response is pending without a UUID")
+		if response.Details.UUID == "" {
+			return mergeAsyncResponse{}, fmt.Errorf("GitHub merge response is pending without a UUID")
 		}
-		result, runErr := c.run(ctx, "api", endpoint+"/"+response.UUID)
+		wait := c.mergePollWait
+		if wait == nil {
+			wait = waitForMergePoll
+		}
+		if waitErr := wait(ctx, mergePollInterval); waitErr != nil {
+			return mergeAsyncResponse{}, fmt.Errorf("wait to poll merge PR #%d: %w", number, waitErr)
+		}
+		result, runErr := c.run(ctx, "api", endpoint+"/"+response.Details.UUID)
 		if runErr != nil {
-			return "", fmt.Errorf("poll merge PR #%d: %w", number, runErr)
+			return mergeAsyncResponse{}, fmt.Errorf("poll merge PR #%d: %w", number, runErr)
 		}
 		if unmarshalErr := json.Unmarshal([]byte(result), &response); unmarshalErr != nil {
-			return "", fmt.Errorf("decode GitHub merge response: %w", unmarshalErr)
+			return mergeAsyncResponse{}, fmt.Errorf("decode GitHub merge response: %w", unmarshalErr)
 		}
 	}
-	if response.Status == mergeStatusFailed {
-		return "", fmt.Errorf("GitHub rejected merge: %s", response.Message)
-	}
-	return normalizeMergeOutcome(response.Status)
+	return response, nil
 }
 
 // ghMergeStatusCode extracts the HTTP status code from a gh CLI merge error.

@@ -3,11 +3,15 @@ package executor
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -63,6 +67,183 @@ func TestEnsureRepoLocalPath_ReconcilesGitHubOriginForCredentialPolicy(t *testin
 			}
 		})
 	}
+}
+
+func TestEnsureRepoLocalPathReevaluatesGitHubProtocol(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	repoPath := initGitRepoWithOrigin(t, "https://github.com/acme/widgets.git")
+	resolver := &mutableExecutorGitProtocolResolver{protocol: repoclone.ProtocolSSH}
+	cloner := repoclone.NewClonerWithProtocolResolver(
+		repoclone.Config{BasePath: t.TempDir()}, resolver, "", nil,
+	)
+	executor := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	executor.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
+		policy: TaskGitCredentialPolicy{Mode: taskGitCredentialsModeExecutor},
+	})
+	executor.SetRepoCloner(cloner, nil)
+	repository := &models.Repository{
+		WorkspaceID:   "workspace-1",
+		SourceType:    "provider",
+		Provider:      "github",
+		ProviderOwner: "acme",
+		ProviderName:  "widgets",
+		LocalPath:     repoPath,
+	}
+
+	if err := executor.ensureRepoLocalPath(context.Background(), repository); err != nil {
+		t.Fatalf("first ensureRepoLocalPath() error = %v", err)
+	}
+	if got := gitOriginURL(t, repoPath); got != "git@github.com:acme/widgets.git" {
+		t.Fatalf("first origin = %q, want SSH URL", got)
+	}
+
+	resolver.protocol = repoclone.ProtocolHTTPS
+	if err := executor.ensureRepoLocalPath(context.Background(), repository); err != nil {
+		t.Fatalf("second ensureRepoLocalPath() error = %v", err)
+	}
+	if got := gitOriginURL(t, repoPath); got != "https://github.com/acme/widgets.git" {
+		t.Fatalf("second origin = %q, want HTTPS URL", got)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.11
+// @covers AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.12
+func TestLaunchPreparedSession_ExistingWorkspace_ReconcilesGitHubOriginsBeforeAgentStart(t *testing.T) {
+	fixture := newPreparedWorkspaceOriginFixture(t)
+	executor := newTestExecutor(t, fixture.agentManager, fixture.repo)
+	executor.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
+		policy: TaskGitCredentialPolicy{Mode: taskGitCredentialsModeExecutor},
+	})
+	executor.SetRepoCloner(fixture.cloner, nil)
+
+	_, err := executor.LaunchPreparedSession(context.Background(), fixture.task, fixture.sessionID, LaunchOptions{
+		AgentProfileID: "profile-prepared-origins",
+		StartAgent:     true,
+	})
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession() error = %v", err)
+	}
+
+	select {
+	case err := <-fixture.startDone:
+		if err != nil {
+			t.Fatalf("agent started before origin reconciliation: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for StartAgentProcess")
+	}
+	for _, path := range fixture.originPaths {
+		if got := fixture.cloner.originCallCount(path); got != 1 {
+			t.Errorf("SetOriginURL calls for %q = %d, want 1", path, got)
+		}
+	}
+}
+
+type preparedWorkspaceOriginFixture struct {
+	repo         *mockRepository
+	task         *v1.Task
+	sessionID    string
+	agentManager *mockAgentManager
+	cloner       *countingRepoCloner
+	startDone    chan error
+	originPaths  []string
+}
+
+func newPreparedWorkspaceOriginFixture(t *testing.T) *preparedWorkspaceOriginFixture {
+	t.Helper()
+	const (
+		taskID      = "task-prepared-origins"
+		sessionID   = "session-prepared-origins"
+		workspaceID = "workspace-prepared-origins"
+	)
+	firstPath := initGitRepoWithOrigin(t, "https://github.com/acme/first.git")
+	secondPath := initGitRepoWithOrigin(t, "git@github.com:acme/second.git")
+	configLock := filepath.Join(secondPath, ".git", "config.lock")
+	if err := os.WriteFile(configLock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(configLock) })
+
+	fixture := &preparedWorkspaceOriginFixture{
+		repo:      newPreparedWorkspaceOriginRepository(taskID, sessionID, workspaceID, firstPath, secondPath),
+		task:      &v1.Task{ID: taskID, WorkspaceID: workspaceID, Title: "prepared origin reconciliation"},
+		sessionID: sessionID,
+		cloner: &countingRepoCloner{
+			Cloner:         repoclone.NewCloner(repoclone.Config{}, repoclone.ProtocolSSH, "", logger.Default()),
+			setOriginCalls: make(map[string]int),
+		},
+		startDone:   make(chan error, 1),
+		originPaths: []string{firstPath, secondPath},
+	}
+	fixture.agentManager = newPreparedWorkspaceOriginAgentManager(fixture)
+	return fixture
+}
+
+func newPreparedWorkspaceOriginRepository(taskID, sessionID, workspaceID, firstPath, secondPath string) *mockRepository {
+	repo := newMockRepository()
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID: sessionID, TaskID: taskID, AgentProfileID: "profile-prepared-origins",
+		State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	repo.executorsRunning[sessionID] = &models.ExecutorRunning{
+		ID: sessionID, SessionID: sessionID, TaskID: taskID,
+		AgentExecutionID: "exec-prepared-origins", Status: models.ExecutorRunningStatusReady,
+	}
+	repo.taskRepositories["task-repo-first"] = &models.TaskRepository{
+		ID: "task-repo-first", TaskID: taskID, RepositoryID: "repo-first", Position: 0,
+	}
+	repo.taskRepositories["task-repo-second"] = &models.TaskRepository{
+		ID: "task-repo-second", TaskID: taskID, RepositoryID: "repo-second", Position: 1,
+	}
+	repo.repositories["repo-first"] = preparedWorkspaceOriginRepository(
+		"repo-first", workspaceID, "first", firstPath,
+	)
+	repo.repositories["repo-second"] = preparedWorkspaceOriginRepository(
+		"repo-second", workspaceID, "second", secondPath,
+	)
+	return repo
+}
+
+func preparedWorkspaceOriginRepository(id, workspaceID, name, localPath string) *models.Repository {
+	return &models.Repository{
+		ID: id, WorkspaceID: workspaceID, SourceType: "provider", Provider: "github",
+		ProviderOwner: "acme", ProviderName: name, LocalPath: localPath,
+	}
+}
+
+func newPreparedWorkspaceOriginAgentManager(fixture *preparedWorkspaceOriginFixture) *mockAgentManager {
+	return &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "exec-prepared-origins", nil
+		},
+		startAgentProcessFunc: func(ctx context.Context, _ string) error {
+			err := fixture.verifyOriginsAtAgentStart(ctx)
+			fixture.startDone <- err
+			return err
+		},
+	}
+}
+
+func (fixture *preparedWorkspaceOriginFixture) verifyOriginsAtAgentStart(ctx context.Context) error {
+	for _, check := range []struct {
+		path string
+		want string
+	}{
+		{path: fixture.originPaths[0], want: "git@github.com:acme/first.git"},
+		{path: fixture.originPaths[1], want: "git@github.com:acme/second.git"},
+	} {
+		got, err := readGitOriginURL(ctx, check.path)
+		if err != nil {
+			return err
+		}
+		if got != check.want {
+			return fmt.Errorf("origin for %s = %q, want %q", check.path, got, check.want)
+		}
+	}
+	return nil
 }
 
 func TestEnsureRepoLocalPath_DoesNotRewriteUserManagedOrigin(t *testing.T) {
@@ -507,6 +688,33 @@ type cloneTransportTestCloner struct {
 	setOriginPaths          []string
 }
 
+type mutableExecutorGitProtocolResolver struct {
+	protocol string
+}
+
+func (r *mutableExecutorGitProtocolResolver) ResolveGitProtocol(context.Context, string) string {
+	return r.protocol
+}
+
+type countingRepoCloner struct {
+	*repoclone.Cloner
+	mu             sync.Mutex
+	setOriginCalls map[string]int
+}
+
+func (c *countingRepoCloner) SetOriginURL(ctx context.Context, repositoryPath, originURL string) error {
+	c.mu.Lock()
+	c.setOriginCalls[repositoryPath]++
+	c.mu.Unlock()
+	return c.Cloner.SetOriginURL(ctx, repositoryPath, originURL)
+}
+
+func (c *countingRepoCloner) originCallCount(repositoryPath string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.setOriginCalls[repositoryPath]
+}
+
 var _ authenticatedRepoCloner = (*cloneTransportTestCloner)(nil)
 
 func (c *cloneTransportTestCloner) EnsureWorkspaceClonedWithCredentialRequest(
@@ -557,7 +765,7 @@ func (c *cloneTransportTestCloner) SetOriginURL(ctx context.Context, repositoryP
 	return nil
 }
 
-func (c *cloneTransportTestCloner) BuildCloneURLWithHost(string, string, string, string) (string, error) {
+func (c *cloneTransportTestCloner) BuildCloneURLWithHost(context.Context, string, string, string, string) (string, error) {
 	return c.cloneURL, nil
 }
 
@@ -577,4 +785,13 @@ func gitOriginURL(t *testing.T, repoPath string) string {
 		t.Fatalf("git remote get-url origin: %v", err)
 	}
 	return string(out[:len(out)-1])
+}
+
+func readGitOriginURL(ctx context.Context, repoPath string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "remote", "get-url", "origin")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git remote get-url origin: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }

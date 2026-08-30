@@ -60,6 +60,26 @@ type EditorSnapshot = {
   isLink: boolean;
 };
 
+const PLAN_BUBBLE_MENU_OPTIONS = { placement: "top" } as const;
+
+const EDITOR_SNAPSHOT_KEYS = {
+  isFocused: "isFocused",
+  isCodeBlock: "isCodeBlock",
+  hasTextSelection: "hasTextSelection",
+  hasCommentSelection: "hasCommentSelection",
+  isBold: "isBold",
+  isItalic: "isItalic",
+  isUnderline: "isUnderline",
+  isStrike: "isStrike",
+  isCode: "isCode",
+  isHighlight: "isHighlight",
+  isLink: "isLink",
+} as const satisfies { [K in keyof EditorSnapshot]: K };
+
+const EDITOR_SNAPSHOT_KEY_VALUES = Object.values(EDITOR_SNAPSHOT_KEYS) as Array<
+  keyof EditorSnapshot
+>;
+
 function readEditorSnapshot(editor: Editor): EditorSnapshot {
   const { from, to } = editor.state.selection;
   const selectedText = editor.state.doc.textBetween(from, to, " ").trim();
@@ -79,11 +99,20 @@ function readEditorSnapshot(editor: Editor): EditorSnapshot {
   };
 }
 
+function areEditorSnapshotsEqual(first: EditorSnapshot, second: EditorSnapshot): boolean {
+  return EDITOR_SNAPSHOT_KEY_VALUES.every((key) => first[key] === second[key]);
+}
+
 function useEditorSnapshot(editor: Editor): EditorSnapshot {
   const [snapshot, setSnapshot] = useState(() => readEditorSnapshot(editor));
 
   useEffect(() => {
-    const update = () => setSnapshot(readEditorSnapshot(editor));
+    const update = () => {
+      setSnapshot((current) => {
+        const next = readEditorSnapshot(editor);
+        return areEditorSnapshotsEqual(current, next) ? current : next;
+      });
+    };
     editor.on("transaction", update);
     editor.on("focus", update);
     editor.on("blur", update);
@@ -558,7 +587,11 @@ export function PlanBubbleMenu({
   }
 
   return (
-    <BubbleMenu editor={editor} options={{ placement: "top" }} shouldShow={shouldShowBubbleMenu}>
+    <BubbleMenu
+      editor={editor}
+      options={PLAN_BUBBLE_MENU_OPTIONS}
+      shouldShow={shouldShowBubbleMenu}
+    >
       {content}
     </BubbleMenu>
   );

@@ -207,6 +207,23 @@ describe("session turn WebSocket handlers", () => {
     expect(store.getState().turns.bySession[SESSION_ID][0].completed_at).toBe(completed);
   });
 
+  it("preserves cancelled tool-call status when the containing turn completes", () => {
+    const store = makeStore();
+    store.getState().addMessage({
+      id: "msg-1",
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      type: "tool_call",
+      metadata: { status: "cancelled", tool_call_id: "tc-1" },
+    } as never);
+
+    send(store, TURN_COMPLETED, turn("turn-1", TURN_STARTED_AT, TURN_COMPLETED_AT));
+
+    expect(store.getState().messages.bySession[SESSION_ID][0].metadata).toEqual(
+      expect.objectContaining({ status: "cancelled" }),
+    );
+  });
+
   it("flushes batched message updates before completing a turn", () => {
     const store = makeStore();
     const flush = vi.fn();

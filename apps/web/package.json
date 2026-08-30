@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit",
     "pretest": "node scripts/generate-release-notes.mjs && node scripts/generate-changelog.mjs",
     "test": "vitest run",
-    "e2e:raw": "playwright test --config e2e/playwright.config.ts",
+    "e2e:raw": "e2e/scripts/run-raw-e2e.sh",
     "e2e:run": "e2e/scripts/run-e2e.sh",
     "e2e:docker": "e2e/scripts/run-e2e.sh --docker",
     "e2e:clean": "e2e/scripts/run-e2e.sh clean",

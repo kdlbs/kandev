@@ -1,4 +1,4 @@
-import { test, expect } from "../../fixtures/test-base";
+import { expect, resetSeedRepositoryCheckout, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
@@ -172,6 +172,13 @@ async function expectAbove(a: ReturnType<Page["locator"]>, b: ReturnType<Page["l
 // ---------------------------------------------------------------------------
 
 test.describe("Changes panel section ordering", () => {
+  test.afterEach(({ seedData, backend }) => {
+    // These tests intentionally mutate the worker-shared checkout. Restore it
+    // even after an assertion failure so later tests do not inherit a branch,
+    // commit, or working-tree change from this describe.
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+  });
+
   /**
    * When a task has both local changes (unstaged) and PR files,
    * the unstaged section should appear above the PR files section.
@@ -183,16 +190,22 @@ test.describe("Changes panel section ordering", () => {
     backend,
   }) => {
     test.setTimeout(120_000);
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
 
     const { workflow, inboxStep, workingStep, doneStep } = await seedWorkflow(
       apiClient,
       seedData.workspaceId,
     );
     const profile = await createStandardProfile(apiClient, "Order Test Profile");
+    const { executors } = await apiClient.listExecutors();
+    const localProfile = executors.find((executor) => ["local", "local_pc"].includes(executor.type))
+      ?.profiles?.[0];
+    expect(localProfile, "a direct local executor profile is required by this test").toBeDefined();
     const task = await apiClient.createTask(seedData.workspaceId, "Order Test Task", {
       workflow_id: workflow.id,
       workflow_step_id: inboxStep.id,
       agent_profile_id: profile.id,
+      executor_profile_id: localProfile!.id,
       repository_ids: [seedData.repositoryId],
     });
 
@@ -274,6 +287,7 @@ test.describe("Changes panel section ordering", () => {
     backend,
   }) => {
     test.setTimeout(120_000);
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
 
     const { workflow, inboxStep, workingStep, doneStep } = await seedWorkflow(
       apiClient,

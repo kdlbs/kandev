@@ -22,9 +22,10 @@ import (
 
 // ErrUserSettingsConflict marks an exhausted conditional settings update.
 var (
-	ErrUserNotFound         = errors.New("user not found")
-	ErrValidation           = errors.New("validation error")
-	ErrUserSettingsConflict = store.ErrUserSettingsRevisionConflict
+	ErrUserNotFound                  = errors.New("user not found")
+	ErrValidation                    = errors.New("validation error")
+	ErrUserSettingsConflict          = store.ErrUserSettingsRevisionConflict
+	ErrAgentProfileRecentUseConflict = store.ErrAgentProfileRecentUseRevisionConflict
 )
 
 const (
@@ -35,10 +36,11 @@ const (
 )
 
 type Service struct {
-	repo        store.Repository
-	eventBus    bus.EventBus
-	logger      *logger.Logger
-	defaultUser string
+	repo          store.Repository
+	recentUseRepo store.AgentProfileRecentUseRepository
+	eventBus      bus.EventBus
+	logger        *logger.Logger
+	defaultUser   string
 }
 
 type UpdateUserSettingsRequest struct {
@@ -97,6 +99,7 @@ type UpdateUserSettingsRequest struct {
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch
 	AppStatusBarEnabled               *bool
 	AppStatusBarOrder                 *models.AppStatusBarOrder
+	QuickChatTabOrderByWorkspace      *map[string][]string
 	KanbanHiddenStepIDs               *map[string][]string
 	WorkflowIDsWithAutoHideEmptySteps *[]string
 }
@@ -109,11 +112,18 @@ type SystemMetricsDisplaySettingsPatch struct {
 // NewService builds the user settings service with its repository, event bus,
 // and logger.
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
+	recentUseRepo, _ := repo.(store.AgentProfileRecentUseRepository)
+	if recentUseLogger, ok := repo.(interface {
+		SetAgentProfileRecentUseLogger(*logger.Logger)
+	}); ok {
+		recentUseLogger.SetAgentProfileRecentUseLogger(log.WithFields(zap.String("component", "user-store")))
+	}
 	return &Service{
-		repo:        repo,
-		eventBus:    eventBus,
-		logger:      log.WithFields(zap.String("component", "user-service")),
-		defaultUser: store.DefaultUserID,
+		repo:          repo,
+		recentUseRepo: recentUseRepo,
+		eventBus:      eventBus,
+		logger:        log.WithFields(zap.String("component", "user-service")),
+		defaultUser:   store.DefaultUserID,
 	}
 }
 
@@ -314,6 +324,12 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	if req.AppStatusBarOrder != nil {
 		settings.AppStatusBarOrder = *req.AppStatusBarOrder
 	}
+	if req.QuickChatTabOrderByWorkspace != nil {
+		if err := validateQuickChatTabOrder(*req.QuickChatTabOrderByWorkspace); err != nil {
+			return err
+		}
+		settings.QuickChatTabOrderByWorkspace = store.CloneStringSliceMap(*req.QuickChatTabOrderByWorkspace)
+	}
 	if err := applyTerminalFontPreferences(settings, req); err != nil {
 		return err
 	}
@@ -375,8 +391,11 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 }
 
 const (
-	maxKanbanHiddenStepWorkflows      = 200
-	maxKanbanHiddenStepIDsPerWorkflow = 200
+	maxQuickChatTabOrderWorkspaces             = 200
+	maxQuickChatTabOrderReferencesPerWorkspace = 200
+	maxQuickChatTabOrderTotalBytes             = maxUserPreferenceBlobBytes
+	maxKanbanHiddenStepWorkflows               = 200
+	maxKanbanHiddenStepIDsPerWorkflow          = 200
 	// maxKanbanHiddenStepIDsTotalBytes matches maxUserPreferenceBlobBytes, the
 	// sibling cap for other free-form settings blobs. The count caps above
 	// bound shape (how many entries), not size (how long each string is); an
@@ -389,6 +408,38 @@ const (
 	maxKanbanHiddenStepIDsTotalBytes     = maxUserPreferenceBlobBytes
 	maxWorkflowIDsWithAutoHideEmptySteps = 200
 )
+
+// validateQuickChatTabOrder bounds the client-supplied mixed-tab order before
+// it is copied into the settings model. The shape limits keep map and slice
+// allocation bounded, while the serialized limit also bounds long opaque ids.
+func validateQuickChatTabOrder(orderByWorkspace map[string][]string) error {
+	if len(orderByWorkspace) > maxQuickChatTabOrderWorkspaces {
+		return fmt.Errorf(
+			"quick_chat_tab_order_by_workspace: max %d workspaces allowed",
+			maxQuickChatTabOrderWorkspaces,
+		)
+	}
+	for workspaceID, references := range orderByWorkspace {
+		if len(references) > maxQuickChatTabOrderReferencesPerWorkspace {
+			return fmt.Errorf(
+				"quick_chat_tab_order_by_workspace[%s]: max %d tab references allowed",
+				workspaceID,
+				maxQuickChatTabOrderReferencesPerWorkspace,
+			)
+		}
+	}
+	serialized, err := json.Marshal(orderByWorkspace)
+	if err != nil {
+		return fmt.Errorf("quick_chat_tab_order_by_workspace: must be serializable: %w", err)
+	}
+	if len(serialized) > maxQuickChatTabOrderTotalBytes {
+		return fmt.Errorf(
+			"quick_chat_tab_order_by_workspace: max %d bytes allowed",
+			maxQuickChatTabOrderTotalBytes,
+		)
+	}
+	return nil
+}
 
 func normalizeWorkflowIDsWithAutoHideEmptySteps(workflowIDs []string) ([]string, error) {
 	unique := make(map[string]struct{}, len(workflowIDs))

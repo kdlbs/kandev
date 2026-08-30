@@ -125,6 +125,7 @@ describe("fetchDatabaseStats", () => {
       jsonResponse({
         driver: "sqlite",
         path: "/data/kandev.db",
+        backup_directory: "/data/backups",
         size_bytes: 1,
         wal_size_bytes: 0,
         schema_version: "1",
@@ -136,6 +137,7 @@ describe("fetchDatabaseStats", () => {
     expect(method()).toBe("GET");
     expect(stats.driver).toBe("sqlite");
     expect(stats.path).toBe("/data/kandev.db");
+    expect(stats.backup_directory).toBe("/data/backups");
   });
 });
 

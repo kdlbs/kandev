@@ -266,6 +266,8 @@ type TaskRepositoryInput struct {
 	GitHubURL      string
 	RemoteURL      string
 	Provider       string
+	ProviderHost   string
+	ProviderScope  string
 	ProviderRepoID string
 	ProviderOwner  string
 	ProviderName   string

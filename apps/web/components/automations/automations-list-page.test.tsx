@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
@@ -40,14 +40,14 @@ function mkAutomation(id: string, overrides: Partial<Automation> = {}): Automati
   };
 }
 
-function renderPage(items: Automation[], workspaceId = "ws-1") {
+function renderPage(items: Automation[], workspaceId = "ws-1", remove = vi.fn()) {
   mockUseAutomations.mockReturnValue({
     items,
     loading: false,
     enable: vi.fn(),
     disable: vi.fn(),
     trigger: vi.fn(),
-    remove: vi.fn(),
+    remove,
   });
   return render(
     <SettingsSaveProvider>
@@ -109,5 +109,17 @@ describe("AutomationsListPage board-move notice", () => {
     renderPage([mkAutomation("a-run-mode"), mkAutomation("b-run-mode")]);
 
     expect(screen.queryByTestId(NOTICE)).toBeNull();
+  });
+
+  it("keeps the delete confirmation open when deletion fails", async () => {
+    const remove = vi.fn().mockRejectedValue(new Error("temporary failure"));
+    renderPage([mkAutomation("automation-a", { name: "Delete me" })], "ws-1", remove);
+
+    fireEvent.click(screen.getByTestId("automation-delete-button-automation-a"));
+    fireEvent.click(screen.getByTestId("automation-delete-confirm"));
+
+    await waitFor(() => expect(remove).toHaveBeenCalledWith("automation-a"));
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    expect(screen.getByText("Delete me")).toBeTruthy();
   });
 });

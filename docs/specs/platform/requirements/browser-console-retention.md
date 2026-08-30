@@ -2,6 +2,7 @@
 status: active
 system: platform
 created: 2026-08-23
+updated: 2026-08-27
 owners:
   - kandev
 ---
@@ -50,6 +51,13 @@ retained history after every log batch.
   diagnostic loss metadata shall remain available.
 - **AC-PLATFORM-BROWSER-CONSOLE-RETENTION-001.7:** Clearing browser diagnostic
   history shall also reset its retained count and byte totals.
+- **AC-PLATFORM-BROWSER-CONSOLE-RETENTION-001.8:** Entries emitted during one
+  250 ms collection window shall use the fewest committed batches allowed by
+  the 50-entry and 256 KiB batch limits. Browser idle time shall not shorten
+  that collection window.
+- **AC-PLATFORM-BROWSER-CONSOLE-RETENTION-001.9:** An explicit diagnostic
+  snapshot shall bypass an outstanding collection window, flush all staged
+  entries, and wait for the existing serialized drain.
 
 ## Compatibility and persistence
 

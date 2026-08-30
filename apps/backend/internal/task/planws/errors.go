@@ -13,6 +13,7 @@ package planws
 import (
 	"errors"
 
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -35,6 +36,7 @@ type mapping struct {
 // MCP tools already receive, so editing one now moves both surfaces together.
 var (
 	taskIDRequired       = mapping{service.ErrTaskIDRequired, ws.ErrorCodeValidation, "task_id is required"}
+	taskNotFound         = mapping{repository.ErrTaskNotFound, ws.ErrorCodeNotFound, "Task not found"}
 	sessionIDRequired    = mapping{service.ErrSessionIDRequired, ws.ErrorCodeValidation, "session_id is required"}
 	sessionTaskMismatch  = mapping{service.ErrSessionTaskMismatch, ws.ErrorCodeValidation, "Session does not belong to task"}
 	planNotFound         = mapping{service.ErrTaskPlanNotFound, ws.ErrorCodeNotFound, "Task plan not found"}
@@ -46,6 +48,7 @@ var (
 	// plan or revision failure.
 	allMappings = []mapping{
 		taskIDRequired,
+		taskNotFound,
 		sessionIDRequired,
 		sessionTaskMismatch,
 		planNotFound,
@@ -73,9 +76,11 @@ func errorResponse(msg *ws.Message, err error, fallback string, recognized []map
 //
 // ErrTaskPlanNotFound is deliberately absent: CreatePlan only returns it when
 // the plan vanishes between the write and the read-back, which is a server-side
-// inconsistency rather than the caller naming a plan that does not exist.
+// inconsistency rather than the caller naming a plan that does not exist. The
+// repository's ErrTaskNotFound is different: it means the write target task
+// did not exist and is safe to report as a not-found response.
 func CreateError(msg *ws.Message, err error) (*ws.Message, error) {
-	return errorResponse(msg, err, "Failed to create task plan: "+err.Error(), []mapping{taskIDRequired})
+	return errorResponse(msg, err, "Failed to create task plan: "+err.Error(), []mapping{taskIDRequired, taskNotFound})
 }
 
 // GetError maps a PlanService.GetPlan failure. The fallback omits err.Error()
@@ -87,7 +92,7 @@ func GetError(msg *ws.Message, err error) (*ws.Message, error) {
 
 // UpdateError maps a PlanService.UpdatePlan failure.
 func UpdateError(msg *ws.Message, err error) (*ws.Message, error) {
-	return errorResponse(msg, err, "Failed to update task plan: "+err.Error(), []mapping{taskIDRequired, planNotFound})
+	return errorResponse(msg, err, "Failed to update task plan: "+err.Error(), []mapping{taskIDRequired, taskNotFound, planNotFound})
 }
 
 // DeleteError maps a PlanService.DeletePlan failure.

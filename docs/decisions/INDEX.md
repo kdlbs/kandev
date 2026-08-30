@@ -42,7 +42,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0034 | [Agent Client Protocol Codex ACP Bridge](0034-agentclientprotocol-codex-acp.md)                                                     | accepted (amended 2026-07-25) | backend, protocol | 2026-07-10 |
 | 0035 | [Version AgentReady events by prompt generation](0035-version-agent-ready-events-by-prompt-generation.md)                          | accepted   | backend                     | 2026-07-14 |
 | 0036 | [Normalize ACP shell output at the adapter boundary](0036-normalize-acp-shell-output-at-adapter-boundary.md)                        | accepted   | backend, frontend, protocol | 2026-07-14 |
-| 0037 | [Resource-aware frontend unit tests](0037-resource-aware-frontend-unit-tests.md)                                                     | accepted   | frontend, infra             | 2026-07-14 |
+| 0037 | [Resource-aware frontend unit tests](0037-resource-aware-frontend-unit-tests.md)                                                     | accepted (amended 2026-08-28) | frontend, infra             | 2026-07-14 |
 | 0038 | [Quick Chat Repository Isolation](0038-quick-chat-repository-isolation.md)                                                           | accepted   | backend, frontend           | 2026-07-14 |
 | 0039 | [Native desktop integration boundary](0039-native-desktop-integration-boundary.md)                                                  | accepted (amended 2026-07-24) | desktop, frontend, backend, infra | 2026-07-15 |
 | 0040 | [Separate updater integrity from OS publisher identity](0040-separate-updater-integrity-from-os-publisher-identity.md)              | accepted   | desktop, infra, workflow    | 2026-07-15 |
@@ -109,6 +109,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-31-authenticated-plugin-actions | [Authenticated Plugin Actions](2026-07-31-authenticated-plugin-actions.md) | accepted | backend, frontend, protocol, security | 2026-07-31 |
 | 2026-07-31-plugin-repository-provider-extensions | [Plugin Repository Provider Extensions](2026-07-31-plugin-repository-provider-extensions.md) | accepted | frontend, backend, protocol | 2026-07-31 |
 | 2026-07-31-provider-neutral-git-credential-broker | [Provider-Neutral Git Credential Broker](2026-07-31-provider-neutral-git-credential-broker.md) | accepted | backend, protocol, security | 2026-07-31 |
+| 2026-08-26-server-owned-plugin-repository-task-resolution | [Resolve First-Use Plugin Repositories on the Server](2026-08-26-server-owned-plugin-repository-task-resolution.md) | accepted | backend, frontend, protocol, security, plugins | 2026-08-26 |
 | 2026-08-01-bitbucket-initial-release-remains-unsigned | [Bitbucket Initial Release Remains Unsigned](2026-08-01-bitbucket-initial-release-remains-unsigned.md) | accepted | infra, workflow, security | 2026-08-01 |
 | 2026-07-31-npm-nightly-release-channel | [Publish deterministic npm-only nightlies](2026-07-31-npm-nightly-release-channel.md) | accepted (amended 2026-08-03) | workflow, backend, frontend, cli | 2026-07-31 |
 | 2026-07-31-isolate-manual-pr-review-content | [Isolate Manual PR Review Content](2026-07-31-isolate-manual-pr-review-content.md) | accepted | infra, workflow, security | 2026-07-31 |
@@ -176,7 +177,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-12-empty-utility-bindings-inherit-default | [Empty Built-in Utility Bindings Inherit the Default](2026-08-12-empty-utility-bindings-inherit-default.md) | accepted | backend, frontend | 2026-08-12 |
 | 2026-08-12-setup-timeout-owns-launch-budget | [One Setup Timeout Owns Launch Budgets](2026-08-12-setup-timeout-owns-launch-budget.md) | accepted | backend | 2026-08-12 |
 | 2026-08-10-no-em-dash-public-copy | [Keep Em Dashes Out of Public Copy](2026-08-10-no-em-dash-public-copy.md) | accepted | frontend, infra | 2026-08-10 |
-| 2026-08-14-current-turn-clarification-ownership | [Current Turn Owns Active Clarification](2026-08-14-current-turn-clarification-ownership.md) | accepted (amended 2026-08-15) | backend, frontend, protocol, workflow | 2026-08-14 |
+| 2026-08-14-current-turn-clarification-ownership | [Current Turn Owns Active Clarification](2026-08-14-current-turn-clarification-ownership.md) | accepted (amended 2026-08-15, 2026-08-24) | backend, frontend, protocol, workflow | 2026-08-14 |
 | 2026-08-12-task-bound-fork-destinations | [Bind Fork Push Destinations to Tasks](2026-08-12-task-bound-fork-destinations.md) | accepted (amended 2026-08-13) | backend, frontend, workflow, security, GitHub | 2026-08-12 |
 | 2026-08-13-hard-delete-task-contribution-links | [Hard delete owns task contribution links](2026-08-13-hard-delete-task-contribution-links.md) | accepted | backend | 2026-08-13 |
 | 2026-08-15-office-mode-follows-active-workspace | [Office Mode Follows the Active Workspace](2026-08-15-office-mode-follows-active-workspace.md) | accepted | frontend, backend | 2026-08-15 |
@@ -184,7 +185,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-17-plugin-workspace-agent-conversations | [Managed workspace agent conversations](2026-08-17-plugin-workspace-agent-conversations.md) | accepted | backend, frontend, protocol, security | 2026-08-17 |
 | 2026-08-24-first-class-workspace-coordinator | [Make Coordinator a durable workspace object](2026-08-24-first-class-workspace-coordinator.md) | proposed | backend, frontend, protocol, security, plugins | 2026-08-24 |
 | 2026-08-18-session-mcp-tool-definition-details | [Bound MCP Tool Definition Details to Current Sessions](2026-08-18-session-mcp-tool-definition-details.md) | accepted | backend, agentctl, frontend, protocol, security | 2026-08-18 |
-| 2026-08-17-separate-task-activity-from-summary-freshness | [Separate Task Activity From Summary Freshness](2026-08-17-separate-task-activity-from-summary-freshness.md) | accepted | backend, frontend, protocol | 2026-08-17 |
+| 2026-08-17-separate-task-activity-from-summary-freshness | [Separate Task Activity From Summary Freshness](2026-08-17-separate-task-activity-from-summary-freshness.md) | accepted (amended 2026-08-29) | backend, frontend, protocol | 2026-08-17 |
 | 2026-08-17-release-pr-ruleset-bypass | [Give Stable Release PRs an Administrator Token Bypass](2026-08-17-release-pr-ruleset-bypass.md) | accepted | infra, workflow, security | 2026-08-17 |
 | 2026-08-18-never-started-agent-stall-terminal | [Treat Never-Started Agent Stalls as Terminal](2026-08-18-never-started-agent-stall-terminal.md) | accepted | backend, frontend, protocol | 2026-08-18 |
 | 2026-08-18-plugin-task-row-metadata | [Keep Task Row Plugin Metadata Generic](2026-08-18-plugin-task-row-metadata.md) | accepted | frontend | 2026-08-18 |
@@ -210,3 +211,9 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-24-agentctl-local-managed-runtime-cache-repair | [Run cache repair where npm runs](2026-08-24-agentctl-local-managed-runtime-cache-repair.md) | accepted | backend, agentctl, protocol, security | 2026-08-24 |
 | 2026-08-24-unified-fork-approval-label | [Use One Maintainer Approval Label for Contributor PR Automation](2026-08-24-unified-fork-approval-label.md) | accepted | infra, workflow, security | 2026-08-24 |
 | 2026-08-25-required-worktree-refresh-fails-closed | [Required Worktree Refresh Fails Closed](2026-08-25-required-worktree-refresh-fails-closed.md) | accepted | backend, security, operations | 2026-08-25 |
+| 2026-08-26-quick-chat-tab-order | [Store Quick Chat Tab Order as a User Preference](2026-08-26-quick-chat-tab-order.md) | accepted | backend, frontend, protocol | 2026-08-26 |
+| 2026-08-26-quick-chat-agent-titles | [Apply Agent-Generated Titles to Quick Chat](2026-08-26-quick-chat-agent-titles.md) | accepted | backend, frontend, protocol | 2026-08-26 |
+| 2026-08-27-bounded-agent-profile-recency | [Store Agent Profile Recency in Bounded Context Rows](2026-08-27-bounded-agent-profile-recency.md) | accepted | backend, frontend, protocol | 2026-08-27 |
+| 2026-08-27-protect-deferred-launch-attribution | [Protect Deferred Launch Attribution](2026-08-27-protect-deferred-launch-attribution.md) | accepted | backend, protocol | 2026-08-27 |
+| 2026-08-27-preserve-legacy-sqlite-before-default-initialization | [Preserve Legacy SQLite Data Before Default Initialization](2026-08-27-preserve-legacy-sqlite-before-default-initialization.md) | accepted | backend, cli, operations | 2026-08-27 |
+| 2026-08-28-bind-github-auto-merge-attempts-to-reviewed-head | [Bind GitHub Auto-Merge Attempts to the Reviewed Head](2026-08-28-bind-github-auto-merge-attempts-to-reviewed-head.md) | accepted | backend, frontend, protocol, security, GitHub | 2026-08-28 |

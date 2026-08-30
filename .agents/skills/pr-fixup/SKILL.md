@@ -148,6 +148,17 @@ For unfamiliar, infrastructure, or E2E failures, load
 Also load it for unexpected zero-duration or no-op manual-review runs: event
 and workflow provenance can explain them without a product-code change.
 
+An explicit request to run `pr fixup` owns every failed required check on the
+current head. Never stop by calling a failure "unrelated" only because its
+files are outside the PR diff. Reproduce each leaf failure with retries
+disabled, inspect its artifacts and shared fixtures/cleanup, and fix every
+valid product, test, fixture, cleanup, or CI-contract defect it exposes. A
+dependent aggregate failure does not replace its leaf failures: trace the
+aggregate to all failed jobs, fix the underlying failures, and wait for the
+aggregate checks to rerun. If concrete evidence proves a failure is external
+after this investigation, report the exact job/log/reproduction evidence and
+keep the PR blocked; do not call it ready while a required check is failed.
+
 Fix with `/tdd` or `/e2e` as applicable, run focused checks, and keep each
 remediation scoped to the reported failure. Do not suppress a failure or mark a
 check clean without fresh evidence.
@@ -299,6 +310,13 @@ Before declaring fixup complete, verify `git status --short` is clean,
 local `HEAD`, and the fresh mergeability state is not conflicting. Do not call
 the PR clean from CI/review counts alone when the worktree or remote tip still
 differs.
+
+The phrase "ready to merge" is reserved for a fresh current-head snapshot
+with every required check successful or explicitly skipped, no pending or
+failed leaf or aggregate check, no blocking review/thread, no merge conflict,
+and the local, upstream, and PR head OIDs aligned. A clean local reproduction
+does not waive a failed remote check; push the remediation and re-check the
+new head first.
 
 ## 6. User-Requested Merge
 

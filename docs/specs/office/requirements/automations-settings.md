@@ -27,6 +27,9 @@ Users want to schedule an agent to run a prompt on a cron (or on a GitHub PR eve
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-001.6:** When the selected executor profile's type does not support multi-repo, the picker renders as today's single dropdown (registered/discovered repos, or "Auto").
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-001.7:** The Executor Profile picker disables executor profiles that don't support multi-repo whenever two or more repositories are currently selected, with the same disabled-reason text as the task-creation dialog, so a user cannot silently strand a multi-repository automation on an incompatible executor.
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-001.8:** Automations created via the WS API directly (bypassing the editor) may still combine an incompatible executor with multiple repository IDs; this is a client-side authoring guard, not a backend rejection. Task launch on an incompatible executor fails the same way manual multi-repo task creation would.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-001.9:** When a user initiates automation deletion from the workspace automation list or the automation editor, the settings UI shall show a confirmation dialog that identifies the automation and states that the deletion cannot be undone.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-001.10:** When the user dismisses or cancels the deletion confirmation, the automation shall remain and no delete request shall be made. When the user confirms, the UI shall perform one deletion and preserve the existing result for that entry point: remove the list item or return the editor to the workspace automation list.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-001.11:** On a phone viewport, the deletion confirmation shall remain inside the viewport and expose reachable Cancel and Delete actions with touch-sized hit areas, while preserving the same deletion outcome as the desktop flow.
 
 ## System design
 

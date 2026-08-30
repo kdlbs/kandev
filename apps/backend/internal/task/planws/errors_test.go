@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -36,6 +37,7 @@ func decode(t *testing.T, msg *ws.Message, err error) ws.ErrorPayload {
 // production message changes, which it cannot do if both read the same symbol.
 const (
 	wantTaskIDRequired   = "task_id is required"
+	wantTaskNotFound     = "Task not found"
 	wantTaskPlanNotFound = "Task plan not found"
 )
 
@@ -57,6 +59,7 @@ func TestMappersCoverEverySentinel(t *testing.T) {
 		message string
 	}{
 		{"create/task_id", CreateError, service.ErrTaskIDRequired, ws.ErrorCodeValidation, wantTaskIDRequired},
+		{"create/task_not_found", CreateError, repository.ErrTaskNotFound, ws.ErrorCodeNotFound, wantTaskNotFound},
 		{"create/fallback", CreateError, boom, ws.ErrorCodeInternalError, "Failed to create task plan: disk on fire"},
 		// CreatePlan's ErrTaskPlanNotFound means the read-back after a
 		// successful write found nothing — a server fault, not a missing plan.
@@ -67,6 +70,7 @@ func TestMappersCoverEverySentinel(t *testing.T) {
 		{"get/fallback", GetError, boom, ws.ErrorCodeInternalError, "Failed to get task plan"},
 
 		{"update/task_id", UpdateError, service.ErrTaskIDRequired, ws.ErrorCodeValidation, wantTaskIDRequired},
+		{"update/task_not_found", UpdateError, repository.ErrTaskNotFound, ws.ErrorCodeNotFound, wantTaskNotFound},
 		{"update/plan_not_found", UpdateError, service.ErrTaskPlanNotFound, ws.ErrorCodeNotFound, wantTaskPlanNotFound},
 		{"update/fallback", UpdateError, boom, ws.ErrorCodeInternalError, "Failed to update task plan: disk on fire"},
 
@@ -99,6 +103,7 @@ func TestErrorCoversFullVocabulary(t *testing.T) {
 		message string
 	}{
 		{service.ErrTaskIDRequired, ws.ErrorCodeValidation, wantTaskIDRequired},
+		{repository.ErrTaskNotFound, ws.ErrorCodeNotFound, wantTaskNotFound},
 		{service.ErrSessionIDRequired, ws.ErrorCodeValidation, "session_id is required"},
 		{service.ErrSessionTaskMismatch, ws.ErrorCodeValidation, "Session does not belong to task"},
 		{service.ErrTaskPlanNotFound, ws.ErrorCodeNotFound, wantTaskPlanNotFound},

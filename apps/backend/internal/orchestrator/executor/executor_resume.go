@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -303,7 +304,7 @@ func (e *Executor) refreshManagedRepositoryForSession(
 	if cloneURL == "" {
 		var err error
 		cloneURL, err = e.repoCloner.BuildCloneURLWithHost(
-			repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
+			ctx, repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
 		)
 		if err != nil || cloneURL == "" {
 			return ErrNoCloneURL
@@ -415,7 +416,7 @@ func (e *Executor) ensureRepoClonedForSession(
 	if cloneURL == "" {
 		var urlErr error
 		cloneURL, urlErr = e.repoCloner.BuildCloneURLWithHost(
-			repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
+			ctx, repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
 		)
 		if urlErr != nil || cloneURL == "" {
 			return "", ErrNoCloneURL
@@ -473,7 +474,7 @@ func (e *Executor) reconcileGitHubCheckoutOrigin(
 		}
 		policy = resolved
 	}
-	originURL, err := gitHubCheckoutOriginURL(repo, policy, e.repoCloner)
+	originURL, err := gitHubCheckoutOriginURL(ctx, repo, policy, e.repoCloner)
 	if err != nil {
 		return err
 	}
@@ -493,11 +494,11 @@ func isGitHubRepository(repo *models.Repository) bool {
 }
 
 func gitHubCheckoutOriginURL(
-	repo *models.Repository, policy TaskGitCredentialPolicy, cloner RepoCloner,
+	ctx context.Context, repo *models.Repository, policy TaskGitCredentialPolicy, cloner RepoCloner,
 ) (string, error) {
 	if policy.Mode == taskGitCredentialsModeExecutor {
 		originURL, err := cloner.BuildCloneURLWithHost(
-			repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
+			ctx, repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
 		)
 		if err != nil {
 			return "", fmt.Errorf("build executor GitHub checkout origin: %w", err)
@@ -1124,6 +1125,30 @@ func (e *Executor) resolveResumeTaskEnvironment(ctx context.Context, taskID stri
 		return nil, fmt.Errorf("lookup existing task environment: %w", err)
 	}
 	if env == nil {
+		// Inherited-environment fallback: a child task created by an office
+		// task-handoff may have had session.TaskEnvironmentID rewritten to point
+		// at the parent's / shared group's env row, which is owned by a
+		// *different* task. GetTaskEnvironmentByTaskID misses that row because it
+		// indexes by the child task id, so without this lookup the resume path
+		// treats the env as absent and persistTaskEnvironment tries to CREATE a
+		// new row using the inherited ID — which already exists, producing
+		// "UNIQUE constraint failed: task_environments.id".
+		//
+		// Unlike the launch path (executor_execute.go), which hard-errors with
+		// ErrWorkspaceReuseUnsafe when the referenced row is absent, resume
+		// falls through to (nil, nil): the ID is then free, so the create path
+		// produces a valid fresh environment rather than a failing resume. A
+		// missing row surfaces as ErrTaskEnvironmentNotFound, which is a miss,
+		// not a fatal error; any other lookup error still propagates.
+		if session.TaskEnvironmentID != "" {
+			inherited, inhErr := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+			if inhErr != nil && !errors.Is(inhErr, repoerrors.ErrTaskEnvironmentNotFound) {
+				return nil, fmt.Errorf("lookup inherited task environment: %w", inhErr)
+			}
+			if inherited != nil {
+				return inherited, nil
+			}
+		}
 		return nil, nil
 	}
 	if session.TaskEnvironmentID != env.ID {
