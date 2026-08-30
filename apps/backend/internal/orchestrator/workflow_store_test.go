@@ -660,3 +660,29 @@ func TestWorkflowStore_DeferredApplyReusesPersistedOperationIdentity(t *testing.
 	assert.Equal(t, "github_pr_merged", readback.ExternalCause)
 	assert.Equal(t, "repo:42", readback.ExternalCauseID)
 }
+
+func TestWorkflowStore_MarkDeferredMoveAppliedSettlesPendingOperationAtCurrentTarget(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	operation := routing.Operation{
+		ID: "deferred-already-satisfied", TaskID: "t1", WorkspaceID: "ws1",
+		Producer: routing.ProducerDeferredMove, ExpectedStepID: "step1",
+		ObservedStepID: "step1", TargetStepID: "step2", SessionID: "s1",
+		ActorKind: "agent", ActorID: "s1", Outcome: routing.OutcomePending,
+	}
+	require.NoError(t, repo.RecordWorkflowRouteOperation(ctx, operation))
+
+	task, err := repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	task.WorkflowStepID = "step2"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+	require.NoError(t, store.MarkDeferredMoveApplied(ctx, "t1", operation.ID))
+
+	readback, found, err := repo.GetWorkflowRouteOperation(ctx, operation.ID)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, routing.OutcomeAlreadySatisfied, readback.Outcome)
+}

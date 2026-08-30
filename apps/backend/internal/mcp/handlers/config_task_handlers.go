@@ -121,6 +121,14 @@ func (h *Handlers) replayMoveTaskOperation(
 		response, responseErr := ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
 		return response, true, responseErr
 	case routing.OutcomePending:
+		workflowID, targetStepID, position, err = h.replayPendingMoveRequest(
+			ctx, operationID, taskID, workflowID, targetStepID, position,
+		)
+		if err != nil {
+			response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to read pending route", nil)
+			return response, true, responseErr
+		}
 		response, responseErr := ws.NewResponse(msg.ID, msg.Action,
 			h.synthesizeMovedTaskDTO(ctx, taskID, workflowID, targetStepID, position))
 		return response, true, responseErr
@@ -133,6 +141,36 @@ func (h *Handlers) replayMoveTaskOperation(
 			"route operation did not commit", nil)
 		return response, true, responseErr
 	}
+}
+
+type pendingMoveLister interface {
+	ListPendingMoves(context.Context) ([]messagequeue.PendingMoveRecord, error)
+}
+
+func (h *Handlers) replayPendingMoveRequest(
+	ctx context.Context,
+	operationID, taskID, workflowID, targetStepID string,
+	position int,
+) (string, string, int, error) {
+	lister, ok := h.messageQueue.(pendingMoveLister)
+	if !ok {
+		return workflowID, targetStepID, position, nil
+	}
+	records, err := lister.ListPendingMoves(ctx)
+	if err != nil {
+		return "", "", 0, err
+	}
+	for _, record := range records {
+		move := record.Move
+		if move.MoveID != operationID {
+			continue
+		}
+		if move.TaskID != taskID || move.WorkflowStepID != targetStepID {
+			return "", "", 0, routing.ErrOperationIdentityConflict
+		}
+		return move.WorkflowID, move.WorkflowStepID, move.Position, nil
+	}
+	return workflowID, targetStepID, position, nil
 }
 
 // deferMoveTask records a PendingMove for the agent's turn-end handler to

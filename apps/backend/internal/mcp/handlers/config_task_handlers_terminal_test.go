@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +21,44 @@ import (
 type stepCompletionRaceRepository struct {
 	*taskrepo.Repository
 	once sync.Once
+}
+
+func TestHandleMoveTask_PendingReplayReturnsPersistedRequest(t *testing.T) {
+	svc, repo, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	seedRunningTask(t, repo, "ws-replay", "wf-replay", "task-replay", "sess-replay", "step-source")
+	now := time.Now().UTC()
+	for _, step := range []*workflowmodels.WorkflowStep{
+		{ID: "step-source", WorkflowID: "wf-replay", Name: "Source", Position: 0, CreatedAt: now, UpdatedAt: now},
+		{ID: "step-target", WorkflowID: "wf-replay", Name: "Target", Position: 1, CreatedAt: now, UpdatedAt: now},
+	} {
+		require.NoError(t, workflowRepo.CreateStep(ctx, step))
+	}
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	queue := messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger(t))
+	h := &Handlers{taskSvc: svc, workflowCtrl: workflowCtrl, messageQueue: queue, logger: testLogger(t).WithFields()}
+
+	first := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{
+		"task_id": "task-replay", "workflow_id": "wf-replay", "workflow_step_id": "step-target", "position": 2,
+	})
+	first.ID = "pending-replay"
+	response, err := h.handleMoveTask(ctx, first)
+	require.NoError(t, err)
+	assert.NotEqual(t, ws.MessageTypeError, response.Type)
+
+	retry := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{
+		"task_id": "task-replay", "workflow_id": "wf-replay", "workflow_step_id": "step-target", "position": 9,
+	})
+	retry.ID = first.ID
+	retryResponse, err := h.handleMoveTask(ctx, retry)
+	require.NoError(t, err)
+	var replayed struct {
+		Position int `json:"position"`
+	}
+	require.NoError(t, json.Unmarshal(retryResponse.Payload, &replayed))
+	assert.Equal(t, 2, replayed.Position)
 }
 
 func (r *stepCompletionRaceRepository) SetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStep(

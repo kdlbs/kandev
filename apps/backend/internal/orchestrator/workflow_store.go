@@ -350,6 +350,10 @@ func (s *workflowStore) MarkDeferredMoveApplied(ctx context.Context, taskID, mov
 	if err != nil {
 		return fmt.Errorf("load task for deferred move identity: %w", err)
 	}
+	ctx, err = s.rehydrateAlreadySatisfiedRouteOperation(ctx, task, moveID)
+	if err != nil {
+		return err
+	}
 	if err := markDeferredMoveApplied(task, moveID); err != nil {
 		return err
 	}
@@ -357,6 +361,30 @@ func (s *workflowStore) MarkDeferredMoveApplied(ctx context.Context, taskID, mov
 		return fmt.Errorf("persist deferred move identity: %w", err)
 	}
 	return nil
+}
+
+func (s *workflowStore) rehydrateAlreadySatisfiedRouteOperation(
+	ctx context.Context,
+	task *models.Task,
+	moveID string,
+) (context.Context, error) {
+	reader, ok := s.repo.(interface {
+		GetWorkflowRouteOperation(context.Context, string) (routing.Operation, bool, error)
+	})
+	if !ok {
+		return ctx, nil
+	}
+	operation, found, err := reader.GetWorkflowRouteOperation(ctx, moveID)
+	if err != nil {
+		return ctx, fmt.Errorf("load already-satisfied route operation: %w", err)
+	}
+	if !found {
+		return ctx, nil
+	}
+	if operation.TaskID != task.ID || operation.TargetStepID != task.WorkflowStepID {
+		return ctx, fmt.Errorf("%w: %s", routing.ErrOperationIdentityConflict, moveID)
+	}
+	return routing.WithOperation(ctx, operation), nil
 }
 
 func (s *workflowStore) applyTransition(ctx context.Context, taskID, sessionID, fromStepID, toStepID string, trigger engine.Trigger, moveID string) error {
