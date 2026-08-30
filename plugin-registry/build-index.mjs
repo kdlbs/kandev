@@ -231,8 +231,74 @@ export function parseManifestFields(text) {
 // --- Enrichment --------------------------------------------------------------
 
 /** Strip a leading `v` from a release tag so versions compare cleanly. */
-function normalizeVersion(tag) {
+export function normalizeVersion(tag) {
   return tag && /^v\d/.test(tag) ? tag.slice(1) : tag;
+}
+
+/** Keep release versions within the package path and archive naming contract. */
+export function isSafeVersion(version) {
+  return SAFE_VERSION.test(String(version || ""));
+}
+
+function parseVersion(version) {
+  if (!isSafeVersion(version)) return null;
+  const [withoutBuild] = version.split("+", 1);
+  const [corePart, prereleasePart] = withoutBuild.split("-", 2);
+  return {
+    core: corePart.split("."),
+    prerelease: prereleasePart?.split(".") || [],
+  };
+}
+
+function compareVersionPart(left, right) {
+  const leftNumeric = /^\d+$/.test(left);
+  const rightNumeric = /^\d+$/.test(right);
+  if (leftNumeric && rightNumeric) {
+    const leftTrimmed = left.replace(/^0+(?=\d)/, "");
+    const rightTrimmed = right.replace(/^0+(?=\d)/, "");
+    if (leftTrimmed.length !== rightTrimmed.length)
+      return leftTrimmed.length > rightTrimmed.length ? 1 : -1;
+    return leftTrimmed === rightTrimmed
+      ? 0
+      : leftTrimmed > rightTrimmed
+        ? 1
+        : -1;
+  }
+  if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+  return left === right ? 0 : left > right ? 1 : -1;
+}
+
+/** Compare the same safe version format accepted by buildEntry. */
+export function compareVersions(left, right) {
+  const a = parseVersion(left);
+  const b = parseVersion(right);
+  if (!a) return -1;
+  if (!b) return 1;
+  const coreCount = Math.max(a.core.length, b.core.length);
+  for (let index = 0; index < coreCount; index += 1) {
+    const order = compareVersionPart(
+      a.core[index] || "0",
+      b.core[index] || "0",
+    );
+    if (order !== 0) return order;
+  }
+  if (a.prerelease.length === 0 || b.prerelease.length === 0) {
+    return a.prerelease.length === b.prerelease.length
+      ? 0
+      : a.prerelease.length === 0
+        ? 1
+        : -1;
+  }
+  const prereleaseCount = Math.max(a.prerelease.length, b.prerelease.length);
+  for (let index = 0; index < prereleaseCount; index += 1) {
+    const leftPart = a.prerelease[index];
+    const rightPart = b.prerelease[index];
+    if (leftPart === undefined || rightPart === undefined)
+      return leftPart === undefined ? -1 : 1;
+    const order = compareVersionPart(leftPart, rightPart);
+    if (order !== 0) return order;
+  }
+  return 0;
 }
 
 /** Pick this plugin's package tarball from the release assets. */
@@ -278,7 +344,7 @@ export async function buildEntry(
 
   const tag = release.tag_name || "";
   const version = normalizeVersion(tag);
-  if (!SAFE_VERSION.test(version || "")) {
+  if (!isSafeVersion(version)) {
     return {
       error: `${pluginId}: unsafe release version ${version || "<missing>"}`,
     };

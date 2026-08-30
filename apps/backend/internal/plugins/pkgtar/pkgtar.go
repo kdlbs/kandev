@@ -275,12 +275,16 @@ func validatePackageManifest(files map[string][]byte) (*manifest.Manifest, error
 	if !m.IsManaged() {
 		return nil, fmt.Errorf("%w: manifest is not runtime-managed (runtime.type must be \"binary\")", ErrManifestInvalid)
 	}
+	missing := make([]string, 0, len(m.Runtime.Executables))
 	for _, execPath := range m.Runtime.Executables {
-		if _, ok := files[execPath]; ok {
-			return m, nil
+		if _, ok := files[execPath]; !ok {
+			missing = append(missing, execPath)
 		}
 	}
-	return nil, fmt.Errorf("%w: package contains none of its declared executables", ErrManifestInvalid)
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("%w: declared executables not found in package: %s", ErrManifestInvalid, strings.Join(missing, ", "))
+	}
+	return m, nil
 }
 
 func validateInstallManifest(files map[string][]byte, m *manifest.Manifest) (*manifest.Manifest, string, error) {

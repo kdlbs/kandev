@@ -279,6 +279,35 @@ func TestVerify_DoesNotRequireCurrentHostExecutable(t *testing.T) {
 	}
 }
 
+func TestVerify_RejectsAnyMissingDeclaredExecutable(t *testing.T) {
+	otherPlatform := "plan9-amd64"
+	manifestYAML := []byte(fmt.Sprintf(`
+id: "kandev-plugin-hello"
+api_version: 1
+version: "1.0.0"
+runtime:
+  type: binary
+  executables:
+    %s: "server/plugin-%s"
+    %s: "server/plugin-%s"
+capabilities:
+  state: true
+`, hostPlatformKey, hostPlatformKey, otherPlatform, otherPlatform))
+	files := map[string][]byte{
+		"manifest.yaml":                    manifestYAML,
+		"server/plugin-" + hostPlatformKey: []byte("binary"),
+	}
+	pkg := buildRawPackageWithChecksums(t, files)
+
+	_, err := Verify(bytes.NewReader(pkg))
+	if !errors.Is(err, ErrManifestInvalid) {
+		t.Fatalf("Verify() error = %v, want ErrManifestInvalid", err)
+	}
+	if !strings.Contains(err.Error(), "server/plugin-"+otherPlatform) {
+		t.Fatalf("Verify() error = %v, want missing executable path", err)
+	}
+}
+
 func TestVerify_RejectsPackageWithoutAnyDeclaredExecutable(t *testing.T) {
 	otherPlatform := "plan9-amd64"
 	files := map[string][]byte{

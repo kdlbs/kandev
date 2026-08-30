@@ -79,6 +79,20 @@ test("detectReleaseChanges compares numeric SemVer identifiers without precision
   assert.deepEqual(result.candidates, ["alpha@9007199254740993.0.0"]);
 });
 
+test("detectReleaseChanges accepts the builder's safe two-component versions", async () => {
+  const current = indexWith([
+    { id: "alpha", repo: "acme/alpha", version: "0.9" },
+  ]);
+
+  const result = await detectReleaseChanges([specs[0]], current, {
+    fetchLatestRelease: async () => release("alpha", "1.0"),
+  });
+
+  assert.equal(result.rebuild, true);
+  assert.deepEqual(result.candidates, ["alpha@1.0"]);
+  assert.deepEqual(result.errors, []);
+});
+
 test("detectReleaseChanges queries only allowlisted repositories", async () => {
   const requested = [];
   const current = indexWith([

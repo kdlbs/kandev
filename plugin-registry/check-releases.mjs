@@ -5,7 +5,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parsePluginsYaml } from "./build-index.mjs";
+import {
+  compareVersions,
+  isSafeVersion,
+  normalizeVersion,
+  parsePluginsYaml,
+} from "./build-index.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGINS_YAML =
@@ -45,9 +50,9 @@ export async function detectReleaseChanges(
       continue;
     }
     const version = normalizeVersion(release?.tag_name);
-    if (!parseSemver(version)) {
+    if (!isSafeVersion(version)) {
       errors.push(
-        `${spec.id}: latest release tag ${release?.tag_name || "<missing>"} is not SemVer`,
+        `${spec.id}: latest release tag ${release?.tag_name || "<missing>"} is not a safe version`,
       );
       continue;
     }
@@ -56,7 +61,7 @@ export async function detectReleaseChanges(
         record?.id === spec.id &&
         record.repo_url === `https://github.com/${spec.repo}`,
     );
-    if (current && compareSemver(version, current.version) <= 0) continue;
+    if (current && compareVersions(version, current.version) <= 0) continue;
 
     const expectedAsset = `${spec.id}-${version}.tar.gz`;
     const exactAsset = (release.assets || []).find(
@@ -100,59 +105,6 @@ function githubHeaders() {
   if (process.env.GITHUB_TOKEN)
     headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
   return headers;
-}
-
-function normalizeVersion(tag) {
-  return tag && /^v\d/.test(tag) ? tag.slice(1) : tag;
-}
-
-function parseSemver(version) {
-  const match = String(version || "").match(
-    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/,
-  );
-  if (!match) return null;
-  return {
-    core: match.slice(1, 4),
-    prerelease: match[4]?.split(".") || [],
-  };
-}
-
-function compareNumericIdentifier(left, right) {
-  if (left.length !== right.length) return left.length > right.length ? 1 : -1;
-  return left === right ? 0 : left > right ? 1 : -1;
-}
-
-function compareSemver(left, right) {
-  const a = parseSemver(left);
-  const b = parseSemver(right);
-  if (!a) return -1;
-  if (!b) return 1;
-  for (let index = 0; index < 3; index += 1) {
-    const order = compareNumericIdentifier(a.core[index], b.core[index]);
-    if (order !== 0) return order;
-  }
-  if (a.prerelease.length === 0 || b.prerelease.length === 0) {
-    return a.prerelease.length === b.prerelease.length
-      ? 0
-      : a.prerelease.length === 0
-        ? 1
-        : -1;
-  }
-  const count = Math.max(a.prerelease.length, b.prerelease.length);
-  for (let index = 0; index < count; index += 1) {
-    const leftPart = a.prerelease[index];
-    const rightPart = b.prerelease[index];
-    if (leftPart === undefined || rightPart === undefined)
-      return leftPart === undefined ? -1 : 1;
-    if (leftPart === rightPart) continue;
-    const leftNumeric = /^\d+$/.test(leftPart);
-    const rightNumeric = /^\d+$/.test(rightPart);
-    if (leftNumeric && rightNumeric)
-      return compareNumericIdentifier(leftPart, rightPart);
-    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
-    return leftPart > rightPart ? 1 : -1;
-  }
-  return 0;
 }
 
 async function main() {
