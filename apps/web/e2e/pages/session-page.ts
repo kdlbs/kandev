@@ -1555,6 +1555,32 @@ export class SessionPage {
     return this.sessionLaunchDialog().getByTestId("task-description-input");
   }
 
+  /** Agent profile combobox inside the new-session or handoff dialog. */
+  newSessionAgentSelector(): Locator {
+    return this.sessionLaunchDialog().getByTestId("agent-profile-selector");
+  }
+
+  /** Visible agent profile options for the active new-session selector. */
+  newSessionAgentOptions(): Locator {
+    return this.page.getByRole("listbox", { name: "Suggestions" }).getByRole("option");
+  }
+
+  /** Select an agent profile from the active new-session or handoff dialog. */
+  async selectNewSessionProfile(profileName: string, touch = false): Promise<void> {
+    const selector = this.newSessionAgentSelector();
+    if (touch) {
+      await selector.tap();
+    } else {
+      await selector.click();
+    }
+    const option = this.newSessionAgentOptions().filter({ hasText: profileName });
+    if (touch) {
+      await option.tap();
+    } else {
+      await option.click();
+    }
+  }
+
   /** Start Agent button inside the new session or handoff dialog. */
   newSessionStartButton(): Locator {
     return this.sessionLaunchDialog().getByRole("button", { name: "Start Agent" });
