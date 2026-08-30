@@ -134,8 +134,14 @@ measurements.
 - The review-file-status regression now scopes the moved-file assertions to its
   selected diff section. A 30-repeat host run with retries disabled passed all
   30 repetitions.
-- Remote cache hit/miss measurements and PR CI results remain pending until the
-  branch workflow runs.
+- PR run [#3163](https://github.com/kdlbs/kandev/pull/3163) passed all 20 E2E
+  shards and the full required check set. A container shard restored a
+  digest-scoped prefix cache, verified Chromium, skipped image extraction, and
+  reported about 9 seconds for browser setup. The preceding PR run exposed a
+  transient GHCR metadata lookup failure; the workflow now retries that lookup
+  three times before failing safely.
+- Post-merge comparison across three successful `main` runs and a forced-miss
+  fallback measurement remain open rollout work.
 
 ## Risks
 

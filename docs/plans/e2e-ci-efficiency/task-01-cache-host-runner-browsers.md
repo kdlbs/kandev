@@ -73,5 +73,9 @@ required external service.
 ## Results
 
 The workflow contract, action-pinning tests, targeted workflow security scan,
-YAML parse, and diff checks pass locally. Remote cache hit/miss measurements
-remain pending until the branch workflow runs.
+YAML parse, and diff checks pass locally. PR #3163 passed all container shards;
+run 33325045980 restored a digest-scoped prefix cache, verified Chromium, and
+skipped image extraction in a reported setup interval of about 9 seconds. The
+workflow also retries transient immutable-image metadata lookup failures three
+times. A forced-miss fallback run and the post-merge three-run comparison remain
+pending for rollout validation.
