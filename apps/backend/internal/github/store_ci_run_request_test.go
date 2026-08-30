@@ -133,6 +133,18 @@ func TestStoreCIRunRequestProviderStartAndAuditAreRedacted(t *testing.T) {
 	if loaded.ProviderCallStartedAt == nil {
 		t.Fatal("provider call start was not persisted")
 	}
+	dispatchStartedAt := now.Add(2 * time.Second)
+	req.Operation = CIRunOperationWorkflowDispatch
+	if err := store.MarkCIRunProviderCallStarted(ctx, req, dispatchStartedAt); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = store.GetCIRunRequest(ctx, req.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ProviderCallStartedAt == nil || !loaded.ProviderCallStartedAt.Equal(dispatchStartedAt) {
+		t.Fatalf("dispatch provider call start = %v, want %v", loaded.ProviderCallStartedAt, dispatchStartedAt)
+	}
 	if err := store.AppendCIRunAuditEvent(ctx, &CIRunAuditEvent{
 		ID: "audit-1", RequestID: req.ID, EventType: "provider_started",
 		FailureClass: "", DetailsJSON: `{"operation":"rerun_failed_jobs"}`, CreatedAt: now,

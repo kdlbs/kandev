@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -10,18 +11,55 @@ import (
 type fixedInstallationMinter struct {
 	token        InstallationToken
 	repositories *[]string
+	permissions  *InstallationPermissions
 }
 
 func (m fixedInstallationMinter) MintInstallationToken(
 	_ context.Context,
 	_ int64,
-	_ InstallationPermissions,
+	permissions InstallationPermissions,
 	repositories []string,
 ) (InstallationToken, error) {
 	if m.repositories != nil {
 		*m.repositories = append([]string(nil), repositories...)
 	}
+	if m.permissions != nil {
+		*m.permissions = clonePermissions(permissions)
+	}
 	return m.token, nil
+}
+
+func TestCachedInstallationCredentialProviderNarrowsScopedActionsPermissions(t *testing.T) {
+	installationID := int64(42)
+	var permissions InstallationPermissions
+	provider := NewCachedInstallationCredentialProvider(NewInstallationTokenCache(fixedInstallationMinter{
+		permissions: &permissions,
+		token: InstallationToken{
+			Token: "installation-token", ExpiresAt: time.Now().Add(time.Hour),
+			Permissions: InstallationPermissions{
+				"actions": PermissionWrite, "contents": PermissionRead,
+				"metadata": PermissionRead, "pull_requests": PermissionRead,
+			},
+		},
+	}))
+
+	_, err := provider.ResolveInstallation(context.Background(), &WorkspaceConnection{
+		WorkspaceID: "workspace-1", Source: ConnectionSourceGitHubAppInstallation,
+		InstallationID: &installationID,
+	}, ResolveCredentialRequest{
+		WorkspaceID: "workspace-1", Purpose: CredentialPurposeScopedActionsWrite,
+		RepoOwner: "kdlbs", RepoName: "kandev",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := InstallationPermissions{
+		"actions": PermissionWrite, "contents": PermissionRead,
+		"metadata": PermissionRead, "pull_requests": PermissionRead,
+	}
+	if !reflect.DeepEqual(permissions, want) {
+		t.Fatalf("mint permissions = %#v, want %#v", permissions, want)
+	}
 }
 
 func TestCachedInstallationCredentialProviderPreservesActorCapabilitiesAndExpiry(t *testing.T) {

@@ -268,7 +268,8 @@ func sourceRunMatches(
 	run *GitHubActionsRun, pr *PR, binding *ciRunBinding, input RequestFreshCIRunInput,
 ) bool {
 	if run == nil || run.ID != input.SourceRunID || run.Attempt != input.ExpectedSourceAttempt ||
-		run.Event != "pull_request" || !strings.EqualFold(run.HeadSHA, input.ExpectedHeadSHA) ||
+		run.Event != "pull_request" || run.Status != checkStatusCompleted || run.Conclusion != checkConclusionFail ||
+		!strings.EqualFold(run.HeadSHA, input.ExpectedHeadSHA) ||
 		!strings.EqualFold(run.Repository, binding.Owner+"/"+binding.Repo) {
 		return false
 	}
@@ -308,8 +309,7 @@ func (s *Service) executeCIRunRequest(
 	_ = s.auditCIRun(ctx, request, "provider_started", "")
 	err = client.RerunFailedActionsJobs(ctx, latestBinding.Owner, latestBinding.Repo, request.SourceRunID)
 	if err == nil {
-		return s.completeCIRunSuccess(ctx, request, verified, request.SourceRunID,
-			request.ExpectedSourceAttempt+1, CIRunOperationRerunFailedJobs)
+		return s.reconcileCIRunRequest(ctx, client, latestBinding, request, verified)
 	}
 	if ciRunFailureFromError(err) != CIRunFailureRerunIneligible {
 		return s.handleCIRunMutationError(ctx, request, err)
@@ -361,6 +361,7 @@ func (s *Service) executeCIRunDispatchFallback(
 	if err := s.store.MarkCIRunProviderCallStarted(ctx, request, dispatchStartedAt); err != nil {
 		return nil, err
 	}
+	request.ProviderCallStartedAt = &dispatchStartedAt
 	_ = s.auditCIRun(ctx, request, "provider_started", "")
 	if err := client.DispatchActionsWorkflow(ctx, latestBinding.Owner, latestBinding.Repo,
 		verified.Workflow.ID, latestPR.HeadBranch, inputs); err != nil {
@@ -459,7 +460,10 @@ func (s *Service) resumeCIRunRequest(
 	if err != nil {
 		return nil, &CIRunRequestError{Class: ciRunFailureFromError(err)}
 	}
-	verified := &verifiedCIRun{Workflow: &GitHubActionsWorkflow{ID: request.ProviderWorkflowID}}
+	verified := &verifiedCIRun{Workflow: &GitHubActionsWorkflow{
+		ID: request.ProviderWorkflowID, Name: request.ProviderWorkflowName,
+		Path: request.ProviderWorkflowPath,
+	}}
 	return s.reconcileCIRunRequest(ctx, client, binding, request, verified)
 }
 
@@ -478,12 +482,21 @@ func (s *Service) reconcileCIRunRequest(
 	if err != nil {
 		return s.handleCIRunMutationError(ctx, request, err)
 	}
-	for _, run := range runs {
+	var matched *GitHubActionsRun
+	for i := range runs {
+		run := &runs[i]
 		if !reconciledCIRunMatches(run, workflowID, request) {
 			continue
 		}
-		verified.Run = &run
-		return s.completeCIRunSuccess(ctx, request, verified, run.ID, run.Attempt, request.Operation)
+		if matched != nil {
+			matched = nil
+			break
+		}
+		matched = run
+	}
+	if matched != nil {
+		verified.Run = matched
+		return s.completeCIRunSuccess(ctx, request, verified, matched.ID, matched.Attempt, request.Operation)
 	}
 	request.Status = CIRunRequestReconciling
 	request.FailureClass = string(CIRunFailureProviderCallAmbiguous)
@@ -492,17 +505,22 @@ func (s *Service) reconcileCIRunRequest(
 	return receiptFromCIRunRequest(request), &CIRunRequestError{Class: CIRunFailureProviderCallAmbiguous}
 }
 
-func reconciledCIRunMatches(run GitHubActionsRun, workflowID int64, request *CIRunRequest) bool {
+func reconciledCIRunMatches(run *GitHubActionsRun, workflowID int64, request *CIRunRequest) bool {
+	if run == nil {
+		return false
+	}
 	if run.WorkflowID != workflowID || !strings.EqualFold(run.HeadSHA, request.ExpectedHeadSHA) ||
 		!strings.EqualFold(run.HeadRepository, request.ProviderHeadRepo) ||
 		run.HeadBranch != request.ProviderHeadRef {
 		return false
 	}
 	if request.Operation == CIRunOperationRerunFailedJobs {
-		return run.ID == request.SourceRunID && run.Attempt > request.ExpectedSourceAttempt
+		return run.ID == request.SourceRunID && run.Attempt == request.ExpectedSourceAttempt+1
 	}
 	return request.Operation == CIRunOperationWorkflowDispatch &&
-		run.ID != request.SourceRunID && run.Event == "workflow_dispatch"
+		request.ProviderCallStartedAt != nil && !run.CreatedAt.IsZero() &&
+		!run.CreatedAt.Before(request.ProviderCallStartedAt.Truncate(time.Second)) &&
+		run.ID != request.SourceRunID && run.Attempt == 1 && run.Event == "workflow_dispatch"
 }
 
 func (s *Service) completeCIRunSuccess(

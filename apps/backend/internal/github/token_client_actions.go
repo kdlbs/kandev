@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 type CIRunFailureClass string
@@ -59,6 +60,7 @@ type GitHubActionsRun struct {
 	Repository     string
 	HeadRepository string
 	PullRequests   []int
+	CreatedAt      time.Time
 }
 
 type GitHubActionsWorkflow struct {
@@ -69,16 +71,17 @@ type GitHubActionsWorkflow struct {
 }
 
 type actionsRunResponse struct {
-	ID         int64  `json:"id"`
-	RunAttempt int    `json:"run_attempt"`
-	WorkflowID int64  `json:"workflow_id"`
-	Name       string `json:"name"`
-	Path       string `json:"path"`
-	Event      string `json:"event"`
-	Status     string `json:"status"`
-	Conclusion string `json:"conclusion"`
-	HeadSHA    string `json:"head_sha"`
-	HeadBranch string `json:"head_branch"`
+	ID         int64     `json:"id"`
+	RunAttempt int       `json:"run_attempt"`
+	WorkflowID int64     `json:"workflow_id"`
+	Name       string    `json:"name"`
+	Path       string    `json:"path"`
+	Event      string    `json:"event"`
+	Status     string    `json:"status"`
+	Conclusion string    `json:"conclusion"`
+	HeadSHA    string    `json:"head_sha"`
+	HeadBranch string    `json:"head_branch"`
+	CreatedAt  time.Time `json:"created_at"`
 	Repository struct {
 		FullName string `json:"full_name"`
 	} `json:"repository"`
@@ -97,6 +100,7 @@ func projectActionsRun(raw actionsRunResponse) *GitHubActionsRun {
 		Status: raw.Status, Conclusion: raw.Conclusion, HeadSHA: raw.HeadSHA,
 		HeadBranch: raw.HeadBranch, Repository: raw.Repository.FullName,
 		HeadRepository: raw.HeadRepository.FullName,
+		CreatedAt:      raw.CreatedAt,
 		PullRequests:   make([]int, 0, len(raw.PullRequests)),
 	}
 	for _, pr := range raw.PullRequests {

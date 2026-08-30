@@ -19,7 +19,8 @@ server boundary. An administrator grants one coordinator task authority for
 one workspace, workflow, CI Fixup step, and task repository. Each request is
 then bound server-side to the calling session, current task and step, linked PR,
 canonical provider repository, exact unchanged head, trusted source run and
-attempt, and a closed evidence policy.
+attempt, and a closed evidence policy. The source must be a completed failed
+pull-request run.
 
 The backend mints a repository-scoped token from the workspace's verified
 GitHub App installation and requires Actions write. It never falls back to PAT,
@@ -33,8 +34,10 @@ Provider mutations use a durable two-key ledger: the caller idempotency key is
 unique in its actor/grant scope, while source run plus attempt is unique for the
 semantic operation. The row is committed before the provider call. Once the
 call is marked started, retries reconcile provider state rather than resending.
-Receipts and audit records contain only stable identities and classified error
-metadata.
+Rerun reconciliation accepts only the exact next attempt; dispatch
+reconciliation accepts only one new first attempt created after the provider
+call began. Receipts and audit records contain only stable identities and
+classified error metadata.
 
 ## Consequences
 

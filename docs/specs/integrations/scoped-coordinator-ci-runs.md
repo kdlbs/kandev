@@ -28,7 +28,8 @@ workspace, task, workflow, current step, task repository, linked PR, provider
 repository identity, exact PR head, and source run before any provider write.
 For fork PRs whose Actions run omits the `pull_requests` array, the source run
 must match the canonical base repository plus exact head repository, ref, and
-SHA. A changed head or any unlinked, cross-workspace, or ungranted target fails
+SHA. In every case, the source must be a completed failed `pull_request` run.
+A changed head or any unlinked, cross-workspace, or ungranted target fails
 closed.
 
 ## Provider policy
@@ -54,6 +55,9 @@ unique within the actor/grant scope, and a second unique identity covers the
 semantic source run attempt. Concurrent or retried claims return the same
 logical operation. Once `provider_call_started_at` is recorded, an interrupted
 or ambiguous call is reconciled from GitHub. It is never blindly sent again.
+Rerun reconciliation accepts only the exact next attempt. Dispatch
+reconciliation accepts only one new first attempt created at or after the
+dispatch call began; zero or multiple candidates remain ambiguous.
 
 ## Receipt and audit
 
@@ -95,8 +99,11 @@ The first reviewed live acceptance is task
 `9349b6e5-a167-4d88-af14-cb355015e3dd` / PR #2841 at
 `fc0539307285eb532f97295dc5e05f14cc9fd169`. The second queued acceptance is
 task `f4136a59-f2ae-4ef3-b718-24d1118b4115` / PR #2872 at
-`eebfe1983b3400a26823ad229469a72f42c2bcb2`. Neither is changed by development
-or test execution.
+`eebfe1983b3400a26823ad229469a72f42c2bcb2`. A separately bound third acceptance,
+after those two, is task `153cdbbe-beac-47b8-bc06-8dafdcc8ed80` / PR #2868 at
+`4b67956a154ddc382ec9084e992f431b423757ad`, using failed source run
+`99292477013` (frontend job `99289554250`). None is changed by development or
+test execution.
 
 ## Non-goals
 

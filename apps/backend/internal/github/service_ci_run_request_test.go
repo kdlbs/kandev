@@ -76,6 +76,8 @@ func (f *fakeCIRunActionsClient) ListActionsWorkflowRuns(context.Context, string
 
 func TestRequestFreshCIRunRerunsVerifiedForkSource(t *testing.T) {
 	service, client, input := setupCIRunServiceTest(t, true)
+	client.runs = []GitHubActionsRun{*client.run}
+	client.runs[0].Attempt = input.ExpectedSourceAttempt + 1
 	receipt, err := service.RequestFreshCIRun(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
@@ -112,6 +114,75 @@ func TestRequestFreshCIRunRerunsVerifiedForkSource(t *testing.T) {
 	}
 }
 
+func TestRequestFreshCIRunRejectsSourceThatIsNotACompletedFailure(t *testing.T) {
+	for _, source := range []struct {
+		name       string
+		status     string
+		conclusion string
+	}{
+		{name: "still running", status: "in_progress"},
+		{name: "already successful", status: "completed", conclusion: "success"},
+		{name: "cancelled", status: "completed", conclusion: "cancelled"},
+	} {
+		t.Run(source.name, func(t *testing.T) {
+			service, client, input := setupCIRunServiceTest(t, false)
+			client.run.Status = source.status
+			client.run.Conclusion = source.conclusion
+
+			_, err := service.RequestFreshCIRun(context.Background(), input)
+			var ciErr *CIRunRequestError
+			if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureSourceRunMismatch {
+				t.Fatalf("error = %#v, want source_run_mismatch", err)
+			}
+			if client.reruns != 0 || client.dispatches != 0 {
+				t.Fatalf("provider mutated for ineligible source: rerun=%d dispatch=%d",
+					client.reruns, client.dispatches)
+			}
+		})
+	}
+}
+
+func TestRequestFreshCIRunConfirmsRerunAttemptBeforeSuccess(t *testing.T) {
+	service, client, input := setupCIRunServiceTest(t, true)
+
+	receipt, err := service.RequestFreshCIRun(context.Background(), input)
+	var ciErr *CIRunRequestError
+	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureProviderCallAmbiguous {
+		t.Fatalf("error = %#v, want provider_call_ambiguous", err)
+	}
+	if receipt == nil || receipt.Status != CIRunRequestReconciling || receipt.Attempt != 0 {
+		t.Fatalf("unconfirmed receipt = %+v", receipt)
+	}
+	if client.reruns != 1 {
+		t.Fatalf("provider reruns = %d, want one", client.reruns)
+	}
+
+	client.runs = []GitHubActionsRun{*client.run}
+	client.runs[0].Attempt = input.ExpectedSourceAttempt + 1
+	receipt, err = service.RequestFreshCIRun(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Status != CIRunRequestSucceeded || receipt.Attempt != 2 || client.reruns != 1 {
+		t.Fatalf("confirmed receipt = %+v, provider reruns=%d", receipt, client.reruns)
+	}
+}
+
+func TestRequestFreshCIRunDoesNotClaimALaterRerunAttempt(t *testing.T) {
+	service, client, input := setupCIRunServiceTest(t, true)
+	client.runs = []GitHubActionsRun{*client.run}
+	client.runs[0].Attempt = input.ExpectedSourceAttempt + 2
+
+	receipt, err := service.RequestFreshCIRun(context.Background(), input)
+	var ciErr *CIRunRequestError
+	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureProviderCallAmbiguous {
+		t.Fatalf("error = %#v, want provider_call_ambiguous", err)
+	}
+	if receipt == nil || receipt.Status != CIRunRequestReconciling || receipt.Attempt != 0 {
+		t.Fatalf("misattributed receipt = %+v", receipt)
+	}
+}
+
 func TestRequestFreshCIRunDispatchesOnlyReviewedSameRepoWorkflow(t *testing.T) {
 	service, client, input := setupCIRunServiceTest(t, false)
 	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
@@ -121,6 +192,7 @@ func TestRequestFreshCIRunDispatchesOnlyReviewedSameRepoWorkflow(t *testing.T) {
 		WorkflowPath: ".github/workflows/e2e-tests.yml", HeadSHA: input.ExpectedHeadSHA,
 		HeadBranch: "feature/x", Event: "workflow_dispatch",
 		Repository: "kdlbs/kandev", HeadRepository: "kdlbs/kandev",
+		CreatedAt: time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC),
 	}}
 	receipt, err := service.RequestFreshCIRun(context.Background(), input)
 	if err != nil {
@@ -142,6 +214,100 @@ func TestRequestFreshCIRunDispatchesOnlyReviewedSameRepoWorkflow(t *testing.T) {
 	}
 	if persisted.Operation != CIRunOperationWorkflowDispatch {
 		t.Fatalf("persisted operation = %q, want workflow_dispatch", persisted.Operation)
+	}
+}
+
+func TestRequestFreshCIRunRejectsAmbiguousDispatchMatches(t *testing.T) {
+	service, client, input := setupCIRunServiceTest(t, false)
+	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
+	client.workflowSource = []byte("on:\n  workflow_dispatch:\n")
+	matching := GitHubActionsRun{
+		ID: 101, Attempt: 1, WorkflowID: 77, WorkflowName: "E2E",
+		WorkflowPath: ".github/workflows/e2e-tests.yml", HeadSHA: input.ExpectedHeadSHA,
+		HeadBranch: "feature/x", Event: "workflow_dispatch",
+		Repository: "kdlbs/kandev", HeadRepository: "kdlbs/kandev",
+	}
+	client.runs = []GitHubActionsRun{matching, matching}
+	client.runs[1].ID = 102
+
+	receipt, err := service.RequestFreshCIRun(context.Background(), input)
+	var ciErr *CIRunRequestError
+	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureProviderCallAmbiguous {
+		t.Fatalf("error = %#v, want provider_call_ambiguous", err)
+	}
+	if receipt == nil || receipt.Status != CIRunRequestReconciling || receipt.RunID != 0 {
+		t.Fatalf("ambiguous receipt = %+v", receipt)
+	}
+	if client.dispatches != 1 {
+		t.Fatalf("provider dispatches = %d, want one", client.dispatches)
+	}
+}
+
+func TestRequestFreshCIRunRejectsDispatchRunCreatedBeforeProviderCall(t *testing.T) {
+	service, client, input := setupCIRunServiceTest(t, false)
+	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
+	client.workflowSource = []byte("on:\n  workflow_dispatch:\n")
+	client.runs = []GitHubActionsRun{{
+		ID: 101, Attempt: 1, WorkflowID: 77, WorkflowName: "E2E",
+		WorkflowPath: ".github/workflows/e2e-tests.yml", HeadSHA: input.ExpectedHeadSHA,
+		HeadBranch: "feature/x", Event: "workflow_dispatch",
+		Repository: "kdlbs/kandev", HeadRepository: "kdlbs/kandev",
+		CreatedAt: time.Date(2026, 8, 30, 11, 59, 59, 0, time.UTC),
+	}}
+
+	receipt, err := service.RequestFreshCIRun(context.Background(), input)
+	var ciErr *CIRunRequestError
+	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureProviderCallAmbiguous {
+		t.Fatalf("error = %#v, want provider_call_ambiguous", err)
+	}
+	if receipt == nil || receipt.Status != CIRunRequestReconciling || receipt.RunID != 0 {
+		t.Fatalf("stale-match receipt = %+v", receipt)
+	}
+}
+
+func TestRequestFreshCIRunAcceptsDispatchCreatedInProviderCallSecond(t *testing.T) {
+	service, client, input := setupCIRunServiceTest(t, false)
+	service.ciRunNow = func() time.Time {
+		return time.Date(2026, 8, 30, 12, 0, 0, 900_000_000, time.UTC)
+	}
+	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
+	client.workflowSource = []byte("on:\n  workflow_dispatch:\n")
+	client.runs = []GitHubActionsRun{{
+		ID: 101, Attempt: 1, WorkflowID: 77, WorkflowName: "E2E",
+		WorkflowPath: ".github/workflows/e2e-tests.yml", HeadSHA: input.ExpectedHeadSHA,
+		HeadBranch: "feature/x", Event: "workflow_dispatch",
+		Repository: "kdlbs/kandev", HeadRepository: "kdlbs/kandev",
+		CreatedAt: time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC),
+	}}
+
+	receipt, err := service.RequestFreshCIRun(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Status != CIRunRequestSucceeded || receipt.RunID != 101 {
+		t.Fatalf("receipt = %+v", receipt)
+	}
+}
+
+func TestRequestFreshCIRunDoesNotClaimARerunOfAnOlderDispatch(t *testing.T) {
+	service, client, input := setupCIRunServiceTest(t, false)
+	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
+	client.workflowSource = []byte("on:\n  workflow_dispatch:\n")
+	client.runs = []GitHubActionsRun{{
+		ID: 101, Attempt: 2, WorkflowID: 77, WorkflowName: "E2E",
+		WorkflowPath: ".github/workflows/e2e-tests.yml", HeadSHA: input.ExpectedHeadSHA,
+		HeadBranch: "feature/x", Event: "workflow_dispatch",
+		Repository: "kdlbs/kandev", HeadRepository: "kdlbs/kandev",
+		CreatedAt: time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC),
+	}}
+
+	receipt, err := service.RequestFreshCIRun(context.Background(), input)
+	var ciErr *CIRunRequestError
+	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureProviderCallAmbiguous {
+		t.Fatalf("error = %#v, want provider_call_ambiguous", err)
+	}
+	if receipt == nil || receipt.Status != CIRunRequestReconciling || receipt.RunID != 0 {
+		t.Fatalf("misattributed receipt = %+v", receipt)
 	}
 }
 

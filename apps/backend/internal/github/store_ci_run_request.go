@@ -197,7 +197,7 @@ func (s *Store) MarkCIRunProviderCallStarted(
 		return errors.New("complete provider call identity is required")
 	}
 	result, err := s.db.ExecContext(ctx, s.db.Rebind(`UPDATE github_ci_run_requests
-		SET provider_call_started_at = COALESCE(provider_call_started_at, ?),
+		SET provider_call_started_at = ?,
 			status = ?, operation = ?, provider_workflow_id = ?,
 			provider_workflow_name = ?, provider_workflow_path = ?, provider_head_repo = ?,
 			provider_head_ref = ?, provider_head_sha = ?, updated_at = ? WHERE id = ?`),

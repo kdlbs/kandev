@@ -8,7 +8,27 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestActionsRunProjectionPreservesCreationTime(t *testing.T) {
+	var raw actionsRunResponse
+	if err := json.Unmarshal([]byte(`{
+		"id":101,
+		"created_at":"2026-08-30T12:00:01Z"
+	}`), &raw); err != nil {
+		t.Fatal(err)
+	}
+
+	run := projectActionsRun(raw)
+	want := time.Date(2026, 8, 30, 12, 0, 1, 0, time.UTC)
+	if run == nil {
+		t.Fatal("projected Actions run is nil")
+	}
+	if !run.CreatedAt.Equal(want) {
+		t.Fatalf("projected created_at = %v, want %v", run.CreatedAt, want)
+	}
+}
 
 func TestTokenClientActionsRunAndWorkflowReads(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
