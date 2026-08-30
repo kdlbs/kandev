@@ -757,6 +757,8 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 	if execution.PassthroughProcessID != "" {
 		return m.RestartAgentProcess(ctx, executionID)
 	}
+	execution.guardedTTYMu.Lock()
+	defer execution.guardedTTYMu.Unlock()
 
 	if execution.agentctl == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
@@ -899,6 +901,8 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	if !exists {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	execution.guardedTTYMu.Lock()
+	defer execution.guardedTTYMu.Unlock()
 	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStopping)
 	if err != nil {
 		return err
@@ -981,6 +985,12 @@ func (m *Manager) StopBySessionID(ctx context.Context, sessionID string, force b
 // conversation context. For ACP agents this restarts via agentctl with a new ACP session.
 // For passthrough (TUI) agents this kills the PTY process and relaunches without --resume.
 func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	execution.guardedTTYMu.Lock()
+	defer execution.guardedTTYMu.Unlock()
 	return m.restartAgentProcess(ctx, executionID, nil)
 }
 

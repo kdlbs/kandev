@@ -100,6 +100,10 @@ type AgentExecution struct {
 
 	// agentctl client for this execution
 	agentctl *agentctl.Client
+	// guardedTTYMu prevents a guarded TTY request from racing an execution
+	// stop, session reset, process restart, or workspace rebind. Those paths
+	// must acquire the same lock before replacing the active ACP principal.
+	guardedTTYMu sync.Mutex
 	// agentctlReady records the successful health check independently of the
 	// agent process and workspace stream lifecycles. Prepared sessions have a
 	// healthy agentctl before either of those is started or attached.

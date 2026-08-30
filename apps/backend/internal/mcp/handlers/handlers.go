@@ -209,6 +209,13 @@ type AgentPermissionService interface {
 	ResolveAgentPermission(ctx context.Context, request orchestrator.ResolveAgentPermissionRequest) (*orchestrator.ResolveAgentPermissionResult, error)
 }
 
+// GuardedTTYExecutionService owns the audit-before-dispatch transaction and
+// the exact live-execution bridge call. The MCP handler contributes only the
+// trusted principal and execution identities attached by lifecycle middleware.
+type GuardedTTYExecutionService interface {
+	ExecuteGuardedTTY(context.Context, streams.GuardedTTYExecRequest) (*streams.GuardedTTYExecReceipt, error)
+}
+
 // TaskTitleBranchRenamer performs the best-effort branch side effect after an
 // owner session accepts a prompt-first task title.
 type TaskTitleBranchRenamer interface {
@@ -316,6 +323,7 @@ type Handlers struct {
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
 	agentPermissionSvc AgentPermissionService
+	guardedTTYService  GuardedTTYExecutionService
 }
 
 // NewHandlers creates new MCP handlers.
@@ -381,6 +389,12 @@ func (h *Handlers) SetTaskStopper(stopper TaskStopper) {
 // SetAgentPermissionService wires the authorized permission domain service.
 func (h *Handlers) SetAgentPermissionService(svc AgentPermissionService) {
 	h.agentPermissionSvc = svc
+}
+
+// SetGuardedTTYExecutionService wires the guarded TTY audit and execution
+// boundary. Without it the backend action is not registered.
+func (h *Handlers) SetGuardedTTYExecutionService(svc GuardedTTYExecutionService) {
+	h.guardedTTYService = svc
 }
 
 // SetTaskTitleBranchRenamer wires the best-effort branch rename performed
@@ -469,6 +483,9 @@ func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
 	d.RegisterFunc(ws.ActionMCPStopTask, h.handleStopTask)
 	d.RegisterFunc(ws.ActionMCPSpawnSession, h.handleSpawnSession)
+	if h.guardedTTYService != nil {
+		d.RegisterFunc(ws.ActionMCPGuardedTTYExec, h.handleGuardedTTYExec)
+	}
 }
 
 func (h *Handlers) registerTaskPlanHandlers(d *guardedMCPDispatcher) {
