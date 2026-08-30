@@ -428,7 +428,8 @@ func (r *Repository) checkShadowFinalSchema(tx *sqlx.Tx) error {
 		return err
 	}
 	for _, required := range []string{"id", "task_environment_id", columnRepositoryID, "branch_slug",
-		columnWorktreeID, columnWorktreePath, columnWorktreeBranch, "position", "error_message",
+		columnWorktreeID, columnWorktreePath, columnWorktreeBranch,
+		"worktree_branch_owner", "worktree_integration_ref", "worktree_recovery_head_sha", "position", "error_message",
 		columnStatus, columnCreatedAt, columnUpdatedAt, "merged_at", "deleted_at"} {
 		if !repoColumns[required] {
 			return fmt.Errorf("cutover: task_environment_repos_shadow missing final column %s", required)

@@ -119,6 +119,13 @@ type MultiRepoStore interface {
 	GetWorktreeBySessionAndRepository(ctx context.Context, sessionID, repositoryID, branchSlug string) (*Worktree, error)
 }
 
+// BranchMetadataStore is the fail-closed persistence capability required for
+// managed-branch compaction. Stores without it retain every branch.
+type BranchMetadataStore interface {
+	CountWorktreeBranchOwners(ctx context.Context, repositoryID, branch string) (int, error)
+	PersistBranchRecoveryHead(ctx context.Context, worktreeID, expected, recoveryHead string) (bool, error)
+}
+
 // NewManager creates a new worktree manager.
 func NewManager(cfg Config, store Store, log *logger.Logger) (*Manager, error) {
 	if err := cfg.Validate(); err != nil {

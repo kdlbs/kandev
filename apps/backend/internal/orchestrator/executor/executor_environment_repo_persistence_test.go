@@ -46,3 +46,19 @@ func TestPersistTaskEnvironmentRepos_PreservesPhysicalWorktreeOnInventoryOnlyRef
 		t.Fatalf("inventory-only refresh did not update inventory metadata: position=%d error=%q", row.Position, row.ErrorMessage)
 	}
 }
+
+func TestEnvironmentReposForLaunch_PersistsBranchCompactionMetadata(t *testing.T) {
+	repos := environmentReposForLaunch(
+		&LaunchAgentRequest{},
+		&LaunchAgentResponse{Worktrees: []RepoWorktreeResult{{
+			RepositoryID:           "repo-kandev",
+			WorktreeID:             "wt-managed",
+			WorktreeBranch:         "feature/task",
+			WorktreeBranchOwner:    "kandev",
+			WorktreeIntegrationRef: "develop",
+		}}},
+	)
+	if len(repos) != 1 || repos[0].WorktreeBranchOwner != "kandev" || repos[0].WorktreeIntegrationRef != "develop" {
+		t.Fatalf("environment repository metadata = %+v", repos)
+	}
+}

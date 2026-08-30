@@ -3347,12 +3347,25 @@ func (s *Service) cleanupTaskEnvironment(
 	if cause := context.Cause(ctx); cause != nil {
 		return []error{cause}
 	}
-	if err := s.teardownEnvironmentResources(ctx, cleanup.env); err != nil {
+	// When a typed batch cleaner is available, it owns worktree cleanup exactly
+	// once (including archive-vs-delete branch policy and aggregate receipts).
+	// Legacy/test configurations without that capability retain the destroyer
+	// fallback so resources are not orphaned.
+	_, archiveBatch := s.worktreeCleanup.(WorktreeArchiveBatchCleaner)
+	_, deleteBatch := s.worktreeCleanup.(WorktreeBatchCleaner)
+	batchHandlesWorktrees := (cleanup.preserveBranches && archiveBatch) || (!cleanup.preserveBranches && deleteBatch)
+	var teardownErr error
+	if batchHandlesWorktrees {
+		teardownErr = s.teardownEnvironmentRuntimeResources(ctx, cleanup.env)
+	} else {
+		teardownErr = s.teardownEnvironmentResources(ctx, cleanup.env)
+	}
+	if teardownErr != nil {
 		s.logger.Warn("failed to teardown task environment during task cleanup",
 			zap.String("task_id", taskID),
 			zap.String("env_id", cleanup.env.ID),
-			zap.Error(err))
-		return []error{fmt.Errorf("teardown task environment %s: %w", cleanup.env.ID, err)}
+			zap.Error(teardownErr))
+		return []error{fmt.Errorf("teardown task environment %s: %w", cleanup.env.ID, teardownErr)}
 	}
 	if cleanup.deleteRow {
 		if cause := context.Cause(ctx); cause != nil {

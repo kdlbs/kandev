@@ -72,6 +72,7 @@ type RepoPrepareSpec struct {
 	RepositoryPath     string
 	RepoName           string
 	BaseBranch         string
+	IntegrationRef     string
 	DefaultBranch      string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch     string
 	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
@@ -119,6 +120,7 @@ type EnvPrepareRequest struct {
 	SetupScript             string
 	RepoSetupScript         string // Repository-level setup script (e.g. "make install")
 	BaseBranch              string
+	IntegrationRef          string
 	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch          string
 	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
@@ -174,6 +176,7 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		RepositoryPath:          r.RepositoryPath,
 		RepoName:                r.RepoName,
 		BaseBranch:              r.BaseBranch,
+		IntegrationRef:          r.IntegrationRef,
 		DefaultBranch:           r.DefaultBranch,
 		CheckoutBranch:          r.CheckoutBranch,
 		PRNumber:                r.PRNumber,
@@ -216,6 +219,8 @@ type RepoWorktreeResult struct {
 	BranchSlug                string `json:"branch_slug,omitempty"`
 	WorktreeID                string `json:"worktree_id,omitempty"`
 	WorktreeBranch            string `json:"worktree_branch,omitempty"`
+	WorktreeBranchOwner       string `json:"-"`
+	WorktreeIntegrationRef    string `json:"-"`
 	WorktreePath              string `json:"worktree_path,omitempty"`
 	MainRepoGitDir            string `json:"main_repo_git_dir,omitempty"`
 	RequestedBaseBranch       string `json:"requested_base_branch,omitempty"`

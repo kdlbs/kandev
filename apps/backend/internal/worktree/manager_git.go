@@ -201,6 +201,42 @@ func (m *Manager) BranchRecoveryStatus(ctx context.Context, repoPath, branch str
 	return BranchStatusMissing
 }
 
+// RecoverBranchStatus restores a safely compacted managed branch from its
+// persisted exact head before reporting status. It performs no fetch.
+func (m *Manager) RecoverBranchStatus(ctx context.Context, wt *Worktree) string {
+	if wt == nil || wt.RepositoryPath == "" || wt.Branch == "" {
+		return BranchStatusMissing
+	}
+	repoLock := m.getRepoLock(wt.RepositoryPath)
+	repoLock.Lock()
+	defer func() {
+		repoLock.Unlock()
+		m.releaseRepoLock(wt.RepositoryPath)
+	}()
+	if exists, err := m.branchExists(ctx, wt.RepositoryPath, "refs/heads/"+wt.Branch); err == nil && exists {
+		return BranchStatusLocal
+	}
+	if m.restoreManagedBranchFromRecoveryHeadLocked(ctx, wt) == nil && wt.RecoveryHeadSHA != "" {
+		return BranchStatusLocal
+	}
+	return m.BranchRecoveryStatus(ctx, wt.RepositoryPath, wt.Branch)
+}
+
+func (m *Manager) restoreManagedBranchFromRecoveryHeadLocked(ctx context.Context, wt *Worktree) error {
+	if wt == nil || wt.BranchOwner != BranchOwnerManaged || wt.RecoveryHeadSHA == "" {
+		return fmt.Errorf("managed branch recovery metadata is unavailable")
+	}
+	resolved, err := m.resolveCommit(ctx, wt.RepositoryPath, wt.RecoveryHeadSHA)
+	if err != nil || resolved != strings.ToLower(wt.RecoveryHeadSHA) {
+		return fmt.Errorf("recovery commit is unavailable")
+	}
+	cmd := m.newNonInteractiveGitCmd(ctx, wt.RepositoryPath, "branch", "--", wt.Branch, resolved)
+	if output, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
+		return fmt.Errorf("restore managed branch: %s: %w", strings.TrimSpace(string(output)), err)
+	}
+	return nil
+}
+
 // refContains reports whether container already includes every commit in
 // contained, i.e. `git merge-base --is-ancestor contained container`.
 // A non-zero ancestry result is distinct from a failed probe: the former is a

@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 type stubEnvRepo struct {
@@ -303,6 +304,33 @@ func TestCleanupTaskEnvironment_CancellationPreservesEnvironmentRow(t *testing.T
 	}
 	if repo.deleted {
 		t.Fatal("environment row deleted after cancellation")
+	}
+}
+
+func TestCleanupDestructiveTaskResources_DoesNotDuplicateBatchWorktreeCleanup(t *testing.T) {
+	repo := &stubEnvRepo{}
+	svc := newResetTestService(t, repo)
+	destroyer := &stubDestroyer{}
+	cleaner := &policyRecordingWorktreeCleanup{}
+	svc.SetEnvironmentDestroyer(destroyer)
+	svc.SetWorktreeCleanup(cleaner)
+	wt := &worktree.Worktree{ID: "wt-once", TaskID: "task-1"}
+
+	errs := svc.cleanupDestructiveTaskResources(
+		context.Background(), "task-1", nil, []*worktree.Worktree{wt},
+		taskEnvironmentCleanup{
+			env:              &models.TaskEnvironment{ID: "env-1", TaskID: "task-1", Repos: []*models.TaskEnvironmentRepo{{WorktreeID: wt.ID}}},
+			preserveBranches: true,
+		}, nil,
+	)
+	if len(errs) != 0 {
+		t.Fatalf("cleanup errors = %v", errs)
+	}
+	if len(destroyer.worktreeCalls) != 0 {
+		t.Fatalf("destroyer worktree calls = %v, want none", destroyer.worktreeCalls)
+	}
+	if cleaner.preservingCalls != 1 {
+		t.Fatalf("batch preserving calls = %d, want 1", cleaner.preservingCalls)
 	}
 }
 

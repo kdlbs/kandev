@@ -12,6 +12,7 @@ func TestBuildWorktreeCreateRequestForwardsProfileEnv(t *testing.T) {
 	req := &EnvPrepareRequest{
 		TaskID:         "task-1",
 		RepositoryPath: "/repo",
+		IntegrationRef: "develop",
 		Env: map[string]string{
 			"FONTAWESOME_NPM_AUTH_TOKEN": "fa-secret-value",
 		},
@@ -21,5 +22,8 @@ func TestBuildWorktreeCreateRequestForwardsProfileEnv(t *testing.T) {
 
 	if got.ScriptEnv["FONTAWESOME_NPM_AUTH_TOKEN"] != "fa-secret-value" {
 		t.Fatalf("CreateRequest.ScriptEnv = %#v, want profile env forwarded", got.ScriptEnv)
+	}
+	if got.IntegrationRef != "develop" {
+		t.Fatalf("CreateRequest.IntegrationRef = %q, want develop", got.IntegrationRef)
 	}
 }

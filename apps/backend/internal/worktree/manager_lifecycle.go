@@ -644,6 +644,7 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 	}
 
 	wt := m.buildWorktreeRecord(worktreeID, req, worktreePath, branchName)
+	wt.BranchOwner = createdBranchOwner(checkoutMode.CheckoutBranch, branchName)
 	if fetchResult != nil {
 		wt.FetchWarning = fetchResult.Warning
 		wt.FetchWarningDetail = fetchResult.WarningDetail
@@ -699,6 +700,7 @@ func (m *Manager) createContributionInTaskDir(
 		return nil, err
 	}
 	wt := m.buildWorktreeRecord(worktreeID, req, worktreePath, branchName)
+	wt.BranchOwner = BranchOwnerExternal
 	if err := m.persistAndCacheWorktree(ctx, wt, req, worktreePath); err != nil {
 		return nil, err
 	}
@@ -1732,6 +1734,13 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 			refreshedStartPoint = selectedRef
 		}
 		exists = true
+	}
+	if !exists {
+		recovery := *existing
+		recovery.RepositoryPath = req.RepositoryPath
+		if restoreErr := m.restoreManagedBranchFromRecoveryHeadLocked(ctx, &recovery); restoreErr == nil {
+			exists = true
+		}
 	}
 	if !exists {
 		if req.RemoteContribution != nil {

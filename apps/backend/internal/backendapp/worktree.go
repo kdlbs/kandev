@@ -121,8 +121,8 @@ func (a *environmentDestroyerAdapter) DestroySandbox(ctx context.Context, sandbo
 }
 
 func (a *environmentDestroyerAdapter) DestroyWorktree(ctx context.Context, worktreeID string) error {
-	// removeBranch=false: preserve the branch so unpushed work isn't lost.
-	return a.worktrees.RemoveByID(ctx, worktreeID, false)
+	_, err := a.worktrees.RemoveByIDWithReceipt(ctx, worktreeID)
+	return err
 }
 
 func (a *environmentDestroyerAdapter) GetContainerLiveStatus(ctx context.Context, containerID string) (*taskservice.ContainerLiveStatus, error) {

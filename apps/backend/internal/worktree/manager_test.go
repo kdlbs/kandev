@@ -117,6 +117,25 @@ func (s *mockStore) CountActiveWorktreeReferences(_ context.Context, _ string, _
 	return 0, nil
 }
 
+func (s *mockStore) CountWorktreeBranchOwners(_ context.Context, repositoryID, branch string) (int, error) {
+	count := 0
+	for _, wt := range s.worktrees {
+		if wt.RepositoryID == repositoryID && wt.Branch == branch {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (s *mockStore) PersistBranchRecoveryHead(_ context.Context, worktreeID, expected, recoveryHead string) (bool, error) {
+	wt := s.worktrees[worktreeID]
+	if wt == nil || (wt.RecoveryHeadSHA != expected && wt.RecoveryHeadSHA != recoveryHead) {
+		return false, nil
+	}
+	wt.RecoveryHeadSHA = recoveryHead
+	return true, nil
+}
+
 // GetWorktreesBySessionID — MultiRepoStore.
 func (s *mockStore) GetWorktreesBySessionID(_ context.Context, sessionID string) ([]*Worktree, error) {
 	var out []*Worktree

@@ -67,6 +67,7 @@ type repoInfo struct {
 	RepositoryID            string
 	RepositoryPath          string
 	BaseBranch              string
+	IntegrationRef          string
 	CheckoutBranch          string
 	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
 	RemoteContribution      *models.RemoteContribution
@@ -167,6 +168,7 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		TaskRepositoryID: tr.ID,
 		RepositoryID:     tr.RepositoryID,
 		BaseBranch:       tr.BaseBranch,
+		IntegrationRef:   tr.BranchPolicyPullRequestTarget,
 		CheckoutBranch:   tr.CheckoutBranch,
 		PRNumber:         prNumberFromMetadata(tr.Metadata),
 		Position:         tr.Position,
@@ -228,6 +230,9 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 	info.PullBeforeWorktree = repo.PullBeforeWorktree
 	if info.BaseBranch == "" && repo.DefaultBranch != "" {
 		info.BaseBranch = repo.DefaultBranch
+	}
+	if info.IntegrationRef == "" {
+		info.IntegrationRef = info.BaseBranch
 	}
 	if info.PullBeforeWorktree {
 		refreshRequired, refreshErr := e.shouldRefreshRepositoryForSession(ctx, repo)

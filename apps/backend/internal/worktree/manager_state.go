@@ -15,6 +15,10 @@ import (
 // buildWorktreeRecord constructs an in-memory Worktree value from a completed git worktree add.
 func (m *Manager) buildWorktreeRecord(worktreeID string, req CreateRequest, worktreePath, branchName string) *Worktree {
 	now := time.Now()
+	integrationRef := req.IntegrationRef
+	if integrationRef == "" {
+		integrationRef = req.BaseBranch
+	}
 	return &Worktree{
 		ID:                worktreeID,
 		SessionID:         req.SessionID,
@@ -27,6 +31,7 @@ func (m *Manager) buildWorktreeRecord(worktreeID string, req CreateRequest, work
 		Path:              worktreePath,
 		Branch:            branchName,
 		BaseBranch:        req.BaseBranch,
+		IntegrationRef:    integrationRef,
 		Status:            StatusActive,
 		CreatedAt:         now,
 		UpdatedAt:         now,

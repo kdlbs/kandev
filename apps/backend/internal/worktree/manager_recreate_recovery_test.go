@@ -373,13 +373,14 @@ func TestCreate_RestoresReleasedWorktreeAfterArchive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}
-	// Work the user never pushed. It only survives because archive keeps the
-	// branch (DestroyWorktree passes removeBranch=false).
+	// Work the user never pushed. It survives because ancestry validation
+	// retains every branch with commits outside the integration ref.
 	runGit(t, wt.Path, "commit", "--allow-empty", "-m", "unpushed work")
 	workSHA := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
 
-	// Archive: remove the directory, release the reference, keep the branch.
-	if err := mgr.RemoveByID(ctx, wt.ID, false); err != nil {
+	// Archive: remove the directory and release the reference; the unique
+	// commit makes the branch ineligible for compaction.
+	if err := mgr.CleanupWorktreesPreservingBranches(ctx, []*Worktree{wt}); err != nil {
 		t.Fatalf("archive worktree: %v", err)
 	}
 	if _, statErr := os.Stat(wt.Path); !os.IsNotExist(statErr) {
@@ -416,4 +417,51 @@ func TestCreate_RestoresReleasedWorktreeAfterArchive(t *testing.T) {
 		t.Fatalf("session lookup returned worktree %q, want the restored %q", found.ID, wt.ID)
 	}
 	assertWorktreeReferenceStatus(t, store, wt.ID, StatusActive)
+}
+
+func TestCreate_RestoresSafelyCompactedBranchFromExactHead(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-integrated", "session-integrated", models.TaskSessionStateCompleted)
+	req := CreateRequest{
+		TaskID:         "task-integrated",
+		SessionID:      "session-integrated",
+		TaskTitle:      "Integrated work",
+		RepositoryID:   "repository",
+		RepositoryPath: initGitRepoWithRemote(t),
+		BaseBranch:     "main",
+		IntegrationRef: "main",
+		TaskDirName:    "task-integrated",
+		RepoName:       "repository",
+	}
+	wt, err := mgr.Create(ctx, req)
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	wantSHA := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
+
+	if err := mgr.CleanupWorktreesPreservingBranches(ctx, []*Worktree{wt}); err != nil {
+		t.Fatalf("archive worktree: %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.RepositoryPath, "branch", "--list", wt.Branch)); got != "" {
+		t.Fatalf("fully integrated branch was not compacted: %q", got)
+	}
+	archived, err := store.GetWorktreeByID(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("load compacted worktree metadata: %v", err)
+	}
+	if archived.BranchOwner != BranchOwnerManaged || archived.RecoveryHeadSHA != wantSHA {
+		t.Fatalf("compacted recovery metadata = owner %q head %q, want %q at %q",
+			archived.BranchOwner, archived.RecoveryHeadSHA, BranchOwnerManaged, wantSHA)
+	}
+
+	resumeReq := req
+	resumeReq.WorktreeID = wt.ID
+	restored, err := mgr.Create(ctx, resumeReq)
+	if err != nil {
+		t.Fatalf("recreate compacted worktree: %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, restored.Path, "rev-parse", "HEAD")); got != wantSHA {
+		t.Fatalf("restored HEAD = %q, want exact compacted head %q", got, wantSHA)
+	}
 }

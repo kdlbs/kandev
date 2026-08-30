@@ -47,6 +47,9 @@ const worktreeSelectCols = `
 	ter.worktree_branch,
 	COALESCE(ter.branch_slug, ''),
 	COALESCE(s.base_branch, ''),
+	COALESCE(ter.worktree_branch_owner, 'unknown'),
+	COALESCE(ter.worktree_integration_ref, ''),
+	COALESCE(ter.worktree_recovery_head_sha, ''),
 	ter.status,
 	ter.created_at,
 	ter.updated_at,
@@ -77,6 +80,9 @@ func scanWorktreeRow(row rowScanner) (*Worktree, error) {
 		&wt.Branch,
 		&wt.BranchSlug,
 		&baseBranch,
+		&wt.BranchOwner,
+		&wt.IntegrationRef,
+		&wt.RecoveryHeadSHA,
 		&wt.Status,
 		&wt.CreatedAt,
 		&wt.UpdatedAt,
@@ -179,19 +185,23 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 	_, err = tx.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO task_environment_repos (
 			id, task_environment_id, repository_id, branch_slug,
-			worktree_id, worktree_path, worktree_branch, position,
+			worktree_id, worktree_path, worktree_branch,
+			worktree_branch_owner, worktree_integration_ref, worktree_recovery_head_sha, position,
 			error_message, status, created_at, updated_at, merged_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_environment_id, repository_id, branch_slug) DO UPDATE SET
 			worktree_id = excluded.worktree_id,
 			worktree_path = excluded.worktree_path,
 			worktree_branch = excluded.worktree_branch,
+			worktree_branch_owner = excluded.worktree_branch_owner,
+			worktree_integration_ref = excluded.worktree_integration_ref,
+			worktree_recovery_head_sha = excluded.worktree_recovery_head_sha,
 			status = excluded.status,
 			updated_at = excluded.updated_at,
 			merged_at = excluded.merged_at,
 			deleted_at = excluded.deleted_at
 	`), uuid.New().String(), envID, wt.RepositoryID, wt.BranchSlug,
-		wt.ID, wt.Path, wt.Branch, 0,
+		wt.ID, wt.Path, wt.Branch, wt.BranchOwner, wt.IntegrationRef, wt.RecoveryHeadSHA, 0,
 		"", wt.Status,
 		wt.CreatedAt, wt.UpdatedAt, wt.MergedAt, wt.DeletedAt)
 	if err != nil {
@@ -330,12 +340,16 @@ func (s *SQLiteStore) UpdateWorktree(ctx context.Context, wt *Worktree) error {
 	query := `
 		UPDATE task_environment_repos SET
 			worktree_path = ?, worktree_branch = ?,
+			worktree_branch_owner = ?, worktree_integration_ref = ?, worktree_recovery_head_sha = ?,
 			status = ?, updated_at = ?, merged_at = ?, deleted_at = ?
 		WHERE worktree_id = ?
 	`
 	args := []interface{}{
 		wt.Path,
 		wt.Branch,
+		wt.BranchOwner,
+		wt.IntegrationRef,
+		wt.RecoveryHeadSHA,
 		wt.Status,
 		wt.UpdatedAt,
 		wt.MergedAt,
@@ -462,6 +476,35 @@ func (s *SQLiteStore) CountActiveWorktreeReferences(
 	return count, err
 }
 
+func (s *SQLiteStore) CountWorktreeBranchOwners(
+	ctx context.Context, repositoryID, branch string,
+) (int, error) {
+	var count int
+	err := s.ro.QueryRowContext(ctx, s.ro.Rebind(`
+		SELECT COUNT(*)
+		FROM task_environment_repos
+		WHERE repository_id = ? AND worktree_branch = ?
+		  AND COALESCE(worktree_id, '') <> ''
+	`), repositoryID, branch).Scan(&count)
+	return count, err
+}
+
+func (s *SQLiteStore) PersistBranchRecoveryHead(
+	ctx context.Context, worktreeID, expected, recoveryHead string,
+) (bool, error) {
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE task_environment_repos
+		SET worktree_recovery_head_sha = ?, updated_at = ?
+		WHERE worktree_id = ?
+		  AND (COALESCE(worktree_recovery_head_sha, '') = ? OR worktree_recovery_head_sha = ?)
+	`), recoveryHead, time.Now().UTC(), worktreeID, expected, recoveryHead)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}
+
 // scanWorktrees is a helper to scan multiple worktree rows. Task-keyed and
 // repository-keyed queries LEFT JOIN sessions (a worktree belongs to the task
 // environment, and a task may have zero or many sessions), so rows are
@@ -485,6 +528,9 @@ func (s *SQLiteStore) scanWorktrees(rows *sql.Rows) ([]*Worktree, error) {
 			&wt.Branch,
 			&wt.BranchSlug,
 			&baseBranch,
+			&wt.BranchOwner,
+			&wt.IntegrationRef,
+			&wt.RecoveryHeadSHA,
 			&wt.Status,
 			&wt.CreatedAt,
 			&wt.UpdatedAt,
@@ -565,6 +611,7 @@ func (s *SQLiteStore) GetWorktreeBySessionAndRepository(ctx context.Context, ses
 
 // Ensure SQLiteStore implements both Store and MultiRepoStore.
 var (
-	_ Store          = (*SQLiteStore)(nil)
-	_ MultiRepoStore = (*SQLiteStore)(nil)
+	_ Store               = (*SQLiteStore)(nil)
+	_ MultiRepoStore      = (*SQLiteStore)(nil)
+	_ BranchMetadataStore = (*SQLiteStore)(nil)
 )
