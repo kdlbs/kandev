@@ -2,6 +2,34 @@
 
 All notable changes to Kandev.
 
+## 0.92.2 - 2026-08-30
+
+### Features
+
+- show previews for expandable thinking messages ([#3160](https://github.com/kdlbs/kandev/pull/3160))
+- compact sidebar trailing content ([#3139](https://github.com/kdlbs/kandev/pull/3139))
+
+### Bug Fixes
+
+- preserve recovered workspace path ([#3167](https://github.com/kdlbs/kandev/pull/3167))
+- reconcile inactive session transcript windows ([#3159](https://github.com/kdlbs/kandev/pull/3159))
+- reconcile stale task state projections ([#3144](https://github.com/kdlbs/kandev/pull/3144))
+- use recent profile for new agent default ([#3161](https://github.com/kdlbs/kandev/pull/3161))
+- quiesce active turns before workflow context reset ([#3156](https://github.com/kdlbs/kandev/pull/3156))
+- show clarification submission status ([#3157](https://github.com/kdlbs/kandev/pull/3157))
+- preserve Changes data after session deletion ([#3162](https://github.com/kdlbs/kandev/pull/3162))
+- preserve staged and unstaged changes per file ([#3104](https://github.com/kdlbs/kandev/pull/3104))
+- accept verified local submodules ([#3136](https://github.com/kdlbs/kandev/pull/3136)) by @yattdev
+- expire and reap stale queued board moves ([#3147](https://github.com/kdlbs/kandev/pull/3147)) by @yattdev
+- make task creation atomic when a reference fails to resolve ([#3148](https://github.com/kdlbs/kandev/pull/3148)) by @yattdev
+- exclude lifecycle turns from task activity ([#3142](https://github.com/kdlbs/kandev/pull/3142))
+- resume persisted Quick Chat sessions ([#3138](https://github.com/kdlbs/kandev/pull/3138))
+- restore review state after cancelled terminal-step turns ([#3141](https://github.com/kdlbs/kandev/pull/3141))
+
+### Performance
+
+- reduce E2E container setup time ([#3163](https://github.com/kdlbs/kandev/pull/3163))
+
 ## 0.92.1 - 2026-08-29
 
 ### Features
