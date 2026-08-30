@@ -137,6 +137,14 @@ class DesktopE2EWorkflowContractTest(unittest.TestCase):
             container_job,
         )
         self.assertIn("id: playwright_image", container_job)
+        self.assertLess(
+            container_job.index("- name: Log in to GHCR"),
+            container_job.index("- name: Resolve immutable Playwright runtime image"),
+        )
+        self.assertIn(
+            "if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository\n        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f",
+            container_job,
+        )
         self.assertIn(
             "image=ghcr.io/kdlbs/kandev-ci:runtime-latest",
             container_job,
