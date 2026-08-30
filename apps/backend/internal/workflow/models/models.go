@@ -330,6 +330,9 @@ const (
 	StepTransitionTriggerChildrenCompleted StepTransitionTrigger = "on_children_completed"
 	StepTransitionTriggerTaskUpdate        StepTransitionTrigger = "task_update"
 	StepTransitionTriggerQueuePromotion    StepTransitionTrigger = "queue_promotion"
+	// StepTransitionTriggerPluginMove identifies a transition caused by a
+	// plugin's MoveTask RPC call.
+	StepTransitionTriggerPluginMove StepTransitionTrigger = "plugin_move"
 )
 
 // StepTransitionActor identifies the source of a move. Human identity is

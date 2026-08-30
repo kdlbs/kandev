@@ -42,6 +42,8 @@ download requirements.
 
 Open **Settings > Executors**, then choose **Local**, **Worktree**, **Docker**, **Sprites.dev**, or **SSH** under **Create New Profile**. Local and Worktree profiles already exist in a new database.
 
+![Settings > Executors showing existing Local, Worktree, and Sprites profiles plus Local, Worktree, Docker, Sprites.dev, and SSH profile creation options.](../screenshots/settings-executors.png)
+
 <DocsVideo
   webm="./media/feature-guides/profile-executor-selection.webm"
   mp4="./media/feature-guides/profile-executor-selection.mp4"

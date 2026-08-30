@@ -29,7 +29,16 @@ vi.mock("@/components/toast-provider", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: unknown) => unknown) =>
-    selector({ setActiveDocument: vi.fn(), setPlanMode: vi.fn() }),
+    selector({
+      setActiveDocument: vi.fn(),
+      setPlanMode: vi.fn(),
+      applyAgentProfileRecentUse: vi.fn(),
+    }),
+}));
+
+const recordRecentUseMock = vi.fn();
+vi.mock("@/lib/agent-profile-recent-use", () => ({
+  recordAgentProfileRecentUseBestEffort: (...args: unknown[]) => recordRecentUseMock(...args),
 }));
 
 const updateTaskMock = vi.fn();
@@ -192,6 +201,7 @@ beforeEach(() => {
   launchSessionMock.mockClear();
   pushMock.mockClear();
   toastMock.mockClear();
+  recordRecentUseMock.mockClear();
 });
 
 // eslint-disable-next-line max-lines-per-function -- grouped edit regressions share one fixture.
@@ -481,7 +491,11 @@ describe("useTaskSubmitHandlers — handleCreateSubmit (CLI-mode parity)", () =>
   });
 
   it("uses the create-mode transport override", async () => {
-    const createTask = vi.fn().mockResolvedValue({ id: TASK_ID, session_id: "session-plugin" });
+    const createTask = vi.fn().mockResolvedValue({
+      id: TASK_ID,
+      session_id: "session-plugin",
+      agent_profile_id: "agent-effective",
+    });
     const deps = makeDeps({
       createTask,
       descriptionInputRef: makeRef("inspect the pull request"),
@@ -499,6 +513,11 @@ describe("useTaskSubmitHandlers — handleCreateSubmit (CLI-mode parity)", () =>
       }),
     );
     expect(createTaskRetryMock).not.toHaveBeenCalled();
+    expect(recordRecentUseMock).not.toHaveBeenCalledWith(
+      "task_create",
+      expect.anything(),
+      expect.any(Function),
+    );
   });
 
   it("skips create when prompt is empty even with cli_passthrough=true (prompt is now required)", async () => {

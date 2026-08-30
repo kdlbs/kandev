@@ -2,7 +2,7 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { Locator } from "@playwright/test";
-import { test, expect } from "../../fixtures/test-base";
+import { expect, resetSeedRepositoryCheckout, test } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
@@ -255,6 +255,7 @@ test.describe("Subtask basics", () => {
     backend,
     seedData,
   }) => {
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
     execSync("git branch -f develop", {
       cwd: seedData.repositoryPath,
       env: makeGitEnv(backend.tmpDir),
@@ -376,6 +377,7 @@ test.describe("Subtask basics", () => {
     } finally {
       await apiClient.deleteExecutorProfile(localProfile.id).catch(() => {});
       await apiClient.deleteRepositoryBranchPolicy(policy.id).catch(() => {});
+      resetSeedRepositoryCheckout(seedData, backend.tmpDir);
     }
   });
 });

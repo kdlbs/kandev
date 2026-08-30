@@ -176,21 +176,22 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	result, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
-		WorkspaceID:    req.WorkspaceID,
-		WorkflowID:     req.WorkflowID,
-		WorkflowStepID: req.WorkflowStepID,
-		Title:          title,
-		Description:    description,
-		Autopilot:      req.Autopilot,
-		Priority:       req.Priority,
-		State:          req.State,
-		Repositories:   convertToServiceRepos(repos),
-		Position:       req.Position,
-		Metadata:       req.Metadata,
-		DeferredLaunch: deferredLaunch,
-		PlanMode:       req.PlanMode,
-		StartAgent:     req.StartAgent,
-		ParentID:       req.ParentID,
+		WorkspaceID:                 req.WorkspaceID,
+		WorkflowID:                  req.WorkflowID,
+		WorkflowStepID:              req.WorkflowStepID,
+		Title:                       title,
+		Description:                 description,
+		Autopilot:                   req.Autopilot,
+		Priority:                    req.Priority,
+		State:                       req.State,
+		Repositories:                convertToServiceRepos(repos),
+		Position:                    req.Position,
+		Metadata:                    req.Metadata,
+		DeferredLaunch:              deferredLaunch,
+		RecordAgentProfileRecentUse: true,
+		PlanMode:                    req.PlanMode,
+		StartAgent:                  req.StartAgent,
+		ParentID:                    req.ParentID,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
@@ -221,6 +222,10 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		response.TaskSessionID = launchResp.SessionID
 		response.AgentExecutionID = launchResp.AgentExecutionID
+		response.AgentProfileID = launchResp.AgentProfileID
+		if launchResp.Success {
+			h.recordSuccessfulTaskCreateProfileAsync(ctx, launchResp.AgentProfileID)
+		}
 	}
 	h.recordTaskCreateLastUsed(ctx, httpCreateTaskRequest{
 		WorkspaceID:       req.WorkspaceID,

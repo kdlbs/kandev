@@ -106,10 +106,10 @@ async function createSubtask({
     workspace_mode: workspaceMode,
     autopilot: autopilot || undefined,
   });
+  const newSessionId = response.session_id ?? response.primary_session_id ?? null;
   // Close the dialog before navigation. Navigation can remount the sidebar
   // that owns the dialog state, which makes a later close update a stale owner.
   onClose();
-  const newSessionId = response.session_id ?? response.primary_session_id ?? null;
   if (newSessionId) {
     setActiveTask(response.id);
     setActiveSession(response.id, newSessionId);

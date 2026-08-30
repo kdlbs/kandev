@@ -162,7 +162,29 @@ func (r *Repository) GetTaskAssignee(ctx context.Context, taskID string) (string
 	return assignee, nil
 }
 
-// AreAllChildrenTerminal checks if all child tasks of a parent are in terminal state.
+// GetTaskAssigneeTx is GetTaskAssignee scoped to a caller-owned transaction,
+// for a caller that must read the effective runner immediately before an
+// insert whose validity depends on it not having changed since an earlier,
+// separate read (ParentWakeReconciler.recordReceipt, scheduler_wake_reconciler.go:
+// closing the race between ListStuckParents' SELECT and this transaction's
+// run insert, where a reassignment in between would otherwise queue a run
+// for a runner that is no longer this parent's assignee).
+func (r *Repository) GetTaskAssigneeTx(ctx context.Context, tx *sqlx.Tx, taskID string) (string, error) {
+	var assignee string
+	err := tx.QueryRowxContext(ctx, tx.Rebind(
+		`SELECT `+RunnerProjection("tasks")+` FROM tasks WHERE id = ?`), taskID).Scan(&assignee)
+	if err != nil {
+		return "", err
+	}
+	return assignee, nil
+}
+
+// AreAllChildrenTerminal checks if all child tasks of a parent are in
+// terminal state. Unlike ListStuckParents (wake_receipts.go), this counts
+// every child regardless of archived_at, so an archived child stuck
+// mid-flight can block it forever — that divergence is intentional on the
+// reconciler's side (see ListStuckParents), not a bug here; do not add an
+// archived_at filter to this query to "match" it.
 func (r *Repository) AreAllChildrenTerminal(ctx context.Context, parentID string) (bool, error) {
 	var nonTerminal int
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`

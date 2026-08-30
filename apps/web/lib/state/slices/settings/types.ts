@@ -22,6 +22,16 @@ import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
 import type { TasksListGroup, TasksListSort } from "@/lib/tasks/tasks-list-options";
 import type { SleepInhibitionResponse } from "@/lib/types/system";
 import type { AgentProfileKind } from "@/lib/types/agent-profile";
+import type {
+  AgentProfileRecentUseRecord,
+  AgentProfileRecentUseState,
+} from "@/lib/agent-profile-recent-use";
+import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
+
+export type {
+  AgentProfileRecentUseRecord,
+  AgentProfileRecentUseState,
+} from "@/lib/agent-profile-recent-use";
 
 export type ExecutorsState = {
   items: Executor[];
@@ -473,6 +483,7 @@ export type SettingsSliceState = {
   settingsData: SettingsDataState;
   sleepInhibition: SleepInhibitionStoreState;
   userSettings: UserSettingsState;
+  agentProfileRecentUse: AgentProfileRecentUseState;
 };
 
 export type SettingsSliceActions = {
@@ -514,6 +525,11 @@ export type SettingsSliceActions = {
   setSleepInhibitionLoading: (loading: boolean) => void;
   setSleepInhibitionError: (error: boolean) => void;
   setUserSettings: (settings: UserSettingsState) => void;
+  setAgentProfileRecentUse: (state: AgentProfileRecentUseState) => void;
+  applyAgentProfileRecentUse: (
+    context: AgentProfileRecentUseContext,
+    record: AgentProfileRecentUseRecord,
+  ) => void;
   bumpAgentProfilesVersion: () => void;
 };
 

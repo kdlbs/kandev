@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
@@ -483,6 +484,204 @@ func TestPluginHost_Tasks_UpdateNotFoundMapsToGRPCNotFound(t *testing.T) {
 	_, err := d.host.Tasks().Update(context.Background(), pluginsdk.UpdateTaskInput{ID: "no-such-task"})
 	if status.Code(err) != codes.NotFound {
 		t.Fatalf("Update() of missing task error = %v, want NotFound", err)
+	}
+}
+
+// ── Task move ───────────────────────────────────────────────────────────
+
+func TestPluginHost_Tasks_MoveDeniedWithoutWriteCapability(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}})
+	_, err := d.host.Tasks().Move(context.Background(), pluginsdk.MoveTaskInput{TaskID: "task-1", WorkflowStepID: "step-2"})
+	assertPermissionDenied(t, err, "api_write:tasks")
+	if d.taskWriter.moveCalls != 0 {
+		t.Fatalf("task writer called despite missing api_write:tasks")
+	}
+}
+
+func TestPluginHost_Tasks_MoveRequiresTaskID(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	_, err := d.host.Tasks().Move(context.Background(), pluginsdk.MoveTaskInput{WorkflowStepID: "step-2"})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("Move() without task_id error = %v, want InvalidArgument", err)
+	}
+	if d.taskWriter.moveCalls != 0 {
+		t.Fatalf("task writer called despite empty task_id")
+	}
+}
+
+func TestPluginHost_Tasks_MoveRequiresWorkflowStepID(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	_, err := d.host.Tasks().Move(context.Background(), pluginsdk.MoveTaskInput{TaskID: "task-1"})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("Move() without workflow_step_id error = %v, want InvalidArgument", err)
+	}
+	if d.taskWriter.moveCalls != 0 {
+		t.Fatalf("task writer called despite empty workflow_step_id")
+	}
+}
+
+// TestPluginHost_Tasks_MoveRejectsPresentButEmptyWorkflowID pins AC-005.5: a
+// present-but-empty workflow_id is rejected outright, not treated the same
+// as an omitted (nil) one — those two have different meanings (explicit
+// empty vs. inherit-current-workflow) and only nil may pass through.
+func TestPluginHost_Tasks_MoveRejectsPresentButEmptyWorkflowID(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	empty := ""
+	_, err := d.host.Tasks().Move(context.Background(), pluginsdk.MoveTaskInput{TaskID: "task-1", WorkflowStepID: "step-2", WorkflowID: &empty})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("Move() with empty workflow_id error = %v, want InvalidArgument", err)
+	}
+	if d.taskWriter.moveCalls != 0 {
+		t.Fatalf("task writer called despite empty workflow_id")
+	}
+}
+
+// TestPluginHost_Tasks_MoveRejectsNegativePosition pins AC-005.4's negative
+// half: omitted position and position=0 are the same request, but a negative
+// position is invalid input rather than a natural default.
+func TestPluginHost_Tasks_MoveRejectsNegativePosition(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	_, err := d.host.Tasks().Move(context.Background(), pluginsdk.MoveTaskInput{TaskID: "task-1", WorkflowStepID: "step-2", Position: -1})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("Move() with negative position error = %v, want InvalidArgument", err)
+	}
+	if d.taskWriter.moveCalls != 0 {
+		t.Fatalf("task writer called despite negative position")
+	}
+}
+
+// TestPluginHost_Tasks_MoveInvalidFieldPrecedenceOrder pins AC-004.3 (TEST-002):
+// when two fields are simultaneously invalid, the ladder in Move (task_id ->
+// workflow_step_id -> present-but-empty workflow_id -> negative position)
+// must report the FIRST offending field, not whichever the implementation
+// happens to check last. Each case names two invalid fields and asserts the
+// error text matches the earlier one in the ladder, not the later one.
+func TestPluginHost_Tasks_MoveInvalidFieldPrecedenceOrder(t *testing.T) {
+	empty := ""
+	cases := []struct {
+		name      string
+		in        pluginsdk.MoveTaskInput
+		wantFirst string
+		notLater  string
+	}{
+		{
+			name:      "empty task_id beats empty workflow_step_id",
+			in:        pluginsdk.MoveTaskInput{TaskID: "", WorkflowStepID: "", Position: -1},
+			wantFirst: "task_id is required",
+			notLater:  "workflow_step_id is required",
+		},
+		{
+			name:      "empty workflow_step_id beats present-but-empty workflow_id",
+			in:        pluginsdk.MoveTaskInput{TaskID: "task-1", WorkflowStepID: "", WorkflowID: &empty, Position: -1},
+			wantFirst: "workflow_step_id is required",
+			notLater:  "workflow_id must not be empty",
+		},
+		{
+			name:      "present-but-empty workflow_id beats negative position",
+			in:        pluginsdk.MoveTaskInput{TaskID: "task-1", WorkflowStepID: "step-2", WorkflowID: &empty, Position: -1},
+			wantFirst: "workflow_id must not be empty",
+			notLater:  "position must not be negative",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+			_, err := d.host.Tasks().Move(context.Background(), tc.in)
+			if status.Code(err) != codes.InvalidArgument {
+				t.Fatalf("Move() error = %v, want InvalidArgument", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantFirst) {
+				t.Fatalf("Move() error = %q, want it to name the earlier ladder field %q", err.Error(), tc.wantFirst)
+			}
+			if strings.Contains(err.Error(), tc.notLater) {
+				t.Fatalf("Move() error = %q, must not report the later ladder field %q ahead of %q", err.Error(), tc.notLater, tc.wantFirst)
+			}
+			if d.taskWriter.moveCalls != 0 {
+				t.Fatalf("task writer called despite invalid input")
+			}
+		})
+	}
+}
+
+func TestPluginHost_Tasks_MoveSucceedsAndStampsSource(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	d.taskWriter.moveResult = &TaskMoveResult{
+		Task:         &taskmodels.Task{ID: "task-1", WorkflowStepID: "step-2"},
+		Transitioned: true,
+		FromStepID:   "step-1",
+	}
+
+	outcome, err := d.host.Tasks().Move(context.Background(), pluginsdk.MoveTaskInput{TaskID: "task-1", WorkflowStepID: "step-2"})
+	if err != nil {
+		t.Fatalf("Move() unexpected error: %v", err)
+	}
+	if outcome == nil || !outcome.Transitioned || outcome.FromStepID != "step-1" {
+		t.Fatalf("Move() = %+v, want transitioned from step-1", outcome)
+	}
+	if outcome.Task == nil || outcome.Task.ID != "task-1" {
+		t.Fatalf("Move() task = %+v, want task-1", outcome.Task)
+	}
+	if d.taskWriter.moveCalls != 1 {
+		t.Fatalf("task writer move calls = %d, want 1", d.taskWriter.moveCalls)
+	}
+	if d.taskWriter.lastMove.Source != "plugin:p1" {
+		t.Fatalf("move source = %q, want plugin:p1 (server-stamped provenance)", d.taskWriter.lastMove.Source)
+	}
+}
+
+// TestPluginHost_Tasks_MoveReportsQueuedForStepIDOnlyWhenSet pins AC-002.2:
+// the admission discriminator is QueuedForStepID's presence alone, never a
+// separate admitted/queued boolean the reader would have to derive.
+func TestPluginHost_Tasks_MoveReportsQueuedForStepIDOnlyWhenSet(t *testing.T) {
+	t.Run("queued", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+		d.taskWriter.moveResult = &TaskMoveResult{
+			Task: &taskmodels.Task{ID: "task-1", WorkflowStepID: "step-2", QueuedForStepID: "step-2"},
+		}
+		outcome, err := d.host.Tasks().Move(context.Background(), pluginsdk.MoveTaskInput{TaskID: "task-1", WorkflowStepID: "step-2"})
+		if err != nil {
+			t.Fatalf("Move() unexpected error: %v", err)
+		}
+		if outcome.QueuedForStepID == nil || *outcome.QueuedForStepID != "step-2" {
+			t.Fatalf("QueuedForStepID = %v, want step-2", outcome.QueuedForStepID)
+		}
+	})
+	t.Run("admitted", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+		d.taskWriter.moveResult = &TaskMoveResult{
+			Task: &taskmodels.Task{ID: "task-1", WorkflowStepID: "step-2", QueuedForStepID: ""},
+		}
+		outcome, err := d.host.Tasks().Move(context.Background(), pluginsdk.MoveTaskInput{TaskID: "task-1", WorkflowStepID: "step-2"})
+		if err != nil {
+			t.Fatalf("Move() unexpected error: %v", err)
+		}
+		if outcome.QueuedForStepID != nil {
+			t.Fatalf("QueuedForStepID = %v, want nil for an admitted task", outcome.QueuedForStepID)
+		}
+	})
+}
+
+func TestPluginHost_Tasks_MoveNotFoundMapsToGRPCNotFound(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	d.taskWriter.moveErr = repoerrors.ErrTaskNotFound
+
+	_, err := d.host.Tasks().Move(context.Background(), pluginsdk.MoveTaskInput{TaskID: "no-such-task", WorkflowStepID: "step-2"})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("Move() of missing task error = %v, want NotFound", err)
+	}
+}
+
+// TestPluginHost_Tasks_MovePropagatesClassifiedError proves an error the
+// writer already classified (e.g. FailedPrecondition for an active session,
+// AC-001.8) passes straight through rather than being reclassified here —
+// classification is owned by the backendapp adapter layer, one level down.
+func TestPluginHost_Tasks_MovePropagatesClassifiedError(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	d.taskWriter.moveErr = status.Error(codes.FailedPrecondition, "task has an active session (session-1)")
+
+	_, err := d.host.Tasks().Move(context.Background(), pluginsdk.MoveTaskInput{TaskID: "task-1", WorkflowStepID: "step-2"})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("Move() error = %v, want FailedPrecondition passed through unchanged", err)
 	}
 }
 

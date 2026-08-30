@@ -231,6 +231,46 @@ func TestFromTask_DerivesInterruptedFromMetadata(t *testing.T) {
 	})
 }
 
+func TestFromTaskRedactsDeferredLaunchAttribution(t *testing.T) {
+	task := &models.Task{
+		ID: "task-private-attribution",
+		Metadata: map[string]interface{}{
+			models.MetaKeyDeferredLaunch: map[string]interface{}{
+				"intent":                                "start",
+				"agent_profile_id":                      "profile-1",
+				models.DeferredLaunchUserIDKey:          "user-private",
+				models.DeferredLaunchRecordRecentUseKey: true,
+			},
+		},
+	}
+
+	got := FromTask(task)
+	launch, ok := got.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	if !ok {
+		t.Fatalf("DTO deferred launch metadata = %#v, want a map", got.Metadata[models.MetaKeyDeferredLaunch])
+	}
+	if _, exists := launch[models.DeferredLaunchUserIDKey]; exists {
+		t.Fatalf("DTO exposed deferred launch user_id = %v", launch[models.DeferredLaunchUserIDKey])
+	}
+	if _, exists := launch[models.DeferredLaunchRecordRecentUseKey]; exists {
+		t.Fatalf("DTO exposed deferred launch recency marker = %v", launch[models.DeferredLaunchRecordRecentUseKey])
+	}
+	if got := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})[models.DeferredLaunchUserIDKey]; got != "user-private" {
+		t.Fatalf("redacting the DTO mutated the source task user_id = %v", got)
+	}
+	apiTask := task.ToAPI()
+	apiLaunch, ok := apiTask.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	if !ok {
+		t.Fatalf("API deferred launch metadata = %#v, want a map", apiTask.Metadata[models.MetaKeyDeferredLaunch])
+	}
+	if _, exists := apiLaunch[models.DeferredLaunchUserIDKey]; exists {
+		t.Fatalf("API exposed deferred launch user_id = %v", apiLaunch[models.DeferredLaunchUserIDKey])
+	}
+	if _, exists := apiLaunch[models.DeferredLaunchRecordRecentUseKey]; exists {
+		t.Fatalf("API exposed deferred launch recency marker = %v", apiLaunch[models.DeferredLaunchRecordRecentUseKey])
+	}
+}
+
 func TestTaskToAPI_DerivesInterruptedFromMetadata(t *testing.T) {
 	now := time.Now().UTC()
 

@@ -290,7 +290,9 @@ describe("PRCIPopover automation status", () => {
           auto_fix_exhausted_at: null,
           last_merge_signature: "",
           last_merge_attempt_at: null,
+          last_merge_result: "",
           last_error: "No promptable task session is available.",
+          last_error_kind: "",
           created_at: "",
           updated_at: "",
         },
@@ -338,10 +340,12 @@ describe("PRCIPopover automation status", () => {
           auto_fix_exhausted_at: null,
           last_merge_signature: "",
           last_merge_attempt_at: null,
+          last_merge_result: "",
           last_queue_attempt_head_sha: "head-a",
           last_queue_fix_event_id: "",
           last_queue_removal_cause: "provider_changed",
           last_error: null,
+          last_error_kind: "",
           created_at: "",
           updated_at: "",
         },
@@ -599,12 +603,12 @@ describe("PRCIPopover task prompts", () => {
     expect(hookMocks.updateMock).not.toHaveBeenCalled();
   });
 
-  it("offers retry after CI automation options fail to load", () => {
+  it("offers refresh after CI automation options fail to load", () => {
     hookMocks.error = BACKEND_UNAVAILABLE;
     renderPopover();
 
     expect(screen.getByText(BACKEND_UNAVAILABLE)).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
 
     expect(hookMocks.refreshMock).toHaveBeenCalledTimes(1);
   });

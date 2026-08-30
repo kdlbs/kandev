@@ -43,7 +43,10 @@ vi.mock("@/lib/links", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
-    selector({ setActiveTask: mockSetActiveTask, setActiveSession: mockSetActiveSession }),
+    selector({
+      setActiveTask: mockSetActiveTask,
+      setActiveSession: mockSetActiveSession,
+    }),
 }));
 
 vi.mock("@/components/task-create-dialog-helpers", () => ({

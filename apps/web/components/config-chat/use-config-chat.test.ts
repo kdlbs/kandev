@@ -8,7 +8,9 @@ const addQuickChatSession = vi.fn();
 const closeQuickChatSession = vi.fn();
 const renameQuickChatSession = vi.fn();
 const setQuickChatInitialPrompt = vi.fn();
+const applyAgentProfileRecentUse = vi.fn();
 const deleteTask = vi.fn();
+const recordRecentUseMock = vi.fn();
 const WORKSPACE_ID = "workspace-1";
 const CONFIG_PROFILE_ID = "profile-config";
 const PASSTHROUGH_PROFILE_ID = "profile-passthrough";
@@ -22,6 +24,7 @@ const appState = {
   closeQuickChatSession,
   renameQuickChatSession,
   setQuickChatInitialPrompt,
+  applyAgentProfileRecentUse,
   setTaskSession,
   taskSessions: {
     items: {} as Record<string, { cancellation_pending?: boolean }>,
@@ -52,6 +55,10 @@ vi.mock("@/lib/api/domains/workspace-api", () => ({
   startConfigChat: (...args: unknown[]) => startConfigChat(...args),
 }));
 
+vi.mock("@/lib/agent-profile-recent-use", () => ({
+  recordAgentProfileRecentUseBestEffort: (...args: unknown[]) => recordRecentUseMock(...args),
+}));
+
 vi.mock("@/app/actions/workspaces", () => ({ updateWorkspaceAction: vi.fn() }));
 
 import { useConfigChat } from "./use-config-chat";
@@ -59,6 +66,7 @@ import { getQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-ses
 
 beforeEach(() => {
   vi.clearAllMocks();
+  recordRecentUseMock.mockReset();
   appState.agentProfiles.items = [
     { id: CONFIG_PROFILE_ID, cli_passthrough: false },
     { id: PASSTHROUGH_PROFILE_ID, cli_passthrough: true },
@@ -103,6 +111,11 @@ describe("useConfigChat unified launch", () => {
     );
     expect(renameQuickChatSession).toHaveBeenCalledWith(SESSION_ID, PROMPT);
     expect(setQuickChatInitialPrompt).toHaveBeenCalledWith(SESSION_ID, PROMPT);
+    expect(recordRecentUseMock).toHaveBeenCalledWith(
+      "config_chat",
+      CONFIG_PROFILE_ID,
+      expect.any(Function),
+    );
   });
 
   it("registers a floating configuration session without opening the large dialog", async () => {
@@ -170,6 +183,7 @@ describe("useConfigChat unified launch", () => {
     });
 
     expect(deleteTask).toHaveBeenCalledWith(TASK_ID);
+    expect(recordRecentUseMock).not.toHaveBeenCalled();
     expect(openQuickChat).not.toHaveBeenCalled();
     expect(setTaskSession).not.toHaveBeenCalled();
   });

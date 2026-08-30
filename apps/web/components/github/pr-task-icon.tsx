@@ -1,9 +1,7 @@
 "use client";
 
-import { IconGitPullRequest } from "@tabler/icons-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import { useChangeRequestTaskTooltipState } from "@/components/integrations/use-change-request-task-tooltip-state";
 import {
@@ -14,10 +12,24 @@ import {
 import {
   getTaskPRsForCurrentWorkspace,
   useTaskPRTooltipHydration,
-  type TaskPRTooltipHydrationStatus,
 } from "@/hooks/domains/github/use-task-pr-tooltip-hydration";
 import type { TaskPR } from "@/lib/types/github";
+import type { TaskCIAutomationOptions } from "@/lib/types/github";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { derivePRTaskStatusSummary, PRTaskStatusSummary } from "./pr-task-status-summary";
+import {
+  CompactPRTooltipContent,
+  PRTaskIconDrawer,
+  PRTaskIconGlyph,
+  PRTaskIconTooltip,
+  TaskPRAutomationDetails,
+  type PRTaskIconDisclosureProps,
+} from "./pr-task-icon-disclosure";
+import { getTaskPRAutomationSummary, type TaskPRInfo } from "./pr-task-automation";
+
+export type { TaskPRInfo } from "./pr-task-automation";
+export { getTaskPRAutomationSummary } from "./pr-task-automation";
+export { AutomationIndicatorDots } from "./pr-task-icon-disclosure";
 
 const MUTED_FOREGROUND = CHANGE_REQUEST_STATUS_COLORS.muted;
 const PURPLE_500 = CHANGE_REQUEST_STATUS_COLORS.merged;
@@ -238,15 +250,9 @@ export function pickDefaultPR(prs: TaskPR[]): TaskPR | null {
   return best;
 }
 
-export type TaskPRInfo = {
-  number: number;
-  state: string;
-  aggregateState?: string;
-};
-
 export function PRTaskIcon({ taskId, prInfo }: { taskId: string; prInfo?: TaskPRInfo }) {
   const prs = useAppStore((state) => getTaskPRsForCurrentWorkspace(state, taskId));
-  const hydration = useTaskPRTooltipHydration(taskId);
+  const hydration = useTaskPRTooltipHydration(taskId, { includeAutomation: true });
   const fullPRs = Array.isArray(prs) && prs.length > 0 ? prs : [];
 
   // Defensive: an upstream payload may briefly seed byTaskId[taskId] with a
@@ -254,7 +260,15 @@ export function PRTaskIcon({ taskId, prInfo }: { taskId: string; prInfo?: TaskPR
   // instead of falling through into a full-data summary, where for-of throws.
   if (fullPRs.length === 0 && !prInfo) return null;
 
-  return <PRTaskIconView taskId={taskId} prInfo={prInfo} prs={fullPRs} hydration={hydration} />;
+  return (
+    <PRTaskIconView
+      taskId={taskId}
+      prInfo={prInfo}
+      prs={fullPRs}
+      hydration={hydration}
+      automationOptions={hydration.automationOptions}
+    />
+  );
 }
 
 type TaskPRIconPresentation = {
@@ -289,21 +303,27 @@ function PRTaskIconView({
   prInfo,
   prs,
   hydration,
+  automationOptions,
 }: {
   taskId: string;
   prInfo?: TaskPRInfo;
   prs: TaskPR[];
   hydration: ReturnType<typeof useTaskPRTooltipHydration>;
+  automationOptions: TaskCIAutomationOptions | null;
 }) {
   const { t } = useTranslation();
+  const { hydrate } = hydration;
   const hasFullData = prs.length > 0;
-  const tooltip = useChangeRequestTaskTooltipState(
-    !hasFullData && prInfo
-      ? () => {
-          void hydration.hydrate();
-        }
-      : undefined,
-  );
+  const usesTouchDrawer = useTouchDrawer();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const automation = getTaskPRAutomationSummary(prs, prInfo, automationOptions);
+  const needsHydration =
+    !hasFullData ||
+    ((automation.autoFixEnabled || automation.autoMergeEnabled) && !automationOptions);
+  const hydrateOnDisclosure = useCallback(() => {
+    if (needsHydration) void hydrate();
+  }, [hydrate, needsHydration]);
+  const tooltip = useChangeRequestTaskTooltipState(hydrateOnDisclosure);
   const {
     singlePR,
     readyToMerge,
@@ -314,52 +334,56 @@ function PRTaskIconView({
     displayCount,
   } = getTaskPRIconPresentation(prs, prInfo);
 
-  const ariaLabel =
+  const statusAriaLabel =
     prs.length > 1
       ? t("github:pullRequestStatuses", { count: prs.length })
       : t("github:pullRequestStatus", { number: singlePR?.pr_number ?? prInfo?.number });
+  const automationAria = [
+    automation.autoFixEnabled ? t("github:autoFixEnabledAria") : null,
+    automation.autoMergeEnabled ? t("github:autoMergeEnabledAria") : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const ariaLabel = automationAria ? `${statusAriaLabel}, ${automationAria}` : statusAriaLabel;
 
-  return (
-    <Tooltip open={tooltip.open}>
-      <TooltipTrigger asChild>
-        <span
-          data-testid={`pr-task-icon-${taskId}`}
-          data-pr-state={displayState}
-          data-pr-count={displayCount}
-          data-pr-ready-to-merge={
-            hasFullData ? String(prs.length === 1 ? readyToMerge : allReadyToMerge) : undefined
-          }
-          role="img"
-          tabIndex={0}
-          aria-label={ariaLabel}
-          onPointerEnter={tooltip.onPointerEnter}
-          onPointerLeave={tooltip.onPointerLeave}
-          onFocus={tooltip.onFocus}
-          onBlur={tooltip.onBlur}
-          className={cn(
-            "inline-flex items-center shrink-0",
-            prs.length > 1 && "gap-0.5",
-            iconColor,
-          )}
-        >
-          <IconGitPullRequest aria-hidden="true" className="h-3.5 w-3.5" />
-          {prs.length > 1 ? (
-            <span className="text-[9px] font-semibold leading-none tabular-nums">{prs.length}</span>
-          ) : null}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent
-        sideOffset={6}
-        onEscapeKeyDown={tooltip.onEscapeKeyDown}
-        className="w-80 max-w-[calc(100vw-1rem)] p-3"
-      >
-        {hasFullData ? (
-          <PRTaskStatusSummary summaries={summaries} />
-        ) : (
-          <CompactPRTooltipContent status={hydration.status} />
-        )}
-      </TooltipContent>
-    </Tooltip>
+  const disclosureProps: PRTaskIconDisclosureProps = {
+    taskId,
+    prInfo,
+    prs,
+    hasFullData,
+    singlePR,
+    readyToMerge,
+    allReadyToMerge,
+    displayState,
+    displayCount,
+    iconColor,
+    ariaLabel,
+    icon: <PRTaskIconGlyph automation={automation} />,
+    content: hasFullData ? (
+      <>
+        <PRTaskStatusSummary summaries={summaries} />
+        <TaskPRAutomationDetails summary={automation} />
+      </>
+    ) : (
+      <>
+        <CompactPRTooltipContent status={hydration.status} />
+        <TaskPRAutomationDetails summary={automation} status={hydration.status} />
+      </>
+    ),
+  };
+
+  return usesTouchDrawer ? (
+    <PRTaskIconDrawer
+      {...disclosureProps}
+      open={drawerOpen}
+      onOpenChange={(nextOpen) => {
+        setDrawerOpen(nextOpen);
+        if (nextOpen) hydrateOnDisclosure();
+      }}
+      t={t}
+    />
+  ) : (
+    <PRTaskIconTooltip {...disclosureProps} tooltip={tooltip} />
   );
 }
 
@@ -367,23 +391,4 @@ function getTaskPRIconColor(prs: TaskPR[], prInfo?: TaskPRInfo): string {
   if (prs.length === 1) return getPRStatusColor(prs[0]);
   if (prs.length > 1) return aggregatePRStatusColor(prs);
   return getPRAggregateStatusColor(prInfo?.aggregateState ?? prInfo?.state);
-}
-
-function CompactPRTooltipContent({ status }: { status: TaskPRTooltipHydrationStatus }) {
-  const { t } = useTranslation();
-  if (status === "loading" || status === "idle") {
-    return (
-      <span data-testid="pr-task-tooltip-loading" className="text-sm text-muted-foreground">
-        {t("github:taskPrDetailsLoading")}
-      </span>
-    );
-  }
-  if (status === "unavailable") {
-    return (
-      <span data-testid="pr-task-tooltip-unavailable" className="text-sm text-muted-foreground">
-        {t("github:taskPrDetailsUnavailable")}
-      </span>
-    );
-  }
-  return null;
 }

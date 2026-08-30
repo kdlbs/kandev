@@ -343,6 +343,72 @@ describe("office WS handler — content-editing guard (AC-61)", () => {
   });
 });
 
+describe("office WS handler — costs refetch gating on office.task.updated", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Cost-by-project breakdown groups by the task's live project_id (see
+  // costs.go), so only a project_id field change should bump "costs" — the
+  // generic kanban task.updated forward carries no `fields` at all and must
+  // not refetch costs on every unrelated task touch.
+  it.each([
+    { fields: ["project_id"], expectCosts: true },
+    { fields: ["project_id", "title"], expectCosts: true },
+    { fields: ["priority"], expectCosts: false },
+    { fields: [], expectCosts: false },
+    { fields: undefined, expectCosts: false },
+  ])("gates the costs trigger by fields=$fields", ({ fields, expectCosts }) => {
+    const { store, setOfficeRefetchTrigger } = makeStore(ACTIVE_WS);
+    const handlers = registerOfficeHandlers(store);
+    const handler = handlers[ACTION_TASK_UPDATED]!;
+
+    handler({
+      type: "notification",
+      action: ACTION_TASK_UPDATED,
+      payload: { workspace_id: ACTIVE_WS, task_id: "t-1", fields },
+    } as Parameters<typeof handler>[0]);
+
+    if (expectCosts) {
+      expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("costs");
+    } else {
+      expect(setOfficeRefetchTrigger).not.toHaveBeenCalledWith("costs");
+    }
+  });
+
+  it("refreshes tasks when a task project changes", () => {
+    const { store, setOfficeRefetchTrigger } = makeStore(ACTIVE_WS);
+    const handlers = registerOfficeHandlers(store);
+    const handler = handlers[ACTION_TASK_UPDATED]!;
+
+    handler({
+      type: "notification",
+      action: ACTION_TASK_UPDATED,
+      payload: { workspace_id: ACTIVE_WS, task_id: "t-1", fields: ["project_id"] },
+    } as Parameters<typeof handler>[0]);
+
+    expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("tasks");
+  });
+
+  it("maps a project_id update to the task store field", () => {
+    const { store, patchTaskInStore } = makeStore(ACTIVE_WS);
+    const handlers = registerOfficeHandlers(store);
+    const handler = handlers[ACTION_TASK_UPDATED]!;
+
+    handler({
+      type: "notification",
+      action: ACTION_TASK_UPDATED,
+      payload: {
+        workspace_id: ACTIVE_WS,
+        task_id: "t-1",
+        project_id: "project-2",
+      },
+    } as Parameters<typeof handler>[0]);
+
+    expect(patchTaskInStore).toHaveBeenCalledWith("t-1", { projectId: "project-2" });
+  });
+});
+
 describe("office WS handler — approval flow events", () => {
   beforeEach(() => {
     vi.clearAllMocks();

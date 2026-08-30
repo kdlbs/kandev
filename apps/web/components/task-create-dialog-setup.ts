@@ -227,6 +227,8 @@ function useDialogSetupData(
     defaultStepId,
     fs,
     lockedWorkflow: props.lockedFields?.workflow === true,
+    agentProfileRecentUseContext:
+      props.mode === "session" || props.mode === "edit" ? "task_session" : "task_create",
   });
   const {
     workflows,

@@ -50,6 +50,7 @@ outcomes that expose those contracts.
 - [GitLab MR Status Chip](requirements/gitlab-mr-status-chip.md)
 - [GitLab MR Badge on the Sidebar and Tasks-List Rows](requirements/gitlab-mr-task-list-badges.md)
 - [GitLab Workflow Sync](requirements/gitlab-workflow-sync.md)
+- [Jira Watcher Task Prompts](requirements/jira-watcher-task-prompts.md)
 - [Jira Ticket Status Filter](requirements/jira-status-filter.md)
 - [MCP Tool Argument Validation](requirements/mcp-tool-argument-validation.md)
 - [Pull request outcome attribution](requirements/pr-outcome-attribution.md)
@@ -60,6 +61,7 @@ outcomes that expose those contracts.
 
 
 
+- [External MCP Saved Prompt Reads](system-design/external-mcp-shared-prompts.md)
 - [Azure DevOps Integration System Design Part 1](system-design/azure-devops-integration-01.md)
 - [Azure DevOps Integration System Design Part 2](system-design/azure-devops-integration-02.md)
 - [Bitbucket Connector Plugin System Design Part 1](system-design/bitbucket-plugin-01.md)
@@ -84,6 +86,7 @@ outcomes that expose those contracts.
 - [GitLab MR Badge on the Sidebar and Tasks-List Rows System Design Part 1](system-design/gitlab-mr-task-list-badges-01.md)
 - [GitLab MR Badge on the Sidebar and Tasks-List Rows System Design Part 2](system-design/gitlab-mr-task-list-badges-02.md)
 - [GitLab MR Badge on the Sidebar and Tasks-List Rows System Design Part 3](system-design/gitlab-mr-task-list-badges-03.md)
+- [Jira Watcher Task Prompts](system-design/jira-watcher-task-prompts.md)
 
 ## Migration record
 

@@ -1,5 +1,6 @@
 let launcherFocus: HTMLElement | null = null;
 let launcherFocusShouldBeSilent = false;
+let quickChatCloseHandler: (() => void) | null = null;
 const SILENT_FOCUS_ATTRIBUTE = "data-quick-chat-silent-focus";
 
 function markFocusAsSilent(element: HTMLElement): void {
@@ -29,4 +30,20 @@ export function restoreQuickChatLauncherFocus(): void {
     if (shouldSilenceFocus) markFocusAsSilent(element);
     element.focus();
   });
+}
+
+/** Registers the mounted modal's close lifecycle for global launchers. */
+export function registerQuickChatCloseHandler(handler: () => void): () => void {
+  quickChatCloseHandler = handler;
+  return () => {
+    if (quickChatCloseHandler === handler) quickChatCloseHandler = null;
+  };
+}
+
+/** Closes Quick Chat through its mounted modal lifecycle when available. */
+export function requestQuickChatClose(): boolean {
+  const handler = quickChatCloseHandler;
+  if (!handler) return false;
+  handler();
+  return true;
 }

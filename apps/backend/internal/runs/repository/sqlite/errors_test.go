@@ -116,7 +116,7 @@ func TestWriteMethodsPropagateDatabaseErrors(t *testing.T) {
 			return repo.UpdateRunOutputSummary(ctx, run.ID, "o", "f")
 		},
 		"FinishRun": func() error {
-			return repo.FinishRun(ctx, run.ID, "finished")
+			return repo.FinishRun(ctx, run.ID, "finished", nil)
 		},
 		"ClaimRun": func() error {
 			_, err := repo.ClaimRun(ctx, "a1")

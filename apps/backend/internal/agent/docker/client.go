@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -421,12 +422,27 @@ func (c *Client) RemoveContainer(ctx context.Context, containerID string, force 
 			// removed the container already, which is the desired end state.
 			return nil
 		}
+		if containerRemovalInProgress(err) {
+			// A concurrent cleanup owner is already removing the container. Treat
+			// this conflict as success because both callers converge on removal.
+			return nil
+		}
 		c.logger.Error("Failed to remove container", zap.String("container_id", containerID), zap.Error(err))
 		return fmt.Errorf("failed to remove container %s: %w", containerID, err)
 	}
 
 	c.logger.Info("Container removed", zap.String("container_id", containerID))
 	return nil
+}
+
+func containerRemovalInProgress(err error) bool {
+	if !errdefs.IsConflict(err) {
+		return false
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "removal of container") &&
+		strings.Contains(message, "already in progress")
 }
 
 func (c *Client) containerRemover() containerRemover {

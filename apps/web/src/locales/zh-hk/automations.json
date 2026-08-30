@@ -51,6 +51,8 @@
   "cronExpressionLabel": "Cron 表達式",
   "cronHelp": "標準五欄位 cron 或快捷方式（{{shortcuts}}）",
   "delete": "刪除",
+  "deleteAutomationTitle": "刪除自動化？",
+  "deleteAutomationDescription": "這將永久刪除 {{name}}。此操作無法復原。",
   "deleteAll": "全部刪除",
   "deleteAllRuns": "刪除所有執行記錄",
   "deleteAllRunsDescription": "這將永久刪除此自動化的所有執行記錄；包括目前未載入的記錄；以及關聯的任務。此操作無法撤銷。",

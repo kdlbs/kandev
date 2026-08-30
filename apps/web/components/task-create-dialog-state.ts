@@ -27,6 +27,7 @@ import {
 import { useDialogComputed } from "@/components/task-create-dialog-computed";
 import { createDebugLogger } from "@/lib/debug/log";
 import { clampTaskTitleInput, truncateRemoteTaskTitle } from "@/lib/task-title";
+import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 
 const stateDebug = createDebugLogger("task-create:state");
 
@@ -586,6 +587,7 @@ type TaskCreateDialogDataArgs = {
   defaultStepId: string | null;
   fs: DialogFormState;
   lockedWorkflow?: boolean;
+  agentProfileRecentUseContext?: AgentProfileRecentUseContext;
 };
 
 export function useTaskCreateDialogData({
@@ -595,6 +597,7 @@ export function useTaskCreateDialogData({
   defaultStepId,
   fs,
   lockedWorkflow = false,
+  agentProfileRecentUseContext = "task_create",
 }: TaskCreateDialogDataArgs) {
   const workflows = useAppStore((state) => state.workflows.items);
   const workspaces = useAppStore((state) => state.workspaces.items);
@@ -636,6 +639,7 @@ export function useTaskCreateDialogData({
     lastUsedWorkflowIdsByWorkspace:
       taskCreateUserSettings.userSettings.taskCreateLastUsed.workflowIdsByWorkspace ?? {},
     userSettingsLoaded: taskCreateUserSettings.loaded,
+    agentProfileRecentUseContext,
   });
   return {
     workflows,

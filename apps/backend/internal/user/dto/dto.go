@@ -88,6 +88,31 @@ type UserSettingsResponse struct {
 	ShellOptions []ShellOption   `json:"shell_options"`
 }
 
+type AgentProfileRecentUseDTO struct {
+	Context    models.AgentProfileRecentUseContext `json:"context"`
+	ProfileIDs []string                            `json:"profile_ids"`
+	Revision   int64                               `json:"revision"`
+	UpdatedAt  string                              `json:"updated_at"`
+}
+
+// FromAgentProfileRecentUse maps the persisted context history to its API
+// representation without exposing the owning user id.
+func FromAgentProfileRecentUse(record *models.AgentProfileRecentUse) AgentProfileRecentUseDTO {
+	if record == nil {
+		return AgentProfileRecentUseDTO{}
+	}
+	return AgentProfileRecentUseDTO{
+		Context:    record.Context,
+		ProfileIDs: append([]string{}, record.ProfileIDs...),
+		Revision:   record.Revision,
+		UpdatedAt:  record.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+type RecordAgentProfileRecentUseRequest struct {
+	AgentProfileID string `json:"agent_profile_id"`
+}
+
 type ShellOption struct {
 	Value string `json:"value"`
 	Label string `json:"label"`

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { captureQuickChatLauncherFocus, restoreQuickChatLauncherFocus } from "./quick-chat-focus";
+import {
+  captureQuickChatLauncherFocus,
+  registerQuickChatCloseHandler,
+  requestQuickChatClose,
+  restoreQuickChatLauncherFocus,
+} from "./quick-chat-focus";
 
 const SILENT_FOCUS_ATTRIBUTE = "data-quick-chat-silent-focus";
 
@@ -9,6 +14,17 @@ afterEach(() => {
 });
 
 describe("quick chat launcher focus", () => {
+  it("routes an external close request through the registered modal lifecycle", () => {
+    const close = vi.fn();
+    const unregister = registerQuickChatCloseHandler(close);
+
+    expect(requestQuickChatClose()).toBe(true);
+    expect(close).toHaveBeenCalledTimes(1);
+
+    unregister();
+    expect(requestQuickChatClose()).toBe(false);
+  });
+
   // @covers AC-UI-QUICK-TERMINAL-001.9
   it("restores focus through the animation frame after closing", () => {
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {

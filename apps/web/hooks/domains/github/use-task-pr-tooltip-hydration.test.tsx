@@ -4,11 +4,14 @@ import type { ReactNode } from "react";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import type { TaskPR } from "@/lib/types/github";
+import type { TaskCIAutomationOptions } from "@/lib/types/github";
 
 const listTaskPRsMock = vi.hoisted(() => vi.fn());
+const getTaskCIAutomationOptionsMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api/domains/github-api", () => ({
   listTaskPRs: listTaskPRsMock,
+  getTaskCIAutomationOptions: getTaskCIAutomationOptionsMock,
 }));
 
 import { useTaskPRTooltipHydration } from "./use-task-pr-tooltip-hydration";
@@ -59,6 +62,24 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   };
 }
 
+function makeAutomationOptions(
+  overrides: Partial<TaskCIAutomationOptions> = {},
+): TaskCIAutomationOptions {
+  return {
+    task_id: "task-1",
+    workspace_id: WORKSPACE_A,
+    auto_fix_enabled: true,
+    auto_merge_enabled: false,
+    auto_fix_prompt_override: null,
+    effective_auto_fix_prompt: "",
+    using_default_prompt: true,
+    updated_at: "2026-08-01T00:00:00Z",
+    pr_states: [],
+    pr_options: [],
+    ...overrides,
+  };
+}
+
 function createStateWrapper(initialState: Partial<AppState> = {}) {
   return function StateTestWrapper({ children }: { children: ReactNode }) {
     return (
@@ -83,6 +104,7 @@ function useHydrationWithStore(taskId: string) {
 
 beforeEach(() => {
   listTaskPRsMock.mockReset();
+  getTaskCIAutomationOptionsMock.mockReset();
 });
 
 afterEach(() => {
@@ -139,6 +161,59 @@ describe("useTaskPRTooltipHydration request coordination", () => {
 
     expect(listTaskPRsMock).toHaveBeenCalledTimes(1);
     expect(result.current.store.getState().taskPRs.byTaskId["task-1"]).toEqual([pr]);
+  });
+});
+
+describe("useTaskPRTooltipHydration automation details", () => {
+  it("hydrates PR details and automation options together on demand", async () => {
+    const pr = makePR();
+    listTaskPRsMock.mockResolvedValue({ task_prs: { "task-1": [pr] } });
+    const options = makeAutomationOptions();
+    getTaskCIAutomationOptionsMock.mockResolvedValue(options);
+
+    const { result } = renderHook(
+      () => useTaskPRTooltipHydration("task-1", { includeAutomation: true }),
+      { wrapper: createStateWrapper() },
+    );
+
+    expect(listTaskPRsMock).not.toHaveBeenCalled();
+    expect(getTaskCIAutomationOptionsMock).not.toHaveBeenCalled();
+    await act(async () => {
+      await result.current.hydrate();
+    });
+
+    expect(listTaskPRsMock).toHaveBeenCalledWith(["task-1"], { cache: "no-store" });
+    expect(getTaskCIAutomationOptionsMock).toHaveBeenCalledWith("task-1", { cache: "no-store" });
+    expect(result.current.automationOptions).toEqual(options);
+  });
+
+  it("uses a newer WebSocket automation update while the disclosure stays mounted", async () => {
+    const pr = makePR();
+    listTaskPRsMock.mockResolvedValue({ task_prs: { "task-1": [pr] } });
+    const initial = makeAutomationOptions();
+    getTaskCIAutomationOptionsMock.mockResolvedValue(initial);
+
+    const { result } = renderHook(
+      () => ({
+        hydration: useTaskPRTooltipHydration("task-1", { includeAutomation: true }),
+        store: useAppStoreApi(),
+      }),
+      { wrapper: createStateWrapper() },
+    );
+
+    await act(async () => {
+      await result.current.hydration.hydrate();
+    });
+
+    const updated = makeAutomationOptions({
+      auto_merge_enabled: true,
+      updated_at: "2026-08-01T00:01:00Z",
+    });
+    act(() => {
+      result.current.store.getState().setTaskCIAutomationOptions("task-1", updated);
+    });
+
+    await waitFor(() => expect(result.current.hydration.automationOptions).toEqual(updated));
   });
 });
 

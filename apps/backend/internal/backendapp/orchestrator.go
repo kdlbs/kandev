@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/delivery"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/gitcredentials"
 	githubpkg "github.com/kandev/kandev/internal/github"
@@ -122,6 +123,7 @@ func provideOrchestrator(
 	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
+	orchestratorSvc.SetAgentProfileRecentUseRecorder(userSvc)
 	if gitCredentialBroker != nil {
 		orchestratorSvc.SetGitHubCredentialBroker(gitCredentialBroker, githubCredentialBrokerEndpoint(cfg))
 	}
@@ -1083,10 +1085,26 @@ func (a *repositoryResolverAdapter) persistDetectedDefaultBranch(
 	if strings.TrimSpace(repo.DefaultBranch) == detected {
 		return detected
 	}
+	// detected is still the correct base branch for the review in progress
+	// even when the write below fails, so it is always returned. But a
+	// failure here is not a transient blip to shrug off: it leaves
+	// repositories.default_branch empty, which (per spec "Degraded
+	// evaluation") permanently degrades every future delivery-ledger
+	// evaluation of this repository to default_branch_unknown until some
+	// later write succeeds — and this call site retries with the same
+	// detected value on every future invocation, so a rejection driven by
+	// validation (as opposed to a transient DB error) will repeat forever.
+	// Review round 3, finding #4: this used to log at Warn and nothing
+	// else, making that permanent degradation invisible. Error level plus
+	// the dedicated counter make it observable the same way ancestry/write
+	// failures already are in internal/delivery/metrics.go.
 	if _, err := a.taskSvc.UpdateRepository(ctx, repo.ID, &taskservice.UpdateRepositoryRequest{
 		DefaultBranch: &detected,
 	}); err != nil {
-		a.logger.Warn("failed to persist detected default branch",
+		delivery.RecordDefaultBranchPersistError()
+		a.logger.Error("failed to persist detected default branch: repository row keeps its prior "+
+			"default_branch and will read as default_branch_unknown in the delivery ledger until a "+
+			"future write succeeds",
 			zap.String("repository_id", repo.ID),
 			zap.String(branchFieldKey, detected),
 			zap.Error(err))

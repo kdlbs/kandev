@@ -1428,6 +1428,8 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 		AgentProfileID    string                 `json:"agent_profile_id"`
 		ExecutorID        string                 `json:"executor_id"`
 		ExecutorProfileID string                 `json:"executor_profile_id"`
+		UserID            string                 `json:"user_id"`
+		RecordRecentUse   bool                   `json:"record_recent_use"`
 		Prompt            string                 `json:"prompt"`
 		PlanMode          bool                   `json:"plan_mode"`
 		Attachments       []v1.MessageAttachment `json:"attachments"`
@@ -1446,19 +1448,25 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 		if !claimOK {
 			return
 		}
-		_, launchErr := s.LaunchSession(launchCtx, &LaunchSessionRequest{
+		launchResp, launchErr := s.LaunchSession(launchCtx, &LaunchSessionRequest{
 			TaskID: task.ID, Intent: launchIntent, AgentProfileID: intent.AgentProfileID,
 			ExecutorID: intent.ExecutorID, ExecutorProfileID: intent.ExecutorProfileID,
 			WorkflowStepID: task.WorkflowStepID, Prompt: intent.Prompt,
 			PlanMode: intent.PlanMode, Attachments: intent.Attachments, LaunchWorkspace: true,
 		})
-		if launchErr != nil {
+		if launchErr != nil || launchResp == nil || !launchResp.Success {
+			if launchErr == nil {
+				launchErr = errors.New("deferred launch returned an unsuccessful response")
+			}
 			s.logger.Error(eventName+": failed to launch deferred task", zap.String("task_id", task.ID), zap.Error(launchErr))
 			s.restoreDeferredLaunch(launchCtx, task.ID, raw, eventName, metadataClaimed)
 			if restoreQueuePromotion {
 				s.restoreTaskLifecycleToken(launchCtx, task.ID, models.MetaKeyQueuePromotionPending, eventName)
 			}
 			return
+		}
+		if intent.RecordRecentUse {
+			s.recordSuccessfulDeferredTaskProfileAsync(launchCtx, intent.UserID, launchResp.AgentProfileID)
 		}
 		delete(task.Metadata, models.MetaKeyDeferredLaunch)
 		if metadataClaimed {
@@ -2276,9 +2284,9 @@ func (s *Service) completeAndStopSession(ctx context.Context, taskID string, ses
 }
 
 // prepareWorkflowStepSession resolves the session that must execute a workflow
-// step before any on_enter action runs. Passthrough sessions and steps without
-// an effective profile keep the current session. Profile changes delegate to
-// the existing reuse/create lifecycle helpers.
+// step before any on_enter action runs. Steps without an effective profile keep
+// the current session. Profile changes delegate to the existing reuse/create
+// lifecycle helpers regardless of the source session transport.
 func (s *Service) prepareWorkflowStepSession(
 	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
 ) (*models.TaskSession, bool, error) {
@@ -2287,9 +2295,6 @@ func (s *Service) prepareWorkflowStepSession(
 	}
 	if step == nil {
 		return nil, false, fmt.Errorf("workflow step is nil")
-	}
-	if s.agentManager.IsPassthroughSession(ctx, session.ID) {
-		return session, false, nil
 	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
 	if effectiveProfile == "" || effectiveProfile == session.AgentProfileID {
@@ -2322,7 +2327,7 @@ func (s *Service) preflightWorkflowStepCredentials(
 	currentSession *models.TaskSession,
 	targetStep *wfmodels.WorkflowStep,
 ) error {
-	if currentSession == nil || targetStep == nil || s.agentManager.IsPassthroughSession(ctx, currentSession.ID) {
+	if currentSession == nil || targetStep == nil {
 		return nil
 	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, targetStep)
@@ -3010,11 +3015,40 @@ func legacyPendingMoveID(sessionID string, move *messagequeue.PendingMove) strin
 	return fmt.Sprintf("legacy-%x", sum[:])
 }
 
-func (s *Service) removePendingMoveHandoffPrompt(ctx context.Context, sessionID, taskID, moveID string) {
+// removePendingMoveHandoffPrompt reports whether cleanup is complete. A false
+// result means queue storage failed and a durable caller must preserve enough
+// correlation state to retry.
+func (s *Service) removePendingMoveHandoffPrompt(ctx context.Context, sessionID, taskID, moveID string) bool {
 	if s.messageQueue == nil {
-		return
+		return true
 	}
-	for _, entry := range s.messageQueue.GetStatus(ctx, sessionID).Entries {
+	entryID, listed := s.pendingMoveHandoffPromptID(ctx, sessionID, taskID, moveID)
+	if !listed {
+		return false
+	}
+	if entryID == "" {
+		return true
+	}
+	_, removed, err := s.messageQueue.TakeQueuedEntry(ctx, sessionID, entryID)
+	if err != nil {
+		s.logger.Warn("failed to remove pending-move hand-off prompt",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return false
+	}
+	if removed {
+		s.pendingMoveHandoffPromptRemoved(ctx, sessionID, taskID, moveID, entryID)
+	}
+	return true
+}
+
+func (s *Service) pendingMoveHandoffPromptID(ctx context.Context, sessionID, taskID, moveID string) (string, bool) {
+	entries, _, err := s.messageQueue.SnapshotSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to list pending-move hand-off prompts",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return "", false
+	}
+	for _, entry := range entries {
 		if entry.TaskID != taskID || entry.QueuedBy != messagequeue.QueuedByMoveTask {
 			continue
 		}
@@ -3026,19 +3060,21 @@ func (s *Service) removePendingMoveHandoffPrompt(ctx context.Context, sessionID,
 		if !matches {
 			continue
 		}
-		_, removed, err := s.messageQueue.TakeQueuedEntry(ctx, sessionID, entry.ID)
-		if err != nil {
-			s.logger.Warn("failed to remove stale pending-move hand-off prompt",
-				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
-			return
-		}
-		if removed {
-			s.publishQueueStatusEvent(ctx, sessionID)
-			s.logger.Warn("dropped stale pending-move hand-off prompt",
-				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.String("move_id", moveID))
-		}
+		return entry.ID, true
+	}
+	return "", true
+}
+
+func (s *Service) pendingMoveHandoffPromptRemoved(
+	ctx context.Context,
+	sessionID, taskID, moveID, entryID string,
+) {
+	if entryID == "" {
 		return
 	}
+	s.publishQueueStatusEvent(ctx, sessionID)
+	s.logger.Warn("dropped pending-move hand-off prompt",
+		zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.String("move_id", moveID))
 }
 
 func (s *Service) syncTaskStateForPendingMove(ctx context.Context, taskID, fromStepID, toStepID string) {

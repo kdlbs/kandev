@@ -31,6 +31,7 @@ import { usePanelSearch } from "@/hooks/use-panel-search";
 import { useTerminalBusyTracking } from "./use-terminal-busy-tracking";
 import { useTerminalTheme } from "./use-terminal-theme";
 import { useTranslation } from "react-i18next";
+import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 
 type BaseProps = {
   autoFocus?: boolean;
@@ -153,6 +154,26 @@ export function isSessionEnded(state: TaskSessionState | null | undefined): bool
   return state != null && SESSION_TERMINAL_STATES.has(state);
 }
 
+export function shouldGuardPassthroughEscape(
+  event: KeyboardEvent,
+  textarea: HTMLTextAreaElement | undefined,
+  isConnected = true,
+): boolean {
+  if (
+    !isConnected ||
+    event.key !== "Escape" ||
+    event.altKey ||
+    event.ctrlKey ||
+    event.metaKey ||
+    event.shiftKey
+  ) {
+    return false;
+  }
+  const activeElement = typeof document === "undefined" ? null : document.activeElement;
+  // The activeElement fallback covers synthetic events whose target and focus diverge.
+  return event.target === textarea || activeElement === textarea;
+}
+
 /**
  * Whether every session sharing this environment has ended.
  *
@@ -209,37 +230,31 @@ function useEnvironmentEnded(environmentId: string | null | undefined): boolean 
   );
 }
 
-// eslint-disable-next-line max-lines-per-function -- wires many hooks + refs; each block is already its own hook
-export function PassthroughTerminal(props: PassthroughTerminalProps) {
-  const {
-    mode,
-    label,
-    autoFocus,
-    pendingCommand,
-    onCommandSent,
-    onXtermReady,
-    disableWebgl,
-    manualInputRouting,
-    onWsReady,
-    enableTouchScroll,
-  } = props;
-  const { resolvedTheme } = useTheme();
-  const terminalId = mode === "shell" ? props.terminalId : undefined;
-  const environmentId = mode === "shell" ? props.environmentId : undefined;
-  const refs = useTerminalRefs();
-  const { terminalRef, xtermRef, fitAddonRef, wsRef, attachAddonRef } = refs;
+type PassthroughConnectionOptions = {
+  connectionID: string | null | undefined;
+  autoFocus?: boolean;
+  onXtermReady?: (xterm: Terminal) => void;
+  xtermRef: React.MutableRefObject<Terminal | null>;
+  attachAddonRef: React.MutableRefObject<AttachAddon | null>;
+  wsRef: React.MutableRefObject<WebSocket | null>;
+};
 
-  const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const environmentSessionId = useEnvironmentSessionId();
-  const sessionId = mode === "agent" ? (props.sessionId ?? storeSessionId) : environmentSessionId;
+type PassthroughConnectionState = {
+  isTerminalReady: boolean;
+  isConnected: boolean;
+  onTerminalReady: () => void;
+  onConnected: () => void;
+  onDisconnected: () => void;
+};
 
-  const { session } = useSession(sessionId);
-  const taskId = session?.task_id ?? null;
-  const connectionID = mode === "agent" ? sessionId : environmentId;
-  const environmentEnded = useEnvironmentEnded(environmentId);
-  const canConnect = computeCanConnect(mode, connectionID, sessionId, environmentEnded);
-  const wsBaseUrl = useWsBaseUrl();
-
+function usePassthroughConnection({
+  connectionID,
+  autoFocus,
+  onXtermReady,
+  xtermRef,
+  attachAddonRef,
+  wsRef,
+}: PassthroughConnectionOptions): PassthroughConnectionState {
   const [isTerminalReady, setIsTerminalReady] = useState(false);
   const onTerminalReady = useCallback(() => {
     setIsTerminalReady(true);
@@ -250,28 +265,79 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   // overlay resets on target switches without needing a separate setState effect.
   const [connectedTargetId, setConnectedTargetId] = useState<string | null>(null);
   const isConnected = connectionID != null && connectedTargetId === connectionID;
-  const paneState = computeTerminalPaneState(mode, environmentEnded, isConnected);
+  const passthroughEscapeGuard = useCallback(
+    (event: KeyboardEvent) =>
+      shouldGuardPassthroughEscape(
+        event,
+        xtermRef.current?.textarea,
+        isConnected &&
+          attachAddonRef.current !== null &&
+          wsRef.current?.readyState === WebSocket.OPEN,
+      ),
+    [attachAddonRef, isConnected, wsRef, xtermRef],
+  );
+  useClarificationEscapeGuard(passthroughEscapeGuard);
+
   const onConnected = useCallback(() => {
     setConnectedTargetId(connectionID ?? null);
-    if (autoFocus) refs.xtermRef.current?.textarea?.focus({ preventScroll: true });
-  }, [connectionID, autoFocus, refs.xtermRef]);
+    if (autoFocus) xtermRef.current?.textarea?.focus({ preventScroll: true });
+  }, [connectionID, autoFocus, xtermRef]);
   const onDisconnected = useCallback(() => {
     const disconnectedTargetId = connectionID ?? null;
     setConnectedTargetId((current) => (current === disconnectedTargetId ? null : current));
   }, [connectionID]);
 
+  return { isTerminalReady, isConnected, onTerminalReady, onConnected, onDisconnected };
+}
+
+type PassthroughEffectsOptions = {
+  props: PassthroughTerminalProps;
+  refs: ReturnType<typeof useTerminalRefs>;
+  terminalId: string | undefined;
+  environmentId: string | null | undefined;
+  taskId: string | null;
+  sessionId: string | null | undefined;
+  canConnect: boolean;
+  wsBaseUrl: string;
+  resolvedTheme: ReturnType<typeof useTheme>["resolvedTheme"];
+  connection: PassthroughConnectionState;
+};
+
+function usePassthroughEffects({
+  props,
+  refs,
+  terminalId,
+  environmentId,
+  taskId,
+  sessionId,
+  canConnect,
+  wsBaseUrl,
+  resolvedTheme,
+  connection,
+}: PassthroughEffectsOptions) {
+  const {
+    mode,
+    label,
+    pendingCommand,
+    onCommandSent,
+    disableWebgl,
+    manualInputRouting,
+    onWsReady,
+    enableTouchScroll,
+  } = props;
+  const { terminalRef, xtermRef, fitAddonRef, wsRef, attachAddonRef } = refs;
+  const { isTerminalReady, isConnected, onTerminalReady, onConnected, onDisconnected } = connection;
   const linkHandler = useTerminalLinkHandler();
   const terminalFontFamily = useAppStore((s) => s.userSettings.terminalFontFamily);
   const terminalFontSize = useAppStore((s) => s.userSettings.terminalFontSize);
   const sendResize = useSendResize(wsRef);
   const fitAndResize = useFitAndResize({
-    xtermRef: refs.xtermRef,
-    fitAddonRef: refs.fitAddonRef,
-    terminalRef: refs.terminalRef,
+    xtermRef,
+    fitAddonRef,
+    terminalRef,
     lastDimensionsRef: refs.lastDimensionsRef,
     sendResize,
   });
-
   const sendInput = useSendInput(wsRef);
   const toggleBottomTerminal = useAppStore((s) => s.toggleBottomTerminal);
   const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
@@ -286,9 +352,9 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     containerRef,
   );
   useTerminalInit({
-    terminalRef: refs.terminalRef,
-    xtermRef: refs.xtermRef,
-    fitAddonRef: refs.fitAddonRef,
+    terminalRef,
+    xtermRef,
+    fitAddonRef,
     isInitializedRef: refs.isInitializedRef,
     lastDimensionsRef: refs.lastDimensionsRef,
     resizeTimeoutRef: refs.resizeTimeoutRef,
@@ -312,14 +378,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     resolvedTheme,
   });
   useTerminalBusyTracking(terminalId, xtermRef, mode === "shell", isTerminalReady);
-
-  useTouchScroll({
-    terminalRef: refs.terminalRef,
-    xtermRef: refs.xtermRef,
-    enabled: !!enableTouchScroll,
-    isTerminalReady,
-  });
-
+  useTouchScroll({ terminalRef, xtermRef, enabled: !!enableTouchScroll, isTerminalReady });
   useWebSocketConnection({
     taskId,
     sessionId,
@@ -340,8 +399,47 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     manualInputRouting,
     onWsReady,
   });
-
   usePendingCommand(pendingCommand, isConnected, wsRef, onCommandSent);
+  return { containerRef, search, isConnected };
+}
+
+export function PassthroughTerminal(props: PassthroughTerminalProps) {
+  const { mode, autoFocus, onXtermReady } = props;
+  const { resolvedTheme } = useTheme();
+  const terminalId = mode === "shell" ? props.terminalId : undefined;
+  const environmentId = mode === "shell" ? props.environmentId : undefined;
+  const refs = useTerminalRefs();
+  const { terminalRef, xtermRef, wsRef, attachAddonRef } = refs;
+  const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const environmentSessionId = useEnvironmentSessionId();
+  const sessionId = mode === "agent" ? (props.sessionId ?? storeSessionId) : environmentSessionId;
+  const { session } = useSession(sessionId);
+  const taskId = session?.task_id ?? null;
+  const connectionID = mode === "agent" ? sessionId : environmentId;
+  const environmentEnded = useEnvironmentEnded(environmentId);
+  const canConnect = computeCanConnect(mode, connectionID, sessionId, environmentEnded);
+  const wsBaseUrl = useWsBaseUrl();
+  const connection = usePassthroughConnection({
+    connectionID,
+    autoFocus,
+    onXtermReady,
+    xtermRef,
+    attachAddonRef,
+    wsRef,
+  });
+  const paneState = computeTerminalPaneState(mode, environmentEnded, connection.isConnected);
+  const { containerRef, search } = usePassthroughEffects({
+    props,
+    refs,
+    terminalId,
+    environmentId,
+    taskId,
+    sessionId,
+    canConnect,
+    wsBaseUrl,
+    resolvedTheme,
+    connection,
+  });
 
   return (
     <div

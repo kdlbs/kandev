@@ -108,8 +108,10 @@ type mockGitHubService struct {
 	fixAttempts          []github.TaskCIFixAttempt
 	fixCheckpointRefresh []github.TaskCIFixAttempt
 	mergeAttempts        []github.TaskCIMergeAttempt
+	mergeAttemptErr      error
 	mergeCalls           int
 	mergeErr             error
+	mergeExpectedHeadSHA string
 	ciErrors             []github.TaskCIPRAutomationState
 	ciExhausted          []github.TaskCIPRAutomationState
 	lifecyclePrompts     []github.TaskPRLifecyclePrompt
@@ -217,7 +219,40 @@ func (m *mockGitHubService) RefreshTaskCIFixCheckpoint(_ context.Context, taskID
 	return nil
 }
 func (m *mockGitHubService) RecordTaskCIMergeAttempt(_ context.Context, attempt github.TaskCIMergeAttempt) error {
+	if m.mergeAttemptErr != nil {
+		return m.mergeAttemptErr
+	}
+	if m.ciPRState != nil && m.ciPRState.LastMergeSignature == attempt.Signature && !m.ciPRState.MergeRetryPending {
+		return github.ErrTaskCIMergeAttemptAlreadyReserved
+	}
 	m.mergeAttempts = append(m.mergeAttempts, attempt)
+	if m.ciPRState == nil {
+		m.ciPRState = &github.TaskCIPRAutomationState{
+			TaskID: attempt.TaskID, RepositoryID: attempt.RepositoryID, PRNumber: attempt.PRNumber,
+		}
+	}
+	m.ciPRState.LastMergeSignature = attempt.Signature
+	m.ciPRState.LastMergeResult = github.TaskCIMergeResultInFlight
+	m.ciPRState.MergeRetryPending = false
+	m.ciPRState.LastMergeAttemptAt = &attempt.AttemptedAt
+	return nil
+}
+func (m *mockGitHubService) RecordTaskCIMergeAttemptResult(
+	_ context.Context, taskID, repositoryID string, prNumber int, signature, result, message string,
+) error {
+	if m.ciPRState == nil {
+		m.ciPRState = &github.TaskCIPRAutomationState{
+			TaskID: taskID, RepositoryID: repositoryID, PRNumber: prNumber,
+		}
+	}
+	if m.ciPRState.LastMergeSignature != "" && m.ciPRState.LastMergeSignature != signature {
+		return github.ErrTaskCIMergeAttemptNotFound
+	}
+	m.ciPRState.LastMergeResult = result
+	if result == github.TaskCIMergeResultFailed {
+		m.ciPRState.LastError = &message
+		m.ciPRState.LastErrorKind = github.TaskCIErrorKindAutoMerge
+	}
 	return nil
 }
 func (m *mockGitHubService) RecordTaskCIMergeQueueObservation(_ context.Context, observation github.TaskCIMergeQueueObservation) error {
@@ -228,6 +263,13 @@ func (m *mockGitHubService) RecordTaskCIMergeQueueObservation(_ context.Context,
 	}
 	if observation.ActiveQueueHeadSHA != "" {
 		m.ciPRState.LastQueueAttemptHeadSHA = observation.ActiveQueueHeadSHA
+	}
+	if observation.ActiveQueueHeadSHA != "" || observation.Accepted {
+		m.ciPRState.LastMergeResult = github.TaskCIMergeResultAccepted
+		if m.ciPRState.LastErrorKind == github.TaskCIErrorKindAutoMerge {
+			m.ciPRState.LastError = nil
+			m.ciPRState.LastErrorKind = ""
+		}
 	}
 	if observation.RemovalCause != "" {
 		m.ciPRState.LastQueueRemovalCause = observation.RemovalCause
@@ -243,6 +285,13 @@ func (m *mockGitHubService) RecordTaskCIError(_ context.Context, taskID, reposit
 	})
 	return nil
 }
+func (m *mockGitHubService) RecordTaskCIAutoMergeError(_ context.Context, taskID, repositoryID string, prNumber int, message string) error {
+	m.ciErrors = append(m.ciErrors, github.TaskCIPRAutomationState{
+		TaskID: taskID, RepositoryID: repositoryID, PRNumber: prNumber,
+		LastError: &message, LastErrorKind: github.TaskCIErrorKindAutoMerge,
+	})
+	return nil
+}
 func (m *mockGitHubService) MarkTaskCIAutoFixExhausted(_ context.Context, taskID, repositoryID string, prNumber int, message string) error {
 	now := time.Now().UTC()
 	m.ciExhausted = append(m.ciExhausted, github.TaskCIPRAutomationState{
@@ -251,6 +300,7 @@ func (m *mockGitHubService) MarkTaskCIAutoFixExhausted(_ context.Context, taskID
 		PRNumber:           prNumber,
 		AutoFixExhaustedAt: &now,
 		LastError:          &message,
+		LastErrorKind:      github.TaskCIErrorKindAutoFix,
 	})
 	return nil
 }
@@ -315,8 +365,9 @@ func (m *mockGitHubService) MergePR(context.Context, string, string, int, string
 }
 
 func (m *mockGitHubService) MergePRForAutomation(
-	ctx context.Context, _, owner, repo string, number int, method string,
+	ctx context.Context, _, owner, repo string, number int, method, expectedHeadSHA string,
 ) error {
+	m.mergeExpectedHeadSHA = expectedHeadSHA
 	return m.MergePR(ctx, owner, repo, number, method)
 }
 func (m *mockGitHubService) EnsurePRWatch(_ context.Context, _, _, _, _, _, branch string) (*github.PRWatch, error) {

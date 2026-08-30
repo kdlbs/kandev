@@ -362,9 +362,10 @@ const (
 	ActionWorktreeReset               = "worktree.reset"                // Reset HEAD to a commit (soft/hard)
 
 	// User actions
-	ActionUserGet             = "user.get"
-	ActionUserSettingsUpdate  = "user.settings.update"
-	ActionUserSettingsUpdated = "user.settings.updated"
+	ActionUserGet                          = "user.get"
+	ActionUserSettingsUpdate               = "user.settings.update"
+	ActionUserSettingsUpdated              = "user.settings.updated"
+	ActionUserAgentProfileRecentUseUpdated = "user.agent_profile_recent_use.updated"
 
 	// ActionPluginUserStateUpdated notifies the writing user's other WS
 	// connections that one of their per-user plugin storage keys changed
@@ -473,6 +474,8 @@ const (
 	ActionMCPDeleteAgentProfile = "mcp.delete_agent_profile"
 	ActionMCPGetMcpConfig       = "mcp.get_mcp_config"
 	ActionMCPUpdateMcpConfig    = "mcp.update_mcp_config"
+	ActionMCPListSharedPrompts  = "mcp.list_shared_prompts"
+	ActionMCPGetSharedPrompt    = "mcp.get_shared_prompt"
 
 	ActionMCPListExecutors         = "mcp.list_executors"
 	ActionMCPListExecutorProfiles  = "mcp.list_executor_profiles"

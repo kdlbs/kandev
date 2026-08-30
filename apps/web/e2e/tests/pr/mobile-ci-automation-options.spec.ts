@@ -38,6 +38,7 @@ async function seedTaskWithPR(
   await apiClient.mockGitHubAssociateTaskPR({
     task_id: task.id,
     workspace_id: seedData.workspaceId,
+    repository_id: seedData.repositoryId,
     owner: OWNER,
     repo: REPO,
     pr_number: PR_NUMBER,
@@ -261,6 +262,7 @@ test.describe("mobile PR CI automation options", () => {
     await expect(drawer.getByRole("alert")).toContainText(
       "Lifecycle prompt could not be delivered to a task session.",
     );
+    await expect(drawer.getByRole("button", { name: "Refresh" })).toBeVisible();
     await expect(drawer.getByTestId("pr-workflow-row")).toHaveCount(30);
 
     const scrollBody = drawer.locator("[data-vaul-no-drag]");
@@ -281,6 +283,67 @@ test.describe("mobile PR CI automation options", () => {
     expect(drawerBox!.x + drawerBox!.width).toBeLessThanOrEqual(documentMetrics.clientWidth);
     expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
     expect(documentMetrics.scrollWidth).toBeLessThanOrEqual(documentMetrics.clientWidth);
+  });
+
+  test("mobile retries one failed automatic merge without page overflow", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const headSHA = "head-auto-merge-retry-mobile";
+    const taskId = await seedTaskWithPR(apiClient, seedData, "CI auto-merge retry mobile", {
+      head_sha: headSHA,
+      checks_state: "success",
+      checks_total: 1,
+      checks_passing: 1,
+      unresolved_review_threads: 0,
+      mergeable_state: "clean",
+    });
+    await apiClient.mockGitHubSetMergeOutcome(OWNER, REPO, PR_NUMBER, "failed");
+    await apiClient.updateTaskCIAutomationOptions(taskId, {
+      repository_id: seedData.repositoryId,
+      pr_number: PR_NUMBER,
+      auto_merge_enabled: true,
+    });
+    await expect
+      .poll(async () => {
+        const options = await apiClient.getTaskCIAutomationOptions(taskId);
+        const state = options.pr_states.find((item) => item.pr_number === PR_NUMBER);
+        return { kind: state?.last_error_kind, result: state?.last_merge_result };
+      })
+      .toEqual({ kind: "auto_merge", result: "failed" });
+
+    await testPage.goto(`/t/${taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.tapPRStatusChip();
+    const drawer = session.prStatusChipDrawer();
+    const retry = drawer.getByRole("button", { name: "Retry" });
+    await expect(retry).toBeVisible();
+    const retryBox = await retry.boundingBox();
+    expect(retryBox).not.toBeNull();
+    expect(retryBox!.height).toBeGreaterThanOrEqual(44);
+    expect(retryBox!.width).toBeGreaterThanOrEqual(44);
+
+    await apiClient.mockGitHubSetMergeOutcome(OWNER, REPO, PR_NUMBER, "queued");
+    await retry.tap();
+
+    await expect.poll(() => apiClient.mockGitHubGetMergeAttempts()).toHaveLength(2);
+    const attempts = await apiClient.mockGitHubGetMergeAttempts();
+    expect(attempts.every((attempt) => attempt.expected_head_sha === headSHA)).toBe(true);
+    await expect
+      .poll(async () => {
+        const options = await apiClient.getTaskCIAutomationOptions(taskId);
+        const state = options.pr_states.find((item) => item.pr_number === PR_NUMBER);
+        return { error: state?.last_error ?? null, result: state?.last_merge_result };
+      })
+      .toEqual({ error: null, result: "accepted" });
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
   });
 
   test("mobile merge queue recovery proves repair and new-head requeue", async ({

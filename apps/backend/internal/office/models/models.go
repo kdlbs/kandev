@@ -425,6 +425,14 @@ type Run struct {
 	ClaimedAt         *time.Time `json:"claimed_at" db:"claimed_at"`
 	FinishedAt        *time.Time `json:"finished_at" db:"finished_at"`
 
+	// Outcome records why a finished run ended (docs/specs/
+	// task-delivery-ledger/spec.md, "Office run outcome"): one of eight
+	// values on the finished path, NULL on failed and on every
+	// pre-activation row. Pointer-typed so StructScan reads the NULL
+	// every pre-activation row carries, same idiom as the provider-
+	// routing columns below.
+	Outcome *string `json:"outcome,omitempty" db:"outcome"`
+
 	// Provider-routing columns (office-provider-routing spec). All
 	// optional and ignored when workspace routing is disabled. The TEXT
 	// columns are pointer-typed so SELECT * StructScan handles the NULL
