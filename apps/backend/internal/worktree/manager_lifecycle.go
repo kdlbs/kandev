@@ -1699,12 +1699,27 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	// fetches origin <branch>:<branch> — or pull/<N>/head for fork PRs, whose
 	// head branch never exists on origin by name — and only errors when the
 	// branch exists neither locally nor on the remote.
-	exists, probeErr := m.branchExists(ctx, req.RepositoryPath, existing.Branch)
+	// Probe the managed local ref explicitly. A short branch name can resolve
+	// through Git's DWIM rules to a remote-tracking ref, which must not preempt
+	// exact persisted recovery.
+	exists, probeErr := m.branchExists(ctx, req.RepositoryPath, "refs/heads/"+existing.Branch)
 	if probeErr != nil {
 		// "Could not tell" (timeout / fs stall) is not "missing" — reporting
 		// ErrBranchUnrecoverable here would misclassify recoverable work as
 		// gone. Propagate so the caller can retry the recreate.
 		return nil, fmt.Errorf("cannot verify worktree branch %q: %w", existing.Branch, probeErr)
+	}
+	// Recovery metadata is authoritative once the local ref is confirmed
+	// missing. Restore it before any refreshed-origin or contribution
+	// materialization can select a different head.
+	recoveredFromHead := false
+	if !exists {
+		recovery := *existing
+		recovery.RepositoryPath = req.RepositoryPath
+		if restoreErr := m.restoreManagedBranchFromRecoveryHeadLocked(ctx, &recovery); restoreErr == nil {
+			exists = true
+			recoveredFromHead = true
+		}
 	}
 	contributionRemote := ""
 	contributionRef := ""
@@ -1716,7 +1731,7 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		}
 	}
 	refreshedStartPoint := ""
-	if req.RemoteSyncHandled && req.RemoteContribution == nil {
+	if !recoveredFromHead && req.RemoteSyncHandled && req.RemoteContribution == nil {
 		sourceBranch := existing.Branch
 		if req.CheckoutBranch != "" {
 			sourceBranch = req.CheckoutBranch
@@ -1734,13 +1749,6 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 			refreshedStartPoint = selectedRef
 		}
 		exists = true
-	}
-	if !exists {
-		recovery := *existing
-		recovery.RepositoryPath = req.RepositoryPath
-		if restoreErr := m.restoreManagedBranchFromRecoveryHeadLocked(ctx, &recovery); restoreErr == nil {
-			exists = true
-		}
 	}
 	if !exists {
 		if req.RemoteContribution != nil {

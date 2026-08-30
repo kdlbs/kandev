@@ -318,6 +318,56 @@ func TestRecreate_ManagedRefreshUsesRemoteWhenLocalCheckoutBranchIsBehind(t *tes
 	}
 }
 
+func TestRecreate_RecoveryHeadWinsOverRefreshedRemoteWhenSyncHandled(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	recoverySHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "feature/pr-branch"))
+	refreshedSHA := advanceRemoteBranch(t, repoPath, "feature/pr-branch")
+	if refreshedSHA == recoverySHA {
+		t.Fatal("remote refresh did not advance the branch")
+	}
+	archiveDeletesLocalBranch(t, repoPath, "feature/pr-branch")
+	worktreePath := filepath.Join(t.TempDir(), "task-recovery-precedence", "repo-1")
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatalf("create worktree placeholder: %v", err)
+	}
+
+	mgr := newRecreateTestManager(t)
+	wt, err := mgr.recreate(context.Background(), &Worktree{
+		ID: "wt-recovery-precedence", SessionID: "session-recovery-precedence",
+		TaskID: "task-recovery-precedence", RepositoryID: "repo-1", RepositoryPath: repoPath,
+		Path: worktreePath, Branch: "feature/pr-branch", BranchOwner: BranchOwnerManaged,
+		RecoveryHeadSHA: recoverySHA, Status: StatusDeleted,
+	}, CreateRequest{
+		SessionID: "session-recovery-precedence", TaskID: "task-recovery-precedence", RepositoryID: "repo-1",
+		RepositoryPath: repoPath, CheckoutBranch: "feature/pr-branch", RemoteSyncHandled: true,
+	})
+	if err != nil {
+		t.Fatalf("recreate(): %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != recoverySHA {
+		t.Fatalf("restored HEAD = %q, want persisted recovery SHA %q (refreshed remote was %q)", got, recoverySHA, refreshedSHA)
+	}
+}
+
+func TestRestoreManagedBranchFromRecoveryHead_RefusesConcurrentCreator(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	recoverySHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "feature/pr-branch"))
+	creatorSHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "main"))
+	runGit(t, repoPath, "branch", "feature/recovery-cas", creatorSHA)
+
+	mgr := newRecreateTestManager(t)
+	err := mgr.restoreManagedBranchFromRecoveryHeadLocked(context.Background(), &Worktree{
+		RepositoryPath: repoPath, Branch: "feature/recovery-cas", BranchOwner: BranchOwnerManaged,
+		RecoveryHeadSHA: recoverySHA,
+	})
+	if err == nil {
+		t.Fatal("restore succeeded despite an existing branch ref")
+	}
+	if got := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "refs/heads/feature/recovery-cas")); got != creatorSHA {
+		t.Fatalf("concurrent creator branch changed to %q, want %q", got, creatorSHA)
+	}
+}
+
 func TestRecreate_ManagedRefreshUsesRemotePRHeadWhenLocalCheckoutBranchIsBehind(t *testing.T) {
 	repoPath, wantSHA := initManagedPRCheckoutBranch(t, 977, "feature/managed-fork-pr-behind")
 	runGit(t, repoPath, "remote", "set-url", "origin", "https://127.0.0.1:1/never.git")
