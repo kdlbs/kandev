@@ -2,6 +2,7 @@
 status: draft
 system: tasks
 created: 2026-08-19
+updated: 2026-08-30
 owners:
   - kandev
 ---
@@ -33,6 +34,24 @@ preserving independent session runtime state.
 - **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001.4:** Unsafe or unsupported
   reuse shall fail with a typed, recoverable API error without creating a
   session or replacement workspace.
+
+### REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002: Canonical Workspace Identity Continuity
+
+**Intent:** Keep the task's effective workspace identity stable when Kandev
+reconstructs or resumes its runtime.
+
+#### Acceptance criteria
+
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.1:** When Kandev recovers
+  or resumes a task with a ready canonical environment, the persisted and
+  projected workspace path shall remain the materialized workspace used by the
+  recovered runtime.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.2:** When the task reloads
+  after recovery, Files and later attached sessions shall resolve the same
+  canonical workspace; the repository's source checkout shall not replace it.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.3:** When no materialized
+  or recovered runtime workspace exists, a legacy repository-backed session
+  can continue to use its source checkout as a compatibility fallback.
 
 ## Migrated source detail
 
@@ -111,3 +130,4 @@ an optional session name remains best effort after a successful launch.
 - A trusted filesystem read-only agent mode.
 - Automatic workspace repair, reset, branch switching, or replacement during
   session spawn.
+- Reconstructing a missing physical worktree from filesystem guesses.

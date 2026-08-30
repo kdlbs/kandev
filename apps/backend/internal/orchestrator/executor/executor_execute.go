@@ -2175,27 +2175,17 @@ func (e *Executor) injectHandoverIfNeeded(ctx context.Context, taskID, currentSe
 // to the task root via filepath.Dir would diverge hot vs cold cwd and break
 // resume with -32002 Resource not found.
 //
-// resp.WorktreePath here already mirrors what executor_standalone.go writes
-// into metadata["worktree_path"] (= req.WorkspacePath from the env preparer),
-// which is also what becomes cmd.Dir of the agent process. So persisting it
-// as-is keeps a single source of truth.
+// resp.WorkspacePath is the lifecycle execution's actual working directory and
+// is therefore authoritative. WorktreePath remains a compatibility fallback
+// for lifecycle responses that only expose the preparer's legacy metadata.
 func computeWorkspacePath(req *LaunchAgentRequest, resp *LaunchAgentResponse) string {
-	// SSH materializes repositories on the remote host. RepositoryPath still
-	// identifies the source checkout on this host, so persisting it would make a
-	// later sibling attach to a different remote directory. The lifecycle
-	// response is the canonical remote task-directory handle.
-	if req.ExecutorType == string(models.ExecutorTypeSSH) && resp.WorkspacePath != "" {
+	if resp.WorkspacePath != "" {
 		return resp.WorkspacePath
 	}
 	if resp.WorktreePath != "" {
 		return resp.WorktreePath
 	}
-	if req.RepositoryPath != "" {
-		return req.RepositoryPath
-	}
-	// Quick-chat sessions have no worktree/repo but the lifecycle manager
-	// creates a workspace directory — use it as fallback.
-	return resp.WorkspacePath
+	return req.RepositoryPath
 }
 
 // persistTaskEnvironment creates or updates the task environment record after a successful launch.
