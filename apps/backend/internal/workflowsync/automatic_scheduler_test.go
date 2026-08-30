@@ -121,6 +121,47 @@ func TestAutomaticScheduler_RequeuesAdmissionWaitingJobsWithoutExhaustingWorkers
 	s.stop()
 }
 
+func TestAutomaticScheduler_RequeuesAfterAdmissionSignalWithoutAnotherPoll(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	admissionChanged := make(chan struct{})
+	started := make(chan struct{})
+	resumed := make(chan struct{})
+	var runs atomic.Int32
+
+	s := newAutomaticScheduler(ctx, 1, func(ctx context.Context, _ automaticJob) automaticJobResult {
+		if runs.Add(1) == 1 {
+			close(started)
+			return automaticJobResult{wait: func(ctx context.Context) error {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-admissionChanged:
+					return nil
+				}
+			}}
+		}
+		close(resumed)
+		return automaticJobResult{}
+	}, func() {})
+	defer s.stop()
+
+	if !s.enqueue(automaticJob{workspaceID: "waiting"}) {
+		t.Fatal("failed to enqueue job")
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("admission-waiting job did not start")
+	}
+	close(admissionChanged)
+	select {
+	case <-resumed:
+	case <-time.After(time.Second):
+		t.Fatal("job was not requeued after admission changed")
+	}
+}
+
 func TestAutomaticScheduler_StopDrainsQueuedJobs(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	started := make(chan struct{})

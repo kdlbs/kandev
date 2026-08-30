@@ -80,28 +80,29 @@ func ghStderrIndicatesRateLimit(stderr string) bool {
 // exceptions; non-`api` subcommands like `pr`, `issue`, and `repo` are
 // implemented against GraphQL by gh itself, so they map to the GraphQL bucket.
 func (c *GHClient) inspectRateStderr(args []string, stderr string) *GitHubAPIError {
-	if c.rateTracker == nil {
-		return nil
-	}
 	if !ghStderrIndicatesRateLimit(stderr) {
 		return nil
 	}
 	resource := resourceForGHArgs(args)
-	if snap, ok := c.rateTracker.Snapshot(resource); ok && snap.Exhausted() {
-		incGitHubResponseClassification(FailurePrimaryRateLimit, resource, RetrySourcePrimaryReset)
-		return &GitHubAPIError{
-			StatusCode: http.StatusForbidden, Endpoint: firstArg(args), Body: stderr,
-			FailureKind: FailurePrimaryRateLimit, Resource: resource,
-			RetryAt: snap.ResetAt, RetrySource: RetrySourcePrimaryReset, Rate: &snap,
+	if c.rateTracker != nil {
+		if snap, ok := c.rateTracker.Snapshot(resource); ok && snap.Exhausted() {
+			incGitHubResponseClassification(FailurePrimaryRateLimit, resource, RetrySourcePrimaryReset)
+			return &GitHubAPIError{
+				StatusCode: http.StatusForbidden, Endpoint: firstArg(args), Body: stderr,
+				FailureKind: FailurePrimaryRateLimit, Resource: resource,
+				RetryAt: snap.ResetAt, RetrySource: RetrySourcePrimaryReset, Rate: &snap,
+			}
 		}
 	}
 	retryAt := time.Now().Add(secondaryFallbackDelay).UTC()
-	c.rateTracker.ObserveSecondary(
-		resource,
-		retryAt,
-		RetrySourceConservativeFallback,
-		stderr,
-	)
+	if c.rateTracker != nil {
+		c.rateTracker.ObserveSecondary(
+			resource,
+			retryAt,
+			RetrySourceConservativeFallback,
+			stderr,
+		)
+	}
 	incGitHubResponseClassification(
 		FailureSecondaryRateLimit, resource, RetrySourceConservativeFallback,
 	)

@@ -34,6 +34,22 @@ func TestIsNotFoundErr(t *testing.T) {
 	}
 }
 
+func TestGHClientClassifiesRateLimitStderrWithoutTracker(t *testing.T) {
+	err := (&GHClient{}).inspectRateStderr(
+		[]string{"api", "graphql"},
+		"HTTP 403: API rate limit exceeded",
+	)
+	if err == nil {
+		t.Fatal("inspectRateStderr returned nil for a rate-limit refusal")
+	}
+	if err.FailureKind != FailureSecondaryRateLimit {
+		t.Fatalf("FailureKind = %q, want %q", err.FailureKind, FailureSecondaryRateLimit)
+	}
+	if err.Resource != ResourceGraphQL {
+		t.Fatalf("Resource = %q, want %q", err.Resource, ResourceGraphQL)
+	}
+}
+
 func TestIsForbiddenErr(t *testing.T) {
 	cases := []struct {
 		name string
