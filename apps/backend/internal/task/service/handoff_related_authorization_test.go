@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	orchmodels "github.com/kandev/kandev/internal/office/models"
 )
 
 func TestListRelatedForRequest_AllowsCoordinatorCompactWorkspaceTreeRead(t *testing.T) {
@@ -28,6 +30,39 @@ func TestListRelatedForRequest_AllowsCoordinatorCompactWorkspaceTreeRead(t *test
 	}
 	if related.Task.Description != "" {
 		t.Fatalf("compact description = %q, want omitted", related.Task.Description)
+	}
+}
+
+func TestListRelatedForRequest_OmitsForeignWorkspaceRelations(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("foreign-parent", "", "workspace-b")
+	tasks.addTask("target", "foreign-parent", "workspace-a")
+	tasks.addTask("foreign-child", "target", "workspace-b")
+	tasks.addTask("foreign-blocker", "", "workspace-b")
+	tasks.addTask("foreign-dependent", "", "workspace-b")
+	blockers := &fakeBlockerRepo{blockers: []*orchmodels.TaskBlocker{
+		{TaskID: "target", BlockerTaskID: "foreign-blocker"},
+		{TaskID: "foreign-dependent", BlockerTaskID: "target"},
+	}}
+	svc := newPhase4Service(t, tasks, blockers, newCascadeWSGroupRepo())
+
+	related, err := svc.ListRelatedForRequest(context.Background(), RelatedReadRequest{
+		CallerTaskID: "target", TargetTaskID: "target", Scope: RelatedReadScopeWorkspaceTaskTree,
+	})
+	if err != nil {
+		t.Fatalf("read target relation tree: %v", err)
+	}
+	if related.Parent != nil {
+		t.Fatalf("foreign parent leaked: %+v", related.Parent)
+	}
+	if len(related.Children) != 0 {
+		t.Fatalf("foreign children leaked: %+v", related.Children)
+	}
+	if len(related.Blockers) != 0 {
+		t.Fatalf("foreign blockers leaked: %+v", related.Blockers)
+	}
+	if len(related.BlockedBy) != 0 {
+		t.Fatalf("foreign blocked-by tasks leaked: %+v", related.BlockedBy)
 	}
 }
 

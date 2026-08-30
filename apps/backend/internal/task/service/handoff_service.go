@@ -720,7 +720,31 @@ func (s *HandoffService) listRelated(ctx context.Context, taskID string, project
 		}
 	}
 
-	return out, nil
+	return relatedTasksInWorkspace(out, self.WorkspaceID), nil
+}
+
+func relatedTasksInWorkspace(related *RelatedTasks, workspaceID string) *RelatedTasks {
+	if related == nil {
+		return nil
+	}
+	if related.Parent != nil && related.Parent.WorkspaceID != workspaceID {
+		related.Parent = nil
+	}
+	related.Children = relatedTasksInWorkspaceSlice(related.Children, workspaceID)
+	related.Siblings = relatedTasksInWorkspaceSlice(related.Siblings, workspaceID)
+	related.Blockers = relatedTasksInWorkspaceSlice(related.Blockers, workspaceID)
+	related.BlockedBy = relatedTasksInWorkspaceSlice(related.BlockedBy, workspaceID)
+	return related
+}
+
+func relatedTasksInWorkspaceSlice(tasks []*RelatedTask, workspaceID string) []*RelatedTask {
+	filtered := make([]*RelatedTask, 0, len(tasks))
+	for _, task := range tasks {
+		if task != nil && task.WorkspaceID == workspaceID {
+			filtered = append(filtered, task)
+		}
+	}
+	return filtered
 }
 
 // GetDocumentForCaller fetches a document on targetTaskID after enforcing
