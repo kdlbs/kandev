@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupTaskStorage,
+  getHiddenSessionIds,
   clearGlobalSidebarWidth,
   getGlobalSidebarWidth,
   getManualRightWidth,
@@ -12,6 +13,7 @@ import {
   markPRPanelOffered,
   restoreAttachmentPreview,
   setGlobalSidebarWidth,
+  setHiddenSessionIds,
   setManualRightWidth,
   clearManualRightWidth,
   setOpenFileTabs,
@@ -191,6 +193,25 @@ describe("manual right width storage", () => {
 
     expect(getManualRightWidth("env-a")).toBeNull();
     expect(getManualRightWidth("env-b")).toBe(420);
+  });
+});
+
+describe("hidden session tab storage", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it("keeps hidden tabs scoped to their environment and clears them with the task", () => {
+    setHiddenSessionIds("env-a", new Set(["session-a", "session-b"]));
+    setHiddenSessionIds("env-b", new Set(["session-c"]));
+
+    expect(getHiddenSessionIds("env-a")).toEqual(["session-a", "session-b"]);
+    expect(getHiddenSessionIds("env-b")).toEqual(["session-c"]);
+
+    cleanupTaskStorage("task-a", [], ["env-a"]);
+
+    expect(getHiddenSessionIds("env-a")).toEqual([]);
+    expect(getHiddenSessionIds("env-b")).toEqual(["session-c"]);
   });
 });
 

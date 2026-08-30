@@ -289,6 +289,10 @@ export function setFilesPanelScrollPosition(sessionId: string, position: number)
 // `apps/web/e2e/helpers/dockview-persistence.ts`; bump both together.
 const DOCKVIEW_ENV_LAYOUT_PREFIX = "kandev.dockview.env-layout-v3.";
 
+// Hidden session tabs are a deliberate per-environment choice. Keep them with
+// the tab-scoped Dockview state so a page refresh does not reopen them.
+const DOCKVIEW_HIDDEN_SESSION_IDS_PREFIX = "kandev.dockview.hidden-session-ids-v1.";
+
 // A serialized Dockview layout is geometry, not evidence of an intentional
 // pixel preference. Keep that preference separately so automatic restores can
 // recompute responsive defaults while genuine sash drags remain per-env.
@@ -317,6 +321,27 @@ export function setEnvLayout(envId: string, layout: object): void {
   } catch {
     // Ignore write failures (storage full, blocked, etc.)
   }
+}
+
+/** Read the session tabs the user explicitly hid for a task environment. */
+export function getHiddenSessionIds(envId: string | null): string[] {
+  if (!envId) return [];
+  const stored = getSessionStorage<JsonValue[]>(
+    `${DOCKVIEW_HIDDEN_SESSION_IDS_PREFIX}${envId}`,
+    [],
+  );
+  return [...new Set(stored.filter((value): value is string => typeof value === "string"))];
+}
+
+/** Persist the session tabs the user explicitly hid for a task environment. */
+export function setHiddenSessionIds(envId: string | null, sessionIds: Set<string>): void {
+  if (!envId) return;
+  const ids = [...sessionIds];
+  if (ids.length === 0) {
+    removeSessionStorage(`${DOCKVIEW_HIDDEN_SESSION_IDS_PREFIX}${envId}`);
+    return;
+  }
+  setSessionStorage(`${DOCKVIEW_HIDDEN_SESSION_IDS_PREFIX}${envId}`, ids);
 }
 
 /** Read the manually-dragged right-panel width for a task env, or `null` if
@@ -786,6 +811,7 @@ export function cleanupTaskStorage(
   for (const envId of envIds) {
     removeEnvMaximizeState(envId);
     removeSessionStorage(`${DOCKVIEW_ENV_LAYOUT_PREFIX}${envId}`);
+    removeSessionStorage(`${DOCKVIEW_HIDDEN_SESSION_IDS_PREFIX}${envId}`);
     clearManualRightWidth(envId);
   }
 

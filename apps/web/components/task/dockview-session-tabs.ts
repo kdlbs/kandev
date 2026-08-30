@@ -21,6 +21,7 @@ import {
 } from "./dockview-session-tab-activation";
 import { anchorIncomingSessionPanel, ensureSessionPanel } from "./dockview-session-handoff";
 import { t } from "@/lib/i18n";
+import { getHiddenSessionIds, setHiddenSessionIds } from "@/lib/local-storage";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
@@ -29,21 +30,31 @@ const hiddenSessionIdsByApi = new WeakMap<DockviewApi, Set<string>>();
 function hiddenSessionIdsFor(api: DockviewApi): Set<string> {
   const existing = hiddenSessionIdsByApi.get(api);
   if (existing) return existing;
-  const hiddenSessionIds = new Set<string>();
+  const hiddenSessionIds = new Set(
+    getHiddenSessionIds(useDockviewStore.getState().currentLayoutEnvId),
+  );
   hiddenSessionIdsByApi.set(api, hiddenSessionIds);
   return hiddenSessionIds;
 }
 
+function persistHiddenSessionIds(hiddenSessionIds: Set<string>): void {
+  setHiddenSessionIds(useDockviewStore.getState().currentLayoutEnvId, hiddenSessionIds);
+}
+
 /** Hide a session tab without changing its persisted session lifecycle. */
 export function hideSessionPanel(api: DockviewApi, sessionId: string): void {
-  hiddenSessionIdsFor(api).add(sessionId);
+  const hiddenSessionIds = hiddenSessionIdsFor(api);
+  hiddenSessionIds.add(sessionId);
+  persistHiddenSessionIds(hiddenSessionIds);
   const panel = api.getPanel(`session:${sessionId}`);
   if (panel) api.removePanel(panel);
 }
 
 /** Forget a prior hide when a session is reopened or deleted. */
 export function clearHiddenSessionPanel(api: DockviewApi, sessionId: string): void {
-  hiddenSessionIdsFor(api).delete(sessionId);
+  const hiddenSessionIds = hiddenSessionIdsFor(api);
+  hiddenSessionIds.delete(sessionId);
+  persistHiddenSessionIds(hiddenSessionIds);
 }
 
 /**
@@ -533,6 +544,12 @@ export function runAutoSessionTabEffect(
 
   const { tid, currentSessionIds } = resolveCurrentSessionIds(appStore);
 
+  // A fresh Dockview API is created after reload. Merge the tab-scoped hide
+  // choice before reconciling siblings so refresh cannot reopen hidden tabs.
+  for (const sessionId of hiddenSessionIdsFor(api)) {
+    refs.hiddenSessionIdsRef.current.add(sessionId);
+  }
+
   logAutoSessionTabEffectEntry(api, effectiveSessionId, tid, currentSessionIds, refs);
 
   if (shouldRebuildDefaultForPendingSession(api, effectiveSessionId, currentSessionIds)) {
@@ -553,6 +570,7 @@ export function runAutoSessionTabEffect(
   for (const hiddenSessionId of refs.hiddenSessionIdsRef.current) {
     if (!currentSessionIdSet.has(hiddenSessionId)) {
       refs.hiddenSessionIdsRef.current.delete(hiddenSessionId);
+      clearHiddenSessionPanel(api, hiddenSessionId);
     }
   }
 
@@ -565,6 +583,7 @@ export function runAutoSessionTabEffect(
   // Selecting a hidden session through the reopen menu (or another explicit
   // session-selection path) restores its panel and clears the hide intent.
   refs.hiddenSessionIdsRef.current.delete(effectiveSessionId);
+  clearHiddenSessionPanel(api, effectiveSessionId);
 
   if (
     shouldSkipPanelEnsure(
