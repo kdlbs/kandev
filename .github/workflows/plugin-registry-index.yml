@@ -80,10 +80,13 @@ jobs:
 
       - name: Fetch last known-good official index
         run: |
-          curl --fail --location --retry 3 --retry-all-errors \
-            --connect-timeout 10 --max-time 30 \
-            --output "$RUNNER_TEMP/prior-plugin-index.json" \
-            https://kdlbs.github.io/kandev/plugins/index.json
+          if ! curl --fail --location --retry 3 --retry-all-errors \
+              --connect-timeout 10 --max-time 30 \
+              --output "$RUNNER_TEMP/prior-plugin-index.json" \
+              https://kdlbs.github.io/kandev/plugins/index.json; then
+            echo "::warning::Published index unavailable; continuing without retention data"
+            printf 'null\n' > "$RUNNER_TEMP/prior-plugin-index.json"
+          fi
 
       - name: Build index.json
         # The Node script uses stdlib + global fetch and delegates archive

@@ -112,9 +112,14 @@ function parseSemver(version) {
   );
   if (!match) return null;
   return {
-    core: match.slice(1, 4).map(Number),
+    core: match.slice(1, 4),
     prerelease: match[4]?.split(".") || [],
   };
+}
+
+function compareNumericIdentifier(left, right) {
+  if (left.length !== right.length) return left.length > right.length ? 1 : -1;
+  return left === right ? 0 : left > right ? 1 : -1;
 }
 
 function compareSemver(left, right) {
@@ -123,8 +128,8 @@ function compareSemver(left, right) {
   if (!a) return -1;
   if (!b) return 1;
   for (let index = 0; index < 3; index += 1) {
-    if (a.core[index] !== b.core[index])
-      return a.core[index] > b.core[index] ? 1 : -1;
+    const order = compareNumericIdentifier(a.core[index], b.core[index]);
+    if (order !== 0) return order;
   }
   if (a.prerelease.length === 0 || b.prerelease.length === 0) {
     return a.prerelease.length === b.prerelease.length
@@ -143,7 +148,7 @@ function compareSemver(left, right) {
     const leftNumeric = /^\d+$/.test(leftPart);
     const rightNumeric = /^\d+$/.test(rightPart);
     if (leftNumeric && rightNumeric)
-      return Number(leftPart) > Number(rightPart) ? 1 : -1;
+      return compareNumericIdentifier(leftPart, rightPart);
     if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
     return leftPart > rightPart ? 1 : -1;
   }

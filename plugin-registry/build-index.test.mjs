@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test, { afterEach } from "node:test";
 import {
   buildEntry,
   buildIndex,
   parseManifestFields,
   parsePluginsYaml,
+  readPriorDocument,
   readResponseBytes,
 } from "./build-index.mjs";
 
@@ -117,6 +121,32 @@ test("readResponseBytes stops a chunked package at the download limit", async ()
     readResponseBytes(response, 5),
     /download exceeds 5 bytes/,
   );
+});
+
+test("buildEntry rejects an unsafe curated ID before any network request", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new Error("network must not be reached");
+  };
+  try {
+    const result = await buildEntry({ id: "../escape", repo: "acme/plugin" });
+    assert.match(result.error, /unsafe curated plugin ID/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("readPriorDocument identifies the unreadable retention source", async () => {
+  const directory = await fs.mkdtemp(
+    path.join(os.tmpdir(), "registry-prior-test-"),
+  );
+  const priorPath = path.join(directory, "prior.json");
+  await fs.writeFile(priorPath, "not json");
+  try {
+    await assert.rejects(readPriorDocument(priorPath), new RegExp(priorPath));
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("buildEntry resolves release, manifest, icon_url and stars", async () => {

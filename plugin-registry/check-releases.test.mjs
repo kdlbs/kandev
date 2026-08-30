@@ -62,6 +62,23 @@ test("detectReleaseChanges surfaces candidates already beyond the publication SL
   assert.deepEqual(result.slaBreaches, ["alpha@1.1.0"]);
 });
 
+test("detectReleaseChanges compares numeric SemVer identifiers without precision loss", async () => {
+  const current = indexWith([
+    {
+      id: "alpha",
+      repo: "acme/alpha",
+      version: "9007199254740992.0.0",
+    },
+  ]);
+
+  const result = await detectReleaseChanges([specs[0]], current, {
+    fetchLatestRelease: async () => release("alpha", "9007199254740993.0.0"),
+  });
+
+  assert.equal(result.rebuild, true);
+  assert.deepEqual(result.candidates, ["alpha@9007199254740993.0.0"]);
+});
+
 test("detectReleaseChanges queries only allowlisted repositories", async () => {
   const requested = [];
   const current = indexWith([

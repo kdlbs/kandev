@@ -10,6 +10,7 @@ const pollPath = new URL(
   "../.github/workflows/plugin-registry-release-poll.yml",
   import.meta.url,
 );
+const e2ePath = new URL("../.github/workflows/e2e-tests.yml", import.meta.url);
 
 test("release poll is off-boundary every five minutes and never accepts repository dispatch", async () => {
   const poll = await fs.readFile(pollPath, "utf8");
@@ -53,6 +54,21 @@ test("index workflow verifies packages and fetches prior catalog before publicat
   assert.match(index, /PLUGIN_REGISTRY_PRIOR_INDEX:/);
   assert.match(index, /PLUGIN_PACKAGE_VERIFIER:/);
   assert.match(index, /node --test plugin-registry\/\*\.test\.mjs/);
+  assert.match(index, /if ! curl[\s\S]*printf 'null\\n'/);
+});
+
+test("sharded plugin E2E jobs receive an executable package verifier", async () => {
+  const e2e = await fs.readFile(e2ePath, "utf8");
+
+  assert.match(
+    e2e,
+    /name: e2e-plugin-package[\s\S]*path: \|[\s\S]*kandev-plugin-e2e-1\.0\.0\.tar\.gz[\s\S]*plugin-package-verify/,
+  );
+  assert.equal(
+    e2e.match(/chmod \+x apps\/backend\/\.build\/plugin-package-verify/g)
+      ?.length,
+    2,
+  );
 });
 
 test("Pages and OIDC permission live on deployment-capable jobs, not the default token", async () => {

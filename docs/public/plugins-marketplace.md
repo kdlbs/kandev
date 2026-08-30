@@ -175,15 +175,14 @@ asset is required; a second is optional:
 - `<id>-<version>.tar.gz` (**required**); the plugin package. It carries its
   own internal `checksums.txt` covering every packaged file, which the install
   pipeline verifies on extraction.
-- `checksums.txt` (optional); the sha256 of the tarball itself. Advisory
-  provenance: the catalog reserves a `package_sha256` field for it, but the
-  index builder does not populate or enforce the digest yet, so it is included
-  only for forward compatibility.
+- `checksums.txt` (optional); the SHA-256 of the tarball itself. The registry
+  always computes `package_sha256` from the downloaded archive and, when this
+  release-level file is present, requires its digest to match before publishing.
 
 The release must pass the standard package integrity gate. The
 [`kdlbs/kandev-plugin-template`](https://github.com/kdlbs/kandev-plugin-template)
-  starter repo is the recommended way to bootstrap a repo with the right layout.
-its `.github/workflows/release.yml` produces both assets automatically when you
+starter repo is the recommended way to bootstrap a repo with the right layout.
+Its `.github/workflows/release.yml` produces both assets automatically when you
 push a version tag.
 
 ### 2. Add an icon (optional)

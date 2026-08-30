@@ -51,6 +51,8 @@ const OUTPUT_JSON =
 const RAW_BASE =
   process.env.PLUGIN_REGISTRY_RAW_BASE || "https://raw.githubusercontent.com";
 const MAX_PACKAGE_DOWNLOAD_SIZE = 200 << 20;
+const SAFE_PLUGIN_ID = /^[a-z0-9][a-z0-9-]*$/;
+const SAFE_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]*$/;
 const execFileAsync = promisify(execFile);
 
 // --- Minimal plugins.yaml parser --------------------------------------------
@@ -263,6 +265,9 @@ export async function buildEntry(
   const repo = spec.repo;
   if (!pluginId || !repo)
     return { error: `entry missing id/repo: ${JSON.stringify(spec)}` };
+  if (!SAFE_PLUGIN_ID.test(pluginId)) {
+    return { error: `${pluginId}: unsafe curated plugin ID` };
+  }
 
   let release;
   try {
@@ -273,6 +278,11 @@ export async function buildEntry(
 
   const tag = release.tag_name || "";
   const version = normalizeVersion(tag);
+  if (!SAFE_VERSION.test(version || "")) {
+    return {
+      error: `${pluginId}: unsafe release version ${version || "<missing>"}`,
+    };
+  }
   const { asset, error: assetError } = pickPackageAsset(
     release.assets || [],
     pluginId,
@@ -540,9 +550,15 @@ async function main() {
   );
 }
 
-async function readPriorDocument(priorPath) {
+export async function readPriorDocument(priorPath) {
   if (!priorPath) return null;
-  return JSON.parse(await fs.readFile(priorPath, "utf8"));
+  try {
+    return JSON.parse(await fs.readFile(priorPath, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `prior index at ${priorPath} is unreadable: ${error.message}`,
+    );
+  }
 }
 
 async function writeBuildReport(result, listedCount) {

@@ -11,6 +11,7 @@ const BACKEND_ROOT = path.join(REPO_ROOT, "apps/backend");
 const REGISTRY_ROOT = path.join(REPO_ROOT, "plugin-registry");
 const PLUGIN_ID = "kandev-plugin-e2e";
 const REPOSITORY = "acme/kandev-plugin-e2e";
+const INITIAL_VERSION = "1.0.0";
 const execFileAsync = promisify(execFile);
 
 export class PluginMarketplaceReleaseFixture {
@@ -19,24 +20,29 @@ export class PluginMarketplaceReleaseFixture {
     this.handle(request, response),
   );
   private readonly packages = new Map<string, string>();
-  private currentRelease = "1.0.0";
+  private currentRelease = INITIAL_VERSION;
   private baseUrl = "";
 
   private constructor() {}
 
   static async start(): Promise<PluginMarketplaceReleaseFixture> {
     const fixture = new PluginMarketplaceReleaseFixture();
-    fixture.preparePackages();
-    await new Promise<void>((resolve, reject) => {
-      fixture.server.once("error", reject);
-      fixture.server.listen(0, "127.0.0.1", () => resolve());
-    });
-    const address = fixture.server.address();
-    if (!address || typeof address === "string")
-      throw new Error("release fixture address unavailable");
-    fixture.baseUrl = `http://127.0.0.1:${address.port}`;
-    fixture.writeInitialIndex();
-    return fixture;
+    try {
+      fixture.preparePackages();
+      await new Promise<void>((resolve, reject) => {
+        fixture.server.once("error", reject);
+        fixture.server.listen(0, "127.0.0.1", () => resolve());
+      });
+      const address = fixture.server.address();
+      if (!address || typeof address === "string")
+        throw new Error("release fixture address unavailable");
+      fixture.baseUrl = `http://127.0.0.1:${address.port}`;
+      fixture.writeInitialIndex();
+      return fixture;
+    } catch (error) {
+      await fixture.close();
+      throw error;
+    }
   }
 
   get indexUrl(): string {
@@ -70,9 +76,11 @@ export class PluginMarketplaceReleaseFixture {
   }
 
   async close(): Promise<void> {
-    await new Promise<void>((resolve, reject) =>
-      this.server.close((error) => (error ? reject(error) : resolve())),
-    );
+    if (this.server.listening) {
+      await new Promise<void>((resolve, reject) =>
+        this.server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
     fs.rmSync(this.tempDir, { recursive: true, force: true });
   }
 
@@ -90,9 +98,9 @@ export class PluginMarketplaceReleaseFixture {
   }
 
   private preparePackages(): void {
-    const v1Path = path.join(BACKEND_ROOT, ".build/kandev-plugin-e2e-1.0.0.tar.gz");
+    const v1Path = path.join(BACKEND_ROOT, `.build/kandev-plugin-e2e-${INITIAL_VERSION}.tar.gz`);
     if (!fs.existsSync(v1Path)) throw new Error(`missing E2E fixture package: ${v1Path}`);
-    this.packages.set("1.0.0", v1Path);
+    this.packages.set(INITIAL_VERSION, v1Path);
     const v2Path = this.repackage(v1Path, "2.0.0");
     this.packages.set("1.5.0", this.corruptCopy(v2Path, "1.5.0"));
     this.packages.set("2.0.0", v2Path);
@@ -108,7 +116,10 @@ export class PluginMarketplaceReleaseFixture {
     execFileSync("tar", ["-xzf", source, "-C", stage]);
     const manifestPath = path.join(stage, "manifest.yaml");
     const manifest = fs.readFileSync(manifestPath, "utf8");
-    fs.writeFileSync(manifestPath, manifest.replace('version: "1.0.0"', `version: "${version}"`));
+    fs.writeFileSync(
+      manifestPath,
+      manifest.replace(`version: "${INITIAL_VERSION}"`, `version: "${version}"`),
+    );
     const checksumPath = path.join(stage, "checksums.txt");
     fs.rmSync(checksumPath, { force: true });
     const files = walkFiles(stage)
@@ -130,7 +141,7 @@ export class PluginMarketplaceReleaseFixture {
   }
 
   private writeInitialIndex(): void {
-    const version = "1.0.0";
+    const version = INITIAL_VERSION;
     const document = {
       schema_version: 1,
       generated_at: "2026-08-30T00:00:00Z",
