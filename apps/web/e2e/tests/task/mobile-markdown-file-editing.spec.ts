@@ -124,6 +124,9 @@ test.describe("Mobile Markdown file editing", () => {
     await expect(hybrid).toBeVisible({ timeout: 15_000 });
     const subheader = hybrid.locator("h4.md-heading", { hasText: "Mobile source markers" });
     await subheader.tap();
+    await expect(
+      hybrid.locator(":is(.md-ws-newline-glyph, .md-ws-blockbreak-glyph):visible"),
+    ).toHaveCount(0);
     const [hybridBox, markerBox] = await Promise.all([
       hybrid.boundingBox(),
       subheader.locator(".md-marker-headingMarker").boundingBox(),

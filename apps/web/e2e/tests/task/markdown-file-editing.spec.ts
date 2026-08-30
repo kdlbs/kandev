@@ -379,6 +379,9 @@ test.describe("Markdown file editing", () => {
     });
     await clickAfterText(testPage, paragraph, "quiet!abcde");
     await testPage.keyboard.type("z");
+    await expect(
+      hybrid.locator(":is(.md-ws-newline-glyph, .md-ws-blockbreak-glyph):visible"),
+    ).toHaveCount(0);
 
     const repeatedPrefixCount = await hybrid.evaluate((element) => {
       const prefix = "Kandev should read as a restrained developer workbench.";

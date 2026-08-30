@@ -64,6 +64,9 @@ change.
   remove or normalize it.
 - **AC-UI-MARKDOWN-FILE-EDITING-001.7:** When the user opens an `.mdx` file,
   the system shall offer Preview and Source modes without a hybrid Edit mode.
+- **AC-UI-MARKDOWN-FILE-EDITING-001.8:** When Edit mode reveals an active
+  block, the system shall keep block-separating line endings in canonical
+  source without showing return or newline glyphs after the block.
 
 ### REQ-UI-MARKDOWN-FILE-EDITING-002: Safe file workflow integration
 

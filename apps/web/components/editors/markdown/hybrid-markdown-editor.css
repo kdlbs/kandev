@@ -81,6 +81,12 @@
   margin-top: 0.5em;
 }
 
+/* Keep block-separating newlines in the editor's source mapping without
+   painting the upstream return-arrow decoration at the end of active blocks. */
+.kandev-hybrid-markdown-editor :is(.md-ws-newline-glyph, .md-ws-blockbreak-glyph) {
+  visibility: hidden;
+}
+
 .kandev-hybrid-markdown-editor .md-blockquote {
   margin: 0.5rem 0;
   border-left: 3px solid var(--primary);

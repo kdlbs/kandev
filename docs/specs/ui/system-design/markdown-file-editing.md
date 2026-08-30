@@ -197,6 +197,11 @@ Preview remains the high-fidelity reading surface. Edit mode favors immediate
 editing context and exact source preservation. Visual results can differ for
 constructs that the experimental engine does not support.
 
+The Kandev hybrid-editor theme hides the upstream return-arrow decorations for
+block-gap and block-break newlines. Their source spans remain in layout so
+source-offset mapping, selection geometry, and canonical line-ending bytes do
+not change.
+
 Unsupported blocks remain visible as editable source. Raw HTML never bypasses
 Kandev sanitization. Edit mode must not use arbitrary `innerHTML` for Markdown
 or Mermaid output. Links route through Kandev's existing task, file, and
