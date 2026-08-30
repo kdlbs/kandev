@@ -175,36 +175,70 @@ func (s *Service) discardStalePendingMove(
 
 // handlePendingMoveAtAgentReady returns true when normal turn-complete queue
 // handling must stop. A fully discarded stale move returns false so the caller
-// continues exactly as if no move had been armed.
+// continues exactly as if no move had been armed. Storage failures leave the
+// move armed and settle the completed session so a later ready event can retry.
 func (s *Service) handlePendingMoveAtAgentReady(
 	ctx context.Context,
 	taskID, sessionID string,
 	session *models.TaskSession,
 ) bool {
-	move, exists := s.messageQueue.GetPendingMove(ctx, sessionID)
-	if !exists {
-		return false
+	const maxReplayAttempts = 2
+	settleSession := func() {
+		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 	}
-	stale, retryPending := s.discardStalePendingMove(ctx, taskID, sessionID, move)
-	if retryPending {
+
+	for attempt := 0; attempt < maxReplayAttempts; attempt++ {
+		move, exists, err := s.messageQueue.GetPendingMoveWithError(ctx, sessionID)
+		if err != nil {
+			s.logger.Warn("failed to read pending move; row preserved for retry",
+				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+			settleSession()
+			return true
+		}
+		if !exists {
+			if attempt > 0 {
+				// A concurrent handler won the claim after our compare failed.
+				// Do not resume normal turn-complete processing for this event.
+				settleSession()
+				return true
+			}
+			return false
+		}
+
+		stale, retryPending := s.discardStalePendingMove(ctx, taskID, sessionID, move)
+		if retryPending {
+			settleSession()
+			return true
+		}
+		if stale {
+			return false
+		}
+
+		record := messagequeue.PendingMoveRecord{SessionID: sessionID, Move: *move}
+		removed, err := s.messageQueue.DeletePendingMoveIfMatch(ctx, record, "")
+		if err != nil {
+			s.logger.Warn("failed to claim pending move; row preserved for retry",
+				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+			settleSession()
+			return true
+		}
+		if !removed {
+			// A replacement raced the read. Re-read once so the successor can be
+			// applied by this completed turn instead of waiting for an unrelated
+			// ready event. The bounded loop preserves the row if races continue.
+			continue
+		}
+		// The turn is already complete. Settle the session before applying the
+		// move so early validation or storage failures inside applyPendingMove
+		// cannot leave it RUNNING with no active turn.
+		settleSession()
+		s.applyPendingMove(ctx, taskID, sessionID, session, move)
 		return true
 	}
-	if stale {
-		return false
-	}
-	record := messagequeue.PendingMoveRecord{SessionID: sessionID, Move: *move}
-	removed, err := s.messageQueue.DeletePendingMoveIfMatch(ctx, record, "")
-	if err != nil {
-		s.logger.Warn("failed to claim pending move; row preserved for retry",
-			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
-		return true
-	}
-	if !removed {
-		// A replacement raced the read. Leave the current move and its prompt
-		// for a later ready event instead of draining it in the source step.
-		return true
-	}
-	s.applyPendingMove(ctx, taskID, sessionID, session, move)
+
+	s.logger.Warn("pending move changed repeatedly during replay; row preserved for retry",
+		zap.String("task_id", taskID), zap.String("session_id", sessionID))
+	settleSession()
 	return true
 }
 
