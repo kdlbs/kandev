@@ -50,8 +50,18 @@ jobs:
       - name: Test Claude Code review workflow contract
         run: python3 .github/scripts/claude-code-review-workflow-contract_test.py
 
+      - name: Test PR walkthrough workflow contract
+        run: |
+          python3 .github/scripts/pr-walkthrough-workflow-contract_test.py
+          python3 scripts/pr-walkthrough-pr-body.test.py
+          python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-context.test.py
+          python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-render.test.py
+
       - name: Test preview environment workflow contract
         run: python3 .github/scripts/preview-env-workflow-contract_test.py
+
+      - name: Test OpenCode code review workflow contract
+        run: python3 .github/scripts/opencode-code-review-workflow-contract_test.py
 
       - name: Test frontend tests workflow contract
         run: python3 .github/scripts/frontend-tests-workflow-contract_test.py
@@ -61,6 +71,9 @@ jobs:
 
       - name: Test E2E workflow contract
         run: python3 .github/scripts/e2e-tests-workflow-contract_test.py
+
+      - name: Test managed runtime pin update workflow contract
+        run: python3 .github/scripts/update-agent-runtime-pins-workflow-contract_test.py
 
       - name: Set up Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6

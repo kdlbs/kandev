@@ -19,6 +19,12 @@ function makeSidebarDraft(baseViewId = "view-a"): SidebarViewDraft {
     filters: [],
     sort: { key: "state", direction: "asc" },
     group: "none",
+    taskRow: {
+      detailsEnabled: true,
+      detailOrder: ["relative_time", "repository", "pull_request_number"],
+      visibleDetails: ["relative_time", "repository", "pull_request_number"],
+      trailing: "git_changes",
+    },
   };
 }
 

@@ -411,9 +411,33 @@ export type TaskMRLifecycleState = {
   updated_at: string;
 };
 
-/** Task-level MR automation preferences: lifecycle switches (#2125) plus auto-fix CI and auto-merge. */
+/**
+ * The five automation switches for one linked merge request. This is the
+ * per-MR source of truth; the same-named booleans on TaskMRAutomationOptions
+ * are an aggregate that only reports "every linked MR has this on".
+ */
+export type TaskMRAutomationOptionsForMR = {
+  task_id: string;
+  repository_id: string;
+  project_path: string;
+  mr_iid: number;
+  auto_fix_enabled: boolean;
+  auto_merge_enabled: boolean;
+  prompt_on_review_requested: boolean;
+  prompt_on_merged: boolean;
+  prompt_on_closed: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * Task MR automation preferences: the task-level auto-fix prompt override and
+ * reviewer username, the per-MR switches in `mr_options`, and an aggregate of
+ * those switches in the top-level booleans.
+ */
 export type TaskMRAutomationOptions = {
   task_id: string;
+  automation_revision?: number;
   auto_fix_enabled: boolean;
   auto_merge_enabled: boolean;
   auto_fix_prompt_override?: string | null;
@@ -426,10 +450,16 @@ export type TaskMRAutomationOptions = {
   review_reviewer_username: string;
   updated_at: string;
   mr_states: TaskMRLifecycleState[];
+  mr_options: TaskMRAutomationOptionsForMR[];
 };
 
 /** Partial update for task MR automation options. */
 export type TaskMRAutomationPatch = {
+  // Target one linked MR's switches; omit all three to apply them to every MR
+  // currently linked to the task.
+  repository_id?: string;
+  project_path?: string;
+  mr_iid?: number;
   auto_fix_enabled?: boolean;
   auto_merge_enabled?: boolean;
   auto_fix_prompt_override?: string;

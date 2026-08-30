@@ -231,7 +231,9 @@ export type RuntimeUpdate = {
   supported: boolean;
   package: string;
   current_version?: string;
+  default_version?: string;
   active_version?: string;
+  effective_version?: string;
 };
 
 export type AvailableAgent = {

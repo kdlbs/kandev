@@ -128,7 +128,7 @@ func (s *Service) MergePR(ctx context.Context, owner, repo string, number int, m
 	if s.client == nil {
 		return "", ErrNoClient
 	}
-	return s.mergePRWithClient(ctx, s.client, "legacy", owner, repo, number, mergeMethod)
+	return s.mergePRWithClient(ctx, s.client, "legacy", owner, repo, number, MergePRRequest{MergeMethod: mergeMethod})
 }
 
 // MergePRForWorkspace performs a user-triggered merge using the workspace's
@@ -153,7 +153,7 @@ func (s *Service) MergePRForWorkspace(
 		return AuthPrincipal{}, "", err
 	}
 	outcome, err := s.mergePRWithClient(
-		ctx, resolved.Client, resolved.CacheScope, owner, repo, number, mergeMethod,
+		ctx, resolved.Client, resolved.CacheScope, owner, repo, number, MergePRRequest{MergeMethod: mergeMethod},
 	)
 	return resolved.Principal, outcome, err
 }
@@ -165,9 +165,9 @@ func (s *Service) mergePRWithClient(
 	owner string,
 	repo string,
 	number int,
-	mergeMethod string,
+	request MergePRRequest,
 ) (MergeOutcome, error) {
-	if mergeMethod == "" {
+	if request.MergeMethod == "" {
 		// Resolve to an allowed method up-front so we don't rely on GitHub's
 		// "default to merge" behavior, which 405s on repos that disallow
 		// merge commits (squash-only / rebase-only). Best-effort: if the
@@ -176,11 +176,11 @@ func (s *Service) mergePRWithClient(
 		// blocking the merge attempt.
 		if methods, err := s.getRepoMergeMethods(ctx, client, cacheScope, owner, repo); err == nil {
 			if pick := pickDefaultMergeMethod(methods); pick != "" {
-				mergeMethod = pick
+				request.MergeMethod = pick
 			}
 		}
 	}
-	return client.MergePR(ctx, owner, repo, number, mergeMethod)
+	return client.MergePR(ctx, owner, repo, number, request)
 }
 
 // GetRepoMergeMethods returns the merge methods a repo allows, cached for

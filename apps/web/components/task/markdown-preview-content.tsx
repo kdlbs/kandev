@@ -11,6 +11,7 @@ import {
   useState,
   type HTMLAttributes,
   type ReactNode,
+  type Ref,
 } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown, { type ExtraProps, type Components } from "react-markdown";
@@ -24,6 +25,7 @@ import {
   remarkPlugins,
   markdownComponents,
 } from "@/components/shared/markdown-components";
+import { ResizableMarkdownTable } from "@/components/shared/resizable-markdown-table";
 import { cn, toRelativePath } from "@/lib/utils";
 import { PanelHeaderBarSplit } from "@/components/task/panel-primitives";
 import { EditorCommentPopover } from "@/components/task/editor-comment-popover";
@@ -140,6 +142,7 @@ type PositionedNode = {
 type SourceBlockProps = HTMLAttributes<HTMLElement> &
   ExtraProps & {
     children?: ReactNode;
+    elementRef?: Ref<HTMLElement>;
     node?: PositionedNode;
     tag: keyof HTMLElementTagNameMap;
   };
@@ -193,7 +196,15 @@ function CommentBadge({
   );
 }
 
-function SourceBlock({ tag, node, children, className, onClick, ...rest }: SourceBlockProps) {
+function SourceBlock({
+  tag,
+  node,
+  children,
+  className,
+  elementRef,
+  onClick,
+  ...rest
+}: SourceBlockProps) {
   const commentContext = useContext(PreviewCommentContext);
   const range = sourceRangeFromNode(node);
   const comments = commentContext?.comments ?? [];
@@ -227,6 +238,7 @@ function SourceBlock({ tag, node, children, className, onClick, ...rest }: Sourc
         className,
       ),
       onClick: handleClick,
+      ref: elementRef,
     },
     children,
     hasCommentBadge && tag !== "pre" ? <CommentBadge onClick={handleBadgeClick} /> : null,
@@ -243,9 +255,15 @@ function SourceBlock({ tag, node, children, className, onClick, ...rest }: Sourc
 
 function MarkdownPreviewTable({ node, children }: MarkdownSourceBlockProps) {
   return (
-    <SourceBlock tag="div" node={node} className="overflow-x-auto">
-      <table>{children}</table>
-    </SourceBlock>
+    <ResizableMarkdownTable
+      renderWrapper={({ children: tableContent, className, elementRef }) => (
+        <SourceBlock tag="div" node={node} className={className} elementRef={elementRef}>
+          {tableContent}
+        </SourceBlock>
+      )}
+    >
+      {children}
+    </ResizableMarkdownTable>
   );
 }
 

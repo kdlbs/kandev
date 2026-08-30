@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/quick-chat-elevation.md
+spec: docs/specs/ui/requirements/quick-chat-elevation.md
 created: 2026-08-04
 status: done
 ---

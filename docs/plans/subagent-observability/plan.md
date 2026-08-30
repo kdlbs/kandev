@@ -1,5 +1,5 @@
 ---
-spec: "../../specs/ui/subagent-observability.md"
+spec: "../../specs/ui/requirements/subagent-observability.md"
 status: building
 created: 2026-08-03
 ---

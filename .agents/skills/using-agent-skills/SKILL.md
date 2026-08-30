@@ -15,7 +15,7 @@ Task arrives
 |-- Need to clarify intent first? ----------> /interview-me
 |-- Create/change/fix/publish Kandev plugin? -> /create-kandev-plugin plus /fix or /tdd as needed
 |-- New feature or behavior-changing fix? --> /spec-driven-development
-|-- Bug regression? ------------------------> /fix -> repair spec -> fix plan/tasks -> /tdd
+|-- Bug regression? ------------------------> /fix -> requirement/design check -> fix plan/work orders -> /tdd
 |-- Running/debugging Kandev locally? ------> /debug
 |-- Need focused context setup? ------------> /context-engineering
 |-- Code change with test coverage? --------> /tdd
@@ -31,7 +31,7 @@ Task arrives
 |-- Validate implementation? ----------------> /tdd plus exact task-defined tests/E2E
 |-- Need local QA/review/simplification? ----> only on explicit user request or PR finding
 |-- Improve skills/agents/commands? --------> /harness-improvement
-|-- Record decisions/spec changes? ---------> /record
+|-- Record decisions/specification changes? -> /record
 |-- Public docs impact? --------------------> /docs-maintainer
 |-- Commit/push/PR? ------------------------> /commit -> /push or /pr
 `-- Release/versioning? --------------------> /release
@@ -52,8 +52,9 @@ Use the smallest covering set and state the order.
 7. Verify with evidence: targeted task-defined tests and browser/E2E proof for
    user-facing flows. The two PR AI reviewers provide semantic review after PR
    creation; do not add broad local gates by default.
-8. Keep all repository work in the primary conversation. Use durable spec,
-   plan, and task files as the user-controlled handoff when switching models.
+8. Keep all repository work in the primary conversation. Use durable
+   requirements, system designs, plans, and work orders as the user-controlled
+   handoff when switching models.
 9. Product media always invokes `/product-demo-seeding` before `/product-video-capture`, even when a prior seed or capture exists. Re-prove current `origin/main`, disposable runtime/data, and teardown; never capture a developer instance or database.
 10. In Kandev repos, local `/commit`, `/push`, and `/pr` workflows, the repository
     PR template, and `.github/AGENTS.md` are authoritative for publication.

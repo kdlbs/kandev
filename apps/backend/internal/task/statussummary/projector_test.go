@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 type projectorTestStore struct {
@@ -446,6 +447,48 @@ func TestProjectorLastActivityTracksBoundedSourcesMonotonically(t *testing.T) {
 		"updated_at":   "2026-08-01T18:10:00Z",
 	})
 	assertProjectedLastActivity(t, store.summary(taskID), "2026-08-01T18:10:00Z")
+}
+
+// @covers AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.10
+func TestProjectorLastActivityIgnoresLifecycleTurns(t *testing.T) {
+	_, store, eventBus, _, _ := newProjectorTest(t)
+	const taskID = "task-last-activity-lifecycle"
+	const sessionID = "session-last-activity-lifecycle"
+
+	publishProjectorEvent(t, eventBus, events.TaskCreated, events.TaskCreated, map[string]interface{}{
+		"task_id":      taskID,
+		"workspace_id": "workspace-1",
+		"created_at":   "2026-08-01T18:00:00Z",
+		"updated_at":   "2026-08-01T18:00:00Z",
+	})
+
+	publishProjectorEvent(t, eventBus, events.TurnStarted, events.TurnStarted, map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"started_at": "2026-08-01T18:01:00Z",
+		"metadata":   map[string]interface{}{models.TurnMetaKeyLifecycleOnly: true},
+	})
+	publishProjectorEvent(t, eventBus, events.TurnCompleted, events.TurnCompleted, map[string]interface{}{
+		"task_id":      taskID,
+		"session_id":   sessionID,
+		"completed_at": "2026-08-01T18:02:00Z",
+		"metadata":     map[string]interface{}{models.TurnMetaKeyLifecycleOnly: true},
+	})
+	assertProjectedLastActivity(t, store.summary(taskID), "2026-08-01T18:00:00Z")
+
+	publishProjectorEvent(t, eventBus, events.TurnStarted, events.TurnStarted, map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"started_at": "2026-08-01T18:03:00Z",
+	})
+	assertProjectedLastActivity(t, store.summary(taskID), "2026-08-01T18:03:00Z")
+
+	publishProjectorEvent(t, eventBus, events.TurnCompleted, events.TurnCompleted, map[string]interface{}{
+		"task_id":      taskID,
+		"session_id":   sessionID,
+		"completed_at": "2026-08-01T18:04:00Z",
+	})
+	assertProjectedLastActivity(t, store.summary(taskID), "2026-08-01T18:04:00Z")
 }
 
 func TestProjectorLastActivityRehydratesFromDurableLoader(t *testing.T) {

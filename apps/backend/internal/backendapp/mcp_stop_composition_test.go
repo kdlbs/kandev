@@ -72,7 +72,7 @@ func TestRegisterMCPAndDebugRoutesWiresCoordinatorTaskStopper(t *testing.T) {
 		addCleanup: func(cleanup func() error) {
 			registerMCPStopTestCleanup(t, "MCP server", cleanup)
 		},
-	}, nil, nil, nil, nil, nil)
+	}, nil, nil, nil, nil, nil, nil)
 
 	require.True(t, gateway.Dispatcher.HasHandler(ws.ActionMCPStopTask),
 		"registerMCPAndDebugRoutes did not register mcp.stop_task")

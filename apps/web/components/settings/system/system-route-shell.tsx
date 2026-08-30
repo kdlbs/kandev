@@ -5,14 +5,10 @@ import { useTranslation } from "react-i18next";
 import { SystemPageShell } from "./system-page-shell";
 
 /**
- * The SQL statement that produces a snapshot, and the directory it writes to.
- * Both are interpolated into the Backups description as values: baked into the
- * message, the pseudo-locale renders them `VÀĆŨŨḾ ĨŃŢŌ` and
- * `<ďàţà-ďĩŕ>/ƀàćķũƥś/`, turning a command the user runs and a path they have to
- * find into dead pointers.
+ * The SQL statement that produces a snapshot is interpolated into the Backups
+ * description as a value, so the pseudo-locale does not alter the command.
  */
 export const BACKUP_SQL_COMMAND = "VACUUM INTO";
-export const BACKUP_DIR = "<data-dir>/backups/";
 
 /**
  * The shell the System routes render through.

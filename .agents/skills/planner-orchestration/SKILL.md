@@ -17,17 +17,18 @@ The user, not the harness, selects the model. Keep each phase in the primary
 conversation so the active model, transcript, and costs are visible in one place.
 
 1. **Design checkpoint — strong model.** Use the user's strong model for
-   clarification, codebase investigation, specs, plans, task decomposition, and
-   high-risk design decisions. Default Codex guidance is GPT-5.6 Sol/high.
-2. **Design-package handoff.** Once the spec, plan, and task files are ready,
-   summarize their paths and end the turn. Do not call
+   clarification, codebase investigation, requirements, system designs, plans,
+   work-order decomposition, and high-risk decisions. Default Codex guidance
+   is GPT-5.6 Sol/high.
+2. **Design-package handoff.** Once the requirements, system design, plan, and
+   work orders are ready, summarize their paths and end the turn. Do not call
    `ask_user_question_kandev` (or an equivalent approval prompt) to ask the
    user to approve the package or switch models. The user reviews the files,
    switches the main session if desired, and sends a later explicit
    implementation request. The files may remain `draft`/`pending`; do not wait
    for a separate approval marker.
 3. **Execution checkpoint.** After that explicit request, read the
-   task file, mark it `in_progress`, implement with `/tdd`, run its exact
+   work order, mark it `in_progress`, implement with `/tdd`, run its exact
    targeted checks, and mark it `done`. Work sequentially through the plan by
    default. The user, not the harness, chooses the active implementation model.
 4. **Escalation checkpoint.** Stop and ask the user to switch back to a stronger
@@ -41,24 +42,25 @@ default implementation or test model. The active agent must never claim a model
 change occurred based on self-identification; use runtime model-usage metadata
 when such confirmation is needed.
 
-## Task-File Workflow
+## Work-Order Workflow
 
 Feature work still follows `/spec`, `/plan`, and `/spec-driven-development`:
 
-- Store the accepted spec in `docs/specs/<slug>/spec.md`.
-- Store `plan.md` and independently actionable sibling task files in
-  `docs/plans/<slug>/`.
-- Use `pending`, `in_progress`, and `done` task-file status as the durable
-  execution record. The primary agent updates both the current task and the
-  plan's status after each completed task.
-- Keep task files small enough that the same conversation can resume from their
+- Store requirements in `docs/specs/<system>/requirements/`.
+- Store technical design in `docs/specs/<system>/system-design/`.
+- Store `plan.md` and independently actionable sibling work orders in
+  `docs/plans/<initiative>/`.
+- Use `pending`, `in_progress`, and `done` work-order status as the durable
+  execution record. The primary agent updates both the current work order and
+  the plan's status after each completed work order.
+- Keep work orders small enough that the same conversation can resume from their
   acceptance criteria, owned files, and exact verification command after a user
   switches model.
 
-Task files are a model-switch handoff and, if the user explicitly asks for
-subagents, a compact work packet. They must include intent, dependencies, owned
-files, acceptance criteria, verification, and risks, but must not name an agent
-role or model tier.
+Work-order files are a model-switch handoff and, if the user explicitly asks
+for subagents, a compact work packet. They must include requirement IDs,
+system-design references, scope, dependencies, owned files, acceptance,
+verification, and risks. They must not name an agent role or model tier.
 
 ## User-Authorized Subagents
 
@@ -72,7 +74,7 @@ When the user authorizes subagents:
 - Do not recreate project custom-agent files or pin a different worker model.
   The child must use the active model the user selected in the primary session.
 - Use `fork_turns: "none"` (or the platform equivalent), not a full-history
-  fork. Put the task-file path, owned files, acceptance criteria, exact command,
+  fork. Put the work-order path, owned files, acceptance criteria, exact command,
   and dependencies in the initial prompt.
 - Launch only tasks explicitly marked parallel-safe with disjoint files and no
   shared schema, migration, generated contract, lockfile, or package config.
@@ -91,7 +93,7 @@ comments, or spawns children.
 
 ## Task-Driven Validation And PR Review
 
-Each task file owns its TDD requirement and exact unit, integration, or E2E
+Each work order owns its TDD requirement and exact unit, integration, or E2E
 commands. Its completed status and recorded command results are the pre-PR
 evidence; do not add a second generic validation pass here.
 
@@ -118,5 +120,5 @@ Treat the OpenCode App as trusted semantic evidence only when `trusted_producer=
 - Do not continue from the design-package handoff automatically or treat
   artifact creation as implementation authorization. Wait for a later explicit
   implementation request; the user controls any model switch between turns.
-- Do not replace durable specs, plans, task files, tests, or verification with
-  chat-only summaries.
+- Do not replace durable requirements, system designs, plans, work orders,
+  tests, or verification with chat-only summaries.

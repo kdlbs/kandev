@@ -109,17 +109,6 @@ func (r *Repository) ExecRaw(ctx context.Context, query string, args ...interfac
 // package should keep using typed methods.
 func (r *Repository) ReaderDB() *sqlx.DB { return r.ro }
 
-// BeginTx starts a transaction on the shared writer connection. Exposed so
-// the office service layer can make CreateCostEventTx atomic with another
-// package's write (e.g. task.Repository.IncrementTaskSessionUsageTx via
-// shared.SessionUsageWriterTx) — safe because both repositories are
-// constructed from the same underlying *sqlx.DB (internal/backendapp/storage.go),
-// so a transaction begun here can execute statements against tables either
-// package owns.
-func (r *Repository) BeginTx(ctx context.Context) (*sqlx.Tx, error) {
-	return r.db.BeginTxx(ctx, nil)
-}
-
 // initSchema creates all office tables if they don't exist.
 func (r *Repository) initSchema() error {
 	if err := r.createCoreTables(); err != nil {
@@ -129,6 +118,7 @@ func (r *Repository) initSchema() error {
 		return err
 	}
 	r.runMigrations()
+	r.activateRunOutcome()
 	return nil
 }
 
@@ -194,6 +184,9 @@ func (r *Repository) createExtensionTables() error {
 		return err
 	}
 	if err := r.createAgentWakeupRequestTable(); err != nil {
+		return err
+	}
+	if err := r.createParentChildWakeReceiptsTable(); err != nil {
 		return err
 	}
 	return nil
@@ -278,7 +271,7 @@ func (r *Repository) createCostTables() error {
 	// columns must stay byte-identical to — see base_migrations.go). NULL
 	// means "not recorded" (legacy row, or an adapter that did not report
 	// cache data); 0 would silently claim zero cache activity. See
-	// docs/specs/office/costs.md.
+	// docs/specs/office/requirements/costs.md.
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS office_cost_events (
 		id TEXT PRIMARY KEY,
@@ -311,13 +304,7 @@ func (r *Repository) createCostTables() error {
 	CREATE INDEX IF NOT EXISTS idx_office_cost_agent ON office_cost_events(agent_profile_id);
 	CREATE INDEX IF NOT EXISTS idx_office_cost_occurred ON office_cost_events(occurred_at DESC);
 	CREATE INDEX IF NOT EXISTS idx_office_cost_task ON office_cost_events(task_id);
-	-- Indexes the join column internal/task/repository/sqlite's
-	-- BackfillSessionTokensCachedIn correlates task_sessions against. Lives
-	-- here (not in the task repository) because it indexes a table this
-	-- repository owns. Without it that correlated subquery falls back to a
-	-- full table scan per task_sessions row - measured at 76.72s at a modest
-	-- 4,000 sessions / 80,000 events versus 0.17s indexed.
-	CREATE INDEX IF NOT EXISTS idx_office_cost_events_session_id ON office_cost_events(session_id);
+	DROP INDEX IF EXISTS idx_office_cost_events_session_id;
 	-- uniq_office_cost_usage_event is created by migrateCostEventContract
 	-- (base_migrations.go), not here: schema init runs before migrations,
 	-- so indexing usage_event_id inline would crash a pre-migration
@@ -359,6 +346,11 @@ func (r *Repository) createRunTables() error {
 		scheduled_retry_at TIMESTAMP,
 		error_message TEXT NOT NULL DEFAULT '',
 		cancel_reason TEXT,
+		-- outcome (task-delivery-ledger): nullable, one of the eight
+		-- Office run outcome values on the finished path, NULL on failed
+		-- and on every pre-activation row. See migrateRunOutcome for the
+		-- ADD COLUMN that converges existing databases.
+		outcome TEXT,
 		-- Provider routing (office-provider-routing).
 		logical_provider_order TEXT,
 		requested_tier TEXT,
@@ -380,6 +372,13 @@ func (r *Repository) createRunTables() error {
 		result_json TEXT NOT NULL DEFAULT '{}',
 		assembled_prompt TEXT NOT NULL DEFAULT '',
 		summary_injected TEXT NOT NULL DEFAULT '',
+		-- continuation_scope is the continuation-summary scope key
+		-- (models.ContinuationScopeForRun) decided once at run creation
+		-- and persisted so every later reader/writer of this run's
+		-- continuation summary uses the same value instead of
+		-- re-deriving it against a context_snapshot a coalesced wakeup
+		-- may have since patched.
+		continuation_scope TEXT NOT NULL DEFAULT '',
 		requested_at TIMESTAMP NOT NULL,
 		claimed_at TIMESTAMP,
 		finished_at TIMESTAMP
@@ -699,6 +698,33 @@ func (r *Repository) createAgentWakeupRequestTable() error {
 	CREATE INDEX IF NOT EXISTS idx_wakeup_agent_status ON agent_wakeup_requests(agent_profile_id, status);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_wakeup_idempotency ON agent_wakeup_requests(idempotency_key)
 		WHERE idempotency_key IS NOT NULL AND idempotency_key != '';
+	`)
+	return err
+}
+
+// createParentChildWakeReceiptsTable creates the table backing
+// ParentWakeReconciler's level-triggered sweep (see
+// scheduler_wake_reconciler.go). One row per parent task records the
+// child set (sorted child IDs + terminal states, compared directly — no
+// hashing) a task_children_completed run was last delivered for, so a
+// healthy steady state costs one indexed lookup per tick and emits
+// nothing.
+//
+// The companion tasks(parent_id) index ListStuckParents needs lives in
+// runMigrations (migrateParentWakeIndexes) via r.migrate.Apply, not here:
+// tasks is a table this package doesn't own (see runMigrations' doc
+// comment), so a plain r.db.Exec against it is fatal in the minimal
+// single-domain test repos under internal/office/repository/sqlite,
+// which build a tasks table only after NewWithDB returns.
+func (r *Repository) createParentChildWakeReceiptsTable() error {
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS parent_child_wake_receipts (
+		parent_task_id        TEXT PRIMARY KEY,
+		child_set_key         TEXT NOT NULL,
+		delivered_run_id      TEXT NOT NULL DEFAULT '',
+		delivery_operation_id TEXT NOT NULL DEFAULT '',
+		delivered_at          TIMESTAMP NOT NULL
+	);
 	`)
 	return err
 }

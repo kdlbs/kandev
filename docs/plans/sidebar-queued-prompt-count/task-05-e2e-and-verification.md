@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-attach-count-to-task-payloads", "04-sidebar-badge-ui"]
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-queued-prompt-count.md"
+spec: "../../specs/ui/requirements/sidebar-queued-prompt-count.md"
 ---
 
 # Task 05: E2E Coverage and Full Verification

@@ -183,7 +183,7 @@ func (s *Service) resolveWorkflow(ctx context.Context, tx *sqlx.Tx, a *Automatio
 // member warns by its 0-based position, since the export carries no UUID to
 // name it by (AC-18).
 func (s *Service) resolveRepositories(ctx context.Context, tx *sqlx.Tx, a *Automation) ([]string, []string, error) {
-	if len(a.RepositoryIDs) == 0 {
+	if a.RepositoryMode == RepositoryModeNone || len(a.RepositoryIDs) == 0 {
 		return nil, nil, nil
 	}
 	if s.exportRepositoryLookup == nil {

@@ -17,10 +17,14 @@ import (
 	"github.com/kandev/kandev/internal/office/skills"
 	"github.com/kandev/kandev/internal/office/tree_controls"
 	"github.com/kandev/kandev/internal/office/workspaces"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 // RegisterAllRoutes delegates route registration to each feature package.
-func RegisterAllRoutes(router *gin.RouterGroup, svcs *Services, log *logger.Logger) {
+// handoff wires the guarded agent-caller comment-read branch of
+// dashboard.listComments; it may be nil where no HandoffService is
+// available, in which case an agent request to that route responds 503.
+func RegisterAllRoutes(router *gin.RouterGroup, svcs *Services, handoff *taskservice.HandoffService, log *logger.Logger) {
 	agents.RegisterRoutes(router, svcs.Agents, log)
 	officeruntime.RegisterRoutes(router, officeruntime.NewHandler(
 		svcs.Agents,
@@ -59,7 +63,7 @@ func RegisterAllRoutes(router *gin.RouterGroup, svcs *Services, log *logger.Logg
 	configHandler := config.NewHandler(svcs.Config, log)
 	config.RegisterRoutes(router, configHandler)
 
-	dashboard.RegisterRoutes(router, svcs.Dashboard, svcs.Repo, svcs.GitManager, log)
+	dashboard.RegisterRoutes(router, svcs.Dashboard, svcs.Repo, svcs.GitManager, handoff, log)
 
 	if svcs.Documents != nil {
 		docHandler := dashboard.NewDocumentHandler(svcs.Documents, svcs.KandevHome, log)

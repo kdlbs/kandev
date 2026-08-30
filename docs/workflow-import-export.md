@@ -250,7 +250,7 @@ events:
       config:
         target: primary
         task_id: this
-        reason: children_completed
+        reason: task_children_completed
 ```
 
 > [!WARNING]

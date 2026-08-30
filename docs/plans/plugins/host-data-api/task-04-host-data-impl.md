@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-proto-contract", "02-session-loc-aggregation", "03-sdk-data-accessors"]
 plan: "plan.md"
-spec: "../../../specs/plugins/spec.md"
+spec: "../../../specs/plugins/requirements/plugins.md"
 adr: "../../../decisions/0043-plugin-host-data-api.md"
 ---
 

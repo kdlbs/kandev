@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-activate-validated-runtime-versions"]
 plan: "plan.md"
-spec: "../../specs/agents/runtime-updates.md"
+spec: "../../specs/agents/requirements/runtime-updates.md"
 ---
 
 # Task 04: Add responsive version recovery UI

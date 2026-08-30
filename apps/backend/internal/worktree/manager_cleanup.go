@@ -403,6 +403,16 @@ func (m *Manager) managedScriptEnvironment(ctx context.Context) map[string]strin
 
 // CleanupWorktrees removes provided worktrees without re-fetching from the store.
 func (m *Manager) CleanupWorktrees(ctx context.Context, worktrees []*Worktree) error {
+	return m.cleanupWorktrees(ctx, worktrees, true)
+}
+
+// CleanupWorktreesPreservingBranches removes provided worktrees while retaining
+// their local branch refs for later archive recovery.
+func (m *Manager) CleanupWorktreesPreservingBranches(ctx context.Context, worktrees []*Worktree) error {
+	return m.cleanupWorktrees(ctx, worktrees, false)
+}
+
+func (m *Manager) cleanupWorktrees(ctx context.Context, worktrees []*Worktree, removeBranch bool) error {
 	if len(worktrees) == 0 {
 		return nil
 	}
@@ -412,8 +422,14 @@ func (m *Manager) CleanupWorktrees(ctx context.Context, worktrees []*Worktree) e
 		if wt == nil {
 			continue
 		}
-		if err := m.removeWorktree(ctx, wt, true); err != nil {
-			m.logger.Warn("failed to remove worktree on task deletion",
+		// Task-environment inventory rows can describe a repository slot
+		// without a materialized physical worktree. Never pass such a row to
+		// filesystem cleanup, because its path can be the source checkout.
+		if strings.TrimSpace(wt.ID) == "" {
+			continue
+		}
+		if err := m.removeWorktree(ctx, wt, removeBranch); err != nil {
+			m.logger.Warn("failed to remove worktree during batch cleanup",
 				zap.String("task_id", wt.TaskID),
 				zap.String("worktree_id", wt.ID),
 				zap.Error(err))

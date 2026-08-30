@@ -351,12 +351,16 @@ test:
 ## Run only the Windows-sensitive packages — mirrors the test-windows job in
 ## .github/workflows/backend-tests.yml. The broader suite uses Unix-only
 ## shell commands in test fixtures and would need GOOS guards to be portable;
-## this narrow scope is the regression coverage for the conpty/job-object
-## bug class. Tests that genuinely cannot run on Windows skip themselves via
-## runtime.GOOS guards in source.
+## this narrow scope is the regression coverage for Windows-specific behavior.
+## Tests that genuinely cannot run on Windows skip themselves via runtime.GOOS
+## guards in source.
 test-windows:
 	@echo "Running Windows-sensitive packages..."
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/backendapp/ownershiplock/...
+	@echo "Running Windows managed runtime cache tests..."
+	# Scoped to the Windows-tagged test only: untagged tests in this package use os.Symlink
+	# which requires Developer Mode on Windows. Add new //go:build windows tests here.
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agent/managedruntime -run TestRemoveNpxExecutionTreeTreatsMissingWindowsChildAsAbsent
 	@echo "Running Windows port-collision tests..."
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/common/netutil -run TestIsAddrInUse
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/instance -run TestAllocatePortAndListenerRetriesAddressInUse
@@ -370,7 +374,6 @@ check-make-shells:
 	$(CHECK_SHELLS)
 
 ## Run E2E tests (real agents, costs money — manual only)
-## Set agent commands via env vars: E2E_CLAUDE_CODE_COMMAND, E2E_AMP_COMMAND
 ## Enable debug: KANDEV_DEBUG_AGENT_MESSAGES=true KANDEV_DEBUG_LOG_DIR=/tmp/e2e-debug
 test-e2e:
 	@echo "Running E2E adapter tests..."

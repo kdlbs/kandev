@@ -5,7 +5,7 @@ status: done
 wave: 7
 depends_on: ["05-single-owner-title-handoff", "06-default-on-title-preference"]
 plan: "plan.md"
-spec: "../../specs/tasks/agent-generated-titles.md"
+spec: "../../specs/tasks/requirements/agent-generated-titles.md"
 ---
 
 # Task 07: Regression coverage and public docs

@@ -3,8 +3,10 @@ package executor
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
@@ -72,5 +74,23 @@ func TestLaunchFailureReviewActionRequiresSuccessfulEligibilityResolver(t *testi
 	errorValue = exec.buildLastAgentError(context.Background(), "task-1", "", errors.New("start failed"))
 	if len(errorValue.RecoveryActions) != 0 {
 		t.Fatalf("failed eligibility lookup exposed recovery actions = %#v", errorValue.RecoveryActions)
+	}
+}
+
+func TestBuildLastAgentErrorSanitizesRepositoryPreparationDetails(t *testing.T) {
+	exec := &Executor{}
+	launchErr := &lifecycle.RepositoryPreparationError{
+		RepositoryID:   "repo-back",
+		RepositoryName: "backend",
+		Cause:          errors.New("fatal: https://user:ghp_abcdefghijklmnopqrstuvwxyz1234567890AB@example.com/repo.git"),
+	}
+
+	errorValue := exec.buildLastAgentError(context.Background(), "task-1", "task-repo-2", launchErr)
+	if !strings.Contains(errorValue.Details, "repo-back") || !strings.Contains(errorValue.Details, "backend") {
+		t.Fatalf("launch details = %q, want repository identity", errorValue.Details)
+	}
+	if strings.Contains(errorValue.Details, "ghp_abcdefghijklmnopqrstuvwxyz1234567890AB") ||
+		strings.Contains(errorValue.Details, "user:") {
+		t.Fatalf("launch details exposed credential-bearing URL: %q", errorValue.Details)
 	}
 }

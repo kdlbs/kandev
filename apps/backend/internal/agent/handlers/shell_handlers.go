@@ -693,8 +693,81 @@ func RegisterShellRoutes(router *gin.Engine, lifecycleMgr *lifecycle.Manager, lo
 // and the terminal service has been injected.
 func RegisterShellRoutesOn(router *gin.Engine, handlers *ShellHandlers) {
 	api := router.Group("/api/v1")
-	api.GET("/environments/:id/terminals", handlers.httpListTerminals)
-	api.GET("/tasks/:id/terminals", handlers.httpListTaskTerminals)
+	api.GET("/environments/:id/terminals", handlers.authorizeEnvironmentRoute, handlers.httpListTerminals)
+	api.GET("/tasks/:id/terminals", handlers.authorizeTaskRoute, handlers.httpListTaskTerminals)
+}
+
+// Per-user scoping for the two SSR terminal lists (opt-in auth).
+//
+// Both handlers read terminal state directly - one from the interactive
+// runner, one from the terminal service - so neither passes through the
+// lifecycle manager's GetOrEnsure* chokepoint where the check normally runs,
+// and the terminal service has no authorization of its own. Unguarded, any
+// authenticated user could list another user's terminals by naming their task
+// or environment, including the display names and initial command lines of
+// their work.
+//
+// The WS equivalents (user_shell.list|create|stop|rename|park|resume) are
+// covered structurally by the dispatch backstop in
+// internal/gateway/websocket/dispatch_scope.go, which parses the same IDs out
+// of the payload. These routes get the same treatment: the guard is mounted on
+// the route rather than written into the handler body, so it runs before any
+// terminal state is read and a future handler edit cannot quietly drop it.
+//
+// Denials are 404 with no distinction between "not yours" and "no such thing",
+// matching the no-existence-leak convention documented at the top of
+// internal/task/service/service_access.go.
+
+// authorizeEnvironmentRoute gates the env-keyed SSR list on :id.
+func (h *ShellHandlers) authorizeEnvironmentRoute(c *gin.Context) {
+	if !h.allowEnvironment(c, c.Param("id")) {
+		return
+	}
+	c.Next()
+}
+
+// authorizeTaskRoute gates the task-keyed SSR list on :id, plus the optional
+// ?task_environment_id= it forwards to appendUnmanagedShells - without that
+// second check the query param is a second way into a foreign environment.
+//
+// The two IDs are checked as a pair, not independently. This handler merges
+// ordinary terminals belonging to the task with unmanaged shells belonging to
+// the environment, and authorizing each ID on its own passes for a caller who
+// holds both but for whom they are unrelated, which merges two unrelated
+// terminal lists.
+func (h *ShellHandlers) authorizeTaskRoute(c *gin.Context) {
+	taskID := c.Param("id")
+	if taskID != "" {
+		if err := h.lifecycleMgr.CheckTaskAccess(c.Request.Context(), taskID); err != nil {
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "task not found"})
+			return
+		}
+	}
+	envID := c.Query("task_environment_id")
+	if envID == "" {
+		c.Next()
+		return
+	}
+	if err := h.lifecycleMgr.CheckTaskEnvironmentAccess(c.Request.Context(), taskID, envID); err != nil {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "task environment not found"})
+		return
+	}
+	c.Next()
+}
+
+// allowEnvironment reports whether the caller may see environmentID, aborting
+// the request with 404 when not. An empty ID is allowed through so the
+// handlers keep returning their own 400 for a missing identifier; empty reads
+// no state either way.
+func (h *ShellHandlers) allowEnvironment(c *gin.Context, environmentID string) bool {
+	if environmentID == "" {
+		return true
+	}
+	if err := h.lifecycleMgr.CheckEnvironmentAccess(c.Request.Context(), environmentID); err != nil {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "task environment not found"})
+		return false
+	}
+	return true
 }
 
 // httpListTerminals (env-keyed legacy SSR) — kept for backwards-compat with

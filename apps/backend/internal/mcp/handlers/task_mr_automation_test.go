@@ -91,3 +91,47 @@ func TestHandleGetTaskMRAutomation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, ws.MessageTypeResponse, response.Type)
 }
+
+// TestHandleUpdateTaskMRAutomationForwardsMRIdentity covers the per-MR MCP
+// contract: an agent that knows which MR it means can say so, and the
+// identity reaches the service instead of being dropped into a fan-out.
+func TestHandleUpdateTaskMRAutomationForwardsMRIdentity(t *testing.T) {
+	automation := &recordingTaskMRAutomationService{}
+	h := &Handlers{taskMRAutomation: automation, logger: testLogger(t).WithFields()}
+
+	msg := makeWSMessage(t, ws.ActionMCPUpdateTaskMRAutomation, map[string]any{
+		"task_id":            "task-current",
+		"repository_id":      "repo-1",
+		"project_path":       "group/a",
+		"mr_iid":             7,
+		"auto_merge_enabled": true,
+	})
+	response, err := h.handleUpdateTaskMRAutomation(context.Background(), msg)
+
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeResponse, response.Type)
+	require.Equal(t, 1, automation.calls)
+	require.True(t, automation.patch.HasMRIdentity())
+	assert.Equal(t, gitlab.MRIdentity{RepositoryID: "repo-1", ProjectPath: "group/a", MRIID: 7},
+		automation.patch.MRIdentity())
+}
+
+// TestHandleUpdateTaskMRAutomationRejectsIdentityOnlyPayload keeps MR
+// identity from counting as a requested change on its own — it only says
+// which MR the (absent) switch changes would have applied to.
+func TestHandleUpdateTaskMRAutomationRejectsIdentityOnlyPayload(t *testing.T) {
+	automation := &recordingTaskMRAutomationService{}
+	h := &Handlers{taskMRAutomation: automation, logger: testLogger(t).WithFields()}
+
+	msg := makeWSMessage(t, ws.ActionMCPUpdateTaskMRAutomation, map[string]any{
+		"task_id":       "task-current",
+		"repository_id": "repo-1",
+		"project_path":  "group/a",
+		"mr_iid":        7,
+	})
+	response, err := h.handleUpdateTaskMRAutomation(context.Background(), msg)
+
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeError, response.Type)
+	assert.Zero(t, automation.calls)
+}

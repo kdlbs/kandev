@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-send-now.md"
+spec: "../../specs/ui/requirements/message-queue-send-now.md"
 ---
 
 # Task 01: Arbitrate FIFO and Send Now handoff

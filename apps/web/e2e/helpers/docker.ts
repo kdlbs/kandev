@@ -73,6 +73,14 @@ export function dockerFileContent(containerID: string, filePath: string): string
   return res.stdout;
 }
 
+export function dockerPathExists(containerID: string, filePath: string): boolean {
+  return (
+    spawnSync("docker", ["exec", containerID, "test", "-e", filePath], {
+      stdio: "ignore",
+    }).status === 0
+  );
+}
+
 export async function waitForDockerContainerRemoved(
   containerID: string,
   message: string,

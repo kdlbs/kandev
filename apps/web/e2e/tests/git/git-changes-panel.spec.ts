@@ -1350,7 +1350,7 @@ test.describe("Git Changes Panel", () => {
     expect(await diffViewerOpen(), "no cumulative diff panel before clicking Diff").toBe(false);
 
     // Click the "Diff" button in the header to open the cumulative diff view
-    await session.changes.getByRole("button", { name: "Diff" }).click();
+    await session.changes.getByRole("button", { name: "Diff", exact: true }).click();
 
     // Assert what the click actually opens. Without this the checks below are
     // vacuous: the two commit texts were already visible before the click and
@@ -1492,22 +1492,12 @@ test.describe("Git Changes Panel", () => {
   }) => {
     const profile = await createStandardProfile(apiClient, "Git PR Dedup Profile");
 
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Git PR Dedup Test",
-      profile.id,
-      {
-        description: "Testing PR commit deduplication",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
-
-    const session = await openTaskSession(testPage, "Git PR Dedup Test");
-
-    // Set up git helper
-    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    // This test mutates repository history. Use a disposable local repository
+    // so commits from earlier cumulative-diff tests cannot leak into the
+    // unified list. The fixture has no fetchable origin, so keep materialization
+    // offline while testing PR commit deduplication.
+    const repoDir = path.join(backend.tmpDir, "repos", "git-pr-dedup-repo");
+    fs.mkdirSync(repoDir, { recursive: true });
     const gitEnv = {
       ...process.env,
       HOME: backend.tmpDir,
@@ -1516,6 +1506,28 @@ test.describe("Git Changes Panel", () => {
       GIT_COMMITTER_NAME: "E2E Test",
       GIT_COMMITTER_EMAIL: "e2e@test.local",
     };
+    execSync("git init -b main", { cwd: repoDir, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
+    const repository = await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
+      name: "Git PR Dedup Repo",
+      pull_before_worktree: false,
+    });
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git PR Dedup Test",
+      profile.id,
+      {
+        description: "Testing PR commit deduplication",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [repository.id],
+      },
+    );
+
+    const session = await openTaskSession(testPage, "Git PR Dedup Test");
+
+    // Set up git helper
     const git = new GitHelper(repoDir, gitEnv);
 
     // Create a commit

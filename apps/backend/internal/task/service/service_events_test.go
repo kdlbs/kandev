@@ -603,6 +603,40 @@ func TestPublishTaskUpdated_EmitsAutopilot(t *testing.T) {
 	}
 }
 
+func TestPublishTaskUpdatedRedactsDeferredLaunchAttribution(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+	task := &models.Task{
+		ID: "task-private-attribution", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+		Metadata: map[string]interface{}{
+			models.MetaKeyDeferredLaunch: map[string]interface{}{
+				models.DeferredLaunchUserIDKey:          "user-private",
+				models.DeferredLaunchRecordRecentUseKey: true,
+			},
+		},
+	}
+
+	svc.PublishTaskUpdated(context.Background(), task)
+
+	data := singlePublishedEventData(t, eventBus)
+	metadata, ok := data["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("event metadata = %#v, want a map", data["metadata"])
+	}
+	launch, ok := metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	if !ok {
+		t.Fatalf("event deferred launch metadata = %#v, want a map", metadata[models.MetaKeyDeferredLaunch])
+	}
+	if _, exists := launch[models.DeferredLaunchUserIDKey]; exists {
+		t.Fatalf("event exposed deferred launch user_id = %v", launch[models.DeferredLaunchUserIDKey])
+	}
+	if _, exists := launch[models.DeferredLaunchRecordRecentUseKey]; exists {
+		t.Fatalf("event exposed deferred launch recency marker = %v", launch[models.DeferredLaunchRecordRecentUseKey])
+	}
+	if got := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})[models.DeferredLaunchUserIDKey]; got != "user-private" {
+		t.Fatalf("redacting the event mutated the source task user_id = %v", got)
+	}
+}
+
 // TestPublishTaskUpdated_EmitsAutoStartFailed regression-tests the WS gap
 // found in Review round 2: setTaskAutoStartFailedMarker /
 // clearTaskAutoStartFailedMarker both call PublishTaskUpdated expecting open

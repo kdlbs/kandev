@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/i18n.md
+spec: docs/specs/platform/requirements/i18n.md
 created: 2026-08-02
 status: done
 ---

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { compareChipMR } from "./mr-task-icon";
 import {
   autoFixRoundForState,
+  findMRAutomationOptionsForMR,
   findMRAutomationStateForMR,
   type AutoFixRoundInfo,
 } from "@/lib/gitlab/mr-automation";
@@ -22,6 +23,29 @@ function autoFixRoundFor(options: TaskMRAutomationOptions | null, mr: TaskMR): A
   );
 }
 
+/**
+ * One MR's own automation switches. The response's top-level booleans are an
+ * aggregate ("every linked MR has this on, and at least one MR is linked"),
+ * so reading them per MR would hide a switch the user enabled on only some
+ * of the linked MRs — the chip would show no auto-fix badge and no round
+ * counter while auto-fix was actively spending its round budget on one MR.
+ * Falls back to the aggregate only when `mr_options` is absent, i.e. a
+ * payload that predates per-MR scoping. Mirrors GitHub's automationForPR.
+ */
+function switchesForMR(
+  options: TaskMRAutomationOptions | null,
+  mr: TaskMR,
+): { autoFix: boolean; autoMerge: boolean } {
+  if (!options?.mr_options) {
+    return {
+      autoFix: Boolean(options?.auto_fix_enabled),
+      autoMerge: Boolean(options?.auto_merge_enabled),
+    };
+  }
+  const row = findMRAutomationOptionsForMR(options.mr_options, mr);
+  return { autoFix: row.auto_fix_enabled, autoMerge: row.auto_merge_enabled };
+}
+
 function isBadgeMRBetter(
   candidateRound: AutoFixRoundInfo,
   candidate: TaskMR,
@@ -36,20 +60,25 @@ function isBadgeMRBetter(
 
 /**
  * The badge-selected MR: the most attention-worthy auto-fix round across the
- * open MRs — an exhausted round beats a non-exhausted one, then a higher
- * `current` wins, then the same `mr_iid` / `project_path` / `id` order
- * `selectChipMR` uses (spec: Selection and ordering). Distinct from the live
- * and frozen selections, and deliberately never frozen (spec: "The
- * automation badges do NOT freeze").
+ * open MRs that have auto-fix enabled *for themselves* — an exhausted round
+ * beats a non-exhausted one, then a higher `current` wins, then the same
+ * `mr_iid` / `project_path` / `id` order `selectChipMR` uses (spec: Selection
+ * and ordering). Distinct from the live and frozen selections, and
+ * deliberately never frozen (spec: "The automation badges do NOT freeze").
+ *
+ * The per-MR gate replaces a task-level `auto_fix_enabled` check: now that
+ * the switches are per MR, that top-level boolean is an aggregate over every
+ * linked MR, so gating on it hid the round counter entirely whenever
+ * auto-fix was on for some linked MRs but not all.
  */
 export function selectBadgeMR(
   openMRs: TaskMR[],
   options: TaskMRAutomationOptions | null,
 ): TaskMR | null {
-  if (!options?.auto_fix_enabled) return null;
   let best: TaskMR | null = null;
   let bestRound: AutoFixRoundInfo | null = null;
   for (const mr of openMRs) {
+    if (!switchesForMR(options, mr).autoFix) continue;
     const round = autoFixRoundFor(options, mr);
     if (!best || !bestRound || isBadgeMRBetter(round, mr, bestRound, best)) {
       best = mr;
@@ -59,15 +88,22 @@ export function selectBadgeMR(
   return best;
 }
 
-/** Automation flags + round info for the chip's badges, live (never frozen). */
+/**
+ * Automation flags + round info for the chip's badges, live (never frozen).
+ * A badge lights up when *any* open MR has that switch on, mirroring
+ * GitHub's automationForPRs — the task-level booleans read "on" only when
+ * every linked MR has the switch on, which would leave the chip silently
+ * under-reporting an armed auto-merge.
+ */
 export function chipAutomation(
   options: TaskMRAutomationOptions | null,
   openMRs: TaskMR[],
 ): ChipAutomation {
   const badgeMR = selectBadgeMR(openMRs, options);
+  const perMR = openMRs.map((mr) => switchesForMR(options, mr));
   return {
-    autoFixEnabled: Boolean(options?.auto_fix_enabled),
-    autoMergeEnabled: Boolean(options?.auto_merge_enabled),
+    autoFixEnabled: perMR.some((s) => s.autoFix),
+    autoMergeEnabled: perMR.some((s) => s.autoMerge),
     autoFixRound: badgeMR ? autoFixRoundFor(options, badgeMR) : null,
   };
 }

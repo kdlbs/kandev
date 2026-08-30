@@ -381,6 +381,46 @@ func TestCutover_NormalizesLegacyFlatEnvironment(t *testing.T) {
 	}
 }
 
+func TestCutover_PreservesLegacyDockerCredentialReferences(t *testing.T) {
+	db := openLegacyDB(t)
+	for _, column := range []string{
+		"container_bootstrap_nonce_secret_id TEXT DEFAULT ''",
+		"container_control_auth_token_secret_id TEXT DEFAULT ''",
+	} {
+		if _, err := db.Exec("ALTER TABLE task_environments ADD COLUMN " + column); err != nil {
+			t.Fatalf("add legacy credential column: %v", err)
+		}
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{envID: "env-docker", taskID: "task-docker", repoID: "repo-docker", sessionID: "session-docker"}
+	seedLegacyTask(t, db, seed, now)
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_environments (
+			id, task_id, repository_id, executor_type, executor_id, executor_profile_id,
+			control_port, status, workspace_path, container_id,
+			container_bootstrap_nonce_secret_id, container_control_auth_token_secret_id,
+			sandbox_id, task_dir_name, created_at, updated_at
+		) VALUES (?, ?, ?, 'local_docker', 'docker', '', 0, 'ready', '/workspace', 'container-1', ?, ?, '', '', ?, ?)`),
+		seed.envID, seed.taskID, seed.repoID, "bootstrap-secret", "control-secret", now, now); err != nil {
+		t.Fatalf("seed legacy Docker environment: %v", err)
+	}
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("upgrade legacy database: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if env.ContainerBootstrapNonceSecretID != "bootstrap-secret" {
+		t.Fatalf("ContainerBootstrapNonceSecretID = %q, want bootstrap-secret", env.ContainerBootstrapNonceSecretID)
+	}
+	if env.ContainerControlAuthTokenSecretID != "control-secret" {
+		t.Fatalf("ContainerControlAuthTokenSecretID = %q, want control-secret", env.ContainerControlAuthTokenSecretID)
+	}
+}
+
 // TestCutover_NormalizesSessionOnlyOwnership seeds sessions with worktrees
 // but no environment, and proves the cutover creates one task-owned
 // environment, homes the worktrees, and links the sessions.

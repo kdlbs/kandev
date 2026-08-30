@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["03-index-page-sliders"]
 plan: "plan.md"
-spec: "../../specs/integrations/enable-disable-toggle.md"
+spec: "../../specs/integrations/requirements/enable-disable-toggle.md"
 ---
 
 # Task 04: "Hide disabled integrations from left panel navigation" setting

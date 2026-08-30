@@ -51,12 +51,26 @@ test.describe("Long prepare (slow git fetch)", () => {
       await session.waitForLoad();
 
       // While git fetch is sleeping, agentctl cannot become ready. The file
-      // tree must sit in the "waiting" state (the fix: useFileBrowserTree
-      // gates its initial load on agentctlStatus.isReady instead of racing
-      // the 18s retry budget).
+      // tree must either remain in the "waiting" state or reach a loaded tree
+      // if the fetch completes before the waiting indicator paints. The test
+      // must not require a transient render state on fast CI runners.
       const fileTreeWaiting = testPage.getByTestId("file-tree-waiting");
       const fileTreeManual = testPage.getByTestId("file-tree-manual");
-      await expect(fileTreeWaiting).toBeVisible({ timeout: 15_000 });
+      const fileTreeNode = testPage.getByTestId("file-tree-node").first();
+      await expect
+        .poll(
+          async () => {
+            if ((await fileTreeManual.count()) > 0) return "manual";
+            if ((await fileTreeWaiting.count()) > 0) return "waiting";
+            if ((await fileTreeNode.count()) > 0) return "loaded";
+            return "loading";
+          },
+          {
+            timeout: 15_000,
+            message: "the file tree did not remain waiting or load after workspace preparation",
+          },
+        )
+        .toMatch(/^(waiting|loaded)$/);
       await expect(fileTreeManual).toHaveCount(0);
 
       // On faster CI runners the 22s fetch may already have completed by the
