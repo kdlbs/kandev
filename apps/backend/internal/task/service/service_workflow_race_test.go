@@ -45,6 +45,25 @@ func (r *workflowMoveRaceRepo) UpdateTaskWithWorkflowStepAdmissionAndState(
 	)
 }
 
+func (r *workflowMoveRaceRepo) UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+	ctx context.Context,
+	task *models.Task,
+	expectedStepID string,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+	expectedWorkflowID string,
+) (bool, bool, error) {
+	if !r.injected {
+		r.injected = true
+		r.inject()
+	}
+	return r.Repository.UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+		ctx, task, expectedStepID, targetStepID, limit, admittedState, queueExitPending, expectedWorkflowID,
+	)
+}
+
 // TestMoveTaskWithOptions_RaceLandingInsideCallIsRejectedByWriteTimeGuard
 // closes the gap Review round 3 flagged: every existing CAS test (including
 // TestConcurrentReassignmentSurvivesMatchingStepStaleMove) only proves a

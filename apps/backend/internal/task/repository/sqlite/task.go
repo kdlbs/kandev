@@ -530,7 +530,7 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	entryID, err := r.updateTaskTx(ctx, tx, task, metadata, "")
+	entryID, err := r.updateTaskTx(ctx, tx, task, metadata, "", "")
 	if err != nil {
 		return err
 	}
@@ -565,7 +565,7 @@ func (r *Repository) UpdateTaskIfWorkflowMatches(ctx context.Context, task *mode
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	entryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID)
+	entryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID, "")
 	if err != nil {
 		return err
 	}
@@ -577,7 +577,31 @@ func (r *Repository) UpdateTaskIfWorkflowMatches(ctx context.Context, task *mode
 	return nil
 }
 
-func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task, metadata []byte, expectedWorkflowID string) (entryID string, err error) {
+// UpdateTaskIfWorkflowStepMatches is the route-generation same-step CAS. It
+// preserves position and other manual-move fields while rejecting a stale
+// caller whose source lane changed before the repository row lock.
+func (r *Repository) UpdateTaskIfWorkflowStepMatches(ctx context.Context, task *models.Task, expectedStepID, expectedWorkflowID string) error {
+	metadata, err := json.Marshal(task.Metadata)
+	if err != nil {
+		metadata = []byte("{}")
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	entryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID, expectedStepID)
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	r.dispatchStepEntry(ctx, task.ID, task.WorkflowID, task.WorkflowStepID, entryID)
+	return nil
+}
+
+func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task, metadata []byte, expectedWorkflowID, expectedStepID string) (entryID string, err error) {
 	fromWorkflowID, fromStepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
 	if err != nil {
 		return "", err
@@ -599,6 +623,9 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		// cannot rule out on its own. See ErrWorkflowResolutionConflict (errors.go).
 		return "", fmt.Errorf("%w: expected %q, task is now in %q",
 			ErrWorkflowResolutionConflict, expectedWorkflowID, fromWorkflowID)
+	}
+	if expectedStepID != "" && fromStepID != expectedStepID {
+		return "", fmt.Errorf("workflow step changed before route commit: expected %q, task is now in %q", expectedStepID, fromStepID)
 	}
 	// Stamped after the transactional read/lock above, not before BeginTx: on
 	// Postgres, readTaskStepInTx's FOR UPDATE blocks until this transaction's
@@ -635,6 +662,9 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	if rows == 0 {
 		return "", fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
+	if err := r.settleTerminalPendingMovesTx(ctx, tx, task); err != nil {
+		return "", err
+	}
 
 	transitionID, err := r.recordStepTransition(ctx, tx, stepTransitionInput{
 		taskID:             task.ID,
@@ -669,6 +699,21 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		return "", err
 	}
 	return entryID, nil
+}
+
+func (r *Repository) settleTerminalPendingMovesTx(ctx context.Context, tx *sql.Tx, task *models.Task) error {
+	if !models.IsTerminalTaskState(task.State) {
+		return nil
+	}
+	// Pending workflow routes are part of the same task generation as the task
+	// row. SetPendingMove locks that row before admitting a deferred route, so
+	// terminal settlement either deletes an earlier row or makes later
+	// admission reject the committed terminal generation.
+	_, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM pending_moves WHERE task_id = ?`), task.ID)
+	if err != nil && !internaldb.IsMissingTableError(err) {
+		return fmt.Errorf("settle terminal pending moves: %w", err)
+	}
+	return nil
 }
 
 // UpdateTaskWithWorkflowStepAdmission atomically moves a task into a workflow
@@ -707,6 +752,24 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndState(
 		ctx, task, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID,
 	)
 	return admitted, err
+}
+
+// UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep combines manual-move
+// state/WIP admission with the route generation CAS in one transaction.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+	ctx context.Context,
+	task *models.Task,
+	expectedStepID string,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+	expectedWorkflowID string,
+) (admitted bool, applied bool, err error) {
+	return r.updateTaskWithWorkflowStepAdmission(
+		ctx, task, targetStepID, limit, admittedState, queueExitPending,
+		expectedStepID, expectedWorkflowID,
+	)
 }
 
 // UpdateTaskWithWorkflowStepAdmissionIfAtStep is the AC-46/48 compare-and-swap
@@ -764,6 +827,7 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 	tx *sql.Tx,
 	task *models.Task,
 	expectedStepID string,
+	expectedWorkflowID string,
 	now time.Time,
 ) (applied bool, err error) {
 	requestedWorkflowID := task.WorkflowID
@@ -774,12 +838,16 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 		}
 	}
 
-	_, currentStepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	currentWorkflowID, currentStepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
 	if err != nil {
 		return false, fmt.Errorf("read task step for admission CAS check: %w", err)
 	}
 	if !found {
 		return false, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
+	}
+	if expectedWorkflowID != "" && currentWorkflowID != expectedWorkflowID {
+		return false, fmt.Errorf("%w: expected %q, task is now in %q",
+			ErrWorkflowResolutionConflict, expectedWorkflowID, currentWorkflowID)
 	}
 	if currentStepID != expectedStepID {
 		return false, nil
@@ -862,7 +930,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	// reported as applied=false, not an error, and the transaction is rolled
 	// back untouched.
 	if expectedStepID != "" {
-		casApplied, err := r.rebaseTaskForStepAdmissionCAS(ctx, tx, task, expectedStepID, now)
+		casApplied, err := r.rebaseTaskForStepAdmissionCAS(ctx, tx, task, expectedStepID, expectedWorkflowID, now)
 		if err != nil {
 			return false, false, err
 		}
@@ -905,7 +973,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	if err != nil {
 		metadata = []byte("{}")
 	}
-	entryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID)
+	entryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID, "")
 	if err != nil {
 		return false, false, err
 	}

@@ -27,6 +27,7 @@ import (
 	workflowadapters "github.com/kandev/kandev/internal/workflow/adapters"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/routing"
 	"github.com/kandev/kandev/internal/workflow/stepentry"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -383,20 +384,6 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		return
 	}
 
-	// Get the task to update its workflow step
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil {
-		s.logger.Warn("failed to get task for workflow transition",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		s.setSessionWaitingForInput(ctx, taskID, sessionID)
-		return
-	}
-	// Atomically admit the target step before exit side effects. A full target
-	// is represented as a durable destination queue entry instead of a failed
-	// transition.
-	task.WorkflowStepID = toStepID
-	task.UpdatedAt = time.Now().UTC()
 	// executeStepTransition's two callers are always a genuine session turn:
 	// on_turn_complete (triggerOnEnter=true) or on_turn_start (false).
 	legacyTrigger := engine.TriggerOnTurnStart
@@ -404,12 +391,36 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		legacyTrigger = engine.TriggerOnTurnComplete
 	}
 	transitionCtx := engineTransitionAttribution(ctx, sessionID, legacyTrigger)
-	if err := s.updateTransitionTaskWithCapacity(transitionCtx, task, targetStep); err != nil {
+	signalSession, _ := s.repo.GetTaskSession(ctx, sessionID)
+	if signalSession != nil {
+		if signal, has := models.LoadPendingStepSignal(signalSession.Metadata); has && signal.StepID == fromStep.ID && signal.OperationID != "" {
+			transitionCtx = routing.WithOperation(transitionCtx, routing.Operation{
+				ID: signal.OperationID, TaskID: taskID, Producer: routing.ProducerStepComplete,
+				ExpectedStepID: fromStep.ID, TargetStepID: toStepID,
+				SessionID: sessionID, ActorKind: string(steptelemetry.ActorAgent), ActorID: sessionID,
+			})
+		}
+	}
+	store := s.workflowStore
+	if store == nil {
+		// Some focused callers construct a legacy service without installing
+		// the engine. They still use the same CAS arbiter; only the surrounding
+		// engine callbacks are absent.
+		store = newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, nil, s.logger)
+	}
+	task, _, applied, err := store.applyTransitionIfAtStepRaw(
+		transitionCtx, taskID, fromStep.ID, toStepID,
+	)
+	if err != nil {
 		s.logger.Warn("workflow transition rejected or failed",
 			zap.String("task_id", taskID),
 			zap.String("from_step", fromStep.Name),
 			zap.String("to_step", targetStep.Name),
 			zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return
+	}
+	if !applied {
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
 		return
 	}
@@ -2857,58 +2868,20 @@ func (s *Service) engineOnEnterCallback(t wfmodels.OnEnterActionType) engine.Act
 // transition. The move hand-off prompt is correlated by MoveID and removed
 // only when the move is already complete or rejected; unrelated queued
 // messages remain available for the normal drain path.
-func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string, session *models.TaskSession, move *messagequeue.PendingMove) {
-	// reinsertPendingMove restores the move so a future agent.ready can retry.
-	// Used on early failure paths (load errors, config issues) where the state
-	// hasn't been touched yet. NOT used after ApplyTransition has executed —
-	// at that point the workflow has either advanced or is in a corrupted state
-	// and re-attempting the move on the next turn would just re-trip the same
-	// failure (or worse, double-apply on a now-half-transitioned task).
-	reinsertPendingMove := func() {
-		if s.messageQueue == nil {
-			return
-		}
-		s.messageQueue.SetPendingMove(ctx, sessionID, move)
-	}
-
+func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string, session *models.TaskSession, move *messagequeue.PendingMove) bool {
 	if s.workflowStepGetter == nil || s.workflowStore == nil {
 		s.logger.Warn("cannot apply pending move: workflow components missing",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID))
-		reinsertPendingMove()
-		return
+		return false
 	}
 	if move.MoveID == "" {
 		move.MoveID = legacyPendingMoveID(sessionID, move)
 	}
 
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil {
-		s.logger.Error("failed to load task for pending move",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		reinsertPendingMove()
-		return
-	}
-	fromStepID := task.WorkflowStepID
-	if fromStepID == move.WorkflowStepID {
-		if err := s.workflowStore.MarkDeferredMoveApplied(ctx, taskID, move.MoveID); errors.Is(err, errDeferredMoveAlreadyApplied) {
-			s.logger.Info("dropping already-applied pending move at current target",
-				zap.String("task_id", taskID), zap.String("move_id", move.MoveID))
-		} else if err != nil {
-			s.logger.Error("failed to record pending move at current target",
-				zap.String("task_id", taskID), zap.String("move_id", move.MoveID), zap.Error(err))
-			reinsertPendingMove()
-			return
-		}
-		// Step already matches. The move is complete, so consume its hand-off
-		// prompt before the natural drain path handles unrelated messages.
-		s.logger.Info("pending move target equals current step; skipping transition",
-			zap.String("task_id", taskID),
-			zap.String("step_id", fromStepID))
-		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
-		s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID)
-		return
+	task, fromStepID, ready, outcome := s.resolvePendingMoveSource(ctx, taskID, sessionID, move)
+	if !ready {
+		return outcome
 	}
 
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, move.WorkflowStepID)
@@ -2917,8 +2890,7 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 			zap.String("task_id", taskID),
 			zap.String("target_step_id", move.WorkflowStepID),
 			zap.Error(err))
-		reinsertPendingMove()
-		return
+		return false
 	}
 	if targetStep.WorkflowID != move.WorkflowID {
 		s.logger.Error("pending move target step belongs to a different workflow; dropping move",
@@ -2934,7 +2906,7 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		// authored for the move's *target* step) — mirrors the cleanup done on
 		// the ApplyTransition failure path below.
 		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
-		return
+		return true
 	}
 
 	// Mark the session WAITING_FOR_INPUT before processOnEnter runs. The agent
@@ -2942,34 +2914,9 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	// otherwise see RUNNING and skip the on_enter processing.
 	s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 
-	// sessionID is the target task's queue/execution session. It is not
-	// necessarily the agent that called move_task_kandev (cross-task hand-offs
-	// are supported), so use the sender persisted with the pending move.
-	deferredMoveAttribution := steptelemetry.Attribution{
-		Trigger:   steptelemetry.TriggerMCPDeferredMove,
-		ActorKind: steptelemetry.ActorSystem,
-	}
-	if move.SenderSessionID != "" {
-		deferredMoveAttribution.ActorKind = steptelemetry.ActorAgent
-		deferredMoveAttribution.ActorID = move.SenderSessionID
-		deferredMoveAttribution.SessionID = move.SenderSessionID
-	}
-	deferredMoveCtx := steptelemetry.WithAttribution(ctx, deferredMoveAttribution)
-	if err := s.workflowStore.ApplyDeferredMoveTransition(deferredMoveCtx, taskID, sessionID, fromStepID, move.WorkflowStepID, move.MoveID); errors.Is(err, errDeferredMoveAlreadyApplied) {
-		s.logger.Info("dropping already-applied pending move", zap.String("task_id", taskID), zap.String("move_id", move.MoveID))
-		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
-		return
-	} else if err != nil {
-		s.logger.Error("failed to apply pending move transition",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		// The hand-off prompt was queued by handleMoveTask before the move was
-		// applied. Now that the move failed, the on_enter path that would have
-		// drained the queue won't run, and handleAgentReady has already returned.
-		// Drop the orphan so it can't be misdelivered to the source step's agent
-		// on a future turn (it was authored for the move's *target* step).
-		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
-		return
+	committed, outcome := s.commitPendingMoveTransition(ctx, taskID, sessionID, fromStepID, move)
+	if !committed {
+		return outcome
 	}
 
 	// ADR 0015 — record the audit row now that the transition is durably
@@ -2992,7 +2939,7 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		// The destination is visible and queued, but its entry lifecycle is
 		// deferred until promotion. The source exit still runs once now.
 		go s.processStepExit(context.WithoutCancel(ctx), taskID, session, fromStepID)
-		return
+		return true
 	}
 
 	s.syncTaskStateForPendingMove(ctx, taskID, fromStepID, move.WorkflowStepID)
@@ -3006,6 +2953,78 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	// it's safe to defer the rest.
 	taskDescription := task.Description
 	go s.processStepExitAndEnter(context.WithoutCancel(ctx), taskID, session, fromStepID, move.WorkflowStepID, taskDescription)
+	return true
+}
+
+func (s *Service) resolvePendingMoveSource(
+	ctx context.Context, taskID, sessionID string, move *messagequeue.PendingMove,
+) (*models.Task, string, bool, bool) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Error("failed to load task for pending move", zap.String("task_id", taskID), zap.Error(err))
+		return nil, "", false, false
+	}
+	if move.ExpectedWorkflowStepID == "" {
+		s.logger.Warn("legacy pending move has no expected source step; preserving for exact cancellation or expiry",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.String("move_id", move.MoveID))
+		return nil, "", false, false
+	}
+	fromStepID := task.WorkflowStepID
+	if fromStepID == move.WorkflowStepID {
+		return nil, "", false, s.finishAlreadySatisfiedPendingMove(ctx, taskID, sessionID, fromStepID, move.MoveID)
+	}
+	if fromStepID != move.ExpectedWorkflowStepID {
+		s.logger.Info("dropping stale pending move after source generation changed",
+			zap.String("task_id", taskID), zap.String("expected_step_id", move.ExpectedWorkflowStepID),
+			zap.String("current_step_id", fromStepID), zap.String("move_id", move.MoveID))
+		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
+		return nil, "", false, true
+	}
+	return task, fromStepID, true, false
+}
+
+func (s *Service) finishAlreadySatisfiedPendingMove(
+	ctx context.Context, taskID, sessionID, stepID, moveID string,
+) bool {
+	err := s.workflowStore.MarkDeferredMoveApplied(ctx, taskID, moveID)
+	if err != nil && !errors.Is(err, errDeferredMoveAlreadyApplied) {
+		s.logger.Error("failed to record pending move at current target",
+			zap.String("task_id", taskID), zap.String("move_id", moveID), zap.Error(err))
+		return false
+	}
+	s.logger.Info("pending move target equals current step; skipping transition",
+		zap.String("task_id", taskID), zap.String("step_id", stepID))
+	s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, moveID)
+	s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID)
+	return true
+}
+
+func (s *Service) commitPendingMoveTransition(
+	ctx context.Context, taskID, sessionID, fromStepID string, move *messagequeue.PendingMove,
+) (bool, bool) {
+	attribution := steptelemetry.Attribution{Trigger: steptelemetry.TriggerMCPDeferredMove, ActorKind: steptelemetry.ActorSystem}
+	if move.SenderSessionID != "" {
+		attribution.ActorKind = steptelemetry.ActorAgent
+		attribution.ActorID = move.SenderSessionID
+		attribution.SessionID = move.SenderSessionID
+	}
+	moveCtx := steptelemetry.WithAttribution(ctx, attribution)
+	err := s.workflowStore.ApplyDeferredMoveTransition(moveCtx, taskID, sessionID, fromStepID, move.WorkflowStepID, move.MoveID)
+	switch {
+	case errors.Is(err, errDeferredMoveAlreadyApplied):
+		s.logger.Info("dropping already-applied pending move", zap.String("task_id", taskID), zap.String("move_id", move.MoveID))
+		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
+		return false, true
+	case errors.Is(err, ErrTransitionSourceChanged):
+		s.logger.Info("pending move lost expected-step race", zap.String("task_id", taskID), zap.String("move_id", move.MoveID))
+		return false, true
+	case err != nil:
+		s.logger.Error("failed to apply pending move transition", zap.String("task_id", taskID), zap.Error(err))
+		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
+		return false, false
+	default:
+		return true, false
+	}
 }
 
 func legacyPendingMoveID(sessionID string, move *messagequeue.PendingMove) string {
@@ -4888,10 +4907,12 @@ func (s *Service) applyEngineTransition(
 ) bool {
 	return s.applyEngineTransitionWithCommit(ctx, taskID, session, result, trigger, taskDescription, triggerOnEnter,
 		func(commitCtx context.Context) (bool, error) {
-			if err := s.workflowStore.ApplyTransition(commitCtx, taskID, session.ID, result.FromStepID, result.ToStepID, trigger); err != nil {
-				return false, err
-			}
-			return true, nil
+			// applyEngineTransitionWithCommit owns this lifecycle already. Use
+			// the raw CAS store path instead of the guardedLifecycle bridge,
+			// which would recursively dispatch on_exit/on_enter a second time.
+			return s.workflowStore.applyTransitionIfAtStep(
+				commitCtx, taskID, session.ID, result.FromStepID, result.ToStepID, trigger,
+			)
 		})
 }
 
@@ -4942,15 +4963,6 @@ func (s *Service) applyEngineTransitionWithCommit(
 
 	terminalTarget := s.workflowStepIsTerminal(ctx, targetStep.ID)
 
-	fromStep, err := s.workflowStepGetter.GetStep(ctx, result.FromStepID)
-	if err != nil {
-		s.logger.Warn("failed to load from-step for on_exit",
-			zap.String("step_id", result.FromStepID),
-			zap.Error(err))
-	} else {
-		s.processOnExit(ctx, taskID, session, fromStep)
-	}
-
 	// A ResultHolder is only attached when this transition will actually
 	// trigger on_enter (triggerOnEnter) — an on_turn_start transition never
 	// reaches launchProcessOnEnter below, so allocating a step-entry it will
@@ -4958,6 +4970,19 @@ func (s *Service) applyEngineTransitionWithCommit(
 	// matching gate in workflow_store.go.
 	var stepEntry *stepentry.AllocationResult
 	applyCtx := ctx
+	var consumedSignal *models.PendingStepCompletionSignal
+	if trigger == engine.TriggerOnTurnComplete {
+		if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == result.FromStepID {
+			consumedSignal = &signal
+			if signal.OperationID != "" {
+				applyCtx = routing.WithOperation(applyCtx, routing.Operation{
+					ID: signal.OperationID, TaskID: taskID, Producer: routing.ProducerStepComplete,
+					ExpectedStepID: result.FromStepID, TargetStepID: result.ToStepID,
+					SessionID: session.ID, ActorKind: string(steptelemetry.ActorAgent), ActorID: session.ID,
+				})
+			}
+		}
+	}
 	if triggerOnEnter {
 		stepEntry = &stepentry.AllocationResult{}
 		applyCtx = stepentry.WithResultHolder(applyCtx, stepEntry)
@@ -4974,17 +4999,18 @@ func (s *Service) applyEngineTransitionWithCommit(
 	if !applied {
 		return false
 	}
+	fromStep, err := s.workflowStepGetter.GetStep(ctx, result.FromStepID)
+	if err != nil {
+		s.logger.Warn("failed to load from-step for on_exit",
+			zap.String("step_id", result.FromStepID), zap.Error(err))
+	} else {
+		s.processOnExit(ctx, taskID, session, fromStep)
+	}
 
 	// ADR 0015 — record the audit row before the pending signal (if any) is
 	// cleared. Only an on_turn_complete transition can have consumed a
 	// signal; on_turn_start and on_children_completed transitions record
 	// with no signal metadata.
-	var consumedSignal *models.PendingStepCompletionSignal
-	if trigger == engine.TriggerOnTurnComplete {
-		if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == result.FromStepID {
-			consumedSignal = &signal
-		}
-	}
 	historyTrigger := wfmodels.StepTransitionTriggerAutoComplete
 	switch trigger {
 	case engine.TriggerOnTurnStart:
@@ -5080,10 +5106,15 @@ func (s *Service) launchProcessOnEnter(
 	taskDescription string,
 	entryID int64,
 ) {
+	// The hook is test-only, but it still needs the same invocation identity as
+	// the on_enter launch. Reading the mutable field at goroutine completion can
+	// invoke a later transition's callback and make two independent entries
+	// appear as a duplicate effect.
+	onComplete := s.onProcessOnEnterComplete
 	go func() {
 		defer func() {
-			if s.onProcessOnEnterComplete != nil {
-				s.onProcessOnEnterComplete()
+			if onComplete != nil {
+				onComplete()
 			}
 		}()
 		s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, entryID)

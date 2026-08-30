@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/steptelemetry"
+	"github.com/kandev/kandev/internal/workflow/routing"
 )
 
 // stepTransitionTx is satisfied by both *sql.Tx and *sqlx.Tx, the two
@@ -80,6 +81,15 @@ type stepTransitionInput struct {
 // with no row). Never log-and-continue on this error.
 func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransitionTx, in stepTransitionInput) (id int64, err error) {
 	if in.fromWorkflowStepID == in.toWorkflowStepID {
+		if operation, ok := routing.FromContext(ctx); ok {
+			operation.TaskID = in.taskID
+			operation.ObservedStepID = in.fromWorkflowStepID
+			operation.TargetStepID = in.toWorkflowStepID
+			operation.Outcome = routing.OutcomeAlreadySatisfied
+			if err := r.recordWorkflowRouteOperationTx(ctx, tx, operation); err != nil {
+				return 0, err
+			}
+		}
 		return 0, nil
 	}
 	if in.fromWorkflowStepID == "" && in.toWorkflowStepID == "" {
@@ -136,6 +146,17 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 	// ("is the writer alive"), not a commit-confirmed row-for-row audit
 	// trail; the ledger table itself is that audit trail.
 	steptelemetry.RecordLedgerRow(r.log, attribution.Trigger)
+	if operation, ok := routing.FromContext(ctx); ok {
+		operation.TaskID = in.taskID
+		operation.ObservedStepID = in.fromWorkflowStepID
+		operation.TargetStepID = in.toWorkflowStepID
+		operation.Outcome = routing.OutcomeCommitted
+		operation.TransitionID = id
+		operation.EffectID = operation.ID + ":destination-entry"
+		if err := r.recordWorkflowRouteOperationTx(ctx, tx, operation); err != nil {
+			return 0, err
+		}
+	}
 	return id, nil
 }
 

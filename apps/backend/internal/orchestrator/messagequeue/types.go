@@ -110,6 +110,10 @@ var (
 	// ErrLifecycleCancelled means an archive/delete purge invalidated a
 	// previously accepted lifecycle entry before it could be retried.
 	ErrLifecycleCancelled = errors.New("lifecycle queue entry cancelled")
+	// ErrPendingMoveGenerationConflict means a queue mutation observed a
+	// different pending-row generation than the one it was authorized to
+	// create, restore, or transfer. The newer row is preserved unchanged.
+	ErrPendingMoveGenerationConflict = errors.New("pending move generation changed")
 )
 
 // QueuedMessage represents a single FIFO entry queued for a session.
@@ -212,15 +216,25 @@ type QueueStatus struct {
 // move_task_kandev) while its turn is still active. Applied by handleAgentReady
 // once the turn ends.
 type PendingMove struct {
+	// ID identifies the persisted pending_moves row generation. A new request
+	// gets a new ID; snapshot restore and session transfer preserve it. This is
+	// the same row identity consumed by exact administrative cancellation.
+	ID string `json:"id"`
 	// MoveID identifies one deferred move request across queue snapshots. A
 	// rollback can restore a previously consumed snapshot, so the orchestrator
 	// needs a durable identity to reject that stale replay.
-	MoveID         string    `json:"move_id"`
-	TaskID         string    `json:"task_id"`
-	WorkflowID     string    `json:"workflow_id"`
-	WorkflowStepID string    `json:"workflow_step_id"`
-	Position       int       `json:"position"`
-	QueuedAt       time.Time `json:"queued_at"`
+	MoveID         string `json:"move_id"`
+	TaskID         string `json:"task_id"`
+	WorkflowID     string `json:"workflow_id"`
+	WorkflowStepID string `json:"workflow_step_id"`
+	// ExpectedWorkflowStepID is the task generation the request was authored
+	// against. Legacy rows leave it empty and fail closed during replay.
+	ExpectedWorkflowStepID string `json:"expected_workflow_step_id,omitempty"`
+	// InitiatingTurnID binds the route to the immutable turn generation when
+	// available. It is audit evidence; expected-step CAS owns mutation safety.
+	InitiatingTurnID string    `json:"initiating_turn_id,omitempty"`
+	Position         int       `json:"position"`
+	QueuedAt         time.Time `json:"queued_at"`
 	// Actor records provenance across the deferred move boundary. Agent is the
 	// value used by move_task_kandev; it prevents owner identity leakage.
 	Actor string `json:"actor,omitempty"`

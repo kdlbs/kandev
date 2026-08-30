@@ -82,8 +82,11 @@ var automationSelfDeniedActions = map[string]struct{}{
 // fields with the trusted stream identity.
 func (h *Handlers) authorizeAutomationRequest(ctx context.Context, msg *ws.Message) (*ws.Message, *ws.Message, error) {
 	principal, ok := mcpscope.PrincipalFromContext(ctx)
-	if !ok || !principal.IsAutomation() {
+	if !ok {
 		return nil, msg, nil
+	}
+	if !principal.IsAutomation() {
+		return h.authorizeOrdinaryMoveRequest(ctx, principal, msg)
 	}
 	if _, allowed := automationSurfaceActions[msg.Action]; !allowed {
 		response, err := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction,
@@ -108,6 +111,38 @@ func (h *Handlers) authorizeAutomationRequest(ctx context.Context, msg *ws.Messa
 	if !changed {
 		return nil, msg, nil
 	}
+	payload, err := json.Marshal(fields)
+	if err != nil {
+		return automationNotFound(msg)
+	}
+	replacement := *msg
+	replacement.Payload = payload
+	return nil, &replacement, nil
+}
+
+// authorizeOrdinaryMoveRequest keeps the ordinary kanban/office agent's move
+// authority task-local. Coordinator automation has a separate, server-attested
+// surface above for same-workspace cross-task routing. The payload's caller
+// fields are always replaced with the principal derived from the live stream.
+func (h *Handlers) authorizeOrdinaryMoveRequest(
+	ctx context.Context,
+	principal mcpscope.Principal,
+	msg *ws.Message,
+) (*ws.Message, *ws.Message, error) {
+	if msg.Action != ws.ActionMCPMoveTask {
+		return nil, msg, nil
+	}
+	fields, err := automationPayloadFields(msg.Payload)
+	if err != nil {
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest,
+			"Invalid payload: "+err.Error(), nil)
+		return response, nil, responseErr
+	}
+	if jsonStringField(fields, "task_id") != principal.CallerTaskID ||
+		!h.authorizeAutomationReferenceFields(ctx, principal, msg.Action, fields) {
+		return automationNotFound(msg)
+	}
+	rewriteAutomationPayload(principal, msg.Action, fields)
 	payload, err := json.Marshal(fields)
 	if err != nil {
 		return automationNotFound(msg)

@@ -408,14 +408,28 @@ type pendingMoveRecordingQueuer struct {
 	pendingMoves     []messagequeue.PendingMove
 }
 
-func (r *pendingMoveRecordingQueuer) SetPendingMove(_ context.Context, sessionID string, move *messagequeue.PendingMove) {
+func (r *pendingMoveRecordingQueuer) SetPendingMove(_ context.Context, sessionID string, move *messagequeue.PendingMove) error {
 	r.pendingSessionID = sessionID
 	if move != nil {
 		r.pendingMoves = append(r.pendingMoves, *move)
 	}
+	return nil
 }
 
-func (r *recordingMessageQueuer) SetPendingMove(_ context.Context, _ string, _ *messagequeue.PendingMove) {
+func (r *pendingMoveRecordingQueuer) DeletePendingMoveIfMatch(_ context.Context, expected messagequeue.PendingMoveRecord, _ string) (bool, error) {
+	if len(r.pendingMoves) == 0 || r.pendingSessionID != expected.SessionID || r.pendingMoves[len(r.pendingMoves)-1].ID != expected.Move.ID {
+		return false, nil
+	}
+	r.pendingMoves = r.pendingMoves[:len(r.pendingMoves)-1]
+	return true, nil
+}
+
+func (r *recordingMessageQueuer) SetPendingMove(_ context.Context, _ string, _ *messagequeue.PendingMove) error {
+	return nil
+}
+
+func (r *recordingMessageQueuer) DeletePendingMoveIfMatch(_ context.Context, _ messagequeue.PendingMoveRecord, _ string) (bool, error) {
+	return false, nil
 }
 
 // TakeQueued is a no-op stub — the unit tests below don't exercise rollback,

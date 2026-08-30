@@ -660,12 +660,13 @@ const (
 // that the orchestrator should consume to drive a workflow step transition.
 // See ADR 0015 for the lifecycle (set → read → clear).
 type PendingStepCompletionSignal struct {
-	StepID     string    `json:"step_id"`
-	Source     string    `json:"source"`
-	Summary    string    `json:"summary"`
-	Handoff    string    `json:"handoff,omitempty"`
-	Blockers   string    `json:"blockers,omitempty"`
-	SignaledAt time.Time `json:"signaled_at"`
+	OperationID string    `json:"operation_id,omitempty"`
+	StepID      string    `json:"step_id"`
+	Source      string    `json:"source"`
+	Summary     string    `json:"summary"`
+	Handoff     string    `json:"handoff,omitempty"`
+	Blockers    string    `json:"blockers,omitempty"`
+	SignaledAt  time.Time `json:"signaled_at"`
 }
 
 // LoadSessionRuntimeConfig decodes the runtime-config bag entry from session

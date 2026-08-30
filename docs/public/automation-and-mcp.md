@@ -560,6 +560,15 @@ The HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sour
 
 `step_complete_kandev` is registered and discoverable in every task-mode session, and in Office sessions per ADR 0015. Kandev includes its completion instruction, and acts on its signal, only on steps whose auto-advance action explicitly requires that signal: on Kanban boards this is opt-in per step, while office-default's `work` step ships with the requirement on. A user message arriving before transition can cancel that automatic move.
 
+`move_task_kandev` commits a terminal destination before returning success,
+even when the calling task session is in the middle of a turn. Nonterminal
+moves from an active session remain deferred until turn end. If that turn then
+calls `step_complete_kandev` for its old lane, the signal fails as stale and
+does not undo the terminal move or create another pending move. Retrying the
+same terminal destination is idempotent. Ordinary task agents can route only
+their own task; the Coordinator automation surface retains its same-workspace
+cross-task authority.
+
 When `create_task_kandev.repositories[].repository_url` is a canonical GitHub pull request URL or a GitLab merge request URL on the configured host, Kandev resolves the contribution before creating the task. The contribution must still be open, have a valid source branch and head commit, and permit the target project to contribute; Kandev keeps the target repository as `origin`, fetches the exact source commit, and routes commits to the contributor's existing source branch. The existing pull request or merge request is associated with the task and reused for later changes, so Kandev does not open a duplicate. Provider-authored title, description, comments, and diff content are not copied into trusted task context. Configure the task's Git credentials as described in [task Git credentials](integrations.md#choose-task-git-credentials); Kandev runs a write preflight before starting the agent.
 
 The task server runs inside agentctl's local runtime boundary. Its MCP routes do not use a separate bearer token. Do not expose agentctl ports; rely on the executor's process/network isolation and Kandev's session scoping.

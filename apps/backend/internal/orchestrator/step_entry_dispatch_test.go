@@ -170,8 +170,13 @@ func (f *reviewLoopFixture) fireOnTurnComplete(t *testing.T, ctx context.Context
 	t.Helper()
 	setSessionState(t, ctx, f.repo, "s1", models.TaskSessionStateRunning)
 
-	onEnterDone := make(chan struct{})
-	f.svc.onProcessOnEnterComplete = func() { close(onEnterDone) }
+	onEnterDone := make(chan struct{}, 1)
+	f.svc.onProcessOnEnterComplete = func() {
+		select {
+		case onEnterDone <- struct{}{}:
+		default:
+		}
+	}
 
 	session, err := f.repo.GetTaskSession(ctx, "s1")
 	if err != nil {
