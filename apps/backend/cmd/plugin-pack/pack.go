@@ -66,14 +66,16 @@ func Pack(dir string, w io.Writer, opts PackOptions) error {
 
 // collectPackageFiles walks dir and reads every regular file into a
 // package-relative-path -> contents map, optionally filtering out
-// non-host-platform server/ executables (see hostExecutablePath).
+// non-host-platform server/ executables (see hostExecutable).
 func collectPackageFiles(dir string, opts PackOptions) (map[string][]byte, error) {
+	var hostPlatformKey string
 	var hostExecPath string
 	if opts.PlatformOnly {
-		execPath, err := hostExecutablePath(dir, opts)
+		platformKey, execPath, err := hostExecutable(dir, opts)
 		if err != nil {
 			return nil, err
 		}
+		hostPlatformKey = platformKey
 		hostExecPath = execPath
 	}
 
@@ -101,7 +103,7 @@ func collectPackageFiles(dir string, opts PackOptions) (map[string][]byte, error
 			return fmt.Errorf("plugin-pack: reading %s: %w", rel, err)
 		}
 		if opts.PlatformOnly && rel == manifestFileName {
-			data, err = filterManifestExecutables(data, hostExecPath)
+			data, err = filterManifestExecutables(data, hostPlatformKey, hostExecPath)
 			if err != nil {
 				return err
 			}
@@ -119,17 +121,13 @@ func collectPackageFiles(dir string, opts PackOptions) (map[string][]byte, error
 // retained by -platform-only. pkgtar validates every declared executable, so
 // removing files without removing their declarations would make the package
 // invalid even though the host executable is present.
-func filterManifestExecutables(data []byte, hostExecPath string) ([]byte, error) {
+func filterManifestExecutables(data []byte, hostPlatformKey, hostExecPath string) ([]byte, error) {
 	m, err := manifest.Parse(data)
 	if err != nil {
 		return nil, fmt.Errorf("plugin-pack: parsing %s: %w", manifestFileName, err)
 	}
-	executables := m.Runtime.Executables
-	m.Runtime.Executables = map[string]string{}
-	for platform, execPath := range executables {
-		if execPath == hostExecPath {
-			m.Runtime.Executables[platform] = execPath
-		}
+	m.Runtime.Executables = map[string]string{
+		hostPlatformKey: hostExecPath,
 	}
 	filtered, err := yaml.Marshal(m)
 	if err != nil {
@@ -138,10 +136,10 @@ func filterManifestExecutables(data []byte, hostExecPath string) ([]byte, error)
 	return filtered, nil
 }
 
-// hostExecutablePath parses dir/manifest.yaml and resolves the
-// runtime.executables entry for opts.GOOS/opts.GOARCH (defaulting to
+// hostExecutable parses dir/manifest.yaml and resolves the platform key and
+// runtime.executables path for opts.GOOS/opts.GOARCH (defaulting to
 // runtime.GOOS/runtime.GOARCH).
-func hostExecutablePath(dir string, opts PackOptions) (string, error) {
+func hostExecutable(dir string, opts PackOptions) (string, string, error) {
 	goos := opts.GOOS
 	if goos == "" {
 		goos = runtime.GOOS
@@ -153,17 +151,18 @@ func hostExecutablePath(dir string, opts PackOptions) (string, error) {
 
 	data, err := os.ReadFile(filepath.Join(dir, manifestFileName))
 	if err != nil {
-		return "", fmt.Errorf("plugin-pack: reading %s for -platform-only: %w", manifestFileName, err)
+		return "", "", fmt.Errorf("plugin-pack: reading %s for -platform-only: %w", manifestFileName, err)
 	}
 	m, err := manifest.Parse(data)
 	if err != nil {
-		return "", fmt.Errorf("plugin-pack: parsing %s: %w", manifestFileName, err)
+		return "", "", fmt.Errorf("plugin-pack: parsing %s: %w", manifestFileName, err)
 	}
+	platformKey := goos + "-" + goarch
 	execPath, ok := m.ExecutableFor(goos, goarch)
 	if !ok {
-		return "", fmt.Errorf("plugin-pack: manifest declares no runtime.executables entry for %s-%s", goos, goarch)
+		return "", "", fmt.Errorf("plugin-pack: manifest declares no runtime.executables entry for %s", platformKey)
 	}
-	return execPath, nil
+	return platformKey, execPath, nil
 }
 
 // isServerExecutable reports whether rel is a package-relative path under

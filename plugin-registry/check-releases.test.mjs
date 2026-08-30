@@ -79,6 +79,23 @@ test("detectReleaseChanges compares numeric SemVer identifiers without precision
   assert.deepEqual(result.candidates, ["alpha@9007199254740993.0.0"]);
 });
 
+test("detectReleaseChanges preserves hyphens inside version suffixes", async () => {
+  const current = indexWith([
+    {
+      id: "alpha",
+      repo: "acme/alpha",
+      version: "1.0.0-alpha-beta.1",
+    },
+  ]);
+
+  const result = await detectReleaseChanges([specs[0]], current, {
+    fetchLatestRelease: async () => release("alpha", "1.0.0-alpha-beta.2"),
+  });
+
+  assert.equal(result.rebuild, true);
+  assert.deepEqual(result.candidates, ["alpha@1.0.0-alpha-beta.2"]);
+});
+
 test("detectReleaseChanges accepts the builder's safe two-component versions", async () => {
   const current = indexWith([
     { id: "alpha", repo: "acme/alpha", version: "0.9" },

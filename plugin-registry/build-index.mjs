@@ -243,7 +243,15 @@ export function isSafeVersion(version) {
 function parseVersion(version) {
   if (!isSafeVersion(version)) return null;
   const [withoutBuild] = version.split("+", 1);
-  const [corePart, prereleasePart] = withoutBuild.split("-", 2);
+  const prereleaseSeparator = withoutBuild.indexOf("-");
+  const corePart =
+    prereleaseSeparator === -1
+      ? withoutBuild
+      : withoutBuild.slice(0, prereleaseSeparator);
+  const prereleasePart =
+    prereleaseSeparator === -1
+      ? undefined
+      : withoutBuild.slice(prereleaseSeparator + 1);
   return {
     core: corePart.split("."),
     prerelease: prereleasePart?.split(".") || [],

@@ -107,5 +107,22 @@ test.describe("Mobile plugin updates", () => {
     expect(
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
+
+    const autoUpdateTestId = `plugin-auto-update-${PLUGIN_ID}`;
+    const autoUpdateToggle = pluginRow.getByTestId(autoUpdateTestId);
+    await autoUpdateToggle.scrollIntoViewIfNeeded();
+    const autoUpdateBox = await autoUpdateToggle.boundingBox();
+    expect(autoUpdateBox).not.toBeNull();
+    expect(
+      await testPage.evaluate(
+        ({ x, y, testId }) =>
+          document.elementFromPoint(x, y)?.closest(`[data-testid="${testId}"]`) !== null,
+        {
+          x: autoUpdateBox!.x + autoUpdateBox!.width / 2,
+          y: autoUpdateBox!.y + autoUpdateBox!.height / 2,
+          testId: autoUpdateTestId,
+        },
+      ),
+    ).toBe(true);
   });
 });
