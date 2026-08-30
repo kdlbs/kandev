@@ -102,7 +102,11 @@ describe("ThinkingMessage", () => {
       <ThinkingMessage comment={thinkingMessage("**Compact thought**")} />,
     );
 
-    expect(screen.getByText("Compact thought", { exact: true })).toBeTruthy();
+    const compactText = screen.getByText("Compact thought", { exact: true });
+    expect(compactText).toBeTruthy();
+    expect(compactText.className).toContain("min-w-0");
+    expect(compactText.className).toContain("break-words");
+    expect(compactText.className).not.toContain("truncate");
     expect(screen.queryByTestId(PREVIEW_TEST_ID)).toBeNull();
     expect(container.querySelector(".markdown-body")).toBeNull();
   });

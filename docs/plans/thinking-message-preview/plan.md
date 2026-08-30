@@ -25,7 +25,8 @@ mobile overflow proof share one component contract.
 - Strip inline Markdown from the selected preview line.
 - Keep the localized Thinking label and add a one-line truncated preview for
   expandable messages.
-- Preserve compact single-line and expanded Markdown behavior.
+- Preserve compact single-line and expanded Markdown behavior; compact text
+  remains complete and may wrap on narrow rows.
 - Prove streaming stability and desktop/mobile containment.
 
 ### Out of scope
@@ -48,7 +49,8 @@ mobile overflow proof share one component contract.
 - Render the preview for expandable content instead of limiting header text to
   compact messages.
 - Give the header and preview flex regions `min-w-0`, keep the localized label
-  non-shrinking, and truncate the preview to one visual line.
+  non-shrinking, truncate only the expandable preview to one visual line, and
+  keep compact text in a shrinkable wrapping region.
 
 ### Component regression tests
 
@@ -56,9 +58,9 @@ mobile overflow proof share one component contract.
   `apps/web/components/task/chat/messages/thinking-message.test.tsx`.
 - First write a failing test for a Codex-shaped source containing leading blank
   lines, a bold first summary, and later details.
-- Cover the empty-preview fallback, inline Markdown stripping, compact
-  single-line preservation, rerendered appended content, expansion, and
-  truncation classes.
+- Cover the empty-preview fallback, conservative inline Markdown stripping,
+  compact single-line preservation and wrapping classes, rerendered appended
+  content, expansion, and truncation classes.
 
 ### Mobile browser evidence
 
@@ -72,23 +74,23 @@ mobile overflow proof share one component contract.
 
 ## Tests
 
-| Acceptance criterion                   | Test evidence                                                                                 |
-| -------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `AC-UI-THINKING-MESSAGE-PREVIEW-001.1` | Component and mobile browser tests require the first meaningful line in the collapsed header. |
-| `AC-UI-THINKING-MESSAGE-PREVIEW-001.2` | Component tests cover leading blank, decoration-only, and empty content.                      |
-| `AC-UI-THINKING-MESSAGE-PREVIEW-001.3` | A component rerender test appends a later summary and keeps the original preview.             |
-| `AC-UI-THINKING-MESSAGE-PREVIEW-001.4` | Header class assertions and the mobile browser geometry scenario prove one-line containment.  |
-| `AC-UI-THINKING-MESSAGE-PREVIEW-001.5` | Component and mobile browser tests expand the row and find the complete later content.        |
-| `AC-UI-THINKING-MESSAGE-PREVIEW-001.6` | A component test preserves compact inline and non-expandable rendering.                       |
-| `AC-UI-THINKING-MESSAGE-PREVIEW-001.7` | The pure helper uses only the provider-neutral thinking string.                               |
+| Acceptance criterion                   | Test evidence                                                                                           |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `AC-UI-THINKING-MESSAGE-PREVIEW-001.1` | Component and mobile browser tests require the first meaningful line in the collapsed header.           |
+| `AC-UI-THINKING-MESSAGE-PREVIEW-001.2` | Component tests cover leading blank, decoration-only, and empty content.                                |
+| `AC-UI-THINKING-MESSAGE-PREVIEW-001.3` | A component rerender test appends a later summary and keeps the original preview.                       |
+| `AC-UI-THINKING-MESSAGE-PREVIEW-001.4` | Header class assertions and the mobile browser geometry scenario prove expandable one-line containment. |
+| `AC-UI-THINKING-MESSAGE-PREVIEW-001.5` | Component and mobile browser tests expand the row and find the complete later content.                  |
+| `AC-UI-THINKING-MESSAGE-PREVIEW-001.6` | A component test preserves compact inline and non-expandable rendering.                                 |
+| `AC-UI-THINKING-MESSAGE-PREVIEW-001.7` | The pure helper uses only the provider-neutral thinking string.                                         |
 
 ## E2E tests
 
 - Mobile: run the new thinking-preview scenario in
   `apps/web/e2e/tests/chat/mobile-markdown-wrap.spec.ts` with the
   `mobile-chrome` project. This proves the shared component's visible preview,
-  expansion path, truncation, and containment on the narrowest supported chat
-  surface.
+  expansion path, expandable-preview truncation, compact full-text wrapping,
+  and containment on the narrowest supported chat surface.
 - Desktop behavior is covered by the shared component test because the change
   does not branch by viewport or pointer mode.
 
@@ -107,7 +109,8 @@ mobile overflow proof share one component contract.
 - Shared logic: desktop and mobile use the same preview derivation, expansion
   state, and complete Markdown content.
 - Mobile proof: the new `mobile-chrome` scenario verifies preview visibility,
-  expansion, truncation, and the absence of document overflow.
+  expansion, expandable-preview truncation, compact full-text wrapping, and
+  the absence of document overflow.
 
 ## Work orders
 
@@ -120,7 +123,8 @@ Implementation is complete. The exact task verification commands passed:
 - Thinking-message component tests: 7 passed.
 - Web typecheck, targeted ESLint, and Prettier checks passed.
 - Specification tests and all specification files passed lint.
-- Mobile Pixel 5 thinking-preview E2E: 2 passed with no chat or document overflow.
+- Mobile Pixel 5 thinking-preview E2E: 2 passed with expandable-preview
+  truncation, compact full-text wrapping, and no chat or document overflow.
 - Fresh desktop and 393px mobile PR screenshots captured, inspected, and compressed.
 
 ## Risks

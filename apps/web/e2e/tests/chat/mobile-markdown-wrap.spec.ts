@@ -242,11 +242,17 @@ test.describe("mobile: Markdown table wrapping", () => {
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,
       clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
       lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
+      text: element.textContent,
+      whiteSpace: getComputedStyle(element).whiteSpace,
     }));
     expect(compactMetrics.clientWidth).toBeGreaterThan(0);
-    expect(compactMetrics.scrollWidth).toBeGreaterThan(compactMetrics.clientWidth);
-    expect(compactMetrics.clientHeight).toBeLessThanOrEqual(compactMetrics.lineHeight + 1);
+    expect(compactMetrics.scrollWidth).toBeLessThanOrEqual(compactMetrics.clientWidth + 1);
+    expect(compactMetrics.clientHeight).toBeGreaterThan(compactMetrics.lineHeight);
+    expect(compactMetrics.scrollHeight).toBe(compactMetrics.clientHeight);
+    expect(compactMetrics.text).toBe(compactLine);
+    expect(compactMetrics.whiteSpace).toBe("normal");
     expect(await chat.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
       true,
     );

@@ -44,8 +44,8 @@ therefore disappears from the collapsed row.
 `ThinkingMessage` uses a pure, model-agnostic helper:
 
 1. Split the source on Unix or Windows line endings.
-2. Process lines in source order with the existing inline Markdown stripping
-   rules.
+2. Process lines in source order with conservative preview-specific inline
+   Markdown normalization.
 3. Trim the plain-text result and select the first non-empty value.
 4. Return an empty preview when no line produces visible text.
 
@@ -56,8 +56,10 @@ Markdown lines are skipped, and identifier punctuation is preserved. React
 renders the result as escaped text rather than Markdown or HTML.
 
 Compact single-line detection remains unchanged. Its complete stripped text
-continues to render inline, and the row remains non-expandable. Expandable
-messages use the derived preview in the same header position.
+continues to render inline, and the row remains non-expandable. The compact
+text stays complete and may wrap at narrow widths, but it is not truncated or
+replaced by the expandable preview. Expandable messages use the derived
+preview in the same header position.
 
 ## Rendering contract
 
@@ -65,6 +67,10 @@ The header keeps the localized Thinking label as a non-shrinking prefix. The
 preview occupies the remaining width in a `min-w-0` flex region and uses
 single-line truncation. The complete source remains in the current expanded
 Markdown region, so truncation never changes or discards transcript content.
+
+The compact inline text uses a separate shrinkable, wrapping flex item. Its
+complete text remains readable on narrow screens without widening the
+transcript.
 
 When preview derivation returns an empty string, the header renders only the
 Thinking label. No placeholder, tooltip, or new user-facing copy is added.
@@ -90,8 +96,9 @@ navigation, overlay, scroll owner, control, or touch target.
 
 The nearest mobile exemplar is the current thinking row in
 `apps/web/e2e/tests/chat/mobile-markdown-wrap.spec.ts`. The localized label
-keeps its current priority, while the preview truncates before it can widen the
-chat or document. Expanding the row continues to use the existing full-width
+keeps its current priority. An expandable preview truncates before it can
+widen the chat or document, while compact text remains complete and can wrap
+within the row. Expanding the row continues to use the existing full-width
 Markdown region and its local overflow handling.
 
 ## Failure and security behavior
@@ -107,14 +114,16 @@ Markdown region and its local overflow handling.
 
 ## Verification
 
-Focused component tests cover leading blank lines, Markdown stripping, the
-label-only fallback, compact single-line preservation, later appended content,
-expansion, and the truncating header classes.
+Focused component tests cover leading blank lines, conservative Markdown
+stripping, structural-only lines, identifier punctuation, the label-only
+fallback, compact single-line preservation and wrapping classes, later
+appended content, expansion, and the truncating header classes.
 
 A `mobile-chrome` Playwright scenario seeds Codex-shaped multiline and compact
 thinking messages, waits for their persisted content, verifies the meaningful
-preview and expansion behavior, and checks that the preview, chat, and document
-remain horizontally contained.
+preview and expansion behavior, checks complete compact text with allowed
+wrapping, and checks that the preview, chat, and document remain horizontally
+contained.
 
 No production telemetry is added. This is a deterministic presentation rule
 with component and browser evidence.

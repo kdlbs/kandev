@@ -49,7 +49,8 @@ provider-neutral message contracts while containing the preview on mobile.
   line beside Thinking before expansion, while later appended lines do not
   replace it.
 - Empty or decoration-only thoughts retain the label-only fallback, and compact
-  single-line thoughts retain their current full inline behavior.
+  single-line thoughts retain their current full inline behavior while wrapping
+  when the row is narrow.
 - The expandable preview stays on one truncated line without widening the
   mobile chat or document, and expansion reveals the complete source.
 
@@ -112,10 +113,11 @@ None.
 
 Implemented a model-agnostic first-meaningful-line helper and rendered its
 plain-text result beside the localized Thinking label for expandable rows.
-Compact single-line messages and expanded Markdown content keep their existing
-behavior. The header uses shrink-safe flex regions and one-line truncation;
-structural Markdown-only lines are skipped and identifier punctuation is
-preserved in previews.
+Compact single-line messages remain complete, non-expandable, and readable when
+their inline text wraps; expanded Markdown content keeps its existing behavior.
+The header uses shrink-safe flex regions and truncates only the expandable
+preview; structural Markdown-only lines are skipped and identifier punctuation
+is preserved in previews.
 
 Verification:
 
@@ -123,5 +125,5 @@ Verification:
 - `cd apps/web && pnpm run typecheck` — passed.
 - Targeted ESLint and Prettier checks — passed.
 - `python3 scripts/lint-spec-files.test.py` and `python3 scripts/lint-spec-files.py --all` — passed.
-- `cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/chat/mobile-markdown-wrap.spec.ts -- --grep "thinking preview" --retries=0` — 2 passed.
+- `cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/chat/mobile-markdown-wrap.spec.ts -- --grep "thinking preview" --retries=0` — 2 passed, including complete compact text wrapping.
 - Disposable PR capture E2E — 1 passed; desktop and 393px mobile screenshots were inspected and compressed.

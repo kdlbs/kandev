@@ -75,7 +75,7 @@ export const ThinkingMessage = memo(function ThinkingMessage({
               {t("task:thinking")}
             </span>
             {isShort && (
-              <span className="min-w-0 truncate text-xs text-muted-foreground/80">
+              <span className="min-w-0 break-words whitespace-normal text-xs text-muted-foreground/80">
                 {displayText}
               </span>
             )}
