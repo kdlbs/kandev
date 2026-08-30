@@ -47,6 +47,33 @@ describe("resolveNewSessionProfileSelection", () => {
     });
   });
 
+  it("keeps the current profile fallback when recent history is unavailable", () => {
+    const selection = resolveNewSessionProfileSelection({
+      compatibleProfiles: profiles,
+      currentProfileId: "profile-a",
+    });
+
+    expect(selection).toEqual({
+      profileId: "profile-a",
+      source: "current",
+      profileExplicit: false,
+    });
+  });
+
+  it("keeps the current profile fallback when recent history is empty", () => {
+    const selection = resolveNewSessionProfileSelection({
+      compatibleProfiles: profiles,
+      recentProfileIds: [],
+      currentProfileId: "profile-a",
+    });
+
+    expect(selection).toEqual({
+      profileId: "profile-a",
+      source: "current",
+      profileExplicit: false,
+    });
+  });
+
   it("uses source order when history and the current profile are unavailable", () => {
     const selection = resolveNewSessionProfileSelection({
       compatibleProfiles: [profiles[1], profiles[2]],

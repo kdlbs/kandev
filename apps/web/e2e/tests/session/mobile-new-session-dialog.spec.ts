@@ -40,10 +40,12 @@ test.describe("New session dialog on mobile", () => {
       await session.waitForChatIdle({ timeout: 30_000 });
       await session.openMobileNewSessionDialog();
 
-      const selector = session.newSessionAgentSelector();
+      const selector = session.newSessionDialogPage.agentSelector();
       await expect(selector).toContainText(profileB.name);
       await selector.tap();
-      await expect(session.newSessionAgentOptions().first()).toContainText(profileB.name);
+      const options = session.newSessionDialogPage.agentOptions();
+      await expect(options.filter({ hasText: profileB.name })).toHaveCount(1);
+      await expect(options.first()).toContainText(profileB.name);
       await testPage.keyboard.press("Escape");
 
       await session.newSessionPromptInput().fill("/e2e:simple-message");

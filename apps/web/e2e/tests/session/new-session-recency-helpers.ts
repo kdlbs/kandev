@@ -35,7 +35,7 @@ export async function seedTaskSessionRecency(options: {
   const { testPage, apiClient, seedData, profileA, profileB, mobile = false } = options;
   const sourceTask = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
-    `Session Recency Source ${Date.now()}`,
+    "Session Recency Source",
     profileA.id,
     {
       description: "/e2e:simple-message",
@@ -60,7 +60,7 @@ export async function seedTaskSessionRecency(options: {
     await sourceSession.openNewSessionDialog();
   }
   await expect(sourceSession.newSessionDialog()).toBeVisible({ timeout: 5_000 });
-  await sourceSession.selectNewSessionProfile(profileB.name, mobile);
+  await sourceSession.newSessionDialogPage.selectProfile(profileB.name, mobile);
   await sourceSession.newSessionPromptInput().fill("/e2e:simple-message");
   if (mobile) {
     await sourceSession.newSessionStartButton().tap();
@@ -90,7 +90,7 @@ export async function seedTaskSessionRecency(options: {
 
   const targetTask = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
-    `Session Recency Target ${Date.now()}`,
+    "Session Recency Target",
     profileA.id,
     {
       description: "/e2e:simple-message",

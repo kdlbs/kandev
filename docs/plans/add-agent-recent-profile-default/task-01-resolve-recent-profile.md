@@ -96,6 +96,8 @@ None.
   current-session, and source-order resolution plus provenance.
 - Wired the resolver into `NewSessionDialog`; recent defaults are explicit,
   manual choices are protected, and invalid selections still fall back safely.
-- Added focused resolver and dialog regressions.
-- `cd apps && pnpm --filter @kandev/web test -- --run components/task/new-session-profile-selection.test.ts components/task/new-session-dialog.test.tsx components/task/new-session-form-actions.test.ts lib/agent-profile-recent-use.test.ts` passed (31 tests).
+- Added focused resolver and dialog regressions, including unavailable and
+  empty recent-use state, invalid manual selections, and incompatible handoff
+  fallback.
+- `cd apps && pnpm --filter @kandev/web test -- --run components/task/new-session-profile-selection.test.ts components/task/new-session-dialog.test.tsx components/task/new-session-form-actions.test.ts lib/agent-profile-recent-use.test.ts` passed (34 tests).
 - `cd apps/web && pnpm run typecheck` passed.

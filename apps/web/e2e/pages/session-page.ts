@@ -1,5 +1,6 @@
 import { type Locator, type Page, expect } from "@playwright/test";
 import { FileTreePage } from "./file-tree-page";
+import { NewSessionDialogPage } from "./new-session-dialog-page";
 import { dwell } from "../helpers/causal-waits";
 
 function escapeRegExp(value: string): string {
@@ -25,6 +26,7 @@ export class SessionPage {
   readonly stepper: Locator;
   readonly passthroughTerminal: Locator;
   readonly fileTree: FileTreePage;
+  readonly newSessionDialogPage: NewSessionDialogPage;
 
   constructor(private readonly page: Page) {
     this.chat = page.getByTestId("session-chat");
@@ -36,6 +38,7 @@ export class SessionPage {
     this.stepper = page.getByTestId("workflow-stepper");
     this.passthroughTerminal = page.getByTestId("passthrough-terminal");
     this.fileTree = new FileTreePage(page, this.files, () => this.activeChat());
+    this.newSessionDialogPage = new NewSessionDialogPage(page);
   }
 
   // Port forward dialog locators
@@ -1553,32 +1556,6 @@ export class SessionPage {
   /** Prompt textarea inside the new session or handoff dialog. */
   newSessionPromptInput(): Locator {
     return this.sessionLaunchDialog().getByTestId("task-description-input");
-  }
-
-  /** Agent profile combobox inside the new-session or handoff dialog. */
-  newSessionAgentSelector(): Locator {
-    return this.sessionLaunchDialog().getByTestId("agent-profile-selector");
-  }
-
-  /** Visible agent profile options for the active new-session selector. */
-  newSessionAgentOptions(): Locator {
-    return this.page.getByRole("listbox", { name: "Suggestions" }).getByRole("option");
-  }
-
-  /** Select an agent profile from the active new-session or handoff dialog. */
-  async selectNewSessionProfile(profileName: string, touch = false): Promise<void> {
-    const selector = this.newSessionAgentSelector();
-    if (touch) {
-      await selector.tap();
-    } else {
-      await selector.click();
-    }
-    const option = this.newSessionAgentOptions().filter({ hasText: profileName });
-    if (touch) {
-      await option.tap();
-    } else {
-      await option.click();
-    }
   }
 
   /** Start Agent button inside the new session or handoff dialog. */

@@ -70,7 +70,8 @@ non-explicit.
 
 Keep selection provenance in the dialog state. Compatibility or recency
 updates must not replace a manual choice. If recent-use state is unavailable,
-the dialog must not block. It uses the existing fallback.
+the dialog must not block. It uses the existing current-session then
+source-order fallback.
 
 ### Launch semantics
 
@@ -124,10 +125,11 @@ It must fail because the current implementation selects the current session.
 
 ## Verification results
 
-- `cd apps && pnpm --filter @kandev/web test -- --run components/task/new-session-profile-selection.test.ts components/task/new-session-dialog.test.tsx components/task/new-session-form-actions.test.ts lib/agent-profile-recent-use.test.ts` passed (31 tests).
+- `cd apps && pnpm --filter @kandev/web test -- --run components/task/new-session-profile-selection.test.ts components/task/new-session-dialog.test.tsx components/task/new-session-form-actions.test.ts lib/agent-profile-recent-use.test.ts` passed (34 tests).
 - `cd apps/web && pnpm run typecheck` passed.
 - `cd apps/web && pnpm e2e:run --project chromium tests/session/new-session-dialog.spec.ts -- --grep "uses task-session recency"` passed (1 test).
 - `cd apps/web && pnpm e2e:run --project mobile-chrome tests/session/mobile-new-session-dialog.spec.ts -- --grep "uses task-session recency"` passed (1 test).
+- Review remediation added explicit coverage for unavailable and empty recent-use state, invalid manual selections, and incompatible handoff fallback. The recency-specific E2E controls now use `NewSessionDialogPage` and assert one matching first option on desktop and mobile.
 
 ## Risks
 

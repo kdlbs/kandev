@@ -440,7 +440,30 @@ describe("NewSessionDialog", () => {
     await waitFor(() => expect(mockAgentSelectorValue).toBe("profile-2"));
   });
 
-  it("does not keep an unhealthy profile selected during a local handoff", async () => {
+  it("resets a manual profile choice when it becomes incompatible", async () => {
+    const manualProfile = { ...BASE_PROFILE, id: "profile-2", label: "Profile 2" };
+    const fallbackProfile = { ...BASE_PROFILE, id: "profile-3", label: "Profile 3" };
+    mockState.agentProfiles.items = [BASE_PROFILE, manualProfile, fallbackProfile];
+    const { rerender } = render(
+      <NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />,
+    );
+
+    await act(async () => {
+      mockAgentSelectorOnChange?.(manualProfile.id);
+    });
+    await waitFor(() => expect(mockAgentSelectorValue).toBe(manualProfile.id));
+
+    mockState.agentProfiles.items = [
+      BASE_PROFILE,
+      { ...manualProfile, enabled: false },
+      fallbackProfile,
+    ];
+    rerender(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+
+    await waitFor(() => expect(mockAgentSelectorValue).toBe(BASE_PROFILE.id));
+  });
+
+  it("uses an implicit fallback when a local handoff target is incompatible", async () => {
     mockExecutorProfile = {
       id: "executor-profile-1",
       name: "Local",
@@ -471,7 +494,7 @@ describe("NewSessionDialog", () => {
       expect(mockBuildStartRequest).toHaveBeenCalledWith(
         "task-1",
         "profile-1",
-        expect.objectContaining({ profileExplicit: true }),
+        expect.objectContaining({ profileExplicit: false }),
       ),
     );
   });

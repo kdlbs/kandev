@@ -282,10 +282,7 @@ function useSessionProfileSelection({
     showAgentSelector,
     selectedProfileId,
     profileExplicit:
-      Boolean(handoff) ||
-      selectionSource === "handoff" ||
-      selectionSource === "recent" ||
-      selectionSource === "manual",
+      selectionSource === "handoff" || selectionSource === "recent" || selectionSource === "manual",
     onProfileChange,
   };
 }

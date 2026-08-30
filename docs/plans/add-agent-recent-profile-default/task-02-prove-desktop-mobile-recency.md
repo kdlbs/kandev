@@ -62,6 +62,7 @@ cd apps/web && pnpm e2e:run --project mobile-chrome tests/session/mobile-new-ses
 
 - `apps/web/e2e/tests/session/new-session-dialog.spec.ts`
 - `apps/web/e2e/tests/session/mobile-new-session-dialog.spec.ts`
+- `apps/web/e2e/pages/new-session-dialog-page.ts`
 - `apps/web/e2e/pages/session-page.ts`
 - `apps/web/e2e/helpers/api-client.ts`
 
@@ -95,5 +96,8 @@ cd apps/web && pnpm e2e:run --project mobile-chrome tests/session/mobile-new-ses
   effective backend session profile.
 - Added equivalent mobile coverage through the sessions picker and touch
   interactions.
+- Extracted the recency-specific profile controls into
+  `apps/web/e2e/pages/new-session-dialog-page.ts`; desktop and mobile tests
+  assert a single matching profile option and its first-position ordering.
 - `cd apps/web && pnpm e2e:run --project chromium tests/session/new-session-dialog.spec.ts -- --grep "uses task-session recency"` passed (1 test).
 - `cd apps/web && pnpm e2e:run --project mobile-chrome tests/session/mobile-new-session-dialog.spec.ts -- --grep "uses task-session recency"` passed (1 test).

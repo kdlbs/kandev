@@ -170,8 +170,8 @@ desktop and mobile browser flows prove the shared selection outcome.
 
 ## Failure and recovery
 
-- Missing recent-use state falls back to source order without blocking a
-  selector.
+- Missing recent-use state preserves the existing current-session then
+  source-order fallback without blocking a selector.
 - An empty or fully ineligible `task_session` history preserves the existing
   current-session or source-order default.
 - Invalid stored JSON fails that context read and is logged; other contexts and
