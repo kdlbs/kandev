@@ -179,7 +179,9 @@ func (m *Manager) verifiedIntegratedBranchHead(
 	if live {
 		return "", RetainedLiveWorktree
 	}
-	if protectedBranchName(wt.Branch, wt.BaseBranch) || protectedBranchName(wt.Branch, wt.IntegrationRef) {
+	if protectedBranchName(wt.Branch, wt.BaseBranch) ||
+		protectedBranchName(wt.Branch, wt.IntegrationRef) ||
+		m.protectedRepositoryDefaultBranch(ctx, wt) {
 		return "", RetainedProtectedRef
 	}
 
@@ -191,6 +193,25 @@ func (m *Manager) verifiedIntegratedBranchHead(
 		return "", reason
 	}
 	return branchHead, ""
+}
+
+// protectedRepositoryDefaultBranch loads the canonical default branch from
+// persisted repository metadata. Archived worktree rows do not retain the
+// session's base branch, so cleanup must not rely on Worktree.BaseBranch for
+// this protection. The lookup is intentionally exact and never derives a
+// protected ref from the candidate branch name or a remote short name.
+func (m *Manager) protectedRepositoryDefaultBranch(ctx context.Context, wt *Worktree) bool {
+	if m.repoProvider == nil || wt == nil || strings.TrimSpace(wt.RepositoryID) == "" {
+		return false
+	}
+	repo, err := m.repoProvider.GetRepository(ctx, wt.RepositoryID)
+	if err != nil || repo == nil {
+		if err != nil {
+			m.logger.Debug("repository default branch unavailable during cleanup", zap.Error(err))
+		}
+		return false
+	}
+	return protectedBranchName(wt.Branch, repo.DefaultBranch)
 }
 
 func (m *Manager) verifyHeadAgainstIntegration(
@@ -430,7 +451,9 @@ func (m *Manager) completeInterruptedArchivedCompaction(
 		}
 		return true, reason
 	}
-	if protectedBranchName(wt.Branch, wt.BaseBranch) || protectedBranchName(wt.Branch, wt.IntegrationRef) {
+	if protectedBranchName(wt.Branch, wt.BaseBranch) ||
+		protectedBranchName(wt.Branch, wt.IntegrationRef) ||
+		m.protectedRepositoryDefaultBranch(ctx, wt) {
 		return true, RetainedProtectedRef
 	}
 	branchHead, err := m.resolveCommit(ctx, wt.RepositoryPath, wt.RecoveryHeadSHA)

@@ -423,6 +423,56 @@ func TestMaintainArchivedBranches_UnarchiveAfterSelectionRetainsBranch(t *testin
 	}
 }
 
+func TestMaintainArchivedBranches_ProtectsCanonicalRepositoryDefault(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	mgr.SetRepositoryProvider(&fakeRepoProvider{repo: &Repository{
+		ID:            "repository",
+		DefaultBranch: "release",
+	}})
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-default-protection", "session-default-protection", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-default-protection", "session-default-protection")
+	oldBranch := wt.Branch
+	if _, err := store.db.ExecContext(ctx, `
+		INSERT INTO repositories (id, workspace_id, name, local_path, default_branch, created_at, updated_at)
+		VALUES (?, 'workspace', 'repository', ?, 'release', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, wt.RepositoryID, wt.RepositoryPath); err != nil {
+		t.Fatalf("persist repository metadata: %v", err)
+	}
+	runGit(t, wt.Path, "commit", "--allow-empty", "-m", "default protection")
+	wantHead := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
+	if _, err := store.db.ExecContext(ctx, `UPDATE tasks SET archived_at = CURRENT_TIMESTAMP WHERE id = ?`, wt.TaskID); err != nil {
+		t.Fatalf("archive task: %v", err)
+	}
+	if _, err := mgr.CleanupWorktreesWithReceipt(ctx, []*Worktree{wt}); err != nil {
+		t.Fatalf("archive cleanup: %v", err)
+	}
+	// Model a locally integrated archived branch whose canonical name is the
+	// persisted repository default, but which is not checked out anywhere.
+	runGit(t, wt.RepositoryPath, "branch", "-m", oldBranch, "release")
+	if _, err := store.db.ExecContext(ctx, `
+		UPDATE task_environment_repos
+		SET worktree_branch = 'release', worktree_integration_ref = 'main'
+		WHERE worktree_id = ?`, wt.ID); err != nil {
+		t.Fatalf("rename archived candidate: %v", err)
+	}
+	runGit(t, wt.RepositoryPath, "update-ref", "refs/heads/main", wantHead)
+	if _, err := store.db.ExecContext(ctx, `UPDATE task_sessions SET base_branch = '' WHERE id = ?`, wt.SessionID); err != nil {
+		t.Fatalf("clear archived base branch: %v", err)
+	}
+
+	receipt, err := mgr.MaintainArchivedBranches(ctx, 1)
+	if err != nil {
+		t.Fatalf("archived maintenance: %v", err)
+	}
+	if receipt.Deleted != 0 || receipt.RetainedReasons[RetainedProtectedRef] != 1 {
+		t.Fatalf("default-protection receipt = %+v", receipt)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.RepositoryPath, "rev-parse", "release")); got != wantHead {
+		t.Fatalf("canonical default branch head = %q, want %q", got, wantHead)
+	}
+}
+
 func TestRemoveByID_RemovesFullyMergedManagedBranch(t *testing.T) {
 	store := newMockStore()
 	mgr, err := NewManager(newTestConfig(t), store, newTestLogger())
