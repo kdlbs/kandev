@@ -1018,6 +1018,12 @@ func classifyCreateTaskError(err error) string {
 	case errors.Is(err, service.ErrSubtaskDepthExceeded),
 		errors.Is(err, service.ErrInvalidTaskWorkflow),
 		errors.Is(err, service.ErrExternalIDInvalid),
+		// A reference the caller supplied that does not resolve is a
+		// validation failure, not an internal one. Classifying it as
+		// INTERNAL_ERROR discarded err.Error() and left the caller with a
+		// bare "Failed to create task" naming neither the field nor the
+		// offending value — the cause reached the backend log and nowhere else.
+		errors.Is(err, service.ErrTaskReferenceNotFound),
 		isMCPWorkflowNotFoundError(err):
 		return ws.ErrorCodeValidation
 	default:
