@@ -4784,6 +4784,11 @@ func (s *Service) claimLifecycleSessionRunning(
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	// Match ordinary prompt admission: a reset-owned cancellation must reject
+	// lifecycle admission before its cancellation wait can observe ctx.Err().
+	if s.isSessionResetInProgress(sessionID) {
+		return nil, "", ErrSessionResetInProgress
+	}
 	if err := s.waitForCancellationWithGuard(ctx, sessionID, lock.Unlock, lock.Lock); err != nil {
 		return nil, "", err
 	}
