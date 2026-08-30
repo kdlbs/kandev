@@ -248,3 +248,61 @@ func TestReapStalePendingMoves_NoQueueIsNoOp(t *testing.T) {
 	svc.messageQueue = nil
 	svc.reapStalePendingMovesOnce(context.Background())
 }
+
+func armPendingMoveInWorkflow(svc *Service, sessionID, taskID, workflowID string, queuedAt time.Time) {
+	svc.messageQueue.SetPendingMove(context.Background(), sessionID, &messagequeue.PendingMove{
+		MoveID:         "move-" + sessionID,
+		TaskID:         taskID,
+		WorkflowID:     workflowID,
+		WorkflowStepID: "step-blocked",
+		QueuedAt:       queuedAt,
+	})
+}
+
+// TestReapStalePendingMoves_IsRowLocalAcrossWorkflows pins that the sweep
+// decides each row on its own queued_at and its own keyed session, never on
+// the row's workflow or on its siblings.
+//
+// pending_moves is a GLOBAL table with no workspace column and a workflow_id
+// that is tempting to filter on. Both directions of that temptation are bugs:
+// a sweep scoped to one workflow would leave every other workspace's rows
+// armed forever (the orphans observed in production spanned two independent
+// workflows), while any cross-row logic would let one workspace's state decide
+// another's. Neither shows up in a single-workflow fixture, which is why this
+// test seeds two.
+func TestReapStalePendingMoves_IsRowLocalAcrossWorkflows(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ctx := context.Background()
+
+	const workflowA = "wf-workspace-a"
+	const workflowB = "wf-workspace-b"
+	fresh := time.Now().UTC().Add(-time.Minute)
+
+	// Workflow A: one stale row and one healthy row.
+	seedPendingMoveSession(t, repo, "task-a-stale", "sess-a-stale")
+	seedPendingMoveSession(t, repo, "task-a-fresh", "sess-a-fresh")
+	armPendingMoveInWorkflow(svc, "sess-a-stale", "task-a-stale", workflowA, staleQueuedAt())
+	armPendingMoveInWorkflow(svc, "sess-a-fresh", "task-a-fresh", workflowA, fresh)
+
+	// Workflow B: the same shapes, plus an orphan within the TTL. Production
+	// had exactly this — an orphan in a workflow other than the one under
+	// investigation.
+	seedPendingMoveSession(t, repo, "task-b-stale", "sess-b-stale")
+	seedPendingMoveSession(t, repo, "task-b-fresh", "sess-b-fresh")
+	armPendingMoveInWorkflow(svc, "sess-b-stale", "task-b-stale", workflowB, staleQueuedAt())
+	armPendingMoveInWorkflow(svc, "sess-b-fresh", "task-b-fresh", workflowB, fresh)
+	armPendingMoveInWorkflow(svc, "sess-b-orphan", "task-b-orphan", workflowB, fresh)
+
+	svc.reapStalePendingMovesOnce(ctx)
+
+	for sessionID, wantArmed := range map[string]bool{
+		"sess-a-stale":  false,
+		"sess-b-stale":  false,
+		"sess-b-orphan": false,
+		"sess-a-fresh":  true,
+		"sess-b-fresh":  true,
+	} {
+		assertArmed(t, svc, sessionID, wantArmed)
+	}
+}
