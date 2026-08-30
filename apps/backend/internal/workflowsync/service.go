@@ -82,13 +82,15 @@ type Service struct {
 	// than racing an in-flight apply.
 	locks sync.Map // workspaceID → *sync.Mutex
 
-	// automaticMu bounds periodic dispatch to one in-flight sync per
-	// workspace. Automatic provider admission may wait for a long retry
-	// window, so the poller must not hold up dispatch for other workspaces or
-	// providers while that wait is in progress.
+	// automaticMu guards the bounded periodic execution pool and coalesces
+	// queued/active work by workspace. Provider admission can wait for a long
+	// retry window, so pending work must remain in the scheduler queue rather
+	// than becoming one goroutine per workspace.
 	automaticMu       sync.Mutex
 	automaticInFlight map[string]struct{}
-	automaticWG       sync.WaitGroup
+	automaticPool     *automaticScheduler
+	automaticCancel   context.CancelFunc
+	automaticWorkers  int
 
 	// workspaceAuthorizer enforces per-user workspace scoping. Nil (unit
 	// tests, or a caller with no identity in context — internal callers like
@@ -143,6 +145,7 @@ func NewService(
 		now:               time.Now,
 		jitter:            defaultJitter,
 		automaticInFlight: make(map[string]struct{}),
+		automaticWorkers:  automaticSyncWorkerLimit,
 	}
 }
 
@@ -466,22 +469,91 @@ func (s *Service) dispatchAutomaticSync(ctx context.Context, workspaceID string)
 		return
 	}
 	s.automaticInFlight[workspaceID] = struct{}{}
+	var pool *automaticScheduler
+	if s.automaticPool == nil {
+		poolCtx, cancel := context.WithCancel(context.Background())
+		s.automaticCancel = cancel
+		pool = newAutomaticScheduler(poolCtx, s.automaticWorkers, s.runAutomaticJob, func() {
+			s.automaticPoolIdle(pool)
+		})
+		s.automaticPool = pool
+	} else {
+		pool = s.automaticPool
+	}
 	s.automaticMu.Unlock()
 
-	s.automaticWG.Add(1)
-	go func() {
-		defer s.automaticWG.Done()
-		defer func() {
-			s.automaticMu.Lock()
-			delete(s.automaticInFlight, workspaceID)
-			s.automaticMu.Unlock()
-		}()
-		_, _ = s.syncWorkspace(ctx, workspaceID, syncAutomatic)
-	}()
+	if !pool.enqueue(automaticJob{workspaceID: workspaceID}) {
+		s.finishAutomaticJob(workspaceID)
+	}
+}
+
+func (s *Service) automaticPoolIdle(pool *automaticScheduler) {
+	s.automaticMu.Lock()
+	if s.automaticPool != pool || len(s.automaticInFlight) != 0 {
+		s.automaticMu.Unlock()
+		return
+	}
+	s.automaticPool = nil
+	cancel := s.automaticCancel
+	s.automaticCancel = nil
+	pool.close()
+	s.automaticMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (s *Service) runAutomaticJob(ctx context.Context, job automaticJob) {
+	defer s.finishAutomaticJob(job.workspaceID)
+	// A caller can cancel its poll tick without cancelling the service-owned
+	// pool. The pool itself is cancelled by Poller.Stop, which gives active
+	// provider calls a reliable shutdown context.
+	if !s.automaticSyncReady(ctx, job.workspaceID) {
+		return
+	}
+	_, _ = s.syncWorkspace(ctx, job.workspaceID, syncAutomatic)
+}
+
+func (s *Service) finishAutomaticJob(workspaceID string) {
+	s.automaticMu.Lock()
+	delete(s.automaticInFlight, workspaceID)
+	s.automaticMu.Unlock()
+}
+
+// automaticSyncReadiness is implemented by providers that can inspect local
+// admission state without issuing a request. It is optional so lightweight
+// provider doubles and integrations remain source-compatible.
+type automaticSyncReadiness interface {
+	BackgroundWorkflowSyncReady(context.Context, string) bool
+}
+
+func (s *Service) automaticSyncReady(ctx context.Context, workspaceID string) bool {
+	cfg, err := s.store.GetConfigForWorkspace(ctx, workspaceID)
+	if err != nil || cfg == nil {
+		return true
+	}
+	if cfg.Provider == ProviderGitHub {
+		if provider, ok := s.githubClients.(automaticSyncReadiness); ok {
+			return provider.BackgroundWorkflowSyncReady(ctx, workspaceID)
+		}
+	}
+	return true
 }
 
 func (s *Service) waitAutomaticSyncs() {
-	s.automaticWG.Wait()
+	s.automaticMu.Lock()
+	pool := s.automaticPool
+	cancel := s.automaticCancel
+	s.automaticPool = nil
+	s.automaticCancel = nil
+	s.automaticInFlight = make(map[string]struct{})
+	s.automaticMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if pool != nil {
+		pool.stop()
+	}
 }
 
 func isSyncDue(cfg *Config, now time.Time) bool {

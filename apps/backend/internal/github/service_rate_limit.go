@@ -73,6 +73,38 @@ type rateAdmissionDecision struct {
 	backgroundReason   string
 }
 
+// BackgroundWorkflowSyncReady reports whether an automatic workflow sync can
+// begin without waiting in provider admission. It is intentionally a local
+// snapshot check: workflow-sync uses it to keep throttled work in its pending
+// queue, outside the bounded execution pool.
+func (s *Service) BackgroundWorkflowSyncReady(ctx context.Context, workspaceID string) bool {
+	resolved, err := s.resolveAutomationClient(ctx, workspaceID, "", "")
+	if err != nil || resolved == nil {
+		// Credential and repository errors still need a real sync attempt so
+		// workflow-sync can persist its actionable failure state.
+		return true
+	}
+	var admission *RateAdmission
+	switch client := resolved.Client.(type) {
+	case *PATClient:
+		admission = client.rateAdmission
+	case *GHClient:
+		admission = client.rateAdmission
+	default:
+		return true
+	}
+	if admission == nil {
+		return true
+	}
+	now := time.Now()
+	for _, resource := range []Resource{ResourceCore, ResourceGraphQL, ResourceSearch} {
+		if !admission.snapshot(resource, now).backgroundAllowed {
+			return false
+		}
+	}
+	return true
+}
+
 // GetWorkspaceRateLimitSnapshot reads only persisted connection metadata and
 // in-memory coordinator state. It deliberately never resolves credentials,
 // calls /rate_limit, or sends any other provider request.
