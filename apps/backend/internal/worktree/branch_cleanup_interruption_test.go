@@ -141,6 +141,36 @@ func TestMaintainArchivedBranches_FinalizesAbsentRefAfterCompletionPersistFailur
 	}
 }
 
+func TestMaintainArchivedBranches_RetainsAdvancedRefAfterInterruptedCompaction(t *testing.T) {
+	mgr, store, wt, recoveryHead := archivedIntegratedBranchForMaintenance(t, "advanced-ref")
+	ctx := context.Background()
+	if persisted, err := store.PersistArchivedBranchRecoveryHead(ctx, wt.ID, "", recoveryHead); err != nil || !persisted {
+		t.Fatalf("persist recovery head: persisted=%v err=%v", persisted, err)
+	}
+	runGit(t, wt.RepositoryPath, "checkout", "main")
+	runGit(t, wt.RepositoryPath, "commit", "--allow-empty", "-m", "advance integration")
+	advancedHead := strings.TrimSpace(runGit(t, wt.RepositoryPath, "rev-parse", "HEAD"))
+	runGit(t, wt.RepositoryPath, "update-ref", "refs/heads/"+wt.Branch, advancedHead)
+
+	receipt, err := mgr.MaintainArchivedBranches(ctx, 1)
+	if err != nil {
+		t.Fatalf("maintenance: %v", err)
+	}
+	if receipt.Deleted != 0 || receipt.RetainedReasons[RetainedHeadChanged] != 1 {
+		t.Fatalf("advanced-ref receipt = %+v", receipt)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.RepositoryPath, "rev-parse", wt.Branch)); got != advancedHead {
+		t.Fatalf("advanced branch head = %q, want %q", got, advancedHead)
+	}
+	persisted, err := store.GetWorktreeByID(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("load recovery metadata: %v", err)
+	}
+	if persisted.RecoveryHeadSHA != recoveryHead {
+		t.Fatalf("recovery head overwritten = %q, want %q", persisted.RecoveryHeadSHA, recoveryHead)
+	}
+}
+
 func TestMaintainArchivedBranches_ReleasesRepoLockAfterPanic(t *testing.T) {
 	mgr, store, wt, _ := archivedIntegratedBranchForMaintenance(t, "panic-lock")
 	mgr.store = &panicArchivedCandidateStore{SQLiteStore: store}

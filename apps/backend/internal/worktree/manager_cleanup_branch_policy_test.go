@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -93,6 +94,53 @@ func TestCleanupWorktreesPreservingBranches_RetainsExternalBranch(t *testing.T) 
 	}
 	if got := strings.TrimSpace(runGit(t, wt.RepositoryPath, "branch", "--list", wt.Branch)); got == "" {
 		t.Fatal("external branch was deleted")
+	}
+}
+
+func TestCleanupWorktreesPreservingBranches_RetainsWhenDefaultProtectionUnavailable(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider RepositoryProvider
+	}{
+		{name: "nil provider"},
+		{name: "empty default", provider: &fakeRepoProvider{repo: &Repository{ID: "repository"}}},
+		{name: "provider error", provider: &fakeRepoProvider{err: errors.New("repository unavailable")}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mgr, store := newReferenceCleanupTestManager(t)
+			if tt.provider != nil {
+				mgr.SetRepositoryProvider(tt.provider)
+			} else {
+				mgr.SetRepositoryProvider(nil)
+			}
+			seedReferenceCleanupSession(t, store, "task-default-unavailable", "session-default-unavailable", models.TaskSessionStateCompleted)
+			wt := createReferenceCleanupWorktree(t, mgr, "task-default-unavailable", "session-default-unavailable")
+			runGit(t, wt.Path, "commit", "--allow-empty", "-m", "unintegrated archive")
+			ctx := context.Background()
+			if _, err := store.db.ExecContext(ctx, `
+				INSERT INTO repositories (id, workspace_id, name, local_path, created_at, updated_at)
+				VALUES (?, 'workspace', 'repository', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+			`, wt.RepositoryID, wt.RepositoryPath); err != nil {
+				t.Fatalf("persist repository metadata: %v", err)
+			}
+			if _, err := store.db.ExecContext(ctx, `UPDATE tasks SET archived_at = CURRENT_TIMESTAMP WHERE id = ?`, wt.TaskID); err != nil {
+				t.Fatalf("archive task: %v", err)
+			}
+			if err := mgr.CleanupWorktreesPreservingBranches(ctx, []*Worktree{wt}); err != nil {
+				t.Fatalf("archive cleanup: %v", err)
+			}
+			receipt, err := mgr.MaintainArchivedBranches(ctx, 1)
+			if err != nil {
+				t.Fatalf("cleanup: %v", err)
+			}
+			if receipt.Deleted != 0 || receipt.RetainedReasons[RetainedProtectedRefUnavailable] != 1 {
+				t.Fatalf("receipt = %+v", receipt)
+			}
+			if got := strings.TrimSpace(runGit(t, wt.RepositoryPath, "branch", "--list", wt.Branch)); got == "" {
+				t.Fatal("branch was deleted without canonical default protection")
+			}
+		})
 	}
 }
 

@@ -153,6 +153,9 @@ func newReferenceCleanupTestManager(t *testing.T) (*Manager, *SQLiteStore) {
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
+	mgr.SetRepositoryProvider(&fakeRepoProvider{repo: &Repository{
+		ID: "repository", DefaultBranch: "main",
+	}})
 	return mgr, store
 }
 

@@ -23,20 +23,21 @@ const (
 type BranchRetentionReason string
 
 const (
-	RetainedUnknownOwner          BranchRetentionReason = "unknown_owner"
-	RetainedExternalOwner         BranchRetentionReason = "external_owner"
-	RetainedAmbiguousOwner        BranchRetentionReason = "ambiguous_owner"
-	RetainedActiveReference       BranchRetentionReason = "active_reference"
-	RetainedMissingMetadata       BranchRetentionReason = "missing_metadata"
-	RetainedLiveWorktree          BranchRetentionReason = "live_worktree"
-	RetainedProtectedRef          BranchRetentionReason = "protected_ref"
-	RetainedMissingRef            BranchRetentionReason = "missing_ref"
-	RetainedAncestryProbeFailed   BranchRetentionReason = "ancestry_probe_failed"
-	RetainedNotIntegrated         BranchRetentionReason = "not_integrated"
-	RetainedRecoveryPersistFailed BranchRetentionReason = "recovery_persist_failed"
-	RetainedHeadChanged           BranchRetentionReason = "head_changed"
-	RetainedSafeDeleteRefused     BranchRetentionReason = "safe_delete_refused"
-	RetainedArchiveStateChanged   BranchRetentionReason = "archive_state_changed"
+	RetainedUnknownOwner            BranchRetentionReason = "unknown_owner"
+	RetainedExternalOwner           BranchRetentionReason = "external_owner"
+	RetainedAmbiguousOwner          BranchRetentionReason = "ambiguous_owner"
+	RetainedActiveReference         BranchRetentionReason = "active_reference"
+	RetainedMissingMetadata         BranchRetentionReason = "missing_metadata"
+	RetainedLiveWorktree            BranchRetentionReason = "live_worktree"
+	RetainedProtectedRef            BranchRetentionReason = "protected_ref"
+	RetainedProtectedRefUnavailable BranchRetentionReason = "protected_ref_unavailable"
+	RetainedMissingRef              BranchRetentionReason = "missing_ref"
+	RetainedAncestryProbeFailed     BranchRetentionReason = "ancestry_probe_failed"
+	RetainedNotIntegrated           BranchRetentionReason = "not_integrated"
+	RetainedRecoveryPersistFailed   BranchRetentionReason = "recovery_persist_failed"
+	RetainedHeadChanged             BranchRetentionReason = "head_changed"
+	RetainedSafeDeleteRefused       BranchRetentionReason = "safe_delete_refused"
+	RetainedArchiveStateChanged     BranchRetentionReason = "archive_state_changed"
 )
 
 type BranchCleanupReceipt struct {
@@ -127,7 +128,7 @@ func (m *Manager) compactManagedBranchWithMode(
 		branchCleanupMetrics.Add("deleted", 1)
 		return receipt
 	}
-	branchHead, reason := m.verifiedIntegratedBranchHead(ctx, wt)
+	branchHead, reason := m.verifiedIntegratedBranchHead(ctx, wt, requireArchived)
 	if reason != "" {
 		receipt.retain(reason)
 		return receipt
@@ -169,7 +170,7 @@ func (m *Manager) branchMetadataStoreForCleanup(
 }
 
 func (m *Manager) verifiedIntegratedBranchHead(
-	ctx context.Context, wt *Worktree,
+	ctx context.Context, wt *Worktree, requireArchived bool,
 ) (string, BranchRetentionReason) {
 	branchRef := "refs/heads/" + wt.Branch
 	live, err := branchCheckedOutInWorktree(ctx, wt.RepositoryPath, branchRef)
@@ -180,9 +181,17 @@ func (m *Manager) verifiedIntegratedBranchHead(
 		return "", RetainedLiveWorktree
 	}
 	if protectedBranchName(wt.Branch, wt.BaseBranch) ||
-		protectedBranchName(wt.Branch, wt.IntegrationRef) ||
-		m.protectedRepositoryDefaultBranch(ctx, wt) {
+		protectedBranchName(wt.Branch, wt.IntegrationRef) {
 		return "", RetainedProtectedRef
+	}
+	if requireArchived {
+		protected, reason := m.protectedRepositoryDefaultBranch(ctx, wt)
+		if reason != "" {
+			return "", reason
+		}
+		if protected {
+			return "", RetainedProtectedRef
+		}
 	}
 
 	branchHead, err := m.resolveCommit(ctx, wt.RepositoryPath, branchRef)
@@ -200,18 +209,20 @@ func (m *Manager) verifiedIntegratedBranchHead(
 // session's base branch, so cleanup must not rely on Worktree.BaseBranch for
 // this protection. The lookup is intentionally exact and never derives a
 // protected ref from the candidate branch name or a remote short name.
-func (m *Manager) protectedRepositoryDefaultBranch(ctx context.Context, wt *Worktree) bool {
+func (m *Manager) protectedRepositoryDefaultBranch(
+	ctx context.Context, wt *Worktree,
+) (bool, BranchRetentionReason) {
 	if m.repoProvider == nil || wt == nil || strings.TrimSpace(wt.RepositoryID) == "" {
-		return false
+		return false, RetainedProtectedRefUnavailable
 	}
 	repo, err := m.repoProvider.GetRepository(ctx, wt.RepositoryID)
-	if err != nil || repo == nil {
+	if err != nil || repo == nil || strings.TrimSpace(repo.DefaultBranch) == "" {
 		if err != nil {
 			m.logger.Debug("repository default branch unavailable during cleanup", zap.Error(err))
 		}
-		return false
+		return false, RetainedProtectedRefUnavailable
 	}
-	return protectedBranchName(wt.Branch, repo.DefaultBranch)
+	return protectedBranchName(wt.Branch, repo.DefaultBranch), ""
 }
 
 func (m *Manager) verifyHeadAgainstIntegration(
@@ -428,6 +439,15 @@ func (m *Manager) reconcileInterruptedArchivedCompaction(
 		return true, RetainedAncestryProbeFailed
 	}
 	if exists {
+		currentHead, resolveErr := m.resolveCommit(ctx, wt.RepositoryPath, branchRef)
+		if resolveErr != nil {
+			return true, RetainedMissingRef
+		}
+		if !strings.EqualFold(currentHead, wt.RecoveryHeadSHA) {
+			// A local ref may have advanced after the recovery head was
+			// durably recorded. Retain it and never replace the recovery SHA.
+			return true, RetainedHeadChanged
+		}
 		return false, ""
 	}
 	return m.completeInterruptedArchivedCompaction(ctx, metadataStore, wt, branchRef)
@@ -452,8 +472,14 @@ func (m *Manager) completeInterruptedArchivedCompaction(
 		return true, reason
 	}
 	if protectedBranchName(wt.Branch, wt.BaseBranch) ||
-		protectedBranchName(wt.Branch, wt.IntegrationRef) ||
-		m.protectedRepositoryDefaultBranch(ctx, wt) {
+		protectedBranchName(wt.Branch, wt.IntegrationRef) {
+		return true, RetainedProtectedRef
+	}
+	protected, reason := m.protectedRepositoryDefaultBranch(ctx, wt)
+	if reason != "" {
+		return true, reason
+	}
+	if protected {
 		return true, RetainedProtectedRef
 	}
 	branchHead, err := m.resolveCommit(ctx, wt.RepositoryPath, wt.RecoveryHeadSHA)
