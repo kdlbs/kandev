@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -216,6 +217,15 @@ type CreateRequest struct {
 	// reusable worktree must bypass it. On success, Create marks the refresh as
 	// handled before selecting local refs.
 	RefreshRepository func(context.Context) error
+
+	// RefreshRepositoryWithState is the typed variant used by managed clones.
+	// Only RemoteRefStateEmpty permits local empty-remote bootstrap; unknown
+	// state remains fail-closed and follows the ordinary refresh rules.
+	RefreshRepositoryWithState func(context.Context) (repoclone.RemoteRefState, error)
+
+	// RemoteRefState is the result of the authenticated remote advertisement
+	// used for this materialization.
+	RemoteRefState repoclone.RemoteRefState
 
 	// WorktreeID is the ID of an existing worktree to reuse (optional).
 	// If provided and valid, the existing worktree is returned instead of creating a new one.

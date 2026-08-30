@@ -442,6 +442,10 @@ type LaunchAgentRequest struct {
 	// RefreshRepository is an optional provider-authenticated refresh deferred
 	// until worktree materialization. A valid reusable worktree bypasses it.
 	RefreshRepository func(context.Context) error
+	// RefreshRepositoryWithState is the typed refresh path used to distinguish
+	// an authenticated empty remote from an unknown refresh result.
+	RefreshRepositoryWithState func(context.Context) (repoclone.RemoteRefState, error)
+	RemoteRefState             repoclone.RemoteRefState
 
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
@@ -492,10 +496,12 @@ type RepoSpec struct {
 	RemoteSyncHandled       bool
 	// RefreshRepository is an optional provider-authenticated refresh deferred
 	// until worktree materialization. A valid reusable worktree bypasses it.
-	RefreshRepository func(context.Context) error
-	RepoSetupScript   string
-	RepoCleanupScript string
-	CopyFiles         string
+	RefreshRepository          func(context.Context) error
+	RefreshRepositoryWithState func(context.Context) (repoclone.RemoteRefState, error)
+	RemoteRefState             repoclone.RemoteRefState
+	RepoSetupScript            string
+	RepoCleanupScript          string
+	CopyFiles                  string
 	// BranchSlug, when non-empty, suffixes the repo dir so the same repo can
 	// host multiple branch worktrees as siblings within one task. Set by the
 	// orchestrator when buildRepoSpecs detects multiple rows sharing a
@@ -893,39 +899,89 @@ type strictAuthenticatedRepoCloner interface {
 	) error
 }
 
+type remoteStateRepoCloner interface {
+	EnsureWorkspaceClonedWithCredentialRequestAndState(
+		ctx context.Context, request repoclone.GitCredentialRequest,
+		credentialHost, token string,
+	) (string, repoclone.RemoteRefState, error)
+	RefreshWorkspaceRepositoryWithCredentialRequestAndState(
+		ctx context.Context, request repoclone.GitCredentialRequest,
+		repositoryPath, credentialHost, token string,
+	) (repoclone.RemoteRefState, error)
+}
+
+type remoteStateAuthenticatedRepoCloner interface {
+	EnsureWorkspaceClonedWithBasicAuthAndState(
+		ctx context.Context, workspaceID, provider, providerHost,
+		cloneURL, owner, name, username, password string,
+	) (string, repoclone.RemoteRefState, error)
+	RefreshWorkspaceRepositoryWithBasicAuthAndState(
+		ctx context.Context, workspaceID, provider, providerHost,
+		cloneURL, owner, name, repositoryPath, username, password string,
+	) (repoclone.RemoteRefState, error)
+}
+
+type localRemoteStateRepoCloner interface {
+	InspectLocalRepositoryRemoteRefState(
+		ctx context.Context, repositoryPath string,
+	) (repoclone.RemoteRefState, error)
+}
+
 const providerAzureDevOps = "azure_devops"
 
 func (e *Executor) ensureClonedWithWorkspaceAuth(
 	ctx context.Context, repo *models.Repository, cloneURL string,
 ) (string, error) {
-	return e.ensureClonedWithWorkspaceAuthForSession(ctx, "", "", repo, cloneURL)
+	path, _, err := e.ensureClonedWithWorkspaceAuthForSessionAndState(ctx, "", "", repo, cloneURL)
+	return path, err
 }
 
 func (e *Executor) ensureClonedWithWorkspaceAuthForSession(
 	ctx context.Context, taskID, sessionID string, repo *models.Repository, cloneURL string,
 ) (string, error) {
+	path, _, err := e.ensureClonedWithWorkspaceAuthForSessionAndState(ctx, taskID, sessionID, repo, cloneURL)
+	return path, err
+}
+
+func (e *Executor) ensureClonedWithWorkspaceAuthForSessionAndState(
+	ctx context.Context, taskID, sessionID string, repo *models.Repository, cloneURL string,
+) (string, repoclone.RemoteRefState, error) {
 	credentialHost, token := "", ""
 	if strings.EqualFold(repo.Provider, "gitlab") && e.gitlabCredentials != nil {
 		credentialHost, token, _ = e.gitlabCredentials.ResolveGitLabExecutionCredentials(ctx, repo.WorkspaceID)
 	}
 	if repo.Provider != providerAzureDevOps || !strings.HasPrefix(cloneURL, "https://") {
-		return e.repoCloner.EnsureWorkspaceClonedWithCredentialRequest(
-			ctx, repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL), credentialHost, token,
+		request := repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL)
+		if stateCloner, ok := e.repoCloner.(remoteStateRepoCloner); ok {
+			return stateCloner.EnsureWorkspaceClonedWithCredentialRequestAndState(
+				ctx, request, credentialHost, token,
+			)
+		}
+		path, err := e.repoCloner.EnsureWorkspaceClonedWithCredentialRequest(
+			ctx, request, credentialHost, token,
 		)
+		return path, repoclone.RemoteRefStateHasRefs, err
 	}
 	authCloner, ok := e.repoCloner.(authenticatedRepoCloner)
 	if !ok || e.secretStore == nil {
-		return "", fmt.Errorf("azure DevOps repository clone authentication is unavailable")
+		return "", repoclone.RemoteRefStateUnknown, fmt.Errorf("azure DevOps repository clone authentication is unavailable")
 	}
 	pat, err := e.secretStore.Reveal(ctx, cloneauth.AzureDevOpsPATKey(repo.WorkspaceID))
 	if err != nil {
-		return "", fmt.Errorf("read Azure DevOps clone credential: %w", err)
+		return "", repoclone.RemoteRefStateUnknown, fmt.Errorf("read Azure DevOps clone credential: %w", err)
 	}
 	// Azure DevOps PAT authentication ignores the username; any non-empty value works.
-	return authCloner.EnsureWorkspaceClonedWithBasicAuth(
+	if stateCloner, ok := e.repoCloner.(remoteStateAuthenticatedRepoCloner); ok {
+		return stateCloner.EnsureWorkspaceClonedWithBasicAuthAndState(
+			ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
+			cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
+		)
+	}
+	path, err := authCloner.EnsureWorkspaceClonedWithBasicAuth(
 		ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
 		cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
 	)
+	return path, repoclone.RemoteRefStateHasRefs, err
 }
 
 func repositoryGitCredentialRequest(

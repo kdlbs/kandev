@@ -34,6 +34,7 @@ launch.
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.5` | [Base-ref selection](#base-ref-selection) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.6` | [Multi-repository launch](#multi-repository-launch) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.7` | [Launch-error projection](#launch-error-projection) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.8` | [Empty remote exception](#empty-remote-exception) |
 
 ## Components and responsibilities
 
@@ -131,6 +132,16 @@ not reset, rebase, merge, or delete a branch.
 Git failure classification but exclude tokens, credential helper output, and
 secret-bearing URLs.
 
+## Empty remote exception
+
+An authenticated remote advertisement with zero refs is not a stale local
+fallback. It is the typed empty-remote state defined by
+[Empty Remote Repository System Design](empty-remote-repositories.md).
+
+This exception creates only the marked local baseline. It does not permit a
+launch-time remote write or relax any authentication, network, timeout,
+cancellation, missing-branch, or ancestry error.
+
 ## Multi-repository launch
 
 The executor resolves and prepares repository specs before agent startup. If a
@@ -159,8 +170,8 @@ credential configuration.
 
 - Fetch authentication, network, timeout, cancellation, and Git command errors
   stop required preparation.
-- A missing fetched remote base stops preparation. It cannot fall back to a
-  local ref when refresh is required.
+- A missing fetched remote base on a non-empty remote stops preparation. It
+  cannot fall back to a local ref when refresh is required.
 - A failed ancestry probe stops preparation.
 - A divergent base stops preparation and preserves both refs.
 - Disabling pull-before-worktree is the explicit offline opt-out. Kandev does

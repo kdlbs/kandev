@@ -15,6 +15,8 @@ import (
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/gitbootstrap"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/worktree/copyfiles"
 )
 
@@ -168,7 +170,20 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 // checked by the caller first, so a valid existing worktree never refreshes
 // origin or incurs provider authentication work.
 func (m *Manager) refreshRepositoryForMaterialization(ctx context.Context, req *CreateRequest) error {
-	if req == nil || req.RemoteSyncHandled || req.RefreshRepository == nil {
+	if req == nil || req.RemoteSyncHandled {
+		return nil
+	}
+	if req.RefreshRepositoryWithState != nil {
+		state, err := req.RefreshRepositoryWithState(ctx)
+		if err != nil {
+			return err
+		}
+		req.RemoteRefState = state
+		req.RemoteSyncHandled = true
+		req.PullBeforeWorktree = false
+		return nil
+	}
+	if req.RefreshRepository == nil {
 		return nil
 	}
 	if err := req.RefreshRepository(ctx); err != nil {
@@ -177,6 +192,23 @@ func (m *Manager) refreshRepositoryForMaterialization(ctx context.Context, req *
 	req.RemoteSyncHandled = true
 	req.PullBeforeWorktree = false
 	return nil
+}
+
+func (m *Manager) ensureEmptyRemoteBaseline(ctx context.Context, req *CreateRequest) (string, error) {
+	if req == nil || req.RemoteRefState != repoclone.RemoteRefStateEmpty {
+		return "", nil
+	}
+	baseline, err := gitbootstrap.Ensure(ctx, req.RepositoryPath, req.BaseBranch)
+	if errors.Is(err, gitbootstrap.ErrBaselineConflict) {
+		req.RemoteRefState = repoclone.RemoteRefStateHasRefs
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("seed empty-remote local baseline: %w", err)
+	}
+	req.RemoteSyncHandled = true
+	req.PullBeforeWorktree = false
+	return baseline.BaseRef, nil
 }
 
 // reuseRequiredWorktree resolves the exact canonical worktree for an
@@ -470,9 +502,23 @@ func requestBranchIdentitySlug(req CreateRequest) string {
 // returned for surfacing on the resulting worktree record.
 func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateRequest) (baseRef, warning, detail string, err error) {
 	baseRef = req.BaseBranch
-	if req.RemoteSyncHandled {
+	switch {
+	case req.RemoteRefState == repoclone.RemoteRefStateEmpty:
+		baselineRef, baselineErr := m.ensureEmptyRemoteBaseline(ctx, req)
+		if baselineErr != nil {
+			return "", "", "", baselineErr
+		}
+		switch {
+		case baselineRef != "":
+			baseRef = baselineRef
+		case req.RemoteSyncHandled:
+			baseRef, err = m.preferRefreshedRemoteRef(ctx, req.RepositoryPath, req.BaseBranch)
+		case req.PullBeforeWorktree:
+			baseRef, err = m.pullBaseBranch(ctx, req.RepositoryPath, req.BaseBranch, req.OnSyncProgress)
+		}
+	case req.RemoteSyncHandled:
 		baseRef, err = m.preferRefreshedRemoteRef(ctx, req.RepositoryPath, req.BaseBranch)
-	} else if req.PullBeforeWorktree {
+	case req.PullBeforeWorktree:
 		baseRef, err = m.pullBaseBranch(ctx, req.RepositoryPath, req.BaseBranch, req.OnSyncProgress)
 	}
 	if err != nil {
@@ -1681,6 +1727,9 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		repoLock.Unlock()
 		m.releaseRepoLock(req.RepositoryPath)
 	}()
+	if _, err := m.ensureEmptyRemoteBaseline(ctx, &req); err != nil {
+		return nil, err
+	}
 
 	// Reuse the original on-disk path so the worktree is recreated in the
 	// same task-dir slot it was first created in.

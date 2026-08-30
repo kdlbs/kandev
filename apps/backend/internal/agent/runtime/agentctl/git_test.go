@@ -341,7 +341,8 @@ func TestGitCreatePR_PostsFullPayloadAndDecodesResult(t *testing.T) {
 	srv, got := captureServer(t, jsonResponder(http.StatusOK, `{
 		"success":true,"branch_pushed":true,
 		"pr_url":"https://github.com/kdlbs/kandev/pull/1",
-		"provider":"github","output":"created"
+		"provider":"github","output":"created",
+		"error_code":"empty_remote_branch_publish_failed"
 	}`))
 
 	result, err := newHTTPOnlyClient(srv.URL).GitCreatePR(
@@ -382,6 +383,9 @@ func TestGitCreatePR_PostsFullPayloadAndDecodesResult(t *testing.T) {
 	}
 	if result.Provider != "github" || result.Output != "created" {
 		t.Errorf("provider/output = %q / %q, want github / created", result.Provider, result.Output)
+	}
+	if result.ErrorCode != "empty_remote_branch_publish_failed" {
+		t.Errorf("error code = %q, want empty_remote_branch_publish_failed", result.ErrorCode)
 	}
 }
 

@@ -43,6 +43,77 @@ func TestClonerExposesExactScopeWorkspaceClone(t *testing.T) {
 	}
 }
 
+func TestInspectRemoteRefStateDistinguishesEmptyAndPopulatedRemotes(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	emptyRemote := filepath.Join(root, "empty.git")
+	populatedRemote := filepath.Join(root, "populated.git")
+	runGit(t, root, "init", "--bare", emptyRemote)
+	runGit(t, root, "init", "--bare", populatedRemote)
+	seed := filepath.Join(root, "seed")
+	runGit(t, root, "clone", populatedRemote, seed)
+	runGit(t, seed, "config", "user.name", "Test User")
+	runGit(t, seed, "config", "user.email", "test@example.com")
+	if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, seed, "add", "README.md")
+	runGit(t, seed, "commit", "-m", "seed")
+	runGit(t, seed, "push", "origin", "HEAD:refs/heads/main")
+
+	cloner := NewCloner(Config{BasePath: root}, ProtocolHTTPS, "", logger.Default())
+	state, err := cloner.InspectRemoteRefState(context.Background(), emptyRemote, "", "")
+	if err != nil {
+		t.Fatalf("empty remote probe error = %v", err)
+	}
+	if state != RemoteRefStateEmpty {
+		t.Fatalf("empty remote state = %q, want %q", state, RemoteRefStateEmpty)
+	}
+	state, err = cloner.InspectRemoteRefState(context.Background(), populatedRemote, "", "")
+	if err != nil {
+		t.Fatalf("populated remote probe error = %v", err)
+	}
+	if state != RemoteRefStateHasRefs {
+		t.Fatalf("populated remote state = %q, want %q", state, RemoteRefStateHasRefs)
+	}
+}
+
+func TestInspectLocalRepositoryRemoteRefState(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	emptyRemote := filepath.Join(root, "empty.git")
+	localPath := filepath.Join(root, "checkout")
+	runGit(t, root, "init", "--bare", emptyRemote)
+	runGit(t, root, "init", "-b", "main", localPath)
+	runGit(t, localPath, "remote", "add", "origin", emptyRemote)
+
+	cloner := NewCloner(Config{BasePath: root}, ProtocolHTTPS, "", logger.Default())
+	state, err := cloner.InspectLocalRepositoryRemoteRefState(context.Background(), localPath)
+	if err != nil {
+		t.Fatalf("empty local remote probe error = %v", err)
+	}
+	if state != RemoteRefStateEmpty {
+		t.Fatalf("empty local remote state = %q, want %q", state, RemoteRefStateEmpty)
+	}
+
+	if err := os.WriteFile(filepath.Join(localPath, "README.md"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, localPath, "add", "README.md")
+	runGit(t, localPath, "-c", "user.name=Test User", "-c", "user.email=test@example.com", "commit", "-m", "seed")
+	runGit(t, localPath, "push", "origin", "HEAD:refs/heads/main")
+
+	state, err = cloner.InspectLocalRepositoryRemoteRefState(context.Background(), localPath)
+	if err != nil {
+		t.Fatalf("populated local remote probe error = %v", err)
+	}
+	if state != RemoteRefStateHasRefs {
+		t.Fatalf("populated local remote state = %q, want %q", state, RemoteRefStateHasRefs)
+	}
+}
+
 func TestClonerBuildCloneURLUsesCurrentProtocol(t *testing.T) {
 	resolver := &mutableGitProtocolResolver{protocol: ProtocolHTTPS}
 	cloner := NewClonerWithProtocolResolver(

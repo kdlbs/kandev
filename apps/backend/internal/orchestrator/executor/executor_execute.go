@@ -1768,20 +1768,22 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 	out := make([]RepoSpec, 0, len(allRepos))
 	for _, info := range allRepos {
 		spec := RepoSpec{
-			TaskRepositoryID:        info.TaskRepositoryID,
-			RepositoryID:            info.RepositoryID,
-			RepositoryPath:          info.RepositoryPath,
-			BaseBranch:              info.BaseBranch,
-			CheckoutBranch:          info.CheckoutBranch,
-			PRNumber:                info.PRNumber,
-			RemoteContribution:      info.RemoteContribution,
-			ContributionDestination: info.ContributionDestination,
-			ComparisonTarget:        info.ComparisonTarget,
-			WorktreeBranchPrefix:    info.WorktreeBranchPrefix,
-			WorktreeBranchTemplate:  info.WorktreeBranchTemplate,
-			PullBeforeWorktree:      info.PullBeforeWorktree,
-			RemoteSyncHandled:       info.RemoteSyncHandled,
-			RefreshRepository:       info.RefreshRepository,
+			TaskRepositoryID:           info.TaskRepositoryID,
+			RepositoryID:               info.RepositoryID,
+			RepositoryPath:             info.RepositoryPath,
+			BaseBranch:                 info.BaseBranch,
+			CheckoutBranch:             info.CheckoutBranch,
+			PRNumber:                   info.PRNumber,
+			RemoteContribution:         info.RemoteContribution,
+			ContributionDestination:    info.ContributionDestination,
+			ComparisonTarget:           info.ComparisonTarget,
+			WorktreeBranchPrefix:       info.WorktreeBranchPrefix,
+			WorktreeBranchTemplate:     info.WorktreeBranchTemplate,
+			PullBeforeWorktree:         info.PullBeforeWorktree,
+			RemoteSyncHandled:          info.RemoteSyncHandled,
+			RefreshRepository:          info.RefreshRepository,
+			RefreshRepositoryWithState: info.RefreshRepositoryWithState,
+			RemoteRefState:             info.RemoteRefState,
 		}
 		if info.Repository != nil {
 			spec.RepoName = info.Repository.Name
@@ -1853,6 +1855,8 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
 		req.RemoteSyncHandled = repoInfo.RemoteSyncHandled
 		req.RefreshRepository = repoInfo.RefreshRepository
+		req.RefreshRepositoryWithState = repoInfo.RefreshRepositoryWithState
+		req.RemoteRefState = repoInfo.RemoteRefState
 		if repoInfo.Repository != nil {
 			req.DefaultBranch = repoInfo.Repository.DefaultBranch
 			if req.UseWorktree {
