@@ -305,33 +305,85 @@ func TestGetGitStatus_PreservesTrackedNodeModules(t *testing.T) {
 	}
 }
 
-func TestGetGitStatus_UsesConsistentIndexSnapshot(t *testing.T) {
-	repoDir, cleanup := setupTestRepo(t)
-	t.Cleanup(cleanup)
-
-	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
-	t.Cleanup(wt.Stop)
-
-	const path = "staged-between-status-queries.txt"
-	writeFile(t, repoDir, path, "staged after the first query\n")
-	wt.gitStatusBetweenQueries = func() {
-		runGit(t, repoDir, "add", path)
+func TestGetGitStatus_UsesConsistentIndexSnapshotAcrossTransitions(t *testing.T) {
+	tests := []struct {
+		name           string
+		path           string
+		setup          func(t *testing.T, repoDir, path string)
+		betweenQueries func(t *testing.T, repoDir, path string)
+		wantUntracked  []string
+		wantFile       *types.FileInfo
+	}{
+		{
+			name: "untracked to staged",
+			path: "staged-between-status-queries.txt",
+			setup: func(t *testing.T, repoDir, path string) {
+				writeFile(t, repoDir, path, "staged after the first query\n")
+			},
+			betweenQueries: func(t *testing.T, repoDir, path string) {
+				runGit(t, repoDir, "add", path)
+			},
+			wantUntracked: []string{"staged-between-status-queries.txt"},
+			wantFile: &types.FileInfo{
+				Path:   "staged-between-status-queries.txt",
+				Status: fileStatusUntracked,
+			},
+		},
+		{
+			name: "tracked to untracked",
+			path: "removed-from-index-between-status-queries.txt",
+			setup: func(t *testing.T, repoDir, path string) {
+				writeFile(t, repoDir, path, "tracked before the first query\n")
+				runGit(t, repoDir, "add", path)
+				runGit(t, repoDir, "commit", "-m", "Track transition fixture")
+			},
+			betweenQueries: func(t *testing.T, repoDir, path string) {
+				runGit(t, repoDir, "rm", "--cached", path)
+			},
+			wantUntracked: nil,
+		},
 	}
 
-	update := types.GitStatusUpdate{Files: make(map[string]types.FileInfo)}
-	if err := wt.parseGitStatusOutput(context.Background(), &update); err != nil {
-		t.Fatalf("parseGitStatusOutput failed: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repoDir, cleanup := setupTestRepo(t)
+			t.Cleanup(cleanup)
 
-	if len(update.Untracked) != 1 || update.Untracked[0] != path {
-		t.Fatalf("untracked paths = %v, want only %q from the stable pre-stage view", update.Untracked, path)
-	}
-	fileInfo, ok := update.Files[path]
-	if !ok {
-		t.Fatalf("stable pre-stage view omitted %q from Files", path)
-	}
-	if fileInfo.Status != fileStatusUntracked || fileInfo.Staged {
-		t.Fatalf("file status = %#v, want an untracked, unstaged entry", fileInfo)
+			wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+			t.Cleanup(wt.Stop)
+			tt.setup(t, repoDir, tt.path)
+			wt.gitStatusBetweenQueries = func() {
+				tt.betweenQueries(t, repoDir, tt.path)
+			}
+
+			update := types.GitStatusUpdate{Files: make(map[string]types.FileInfo)}
+			if err := wt.parseGitStatusOutput(context.Background(), &update); err != nil {
+				t.Fatalf("parseGitStatusOutput failed: %v", err)
+			}
+
+			if len(update.Untracked) != len(tt.wantUntracked) {
+				t.Fatalf("untracked paths = %v, want %v", update.Untracked, tt.wantUntracked)
+			}
+			for i, wantPath := range tt.wantUntracked {
+				if update.Untracked[i] != wantPath {
+					t.Fatalf("untracked path %d = %q, want %q", i, update.Untracked[i], wantPath)
+				}
+			}
+
+			if tt.wantFile == nil {
+				if len(update.Files) != 0 {
+					t.Fatalf("status files = %v, want no entries from the stable pre-removal view", mapKeys(update.Files))
+				}
+				return
+			}
+			fileInfo, ok := update.Files[tt.wantFile.Path]
+			if !ok {
+				t.Fatalf("stable transition view omitted %q", tt.wantFile.Path)
+			}
+			if fileInfo.Status != tt.wantFile.Status || fileInfo.Staged != tt.wantFile.Staged {
+				t.Fatalf("file status = %#v, want %#v", fileInfo, *tt.wantFile)
+			}
+		})
 	}
 }
 

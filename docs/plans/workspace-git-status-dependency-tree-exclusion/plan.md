@@ -72,6 +72,8 @@ The root cause is server-side enumeration, not frontend merging. Agentctl runs `
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.14:** Add `TestGetGitStatus_PreservesTrackedNodeModules` in `apps/backend/internal/agentctl/server/process/workspace_git_status_test.go`. Force-add and commit a file below `node_modules`, change it, and assert that its tracked status and diff remain visible. Keep `TestGetGitStatus_UntrackedFileWithSpaces` green to protect the new NUL parser.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.15:** Add `TestGetUntrackedFilesID_ExcludesNodeModules` in `apps/backend/internal/agentctl/server/process/workspace_monitor_test.go`. Assert that dependency-only creation and modification keep the same fingerprint, while an ordinary untracked file changes it.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.6 and .8:** Keep the existing diff-budget and large-set tests green. The change reduces the eligible input set but does not change enrichment limits or eligible-path retention.
+- Add `TestGetGitStatus_UsesConsistentIndexSnapshotAcrossTransitions` to cover both untracked-to-staged and tracked-to-untracked index changes between the two status queries.
+- Add focused parser and snapshot lifecycle coverage for embedded-newline paths, cancellation, error cleanup, and linked-worktree Git directories.
 
 ## E2E tests
 
@@ -89,9 +91,10 @@ Execution is sequential in the primary conversation. The browser regression, pro
 - RED process run: `TestGetGitStatus_ExcludesUntrackedNodeModules` and `TestGetUntrackedFilesID_ExcludesNodeModules` failed against the prior implementation because dependency paths entered status and changed the monitor fingerprint. `TestGetGitStatus_PreservesTrackedNodeModules` passed, protecting the tracked-path contract.
 - RED Chromium run: `omits untracked node_modules before repository ignore exists` failed at the intended assertion because one dependency row was visible.
 - GREEN focused process run: all three new tests passed.
-- GREEN tracking-transition process run: `TestGetGitStatus_UsesConsistentIndexSnapshot` passed after staging a file between the two status queries.
+- GREEN tracking-transition process run: `TestGetGitStatus_UsesConsistentIndexSnapshotAcrossTransitions` passed for both untracked-to-staged and tracked-to-untracked interleavings.
+- GREEN parser and index-lifecycle process run: `TestParseGitUntrackedOutput` covered NUL-separated paths with embedded newlines and cancellation; `TestSnapshotGitIndex*` covered cleanup, cancellation/error cleanup, and linked-worktree Git directories.
 - GREEN existing regressions: the untracked-space, enrichment, and diff-budget tests passed (9 tests).
-- GREEN race run: `go test -race ./internal/agentctl/server/process` passed, covering 728 tests.
+- GREEN race run: `go test -race ./internal/agentctl/server/process` passed, covering 737 tests.
 - GREEN Chromium run: `omits untracked node_modules before repository ignore exists` passed (1 test).
 - `make -C apps/backend fmt`, backend lint (0 issues), web lint, and `git diff --check` passed.
 - The first ambient `make -C apps/backend test` run selected the task runtime's `/root/.kandev/config.yaml` through inherited `KANDEV_INTERNAL_CONFIG_FILE` and `KANDEV_INTERNAL_CONFIG_HOME_FILE` values. The isolated rerun with both variables unset passed the complete backend suite.

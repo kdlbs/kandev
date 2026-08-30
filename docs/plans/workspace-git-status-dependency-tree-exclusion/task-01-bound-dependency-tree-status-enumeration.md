@@ -53,7 +53,7 @@ cd apps
 rtk pnpm install --frozen-lockfile
 
 cd backend
-rtk go test ./internal/agentctl/server/process -run 'Test(GetGitStatus_ExcludesUntrackedNodeModules|GetGitStatus_PreservesTrackedNodeModules|GetUntrackedFilesID_ExcludesNodeModules)$'
+rtk go test ./internal/agentctl/server/process -run 'Test(GetGitStatus_ExcludesUntrackedNodeModules|GetGitStatus_PreservesTrackedNodeModules|GetUntrackedFilesID_ExcludesNodeModules|GetGitStatus_UsesConsistentIndexSnapshotAcrossTransitions|ParseGitUntrackedOutput|SnapshotGitIndex.*)$'
 rtk go test ./internal/agentctl/server/process -run 'Test(GetGitStatus_UntrackedFileWithSpaces|EnrichUntrackedFileDiffs|DiffBudget)'
 rtk go test -race ./internal/agentctl/server/process
 
@@ -108,9 +108,10 @@ None.
 - RED process run: `TestGetGitStatus_ExcludesUntrackedNodeModules` and `TestGetUntrackedFilesID_ExcludesNodeModules` failed against the prior implementation because dependency paths entered status and changed the monitor fingerprint. `TestGetGitStatus_PreservesTrackedNodeModules` passed, protecting the tracked-path contract.
 - RED Chromium run: `omits untracked node_modules before repository ignore exists` failed at the intended assertion because one dependency row was visible.
 - GREEN focused process run: all three new tests passed.
-- GREEN tracking-transition process run: `TestGetGitStatus_UsesConsistentIndexSnapshot` passed after staging a file between the two status queries.
+- GREEN tracking-transition process run: `TestGetGitStatus_UsesConsistentIndexSnapshotAcrossTransitions` passed for both untracked-to-staged and tracked-to-untracked interleavings.
+- GREEN parser and index-lifecycle process run: `TestParseGitUntrackedOutput` covered NUL-separated paths with embedded newlines and cancellation; `TestSnapshotGitIndex*` covered cleanup, cancellation/error cleanup, and linked-worktree Git directories.
 - GREEN existing regressions: the untracked-space, enrichment, and diff-budget tests passed (9 tests).
-- GREEN race run: `go test -race ./internal/agentctl/server/process` passed, covering 728 tests.
+- GREEN race run: `go test -race ./internal/agentctl/server/process` passed, covering 737 tests.
 - GREEN Chromium run: `omits untracked node_modules before repository ignore exists` passed (1 test).
 - `make -C apps/backend fmt`, backend lint (0 issues), web lint, and `git diff --check` passed.
 - The first ambient backend suite run selected `/root/.kandev/config.yaml` through inherited `KANDEV_INTERNAL_CONFIG_FILE` and `KANDEV_INTERNAL_CONFIG_HOME_FILE` values. The isolated rerun with both variables unset passed the complete backend suite.
