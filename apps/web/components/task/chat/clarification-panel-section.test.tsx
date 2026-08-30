@@ -167,6 +167,49 @@ describe("ClarificationPanelSection — collapse affordance", () => {
   });
 });
 
+describe("ClarificationPanelSection — submitting feedback", () => {
+  it("shows the translated submitting status before Skip while a single answer is in flight", async () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    let releaseResponse!: (response: Response) => void;
+    const heldResponse = new Promise<Response>((resolve) => {
+      releaseResponse = resolve;
+    });
+    fetchMock.mockReturnValueOnce(heldResponse);
+    renderSection(true, messages);
+
+    expect(screen.queryByTestId("clarification-submitting-status")).toBeNull();
+
+    try {
+      fireEvent.click(screen.getByTestId("clarification-option"));
+
+      const status = await screen.findByTestId("clarification-submitting-status");
+      const skip = screen.getByTestId("clarification-skip");
+      expect(status.getAttribute("aria-label")).toBe(i18n.t("task:submitting"));
+      expect(status.compareDocumentPosition(skip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect((skip as HTMLButtonElement).disabled).toBe(true);
+
+      releaseResponse(
+        new Response("{}", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      await vi.waitFor(() =>
+        expect(screen.queryByTestId("clarification-submitting-status")).toBeNull(),
+      );
+    } finally {
+      releaseResponse(
+        new Response("{}", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
+  });
+});
+
 describe("ClarificationPanelSection — per-surface max-height cap", () => {
   it("renders the CSS max-height from the maxHeightVh prop instead of a hardcoded value", () => {
     const messages = [

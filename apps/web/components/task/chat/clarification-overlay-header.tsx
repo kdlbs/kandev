@@ -94,14 +94,17 @@ export function ClarificationHeaderActions({
               )}
             >
               {isSubmitting ? t("task:submitting") : t("task:submit")}
-              {isSubmitting ? (
-                <Spinner aria-hidden="true" className="size-3" />
-              ) : (
-                <IconCheck className="h-3 w-3" />
-              )}
+              {!isSubmitting && <IconCheck className="h-3 w-3" />}
             </button>
           </span>
         </KeyboardShortcutTooltip>
+      )}
+      {isSubmitting && (
+        <Spinner
+          aria-label={t("task:submitting")}
+          data-testid="clarification-submitting-status"
+          className="size-3 shrink-0"
+        />
       )}
       <ClarificationSkipButton
         isSubmitting={isSubmitting}

@@ -519,6 +519,11 @@ export class SessionPage {
     return this.page.getByTestId("clarification-skip");
   }
 
+  /** Header status shown while a clarification answer is being submitted. */
+  clarificationSubmittingStatus(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-submitting-status");
+  }
+
   /** Custom text input on the clarification overlay. */
   clarificationInput(): Locator {
     return this.page.getByTestId("clarification-input");
