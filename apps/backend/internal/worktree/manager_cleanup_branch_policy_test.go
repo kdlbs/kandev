@@ -97,6 +97,37 @@ func TestCleanupWorktreesPreservingBranches_RetainsExternalBranch(t *testing.T) 
 	}
 }
 
+func TestCleanupWorktreesPreservingBranches_RetainsCanonicalRepositoryDefault(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	mgr.SetRepositoryProvider(&fakeRepoProvider{repo: &Repository{
+		ID: "repository", DefaultBranch: "release",
+	}})
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-default-terminal", "session-default-terminal", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-default-terminal", "session-default-terminal")
+	runGit(t, wt.Path, "commit", "--allow-empty", "-m", "terminal default protection")
+	wantHead := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
+	runGit(t, wt.Path, "branch", "-m", "release")
+	wt.Branch = "release"
+	if err := store.UpdateWorktree(ctx, wt); err != nil {
+		t.Fatalf("persist canonical default branch: %v", err)
+	}
+	// The primary worktree remains on main, so liveness alone cannot protect
+	// release. Its exact head is integrated, making it otherwise eligible.
+	runGit(t, wt.RepositoryPath, "update-ref", "refs/heads/main", wantHead)
+
+	receipt, err := mgr.CleanupWorktreesWithReceipt(ctx, []*Worktree{wt})
+	if err != nil {
+		t.Fatalf("terminal cleanup: %v", err)
+	}
+	if receipt.Deleted != 0 || receipt.RetainedReasons[RetainedProtectedRef] != 1 {
+		t.Fatalf("terminal default-protection receipt = %+v", receipt)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.RepositoryPath, "rev-parse", "refs/heads/release")); got != wantHead {
+		t.Fatalf("canonical default branch head = %q, want %q", got, wantHead)
+	}
+}
+
 func TestCleanupWorktreesPreservingBranches_RetainsWhenDefaultProtectionUnavailable(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -527,6 +558,9 @@ func TestRemoveByID_RemovesFullyMergedManagedBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
+	mgr.SetRepositoryProvider(&fakeRepoProvider{repo: &Repository{
+		ID: "repository", DefaultBranch: "main",
+	}})
 	wt, err := mgr.Create(context.Background(), CreateRequest{
 		TaskID:         "task-direct",
 		SessionID:      "session-direct",

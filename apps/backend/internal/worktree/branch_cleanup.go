@@ -184,14 +184,12 @@ func (m *Manager) verifiedIntegratedBranchHead(
 		protectedBranchName(wt.Branch, wt.IntegrationRef) {
 		return "", RetainedProtectedRef
 	}
-	if requireArchived {
-		protected, reason := m.protectedRepositoryDefaultBranch(ctx, wt)
-		if reason != "" {
-			return "", reason
-		}
-		if protected {
-			return "", RetainedProtectedRef
-		}
+	protected, reason := m.protectedRepositoryDefaultBranch(ctx, wt)
+	if reason != "" {
+		return "", reason
+	}
+	if protected {
+		return "", RetainedProtectedRef
 	}
 
 	branchHead, err := m.resolveCommit(ctx, wt.RepositoryPath, branchRef)
@@ -205,10 +203,11 @@ func (m *Manager) verifiedIntegratedBranchHead(
 }
 
 // protectedRepositoryDefaultBranch loads the canonical default branch from
-// persisted repository metadata. Archived worktree rows do not retain the
-// session's base branch, so cleanup must not rely on Worktree.BaseBranch for
-// this protection. The lookup is intentionally exact and never derives a
-// protected ref from the candidate branch name or a remote short name.
+// persisted repository metadata. Worktree BaseBranch and IntegrationRef may
+// differ from the canonical default branch, so every inferred-safe compaction
+// must prove this protection independently. The lookup is intentionally exact
+// and never derives a protected ref from the candidate branch name or a remote
+// short name.
 func (m *Manager) protectedRepositoryDefaultBranch(
 	ctx context.Context, wt *Worktree,
 ) (bool, BranchRetentionReason) {
