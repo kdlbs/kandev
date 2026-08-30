@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/routing"
@@ -62,6 +63,39 @@ func TestWorkflowRoutingSchemaReplayAndCommittedReadback(t *testing.T) {
 	var effects int
 	require.NoError(t, repo.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM workflow_route_effects WHERE operation_id = ?`, operation.ID).Scan(&effects))
 	assert.Equal(t, 1, effects)
+}
+
+func TestWorkflowRouteEffectClaimAndCrashRecovery(t *testing.T) {
+	repo := newStepTransitionsTestRepo(t)
+	ctx := context.Background()
+	task := createStepTransitionsTestTask(t, repo, "task-route-effect", "workflow-route", "step-pr")
+	op := routing.Operation{ID: "route-effect-op", TaskID: task.ID, WorkspaceID: task.WorkspaceID,
+		Producer: routing.ProducerManualMove, ExpectedStepID: "step-pr", TargetStepID: "step-done"}
+	task.WorkflowStepID = "step-done"
+	require.NoError(t, repo.UpdateTask(routing.WithOperation(ctx, op), task))
+	effectID := op.ID + ":destination-entry"
+	now := time.Date(2026, 8, 30, 23, 0, 0, 0, time.UTC)
+
+	claimed, err := repo.ClaimWorkflowRouteEffect(ctx, effectID, "worker-a", now, time.Minute)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	claimed, err = repo.ClaimWorkflowRouteEffect(ctx, effectID, "worker-b", now.Add(30*time.Second), time.Minute)
+	require.NoError(t, err)
+	assert.False(t, claimed, "a live owner is never duplicated")
+
+	claimed, err = repo.ClaimWorkflowRouteEffect(ctx, effectID, "recovery", now.Add(2*time.Minute), time.Minute)
+	require.NoError(t, err)
+	require.True(t, claimed, "a crashed claimant is recoverable after its lease")
+	completed, err := repo.CompleteWorkflowRouteEffect(ctx, effectID, "worker-a", now.Add(2*time.Minute))
+	require.NoError(t, err)
+	assert.False(t, completed, "a stale claimant cannot complete a reclaimed effect")
+	completed, err = repo.CompleteWorkflowRouteEffect(ctx, effectID, "recovery", now.Add(2*time.Minute))
+	require.NoError(t, err)
+	require.True(t, completed)
+
+	claimed, err = repo.ClaimWorkflowRouteEffect(ctx, effectID, "late", now.Add(10*time.Minute), time.Minute)
+	require.NoError(t, err)
+	assert.False(t, claimed, "completed route effects are absorbing")
 }
 
 func TestWorkflowRouteOperationIdentitySerializesDifferentTasks(t *testing.T) {

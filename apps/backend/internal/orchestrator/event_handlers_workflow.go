@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -1975,6 +1977,15 @@ func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID strin
 		return fmt.Errorf("load session for on_enter: %w", err)
 	}
 
+	completeEffect, claimed, effectErr := s.claimRouteEffectForStepEnter(ctx, taskID)
+	if effectErr != nil {
+		return effectErr
+	}
+	if !claimed {
+		return nil
+	}
+	defer completeEffect()
+
 	// entryID 0: this path (manual move / legacy on_turn_start/complete) does
 	// not attach a step-entry ResultHolder before ApplyTransition, so no
 	// entry was allocated for this step-entry. processOnEnter's engine-owned
@@ -1984,6 +1995,44 @@ func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID strin
 	// plan's scope note for why E2-E5 dispatch is deferred.
 	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, 0)
 	return nil
+}
+
+type routeEffectRepository interface {
+	GetWorkflowRouteEffectByTransition(context.Context, string, int64) (routing.Effect, bool, error)
+	ClaimWorkflowRouteEffect(context.Context, string, string, time.Time, time.Duration) (bool, error)
+	CompleteWorkflowRouteEffect(context.Context, string, string, time.Time) (bool, error)
+}
+
+func (s *Service) claimRouteEffectForStepEnter(ctx context.Context, taskID string) (func(), bool, error) {
+	effects, ok := s.repo.(routeEffectRepository)
+	if !ok {
+		return func() {}, true, nil
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil || task.WorkflowStepTransitionID == 0 {
+		return func() {}, true, nil
+	}
+	effect, found, err := effects.GetWorkflowRouteEffectByTransition(ctx, taskID, task.WorkflowStepTransitionID)
+	if err != nil {
+		return nil, false, fmt.Errorf("read route effect for step entry: %w", err)
+	}
+	if !found {
+		return func() {}, true, nil
+	}
+	token := uuid.NewString()
+	claimed, err := effects.ClaimWorkflowRouteEffect(ctx, effect.ID, token, time.Now().UTC(), time.Minute)
+	if err != nil {
+		return nil, false, fmt.Errorf("claim route effect for step entry: %w", err)
+	}
+	if !claimed {
+		return func() {}, false, nil
+	}
+	return func() {
+		completed, completeErr := effects.CompleteWorkflowRouteEffect(ctx, effect.ID, token, time.Now().UTC())
+		if completeErr != nil || !completed {
+			s.logger.Warn("failed to complete workflow route effect", zap.String("effect_id", effect.ID), zap.Error(completeErr))
+		}
+	}, true, nil
 }
 
 // resolveStepPlanMode determines whether plan mode should be active for a step.

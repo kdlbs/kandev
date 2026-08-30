@@ -282,6 +282,8 @@ func (s *workflowStore) recordAlreadySatisfiedTransition(ctx context.Context, ta
 		RecordWorkflowRouteOperation(context.Context, routing.Operation) error
 	})
 	if !ok {
+		s.logger.Warn("workflow route operation recorder unavailable for already-satisfied transition",
+			zap.String("task_id", task.ID), zap.String("target_step_id", targetStepID))
 		return nil
 	}
 	operation, ok := routing.FromContext(ctx)
@@ -620,7 +622,10 @@ func (s *workflowStore) applyTransitionIfAtStepRawOptions(
 					operation.ObservedStepID = current.WorkflowStepID
 				}
 				operation.Outcome = routing.OutcomeStaleSource
-				_ = recorder.RecordWorkflowRouteOperation(ctx, operation)
+				if recordErr := recorder.RecordWorkflowRouteOperation(ctx, operation); recordErr != nil {
+					s.logger.Warn("failed to record stale workflow route operation",
+						zap.String("task_id", taskID), zap.String("operation_id", operation.ID), zap.Error(recordErr))
+				}
 			}
 		}
 		return nil, oldWorkflowID, false, nil

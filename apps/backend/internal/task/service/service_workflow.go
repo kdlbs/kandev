@@ -19,6 +19,10 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
+// ErrWorkflowStepChanged is returned when a route's source generation no
+// longer matches the task row at the transaction boundary.
+var ErrWorkflowStepChanged = errors.New("workflow step changed before route commit")
+
 // ApproveSessionResult contains the result of approving a session
 type ApproveSessionResult struct {
 	Session      *models.TaskSession
@@ -1274,7 +1278,7 @@ func (s *Service) updateMovedTaskCrossStep(
 			return false, err
 		}
 		if !applied {
-			return false, fmt.Errorf("workflow step changed before route commit")
+			return false, ErrWorkflowStepChanged
 		}
 		return admitted, nil
 	}

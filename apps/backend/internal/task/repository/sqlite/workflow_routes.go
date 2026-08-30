@@ -58,17 +58,40 @@ func (r *Repository) GetWorkflowRouteEffect(
 ) (routing.Effect, bool, error) {
 	var effect routing.Effect
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, operation_id, task_id, transition_id, target_step_id, status
+		SELECT id, operation_id, task_id, transition_id, target_step_id, status, claim_token
 		FROM workflow_route_effects WHERE id = ?
 	`), effectID).Scan(
 		&effect.ID, &effect.OperationID, &effect.TaskID, &effect.TransitionID,
-		&effect.TargetStepID, &effect.Status,
+		&effect.TargetStepID, &effect.Status, &effect.ClaimToken,
 	)
 	if err == sql.ErrNoRows {
 		return routing.Effect{}, false, nil
 	}
 	if err != nil {
 		return routing.Effect{}, false, fmt.Errorf("read workflow route effect: %w", err)
+	}
+	return effect, true, nil
+}
+
+// GetWorkflowRouteEffectByTransition finds the one route-owned entry effect
+// for a committed task transition. Non-route transitions deliberately return
+// no effect.
+func (r *Repository) GetWorkflowRouteEffectByTransition(
+	ctx context.Context, taskID string, transitionID int64,
+) (routing.Effect, bool, error) {
+	var effect routing.Effect
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT id, operation_id, task_id, transition_id, target_step_id, status, claim_token
+		FROM workflow_route_effects WHERE task_id = ? AND transition_id = ?
+	`), taskID, transitionID).Scan(
+		&effect.ID, &effect.OperationID, &effect.TaskID, &effect.TransitionID,
+		&effect.TargetStepID, &effect.Status, &effect.ClaimToken,
+	)
+	if err == sql.ErrNoRows {
+		return routing.Effect{}, false, nil
+	}
+	if err != nil {
+		return routing.Effect{}, false, fmt.Errorf("read workflow route effect by transition: %w", err)
 	}
 	return effect, true, nil
 }
@@ -108,6 +131,9 @@ func (r *Repository) initWorkflowRoutingSchema() error {
 		transition_id BIGINT NOT NULL,
 		target_step_id TEXT NOT NULL,
 		status TEXT NOT NULL DEFAULT 'pending',
+		claim_token TEXT NOT NULL DEFAULT '',
+		claimed_at TIMESTAMP,
+		completed_at TIMESTAMP,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
@@ -118,6 +144,51 @@ func (r *Repository) initWorkflowRoutingSchema() error {
 		return fmt.Errorf("init workflow routing schema: %w", err)
 	}
 	return nil
+}
+
+// ClaimWorkflowRouteEffect atomically acquires an effect for delivery. A
+// caller may reclaim a lease after its owner died before completion; completed
+// effects are absorbing. The token must be supplied to Complete so a late
+// worker cannot complete a lease reclaimed by crash recovery.
+func (r *Repository) ClaimWorkflowRouteEffect(ctx context.Context, effectID, token string, now time.Time, lease time.Duration) (bool, error) {
+	if effectID == "" || token == "" {
+		return false, nil
+	}
+	staleBefore := now.Add(-lease)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE workflow_route_effects
+		SET status = 'claimed', claim_token = ?, claimed_at = ?, updated_at = ?
+		WHERE id = ? AND (
+			status = 'pending' OR (status = 'claimed' AND claimed_at <= ?)
+		)
+	`), token, now, now, effectID, staleBefore)
+	if err != nil {
+		return false, fmt.Errorf("claim workflow route effect: %w", err)
+	}
+	claimed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read workflow route effect claim: %w", err)
+	}
+	return claimed == 1, nil
+}
+
+// CompleteWorkflowRouteEffect records successful delivery for the exact claim
+// token. It is idempotent for a retried successful completion and rejects a
+// stale claimant after recovery has reclaimed the effect.
+func (r *Repository) CompleteWorkflowRouteEffect(ctx context.Context, effectID, token string, now time.Time) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE workflow_route_effects
+		SET status = 'completed', completed_at = ?, updated_at = ?
+		WHERE id = ? AND status = 'claimed' AND claim_token = ?
+	`), now, now, effectID, token)
+	if err != nil {
+		return false, fmt.Errorf("complete workflow route effect: %w", err)
+	}
+	completed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read workflow route effect completion: %w", err)
+	}
+	return completed == 1, nil
 }
 
 // RecordWorkflowRouteOperation records a non-transitioning outcome (queued,

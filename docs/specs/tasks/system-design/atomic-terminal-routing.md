@@ -58,7 +58,9 @@ later admission to fail its terminal/source predicate.
 - `workflow_route_effects` gives the winning transition one destination-entry
   identity. Engine-owned on-entry actions continue to claim their exact
   `workflow_step_entries` markers, so retrying delivery cannot create another
-  logical entry. The route effect has typed readback for its operation,
+  logical entry. Delivery claims the route effect with a token and lease,
+  completes only with that token, and permits recovery to reclaim an expired
+  crash lease. The route effect has typed readback for its operation,
   transition, target, and status.
 
 ## Producer behavior

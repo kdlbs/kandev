@@ -74,9 +74,10 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		(session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting) {
 		terminal, err := h.taskSvc.IsTerminalWorkflowStep(ctx, req.WorkflowStepID)
 		if err != nil {
-			// Preserve the deferred path's detailed target/workspace validation.
-			// A missing or foreign step is a request error, not an internal one.
-			return h.deferMoveTask(ctx, msg, req, session)
+			h.logger.Error("move_task: failed to classify target workflow step",
+				zap.String("workflow_step_id", req.WorkflowStepID), zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to classify target workflow step", nil)
 		}
 		if terminal {
 			return h.applyMoveTaskImmediate(ctx, msg, req, session, true)
@@ -380,12 +381,15 @@ func (h *Handlers) applyMoveTaskImmediate(
 			StepHistoryActor:          wfmodels.StepTransitionActorAgent,
 		})
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "workflow step changed") {
+		if errors.Is(err, service.ErrWorkflowStepChanged) {
 			if observed, loadErr := h.taskSvc.GetTask(ctx, req.TaskID); loadErr == nil && observed != nil {
 				routeOperation.ObservedStepID = observed.WorkflowStepID
 			}
 			routeOperation.Outcome = routing.OutcomeStaleSource
-			_ = h.taskSvc.RecordWorkflowRouteOperation(ctx, routeOperation)
+			if recordErr := h.taskSvc.RecordWorkflowRouteOperation(ctx, routeOperation); recordErr != nil {
+				h.logger.Warn("move_task: failed to record stale route operation",
+					zap.String("task_id", req.TaskID), zap.String("operation_id", routeOperation.ID), zap.Error(recordErr))
+			}
 		}
 		// Roll back the queued prompt — without this, the next turn would
 		// deliver a "You were moved to this step…" message for a transition

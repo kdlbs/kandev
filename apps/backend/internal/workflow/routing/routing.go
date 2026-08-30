@@ -63,7 +63,14 @@ type Effect struct {
 	TransitionID int64
 	TargetStepID string
 	Status       string
+	ClaimToken   string
 }
+
+const (
+	EffectPending   = "pending"
+	EffectClaimed   = "claimed"
+	EffectCompleted = "completed"
+)
 
 type operationContextKey struct{}
 

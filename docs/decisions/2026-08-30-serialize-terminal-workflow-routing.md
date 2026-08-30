@@ -31,7 +31,9 @@ operation identity.
 
 `workflow_route_operations` is the durable request/outcome readback and
 `workflow_route_effects` allocates the winning destination-entry identity in
-the task transition transaction. The existing `task_step_transitions` row is
+the task transition transaction. Effect delivery uses an atomic pending →
+claimed → completed CAS with a claimant token; an expired claim may be
+reclaimed after a crash, while completed effects are absorbing. The existing `task_step_transitions` row is
 the physical lane ledger, while engine-owned on-entry actions continue to use
 their transition-derived `workflow_step_entries` markers. This composes with,
 rather than duplicates, the exact-row cancellation schema from PR #3155.
