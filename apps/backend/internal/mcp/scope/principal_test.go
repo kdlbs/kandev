@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
@@ -39,17 +40,21 @@ func TestScopePrincipalDerivesAutomationIdentityFromExecution(t *testing.T) {
 		session:   &models.TaskSession{ID: "session-1", TaskID: "automation-task"},
 	}}
 
-	ctx, err := resolver.ScopePrincipal(context.Background(), "automation-task", "session-1")
+	trusted := streams.WithMCPExecutionContext(context.Background(), streams.MCPExecutionContext{
+		ExecutionID: "execution-1", TaskID: "automation-task", SessionID: "session-1",
+	})
+	ctx, err := resolver.ScopePrincipal(trusted, "automation-task", "session-1")
 	require.NoError(t, err)
 
 	principal, ok := PrincipalFromContext(ctx)
 	require.True(t, ok)
 	require.Equal(t, Principal{
-		AutomationID:    "automation-1",
-		WorkspaceID:     "workspace-1",
-		CallerTaskID:    "automation-task",
-		CallerSessionID: "session-1",
-		Surface:         mcpprofile.SurfaceAutomation,
+		AutomationID:      "automation-1",
+		WorkspaceID:       "workspace-1",
+		CallerTaskID:      "automation-task",
+		CallerSessionID:   "session-1",
+		CallerExecutionID: "execution-1",
+		Surface:           mcpprofile.SurfaceAutomation,
 	}, principal)
 	require.True(t, principal.IsAutomation())
 }

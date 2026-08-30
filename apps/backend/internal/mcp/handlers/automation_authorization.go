@@ -57,6 +57,7 @@ var automationSurfaceActions = map[string]struct{}{
 	ws.ActionMCPAnswerQuestion:              {},
 	ws.ActionMCPListPendingAgentPermissions: {},
 	ws.ActionMCPResolveAgentPermission:      {},
+	ws.ActionMCPCancelPendingMove:           {},
 }
 
 var automationSelfDeniedActions = map[string]struct{}{
@@ -89,6 +90,13 @@ func (h *Handlers) authorizeAutomationRequest(ctx context.Context, msg *ws.Messa
 		response, err := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction,
 			"tool is not available on the automation MCP surface", nil)
 		return response, nil, err
+	}
+	// Exact pending-move cancellation owns its complete authorization and
+	// relation comparison inside the queue transaction. A separate task/session
+	// preflight here would race replacement and would skip the durable denial
+	// audit, so forward this one action unchanged to its fail-closed handler.
+	if msg.Action == ws.ActionMCPCancelPendingMove {
+		return nil, msg, nil
 	}
 	if h.taskSvc == nil || principal.WorkspaceID == "" {
 		return automationNotFound(msg)

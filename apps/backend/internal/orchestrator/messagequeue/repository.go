@@ -221,6 +221,14 @@ type Repository interface {
 	// entry is removed in the same transaction. Reports whether the move row was
 	// removed; a missing or replaced row is a successful no-op, not an error.
 	DeletePendingMoveIfMatch(ctx context.Context, expected PendingMoveRecord, handoffEntryID string) (bool, error)
+
+	// ExactCancelPendingMove validates the caller and all seven reviewed
+	// predicates in one transaction and removes only that row generation.
+	ExactCancelPendingMove(ctx context.Context, actor PendingMoveCancellationActor, match ExactPendingMoveMatch, correlationID string) (*PendingMoveCancellationResult, error)
+
+	// AuditInvalidPendingMoveCancellation records only safe server-attested
+	// actor metadata and identifier shape flags; it never stores raw inputs.
+	AuditInvalidPendingMoveCancellation(ctx context.Context, actor PendingMoveCancellationActor, correlationID string, identifiersPresent, identifiersCanonical bool) error
 }
 
 // applyMetadataUpdates merges metadata key updates into current; a nil value removes the key.

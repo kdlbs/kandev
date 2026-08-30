@@ -198,6 +198,9 @@ func (c *ChannelBackendClient) beginPublish() bool {
 }
 
 func backendPayloadForLog(action string, payload interface{}) interface{} {
+	if action == ws.ActionMCPCancelPendingMove {
+		return "<redacted>"
+	}
 	if action != ws.ActionMCPInvokePluginTool {
 		return payload
 	}

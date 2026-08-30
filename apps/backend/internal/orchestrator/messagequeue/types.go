@@ -110,6 +110,14 @@ var (
 	// ErrLifecycleCancelled means an archive/delete purge invalidated a
 	// previously accepted lifecycle entry before it could be retried.
 	ErrLifecycleCancelled = errors.New("lifecycle queue entry cancelled")
+	// ErrPendingMoveNotFoundOrChanged intentionally collapses authorization,
+	// workspace, missing-row, and exact-predicate failures into one public result.
+	ErrPendingMoveNotFoundOrChanged = errors.New("pending move was not found or no longer matches the requested state")
+	// ErrPendingMoveInvalidArgument is returned before any target lookup when a
+	// required identifier is missing or non-canonical.
+	ErrPendingMoveInvalidArgument = errors.New("pending move cancellation requires canonical identifiers")
+	// ErrPendingMoveCancelFailed is the sanitized storage/audit failure sentinel.
+	ErrPendingMoveCancelFailed = errors.New("pending move cancellation failed")
 )
 
 // QueuedMessage represents a single FIFO entry queued for a session.
@@ -212,6 +220,9 @@ type QueueStatus struct {
 // move_task_kandev) while its turn is still active. Applied by handleAgentReady
 // once the turn ends.
 type PendingMove struct {
+	// ID identifies the persisted pending_moves row generation. A replacement
+	// always rotates it; snapshot restore and session transfer preserve it.
+	ID string `json:"id"`
 	// MoveID identifies one deferred move request across queue snapshots. A
 	// rollback can restore a previously consumed snapshot, so the orchestrator
 	// needs a durable identity to reject that stale replay.
@@ -270,4 +281,66 @@ func (m *PendingMove) IsStaleAt(now time.Time, ttl time.Duration) bool {
 type PendingMoveRecord struct {
 	SessionID string
 	Move      PendingMove
+}
+
+const (
+	PendingMoveCancellationOutcomeCancelled         = "cancelled"
+	PendingMoveCancellationOutcomeNotFoundOrChanged = "not_found_or_changed"
+	PendingMoveCancellationOutcomeInvalidArgument   = "invalid_argument"
+)
+
+// PendingMoveCancellationActor contains only server-attested caller identity.
+// Request payloads must never populate it.
+type PendingMoveCancellationActor struct {
+	Kind              string
+	ID                string
+	UserID            string
+	WorkspaceID       string
+	CallerTaskID      string
+	CallerSessionID   string
+	CallerExecutionID string
+}
+
+// ExactPendingMoveMatch is the complete immutable tuple required to cancel one
+// reviewed pending-move generation.
+type ExactPendingMoveMatch struct {
+	PendingMoveID                 string
+	SessionID                     string
+	TaskID                        string
+	MoveID                        string
+	WorkflowID                    string
+	ExpectedCurrentWorkflowStepID string
+	ExpectedTargetWorkflowStepID  string
+}
+
+// PendingMoveCancellationResult is the safe immutable success readback.
+type PendingMoveCancellationResult struct {
+	Cancelled                  bool      `json:"cancelled"`
+	CorrelationID              string    `json:"correlation_id"`
+	ActorKind                  string    `json:"actor_kind"`
+	ActorID                    string    `json:"actor_id"`
+	PendingMoveID              string    `json:"pending_move_id"`
+	MoveID                     string    `json:"move_id"`
+	TaskID                     string    `json:"task_id"`
+	SessionID                  string    `json:"session_id"`
+	WorkflowID                 string    `json:"workflow_id"`
+	PriorCurrentWorkflowStepID string    `json:"prior_current_workflow_step_id"`
+	PriorTargetWorkflowStepID  string    `json:"prior_target_workflow_step_id"`
+	QueuedAt                   time.Time `json:"queued_at"`
+}
+
+// PendingMoveCancellationAudit is the durable, secret-free evidence row.
+type PendingMoveCancellationAudit struct {
+	CorrelationID              string `db:"correlation_id"`
+	ActorKind                  string `db:"actor_kind"`
+	ActorID                    string `db:"actor_id"`
+	PendingMoveID              string `db:"pending_move_id"`
+	MoveID                     string `db:"move_id"`
+	TaskID                     string `db:"task_id"`
+	SessionID                  string `db:"session_id"`
+	WorkflowID                 string `db:"workflow_id"`
+	PriorCurrentWorkflowStepID string `db:"prior_current_workflow_step_id"`
+	PriorTargetWorkflowStepID  string `db:"prior_target_workflow_step_id"`
+	Outcome                    string `db:"outcome"`
+	Changed                    bool   `db:"changed"`
 }

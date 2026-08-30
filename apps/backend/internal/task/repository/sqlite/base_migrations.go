@@ -344,7 +344,32 @@ func (r *Repository) runMigrations() error {
 	if err := r.backfillPromptSeq(); err != nil {
 		return err
 	}
+	// Several historical migrations rebuild tasks. Install the Coordinator
+	// grant relation only after those rebuilds have settled.
+	if err := r.ensureWorkspaceCoordinatorGrantSchema(); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+func (r *Repository) ensureWorkspaceCoordinatorGrantSchema() error {
+	_, err := r.db.Exec(`
+		CREATE TABLE IF NOT EXISTS workspace_coordinator_grants (
+			workspace_id TEXT PRIMARY KEY,
+			coordinator_task_id TEXT NOT NULL,
+			created_by_user_id TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+			FOREIGN KEY (coordinator_task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		);
+		CREATE INDEX IF NOT EXISTS idx_workspace_coordinator_grants_task
+			ON workspace_coordinator_grants(coordinator_task_id);
+	`)
+	if err != nil {
+		return fmt.Errorf("ensure workspace coordinator grant schema: %w", err)
+	}
 	return nil
 }
 

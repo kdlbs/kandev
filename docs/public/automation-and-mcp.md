@@ -202,6 +202,22 @@ Automation sessions receive one fixed, workspace-scoped coordinator MCP surface.
 
 The automation's own hidden task and every session on it are invalid targets for mutation, messaging, stopping, spawning, and blocker discovery or resolution. Foreign-workspace targets return the same not-found result as unknown targets. A task spawned on another allowed task receives that target task's normal MCP profile and never inherits the automation surface. Reused worktrees are not reset or rebased by coordinator actions.
 
+The designated workspace Coordinator also receives
+`cancel_pending_move_kandev` for reviewed recovery from one hazardous deferred
+workflow move. This is an exact, effect-idempotent administrative operation, not
+a general queue control. It requires the pending-row ID, session, task, move,
+workflow, expected current step, and expected target step. Kandev verifies the
+live Coordinator grant and all seven predicates in one transaction. A changed,
+replaced, unknown, unauthorized, or cross-workspace target returns the same
+not-found-or-changed error and leaves state untouched. A successful call removes
+only that pending-move row; it does not message or resume the session, move the
+task, change tags, or remove queued prompts. Every attempt is audited without
+logging the request payload.
+
+Do not use this tool as routine cleanup. Automatic expiration and orphan reaping
+remain the normal lifecycle, and a live administrative cancellation should use
+identifiers captured during a reviewed readback.
+
 ## Export automations
 
 The automations settings page (**Settings > Workspaces > _Workspace_ > Automations**) has an **Export** control next to **New Automation**. It downloads every automation in the workspace as a zip, one YAML file per automation at `.kandev/automations/<slug>.yml`, ready to read, diff, or check into a repository. A workspace with no automations still downloads a (empty) zip rather than showing an error.

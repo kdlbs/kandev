@@ -990,6 +990,7 @@ func (s *Server) registerAutomationTools() {
 	s.registerAgentPermissionTools()
 	s.registerConfigWorkflowTools()
 	s.registerConfigExecutorTools()
+	s.registerPendingMoveCancellationTool()
 	s.mcpServer.DeleteTools(
 		"delete_task_kandev",
 		"update_task_state_kandev",

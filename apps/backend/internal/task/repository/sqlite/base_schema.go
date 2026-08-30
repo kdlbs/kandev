@@ -380,6 +380,17 @@ func (r *Repository) initTaskSchema() error {
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
+	CREATE TABLE IF NOT EXISTS workspace_coordinator_grants (
+		workspace_id TEXT PRIMARY KEY,
+		coordinator_task_id TEXT NOT NULL,
+		created_by_user_id TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+		FOREIGN KEY (coordinator_task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_workspace_coordinator_grants_task
+		ON workspace_coordinator_grants(coordinator_task_id);
 
 	CREATE TABLE IF NOT EXISTS repositories (
 		id TEXT PRIMARY KEY,
