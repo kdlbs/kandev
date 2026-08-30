@@ -89,11 +89,13 @@ Execution is sequential in the primary conversation. The browser regression, pro
 - RED process run: `TestGetGitStatus_ExcludesUntrackedNodeModules` and `TestGetUntrackedFilesID_ExcludesNodeModules` failed against the prior implementation because dependency paths entered status and changed the monitor fingerprint. `TestGetGitStatus_PreservesTrackedNodeModules` passed, protecting the tracked-path contract.
 - RED Chromium run: `omits untracked node_modules before repository ignore exists` failed at the intended assertion because one dependency row was visible.
 - GREEN focused process run: all three new tests passed.
+- GREEN tracking-transition process run: `TestGetGitStatus_UsesConsistentIndexSnapshot` passed after staging a file between the two status queries.
 - GREEN existing regressions: the untracked-space, enrichment, and diff-budget tests passed (9 tests).
-- GREEN race run: `go test -race ./internal/agentctl/server/process` passed, covering 727 tests.
+- GREEN race run: `go test -race ./internal/agentctl/server/process` passed, covering 728 tests.
 - GREEN Chromium run: `omits untracked node_modules before repository ignore exists` passed (1 test).
 - `make -C apps/backend fmt`, backend lint (0 issues), web lint, and `git diff --check` passed.
 - The first ambient `make -C apps/backend test` run selected the task runtime's `/root/.kandev/config.yaml` through inherited `KANDEV_INTERNAL_CONFIG_FILE` and `KANDEV_INTERNAL_CONFIG_HOME_FILE` values. The isolated rerun with both variables unset passed the complete backend suite.
+- PR fixup remediation: full status now runs both queries against a temporary stable Git-index snapshot, and E2E cleanup derives dependency directories from `dependencyPaths`.
 
 ## Risks
 
@@ -102,3 +104,4 @@ Execution is sequential in the primary conversation. The browser regression, pro
 - Line-based parsing can regress valid filenames that contain newlines. The new untracked query must remain NUL-separated in both callers.
 - Splitting collection adds one Git subprocess to each full observation. Both commands must retain the caller's admission class, context, and timeout behavior.
 - Separate argument builders can make the monitor and full observer drift. They must share one definition.
+- Separate status queries can observe different index membership. The full observer uses one temporary index snapshot for both queries.

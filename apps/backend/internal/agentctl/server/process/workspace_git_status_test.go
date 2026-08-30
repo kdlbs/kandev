@@ -305,6 +305,36 @@ func TestGetGitStatus_PreservesTrackedNodeModules(t *testing.T) {
 	}
 }
 
+func TestGetGitStatus_UsesConsistentIndexSnapshot(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+
+	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	t.Cleanup(wt.Stop)
+
+	const path = "staged-between-status-queries.txt"
+	writeFile(t, repoDir, path, "staged after the first query\n")
+	wt.gitStatusBetweenQueries = func() {
+		runGit(t, repoDir, "add", path)
+	}
+
+	update := types.GitStatusUpdate{Files: make(map[string]types.FileInfo)}
+	if err := wt.parseGitStatusOutput(context.Background(), &update); err != nil {
+		t.Fatalf("parseGitStatusOutput failed: %v", err)
+	}
+
+	if len(update.Untracked) != 1 || update.Untracked[0] != path {
+		t.Fatalf("untracked paths = %v, want only %q from the stable pre-stage view", update.Untracked, path)
+	}
+	fileInfo, ok := update.Files[path]
+	if !ok {
+		t.Fatalf("stable pre-stage view omitted %q from Files", path)
+	}
+	if fileInfo.Status != fileStatusUntracked || fileInfo.Staged {
+		t.Fatalf("file status = %#v, want an untracked, unstaged entry", fileInfo)
+	}
+}
+
 // TestGetGitStatus_FreshBypassesStaleCache simulates the bug class where the
 // poll loop missed a HEAD change (paused mode, dropped tick) and left
 // currentStatus.Files holding pre-commit entries. fresh=true must re-run

@@ -381,15 +381,11 @@ test.describe("Git Changes Panel", () => {
       git.deleteFile(sourcePath);
       for (const dependencyPath of dependencyPaths) {
         git.deleteFile(dependencyPath);
+        fs.rmSync(path.dirname(path.join(repoDir, dependencyPath)), {
+          recursive: true,
+          force: true,
+        });
       }
-      fs.rmSync(path.join(repoDir, "node_modules", "demo-package"), {
-        recursive: true,
-        force: true,
-      });
-      fs.rmSync(path.join(repoDir, "packages", "app", "node_modules", "nested-package"), {
-        recursive: true,
-        force: true,
-      });
     }
   });
 

@@ -16,7 +16,7 @@ Git ignore rules remain the repository's source of truth for ordinary untracked 
 
 Agentctl excludes untracked directories named `node_modules` at any repository depth before Git returns individual untracked paths. This exclusion also covers pnpm content under `node_modules/.pnpm`.
 
-Full status uses separate tracked and untracked queries. The tracked query disables untracked enumeration and preserves every tracked change. The untracked query uses Git's standard ignore rules plus the `node_modules/` exclusion. It returns NUL-separated paths for direct insertion into the existing status model.
+Full status uses separate tracked and untracked queries. The tracked query disables untracked enumeration and preserves every tracked change. The untracked query uses Git's standard ignore rules plus the `node_modules/` exclusion. It returns NUL-separated paths for direct insertion into the existing status model. Both queries read a temporary snapshot of the Git index, so a tracking-state change between the commands cannot produce a contradictory projection.
 
 The workspace monitor uses the same untracked query definition. It does not stat excluded dependency files or refresh status when only those files change.
 
@@ -28,6 +28,7 @@ The first owned exclusion is `node_modules`. Other generated directories continu
 - Tracked changes below `node_modules` remain visible because the tracked query has no generated-tree path filter.
 - Ordinary untracked files remain visible and retain the existing diff limits.
 - One full observation uses an extra Git subprocess to keep tracked and untracked policies separate.
+- The temporary index snapshot adds a small per-observation filesystem operation while keeping concurrent user Git writes independent.
 - The Changes panel no longer mirrors raw `git status --untracked-files=all` for untracked `node_modules` content.
 - Future generated-tree exclusions require another reviewed contract change. They must not silently broaden this list.
 

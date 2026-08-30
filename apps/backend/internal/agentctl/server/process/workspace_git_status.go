@@ -790,12 +790,19 @@ func carryRemoteSnapshot(update *types.GitStatusUpdate, prior types.GitStatusUpd
 // then populates the file lists and map.
 func (wt *WorkspaceTracker) parseGitStatusOutput(ctx context.Context, update *types.GitStatusUpdate) error {
 	class := gitWorkClass(ctx)
+	indexSnapshot, cleanup, err := snapshotGitIndex(ctx, wt.gitIndexPath)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	statusCtx := withGitIndexFile(ctx, indexSnapshot)
+
 	// The tracked query must not receive the dependency-tree exclusion: tracked
 	// paths below node_modules remain part of the workspace status. The
 	// lockless read and carried observation class preserve the existing Git
 	// admission and index-lock behavior.
 	statusOut, err := wt.runGitOutputClass(
-		ctx,
+		statusCtx,
 		class,
 		true,
 		"status", "--porcelain", "--untracked-files=no",
@@ -808,7 +815,11 @@ func (wt *WorkspaceTracker) parseGitStatusOutput(ctx context.Context, update *ty
 		return err
 	}
 
-	untrackedOut, err := wt.runGitOutputClass(ctx, class, true, gitUntrackedFilesArgs...)
+	if wt.gitStatusBetweenQueries != nil {
+		wt.gitStatusBetweenQueries()
+	}
+
+	untrackedOut, err := wt.runGitOutputClass(statusCtx, class, true, gitUntrackedFilesArgs...)
 	if err != nil {
 		return err
 	}

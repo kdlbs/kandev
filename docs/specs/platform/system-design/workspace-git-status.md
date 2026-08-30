@@ -45,6 +45,8 @@ Agentctl owns the complete workspace snapshot. It collects tracked and untracked
 
 The tracked query uses `git status --porcelain --untracked-files=no`. It preserves index and working-tree changes for every tracked path, including a tracked path below `node_modules`. The untracked query uses `git ls-files --others --exclude-standard --exclude=node_modules/ -z`. Git applies the extra exclusion while it walks the worktree. The `-z` result preserves path names without quoting or line splitting. Agentctl adds each returned path to the existing untracked status projection before diff enrichment.
 
+For each full observation, agentctl pins both queries to a temporary snapshot of the Git index. Git writes the real index atomically, so the snapshot keeps tracking membership stable across the pair without blocking concurrent user Git operations. The snapshot is removed after the observation.
+
 The extra exclusion applies to directories named `node_modules` at any repository depth. It also covers pnpm's nested `node_modules/.pnpm` store. It does not cover `.next`, `dist`, `build`, or other generated names. Those paths continue to follow Git's repository, global, and command-level ignore rules.
 
 The full status observer and the untracked monitor fingerprint use one shared argument definition. The monitor therefore does not stat dependency-tree files, and changes limited to an untracked dependency tree do not start a full refresh. Filtering parsed status output is not sufficient because Git and agentctl have already paid the enumeration cost at that point.
