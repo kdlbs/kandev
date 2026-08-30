@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func (p *Projector) applySourceEventLocked(state *projectionState, eventType string, data map[string]interface{}) bool {
@@ -85,13 +86,24 @@ func applyTaskActivityEventLocked(state *projectionState, eventType string, data
 		}
 		candidate = timeValue(data["queued_at"])
 	case events.TurnStarted:
+		if isLifecycleOnlyTurn(data) {
+			return false
+		}
 		candidate = timeValue(data["started_at"])
 	case events.TurnCompleted:
+		if isLifecycleOnlyTurn(data) {
+			return false
+		}
 		candidate = timeValue(data["completed_at"])
 	default:
 		return false
 	}
 	return advanceTaskActivity(state, candidate)
+}
+
+func isLifecycleOnlyTurn(data map[string]interface{}) bool {
+	metadata, _ := data["metadata"].(map[string]interface{})
+	return boolValue(metadata[models.TurnMetaKeyLifecycleOnly])
 }
 
 func isUserQueuedPrompt(data map[string]interface{}) bool {

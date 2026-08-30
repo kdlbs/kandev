@@ -109,6 +109,17 @@ func (s *Service) PublishTaskDeleted(ctx context.Context, task *models.Task) {
 	s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
 }
 
+// PublishTaskSessionsCancelled publishes session.state_changed events for
+// sessions finalized by a cascade path that bypasses Service.ArchiveTask.
+func (s *Service) PublishTaskSessionsCancelled(
+	ctx context.Context,
+	taskID string,
+	cancelledSessions []*models.TaskSession,
+	reason string,
+) {
+	s.publishSessionsCancelled(context.WithoutCancel(ctx), taskID, nil, cancelledSessions, reason)
+}
+
 // taskPublicationTimeout bounds publication-owned repository reads and
 // synchronous EventBus delivery. It intentionally starts when a queued closure
 // drains, rather than inheriting a caller deadline that may already have expired.

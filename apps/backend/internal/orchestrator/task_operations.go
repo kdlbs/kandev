@@ -6251,18 +6251,23 @@ func (s *Service) reconcileCancelledAgentWorkflow(ctx context.Context, session *
 	if session == nil {
 		return
 	}
+	transitioned := false
 	if completionEligible {
-		s.processOnTurnCompleteViaEngineWithCause(ctx, session.TaskID, session, turnCompletionCauseUserCancellation)
+		transitioned = s.processOnTurnCompleteViaEngineWithCause(
+			ctx, session.TaskID, session, turnCompletionCauseUserCancellation,
+		)
 	}
-	s.reconcileCancelledTaskReview(ctx, session.TaskID, session.ID)
+	s.reconcileCancelledTaskReview(ctx, session.TaskID, session.ID, transitioned)
 }
 
-func (s *Service) reconcileCancelledTaskReview(ctx context.Context, taskID, sessionID string) {
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err == nil && task != nil && task.WorkflowStepID != "" && s.workflowStepGetter != nil {
-		step, stepErr := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
-		if stepErr == nil && step != nil && s.workflowStepIsTerminal(ctx, step.ID) {
-			return
+func (s *Service) reconcileCancelledTaskReview(ctx context.Context, taskID, sessionID string, transitioned bool) {
+	if transitioned {
+		task, err := s.repo.GetTask(ctx, taskID)
+		if err == nil && task != nil && task.WorkflowStepID != "" && s.workflowStepGetter != nil {
+			step, stepErr := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+			if stepErr == nil && step != nil && s.workflowStepIsTerminal(ctx, step.ID) {
+				return
+			}
 		}
 	}
 	s.writeTaskReviewState(ctx, taskID, sessionID)

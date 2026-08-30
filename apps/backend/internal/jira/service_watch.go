@@ -239,7 +239,7 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*JiraTi
 	// Single page is enough per tick: the next poll picks up anything that
 	// overflowed maxResults. Pagination would let one chatty workspace starve
 	// the others without any real freshness benefit.
-	res, err := client.SearchTickets(ctx, w.JQL, "", issueWatchSearchPageSize)
+	res, err := client.SearchTicketsForWatch(ctx, w.JQL, "", issueWatchSearchPageSize)
 	if err != nil {
 		return nil, err
 	}

@@ -525,6 +525,11 @@ var searchFields = []string{
 	"priority", "assignee", "reporter", jiraFieldUpdated,
 }
 
+var watcherSearchFields = []string{
+	"summary", "status", "project", "issuetype",
+	"priority", "assignee", "reporter", jiraFieldUpdated, "description",
+}
+
 // SearchTickets runs a JQL search and returns a page of tickets. The transport
 // branches on instance type because Cloud and Server/DC expose different
 // search endpoints with incompatible pagination shapes:
@@ -538,6 +543,17 @@ var searchFields = []string{
 // pageToken is the cursor returned in the previous page's NextPageToken;
 // pass "" for the first page. maxResults is capped at 100.
 func (c *CloudClient) SearchTickets(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
+	return c.searchTickets(ctx, jql, pageToken, maxResults, searchFields)
+}
+
+// SearchTicketsForWatch runs a JQL search with the description field included
+// for watcher-created task prompts. It uses the same endpoint and pagination
+// behavior as SearchTickets while keeping the interactive field set compact.
+func (c *CloudClient) SearchTicketsForWatch(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
+	return c.searchTickets(ctx, jql, pageToken, maxResults, watcherSearchFields)
+}
+
+func (c *CloudClient) searchTickets(ctx context.Context, jql, pageToken string, maxResults int, fields []string) (*SearchResult, error) {
 	if maxResults <= 0 {
 		maxResults = 25
 	}
@@ -545,16 +561,16 @@ func (c *CloudClient) SearchTickets(ctx context.Context, jql, pageToken string, 
 		maxResults = 100
 	}
 	if c.instanceType == InstanceTypeServer {
-		return c.searchTicketsServer(ctx, jql, pageToken, maxResults)
+		return c.searchTicketsServer(ctx, jql, pageToken, maxResults, fields)
 	}
-	return c.searchTicketsCloud(ctx, jql, pageToken, maxResults)
+	return c.searchTicketsCloud(ctx, jql, pageToken, maxResults, fields)
 }
 
-func (c *CloudClient) searchTicketsCloud(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
+func (c *CloudClient) searchTicketsCloud(ctx context.Context, jql, pageToken string, maxResults int, fields []string) (*SearchResult, error) {
 	body := map[string]interface{}{
 		"jql":        jql,
 		"maxResults": maxResults,
-		"fields":     searchFields,
+		"fields":     fields,
 	}
 	if pageToken != "" {
 		body["nextPageToken"] = pageToken
@@ -575,7 +591,7 @@ func (c *CloudClient) searchTicketsCloud(ctx context.Context, jql, pageToken str
 	return out, nil
 }
 
-func (c *CloudClient) searchTicketsServer(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
+func (c *CloudClient) searchTicketsServer(ctx context.Context, jql, pageToken string, maxResults int, fields []string) (*SearchResult, error) {
 	startAt := 0
 	if pageToken != "" {
 		// A malformed token is fixed by starting over from the first page —
@@ -588,7 +604,7 @@ func (c *CloudClient) searchTicketsServer(ctx context.Context, jql, pageToken st
 		"jql":        jql,
 		"startAt":    startAt,
 		"maxResults": maxResults,
-		"fields":     searchFields,
+		"fields":     fields,
 	}
 	var resp serverSearchResponse
 	if err := c.do(ctx, http.MethodPost, c.apiBase+"/search", body, &resp); err != nil {

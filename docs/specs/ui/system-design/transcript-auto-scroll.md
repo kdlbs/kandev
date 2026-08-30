@@ -4,6 +4,7 @@ system: ui
 requirements:
   - REQ-UI-TRANSCRIPT-AUTO-SCROLL-001
 created: 2026-08-27
+updated: 2026-08-29
 owners:
   - kandev
 ---
@@ -31,12 +32,16 @@ common message-update and work-start paths call this helper. They do not read
 `scrollHeight`, `clientHeight`, a bounding rectangle, or computed style before
 the write.
 
-The browser clamps the requested offset to the current maximum. The existing
-near-bottom reference remains the decision input. The helper does not add a
-second animation frame, smooth scrolling, or a resize observer.
+The helper writes `2_147_483_647`, which is the largest signed 32-bit integer.
+Chromium, Gecko, and WebKit clamp this positive offset to the current maximum.
+The helper must not write `Number.MAX_SAFE_INTEGER`. WebKit resolves that value
+to the top of the scroll container.
+
+The existing near-bottom reference remains the decision input. The helper does
+not add a second animation frame, smooth scrolling, or a resize observer.
 
 Tests instrument the common append path. A `scrollHeight` getter fails the test
-if that path reads it. The scroll setter records the maximum-offset request.
+if that path reads it. The scroll setter records the WebKit-safe offset.
 
 ## Interaction boundaries
 
@@ -73,8 +78,10 @@ change.
 ## Failure modes
 
 - If the container is not mounted, the helper performs no work.
-- If a browser clamps a large requested offset, the result is the native
+- Chromium, Gecko, and WebKit clamp the signed 32-bit maximum to the native
   maximum scroll position.
+- An offset outside WebKit's safe range can resolve to zero and move the
+  transcript to the top.
 - If a layout restore or explicit navigation owns the scroll, the existing
   guards suppress bottom placement until that owner releases control.
 

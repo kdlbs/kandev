@@ -3015,11 +3015,40 @@ func legacyPendingMoveID(sessionID string, move *messagequeue.PendingMove) strin
 	return fmt.Sprintf("legacy-%x", sum[:])
 }
 
-func (s *Service) removePendingMoveHandoffPrompt(ctx context.Context, sessionID, taskID, moveID string) {
+// removePendingMoveHandoffPrompt reports whether cleanup is complete. A false
+// result means queue storage failed and a durable caller must preserve enough
+// correlation state to retry.
+func (s *Service) removePendingMoveHandoffPrompt(ctx context.Context, sessionID, taskID, moveID string) bool {
 	if s.messageQueue == nil {
-		return
+		return true
 	}
-	for _, entry := range s.messageQueue.GetStatus(ctx, sessionID).Entries {
+	entryID, listed := s.pendingMoveHandoffPromptID(ctx, sessionID, taskID, moveID)
+	if !listed {
+		return false
+	}
+	if entryID == "" {
+		return true
+	}
+	_, removed, err := s.messageQueue.TakeQueuedEntry(ctx, sessionID, entryID)
+	if err != nil {
+		s.logger.Warn("failed to remove pending-move hand-off prompt",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return false
+	}
+	if removed {
+		s.pendingMoveHandoffPromptRemoved(ctx, sessionID, taskID, moveID, entryID)
+	}
+	return true
+}
+
+func (s *Service) pendingMoveHandoffPromptID(ctx context.Context, sessionID, taskID, moveID string) (string, bool) {
+	entries, _, err := s.messageQueue.SnapshotSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to list pending-move hand-off prompts",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return "", false
+	}
+	for _, entry := range entries {
 		if entry.TaskID != taskID || entry.QueuedBy != messagequeue.QueuedByMoveTask {
 			continue
 		}
@@ -3031,19 +3060,21 @@ func (s *Service) removePendingMoveHandoffPrompt(ctx context.Context, sessionID,
 		if !matches {
 			continue
 		}
-		_, removed, err := s.messageQueue.TakeQueuedEntry(ctx, sessionID, entry.ID)
-		if err != nil {
-			s.logger.Warn("failed to remove stale pending-move hand-off prompt",
-				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
-			return
-		}
-		if removed {
-			s.publishQueueStatusEvent(ctx, sessionID)
-			s.logger.Warn("dropped stale pending-move hand-off prompt",
-				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.String("move_id", moveID))
-		}
+		return entry.ID, true
+	}
+	return "", true
+}
+
+func (s *Service) pendingMoveHandoffPromptRemoved(
+	ctx context.Context,
+	sessionID, taskID, moveID, entryID string,
+) {
+	if entryID == "" {
 		return
 	}
+	s.publishQueueStatusEvent(ctx, sessionID)
+	s.logger.Warn("dropped pending-move hand-off prompt",
+		zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.String("move_id", moveID))
 }
 
 func (s *Service) syncTaskStateForPendingMove(ctx context.Context, taskID, fromStepID, toStepID string) {

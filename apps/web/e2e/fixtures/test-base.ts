@@ -21,6 +21,54 @@ const DEFAULT_SIDEBAR_VIEW = {
 const AGENT_PROFILE_READY_TIMEOUT_MS = 30_000;
 const AGENT_PROFILE_READY_POLL_MS = 250;
 
+function isFetchTransportError(error: unknown): boolean {
+  return error instanceof TypeError && /fetch failed|network error/i.test(error.message);
+}
+
+async function runWithBackendRecovery<T>(
+  backend: BackendContext,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isFetchTransportError(error)) throw error;
+    // A backend restart can leave the test runner holding a keep-alive socket
+    // that closes during setup. All setup operations below are idempotent, so
+    // retry the complete reset after replacing that listener once.
+    await backend.restart();
+    return operation();
+  }
+}
+
+async function maybeRecoverSeedBackend(
+  backend: BackendContext,
+  consecutiveFailures: number,
+  recoveryAttempted: boolean,
+  observation: string,
+): Promise<{
+  consecutiveFailures: number;
+  recoveryAttempted: boolean;
+  observation: string;
+}> {
+  if (consecutiveFailures < 3 || recoveryAttempted) {
+    return { consecutiveFailures, recoveryAttempted, observation };
+  }
+
+  try {
+    await backend.restart();
+    return { consecutiveFailures: 0, recoveryAttempted: true, observation };
+  } catch (error) {
+    return {
+      consecutiveFailures,
+      recoveryAttempted: true,
+      observation: `${observation}; backend recovery failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+}
+
 export type SeedData = {
   workspaceId: string;
   workflowId: string;
@@ -43,11 +91,14 @@ async function waitForSeedAgentProfile(
 ): Promise<string> {
   const deadline = Date.now() + AGENT_PROFILE_READY_TIMEOUT_MS;
   let lastObservation = "no response";
+  let consecutiveFailures = 0;
+  let recoveryAttempted = false;
 
   while (Date.now() < deadline) {
     try {
       await backend.ensureReady();
       const { agents } = await apiClient.listAgents();
+      consecutiveFailures = 0;
       const profiles = agents.flatMap((agent) => agent.profiles ?? []);
       const profile = profiles.find((candidate) => candidate.id === profileId);
 
@@ -83,6 +134,19 @@ async function waitForSeedAgentProfile(
         `(available profiles: ${profiles.map((candidate) => candidate.id).join(", ") || "none"})`;
     } catch (error) {
       lastObservation = error instanceof Error ? error.message : String(error);
+      consecutiveFailures += 1;
+      // A backend restart can leave an old keep-alive socket in the test
+      // runner. After several consecutive transport failures, restart the
+      // isolated worker backend once so the next poll uses a fresh listener.
+      const recovery = await maybeRecoverSeedBackend(
+        backend,
+        consecutiveFailures,
+        recoveryAttempted,
+        lastObservation,
+      );
+      consecutiveFailures = recovery.consecutiveFailures;
+      recoveryAttempted = recovery.recoveryAttempted;
+      lastObservation = recovery.observation;
     }
 
     await dwell(
@@ -132,12 +196,16 @@ export const test = backendFixture.extend<
       let lastStatus = 0;
       let lastText = "";
       while (Date.now() < probeDeadline) {
-        const probe = await client.rawRequest("GET", "/api/v1/_test/health");
-        lastStatus = probe.status;
-        if (probe.ok) break;
-        if (probe.status !== 404 && probe.status !== 503) {
-          lastText = await probe.text();
-          break;
+        try {
+          const probe = await client.rawRequest("GET", "/api/v1/_test/health");
+          lastStatus = probe.status;
+          if (probe.ok) break;
+          if (probe.status !== 404 && probe.status !== 503) {
+            lastText = await probe.text();
+            break;
+          }
+        } catch (error) {
+          lastText = error instanceof Error ? error.message : String(error);
         }
         await dwell(
           250,
@@ -268,52 +336,56 @@ export const test = backendFixture.extend<
       backend,
       seedData.agentProfileId,
     );
-    // Clean up tasks, test-created workflows, and extra agent profiles from
-    // previous tests in this worker. Keep the seeded workflow and the seed
-    // agent profile so the worker-scoped seedData fixture remains valid.
-    await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
-    await apiClient.updateWorkspace(seedData.workspaceId, { default_agent_profile_id: "" });
-    await apiClient.cleanupTestProfiles([seedData.agentProfileId]);
+    await runWithBackendRecovery(backend, async () => {
+      // Clean up tasks, test-created workflows, and extra agent profiles from
+      // previous tests in this worker. Keep the seeded workflow and the seed
+      // agent profile so the worker-scoped seedData fixture remains valid.
+      await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+      await apiClient.updateWorkspace(seedData.workspaceId, { default_agent_profile_id: "" });
+      await apiClient.cleanupTestProfiles([seedData.agentProfileId]);
 
-    await apiClient.saveUserSettings({
-      workspace_id: seedData.workspaceId,
-      workflow_filter_id: seedData.workflowId,
-      keyboard_shortcuts: {},
-      enable_preview_on_click: false,
-      confirm_task_archive: true,
-      agent_generated_task_titles: false,
-      mcp_task_agent_profile_default: "current_task",
-      sidebar_views: [DEFAULT_SIDEBAR_VIEW],
-      sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
-      sidebar_draft: null,
-      saved_layouts: [],
-      lsp_auto_start_languages: [],
-      lsp_auto_install_languages: [],
-      lsp_server_configs: {},
-      task_create_last_used: {
-        repository_id: seedData.repositoryId,
-        branch: "main",
-        agent_profile_id: seedData.agentProfileId,
-        workflow_ids_by_workspace: { [seedData.workspaceId]: seedData.workflowId },
-      },
-      // Reset to default kanban view. Pipeline-view tests switch this to
-      // "graph2", which persists per-workspace; without this reset the next
-      // test renders cards with data-testid="pipeline-task-<id>" instead of
-      // "task-card-<id>", breaking taskCardByTitle locators.
-      kanban_view_mode: "",
-      // Keep startup routing deterministic for tests that open bare home.
-      startup_page: "task_overview",
-      // Reset to the default (off). Prevent-auto-start tests flip this via
-      // saveUserSettings; without this reset it would leak into unrelated
-      // tests running later in the same worker.
-      prevent_auto_start_agent_on_open: false,
-      // Reset to the default (off). Anchored-bar tests flip this via
-      // saveUserSettings; without this reset it would leak into unrelated
-      // tests running later in the same worker.
-      show_anchored_prompt_bar: false,
-      show_scroll_to_last_prompt: true,
-      show_scroll_to_start: false,
-      show_transcript_auto_scroll_control: true,
+      await apiClient.saveUserSettings({
+        workspace_id: seedData.workspaceId,
+        workflow_filter_id: seedData.workflowId,
+        keyboard_shortcuts: {},
+        enable_preview_on_click: false,
+        confirm_task_archive: true,
+        agent_generated_task_titles: false,
+        mcp_task_agent_profile_default: "current_task",
+        sidebar_views: [DEFAULT_SIDEBAR_VIEW],
+        sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
+        sidebar_draft: null,
+        saved_layouts: [],
+        lsp_auto_start_languages: [],
+        lsp_auto_install_languages: [],
+        lsp_server_configs: {},
+        task_create_last_used: {
+          repository_id: seedData.repositoryId,
+          branch: "main",
+          agent_profile_id: seedData.agentProfileId,
+          workflow_ids_by_workspace: { [seedData.workspaceId]: seedData.workflowId },
+        },
+        // Reset to default kanban view. Pipeline-view tests switch this to
+        // "graph2", which persists per-workspace; without this reset the next
+        // test renders cards with data-testid="pipeline-task-<id>" instead of
+        // "task-card-<id>", breaking taskCardByTitle locators.
+        kanban_view_mode: "",
+        // Keep startup routing deterministic for tests that open bare home.
+        startup_page: "task_overview",
+        // Reset to the default (off). Prevent-auto-start tests flip this via
+        // saveUserSettings; without this reset it would leak into unrelated
+        // tests running later in the same worker.
+        prevent_auto_start_agent_on_open: false,
+        // Reset to the default (off). Anchored-bar tests flip this via
+        // saveUserSettings; without this reset it would leak into unrelated
+        // tests running later in the same worker.
+        show_anchored_prompt_bar: false,
+        show_scroll_to_last_prompt: true,
+        show_scroll_to_start: false,
+        show_transcript_auto_scroll_control: true,
+        tasks_list_sort: "updated_desc",
+        tasks_list_group: "state",
+      });
     });
     const context = await browser.newContext({
       baseURL: backend.frontendUrl,
@@ -355,7 +427,8 @@ export const test = backendFixture.extend<
   },
 
   integrationCleanup: [
-    async ({ apiClient, seedData }, use) => {
+    async ({ apiClient, backend, seedData }, use) => {
+      await backend.ensureReady();
       const scoped = `workspace_id=${encodeURIComponent(seedData.workspaceId)}`;
       await apiClient.rawRequest("DELETE", `/api/v1/jira/config?${scoped}`).catch(() => undefined);
       await apiClient
@@ -374,12 +447,14 @@ export const test = backendFixture.extend<
         // Provider-focused specs reuse and mutate the worker-scoped seed row.
         // Restore its local-only identity before the next test; otherwise a
         // removed mock remote plus stale provider metadata breaks workspace prep.
-        apiClient.updateRepository(seedData.repositoryId, {
-          provider: "",
-          provider_host: "",
-          provider_owner: "",
-          provider_name: "",
-        }),
+        apiClient
+          .updateRepository(seedData.repositoryId, {
+            provider: "",
+            provider_host: "",
+            provider_owner: "",
+            provider_name: "",
+          })
+          .catch(() => undefined),
         apiClient.mockJiraReset().catch(() => undefined),
         apiClient.mockLinearReset().catch(() => undefined),
         apiClient.mockSentryReset().catch(() => undefined),
@@ -419,6 +494,23 @@ export function restoreSeedRepositoryOrigin(seedData: SeedData) {
     });
   }
   execFileSync("git", ["-C", seedData.repositoryPath, "fetch", "--no-tags", "origin"], {
+    stdio: "ignore",
+  });
+}
+
+/** Restores the shared seed checkout to its clean main branch. */
+export function resetSeedRepositoryCheckout(seedData: SeedData, tmpDir: string) {
+  const env = makeGitEnv(tmpDir);
+  execFileSync("git", ["-C", seedData.repositoryPath, "checkout", "-f", "main"], {
+    env,
+    stdio: "ignore",
+  });
+  execFileSync("git", ["-C", seedData.repositoryPath, "reset", "--hard", "main"], {
+    env,
+    stdio: "ignore",
+  });
+  execFileSync("git", ["-C", seedData.repositoryPath, "clean", "-fd"], {
+    env,
     stdio: "ignore",
   });
 }
@@ -477,39 +569,43 @@ export function pointSeedRepositoryAtFailingOrigin(seedData: SeedData, tmpDir: s
 // a known workspace_id instead of whatever a previous test's completeOnboarding
 // call wrote into user_settings. This is idempotent — the testPage fixture
 // also calls saveUserSettings, so tests that do use testPage are unaffected.
-test.beforeEach(async ({ apiClient, seedData }) => {
-  await apiClient.updateWorkspace(seedData.workspaceId, { default_agent_profile_id: "" });
-  await apiClient.saveUserSettings({
-    workspace_id: seedData.workspaceId,
-    workflow_filter_id: seedData.workflowId,
-    keyboard_shortcuts: {},
-    enable_preview_on_click: false,
-    confirm_task_archive: true,
-    agent_generated_task_titles: false,
-    mcp_task_agent_profile_default: "current_task",
-    sidebar_views: [DEFAULT_SIDEBAR_VIEW],
-    sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
-    sidebar_draft: null,
-    saved_layouts: [],
-    // Status-surface specs opt in from their local beforeEach hooks; unrelated
-    // tests start from the portable setting's default-off state.
-    app_status_bar_enabled: false,
-    lsp_auto_start_languages: [],
-    lsp_auto_install_languages: [],
-    lsp_server_configs: {},
-    kanban_view_mode: "",
-    tasks_list_show_details: false,
-    startup_page: "task_overview",
-    show_anchored_prompt_bar: false,
-    show_scroll_to_last_prompt: true,
-    show_scroll_to_start: false,
-    show_transcript_auto_scroll_control: true,
-    task_create_last_used: {
-      repository_id: seedData.repositoryId,
-      branch: "main",
-      agent_profile_id: seedData.agentProfileId,
-      workflow_ids_by_workspace: { [seedData.workspaceId]: seedData.workflowId },
-    },
+test.beforeEach(async ({ apiClient, backend, seedData }) => {
+  await runWithBackendRecovery(backend, async () => {
+    await apiClient.updateWorkspace(seedData.workspaceId, { default_agent_profile_id: "" });
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: seedData.workflowId,
+      keyboard_shortcuts: {},
+      enable_preview_on_click: false,
+      confirm_task_archive: true,
+      agent_generated_task_titles: false,
+      mcp_task_agent_profile_default: "current_task",
+      sidebar_views: [DEFAULT_SIDEBAR_VIEW],
+      sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
+      sidebar_draft: null,
+      saved_layouts: [],
+      // Status-surface specs opt in from their local beforeEach hooks; unrelated
+      // tests start from the portable setting's default-off state.
+      app_status_bar_enabled: false,
+      lsp_auto_start_languages: [],
+      lsp_auto_install_languages: [],
+      lsp_server_configs: {},
+      kanban_view_mode: "",
+      tasks_list_show_details: false,
+      tasks_list_sort: "updated_desc",
+      tasks_list_group: "state",
+      startup_page: "task_overview",
+      show_anchored_prompt_bar: false,
+      show_scroll_to_last_prompt: true,
+      show_scroll_to_start: false,
+      show_transcript_auto_scroll_control: true,
+      task_create_last_used: {
+        repository_id: seedData.repositoryId,
+        branch: "main",
+        agent_profile_id: seedData.agentProfileId,
+        workflow_ids_by_workspace: { [seedData.workspaceId]: seedData.workflowId },
+      },
+    });
   });
 });
 
