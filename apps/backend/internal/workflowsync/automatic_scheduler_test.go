@@ -253,6 +253,30 @@ func TestAutomaticScheduler_RejectedDeferredJobDiscardsExactlyOnce(t *testing.T)
 	s.stop()
 }
 
+func TestAutomaticScheduler_CancelledWorkerDiscardsQueuedJobs(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	s := &automaticScheduler{}
+	s.cond = sync.NewCond(&s.mu)
+	s.wg.Add(1)
+	var discarded atomic.Int32
+	if !s.enqueueOwned(queuedAutomaticJob{
+		job:     automaticJob{workspaceID: "cancelled"},
+		discard: func() { discarded.Add(1) },
+	}) {
+		t.Fatal("failed to enqueue job")
+	}
+
+	s.worker(ctx, func(context.Context, automaticJob) automaticJobResult {
+		t.Fatal("cancelled worker ran a queued job")
+		return automaticJobResult{}
+	}, func() {})
+	if got := discarded.Load(); got != 1 {
+		t.Fatalf("discard calls = %d, want exactly one", got)
+	}
+}
+
 func TestAutomaticScheduler_StopDrainsQueuedJobs(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	started := make(chan struct{})

@@ -77,8 +77,11 @@ func (s *automaticScheduler) worker(ctx context.Context, run func(context.Contex
 			s.cond.Wait()
 		}
 		if s.closing || ctx.Err() != nil {
-			s.queue = nil
+			discard := s.takeQueuedDiscardsLocked()
 			s.mu.Unlock()
+			for _, fn := range discard {
+				fn()
+			}
 			return
 		}
 		queued := s.queue[0]
@@ -104,9 +107,7 @@ func (s *automaticScheduler) worker(ctx context.Context, run func(context.Contex
 	}
 }
 
-func (s *automaticScheduler) close() {
-	s.mu.Lock()
-	s.closing = true
+func (s *automaticScheduler) takeQueuedDiscardsLocked() []func() {
 	discard := make([]func(), 0, len(s.queue))
 	for _, queued := range s.queue {
 		if queued.discard != nil {
@@ -114,6 +115,13 @@ func (s *automaticScheduler) close() {
 		}
 	}
 	s.queue = nil
+	return discard
+}
+
+func (s *automaticScheduler) close() {
+	s.mu.Lock()
+	s.closing = true
+	discard := s.takeQueuedDiscardsLocked()
 	s.cond.Broadcast()
 	s.mu.Unlock()
 	for _, fn := range discard {
