@@ -480,26 +480,34 @@ func (m *Manager) MaintainArchivedBranches(
 		if wt == nil {
 			continue
 		}
-		repoLock := m.getRepoLock(wt.RepositoryPath)
-		repoLock.Lock()
-		eligible, checkErr := maintenanceStore.IsArchivedBranchCandidate(ctx, wt.ID)
-		if checkErr != nil || !eligible {
-			candidateReceipt := newBranchCleanupReceipt()
-			candidateReceipt.Attempted = 1
-			branchCleanupMetrics.Add("attempted", 1)
-			candidateReceipt.retain(RetainedArchiveStateChanged)
-			receipt.merge(candidateReceipt)
-		} else {
-			receipt.merge(m.compactArchivedManagedBranch(ctx, wt))
-		}
-		repoLock.Unlock()
-		m.releaseRepoLock(wt.RepositoryPath)
+		receipt.merge(m.maintainArchivedBranchCandidate(ctx, maintenanceStore, wt))
 		if touchErr := maintenanceStore.TouchArchivedBranchCandidate(ctx, wt.ID); touchErr != nil && err == nil {
 			err = touchErr
 		}
 	}
 	m.logger.Info("archived managed branch maintenance receipt", receipt.reasonFields()...)
 	return receipt, err
+}
+
+func (m *Manager) maintainArchivedBranchCandidate(
+	ctx context.Context, maintenanceStore ArchivedBranchMaintenanceStore, wt *Worktree,
+) BranchCleanupReceipt {
+	repoLock := m.getRepoLock(wt.RepositoryPath)
+	repoLock.Lock()
+	defer func() {
+		repoLock.Unlock()
+		m.releaseRepoLock(wt.RepositoryPath)
+	}()
+
+	eligible, err := maintenanceStore.IsArchivedBranchCandidate(ctx, wt.ID)
+	if err == nil && eligible {
+		return m.compactArchivedManagedBranch(ctx, wt)
+	}
+	candidateReceipt := newBranchCleanupReceipt()
+	candidateReceipt.Attempted = 1
+	branchCleanupMetrics.Add("attempted", 1)
+	candidateReceipt.retain(RetainedArchiveStateChanged)
+	return candidateReceipt
 }
 
 func (m *Manager) cleanupWorktrees(ctx context.Context, worktrees []*Worktree, removeBranch bool) error {

@@ -494,6 +494,8 @@ func (s *SQLiteStore) CountActiveWorktreeReferences(
 func (s *SQLiteStore) CountWorktreeBranchOwners(
 	ctx context.Context, repositoryID, branch string,
 ) (int, error) {
+	// Count every durable claimant, including soft-deleted rows. A deleted row
+	// may still retain the local ref, so ambiguity must fail closed.
 	var count int
 	err := s.ro.QueryRowContext(ctx, s.ro.Rebind(`
 		SELECT COUNT(*)
