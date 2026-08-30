@@ -53,6 +53,7 @@ description. Preserve bounded opening and prompt-`#1` behavior.
 cd apps/web
 pnpm exec vitest run \
   hooks/use-processed-messages-fallback.test.ts \
+  hooks/domains/session/use-session-messages.test.ts \
   hooks/domains/session/use-session-message-fetch.test.ts \
   lib/state/slices/session/session-slice.merge-messages.test.ts \
   components/task/chat/message-list-shared.test.tsx
@@ -103,5 +104,5 @@ None.
   preserving stored user prompts and the prompt-`#1` visible boundary.
 - Added regressions for older history, uninitialized history, live inserts, and
   authoritative fetch metadata.
-- The focused Task 01 Vitest suite passed (4 files, 66 tests).
+- The focused Task 01 Vitest suite passed (5 files, 87 tests).
 - `pnpm run typecheck` passed.

@@ -120,11 +120,14 @@ pnpm e2e:run --host --no-build --project mobile-chrome -- \
   retaining boundary keys for anchoring and diagnostics.
 - Added transcript-local recovery state and an explicit retry path for rejected
   or zero-progress requests; routine successful pagination stays button-free.
+- Added committed-geometry continuation and session-epoch guards so stale
+  observer entries and prior-session settlements cannot stop or alter the
+  current transcript.
 - Preserved the desktop fine-pointer density and added a coarse-pointer
   minimum 44-pixel recovery target.
 - Added long-history and short-boundary fixtures plus matching desktop/mobile
   browser regressions.
-- The focused Task 02 Vitest suite passed (4 files, 113 tests).
+- The focused Task 02 Vitest suite passed (4 files, 115 tests).
 - `pnpm run typecheck` and `make build-web` passed.
 - Chromium pagination passed (6 tests); mobile Chrome pagination passed (6
   tests).

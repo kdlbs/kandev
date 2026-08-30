@@ -38,6 +38,7 @@ export function scrollNativeToBottom(element: HTMLElement): void {
 
 type PaginationRequest = {
   boundaryBefore: string | null;
+  sessionEpoch: number;
   debug?: {
     generation: number;
     scrollTopBefore: number | null;
@@ -155,6 +156,16 @@ function usePaginationRecovery(sessionId: string | null, hasMore: boolean) {
   );
 
   return { showRecovery, reportRecovery };
+}
+
+function useSessionEpoch(sessionId: string | null) {
+  const epochRef = useRef(0);
+  const previousSessionIdRef = useRef(sessionId);
+  if (previousSessionIdRef.current !== sessionId) {
+    previousSessionIdRef.current = sessionId;
+    epochRef.current += 1;
+  }
+  return epochRef;
 }
 
 function reportPaginationSettleDebug(params: {
@@ -323,6 +334,7 @@ function capturePrependScrollState(scrollRoot: HTMLElement, anchorKey: string | 
  * transcript does not join an in-flight request. The explicit button is
  * rendered only as the recovery path for errors and no-op pages.
  */
+// eslint-disable-next-line max-lines-per-function -- request epoch, geometry, and recovery must stay synchronized here.
 function useLazyLoadSentinel(params: {
   scrollRef: React.RefObject<HTMLDivElement | null>;
   items: RenderItem[];
@@ -340,15 +352,18 @@ function useLazyLoadSentinel(params: {
   const sentinelNodeRef = useRef<HTMLDivElement | null>(null);
   const requestGenerationRef = useRef(0);
   const requestRef = useRef<PaginationRequest | null>(null);
+  const sessionEpochRef = useSessionEpoch(sessionId);
   const { showRecovery, reportRecovery } = usePaginationRecovery(sessionId, hasMore);
 
   const reportSettle = useCallback(
     (result: LazyLoadSentinelSettleResult) => {
-      reportRecovery(result);
+      const request = requestRef.current;
+      const staleSession = request !== null && request.sessionEpoch !== sessionEpochRef.current;
+      if (!staleSession) reportRecovery(result);
       reportPaginationSettleDebug({
         result,
         sessionId,
-        request: requestRef.current,
+        request,
         items: itemsRef.current,
         scrollRoot: scrollRef.current,
         sentinel: sentinelNodeRef.current,
@@ -361,6 +376,7 @@ function useLazyLoadSentinel(params: {
   const loadPage = useCallback(async () => {
     const request: PaginationRequest = {
       boundaryBefore: getOldestVisibleBoundaryKey(itemsRef.current),
+      sessionEpoch: sessionEpochRef.current,
     };
     requestRef.current = request;
     if (isDebug()) {
@@ -381,6 +397,11 @@ function useLazyLoadSentinel(params: {
     }
     return loadMore();
   }, [loadMore, scrollRef, sessionId]);
+
+  const isRequestCurrent = useCallback(() => {
+    const request = requestRef.current;
+    return request === null || request.sessionEpoch === sessionEpochRef.current;
+  }, []);
 
   const shouldContinueWhileIntersecting = useCallback(() => {
     const scrollRoot = scrollRef.current;
@@ -404,6 +425,7 @@ function useLazyLoadSentinel(params: {
       rearmWhileIntersecting: true,
       shouldContinueWhileIntersecting,
       onLoadSettled: reportSettle,
+      isRequestCurrent,
     },
   );
   const sentinelRef = useCallback(

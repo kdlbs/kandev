@@ -132,8 +132,8 @@ current implementation.
 
 ## Verification results
 
-- Focused Task 01 Vitest suite: passed (4 files, 66 tests).
-- Focused Task 02 Vitest suite: passed (4 files, 113 tests).
+- Focused Task 01 Vitest suite: passed (5 files, 87 tests).
+- Focused Task 02 Vitest suite: passed (4 files, 115 tests).
 - `pnpm run typecheck`: passed.
 - `make build-web`: passed; Vite emitted existing chunk-size and dynamic-import
   warnings only.

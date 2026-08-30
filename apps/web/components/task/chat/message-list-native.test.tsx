@@ -292,6 +292,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
       rearmWhileIntersecting: true,
       shouldContinueWhileIntersecting: expect.any(Function),
       onLoadSettled: expect.any(Function),
+      isRequestCurrent: expect.any(Function),
     });
   });
 
@@ -326,6 +327,51 @@ describe("useNativeScrollManagement transcript pagination", () => {
       <NativeScrollManagementHarness items={[]} sessionId="session-2" recoveryRef={recoveryRef} />,
     );
     expect(recoveryRef.current).toBe(false);
+  });
+
+  it("ignores a settlement from the previous session epoch", async () => {
+    const recoveryRef = { current: false };
+    let resolveLoad: (value: number) => void = () => {};
+    const loadMore = vi.fn(
+      () =>
+        new Promise<number>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    const { rerender } = render(
+      <NativeScrollManagementHarness
+        items={[]}
+        sessionId="session-1"
+        loadMore={loadMore}
+        recoveryRef={recoveryRef}
+      />,
+    );
+    const initialCall = sharedSentinelCalls.at(-1);
+    const loadPage = initialCall?.[4] as () => Promise<number>;
+    const oldOptions = initialCall?.[5] as {
+      onLoadSettled: (result: {
+        count: number;
+        rejected: boolean;
+        continuation: "rejected";
+      }) => void;
+    };
+    const pendingLoad = loadPage();
+
+    rerender(
+      <NativeScrollManagementHarness
+        items={[]}
+        sessionId="session-2"
+        loadMore={loadMore}
+        recoveryRef={recoveryRef}
+      />,
+    );
+    act(() => {
+      oldOptions.onLoadSettled({ count: 0, rejected: true, continuation: "rejected" });
+    });
+    expect(recoveryRef.current).toBe(false);
+
+    resolveLoad(0);
+    await pendingLoad;
   });
 
   it("continues while the sentinel remains in preload even when the visible boundary changes", async () => {

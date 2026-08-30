@@ -65,7 +65,10 @@ describe("useProcessedMessages task description fallback", () => {
   it("does not duplicate a visible stored user prompt", () => {
     const userMessage = makeMessage("user-1", "user", "stored prompt");
     const { result } = renderHook(() =>
-      useProcessedMessages([userMessage], "t1", "s1", TASK_DESCRIPTION),
+      useProcessedMessages([userMessage], "t1", "s1", TASK_DESCRIPTION, {
+        historyInitialized: true,
+        hasOlderMessages: false,
+      }),
     );
 
     expect(result.current.allMessages.map((message) => message.id)).toEqual(["user-1"]);
