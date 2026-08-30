@@ -22,6 +22,7 @@ import (
 
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -99,6 +100,12 @@ func collectPackageFiles(dir string, opts PackOptions) (map[string][]byte, error
 		if err != nil {
 			return fmt.Errorf("plugin-pack: reading %s: %w", rel, err)
 		}
+		if opts.PlatformOnly && rel == manifestFileName {
+			data, err = filterManifestExecutables(data, hostExecPath)
+			if err != nil {
+				return err
+			}
+		}
 		files[rel] = data
 		return nil
 	})
@@ -106,6 +113,29 @@ func collectPackageFiles(dir string, opts PackOptions) (map[string][]byte, error
 		return nil, walkErr
 	}
 	return files, nil
+}
+
+// filterManifestExecutables keeps the manifest consistent with the binaries
+// retained by -platform-only. pkgtar validates every declared executable, so
+// removing files without removing their declarations would make the package
+// invalid even though the host executable is present.
+func filterManifestExecutables(data []byte, hostExecPath string) ([]byte, error) {
+	m, err := manifest.Parse(data)
+	if err != nil {
+		return nil, fmt.Errorf("plugin-pack: parsing %s: %w", manifestFileName, err)
+	}
+	executables := m.Runtime.Executables
+	m.Runtime.Executables = map[string]string{}
+	for platform, execPath := range executables {
+		if execPath == hostExecPath {
+			m.Runtime.Executables[platform] = execPath
+		}
+	}
+	filtered, err := yaml.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("plugin-pack: filtering %s: %w", manifestFileName, err)
+	}
+	return filtered, nil
 }
 
 // hostExecutablePath parses dir/manifest.yaml and resolves the
