@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-var safeComparableVersion = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+-]*$`)
+var comparableVersionPattern = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)*(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`)
 
 // NormalizeReleaseVersion returns a dotted numeric release version suitable
 // for compatibility comparisons. Kandev release builds are tagged `vX.Y.Z`,
@@ -84,7 +84,7 @@ type comparableVersion struct {
 }
 
 func parseComparableVersion(version string) (comparableVersion, bool) {
-	if !safeComparableVersion.MatchString(version) {
+	if !comparableVersionPattern.MatchString(version) {
 		return comparableVersion{}, false
 	}
 	withoutBuild, _, _ := strings.Cut(version, "+")

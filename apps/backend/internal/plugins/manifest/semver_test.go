@@ -34,6 +34,10 @@ func TestCompareVersions(t *testing.T) {
 			name: "build metadata does not affect precedence",
 			a:    "1.0.0+build.1", b: "1.0.0+build.2", want: 0,
 		},
+		{
+			name: "malformed prerelease falls back to lexical ordering",
+			a:    "1.0.0-", b: "1.0.0", want: 1,
+		},
 	}
 
 	for _, tt := range tests {
