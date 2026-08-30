@@ -48,7 +48,7 @@ function runInEnvironment(
   }
 }
 
-describe("hidden session tab persistence", () => {
+describe("hidden session tab state", () => {
   it("keeps hidden tabs scoped when switching environments in one Dockview API", () => {
     const { api } = makeReorderingAutoSessionApi();
     const appStore = makeAppStore();

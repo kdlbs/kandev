@@ -613,7 +613,7 @@ describe("runAutoSessionTabEffect sibling visibility", () => {
     expect(api.getPanel(`session:${hiddenSessionId}`)).toBeNull();
   });
 
-  it("keeps an explicitly hidden sibling closed after a reload", () => {
+  it("does not carry hidden sibling state into a new Dockview API after reload", () => {
     const activeSessionId = AUTO_ACTIVE_SESSION_ID;
     const hiddenSessionId = "session-hidden";
     const appStore = makeAutoSessionAppStore(AUTO_TASK_ID, [activeSessionId, hiddenSessionId]);
@@ -635,7 +635,7 @@ describe("runAutoSessionTabEffect sibling visibility", () => {
       },
     );
 
-    expect(afterReload.api.getPanel(`session:${hiddenSessionId}`)).toBeNull();
+    expect(afterReload.api.getPanel(`session:${hiddenSessionId}`)).not.toBeNull();
   });
 
   it("reopens an explicitly hidden session when it becomes effective", () => {

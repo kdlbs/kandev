@@ -21,7 +21,6 @@ import {
 } from "./dockview-session-tab-activation";
 import { anchorIncomingSessionPanel, ensureSessionPanel } from "./dockview-session-handoff";
 import { t } from "@/lib/i18n";
-import { getHiddenSessionIds, setHiddenSessionIds } from "@/lib/local-storage";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
@@ -36,20 +35,15 @@ function hiddenSessionIdsFor(api: DockviewApi): Set<string> {
   }
   const existing = hiddenSessionIdsByEnv.get(envId);
   if (existing) return existing;
-  const hiddenSessionIds = new Set(getHiddenSessionIds(envId));
+  const hiddenSessionIds = new Set<string>();
   hiddenSessionIdsByEnv.set(envId, hiddenSessionIds);
   return hiddenSessionIds;
-}
-
-function persistHiddenSessionIds(hiddenSessionIds: Set<string>): void {
-  setHiddenSessionIds(useDockviewStore.getState().currentLayoutEnvId, hiddenSessionIds);
 }
 
 /** Hide a session tab without changing its persisted session lifecycle. */
 export function hideSessionPanel(api: DockviewApi, sessionId: string): void {
   const hiddenSessionIds = hiddenSessionIdsFor(api);
   hiddenSessionIds.add(sessionId);
-  persistHiddenSessionIds(hiddenSessionIds);
   const panel = api.getPanel(`session:${sessionId}`);
   if (panel) api.removePanel(panel);
 }
@@ -58,7 +52,6 @@ export function hideSessionPanel(api: DockviewApi, sessionId: string): void {
 export function clearHiddenSessionPanel(api: DockviewApi, sessionId: string): void {
   const hiddenSessionIds = hiddenSessionIdsFor(api);
   hiddenSessionIds.delete(sessionId);
-  persistHiddenSessionIds(hiddenSessionIds);
 }
 
 /**
@@ -549,8 +542,10 @@ export function runAutoSessionTabEffect(
 
   const { tid, currentSessionIds } = resolveCurrentSessionIds(appStore);
 
-  // A fresh Dockview API is created after reload, while an environment switch
-  // retains its API. Use the current environment's hide set in either case.
+  // Keep hidden tabs in memory for the mounted Dockview API and scope them by
+  // environment so switching A -> B -> A restores each environment's choice.
+  // A fresh API after reload intentionally starts with no hidden-session state;
+  // saved Dockview layouts remain responsible for persisted panel geometry.
   const currentEnvId = useDockviewStore.getState().currentLayoutEnvId;
   if (refs.hiddenSessionEnvIdRef.current !== currentEnvId) {
     refs.hiddenSessionIdsRef.current = hiddenSessionIdsFor(api);
@@ -577,7 +572,6 @@ export function runAutoSessionTabEffect(
   for (const hiddenSessionId of refs.hiddenSessionIdsRef.current) {
     if (!currentSessionIdSet.has(hiddenSessionId)) {
       refs.hiddenSessionIdsRef.current.delete(hiddenSessionId);
-      clearHiddenSessionPanel(api, hiddenSessionId);
     }
   }
 
@@ -590,7 +584,6 @@ export function runAutoSessionTabEffect(
   // Selecting a hidden session through the reopen menu (or another explicit
   // session-selection path) restores its panel and clears the hide intent.
   refs.hiddenSessionIdsRef.current.delete(effectiveSessionId);
-  clearHiddenSessionPanel(api, effectiveSessionId);
 
   if (
     shouldSkipPanelEnsure(
