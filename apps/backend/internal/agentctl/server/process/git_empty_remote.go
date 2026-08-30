@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/gitbootstrap"
+	"go.uber.org/zap"
 )
 
 const (
@@ -24,7 +25,11 @@ type emptyRemotePublication struct {
 }
 
 func (g *GitOperator) prepareEmptyRemotePublication(ctx context.Context, requestedBaseBranch string) emptyRemotePublication {
-	baseBranch := g.emptyRemoteBaseBranch(requestedBaseBranch)
+	requestedBaseBranch = normalizeEmptyRemoteBaseBranch(requestedBaseBranch)
+	baseBranch := g.emptyRemoteBaseBranch("")
+	if baseBranch == "" {
+		baseBranch = requestedBaseBranch
+	}
 	if baseBranch == "" || !securityutil.IsValidBaseBranchRef(baseBranch) {
 		return emptyRemotePublication{}
 	}
@@ -41,6 +46,13 @@ func (g *GitOperator) prepareEmptyRemotePublication(ctx context.Context, request
 	}
 	if !present {
 		return emptyRemotePublication{}
+	}
+	if requestedBaseBranch != "" && requestedBaseBranch != baseBranch {
+		return emptyRemotePublication{
+			active:    true,
+			errorCode: emptyRemoteRemoteChangedErrorCode,
+			err:       errors.New("the requested change-request base does not match the empty-remote task base; refresh the task and retry"),
+		}
 	}
 
 	refs, err := g.advertisedOriginRefs(ctx)
@@ -62,9 +74,24 @@ func (g *GitOperator) prepareEmptyRemotePublication(ctx context.Context, request
 				err:       fmt.Errorf("failed to publish the empty-remote base branch: %s", g.sanitizePRFailure(output, "", "")),
 			}
 		}
+		if retireErr := gitbootstrap.Retire(ctx, g.workDir, baseline); retireErr != nil {
+			return emptyRemotePublication{
+				active:    true,
+				output:    g.sanitizeGitPushOutput(output),
+				errorCode: emptyRemoteBasePublishFailedErrorCode,
+				err:       fmt.Errorf("empty-remote base was published but its local marker could not be retired: %s", g.sanitizePRFailure(retireErr.Error())),
+			}
+		}
 		return emptyRemotePublication{active: true, output: g.sanitizeGitPushOutput(output)}
 	}
-	if len(refs) == 1 && refs[baseRef] == baseline.Commit {
+	if refs[baseRef] == baseline.Commit {
+		if retireErr := gitbootstrap.Retire(ctx, g.workDir, baseline); retireErr != nil {
+			return emptyRemotePublication{
+				active:    true,
+				errorCode: emptyRemoteBasePublishFailedErrorCode,
+				err:       fmt.Errorf("empty-remote base is already published but its local marker could not be retired: %s", g.sanitizePRFailure(retireErr.Error())),
+			}
+		}
 		return emptyRemotePublication{active: true}
 	}
 	return emptyRemotePublication{
@@ -79,6 +106,11 @@ func (g *GitOperator) emptyRemoteBaseBranch(requestedBaseBranch string) string {
 	if branch == "" && g.workspaceTracker != nil {
 		branch = strings.TrimSpace(g.workspaceTracker.BaseBranch())
 	}
+	return normalizeEmptyRemoteBaseBranch(branch)
+}
+
+func normalizeEmptyRemoteBaseBranch(branch string) string {
+	branch = strings.TrimSpace(branch)
 	branch = strings.TrimPrefix(branch, "origin/")
 	return strings.TrimPrefix(branch, "refs/heads/")
 }
@@ -86,7 +118,9 @@ func (g *GitOperator) emptyRemoteBaseBranch(requestedBaseBranch string) string {
 func (g *GitOperator) advertisedOriginRefs(ctx context.Context) (map[string]string, error) {
 	output, err := g.runGitCommand(ctx, "ls-remote", "--refs", "origin")
 	if err != nil {
-		return nil, err
+		g.logger.Debug("could not inspect remote refs before empty-remote publication",
+			zap.String("error", g.sanitizePRFailure(err.Error())))
+		return nil, errors.New("remote ref advertisement unavailable")
 	}
 	refs := make(map[string]string)
 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {

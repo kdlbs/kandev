@@ -2,7 +2,9 @@ package process
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -27,6 +29,75 @@ func TestGitOperatorPushPublishesEmptyRemoteBaseBeforeTaskBranch(t *testing.T) {
 	branchSHA := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
 	if got := strings.TrimSpace(runGit(t, originDir, "rev-parse", "refs/heads/feature/empty")); got != branchSHA {
 		t.Fatalf("remote task branch = %q, want %q", got, branchSHA)
+	}
+	markerRef, err := gitbootstrap.MarkerRef("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasLocalRef(t, repoDir, markerRef) {
+		t.Fatalf("bootstrap marker %q remains after successful publication", markerRef)
+	}
+}
+
+func TestGitOperatorPushPublishesAnotherTaskBranchAfterBaseInitialization(t *testing.T) {
+	repoDir, originDir, operator := setupEmptyRemoteTaskRepo(t)
+
+	first, err := operator.Push(context.Background(), false, false)
+	if err != nil {
+		t.Fatalf("first Push() error = %v", err)
+	}
+	if !first.Success {
+		t.Fatalf("first Push() result = %+v", first)
+	}
+
+	runGit(t, repoDir, "checkout", "-b", "feature/second", "main")
+	if err := os.WriteFile(filepath.Join(repoDir, "second.txt"), []byte("second\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "second.txt")
+	runGit(t, repoDir, "commit", "-m", "second task change")
+
+	second, err := operator.Push(context.Background(), false, false)
+	if err != nil {
+		t.Fatalf("second Push() error = %v", err)
+	}
+	if !second.Success {
+		t.Fatalf("second Push() result = %+v", second)
+	}
+	if got := strings.TrimSpace(runGit(t, originDir, "rev-parse", "refs/heads/feature/second")); got == "" {
+		t.Fatal("second task branch was not published after base initialization")
+	}
+}
+
+func TestGitOperatorPushAcceptsMarkedBaseWithUnrelatedRemoteRefs(t *testing.T) {
+	repoDir, originDir, operator := setupEmptyRemoteTaskRepo(t)
+	runGit(t, repoDir, "push", "origin", "main")
+
+	runGit(t, repoDir, "checkout", "-b", "external", "main")
+	if err := os.WriteFile(filepath.Join(repoDir, "external.txt"), []byte("external\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "external.txt")
+	runGit(t, repoDir, "commit", "-m", "external history")
+	runGit(t, repoDir, "push", "origin", "external")
+	runGit(t, repoDir, "checkout", "feature/empty")
+
+	result, err := operator.Push(context.Background(), false, false)
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("Push() result = %+v, want marked base recovery to continue", result)
+	}
+	markerRef, err := gitbootstrap.MarkerRef("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasLocalRef(t, repoDir, markerRef) {
+		t.Fatalf("bootstrap marker %q remains after crash recovery", markerRef)
+	}
+	if got := strings.TrimSpace(runGit(t, originDir, "rev-parse", "refs/heads/external")); got == "" {
+		t.Fatal("unrelated remote ref was lost during crash recovery")
 	}
 }
 
@@ -119,6 +190,53 @@ func TestGitOperatorCreatePRPublishesEmptyRemoteBaseBeforeProviderRequest(t *tes
 	}
 }
 
+func TestGitOperatorCreatePRRejectsDifferentBootstrapBaseBeforePush(t *testing.T) {
+	repoDir, originDir, operator := setupEmptyRemoteTaskRepo(t)
+	const remoteURL = "https://github.com/acme/empty.git"
+
+	scriptDir := t.TempDir()
+	writeExecutable(t, filepath.Join(scriptDir, "gh"), "#!/bin/sh\nprintf 'https://github.com/acme/empty/pull/1\\n'\n")
+	writeGitRemoteWrapper(t, scriptDir, remoteURL)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result, err := operator.CreatePR(context.Background(), "Empty remote", "Publish the task", "develop", false)
+	if err != nil {
+		t.Fatalf("CreatePR() error = %v", err)
+	}
+	if result.Success || result.ErrorCode != emptyRemoteRemoteChangedErrorCode {
+		t.Fatalf("CreatePR() result = %+v, want a base mismatch before push", result)
+	}
+	if refs := strings.TrimSpace(runGit(t, repoDir, "ls-remote", "--refs", "origin")); refs != "" {
+		t.Fatalf("remote refs were created for a mismatched base: %s", refs)
+	}
+	if hasLocalRef(t, originDir, "refs/heads/feature/empty") {
+		t.Fatal("task branch was published for a mismatched base")
+	}
+}
+
+func TestGitOperatorPushRedactsEmptyRemoteProbeFailure(t *testing.T) {
+	_, _, operator := setupEmptyRemoteTaskRepo(t)
+	const secret = "super-secret-token"
+	scriptDir := t.TempDir()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("find git: %v", err)
+	}
+	writeExecutable(t, filepath.Join(scriptDir, "git"), fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = \"ls-remote\" ]; then\n  printf 'fatal: unable to access https://user:%s@example.com/empty.git: denied\\n' >&2\n  exit 1\nfi\nexec %q \"$@\"\n", secret, realGit))
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result, err := operator.Push(context.Background(), false, false)
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if result.Success || result.ErrorCode != emptyRemoteBasePublishFailedErrorCode {
+		t.Fatalf("Push() result = %+v, want bounded probe failure", result)
+	}
+	if strings.Contains(result.Error, secret) || strings.Contains(result.Output, secret) {
+		t.Fatalf("probe secret leaked in result: %+v", result)
+	}
+}
+
 func setupEmptyRemoteTaskRepo(t *testing.T) (string, string, *GitOperator) {
 	t.Helper()
 	root := t.TempDir()
@@ -142,4 +260,10 @@ func setupEmptyRemoteTaskRepo(t *testing.T) (string, string, *GitOperator) {
 	tracker := NewWorkspaceTracker(repoDir, newTestLogger(t))
 	tracker.SetBaseBranch("main")
 	return repoDir, originDir, NewGitOperator(repoDir, newTestLogger(t), tracker)
+}
+
+func hasLocalRef(t *testing.T, repoDir, ref string) bool {
+	t.Helper()
+	cmd := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	return cmd.Run() == nil
 }

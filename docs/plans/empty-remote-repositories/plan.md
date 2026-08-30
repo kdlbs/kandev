@@ -120,6 +120,7 @@ Completed.
 - Task 04: desktop and `mobile-chrome` Playwright scenarios passed.
 - Task 05: public-doc tests (61 passed), public-doc validation (41 pages), and `git diff --check -- docs/public` passed.
 - Repository specification lint passed with `python3 scripts/lint-spec-files.py --all`.
+- Review round: marker retirement, marked-base recovery, base mismatch, and credential-safe probe regressions passed; backend lint reports 0 issues.
 
 ## Risks
 

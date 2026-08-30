@@ -104,6 +104,25 @@ func Validate(ctx context.Context, repoPath, baseBranch string) (Baseline, bool,
 	return baseline, present, err
 }
 
+// Retire removes the local bootstrap marker after the baseline has been
+// published. The expected commit protects a concurrent local ref change.
+func Retire(ctx context.Context, repoPath string, baseline Baseline) error {
+	if strings.TrimSpace(baseline.MarkerRef) == "" || strings.TrimSpace(baseline.Commit) == "" {
+		return errors.New("invalid empty-remote baseline marker")
+	}
+	input := strings.Join([]string{
+		"start",
+		"delete " + baseline.MarkerRef + " " + baseline.Commit,
+		"prepare",
+		"commit",
+		"",
+	}, "\n")
+	if _, err := runGitWithInput(ctx, repoPath, input, "update-ref", "--stdin"); err != nil {
+		return fmt.Errorf("retire empty-remote baseline marker: %w", err)
+	}
+	return nil
+}
+
 func refsForBranch(baseBranch string) (string, string, error) {
 	branch, err := normalizeBranch(baseBranch)
 	if err != nil {
