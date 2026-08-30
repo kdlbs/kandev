@@ -20,7 +20,7 @@ var (
 // Settings-triggered restart rebuilds from source) plus the Vite dev server.
 // All dev state lives under <repoRoot>/.kandev-dev/ so `make dev` never
 // mutates the user's production ~/.kandev.
-func runDev(ctx context.Context, opts Options) int {
+func runDev(ctx context.Context, opts Options, build BuildInfo) int {
 	cfg, code := devLaunchConfigFor(opts)
 	if code != 0 {
 		return code
@@ -29,7 +29,7 @@ func runDev(ctx context.Context, opts Options) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
-	logStartup("dev mode: using local repo", cfg.ports, cfg.dbPath, cfg.logLevel, serverHostForConfig(cfg.startup))
+	logStartup("dev mode: using local repo", build.Version, cfg.ports, cfg.dbPath, cfg.logLevel, serverHostForConfig(cfg.startup))
 
 	ignoreBrokenPipeSignal()
 	setLauncherShutdownDebug(cfg.debug || os.Getenv("KANDEV_SHUTDOWN_DEBUG") == "1")
@@ -77,7 +77,10 @@ func runDev(ctx context.Context, opts Options) int {
 		return 1
 	}
 	fmt.Printf("[kandev] backend ready at %s\n", cfg.ports.BackendURL)
+	return runDevWeb(ctx, opts, cfg, supervisor, backend)
+}
 
+func runDevWeb(ctx context.Context, opts Options, cfg devLaunchConfig, supervisor *processSupervisor, backend *restartableBackend) int {
 	webURL := fmt.Sprintf("http://localhost:%d", cfg.ports.WebPort)
 	fmt.Println("[kandev] starting web...")
 	webProc, err := launchWebChild(cfg.repoRoot, cfg.ports, supervisor)
@@ -117,10 +120,6 @@ type devLaunchConfig struct {
 // spawned: repo root, dev ports, and the dev backend env. It returns a
 // nonzero exit code (having printed the error) when any step fails.
 func devLaunchConfigFor(opts Options, configs ...*config.Config) (devLaunchConfig, int) {
-	startupConfig, exitCode := devStartupConfig(configs...)
-	if exitCode != 0 {
-		return devLaunchConfig{}, exitCode
-	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
@@ -130,6 +129,10 @@ func devLaunchConfigFor(opts Options, configs ...*config.Config) (devLaunchConfi
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return devLaunchConfig{}, 2
+	}
+	startupConfig, exitCode := devStartupConfig(repoRoot, configs...)
+	if exitCode != 0 {
+		return devLaunchConfig{}, exitCode
 	}
 	backendPort, err := resolvePorts(opts, startupConfig)
 	if err != nil {
@@ -152,25 +155,30 @@ func devLaunchConfigFor(opts Options, configs ...*config.Config) (devLaunchConfi
 		return devLaunchConfig{}, 1
 	}
 	ports.BackendURL = endpoints.accessURL
-	dbPath, extra := resolveDevBackendEnv(repoRoot, startupConfig)
-	homeDir := devKandevHome(repoRoot)
-	if !isInsideKandevTask(repoRoot) && configSourceIsExplicit(startupConfig, "homeDir") {
-		homeDir = startupConfig.ResolvedHomeDir()
+	database := resolveDevDatabaseTarget(repoRoot, startupConfig)
+	if err := validateDevDatabaseTarget(repoRoot, database); err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return devLaunchConfig{}, 1
+	}
+	database, err = normalizeDevDatabaseTarget(database)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] unable to normalize dev database target: "+err.Error())
+		return devLaunchConfig{}, 1
 	}
 	return devLaunchConfig{
 		repoRoot:  repoRoot,
 		ports:     ports,
-		dbPath:    dbPath,
-		extra:     extra,
+		dbPath:    database.path,
+		extra:     database.extra,
 		logLevel:  resolveLogLevelForConfig(opts, startupConfig),
 		debug:     opts.Debug,
-		homeDir:   homeDir,
+		homeDir:   database.homeDir,
 		startup:   startupConfig,
 		endpoints: endpoints,
 	}, 0
 }
 
-func devStartupConfig(configs ...*config.Config) (*config.Config, int) {
+func devStartupConfig(repoRoot string, configs ...*config.Config) (*config.Config, int) {
 	if len(configs) > 0 {
 		return configs[0], 0
 	}
@@ -181,7 +189,7 @@ func devStartupConfig(configs ...*config.Config) (*config.Config, int) {
 			return nil, 1
 		}
 	}
-	startupConfig, err := loadDevBootstrapConfig()
+	startupConfig, err := loadDevBootstrapConfig(repoRoot)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return nil, 1
@@ -189,23 +197,44 @@ func devStartupConfig(configs ...*config.Config) (*config.Config, int) {
 	return startupConfig, 0
 }
 
-func loadDevBootstrapConfig() (*config.Config, error) {
+func loadDevBootstrapConfig(repoRoot string) (*config.Config, error) {
+	// Temporarily remove ambient KANDEV_HOME_DIR so a working-directory or
+	// system YAML homeDir is not silently overridden by the parent process's
+	// homeDir (which in dev mode is the parent backend's value, not an
+	// explicit instruction). This must happen before the fast-path check
+	// below because devStartupConfig sets KANDEV_DEBUG_DEV_MODE=true before
+	// calling us.
+	prevHome, homePresent := os.LookupEnv("KANDEV_HOME_DIR")
+	if homePresent {
+		if err := os.Unsetenv("KANDEV_HOME_DIR"); err != nil {
+			return nil, err
+		}
+		defer func() {
+			_ = os.Setenv("KANDEV_HOME_DIR", prevHome) // best effort restore
+		}()
+	}
+
 	if os.Getenv("KANDEV_E2E_MOCK") != "" || os.Getenv("KANDEV_DEBUG_DEV_MODE") != "" {
-		return loadBootstrapConfig()
+		return loadBootstrapConfigWithHome(devKandevHome(repoRoot))
 	}
 
 	const selector = "KANDEV_DEBUG_DEV_MODE"
-	previous, present := os.LookupEnv(selector)
+	prevMode, modePresent := os.LookupEnv(selector)
 	if err := os.Setenv(selector, "true"); err != nil {
 		return nil, err
 	}
-	cfg, err := loadBootstrapConfig()
-	if present {
-		if restoreErr := os.Setenv(selector, previous); err == nil {
+	cfg, err := loadBootstrapConfigWithHome(devKandevHome(repoRoot))
+	if modePresent {
+		if restoreErr := os.Setenv(selector, prevMode); err == nil {
 			err = restoreErr
 		}
 	} else if restoreErr := os.Unsetenv(selector); err == nil {
 		err = restoreErr
+	}
+	if homePresent {
+		if restoreErr := os.Setenv("KANDEV_HOME_DIR", prevHome); err == nil {
+			err = restoreErr
+		}
 	}
 	return cfg, err
 }

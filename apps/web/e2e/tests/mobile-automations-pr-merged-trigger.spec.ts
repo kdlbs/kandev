@@ -70,6 +70,11 @@ test.describe("Pull request merged automation on mobile", () => {
     expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
 
     await automations.deleteButton.tap();
+    await expect(automations.deleteConfirmation).toBeVisible();
+    await expect(automations.deleteConfirmation).toContainText(
+      "This will permanently delete Mobile PR merged trigger. This action cannot be undone.",
+    );
+    await automations.deleteConfirmButton.tap();
     await expect(testPage).toHaveURL(/automations$/, { timeout: 10_000 });
     await expect(testPage.getByText(automationName, { exact: true })).not.toBeVisible();
   });

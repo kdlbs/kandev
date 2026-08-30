@@ -19,6 +19,7 @@ func (m *Manager) buildWorktreeRecord(worktreeID string, req CreateRequest, work
 		ID:                worktreeID,
 		SessionID:         req.SessionID,
 		TaskID:            req.TaskID,
+		TaskDirName:       req.TaskDirName,
 		TaskEnvironmentID: req.TaskEnvironmentID,
 		RepositoryID:      req.RepositoryID,
 		BranchSlug:        requestBranchIdentitySlug(req),

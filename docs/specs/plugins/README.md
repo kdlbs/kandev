@@ -33,10 +33,12 @@ plugin security boundaries.
 
 
 - [Plugin-Contributed Agent Tools](requirements/agent-tools.md)
+- [Plugin-Initiated Workflow Step Transitions](requirements/plugin-initiated-step-transitions.md)
 - [Plugin Authoring Experience](requirements/authoring-experience.md)
 - [Plugin Marketplace](requirements/marketplace.md)
 - [Plugin nav items in the sidebar footer icon row](requirements/plugin-nav-sidebar-footer.md)
 - [Plugin System](requirements/plugins.md)
+- [Plugin Repository Task Creation](requirements/repository-provider-task-creation.md)
 - [Voice Plugin Host Prerequisites](requirements/voice-extraction-host.md)
 - [Voice Mode Leaves Core](requirements/voice-extraction.md)
 
@@ -44,6 +46,7 @@ plugin security boundaries.
 
 
 
+- [Plugin-Initiated Workflow Step Transitions](system-design/plugin-initiated-step-transitions.md)
 - [Plugin Marketplace](system-design/marketplace.md)
 - [Plugin nav items in the sidebar footer icon row System Design Part 1](system-design/plugin-nav-sidebar-footer-01.md)
 - [Plugin nav items in the sidebar footer icon row System Design Part 2](system-design/plugin-nav-sidebar-footer-02.md)
@@ -53,6 +56,7 @@ plugin security boundaries.
 - [Plugin System System Design Part 2](system-design/plugins-02.md)
 - [Plugin System System Design Part 3](system-design/plugins-03.md)
 - [Plugin System System Design Part 4](system-design/plugins-04.md)
+- [Plugin Repository Task Creation](system-design/repository-provider-task-creation.md)
 
 ## Migration record
 

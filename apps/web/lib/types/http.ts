@@ -3,7 +3,11 @@
 import type { ExecutorType } from "./executor";
 import type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
 import type { UserSettings } from "./http-user-settings";
-import type { TaskRepository, WorkspaceFolder } from "./http-workspace-sources";
+import type {
+  RepositoryBranchPolicy,
+  TaskRepository,
+  WorkspaceFolder,
+} from "./http-workspace-sources";
 import type {
   AgentProfileId,
   RepositoryId,
@@ -36,8 +40,13 @@ export type {
   UserSettingsUpdatePayload,
 } from "./http-user-settings";
 export type {
+  AgentProfileRecentUseApiRecord,
+  AgentProfileRecentUseContext,
+} from "./http-agent-profile-recent-use";
+export type {
   AttachTaskWorkspaceSourcesRequest,
   AttachTaskWorkspaceSourcesResponse,
+  RepositoryBranchPolicy,
   TaskRepository,
   WorkspaceFolder,
   WorkspaceFolderSourceRequest,
@@ -435,6 +444,7 @@ export const isFromOffice = (task: Task | null | undefined): boolean => !!task?.
 export type CreateTaskResponse = Task & {
   session_id?: string;
   agent_execution_id?: string;
+  agent_profile_id?: AgentProfileId;
 };
 
 // Backend workflow step DTO (flat fields, as returned from API)
@@ -639,6 +649,11 @@ export type ListTasksResponse = {
 
 export type ListRepositorySetsResponse = {
   repository_sets: RepositorySet[];
+  total: number;
+};
+
+export type ListRepositoryBranchPoliciesResponse = {
+  repository_branch_policies: RepositoryBranchPolicy[];
   total: number;
 };
 

@@ -299,14 +299,12 @@ func (s *Service) preparedTaskCleanupMutationCommitted(
 		return false, err
 	}
 	taskExists := err == nil && task != nil
+	if taskResourceCleanupDeletesTask(job.Trigger) {
+		return !taskExists, nil
+	}
 	switch job.Trigger {
 	case models.TaskResourceCleanupTriggerArchive, models.TaskResourceCleanupTriggerCascadeArchive:
 		return taskExists && task.ArchivedAt != nil, nil
-	case models.TaskResourceCleanupTriggerDelete,
-		models.TaskResourceCleanupTriggerCascadeDelete,
-		models.TaskResourceCleanupTriggerWorkspaceDelete,
-		models.TaskResourceCleanupTriggerQuickChatExpire:
-		return !taskExists, nil
 	default:
 		return false, nil
 	}
@@ -344,6 +342,12 @@ func (s *Service) processTaskResourceCleanupJob(ctx context.Context, id string) 
 	var snapshot taskResourceCleanupSnapshot
 	if err := json.Unmarshal([]byte(job.ResourceSnapshot), &snapshot); err != nil {
 		return s.retryTaskResourceCleanupJob(runCtx, job, fmt.Errorf("decode resource snapshot: %w", err))
+	}
+	// Archive snapshots written by older versions can request environment-row
+	// deletion. The lifecycle trigger is authoritative, so normalize that
+	// stale flag before any destructive step and persist the corrected snapshot.
+	if job.IsArchive() {
+		snapshot.DeleteEnvironmentRow = false
 	}
 	defer s.signalCleanupDoneForTest()
 	cleanupErr := s.executeTaskResourceCleanupJob(runCtx, job, &snapshot)
@@ -429,18 +433,28 @@ func (s *Service) executeTaskResourceCleanupJob(
 		return fmt.Errorf("refresh task cleanup runtime inventory: %w", err)
 	}
 	s.registerTaskRuntimeStopOwners(targets, true)
-	stopOutcome := s.stopTaskRuntimeTargets(ctx, job.TaskID, targets, taskResourceCleanupStopReason(job.Trigger), "task cleanup runtime stop failed")
+	stopOutcome := s.stopTaskRuntimeTargetsWithTaskDeleted(
+		ctx,
+		job.TaskID,
+		targets,
+		taskResourceCleanupStopReason(job.Trigger),
+		"task cleanup runtime stop failed",
+		taskResourceCleanupDeletesTask(job.Trigger),
+	)
 	failedStops := stopOutcome.failed
 	if cancelled, err := s.cancelIfTaskUnarchived(ctx, job); err != nil || cancelled {
 		return err
 	}
 	errs := s.performTaskCleanup(ctx, job.TaskID, snapshot.Sessions, snapshot.Worktrees, targets,
-		taskEnvironmentCleanup{env: snapshot.TaskEnvironment, deleteRow: snapshot.DeleteEnvironmentRow},
+		taskEnvironmentCleanup{
+			env: snapshot.TaskEnvironment, deleteRow: snapshot.DeleteEnvironmentRow,
+			preserveBranches: job.IsArchive(),
+		},
 		taskCleanupPreserveRows(stopOutcome))
 	if cause := context.Cause(ctx); cause != nil {
 		return errors.Join(append(errs, cause)...)
 	}
-	if snapshot.LegacyWorktreeCleanup && len(failedStops) == 0 && s.worktreeCleanup != nil {
+	if snapshot.LegacyWorktreeCleanup && !job.IsArchive() && len(failedStops) == 0 && s.worktreeCleanup != nil {
 		if err := s.worktreeCleanup.OnTaskDeleted(ctx, job.TaskID); err != nil {
 			errs = append(errs, fmt.Errorf("legacy worktree cleanup: %w", err))
 		}
@@ -466,6 +480,18 @@ func (s *Service) hasLegacyWorktreeCleanup() bool {
 	}
 	_, isProvider := s.worktreeCleanup.(WorktreeProvider)
 	return !isProvider
+}
+
+func taskResourceCleanupDeletesTask(trigger models.TaskResourceCleanupTrigger) bool {
+	switch trigger {
+	case models.TaskResourceCleanupTriggerDelete,
+		models.TaskResourceCleanupTriggerCascadeDelete,
+		models.TaskResourceCleanupTriggerWorkspaceDelete,
+		models.TaskResourceCleanupTriggerQuickChatExpire:
+		return true
+	default:
+		return false
+	}
 }
 
 func taskResourceCleanupStopReason(trigger models.TaskResourceCleanupTrigger) string {

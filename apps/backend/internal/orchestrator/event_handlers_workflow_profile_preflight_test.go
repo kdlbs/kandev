@@ -250,7 +250,7 @@ func TestSwitchSessionForStepUsesReusableSessionExecutorProfileForCredentialAdmi
 	}
 	target := &models.TaskSession{
 		ID: "s-target", TaskID: "t1", AgentProfileID: "profile-b", ExecutorID: "exec-ssh",
-		ExecutorProfileID: "ep-token", State: models.TaskSessionStateCompleted,
+		ExecutorProfileID: "ep-token", State: models.TaskSessionStateWaitingForInput,
 		StartedAt: now.Add(-time.Minute), UpdatedAt: now,
 	}
 	if err := repo.CreateTaskSession(ctx, current); err != nil {

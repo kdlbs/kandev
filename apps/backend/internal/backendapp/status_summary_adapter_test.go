@@ -114,3 +114,38 @@ func TestGitHubTaskStatusSummaryPRReaderPreservesMergeQueueState(t *testing.T) {
 		t.Fatalf("MergeQueueState = %q, want %q", inputs[0].MergeQueueState, queuePR.MergeQueueState)
 	}
 }
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.10
+func TestGitHubTaskStatusSummaryPRReaderIncludesPerPRAutomationFlags(t *testing.T) {
+	ctx := context.Background()
+	store := newStatusSummaryTestStore(t)
+	queuePR := &github.TaskPR{
+		TaskID: "task-automation-summary", RepositoryID: "repo-automation-summary", PRNumber: 42,
+		PRURL: "https://example.test/42", State: "open", CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, queuePR); err != nil {
+		t.Fatalf("CreateTaskPR: %v", err)
+	}
+	autoFix := true
+	autoMerge := true
+	if _, err := store.UpdateTaskPRAutomationOptions(ctx, queuePR.TaskID, queuePR.RepositoryID, queuePR.PRNumber,
+		github.TaskPRAutomationOptionsPatch{AutoFixEnabled: &autoFix, AutoMergeEnabled: &autoMerge}, false,
+	); err != nil {
+		t.Fatalf("UpdateTaskPRAutomationOptions: %v", err)
+	}
+
+	reader := &githubTaskStatusSummaryPRReader{
+		gh: github.NewService(nil, "", nil, store, nil, nil),
+	}
+	result, err := reader.ListTaskStatusSummaryPullRequests(ctx, []string{queuePR.TaskID})
+	if err != nil {
+		t.Fatalf("ListTaskStatusSummaryPullRequests: %v", err)
+	}
+	inputs := result[queuePR.TaskID]
+	if len(inputs) != 1 {
+		t.Fatalf("summary inputs = %+v, want one input", inputs)
+	}
+	if !inputs[0].AutoFixEnabled || !inputs[0].AutoMergeEnabled {
+		t.Fatalf("automation flags = %+v, want both enabled", inputs[0])
+	}
+}

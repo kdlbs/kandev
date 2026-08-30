@@ -18,3 +18,11 @@ The [system README](../templates/system-readme.md),
 [system-design](../templates/system-design.md) templates provide the required
 document shapes.
 
+## Authoring language
+
+Write all specification, system-design, plan, and work-order files in English.
+Use English for filenames, frontmatter, IDs, titles, headings, prose, examples,
+comments, and results. Translate non-English task input before recording it.
+Do not copy the original wording into an engineering artifact. Keep non-English
+text only for intentional product localization or exact product data required
+by the contract. Keep the surrounding explanation in English.

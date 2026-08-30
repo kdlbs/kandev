@@ -799,3 +799,63 @@ func TestQueueRunForEachParticipantCallback_MissingDeps_Errors(t *testing.T) {
 		t.Fatalf("expected ErrActionNotYetWired, got %v", err)
 	}
 }
+
+// selectiveFailRunQueue fails QueueRun only for the agent profile ids listed
+// in failFor, recording every call (including the ones it fails) so a test
+// can assert the fan-out kept going past the failure.
+type selectiveFailRunQueue struct {
+	calls   []QueueRunRequest
+	failFor map[string]error
+}
+
+func (f *selectiveFailRunQueue) QueueRun(_ context.Context, req QueueRunRequest) (QueueOutcome, error) {
+	f.calls = append(f.calls, req)
+	if err, ok := f.failFor[req.AgentProfileID]; ok {
+		return "", err
+	}
+	return "", nil
+}
+
+// TestQueueRunForEachParticipantCallback_OneParticipantFailureDoesNotAbortFanOut
+// pins AC-C1: a single participant's QueueRun error must not stop the
+// remaining participants from being queued. Before this fix the loop
+// returned on the first error, so rev-B and rev-C never got a call.
+func TestQueueRunForEachParticipantCallback_OneParticipantFailureDoesNotAbortFanOut(t *testing.T) {
+	boom := errors.New("boom")
+	q := &selectiveFailRunQueue{failFor: map[string]error{"rev-A": boom}}
+	parts := fakeParticipants{list: []ParticipantInfo{
+		{ID: "p1", Role: "reviewer", AgentProfileID: "rev-A"},
+		{ID: "p2", Role: "reviewer", AgentProfileID: "rev-B"},
+		{ID: "p3", Role: "reviewer", AgentProfileID: "rev-C"},
+	}}
+	cb := QueueRunForEachParticipantCallback{Adapter: q, Participants: parts}
+	in := ActionInput{
+		Trigger: TriggerOnEnter,
+		State:   MachineState{TaskID: "task-1"},
+		Step:    StepSpec{ID: "step-1"},
+		Action: Action{
+			Kind: ActionQueueRunForEachParticipant,
+			QueueRunForEachParticipant: &QueueRunForEachParticipantAction{
+				Role: "reviewer",
+			},
+		},
+	}
+
+	_, err := cb.Execute(context.Background(), in)
+	if err == nil {
+		t.Fatalf("expected the joined error from rev-A's failure to be returned")
+	}
+	if !errors.Is(err, boom) {
+		t.Fatalf("expected the returned error to wrap the participant failure, got %v", err)
+	}
+	if len(q.calls) != 3 {
+		t.Fatalf("expected all 3 participants to receive a QueueRun attempt despite rev-A's failure, got %d calls: %#v", len(q.calls), q.calls)
+	}
+	got := []string{q.calls[0].AgentProfileID, q.calls[1].AgentProfileID, q.calls[2].AgentProfileID}
+	want := []string{"rev-A", "rev-B", "rev-C"}
+	for i, w := range want {
+		if got[i] != w {
+			t.Fatalf("call %d agent = %q, want %q (order: %#v)", i, got[i], w, got)
+		}
+	}
+}

@@ -123,7 +123,7 @@ Each trigger firing creates a routine run record (`office_routine_runs`) with `r
 #### Heavy vs lightweight routines
 
 - **Lightweight** (`task_template` empty): fire produces a taskless agent run. Continuation summary keyed by `routine:<routine_id>`. Use case: "check upstream PRs" without a trackable artifact.
-- **Heavy** (`task_template` set): fire creates a fresh task in the `routine` workflow (a single auto-completing `in_progress -> done` step, system-flagged via `SystemWorkflowTemplateIDs` so heavy routine tasks inherit the hide-by-default UX), then a normal task-bound run. Use case: "daily review" where output should be a trackable item.
+- **Heavy** (`task_template` set): fire creates a task in the system `routine` workflow (one hidden `in_progress -> done` step). Its `task.created` event evaluates `auto_start_agent` and starts a task-bound run. Use case: "daily review" with trackable output.
 
 #### Concurrency policy
 

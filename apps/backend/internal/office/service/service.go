@@ -331,9 +331,15 @@ func (s *Service) SetSyncHandlers(sync bool) {
 // NewService creates a new office service. All dependencies are provided via
 // ServiceOptions for compile-time completeness; only Repo and Logger are required.
 func NewService(opts ServiceOptions) *Service {
+	log := opts.Logger.WithFields(zap.String("component", "office-service"))
+	if opts.TaskStarter == nil {
+		log.Warn("office service constructed without a TaskStarter; " +
+			"every run the scheduler claims will fail immediately " +
+			"instead of launching an agent (WO-35)")
+	}
 	svc := &Service{
 		repo:                    opts.Repo,
-		logger:                  opts.Logger.WithFields(zap.String("component", "office-service")),
+		logger:                  log,
 		cfgLoader:               opts.CfgLoader,
 		cfgWriter:               opts.CfgWriter,
 		gitManager:              opts.GitManager,

@@ -3,16 +3,13 @@
 import { memo, useMemo, useRef, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
-import { Button } from "@kandev/ui/button";
-import { IconX } from "@tabler/icons-react";
-import { useAppStore } from "@/components/state-provider";
 import dynamic from "@/lib/routing/client-dynamic";
+import { useAppStore } from "@/components/state-provider";
+import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import { QuickChatDeleteDialog } from "./quick-chat-delete-dialog";
 import { QuickChatSessionView } from "./quick-chat-session-view";
-import { QuickChatTabItem } from "./quick-chat-tab-item";
-import { QuickTerminalTabItem } from "./quick-terminal-tab-item";
-import { QuickTabAddMenu } from "./quick-tab-add-menu";
 import { QuickChatSetup } from "./quick-chat-setup";
+import { QuickChatTabs } from "./quick-chat-tab-strip";
 import { useQuickChatModal } from "./use-quick-chat-modal";
 import { useQuickChatWidth } from "@/hooks/use-quick-chat-width";
 import {
@@ -22,10 +19,6 @@ import {
 } from "@/hooks/use-clarification-escape-guard";
 import { ConfigChatSetup } from "@/components/config-chat/config-chat-setup";
 import { useConfigChat } from "@/components/config-chat/use-config-chat";
-import type { QuickChatSession, QuickTerminalTab } from "@/lib/state/slices/ui/types";
-import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
-import { selectQuickChatSessionIsWorking } from "@/lib/state/slices/ui/quick-chat-activity-selectors";
-import type { TFunction } from "i18next";
 
 const QuickTerminalTabView = dynamic(
   () => import("./quick-terminal-tab-view").then((module) => module.QuickTerminalTabView),
@@ -35,113 +28,6 @@ const QuickTerminalTabView = dynamic(
 type QuickChatModalProps = {
   workspaceId: string;
 };
-
-function quickChatTabName(t: TFunction, session: QuickChatSession, index: number) {
-  if (!isQuickChatSetupSessionId(session.sessionId)) {
-    return session.name || t("chat:chatTabName", { index: index + 1 });
-  }
-  return session.kind === "config" ? t("chat:configurationChatTab") : t("chat:newChatTab");
-}
-
-function QuickChatConversationTab({
-  session,
-  ...props
-}: {
-  session: QuickChatSession;
-  name: string;
-  isActive: boolean;
-  onActivate: () => void;
-  onClose: () => void;
-  onRename: (name: string) => void;
-}) {
-  const isWorking = useAppStore((state) =>
-    selectQuickChatSessionIsWorking(state, session.sessionId),
-  );
-
-  return (
-    <QuickChatTabItem
-      {...props}
-      isRenameable={!isQuickChatSetupSessionId(session.sessionId)}
-      isWorking={!isQuickChatSetupSessionId(session.sessionId) && isWorking}
-      kind={session.kind}
-    />
-  );
-}
-
-function QuickChatTabs({
-  sessions,
-  terminalTabs,
-  activeKind,
-  activeSessionId,
-  activeTerminalTabId,
-  onTabChange,
-  onTabClose,
-  onNewChat,
-  onNewTerminal,
-  onTerminalClose,
-  onTerminalActivate,
-  onRename,
-  onCloseModal,
-}: {
-  sessions: QuickChatSession[];
-  terminalTabs: QuickTerminalTab[];
-  activeKind: "conversation" | "terminal";
-  activeSessionId: string | null;
-  activeTerminalTabId: string | null;
-  onTabChange: (sessionId: string) => void;
-  onTabClose: (sessionId: string) => void;
-  onNewChat: () => void;
-  onNewTerminal: () => void;
-  onTerminalClose: (tabId: string) => void;
-  onTerminalActivate: (tabId: string) => void;
-  onRename: (sessionId: string, name: string) => void;
-  onCloseModal: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex items-center gap-1 px-2 py-1 border-b bg-muted/20">
-      <div className="flex items-center gap-1 overflow-x-auto flex-1 scrollbar-hide">
-        {sessions.map((s, index) => {
-          const tabName = quickChatTabName(t, s, index);
-          return (
-            <QuickChatConversationTab
-              key={s.sessionId || `new-${index}`}
-              session={s}
-              name={tabName}
-              isActive={activeKind === "conversation" && s.sessionId === activeSessionId}
-              onActivate={() => onTabChange(s.sessionId)}
-              onClose={() => onTabClose(s.sessionId)}
-              onRename={(name) => onRename(s.sessionId, name)}
-            />
-          );
-        })}
-        {terminalTabs.map((tab) => (
-          <QuickTerminalTabItem
-            key={tab.tabId}
-            sequence={tab.sequence}
-            isActive={activeKind === "terminal" && tab.tabId === activeTerminalTabId}
-            error={tab.error}
-            onActivate={() => onTerminalActivate(tab.tabId)}
-            onClose={() => onTerminalClose(tab.tabId)}
-          />
-        ))}
-        <QuickTabAddMenu onNewAgent={onNewChat} onNewTerminal={onNewTerminal} />
-      </div>
-      {/* Touch devices have no Escape key or visible overlay to dismiss the
-          full-screen dialog, so give them an explicit close control. */}
-      <Button
-        size="sm"
-        variant="ghost"
-        className="h-11 w-11 shrink-0 cursor-pointer p-0 sm:hidden"
-        onClick={onCloseModal}
-        aria-label={t("sidebar:quickChatClose")}
-        data-testid="quick-chat-close"
-      >
-        <IconX className="h-3.5 w-3.5" />
-      </Button>
-    </div>
-  );
-}
 
 type QuickChatContentProps = {
   workspaceId: string;
@@ -180,6 +66,9 @@ function QuickChatContent({
         onTerminalClose={quickChat.handleCloseTerminal}
         onRename={quickChat.handleRename}
         onCloseModal={() => quickChat.handleOpenChange(false)}
+        tabOrderSyncError={quickChat.tabOrderSyncError}
+        tabOrder={quickChat.tabOrder}
+        onTabOrderChange={quickChat.persistTabOrder}
       />
       {quickChat.activeKind === "terminal" && quickChat.activeTerminalTab && (
         <QuickTerminalTabView
@@ -290,7 +179,7 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
           className="!left-0 !top-0 !h-dvh !max-h-dvh !w-screen !max-w-none !translate-x-0 !translate-y-0 flex flex-col gap-0 p-0 pt-safe pb-safe shadow-2xl sm:!left-1/2 sm:!top-1/2 sm:!h-[85vh] sm:!max-h-[85vh] sm:!w-[var(--quick-chat-width)] sm:!max-w-[calc(100vw-2rem)] sm:!-translate-x-1/2 sm:!-translate-y-1/2"
           style={{ "--quick-chat-width": `${width}px` } as CSSProperties}
           showCloseButton={false}
-          overlayClassName="bg-black/20"
+          overlayClassName="bg-black/20 sm:bg-black/40 sm:backdrop-blur-sm"
           onEscapeKeyDown={(event) => {
             // A pending, expanded clarification (or an open suggestion popup,
             // or the reverse-search overlay) handles this Escape itself and

@@ -2,6 +2,7 @@
 status: active
 system: ui
 created: 2026-08-23
+updated: 2026-08-28
 owners:
   - kandev
 ---
@@ -30,11 +31,13 @@ defaults, persistence ownership, accessibility, or responsive interaction behavi
 - **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.5:** Disabling details removes all under-title metadata and leaves the title row vertically centered with its task-state icon, badges, trailing content, and action menu.
 - **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.6:** Selecting relative time on the right suppresses its duplicate detail while preserving its saved detail position and visibility and marking it as shown on the right in the editor.
 - **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.7:** Grouping by repository suppresses duplicate repository details without changing the saved field setting, and absent metadata reserves no empty row space.
-- **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.8:** Passive trailing values yield to the action menu on the same outer-row hover and focus conditions; an interactive change-request status remains keyboard and pointer reachable beside the menu.
+- **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.8:** On an idle fine-pointer row, a present trailing value uses the far-right edge and the hidden action menu reserves no width. Row hover or keyboard focus reveals the menu beside an interactive change-request status without covering that status.
 - **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.9:** Desktop uses the anchored editor popover, while phone and tablet layouts use an inset, safe-area-aware bottom drawer with one internal vertical scroll area and separators constrained to the drawer width.
 - **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.10:** Mobile section headers, switches, selectors, and drag handles provide at least 44 by 44 CSS pixel touch targets, and field reorder supports pointer, touch, and keyboard input with an accessible announcement.
 - **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.11:** A failed draft, create, or save request cannot roll back a later confirmed sidebar write; all sidebar writes share one synchronization journal and restore only the latest confirmed state.
 - **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.12:** The editor and task rows cause no document-level horizontal overflow at supported widths, and the mobile task row remains the primary tap target.
+- **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.13:** Relative time on the right uses localized compact seconds, minutes, hours, days, weeks, or years without direction words or calendar phrases such as **ago** or **yesterday**.
+- **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.14:** Every rendered right-side time uses the same fixed visual width, right alignment, and tabular numbers. A missing or invalid timestamp reserves no time width, and assistive technology receives the full localized relative time.
 
 ## Migrated source detail
 
@@ -86,9 +89,14 @@ belongs to the same view because a review view and a planning view can need diff
 - A missing value does not reserve empty space. For example, a task without a pull request shows no
   pull request number or trailing status gap.
 - **Nothing** removes the trailing data. The task action menu remains available.
-- Passive trailing values can yield to the task action menu on hover or keyboard focus, as Git
-  changes do now. An interactive pull request status remains reachable while the menu is open. The
-  menu appears beside it and does not cover its pointer or keyboard target.
+- An idle fine-pointer row does not reserve space for its hidden action menu. A present trailing
+  value uses the far-right edge.
+- Row hover or keyboard focus reveals the action menu. The menu appears beside an interactive
+  pull request status and does not cover its pointer or keyboard target.
+- Relative time on the right uses a compact elapsed-time ladder: seconds, minutes, hours, days,
+  weeks, and years. It does not show direction words or calendar phrases.
+- Every right-side time uses one fixed visual column with right-aligned tabular numbers. The full
+  localized relative phrase remains available to assistive technology.
 
 ## Editor behavior
 
@@ -143,6 +151,8 @@ portable user settings.
   technology, and a completed reorder receives an accessible announcement.
 - The mobile task list keeps the row as its primary tap target. A passive pull request indicator
   does not become a competing touch action.
+- The phone layout keeps its visible, 44 CSS pixel task action. It does not depend on hover to open
+  the task menu.
 - The editor and task rows do not cause document-level horizontal overflow at supported widths.
 
 ## Failure behavior
@@ -168,8 +178,11 @@ portable user settings.
 - **GIVEN** relative time is visible in details, **WHEN** the user selects relative time for the
   right side, **THEN** each task shows one relative time value on the right and none in details.
 - **GIVEN** pull request status is selected for the right side, **WHEN** a task has a linked change
-  request, **THEN** one provider status indicator appears on the right and remains keyboard
-  reachable beside the task menu.
+  request, **THEN** the provider status uses the idle far-right edge without a blank menu gap. The
+  menu appears beside it on row hover or keyboard focus.
+- **GIVEN** relative time is selected for the right side, **WHEN** rows contain timestamps from
+  seconds through years ago, **THEN** each row uses the same short time column and shows only a
+  localized number and unit.
 - **GIVEN** a view is grouped by repository, **WHEN** repository is enabled in its details, **THEN**
   the task rows omit the repeated repository while the saved field remains enabled.
 - **GIVEN** the user saves, saves as, discards, reloads, or opens the view on another client,
@@ -186,7 +199,10 @@ portable user settings.
 - Applying this preference to Kanban cards or the `/tasks` rich task list.
 - A global task-row preference outside saved sidebar views.
 - A new cross-tab conflict model for full-array user-settings writes.
+- Changing relative-time copy on task details, activity feeds, plugins, or other surfaces.
 
 ## Implementation plan
 
 [Sidebar task row presentation plan](../../../plans/sidebar-task-row-presentation/plan.md)
+
+[Compact sidebar trailing content plan](../../../plans/sidebar-task-row-compact-trailing/plan.md)

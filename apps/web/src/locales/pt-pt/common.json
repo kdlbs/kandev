@@ -514,5 +514,18 @@
   "relativeMinutesAgo_other": "há {{count}}m",
   "relativeSecondsAgo_one": "há {{count}}s",
   "relativeSecondsAgo_other": "há {{count}}s",
-  "relativeYesterday": "ontem"
+  "relativeYesterday": "ontem",
+  "sidebarSeconds_one": "{{count}}s",
+  "sidebarSeconds_other": "{{count}}s",
+  "sidebarMinutes_one": "{{count}}m",
+  "sidebarMinutes_other": "{{count}}m",
+  "sidebarHours_one": "{{count}}h",
+  "sidebarHours_other": "{{count}}h",
+  "sidebarDays_one": "{{count}}d",
+  "sidebarDays_other": "{{count}}d",
+  "sidebarWeeks_one": "{{count}}sem",
+  "sidebarWeeks_other": "{{count}}sem",
+  "sidebarYears_one": "{{count}}a",
+  "sidebarYears_other": "{{count}}a",
+  "sidebarYearsMax": "99+a"
 }

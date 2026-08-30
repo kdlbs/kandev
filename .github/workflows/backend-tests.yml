@@ -159,17 +159,22 @@ jobs:
         working-directory: ${{ github.workspace }}
         env:
           EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.base_ref }}
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
           PUSH_BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
 
-          # A merge_group run has no pull request behind it, so neither
-          # `pull_request.base.sha` nor `event.before` exists. The queue branch
+          # On `pull_request` the checkout is the merge ref, whose first parent
+          # is the current base branch tip. `pull_request.base.sha` is the base
+          # tip from when the PR event fired, so it can be stale after main
+          # advances. Use the merge ref's actual base tip to keep the diff and
+          # incremental lint scoped to this PR.
+          #
+          # A merge_group run has no pull request behind it, so the queue branch
           # is cut from `merge_group.base_sha`, which is the equivalent base.
           if [[ "${EVENT_NAME}" == "pull_request" ]]; then
-            BASE_SHA="${PR_BASE_SHA}"
+            BASE_SHA="$(git merge-base HEAD "origin/${BASE_REF}")"
           elif [[ "${EVENT_NAME}" == "merge_group" ]]; then
             BASE_SHA="${MERGE_GROUP_BASE_SHA}"
           else
@@ -337,9 +342,11 @@ jobs:
     # so it cannot catch a package that starts reading them again — the class
     # of bug that shipped alongside internal/gitlab's host-trust tests (they
     # only passed because CI never set KANDEV_GITLAB_HOST/GITLAB_HOST/
-    # GITLAB_TOKEN). This job poisons them with obviously-fake .invalid-TLD
-    # values so both GitLab-facing packages are forced to prove they stay
-    # hermetic instead of accidentally depending on an unset ambient env.
+    # GITLAB_TOKEN), and that internal/github hit for real with an ambient
+    # GH_TOKEN/GITHUB_TOKEN picking a PAT client over the "no auth configured"
+    # path. This job poisons them with obviously-fake values so the GitLab-
+    # and GitHub-facing packages are forced to prove they stay hermetic
+    # instead of accidentally depending on an unset ambient env.
     container: ghcr.io/kdlbs/kandev-ci:build-latest
     defaults:
       run:
@@ -374,6 +381,12 @@ jobs:
           GITLAB_HOST: https://gitlab.ambient-ci.invalid
           GITLAB_TOKEN: glpat-ambient-ci-not-a-real-token
         run: go test -race ./internal/gitlab/... ./internal/agentctl/server/process/...
+
+      - name: Run GitHub-facing package under a poisoned ambient environment
+        env:
+          GH_TOKEN: ghp-ambient-ci-not-a-real-token
+          KANDEV_MOCK_GITHUB: "true"
+        run: GITHUB_TOKEN=ghp-ambient-ci-not-a-real-token-legacy go test -race ./internal/github/...
 
   # The required check. Runs on every event, including the ones where every job
   # above is correctly skipped, so the merge queue always has a conclusion to
@@ -557,6 +570,9 @@ jobs:
       # every platform.
       - name: Test windows-sensitive packages
         run: go test -race -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/...
+
+      - name: Test Windows managed runtime cache repair
+        run: go test -race -v ./internal/agent/managedruntime -run TestRemoveNpxExecutionTreeTreatsMissingWindowsChildAsAbsent
 
       # Keep port-collision coverage targeted: the instance package contains
       # broader stdio MCP fixture tests that depend on Unix command behavior.

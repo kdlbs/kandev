@@ -5,13 +5,137 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 const deferredLaunchTaskID = "task-deferred"
+
+func TestCreateTaskPersistsDeferredLaunchOriginUserID(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "user-created"})
+
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-origin", Name: "Origin"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-origin", WorkspaceID: "ws-origin", Name: "flow"}))
+
+	result, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID:                 "ws-origin",
+		WorkflowID:                  "wf-origin",
+		Title:                       "Deferred task",
+		StartAgent:                  true,
+		RecordAgentProfileRecentUse: true,
+		DeferredLaunch: map[string]interface{}{
+			"intent":           "start",
+			"agent_profile_id": "profile-1",
+			"prompt":           "run this later",
+		},
+	})
+	require.NoError(t, err)
+
+	launch, ok := result.Task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	require.True(t, ok, "created task must retain its deferred launch intent")
+	if got := launch[models.DeferredLaunchUserIDKey]; got != "user-created" {
+		t.Fatalf("deferred launch user_id = %v, want user-created", got)
+	}
+	if got := launch[models.DeferredLaunchRecordRecentUseKey]; got != true {
+		t.Fatalf("deferred launch record_recent_use = %v, want true", got)
+	}
+}
+
+func TestCreateTaskDoesNotPersistDeferredLaunchOriginUserIDWithoutOptIn(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "mcp-user"})
+
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-mcp", Name: "MCP"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-mcp", WorkspaceID: "ws-mcp", Name: "flow"}))
+
+	result, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-mcp",
+		WorkflowID:  "wf-mcp",
+		Title:       "MCP deferred task",
+		StartAgent:  true,
+		DeferredLaunch: map[string]interface{}{
+			"intent":           "start",
+			"agent_profile_id": "profile-mcp",
+			"prompt":           "run this later",
+		},
+	})
+	require.NoError(t, err)
+
+	launch, ok := result.Task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	require.True(t, ok, "created task must retain its deferred launch intent")
+	if _, exists := launch[models.DeferredLaunchUserIDKey]; exists {
+		t.Fatalf("deferred launch user_id = %v, want no recency attribution without opt-in", launch[models.DeferredLaunchUserIDKey])
+	}
+}
+
+func TestUpdateTaskCannotReplaceDeferredLaunchAttribution(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-protected", Name: "Protected"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-protected", WorkspaceID: "ws-protected", Name: "flow"}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "task-protected", WorkspaceID: "ws-protected", WorkflowID: "wf-protected",
+		Title: "Protected deferred task", State: v1.TaskStateCreated,
+		Metadata: map[string]interface{}{
+			models.MetaKeyDeferredLaunch: map[string]interface{}{
+				"intent":                                "start",
+				"agent_profile_id":                      "profile-protected",
+				models.DeferredLaunchUserIDKey:          "user-a",
+				models.DeferredLaunchRecordRecentUseKey: true,
+			},
+		},
+	}))
+
+	attackerCtx := authn.WithIdentity(ctx, authn.Identity{UserID: "user-b"})
+	_, err := svc.UpdateTask(attackerCtx, "task-protected", &UpdateTaskRequest{
+		Metadata: map[string]interface{}{
+			"ordinary": "allowed",
+			models.MetaKeyDeferredLaunch: map[string]interface{}{
+				"intent":                                "start",
+				"agent_profile_id":                      "profile-protected",
+				models.DeferredLaunchUserIDKey:          "user-b",
+				models.DeferredLaunchRecordRecentUseKey: true,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	updated, err := repo.GetTask(ctx, "task-protected")
+	require.NoError(t, err)
+	launch, ok := updated.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	require.True(t, ok, "deferred launch attribution must survive generic metadata updates")
+	if got := launch[models.DeferredLaunchUserIDKey]; got != "user-a" {
+		t.Fatalf("deferred launch user_id = %v, want immutable user-a", got)
+	}
+	if got := updated.Metadata["ordinary"]; got != "allowed" {
+		t.Fatalf("ordinary metadata = %v, want the caller's update preserved", got)
+	}
+
+	_, err = svc.UpdateTaskMetadata(attackerCtx, "task-protected", map[string]interface{}{
+		"ordinary_from_merge": "allowed",
+		models.MetaKeyDeferredLaunch: map[string]interface{}{
+			models.DeferredLaunchUserIDKey:          "user-b",
+			models.DeferredLaunchRecordRecentUseKey: true,
+		},
+	})
+	require.NoError(t, err)
+
+	updated, err = repo.GetTask(ctx, "task-protected")
+	require.NoError(t, err)
+	launch, ok = updated.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	require.True(t, ok, "deferred launch attribution must survive metadata merges")
+	if got := launch[models.DeferredLaunchUserIDKey]; got != "user-a" {
+		t.Fatalf("merged deferred launch user_id = %v, want immutable user-a", got)
+	}
+	if got := updated.Metadata["ordinary_from_merge"]; got != "allowed" {
+		t.Fatalf("ordinary metadata from merge = %v, want the caller's update preserved", got)
+	}
+}
 
 // seedDeferredLaunchTask creates a task carrying a pending start-when-unblocked
 // deferred launch, matching what create_task_kandev with blocked_by leaves.

@@ -6,9 +6,22 @@ import { mapUserSettingsData } from "@/lib/ssr/user-settings";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import { migrateSidebarViewDraft, migrateView } from "@/lib/state/slices/ui/ui-slice";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
+import {
+  mapAgentProfileRecentUseApiRecords,
+  mergeAgentProfileRecentUseState,
+} from "@/lib/agent-profile-recent-use";
 
 export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
+    "user.agent_profile_recent_use.updated": (message) => {
+      store.setState((state) => ({
+        ...state,
+        agentProfileRecentUse: mergeAgentProfileRecentUseState(
+          state.agentProfileRecentUse,
+          mapAgentProfileRecentUseApiRecords([message.payload]),
+        ),
+      }));
+    },
     "user.settings.updated": (message) => {
       store.setState((state) => {
         const order = compareUserSettingsRevisions(

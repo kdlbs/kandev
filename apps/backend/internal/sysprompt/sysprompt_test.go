@@ -43,6 +43,8 @@ func TestConfigContext_ContainsAllTools(t *testing.T) {
 		"update_agent_profile_kandev",
 		"get_mcp_config_kandev",
 		"update_mcp_config_kandev",
+		"list_shared_prompts_kandev",
+		"get_shared_prompt_kandev",
 		"list_tasks_kandev",
 		"move_task_kandev",
 		"delete_task_kandev",
@@ -61,6 +63,7 @@ func TestConfigContext_ContainsSections(t *testing.T) {
 	assert.Contains(t, ConfigContext(), "AGENT TOOLS:")
 	assert.Contains(t, ConfigContext(), "EXECUTOR PROFILE TOOLS:")
 	assert.Contains(t, ConfigContext(), "MCP CONFIG TOOLS:")
+	assert.Contains(t, ConfigContext(), "SAVED PROMPT TOOLS:")
 	assert.Contains(t, ConfigContext(), "TASK TOOLS:")
 	assert.Contains(t, ConfigContext(), "INTERACTION:")
 	assert.Contains(t, ConfigContext(), "EXAMPLE REQUESTS")

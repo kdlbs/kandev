@@ -514,5 +514,18 @@
   "relativeMinutesAgo_other": "{{count}}ḿ àĝō",
   "relativeSecondsAgo_one": "{{count}}ś àĝō",
   "relativeSecondsAgo_other": "{{count}}ś àĝō",
-  "relativeYesterday": "ŷēśţēŕďàŷ"
+  "relativeYesterday": "ŷēśţēŕďàŷ",
+  "sidebarSeconds_one": "{{count}}ś",
+  "sidebarSeconds_other": "{{count}}ś",
+  "sidebarMinutes_one": "{{count}}ḿ",
+  "sidebarMinutes_other": "{{count}}ḿ",
+  "sidebarHours_one": "{{count}}ĥ",
+  "sidebarHours_other": "{{count}}ĥ",
+  "sidebarDays_one": "{{count}}ď",
+  "sidebarDays_other": "{{count}}ď",
+  "sidebarWeeks_one": "{{count}}ŵ",
+  "sidebarWeeks_other": "{{count}}ŵ",
+  "sidebarYears_one": "{{count}}ŷ",
+  "sidebarYears_other": "{{count}}ŷ",
+  "sidebarYearsMax": "99+ŷ"
 }

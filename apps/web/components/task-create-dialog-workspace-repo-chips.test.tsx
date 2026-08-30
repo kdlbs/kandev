@@ -1,12 +1,31 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { StateProvider } from "@/components/state-provider";
 import type { Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "./task-create-dialog-types";
 import { WorkspaceRepoChips } from "./task-create-dialog-workspace-repo-chips";
 
 vi.mock("@/hooks/domains/workspace/use-repository-branches", () => ({
   useBranches: () => ({ branches: [], isLoading: false }),
+}));
+
+vi.mock("@/hooks/domains/workspace/use-repository-branch-policies", () => ({
+  useRepositoryBranchPolicies: () => ({
+    policies: [
+      {
+        id: "policy-1",
+        repository_id: "repo-front",
+        name: "Feature branches",
+        description: "Policy description",
+        base_branch: "main",
+        branch_template: "feature/{title}-{suffix}",
+        pull_request_target: "develop",
+        created_at: "2026-08-24T10:00:00Z",
+        updated_at: "2026-08-24T10:00:00Z",
+      },
+    ],
+  }),
 }));
 
 const FRONTEND_ID = "repo-front";
@@ -58,7 +77,11 @@ function chips(overrides: Partial<ChipsProps> = {}) {
 }
 
 function renderChips(overrides: Partial<ChipsProps> = {}) {
-  return render(<TooltipProvider>{chips(overrides)}</TooltipProvider>);
+  return render(
+    <StateProvider>
+      <TooltipProvider>{chips(overrides)}</TooltipProvider>
+    </StateProvider>,
+  );
 }
 
 afterEach(cleanup);
@@ -115,6 +138,23 @@ describe("WorkspaceRepoChips duplicate policy", () => {
   });
 });
 
+describe("WorkspaceRepoChips branch policy preview", () => {
+  it("keeps policy choices on one line and moves details behind an info control", () => {
+    renderChips({
+      rows: [row({ key: "r0", repositoryId: FRONTEND_ID, branch: "main" })],
+      showBranchPolicies: true,
+    });
+
+    fireEvent.click(screen.getByTestId("branch-chip-trigger"));
+
+    const option = screen.getByRole("option", { name: /Feature branches/ });
+    expect(option.textContent).not.toContain("feature/{title}-{suffix}");
+    expect(
+      screen.getByTestId("branch-policy-option-info-policy-1").getAttribute("aria-label"),
+    ).toContain("feature/{title}-{suffix}");
+  });
+});
+
 describe("WorkspaceRepoChips workspace markers", () => {
   it("marks another task row's workspace repository while keeping it selectable", () => {
     const onRowRepositoryChange = vi.fn();
@@ -155,9 +195,11 @@ describe("WorkspaceRepoChips workspace markers", () => {
     ).toBeTruthy();
 
     rerender(
-      <TooltipProvider>
-        {chips({ rows: [row({ key: "r0", repositoryId: BACKEND_ID }), row({ key: "r1" })] })}
-      </TooltipProvider>,
+      <StateProvider>
+        <TooltipProvider>
+          {chips({ rows: [row({ key: "r0", repositoryId: BACKEND_ID }), row({ key: "r1" })] })}
+        </TooltipProvider>
+      </StateProvider>,
     );
     expect(
       within(screen.getByRole("option", { name: /^frontend/ })).queryByTestId(ADDED_MARKER),
@@ -166,7 +208,11 @@ describe("WorkspaceRepoChips workspace markers", () => {
       within(screen.getByRole("option", { name: /^backend/ })).getByTestId(ADDED_MARKER),
     ).toBeTruthy();
 
-    rerender(<TooltipProvider>{chips({ rows: [row({ key: "r1" })] })}</TooltipProvider>);
+    rerender(
+      <StateProvider>
+        <TooltipProvider>{chips({ rows: [row({ key: "r1" })] })}</TooltipProvider>
+      </StateProvider>,
+    );
     expect(
       within(screen.getByRole("option", { name: /^backend/ })).queryByTestId(ADDED_MARKER),
     ).toBeNull();
@@ -189,24 +235,28 @@ describe("WorkspaceRepoChips discovered markers", () => {
     ).toBeTruthy();
 
     rerender(
-      <TooltipProvider>
-        {chips({
-          rows: [
-            row({ key: "r0", localPath: "/home/me/projects/another-project" }),
-            row({ key: "r1" }),
-          ],
-          discoveredRepositories,
-        })}
-      </TooltipProvider>,
+      <StateProvider>
+        <TooltipProvider>
+          {chips({
+            rows: [
+              row({ key: "r0", localPath: "/home/me/projects/another-project" }),
+              row({ key: "r1" }),
+            ],
+            discoveredRepositories,
+          })}
+        </TooltipProvider>
+      </StateProvider>,
     );
     expect(
       within(screen.getByRole("option", { name: /^local-project/ })).queryByTestId(ADDED_MARKER),
     ).toBeNull();
 
     rerender(
-      <TooltipProvider>
-        {chips({ rows: [row({ key: "r1" })], discoveredRepositories })}
-      </TooltipProvider>,
+      <StateProvider>
+        <TooltipProvider>
+          {chips({ rows: [row({ key: "r1" })], discoveredRepositories })}
+        </TooltipProvider>
+      </StateProvider>,
     );
     expect(
       within(screen.getByRole("option", { name: /^local-project/ })).queryByTestId(ADDED_MARKER),

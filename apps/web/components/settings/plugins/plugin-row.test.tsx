@@ -61,6 +61,7 @@ const UPDATE_BUTTON_TESTID = "plugin-update-acme";
 const LATEST_VERSION_TESTID = "plugin-latest-version-acme";
 const UPDATE_BADGE_TESTID = "plugin-update-available-acme";
 const NOT_IN_MARKETPLACE_TESTID = "plugin-not-in-marketplace-acme";
+const INLINE_UNINSTALL_CONFIRMATION_TESTID = "plugin-uninstall-inline-confirmation";
 
 // baseProps carries the always-required callbacks/flags so each test only
 // spells out the props it is actually asserting on.
@@ -369,8 +370,68 @@ describe("PluginRow auto-update toggle", () => {
   });
 });
 
+describe("PluginRow member view", () => {
+  it("keeps plugin details available without rendering administrator actions", () => {
+    render(
+      <PluginRow
+        {...baseProps}
+        plugin={plugin()}
+        update={updateState()}
+        onUpdate={noop}
+        canManage={false}
+      />,
+    );
+
+    expect(screen.getByTestId("plugin-row-link-acme")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Disable" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Uninstall" })).toBeNull();
+    expect(screen.queryByTestId("plugin-update-acme")).toBeNull();
+    expect(screen.queryByTestId(AUTO_UPDATE_TESTID)).toBeNull();
+  });
+});
+
 describe("PluginRow uninstall confirmation", () => {
   const pluginName = "Acme Tools";
+
+  it("closes an open confirmation when management permission is revoked", () => {
+    const p = plugin({ display_name: pluginName });
+    const onConfirmUninstall = vi.fn();
+    const view = render(
+      <PluginRow
+        {...baseProps}
+        plugin={p}
+        isFinePointer={false}
+        canManage
+        onConfirmUninstall={onConfirmUninstall}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^Uninstall$/i }));
+    expect(screen.getByTestId(INLINE_UNINSTALL_CONFIRMATION_TESTID)).toBeTruthy();
+
+    view.rerender(
+      <PluginRow
+        {...baseProps}
+        plugin={p}
+        isFinePointer={false}
+        canManage={false}
+        onConfirmUninstall={onConfirmUninstall}
+      />,
+    );
+    expect(screen.queryByTestId(INLINE_UNINSTALL_CONFIRMATION_TESTID)).toBeNull();
+
+    view.rerender(
+      <PluginRow
+        {...baseProps}
+        plugin={p}
+        isFinePointer={false}
+        canManage
+        onConfirmUninstall={onConfirmUninstall}
+      />,
+    );
+    expect(screen.queryByTestId(INLINE_UNINSTALL_CONFIRMATION_TESTID)).toBeNull();
+    expect(onConfirmUninstall).not.toHaveBeenCalled();
+  });
 
   it("anchors fine-pointer confirmation to the row action and names the target", () => {
     const p = plugin({ display_name: pluginName });
@@ -406,7 +467,7 @@ describe("PluginRow uninstall confirmation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Uninstall$/i }));
 
-    const confirmation = screen.getByTestId("plugin-uninstall-inline-confirmation");
+    const confirmation = screen.getByTestId(INLINE_UNINSTALL_CONFIRMATION_TESTID);
     expect(confirmation.textContent).toContain(pluginName);
     expect(screen.queryByRole("button", { name: /^Uninstall$/i })).toBeNull();
     expect(screen.getByTestId("plugin-uninstall-confirm").className).toContain("h-11");

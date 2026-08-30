@@ -473,13 +473,27 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 	if !ok {
 		return fmt.Errorf("instance %s not found", id)
 	}
+	return m.stopInstance(ctx, id, inst)
+}
+
+func (m *Manager) stopInstance(ctx context.Context, id string, inst *Instance) error {
 	inst.stopMu.Lock()
 	defer inst.stopMu.Unlock()
 
 	// A concurrent successful stop may have removed the instance while this
 	// caller waited for the per-instance teardown lock.
 	m.mu.Lock()
-	if current, exists := m.instances[id]; !exists || current != inst {
+	current, exists := m.instances[id]
+	if !exists {
+		alreadyStopped := inst.portReleased
+		m.mu.Unlock()
+		if !alreadyStopped {
+			return fmt.Errorf("instance %s not found", id)
+		}
+		m.logger.Debug("StopInstance already completed", zap.String("instance_id", id))
+		return nil
+	}
+	if current != inst {
 		m.mu.Unlock()
 		return fmt.Errorf("instance %s not found", id)
 	}

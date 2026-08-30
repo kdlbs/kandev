@@ -416,6 +416,57 @@ Radix/portal/context-based would split React context across instances and
 break refs/`asChild`. Pure-React libs (e.g. `@tabler/icons-react`) bundle
 fine.
 
+### First-use repository inspection action
+
+A manifest-owned repository provider that supports native task creation from a
+new URL declares this workspace-scoped action:
+
+```yaml
+actions:
+  - key: "repositories.inspect"
+    scope: "workspace"
+    max_body_bytes: 16384
+```
+
+The host invokes the active manifest owner from the backend. The plugin receives
+the verified workspace context and this bounded body. Browser descriptor fields
+are not forwarded:
+
+```json
+{"url":"https://code.example.com/owner/repository"}
+```
+
+Return the preferred nested response:
+
+```json
+{
+  "repository": {
+    "provider_id": "example-provider",
+    "provider_host": "https://code.example.com",
+    "provider_scope": "https://code.example.com/context-a",
+    "provider_repository_id": "owner/repository",
+    "owner_or_project": "owner",
+    "name": "repository",
+    "clone_url": "https://code.example.com/owner/repository.git",
+    "default_branch": "main"
+  }
+}
+```
+
+The host accepts the descriptor at the top level for compatibility and accepts
+`{"matched":false}` for a URL the provider does not own. A successful response
+must use the requested provider ID and include a provider host, provider scope,
+repository ID, owner or project, name, credential-free HTTPS clone URL, and
+default branch. The clone origin must match the HTTPS provider origin. Provider
+scope is limited to 512 bytes and identity fields cannot contain NUL bytes. Any
+scope or repository ID hint from the task request must match the response.
+
+The host enforces the manifest body limit, a 15-second timeout, and a 1 MiB
+response limit. It validates the response before it writes a repository or task.
+Malformed output is invalid, `matched:false` is not found, and provider or
+transport failures are unavailable. Error responses do not include plugin body
+content or upstream credentials.
+
 ### Persisted repository branch action
 
 A manifest-owned repository provider that participates in Kandev's native task branch
@@ -427,6 +478,10 @@ actions:
     scope: "workspace"
     max_body_bytes: 16384
 ```
+
+Browser-invoked actions may additionally declare `access: "admin"`. Omitting
+`access` preserves the default `authenticated` policy. The host rejects a
+non-administrator before it forwards any request body to an admin action.
 
 This action is invoked by the host backend, not the browser callback. Kandev resolves the
 active plugin that owns the repository's persisted provider ID and supplies a verified
@@ -802,8 +857,8 @@ interface PluginRegistry {
   registerKeybinding(id: string, handler: (event: KeyboardEvent) => void): void;
 
   // Requires manifest ownership of provider.id. One active plugin owns one provider;
-  // unload revokes it and aborts in-flight provider work. inspectURL returns a complete
-  // credential-free HTTPS descriptor—host does not parse plugin provider URLs.
+  // unload revokes it and aborts in-flight provider work. inspectURL returns browser
+  // picker data only. Native first-use task creation also requires repositories.inspect.
   registerRepositoryProvider(provider: RepositoryProviderRegistration): void;
 
   // Native task-menu contribution. placement "link" renders in Link menus on desktop
@@ -874,6 +929,7 @@ interface RepositoryProviderRegistration {
     repository: RepositoryInspection;
     signal: AbortSignal;
   }): Promise<RepositoryProviderBranch[]>;
+// Browser picker callback. Its result is not authoritative for a native task write.
   inspectURL(context: {
     workspaceId: string;
     url: string;

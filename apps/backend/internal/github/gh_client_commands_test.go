@@ -531,7 +531,7 @@ func TestGHClient_SubmitReview(t *testing.T) {
 func TestGHClient_MergePR(t *testing.T) {
 	t.Run("sends the merge method", func(t *testing.T) {
 		calls := newFakeGH(t, ghResponse{Prefix: "api repos/", Stdout: `{"status":"merged"}`})
-		if _, err := NewGHClient().MergePR(context.Background(), "acme", "widget", 42, "squash"); err != nil {
+		if _, err := NewGHClient().MergePR(context.Background(), "acme", "widget", 42, MergePRRequest{MergeMethod: "squash"}); err != nil {
 			t.Fatalf("MergePR: %v", err)
 		}
 		assertGHArgv(t, calls(t), 0, []string{
@@ -541,13 +541,26 @@ func TestGHClient_MergePR(t *testing.T) {
 	})
 	t.Run("omits the merge method when unset", func(t *testing.T) {
 		calls := newFakeGH(t, ghResponse{Prefix: "api repos/", Stdout: `{"status":"merged"}`})
-		if _, err := NewGHClient().MergePR(context.Background(), "acme", "widget", 42, ""); err != nil {
+		if _, err := NewGHClient().MergePR(context.Background(), "acme", "widget", 42, MergePRRequest{}); err != nil {
 			t.Fatalf("MergePR: %v", err)
 		}
 		assertGHArgv(t, calls(t), 0, []string{
 			"api", "repos/acme/widget/pulls/42/merge-async", "-X", "PUT",
 			"-f", "merge_action=default",
 		})
+	})
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.1
+func TestGHClient_MergePR_SendsExpectedHeadSHA(t *testing.T) {
+	calls := newFakeGH(t, ghResponse{Prefix: "api repos/", Stdout: `{"status":"merged"}`})
+	request := MergePRRequest{MergeMethod: "squash", ExpectedHeadSHA: "abc123"}
+	if _, err := NewGHClient().MergePR(context.Background(), "acme", "widget", 42, request); err != nil {
+		t.Fatalf("MergePR: %v", err)
+	}
+	assertGHArgv(t, calls(t), 0, []string{
+		"api", "repos/acme/widget/pulls/42/merge-async", "-X", "PUT",
+		"-f", "merge_action=default", "-f", "merge_method=squash", "-f", "sha=abc123",
 	})
 }
 
@@ -566,7 +579,7 @@ func TestGHClient_MergePR_StatusIsRecoverable(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(http.StatusText(tc.want), func(t *testing.T) {
 			newFakeGH(t, ghResponse{Prefix: "api repos/", Stderr: tc.stderr, Exit: 1})
-			_, err := NewGHClient().MergePR(context.Background(), "acme", "widget", 42, "merge")
+			_, err := NewGHClient().MergePR(context.Background(), "acme", "widget", 42, MergePRRequest{MergeMethod: "merge"})
 			var apiErr *GitHubAPIError
 			if !errors.As(err, &apiErr) {
 				t.Fatalf("err = %v, want a *GitHubAPIError", err)
@@ -583,18 +596,75 @@ func TestGHClient_MergePR_StatusIsRecoverable(t *testing.T) {
 
 func TestGHClient_MergePR_AlreadyQueuedIsIdempotent(t *testing.T) {
 	newFakeGH(t,
-		ghResponse{Prefix: "api repos/acme/widget/pulls/42/merge-async/request-1", Stdout: `{"status":"enqueued","uuid":"request-1"}`},
-		ghResponse{Prefix: "api repos/", Stderr: `{"status":"pending","uuid":"request-1"} gh: HTTP 409`, Exit: 1},
+		ghResponse{Prefix: "api repos/acme/widget/pulls/42/merge-async/request-1", Stdout: `{"status":"enqueued","details":{"message":"Pull request was added to the merge queue."}}`},
+		ghResponse{Prefix: "api repos/", Stderr: `{"status":"pending","details":{"message":"Merge request enqueued.","uuid":"request-1","merge_method":"squash","merge_action":"default","expected_head_sha":"abc123"}} gh: HTTP 409`, Exit: 1},
 	)
-	outcome, err := NewGHClient().MergePR(context.Background(), "acme", "widget", 42, "squash")
+	outcome, err := NewGHClient().MergePR(context.Background(), "acme", "widget", 42, MergePRRequest{MergeMethod: "squash"})
 	if err != nil || outcome != MergeOutcomeQueued {
 		t.Fatalf("outcome = %q, err = %v, want queued", outcome, err)
 	}
 }
 
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001.3
+func TestGHClient_MergePR_PollsNestedPendingResponse(t *testing.T) {
+	calls := newFakeGH(t,
+		ghResponse{Prefix: "api repos/acme/widget/pulls/42/merge-async/request-1", Stdout: `{"status":"merged","details":{"sha":"abc123"}}`},
+		ghResponse{Prefix: "api repos/", Stdout: `{"status":"pending","details":{"message":"Merge request enqueued.","uuid":"request-1","merge_method":"squash","merge_action":"default","expected_head_sha":"abc123"}}`},
+	)
+
+	outcome, err := NewGHClient().MergePR(context.Background(), "acme", "widget", 42, MergePRRequest{MergeMethod: "squash"})
+	if err != nil || outcome != MergeOutcomeMerged {
+		t.Fatalf("outcome = %q, err = %v, want merged", outcome, err)
+	}
+	assertGHArgv(t, calls(t), 1, []string{
+		"api", "repos/acme/widget/pulls/42/merge-async/request-1",
+	})
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.7
+func TestGHClient_MergePR_PendingPollHonorsContextBeforeNextRequest(t *testing.T) {
+	calls := newFakeGH(t, ghResponse{
+		Prefix: "api repos/",
+		Stdout: `{"status":"pending","details":{"uuid":"request-1"}}`,
+	})
+	client := NewGHClient()
+	var gotDelay time.Duration
+	client.mergePollWait = func(_ context.Context, delay time.Duration) error {
+		gotDelay = delay
+		return context.DeadlineExceeded
+	}
+
+	_, err := client.MergePR(
+		context.Background(), "acme", "widget", 42, MergePRRequest{MergeMethod: "squash"},
+	)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("MergePR error = %v, want context deadline", err)
+	}
+	if got := len(calls(t)); got != 1 {
+		t.Fatalf("request count = %d, want only the initial request before cancellation", got)
+	}
+	if gotDelay != time.Second {
+		t.Fatalf("poll delay = %s, want one second", gotDelay)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001.13
+func TestGHClient_MergePR_ReportsNestedFailureMessage(t *testing.T) {
+	newFakeGH(t, ghResponse{
+		Prefix: "api repos/",
+		Stdout: `{"status":"failed","details":{"message":"Branch protection blocked the merge.","expected_head_sha":"abc123"}}`,
+	})
+
+	_, err := NewGHClient().MergePR(context.Background(), "acme", "widget", 42, MergePRRequest{MergeMethod: "squash"})
+	if err == nil || !strings.Contains(err.Error(), "Branch protection blocked the merge.") ||
+		!strings.Contains(err.Error(), "abc123") {
+		t.Fatalf("err = %v, want the nested provider message and expected head", err)
+	}
+}
+
 func TestGHClient_MergePR_UnmappedStatusFallsBackToAPlainWrap(t *testing.T) {
 	newFakeGH(t, ghResponse{Prefix: "api repos/", Stderr: "gh: HTTP 500: server error", Exit: 1})
-	_, err := NewGHClient().MergePR(context.Background(), "acme", "widget", 42, "merge")
+	_, err := NewGHClient().MergePR(context.Background(), "acme", "widget", 42, MergePRRequest{MergeMethod: "merge"})
 	if err == nil || !strings.Contains(err.Error(), "merge PR #42") {
 		t.Fatalf("err = %v, want a plain wrap naming the PR", err)
 	}

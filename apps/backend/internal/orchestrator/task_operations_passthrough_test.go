@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -63,6 +64,63 @@ func TestResolveIsPassthroughForLaunch_UsesSessionSnapshotOnSuccess(t *testing.T
 
 	if got {
 		t.Fatalf("resolveIsPassthroughForLaunch() = %v, want false (session snapshot IsPassthrough)", got)
+	}
+}
+
+// TestStartSessionForWorkflowStepRejectsPassthroughProfileMismatchBeforePrompt
+// proves that an explicit workflow-step launch cannot advance the task or
+// deliver the step prompt through a passthrough session whose profile does not
+// match the step's fixed profile.
+func TestStartSessionForWorkflowStepRejectsPassthroughProfileMismatchBeforePrompt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.AgentProfileID = "profile-a"
+	session.IsPassthrough = true
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID:             "step2",
+		WorkflowID:     "wf1",
+		AgentProfileID: "profile-b",
+	}
+	agentMgr := &mockAgentManager{
+		isPassthrough:  true,
+		isAgentRunning: true,
+	}
+	svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	err = svc.StartSessionForWorkflowStep(ctx, "task1", "session1", "step2")
+	if err == nil || !strings.Contains(err.Error(), "profile mismatch") {
+		t.Fatalf("StartSessionForWorkflowStep error = %v, want profile mismatch", err)
+	}
+
+	task, err := repo.GetTask(ctx, "task1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.WorkflowStepID != "step1" {
+		t.Fatalf("task workflow step = %q, want unchanged step1", task.WorkflowStepID)
+	}
+
+	agentMgr.mu.Lock()
+	defer agentMgr.mu.Unlock()
+	if len(agentMgr.passthroughStdinCalls) != 0 {
+		t.Fatalf("passthrough prompt calls = %d, want none", len(agentMgr.passthroughStdinCalls))
+	}
+	if len(agentMgr.capturedPrompts) != 0 {
+		t.Fatalf("ACP prompt calls = %d, want none", len(agentMgr.capturedPrompts))
 	}
 }
 

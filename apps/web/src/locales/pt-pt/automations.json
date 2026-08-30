@@ -51,6 +51,8 @@
   "cronExpressionLabel": "Expressão cron",
   "cronHelp": "Cron padrão de 5 campos ou atalhos ({{shortcuts}})",
   "delete": "Eliminar",
+  "deleteAutomationTitle": "Eliminar automatização?",
+  "deleteAutomationDescription": "Esta ação irá eliminar permanentemente {{name}}. Esta ação não pode ser anulada.",
   "deleteAll": "Eliminar todas",
   "deleteAllRuns": "Eliminar todas as execuções",
   "deleteAllRunsDescription": "Isto remove permanentemente todos os registos de execução desta automatização; incluindo os que não estão carregados neste momento; e as tarefas associadas. Esta ação não pode ser anulada.",

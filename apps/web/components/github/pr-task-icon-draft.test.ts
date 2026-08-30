@@ -6,6 +6,7 @@ import { derivePRTaskStatusSummary } from "./pr-task-status-summary";
 function draftPR(): TaskPR {
   return {
     id: "id",
+    workspace_id: "workspace-1",
     task_id: "task",
     owner: "o",
     repo: "r",

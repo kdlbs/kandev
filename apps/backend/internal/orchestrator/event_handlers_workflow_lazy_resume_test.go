@@ -49,7 +49,7 @@ func TestProcessOnEnterResetAgentContext_ClearsLazyResumeTokenWithoutLiveExecuti
 		t.Fatalf("load session: %v", err)
 	}
 
-	svc.processOnEnter(ctx, "task-lazy-resume", session, step, "review task")
+	svc.processOnEnter(ctx, "task-lazy-resume", session, step, "review task", 0)
 
 	if len(agentManager.restartProcessCalls) != 0 {
 		t.Fatalf("expected no reset against a missing live execution, got %d calls", len(agentManager.restartProcessCalls))

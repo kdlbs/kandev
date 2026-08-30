@@ -39,6 +39,12 @@ actions:
   - key: "connection-status"
     scope: "workspace"
     max_body_bytes: 4096
+  - key: "repositories.inspect"
+    scope: "workspace"
+    max_body_bytes: 16384
+  - key: "repositories.branches"
+    scope: "workspace"
+    max_body_bytes: 16384
   - key: "link-pull-request"
     scope: "task"
     max_body_bytes: 4096

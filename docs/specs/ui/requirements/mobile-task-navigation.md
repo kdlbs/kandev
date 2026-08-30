@@ -30,6 +30,12 @@ Mobile users need the same task controls as desktop without relying on long pres
 
 ## Migrated source detail
 
+> **Migration note:** Phone task-top-bar action placement is now authoritative
+> in [Mobile Task Chrome Requirements](requirements/mobile-task-chrome.md) and
+> [Mobile Task Chrome System Design](system-design/mobile-task-chrome.md). This
+> legacy document remains authoritative for the other mobile navigation
+> behavior below while the UI system migration continues.
+
 ## Why
 
 Mobile users need the same task controls as desktop without relying on long press, clipped popovers, or boards that scroll in two directions. Moving a task, changing workflow context, and choosing a workflow step must remain comfortable with one hand on a narrow viewport.

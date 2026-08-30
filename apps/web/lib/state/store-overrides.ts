@@ -26,6 +26,7 @@ export function buildStateOverrides(m: DefaultState) {
     settingsData: m.settingsData,
     sleepInhibition: m.sleepInhibition,
     userSettings: m.userSettings,
+    agentProfileRecentUse: m.agentProfileRecentUse,
     messages: m.messages,
     turns: m.turns,
     taskSessions: m.taskSessions,

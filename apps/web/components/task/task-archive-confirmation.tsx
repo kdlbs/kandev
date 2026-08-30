@@ -137,6 +137,7 @@ function ArchiveConfirmPopover({
   return (
     <ActionConfirmPopover
       open={open}
+      size="wide"
       disabled={isArchiving}
       anchorRef={anchorRef}
       focusReturnRef={focusReturnRef}
@@ -178,6 +179,7 @@ function ArchiveClassifyingPopover({
   return (
     <ActionConfirmPopover
       open
+      size="wide"
       anchorRef={anchorRef}
       focusReturnRef={focusReturnRef}
       focusBoundaryRef={focusBoundaryRef ?? anchorRef}

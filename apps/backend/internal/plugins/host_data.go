@@ -28,6 +28,7 @@ import (
 	analyticsmodels "github.com/kandev/kandev/internal/analytics/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 
+	githubsvc "github.com/kandev/kandev/internal/github"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/pkg/pluginsdk"
@@ -162,6 +163,19 @@ type workflowStepLister interface {
 // (see filterGlobalProfiles), matching the resource's global-instance scope.
 type agentProfileDataSource interface {
 	ListAgents(ctx context.Context) (*agentsettingsdto.ListAgentsResponse, error)
+}
+
+// taskPRSource is the narrow slice of internal/github.Service the Tasks reader
+// needs to populate Task.PullRequests.
+//
+// SEPARATE FROM taskDataSource ON PURPOSE. A task's pull requests live in
+// github_task_prs, owned by internal/github, not on the task row — so the link
+// is not derivable from anything taskDataSource returns. It is wired separately
+// (SetTaskPRSource) because GitHub is optional and may be available after a
+// host is created; a nil source simply yields tasks with no PullRequests rather
+// than failing the read.
+type taskPRSource interface {
+	ListTaskPRsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*githubsvc.TaskPR, error)
 }
 
 // sessionCodeStatsSource is the narrow slice of
@@ -339,14 +353,47 @@ func (r taskReader) List(ctx context.Context, filter pluginsdk.TaskFilter, page 
 	if err != nil {
 		return nil, nil, err
 	}
-	tasks, err := r.host.fetchTasksForWorkspaces(ctx, workspaceIDs, filter.IncludeEphemeral, false)
+	tasks, err := r.host.fetchTasksForWorkspaces(ctx, workspaceIDs, filter.IncludeEphemeral, filter.IncludeArchived)
 	if err != nil {
 		return nil, nil, err
 	}
 	tasks = filterTasks(tasks, filter)
 	sortTasksNewestFirst(tasks)
 	items, info := paginate(tasksToDTOs(tasks), page)
+	// Attached AFTER pagination so the PR lookup covers one page, not the whole
+	// workspace: a campaign-sized read would otherwise fan out over every task
+	// kandev holds to fill a list the caller already bounded.
+	r.host.attachPullRequests(ctx, items)
 	return items, info, nil
+}
+
+// attachPullRequests fills Task.PullRequests in place. A missing source or a
+// failed lookup leaves them empty and logs nothing: pull requests are
+// supplementary to a task read, and refusing the whole list over them would
+// take away more than it protects.
+func (h *pluginHost) attachPullRequests(ctx context.Context, tasks []pluginsdk.Task) {
+	source := h.taskPRs
+	if h.taskPRsDep != nil {
+		source = h.taskPRsDep()
+	}
+	if source == nil || len(tasks) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(tasks))
+	for i := range tasks {
+		ids = append(ids, tasks[i].ID)
+	}
+	byTask, err := source.ListTaskPRsByTaskIDs(ctx, ids)
+	if err != nil {
+		return
+	}
+	for i := range tasks {
+		prs := byTask[tasks[i].ID]
+		if len(prs) == 0 {
+			continue
+		}
+		tasks[i].PullRequests = taskPRsToDTOs(prs)
+	}
 }
 
 // Get returns a gRPC NotFound error (not a (nil, nil) success) when id
@@ -366,8 +413,9 @@ func (r taskReader) Get(ctx context.Context, id string) (*pluginsdk.Task, error)
 		}
 		return nil, err
 	}
-	dto := taskModelToDTO(task)
-	return &dto, nil
+	items := []pluginsdk.Task{taskModelToDTO(task)}
+	r.host.attachPullRequests(ctx, items)
+	return &items[0], nil
 }
 
 type sessionReader struct{ host *pluginHost }

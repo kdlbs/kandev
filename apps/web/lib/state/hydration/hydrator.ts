@@ -7,6 +7,7 @@ import {
   reconcileQuickTerminalTabs,
 } from "@/lib/state/slices/ui/quick-chat-sync";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
+import { mergeAgentProfileRecentUseState } from "@/lib/agent-profile-recent-use";
 import {
   mergeTurnRows,
   parseTurnTimestamp,
@@ -117,6 +118,8 @@ function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: HydrationState
   if (state.tasks) deepMerge(draft.tasks, state.tasks);
   if (state.workspaces) deepMerge(draft.workspaces, state.workspaces);
   if (state.repositories) deepMerge(draft.repositories, state.repositories);
+  if (state.repositoryBranchPolicies)
+    deepMerge(draft.repositoryBranchPolicies, state.repositoryBranchPolicies);
   if (state.repositoryBranches) deepMerge(draft.repositoryBranches, state.repositoryBranches);
 }
 
@@ -132,6 +135,12 @@ function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
   mergeWithLoading(draft.notificationProviders, state.notificationProviders);
   if (state.settingsData) deepMerge(draft.settingsData, state.settingsData);
   if (state.sleepInhibition) deepMerge(draft.sleepInhibition, state.sleepInhibition);
+  if (state.agentProfileRecentUse) {
+    draft.agentProfileRecentUse = mergeAgentProfileRecentUseState(
+      draft.agentProfileRecentUse as unknown as AppState["agentProfileRecentUse"],
+      state.agentProfileRecentUse,
+    ) as unknown as Draft<AppState["agentProfileRecentUse"]>;
+  }
   if (state.userSettings && shouldHydrateUserSettings(draft.userSettings, state.userSettings)) {
     deepMerge(draft.userSettings, state.userSettings);
     bridgeSidebarViewsFromUserSettings(draft, state.userSettings);
@@ -610,7 +619,15 @@ function hydrateGitHub(draft: Draft<AppState>, state: HydrationState): void {
   if (state.githubAppRegistrations) {
     mergeWithLoading(draft.githubAppRegistrations, state.githubAppRegistrations);
   }
-  if (state.taskPRs) deepMerge(draft.taskPRs, state.taskPRs);
+  if (state.taskPRs) {
+    deepMerge(draft.taskPRs, state.taskPRs);
+    // Older boot payloads contain only byTaskId. Stamp those records with the
+    // workspace context that was hydrated alongside them so a later workspace
+    // switch cannot treat them as current data.
+    draft.taskPRs.workspaceId = state.taskPRs.workspaceId ?? draft.workspaces.activeId;
+    draft.taskPRs.workspaceContextGeneration =
+      state.taskPRs.workspaceContextGeneration ?? draft.workspaceContextGeneration;
+  }
   if (state.azureDevOpsTaskPullRequests) {
     deepMerge(draft.azureDevOpsTaskPullRequests, state.azureDevOpsTaskPullRequests);
   }

@@ -458,3 +458,34 @@ func TestEvaluateStepQuorum_GuardsOrderedByConfiguredActionOrderAndSatisfiedOmit
 		t.Fatalf("expected a satisfied guard entry to omit Reason (AC-60), got %q", snap.Guards[1].Reason)
 	}
 }
+
+// TestEvaluateStepQuorum_DoesNotRecordSlateEmptySideEffects is the
+// AC-004.10/AC-24b regression: EvaluateStepQuorum's doc comment promises "no
+// AC-24a counter, no AC-24 log" for its read-only diagnostic snapshot, but a
+// dashboard poll hits the same computeGuardOutcome/recordQuorumSlateEmpty
+// code the committing HandleTrigger and reevaluation paths use. A guard
+// whose required slate is empty must surface ReasonSlateEmpty in the
+// snapshot entry without incrementing workflow_quorum_slate_empty_total or
+// emitting the "workflow quorum required slate empty" warning log — in
+// contrast to TestComputeGuardOutcome_SlateEmpty's committing-path sibling,
+// which does record both.
+func TestEvaluateStepQuorum_DoesNotRecordSlateEmptySideEffects(t *testing.T) {
+	store := quorumStore(approvedGuard("reviewer"))
+	decisions := newFakeDecisionStore()
+	eng, logs := newObservedEngine(store, decisions, fakeParticipants{})
+
+	before := readQuorumSlateEmptyCounter("reviewer")
+	snap, err := eng.EvaluateStepQuorum(context.Background(), "task-1", "sess-1")
+	if err != nil {
+		t.Fatalf("EvaluateStepQuorum: %v", err)
+	}
+	if len(snap.Guards) != 1 || snap.Guards[0].Reason != ReasonSlateEmpty {
+		t.Fatalf("expected a single slate_empty guard entry, got %#v", snap.Guards)
+	}
+	if after := readQuorumSlateEmptyCounter("reviewer"); after != before {
+		t.Fatalf("expected no slate_empty counter delta from a read-only snapshot, got %d -> %d", before, after)
+	}
+	if entries := logs.FilterMessage("workflow quorum required slate empty").All(); len(entries) != 0 {
+		t.Fatalf("expected no slate-empty warning log from a read-only snapshot, got %d: %+v", len(entries), entries)
+	}
+}
