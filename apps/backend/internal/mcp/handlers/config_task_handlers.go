@@ -74,6 +74,9 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		(session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting) {
 		terminal, err := h.taskSvc.IsTerminalWorkflowStep(ctx, req.WorkflowStepID)
 		if err != nil {
+			if errors.Is(err, service.ErrWorkflowStepNotFound) {
+				return h.deferMoveTask(ctx, msg, req, session)
+			}
 			h.logger.Error("move_task: failed to classify target workflow step",
 				zap.String("workflow_step_id", req.WorkflowStepID), zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,

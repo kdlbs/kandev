@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -22,6 +23,10 @@ import (
 // ErrWorkflowStepChanged is returned when a route's source generation no
 // longer matches the task row at the transaction boundary.
 var ErrWorkflowStepChanged = errors.New("workflow step changed before route commit")
+
+// ErrWorkflowStepNotFound distinguishes a request for a missing step from a
+// storage failure while preserving the repository's existing error contract.
+var ErrWorkflowStepNotFound = errors.New("workflow step not found")
 
 // ApproveSessionResult contains the result of approving a session
 type ApproveSessionResult struct {
@@ -741,6 +746,9 @@ func (s *Service) terminalWorkflowStep(ctx context.Context, workflowStepID strin
 	}
 	step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
 	if err != nil {
+		if strings.Contains(err.Error(), "workflow step not found") {
+			return false, fmt.Errorf("%w: %v", ErrWorkflowStepNotFound, err)
+		}
 		return false, fmt.Errorf("failed to get workflow step %s: %w", workflowStepID, err)
 	}
 	if step == nil {
