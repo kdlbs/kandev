@@ -1,12 +1,20 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { IconPlayerPlay, IconLoader2, IconCheck, IconX, IconTrash } from "@tabler/icons-react";
+import {
+  IconPlayerPlay,
+  IconLoader2,
+  IconCheck,
+  IconX,
+  IconTrash,
+  IconInfoCircle,
+} from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
+import { Switch } from "@kandev/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { ScriptEditor } from "@/components/settings/profile-edit/script-editor";
 import {
@@ -411,6 +419,42 @@ function ContainerRow({
         </div>
       </TableCell>
     </TableRow>
+  );
+}
+
+export function UserNamespacesCard({
+  enabled,
+  baselineEnabled = false,
+  onChange,
+}: {
+  enabled: boolean;
+  baselineEnabled?: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const isDirty = enabled !== baselineEnabled;
+  return (
+    <SettingsCard isDirty={isDirty}>
+      <SettingsCardHeader
+        title={t("executors:allowUserNamespacesTitle")}
+        description={t("executors:allowUserNamespacesDescription")}
+        actions={
+          <Switch
+            id="allow-user-namespaces"
+            aria-label={t("executors:allowUserNamespacesTitle")}
+            checked={enabled}
+            onCheckedChange={onChange}
+            data-settings-dirty={isDirty}
+          />
+        }
+      />
+      <CardContent>
+        <p className="text-sm text-muted-foreground flex items-start gap-2">
+          <IconInfoCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          {t("executors:allowUserNamespacesNote")}
+        </p>
+      </CardContent>
+    </SettingsCard>
   );
 }
 

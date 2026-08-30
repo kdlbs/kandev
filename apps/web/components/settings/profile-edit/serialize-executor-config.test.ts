@@ -14,8 +14,10 @@ function form(overrides: Partial<ExecutorProfileConfigForm> = {}): ExecutorProfi
     gitUserName: "",
     gitUserEmail: "",
     isDocker: false,
+    isLocalDocker: false,
     dockerfile: "",
     imageTag: "",
+    allowUserNamespaces: false,
     isSSH: false,
     sshShell: "",
     sshReclaimTaskDir: false,
@@ -40,6 +42,33 @@ describe("buildSaveConfig", () => {
     const config = buildSaveConfig(form({ remoteCredentials: ["codex-auth"] }));
 
     expect(config).toEqual({ remote_credentials: '["codex-auth"]' });
+  });
+
+  it("persists allowUserNamespaces when enabled on a Docker profile", () => {
+    const config = buildSaveConfig(
+      form({ isDocker: true, isLocalDocker: true, allowUserNamespaces: true }),
+    );
+    expect(config.allow_user_namespaces).toBe("true");
+  });
+
+  it("removes allowUserNamespaces key when disabled", () => {
+    const config = buildSaveConfig(
+      form({ isDocker: true, isLocalDocker: true, allowUserNamespaces: false }),
+    );
+    expect(config.allow_user_namespaces).toBeUndefined();
+  });
+
+  it("removes allowUserNamespaces when not a Docker profile", () => {
+    const config = buildSaveConfig(form({ isDocker: false, allowUserNamespaces: true }));
+    expect(config.allow_user_namespaces).toBeUndefined();
+  });
+
+  it("removes allowUserNamespaces from a remote Docker profile", () => {
+    const config = buildSaveConfig(
+      form({ isDocker: true, isLocalDocker: false, allowUserNamespaces: true }),
+      { allow_user_namespaces: "true" },
+    );
+    expect(config.allow_user_namespaces).toBeUndefined();
   });
 });
 

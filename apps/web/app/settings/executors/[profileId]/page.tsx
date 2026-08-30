@@ -67,6 +67,7 @@ import type { Executor, ExecutorProfile, ExecutorType, ProfileEnvVar } from "@/l
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import { executorProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { buildSaveConfig } from "@/components/settings/profile-edit/serialize-executor-config";
+import { useUserNamespacesFormState } from "@/components/settings/profile-edit/use-user-namespaces-form-state";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 const SPRITES_TOKEN_KEY = "SPRITES_API_TOKEN";
@@ -93,6 +94,7 @@ function useRemoteExecutorFlags(executorType: ExecutorType) {
   return {
     isRemote,
     isDocker: executorType === "local_docker" || executorType === "remote_docker",
+    isLocalDocker: executorType === "local_docker",
     isSprites: executorType === "sprites",
   };
 }
@@ -283,6 +285,7 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
   const [cleanupScript, setCleanupScript] = useState(profile.cleanup_script ?? "");
   const [dockerfile, setDockerfile] = useState(profile.config?.dockerfile ?? "");
   const [imageTag, setImageTag] = useState(profile.config?.image_tag ?? "");
+  const userNamespaces = useUserNamespacesFormState(profile.config);
   const [sshShell, setSshShell] = useState(profile.config?.ssh_shell ?? "");
   const [sshReclaimTaskDir, setSshReclaimTaskDir] = useState(() =>
     isSSHReclaimEnabled(profile.config),
@@ -328,6 +331,9 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
     setDockerfile,
     imageTag,
     setImageTag,
+    allowUserNamespaces: userNamespaces.allowUserNamespaces,
+    setAllowUserNamespaces: userNamespaces.setAllowUserNamespaces,
+    resetUserNamespaces: userNamespaces.resetUserNamespaces,
     sshShell,
     setSshShell,
     sshReclaimTaskDir,
@@ -357,6 +363,7 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
     setGitUserEmail: gitIdentity.setGitUserEmail,
     isRemote: flags.isRemote,
     isDocker: flags.isDocker,
+    isLocalDocker: flags.isLocalDocker,
     isSprites: flags.isSprites,
     isSSH: executor.type === "ssh",
     mcpPolicyErrorKey,
@@ -407,6 +414,9 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
           onDockerfileChange={form.setDockerfile}
           imageTag={form.imageTag}
           onImageTagChange={form.setImageTag}
+          allowsUserNamespaces={form.isLocalDocker}
+          allowUserNamespaces={form.allowUserNamespaces}
+          onAllowUserNamespacesChange={form.setAllowUserNamespaces}
         />
       )}
       {form.isRemote && (
@@ -551,7 +561,7 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       baselineReady && Boolean(form.name.trim()) && !form.mcpPolicyErrorKey && !spritesTokenMissing,
     invalidReason,
     save: handleSave,
-    discard: () => undefined,
+    discard: form.resetUserNamespaces,
   });
 
   const handleDelete = (options?: { removeRelatedDockerContainers?: boolean }) => {

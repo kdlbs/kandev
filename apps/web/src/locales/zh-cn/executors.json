@@ -280,5 +280,8 @@
   "portableConfigInfoTitle": "可迁移的智能体配置",
   "portableConfigNotFound": "未找到",
   "portableConfigNotFoundHint": "这只是编辑提示。你可以先保存配置，稍后再添加该文件。",
-  "portableConfigTitle": "智能体配置"
+  "portableConfigTitle": "智能体配置",
+  "allowUserNamespacesTitle": "用户命名空间支持",
+  "allowUserNamespacesDescription": "允许在容器内创建无特权的用户命名空间和执行挂载操作。启用类似 bwrap 的沙箱工具。",
+  "allowUserNamespacesNote": "此设置仅影响新创建的容器。现有任务环境必须重置才能使更改生效。"
 }
