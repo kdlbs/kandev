@@ -42,14 +42,14 @@ func (r *sqliteRepository) ExactCancelPendingMove(
 		return nil, ErrPendingMoveCancelFailed
 	}
 	if !authorized {
-		return nil, r.commitExactCancelMiss(ctx, tx, actor, ExactPendingMoveMatch{}, nil, correlationID)
+		return nil, r.commitExactCancelMiss(ctx, tx, actor, nil, correlationID)
 	}
 	locked, err := r.lockExistingExactCancelSession(ctx, tx, match.SessionID)
 	if err != nil {
 		return nil, ErrPendingMoveCancelFailed
 	}
 	if !locked {
-		return nil, r.commitExactCancelMiss(ctx, tx, actor, match, nil, correlationID)
+		return nil, r.commitExactCancelMiss(ctx, tx, actor, nil, correlationID)
 	}
 
 	target, err := r.readExactCancelTarget(ctx, tx, match.SessionID)
@@ -57,7 +57,7 @@ func (r *sqliteRepository) ExactCancelPendingMove(
 		return nil, ErrPendingMoveCancelFailed
 	}
 	if errors.Is(err, sql.ErrNoRows) || !exactCancelTargetMatches(target, actor, match) {
-		return nil, r.commitExactCancelMiss(ctx, tx, actor, match, target, correlationID)
+		return nil, r.commitExactCancelMiss(ctx, tx, actor, target, correlationID)
 	}
 
 	deleted, err := r.deleteExactCancelTarget(ctx, tx, actor, match)
@@ -65,7 +65,7 @@ func (r *sqliteRepository) ExactCancelPendingMove(
 		return nil, ErrPendingMoveCancelFailed
 	}
 	if !deleted {
-		return nil, r.commitExactCancelMiss(ctx, tx, actor, match, target, correlationID)
+		return nil, r.commitExactCancelMiss(ctx, tx, actor, target, correlationID)
 	}
 	if err := r.appendPendingMoveCancellationAudit(ctx, tx, actor, match, target,
 		correlationID, PendingMoveCancellationOutcomeCancelled, true); err != nil {
@@ -116,10 +116,10 @@ func (r *sqliteRepository) commitExactCancelMiss(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	actor PendingMoveCancellationActor,
-	match ExactPendingMoveMatch,
 	target *exactCancelTarget,
 	correlationID string,
 ) error {
+	match, target := safeExactCancelAuditTarget(actor, target)
 	if err := r.appendPendingMoveCancellationAudit(ctx, tx, actor, match, target,
 		correlationID, PendingMoveCancellationOutcomeNotFoundOrChanged, false); err != nil {
 		return ErrPendingMoveCancelFailed
@@ -128,6 +128,24 @@ func (r *sqliteRepository) commitExactCancelMiss(
 		return ErrPendingMoveCancelFailed
 	}
 	return ErrPendingMoveNotFoundOrChanged
+}
+
+func safeExactCancelAuditTarget(
+	actor PendingMoveCancellationActor,
+	target *exactCancelTarget,
+) (ExactPendingMoveMatch, *exactCancelTarget) {
+	if target == nil || actor.WorkspaceID == "" || target.workspaceID != actor.WorkspaceID {
+		return ExactPendingMoveMatch{}, nil
+	}
+	return ExactPendingMoveMatch{
+		PendingMoveID:                 target.rowID,
+		SessionID:                     target.sessionID,
+		TaskID:                        target.taskID,
+		MoveID:                        target.moveID,
+		WorkflowID:                    target.workflowID,
+		ExpectedCurrentWorkflowStepID: target.currentStepID,
+		ExpectedTargetWorkflowStepID:  target.targetStepID,
+	}, target
 }
 
 // deleteExactCancelTarget repeats the full authorization and relation tuple at

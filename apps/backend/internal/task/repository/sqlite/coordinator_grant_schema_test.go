@@ -33,14 +33,18 @@ func assertWorkspaceCoordinatorGrantSchema(t *testing.T, repo *Repository) {
 	now := time.Now().UTC()
 	if _, err := repo.db.Exec(repo.db.Rebind(`
 		INSERT INTO workspaces (id, name, created_at, updated_at) VALUES
-			('workspace-a', 'A', ?, ?), ('workspace-b', 'B', ?, ?)
-	`), now, now, now, now); err != nil {
+			('', 'Empty', ?, ?), ('workspace-a', 'A', ?, ?),
+			('workspace-b', 'B', ?, ?), ('workspace-c', 'C', ?, ?)
+	`), now, now, now, now, now, now, now, now); err != nil {
 		t.Fatalf("seed workspaces: %v", err)
 	}
 	if _, err := repo.db.Exec(repo.db.Rebind(`
 		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
-		VALUES ('coordinator-a', 'workspace-a', 'Coordinator', ?, ?)
-	`), now, now); err != nil {
+		VALUES
+			('coordinator-a', 'workspace-a', 'Coordinator A', ?, ?),
+			('coordinator-empty-workspace', '', 'Empty workspace', ?, ?),
+			('', 'workspace-c', 'Empty task ID', ?, ?)
+	`), now, now, now, now, now, now); err != nil {
 		t.Fatalf("seed coordinator task: %v", err)
 	}
 	if _, err := repo.db.Exec(repo.db.Rebind(`
@@ -54,22 +58,22 @@ func assertWorkspaceCoordinatorGrantSchema(t *testing.T, repo *Repository) {
 		INSERT INTO workspace_coordinator_grants
 			(workspace_id, coordinator_task_id, created_by_user_id, created_at, updated_at)
 		VALUES ('workspace-b', 'coordinator-a', 'owner-b', ?, ?)
-	`), now, now); err != nil {
-		t.Fatalf("insert inert cross-workspace grant fixture: %v", err)
+	`), now, now); err == nil {
+		t.Fatal("cross-workspace Coordinator grant was representable")
 	}
-	var active int
-	if err := repo.db.Get(&active, `
-		SELECT COUNT(*)
-		FROM workspace_coordinator_grants grant
-		JOIN tasks coordinator
-			ON coordinator.id = grant.coordinator_task_id
-			AND coordinator.workspace_id = grant.workspace_id
-		WHERE grant.workspace_id = 'workspace-b'
-	`); err != nil {
-		t.Fatalf("check cross-workspace grant activation: %v", err)
+	if _, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO workspace_coordinator_grants
+			(workspace_id, coordinator_task_id, created_by_user_id, created_at, updated_at)
+		VALUES ('', 'coordinator-empty-workspace', 'owner-empty', ?, ?)
+	`), now, now); err == nil {
+		t.Fatal("empty-workspace Coordinator grant was representable")
 	}
-	if active != 0 {
-		t.Fatal("cross-workspace grant became an active same-workspace designation")
+	if _, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO workspace_coordinator_grants
+			(workspace_id, coordinator_task_id, created_by_user_id, created_at, updated_at)
+		VALUES ('workspace-c', '', 'owner-c', ?, ?)
+	`), now, now); err == nil {
+		t.Fatal("empty-task Coordinator grant was representable")
 	}
 	if _, err := repo.db.Exec(`DELETE FROM tasks WHERE id = 'coordinator-a'`); err != nil {
 		t.Fatalf("delete coordinator task: %v", err)

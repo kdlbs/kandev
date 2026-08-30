@@ -24,24 +24,12 @@ func (s *Server) registerPendingMoveCancellationTool() {
 			mcp.WithString("expected_current_workflow_step_id", mcp.Required(), mcp.Description("Exact current workflow step ID")),
 			mcp.WithString("expected_target_workflow_step_id", mcp.Required(), mcp.Description("Exact queued target workflow step ID")),
 		),
-		s.wrapHandler("cancel_pending_move_kandev", s.cancelPendingMoveHandler()),
+		s.wrapAuditedSensitiveHandler("cancel_pending_move_kandev", s.cancelPendingMoveHandler()),
 	)
 }
 
 func (s *Server) cancelPendingMoveHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		keys := []string{
-			"pending_move_id", "session_id", "task_id", "move_id", "workflow_id",
-			"expected_current_workflow_step_id", "expected_target_workflow_step_id",
-		}
-		payload := make(map[string]string, len(keys))
-		for _, key := range keys {
-			value, err := req.RequireString(key)
-			if err != nil {
-				return mcp.NewToolResultError(key + " is required"), nil
-			}
-			payload[key] = value
-		}
-		return s.forwardToBackend(ctx, ws.ActionMCPCancelPendingMove, payload)
+		return s.forwardToBackend(ctx, ws.ActionMCPCancelPendingMove, req.GetRawArguments())
 	}
 }

@@ -36,10 +36,15 @@ workspace Coordinator grant and validates the caller's live task, session,
 execution, workspace, and workspace-owner identity. Request arguments cannot
 assert authority. Ordinary-agent self-only authorization is unchanged, Support
 authorization is deferred, and no predicate-light or raw SQL variant exists.
+The grant itself is database-bound to a non-empty workspace/task pair through
+the unique `tasks(workspace_id, id)` key and a composite cascading foreign key;
+an authorization-time join does not replace that storage invariant.
 
 The outcome audit and successful delete are atomic. Evidence records only safe
 identifiers, prior step state, outcome, changed flag, and timestamp. Tool
-payloads and secrets are excluded from logs.
+payloads and secrets are excluded from logs. Schema-invalid MCP calls reach the
+backend denial-audit path; transport validation cannot silently bypass durable
+evidence, and audit failure returns the sanitized internal failure.
 
 ## Consequences
 
@@ -49,6 +54,8 @@ payloads and secrets are excluded from logs.
   the stable miss and makes no further mutation.
 - Coordinator grant management remains a dependency on the shared trust
   control plane. An installation with no grant is fail closed.
+- Invalid or cross-workspace Coordinator designations cannot be represented,
+  even if a future caller bypasses the runtime authorization join.
 - Row identity and audit schema are additive and may remain after rollback.
 - TTL/orphan reaping remains separately owned and can compose through the same
   row identity without duplicating policy.

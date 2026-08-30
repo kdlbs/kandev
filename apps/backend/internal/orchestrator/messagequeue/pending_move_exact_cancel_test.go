@@ -366,14 +366,29 @@ func TestSQLiteRepository_ExactCancelPendingMoveRejectsBrokenRelations(t *testin
 			if count != 1 {
 				t.Fatalf("broken relation removed pending row, count=%d", count)
 			}
+			var auditedTargetID string
+			if err := fixture.sql.Get(&auditedTargetID,
+				`SELECT pending_move_id FROM pending_move_cancellation_audit WHERE correlation_id = ?`,
+				"correlation-relation"); err != nil {
+				t.Fatalf("read broken-relation audit: %v", err)
+			}
+			if auditedTargetID != "" {
+				t.Fatalf("broken-relation audit retained untrusted target ID %q", auditedTargetID)
+			}
 		})
 	}
 }
 
 func TestSQLiteRepository_ExactDeleteRevalidatesStateAndAuthorization(t *testing.T) {
 	cases := map[string]string{
-		"current step changed": `UPDATE tasks SET workflow_step_id = '` + exactTargetStepID + `' WHERE id = '` + exactTargetTaskID + `'`,
-		"grant revoked":        `DELETE FROM workspace_coordinator_grants`,
+		"current step changed":      `UPDATE tasks SET workflow_step_id = '` + exactTargetStepID + `' WHERE id = '` + exactTargetTaskID + `'`,
+		"caller workspace changed":  `UPDATE tasks SET workspace_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' WHERE id = '` + exactCallerTaskID + `'`,
+		"caller session mismatched": `UPDATE task_sessions SET task_id = '` + exactTargetTaskID + `' WHERE id = '` + exactCallerSessionID + `'`,
+		"caller session stopped":    `UPDATE task_sessions SET state = 'STOPPED' WHERE id = '` + exactCallerSessionID + `'`,
+		"execution replaced":        `UPDATE executors_running SET agent_execution_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'`,
+		"execution stopped":         `UPDATE executors_running SET status = 'stopped'`,
+		"grant reassigned":          `UPDATE workspace_coordinator_grants SET coordinator_task_id = '` + exactTargetTaskID + `'`,
+		"grant revoked":             `DELETE FROM workspace_coordinator_grants`,
 	}
 	for name, mutation := range cases {
 		t.Run(name, func(t *testing.T) {

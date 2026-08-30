@@ -57,8 +57,6 @@ func TestHandleCancelPendingMoveUsesOnlyServerAttestedActor(t *testing.T) {
 	})
 	ctx = authn.WithIdentity(ctx, authn.Identity{UserID: "owner-1"})
 	payload := exactCancelPayload()
-	payload["caller_task_id"] = "forged-task"
-	payload["workspace_id"] = "forged-workspace"
 	msg := makeWSMessage(t, ws.ActionMCPCancelPendingMove, payload)
 
 	resp, err := h.handleCancelPendingMove(ctx, msg)
@@ -74,6 +72,38 @@ func TestHandleCancelPendingMoveUsesOnlyServerAttestedActor(t *testing.T) {
 		canceller.actor.UserID != "owner-1" {
 		t.Fatalf("actor was not server-derived: %#v", canceller.actor)
 	}
+}
+
+func TestHandleCancelPendingMoveRejectsAndAuditsCallerFields(t *testing.T) {
+	canceller := &recordingPendingMoveCanceller{err: messagequeue.ErrPendingMoveInvalidArgument}
+	h := &Handlers{pendingMoveCanceller: canceller, logger: testLogger(t)}
+	payload := exactCancelPayload()
+	payload["caller_task_id"] = "forged-task"
+	payload["workspace_id"] = "forged-workspace"
+	msg := makeWSMessage(t, ws.ActionMCPCancelPendingMove, payload)
+
+	resp, err := h.handleCancelPendingMove(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("handleCancelPendingMove: %v", err)
+	}
+	assertWSError(t, resp, PendingMoveInvalidArgumentCode)
+	if canceller.calls != 1 || canceller.match != (messagequeue.ExactPendingMoveMatch{}) {
+		t.Fatalf("invalid caller fields were not audited safely: calls=%d match=%#v", canceller.calls, canceller.match)
+	}
+}
+
+func TestHandleCancelPendingMoveInvalidAuditFailureIsInternal(t *testing.T) {
+	canceller := &recordingPendingMoveCanceller{err: messagequeue.ErrPendingMoveCancelFailed}
+	h := &Handlers{pendingMoveCanceller: canceller, logger: testLogger(t)}
+	payload := exactCancelPayload()
+	payload["force"] = true
+	msg := makeWSMessage(t, ws.ActionMCPCancelPendingMove, payload)
+
+	resp, err := h.handleCancelPendingMove(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("handleCancelPendingMove: %v", err)
+	}
+	assertWSError(t, resp, PendingMoveCancelFailedCode)
 }
 
 func TestHandleCancelPendingMoveDeniesOrdinaryAndSyntheticCallersIdentically(t *testing.T) {

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -36,8 +37,15 @@ func (h *Handlers) handleCancelPendingMove(ctx context.Context, msg *ws.Message)
 		return ws.NewError(msg.ID, msg.Action, PendingMoveCancelFailedCode, pendingMoveCancelFailedMessage, nil)
 	}
 	var req cancelPendingMoveRequest
-	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		_, _ = h.pendingMoveCanceller.ExactCancelPendingMove(ctx, actor, messagequeue.ExactPendingMoveMatch{}, msg.ID)
+	decoder := json.NewDecoder(bytes.NewReader(msg.Payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		_, auditErr := h.pendingMoveCanceller.ExactCancelPendingMove(
+			ctx, actor, messagequeue.ExactPendingMoveMatch{}, msg.ID,
+		)
+		if auditErr != nil {
+			return pendingMoveCancellationError(msg, auditErr)
+		}
 		return ws.NewError(msg.ID, msg.Action, PendingMoveInvalidArgumentCode, pendingMoveInvalidArgumentMessage, nil)
 	}
 	result, err := h.pendingMoveCanceller.ExactCancelPendingMove(ctx, actor, messagequeue.ExactPendingMoveMatch{

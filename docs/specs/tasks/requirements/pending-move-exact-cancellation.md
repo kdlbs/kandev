@@ -77,7 +77,9 @@ make forged or stale caller identity fail closed.
 - **AC-TASKS-PENDING-MOVE-CANCELLATION-002.3:** A Coordinator request shall be
   authorized only while the workspace grant, caller task/session/execution,
   target task/session/workflow, and workspace-owner identity are all live and
-  consistent in the cancellation transaction.
+  consistent in the cancellation transaction. Coordinator-grant persistence
+  shall also reject empty identifiers and make a cross-workspace task/grant
+  pair unrepresentable.
 - **AC-TASKS-PENDING-MOVE-CANCELLATION-002.4:** Ordinary agents, synthetic or forged
   principals, self-targets, revoked or stopped Coordinators, non-owner callers,
   and cross-workspace requests shall make no mutation and shall receive the
@@ -104,7 +106,9 @@ secrets.
   both the pending row and audit state unchanged.
 - **AC-TASKS-PENDING-MOVE-CANCELLATION-003.3:** Schema upgrades shall be additive and
   replay-safe for SQLite and PostgreSQL, and rollback shall not require
-  destructive removal of audit evidence or row identities.
+  destructive removal of audit evidence or row identities. The shared grant
+  relation shall use the database-enforced workspace/task composite key rather
+  than relying on an authorization-time join alone.
 - **AC-TASKS-PENDING-MOVE-CANCELLATION-003.4:** Automatic pending-move expiration and
   orphan reaping shall remain owned by the existing TTL/reaper lifecycle; this
   operation shall neither duplicate nor weaken that policy.
