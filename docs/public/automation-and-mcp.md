@@ -552,7 +552,8 @@ when GitHub omits the run's `pull_requests` array: the base repository, head
 repository, head ref, and head SHA must all match. The server first asks GitHub
 to rerun failed jobs from the named attempt. If GitHub says the run is not
 rerunnable, Kandev can dispatch only a reviewed same-repository PR-head
-workflow with server-fixed inputs. It never dispatches a fork ref.
+workflow with server-fixed inputs. The workflow file at the live PR ref must
+byte-match its trusted base-branch copy. It never dispatches a fork ref.
 
 `current_merge` requests currently return `merge_evidence_unavailable` because
 GitHub's REST run record does not expose enough runtime merge-SHA evidence to

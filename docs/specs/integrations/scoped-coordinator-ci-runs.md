@@ -41,7 +41,9 @@ The backend reruns failed jobs of the named source attempt first. If GitHub says
 that run cannot be rerun, `workflow_dispatch` is allowed only for a same-repo
 `pr_head` request whose trusted source workflow has `workflow_dispatch` and
 whose workflow belongs to the base repository. Kandev supplies the verified
-head branch and reviewed fixed inputs. Fork dispatch is denied. `current_merge`
+head branch and reviewed fixed inputs, and requires the workflow file at that
+mutable head ref to byte-match the trusted base-branch copy. Fork dispatch is
+denied. `current_merge`
 fails with `merge_evidence_unavailable` until the provider exposes verifiable
 runtime merge-SHA evidence; Kandev never fabricates a merge-ref check.
 

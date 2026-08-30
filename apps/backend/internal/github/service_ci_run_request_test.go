@@ -17,7 +17,9 @@ type fakeCIRunActionsClient struct {
 	run            *GitHubActionsRun
 	workflow       *GitHubActionsWorkflow
 	workflowSource []byte
-	workflowRef    string
+	workflowHead   []byte
+	workflowRefs   []string
+	workflowHook   func()
 	runs           []GitHubActionsRun
 	rerunErr       error
 	dispatchErr    error
@@ -37,13 +39,19 @@ func (f *fakeCIRunActionsClient) GetPR(context.Context, string, string, int) (*P
 func (f *fakeCIRunActionsClient) GetRepoFileContent(
 	_ context.Context, _, _, _, ref string,
 ) ([]byte, error) {
-	f.workflowRef = ref
+	f.workflowRefs = append(f.workflowRefs, ref)
+	if f.workflowHead != nil && ref == "feature/x" {
+		return f.workflowHead, nil
+	}
 	return f.workflowSource, nil
 }
 func (f *fakeCIRunActionsClient) GetActionsRun(context.Context, string, string, int64) (*GitHubActionsRun, error) {
 	return f.run, nil
 }
 func (f *fakeCIRunActionsClient) GetActionsWorkflow(context.Context, string, string, int64) (*GitHubActionsWorkflow, error) {
+	if f.workflowHook != nil {
+		f.workflowHook()
+	}
 	return f.workflow, nil
 }
 func (f *fakeCIRunActionsClient) RerunFailedActionsJobs(context.Context, string, string, int64) error {
@@ -124,8 +132,9 @@ func TestRequestFreshCIRunDispatchesOnlyReviewedSameRepoWorkflow(t *testing.T) {
 	if client.dispatchRef != "feature/x" || client.dispatchInputs["fail_on_flaky"] != "false" {
 		t.Fatalf("dispatch ref/inputs = %q %#v", client.dispatchRef, client.dispatchInputs)
 	}
-	if client.workflowRef != "main" {
-		t.Fatalf("workflow source ref = %q, want live PR base branch", client.workflowRef)
+	if len(client.workflowRefs) != 2 || client.workflowRefs[0] != "main" ||
+		client.workflowRefs[1] != "feature/x" {
+		t.Fatalf("workflow source refs = %#v, want trusted base then live PR head", client.workflowRefs)
 	}
 	persisted, err := service.store.GetCIRunRequest(context.Background(), receipt.RequestID)
 	if err != nil {
@@ -237,6 +246,52 @@ func TestRequestFreshCIRunRechecksHeadImmediatelyBeforeDispatch(t *testing.T) {
 	}
 	if client.dispatches != 0 {
 		t.Fatal("workflow was dispatched after the PR head changed")
+	}
+}
+
+func TestRequestFreshCIRunDeniesChangedHeadWorkflow(t *testing.T) {
+	service, client, input := setupCIRunServiceTest(t, false)
+	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
+	client.workflowSource = []byte("on:\n  workflow_dispatch:\n")
+	client.workflowHead = []byte("on:\n  workflow_dispatch:\njobs:\n  unreviewed: {}\n")
+
+	_, err := service.RequestFreshCIRun(context.Background(), input)
+	var ciErr *CIRunRequestError
+	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureDispatchDenied {
+		t.Fatalf("error = %#v, want workflow_dispatch_denied", err)
+	}
+	if client.dispatches != 0 {
+		t.Fatal("changed head workflow was dispatched")
+	}
+}
+
+func TestRequestFreshCIRunRevalidatesGrantAndLaneBeforeProviderWrite(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*Service)
+		want CIRunFailureClass
+	}{
+		{name: "grant revoked", edit: func(service *Service) {
+			_, _ = service.store.db.Exec(`UPDATE github_ci_run_grants SET revoked_at = CURRENT_TIMESTAMP`)
+		}, want: CIRunFailureNotAuthorized},
+		{name: "lane changed", edit: func(service *Service) {
+			_, _ = service.store.db.Exec(`UPDATE tasks SET workflow_step_id = 'review' WHERE id = 'target-1'`)
+		}, want: CIRunFailureWorkflowStepMismatch},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service, client, input := setupCIRunServiceTest(t, false)
+			client.workflowHook = func() { tt.edit(service) }
+			_, err := service.RequestFreshCIRun(context.Background(), input)
+			var ciErr *CIRunRequestError
+			if !errors.As(err, &ciErr) || ciErr.Class != tt.want {
+				t.Fatalf("error = %#v, want %q", err, tt.want)
+			}
+			if client.reruns != 0 || client.dispatches != 0 {
+				t.Fatalf("provider mutated after admission drift: rerun=%d dispatch=%d",
+					client.reruns, client.dispatches)
+			}
+		})
 	}
 }
 
