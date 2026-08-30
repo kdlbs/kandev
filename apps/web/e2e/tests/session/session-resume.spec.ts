@@ -185,12 +185,13 @@ test.describe("Session resume (ACP mode)", () => {
 
     const { sessions } = await apiClient.listTaskSessions(task.id);
     const initialSession = sessions.find((candidate) => candidate.id === sessionId);
-    const expectedWorkspacePath = initialSession?.worktree_path;
+    const expectedWorkspacePath = initialSession?.workspace_path ?? initialSession?.worktree_path;
     if (!expectedWorkspacePath) throw new Error("Worktree session did not expose a workspace path");
+    const expectedDisplayPath = expectedWorkspacePath.replace(/^\/(?:Users|home)\/[^/]+\//, "~/");
 
     await session.clickTab("Files");
     const visibleWorkspacePath = session.files.getByTestId("file-browser-workspace-path");
-    await expect(visibleWorkspacePath).toHaveText(expectedWorkspacePath, { timeout: 30_000 });
+    await expect(visibleWorkspacePath).toHaveText(expectedDisplayPath, { timeout: 30_000 });
 
     // Keeping Files active makes reload reconstruct the workspace-only execution
     // before automatic session resume promotes and persists that execution.
@@ -210,7 +211,7 @@ test.describe("Session resume (ACP mode)", () => {
     await testPage.reload();
     await session.waitForLoad();
     await session.clickTab("Files");
-    await expect(visibleWorkspacePath).toHaveText(expectedWorkspacePath, { timeout: 30_000 });
+    await expect(visibleWorkspacePath).toHaveText(expectedDisplayPath, { timeout: 30_000 });
   });
 });
 
