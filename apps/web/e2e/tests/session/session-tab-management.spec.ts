@@ -359,22 +359,25 @@ test.describe("Session tab management — close behavior", () => {
     const localChangePath = path.join(seedData.repositoryPath, localChange);
     fs.writeFileSync(localChangePath, "keep this change visible\n");
 
-    const receivedGitEvent = (sessionId: string) =>
-      traffic.frames.some(
-        (frame) =>
-          frame.direction === "received" &&
-          frame.action === "session.git.event" &&
-          frame.sessionId === sessionId,
-      );
+    const receivedGitEvent = (sessionId: string, fromIndex: number) =>
+      traffic.frames
+        .slice(fromIndex)
+        .some(
+          (frame) =>
+            frame.direction === "received" &&
+            frame.action === "session.git.event" &&
+            frame.sessionId === sessionId,
+        );
 
     try {
       traffic.frames.length = 0;
+      const beforeReload = traffic.frames.length;
       await testPage.reload();
       await session.waitForLoad();
 
       await session.sessionTabBySessionId(session1Id).click();
       await expect
-        .poll(() => receivedGitEvent(session1Id), {
+        .poll(() => receivedGitEvent(session1Id, beforeReload), {
           timeout: 20_000,
           message: "waiting for the first sibling git-status hydration",
         })
@@ -382,9 +385,10 @@ test.describe("Session tab management — close behavior", () => {
       await session.clickTab("Changes");
       await expect(session.changesFileRow(localChange)).toBeVisible({ timeout: 20_000 });
 
+      const beforeSecondClick = traffic.frames.length;
       await session.sessionTabBySessionId(session2Id).click();
       await expect
-        .poll(() => receivedGitEvent(session2Id), {
+        .poll(() => receivedGitEvent(session2Id, beforeSecondClick), {
           timeout: 20_000,
           message: "waiting for the second sibling git-status hydration",
         })

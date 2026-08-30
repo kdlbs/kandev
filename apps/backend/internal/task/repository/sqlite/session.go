@@ -2386,6 +2386,31 @@ func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*mo
 	return r.loadWorktreesBatch(ctx, sessions)
 }
 
+// ListTaskSessionsByTaskEnvironment returns every session bound to an
+// environment, including inherited sessions whose task differs from the
+// environment owner's task. The environment binding, rather than task row
+// ownership, is the source-selection boundary for shared workspaces.
+func (r *Repository) ListTaskSessionsByTaskEnvironment(ctx context.Context, environmentID string) ([]*models.TaskSession, error) {
+	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTaskSessionsByTaskEnvironment")
+	defer span.End()
+	if environmentID == "" {
+		return []*models.TaskSession{}, nil
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(
+		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+` WHERE ts.task_environment_id = ? ORDER BY ts.started_at DESC`,
+	), environmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	sessions, err := r.scanTaskSessions(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	return r.loadWorktreesBatch(ctx, sessions)
+}
+
 // GetTaskSessionWorkspacePaths returns the workspace paths recorded on the
 // session rows for a task. Session projections intentionally replace these
 // values with the linked task environment's effective path, but status source
@@ -2401,6 +2426,39 @@ func (r *Repository) GetTaskSessionWorkspacePaths(ctx context.Context, taskID st
 		FROM task_sessions
 		WHERE task_id = ?
 	`), taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var sessionID string
+		var workspacePath sql.NullString
+		if err := rows.Scan(&sessionID, &workspacePath); err != nil {
+			return nil, err
+		}
+		paths[sessionID] = workspacePath.String
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return paths, nil
+}
+
+// GetTaskSessionWorkspacePathsByTaskEnvironment returns only the raw workspace
+// paths recorded on session rows bound to an environment. It deliberately does
+// not use the effective environment projection because an empty or historical
+// session path must remain distinguishable from the canonical path.
+func (r *Repository) GetTaskSessionWorkspacePathsByTaskEnvironment(ctx context.Context, environmentID string) (map[string]string, error) {
+	paths := make(map[string]string)
+	if environmentID == "" {
+		return paths, nil
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT id, workspace_path
+		FROM task_sessions
+		WHERE task_environment_id = ?
+	`), environmentID)
 	if err != nil {
 		return nil, err
 	}

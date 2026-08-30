@@ -99,6 +99,9 @@ mobile-specific interaction.
 - Task 02 applies per-environment and per-repository timestamp ordering, keeps
   duplicate-content watermarks without invalidating cumulative diffs, and adds
   the shared-environment Chromium regression.
+- PR fixup coverage now verifies raw workspace provenance, inherited
+  cross-task environment bindings, recovered executions, one deadline across
+  live source probes, and one persisted fallback status per repository.
 - The shared desktop/mobile store contract is covered without a duplicate
   mobile E2E case because presentation and interaction are unchanged.
 - The exact RED/GREEN evidence and verification results are recorded in the

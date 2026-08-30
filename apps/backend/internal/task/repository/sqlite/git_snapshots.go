@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -64,9 +65,10 @@ const snapshotRankExpr = `
 			id DESC`
 
 // UpsertLatestLiveGitSnapshot keeps at most one cached "live monitor" snapshot
-// per session by deleting any previous live row and inserting the new one in a
-// single transaction. This is the cache that backs the sidebar diff badge for
-// tasks whose executor isn't currently running.
+// per session and repository by deleting the previous row for that repository
+// and inserting the new one in a single transaction. This is the cache that
+// backs the sidebar diff badge for tasks whose executor isn't currently
+// running.
 func (r *Repository) UpsertLatestLiveGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error {
 	if snapshot == nil {
 		return fmt.Errorf("snapshot is nil")
@@ -86,10 +88,12 @@ func (r *Repository) UpsertLatestLiveGitSnapshot(ctx context.Context, snapshot *
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	repositoryName := gitSnapshotRepositoryName(snapshot)
+	repositoryExpr := "COALESCE(" + dialect.JSONExtract(r.db.DriverName(), "metadata", "repository_name") + ", '')"
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM task_session_git_snapshots
-		WHERE session_id = ? AND snapshot_type = ? AND triggered_by = ?
-	`), snapshot.SessionID, string(models.SnapshotTypeStatusUpdate), TriggeredByLiveMonitor); err != nil {
+		WHERE session_id = ? AND snapshot_type = ? AND triggered_by = ? AND `+repositoryExpr+` = ?
+	`), snapshot.SessionID, string(models.SnapshotTypeStatusUpdate), TriggeredByLiveMonitor, repositoryName); err != nil {
 		return fmt.Errorf("delete previous live snapshot: %w", err)
 	}
 
@@ -281,6 +285,67 @@ func (r *Repository) GetLatestGitSnapshotsBySessionIDs(
 		_ = rows.Close()
 	}
 	return result, nil
+}
+
+// GetLatestGitStatusSnapshotsBySessionIDs loads one authoritative snapshot per
+// session and repository. Unlike GetLatestGitSnapshotsBySessionIDs, this
+// preserves every repository needed to rebuild a multi-repository status
+// notification while retaining the same archive/completion/live ranking.
+func (r *Repository) GetLatestGitStatusSnapshotsBySessionIDs(
+	ctx context.Context,
+	sessionIDs []string,
+) ([]*models.GitSnapshot, error) {
+	result := make([]*models.GitSnapshot, 0)
+	if len(sessionIDs) == 0 {
+		return result, nil
+	}
+	repositoryExpr := "COALESCE(" + dialect.JSONExtract(r.db.DriverName(), "metadata", "repository_name") + ", '')"
+	for _, chunk := range chunkIDs(sessionIDs, sqliteMaxHostParams) {
+		placeholders, args := buildInPlaceholders(chunk)
+		query := `
+			SELECT id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
+			       ahead, behind, files, triggered_by, metadata, created_at
+			FROM (
+				SELECT id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
+				       ahead, behind, files, triggered_by, metadata, created_at,
+				       ROW_NUMBER() OVER (
+					       PARTITION BY session_id, ` + repositoryExpr + `
+					       ORDER BY` + snapshotRankExpr + `
+				       ) AS row_number
+				FROM task_session_git_snapshots
+				WHERE session_id IN (` + placeholders + `)
+			) ranked
+			WHERE row_number = 1
+			ORDER BY session_id, id
+		`
+		rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			snapshot, scanErr := scanGitSnapshot(rows)
+			if scanErr != nil {
+				_ = rows.Close()
+				return nil, scanErr
+			}
+			result = append(result, snapshot)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		_ = rows.Close()
+	}
+	return result, nil
+}
+
+func gitSnapshotRepositoryName(snapshot *models.GitSnapshot) string {
+	if snapshot != nil && snapshot.Metadata != nil {
+		if repositoryName, ok := snapshot.Metadata["repository_name"].(string); ok {
+			return repositoryName
+		}
+	}
+	return ""
 }
 
 type gitSnapshotScanner interface {

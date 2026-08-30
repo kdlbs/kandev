@@ -22,10 +22,11 @@ workspace.
 - Add focused source-selection helpers in
   `apps/backend/internal/backendapp/helpers.go` and
   `apps/backend/internal/backendapp/git_status_sources.go`.
-- Resolve the requested session's task environment and sibling sessions.
+- Resolve the requested session's task environment and every session bound to
+  that environment, including inherited sessions from another task.
 - Validate session and live-execution workspace identity before a live query.
-- Batch-load eligible snapshots and select the newest observation after live
-  status is unavailable.
+- Batch-load eligible snapshots and select the newest observation per
+  repository after live status is unavailable.
 - Route the selected result with the requested subscription session ID.
 - Add bounded debug logs for source choice and rejection reason.
 
@@ -93,14 +94,16 @@ environment. Update this work order and `plan.md` in the implementation turn.
 - RED evidence: the new canonical snapshot test stored no status, and the
   mismatched-live test selected the wrong live status before the production
   changes.
-- GREEN evidence: `go test -tags fts5 ./internal/backendapp -run
-  'TestAppendLiveGitStatusMessage.*(Canonical|Mismatched)' -count=1` passed 3
-  tests.
+- GREEN evidence: the targeted canonical and mismatched-source test command
+  passed 3 tests.
 - Source order: a matching live execution is preferred; when live status is
   unavailable, the newest timestamped snapshot from canonical-bound sessions
   is selected. The requested session ID remains on the published event.
 - Environment-owned hydration fails closed when the task environment is
   missing, mismatched, or has no eligible source. Sessions without an
   environment retain the existing session-scoped behavior.
-- `go test -tags fts5 ./internal/backendapp -count=1` passed 749 tests, and
+- The fixup adds raw workspace provenance checks, environment-wide source
+  enumeration across task boundaries, recovered-execution handling, a single
+  live-probe deadline, and per-repository snapshot fallback.
+- `go test -tags fts5 ./internal/backendapp -count=1` passed 754 tests, and
   `make -C apps/backend build` passed.

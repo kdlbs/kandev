@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -290,7 +291,16 @@ func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, r
 		return nil
 	}
 
+	// Bound the complete source probe, not each source independently. Shared
+	// environments can have several eligible executions, and a stuck agentctl
+	// must not add another two seconds for every sibling.
+	rpcCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
 	for _, sourceSessionID := range sources.sessionIDs {
+		if err := rpcCtx.Err(); err != nil {
+			return nil
+		}
 		execution, ok := lifecycleMgr.GetExecutionBySessionID(sourceSessionID)
 		if !ok {
 			continue
@@ -298,7 +308,7 @@ func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, r
 		if !executionMatchesGitStatusSource(sources, execution, sourceSessionID, log) {
 			continue
 		}
-		if msgs := tryGetLiveGitStatusFromExecution(ctx, execution, requestedSessionID, sourceSessionID, log); len(msgs) > 0 {
+		if msgs := tryGetLiveGitStatusFromExecution(rpcCtx, execution, requestedSessionID, sourceSessionID, log); len(msgs) > 0 {
 			return msgs
 		}
 	}
@@ -309,7 +319,7 @@ func executionMatchesGitStatusSource(sources *gitStatusSources, execution *lifec
 	if execution == nil || sources.environmentID == "" {
 		return execution != nil
 	}
-	if execution.TaskEnvironmentID != sources.environmentID {
+	if execution.TaskEnvironmentID != "" && execution.TaskEnvironmentID != sources.environmentID {
 		log.Debug("rejecting live git status source",
 			zap.String("source_session_id", sessionID),
 			zap.String("task_environment_id", sources.environmentID),
@@ -334,11 +344,8 @@ func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.
 		return nil
 	}
 
-	// Use bounded timeout to prevent blocking session hydration if agentctl is stuck.
-	rpcCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
 	// Force fresh git query: cache can wedge when the poll loop misses a HEAD change.
-	multi, err := agentClient.GetGitStatusMultiFresh(rpcCtx)
+	multi, err := agentClient.GetGitStatusMultiFresh(ctx)
 	if err != nil {
 		log.Debug("failed to get live git status, will fall back to DB snapshot",
 			zap.String("source_session_id", sourceSessionID),
@@ -417,61 +424,91 @@ func buildGitStatusNotification(sessionID, repositoryName string, status client.
 // eligible DB snapshot. The selected source is always routed as the requested
 // subscription session.
 func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Repository, sessionID string, sources *gitStatusSources, result []*ws.Message, log *logger.Logger) []*ws.Message {
-	log.Debug("falling back to DB snapshot for git status",
-		zap.String("requested_session_id", sessionID),
-		zap.String("task_environment_id", sources.environmentID))
+	logFields := []zap.Field{zap.String("requested_session_id", sessionID)}
+	if sources.environmentID != "" {
+		logFields = append(logFields, zap.String("task_environment_id", sources.environmentID))
+	}
+	log.Debug("falling back to DB snapshot for git status", logFields...)
 
-	snapshots, err := taskRepo.GetLatestGitSnapshotsBySessionIDs(ctx, sources.sessionIDs)
+	snapshots, err := taskRepo.GetLatestGitStatusSnapshotsBySessionIDs(ctx, sources.sessionIDs)
 	if err != nil {
 		log.Warn("failed to load DB snapshots for git status",
 			zap.String("requested_session_id", sessionID),
 			zap.Error(err))
 		return result
 	}
-	latestSnapshot := newestGitStatusSnapshot(sources.sessionIDs, snapshots)
-	if latestSnapshot == nil {
+	latestByRepository := newestGitStatusSnapshotsByRepository(snapshots)
+	if len(latestByRepository) == 0 {
 		log.Debug("no eligible DB snapshot found for git status",
 			zap.String("requested_session_id", sessionID))
 		return result
 	}
-	log.Debug("selected DB snapshot for git status",
-		zap.String("requested_session_id", sessionID),
-		zap.String("source_session_id", latestSnapshot.SessionID),
-		zap.String("task_environment_id", sources.environmentID))
+	repositoryNames := make([]string, 0, len(latestByRepository))
+	for repositoryName := range latestByRepository {
+		repositoryNames = append(repositoryNames, repositoryName)
+	}
+	sort.Strings(repositoryNames)
+	for _, repositoryName := range repositoryNames {
+		snapshot := latestByRepository[repositoryName]
+		logFields := []zap.Field{
+			zap.String("requested_session_id", sessionID),
+			zap.String("source_session_id", snapshot.SessionID),
+		}
+		if sources.environmentID != "" {
+			logFields = append(logFields, zap.String("task_environment_id", sources.environmentID))
+		}
+		if repositoryName != "" {
+			logFields = append(logFields, zap.String("repository_name", repositoryName))
+		}
+		log.Debug("selected DB snapshot for git status", logFields...)
+		if notification := buildGitSnapshotNotification(sessionID, repositoryName, snapshot); notification != nil {
+			result = append(result, notification)
+		}
+	}
+	return result
+}
 
-	metadata := latestSnapshot.Metadata
+func buildGitSnapshotNotification(sessionID, repositoryName string, snapshot *models.GitSnapshot) *ws.Message {
+	if snapshot == nil {
+		return nil
+	}
+	metadata := snapshot.Metadata
+	statusPayload := map[string]interface{}{
+		branchFieldKey:          snapshot.Branch,
+		"remote_branch":         snapshot.RemoteBranch,
+		"head_commit":           snapshot.HeadCommit,
+		"base_commit":           snapshot.BaseCommit,
+		"ahead":                 snapshot.Ahead,
+		"behind":                snapshot.Behind,
+		"remote_ahead":          metadata["remote_ahead"],
+		"remote_behind":         metadata["remote_behind"],
+		"remote_head_commit":    metadata["remote_head_commit"],
+		"files":                 snapshot.Files,
+		"modified":              metadata["modified"],
+		addedFieldKey:           metadata[addedFieldKey],
+		deletedFieldKey:         metadata[deletedFieldKey],
+		"untracked":             metadata["untracked"],
+		"renamed":               metadata["renamed"],
+		branchAdditionsFieldKey: metadata[branchAdditionsFieldKey],
+		branchDeletionsFieldKey: metadata[branchDeletionsFieldKey],
+		"comparison_target":     metadata["comparison_target"],
+		"comparison_status":     metadata["comparison_status"],
+		"comparison_error_code": metadata["comparison_error_code"],
+	}
+	if repositoryName != "" {
+		statusPayload["repository_name"] = repositoryName
+	}
 	gitEventData := map[string]interface{}{
 		"type":       "status_update",
 		"session_id": sessionID,
 		"timestamp":  metadata["timestamp"],
-		"status": map[string]interface{}{
-			branchFieldKey:          latestSnapshot.Branch,
-			"remote_branch":         latestSnapshot.RemoteBranch,
-			"head_commit":           latestSnapshot.HeadCommit,
-			"base_commit":           latestSnapshot.BaseCommit,
-			"ahead":                 latestSnapshot.Ahead,
-			"behind":                latestSnapshot.Behind,
-			"remote_ahead":          metadata["remote_ahead"],
-			"remote_behind":         metadata["remote_behind"],
-			"remote_head_commit":    metadata["remote_head_commit"],
-			"files":                 latestSnapshot.Files,
-			"modified":              metadata["modified"],
-			addedFieldKey:           metadata[addedFieldKey],
-			deletedFieldKey:         metadata[deletedFieldKey],
-			"untracked":             metadata["untracked"],
-			"renamed":               metadata["renamed"],
-			branchAdditionsFieldKey: metadata[branchAdditionsFieldKey],
-			branchDeletionsFieldKey: metadata[branchDeletionsFieldKey],
-			"comparison_target":     metadata["comparison_target"],
-			"comparison_status":     metadata["comparison_status"],
-			"comparison_error_code": metadata["comparison_error_code"],
-		},
+		"status":     statusPayload,
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionGitEvent, gitEventData)
-	if err == nil {
-		result = append(result, notification)
+	if err != nil {
+		return nil
 	}
-	return result
+	return notification
 }
 
 // appendContextWindowMessage adds a context window notification to result if available.

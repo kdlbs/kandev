@@ -7,6 +7,8 @@
 ## Context
 
 Multiple task sessions share one `TaskEnvironment` and one physical workspace.
+Some sessions can be inherited or shared across task boundaries while still
+binding to that environment.
 Git-status transport is still session-scoped. Each mounted consumer can
 subscribe with a different session ID, and each status event is then stored
 under the shared environment key in the frontend.
@@ -23,11 +25,13 @@ Treat the task environment as the authority for current Git status. Treat a
 session ID only as a request and delivery handle.
 
 Before the backend publishes current status, it must prove that the source
-session and any live execution refer to the task environment's canonical
-workspace. A persisted snapshot is eligible only when its source session has
-the same canonical binding. Among eligible snapshots, the newest observation
-wins. The outgoing event keeps the requested session ID for protocol
-compatibility.
+session is bound to the task environment and has a raw recorded workspace path
+equal to the environment's canonical workspace. A live execution must match
+that workspace; a recovered execution may have an empty environment ID only
+after the session binding has been verified. A persisted snapshot is eligible
+only when its source session has the same canonical binding. Among eligible
+snapshots, the newest observation wins independently for each repository. The
+outgoing event keeps the requested session ID for protocol compatibility.
 
 The frontend keeps Git status under the environment key and applies a monotonic
 timestamp rule per repository. An older observation cannot replace a newer
@@ -45,6 +49,8 @@ at projection time. Do not add a second persisted Git-status owner.
   non-empty file lists.
 - Historical sessions with an obsolete workspace path remain in the audit
   record but cannot supply current environment status.
+- Multi-repository status remains session-attributed and is retained one row per
+  repository for fallback hydration.
 - A lookup failure can temporarily produce no hydration event. It cannot clear
   correct frontend state with unverified data.
 - PR #3167 remains necessary because it repairs the workspace path used when a

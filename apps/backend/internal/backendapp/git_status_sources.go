@@ -82,11 +82,11 @@ func loadGitStatusEnvironment(
 			zap.Error(err))
 		return nil, false
 	}
-	if env == nil || env.TaskID != requested.TaskID || env.WorkspacePath == "" {
+	if env == nil || env.WorkspacePath == "" {
 		log.Debug("cannot resolve canonical workspace for git status",
 			zap.String("session_id", requested.ID),
 			zap.String("task_environment_id", requested.TaskEnvironmentID),
-			zap.String("reason", "canonical_workspace_missing_or_task_mismatch"))
+			zap.String("reason", "canonical_workspace_missing"))
 		return nil, false
 	}
 	return env, true
@@ -99,7 +99,7 @@ func loadGitStatusCandidates(
 	environmentID string,
 	log *logger.Logger,
 ) ([]*models.TaskSession, map[string]string, bool) {
-	sessions, err := taskRepo.ListTaskSessions(ctx, requested.TaskID)
+	sessions, err := taskRepo.ListTaskSessionsByTaskEnvironment(ctx, environmentID)
 	if err != nil {
 		log.Debug("cannot load sibling sessions for git status",
 			zap.String("session_id", requested.ID),
@@ -108,7 +108,7 @@ func loadGitStatusCandidates(
 			zap.Error(err))
 		return nil, nil, false
 	}
-	recordedPaths, err := taskRepo.GetTaskSessionWorkspacePaths(ctx, requested.TaskID)
+	recordedPaths, err := taskRepo.GetTaskSessionWorkspacePathsByTaskEnvironment(ctx, environmentID)
 	if err != nil {
 		log.Debug("cannot load recorded session workspaces for git status",
 			zap.String("session_id", requested.ID),
@@ -169,9 +169,13 @@ func eligibleGitStatusSession(
 			zap.String("reason", "environment_mismatch"))
 		return false
 	}
-	workspacePath := recordedPaths[candidate.ID]
-	if workspacePath == "" {
-		workspacePath = candidate.WorkspacePath
+	workspacePath, recorded := recordedPaths[candidate.ID]
+	if !recorded || workspacePath == "" {
+		log.Debug("rejecting git status source",
+			zap.String("source_session_id", candidate.ID),
+			zap.String("task_environment_id", environmentID),
+			zap.String("reason", "workspace_unverified"))
+		return false
 	}
 	if workspacePath != canonicalWorkspacePath {
 		log.Debug("rejecting git status source",
@@ -183,16 +187,28 @@ func eligibleGitStatusSession(
 	return true
 }
 
-func newestGitStatusSnapshot(sessionIDs []string, snapshots map[string]*models.GitSnapshot) *models.GitSnapshot {
-	var newest *models.GitSnapshot
-	for _, sessionID := range sessionIDs {
-		snapshot := snapshots[sessionID]
-		if snapshot == nil || (newest != nil && !newerGitStatusSnapshot(snapshot, newest)) {
+func newestGitStatusSnapshotsByRepository(snapshots []*models.GitSnapshot) map[string]*models.GitSnapshot {
+	newest := make(map[string]*models.GitSnapshot)
+	for _, snapshot := range snapshots {
+		if snapshot == nil {
 			continue
 		}
-		newest = snapshot
+		repositoryName := gitStatusRepositoryName(snapshot)
+		current := newest[repositoryName]
+		if current == nil || newerGitStatusSnapshot(snapshot, current) {
+			newest[repositoryName] = snapshot
+		}
 	}
 	return newest
+}
+
+func gitStatusRepositoryName(snapshot *models.GitSnapshot) string {
+	if snapshot != nil && snapshot.Metadata != nil {
+		if repositoryName, ok := snapshot.Metadata["repository_name"].(string); ok {
+			return repositoryName
+		}
+	}
+	return ""
 }
 
 func newerGitStatusSnapshot(candidate, current *models.GitSnapshot) bool {
