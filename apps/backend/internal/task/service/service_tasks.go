@@ -361,10 +361,10 @@ func (s *Service) loadContributionDestinationRepositories(
 		}
 		repository, err := s.repoEntities.GetRepository(ctx, input.RepositoryID)
 		if err != nil {
-			return nil, fmt.Errorf("load repository %s for contribution destination: %w", input.RepositoryID, err)
+			return nil, classifyRepositoryResolutionError(index, input.RepositoryID, err)
 		}
 		if repository == nil || repository.WorkspaceID != req.WorkspaceID {
-			return nil, repoerrors.ErrRepositoryNotFound
+			return nil, unknownRepositoryReferenceError(index, input.RepositoryID)
 		}
 		repositories[index] = repository
 	}

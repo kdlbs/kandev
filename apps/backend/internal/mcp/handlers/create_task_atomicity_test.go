@@ -29,6 +29,17 @@ type atomicityFixture struct {
 	workflowID  string
 }
 
+type noOpContributionDestinationPreparer struct{}
+
+func (*noOpContributionDestinationPreparer) PrepareContributionDestination(
+	context.Context,
+	*service.CreateTaskRequest,
+	*models.Workflow,
+	[]*models.Repository,
+) error {
+	return nil
+}
+
 func newAtomicityFixture(t *testing.T) *atomicityFixture {
 	t.Helper()
 	svc, repo := newTestTaskService(t)
@@ -266,6 +277,30 @@ func TestHandleCreateTask_UnknownRepositoryIDIsNotPartiallyApplied(t *testing.T)
 	require.Equal(t, before, f.taskCount(t), "a later bad reference must not strand the task")
 	require.Equal(t, ws.ErrorCodeValidation, failure.Code)
 	require.Contains(t, failure.Message, "repositories[1].repository_id", "error must name the failing index")
+}
+
+// TestHandleCreateTask_UnknownRepositoryInTemplatedWorkflowIsValidation guards
+// the contribution-destination preparation path. That path runs before the
+// main reference resolver for templated workflows, so it must use the same
+// caller-facing reference error when its repository lookup fails.
+func TestHandleCreateTask_UnknownRepositoryInTemplatedWorkflowIsValidation(t *testing.T) {
+	f := newAtomicityFixture(t)
+	workflow, err := f.repo.GetWorkflow(context.Background(), f.workflowID)
+	require.NoError(t, err)
+	templateID := "templated-workflow"
+	workflow.WorkflowTemplateID = &templateID
+	require.NoError(t, f.repo.UpdateWorkflow(context.Background(), workflow))
+	f.svc.SetContributionDestinationPreparer(&noOpContributionDestinationPreparer{})
+
+	resp := f.create(t, map[string]interface{}{
+		"repositories": []map[string]interface{}{{"repository_id": unknownReferenceUUID}},
+	})
+
+	failure := errorPayload(t, resp)
+	require.Equal(t, ws.ErrorCodeValidation, failure.Code)
+	require.Contains(t, failure.Message, "repositories[0].repository_id")
+	require.Contains(t, failure.Message, unknownReferenceUUID)
+	require.Equal(t, 0, f.taskCount(t), "failed create must leave no orphan task row")
 }
 
 // TestHandleCreateTask_BlockedByWithDeferredLaunchStillSucceeds is the
