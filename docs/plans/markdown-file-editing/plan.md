@@ -1,6 +1,6 @@
 ---
 created: 2026-08-27
-status: completed
+status: in_progress
 requirements:
   - REQ-UI-MARKDOWN-FILE-EDITING-001
   - REQ-UI-MARKDOWN-FILE-EDITING-002
@@ -28,6 +28,7 @@ file surfaces before proving both flows with production-build E2E tests.
 - Open-file mode persistence and legacy Boolean-state migration.
 - Existing save, dirty, update, comment, link, table, and comparison behavior.
 - Desktop, tablet, and phone file editing outcomes.
+- Positional table insertion controls and transient Edit-mode column sizing.
 - Source-preservation, security, component, localization, and E2E evidence.
 
 ### Out of scope
@@ -37,6 +38,8 @@ file surfaces before proving both flows with production-build E2E tests.
 - Replacement of Kandev's general Monaco and CodeMirror provider contract.
 - A backend file API or collaborative editing change.
 - Tiptap conversion for arbitrary repository Markdown.
+- Persisted Markdown table widths, merged cells, or Confluence-specific table
+  semantics.
 
 ## Technical approach
 
@@ -73,6 +76,19 @@ file surfaces before proving both flows with production-build E2E tests.
 - Keep one mobile vertical scroll owner, safe-area spacing, 44-pixel controls,
   virtual-keyboard clearance, and local table scrolling.
 
+### Table editing refinement
+
+- Replace append-only helpers in
+  `apps/web/components/editors/markdown/markdown-table-edit.ts` with escaped-pipe-aware
+  positional row and column insertion while preserving source bytes and line
+  endings.
+- Replace the top-right table toolbar in `HybridMarkdownEditor` with a
+  table-local edge layer that maps visible rows and columns to source actions.
+- Hide the upstream delimiter row in the scoped Edit theme while retaining it
+  in the AST and canonical source.
+- Add pointer, touch, and keyboard column resizing backed by transient
+  per-file-tab presentation state rather than Markdown mutations.
+
 ## Tests
 
 | Acceptance criteria                                   | Evidence                                                                                                 |
@@ -82,6 +98,7 @@ file surfaces before proving both flows with production-build E2E tests.
 | `AC-UI-MARKDOWN-FILE-EDITING-002.1`, `.2`             | Existing `components/task/markdown-preview-content*.test.tsx` plus coordinator regression cases          |
 | `AC-UI-MARKDOWN-FILE-EDITING-002.3`, `.4`, `.5`, `.8` | `components/task/markdown-file-editor.test.tsx` and existing file-state tests                            |
 | `AC-UI-MARKDOWN-FILE-EDITING-002.6`, `.7`             | Hybrid adapter comment and baseline cases                                                                |
+| `AC-UI-MARKDOWN-FILE-EDITING-002.9` through `.12`     | `markdown-table-edit.test.ts` and `hybrid-markdown-editor.test.tsx`                                      |
 | `AC-UI-MARKDOWN-FILE-EDITING-003.1`, `.5`             | Desktop mode-control component tests                                                                     |
 | `AC-UI-MARKDOWN-FILE-EDITING-003.2`, `.3`, `.4`       | `components/task/mobile/mobile-file-viewer-panel.test.tsx`                                               |
 | `AC-UI-MARKDOWN-FILE-EDITING-003.6`                   | Desktop and mobile Playwright flows below                                                                |
@@ -101,6 +118,8 @@ file surfaces before proving both flows with production-build E2E tests.
 - [x] [Task 03: Add Mobile Markdown Editing](task-03-mobile-markdown-editing.md)
 - [x] [Task 04: Prove Markdown Editing End to End](task-04-markdown-editor-e2e.md)
 - [x] [Task 05: Polish Code and Table Editing](task-05-polish-code-and-table-editing.md)
+- [ ] [Task 06: Add Positional Markdown Table Edits](task-06-positional-table-edits.md)
+- [ ] [Task 07: Add Table Edge Editing Chrome](task-07-table-edge-editing-chrome.md)
 
 ## Verification results
 
@@ -127,3 +146,6 @@ file surfaces before proving both flows with production-build E2E tests.
   Boundary tests must use one canonical source mapping.
 - A phone virtual keyboard can obscure controls or active text. Mobile E2E must
   test the focused surface with constrained viewport geometry.
+- DOM geometry can drift while the upstream editor rerenders an active table.
+  The edge layer must reconcile through one observer without feedback loops or
+  stale resize handles.

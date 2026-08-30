@@ -29,6 +29,8 @@ existing workspace and task contracts.
 - **Source mode:** The existing plain-text code editor for exact source access.
 - **Canonical source:** The plain Markdown string that Kandev loads, edits,
   marks dirty, and saves.
+- **Table delimiter row:** The required Markdown source row, such as
+  `| --- | --- |`, that separates a table header from its body.
 - **Unsupported construct:** Markdown or embedded syntax that Edit mode cannot
   render without changing its source.
 
@@ -104,9 +106,19 @@ workflow, so that switching presentation does not risk my work.
 - **AC-UI-MARKDOWN-FILE-EDITING-002.8:** When Edit mode fails to initialize or
   update, the system shall keep the current content and offer Source mode.
 - **AC-UI-MARKDOWN-FILE-EDITING-002.9:** Preview and Edit modes shall show
-  visible table cell boundaries. When an editable table is active, Edit mode
-  shall provide accessible actions to append a row and append a column through
-  undoable canonical-source edits.
+  visible table cell boundaries.
+- **AC-UI-MARKDOWN-FILE-EDITING-002.10:** When a table is active in Edit mode,
+  the system shall hide its table delimiter row while preserving the exact
+  delimiter bytes in canonical source.
+- **AC-UI-MARKDOWN-FILE-EDITING-002.11:** When a table is active in Edit mode,
+  the system shall provide an insertion action after every visible row and
+  column. Each action shall remain outside editable cells, apply one undoable
+  canonical-source edit, and place the selection in the inserted row or
+  column.
+- **AC-UI-MARKDOWN-FILE-EDITING-002.12:** When a user resizes an Edit-mode
+  table column by pointer, touch, or keyboard, the system shall update the
+  visible column width without changing canonical source. The width shall
+  survive mode switches while the file tab remains open.
 
 ### REQ-UI-MARKDOWN-FILE-EDITING-003: Responsive and accessible editing
 
@@ -131,9 +143,10 @@ the Files surface, so that I can complete the same task without a desktop.
   accessible names, keyboard operation, selected state, and focus feedback.
 - **AC-UI-MARKDOWN-FILE-EDITING-003.6:** Desktop and mobile automated tests
   shall prove editing, saving, reloading, previewing, and source fallback.
-- **AC-UI-MARKDOWN-FILE-EDITING-003.7:** Table editing actions shall use the
-  surrounding file-surface density on fine pointers and at least 44-pixel hit
-  targets on coarse pointers without adding another scroll owner.
+- **AC-UI-MARKDOWN-FILE-EDITING-003.7:** Table edge actions and resize handles
+  shall use the surrounding file-surface density on fine pointers and at least
+  44-pixel hit targets on coarse pointers without covering table content or
+  adding another scroll owner. A coarse-pointer action shall not require hover.
 
 ## Out of scope
 
@@ -142,4 +155,7 @@ the Files surface, so that I can complete the same task without a desktop.
 - Replacing Monaco as Kandev's general code editor.
 - Converting arbitrary repository Markdown into a ProseMirror document.
 - Providing hybrid editing for MDX, embedded JSX, or executable HTML.
+- Persisting table column widths into repository Markdown or backend state.
+- Creating tables, merging cells, or adding Confluence-specific header,
+  numbered-column, chart, and macro semantics.
 - Adding collaborative multi-cursor editing or a new backend file API.

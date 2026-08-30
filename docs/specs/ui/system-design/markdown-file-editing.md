@@ -44,6 +44,12 @@ Both products support a source-preserving model. A rich document model such as
 Kandev's Tiptap plan editor can normalize unsupported Markdown during a round
 trip, so it is not suitable for arbitrary repository files.
 
+Confluence exposes table insertion controls in gutters above columns and beside
+rows, keeping those actions out of editable cells. It also exposes drag-based
+width controls. Kandev adopts those interaction locations for the subset that
+plain Markdown can represent, while retaining source-preservation and mobile
+accessibility constraints.
+
 Primary references:
 
 - [VS Code 1.131 hybrid Markdown editor](https://code.visualstudio.com/updates/v1_131#_hybrid-markdown-editor-experimental)
@@ -53,6 +59,7 @@ Primary references:
 - [Obsidian Live Preview](https://help.obsidian.md/Live%2Bpreview%2Bupdate)
 - [Obsidian editor extensions](https://github.com/obsidianmd/obsidian-developer-docs/blob/main/en/Plugins/Editor/Editor%20extensions.md)
 - [Obsidian editor decorations](https://docs.obsidian.md/Plugins/Editor/Decorations)
+- [Confluence table editing](https://www.atlassian.com/software/confluence/resources/guides/best-practices/make-tables#make-quick-work-of-tables)
 
 ## Requirement mapping
 
@@ -170,12 +177,22 @@ Kandev's scoped theme maps those tokens to application colors. Unknown
 languages remain readable plain text.
 
 The upstream engine does not provide table-structure commands. Kandev therefore
-owns two narrow table actions at the adapter boundary: append row and append
-column. Each action locates the active table AST, constructs one source edit,
-records it in the adapter's local history, and places the selection in the new
-cell. The helper preserves line endings, leading and trailing pipe style, and
+owns positional row and column insertion at the adapter boundary. Each edge
+action locates the active table AST, identifies the semantic row or column,
+constructs one source edit, records it in the adapter's local history, and
+places the selection in the inserted cell. Inserting below the visible header
+places the new row after the required delimiter row. The source helper parses
+escaped pipes, preserves line endings, leading and trailing pipe style, and
 all existing cell bytes. It never converts the table into another document
 model.
+
+Kandev also owns transient column sizing. A per-file-tab table presentation
+map keys widths by the active table's source start and column index. Drag or
+keyboard resizing updates a table-local `colgroup` and the edge-control
+geometry without emitting a source edit. Mode switches retain the map because
+the hybrid lifecycle remains mounted; closing the file tab disposes it. A
+structural edit retains widths for existing column indices and gives an
+inserted column the default width.
 
 ## Control flow
 
@@ -222,6 +239,12 @@ states because the upstream active-table theme otherwise makes cell borders
 transparent. Preview continues to use the shared bordered Markdown table
 renderer.
 
+The scoped Edit theme overrides the upstream active-table delimiter rule so
+`.md-table-delimiter-row` remains hidden. This is presentation-only: the AST,
+source offsets, history, and canonical delimiter bytes remain unchanged. The
+active header keeps normal cell padding so hiding the compact delimiter row
+does not leave a false editing gap.
+
 Unsupported blocks remain visible as editable source. Raw HTML never bypasses
 Kandev sanitization. Edit mode must not use arbitrary `innerHTML` for Markdown
 or Mermaid output. Links route through Kandev's existing task, file, and
@@ -246,9 +269,14 @@ the eye/code toggle. Preview is the initial mode, Edit is the prominent action,
 and Source remains available beside it. The existing toolbar continues to own
 Save, Delete, Reload, Comments, and external file actions.
 
-When a table is active, compact icon actions attach to the table itself for
-appending a row or column. They do not create a second file toolbar and do not
-cover editable cells.
+When a table is active, a table-local edge layer reserves a narrow top gutter
+above columns and a left gutter beside rows. Fine-pointer users see compact
+dots that reveal an insert action on hover or focus. Each row action inserts
+below its row; each column action inserts to the right of its column. The layer
+also places a draggable separator at every internal column boundary. Resize
+separators support Left and Right arrow keys after focus. The layer follows the
+table's local horizontal scroller, never creates a second file toolbar, and
+never overlaps editable cells.
 
 ### Phone
 
@@ -261,9 +289,12 @@ respect safe-area insets. The body keeps enough keyboard clearance for the
 active line and selection handles. Wide tables keep their existing local
 horizontal scroller and do not widen the document.
 
-Table actions use the same icons and labels as desktop, but coarse-pointer hit
-areas expand to 44 pixels. They stay inside the table-local wrapper so the file
-surface retains one vertical scroll owner.
+Table edge actions use the same labels as desktop, but remain visibly
+discoverable without hover and expand to 44-pixel hit targets. Column resize
+handles accept touch drag and expose the same keyboard alternative. The edge
+layer stays inside the table-local horizontal wrapper so the file surface
+retains one vertical scroll owner and document-level horizontal overflow stays
+zero.
 
 The nearest implementation exemplar is the current `MobileFileViewerPanel`.
 It already owns file identity, back navigation, preview comments, and contained
@@ -286,6 +317,10 @@ user edit, a source-preservation test fails and blocks the upgrade.
 Open-file session state persists `markdownMode` with the existing file-tab
 state. The mode is presentation state and does not enter repository content or
 backend storage.
+
+Transient Edit-mode column widths live only with the mounted file-tab hybrid
+lifecycle. They survive Preview, Edit, and Source switches while that tab is
+open, but do not enter Markdown, local storage, or backend state.
 
 The canonical source and dirty state keep their current lifetime. Closing an
 unpersisted tab follows the existing unsaved-change flow. Disposing a file tab
@@ -319,14 +354,16 @@ that focus, blur, mode changes, and external updates do not change untouched
 bytes.
 
 Focused adapter tests also prove supported-code tokenization is connected,
-table row and column edits preserve existing source bytes and line endings,
-table controls are keyboard accessible, and those edits participate in local
-undo history.
+positional row and column edits preserve existing source bytes and line
+endings, the delimiter row remains hidden, table controls and resize handles
+are keyboard accessible, structural edits participate in local undo history,
+and resizing emits no source edit.
 
 Desktop Playwright tests open a Markdown file, edit rendered content, save,
 reload, check Preview output, use Source mode, and verify persisted mode. Mobile
 Playwright tests repeat the edit and save flow with a virtual keyboard viewport.
-They also verify safe controls, local table scrolling, and no page overflow.
+They also verify safe edge controls, touch resizing, local table scrolling, and
+no page overflow.
 
 Security tests keep the existing unsafe HTML and URL cases. Adapter tests add
 unsafe link activation, unsupported HTML, initialization failure, and exact
