@@ -340,6 +340,62 @@ test.describe("Session tab management — close behavior", () => {
     }
   });
 
+  test("keeps dirty Changes status after sibling hydration", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+    // Attach before setup so the capture also observes the reload-driven
+    // subscriptions used by this regression.
+    const traffic = attachGatewayTrafficCapture(testPage);
+    const { session, session1Id, session2Id } = await createTaskWithTwoSessions(
+      testPage,
+      apiClient,
+      seedData,
+      "Sibling Hydration Keeps Changes",
+    );
+    const localChange = "sibling-hydration-change.txt";
+    const localChangePath = path.join(seedData.repositoryPath, localChange);
+    fs.writeFileSync(localChangePath, "keep this change visible\n");
+
+    const receivedGitEvent = (sessionId: string) =>
+      traffic.frames.some(
+        (frame) =>
+          frame.direction === "received" &&
+          frame.action === "session.git.event" &&
+          frame.sessionId === sessionId,
+      );
+
+    try {
+      traffic.frames.length = 0;
+      await testPage.reload();
+      await session.waitForLoad();
+
+      await session.sessionTabBySessionId(session1Id).click();
+      await expect
+        .poll(() => receivedGitEvent(session1Id), {
+          timeout: 20_000,
+          message: "waiting for the first sibling git-status hydration",
+        })
+        .toBe(true);
+      await session.clickTab("Changes");
+      await expect(session.changesFileRow(localChange)).toBeVisible({ timeout: 20_000 });
+
+      await session.sessionTabBySessionId(session2Id).click();
+      await expect
+        .poll(() => receivedGitEvent(session2Id), {
+          timeout: 20_000,
+          message: "waiting for the second sibling git-status hydration",
+        })
+        .toBe(true);
+      await session.clickTab("Changes");
+      await expect(session.changesFileRow(localChange)).toBeVisible({ timeout: 20_000 });
+    } finally {
+      fs.rmSync(localChangePath, { force: true });
+    }
+  });
+
   test("deleting then immediately switching tasks does not resurrect the tab", async ({
     testPage,
     apiClient,
