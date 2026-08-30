@@ -66,6 +66,7 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 		execution_state TEXT DEFAULT '',
 		checkout_agent_id TEXT,
 		checkout_at DATETIME,
+		checkout_run_id TEXT,
 		archived_at DATETIME,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -81,7 +82,8 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 	}
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS workflow_steps (
 		id TEXT PRIMARY KEY,
-		agent_profile_id TEXT NOT NULL DEFAULT ''
+		agent_profile_id TEXT NOT NULL DEFAULT '',
+		stage_type TEXT NOT NULL DEFAULT 'custom'
 	)`); err != nil {
 		t.Fatalf("create workflow_steps: %v", err)
 	}
@@ -97,11 +99,17 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 		t.Fatalf("create workflow_step_participants: %v", err)
 	}
 	// Stub of task_sessions, mirroring the columns GetSessionAgentProfileID
-	// (RunnerProjection's fallback source, see prompt_usage_cost.go) reads.
+	// (RunnerProjection's fallback source, see prompt_usage_cost.go) reads,
+	// plus the AC-10 rollup columns so tests can assert the Office
+	// subscriber never writes them (AC-21).
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
 		agent_profile_id TEXT,
+		tokens_in INTEGER NOT NULL DEFAULT 0,
+		tokens_cached_in INTEGER NOT NULL DEFAULT 0,
+		tokens_out INTEGER NOT NULL DEFAULT 0,
+		cost_subcents INTEGER NOT NULL DEFAULT 0,
 		started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`); err != nil {

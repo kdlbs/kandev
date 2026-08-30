@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-public-provider-resolution"]
 plan: "plan.md"
-spec: "../../specs/tasks/multi-branch/spec.md"
+spec: "../../specs/tasks/requirements/multi-branch.md"
 ---
 
 # Task 02: Explicit remote URL entry
@@ -31,7 +31,7 @@ spec: "../../specs/tasks/multi-branch/spec.md"
 
 ## Inputs
 
-- `docs/specs/tasks/multi-branch/spec.md` — explicit-submit scenarios.
+- `docs/specs/tasks/requirements/multi-branch.md` — explicit-submit scenarios.
 - Existing Remote popover input and mobile geometry.
 
 ## Output contract

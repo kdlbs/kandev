@@ -18,7 +18,7 @@ type TurnGroupMessageProps = {
   childrenByParentToolCallId?: Map<string, Message[]>;
   taskId?: string;
   worktreePath?: string;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   /** Whether this is the last turn group in the current turn */
   isLastGroup?: boolean;
   /** Whether the turn is still active (agent is running) */
@@ -131,7 +131,7 @@ type TurnGroupContentProps = {
   childrenByParentToolCallId?: Map<string, Message[]>;
   taskId?: string;
   worktreePath?: string;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   isTurnActive?: boolean;
   streamingMessageId?: string | null;
   onScrollToMessage?: (messageId: string) => void;

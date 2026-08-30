@@ -277,6 +277,7 @@ type MentionKeyboardParams = {
   setSelectedIndex: (v: number | ((prev: number) => number)) => void;
   handleSelect: (item: MentionItem) => void;
   closeMenu: () => void;
+  restoreFocus: () => void;
 };
 
 function useMentionKeyboard({
@@ -286,6 +287,7 @@ function useMentionKeyboard({
   setSelectedIndex,
   handleSelect,
   closeMenu,
+  restoreFocus,
 }: MentionKeyboardParams) {
   return useCallback(
     (event: React.KeyboardEvent) => {
@@ -309,11 +311,13 @@ function useMentionKeyboard({
           break;
         case "Escape":
           event.preventDefault();
+          event.stopPropagation();
           closeMenu();
+          restoreFocus();
           break;
       }
     },
-    [isOpen, filteredItems, selectedIndex, setSelectedIndex, handleSelect, closeMenu],
+    [isOpen, filteredItems, selectedIndex, setSelectedIndex, handleSelect, closeMenu, restoreFocus],
   );
 }
 
@@ -433,6 +437,10 @@ export function useInlineMention({
     clearMentionState(setIsOpen, setTriggerStart, setQuery);
   }, [invalidateMentionChange]);
 
+  const restoreFocus = useCallback(() => {
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [inputRef]);
+
   const handleSelect = useCallback(
     (item: MentionItem) => {
       const input = inputRef.current;
@@ -450,6 +458,7 @@ export function useInlineMention({
     setSelectedIndex,
     handleSelect,
     closeMenu,
+    restoreFocus,
   });
 
   return {

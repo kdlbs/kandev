@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-quick-terminal-ui", "02-quick-terminal-e2e"]
 plan: "plan.md"
-spec: "../../specs/quick-terminal/spec.md"
+spec: "../../specs/ui/requirements/quick-terminal.md"
 ---
 
 # Task 03: Fix Quick Terminal startup race
@@ -25,7 +25,7 @@ spec: "../../specs/quick-terminal/spec.md"
 - `apps/web/components/app-sidebar/app-sidebar-new-task-item.test.tsx`
 - `apps/web/e2e/tests/terminal/quick-terminal.spec.ts`
 - `apps/web/e2e/tests/terminal/mobile-quick-terminal.spec.ts`
-- `docs/specs/quick-terminal/spec.md`
+- `docs/specs/ui/requirements/quick-terminal.md`
 - `docs/plans/quick-terminal/plan.md`
 
 ## Verification

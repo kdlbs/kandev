@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-backend-initialization", "02-task-create-selector"]
 plan: "plan.md"
-spec: "../../specs/create-local-repository/spec.md"
+spec: "../../specs/workspaces/requirements/create-local-repository.md"
 ---
 
 # Task 03: Local Repository Creation E2E Verification

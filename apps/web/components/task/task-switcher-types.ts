@@ -2,6 +2,7 @@ import type { ForegroundActivity, TaskSessionState, TaskState } from "@/lib/type
 import type { GroupedSidebarList } from "@/lib/sidebar/apply-view";
 import type { TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
+import type { SidebarTaskRowPresentation } from "@/lib/state/slices/ui/sidebar-task-row-presentation";
 
 export type StepDef = {
   id: string;
@@ -32,6 +33,7 @@ export type TaskSwitcherItem = {
   /** Persisted task-to-repository links used by host-owned plugin task actions. */
   repositoryLinks?: Array<{ repository_id: string; position?: number }>;
   diffStats?: { additions: number; deletions: number };
+  comparisonUnavailable?: boolean;
   isRemoteExecutor?: boolean;
   remoteExecutorType?: string;
   remoteExecutorName?: string;
@@ -69,7 +71,7 @@ export type TaskSwitcherProps = {
   onSelectTask: (taskId: string) => void;
   onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
-  onArchiveTask?: (taskId: string) => void;
+  onArchiveTask?: (taskId: string, opts?: { cascade?: boolean }) => void;
   onCreateSubtask?: (taskId: string, taskTitle: string) => void;
   onDeleteTask?: (taskId: string) => void;
   onDetachTask?: (taskId: string) => void;
@@ -87,12 +89,15 @@ export type TaskSwitcherProps = {
   onNestTask?: (taskId: string, parentTaskId: string) => void;
   pinnedTaskIds?: string[];
   deletingTaskId?: string | null;
+  archivingTaskId?: string | null;
+  isArchiving?: boolean;
   isLoading?: boolean;
   loadError?: string | null;
   onRetryLoad?: () => void;
   retryLabel?: string;
   totalTaskCount?: number;
   showActivityTime?: boolean;
+  taskRowPresentation?: SidebarTaskRowPresentation;
   // Multi-select (cmd/shift click). When the selection is non-empty, plain
   // clicks toggle instead of navigating; the context menu acts on the selection.
   selectedTaskIds?: Set<string>;

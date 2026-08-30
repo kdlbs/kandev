@@ -52,6 +52,12 @@ import { PRClosedBanner, PRMergedBanner } from "./pr-archive-banners";
 const MERGED_ARCHIVE_BUTTON = "pr-merged-archive-button";
 const MERGED_ARCHIVE_CONFIRM = "pr-merged-archive-confirm";
 
+async function findEnabledConfirm(testId: string) {
+  await screen.findByTestId<HTMLButtonElement>(testId);
+  await waitFor(() => expect(screen.getByTestId<HTMLButtonElement>(testId).disabled).toBe(false));
+  return screen.getByTestId<HTMLButtonElement>(testId);
+}
+
 beforeEach(() => {
   archiveAndSwitchMock.mockResolvedValue(undefined);
   mockGetSubtaskCount.mockResolvedValue({ count: 0 });
@@ -81,7 +87,7 @@ describe("PRMergedBanner", () => {
     render(<PRMergedBanner taskId="task-1" />);
 
     fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
-    fireEvent.click(await screen.findByTestId(MERGED_ARCHIVE_CONFIRM));
+    fireEvent.click(await findEnabledConfirm(MERGED_ARCHIVE_CONFIRM));
 
     await waitFor(() =>
       expect(archiveAndSwitchMock).toHaveBeenCalledWith("task-1", { cascade: false }),
@@ -93,7 +99,8 @@ describe("PRMergedBanner", () => {
     render(<PRMergedBanner taskId="task-1" />);
 
     fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
-    fireEvent.click(await screen.findByText("Cancel"));
+    await findEnabledConfirm(MERGED_ARCHIVE_CONFIRM);
+    fireEvent.click(screen.getByText("Cancel"));
 
     await waitFor(() => expect(screen.queryByTestId(MERGED_ARCHIVE_CONFIRM)).toBeNull());
     expect(archiveAndSwitchMock).not.toHaveBeenCalled();
@@ -105,7 +112,7 @@ describe("PRMergedBanner", () => {
     render(<PRMergedBanner taskId="task-1" />);
 
     fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
-    fireEvent.click(await screen.findByTestId(MERGED_ARCHIVE_CONFIRM));
+    fireEvent.click(await findEnabledConfirm(MERGED_ARCHIVE_CONFIRM));
 
     await waitFor(() =>
       expect(toastMock).toHaveBeenCalledWith({
@@ -136,7 +143,7 @@ describe("PRMergedBanner", () => {
     render(<PRMergedBanner taskId="task-1" />);
 
     fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
-    fireEvent.click(await screen.findByTestId(MERGED_ARCHIVE_CONFIRM));
+    fireEvent.click(await findEnabledConfirm(MERGED_ARCHIVE_CONFIRM));
     await waitFor(() => expect(archiveAndSwitchMock).toHaveBeenCalledTimes(1));
 
     // Reopen while the async archive is still pending: confirm must be disabled.
@@ -174,7 +181,7 @@ describe("PRClosedBanner", () => {
 
     fireEvent.click(screen.getByTestId("pr-closed-archive-button"));
     expect(archiveAndSwitchMock).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByTestId("pr-closed-archive-confirm"));
+    fireEvent.click(await findEnabledConfirm("pr-closed-archive-confirm"));
 
     await waitFor(() =>
       expect(archiveAndSwitchMock).toHaveBeenCalledWith("task-1", { cascade: false }),

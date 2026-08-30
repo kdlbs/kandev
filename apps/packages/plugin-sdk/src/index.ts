@@ -304,6 +304,20 @@ export interface TaskFilterRegistration {
   matches(context: { taskId: string }, selected: string[]): boolean;
 }
 
+export interface TaskListFacetValue {
+  value: string;
+  label: string;
+  color?: string;
+}
+
+/** A synchronous, page-local facet contribution for the host task list. */
+export interface TaskListFacetRegistration {
+  id: string;
+  label: string;
+  getValues(context: { taskId: string; workspaceId?: string }): readonly TaskListFacetValue[];
+  subscribe?(listener: () => void): () => void;
+}
+
 export type PluginStorageScope = "instance" | "workspace" | "task" | "session" | "repository";
 
 export interface PluginStorageEntry {
@@ -611,6 +625,14 @@ export interface PluginHostApi {
   storage: PluginStorageApi;
 }
 
+export type IntegrationSettingsActionSurface = "detail" | "index";
+
+export interface IntegrationSettingsActionProps {
+  workspaceId?: string;
+  /** Identifies the native integration surface that mounted the action. */
+  surface: IntegrationSettingsActionSurface;
+}
+
 export interface PluginRegistry {
   registerTranslations(catalogs: PluginTranslationCatalogs): void;
   registerRoute(path: string, component: Component, options?: PluginRouteOptions): void;
@@ -631,10 +653,9 @@ export interface PluginRegistry {
     description: string;
     icon?: PluginIcon;
     Component: Component<{ workspaceId?: string }>;
-    /** Optional header action (e.g. an enable toggle) rendered in the host
-     * section header's action slot, mirroring built-in integrations.
-     * Receives `{ workspaceId?: string }` so it can operate per-workspace. */
-    action?: Component<{ workspaceId?: string }>;
+    /** Optional action rendered in the detail section header and index card.
+     * Receives the routed workspace and the native surface that mounted it. */
+    action?: Component<IntegrationSettingsActionProps>;
   }): void;
   registerRepositoryProvider(provider: RepositoryProviderRegistration): void;
   registerTaskAction(action: {
@@ -685,6 +706,7 @@ export interface PluginRegistry {
   registerTaskPanel(registration: TaskPanelRegistration): void;
   registerTaskMenuAction(registration: TaskMenuActionRegistration): void;
   registerTaskFilter(registration: TaskFilterRegistration): void;
+  registerTaskListFacet(registration: TaskListFacetRegistration): void;
 }
 
 export type PluginHost = PluginHostApi;

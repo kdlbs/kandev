@@ -211,6 +211,101 @@ func tasksToProto(items []Task) ([]*pluginv1.Task, error) {
 	return out, nil
 }
 
+// RelationTask is the compact, description-free task projection returned by
+// TaskRelationsReader. Relationship group membership carries the edge type;
+// this DTO intentionally excludes task documents, free-form metadata, and
+// repository information.
+type RelationTask struct {
+	ID          string
+	WorkspaceID string
+	Identifier  string
+	Title       string
+	State       string
+}
+
+func (t RelationTask) toProto() *pluginv1.RelationTask {
+	return &pluginv1.RelationTask{
+		Id: t.ID, WorkspaceId: t.WorkspaceID, Identifier: t.Identifier,
+		Title: t.Title, State: t.State,
+	}
+}
+
+func relationTaskFromProto(p *pluginv1.RelationTask) RelationTask {
+	if p == nil {
+		return RelationTask{}
+	}
+	return RelationTask{
+		ID:          p.GetId(),
+		WorkspaceID: p.GetWorkspaceId(),
+		Identifier:  p.GetIdentifier(),
+		Title:       p.GetTitle(),
+		State:       p.GetState(),
+	}
+}
+
+func relationTasksToProto(items []RelationTask) []*pluginv1.RelationTask {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]*pluginv1.RelationTask, len(items))
+	for i := range items {
+		out[i] = items[i].toProto()
+	}
+	return out
+}
+
+func relationTasksFromProto(items []*pluginv1.RelationTask) []RelationTask {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]RelationTask, len(items))
+	for i := range items {
+		out[i] = relationTaskFromProto(items[i])
+	}
+	return out
+}
+
+// TaskRelations is a workspace-scoped compact graph for one task. Parent is
+// nil when the parent is absent or outside the authorized workspace.
+type TaskRelations struct {
+	Task      RelationTask
+	Parent    *RelationTask
+	Children  []RelationTask
+	Siblings  []RelationTask
+	Blockers  []RelationTask
+	BlockedBy []RelationTask
+}
+
+func (r TaskRelations) toProto() *pluginv1.TaskRelations {
+	out := &pluginv1.TaskRelations{
+		Task: r.Task.toProto(), Children: relationTasksToProto(r.Children),
+		Siblings: relationTasksToProto(r.Siblings), Blockers: relationTasksToProto(r.Blockers),
+		BlockedBy: relationTasksToProto(r.BlockedBy),
+	}
+	if r.Parent != nil {
+		out.Parent = r.Parent.toProto()
+	}
+	return out
+}
+
+func taskRelationsFromProto(p *pluginv1.TaskRelations) *TaskRelations {
+	if p == nil {
+		return nil
+	}
+	out := &TaskRelations{
+		Task:      relationTaskFromProto(p.GetTask()),
+		Children:  relationTasksFromProto(p.GetChildren()),
+		Siblings:  relationTasksFromProto(p.GetSiblings()),
+		Blockers:  relationTasksFromProto(p.GetBlockers()),
+		BlockedBy: relationTasksFromProto(p.GetBlockedBy()),
+	}
+	if p.GetParent() != nil {
+		parent := relationTaskFromProto(p.GetParent())
+		out.Parent = &parent
+	}
+	return out
+}
+
 // TaskFilter is the Go-native mirror of kandev.plugin.v1.TaskFilter.
 type TaskFilter struct {
 	WorkspaceIDs     []string

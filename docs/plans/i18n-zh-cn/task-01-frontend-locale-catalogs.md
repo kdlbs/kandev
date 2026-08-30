@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/i18n.md"
+spec: "../../specs/platform/requirements/i18n.md"
 ---
 
 # Task 01: Frontend zh-cn integration

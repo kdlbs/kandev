@@ -5,7 +5,7 @@ status: done
 wave: 0
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 11: Reconcile Latest Main

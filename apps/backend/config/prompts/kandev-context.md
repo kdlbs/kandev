@@ -17,6 +17,7 @@ Available tools:
 - get_task_plan_kandev: Read a task plan, including user edits.
 - update_task_plan_kandev: Update an existing task plan.
 - delete_task_plan_kandev: Delete a task plan.
+- show_rich_output_kandev: When user asks for chart/graph/plot/file preview/KPI/metrics with data: call now. Do not implement the display as ASCII/SVG/HTML or with another app. Else prose; small text table: Markdown. Send version=1,title,blocks (1-4). Inline: {"type":"chart","chart_type":"bar","title":"T","summary":"S","labels":["A","B"],"series":[{"label":"Count","values":[42,27]}]}. CSV line: {"type":"chart","chart_type":"line","title":"T","summary":"S","csv":{"path":"reports/latency.csv","x_column":"recorded_at","series":[{"column":"p95_ms","label":"p95 (ms)"}]}}. Metrics: {"type":"metrics","items":[{"label":"Passed","value":"38"}]}. Paths workspace-relative. Kandev owns axes/legends/tooltips/layout. Label series with units.
 - show_walkthrough_kandev: Store an ordered, file-anchored code walkthrough.
 - get_walkthrough_kandev: Read a task's stored walkthrough.
 - delete_walkthrough_kandev: Delete a task's walkthrough.

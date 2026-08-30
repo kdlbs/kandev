@@ -106,6 +106,7 @@ build_fe() {
 build_backend_host() {
   log "building backend (host)"
   local targets=(build)
+  # The Playwright project is `containers`; `KANDEV_E2E_DOCKER` remains only an env alias.
   [[ "$PROJECT" == containers ]] && targets+=(build-agentctl-linux build-mock-agent-linux)
   make -C "$BACKEND_DIR" "${targets[@]}" >/dev/null || die "backend build failed"
 }
@@ -193,6 +194,8 @@ log "mode=$MODE  shards=$SHARDS  project=$PROJECT  strict=$STRICT"
 
 STRICT_ENV=()
 [[ "$STRICT" == 1 ]] && STRICT_ENV=(KANDEV_E2E_WS_ASSERT=1)
+CONTAINER_ENV=()
+[[ "$PROJECT" == containers ]] && CONTAINER_ENV=(KANDEV_E2E_CONTAINERS=1)
 
 # ---------------------------------------------------------------------------
 # HOST mode
@@ -202,13 +205,13 @@ run_host() {
   [[ "$DO_BUILD" == 1 ]] && { build_backend_host; build_fe; build_plugin_package; }
   local base_args=(playwright test --config e2e/playwright.config.ts --project="$PROJECT")
   if [[ "$SHARDS" -le 1 ]]; then
-    ( cd "$WEB_DIR" && env ${STRICT_ENV[@]+"${STRICT_ENV[@]}"} pnpm exec "${base_args[@]}" ${PW_ARGS[@]+"${PW_ARGS[@]}"} )
+    ( cd "$WEB_DIR" && env ${STRICT_ENV[@]+"${STRICT_ENV[@]}"} ${CONTAINER_ENV[@]+"${CONTAINER_ENV[@]}"} pnpm exec "${base_args[@]}" ${PW_ARGS[@]+"${PW_ARGS[@]}"} )
     return $?
   fi
   log "running $SHARDS host shards (distinct E2E_PORT_OFFSET + output dirs)"
   local pids=() rc=0 i
   for ((i=1; i<=SHARDS; i++)); do
-    ( cd "$WEB_DIR" && env ${STRICT_ENV[@]+"${STRICT_ENV[@]}"} E2E_PORT_OFFSET=$((i-1)) \
+    ( cd "$WEB_DIR" && env ${STRICT_ENV[@]+"${STRICT_ENV[@]}"} ${CONTAINER_ENV[@]+"${CONTAINER_ENV[@]}"} E2E_PORT_OFFSET=$((i-1)) \
         pnpm exec "${base_args[@]}" --shard="$i/$SHARDS" --output="e2e/test-results-shard-$i" ${PW_ARGS[@]+"${PW_ARGS[@]}"} \
         > "/tmp/e2e-host-shard-$i.log" 2>&1 ) &
     pids+=("$!")
@@ -234,6 +237,8 @@ run_docker() {
 
   local strict_flag=()
   [[ "$STRICT" == 1 ]] && strict_flag=(-e KANDEV_E2E_WS_ASSERT=1)
+  local container_flag=()
+  [[ "$PROJECT" == containers ]] && container_flag=(-e KANDEV_E2E_CONTAINERS=1)
   local capture_flag=()
   [[ -n "${CAPTURE_PR_ASSETS:-}" ]] && capture_flag=(-e CAPTURE_PR_ASSETS)
   local pw="git config --global --add safe.directory /work 2>/dev/null; cd /work/apps/web && pnpm exec playwright test --config e2e/playwright.config.ts --project=\"$PROJECT\""
@@ -244,6 +249,7 @@ run_docker() {
     docker run --rm --ipc=host \
       -v "$REPO_ROOT":/work -w /work/apps/web \
       ${strict_flag[@]+"${strict_flag[@]}"} \
+      ${container_flag[@]+"${container_flag[@]}"} \
       ${capture_flag[@]+"${capture_flag[@]}"} \
       -e NODE_OPTIONS=--dns-result-order=ipv4first \
       -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \

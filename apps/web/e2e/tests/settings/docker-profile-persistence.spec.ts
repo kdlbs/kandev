@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { setStoreRole } from "../../helpers/session-store";
 
 /**
  * Regression test for the Docker executor profile UI persisting Dockerfile
@@ -203,5 +204,26 @@ test.describe("Docker executor profile persistence", () => {
     } finally {
       await apiClient.deleteExecutor(exec.id).catch(() => {});
     }
+  });
+
+  /**
+   * POST /api/v1/docker/build is admin-gated on the backend, so a member must
+   * not be shown an enabled control that can only end in a 403. Auth is
+   * disabled in e2e, which leaves the role undefined and the button enabled,
+   * so the member identity is injected through the store bridge the same way
+   * the message-queue settings spec does.
+   */
+  test("member sees the build control disabled with an explanation", async ({ testPage }) => {
+    await testPage.goto("/settings/executors/new/local_docker");
+    await expect(testPage.locator("#profile-name")).toHaveValue("Docker", { timeout: 10_000 });
+    await testPage.getByRole("button", { name: "Use defaults" }).click();
+
+    const buildButton = testPage.getByRole("button", { name: "Build Image" });
+    await expect(buildButton).toBeEnabled();
+
+    await setStoreRole(testPage, "member");
+
+    await expect(buildButton).toBeDisabled();
+    await expect(testPage.getByText("Only administrators can build images.")).toBeVisible();
   });
 });

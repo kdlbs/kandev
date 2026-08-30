@@ -6,6 +6,7 @@ import {
   type MessageType,
   type TaskPendingAction,
 } from "@/lib/types/http";
+import { isRichOutputMessage } from "@/components/task/chat/types";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
 import {
   findPendingClarification,
@@ -254,7 +255,10 @@ function groupActivityMessages(allMessages: Message[]): RenderItem[] {
 
   for (const message of allMessages) {
     const isActivity =
-      message.type && ACTIVITY_MESSAGE_TYPES.has(message.type) && !isSubagentMessage(message);
+      message.type &&
+      ACTIVITY_MESSAGE_TYPES.has(message.type) &&
+      !isSubagentMessage(message) &&
+      !isRichOutputMessage(message);
     const messageTurnId = message.turn_id ?? null;
     if (isActivity && messageTurnId) {
       if (currentGroup.length > 0 && currentTurnId === messageTurnId) {
@@ -437,6 +441,35 @@ function useVisibleMessages(
   );
 }
 
+export function shouldShowTaskDescriptionFallback(
+  taskDescription: string | null,
+  visibleMessages: Message[],
+): boolean {
+  return (
+    Boolean(taskDescription) && !visibleMessages.some((message) => message.author_type === "user")
+  );
+}
+
+export const TASK_DESCRIPTION_SYNTHETIC_ID = "task-description";
+
+function buildTaskDescriptionMessage(
+  showFallback: boolean,
+  taskDescription: string | null,
+  taskId: string | null,
+  resolvedSessionId: string | null,
+): Message | null {
+  if (!showFallback) return null;
+  return {
+    id: TASK_DESCRIPTION_SYNTHETIC_ID,
+    task_id: toTaskId(taskId ?? ""),
+    session_id: toSessionId(resolvedSessionId ?? ""),
+    author_type: "user",
+    content: taskDescription ?? "",
+    type: "message",
+    created_at: "",
+  };
+}
+
 export function useProcessedMessages(
   messages: Message[],
   taskId: string | null,
@@ -464,19 +497,20 @@ export function useProcessedMessages(
 
   const visibleMessages = useVisibleMessages(messages, toolCallIds, subagentChildIds, scope);
 
-  const taskDescriptionMessage: Message | null = useMemo(() => {
-    return taskDescription && visibleMessages.length === 0
-      ? {
-          id: "task-description",
-          task_id: toTaskId(taskId ?? ""),
-          session_id: toSessionId(resolvedSessionId ?? ""),
-          author_type: "user",
-          content: taskDescription,
-          type: "message",
-          created_at: "",
-        }
-      : null;
-  }, [taskDescription, visibleMessages.length, taskId, resolvedSessionId]);
+  const showTaskDescriptionFallback = useMemo(
+    () => shouldShowTaskDescriptionFallback(taskDescription, visibleMessages),
+    [taskDescription, visibleMessages],
+  );
+  const taskDescriptionMessage: Message | null = useMemo(
+    () =>
+      buildTaskDescriptionMessage(
+        showTaskDescriptionFallback,
+        taskDescription,
+        taskId,
+        resolvedSessionId,
+      ),
+    [showTaskDescriptionFallback, taskDescription, taskId, resolvedSessionId],
+  );
 
   const allMessages = useMemo(() => {
     return taskDescriptionMessage ? [taskDescriptionMessage, ...visibleMessages] : visibleMessages;

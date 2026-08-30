@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
 // Workspace-mode and ordering constants used across handoff plumbing.
@@ -522,6 +523,69 @@ func (s *HandoffService) ListRelatedForRequest(ctx context.Context, req RelatedR
 		return nil, err
 	}
 	return related, nil
+}
+
+// GetTaskRelations returns a compact, workspace-scoped relationship graph for
+// plugin Host API callers. It is deliberately independent from the MCP
+// coordinator read scope: plugins receive neither descriptions nor document
+// keys, and foreign relationship edges are omitted.
+func (s *HandoffService) GetTaskRelations(ctx context.Context, workspaceID, taskID string) (*pluginsdk.TaskRelations, error) {
+	if workspaceID == "" || taskID == "" {
+		return nil, ErrDocumentTaskRequired
+	}
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, repository.ErrTaskNotFound) {
+			return nil, repository.ErrTaskNotFound
+		}
+		return nil, err
+	}
+	if task == nil || task.WorkspaceID != workspaceID {
+		return nil, repository.ErrTaskNotFound
+	}
+	related, err := s.ListRelated(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return taskRelationsFromRelated(related, workspaceID), nil
+}
+
+func taskRelationsFromRelated(related *RelatedTasks, workspaceID string) *pluginsdk.TaskRelations {
+	if related == nil || related.Task.WorkspaceID != workspaceID {
+		return nil
+	}
+	out := &pluginsdk.TaskRelations{
+		Task:      relationTaskFromRelated(related.Task),
+		Children:  relationTasksFromRelated(related.Children, workspaceID),
+		Siblings:  relationTasksFromRelated(related.Siblings, workspaceID),
+		Blockers:  relationTasksFromRelated(related.Blockers, workspaceID),
+		BlockedBy: relationTasksFromRelated(related.BlockedBy, workspaceID),
+	}
+	if related.Parent != nil && related.Parent.WorkspaceID == workspaceID {
+		parent := relationTaskFromRelated(*related.Parent)
+		out.Parent = &parent
+	}
+	return out
+}
+
+func relationTaskFromRelated(task RelatedTask) pluginsdk.RelationTask {
+	return pluginsdk.RelationTask{
+		ID:          task.ID,
+		WorkspaceID: task.WorkspaceID,
+		Identifier:  task.Identifier,
+		Title:       task.Title,
+		State:       task.State,
+	}
+}
+
+func relationTasksFromRelated(tasks []*RelatedTask, workspaceID string) []pluginsdk.RelationTask {
+	out := make([]pluginsdk.RelationTask, 0, len(tasks))
+	for _, task := range tasks {
+		if task != nil && task.WorkspaceID == workspaceID {
+			out = append(out, relationTaskFromRelated(*task))
+		}
+	}
+	return out
 }
 
 func (s *HandoffService) authorizeRelatedRead(ctx context.Context, req RelatedReadRequest) error {

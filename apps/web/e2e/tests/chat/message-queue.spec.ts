@@ -204,17 +204,39 @@ async function seedTaskAndWaitForIdle(
   return session;
 }
 
-async function queueMessagesWhileBusy(
-  page: Page,
-  editor: Locator,
+async function queueMessages(
+  apiClient: ApiClient,
+  taskId: string,
+  sessionId: string,
   messages: string[],
 ): Promise<void> {
-  const submit = page.getByTestId("submit-message-button");
   for (const message of messages) {
-    await typeWhileBusy(page, editor, message);
-    await expect(submit).toBeVisible({ timeout: 5_000 });
-    await submit.click();
+    await apiClient.queueMessage(taskId, sessionId, message);
   }
+}
+
+function scriptedQueueMessage(marker: string, delayMs = 250): string {
+  return `e2e:delay(${delayMs})\ne2e:message("${marker}")`;
+}
+
+async function expectSeparateTurnsInOrder(scope: Locator, markers: string[]): Promise<void> {
+  const agentBodies = scope.locator("[data-agent-message-body][data-message-id]");
+  for (const marker of markers) {
+    await expect(agentBodies.filter({ hasText: marker })).toHaveCount(1, { timeout: 45_000 });
+  }
+
+  const agentTexts = await agentBodies.allTextContents();
+  const agentIndexes = markers.map((marker) =>
+    agentTexts.findIndex((text) => text.includes(marker)),
+  );
+  expect(agentIndexes.every((index) => index >= 0)).toBe(true);
+  expect(agentIndexes).toEqual([...agentIndexes].sort((a, b) => a - b));
+
+  const userTexts = await scope.getByTestId("user-message-bubble").allTextContents();
+  const userIndexes = markers.map((marker) => userTexts.findIndex((text) => text.includes(marker)));
+  expect(userIndexes.every((index) => index >= 0)).toBe(true);
+  expect(new Set(userIndexes).size).toBe(markers.length);
+  expect(userIndexes).toEqual([...userIndexes].sort((a, b) => a - b));
 }
 
 test.describe("Task session queue", () => {
@@ -343,7 +365,7 @@ test.describe("Task session queue", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 
-  test("row Send Now replaces the active turn and preserves neighboring entries", async ({
+  test("Send Now resumes Auto-run with the selected row first", async ({
     testPage,
     apiClient,
     seedData,
@@ -365,17 +387,27 @@ test.describe("Task session queue", () => {
     if (!taskID) throw new Error("task URL did not contain a task ID");
     const workflowStepBefore = (await apiClient.getTask(taskID)).workflow_step_id;
 
-    const editor = testPage.locator(".tiptap.ProseMirror").first();
-    await queueMessagesWhileBusy(testPage, editor, [
-      "send first now",
-      "/slow 10s second now",
-      "send third now",
+    const markerA = "targeted A response";
+    const markerB = "targeted B response";
+    const markerC = "targeted C response";
+    const task = await apiClient.getTask(taskID);
+    const sessionID = task.primary_session_id;
+    if (!sessionID) throw new Error("task did not have a primary session");
+    await queueMessages(apiClient, taskID, sessionID, [
+      scriptedQueueMessage(markerA),
+      scriptedQueueMessage(markerB, 5_000),
+      scriptedQueueMessage(markerC),
     ]);
 
     await openQueuePanel(testPage);
     const panel = testPage.getByTestId("queued-ghost-list");
     await expect(panel.getByTestId("queue-entry-text")).toHaveCount(3);
-    const target = panel.getByTestId("queue-entry").filter({ hasText: "second now" });
+    const autoRun = panel.getByTestId("queue-auto-run");
+    await expect(autoRun).toHaveAttribute("data-state", "checked");
+    await autoRun.click();
+    await expect(autoRun).toHaveAttribute("data-state", "unchecked");
+
+    const target = panel.getByTestId("queue-entry").filter({ hasText: markerB });
     await expect(target).toBeVisible();
     await target.hover();
     const sendNow = target.getByTestId("queue-entry-send-now");
@@ -383,20 +415,27 @@ test.describe("Task session queue", () => {
     await expect(sendNow).toBeEnabled({ timeout: 10_000 });
     await sendNow.click();
 
-    const transcript = session.chat.locator(".chat-message-list:visible");
-    await expect(transcript.getByText("/slow 10s second now", { exact: true })).toBeVisible({
-      timeout: 20_000,
-    });
     await expect(panel.getByTestId("queue-entry-text")).toHaveCount(2, { timeout: 10_000 });
-    await expect(panel.getByTestId("queue-entry-text").nth(0)).toContainText("send first now");
-    await expect(panel.getByTestId("queue-entry-text").nth(1)).toContainText("send third now");
+    await expect(panel.getByTestId("queue-entry-text").nth(0)).toContainText(markerA);
+    await expect(panel.getByTestId("queue-entry-text").nth(1)).toContainText(markerC);
+    await expect(autoRun).toHaveAttribute("data-state", "checked", { timeout: 10_000 });
+
+    // Send Now's internal interruption must not behave like an explicit user
+    // cancellation. Check while the selected replacement turn is still active;
+    // successful turn completion may legitimately advance the workflow later.
+    await expect(
+      session.chat.getByTestId("user-message-bubble").filter({ hasText: markerB }),
+    ).toHaveCount(1, { timeout: 20_000 });
+    await expect(session.agentStatus()).toBeVisible({ timeout: 20_000 });
+    expect((await apiClient.getTask(taskID)).workflow_step_id).toBe(workflowStepBefore);
+
+    await expectSeparateTurnsInOrder(session.chat, [markerB, markerA, markerC]);
+    await session.waitForChatIdle({ timeout: 45_000 });
+    await expect(panel).not.toBeVisible({ timeout: 15_000 });
     await expect(session.chat).not.toContainText("Turn cancelled by user");
-    await expect
-      .poll(async () => (await apiClient.getTask(taskID)).workflow_step_id, { timeout: 10_000 })
-      .toBe(workflowStepBefore);
   });
 
-  test("header Send Now replaces the turn with the visible queue in FIFO order", async ({
+  test("Auto-run OFF finishes the current turn, survives reload, then resumes FIFO", async ({
     testPage,
     apiClient,
     seedData,
@@ -407,40 +446,51 @@ test.describe("Task session queue", () => {
       testPage,
       apiClient,
       seedData,
-      "Queue Send Now bulk test",
+      "Queue Auto-run hold and resume",
     );
-    await session.sendMessage("/slow 30s");
+    await session.sendMessage("/slow 8s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
     await waitForComposerQueueMode(testPage);
 
-    const editor = testPage.locator(".tiptap.ProseMirror").first();
-    await queueMessagesWhileBusy(testPage, editor, ["bulk first", "bulk second", "bulk third"]);
+    const taskID = new URL(testPage.url()).pathname.split("/").pop();
+    if (!taskID) throw new Error("task URL did not contain a task ID");
+    const task = await apiClient.getTask(taskID);
+    const sessionID = task.primary_session_id;
+    if (!sessionID) throw new Error("task did not have a primary session");
+    const markers = ["auto-run A response", "auto-run B response", "auto-run C response"];
+    await queueMessages(
+      apiClient,
+      taskID,
+      sessionID,
+      markers.map((marker) => scriptedQueueMessage(marker)),
+    );
     await openQueuePanel(testPage);
-    const panel = testPage.getByTestId("queued-ghost-list");
+    let panel = testPage.getByTestId("queued-ghost-list");
     await expect(panel.getByTestId("queue-entry-text")).toHaveCount(3);
+    let autoRun = panel.getByTestId("queue-auto-run");
+    await expect(autoRun).toHaveAttribute("data-state", "checked");
+    await autoRun.click();
+    await expect(autoRun).toHaveAttribute("data-state", "unchecked");
 
-    await panel.getByTestId("queue-send-now").click();
-    await expect(panel).not.toBeVisible({ timeout: 15_000 });
-    await expect(testPage.getByTestId("queue-chip")).not.toBeVisible({ timeout: 15_000 });
+    await expect(session.chat.getByText("Slow response complete", { exact: false })).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(panel.getByTestId("queue-entry-text")).toHaveCount(3);
+    await expect(autoRun).toHaveAttribute("data-state", "unchecked");
 
-    const transcript = session.chat.locator(".chat-message-list:visible");
-    await expect(transcript).toContainText("bulk first", { timeout: 20_000 });
-    await expect(transcript).toContainText("bulk second");
-    await expect(transcript).toContainText("bulk third");
-    const aggregateUserBubble = transcript
-      .getByTestId("user-message-bubble")
-      .filter({ hasText: "bulk first" });
-    await expect(aggregateUserBubble).toHaveCount(1);
-    await expect(aggregateUserBubble).toContainText("bulk second");
-    await expect(aggregateUserBubble).toContainText("bulk third");
-    const transcriptText = await transcript.innerText();
-    expect(transcriptText.indexOf("bulk first")).toBeLessThan(
-      transcriptText.indexOf("bulk second"),
-    );
-    expect(transcriptText.indexOf("bulk second")).toBeLessThan(
-      transcriptText.indexOf("bulk third"),
-    );
+    await testPage.reload();
+    await session.waitForLoad();
+    await openQueuePanel(testPage);
+    panel = testPage.getByTestId("queued-ghost-list");
+    autoRun = panel.getByTestId("queue-auto-run");
+    await expect(panel.getByTestId("queue-entry-text")).toHaveCount(3);
+    await expect(autoRun).toHaveAttribute("data-state", "unchecked");
+
+    await autoRun.click();
+    await expectSeparateTurnsInOrder(session.chat, markers);
     await session.waitForChatIdle({ timeout: 45_000 });
+    await expect(testPage.getByTestId("queue-chip")).not.toBeVisible({ timeout: 15_000 });
   });
 
   test("queue editor textarea scrolls when content is long", async ({

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/task-surface-refresh.md
+spec: docs/specs/ui/requirements/task-surface-refresh.md
 created: 2026-07-27
 status: building
 ---

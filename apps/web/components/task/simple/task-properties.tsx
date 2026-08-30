@@ -17,6 +17,7 @@ import { SubIssuesRow } from "./components/sub-issues-row";
 import { ReviewersPicker } from "./components/reviewers-picker";
 import { ApproversPicker } from "./components/approvers-picker";
 import { PendingApprovalBadge } from "./components/pending-approval-badge";
+import { QuorumStatusBadge } from "./components/quorum-status-badge";
 import { useTranslation } from "react-i18next";
 
 type TaskPropertiesProps = {
@@ -32,7 +33,7 @@ function formatDate(dateStr: string): string {
 }
 
 // formatCurrency converts subcents (hundredths of a cent — the office
-// cost storage unit per docs/specs/office-costs/spec.md) to a USD string.
+// cost storage unit per docs/specs/office/requirements/costs.md) to a USD string.
 function formatCurrency(subcents: number): string {
   return new Intl.NumberFormat(undefined, {
     style: "currency",
@@ -58,6 +59,7 @@ function IdentitySection({ task }: { task: Task }) {
     <>
       <PropertyRow label={t("common:status")} valueClassName="ml-auto">
         <span className="flex items-center gap-2 ml-auto">
+          <QuorumStatusBadge task={task} />
           <PendingApprovalBadge task={task} />
           <StatusPicker task={task} />
         </span>
@@ -116,11 +118,18 @@ function TimelineSection({ task }: { task: Task }) {
   const { t } = useTranslation();
   const dateOrDash = (d?: string | null) =>
     d ? formatDate(d) : <span className="text-muted-foreground">--</span>;
+  const orDash = (v?: string | null) => (v ? v : <span className="text-muted-foreground">--</span>);
   return (
     <>
-      <PropertyRow label={t("task:createdBy")}>{task.createdBy}</PropertyRow>
-      <PropertyRow label={t("task:started")}>{dateOrDash(task.startedAt)}</PropertyRow>
-      <PropertyRow label={t("task:completed")}>{dateOrDash(task.completedAt)}</PropertyRow>
+      <PropertyRow label={t("task:createdBy")} testId="created-by-row">
+        {orDash(task.createdBy)}
+      </PropertyRow>
+      <PropertyRow label={t("task:started")} testId="started-row">
+        {dateOrDash(task.startedAt)}
+      </PropertyRow>
+      <PropertyRow label={t("task:completed")} testId="completed-row">
+        {dateOrDash(task.completedAt)}
+      </PropertyRow>
       <PropertyRow label={t("task:created")}>{formatDate(task.createdAt)}</PropertyRow>
       <PropertyRow label={t("task:updated")}>{formatRelativeTime(task.updatedAt)}</PropertyRow>
     </>

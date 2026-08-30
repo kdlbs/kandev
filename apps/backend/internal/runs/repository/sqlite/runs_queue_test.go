@@ -53,6 +53,24 @@ func TestCoalesceRun_MergesIntoMostRecentQueuedRun(t *testing.T) {
 	}
 }
 
+func TestCoalesceRun_DoesNotMergeDifferentTaskRuns(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	queued := queueRunAt(t, repo, "task-a", "a1", time.Now().UTC())
+
+	merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 3600, `{"task_id":"task-b"}`)
+	if err != nil {
+		t.Fatalf("coalesce: %v", err)
+	}
+	if merged {
+		t.Fatal("coalesce = true for a different task, want false")
+	}
+
+	got := mustGetRun(t, repo, queued.ID)
+	checkInt(t, "coalesced_count", got.CoalescedCount, 1)
+	checkString(t, "payload", got.Payload, `{"task_id":"task-a"}`)
+}
+
 // TestCoalesceRun_RepeatedCoalesceAccumulatesOnOneRow pins the counter
 // arithmetic across several merges into the same run.
 func TestCoalesceRun_RepeatedCoalesceAccumulatesOnOneRow(t *testing.T) {

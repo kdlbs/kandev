@@ -82,6 +82,8 @@ type NativeMessageListScrollParams = {
   enabled: boolean;
   dividerBeforeItemKey?: string | null;
   anchoredBarHeight?: number;
+  /** Initial/refetch loading: the sentinel's hard block. */
+  messagesLoading: boolean;
   hasMore: boolean;
   isLoadingMore: boolean;
   loadMore: () => Promise<number>;
@@ -109,6 +111,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     enabled,
     dividerBeforeItemKey,
     anchoredBarHeight,
+    messagesLoading,
     hasMore,
     isLoadingMore,
     loadMore,
@@ -126,6 +129,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     sessionId,
     enabled,
     hasUnreadDivider: Boolean(dividerBeforeItemKey),
+    messagesLoading,
     hasMore,
     isLoadingMore,
     loadMore,
@@ -158,13 +162,19 @@ type MessageRowProps = {
   childrenByParentToolCallId: Map<string, Message[]>;
   taskId?: string;
   worktreePath?: string;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   isLastGroup: boolean;
   activeTurnId: string | null;
   streamingMessageId: string | null;
   onScrollToMessage: (messageId: string, options?: { align?: "start" | "center" }) => void;
   dividerBeforeItemKey?: string | null;
 };
+
+function getItemTurnId(item: RenderItem): string | undefined {
+  if (item.type === "turn_group") return item.turnId ?? undefined;
+  if (item.type === "message") return item.message.turn_id ?? undefined;
+  return undefined;
+}
 
 /** One transcript row, keyed and DOM-id'd by `getItemKey` so the scroll
  * affordances (and `scrollToMessage`) can locate it directly. */
@@ -186,6 +196,8 @@ function MessageRow({
   return (
     <div
       id={`msg-${key}`}
+      data-turn-id={getItemTurnId(item)}
+      tabIndex={-1}
       className="pb-2 scroll-mt-[calc(4rem+env(safe-area-inset-top))] sm:scroll-mt-[var(--anchored-bar-h,0px)]"
       style={{ overflowAnchor: "none" }}
     >
@@ -219,7 +231,7 @@ type NativeMessageListBodyProps = {
   messagesLoading: boolean;
   sessionState?: TaskSessionState;
   worktreePath?: string;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   hasMore: boolean;
   isLoadingMore: boolean;
   isInitialLoading: boolean;
@@ -466,7 +478,7 @@ export const NativeMessageList = memo(
       isWorking,
       sessionState,
     });
-    const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
+    const { loadMore, hasMore, isLoadingMore } = useLazyLoadMessages(sessionId);
     const { activeTurnId } = useSessionTurn(sessionId);
     const effectiveActiveTurnId = getEffectiveActiveTurnId(activeTurnId, isWorking);
     const streamingMessageId = getStreamingAgentMessageId(messages);
@@ -482,6 +494,7 @@ export const NativeMessageList = memo(
       enabled: autoScrollEnabled,
       dividerBeforeItemKey,
       anchoredBarHeight,
+      messagesLoading,
       hasMore,
       isLoadingMore,
       loadMore,

@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { officeTopbarTitle } from "../../helpers/office-topbar";
 
 test.describe("Dashboard", () => {
   test("dashboard shows agent count", async ({ officeApi, officeSeed }) => {
@@ -51,25 +52,37 @@ test.describe("Dashboard", () => {
 
   test("org chart page renders", async ({ testPage, officeSeed: _ }) => {
     await testPage.goto("/office/workspace/org");
-    await expect(testPage.getByRole("heading", { name: /Org/i }).first()).toBeVisible({
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Org/i, {
       timeout: 10_000,
     });
   });
 
   test("preferences page renders", async ({ testPage, officeSeed: _ }) => {
     await testPage.goto("/office/workspace/settings");
-    await expect(testPage.getByRole("heading", { name: /preferences/i })).toBeVisible({
+    await expect(officeTopbarTitle(testPage)).toHaveText(/preferences/i, {
       timeout: 10_000,
     });
   });
 
   test("update workspace settings", async ({ officeApi, officeSeed }) => {
-    const updated = await officeApi.updateWorkspaceSettings(officeSeed.workspaceId, {
-      name: "E2E Workspace Updated",
-    });
-    expect(updated).toBeDefined();
+    const { settings: originalSettings } = await officeApi.getWorkspaceSettings(
+      officeSeed.workspaceId,
+    );
+    const originalLookbackHours = (originalSettings as { recovery_lookback_hours: number })
+      .recovery_lookback_hours;
 
-    const settings = await officeApi.getWorkspaceSettings(officeSeed.workspaceId);
-    expect(settings).toBeDefined();
+    try {
+      const updated = await officeApi.updateWorkspaceSettings(officeSeed.workspaceId, {
+        recovery_lookback_hours: 42,
+      });
+      expect(updated).toEqual({ ok: true });
+
+      const { settings } = await officeApi.getWorkspaceSettings(officeSeed.workspaceId);
+      expect((settings as { recovery_lookback_hours: number }).recovery_lookback_hours).toBe(42);
+    } finally {
+      await officeApi.updateWorkspaceSettings(officeSeed.workspaceId, {
+        recovery_lookback_hours: originalLookbackHours,
+      });
+    }
   });
 });

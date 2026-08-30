@@ -13,12 +13,17 @@ import {
   loadAppSidebarState,
 } from "./app-sidebar-actions";
 import { buildSettingsMenuActions, loadSettingsMenuState } from "./settings-menu-actions";
+import {
+  buildRichOutputMotionActions,
+  loadRichOutputMotionState,
+} from "./rich-output-motion-actions";
 import { DEFAULT_SETTINGS_MENU_MODE } from "@/lib/settings/settings-menu-mode";
 import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
 import { buildSidebarTaskPrefsActions } from "./sidebar-task-prefs-actions";
 import { buildSidebarViewActions } from "./sidebar-view-actions";
 import { DEFAULT_VIEW } from "./sidebar-view-builtins";
 import type { SidebarView, SidebarViewDraft, SortSpec } from "./sidebar-view-types";
+import { cloneSidebarTaskRowPresentation } from "./sidebar-task-row-presentation";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { ActiveDocument, UISlice, UISliceState } from "./types";
 import { buildQuickChatActions } from "./quick-chat-actions";
@@ -65,6 +70,7 @@ export function migrateView(view: SidebarView): SidebarView {
     ...view,
     filters: view.filters.filter((c) => KNOWN_DIMENSIONS.has(c.dimension)),
     sort,
+    taskRow: cloneSidebarTaskRowPresentation(view.taskRow),
   };
 }
 
@@ -77,6 +83,7 @@ export function migrateSidebarViewDraft(draft: SidebarViewDraft): SidebarViewDra
     ...draft,
     filters: draft.filters.filter((c) => KNOWN_DIMENSIONS.has(c.dimension)),
     sort,
+    taskRow: cloneSidebarTaskRowPresentation(draft.taskRow),
   };
 }
 
@@ -145,6 +152,10 @@ export const defaultUIState: UISliceState = {
     mode: DEFAULT_SETTINGS_MENU_MODE,
     savedMode: DEFAULT_SETTINGS_MENU_MODE,
     expandedKeys: [],
+  },
+  richOutputMotion: {
+    enabled: true,
+    savedEnabled: true,
   },
   acknowledgedAgentErrors: {},
   dismissedAgentErrors: {},
@@ -340,8 +351,10 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
   appSidebar: loadAppSidebarState(),
   settingsMenu: loadSettingsMenuState(),
+  richOutputMotion: loadRichOutputMotionState(),
   ...buildAppSidebarActions(set),
   ...buildSettingsMenuActions(set),
+  ...buildRichOutputMotionActions(set),
   ...buildPreviewActions(set),
   ...buildMobileActions(set),
   ...buildBottomTerminalActions(set),

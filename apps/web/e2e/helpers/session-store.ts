@@ -7,6 +7,12 @@ type E2EStoreWindow = Window & {
       tasks: { activeSessionId: string | null };
       sessionAgentctl: { itemsBySessionId: Record<string, { status?: string }> };
       setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
+      setAuthState: (state: {
+        mode: string;
+        authenticated: boolean;
+        user: StoreUser;
+        ssoProviders: unknown[];
+      }) => void;
     };
     setState: (
       updater: (state: {
@@ -16,11 +22,55 @@ type E2EStoreWindow = Window & {
   };
 };
 
+type StoreUser = {
+  id: string;
+  email: string;
+  display_name: string;
+  role: string;
+  status: string;
+};
+
 type AvailableCommand = {
   name: string;
   description?: string;
   input_hint?: string;
 };
+
+/**
+ * Inject an authenticated identity through the store bridge.
+ *
+ * E2E runs with authentication disabled, which leaves the role undefined and
+ * every role-gated control in its permissive single-user state. Specs that
+ * need to prove a member/admin difference set the identity directly rather
+ * than standing up a real login, matching what the system settings specs do.
+ */
+export async function setStoreRole(
+  page: Page,
+  role: "member" | "admin",
+  overrides: Partial<StoreUser> = {},
+): Promise<void> {
+  await page.waitForFunction(() => Boolean((window as E2EStoreWindow).__KANDEV_E2E_STORE__));
+  await page.evaluate(
+    ({ role, overrides }) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) throw new Error("E2E store bridge is unavailable");
+      store.getState().setAuthState({
+        mode: "enabled",
+        authenticated: true,
+        user: {
+          id: `e2e-${role}`,
+          email: `${role}@e2e.dev`,
+          display_name: role === "admin" ? "E2E Admin" : "E2E Member",
+          role,
+          status: "active",
+          ...overrides,
+        },
+        ssoProviders: [],
+      });
+    },
+    { role, overrides },
+  );
+}
 
 /** Wait until the session agentctl is ready for controls that require it. */
 export async function waitForSessionAgentctlReady(

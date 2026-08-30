@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { PluginRow } from "./plugin-row";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { PluginRow, type PluginRowUpdateState } from "./plugin-row";
 import type { MarketplaceEntry, PluginRecord } from "@/lib/types/plugins";
 
 afterEach(() => cleanup());
@@ -24,7 +24,7 @@ function plugin(overrides: Partial<PluginRecord> = {}): PluginRecord {
   };
 }
 
-function updateEntry(): MarketplaceEntry {
+function marketplaceEntry(overrides: Partial<MarketplaceEntry> = {}): MarketplaceEntry {
   return {
     id: "acme",
     name: "Acme",
@@ -42,10 +42,25 @@ function updateEntry(): MarketplaceEntry {
     install_state: "update_available",
     source_id: "official",
     source_name: "Kandev Official",
+    ...overrides,
+  };
+}
+
+function updateState(overrides: Partial<PluginRowUpdateState> = {}): PluginRowUpdateState {
+  return {
+    latest: marketplaceEntry(),
+    hasUpdate: true,
+    checked: true,
+    busy: false,
+    ...overrides,
   };
 }
 
 const noop = () => undefined;
+const UPDATE_BUTTON_TESTID = "plugin-update-acme";
+const LATEST_VERSION_TESTID = "plugin-latest-version-acme";
+const UPDATE_BADGE_TESTID = "plugin-update-available-acme";
+const NOT_IN_MARKETPLACE_TESTID = "plugin-not-in-marketplace-acme";
 
 // baseProps carries the always-required callbacks/flags so each test only
 // spells out the props it is actually asserting on.
@@ -55,7 +70,6 @@ const baseProps = {
   autoUpdateBusy: false,
   onEnable: noop,
   onDisable: noop,
-  onUninstall: noop,
   onSetAutoUpdate: noop,
 };
 
@@ -119,17 +133,143 @@ describe("PluginRow update button", () => {
   it("shows an Update button with the new version and fires onUpdate", () => {
     const onUpdate = vi.fn();
     render(
-      <PluginRow {...baseProps} plugin={plugin()} update={updateEntry()} onUpdate={onUpdate} />,
+      <PluginRow {...baseProps} plugin={plugin()} update={updateState()} onUpdate={onUpdate} />,
     );
-    const button = screen.getByTestId("plugin-update-acme");
+    const button = screen.getByTestId(UPDATE_BUTTON_TESTID);
     expect(button.textContent).toContain("Update to v2.0.0");
     fireEvent.click(button);
-    expect(onUpdate).toHaveBeenCalledWith(updateEntry());
+    expect(onUpdate).toHaveBeenCalledWith(marketplaceEntry());
   });
 
   it("renders no Update button when there is no pending update", () => {
     render(<PluginRow {...baseProps} plugin={plugin()} />);
-    expect(screen.queryByTestId("plugin-update-acme")).toBeNull();
+    expect(screen.queryByTestId(UPDATE_BUTTON_TESTID)).toBeNull();
+  });
+
+  it("shows a spinner and 'Updating…' while a manual update is in flight, and disables Enable/Disable/Uninstall", () => {
+    render(
+      <PluginRow
+        {...baseProps}
+        busy
+        plugin={plugin()}
+        update={updateState({ busy: true })}
+        onUpdate={noop}
+      />,
+    );
+    const button = screen.getByTestId(UPDATE_BUTTON_TESTID);
+    expect(button.textContent).toContain("Updating");
+    expect(button.querySelector(".animate-spin")).not.toBeNull();
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Uninstall" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it("shows an inline error after a failed manual update, and keeps the button clickable", () => {
+    const onUpdate = vi.fn();
+    render(
+      <PluginRow
+        {...baseProps}
+        plugin={plugin()}
+        update={updateState({ error: "bad checksum" })}
+        onUpdate={onUpdate}
+      />,
+    );
+    expect(screen.getByTestId("plugin-update-error-acme").textContent).toContain("bad checksum");
+    const button = screen.getByTestId(UPDATE_BUTTON_TESTID);
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(button);
+    expect(onUpdate).toHaveBeenCalled();
+  });
+});
+
+describe("PluginRow latest version info", () => {
+  it("shows the latest version without duplicating the update button with a badge", () => {
+    render(<PluginRow {...baseProps} plugin={plugin()} update={updateState()} onUpdate={noop} />);
+    expect(screen.getByTestId(LATEST_VERSION_TESTID).textContent).toContain("Latest v2.0.0");
+    expect(screen.queryByTestId(UPDATE_BADGE_TESTID)).toBeNull();
+    expect(screen.getByTestId(UPDATE_BUTTON_TESTID).getAttribute("data-variant")).toBe("default");
+  });
+
+  it("shows the latest version with no badge and no button when already up to date", () => {
+    render(
+      <PluginRow
+        {...baseProps}
+        plugin={plugin()}
+        update={updateState({
+          latest: marketplaceEntry({ version: "1.0.0", install_state: "installed" }),
+          hasUpdate: false,
+        })}
+      />,
+    );
+    expect(screen.getByTestId(LATEST_VERSION_TESTID).textContent).toContain("Latest v1.0.0");
+    expect(screen.queryByTestId(UPDATE_BADGE_TESTID)).toBeNull();
+    expect(screen.queryByTestId(UPDATE_BUTTON_TESTID)).toBeNull();
+  });
+
+  it("shows a not-in-marketplace hint once checked and absent from every catalog", () => {
+    render(
+      <PluginRow
+        {...baseProps}
+        plugin={plugin()}
+        update={updateState({ latest: undefined, hasUpdate: false, checked: true })}
+      />,
+    );
+    expect(screen.getByTestId(NOT_IN_MARKETPLACE_TESTID)).toBeTruthy();
+    expect(screen.queryByTestId(LATEST_VERSION_TESTID)).toBeNull();
+  });
+
+  // Regression: a plugin carried only by a source that failed this check is
+  // unknown, not delisted — claiming "Not in the marketplace" reads as removal.
+  it("withholds the not-in-marketplace hint when the check only reached some sources", () => {
+    render(
+      <PluginRow
+        {...baseProps}
+        plugin={plugin()}
+        update={updateState({
+          latest: undefined,
+          hasUpdate: false,
+          checked: true,
+          sourcesDegraded: true,
+        })}
+      />,
+    );
+    expect(screen.queryByTestId(NOT_IN_MARKETPLACE_TESTID)).toBeNull();
+    expect(screen.queryByTestId(LATEST_VERSION_TESTID)).toBeNull();
+  });
+
+  it("still shows a known latest version when some other source is degraded", () => {
+    render(
+      <PluginRow
+        {...baseProps}
+        plugin={plugin()}
+        update={updateState({ sourcesDegraded: true })}
+        onUpdate={noop}
+      />,
+    );
+    expect(screen.getByTestId(LATEST_VERSION_TESTID).textContent).toContain("Latest v2.0.0");
+    expect(screen.queryByTestId(UPDATE_BADGE_TESTID)).toBeNull();
+    expect(screen.getByTestId(UPDATE_BUTTON_TESTID).getAttribute("data-variant")).toBe("default");
+  });
+
+  it("shows neither the latest version nor the not-in-marketplace hint before the first successful check", () => {
+    render(
+      <PluginRow
+        {...baseProps}
+        plugin={plugin()}
+        update={updateState({ latest: undefined, hasUpdate: false, checked: false })}
+      />,
+    );
+    expect(screen.queryByTestId(LATEST_VERSION_TESTID)).toBeNull();
+    expect(screen.queryByTestId(NOT_IN_MARKETPLACE_TESTID)).toBeNull();
+  });
+
+  it("renders nothing update-related when no update prop is passed at all", () => {
+    render(<PluginRow {...baseProps} plugin={plugin()} />);
+    expect(screen.queryByTestId(LATEST_VERSION_TESTID)).toBeNull();
+    expect(screen.queryByTestId(NOT_IN_MARKETPLACE_TESTID)).toBeNull();
+    expect(screen.queryByTestId(UPDATE_BADGE_TESTID)).toBeNull();
   });
 });
 
@@ -158,6 +298,17 @@ describe("PluginRow repo link", () => {
       />,
     );
     expect(screen.queryByTestId(REPO_LINK_TESTID)).toBeNull();
+  });
+});
+
+describe("PluginRow settings link", () => {
+  it("shows a labeled settings link beside the row actions", () => {
+    render(<PluginRow {...baseProps} plugin={plugin()} />);
+
+    const settingsLink = screen.getByTestId("plugin-settings-link-acme");
+    expect(settingsLink.textContent).toContain("Settings");
+    expect(settingsLink.getAttribute("href")).toBe("/settings/plugins/acme");
+    expect(settingsLink.className).toContain("min-h-11");
   });
 });
 
@@ -215,5 +366,53 @@ describe("PluginRow auto-update toggle", () => {
     render(<PluginRow {...baseProps} plugin={p} onSetAutoUpdate={onSetAutoUpdate} />);
     fireEvent.click(screen.getByTestId("plugin-auto-update-reset-acme"));
     expect(onSetAutoUpdate).toHaveBeenCalledWith(p, null);
+  });
+});
+
+describe("PluginRow uninstall confirmation", () => {
+  const pluginName = "Acme Tools";
+
+  it("anchors fine-pointer confirmation to the row action and names the target", () => {
+    const p = plugin({ display_name: pluginName });
+    const onConfirmUninstall = vi.fn();
+
+    render(
+      <PluginRow {...baseProps} plugin={p} isFinePointer onConfirmUninstall={onConfirmUninstall} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^Uninstall$/i }));
+
+    expect(screen.getByTestId("plugin-uninstall-confirm-popover").textContent).toContain(
+      pluginName,
+    );
+    expect(document.querySelector('[data-slot="dialog-overlay"]')).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/i }));
+    expect(screen.queryByTestId("plugin-uninstall-confirm-popover")).toBeNull();
+  });
+
+  it("uses inline touch actions on coarse pointers and passes the row target on confirm", async () => {
+    const p = plugin({ display_name: pluginName });
+    const onConfirmUninstall = vi.fn();
+
+    render(
+      <PluginRow
+        {...baseProps}
+        plugin={p}
+        isFinePointer={false}
+        onConfirmUninstall={onConfirmUninstall}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^Uninstall$/i }));
+
+    const confirmation = screen.getByTestId("plugin-uninstall-inline-confirmation");
+    expect(confirmation.textContent).toContain(pluginName);
+    expect(screen.queryByRole("button", { name: /^Uninstall$/i })).toBeNull();
+    expect(screen.getByTestId("plugin-uninstall-confirm").className).toContain("h-11");
+    expect(screen.getByTestId("plugin-uninstall-confirm").className).toContain("min-w-11");
+
+    fireEvent.click(screen.getByTestId("plugin-uninstall-confirm"));
+    await waitFor(() => expect(onConfirmUninstall).toHaveBeenCalledWith(p));
   });
 });

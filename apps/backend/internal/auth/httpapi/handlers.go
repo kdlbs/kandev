@@ -93,7 +93,7 @@ func (h *Handlers) setup(c *gin.Context) {
 		h.writeAuthError(c, err)
 		return
 	}
-	setSessionCookie(c, h.svc.CookieName(), token, h.svc.SessionTTL())
+	setSessionCookie(c, h.svc.CookieNameForRequest(c.Request), token, h.svc.SessionTTL())
 	c.JSON(http.StatusOK, gin.H{"user": user})
 }
 
@@ -108,10 +108,14 @@ func (h *Handlers) login(c *gin.Context) {
 		h.writeAuthError(c, err)
 		return
 	}
-	setSessionCookie(c, h.svc.CookieName(), token, h.svc.SessionTTL())
+	setSessionCookie(c, h.svc.CookieNameForRequest(c.Request), token, h.svc.SessionTTL())
 	c.JSON(http.StatusOK, gin.H{"user": user})
 }
 
+// logout terminates the current session (if any) and clears its port-scoped
+// session cookie. The unprefixed base name is deliberately left untouched —
+// on a host serving a default-port instance it is that instance's live
+// session cookie (see spec: no proactive legacy scrubbing).
 func (h *Handlers) logout(c *gin.Context) {
 	identity, ok := authn.FromGin(c)
 	if ok && identity.SessionID != "" {
@@ -120,7 +124,13 @@ func (h *Handlers) logout(c *gin.Context) {
 			return
 		}
 	}
-	clearSessionCookie(c, h.svc.CookieName())
+	// Clear only the effective (port-scoped) name. The unprefixed base name is
+	// deliberately left alone: on a host serving a default-port instance (or a
+	// not-yet-upgraded one), it is that instance's LIVE session cookie, not an
+	// inert legacy jar — expiring it would log the other instance out (see
+	// docs/specs/auth/requirements/fix-multi-instance-cookie-isolation.md: the upgraded
+	// instance does not proactively delete the legacy cookie).
+	clearSessionCookie(c, h.svc.CookieNameForRequest(c.Request))
 	c.Status(http.StatusNoContent)
 }
 

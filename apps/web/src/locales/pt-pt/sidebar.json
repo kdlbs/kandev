@@ -71,6 +71,7 @@
   "wipQueuePosition": "Posição {{position}} de {{total}} na fila de {{step}}",
   "quickChat": "Chat rápido",
   "quickChatUnseen": "Chat rápido, nova resposta",
+  "quickChatRunning": "Chat rápido, agente a trabalhar",
   "quickTerminal": "Terminal rápido",
   "quickChatTerminals": "Terminais",
   "quickChatNewAgent": "Novo agente",

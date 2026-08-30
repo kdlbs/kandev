@@ -68,6 +68,14 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.DELETE("/personal-connection", c.httpDisconnectPersonalAuth)
 	api.GET("/credentials/resolve", c.httpCredentialBrokerReady)
 	api.POST("/credentials/resolve", c.httpResolveCredentialLease)
+	api.POST("/credentials/reissue", c.httpReissueCredentialLease)
+
+	// Git credential broker routes are provider-neutral. Keep the GitHub paths
+	// above as compatibility aliases for existing executors and integrations.
+	gitAPI := router.Group("/api/v1/git")
+	gitAPI.GET("/credentials/resolve", c.httpCredentialBrokerReady)
+	gitAPI.POST("/credentials/resolve", c.httpResolveCredentialLease)
+	gitAPI.POST("/credentials/reissue", c.httpReissueCredentialLease)
 
 	api.GET("/task-prs", c.httpListTaskPRs)
 	api.POST("/task-prs", c.httpCreateTaskPR)

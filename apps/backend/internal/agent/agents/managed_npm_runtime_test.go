@@ -24,24 +24,33 @@ func TestManagedNPMRuntimeContracts(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			spec := tt.agent.ManagedNPMRuntime()
+			wantDefault := spec.DefaultVersionOrPinned()
+			if wantDefault == "" {
+				t.Fatal("DefaultVersionOrPinned() is empty")
+			}
 			if got := spec.Package; got != tt.wantPackage {
 				t.Fatalf("Package = %q, want %q", got, tt.wantPackage)
+			}
+			if got := spec.DefaultVersion; got != wantDefault {
+				t.Fatalf("DefaultVersion = %q, want %q", got, wantDefault)
 			}
 			if got := spec.ACPArgs; !slices.Equal(got, tt.wantACPArgs) {
 				t.Fatalf("ACPArgs = %#v, want %#v", got, tt.wantACPArgs)
 			}
 
 			cached := spec.CachedACPCommand()
-			wantCached := append([]string{"npx", "--yes", "--prefer-offline", tt.wantPackage}, tt.wantACPArgs...)
+			wantCached := append([]string{"npx", "--yes", "--prefer-offline", tt.wantPackage + "@" + wantDefault}, tt.wantACPArgs...)
 			if !slices.Equal(cached.Args(), wantCached) {
 				t.Fatalf("CachedACPCommand = %#v, want %#v", cached.Args(), wantCached)
 			}
-			assertUnversionedPackage(t, cached.Args(), tt.wantPackage)
+			if got := spec.PackageSpec(""); got != tt.wantPackage+"@"+wantDefault {
+				t.Fatalf("empty PackageSpec = %q, want exact default", got)
+			}
 
 			update := spec.CacheUpdateCommand()
 			wantUpdate := []string{
 				"npm", "exec", "--yes", "--prefer-online",
-				"--package=" + tt.wantPackage, "--", "node", "-e", "",
+				"--package=" + tt.wantPackage + "@" + wantDefault, "--", "node", "-e", "",
 			}
 			if !slices.Equal(update.Args(), wantUpdate) {
 				t.Fatalf("CacheUpdateCommand = %#v, want %#v", update.Args(), wantUpdate)
@@ -55,8 +64,27 @@ func TestManagedNPMRuntimeContracts(t *testing.T) {
 
 func TestManagedNPMRuntimeExecutionCacheKeyMatchesNPM(t *testing.T) {
 	spec := ManagedNPMRuntimeSpec{Package: "opencode-ai"}
-	if got := spec.ExecutionCacheKey(); got != "e2094862b59aac7b" {
-		t.Fatalf("ExecutionCacheKey = %q, want npm key e2094862b59aac7b", got)
+	if got := spec.ExecutionCacheKey(); got != "305cdb391114ad88" {
+		t.Fatalf("ExecutionCacheKey = %q, want npm key 305cdb391114ad88", got)
+	}
+}
+
+func TestManagedNPMRuntimeDefaultVersionOrPinned(t *testing.T) {
+	tests := []struct {
+		name string
+		spec ManagedNPMRuntimeSpec
+		want string
+	}{
+		{name: "explicit default", spec: ManagedNPMRuntimeSpec{Package: "@scope/managed", DefaultVersion: "1.2.3"}, want: "1.2.3"},
+		{name: "built-in catalogue fallback", spec: ManagedNPMRuntimeSpec{Package: "opencode-ai"}, want: MustDefaultManagedNPMRuntimeVersion("opencode-ai")},
+		{name: "custom package without default", spec: ManagedNPMRuntimeSpec{Package: "@scope/managed"}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.spec.DefaultVersionOrPinned(); got != tt.want {
+				t.Fatalf("DefaultVersionOrPinned() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -132,16 +160,5 @@ func TestManagedAgentsHonorExactVersionCommandOption(t *testing.T) {
 				t.Fatalf("exact BuildCommand = %#v, want %#v", got, want)
 			}
 		})
-	}
-}
-
-func assertUnversionedPackage(t *testing.T, argv []string, wantPackage string) {
-	t.Helper()
-	packageArg := argv[3]
-	if packageArg != wantPackage {
-		t.Fatalf("package argv = %q, want unversioned %q", packageArg, wantPackage)
-	}
-	if packageArg == wantPackage+"@latest" {
-		t.Fatalf("package argv contains explicit latest: %q", packageArg)
 	}
 }

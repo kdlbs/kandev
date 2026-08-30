@@ -2,8 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStoreApi } from "@/components/state-provider";
 import { getStoredAutoScrollTop } from "@/lib/local-storage";
+import { useLazyLoadSentinel as useSharedLazyLoadSentinel } from "@/hooks/use-lazy-load-sentinel";
 import type { Message } from "@/lib/types/http";
-import type { RenderItem } from "@/hooks/use-processed-messages";
+import { TASK_DESCRIPTION_SYNTHETIC_ID, type RenderItem } from "@/hooks/use-processed-messages";
 import { getItemKey, shouldAutoScrollToBottom } from "./message-list-shared";
 import {
   isPrependUpdate,
@@ -18,22 +19,35 @@ import { scheduleClampedScrollRestore } from "./clamped-scroll-restore";
 /**
  * Continuously captures scroll state via scroll listener.
  * On a genuine prepend (older messages loaded above the current view, so the
- * first rendered item's identity changes), restores scroll position so the
- * user stays at the same visual spot. A plain append (new item count grows
- * but the first item is unchanged) is left alone — that's the auto-scroll
- * hook's concern, not this one's. Skipped while a user-initiated programmatic
- * scroll (scroll-to-start / scroll-to-last-prompt) is in flight — otherwise
- * writing a stale captured `scrollTop` mid-animation interrupts/cancels the
- * user's smooth scroll and can leave the transcript at the wrong position.
+ * oldest non-synthetic item's identity changes), restores scroll position so
+ * the user stays at the same visual spot. A plain append (new item count grows
+ * but the oldest real item is unchanged) is left alone — that's the
+ * auto-scroll hook's concern, not this one's. Skipped while a user-initiated
+ * programmatic scroll (scroll-to-start / scroll-to-last-prompt) is in flight
+ * — otherwise writing a stale captured `scrollTop` mid-animation
+ * interrupts/cancels the user's smooth scroll and can leave the transcript at
+ * the wrong position.
  */
 function useScrollPositionOnPrepend(
   scrollRef: React.RefObject<HTMLDivElement | null>,
   items: RenderItem[],
+  isLoadingMore: boolean,
   isProgrammaticScrollLocked: () => boolean,
 ) {
-  const scrollState = useRef({ scrollHeight: 0, scrollTop: 0 });
+  const scrollState = useRef<{
+    scrollHeight: number;
+    scrollTop: number;
+    anchorKey: string | null;
+    anchorTop: number | null;
+  }>({ scrollHeight: 0, scrollTop: 0, anchorKey: null, anchorTop: null });
+  const isLoadingMoreRef = useRef(isLoadingMore);
+  const olderLoadPendingRef = useRef(false);
+  const newestItemKeyRef = useRef<string | null>(getNewestNonSyntheticItemKey(items));
+  isLoadingMoreRef.current = isLoadingMore;
+  if (isLoadingMore) olderLoadPendingRef.current = true;
+  newestItemKeyRef.current = getNewestNonSyntheticItemKey(items);
   const prevItemCountRef = useRef(items.length);
-  const prevFirstKeyRef = useRef<string | null>(items.length > 0 ? getItemKey(items[0]) : null);
+  const prevFirstKeyRef = useRef<string | null>(getOldestNonSyntheticItemKey(items));
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -41,8 +55,11 @@ function useScrollPositionOnPrepend(
     /** Captures the container's current scrollHeight/scrollTop so a later
      * prepend can restore the visual position. */
     const onScroll = () => {
-      scrollState.current.scrollHeight = el.scrollHeight;
-      scrollState.current.scrollTop = el.scrollTop;
+      // Native overflow anchoring can adjust scrollTop while the older page is
+      // being inserted. Keep the pre-request baseline until our layout effect
+      // has restored the visual position explicitly.
+      if (isLoadingMoreRef.current) return;
+      scrollState.current = capturePrependScrollState(el, newestItemKeyRef.current);
     };
     onScroll();
     el.addEventListener("scroll", onScroll, { passive: true });
@@ -51,8 +68,8 @@ function useScrollPositionOnPrepend(
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    const nextFirstKey = items.length > 0 ? getItemKey(items[0]) : null;
-    const prepend =
+    const nextFirstKey = getOldestNonSyntheticItemKey(items);
+    const identityPrepend =
       !!el &&
       isPrependUpdate({
         prevItemCount: prevItemCountRef.current,
@@ -60,77 +77,80 @@ function useScrollPositionOnPrepend(
         prevFirstKey: prevFirstKeyRef.current,
         nextFirstKey,
       });
+    const olderLoadSettled = olderLoadPendingRef.current && !isLoadingMore;
+    const prepend = olderLoadSettled || (!olderLoadPendingRef.current && identityPrepend);
     prevItemCountRef.current = items.length;
     prevFirstKeyRef.current = nextFirstKey;
+    if (olderLoadSettled) olderLoadPendingRef.current = false;
     if (!el || !prepend || isProgrammaticScrollLocked()) return;
     const prev = scrollState.current;
-    const delta = el.scrollHeight - prev.scrollHeight;
-    if (delta > 0) {
-      el.scrollTop = prev.scrollTop + delta;
+    const anchor = findMessageRow(el, prev.anchorKey);
+    if (anchor && prev.anchorTop !== null) {
+      el.scrollTop += anchor.getBoundingClientRect().top - prev.anchorTop;
+    } else {
+      const delta = el.scrollHeight - prev.scrollHeight;
+      if (delta > 0) el.scrollTop = prev.scrollTop + delta;
     }
-  }, [items, scrollRef, isProgrammaticScrollLocked]);
+    scrollState.current = capturePrependScrollState(el, newestItemKeyRef.current);
+  }, [items, scrollRef, isLoadingMore, isProgrammaticScrollLocked]);
+}
+
+function getOldestNonSyntheticItemKey(items: RenderItem[]): string | null {
+  const oldestRealItem = items.find((item) => {
+    if (item.type === "prepare_progress" || item.type === "agent_error_notice") return false;
+    return item.type !== "message" || item.message.id !== TASK_DESCRIPTION_SYNTHETIC_ID;
+  });
+  return oldestRealItem ? getItemKey(oldestRealItem) : null;
+}
+
+function getNewestNonSyntheticItemKey(items: RenderItem[]): string | null {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item.type === "prepare_progress" || item.type === "agent_error_notice") continue;
+    if (item.type === "message" && item.message.id === TASK_DESCRIPTION_SYNTHETIC_ID) continue;
+    return getItemKey(item);
+  }
+  return null;
+}
+
+function findMessageRow(scrollRoot: HTMLElement, itemKey: string | null): HTMLElement | null {
+  if (!itemKey) return null;
+  const expectedId = `msg-${itemKey}`;
+  return (
+    Array.from(scrollRoot.querySelectorAll<HTMLElement>("[id^='msg-']")).find(
+      (candidate) => candidate.id === expectedId,
+    ) ?? null
+  );
+}
+
+function capturePrependScrollState(scrollRoot: HTMLElement, anchorKey: string | null) {
+  const anchor = findMessageRow(scrollRoot, anchorKey);
+  return {
+    scrollHeight: scrollRoot.scrollHeight,
+    scrollTop: scrollRoot.scrollTop,
+    anchorKey,
+    anchorTop: anchor?.getBoundingClientRect().top ?? null,
+  };
 }
 
 /**
  * Observes a sentinel element at the top of the list to trigger lazy loading.
- * Uses a callback ref so the observer reconnects when the sentinel remounts.
- *
- * Handles the timing issue where the sentinel DOM node mounts (callback ref fires)
- * before the useEffect creates the IntersectionObserver. The sentinelNodeRef bridges
- * the gap: the callback ref stores the node, and the effect observes it if present.
+ * Delegates to the shared useLazyLoadSentinel hook with positive-result
+ * automatic re-arming enabled. The transcript still does not join an
+ * in-flight request: it waits for its current page before observing the next
+ * one. The explicit button remains the recovery path for errors and no-op
+ * responses.
  */
 function useLazyLoadSentinel(
   scrollRef: React.RefObject<HTMLDivElement | null>,
   hasMore: boolean,
+  blocked: boolean,
   isLoadingMore: boolean,
   loadMore: () => Promise<number>,
 ) {
-  const stateRef = useRef({ hasMore, isLoadingMore });
-  useEffect(() => {
-    stateRef.current = { hasMore, isLoadingMore };
-  }, [hasMore, isLoadingMore]);
-
-  const observerRef = useRef<IntersectionObserver | null>(null);
-  const sentinelNodeRef = useRef<HTMLDivElement | null>(null);
-
-  // Create/destroy observer when scroll container changes
-  useEffect(() => {
-    const root = scrollRef.current;
-    if (!root) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const { hasMore, isLoadingMore } = stateRef.current;
-        const isIntersecting = entries[0]?.isIntersecting;
-        if (isIntersecting && hasMore && !isLoadingMore) {
-          loadMore();
-        }
-      },
-      { root, rootMargin: "200px 0px 0px 0px" },
-    );
-    observerRef.current = observer;
-    // If sentinel already mounted before this effect ran, observe it now
-    if (sentinelNodeRef.current) {
-      observer.observe(sentinelNodeRef.current);
-    }
-    return () => {
-      observer.disconnect();
-      observerRef.current = null;
-    };
-  }, [scrollRef, loadMore]);
-
-  // Callback ref — stores node and observes if observer already exists
-  const sentinelRef = useCallback((node: HTMLDivElement | null) => {
-    sentinelNodeRef.current = node;
-    const observer = observerRef.current;
-    if (observer) {
-      observer.disconnect();
-      if (node) {
-        observer.observe(node);
-      }
-    }
-  }, []);
-
-  return sentinelRef;
+  return useSharedLazyLoadSentinel(scrollRef, hasMore, blocked, isLoadingMore, loadMore, {
+    rearmWhileIntersecting: true,
+  });
 }
 
 /** Duration a programmatic scroll's guard stays held if the browser never
@@ -574,6 +594,8 @@ export function useNativeScrollManagement(params: {
   sessionId: string | null;
   enabled: boolean;
   hasUnreadDivider: boolean;
+  /** Initial/refetch loading: the sentinel's hard block (never fires, never joins). */
+  messagesLoading: boolean;
   hasMore: boolean;
   isLoadingMore: boolean;
   loadMore: () => Promise<number>;
@@ -586,6 +608,7 @@ export function useNativeScrollManagement(params: {
     sessionId,
     enabled,
     hasUnreadDivider,
+    messagesLoading,
     hasMore,
     isLoadingMore,
     loadMore,
@@ -607,8 +630,14 @@ export function useNativeScrollManagement(params: {
     resyncIsNearBottom,
   );
   const handleScrollToMessage = useScrollToMessage(scrollRef, runGuardedScroll);
-  useScrollPositionOnPrepend(scrollRef, items, isProgrammaticScrollLocked);
-  const sentinelRef = useLazyLoadSentinel(scrollRef, hasMore, isLoadingMore, loadMore);
+  useScrollPositionOnPrepend(scrollRef, items, isLoadingMore, isProgrammaticScrollLocked);
+  const { sentinelRef } = useLazyLoadSentinel(
+    scrollRef,
+    hasMore,
+    messagesLoading,
+    isLoadingMore,
+    loadMore,
+  );
   useInitialScrollPosition(scrollRef, items.length, sessionId, enabled, isNearBottomRef);
 
   return { handleScrollToMessage, sentinelRef, resyncIsNearBottom, markNotNearBottom };

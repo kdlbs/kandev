@@ -241,6 +241,12 @@ test.describe("Entity reference composer", () => {
     await expect(testPage.getByRole("option").filter({ hasText: targetTitle })).toBeVisible({
       timeout: 10_000,
     });
+
+    await editor.press("Escape");
+    await expect(testPage.getByRole("option").filter({ hasText: targetTitle })).toHaveCount(0);
+    await expect(editor).toBeFocused();
+    await editor.pressSequentially(" continued");
+    await expect(editor).toHaveText(new RegExp(`@${targetTitle} continued`));
   });
 
   test("task chat restores a keyboard-selected draft and explicitly sends durable metadata", async ({
@@ -490,6 +496,7 @@ test.describe("Entity reference composer", () => {
     await editor.pressSequentially("E");
     await editor.press("Escape");
     await expect(menu).toHaveCount(0);
+    await expect(editor).toBeFocused();
     await editor.pressSequentially(" continued");
     await expect(menu).toHaveCount(0);
     await expect(editor).toHaveText(

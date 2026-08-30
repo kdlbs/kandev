@@ -5,7 +5,7 @@ status: in-progress
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/fix-duplicated-tab-stale-data/spec.md"
+spec: "../../specs/ui/requirements/fix-duplicated-tab-stale-data.md"
 ---
 
 # Task 01: Reload on BFCache Restore
@@ -121,7 +121,7 @@ Sequential. Single task; no parallel candidates.
 
 ## Inputs
 
-- Repair spec: `docs/specs/fix-duplicated-tab-stale-data/spec.md`.
+- Repair spec: `docs/specs/ui/requirements/fix-duplicated-tab-stale-data.md`.
 - Existing pattern: `apps/web/src/vite-preload-recovery.ts` and its test
   (injected `target`/`reload`, defensive storage reads).
 - Bootstrap entry: `apps/web/src/main.tsx` (`installVitePreloadRecovery()`

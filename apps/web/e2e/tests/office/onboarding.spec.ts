@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { officeTopbarTitle } from "../../helpers/office-topbar";
 
 test.describe("Onboarding", () => {
   test("onboarding state reflects completed after setup", async ({ officeApi, officeSeed }) => {
@@ -25,7 +26,7 @@ test.describe("Onboarding", () => {
 
   test("dashboard page shows metric cards", async ({ testPage, officeSeed: _ }) => {
     await testPage.goto("/office");
-    await expect(testPage.getByRole("heading", { name: /Dashboard/i }).first()).toBeVisible({
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Dashboard/i, {
       timeout: 10_000,
     });
     await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
@@ -280,7 +281,7 @@ test.describe("Onboarding", () => {
 
     // Redirect to dashboard with new workspace selected
     await expect(testPage).toHaveURL(/\/office(\?|$)/, { timeout: 15_000 });
-    await expect(testPage.getByRole("heading", { name: /Dashboard/i }).first()).toBeVisible({
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Dashboard/i, {
       timeout: 10_000,
     });
 

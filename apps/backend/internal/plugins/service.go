@@ -75,6 +75,18 @@ type Service struct {
 	// insertion one atomic catalog mutation across different plugin IDs.
 	agentToolInstallMu sync.Mutex
 
+	// extractingMu guards extractingPaths and, crucially, is held across the
+	// pkgtar extraction that registers into it: a version directory must never
+	// be observable on disk before it is marked in flight, or a concurrent
+	// prune could delete it in that gap. See extractPackage.
+	extractingMu sync.Mutex
+	// extractingPaths counts, per version directory, the installs that have
+	// extracted it but have not yet finished. Install extracts before it can
+	// know the plugin id (and therefore before it can take that id's lifecycle
+	// lock), so this is what tells a prune running under the lock that a
+	// directory belongs to an install still waiting for it.
+	extractingPaths map[string]int
+
 	pluginsDir       string
 	store            store.Store
 	registry         *Registry
@@ -105,11 +117,13 @@ type Service struct {
 	// accessors regardless of declared capabilities (see host_data.go's
 	// accessor nil-checks).
 	taskData         taskDataSource
+	taskRelations    taskRelationsSource
 	workflows        workflowLister
 	workflowSteps    workflowStepLister
 	agentProfiles    agentProfileDataSource
 	sessionCodeStats sessionCodeStatsSource
 	messageData      messageDataSource
+	interactionData  interactionDataSource
 	taskWriter       taskWriter
 
 	// Utility agent invocation (ADR 0048), wired via SetUtilityAgent.
@@ -122,6 +136,12 @@ type Service struct {
 	// pluginHost). Mutex-guarded against the concurrent hostForPlugin reads.
 	messenger   taskMessenger
 	taskStarter taskStarter
+
+	// Interaction response path wired late via SetInteractionResponder (ADR
+	// 0052), for the same reason as messenger/taskStarter: the orchestrator
+	// and the clarification handler are constructed after boot-active plugins
+	// spawn. Mutex-guarded against the concurrent hostForPlugin reads.
+	interactionResponder interactionResponder
 
 	// authLogin establishes an authenticated browser session for an external
 	// identity an auth-capable plugin asserts via its webhook response
@@ -389,6 +409,7 @@ func (s *Service) SetDataSources(
 	agentProfiles agentProfileDataSource,
 	sessionCodeStats sessionCodeStatsSource,
 	messages messageDataSource,
+	interactions interactionDataSource,
 	taskWrites taskWriter,
 ) {
 	s.taskData = tasks
@@ -397,7 +418,44 @@ func (s *Service) SetDataSources(
 	s.agentProfiles = agentProfiles
 	s.sessionCodeStats = sessionCodeStats
 	s.messageData = messages
+	s.interactionData = interactions
 	s.taskWriter = taskWrites
+}
+
+// SetInteractionResponder wires the interaction write path (ADR 0052): the
+// adapter that answers permissions through the orchestrator and clarification
+// bundles through the clarification handler. Wired LATE for the same reason as
+// SetWriteDeps — both first-party services are constructed after
+// StartActivePlugins has spawned boot-active plugins — so hosts read it live
+// via interactionResponderDep rather than snapshotting it. A nil responder
+// leaves the write RPCs returning Unimplemented; the reads are unaffected.
+func (s *Service) SetInteractionResponder(responder interactionResponder) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.interactionResponder = responder
+}
+
+// interactionResponderDep returns the currently-wired interaction responder,
+// guarded by s.mu against the SetInteractionResponder write.
+func (s *Service) interactionResponderDep() interactionResponder {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.interactionResponder
+}
+
+// SetTaskRelationsSource wires the compact workspace-scoped relation graph
+// separately because HandoffService is assembled after boot-active plugins
+// may already have started. Hosts resolve it at request time.
+func (s *Service) SetTaskRelationsSource(source taskRelationsSource) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.taskRelations = source
+}
+
+func (s *Service) taskRelationsSource() taskRelationsSource {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.taskRelations
 }
 
 // SetWriteDeps wires the Host data API's late write dependencies (ADR 0043
@@ -468,6 +526,18 @@ func (s *Service) authLoginBridge() AuthLoginBridge {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.authLogin
+}
+
+// sessionCookieName returns the name of Kandev's own session cookie via the
+// wired auth bridge, or "" when no bridge is wired (auth disabled entirely,
+// so no session cookie is ever minted). Used by the webhook relay to strip
+// that cookie before forwarding headers to a plugin subprocess.
+func (s *Service) sessionCookieName() string {
+	bridge := s.authLoginBridge()
+	if bridge == nil {
+		return ""
+	}
+	return bridge.SessionCookieName()
 }
 
 // SetKandevVersion wires the currently running kandev build version,
@@ -570,14 +640,17 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		bus:                 s.eventBus,
 		configs:             s.store,
 		taskData:            s.taskData,
+		taskRelations:       s.taskRelationsSource,
 		workflows:           s.workflows,
 		workflowSteps:       s.workflowSteps,
 		agentProfiles:       s.agentProfiles,
 		sessionCodeStats:    s.sessionCodeStats,
 		messageData:         s.messageData,
+		interactionData:     s.interactionData,
 		taskWriter:          s.taskWriter,
 		utilityDeps:         s.utilityAgentDeps,
 		writeDeps:           s.writeDependencies,
+		interactionDeps:     s.interactionResponderDep,
 	}
 }
 

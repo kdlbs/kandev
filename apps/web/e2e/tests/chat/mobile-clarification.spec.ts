@@ -8,9 +8,9 @@ import { seedClarificationSession } from "../../helpers/clarification";
  * bundles). Runs under the Pixel 5 `mobile-chrome` project.
  */
 test.describe("Mobile clarification multiline answer", () => {
-  test.describe.configure({ retries: 1, timeout: 120_000 });
+  test.describe.configure({ timeout: 120_000 });
 
-  test("keeps a pending question open while typing a digit in the inline composer", async ({
+  test("Auto-run ON does not bypass a pending clarification on mobile", async ({
     testPage,
     apiClient,
     seedData,
@@ -34,8 +34,16 @@ test.describe("Mobile clarification multiline answer", () => {
     await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
     await expect(session.clarificationOverlay()).toBeVisible();
     await testPage.getByTestId("queue-chip").tap();
-    await expect(testPage.getByTestId("queued-ghost-list")).toBeVisible();
-    await expect(testPage.getByTestId("queue-drain-next")).not.toBeVisible();
+    const panel = testPage.getByTestId("queued-ghost-list");
+    await expect(panel).toBeVisible();
+    const autoRun = panel.getByTestId("queue-auto-run");
+    await expect(autoRun).toHaveAttribute("data-state", "checked");
+    await autoRun.tap();
+    await expect(autoRun).toHaveAttribute("data-state", "unchecked");
+    await autoRun.tap();
+    await expect(autoRun).toHaveAttribute("data-state", "checked");
+    await expect(panel.getByTestId("queue-entry")).toHaveCount(1);
+    await expect(session.clarificationOverlay()).toBeVisible();
   });
 
   test("Enter inserts a newline and the Send button submits the multiline answer", async ({
@@ -76,6 +84,43 @@ test.describe("Mobile clarification multiline answer", () => {
     await expect(session.chat).toContainText("first line");
     await expect(session.chat).toContainText("second line");
     await expect(session.chat).not.toContainText("linesecond line");
+  });
+
+  test("keeps the over-limit counter inside the phone viewport", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarify Limit",
+      { scenario: "clarification" },
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    await session.clarificationInput().fill("a".repeat(2001));
+
+    const counter = session.clarificationOverlay().getByTestId("clarification-input-rune-counter");
+    await expect(counter).toHaveAttribute("data-over-limit", "true");
+
+    const [counterBox, overlayBox] = await Promise.all([
+      counter.boundingBox(),
+      session.clarificationOverlay().boundingBox(),
+    ]);
+    if (!counterBox || !overlayBox) {
+      throw new Error("expected mobile counter and overlay to have bounding boxes");
+    }
+    expect(counterBox.x).toBeGreaterThanOrEqual(overlayBox.x - 1);
+    expect(counterBox.x + counterBox.width).toBeLessThanOrEqual(
+      overlayBox.x + overlayBox.width + 1,
+    );
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
   });
 
   test("shows shared context once above the question on mobile", async ({
@@ -128,5 +173,82 @@ test.describe("Mobile clarification multiline answer", () => {
     await session.clarificationStep(1).tap();
     await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "true");
     await expect(context).toHaveCount(1);
+  });
+
+  test("separates batch actions from the stepper while showing submission feedback", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarify Submit Feedback",
+      { scenario: "clarification-multi" },
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    await session.clarificationOption("PostgreSQL").tap();
+    await session.clarificationOption("Go").tap();
+    await session.clarificationOption("Docker").tap();
+
+    let releaseResponse = () => undefined;
+    const heldResponse = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+    await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      await heldResponse;
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    });
+
+    const header = session.clarificationOverlay().getByTestId("clarification-overlay-header");
+    const stepper = session.clarificationOverlay().getByTestId("clarification-stepper");
+    const submit = session.clarificationSubmit();
+    const skip = session.clarificationSkip();
+    const collapse = session.clarificationCollapseToggle();
+    await expect(submit).toBeEnabled();
+    const [headerBox, stepperBox, idleSubmitBox, skipBox, collapseBox] = await Promise.all([
+      header.boundingBox(),
+      stepper.boundingBox(),
+      submit.boundingBox(),
+      skip.boundingBox(),
+      collapse.boundingBox(),
+    ]);
+    if (!headerBox || !stepperBox || !idleSubmitBox || !skipBox || !collapseBox) {
+      throw new Error("expected mobile clarification header controls to have bounding boxes");
+    }
+
+    expect(idleSubmitBox.y).toBeGreaterThanOrEqual(stepperBox.y + stepperBox.height + 4);
+    expect(skipBox.height).toBeGreaterThanOrEqual(44);
+    expect(skipBox.width).toBeGreaterThanOrEqual(44);
+    expect(collapseBox.height).toBeGreaterThanOrEqual(44);
+    expect(collapseBox.width).toBeGreaterThanOrEqual(44);
+    expect(idleSubmitBox.x).toBeGreaterThanOrEqual(headerBox.x);
+    expect(collapseBox.x + collapseBox.width).toBeLessThanOrEqual(headerBox.x + headerBox.width);
+    await submit.tap();
+    await expect(submit).toContainText("Submitting");
+    await expect(submit).toBeDisabled();
+    await expect(submit.locator('[role="status"]')).toBeVisible();
+    await expect(submit.locator('[role="status"]')).toHaveAttribute("aria-hidden", "true");
+    await expect(submit.locator("svg.tabler-icon-check")).toHaveCount(0);
+    const pendingSubmitBox = await submit.boundingBox();
+    if (!pendingSubmitBox) {
+      throw new Error("expected pending mobile clarification Submit button to have a bounding box");
+    }
+    await expect(
+      testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).resolves.toBe(true);
+
+    try {
+      expect(idleSubmitBox.height).toBeGreaterThanOrEqual(44);
+      expect(pendingSubmitBox.height).toBeGreaterThanOrEqual(44);
+      expect(Math.abs(pendingSubmitBox.height - idleSubmitBox.height)).toBeLessThanOrEqual(1);
+    } finally {
+      releaseResponse();
+    }
+    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
   });
 });

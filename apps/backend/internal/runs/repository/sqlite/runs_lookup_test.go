@@ -82,6 +82,38 @@ func TestGetClaimedRunByTaskID_MatchesThePayloadTaskAndPrefersTheLatestClaim(t *
 	}
 }
 
+// TestGetClaimedRunByTaskAndAgent_ScopesToTheAgentEvenWhenAnotherAgentsClaimIsNewer
+// pins the Review round-4 BLOCKING FINDING 2 fix: two different agents can
+// each have a claimed run on the same task at once (ClaimNextEligibleRun's
+// busy-lock is per-agent, not per-task), so a caller that knows which
+// agent's lifecycle event it is handling must not fall back to "most
+// recently claimed" like GetClaimedRunByTaskID does.
+func TestGetClaimedRunByTaskAndAgent_ScopesToTheAgentEvenWhenAnotherAgentsClaimIsNewer(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	wantAgent := seedTaskRun(t, repo, "older-claim-a1", "a1", "t1", "queued")
+	setStatus(t, repo, wantAgent.ID, "claimed", timePtr(base), nil)
+	otherAgent := seedTaskRun(t, repo, "newer-claim-a2", "a2", "t1", "queued")
+	setStatus(t, repo, otherAgent.ID, "claimed", timePtr(base.Add(time.Hour)), nil)
+
+	got, err := repo.GetClaimedRunByTaskAndAgent(ctx, "t1", "a1")
+	if err != nil {
+		t.Fatalf("get claimed run: %v", err)
+	}
+	if got.ID != wantAgent.ID {
+		t.Errorf("claimed run = %q, want %q (a1's own claim, not a2's newer one)", got.ID, wantAgent.ID)
+	}
+
+	if _, err := repo.GetClaimedRunByTaskAndAgent(ctx, "t1", "a-unknown"); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("unknown agent err = %v, want sql.ErrNoRows", err)
+	}
+	if _, err := repo.GetClaimedRunByTaskAndAgent(ctx, "t-unknown", "a1"); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("unknown task err = %v, want sql.ErrNoRows", err)
+	}
+}
+
 // TestGetClaimedTasklessRunForAgent_OnlyMatchesRunsWithoutATask pins the
 // heartbeat attribution rule: a missing or empty payload task_id counts
 // as taskless, a populated one never does.
@@ -225,4 +257,72 @@ func checkInt64(t *testing.T, field string, got, want int64) {
 	if got != want {
 		t.Errorf("%s = %d, want %d", field, got, want)
 	}
+}
+
+// TestGetRunWorkspaceID_ResolvesViaAgentProfileJoin pins the WS gateway's
+// run.subscribe authorization lookup (WO-02): the run's owning workspace
+// comes from its agent profile, the same join idiom ListRuns uses.
+func TestGetRunWorkspaceID_ResolvesViaAgentProfileJoin(t *testing.T) {
+	repo, writer := newTestRepoWithDB(t)
+	ctx := context.Background()
+
+	seedAgentProfile(t, writer, "a1", "ws-1")
+	run := seedTaskRun(t, repo, "run-1", "a1", "t1", "queued")
+
+	got, err := repo.GetRunWorkspaceID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run workspace id: %v", err)
+	}
+	checkString(t, "workspace_id", got, "ws-1")
+}
+
+// TestGetRunWorkspaceID_StillResolvesWhenAgentProfileSoftDeleted pins the
+// deliberate choice of a raw join over GetAgentInstance: GetAgentInstance
+// filters deleted_at IS NULL, which would make a run under a soft-deleted
+// agent profile permanently unresolvable (and so permanently deniable) to
+// its own owner.
+func TestGetRunWorkspaceID_StillResolvesWhenAgentProfileSoftDeleted(t *testing.T) {
+	repo, writer := newTestRepoWithDB(t)
+	ctx := context.Background()
+
+	seedAgentProfile(t, writer, "a1", "ws-1")
+	run := seedTaskRun(t, repo, "run-1", "a1", "t1", "queued")
+
+	if _, err := writer.Exec(`UPDATE agent_profiles SET deleted_at = ? WHERE id = 'a1'`, time.Now().UTC()); err != nil {
+		t.Fatalf("soft-delete agent profile: %v", err)
+	}
+
+	got, err := repo.GetRunWorkspaceID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run workspace id after soft delete: %v", err)
+	}
+	checkString(t, "workspace_id", got, "ws-1")
+}
+
+// TestGetRunWorkspaceID_UnknownRunReturnsNoRows pins the sentinel the
+// gateway's subscribe hook denies on.
+func TestGetRunWorkspaceID_UnknownRunReturnsNoRows(t *testing.T) {
+	repo := newTestRepo(t)
+	if _, err := repo.GetRunWorkspaceID(context.Background(), "nope"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("err = %v, want sql.ErrNoRows", err)
+	}
+}
+
+// TestGetRunWorkspaceID_ResolvesToEmptyStringForUnscopedAgentProfile pins the
+// WO-02 round-2 fix: an ordinary (non-Office) agent profile has
+// workspace_id=” (schema default, no backfill), and the join returns that
+// empty string as-is rather than an error. The gateway's subscribe hook (not
+// this repository) is responsible for denying on an empty result.
+func TestGetRunWorkspaceID_ResolvesToEmptyStringForUnscopedAgentProfile(t *testing.T) {
+	repo, writer := newTestRepoWithDB(t)
+	ctx := context.Background()
+
+	seedAgentProfile(t, writer, "a1", "")
+	run := seedTaskRun(t, repo, "run-1", "a1", "t1", "queued")
+
+	got, err := repo.GetRunWorkspaceID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run workspace id: %v", err)
+	}
+	checkString(t, "workspace_id", got, "")
 }

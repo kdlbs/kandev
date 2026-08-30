@@ -2,6 +2,7 @@ package statussummary
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -133,5 +134,78 @@ func TestTaskStatusSummaryValidateBoundsErrorPreview(t *testing.T) {
 	invalidUTF8 := TaskStatusSummary{ActiveError: &ActiveErrorSummary{Preview: string([]byte{0xff})}}
 	if err := invalidUTF8.Validate(); err == nil {
 		t.Fatal("invalid UTF-8 preview should be rejected")
+	}
+}
+
+func TestTaskStatusSummaryProjectsTaskOwnedErrorFields(t *testing.T) {
+	now := time.Date(2026, 8, 19, 20, 0, 0, 0, time.UTC)
+	got := BuildFromAuthoritative(RebuildInput{
+		TaskError: &ActiveErrorSummary{
+			TaskRepositoryID: "task-repository-1",
+			Stamp:            "task-error-1",
+			OccurredAt:       now,
+			Preview:          "The linked pull request is already closed or merged.",
+			Category:         "pr_already_closed",
+			RecoveryActions: []string{
+				"mark_review_done", "unknown", "mark_review_done", "retry_default",
+			},
+		},
+		Sessions: []RebuildSession{{
+			ID: "older-session",
+			ActiveError: &ActiveErrorSummary{
+				SessionID:  "older-session",
+				Stamp:      "session-error-1",
+				OccurredAt: now.Add(-time.Minute),
+				Preview:    "older",
+			},
+		}},
+		Now: now,
+	})
+
+	if got.ActiveError == nil {
+		t.Fatal("active error is nil")
+	}
+	if got.ActiveError.SessionID != "" || got.ActiveError.TaskRepositoryID != "task-repository-1" {
+		t.Fatalf("active error identity = %+v", got.ActiveError)
+	}
+	if got.ActiveError.Category != "pr_already_closed" {
+		t.Fatalf("active error category = %q", got.ActiveError.Category)
+	}
+	wantActions := []string{"mark_review_done", "retry_default"}
+	if !reflect.DeepEqual(got.ActiveError.RecoveryActions, wantActions) {
+		t.Fatalf("active error actions = %#v, want %#v", got.ActiveError.RecoveryActions, wantActions)
+	}
+}
+
+func TestTaskStatusSummaryValidatesActiveErrorCategoryAndTaskRepositoryBounds(t *testing.T) {
+	tooLargeCategory := TaskStatusSummary{ActiveError: &ActiveErrorSummary{
+		Category: strings.Repeat("x", 65),
+	}}
+	if err := tooLargeCategory.Validate(); err == nil {
+		t.Fatal("oversized active error category should be rejected")
+	}
+	tooLargeRepository := TaskStatusSummary{ActiveError: &ActiveErrorSummary{
+		TaskRepositoryID: strings.Repeat("x", 257),
+	}}
+	if err := tooLargeRepository.Validate(); err == nil {
+		t.Fatal("oversized task repository identity should be rejected")
+	}
+}
+
+func TestBuildFromAuthoritativeUsesStableStampAsErrorTieBreaker(t *testing.T) {
+	now := time.Date(2026, 8, 19, 20, 0, 0, 0, time.UTC)
+	got := BuildFromAuthoritative(RebuildInput{
+		Sessions: []RebuildSession{
+			{ID: "session-a", ActiveError: &ActiveErrorSummary{
+				SessionID: "session-a", Stamp: "stamp-a", OccurredAt: now, Preview: "a",
+			}},
+			{ID: "session-b", ActiveError: &ActiveErrorSummary{
+				SessionID: "session-b", Stamp: "stamp-b", OccurredAt: now, Preview: "b",
+			}},
+		},
+		Now: now,
+	})
+	if got.ActiveError == nil || got.ActiveError.Stamp != "stamp-b" {
+		t.Fatalf("active error = %+v, want the stable-stamp winner", got.ActiveError)
 	}
 }

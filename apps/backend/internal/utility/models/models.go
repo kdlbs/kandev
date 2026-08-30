@@ -36,18 +36,19 @@ func UsesDefaultProfile(agent *UtilityAgent) bool {
 
 // UtilityAgentCall represents a single invocation of a utility agent.
 type UtilityAgentCall struct {
-	ID             string     `json:"id" db:"id"`
-	UtilityID      string     `json:"utility_id" db:"utility_id"`
-	SessionID      string     `json:"session_id" db:"session_id"`
-	ResolvedPrompt string     `json:"resolved_prompt" db:"resolved_prompt"`
-	Response       string     `json:"response" db:"response"`
-	Model          string     `json:"model" db:"model"`
-	AgentProfileID string     `json:"agent_profile_id" db:"agent_profile_id"`
-	PromptTokens   int        `json:"prompt_tokens" db:"prompt_tokens"`
-	ResponseTokens int        `json:"response_tokens" db:"response_tokens"`
-	DurationMs     int        `json:"duration_ms" db:"duration_ms"`
-	Status         string     `json:"status" db:"status"` // "pending", "completed", "failed"
-	ErrorMessage   string     `json:"error_message" db:"error_message"`
-	CreatedAt      time.Time  `json:"created_at" db:"created_at"`
-	CompletedAt    *time.Time `json:"completed_at" db:"completed_at"`
+	ID                 string     `json:"id" db:"id"`
+	UtilityID          string     `json:"utility_id" db:"utility_id"`
+	SessionID          string     `json:"session_id" db:"session_id"`
+	ResolvedPrompt     string     `json:"resolved_prompt" db:"resolved_prompt"`
+	Response           string     `json:"response" db:"response"`
+	Model              string     `json:"model" db:"model"`
+	AgentProfileID     string     `json:"agent_profile_id" db:"agent_profile_id"`
+	ExecutionProfileID string     `json:"execution_profile_id,omitempty" db:"execution_profile_id"`
+	PromptTokens       int        `json:"prompt_tokens" db:"prompt_tokens"`
+	ResponseTokens     int        `json:"response_tokens" db:"response_tokens"`
+	DurationMs         int        `json:"duration_ms" db:"duration_ms"`
+	Status             string     `json:"status" db:"status"` // "pending", "completed", "failed"
+	ErrorMessage       string     `json:"error_message" db:"error_message"`
+	CreatedAt          time.Time  `json:"created_at" db:"created_at"`
+	CompletedAt        *time.Time `json:"completed_at" db:"completed_at"`
 }

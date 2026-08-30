@@ -100,6 +100,7 @@ func (s *Server) setupRoutes() {
 
 		// Process control
 		api.POST("/agent/configure", s.handleAgentConfigure)
+		api.POST("/agent/managed-runtime/cache-repair", s.handleManagedRuntimeCacheRepair)
 		api.POST("/start", s.handleStart)
 		api.POST("/stop", s.handleStop)
 
@@ -128,6 +129,9 @@ func (s *Server) setupRoutes() {
 		// and triggers a fresh git-status emit so the UI updates without
 		// waiting for the next poll tick.
 		api.POST("/workspace/base-branches", s.handleSetBaseBranches)
+		// Provider-qualified comparison targets are authenticated internal state;
+		// the backend uses this route after association, retarget, and resume.
+		api.POST("/workspace/comparison-targets", s.handleSetComparisonTargets)
 
 		// Workspace file operations (simple HTTP)
 		api.GET("/workspace/tree", s.handleFileTree)
@@ -424,10 +428,10 @@ func (s *Server) handleStart(c *gin.Context) {
 type AgentConfigureRequest struct {
 	Command         string            `json:"command"`
 	AgentArgs       optionalArgs      `json:"agent_args"`
-	ContinueCommand string            `json:"continue_command,omitempty"` // For one-shot agents (Amp): command for follow-up prompts
+	ContinueCommand string            `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
 	ContinueArgs    optionalArgs      `json:"continue_args"`
 	Env             map[string]string `json:"env,omitempty"`
-	ApprovalPolicy  string            `json:"approval_policy,omitempty"` // For Codex: "untrusted", "on-failure", "on-request", "never"
+	ApprovalPolicy  string            `json:"approval_policy,omitempty"` // "untrusted", "on-failure", "on-request", or "never"
 }
 
 type optionalArgs struct {

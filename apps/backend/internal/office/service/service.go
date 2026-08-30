@@ -3,8 +3,6 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -258,10 +256,6 @@ type Service struct {
 	// misses and rows get cost_subcents=0 + estimated=true.
 	pricingLookup shared.PricingLookup
 
-	// sessionUsageWriter accumulates tokens / cost onto task_sessions
-	// when a cost event lands. Optional in tests.
-	sessionUsageWriter shared.SessionUsageWriter
-
 	// budgetChecker evaluates budget policies. Wired to the
 	// costs.CostService at startup; nil in tests that don't exercise
 	// the budget pathways. Both CheckBudget and CheckPreExecutionBudget
@@ -288,9 +282,6 @@ func (s *Service) SetBudgetChecker(b BudgetEvaluator) { s.budgetChecker = b }
 
 // SetPricingLookup wires the models.dev pricing lookup.
 func (s *Service) SetPricingLookup(p shared.PricingLookup) { s.pricingLookup = p }
-
-// SetSessionUsageWriter wires the task-session usage incrementer.
-func (s *Service) SetSessionUsageWriter(w shared.SessionUsageWriter) { s.sessionUsageWriter = w }
 
 // SetAgentTokenMinter wires the runtime token minter after feature services are constructed.
 func (s *Service) SetAgentTokenMinter(minter AgentTokenMinter) {
@@ -500,8 +491,9 @@ func prepareServiceSkillPackageMetadata(skill *models.Skill) {
 	if skill.ApprovalState == "" {
 		skill.ApprovalState = "approved"
 	}
-	sum := sha256.Sum256([]byte(skill.Content + "\x00" + skill.FileInventory + "\x00" + skill.SourceLocator))
-	skill.ContentHash = hex.EncodeToString(sum[:])
+	skill.ContentHash = models.SkillPackageContentHash(
+		skill.Content, skill.FileInventory, skill.SourceLocator,
+	)
 }
 
 // DeleteSkill deletes a skill from the DB.
@@ -774,6 +766,13 @@ func (s *Service) DeleteAgentMemory(ctx context.Context, id string) error {
 // CheckoutTask atomically acquires an exclusive lock on a task for an agent.
 func (s *Service) CheckoutTask(ctx context.Context, taskID, agentID string) (bool, error) {
 	return s.repo.CheckoutTask(ctx, taskID, agentID)
+}
+
+// CheckoutTaskForRun atomically acquires a task checkout for the exact run
+// that is about to launch. A same-agent successor cannot replace a live
+// predecessor's checkout.
+func (s *Service) CheckoutTaskForRun(ctx context.Context, taskID, agentID, runID string) (bool, error) {
+	return s.repo.CheckoutTaskForRun(ctx, taskID, agentID, runID)
 }
 
 // ReleaseTaskCheckout releases the exclusive lock on a task.

@@ -81,6 +81,7 @@ type CreateInstanceRequest struct {
 	// the workspace root.
 	RemoteContributions      map[string]models.RemoteContribution      `json:"remote_contributions,omitempty"`
 	ContributionDestinations map[string]models.ContributionDestination `json:"contribution_destinations,omitempty"`
+	ComparisonTargets        map[string]models.ComparisonTarget        `json:"comparison_targets,omitempty"`
 	// WorkspaceSourceRoots are canonical host roots explicitly attached to the
 	// workspace. Agentctl permits file operations through links only beneath
 	// these roots.
@@ -300,7 +301,11 @@ func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) e
 		_ = resp.Body.Close()
 	}()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+	// A retry may observe 404 after agentctl completed the first delete but its
+	// response was lost. The desired postcondition is already satisfied.
+	if resp.StatusCode != http.StatusOK &&
+		resp.StatusCode != http.StatusNoContent &&
+		resp.StatusCode != http.StatusNotFound {
 		var errResp struct {
 			Error string `json:"error"`
 		}

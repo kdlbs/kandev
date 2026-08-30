@@ -24,6 +24,7 @@ const DEFAULT_DESKTOP_PORT: u16 = 38430;
 const DESKTOP_PORT_ENV: &str = "KANDEV_DESKTOP_PORT";
 const DESKTOP_HEALTH_TOKEN_ENV: &str = "KANDEV_DESKTOP_HEALTH_TOKEN";
 const DESKTOP_NATIVE_NOTIFICATIONS_ENV: &str = "KANDEV_DESKTOP_NATIVE_NOTIFICATIONS";
+const LAUNCHER_PARENT_PID_ENV: &str = "KANDEV_LAUNCHER_PARENT_PID";
 const DESKTOP_HEALTH_TOKEN_HEADER: &str = "x-kandev-desktop-health-token";
 const STARTUP_OUTPUT_LIMIT: usize = 12 * 1024;
 const HEALTH_READY_SETTLE: Duration = Duration::from_millis(100);
@@ -269,6 +270,7 @@ fn launch_and_wait(app: &AppHandle, state: &BackendState) -> Result<String, Stri
         OsString::from(DESKTOP_HEALTH_TOKEN_ENV),
         OsString::from(&health_token),
     );
+    add_launcher_parent_pid(&mut inherited_env);
     let spec = build_backend_command(
         &runtime_dir,
         port,
@@ -285,7 +287,15 @@ fn launch_and_wait(app: &AppHandle, state: &BackendState) -> Result<String, Stri
         return Err("Desktop startup cancelled".to_string());
     }
     wait_for_backend(port, state, HEALTH_TIMEOUT, &health_token)?;
+    wait_for_ready(port, state)?;
     Ok(format!("http://{LOOPBACK_HOST}:{port}/"))
+}
+
+fn add_launcher_parent_pid(env: &mut BTreeMap<OsString, OsString>) {
+    env.insert(
+        OsString::from(LAUNCHER_PARENT_PID_ENV),
+        OsString::from(std::process::id().to_string()),
+    );
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -521,6 +531,42 @@ fn wait_for_backend(
     }
 }
 
+// wait_for_ready polls GET /ready after wait_for_backend's /health check
+// already passed. /health flips to 200 as soon as the listener binds, before
+// startup recovery finishes, so treating a healthy response as "safe to
+// navigate the webview" reopens the crash-loop-adjacent bug this backend
+// change fixed: the window would load the bootstrap handler's raw 503 body.
+// /ready is the readiness signal instead. This wait has no timeout and never
+// aborts the launch on its own: HEALTH_TIMEOUT above already made the
+// keep-or-kill decision, and readiness can legitimately take longer while
+// startup recovery sweeps run. It only returns early if the backend process
+// exits or shutdown starts. Mirrors wait_for_backend's settle-then-recheck
+// after a successful probe: a bare "GET /ready succeeded" is not proof the
+// backend that answered is still the one we launched, since another process
+// could rebind the same loopback port in the gap between exit and probe.
+fn wait_for_ready(port: u16, state: &BackendState) -> Result<(), String> {
+    loop {
+        if state.is_shutdown_started() {
+            return Err("Desktop startup cancelled".to_string());
+        }
+        if let Some(message) = state.child_exit_message()? {
+            return Err(format!(
+                "Kandev launcher exited before /ready reported ready ({message})"
+            ));
+        }
+        if ready_ready(port) {
+            thread::sleep(HEALTH_READY_SETTLE);
+            if let Some(message) = state.child_exit_message()? {
+                return Err(format!(
+                    "Kandev launcher exited before /ready reported ready ({message})"
+                ));
+            }
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+}
+
 fn launcher_exit_message(status: &str, output: Option<String>) -> String {
     let mut message = status.to_string();
     append_recent_output(&mut message, output);
@@ -566,6 +612,37 @@ fn request_health(port: u16, expected_health_token: &str) -> Result<bool, String
         DESKTOP_HEALTH_TOKEN_HEADER,
         expected_health_token,
     ))
+}
+
+fn ready_ready(port: u16) -> bool {
+    request_ready(port).unwrap_or(false)
+}
+
+// request_ready hits /ready rather than /health. /ready never sets
+// DESKTOP_HEALTH_TOKEN_HEADER (that header is /health-only — see
+// docs/specs/health-endpoint-version/spec.md AC-21), so unlike
+// request_health this does not check for one.
+fn request_ready(port: u16) -> Result<bool, String> {
+    let addr = (LOOPBACK_HOST, port)
+        .to_socket_addrs()
+        .map_err(|err| err.to_string())?
+        .next()
+        .ok_or_else(|| format!("Could not resolve {LOOPBACK_HOST}:{port}"))?;
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(250))
+        .map_err(|err| err.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(250)))
+        .map_err(|err| err.to_string())?;
+    stream
+        .write_all(
+            format!(
+                "GET /ready HTTP/1.1\r\nHost: {LOOPBACK_HOST}:{port}\r\nConnection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .map_err(|err| err.to_string())?;
+    let response = read_http_response_head(&mut stream)?;
+    Ok(response.starts_with(b"HTTP/1.1 200") || response.starts_with(b"HTTP/1.0 200"))
 }
 
 fn read_http_response_head<R: Read>(reader: &mut R) -> Result<Vec<u8>, String> {
@@ -742,6 +819,10 @@ mod tests {
             OsString::from(DESKTOP_HEALTH_TOKEN_ENV),
             OsString::from("health-token"),
         );
+        inherited.insert(
+            OsString::from(LAUNCHER_PARENT_PID_ENV),
+            OsString::from("12345"),
+        );
         inherited.insert(OsString::from("PATH"), OsString::from("/existing/bin"));
 
         let spec = build_backend_command(
@@ -781,9 +862,25 @@ mod tests {
             Some(&OsString::from("health-token"))
         );
         assert_eq!(
+            spec.env.get(OsStr::new(LAUNCHER_PARENT_PID_ENV)),
+            Some(&OsString::from("12345"))
+        );
+        assert_eq!(
             spec.env
                 .get(OsStr::new("KANDEV_DESKTOP_NATIVE_NOTIFICATIONS")),
             Some(&OsString::from("true"))
+        );
+    }
+
+    #[test]
+    fn launcher_parent_environment_uses_shell_pid() {
+        let mut inherited = BTreeMap::new();
+
+        add_launcher_parent_pid(&mut inherited);
+
+        assert_eq!(
+            inherited.get(OsStr::new(LAUNCHER_PARENT_PID_ENV)),
+            Some(&OsString::from(std::process::id().to_string()))
         );
     }
 
@@ -818,6 +915,36 @@ mod tests {
             Some(&OsString::from("true"))
         );
         assert!(!env.contains_key(OsStr::new("kandev_desktop_native_notifications")));
+    }
+
+    #[test]
+    fn desktop_environment_overrides_inherited_server_host_with_loopback() {
+        // Desktop launches must keep the embedded backend on the loopback host.
+        let mut inherited = BTreeMap::new();
+        inherited.insert(
+            OsString::from("KANDEV_SERVER_HOST"),
+            OsString::from("10.0.0.42"),
+        );
+
+        let env = desktop_environment(Path::new("/opt/kandev"), inherited, None);
+
+        assert_eq!(
+            env.get(OsStr::new("KANDEV_SERVER_HOST")),
+            Some(&OsString::from(LOOPBACK_HOST)),
+            "desktop_environment must force the loopback server host",
+        );
+    }
+
+    #[test]
+    fn desktop_environment_falls_back_to_loopback_when_server_host_unset() {
+        // The default production path: no inherited KANDEV_SERVER_HOST,
+        // desktop_environment must inject the loopback default.
+        let env = desktop_environment(Path::new("/opt/kandev"), BTreeMap::new(), None);
+
+        assert_eq!(
+            env.get(OsStr::new("KANDEV_SERVER_HOST")),
+            Some(&OsString::from(LOOPBACK_HOST))
+        );
     }
 
     #[test]
@@ -1063,6 +1190,47 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn request_ready_accepts_response_without_health_token_header() {
+        // readyHandler never sets X-Kandev-Desktop-Health-Token (that header
+        // is /health-only); request_ready must accept a bare 2xx.
+        let listener = TcpListener::bind((LOOPBACK_HOST, 0)).expect("bind ready listener");
+        let port = listener.local_addr().expect("listener addr").port();
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0_u8; 512];
+                let _ = stream.read(&mut buf);
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+            }
+        });
+
+        let ready = request_ready(port).expect("request_ready");
+        assert!(
+            ready,
+            "request_ready must treat a bare 2xx as ready with no token check"
+        );
+    }
+
+    #[test]
+    fn request_ready_rejects_non_2xx_response() {
+        let listener = TcpListener::bind((LOOPBACK_HOST, 0)).expect("bind ready listener");
+        let port = listener.local_addr().expect("listener addr").port();
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0_u8; 512];
+                let _ = stream.read(&mut buf);
+                let _ = stream
+                    .write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n");
+            }
+        });
+
+        let ready = request_ready(port).expect("request_ready");
+        assert!(
+            !ready,
+            "request_ready must reject a non-2xx response (bootstrap-not-ready-yet)"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn stop_terminates_tracked_child() {
@@ -1083,6 +1251,48 @@ mod tests {
         assert!(
             !process_exists(pid),
             "backend child {pid} should be terminated"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wait_for_ready_rechecks_child_exit_after_success() {
+        // The child exits well before the /ready response arrives, so a
+        // wait_for_ready that trusted a bare "GET /ready succeeded" without
+        // rechecking would return Ok for a backend that is already gone.
+        let listener = TcpListener::bind((LOOPBACK_HOST, 0)).expect("bind ready listener");
+        let port = listener.local_addr().expect("listener addr").port();
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0_u8; 512];
+                let _ = stream.read(&mut buf);
+                thread::sleep(Duration::from_millis(300));
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+            }
+        });
+
+        let state = BackendState::default();
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg("sleep 0.1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn short-lived child");
+        assert!(state.set_child(child));
+
+        let result = wait_for_ready(port, &state);
+
+        assert!(
+            result.is_err(),
+            "wait_for_ready must not return Ok once the child has exited"
+        );
+        assert!(
+            result
+                .unwrap_err()
+                .contains("exited before /ready reported ready"),
+            "wait_for_ready error should name the exit-before-ready reason"
         );
     }
 

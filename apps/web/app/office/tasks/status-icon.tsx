@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import type { OfficeTaskStatus } from "@/lib/state/slices/office/types";
-import { normalizeTaskStatus } from "./normalize-status";
+import { normalizeTaskStatus } from "@/lib/api/domains/office-task-normalize";
 import { STATUS_LABEL_KEYS } from "../lib/label-keys";
 import { useTranslation } from "react-i18next";
 

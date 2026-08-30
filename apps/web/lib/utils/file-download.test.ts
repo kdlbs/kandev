@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { triggerFileDownload } from "./file-download";
+import { triggerBlobDownload, triggerFileDownload } from "./file-download";
 
 const createObjectURLMock = vi.fn((_blob: Blob): string => "blob:mock");
 const revokeObjectURLMock = vi.fn((_url: string): void => undefined);
@@ -69,5 +69,19 @@ describe("triggerFileDownload", () => {
     triggerFileDownload({ fileName: "src/lib/notes.md", content: "hi", isBinary: false });
 
     expect(download()).toBe("notes.md");
+  });
+});
+
+describe("triggerBlobDownload", () => {
+  it("downloads an already-built blob under the exact given file name", () => {
+    const { click, download } = spyAnchorClick();
+    const blob = new Blob(["zip-bytes"], { type: "application/zip" });
+
+    triggerBlobDownload(blob, "kandev-automations.zip");
+
+    expect(createObjectURLMock).toHaveBeenCalledWith(blob);
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(download()).toBe("kandev-automations.zip");
+    expect(revokeObjectURLMock).toHaveBeenCalledWith("blob:mock");
   });
 });

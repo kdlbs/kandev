@@ -42,6 +42,7 @@ function toMessage(payload: MessagePayload): MessageUpdate {
     requests_input: payload.requests_input,
     created_at: payload.created_at,
     updated_at: payload.updated_at,
+    prompt_index: payload.prompt_index,
   };
 }
 

@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-canonical-guide"]
 plan: "plan.md"
-spec: "../../specs/plugins/authoring-experience.md"
+spec: "../../specs/plugins/requirements/authoring-experience.md"
 ---
 
 # Task 02: Plugin contract reconciliation
@@ -32,7 +32,7 @@ node scripts/validate-public-docs.mjs
 
 - `docs/plans/plugins/PLUGIN-API.md`
 - `docs/plans/plugins/GRPC-CONTRACT.md`
-- `docs/specs/plugins/spec.md`
+- `docs/specs/plugins/requirements/plugins.md`
 - `docs/plugins-example.md`
 - maintained fixture/type comments only if necessary
 

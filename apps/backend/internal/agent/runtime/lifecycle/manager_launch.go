@@ -178,6 +178,76 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	return metadata
 }
 
+// collectComparisonTargets projects the validated per-repository comparison
+// targets into the same workspace-subpath keys used by base branches. The
+// target remains credential-free and is revalidated at the runtime boundary.
+func collectComparisonTargets(req *LaunchRequest) (map[string]models.ComparisonTarget, error) {
+	if req == nil {
+		return nil, nil
+	}
+	specs := req.RepoSpecs()
+	if len(specs) == 0 {
+		if req.ComparisonTarget == nil {
+			return nil, nil
+		}
+		if err := req.ComparisonTarget.Validate(); err != nil {
+			return nil, fmt.Errorf("validate comparison target: %w", err)
+		}
+		return map[string]models.ComparisonTarget{"": *req.ComparisonTarget}, nil
+	}
+	targets := make(map[string]models.ComparisonTarget)
+	for index, spec := range specs {
+		if spec.ComparisonTarget == nil {
+			continue
+		}
+		if err := spec.ComparisonTarget.Validate(); err != nil {
+			return nil, fmt.Errorf("validate comparison target for repository %q: %w", spec.RepoName, err)
+		}
+		key := ""
+		if index > 0 {
+			key = baseBranchMetadataKey(spec)
+		}
+		if existing, ok := targets[key]; ok && !existing.Equal(*spec.ComparisonTarget) {
+			return nil, fmt.Errorf("multiple comparison targets map to workspace repository %q", key)
+		}
+		targets[key] = *spec.ComparisonTarget
+	}
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	return targets, nil
+}
+
+func comparisonTargetsFromWorkspaceRepositories(specs []WorkspaceRepositorySpec) (map[string]models.ComparisonTarget, error) {
+	if len(specs) == 0 {
+		return nil, nil
+	}
+	targets := make(map[string]models.ComparisonTarget)
+	for index, spec := range specs {
+		if spec.ComparisonTarget == nil {
+			continue
+		}
+		if err := spec.ComparisonTarget.Validate(); err != nil {
+			return nil, fmt.Errorf("validate comparison target for repository %q: %w", spec.RepoName, err)
+		}
+		key := ""
+		if index > 0 {
+			key = baseBranchMetadataKey(RepoLaunchSpec{
+				RepoName:   spec.RepoName,
+				BranchSlug: spec.BranchSlug,
+			})
+		}
+		if existing, ok := targets[key]; ok && !existing.Equal(*spec.ComparisonTarget) {
+			return nil, fmt.Errorf("comparison target collision for workspace repository %q", key)
+		}
+		targets[key] = *spec.ComparisonTarget
+	}
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	return targets, nil
+}
+
 // collectRemoteContributions projects the validated per-repository bindings
 // into the workspace-subpath keys understood by agentctl. The first repository
 // owns the workspace root; sibling destinations use the same deterministic key
@@ -419,23 +489,32 @@ func (m *Manager) buildAgentCommandWithContext(
 
 func (m *Manager) resolveManagedRuntimeVersion(
 	ctx context.Context,
-	runtime agentruntime.Runtime,
+	_ agentruntime.Runtime,
 	agentConfig agents.Agent,
 ) (string, error) {
-	if runtime != agentruntime.RuntimeStandalone || m.managedRuntimeSelections == nil {
-		return "", nil
-	}
 	managed, ok := agentConfig.(agents.ManagedNPMRuntimeAgent)
 	if !ok {
 		return "", nil
 	}
 	spec := managed.ManagedNPMRuntime()
+	effectiveVersion := spec.DefaultVersion
+	if effectiveVersion == "" {
+		// Test and embedded agents may construct a spec literal. PackageSpec
+		// still resolves a known built-in package's reviewed default.
+		packageSpec := spec.PackageSpec("")
+		if packageSpec != spec.Package {
+			effectiveVersion = strings.TrimPrefix(packageSpec, spec.Package+"@")
+		}
+	}
+	if m.managedRuntimeSelections == nil {
+		return effectiveVersion, nil
+	}
 	selection, found, err := m.managedRuntimeSelections.Get(ctx, agentConfig.ID(), spec.Package)
 	if err != nil {
 		return "", fmt.Errorf("resolve active managed runtime version for %s: %w", agentConfig.ID(), err)
 	}
 	if !found || selection.Package != spec.Package {
-		return "", nil
+		return effectiveVersion, nil
 	}
 	return selection.Version, nil
 }
@@ -764,12 +843,24 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	if len(remoteContributions) > 0 {
 		metadata[MetadataKeyRemoteContributions] = remoteContributions
 	}
+	comparisonTargets, err := collectComparisonTargets(reqWithWorktree)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(comparisonTargets) > 0 {
+		metadata[MetadataKeyComparisonTargets] = comparisonTargets
+	}
 	contributionDestinations, err := collectContributionDestinations(reqWithWorktree)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	if len(contributionDestinations) > 0 {
 		metadata[MetadataKeyContributionDestinations] = contributionDestinations
+	}
+
+	launchAuthToken, err := m.resolveLaunchAuthToken(ctx, reqWithWorktree, metadata)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("resolve launch auth token: %w", err)
 	}
 
 	var autoApproveOverride *bool
@@ -782,6 +873,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		TaskTitle:                      reqWithWorktree.TaskTitle,
 		SessionID:                      reqWithWorktree.SessionID,
 		TaskEnvironmentID:              reqWithWorktree.TaskEnvironmentID,
+		WorkspaceReuseRequired:         reqWithWorktree.WorkspaceReuseRequired,
 		AgentProfileID:                 executionProfileID(reqWithWorktree),
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
 		PromptTurnID:                   reqWithWorktree.TurnID,
@@ -799,11 +891,13 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		McpMode:                        reqWithWorktree.McpMode,
 		McpProviders:                   reqWithWorktree.McpProviders,
 		McpProfile:                     reqWithWorktree.McpProfile,
-		AuthToken:                      m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
+		AuthToken:                      launchAuthToken,
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
+		AgentctlStartupConfig:          m.agentctlStartupConfig,
 		OnProgress:                     onProgress,
 		RemoteContributions:            remoteContributions,
 		ContributionDestinations:       contributionDestinations,
+		ComparisonTargets:              comparisonTargets,
 	}
 
 	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)
@@ -817,6 +911,23 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		return nil, nil, nil, fmt.Errorf("failed to create execution: %w", err)
 	}
 	return execReq, execInstance, rt, nil
+}
+
+func isDockerExecutorType(executorType string) bool {
+	return executorType == string(models.ExecutorTypeLocalDocker) || executorType == string(models.ExecutorTypeRemoteDocker)
+}
+
+// resolveLaunchAuthToken returns the agentctl token a launch/resume hands the
+// backend. Docker uses the environment-scoped container control token (#2843)
+// so a sibling session can authenticate to a shared container, falling back
+// to the session token only when workspace reuse is required and no
+// container-control secret exists yet. Every other executor uses its own
+// session handshake token directly, which SSH resume requires.
+func (m *Manager) resolveLaunchAuthToken(ctx context.Context, req *LaunchRequest, metadata map[string]interface{}) (string, error) {
+	if isDockerExecutorType(req.ExecutorType) {
+		return m.revealContainerControlAuthToken(ctx, metadata, req.WorkspaceReuseRequired)
+	}
+	return m.revealRuntimeSecretValue(ctx, metadata, MetadataKeyAuthTokenSecret)
 }
 
 func resumeRemoteInstancePreflight(ctx context.Context, rt ExecutorBackend, req *ExecutorCreateRequest) error {
@@ -908,12 +1019,15 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		TaskID:                  req.TaskID,
 		WorkspaceID:             req.WorkspaceID,
 		SessionID:               req.SessionID,
+		TaskEnvironmentID:       req.TaskEnvironmentID,
 		TaskTitle:               req.TaskTitle,
 		ExecutorType:            execName,
 		WorkspacePath:           workspacePath,
 		RepositoryPath:          req.RepositoryPath,
 		RepositoryID:            req.RepositoryID,
+		TaskRepositoryID:        req.TaskRepositoryID,
 		UseWorktree:             req.UseWorktree,
+		WorkspaceReuseRequired:  req.WorkspaceReuseRequired,
 		WorktreeID:              req.WorktreeID,
 		SetupScript:             req.SetupScript,
 		RepoSetupScript:         repoSetupScript,
@@ -946,6 +1060,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				setup = repoSetupScript
 			}
 			specs = append(specs, RepoPrepareSpec{
+				TaskRepositoryID:        r.TaskRepositoryID,
 				RepositoryID:            r.RepositoryID,
 				RepositoryPath:          r.RepositoryPath,
 				RepoName:                r.RepoName,
@@ -1133,7 +1248,7 @@ func (m *Manager) markAgentStartPending(execution *AgentExecution) {
 // dedicated singleflight key so they don't race on the shared AgentExecution
 // pointer.
 func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *AgentExecution, req *LaunchRequest) error {
-	_, err := m.doCoalescedExecution(ctx, "promote:"+req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
+	_, err := m.doCoalescedExecution(ctx, req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
 		activityLease, acquireErr := m.acquireActivity(sharedCtx, activity.KindExecutionPreparing)
 		if acquireErr != nil {
 			return nil, acquireErr
@@ -1357,9 +1472,6 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 			execInstance.Client.Close()
 		}
 		return nil, err
-	}
-	if profileInfo != nil && len(profileInfo.EnvVars) > 0 {
-		m.cacheResolvedProfileEnv(execution, m.resolveAgentProfileEnvVars(ctx, profileInfo.EnvVars))
 	}
 	if !reqWithWorktree.IsPassthrough {
 		if err := m.materializeRuntimeProjectMCP(ctx, execution, agentConfig); err != nil {
@@ -1834,8 +1946,21 @@ func getAttachmentsFromMetadata(execution *AgentExecution) []MessageAttachment {
 // configureAndStartAgent configures the agent command and starts the agent subprocess.
 // Returns the effective boot command (full command with adapter args, or base command).
 func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentExecution, approvalPolicy string) (string, error) {
-	env := runtimeEnvFromMetadata(execution.MetadataSnapshot())
-	m.mergeAgentProfileEnvForExecution(ctx, execution, env)
+	env := execution.RuntimeEnvironment()
+	metadataEnv := runtimeEnvFromMetadata(execution.MetadataSnapshot())
+	if env == nil {
+		env = metadataEnv
+		if err := m.mergeAgentProfileEnvForExecution(ctx, execution, env); err != nil {
+			m.updateExecutionError(execution.ID, "failed to resolve agent profile environment: "+err.Error())
+			return "", fmt.Errorf("resolve agent profile environment: %w", err)
+		}
+	} else {
+		// SetExecutionEnv carries per-run values such as repository credentials.
+		// Overlay them on the launch snapshot without re-reading profile secrets.
+		for key, value := range metadataEnv {
+			env[key] = value
+		}
+	}
 	if err := spillLargeWakePayloadEnv(env, execution.WorkspacePath, m.logger.Zap()); err != nil {
 		m.updateExecutionError(execution.ID, "failed to prepare agent env: "+err.Error())
 		return "", fmt.Errorf("failed to prepare agent env: %w", err)

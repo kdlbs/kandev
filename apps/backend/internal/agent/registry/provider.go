@@ -17,7 +17,8 @@ import (
 // Provide creates and loads the agent registry.
 //
 // KANDEV_MOCK_AGENT controls mock-agent availability:
-//   - "only"  → E2E mode: only register mock agent, skip all others
+//   - "only"  → E2E mode: register virtual families and the mock agent,
+//     skip all other inference agents
 //   - "true"  → Dev mode: load all agents AND enable mock agent
 //   - unset   → Production: load all agents, mock agent disabled
 //
@@ -39,7 +40,11 @@ func Provide(log *logger.Logger) (*Registry, func() error, error) {
 	mockMode := os.Getenv("KANDEV_MOCK_AGENT")
 	mockProviders := os.Getenv("KANDEV_MOCK_PROVIDERS")
 	if mockMode == "only" {
-		// E2E mode: only register mock agent — skip agent discovery for all others
+		// E2E mode keeps inference isolated to the mock provider, but virtual
+		// families are still part of the settings and routing contract. They do
+		// not launch a process or discover a host binary, so retaining them does
+		// not weaken the isolation boundary.
+		_ = reg.Register(agents.NewDynamicAgent())
 		_ = reg.Register(agents.NewMockAgent())
 		configureMockAgent(reg, "mock-agent", log)
 		registerExtraMockProviders(reg, log, mockProviders)
@@ -157,11 +162,14 @@ func (r *Registry) resolveManagedProviderVersion(
 	}
 	spec := managed.ManagedNPMRuntime()
 	selection, found, err := selectionStore.Get(ctx, providerID, spec.Package)
-	if err != nil || !found {
-		return "", err == nil
-	}
-	if selection.Package != spec.Package || selection.Version == "" {
+	if err != nil {
 		return "", false
+	}
+	if !found || selection.Package != spec.Package {
+		return spec.DefaultVersion, true
+	}
+	if selection.Version == "" {
+		return spec.DefaultVersion, true
 	}
 	return selection.Version, true
 }

@@ -643,6 +643,9 @@ func TestAddBranchToTask_RejectsAnotherTask(t *testing.T) {
 func TestAddWorkspaceSourcesDefaultsTaskAndForwardsMixedSources(t *testing.T) {
 	backend := &testBackend{response: map[string]interface{}{"task_id": "task-current"}}
 	s := newTaskModeServer(t, backend, "task-current")
+	properties := toolInputProperties(t, s, "add_workspace_sources_kandev")
+	assert.NotContains(t, properties, "caller_task_id")
+	assert.NotContains(t, properties, "caller_session_id")
 
 	result := callTool(t, s, "add_workspace_sources_kandev", map[string]interface{}{
 		"sources": []interface{}{
@@ -656,11 +659,13 @@ func TestAddWorkspaceSourcesDefaultsTaskAndForwardsMixedSources(t *testing.T) {
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "task-current", payload["task_id"])
+	assert.Equal(t, "task-current", payload["caller_task_id"])
+	assert.Equal(t, "test-session", payload["caller_session_id"])
 	assert.Len(t, payload["sources"], 2)
 }
 
-func TestAddWorkspaceSourcesRejectsAnotherTask(t *testing.T) {
-	backend := &testBackend{}
+func TestAddWorkspaceSourcesForwardsDirectChildTargetWithTrustedProvenance(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"task_id": "task-child"}}
 	s := newTaskModeServer(t, backend, "task-current")
 
 	result := callTool(t, s, "add_workspace_sources_kandev", map[string]interface{}{
@@ -668,8 +673,12 @@ func TestAddWorkspaceSourcesRejectsAnotherTask(t *testing.T) {
 		"sources": []interface{}{map[string]interface{}{"kind": "folder", "local_path": "/tmp/docs"}},
 	})
 
-	assert.True(t, result.IsError)
-	assert.Empty(t, backend.lastAction)
+	assert.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-other", payload["task_id"])
+	assert.Equal(t, "task-current", payload["caller_task_id"])
+	assert.Equal(t, "test-session", payload["caller_session_id"])
 }
 
 // TestAddBranchToTask_ForwardsLocalPath verifies local_path is plumbed through
@@ -977,6 +986,69 @@ func TestTaskMRAutomationToolsNoTaskIDArgument(t *testing.T) {
 
 	properties := toolInputProperties(t, s, "update_task_mr_automation_kandev")
 	assert.NotContains(t, properties, "task_id")
+}
+
+// TestUpdateTaskMRAutomationToolForwardsMRIdentityAndAutoFixFields covers
+// AC31: repository_id/project_path/mr_iid must reach the backend payload
+// unchanged (including an explicit empty repository_id, R6) so the WS
+// handler can scope the patch to one linked MR, and auto_fix_enabled /
+// auto_merge_enabled / auto_fix_prompt_override must also be forwarded —
+// the tool's input schema declares all six, but until this test regressed
+// them, the handler only ever copied the three lifecycle booleans.
+func TestUpdateTaskMRAutomationToolForwardsMRIdentityAndAutoFixFields(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"task_id": "task-current"}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "update_task_mr_automation_kandev", map[string]interface{}{
+		"repository_id":            "",
+		"project_path":             "group/project",
+		"mr_iid":                   float64(7),
+		"auto_fix_enabled":         true,
+		"auto_merge_enabled":       false,
+		"auto_fix_prompt_override": "custom prompt",
+	})
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPUpdateTaskMRAutomation, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "", payload["repository_id"])
+	assert.Equal(t, "group/project", payload["project_path"])
+	assert.Equal(t, 7, payload["mr_iid"])
+	assert.Equal(t, true, payload["auto_fix_enabled"])
+	assert.Equal(t, false, payload["auto_merge_enabled"])
+	assert.Equal(t, "custom prompt", payload["auto_fix_prompt_override"])
+}
+
+// TestUpdateTaskMRAutomationToolRejectsIdentityAloneWithNoSwitch ensures MR
+// identity by itself (no actual option change) is still rejected — mirrors
+// TaskMRAutomationPatch.HasAny() treating identity as "which MR", not "a
+// change".
+func TestUpdateTaskMRAutomationToolRejectsIdentityAloneWithNoSwitch(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "update_task_mr_automation_kandev", map[string]interface{}{
+		"repository_id": "",
+		"project_path":  "group/project",
+		"mr_iid":        float64(7),
+	})
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction, "identity-only calls must not reach the backend")
+}
+
+func TestUpdateTaskMRAutomationToolRejectsFractionalMRIID(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "update_task_mr_automation_kandev", map[string]interface{}{
+		"repository_id":      "",
+		"project_path":       "group/project",
+		"mr_iid":             float64(7.5),
+		"auto_merge_enabled": true,
+	})
+
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction, "invalid MR IID must not reach the backend")
 }
 
 func TestTaskMRAutomationToolsDoNotExposeLifecyclePromptOverrides(t *testing.T) {

@@ -47,7 +47,7 @@ repositoryProviderIds?: string[] }`. `repositoryProviderIds` is JSON
    from an expired generation cannot mutate the replacement generation. Failure or
    timeout does **not** unregister `registry` contributions (nav items, routes,
    etc.) already made before the failure — those persist, and only the plugin's
-   lifecycle status becomes failed, until the plugin's *next* load revokes them.
+   lifecycle status becomes failed, until the plugin's _next_ load revokes them.
 
 ## Global entry point
 
@@ -164,7 +164,11 @@ interface PluginHostApi {
   // Publishes one integration registration's live enabled state for one
   // workspace. The value is memory-only; persist it with host.storage and
   // republish it for every workspace after plugin load.
-  setIntegrationEnabled(integrationId: string, workspaceId: string, enabled: boolean): void;
+  setIntegrationEnabled(
+    integrationId: string,
+    workspaceId: string,
+    enabled: boolean,
+  ): void;
   // Authenticated, per-user key/value storage backed by
   // /api/plugins/{id}/user-state/... — see the "host.storage" section below.
   // Requires the plugin manifest to declare capabilities.user_state: true.
@@ -512,10 +516,11 @@ These are functions, so they sit beside `navigate`/`openModal` rather than in
 
 ### Native integration settings state
 
-`registerIntegrationSettings` may provide an `action` component. The host passes
-the routed `workspaceId` to both the page component and the action. Use that
-value for workspace-scoped reads and writes. Do not use
-`getActiveWorkspaceId()` for a routed settings page.
+`registerIntegrationSettings` may provide an `action` component. The host mounts
+the action in the detail `SettingsSection` header and in the native integrations
+index card. The host passes the routed `workspaceId` and a `surface` value of
+`"detail"` or `"index"`. Use the workspace value for workspace-scoped reads and
+writes. Do not use `getActiveWorkspaceId()` for a routed settings page.
 
 `host.setIntegrationEnabled(integrationId, workspaceId, enabled)` publishes a
 live value for one registration and workspace. The host checks that the
@@ -524,9 +529,17 @@ cleared when the plugin unloads. Persist the source of truth with
 `host.storage`, then republish it after load:
 
 ```ts
-function publishAll(host: PluginHostApi, integrationId: string, enabledByWorkspace: Map<string, boolean>) {
+function publishAll(
+  host: PluginHostApi,
+  integrationId: string,
+  enabledByWorkspace: Map<string, boolean>,
+) {
   for (const workspaceId of host.context.getWorkspaceIds()) {
-    host.setIntegrationEnabled(integrationId, workspaceId, enabledByWorkspace.get(workspaceId) === true);
+    host.setIntegrationEnabled(
+      integrationId,
+      workspaceId,
+      enabledByWorkspace.get(workspaceId) === true,
+    );
   }
 }
 
@@ -630,7 +643,11 @@ own write).
 // unrecognised one, simply degrade to "main"'s placement — nothing is ever
 // silently dropped.
 type PluginIcon = string | React.ComponentType<{ className?: string }>;
-export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-footer";
+export type PluginNavSection =
+  | "main"
+  | "settings"
+  | "integrations"
+  | "sidebar-footer";
 
 interface NavItem {
   id: string;
@@ -697,7 +714,8 @@ interface PluginRegistry {
   // "settings-nav", "chat-input-actions", "task-create-input-actions",
   // "new-session-input-actions", "chat-top-bar",
   // "main-top-bar", "app-status-bar-left", "app-status-bar-right",
-  // "plugin-settings", "task-card-indicators", "task-card-tags", and
+  // "plugin-settings", "task-card-indicators", "task-card-tags",
+  // "task-row-metadata", and
   // "sidebar-workspace-actions".
   // "task-card-indicators" renders a small icon/badge beside the PR status
   // icon on every kanban card and forwards
@@ -709,6 +727,10 @@ interface PluginRegistry {
   // same `{ taskId: string, workspaceId: string | null, workflowStepId: string | null }`
   // shape as `slotProps` (`workspaceId` is null with no active workspace, and
   // `workflowStepId` is null when the task has no workflow step assigned).
+  // "task-row-metadata" renders compact, read-only metadata on the sidebar
+  // task tree and `/tasks` list. It forwards
+  // `{ taskId, workspaceId, workflowStepId, surface }`, where `surface` is
+  // "sidebar" or "task-list". The slot is plugin-agnostic.
   // "chat-input-actions", "task-create-input-actions", and
   // "new-session-input-actions" render composer actions for task/Quick Chat,
   // task creation, and new-session creation. Each forwards the typed
@@ -805,6 +827,7 @@ interface PluginRegistry {
   // dropdown, alongside the built-in Workflow/Repository sections. See
   // "Task filters" below.
   registerTaskFilter(registration: TaskFilterRegistration): void;
+  registerTaskListFacet(registration: TaskListFacetRegistration): void;
 }
 
 interface IntegrationSettingsRegistration {
@@ -813,9 +836,17 @@ interface IntegrationSettingsRegistration {
   description: string;
   icon?: PluginIcon;
   Component: React.ComponentType<{ workspaceId?: string }>;
-  // Optional native header action. It receives the same routed workspace id
-  // as Component, so it never needs to infer the target from the active one.
-  action?: React.ComponentType<{ workspaceId?: string }>;
+  // Optional action for the detail section header and integrations index card.
+  // The surface identifies the host location and the workspace id identifies
+  // the settings target.
+  action?: React.ComponentType<IntegrationSettingsActionProps>;
+}
+
+type IntegrationSettingsActionSurface = "detail" | "index";
+
+interface IntegrationSettingsActionProps {
+  workspaceId?: string;
+  surface: IntegrationSettingsActionSurface;
 }
 
 // Integration settings render at /settings/integrations/{id} and
@@ -1188,11 +1219,10 @@ console, and the menu still closes either way (Radix's own close-on-select,
 independent of the async result).
 
 Group `"primary"` renders each visible action as its own flat, top-level menu
-item instead of nesting it under `Edit` — positioned between the "Move
-to"/"Send to workflow" submenus and the "Link" submenu. Visibility filtering,
-registration order, and `run()`/error handling are identical to the `"edit"`
-group; the two groups are independent lists (an action only ever belongs to
-one).
+item instead of nesting it under `Edit`. It appears on cards and on the shared
+desktop/mobile task-row menu. Group `"edit"` remains card-only. Visibility
+filtering, registration order, and `run()`/error handling are identical; the
+two groups are independent lists (an action only ever belongs to one).
 
 `"task-card-indicators"` (documented above with the other slots) is the
 matching read-only surface: a small icon/badge rendered beside the PR status
@@ -1203,6 +1233,11 @@ context — same `{ taskId, workspaceId, workflowStepId }` shape — but mounted
 in its own row on the card instead of the cramped title row
 `"task-card-indicators"` shares with `PRTaskIcon`. Use it for a contribution
 that needs its own width, e.g. a row of tag chips.
+
+`"task-row-metadata"` is a separate, plugin-agnostic slot for compact,
+read-only metadata in the sidebar task tree and `/tasks` list. Its shape is
+`{ taskId, workspaceId, workflowStepId, surface }`, with `surface` equal to
+`"sidebar"` or `"task-list"`. The host emits no wrapper when the slot is empty.
 
 ### Task filters
 
@@ -1224,6 +1259,19 @@ combine with AND (a task must match every section with an active selection),
 mirroring how Workflow/Repository combine with the search query today. If
 `matches()` throws, the task is treated as non-matching and the error is
 logged (mirroring `TaskMenuActionRegistration.visible`'s error handling).
+
+### Task-list facets
+
+`registerTaskListFacet({ id, label, getValues, subscribe? })` adds a choice to `/tasks` Sort and
+Group controls. `getValues({ taskId, workspaceId })` synchronously returns `{ value, label,
+color? }[]`; `subscribe` invalidates the loaded page. Return each value at most once for a task,
+and keep one label and color for a value across all tasks. Facet sorting uses the first value label
+after a case-insensitive alphabetical comparison. Facets are page-local: no facet selection is
+persisted or sent to the backend. The host catches callback errors and revokes registrations and
+active subscriptions when the owning plugin unloads. A task with multiple values appears in each
+matching group; a task without a value appears in the host's `Ungrouped` section. Parent/child
+indentation is preserved only within a group both tasks match, so a matching child without its
+parent is rendered at that group's root.
 
 ## Registry internals (host side)
 

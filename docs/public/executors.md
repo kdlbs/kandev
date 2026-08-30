@@ -124,7 +124,7 @@ Do not treat the two script fields as universal hooks:
 Keep working prepare scripts noninteractive and idempotent. Kandev resolves supported placeholders and appends its managed branch checkout for Docker, Sprites, and SSH after the user script. A profile cleanup script must never remove paths outside the environment it owns.
 
 The common preparation limit is configured through
-`KANDEV_TASK_PREPARATION_TIMEOUT`; see [Configuration](./configuration.md#setup-and-launch-timing)
+`KANDEV_TASK_PREPARATION_TIMEOUT`; see [Configuration](configuration.md#setup-and-launch-timing)
 for duration syntax, fallback behavior, and the derived launch-phase limit.
 
 Two current preparation exceptions are easy to miss:
@@ -277,7 +277,7 @@ docker ps -a --filter label=kandev.managed=true
 3. Select that secret for the required `SPRITES_API_TOKEN` profile environment variable.
 4. Review remote credential methods, Git identity, prepare/cleanup scripts, and network policy.
 
-Sprites profiles do not copy the host-active `gh` CLI token. Kandev may copy explicitly selected agent credential files, resolve selected Kandev secrets into agent environment variables, or run an agent auth setup script. A profile-selected GitHub token is an unmanaged override; otherwise an attached GitHub repository uses the workspace credential broker. Set `githubCredentialBroker.publicBaseUrl` (or `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL`) to an HTTPS Kandev URL reachable from remote executors; this setting is independent of GitHub App registration. Credential upload is best-effort: provisioning can continue while later agent authentication fails. The remote sandbox receives highly sensitive data; use a scoped provider token and least-privilege repository credentials.
+Sprites profiles do not copy the host-active `gh` CLI token. Kandev may copy explicitly selected agent credential files, resolve selected Kandev secrets into agent environment variables, or run an agent auth setup script. A profile-selected GitHub token is an unmanaged override; otherwise an attached GitHub repository uses the workspace credential broker. Set `githubCredentialBroker.publicBaseUrl` (or `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL`) to an HTTPS Kandev URL reachable from remote executors. To recover managed Git credentials after a backend restart, configure the stable secret `githubCredentialBroker.reissueSigningKey` (or `KANDEV_GITHUB_CREDENTIAL_BROKER_REISSUE_SIGNING_KEY`); changing it invalidates outstanding execution capabilities. Drain or quiesce active agent sessions before key rotation. The broker uses `/api/v1/git/credentials/resolve` and `/api/v1/git/credentials/reissue`; the older GitHub paths remain compatibility aliases. These settings are independent of GitHub App registration. Credential upload is best-effort: provisioning can continue while later agent authentication fails. The remote sandbox receives highly sensitive data; use a scoped provider token and least-privilege repository credentials.
 
 Network rules are stored in `sprites_network_policy_rules` as JSON entries with `domain`, `action` (`allow` or `deny`), and optional `include`. Kandev applies them only on fresh sandbox creation, and currently does so after credential upload, prepare, controller startup, and agent-instance creation. Bootstrap traffic can therefore occur before the profile policy is installed. A parse/provider failure is reported as skipped and does not abort launch. Provider semantics remain authoritative; do not treat this late, best-effort step as a security boundary, and test the resulting policy.
 
@@ -309,14 +309,14 @@ Released Kandev bundles include helpers for all four platform combinations. The 
 
 ### Create the connection
 
-Choose **Settings > Executors > SSH**. Enter a name plus either a Host or a host alias from `~/.ssh/config`. The backend resolver can inherit `HostName`, `Port`, `User`, `IdentityFile`, and one `ProxyJump`; explicit form values win. The current create form defaults and persists Port `22` and identity source `ssh-agent`, so enter a non-22 alias port and desired identity source explicitly instead of assuming those two values inherit. `IdentitiesOnly` and arbitrary OpenSSH directives are not consumed by Kandev.
+Choose **Settings > Executors > SSH**. Enter a name plus either a Host or a host alias from your OpenSSH client configuration. The backend resolver can inherit `HostName`, `Port`, `User`, `IdentityAgent`, `IdentityFile`, and one `ProxyJump`; explicit form values win. The current create form defaults and persists Port `22` and identity source `ssh-agent`, so enter a non-22 alias port and desired identity source explicitly instead of assuming those two values inherit. `IdentitiesOnly` and arbitrary OpenSSH directives are not consumed by Kandev.
 
 Authentication choices are:
 
-- `ssh-agent (SSH_AUTH_SOCK)`; or
+- ssh-agent, using the host's expanded `IdentityAgent` when configured and otherwise `$SSH_AUTH_SOCK`; or
 - an unencrypted private-key file.
 
-Password and keyboard-interactive authentication are not supported. A passphrase-protected key file must first be loaded with `ssh-add`, then used through ssh-agent.
+`IdentityAgent none` disables agent authentication for that host. Kandev expands `~`, `${VAR}`, whole-value `$VAR`, `SSH_AUTH_SOCK`, and the `%%`, `%d`, `%h`, `%i`, `%j`, `%k`, `%L`, `%l`, `%n`, `%p`, `%r`, and `%u` OpenSSH tokens in agent socket paths; `%C` is not supported. Password and keyboard-interactive authentication are not supported. A passphrase-protected key file must first be loaded with `ssh-add`, then used through ssh-agent.
 
 Run **Test Connection**, independently verify the observed SHA256 host fingerprint, select **Trust this host**, then save. Kandev pins the final target fingerprint and refuses a changed key. With ProxyJump, the target remains pinned, but bastion handling is weaker: Kandev checks `~/.ssh/known_hosts` when available and rejects a changed known key, while an unknown bastion key is accepted on first use. Verify and pre-populate the bastion key yourself.
 

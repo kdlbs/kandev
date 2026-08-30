@@ -210,5 +210,18 @@
   "workflowStep": "工作流程步驟",
   "yourJiraSessionExpiredOrNeeds": "你的 Jira 工作階段已過期或需要二次驗證。請重新連接以查看此工單。",
   "builtinViewAssignedToMe": "指派給我",
-  "builtinViewUnassigned": "未指派"
+  "builtinViewUnassigned": "未指派",
+  "connectWithAtlassian": "連接 Atlassian",
+  "connecting": "正在連線...",
+  "oauth2": "OAuth 2.0",
+  "oauthConnected": "已通過 OAuth 連接。權杖會自動刷新。",
+  "oauthDescription": "通過 Atlassian OAuth 2.1（含 PKCE）進行身份驗證。無需建立應用或提供認證資料。點擊即可在瀏覽器中授權。權杖過期後會自動刷新。",
+  "oauthStartFailed": "無法啓動 OAuth：{{error}}",
+  "oauthTokenExpires": "權杖過期時間：{{date}}",
+  "oauthPasteInstructions": "在新標籤頁中完成授權",
+  "oauthPasteHelp": "在 Atlassian 上批准後，你將被重定向到一個無法載入的 localhost 網址。請從瀏覽器地址欄複製完整網址並貼上到下方。",
+  "oauthPopupBlocked": "瀏覽器已封鎖授權視窗。請允許彈出式視窗，然後再試。",
+  "oauthComplete": "完成",
+  "oauthCancel": "取消",
+  "oauthPasteInvalid": "網址無效。請確保複製了包含 code 和 state 參數的完整重定向網址。"
 }

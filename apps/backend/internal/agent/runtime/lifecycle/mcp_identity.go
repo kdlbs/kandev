@@ -18,6 +18,12 @@ import (
 // it fails closed rather than falling back to full access.
 type MCPIdentityScoper func(ctx context.Context, taskID string) (context.Context, error)
 
+// MCPPrincipalScoper attaches the server-derived task/session MCP principal.
+// It runs after the owner identity scoper and is independent of auth mode:
+// automation self/workspace boundaries are required even on single-user
+// installations.
+type MCPPrincipalScoper func(ctx context.Context, taskID, sessionID string) (context.Context, error)
+
 // taskScopedMCPHandler scopes every MCP request on one agent stream to the
 // owner of that stream's task.
 //
@@ -28,6 +34,7 @@ type MCPIdentityScoper func(ctx context.Context, taskID string) (context.Context
 type taskScopedMCPHandler struct {
 	inner       agentctl.MCPHandler
 	scope       MCPIdentityScoper
+	principal   MCPPrincipalScoper
 	executionID string
 	taskID      string
 	sessionID   string
@@ -40,19 +47,33 @@ func (h *taskScopedMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*
 		TaskID:      h.taskID,
 		SessionID:   h.sessionID,
 	})
-	if h.scope == nil {
-		return h.inner.Dispatch(ctx, msg)
+	scoped := ctx
+	if h.scope != nil {
+		var err error
+		scoped, err = h.scope(ctx, h.taskID)
+		if err != nil {
+			h.logger.Error("denying in-session MCP request: cannot resolve the task owner",
+				zap.String("task_id", h.taskID),
+				zap.String("action", msg.Action),
+				zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to resolve the session owner", nil)
+		}
 	}
-	scoped, err := h.scope(ctx, h.taskID)
+	if h.principal == nil {
+		return h.inner.Dispatch(scoped, msg)
+	}
+	principalScoped, err := h.principal(scoped, h.taskID, h.sessionID)
 	if err != nil {
-		h.logger.Error("denying in-session MCP request: cannot resolve the task owner",
+		h.logger.Error("denying in-session MCP request: cannot resolve the caller principal",
 			zap.String("task_id", h.taskID),
+			zap.String("session_id", h.sessionID),
 			zap.String("action", msg.Action),
 			zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-			"failed to resolve the session owner", nil)
+			"failed to resolve the session principal", nil)
 	}
-	return h.inner.Dispatch(scoped, msg)
+	return h.inner.Dispatch(principalScoped, msg)
 }
 
 // mcpHandlerFor returns the MCP handler for one execution's stream. The
@@ -65,6 +86,7 @@ func (sm *StreamManager) mcpHandlerFor(execution *AgentExecution) agentctl.MCPHa
 	return &taskScopedMCPHandler{
 		inner:       sm.mcpHandler,
 		scope:       sm.mcpIdentityScoper,
+		principal:   sm.mcpPrincipalScoper,
 		executionID: execution.ID,
 		taskID:      execution.TaskID,
 		sessionID:   execution.SessionID,

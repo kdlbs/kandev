@@ -28,7 +28,11 @@ const AgentCtlPort = ports.AgentCtl
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
-	ID                string
+	ID string
+	// RunID identifies the Office run that launched this execution. It is
+	// retained after runtime environment cleanup so delayed stop events can
+	// still be attributed to the correct run.
+	RunID             string
 	TaskID            string
 	SessionID         string
 	TaskEnvironmentID string // Env owning this execution; sessions in the same task share one env
@@ -46,7 +50,7 @@ type AgentExecution struct {
 	WorkspaceSourceRoots []string             // Canonical durable source roots permitted by agentctl file operations
 	ACPSessionID         string               // ACP session ID to resume, if available
 	AgentCommand         string               // Command to start the agent subprocess
-	ContinueCommand      string               // Command for follow-up prompts (one-shot agents like Amp)
+	ContinueCommand      string               // Command for follow-up prompts (one-shot agents)
 	AgentArgs            []string             // Structured argv for AgentCommand
 	ContinueArgs         []string             // Structured argv for ContinueCommand
 	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
@@ -203,7 +207,7 @@ type AgentExecution struct {
 	// response buffers active for an execution. Agentctl accepts prompt requests
 	// asynchronously, so its transport-level gate alone cannot provide this.
 	promptMu                sync.Mutex
-	dispatchedPromptPending bool
+	dispatchedPromptPending atomic.Bool
 
 	// Closed when the current SendPrompt returns, so CancelAgent can wait
 	// for the in-flight prompt to finish before the caller retries.
@@ -746,6 +750,7 @@ func (ae *AgentExecution) EndSessionSpan() {
 // the top level. When LaunchRequest.Repositories is set, each entry produces
 // one prepared worktree under the shared TaskDirName.
 type RepoLaunchSpec struct {
+	TaskRepositoryID        string
 	RepositoryID            string
 	RepositoryPath          string
 	RepositoryURL           string // Clone URL for remote executors that need to clone
@@ -765,6 +770,7 @@ type RepoLaunchSpec struct {
 	RepoCleanupScript       string // Repository-level cleanup script (optional)
 	CopyFiles               string // Comma-separated paths/globs to copy from the source repo (gitignored .env / config files)
 	ContributionDestination *models.ContributionDestination
+	ComparisonTarget        *models.ComparisonTarget
 	// BranchSlug, when set, suffixes the worktree directory as
 	// {RepoName}-{BranchSlug} so multi-branch tasks (same repo, multiple
 	// branches) don't collide.
@@ -791,6 +797,7 @@ type WorkspaceRepositorySpec struct {
 	BaseBranch             string
 	DefaultBranch          string
 	CheckoutBranch         string
+	ComparisonTarget       *models.ComparisonTarget
 	WorktreeID             string
 	WorktreeBranchPrefix   string
 	WorktreeBranchTemplate string
@@ -820,7 +827,9 @@ type LaunchRequest struct {
 	WorkspaceID       string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
 	SessionID         string
 	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
-	TaskTitle         string // Human-readable task title for semantic worktree naming
+	// WorkspaceReuseRequired selects attach-only environment preparation.
+	WorkspaceReuseRequired bool
+	TaskTitle              string // Human-readable task title for semantic worktree naming
 	// AgentProfileID is the stable Office identity for routed Office launches.
 	// For non-Office launches it is also the concrete execution profile.
 	AgentProfileID string
@@ -884,12 +893,14 @@ type LaunchRequest struct {
 	UseWorktree             bool   // Whether to use a Git worktree for isolation
 	WorktreeID              string // Existing worktree ID to reuse (skip creation if set)
 	RepositoryID            string // Repository ID for worktree tracking
+	TaskRepositoryID        string // Exact task_repositories row for worktree recovery
 	RepositoryPath          string // Path to the main repository (for worktree creation)
 	BaseBranch              string // Base branch for the worktree (e.g., "main")
 	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch          string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	PRNumber                int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
+	ComparisonTarget        *models.ComparisonTarget
 	WorktreeBranchPrefix    string // Branch prefix for worktree branches
 	WorktreeBranchTemplate  string // Branch name template for worktree branches
 	WorktreeBranchTicket    string // External ticket value for branch templates
@@ -929,6 +940,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		return nil
 	}
 	return []RepoLaunchSpec{{
+		TaskRepositoryID:        r.TaskRepositoryID,
 		RepositoryID:            r.RepositoryID,
 		RepositoryPath:          r.RepositoryPath,
 		RepoName:                r.RepoName,
@@ -937,6 +949,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		CheckoutBranch:          r.CheckoutBranch,
 		PRNumber:                r.PRNumber,
 		RemoteContribution:      r.RemoteContribution,
+		ComparisonTarget:        r.ComparisonTarget,
 		ContributionDestination: r.ContributionDestination,
 		WorktreeID:              r.WorktreeID,
 		WorktreeBranchPrefix:    r.WorktreeBranchPrefix,

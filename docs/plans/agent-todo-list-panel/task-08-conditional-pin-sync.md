@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["07-frontend-settings-plumbing"]
 plan: "plan.md"
-spec: "../../specs/ui/agent-todo-list-panel.md"
+spec: "../../specs/ui/requirements/agent-todo-list-panel.md"
 ---
 
 # Task 08: Conditional pin sync
@@ -38,7 +38,7 @@ an existing panel and never affects manual adds.
   exists in `UserSettingsState`).
 - **Parallelism:** `sequential`.
 - **Inputs:** Spec What / Scenarios sections
-  (`docs/specs/ui/agent-todo-list-panel.md`); plan's "Conditional-pin sync"
+  (`docs/specs/ui/requirements/agent-todo-list-panel.md`); plan's "Conditional-pin sync"
   section; `apps/web/components/task/todos-panel-content.tsx` as the exact
   two-source fallback reference; `buildTodoItems`
   (`apps/web/hooks/use-processed-messages.ts`).

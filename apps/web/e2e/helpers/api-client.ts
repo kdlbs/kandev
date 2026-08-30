@@ -54,6 +54,18 @@ export type MockPR = {
   author_login: string;
   repo_owner: string;
   repo_name: string;
+  /** Explicit source repository identity for fork pull-request tests. */
+  head_repo_id?: number;
+  head_repo_node_id?: string;
+  head_repo_owner?: string;
+  head_repo_name?: string;
+  head_repo_clone_url?: string;
+  /** Explicit target repository identity for fork pull-request tests. */
+  base_repo_id?: number;
+  base_repo_owner?: string;
+  base_repo_name?: string;
+  base_default_branch?: string;
+  maintainer_can_modify?: boolean;
   html_url?: string;
   url?: string;
   body?: string;
@@ -499,17 +511,33 @@ export class ApiClient {
     await this.request("PATCH", `/api/v1/tasks/${taskId}`, { title });
   }
 
+  /** Replace a task's metadata via the same PATCH path a real orchestrator
+   *  mutation would use, so the update travels over `task.updated` WS to any
+   *  page that already has the task open, instead of only landing in the next
+   *  HTTP snapshot. `UpdateTask` replaces metadata wholesale, so pass the full
+   *  desired object. */
+  async updateTaskMetadata(taskId: string, metadata: Record<string, unknown>): Promise<void> {
+    await this.request("PATCH", `/api/v1/tasks/${taskId}`, { metadata });
+  }
+
   async listAgents(): Promise<{ agents: Agent[]; total: number }> {
     const response = await this.request<{ agents: Agent[]; total: number }>(
       "GET",
       "/api/v1/agents",
     );
-    return {
-      ...response,
-      agents: response.agents.map((agent) => ({
+    // The Dynamic family is intentionally ranked first by the product API so
+    // settings can present its dedicated card first. Most E2E profile
+    // factories predate virtual families and use the first agent as a
+    // launchable owner, so keep concrete families first in this test client.
+    const agents = response.agents
+      .map((agent) => ({
         ...agent,
         profiles: (agent.profiles ?? []).map(normalizeAgentProfile),
-      })),
+      }))
+      .sort((a, b) => Number(a.id === "dynamic") - Number(b.id === "dynamic"));
+    return {
+      ...response,
+      agents,
     };
   }
 
@@ -668,6 +696,13 @@ export class ApiClient {
 
   async deletePrompt(promptId: string): Promise<void> {
     await this.request("DELETE", `/api/v1/prompts/${promptId}`);
+  }
+
+  async resetGitHubActionPresets(workspaceId: string): Promise<void> {
+    await this.request(
+      "POST",
+      `/api/v1/github/action-presets/reset?workspace_id=${encodeURIComponent(workspaceId)}`,
+    );
   }
 
   async createTaskWithAgent(
@@ -873,6 +908,7 @@ export class ApiClient {
   async updateRepository(
     repositoryId: string,
     updates: {
+      default_branch?: string;
       provider?: string;
       provider_repo_id?: string;
       provider_host?: string;
@@ -1067,6 +1103,7 @@ export class ApiClient {
     tasks_list_group?: string;
     task_create_last_used?: TaskCreateLastUsedApi;
     kanban_hidden_step_ids?: Record<string, string[]>;
+    workflow_ids_with_auto_hide_empty_steps?: string[];
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }
@@ -1090,6 +1127,8 @@ export class ApiClient {
     updates: {
       prompt?: string;
       agent_profile_id?: string;
+      /** Promotes this step to the workflow's start step, demoting the previous one. */
+      is_start_step?: boolean;
       events?: {
         on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -1229,9 +1268,11 @@ export class ApiClient {
   }
 
   /**
-   * Seeds an agent message via the e2e harness. `metadata` lands on the
-   * message row; `turnMetadata` is persisted on the ensured turn so specs can
-   * exercise the metadata dialog's `turn_metadata` field.
+   * Seeds a message via the e2e harness. `metadata` lands on the message row;
+   * `turnMetadata` is persisted on the ensured turn so specs can exercise the
+   * metadata dialog's `turn_metadata` field. `authorType` defaults to agent;
+   * "user" seeds a prompt row whose prompt_index is computed server-side.
+   * `createdAt` (RFC3339) pins the row's timestamp for deterministic ordering.
    */
   async seedSessionMessage(
     sessionId: string,
@@ -1240,12 +1281,16 @@ export class ApiClient {
       content?: string;
       metadata?: Record<string, unknown>;
       turnMetadata?: Record<string, unknown>;
+      authorType?: "user" | "agent";
+      createdAt?: string;
     },
   ): Promise<void> {
     const body: Record<string, unknown> = { session_id: sessionId, type: opts.type };
     if (opts.content !== undefined) body.content = opts.content;
     if (opts.metadata !== undefined) body.metadata = opts.metadata;
     if (opts.turnMetadata !== undefined) body.turn_metadata = opts.turnMetadata;
+    if (opts.authorType !== undefined) body.author_type = opts.authorType;
+    if (opts.createdAt !== undefined) body.created_at = opts.createdAt;
     await this.request("POST", "/api/v1/_test/messages", body);
   }
 
@@ -1632,6 +1677,9 @@ export class ApiClient {
     review_state?: string;
     checks_state?: string;
     mergeable_state?: string;
+    merge_queue_state?: string;
+    merge_queue_position?: number | null;
+    merge_queue_estimated_time_to_merge_seconds?: number | null;
     additions?: number;
     deletions?: number;
     review_count?: number;
@@ -1675,6 +1723,9 @@ export class ApiClient {
     review_state: string;
     checks_state: string;
     mergeable_state: string;
+    merge_queue_state?: string;
+    merge_queue_position?: number | null;
+    merge_queue_estimated_time_to_merge_seconds?: number | null;
     review_count: number;
     pending_review_count: number;
     required_reviews?: number | null;
@@ -2159,6 +2210,7 @@ export class ApiClient {
     title: string;
     autopilot?: boolean;
     primary_session_id?: string | null;
+    primary_executor_type?: string | null;
     state?: string;
     workflow_step_id?: string;
     parent_id?: string;
@@ -2439,7 +2491,7 @@ export class ApiClient {
     await this.wsRequest("message.queue.cancel", { session_id: sessionId });
   }
 
-  async getQueueStatus(sessionId: string): Promise<{ count: number }> {
+  async getQueueStatus(sessionId: string): Promise<{ count: number; auto_run: boolean }> {
     return this.wsRequest("message.queue.get", { session_id: sessionId });
   }
 
@@ -3145,6 +3197,10 @@ export class ApiClient {
     name: string;
     workflowId?: string;
     workflowStepId?: string;
+    taskMode?: "automation_run" | "normal_task";
+    repositoryMode?: "workspace_default" | "selected" | "none";
+    repositoryIds?: string[];
+    repositories?: Array<{ repository_id: string; base_branch: string }>;
     /**
      * The automation's standing instruction. The run view only renders the
      * instruction card when there is one, so specs asserting on where that
@@ -3180,6 +3236,10 @@ export class ApiClient {
       name: opts.name,
       workflow_id: opts.workflowId ?? "",
       workflow_step_id: opts.workflowStepId ?? "",
+      task_mode: opts.taskMode,
+      repository_mode: opts.repositoryMode,
+      repository_ids: opts.repositoryIds,
+      repositories: opts.repositories,
       prompt: opts.prompt ?? "",
       agent_profile_id: opts.agentProfileId ?? "",
       executor_profile_id: opts.executorProfileId ?? "",
@@ -3219,11 +3279,21 @@ export class ApiClient {
     automationId: string,
     status = "skipped",
     taskId?: string,
-  ): Promise<{ id: string; automation_id: string; status: string; task_id: string }> {
+    opts?: { sessionId?: string; turnId?: string },
+  ): Promise<{
+    id: string;
+    automation_id: string;
+    status: string;
+    task_id: string;
+    session_id: string;
+    turn_id: string;
+  }> {
     return this.request("POST", "/api/v1/e2e/automation-runs", {
       automation_id: automationId,
       status,
       task_id: taskId ?? "",
+      session_id: opts?.sessionId,
+      turn_id: opts?.turnId,
     });
   }
 

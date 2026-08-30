@@ -36,6 +36,11 @@ func (s *Service) HandleAgentFailure(
 	if err := s.repo.MarkRunFailed(ctx, run.ID, errorMessage); err != nil {
 		return fmt.Errorf("mark run failed: %w", err)
 	}
+	// MarkRunFailed bypasses transitionRunTerminal (this is the office v1
+	// failure path, not FailRun), so the checkout release that lives there
+	// has to be duplicated here — otherwise every agent-error terminal
+	// transition leaks the task checkout the same way FinishRun used to.
+	s.releaseTaskCheckoutForRun(ctx, run)
 
 	count, err := s.repo.IncrementAgentConsecutiveFailures(ctx, run.AgentProfileID)
 	if err != nil {

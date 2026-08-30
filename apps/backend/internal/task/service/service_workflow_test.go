@@ -261,6 +261,64 @@ func TestService_MoveTaskToTerminalStepPreservesTerminalFailureStates(t *testing
 	}
 }
 
+func TestService_MoveTaskRecoveryCompletesFailedTaskAtTerminalStep(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
+	getter.steps["step-done"] = &wfmodels.WorkflowStep{
+		ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2,
+	}
+	createMoveTask(t, ctx, repo, "task-recovery", "wf-source", "step-source", nil)
+	task, err := repo.GetTask(ctx, "task-recovery")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	task.State = v1.TaskStateFailed
+	must(t, repo.UpdateTask(ctx, task))
+
+	moved, err := svc.MoveTaskWithOptions(ctx, task.ID, "wf-source", "step-done", 0, MoveTaskOptions{
+		AllowFailedToCompletedRecovery: true,
+	})
+	if err != nil {
+		t.Fatalf("MoveTaskWithOptions: %v", err)
+	}
+	if moved.Task.State != v1.TaskStateCompleted {
+		t.Fatalf("recovered task state = %q, want COMPLETED", moved.Task.State)
+	}
+
+	stored, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask after recovery: %v", err)
+	}
+	if stored.State != v1.TaskStateCompleted {
+		t.Fatalf("persisted recovered task state = %q, want COMPLETED", stored.State)
+	}
+}
+
+func TestService_MoveTaskRecoveryIsIdempotentAtTerminalStep(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
+	getter.steps["step-done"] = &wfmodels.WorkflowStep{
+		ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2,
+	}
+	createMoveTask(t, ctx, repo, "task-recovery-idempotent", "wf-source", "step-done", nil)
+
+	moved, err := svc.MoveTaskWithOptions(ctx, "task-recovery-idempotent", "wf-source", "step-done", 0, MoveTaskOptions{
+		AllowFailedToCompletedRecovery: true,
+	})
+	if err != nil {
+		t.Fatalf("MoveTaskWithOptions on target step: %v", err)
+	}
+	if moved.Task.WorkflowStepID != "step-done" {
+		t.Fatalf("idempotent recovery moved task to %q", moved.Task.WorkflowStepID)
+	}
+}
+
 func TestService_MoveTaskFailsWhenTerminalStatusLookupFails(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -402,6 +460,10 @@ func TestService_MoveTaskWithOptionsAllowsRunningPrimarySession(t *testing.T) {
 	}
 	if got := data["session_id"]; got != "session-running-primary" {
 		t.Fatalf("session_id = %v, want session-running-primary", got)
+	}
+	transitionID, ok := data["step_transition_id"].(int64)
+	if !ok || transitionID == 0 {
+		t.Fatalf("step_transition_id = %v (%T), want a positive ledger identifier", data["step_transition_id"], data["step_transition_id"])
 	}
 }
 

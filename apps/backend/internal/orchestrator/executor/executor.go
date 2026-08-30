@@ -102,6 +102,30 @@ type initialRuntimeSeedTaskSessionCreator interface {
 	CreateTaskSessionWithInitialRuntimeSeed(context.Context, *models.TaskSession) error
 }
 
+// taskEnvironmentMaterializationFinalizer publishes a successfully prepared
+// canonical environment only after its complete repository inventory is saved.
+// It is kept narrow so legacy test stores retain the existing fallback path.
+type taskEnvironmentMaterializationFinalizer interface {
+	FinalizeTaskEnvironmentMaterialization(context.Context, *models.TaskEnvironment, []*models.TaskEnvironmentRepo, string) error
+}
+
+// workspaceBindingTaskSessionCreator elects the single materializing session
+// and inserts its creating environment in the same transaction as the session.
+// It is optional for lightweight test/legacy stores; production repositories
+// must implement it so a concurrent sibling cannot enter lifecycle setup
+// without a durable canonical workspace binding.
+type workspaceBindingTaskSessionCreator interface {
+	CreateTaskSessionWithWorkspaceBinding(context.Context, *models.TaskSession, *models.TaskEnvironment) error
+}
+
+// sharedGroupWorkspaceBindingTaskSessionCreator elects the sole first
+// materializer for a shared workspace group while inserting its session and
+// creating environment. Later members observe the same durable claim instead
+// of independently creating task-local workspaces.
+type sharedGroupWorkspaceBindingTaskSessionCreator interface {
+	CreateTaskSessionWithSharedGroupWorkspaceBinding(context.Context, *models.TaskSession, *models.TaskEnvironment, string) error
+}
+
 type primarySessionTaskStateStore interface {
 	UpdateTaskStateIfPrimarySessionState(
 		context.Context,
@@ -179,6 +203,9 @@ type AgentManagerClient interface {
 
 	// RespondToPermission sends a response to a permission request
 	RespondToPermissionBySessionID(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error
+	ListPendingPermissionsBySessionID(ctx context.Context, sessionID string) ([]streams.PendingAgentPermission, error)
+	ResolvePermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error)
+	CancelPermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error)
 
 	// IsAgentRunningForSession checks if an agent is actually running for a session
 	// This probes the actual agent (Docker container or standalone process) rather than relying on cached state
@@ -341,9 +368,12 @@ type LaunchAgentRequest struct {
 	WorkspaceID       string // Kandev workspace ID — used to build scratch dir for repo-less tasks
 	SessionID         string
 	TaskEnvironmentID string // Env owning this session (shared across sessions in the same task)
-	TaskTitle         string // Human-readable task title for semantic worktree naming
-	AgentProfileID    string
-	TurnID            string // Durable Kandev turn for the initial prompt, when present
+	// WorkspaceReuseRequired selects attach-only preparation of an already-ready
+	// task environment. It must never be inferred from a sibling execution ID.
+	WorkspaceReuseRequired bool
+	TaskTitle              string // Human-readable task title for semantic worktree naming
+	AgentProfileID         string
+	TurnID                 string // Durable Kandev turn for the initial prompt, when present
 	// OfficeAgentProfileID is the stable Office identity. AgentProfileID stays
 	// the concrete execution profile inside the executor for compatibility.
 	OfficeAgentProfileID string
@@ -395,6 +425,7 @@ type LaunchAgentRequest struct {
 	UseWorktree             bool   // Whether to use a Git worktree for isolation
 	WorktreeID              string // Existing worktree ID to reuse (skip creation if set)
 	RepositoryID            string // Repository ID for worktree tracking
+	TaskRepositoryID        string // Exact task_repositories row for worktree recovery
 	RepositoryPath          string // Path to the main repository (for worktree creation)
 	BaseBranch              string // Base branch for the worktree (e.g., "main")
 	DefaultBranch           string // Repository's default_branch, used as a fallback when BaseBranch is missing
@@ -402,6 +433,7 @@ type LaunchAgentRequest struct {
 	PRNumber                int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
 	ContributionDestination *models.ContributionDestination
+	ComparisonTarget        *models.ComparisonTarget
 	WorktreeBranchPrefix    string // Branch prefix for worktree branches
 	WorktreeBranchTemplate  string // Branch name template for worktree branches
 	WorktreeBranchTicket    string // External ticket value for branch templates
@@ -437,6 +469,7 @@ type WorkspaceFolderSpec struct{ Name, LocalPath string }
 // the orchestrator package does not need to import lifecycle types into its
 // public API.
 type RepoSpec struct {
+	TaskRepositoryID        string
 	RepositoryID            string
 	RepositoryPath          string
 	RepositoryURL           string
@@ -447,6 +480,7 @@ type RepoSpec struct {
 	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
 	ContributionDestination *models.ContributionDestination
+	ComparisonTarget        *models.ComparisonTarget
 	WorktreeID              string
 	WorktreeBranchPrefix    string
 	WorktreeBranchTemplate  string
@@ -479,8 +513,12 @@ const McpModeTaskTitlePending = "task-title-pending"
 // McpModeOffice restricts the MCP toolset for office (autonomous) agents to
 // interaction + plan tools. Office agents manage tasks via the kandev CLI
 // (exposed through agentctl + $KANDEV_CLI), not MCP — see
-// docs/specs/office-agent-cli/spec.md.
+// docs/specs/office/system-design/agents-03.md.
 const McpModeOffice = "office"
+
+// McpModeAutomation selects the fixed coordinator MCP surface for tasks
+// created by a user-configured automation.
+const McpModeAutomation = "automation"
 
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
@@ -489,9 +527,10 @@ type LaunchOptions struct {
 	ExecutorID           string
 	TurnID               string
 	Prompt               string
+	PriorACPSession      string // ACP session ID to resume for the same concrete profile
 	WorkflowStepID       string
 	StartAgent           bool
-	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, or McpModeOffice
+	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
 	McpProfile           *mcpprofile.Context
 	Attachments          []v1.MessageAttachment
 	Env                  map[string]string
@@ -530,15 +569,18 @@ type LaunchContext struct {
 
 // LaunchAgentResponse contains the result of launching an agent
 type LaunchAgentResponse struct {
-	AgentExecutionID string
-	ContainerID      string
-	Status           v1.AgentStatus
-	WorktreeID       string
-	WorktreePath     string
-	WorktreeBranch   string
-	WorkspacePath    string // Effective workspace path (may differ from WorktreePath for quick-chat sessions)
-	Metadata         map[string]interface{}
-	PrepareResult    *lifecycle.EnvPrepareResult `json:"-"` // Carried from lifecycle.Launch for synchronous persistence
+	AgentExecutionID          string
+	ContainerID               string
+	Status                    v1.AgentStatus
+	WorktreeID                string
+	WorktreePath              string
+	WorktreeBranch            string
+	RequestedBaseBranch       string
+	BaseBranch                string
+	BaseBranchFallbackWarning string
+	WorkspacePath             string // Effective workspace path (may differ from WorktreePath for quick-chat sessions)
+	Metadata                  map[string]interface{}
+	PrepareResult             *lifecycle.EnvPrepareResult `json:"-"` // Carried from lifecycle.Launch for synchronous persistence
 
 	// Worktrees is the per-repository preparer result list when the launch is
 	// multi-repo. Empty for single-repo launches; the legacy WorktreeID/Path/
@@ -549,13 +591,17 @@ type LaunchAgentResponse struct {
 // RepoWorktreeResult mirrors lifecycle.RepoWorktreeResult for the orchestrator
 // API surface. One entry per repository prepared during a multi-repo launch.
 type RepoWorktreeResult struct {
-	RepositoryID   string
-	BranchSlug     string
-	WorktreeID     string
-	WorktreeBranch string
-	WorktreePath   string
-	MainRepoGitDir string
-	ErrorMessage   string
+	TaskRepositoryID          string
+	RepositoryID              string
+	BranchSlug                string
+	WorktreeID                string
+	WorktreeBranch            string
+	WorktreePath              string
+	MainRepoGitDir            string
+	RequestedBaseBranch       string
+	BaseBranch                string
+	BaseBranchFallbackWarning string
+	ErrorMessage              string
 }
 
 // TaskExecution tracks an active task execution
@@ -563,6 +609,7 @@ type TaskExecution struct {
 	TaskID           string
 	AgentExecutionID string
 	AgentProfileID   string
+	TurnID           string
 	StartedAt        time.Time
 	SessionState     v1.TaskSessionState
 	LastUpdate       time.Time
@@ -664,6 +711,11 @@ type AgentStartFailedFunc func(ctx context.Context, taskID, sessionID, agentExec
 // repositoryID identifies the repository whose launch failed. Useful for
 // creating repository-scoped user-facing status messages tied to launch errors.
 type LaunchFailedFunc func(ctx context.Context, taskID, sessionID, repositoryID string, err error)
+
+// LaunchFailureReviewEligibilityFunc reports whether a failed launch can offer
+// the mark-review-done recovery action. The resolver owns workflow and PR
+// lookups; an error omits the action without blocking failure persistence.
+type LaunchFailureReviewEligibilityFunc func(ctx context.Context, taskID string) (bool, error)
 
 // PrimarySessionSetFunc is called when the first session for a task is marked
 // primary. This lets the orchestrator publish a task.updated event so the
@@ -767,6 +819,8 @@ type Executor struct {
 	// Callback for session launch failures (pre-start). Allows orchestrator
 	// to emit user-friendly guidance for known failure patterns.
 	onLaunchFailed LaunchFailedFunc
+	// Optional resolver for the mark-review-done recovery action.
+	launchFailureReviewEligibility LaunchFailureReviewEligibilityFunc
 
 	// Callback when the first session for a task is marked primary.
 	onPrimarySessionSet PrimarySessionSetFunc
@@ -793,8 +847,9 @@ type Executor struct {
 	officeSessionLocks sync.Map // map[string]*sync.Mutex
 
 	// Optional cloner for provider-backed repos without a local path.
-	repoCloner  RepoCloner
-	repoUpdater RepoUpdater
+	repoCloner                      RepoCloner
+	repoUpdater                     RepoUpdater
+	taskRepositoryBaseBranchUpdater TaskRepositoryBaseBranchUpdater
 }
 
 // taskEnvLock returns the per-task mutex for env persistence, creating one on
@@ -887,6 +942,13 @@ type RepoUpdater interface {
 	// the repository row was created without an upstream-derived value
 	// (e.g. via the MCP create_task path that takes a bare github URL).
 	UpdateRepositoryDefaultBranch(ctx context.Context, repositoryID, defaultBranch string) error
+}
+
+// TaskRepositoryBaseBranchUpdater persists a recovered base branch on the
+// exact task_repositories row. It is optional so lifecycle and executor unit
+// tests remain independent of the task service.
+type TaskRepositoryBaseBranchUpdater interface {
+	UpdateTaskRepositoryBaseBranch(ctx context.Context, taskID, taskRepositoryID, baseBranch string) error
 }
 
 // ExecutorConfig holds configuration for the Executor
@@ -983,6 +1045,12 @@ func (e *Executor) SetRepoCloner(cloner RepoCloner, updater RepoUpdater) {
 	e.repoUpdater = updater
 }
 
+// SetTaskRepositoryBaseBranchUpdater wires the task-service seam used by
+// successful worktree fallback self-healing.
+func (e *Executor) SetTaskRepositoryBaseBranchUpdater(updater TaskRepositoryBaseBranchUpdater) {
+	e.taskRepositoryBaseBranchUpdater = updater
+}
+
 // SetOnAgentStartFailed sets a callback for agent process start failures.
 // This allows the orchestrator to intercept auth errors and treat them as
 // recoverable instead of terminal failures.
@@ -1006,6 +1074,14 @@ func (e *Executor) SetOnContextWindowReset(fn ContextWindowResetFunc) {
 // the agent process has started.
 func (e *Executor) SetOnLaunchFailed(fn LaunchFailedFunc) {
 	e.onLaunchFailed = fn
+}
+
+// SetLaunchFailureReviewEligibility wires the narrow review-completion
+// eligibility check used when a launch fails before an agent starts.
+func (e *Executor) SetLaunchFailureReviewEligibility(
+	fn LaunchFailureReviewEligibilityFunc,
+) {
+	e.launchFailureReviewEligibility = fn
 }
 
 // SetCapabilities sets the executor type capabilities provider.

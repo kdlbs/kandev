@@ -31,6 +31,31 @@ func TestMapKanbanStateIncludesWIPAdmissionFields(t *testing.T) {
 	}
 }
 
+// TestMapKanbanTaskStateIncludesAutoStartFailed regression-tests Review round
+// 2's MAJOR finding: mapKanbanTaskState is a camelCase whitelist that omitted
+// auto_start_failed, so a task whose auto-start already failed rendered with
+// no badge until the WS path (now fixed separately) delivered an update — the
+// very first paint was wrong for a task that failed before this boot payload
+// was ever built.
+func TestMapKanbanTaskStateIncludesAutoStartFailed(t *testing.T) {
+	task := mapKanbanTaskState(taskdto.TaskDTO{
+		ID:              "task-auto-start-failed",
+		WorkflowStepID:  "step-review",
+		AutoStartFailed: true,
+	})
+	if task["autoStartFailed"] != true {
+		t.Fatalf("kanban task autoStartFailed = %#v, want true", task["autoStartFailed"])
+	}
+
+	cleared := mapKanbanTaskState(taskdto.TaskDTO{
+		ID:             "task-auto-start-ok",
+		WorkflowStepID: "step-review",
+	})
+	if cleared["autoStartFailed"] != false {
+		t.Fatalf("kanban task autoStartFailed = %#v, want false for a task without the marker", cleared["autoStartFailed"])
+	}
+}
+
 func TestMapUserSettingsStateIncludesAzureDevOpsBrowsePreferences(t *testing.T) {
 	preferences := json.RawMessage(`{"workspace-1":{"mode":"board","filters":{"projectId":"project-2"},"board":{"teamId":"team-2","boardId":"board-2","focusedColumnId":"done"}}}`)
 	state := mapUserSettingsState(userdto.UserSettingsResponse{
@@ -70,11 +95,23 @@ func TestMapUserSettingsStateIncludesPortableTaskAndSidebarSettings(t *testing.T
 			SidebarViews: []usermodels.SidebarView{{
 				ID:   "view-1",
 				Name: "My view",
+				TaskRow: &usermodels.SidebarTaskRowPresentation{
+					DetailsEnabled: true,
+					DetailOrder:    []string{"repository", "relative_time"},
+					VisibleDetails: []string{"repository"},
+					Trailing:       "relative_time",
+				},
 			}},
 			SidebarActiveViewID: "view-1",
 			SidebarDraft: &usermodels.SidebarViewDraft{
 				BaseViewID: "view-1",
 				Group:      "repository",
+				TaskRow: &usermodels.SidebarTaskRowPresentation{
+					DetailsEnabled: false,
+					DetailOrder:    []string{"relative_time", "repository", "pull_request_number"},
+					VisibleDetails: []string{},
+					Trailing:       "none",
+				},
 			},
 			SidebarTaskPrefs: usermodels.SidebarTaskPrefs{
 				PinnedTaskIDs:          []string{"task-1"},
@@ -97,6 +134,18 @@ func TestMapUserSettingsStateIncludesPortableTaskAndSidebarSettings(t *testing.T
 	draft, ok := state["sidebarDraft"].(map[string]any)
 	if !ok || draft["baseViewId"] != "view-1" || draft["group"] != "repository" {
 		t.Fatalf("sidebarDraft = %#v, want mapped draft", state["sidebarDraft"])
+	}
+	view, ok := state["sidebarViews"].([]map[string]any)
+	if !ok || len(view) != 1 {
+		t.Fatalf("sidebarViews = %#v, want one mapped view", state["sidebarViews"])
+	}
+	viewTaskRow, ok := view[0]["taskRow"].(map[string]any)
+	if !ok || viewTaskRow["trailing"] != "relative_time" {
+		t.Fatalf("sidebarViews taskRow = %#v, want relative_time trailing", view[0]["taskRow"])
+	}
+	draftTaskRow, ok := draft["taskRow"].(map[string]any)
+	if !ok || draftTaskRow["detailsEnabled"] != false || draftTaskRow["trailing"] != "none" {
+		t.Fatalf("sidebarDraft taskRow = %#v, want disabled none presentation", draft["taskRow"])
 	}
 	prefs, ok := state["sidebarTaskPrefs"].(map[string]any)
 	if !ok || len(prefs["pinnedTaskIds"].([]string)) != 1 {

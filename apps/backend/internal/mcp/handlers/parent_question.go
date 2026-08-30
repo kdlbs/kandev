@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/clarification"
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -146,7 +147,18 @@ func (h *Handlers) handleAskParentQuestion(ctx context.Context, msg *ws.Message)
 	// lets an answer race the cancellation of the turn that asked it.
 	h.setSessionWaitingForInput(ctx, target.childTask.ID, target.childSession.ID)
 	if h.inputPauser != nil {
-		if _, pauseErr := h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), target.childSession.ID); pauseErr != nil {
+		pauseCtx := context.WithoutCancel(ctx)
+		var pauseErr error
+		if pauser, ok := h.inputPauser.(clarificationInputPauserWithOptions); ok {
+			_, pauseErr = pauser.PauseForClarificationInputWithOptions(
+				pauseCtx,
+				target.childSession.ID,
+				orchestrator.ClarificationPauseOptions{},
+			)
+		} else {
+			_, pauseErr = h.inputPauser.PauseForClarificationInput(pauseCtx, target.childSession.ID)
+		}
+		if pauseErr != nil {
 			h.logger.Warn("failed to pause autopilot child before parent question delivery",
 				zap.String("question_id", questionID), zap.String("session_id", target.childSession.ID), zap.Error(pauseErr))
 		}

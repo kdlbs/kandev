@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: [app-status-bar-appearance-01]
 plan: docs/plans/app-status-bar-appearance-setting/plan.md
-spec: docs/specs/ui/app-status-bar.md
+spec: docs/specs/ui/requirements/app-status-bar.md
 decision: docs/decisions/2026-08-11-user-owned-status-bar-visibility.md
 ---
 

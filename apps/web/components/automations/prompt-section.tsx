@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Label } from "@kandev/ui/label";
-import { ScriptEditor } from "@/components/settings/profile-edit/script-editor";
+import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
 import type { PlaceholderInfo } from "@/lib/types/automation";
 import { toScriptPlaceholders } from "./automation-placeholders";
 
@@ -23,19 +23,17 @@ export function PromptSection({ value, isDirty, onChange, placeholders }: Prompt
       <Label className="text-xs uppercase tracking-wider text-muted-foreground">
         {t("automations:instructionsLabel")}
       </Label>
-      <div
-        className="rounded-md border border-transparent"
-        data-settings-dirty={isDirty}
-        data-settings-dirty-level="container"
-      >
-        <ScriptEditor
-          value={value}
-          onChange={onChange}
-          language="plaintext"
-          height="160px"
-          placeholders={scriptPlaceholders}
-        />
-      </div>
+      <SettingsPromptEditor
+        value={value}
+        onChange={onChange}
+        language="plaintext"
+        height="160px"
+        placeholders={scriptPlaceholders}
+        promptReferences
+        isDirty={isDirty}
+        dirtyLevel="container"
+        testId="automation-prompt-editor"
+      />
       {placeholders.length > 0 && (
         <div className="text-xs text-muted-foreground space-y-1">
           <p className="font-medium">{t("automations:availablePlaceholdersColon")}</p>

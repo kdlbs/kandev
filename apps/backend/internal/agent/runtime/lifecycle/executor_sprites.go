@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 	spritesutil "github.com/kandev/kandev/internal/sprites"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 type RemoteAuthAgentLister interface {
@@ -122,6 +123,12 @@ func (r *SpritesExecutor) ResumeRemoteInstance(_ context.Context, req *ExecutorC
 
 func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
 	baseCtx := preparationContext(ctx)
+	if req.WorkspaceReuseRequired && !spritesShouldReconnect(req) {
+		return nil, fmt.Errorf("%w: missing canonical Sprite handle", models.ErrWorkspaceReuseUnsafe)
+	}
+	if err := validateAgentctlStartupConfig(req.AgentctlStartupConfig); err != nil {
+		return nil, fmt.Errorf("invalid agentctl startup configuration: %w", err)
+	}
 	if _, err := validateRemoteContributions(req.RemoteContributions); err != nil {
 		return nil, err
 	}
@@ -156,6 +163,9 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 	sprite, err := r.stepCreateSprite(launchCtx, client, spriteName, reconnect, report)
 	if err != nil {
 		if reconnect && errors.Is(err, spritesutil.ErrSpriteNotFound) {
+			if req.WorkspaceReuseRequired {
+				return nil, fmt.Errorf("%w: existing Sprite workspace is unavailable", models.ErrWorkspaceReuseUnsafe)
+			}
 			oldName := spriteName
 			spriteName = r.fallbackToFreshSandbox(req, progressPlan, report, oldName)
 			reconnect = false
@@ -232,7 +242,7 @@ func (r *SpritesExecutor) preflightGitHubCredentialBroker(
 		stepCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		cmd := sprite.CommandContext(stepCtx, "sh", "-c", command)
-		cmd.Env = r.buildSpriteEnv(env)
+		cmd.Env = r.buildSpriteEnv(env, req.AgentctlStartupConfig)
 		return cmd.CombinedOutput()
 	})
 }

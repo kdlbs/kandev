@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { isValidElement, type ReactNode } from "react";
 import { render } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import {
   IconCheck,
   IconCircleCheck,
@@ -19,8 +20,15 @@ import {
   shouldShowTaskRunningSpinner,
 } from "./state-icons";
 
+const WILL_CHANGE_TRANSFORM = "will-change-transform";
+const SPIN_CLASS = "animate-spin";
+const SPIN_SELECTOR = `.${SPIN_CLASS}`;
+
 function iconType(node: ReactNode) {
   if (!isValidElement(node)) throw new Error("Expected React element");
+  if (node.type === CompositorSpin) {
+    return iconType((node.props as { children: ReactNode }).children);
+  }
   return node.type;
 }
 
@@ -30,6 +38,47 @@ function iconClassName(node: ReactNode): string {
 }
 
 describe("getTaskStateIcon", () => {
+  it("uses a compositor transform animation when Web Animations are available", () => {
+    const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+    const animate = vi.fn(() => ({ cancel: vi.fn() }) as unknown as Animation);
+    Object.defineProperty(HTMLElement.prototype, "animate", {
+      configurable: true,
+      value: animate,
+    });
+
+    try {
+      const { container } = render(
+        <TooltipProvider>{getTaskStateIcon("IN_PROGRESS")}</TooltipProvider>,
+      );
+      const wrapper = container.querySelector(SPIN_SELECTOR) as HTMLElement;
+
+      expect(wrapper.style.animation).toBe("none");
+      expect(animate).toHaveBeenCalledWith(
+        [{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }],
+        expect.objectContaining({ duration: 1_000, easing: "linear", iterations: Infinity }),
+      );
+    } finally {
+      if (originalAnimate) {
+        Object.defineProperty(HTMLElement.prototype, "animate", originalAnimate);
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, "animate");
+      }
+    }
+  });
+
+  it("animates an HTML wrapper while keeping the status SVG static", () => {
+    const { container } = render(
+      <TooltipProvider>{getTaskStateIcon("IN_PROGRESS")}</TooltipProvider>,
+    );
+    const animated = container.querySelector(SPIN_SELECTOR);
+
+    expect(animated?.tagName).toBe("SPAN");
+    expect(animated?.classList.contains(WILL_CHANGE_TRANSFORM)).toBe(true);
+    const svg = animated?.querySelector("svg");
+    expect(svg).not.toBeNull();
+    expect(svg?.classList.contains(SPIN_CLASS)).toBe(false);
+  });
+
   it("uses the question icon for waiting-for-input task state", () => {
     expect(iconType(getTaskStateIcon("WAITING_FOR_INPUT"))).toBe(IconMessageQuestion);
   });
@@ -167,6 +216,57 @@ describe("getTaskStateIcon — task-level activity tri-state", () => {
     expect(iconType(getTaskStateIcon("COMPLETED", undefined))).toBe(IconCheck);
   });
 
+  it("safe fallback: an in-progress task with a MISSING aggregate reads not-done, never a check", () => {
+    // safe default: a task whose turn is still
+    // open (coarse IN_PROGRESS) but whose task-level aggregate is unknown — e.g.
+    // the aggregate never reached this client, or the in-memory tracker reset on
+    // a backend restart — must fall back to the working spinner, never the done
+    // check. The coarse IN_PROGRESS reading is itself not-done, so a missing
+    // aggregate can only ever soften to working, never harden to done.
+    const missingUndefined = getTaskStateIcon("IN_PROGRESS", undefined);
+    const missingNull = getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: null });
+    expect(iconType(missingUndefined)).toBe(IconLoader2);
+    expect(iconType(missingUndefined)).not.toBe(IconCheck);
+    expect(iconType(missingNull)).toBe(IconLoader2);
+    expect(iconType(missingNull)).not.toBe(IconCheck);
+  });
+
+  it("distinguishes background from BOTH generating and done by icon SHAPE, not hue alone", () => {
+    // Icon TYPE (glyph) differs for all three, so the reading survives a
+    // grayscale/desaturated scan for color-vision-deficient operators
+    // The affordance remains distinguishable without color.
+    const generating = iconType(
+      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "generating" }),
+    );
+    const background = iconType(
+      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "background" }),
+    );
+    const done = iconType(getTaskStateIcon("COMPLETED", undefined, { foregroundActivity: null }));
+    expect(background).not.toBe(generating);
+    expect(background).not.toBe(done);
+    expect(generating).not.toBe(done);
+  });
+
+  it("also separates background from generating and done by HUE on the compact surfaces", () => {
+    // The dense board/list/graph surfaces get an extra hue separation on top of the
+    // shape difference so background reads apart from generating at a glance — its
+    // own violet, distinct from generating's blue and done's green.
+    const generating = iconClassName(
+      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "generating" }),
+    );
+    const background = iconClassName(
+      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "background" }),
+    );
+    const done = iconClassName(
+      getTaskStateIcon("COMPLETED", undefined, { foregroundActivity: null }),
+    );
+    expect(background).toContain("text-violet-500");
+    expect(background).not.toBe(generating);
+    expect(background).not.toBe(done);
+  });
+});
+
+describe("getTaskStateIcon — status markers", () => {
   it("renders the accessible interrupted icon with the tooltip label", () => {
     const { container } = render(
       <TooltipProvider>
@@ -218,53 +318,55 @@ describe("getTaskStateIcon — task-level activity tri-state", () => {
     ).toBe(IconShieldQuestion);
   });
 
-  it("safe fallback: an in-progress task with a MISSING aggregate reads not-done, never a check", () => {
-    // safe default: a task whose turn is still
-    // open (coarse IN_PROGRESS) but whose task-level aggregate is unknown — e.g.
-    // the aggregate never reached this client, or the in-memory tracker reset on
-    // a backend restart — must fall back to the working spinner, never the done
-    // check. The coarse IN_PROGRESS reading is itself not-done, so a missing
-    // aggregate can only ever soften to working, never harden to done.
-    const missingUndefined = getTaskStateIcon("IN_PROGRESS", undefined);
-    const missingNull = getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: null });
-    expect(iconType(missingUndefined)).toBe(IconLoader2);
-    expect(iconType(missingUndefined)).not.toBe(IconCheck);
-    expect(iconType(missingNull)).toBe(IconLoader2);
-    expect(iconType(missingNull)).not.toBe(IconCheck);
+  it("renders the accessible auto-start-failed icon with the tooltip label", () => {
+    const { container } = render(
+      <TooltipProvider>
+        {getTaskStateIcon("REVIEW", undefined, { autoStartFailed: true })}
+      </TooltipProvider>,
+    );
+    const icon = container.querySelector('[data-testid="task-state-auto-start-failed"]');
+    expect(icon).not.toBeNull();
+    expect(icon?.className).toContain("text-red-500");
+    expect(container.querySelector('[aria-label="Auto-start failed"]')).not.toBeNull();
+    // The icon itself is decorative; the label lives on the trigger.
+    expect(icon?.getAttribute("aria-hidden")).toBe("true");
   });
 
-  it("distinguishes background from BOTH generating and done by icon SHAPE, not hue alone", () => {
-    // Icon TYPE (glyph) differs for all three, so the reading survives a
-    // grayscale/desaturated scan for color-vision-deficient operators
-    // The affordance remains distinguishable without color.
-    const generating = iconType(
-      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "generating" }),
+  it("keeps terminal state icons over a lingering auto-start-failed marker", () => {
+    expect(iconType(getTaskStateIcon("COMPLETED", undefined, { autoStartFailed: true }))).toBe(
+      IconCheck,
     );
-    const background = iconType(
-      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "background" }),
+    expect(iconType(getTaskStateIcon("FAILED", undefined, { autoStartFailed: true }))).toBe(IconX);
+    expect(iconType(getTaskStateIcon("CANCELLED", undefined, { autoStartFailed: true }))).toBe(
+      IconX,
     );
-    const done = iconType(getTaskStateIcon("COMPLETED", undefined, { foregroundActivity: null }));
-    expect(background).not.toBe(generating);
-    expect(background).not.toBe(done);
-    expect(generating).not.toBe(done);
   });
 
-  it("also separates background from generating and done by HUE on the compact surfaces", () => {
-    // The dense board/list/graph surfaces get an extra hue separation on top of the
-    // shape difference so background reads apart from generating at a glance — its
-    // own violet, distinct from generating's blue and done's green.
-    const generating = iconClassName(
-      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "generating" }),
-    );
-    const background = iconClassName(
-      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "background" }),
-    );
-    const done = iconClassName(
-      getTaskStateIcon("COMPLETED", undefined, { foregroundActivity: null }),
-    );
-    expect(background).toContain("text-violet-500");
-    expect(background).not.toBe(generating);
-    expect(background).not.toBe(done);
+  it("keeps active and pending affordances over the auto-start-failed marker", () => {
+    expect(
+      iconType(
+        getTaskStateIcon("REVIEW", undefined, {
+          foregroundActivity: "generating",
+          autoStartFailed: true,
+        }),
+      ),
+    ).toBe(IconLoader2);
+    expect(
+      iconType(
+        getTaskStateIcon("REVIEW", undefined, {
+          hasPendingClarification: true,
+          autoStartFailed: true,
+        }),
+      ),
+    ).toBe(IconMessageQuestion);
+    expect(
+      iconType(
+        getTaskStateIcon("REVIEW", undefined, {
+          hasPendingPermission: true,
+          autoStartFailed: true,
+        }),
+      ),
+    ).toBe(IconShieldQuestion);
   });
 });
 
@@ -278,7 +380,7 @@ describe("getSessionStateIcon — fine-grained busy tri-state", () => {
     // running affordance is deliberately left as it always was (static dot).
     const a = getSessionStateIcon("RUNNING", undefined, "generating");
     expect(iconType(a)).toBe(IconCircleFilled);
-    expect(iconClassName(a)).not.toContain("animate-spin");
+    expect(iconClassName(a)).not.toContain(SPIN_CLASS);
   });
 
   it("(a) defaults to the running dot when the substate is unknown", () => {
@@ -287,17 +389,34 @@ describe("getSessionStateIcon — fine-grained busy tri-state", () => {
     expect(iconType(getSessionStateIcon("RUNNING", undefined, null))).toBe(IconCircleFilled);
   });
 
+  it("animates a STARTING session on an HTML wrapper", () => {
+    const { container } = render(<>{getSessionStateIcon("STARTING")}</>);
+    const animated = container.querySelector(SPIN_SELECTOR);
+
+    expect(animated?.tagName).toBe("SPAN");
+    expect(animated?.classList.contains(WILL_CHANGE_TRANSFORM)).toBe(true);
+    const svg = animated?.querySelector("svg");
+    expect(svg).not.toBeNull();
+    expect(svg?.classList.contains(SPIN_CLASS)).toBe(false);
+  });
+
   it("(b) shows a working spinner — never the done checkmark — while background work runs", () => {
     const b = getSessionStateIcon("WAITING_FOR_INPUT", undefined, "background");
     expect(iconType(b)).toBe(IconLoader2);
     expect(iconType(b)).not.toBe(IconCircleCheck);
-    expect(iconClassName(b)).toContain("animate-spin");
+    const { container } = render(<>{b}</>);
+    const animated = container.querySelector(SPIN_SELECTOR);
+    expect(animated).not.toBeNull();
+    expect(animated?.tagName).toBe("SPAN");
+    const svg = animated?.querySelector("svg");
+    expect(svg).not.toBeNull();
+    expect(svg?.classList.contains(SPIN_CLASS)).toBe(false);
   });
 
-  it("(b) is visually distinct from (a) so the operator can tell them apart", () => {
+  it("(b) shares (a)'s hue while shape and motion distinguish them", () => {
     const a = iconClassName(getSessionStateIcon("RUNNING", undefined, "generating"));
     const b = iconClassName(getSessionStateIcon("RUNNING", undefined, "background"));
-    expect(a).not.toBe(b);
+    expect(a).toBe(b);
   });
 
   it("(c) flips to the done checkmark once background activity is cleared", () => {

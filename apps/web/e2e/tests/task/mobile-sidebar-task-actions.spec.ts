@@ -4,6 +4,7 @@ import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { activeSessionId, seedSecondaryClarificationTask } from "../../helpers/clarification";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Mobile sidebar task actions", () => {
@@ -49,6 +50,66 @@ test.describe("Mobile sidebar task actions", () => {
         { message: "pending clarification task should not overflow the phone viewport" },
       )
       .toBe(true);
+  });
+
+  test("keeps a linked PR badge beside its title in the phone drawer", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const title = "Mobile sidebar PR badge spacing";
+    const task = await apiClient.createTask(seedData.workspaceId, title, {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 902,
+      pr_url: "https://github.com/testorg/testrepo/pull/902",
+      pr_title: "Mobile sidebar spacing",
+      head_branch: "feature/mobile-sidebar-spacing",
+      base_branch: "main",
+      author_login: "e2e",
+      state: "open",
+      checks_state: "success",
+      mergeable_state: "clean",
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.mobileSessionMenu.tap();
+
+    const drawer = testPage.getByRole("dialog", { name: "Tasks" });
+    const row = drawer.getByTestId("sidebar-task-item").filter({ hasText: title });
+    await expect(row).toBeVisible();
+    const prIcon = row.getByTestId(`pr-task-icon-${task.id}`);
+    await expect(prIcon).toBeVisible({ timeout: 15_000 });
+
+    const spacing = await row.evaluate((el, titleText) => {
+      const titleElement = [...el.querySelectorAll("span")].find(
+        (candidate) =>
+          candidate.classList.contains("whitespace-nowrap") && candidate.textContent === titleText,
+      );
+      const pr = el.querySelector('[data-testid^="pr-task-icon-"]');
+      if (!titleElement || !pr) return { found: false, gap: -1, titleTop: -1, prTop: -1 };
+      const titleBox = titleElement.getBoundingClientRect();
+      const prBox = pr.getBoundingClientRect();
+      return {
+        found: true,
+        gap: prBox.left - titleBox.right,
+        titleTop: titleBox.top,
+        prTop: prBox.top,
+      };
+    }, title);
+    expect(spacing.found).toBe(true);
+    expect(Math.abs(spacing.titleTop - spacing.prTop)).toBeLessThan(4);
+    expect(spacing.gap).toBeGreaterThanOrEqual(0);
+    expect(spacing.gap).toBeLessThan(32);
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile sidebar PR badge spacing");
   });
 
   test("switches to the selected task and its chat from the phone task drawer", async ({
@@ -159,12 +220,12 @@ test.describe("Mobile sidebar task actions", () => {
     expect(cardBox.y).toBeGreaterThan(0);
   });
 
-  test("keeps the archive confirmation readable on a phone", async ({
+  test("keeps the inline archive confirmation readable on a phone", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    const task = await apiClient.seedTask(seedData.workspaceId, "Mobile archive dialog target", {
+    const task = await apiClient.seedTask(seedData.workspaceId, "Mobile archive inline target", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
@@ -177,62 +238,31 @@ test.describe("Mobile sidebar task actions", () => {
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = drawer
       .getByTestId("sidebar-task-item")
-      .filter({ hasText: "Mobile archive dialog target" });
+      .filter({ hasText: "Mobile archive inline target" });
     await taskRow.getByRole("button", { name: "Task actions" }).tap();
     await testPage.getByRole("menuitem", { name: "Archive", exact: true }).tap();
 
-    const dialog = testPage.getByRole("alertdialog");
-    await expect(dialog).toBeVisible();
-    await expect(dialog).toHaveClass(/font-sans/);
-    const header = dialog.locator('[data-slot="alert-dialog-header"]');
-    await expect
-      .poll(async () =>
-        header.evaluate((element) => {
-          const style = getComputedStyle(element);
-          return { justifyItems: style.justifyItems, textAlign: style.textAlign };
-        }),
-      )
-      .toEqual({ justifyItems: "start", textAlign: "left" });
-    await expect(dialog.locator('[data-slot="alert-dialog-description"]')).toHaveClass(/text-sm/);
-    await dialog.evaluate(async (element) => {
-      await Promise.all(
-        element
-          .getAnimations({ subtree: true })
-          .map((animation) => animation.finished.catch(() => undefined)),
-      );
-    });
+    const confirmation = taskRow.getByTestId("task-archive-inline-confirmation");
+    await expect(confirmation).toBeVisible();
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await expect(confirmation).toContainText("Mobile archive inline target");
 
-    const [dialogBox, viewport] = await Promise.all([
-      dialog.boundingBox(),
-      testPage.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
-    ]);
-    if (!dialogBox) throw new Error("archive confirmation dialog has no layout box");
-    expect(dialogBox.width).toBeGreaterThanOrEqual(viewport.width - 40);
-    expect(dialogBox.x).toBeGreaterThanOrEqual(8);
-    expect(dialogBox.x + dialogBox.width).toBeLessThanOrEqual(viewport.width - 8);
-    expect(dialogBox.y).toBeGreaterThanOrEqual(8);
-    expect(dialogBox.y + dialogBox.height).toBeLessThanOrEqual(viewport.height - 8);
+    for (const button of [
+      confirmation.getByRole("button", { name: "Cancel" }),
+      confirmation.getByTestId("archive-task-confirm"),
+    ]) {
+      const box = await button.boundingBox();
+      if (!box) throw new Error("inline archive action has no layout box");
+      expect(box.width).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      await expect(button).toBeInViewport();
+    }
 
-    const typography = await dialog.evaluate((element) => {
-      const description = element.querySelector('[data-slot="alert-dialog-description"]');
-      const cancel = element.querySelector('[data-slot="alert-dialog-cancel"]');
-      const action = element.querySelector('[data-slot="alert-dialog-action"]');
-      return {
-        dialogFontFamily: getComputedStyle(element).fontFamily,
-        descriptionFontFamily: description ? getComputedStyle(description).fontFamily : "",
-        descriptionFontSize: description ? getComputedStyle(description).fontSize : "",
-        cancelFontFamily: cancel ? getComputedStyle(cancel).fontFamily : "",
-        cancelFontSize: cancel ? getComputedStyle(cancel).fontSize : "",
-        actionFontFamily: action ? getComputedStyle(action).fontFamily : "",
-        actionFontSize: action ? getComputedStyle(action).fontSize : "",
-      };
-    });
-    expect(typography.dialogFontFamily).toContain("Figtree");
-    expect(typography.descriptionFontFamily).toBe(typography.dialogFontFamily);
-    expect(typography.cancelFontFamily).toBe(typography.dialogFontFamily);
-    expect(typography.descriptionFontSize).toBe(typography.cancelFontSize);
-    expect(typography.actionFontFamily).toBe(typography.dialogFontFamily);
-    expect(typography.actionFontSize).toBe(typography.descriptionFontSize);
+    const pageWidth = await testPage.evaluate(() => ({
+      scroll: document.documentElement.scrollWidth,
+      client: document.documentElement.clientWidth,
+    }));
+    expect(pageWidth.scroll).toBeLessThanOrEqual(pageWidth.client);
   });
 
   test("keeps the tablet task switcher as a left-side sheet", async ({

@@ -257,6 +257,12 @@ var profileConfigRenameKeys = map[string]string{
 var profileConfigAuthoritativeKeys = []string{
 	lifecycle.MetadataKeySSHWorkdirRoot,
 	lifecycle.MetadataKeySSHShell,
+	// Reclaiming the remote task directory is destructive and irreversible.
+	// A task that could supply ssh_reclaim_task_dir in its own metadata
+	// would be arming a deletion on a host its profile never opted in, so
+	// the profile value wins unconditionally — including when it is empty,
+	// which the reader treats as disabled.
+	lifecycle.MetadataKeySSHReclaimTaskDir,
 }
 
 // applyProfileConfigToMetadata projects profile.Config keys into the

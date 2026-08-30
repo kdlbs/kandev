@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -404,7 +405,7 @@ func TestAutoStart_BothPathsFireExactlyOnce(t *testing.T) {
 
 	// Path A: promotion event-driven auto-start on the same task.
 	// autoStartTaskForStep spawns a goroutine — we synchronise via the launched channel.
-	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.queue_promoted")
+	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.queue_promoted", 0)
 
 	// Wait for exactly one launch. Allow 2 seconds for the async goroutine.
 	deadline := time.After(2 * time.Second)
@@ -567,12 +568,95 @@ func TestAutoStart_NoTokenDoesNotBlock(t *testing.T) {
 	}
 	svc := createTestServiceWithScheduler(repo, sg, taskRepo, agentMgr)
 
-	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.moved")
+	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.moved", 0)
 
 	select {
 	case <-launched:
 	case <-time.After(2 * time.Second):
 		t.Fatal("autoStartTaskForStep should launch a task with no token")
+	}
+}
+
+// TestAutoStart_FailedLaunchWithoutGuardDoesNotStampClaimed is the regression
+// test for the bogus-claim-restore bug: restoreAutoStartClaim used to run
+// unconditionally on any launch failure, so a task that never carried
+// MetaKeyAutoStartGuard (and therefore never claimed MetaKeyAutoStartClaimed
+// in the first place) still gained the token after a failed launch. A failed
+// launch on a guardless task must leave auto_start_claimed absent, and must
+// stamp auto_start_failed instead so the failure surfaces on the card.
+func TestAutoStart_FailedLaunchWithoutGuardDoesNotStampClaimed(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const taskID = "task-fail-no-guard"
+	const stepID = "step-review"
+
+	sg := newMockStepGetter()
+	sg.steps[stepID] = &wfmodels.WorkflowStep{
+		ID: stepID, WorkflowID: "wf1", Name: "Review", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}},
+		},
+	}
+
+	now := time.Now().UTC()
+	_ = repo.CreateWorkspace(ctx, &taskmodels.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateWorkflow(ctx, &taskmodels.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateTask(ctx, &taskmodels.Task{
+		ID: taskID, WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: stepID,
+		Title: "T", Description: "D", State: v1.TaskStateInProgress,
+		Metadata:  map[string]interface{}{taskmodels.MetaKeyAgentProfileID: testAgentProfileID},
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{
+		ID:    taskID,
+		State: v1.TaskStateInProgress,
+		Metadata: map[string]interface{}{
+			taskmodels.MetaKeyAgentProfileID: testAgentProfileID,
+		},
+	}
+
+	attempted := make(chan struct{}, 1)
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			attempted <- struct{}{}
+			return nil, errors.New("boom")
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, sg, taskRepo, agentMgr)
+
+	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.moved", 0)
+
+	select {
+	case <-attempted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected the launch attempt to fire")
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		task, err := repo.GetTask(ctx, taskID)
+		if err != nil {
+			t.Fatalf("GetTask: %v", err)
+		}
+		if task.Metadata[taskmodels.MetaKeyAutoStartFailed] != nil {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for auto_start_failed marker to be set")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	task, err := repo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.Metadata[taskmodels.MetaKeyAutoStartClaimed] != nil {
+		t.Error("a failed launch on a task without the guard must not stamp auto_start_claimed")
 	}
 }
 

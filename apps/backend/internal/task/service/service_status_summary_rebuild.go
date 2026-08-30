@@ -147,6 +147,7 @@ func (s *Service) rebuildMissingSummaries(
 	for _, task := range missing {
 		activityAt := activityAtByTask[task.ID]
 		s.rebuildMissingSummary(ctx, task, summaries, s.rebuildInput(
+			taskLaunchErrorSummary(task),
 			sessionsByTask[task.ID],
 			pendingBySession,
 			gitBySession,
@@ -240,10 +241,7 @@ func (s *Service) reconcileExistingSummary(
 	activityObserved bool,
 ) (*statussummary.TaskStatusSummary, error) {
 	for attempt := 0; attempt < maxSummaryReconcileAttempts && current != nil; attempt++ {
-		activityNeedsRepair := activityObserved &&
-			(authoritativeActivity.After(time.Time{}) &&
-				(current.LastActivityAt == nil || authoritativeActivity.After(*current.LastActivityAt)))
-		if current.PendingAction == pendingAction && !activityNeedsRepair {
+		if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved) {
 			return current, nil
 		}
 		if err := prepareSummaryReconcileAttempt(ctx, attempt, current.Revision); err != nil {
@@ -271,35 +269,61 @@ func (s *Service) reconcileExistingSummary(
 			s.publishReconciledSummary(ctx, task, next)
 			return &next, nil
 		}
-		rows, err := s.statusSummaries.LoadTaskStatusSummaries(ctx, []string{task.ID})
+		current, pendingAction, err = s.reloadSummaryReconcileState(ctx, task.ID)
 		if err != nil {
-			return nil, fmt.Errorf("reload after compare-and-set rejection: %w", err)
+			return nil, err
 		}
-		current = rows[task.ID]
 		if current == nil {
 			return nil, nil
 		}
-		if s.sessions == nil {
-			return nil, errors.New("reload sessions: session repository unavailable")
-		}
-		refreshedSessions, err := s.sessions.ListTaskSessions(ctx, task.ID)
-		if err != nil {
-			return nil, fmt.Errorf("reload sessions: %w", err)
-		}
-		pendingBySession, err := s.GetPendingActionsForSessions(ctx, taskSessionIDs(refreshedSessions))
-		if err != nil {
-			return nil, fmt.Errorf("reload pending actions: %w", err)
-		}
-		pendingAction = pendingActionForTask(refreshedSessions, pendingBySession)
 	}
-	activityNeedsRepair := activityObserved &&
-		(authoritativeActivity.After(time.Time{}) &&
-			(current != nil && (current.LastActivityAt == nil || authoritativeActivity.After(*current.LastActivityAt))))
-	if current != nil && current.PendingAction == pendingAction && !activityNeedsRepair {
+	if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved) {
 		return current, nil
 	}
 	s.logSummaryReconcileExhaustion(task.ID, current)
 	return nil, errors.New("exhausted compare-and-set retries")
+}
+
+func summaryNeedsReconcile(
+	current *statussummary.TaskStatusSummary,
+	pendingAction string,
+	authoritativeActivity time.Time,
+	activityObserved bool,
+) bool {
+	if current == nil {
+		return false
+	}
+	if current.PendingAction != pendingAction {
+		return true
+	}
+	return activityObserved && authoritativeActivity.After(time.Time{}) &&
+		(current.LastActivityAt == nil || authoritativeActivity.After(*current.LastActivityAt))
+}
+
+func (s *Service) reloadSummaryReconcileState(
+	ctx context.Context,
+	taskID string,
+) (*statussummary.TaskStatusSummary, string, error) {
+	rows, err := s.statusSummaries.LoadTaskStatusSummaries(ctx, []string{taskID})
+	if err != nil {
+		return nil, "", fmt.Errorf("reload after compare-and-set rejection: %w", err)
+	}
+	current := rows[taskID]
+	if current == nil {
+		return nil, "", nil
+	}
+	if s.sessions == nil {
+		return nil, "", errors.New("reload sessions: session repository unavailable")
+	}
+	refreshedSessions, err := s.sessions.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, "", fmt.Errorf("reload sessions: %w", err)
+	}
+	pendingBySession, err := s.GetPendingActionsForSessions(ctx, taskSessionIDs(refreshedSessions))
+	if err != nil {
+		return nil, "", fmt.Errorf("reload pending actions: %w", err)
+	}
+	return current, pendingActionForTask(refreshedSessions, pendingBySession), nil
 }
 
 func maxSummaryActivity(current *time.Time, candidate time.Time) *time.Time {
@@ -492,6 +516,7 @@ func (s *Service) loadSummaryGit(
 }
 
 func (s *Service) rebuildInput(
+	taskError *statussummary.ActiveErrorSummary,
 	sessions []*models.TaskSession,
 	pendingBySession map[string]models.TaskPendingAction,
 	gitBySession map[string]*models.GitSnapshot,
@@ -505,6 +530,7 @@ func (s *Service) rebuildInput(
 ) statussummary.RebuildInput {
 	input := statussummary.RebuildInput{
 		Sessions:          make([]statussummary.RebuildSession, 0, len(sessions)),
+		TaskError:         taskError,
 		PendingActions:    make(map[string]string),
 		ActivityObserved:  s.foregroundActivity != nil,
 		LastActivityAt:    nil,
@@ -537,10 +563,13 @@ func (s *Service) rebuildInput(
 		var activeError *statussummary.ActiveErrorSummary
 		if lastError, ok := models.LoadLastAgentError(session.Metadata); ok && !lastError.IsDismissed() {
 			activeError = &statussummary.ActiveErrorSummary{
-				SessionID:  session.ID,
-				Stamp:      lastError.Stamp(),
-				OccurredAt: lastError.OccurredAt,
-				Preview:    lastError.Message,
+				SessionID:        session.ID,
+				TaskRepositoryID: lastError.TaskRepositoryID,
+				Stamp:            lastError.Stamp(),
+				OccurredAt:       lastError.OccurredAt,
+				Preview:          lastError.Message,
+				Category:         lastError.Code,
+				RecoveryActions:  lastError.RecoveryActions,
 			}
 		}
 		input.Sessions = append(input.Sessions, statussummary.RebuildSession{
@@ -564,6 +593,24 @@ func (s *Service) rebuildInput(
 	return input
 }
 
+func taskLaunchErrorSummary(task *models.Task) *statussummary.ActiveErrorSummary {
+	if task == nil {
+		return nil
+	}
+	errorValue, ok := models.LoadTaskLaunchError(task.Metadata)
+	if !ok {
+		return nil
+	}
+	return &statussummary.ActiveErrorSummary{
+		TaskRepositoryID: errorValue.TaskRepositoryID,
+		Stamp:            errorValue.Stamp(),
+		OccurredAt:       errorValue.OccurredAt,
+		Preview:          errorValue.Message,
+		Category:         errorValue.Code,
+		RecoveryActions:  errorValue.RecoveryActions,
+	}
+}
+
 func snapshotRepositoryKey(snapshot *models.GitSnapshot, fallback string) string {
 	if snapshot != nil && snapshot.Metadata != nil {
 		if repository, ok := snapshot.Metadata["repository_name"].(string); ok && strings.TrimSpace(repository) != "" {
@@ -578,17 +625,29 @@ func gitSummaryFromSnapshot(snapshot *models.GitSnapshot) statussummary.GitSumma
 		return statussummary.GitSummary{}
 	}
 	return statussummary.GitSummary{
-		Additions:    nonNegative(snapshot.Metadata, "branch_additions"),
-		Deletions:    nonNegative(snapshot.Metadata, "branch_deletions"),
-		ChangedFiles: changedFilesFromSnapshot(snapshot),
-		Ahead:        maxInt(snapshot.Ahead, 0),
-		Behind:       maxInt(snapshot.Behind, 0),
+		Additions:             nonNegative(snapshot.Metadata, "branch_additions"),
+		Deletions:             nonNegative(snapshot.Metadata, "branch_deletions"),
+		ChangedFiles:          changedFilesFromSnapshot(snapshot),
+		Ahead:                 maxInt(snapshot.Ahead, 0),
+		Behind:                maxInt(snapshot.Behind, 0),
+		ComparisonUnavailable: snapshotComparisonUnavailable(snapshot),
 	}
+}
+
+func snapshotComparisonUnavailable(snapshot *models.GitSnapshot) bool {
+	if snapshot == nil || snapshot.Metadata == nil {
+		return false
+	}
+	value, _ := snapshot.Metadata["comparison_status"].(string)
+	return value == "unavailable"
 }
 
 func changedFilesFromSnapshot(snapshot *models.GitSnapshot) int {
 	if snapshot == nil {
 		return 0
+	}
+	if _, ok := snapshot.Metadata["changed_files"]; ok {
+		return nonNegative(snapshot.Metadata, "changed_files")
 	}
 	count := 0
 	for _, key := range []string{"modified", "added", "deleted", "untracked", "renamed"} {

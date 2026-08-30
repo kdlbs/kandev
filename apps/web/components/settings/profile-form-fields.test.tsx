@@ -198,6 +198,25 @@ describe("ProfileFormFields no-silent-model-fallback rows", () => {
 });
 
 describe("ProfileFormFields model options", () => {
+  it("constrains a single start model field on desktop", () => {
+    renderForm(formData());
+
+    const row = screen.getByTestId("profile-capabilities-model-row");
+    expect(row.firstElementChild?.className).toContain("md:max-w-xl");
+  });
+
+  it("keeps the model and mode fields balanced when modes are available", () => {
+    renderForm(formData({ mode: "default" }), {
+      ...modelConfig,
+      available_modes: [{ id: "default", name: "Default" }],
+      current_mode_id: "default",
+    });
+
+    const row = screen.getByTestId("profile-capabilities-model-row");
+    expect(row.firstElementChild?.className).toContain("flex-1");
+    expect(screen.getByTestId("profile-mode-field")).not.toBeNull();
+  });
+
   it("loads model-specific options in the profile model selector", async () => {
     const dynamicModelConfig: ModelConfig = {
       default_model: "model-a",
@@ -327,6 +346,70 @@ describe("ProfileFormFields initial model options", () => {
 });
 
 describe("ProfileFormFields model options after selection", () => {
+  it("keeps the model selector open while resolving the selected model options", async () => {
+    __resetModelConfigResolutionCache();
+    let resolveResponse: ((value: unknown) => void) | undefined;
+    const response = new Promise((resolve) => {
+      resolveResponse = resolve;
+    });
+    vi.mocked(resolveAgentModelConfig).mockReturnValueOnce(response as never);
+
+    const dynamicModelConfig: ModelConfig = {
+      default_model: "model-a",
+      current_model_id: "model-a",
+      available_models: [
+        { id: "model-a", name: "Model A" },
+        { id: "model-b", name: "Model B" },
+      ],
+      config_options: [
+        {
+          type: "select",
+          id: reasoningEffortOptionId,
+          name: reasoningEffortName,
+          current_value: "medium",
+          options: [{ value: "medium", name: "Medium" }],
+        },
+      ],
+      supports_dynamic_models: true,
+    };
+
+    renderStatefulForm(
+      formData({ model: "model-a", config_options: { [reasoningEffortOptionId]: "medium" } }),
+      dynamicModelConfig,
+      vi.fn(),
+    );
+
+    const selector = await screen.findByRole("button", { name: profileStartModelSettingsLabel });
+    fireEvent.click(selector);
+    fireEvent.click(screen.getByRole("option", { name: /Model B/ }));
+
+    await waitFor(() => expect(screen.getByTestId("model-config-options-loading")).toBeTruthy());
+    expect(screen.queryByTestId(`config-option-trigger-${reasoningEffortOptionId}`)).toBeNull();
+
+    await act(async () => {
+      resolveResponse?.({
+        agent_name: "mock-agent",
+        model: "model-b",
+        status: "ok",
+        config_options: [
+          {
+            type: "select",
+            id: reasoningEffortOptionId,
+            name: reasoningEffortName,
+            current_value: "max",
+            options: [{ value: "max", name: "Max" }],
+          },
+        ],
+        error: null,
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("config-option-trigger-reasoning_effort")).toBeTruthy(),
+    );
+    expect(screen.queryByTestId("model-config-options-loading")).toBeNull();
+  });
+
   it("removes a saved option value after the user changes the model", async () => {
     const onChange = vi.fn();
     const dynamicModelConfig: ModelConfig = {

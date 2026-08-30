@@ -61,7 +61,6 @@ import (
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
-	"github.com/kandev/kandev/internal/office"
 	officeagents "github.com/kandev/kandev/internal/office/agents"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officetestharness "github.com/kandev/kandev/internal/office/testharness"
@@ -110,6 +109,7 @@ const (
 	branchDeletionsFieldKey  = "branch_deletions"
 	deletedFieldKey          = "deleted"
 	versionFieldKey          = "version"
+	serviceFieldKey          = "service"
 	kandevName               = "kandev"
 	startingStatus           = "starting"
 )
@@ -357,6 +357,9 @@ func buildGitStatusNotification(sessionID, repositoryName string, status client.
 		"renamed":               status.Renamed,
 		branchAdditionsFieldKey: status.BranchAdditions,
 		branchDeletionsFieldKey: status.BranchDeletions,
+		"comparison_target":     status.ComparisonTarget,
+		"comparison_status":     status.ComparisonStatus,
+		"comparison_error_code": status.ComparisonErrorCode,
 		"is_submodule":          status.IsSubmodule,
 	}
 	if repositoryName != "" {
@@ -405,8 +408,13 @@ func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Reposit
 		"status": map[string]interface{}{
 			branchFieldKey:          latestSnapshot.Branch,
 			"remote_branch":         latestSnapshot.RemoteBranch,
+			"head_commit":           latestSnapshot.HeadCommit,
+			"base_commit":           latestSnapshot.BaseCommit,
 			"ahead":                 latestSnapshot.Ahead,
 			"behind":                latestSnapshot.Behind,
+			"remote_ahead":          metadata["remote_ahead"],
+			"remote_behind":         metadata["remote_behind"],
+			"remote_head_commit":    metadata["remote_head_commit"],
 			"files":                 latestSnapshot.Files,
 			"modified":              metadata["modified"],
 			addedFieldKey:           metadata[addedFieldKey],
@@ -415,6 +423,9 @@ func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Reposit
 			"renamed":               metadata["renamed"],
 			branchAdditionsFieldKey: metadata[branchAdditionsFieldKey],
 			branchDeletionsFieldKey: metadata[branchDeletionsFieldKey],
+			"comparison_target":     metadata["comparison_target"],
+			"comparison_status":     metadata["comparison_status"],
+			"comparison_error_code": metadata["comparison_error_code"],
 		},
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionGitEvent, gitEventData)
@@ -496,18 +507,36 @@ func appendSessionModelsMessage(sessionID string, session *models.TaskSession, l
 	if lifecycleMgr == nil {
 		return result
 	}
-	modelState := lifecycleMgr.GetModelStateForSession(sessionID)
-	if modelState == nil || (modelState.CurrentModelID == "" && len(modelState.Models) == 0) {
+	return appendSessionModelsMessageFromState(
+		sessionID,
+		session,
+		lifecycleMgr.GetModelStateForSession(sessionID),
+		result,
+	)
+}
+
+func appendSessionModelsMessageFromState(sessionID string, session *models.TaskSession, modelState *lifecycle.CachedModelState, result []*ws.Message) []*ws.Message {
+	if modelState == nil {
 		return result
 	}
 	snapshot, _ := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
+	replayState := *modelState
+	if len(replayState.Models) == 0 &&
+		len(replayState.ConfigOptions) == 0 &&
+		!replayState.ConfigOptionsSettled &&
+		len(snapshot.Models) > 0 {
+		replayState.Models = snapshot.Models
+	}
+	if replayState.CurrentModelID == "" && len(replayState.Models) == 0 {
+		return result
+	}
 	notification, err := ws.NewNotification(ws.ActionSessionModelsUpdated, lifecycle.SessionModelsEventPayload{
 		TaskID:               session.TaskID,
 		SessionID:            sessionID,
-		CurrentModelID:       modelState.CurrentModelID,
-		Models:               modelState.Models,
-		ConfigOptions:        modelState.ConfigOptions,
-		ConfigOptionsSettled: modelState.ConfigOptionsSettled || snapshot.ConfigOptionsSettled,
+		CurrentModelID:       replayState.CurrentModelID,
+		Models:               replayState.Models,
+		ConfigOptions:        replayState.ConfigOptions,
+		ConfigOptionsSettled: replayState.ConfigOptionsSettled || snapshot.ConfigOptionsSettled,
 		ConfigBaseline:       sessionACPConfigBaseline(session),
 	})
 	if err == nil {
@@ -567,6 +596,8 @@ type routeParams struct {
 	devMode                       bool
 	httpPort                      int
 	features                      config.FeaturesConfig
+	planCoalesceWindow            time.Duration
+	planCoalesceWindowConfigured  bool
 	homeDir                       string
 	interimSettingsInterlockToken string
 	log                           *logger.Logger
@@ -575,13 +606,31 @@ type routeParams struct {
 // registerRoutes sets up all HTTP and WebSocket routes on the given router.
 func registerRoutes(p routeParams) {
 	workflowCtrl := workflowcontroller.NewController(p.services.Workflow)
-	planService := taskservice.NewPlanService(p.taskRepo, p.eventBus, p.log)
+	var planService *taskservice.PlanService
+	if p.planCoalesceWindowConfigured {
+		planService = taskservice.NewPlanService(p.taskRepo, p.eventBus, p.log, p.planCoalesceWindow)
+	} else {
+		planService = taskservice.NewPlanService(p.taskRepo, p.eventBus, p.log)
+	}
 	// Per-user task scoping for plan reads/writes (opt-in auth).
 	planService.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
 	clarificationStore := clarification.NewStore(2 * time.Hour)
 	clarificationCanceller := clarification.NewCanceller(clarificationStore, p.taskRepo, p.taskSvc, p.log)
 	p.orchestratorSvc.SetClarificationCanceller(clarificationCanceller)
 	p.taskSvc.SetClarificationCanceller(clarificationCanceller)
+	// Single resolver instance shared by the REST clarification routes and the
+	// external answer_question_kandev/list_pending_questions_kandev MCP tools
+	// (R3: both entry points must race through the same claim).
+	clarificationResolver := clarification.NewResolver(
+		clarificationStore,
+		p.taskRepo,
+		p.msgCreator,
+		p.taskSvc,
+		p.orchestratorSvc,
+		p.eventBus,
+		p.orchestratorSvc.HandleClarificationPrimaryAnswered,
+		p.log,
+	)
 
 	// Wire pending clarification requests into the office inbox.
 	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
@@ -596,6 +645,9 @@ func registerRoutes(p routeParams) {
 	handoffDocSvc := taskservice.NewDocumentService(p.taskRepo, p.log)
 	handoffSvc := taskservice.NewHandoffService(p.taskRepo, p.taskRepo, handoffDocSvc,
 		p.officeRepo, p.officeRepo, p.log)
+	if p.services.Plugins != nil {
+		p.services.Plugins.SetTaskRelationsSource(handoffSvc)
+	}
 	// Phase 6 wirings — materializer hook + disk cleaner. The
 	// SessionWorktreeReader and WorkspaceCleaner interfaces are both
 	// satisfied by adapters that delegate to existing services.
@@ -682,20 +734,31 @@ func registerRoutes(p routeParams) {
 
 	p.gateway.SetupRoutes(p.router)
 	registerTaskRoutes(p, planService, handoffSvc)
-	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, planService, handoffSvc)
+	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
 	if p.authSvc != nil {
 		authhttpapi.RegisterRoutes(p.router, p.authSvc, p.log)
 	}
 
-	// /health is a readiness probe, not a liveness probe. It only
-	// returns 200 after main has flipped the package-level `ready`
-	// flag — which happens after route registration, agent-registry
-	// seeding, the HTTP listener accepting connections, and (when
-	// KANDEV_E2E_MOCK is set) the testharness routes being mounted.
-	// Before that, return 503 so callers (including the e2e fixture's
-	// waitForHealth) keep polling instead of racing ahead and hitting
-	// 404s on routes that aren't wired yet.
+	// /health is a liveness probe: it answers 200 unconditionally, matching
+	// the bootstrap handler's /health contract (internal/backendapp/
+	// httpserver.go) so the launcher's healthcheck never depends on startup
+	// progress. By the time this handler is reachable at all, ready is
+	// already true (see the comment on startGatewayAndServe's Store calls),
+	// but it does not gate on that flag — liveness must not depend on
+	// readiness, or the crash loop docs/specs/startup-listener-before-
+	// recovery/spec.md exists to fix comes back.
 	p.router.GET("/health", healthHandler(p))
+
+	// /ready is a readiness probe. It returns 200 only after main has
+	// flipped the package-level `ready` flag — which happens after route
+	// registration, agent-registry seeding, the HTTP listener accepting
+	// connections, and (when KANDEV_E2E_MOCK is set) the testharness routes
+	// being mounted. Before that, return 503 so callers (including the e2e
+	// fixture's readiness wait and Kubernetes' readinessProbe) keep polling
+	// instead of racing ahead and hitting 404s on routes that aren't wired
+	// yet. See docs/specs/health-endpoint-version/spec.md for the exact
+	// contract this endpoint now owns.
+	p.router.GET("/ready", readyHandler(p))
 
 	// /api/v1/features is a public, unauthenticated read of the runtime
 	// feature-flag map. The frontend SSR-fetches it once per page render to
@@ -732,7 +795,7 @@ func registerRoutes(p routeParams) {
 		} else {
 			p.router.NoRoute(func(c *gin.Context) {
 				path := c.Request.URL.Path
-				if strings.HasPrefix(path, "/api/") || path == "/ws" || path == "/health" {
+				if strings.HasPrefix(path, "/api/") || path == "/ws" || path == "/health" || path == "/ready" {
 					c.AbortWithStatus(http.StatusNotFound)
 					return
 				}
@@ -756,40 +819,60 @@ func registerRoutes(p routeParams) {
 	}
 }
 
-// healthHandler serves GET /health. The response always carries the
-// process's running version — in both the ready and not-ready bodies — so an
-// operator can identify the build of a backend that is stuck starting, and so
-// a monitor never needs a credential to read it (see docs/specs/
-// health-endpoint-version/spec.md).
+// healthHandler serves GET /health, the liveness probe. It always answers
+// 200 with the process's running version — regardless of the `ready` flag —
+// mirroring the bootstrap handler's /health contract (httpserver.go) so the
+// launcher's healthcheck never depends on startup progress. See docs/specs/
+// health-endpoint-version/spec.md for the exact response contract.
 func healthHandler(p routeParams) gin.HandlerFunc {
-	// p.version is normally the package-level Version wired in by run()'s
-	// registerRoutes call. Falling back here keeps the never-empty guarantee
-	// (AC-11) true regardless of that call-site wiring, since standing up
-	// run()'s full DI graph in a test just to exercise that one field
-	// assignment is out of proportion to this change.
-	version := p.version
-	if version == "" {
-		version = Version
-	}
+	version := resolveVersion(p)
 	return func(c *gin.Context) {
-		if !ready.Load() {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"status":        startingStatus,
-				"service":       kandevName,
-				versionFieldKey: version,
-			})
-			return
-		}
 		if token := desktopHealthToken(); token != "" {
 			c.Header(desktopHealthTokenHeader, token)
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"status":        "ok",
-			"service":       kandevName,
+			statusKey:       "ok",
+			serviceFieldKey: kandevName,
 			"mode":          "websocket+http",
 			versionFieldKey: version,
 		})
 	}
+}
+
+// readyHandler serves GET /ready, the readiness probe. The response always
+// carries the process's running version — in both the ready and not-ready
+// bodies — so an operator can identify the build of a backend that is stuck
+// starting, and so a monitor never needs a credential to read it (see
+// docs/specs/health-endpoint-version/spec.md).
+func readyHandler(p routeParams) gin.HandlerFunc {
+	version := resolveVersion(p)
+	return func(c *gin.Context) {
+		if !ready.Load() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				statusKey:       startingStatus,
+				serviceFieldKey: kandevName,
+				versionFieldKey: version,
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			statusKey:       "ok",
+			serviceFieldKey: kandevName,
+			versionFieldKey: version,
+		})
+	}
+}
+
+// resolveVersion returns p.version, falling back to the package-level
+// Version. p.version is normally wired in by run()'s registerRoutes call;
+// the fallback keeps the never-empty guarantee (AC-11) true regardless of
+// that call-site wiring, since standing up run()'s full DI graph in a test
+// just to exercise that one field assignment is out of proportion.
+func resolveVersion(p routeParams) string {
+	if p.version != "" {
+		return p.version
+	}
+	return Version
 }
 
 func desktopHealthToken() string {
@@ -1077,7 +1160,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		&orchestratorWrapper{svc: p.orchestratorSvc}, p.log, referenceValidators...,
 	)
 	taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
-	analyticshandlers.RegisterStatsRoutes(p.router, p.analyticsRepo, p.log)
+	analyticshandlers.RegisterStatsRoutes(p.router, p.analyticsRepo, p.taskSvc, p.log)
 	agenthandlers.RegisterShellRoutes(p.router, p.lifecycleMgr, p.log)
 	if p.services.Share != nil {
 		p.services.Share.RegisterRoutes(p.router)
@@ -1093,6 +1176,7 @@ func registerSecondaryRoutes(
 	workflowCtrl *workflowcontroller.Controller,
 	clarificationStore *clarification.Store,
 	clarificationCanceller *clarification.Canceller,
+	clarificationResolver *clarification.Resolver,
 	planService *taskservice.PlanService,
 	handoffSvc *taskservice.HandoffService,
 ) {
@@ -1143,10 +1227,24 @@ func registerSecondaryRoutes(
 		p.msgCreator,
 		p.taskRepo,
 		p.eventBus,
-		p.orchestratorSvc,
+		clarificationResolver,
 		p.log,
 	)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
+
+	// Wire the plugin Host interaction write path (ADR 0052) onto the same
+	// orchestrator permission resolution and the same clarification resolver
+	// instance the REST route and the MCP handlers use, so a plugin's response
+	// is indistinguishable from a user's and takes the same durable claim.
+	// Deliberately here rather than in initOfficeServices: that returns early
+	// when features.office=false (the production default), while plugins run
+	// whenever services.Plugins is non-nil.
+	if p.services.Plugins != nil {
+		p.services.Plugins.SetInteractionResponder(pluginsInteractionResponderAdapter{
+			permissions:    p.orchestratorSvc,
+			clarifications: clarificationResolver,
+		})
+	}
 
 	if p.secretsSvc != nil {
 		secrets.RegisterRoutes(p.router, p.gateway.Dispatcher, p.secretsSvc, p.log)
@@ -1228,7 +1326,10 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered Plugins handlers (HTTP)")
 	}
 
-	docker.RegisterDockerRoutes(p.router, p.lifecycleMgr.DockerClientProvider(), dockerTaskTitleProvider(p.taskRepo, p.log), p.log)
+	docker.RegisterDockerRoutes(
+		p.router, p.lifecycleMgr.DockerClientProvider(),
+		dockerTaskTitleProvider(p.taskRepo, p.log), dockerSessionAuthorizer(p.taskSvc), p.log,
+	)
 	p.log.Debug("Registered Docker management handlers (HTTP)")
 
 	registerHealthRoutes(p)
@@ -1258,7 +1359,7 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered Improve Kandev handlers (HTTP)")
 	}
 
-	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, planService, handoffSvc)
+	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
 
 	var automationSvc *automation.Service
 	if p.services.Automation != nil {
@@ -1287,43 +1388,8 @@ func registerSecondaryRoutes(
 
 	// Register office routes
 	if p.services.OfficeSvcs != nil {
-		api := p.router.Group("/api/v1/office")
-		api.Use(officeagents.AgentAuthMiddleware(p.services.OfficeSvcs.Agents))
-		api.Use(officeWorkspaceScopeMiddleware(p.authSvc, p.taskSvc))
-		office.RegisterAllRoutes(api, p.services.OfficeSvcs, p.log)
+		mountOfficeRoutes(p.router, p.services.OfficeSvcs, p.authSvc, p.taskSvc, p.officeRepo, p.log)
 		p.log.Debug("Registered Office handlers (HTTP)")
-	}
-}
-
-// officeWorkspaceScopeMiddleware enforces per-user workspace ownership on
-// office routes that carry a `:wsId` param (opt-in auth). Office endpoints are
-// dual-consumed: sandbox agents authenticate with a workspace-scoped JWT
-// (validated + workspace-claim-checked by AgentAuthMiddleware, which sets an
-// agent caller in context — those requests skip this check), while browser
-// users authenticate with a session cookie and must own the target workspace.
-// Routes without a `:wsId` param (agent runtime callbacks, approval/routine by
-// ID) are not gated here; they remain governed by AgentAuthMiddleware.
-func officeWorkspaceScopeMiddleware(authSvc *auth.Service, taskSvc *taskservice.Service) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if authSvc == nil || authSvc.Mode() == auth.ModeDisabled {
-			c.Next()
-			return
-		}
-		// Agent JWT callers are already constrained to their workspace claim.
-		if officeagents.CallerFromContext(c) != nil {
-			c.Next()
-			return
-		}
-		wsID := c.Param("wsId")
-		if wsID == "" {
-			c.Next()
-			return
-		}
-		if err := taskSvc.AuthorizeWorkspaceAccess(c.Request.Context(), wsID); err != nil {
-			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
-			return
-		}
-		c.Next()
 	}
 }
 
@@ -1393,6 +1459,40 @@ func workspaceIDFromPath(path string) string {
 		return rest[:slash]
 	}
 	return rest
+}
+
+// dockerSessionAuthorizer scopes the Docker management endpoints to the
+// caller's own task sessions. Returning an untyped nil when the task service
+// is absent (partial builds) keeps the handlers failing closed instead of
+// calling through a typed-nil interface.
+func dockerSessionAuthorizer(taskSvc *taskservice.Service) docker.SessionAuthorizer {
+	if taskSvc == nil {
+		return nil
+	}
+	return taskSvc
+}
+
+// lifecycleAccessAuthorizer is the task-service surface the lifecycle manager's
+// per-user visibility checks are wired to. Narrowed to an interface so the
+// wiring itself is testable: the three single-ID checkers take the same
+// signature, so a crossed wire (session visibility installed in the task slot,
+// say) compiles and silently authorizes the wrong resource.
+type lifecycleAccessAuthorizer interface {
+	AuthorizeSessionAccess(ctx context.Context, sessionID string) error
+	AuthorizeEnvironmentAccess(ctx context.Context, taskEnvironmentID string) error
+	AuthorizeTaskAccess(ctx context.Context, taskID string) error
+	AuthorizeTaskEnvironmentAccess(ctx context.Context, taskID, taskEnvironmentID string) error
+}
+
+// wireLifecycleAccessCheckers installs every per-user visibility check on the
+// lifecycle manager. Kept together so a surface that needs a new kind of check
+// has one place to add it, rather than another setter call somewhere else in
+// startup that nothing asserts on.
+func wireLifecycleAccessCheckers(lifecycleMgr *lifecycle.Manager, authz lifecycleAccessAuthorizer) {
+	lifecycleMgr.SetSessionAccessChecker(authz.AuthorizeSessionAccess)
+	lifecycleMgr.SetEnvironmentAccessChecker(authz.AuthorizeEnvironmentAccess)
+	lifecycleMgr.SetTaskAccessChecker(authz.AuthorizeTaskAccess)
+	lifecycleMgr.SetTaskEnvironmentAccessChecker(authz.AuthorizeTaskEnvironmentAccess)
 }
 
 func dockerTaskTitleProvider(taskRepo *sqliterepo.Repository, log *logger.Logger) docker.TaskTitleProvider {
@@ -1540,6 +1640,7 @@ func registerMCPAndDebugRoutes(
 	wfCtrl *workflowcontroller.Controller,
 	clarificationStore *clarification.Store,
 	clarificationCanceller *clarification.Canceller,
+	clarificationResolver *clarification.Resolver,
 	planService *taskservice.PlanService,
 	handoffSvc *taskservice.HandoffService,
 ) {
@@ -1556,8 +1657,13 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
 	mcpHandlers.SetTaskStopper(p.orchestratorSvc)
+	mcpHandlers.SetAgentPermissionService(p.orchestratorSvc)
 	mcpHandlers.SetTaskTitleBranchRenamer(p.orchestratorSvc)
 	mcpHandlers.SetUserSettingsProvider(p.services.User)
+	// list_pending_questions_kandev / answer_question_kandev (external MCP
+	// surface only). p.taskRepo already implements ClarificationBundleLister
+	// (ListUnresolvedClarificationBundles, FindMessagesByPendingID).
+	mcpHandlers.SetClarificationResolver(clarificationResolver, p.taskRepo)
 	if p.systemSvc != nil && p.systemSvc.LogBundles != nil {
 		mcpHandlers.SetDiagnosticBundleServices(p.systemSvc.LogBundles, p.lifecycleMgr)
 	}
@@ -1570,6 +1676,9 @@ func registerMCPAndDebugRoutes(
 	}
 	if p.services.GitLab != nil {
 		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)
+	}
+	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
+		mcpHandlers.SetDashboardService(p.services.OfficeSvcs.Dashboard)
 	}
 
 	// Reuse the cross-task handoff service constructed in registerRoutes —
@@ -1609,16 +1718,20 @@ func registerMCPAndDebugRoutes(
 	p.log.Debug("MCP handler configured for agent lifecycle manager")
 
 	// In-session MCP calls reach this same dispatcher over the agent's own WS
-	// stream, which carries no credential — so scope them to the user who owns
-	// the stream's task. Without this the handlers run with no identity, which
-	// the task service treats as an internal caller and serves unscoped.
+	// stream, which carries no credential. Always attach the server-derived
+	// task/session principal so automation self/workspace boundaries remain in
+	// force even when authentication is disabled or unavailable. Owner identity
+	// scoping is conditional because single-user installs intentionally retain
+	// their existing unscoped behavior.
+	mcpScopeResolver := mcpscope.NewResolver(
+		p.taskRepo,
+		p.authSvc,
+		func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled },
+		p.log,
+	)
+	p.lifecycleMgr.SetMCPPrincipalScoper(mcpScopeResolver.ScopePrincipal)
 	if p.authSvc != nil {
-		p.lifecycleMgr.SetMCPIdentityScoper(mcpscope.NewResolver(
-			p.taskRepo,
-			p.authSvc,
-			func() bool { return p.authSvc.Mode() != auth.ModeDisabled },
-			p.log,
-		).Scope)
+		p.lifecycleMgr.SetMCPIdentityScoper(mcpScopeResolver.Scope)
 		p.log.Debug("In-session MCP dispatch scoped to task owner")
 	}
 
@@ -1644,7 +1757,7 @@ func registerExternalMCP(p routeParams) {
 	}
 	baseURL := fmt.Sprintf("http://localhost:%d", port)
 
-	backendClient := mcpserver.NewDispatcherBackendClient(p.gateway.Dispatcher, p.log)
+	backendClient := mcpserver.NewExternalDispatcherBackendClient(p.gateway.Dispatcher, p.log)
 	srv := mcpserver.NewExternal(backendClient, p.log, "")
 	mcpGroup := p.router.Group("", externalMCPAuthMiddleware(p.authSvc))
 	srv.RegisterBackendRoutes(mcpGroup)

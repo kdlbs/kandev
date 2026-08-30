@@ -102,6 +102,178 @@ describe("ModelConfigSelector", () => {
   });
 });
 
+describe("ModelConfigSelector selected options", () => {
+  it("puts the current model and nested config value first", () => {
+    render(
+      <ModelConfigSelector
+        modelOptions={[
+          { id: "model-1", name: "Model 1" },
+          { id: "model-2", name: "Model 2" },
+          { id: "model-3", name: "Model 3" },
+        ]}
+        currentModel="model-2"
+        onModelChange={() => {}}
+        onConfigChange={() => {}}
+        configOptions={[
+          {
+            type: "select",
+            id: "effort",
+            name: "Effort",
+            currentValue: "medium",
+            options: [
+              { value: "low", name: "Low" },
+              { value: "medium", name: "Medium" },
+              { value: "high", name: "High" },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
+    expect(screen.getAllByRole("option").map((option) => option.textContent?.trim())).toEqual([
+      "Model 2",
+      "Model 1",
+      "Model 3",
+    ]);
+    expect(screen.getByTestId("model-config-selected-row").className).toContain("bg-card");
+    expect(screen.getByTestId("model-config-selected-row").className).toContain(
+      "border-primary/50",
+    );
+
+    fireEvent.click(screen.getByTestId(effortTriggerTestId));
+    const effortSection = screen.getByTestId(effortSectionTestId);
+    expect(
+      within(effortSection)
+        .getAllByRole("button")
+        .map((button) => button.textContent?.trim()),
+    ).toEqual(["Medium", "Low", "High"]);
+    expect(within(effortSection).getByRole("button", { name: "Medium" }).className).toContain(
+      "bg-card",
+    );
+  });
+});
+
+describe("ModelConfigSelector loading behavior", () => {
+  it("keeps the picker open after selecting a model without existing dependent options", () => {
+    const onModelChange = vi.fn();
+
+    render(
+      <ModelConfigSelector
+        modelOptions={[
+          { id: "model-a", name: "Model A" },
+          { id: "model-b", name: "Model B" },
+        ]}
+        currentModel="model-a"
+        onModelChange={onModelChange}
+        keepOpenOnModelChange
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
+    fireEvent.click(screen.getByRole("option", { name: /Model B/ }));
+
+    expect(onModelChange).toHaveBeenCalledWith("model-b");
+    expect(screen.getByRole("option", { name: /Model B/ })).toBeTruthy();
+  });
+
+  it("replaces dependent options with a loading row until the snapshot resolves", () => {
+    const { rerender } = render(
+      <ModelConfigSelector
+        modelOptions={[{ id: "model-a", name: "Model A" }]}
+        currentModel="model-a"
+        onModelChange={() => {}}
+        configOptions={[
+          {
+            type: "select",
+            id: "effort",
+            name: "Effort",
+            currentValue: "medium",
+            options: [{ value: "medium", name: "Medium" }],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
+    expect(screen.getByTestId(effortTriggerTestId)).toBeTruthy();
+
+    rerender(
+      <ModelConfigSelector
+        modelOptions={[{ id: "model-b", name: "Model B" }]}
+        currentModel="model-b"
+        onModelChange={() => {}}
+        configOptions={[
+          {
+            type: "select",
+            id: "effort",
+            name: "Effort",
+            currentValue: "medium",
+            options: [{ value: "medium", name: "Medium" }],
+          },
+        ]}
+        configOptionsLoading
+        keepOpenOnModelChange
+      />,
+    );
+
+    const loadingRow = screen.getByTestId("model-config-options-loading");
+    expect(loadingRow.getAttribute("role")).toBe("status");
+    expect(screen.getByRole("status", { name: "Loading model options…" })).toBe(loadingRow);
+    expect(screen.queryByTestId(effortTriggerTestId)).toBeNull();
+    const selectedModelRow = screen.getByTestId("model-config-selected-row");
+    expect(selectedModelRow.querySelector("svg.tabler-icon-loader")).toBeTruthy();
+    expect(selectedModelRow.querySelector("svg.tabler-icon-check.absolute")).toBeNull();
+
+    rerender(
+      <ModelConfigSelector
+        modelOptions={[{ id: "model-b", name: "Model B" }]}
+        currentModel="model-b"
+        onModelChange={() => {}}
+        configOptions={[
+          {
+            type: "select",
+            id: "effort",
+            name: "Effort",
+            currentValue: "max",
+            options: [{ value: "max", name: "Max" }],
+          },
+        ]}
+        keepOpenOnModelChange
+      />,
+    );
+
+    expect(screen.queryByTestId("model-config-options-loading")).toBeNull();
+    expect(selectedModelRow.querySelector("svg.tabler-icon-loader")).toBeNull();
+    expect(selectedModelRow.querySelector("svg.tabler-icon-check.absolute")).toBeTruthy();
+    expect(screen.getByTestId(effortTriggerTestId).textContent).toContain("Max");
+  });
+});
+
+describe("ModelConfigSelector loading guard", () => {
+  it("keeps the picker open when options are loading without the explicit open flag", () => {
+    const onModelChange = vi.fn();
+
+    render(
+      <ModelConfigSelector
+        modelOptions={[
+          { id: "model-a", name: "Model A" },
+          { id: "model-b", name: "Model B" },
+        ]}
+        currentModel="model-a"
+        onModelChange={onModelChange}
+        configOptionsLoading
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
+    fireEvent.click(screen.getByRole("option", { name: /Model B/ }));
+
+    expect(onModelChange).toHaveBeenCalledWith("model-b");
+    expect(screen.getByTestId("model-config-options-loading")).toBeTruthy();
+  });
+});
+
 describe("ModelConfigSelector filtering", () => {
   it("deduplicates repeated model ids from provider config", () => {
     const modelConfig: SelectConfigOption = {

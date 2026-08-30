@@ -74,7 +74,7 @@ function MessageList({
   taskId: string;
   sessionId: string | null;
   worktreePath?: string;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   activeTurnId: string | null;
   scrollRef: React.RefObject<HTMLDivElement | null>;
 }) {

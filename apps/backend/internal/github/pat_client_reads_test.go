@@ -211,6 +211,61 @@ func assertPRRepositories(t *testing.T, pr *PR) {
 	}
 }
 
+// TestPATClient_GetPR_DecodesOutcomeFields covers AC-09's REST half:
+// changed_files, merged_by, and a non-null auto_merge decode onto PR.
+func TestPATClient_GetPR_DecodesOutcomeFields(t *testing.T) {
+	c, _ := newRecordingPATServer(t, map[string]string{
+		"/repos/kdlbs/kandev/pulls/2554": `{
+			"number":2554,"state":"closed","merged_at":"2026-08-12T00:00:00Z",
+			"changed_files":8,"merged_by":{"login":"carlosflorencio"},
+			"auto_merge":{"enabled_by":{"login":"carlosflorencio"},"merge_method":"squash"},
+			"user":{"login":"carlosflorencio"},"head":{"ref":"f"},"base":{"ref":"main"}
+		}`,
+	})
+
+	pr, err := c.GetPR(context.Background(), "kdlbs", "kandev", 2554)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.ChangedFiles != 8 {
+		t.Errorf("ChangedFiles = %d, want 8", pr.ChangedFiles)
+	}
+	if pr.MergedByLogin != "carlosflorencio" {
+		t.Errorf("MergedByLogin = %q, want carlosflorencio", pr.MergedByLogin)
+	}
+	if !pr.AutoMergeEnabled {
+		t.Error("AutoMergeEnabled = false, want true (non-null auto_merge)")
+	}
+}
+
+// TestPATClient_GetPR_NullMergedByAndAutoMergeDecodeToZeroValues covers the
+// "never observed / not armed" side: GitHub reports auto_merge: null once it
+// fires (merged PR 2554 in the spec's live sample) or when never armed, and
+// merged_by: null on an unmerged PR.
+func TestPATClient_GetPR_NullMergedByAndAutoMergeDecodeToZeroValues(t *testing.T) {
+	c, _ := newRecordingPATServer(t, map[string]string{
+		"/repos/kdlbs/kandev/pulls/2476": `{
+			"number":2476,"state":"closed","draft":true,"changed_files":114,
+			"merged_by":null,"auto_merge":null,
+			"user":{"login":"nova28"},"head":{"ref":"f"},"base":{"ref":"main"}
+		}`,
+	})
+
+	pr, err := c.GetPR(context.Background(), "kdlbs", "kandev", 2476)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.MergedByLogin != "" {
+		t.Errorf("MergedByLogin = %q, want empty", pr.MergedByLogin)
+	}
+	if pr.AutoMergeEnabled {
+		t.Error("AutoMergeEnabled = true, want false (null auto_merge)")
+	}
+	if pr.ChangedFiles != 114 {
+		t.Errorf("ChangedFiles = %d, want 114", pr.ChangedFiles)
+	}
+}
+
 func TestPATClient_GetPR_MergedStateAndTimestamps(t *testing.T) {
 	c, _ := newRecordingPATServer(t, map[string]string{
 		"/repos/acme/widget/pulls/9": `{"number":9,"state":"closed",

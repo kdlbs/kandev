@@ -1,11 +1,20 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { IconAlertTriangle, IconGitBranch, IconTerminal2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type {
   LocalRepository,
   Repository,
@@ -16,20 +25,67 @@ import type {
 import type { AvailableAgent } from "@/lib/types/http-agents";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import { formatUserHomePath, truncateRepoPath } from "@/lib/utils";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { getCapabilityWarning } from "@/lib/capability-warning";
-import { buildBranchKeywords } from "./task-create-dialog-pill";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { buildBranchKeywords } from "./task-create-dialog-branch-options";
 
 type OptionItem = {
   value: string;
   label: string;
   renderLabel: () => React.ReactNode;
+  renderTriggerLabel?: () => React.ReactNode;
   disabled?: boolean;
   disabledReason?: string;
 };
+
+function ModelProbeWarning({ note }: { note: string }) {
+  const usesTouchDrawer = useTouchDrawer();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const trigger = (
+    <button
+      type="button"
+      className="inline-flex min-h-11 min-w-8 shrink-0 cursor-help items-center justify-center rounded-sm border-0 bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      aria-label={note}
+      aria-expanded={usesTouchDrawer ? drawerOpen : undefined}
+      aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
+      data-testid="agent-profile-model-probe-warning"
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <IconAlertTriangle className="size-3.5 text-amber-500" aria-hidden />
+    </button>
+  );
+
+  if (usesTouchDrawer) {
+    return (
+      <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
+        <DrawerTrigger asChild>{trigger}</DrawerTrigger>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle className="sr-only">{note}</DrawerTitle>
+            <DrawerDescription>{note}</DrawerDescription>
+          </DrawerHeader>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+      <TooltipContent side="top">{note}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function ModelProbeWarningIndicator({ note }: { note: string }) {
+  return <IconAlertTriangle className="size-3.5 text-amber-500" title={note} aria-hidden />;
+}
 
 export function useRepositoryOptions(
   repositories: Repository[],
@@ -132,10 +188,13 @@ function advertisedModelIDs(availableAgents: AvailableAgent[], agentName: string
 export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): OptionItem[] {
   const { t } = useTranslation();
   const { items: availableAgents } = useAvailableAgents();
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
   return useMemo(() => {
     // Disabled profiles stay in the store (existing sessions keep their
     // labels) but are never offered as a choice for new work.
-    const selectable = agentProfiles.filter(isSelectableAgentProfile);
+    const selectable = agentProfiles.filter((profile) =>
+      isSelectableAgentProfile(profile, dynamicRoutingEnabled),
+    );
     return selectable.map((profile: AgentProfileOption) => {
       const parts = profile.label.split(" \u2022 ");
       const agentLabel = parts[0] ?? profile.label;
@@ -152,52 +211,47 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
       const modelProbeNote = startModelGone
         ? t("settings:profileStartModelNotAdvertisedOnHost", { model: profile.model })
         : undefined;
+      const renderProfileLabel = (modelProbeWarning: React.ReactNode) => (
+        <span className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="flex shrink-0 items-center justify-between gap-2">
+            <span className="flex shrink-0 items-center gap-1.5">
+              <AgentLogo agentName={profile.agent_name} className="shrink-0" />
+              <span>{agentLabel}</span>
+              {warning && (
+                <warning.Icon className={`size-3.5 ${warning.color}`} title={warning.title} />
+              )}
+              {modelProbeWarning}
+            </span>
+            <span className="flex shrink-0 items-center gap-1.5">
+              {isPassthrough && (
+                <IconTerminal2
+                  className="size-3.5 text-muted-foreground"
+                  title={t("common:cliModeYourPromptWillBe")}
+                />
+              )}
+              {profileLabel ? (
+                <ScrollOnOverflow className="rounded-full border border-border px-2 py-0.5 text-xs">
+                  {profileLabel}
+                </ScrollOnOverflow>
+              ) : null}
+            </span>
+          </span>
+        </span>
+      );
       return {
         value: profile.id,
         label: profile.label,
         disabled: undefined,
         disabledReason: undefined,
-        renderLabel: () => (
-          <span className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="flex shrink-0 items-center justify-between gap-2">
-              <span className="flex shrink-0 items-center gap-1.5">
-                <AgentLogo agentName={profile.agent_name} className="shrink-0" />
-                <span>{agentLabel}</span>
-                {warning && (
-                  <warning.Icon className={`size-3.5 ${warning.color}`} title={warning.title} />
-                )}
-                {modelProbeNote && (
-                  <IconAlertTriangle
-                    className="size-3.5 shrink-0 text-amber-500"
-                    title={modelProbeNote}
-                  />
-                )}
-              </span>
-              <span className="flex shrink-0 items-center gap-1.5">
-                {isPassthrough && (
-                  <IconTerminal2
-                    className="size-3.5 text-muted-foreground"
-                    title={t("common:cliModeYourPromptWillBe")}
-                  />
-                )}
-                {profileLabel ? (
-                  <ScrollOnOverflow className="rounded-full border border-border px-2 py-0.5 text-xs">
-                    {profileLabel}
-                  </ScrollOnOverflow>
-                ) : null}
-              </span>
-            </span>
-            {modelProbeNote && (
-              <span className="flex items-center gap-1.5 pl-1 text-xs text-amber-600">
-                <IconAlertTriangle className="size-3 shrink-0" aria-hidden />
-                {modelProbeNote}
-              </span>
-            )}
-          </span>
-        ),
+        renderLabel: () =>
+          renderProfileLabel(modelProbeNote ? <ModelProbeWarning note={modelProbeNote} /> : null),
+        renderTriggerLabel: () =>
+          renderProfileLabel(
+            modelProbeNote ? <ModelProbeWarningIndicator note={modelProbeNote} /> : null,
+          ),
       };
     });
-  }, [agentProfiles, availableAgents, t]);
+  }, [agentProfiles, availableAgents, dynamicRoutingEnabled, t]);
 }
 
 export function useExecutorOptions(executors: Executor[]): OptionItem[] {

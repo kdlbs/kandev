@@ -52,6 +52,8 @@ export function ModelPicker({
   placeholder,
   goneModelLabel,
   disabled,
+  configOptionsLoading,
+  keepOpenOnModelChange,
 }: {
   profile: ProfileFormData;
   models: ModelEntry[];
@@ -62,6 +64,8 @@ export function ModelPicker({
   placeholder?: string;
   goneModelLabel: string;
   disabled?: boolean;
+  configOptionsLoading?: boolean;
+  keepOpenOnModelChange?: boolean;
 }) {
   const { t } = useTranslation();
   const modelConfig = configOptions.find(isModelConfigOption);
@@ -105,7 +109,10 @@ export function ModelPicker({
       }
       placeholder={placeholder ?? t("settings:selectAModel")}
       ariaLabel={ariaLabel}
+      popoverAlign="start"
       disabled={disabled}
+      configOptionsLoading={configOptionsLoading}
+      keepOpenOnModelChange={keepOpenOnModelChange}
       triggerClassName={modelIsGone ? "text-destructive" : undefined}
     />
   );

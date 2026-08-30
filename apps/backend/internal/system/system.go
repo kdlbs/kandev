@@ -59,6 +59,7 @@ type Wiring struct {
 	OrchestratorShutdown func()
 	RestoreQuiesce       func() error
 	MessageQueue         queuesettings.Target
+	MessageQueueConfig   queuesettings.Configuration
 	TaskSessions         sleepinhibition.SessionReader
 }
 
@@ -125,6 +126,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		if wiring.MessageQueue != nil {
 			queueSettingsSvc = queuesettings.NewService(
 				queuesettings.NewStore(settingsStore), wiring.MessageQueue, nil, log,
+				wiring.MessageQueueConfig,
 			)
 		}
 		if wiring.TaskSessions != nil {
@@ -183,7 +185,7 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 
 	g.GET("/info", info.Handler(s.Info))
 	if s.Storage != nil {
-		storage.RegisterRoutes(g, s.Storage)
+		storage.RegisterRoutes(g, admin, s.Storage)
 	}
 
 	g.GET("/disk-usage", disk.HandleGet(s.Disk))
@@ -195,7 +197,7 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	admin.POST("/database/optimize", database.HandleOptimize(s.Database))
 	admin.POST("/database/reset", database.HandleReset(s.Database))
 
-	backups.RegisterRoutes(g, s.Backups)
+	backups.RegisterRoutes(g, admin, s.Backups)
 
 	if s.FrontendErrors != nil {
 		g.POST("/logs/frontend-errors", frontenderrors.Handle(s.FrontendErrors))

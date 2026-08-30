@@ -4,6 +4,7 @@ import { IconAlertCircle, IconSubtask } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
+import { TaskRowMetadata } from "@/components/task/task-row-plugin-slots";
 import { MRTaskIcon } from "@/components/gitlab/mr-task-icon";
 import { useTaskPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
@@ -134,6 +135,12 @@ function RichTaskContent({
         <PrimaryTaskLine task={task} pendingInput={pendingInput} showContributions />
       </div>
       <RichMetadataBadges details={details} />
+      <TaskRowMetadata
+        taskId={task.id}
+        workflowStepId={task.workflow_step_id}
+        surface="task-list"
+        className="mt-1 pl-6"
+      />
       {details.description && (
         <p className="mt-1 line-clamp-2 pl-6 text-xs leading-tight text-muted-foreground">
           {details.description}
@@ -177,6 +184,12 @@ export function TaskListRowPrimaryContent({
       style={{ paddingLeft: `${level * 28}px` }}
     >
       <PrimaryTaskLine task={task} pendingInput={pendingInput} showContributions={false} />
+      <TaskRowMetadata
+        taskId={task.id}
+        workflowStepId={task.workflow_step_id}
+        surface="task-list"
+        className="flex min-w-0 shrink items-center gap-1 overflow-hidden"
+      />
     </div>
   );
 }

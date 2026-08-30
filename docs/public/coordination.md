@@ -49,6 +49,13 @@ Use an additional session when agents need the same task, repository attachments
 
 The dialog shows the environment, branch, and executor the session will share. Two sessions can edit the same files concurrently; assign files or phases explicitly.
 
+Additional sessions attach to the task's existing workspace. They do not create a
+second checkout, switch branches, pull, or run repository setup again, so
+uncommitted files remain visible to every session. If Kandev reports that the
+workspace is still preparing, wait for the first session to finish preparing
+and retry. If it reports that reuse is unsafe, restore or repair that existing
+workspace before retrying; starting another session never replaces it.
+
 Right-click a session tab to **Rename…**, **Set as Primary**, stop, resume, delete, share, use **Handoff** to another profile, or **Close Others**, when that action is available for the session state. Names are trimmed and limited to 120 characters. **Handoff** creates another session; it does not move the task or transfer its workflow state.
 
 ### Spawn a session from an agent
@@ -108,7 +115,7 @@ Call `create_task_kandev` with `parent_id: "self"`. `workspace_mode` defaults to
 - Inherited repository attachments deliberately do not copy an explicit checkout branch.
 - An explicit same-repository child uses the inherited base branch. An explicit cross-repository child defaults to that repository's default branch unless `base_branch` is supplied.
 - Every created task must resolve an agent profile, even with `start_agent: false`.
-- Profile precedence when the task lands on a workflow step is the destination step's launch profile first (the step's pinned profile, or the workflow default when the step is unpinned), because that is what the orchestrator launches; it overrides an explicit `agent_profile_id`, and the created task records it. With no explicit `workflow_step_id`, the destination is the workflow's start step, so a workflow with steps still applies its start-step launch profile. Off a workflow step (no workflow, or a workflow with no steps), the order is explicit profile, then parent/current/source task metadata or primary-session profile, then the workspace default.
+- Profile precedence when the task lands on a workflow step is the destination step's launch profile first (the step's pinned profile, or the workflow default when the step is unpinned), because that is what the orchestrator launches; it overrides an explicit `agent_profile_id`, and the created task records it. With no explicit `workflow_step_id`, the destination is the first **Auto-start agent** step for `start_agent: true` and the workflow's start step otherwise, so a workflow with steps still applies that step's launch profile. Off a workflow step (no workflow, or a workflow with no steps), the order is explicit profile, then parent/current/source task metadata or primary-session profile, then the workspace default.
 - If no executor or executor profile is explicit or inherited, task MCP uses the built-in **git-worktree** executor. It does not consult the workspace's **Default Executor** for this fallback.
 - The one-level Kanban depth rule still applies.
 - An ephemeral Quick Chat task cannot be a parent; omit `parent_id` and create a top-level task instead.
@@ -126,7 +133,7 @@ For predictable top-level creation, pass `repository_url`, `repository_id`, or `
 | Created but not started     | Starts the session with the message.      |
 | Failed or cancelled         | Returns an error.                         |
 
-The default delivery mode is queued. Each session accepts 10 queued messages by default. An admin can change the install-wide limit under **Settings > Task Behavior > Message Queue**; `0` means unlimited. The saved value applies immediately to new admissions without removing messages already waiting. `KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence, locks only the capacity field, and requires a restart when changed; zero or a negative value means unlimited. Only one queued message drains per agent turn. When the cap is reached, the sender receives a structured `queue_full` error and should retry after space becomes available.
+The default delivery mode is queued. Each session accepts 10 queued messages by default. An admin can change the install-wide limit under **Settings > Task Behavior > Message Queue**; `0` means unlimited. The saved value applies immediately to new admissions without removing messages already waiting. `KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence, locks only the capacity field, and requires a restart when changed; zero or a negative value means unlimited. With **Auto-run** ON, one queued message runs per agent turn. When the cap is reached, the sender receives a structured `queue_full` error and should retry after space becomes available.
 
 **Automatically merge consecutive messages** is enabled by default on the same settings card. After capacity admission succeeds, a new message may fold into the immediately preceding pending entry when both have the same strict source and compatible task, model, mode, metadata, attachments, and references. Otherwise it remains a separate FIFO entry. The earlier entry survives, so a successful admission may return an older queue-entry ID. The switch affects only later admissions and never sweeps rows already waiting. It is independent from **Enable queued message merging**, which controls the manual **Merge with above** action.
 
@@ -134,10 +141,10 @@ In the task workbench, expand the queue chip to manage pending messages. Every v
 
 Use the queue controls according to the outcome you want:
 
-- **Run next** dispatches the promptable FIFO head without interrupting an active turn. It is available when the session can accept a prompt.
-- **Send Now** sends directly when the session is promptable; when an agent turn is active, it waits for the backend to acknowledge cancellation and then replaces that captured turn with either the selected row or the click-time snapshot of every visible row. Bulk Send Now joins non-empty bodies with a blank line, keeps attachments in FIFO order, and deduplicates references. It creates a replacement turn but does not apply normal Cancel side effects: it does not record a cancellation message, complete the cancelled workflow step, or move the task to review. New rows added after the click remain queued.
+- **Auto-run** is ON by default. ON runs eligible messages one at a time in FIFO order. OFF lets the current response finish, then holds every later message. The per-session setting survives an empty queue, reload, and backend restart. Turning it ON starts the head immediately when the session is promptable; clarification, workflow transitions, cancellation, and other lifecycle guards can defer delivery without changing the displayed ON state.
+- Every row's **Send Now** targets that message. It sends directly when the session is promptable; when an agent turn is active, it waits for backend cancellation acknowledgement and replaces that captured turn. A successful Send Now turns Auto-run ON, runs the selected row first, then continues the preserved remainder as separate FIFO turns. It does not record ordinary Cancel side effects, complete the cancelled workflow step, or move the task to review.
 - **Clear all** removes every visible pending row without sending a prompt.
-- **Cancel** in the chat toolbar stops the active turn as a user cancellation. It may record the cancellation, complete an eligible workflow step, and move the task to review; it does not send queued content.
+- **Cancel** in the chat toolbar stops the active turn immediately as a user cancellation. It may record the cancellation, complete an eligible workflow step, and move the task to review. It does not send queued content; when pending rows remain, Auto-run becomes OFF so they stay parked.
 
 Choose the control by intent:
 
@@ -198,6 +205,19 @@ Before starting, document:
 - the merge order for dependent changes; and
 - the test command required in each repository.
 
+### Fork pull requests and comparison targets
+
+When a task branch is the head of a fork pull request, provider integration records both repository
+identities. Kandev applies the target only when the attached repository matches the PR head and the
+live checkout branch matches the PR source branch. This prevents an old fork PR from changing the
+comparison base of another attachment.
+
+The target repository and branch are stored on that task-repository attachment. A live session uses
+an exact comparison-only ref for the target. It keeps `origin`, checkout, and push routing unchanged.
+Retargeting the PR refreshes the target. Changing the task base branch or removing the owning PR
+association clears it. If the target is unavailable, Kandev fails closed and marks comparison
+unavailable instead of using a same-named local or `origin` branch.
+
 </details>
 
 ### Add sources after creation
@@ -230,7 +250,7 @@ processes after attachment. Local Docker, SSH, and Sprites instead clone the new
 the current remote workspace and rescan it without changing the agent CWD or restarting the agent
 and workspace processes.
 
-Task agents can call `add_workspace_sources_kandev` with the same mixed batch; `task_id` defaults to the current task, and the operation remains idle-only. `add_branch_to_task_kandev` is the Worktree-only legacy one-repository/branch path and may run during an active turn: it creates a sibling worktree under the task directory, promotes the Files root to that parent, and rescans without restarting the agent, terminals, or workspace processes. Its `worktree_path` is the exact new location, `task_workspace_path` is the Files root, and `agent_cwd_changed` is always `false`; the agent's current directory stays unchanged.
+Task agents can call `add_workspace_sources_kandev` with the same mixed batch; `task_id` defaults to the current task, and the operation remains idle-only. A direct parent in the same workspace can use it to recover an idle child that is missing a repository or SDK; siblings and other task relationships cannot target that child. Exact retries are safe no-ops. `add_branch_to_task_kandev` remains the current-task-only Worktree legacy one-repository/branch path and may run during an active turn: it creates a sibling worktree under the task directory, promotes the Files root to that parent, and rescans without restarting the agent, terminals, or workspace processes. Its `worktree_path` is the exact new location, `task_workspace_path` is the Files root, and `agent_cwd_changed` is always `false`; the agent's current directory stays unchanged.
 
 Use `update_repository_base_branch_kandev` with a task-repository ID to change the comparison base. The database update is authoritative. Resetting cached session bases, refreshing Changes, base commit, ahead/behind counts, and cumulative diff in a live tracker are best-effort side effects; a failure is logged without rolling back the new base, and the persisted value is rebuilt on the next session launch. The tool does not rewrite commits, switch the checkout, or change an existing pull request's target branch.
 

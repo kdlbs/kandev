@@ -51,6 +51,15 @@ A server that listens on non-loopback interfaces with authentication disabled lo
 
 Roles: `admin` (user management, authentication settings, destructive system operations, feature toggles) and `member` (everything else, scoped to their own workspaces).
 
+Install-wide data in `Settings > System > Data & storage` follows the same
+split. Members can read the database stats, the backup listing, and the storage
+usage, policy, run history, and quarantine contents. Creating, downloading,
+restoring, and deleting a backup is admin only, because a backup is a copy of
+the whole database and downloading one would export every user's workspaces.
+Changing storage settings, adopting a Go cache, and running an analysis,
+cleanup, or quarantine restore/purge are admin only for the same reason
+database vacuum, optimize, and reset are: they act on the whole install.
+
 ## Personal access tokens
 
 `Settings > Account > API Tokens`. Tokens look like `kandev_pat_…`, are shown **once** at creation, and are sent as a bearer header:
@@ -63,7 +72,19 @@ External MCP clients (Claude Code, Cursor connecting to `/mcp`) must be configur
 
 ## Endpoints that stay public
 
-`/health` (readiness probes), the login/setup/invite pages, `GET /api/v1/features`, and self-authenticating webhook receivers (automation webhooks with `X-Webhook-Secret`, office channel HMAC webhooks, plugin webhooks). Everything else requires a session or token.
+`/health` (liveness probes) and `/ready` (readiness probes), the login/setup/invite pages, `GET /api/v1/features`, and self-authenticating webhook receivers (automation webhooks with `X-Webhook-Secret`, office channel HMAC webhooks). Everything else requires a session or token.
+
+Plugin webhooks (`/api/plugins/{id}/webhooks/{key}`) are **not** public by default: a plugin's manifest must explicitly declare `webhooks[].public: true` for that specific webhook to accept anonymous requests. Unflagged webhooks require a session or PAT like any other endpoint. See [Plugin manifest reference](plugins-manifest.md).
+
+## Multiple instances on one host
+
+Browsers match cookies by host and ignore the port, so several auth-enabled kandev instances on the same host (same IP, different ports) would otherwise share one cookie jar. Kandev isolates them by port-scoping its instance-identity cookie **names**: `kandev_session_<port>`, `kandev-active-workspace_<port>`, and `office-active-workspace_<port>` on a ported host, plain names on a default-port host. Default-port normalization is scheme-aware and mirrors the SPA's `URL.port` behavior: `:80` on HTTP and `:443` on HTTPS yield no suffix (browsers omit them from `Host`), while the scheme-mismatched combinations (HTTP `:443`, HTTPS `:80`) keep their port suffix on both sides, so `example.com:80` and `example.com` resolve to the same plain names and two HTTP instances on ports 80 and 443 stay isolated. Logging into one instance no longer logs the others out, and selecting a workspace in one no longer changes what the others boot into.
+
+**Reverse proxies must preserve the browser hostname.** The CORS/WS origin gate compares the browser `Origin` hostname with the request `Host` and ignores `X-Forwarded-Host` and ports. The proxy may either preserve the full `Host` (`public.example:8443`) or rewrite only the port and forward a correct `X-Forwarded-Host` (the cookie resolver takes the public port from it; the header is honored only from peers listed in `KANDEV_TRUSTED_PROXIES`, the same list that gates `X-Forwarded-For`). Rewriting a **non-loopback hostname** is rejected with 403 before authentication. Loopback-alias rewrites (e.g. `localhost` → `127.0.0.1`) pass the gate by design.
+
+**Session-cookie migration.** Old auth-enabled builds conflict with each other via the shared unprefixed `kandev_session`; an upgraded instance ignores the legacy session token and requires one re-login (the new build never reads the unprefixed session cookie, so this holds on rollback and re-upgrade too). Workspace selections keep their validated legacy read fallback, so a pre-upgrade selection survives.
+
+A custom `auth.cookieName` (see [configuration](configuration.md#authentication-office-plugins-and-feature-flags)) disables automatic port isolation and must be unique per cookie host. In particular, an explicit `auth.cookieName: kandev_session` (copied from the pre-isolation default) silently keeps the old shared-name behavior after upgrade: remove the setting (or any other value equal to the base name) to inherit port isolation. A custom name does not change the origin gate, which compares hostnames independently of cookie names. Instances served on the same host at default ports over different schemes (HTTP `:80` + HTTPS `:443`) carry no port in their Host and keep the plain names; they are not isolated by this mechanism.
 
 ## What is isolated
 

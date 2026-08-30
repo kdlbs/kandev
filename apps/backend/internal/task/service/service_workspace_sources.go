@@ -33,8 +33,10 @@ type WorkspaceSourceInput struct {
 }
 
 type AttachWorkspaceSourcesRequest struct {
-	TaskID  string
-	Sources []WorkspaceSourceInput
+	TaskID                    string
+	Sources                   []WorkspaceSourceInput
+	ExpectedParentID          string
+	ExpectedParentWorkspaceID string
 }
 
 // AttachWorkspaceSourcesResult is the authoritative post-materialization
@@ -45,6 +47,9 @@ type AttachWorkspaceSourcesResult struct {
 	WorkspacePath string
 	WorktreePath  string
 	SessionIDs    []string
+	// Changed reports whether this request made a durable mutation. Exact
+	// normalized retries return the same projection without runtime side effects.
+	Changed bool
 }
 
 // WorkspaceSourceMaterializationResult is returned by the runtime boundary
@@ -94,10 +99,10 @@ func (s *Service) AttachWorkspaceSources(ctx context.Context, req AttachWorkspac
 	if task == nil {
 		return nil, fmt.Errorf("%w: %s", taskrepository.ErrTaskNotFound, req.TaskID)
 	}
-	if err := s.workspaceSourcesIdle(ctx, task.ID); err != nil {
-		return nil, err
+	if req.ExpectedParentID != "" && (task.ParentID != req.ExpectedParentID || task.WorkspaceID != req.ExpectedParentWorkspaceID) {
+		return nil, fmt.Errorf("%w: %s", taskrepository.ErrTaskParentMismatch, task.ID)
 	}
-	if err := s.rejectUnsupportedFolderSources(ctx, task.ID, req.Sources); err != nil {
+	if err := s.workspaceSourcesIdle(ctx, task.ID); err != nil {
 		return nil, err
 	}
 	existing, err := s.taskRepos.ListTaskRepositories(ctx, task.ID)
@@ -115,11 +120,99 @@ func (s *Service) AttachWorkspaceSources(ctx context.Context, req AttachWorkspac
 	if err != nil {
 		return nil, err
 	}
-	batch, cleanupCreated, err := s.prepareWorkspaceSourceBatch(ctx, task, existing, folders, req.Sources)
+	inputs, err := filterExactWorkspaceSourceDuplicates(existing, folders, req.Sources)
+	if err != nil {
+		// Preserve the capability-first error for unsupported executors when a
+		// new folder path cannot be normalized. Valid paths still reach the
+		// duplicate filter first, so exact retries remain no-ops after an
+		// executor change.
+		if errors.Is(err, ErrInvalidWorkspaceSource) {
+			if capabilityErr := s.rejectUnsupportedFolderSources(ctx, task.ID, req.Sources); capabilityErr != nil {
+				return nil, capabilityErr
+			}
+		}
+		return nil, err
+	}
+	if err := s.rejectUnsupportedFolderSources(ctx, task.ID, inputs); err != nil {
+		return nil, err
+	}
+	if len(inputs) == 0 {
+		if err := guardWorkspaceSourceParent(ctx, store, task, req); err != nil {
+			return nil, err
+		}
+		return s.hydrateWorkspaceSourceResult(ctx, task, store)
+	}
+	batch, cleanupCreated, err := s.prepareWorkspaceSourceBatch(ctx, task, existing, folders, inputs)
 	if err != nil {
 		return nil, err
 	}
+	batch.ExpectedParentID = req.ExpectedParentID
+	batch.ExpectedParentWorkspaceID = req.ExpectedParentWorkspaceID
+	if len(batch.Sources) == 0 && len(batch.RepositoryUpdates) == 0 {
+		cleanupCreated(context.WithoutCancel(ctx))
+		if err := guardWorkspaceSourceParent(ctx, store, task, req); err != nil {
+			return nil, err
+		}
+		return s.hydrateWorkspaceSourceResult(ctx, task, store)
+	}
 	return s.commitWorkspaceSourceBatch(ctx, task, batch, cleanupCreated, s.materializeWorkspaceSources)
+}
+
+func guardWorkspaceSourceParent(ctx context.Context, store taskrepository.TaskWorkspaceFolderRepository, task *models.Task, req AttachWorkspaceSourcesRequest) error {
+	if req.ExpectedParentID == "" {
+		return nil
+	}
+	return store.CreateWorkspaceSourceBatch(ctx, &models.WorkspaceSourceBatch{
+		TaskID:                    task.ID,
+		ExpectedParentID:          req.ExpectedParentID,
+		ExpectedParentWorkspaceID: req.ExpectedParentWorkspaceID,
+	})
+}
+
+func filterExactWorkspaceSourceDuplicates(existing []*models.TaskRepository, folders []*models.TaskWorkspaceFolder, inputs []WorkspaceSourceInput) ([]WorkspaceSourceInput, error) {
+	paths, names := map[string]string{}, map[string]string{}
+	for _, folder := range folders {
+		paths[folder.LocalPath] = folder.DisplayName
+		names[folder.DisplayName] = folder.LocalPath
+	}
+	filtered := make([]WorkspaceSourceInput, 0, len(inputs))
+	for _, input := range inputs {
+		if input.Kind == WorkspaceSourceFolder {
+			folder, duplicate, err := filterWorkspaceFolderDuplicate(input, paths, names)
+			if err != nil {
+				return nil, err
+			}
+			if !duplicate {
+				filtered = append(filtered, folder)
+			}
+			continue
+		}
+		filtered = append(filtered, input)
+	}
+	return filtered, nil
+}
+
+func filterWorkspaceFolderDuplicate(input WorkspaceSourceInput, paths, names map[string]string) (WorkspaceSourceInput, bool, error) {
+	path, err := canonicalFolder(input.LocalPath)
+	if err != nil {
+		return input, false, fmt.Errorf("%w: %v", ErrInvalidWorkspaceSource, err)
+	}
+	name := input.DisplayName
+	if name == "" {
+		name = filepath.Base(path)
+	}
+	if existingName, exists := paths[path]; exists {
+		if existingName == name {
+			return input, true, nil
+		}
+		return input, false, fmt.Errorf("%w: workspace folder path is already attached", ErrWorkspaceSourceConflict)
+	}
+	if existingPath, exists := names[name]; exists && existingPath != path {
+		return input, false, fmt.Errorf("%w: workspace folder name is already attached", ErrWorkspaceSourceConflict)
+	}
+	paths[path], names[name] = name, path
+	input.LocalPath, input.DisplayName = path, name
+	return input, false, nil
 }
 
 func (s *Service) prepareWorkspaceSourceBatch(ctx context.Context, task *models.Task, existing []*models.TaskRepository, folders []*models.TaskWorkspaceFolder, inputs []WorkspaceSourceInput) (*models.WorkspaceSourceBatch, func(context.Context), error) {
@@ -151,9 +244,15 @@ func (s *Service) prepareWorkspaceSourceBatch(ctx context.Context, task *models.
 			}
 			batch.Sources = append(batch.Sources, models.WorkspaceSource{Folder: folder})
 		case WorkspaceSourceRepository:
-			taskRepository, createdByUs, err := s.prepareRepositoryWorkspaceSource(ctx, task, input, prospective)
+			taskRepository, createdByUs, duplicate, err := s.prepareRepositoryWorkspaceSource(ctx, task, input, prospective)
 			if err != nil {
 				return nil, nil, err
+			}
+			if duplicate {
+				if createdByUs != "" {
+					s.cleanupCreatedWorkspaceRepositories(context.WithoutCancel(ctx), []string{createdByUs})
+				}
+				continue
 			}
 			if createdByUs != "" {
 				created = append(created, createdByUs)
@@ -230,39 +329,57 @@ func prepareFolderWorkspaceSource(input WorkspaceSourceInput, seenPaths, seenNam
 	return &models.TaskWorkspaceFolder{LocalPath: path, DisplayName: name}, nil
 }
 
-func (s *Service) prepareRepositoryWorkspaceSource(ctx context.Context, task *models.Task, input WorkspaceSourceInput, existing []*models.TaskRepository) (*models.TaskRepository, string, error) {
+func (s *Service) prepareRepositoryWorkspaceSource(ctx context.Context, task *models.Task, input WorkspaceSourceInput, existing []*models.TaskRepository) (*models.TaskRepository, string, bool, error) {
 	if err := s.validateRepositoryWorkspaceSourceInput(ctx, task, input); err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	id, base, createdID, err := s.resolveRepositoryWorkspaceSource(ctx, task, input)
 	if err != nil {
-		return nil, createdID, err
+		return nil, createdID, false, err
 	}
 	repo, base, err := s.resolveWorkspaceSourceBaseBranch(ctx, task, id, base)
 	if err != nil {
-		return nil, createdID, err
+		return nil, createdID, false, err
 	}
 	if err := validateWorkspaceSourceBranches(base, input.CheckoutBranch); err != nil {
-		return nil, createdID, err
+		return nil, createdID, false, err
 	}
 	if input.LocalPath != "" {
 		if err := s.requireCloneableLocalRepository(ctx, task.ID, repo); err != nil {
-			return nil, createdID, err
+			return nil, createdID, false, err
 		}
+	}
+	if hasExactWorkspaceSourceRepository(existing, id, base, input.CheckoutBranch) {
+		return nil, createdID, true, nil
 	}
 	checkout := input.CheckoutBranch
 	if _, duplicate := scanForBranchAddDuplicate(existing, id, base, checkout, repo); duplicate != nil {
-		return nil, createdID, fmt.Errorf("%w: %v", ErrWorkspaceSourceConflict, duplicate)
+		return nil, createdID, false, fmt.Errorf("%w: %v", ErrWorkspaceSourceConflict, duplicate)
 	}
-	return &models.TaskRepository{RepositoryID: id, BaseBranch: base, CheckoutBranch: checkout, Metadata: map[string]interface{}{}}, createdID, nil
+	return &models.TaskRepository{RepositoryID: id, BaseBranch: base, CheckoutBranch: checkout, Metadata: map[string]interface{}{}}, createdID, false, nil
+}
+
+func hasExactWorkspaceSourceRepository(existing []*models.TaskRepository, repositoryID, baseBranch, checkoutBranch string) bool {
+	for _, repository := range existing {
+		if repository != nil && repository.RepositoryID == repositoryID && repository.BaseBranch == baseBranch && repository.CheckoutBranch == checkoutBranch {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) validateRepositoryWorkspaceSourceInput(ctx context.Context, task *models.Task, input WorkspaceSourceInput) error {
 	if repositoryLocatorCount(input) != 1 {
 		return fmt.Errorf("%w: repository source requires exactly one locator", ErrInvalidWorkspaceSource)
 	}
-	if err := validateWorkspaceSourceBranches(input.BaseBranch, input.CheckoutBranch); err != nil {
-		return err
+	// base_branch may be omitted when the resolved repository has a default
+	// branch. Validate a supplied value here and the effective value after
+	// resolution in prepareRepositoryWorkspaceSource.
+	if input.BaseBranch != "" && !securityutil.IsValidBranchName(input.BaseBranch) {
+		return fmt.Errorf("%w: base_branch %q is not a safe git branch", ErrInvalidWorkspaceSource, input.BaseBranch)
+	}
+	if input.CheckoutBranch != "" && !securityutil.IsValidBranchName(input.CheckoutBranch) {
+		return fmt.Errorf("%w: checkout_branch %q is not a safe git branch", ErrInvalidWorkspaceSource, input.CheckoutBranch)
 	}
 	if input.RepositoryID == "" {
 		return nil
@@ -298,6 +415,9 @@ func (s *Service) resolveWorkspaceSourceBaseBranch(ctx context.Context, task *mo
 		if err != nil {
 			return nil, "", fmt.Errorf("%w: resolve local repository branch: %v", ErrInvalidWorkspaceSource, err)
 		}
+	}
+	if base == "" {
+		base = repo.DefaultBranch
 	}
 	if base == "" {
 		return nil, "", fmt.Errorf("%w: repository source requires base_branch", ErrInvalidWorkspaceSource)
@@ -476,6 +596,7 @@ func (s *Service) commitWorkspaceSourceBatch(ctx context.Context, task *models.T
 		s.PublishWorkspaceSourcesAdopted(context.WithoutCancel(ctx), task.ID, result.WorkspacePath, result.SessionIDs)
 	}
 	succeeded = true
+	result.Changed = true
 	return result, nil
 }
 

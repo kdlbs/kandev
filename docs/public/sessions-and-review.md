@@ -61,11 +61,13 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 
 Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. The failure banner offers **Start fresh** when continuation is unavailable.
 
-Stopping a turn does not itself run the next queued message. Expand the queue and select **Run next** when you want processing to continue.
+Stopping a turn does not itself run the next queued message. If pending rows remain, Kandev sets their session's **Auto-run** switch to OFF. Expand the queue and turn Auto-run ON when you want FIFO processing to continue.
 
-The expanded queue also lets you discard stale work. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
+The expanded queue also lets you pause or discard stale work. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
 
-The queue panel separates four actions. **Run next** sends the promptable FIFO head and leaves a running turn alone. **Send Now** sends directly when the session is promptable; otherwise it waits for backend cancellation acknowledgement, then replaces the active turn with one selected row or the click-time snapshot of all visible rows as one FIFO-ordered prompt. It does not record ordinary Cancel side effects or complete the cancelled workflow step. **Clear all** discards the visible queue. The chat toolbar's **Cancel** is the normal user cancellation for the active turn; it sends no queued prompt and may complete an eligible workflow step or move the task to review.
+Use **Auto-run** for normal queue motion. ON runs one eligible row per turn in FIFO order; OFF lets the current response finish and holds later rows. The setting belongs to the session and survives an empty queue, reload, and backend restart. A pending clarification or another lifecycle guard can leave the queue waiting while the switch remains ON.
+
+Every row has **Send Now** for targeted priority. It sends that row directly when the session is promptable or replaces the captured active turn after backend cancellation acknowledgement. A successful Send Now turns Auto-run ON, runs the selected row first, then continues the remaining rows as separate FIFO turns without ordinary Cancel side effects. **Clear all** discards the visible queue. The chat toolbar's **Cancel** immediately stops the active turn, sends no queued prompt, parks any pending backlog with Auto-run OFF, and may complete an eligible workflow step or move the task to review.
 
 A CLI-passthrough profile displays the agent's native terminal interface in a PTY. It still belongs to the task, but it does not provide Kandev's structured chat messages and tool-call presentation.
 
@@ -158,6 +160,17 @@ Changes are grouped by repository and then by state:
 - **Commits** on the task branch.
 
 From this panel you can stage or unstage files, discard working-tree changes, commit, amend, reset or revert commits, pull, rebase, merge, push, force-push, rename the task branch, choose a base branch, and create or open a pull request or merge request. Operations apply to the selected repository. Discarding a file is permanent, and history-changing operations can lose work or invalidate review; read [Git operations](git-operations.md) before using them.
+
+Changes-panel Git operations use Kandev's control path, not the agent's shell. They can work when a restricted agent mode blocks shell writes to Git metadata. If the error says that `.git/index.lock` already exists or is held, stop other Git operations and inspect the lock before retrying. Remove a stale lock only after you confirm that no Git process owns it. The Changes panel uses the same worktree, so it does not bypass an active lock. If the agent cannot create `.git/index.lock` because of its permission mode, use the Changes panel. Read [Git operations](git-operations.md#prerequisites-and-trust-boundary) before you change the agent mode.
+
+For a linked fork pull request, the Changes header shows the exact comparison target, such as
+`upstream/widget:main`. Kandev keeps this target separate from `origin`, the checked-out branch,
+and the push remote. Desktop hover details and the mobile touch drawer show the same target.
+
+If Kandev cannot materialize that exact target, the Changes panel shows a comparison warning and
+hides numeric diff, commit, and ahead/behind totals. It does not use a same-named `origin` branch as
+a substitute. Check the executor's Git access and refresh the session after the target becomes
+available.
 
 ### Open a file in its external repository
 
@@ -263,7 +276,7 @@ The GitLab MR topbar control has an **Automation** group with the same two actio
 - **Auto-fix CI and address comments** sends the agent a new or changed failing pipeline job or unresolved discussion note once the pipeline settles, and stops after 10 repair rounds for that MR. Disable and re-enable it to reset the limit.
 - **Auto-merge when ready** merges only after the pipeline passes, unresolved discussions are cleared, and GitLab's own merge-readiness check agrees.
 
-Below that, open **Review follow-up** for the same three notification switches GitHub uses, task-level and applying to every merge request linked to the task:
+Below that, open **Review follow-up** for the same three notification switches GitHub uses. Every switch above belongs to one merge request: a task with several linked MRs shows an **Automation** group per MR, each labelled with its MR number, and turning a switch on for one leaves the others alone.
 
 - **Your review is requested** wakes the agent when the workspace's connected GitLab account is newly added as a reviewer on the MR. Staying assigned across MR updates does not re-fire it; being removed and re-added (for example, for a re-review after changes) does.
 - **MR merged** and **MR closed without merging** independently wake the agent when review work ends.
@@ -304,7 +317,7 @@ Before moving a task to done:
 - **New Agent has no profiles:** create a profile compatible with the task executor. A profile for another executor is intentionally hidden.
 - **Summary or generated text fails:** configure the corresponding utility agent with an enabled ACP profile in **Settings > Utility Agents**. Repair any stale or disabled profile binding before retrying.
 - **Resume fails:** start fresh when the executor no longer has resumable session state, then supply a summary or copy the relevant context.
-- **A peer message never arrives:** check the target session state and ID. Running sessions queue messages; failed or cancelled sessions reject them. For a full queue, expand its chip and run, remove, or clear pending work before retrying; an admin can also review the install-wide limit under **Settings > Task Behavior > Message Queue**.
+- **A peer message never arrives:** check the target session state and ID. Running sessions queue messages; failed or cancelled sessions reject them. Expand the queue chip and check Auto-run: turn it ON for normal FIFO processing, use a row's Send Now for targeted priority, or remove stale work. For a full queue, remove or clear pending rows before retrying; an admin can also review the install-wide limit under **Settings > Task Behavior > Message Queue**.
 - **Changes is empty:** select the correct repository and comparison, then confirm the agent wrote inside the materialized task path.
 - **Review marks became stale:** the underlying diff changed. Re-review the new hash before marking the file complete.
 - **Walkthrough does not appear:** confirm an active task-MCP session exists and that the saved `changes-walkthrough` prompt was not removed or made invalid.

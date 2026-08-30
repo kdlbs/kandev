@@ -26,6 +26,7 @@ const (
 // carried at the top level. When EnvPrepareRequest.Repositories is non-empty,
 // each entry produces one prepared worktree under the shared TaskDirName.
 type RepoPrepareSpec struct {
+	TaskRepositoryID        string
 	RepositoryID            string
 	RepositoryPath          string
 	RepoName                string
@@ -35,6 +36,10 @@ type RepoPrepareSpec struct {
 	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
 	WorktreeID              string
+	// WorkspaceReuseRequired makes preparation attach to the exact canonical
+	// environment. It forbids worktree creation/recreation and all repository
+	// mutating setup paths.
+	WorkspaceReuseRequired bool
 	WorktreeBranch          string
 	WorktreeBranchPrefix    string
 	WorktreeBranchTemplate  string
@@ -58,12 +63,14 @@ type EnvPrepareRequest struct {
 	TaskID                  string
 	WorkspaceID             string
 	SessionID               string
+	TaskEnvironmentID       string
 	TaskTitle               string
 	ExecutionID             string
 	ExecutorType            executor.Name
 	WorkspacePath           string
 	RepositoryPath          string
 	RepositoryID            string
+	TaskRepositoryID        string
 	UseWorktree             bool
 	SetupScript             string
 	RepoSetupScript         string // Repository-level setup script (e.g. "make install")
@@ -75,6 +82,10 @@ type EnvPrepareRequest struct {
 	ContributionDestination *models.ContributionDestination
 	WorktreeID              string
 	WorktreeBranch          string
+	// WorkspaceReuseRequired applies attach-only semantics to every repository
+	// in this request. RepoPrepareSpec carries the same value so multi-repo
+	// callers can retain it while requests are split.
+	WorkspaceReuseRequired bool
 
 	WorktreeBranchPrefix   string
 	WorktreeBranchTemplate string
@@ -111,6 +122,7 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		return nil
 	}
 	return []RepoPrepareSpec{{
+		TaskRepositoryID:        r.TaskRepositoryID,
 		RepositoryID:            r.RepositoryID,
 		RepositoryPath:          r.RepositoryPath,
 		RepoName:                r.RepoName,
@@ -120,6 +132,7 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		PRNumber:                r.PRNumber,
 		RemoteContribution:      r.RemoteContribution,
 		WorktreeID:              r.WorktreeID,
+		WorkspaceReuseRequired:  r.WorkspaceReuseRequired,
 		WorktreeBranch:          r.WorktreeBranch,
 		WorktreeBranchPrefix:    r.WorktreeBranchPrefix,
 		WorktreeBranchTemplate:  r.WorktreeBranchTemplate,
@@ -150,13 +163,17 @@ type PrepareStep struct {
 // Populated by preparers that handle multi-repo launches; each entry corresponds
 // to one RepoPrepareSpec from the request.
 type RepoWorktreeResult struct {
-	RepositoryID   string `json:"repository_id"`
-	BranchSlug     string `json:"branch_slug,omitempty"`
-	WorktreeID     string `json:"worktree_id,omitempty"`
-	WorktreeBranch string `json:"worktree_branch,omitempty"`
-	WorktreePath   string `json:"worktree_path,omitempty"`
-	MainRepoGitDir string `json:"main_repo_git_dir,omitempty"`
-	ErrorMessage   string `json:"error_message,omitempty"`
+	TaskRepositoryID          string `json:"task_repository_id,omitempty"`
+	RepositoryID              string `json:"repository_id"`
+	BranchSlug                string `json:"branch_slug,omitempty"`
+	WorktreeID                string `json:"worktree_id,omitempty"`
+	WorktreeBranch            string `json:"worktree_branch,omitempty"`
+	WorktreePath              string `json:"worktree_path,omitempty"`
+	MainRepoGitDir            string `json:"main_repo_git_dir,omitempty"`
+	RequestedBaseBranch       string `json:"requested_base_branch,omitempty"`
+	BaseBranch                string `json:"base_branch,omitempty"`
+	BaseBranchFallbackWarning string `json:"base_branch_fallback_warning,omitempty"`
+	ErrorMessage              string `json:"error_message,omitempty"`
 }
 
 // EnvPrepareResult contains the result of environment preparation.
@@ -169,9 +186,12 @@ type EnvPrepareResult struct {
 
 	// Worktree fields (populated when worktree preparer runs).
 	// Legacy single-worktree fields; for multi-repo results they mirror Worktrees[0].
-	WorktreeID     string `json:"worktree_id,omitempty"`
-	WorktreeBranch string `json:"worktree_branch,omitempty"`
-	MainRepoGitDir string `json:"main_repo_git_dir,omitempty"`
+	WorktreeID                string `json:"worktree_id,omitempty"`
+	WorktreeBranch            string `json:"worktree_branch,omitempty"`
+	MainRepoGitDir            string `json:"main_repo_git_dir,omitempty"`
+	RequestedBaseBranch       string `json:"requested_base_branch,omitempty"`
+	BaseBranch                string `json:"base_branch,omitempty"`
+	BaseBranchFallbackWarning string `json:"base_branch_fallback_warning,omitempty"`
 
 	// Worktrees is the per-repository outcome list when the preparer ran in
 	// multi-repo mode. Empty for single-repo or repo-less results.

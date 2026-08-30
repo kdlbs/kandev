@@ -575,5 +575,18 @@
   "failedToFetchPrFiles": "Ƒàĩĺēď ţō ƒēţćĥ ƤŔ ƒĩĺēś",
   "failedToLoadCiAutomationOptions": "Ƒàĩĺēď ţō ĺōàď ĆĨ àũţōḿàţĩōń ōƥţĩōńś.",
   "failedToSearchGitHub": "Ƒàĩĺēď ţō śēàŕćĥ ĜĩţĤũƀ",
-  "pullRequestNumbered": "Ƥũĺĺ Ŕēqũēśţ #{{number}}"
+  "pullRequestNumbered": "Ƥũĺĺ Ŕēqũēśţ #{{number}}",
+  "mergeQueueEstimate_one": "Ēśţĩḿàţēď ḿēŕĝē ţĩḿē: {{count}} ḿĩńũţē.",
+  "mergeQueueEstimate_other": "Ēśţĩḿàţēď ḿēŕĝē ţĩḿē: {{count}} ḿĩńũţēś.",
+  "mergeQueuePosition": "Ƥōśĩţĩōń {{position}}",
+  "mergeQueuePositionAndEstimate_one": "Ƥōśĩţĩōń {{position}}. Ēśţĩḿàţēď ḿēŕĝē ţĩḿē: {{count}} ḿĩńũţē.",
+  "mergeQueuePositionAndEstimate_other": "Ƥōśĩţĩōń {{position}}. Ēśţĩḿàţēď ḿēŕĝē ţĩḿē: {{count}} ḿĩńũţēś.",
+  "mergeQueuePositionAndSubMinuteEstimate": "Ƥōśĩţĩōń {{position}}. Ēśţĩḿàţēď ḿēŕĝē ţĩḿē: ĺēśś ţĥàń à ḿĩńũţē.",
+  "mergeQueueStateAwaitingChecks": "Àŵàĩţĩńĝ ćĥēćķś",
+  "mergeQueueStateLocked": "Ĺōćķēď",
+  "mergeQueueStateMergeable": "Ḿēŕĝēàƀĺē",
+  "mergeQueueStateQueued": "Qũēũēď",
+  "mergeQueueStateUnmergeable": "Ũńḿēŕĝēàƀĺē",
+  "mergeQueueStatus": "Ḿēŕĝē qũēũē: {{state}}",
+  "mergeQueueSubMinuteEstimate": "Ēśţĩḿàţēď ḿēŕĝē ţĩḿē: ĺēśś ţĥàń à ḿĩńũţē."
 }

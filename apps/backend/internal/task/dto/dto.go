@@ -207,6 +207,11 @@ type TaskDTO struct {
 	// died and has not been resumed since. Derived from the interrupted_at
 	// metadata key at DTO conversion time (see FromTaskWithSessionInfo).
 	Interrupted bool `json:"interrupted,omitempty"`
+	// AutoStartFailed reports that a workflow step's auto_start_agent on_enter
+	// action failed to launch a run for this task. Derived from the
+	// auto_start_failed metadata key at DTO conversion time (see
+	// FromTaskWithSessionInfo).
+	AutoStartFailed bool `json:"auto_start_failed,omitempty"`
 
 	// Dependency projection. Derived on every read from task_blockers plus each
 	// related task's own state — never persisted, because a stale copy would be
@@ -231,7 +236,7 @@ type TaskDTO struct {
 	Labels                 string `json:"labels,omitempty"`
 	Identifier             string `json:"identifier,omitempty"`
 	// ExternalID is a caller-supplied identity used for task create-
-	// idempotency (docs/specs/tasks/external-id-idempotency/spec.md). Omitted
+	// idempotency (docs/specs/tasks/requirements/external-id-idempotency.md). Omitted
 	// when the task holds none.
 	ExternalID string `json:"external_id,omitempty"`
 	// IsFromOffice is the authoritative "this task is owned by office"
@@ -351,6 +356,13 @@ type TaskSessionDTO struct {
 	// the newest message the frontend has marked as read. Used by the
 	// transcript to position the unread ("New") divider.
 	LastReadMessageID string `json:"last_read_message_id,omitempty"`
+	// Usage/cost rollup (docs/specs/task-cost-ledger/spec.md AC-28, AC-29).
+	// Deliberately not on TaskSessionSummaryDTO - the summary projection used
+	// by cross-task views is not widened by this card.
+	CostSubcents   int64 `json:"cost_subcents"`
+	TokensIn       int64 `json:"tokens_in"`
+	TokensCachedIn int64 `json:"tokens_cached_in"`
+	TokensOut      int64 `json:"tokens_out"`
 }
 
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.
@@ -836,6 +848,7 @@ func FromTaskWithSessionInfo(
 		UpdatedAt:                   task.UpdatedAt,
 		Metadata:                    task.Metadata,
 		Interrupted:                 task.Metadata[models.MetaKeyInterruptedAt] != nil,
+		AutoStartFailed:             task.Metadata[models.MetaKeyAutoStartFailed] != nil,
 		// Office extensions. AssigneeAgentProfileID is a read-time
 		// projection from workflow_step_participants (ADR 0005 Wave F);
 		// the repo's task SELECTs hydrate it via a correlated subquery.
@@ -917,6 +930,10 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		ReviewStatus:      session.ReviewStatus,
 		TaskEnvironmentID: session.TaskEnvironmentID,
 		LastReadMessageID: session.LastReadMessageID,
+		CostSubcents:      session.CostSubcents,
+		TokensIn:          session.TokensIn,
+		TokensCachedIn:    session.TokensCachedIn,
+		TokensOut:         session.TokensOut,
 	}
 	if worktrees := session.WorktreesAPI(); len(worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID

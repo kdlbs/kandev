@@ -12,10 +12,13 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/registry"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
@@ -69,6 +72,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	}
 	userSecretStore := secrets.NewUserVisibleStore(repos.Secrets)
 	agentSettingsController := agentsettingscontroller.NewController(repos.AgentSettings, discoveryRegistry, agentRegistry, repos.Task, log)
+	agentSettingsController.SetDynamicAgentRoutingEnabled(cfg.Features.DynamicAgentRouting)
 	agentSettingsController.SetSecretStore(userSecretStore)
 	managedRuntimeSettings, err := systemsettings.NewStore(dbPool)
 	if err != nil {
@@ -82,9 +86,36 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	promptSvc := promptservice.NewService(repos.Prompts)
 	utilitySvc := utilityservice.NewService(repos.Utility)
 	utilitySvc.SetProfileResolver(profilebinding.New(repos.AgentSettings, func(agentID string) bool {
+		if agentID == agents.DynamicAgentID {
+			return cfg.Features.DynamicAgentRouting
+		}
 		_, ok := agentRegistry.GetInferenceAgent(agentID)
 		return ok
 	}))
+	dynamicCircuits := dynamicruntime.NewCircuitRegistry(
+		dynamicruntime.WithCircuitPersistence(repos.Task),
+	)
+	if err := dynamicCircuits.Restore(context.Background()); err != nil {
+		return nil, nil, fmt.Errorf("restore dynamic routing health: %w", err)
+	}
+	dynamicEngine := dynamicruntime.NewEngine(
+		dynamicruntime.WithPersistence(repos.Task),
+		dynamicruntime.WithStateLoader(repos.Task),
+		dynamicruntime.WithCircuitRegistry(dynamicCircuits),
+	)
+	dynamicBindingResolver, err := dynamicruntime.NewPersistentCredentialBindingResolver(
+		context.Background(), repos.Task,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("initialize dynamic routing installation key: %w", err)
+	}
+	dynamicResolver := agentruntime.NewProfileExecutionResolver(
+		repos.AgentSettings,
+		dynamicEngine,
+		cfg.Features.DynamicAgentRouting,
+	)
+	dynamicResolver.SetCredentialBindingResolver(dynamicBindingResolver)
+	utilitySvc.SetExecutionProfileResolver(dynamicResolver)
 	workflowSvc := workflowservice.NewService(repos.Workflow, log)
 	pendingActionProjectionEpoch, err := repos.Task.NextPendingActionProjectionEpoch(context.Background())
 	if err != nil {
@@ -113,6 +144,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			StatusSummaries:   repos.Task,
 			TaskActivity:      repos.Task,
 			SubagentContexts:  repos.Task,
+			Usage:             repos.Task,
 		},
 		eventBus,
 		log,
@@ -142,6 +174,14 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	// Session history is owned by workflow service, but access is owned by the
 	// task service. Keep the authorization check at the service boundary.
 	workflowSvc.SetSessionAccessChecker(taskSvc.AuthorizeSessionAccess)
+	// Same split for the rest of the workflow-step surface: the workflow
+	// package owns steps, templates and export/import, but a workflow's owner
+	// is its workspace's owner, which only the task service can resolve.
+	workflowSvc.SetWorkflowAccessChecker(taskSvc.AuthorizeWorkflowAccess)
+	workflowSvc.SetWorkspaceAccessChecker(taskSvc.AuthorizeWorkspaceAccess)
+	// A step's queue_run action names the task it starts work on, so the
+	// step-write API accepts task IDs as well.
+	workflowSvc.SetTaskAccessChecker(taskSvc.AuthorizeTaskAccess)
 
 	// Wire the ADR 0015 audit-trail writer for manual step transitions.
 	// workflowSvc.CreateStepTransition already matches
@@ -162,6 +202,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	githubSvc := initGitHubService(cfg, dbPool, eventBus, repos.Secrets, log)
 	if githubSvc != nil {
 		taskSvc.SetTaskStatusSummaryPRReader(&githubTaskStatusSummaryPRReader{gh: githubSvc})
+		githubSvc.SetComparisonTargetObserver(taskSvc)
 		githubSvc.SetPromptResolver(promptSvc)
 		taskSvc.SetContributionDestinationPreparer(&githubContributionDestinationPreparer{service: githubSvc, taskSvc: taskSvc})
 		if brokerErr := githubSvc.ConfigureCredentialBroker(&githubBrokerScopeAuthorizer{repo: repos.Task, provider: githubSvc}); brokerErr != nil {
@@ -171,6 +212,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	gitlabSvc, gitlabCleanup := initGitLabService(dbPool, eventBus, repos.Secrets, log)
 	if gitlabSvc != nil {
 		gitlabSvc.SetPromptResolver(promptSvc)
+		gitlabSvc.SetComparisonTargetObserver(taskSvc)
 	}
 	azureDevOpsSvc := initAzureDevOpsService(dbPool, eventBus, repos.Secrets, log)
 	if azureDevOpsSvc != nil {
@@ -188,9 +230,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		// caller; without it the check stays a no-op. An un-stamped local
 		// build passes "dev", which the service treats as "don't enforce".
 		pluginsSvc.SetKandevVersion(version)
-		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
+		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
 	}
-	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task)
+	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task, cfg.GitHubCredentialBroker.ReissueSigningKey)
 	if pluginsSvc != nil {
 		pluginsSvc.SetGitCredentialLeaseRevoker(gitCredentialBroker.RevokeProvider)
 	}
@@ -229,7 +271,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		automationComponents.Service.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
 		// A UI filter is not an authorization boundary: reject a workflow owned
 		// by another workspace even when a request names it directly.
-		automationComponents.Service.SetWorkflowLocator(&automationWorkflowLocatorAdapter{svc: taskSvc})
+		automationWorkflowLocator := &automationWorkflowLocatorAdapter{svc: taskSvc, workflows: workflowSvc}
+		automationComponents.Service.SetWorkflowLocator(automationWorkflowLocator)
+		automationComponents.Service.SetWorkflowStepLocator(automationWorkflowLocator)
 		automationComponents.Service.SetTaskOriginLookup(&automationTaskOriginLookupAdapter{svc: taskSvc, log: log})
 		// Profile deletion disables the automations bound to a profile before
 		// the row goes, but nothing ever checked that the binding pointed at a
@@ -237,10 +281,22 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		// that never existed produced the same orphan without any delete
 		// involved.
 		automationComponents.Service.SetAgentProfileLookup(&automationAgentProfileLookupAdapter{store: repos.AgentSettings})
+		// YAML export descriptor resolution (AC-29): each Set* below is
+		// satisfied directly by an existing repository's Tx-accepting method,
+		// so the export's single read transaction can pass straight through
+		// without an adapter shim.
+		automationComponents.Service.SetExportAgentProfileLookup(repos.AgentSettings)
+		automationComponents.Service.SetExportExecutorProfileLookup(repos.Task)
+		automationComponents.Service.SetExportWorkflowLookup(repos.Task)
+		automationComponents.Service.SetExportWorkflowStepLookup(repos.Workflow)
+		automationComponents.Service.SetExportRepositoryLookup(repos.Task)
+		automationComponents.Service.SetExportWorkspaceLookup(&automationExportWorkspaceLookupAdapter{svc: taskSvc})
 	}
 
 	services := &Services{
 		ManagedRuntimeSelections: managedRuntimeSelections,
+		DynamicProfileResolver:   dynamicResolver,
+		DynamicBindingResolver:   dynamicBindingResolver,
 		Task:                     taskSvc,
 		User:                     userSvc,
 		Editor:                   editorSvc,
@@ -720,6 +776,15 @@ func (a *startStepResolverAdapter) ResolveFirstStep(ctx context.Context, workflo
 	return step.ID, nil
 }
 
+// ResolveAutoStartStep implements taskservice.StartStepResolver.
+func (a *startStepResolverAdapter) ResolveAutoStartStep(ctx context.Context, workflowID string) (string, error) {
+	step, err := a.svc.ResolveAutoStartStep(ctx, workflowID)
+	if err != nil {
+		return "", err
+	}
+	return step.ID, nil
+}
+
 // githubSecretAdapter adapts secrets.SecretStore to github.SecretProvider and github.SecretManager.
 type githubSecretAdapter struct {
 	store secrets.SecretStore
@@ -1105,6 +1170,7 @@ func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.Tas
 		Metadata:       metadata,
 		Repositories:   repositories,
 		PlanMode:       in.PlanMode,
+		StartAgent:     in.StartAgent,
 	})
 	if err != nil {
 		return nil, err

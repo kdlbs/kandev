@@ -368,23 +368,30 @@ func snapshotTaskForPublication(task *models.Task) *models.Task {
 func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState, extra map[string]interface{}, oldWorkflowIDs []string, activity *taskActivitySnapshot) {
 
 	data := map[string]interface{}{
-		"task_id":          task.ID,
-		"workspace_id":     task.WorkspaceID,
-		"workflow_id":      task.WorkflowID,
-		"workflow_step_id": task.WorkflowStepID,
-		"title":            task.Title,
-		"description":      task.Description,
-		"state":            string(task.State),
-		"priority":         task.Priority,
-		"position":         task.Position,
-		"wip_admitted":     task.WIPAdmitted,
-		"created_at":       task.CreatedAt.Format(time.RFC3339Nano),
-		"updated_at":       task.UpdatedAt.Format(time.RFC3339Nano),
-		"is_ephemeral":     task.IsEphemeral,
-		"autopilot":        task.Autopilot,
+		"task_id":            task.ID,
+		"step_transition_id": task.WorkflowStepTransitionID,
+		"workspace_id":       task.WorkspaceID,
+		"workflow_id":        task.WorkflowID,
+		"workflow_step_id":   task.WorkflowStepID,
+		"title":              task.Title,
+		"description":        task.Description,
+		"state":              string(task.State),
+		"priority":           task.Priority,
+		"position":           task.Position,
+		"wip_admitted":       task.WIPAdmitted,
+		"created_at":         task.CreatedAt.Format(time.RFC3339Nano),
+		"updated_at":         task.UpdatedAt.Format(time.RFC3339Nano),
+		"is_ephemeral":       task.IsEphemeral,
+		"autopilot":          task.Autopilot,
 		// Consumers that restore quick-chat tabs filter on origin, so it has to
 		// travel with the event and not just the HTTP DTO.
 		"origin": task.Origin,
+		// Sent as an explicit true/false (never omitted) so a clear reaches
+		// open clients too: preserveOmittedField on the frontend only pins the
+		// previous value when the key is absent from the payload, and an
+		// omitted key here would make clearTaskAutoStartFailedMarker's publish
+		// as invisible as the set it is meant to undo.
+		"auto_start_failed": task.Metadata[models.MetaKeyAutoStartFailed] != nil,
 	}
 	data["queued_for_step_id"] = task.QueuedForStepID
 	if task.QueuedAt != nil {
@@ -398,7 +405,7 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 	if task.ParentID != "" {
 		data["parent_id"] = task.ParentID
 	}
-	// external_id (docs/specs/tasks/external-id-idempotency): omitted rather
+	// external_id (docs/specs/tasks/requirements/external-id-idempotency.md): omitted rather
 	// than sent as null/"" when the task holds none, matching the REST DTO's
 	// omitempty and parent_id's convention above. This map is hand-built, not
 	// derived from TaskDTO, so it needs its own explicit field.
@@ -433,6 +440,12 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 	}
 	for k, v := range extra {
 		data[k] = v
+	}
+	if eventType == events.TaskStateChanged && oldState != nil && s.taskStateActivity != nil {
+		// Write the Office read-model row before publishing the event. The
+		// WebSocket broadcaster can then trigger a detail GET without racing
+		// the activity projection that supplies Started and Completed.
+		s.taskStateActivity.LogTaskStateChange(ctx, task, *oldState)
 	}
 
 	event := bus.NewEvent(eventType, "task-service", data)
@@ -716,6 +729,7 @@ func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, 
 	}
 	data := map[string]interface{}{
 		"task_id":                   task.ID,
+		"step_transition_id":        task.WorkflowStepTransitionID,
 		"from_workflow_id":          fromWorkflowID,
 		"to_workflow_id":            task.WorkflowID,
 		"from_step_id":              fromStepID,
@@ -925,6 +939,7 @@ func messageEventChangesPendingAction(eventType string, message *models.Message)
 	}
 }
 
+// newMessageEvent builds a bus event for a message lifecycle change, embedding the message's prompt index when present.
 func newMessageEvent(eventType string, message *models.Message) *bus.Event {
 
 	messageType := string(message.Type)
@@ -948,6 +963,12 @@ func newMessageEvent(eventType string, message *models.Message) *bus.Event {
 		// fields with nanosecond precision too, so both delivery channels agree.
 		"created_at": message.CreatedAt.Format(time.RFC3339Nano),
 		"updated_at": message.UpdatedAt.Format(time.RFC3339Nano),
+	}
+
+	// User messages carry their stable prompt ordinal so WS consumers can
+	// render the panel label without an extra fetch; agent rows omit it.
+	if message.PromptIndex > 0 {
+		data["prompt_index"] = message.PromptIndex
 	}
 
 	if hasHidden {

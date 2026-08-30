@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -120,7 +121,7 @@ func isOfficeRequest(req *CreateTaskRequest) bool {
 
 // CreateTaskOutcome distinguishes why Service.CreateTask returned the task it
 // did, per the create-idempotency contract
-// (docs/specs/tasks/external-id-idempotency/spec.md). Only meaningful when
+// (docs/specs/tasks/requirements/external-id-idempotency.md). Only meaningful when
 // the request carried an external_id; a request without one always reports
 // CreateTaskOutcomeCreated. The fourth contract outcome, CreatedIdentityLost,
 // is not produced here — it is decided by the handler during settlement,
@@ -162,7 +163,7 @@ func foundOutcomeFor(task *models.Task) CreateTaskOutcome {
 // CreateTask creates a new task and publishes a task.created event, or —
 // when the request carries an external_id already held by a task — returns
 // that task instead, per the create-idempotency contract
-// (docs/specs/tasks/external-id-idempotency/spec.md). WorkflowID is required
+// (docs/specs/tasks/requirements/external-id-idempotency.md). WorkflowID is required
 // for non-ephemeral kanban tasks. Office tasks (project_id set, or origin is
 // agent_created/routine) auto-resolve to the workspace's office workflow.
 // Ephemeral tasks (quick chat, config chat) must NOT have a workflow.
@@ -223,6 +224,17 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 // required validation, workflow/step resolution, and office identifier
 // assignment, producing the in-memory task CreateTask is about to insert.
 func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskRequest, externalID string) (*models.Task, error) {
+	// Subtasks created without an explicit project inherit the parent's, so
+	// office cost events (which copy tasks.project_id verbatim) attribute to
+	// the same project as the rest of the tree instead of leaking. Runs first
+	// so every isOfficeRequest check below — including prepareAutoTitle's —
+	// classifies office-ness from the same, final req.ProjectID: an inherited
+	// project must reach the same auto_title rejection an explicit one does,
+	// not silently create an office task carrying agent_title_pending.
+	if err := s.inheritParentProject(ctx, req); err != nil {
+		return nil, err
+	}
+
 	if err := prepareAutoTitle(req); err != nil {
 		return nil, err
 	}
@@ -535,6 +547,37 @@ func (s *Service) inheritParentRepositories(ctx context.Context, req *CreateTask
 	return nil
 }
 
+// inheritParentProject fills req.ProjectID from the parent task when a
+// subtask is created without an explicit project. Office cost events copy
+// tasks.project_id verbatim (see office/service/event_subscribers.go
+// projectIDForTask) with no ancestry walk or fallback, so a subtask left
+// projectless never rolls up to its tree's budget even though its parent
+// has one.
+//
+// CreateTask authorizes only req.WorkspaceID, never the parent, and the MCP
+// create-task path deliberately allows an explicit req.WorkspaceID that
+// differs from the parent's (TestHandleCreateTask_SubtaskHonorsExplicitWorkspaceAndWorkflow) —
+// so a workspace mismatch cannot be rejected outright without breaking that
+// flow. Inheritance is skipped instead: a caller authorized only for
+// workspace A that passes a parent from workspace B gets a projectless
+// subtask in A, never B's project silently attributed to A. This mirrors
+// the pre-fix behavior for every subtask (blank project) rather than
+// introducing a new failure mode.
+func (s *Service) inheritParentProject(ctx context.Context, req *CreateTaskRequest) error {
+	if req.ParentID == "" || req.ProjectID != "" {
+		return nil
+	}
+	parent, err := s.tasks.GetTask(ctx, req.ParentID)
+	if err != nil {
+		return fmt.Errorf("get parent task for project inheritance: %w", err)
+	}
+	if parent.WorkspaceID != req.WorkspaceID {
+		return nil
+	}
+	req.ProjectID = parent.ProjectID
+	return nil
+}
+
 // validateCreateTaskRequest validates constraints for task creation.
 func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
 	if err := validateTaskTitle(req.Title); err != nil {
@@ -620,14 +663,32 @@ func (s *Service) resolveOfficeWorkflow(ctx context.Context, req *CreateTaskRequ
 }
 
 // resolveWorkflowStep resolves the starting workflow step for a new task.
+//
+// Three destinations, picked by what the caller is asking for:
+//
+//   - plan mode → the first step by position. Planning happens before the work,
+//     so the task belongs at the head of the board even when a later step is
+//     marked as the start step.
+//   - starting an agent now → the first step that runs agents
+//     (on_enter: auto_start_agent). A task that is about to run does not belong
+//     in a parking column that was never configured to run anything.
+//   - everything else → the workflow's start step (is_start_step).
+//
+// The middle case is the one that is easy to get wrong: `is_start_step` and
+// `auto_start_agent` are separate settings, and routing an agent start through
+// the start step silently made the two synonymous. It went unnoticed because
+// every built-in template puts both on the same step.
 func (s *Service) resolveWorkflowStep(ctx context.Context, req *CreateTaskRequest) string {
 	workflowStepID := req.WorkflowStepID
 	if workflowStepID == "" && req.WorkflowID != "" && s.startStepResolver != nil {
 		var resolvedID string
 		var err error
-		if req.PlanMode {
+		switch {
+		case req.PlanMode:
 			resolvedID, err = s.startStepResolver.ResolveFirstStep(ctx, req.WorkflowID)
-		} else {
+		case req.StartAgent:
+			resolvedID, err = s.startStepResolver.ResolveAutoStartStep(ctx, req.WorkflowID)
+		default:
 			resolvedID, err = s.startStepResolver.ResolveStartStep(ctx, req.WorkflowID)
 		}
 		if err != nil {
@@ -883,6 +944,9 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		return s.resolveRepoInputID(ctx, workspaceID, repositoryID, baseBranch)
 	}
 
+	// Only the plugin Host Tasks.Create path can set this internal marker.
+	// REST, WebSocket, and MCP callers must go through the built-in resolver;
+	// they cannot assert ownership of a plugin descriptor in request data.
 	if repoInput.TrustedProviderDescriptor {
 		return s.resolveTrustedRemoteRepository(ctx, workspaceID, repoInput, baseBranch)
 	}
@@ -1225,6 +1289,9 @@ func validateTrustedRemoteRepository(input TaskRepositoryInput) error {
 	}
 	if _, err := validateProviderScope(input.ProviderScope); err != nil {
 		return errors.New("trusted remote repository provider_scope is invalid")
+	}
+	if err := repoclone.ValidateHTTPSCloneOrigin(input.RemoteURL, input.ProviderHost); err != nil {
+		return fmt.Errorf("trusted remote repository clone origin: %w", err)
 	}
 	parsed, _, err := normalizeRemoteRepositoryURL(input.RemoteURL)
 	if err != nil {

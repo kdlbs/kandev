@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/app-status-bar.md
+spec: docs/specs/ui/requirements/app-status-bar.md
 decision: docs/decisions/2026-08-11-user-owned-status-bar-visibility.md
 created: 2026-08-11
 status: done

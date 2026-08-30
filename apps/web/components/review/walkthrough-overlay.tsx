@@ -1,17 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { IconRoute, IconX } from "@tabler/icons-react";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@kandev/ui/alert-dialog";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { deleteTaskWalkthrough, getTaskWalkthrough } from "@/lib/api/domains/walkthrough-api";
@@ -20,6 +10,9 @@ import { clearOpenWalkthroughTaskId, setOpenWalkthroughTaskId } from "@/lib/walk
 import { cn } from "@kandev/ui/lib/utils";
 import type { TaskWalkthrough } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
+import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
+import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 type WalkthroughOverlayProps = {
   /** The task whose walkthrough launcher should be shown. */
@@ -31,22 +24,40 @@ type WalkthroughOverlayProps = {
 
 type WalkthroughLauncherProps = {
   activeStep: number;
+  confirmDiscardOpen: boolean;
+  discardAnchorRef: RefObject<HTMLButtonElement | null>;
+  discardDisabled: boolean;
   hasUnseen: boolean;
+  isFinePointer: boolean;
   isOpen: boolean;
   onDiscardClick: () => void;
+  onDiscardCancel: () => void;
+  onDiscardClose: () => void;
+  onDiscardConfirm: () => void | Promise<void>;
   onToggle: () => void;
   stepCount: number;
 };
 
 function WalkthroughLauncher({
   activeStep,
+  confirmDiscardOpen,
+  discardAnchorRef,
+  discardDisabled,
   hasUnseen,
+  isFinePointer,
   isOpen,
   onDiscardClick,
+  onDiscardCancel,
+  onDiscardClose,
+  onDiscardConfirm,
   onToggle,
   stepCount,
 }: WalkthroughLauncherProps) {
   const { t } = useTranslation();
+  const discardLabel = t("review:discardWalkthrough");
+  const discardVisibility = isFinePointer
+    ? "opacity-0 pointer-events-none scale-90 group-hover:pointer-events-auto group-hover:scale-100 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:scale-100 group-focus-within:opacity-100"
+    : "";
   return (
     <div className="group fixed bottom-[calc(1.5rem+var(--app-status-bar-height))] right-6 z-[41]">
       <button
@@ -79,64 +90,42 @@ function WalkthroughLauncher({
           {activeStep + 1}/{stepCount}
         </span>
       </button>
-      <button
-        type="button"
-        aria-label={t("review:discardWalkthrough")}
-        title={t("review:discardWalkthrough")}
-        data-testid="walkthrough-discard"
-        onClick={onDiscardClick}
-        className={cn(
-          "absolute -right-3 -top-3 flex size-9 cursor-pointer items-center justify-center rounded-full",
-          "border border-border bg-card text-muted-foreground shadow-md transition-all",
-          "hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive",
-          "sm:size-7 sm:opacity-0 sm:pointer-events-none sm:scale-90",
-          "sm:group-hover:pointer-events-auto sm:group-hover:scale-100 sm:group-hover:opacity-100",
-          "sm:group-focus-within:pointer-events-auto sm:group-focus-within:scale-100 sm:group-focus-within:opacity-100",
-        )}
-      >
-        <IconX className="size-4" />
-      </button>
+      {isFinePointer || !confirmDiscardOpen ? (
+        <button
+          ref={discardAnchorRef}
+          type="button"
+          aria-label={discardLabel}
+          title={discardLabel}
+          data-testid="walkthrough-discard"
+          disabled={discardDisabled}
+          onClick={onDiscardClick}
+          className={cn(
+            "absolute -right-3 -top-3 flex cursor-pointer items-center justify-center rounded-full",
+            isFinePointer ? "h-7 min-h-7 w-7 min-w-7" : "h-11 min-h-11 w-11 min-w-11",
+            "border border-border bg-card text-muted-foreground shadow-md transition-all",
+            "hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive",
+            "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-45",
+            discardVisibility,
+          )}
+        >
+          <IconX className="size-4" />
+        </button>
+      ) : (
+        <div className="absolute bottom-full right-0 z-[1] mb-2 rounded-lg border border-border bg-card/95 p-1 shadow-lg backdrop-blur-sm">
+          <InlineConfirmActions
+            density="touch"
+            testId="walkthrough-discard-confirmation"
+            ariaLabel={t("review:discardWalkthroughTitle")}
+            cancelLabel={t("common:cancel")}
+            confirmLabel={discardLabel}
+            confirmAriaLabel={discardLabel}
+            onCancel={onDiscardCancel}
+            onClose={onDiscardClose}
+            onConfirm={onDiscardConfirm}
+          />
+        </div>
+      )}
     </div>
-  );
-}
-
-type DiscardWalkthroughDialogProps = {
-  discarding: boolean;
-  onConfirm: (event: MouseEvent<HTMLButtonElement>) => void;
-  onOpenChange: (open: boolean) => void;
-  open: boolean;
-};
-
-function DiscardWalkthroughDialog({
-  discarding,
-  onConfirm,
-  onOpenChange,
-  open,
-}: DiscardWalkthroughDialogProps) {
-  const { t } = useTranslation();
-  return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent data-testid="walkthrough-discard-dialog">
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t("review:discardWalkthroughTitle")}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {t("review:discardWalkthroughDescription")}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer" disabled={discarding}>
-            {t("common:cancel")}
-          </AlertDialogCancel>
-          <AlertDialogAction
-            className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            disabled={discarding}
-            onClick={onConfirm}
-          >
-            {t("review:discardWalkthrough")}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   );
 }
 
@@ -189,6 +178,8 @@ function useWalkthroughBackfill(params: {
  */
 export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayProps) {
   const { t } = useTranslation();
+  const discardLabel = t("review:discardWalkthrough");
+  const { isFinePointer } = useResponsiveBreakpoint();
   const walkthrough = useAppStore((s) => (taskId ? s.walkthroughs.byTaskId[taskId] : null));
   const connectionStatus = useAppStore((s) => s.connection.status);
   const activeStep = useAppStore((s) =>
@@ -199,10 +190,12 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
   );
   const setWalkthrough = useAppStore((s) => s.setWalkthrough);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
-  const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
+  const [discardTargetTaskId, setDiscardTargetTaskId] = useState<string | null>(null);
   const [discarding, setDiscarding] = useState(false);
+  const discardAnchorRef = useRef<HTMLButtonElement>(null);
   const { toast } = useToast();
   const open = taskId !== null && openTaskId === taskId;
+  const confirmDiscardOpen = taskId !== null && discardTargetTaskId === taskId;
 
   useWalkthroughBackfill({ connectionStatus, setWalkthrough, taskId, walkthrough });
 
@@ -231,16 +224,15 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
     clearOpenWalkthroughTaskId(taskId);
     setOpenTaskId(null);
   };
-  const confirmDiscard = async (event: MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    if (!taskId || discarding) return;
+  const discardWalkthrough = async (targetTaskId: string | null) => {
+    if (!targetTaskId || discarding) return;
     setDiscarding(true);
     try {
-      await deleteTaskWalkthrough(taskId);
-      clearOpenWalkthroughTaskId(taskId);
-      setOpenTaskId(null);
-      setWalkthrough(taskId, null);
-      setConfirmDiscardOpen(false);
+      await deleteTaskWalkthrough(targetTaskId);
+      clearOpenWalkthroughTaskId(targetTaskId);
+      setOpenTaskId((currentTaskId) => (currentTaskId === targetTaskId ? null : currentTaskId));
+      setWalkthrough(targetTaskId, null);
+      setDiscardTargetTaskId(null);
       toast({ title: t("review:walkthroughDiscarded"), variant: "success" });
     } catch (error) {
       console.error("Failed to discard walkthrough:", error);
@@ -255,18 +247,36 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
       {open ? <WalkthroughFloatingWindow onClose={closeTour} onSelectFile={onSelectFile} /> : null}
       <WalkthroughLauncher
         activeStep={activeStep}
+        confirmDiscardOpen={confirmDiscardOpen}
+        discardAnchorRef={discardAnchorRef}
+        discardDisabled={discarding}
         hasUnseen={hasUnseen}
+        isFinePointer={isFinePointer}
         isOpen={open}
-        onDiscardClick={() => setConfirmDiscardOpen(true)}
+        onDiscardClick={() => setDiscardTargetTaskId(taskId)}
+        onDiscardCancel={() => {
+          setDiscardTargetTaskId(null);
+          requestAnimationFrame(() => discardAnchorRef.current?.focus());
+        }}
+        onDiscardClose={() => setDiscardTargetTaskId(null)}
+        onDiscardConfirm={() => discardWalkthrough(discardTargetTaskId)}
         onToggle={() => (open ? closeTour() : openTour())}
         stepCount={walkthrough.steps.length}
       />
-      <DiscardWalkthroughDialog
-        discarding={discarding}
-        onConfirm={confirmDiscard}
-        onOpenChange={setConfirmDiscardOpen}
-        open={confirmDiscardOpen}
-      />
+      {isFinePointer ? (
+        <ActionConfirmPopover
+          open={confirmDiscardOpen}
+          anchorRef={discardAnchorRef}
+          title={t("review:discardWalkthroughTitle")}
+          description={t("review:discardWalkthroughDescription")}
+          cancelLabel={t("common:cancel")}
+          confirmLabel={discardLabel}
+          confirmTestId="walkthrough-discard-confirm"
+          testId="walkthrough-discard-confirmation"
+          onOpenChange={(nextOpen) => setDiscardTargetTaskId(nextOpen ? taskId : null)}
+          onConfirm={() => discardWalkthrough(discardTargetTaskId)}
+        />
+      ) : null}
     </>
   );
 }

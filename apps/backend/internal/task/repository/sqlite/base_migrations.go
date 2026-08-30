@@ -2,7 +2,6 @@
 package sqlite
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -45,79 +44,9 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 	// session (the reported bug measured up to 98,805,109 on one already-
 	// completed task). SQLite's INTEGER is 64-bit regardless, but on Postgres
 	// INTEGER is int4 - an overflowing session would abort the single
-	// multi-column UPDATE in IncrementTaskSessionUsage and the single
-	// table-wide UPDATE in BackfillSessionTokensCachedIn, silently taking
+	// multi-column UPDATE in IncrementTaskSessionUsage, silently taking
 	// tokens_in/tokens_out/cost_subcents down with it for that session.
 	r.migrate.Apply("task_sessions.tokens_cached_in", `ALTER TABLE task_sessions ADD COLUMN tokens_cached_in BIGINT NOT NULL DEFAULT 0`)
-}
-
-// BackfillSessionTokensCachedIn recomputes task_sessions.tokens_cached_in from
-// the office_cost_events ledger. The rollup is purely derived from the ledger,
-// so recomputing from it is restoring data, not inventing it.
-//
-// Deliberately NOT called from runMigrations(): office_cost_events is owned and
-// created by internal/office/repository/sqlite, a separate repository that
-// shares this database but initializes independently, and on a fresh boot the
-// task repository's own migrations run first (internal/backendapp/storage.go).
-// An earlier version of this method guarded on the ledger table's existence to
-// tolerate that ordering from inside runMigrations(); that guard, and the table
-// existence it checked, both went away in favor of the caller in
-// internal/backendapp/storage.go, which only invokes this after office.Provide
-// has already succeeded — construction order guarantees office_cost_events
-// exists by then, so no guard is needed here. This keeps the task repository
-// from having to know office's schema/table-existence details, and lets the
-// office_cost_events(session_id) index it depends on live with the table it
-// indexes (internal/office/repository/sqlite/base.go createCostTables).
-//
-// Deliberately unconditional per session it touches (assignment, not
-// increment, so it is idempotent across replays) rather than gated on
-// "already nonzero": the rollup can go out of sync with the ledger without
-// erroring — a live IncrementTaskSessionUsage call is a best-effort
-// UPDATE ... WHERE id = ? that silently matches zero rows if the session row
-// doesn't exist yet (see the "missing row" case in
-// TestIncrementTaskSessionUsage_UnknownSessionNoError), and
-// event_subscribers.go only logs a Warn when the rollup write fails while the
-// ledger insert has already committed. A "skip if nonzero" guard would make
-// exactly that drift permanent instead of self-healing it on the next boot.
-// (If the ledger for a session was deleted separately from the session row
-// itself - see the two-transaction delete in workspace_deletion.go - this
-// recompute correctly zeroes that session's tokens_cached_in, since an empty
-// ledger sums to zero; the rollup's only contract is to equal the ledger sum.)
-//
-// The WHERE clause below is a boot-cost optimization, not a correctness gate:
-// it restricts the write to sessions that either have ledger rows (need a
-// possible recompute) or already hold a nonzero value (need a possible
-// zeroing, per the paragraph above). Every row it excludes has
-// tokens_cached_in = 0 AND no ledger rows, so the unconditional
-// COALESCE(NULL, 0) = 0 this statement would otherwise compute for it is
-// already what the row holds — excluding it is a provable no-op, never a
-// skip of a row that needs correcting. This runs unconditionally on every
-// boot (no run-once tracking - see MigrateLogger.Apply, which this method
-// deliberately does not use so a real failure propagates instead of being
-// swallowed as a Warn), so office_cost_events(session_id) must already be
-// indexed: an unindexed correlated subquery here is quadratic in
-// (sessions x ledger rows), measured at 76.72s at a modest 4,000 sessions /
-// 80,000 events versus 0.17s indexed.
-//
-// Returns the number of task_sessions rows the WHERE clause matched, so a
-// caller can log it for boot-time observability; not otherwise used for
-// correctness.
-func (r *Repository) BackfillSessionTokensCachedIn(ctx context.Context) (int64, error) {
-	result, err := r.db.ExecContext(ctx, `
-		UPDATE task_sessions
-		   SET tokens_cached_in = COALESCE(
-		       (SELECT SUM(e.tokens_cached_in) FROM office_cost_events e
-		         WHERE e.session_id = task_sessions.id), 0)
-		 WHERE EXISTS (SELECT 1 FROM office_cost_events e WHERE e.session_id = task_sessions.id)
-		    OR tokens_cached_in <> 0`)
-	if err != nil {
-		return 0, fmt.Errorf("backfill task_sessions.tokens_cached_in: %w", err)
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("backfill task_sessions.tokens_cached_in: rows affected: %w", err)
-	}
-	return affected, nil
 }
 
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
@@ -132,6 +61,12 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 	r.migrate.Apply("task_sessions.execution_profile_id", `ALTER TABLE task_sessions ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("task_sessions.route_generation", `ALTER TABLE task_sessions ADD COLUMN route_generation INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("task_sessions.route_state", `ALTER TABLE task_sessions ADD COLUMN route_state TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("task_sessions.route_reason", `ALTER TABLE task_sessions ADD COLUMN route_reason TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("task_sessions.downstream_acp_session_id", `ALTER TABLE task_sessions ADD COLUMN downstream_acp_session_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("dynamic_route_states.continuation_json", `ALTER TABLE dynamic_route_states ADD COLUMN continuation_json TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("dynamic_route_states.policy_state_json", `ALTER TABLE dynamic_route_states ADD COLUMN policy_state_json TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("executors_running.execution_profile_id", `ALTER TABLE executors_running ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("executors_running.last_message_uuid", `ALTER TABLE executors_running ADD COLUMN last_message_uuid TEXT DEFAULT ''`)
 	r.migrate.Apply("executors_running.metadata", `ALTER TABLE executors_running ADD COLUMN metadata TEXT DEFAULT '{}'`)
@@ -181,6 +116,9 @@ func (r *Repository) runMigrations() error {
 	}
 	// Must run BEFORE migrateTaskEnvironmentsRemoveAgentExecutionID, which copies task_dir_name into the recreated table.
 	r.migrate.Apply("task_environments.task_dir_name", `ALTER TABLE task_environments ADD COLUMN task_dir_name TEXT DEFAULT ''`)
+	r.migrate.Apply("task_environments.materialization_session_id", `ALTER TABLE task_environments ADD COLUMN materialization_session_id TEXT DEFAULT ''`)
+	r.migrate.Apply("task_environments.container_bootstrap_nonce_secret_id", `ALTER TABLE task_environments ADD COLUMN container_bootstrap_nonce_secret_id TEXT DEFAULT ''`)
+	r.migrate.Apply("task_environments.container_control_auth_token_secret_id", `ALTER TABLE task_environments ADD COLUMN container_control_auth_token_secret_id TEXT DEFAULT ''`)
 	if err := r.migrateTaskEnvironmentsRemoveAgentExecutionID(); err != nil {
 		return err
 	}
@@ -250,10 +188,10 @@ func (r *Repository) runMigrations() error {
 	// task_sessions rebuilds above so it repairs legacy DBs whose schema can no
 	// longer trigger a rebuild (see migrateSessionsAddCostColumns).
 	r.migrateSessionsAddCostColumns()
-	// BackfillSessionTokensCachedIn is deliberately NOT called here - see its
-	// doc comment. It runs from internal/backendapp/storage.go, after both
-	// this repository and the office repository (which owns office_cost_events)
-	// have finished initializing.
+	// AC-28: widen the three still-INTEGER rollup columns to BIGINT (Postgres
+	// only). Must run after migrateSessionsAddCostColumns so a legacy DB has
+	// the columns to widen before this ALTERs their type.
+	r.migrateTaskSessionsRollupColumnsToBigint()
 
 	// Office task extensions - net-new columns on existing main tables.
 	// Idempotent ALTERs; main upgrades pick them up at first boot.
@@ -263,13 +201,14 @@ func (r *Repository) runMigrations() error {
 	// therefore not added or dropped here.
 	r.migrate.Apply("tasks.origin", `ALTER TABLE tasks ADD COLUMN origin TEXT DEFAULT 'manual'`)
 	r.migrate.Apply("tasks.project_id", `ALTER TABLE tasks ADD COLUMN project_id TEXT DEFAULT ''`)
+	r.migrate.Apply("idx_tasks_project_id", `CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id)`)
 	r.migrate.Apply("tasks.labels", `ALTER TABLE tasks ADD COLUMN labels TEXT DEFAULT '[]'`)
 	r.migrate.Apply("tasks.identifier", `ALTER TABLE tasks ADD COLUMN identifier TEXT`)
 	// Office task-handoffs phase 6 - tag tasks archived as part of a cascade so
 	// unarchive can restore exactly the descendants that cascade archived.
 	r.migrate.Apply("tasks.archived_by_cascade_id", `ALTER TABLE tasks ADD COLUMN archived_by_cascade_id TEXT DEFAULT ''`)
 
-	// Task create-idempotency (docs/specs/tasks/external-id-idempotency).
+	// Task create-idempotency (docs/specs/tasks/system-design/external-id-idempotency.md).
 	// external_id needs an explicit deterministic collation: SQLite TEXT
 	// columns already compare BINARY by default, but an unqualified Postgres
 	// column silently inherits the database's default collation, which may be
@@ -337,6 +276,8 @@ func (r *Repository) runMigrations() error {
 	// frontend snapshots the prior value before the advance to position the
 	// "New" divider (see models.TaskSession.LastReadMessageID).
 	r.migrate.Apply("task_sessions.last_read_message_id", `ALTER TABLE task_sessions ADD COLUMN last_read_message_id TEXT DEFAULT ''`)
+	r.migrate.Apply("task_session_turns.execution_profile_id", `ALTER TABLE task_session_turns ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("task_session_turns.route_generation", `ALTER TABLE task_session_turns ADD COLUMN route_generation BIGINT NOT NULL DEFAULT 0`)
 
 	// Bounded task-level status projection. Keep this on the replay path as well
 	// as the fresh schema path so an existing installation gets the table
@@ -365,6 +306,60 @@ func (r *Repository) runMigrations() error {
 	// backfill belongs in the migration phase.
 	r.migrateSubagentContextBackfill()
 
+	// Durable per-session prompt ordinals. prompt_seq is allocated from a
+	// per-session sequence counter inside the create write boundary, so an
+	// ordinal survives message deletion and clock corrections. Previously the
+	// ordinal was derived from the session's remaining user rows (a correlated
+	// count), which renumbered prompts after a delete. SQLite forbids
+	// non-constant column defaults, so the column is added with DEFAULT 0 and
+	// existing user rows are backfilled with the previously derived ordinal
+	// (count of user rows ordered before them by the normalized microsecond
+	// key, ties by id); the counter is seeded to each session's backfilled
+	// maximum. The backfill predicate (prompt_seq = 0) and ON CONFLICT keep
+	// every statement idempotent across replays.
+	r.migrate.Apply("task_session_messages.prompt_seq", `ALTER TABLE task_session_messages ADD COLUMN prompt_seq INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("task_session_prompt_seq.table", `
+		CREATE TABLE IF NOT EXISTS task_session_prompt_seq (
+			task_session_id TEXT PRIMARY KEY,
+			last_seq INTEGER NOT NULL
+		)`)
+	if err := r.backfillPromptSeq(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// backfillPromptSeq assigns existing user rows their previously derived
+// ordinal (the correlated count over the session's user rows using the same
+// normalized-microsecond predicate the create boundary used) and seeds each
+// session's sequence counter at its backfilled maximum. Idempotent: user rows
+// already carrying a nonzero prompt_seq are untouched, and the counter seed
+// ignores existing rows.
+func (r *Repository) backfillPromptSeq() error {
+	nmU := dialect.NormalizedMicrosecond(r.db.DriverName(), "u.created_at")
+	nmM := dialect.NormalizedMicrosecond(r.db.DriverName(), "task_session_messages.created_at")
+	update := fmt.Sprintf(`
+		UPDATE task_session_messages
+		SET prompt_seq = (
+			SELECT COUNT(*) FROM task_session_messages u
+			WHERE u.task_session_id = task_session_messages.task_session_id
+			  AND u.author_type = 'user'
+			  AND (%s < %s OR (%s = %s AND u.id <= task_session_messages.id))
+		)
+		WHERE author_type = 'user' AND prompt_seq = 0`, nmU, nmM, nmU, nmM)
+	if _, err := r.db.Exec(update); err != nil {
+		return fmt.Errorf("backfill prompt_seq: %w", err)
+	}
+	seed := `
+		INSERT INTO task_session_prompt_seq (task_session_id, last_seq)
+		SELECT task_session_id, MAX(prompt_seq) FROM task_session_messages
+		WHERE author_type = 'user' AND prompt_seq > 0
+		GROUP BY task_session_id
+		ON CONFLICT(task_session_id) DO NOTHING`
+	if _, err := r.db.Exec(seed); err != nil {
+		return fmt.Errorf("seed prompt sequence counters: %w", err)
+	}
 	return nil
 }
 
@@ -854,6 +849,10 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 			task_id TEXT NOT NULL,
 			agent_profile_id TEXT,
 			execution_profile_id TEXT NOT NULL DEFAULT '',
+			route_generation INTEGER NOT NULL DEFAULT 0,
+			route_state TEXT NOT NULL DEFAULT '',
+			route_reason TEXT NOT NULL DEFAULT '',
+			downstream_acp_session_id TEXT NOT NULL DEFAULT '',
 			executor_id TEXT DEFAULT '',
 			executor_profile_id TEXT DEFAULT '',
 			environment_id TEXT DEFAULT '',
@@ -882,6 +881,7 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 		)`,
 		`INSERT INTO task_sessions_new SELECT
 			id, task_id, agent_profile_id, execution_profile_id,
+			route_generation, route_state, route_reason, downstream_acp_session_id,
 			executor_id, executor_profile_id, environment_id, repository_id, base_branch,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
@@ -912,11 +912,14 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 			executor_profile_id TEXT DEFAULT '',
 			control_port INTEGER DEFAULT 0,
 			status TEXT NOT NULL DEFAULT 'creating',
+			materialization_session_id TEXT DEFAULT '',
 			worktree_id TEXT DEFAULT '',
 			worktree_path TEXT DEFAULT '',
 			worktree_branch TEXT DEFAULT '',
 			workspace_path TEXT DEFAULT '',
 			container_id TEXT DEFAULT '',
+			container_bootstrap_nonce_secret_id TEXT DEFAULT '',
+			container_control_auth_token_secret_id TEXT DEFAULT '',
 			sandbox_id TEXT DEFAULT '',
 			task_dir_name TEXT DEFAULT '',
 			created_at TIMESTAMP NOT NULL,
@@ -925,8 +928,8 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 		)`,
 		`INSERT INTO task_environments_new SELECT
 			id, task_id, repository_id, executor_type, executor_id, executor_profile_id,
-			control_port, status, worktree_id, worktree_path, worktree_branch,
-			workspace_path, container_id, sandbox_id,
+			control_port, status, '', worktree_id, worktree_path, worktree_branch,
+			workspace_path, container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''), sandbox_id,
 			COALESCE(task_dir_name, ''), created_at, updated_at
 		FROM task_environments`,
 		`DROP TABLE task_environments`,
@@ -1087,6 +1090,10 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 			container_id TEXT NOT NULL DEFAULT '',
 			agent_profile_id TEXT,
 			execution_profile_id TEXT NOT NULL DEFAULT '',
+			route_generation INTEGER NOT NULL DEFAULT 0,
+			route_state TEXT NOT NULL DEFAULT '',
+			route_reason TEXT NOT NULL DEFAULT '',
+			downstream_acp_session_id TEXT NOT NULL DEFAULT '',
 			executor_id TEXT DEFAULT '',
 			executor_profile_id TEXT DEFAULT '',
 			environment_id TEXT DEFAULT '',
@@ -1111,6 +1118,7 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 		)`,
 		`INSERT INTO task_sessions_new SELECT
 			id, task_id, agent_execution_id, container_id, agent_profile_id, execution_profile_id,
+			route_generation, route_state, route_reason, downstream_acp_session_id,
 			executor_id, executor_profile_id, environment_id, repository_id, base_branch,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,

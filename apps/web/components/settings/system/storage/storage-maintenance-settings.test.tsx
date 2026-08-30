@@ -13,6 +13,22 @@ const mocks = vi.hoisted(() => ({
 const IDLE_PERIOD_TEST_ID = "storage-idle-period";
 const SAVE_BUTTON_NAME = "Save changes";
 const ANALYZE_TEST_ID = "storage-analyze";
+const RUN_NOW_TEST_ID = "storage-run-now";
+// Mirrors the auth slice the admin gate reads. `undefined` is the
+// auth-disabled single-user mode, which the backend treats as an admin.
+let currentRole: "admin" | "member" | undefined;
+let currentMode: "disabled" | "setup" | "enabled" = "enabled";
+
+// Mirrors the auth slice the admin gate reads. `currentMode` distinguishes
+// auth-disabled single-user mode (synthetic admin) from a cleared session.
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (
+    selector: (state: { auth: { mode: string; user?: { role: string } } }) => unknown,
+  ) =>
+    selector({
+      auth: { mode: currentMode, user: currentRole ? { role: currentRole } : undefined },
+    }),
+}));
 
 vi.mock("@/hooks/domains/system/use-storage-maintenance", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/hooks/domains/system/use-storage-maintenance")>()),
@@ -112,8 +128,47 @@ describe("StorageMaintenanceSettings", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
+    currentRole = "admin";
+    currentMode = "enabled";
     mocks.useSystemJob.mockReturnValue(undefined);
     mocks.useStorageMaintenance.mockReturnValue(controller(overview));
+  });
+
+  // Every mutating storage route is admin-only on the backend, so a member's
+  // controls must be disabled here rather than 403 after the click.
+  it("disables the maintenance actions and the policy form for a member", () => {
+    currentRole = "member";
+    currentMode = "enabled";
+    const editableOverview = { ...overview, settings: { ...overview.settings, enabled: true } };
+    mocks.useStorageMaintenance.mockReturnValue(controller(editableOverview));
+
+    render(<StorageMaintenanceSettings />, { wrapper: Providers });
+
+    expect((screen.getByTestId(ANALYZE_TEST_ID) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId(RUN_NOW_TEST_ID) as HTMLButtonElement).disabled).toBe(true);
+    const idlePeriod = screen.getByTestId(IDLE_PERIOD_TEST_ID) as HTMLInputElement;
+    expect(idlePeriod.disabled).toBe(true);
+    // A disabled field cannot go dirty, so the shared Save control stays
+    // inert: a member has no way to reach the admin-only PATCH at all.
+    fireEvent.change(idlePeriod, { target: { value: "31" } });
+    expect(
+      (screen.getByRole("button", { name: SAVE_BUTTON_NAME }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  // Auth disabled: no user in the boot payload, and the backend's synthetic
+  // identity is an admin. Nothing may change.
+  it("leaves every control live when no user is signed in", () => {
+    currentRole = undefined;
+    currentMode = "disabled";
+    const editableOverview = { ...overview, settings: { ...overview.settings, enabled: true } };
+    mocks.useStorageMaintenance.mockReturnValue(controller(editableOverview));
+
+    render(<StorageMaintenanceSettings />, { wrapper: Providers });
+
+    expect((screen.getByTestId(ANALYZE_TEST_ID) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId(RUN_NOW_TEST_ID) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId(IDLE_PERIOD_TEST_ID) as HTMLInputElement).disabled).toBe(false);
   });
 
   it("shows analysis completion inside the Analyze button", () => {
@@ -231,6 +286,10 @@ describe("StorageMaintenanceSettings busy feedback", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
+    // Reset the role explicitly: without it these tests inherit whatever the
+    // previous describe block left behind and pass only in file order.
+    currentRole = undefined;
+    currentMode = "disabled";
     mocks.useSystemJob.mockReturnValue(undefined);
   });
 
@@ -256,10 +315,37 @@ describe("StorageMaintenanceSettings busy feedback", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run anyway" }));
     expect(runAnyway).toHaveBeenCalledTimes(1);
   });
+
+  // Run anyway forces POST /storage/run, which is admin only. The busy alert
+  // is a second, independent path to that call: gating the action buttons
+  // above it is not enough.
+  it("does not expose Run anyway to a member even when force is available", () => {
+    currentRole = "member";
+    currentMode = "enabled";
+    const runAnyway = vi.fn();
+    mocks.useStorageMaintenance.mockReturnValue({
+      ...controller(overview),
+      busy: {
+        resources: [{ kind: "execution_running", label: "An agent execution is running" }],
+        forceAvailable: true,
+      },
+      runAnyway,
+    });
+
+    render(<StorageMaintenanceSettings />, { wrapper: Providers });
+
+    expect(screen.queryByTestId("storage-run-anyway")).toBeNull();
+    expect(runAnyway).not.toHaveBeenCalled();
+  });
 });
 
 describe("StorageMaintenanceSettings pending policy", () => {
   afterEach(cleanup);
+
+  beforeEach(() => {
+    currentRole = undefined;
+    currentMode = "disabled";
+  });
 
   it("rebases an adopted Go cache path into a dirty policy draft before shared save", async () => {
     const currentController = controller(overview);
@@ -361,6 +447,8 @@ describe("StorageMaintenanceSettings coordinated save", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
+    currentRole = undefined;
+    currentMode = "disabled";
     mocks.useSystemJob.mockReturnValue(undefined);
   });
 

@@ -1,5 +1,5 @@
 // Package manifest defines the plugin manifest data model and validation
-// rules described in docs/specs/plugins/spec.md ("Data model / Plugin
+// rules described in docs/specs/plugins/requirements/plugins.md ("Data model / Plugin
 // registration"). A manifest is the YAML document an operator supplies to
 // POST /api/plugins/register.
 package manifest
@@ -13,6 +13,15 @@ import (
 // MaxActionBodyBytes is the largest request body an authenticated action may
 // declare. Individual actions must still declare their own smaller bound.
 const MaxActionBodyBytes = 1 << 20
+
+const (
+	// LegacyAPIVersion preserves the original webhook behavior: an omitted
+	// access field means public.
+	LegacyAPIVersion = 1
+	// CurrentAPIVersion makes omitted webhook access authenticated. Authors can
+	// still opt individual integration callbacks into public access.
+	CurrentAPIVersion = 2
+)
 
 // Manifest is the plugin registration manifest.
 type Manifest struct {
@@ -149,7 +158,9 @@ type AuthProvider struct {
 	Initiate    string `yaml:"initiate" json:"initiate"`
 }
 
-// Webhook is a proxied external webhook endpoint the plugin declares.
+// Webhook is a proxied external webhook endpoint the plugin declares. The
+// manifest api_version selects the default when Access is omitted: v1 remains
+// public for compatibility, while v2 defaults to authenticated.
 type Webhook struct {
 	Key          string `yaml:"key" json:"key"`
 	Description  string `yaml:"description,omitempty" json:"description,omitempty"`
@@ -165,9 +176,12 @@ const (
 	MaximumWebhookMaxBodyBytes int64 = 16 << 20
 )
 
-func (w Webhook) EffectiveAccess() string {
+func (w Webhook) EffectiveAccess(apiVersion int) string {
 	if w.Access == "" {
-		return WebhookAccessPublic
+		if apiVersion == LegacyAPIVersion {
+			return WebhookAccessPublic
+		}
+		return WebhookAccessAuthenticated
 	}
 	return w.Access
 }

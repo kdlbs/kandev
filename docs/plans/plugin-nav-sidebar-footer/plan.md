@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/plugin-nav-sidebar-footer/spec.md
+spec: docs/specs/plugins/requirements/plugin-nav-sidebar-footer.md
 created: 2026-08-12
 status: superseded
 ---

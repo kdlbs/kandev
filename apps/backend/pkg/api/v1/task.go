@@ -152,11 +152,16 @@ type Task struct {
 	// when the backend died and has not been resumed since. Derived from the
 	// interrupted_at metadata key at DTO conversion time; the orchestrator
 	// clears it when a session of the task next enters STARTING/RUNNING.
-	Interrupted bool   `json:"interrupted,omitempty"`
-	IsEphemeral bool   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
-	ParentID    string `json:"parent_id,omitempty"` // FK to parent task for subtasks
-	Autopilot   bool   `json:"autopilot"`
-	Identifier  string `json:"identifier,omitempty"`
+	Interrupted bool `json:"interrupted,omitempty"`
+	// AutoStartFailed reports that a workflow step's auto_start_agent on_enter
+	// action failed to launch a run for this task. Derived from the
+	// auto_start_failed metadata key at DTO conversion time; the orchestrator
+	// clears it when a session of the task next enters STARTING/RUNNING.
+	AutoStartFailed bool   `json:"auto_start_failed,omitempty"`
+	IsEphemeral     bool   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
+	ParentID        string `json:"parent_id,omitempty"` // FK to parent task for subtasks
+	Autopilot       bool   `json:"autopilot"`
+	Identifier      string `json:"identifier,omitempty"`
 }
 
 // TaskRepositoryInput for creating/updating task repositories
@@ -242,6 +247,11 @@ type Message struct {
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 	CreatedAt     time.Time              `json:"created_at"`
 	UpdatedAt     time.Time              `json:"updated_at,omitempty"` // Authoritative per-message change signal
+	// PromptIndex is the 1-based ordinal of the message among ALL user
+	// messages of its session (ordered by normalized-microsecond created_at
+	// ascending, ties by id ascending), present only on user messages
+	// produced by an indexed server payload; omitted when zero.
+	PromptIndex int `json:"prompt_index,omitempty"`
 }
 
 // CreateMessageRequest for adding a message to a task session

@@ -930,6 +930,11 @@ func TestPauseForClarificationInput_ContinuesHardPauseAfterDetachFailure(t *test
 	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
 	svc.SetClarificationCanceller(&failingDetachClarificationCanceller{err: wantErr})
 	svc.turnService = &repoBackedTurnService{repo: repo}
+	if _, err := svc.messageQueue.QueueMessageWithMetadata(
+		ctx, "s1", "t1", "peer-during-detach-failure", "user-1", "user-1", false, nil, map[string]interface{}{},
+	); err != nil {
+		t.Fatalf("queue peer: %v", err)
+	}
 
 	detached, err := svc.PauseForClarificationInput(ctx, "s1")
 	if detached != 0 || !errors.Is(err, wantErr) {
@@ -944,6 +949,9 @@ func TestPauseForClarificationInput_ContinuesHardPauseAfterDetachFailure(t *test
 	}
 	if session.State != models.TaskSessionStateWaitingForInput {
 		t.Fatalf("expected session waiting for input after detach failure, got %q", session.State)
+	}
+	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 1 {
+		t.Fatalf("detach failure drained queued peer message: count=%d, want 1", got)
 	}
 }
 
@@ -1460,6 +1468,279 @@ func TestClarificationWatchdogCancellationInterruptsFallbackLookup(t *testing.T)
 	case <-lookupCtx.Done():
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("watchdog cancellation did not interrupt fallback turn lookup")
+	}
+}
+
+func TestClarificationWatchdogRecoveryIgnoresOwnCancelActivity(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-watchdog-own-cancel"
+		sessionID = "session-watchdog-own-cancel"
+		execution = "exec-watchdog-own-cancel"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, sessionID, taskID, execution)
+
+	promptDone := make(chan struct{})
+	var svc *Service
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true,
+		promptDone:     promptDone,
+	}
+	agentMgr.cancelAgentFunc = func(cancelCtx context.Context, _ string) error {
+		svc.handleAgentStreamEvent(cancelCtx, &lifecycle.AgentStreamEventPayload{
+			TaskID:      taskID,
+			SessionID:   sessionID,
+			ExecutionID: execution,
+			Data: &lifecycle.AgentStreamEventData{
+				Type:             "session_info",
+				PromptGeneration: 1,
+			},
+		})
+		return nil
+	}
+	agentMgr.currentPromptExecutionID = execution
+	agentMgr.currentPromptGeneration.Store(1)
+	svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.turnService = &repoTurnService{repo: repo}
+	clarificationTurn, err := svc.turnService.StartTurn(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("start clarification turn: %v", err)
+	}
+
+	watchCtx, cancelWatchdog := context.WithCancel(context.Background())
+	defer cancelWatchdog()
+	pendingID := "pending-watchdog-own-cancel"
+	entry := &clarificationWatchdogEntry{cancel: cancelWatchdog}
+	key := svc.clarificationWatchdogKey(sessionID, pendingID)
+	svc.clarificationWatchdogs.Store(key, entry)
+	t.Cleanup(func() { svc.cancelAllClarificationWatchdogs() })
+
+	recovered := svc.retryClarificationAfterCancel(
+		watchCtx,
+		clarificationAnsweredData{
+			TaskID: taskID, SessionID: sessionID, PendingID: pendingID,
+			ClarificationTurnID: clarificationTurn.ID,
+		},
+		"the clarification answer",
+		fmt.Errorf("wrapped: %w", ErrAgentPromptInProgress),
+	)
+	if !recovered {
+		t.Fatal("clarification watchdog recovery did not complete after its own cancellation activity")
+	}
+	select {
+	case <-promptDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("clarification answer was not handed off after recovery")
+	}
+	if err := watchCtx.Err(); err != nil {
+		t.Fatalf("watchdog recovery context was cancelled by its own stream activity: %v", err)
+	}
+	if got := len(agentMgr.capturedPrompts); got != 1 {
+		t.Fatalf("clarification replacement prompts = %d, want exactly 1", got)
+	}
+}
+
+func TestClarificationWatchdogRecoveryCancelsOnIndependentActivity(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-watchdog-independent-activity"
+		sessionID = "session-watchdog-independent-activity"
+		execution = "exec-watchdog-independent-activity"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, sessionID, taskID, execution)
+
+	cancelEntered := make(chan struct{}, 1)
+	releaseCancel := make(chan struct{})
+	var releaseCancelOnce sync.Once
+	release := func() {
+		releaseCancelOnce.Do(func() { close(releaseCancel) })
+	}
+	promptDone := make(chan struct{})
+	agentMgr := &mockAgentManager{
+		isAgentRunning:           true,
+		promptDone:               promptDone,
+		cancelAgentBlock:         releaseCancel,
+		cancelAgentEntered:       cancelEntered,
+		currentPromptExecutionID: execution,
+	}
+	agentMgr.currentPromptGeneration.Store(1)
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.messageCreator = &mockMessageCreator{}
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.turnService = &repoTurnService{repo: repo}
+	clarificationTurn, err := svc.turnService.StartTurn(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("start clarification turn: %v", err)
+	}
+
+	watchCtx, cancelWatchdog := context.WithCancel(context.Background())
+	defer cancelWatchdog()
+	pendingID := "pending-watchdog-independent-activity"
+	entry := &clarificationWatchdogEntry{cancel: cancelWatchdog}
+	key := svc.clarificationWatchdogKey(sessionID, pendingID)
+	svc.clarificationWatchdogs.Store(key, entry)
+	t.Cleanup(func() {
+		release()
+		svc.cancelAllClarificationWatchdogs()
+	})
+
+	recoveryDone := make(chan bool, 1)
+	go func() {
+		recoveryDone <- svc.retryClarificationAfterCancel(
+			watchCtx,
+			clarificationAnsweredData{
+				TaskID: taskID, SessionID: sessionID, PendingID: pendingID,
+				ClarificationTurnID: clarificationTurn.ID,
+			},
+			"the clarification answer",
+			fmt.Errorf("wrapped: %w", ErrAgentPromptInProgress),
+		)
+	}()
+
+	select {
+	case <-cancelEntered:
+	case <-time.After(time.Second):
+		t.Fatal("silent cancellation did not reach the agent")
+	}
+
+	// This frame is from a newer prompt generation on the same execution. It
+	// must remain authoritative even while the fallback cancellation is blocked.
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      taskID,
+		SessionID:   sessionID,
+		ExecutionID: execution,
+		Data: &lifecycle.AgentStreamEventData{
+			Type:             "session_info",
+			PromptGeneration: 2,
+		},
+	})
+	if watchCtx.Err() == nil {
+		t.Fatal("independent stream activity did not cancel the watchdog")
+	}
+
+	release()
+	select {
+	case <-recoveryDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("silent cancellation did not settle")
+	}
+}
+
+func TestClarificationWatchdogRecoveryCancelsOnSameExecutionMessageActivity(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-watchdog-same-execution-message"
+		sessionID = "session-watchdog-same-execution-message"
+		execution = "exec-watchdog-same-execution-message"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, sessionID, taskID, execution)
+
+	cancelEntered := make(chan struct{}, 1)
+	releaseCancel := make(chan struct{})
+	var releaseCancelOnce sync.Once
+	release := func() {
+		releaseCancelOnce.Do(func() { close(releaseCancel) })
+	}
+	agentMgr := &mockAgentManager{
+		isAgentRunning:           true,
+		cancelAgentBlock:         releaseCancel,
+		cancelAgentEntered:       cancelEntered,
+		currentPromptExecutionID: execution,
+	}
+	agentMgr.currentPromptGeneration.Store(1)
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.messageCreator = &mockMessageCreator{}
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.turnService = &repoTurnService{repo: repo}
+	clarificationTurn, err := svc.turnService.StartTurn(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("start clarification turn: %v", err)
+	}
+
+	watchCtx, cancelWatchdog := context.WithCancel(context.Background())
+	defer cancelWatchdog()
+	pendingID := "pending-watchdog-same-execution-message"
+	entry := &clarificationWatchdogEntry{cancel: cancelWatchdog}
+	key := svc.clarificationWatchdogKey(sessionID, pendingID)
+	svc.clarificationWatchdogs.Store(key, entry)
+	t.Cleanup(func() {
+		release()
+		svc.cancelAllClarificationWatchdogs()
+	})
+
+	recoveryDone := make(chan bool, 1)
+	go func() {
+		recoveryDone <- svc.retryClarificationAfterCancel(
+			watchCtx,
+			clarificationAnsweredData{
+				TaskID: taskID, SessionID: sessionID, PendingID: pendingID,
+				ClarificationTurnID: clarificationTurn.ID,
+			},
+			"the clarification answer",
+			fmt.Errorf("wrapped: %w", ErrAgentPromptInProgress),
+		)
+	}()
+
+	select {
+	case <-cancelEntered:
+	case <-time.After(time.Second):
+		t.Fatal("silent cancellation did not reach the agent")
+	}
+
+	// A same-execution message frame is still independent activity. Matching the
+	// cancellation's execution and prompt generation does not prove that a
+	// message frame came from the cancellation, so it must cancel recovery.
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      taskID,
+		SessionID:   sessionID,
+		ExecutionID: execution,
+		Data: &lifecycle.AgentStreamEventData{
+			Type:             "message_streaming",
+			PromptGeneration: 1,
+		},
+	})
+	if watchCtx.Err() == nil {
+		t.Fatal("same-execution message activity did not cancel the watchdog")
+	}
+
+	release()
+	select {
+	case <-recoveryDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("silent cancellation did not settle")
+	}
+}
+
+func TestClarificationRecoveryCancellationFrameRejectsNormalAgentActivity(t *testing.T) {
+	for _, eventType := range []string{"message_streaming", "thinking_streaming", agentEventToolCall, agentEventToolUpdate} {
+		t.Run(eventType, func(t *testing.T) {
+			if clarificationRecoveryCancellationFrame(&lifecycle.AgentStreamEventPayload{
+				Data: &lifecycle.AgentStreamEventData{Type: eventType},
+			}) {
+				t.Fatalf("%q was classified as recovery cancellation activity", eventType)
+			}
+		})
+	}
+
+	if !clarificationRecoveryCancellationFrame(&lifecycle.AgentStreamEventPayload{
+		Data: &lifecycle.AgentStreamEventData{Type: "session_info"},
+	}) {
+		t.Fatal("session_info was not classified as recovery cancellation activity")
+	}
+	if !clarificationRecoveryCancellationFrame(&lifecycle.AgentStreamEventPayload{
+		Data: &lifecycle.AgentStreamEventData{
+			Type: agentEventComplete,
+			Data: map[string]interface{}{"stop_reason": "cancelled"},
+		},
+	}) {
+		t.Fatal("cancelled complete was not classified as recovery cancellation activity")
 	}
 }
 

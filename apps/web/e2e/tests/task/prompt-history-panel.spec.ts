@@ -72,6 +72,15 @@ test.describe("Prompt history panel", () => {
 
     // (2) Activate the chat tab and send the second prompt through the UI
     // (the mock agent's e2e:message emits an AGENT update, not a prompt).
+    // Pin the ordinals first: the settled session must contain EXACTLY one
+    // user message (the seeded first prompt), so the UI-sent prompt is
+    // deterministically #2 and the seed #1.
+    await expect
+      .poll(async () => {
+        const { messages } = await apiClient.listSessionMessages(sessionId);
+        return messages.filter((m) => m.author_type === "user").length;
+      })
+      .toBe(1);
     await session.clickSessionChatTab();
     await session.sendMessage(longPrompt);
     await expect
@@ -97,12 +106,14 @@ test.describe("Prompt history panel", () => {
       .toBe(true);
     if (!sentinelMessageId) throw new Error("sentinel prompt was not persisted");
 
-    // (3) Re-activate Prompt history: two rows, newest first.
+    // (3) Re-activate Prompt history: two rows, newest first, numbered #2/#1.
     await session.clickTab("Prompt history");
     const sentinelRow = testPage.getByTestId("prompt-history-row-0");
     const seededRow = testPage.getByTestId("prompt-history-row-1");
     await expect(sentinelRow).toContainText(SENTINEL);
     await expect(seededRow).toContainText(seedPrompt);
+    await expect(sentinelRow.getByTestId("prompt-history-number-0")).toHaveText("#2");
+    await expect(seededRow.getByTestId("prompt-history-number-1")).toHaveText("#1");
 
     // (4) Durations match formatPromptDuration shapes on both rows.
     const sentinelDuration = await sentinelRow

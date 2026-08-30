@@ -10,16 +10,7 @@ import {
   useUnknownSessionSubscriptionRetryEffect,
 } from "./use-session-subscription-retry";
 import { doFetchMessages } from "./use-session-message-fetch";
-import { autoBackfillUntilUserMessage, hasUserOrAgentMessage } from "./message-backfill";
 import { t } from "@/lib/i18n";
-
-export {
-  autoBackfillUntilUserMessage,
-  type BackfillStep,
-  hasUserOrAgentMessage,
-  MAX_AUTO_BACKFILL_PAGES,
-  runBackfillRound,
-} from "./message-backfill";
 
 export { shouldRetryUnknownSessionSubscription } from "./use-session-subscription-retry";
 // Test seam: exported for direct unit coverage of hydration dedup/guards.
@@ -150,7 +141,7 @@ type InFlightMessageRequest = {
 };
 
 const EMPTY_MESSAGES: Message[] = [];
-const EMPTY_META = { isLoading: false, hasMore: false, oldestCursor: null };
+const EMPTY_META = { isLoading: false, isLoadingMore: false, hasMore: false, oldestCursor: null };
 const inFlightMessageRequests = new Map<string, InFlightMessageRequest>();
 
 /** Debug-only summary of a fetch response (no-op unless debug logging is on). */
@@ -314,8 +305,6 @@ function useTerminalStateFetch(
       taskSessionId,
       ...refs,
       fetchAndStoreMessages,
-      autoBackfillUntilUserMessage,
-      hasUserOrAgentMessage,
       onError: (error) => console.error("Failed to fetch messages after state change:", error),
     });
   }, [taskSessionId, taskSessionState, hasAgentMessage, connectionStatus, refs]);
@@ -639,8 +628,6 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
       taskSessionId,
       ...fetchRefs,
       fetchAndStoreMessages,
-      autoBackfillUntilUserMessage,
-      hasUserOrAgentMessage,
       isActive: () => active,
     });
     return deactivate;

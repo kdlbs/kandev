@@ -9,6 +9,7 @@ import { toast } from "@/lib/toast/sonner";
 import { useAutomations } from "@/hooks/domains/settings/use-automations";
 import { AutomationsTable } from "./automations-table";
 import { AutomationBoardMoveNotice } from "./board-move-notice";
+import { AutomationsExportButton } from "./automations-export-button";
 import { useAutomationEnabledDrafts } from "./use-automation-enabled-drafts";
 import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
 
@@ -52,16 +53,19 @@ export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
         tab="automations"
         description={t("automations:listDescription")}
         action={
-          <Button
-            type="button"
-            size="sm"
-            data-testid="new-automation-button"
-            className="cursor-pointer"
-            onClick={() => router.push(`/settings/workspaces/${workspaceId}/automations/new`)}
-          >
-            <IconPlus className="h-4 w-4 mr-2" />
-            {t("automations:newAutomation")}
-          </Button>
+          <div className="flex items-center gap-2">
+            <AutomationsExportButton workspaceId={workspaceId} />
+            <Button
+              type="button"
+              size="sm"
+              data-testid="new-automation-button"
+              className="min-h-11 cursor-pointer md:min-h-7"
+              onClick={() => router.push(`/settings/workspaces/${workspaceId}/automations/new`)}
+            >
+              <IconPlus className="h-4 w-4 mr-2" />
+              {t("automations:newAutomation")}
+            </Button>
+          </div>
         }
       />
       <Separator />

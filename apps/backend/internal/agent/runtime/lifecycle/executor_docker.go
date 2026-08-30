@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/scriptengine"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const dockerWorkspacePath = "/workspace"
@@ -163,10 +164,16 @@ func (r *DockerExecutor) HealthCheck(_ context.Context) error {
 
 func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (instance *ExecutorInstance, err error) {
 	baseCtx := preparationContext(ctx)
+	if err := validateAgentctlStartupConfig(req.AgentctlStartupConfig); err != nil {
+		return nil, fmt.Errorf("invalid agentctl startup configuration: %w", err)
+	}
 	if _, err := validateRemoteContributions(req.RemoteContributions); err != nil {
 		return nil, err
 	}
 	if _, err := validateContributionDestinations(req.ContributionDestinations); err != nil {
+		return nil, err
+	}
+	if _, err := validateComparisonTargets(req.ComparisonTargets); err != nil {
 		return nil, err
 	}
 	dockerClient, containerMgr, err := r.ensureClient()
@@ -180,6 +187,9 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 
 	if reconnected, ok := r.tryReconnect(baseCtx, dockerClient, req); ok {
 		return reconnected, nil
+	}
+	if req.WorkspaceReuseRequired {
+		return nil, fmt.Errorf("%w: existing Docker workspace could not be attached", models.ErrWorkspaceReuseUnsafe)
 	}
 
 	r.seedSessionDir(baseCtx, req)
@@ -222,14 +232,14 @@ func reportCreateInstanceProgress(req *ExecutorCreateRequest, errPtr *error) fun
 // container that's healthy enough to resume; otherwise (nil, false) and the
 // caller falls back to provisioning a fresh container.
 func (r *DockerExecutor) tryReconnect(ctx context.Context, dockerClient *docker.Client, req *ExecutorCreateRequest) (*ExecutorInstance, bool) {
-	if req.PreviousExecutionID == "" {
+	if req.PreviousExecutionID == "" && strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeyContainerID)) == "" {
 		return nil, false
 	}
 	reconnected, reconnectErr := r.reconnectToContainer(ctx, dockerClient, req)
 	if reconnectErr == nil {
 		return reconnected, true
 	}
-	r.logger.Info("could not reconnect to previous container, creating new one",
+	r.logger.Info("could not reconnect to existing container",
 		zap.String("previous_execution_id", req.PreviousExecutionID),
 		zap.Error(reconnectErr))
 	return nil, false
@@ -288,6 +298,8 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		BaseBranches:                   getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:            req.RemoteContributions,
 		ContributionDestinations:       req.ContributionDestinations,
+		ComparisonTargets:              req.ComparisonTargets,
+		AgentctlStartupConfig:          req.AgentctlStartupConfig,
 	}, nil
 }
 
@@ -589,6 +601,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		BaseBranches:             getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:      req.RemoteContributions,
 		ContributionDestinations: req.ContributionDestinations,
+		ComparisonTargets:        req.ComparisonTargets,
 	}
 }
 

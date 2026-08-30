@@ -425,6 +425,7 @@ const (
 	Host_GetConfig_FullMethodName                  = "/kandev.plugin.v1.Host/GetConfig"
 	Host_ListTasks_FullMethodName                  = "/kandev.plugin.v1.Host/ListTasks"
 	Host_GetTask_FullMethodName                    = "/kandev.plugin.v1.Host/GetTask"
+	Host_GetTaskRelations_FullMethodName           = "/kandev.plugin.v1.Host/GetTaskRelations"
 	Host_ListWorkspaces_FullMethodName             = "/kandev.plugin.v1.Host/ListWorkspaces"
 	Host_ListWorkflows_FullMethodName              = "/kandev.plugin.v1.Host/ListWorkflows"
 	Host_ListWorkflowSteps_FullMethodName          = "/kandev.plugin.v1.Host/ListWorkflowSteps"
@@ -434,12 +435,17 @@ const (
 	Host_ListSessions_FullMethodName               = "/kandev.plugin.v1.Host/ListSessions"
 	Host_ListSessionCodeStats_FullMethodName       = "/kandev.plugin.v1.Host/ListSessionCodeStats"
 	Host_ListMessages_FullMethodName               = "/kandev.plugin.v1.Host/ListMessages"
+	Host_ListPendingInteractions_FullMethodName    = "/kandev.plugin.v1.Host/ListPendingInteractions"
+	Host_GetInteraction_FullMethodName             = "/kandev.plugin.v1.Host/GetInteraction"
 	Host_InvokeUtilityAgent_FullMethodName         = "/kandev.plugin.v1.Host/InvokeUtilityAgent"
 	Host_CreateTask_FullMethodName                 = "/kandev.plugin.v1.Host/CreateTask"
 	Host_UpdateTask_FullMethodName                 = "/kandev.plugin.v1.Host/UpdateTask"
 	Host_SendMessage_FullMethodName                = "/kandev.plugin.v1.Host/SendMessage"
 	Host_PreviewPluginOwnedTaskTree_FullMethodName = "/kandev.plugin.v1.Host/PreviewPluginOwnedTaskTree"
 	Host_DeletePluginOwnedTaskTree_FullMethodName  = "/kandev.plugin.v1.Host/DeletePluginOwnedTaskTree"
+	Host_RespondToPermission_FullMethodName        = "/kandev.plugin.v1.Host/RespondToPermission"
+	Host_AnswerClarification_FullMethodName        = "/kandev.plugin.v1.Host/AnswerClarification"
+	Host_CancelClarification_FullMethodName        = "/kandev.plugin.v1.Host/CancelClarification"
 )
 
 // HostClient is the client API for Host service.
@@ -493,6 +499,11 @@ type HostClient interface {
 	// Reads — capability api_read:<resource>
 	ListTasks(ctx context.Context, in *ListTasksRequest, opts ...grpc.CallOption) (*ListTasksResponse, error)
 	GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*GetTaskResponse, error)
+	// Compact task relationship graph — capability api_read:task_relations.
+	// Unlike Task, RelationTask intentionally has no description, metadata,
+	// repositories, or document fields. The requested target must belong to
+	// workspace_id; foreign and unknown targets fail as NotFound.
+	GetTaskRelations(ctx context.Context, in *GetTaskRelationsRequest, opts ...grpc.CallOption) (*GetTaskRelationsResponse, error)
 	ListWorkspaces(ctx context.Context, in *ListWorkspacesRequest, opts ...grpc.CallOption) (*ListWorkspacesResponse, error)
 	ListWorkflows(ctx context.Context, in *ListWorkflowsRequest, opts ...grpc.CallOption) (*ListWorkflowsResponse, error)
 	ListWorkflowSteps(ctx context.Context, in *ListWorkflowStepsRequest, opts ...grpc.CallOption) (*ListWorkflowStepsResponse, error)
@@ -512,6 +523,18 @@ type HostClient interface {
 	// <kandev-system> blocks are stripped, exactly like the message.added bus
 	// event — raw system prompts are never exposed to plugins.
 	ListMessages(ctx context.Context, in *ListMessagesRequest, opts ...grpc.CallOption) (*ListMessagesResponse, error)
+	// Pending agent interactions — capability api_read:interactions. The
+	// DURABLE record of every permission request and clarification bundle still
+	// owed a human response, under the same turn/session authority kandev's own
+	// list surfaces use. Session state alone cannot answer this: WAITING_FOR_INPUT
+	// also describes an ordinarily completed turn, so a state-only consumer
+	// reports attention that is not owed. Reading the record is what lets a
+	// consumer that started late, restarted, or missed an event reconcile.
+	// GetInteraction resolves ANY interaction — including terminal ones — so a
+	// replayed or missed event converges on the current result instead of
+	// NotFound.
+	ListPendingInteractions(ctx context.Context, in *ListPendingInteractionsRequest, opts ...grpc.CallOption) (*ListPendingInteractionsResponse, error)
+	GetInteraction(ctx context.Context, in *GetInteractionRequest, opts ...grpc.CallOption) (*GetInteractionResponse, error)
 	// Utility agent — capability agent_invoke. Runs a one-shot, non-interactive
 	// completion using the operator-configured "utility agent" profile (Settings
 	// > System), so a plugin can delegate a lightweight LLM step without holding
@@ -530,6 +553,17 @@ type HostClient interface {
 	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error)
 	PreviewPluginOwnedTaskTree(ctx context.Context, in *PreviewPluginOwnedTaskTreeRequest, opts ...grpc.CallOption) (*PreviewPluginOwnedTaskTreeResponse, error)
 	DeletePluginOwnedTaskTree(ctx context.Context, in *DeletePluginOwnedTaskTreeRequest, opts ...grpc.CallOption) (*DeletePluginOwnedTaskTreeResponse, error)
+	// Interaction responses — capability api_write:interactions. Each routes
+	// through the same first-party service the native UI uses, so the agent
+	// unblocks, the durable record turns terminal, and every surface converges
+	// through the normal events. Terminal-once: an interaction that already has
+	// a resolution answers FailedPrecondition rather than dispatching a second
+	// response, and an unknown id answers NotFound — the two outcomes a
+	// reconciling cache needs to distinguish "someone else got there first" from
+	// "I am holding a stale id".
+	RespondToPermission(ctx context.Context, in *RespondToPermissionRequest, opts ...grpc.CallOption) (*RespondToPermissionResponse, error)
+	AnswerClarification(ctx context.Context, in *AnswerClarificationRequest, opts ...grpc.CallOption) (*AnswerClarificationResponse, error)
+	CancelClarification(ctx context.Context, in *CancelClarificationRequest, opts ...grpc.CallOption) (*CancelClarificationResponse, error)
 }
 
 type hostClient struct {
@@ -660,6 +694,16 @@ func (c *hostClient) GetTask(ctx context.Context, in *GetTaskRequest, opts ...gr
 	return out, nil
 }
 
+func (c *hostClient) GetTaskRelations(ctx context.Context, in *GetTaskRelationsRequest, opts ...grpc.CallOption) (*GetTaskRelationsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTaskRelationsResponse)
+	err := c.cc.Invoke(ctx, Host_GetTaskRelations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostClient) ListWorkspaces(ctx context.Context, in *ListWorkspacesRequest, opts ...grpc.CallOption) (*ListWorkspacesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListWorkspacesResponse)
@@ -750,6 +794,26 @@ func (c *hostClient) ListMessages(ctx context.Context, in *ListMessagesRequest, 
 	return out, nil
 }
 
+func (c *hostClient) ListPendingInteractions(ctx context.Context, in *ListPendingInteractionsRequest, opts ...grpc.CallOption) (*ListPendingInteractionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListPendingInteractionsResponse)
+	err := c.cc.Invoke(ctx, Host_ListPendingInteractions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) GetInteraction(ctx context.Context, in *GetInteractionRequest, opts ...grpc.CallOption) (*GetInteractionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetInteractionResponse)
+	err := c.cc.Invoke(ctx, Host_GetInteraction_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostClient) InvokeUtilityAgent(ctx context.Context, in *InvokeUtilityAgentRequest, opts ...grpc.CallOption) (*InvokeUtilityAgentResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(InvokeUtilityAgentResponse)
@@ -810,6 +874,36 @@ func (c *hostClient) DeletePluginOwnedTaskTree(ctx context.Context, in *DeletePl
 	return out, nil
 }
 
+func (c *hostClient) RespondToPermission(ctx context.Context, in *RespondToPermissionRequest, opts ...grpc.CallOption) (*RespondToPermissionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RespondToPermissionResponse)
+	err := c.cc.Invoke(ctx, Host_RespondToPermission_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) AnswerClarification(ctx context.Context, in *AnswerClarificationRequest, opts ...grpc.CallOption) (*AnswerClarificationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AnswerClarificationResponse)
+	err := c.cc.Invoke(ctx, Host_AnswerClarification_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) CancelClarification(ctx context.Context, in *CancelClarificationRequest, opts ...grpc.CallOption) (*CancelClarificationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CancelClarificationResponse)
+	err := c.cc.Invoke(ctx, Host_CancelClarification_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // HostServer is the server API for Host service.
 // All implementations must embed UnimplementedHostServer
 // for forward compatibility.
@@ -861,6 +955,11 @@ type HostServer interface {
 	// Reads — capability api_read:<resource>
 	ListTasks(context.Context, *ListTasksRequest) (*ListTasksResponse, error)
 	GetTask(context.Context, *GetTaskRequest) (*GetTaskResponse, error)
+	// Compact task relationship graph — capability api_read:task_relations.
+	// Unlike Task, RelationTask intentionally has no description, metadata,
+	// repositories, or document fields. The requested target must belong to
+	// workspace_id; foreign and unknown targets fail as NotFound.
+	GetTaskRelations(context.Context, *GetTaskRelationsRequest) (*GetTaskRelationsResponse, error)
 	ListWorkspaces(context.Context, *ListWorkspacesRequest) (*ListWorkspacesResponse, error)
 	ListWorkflows(context.Context, *ListWorkflowsRequest) (*ListWorkflowsResponse, error)
 	ListWorkflowSteps(context.Context, *ListWorkflowStepsRequest) (*ListWorkflowStepsResponse, error)
@@ -880,6 +979,18 @@ type HostServer interface {
 	// <kandev-system> blocks are stripped, exactly like the message.added bus
 	// event — raw system prompts are never exposed to plugins.
 	ListMessages(context.Context, *ListMessagesRequest) (*ListMessagesResponse, error)
+	// Pending agent interactions — capability api_read:interactions. The
+	// DURABLE record of every permission request and clarification bundle still
+	// owed a human response, under the same turn/session authority kandev's own
+	// list surfaces use. Session state alone cannot answer this: WAITING_FOR_INPUT
+	// also describes an ordinarily completed turn, so a state-only consumer
+	// reports attention that is not owed. Reading the record is what lets a
+	// consumer that started late, restarted, or missed an event reconcile.
+	// GetInteraction resolves ANY interaction — including terminal ones — so a
+	// replayed or missed event converges on the current result instead of
+	// NotFound.
+	ListPendingInteractions(context.Context, *ListPendingInteractionsRequest) (*ListPendingInteractionsResponse, error)
+	GetInteraction(context.Context, *GetInteractionRequest) (*GetInteractionResponse, error)
 	// Utility agent — capability agent_invoke. Runs a one-shot, non-interactive
 	// completion using the operator-configured "utility agent" profile (Settings
 	// > System), so a plugin can delegate a lightweight LLM step without holding
@@ -898,6 +1009,17 @@ type HostServer interface {
 	SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error)
 	PreviewPluginOwnedTaskTree(context.Context, *PreviewPluginOwnedTaskTreeRequest) (*PreviewPluginOwnedTaskTreeResponse, error)
 	DeletePluginOwnedTaskTree(context.Context, *DeletePluginOwnedTaskTreeRequest) (*DeletePluginOwnedTaskTreeResponse, error)
+	// Interaction responses — capability api_write:interactions. Each routes
+	// through the same first-party service the native UI uses, so the agent
+	// unblocks, the durable record turns terminal, and every surface converges
+	// through the normal events. Terminal-once: an interaction that already has
+	// a resolution answers FailedPrecondition rather than dispatching a second
+	// response, and an unknown id answers NotFound — the two outcomes a
+	// reconciling cache needs to distinguish "someone else got there first" from
+	// "I am holding a stale id".
+	RespondToPermission(context.Context, *RespondToPermissionRequest) (*RespondToPermissionResponse, error)
+	AnswerClarification(context.Context, *AnswerClarificationRequest) (*AnswerClarificationResponse, error)
+	CancelClarification(context.Context, *CancelClarificationRequest) (*CancelClarificationResponse, error)
 	mustEmbedUnimplementedHostServer()
 }
 
@@ -944,6 +1066,9 @@ func (UnimplementedHostServer) ListTasks(context.Context, *ListTasksRequest) (*L
 func (UnimplementedHostServer) GetTask(context.Context, *GetTaskRequest) (*GetTaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTask not implemented")
 }
+func (UnimplementedHostServer) GetTaskRelations(context.Context, *GetTaskRelationsRequest) (*GetTaskRelationsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTaskRelations not implemented")
+}
 func (UnimplementedHostServer) ListWorkspaces(context.Context, *ListWorkspacesRequest) (*ListWorkspacesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListWorkspaces not implemented")
 }
@@ -971,6 +1096,12 @@ func (UnimplementedHostServer) ListSessionCodeStats(context.Context, *ListSessio
 func (UnimplementedHostServer) ListMessages(context.Context, *ListMessagesRequest) (*ListMessagesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListMessages not implemented")
 }
+func (UnimplementedHostServer) ListPendingInteractions(context.Context, *ListPendingInteractionsRequest) (*ListPendingInteractionsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListPendingInteractions not implemented")
+}
+func (UnimplementedHostServer) GetInteraction(context.Context, *GetInteractionRequest) (*GetInteractionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetInteraction not implemented")
+}
 func (UnimplementedHostServer) InvokeUtilityAgent(context.Context, *InvokeUtilityAgentRequest) (*InvokeUtilityAgentResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InvokeUtilityAgent not implemented")
 }
@@ -988,6 +1119,15 @@ func (UnimplementedHostServer) PreviewPluginOwnedTaskTree(context.Context, *Prev
 }
 func (UnimplementedHostServer) DeletePluginOwnedTaskTree(context.Context, *DeletePluginOwnedTaskTreeRequest) (*DeletePluginOwnedTaskTreeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeletePluginOwnedTaskTree not implemented")
+}
+func (UnimplementedHostServer) RespondToPermission(context.Context, *RespondToPermissionRequest) (*RespondToPermissionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RespondToPermission not implemented")
+}
+func (UnimplementedHostServer) AnswerClarification(context.Context, *AnswerClarificationRequest) (*AnswerClarificationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AnswerClarification not implemented")
+}
+func (UnimplementedHostServer) CancelClarification(context.Context, *CancelClarificationRequest) (*CancelClarificationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CancelClarification not implemented")
 }
 func (UnimplementedHostServer) mustEmbedUnimplementedHostServer() {}
 func (UnimplementedHostServer) testEmbeddedByValue()              {}
@@ -1226,6 +1366,24 @@ func _Host_GetTask_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Host_GetTaskRelations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTaskRelationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetTaskRelations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetTaskRelations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetTaskRelations(ctx, req.(*GetTaskRelationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Host_ListWorkspaces_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListWorkspacesRequest)
 	if err := dec(in); err != nil {
@@ -1388,6 +1546,42 @@ func _Host_ListMessages_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Host_ListPendingInteractions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListPendingInteractionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListPendingInteractions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListPendingInteractions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListPendingInteractions(ctx, req.(*ListPendingInteractionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_GetInteraction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetInteractionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetInteraction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetInteraction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetInteraction(ctx, req.(*GetInteractionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Host_InvokeUtilityAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(InvokeUtilityAgentRequest)
 	if err := dec(in); err != nil {
@@ -1496,6 +1690,60 @@ func _Host_DeletePluginOwnedTaskTree_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Host_RespondToPermission_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RespondToPermissionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).RespondToPermission(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_RespondToPermission_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).RespondToPermission(ctx, req.(*RespondToPermissionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_AnswerClarification_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AnswerClarificationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).AnswerClarification(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_AnswerClarification_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).AnswerClarification(ctx, req.(*AnswerClarificationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_CancelClarification_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CancelClarificationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).CancelClarification(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_CancelClarification_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).CancelClarification(ctx, req.(*CancelClarificationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Host_ServiceDesc is the grpc.ServiceDesc for Host service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1552,6 +1800,10 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Host_GetTask_Handler,
 		},
 		{
+			MethodName: "GetTaskRelations",
+			Handler:    _Host_GetTaskRelations_Handler,
+		},
+		{
 			MethodName: "ListWorkspaces",
 			Handler:    _Host_ListWorkspaces_Handler,
 		},
@@ -1588,6 +1840,14 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Host_ListMessages_Handler,
 		},
 		{
+			MethodName: "ListPendingInteractions",
+			Handler:    _Host_ListPendingInteractions_Handler,
+		},
+		{
+			MethodName: "GetInteraction",
+			Handler:    _Host_GetInteraction_Handler,
+		},
+		{
 			MethodName: "InvokeUtilityAgent",
 			Handler:    _Host_InvokeUtilityAgent_Handler,
 		},
@@ -1610,6 +1870,18 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeletePluginOwnedTaskTree",
 			Handler:    _Host_DeletePluginOwnedTaskTree_Handler,
+		},
+		{
+			MethodName: "RespondToPermission",
+			Handler:    _Host_RespondToPermission_Handler,
+		},
+		{
+			MethodName: "AnswerClarification",
+			Handler:    _Host_AnswerClarification_Handler,
+		},
+		{
+			MethodName: "CancelClarification",
+			Handler:    _Host_CancelClarification_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

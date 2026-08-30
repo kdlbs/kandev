@@ -76,7 +76,7 @@ test.describe("@chat last prompt scroll affordance", () => {
     await expect(chat.getByTestId("scroll-to-start-button")).toHaveCount(0);
   });
 
-  test("loads older pages only until it finds the latest prompt", async ({
+  test("keeps task opening bounded before last-prompt navigation", async ({
     testPage,
     apiClient,
     seedData,
@@ -110,7 +110,8 @@ test.describe("@chat last prompt scroll affordance", () => {
     await expect(marker).not.toBeInViewport();
     const button = chat.getByTestId("scroll-to-last-prompt-button");
     await expect(button).toBeVisible({ timeout: 15_000 });
-    expect(olderPageRequests.length).toBeGreaterThan(0);
+    // Opening the task must not fetch older pages just to locate the prompt.
+    expect(olderPageRequests).toHaveLength(0);
     await expect(chat.getByText(FIRST_PROMPT_MARKER, { exact: false })).toHaveCount(0);
     await button.click();
     await expect(marker).toBeInViewport({ timeout: 10_000 });

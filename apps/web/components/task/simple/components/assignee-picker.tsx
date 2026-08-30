@@ -56,7 +56,7 @@ export function AssigneePicker({ task }: AssigneePickerProps) {
       keywords: [a.name, a.role ?? ""],
       renderLabel: () => (
         <span className="flex items-center gap-2 min-w-0">
-          <AgentAvatar role={a.role} name={a.name} size="sm" />
+          <AgentAvatar role={a.role} name={a.name} icon={a.icon} size="sm" />
           <span className="truncate">{a.name}</span>
         </span>
       ),

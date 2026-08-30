@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -119,10 +120,30 @@ type clarificationAnsweredData struct {
 	AnswerText          string `json:"answer_text"`
 	Rejected            bool   `json:"rejected"`
 	RejectReason        string `json:"reject_reason"`
+	HandledInline       bool   `json:"handled_inline"`
 }
 
 type clarificationWatchdogEntry struct {
 	cancel func()
+	// Recovery's silent cancellation can synchronously emit stream activity.
+	// Keep that activity from cancelling this entry's own recovery context.
+	recoveryCancellationActive atomic.Bool
+}
+
+func (e *clarificationWatchdogEntry) beginRecoveryCancellation() {
+	if e != nil {
+		e.recoveryCancellationActive.Store(true)
+	}
+}
+
+func (e *clarificationWatchdogEntry) endRecoveryCancellation() {
+	if e != nil {
+		e.recoveryCancellationActive.Store(false)
+	}
+}
+
+func (e *clarificationWatchdogEntry) isRecoveryCancellationActive() bool {
+	return e != nil && e.recoveryCancellationActive.Load()
 }
 
 // handleClarificationAnswered handles user responses to agent clarification questions.
@@ -252,6 +273,16 @@ func (s *Service) handleClarificationPrimaryAnswered(ctx context.Context, event 
 			zap.String("pending_id", data.PendingID))
 		return nil
 	}
+	if data.HandledInline {
+		return nil
+	}
+	return s.handleClarificationPrimaryAnsweredData(ctx, data)
+}
+
+func (s *Service) handleClarificationPrimaryAnsweredData(ctx context.Context, data clarificationAnsweredData) error {
+	if data.SessionID == "" || data.TaskID == "" || data.PendingID == "" {
+		return nil
+	}
 
 	// A directly answered MCP request does not transition the session through
 	// WAITING_FOR_INPUT, so no ordinary turn-start event exists to move a task
@@ -261,8 +292,39 @@ func (s *Service) handleClarificationPrimaryAnswered(ctx context.Context, event 
 	return nil
 }
 
+// HandleClarificationPrimaryAnswered is the synchronous local notification
+// used by clarification.Resolver to arm the watchdog before releasing a live
+// clarification waiter. The bus event remains available for projections.
+func (s *Service) HandleClarificationPrimaryAnswered(ctx context.Context, answered clarification.PrimaryAnswered) {
+	_ = s.handleClarificationPrimaryAnsweredData(ctx, clarificationAnsweredData{
+		SessionID:           answered.SessionID,
+		TaskID:              answered.TaskID,
+		PendingID:           answered.PendingID,
+		ClarificationTurnID: answered.ClarificationTurnID,
+		Question:            answered.Question,
+		AnswerText:          answered.AnswerText,
+		Rejected:            answered.Rejected,
+		RejectReason:        answered.RejectReason,
+	})
+}
+
 func (s *Service) clarificationWatchdogKey(sessionID, pendingID string) string {
 	return sessionID + "::" + pendingID
+}
+
+func (s *Service) loadClarificationWatchdogEntry(sessionID, pendingID string) *clarificationWatchdogEntry {
+	if sessionID == "" || pendingID == "" {
+		return nil
+	}
+	value, ok := s.clarificationWatchdogs.Load(s.clarificationWatchdogKey(sessionID, pendingID))
+	if !ok {
+		return nil
+	}
+	entry, ok := value.(*clarificationWatchdogEntry)
+	if !ok {
+		return nil
+	}
+	return entry
 }
 
 func (s *Service) getClarificationWatchdogTimeout() time.Duration {
@@ -410,10 +472,26 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 		return false
 	}
 
-	if err := s.cancelAgentSilentWithGuard(ctx, data.TaskID, data.SessionID, guard.unlock, guard.relock); err != nil {
+	watchdogEntry := s.loadClarificationWatchdogEntry(data.SessionID, data.PendingID)
+	if watchdogEntry != nil {
+		watchdogEntry.beginRecoveryCancellation()
+	}
+	expectedTurnID := data.ClarificationTurnID
+	cancelErr := s.cancelAgentSilentExpectedWithGuard(
+		ctx,
+		data.TaskID,
+		data.SessionID,
+		&expectedTurnID,
+		guard.unlock,
+		guard.relock,
+	)
+	if watchdogEntry != nil {
+		watchdogEntry.endRecoveryCancellation()
+	}
+	if cancelErr != nil {
 		s.logger.Warn("cancel failed (agent likely dead), force-transitioning session state",
 			zap.String("session_id", data.SessionID),
-			zap.Error(err))
+			zap.Error(cancelErr))
 		// Revert through the terminal-safe state writer. Production uses a
 		// compare-and-set, and the shared guard keeps coordinator cancellation
 		// outside this narrow mutation.
@@ -448,6 +526,9 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 		s.logger.Debug("skipping clarification replacement for terminal session after cancellation",
 			zap.String("session_id", data.SessionID),
 			zap.String("session_state", string(session.State)))
+		return false
+	}
+	if !s.clarificationTurnStillCurrentAfterRecovery(ctx, data) {
 		return false
 	}
 
@@ -519,12 +600,32 @@ func (s *Service) dispatchClarificationResumeLocked(ctx context.Context, data cl
 	return nil
 }
 
+// ClarificationPauseOptions controls the queue policy for a clarification
+// pause. Human no-answer pauses drain an already queued prompt, while an
+// autopilot parent question keeps unrelated child prompts parked until the
+// parent answers.
+type ClarificationPauseOptions struct {
+	DrainQueuedMessages bool
+}
+
 // PauseForClarificationInput converts a no-answer ask_user_question outcome
 // into a platform pause. It detaches the pending clarification so a late user
 // answer resumes through the event fallback path, then silently cancels the
 // active agent turn without evaluating workflow turn-complete actions. It
 // returns the number of clarification bundles detached.
 func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID string) (int, error) {
+	return s.PauseForClarificationInputWithOptions(ctx, sessionID, ClarificationPauseOptions{
+		DrainQueuedMessages: true,
+	})
+}
+
+// PauseForClarificationInputWithOptions is the explicit pause policy used by
+// callers whose queue semantics differ from the human clarification timeout.
+func (s *Service) PauseForClarificationInputWithOptions(
+	ctx context.Context,
+	sessionID string,
+	options ClarificationPauseOptions,
+) (int, error) {
 	if sessionID == "" {
 		return 0, fmt.Errorf("session_id is required")
 	}
@@ -533,21 +634,12 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 	guard := s.lockCancelInFlightGuard(sessionID)
 	defer guard.release()
 	guardedPersistenceStartedAt := time.Now()
-	session, err := s.repo.GetTaskSession(writeCtx, sessionID)
+	session, expectedTurnID, expectedTurn, err := s.loadClarificationPauseState(writeCtx, sessionID)
 	if err != nil {
-		return 0, fmt.Errorf("load session for clarification pause: %w", err)
+		return 0, err
 	}
 	if session == nil {
 		return 0, nil
-	}
-	expectedTurnID := ""
-	var expectedTurn *string
-	if s.turnService != nil {
-		expectedTurnID, err = s.peekActiveTurnID(writeCtx, sessionID)
-		if err != nil {
-			return 0, fmt.Errorf("inspect clarification turn before pause: %w", err)
-		}
-		expectedTurn = &expectedTurnID
 	}
 
 	hasPendingClarification := s.sessionHasPendingClarification(writeCtx, sessionID)
@@ -596,7 +688,43 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 	} else if err != nil {
 		return detached, errors.Join(detachErr, err)
 	}
+	if !options.DrainQueuedMessages {
+		return detached, detachErr
+	}
+	if detachErr != nil {
+		// The durable clarification remains the input authority when detachment
+		// failed. Starting a successor here would make the row look stale and
+		// allow work to continue without a recoverable question.
+		return detached, detachErr
+	}
+	// Clarification park is a turn boundary, mirroring the
+	// pre-#677 contract where handleAgentReady always drained after returning
+	// from a turn. PauseForClarificationInput holds the cancelInFlight guard
+	// (line 533) for the entire function, so we must use the *Locked* drain
+	// variant — the public one would try to re-acquire the same non-reentrant
+	// sync.Mutex and deadlock. The detached bundle remains in the UI for the
+	// user to answer, but the workflow will no longer block on it for the new
+	// turn (PR description flags this trade-off for maintainer review).
+	s.drainQueuedMessageForPromptableSessionLocked(pauseCtx, sessionID)
 	return detached, detachErr
+}
+
+func (s *Service) loadClarificationPauseState(
+	ctx context.Context,
+	sessionID string,
+) (*models.TaskSession, string, *string, error) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("load session for clarification pause: %w", err)
+	}
+	if session == nil || s.turnService == nil {
+		return session, "", nil, nil
+	}
+	expectedTurnID, err := s.peekActiveTurnID(ctx, sessionID)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("inspect clarification turn before pause: %w", err)
+	}
+	return session, expectedTurnID, &expectedTurnID, nil
 }
 
 // cancelAgentSilent cancels the agent turn without creating a visible message
@@ -865,7 +993,10 @@ func (s *Service) logSilentCancelReconciled(taskID, sessionID string, err error)
 		zap.Error(err))
 }
 
-func (s *Service) cancelClarificationWatchdogsForSession(sessionID, reason string) {
+func (s *Service) cancelClarificationWatchdogsForSession(
+	sessionID, reason string,
+	payload *lifecycle.AgentStreamEventPayload,
+) {
 	if sessionID == "" {
 		return
 	}
@@ -875,6 +1006,15 @@ func (s *Service) cancelClarificationWatchdogsForSession(sessionID, reason strin
 	s.clarificationWatchdogs.Range(func(key, value interface{}) bool {
 		keyStr, ok := key.(string)
 		if !ok || !strings.HasPrefix(keyStr, prefix) {
+			return true
+		}
+		// Silent cancellation may synchronously emit a frame for the captured
+		// execution/prompt. Ignore only that operation-owned identity. A newer
+		// execution or prompt generation remains authoritative and cancels the
+		// watchdog even while the fallback cancellation is blocked.
+		if entry, ok := value.(*clarificationWatchdogEntry); ok &&
+			entry.isRecoveryCancellationActive() &&
+			s.clarificationRecoveryOwnsStreamEvent(sessionID, payload) {
 			return true
 		}
 		s.clarificationWatchdogs.Delete(keyStr)
@@ -890,6 +1030,53 @@ func (s *Service) cancelClarificationWatchdogsForSession(sessionID, reason strin
 			zap.String("session_id", sessionID),
 			zap.String("reason", reason),
 			zap.Int("count", cancelled))
+	}
+}
+
+func (s *Service) clarificationRecoveryOwnsStreamEvent(
+	sessionID string,
+	payload *lifecycle.AgentStreamEventPayload,
+) bool {
+	if payload == nil || payload.Data == nil {
+		return false
+	}
+	operation := s.currentCancellation(sessionID)
+	if operation == nil || operation.kind != cancellationKindSilent {
+		return false
+	}
+	if !clarificationRecoveryCancellationFrame(payload) {
+		// Message, thinking, and tool frames are always live activity. Even an
+		// exact execution/generation match cannot prove that those frames came
+		// from the cancellation rather than the agent's normal work.
+		return false
+	}
+	identity, ready := s.cancellationIdentitySnapshot(operation)
+	if !ready || identity.executionID == "" || identity.promptGeneration == 0 {
+		// Recovery may ignore a frame only when both immutable parts of the
+		// cancellation identity are present on the frame. Missing identity is
+		// independent activity by definition, not evidence of cancellation.
+		return false
+	}
+	eventExecutionID := payload.ExecutionID
+	if eventExecutionID == "" {
+		eventExecutionID = payload.AgentID
+	}
+	return eventExecutionID != "" &&
+		eventExecutionID == identity.executionID &&
+		payload.Data.PromptGeneration == identity.promptGeneration
+}
+
+func clarificationRecoveryCancellationFrame(payload *lifecycle.AgentStreamEventPayload) bool {
+	if payload == nil || payload.Data == nil {
+		return false
+	}
+	switch payload.Data.Type {
+	case "session_info", "session_status":
+		return true
+	case agentEventComplete:
+		return extractStopReason(payload) == stopReasonCancelled
+	default:
+		return false
 	}
 }
 

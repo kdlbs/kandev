@@ -66,10 +66,15 @@ func (f *fakeQueueAccessAuthorizer) AuthorizeTaskSessionAccess(context.Context, 
 }
 
 type mockQueueDrainer struct {
-	calls     int
-	sessionID string
-	drained   bool
-	err       error
+	calls             int
+	sessionID         string
+	drained           bool
+	err               error
+	autoRunCalls      int
+	autoRunEnabled    bool
+	autoRunResult     bool
+	autoRunDispatched bool
+	autoRunErr        error
 }
 
 type fakeReferenceSubmissionValidator struct {
@@ -119,6 +124,13 @@ func (m *mockQueueDrainer) DrainQueuedMessage(_ context.Context, sessionID strin
 	m.calls++
 	m.sessionID = sessionID
 	return m.drained, m.err
+}
+
+func (m *mockQueueDrainer) SetQueueAutoRun(_ context.Context, sessionID string, enabled bool) (bool, bool, error) {
+	m.autoRunCalls++
+	m.sessionID = sessionID
+	m.autoRunEnabled = enabled
+	return m.autoRunResult, m.autoRunDispatched, m.autoRunErr
 }
 
 func setupQueueHandlers(t *testing.T) (*QueueHandlers, *messagequeue.Service) {
@@ -183,6 +195,9 @@ func TestQueueHandlersDenyUnauthorizedSessionActions(t *testing.T) {
 			return map[string]interface{}{"session_id": "s", "entry_id": id, "content": "changed"}
 		}},
 		{name: "drain", action: ws.ActionMessageQueueDrain, call: (*QueueHandlers).wsDrainQueue, body: func(string) map[string]interface{} { return map[string]interface{}{"session_id": "s"} }},
+		{name: "auto-run", action: ws.ActionMessageQueueAutoRunSet, call: (*QueueHandlers).wsSetAutoRun, body: func(string) map[string]interface{} {
+			return map[string]interface{}{"session_id": "s", "enabled": false}
+		}},
 		{name: "send now", action: ws.ActionMessageQueueSendNow, call: (*QueueHandlers).wsSendNow, body: func(string) map[string]interface{} {
 			return map[string]interface{}{"session_id": "s", "scope": orchestrator.QueueSendNowScopeEntry, "entry_id": "q"}
 		}},
@@ -570,6 +585,102 @@ func TestWsDrainQueue(t *testing.T) {
 		handlers, _ := setupQueueHandlersWithDrainer(t, &mockQueueDrainer{err: errors.New("boom")})
 		response, err := handlers.wsDrainQueue(context.Background(),
 			createTestMessage(t, ws.ActionMessageQueueDrain, map[string]interface{}{"session_id": "s"}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, ws.ErrorCodeInternalError, parseError(t, response).Code)
+	})
+}
+
+func TestQueueHandlers_AutoRunSetContract(t *testing.T) {
+	const action = "message.queue.auto_run.set"
+
+	t.Run("registers action and returns authoritative result", func(t *testing.T) {
+		drainer := &mockQueueDrainer{autoRunResult: false, autoRunDispatched: false}
+		handlers, _ := setupQueueHandlersWithDrainer(t, drainer)
+		dispatcher := ws.NewDispatcher()
+		handlers.RegisterHandlers(dispatcher)
+		require.True(t, dispatcher.HasHandler(action))
+
+		response, err := dispatcher.Dispatch(context.Background(), createTestMessage(t, action, map[string]interface{}{
+			"session_id": "s",
+			"enabled":    false,
+		}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+		assert.Equal(t, 1, drainer.autoRunCalls)
+		assert.Equal(t, "s", drainer.sessionID)
+		assert.False(t, drainer.autoRunEnabled)
+		var payload map[string]interface{}
+		require.NoError(t, json.Unmarshal(response.Payload, &payload))
+		assert.Equal(t, false, payload["auto_run"])
+		assert.Equal(t, false, payload["dispatched"])
+	})
+
+	t.Run("requires explicit boolean", func(t *testing.T) {
+		drainer := &mockQueueDrainer{}
+		handlers, _ := setupQueueHandlersWithDrainer(t, drainer)
+		dispatcher := ws.NewDispatcher()
+		handlers.RegisterHandlers(dispatcher)
+
+		response, err := dispatcher.Dispatch(context.Background(), createTestMessage(t, action, map[string]interface{}{
+			"session_id": "s",
+		}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, ws.ErrorCodeValidation, parseError(t, response).Code)
+		assert.Equal(t, 0, drainer.autoRunCalls)
+
+		response, err = dispatcher.Dispatch(context.Background(), createTestMessage(t, action, map[string]interface{}{
+			"session_id": "s",
+			"enabled":    "yes",
+		}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, ws.ErrorCodeBadRequest, parseError(t, response).Code)
+		assert.Equal(t, 0, drainer.autoRunCalls)
+	})
+
+	t.Run("authorizes before mutation", func(t *testing.T) {
+		drainer := &mockQueueDrainer{}
+		authorizer := &fakeQueueAccessAuthorizer{sessionErr: errors.New("denied")}
+		handlers, _ := setupQueueHandlersWithDrainer(t, drainer)
+		handlers.accessAuthorizer = authorizer
+		dispatcher := ws.NewDispatcher()
+		handlers.RegisterHandlers(dispatcher)
+
+		response, err := dispatcher.Dispatch(context.Background(), createTestMessage(t, action, map[string]interface{}{
+			"session_id": "hidden",
+			"enabled":    true,
+		}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, queueAccessDenied, parseError(t, response).Message)
+		assert.Equal(t, 1, authorizer.sessionCalls)
+		assert.Equal(t, 0, drainer.autoRunCalls)
+	})
+
+	t.Run("reports unavailable controller", func(t *testing.T) {
+		handlers, _ := setupQueueHandlers(t)
+		dispatcher := ws.NewDispatcher()
+		handlers.RegisterHandlers(dispatcher)
+		response, err := dispatcher.Dispatch(context.Background(), createTestMessage(t, action, map[string]interface{}{
+			"session_id": "s",
+			"enabled":    true,
+		}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, ws.ErrorCodeInternalError, parseError(t, response).Code)
+	})
+
+	t.Run("reports controller failure", func(t *testing.T) {
+		drainer := &mockQueueDrainer{autoRunErr: errors.New("storage unavailable")}
+		handlers, _ := setupQueueHandlersWithDrainer(t, drainer)
+		dispatcher := ws.NewDispatcher()
+		handlers.RegisterHandlers(dispatcher)
+		response, err := dispatcher.Dispatch(context.Background(), createTestMessage(t, action, map[string]interface{}{
+			"session_id": "s",
+			"enabled":    true,
+		}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeError, response.Type)
 		assert.Equal(t, ws.ErrorCodeInternalError, parseError(t, response).Code)

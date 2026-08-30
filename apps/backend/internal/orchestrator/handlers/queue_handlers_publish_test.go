@@ -66,12 +66,15 @@ func TestPublishStatusIncludesTaskIDWhenResolvable(t *testing.T) {
 	msg := &messagequeue.QueuedMessage{SessionID: "s1", TaskID: "task-1", Content: "x", QueuedBy: messagequeue.QueuedByUser}
 	_, err := svc.QueueMessageWithMetadata(ctx, msg.SessionID, msg.TaskID, msg.Content, "", msg.QueuedBy, false, nil, nil)
 	require.NoError(t, err)
+	require.NoError(t, svc.SetAutoRun(ctx, "s1", false))
 
 	handlers.publishStatus(ctx, "s1")
 
 	require.NotNil(t, events.lastData, "expected a published queue status event")
 	require.Equal(t, "task-1", events.lastData["task_id"])
 	require.Equal(t, "s1", events.lastData["session_id"])
+	require.Equal(t, false, events.lastData["auto_run"])
+	require.Equal(t, true, events.lastData["merge_enabled"])
 }
 
 func TestWsQueueMessagePublishesUserPromptActivity(t *testing.T) {

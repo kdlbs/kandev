@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-creator-session-resolution"]
 plan: "plan.md"
-spec: "../../specs/tasks/mcp-task-agent-profile-default/spec.md"
+spec: "../../specs/tasks/requirements/mcp-task-agent-profile-default.md"
 ---
 
 # Task 03: Explain creator-session default

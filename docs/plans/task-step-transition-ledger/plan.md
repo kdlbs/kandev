@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/workflow/task-step-transition-ledger/spec.md
+spec: docs/specs/tasks/requirements/workflow-task-step-transition-ledger.md
 created: 2026-08-13
 status: draft
 ---
@@ -434,7 +434,7 @@ No store slice, hook, component, or API client changes.
 
 | What | File | How |
 |---|---|---|
-| A new production statement mutating `tasks.workflow_step_id` fails the build until registered | `internal/task/repository/sqlite/step_transition_writers_pin_test.go` (new) | `go/parser` over the package's non-test files; collect functions whose body contains a string literal matching `INSERT INTO tasks` or an `UPDATE tasks ... workflow_step_id` assignment; assert set equality against the seven registered names |
+| A new production statement mutating `tasks.workflow_step_id` fails the build until registered | `internal/task/repository/sqlite/step_transition_writers_pin_test.go` (new) | `go/parser` scans `apps/backend/internal` recursively; resolve package constants and `fmt.Sprintf` column setters, qualify identities by package and receiver, and assert set equality against the registered names |
 | A ledger row bumps the expvar counter for its trigger and logs `telemetry.metric.step_transition_written` | `internal/steptelemetry/metrics_test.go` (new) | Read the expvar map; assert with `zaptest`'s observed logs |
 | A stamped/unstamped turn bumps the turn counter and logs `telemetry.metric.turn_stamped` | same | Both branches |
 | Boot emits one health line per registered contract with existence, activation, count, recency | `internal/telemetrycontract/health_test.go` (new) | Observed logs against a seeded DB |
@@ -558,7 +558,7 @@ is subsumed by the equal-values check above it) — harmless, left as-is rather
 than churning a working file for a no-op cleanup.
 
 **Test-honesty audit** against all ~47 GIVEN/WHEN/THEN scenarios in
-`docs/specs/workflow/task-step-transition-ledger/spec.md` § Scenarios, by
+`docs/specs/tasks/requirements/workflow-task-step-transition-ledger.md` § Scenarios, by
 category:
 
 | Category | Scenarios | Result |
@@ -623,6 +623,107 @@ skipped, or had its assertions loosened.
 **E2E:** none, confirmed twice — the spec states zero user-visible surfaces,
 and this step's mechanical file-diff check independently confirms zero
 `apps/web/` changes on the branch.
+
+---
+
+## Review Round 1 / Round 2 — test-rigor follow-up on the writer-health pinning gate
+
+A later Kandev task (`fix-mcp-deferred-mov_428h3jqo`) opened a follow-up card
+strengthening `TestStepTransitionWritersArePinned` and its supporting
+detector (`findWorkflowStepIDMutators` in
+`step_transition_writers_pin_test.go`) against seven mutation-proven false
+negatives, then ran two adversarial review rounds against the fix (a
+Kandev-internal review leg plus an independent cross-vendor `codex` leg each
+round). This entry is the durable receipt Review Round 1 required and Review
+Round 2 confirmed was still missing from this file after Build round 2's
+commit message (`84a466d44`) claimed — inaccurately — that it had already
+been recorded here. Recording it now closes that gap.
+
+**What Round 1 found and Round 2 confirmed fixed:**
+1. The production scan was rooted at this package's own directory (`"."`),
+   not the whole backend source tree, so recursion into subdirectories bought
+   the gate nothing against a writer added in a sibling package. Fixed by
+   `findBackendSourceRoot`, which walks up to `apps/backend/internal`.
+2. The Postgres concurrency test relied on a `sync.WaitGroup` barrier, which
+   guarantees simultaneous start but not actual lock contention — reintroducing
+   the historical bug it exists to catch produced only 7/20 failures (~35%).
+   Fixed by `TestPostgresReadTaskStepInTxBlocksOnConcurrentRowLock`, a
+   channel-gated deterministic lock-hold test mirroring
+   `turn_step_stamp_postgres_test.go`'s existing pattern. The test now polls
+   `pg_stat_activity` to confirm that the competing backend is waiting on the
+   row lock, and it uses the repository clock seam to prove the transition
+   timestamp is sampled after lock release; the same reintroduced bug fails
+   5/5.
+3. (Round 2, new) `funcIdentity()` keyed registered writers as
+   `"ReceiverType.FuncName"` with no package qualification. Since this
+   codebase declares a type literally named `Repository` in 11 different
+   backend packages, a same-named method in any of them collided with an
+   already-registered entry and the gate missed it. Fixed by qualifying the
+   identity with the writer's package directory relative to the scan root
+   (`"task/repository/sqlite/Repository.updateTaskTx"`), plus a permanent
+   regression fixture (`TestFindWorkflowStepIDMutatorsQualifiesByPackage`)
+   proving two packages with colliding receiver-type-and-method names are now
+   reported as two distinct writers, not collapsed into one.
+
+**Both-ways (fail-then-pass) receipt for the evasive-shapes fixture test,**
+run against the actual pre-fix detector, not reconstructed from memory:
+
+```
+$ git show 9fe867f9f:apps/backend/internal/task/repository/sqlite/step_transition_writers_pin_test.go \
+  > /tmp/pin_old_detector_source.go
+# extracted the pre-fix functionMutatesWorkflowStepID/literalMutatesWorkflowStepID
+# (BasicLit-only — no Sprintf handling, no const resolution, bare-name keys —
+# i.e. exactly origin/main's shape before this card's fixes) into a standalone
+# `go run` program and ran it against the current three fixture files.
+$ go run /tmp/pin_old_detector_repro/main.go
+found["constHoistedStepMutator"]        = false   # (a) unreachable: literal is const-hoisted, old detector only walked BasicLit
+found["sprintfInterpolatedStepMutator"] = false   # (b) unreachable: old detector had no Sprintf handling at all
+found["updateTaskTx"]                   = true    # (c) RepoA and RepoB collapse into one bare-name key — a duplicate masked as a single hit, not a miss
+```
+
+3 of the 5 fixture shapes were genuinely undetectable (or miscounted) under
+the pre-fix detector, confirming the fixtures encode real false negatives,
+not hypothetical ones. Post-fix, all 5 pass —
+`TestFindWorkflowStepIDMutatorsCatchesEvasiveShapes`, run fresh:
+
+```
+$ go test ./internal/task/repository/sqlite/ -run TestFindWorkflowStepIDMutatorsCatchesEvasiveShapes -v -count=1
+--- PASS: TestFindWorkflowStepIDMutatorsCatchesEvasiveShapes (0.00s)
+```
+
+**Package-qualification receipt (Round 2, Finding A), live decoy in a real
+backend package, not a synthetic fixture:**
+
+```
+$ cat > internal/office/repository/sqlite/zz_review_collision_tmp.go   # package sqlite, a DIFFERENT
+package sqlite                                                        # backend package than the real
+                                                                       # writer's internal/task/repository/sqlite
+func (r *Repository) updateTaskTx() string {
+	return "UPDATE tasks SET workflow_step_id = ? WHERE id = ?"
+}
+
+$ go build ./internal/office/...                                                    # clean
+$ go test ./internal/task/repository/sqlite/ -run TestStepTransitionWritersArePinned -v -count=1
+--- FAIL: TestStepTransitionWritersArePinned
+    function(s) [office/repository/sqlite/Repository.updateTaskTx] contain a
+    statement that mutates tasks.workflow_step_id but are not registered...
+$ rm internal/office/repository/sqlite/zz_review_collision_tmp.go
+$ git status --porcelain internal/office/ internal/task/                            # empty — clean revert
+```
+
+Before the Round 2 fix this exact decoy passed silently (the collision with
+the already-registered `"Repository.updateTaskTx"` entry masked it); after
+the fix it is reported under its own package-qualified identity and fails
+the gate as intended.
+
+**Process note, disclosed rather than omitted:** while drafting this card's
+own Kandev task plan during Round 2, the reviewer wrote a sentence claiming
+the evasive-shapes both-ways receipt above had already been re-verified
+before that verification had actually been run — the same class of
+unsubstantiated claim this section exists to prevent. It was caught before
+being reported anywhere external, and the real verification (shown above)
+was performed immediately after. Recorded here so the fix's provenance is
+honest rather than convenient.
 
 ---
 

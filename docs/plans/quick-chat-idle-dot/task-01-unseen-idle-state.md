@@ -5,7 +5,7 @@ status: complete
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/quick-chat-idle-dot/spec.md"
+spec: "../../specs/ui/requirements/quick-chat-idle-dot.md"
 ---
 
 # Task 01: Unseen-idle state in the UI slice
@@ -58,7 +58,7 @@ survives hydration of a different workspace's session list.
   - `apps/web/hooks/domains/session/use-session-actions.ts` — `remove` success path calls `removeQuickChatSession(sessionId)` after `removeTaskSession(taskId, sessionId)`.
   - `apps/web/components/task/sessions-dropdown.tsx` — `handleDeleteSession` calls `removeQuickChatSession(sessionId)` after the successful direct `session.delete` (before `loadSessions(true)`).
   - `apps/web/hooks/use-quick-chat-resync.ts` — captures `syncRevisionByWorkspace[workspaceId]` before the HTTP fetch, discards a stale tab list when the epoch moved, and applies the returned `task_sessions` rows PER-ROW: a row whose live store row has a newer `updated_at` is skipped (checking BEFORE every side effect, including `setTaskSession`).
-  
+
   - `apps/web/components/quick-chat/use-quick-chat-modal.ts` (or the rename helper) — the optimistic rename flow bumps `syncRevisionByWorkspace` before `persistQuickChatRename`.
   - `apps/web/components/quick-chat/use-quick-chat-modal.ts` — `handleConfirmClose` routes the NON-setup branch through `removeQuickChatSession(sessionId)` (tombstones) after the successful `deleteQuickChatTask`, and the non-setup no-taskId branch uses the same cleanup (via the ownership lookup); only setup-tab closes keep `closeQuickChatSession`.
   - `apps/web/lib/state/slices/ui/ui-slice.ts` — default state (all five fields) and THIN action wrappers only: the ownership-index, tombstone, revision-epoch, ledger-pruning, marker-cleanup, and `removeQuickChatSession` state transitions are EXTRACTED into `quick-chat-sync.ts` / a dedicated `quick-chat-lifecycle.ts` module (pure reducers + helpers) so `ui-slice.ts` stays ≤600 lines and every function ≤100 lines (AGENTS.md caps, enforced by `apps/web/eslint.config.mjs`).

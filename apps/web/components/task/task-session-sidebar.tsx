@@ -29,6 +29,7 @@ import {
 } from "./task-select-helpers";
 import { useArchivedTaskState } from "./task-archived-context";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
+import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { useGroupedSidebarView } from "./task-session-sidebar-grouped-view";
 import { useSidebarLinkActions } from "./task-session-sidebar-link-actions";
 import { buildArchivedSidebarItem } from "./task-session-sidebar-archived-item";
@@ -198,23 +199,8 @@ function useArchiveActions(store: StoreApi) {
   const [archivingTaskId, setArchivingTaskId] = useState<string | null>(null);
   const [isArchiving, setIsArchiving] = useState(false);
 
-  const handleArchiveTask = useCallback(
-    (taskId: string) => {
-      const state = store.getState();
-      const task = findSidebarTask(state, taskId);
-      setArchivingTask({
-        id: taskId,
-        title: task?.title ?? t("task:thisTask"),
-        executorType: task?.primaryExecutorType,
-      });
-    },
-    [store],
-  );
-
-  const handleArchiveConfirm = useCallback(
-    async (opts: { cascade: boolean }) => {
-      if (!archivingTask) return;
-      const taskId = archivingTask.id;
+  const runArchive = useCallback(
+    async (taskId: string, opts: { cascade?: boolean }) => {
       setIsArchiving(true);
       setArchivingTaskId(taskId);
       try {
@@ -227,7 +213,32 @@ function useArchiveActions(store: StoreApi) {
         setArchivingTask((current) => (current?.id === taskId ? null : current));
       }
     },
-    [archivingTask, archiveAndSwitch],
+    [archiveAndSwitch],
+  );
+
+  const handleArchiveTask = useCallback(
+    (taskId: string, opts?: { cascade?: boolean }) => {
+      if (opts) {
+        void runArchive(taskId, opts);
+        return;
+      }
+      const state = store.getState();
+      const task = findSidebarTask(state, taskId);
+      setArchivingTask({
+        id: taskId,
+        title: task?.title ?? t("task:thisTask"),
+        executorType: task?.primaryExecutorType,
+      });
+    },
+    [runArchive, store, t],
+  );
+
+  const handleArchiveConfirm = useCallback(
+    async (opts: { cascade: boolean }) => {
+      if (!archivingTask) return;
+      await runArchive(archivingTask.id, opts);
+    },
+    [archivingTask, runArchive],
   );
 
   return {
@@ -458,6 +469,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   const store = useAppStoreApi();
   const { t } = useTranslation();
   useRepositories(workspaceId);
+  useWorkspaceMRs(workspaceId);
   const pathname = usePathname();
 
   const {
