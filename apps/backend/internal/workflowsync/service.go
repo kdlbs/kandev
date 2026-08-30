@@ -88,6 +88,7 @@ type Service struct {
 	// providers while that wait is in progress.
 	automaticMu       sync.Mutex
 	automaticInFlight map[string]struct{}
+	automaticWG       sync.WaitGroup
 
 	// workspaceAuthorizer enforces per-user workspace scoping. Nil (unit
 	// tests, or a caller with no identity in context — internal callers like
@@ -467,7 +468,9 @@ func (s *Service) dispatchAutomaticSync(ctx context.Context, workspaceID string)
 	s.automaticInFlight[workspaceID] = struct{}{}
 	s.automaticMu.Unlock()
 
+	s.automaticWG.Add(1)
 	go func() {
+		defer s.automaticWG.Done()
 		defer func() {
 			s.automaticMu.Lock()
 			delete(s.automaticInFlight, workspaceID)
@@ -475,6 +478,10 @@ func (s *Service) dispatchAutomaticSync(ctx context.Context, workspaceID string)
 		}()
 		_, _ = s.syncWorkspace(ctx, workspaceID, syncAutomatic)
 	}()
+}
+
+func (s *Service) waitAutomaticSyncs() {
+	s.automaticWG.Wait()
 }
 
 func isSyncDue(cfg *Config, now time.Time) bool {

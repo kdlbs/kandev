@@ -62,6 +62,7 @@ func (p *Poller) Stop() {
 	p.started = false
 	p.cancel()
 	p.wg.Wait()
+	p.svc.waitAutomaticSyncs()
 }
 
 // loop waits a full interval before the first sync so boot doesn't hammer
