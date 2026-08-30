@@ -320,6 +320,58 @@ test("buildEntry rejects verifier identity that differs from the curated release
   assert.match(error, /verified package identity/);
 });
 
+test("buildEntry rejects a release checksum that differs from the verified package", async () => {
+  const directory = await fs.mkdtemp(
+    path.join(os.tmpdir(), "registry-verifier-test-"),
+  );
+  const verifierPath = path.join(directory, "plugin-package-verify");
+  await fs.writeFile(
+    verifierPath,
+    `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(
+      JSON.stringify(verifiedPackage()),
+    )});\n`,
+    { mode: 0o755 },
+  );
+  const originalVerifier = process.env.PLUGIN_PACKAGE_VERIFIER;
+  process.env.PLUGIN_PACKAGE_VERIFIER = verifierPath;
+  globalThis.fetch = async (url) => {
+    const requested = String(url);
+    if (requested.includes("/releases/latest")) {
+      return jsonResponse({
+        tag_name: "v1.2.0",
+        assets: [
+          {
+            name: "foo-1.2.0.tar.gz",
+            browser_download_url: "https://dl/foo-1.2.0.tar.gz",
+          },
+          {
+            name: "checksums.txt",
+            browser_download_url: "https://dl/checksums.txt",
+          },
+        ],
+      });
+    }
+    if (requested.endsWith("foo-1.2.0.tar.gz")) {
+      return new Response("package bytes");
+    }
+    if (requested.endsWith("checksums.txt")) {
+      return new Response(`${"b".repeat(64)}  foo-1.2.0.tar.gz\n`);
+    }
+    throw new Error(`unexpected fetch: ${requested}`);
+  };
+
+  try {
+    const { record, error } = await buildEntry({ id: "foo", repo: "acme/foo" });
+    assert.equal(record, undefined);
+    assert.match(error, /release checksum mismatch/);
+  } finally {
+    if (originalVerifier === undefined)
+      delete process.env.PLUGIN_PACKAGE_VERIFIER;
+    else process.env.PLUGIN_PACKAGE_VERIFIER = originalVerifier;
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("buildIndex retains only still-curated prior records while valid peers advance", async () => {
   const specs = [
     { id: "a", repo: "o/a" },
