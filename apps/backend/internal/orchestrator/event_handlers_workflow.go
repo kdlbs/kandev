@@ -4049,6 +4049,15 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 	s.setSessionResetInProgress(sessionID, true)
 	defer s.setSessionResetInProgress(sessionID, false)
 
+	if err := s.quiesceActiveResetTurn(ctx, taskID, sessionID, stepName); err != nil {
+		s.logger.Error("failed to quiesce active turn before context reset",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("step_name", stepName),
+			zap.Error(err))
+		return false
+	}
+
 	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	if err != nil || executionID == "" {
 		// No in-memory execution exists yet — most commonly a lazily-resumed
@@ -4112,6 +4121,49 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 	// after the provider reset succeeds. The token is handled explicitly above.
 	s.clearPersistedResetState(ctx, sessionID, session)
 	return true
+}
+
+// quiesceActiveResetTurn stops an in-flight turn through the internal silent
+// cancellation coordinator before the provider conversation is replaced. It
+// deliberately does not call Service.CancelAgent: that path evaluates the
+// user's configured cancellation completion and creates a visible message.
+func (s *Service) quiesceActiveResetTurn(
+	ctx context.Context,
+	taskID, sessionID, stepName string,
+) error {
+	active, err := s.hasActiveResetTurn(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("inspect active turn for context reset: %w", err)
+	}
+	if !active {
+		return nil
+	}
+	if _, err := s.cancelAgentSilentActionWithKind(
+		ctx, taskID, sessionID, nil, cancellationKindInternal,
+	); err != nil {
+		return fmt.Errorf("cancel active turn for context reset at %s: %w", stepName, err)
+	}
+	return nil
+}
+
+// hasActiveResetTurn combines the in-memory admission records with the
+// durable turn service. Either record is enough to fail closed before a
+// provider context replacement; missing an active turn could let the old
+// provider stream race the new conversation.
+func (s *Service) hasActiveResetTurn(ctx context.Context, sessionID string) (bool, error) {
+	if s.turnService != nil {
+		turnID, err := s.peekActiveTurnID(ctx, sessionID)
+		if err != nil {
+			return false, err
+		}
+		if turnID != "" {
+			return true, nil
+		}
+	}
+	if _, ok := s.activeTurns.Load(sessionID); ok {
+		return true, nil
+	}
+	return s.reservedPromptTurnID(sessionID) != "", nil
 }
 
 // reconcileFailedContextReset handles a reset that moved the live ACP session
