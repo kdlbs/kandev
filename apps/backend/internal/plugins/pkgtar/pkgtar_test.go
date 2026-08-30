@@ -246,6 +246,62 @@ func TestInspect_RejectsInvalidManifest(t *testing.T) {
 	}
 }
 
+func TestVerify_ValidatesIntegrityWithoutInstalling(t *testing.T) {
+	pkg := writeValidPackage(t, "2.3.4")
+	watchDir := t.TempDir()
+
+	result, err := Verify(bytes.NewReader(pkg))
+	if err != nil {
+		t.Fatalf("Verify() unexpected error: %v", err)
+	}
+	if result.Manifest.ID != "kandev-plugin-hello" || result.Manifest.Version != "2.3.4" {
+		t.Fatalf("Verify() manifest = %+v, want kandev-plugin-hello@2.3.4", result.Manifest)
+	}
+	entries, err := os.ReadDir(watchDir)
+	if err != nil {
+		t.Fatalf("ReadDir() unexpected error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("Verify() wrote %d entries, want no filesystem side effects", len(entries))
+	}
+}
+
+func TestVerify_DoesNotRequireCurrentHostExecutable(t *testing.T) {
+	otherPlatform := "plan9-amd64"
+	files := map[string][]byte{
+		"manifest.yaml":                  []byte(fmt.Sprintf(managedManifestTemplate, "1.0.0", otherPlatform, otherPlatform)),
+		"server/plugin-" + otherPlatform: []byte("binary"),
+	}
+	pkg := buildRawPackageWithChecksums(t, files)
+
+	if _, err := Verify(bytes.NewReader(pkg)); err != nil {
+		t.Fatalf("Verify() unexpected platform error: %v", err)
+	}
+}
+
+func TestVerify_RejectsPackageWithoutAnyDeclaredExecutable(t *testing.T) {
+	otherPlatform := "plan9-amd64"
+	files := map[string][]byte{
+		"manifest.yaml": []byte(fmt.Sprintf(managedManifestTemplate, "1.0.0", otherPlatform, otherPlatform)),
+		"ui/bundle.js":  []byte("plugin UI"),
+	}
+	pkg := buildRawPackageWithChecksums(t, files)
+
+	_, err := Verify(bytes.NewReader(pkg))
+	if !errors.Is(err, ErrManifestInvalid) {
+		t.Fatalf("Verify() error = %v, want ErrManifestInvalid", err)
+	}
+}
+
+func TestVerify_RejectsMissingChecksums(t *testing.T) {
+	pkg := buildRawPackage(t, buildValidFiles("1.0.0"))
+
+	_, err := Verify(bytes.NewReader(pkg))
+	if !errors.Is(err, ErrMissingChecksums) {
+		t.Fatalf("Verify() error = %v, want ErrMissingChecksums", err)
+	}
+}
+
 func TestInstall_BadChecksumRejected(t *testing.T) {
 	destRoot := t.TempDir()
 	files := buildValidFiles("1.0.0")

@@ -106,6 +106,13 @@ type InstallResult struct {
 	Signed bool
 }
 
+// VerifyResult describes a package that passed the archive, checksum, and
+// manifest safety gates without being installed.
+type VerifyResult struct {
+	Manifest *manifest.Manifest
+	Signed   bool
+}
+
 // Inspect streams r (a kandev plugin tar.gz package), extracts only
 // manifest.yaml into memory (capped at maxManifestSize), and parses +
 // validates it. It performs no checksum verification and writes nothing to
@@ -170,17 +177,12 @@ func parseManifestEntry(tr *tar.Reader, size int64) (*manifest.Manifest, error) 
 //     executables to 0755, then atomically rename into place. Fails with
 //     ErrVersionExists if destRoot/<id>/<version> already exists.
 func Install(r io.Reader, destRoot string) (*InstallResult, error) {
-	files, err := readArchive(r)
+	files, verified, err := verifyArchive(r)
 	if err != nil {
 		return nil, err
 	}
 
-	signed, err := verifyPackageIntegrity(files)
-	if err != nil {
-		return nil, err
-	}
-
-	m, execPath, err := validateInstallManifest(files)
+	m, execPath, err := validateInstallManifest(files, verified.Manifest)
 	if err != nil {
 		return nil, err
 	}
@@ -194,8 +196,33 @@ func Install(r io.Reader, destRoot string) (*InstallResult, error) {
 		Manifest:    m,
 		InstallPath: versionDir,
 		Version:     m.Version,
-		Signed:      signed,
+		Signed:      verified.Signed,
 	}, nil
+}
+
+// Verify applies the same bounded archive, internal checksum, signature, and
+// managed-manifest validation used by Install. It does not select a host
+// executable, extract files, or write to disk, so central registry automation
+// can validate multi-platform packages safely.
+func Verify(r io.Reader) (*VerifyResult, error) {
+	_, result, err := verifyArchive(r)
+	return result, err
+}
+
+func verifyArchive(r io.Reader) (map[string][]byte, *VerifyResult, error) {
+	files, err := readArchive(r)
+	if err != nil {
+		return nil, nil, err
+	}
+	signed, err := verifyPackageIntegrity(files)
+	if err != nil {
+		return nil, nil, err
+	}
+	m, err := validatePackageManifest(files)
+	if err != nil {
+		return nil, nil, err
+	}
+	return files, &VerifyResult{Manifest: m, Signed: signed}, nil
 }
 
 // verifyPackageIntegrity requires checksums.txt, verifies every listed
@@ -233,22 +260,30 @@ func verifyPackageIntegrity(files map[string][]byte) (signed bool, err error) {
 // validateInstallManifest parses manifest.yaml out of files, validates it,
 // requires it to be runtime-managed, and resolves the current host
 // platform's executable path (which must itself be present in files).
-func validateInstallManifest(files map[string][]byte) (*manifest.Manifest, string, error) {
+func validatePackageManifest(files map[string][]byte) (*manifest.Manifest, error) {
 	manifestData, ok := files[manifestFileName]
 	if !ok {
-		return nil, "", fmt.Errorf("%w: missing %s", ErrManifestInvalid, manifestFileName)
+		return nil, fmt.Errorf("%w: missing %s", ErrManifestInvalid, manifestFileName)
 	}
 	m, err := manifest.Parse(manifestData)
 	if err != nil {
-		return nil, "", fmt.Errorf("%w: %v", ErrManifestInvalid, err)
+		return nil, fmt.Errorf("%w: %v", ErrManifestInvalid, err)
 	}
 	if err := m.Validate(); err != nil {
-		return nil, "", fmt.Errorf("%w: %v", ErrManifestInvalid, err)
+		return nil, fmt.Errorf("%w: %v", ErrManifestInvalid, err)
 	}
 	if !m.IsManaged() {
-		return nil, "", fmt.Errorf("%w: manifest is not runtime-managed (runtime.type must be \"binary\")", ErrManifestInvalid)
+		return nil, fmt.Errorf("%w: manifest is not runtime-managed (runtime.type must be \"binary\")", ErrManifestInvalid)
 	}
+	for _, execPath := range m.Runtime.Executables {
+		if _, ok := files[execPath]; ok {
+			return m, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: package contains none of its declared executables", ErrManifestInvalid)
+}
 
+func validateInstallManifest(files map[string][]byte, m *manifest.Manifest) (*manifest.Manifest, string, error) {
 	execPath, ok := m.ExecutableFor(runtime.GOOS, runtime.GOARCH)
 	if !ok {
 		return nil, "", fmt.Errorf("%w: %s-%s", ErrPlatformNotSupported, runtime.GOOS, runtime.GOARCH)

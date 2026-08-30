@@ -12,26 +12,29 @@ on:
     paths:
       - "plugin-registry/**"
       - ".github/workflows/plugin-registry-index.yml"
+      - ".github/workflows/plugin-registry-release-poll.yml"
   # Validate registry edits before merge (the build job runs; the separate
   # deploy job is gated to non-PR events, so a PR never deploys to Pages).
   pull_request:
     paths:
       - "plugin-registry/**"
       - ".github/workflows/plugin-registry-index.yml"
+      - ".github/workflows/plugin-registry-release-poll.yml"
   # Manual rebuild.
   workflow_dispatch:
   # Allow a sibling workflow (star refresh) to invoke this build.
   workflow_call:
+    inputs:
+      reason:
+        description: Why the reusable registry build was requested
+        required: false
+        type: string
   # Daily rebuild — keeps star counts and latest versions fresh without commits.
   schedule:
     - cron: "0 6 * * *"
 
-# Least-privilege for a Pages deploy: read source, write Pages, mint the OIDC
-# token deploy-pages needs.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # Only one concurrent Pages deployment; let an in-progress deploy finish.
 concurrency:
@@ -46,6 +49,8 @@ jobs:
   build:
     name: Build index.json
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -57,17 +62,37 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Test build script
-        run: node --test plugin-registry/build-index.test.mjs
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: apps/backend/go.mod
+
+      - name: Test registry automation
+        run: node --test plugin-registry/*.test.mjs
+
+      - name: Test package verifier
+        working-directory: apps/backend
+        run: go test ./cmd/plugin-package-verify ./internal/plugins/pkgtar
+
+      - name: Build package verifier
+        working-directory: apps/backend
+        run: go build -o "$RUNNER_TEMP/plugin-package-verify" ./cmd/plugin-package-verify
+
+      - name: Fetch last known-good official index
+        run: |
+          curl --fail --location --retry 3 --retry-all-errors \
+            --connect-timeout 10 --max-time 30 \
+            --output "$RUNNER_TEMP/prior-plugin-index.json" \
+            https://kdlbs.github.io/kandev/plugins/index.json
 
       - name: Build index.json
-        # Zero-dependency Node script (stdlib + global fetch); no install step.
-        # GITHUB_TOKEN authenticates the GitHub API calls. It reads the public
-        # plugin repos fine here; at larger scale, reading arbitrary external
-        # repos' stars reliably may want a PAT with `public_repo` scope set as
-        # this secret instead.
+        # The Node script uses stdlib + global fetch and delegates archive
+        # verification to the Go binary built above. GITHUB_TOKEN authenticates
+        # read-only GitHub API calls for the curated public repositories.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PLUGIN_PACKAGE_VERIFIER: ${{ runner.temp }}/plugin-package-verify
+          PLUGIN_REGISTRY_PRIOR_INDEX: ${{ runner.temp }}/prior-plugin-index.json
         run: node plugin-registry/build-index.mjs
 
       - name: Stage Pages site
@@ -75,10 +100,6 @@ jobs:
         run: |
           mkdir -p _site/plugins
           cp plugin-registry/index.json _site/plugins/index.json
-
-      - name: Configure Pages
-        if: github.event_name != 'pull_request'
-        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Upload Pages artifact
         if: github.event_name != 'pull_request'
@@ -94,10 +115,17 @@ jobs:
     if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
       - name: Deploy to GitHub Pages
         id: deploy
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
