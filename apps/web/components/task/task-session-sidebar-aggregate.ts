@@ -117,8 +117,10 @@ function reconcileTaskProjection(
     _workflowId: activeWorkflowId,
   };
   const task = activeTaskIsNewer(active, projected) ? activeTask : projected;
+  const interrupted = task.interrupted ?? projected.interrupted;
   return {
     ...task,
+    ...(interrupted === undefined ? {} : { interrupted }),
     // Workflow snapshots can re-stamp queued_prompt_count at an equal
     // revision, so treat the snapshot as the incoming reading and the live
     // projection as the cached fallback.

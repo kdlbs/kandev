@@ -337,6 +337,29 @@ describe("aggregateSidebarTasks task lifecycle freshness", () => {
   });
 });
 
+describe("aggregateSidebarTasks interruption projection", () => {
+  it("preserves projected interruption when an equal-timestamp active task omits it", () => {
+    const projected = makeTask("t1", "s1", {
+      state: "REVIEW",
+      interrupted: true,
+      updatedAt: ACTIVE_TASK_UPDATED_AT,
+    });
+    const active = makeTask("t1", "s1", {
+      state: "REVIEW",
+      updatedAt: ACTIVE_TASK_UPDATED_AT,
+    });
+
+    const result = aggregateSidebarTasks(
+      { "wf-1": makeSnapshot([makeStep("s1", 0)], [projected]) },
+      "wf-1",
+      [active],
+      [makeStep("s1", 0)],
+    );
+
+    expect(result.allTasks[0].interrupted).toBe(true);
+  });
+});
+
 describe("buildPendingFlags / readTaskPendingFlags", () => {
   it("aggregates permission from a secondary waiting session", () => {
     const flags = buildPendingFlags(

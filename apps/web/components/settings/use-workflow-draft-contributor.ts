@@ -58,7 +58,12 @@ function useWorkflowDraftPersistence(args: WorkflowDraftContributorArgs) {
   const saveProgressRef = useRef(createWorkflowDraftSaveProgress());
   const saveFailedRef = useRef(false);
   const revision = JSON.stringify({
-    workflow: [workflow.name, workflow.description, workflow.prompt, workflow.agent_profile_id],
+    workflow: [
+      workflow.name,
+      workflow.description ?? "",
+      workflow.prompt ?? "",
+      workflow.agent_profile_id ?? "",
+    ],
     steps: workflowSteps,
   });
   const latestRevisionRef = useRef(revision);

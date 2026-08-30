@@ -676,6 +676,11 @@ test.describe("PR status badge", () => {
       mergeable_state: "dirty",
     });
     await expect(icon).toHaveAttribute("data-pr-count", "2", { timeout: 15_000 });
+    // Expanding the compact action slot shifts the trailing icon left. Hover
+    // the row first so the layout is settled before opening the tooltip.
+    await taskRow.hover();
+    const compactMenuSlot = taskRow.getByTestId("sidebar-task-change-request-menu-slot");
+    await expect(compactMenuSlot).toHaveCSS("width", "24px");
     await icon.hover();
 
     const multiSummary = visibleTaskPRSummary(testPage);
