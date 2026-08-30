@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -102,6 +103,8 @@ func (s *Service) validateBlockerReferences(ctx context.Context, req *CreateTask
 // for remote-contribution association and workspace-policy attach. A failed
 // rollback is logged, never substituted for the original error: the caller
 // needs to know why the create failed, not why the cleanup did.
+// Cleanup is detached from caller cancellation but remains bounded, because a
+// canceled request can be the reason finalization failed in the first place.
 //
 // Dependency edges are removed first. blocked_by is written one edge at a
 // time, so a failure on the second entry leaves the first already persisted,
@@ -109,8 +112,10 @@ func (s *Service) validateBlockerReferences(ctx context.Context, req *CreateTask
 // back only the task row would trade an orphan task for an orphan edge
 // pointing at a task that no longer exists.
 func (s *Service) rollbackPartialTask(ctx context.Context, taskID string, cause error) error {
-	s.deleteDependencyEdgesForTask(ctx, taskID)
-	if err := s.tasks.DeleteTask(ctx, taskID); err != nil {
+	rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	s.deleteDependencyEdgesForTask(rollbackCtx, taskID)
+	if err := s.tasks.DeleteTask(rollbackCtx, taskID); err != nil {
 		s.logger.Error("rollback delete failed; task left in inconsistent state",
 			zap.String("task_id", taskID), zap.Error(err))
 	}

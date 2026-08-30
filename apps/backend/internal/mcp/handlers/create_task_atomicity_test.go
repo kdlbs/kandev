@@ -80,6 +80,14 @@ func (f *atomicityFixture) taskCount(t *testing.T) int {
 }
 
 func (f *atomicityFixture) create(t *testing.T, overrides map[string]interface{}) *ws.Message {
+	return f.createWithContext(t, context.Background(), overrides)
+}
+
+func (f *atomicityFixture) createWithContext(
+	t *testing.T,
+	ctx context.Context,
+	overrides map[string]interface{},
+) *ws.Message {
 	t.Helper()
 	payload := map[string]interface{}{
 		"workspace_id":     f.workspaceID,
@@ -92,7 +100,7 @@ func (f *atomicityFixture) create(t *testing.T, overrides map[string]interface{}
 	for k, v := range overrides {
 		payload[k] = v
 	}
-	resp, err := f.handlers.handleCreateTask(context.Background(), makeWSMessage(t, ws.ActionMCPCreateTask, payload))
+	resp, err := f.handlers.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, payload))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	return resp
@@ -108,11 +116,17 @@ type memBlockerRepo struct {
 	// post-insert write. Zero disables the injection.
 	failCreateAfter int
 	creates         int
+	cancelOnFailure context.CancelFunc
+	cleanupCtxErr   error
+	cleanupDeadline bool
 }
 
 func (m *memBlockerRepo) CreateTaskBlocker(_ context.Context, blocker *orchmodels.TaskBlocker) error {
 	m.creates++
 	if m.failCreateAfter > 0 && m.creates > m.failCreateAfter {
+		if m.cancelOnFailure != nil {
+			m.cancelOnFailure()
+		}
 		return errors.New("blocker vanished")
 	}
 	m.edges = append(m.edges, blocker)
@@ -121,7 +135,9 @@ func (m *memBlockerRepo) CreateTaskBlocker(_ context.Context, blocker *orchmodel
 
 // DeleteTaskBlockersForTask satisfies the optional taskDependencyCleaner seam
 // the service uses to tear down edges for a deleted task.
-func (m *memBlockerRepo) DeleteTaskBlockersForTask(_ context.Context, taskID string) error {
+func (m *memBlockerRepo) DeleteTaskBlockersForTask(ctx context.Context, taskID string) error {
+	m.cleanupCtxErr = ctx.Err()
+	_, m.cleanupDeadline = ctx.Deadline()
 	kept := m.edges[:0]
 	for _, edge := range m.edges {
 		if edge.TaskID != taskID && edge.BlockerTaskID != taskID {
@@ -318,4 +334,25 @@ func TestHandleCreateTask_RollbackAlsoRemovesDependencyEdges(t *testing.T) {
 	errorPayload(t, resp)
 	require.Equal(t, before, f.taskCount(t), "failed create must leave no orphan task row")
 	require.Empty(t, f.blockers.edges, "rollback must also remove the edge that was already written")
+}
+
+func TestHandleCreateTask_RollbackSurvivesCallerCancellation(t *testing.T) {
+	f := newAtomicityFixture(t)
+	first := f.createdTaskID(t, "Blocker one")
+	second := f.createdTaskID(t, "Blocker two")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	f.blockers.failCreateAfter = 1
+	f.blockers.cancelOnFailure = cancel
+	before := f.taskCount(t)
+
+	resp := f.createWithContext(t, ctx, map[string]interface{}{
+		"title":      "Blocked child",
+		"blocked_by": []string{first, second},
+	})
+
+	errorPayload(t, resp)
+	require.Equal(t, before, f.taskCount(t), "rollback must delete the partial task after caller cancellation")
+	require.NoError(t, f.blockers.cleanupCtxErr, "rollback cleanup must not inherit caller cancellation")
+	require.True(t, f.blockers.cleanupDeadline, "rollback cleanup must remain bounded")
 }
