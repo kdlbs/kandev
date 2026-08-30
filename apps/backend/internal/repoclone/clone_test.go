@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -111,6 +112,38 @@ func TestInspectLocalRepositoryRemoteRefState(t *testing.T) {
 	}
 	if state != RemoteRefStateHasRefs {
 		t.Fatalf("populated local remote state = %q, want %q", state, RemoteRefStateHasRefs)
+	}
+}
+
+func TestInspectRemoteRefStateParsesStdoutWhenGitWritesDiagnostics(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell wrapper test is Unix-only")
+	}
+
+	scriptDir := t.TempDir()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("find git: %v", err)
+	}
+	shim := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"ls-remote\" ]; then\n" +
+		"  printf '0123456789012345678901234567890123456789 refs/heads/main\\n'\n" +
+		"  printf 'warning: using a redirected remote\\n' >&2\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"exec \"" + realGit + "\" \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(scriptDir, "git"), []byte(shim), 0o755); err != nil {
+		t.Fatalf("write git shim: %v", err)
+	}
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolHTTPS, "", logger.Default())
+	state, err := cloner.InspectRemoteRefState(context.Background(), "https://github.com/acme/widgets.git", "", "")
+	if err != nil {
+		t.Fatalf("InspectRemoteRefState() error = %v", err)
+	}
+	if state != RemoteRefStateHasRefs {
+		t.Fatalf("remote state = %q, want %q", state, RemoteRefStateHasRefs)
 	}
 }
 

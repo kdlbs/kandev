@@ -1,6 +1,7 @@
 package repoclone
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -47,10 +48,13 @@ func (c *Cloner) InspectLocalRepositoryRemoteRefState(
 		return RemoteRefStateUnknown, err
 	}
 	defer cleanup()
-	output, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	output, err := subproc.RunGitOutputClass(ctx, subproc.GitLifecycle, cmd)
 	if err != nil {
+		diagnostic := redactCloneOutput(stderr.String(), "")
 		return RemoteRefStateUnknown, fmt.Errorf("inspect local repository refs: %s: %w",
-			redactCloneOutput(string(output), ""), err)
+			strings.TrimSpace(diagnostic), err)
 	}
 	return parseRemoteRefState(string(output))
 }
@@ -62,10 +66,13 @@ func (c *Cloner) remoteRefState(ctx context.Context, cloneURL string, auth *clon
 		return RemoteRefStateUnknown, err
 	}
 	defer cleanup()
-	output, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	output, err := subproc.RunGitOutputClass(ctx, subproc.GitLifecycle, cmd)
 	if err != nil {
+		diagnostic := redactCloneOutput(stderr.String(), authToken(auth))
 		return RemoteRefStateUnknown, fmt.Errorf("inspect remote refs: %s: %w",
-			redactCloneOutput(string(output), authToken(auth)), err)
+			strings.TrimSpace(diagnostic), err)
 	}
 	return parseRemoteRefState(string(output))
 }

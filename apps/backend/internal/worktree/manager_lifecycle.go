@@ -201,7 +201,9 @@ func (m *Manager) ensureEmptyRemoteBaseline(ctx context.Context, req *CreateRequ
 	baseline, err := gitbootstrap.Ensure(ctx, req.RepositoryPath, req.BaseBranch)
 	if errors.Is(err, gitbootstrap.ErrBaselineConflict) {
 		req.RemoteRefState = repoclone.RemoteRefStateHasRefs
-		return "", nil
+		req.RemoteSyncHandled = false
+		baseBranch := strings.TrimPrefix(strings.TrimSpace(req.BaseBranch), "origin/")
+		return strings.TrimPrefix(baseBranch, "refs/heads/"), nil
 	}
 	if err != nil {
 		return "", fmt.Errorf("seed empty-remote local baseline: %w", err)
@@ -1727,7 +1729,8 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		repoLock.Unlock()
 		m.releaseRepoLock(req.RepositoryPath)
 	}()
-	if _, err := m.ensureEmptyRemoteBaseline(ctx, &req); err != nil {
+	emptyRemoteBaseRef, err := m.ensureEmptyRemoteBaseline(ctx, &req)
+	if err != nil {
 		return nil, err
 	}
 
@@ -1763,7 +1766,7 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		}
 	}
 	refreshedStartPoint := ""
-	if req.RemoteSyncHandled && req.RemoteContribution == nil {
+	if req.RemoteSyncHandled && req.RemoteContribution == nil && emptyRemoteBaseRef == "" {
 		sourceBranch := existing.Branch
 		if req.CheckoutBranch != "" {
 			sourceBranch = req.CheckoutBranch
@@ -1787,6 +1790,11 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 			branchCmd := m.newNonInteractiveGitCmd(ctx, req.RepositoryPath, "branch", existing.Branch, contributionRef)
 			if output, branchErr := runGitCmdCombinedOutput(ctx, branchCmd); branchErr != nil {
 				return nil, fmt.Errorf("restore contribution branch: %s: %w", strings.TrimSpace(string(output)), branchErr)
+			}
+		} else if emptyRemoteBaseRef != "" {
+			branchCmd := m.newNonInteractiveGitCmd(ctx, req.RepositoryPath, "branch", existing.Branch, emptyRemoteBaseRef)
+			if output, branchErr := runGitCmdCombinedOutput(ctx, branchCmd); branchErr != nil {
+				return nil, fmt.Errorf("restore empty-remote worktree branch: %s: %w", strings.TrimSpace(string(output)), branchErr)
 			}
 		} else {
 			if _, fetchErr := m.fetchBranchToLocalWithPolicy(

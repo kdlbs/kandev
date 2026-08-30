@@ -197,12 +197,7 @@ func createCommit(ctx context.Context, repoPath, tree string) (string, error) {
 		"-c", "commit.gpgSign=false",
 		"commit-tree", tree, "-m", commitMessage,
 	)
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_DATE="+commitDate,
-		"GIT_COMMITTER_DATE="+commitDate,
-		"GIT_CONFIG_NOSYSTEM=1",
-		"GIT_TERMINAL_PROMPT=0",
-	)
+	cmd.Env = baselineGitEnvironment()
 	output, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", strings.TrimSpace(string(output)), err)
@@ -212,6 +207,33 @@ func createCommit(ctx context.Context, repoPath, tree string) (string, error) {
 		return "", errors.New("git commit-tree returned no object ID")
 	}
 	return commit, nil
+}
+
+func baselineGitEnvironment() []string {
+	const (
+		authorName     = "GIT_AUTHOR_NAME="
+		authorEmail    = "GIT_AUTHOR_EMAIL="
+		committerName  = "GIT_COMMITTER_NAME="
+		committerEmail = "GIT_COMMITTER_EMAIL="
+	)
+	env := make([]string, 0, len(os.Environ())+6)
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, authorName) || strings.HasPrefix(entry, authorEmail) ||
+			strings.HasPrefix(entry, committerName) || strings.HasPrefix(entry, committerEmail) {
+			continue
+		}
+		env = append(env, entry)
+	}
+	return append(env,
+		"GIT_AUTHOR_DATE="+commitDate,
+		"GIT_COMMITTER_DATE="+commitDate,
+		"GIT_AUTHOR_NAME="+identityName,
+		"GIT_AUTHOR_EMAIL="+identityEmail,
+		"GIT_COMMITTER_NAME="+identityName,
+		"GIT_COMMITTER_EMAIL="+identityEmail,
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_TERMINAL_PROMPT=0",
+	)
 }
 
 func createRefs(ctx context.Context, repoPath string, baseline Baseline) error {

@@ -11,7 +11,10 @@ import (
 )
 
 func TestEnsureCreatesDeterministicEmptyBaseline(t *testing.T) {
-	t.Parallel()
+	t.Setenv("GIT_AUTHOR_NAME", "Inherited Author")
+	t.Setenv("GIT_AUTHOR_EMAIL", "inherited-author@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "Inherited Committer")
+	t.Setenv("GIT_COMMITTER_EMAIL", "inherited-committer@example.com")
 
 	repoPath := t.TempDir()
 	runGit(t, repoPath, "init", "-b", "main", ".")
@@ -48,6 +51,20 @@ func TestEnsureCreatesDeterministicEmptyBaseline(t *testing.T) {
 	}
 	if second.Commit != first.Commit {
 		t.Fatalf("second baseline commit = %q, want deterministic %q", second.Commit, first.Commit)
+	}
+
+	t.Setenv("GIT_AUTHOR_NAME", "Another Author")
+	t.Setenv("GIT_AUTHOR_EMAIL", "another-author@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "Another Committer")
+	t.Setenv("GIT_COMMITTER_EMAIL", "another-committer@example.com")
+	otherRepo := t.TempDir()
+	runGit(t, otherRepo, "init", "-b", "main", ".")
+	other, err := gitbootstrap.Ensure(context.Background(), otherRepo, "main")
+	if err != nil {
+		t.Fatalf("Ensure() with another inherited identity error = %v", err)
+	}
+	if other.Commit != first.Commit {
+		t.Fatalf("baseline changed with inherited Git identity: first=%q other=%q", first.Commit, other.Commit)
 	}
 }
 

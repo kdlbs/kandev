@@ -249,6 +249,15 @@ func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string
 			continue
 		}
 
+		// Empty-remote publication uses an immutable commit-to-branch refspec.
+		// Validate it before the generic slash-bearing reference check.
+		if source, destination, ok := strings.Cut(arg, ":refs/heads/"); ok {
+			if securityutil.LooksLikeCommitSHA(source) &&
+				securityutil.IsValidBranchName(destination) {
+				continue
+			}
+		}
+
 		// Validate branch references (e.g., "origin/branch", "upstream/main")
 		// This provides defense-in-depth even though branches are validated at call sites
 		if strings.Contains(arg, "/") {

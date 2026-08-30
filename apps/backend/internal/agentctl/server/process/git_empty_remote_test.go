@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -166,7 +167,96 @@ func TestGitOperatorPushReportsTaskBranchFailureAfterBasePublication(t *testing.
 	}
 }
 
+func TestGitOperatorPushRetainsMarkerWhenUnrelatedRefAppearsDuringBasePublication(t *testing.T) {
+	repoDir, originDir, operator := setupEmptyRemoteTaskRepo(t)
+	baseline, present, err := gitbootstrap.Validate(context.Background(), repoDir, "main")
+	if err != nil || !present {
+		t.Fatalf("Validate() = (%+v, %v, %v), want a baseline", baseline, present, err)
+	}
+	hook := "#!/bin/sh\n" +
+		"while read old new ref; do\n" +
+		"  if [ \"$ref\" = \"refs/heads/main\" ] && [ \"$new\" != \"0000000000000000000000000000000000000000\" ]; then\n" +
+		"    tree=$(printf '' | env -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_QUARANTINE_PATH git hash-object -t tree -w --stdin)\n" +
+		"    commit=$(printf 'tree %s\\nauthor External User \u003cexternal@example.com\u003e 0 +0000\\ncommitter External User \u003cexternal@example.com\u003e 0 +0000\\n\\nexternal history\\n' \"$tree\" | env -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_QUARANTINE_PATH git hash-object -t commit -w --stdin)\n" +
+		"    env -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_QUARANTINE_PATH git update-ref refs/heads/external \"$commit\"\n" +
+		"  fi\n" +
+		"done\n" +
+		"exit 0\n"
+	writeExecutable(t, filepath.Join(originDir, "hooks", "pre-receive"), hook)
+
+	result, err := operator.Push(context.Background(), false, false)
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if result.Success || result.ErrorCode != emptyRemoteRemoteChangedErrorCode {
+		t.Fatalf("Push() result = %+v, want remote-changed failure", result)
+	}
+	markerRef, err := gitbootstrap.MarkerRef("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasLocalRef(t, repoDir, markerRef) {
+		t.Fatalf("bootstrap marker %q was retired after publication race", markerRef)
+	}
+	if got := strings.TrimSpace(runGit(t, originDir, "rev-parse", "refs/heads/main")); got != baseline.Commit {
+		t.Fatalf("remote base = %q, want the validated baseline %q", got, baseline.Commit)
+	}
+	if !hasLocalRef(t, originDir, "refs/heads/external") {
+		t.Fatal("unrelated remote ref was not preserved")
+	}
+	if hasLocalRef(t, originDir, "refs/heads/feature/empty") {
+		t.Fatal("task branch was published after publication race")
+	}
+}
+
+func TestGitOperatorPushPublishesValidatedBaselineCommit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell wrapper test is Unix-only")
+	}
+
+	repoDir, originDir, operator := setupEmptyRemoteTaskRepo(t)
+	baseline, present, err := gitbootstrap.Validate(context.Background(), repoDir, "main")
+	if err != nil || !present {
+		t.Fatalf("Validate() = (%+v, %v, %v), want a baseline", baseline, present, err)
+	}
+	scriptDir := t.TempDir()
+	moveMarker := filepath.Join(scriptDir, "moved")
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("find git: %v", err)
+	}
+	shim := fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = \"ls-remote\" ] && [ ! -f %q ]; then\n  touch %q\n  %q update-ref refs/heads/main refs/heads/feature/empty\nfi\nexec %q \"$@\"\n", moveMarker, moveMarker, realGit, realGit)
+	writeExecutable(t, filepath.Join(scriptDir, "git"), shim)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result, err := operator.Push(context.Background(), false, false)
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if result.Success || result.ErrorCode != emptyRemoteRemoteChangedErrorCode {
+		t.Fatalf("Push() result = %+v, want local-baseline conflict", result)
+	}
+	if hasLocalRef(t, originDir, "refs/heads/main") {
+		if got := strings.TrimSpace(runGit(t, originDir, "rev-parse", "refs/heads/main")); got != baseline.Commit {
+			t.Fatalf("remote base = %q, want the validated baseline %q", got, baseline.Commit)
+		}
+	}
+	markerRef, err := gitbootstrap.MarkerRef("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasLocalRef(t, repoDir, markerRef) {
+		t.Fatalf("bootstrap marker %q was retired after local baseline changed", markerRef)
+	}
+	if hasLocalRef(t, originDir, "refs/heads/feature/empty") {
+		t.Fatal("task branch was published after local baseline changed")
+	}
+}
+
 func TestGitOperatorCreatePRPublishesEmptyRemoteBaseBeforeProviderRequest(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell wrapper test is Unix-only")
+	}
 	_, originDir, operator := setupEmptyRemoteTaskRepo(t)
 	const remoteURL = "https://github.com/acme/empty.git"
 
@@ -191,6 +281,9 @@ func TestGitOperatorCreatePRPublishesEmptyRemoteBaseBeforeProviderRequest(t *tes
 }
 
 func TestGitOperatorCreatePRRejectsDifferentBootstrapBaseBeforePush(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell wrapper test is Unix-only")
+	}
 	repoDir, originDir, operator := setupEmptyRemoteTaskRepo(t)
 	const remoteURL = "https://github.com/acme/empty.git"
 
@@ -215,6 +308,9 @@ func TestGitOperatorCreatePRRejectsDifferentBootstrapBaseBeforePush(t *testing.T
 }
 
 func TestGitOperatorPushRedactsEmptyRemoteProbeFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell wrapper test is Unix-only")
+	}
 	_, _, operator := setupEmptyRemoteTaskRepo(t)
 	const secret = "super-secret-token"
 	scriptDir := t.TempDir()

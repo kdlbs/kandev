@@ -121,6 +121,7 @@ Completed.
 - Task 05: public-doc tests (61 passed), public-doc validation (41 pages), and `git diff --check -- docs/public` passed.
 - Repository specification lint passed with `python3 scripts/lint-spec-files.py --all`.
 - Review round: marker retirement, marked-base recovery, base mismatch, and credential-safe probe regressions passed; backend lint reports 0 issues.
+- Review fixup coverage: absence-lease publication, immutable baseline refspec, post-publication race detection, local-baseline recreation, refreshed local-base fallback, deterministic Git identity, stdout/stderr separation, and credential-safe diagnostics are covered by focused regressions.
 
 ## Risks
 
