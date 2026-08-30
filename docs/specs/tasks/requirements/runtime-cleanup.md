@@ -44,10 +44,16 @@ and safe when runtimes or task rows are already gone.
   recovery, while branches with unpublished commits shall retain their original
   local ref and restore exactly.
 - **AC-TASKS-RUNTIME-CLEANUP-001.11:** Managed branch compaction shall delete only
-  one explicit local ref with Git's non-force branch deletion. It shall never
+  one explicit local ref with an atomic expected-head compare-and-delete. It shall never
   delete remote refs, protected/base refs, inferred branch globs, externally
   owned refs, or refs with legacy, missing, or ambiguous ownership metadata.
 - **AC-TASKS-RUNTIME-CLEANUP-001.12:** Terminal cleanup shall emit bounded
   attempted, deleted, and retained totals plus fixed retained-reason counts.
   Receipts and metrics shall not contain branch lists, repository contents, or
   credentials.
+- **AC-TASKS-RUNTIME-CLEANUP-001.13:** When archive cleanup retains a managed
+  branch because it is not yet integrated, storage maintenance shall revisit at
+  most a fixed number of archived, inactive worktree rows per run. It shall
+  revalidate that the task remains archived immediately before invoking the
+  worktree manager's existing safety policy. A later unarchive shall restore a
+  safely compacted branch from its exact recorded head.

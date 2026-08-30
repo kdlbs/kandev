@@ -142,22 +142,17 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
 
 ## Archive cleanup disposition
 
-Direct and cascade archive use the same cleanup disposition. A caller-specific
-Boolean must not change it:
+Direct and cascade archive share one disposition: stop runtimes, remove the
+physical worktree and mark its row deleted, but preserve the environment rows
+and recovery metadata. Duplicate snapshots cannot change that disposition.
+Unarchive reuses a retained branch or its exact compacted head; delete remains a
+separate operation that may remove owner rows.
 
-- Stop the task runtimes and remove executor-specific runtime resources.
-- Remove the physical worktree directory and mark its repository row deleted.
-- Preserve the owning `task_environments` row, every
-  `task_environment_repos` row and its recovery metadata, then apply the linked
-  fail-closed branch-retention ADR.
-
-If a worktree appears in both snapshots, every pass uses this disposition and
-must not delete a branch preserved earlier.
-
-Unarchive keeps the preserved environment link. Normal preparation uses a
-retained branch or recreates a safely compacted branch from its exact head before
-remote recovery. Delete remains separate and may remove owner rows after
-capturing its cleanup snapshot.
+Archive makes the first compaction attempt. Storage maintenance later selects
+at most 100 managed, deleted rows for still-archived tasks, without scanning
+branch names. The worktree manager alone owns safety policy and rechecks archive
+state before `git update-ref -d refs/heads/<branch> <expected-head-sha>`.
+Unarchive or head races retain retryable refs; success keeps the recovery SHA.
 
 ## Data Model
 

@@ -42,7 +42,8 @@ Delete it only when all of these conditions hold:
 4. `git merge-base --is-ancestor <branch-head> <integration-head>` succeeds.
 5. The exact branch head is persisted with compare-and-set and is unchanged when
    re-read immediately before deletion.
-6. `git branch -d -- <branch>` accepts the single explicit ref.
+6. `git update-ref -d refs/heads/<branch> <expected-head-sha>` atomically removes
+   the single explicit local ref only if its head is unchanged.
 
 Any missing metadata, ambiguous owner, active/shared reference, protected ref,
 failed probe, unique commit, compare-and-set loss, head race, or refused
@@ -62,6 +63,15 @@ to its batch cleaner exactly once. Aggregate attempted/deleted/retained receipts
 fixed retained-reason counts, and matching expvar counters provide bounded
 observability without branch lists or repository data.
 
+Archive cleanup is the first attempt, not the only attempt. A storage-maintenance
+provider selects at most 100 Kandev-owned rows whose tasks remain archived and
+whose worktrees are inactive and deleted. It delegates every selected row to the
+same manager policy and contains no branch-name scan or deletion logic. The
+manager conditionally persists the recovery head while the task is archived,
+rechecks archived state immediately before ref mutation, and rotates retained
+candidates by durable update time so bounded runs make progress. A safely
+compacted row keeps its recovery head and is no longer selected.
+
 ## Consequences
 
 - Fully integrated Kandev-created local branches no longer accumulate without
@@ -70,10 +80,12 @@ observability without branch lists or repository data.
   branches remain fail-closed.
 - Archive/unarchive preserves exact state whether the branch ref was retained or
   safely compacted.
+- Branches archived before integration receive a bounded later retry without an
+  install-wide Git ref scan.
 - New additive columns must survive SQLite and PostgreSQL ownership migrations
   and environment-repository CRUD.
-- Non-force deletion may conservatively retain a branch even after ancestry was
-  independently proven. Safety takes precedence over reclamation rate.
+- Expected-SHA deletion conservatively retains a branch advanced after ancestry
+  proof. Safety takes precedence over reclamation rate.
 
 ## Alternatives Considered
 

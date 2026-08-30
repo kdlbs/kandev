@@ -26,6 +26,9 @@ const (
 	gitNoTags                = "--no-tags"
 )
 
+// ArchivedBranchMaintenanceBatchLimit bounds one storage-maintenance revisit.
+const ArchivedBranchMaintenanceBatchLimit = 100
+
 // repoLockEntry tracks a repository lock and its reference count.
 type repoLockEntry struct {
 	mu       *sync.Mutex
@@ -124,6 +127,18 @@ type MultiRepoStore interface {
 type BranchMetadataStore interface {
 	CountWorktreeBranchOwners(ctx context.Context, repositoryID, branch string) (int, error)
 	PersistBranchRecoveryHead(ctx context.Context, worktreeID, expected, recoveryHead string) (bool, error)
+}
+
+// ArchivedBranchMaintenanceStore supplies only durable archived worktree
+// candidates. The Manager remains responsible for every Git safety check and
+// mutation after selection.
+type ArchivedBranchMaintenanceStore interface {
+	ListArchivedBranchCandidates(ctx context.Context, limit int) ([]*Worktree, error)
+	IsArchivedBranchCandidate(ctx context.Context, worktreeID string) (bool, error)
+	PersistArchivedBranchRecoveryHead(
+		ctx context.Context, worktreeID, expected, recoveryHead string,
+	) (bool, error)
+	TouchArchivedBranchCandidate(ctx context.Context, worktreeID string) error
 }
 
 // NewManager creates a new worktree manager.

@@ -33,13 +33,14 @@ const (
 	RetainedRecoveryPersistFailed BranchRetentionReason = "recovery_persist_failed"
 	RetainedHeadChanged           BranchRetentionReason = "head_changed"
 	RetainedSafeDeleteRefused     BranchRetentionReason = "safe_delete_refused"
+	RetainedArchiveStateChanged   BranchRetentionReason = "archive_state_changed"
 )
 
 type BranchCleanupReceipt struct {
-	Attempted       int
-	Deleted         int
-	Retained        int
-	RetainedReasons map[BranchRetentionReason]int
+	Attempted       int                           `json:"attempted"`
+	Deleted         int                           `json:"deleted"`
+	Retained        int                           `json:"retained"`
+	RetainedReasons map[BranchRetentionReason]int `json:"retained_reasons"`
 }
 
 var branchCleanupMetrics = expvar.NewMap("worktree_branch_cleanup_total")
@@ -94,6 +95,16 @@ func (r BranchCleanupReceipt) reasonFields() []zap.Field {
 var commitSHA = regexp.MustCompile(`^[0-9a-fA-F]{40}([0-9a-fA-F]{24})?$`)
 
 func (m *Manager) compactManagedBranch(ctx context.Context, wt *Worktree) BranchCleanupReceipt {
+	return m.compactManagedBranchWithMode(ctx, wt, false)
+}
+
+func (m *Manager) compactArchivedManagedBranch(ctx context.Context, wt *Worktree) BranchCleanupReceipt {
+	return m.compactManagedBranchWithMode(ctx, wt, true)
+}
+
+func (m *Manager) compactManagedBranchWithMode(
+	ctx context.Context, wt *Worktree, requireArchived bool,
+) BranchCleanupReceipt {
 	receipt := newBranchCleanupReceipt()
 	receipt.Attempted = 1
 	branchCleanupMetrics.Add("attempted", 1)
@@ -108,7 +119,7 @@ func (m *Manager) compactManagedBranch(ctx context.Context, wt *Worktree) Branch
 		receipt.retain(reason)
 		return receipt
 	}
-	if reason = m.persistRecoveryAndDeleteBranch(ctx, metadataStore, wt, branchHead); reason != "" {
+	if reason = m.persistRecoveryAndDeleteBranch(ctx, metadataStore, wt, branchHead, requireArchived); reason != "" {
 		receipt.retain(reason)
 		return receipt
 	}
@@ -179,25 +190,97 @@ func (m *Manager) verifiedIntegratedBranchHead(
 }
 
 func (m *Manager) persistRecoveryAndDeleteBranch(
-	ctx context.Context, metadataStore BranchMetadataStore, wt *Worktree, branchHead string,
+	ctx context.Context,
+	metadataStore BranchMetadataStore,
+	wt *Worktree,
+	branchHead string,
+	requireArchived bool,
 ) BranchRetentionReason {
-	persisted, err := metadataStore.PersistBranchRecoveryHead(ctx, wt.ID, wt.RecoveryHeadSHA, branchHead)
-	if err != nil || !persisted {
-		return RetainedRecoveryPersistFailed
+	persisted, reason := m.persistBranchRecoveryHead(
+		ctx, metadataStore, wt, branchHead, requireArchived,
+	)
+	if reason != "" {
+		return reason
 	}
 	wt.RecoveryHeadSHA = branchHead
+	if requireArchived && !m.archivedBranchMutationStillAllowed(ctx, metadataStore, wt, branchHead) {
+		return RetainedArchiveStateChanged
+	}
+	if !persisted {
+		return RetainedRecoveryPersistFailed
+	}
+	return m.deleteExpectedBranchRef(ctx, metadataStore, wt, branchHead)
+}
 
+func (m *Manager) persistBranchRecoveryHead(
+	ctx context.Context,
+	metadataStore BranchMetadataStore,
+	wt *Worktree,
+	branchHead string,
+	requireArchived bool,
+) (bool, BranchRetentionReason) {
+	if requireArchived {
+		maintenanceStore, ok := m.store.(ArchivedBranchMaintenanceStore)
+		if !ok {
+			return false, RetainedArchiveStateChanged
+		}
+		persisted, err := maintenanceStore.PersistArchivedBranchRecoveryHead(
+			ctx, wt.ID, wt.RecoveryHeadSHA, branchHead,
+		)
+		if err == nil && !persisted {
+			return false, RetainedArchiveStateChanged
+		}
+		if err != nil {
+			return false, RetainedRecoveryPersistFailed
+		}
+		return true, ""
+	}
+	persisted, err := metadataStore.PersistBranchRecoveryHead(ctx, wt.ID, wt.RecoveryHeadSHA, branchHead)
+	if err != nil || !persisted {
+		return false, RetainedRecoveryPersistFailed
+	}
+	return true, ""
+}
+
+func (m *Manager) archivedBranchMutationStillAllowed(
+	ctx context.Context, metadataStore BranchMetadataStore, wt *Worktree, branchHead string,
+) bool {
+	maintenanceStore := m.store.(ArchivedBranchMaintenanceStore)
+	eligible, err := maintenanceStore.IsArchivedBranchCandidate(ctx, wt.ID)
+	if err == nil && eligible {
+		return true
+	}
+	m.clearBranchRecoveryHead(ctx, metadataStore, wt, branchHead)
+	return false
+}
+
+func (m *Manager) deleteExpectedBranchRef(
+	ctx context.Context, metadataStore BranchMetadataStore, wt *Worktree, branchHead string,
+) BranchRetentionReason {
 	branchRef := "refs/heads/" + wt.Branch
-	currentHead, err := m.resolveCommit(ctx, wt.RepositoryPath, branchRef)
-	if err != nil || currentHead != branchHead {
-		return RetainedHeadChanged
+	cmd := m.newNonInteractiveGitCmd(ctx, wt.RepositoryPath, "update-ref", "-d", branchRef, branchHead)
+	output, err := runGitCmdCombinedOutput(ctx, cmd)
+	if err == nil {
+		return ""
 	}
-	cmd := m.newNonInteractiveGitCmd(ctx, wt.RepositoryPath, "branch", "-d", "--", wt.Branch)
-	if output, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
-		m.logger.Debug("safe managed branch deletion refused", zap.String("output", strings.TrimSpace(string(output))))
-		return RetainedSafeDeleteRefused
+	currentHead, resolveErr := m.resolveCommit(ctx, wt.RepositoryPath, branchRef)
+	if resolveErr == nil {
+		m.clearBranchRecoveryHead(ctx, metadataStore, wt, branchHead)
+		if currentHead != branchHead {
+			return RetainedHeadChanged
+		}
 	}
-	return ""
+	m.logger.Debug("exact managed branch deletion refused", zap.String("output", strings.TrimSpace(string(output))))
+	return RetainedSafeDeleteRefused
+}
+
+func (m *Manager) clearBranchRecoveryHead(
+	ctx context.Context, metadataStore BranchMetadataStore, wt *Worktree, branchHead string,
+) {
+	cleared, err := metadataStore.PersistBranchRecoveryHead(ctx, wt.ID, branchHead, "")
+	if err == nil && cleared {
+		wt.RecoveryHeadSHA = ""
+	}
 }
 
 func protectedBranchName(branch, protectedRef string) bool {

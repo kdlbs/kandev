@@ -454,6 +454,54 @@ func (m *Manager) CleanupWorktreesWithReceipt(
 	return receipt, err
 }
 
+// MaintainArchivedBranches revisits a bounded set of managed branches retained
+// by archive cleanup. Candidate selection is durable metadata only; the normal
+// manager policy still owns repository locking, liveness, ancestry, recovery,
+// and ref deletion.
+func (m *Manager) MaintainArchivedBranches(
+	ctx context.Context, limit int,
+) (BranchCleanupReceipt, error) {
+	receipt := newBranchCleanupReceipt()
+	if limit <= 0 {
+		return receipt, nil
+	}
+	if limit > ArchivedBranchMaintenanceBatchLimit {
+		limit = ArchivedBranchMaintenanceBatchLimit
+	}
+	maintenanceStore, ok := m.store.(ArchivedBranchMaintenanceStore)
+	if !ok {
+		return receipt, nil
+	}
+	candidates, err := maintenanceStore.ListArchivedBranchCandidates(ctx, limit)
+	if err != nil {
+		return receipt, err
+	}
+	for _, wt := range candidates {
+		if wt == nil {
+			continue
+		}
+		repoLock := m.getRepoLock(wt.RepositoryPath)
+		repoLock.Lock()
+		eligible, checkErr := maintenanceStore.IsArchivedBranchCandidate(ctx, wt.ID)
+		if checkErr != nil || !eligible {
+			candidateReceipt := newBranchCleanupReceipt()
+			candidateReceipt.Attempted = 1
+			branchCleanupMetrics.Add("attempted", 1)
+			candidateReceipt.retain(RetainedArchiveStateChanged)
+			receipt.merge(candidateReceipt)
+		} else {
+			receipt.merge(m.compactArchivedManagedBranch(ctx, wt))
+		}
+		repoLock.Unlock()
+		m.releaseRepoLock(wt.RepositoryPath)
+		if touchErr := maintenanceStore.TouchArchivedBranchCandidate(ctx, wt.ID); touchErr != nil && err == nil {
+			err = touchErr
+		}
+	}
+	m.logger.Info("archived managed branch maintenance receipt", receipt.reasonFields()...)
+	return receipt, err
+}
+
 func (m *Manager) cleanupWorktrees(ctx context.Context, worktrees []*Worktree, removeBranch bool) error {
 	_, err := m.cleanupWorktreesWithReceipt(ctx, worktrees, removeBranch)
 	return err

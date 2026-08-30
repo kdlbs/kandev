@@ -505,6 +505,86 @@ func (s *SQLiteStore) PersistBranchRecoveryHead(
 	return rows == 1, err
 }
 
+func (s *SQLiteStore) ListArchivedBranchCandidates(
+	ctx context.Context, limit int,
+) ([]*Worktree, error) {
+	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`
+		SELECT `+worktreeSelectCols+`
+		FROM task_environment_repos ter
+		INNER JOIN task_environments te ON ter.task_environment_id = te.id
+		INNER JOIN tasks t ON te.task_id = t.id
+		LEFT JOIN task_sessions s ON s.task_environment_id = ter.task_environment_id
+		LEFT JOIN repositories r ON ter.repository_id = r.id
+		WHERE t.archived_at IS NOT NULL
+		  AND ter.status = ?
+		  AND ter.deleted_at IS NOT NULL
+		  AND ter.worktree_branch_owner = ?
+		  AND COALESCE(ter.worktree_recovery_head_sha, '') = ''
+		  AND COALESCE(ter.worktree_id, '') <> ''
+		ORDER BY ter.updated_at ASC, ter.worktree_id ASC
+		LIMIT ?
+	`), StatusDeleted, BranchOwnerManaged, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return s.scanWorktrees(rows)
+}
+
+func (s *SQLiteStore) IsArchivedBranchCandidate(ctx context.Context, worktreeID string) (bool, error) {
+	var eligible bool
+	err := s.ro.QueryRowContext(ctx, s.ro.Rebind(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM task_environment_repos ter
+			INNER JOIN task_environments te ON ter.task_environment_id = te.id
+			INNER JOIN tasks t ON te.task_id = t.id
+			WHERE ter.worktree_id = ?
+			  AND t.archived_at IS NOT NULL
+			  AND ter.status = ?
+			  AND ter.deleted_at IS NOT NULL
+			  AND ter.worktree_branch_owner = ?
+		)
+	`), worktreeID, StatusDeleted, BranchOwnerManaged).Scan(&eligible)
+	return eligible, err
+}
+
+func (s *SQLiteStore) PersistArchivedBranchRecoveryHead(
+	ctx context.Context, worktreeID, expected, recoveryHead string,
+) (bool, error) {
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE task_environment_repos
+		SET worktree_recovery_head_sha = ?, updated_at = ?
+		WHERE worktree_id = ?
+		  AND status = ?
+		  AND deleted_at IS NOT NULL
+		  AND worktree_branch_owner = ?
+		  AND (COALESCE(worktree_recovery_head_sha, '') = ? OR worktree_recovery_head_sha = ?)
+		  AND EXISTS (
+			SELECT 1
+			FROM task_environments te
+			INNER JOIN tasks t ON te.task_id = t.id
+			WHERE te.id = task_environment_repos.task_environment_id
+			  AND t.archived_at IS NOT NULL
+		  )
+	`), recoveryHead, time.Now().UTC(), worktreeID, StatusDeleted, BranchOwnerManaged,
+		expected, recoveryHead)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}
+
+func (s *SQLiteStore) TouchArchivedBranchCandidate(ctx context.Context, worktreeID string) error {
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE task_environment_repos
+		SET updated_at = ?
+		WHERE worktree_id = ?
+	`), time.Now().UTC(), worktreeID)
+	return err
+}
+
 // scanWorktrees is a helper to scan multiple worktree rows. Task-keyed and
 // repository-keyed queries LEFT JOIN sessions (a worktree belongs to the task
 // environment, and a task may have zero or many sessions), so rows are
@@ -611,7 +691,8 @@ func (s *SQLiteStore) GetWorktreeBySessionAndRepository(ctx context.Context, ses
 
 // Ensure SQLiteStore implements both Store and MultiRepoStore.
 var (
-	_ Store               = (*SQLiteStore)(nil)
-	_ MultiRepoStore      = (*SQLiteStore)(nil)
-	_ BranchMetadataStore = (*SQLiteStore)(nil)
+	_ Store                          = (*SQLiteStore)(nil)
+	_ MultiRepoStore                 = (*SQLiteStore)(nil)
+	_ BranchMetadataStore            = (*SQLiteStore)(nil)
+	_ ArchivedBranchMaintenanceStore = (*SQLiteStore)(nil)
 )
