@@ -68,13 +68,15 @@ The recent merged E2E stabilization changes are relevant inputs:
 
 ## Technical approach
 
-The container jobs restore `/tmp/ms-playwright` before the current image pull
-and copy step. The cache key includes the runner OS and browser source identity,
-including the Playwright base-image reference and CI image definition hash. A
-verified hit skips the pull/copy step. A miss, stale, cache-service failure,
-or failed Chromium verification runs the existing extraction path and can
-populate the cache after a successful test setup. Cache actions are best-effort
-and cannot turn a healthy fallback into a failed E2E job.
+The container jobs resolve the `runtime-latest` convenience tag to an immutable
+sha256 digest, then restore `/tmp/ms-playwright` before the digest-pinned image
+pull and copy step. The cache key includes the runner OS, browser source,
+resolved image digest, and a run-specific primary-key suffix with a stable
+digest-scoped restore prefix. A verified exact or prefix hit skips the
+pull/copy step. A miss, stale, cache-service failure, or failed Chromium
+verification runs the existing digest-pinned extraction path and can populate
+the cache under a new primary key after successful setup. Cache actions are
+best-effort and cannot turn a healthy fallback into a failed E2E job.
 
 The review test anchors the final moved-file assertions to the selected file's
 existing review header/section boundary. Other lazy sections may still show a
@@ -123,10 +125,12 @@ measurements.
 
 ## Implementation results
 
-- The container workflow now restores and saves a Playwright browser cache
-  keyed by runner OS, browser source, and the CI image definition hash. Cache
-  verification gates the GHCR fallback, and setup state is written to the job
-  summary. Cache errors remain non-blocking.
+- The container workflow now resolves an immutable runtime image digest,
+  restores and saves a Playwright browser cache keyed by runner OS, browser
+  source, digest, and a run-specific suffix, and uses a stable digest-scoped
+  restore prefix. Cache verification gates the digest-pinned GHCR fallback,
+  and setup state is written to the job summary. Cache errors remain
+  non-blocking.
 - The review-file-status regression now scopes the moved-file assertions to its
   selected diff section. A 30-repeat host run with retries disabled passed all
   30 repetitions.
@@ -139,8 +143,10 @@ measurements.
   saving. Step summaries must report restore and verification duration before
   declaring success.
 - Concurrent first-run cache saves can race. The fallback remains valid and
-  the cache key is immutable; later runs must converge on a hit.
+  each run has a distinct primary key; the restore prefix selects the newest
+  compatible successful entry.
 - The runtime image may change without a browser-version change. Including the
-  checked-in image definition in the key is a conservative invalidation rule.
+  resolved image digest in the key is a conservative invalidation rule and
+  binds fallback extraction to the same image identity.
 - Hosted-runner queue capacity can dominate total workflow wall time. The
   rollout must compare job execution intervals and queue intervals separately.

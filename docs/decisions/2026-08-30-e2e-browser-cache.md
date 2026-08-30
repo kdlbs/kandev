@@ -20,16 +20,21 @@ change test selection or block a correct E2E run.
 ## Decision
 
 The host-runner container jobs use a GitHub Actions cache for the Playwright
-browser directory. The key includes the runner operating system and the exact
-browser source identity, including the Playwright base-image reference and the
-checked-in CI image definition.
+browser directory. The workflow resolves the `runtime-latest` convenience tag
+to a sha256 digest before it constructs the cache key. The key includes the
+runner operating system, the Playwright browser source, the resolved image
+digest, and a unique workflow run ID and attempt. A stable digest-scoped
+restore prefix selects the newest compatible entry.
 
 The job restores the cache before browser provisioning and verifies Chromium
-from the restored path. A verified hit skips the image pull and browser copy.
-A miss, stale key, cache-service error, or failed verification uses the
-existing pinned runtime-image extraction and smoke check. A successful
-fallback may populate the cache. Cache restore and save are best-effort
-acceleration steps and are reported separately from test correctness.
+from the restored path. A verified exact or prefix hit skips the image pull and
+browser copy. A miss, stale key, cache-service error, or failed verification
+uses the digest-pinned runtime-image extraction and smoke check. A successful
+fallback populates a new run-specific cache key, so a failed cache entry cannot
+remain the newest exact candidate forever. If the image digest cannot be
+resolved, the job fails before using the mutable tag. Cache restore and save
+are best-effort acceleration steps and are reported separately from test
+correctness.
 
 The cache contains browser binaries only. It does not contain source,
 credentials, Docker state, or test artifacts.
@@ -42,8 +47,9 @@ credentials, Docker state, or test artifacts.
   cost while creating a new cache entry.
 - Cache service incidents do not block E2E when the pinned-image fallback is
   healthy.
-- Updating the CI image definition invalidates the cache, including changes
-  that do not affect browsers. This is conservative and keeps the key simple.
+- Updating the runtime image digest invalidates the cache, including changes
+  that do not affect browsers. This is conservative and binds the cache to the
+  exact fallback image.
 - The workflow must report cache state and provisioning duration so a cache
   hit rate and actual wall-time reduction can be evaluated after merge.
 
@@ -66,4 +72,3 @@ the same explicit source key.
 Deferred. Host-image ownership would couple the Docker executor to runner
 provisioning and would not help arbitrary GitHub-hosted runners. Revisit only
 if cache hit rates or cache transfer time do not produce a measured gain.
-

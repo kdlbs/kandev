@@ -183,15 +183,20 @@ Dispatch the workflow with `fail_on_flaky=true` to set
 existing two-retry policy while the summary makes retry groups visible.
 
 Container-backed CI jobs also cache the browser directory used by the host
-runner. The cache key includes the runner OS, the Playwright `v1.61.1-noble`
-browser source, and the CI image definition hash. A verified hit sets
-`PLAYWRIGHT_BROWSERS_PATH=/tmp/ms-playwright` and skips the GHCR pull and
+runner. Each job first resolves the `runtime-latest` convenience tag to a
+sha256 image digest. The cache key includes the runner OS, the Playwright
+`v1.61.1-noble` browser source, that digest, and a run-specific primary-key
+suffix. Its stable restore prefix selects the newest compatible entry without
+making a rejected cache entry win forever. A verified exact or prefix match
+sets `PLAYWRIGHT_BROWSERS_PATH=/tmp/ms-playwright` and skips the GHCR pull and
 browser copy. A miss, stale entry, unavailable cache, or failed Chromium
-verification uses the pinned runtime-image extraction path. Cache operations
-are best-effort and cannot change the manifest or block a healthy fallback.
-The container job summary reports cache state, verification, extraction, save
-status, and elapsed setup time so cache transfer cost can be compared with the
-54-second browser provisioning baseline.
+verification uses the digest-pinned runtime-image extraction path. A fallback
+save uses the current run's primary key, so a repaired entry becomes the next
+candidate. Cache operations are best-effort and cannot change the manifest or
+block a healthy fallback. The container job summary reports the image digest,
+cache state, verification, extraction, save status, and total setup time so
+cache transfer cost can be compared with the 54-second browser provisioning
+baseline.
 
 ### Flake rate and trend
 

@@ -136,27 +136,50 @@ class DesktopE2EWorkflowContractTest(unittest.TestCase):
             "uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
             container_job,
         )
+        self.assertIn("id: playwright_image", container_job)
+        self.assertIn(
+            "image=ghcr.io/kdlbs/kandev-ci:runtime-latest",
+            container_job,
+        )
+        self.assertIn(
+            'docker buildx imagetools inspect "$image"',
+            container_job,
+        )
         self.assertIn("path: /tmp/ms-playwright", container_job)
         self.assertIn(
-            "key: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ hashFiles('.github/docker/ci-base/Dockerfile') }}",
+            "key: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ steps.playwright_image.outputs.digest }}-${{ github.run_id }}-${{ github.run_attempt }}",
+            container_job,
+        )
+        self.assertIn(
+            "restore-keys: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ steps.playwright_image.outputs.digest }}-",
             container_job,
         )
         self.assertIn("id: playwright_cache", container_job)
         self.assertIn("id: playwright_cache_verify", container_job)
         self.assertIn("PLAYWRIGHT_BROWSERS_PATH=/tmp/ms-playwright", container_job)
         self.assertIn(
-            "if: steps.playwright_cache.outputs.cache-hit == 'true'",
+            "if: steps.playwright_cache.outputs.cache-hit != ''",
             container_job,
         )
         self.assertIn(
-            "if: steps.playwright_cache.outputs.cache-hit != 'true' || steps.playwright_cache_verify.outcome != 'success'",
+            "if: steps.playwright_cache.outputs.cache-hit == '' || steps.playwright_cache_verify.outcome != 'success'",
             container_job,
         )
         self.assertIn(
             "github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository",
             container_job,
         )
-        self.assertIn("docker pull ghcr.io/kdlbs/kandev-ci:runtime-latest", container_job)
+        self.assertIn(
+            "PLAYWRIGHT_RUNTIME_REF: ${{ steps.playwright_image.outputs.ref }}",
+            container_job,
+        )
+        self.assertIn('docker pull "$PLAYWRIGHT_RUNTIME_REF"', container_job)
+        self.assertIn('"$PLAYWRIGHT_RUNTIME_REF" \\', container_job)
+        self.assertNotIn('docker pull "${{ steps.playwright_image.outputs.ref }}"', container_job)
+        self.assertIn(
+            "if: success() && (steps.playwright_cache.outputs.cache-hit == '' || steps.playwright_cache_verify.outcome != 'success')",
+            container_job,
+        )
         self.assertIn("GITHUB_STEP_SUMMARY", container_job)
         self.assertIn("id: browser_setup_timer", container_job)
         self.assertIn('echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"', container_job)

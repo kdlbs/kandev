@@ -25,13 +25,15 @@ preserving the current pinned-image path as a correctness-safe fallback.
 
 ## Acceptance
 
-- The existing host-runner container jobs restore a cache for
-  `/tmp/ms-playwright` using a key that changes with the runner OS and exact
-  browser source. A verified hit skips the Docker pull/copy step.
+- The existing host-runner container jobs resolve the runtime image to an
+  immutable digest and restore `/tmp/ms-playwright` using a digest-scoped
+  restore prefix plus a run-specific primary key. A verified exact or prefix
+  hit skips the Docker pull/copy step.
 - A cache miss, stale or unavailable entry, cache action error, or failed
-  browser verification runs the current pinned-image extraction and smoke
-  check. Cache operations cannot fail a healthy fallback or change the test
-  manifest, retries, timeout, or worker count.
+  browser verification runs the digest-pinned image extraction and smoke
+  check. A successful fallback uses a new primary key so a rejected cache
+  entry is not repeatedly selected. Cache operations cannot fail a healthy
+  fallback or change the test manifest, retries, timeout, or worker count.
 - Each container job reports cache state, browser verification, and setup
   timing. Workflow contract tests protect the key, conditional fallback, and
   existing container setup.

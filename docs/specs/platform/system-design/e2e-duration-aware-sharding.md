@@ -100,19 +100,23 @@ image as the source of truth.
 
 The existing host job uses the following sequence:
 
-1. Restore `/tmp/ms-playwright` from the GitHub Actions cache before the
-   Docker pull and copy step.
-2. Key the entry by runner operating system and the exact browser source
-   identity, including the Playwright base-image reference and the checked-in
-   CI image definition. A browser-source change therefore cannot reuse an
-   entry from an incompatible image.
-3. On a matching hit, set `PLAYWRIGHT_BROWSERS_PATH` to the restored path,
-   verify that Chromium is usable, and skip the image pull and copy.
-4. On a miss, stale entry, cache-service error, or failed verification, run
-   the current pinned-image extraction and browser smoke check unchanged.
-5. Save a successful fallback result under the same key. Cache restore and
-   save failures are reported as setup diagnostics and do not fail a test
-   whose pinned-image fallback succeeds.
+1. Resolve the runtime image manifest to a sha256 digest. If resolution fails,
+   stop before using a mutable image reference.
+2. Restore `/tmp/ms-playwright` from the GitHub Actions cache before the
+   digest-pinned Docker pull and copy step.
+3. Use the runner operating system, Playwright browser source, resolved image
+   digest, workflow run ID, and attempt number in the primary key. Supply a
+   stable prefix ending before the run-specific suffix as the restore key. A
+   browser-source or image change therefore cannot reuse an incompatible
+   entry, while a failed entry cannot win an exact-key lookup forever.
+4. On a matching exact or prefix hit, set `PLAYWRIGHT_BROWSERS_PATH` to the
+   restored path, verify that Chromium is usable, and skip the image pull and
+   copy.
+5. On a miss, stale entry, cache-service error, or failed verification, pull
+   the resolved digest, run the existing image extraction and browser smoke
+   check, and save a successful fallback under the current run's new primary
+   key. Cache restore and save failures are reported as setup diagnostics and
+   do not fail a test whose digest-pinned fallback succeeds.
 
 The cache contains browser binaries only. It does not contain repository
 source, credentials, test results, or generated application artifacts. A
@@ -153,9 +157,11 @@ The report preserves these distinct measurements:
 
 Predicted-versus-actual shard data remains keyed by cohort and shard number.
 It includes the planning mode, unknown and warm counts, target duration, and
-actual duration. Cache hit, miss, fallback, verification, and extraction
-duration are emitted in the container job summary so setup savings can be
-compared with the test and queue budgets.
+actual duration. The container summary emits the resolved image digest,
+logical cache state, setup mode, restore/verification/extraction/save outcomes,
+and total browser setup elapsed time. These values let setup savings be
+compared with the test and queue budgets without claiming per-step durations
+that the workflow does not measure.
 
 ## Failure modes and recovery
 
@@ -163,8 +169,9 @@ compared with the test and queue budgets.
 | --- | --- |
 | Timing profile is absent or unusable | Use the validated count-based plan and report the fallback. |
 | Manifest is missing, malformed, incomplete, or overlapping | Fail the planning or shard job before test execution. |
+| Runtime image digest cannot be resolved | Fail before cache restore or image use; never fall back to the mutable convenience tag. |
 | Browser cache hit | Verify the restored browser path, then skip image extraction only when verification succeeds. |
-| Browser cache miss, stale key, cache outage, or failed verification | Use the current pinned runtime image extraction and smoke check. Test selection and correctness remain unchanged. |
+| Browser cache miss, stale key, cache outage, or failed verification | Use the digest-pinned runtime image extraction and smoke check, then save under a new run-specific key when possible. Test selection and correctness remain unchanged. |
 | Cache save is unavailable | Finish the successful test run and report that the next run will need the fallback path. |
 | Test passes after retry | Preserve the final pass, attempt details, error category, and diagnostic artifacts; fail the explicit diagnostic lane. |
 | Selected review file is loaded while other lazy sections still show placeholders | Pass the selection-scoped assertion; unrelated placeholders are ignored. |
@@ -175,9 +182,10 @@ compared with the test and queue budgets.
 - Keep all workflow actions pinned to their existing reviewed commit SHAs.
 - Use the existing read-only package and artifact permissions. The browser
   cache must not require a new secret or broaden pull-request credentials.
-- Restore only the exact browser path used by the host job and use the cache
-  key as a compatibility boundary. Do not restore arbitrary files into the
-  workspace or Docker state.
+- Resolve `runtime-latest` to a sha256 digest and use the digest-pinned image
+  reference for fallback extraction. Restore only the exact browser path used
+  by the host job and use the digest-scoped cache prefix as a compatibility
+  boundary. Do not restore arbitrary files into the workspace or Docker state.
 - Preserve the repository's workflow rules for untrusted pull requests,
   checkout credentials, and container cleanup.
 
@@ -191,7 +199,8 @@ questions answerable from one run:
 
 - Did the run use a timing profile or count fallback?
 - Was the slowest shard caused by test execution or setup?
-- Did a browser cache hit remove the extraction step?
+- Which immutable image digest and cache state did the run use, and did the
+  cache hit remove the extraction step?
 - Did any test pass only after retry, and is it a repeat offender?
 - Was the total wall time dominated by runner queue capacity?
 

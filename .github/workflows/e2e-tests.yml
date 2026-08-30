@@ -517,25 +517,48 @@ jobs:
         id: browser_setup_timer
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
+      # Resolve the mutable convenience tag before restoring the cache. The
+      # digest binds both the cache and the fallback extraction to one image
+      # identity, while avoiding a full image pull on a verified cache hit.
+      - name: Resolve immutable Playwright runtime image
+        id: playwright_image
+        run: |
+          set -euo pipefail
+          image=ghcr.io/kdlbs/kandev-ci:runtime-latest
+          digest="$(docker buildx imagetools inspect "$image" | awk '$1 == "Digest:" { print $2; exit }')"
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Could not resolve an immutable digest for $image"
+            exit 1
+          fi
+          {
+            echo "digest=$digest"
+            echo "ref=$image@$digest"
+          } >> "$GITHUB_OUTPUT"
+
       # The runtime image remains the browser source of truth. The cache only
       # avoids copying its already-installed browsers on warm host runners.
+      # Each run has a unique primary key so a repaired fallback can replace a
+      # cache entry whose verification failed. The restore prefix selects the
+      # newest compatible entry without allowing a rejected exact key to win.
       - name: Restore Playwright browser cache
         id: playwright_cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         continue-on-error: true
         with:
           path: /tmp/ms-playwright
-          key: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ hashFiles('.github/docker/ci-base/Dockerfile') }}
+          key: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ steps.playwright_image.outputs.digest }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ steps.playwright_image.outputs.digest }}-
 
       - name: Configure Playwright browser path
         run: echo "PLAYWRIGHT_BROWSERS_PATH=/tmp/ms-playwright" >> "$GITHUB_ENV"
 
       # A cache hit is usable only after Chromium launches from the restored
-      # directory. A corrupted or incompatible entry takes the normal image
-      # extraction path below.
+      # directory. `cache-hit` is non-empty for both an exact hit and a
+      # restore-key match. A corrupted or incompatible entry takes the normal
+      # image extraction path below.
       - name: Verify cached Playwright browser
         id: playwright_cache_verify
-        if: steps.playwright_cache.outputs.cache-hit == 'true'
+        if: steps.playwright_cache.outputs.cache-hit != ''
         continue-on-error: true
         working-directory: apps/web
         run: |
@@ -564,7 +587,7 @@ jobs:
       # first operand decides it. That is the right answer: the queue branch
       # lives in this repository and its token is a base-repository token.
       - name: Log in to GHCR
-        if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (steps.playwright_cache.outputs.cache-hit != 'true' || steps.playwright_cache_verify.outcome != 'success')
+        if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (steps.playwright_cache.outputs.cache-hit == '' || steps.playwright_cache_verify.outcome != 'success')
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -575,18 +598,21 @@ jobs:
       # download (~7 min and an outage-prone path) by copying the prebaked
       # browser out of the kandev-ci image. The runtime image is
       # `FROM mcr.microsoft.com/playwright:...` and ships it at /ms-playwright.
-      # Pulling the `runtime` tag matches the `e2e` and `e2e-report` jobs; the
-      # `build` tag has the same browser layer but is ~300 MB larger.
+      # Pulling the resolved digest keeps the fallback tied to the image used
+      # for the cache key; the build image has the same browser layer but is
+      # ~300 MB larger.
       - name: Extract Playwright browsers from kandev-ci image
         id: playwright_extract
-        if: steps.playwright_cache.outputs.cache-hit != 'true' || steps.playwright_cache_verify.outcome != 'success'
+        if: steps.playwright_cache.outputs.cache-hit == '' || steps.playwright_cache_verify.outcome != 'success'
+        env:
+          PLAYWRIGHT_RUNTIME_REF: ${{ steps.playwright_image.outputs.ref }}
         run: |
           set -euo pipefail
-          docker pull ghcr.io/kdlbs/kandev-ci:runtime-latest
+          docker pull "$PLAYWRIGHT_RUNTIME_REF"
           mkdir -p /tmp/ms-playwright
           docker run --rm \
             -v /tmp/ms-playwright:/dest \
-            ghcr.io/kdlbs/kandev-ci:runtime-latest \
+            "$PLAYWRIGHT_RUNTIME_REF" \
             cp -a /ms-playwright/. /dest/
 
       # Browser binaries come from the verified cache or the image above.
@@ -595,7 +621,7 @@ jobs:
       # fallback.
       - name: Verify Playwright browser runtime
         id: playwright_runtime_verify
-        if: steps.playwright_cache.outputs.cache-hit != 'true' || steps.playwright_cache_verify.outcome != 'success'
+        if: steps.playwright_cache.outputs.cache-hit == '' || steps.playwright_cache_verify.outcome != 'success'
         working-directory: apps/web
         run: |
           set -euo pipefail
@@ -627,12 +653,12 @@ jobs:
 
       - name: Save Playwright browser cache
         id: playwright_cache_save
-        if: success() && steps.playwright_cache.outputs.cache-hit != 'true'
+        if: success() && (steps.playwright_cache.outputs.cache-hit == '' || steps.playwright_cache_verify.outcome != 'success')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         continue-on-error: true
         with:
           path: /tmp/ms-playwright
-          key: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ hashFiles('.github/docker/ci-base/Dockerfile') }}
+          key: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ steps.playwright_image.outputs.digest }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Summarize Playwright browser setup
         if: always()
@@ -642,6 +668,7 @@ jobs:
           CACHE_VERIFY_OUTCOME: ${{ steps.playwright_cache_verify.outcome }}
           CACHE_EXTRACT_OUTCOME: ${{ steps.playwright_extract.outcome }}
           CACHE_SAVE_OUTCOME: ${{ steps.playwright_cache_save.outcome }}
+          IMAGE_DIGEST: ${{ steps.playwright_image.outputs.digest }}
           SETUP_STARTED_AT: ${{ steps.browser_setup_timer.outputs.started_at }}
         run: |
           set -euo pipefail
@@ -649,14 +676,15 @@ jobs:
           elapsed="$(( $(date +%s) - started ))"
           cache_state="miss"
           setup_mode="image-fallback"
-          if [[ "${CACHE_HIT:-}" == "true" ]]; then
+          if [[ -n "${CACHE_HIT:-}" ]]; then
             cache_state="hit"
           fi
-          if [[ "${CACHE_HIT:-}" == "true" && "${CACHE_VERIFY_OUTCOME:-}" == "success" ]]; then
+          if [[ -n "${CACHE_HIT:-}" && "${CACHE_VERIFY_OUTCOME:-}" == "success" ]]; then
             setup_mode="cache-hit"
           fi
           {
             echo "### Playwright browser setup"
+            echo "- image-digest: ${IMAGE_DIGEST:-unresolved}"
             echo "- cache: ${cache_state}"
             echo "- mode: ${setup_mode}"
             echo "- restore: ${CACHE_RESTORE_OUTCOME:-not-run}"
