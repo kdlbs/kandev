@@ -320,6 +320,7 @@ export function ensureSessionTabPrecedesNonSessionTabs(api: DockviewApi, session
 type AutoSessionTabRefs = {
   sessionTabCreatedRef: MutableRefObject<Set<string>>;
   hiddenSessionIdsRef: MutableRefObject<Set<string>>;
+  hiddenSessionApiRef: MutableRefObject<DockviewApi | null>;
   hiddenSessionEnvIdRef: MutableRefObject<string | null>;
   prevTaskIdRef: MutableRefObject<string | null>;
   prevSessionIdRef: MutableRefObject<string | null>;
@@ -547,8 +548,12 @@ export function runAutoSessionTabEffect(
   // A fresh API after reload intentionally starts with no hidden-session state;
   // saved Dockview layouts remain responsible for persisted panel geometry.
   const currentEnvId = useDockviewStore.getState().currentLayoutEnvId;
-  if (refs.hiddenSessionEnvIdRef.current !== currentEnvId) {
+  if (
+    refs.hiddenSessionApiRef.current !== api ||
+    refs.hiddenSessionEnvIdRef.current !== currentEnvId
+  ) {
     refs.hiddenSessionIdsRef.current = hiddenSessionIdsFor(api);
+    refs.hiddenSessionApiRef.current = api;
     refs.hiddenSessionEnvIdRef.current = currentEnvId;
   }
 
@@ -677,6 +682,7 @@ export function runAutoSessionTabEffect(
 export function useAutoSessionTab(effectiveSessionId: string | null) {
   const sessionTabCreatedRef = useRef<Set<string>>(new Set());
   const hiddenSessionIdsRef = useRef<Set<string>>(new Set());
+  const hiddenSessionApiRef = useRef<DockviewApi | null>(null);
   const hiddenSessionEnvIdRef = useRef<string | null>(null);
   const prevTaskIdRef = useRef<string | null>(null);
   const prevSessionIdRef = useRef<string | null>(null);
@@ -686,6 +692,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
   useEffect(() => {
     if (!dockviewApi) return;
     hiddenSessionIdsRef.current = hiddenSessionIdsFor(dockviewApi);
+    hiddenSessionApiRef.current = dockviewApi;
     hiddenSessionEnvIdRef.current = useDockviewStore.getState().currentLayoutEnvId;
   }, [dockviewApi]);
 
@@ -704,6 +711,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     runAutoSessionTabEffect(effectiveSessionId, appStore, {
       sessionTabCreatedRef,
       hiddenSessionIdsRef,
+      hiddenSessionApiRef,
       hiddenSessionEnvIdRef,
       prevTaskIdRef,
       prevSessionIdRef,

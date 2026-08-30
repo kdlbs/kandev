@@ -100,7 +100,7 @@ function starInTab(session: SessionPage, sessionId: string) {
 }
 
 test.describe("Session tab management — close behavior", () => {
-  test("tab close button confirms then permanently deletes the session", async ({
+  test("tab close button closes the panel without deleting the session", async ({
     testPage,
     apiClient,
     seedData,
@@ -111,7 +111,7 @@ test.describe("Session tab management — close behavior", () => {
       testPage,
       apiClient,
       seedData,
-      "Tab Close Deletes Session",
+      "Tab Close Keeps Session",
     );
 
     await session.sessionTabBySessionId(session1Id).click();
@@ -119,15 +119,19 @@ test.describe("Session tab management — close behavior", () => {
 
     await session.sessionTabCloseButton(session1Id).click();
 
-    await expect(session.alertDialog()).toBeVisible();
-    await session.alertDialog().getByRole("button", { name: "Delete" }).click();
+    await expect(session.alertDialog()).not.toBeVisible();
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 5_000 });
     await expect(session.sessionTabBySessionId(session2Id)).toBeVisible();
     await expect(session.sessionTabCloseButton(session2Id)).not.toBeVisible();
 
     await expect
       .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.map((s) => s.id))
-      .toEqual([session2Id]);
+      .toEqual(expect.arrayContaining([session1Id, session2Id]));
+
+    await session.addPanelButton().click();
+    await expect(session.sessionReopenItem(session1Id)).toBeVisible();
+    await session.sessionReopenItem(session1Id).click();
+    await expect(session.sessionTabBySessionId(session1Id)).toBeVisible({ timeout: 5_000 });
   });
 
   test("Hide closes the panel without deleting the session and allows reopening", async ({

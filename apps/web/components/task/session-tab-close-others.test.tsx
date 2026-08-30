@@ -47,14 +47,6 @@ vi.mock("./session-tab-menu", () => ({
 }));
 
 vi.mock("./use-tab-maximize", () => ({ useTabMaximizeOnDoubleClick: () => () => {} }));
-vi.mock("./use-session-tab-delete", () => ({
-  useSessionTabDelete: () => ({
-    deleteOrigin: "tab",
-    handleDeleteDialogOpenChange: vi.fn(),
-    handleConfirmDelete: vi.fn(),
-    handleMenuDelete: vi.fn(),
-  }),
-}));
 vi.mock("./session-tab-close-action", () => ({ SessionTabCloseAction: () => null }));
 vi.mock("./session-tab-title", () => ({ resolveSessionTabTitle: () => "Current" }));
 vi.mock("./session-sort", () => ({ isSessionActive: () => false }));

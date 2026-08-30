@@ -32,7 +32,6 @@ import { resolveSessionTabTitle } from "./session-tab-title";
 import { TabRenameInput } from "./tab-rename-input";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import { SessionTabCloseAction } from "./session-tab-close-action";
-import { useSessionTabDelete } from "./use-session-tab-delete";
 import { clearHiddenSessionPanel, hideSessionPanel } from "./dockview-session-tabs";
 import { useTranslation } from "react-i18next";
 
@@ -462,7 +461,8 @@ function useSessionTabTitleSync(api: IDockviewPanelHeaderProps["api"], tabTitle:
 
 type SessionTabDialogHostProps = {
   dialogs: ReturnType<typeof useSessionTabDialogState>;
-  deleteState: ReturnType<typeof useSessionTabDelete>;
+  onDeleteDialogOpenChange: (open: boolean) => void;
+  onConfirmDelete: () => void | Promise<void>;
   menuDeleteAnchorRef: RefObject<HTMLElement | null>;
   menuDeleteFocusBoundaryRef: RefObject<HTMLElement | null>;
   isPrimary: boolean;
@@ -475,7 +475,8 @@ type SessionTabDialogHostProps = {
 
 function SessionTabDialogHost({
   dialogs,
-  deleteState,
+  onDeleteDialogOpenChange,
+  onConfirmDelete,
   menuDeleteAnchorRef,
   menuDeleteFocusBoundaryRef,
   isPrimary,
@@ -487,14 +488,14 @@ function SessionTabDialogHost({
 }: SessionTabDialogHostProps) {
   return (
     <SessionTabDialogs
-      confirmDelete={dialogs.confirmDelete && deleteState.deleteOrigin === "tab"}
-      menuDeleteOpen={dialogs.confirmDelete && deleteState.deleteOrigin === "menu"}
+      confirmDelete={false}
+      menuDeleteOpen={dialogs.confirmDelete}
       menuDeleteAnchorRef={menuDeleteAnchorRef}
       menuDeleteFocusBoundaryRef={menuDeleteFocusBoundaryRef}
-      setConfirmDelete={deleteState.handleDeleteDialogOpenChange}
+      setConfirmDelete={onDeleteDialogOpenChange}
       isPrimary={isPrimary}
       sessionCount={sessionCount}
-      onConfirmDelete={deleteState.handleConfirmDelete}
+      onConfirmDelete={onConfirmDelete}
       targetName={targetName}
       taskId={taskId}
       sessionId={sessionId}
@@ -541,10 +542,17 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
 
   const showMultiSessionBadges = sessionCount > 1;
   const showCloseAction = visibleSessionPanelCount > 1;
-  const deleteState = useSessionTabDelete(dialogs.setConfirmDelete, actions.handleDelete);
+  const handleDeleteDialogOpenChange = useCallback(
+    (open: boolean) => dialogs.setConfirmDelete(open),
+    [dialogs],
+  );
+  const handleConfirmDelete = useCallback(async () => {
+    dialogs.setConfirmDelete(false);
+    await actions.handleDelete({ feedback: "toast" });
+  }, [actions.handleDelete, dialogs]);
   const triggerRef = useRef<HTMLElement>(null);
   const { menuDeleteAnchorRef, menuDeleteFocusBoundaryRef, handleMenuDelete } =
-    useSessionMenuDelete(triggerRef, deleteState.handleMenuDelete);
+    useSessionMenuDelete(triggerRef, () => dialogs.setConfirmDelete(true));
   const { handlePointerDownCapture, handleKeyDownCapture } = useSessionTabUserActivationIntent(
     sessionId,
     activeSessionId,
@@ -577,7 +585,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
             sessionState={sessionState}
             isActive={isActive}
             showCloseAction={showCloseAction}
-            onCloseTab={deleteState.handleTabDelete}
+            onCloseTab={actions.hideSessionPanel}
           />
         </ContextMenuTrigger>
         <SessionContextMenuItems
@@ -595,7 +603,8 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
       </ContextMenu>
       <SessionTabDialogHost
         dialogs={dialogs}
-        deleteState={deleteState}
+        onDeleteDialogOpenChange={handleDeleteDialogOpenChange}
+        onConfirmDelete={handleConfirmDelete}
         menuDeleteAnchorRef={menuDeleteAnchorRef}
         menuDeleteFocusBoundaryRef={menuDeleteFocusBoundaryRef}
         isPrimary={isPrimary}

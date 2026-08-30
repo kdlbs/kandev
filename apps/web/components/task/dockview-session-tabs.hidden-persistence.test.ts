@@ -24,6 +24,7 @@ function makeRefs() {
   return {
     sessionTabCreatedRef: { current: new Set<string>() },
     hiddenSessionIdsRef: { current: new Set<string>() },
+    hiddenSessionApiRef: { current: null },
     hiddenSessionEnvIdRef: { current: null as string | null },
     prevTaskIdRef: { current: "task-old" as string | null },
     prevSessionIdRef: { current: "session-old" as string | null },
@@ -68,6 +69,38 @@ describe("hidden session tab state", () => {
     if (visiblePanel) api.removePanel(visiblePanel);
 
     runInEnvironment(api, "env-cache-a", () => {
+      runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
+    });
+
+    expect(api.getPanel(`session:${HIDDEN_SESSION_ID}`)).toBeNull();
+  });
+
+  it("refreshes hidden state when the Dockview API is replaced in the same environment", () => {
+    const firstLoad = makeReorderingAutoSessionApi();
+    const refs = makeRefs();
+    const appStore = makeAppStore();
+
+    runInEnvironment(firstLoad.api, "env-reload", () => {
+      runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
+      hideSessionPanel(firstLoad.api, HIDDEN_SESSION_ID);
+    });
+
+    const reloaded = makeReorderingAutoSessionApi();
+    runInEnvironment(reloaded.api, "env-reload", () => {
+      runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
+    });
+
+    expect(reloaded.api.getPanel(`session:${HIDDEN_SESSION_ID}`)).not.toBeNull();
+  });
+
+  it("keeps a closed panel absent during layout-only reconciliation", () => {
+    const { api } = makeReorderingAutoSessionApi();
+    const refs = makeRefs();
+    const appStore = makeAppStore();
+
+    runInEnvironment(api, "env-layout", () => {
+      runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
+      hideSessionPanel(api, HIDDEN_SESSION_ID);
       runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
     });
 

@@ -89,6 +89,7 @@ function makeAutoSessionRefs(
   return {
     sessionTabCreatedRef: { current: new Set<string>() },
     hiddenSessionIdsRef: { current: new Set<string>() },
+    hiddenSessionApiRef: { current: null },
     hiddenSessionEnvIdRef: { current: null as string | null },
     prevTaskIdRef: { current: prevTaskId as string | null },
     prevSessionIdRef: { current: prevSessionId },
