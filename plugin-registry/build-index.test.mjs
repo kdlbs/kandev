@@ -136,14 +136,16 @@ test("buildEntry rejects an unsafe curated ID before any network request", async
   }
 });
 
-test("readPriorDocument identifies the unreadable retention source", async () => {
+test("readPriorDocument treats malformed retention data as absent", async () => {
   const directory = await fs.mkdtemp(
     path.join(os.tmpdir(), "registry-prior-test-"),
   );
   const priorPath = path.join(directory, "prior.json");
   await fs.writeFile(priorPath, "not json");
   try {
-    await assert.rejects(readPriorDocument(priorPath), new RegExp(priorPath));
+    assert.equal(await readPriorDocument(priorPath), null);
+    await fs.writeFile(priorPath, "");
+    assert.equal(await readPriorDocument(priorPath), null);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

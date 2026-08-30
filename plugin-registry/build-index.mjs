@@ -629,9 +629,10 @@ export async function readPriorDocument(priorPath) {
   try {
     return JSON.parse(await fs.readFile(priorPath, "utf8"));
   } catch (error) {
-    throw new Error(
-      `prior index at ${priorPath} is unreadable: ${error.message}`,
+    console.error(
+      `warning: prior index at ${priorPath} is unusable; continuing without retention data (${error.message})`,
     );
+    return null;
   }
 }
 

@@ -99,6 +99,39 @@ func TestInstall_HappyPathMultiFileHostPlatform(t *testing.T) {
 	}
 }
 
+func TestInstall_LegacyMultiPlatformPackageMayOmitForeignExecutable(t *testing.T) {
+	otherPlatform := "plan9-amd64"
+	manifestYAML := []byte(fmt.Sprintf(`
+id: "kandev-plugin-hello"
+api_version: 1
+version: "1.0.0"
+display_name: "Hello Plugin"
+description: "A runtime-managed example plugin"
+author: "kandev"
+categories: ["tools"]
+runtime:
+  type: binary
+  executables:
+    %s: "server/plugin-%s"
+    %s: "server/plugin-%s"
+capabilities:
+  state: true
+`, hostPlatformKey, hostPlatformKey, otherPlatform, otherPlatform))
+	files := map[string][]byte{
+		"manifest.yaml":                    manifestYAML,
+		"server/plugin-" + hostPlatformKey: []byte("binary"),
+	}
+	pkg := buildRawPackageWithChecksums(t, files)
+
+	result, err := Install(bytes.NewReader(pkg), t.TempDir())
+	if err != nil {
+		t.Fatalf("Install() unexpected error for legacy multi-platform package: %v", err)
+	}
+	if result.Manifest.Version != "1.0.0" {
+		t.Fatalf("Manifest.Version = %q, want 1.0.0", result.Manifest.Version)
+	}
+}
+
 func TestInstall_ChmodsExecutableTo0755(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("file mode bits are not meaningful on windows")

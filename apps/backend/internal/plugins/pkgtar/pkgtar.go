@@ -177,7 +177,7 @@ func parseManifestEntry(tr *tar.Reader, size int64) (*manifest.Manifest, error) 
 //     executables to 0755, then atomically rename into place. Fails with
 //     ErrVersionExists if destRoot/<id>/<version> already exists.
 func Install(r io.Reader, destRoot string) (*InstallResult, error) {
-	files, verified, err := verifyArchive(r)
+	files, verified, err := verifyArchive(r, false)
 	if err != nil {
 		return nil, err
 	}
@@ -205,11 +205,11 @@ func Install(r io.Reader, destRoot string) (*InstallResult, error) {
 // executable, extract files, or write to disk, so central registry automation
 // can validate multi-platform packages safely.
 func Verify(r io.Reader) (*VerifyResult, error) {
-	_, result, err := verifyArchive(r)
+	_, result, err := verifyArchive(r, true)
 	return result, err
 }
 
-func verifyArchive(r io.Reader) (map[string][]byte, *VerifyResult, error) {
+func verifyArchive(r io.Reader, requireAllExecutables bool) (map[string][]byte, *VerifyResult, error) {
 	files, err := readArchive(r)
 	if err != nil {
 		return nil, nil, err
@@ -218,7 +218,7 @@ func verifyArchive(r io.Reader) (map[string][]byte, *VerifyResult, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	m, err := validatePackageManifest(files)
+	m, err := validatePackageManifest(files, requireAllExecutables)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -260,7 +260,7 @@ func verifyPackageIntegrity(files map[string][]byte) (signed bool, err error) {
 // validateInstallManifest parses manifest.yaml out of files, validates it,
 // requires it to be runtime-managed, and resolves the current host
 // platform's executable path (which must itself be present in files).
-func validatePackageManifest(files map[string][]byte) (*manifest.Manifest, error) {
+func validatePackageManifest(files map[string][]byte, requireAllExecutables bool) (*manifest.Manifest, error) {
 	manifestData, ok := files[manifestFileName]
 	if !ok {
 		return nil, fmt.Errorf("%w: missing %s", ErrManifestInvalid, manifestFileName)
@@ -275,14 +275,16 @@ func validatePackageManifest(files map[string][]byte) (*manifest.Manifest, error
 	if !m.IsManaged() {
 		return nil, fmt.Errorf("%w: manifest is not runtime-managed (runtime.type must be \"binary\")", ErrManifestInvalid)
 	}
-	missing := make([]string, 0, len(m.Runtime.Executables))
-	for _, execPath := range m.Runtime.Executables {
-		if _, ok := files[execPath]; !ok {
-			missing = append(missing, execPath)
+	if requireAllExecutables {
+		missing := make([]string, 0, len(m.Runtime.Executables))
+		for _, execPath := range m.Runtime.Executables {
+			if _, ok := files[execPath]; !ok {
+				missing = append(missing, execPath)
+			}
 		}
-	}
-	if len(missing) > 0 {
-		return nil, fmt.Errorf("%w: declared executables not found in package: %s", ErrManifestInvalid, strings.Join(missing, ", "))
+		if len(missing) > 0 {
+			return nil, fmt.Errorf("%w: declared executables not found in package: %s", ErrManifestInvalid, strings.Join(missing, ", "))
+		}
 	}
 	return m, nil
 }
