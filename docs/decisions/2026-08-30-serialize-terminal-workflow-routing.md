@@ -35,13 +35,20 @@ the task transition transaction. The existing `task_step_transitions` row is
 the physical lane ledger, while engine-owned on-entry actions continue to use
 their transition-derived `workflow_step_entries` markers. This composes with,
 rather than duplicates, the exact-row cancellation schema from PR #3155.
+An operation ID is globally immutable across its task, producer, source,
+target, caller generation, actor, and external cause. A conflicting reuse
+fails the owning task transaction instead of rewriting the stored operation.
+Deferred application reloads the original operation before committing, so
+turn-end and crash recovery retain the same attribution.
 
 ## Consequences
 
 Terminal move success now means the task is physically terminal before the MCP
 response returns. Retried producers converge without duplicate transition or
-on-entry behavior. Legacy pending rows without a source generation remain
-readable but fail closed during automatic replay. New and old backend versions
+on-entry behavior. Route operation and effect readback exposes the exact
+transition correlation and destination-entry status. Legacy pending rows
+without a source generation remain readable but fail closed during automatic
+replay. New and old backend versions
 must not process the same pending queue during rollout.
 
 The queue and task repositories share a lock order: workspace/task admission,

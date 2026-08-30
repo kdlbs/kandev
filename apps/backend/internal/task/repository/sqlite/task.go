@@ -831,6 +831,13 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 	now time.Time,
 ) (applied bool, err error) {
 	requestedWorkflowID := task.WorkflowID
+	requestedPosition := task.Position
+	requestedRouteMetadata := make(map[string]interface{})
+	for _, key := range routeOwnedMetadataKeys() {
+		if value, ok := task.Metadata[key]; ok {
+			requestedRouteMetadata[key] = value
+		}
+	}
 	requestedAppliedMoves := map[string]interface{}{}
 	if appliedMoves, ok := task.Metadata[models.MetaKeyAppliedDeferredMoves].(map[string]interface{}); ok {
 		for moveID, value := range appliedMoves {
@@ -864,8 +871,20 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 	if requestedWorkflowID != "" {
 		task.WorkflowID = requestedWorkflowID
 	}
+	task.Position = requestedPosition
 	if task.Metadata == nil {
 		task.Metadata = map[string]interface{}{}
+	}
+	// MoveTaskWithOptions owns these lifecycle keys. Rebase every unrelated
+	// field from the locked row, but preserve both its deliberate values and
+	// its deliberate removals so a default-CAS manual route does not lose its
+	// lifecycle barrier or resurrect a consumed launch intent.
+	for _, key := range routeOwnedMetadataKeys() {
+		if value, ok := requestedRouteMetadata[key]; ok {
+			task.Metadata[key] = value
+		} else {
+			delete(task.Metadata, key)
+		}
 	}
 	if len(requestedAppliedMoves) > 0 {
 		currentAppliedMoves := map[string]interface{}{}
@@ -881,6 +900,17 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 	}
 	task.UpdatedAt = now
 	return true, nil
+}
+
+func routeOwnedMetadataKeys() []string {
+	return []string{
+		models.MetaKeyQueuedMoveExitPending,
+		models.MetaKeyQueuedMoveExitCompleted,
+		models.MetaKeyQueuePromotionPending,
+		models.MetaKeyManualMoveLifecyclePending,
+		models.MetaKeyManualMoveLifecycleCompleted,
+		models.MetaKeyDeferredLaunch,
+	}
 }
 
 func (r *Repository) updateTaskWithWorkflowStepAdmission(

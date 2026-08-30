@@ -2,11 +2,76 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
 	"github.com/kandev/kandev/internal/workflow/routing"
 )
+
+// GetWorkflowRouteOperation returns the immutable stored request/outcome for
+// an operation key. Producers use this before any queue, prompt, or lane
+// mutation so exact retries and key collisions are settled from durable state.
+func (r *Repository) GetWorkflowRouteOperation(
+	ctx context.Context,
+	operationID string,
+) (routing.Operation, bool, error) {
+	var operation routing.Operation
+	var producer, outcome string
+	var sessionID, turnID, actorID, supersedesID, effectID sql.NullString
+	var transitionID sql.NullInt64
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT id, task_id, workspace_id, producer, expected_step_id,
+			observed_step_id, target_step_id, session_id, turn_id,
+			actor_kind, actor_id, external_cause, external_cause_id,
+			outcome, supersedes_id, transition_id, effect_id
+		FROM workflow_route_operations WHERE id = ?
+	`), operationID).Scan(
+		&operation.ID, &operation.TaskID, &operation.WorkspaceID, &producer,
+		&operation.ExpectedStepID, &operation.ObservedStepID, &operation.TargetStepID,
+		&sessionID, &turnID, &operation.ActorKind, &actorID,
+		&operation.ExternalCause, &operation.ExternalCauseID, &outcome,
+		&supersedesID, &transitionID, &effectID,
+	)
+	if err == sql.ErrNoRows {
+		return routing.Operation{}, false, nil
+	}
+	if err != nil {
+		return routing.Operation{}, false, fmt.Errorf("read workflow route operation: %w", err)
+	}
+	operation.Producer = routing.Producer(producer)
+	operation.Outcome = routing.Outcome(outcome)
+	operation.SessionID = sessionID.String
+	operation.TurnID = turnID.String
+	operation.ActorID = actorID.String
+	operation.SupersedesID = supersedesID.String
+	operation.TransitionID = transitionID.Int64
+	operation.EffectID = effectID.String
+	return operation, true, nil
+}
+
+// GetWorkflowRouteEffect returns the exact destination-entry allocation linked
+// by a committed route operation.
+func (r *Repository) GetWorkflowRouteEffect(
+	ctx context.Context,
+	effectID string,
+) (routing.Effect, bool, error) {
+	var effect routing.Effect
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT id, operation_id, task_id, transition_id, target_step_id, status
+		FROM workflow_route_effects WHERE id = ?
+	`), effectID).Scan(
+		&effect.ID, &effect.OperationID, &effect.TaskID, &effect.TransitionID,
+		&effect.TargetStepID, &effect.Status,
+	)
+	if err == sql.ErrNoRows {
+		return routing.Effect{}, false, nil
+	}
+	if err != nil {
+		return routing.Effect{}, false, fmt.Errorf("read workflow route effect: %w", err)
+	}
+	return effect, true, nil
+}
 
 func (r *Repository) initWorkflowRoutingSchema() error {
 	_, err := r.db.Exec(`
@@ -82,7 +147,7 @@ func (r *Repository) recordWorkflowRouteOperationTx(
 		operation.Outcome = routing.OutcomePending
 	}
 	now := time.Now().UTC()
-	_, err := tx.ExecContext(ctx, r.db.Rebind(`
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workflow_route_operations (
 			id, task_id, workspace_id, producer, expected_step_id, observed_step_id,
 			target_step_id, session_id, turn_id, actor_kind, actor_id,
@@ -96,6 +161,17 @@ func (r *Repository) recordWorkflowRouteOperationTx(
 			transition_id = COALESCE(workflow_route_operations.transition_id, excluded.transition_id),
 			effect_id = COALESCE(workflow_route_operations.effect_id, excluded.effect_id),
 			updated_at = excluded.updated_at
+		WHERE workflow_route_operations.task_id = excluded.task_id
+			AND workflow_route_operations.workspace_id = excluded.workspace_id
+			AND workflow_route_operations.producer = excluded.producer
+			AND workflow_route_operations.expected_step_id = excluded.expected_step_id
+			AND workflow_route_operations.target_step_id = excluded.target_step_id
+			AND COALESCE(workflow_route_operations.session_id, '') = COALESCE(excluded.session_id, '')
+			AND COALESCE(workflow_route_operations.turn_id, '') = COALESCE(excluded.turn_id, '')
+			AND workflow_route_operations.actor_kind = excluded.actor_kind
+			AND COALESCE(workflow_route_operations.actor_id, '') = COALESCE(excluded.actor_id, '')
+			AND workflow_route_operations.external_cause = excluded.external_cause
+			AND workflow_route_operations.external_cause_id = excluded.external_cause_id
 	`),
 		operation.ID, operation.TaskID, operation.WorkspaceID, string(operation.Producer),
 		operation.ExpectedStepID, operation.ObservedStepID, operation.TargetStepID,
@@ -106,6 +182,13 @@ func (r *Repository) recordWorkflowRouteOperationTx(
 	)
 	if err != nil {
 		return fmt.Errorf("record workflow route operation: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read workflow route operation result: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: %s", routing.ErrOperationIdentityConflict, operation.ID)
 	}
 	if operation.TransitionID == 0 || operation.EffectID == "" {
 		return nil

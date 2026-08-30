@@ -300,7 +300,13 @@ func (s *workflowStore) recordAlreadySatisfiedTransition(ctx context.Context, ta
 }
 
 func (s *workflowStore) ApplyDeferredMoveTransition(ctx context.Context, taskID, sessionID, fromStepID, toStepID, moveID string) error {
-	applied, err := s.applyTransitionIfAtStepWithMoveID(ctx, taskID, sessionID, fromStepID, toStepID, engine.TriggerOnEnter, moveID, false)
+	ctx, err := s.rehydrateDeferredRouteOperation(ctx, taskID, fromStepID, toStepID, moveID)
+	if err != nil {
+		return err
+	}
+	applied, err := s.applyTransitionIfAtStepWithMoveID(
+		ctx, taskID, sessionID, fromStepID, toStepID, engine.TriggerOnEnter, moveID, false,
+	)
 	if err != nil {
 		return err
 	}
@@ -308,6 +314,32 @@ func (s *workflowStore) ApplyDeferredMoveTransition(ctx context.Context, taskID,
 		return ErrTransitionSourceChanged
 	}
 	return nil
+}
+
+func (s *workflowStore) rehydrateDeferredRouteOperation(
+	ctx context.Context,
+	taskID, fromStepID, toStepID, moveID string,
+) (context.Context, error) {
+	if moveID == "" {
+		return ctx, nil
+	}
+	reader, ok := s.repo.(interface {
+		GetWorkflowRouteOperation(context.Context, string) (routing.Operation, bool, error)
+	})
+	if !ok {
+		return ctx, nil
+	}
+	operation, found, err := reader.GetWorkflowRouteOperation(ctx, moveID)
+	if err != nil {
+		return ctx, fmt.Errorf("load deferred route operation: %w", err)
+	}
+	if !found {
+		return ctx, nil
+	}
+	if operation.TaskID != taskID || operation.ExpectedStepID != fromStepID || operation.TargetStepID != toStepID {
+		return ctx, fmt.Errorf("%w: %s", routing.ErrOperationIdentityConflict, moveID)
+	}
+	return routing.WithOperation(ctx, operation), nil
 }
 
 func (s *workflowStore) MarkDeferredMoveApplied(ctx context.Context, taskID, moveID string) error {

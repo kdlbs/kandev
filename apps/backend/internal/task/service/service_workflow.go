@@ -548,6 +548,14 @@ func (s *Service) MoveTaskWithOptions(
 	if err != nil {
 		return nil, err
 	}
+	// The task row read above defines this request's source generation for
+	// every producer, including human board moves and internal callers that do
+	// not pass an explicit guard. The repository rechecks it under the task-row
+	// lock, so a lane change that lands during validation cannot be overwritten
+	// by this call's stale snapshot.
+	if opts.ExpectedWorkflowStepID == "" {
+		opts.ExpectedWorkflowStepID = task.WorkflowStepID
+	}
 	if opts.ExpectedWorkflowID != nil && task.WorkflowID != *opts.ExpectedWorkflowID {
 		// Cheap fast-fail only: this GetTask is not inside a lock, so it
 		// cannot by itself rule out a race landing between this read and the

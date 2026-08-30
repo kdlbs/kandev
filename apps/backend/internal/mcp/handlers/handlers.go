@@ -2332,6 +2332,31 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record signal", nil)
 	}
 	if !stored {
+		observed, loadErr := h.taskSvc.GetTask(ctx, req.TaskID)
+		if loadErr != nil {
+			h.logger.Error("failed to classify rejected step-completion claim",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.SessionID),
+				zap.Error(loadErr))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to classify completion signal", nil)
+		}
+		if observed.WorkflowStepID != launchStepID {
+			operation := routing.Operation{
+				ID: signal.OperationID, TaskID: req.TaskID, WorkspaceID: observed.WorkspaceID,
+				Producer:       routing.ProducerStepComplete,
+				ExpectedStepID: launchStepID, ObservedStepID: observed.WorkflowStepID,
+				SessionID: req.SessionID, TurnID: turnID,
+				ActorKind: string(steptelemetry.ActorAgent), ActorID: req.SessionID,
+				Outcome: routing.OutcomeStaleSource,
+			}
+			if err := h.taskSvc.RecordWorkflowRouteOperation(ctx, operation); err != nil {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+					"failed to record stale signal", nil)
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+				"workflow step changed before signal was recorded", nil)
+		}
 		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, launchStepID, session)
 	}
 	if err := h.taskSvc.RecordWorkflowRouteOperation(ctx, routing.Operation{

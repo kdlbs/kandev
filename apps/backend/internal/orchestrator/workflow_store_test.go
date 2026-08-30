@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/routing"
 	"github.com/kandev/kandev/internal/workflow/stepentry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -625,4 +626,37 @@ func TestWorkflowStore_OperationIdempotency(t *testing.T) {
 			t.Error("expected marked operation to return true")
 		}
 	})
+}
+
+func TestWorkflowStore_DeferredApplyReusesPersistedOperationIdentity(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Done", Position: 1,
+	}
+	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger())
+	operation := routing.Operation{
+		ID: "deferred-operation", TaskID: "t1", WorkspaceID: "ws1",
+		Producer: routing.ProducerMergedPR, ExpectedStepID: "step1",
+		ObservedStepID: "step1", TargetStepID: "step2", SessionID: "s1",
+		TurnID: "turn-merged", ActorKind: "agent", ActorID: "s1",
+		ExternalCause: "github_pr_merged", ExternalCauseID: "repo:42",
+		Outcome: routing.OutcomePending,
+	}
+	require.NoError(t, repo.RecordWorkflowRouteOperation(ctx, operation))
+
+	require.NoError(t, store.ApplyDeferredMoveTransition(
+		ctx, "t1", "s1", "step1", "step2", operation.ID,
+	))
+
+	readback, found, err := repo.GetWorkflowRouteOperation(ctx, operation.ID)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, routing.OutcomeCommitted, readback.Outcome)
+	assert.Equal(t, routing.ProducerMergedPR, readback.Producer)
+	assert.Equal(t, "turn-merged", readback.TurnID)
+	assert.Equal(t, "github_pr_merged", readback.ExternalCause)
+	assert.Equal(t, "repo:42", readback.ExternalCauseID)
 }

@@ -565,7 +565,8 @@ even when the calling task session is in the middle of a turn. Nonterminal
 moves from an active session remain deferred until turn end. If that turn then
 calls `step_complete_kandev` for its old lane, the signal fails as stale and
 does not undo the terminal move or create another pending move. Retrying the
-same terminal destination is idempotent. Ordinary task agents can route only
+same terminal operation is idempotent; reusing its request identity for another
+task or destination is rejected. Ordinary task agents can route only
 their own task; the Coordinator automation surface retains its same-workspace
 cross-task authority.
 

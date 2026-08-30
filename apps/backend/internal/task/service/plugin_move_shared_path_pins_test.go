@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"sync"
 	"testing"
 
@@ -186,10 +187,9 @@ func TestSharedMovePath_ConcurrentSameTaskSameStepNeverExceedsWIPLimit(t *testin
 }
 
 // TestSharedMovePath_ConcurrentDifferentStepMovesRecordDistinctTransitions
-// pins AC-PLUGINS-STEP-MOVE-005.10: two callers moving the same task to
-// different steps concurrently must serialize on the task write, commit both,
-// and record one ledger row per committed change — the writer never
-// collapses two committed step changes into a single row.
+// pins the shared arbiter contract: two callers moving the same source
+// generation to different steps concurrently produce one committed transition
+// and one stale-source rejection.
 func TestSharedMovePath_ConcurrentDifferentStepMovesRecordDistinctTransitions(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -202,14 +202,31 @@ func TestSharedMovePath_ConcurrentDifferentStepMovesRecordDistinctTransitions(t 
 	createMoveTask(t, ctx, repo, "task-racing", "wf-source", "step-source", nil)
 
 	var wg sync.WaitGroup
+	results := make(chan error, 2)
 	wg.Add(2)
 	for _, dest := range []string{"step-a", "step-b"} {
 		go func(step string) {
 			defer wg.Done()
-			_, _ = svc.MoveTaskWithOptions(pluginMoveContext("plugin:acme"), "task-racing", "wf-source", step, 0, pluginMoveOptions())
+			_, err := svc.MoveTaskWithOptions(pluginMoveContext("plugin:acme"), "task-racing", "wf-source", step, 0, pluginMoveOptions())
+			results <- err
 		}(dest)
 	}
 	wg.Wait()
+	close(results)
+	winners, stale := 0, 0
+	for err := range results {
+		switch {
+		case err == nil:
+			winners++
+		case strings.Contains(err.Error(), "workflow step changed before route commit"):
+			stale++
+		default:
+			t.Fatalf("concurrent move error = %v, want success or stale source", err)
+		}
+	}
+	if winners != 1 || stale != 1 {
+		t.Fatalf("concurrent move outcomes = %d winner/%d stale, want 1/1", winners, stale)
+	}
 
 	final, err := repo.GetTask(ctx, "task-racing")
 	if err != nil {
@@ -219,12 +236,11 @@ func TestSharedMovePath_ConcurrentDifferentStepMovesRecordDistinctTransitions(t 
 		t.Fatalf("final step = %s, want step-a or step-b", final.WorkflowStepID)
 	}
 
-	// The genesis task_created row (see genesisAttribution in
-	// step_transitions.go) precedes the two move-driven rows this test
-	// cares about — assert the trailing two, not the full history.
+	// The genesis task_created row precedes the one winning move row. The stale
+	// snapshot never creates a physical transition.
 	triggers := stepTransitionTriggers(t, repo, "task-racing")
-	if len(triggers) != 3 {
-		t.Fatalf("ledger rows for task-racing = %d (%v), want exactly 3 (1 genesis + one per committed move, not collapsed)", len(triggers), triggers)
+	if len(triggers) != 2 {
+		t.Fatalf("ledger rows for task-racing = %d (%v), want exactly 2 (genesis + winner)", len(triggers), triggers)
 	}
 	for _, trigger := range triggers[1:] {
 		if trigger != string(steptelemetry.TriggerPluginMove) {

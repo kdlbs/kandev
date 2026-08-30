@@ -4,7 +4,12 @@
 // task transaction that owns the physical lane change.
 package routing
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+var ErrOperationIdentityConflict = errors.New("route operation identity conflict")
 
 type Producer string
 
@@ -46,6 +51,18 @@ type Operation struct {
 	SupersedesID    string
 	TransitionID    int64
 	EffectID        string
+}
+
+// Effect is the durable destination-entry allocation owned by a committed
+// route operation. Engine workers retain their existing workflow-step entry
+// claims; this record makes the route-to-entry correlation and status readable.
+type Effect struct {
+	ID           string
+	OperationID  string
+	TaskID       string
+	TransitionID int64
+	TargetStepID string
+	Status       string
 }
 
 type operationContextKey struct{}

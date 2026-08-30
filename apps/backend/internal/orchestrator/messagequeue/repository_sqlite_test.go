@@ -988,6 +988,7 @@ func TestSQLiteRepository_PendingMoveSenderSessionMigration(t *testing.T) {
 	ctx := context.Background()
 	if err := repo.SetPendingMove(ctx, "s1", &PendingMove{
 		MoveID: "move-migrated", TaskID: "t1", WorkflowStepID: "step-a", SenderSessionID: "sender-s1",
+		ExpectedWorkflowStepID: "step-source", InitiatingTurnID: "turn-source",
 	}); err != nil {
 		t.Fatalf("set migrated pending move: %v", err)
 	}
@@ -1000,6 +1001,9 @@ func TestSQLiteRepository_PendingMoveSenderSessionMigration(t *testing.T) {
 	}
 	if move.MoveID != "move-migrated" {
 		t.Fatalf("migrated pending move move_id = %q, want move-migrated", move.MoveID)
+	}
+	if move.ExpectedWorkflowStepID != "step-source" || move.InitiatingTurnID != "turn-source" {
+		t.Fatalf("migrated pending move generation = %#v, want step-source/turn-source", move)
 	}
 }
 

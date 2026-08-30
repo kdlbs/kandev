@@ -44,6 +44,11 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	if req.WorkflowStepID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_step_id is required", nil)
 	}
+	if replay, handled, err := h.replayMoveTaskOperation(
+		ctx, msg, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position,
+	); handled {
+		return replay, err
+	}
 
 	// Prompt is OPTIONAL — config-mode/admin moves don't always have an agent
 	// to hand off to. When supplied, it activates the deferred-move path that
@@ -82,6 +87,52 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	// Idle path — apply immediately. If a prompt was supplied, queue it on the
 	// session so the receiving agent's next turn picks it up; if not, just move.
 	return h.applyMoveTaskImmediate(ctx, msg, req, session, false)
+}
+
+func (h *Handlers) replayMoveTaskOperation(
+	ctx context.Context,
+	msg *ws.Message,
+	taskID, workflowID, targetStepID string,
+	position int,
+) (*ws.Message, bool, error) {
+	operationID := workflowRouteOperationID("mcp-move", msg.ID)
+	operation, found, err := h.taskSvc.GetWorkflowRouteOperation(ctx, operationID)
+	if err != nil {
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to read route operation", nil)
+		return response, true, responseErr
+	}
+	if !found {
+		return nil, false, nil
+	}
+	if operation.TaskID != taskID || operation.TargetStepID != targetStepID {
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict,
+			"route operation identity already belongs to a different request", nil)
+		return response, true, responseErr
+	}
+	switch operation.Outcome {
+	case routing.OutcomeCommitted, routing.OutcomeAlreadySatisfied:
+		task, loadErr := h.taskSvc.GetTask(ctx, taskID)
+		if loadErr != nil {
+			response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to read routed task", nil)
+			return response, true, responseErr
+		}
+		response, responseErr := ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+		return response, true, responseErr
+	case routing.OutcomePending:
+		response, responseErr := ws.NewResponse(msg.ID, msg.Action,
+			h.synthesizeMovedTaskDTO(ctx, taskID, workflowID, targetStepID, position))
+		return response, true, responseErr
+	case routing.OutcomeStaleSource:
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"workflow step changed before route commit", nil)
+		return response, true, responseErr
+	default:
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict,
+			"route operation did not commit", nil)
+		return response, true, responseErr
+	}
 }
 
 // deferMoveTask records a PendingMove for the agent's turn-end handler to
@@ -365,6 +416,7 @@ func classifyMoveTaskError(err error) string {
 	msg := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(msg, "wip limit exceeded"),
+		strings.Contains(msg, routing.ErrOperationIdentityConflict.Error()),
 		strings.Contains(msg, "active session"),
 		strings.Contains(msg, "archived tasks cannot be moved"),
 		strings.Contains(msg, "different workspace"),
