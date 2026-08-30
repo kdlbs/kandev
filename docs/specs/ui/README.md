@@ -11,20 +11,21 @@ owners:
 
 ## Purpose
 
-UI owns web presentation and reusable interaction contracts.
+The UI system owns web presentation.
 
 ## Ownership
 
-UI owns navigation, settings, boards, task/review surfaces, walkthroughs, chat
-controls, and visual feedback. Provider and task state remain with their owning
-systems.
+The UI system owns reusable navigation, settings, task/review, chat, visual
+feedback, and responsive interaction contracts. Provider and task state remain
+with their owning systems.
 
 ## Exclusions
 
-- Durable task behavior: [Tasks](../tasks/README.md).
-- Agent profile behavior: [Agents](../agents/README.md).
-- Plugin contribution contracts: [Plugins](../plugins/README.md).
-- Provider-specific state and actions: [Integrations](../integrations/README.md).
+- Durable task behavior belongs to the [task system](../tasks/README.md).
+- Agent profile behavior belongs to the [agent system](../agents/README.md).
+- Plugin contribution contracts belong to the [plugin system](../plugins/README.md).
+- Provider-specific state and actions belong to the
+  [integration system](../integrations/README.md).
 
 ## Specification map
 
@@ -39,7 +40,7 @@ systems.
 - [Agent-message inline comments](requirements/agent-message-comments.md)
 - [Agent Todo List Panel](requirements/agent-todo-list-panel.md)
 - [App Status Bar](requirements/app-status-bar.md)
-- [Per-workflow column visibility on the kanban board](requirements/board-step-visibility-filter.md)
+- [Workflow column visibility](requirements/board-step-visibility-filter.md)
 - [Browser inspect annotation submission](requirements/browser-inspect-annotations-save.md)
 - [Backend-owned cancel-turn progress](requirements/cancel-turn-progress.md)
 - [Changes File Row Containment](requirements/changes-file-row-containment.md)
@@ -63,7 +64,7 @@ systems.
 - [Executor settings card spacing](requirements/executor-settings-card-spacing.md)
 - [External VCS File Links](requirements/external-vcs-file-links.md)
 - [File Tree Chat Context](requirements/file-tree-chat-context.md)
-- [Reload Kandev when a tab is restored from a frozen browser snapshot](requirements/fix-duplicated-tab-stale-data.md)
+- [Reload Kandev after frozen-tab restore](requirements/fix-duplicated-tab-stale-data.md)
 - [GitHub PR Review Actions](requirements/github-pr-review-actions.md)
 - [GitHub Saved-Query Default Views](requirements/github-saved-query-defaults.md)
 - [Kandev MCP Tool Results](requirements/kandev-mcp-tool-results.md)
@@ -104,7 +105,7 @@ systems.
 - [Review File Status Cues](requirements/review-file-status.md)
 - [Review Markdown Preview](requirements/review-markdown-preview.md)
 - [Search/filter dropdown scroll reset](requirements/search-filter-scroll-reset.md)
-- [Selected option prominence in single-choice pickers](requirements/selected-option-picker-prominence.md)
+- [Selected option prominence](requirements/selected-option-picker-prominence.md)
 - [Session tab delete feedback](requirements/session-tab-delete-feedback.md)
 - [Settings Discovery](requirements/settings-discovery.md)
 - [Settings Manual Save](requirements/settings-manual-save.md)
@@ -129,7 +130,7 @@ systems.
 - [Task Listing Display Preferences](requirements/task-listing-display-preferences.md)
 - [Task transcript history visibility](requirements/task-prompt-transcript-visibility.md)
 - [Task Review Shortcut Switcher](requirements/task-review-shortcut.md)
-- [Task Surface Foreground Refresh and Mobile Create Action](requirements/task-surface-refresh.md)
+- [Task surface refresh and mobile create](requirements/task-surface-refresh.md)
 - [Task Workspace Content Search](requirements/task-workspace-content-search.md)
 - [Terminal close feedback](requirements/terminal-close-feedback.md)
 - [Terminal Rendering](requirements/terminal-rendering.md)
@@ -145,6 +146,7 @@ systems.
 
 ### System design
 
+- [Clarification submit feedback](system-design/clarification-submit-feedback.md)
 - [Growing Dialog Content Containment](system-design/dialog-content-containment.md)
 - [Agent Todo List Panel](system-design/agent-todo-list-panel.md)
 - [App Status Bar](system-design/app-status-bar.md)
