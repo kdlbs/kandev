@@ -2,7 +2,7 @@
 status: active
 system: workspaces
 created: 2026-07-20
-updated: 2026-08-22
+updated: 2026-08-30
 owners:
   - kandev
 ---
@@ -23,6 +23,8 @@ Users need to connect repositories already present on the machine running Kandev
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-001.1:** A user can add a local Git repository by entering or selecting an absolute path that the Kandev process can access.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-001.2:** Manual selection is valid independently of `repositoryDiscovery.roots`; those roots govern only automatic discovery scans.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-001.3:** Kandev validates and canonicalizes a non-empty local repository path before saving it. A saved repository records the exact canonical path the user selected.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-001.3a:** An initialized Git submodule with reciprocal canonical `core.worktree` metadata can be registered as its selected local repository path.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-001.3b:** A regular-file `.git` pointer without reciprocal ownership proof, including a missing, empty, mismatched, or alternate-source `core.worktree`, is rejected and not persisted.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-001.4:** Trusting one repository does not trust its parent directory, filesystem volume, or sibling repositories.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-001.5:** Saved repositories remain usable for branch listing, current status, refresh, task creation, and fresh-branch workflows after restart.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-001.6:** A saved repository without an `origin` remote supports Merge and Rebase when the selected base branch exists locally.
@@ -55,7 +57,8 @@ work without widening automatic filesystem scans or editing packaged runtime con
 - A missing local base branch causes a clear error before Merge or Rebase changes repository
   history.
 - A saved repository must continue resolving to its recorded canonical location. Git metadata
-  outside that location is accepted only for a verifiable linked worktree with reciprocal metadata.
+  outside that location is accepted only for a verifiable linked worktree or initialized submodule
+  with reciprocal canonical `core.worktree` metadata.
 - Provider-backed repositories may be saved without a local path and are unaffected until Kandev
   materializes a local clone.
 - Path behavior is platform-native, including Windows drive-letter paths and UNC paths.
@@ -109,6 +112,7 @@ directly rather than treating discovery roots as an authorization mechanism.
 | Directory is not a Git repository | Validation reports that it is not a Git repository; create/update returns 4xx. |
 | Canonicalization or access fails | The operation fails without persisting or mutating repository state. |
 | `.git` metadata points at an unrelated repository or unverifiable external metadata | Validation fails and the path is not persisted. |
+| Submodule metadata enables Git includes or `config.worktree` overrides | Validation fails and the path is not persisted. |
 | A saved path later resolves to a different canonical location | Identity-bound reads and mutations fail closed. |
 | A pre-canonical saved path contains symbolic-link components | The user re-saves it once to persist its canonical location. |
 | Saved repository later disappears | Read and Git operations surface the filesystem error; the stored grant remains until edited or deleted. |

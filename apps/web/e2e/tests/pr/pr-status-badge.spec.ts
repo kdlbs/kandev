@@ -706,15 +706,19 @@ test.describe("PR status badge", () => {
       mergeable_state: "dirty",
     });
     await expect(icon).toHaveAttribute("data-pr-count", "2", { timeout: 15_000 });
-    await testPage.mouse.move(0, 0);
+    await taskRow.hover();
+    await expect(taskActions).toBeVisible();
+    await expect(menuSlot).toHaveCSS("width", "24px");
     await icon.hover();
-    await icon.focus();
 
     const multiSummary = visibleTaskPRSummary(testPage);
+    await expect(multiSummary).toBeVisible();
     const entries = multiSummary.getByTestId("pr-task-status-entry");
     await expect(entries).toHaveCount(2);
-    await expect(multiSummary).toContainText("PR #2966");
-    await expect(multiSummary).toContainText("PR #2967");
-    await expect(multiSummary).toContainText("Resolve the failing API checks");
+    await expect(entries.nth(0).getByTestId("pr-task-status-number")).toHaveText("PR #2966");
+    await expect(entries.nth(1).getByTestId("pr-task-status-number")).toHaveText("PR #2967");
+    await expect(entries.nth(1).getByTestId("pr-task-status-title")).toHaveText(
+      "Resolve the failing API checks",
+    );
   });
 });
