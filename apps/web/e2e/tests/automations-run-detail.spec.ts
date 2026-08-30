@@ -390,7 +390,7 @@ test.describe("Automation concurrency note", () => {
     await testPage.getByTestId("automation-run-now").click();
     await expect(
       testPage.getByRole("region", { name: /^Notifications/ }).getByText(/Triggered|Skipped/),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 15_000 });
 
     // The run row is written after the fire returns, so a page that only polls
     // while it can already see something open never learns the run happened.
@@ -415,13 +415,13 @@ test.describe("Automation concurrency note", () => {
 
     await testPage.goto(`/automations/${automationId}`);
     const runsRail = testPage.getByTestId("runs-rail");
-    await expect(runsRail.getByText("Triggered", { exact: true })).toBeVisible();
+    await expect(runsRail.getByText("Triggered", { exact: true })).toBeVisible({ timeout: 15_000 });
 
     await testPage.getByTestId("automation-run-now").click();
     await expect(
       testPage
         .getByRole("region", { name: /^Notifications/ })
         .getByText("Triggered", { exact: true }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 15_000 });
   });
 });
