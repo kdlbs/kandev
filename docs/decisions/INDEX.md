@@ -217,3 +217,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-27-mixed-git-change-facets | [Preserve mixed Git changes as path facets](2026-08-27-mixed-git-change-facets.md) | accepted | backend, agentctl, frontend, protocol | 2026-08-27 |
 | 2026-08-28-bind-github-auto-merge-attempts-to-reviewed-head | [Bind GitHub Auto-Merge Attempts to the Reviewed Head](2026-08-28-bind-github-auto-merge-attempts-to-reviewed-head.md) | accepted | backend, frontend, protocol, security, GitHub | 2026-08-28 |
 | 2026-08-30-context-reset-quiesces-active-turn | [Quiesce Active Turns Before Context Reset](2026-08-30-context-reset-quiesces-active-turn.md) | accepted | backend, workflow | 2026-08-30 |
+| 2026-08-30-bound-untracked-dependency-enumeration | [Bound Untracked Dependency Enumeration](2026-08-30-bound-untracked-dependency-enumeration.md) | accepted | backend | 2026-08-30 |
