@@ -393,6 +393,7 @@ export function useLazyLoadSentinel(
 ): {
   sentinelRef: (node: HTMLDivElement | null) => void;
   onUserGesture: () => void;
+  retry: () => void;
 } {
   const {
     rootMargin = "200px 0px 0px 0px",
@@ -542,5 +543,18 @@ export function useLazyLoadSentinel(
     void fireLoad();
   }, [fireLoad]);
 
-  return { sentinelRef, onUserGesture };
+  // Explicit recovery is allowed regardless of the sentinel's current
+  // intersection. The user has supplied fresh pagination intent, so a
+  // button click can retry a disarmed request even when the sentinel is just
+  // outside the preload region. The normal observer path remains geometry
+  // gated and never calls this callback automatically.
+  const retry = useCallback(() => {
+    const { hasMore, blocked, isLoadingMore } = stateRef.current;
+    const { joinInFlightWhileLoading } = optionsRef.current;
+    if (!hasMore || blocked || (isLoadingMore && !joinInFlightWhileLoading)) return;
+    disarmedRef.current = false;
+    void fireLoad();
+  }, [fireLoad]);
+
+  return { sentinelRef, onUserGesture, retry };
 }

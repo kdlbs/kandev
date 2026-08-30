@@ -121,19 +121,20 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     onFirstMessageHiddenChange,
     scrollLayoutKey,
   } = params;
-  const { handleScrollToMessage, sentinelRef, markNotNearBottom } = useNativeScrollManagement({
-    scrollRef,
-    items,
-    messages,
-    isWorking,
-    sessionId,
-    enabled,
-    hasUnreadDivider: Boolean(dividerBeforeItemKey),
-    messagesLoading,
-    hasMore,
-    isLoadingMore,
-    loadMore,
-  });
+  const { handleScrollToMessage, sentinelRef, markNotNearBottom, retryLoadMore, showRecovery } =
+    useNativeScrollManagement({
+      scrollRef,
+      items,
+      messages,
+      isWorking,
+      sessionId,
+      enabled,
+      hasUnreadDivider: Boolean(dividerBeforeItemKey),
+      messagesLoading,
+      hasMore,
+      isLoadingMore,
+      loadMore,
+    });
   const anchoredBarOffsetPx = anchoredBarScrollOffsetPx(anchoredBarHeight);
   useEffect(() => {
     scrollRef.current?.style.setProperty("--anchored-bar-h", `${anchoredBarOffsetPx}px`);
@@ -152,7 +153,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     firstMessageId,
     onFirstMessageHiddenChange,
   );
-  return { handleScrollToMessage, sentinelRef };
+  return { handleScrollToMessage, sentinelRef, retryLoadMore, showRecovery };
 }
 
 type MessageRowProps = {
@@ -236,7 +237,8 @@ type NativeMessageListBodyProps = {
   isLoadingMore: boolean;
   isInitialLoading: boolean;
   showLoadingState: boolean;
-  loadMore: () => Promise<number>;
+  retryLoadMore: () => void;
+  showRecovery: boolean;
   sentinelRef: (node: HTMLDivElement | null) => void;
   lastTurnGroupId: string | null;
   activeTurnId: string | null;
@@ -378,7 +380,8 @@ function NativeMessageListBody({
   isLoadingMore,
   isInitialLoading,
   showLoadingState,
-  loadMore,
+  retryLoadMore,
+  showRecovery,
   sentinelRef,
   lastTurnGroupId,
   activeTurnId,
@@ -399,7 +402,8 @@ function NativeMessageListBody({
         messagesLoading={messagesLoading}
         isInitialLoading={isInitialLoading}
         messagesCount={messages.length}
-        onLoadMore={loadMore}
+        onLoadMore={retryLoadMore}
+        showRecovery={showRecovery}
       />
 
       {items.map((item) => (
@@ -484,33 +488,34 @@ export const NativeMessageList = memo(
     const streamingMessageId = getStreamingAgentMessageId(messages);
     const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
     const autoScrollEnabled = useTranscriptAutoScrollEnabled(sessionId);
-    const { handleScrollToMessage, sentinelRef } = useNativeMessageListScroll({
-      scrollRef,
-      ref,
-      items,
-      messages,
-      isWorking,
-      sessionId,
-      enabled: autoScrollEnabled,
-      dividerBeforeItemKey,
-      anchoredBarHeight,
-      messagesLoading,
-      hasMore,
-      isLoadingMore,
-      loadMore,
-      lastPromptMessageId,
-      onLastPromptEdgeChange,
-      firstMessageId,
-      onFirstMessageHiddenChange,
-      scrollLayoutKey: [
-        messagesLoading,
-        isInitialLoading,
-        showLoadingState,
-        isLoadingMore,
-        hasMore,
+    const { handleScrollToMessage, sentinelRef, retryLoadMore, showRecovery } =
+      useNativeMessageListScroll({
+        scrollRef,
+        ref,
+        items,
+        messages,
         isWorking,
-      ].join(":"),
-    });
+        sessionId,
+        enabled: autoScrollEnabled,
+        dividerBeforeItemKey,
+        anchoredBarHeight,
+        messagesLoading,
+        hasMore,
+        isLoadingMore,
+        loadMore,
+        lastPromptMessageId,
+        onLastPromptEdgeChange,
+        firstMessageId,
+        onFirstMessageHiddenChange,
+        scrollLayoutKey: [
+          messagesLoading,
+          isInitialLoading,
+          showLoadingState,
+          isLoadingMore,
+          hasMore,
+          isWorking,
+        ].join(":"),
+      });
 
     return (
       <SessionPanelContent
@@ -537,7 +542,8 @@ export const NativeMessageList = memo(
           isLoadingMore={isLoadingMore}
           isInitialLoading={isInitialLoading}
           showLoadingState={showLoadingState}
-          loadMore={loadMore}
+          retryLoadMore={retryLoadMore}
+          showRecovery={showRecovery}
           sentinelRef={sentinelRef}
           lastTurnGroupId={lastTurnGroupId}
           activeTurnId={effectiveActiveTurnId}

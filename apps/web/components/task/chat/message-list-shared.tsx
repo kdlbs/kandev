@@ -18,6 +18,7 @@ import {
   readLastAgentError,
 } from "@/lib/session-last-agent-error";
 import { useTranslation } from "react-i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 export type MessageListProps = {
   items: RenderItem[];
@@ -387,6 +388,7 @@ export function MessageListStatus({
   isInitialLoading,
   messagesCount,
   onLoadMore,
+  showRecovery = false,
 }: {
   isLoadingMore: boolean;
   hasMore: boolean;
@@ -400,8 +402,11 @@ export function MessageListStatus({
    * fails to re-arm (e.g. pinned at the very top with the sentinel always in view).
    */
   onLoadMore?: () => void;
+  /** Shows the explicit control only after a recoverable pagination failure. */
+  showRecovery?: boolean;
 }) {
   const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
   return (
     <>
       {isLoadingMore && hasMore && (
@@ -409,13 +414,13 @@ export function MessageListStatus({
           {t("task:loadingOlderMessages")}
         </div>
       )}
-      {hasMore && !isLoadingMore && onLoadMore && (
+      {hasMore && !isLoadingMore && showRecovery && onLoadMore && (
         <div className="flex justify-center py-2">
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            className="cursor-pointer text-xs text-muted-foreground"
+            className={`cursor-pointer text-xs text-muted-foreground ${isFinePointer ? "" : "min-h-11"}`}
             data-testid="load-older-messages"
             onClick={onLoadMore}
           >

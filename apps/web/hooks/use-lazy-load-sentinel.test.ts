@@ -623,6 +623,25 @@ describe("useLazyLoadSentinel — failure recovery and stale completions", () =>
     await act(async () => {});
     expect(loadMore).toHaveBeenCalledTimes(3);
   });
+
+  it("allows an explicit retry after the sentinel leaves preload", async () => {
+    const scrollRef = makeScrollRef();
+    const loadMore = vi.fn().mockResolvedValueOnce(0).mockResolvedValueOnce(20);
+    const { result } = renderHook(() =>
+      useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
+        rearmWhileIntersecting: true,
+      }),
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+
+    fire(records[0], true, node);
+    await act(async () => {});
+    fire(records[0], false, node);
+
+    act(() => result.current.retry());
+    await waitFor(() => expect(loadMore).toHaveBeenCalledTimes(2));
+  });
 });
 
 describe("useLazyLoadSentinel — stale observers", () => {

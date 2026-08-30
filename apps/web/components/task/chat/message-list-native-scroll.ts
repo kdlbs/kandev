@@ -1,6 +1,6 @@
 /* eslint-disable max-lines -- pagination, scroll anchoring, and retry state share one boundary. */
 
-import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStoreApi } from "@/components/state-provider";
 import { getStoredAutoScrollTop } from "@/lib/local-storage";
@@ -24,6 +24,8 @@ import { scheduleClampedScrollRestore } from "./clamped-scroll-restore";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const paginationDebug = createDebugLogger("messages:pagination");
+// i18n-exempt: IntersectionObserver root-margin configuration, not user-facing copy.
+export const TRANSCRIPT_SENTINEL_ROOT_MARGIN = "200px 0px 0px 0px";
 
 // INT32_MAX: WebKit resolves Number.MAX_SAFE_INTEGER to 0 (not bottom).
 const NATIVE_BOTTOM_SCROLL_TOP = 2_147_483_647;
@@ -66,6 +68,7 @@ function resolvePaginationSettleReason(
   result: LazyLoadSentinelSettleResult,
   boundaryUnchanged: boolean,
   hasMore: boolean,
+  sentinelInPreload: boolean,
 ): PaginationStopReason | null {
   switch (result.continuation) {
     case "continued":
@@ -75,10 +78,125 @@ function resolvePaginationSettleReason(
       return "no-progress";
     case "caller-stopped":
     case "no-more":
+      if (result.continuation === "caller-stopped" && !sentinelInPreload) {
+        return "sentinel-left-preload";
+      }
       return resolvePaginationStopReason(boundaryUnchanged, hasMore);
     default:
       return result.continuation;
   }
+}
+
+type RootMarginPixels = {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+};
+
+function parseRootMarginPixels(rootMargin: string): RootMarginPixels {
+  const values = rootMargin
+    .trim()
+    .split(/\s+/)
+    .map((value) => Number.parseFloat(value))
+    .map((value) => (Number.isFinite(value) ? value : 0));
+  const [top = 0, right = top, bottom = top, left = right] = values;
+  return { top, right, bottom, left };
+}
+
+/** Returns whether the current sentinel geometry is inside the observer's
+ * preload rectangle. This is intentionally measured after a page commit,
+ * rather than inferred from the last IntersectionObserver entry. */
+export function isElementInPreloadRegion(
+  scrollRoot: HTMLElement,
+  sentinel: HTMLElement,
+  rootMargin = TRANSCRIPT_SENTINEL_ROOT_MARGIN,
+): boolean {
+  const rootRect = scrollRoot.getBoundingClientRect();
+  const sentinelRect = sentinel.getBoundingClientRect();
+  const margin = parseRootMarginPixels(rootMargin);
+  return (
+    sentinelRect.bottom >= rootRect.top - margin.top &&
+    sentinelRect.top <= rootRect.bottom + margin.bottom &&
+    sentinelRect.right >= rootRect.left - margin.left &&
+    sentinelRect.left <= rootRect.right + margin.right
+  );
+}
+
+function resolveRecoveryVisibility(
+  result: LazyLoadSentinelSettleResult,
+  hasMore: boolean,
+): boolean | null {
+  if (result.continuation === "stale") return null;
+  if (hasMore && (result.continuation === "rejected" || result.continuation === "no-progress")) {
+    return true;
+  }
+  if (result.count > 0 || !hasMore) return false;
+  return null;
+}
+
+function usePaginationRecovery(sessionId: string | null, hasMore: boolean) {
+  const [showRecovery, setShowRecovery] = useState(false);
+  const recoverySessionRef = useRef(sessionId);
+
+  useEffect(() => {
+    if (recoverySessionRef.current !== sessionId || !sessionId || !hasMore) {
+      setShowRecovery(false);
+    }
+    recoverySessionRef.current = sessionId;
+  }, [hasMore, sessionId]);
+
+  const reportRecovery = useCallback(
+    (result: LazyLoadSentinelSettleResult) => {
+      const nextVisibility = resolveRecoveryVisibility(result, hasMore);
+      if (nextVisibility !== null) setShowRecovery(nextVisibility);
+    },
+    [hasMore],
+  );
+
+  return { showRecovery, reportRecovery };
+}
+
+function reportPaginationSettleDebug(params: {
+  result: LazyLoadSentinelSettleResult;
+  sessionId: string | null;
+  request: PaginationRequest | null;
+  items: RenderItem[];
+  scrollRoot: HTMLElement | null;
+  sentinel: HTMLElement | null;
+  hasMore: boolean;
+}) {
+  const request = params.request;
+  if (!isDebug() || !request?.debug) return;
+  const { result, scrollRoot, sentinel } = params;
+  const requestDebug = request.debug;
+  const boundaryAfter = getOldestVisibleBoundaryKey(params.items);
+  const boundaryUnchanged = request.boundaryBefore === boundaryAfter;
+  const sentinelInPreload = Boolean(
+    scrollRoot &&
+    sentinel &&
+    isElementInPreloadRegion(scrollRoot, sentinel, TRANSCRIPT_SENTINEL_ROOT_MARGIN),
+  );
+  paginationDebug("older page settled", {
+    sessionId: params.sessionId,
+    trigger: "top-intersection",
+    generation: requestDebug.generation,
+    loadedCount: result.count,
+    boundaryBefore: request.boundaryBefore,
+    boundaryAfter,
+    scrollTopBefore: requestDebug.scrollTopBefore,
+    scrollTopAfter: scrollRoot?.scrollTop ?? null,
+    scrollHeightBefore: requestDebug.scrollHeightBefore,
+    scrollHeightAfter: scrollRoot?.scrollHeight ?? null,
+    continued: result.continuation === "continued",
+    stopReason: resolvePaginationSettleReason(
+      result,
+      boundaryUnchanged,
+      params.hasMore,
+      sentinelInPreload,
+    ),
+    continuation: result.continuation,
+  });
 }
 
 /**
@@ -200,10 +318,10 @@ function capturePrependScrollState(scrollRoot: HTMLElement, anchorKey: string | 
 
 /**
  * Observes a sentinel element at the top of the list to trigger lazy loading.
- * Re-arms only while older pages leave the committed visible boundary
- * unchanged, which crosses collapsed activity without cascading through
- * standalone messages. The transcript does not join an in-flight request.
- * The explicit button remains the recovery path for errors and no-op pages.
+ * Re-arms only while the committed sentinel remains inside the preload
+ * region, which crosses both collapsed activity and standalone messages. The
+ * transcript does not join an in-flight request. The explicit button is
+ * rendered only as the recovery path for errors and no-op pages.
  */
 function useLazyLoadSentinel(params: {
   scrollRef: React.RefObject<HTMLDivElement | null>;
@@ -219,35 +337,25 @@ function useLazyLoadSentinel(params: {
   itemsRef.current = items;
   const hasMoreRef = useRef(hasMore);
   hasMoreRef.current = hasMore;
+  const sentinelNodeRef = useRef<HTMLDivElement | null>(null);
   const requestGenerationRef = useRef(0);
   const requestRef = useRef<PaginationRequest | null>(null);
+  const { showRecovery, reportRecovery } = usePaginationRecovery(sessionId, hasMore);
 
   const reportSettle = useCallback(
     (result: LazyLoadSentinelSettleResult) => {
-      if (!isDebug()) return;
-      const request = requestRef.current;
-      const requestDebug = request?.debug;
-      if (!request || !requestDebug) return;
-      const boundaryAfter = getOldestVisibleBoundaryKey(itemsRef.current);
-      const scroller = scrollRef.current;
-      const boundaryUnchanged = request.boundaryBefore === boundaryAfter;
-      paginationDebug("older page settled", {
+      reportRecovery(result);
+      reportPaginationSettleDebug({
+        result,
         sessionId,
-        trigger: "top-intersection",
-        generation: requestDebug.generation,
-        loadedCount: result.count,
-        boundaryBefore: request.boundaryBefore,
-        boundaryAfter,
-        scrollTopBefore: requestDebug.scrollTopBefore,
-        scrollTopAfter: scroller?.scrollTop ?? null,
-        scrollHeightBefore: requestDebug.scrollHeightBefore,
-        scrollHeightAfter: scroller?.scrollHeight ?? null,
-        continued: result.continuation === "continued",
-        stopReason: resolvePaginationSettleReason(result, boundaryUnchanged, hasMoreRef.current),
-        continuation: result.continuation,
+        request: requestRef.current,
+        items: itemsRef.current,
+        scrollRoot: scrollRef.current,
+        sentinel: sentinelNodeRef.current,
+        hasMore: hasMoreRef.current,
       });
     },
-    [scrollRef, sessionId],
+    [reportRecovery, scrollRef, sessionId],
   );
 
   const loadPage = useCallback(async () => {
@@ -275,18 +383,43 @@ function useLazyLoadSentinel(params: {
   }, [loadMore, scrollRef, sessionId]);
 
   const shouldContinueWhileIntersecting = useCallback(() => {
-    const request = requestRef.current;
-    if (!request) return false;
-    const boundaryAfter = getOldestVisibleBoundaryKey(itemsRef.current);
-    const boundaryUnchanged = request.boundaryBefore === boundaryAfter;
-    return boundaryUnchanged && hasMoreRef.current;
-  }, []);
+    const scrollRoot = scrollRef.current;
+    const sentinel = sentinelNodeRef.current;
+    return Boolean(
+      hasMoreRef.current &&
+      scrollRoot &&
+      sentinel &&
+      isElementInPreloadRegion(scrollRoot, sentinel, TRANSCRIPT_SENTINEL_ROOT_MARGIN),
+    );
+  }, [scrollRef]);
 
-  return useSharedLazyLoadSentinel(scrollRef, hasMore, blocked, isLoadingMore, loadPage, {
-    rearmWhileIntersecting: true,
-    shouldContinueWhileIntersecting,
-    onLoadSettled: isDebug() ? reportSettle : undefined,
-  });
+  const sharedSentinel = useSharedLazyLoadSentinel(
+    scrollRef,
+    hasMore,
+    blocked,
+    isLoadingMore,
+    loadPage,
+    {
+      rootMargin: TRANSCRIPT_SENTINEL_ROOT_MARGIN,
+      rearmWhileIntersecting: true,
+      shouldContinueWhileIntersecting,
+      onLoadSettled: reportSettle,
+    },
+  );
+  const sentinelRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      sentinelNodeRef.current = node;
+      sharedSentinel.sentinelRef(node);
+    },
+    [sharedSentinel.sentinelRef],
+  );
+
+  return {
+    sentinelRef,
+    onUserGesture: sharedSentinel.onUserGesture,
+    retry: sharedSentinel.retry,
+    showRecovery,
+  };
 }
 
 /**
@@ -818,7 +951,12 @@ export function useNativeScrollManagement(params: {
   );
   const handleScrollToMessage = useScrollToMessage(scrollRef, runGuardedScroll);
   useScrollPositionOnPrepend(scrollRef, items, isLoadingMore, isProgrammaticScrollLocked);
-  const { sentinelRef, onUserGesture } = useLazyLoadSentinel({
+  const {
+    sentinelRef,
+    onUserGesture,
+    retry: retryLoadMore,
+    showRecovery,
+  } = useLazyLoadSentinel({
     scrollRef,
     items,
     sessionId,
@@ -830,5 +968,12 @@ export function useNativeScrollManagement(params: {
   useRetryPaginationOnUpwardScroll(scrollRef, onUserGesture, isProgrammaticScrollLocked);
   useInitialScrollPosition(scrollRef, items.length, sessionId, enabled, isNearBottomRef);
 
-  return { handleScrollToMessage, sentinelRef, resyncIsNearBottom, markNotNearBottom };
+  return {
+    handleScrollToMessage,
+    sentinelRef,
+    resyncIsNearBottom,
+    markNotNearBottom,
+    retryLoadMore,
+    showRecovery,
+  };
 }
