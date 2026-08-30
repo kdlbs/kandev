@@ -25,15 +25,19 @@ import { getHiddenSessionIds, setHiddenSessionIds } from "@/lib/local-storage";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
-const hiddenSessionIdsByApi = new WeakMap<DockviewApi, Set<string>>();
+const hiddenSessionIdsByApi = new WeakMap<DockviewApi, Map<string | null, Set<string>>>();
 
 function hiddenSessionIdsFor(api: DockviewApi): Set<string> {
-  const existing = hiddenSessionIdsByApi.get(api);
+  const envId = useDockviewStore.getState().currentLayoutEnvId;
+  let hiddenSessionIdsByEnv = hiddenSessionIdsByApi.get(api);
+  if (!hiddenSessionIdsByEnv) {
+    hiddenSessionIdsByEnv = new Map();
+    hiddenSessionIdsByApi.set(api, hiddenSessionIdsByEnv);
+  }
+  const existing = hiddenSessionIdsByEnv.get(envId);
   if (existing) return existing;
-  const hiddenSessionIds = new Set(
-    getHiddenSessionIds(useDockviewStore.getState().currentLayoutEnvId),
-  );
-  hiddenSessionIdsByApi.set(api, hiddenSessionIds);
+  const hiddenSessionIds = new Set(getHiddenSessionIds(envId));
+  hiddenSessionIdsByEnv.set(envId, hiddenSessionIds);
   return hiddenSessionIds;
 }
 
@@ -323,6 +327,7 @@ export function ensureSessionTabPrecedesNonSessionTabs(api: DockviewApi, session
 type AutoSessionTabRefs = {
   sessionTabCreatedRef: MutableRefObject<Set<string>>;
   hiddenSessionIdsRef: MutableRefObject<Set<string>>;
+  hiddenSessionEnvIdRef: MutableRefObject<string | null>;
   prevTaskIdRef: MutableRefObject<string | null>;
   prevSessionIdRef: MutableRefObject<string | null>;
 };
@@ -544,10 +549,12 @@ export function runAutoSessionTabEffect(
 
   const { tid, currentSessionIds } = resolveCurrentSessionIds(appStore);
 
-  // A fresh Dockview API is created after reload. Merge the tab-scoped hide
-  // choice before reconciling siblings so refresh cannot reopen hidden tabs.
-  for (const sessionId of hiddenSessionIdsFor(api)) {
-    refs.hiddenSessionIdsRef.current.add(sessionId);
+  // A fresh Dockview API is created after reload, while an environment switch
+  // retains its API. Use the current environment's hide set in either case.
+  const currentEnvId = useDockviewStore.getState().currentLayoutEnvId;
+  if (refs.hiddenSessionEnvIdRef.current !== currentEnvId) {
+    refs.hiddenSessionIdsRef.current = hiddenSessionIdsFor(api);
+    refs.hiddenSessionEnvIdRef.current = currentEnvId;
   }
 
   logAutoSessionTabEffectEntry(api, effectiveSessionId, tid, currentSessionIds, refs);
@@ -677,6 +684,7 @@ export function runAutoSessionTabEffect(
 export function useAutoSessionTab(effectiveSessionId: string | null) {
   const sessionTabCreatedRef = useRef<Set<string>>(new Set());
   const hiddenSessionIdsRef = useRef<Set<string>>(new Set());
+  const hiddenSessionEnvIdRef = useRef<string | null>(null);
   const prevTaskIdRef = useRef<string | null>(null);
   const prevSessionIdRef = useRef<string | null>(null);
   const appStore = useAppStoreApi();
@@ -684,12 +692,8 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
 
   useEffect(() => {
     if (!dockviewApi) return;
-    const registered = hiddenSessionIdsByApi.get(dockviewApi);
-    if (registered) {
-      hiddenSessionIdsRef.current = registered;
-      return;
-    }
-    hiddenSessionIdsByApi.set(dockviewApi, hiddenSessionIdsRef.current);
+    hiddenSessionIdsRef.current = hiddenSessionIdsFor(dockviewApi);
+    hiddenSessionEnvIdRef.current = useDockviewStore.getState().currentLayoutEnvId;
   }, [dockviewApi]);
 
   // Key-based dependency so the effect re-runs when the task's session list
@@ -707,6 +711,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     runAutoSessionTabEffect(effectiveSessionId, appStore, {
       sessionTabCreatedRef,
       hiddenSessionIdsRef,
+      hiddenSessionEnvIdRef,
       prevTaskIdRef,
       prevSessionIdRef,
     });
