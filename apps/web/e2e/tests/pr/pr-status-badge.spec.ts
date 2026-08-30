@@ -707,6 +707,7 @@ test.describe("PR status badge", () => {
     });
     await expect(icon).toHaveAttribute("data-pr-count", "2", { timeout: 15_000 });
     await taskRow.hover();
+    await expect(taskActions).toBeVisible();
     await expect(menuSlot).toHaveCSS("width", "24px");
     await icon.hover();
 
