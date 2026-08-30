@@ -117,7 +117,9 @@ func (s *Service) loadCIRunBinding(ctx context.Context, input RequestFreshCIRunI
 	}
 	var actor, target taskIdentity
 	if err := s.store.ro.GetContext(ctx, &actor, s.store.ro.Rebind(
-		`SELECT workspace_id, workflow_id, workflow_step_id FROM tasks WHERE id = ?`), input.ActorTaskID); err != nil {
+		`SELECT actor.workspace_id, actor.workflow_id, actor.workflow_step_id
+		FROM tasks actor JOIN task_sessions session ON session.task_id = actor.id
+		WHERE actor.id = ? AND session.id = ?`), input.ActorTaskID, input.ActorSessionID); err != nil {
 		return nil, &CIRunRequestError{Class: CIRunFailureNotAuthorized}
 	}
 	if err := s.store.ro.GetContext(ctx, &target, s.store.ro.Rebind(

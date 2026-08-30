@@ -381,6 +381,32 @@ func TestRequestFreshCIRunDeniesStaticScopeMismatches(t *testing.T) {
 	}
 }
 
+func TestRequestFreshCIRunDeniesSessionsOutsideTheCoordinatorTask(t *testing.T) {
+	tests := []struct {
+		name      string
+		sessionID string
+	}{
+		{name: "missing session", sessionID: "session-missing"},
+		{name: "session owned by another task", sessionID: "session-other"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service, client, input := setupCIRunServiceTest(t, false)
+			input.ActorSessionID = tt.sessionID
+
+			_, err := service.RequestFreshCIRun(context.Background(), input)
+			var ciErr *CIRunRequestError
+			if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureNotAuthorized {
+				t.Fatalf("error = %#v, want not_authorized", err)
+			}
+			if client.reruns != 0 || client.dispatches != 0 {
+				t.Fatalf("provider mutated for foreign session: rerun=%d dispatch=%d",
+					client.reruns, client.dispatches)
+			}
+		})
+	}
+}
+
 func TestRequestFreshCIRunDeniesUnreviewedDispatchWorkflow(t *testing.T) {
 	service, client, input := setupCIRunServiceTest(t, false)
 	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
@@ -557,6 +583,7 @@ func setupCIRunServiceTest(t *testing.T, fork bool) (*Service, *fakeCIRunActions
 		`ALTER TABLE tasks ADD COLUMN workflow_step_id TEXT NOT NULL DEFAULT ''`,
 		`CREATE TABLE repositories (id TEXT PRIMARY KEY, workspace_id TEXT, provider TEXT, provider_owner TEXT, provider_name TEXT, provider_repo_id TEXT)`,
 		`CREATE TABLE task_repositories (id TEXT PRIMARY KEY, task_id TEXT, repository_id TEXT)`,
+		`CREATE TABLE task_sessions (id TEXT PRIMARY KEY, task_id TEXT NOT NULL)`,
 	} {
 		if _, err := store.db.Exec(statement); err != nil {
 			t.Fatal(err)
@@ -567,7 +594,12 @@ func setupCIRunServiceTest(t *testing.T, fork bool) (*Service, *fakeCIRunActions
 	}
 	if _, err := store.db.Exec(`INSERT INTO tasks(id, workspace_id, workflow_id, workflow_step_id) VALUES
 		('coordinator-1','workspace-1','coordinator-workflow','coordinator-step'),
-		('target-1','workspace-1','workflow-1','ci-fixup')`); err != nil {
+		('target-1','workspace-1','workflow-1','ci-fixup'),
+		('other-task','workspace-1','other-workflow','other-step')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO task_sessions(id, task_id) VALUES
+		('session-1', 'coordinator-1'), ('session-other', 'other-task')`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.db.Exec(`INSERT INTO repositories VALUES
