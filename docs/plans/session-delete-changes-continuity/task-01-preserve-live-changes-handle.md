@@ -48,9 +48,9 @@ environment.
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- hooks/use-environment-session-id.test.ts
-cd apps/web && pnpm run typecheck
-cd apps/web && pnpm e2e:run tests/session/session-tab-management.spec.ts -- --grep "deleting the active shared-environment session keeps Changes data visible"
+(cd apps && pnpm --filter @kandev/web test -- hooks/use-environment-session-id.test.ts)
+(cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm e2e:run tests/session/session-tab-management.spec.ts -- --grep "deleting the active shared-environment session keeps Changes data visible")
 ```
 
 ## Files likely touched

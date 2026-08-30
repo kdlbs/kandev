@@ -266,73 +266,78 @@ test.describe("Session tab management — close behavior", () => {
 
     const localChange = "session-delete-change.txt";
     const remoteChange = "remote-session-delete-change.ts";
-    fs.writeFileSync(path.join(worktreePath, localChange), "keep this change visible\n");
+    const localChangePath = path.join(worktreePath, localChange);
+    fs.writeFileSync(localChangePath, "keep this change visible\n");
 
-    await apiClient.mockGitHubReset();
-    await apiClient.mockGitHubSetUser("test-user");
-    await apiClient.mockGitHubAddPRs([
-      {
-        number: 3157,
-        title: "Keep Changes visible after session deletion",
-        state: "open",
+    try {
+      await apiClient.mockGitHubReset();
+      await apiClient.mockGitHubSetUser("test-user");
+      await apiClient.mockGitHubAddPRs([
+        {
+          number: 3157,
+          title: "Keep Changes visible after session deletion",
+          state: "open",
+          head_branch: worktreeBranch,
+          base_branch: "main",
+          author_login: "test-user",
+          repo_owner: "testorg",
+          repo_name: "testrepo",
+          additions: 1,
+          deletions: 0,
+        },
+      ]);
+      await apiClient.mockGitHubAddPRFiles("testorg", "testrepo", 3157, [
+        {
+          filename: remoteChange,
+          status: "added",
+          additions: 1,
+          deletions: 0,
+          patch: "@@ -0,0 +1 @@\n+export const kept = true;",
+        },
+      ]);
+      await apiClient.mockGitHubAssociateTaskPR({
+        task_id: task.id,
+        workspace_id: seedData.workspaceId,
+        repository_id: seedData.repositoryId,
+        owner: "testorg",
+        repo: "testrepo",
+        pr_number: 3157,
+        pr_url: "https://github.com/testorg/testrepo/pull/3157",
+        pr_title: "Keep Changes visible after session deletion",
         head_branch: worktreeBranch,
         base_branch: "main",
         author_login: "test-user",
-        repo_owner: "testorg",
-        repo_name: "testrepo",
         additions: 1,
         deletions: 0,
-      },
-    ]);
-    await apiClient.mockGitHubAddPRFiles("testorg", "testrepo", 3157, [
-      {
-        filename: remoteChange,
-        status: "added",
-        additions: 1,
-        deletions: 0,
-        patch: "@@ -0,0 +1 @@\n+export const kept = true;",
-      },
-    ]);
-    await apiClient.mockGitHubAssociateTaskPR({
-      task_id: task.id,
-      workspace_id: seedData.workspaceId,
-      repository_id: seedData.repositoryId,
-      owner: "testorg",
-      repo: "testrepo",
-      pr_number: 3157,
-      pr_url: "https://github.com/testorg/testrepo/pull/3157",
-      pr_title: "Keep Changes visible after session deletion",
-      head_branch: worktreeBranch,
-      base_branch: "main",
-      author_login: "test-user",
-      additions: 1,
-      deletions: 0,
-    });
+      });
 
-    await testPage.reload();
-    await session.waitForLoad();
-    await session.sessionTabBySessionId(session1Id).click();
-    await session.clickTab("Changes");
-    await expect(session.changesFileRow(localChange)).toBeVisible({ timeout: 20_000 });
-    await session.expandPRChangesSection();
-    await expect(
-      session.prFilesSection().locator(`[data-changes-file="${remoteChange}"]`),
-    ).toBeVisible({ timeout: 20_000 });
+      await testPage.reload();
+      await session.waitForLoad();
+      await session.sessionTabBySessionId(session1Id).click();
+      await session.clickTab("Changes");
+      await expect(session.changesFileRow(localChange)).toBeVisible({ timeout: 20_000 });
+      await session.expandPRChangesSection();
+      await expect(
+        session.prFilesSection().locator(`[data-changes-file="${remoteChange}"]`),
+      ).toBeVisible({ timeout: 20_000 });
 
-    await session.sessionTabBySessionId(session1Id).click({ button: "right" });
-    await session.contextMenuItem("Delete").click();
-    const confirmation = testPage.getByTestId("session-delete-confirm-popover");
-    await expect(confirmation).toBeVisible({ timeout: 5_000 });
-    await confirmation.getByTestId("session-delete-confirm").click();
+      await session.sessionTabBySessionId(session1Id).click({ button: "right" });
+      await session.contextMenuItem("Delete").click();
+      const confirmation = testPage.getByTestId("session-delete-confirm-popover");
+      await expect(confirmation).toBeVisible({ timeout: 5_000 });
+      await confirmation.getByTestId("session-delete-confirm").click();
 
-    await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 15_000 });
-    await expect(session.sessionTabBySessionId(session2Id)).toBeVisible({ timeout: 5_000 });
-    await session.clickTab("Changes");
-    await expect(session.changesFileRow(localChange)).toBeVisible({ timeout: 20_000 });
-    await session.expandPRChangesSection();
-    await expect(
-      session.prFilesSection().locator(`[data-changes-file="${remoteChange}"]`),
-    ).toBeVisible({ timeout: 20_000 });
+      await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 15_000 });
+      await expect(session.sessionTabBySessionId(session2Id)).toBeVisible({ timeout: 5_000 });
+      await session.clickTab("Changes");
+      await expect(session.changesFileRow(localChange)).toBeVisible({ timeout: 20_000 });
+      await session.expandPRChangesSection();
+      await expect(
+        session.prFilesSection().locator(`[data-changes-file="${remoteChange}"]`),
+      ).toBeVisible({ timeout: 20_000 });
+    } finally {
+      fs.rmSync(localChangePath, { force: true });
+    }
   });
 
   test("deleting then immediately switching tasks does not resurrect the tab", async ({

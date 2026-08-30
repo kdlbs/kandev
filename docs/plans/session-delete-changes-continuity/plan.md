@@ -25,14 +25,15 @@ pull-request data after same-environment active-session deletion.
   sessions that share a task environment.
 - Replace a cached session handle after its environment mapping is purged and a
   surviving active session maps to the same environment.
-- Keep environment-keyed Git, cumulative-diff, review, and pull-request data
-  visible in the desktop Changes panel after active-session deletion.
+- Keep environment-keyed Git, cumulative-diff, and pull-request data visible in
+  the desktop Changes panel after active-session deletion.
 - Cover the shared data path used by the existing mobile Changes surface.
 
 ### Out of scope
 
 - Backend session deletion, task-environment ownership, or Git/PR APIs.
 - Changes panel layout, navigation, touch behavior, copy, or empty-state design.
+- Session-scoped file-review markers and their cache ownership.
 - Changing when ordinary same-environment tab switches refetch workspace data.
 - Recovering tasks that have no surviving session lookup handle.
 

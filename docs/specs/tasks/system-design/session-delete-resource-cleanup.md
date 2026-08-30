@@ -79,9 +79,10 @@ Session deletion first selects a surviving session. Then it purges the deleted
 session's runtime state. When the purge removes the retained mapping,
 `useEnvironmentSessionId` promotes the current active session as the lookup
 handle. The environment identity does not change. Environment-keyed caches for
-Git status, commits, cumulative diffs, file reviews, and remote contributions
-remain intact. These caches continue to serve desktop and mobile Changes
-surfaces.
+Git status, commits, cumulative diffs, and remote contributions remain intact.
+These caches continue to serve desktop and mobile Changes surfaces. File-review
+markers remain session-scoped and are intentionally outside this continuity
+guarantee.
 
 The selector does not treat a missing mapping as proof that an inactive cached
 session is usable. Thus, downstream hooks do not use a deleted session ID as a
