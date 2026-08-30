@@ -689,6 +689,11 @@ test.describe("PR status badge", () => {
     await expect(focusedSummary).toBeVisible();
     await testPage.keyboard.press("Escape");
     await expect(focusedSummary).toBeHidden();
+    // End the keyboard-disclosure flow before exercising hover again. Leaving
+    // the dismissed tooltip trigger focused makes the later pointer transition
+    // depend on overlapping focus and hover state.
+    await taskRow.focus();
+    await expect(taskRow).toBeFocused();
     await apiClient.mockGitHubAssociateTaskPR({
       workspace_id: seedData.workspaceId,
       task_id: task.id,
