@@ -16,6 +16,7 @@ import (
 func (r *Repository) initSchema() error {
 	steps := []func() error{
 		r.initCoreSchema,
+		r.initCoordinatorGrantSchema,
 		r.initRepositorySetsSchema,
 		r.initRepositoryBranchPoliciesSchema,
 		r.initPlansSchema,

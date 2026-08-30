@@ -72,11 +72,46 @@ func TestMoveTaskAuthorizationSeparatesOrdinaryAndCoordinatorAuthority(t *testin
 	})
 	guarded, replacement, err = h.authorizeAutomationRequest(coordinatorCtx, message("task-sibling", "wf-route"))
 	require.NoError(t, err)
-	assert.Nil(t, guarded)
-	require.NotNil(t, replacement)
+	require.NotNil(t, guarded)
+	assert.Equal(t, ws.MessageTypeError, guarded.Type)
+	assert.Nil(t, replacement)
 
 	guarded, _, err = h.authorizeAutomationRequest(coordinatorCtx, message("task-foreign", "wf-foreign"))
 	require.NoError(t, err)
 	require.NotNil(t, guarded)
 	assert.Equal(t, ws.MessageTypeError, guarded.Type)
+}
+
+func TestMoveTaskAuthorizationAllowsOnlyCurrentCoordinatorGrant(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-route", Name: "Route", CreatedAt: now, UpdatedAt: now}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-route", WorkspaceID: "ws-route", Name: "Route", CreatedAt: now, UpdatedAt: now}))
+	for _, task := range []*models.Task{
+		{ID: "task-coordinator", WorkspaceID: "ws-route", WorkflowID: "wf-route", Title: "Coordinator", CreatedAt: now, UpdatedAt: now},
+		{ID: "task-sibling", WorkspaceID: "ws-route", WorkflowID: "wf-route", Title: "Sibling", CreatedAt: now, UpdatedAt: now},
+	} {
+		require.NoError(t, repo.CreateTask(ctx, task))
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-coordinator", TaskID: "task-coordinator", State: models.TaskSessionStateRunning, IsPrimary: true, StartedAt: now, UpdatedAt: now}))
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{ID: "execution-coordinator", SessionID: "session-coordinator", TaskID: "task-coordinator", ExecutorID: "executor", Status: models.ExecutorRunningStatusRunning, AgentExecutionID: "execution-coordinator"}))
+	_, err := repo.DB().ExecContext(ctx, `INSERT INTO workspace_coordinator_grants (workspace_id, coordinator_task_id, created_by_user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, "ws-route", "task-coordinator", "owner", now, now)
+	require.NoError(t, err)
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	payload, err := json.Marshal(map[string]interface{}{"task_id": "task-sibling", "workflow_id": "wf-route", "workflow_step_id": "step-done"})
+	require.NoError(t, err)
+	msg := &ws.Message{ID: "current-grant", Action: ws.ActionMCPMoveTask, Payload: payload}
+	principal := mcpscope.Principal{AutomationID: "automation", WorkspaceID: "ws-route", CallerTaskID: "task-coordinator", CallerSessionID: "session-coordinator", CallerExecutionID: "execution-coordinator", Surface: mcpprofile.SurfaceAutomation}
+
+	guarded, replacement, err := h.authorizeAutomationRequest(mcpscope.WithPrincipal(ctx, principal), msg)
+	require.NoError(t, err)
+	assert.Nil(t, guarded)
+	require.NotNil(t, replacement)
+
+	principal.CallerExecutionID = "expired-execution"
+	guarded, _, err = h.authorizeAutomationRequest(mcpscope.WithPrincipal(ctx, principal), msg)
+	require.NoError(t, err)
+	require.NotNil(t, guarded)
 }

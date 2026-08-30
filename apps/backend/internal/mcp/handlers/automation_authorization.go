@@ -96,6 +96,18 @@ func (h *Handlers) authorizeAutomationRequest(ctx context.Context, msg *ws.Messa
 	if h.taskSvc == nil || principal.WorkspaceID == "" {
 		return automationNotFound(msg)
 	}
+	// A cross-task route is privileged even when the caller's automation
+	// surface was server-derived. The durable Coordinator grant must still be
+	// bound to the live execution that produced this principal.
+	if msg.Action == ws.ActionMCPMoveTask {
+		granted, err := h.taskSvc.IsCurrentCoordinatorGrant(
+			ctx, principal.WorkspaceID, principal.CallerTaskID,
+			principal.CallerSessionID, principal.CallerExecutionID,
+		)
+		if err != nil || !granted {
+			return automationNotFound(msg)
+		}
+	}
 
 	fields, err := automationPayloadFields(msg.Payload)
 	if err != nil {
