@@ -40,6 +40,17 @@ export type ProcessState = {
   devProcessBySessionId: Record<string, string>;
 };
 
+export type GitChangeLayer = "staged" | "unstaged";
+
+export type FileChangeFacet = {
+  status: "modified" | "added" | "deleted" | "untracked" | "renamed";
+  additions?: number;
+  deletions?: number;
+  old_path?: string;
+  diff?: string;
+  diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+};
+
 export type FileInfo = {
   path: string;
   status: "modified" | "added" | "deleted" | "untracked" | "renamed";
@@ -49,6 +60,10 @@ export type FileInfo = {
   old_path?: string;
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  staged_change?: FileChangeFacet;
+  unstaged_change?: FileChangeFacet;
+  /** Frontend-only projection used when one raw path appears in both change sections. */
+  change_layer?: GitChangeLayer;
   /** Exact old-side ref for cumulative committed diffs. */
   base_ref?: string;
   /**

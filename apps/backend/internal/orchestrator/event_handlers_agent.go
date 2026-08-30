@@ -665,8 +665,15 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// avoid racing on_enter against the running turn. Apply it now: the move
 	// is the explicit transition the agent requested, so skip the regular
 	// on_turn_complete evaluation against the (still old) step.
-	if pendingMove, exists := s.messageQueue.TakePendingMove(ctx, data.SessionID); exists {
-		s.applyPendingMove(ctx, data.TaskID, data.SessionID, session, pendingMove)
+	//
+	// A move that has been armed longer than the TTL is not applied: the board
+	// state it was authored against is long gone, and applying it would
+	// relocate the card behind the user's back. discardStalePendingMove drops
+	// it (and its hand-off prompt), so this turn falls through to the normal
+	// on_turn_complete handling below, exactly as if no move had been armed.
+	// Fresh moves are claimed with an exact-row comparison before application.
+	// See pending_move_reaper.go.
+	if s.handlePendingMoveAtAgentReady(ctx, data.TaskID, data.SessionID, session) {
 		return
 	}
 

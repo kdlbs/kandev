@@ -15,12 +15,9 @@ The UI system owns web presentation.
 
 ## Ownership
 
-This system owns navigation, settings, boards, task/review surfaces,
-walkthroughs, chat controls, visual feedback, and responsive interaction
-contracts without backend-state ownership.
-
-Controls for provider/task state remain owned by that system.
-The UI system owns reusable contracts.
+The UI system owns reusable navigation, settings, task/review, chat, visual
+feedback, and responsive interaction contracts. Provider and task state remain
+with their owning systems.
 
 ## Exclusions
 
@@ -148,6 +145,7 @@ The UI system owns reusable contracts.
 
 ### System design
 
+- [Clarification submit feedback](system-design/clarification-submit-feedback.md)
 - [Growing Dialog Content Containment](system-design/dialog-content-containment.md)
 - [Agent Todo List Panel](system-design/agent-todo-list-panel.md)
 - [App Status Bar](system-design/app-status-bar.md)
