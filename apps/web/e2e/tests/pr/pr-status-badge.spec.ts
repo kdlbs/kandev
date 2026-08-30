@@ -676,9 +676,9 @@ test.describe("PR status badge", () => {
       mergeable_state: "dirty",
     });
     await expect(icon).toHaveAttribute("data-pr-count", "2", { timeout: 15_000 });
-    const taskActions = taskRow.getByRole("button", { name: "Task actions" });
+    const prSummaryTaskActions = taskRow.getByRole("button", { name: "Task actions" });
     await taskRow.hover();
-    await expect(taskActions).toBeVisible();
+    await expect(prSummaryTaskActions).toBeVisible();
     await icon.hover();
 
     const multiSummary = visibleTaskPRSummary(testPage);
