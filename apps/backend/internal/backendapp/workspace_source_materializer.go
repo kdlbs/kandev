@@ -32,6 +32,8 @@ const legacyLocalPCExecutor = "local_pc"
 type workspaceSourceMaterializerRepo interface {
 	GetTaskEnvironmentByTaskID(context.Context, string) (*models.TaskEnvironment, error)
 	UpdateTaskEnvironment(context.Context, *models.TaskEnvironment) error
+	ListTaskEnvironmentRepos(context.Context, string) ([]*models.TaskEnvironmentRepo, error)
+	CreateTaskEnvironmentRepo(context.Context, *models.TaskEnvironmentRepo) error
 	ListTaskSessions(context.Context, string) ([]*models.TaskSession, error)
 	ListTaskRepositories(context.Context, string) ([]*models.TaskRepository, error)
 	ListTaskWorkspaceFolders(context.Context, string) ([]*models.TaskWorkspaceFolder, error)
@@ -142,6 +144,9 @@ func (m *workspaceSourceMaterializer) materializeHostWorkspaceSources(ctx contex
 	materialization.linkUndo = append(materialization.linkUndo, materialized...)
 	if materializeErr != nil {
 		return nil, materializeErr
+	}
+	if err = m.persistEnvironmentRepositoryInventory(ctx, state.environment.ID, state.environment.ExecutorType, batch, branchMaterializations); err != nil {
+		return nil, err
 	}
 	if state.environment.WorkspacePath != materialization.root {
 		state.environment.WorkspacePath, state.environment.UpdatedAt = materialization.root, time.Now().UTC()
@@ -490,7 +495,118 @@ func (m *workspaceSourceMaterializer) materializeRemoteWorkspaceSources(ctx cont
 	if err != nil {
 		return nil, err
 	}
+	if err := m.persistEnvironmentRepositoryInventory(ctx, state.environment.ID, state.environment.ExecutorType, batch, nil); err != nil {
+		return nil, err
+	}
 	return &taskservice.WorkspaceSourceMaterializationResult{WorkspacePath: state.environment.WorkspacePath, SessionIDs: ids}, nil
+}
+
+// persistEnvironmentRepositoryInventory records the repository slots created
+// by this attachment after their runtime materialization succeeds. The resume
+// path validates task_repositories against this canonical inventory before it
+// reuses an environment, so a live workspace-source attachment must publish
+// its new slot before the next backend restart.
+func (m *workspaceSourceMaterializer) persistEnvironmentRepositoryInventory(
+	ctx context.Context,
+	environmentID, executorType string,
+	batch *models.WorkspaceSourceBatch,
+	branchMaterializations []*branchMaterialization,
+) error {
+	if batch == nil || environmentID == "" {
+		return nil
+	}
+	existing, err := m.loadEnvironmentRepositoryInventory(ctx, environmentID)
+	if err != nil {
+		return err
+	}
+	for _, row := range workspaceSourceInventoryRows(environmentID, executorType, batch, branchMaterializations, existing) {
+		if err := m.repo.CreateTaskEnvironmentRepo(ctx, row); err != nil {
+			return fmt.Errorf("persist task environment repository %q: %w", row.RepositoryID, err)
+		}
+	}
+	return nil
+}
+
+func (m *workspaceSourceMaterializer) loadEnvironmentRepositoryInventory(ctx context.Context, environmentID string) (map[string]struct{}, error) {
+	rows, err := m.repo.ListTaskEnvironmentRepos(ctx, environmentID)
+	if err != nil {
+		return nil, fmt.Errorf("list task environment repository inventory: %w", err)
+	}
+	existing := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		if row != nil && row.RepositoryID != "" {
+			existing[environmentRepoInventoryKey(row.RepositoryID, row.BranchSlug)] = struct{}{}
+		}
+	}
+	return existing, nil
+}
+
+func workspaceSourceInventoryRows(
+	environmentID, executorType string,
+	batch *models.WorkspaceSourceBatch,
+	branchMaterializations []*branchMaterialization,
+	existing map[string]struct{},
+) []*models.TaskEnvironmentRepo {
+	materialized := make(map[string]*branchMaterialization, len(branchMaterializations))
+	for _, branch := range branchMaterializations {
+		if branch != nil && branch.repositoryID != "" {
+			materialized[branch.repositoryID] = branch
+		}
+	}
+	rows := make([]*models.TaskEnvironmentRepo, 0, len(batch.Sources))
+	for _, source := range batch.Sources {
+		row, ok := workspaceSourceInventoryRow(environmentID, executorType, source.Repository, materialized)
+		if !ok {
+			continue
+		}
+		if _, found := existing[environmentRepoInventoryKey(row.RepositoryID, row.BranchSlug)]; found {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func workspaceSourceInventoryRow(
+	environmentID, executorType string,
+	taskRepository *models.TaskRepository,
+	materialized map[string]*branchMaterialization,
+) (*models.TaskEnvironmentRepo, bool) {
+	if taskRepository == nil || taskRepository.RepositoryID == "" {
+		return nil, false
+	}
+	branchSlug := workspaceSourceBranchSlug(taskRepository)
+	branch := materialized[taskRepository.RepositoryID]
+	if executorType == string(models.ExecutorTypeWorktree) && branch == nil {
+		// A worktree source that was not materialized has no physical checkout
+		// to publish. The next launch must prepare it first.
+		return nil, false
+	}
+	row := &models.TaskEnvironmentRepo{
+		TaskEnvironmentID: environmentID,
+		RepositoryID:      taskRepository.RepositoryID,
+		BranchSlug:        branchSlug,
+		Position:          taskRepository.Position,
+	}
+	if branch != nil && branch.worktree != nil {
+		row.WorktreeID = branch.worktree.ID
+		row.WorktreePath = branch.worktree.Path
+		row.WorktreeBranch = branch.worktree.Branch
+		row.BranchSlug = branch.slug
+	}
+	return row, true
+}
+
+func workspaceSourceBranchSlug(taskRepository *models.TaskRepository) string {
+	branch := taskRepository.CheckoutBranch
+	if branch == "" {
+		branch = taskRepository.BaseBranch
+	}
+	return worktree.SanitizeBranchSlug(branch)
+}
+
+func environmentRepoInventoryKey(repositoryID, branchSlug string) string {
+	return repositoryID + "\x00" + branchSlug
 }
 
 // buildRemoteWorkspaceRepositoryBatch projects only the sources created by

@@ -20,7 +20,7 @@ async function expandIntegrationsSection(testPage: Page) {
   await expect(integrationsToggle).toHaveAttribute("aria-expanded", "true");
 }
 
-// Covers docs/specs/integrations/enable-disable-toggle.md's nav-visibility
+// Covers docs/specs/integrations/requirements/enable-disable-toggle.md's nav-visibility
 // scenarios: with "Hide disabled integrations from left panel navigation"
 // off (the default), a disabled-but-configured integration still shows in
 // the sidebar; turning the setting on hides it; turning it back off (or
@@ -29,6 +29,7 @@ test.describe("hide disabled integrations from left panel navigation", () => {
   test("off by default keeps a disabled integration visible; on hides it; re-enabling reveals it", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
     // Make GitHub configured/healthy so it is eligible to appear in the nav
     // regardless of its enabled state.
@@ -72,8 +73,10 @@ test.describe("hide disabled integrations from left panel navigation", () => {
     // The tree is opt-in — `flat`, the default menu mode, renders no branches
     // at all — so choose a tree mode before asserting on its rows.
     await setSettingsMenuMode(testPage, "accordion");
-    const { workspaces } = await apiClient.listWorkspaces();
-    const workspaceId = workspaces[0].id;
+    // The setting above is scoped to the worker's seeded workspace. Do not
+    // use the first workspace returned by the API: another test can create a
+    // workspace earlier in the worker, and its GitHub state is independent.
+    const workspaceId = seedData.workspaceId;
     const integrationsPath = `/settings/workspaces/${workspaceId}/integrations`;
     await testPage.goto(integrationsPath);
     const settingsTree = testPage.getByTestId(SETTINGS_TAKEOVER_TESTID);

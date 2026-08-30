@@ -2,12 +2,14 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -99,6 +101,46 @@ func TestGetPromptGenerationForSessionUnknownSession(t *testing.T) {
 	_, err := mgr.GetPromptGenerationForSession(context.Background(), "session-absent")
 
 	require.ErrorIs(t, err, ErrNoExecutionForSession)
+}
+
+// TestGetPromptActivityForSessionReturnsTrackedSnapshot is the codex P1 gap
+// flagged during WO-38 Build round 7: GetPromptActivityForSession (the
+// primitive the stuck-signal watchdog reads to gate reclaims on real elapsed
+// inactivity, orchestrator/stuck_signal_watchdog.go) had no direct unit test
+// of its own — only indirect coverage through the watchdog's mock. This pins
+// its two branches: a tracked execution returns the execution ID, prompt
+// generation, activity epoch, and lastActivityAt that markAgentActivity last
+// recorded; an untracked session returns ErrNoExecutionForSession.
+func TestGetPromptActivityForSessionReturnsTrackedSnapshot(t *testing.T) {
+	mgr := newTestManager(t)
+	exec := &AgentExecution{ID: "exec-1", SessionID: "session-1"}
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	generation, err := mgr.BeginPrompt("exec-1")
+	require.NoError(t, err)
+	exec.markAgentActivity()
+	wantActivityAt, _, wantEpoch := exec.promptActivitySnapshot()
+
+	executionID, gotGeneration, gotEpoch, gotActivityAt, err := mgr.GetPromptActivityForSession(context.Background(), "session-1")
+
+	require.NoError(t, err)
+	require.Equal(t, "exec-1", executionID)
+	require.Equal(t, generation, gotGeneration)
+	require.Equal(t, wantEpoch, gotEpoch)
+	require.True(t, wantActivityAt.Equal(gotActivityAt),
+		"expected the session-scoped read to observe the same lastActivityAt markAgentActivity recorded")
+}
+
+func TestGetPromptActivityForSessionUnknownSession(t *testing.T) {
+	mgr := newTestManager(t)
+
+	executionID, generation, epoch, activityAt, err := mgr.GetPromptActivityForSession(context.Background(), "session-absent")
+
+	require.ErrorIs(t, err, ErrNoExecutionForSession)
+	require.Empty(t, executionID)
+	require.Zero(t, generation)
+	require.Zero(t, epoch)
+	require.True(t, activityAt.IsZero())
 }
 
 func TestBeginPromptUnknownExecution(t *testing.T) {
@@ -318,6 +360,60 @@ func TestStopAgentForcePassesForceToBackend(t *testing.T) {
 
 	require.True(t, stopTracker.forced, "force must be forwarded to StopInstance")
 	require.Equal(t, StopReasonBackendShutdown, stopTracker.stopReason)
+}
+
+func TestStopAgentWithReason_BackendFailureKeepsExecutionRetryable(t *testing.T) {
+	log := newTestRegistryLogger()
+	execRegistry := NewExecutorRegistry(log)
+	backend := &retryableStopBackend{
+		MockExecutor: MockExecutor{name: executor.NameStandalone},
+		stopErr:      errors.New("runtime stop failed"),
+	}
+	execRegistry.Register(backend)
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, execRegistry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	coordinator := activity.NewCoordinator(activity.Options{})
+	mgr.SetActivityCoordinator(coordinator)
+	runningLease, err := coordinator.AcquireTask(context.Background(), activity.KindExecutionRunning)
+	require.NoError(t, err)
+	mgr.trackActivity(executionActivityKey("exec-retryable-stop"), runningLease)
+
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID:          "exec-retryable-stop",
+		TaskID:      "task-retryable-stop",
+		SessionID:   "session-retryable-stop",
+		RuntimeName: executor.NameStandalone,
+		Status:      v1.AgentStatusRunning,
+	}))
+
+	err = mgr.StopAgentWithReason(context.Background(), "exec-retryable-stop", "idle cleanup", false)
+	require.ErrorIs(t, err, backend.stopErr)
+	_, exists := mgr.executionStore.Get("exec-retryable-stop")
+	require.True(t, exists, "a failed runtime stop must retain the execution for retry")
+
+	bus := mgr.eventBus.(*MockEventBus)
+	require.Empty(t, bus.PublishedEvents, "a failed runtime stop must not publish agent.stopped")
+	_, _, err = coordinator.TryAcquireMaintenance(context.Background(), 0)
+	require.ErrorIs(t, err, activity.ErrBusy, "a failed stop must retain execution activity")
+
+	backend.stopErr = nil
+	require.NoError(t, mgr.StopAgentWithReason(context.Background(), "exec-retryable-stop", "idle cleanup retry", false))
+	_, exists = mgr.executionStore.Get("exec-retryable-stop")
+	require.False(t, exists)
+	require.Len(t, bus.PublishedEvents, 1)
+	require.Equal(t, events.AgentStopped, bus.PublishedEvents[0].Type)
+	maintenance, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
+	require.NoError(t, err)
+	maintenance.Release()
+}
+
+type retryableStopBackend struct {
+	MockExecutor
+	stopErr error
+}
+
+func (b *retryableStopBackend) StopInstance(context.Context, *ExecutorInstance, bool) error {
+	return b.stopErr
 }
 
 type forceRecordingStopTracker struct {

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/subagent-context-persistence/spec.md
+spec: docs/specs/agents/requirements/subagent-context-persistence.md
 created: 2026-08-13
 status: draft
 ---

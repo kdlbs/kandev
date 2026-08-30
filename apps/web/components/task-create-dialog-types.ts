@@ -13,6 +13,7 @@ import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by
 import type { RepositoryInspection } from "@/lib/plugins/types";
 import type { UtilityGenerationResult } from "@/hooks/use-utility-agent-generator";
 import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
+import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 import type {
   KanbanMultiState,
   WorkflowSnapshotData,
@@ -54,6 +55,7 @@ export interface TaskCreateDialogProps {
     workflowStepId: string;
     state?: Task["state"];
     repositoryId?: string;
+    repositories?: TaskRepositorySnapshot[];
   } | null;
   onSuccess?: (
     task: Task,
@@ -109,6 +111,26 @@ export type TaskRepoRow = {
   /** On-machine repo path, when the user picked from discovered repos. */
   localPath?: string;
   branch: string;
+  /** Saved repository policy selected for this row. */
+  branchPolicyId?: string;
+};
+
+/** Repository fields needed to rehydrate an edit form without losing a policy snapshot. */
+export type TaskRepositorySnapshot = {
+  repository_id: string;
+  base_branch?: string;
+  id?: string;
+  task_id?: string;
+  checkout_branch?: string;
+  branch_policy_id?: string;
+  branch_policy_name?: string;
+  branch_policy_base_branch?: string;
+  branch_policy_branch_template?: string;
+  branch_policy_pull_request_target?: string;
+  position?: number;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
 };
 
 /**
@@ -152,6 +174,8 @@ export type StepType = {
 export type TaskCreateDialogInitialValues = {
   title: string;
   description?: string;
+  /** Existing task repository rows, including immutable policy snapshots. */
+  repositories?: TaskRepositorySnapshot[];
   repositoryId?: string;
   branch?: string;
   /** Existing remote branch to check out directly in the worktree (e.g. a PR's head branch),
@@ -253,6 +277,7 @@ export type DialogComputedArgs = {
   lastUsedWorkflowIdsByWorkspace: Record<string, string>;
   userSettingsLoaded?: boolean;
   snapshots: Record<string, WorkflowSnapshotData>;
+  agentProfileRecentUseContext?: AgentProfileRecentUseContext;
 };
 
 export type TaskCreateEffectsArgs = {
@@ -329,7 +354,10 @@ export type DialogFormState = {
    * order is the position the backend sees. There is no "primary" concept.
    */
   repositories: TaskRepoRow[];
+  /** False while rows are hydrated from an existing task; true after user edits. */
+  repositoriesDirty: boolean;
   setRepositories: React.Dispatch<React.SetStateAction<TaskRepoRow[]>>;
+  setRepositoriesDirty: (dirty: boolean) => void;
   addRepository: () => void;
   removeRepository: (key: string) => void;
   updateRepository: (key: string, patch: Partial<TaskRepoRow>) => void;
@@ -417,9 +445,10 @@ export type SubmitHandlersDeps = {
   workspaceId: string | null;
   workflowId: string | null;
   effectiveWorkflowId: string | null;
-  effectiveDefaultStepId: string | null;
   /** Unified repo list from the form. Empty when in GitHub URL mode. */
   repositories: TaskRepoRow[];
+  /** Whether the user explicitly changed repository selections in this form. */
+  repositoriesDirty: boolean;
   /** All on-machine discovered repos — used to look up `default_branch` for `localPath` rows. */
   discoveredRepositories: LocalRepository[];
   /** Workspace repositories — used to look up `default_branch` for `repositoryId` rows. */
@@ -444,6 +473,7 @@ export type SubmitHandlersDeps = {
     workflowStepId: string;
     state?: Task["state"];
     repositoryId?: string;
+    repositories?: TaskRepositorySnapshot[];
   } | null;
   onSuccess?: (
     task: Task,
@@ -461,6 +491,8 @@ export type SubmitHandlersDeps = {
   onOpenChange: (open: boolean) => void;
   /** Create-mode transport override. Omitted to use Kandev's REST task endpoint. */
   createTask?: TaskCreateSubmit;
+  /** Refreshes selected branch-policy options after a stale task submission. */
+  refreshBranchPolicies?: () => Promise<void>;
   preserveTaskCreateLastUsedOnClose?: () => void;
   taskId: string | null;
   parentTaskId?: string;
@@ -535,6 +567,7 @@ export type DialogFormBodyProps = {
   onTaskNameChange: (v: string) => void;
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
+  onRowPolicyChange?: (key: string, policyId: string, baseBranch: string) => void;
   onAgentProfileChange: (v: string) => void;
   onExecutorProfileChange: (v: string) => void;
   onWorkflowChange: (v: string) => void;

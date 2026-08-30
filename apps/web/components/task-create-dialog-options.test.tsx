@@ -15,21 +15,33 @@ type MockStore = {
     loaded: boolean;
     tools: [];
   };
+  agentProfileRecentUse: {
+    loaded: boolean;
+    records: Record<string, { profileIds: string[]; revision: number; updatedAt: string }>;
+  };
 };
 
 let mockStore: MockStore = {
   features: { dynamicAgentRouting: true },
   availableAgents: { items: [], loading: false, loaded: true, tools: [] },
+  agentProfileRecentUse: { loaded: false, records: {} },
 };
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: MockStore) => unknown) => selector(mockStore),
+  useAppStoreApi: () => ({
+    getState: () => ({
+      agentProfileRecentUse: mockStore.agentProfileRecentUse,
+      setAgentProfileRecentUse: vi.fn(),
+    }),
+  }),
 }));
 
 function setAvailableAgents(items: AvailableAgent[]) {
   mockStore = {
     features: { dynamicAgentRouting: true },
     availableAgents: { items, loading: false, loaded: true, tools: [] },
+    agentProfileRecentUse: { loaded: false, records: {} },
   };
 }
 
@@ -61,8 +73,14 @@ function profileOption(overrides: Partial<AgentProfileOption>): AgentProfileOpti
   };
 }
 
-function OptionsProbe({ profiles }: { profiles: AgentProfileOption[] }) {
-  const options = useAgentProfileOptions(profiles);
+function OptionsProbe({
+  profiles,
+  context,
+}: {
+  profiles: AgentProfileOption[];
+  context?: "task_create";
+}) {
+  const options = useAgentProfileOptions(profiles, context);
   return (
     <TooltipProvider>
       <div>
@@ -70,6 +88,7 @@ function OptionsProbe({ profiles }: { profiles: AgentProfileOption[] }) {
           <div
             key={option.value}
             data-testid={`option-${index}`}
+            data-value={option.value}
             data-disabled={option.disabled ? "true" : undefined}
             data-reason={option.disabledReason}
           >
@@ -161,6 +180,36 @@ describe("useAgentProfileOptions enabled filter", () => {
       useAgentProfileOptions([profileOption({ id: "p-legacy", label: "Agent • p-legacy" })]),
     );
     expect(result.current.map((o) => o.value)).toEqual(["p-legacy"]);
+  });
+});
+
+describe("useAgentProfileOptions recent-use ordering", () => {
+  it("ranks remembered eligible profiles and keeps unseen source order", () => {
+    mockStore.agentProfileRecentUse = {
+      loaded: true,
+      records: {
+        task_create: {
+          profileIds: ["missing", "p-disabled", "p-recent"],
+          revision: 1,
+          updatedAt: "2026-08-27T12:00:00Z",
+        },
+      },
+    };
+    render(
+      <OptionsProbe
+        context="task_create"
+        profiles={[
+          profileOption({ id: "p-unseen", label: "Agent • unseen" }),
+          profileOption({ id: "p-disabled", label: "Agent • disabled", enabled: false }),
+          profileOption({ id: "p-recent", label: "Agent • recent" }),
+          profileOption({ id: "p-other", label: "Agent • other" }),
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getAllByTestId(/option-/).map((option) => option.getAttribute("data-value")),
+    ).toEqual(["p-recent", "p-unseen", "p-other"]);
   });
 });
 

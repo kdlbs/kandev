@@ -11,11 +11,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(__dirname, "..");
 const repoRoot = resolve(desktopRoot, "../..");
 
-// Keep above HEALTH_TIMEOUT in apps/desktop/src-tauri/src/backend.rs (60s): the Rust side
-// retries GET /health every 250ms until that deadline, so this must give it enough room to
-// finish, or a launcher Rust would still consider "starting" gets killed here first.
-// desktop-launch-smoke.test.mjs asserts the relationship so the two stay in sync.
+// The Rust side (apps/desktop/src-tauri/src/backend.rs) does a two-stage wait before it
+// navigates the webview: wait_for_backend polls GET /health every 250ms against a bounded
+// HEALTH_TIMEOUT (60s), then wait_for_ready polls GET /ready every 250ms with NO timeout —
+// it only gives up on child exit or shutdown. HEALTH_REQUESTED_TIMEOUT_MS must stay above
+// HEALTH_TIMEOUT so the fake runtime doesn't get killed here before the Rust side even
+// finishes the first stage; desktop-launch-smoke.test.mjs asserts that relationship so the
+// two stay in sync. READY_REQUESTED_TIMEOUT_MS only bounds this test — the fake runtime
+// answers /ready immediately once it's listening, so the real wait_for_ready being unbounded
+// doesn't matter here.
 export const HEALTH_REQUESTED_TIMEOUT_MS = 90_000;
+export const READY_REQUESTED_TIMEOUT_MS = 60_000;
 export const ROOT_REQUESTED_TIMEOUT_MS = 60_000;
 
 // Only run the CLI behavior when this file is executed directly (`node desktop-launch-smoke.mjs`
@@ -82,6 +88,12 @@ async function runSmoke() {
       describeChild,
     );
     await waitForFile(
+      join(stateDir, "ready-requested"),
+      READY_REQUESTED_TIMEOUT_MS,
+      failIfExited,
+      describeChild,
+    );
+    await waitForFile(
       join(stateDir, "root-requested"),
       ROOT_REQUESTED_TIMEOUT_MS,
       failIfExited,
@@ -91,7 +103,9 @@ async function runSmoke() {
     await stopProcess(child);
   }
 
-  console.log("Desktop smoke passed: WebView requested / after backend health succeeded.");
+  console.log(
+    "Desktop smoke passed: WebView requested / after backend health and readiness succeeded.",
+  );
 }
 
 async function writeFakeRuntime(runtimeDir, stateDir) {
@@ -149,6 +163,13 @@ async function runFakeRuntime(stateDir, args) {
         headers["x-kandev-desktop-health-token"] = process.env.KANDEV_DESKTOP_HEALTH_TOKEN;
       }
       res.writeHead(200, headers);
+      res.end('{"status":"ok"}');
+      return;
+    }
+
+    if (req.url === "/ready") {
+      await writeFile(join(stateDir, "ready-requested"), "1");
+      res.writeHead(200, { "content-type": "application/json" });
       res.end('{"status":"ok"}');
       return;
     }

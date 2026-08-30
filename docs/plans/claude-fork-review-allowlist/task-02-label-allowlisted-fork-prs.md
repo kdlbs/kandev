@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: ["01-forward-fork-allowlist"]
 plan: "plan.md"
-spec: "../../specs/claude-fork-review-allowlist/spec.md"
+spec: "../../specs/integrations/requirements/claude-fork-review-allowlist.md"
 ---
 
 # Task 02: Label allowlisted fork pull requests
@@ -30,7 +30,7 @@ spec: "../../specs/claude-fork-review-allowlist/spec.md"
 - `.github/workflows/lint-action-pinning.yml`
 - `.github/scripts/claude-code-review-workflow-contract_test.py`
 - `.github/scripts/preview-env-workflow-contract_test.py`
-- `docs/specs/claude-fork-review-allowlist/spec.md`
+- `docs/specs/integrations/requirements/claude-fork-review-allowlist.md`
 - `docs/plans/claude-fork-review-allowlist/plan.md`
 - `docs/decisions/2026-08-07-claude-allowlist-label-bridge.md`
 - `docs/decisions/INDEX.md`
@@ -45,7 +45,7 @@ Task 01 is complete; use the existing `allowed_non_write_users` forwarding contr
 
 ## Inputs
 
-- `docs/specs/claude-fork-review-allowlist/spec.md`, especially the permissions, failure modes, and new label/preview scenarios.
+- `docs/specs/integrations/requirements/claude-fork-review-allowlist.md`, especially the permissions, failure modes, and new label/preview scenarios.
 - `docs/plans/claude-fork-review-allowlist/plan.md`.
 - `docs/decisions/2026-08-07-claude-allowlist-label-bridge.md`.
 - Existing `safe-to-review` and `safe-to-test` gates in `.github/workflows/claude-code-review.yml`, `.github/workflows/opencode-code-review.yml`, and `.github/workflows/preview-env.yml`.

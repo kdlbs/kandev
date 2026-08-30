@@ -1,6 +1,7 @@
 package github
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -32,11 +33,12 @@ type TokenPrincipal struct {
 // token source. The token itself remains private while principal metadata is
 // available for authorization, rate-limit, cache, and attribution keys.
 type TokenClient struct {
-	token       string
-	httpClient  *http.Client
-	username    string // cached after first GetAuthenticatedUser call
-	rateTracker *RateTracker
-	principal   TokenPrincipal
+	token         string
+	httpClient    *http.Client
+	username      string // cached after first GetAuthenticatedUser call
+	rateTracker   *RateTracker
+	principal     TokenPrincipal
+	mergePollWait func(context.Context, time.Duration) error
 }
 
 // PATClient remains an alias so existing callers retain source compatibility.

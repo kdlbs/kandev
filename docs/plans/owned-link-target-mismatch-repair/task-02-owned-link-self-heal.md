@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-task-unique-root-name"]
 plan: "plan.md"
-spec: "../../specs/tasks/attach-workspace-sources.md"
+spec: "../../specs/tasks/system-design/attach-workspace-sources.md"
 parallelism: sequential
 ---
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, it, expect } from "vitest";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
-import { applyGroup } from "./apply-view";
+import { applyGroup, applyView } from "./apply-view";
 import { i18n } from "@/lib/i18n";
 import type { TaskState } from "@/lib/types/http";
 
@@ -85,5 +85,33 @@ describe("applyGroup — group labels are catalog-backed", () => {
     expect(groups[0].key).toBe("__all__");
     expect(groups[0].label).not.toBe("All");
     expect(groups[0].label).toMatch(/[^\p{ASCII}]/u);
+  });
+});
+
+describe("applyGroup — grouping dimension is reported back", () => {
+  // Rows read `groupKey` to decide whether naming their own repository would
+  // just repeat the section header, so the grouped list has to carry it.
+  it("reports the dimension it grouped by", () => {
+    expect(applyGroup(REPO_TASKS, "repository").groupKey).toBe("repository");
+    expect(applyGroup(REPO_TASKS, "workflowStep").groupKey).toBe("workflowStep");
+  });
+
+  it("reports an ungrouped flat list as such", () => {
+    expect(applyGroup(REPO_TASKS, "none").groupKey).toBe("none");
+  });
+
+  // applyView post-processes the grouped list (pinning, subtask order); the
+  // dimension has to survive that trip, since the rows read it from there.
+  it("survives applyView's post-processing", () => {
+    const view = {
+      filters: [],
+      sort: { key: "createdAt", direction: "desc" },
+      group: "repository",
+      collapsedGroups: [],
+    } as unknown as Parameters<typeof applyView>[1];
+
+    expect(applyView(REPO_TASKS, view, { pinnedTaskIds: ["a"], orderedTaskIds: [] }).groupKey).toBe(
+      "repository",
+    );
   });
 });

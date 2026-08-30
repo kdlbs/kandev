@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   duplicateAgentProfileAction: vi.fn(),
   toast: vi.fn(),
   routerPush: vi.fn(),
-  responsive: { isFullDesktop: false },
+  responsive: { isFullDesktop: false, isFinePointer: false },
 }));
 
 function profile(id: string, name: string): AgentProfile {
@@ -19,6 +19,7 @@ function profile(id: string, name: string): AgentProfile {
 
 const ALPHA_PROFILE_NAME = "Alpha";
 const PROFILE_ROW_SELECTOR = '[data-testid="agent-profile-row"]';
+const PROFILE_ACTIONS_MENU_SELECTOR = '[data-testid="profile-actions-menu-p-1"]';
 
 const AGENT = {
   id: "agent-1",
@@ -74,9 +75,8 @@ vi.mock("@/components/routing/app-link", () => ({
   default: ({ children, ...props }: { children?: ReactNode }) => <a {...props}>{children}</a>,
 }));
 
-// Radix's dropdown does not open under jsdom clicks, and the confirm dialog
-// portals out of the row. Both are chrome around the behaviour under test, so
-// render them inline and reachable.
+// Radix's dropdown does not open under jsdom clicks, so keep menu items inline
+// and reachable while exercising the real local confirmation shell.
 vi.mock("@kandev/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   DropdownMenuTrigger: ({ children }: { children?: ReactNode }) => <>{children}</>,
@@ -94,21 +94,6 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
       {children}
     </button>
   ),
-}));
-
-vi.mock("@/components/settings/agent-profile-delete-dialog", () => ({
-  AgentProfileDeleteConfirmDialog: ({
-    open,
-    onConfirm,
-  }: {
-    open: boolean;
-    onConfirm: () => void;
-  }) =>
-    open ? (
-      <button type="button" data-testid="confirm-delete" onClick={onConfirm}>
-        confirm
-      </button>
-    ) : null,
 }));
 
 import { AgentProfilesSubList, ProfileRow } from "./agent-profiles-section";
@@ -133,12 +118,13 @@ function confirmDeleteFor(name: string) {
   const profileId = AGENT.profiles.find((p) => p.name === name)?.id;
   if (!profileId) throw new Error(`no profile id for ${name}`);
   fireEvent.click(row.querySelector(`[data-testid="delete-profile-${profileId}"]`)!);
-  fireEvent.click(row.querySelector('[data-testid="confirm-delete"]')!);
+  fireEvent.click(row.querySelector('[data-testid="agent-profile-delete-confirm"]')!);
 }
 
 describe("ProfileRow deletion", () => {
   beforeEach(() => {
     mocks.responsive.isFullDesktop = false;
+    mocks.responsive.isFinePointer = false;
     storeState = {
       settingsAgents: { items: [{ ...AGENT, profiles: [...AGENT.profiles] }] },
       agentProfiles: { items: [{ id: "p-1" }, { id: "p-2" }] },
@@ -185,6 +171,54 @@ describe("ProfileRow deletion", () => {
     });
     expect(storeState.agentProfiles.items).toEqual([]);
   });
+
+  it("keeps simple confirmation inline on coarse pointers and lets cancel be a no-op", async () => {
+    mocks.deleteAgentProfileAction.mockResolvedValue({ status: "ok" });
+    renderRows();
+
+    const row = screen.getByLabelText(ALPHA_PROFILE_NAME).closest(PROFILE_ROW_SELECTOR);
+    if (!row) throw new Error(`no row for ${ALPHA_PROFILE_NAME}`);
+    fireEvent.click(row.querySelector('[data-testid="delete-profile-p-1"]')!);
+
+    expect(
+      row.querySelector('[data-testid="agent-profile-delete-inline-confirmation"]'),
+    ).not.toBeNull();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+
+    const inlineConfirmation = row.querySelector(
+      '[data-testid="agent-profile-delete-inline-confirmation"]',
+    );
+    if (!inlineConfirmation) throw new Error("no inline confirmation");
+    fireEvent.click(
+      within(inlineConfirmation as HTMLElement).getByRole("button", { name: "Cancel" }),
+    );
+
+    expect(mocks.deleteAgentProfileAction).not.toHaveBeenCalled();
+    expect(
+      row.querySelector('[data-testid="agent-profile-delete-inline-confirmation"]'),
+    ).toBeNull();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(row.querySelector(PROFILE_ACTIONS_MENU_SELECTOR)),
+    );
+  });
+
+  it("restores focus to the row action after deletion fails", async () => {
+    mocks.deleteAgentProfileAction.mockResolvedValue({ status: "error", message: "Delete failed" });
+    renderRows();
+
+    const row = screen.getByLabelText(ALPHA_PROFILE_NAME).closest(PROFILE_ROW_SELECTOR);
+    if (!row) throw new Error(`no row for ${ALPHA_PROFILE_NAME}`);
+    if (!row.querySelector(PROFILE_ACTIONS_MENU_SELECTOR)) {
+      throw new Error("no profile actions trigger");
+    }
+    fireEvent.click(row.querySelector('[data-testid="delete-profile-p-1"]')!);
+    fireEvent.click(row.querySelector('[data-testid="agent-profile-delete-confirm"]')!);
+
+    await waitFor(() => expect(mocks.deleteAgentProfileAction).toHaveBeenCalledWith("p-1"));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(row.querySelector(PROFILE_ACTIONS_MENU_SELECTOR)),
+    );
+  });
 });
 
 describe("ProfileRow duplicate", () => {
@@ -219,6 +253,7 @@ describe("ProfileRow responsive actions", () => {
       agentProfiles: { items: [] },
     };
     mocks.responsive.isFullDesktop = false;
+    mocks.responsive.isFinePointer = false;
     vi.clearAllMocks();
   });
   afterEach(() => cleanup());
@@ -242,7 +277,7 @@ describe("ProfileRow responsive actions", () => {
     expect(deleteButton?.textContent).toBe("");
     expect(duplicate?.getAttribute("data-size")).toBe("icon");
     expect(deleteButton?.getAttribute("data-size")).toBe("icon");
-    expect(row.querySelector('[data-testid="profile-actions-menu-p-1"]')).toBeNull();
+    expect(row.querySelector(PROFILE_ACTIONS_MENU_SELECTOR)).toBeNull();
 
     fireEvent.focus(duplicate!);
     await waitFor(() => expect(screen.getByRole("tooltip", { name: "Duplicate" })).toBeTruthy());
@@ -256,7 +291,7 @@ describe("ProfileRow responsive actions", () => {
     const row = screen.getByLabelText(ALPHA_PROFILE_NAME).closest(PROFILE_ROW_SELECTOR);
     if (!row) throw new Error(`no row for ${ALPHA_PROFILE_NAME}`);
     expect(row.querySelector('[data-testid="profile-actions-inline-p-1"]')).toBeNull();
-    expect(row.querySelector('[data-testid="profile-actions-menu-p-1"]')).not.toBeNull();
+    expect(row.querySelector(PROFILE_ACTIONS_MENU_SELECTOR)).not.toBeNull();
     expect(row.querySelector('[data-testid="duplicate-profile-p-1"]')).not.toBeNull();
     expect(row.querySelector('[data-testid="delete-profile-p-1"]')).not.toBeNull();
   });
@@ -274,10 +309,23 @@ describe("ProfileRow responsive actions", () => {
     if (!row) throw new Error(`no row for ${ALPHA_PROFILE_NAME}`);
     fireEvent.click(row.querySelector('[data-testid="duplicate-profile-inline-p-1"]')!);
     fireEvent.click(row.querySelector('[data-testid="delete-profile-inline-p-1"]')!);
-    fireEvent.click(row.querySelector('[data-testid="confirm-delete"]')!);
+    fireEvent.click(row.querySelector('[data-testid="agent-profile-delete-confirm"]')!);
 
     await waitFor(() => expect(mocks.duplicateAgentProfileAction).toHaveBeenCalledWith("p-1"));
     await waitFor(() => expect(mocks.deleteAgentProfileAction).toHaveBeenCalledWith("p-1"));
+  });
+
+  it("anchors simple confirmation to the row action on fine pointers", () => {
+    mocks.responsive.isFullDesktop = true;
+    mocks.responsive.isFinePointer = true;
+    renderWithTooltipProvider(<ProfileRow agent={AGENT} profile={AGENT.profiles[0]} />);
+
+    const row = screen.getByLabelText(ALPHA_PROFILE_NAME).closest(PROFILE_ROW_SELECTOR);
+    if (!row) throw new Error(`no row for ${ALPHA_PROFILE_NAME}`);
+    fireEvent.click(row.querySelector('[data-testid="delete-profile-inline-p-1"]')!);
+
+    expect(screen.getByTestId("agent-profile-delete-confirm-popover")).toBeTruthy();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 });
 

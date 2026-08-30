@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["05-capture-tool-definitions"]
 plan: "plan.md"
-spec: "../../specs/mcp-session-observability/spec.md"
+spec: "../../specs/platform/requirements/mcp-session-observability.md"
 ---
 
 # Task 06: Refine Explorer Navigation and Layout

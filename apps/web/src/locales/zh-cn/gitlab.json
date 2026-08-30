@@ -287,6 +287,7 @@
   "workflowThatReceivesNewTasks": "接收新任务的工作流。",
   "yourTokenMayStillBeValid": "你的令牌可能仍然有效--这看起来是网络或上游服务问题。",
   "mrAutomationClosedLabel": "MR 已关闭未合并",
+  "mrAutomationAppliesToMR": "适用于 !{{iid}}",
   "mrAutomationDescription": "当关联的合并请求请求你的审阅，或该合并请求被合并、关闭时，唤醒此任务的智能体。通知会发送到该任务当前处于活动状态的会话队列。",
   "mrAutomationMergedLabel": "MR 已合并",
   "mrAutomationRetry": "重试",

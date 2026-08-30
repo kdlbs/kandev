@@ -300,6 +300,7 @@
   "mrAutomationUpdateFailedDescription": "The setting was not saved.",
   "mrAutomationUpdateFailedTitle": "Failed to update MR automation",
   "mrAutomation": "Automation",
+  "mrAutomationAppliesToMR": "Applies to !{{iid}}",
   "mrAutoFixCiAndAddressComments": "Auto-fix CI and address comments",
   "mrAutoFixPrompt": "Auto-fix prompt",
   "mrAutoFixPromptDescription": "This prompt is used only for this task. Leave it blank to use the default prompt. Add <0>{{placeholder}}</0> when you want Kandev to include its MR feedback snapshot.",

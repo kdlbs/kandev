@@ -294,6 +294,64 @@ func TestPrepareTaskSession_UsesExecutorIDFromTaskMetadata(t *testing.T) {
 	}
 }
 
+func TestPrepareTaskSession_InheritParentKeepsImplicitParentExecutor(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+
+	now := time.Now().UTC()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "Test Workflow", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("seed workflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "parent1", WorkflowID: "wf1", WorkspaceID: "ws1", Title: "Parent", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed parent task: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "child1", ParentID: "parent1", WorkflowID: "wf1", WorkspaceID: "ws1", Title: "Child",
+		Metadata:  map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed child task: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-parent", TaskID: "parent1", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("seed parent environment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "parent-session", TaskID: "parent1", IsPrimary: true,
+		State: models.TaskSessionStateRunning, AgentProfileID: "parent-agent",
+		TaskEnvironmentID: "env-parent", StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed parent session: %v", err)
+	}
+	taskRepo.tasks["child1"] = &v1.Task{
+		ID: "child1", ParentID: "parent1", WorkspaceID: "ws1", WorkflowID: "wf1",
+		Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
+	}
+
+	sessionID, err := svc.PrepareTaskSession(ctx, "child1", "", "", "", "", false)
+	if err != nil {
+		t.Fatalf("PrepareTaskSession: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.ExecutorID != "" {
+		t.Fatalf("ExecutorID = %q, want empty to preserve the parent's implicit local executor", session.ExecutorID)
+	}
+	if session.TaskEnvironmentID != "env-parent" {
+		t.Fatalf("TaskEnvironmentID = %q, want env-parent", session.TaskEnvironmentID)
+	}
+}
+
 // Service-level companion to the lock primitive tests: with no pre-existing
 // session, N concurrent EnsureSession calls must converge on exactly one
 // created session. This catches regressions in findExistingSession or

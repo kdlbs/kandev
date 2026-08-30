@@ -213,7 +213,8 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 
 	// Cancel active runs first. Failures are logged and skipped — a
 	// stuck cancel must not block the archive cascade; the orchestrator
-	// will reconcile any orphan execution on its next tick.
+	// will reconcile any orphan execution on its next tick. Session rows
+	// are finalized only after the matching archive mutation commits below.
 	s.cancelActiveRuns(ctx, all, models.SessionArchiveTreeCancelReason)
 
 	// Archive deepest first so parent_id pointers stay valid through
@@ -227,6 +228,9 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 		}
 		if ok {
 			out.ArchivedTaskIDs = append(out.ArchivedTaskIDs, all[i])
+			// The archive mutation committed, so it is now safe to finalize
+			// any session that the runtime canceller could not update.
+			s.finalizeActiveSessions(context.WithoutCancel(ctx), all[i], models.SessionArchiveTreeCancelReason)
 			// Re-read the row so the published event carries the freshly
 			// stamped archived_at; the WS handler removes archived tasks
 			// from the kanban board by checking that field. Service.ArchiveTask
@@ -343,6 +347,9 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 			}
 			return out, deleteErr
 		}
+		// The delete mutation committed, so it is now safe to finalize
+		// any session row that was not removed with the task.
+		s.finalizeActiveSessions(context.WithoutCancel(ctx), all[i], "task tree deleted")
 		if operationID := cleanupOps[all[i]]; operationID != "" {
 			s.startCascadeResourceCleanup(ctx, operationID)
 		} else if s.resourceCleaner != nil {
@@ -612,19 +619,38 @@ func (s *HandoffService) cancelCascadeResourceCleanup(ctx context.Context, opera
 	}
 }
 
-// cancelActiveRuns invokes the configured RunCanceller for every task
-// in the cascade set. Failures are logged and skipped — the cascade
-// proceeds even if a single cancellation fails so the user's archive /
-// delete intent is honoured.
+// cancelActiveRuns invokes the configured RunCanceller for every task in the
+// cascade set. Session rows are finalized after the matching archive/delete
+// mutation commits, because finalizing them here could leave a task active in
+// the database when the caller's lifecycle mutation is cancelled.
 func (s *HandoffService) cancelActiveRuns(ctx context.Context, taskIDs []string, reason string) {
-	if s.runCanceller == nil {
+	for _, id := range taskIDs {
+		if s.runCanceller != nil {
+			if err := s.runCanceller.CancelTaskExecution(ctx, id, reason, false); err != nil {
+				s.logf().Warn("cascade: cancel task execution failed",
+					zap.String("task_id", id), zap.Error(err))
+			}
+		}
+	}
+}
+
+func (s *HandoffService) finalizeActiveSessions(ctx context.Context, taskID, reason string) {
+	canceller, ok := s.sessions.(activeTaskSessionCanceller)
+	if !ok {
 		return
 	}
-	for _, id := range taskIDs {
-		if err := s.runCanceller.CancelTaskExecution(ctx, id, reason, false); err != nil {
-			s.logf().Warn("cascade: cancel task execution failed",
-				zap.String("task_id", id), zap.Error(err))
-		}
+	finalizeCtx := context.WithoutCancel(ctx)
+	cancelled, err := canceller.CancelActiveTaskSessionsByTaskID(finalizeCtx, taskID, reason)
+	if err != nil {
+		s.logf().Warn("cascade: finalize active task sessions failed",
+			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	if len(cancelled) == 0 {
+		return
+	}
+	if publisher, ok := s.eventPublisher.(taskSessionCancellationPublisher); ok {
+		publisher.PublishTaskSessionsCancelled(finalizeCtx, taskID, cancelled, reason)
 	}
 }
 

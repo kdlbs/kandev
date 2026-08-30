@@ -5,7 +5,7 @@ status: done
 wave: 0
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/improve-kandev/spec.md"
+spec: "../../specs/workspaces/requirements/improve-kandev.md"
 ---
 
 # Task 01: Harness planning gate

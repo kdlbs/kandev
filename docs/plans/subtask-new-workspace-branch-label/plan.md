@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/office/tasks.md
+spec: docs/specs/office/requirements/tasks.md
 created: 2026-08-11
 status: done
 ---

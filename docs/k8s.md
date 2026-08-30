@@ -46,7 +46,7 @@ Kandev publishes two flavors: the default vanilla image (smallest, npm-installab
 image: ghcr.io/kdlbs/kandev:universal
 ```
 
-See [`images.md`](./images.md) for the full comparison, inclusion policy, and recipes for deriving your own image when you need something neither flavor includes.
+See [`images.md`](images.md) for the full comparison, inclusion policy, and recipes for deriving your own image when you need something neither flavor includes.
 
 ## Deploying to Kubernetes
 
@@ -90,7 +90,7 @@ No extra configuration is needed. The frontend automatically uses `window.locati
 
 The kandev image ships with `git`, `gh` (GitHub CLI), `node`, and `npm`, but **does not bundle the coding-agent CLIs** (`claude-code`, `codex`, `auggie`, etc.) — agent choice is per-user, and bundling all of them would bloat the image significantly.
 
-> Looking to add tools *beyond* agent CLIs - language toolchains, build tools, internal CLIs? See [`images.md`](./images.md) for the universal-image option and recipes for deriving your own image.
+> Looking to add tools *beyond* agent CLIs - language toolchains, build tools, internal CLIs? See [`images.md`](images.md) for the universal-image option and recipes for deriving your own image.
 
 To install an agent inside the running pod, open **Settings → Agents** in the UI and click **Install** on the agent card under "Available to Install". The backend runs the agent's hard-coded install script (`npm install -g <pkg>`) and rescans on success.
 
@@ -125,7 +125,7 @@ Kandev reads configuration via `KANDEV_`-prefixed environment variables (Viper).
 
 ### Core Settings
 
-See [`configuration.md`](./configuration.md) for the full reference (every backend knob and its YAML form). The tables below cover what's most commonly set in K8s manifests.
+See [`configuration.md`](configuration.md) for the full reference (every backend knob and its YAML form). The tables below cover what's most commonly set in K8s manifests.
 
 | Env Var | Required | Default | Description |
 |---------|----------|---------|-------------|
@@ -144,7 +144,7 @@ See [`configuration.md`](./configuration.md) for the full reference (every backe
 
 > **Logging in K8s:** prefer the default `stdout` so kubelet collects logs. If you set `KANDEV_LOGGING_OUTPUTPATH` to a file, the active log is created with mode `0600` (owner read/write only); any sidecar reading it must run as the same user.
 
-> **Upgrading from a pre-`KANDEV_HOME_DIR` deployment?** The SQLite DB path moved from `/data/kandev.db` to `/data/data/kandev.db`, and `KANDEV_DATA_DIR` is gone — point `KANDEV_HOME_DIR` at the same volume mount (`/data`) instead. (`KANDEV_WORKTREE_BASEPATH` still works as an explicit override if you want to keep worktrees outside the home dir.) The backend auto-migrates the legacy `kandev.db` (plus any `-wal`/`-shm` files) on first boot — look for `Migrated SQLite database from pre-KANDEV_HOME_DIR location` in the pod logs. If you'd rather pin the old path, set `KANDEV_DATABASE_PATH=/data/kandev.db` in the ConfigMap.
+> **Upgrading from a pre-`KANDEV_HOME_DIR` deployment?** The SQLite DB path moved from `/data/kandev.db` to `/data/data/kandev.db`, and `KANDEV_DATA_DIR` is gone. Point `KANDEV_HOME_DIR` at the same volume mount (`/data`) instead. (`KANDEV_WORKTREE_BASEPATH` still works as an explicit override if you want to keep worktrees outside the home dir.) With no explicit database path, the backend checks the legacy `kandev.db` and, when valid, installs a validated snapshot at the current path while retaining the legacy database and its `-wal`/`-shm` files. Look for the `SQLite database selected` diagnostic with outcome `legacy_adopted`. If both candidates need operator review, startup stops and names both paths; preserve them and select the intended file with `KANDEV_DATABASE_PATH`. To keep the old path explicitly, set `KANDEV_DATABASE_PATH=/data/kandev.db` in the ConfigMap.
 
 ### PostgreSQL Settings (when `KANDEV_DATABASE_DRIVER=postgres`)
 
@@ -203,12 +203,12 @@ spec:
 
 ## Health Checks
 
-The deployment includes both probes on the `/health` endpoint:
+The deployment's liveness probe calls `/health`; the readiness probe calls `/ready`:
 
-- **Liveness probe**: Restarts the pod if the backend becomes unresponsive (30s interval, 3 failures)
-- **Readiness probe**: Removes the pod from service during startup or issues (10s interval, 3 failures)
+- **Liveness probe**: Restarts the pod if the backend becomes unresponsive (30s interval, 3 failures). `/health` returns 200 as soon as the TCP listener accepts connections, before startup finishes.
+- **Readiness probe**: Removes the pod from service during startup or issues (10s interval, 3 failures). `/ready` returns 503 until the real router is wired in and the pod can serve real traffic, then 200.
 
-The CLI launcher also performs an internal health check — it waits for the backend to be healthy before starting the web server.
+The CLI launcher performs the same two-stage check: it waits for `/health` (the backend process is alive) and then for `/ready` (startup finished, the backend can serve real requests) before starting the web server.
 
 ## Scaling
 

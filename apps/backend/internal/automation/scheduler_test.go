@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 // TestFireTrigger_SkippedForConcurrencyCap_UpdatesLastEvaluatedAt guards
@@ -91,6 +93,63 @@ func TestFireTrigger_SkippedForConcurrencyCap_UpdatesLastEvaluatedAt(t *testing.
 	}
 	if triggers[0].LastEvaluatedAt == nil {
 		t.Fatal("expected LastEvaluatedAt to be set after a concurrency-cap skip, got nil")
+	}
+}
+
+func TestFireTriggerAdmitsRunBeforePublishing(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	a := &Automation{
+		WorkspaceID:       "ws-1",
+		Name:              "Daily report",
+		TaskTitleTemplate: "Report: {{trigger.type}}",
+		WorkflowID:        "wf-1",
+		WorkflowStepID:    "s-1",
+		Enabled:           true,
+		MaxConcurrentRuns: 1,
+	}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	trig := &AutomationTrigger{AutomationID: a.ID, Type: TriggerTypeScheduled, Config: json.RawMessage(`{}`), Enabled: true}
+	if err := svc.store.CreateTrigger(ctx, trig); err != nil {
+		t.Fatal(err)
+	}
+
+	var publishedRun *AutomationRun
+	if _, err := svc.eventBus.Subscribe(events.AutomationTriggered, func(ctx context.Context, event *bus.Event) error {
+		evt, ok := event.Data.(*AutomationTriggeredEvent)
+		if !ok {
+			t.Fatalf("event data = %T, want *AutomationTriggeredEvent", event.Data)
+		}
+		if evt.RunID == "" {
+			t.Fatal("published automation event has no admitted run ID")
+		}
+		var err error
+		publishedRun, err = svc.store.GetRun(ctx, evt.RunID)
+		if err != nil {
+			t.Fatalf("load admitted run during publish: %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), "scheduled:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Skipped || result.RunID == "" {
+		t.Fatalf("FireTrigger result = %+v, want an admitted run", result)
+	}
+	if publishedRun == nil {
+		t.Fatal("event was not observed")
+	}
+	if publishedRun.Status != RunStatusTriggered {
+		t.Fatalf("published run status = %q, want triggered", publishedRun.Status)
+	}
+	if publishedRun.DisplayTitle != "Report: scheduled" {
+		t.Fatalf("display title = %q, want rendered trigger title", publishedRun.DisplayTitle)
 	}
 }
 

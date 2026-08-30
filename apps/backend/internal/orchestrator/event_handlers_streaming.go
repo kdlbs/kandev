@@ -54,11 +54,13 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	if eventExecutionID == "" {
 		eventExecutionID = payload.AgentID
 	}
+	eventType := payload.Data.Type
 	if !s.cancellationOwnsStreamEvent(
 		payload.SessionID,
 		eventExecutionID,
 		payload.Data.PromptGeneration,
 	) {
+		s.cancelClarificationWatchdogsForSession(payload.SessionID, eventType, payload)
 		s.logger.Debug("ignoring stream event for execution outside cancellation identity",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", payload.SessionID),
@@ -68,7 +70,6 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	}
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
-	eventType := payload.Data.Type
 	terminalCompleteStream := false
 
 	if eventType == agentEventComplete {
@@ -111,7 +112,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		// Any live agent stream activity means the agent resumed after clarification.
 		// Cancel primary-path clarification watchdogs for this session. Late terminal
 		// completes are excluded because they belong to an already-finished execution.
-		s.cancelClarificationWatchdogsForSession(sessionID, eventType)
+		s.cancelClarificationWatchdogsForSession(sessionID, eventType, payload)
 	}
 
 	s.logger.Debug("handling agent stream event",
@@ -2457,11 +2458,12 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	if session != nil && s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session, stopReason) {
 		return
 	}
-	if session != nil && s.handleAutomationTurnComplete(
+	if session != nil && s.handleAutomationTurnCompleteForTurn(
 		ctx,
 		payload.TaskID,
 		payload.SessionID,
 		session,
+		completionTurnID,
 		stopReason,
 		extractCompleteIsError(payload),
 		extractCompleteErrorMessage(payload),
@@ -3083,6 +3085,23 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+	settled := configOptionsSettled(payload.Data.Data)
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to load session before session model persistence",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if shouldDeferUnsettledStartupModelsEvent(session, settled) {
+		// The session state read is optimistic. A concurrent transition out of
+		// STARTING can cause a conservative defer, and the next live model event
+		// corrects the client state without introducing a lock-order dependency.
+		s.logger.Debug("deferring unsettled startup session_models event",
+			zap.String("session_id", sessionID),
+			zap.String("current_model_id", payload.Data.CurrentModelID))
+		return
+	}
 
 	// Store the write-once baseline before the mutable selector snapshot so a
 	// concurrent task-detail boot cannot observe the new state without its
@@ -3094,7 +3113,6 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 			zap.Error(err))
 		return
 	}
-	settled := configOptionsSettled(payload.Data.Data)
 	s.persistSessionModelAndRuntimeConfigWithSettlement(
 		ctx, sessionID, payload.Data.CurrentModelID, "", payload.Data.SessionModels, payload.Data.ConfigOptions, settled,
 	)
@@ -3550,6 +3568,10 @@ func configOptionsSettled(data any) bool {
 	return result
 }
 
+func shouldDeferUnsettledStartupModelsEvent(session *models.TaskSession, settled bool) bool {
+	return !settled && session != nil && session.State == models.TaskSessionStateStarting
+}
+
 func originalConfigSettled(data any) bool {
 	metadata, _ := data.(map[string]any)
 	result, _ := metadata["original_config_settled"].(bool)
@@ -3802,14 +3824,22 @@ func (s *Service) persistTodoMessage(ctx context.Context, taskID, sessionID stri
 }
 
 // handlePermissionCancelledEvent marks the pending permission message as expired.
+//
+// The update is qualified by RequestID as well as PendingID: a provider may
+// reuse pending_id for a later, unrelated request once the original is
+// resolved, and this event can arrive after that happens (agentctl's
+// ctx.Done() cancellation path races the handler goroutine's own teardown).
+// Matching RequestID too keeps a delayed cancellation from expiring the new
+// request's message.
 func (s *Service) handlePermissionCancelledEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	sessionID := payload.SessionID
 	if sessionID == "" || payload.Data.PendingID == "" || s.messageCreator == nil {
 		return
 	}
-	if err := s.messageCreator.UpdatePermissionMessage(ctx, sessionID, payload.Data.PendingID, models.PermissionStatusExpired); err != nil {
+	if err := s.messageCreator.UpdatePermissionMessage(ctx, payload.TaskID, sessionID, payload.Data.RequestID, payload.Data.PendingID, models.PermissionStatusExpired); err != nil {
 		s.logger.Warn("failed to mark permission as expired",
 			zap.String("session_id", sessionID),
+			zap.String("request_id", payload.Data.RequestID),
 			zap.String("pending_id", payload.Data.PendingID),
 			zap.Error(err))
 	}

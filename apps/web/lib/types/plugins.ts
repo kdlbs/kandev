@@ -20,6 +20,11 @@ export interface PluginWebhook {
   key: string;
   description?: string;
   method?: string;
+  /** API v1 defaults to "public" for compatibility. API v2 defaults to
+   * "authenticated", requiring a caller identity (session or PAT). Explicit
+   * values override either default. See docs/public/plugins-manifest.md. */
+  access?: "public" | "authenticated";
+  max_body_bytes?: number;
 }
 
 export interface PluginUIPage {

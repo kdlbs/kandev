@@ -2,8 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { IconMessageQuestion, IconInfoCircle } from "@tabler/icons-react";
-import ReactMarkdown from "react-markdown";
-import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
 import type {
   Message,
   ClarificationRequestMetadata,
@@ -13,12 +11,16 @@ import type {
 import { useClarificationGroup } from "@/hooks/domains/session/use-clarification-group";
 import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 import {
+  CLARIFICATION_CUSTOM_TEXT_MAX_RUNES,
   ClarificationCarouselNav,
   ClarificationCustomInput,
   ClarificationOptions,
   ClarificationStepper,
+  countRunes,
 } from "./clarification-overlay-parts";
 import { ClarificationHeaderActions } from "./clarification-overlay-header";
+import { ClarificationMarkdown } from "./clarification-markdown";
+import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 
 type ClarificationInputOverlayProps = {
@@ -41,6 +43,15 @@ type SingleQuestionMeta = {
   question: ClarificationQuestion;
   questionId: string;
 };
+
+function clarificationHeaderClassName(total: number): string {
+  return cn(
+    "flex min-h-11 justify-between",
+    total > 1
+      ? "flex-col items-stretch gap-2 px-3 py-2 md:flex-row md:items-center md:gap-3 md:px-4 md:py-0"
+      : "items-center gap-3 px-4",
+  );
+}
 
 function readSingleQuestionMeta(message: Message | null | undefined): SingleQuestionMeta | null {
   if (!message) return null;
@@ -142,18 +153,21 @@ function ClarificationCard(props: CardProps) {
             </span>
           )}
           {metadata.question.title && (
-            <span className="text-muted-foreground/70">
+            <span data-testid="clarification-question-title" className="text-muted-foreground/70">
               {total > 1 ? "· " : ""}
-              {metadata.question.title}
+              <ClarificationMarkdown variant="inline">
+                {metadata.question.title}
+              </ClarificationMarkdown>
             </span>
           )}
         </div>
       )}
-      <div className="markdown-body max-w-none text-sm font-medium [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 mb-3">
-        <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
-          {question.prompt}
-        </ReactMarkdown>
-      </div>
+      <ClarificationMarkdown
+        variant="block"
+        className="mb-3 max-w-none text-sm font-medium [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+      >
+        {question.prompt}
+      </ClarificationMarkdown>
       <ClarificationOptions
         options={question.options}
         selectedOption={selectedOption}
@@ -437,10 +451,14 @@ function buildQuestionHandlers(ctx: QuestionHandlerCtx): QuestionHandlers {
     // Live-record the draft so the stepper updates and the custom input lights
     // up the moment the user types. Emptying the draft clears the answer so
     // allAnswered reverts to false. Enter/Cmd+Enter still drives advance/submit.
+    // An over-limit draft is also treated as unanswered (W4): otherwise it
+    // could sit recorded from live-typing and reach the header Submit button,
+    // which has no per-question rune check of its own, and fail the request
+    // with an opaque 400 the user never saw coming from this input.
     onCustomDraftChange(value) {
       setCustomDrafts((prev) => ({ ...prev, [meta.questionId]: value }));
       const trimmed = value.trim();
-      if (trimmed.length === 0) {
+      if (trimmed.length === 0 || countRunes(trimmed) > CLARIFICATION_CUSTOM_TEXT_MAX_RUNES) {
         group.clearAnswer(meta.questionId);
         return;
       }
@@ -597,7 +615,7 @@ export function ClarificationInputOverlay({
   return (
     <div className="relative" data-testid="clarification-overlay">
       <div
-        className="flex min-h-11 items-center justify-between gap-3 px-4"
+        className={clarificationHeaderClassName(total)}
         data-testid="clarification-overlay-header"
       >
         <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -614,7 +632,7 @@ export function ClarificationInputOverlay({
           {total > 1 && (
             <span
               data-testid="clarification-group-progress"
-              className="min-w-0 truncate text-xs text-muted-foreground"
+              className="ml-auto min-w-0 truncate text-xs text-muted-foreground md:ml-0"
             >
               {group.answeredCount} of {group.total} answered
             </span>

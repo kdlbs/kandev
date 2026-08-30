@@ -27,6 +27,8 @@ type WorkflowRepo interface {
 	ClearStepDecisions(ctx context.Context, taskID, stepID string) (int64, error)
 	ResolveCurrentRunner(ctx context.Context, stepID, taskID string) (string, error)
 	GetTaskWorkflowStepID(ctx context.Context, taskID string) (string, error)
+	HasRoleSeatForTaskWorkflow(ctx context.Context, workflowID, taskID, role string) (bool, error)
+	EnsureRoleSeat(ctx context.Context, workflowID, stepID, taskID, role, agentProfileID string) (*models.WorkflowStepParticipant, bool, error)
 }
 
 type workflowScopedParticipantRepo interface {
@@ -194,6 +196,47 @@ func (a *DecisionAdapter) ClearStepDecisions(
 	return a.Repo.ClearStepDecisions(ctx, taskID, stepID)
 }
 
+// ParticipantSeatWriterAdapter implements engine.ParticipantSeatWriter.
+type ParticipantSeatWriterAdapter struct {
+	Repo WorkflowRepo
+}
+
+// NewParticipantSeatWriterAdapter builds a ParticipantSeatWriterAdapter
+// wrapping the workflow repo.
+func NewParticipantSeatWriterAdapter(repo WorkflowRepo) *ParticipantSeatWriterAdapter {
+	return &ParticipantSeatWriterAdapter{Repo: repo}
+}
+
+// HasRoleSeatForTaskWorkflow satisfies engine.ParticipantSeatWriter.
+func (a *ParticipantSeatWriterAdapter) HasRoleSeatForTaskWorkflow(
+	ctx context.Context, workflowID, taskID, role string,
+) (bool, error) {
+	seated, err := a.Repo.HasRoleSeatForTaskWorkflow(ctx, workflowID, taskID, role)
+	if err != nil {
+		return false, fmt.Errorf("check existing role seat: %w", err)
+	}
+	return seated, nil
+}
+
+// EnsureRoleSeat satisfies engine.ParticipantSeatWriter.
+func (a *ParticipantSeatWriterAdapter) EnsureRoleSeat(
+	ctx context.Context, workflowID, stepID, taskID, role, agentProfileID string,
+) (engine.ParticipantInfo, error) {
+	seat, _, err := a.Repo.EnsureRoleSeat(ctx, workflowID, stepID, taskID, role, agentProfileID)
+	if err != nil {
+		return engine.ParticipantInfo{}, fmt.Errorf("ensure role seat: %w", err)
+	}
+	return engine.ParticipantInfo{
+		ID:               seat.ID,
+		StepID:           seat.StepID,
+		TaskID:           seat.TaskID,
+		Role:             string(seat.Role),
+		AgentProfileID:   seat.AgentProfileID,
+		DecisionRequired: seat.DecisionRequired,
+		Position:         seat.Position,
+	}, nil
+}
+
 // PrimaryAgentAdapter implements engine.PrimaryAgentResolver. The "primary"
 // agent for a task is its current runner participant, falling back to the
 // workflow step's agent_profile_id when no task-specific runner exists.
@@ -229,4 +272,5 @@ var (
 	_ engine.DecisionStore          = (*DecisionAdapter)(nil)
 	_ engine.PrimaryAgentResolver   = (*PrimaryAgentAdapter)(nil)
 	_ engine.TargetTaskStepResolver = (*PrimaryAgentAdapter)(nil)
+	_ engine.ParticipantSeatWriter  = (*ParticipantSeatWriterAdapter)(nil)
 )

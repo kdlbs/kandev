@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/autopilot-mode.md"
+spec: "../../specs/tasks/requirements/autopilot-mode.md"
 ---
 
 # Task 01: Persist the Autopilot Task Contract

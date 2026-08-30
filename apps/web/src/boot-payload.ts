@@ -1,7 +1,14 @@
 import type { AppState } from "@/lib/state/store";
 import { getBackendConfig } from "@/lib/config";
 import type { FetchedSessionData } from "@/lib/ssr/session-page-state";
-import type { Repository, RepositorySet, Task, Workflow, WorkflowStep } from "@/lib/types/http";
+import type {
+  Repository,
+  RepositoryBranchPolicy,
+  RepositorySet,
+  Task,
+  Workflow,
+  WorkflowStep,
+} from "@/lib/types/http";
 import type { ActivePlugin } from "@/lib/plugins/types";
 
 export type { ActivePlugin };
@@ -43,6 +50,7 @@ export type BootRouteData = {
     steps?: WorkflowStep[];
     repositories?: Repository[];
     repositorySets?: RepositorySet[];
+    repositoryBranchPolicies?: RepositoryBranchPolicy[];
   };
   tasksPage?: {
     activeWorkspaceId?: string | null;
@@ -50,6 +58,7 @@ export type BootRouteData = {
     steps?: WorkflowStep[];
     repositories?: Repository[];
     repositorySets?: RepositorySet[];
+    repositoryBranchPolicies?: RepositoryBranchPolicy[];
     tasks?: Task[];
     total?: number;
     tasksListSort?: string;

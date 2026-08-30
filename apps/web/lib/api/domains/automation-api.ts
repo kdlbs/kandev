@@ -176,3 +176,13 @@ export async function deleteAllAutomationRuns(
     workspace_id: workspaceId,
   });
 }
+
+export async function stopAutomationRun(
+  automationId: string,
+  runId: string,
+): Promise<{ run_id: string; status: string }> {
+  return requireClient().request<{ run_id: string; status: string }>("automation.run.stop", {
+    automation_id: automationId,
+    run_id: runId,
+  });
+}

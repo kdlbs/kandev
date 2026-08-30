@@ -171,6 +171,30 @@ export class OfficeApiClient {
     return this.request("GET", `/workspaces/${wsId}/tasks/search?q=${encodeURIComponent(query)}`);
   }
 
+  /**
+   * Reassign (or clear, with "") the task's project. Publishes
+   * `office.task.updated` with `fields: ["project_id"]`, which is what the
+   * costs page's live refetch gate keys off.
+   */
+  async updateTaskProjectId(id: string, projectId: string): Promise<Record<string, unknown>> {
+    return this.request("PATCH", `/tasks/${id}`, { project_id: projectId });
+  }
+
+  /**
+   * Create a project in the workspace. Onboarding does not seed a default
+   * project (see e2e/tests/office/project-repository-picker.spec.ts), so
+   * tests that need a real project_id to reassign a task to must create
+   * one first.
+   */
+  async createProject(wsId: string, name: string): Promise<Record<string, unknown>> {
+    const res = await this.request<{ project?: Record<string, unknown> }>(
+      "POST",
+      `/workspaces/${wsId}/projects`,
+      { name },
+    );
+    return res.project ?? (res as unknown as Record<string, unknown>);
+  }
+
   // --- Labels ---
 
   async addLabel(wsId: string, taskId: string, name: string): Promise<Record<string, unknown>> {
@@ -275,6 +299,7 @@ export class OfficeApiClient {
           execution_profile_ids?: { frontier?: string; balanced?: string; economy?: string };
         }
       >;
+      role_tiers?: Record<string, "frontier" | "balanced" | "economy">;
     };
     known_providers: string[];
     execution_profiles: Array<{
@@ -306,6 +331,7 @@ export class OfficeApiClient {
           execution_profile_ids?: { frontier?: string; balanced?: string; economy?: string };
         }
       >;
+      role_tiers?: Record<string, "frontier" | "balanced" | "economy">;
     },
   ): Promise<Record<string, unknown>> {
     return this.request("PUT", `/workspaces/${wsId}/routing`, cfg);

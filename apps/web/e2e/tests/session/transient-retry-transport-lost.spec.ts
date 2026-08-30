@@ -48,6 +48,7 @@ test.describe("transient provider error (ACP peer disconnected) retry", () => {
     // Cancelling falls through to the red Resume / Start-fresh recovery banner.
     await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
     await expect(session.recoveryFreshButton()).toBeVisible();
+    await expect(session.transientRetryCard()).toBeHidden();
   });
 
   test("a peer-disconnected error on the very first turn retries (launch prompt is cached)", async ({

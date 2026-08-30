@@ -18,7 +18,7 @@ const (
 )
 
 // Budget period and action-on-exceed constants. See spec
-// docs/specs/office-costs/spec.md for semantics.
+// docs/specs/office/requirements/costs.md for semantics.
 const (
 	budgetPeriodMonthly = "monthly"
 
@@ -191,7 +191,7 @@ func (s *CostService) EvaluateBudget(
 // CheckPreExecutionBudget checks all applicable budget policies before
 // launching an agent session. Returns (allowed, reason, error). Only
 // pause_agent and block_new_tasks return allowed=false (notify_only
-// alerts but does not block). See docs/specs/office-costs/spec.md.
+// alerts but does not block). See docs/specs/office/requirements/costs.md.
 // Implements shared.BudgetChecker.
 func (s *CostService) CheckPreExecutionBudget(
 	ctx context.Context, agentInstanceID, projectID, workspaceID string,

@@ -771,7 +771,10 @@ esac
 	}
 
 	repoPath := t.TempDir()
-	ref := mgr.pullBaseBranch(context.Background(), repoPath, "origin/master", nil)
+	ref, err := mgr.pullBaseBranch(context.Background(), repoPath, "origin/master", nil)
+	if err != nil {
+		t.Fatalf("pullBaseBranch() error = %v", err)
+	}
 	if ref != "origin/master" {
 		t.Fatalf("pullBaseBranch() ref = %q, want %q", ref, "origin/master")
 	}
@@ -788,7 +791,7 @@ esac
 	}
 }
 
-func TestPullBaseBranch_FetchTimeoutFallsBackQuickly(t *testing.T) {
+func TestPullBaseBranch_FetchTimeoutFailsQuickly(t *testing.T) {
 	scriptDir := writeFakeGitScript(t, `
 case "${1:-}" in
   fetch)
@@ -820,11 +823,14 @@ esac
 
 	repoPath := t.TempDir()
 	start := time.Now()
-	ref := mgr.pullBaseBranch(context.Background(), repoPath, "master", nil)
+	ref, err := mgr.pullBaseBranch(context.Background(), repoPath, "master", nil)
 	elapsed := time.Since(start)
 
-	if ref != "master" {
-		t.Fatalf("pullBaseBranch() ref = %q, want %q", ref, "master")
+	if err == nil {
+		t.Fatal("pullBaseBranch() error = nil, want required refresh failure")
+	}
+	if ref != "" {
+		t.Fatalf("pullBaseBranch() ref = %q, want empty on failure", ref)
 	}
 	// Allow CI scheduling variance while still asserting we timed out
 	// well before the fake 2s fetch command completes.
@@ -871,7 +877,10 @@ esac
 	mgr.pullTimeout = 300 * time.Millisecond
 
 	repoPath := t.TempDir()
-	ref := mgr.pullBaseBranch(context.Background(), repoPath, "master", nil)
+	ref, err := mgr.pullBaseBranch(context.Background(), repoPath, "master", nil)
+	if err != nil {
+		t.Fatalf("pullBaseBranch() error = %v", err)
+	}
 	if ref != "origin/master" {
 		t.Fatalf("pullBaseBranch() ref = %q, want %q", ref, "origin/master")
 	}
@@ -951,6 +960,84 @@ esac
 	}
 	if result.WarningDetail == "" {
 		t.Fatal("expected warning detail with raw git output")
+	}
+}
+
+func TestFetchBranchToLocal_RequiredRefreshRejectsLocalFallback(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    echo "fatal: Authentication failed" >&2
+    exit 1
+    ;;
+  rev-parse)
+    if [ "${2:-}" = "--verify" ]; then
+      exit 0
+    fi
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	result, err := mgr.fetchBranchToLocalWithPolicy(
+		context.Background(), t.TempDir(), "feature/pr-branch", 0, true,
+	)
+	if err == nil {
+		t.Fatal("required checkout refresh succeeded after fetch authentication failure")
+	}
+	if result != nil {
+		t.Fatalf("required checkout refresh returned a fallback result: %+v", result)
+	}
+	if strings.Contains(err.Error(), "Using local") {
+		t.Fatalf("required checkout refresh exposed a stale local fallback: %v", err)
+	}
+}
+
+func TestFetchBranchToLocal_RequiredRefreshReportsMissingBranch(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    echo "fatal: couldn't find remote ref feature/pr-branch" >&2
+    exit 128
+    ;;
+  rev-parse)
+    if [ "${2:-}" = "--verify" ]; then
+      exit 1
+    fi
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	result, err := mgr.fetchBranchToLocalWithPolicy(
+		context.Background(), t.TempDir(), "feature/pr-branch", 0, true,
+	)
+	if err == nil {
+		t.Fatal("required checkout refresh succeeded for a missing remote branch")
+	}
+	if result != nil {
+		t.Fatalf("required checkout refresh returned a result: %+v", result)
+	}
+	if !errors.Is(err, ErrInvalidBaseBranch) {
+		t.Fatalf("error = %v, want ErrInvalidBaseBranch", err)
 	}
 }
 

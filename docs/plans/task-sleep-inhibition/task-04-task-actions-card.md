@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-system-api-wiring"]
 plan: "plan.md"
-spec: "../../specs/platform/task-sleep-inhibition.md"
+spec: "../../specs/platform/requirements/task-sleep-inhibition.md"
 ---
 
 # Task 04: Task Actions sleep setting

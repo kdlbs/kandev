@@ -8,7 +8,7 @@ import { test, expect } from "../../fixtures/test-base";
  * externalization sweep: any plain-ASCII user-facing text under `pseudo` is a
  * literal that was never routed through `t()`.
  *
- * See docs/specs/platform/i18n.md and docs/i18n.md.
+ * See docs/specs/platform/requirements/i18n.md and docs/i18n.md.
  */
 
 const APPEARANCE_URL = "/settings/preferences/appearance";

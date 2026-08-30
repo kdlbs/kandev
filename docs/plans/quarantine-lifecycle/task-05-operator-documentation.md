@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["04-responsive-quarantine-ui"]
 plan: "plan.md"
-spec: "../../specs/system-page/storage-maintenance.md"
+spec: "../../specs/system-page/requirements/storage-maintenance.md"
 ---
 
 # Task 05: Operator documentation
