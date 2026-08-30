@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -53,6 +54,46 @@ func TestRateCoordinatorAdmissionSerializesBackgroundPerPrincipalResource(t *tes
 			t.Fatalf("background deferral counter delta = %d, want 1", delta)
 		}
 	})
+}
+
+func TestRateCoordinatorNonBlockingBackgroundAdmissionDefersWithoutHoldingWorker(t *testing.T) {
+	coordinator := NewRateCoordinator(nil, nil)
+	tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Login: "blocked-user",
+	}, nil)
+	tracker.ObserveSecondary(ResourceCore, time.Now().Add(time.Hour), RetrySourceConservativeFallback, "fixture")
+
+	ctx := WithNonBlockingGitHubAdmission(
+		WithGitHubWorkClass(context.Background(), WorkClassBackground),
+	)
+	release, err := admission.acquire(ctx, ResourceCore)
+	if release != nil {
+		t.Fatal("deferred admission returned a release function")
+	}
+	var deferred *AdmissionDeferredError
+	if !errors.As(err, &deferred) {
+		t.Fatalf("acquire error = %v, want AdmissionDeferredError", err)
+	}
+
+	tracker.ObserveSuccess(ResourceCore)
+	if err := deferred.Wait(context.Background()); err != nil {
+		t.Fatalf("deferred admission did not wake after tracker change: %v", err)
+	}
+}
+
+func TestBackgroundWorkflowSyncReadinessUsesCoreOnly(t *testing.T) {
+	coordinator := NewRateCoordinator(nil, nil)
+	tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Login: "core-user",
+	}, nil)
+	now := time.Now()
+	tracker.Record(RateSnapshot{Resource: ResourceCore, Limit: 5000, Remaining: 4999, ResetAt: now.Add(time.Hour)})
+	tracker.Record(RateSnapshot{Resource: ResourceGraphQL, Limit: 5000, Remaining: 0, RemainingObserved: true, ResetAt: now.Add(time.Hour)})
+	tracker.Record(RateSnapshot{Resource: ResourceSearch, Limit: 30, Remaining: 0, RemainingObserved: true, ResetAt: now.Add(time.Hour)})
+
+	if !backgroundWorkflowSyncReady(admission, now) {
+		t.Fatal("REST Core workflow sync was blocked by unrelated GraphQL/Search exhaustion")
+	}
 }
 
 func TestRateCoordinatorAdmissionGivesInteractiveWorkPriorityAfterRetryWindow(t *testing.T) {

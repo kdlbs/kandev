@@ -51,7 +51,10 @@ Kandev-routed requests default to interactive work. Periodic GitHub and
 Workflow Sync pollers mark their context as background. Background requests
 are serialized and paced per principal/resource, stop at a ten-percent primary
 reserve, and yield to interactive waiters. Primary and secondary retry windows
-block both classes without occupying an execution slot while waiting.
+block both classes without occupying an execution slot while waiting. Automatic
+Workflow Sync admission failures remain in the scheduler's pending queue and
+are requeued by the admission-change signal or retry deadline; REST-only sync
+uses the Core resource and does not wait on GraphQL or Search state.
 
 ## Workflow Sync recovery
 

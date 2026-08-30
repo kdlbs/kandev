@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -261,6 +262,10 @@ func (s *Service) syncWorkspace(
 
 	files, err := s.fetchFiles(ctx, cfg)
 	if err != nil {
+		var deferred *github.AdmissionDeferredError
+		if errors.As(err, &deferred) {
+			return nil, err
+		}
 		s.recordFailure(ctx, cfg, err)
 		return nil, err
 	}
@@ -503,41 +508,29 @@ func (s *Service) automaticPoolIdle(pool *automaticScheduler) {
 	}
 }
 
-func (s *Service) runAutomaticJob(ctx context.Context, job automaticJob) {
-	defer s.finishAutomaticJob(job.workspaceID)
-	// A caller can cancel its poll tick without cancelling the service-owned
-	// pool. The pool itself is cancelled by Poller.Stop, which gives active
-	// provider calls a reliable shutdown context.
-	if !s.automaticSyncReady(ctx, job.workspaceID) {
-		return
+func (s *Service) runAutomaticJob(ctx context.Context, job automaticJob) automaticJobResult {
+	// Admission-waiting work must leave the bounded execution pool. The
+	// provider re-check is nonblocking so a readiness change between the
+	// scheduler snapshot and the actual request cannot occupy a worker.
+	jobCtx := github.WithNonBlockingGitHubAdmission(
+		github.WithGitHubWorkClass(ctx, github.WorkClassBackground),
+	)
+	_, err := s.syncWorkspace(jobCtx, job.workspaceID, syncAutomatic)
+	var deferred *github.AdmissionDeferredError
+	if errors.As(err, &deferred) {
+		return automaticJobResult{
+			wait:    deferred.Wait,
+			discard: func() { s.finishAutomaticJob(job.workspaceID) },
+		}
 	}
-	_, _ = s.syncWorkspace(ctx, job.workspaceID, syncAutomatic)
+	s.finishAutomaticJob(job.workspaceID)
+	return automaticJobResult{}
 }
 
 func (s *Service) finishAutomaticJob(workspaceID string) {
 	s.automaticMu.Lock()
 	delete(s.automaticInFlight, workspaceID)
 	s.automaticMu.Unlock()
-}
-
-// automaticSyncReadiness is implemented by providers that can inspect local
-// admission state without issuing a request. It is optional so lightweight
-// provider doubles and integrations remain source-compatible.
-type automaticSyncReadiness interface {
-	BackgroundWorkflowSyncReady(context.Context, string) bool
-}
-
-func (s *Service) automaticSyncReady(ctx context.Context, workspaceID string) bool {
-	cfg, err := s.store.GetConfigForWorkspace(ctx, workspaceID)
-	if err != nil || cfg == nil {
-		return true
-	}
-	if cfg.Provider == ProviderGitHub {
-		if provider, ok := s.githubClients.(automaticSyncReadiness); ok {
-			return provider.BackgroundWorkflowSyncReady(ctx, workspaceID)
-		}
-	}
-	return true
 }
 
 func (s *Service) waitAutomaticSyncs() {

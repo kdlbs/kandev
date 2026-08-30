@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -11,6 +12,33 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"go.uber.org/zap"
 )
+
+// ErrBackgroundAdmissionDeferred marks a background request that should be
+// requeued instead of waiting inside an execution worker.
+var ErrBackgroundAdmissionDeferred = errors.New("background provider admission deferred")
+
+// AdmissionDeferredError describes the local admission signal that will wake
+// a requeued background request.
+type AdmissionDeferredError struct {
+	Resource       Resource
+	Delay          time.Duration
+	Changed        <-chan struct{}
+	TrackerChanged <-chan struct{}
+	Reason         string
+}
+
+func (e *AdmissionDeferredError) Error() string {
+	return fmt.Sprintf("%s: %s", ErrBackgroundAdmissionDeferred, e.Reason)
+}
+
+// Unwrap supports errors.Is and errors.As through provider-specific wrappers.
+func (e *AdmissionDeferredError) Unwrap() error { return ErrBackgroundAdmissionDeferred }
+
+// Wait blocks until admission changes, the retry boundary elapses, or ctx is
+// cancelled. It owns no execution-pool capacity while waiting.
+func (e *AdmissionDeferredError) Wait(ctx context.Context) error {
+	return waitForAdmissionChange(ctx, e.Delay, e.TrackerChanged, e.Changed)
+}
 
 // RateCoordinator owns rate observations by GitHub's upstream quota identity,
 // rather than by Kandev workspace or credential generation.
@@ -99,8 +127,16 @@ const (
 
 type workClassContextKey struct{}
 
+type nonBlockingAdmissionContextKey struct{}
+
 func WithGitHubWorkClass(ctx context.Context, class WorkClass) context.Context {
 	return context.WithValue(ctx, workClassContextKey{}, class)
+}
+
+// WithNonBlockingGitHubAdmission asks background GitHub clients to return a
+// deferred-admission error instead of blocking the caller.
+func WithNonBlockingGitHubAdmission(ctx context.Context) context.Context {
+	return context.WithValue(ctx, nonBlockingAdmissionContextKey{}, true)
 }
 
 func githubWorkClass(ctx context.Context) WorkClass {
@@ -108,6 +144,11 @@ func githubWorkClass(ctx context.Context) WorkClass {
 		return class
 	}
 	return WorkClassInteractive
+}
+
+func nonBlockingGitHubAdmission(ctx context.Context) bool {
+	value, _ := ctx.Value(nonBlockingAdmissionContextKey{}).(bool)
+	return value
 }
 
 func NewRateCoordinator(eventBus bus.EventBus, log *logger.Logger) *RateCoordinator {
@@ -146,9 +187,50 @@ func (a *RateAdmission) acquire(ctx context.Context, resource Resource) (func(),
 		return func() {}, nil
 	}
 	if githubWorkClass(ctx) == WorkClassBackground {
+		if nonBlockingGitHubAdmission(ctx) {
+			return a.tryAcquireBackground(ctx, resource)
+		}
 		return a.acquireBackground(ctx, resource)
 	}
 	return a.acquireInteractive(ctx, resource)
+}
+
+func (a *RateAdmission) tryAcquireBackground(_ context.Context, resource Resource) (func(), error) {
+	decision := a.snapshot(resource, time.Now())
+	state := a.resourceState(resource)
+	wait := a.principal.tracker.BackgroundWaitDuration(resource)
+	a.principal.mu.Lock()
+	if paceWait := time.Until(state.nextBackgroundAt); paceWait > wait {
+		wait = paceWait
+	}
+	if wait <= 0 && !state.backgroundBusy && state.waitingInteractive == 0 {
+		state.backgroundBusy = true
+		a.principal.mu.Unlock()
+		return func() { a.releaseBackground(resource, state) }, nil
+	}
+	changed := state.changed
+	waitingInteractive := state.waitingInteractive
+	backgroundBusy := state.backgroundBusy
+	nextBackgroundAt := state.nextBackgroundAt
+	a.principal.mu.Unlock()
+	reason := decision.backgroundReason
+	if reason == "" {
+		switch {
+		case waitingInteractive > 0:
+			reason = rateLimitBlockInteractiveWaiting
+		case backgroundBusy:
+			reason = rateLimitBlockBackgroundBusy
+		case nextBackgroundAt.After(time.Now()):
+			reason = rateLimitBlockBackgroundPacing
+		default:
+			reason = "provider_retry"
+		}
+	}
+	incGitHubBackgroundDeferral(resource, reason)
+	return nil, &AdmissionDeferredError{
+		Resource: resource, Delay: wait, Changed: changed,
+		TrackerChanged: a.principal.tracker.Changed(), Reason: reason,
+	}
 }
 
 func (a *RateAdmission) acquireInteractive(ctx context.Context, resource Resource) (func(), error) {

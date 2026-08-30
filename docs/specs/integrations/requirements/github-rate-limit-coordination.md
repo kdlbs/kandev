@@ -89,6 +89,10 @@ provider bursts.
 - **AC-INTEGRATIONS-GITHUB-RATE-003.4:** When a user saves the sync
   configuration or explicitly selects Sync now, Kandev shall allow a recovery
   attempt and clear retry state after success.
+- **AC-INTEGRATIONS-GITHUB-RATE-003.5:** When automatic work is temporarily
+  denied by provider admission, it shall remain pending outside the bounded
+  execution pool and resume on an admission change or retry boundary. A
+  REST-only workflow sync shall be gated by the Core resource only.
 
 ### REQ-INTEGRATIONS-GITHUB-RATE-004: Zero-call agent visibility
 

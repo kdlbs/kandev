@@ -96,13 +96,16 @@ func (s *Service) BackgroundWorkflowSyncReady(ctx context.Context, workspaceID s
 	if admission == nil {
 		return true
 	}
-	now := time.Now()
-	for _, resource := range []Resource{ResourceCore, ResourceGraphQL, ResourceSearch} {
-		if !admission.snapshot(resource, now).backgroundAllowed {
-			return false
-		}
+	return backgroundWorkflowSyncReady(admission, time.Now())
+}
+
+func backgroundWorkflowSyncReady(admission *RateAdmission, now time.Time) bool {
+	if admission == nil {
+		return true
 	}
-	return true
+	// Workflow Sync reads repository contents through REST Core. GraphQL and
+	// Search readiness must not gate this REST-only operation.
+	return admission.snapshot(ResourceCore, now).backgroundAllowed
 }
 
 // GetWorkspaceRateLimitSnapshot reads only persisted connection metadata and
