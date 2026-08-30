@@ -14,6 +14,11 @@ type automaticJob struct {
 	workspaceID string
 }
 
+type queuedAutomaticJob struct {
+	job     automaticJob
+	discard func()
+}
+
 type automaticJobResult struct {
 	wait    func(context.Context) error
 	discard func()
@@ -26,7 +31,7 @@ type automaticJobResult struct {
 type automaticScheduler struct {
 	mu       sync.Mutex
 	cond     *sync.Cond
-	queue    []automaticJob
+	queue    []queuedAutomaticJob
 	closing  bool
 	wg       sync.WaitGroup
 	watchers sync.WaitGroup
@@ -46,13 +51,21 @@ func newAutomaticScheduler(ctx context.Context, workers int, run func(context.Co
 }
 
 func (s *automaticScheduler) enqueue(job automaticJob) bool {
+	return s.enqueueOwned(queuedAutomaticJob{job: job})
+}
+
+func (s *automaticScheduler) enqueueOwned(job queuedAutomaticJob) bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.closing {
+		s.mu.Unlock()
+		if job.discard != nil {
+			job.discard()
+		}
 		return false
 	}
 	s.queue = append(s.queue, job)
 	s.cond.Signal()
+	s.mu.Unlock()
 	return true
 }
 
@@ -68,11 +81,11 @@ func (s *automaticScheduler) worker(ctx context.Context, run func(context.Contex
 			s.mu.Unlock()
 			return
 		}
-		job := s.queue[0]
+		queued := s.queue[0]
 		copy(s.queue, s.queue[1:])
 		s.queue = s.queue[:len(s.queue)-1]
 		s.mu.Unlock()
-		result := run(ctx, job)
+		result := run(ctx, queued.job)
 		if result.wait == nil {
 			idle()
 			continue
@@ -86,9 +99,7 @@ func (s *automaticScheduler) worker(ctx context.Context, run func(context.Contex
 				}
 				return
 			}
-			if !s.enqueue(job) && result.discard != nil {
-				result.discard()
-			}
+			s.enqueueOwned(queuedAutomaticJob{job: queued.job, discard: result.discard})
 		}()
 	}
 }
@@ -96,9 +107,18 @@ func (s *automaticScheduler) worker(ctx context.Context, run func(context.Contex
 func (s *automaticScheduler) close() {
 	s.mu.Lock()
 	s.closing = true
+	discard := make([]func(), 0, len(s.queue))
+	for _, queued := range s.queue {
+		if queued.discard != nil {
+			discard = append(discard, queued.discard)
+		}
+	}
 	s.queue = nil
 	s.cond.Broadcast()
 	s.mu.Unlock()
+	for _, fn := range discard {
+		fn()
+	}
 }
 
 func (s *automaticScheduler) stop() {

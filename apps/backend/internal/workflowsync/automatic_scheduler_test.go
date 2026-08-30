@@ -211,6 +211,48 @@ func TestAutomaticScheduler_CancellationDiscardsDeferredWatcher(t *testing.T) {
 	s.stop()
 }
 
+func TestAutomaticScheduler_CloseDiscardsDeferredJobRequeuedBeforeShutdown(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := newAutomaticScheduler(ctx, 1, func(context.Context, automaticJob) automaticJobResult {
+		return automaticJobResult{}
+	}, func() {})
+
+	var discarded atomic.Int32
+	if !s.enqueueOwned(queuedAutomaticJob{
+		job:     automaticJob{workspaceID: "requeued"},
+		discard: func() { discarded.Add(1) },
+	}) {
+		t.Fatal("failed to enqueue deferred job")
+	}
+	s.close()
+	if got := discarded.Load(); got != 1 {
+		t.Fatalf("discard calls = %d, want exactly one", got)
+	}
+	s.stop()
+}
+
+func TestAutomaticScheduler_RejectedDeferredJobDiscardsExactlyOnce(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := newAutomaticScheduler(ctx, 1, func(context.Context, automaticJob) automaticJobResult {
+		return automaticJobResult{}
+	}, func() {})
+	s.close()
+
+	var discarded atomic.Int32
+	if s.enqueueOwned(queuedAutomaticJob{
+		job:     automaticJob{workspaceID: "rejected"},
+		discard: func() { discarded.Add(1) },
+	}) {
+		t.Fatal("closed scheduler accepted deferred job")
+	}
+	if got := discarded.Load(); got != 1 {
+		t.Fatalf("discard calls = %d, want exactly one", got)
+	}
+	s.stop()
+}
+
 func TestAutomaticScheduler_StopDrainsQueuedJobs(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	started := make(chan struct{})
