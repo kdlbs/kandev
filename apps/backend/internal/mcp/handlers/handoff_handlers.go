@@ -55,10 +55,13 @@ func (h *Handlers) handleListRelatedTasks(ctx context.Context, msg *ws.Message) 
 		Verbose: req.Verbose,
 	})
 	if err != nil {
-		h.logRelatedReadDecision(req, caller, "denied", err)
-		if !errors.Is(err, service.ErrAccessDenied) {
+		outcome := "error"
+		if errors.Is(err, service.ErrAccessDenied) {
+			outcome = "denied"
+		} else {
 			h.logger.Error("list related tasks", zap.Error(err))
 		}
+		h.logRelatedReadDecision(req, caller, outcome, err)
 		return mapRelatedReadError(msg, err)
 	}
 	h.enrichRelatedTasksWithPRs(ctx, related)

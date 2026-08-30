@@ -6,12 +6,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestListRelatedTasksDispatcherEnforcesRelatedReadAuthorization(t *testing.T) {
@@ -88,6 +91,28 @@ func TestListRelatedTasksDispatcherEnforcesRelatedReadAuthorization(t *testing.T
 	assert.NotContains(t, string(foreign.Payload), "Foreign secret")
 
 	assert.Equal(t, before, snapshotRelatedReadTables(t, repo))
+}
+
+func TestListRelatedTasksAuditMarksInternalFailuresAsErrors(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	core, observed := observer.New(zap.InfoLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+	handoff := service.NewHandoffService(repo, repo, service.NewDocumentService(repo, log), nil, nil, log)
+	handlers := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, log)
+	handlers.SetHandoffService(handoff)
+
+	_, err = repo.DB().ExecContext(context.Background(), "DROP TABLE tasks")
+	require.NoError(t, err)
+	response, err := handlers.handleListRelatedTasks(context.Background(), makeWSMessage(t, ws.ActionMCPListRelatedTasks, map[string]any{
+		"task_id": "task-a", "caller_task_id": "task-a", "caller_session_id": "session-a",
+	}))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, response.Type)
+
+	entries := observed.FilterMessage("mcp.related_task_read.authorization").All()
+	require.Len(t, entries, 1)
+	assert.Equal(t, "error", entries[0].ContextMap()["outcome"])
 }
 
 func seedRelatedReadTasks(t *testing.T, repo relatedReadSeedRepo) {
