@@ -23,8 +23,16 @@ func TestCompareVersions(t *testing.T) {
 		{name: "shorter version with fewer segments is less", a: "1.0", b: "1.0.1", want: -1},
 		{name: "trailing zero segment is equal to the shorter form", a: "1.0", b: "1.0.0", want: 0},
 		{
-			name: "non-numeric segment falls back to string compare",
-			a:    "1.0.0-beta", b: "1.0.0", want: 1, // "1.0.0-beta" > "1.0.0" lexically
+			name: "prerelease is older than the matching stable version",
+			a:    "1.0.0-beta", b: "1.0.0", want: -1,
+		},
+		{
+			name: "numeric prerelease identifiers sort numerically",
+			a:    "1.0.0-alpha.10", b: "1.0.0-alpha.2", want: 1,
+		},
+		{
+			name: "build metadata does not affect precedence",
+			a:    "1.0.0+build.1", b: "1.0.0+build.2", want: 0,
 		},
 	}
 

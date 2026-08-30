@@ -102,6 +102,7 @@ func TestCatalogInstallStateAnnotation(t *testing.T) {
 	official := serve(t, indexJSON(
 		entryJSON("installed", "1.0.0", 1)+","+
 			entryJSON("outdated", "2.0.0", 1)+","+
+			entryJSON("prerelease", "1.0.0", 1)+","+
 			entryJSON("fresh", "1.0.0", 1)))
 	s := newTestService(t)
 	_ = s.store.EnsureBuiltin("Official", official.URL)
@@ -109,6 +110,7 @@ func TestCatalogInstallStateAnnotation(t *testing.T) {
 	installed := []InstalledPlugin{
 		{ID: "installed", Version: "1.0.0"},
 		{ID: "outdated", Version: "1.0.0"},
+		{ID: "prerelease", Version: "1.0.0-beta"},
 	}
 	result, err := s.Catalog(context.Background(), installed)
 	if err != nil {
@@ -116,6 +118,7 @@ func TestCatalogInstallStateAnnotation(t *testing.T) {
 	}
 	assertState(t, result.Plugins, "installed", StateInstalled)
 	assertState(t, result.Plugins, "outdated", StateUpdateAvailable)
+	assertState(t, result.Plugins, "prerelease", StateUpdateAvailable)
 	assertState(t, result.Plugins, "fresh", StateAvailable)
 }
 

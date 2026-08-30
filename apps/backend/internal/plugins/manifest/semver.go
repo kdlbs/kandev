@@ -1,9 +1,12 @@
 package manifest
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+var safeComparableVersion = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+-]*$`)
 
 // NormalizeReleaseVersion returns a dotted numeric release version suitable
 // for compatibility comparisons. Kandev release builds are tagged `vX.Y.Z`,
@@ -31,51 +34,121 @@ func NormalizeReleaseVersion(raw string) (string, bool) {
 	return version, true
 }
 
-// CompareVersions performs a best-effort, dependency-free comparison of two
-// dotted version strings (e.g. plugin manifest "version" values), for
-// callers that need to pick the "greatest" of a small set of versions
-// (sideload directory scanning, min_kandev_version enforcement) without a
-// full semver parser. Each "."-separated segment is compared numerically
-// when both sides parse as a non-negative integer; the moment a segment
-// pair does not (a pre-release suffix like "1.0.0-beta", a malformed
-// version, etc.), comparison falls back to a plain byte-wise string compare
-// of the two original, full version strings so the function always returns
-// a total order rather than panicking or guessing.
+// CompareVersions performs a dependency-free comparison of the safe release
+// versions the marketplace accepts. Numeric core and prerelease identifiers
+// sort without integer overflow; a prerelease sorts below its matching stable
+// version and build metadata does not affect precedence. Other manifest
+// versions retain the legacy byte-wise fallback.
 //
 // Returns -1 if a<b, 0 if equal, 1 if a>b.
 func CompareVersions(a, b string) int {
 	if a == b {
 		return 0
 	}
-	as := strings.Split(a, ".")
-	bs := strings.Split(b, ".")
-	n := len(as)
-	if len(bs) > n {
-		n = len(bs)
+	left, leftOK := parseComparableVersion(a)
+	right, rightOK := parseComparableVersion(b)
+	if !leftOK || !rightOK {
+		return strings.Compare(a, b)
 	}
-	for i := 0; i < n; i++ {
-		av, bv := segmentAt(as, i), segmentAt(bs, i)
-		ai, aErr := strconv.Atoi(av)
-		bi, bErr := strconv.Atoi(bv)
-		if aErr != nil || bErr != nil {
-			return strings.Compare(a, b)
+	for i := 0; i < max(len(left.core), len(right.core)); i++ {
+		if comparison := compareVersionIdentifier(versionPart(left.core, i, "0"), versionPart(right.core, i, "0")); comparison != 0 {
+			return comparison
 		}
-		if ai != bi {
-			if ai < bi {
-				return -1
-			}
+	}
+	if len(left.prerelease) == 0 || len(right.prerelease) == 0 {
+		if len(left.prerelease) == len(right.prerelease) {
+			return 0
+		}
+		if len(left.prerelease) == 0 {
 			return 1
+		}
+		return -1
+	}
+	for i := 0; i < max(len(left.prerelease), len(right.prerelease)); i++ {
+		if i >= len(left.prerelease) {
+			return -1
+		}
+		if i >= len(right.prerelease) {
+			return 1
+		}
+		if comparison := compareVersionIdentifier(left.prerelease[i], right.prerelease[i]); comparison != 0 {
+			return comparison
 		}
 	}
 	return 0
 }
 
-// segmentAt returns segments[i], or "0" if i is out of range (a version
-// with fewer dotted segments than its comparison partner) so "1.0" compares
-// equal to "1.0.0" rather than being treated as unparseable.
-func segmentAt(segments []string, i int) string {
-	if i < len(segments) {
-		return segments[i]
+type comparableVersion struct {
+	core       []string
+	prerelease []string
+}
+
+func parseComparableVersion(version string) (comparableVersion, bool) {
+	if !safeComparableVersion.MatchString(version) {
+		return comparableVersion{}, false
 	}
-	return "0"
+	withoutBuild, _, _ := strings.Cut(version, "+")
+	core, prerelease, hasPrerelease := strings.Cut(withoutBuild, "-")
+	parsed := comparableVersion{core: strings.Split(core, ".")}
+	if hasPrerelease {
+		parsed.prerelease = strings.Split(prerelease, ".")
+	}
+	return parsed, true
+}
+
+func versionPart(parts []string, index int, fallback string) string {
+	if index < len(parts) {
+		return parts[index]
+	}
+	return fallback
+}
+
+func compareVersionIdentifier(left, right string) int {
+	leftNumeric := isNumericIdentifier(left)
+	rightNumeric := isNumericIdentifier(right)
+	if comparison, comparable := compareNumericIdentifiers(left, right, leftNumeric, rightNumeric); comparable {
+		return comparison
+	}
+	if leftNumeric != rightNumeric {
+		if leftNumeric {
+			return -1
+		}
+		return 1
+	}
+	return strings.Compare(left, right)
+}
+
+func compareNumericIdentifiers(left, right string, leftNumeric, rightNumeric bool) (int, bool) {
+	if !leftNumeric || !rightNumeric {
+		return 0, false
+	}
+	leftTrimmed := trimLeadingZeroes(left)
+	rightTrimmed := trimLeadingZeroes(right)
+	if len(leftTrimmed) != len(rightTrimmed) {
+		if len(leftTrimmed) < len(rightTrimmed) {
+			return -1, true
+		}
+		return 1, true
+	}
+	return strings.Compare(leftTrimmed, rightTrimmed), true
+}
+
+func trimLeadingZeroes(value string) string {
+	trimmed := strings.TrimLeft(value, "0")
+	if trimmed == "" {
+		return "0"
+	}
+	return trimmed
+}
+
+func isNumericIdentifier(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, character := range value {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }
