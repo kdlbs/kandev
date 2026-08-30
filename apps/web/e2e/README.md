@@ -182,6 +182,17 @@ Dispatch the workflow with `fail_on_flaky=true` to set
 `failOnFlakyTests: true` for a diagnostic run. Normal PR runs retain the
 existing two-retry policy while the summary makes retry groups visible.
 
+Container-backed CI jobs also cache the browser directory used by the host
+runner. The cache key includes the runner OS, the Playwright `v1.61.1-noble`
+browser source, and the CI image definition hash. A verified hit sets
+`PLAYWRIGHT_BROWSERS_PATH=/tmp/ms-playwright` and skips the GHCR pull and
+browser copy. A miss, stale entry, unavailable cache, or failed Chromium
+verification uses the pinned runtime-image extraction path. Cache operations
+are best-effort and cannot change the manifest or block a healthy fallback.
+The container job summary reports cache state, verification, extraction, save
+status, and elapsed setup time so cache transfer cost can be compared with the
+54-second browser provisioning baseline.
+
 ### Flake rate and trend
 
 CI retries hide flakes: with `retries: 2` and `failOnFlakyTests: false`, a test
