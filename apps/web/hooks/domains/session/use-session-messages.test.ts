@@ -38,6 +38,7 @@ const mockState = {
   setActiveTurn: vi.fn(),
   reconcileActiveTurnAfterHydration: vi.fn(),
 };
+const mockStoreApi = { getState: () => mockState };
 
 vi.mock("@/lib/api/domains/session-api", () => ({
   listSessionTurns: (...args: unknown[]) => mockListSessionTurns(...args),
@@ -49,7 +50,7 @@ vi.mock("@/lib/ws/connection", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
-  useAppStoreApi: () => ({ getState: () => mockState }),
+  useAppStoreApi: () => mockStoreApi,
 }));
 
 import { taskId, sessionId } from "@/lib/types/ids";
@@ -364,6 +365,7 @@ describe("session subscription hydration ordering", () => {
       await readiness.promise;
     });
 
+    expect(mockWebSocketClient.subscribeSessionWithReady).toHaveBeenCalledTimes(1);
     expect(mockWebSocketClient.request).toHaveBeenCalledWith(
       "message.list",
       expect.objectContaining({ session_id: "sess-1" }),
