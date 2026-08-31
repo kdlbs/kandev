@@ -3,12 +3,17 @@ package service
 import (
 	"context"
 	"errors"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
@@ -488,5 +493,229 @@ func TestPlanService_CoalescesRepeatedlyWithinWindow(t *testing.T) {
 	}
 	if full.Content != "v3" {
 		t.Errorf("expected the coalesced revision to hold the latest (3rd) content, got %q", full.Content)
+	}
+}
+
+// newSeparatePoolsPlanService builds a PlanService backed by genuinely
+// separate writer and reader *sql.DB pools - the same internal/db.OpenSQLite
+// / OpenSQLiteReader split production uses - rather than the single handle
+// every other test in this package shares as both. AC-002.10 requires plan
+// reads inside the serialized section to observe a commit made through a
+// different database connection than the read uses; a shared handle can't
+// exercise that, since a single connection trivially sees its own prior
+// writes.
+func newSeparatePoolsPlanService(t *testing.T) (*PlanService, *sqliterepo.Repository) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+
+	writerConn, err := db.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("OpenSQLite (writer pool): %v", err)
+	}
+	readerConn, err := db.OpenSQLiteReader(dbPath)
+	if err != nil {
+		t.Fatalf("OpenSQLiteReader (reader pool): %v", err)
+	}
+	writerDB := sqlx.NewDb(writerConn, "sqlite3")
+	readerDB := sqlx.NewDb(readerConn, "sqlite3")
+
+	repo, cleanup, err := repository.Provide(writerDB, readerDB, nil)
+	if err != nil {
+		t.Fatalf("repository.Provide: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := writerDB.Close(); err != nil {
+			t.Errorf("failed to close writer pool: %v", err)
+		}
+		if err := readerDB.Close(); err != nil {
+			t.Errorf("failed to close reader pool: %v", err)
+		}
+		if err := cleanup(); err != nil {
+			t.Errorf("failed to close repo: %v", err)
+		}
+	})
+
+	eventBus := NewMockEventBus()
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	svc := NewPlanService(repo, eventBus, log)
+	return svc, repo
+}
+
+// TestPlanService_SeparateReaderWriterPoolsObserveCommittedWrites is the one
+// test in this package wired with real separate connection pools (AC-002.10).
+// It drives the service through the same read-after-write sequence
+// upsertPlan performs inside the per-task lock - HEAD read, latest-revision
+// read, write, re-read - and asserts each read observes what the previous
+// write committed through the other pool, including the coalesce/append
+// decision a second write makes from what it reads.
+func TestPlanService_SeparateReaderWriterPoolsObserveCommittedWrites(t *testing.T) {
+	svc, repo := newSeparatePoolsPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-pool-split")
+
+	if _, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-pool-split", Title: "Plan", Content: "v1", AuthorKind: "agent", AuthorName: "A",
+	}); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+
+	// Read HEAD and the latest revision through the reader pool - a
+	// connection distinct from the one the write above committed through.
+	head, err := repo.GetTaskPlan(ctx, "task-pool-split")
+	if err != nil {
+		t.Fatalf("GetTaskPlan (reader pool): %v", err)
+	}
+	if head == nil || head.Content != "v1" {
+		t.Fatalf("reader pool did not observe the write committed through the writer pool: got %+v", head)
+	}
+	rev, err := repo.GetLatestTaskPlanRevision(ctx, "task-pool-split")
+	if err != nil {
+		t.Fatalf("GetLatestTaskPlanRevision (reader pool): %v", err)
+	}
+	if rev == nil || rev.Content != "v1" || rev.RevisionNumber != 1 {
+		t.Fatalf("reader pool did not observe the revision committed through the writer pool: got %+v", rev)
+	}
+
+	// A second write, forced to append, must compute its
+	// PriorRevisionNumber and coalesce decision from what the reader pool
+	// observes of the first write's commit - not from any writer-pool-local
+	// state, since PlanService always reads via the reader pool.
+	result, err := svc.UpdatePlan(ctx, UpdatePlanRequest{
+		TaskID: "task-pool-split", Content: "v2", AuthorKind: "agent", AuthorName: "A", ForceNewRevision: true,
+	})
+	if err != nil {
+		t.Fatalf("UpdatePlan: %v", err)
+	}
+	if result.Plan == nil || result.Plan.Content != "v2" {
+		t.Fatalf("expected the second write to commit v2 based on a reader-pool read of the first write's commit, got %+v", result.Plan)
+	}
+
+	list, err := svc.ListRevisions(ctx, "task-pool-split")
+	if err != nil {
+		t.Fatalf("ListRevisions: %v", err)
+	}
+	if len(list) != 2 || list[0].RevisionNumber != 2 {
+		t.Fatalf("expected the second write to append revision 2 (numbered from a reader-pool read of revision 1), got %+v", list)
+	}
+}
+
+// TestPlanService_ConcurrentTruncatingWriteReflectsCommittedPredecessor is
+// the spec's core TOCTOU scenario (AC-001.3, AC-002.1, AC-002.2, AC-002.3):
+// writer A is gated inside its write transaction, already holding the
+// per-task lock, after having read the seeded plan state. Writer B for the
+// same task is started while A is still blocked and must queue rather than
+// commit. Releasing A lets both commit in order, and each write's truncation
+// decision (ReplacedRunes/NewRunes/PriorRevisionNumber) must describe the
+// state that write actually committed against - B's decision must reflect
+// A's committed content and revision number, not the stale seed state that
+// existed before A ran, and HEAD must end up equal to the latest revision.
+func TestPlanService_ConcurrentTruncatingWriteReflectsCommittedPredecessor(t *testing.T) {
+	_, eventBus, repo := createTestService(t)
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-interleave-trunc")
+
+	seedContent := strings.Repeat("s", 10000)
+	if err := repo.CreateTaskPlan(ctx, &models.TaskPlan{
+		TaskID: "task-interleave-trunc", Title: "Plan", Content: seedContent, CreatedBy: "agent",
+	}); err != nil {
+		t.Fatalf("seed CreateTaskPlan: %v", err)
+	}
+	if err := repo.InsertTaskPlanRevision(ctx, &models.TaskPlanRevision{
+		TaskID: "task-interleave-trunc", RevisionNumber: 1, Title: "Plan", Content: seedContent,
+		AuthorKind: "agent", AuthorName: "Seed",
+	}); err != nil {
+		t.Fatalf("seed InsertTaskPlanRevision: %v", err)
+	}
+
+	writeStarted := make(chan struct{})
+	releaseWrite := make(chan struct{})
+	gated := &gatedWriteRepo{Repository: repo, writeStarted: writeStarted, proceed: releaseWrite}
+	svc := NewPlanService(gated, eventBus, log)
+
+	type writeOutcome struct {
+		result PlanWriteResult
+		err    error
+	}
+
+	aContent := strings.Repeat("a", 3000) // < half of seedContent's 10000 runes: A must detect truncation.
+	aDone := make(chan writeOutcome, 1)
+	go func() {
+		result, err := svc.UpdatePlan(ctx, UpdatePlanRequest{
+			TaskID: "task-interleave-trunc", Content: aContent, AuthorKind: "agent", AuthorName: "A",
+			EvaluateTruncation: true,
+		})
+		aDone <- writeOutcome{result, err}
+	}()
+	<-writeStarted // A holds the per-task lock, blocked inside its write tx, after having read the seed.
+
+	bContent := strings.Repeat("b", 1000) // < half of aContent's 3000 runes, IF measured against A's commit.
+	bDone := make(chan writeOutcome, 1)
+	go func() {
+		result, err := svc.UpdatePlan(ctx, UpdatePlanRequest{
+			TaskID: "task-interleave-trunc", Content: bContent, AuthorKind: "agent", AuthorName: "B",
+			EvaluateTruncation: true,
+		})
+		bDone <- writeOutcome{result, err}
+	}()
+
+	select {
+	case out := <-bDone:
+		t.Fatalf("second write finished (err=%v) before the gated first write released the per-task lock - not queued", out.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(releaseWrite)
+	aOut := <-aDone
+	if aOut.err != nil {
+		t.Fatalf("write A: %v", aOut.err)
+	}
+	bOut := <-bDone
+	if bOut.err != nil {
+		t.Fatalf("write B: %v", bOut.err)
+	}
+
+	if !aOut.result.TruncationDetected {
+		t.Error("expected write A to detect truncation against the seeded content")
+	}
+	if aOut.result.ReplacedRunes != 10000 || aOut.result.NewRunes != 3000 {
+		t.Errorf("write A: got ReplacedRunes=%d NewRunes=%d, want 10000/3000 (replaced the seed)",
+			aOut.result.ReplacedRunes, aOut.result.NewRunes)
+	}
+	if aOut.result.PriorRevisionNumber != 1 {
+		t.Errorf("write A: got PriorRevisionNumber=%d, want 1 (the seed revision)", aOut.result.PriorRevisionNumber)
+	}
+
+	if !bOut.result.TruncationDetected {
+		t.Fatal("expected write B to detect truncation against A's committed content, not the stale seed it would have read had it not queued")
+	}
+	if bOut.result.ReplacedRunes != 3000 || bOut.result.NewRunes != 1000 {
+		t.Errorf("write B: got ReplacedRunes=%d NewRunes=%d, want 3000/1000 (replaced A's committed content, not the 10000-rune seed)",
+			bOut.result.ReplacedRunes, bOut.result.NewRunes)
+	}
+	if bOut.result.PriorRevisionNumber != 2 {
+		t.Errorf("write B: got PriorRevisionNumber=%d, want 2 (A's committed revision, not the seed's revision 1)", bOut.result.PriorRevisionNumber)
+	}
+
+	head, err := svc.GetPlan(ctx, "task-interleave-trunc")
+	if err != nil {
+		t.Fatalf("GetPlan: %v", err)
+	}
+	if head.Content != bContent {
+		t.Errorf("expected HEAD to equal B's committed content (the last write), got a plan with %d bytes", len(head.Content))
+	}
+
+	list, err := svc.ListRevisions(ctx, "task-interleave-trunc")
+	if err != nil {
+		t.Fatalf("ListRevisions: %v", err)
+	}
+	if len(list) != 3 {
+		t.Fatalf("expected 3 revisions (seed=1, A's truncating append=2, B's truncating append=3), got %d", len(list))
+	}
+	if list[0].RevisionNumber != 3 {
+		t.Errorf("expected the newest revision to be numbered 3, got %d", list[0].RevisionNumber)
+	}
+	if list[1].RevisionNumber != 2 {
+		t.Errorf("expected the middle revision to be numbered 2, got %d", list[1].RevisionNumber)
 	}
 }
