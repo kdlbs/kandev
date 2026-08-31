@@ -510,12 +510,9 @@ type WorkflowStep struct {
 	AgentProfileID string
 	// OnEnterActionTypes lists the on_enter action types configured on this
 	// step, as authored. A type appearing here means it is configured, not a
-	// guarantee of when or whether it fires: arrival at a step runs its
-	// session-independent actions on every route, while session-shaped actions
-	// additionally require a live arriving session. Config maps are
-	// deliberately not exposed. Nil when the step has no on_enter actions,
-	// never an empty non-nil slice. Callers must ignore action types they do
-	// not recognize.
+	// guarantee of when or whether it fires. Config maps are deliberately not
+	// exposed. Nil when the step has no on_enter actions, never an empty
+	// non-nil slice. Callers must ignore action types they do not recognize.
 	OnEnterActionTypes []string
 }
 
