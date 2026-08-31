@@ -266,7 +266,22 @@ func (s *Store) MarkCIRunProviderCallStarted(
 			provider_workflow_name = ?, provider_workflow_path = ?, provider_head_repo = ?,
 			provider_head_ref = ?, provider_head_sha = ?, provider_run_watermark = ?, updated_at = ?
 		WHERE id = ? AND execution_owner = ? AND status = ?
-			AND provider_call_started_at IS NULL AND provider_call_revision = ?`),
+			AND provider_call_started_at IS NULL AND provider_call_revision = ?
+			AND EXISTS (
+				SELECT 1 FROM github_ci_run_grants grant
+				JOIN tasks target ON target.id = github_ci_run_requests.target_task_id
+				WHERE grant.id = github_ci_run_requests.grant_id
+					AND grant.workspace_id = github_ci_run_requests.workspace_id
+					AND grant.actor_task_id = github_ci_run_requests.actor_task_id
+					AND grant.target_task_id = github_ci_run_requests.target_task_id
+					AND grant.workflow_id = github_ci_run_requests.workflow_id
+					AND grant.workflow_step_id = github_ci_run_requests.workflow_step_id
+					AND grant.repository_id = github_ci_run_requests.repository_id
+					AND grant.revoked_at IS NULL
+					AND target.workspace_id = github_ci_run_requests.workspace_id
+					AND target.workflow_id = github_ci_run_requests.workflow_id
+					AND target.workflow_step_id = github_ci_run_requests.workflow_step_id
+			)`),
 		at.UTC(), CIRunRequestReconciling, request.Operation, request.ProviderWorkflowID,
 		request.ProviderWorkflowName, request.ProviderWorkflowPath, request.ProviderHeadRepo,
 		request.ProviderHeadRef, request.ProviderHeadSHA, request.ProviderRunWatermark,

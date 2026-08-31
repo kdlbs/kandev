@@ -53,6 +53,7 @@ func TestStoreCIRunExecutionLeaseExpiresBeforeProviderStart(t *testing.T) {
 	if err := store.UpsertCIRunGrant(ctx, grant); err != nil {
 		t.Fatal(err)
 	}
+	seedCIRunProviderStartScope(t, store, grant)
 	request, _, err := store.ClaimCIRunRequest(ctx, testCIRunRequest(grant, now))
 	if err != nil {
 		t.Fatal(err)
@@ -123,6 +124,7 @@ func TestStoreCIRunAmbiguousWriteCannotDowngradeSuccess(t *testing.T) {
 	if err := store.UpsertCIRunGrant(ctx, grant); err != nil {
 		t.Fatal(err)
 	}
+	seedCIRunProviderStartScope(t, store, grant)
 	request, _, err := store.ClaimCIRunRequest(ctx, testCIRunRequest(grant, now))
 	if err != nil {
 		t.Fatal(err)
@@ -168,6 +170,7 @@ func TestStoreCIRunProviderRevisionRejectsEarlierAttempt(t *testing.T) {
 	if err := store.UpsertCIRunGrant(ctx, grant); err != nil {
 		t.Fatal(err)
 	}
+	seedCIRunProviderStartScope(t, store, grant)
 	request, _, err := store.ClaimCIRunRequest(ctx, testCIRunRequest(grant, now))
 	if err != nil {
 		t.Fatal(err)
@@ -279,6 +282,7 @@ func TestStoreCIRunRequestProviderStartAndAuditAreRedacted(t *testing.T) {
 	if err := store.UpsertCIRunGrant(ctx, grant); err != nil {
 		t.Fatal(err)
 	}
+	seedCIRunProviderStartScope(t, store, grant)
 	req, _, err := store.ClaimCIRunRequest(ctx, testCIRunRequest(grant, now))
 	if err != nil {
 		t.Fatal(err)
@@ -379,6 +383,22 @@ func testCIRunGrant(now time.Time) *CIRunGrant {
 		ID: "grant-1", WorkspaceID: "workspace-1", ActorTaskID: "coordinator-1",
 		TargetTaskID: "target-1", WorkflowID: "workflow-1", WorkflowStepID: "ci-fixup",
 		RepositoryID: "repository-1", CreatedByUserID: "admin-1", CreatedAt: now, UpdatedAt: now,
+	}
+}
+
+func seedCIRunProviderStartScope(t *testing.T, store *Store, grant *CIRunGrant) {
+	t.Helper()
+	for _, statement := range []string{
+		`ALTER TABLE tasks ADD COLUMN workflow_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN workflow_step_id TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := store.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.db.Exec(`INSERT INTO tasks(id, workspace_id, workflow_id, workflow_step_id)
+		VALUES (?, ?, ?, ?)`, grant.TargetTaskID, grant.WorkspaceID, grant.WorkflowID, grant.WorkflowStepID); err != nil {
+		t.Fatal(err)
 	}
 }
 

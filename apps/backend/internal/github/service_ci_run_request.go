@@ -345,6 +345,9 @@ func (s *Service) executeCIRunRequest(
 	request.ProviderHeadRef = verified.Run.HeadBranch
 	request.ProviderHeadSHA = verified.Run.HeadSHA
 	if err := s.store.MarkCIRunProviderCallStarted(ctx, request, now); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return s.handleCIRunProviderStartConflict(ctx, client, request)
+		}
 		return nil, err
 	}
 	request.ProviderCallStartedAt = &now
@@ -462,6 +465,9 @@ func (s *Service) executeCIRunDispatchFallback(
 	request.ProviderRunWatermark = maxCIRunID(baseline)
 	dispatchStartedAt := s.ciRunClock()().UTC()
 	if err := s.store.MarkCIRunProviderCallStarted(ctx, request, dispatchStartedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return s.handleCIRunProviderStartConflict(ctx, client, request)
+		}
 		return nil, err
 	}
 	request.ProviderCallStartedAt = &dispatchStartedAt
@@ -511,6 +517,17 @@ func (s *Service) revalidateCIRunAdmission(
 		return nil, nil, err
 	}
 	return binding, pr, nil
+}
+
+func (s *Service) handleCIRunProviderStartConflict(
+	ctx context.Context,
+	client ciRunActionsClient,
+	request *CIRunRequest,
+) (*CIRunReceipt, error) {
+	if _, _, err := s.revalidateCIRunAdmission(ctx, client, request); err != nil {
+		return s.failCIRunAdmission(ctx, request, err)
+	}
+	return s.reloadCIRunResult(ctx, request)
 }
 
 func (s *Service) failCIRunAdmission(
@@ -595,7 +612,7 @@ func (s *Service) reconcileCIRunRequest(
 	}
 	runs, err := client.ListActionsWorkflowRuns(ctx, binding.Owner, binding.Repo, workflowID, request.ExpectedHeadSHA)
 	if err != nil {
-		return s.handleCIRunMutationError(ctx, request, err)
+		return receiptFromCIRunRequest(request), &CIRunRequestError{Class: ciRunFailureFromError(err)}
 	}
 	var matched *GitHubActionsRun
 	for i := range runs {

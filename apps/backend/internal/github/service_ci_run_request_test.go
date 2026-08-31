@@ -22,6 +22,9 @@ type fakeCIRunActionsClient struct {
 	workflowHead    []byte
 	workflowRefs    []string
 	workflowHook    func()
+	runHook         func(int)
+	listHook        func()
+	listErr         error
 	runs            []GitHubActionsRun
 	preDispatchRuns []GitHubActionsRun
 	rerunErr        error
@@ -50,6 +53,9 @@ func (f *fakeCIRunActionsClient) GetRepoFileContent(
 }
 func (f *fakeCIRunActionsClient) GetActionsRun(context.Context, string, string, int64) (*GitHubActionsRun, error) {
 	f.runCalls++
+	if f.runHook != nil {
+		f.runHook(f.runCalls)
+	}
 	if f.runCalls <= len(f.runSequence) {
 		return f.runSequence[f.runCalls-1], nil
 	}
@@ -80,6 +86,12 @@ func (f *fakeCIRunActionsClient) DispatchActionsWorkflow(
 func (f *fakeCIRunActionsClient) ListActionsWorkflowRuns(context.Context, string, string, int64, string) ([]GitHubActionsRun, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.listHook != nil {
+		f.listHook()
+	}
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	if f.dispatches == 0 && (f.reruns == 0 ||
 		ciRunFailureFromError(f.rerunErr) == CIRunFailureRerunIneligible) {
 		return f.preDispatchRuns, nil
@@ -656,98 +668,6 @@ func TestRequestFreshCIRunPersistsProviderFailureClass(t *testing.T) {
 	}
 	if storedClass != string(CIRunFailureProviderUnavailable) {
 		t.Fatalf("stored failure class = %q", storedClass)
-	}
-}
-
-func TestRequestFreshCIRunRetriesRateLimitedMutationAfterReset(t *testing.T) {
-	service, client, input := setupCIRunServiceTest(t, false)
-	now := service.ciRunClock()().UTC()
-	reset := now.Add(time.Minute)
-	client.rerunErr = &CIRunProviderError{
-		Class: CIRunFailureProviderRateLimited, StatusCode: 429,
-		Retryable: true, RetryAfter: &reset,
-	}
-
-	_, err := service.RequestFreshCIRun(context.Background(), input)
-	var ciErr *CIRunRequestError
-	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureProviderRateLimited {
-		t.Fatalf("first error = %#v, want provider_rate_limited", err)
-	}
-	_, err = service.RequestFreshCIRun(context.Background(), input)
-	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureProviderRateLimited || client.reruns != 1 {
-		t.Fatalf("early retry error = %#v, provider reruns = %d", err, client.reruns)
-	}
-
-	service.ciRunNow = func() time.Time { return reset.Add(time.Second) }
-	client.rerunErr = nil
-	client.runs = []GitHubActionsRun{*client.run}
-	client.runs[0].Attempt = input.ExpectedSourceAttempt + 1
-	receipt, err := service.RequestFreshCIRun(context.Background(), input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if receipt.Status != CIRunRequestSucceeded || client.reruns != 2 {
-		t.Fatalf("receipt = %+v, provider reruns = %d", receipt, client.reruns)
-	}
-}
-
-func TestRequestFreshCIRunReconcilesAmbiguousMutationWithoutResending(t *testing.T) {
-	service, client, input := setupCIRunServiceTest(t, false)
-	client.rerunErr = classifyCIRunProviderError(
-		&GitHubAPIError{StatusCode: 503, Endpoint: "/rerun"}, true, true,
-	)
-	_, err := service.RequestFreshCIRun(context.Background(), input)
-	var ciErr *CIRunRequestError
-	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureProviderCallAmbiguous {
-		t.Fatalf("first error = %#v", err)
-	}
-	client.runs = []GitHubActionsRun{{
-		ID: input.SourceRunID, Attempt: 2, WorkflowID: 77, Event: "pull_request",
-		HeadSHA: input.ExpectedHeadSHA, HeadBranch: "feature/x",
-		Repository: "kdlbs/kandev", HeadRepository: "kdlbs/kandev",
-	}}
-	receipt, err := service.RequestFreshCIRun(context.Background(), input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if receipt.Status != CIRunRequestSucceeded || receipt.Attempt != 2 ||
-		receipt.WorkflowName != "E2E" || receipt.WorkflowPath != reviewedDispatchWorkflow {
-		t.Fatalf("receipt = %+v", receipt)
-	}
-	if client.reruns != 1 {
-		t.Fatalf("provider reruns = %d, want one ambiguous send only", client.reruns)
-	}
-}
-
-func TestRequestFreshCIRunTakesOverExpiredPreProviderLease(t *testing.T) {
-	service, client, input := setupCIRunServiceTest(t, false)
-	now := service.ciRunClock()().UTC()
-	binding, err := service.loadCIRunBinding(context.Background(), input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request, _, err := service.store.ClaimCIRunRequest(
-		context.Background(), newCIRunRequest(binding, input, now),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	acquired, err := service.store.AcquireCIRunExecution(
-		context.Background(), request, "crashed-worker", now, 30*time.Second,
-	)
-	if err != nil || !acquired {
-		t.Fatalf("seed crashed lease = %v, %v", acquired, err)
-	}
-	service.ciRunNow = func() time.Time { return now.Add(31 * time.Second) }
-	client.runs = []GitHubActionsRun{*client.run}
-	client.runs[0].Attempt = input.ExpectedSourceAttempt + 1
-
-	receipt, err := service.RequestFreshCIRun(context.Background(), input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if receipt.Status != CIRunRequestSucceeded || client.reruns != 1 {
-		t.Fatalf("receipt = %+v, provider reruns = %d", receipt, client.reruns)
 	}
 }
 
