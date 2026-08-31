@@ -2,7 +2,9 @@ package github
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -100,5 +102,12 @@ func TestClassifyGitHubResponseRetryAfterHTTPDate(t *testing.T) {
 	got := classifyGitHubResponse(resp, "/user", []byte(`{"message":"secondary rate limit"}`), now)
 	if got.RetrySource != RetrySourceRetryAfter || !got.RetryAt.Equal(retry) {
 		t.Fatalf("classification = %+v", got)
+	}
+}
+
+func TestFailureKindOfClassifiesNetworkTransportAsTransient(t *testing.T) {
+	err := &url.Error{Op: "Get", URL: "https://api.github.com/user", Err: syscall.ECONNREFUSED}
+	if got := FailureKindOf(err); got != FailureTransient {
+		t.Fatalf("failure kind = %q, want %q", got, FailureTransient)
 	}
 }
