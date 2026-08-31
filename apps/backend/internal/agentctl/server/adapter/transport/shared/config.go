@@ -14,10 +14,6 @@ type Config struct {
 	// AutoApprove automatically approves permission requests
 	AutoApprove bool
 
-	// PermissionPolicy controls the permission mode: "autonomous", "supervised", "plan".
-	// Used to determine hook registration and --permission-mode flag.
-	PermissionPolicy string
-
 	// PermissionTimeout is the maximum time to wait for a permission response.
 	// After timeout, the request is auto-denied with interrupt. Defaults to DefaultPermissionTimeout.
 	PermissionTimeout time.Duration
