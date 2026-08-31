@@ -1340,7 +1340,6 @@ func (m *Manager) buildAdapterConfig() error {
 	m.adapterCfg = &adapter.Config{
 		WorkDir:                   m.cfg.WorkDir,
 		AutoApprove:               m.cfg.AutoApprovePermissions,
-		ApprovalPolicy:            m.cfg.ApprovalPolicy,
 		McpServers:                mcpServers,
 		AgentID:                   m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
 		AssumeMcpSse:              m.cfg.AssumeMcpSse,

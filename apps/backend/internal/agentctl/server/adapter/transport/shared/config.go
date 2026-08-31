@@ -14,11 +14,6 @@ type Config struct {
 	// AutoApprove automatically approves permission requests
 	AutoApprove bool
 
-	// ApprovalPolicy controls when the agent requests approval.
-	// Valid values: "untrusted" (always), "on-failure", "on-request", "never".
-	// Defaults to "on-request" if empty.
-	ApprovalPolicy string
-
 	// PermissionPolicy controls the permission mode: "autonomous", "supervised", "plan".
 	// Used to determine hook registration and --permission-mode flag.
 	PermissionPolicy string
