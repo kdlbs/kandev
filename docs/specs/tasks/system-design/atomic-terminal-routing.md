@@ -58,10 +58,13 @@ later admission to fail its terminal/source predicate.
 - `workflow_route_effects` gives the winning transition one destination-entry
   identity. Engine-owned on-entry actions continue to claim their exact
   `workflow_step_entries` markers, so retrying delivery cannot create another
-  logical entry. Delivery claims the route effect with a token and lease,
-  completes only with that token, and permits recovery to reclaim an expired
-  crash lease. The route effect has typed readback for its operation,
-  transition, target, and status.
+  logical entry. Delivery first claims the route effect with a token and lease
+  while it prepares the session. Immediately before any lifecycle side effect,
+  the same token moves the effect from `claimed` to `executing`. An expired
+  `claimed` lease is recoverable; `executing` is non-reclaimable because an
+  external outcome may already exist. Completion accepts only that execution
+  token and same-token retries read back as successful. The route effect has
+  typed readback for its operation, transition, target, and status.
 
 ## Producer behavior
 
@@ -96,6 +99,16 @@ settlement) or a row whose retry observes the committed target and cleans up
 idempotently. A legacy row without an expected step fails closed for exact
 cancellation or TTL.
 
+Route-effect recovery prioritizes duplicate prevention over automatic liveness.
+A worker may reclaim an expired `claimed` effect because no lifecycle side
+effect has started. The worker atomically changes it to `executing` before
+`on_exit` or `on_enter`. Later workers report that state for reconciliation and
+do not schedule automatic redelivery. The executing worker retries transient
+completion writes with its exact token without rerunning lifecycle actions. If
+the process dies after execution begins, the durable `executing` state remains
+for explicit reconciliation because the backend cannot safely infer whether an
+external action committed.
+
 Schema changes are additive and replay-safe on SQLite and PostgreSQL. Rollback
 keeps the added columns/tables; operators must settle new-format rows before an
 older backend resumes queue processing. No production row is backfilled from a
@@ -111,4 +124,7 @@ mutable current task step.
 | Different request after terminal commit | `already_satisfied`; no new transition/effect |
 | Newer pending row replaced/restored/transferred by stale snapshot | Generation conflict; newer row survives |
 | Crash after task commit before turn-end cleanup | Retry observes target and exact-cleans; no second transition |
+| Preparation worker dies with a `claimed` effect | Expired lease is reclaimable because no lifecycle side effect began |
+| Worker stalls or dies after effect becomes `executing` | Successors do not reclaim; effect remains attributable for explicit reconciliation |
+| Exact-token completion response is lost | Same-token retry reads the completed outcome as success without rerunning effects |
 | Legacy row lacks expected source | Preserved and never auto-applied |

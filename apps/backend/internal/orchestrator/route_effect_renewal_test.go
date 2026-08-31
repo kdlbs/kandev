@@ -42,12 +42,77 @@ func (*rejectingRouteEffectCompletionRepository) CompleteWorkflowRouteEffect(
 	return false, nil
 }
 
+type transientRouteEffectCompletionRepository struct {
+	*countingLifecycleRepository
+	mu       sync.Mutex
+	attempts int
+}
+
+func (r *transientRouteEffectCompletionRepository) CompleteWorkflowRouteEffect(
+	ctx context.Context, effectID, token string, now time.Time,
+) (bool, error) {
+	r.mu.Lock()
+	r.attempts++
+	attempt := r.attempts
+	r.mu.Unlock()
+	if attempt == 1 {
+		return false, errors.New("injected transient completion failure")
+	}
+	return r.Repository.CompleteWorkflowRouteEffect(ctx, effectID, token, now)
+}
+
+func (r *transientRouteEffectCompletionRepository) attemptCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.attempts
+}
+
 type blockedLostClaimLifecycleRepository struct {
 	*countingLifecycleRepository
 	entered       chan struct{}
 	release       chan struct{}
 	successorDone chan struct{}
 	blockOnce     sync.Once
+}
+
+type blockedAfterFenceLifecycleRepository struct {
+	*countingLifecycleRepository
+	entered       chan struct{}
+	release       chan struct{}
+	successorDone chan struct{}
+	blockOnce     sync.Once
+	mu            sync.Mutex
+	renewals      int
+}
+
+func (r *blockedAfterFenceLifecycleRepository) SetSessionMetadataKey(
+	ctx context.Context, sessionID, key string, value interface{},
+) error {
+	if enabled, ok := value.(bool); key == "plan_mode" && ok && !enabled {
+		r.blockOnce.Do(func() {
+			close(r.entered)
+			<-r.release
+		})
+	}
+	return r.countingLifecycleRepository.SetSessionMetadataKey(ctx, sessionID, key, value)
+}
+
+func (r *blockedAfterFenceLifecycleRepository) RenewWorkflowRouteEffect(
+	ctx context.Context, effectID, token string, now time.Time,
+) (bool, error) {
+	r.mu.Lock()
+	r.renewals++
+	renewal := r.renewals
+	r.mu.Unlock()
+	if renewal == 1 {
+		return r.Repository.RenewWorkflowRouteEffect(ctx, effectID, token, now)
+	}
+	select {
+	case <-r.successorDone:
+		return r.Repository.RenewWorkflowRouteEffect(ctx, effectID, token, now)
+	default:
+		return false, errors.New("injected renewal outage")
+	}
 }
 
 func (r *blockedLostClaimLifecycleRepository) GetTaskSession(
@@ -114,6 +179,10 @@ func (*renewingRouteEffectRepository) GetCurrentWorkflowRouteEffect(context.Cont
 }
 
 func (*renewingRouteEffectRepository) ClaimWorkflowRouteEffect(context.Context, string, string, time.Time, time.Duration) (bool, error) {
+	return false, nil
+}
+
+func (*renewingRouteEffectRepository) BeginWorkflowRouteEffect(context.Context, string, string, time.Time) (bool, error) {
 	return false, nil
 }
 
@@ -318,6 +387,103 @@ func TestManualMoveLifecycleLostClaimDoesNotRepeatExitOrEnter(t *testing.T) {
 	})
 }
 
+func TestManualMoveLifecycleExecutingClaimCannotBeReclaimed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := context.Background()
+		baseRepo := setupTestRepo(t)
+		seedSession(t, baseRepo, "executing-task", "executing-session", "source-step")
+		require.NoError(t, baseRepo.SetSessionMetadataKey(ctx, "executing-session", "plan_mode", true))
+		countingRepo := &countingLifecycleRepository{Repository: baseRepo}
+		blockedRepo := &blockedAfterFenceLifecycleRepository{
+			countingLifecycleRepository: countingRepo,
+			entered:                     make(chan struct{}),
+			release:                     make(chan struct{}),
+			successorDone:               make(chan struct{}),
+		}
+		task, err := baseRepo.GetTask(ctx, "executing-task")
+		require.NoError(t, err)
+		task.WorkflowStepID = "destination-step"
+		task.State = v1.TaskStateInProgress
+		task.Metadata = map[string]interface{}{
+			models.MetaKeyManualMoveLifecyclePending: map[string]interface{}{"from_step_id": "source-step"},
+		}
+		require.NoError(t, baseRepo.UpdateTask(ctx, task))
+		require.NoError(t, baseRepo.RecordWorkflowRouteOperation(ctx, routing.Operation{
+			ID: "executing-operation", TaskID: task.ID, Producer: routing.ProducerManualMove,
+			ExpectedStepID: "source-step", TargetStepID: "destination-step",
+			Outcome: routing.OutcomeCommitted, TransitionID: task.WorkflowStepTransitionID,
+			EffectID: "executing-effect",
+		}))
+
+		steps := newMockStepGetter()
+		steps.steps["source-step"] = &wfmodels.WorkflowStep{
+			ID: "source-step", WorkflowID: "wf1", Name: "Source",
+			Events: wfmodels.StepEvents{OnExit: []wfmodels.OnExitAction{{Type: wfmodels.OnExitDisablePlanMode}}},
+		}
+		steps.steps["destination-step"] = &wfmodels.WorkflowStep{
+			ID: "destination-step", WorkflowID: "wf1", Name: "Destination",
+			Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{
+				Type: wfmodels.OnEnterSetSessionMode, Config: map[string]interface{}{"mode": "destination"},
+			}}},
+		}
+		first := createTestService(baseRepo, steps, newMockTaskRepo())
+		first.repo = blockedRepo
+		first.startTaskLifecycleRetries()
+		t.Cleanup(first.stopTaskLifecycleRetries)
+		successor := createTestService(baseRepo, steps, newMockTaskRepo())
+		successor.repo = countingRepo
+		successor.startTaskLifecycleRetries()
+		t.Cleanup(successor.stopTaskLifecycleRetries)
+		session, err := baseRepo.GetTaskSession(ctx, "executing-session")
+		require.NoError(t, err)
+
+		firstDone := make(chan struct{})
+		go func() {
+			defer close(firstDone)
+			first.processManualMoveLifecycleWithFeederBarrier(
+				ctx, task.ID, session, steps.steps["source-step"], steps.steps["destination-step"],
+				"source-step", "destination-step", task.Description, 0,
+			)
+		}()
+		<-blockedRepo.entered
+		effect, found, err := baseRepo.GetWorkflowRouteEffect(ctx, "executing-effect")
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, routing.EffectExecuting, effect.Status)
+
+		time.Sleep(routeEffectLease + time.Second)
+		successor.processManualMoveLifecycleWithFeederBarrier(
+			ctx, task.ID, session, steps.steps["source-step"], steps.steps["destination-step"],
+			"source-step", "destination-step", task.Description, 0,
+		)
+		successor.taskLifecycleRetryMu.Lock()
+		_, retryScheduled := successor.taskLifecycleRetryTimers[task.ID]
+		successor.taskLifecycleRetryMu.Unlock()
+		if retryScheduled {
+			t.Error("an executing effect requires reconciliation instead of automatic redelivery")
+		}
+		if got := countingRepo.disableCount(); got != 0 {
+			t.Errorf("successor source on_exit executions while first worker is executing = %d, want 0", got)
+		}
+		if got := countingRepo.destinationEntryCount(); got != 0 {
+			t.Errorf("successor destination on_enter executions while first worker is executing = %d, want 0", got)
+		}
+		close(blockedRepo.successorDone)
+		time.Sleep(routeEffectLease / 3)
+		close(blockedRepo.release)
+		<-firstDone
+
+		require.Equal(t, 1, countingRepo.disableCount(),
+			"an executing owner must remain the only source on_exit worker")
+		require.Equal(t, 1, countingRepo.destinationEntryCount(),
+			"an executing owner must remain the only destination on_enter worker")
+		stored, err := baseRepo.GetTask(ctx, task.ID)
+		require.NoError(t, err)
+		require.NotContains(t, stored.Metadata, models.MetaKeyManualMoveLifecyclePending)
+		require.Contains(t, stored.Metadata, models.MetaKeyManualMoveLifecycleCompleted)
+	})
+}
+
 func TestManualMoveLifecycleDoesNotExitOrCompleteWhenStepEnterPreparationFails(t *testing.T) {
 	ctx := context.Background()
 	baseRepo := setupTestRepo(t)
@@ -426,6 +592,105 @@ func TestManualMoveLifecycleRetainsPendingWhenEffectCompletionLosesClaim(t *test
 	require.NotContains(t, stored.Metadata, models.MetaKeyManualMoveLifecycleCompleted)
 	require.Equal(t, 1, countingRepo.disableCount())
 	require.Equal(t, 1, countingRepo.destinationEntryCount())
+}
+
+func TestManualMoveLifecycleRetriesTransientEffectCompletion(t *testing.T) {
+	ctx := context.Background()
+	baseRepo := setupTestRepo(t)
+	seedSession(t, baseRepo, "completion-retry-task", "completion-retry-session", "source-step")
+	countingRepo := &countingLifecycleRepository{Repository: baseRepo}
+	repo := &transientRouteEffectCompletionRepository{countingLifecycleRepository: countingRepo}
+	task, err := baseRepo.GetTask(ctx, "completion-retry-task")
+	require.NoError(t, err)
+	task.WorkflowStepID = "destination-step"
+	task.State = v1.TaskStateInProgress
+	task.Metadata = map[string]interface{}{
+		models.MetaKeyManualMoveLifecyclePending: map[string]interface{}{"from_step_id": "source-step"},
+	}
+	require.NoError(t, baseRepo.UpdateTask(ctx, task))
+	require.NoError(t, baseRepo.RecordWorkflowRouteOperation(ctx, routing.Operation{
+		ID: "completion-retry-operation", TaskID: task.ID, Producer: routing.ProducerManualMove,
+		ExpectedStepID: "source-step", TargetStepID: "destination-step",
+		Outcome: routing.OutcomeCommitted, TransitionID: task.WorkflowStepTransitionID,
+		EffectID: "completion-retry-effect",
+	}))
+
+	steps := newMockStepGetter()
+	steps.steps["source-step"] = &wfmodels.WorkflowStep{
+		ID: "source-step", WorkflowID: "wf1", Name: "Source",
+		Events: wfmodels.StepEvents{OnExit: []wfmodels.OnExitAction{{Type: wfmodels.OnExitDisablePlanMode}}},
+	}
+	steps.steps["destination-step"] = &wfmodels.WorkflowStep{
+		ID: "destination-step", WorkflowID: "wf1", Name: "Destination",
+		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{
+			Type: wfmodels.OnEnterSetSessionMode, Config: map[string]interface{}{"mode": "destination"},
+		}}},
+	}
+	svc := createTestService(baseRepo, steps, newMockTaskRepo())
+	svc.repo = repo
+	svc.startTaskLifecycleRetries()
+	t.Cleanup(svc.stopTaskLifecycleRetries)
+	session, err := baseRepo.GetTaskSession(ctx, "completion-retry-session")
+	require.NoError(t, err)
+
+	svc.processManualMoveLifecycleWithFeederBarrier(
+		ctx, task.ID, session, steps.steps["source-step"], steps.steps["destination-step"],
+		"source-step", "destination-step", task.Description, 0,
+	)
+
+	stored, err := baseRepo.GetTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotContains(t, stored.Metadata, models.MetaKeyManualMoveLifecyclePending)
+	require.Contains(t, stored.Metadata, models.MetaKeyManualMoveLifecycleCompleted)
+	require.Equal(t, 1, countingRepo.disableCount())
+	require.Equal(t, 1, countingRepo.destinationEntryCount())
+	effect, found, err := baseRepo.GetWorkflowRouteEffect(ctx, "completion-retry-effect")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, routing.EffectCompleted, effect.Status)
+}
+
+func TestLaunchProcessOnEnterRetriesTransientEffectCompletion(t *testing.T) {
+	ctx := context.Background()
+	baseRepo := setupTestRepo(t)
+	seedSession(t, baseRepo, "async-completion-task", "async-completion-session", "source-step")
+	countingRepo := &countingLifecycleRepository{Repository: baseRepo}
+	repo := &transientRouteEffectCompletionRepository{countingLifecycleRepository: countingRepo}
+	task, err := baseRepo.GetTask(ctx, "async-completion-task")
+	require.NoError(t, err)
+	task.WorkflowStepID = "destination-step"
+	task.State = v1.TaskStateInProgress
+	require.NoError(t, baseRepo.UpdateTask(ctx, task))
+	require.NoError(t, baseRepo.RecordWorkflowRouteOperation(ctx, routing.Operation{
+		ID: "async-completion-operation", TaskID: task.ID, Producer: routing.ProducerWorkflow,
+		ExpectedStepID: "source-step", TargetStepID: "destination-step",
+		Outcome: routing.OutcomeCommitted, TransitionID: task.WorkflowStepTransitionID,
+		EffectID: "async-completion-effect",
+	}))
+	step := &wfmodels.WorkflowStep{
+		ID: "destination-step", WorkflowID: "wf1", Name: "Destination",
+		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{
+			Type: wfmodels.OnEnterSetSessionMode, Config: map[string]interface{}{"mode": "destination"},
+		}}},
+	}
+	steps := newMockStepGetter()
+	steps.steps[step.ID] = step
+	svc := createTestService(baseRepo, steps, newMockTaskRepo())
+	svc.repo = repo
+	done := make(chan struct{})
+	svc.onProcessOnEnterComplete = func() { close(done) }
+	session, err := baseRepo.GetTaskSession(ctx, "async-completion-session")
+	require.NoError(t, err)
+
+	svc.launchProcessOnEnter(ctx, task.ID, session, step, task.Description, 0, 0)
+	<-done
+
+	require.Equal(t, 1, countingRepo.destinationEntryCount())
+	require.Equal(t, 2, repo.attemptCount())
+	effect, found, err := baseRepo.GetWorkflowRouteEffect(ctx, "async-completion-effect")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, routing.EffectCompleted, effect.Status)
 }
 
 func TestTaskLifecycleRetryCannotRestartAfterStop(t *testing.T) {
@@ -541,6 +806,12 @@ func (r *completedDuringRouteEffectClaimRepository) GetCurrentWorkflowRouteEffec
 
 func (*completedDuringRouteEffectClaimRepository) ClaimWorkflowRouteEffect(
 	context.Context, string, string, time.Time, time.Duration,
+) (bool, error) {
+	return false, nil
+}
+
+func (*completedDuringRouteEffectClaimRepository) BeginWorkflowRouteEffect(
+	context.Context, string, string, time.Time,
 ) (bool, error) {
 	return false, nil
 }

@@ -136,4 +136,13 @@ func TestPostgresWorkflowRouteEffectLeaseCanBeRenewed(t *testing.T) {
 	claimed, err = repo.ClaimWorkflowRouteEffect(ctx, "pg-effect", "worker-b", now.Add(90*time.Second), time.Minute)
 	require.NoError(t, err)
 	require.False(t, claimed)
+	begun, err := repo.BeginWorkflowRouteEffect(ctx, "pg-effect", "worker-a", now.Add(90*time.Second))
+	require.NoError(t, err)
+	require.True(t, begun)
+	claimed, err = repo.ClaimWorkflowRouteEffect(ctx, "pg-effect", "worker-b", now.Add(10*time.Minute), time.Minute)
+	require.NoError(t, err)
+	require.False(t, claimed, "executing effects are non-reclaimable on PostgreSQL")
+	completed, err := repo.CompleteWorkflowRouteEffect(ctx, "pg-effect", "worker-a", now.Add(10*time.Minute))
+	require.NoError(t, err)
+	require.True(t, completed)
 }

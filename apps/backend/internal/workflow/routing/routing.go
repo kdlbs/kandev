@@ -76,6 +76,7 @@ type Result struct {
 const (
 	EffectPending   = "pending"
 	EffectClaimed   = "claimed"
+	EffectExecuting = "executing"
 	EffectCompleted = "completed"
 )
 

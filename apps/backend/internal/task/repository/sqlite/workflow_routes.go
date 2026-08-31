@@ -176,10 +176,10 @@ func (r *Repository) initWorkflowRoutingSchema() error {
 	return nil
 }
 
-// ClaimWorkflowRouteEffect atomically acquires an effect for delivery. A
-// caller may reclaim a lease after its owner died before completion; completed
-// effects are absorbing. The token must be supplied to Complete so a late
-// worker cannot complete a lease reclaimed by crash recovery.
+// ClaimWorkflowRouteEffect atomically acquires an effect for preparation. A
+// caller may reclaim an expired claimed lease only before execution begins;
+// executing and completed effects are absorbing. The token must cross the
+// durable execution boundary before any lifecycle side effect runs.
 func (r *Repository) ClaimWorkflowRouteEffect(ctx context.Context, effectID, token string, now time.Time, lease time.Duration) (bool, error) {
 	if effectID == "" || token == "" {
 		return false, nil
@@ -202,16 +202,38 @@ func (r *Repository) ClaimWorkflowRouteEffect(ctx context.Context, effectID, tok
 	return claimed == 1, nil
 }
 
-// RenewWorkflowRouteEffect extends the lease only for its current claim
-// token. A stale worker can neither keep nor complete a claim recovered by a
-// successor.
+// BeginWorkflowRouteEffect durably crosses the point after which lifecycle
+// side effects may run. Executing effects are deliberately non-reclaimable:
+// after this CAS a successor must not repeat work whose external outcome may
+// be unknowable after a crash.
+func (r *Repository) BeginWorkflowRouteEffect(
+	ctx context.Context, effectID, token string, now time.Time,
+) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE workflow_route_effects
+		SET status = 'executing', claimed_at = ?, updated_at = ?
+		WHERE id = ? AND status = 'claimed' AND claim_token = ?
+	`), now, now, effectID, token)
+	if err != nil {
+		return false, fmt.Errorf("begin workflow route effect: %w", err)
+	}
+	begun, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read workflow route effect begin: %w", err)
+	}
+	return begun == 1, nil
+}
+
+// RenewWorkflowRouteEffect refreshes the current token while preparation or
+// execution is still live. Only claimed effects are lease-reclaimable;
+// executing effects retain their token solely for completion and readback.
 func (r *Repository) RenewWorkflowRouteEffect(
 	ctx context.Context, effectID, token string, now time.Time,
 ) (bool, error) {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE workflow_route_effects
 		SET claimed_at = ?, updated_at = ?
-		WHERE id = ? AND status = 'claimed' AND claim_token = ?
+		WHERE id = ? AND status IN ('claimed', 'executing') AND claim_token = ?
 	`), now, now, effectID, token)
 	if err != nil {
 		return false, fmt.Errorf("renew workflow route effect: %w", err)
@@ -223,14 +245,14 @@ func (r *Repository) RenewWorkflowRouteEffect(
 	return renewed == 1, nil
 }
 
-// CompleteWorkflowRouteEffect records successful delivery for the exact claim
-// token. It is idempotent for a retried successful completion and rejects a
-// stale claimant after recovery has reclaimed the effect.
+// CompleteWorkflowRouteEffect records successful delivery for the exact token
+// that durably began execution. A preparation-only claimant cannot mark work
+// complete, and an executing effect cannot be reclaimed by another worker.
 func (r *Repository) CompleteWorkflowRouteEffect(ctx context.Context, effectID, token string, now time.Time) (bool, error) {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE workflow_route_effects
 		SET status = 'completed', completed_at = ?, updated_at = ?
-		WHERE id = ? AND status = 'claimed' AND claim_token = ?
+		WHERE id = ? AND status = 'executing' AND claim_token = ?
 	`), now, now, effectID, token)
 	if err != nil {
 		return false, fmt.Errorf("complete workflow route effect: %w", err)
@@ -239,7 +261,20 @@ func (r *Repository) CompleteWorkflowRouteEffect(ctx context.Context, effectID, 
 	if err != nil {
 		return false, fmt.Errorf("read workflow route effect completion: %w", err)
 	}
-	return completed == 1, nil
+	if completed == 1 {
+		return true, nil
+	}
+	var status, storedToken string
+	err = r.db.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT status, claim_token FROM workflow_route_effects WHERE id = ?
+	`), effectID).Scan(&status, &storedToken)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read workflow route effect completion outcome: %w", err)
+	}
+	return status == routing.EffectCompleted && storedToken == token, nil
 }
 
 // RecordWorkflowRouteOperation records a non-transitioning outcome (queued,

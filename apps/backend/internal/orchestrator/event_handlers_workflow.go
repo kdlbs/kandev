@@ -1892,6 +1892,11 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 		ctx, taskID, session, fromStep, targetStep,
 		fromStepID, toStepID, taskDescription, false, transitionID,
 	); err != nil {
+		if errors.Is(err, errRouteEffectExecutionStarted) {
+			s.logger.Warn("manual move lifecycle execution requires reconciliation",
+				zap.String("task_id", taskID), zap.Error(err))
+			return
+		}
 		if !errors.Is(err, errRouteEffectLeaseHeld) {
 			s.logger.Warn("manual move lifecycle processing failed; scheduling retry",
 				zap.String("task_id", taskID), zap.Error(err))
@@ -1967,7 +1972,7 @@ func (s *Service) processStepExitAndEnterWithSteps(
 		}
 		return err
 	}
-	if err := effectClaim.fence(); err != nil {
+	if err := effectClaim.beginExecution(); err != nil {
 		return err
 	}
 
@@ -2011,7 +2016,7 @@ func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID strin
 			_ = effectClaim.finish(false)
 		}
 	}()
-	if err := effectClaim.fence(); err != nil {
+	if err := effectClaim.beginExecution(); err != nil {
 		return err
 	}
 
@@ -2055,14 +2060,18 @@ type routeEffectRepository interface {
 	GetWorkflowRouteEffectByTransition(context.Context, string, int64) (routing.Effect, bool, error)
 	GetCurrentWorkflowRouteEffect(context.Context, string, string) (routing.Effect, bool, error)
 	ClaimWorkflowRouteEffect(context.Context, string, string, time.Time, time.Duration) (bool, error)
+	BeginWorkflowRouteEffect(context.Context, string, string, time.Time) (bool, error)
 	RenewWorkflowRouteEffect(context.Context, string, string, time.Time) (bool, error)
 	CompleteWorkflowRouteEffect(context.Context, string, string, time.Time) (bool, error)
 }
 
 const routeEffectLease = time.Minute
+const routeEffectCompletionRetryDelay = 25 * time.Millisecond
+const routeEffectCompletionAttempts = 3
 
 var errRouteEffectLeaseHeld = errors.New("workflow route effect lease is still held")
 var errRouteEffectClaimLost = errors.New("workflow route effect claim was lost")
+var errRouteEffectExecutionStarted = errors.New("workflow route effect execution already started")
 
 type routeEffectClaim struct {
 	effects        routeEffectRepository
@@ -2074,17 +2083,17 @@ type routeEffectClaim struct {
 	renewalResult  chan error
 }
 
-func (c *routeEffectClaim) fence() error {
+func (c *routeEffectClaim) beginExecution() error {
 	if c.effects == nil {
 		return nil
 	}
-	renewed, err := c.effects.RenewWorkflowRouteEffect(
+	begun, err := c.effects.BeginWorkflowRouteEffect(
 		c.ctx, c.effectID, c.token, time.Now().UTC(),
 	)
 	if err != nil {
-		return fmt.Errorf("fence workflow route effect claim: %w", err)
+		return fmt.Errorf("begin workflow route effect execution: %w", err)
 	}
-	if !renewed {
+	if !begun {
 		return errRouteEffectClaimLost
 	}
 	return nil
@@ -2102,20 +2111,65 @@ func (c *routeEffectClaim) finish(complete bool) error {
 	if !complete {
 		return nil
 	}
-	completed, err := c.effects.CompleteWorkflowRouteEffect(
-		c.ctx, c.effectID, c.token, time.Now().UTC(),
-	)
-	if err != nil {
-		return fmt.Errorf("complete workflow route effect: %w", err)
+	var lastErr error
+	for attempt := 0; attempt < routeEffectCompletionAttempts; attempt++ {
+		completed, err := c.effects.CompleteWorkflowRouteEffect(
+			c.ctx, c.effectID, c.token, time.Now().UTC(),
+		)
+		if err == nil {
+			if !completed {
+				return errRouteEffectClaimLost
+			}
+			return nil
+		}
+		lastErr = err
+		if attempt+1 < routeEffectCompletionAttempts {
+			time.Sleep(routeEffectCompletionRetryDelay)
+		}
 	}
-	if !completed {
-		return errRouteEffectClaimLost
-	}
-	return nil
+	return fmt.Errorf("complete workflow route effect after retries: %w", lastErr)
 }
 
 func noOpRouteEffectClaim() *routeEffectClaim {
 	return &routeEffectClaim{}
+}
+
+func readRouteEffectForStepEnter(
+	ctx context.Context,
+	effects routeEffectRepository,
+	taskID, targetStepID string,
+	transitionID int64,
+) (routing.Effect, bool, error) {
+	if transitionID != 0 {
+		return effects.GetWorkflowRouteEffectByTransition(ctx, taskID, transitionID)
+	}
+	return effects.GetCurrentWorkflowRouteEffect(ctx, taskID, targetStepID)
+}
+
+func failedRouteEffectClaim(
+	ctx context.Context,
+	effects routeEffectRepository,
+	effect routing.Effect,
+	taskID, targetStepID string,
+	transitionID int64,
+) (*routeEffectClaim, bool, error) {
+	latest, found, err := readRouteEffectForStepEnter(
+		ctx, effects, taskID, targetStepID, transitionID,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("re-read route effect after failed claim: %w", err)
+	}
+	if !found || latest.ID != effect.ID {
+		return nil, false, errRouteEffectLeaseHeld
+	}
+	switch latest.Status {
+	case routing.EffectCompleted:
+		return noOpRouteEffectClaim(), false, nil
+	case routing.EffectExecuting:
+		return nil, false, errRouteEffectExecutionStarted
+	default:
+		return nil, false, errRouteEffectLeaseHeld
+	}
 }
 
 func (s *Service) claimRouteEffectForStepEnter(
@@ -2125,14 +2179,9 @@ func (s *Service) claimRouteEffectForStepEnter(
 	if !ok {
 		return noOpRouteEffectClaim(), true, nil
 	}
-	var effect routing.Effect
-	var found bool
-	var err error
-	if transitionID != 0 {
-		effect, found, err = effects.GetWorkflowRouteEffectByTransition(ctx, taskID, transitionID)
-	} else {
-		effect, found, err = effects.GetCurrentWorkflowRouteEffect(ctx, taskID, targetStepID)
-	}
+	effect, found, err := readRouteEffectForStepEnter(
+		ctx, effects, taskID, targetStepID, transitionID,
+	)
 	if err != nil {
 		return nil, false, fmt.Errorf("read route effect for step entry: %w", err)
 	}
@@ -2145,19 +2194,9 @@ func (s *Service) claimRouteEffectForStepEnter(
 		return nil, false, fmt.Errorf("claim route effect for step entry: %w", err)
 	}
 	if !claimed {
-		latest := effect
-		if transitionID != 0 {
-			latest, found, err = effects.GetWorkflowRouteEffectByTransition(ctx, taskID, transitionID)
-		} else {
-			latest, found, err = effects.GetCurrentWorkflowRouteEffect(ctx, taskID, targetStepID)
-		}
-		if err != nil {
-			return nil, false, fmt.Errorf("re-read route effect after failed claim: %w", err)
-		}
-		if found && latest.ID == effect.ID && latest.Status == routing.EffectCompleted {
-			return noOpRouteEffectClaim(), false, nil
-		}
-		return nil, false, errRouteEffectLeaseHeld
+		return failedRouteEffectClaim(
+			ctx, effects, effect, taskID, targetStepID, transitionID,
+		)
 	}
 	renewCtx := context.WithoutCancel(ctx)
 	stopRenewal := make(chan struct{})
@@ -5413,7 +5452,7 @@ func (s *Service) launchProcessOnEnter(
 				_ = effectClaim.finish(false)
 			}
 		}()
-		if err := effectClaim.fence(); err != nil {
+		if err := effectClaim.beginExecution(); err != nil {
 			s.logger.Warn("lost workflow route effect before on_enter",
 				zap.String("task_id", taskID), zap.Error(err))
 			return

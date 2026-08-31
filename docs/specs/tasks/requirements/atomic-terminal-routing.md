@@ -39,6 +39,12 @@ backward or leave a contradictory live intent.
 - **AC-TASKS-ATOMIC-TERMINAL-ROUTING-001.5:** Merged-PR lifecycle prompts keep their current prompt-driven behavior. A move
   issued from the bound lifecycle turn carries the exact task/repository/PR
   cause and converges with a concurrent manual terminal route.
+- **AC-TASKS-ATOMIC-TERMINAL-ROUTING-001.6:** A destination effect remains lease-reclaimable only before lifecycle side
+  effects begin. Once execution starts, a successor cannot reclaim or repeat
+  the effect. Transient completion writes retry with the same token; a process
+  crash during execution leaves an attributable reconciliation-required state
+  rather than automatically replaying an external effect with an unknown
+  outcome.
 
 ### REQ-TASKS-ATOMIC-TERMINAL-ROUTING-002: Exact deferred generations
 
