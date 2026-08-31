@@ -294,10 +294,14 @@ func (s *Service) ensurePRWatch(
 // --- Task-PR association ---
 
 // AssociatePRWithTask creates a task-PR association scoped to a specific
-// repository. `repositoryID` is the per-task repository_id (from
-// task_repositories); empty preserves legacy single-repo behavior. Multi-repo
-// callers MUST pass it — empty causes ReplaceTaskPR to wipe the entire task's
-// PR rows (legacy "delete all" branch), which is what older code relied on.
+// repository. `repositoryID` is repositories.ID — the repository_id COLUMN
+// value stored on the task's task_repositories row, NOT that row's own id.
+// Passing the row id instead lets two writers disagree on repository_id for
+// the same task+PR, so both pass the UNIQUE(task_id, repository_id,
+// pr_number) constraint and the PR is associated twice. Empty preserves
+// legacy single-repo behavior. Multi-repo callers MUST pass it — empty
+// causes ReplaceTaskPR to wipe the entire task's PR rows (legacy "delete
+// all" branch), which is what older code relied on.
 func (s *Service) AssociatePRWithTask(ctx context.Context, taskID, repositoryID string, pr *PR) (*TaskPR, error) {
 	// pr here comes from branch-search discovery (poller.detectPRForWatch) or
 	// a batched status result of unknown populated-ness — never assert
@@ -305,6 +309,8 @@ func (s *Service) AssociatePRWithTask(ctx context.Context, taskID, repositoryID 
 	return s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, false, false)
 }
 
+// AssociatePRWithTaskForWorkspace is the workspace-scoped variant of
+// AssociatePRWithTask; `repositoryID` is repositories.ID, same as there.
 func (s *Service) AssociatePRWithTaskForWorkspace(
 	ctx context.Context, workspaceID, taskID, repositoryID string, pr *PR,
 ) (*TaskPR, error) {
@@ -323,6 +329,9 @@ func (s *Service) AssociatePRWithTaskForWorkspace(
 func (s *Service) associatePRWithTask(
 	ctx context.Context, workspaceID, taskID, repositoryID string, pr *PR, restoreDetached, outcomeFieldsPopulated bool,
 ) (*TaskPR, error) {
+	if err := s.validateTaskRepositoryID(ctx, taskID, repositoryID); err != nil {
+		return nil, err
+	}
 	// Multi-branch: scope the "already-current" short-circuit by exact
 	// pr_number too. A task can hold multiple PR rows per (task, repo) on
 	// different branches; the legacy by-repo lookup returns whichever row
@@ -421,7 +430,8 @@ func (s *Service) associatePRWithTask(
 //
 // Returns the persisted TaskPR row so callers can confirm the association
 // and react to errors synchronously, in contrast to AssociatePRByURL's
-// fire-and-forget logging.
+// fire-and-forget logging. `repositoryID` is repositories.ID, same id space
+// as AssociatePRWithTask.
 func (s *Service) AssociateExistingPRByURL(ctx context.Context, taskID, repositoryID, prURL string) (*TaskPR, error) {
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
@@ -429,6 +439,9 @@ func (s *Service) AssociateExistingPRByURL(ctx context.Context, taskID, reposito
 	owner, repo, prNumber, err := parsePRURL(prURL)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidPRURL, err)
+	}
+	if err := s.validateTaskRepositoryID(ctx, taskID, repositoryID); err != nil {
+		return nil, err
 	}
 	pr, err := s.client.GetPR(ctx, owner, repo, prNumber)
 	if err != nil {
@@ -441,12 +454,17 @@ func (s *Service) AssociateExistingPRByURL(ctx context.Context, taskID, reposito
 	return tp, nil
 }
 
+// AssociateExistingPRByURLForWorkspace is the workspace-scoped variant of
+// AssociateExistingPRByURL; `repositoryID` is repositories.ID, same as there.
 func (s *Service) AssociateExistingPRByURLForWorkspace(
 	ctx context.Context, workspaceID, userID, taskID, repositoryID, prURL string,
 ) (*TaskPR, error) {
 	owner, repo, prNumber, err := parsePRURL(prURL)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidPRURL, err)
+	}
+	if err := s.validateTaskRepositoryID(ctx, taskID, repositoryID); err != nil {
+		return nil, err
 	}
 	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
 		return nil, err
@@ -481,6 +499,11 @@ func (s *Service) AssociatePRByURL(ctx context.Context, sessionID, taskID, repos
 		s.logger.Error("failed to parse PR URL", zap.String("url", prURL), zap.Error(err))
 		return
 	}
+	if err := s.validateTaskRepositoryID(ctx, taskID, repositoryID); err != nil {
+		s.logger.Error("invalid task repository for PR association",
+			zap.String("task_id", taskID), zap.String("repository_id", repositoryID), zap.Error(err))
+		return
+	}
 
 	pr, err := s.client.GetPR(ctx, owner, repo, prNumber)
 	if err != nil {
@@ -511,6 +534,9 @@ func (s *Service) AssociatePRByURLForWorkspace(
 	owner, repo, prNumber, err := parsePRURL(prURL)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidPRURL, err)
+	}
+	if err := s.validateTaskRepositoryID(ctx, taskID, repositoryID); err != nil {
+		return err
 	}
 	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
 		return err

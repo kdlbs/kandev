@@ -18,6 +18,11 @@ var ErrInvalidIssueReference = errors.New("invalid GitHub issue reference")
 // that is not attached to the target task.
 var ErrIssueRepositoryMismatch = errors.New("GitHub issue repository is not attached to task")
 
+// ErrTaskPRRepositoryMismatch signals that a PR association used a
+// task_repositories row ID instead of the canonical repositories.ID attached
+// to the task.
+var ErrTaskPRRepositoryMismatch = errors.New("GitHub PR repository is not attached to task")
+
 // ErrTaskNotFound is the sentinel that cleanup paths check to distinguish
 // "the task is already gone — fine, mop up the dedup row" from a real
 // upstream failure. Adapter implementations of TaskDeleter wrap this when

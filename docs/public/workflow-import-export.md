@@ -159,6 +159,7 @@ An event contains an ordered list of actions. Each action has a `type` and an op
 | `on_turn_start` | A user sends a message. | `move_to_next`, `move_to_previous`, `move_to_step` |
 | `on_turn_complete` | An agent turn completes. | `move_to_next`, `move_to_previous`, `move_to_step`, `disable_plan_mode` |
 | `on_exit` | A task leaves the step. | `disable_plan_mode` |
+| `on_comment`, `on_blocker_resolved`, `on_children_completed`, `on_approval_resolved`, `on_heartbeat`, `on_budget_alert`, `on_agent_error` | Office/Phase-2 lifecycle events: a comment is added, a blocker is resolved, all child tasks complete, an approval is decided, a periodic heartbeat ticks, a budget threshold is crossed, or the agent errors. | `move_to_next`, `move_to_previous`, `move_to_step`, `auto_start_agent`, `queue_run`, `clear_decisions`, `queue_run_for_each_participant` |
 
 `set_session_mode` requires `config.mode` to be a non-empty string. `move_to_step` requires `config.step_position` pointing to a position in the same workflow:
 
@@ -174,11 +175,11 @@ Internally, transitions use database `step_id` values. Export converts `step_id`
 
 Portable validation is deliberately narrow. Beyond `set_session_mode` and position references, it does not currently reject every unknown action string or malformed action config. An accepted file can therefore contain an inert action. Use the action names and shapes documented here and exercise the workflow after import.
 
-### Office triggers do not round-trip
+### Office / Phase-2 triggers
 
-The runtime model also has `on_comment`, `on_blocker_resolved`, `on_children_completed`, `on_approval_resolved`, `on_heartbeat`, `on_budget_alert`, and `on_agent_error`. The current portable conversion copies only the four triggers in the table above. Hand-authored Office triggers in a portable file are discarded during import conversion, and Office fields are omitted on export.
+The seven Office/Phase-2 triggers listed in the table above round-trip through export and import: their actions, including `move_to_step`, are carried the same way as the four Kanban-era triggers. A Phase-2 `move_to_step` uses `config.step_position` and is validated against the workflow's step positions identically to `on_turn_start`/`on_turn_complete`.
 
-The Workflows settings UI filters Office-style workflows from its list and Export All selection for this reason. Manage Office workflow behavior through its product surface; do not use portable Kanban import/export as an Office backup.
+What still doesn't round-trip is Office step *metadata* that has no portable representation: `stage_type`, step participants (reviewers/approvers), recorded decisions, task data, and step history (see [Step fields](#step-fields)). The Workflows settings UI filters Office-style workflows from its list and Export All selection because of that metadata gap, not because their trigger events are dropped. Manage participant and decision state through the Office product surface; portable Kanban import/export only carries step behavior, not Office workflow state.
 
 </details>
 
@@ -285,7 +286,7 @@ After import, assign a workflow-level or Work-step agent profile if the destinat
 - **Pull reference error:** ensure the target position exists, is not the same step, and does not participate in a cycle.
 - **Workflow skipped:** rename either the destination workflow or the imported workflow; import is create-or-skip, not update.
 - **Profile missing after import:** match display name, model, and mode exactly, or select a profile in settings afterward.
-- **Event vanished:** only the four portable triggers round-trip; Office triggers and metadata do not.
+- **Event vanished:** all eleven triggers round-trip; only Office step metadata (`stage_type`, participants, decisions, task data, step history) does not.
 - **Large import reports strange YAML:** keep the request below 1 MiB; the route truncates at that boundary.
 - **Import failed after creating something:** creation is not an all-or-nothing transaction; remove partial results and retry a corrected file.
 
