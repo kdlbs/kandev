@@ -160,6 +160,14 @@ export function getBuiltInLayoutOverrideSourceId(
   );
 }
 
+/** Resolve the identity represented by a saved layout profile ID. */
+export function getLayoutProfileIdentity(profile: Pick<SavedLayout, "id">): LayoutProfileIdentity {
+  const builtInSource = getBuiltInLayoutOverrideSourceId(profile);
+  return builtInSource
+    ? { kind: "built-in", id: builtInSource }
+    : { kind: "custom", id: profile.id };
+}
+
 export function isBuiltInLayoutOverride(profile: Pick<SavedLayout, "id">): boolean {
   return getBuiltInLayoutOverrideSourceId(profile) !== null;
 }

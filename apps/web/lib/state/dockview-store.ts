@@ -13,10 +13,7 @@ import {
   setGlobalSidebarWidth,
   getManualRightWidth,
 } from "@/lib/local-storage";
-import {
-  getBuiltInLayoutOverrideSourceId,
-  type LayoutProfileIdentity,
-} from "@/lib/layout/layout-profiles";
+import { getLayoutProfileIdentity, type LayoutProfileIdentity } from "@/lib/layout/layout-profiles";
 import { setPinnedTarget, clearPinnedTarget } from "./layout-manager";
 import { applyLayoutFixups, focusOrAddPanel } from "./dockview-layout-builders";
 import {
@@ -76,10 +73,7 @@ const RIGHT_PANEL_IDS = new Set(["changes", "files", TERMINAL_DEFAULT_ID]);
 const DEFAULT_LAYOUT_PROFILE: LayoutProfileIdentity = { kind: "built-in", id: "default" };
 
 function profileForCustomLayout(layout: Pick<SavedLayoutConfig, "id">): LayoutProfileIdentity {
-  const builtInSource = getBuiltInLayoutOverrideSourceId(layout);
-  return builtInSource
-    ? { kind: "built-in", id: builtInSource }
-    : { kind: "custom", id: layout.id };
+  return getLayoutProfileIdentity(layout);
 }
 
 function inferLayoutProfileFromApi(api: DockviewApi): LayoutProfileIdentity {
@@ -119,10 +113,11 @@ function resolveEnvSwitchProfile(args: {
 function resolveDefaultLayoutProfile(
   basePreset: BuiltInPreset | undefined,
   userDefaultLayout: LayoutState | null,
+  userDefaultLayoutProfile: LayoutProfileIdentity,
   defaultPreset: BuiltInPreset,
 ): LayoutProfileIdentity {
   if (basePreset) return { kind: "built-in", id: basePreset };
-  if (userDefaultLayout) return { kind: "custom", id: "user-default" };
+  if (userDefaultLayout) return userDefaultLayoutProfile;
   return { kind: "built-in", id: defaultPreset };
 }
 
@@ -310,7 +305,8 @@ type DockviewStore = {
   pinnedWidths: Map<string, number>;
   setPinnedWidth: (columnId: string, width: number) => void;
   userDefaultLayout: LayoutState | null;
-  setUserDefaultLayout: (layout: LayoutState | null) => void;
+  userDefaultLayoutProfile: LayoutProfileIdentity;
+  setUserDefaultLayout: (layout: LayoutState | null, profile: LayoutProfileIdentity) => void;
   activeFilePath: string | null;
   activeFileRepo: string | null;
   activePanelComponent: string | null;
@@ -1228,7 +1224,7 @@ function performBuildDefault(
   get: StoreGet,
   intentName?: string,
 ): void {
-  const { userDefaultLayout } = get();
+  const { userDefaultLayout, userDefaultLayoutProfile } = get();
   const intent = intentName ? resolveNamedIntent(intentName) : null;
   // Capture dimensions before layout change — api.width can become stale
   // after fromJSON inside applyLayout
@@ -1244,6 +1240,7 @@ function performBuildDefault(
   const activeLayoutProfile = resolveDefaultLayoutProfile(
     basePreset,
     userDefaultLayout,
+    userDefaultLayoutProfile,
     get().defaultPreset,
   );
 
@@ -1444,7 +1441,9 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
     });
   },
   userDefaultLayout: null,
-  setUserDefaultLayout: (layout) => set({ userDefaultLayout: layout }),
+  userDefaultLayoutProfile: DEFAULT_LAYOUT_PROFILE,
+  setUserDefaultLayout: (layout, profile) =>
+    set({ userDefaultLayout: layout, userDefaultLayoutProfile: profile }),
   ...buildVisibilityActions(set, get),
   ...buildPresetActions(set, get),
   defaultPreset: "default",

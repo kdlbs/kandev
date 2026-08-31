@@ -34,7 +34,7 @@ Restrict automatic Changes activation to the Default layout's Files and Changes 
 
 ### Changes activation guard
 
-Update `activateChangesPanel` in `apps/web/components/task/changes-panel-focus.ts`. Require the active profile to be the built-in Default, use `RIGHT_TOP_GROUP` as the layout identity, and permit activation only when the live group contains exactly `files` and `changes`. Persist the active profile identity with each environment-scoped Dockview layout so copied custom profiles remain ineligible after restores and task switches.
+Update `activateChangesPanel` in `apps/web/components/task/changes-panel-focus.ts`. Require the active profile to be the built-in Default, use `RIGHT_TOP_GROUP` as the layout identity, and permit activation only when the live group contains exactly `files` and `changes`. Persist the active profile identity with each environment-scoped Dockview layout so copied custom profiles remain ineligible after restores and task switches. Carry the effective default's identity alongside its layout when seeding the store, so a reserved customized Default remains built-in Default during fresh builds and Reset Layout while arbitrary custom defaults remain custom.
 
 Keep both activation callers on this shared helper. `ChangesTab` uses it for active-task count increases. `useChangesPanelAutoFocus` uses it after inactive-task updates.
 
@@ -46,11 +46,14 @@ Add direct unit coverage for the activation guard in `apps/web/components/task/c
 
 Replace the E2E expectation that activates Changes in any non-Agent group. The new scenario selects the VS Code preset, leaves VS Code active, and creates another Git update. The test proves that the `vscode | files | changes` group does not lose focus.
 
+Add store and profile-identity coverage for a reserved customized Default used as the effective default during fresh build and Reset Layout, plus the existing env-profile read/write paths.
+
 ## Tests
 
 - `AC-UI-TASK-LAYOUT-PROFILES-001.9`: Unit cases cover the eligible Default group, a non-Default group, and a Default group with an extra VS Code tab.
 - `AC-UI-TASK-LAYOUT-PROFILES-001.9`: Unit and store-integration cases cover a copied Default custom profile, built-in override identity, and per-environment profile persistence.
 - `AC-UI-TASK-LAYOUT-PROFILES-001.9`: Existing state tests preserve reload baselining and inactive-task attention.
+- `AC-UI-TASK-LAYOUT-PROFILES-001.9`: A reserved customized Default keeps built-in identity through a fresh build and Reset Layout; arbitrary saved profile IDs remain custom.
 
 ## E2E tests
 
@@ -67,6 +70,8 @@ Replace the E2E expectation that activates Changes in any non-Agent group. The n
 - `pnpm exec vitest run components/task/changes-panel-focus.test.ts`: passed, 20 tests before the fixup and 20 tests after the fixup.
 - `pnpm exec vitest run lib/local-storage.test.ts lib/state/dockview-store.test.ts lib/state/dockview-preset-persistence.test.ts components/task/changes-panel-focus.test.ts`: passed, 92 tests.
 - `pnpm run typecheck`: passed.
+- `pnpm test`: passed, 1,677 test files and 14,381 tests (4 skipped).
+- `pnpm run lint`: passed.
 - `pnpm e2e:run tests/layout/changes-panel-focus.spec.ts -- --grep "VS Code group"`: passed.
 - The complete `changes-panel-focus.spec.ts` suite passed, 6 tests, with the desktop PR capture enabled.
 - `python3 ../../scripts/lint-spec-files.test.py`: passed, 20 tests.
