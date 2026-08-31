@@ -92,3 +92,14 @@ func (s *Service) RevokeCIRunGrant(
 	}
 	return err
 }
+
+// ListCIRunGrants returns grants visible to the authenticated workspace owner.
+func (s *Service) ListCIRunGrants(ctx context.Context, userID, workspaceID string) ([]CIRunGrant, error) {
+	if userID == "" || workspaceID == "" {
+		return nil, errors.New("workspace and user identity are required")
+	}
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return nil, err
+	}
+	return s.store.ListCIRunGrants(ctx, workspaceID)
+}

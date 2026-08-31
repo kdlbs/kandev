@@ -991,6 +991,7 @@ func (s *Server) registerAutomationTools() {
 	s.registerConfigWorkflowTools()
 	s.registerConfigExecutorTools()
 	s.mcpServer.DeleteTools(
+		"request_fresh_ci_run_kandev",
 		"delete_task_kandev",
 		"update_task_state_kandev",
 		"create_workflow_kandev",
@@ -1147,25 +1148,27 @@ func (s *Server) registerKanbanTools() {
 		),
 		s.wrapHandler("stop_task_kandev", s.stopTaskHandler()),
 	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("request_fresh_ci_run_kandev",
-			mcp.WithDescription("Request one server-authorized fresh GitHub Actions run for a task's linked pull request at an exact unchanged head. The backend binds the caller, workspace, task, current workflow step, repository, PR, source run attempt, and GitHub App installation. Callers cannot choose an owner, repository name, ref, workflow, inputs, or credential."),
-			mcp.WithReadOnlyHintAnnotation(false),
-			mcp.WithDestructiveHintAnnotation(false),
-			mcp.WithIdempotentHintAnnotation(true),
-			mcp.WithOpenWorldHintAnnotation(true),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("Target task with the linked pull request")),
-			mcp.WithString("repository_id", mcp.Required(), mcp.Description("Target task's linked repository ID")),
-			mcp.WithNumber("pr_number", mcp.Required(), mcp.Min(1)),
-			mcp.WithString("expected_head_sha", mcp.Required(), mcp.MinLength(40), mcp.MaxLength(40)),
-			mcp.WithString("expected_workflow_step_id", mcp.Required()),
-			mcp.WithNumber("source_run_id", mcp.Required(), mcp.Min(1)),
-			mcp.WithNumber("expected_source_attempt", mcp.Required(), mcp.Min(1)),
-			mcp.WithString("evidence_kind", mcp.Required(), mcp.Enum("pr_head", "current_merge")),
-			mcp.WithString("idempotency_key", mcp.Required(), mcp.MinLength(1), mcp.MaxLength(256)),
-		),
-		s.wrapHandler("request_fresh_ci_run_kandev", s.requestFreshCIRunHandler()),
-	)
+	if s.profile.Surface == mcpprofile.SurfaceKanbanTask && mcpproviders.Contains(s.mcpProviders, mcpproviders.GitHub) {
+		s.mcpServer.AddTool(
+			mcp.NewTool("request_fresh_ci_run_kandev",
+				mcp.WithDescription("Request one server-authorized fresh GitHub Actions run for a task's linked pull request at an exact unchanged head. The backend binds the caller, workspace, task, current workflow step, repository, PR, source run attempt, and GitHub App installation. Callers cannot choose an owner, repository name, ref, workflow, inputs, or credential."),
+				mcp.WithReadOnlyHintAnnotation(false),
+				mcp.WithDestructiveHintAnnotation(false),
+				mcp.WithIdempotentHintAnnotation(true),
+				mcp.WithOpenWorldHintAnnotation(true),
+				mcp.WithString("task_id", mcp.Required(), mcp.Description("Target task with the linked pull request")),
+				mcp.WithString("repository_id", mcp.Required(), mcp.Description("Target task's linked repository ID")),
+				mcp.WithNumber("pr_number", mcp.Required(), mcp.Min(1)),
+				mcp.WithString("expected_head_sha", mcp.Required(), mcp.MinLength(40), mcp.MaxLength(40)),
+				mcp.WithString("expected_workflow_step_id", mcp.Required()),
+				mcp.WithNumber("source_run_id", mcp.Required(), mcp.Min(1)),
+				mcp.WithNumber("expected_source_attempt", mcp.Required(), mcp.Min(1)),
+				mcp.WithString("evidence_kind", mcp.Required(), mcp.Enum("pr_head", "current_merge")),
+				mcp.WithString("idempotency_key", mcp.Required(), mcp.MinLength(1), mcp.MaxLength(256)),
+			),
+			s.wrapHandler("request_fresh_ci_run_kandev", s.requestFreshCIRunHandler()),
+		)
+	}
 	s.registerSpawnSessionTool()
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_task_conversation_kandev",

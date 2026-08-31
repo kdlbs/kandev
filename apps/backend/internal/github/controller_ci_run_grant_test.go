@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,8 +13,15 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 )
 
-func TestCIRunGrantEndpointRequiresAdminAndCreatesExactScope(t *testing.T) {
+func TestCIRunGrantEndpointAllowsWorkspaceOwnerAndListsGrants(t *testing.T) {
 	service, _, _ := setupCIRunServiceTest(t, false)
+	service.SetWorkspaceAuthorizer(func(ctx context.Context, workspaceID string) error {
+		identity, _ := authn.IdentityFromContext(ctx)
+		if workspaceID == "workspace-1" && identity.UserID == "owner-1" {
+			return nil
+		}
+		return errors.New("workspace is not visible")
+	})
 	if _, err := service.store.db.Exec(`DELETE FROM github_ci_run_grants`); err != nil {
 		t.Fatal(err)
 	}
@@ -29,27 +37,28 @@ func TestCIRunGrantEndpointRequiresAdminAndCreatesExactScope(t *testing.T) {
 	memberRequest := httptest.NewRequest(http.MethodPost, "/api/v1/github/ci-run-grants", bytes.NewReader(body))
 	memberRequest.Header.Set("Content-Type", "application/json")
 	memberRequest = memberRequest.WithContext(authn.WithIdentity(context.Background(), authn.Identity{
-		UserID: "member-1", Role: authn.RoleMember,
+		UserID: "owner-1", Role: authn.RoleMember,
 	}))
 	router.ServeHTTP(member, memberRequest)
-	if member.Code != http.StatusForbidden {
-		t.Fatalf("member status = %d", member.Code)
+	if member.Code != http.StatusCreated {
+		t.Fatalf("owner status = %d body=%s", member.Code, member.Body.String())
 	}
 
-	admin := httptest.NewRecorder()
-	adminRequest := httptest.NewRequest(http.MethodPost, "/api/v1/github/ci-run-grants", bytes.NewReader(body))
-	adminRequest.Header.Set("Content-Type", "application/json")
-	adminRequest = adminRequest.WithContext(authn.WithIdentity(context.Background(), authn.Identity{
-		UserID: "admin-1", Role: authn.RoleAdmin,
-	}))
-	router.ServeHTTP(admin, adminRequest)
-	if admin.Code != http.StatusCreated {
-		t.Fatalf("admin status = %d body=%s", admin.Code, admin.Body.String())
+	list := httptest.NewRecorder()
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/v1/github/ci-run-grants?workspace_id=workspace-1", nil)
+	listRequest = listRequest.WithContext(authn.WithIdentity(context.Background(), authn.Identity{UserID: "owner-1", Role: authn.RoleMember}))
+	router.ServeHTTP(list, listRequest)
+	if list.Code != http.StatusOK {
+		t.Fatalf("list status = %d body=%s", list.Code, list.Body.String())
 	}
-	var grant CIRunGrant
-	if err := json.Unmarshal(admin.Body.Bytes(), &grant); err != nil {
+	var grants []CIRunGrant
+	if err := json.Unmarshal(list.Body.Bytes(), &grants); err != nil {
 		t.Fatal(err)
 	}
+	if len(grants) != 1 {
+		t.Fatalf("grants = %+v", grants)
+	}
+	grant := grants[0]
 	if grant.ActorTaskID != "coordinator-1" || grant.TargetTaskID != "target-1" ||
 		grant.WorkflowStepID != "ci-fixup" || grant.RepositoryID != "repository-1" {
 		t.Fatalf("grant = %+v", grant)

@@ -67,6 +67,21 @@ func (s *Store) GetActiveCIRunGrant(
 	return &grant, err
 }
 
+func (s *Store) ListCIRunGrants(ctx context.Context, workspaceID string) ([]CIRunGrant, error) {
+	var grants []CIRunGrant
+	err := s.ro.SelectContext(ctx, &grants, s.ro.Rebind(`
+		SELECT id, generation, workspace_id, actor_task_id, target_task_id, workflow_id,
+			workflow_step_id, repository_id, created_by_user_id, revoked_at, created_at, updated_at
+		FROM github_ci_run_grants WHERE workspace_id = ? ORDER BY updated_at DESC`), workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if grants == nil {
+		grants = []CIRunGrant{}
+	}
+	return grants, nil
+}
+
 func (s *Store) GetAuthorizedCIRunGrant(
 	ctx context.Context,
 	actorTaskID, actorSessionID, targetTaskID, repositoryID string,

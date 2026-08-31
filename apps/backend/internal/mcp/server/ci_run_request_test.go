@@ -1,8 +1,10 @@
 package mcp
 
 import (
+	"context"
 	"testing"
 
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -47,4 +49,18 @@ func TestRequestFreshCIRunToolRejectsExtraAuthorityFields(t *testing.T) {
 	})
 	assert.True(t, result.IsError)
 	assert.Empty(t, backend.lastAction)
+}
+
+func TestRequestFreshCIRunToolOnlyRegisteredForGitHubTaskContext(t *testing.T) {
+	log := newTestLogger(t)
+	backend := &testBackend{}
+	noProvider := NewWithProfile(backend, "session", "task", 10005, log, "", false,
+		mcpprofile.New(mcpprofile.SurfaceKanbanTask, nil, nil))
+	_ = noProvider.Close(context.Background())
+	assert.NotContains(t, getRegisteredToolNames(noProvider), "request_fresh_ci_run_kandev")
+
+	gitHubTask := NewWithProfile(backend, "session", "task", 10005, log, "", false,
+		mcpprofile.New(mcpprofile.SurfaceKanbanTask, nil, []string{"github"}))
+	_ = gitHubTask.Close(context.Background())
+	assert.Contains(t, getRegisteredToolNames(gitHubTask), "request_fresh_ci_run_kandev")
 }

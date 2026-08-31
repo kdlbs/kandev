@@ -11,8 +11,8 @@ import (
 
 func (c *Controller) httpCreateCIRunGrant(ctx *gin.Context) {
 	identity, ok := authn.FromGin(ctx)
-	if !ok || !identity.IsAdmin() {
-		ctx.JSON(http.StatusForbidden, gin.H{"error": "administrator authorization is required"})
+	if !ok || identity.UserID == "" {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "authenticated workspace owner authorization is required"})
 		return
 	}
 	var input CreateCIRunGrantInput
@@ -28,10 +28,24 @@ func (c *Controller) httpCreateCIRunGrant(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, grant)
 }
 
+func (c *Controller) httpListCIRunGrants(ctx *gin.Context) {
+	identity, ok := authn.FromGin(ctx)
+	if !ok || identity.UserID == "" {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "authenticated workspace owner authorization is required"})
+		return
+	}
+	grants, err := c.service.ListCIRunGrants(ctx.Request.Context(), identity.UserID, strings.TrimSpace(ctx.Query("workspace_id")))
+	if err != nil {
+		writeCIRunGrantError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, grants)
+}
+
 func (c *Controller) httpRevokeCIRunGrant(ctx *gin.Context) {
 	identity, ok := authn.FromGin(ctx)
-	if !ok || !identity.IsAdmin() {
-		ctx.JSON(http.StatusForbidden, gin.H{"error": "administrator authorization is required"})
+	if !ok || identity.UserID == "" {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "authenticated workspace owner authorization is required"})
 		return
 	}
 	workspaceID := strings.TrimSpace(ctx.Query("workspace_id"))
