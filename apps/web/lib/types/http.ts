@@ -208,6 +208,21 @@ export type TaskPendingActionRevision = {
   sequence: number;
 };
 
+export type WorkflowProfileSessionPolicy = "complete" | "park_reuse" | "park_new";
+
+export function normalizeWorkflowProfileSessionPolicy(
+  value: string | null | undefined,
+): WorkflowProfileSessionPolicy {
+  switch (value?.trim()) {
+    case "park_reuse":
+      return "park_reuse";
+    case "park_new":
+      return "park_new";
+    default:
+      return "complete";
+  }
+}
+
 /**
  * Fine-grained busy substate of a session (see ADR-0049). Distinguishes
  * a foreground turn that is actively generating from one that is idle, held open
@@ -226,6 +241,7 @@ export type Workflow = {
   prompt?: string;
   workflow_template_id?: string | null;
   agent_profile_id?: AgentProfileId;
+  profile_session_policy?: WorkflowProfileSessionPolicy;
   sort_order?: number;
   hidden?: boolean;
   /**

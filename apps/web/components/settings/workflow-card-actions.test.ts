@@ -376,6 +376,25 @@ describe("persistWorkflowDraft", () => {
       expect.objectContaining({ pull_from_step_id: SERVER_STEP_ONE }),
     );
   });
+
+  it("persists the workflow profile session policy", async () => {
+    const draftWorkflow = {
+      ...workflow,
+      profile_session_policy: "park_new" as const,
+    } as Workflow;
+
+    await persistWorkflowDraft({
+      workflow: draftWorkflow,
+      draftSteps: [],
+      savedSteps: [],
+      progress: createWorkflowDraftSaveProgress(),
+    });
+
+    expect(updateWorkflowAction).toHaveBeenCalledWith(
+      workflow.id,
+      expect.objectContaining({ profile_session_policy: "park_new" }),
+    );
+  });
 });
 
 describe("persistWorkflowDraft cancellation policy", () => {

@@ -256,6 +256,7 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("workflows.source", `ALTER TABLE workflows ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`)
 	r.migrate.Apply("workflows.source_path", `ALTER TABLE workflows ADD COLUMN source_path TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("workflows.prompt", `ALTER TABLE workflows ADD COLUMN prompt TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("workflows.profile_session_policy", `ALTER TABLE workflows ADD COLUMN profile_session_policy TEXT NOT NULL DEFAULT 'complete'`)
 	if err := r.ensureImproveKandevWorkflowTemplateUniqueness(); err != nil {
 		return err
 	}

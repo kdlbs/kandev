@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
@@ -32,6 +33,7 @@ func TestWorkflowProviderAdapter_UpdateWorkflowPersistsPrompt(t *testing.T) {
 
 	adapter := &workflowProviderAdapter{svc: harness.taskSvc}
 	created.Prompt = "If the PR is merged or closed, move the Task to Done."
+	created.ProfileSessionPolicy = taskmodels.WorkflowProfileSessionPolicyParkReuse
 	if err := adapter.UpdateWorkflow(ctx, created); err != nil {
 		t.Fatalf("UpdateWorkflow: %v", err)
 	}
@@ -42,6 +44,9 @@ func TestWorkflowProviderAdapter_UpdateWorkflowPersistsPrompt(t *testing.T) {
 	}
 	if got.Prompt != created.Prompt {
 		t.Fatalf("Prompt = %q, want %q", got.Prompt, created.Prompt)
+	}
+	if got.ProfileSessionPolicy != taskmodels.WorkflowProfileSessionPolicyParkReuse {
+		t.Fatalf("ProfileSessionPolicy = %q, want %q", got.ProfileSessionPolicy, taskmodels.WorkflowProfileSessionPolicyParkReuse)
 	}
 
 	// Clear through the adapter must persist empty, not leave stale text.

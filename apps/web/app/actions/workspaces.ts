@@ -160,6 +160,7 @@ export async function createWorkflowAction(payload: {
   description?: string;
   prompt?: string;
   workflow_template_id?: string;
+  profile_session_policy?: "complete" | "park_reuse" | "park_new";
 }) {
   return fetchJson<Workflow>(`${apiBaseUrl}/api/v1/workflows`, {
     method: "POST",
@@ -169,7 +170,13 @@ export async function createWorkflowAction(payload: {
 
 export async function updateWorkflowAction(
   id: string,
-  payload: { name?: string; description?: string; prompt?: string; agent_profile_id?: string },
+  payload: {
+    name?: string;
+    description?: string;
+    prompt?: string;
+    agent_profile_id?: string;
+    profile_session_policy?: "complete" | "park_reuse" | "park_new";
+  },
 ) {
   return fetchJson<Workflow>(`${apiBaseUrl}/api/v1/workflows/${id}`, {
     method: "PATCH",

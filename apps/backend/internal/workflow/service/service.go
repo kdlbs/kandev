@@ -291,8 +291,9 @@ func (s *Service) GetNextStepByPosition(ctx context.Context, workflowID string, 
 // WorkflowMeta is the subset of workflow fields needed at step entry
 // (agent profile default + optional workflow-level prompt).
 type WorkflowMeta struct {
-	AgentProfileID string
-	Prompt         string
+	AgentProfileID       string
+	Prompt               string
+	ProfileSessionPolicy taskmodels.WorkflowProfileSessionPolicy
 }
 
 // GetWorkflowMeta returns agent profile id and prompt for a workflow in one
@@ -304,8 +305,9 @@ func (s *Service) GetWorkflowMeta(ctx context.Context, workflowID string) (Workf
 		return WorkflowMeta{}, err
 	}
 	return WorkflowMeta{
-		AgentProfileID: wf.AgentProfileID,
-		Prompt:         wf.Prompt,
+		AgentProfileID:       wf.AgentProfileID,
+		Prompt:               wf.Prompt,
+		ProfileSessionPolicy: taskmodels.NormalizeWorkflowProfileSessionPolicy(string(wf.ProfileSessionPolicy)),
 	}, nil
 }
 
@@ -796,6 +798,11 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 	}
 	if pw.Prompt != "" {
 		wf.Prompt = pw.Prompt
+		needsUpdate = true
+	}
+	profileSessionPolicy := taskmodels.NormalizeWorkflowProfileSessionPolicy(string(pw.ProfileSessionPolicy))
+	if wf.ProfileSessionPolicy != profileSessionPolicy {
+		wf.ProfileSessionPolicy = profileSessionPolicy
 		needsUpdate = true
 	}
 	if needsUpdate {

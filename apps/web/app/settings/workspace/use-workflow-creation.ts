@@ -126,6 +126,7 @@ export function useWorkflowCreation({
       // Persisted workflow name; the fallback is data, not copy.
       name: newWorkflowName.trim() || template?.name || "New Workflow",
       description: template?.description,
+      profile_session_policy: "complete",
       workflow_template_id: template?.id,
       created_at: "",
       updated_at: "",

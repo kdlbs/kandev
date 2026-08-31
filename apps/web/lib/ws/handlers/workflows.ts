@@ -37,6 +37,7 @@ function applyWorkflowCreated(state: AppState, payload: WorkflowPayload): AppSta
           name: payload.name,
           hidden: isHidden,
           style: payload.style,
+          profile_session_policy: payload.profile_session_policy ?? "complete",
         },
         ...state.workflows.items,
       ],
@@ -54,6 +55,8 @@ function applyWorkflowUpdated(state: AppState, payload: WorkflowPayload): AppSta
           description: payload.description,
           prompt: payload.prompt,
           agent_profile_id: payload.agent_profile_id,
+          profile_session_policy:
+            payload.profile_session_policy ?? item.profile_session_policy ?? "complete",
           hidden: payload.hidden !== undefined ? Boolean(payload.hidden) : item.hidden,
           style: payload.style ?? item.style,
         }

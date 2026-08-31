@@ -46,6 +46,19 @@ describe("workflow dirty state", () => {
     expect(isWorkflowFieldDirty(draft, draft, "prompt")).toBe(false);
   });
 
+  it("marks a changed workflow profile session policy dirty", () => {
+    const draft = { ...workflow, profile_session_policy: "park_reuse" as const };
+
+    expect(isWorkflowFieldDirty(draft, workflow, "profile_session_policy")).toBe(true);
+    expect(
+      isWorkflowFieldDirty(
+        draft,
+        { ...workflow, profile_session_policy: "park_reuse" },
+        "profile_session_policy",
+      ),
+    ).toBe(false);
+  });
+
   it("marks new and changed steps dirty", () => {
     expect(isWorkflowStepDirty(step, undefined)).toBe(true);
     expect(isWorkflowStepDirty({ ...step, name: "Doing" }, step)).toBe(true);

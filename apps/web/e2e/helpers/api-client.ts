@@ -403,11 +403,17 @@ export class ApiClient {
     return this.request("GET", "/api/v1/workspaces");
   }
 
-  async createWorkflow(workspaceId: string, name: string, templateId?: string): Promise<Workflow> {
+  async createWorkflow(
+    workspaceId: string,
+    name: string,
+    templateId?: string,
+    profileSessionPolicy?: "complete" | "park_reuse" | "park_new",
+  ): Promise<Workflow> {
     return this.request("POST", "/api/v1/workflows", {
       workspace_id: workspaceId,
       name,
       ...(templateId ? { workflow_template_id: templateId } : {}),
+      ...(profileSessionPolicy ? { profile_session_policy: profileSessionPolicy } : {}),
     });
   }
 
@@ -1173,7 +1179,13 @@ export class ApiClient {
 
   async updateWorkflow(
     workflowId: string,
-    updates: { name?: string; description?: string; prompt?: string; agent_profile_id?: string },
+    updates: {
+      name?: string;
+      description?: string;
+      prompt?: string;
+      agent_profile_id?: string;
+      profile_session_policy?: "complete" | "park_reuse" | "park_new";
+    },
   ): Promise<Workflow> {
     return this.request("PATCH", `/api/v1/workflows/${workflowId}`, updates);
   }
@@ -2271,7 +2283,9 @@ export class ApiClient {
       executor_id?: string;
       executor_profile_id?: string;
       state: string;
+      is_primary: boolean;
       started_at: string;
+      completed_at?: string | null;
       task_environment_id?: string;
       workspace_path?: string;
       worktree_path?: string;

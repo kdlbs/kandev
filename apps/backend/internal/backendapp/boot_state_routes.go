@@ -702,14 +702,15 @@ func mapWorkspaceItemState(workspace taskdto.WorkspaceDTO) map[string]any {
 // mapWorkflowItemState maps a workflow DTO to its SPA boot shape.
 func mapWorkflowItemState(workflow taskdto.WorkflowDTO) map[string]any {
 	return map[string]any{
-		"id":               workflow.ID,
-		"workspaceId":      workflow.WorkspaceID,
-		"name":             workflow.Name,
-		"description":      workflow.Description,
-		"sortOrder":        workflow.SortOrder,
-		"agent_profile_id": nullString(workflow.AgentProfileID),
-		"hidden":           workflow.Hidden,
-		"style":            workflow.Style,
+		"id":                     workflow.ID,
+		"workspaceId":            workflow.WorkspaceID,
+		"name":                   workflow.Name,
+		"description":            workflow.Description,
+		"sortOrder":              workflow.SortOrder,
+		"agent_profile_id":       nullString(workflow.AgentProfileID),
+		"profile_session_policy": string(workflow.ProfileSessionPolicy),
+		"hidden":                 workflow.Hidden,
+		"style":                  workflow.Style,
 	}
 }
 

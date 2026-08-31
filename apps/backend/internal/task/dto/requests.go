@@ -42,18 +42,20 @@ type GetWorkflowRequest struct {
 }
 
 type CreateWorkflowRequest struct {
-	WorkspaceID        string
-	Name               string
-	Description        string
-	Prompt             string
-	WorkflowTemplateID *string
+	WorkspaceID          string
+	Name                 string
+	Description          string
+	Prompt               string
+	WorkflowTemplateID   *string
+	ProfileSessionPolicy string
 }
 
 type UpdateWorkflowRequest struct {
-	ID          string
-	Name        *string
-	Description *string
-	Prompt      *string
+	ID                   string
+	Name                 *string
+	Description          *string
+	Prompt               *string
+	ProfileSessionPolicy *string
 }
 
 type DeleteWorkflowRequest struct {

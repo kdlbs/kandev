@@ -46,6 +46,7 @@ function cloneWorkflow(source: Workflow, workflows: readonly Workflow[], id: str
     description: source.description,
     prompt: source.prompt,
     agent_profile_id: source.agent_profile_id,
+    profile_session_policy: source.profile_session_policy,
     created_at: "",
     updated_at: "",
   };

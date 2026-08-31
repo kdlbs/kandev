@@ -252,6 +252,7 @@ export type WorkflowPayload = {
   description?: string;
   prompt?: string;
   agent_profile_id?: string;
+  profile_session_policy?: "complete" | "park_reuse" | "park_new";
   hidden?: boolean;
   /** Phase 2 (ADR-0004) UX hint — frontend-only. */
   style?: "kanban" | "office" | "custom";

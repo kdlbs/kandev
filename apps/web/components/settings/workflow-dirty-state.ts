@@ -9,7 +9,7 @@ function valuesEqual(left: unknown, right: unknown): boolean {
 export function isWorkflowFieldDirty(
   draft: Workflow,
   saved: Workflow | undefined,
-  field: "name" | "description" | "prompt" | "agent_profile_id",
+  field: "name" | "description" | "prompt" | "agent_profile_id" | "profile_session_policy",
 ): boolean {
   if (!saved) return true;
   return !valuesEqual(draft[field] ?? "", saved[field] ?? "");

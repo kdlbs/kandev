@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import {
   agentProfileId,
+  normalizeWorkflowProfileSessionPolicy,
   workflowId,
   workspaceId as toWorkspaceId,
   type Workflow,
@@ -144,11 +145,17 @@ function workflowIsDirty(workflow: Workflow, savedWorkflows: Map<string, Workflo
     workflow.name !== saved.name ||
     (workflow.description ?? "") !== (saved.description ?? "") ||
     (workflow.prompt ?? "") !== (saved.prompt ?? "") ||
-    (workflow.agent_profile_id ?? "") !== (saved.agent_profile_id ?? "")
+    (workflow.agent_profile_id ?? "") !== (saved.agent_profile_id ?? "") ||
+    (workflow.profile_session_policy ?? "complete") !== (saved.profile_session_policy ?? "complete")
   );
 }
 
-type EditableWorkflowField = "name" | "description" | "prompt" | "agent_profile_id";
+type EditableWorkflowField =
+  | "name"
+  | "description"
+  | "prompt"
+  | "agent_profile_id"
+  | "profile_session_policy";
 
 // Whether the displayed value for `field` has already diverged from the last-known-saved
 // baseline — i.e. the user has an uncommitted local edit that a store refresh must not clobber.
@@ -173,6 +180,7 @@ type StoreWorkflowItem = {
   description?: string | null;
   prompt?: string;
   agent_profile_id?: string;
+  profile_session_policy?: Workflow["profile_session_policy"];
 };
 
 // Pulls fresh values from the store into the displayed/editable draft, field by field, skipping
@@ -209,7 +217,17 @@ function mergeDisplayedWorkflowFromStore(
     next.agent_profile_id = serverAgentProfileId;
     changed = true;
   }
-
+  const serverProfileSessionPolicy = normalizeWorkflowProfileSessionPolicy(
+    server.profile_session_policy,
+  );
+  if (
+    !hasLocalDraft(displayed, saved, "profile_session_policy") &&
+    serverProfileSessionPolicy !==
+      normalizeWorkflowProfileSessionPolicy(displayed.profile_session_policy)
+  ) {
+    next.profile_session_policy = serverProfileSessionPolicy;
+    changed = true;
+  }
   return changed ? next : displayed;
 }
 
@@ -218,11 +236,18 @@ function mergeDisplayedWorkflowFromStore(
 function mergeSavedWorkflowFromServer(saved: Workflow, server: StoreWorkflowItem): Workflow {
   const serverAgentProfileId =
     server.agent_profile_id !== undefined ? agentProfileId(server.agent_profile_id) : undefined;
+  const serverProfileSessionPolicy = normalizeWorkflowProfileSessionPolicy(
+    server.profile_session_policy,
+  );
+  const savedProfileSessionPolicy = normalizeWorkflowProfileSessionPolicy(
+    saved.profile_session_policy,
+  );
   if (
     server.name === saved.name &&
     server.description === saved.description &&
     server.prompt === saved.prompt &&
-    serverAgentProfileId === saved.agent_profile_id
+    serverAgentProfileId === saved.agent_profile_id &&
+    serverProfileSessionPolicy === savedProfileSessionPolicy
   ) {
     return saved;
   }
@@ -232,6 +257,7 @@ function mergeSavedWorkflowFromServer(saved: Workflow, server: StoreWorkflowItem
     description: server.description,
     prompt: server.prompt,
     agent_profile_id: serverAgentProfileId,
+    profile_session_policy: serverProfileSessionPolicy,
   };
 }
 
@@ -243,6 +269,7 @@ function useScopedStoreWorkflows<
     description?: string | null;
     prompt?: string;
     agent_profile_id?: string;
+    profile_session_policy?: Workflow["profile_session_policy"];
     hidden?: boolean;
     style?: string;
   },
@@ -266,6 +293,7 @@ function storeItemToWorkflow(sw: StoreWorkflowItem): Workflow {
     prompt: sw.prompt,
     agent_profile_id:
       sw.agent_profile_id !== undefined ? agentProfileId(sw.agent_profile_id) : undefined,
+    profile_session_policy: normalizeWorkflowProfileSessionPolicy(sw.profile_session_policy),
     created_at: "",
     updated_at: "",
   };

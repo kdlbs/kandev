@@ -113,7 +113,7 @@ describe("useWorkflowDraftContributor", () => {
       draftWorkflow: { ...savedWorkflow, description: null },
     });
 
-    expect(contributor().revision).toContain('"workflow":["Workflow","","",""]');
+    expect(contributor().revision).toContain('"workflow":["Workflow","","","","complete"]');
   });
 
   it("blocks coordinated saves while session model options are resolving", () => {

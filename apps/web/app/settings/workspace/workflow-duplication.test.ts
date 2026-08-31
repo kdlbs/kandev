@@ -22,6 +22,7 @@ function sourceWorkflow(name = "Review"): Workflow {
     description: "Review configuration",
     prompt: "Review the task",
     agent_profile_id: agentProfileId("agent-source"),
+    profile_session_policy: "park_reuse",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-02T00:00:00Z",
   };
@@ -133,6 +134,7 @@ describe("createWorkflowDuplication", () => {
       description: source.description,
       prompt: source.prompt,
       agent_profile_id: source.agent_profile_id,
+      profile_session_policy: source.profile_session_policy,
       created_at: "",
       updated_at: "",
     });

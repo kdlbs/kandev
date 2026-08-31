@@ -2014,6 +2014,25 @@ func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.Wo
 	return ""
 }
 
+// resolveStepProfileSessionPolicy returns the workflow-wide lifecycle policy
+// for a profile switch. Step overrides affect only the profile; the policy is
+// always owned by the destination workflow. Invalid or unavailable values use
+// the compatibility default.
+func (s *Service) resolveStepProfileSessionPolicy(ctx context.Context, step *wfmodels.WorkflowStep) models.WorkflowProfileSessionPolicy {
+	if step == nil || s.workflowStepGetter == nil || step.WorkflowID == "" {
+		return models.WorkflowProfileSessionPolicyComplete
+	}
+	meta, err := s.getWorkflowMeta(ctx, step.WorkflowID)
+	if err != nil {
+		s.logger.Warn("failed to resolve workflow profile-session policy, using complete",
+			zap.String("workflow_id", step.WorkflowID),
+			zap.String("step_id", step.ID),
+			zap.Error(err))
+		return models.WorkflowProfileSessionPolicyComplete
+	}
+	return models.NormalizeWorkflowProfileSessionPolicy(string(meta.ProfileSessionPolicy))
+}
+
 // tagSessionAsWorkflowSwitched records that a session's profile came from a
 // workflow step override rather than direct user selection. Uses the atomic
 // SetSessionMetadataKey (json_set) so other metadata keys are preserved.
@@ -2032,19 +2051,41 @@ func (s *Service) tagSessionAsWorkflowSwitched(ctx context.Context, sessionID st
 // conversation, because prior-completion state in that conversation can
 // mislead the agent into replaying stale routing intent (see
 // findReusableSessionForProfile). In both cases the previous session is
-// stopped and marked COMPLETED.
+// stopped and either marked COMPLETED or parked according to policy.
 func (s *Service) switchSessionForStep(ctx context.Context, taskID string, currentSession *models.TaskSession, newAgentProfileID string) (*models.TaskSession, error) {
+	return s.switchSessionForStepWithPolicy(
+		ctx,
+		taskID,
+		currentSession,
+		newAgentProfileID,
+		models.WorkflowProfileSessionPolicyComplete,
+	)
+}
+
+func (s *Service) switchSessionForStepWithPolicy(
+	ctx context.Context,
+	taskID string,
+	currentSession *models.TaskSession,
+	newAgentProfileID string,
+	policy models.WorkflowProfileSessionPolicy,
+) (*models.TaskSession, error) {
+	policy = models.NormalizeWorkflowProfileSessionPolicy(string(policy))
 	s.logger.Info("switching session for workflow step agent profile change",
 		zap.String("task_id", taskID),
 		zap.String("current_session", currentSession.ID),
 		zap.String("current_profile", currentSession.AgentProfileID),
-		zap.String("new_profile", newAgentProfileID))
-	existing, lookupErr := s.findReusableSessionForProfile(ctx, taskID, newAgentProfileID, currentSession.ID)
-	if lookupErr != nil {
-		s.logger.Warn("failed to look up reusable session, falling through to create new",
-			zap.String("task_id", taskID),
-			zap.String("agent_profile_id", newAgentProfileID),
-			zap.Error(lookupErr))
+		zap.String("new_profile", newAgentProfileID),
+		zap.String("profile_session_policy", string(policy)))
+	var existing *models.TaskSession
+	if policy != models.WorkflowProfileSessionPolicyParkNew {
+		var lookupErr error
+		existing, lookupErr = s.findReusableSessionForProfile(ctx, taskID, newAgentProfileID, currentSession.ID)
+		if lookupErr != nil {
+			s.logger.Warn("failed to look up reusable session, falling through to create new",
+				zap.String("task_id", taskID),
+				zap.String("agent_profile_id", newAgentProfileID),
+				zap.Error(lookupErr))
+		}
 	}
 	targetSession := currentSession
 	if existing != nil {
@@ -2076,7 +2117,7 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 	}
 
 	if existing != nil {
-		reused, err := s.reuseSessionForStep(ctx, taskID, currentSession, existing)
+		reused, err := s.reuseSessionForStepWithPolicy(ctx, taskID, currentSession, existing, policy)
 		if err == nil {
 			return reused, nil
 		}
@@ -2089,7 +2130,7 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 			zap.String("agent_profile_id", newAgentProfileID))
 	}
 
-	return s.createNewSessionForStep(ctx, taskID, currentSession, newAgentProfileID)
+	return s.createNewSessionForStepWithPolicy(ctx, taskID, currentSession, newAgentProfileID, policy)
 }
 
 // findReusableSessionForProfile returns the most-recently-updated
@@ -2141,6 +2182,22 @@ func (s *Service) findReusableSessionForProfile(ctx context.Context, taskID, pro
 // promotion race where an agent completion could otherwise make a stale ACP
 // conversation primary again.
 func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, currentSession, existing *models.TaskSession) (*models.TaskSession, error) {
+	return s.reuseSessionForStepWithPolicy(
+		ctx,
+		taskID,
+		currentSession,
+		existing,
+		models.WorkflowProfileSessionPolicyComplete,
+	)
+}
+
+func (s *Service) reuseSessionForStepWithPolicy(
+	ctx context.Context,
+	taskID string,
+	currentSession, existing *models.TaskSession,
+	policy models.WorkflowProfileSessionPolicy,
+) (*models.TaskSession, error) {
+	policy = models.NormalizeWorkflowProfileSessionPolicy(string(policy))
 	s.logger.Info("reusing existing session for profile",
 		zap.String("task_id", taskID),
 		zap.String("current_session", currentSession.ID),
@@ -2178,7 +2235,13 @@ func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, curren
 		}
 	}
 
-	s.completeAndStopSession(ctx, taskID, currentSession)
+	parked, err := s.finishWorkflowProfileSwitchSource(ctx, taskID, currentSession, policy)
+	if err != nil {
+		if policy != models.WorkflowProfileSessionPolicyComplete && !parked && currentSession.IsPrimary {
+			s.restoreWorkflowProfileSwitchSourcePrimary(ctx, currentSession)
+		}
+		return nil, err
+	}
 	return existing, nil
 }
 
@@ -2191,6 +2254,23 @@ func (s *Service) setNonterminalSessionPrimary(ctx context.Context, sessionID st
 // createNewSessionForStep is the original switch-and-create-fresh-session path,
 // used when there is no existing session for the target profile.
 func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, currentSession *models.TaskSession, newAgentProfileID string) (*models.TaskSession, error) {
+	return s.createNewSessionForStepWithPolicy(
+		ctx,
+		taskID,
+		currentSession,
+		newAgentProfileID,
+		models.WorkflowProfileSessionPolicyComplete,
+	)
+}
+
+func (s *Service) createNewSessionForStepWithPolicy(
+	ctx context.Context,
+	taskID string,
+	currentSession *models.TaskSession,
+	newAgentProfileID string,
+	policy models.WorkflowProfileSessionPolicy,
+) (*models.TaskSession, error) {
+	policy = models.NormalizeWorkflowProfileSessionPolicy(string(policy))
 	// Prepare the new session BEFORE touching the old one.
 	// If any step below fails, the old session remains active and the task stays recoverable.
 	task, err := s.scheduler.GetTask(ctx, taskID)
@@ -2250,12 +2330,38 @@ func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, cu
 	// Use SetPrimarySession (not repo.SetSessionPrimary) to broadcast a task.updated WS
 	// event — the frontend reads primarySessionId from the task to render the star icon.
 	if err := s.SetPrimarySession(ctx, newSession.ID); err != nil {
-		s.logger.Warn("failed to set new session as primary",
-			zap.String("session_id", newSession.ID), zap.Error(err))
+		return nil, fmt.Errorf("failed to promote new workflow session: %w", err)
 	}
 
-	s.completeAndStopSession(ctx, taskID, currentSession)
+	parked, err := s.finishWorkflowProfileSwitchSource(ctx, taskID, currentSession, policy)
+	if err != nil {
+		if policy != models.WorkflowProfileSessionPolicyComplete && !parked && currentSession.IsPrimary {
+			s.restoreWorkflowProfileSwitchSourcePrimary(ctx, currentSession)
+		}
+		return nil, err
+	}
 	return newSession, nil
+}
+
+func (s *Service) finishWorkflowProfileSwitchSource(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	policy models.WorkflowProfileSessionPolicy,
+) (bool, error) {
+	if policy == models.WorkflowProfileSessionPolicyParkReuse || policy == models.WorkflowProfileSessionPolicyParkNew {
+		return s.parkSessionForProfileSwitch(ctx, taskID, session)
+	}
+	s.completeAndStopSession(ctx, taskID, session)
+	return true, nil
+}
+
+func (s *Service) restoreWorkflowProfileSwitchSourcePrimary(ctx context.Context, session *models.TaskSession) {
+	if err := s.SetPrimarySession(ctx, session.ID); err != nil {
+		s.logger.Warn("failed to restore source session after parked profile switch failure",
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+	}
 }
 
 // completeAndStopSession stops the agent for a session and marks it COMPLETED.
@@ -2297,6 +2403,7 @@ func (s *Service) prepareWorkflowStepSession(
 	if step == nil {
 		return nil, false, fmt.Errorf("workflow step is nil")
 	}
+	ctx = withWorkflowMetaCache(ctx)
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
 	if effectiveProfile == "" || effectiveProfile == session.AgentProfileID {
 		if effectiveProfile != "" {
@@ -2315,7 +2422,8 @@ func (s *Service) prepareWorkflowStepSession(
 		}
 		return session, false, nil
 	}
-	newSession, err := s.switchSessionForStep(ctx, taskID, session, effectiveProfile)
+	policy := s.resolveStepProfileSessionPolicy(ctx, step)
+	newSession, err := s.switchSessionForStepWithPolicy(ctx, taskID, session, effectiveProfile, policy)
 	if err != nil {
 		return nil, false, err
 	}
@@ -2331,17 +2439,21 @@ func (s *Service) preflightWorkflowStepCredentials(
 	if currentSession == nil || targetStep == nil {
 		return nil
 	}
+	ctx = withWorkflowMetaCache(ctx)
 	effectiveProfile := s.resolveStepAgentProfile(ctx, targetStep)
 	if effectiveProfile == "" || effectiveProfile == currentSession.AgentProfileID {
 		return nil
 	}
+	policy := s.resolveStepProfileSessionPolicy(ctx, targetStep)
 	targetSession := currentSession
-	existing, err := s.findReusableSessionForProfile(ctx, taskID, effectiveProfile, currentSession.ID)
-	if err != nil {
-		return fmt.Errorf("find reusable session for credential preflight: %w", err)
-	}
-	if existing != nil {
-		targetSession = existing
+	if policy != models.WorkflowProfileSessionPolicyParkNew {
+		existing, err := s.findReusableSessionForProfile(ctx, taskID, effectiveProfile, currentSession.ID)
+		if err != nil {
+			return fmt.Errorf("find reusable session for credential preflight: %w", err)
+		}
+		if existing != nil {
+			targetSession = existing
+		}
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
@@ -4926,6 +5038,7 @@ func (s *Service) applyEngineTransitionWithCommit(
 	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
 	triggerOnEnter bool, commit func(context.Context) (bool, error),
 ) bool {
+	ctx = withWorkflowMetaCache(ctx)
 	// Validate the target step exists BEFORE persisting the transition.
 	// This prevents the task from being moved to an invalid step_id
 	// (e.g., a template-level alias like "review" that doesn't resolve to a real UUID).

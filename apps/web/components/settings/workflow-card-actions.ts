@@ -249,6 +249,7 @@ export async function persistWorkflowDraft({
     description: workflow.description ?? "",
     prompt: workflow.prompt ?? "",
     agent_profile_id: workflow.agent_profile_id ?? "",
+    profile_session_policy: workflow.profile_session_policy ?? "complete",
   });
   progress.workflow = updatedWorkflow;
   await reconcileTemplateSteps({ workflow, draftSteps, updatedWorkflow, progress, isNewWorkflow });
@@ -275,6 +276,7 @@ async function ensurePersistedWorkflow(
         name: workflow.name.trim(),
         description: workflow.description ?? undefined,
         prompt: workflow.prompt ?? undefined,
+        profile_session_policy: workflow.profile_session_policy ?? "complete",
         workflow_template_id: workflow.workflow_template_id ?? undefined,
       })
     : workflow;

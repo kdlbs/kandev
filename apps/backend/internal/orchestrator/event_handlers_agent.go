@@ -1211,6 +1211,14 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 		return
 	}
+	if s.consumeParkedProfileSwitchStopIntent(ctx, data, session) {
+		s.logger.Debug("ignoring agent.completed caused by parked workflow profile switch",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID))
+		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+		return
+	}
 
 	// task_session_commits reconciliation (captureSessionCommitsSweep) runs in
 	// the caller, handleAgentCompleted, before this function's rotated-
@@ -2217,6 +2225,13 @@ func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEven
 	s.retireExecutionActivityAndPublish(
 		context.WithoutCancel(ctx), data.TaskID, data.SessionID, data.AgentExecutionID,
 	)
+	if s.consumeParkedProfileSwitchStopIntent(ctx, data, nil) {
+		s.logger.Debug("ignoring agent.stopped caused by parked workflow profile switch",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID))
+		return
+	}
 
 	// NOTE: we deliberately do NOT resetTransientRetry here — the transient
 	// retry tears down the failed execution via StopExecution as part of its

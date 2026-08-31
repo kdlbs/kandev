@@ -39,11 +39,12 @@ type AgentProfileMatcher func(agentName, model, mode, currentID string) string
 
 // WorkflowPortable is a workflow without instance-specific fields (IDs, timestamps).
 type WorkflowPortable struct {
-	Name         string                `json:"name" yaml:"name"`
-	Description  string                `json:"description,omitempty" yaml:"description,omitempty"`
-	Prompt       string                `json:"prompt,omitempty" yaml:"prompt,omitempty"`
-	AgentProfile *AgentProfilePortable `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
-	Steps        []StepPortable        `json:"steps" yaml:"steps"`
+	Name                 string                                  `json:"name" yaml:"name"`
+	Description          string                                  `json:"description,omitempty" yaml:"description,omitempty"`
+	Prompt               string                                  `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+	ProfileSessionPolicy taskmodels.WorkflowProfileSessionPolicy `json:"profile_session_policy,omitempty" yaml:"profile_session_policy,omitempty"`
+	AgentProfile         *AgentProfilePortable                   `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
+	Steps                []StepPortable                          `json:"steps" yaml:"steps"`
 }
 
 // StepPortable is a workflow step without instance-specific fields.
@@ -112,10 +113,11 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 	}
 
 	wp := WorkflowPortable{
-		Name:        wf.Name,
-		Description: wf.Description,
-		Prompt:      wf.Prompt,
-		Steps:       portableSteps,
+		Name:                 wf.Name,
+		Description:          wf.Description,
+		Prompt:               wf.Prompt,
+		ProfileSessionPolicy: taskmodels.NormalizeWorkflowProfileSessionPolicy(string(wf.ProfileSessionPolicy)),
+		Steps:                portableSteps,
 	}
 	if resolveProfile != nil && wf.AgentProfileID != "" {
 		wp.AgentProfile = resolveProfile(wf.AgentProfileID)

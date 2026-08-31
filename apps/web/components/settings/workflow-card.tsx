@@ -33,6 +33,7 @@ import { useWorkflowMutationGuard } from "./workflow-mutation-guard";
 import { useWorkflowDraftContributor } from "./use-workflow-draft-contributor";
 import { WorkflowPromptSection } from "./workflow-prompt-section";
 import { WorkflowDescriptionField } from "./workflow-description-field";
+import { WorkflowProfileSessionPolicyField } from "./workflow-profile-session-policy";
 import { useWorkflowDuplication } from "@/app/settings/workspace/use-workflow-duplication";
 
 const TEMP_WORKFLOW_PREFIX = "temp-workflow-";
@@ -51,6 +52,7 @@ type WorkflowCardProps = {
     description?: string;
     prompt?: string;
     agent_profile_id?: string;
+    profile_session_policy?: Workflow["profile_session_policy"];
   }) => void;
   onDeleteWorkflow: () => Promise<unknown>;
   onDuplicateWorkflow: (steps: WorkflowStep[]) => void;
@@ -175,6 +177,7 @@ type WorkflowCardBodyProps = {
     description?: string;
     prompt?: string;
     agent_profile_id?: string;
+    profile_session_policy?: Workflow["profile_session_policy"];
   }) => void;
   workflowLoading: boolean;
   workflowSteps: WorkflowStep[];
@@ -229,6 +232,50 @@ function WorkflowNameField({
   );
 }
 
+function WorkflowAgentProfileField({
+  workflow,
+  savedWorkflow,
+  onUpdateWorkflow,
+  readOnly,
+}: Pick<WorkflowCardBodyProps, "workflow" | "savedWorkflow" | "onUpdateWorkflow" | "readOnly">) {
+  const { t } = useTranslation();
+  const healthyProfiles = useHealthyAgentProfiles(workflow.agent_profile_id);
+
+  return (
+    <div className="w-full space-y-1.5 md:w-[240px] md:shrink-0">
+      <Label className="flex items-center gap-1">
+        <span>{t("workflows:agentProfile")}</span>
+        <HelpTip text={t("workflows:agentProfileHelp")} />
+      </Label>
+      <Select
+        value={workflow.agent_profile_id || "none"}
+        onValueChange={(value) =>
+          onUpdateWorkflow({ agent_profile_id: value === "none" ? "" : value })
+        }
+        disabled={readOnly}
+      >
+        <SelectTrigger
+          className="w-full cursor-pointer"
+          data-testid="workflow-agent-profile-select"
+          data-settings-dirty={isWorkflowFieldDirty(workflow, savedWorkflow, "agent_profile_id")}
+        >
+          <SelectValue placeholder={t("workflows:noneUseTaskDefault")} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none" className="cursor-pointer">
+            {t("workflows:noneUseTaskDefault")}
+          </SelectItem>
+          {healthyProfiles.map((p) => (
+            <SelectItem key={p.id} value={p.id} className="cursor-pointer">
+              {p.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 function WorkflowCardBody({
   workflow,
   savedWorkflow,
@@ -244,7 +291,6 @@ function WorkflowCardBody({
   onSessionConfigResolutionPendingChange,
 }: WorkflowCardBodyProps) {
   const { t } = useTranslation();
-  const healthyProfiles = useHealthyAgentProfiles(workflow.agent_profile_id);
 
   return (
     <>
@@ -257,42 +303,19 @@ function WorkflowCardBody({
           readOnly={readOnly}
           isImproveWorkspace={isImproveWorkspace}
         />
-        <div className="w-full space-y-1.5 md:w-[240px] md:shrink-0">
-          <Label className="flex items-center gap-1">
-            <span>{t("workflows:agentProfile")}</span>
-            <HelpTip text={t("workflows:agentProfileHelp")} />
-          </Label>
-          <Select
-            value={workflow.agent_profile_id || "none"}
-            onValueChange={(value) =>
-              onUpdateWorkflow({ agent_profile_id: value === "none" ? "" : value })
-            }
-            disabled={readOnly}
-          >
-            <SelectTrigger
-              className="w-full cursor-pointer"
-              data-testid="workflow-agent-profile-select"
-              data-settings-dirty={isWorkflowFieldDirty(
-                workflow,
-                savedWorkflow,
-                "agent_profile_id",
-              )}
-            >
-              <SelectValue placeholder={t("workflows:noneUseTaskDefault")} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none" className="cursor-pointer">
-                {t("workflows:noneUseTaskDefault")}
-              </SelectItem>
-              {healthyProfiles.map((p) => (
-                <SelectItem key={p.id} value={p.id} className="cursor-pointer">
-                  {p.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <WorkflowAgentProfileField
+          workflow={workflow}
+          savedWorkflow={savedWorkflow}
+          onUpdateWorkflow={onUpdateWorkflow}
+          readOnly={readOnly}
+        />
       </div>
+      <WorkflowProfileSessionPolicyField
+        workflow={workflow}
+        savedWorkflow={savedWorkflow}
+        onChange={(profile_session_policy) => onUpdateWorkflow({ profile_session_policy })}
+        readOnly={readOnly}
+      />
       <WorkflowDescriptionField
         workflow={workflow}
         savedWorkflow={savedWorkflow}

@@ -14,6 +14,7 @@ type StoreWorkflow = {
   description?: string | null;
   prompt?: string;
   agent_profile_id?: string;
+  profile_session_policy?: "complete" | "park_reuse" | "park_new";
   hidden?: boolean;
   style?: "kanban" | "office" | "custom";
 };
@@ -315,6 +316,44 @@ describe("useWorkflowSettings — cross-tab field sync", () => {
 
     expect(result.current.workflowItems[0].agent_profile_id).toBe(agentProfileId("agent-draft"));
     expect(result.current.savedWorkflowItems[0].agent_profile_id).toBe(agentProfileId("agent-new"));
+    expect(result.current.isWorkflowDirty(result.current.workflowItems[0])).toBe(true);
+  });
+});
+
+describe("useWorkflowSettings — profile session policy sync", () => {
+  it("syncs a workflow profile session policy update from the store", () => {
+    const initial = [
+      { ...wf("wf-b1", "ws-b", NAME_B1), profile_session_policy: "complete" as const },
+    ];
+    const store: StoreWorkflow = { ...STORE_B1, profile_session_policy: "complete" };
+    const { result, rerender } = renderWithStoreItem(initial, store);
+
+    act(() => {
+      rerender({ storeItems: [{ ...store, profile_session_policy: "park_reuse" }] });
+    });
+
+    expect(result.current.workflowItems[0].profile_session_policy).toBe("park_reuse");
+    expect(result.current.savedWorkflowItems[0].profile_session_policy).toBe("park_reuse");
+  });
+
+  it("does not overwrite a dirty profile session policy when the store refreshes", () => {
+    const initial = [
+      { ...wf("wf-b1", "ws-b", NAME_B1), profile_session_policy: "complete" as const },
+    ];
+    const store: StoreWorkflow = { ...STORE_B1, profile_session_policy: "complete" };
+    const { result, rerender } = renderWithStoreItem(initial, store);
+
+    act(() => {
+      result.current.setWorkflowItems((items) =>
+        items.map((item) => ({ ...item, profile_session_policy: "park_new" as const })),
+      );
+    });
+    act(() => {
+      rerender({ storeItems: [{ ...store, profile_session_policy: "park_reuse" }] });
+    });
+
+    expect(result.current.workflowItems[0].profile_session_policy).toBe("park_new");
+    expect(result.current.savedWorkflowItems[0].profile_session_policy).toBe("park_reuse");
     expect(result.current.isWorkflowDirty(result.current.workflowItems[0])).toBe(true);
   });
 });

@@ -583,6 +583,7 @@ function mapWorkflowItem(workflow: Workflow) {
     name: workflow.name,
     description: workflow.description ?? null,
     sortOrder: workflow.sort_order ?? 0,
+    profile_session_policy: workflow.profile_session_policy ?? "complete",
     ...(workflow.agent_profile_id ? { agent_profile_id: workflow.agent_profile_id } : {}),
     ...(workflow.hidden !== undefined ? { hidden: workflow.hidden } : {}),
     ...(workflow.style !== undefined ? { style: workflow.style } : {}),

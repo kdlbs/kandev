@@ -244,6 +244,17 @@ export class WorkflowSettingsPage {
     return card.getByTestId("workflow-agent-profile-select");
   }
 
+  /** The workflow-level profile session policy select trigger within a workflow card. */
+  workflowProfileSessionPolicySelect(card: Locator): Locator {
+    return card.getByTestId("workflow-profile-session-policy-select");
+  }
+
+  /** Select and apply a workflow-level profile session policy. */
+  async setWorkflowProfileSessionPolicy(card: Locator, optionName: string, touch = false) {
+    await this.activate(this.workflowProfileSessionPolicySelect(card), touch);
+    await this.activate(this.page.getByRole("option", { name: optionName, exact: false }), touch);
+  }
+
   /** The step agent profile override select trigger in the step config panel within a workflow card. */
   stepAgentProfileSelect(card: Locator): Locator {
     return card.getByTestId("step-agent-profile-select");

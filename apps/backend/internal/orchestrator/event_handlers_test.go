@@ -41,17 +41,18 @@ import (
 
 // mockStepGetter implements WorkflowStepGetter for testing.
 type mockStepGetter struct {
-	steps                  map[string]*wfmodels.WorkflowStep // stepID -> step
-	getStepFunc            func(context.Context, string) (*wfmodels.WorkflowStep, error)
-	workflowAgentProfileID string            // returned by GetWorkflowMeta
-	workflowAgentProfiles  []string          // optional profiles returned per call
-	workflowPrompts        map[string]string // workflowID -> prompt
-	workflowMetaCalls      int               // GetWorkflowMeta invocations
-	workflowMetaErr        error             // optional error from GetWorkflowMeta
-	workflowMetaDelay      time.Duration     // optional sleep before returning meta
-	workflowMetaMu         sync.Mutex        // guards workflowMetaCalls for concurrent tests
-	getStepCalls           int               // GetStep invocations, guarded by getStepMu
-	getStepMu              sync.Mutex
+	steps                        map[string]*wfmodels.WorkflowStep // stepID -> step
+	getStepFunc                  func(context.Context, string) (*wfmodels.WorkflowStep, error)
+	workflowAgentProfileID       string            // returned by GetWorkflowMeta
+	workflowAgentProfiles        []string          // optional profiles returned per call
+	workflowPrompts              map[string]string // workflowID -> prompt
+	workflowProfileSessionPolicy models.WorkflowProfileSessionPolicy
+	workflowMetaCalls            int           // GetWorkflowMeta invocations
+	workflowMetaErr              error         // optional error from GetWorkflowMeta
+	workflowMetaDelay            time.Duration // optional sleep before returning meta
+	workflowMetaMu               sync.Mutex    // guards workflowMetaCalls for concurrent tests
+	getStepCalls                 int           // GetStep invocations, guarded by getStepMu
+	getStepMu                    sync.Mutex
 }
 
 func newMockStepGetter() *mockStepGetter {
@@ -130,8 +131,9 @@ func (m *mockStepGetter) GetWorkflowMeta(_ context.Context, workflowID string) (
 		profileID = m.workflowAgentProfiles[callNumber-1]
 	}
 	return WorkflowMeta{
-		AgentProfileID: profileID,
-		Prompt:         prompt,
+		AgentProfileID:       profileID,
+		Prompt:               prompt,
+		ProfileSessionPolicy: m.workflowProfileSessionPolicy,
 	}, nil
 }
 

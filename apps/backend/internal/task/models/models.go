@@ -249,6 +249,10 @@ func HasAutoStartOnCreateIntent(metadata map[string]interface{}) bool {
 const (
 	SessionMetaKeyCreatedBy        = "created_by"
 	SessionCreatedByWorkflowSwitch = "workflow_switch"
+	// SessionMetaKeyWorkflowProfileSwitchStopIntent identifies the transient
+	// coordination record used to suppress the lifecycle event caused by a
+	// parked workflow profile switch.
+	SessionMetaKeyWorkflowProfileSwitchStopIntent = "workflow_profile_switch_stop_intent"
 	// SessionMetaKeyOrigin identifies immutable task-session provenance. Unlike
 	// IsPrimary, it never changes when the user selects another conversation tab.
 	SessionMetaKeyOrigin                 = "origin"
@@ -260,6 +264,14 @@ const (
 	// their own creation time, so the result survives transcript write failures.
 	SessionMetaKeyRecoveryResolvedAt = "recovery_resolved_at"
 )
+
+// WorkflowProfileSwitchStopIntent binds a deliberate parked-session stop to
+// one exact runtime execution. Stamp is compared before the metadata key is
+// removed, so a delayed event cannot consume a newer switch intent.
+type WorkflowProfileSwitchStopIntent struct {
+	ExecutionID string `json:"execution_id"`
+	Stamp       string `json:"stamp"`
+}
 
 // SessionMetaKeySessionMode records the agent's last-known session permission
 // mode (auto / default / accept-edits, etc.) so it survives a backend restart or
@@ -995,6 +1007,30 @@ const (
 	WorkflowStyleCustom = "custom"
 )
 
+// WorkflowProfileSessionPolicy controls what happens to a session when a
+// fixed-profile workflow step switches to another agent profile.
+type WorkflowProfileSessionPolicy string
+
+const (
+	WorkflowProfileSessionPolicyComplete  WorkflowProfileSessionPolicy = "complete"
+	WorkflowProfileSessionPolicyParkReuse WorkflowProfileSessionPolicy = "park_reuse"
+	WorkflowProfileSessionPolicyParkNew   WorkflowProfileSessionPolicy = "park_new"
+)
+
+// NormalizeWorkflowProfileSessionPolicy returns the safe compatibility default
+// for empty and unknown workflow profile-session policy values.
+func NormalizeWorkflowProfileSessionPolicy(value string) WorkflowProfileSessionPolicy {
+	value = strings.TrimSpace(value)
+	switch WorkflowProfileSessionPolicy(value) {
+	case WorkflowProfileSessionPolicyComplete,
+		WorkflowProfileSessionPolicyParkReuse,
+		WorkflowProfileSessionPolicyParkNew:
+		return WorkflowProfileSessionPolicy(value)
+	default:
+		return WorkflowProfileSessionPolicyComplete
+	}
+}
+
 // WorkflowSource values are persisted in workflows.source and record where a
 // workflow definition came from. Manual workflows are user-managed; GitHub
 // workflows are owned by the workflow-sync poller and may be overwritten or
@@ -1024,6 +1060,9 @@ type Workflow struct {
 	// Hidden workflows are excluded from management and picker UIs by default.
 	// Used by system-only flows like Improve Kandev.
 	Hidden bool `json:"hidden,omitempty"`
+	// ProfileSessionPolicy controls whether profile-switch source sessions are
+	// completed, parked for reuse, or parked while each re-entry starts fresh.
+	ProfileSessionPolicy WorkflowProfileSessionPolicy `json:"profile_session_policy"`
 	// Style is a Phase 2 (ADR-0004) UX hint read by the frontend ONLY.
 	// Allowed values: "kanban" | "office" | "custom". Empty / unknown
 	// values fall back to "kanban" via the schema default. Backend code

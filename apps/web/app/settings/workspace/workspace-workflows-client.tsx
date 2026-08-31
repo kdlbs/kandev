@@ -163,7 +163,9 @@ export function hasNewerWorkflowMetadata(current: Workflow, savedFrom: Workflow)
     current.name !== savedFrom.name ||
     (current.description ?? "") !== (savedFrom.description ?? "") ||
     (current.prompt ?? "") !== (savedFrom.prompt ?? "") ||
-    (current.agent_profile_id ?? "") !== (savedFrom.agent_profile_id ?? "")
+    (current.agent_profile_id ?? "") !== (savedFrom.agent_profile_id ?? "") ||
+    (current.profile_session_policy ?? "complete") !==
+      (savedFrom.profile_session_policy ?? "complete")
   );
 }
 
@@ -190,7 +192,13 @@ function useWorkflowActions({
 
   const handleUpdateWorkflow = (
     workflowId: string,
-    updates: { name?: string; description?: string; prompt?: string; agent_profile_id?: string },
+    updates: {
+      name?: string;
+      description?: string;
+      prompt?: string;
+      agent_profile_id?: string;
+      profile_session_policy?: Workflow["profile_session_policy"];
+    },
   ) => {
     setWorkflowItems((prev) =>
       prev.map((wf) =>
@@ -292,7 +300,13 @@ type WorkflowListProps = {
   isImproveWorkspace?: boolean;
   onUpdate: (
     id: string,
-    u: { name?: string; description?: string; agent_profile_id?: string },
+    u: {
+      name?: string;
+      description?: string;
+      prompt?: string;
+      agent_profile_id?: string;
+      profile_session_policy?: Workflow["profile_session_policy"];
+    },
   ) => void;
   onDelete: (id: string) => void;
   onDuplicate: (workflow: Workflow, steps: WorkflowStep[]) => void;
