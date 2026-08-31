@@ -297,6 +297,10 @@ type Config struct {
 	// decide whether to kill the entire process group on shutdown.
 	RequiresProcessKill bool
 
+	// RecordTurnStart stamps process.Manager's turn-start marker for the
+	// parked-on-background-work settle probe. The lifecycle layer omits it
+	// when the feature is disabled. May be nil; callers must guard.
+	RecordTurnStart shared.RecordTurnStartFunc
 	// NotificationQueueCapacity is the server-resolved ACP inbound queue size.
 	NotificationQueueCapacity int
 }
@@ -329,6 +333,7 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		AssumeMcpSse:              c.AssumeMcpSse,
 		AssumeMcpHttp:             c.AssumeMcpHttp,
 		RequiresProcessKill:       c.RequiresProcessKill,
+		RecordTurnStart:           c.RecordTurnStart,
 		NotificationQueueCapacity: c.NotificationQueueCapacity,
 	}
 }

@@ -7,6 +7,36 @@ import { mergeTaskRepositoryFields } from "@/lib/ws/handlers/task-repositories";
 type KanbanTask = KanbanState["tasks"][number];
 type KanbanStep = KanbanState["steps"][number];
 
+/**
+ * Fields the multi-workflow snapshot preserves when a kanban.update omits
+ * them. Falling back is only correct for `undefined` (task absent from
+ * kanban.tasks); an explicit `null` means the primary intentionally cleared
+ * the value and must NOT be replaced by a stale snapshot value.
+ */
+const PRESERVED_SNAPSHOT_KEYS = [
+  "primarySessionId",
+  "primarySessionState",
+  "primarySessionPendingAction",
+  "taskPendingAction",
+  "foregroundActivity",
+  "parkedOnBackgroundWork",
+  "interrupted",
+  "autoStartFailed",
+  "priority",
+] as const satisfies readonly (keyof KanbanTask)[];
+
+function mergeMultiSnapshotTask(task: KanbanTask, fallback: KanbanTask | undefined): KanbanTask {
+  const merged: KanbanTask = { ...task, ...mergeTaskRepositoryFields(fallback, task) };
+  for (const key of PRESERVED_SNAPSHOT_KEYS) {
+    if (merged[key] === undefined && fallback?.[key] !== undefined) {
+      // Index-write through a checked key list; the pair is same-keyed by
+      // construction, so the value type matches.
+      (merged as Record<string, unknown>)[key] = fallback[key];
+    }
+  }
+  return merged;
+}
+
 function queueFields(
   task: KanbanUpdateTask,
   existing: KanbanTask | undefined,
@@ -99,35 +129,6 @@ function preserveIfUndefined<T>(value: T | undefined, fallback: T | undefined): 
   return value === undefined ? fallback : value;
 }
 
-function preserveMultiSnapshotFields(
-  t: KanbanTask,
-  fallback: KanbanTask | undefined,
-): Pick<
-  KanbanTask,
-  | "primarySessionId"
-  | "primarySessionState"
-  | "primarySessionPendingAction"
-  | "taskPendingAction"
-  | "foregroundActivity"
-  | "interrupted"
-  | "autoStartFailed"
-  | "priority"
-> {
-  return {
-    primarySessionId: preserveIfUndefined(t.primarySessionId, fallback?.primarySessionId),
-    primarySessionState: preserveIfUndefined(t.primarySessionState, fallback?.primarySessionState),
-    primarySessionPendingAction: preserveIfUndefined(
-      t.primarySessionPendingAction,
-      fallback?.primarySessionPendingAction,
-    ),
-    taskPendingAction: preserveIfUndefined(t.taskPendingAction, fallback?.taskPendingAction),
-    foregroundActivity: preserveIfUndefined(t.foregroundActivity, fallback?.foregroundActivity),
-    interrupted: preserveIfUndefined(t.interrupted, fallback?.interrupted),
-    autoStartFailed: preserveIfUndefined(t.autoStartFailed, fallback?.autoStartFailed),
-    priority: preserveIfUndefined(t.priority, fallback?.priority),
-  };
-}
-
 export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "kanban.update": (message) => {
@@ -176,6 +177,7 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
               autoStartFailed: existing?.autoStartFailed,
               foregroundActivity: existing?.foregroundActivity,
               priority: preserveIfUndefined(task.priority, existing?.priority),
+              parkedOnBackgroundWork: existing?.parkedOnBackgroundWork,
               ...queueFields(task, existing),
               ...dependencyFields(task, existing),
             };
@@ -190,15 +192,9 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
         const snapshot = state.kanbanMulti.snapshots[workflowId];
         if (snapshot) {
           const existingMultiById = new Map(snapshot.tasks.map((t) => [t.id, t]));
-          const multiTasks = tasks.map((t) => {
-            const fallback = existingMultiById.get(t.id);
-            const repoFields = mergeTaskRepositoryFields(fallback, t);
-            return {
-              ...t,
-              ...repoFields,
-              ...preserveMultiSnapshotFields(t, fallback),
-            };
-          });
+          const multiTasks = tasks.map((t) =>
+            mergeMultiSnapshotTask(t, existingMultiById.get(t.id)),
+          );
           return {
             ...next,
             kanbanMulti: {

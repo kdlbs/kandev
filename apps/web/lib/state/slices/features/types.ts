@@ -15,6 +15,7 @@ export const defaultFeatureFlags = {
   claudeBackgroundPromptHandoff: false,
   claudeMidTurnSteering: false,
   officeSessionIdentity: false,
+  parkedOnBackgroundWork: false,
 } as const;
 
 export type FeatureName = keyof typeof defaultFeatureFlags;

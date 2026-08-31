@@ -715,8 +715,9 @@ func TestBuildReconnectCreateInstanceRequest(t *testing.T) {
 		Env: map[string]string{
 			"OPENAI_API_KEY": "token",
 		},
-		McpServers: []McpServerConfig{{Name: "test-mcp"}},
-		McpMode:    "config",
+		McpServers:             []McpServerConfig{{Name: "test-mcp"}},
+		McpMode:                "config",
+		ParkedOnBackgroundWork: true,
 	}
 
 	got := buildReconnectCreateInstanceRequest(req, "previous-exec")
@@ -740,6 +741,9 @@ func TestBuildReconnectCreateInstanceRequest(t *testing.T) {
 	}
 	if len(got.McpServers) != 1 || got.McpServers[0].Name != "test-mcp" {
 		t.Fatalf("mcp servers not propagated: %v", got.McpServers)
+	}
+	if !got.ParkedOnBackgroundWork {
+		t.Fatal("ParkedOnBackgroundWork was not propagated")
 	}
 	if !got.AssumeMcpSse {
 		t.Fatal("expected AssumeMcpSse to be propagated")

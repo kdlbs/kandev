@@ -207,6 +207,7 @@ func buildTaskDTOsWithSessionInfo(
 	svc *service.Service,
 	log *logger.Logger,
 	activityProvider dto.ForegroundActivityProvider,
+	parkedProvider dto.TaskParkedProjectionProvider,
 	tasks []*models.Task,
 ) ([]dto.TaskDTO, error) {
 	if len(tasks) == 0 {
@@ -292,6 +293,7 @@ func buildTaskDTOsWithSessionInfo(
 		dto.EnrichTaskForegroundActivity(&taskDTO, sessions, activityProvider)
 		dto.EnrichTaskDependencies(&taskDTO, dependencyProjection(dependencyViews[task.ID]), task)
 		dto.EnrichTaskStatusSummary(&taskDTO, task.ID, statusSummaries)
+		dto.EnrichTaskParked(&taskDTO, parkedProvider)
 		if taskDTO.StatusSummary != nil {
 			switch {
 			case queuedErr != nil:
@@ -440,7 +442,7 @@ func (h *TaskHandlers) taskSessionDTO(ctx context.Context, session *models.TaskS
 }
 
 func (h *TaskHandlers) toTaskDTOsWithSessionInfo(ctx context.Context, tasks []*models.Task) ([]dto.TaskDTO, error) {
-	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, tasks)
+	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, h.taskParked, tasks)
 }
 
 func (h *TaskHandlers) httpGetTask(c *gin.Context) {
@@ -449,7 +451,7 @@ func (h *TaskHandlers) httpGetTask(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task not found")
 		return
 	}
-	dtos, err := buildTaskDTOsWithSessionInfo(c.Request.Context(), h.service, h.logger, h.foregroundActivity, []*models.Task{task})
+	dtos, err := buildTaskDTOsWithSessionInfo(c.Request.Context(), h.service, h.logger, h.foregroundActivity, h.taskParked, []*models.Task{task})
 	if err != nil {
 		h.logger.Error("failed to build task DTO with session info", zap.Error(err))
 		c.JSON(http.StatusOK, dto.FromTask(task))
@@ -516,6 +518,7 @@ func (h *TaskHandlers) httpGetTaskSession(c *gin.Context) {
 	}
 	sessionDTO := h.taskSessionDTO(c.Request.Context(), session)
 	dto.EnrichForegroundActivity(&sessionDTO, h.foregroundActivity)
+	dto.EnrichParked(&sessionDTO, h.parkedProjection)
 	c.JSON(http.StatusOK, dto.GetTaskSessionResponse{
 		Session: sessionDTO,
 	})
@@ -538,6 +541,7 @@ func (h *TaskHandlers) httpDismissLastAgentError(c *gin.Context) {
 	}
 	sessionDTO := h.taskSessionDTO(c.Request.Context(), session)
 	dto.EnrichForegroundActivity(&sessionDTO, h.foregroundActivity)
+	dto.EnrichParked(&sessionDTO, h.parkedProjection)
 	c.JSON(http.StatusOK, dto.GetTaskSessionResponse{
 		Session: sessionDTO,
 	})

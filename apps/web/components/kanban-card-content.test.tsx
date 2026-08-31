@@ -27,7 +27,8 @@ vi.mock("@/components/gitlab/mr-task-icon", () => ({
 }));
 
 import { pluginRegistry } from "@/lib/plugins/registry";
-import { KanbanCardBody, renderTaskStatusIcon } from "./kanban-card-content";
+import { KanbanCardBody } from "./kanban-card-content";
+import { renderTaskStatusIcon } from "./kanban-card-status-icon";
 import type { Task } from "./kanban-card";
 
 const TASK: Task = {

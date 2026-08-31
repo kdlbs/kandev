@@ -41,5 +41,6 @@ The following specifications were added after this migration and remain in the l
 - [Kubernetes Executor](kubernetes-executor/spec.md) (implemented)
 - [Task Delivery Ledger](task-delivery-ledger/spec.md) (draft)
 - [Workflow Engine Operation Ledger Lifetime](workflow-engine-operation-ledger-lifetime/spec.md) (draft)
+- [Parked board MVP](parked-board-mvp/spec.md) (building)
 
 ## Authoring rule

@@ -70,6 +70,7 @@ type ContainerConfig struct {
 	// diff stats against the task-recorded base.
 	BaseBranches             map[string]string
 	RemoteContributions      map[string]models.RemoteContribution
+	ParkedOnBackgroundWork   bool
 	ContributionDestinations map[string]models.ContributionDestination
 	ComparisonTargets        map[string]models.ComparisonTarget
 }
@@ -123,6 +124,7 @@ func buildContainerCreateInstanceRequest(
 		McpProviders:               config.McpProviders,
 		McpProfile:                 config.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromAgent(config.AgentConfig),
+		ParkedOnBackgroundWork:     config.ParkedOnBackgroundWork,
 		RequiresProcessKill:        requiresProcessKill,
 		StripEnv:                   stripEnv,
 		BaseBranches:               config.BaseBranches,
