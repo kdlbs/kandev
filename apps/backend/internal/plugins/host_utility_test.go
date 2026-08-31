@@ -109,7 +109,7 @@ func TestPluginHost_InvokeUtilityAgent_UsesConfiguredAgentProfileBeforeUtilityAg
 	}
 }
 
-func TestPluginHost_InvokeUtilityAgent_FallsBackToUndeclaredLegacyUtilityAgentConfig(t *testing.T) {
+func TestPluginHost_InvokeUtilityAgent_RejectsUndeclaredLegacyUtilityAgentConfig(t *testing.T) {
 	d := configuredUtilityHost(t)
 	d.host.configSchema = map[string]any{
 		"properties": map[string]any{
@@ -117,15 +117,15 @@ func TestPluginHost_InvokeUtilityAgent_FallsBackToUndeclaredLegacyUtilityAgentCo
 		},
 	}
 
-	got, err := d.host.InvokeUtilityAgent(context.Background(), "summarize yesterday")
-	if err != nil || got != "the summary" {
-		t.Fatalf("InvokeUtilityAgent() = (%q, %v)", got, err)
+	_, err := d.host.InvokeUtilityAgent(context.Background(), "summarize yesterday")
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("InvokeUtilityAgent() status = %s, want %s; err = %v", status.Code(err), codes.FailedPrecondition, err)
 	}
-	if d.utilAgents.gotSelector != "utility-agent-42" {
-		t.Fatalf("looked up utility agent %q", d.utilAgents.gotSelector)
+	if d.utilAgents.calls != 0 {
+		t.Fatalf("looked up undeclared utility agent %d times", d.utilAgents.calls)
 	}
-	if d.utilRun.gotProfileID != "profile-42" {
-		t.Fatalf("runner got profile %q", d.utilRun.gotProfileID)
+	if d.utilRun.calls != 0 {
+		t.Fatalf("runner calls = %d, want 0", d.utilRun.calls)
 	}
 }
 

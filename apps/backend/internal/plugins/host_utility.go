@@ -98,7 +98,7 @@ func (h *pluginHost) InvokeUtilityAgent(ctx context.Context, prompt string) (str
 	// utility-agent schema. Keep reading the persisted legacy key even though
 	// the new settings form no longer renders it; plugin config replacement does
 	// not migrate or delete unknown keys.
-	if hasUtilityAgentConfig(h.configSchema) || hasAgentProfileConfig(h.configSchema) {
+	if hasUtilityAgentConfig(h.configSchema) {
 		agentID, _ := config[utilityAgentConfigKey].(string)
 		if agentID != "" {
 			return h.invokeConfiguredUtilityAgent(ctx, agentID, agents, runner, prompt)
