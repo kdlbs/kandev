@@ -734,13 +734,16 @@ func TestDeleteLiveMonitorSnapshots(t *testing.T) {
 		t.Fatalf("upsert live: %v", err)
 	}
 
-	// Create an agent_completed snapshot.
+	// Create a non-live snapshot. An agent_completed write intentionally
+	// supersedes the live row in the same environment, so it cannot be used to
+	// exercise DeleteLiveMonitorSnapshots directly.
 	completed := &models.GitSnapshot{
-		SessionID:   sessionID,
-		Branch:      "feature",
-		HeadCommit:  "completed-head",
-		TriggeredBy: "agent_completed",
-		Metadata:    map[string]interface{}{"branch_additions": float64(5)},
+		SessionID:    sessionID,
+		SnapshotType: models.SnapshotTypeArchive,
+		Branch:       "feature",
+		HeadCommit:   "completed-head",
+		TriggeredBy:  "archive",
+		Metadata:     map[string]interface{}{"branch_additions": float64(5)},
 	}
 	if err := repo.CreateGitSnapshot(ctx, completed); err != nil {
 		t.Fatalf("create agent_completed: %v", err)
@@ -760,7 +763,7 @@ func TestDeleteLiveMonitorSnapshots(t *testing.T) {
 		t.Fatalf("DeleteLiveMonitorSnapshots: %v", err)
 	}
 
-	// Only agent_completed should remain.
+	// Only the non-live snapshot should remain.
 	all, err = repo.GetGitSnapshotsBySession(ctx, sessionID, 0)
 	if err != nil {
 		t.Fatalf("list after delete: %v", err)
@@ -768,7 +771,7 @@ func TestDeleteLiveMonitorSnapshots(t *testing.T) {
 	if len(all) != 1 {
 		t.Fatalf("expected 1 snapshot after delete, got %d", len(all))
 	}
-	if all[0].TriggeredBy != "agent_completed" {
-		t.Errorf("expected remaining snapshot to be agent_completed, got %q", all[0].TriggeredBy)
+	if all[0].TriggeredBy != "archive" {
+		t.Errorf("expected remaining snapshot to be archive, got %q", all[0].TriggeredBy)
 	}
 }
