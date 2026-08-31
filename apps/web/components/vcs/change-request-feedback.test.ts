@@ -65,4 +65,22 @@ describe("getChangeRequestFailureFeedback", () => {
       variant: "error",
     });
   });
+
+  it("maps empty-remote publication failures to recovery copy", () => {
+    expect(
+      getChangeRequestFailureFeedback(
+        {
+          success: false,
+          provider: "github",
+          error: "raw push output",
+          error_code: "empty_remote_branch_publish_failed",
+        },
+        getChangeRequestTerminology("github"),
+      ),
+    ).toEqual({
+      title: "Create PR failed",
+      description: "The base branch was published, but the task branch was not. Try Push again.",
+      variant: "error",
+    });
+  });
 });

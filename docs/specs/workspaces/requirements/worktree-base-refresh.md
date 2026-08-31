@@ -48,7 +48,8 @@ old copy without my knowledge.
 - **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.3:** When a required fetch fails
   because of authentication, network access, timeout, cancellation, or another
   Git error, Kandev shall stop worktree preparation and shall not use a stale
-  local fallback ref.
+  local fallback ref. An authenticated zero-ref advertisement is the distinct
+  empty-remote state defined by `REQ-WORKSPACES-EMPTY-REMOTE-REPOSITORIES-001`.
 - **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.4:** When the required fetch
   succeeds, Kandev shall choose a start ref that contains the fetched remote
   base. It can preserve local-only commits only when the local base also
@@ -65,6 +66,9 @@ old copy without my knowledge.
   during initial launch or a resume that creates or recreates a worktree,
   Kandev shall expose the failure through the existing durable task launch-error
   projection.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.8:** When authenticated refresh
+  proves that a remote advertises zero refs, Kandev shall use only the marked
+  local baseline defined by the empty-remote repository contract.
 
 ## Out of scope
 
@@ -77,4 +81,3 @@ old copy without my knowledge.
 ## System design
 
 - [Worktree Base Refresh System Design](../system-design/worktree-base-refresh.md)
-

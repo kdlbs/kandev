@@ -218,5 +218,6 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-28-bind-github-auto-merge-attempts-to-reviewed-head | [Bind GitHub Auto-Merge Attempts to the Reviewed Head](2026-08-28-bind-github-auto-merge-attempts-to-reviewed-head.md) | accepted | backend, frontend, protocol, security, GitHub | 2026-08-28 |
 | 2026-08-30-context-reset-quiesces-active-turn | [Quiesce Active Turns Before Context Reset](2026-08-30-context-reset-quiesces-active-turn.md) | accepted | backend, workflow | 2026-08-30 |
 | 2026-08-30-serialize-terminal-workflow-routing | [Serialize Terminal Workflow Routing](2026-08-30-serialize-terminal-workflow-routing.md) | accepted | workflow | 2026-08-30 |
+| 2026-08-30-empty-remote-bootstrap-publication | [Keep Empty Remote Bootstrap Local Until Publication](2026-08-30-empty-remote-bootstrap-publication.md) | accepted | backend, frontend, protocol, security | 2026-08-30 |
 | 2026-08-30-bound-untracked-dependency-enumeration | [Bound Untracked Dependency Enumeration](2026-08-30-bound-untracked-dependency-enumeration.md) | accepted | backend | 2026-08-30 |
 | 2026-08-30-e2e-browser-cache | [Cache host-runner E2E browser provisioning](2026-08-30-e2e-browser-cache.md) | accepted | infra, workflow | 2026-08-30 |
