@@ -35,17 +35,19 @@ func (a *fakeIdentityAgent) BuildCommand(opts agents.CommandOptions) agents.Comm
 // create-instance request reads.
 type fakeRuntimeAgent struct {
 	*agents.MockAgent
-	id           string
-	requiresKill bool
-	stripEnv     []string
+	id                 string
+	requiresKill       bool
+	stripEnv           []string
+	namespacesMCPTools bool
 }
 
 func (a *fakeRuntimeAgent) ID() string { return a.id }
 
 func (a *fakeRuntimeAgent) Runtime() *agents.RuntimeConfig {
 	return &agents.RuntimeConfig{
-		RequiresProcessKill: a.requiresKill,
-		StripEnv:            a.stripEnv,
+		RequiresProcessKill:        a.requiresKill,
+		StripEnv:                   a.stripEnv,
+		NamespacesMCPToolsByServer: a.namespacesMCPTools,
 	}
 }
 
