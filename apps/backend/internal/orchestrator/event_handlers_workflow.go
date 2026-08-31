@@ -926,7 +926,12 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 		s.logger.Warn("failed to list completed manual move lifecycle tokens for recovery", zap.Error(err))
 		return
 	}
-	jobs := make(map[string]struct{}, len(pending)+len(promotions)+len(manualPending)+len(manualCompleted))
+	autoStarts, err := lister.ListTasksWithMetadataKey(ctx, models.MetaKeyAutoStartOnCreate)
+	if err != nil {
+		s.logger.Warn("failed to list auto-start-on-create tokens for recovery", zap.Error(err))
+		return
+	}
+	jobs := make(map[string]struct{}, len(pending)+len(promotions)+len(manualPending)+len(manualCompleted)+len(autoStarts))
 	for _, task := range pending {
 		if task != nil {
 			jobs[task.ID] = struct{}{}
@@ -943,6 +948,11 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 		}
 	}
 	for _, task := range manualCompleted {
+		if task != nil {
+			jobs[task.ID] = struct{}{}
+		}
+	}
+	for _, task := range autoStarts {
 		if task != nil {
 			jobs[task.ID] = struct{}{}
 		}
@@ -1054,12 +1064,21 @@ func (s *Service) recoverTaskLifecycleAttempt(ctx context.Context, taskID string
 	if _, pending := task.Metadata[models.MetaKeyQueuePromotionPending]; pending {
 		s.handleTaskQueuePromoted(ctx, watcher.TaskEventData{TaskID: taskID})
 	}
+	if hasAutoStartOnCreatePending(task) {
+		// Re-enters handleTaskCreated exactly like a live task.created
+		// delivery would, so it re-runs the same office/opt-in/claim guards
+		// rather than duplicating them here. A surviving token proves no
+		// launch ever happened (the claim precedes the launch in the live
+		// path), so there is no "already started" case to special-case.
+		s.handleTaskCreated(ctx, watcher.TaskEventData{TaskID: taskID})
+	}
 	latest, err := s.repo.GetTask(ctx, taskID)
 	if err != nil || latest == nil {
 		return false
 	}
 	return queuedMoveExitPending(latest) || manualMoveLifecyclePending(latest) ||
-		manualMoveLifecycleCompleted(latest) || hasQueuePromotionPending(latest)
+		manualMoveLifecycleCompleted(latest) || hasQueuePromotionPending(latest) ||
+		hasAutoStartOnCreatePending(latest)
 }
 
 func (s *Service) recoverQueuedMoveExit(ctx context.Context, task *models.Task) bool {
@@ -1120,6 +1139,19 @@ func hasQueuePromotionPending(task *models.Task) bool {
 		return false
 	}
 	_, pending := task.Metadata[models.MetaKeyQueuePromotionPending]
+	return pending
+}
+
+// hasAutoStartOnCreatePending reports whether a task still carries the
+// create-time auto-start opt-in (models.MetaKeyAutoStartOnCreate). A live
+// task.created delivery claims (removes) this key before launching, so a
+// surviving key at startup means that delivery was lost — e.g. to a
+// transient GetTask error in handleTaskCreated before the claim ever ran.
+func hasAutoStartOnCreatePending(task *models.Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	_, pending := task.Metadata[models.MetaKeyAutoStartOnCreate]
 	return pending
 }
 

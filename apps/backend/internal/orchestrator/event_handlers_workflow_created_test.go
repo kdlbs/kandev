@@ -324,3 +324,87 @@ func TestHandleTaskCreated(t *testing.T) {
 		svc.handleTaskCreated(ctx, watcher.TaskEventData{TaskID: "nonexistent"})
 	})
 }
+
+// TestReconcileTaskLifecycleTokensRecoversAutoStartOnCreate covers the
+// greptile-flagged gap on PR #2967 (review thread PRRT_kwDOQ2-eWs6bh_fo,
+// comment r3839544092): when handleTaskCreated's GetTask call fails
+// transiently, it returns before ever reaching claimTaskEventMetadata, so
+// MetaKeyAutoStartOnCreate is never claimed. task.created is a one-shot
+// watcher event with no redelivery, so without this recovery path the task
+// would carry the opt-in forever with no session and no way to retry.
+//
+// This test never calls handleTaskCreated directly — that IS the simulated
+// lost delivery. It seeds a task carrying the opt-in exactly as
+// CreateOfficeTaskInWorkflow would leave it if the live handler never ran,
+// then drives recovery entirely through reconcileTaskLifecycleTokens, the
+// startup sweep.
+func TestReconcileTaskLifecycleTokensRecoversAutoStartOnCreate(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+	requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
+
+	metadata := map[string]interface{}{
+		models.MetaKeyAutoStartOnCreate: true,
+		models.MetaKeyAgentProfileID:    "routine-assignee",
+	}
+	requireNoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:             "t-lost-delivery",
+		WorkspaceID:    "ws1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: "step1",
+		Title:          "Routine run",
+		Description:    "prompt",
+		State:          v1.TaskStateCreated,
+		Metadata:       metadata,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}))
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Routine Start", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{
+				{Type: wfmodels.OnEnterAutoStartAgent},
+			},
+		},
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t-lost-delivery"] = &v1.Task{
+		ID:          "t-lost-delivery",
+		WorkspaceID: "ws1",
+		WorkflowID:  "wf1",
+		Description: "prompt",
+		State:       v1.TaskStateCreated,
+		Metadata:    metadata,
+	}
+	launched := make(chan string, 1)
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			agentProfileID, _ := req.Metadata[models.MetaKeyAgentProfileID].(string)
+			launched <- agentProfileID
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+
+	svc.reconcileTaskLifecycleTokens(ctx)
+
+	select {
+	case got := <-launched:
+		if got != "routine-assignee" {
+			t.Fatalf("AgentProfileID = %q, want routine-assignee", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the startup sweep to recover the lost task.created delivery")
+	}
+
+	reloaded, err := repo.GetTask(ctx, "t-lost-delivery")
+	requireNoError(t, err)
+	if models.HasAutoStartOnCreateIntent(reloaded.Metadata) {
+		t.Fatal("MetaKeyAutoStartOnCreate still present after recovery; the next startup sweep would re-launch the same task")
+	}
+}
