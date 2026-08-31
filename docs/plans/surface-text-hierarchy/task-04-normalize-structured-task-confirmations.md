@@ -104,3 +104,7 @@ pnpm run i18n:check
 - Focused verification passed with 3 test files and 11 tests. Web typecheck,
   focused ESLint with `--max-warnings 0`, `pnpm run i18n:check`, targeted
   Prettier, and `git diff --check` also passed on the integrated stack.
+- Exact-head E2E integration exposed that the archive-only wide popover had
+  lost its specified pretty prose wrapping. The wide size contract now applies
+  `text-pretty` to its description while the default popover remains unchanged;
+  the shared popover and archive confirmation suites pass 20 tests.
