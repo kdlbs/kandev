@@ -40,11 +40,12 @@ new surface families from diverging by accident.
 
 ## Shared primitive contract
 
-The five title primitives add `text-balance` and word containment. The five
-description primitives add `text-pretty` and word containment. The two broken
-description primitives remove both `text-balance` and the `md:text-pretty`
-switch. These classes live on the semantic primitive rather than in every
-consumer:
+The five title primitives add `min-w-0`, `text-balance`, and word containment.
+The five description primitives add `min-w-0`, `text-pretty`, and word
+containment. The zero minimum lets grid and flex items shrink before emergency
+word breaks are considered. The two broken description primitives remove both
+`text-balance` and the `md:text-pretty` switch. These classes live on the
+semantic primitive rather than in every consumer:
 
 - `AlertTitle` and `AlertDescription` in `apps/packages/ui/src/alert.tsx`;
 - `AlertDialogTitle` and `AlertDialogDescription` in
@@ -75,10 +76,11 @@ reset. It does not mechanically rewrite every one-sentence confirmation. Task
 archive and delete have their separate consequence hierarchy in the task
 confirmation design.
 
-Dynamic labels use the description primitive's word containment. Consumer
-lists also apply `min-w-0` where a grid or flex item would otherwise use its
-min-content width. This contains unusually long task names, profile names,
-paths, and identifiers without breaking normal words unnecessarily.
+Dynamic labels use the description primitive's zero-minimum and word
+containment contract. Nested consumer list items also apply `min-w-0` where a
+grid or flex item would otherwise use its min-content width. This contains
+unusually long task names, profile names, paths, and identifiers without
+breaking normal words unnecessarily.
 
 ## Responsive behavior
 

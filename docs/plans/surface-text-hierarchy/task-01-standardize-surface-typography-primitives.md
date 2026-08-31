@@ -97,17 +97,18 @@ None.
 - RED: The focused primitive contract test initially failed on the missing
   `text-balance` title default and the inverted Alert/AlertDialog description
   classes.
+- Review-remediation RED: The focused contract failed when it required a zero
+  minimum width alongside emergency word wrapping for grid and flex items.
 - GREEN: Alert, AlertDialog, Dialog, Drawer, and Sheet titles now use
-  `text-balance wrap-break-word`; descriptions use
-  `text-pretty wrap-break-word` at every breakpoint. Alert and AlertDialog no
-  longer apply `text-balance md:text-pretty` to descriptions.
+  `min-w-0 text-balance wrap-break-word`; descriptions use
+  `min-w-0 text-pretty wrap-break-word` at every breakpoint. Alert and
+  AlertDialog no longer apply `text-balance md:text-pretty` to descriptions.
 - GREEN: `pnpm --filter @kandev/web test --
-  components/overlay-typography-primitives.test.tsx` (1 file, 2 tests).
+components/overlay-typography-primitives.test.tsx` (1 file, 2 tests).
 - GREEN: `pnpm --filter @kandev/web run typecheck`.
 - GREEN: Focused Prettier check for the five primitives and contract test.
 - GREEN: Focused ESLint check for the contract test with `--max-warnings 0`.
 - The contract test covers all five families, long-value containment classes,
   the absence of responsive balanced body copy, and className wrapping
-  overrides. No mobile E2E was added because this is a shared content-only
-  primitive change with no mobile composition, touch, navigation, or scroll
-  behavior change.
+  overrides. The approved Task 05 work order owns rendered 320px/393px geometry
+  checks, preserving this foundation task's component-test boundary.
