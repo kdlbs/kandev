@@ -30,6 +30,7 @@ Use one task-state icon component for the sidebar and command panel. Keep comman
 - Extract and reuse the sidebar task-state icon.
 - Map HTTP and store task data into the shared icon input.
 - Reconcile status summaries by revision.
+- Pass the effective workflow's final step ID into the shared icon and preserve live foreground-activity clears.
 - Add focused component, desktop, and phone tests.
 
 ## Out of scope
@@ -91,5 +92,6 @@ None.
 - Extracted the sidebar task-state icon into a shared component without changing its priority or background-work tooltip.
 - Replaced the command-panel hammer/archive glyph with the shared task-state icon and localized accessible state labels.
 - Reconciled task-search results with live workflow snapshots by task timestamp and status-summary revision.
+- Preserved final-step workflow completion and accepted live projections that clear foreground activity, including legacy projections without `updatedAt`.
 - Added focused stale/live projection tests plus desktop and phone Playwright coverage.
-- Passed all verification commands in this work order.
+- Passed all verification commands in this work order, including the remediation checks after PR review.

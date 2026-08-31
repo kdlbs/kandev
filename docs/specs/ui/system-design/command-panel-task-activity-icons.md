@@ -44,6 +44,8 @@ The shared component keeps the sidebar icon priority. Generating activity shows 
 
 Pending input, interruption, review, completion, and idle states keep their sidebar icons. The command panel does not use `workflow_step_id` to infer activity.
 
+For review tasks, the command panel receives the final step ID for each workflow from the same visible workflow-step list used by the sidebar. The shared component therefore selects the workflow-complete icon only when the effective task step is that workflow's final step.
+
 The command-panel result uses its existing compact leading-icon slot. The icon remains passive and cannot receive selection separately from the result row.
 
 ## Live data selection
@@ -52,7 +54,7 @@ The workspace task-list response provides the initial task state and bounded sta
 
 The command panel also reads the current task projection from the application store. WebSocket task events keep this projection current.
 
-For each result, the UI compares the HTTP summary with the live summary. The summary with the highest revision supplies activity and session data.
+For each result, the UI compares the HTTP summary with the live summary. The summary with the highest revision supplies activity and session data, while an accepted live task projection remains authoritative for its lifecycle and foreground-activity fields. This preserves an explicit live clear (`null`) instead of falling back to a stale search response. Legacy live projections without an update timestamp are accepted as current WebSocket-backed readings so their cleared fields are honored.
 
 A newer task update supplies lifecycle state and interruption state. If no live task exists, the result uses the HTTP fields.
 

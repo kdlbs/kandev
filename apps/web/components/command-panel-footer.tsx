@@ -145,6 +145,7 @@ export type CommandPanelViewProps = {
   stepMap: StepMap;
   repoMap: Map<string, string>;
   liveTasksById: Map<string, CommandPanelLiveTask>;
+  lastStepIdByWorkflowId: ReadonlyMap<string, string>;
   handleTaskSelect: (task: Task) => void;
 };
 
@@ -231,6 +232,7 @@ function CommandPanelResultList(props: CommandPanelViewProps) {
     stepMap,
     repoMap,
     liveTasksById,
+    lastStepIdByWorkflowId,
     handleTaskSelect,
   } = props;
   const { confirmationCommand, visibleCommands, visibleGroups } = getCommandConfirmationState(
@@ -251,6 +253,7 @@ function CommandPanelResultList(props: CommandPanelViewProps) {
           stepMap={stepMap}
           repoMap={repoMap}
           liveTasksById={liveTasksById}
+          lastStepIdByWorkflowId={lastStepIdByWorkflowId}
           onTaskSelect={handleTaskSelect}
         />
       )}
@@ -262,6 +265,7 @@ function CommandPanelResultList(props: CommandPanelViewProps) {
           stepMap={stepMap}
           repoMap={repoMap}
           liveTasksById={liveTasksById}
+          lastStepIdByWorkflowId={lastStepIdByWorkflowId}
           onSelect={handleTaskSelect}
         />
       )}

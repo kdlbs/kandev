@@ -5,6 +5,9 @@ import type { CommandPanelLiveTask } from "@/lib/commands/task-result-activity";
 import type { Task } from "@/lib/types/http";
 import { taskId, workflowId, workspaceId } from "@/lib/types/ids";
 
+const RUNNING_ICON_TEST_ID = "task-state-running";
+const BACKLOG_ICON_TEST_ID = "task-state-backlog";
+
 vi.mock("@kandev/ui/command", () => ({
   CommandEmpty: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CommandGroup: ({ children }: { children: ReactNode }) => <section>{children}</section>,
@@ -34,7 +37,11 @@ function task(id: string, title: string): Task {
   };
 }
 
-function taskResults(tasks: Task[], liveTasksById = new Map<string, CommandPanelLiveTask>()) {
+function taskResults(
+  tasks: Task[],
+  liveTasksById = new Map<string, CommandPanelLiveTask>(),
+  lastStepIdByWorkflowId = new Map<string, string>(),
+) {
   return (
     <CommandsListContent
       commands={[]}
@@ -46,6 +53,7 @@ function taskResults(tasks: Task[], liveTasksById = new Map<string, CommandPanel
       stepMap={new Map()}
       repoMap={new Map()}
       liveTasksById={liveTasksById}
+      lastStepIdByWorkflowId={lastStepIdByWorkflowId}
       onTaskSelect={vi.fn()}
     />
   );
@@ -65,7 +73,7 @@ describe("command panel task activity icons", () => {
       ]),
     );
 
-    expect(screen.getByTestId("task-state-running")).toBeTruthy();
+    expect(screen.getByTestId(RUNNING_ICON_TEST_ID)).toBeTruthy();
     expect(screen.getByRole("img", { name: "In progress" })).toBeTruthy();
   });
 
@@ -73,7 +81,7 @@ describe("command panel task activity icons", () => {
   it("shows the sidebar idle icon for a task that is not running", () => {
     render(taskResults([{ ...task("task-idle", "Idle task"), state: "TODO" }]));
 
-    expect(screen.getByTestId("task-state-backlog")).toBeTruthy();
+    expect(screen.getByTestId(BACKLOG_ICON_TEST_ID)).toBeTruthy();
     expect(screen.getByRole("img", { name: "To do" })).toBeTruthy();
   });
 
@@ -93,11 +101,11 @@ describe("command panel task activity icons", () => {
     };
 
     const view = render(taskResults([loadedTask]));
-    expect(screen.getByTestId("task-state-backlog")).toBeTruthy();
+    expect(screen.getByTestId(BACKLOG_ICON_TEST_ID)).toBeTruthy();
 
     view.rerender(taskResults([loadedTask], new Map([[loadedTask.id, liveTask]])));
 
-    expect(screen.getByTestId("task-state-running")).toBeTruthy();
+    expect(screen.getByTestId(RUNNING_ICON_TEST_ID)).toBeTruthy();
   });
 
   it("does not let an older live projection regress a newer search result", () => {
@@ -119,7 +127,63 @@ describe("command panel task activity icons", () => {
 
     render(taskResults([loadedTask], new Map([[loadedTask.id, staleLiveTask]])));
 
-    expect(screen.getByTestId("task-state-backlog")).toBeTruthy();
-    expect(screen.queryByTestId("task-state-running")).toBeNull();
+    expect(screen.getByTestId(BACKLOG_ICON_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
+  });
+});
+
+describe("command panel task activity icon edge cases", () => {
+  it("keeps the workflow-complete icon for a task on the final step", () => {
+    render(
+      taskResults(
+        [{ ...task("task-complete", "Complete task"), state: "REVIEW" }],
+        new Map(),
+        new Map([["workflow-1", "step-1"]]),
+      ),
+    );
+
+    expect(screen.getByTestId("task-state-workflow-complete")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Completed" })).toBeTruthy();
+  });
+
+  it("treats a current live activity clear as authoritative", () => {
+    const loadedTask = {
+      ...task("task-cleared", "Cleared task"),
+      state: "TODO" as const,
+      foreground_activity: "generating" as const,
+    };
+    const liveTask: CommandPanelLiveTask = {
+      id: loadedTask.id,
+      workflowId: loadedTask.workflow_id,
+      workflowStepId: loadedTask.workflow_step_id,
+      title: loadedTask.title,
+      position: loadedTask.position,
+      state: "TODO",
+      primarySessionState: "IDLE",
+      foregroundActivity: null,
+      updatedAt: "2026-08-24T09:01:00Z",
+    };
+
+    render(taskResults([loadedTask], new Map([[loadedTask.id, liveTask]])));
+
+    expect(screen.getByTestId(BACKLOG_ICON_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
+  });
+
+  it("accepts a legacy live projection without an updated timestamp", () => {
+    const loadedTask = { ...task("task-legacy", "Legacy task"), state: "TODO" as const };
+    const liveTask: CommandPanelLiveTask = {
+      id: loadedTask.id,
+      workflowId: loadedTask.workflow_id,
+      workflowStepId: loadedTask.workflow_step_id,
+      title: loadedTask.title,
+      position: loadedTask.position,
+      state: "IN_PROGRESS",
+      primarySessionState: "RUNNING",
+    };
+
+    render(taskResults([loadedTask], new Map([[loadedTask.id, liveTask]])));
+
+    expect(screen.getByTestId(RUNNING_ICON_TEST_ID)).toBeTruthy();
   });
 });

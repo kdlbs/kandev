@@ -390,17 +390,36 @@ function useCommandPanelHandlers({
   };
 }
 
+function findLastWorkflowStepId(steps: { id: string; position: number }[]) {
+  let lastStep: { id: string; position: number } | undefined;
+  for (const step of steps) {
+    if (!lastStep || step.position > lastStep.position) lastStep = step;
+  }
+  return lastStep?.id;
+}
+
 function useCommandPanelLiveTasks() {
   const kanbanTasks = useAppStore((state) => state.kanban.tasks);
+  const kanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
+  const kanbanSteps = useAppStore((state) => state.kanban.steps);
   const kanbanSnapshots = useAppStore((state) => state.kanbanMulti?.snapshots ?? {});
   return useMemo(() => {
     const tasks = new Map<string, (typeof kanbanTasks)[number]>();
+    const lastStepIdByWorkflowId = new Map<string, string>();
     for (const snapshot of Object.values(kanbanSnapshots)) {
       for (const task of snapshot.tasks) tasks.set(task.id, task);
     }
+    for (const [workflowId, snapshot] of Object.entries(kanbanSnapshots)) {
+      const lastStepId = findLastWorkflowStepId(snapshot.steps);
+      if (lastStepId) lastStepIdByWorkflowId.set(workflowId, lastStepId);
+    }
     for (const task of kanbanTasks) tasks.set(task.id, task);
-    return tasks;
-  }, [kanbanSnapshots, kanbanTasks]);
+    const activeLastStepId = findLastWorkflowStepId(kanbanSteps);
+    if (kanbanWorkflowId && activeLastStepId) {
+      lastStepIdByWorkflowId.set(kanbanWorkflowId, activeLastStepId);
+    }
+    return { tasks, lastStepIdByWorkflowId, steps: kanbanSteps };
+  }, [kanbanSnapshots, kanbanSteps, kanbanTasks, kanbanWorkflowId]);
 }
 
 function useCommandPanelRepositories(workspaceId: string | null) {
@@ -408,12 +427,16 @@ function useCommandPanelRepositories(workspaceId: string | null) {
   return workspaceId ? (repositories[workspaceId] ?? []) : [];
 }
 
+// eslint-disable-next-line max-lines-per-function -- composition root keeps hook ordering and view wiring together.
 export function CommandPanel() {
   const { open, setOpen, mode: panelMode, setMode, modeRequestVersion } = useCommandPanelOpen();
   const commands = useCommands();
   const pathname = usePathname();
-  const kanbanSteps = useAppStore((state) => state.kanban.steps);
-  const liveTasksById = useCommandPanelLiveTasks();
+  const {
+    tasks: liveTasksById,
+    lastStepIdByWorkflowId,
+    steps: kanbanSteps,
+  } = useCommandPanelLiveTasks();
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
@@ -425,7 +448,6 @@ export function CommandPanel() {
   );
   const repositories = useCommandPanelRepositories(workspaceId);
   const handleTaskNavigation = useCommandPanelTaskNavigation(pathname, activeTaskId);
-
   const state = useCommandPanelState(panelMode, setMode);
   const {
     mode,
@@ -439,7 +461,6 @@ export function CommandPanel() {
     setSelectedValue,
     setSearch,
   } = state;
-
   useCommandPanelEffects({
     open,
     state,
@@ -459,7 +480,6 @@ export function CommandPanel() {
     sessionId: activeSessionId,
   });
   useFirstResultSelection(open, state, commands, contentResults);
-
   useCommandPanelShortcuts({
     open,
     setOpen,
@@ -468,7 +488,6 @@ export function CommandPanel() {
     setMode,
     setSearch,
   });
-
   const handlers = useCommandPanelHandlers({
     state,
     setOpen,
@@ -509,6 +528,7 @@ export function CommandPanel() {
       stepMap={handlers.stepMap}
       repoMap={handlers.repoMap}
       liveTasksById={liveTasksById}
+      lastStepIdByWorkflowId={lastStepIdByWorkflowId}
       handleTaskSelect={handlers.handleTaskSelect}
     />
   );

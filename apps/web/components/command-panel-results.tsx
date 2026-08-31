@@ -102,16 +102,28 @@ type TaskResultItemProps = {
   stepMap: StepMap;
   repoMap: Map<string, string>;
   liveTasksById: Map<string, CommandPanelLiveTask>;
+  lastStepIdByWorkflowId: ReadonlyMap<string, string>;
   onSelect: (task: Task) => void;
 };
 
-function TaskResultItem({ task, stepMap, repoMap, liveTasksById, onSelect }: TaskResultItemProps) {
+function TaskResultItem({
+  task,
+  stepMap,
+  repoMap,
+  liveTasksById,
+  lastStepIdByWorkflowId,
+  onSelect,
+}: TaskResultItemProps) {
   const { t } = useTranslation();
   const locale = useDateLocale();
   const isArchived = ARCHIVED_STATES.has(task.state);
   const step = stepMap.get(task.workflow_step_id);
   const stepHex = step ? STEP_COLOR_MAP[step.color] : undefined;
-  const activity = resolveTaskResultActivity(task, liveTasksById.get(task.id));
+  const activity = resolveTaskResultActivity(
+    task,
+    liveTasksById.get(task.id),
+    lastStepIdByWorkflowId,
+  );
   const rawPath =
     task.primary_working_directory ??
     (task.repositories?.[0] ? repoMap.get(task.repositories[0].repository_id) : undefined);
@@ -161,6 +173,7 @@ type TaskResultGroupProps = {
   stepMap: StepMap;
   repoMap: Map<string, string>;
   liveTasksById: Map<string, CommandPanelLiveTask>;
+  lastStepIdByWorkflowId: ReadonlyMap<string, string>;
   onSelect: (task: Task) => void;
   testId?: string;
 };
@@ -171,6 +184,7 @@ function TaskResultGroup({
   stepMap,
   repoMap,
   liveTasksById,
+  lastStepIdByWorkflowId,
   onSelect,
   testId,
 }: TaskResultGroupProps) {
@@ -189,6 +203,7 @@ function TaskResultGroup({
           stepMap={stepMap}
           repoMap={repoMap}
           liveTasksById={liveTasksById}
+          lastStepIdByWorkflowId={lastStepIdByWorkflowId}
           onSelect={onSelect}
         />
       ))}
@@ -217,6 +232,7 @@ type CommandsListContentProps = {
   stepMap: StepMap;
   repoMap: Map<string, string>;
   liveTasksById: Map<string, CommandPanelLiveTask>;
+  lastStepIdByWorkflowId: ReadonlyMap<string, string>;
   onTaskSelect: (task: Task) => void;
 };
 
@@ -298,6 +314,7 @@ export function CommandsListContent({
   stepMap,
   repoMap,
   liveTasksById,
+  lastStepIdByWorkflowId,
   onTaskSelect,
 }: CommandsListContentProps) {
   const { t } = useTranslation();
@@ -312,6 +329,7 @@ export function CommandsListContent({
         stepMap={stepMap}
         repoMap={repoMap}
         liveTasksById={liveTasksById}
+        lastStepIdByWorkflowId={lastStepIdByWorkflowId}
         onSelect={onTaskSelect}
         testId="command-panel-task-preview"
       />
@@ -338,6 +356,7 @@ type TaskSearchContentProps = {
   stepMap: StepMap;
   repoMap: Map<string, string>;
   liveTasksById: Map<string, CommandPanelLiveTask>;
+  lastStepIdByWorkflowId: ReadonlyMap<string, string>;
   onSelect: (task: Task) => void;
 };
 
@@ -348,6 +367,7 @@ export function TaskSearchContent({
   stepMap,
   repoMap,
   liveTasksById,
+  lastStepIdByWorkflowId,
   onSelect,
 }: TaskSearchContentProps) {
   const { t } = useTranslation();
@@ -366,6 +386,7 @@ export function TaskSearchContent({
       stepMap={stepMap}
       repoMap={repoMap}
       liveTasksById={liveTasksById}
+      lastStepIdByWorkflowId={lastStepIdByWorkflowId}
       onSelect={onSelect}
       testId="command-panel-task-results"
     />

@@ -47,7 +47,9 @@ Read live task projections from the current Kanban snapshots. Match each project
 
 Use `pickFreshestStatusSummary` to compare the result summary and the live summary. Use lifecycle fields from the newer task projection.
 
-Map snake-case HTTP fields and camel-case store fields into the shared icon input. Do not subscribe to session-detail streams.
+Map snake-case HTTP fields and camel-case store fields into the shared icon input. Derive the final step ID per workflow from the visible Kanban step list and pass it through to the shared icon so review tasks keep sidebar completion parity. Do not subscribe to session-detail streams.
+
+An accepted live projection is authoritative for lifecycle and foreground-activity fields, including an explicit clear. Legacy projections without `updatedAt` are treated as current so a live clear cannot fall back to an older search response.
 
 ### Result-row presentation
 
@@ -82,7 +84,7 @@ Update `apps/web/e2e/tests/search/mobile-command-palette-scopes.spec.ts`. Assert
 
 ## Verification results
 
-- Shared component tests: 85 passed.
+- Shared component tests: 88 passed.
 - TypeScript, targeted ESLint, and full i18n validation passed.
 - Desktop Chromium task-icon E2E: 1 passed.
 - Mobile Chrome task-icon and layout E2E: 1 passed.
@@ -92,4 +94,6 @@ Update `apps/web/e2e/tests/search/mobile-command-palette-scopes.spec.ts`. Assert
 
 - An HTTP result can race with a WebSocket update. Summary revision comparison must reject the older result.
 - The sidebar has more task-state variants than the current command panel. Shared logic must preserve all sidebar priorities.
+- Review tasks need the workflow's final step ID to retain the sidebar's completed-versus-turn-finished distinction.
+- Live projections can explicitly clear foreground activity; the merge must preserve that clear instead of reviving stale HTTP activity.
 - The leading icon must not reduce title width on a phone.

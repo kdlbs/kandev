@@ -165,6 +165,7 @@ function viewProps(overrides: Partial<CommandPanelViewProps> = {}): CommandPanel
     stepMap: new Map(),
     repoMap: new Map(),
     liveTasksById: new Map(),
+    lastStepIdByWorkflowId: new Map(),
     handleTaskSelect: vi.fn(),
     ...overrides,
   };

@@ -231,16 +231,14 @@ export function getTaskStateIconLabelKey({
   isOnLastWorkflowStep,
   interrupted,
 }: TaskStateIconProps) {
-  if (
-    shouldUsePermissionTaskIcon(hasPendingPermission) ||
-    hasPendingClarification ||
-    shouldUseQuestionTaskIcon(state)
-  ) {
+  if (shouldUsePermissionTaskIcon(hasPendingPermission) || hasPendingClarification) {
     return "common:taskStateWaitingForInput";
   }
+  if (foregroundActivity === "generating") return "common:taskStateInProgress";
   if (foregroundActivity === "background") return "task:backgroundWorkIsRunning";
+  if (shouldUseQuestionTaskIcon(state)) return "common:taskStateWaitingForInput";
   if (computeIsPreparing(state, sessionState)) return "common:taskStateScheduling";
-  if (foregroundActivity === "generating" || computeIsInProgress(state, sessionState)) {
+  if (computeIsInProgress(state, sessionState)) {
     return "common:taskStateInProgress";
   }
   if (interrupted && !isTerminalInterruptedState(state, sessionState)) {
