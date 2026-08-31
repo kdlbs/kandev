@@ -320,6 +320,75 @@ test.describe("Git Changes Panel", () => {
     git.deleteFile("new-feature.ts");
   });
 
+  // @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.13, AC-PLATFORM-WORKSPACE-GIT-STATUS-001.14
+  test("omits untracked node_modules before repository ignore exists", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const profile = await createStandardProfile(apiClient, "Git Dependency Tree Profile");
+
+    await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git Dependency Tree Test",
+      profile.id,
+      {
+        description: "Testing untracked dependency-tree exclusion",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    const session = await openTaskSession(testPage, "Git Dependency Tree Test");
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const git = new GitHelper(repoDir, {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    });
+
+    const sourcePath = "untracked-source.ts";
+    const dependencyPaths = [
+      "node_modules/demo-package/package.json",
+      "packages/app/node_modules/nested-package/package.json",
+    ];
+    try {
+      git.createFile(sourcePath, "export const source = true;\n");
+      for (const dependencyPath of dependencyPaths) {
+        fs.mkdirSync(path.dirname(path.join(repoDir, dependencyPath)), { recursive: true });
+        git.createFile(dependencyPath, '{"name":"demo-package"}\n');
+      }
+
+      await session.clickTab("Changes");
+      await expect(session.changes).toBeVisible({ timeout: 10_000 });
+      await expect(testPage.getByTestId("unstaged-files-section")).toBeVisible({
+        timeout: 15_000,
+      });
+      await expect(session.changes.getByTestId(`file-row-${sourcePath}`)).toBeVisible({
+        timeout: 15_000,
+      });
+
+      for (const dependencyPath of dependencyPaths) {
+        const rowTestId = `file-row-${dependencyPath.replace(/[/\\]/g, "-")}`;
+        await expect(session.changes.getByTestId(rowTestId)).toHaveCount(0);
+      }
+    } finally {
+      git.deleteFile(sourcePath);
+      for (const dependencyPath of dependencyPaths) {
+        git.deleteFile(dependencyPath);
+        fs.rmSync(path.dirname(path.join(repoDir, dependencyPath)), {
+          recursive: true,
+          force: true,
+        });
+      }
+    }
+  });
+
   /**
    * Verifies that files with spaces in their path are shown correctly in the
    * Changes panel and that their diff content is visible (not "No changes").
