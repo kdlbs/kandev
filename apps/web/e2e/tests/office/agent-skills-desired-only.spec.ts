@@ -35,6 +35,11 @@ test.describe("Office agent skills - desired-only convergence", () => {
     const beforeDesired = JSON.parse(
       (before.desired_skills as string | undefined) ?? "[]",
     ) as string[];
+    // Save now writes skill_ids too (that's the fix under test), so the
+    // restore must snapshot and reset both columns — not desired_skills
+    // alone — or this worker-scoped seeded agent leaks a converged
+    // skill_ids into every other spec in the worker.
+    const beforeIds = JSON.parse((before.skill_ids as string | undefined) ?? "[]") as string[];
 
     try {
       await officeApi.updateAgent(officeSeed.agentId, {
@@ -82,6 +87,7 @@ test.describe("Office agent skills - desired-only convergence", () => {
     } finally {
       await officeApi.updateAgent(officeSeed.agentId, {
         desired_skills: JSON.stringify(beforeDesired),
+        skill_ids: JSON.stringify(beforeIds),
       });
     }
   });
