@@ -567,6 +567,8 @@ func TestWorkflowDispatchDeclarationMustBeUnderTopLevelOn(t *testing.T) {
 		"jobs:\n  workflow_dispatch:\n",
 		"# workflow_dispatch:\non:\n  pull_request:\n",
 		"name: workflow_dispatch:\non:\n  push:\n",
+		"on: workflow_dispatch\n",
+		"on: [push, workflow_dispatch]\n",
 	} {
 		if workflowDispatchDeclared([]byte(source)) {
 			t.Fatalf("untrusted declaration accepted: %q", source)
