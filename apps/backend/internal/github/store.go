@@ -460,6 +460,7 @@ const ciRunTablesSQL = `
 	CREATE TABLE IF NOT EXISTS github_ci_run_requests (
 		id TEXT PRIMARY KEY,
 		grant_id TEXT NOT NULL,
+		grant_generation BIGINT NOT NULL DEFAULT 1 CHECK (grant_generation > 0),
 		workspace_id TEXT NOT NULL,
 		actor_task_id TEXT NOT NULL,
 		actor_session_id TEXT NOT NULL,
@@ -492,7 +493,7 @@ const ciRunTablesSQL = `
 		failure_class TEXT NOT NULL DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
-		UNIQUE (grant_id, actor_task_id, idempotency_hash),
+		UNIQUE (actor_task_id, idempotency_hash),
 		UNIQUE (
 			workspace_id, target_task_id, workflow_id, workflow_step_id, repository_id,
 			pr_number, expected_head_sha, source_run_id, expected_source_attempt, evidence_kind
@@ -651,6 +652,9 @@ func (s *Store) applyIdempotentSchemaColumns() {
 }
 
 func (s *Store) initSchemaUpgrades() error {
+	if err := s.addCIRunGrantColumns(); err != nil {
+		return err
+	}
 	if err := s.addCIRunRecoveryColumns(); err != nil {
 		return err
 	}
@@ -696,10 +700,29 @@ func (s *Store) initSchemaUpgrades() error {
 	return nil
 }
 
+// addCIRunGrantColumns upgrades databases created before grant generations
+// were persisted.  Requests retain the generation that authorized admission,
+// so silently relying on the grant's current generation after a restart would
+// make old requests ambiguous and could invalidate recovery decisions.
+func (s *Store) addCIRunGrantColumns() error {
+	columns, err := s.tableColumns("github_ci_run_grants")
+	if err != nil {
+		return fmt.Errorf("read github_ci_run_grants columns: %w", err)
+	}
+	if _, ok := columns["generation"]; ok {
+		return nil
+	}
+	if _, err := s.db.Exec(`ALTER TABLE github_ci_run_grants ADD COLUMN generation BIGINT NOT NULL DEFAULT 1`); err != nil && !dbutil.IsDuplicateColumnError(err) {
+		return fmt.Errorf("add github_ci_run_grants.generation: %w", err)
+	}
+	return nil
+}
+
 var ciRunRecoveryColumnDDL = []struct {
 	name string
 	ddl  string
 }{
+	{"grant_generation", "BIGINT NOT NULL DEFAULT 1"},
 	{"execution_owner", "TEXT NOT NULL DEFAULT ''"},
 	{"execution_lease_expires_at", "DATETIME"},
 	{"provider_retry_after", "DATETIME"},
@@ -725,6 +748,8 @@ func (s *Store) addCIRunRecoveryColumns() error {
 }
 
 const legacyCIRunSemanticConstraint = "UNIQUE (target_task_id, repository_id, pr_number, source_run_id, expected_source_attempt, evidence_kind)"
+const legacyCIRunCallerConstraint = "UNIQUE (grant_id, actor_task_id, idempotency_hash)"
+const scopedCIRunCallerConstraint = "UNIQUE (actor_task_id, idempotency_hash)"
 
 const scopedCIRunSemanticConstraint = "UNIQUE (workspace_id, target_task_id, workflow_id, workflow_step_id, repository_id, pr_number, expected_head_sha, source_run_id, expected_source_attempt, evidence_kind)"
 
@@ -734,13 +759,16 @@ func (s *Store) migrateCIRunSemanticConstraint() error {
 		WHERE type = 'table' AND name = 'github_ci_run_requests'`).Scan(&existingSQL); err != nil {
 		return fmt.Errorf("read github_ci_run_requests schema: %w", err)
 	}
-	if !strings.Contains(existingSQL, legacyCIRunSemanticConstraint) {
+	if !strings.Contains(existingSQL, legacyCIRunSemanticConstraint) &&
+		!strings.Contains(existingSQL, legacyCIRunCallerConstraint) {
 		return nil
 	}
 	requestSchema := strings.Replace(existingSQL,
 		"github_ci_run_requests", "github_ci_run_requests_new", 1)
 	requestSchema = strings.Replace(requestSchema,
 		legacyCIRunSemanticConstraint, scopedCIRunSemanticConstraint, 1)
+	requestSchema = strings.Replace(requestSchema,
+		legacyCIRunCallerConstraint, scopedCIRunCallerConstraint, 1)
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err

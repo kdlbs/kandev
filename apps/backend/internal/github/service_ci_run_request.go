@@ -68,16 +68,8 @@ func (s *Service) RequestFreshCIRun(
 		return nil, &CIRunRequestError{Class: failure}
 	}
 	digest := sha256.Sum256([]byte(input.IdempotencyKey))
-	if existing, lookupErr := s.store.GetCIRunRequestByCallerKey(ctx, input.ActorTaskID, input.ActorSessionID, hex.EncodeToString(digest[:])); lookupErr != nil {
-		return nil, lookupErr
-	} else if existing != nil && (existing.ProviderCallStartedAt != nil || existing.Status == CIRunRequestSucceeded || existing.Status == CIRunRequestFailed) {
-		// Once GitHub may have accepted the request, recovery is read-only and must
-		// remain possible even if the grant, lane, or PR was subsequently changed.
-		owner, repo, repoErr := s.loadCIRunRepository(ctx, existing.WorkspaceID, existing.TargetTaskID, existing.RepositoryID)
-		if repoErr != nil {
-			return s.reloadCIRunResult(ctx, existing)
-		}
-		return s.resumeCIRunRequest(ctx, &ciRunBinding{WorkspaceID: existing.WorkspaceID, Owner: owner, Repo: repo}, existing)
+	if receipt, handled, lookupErr := s.resumeExistingCIRunRequest(ctx, input, hex.EncodeToString(digest[:])); lookupErr != nil || handled {
+		return receipt, lookupErr
 	}
 	binding, err := s.loadCIRunBinding(ctx, input)
 	if err != nil {
@@ -94,10 +86,7 @@ func (s *Service) RequestFreshCIRun(
 		}
 		return nil, err
 	}
-	if !created {
-		return s.continueCIRunRequest(ctx, binding, claimed, input)
-	}
-	if err := s.auditCIRun(ctx, claimed, "claimed", ""); err != nil {
+	if err := s.ensureCIRunClaimAudit(ctx, claimed, created); err != nil {
 		return nil, err
 	}
 	return s.continueCIRunRequest(ctx, binding, claimed, input)
@@ -219,7 +208,7 @@ func (s *Service) loadCIRunRepository(
 func newCIRunRequest(binding *ciRunBinding, input RequestFreshCIRunInput, now time.Time) *CIRunRequest {
 	digest := sha256.Sum256([]byte(input.IdempotencyKey))
 	return &CIRunRequest{
-		ID: uuid.NewString(), GrantID: binding.Grant.ID, WorkspaceID: binding.WorkspaceID,
+		ID: uuid.NewString(), GrantID: binding.Grant.ID, GrantGeneration: binding.Grant.Generation, WorkspaceID: binding.WorkspaceID,
 		ActorTaskID: input.ActorTaskID, ActorSessionID: input.ActorSessionID,
 		TargetTaskID: input.TargetTaskID, WorkflowID: binding.WorkflowID,
 		WorkflowStepID: binding.WorkflowStep, RepositoryID: input.RepositoryID,
@@ -367,6 +356,9 @@ func (s *Service) executeCIRunRequest(
 	request.ProviderHeadRepo = verified.Run.HeadRepository
 	request.ProviderHeadRef = verified.Run.HeadBranch
 	request.ProviderHeadSHA = verified.Run.HeadSHA
+	if err := s.auditCIRun(ctx, request, "provider_started", ""); err != nil {
+		return receiptFromCIRunRequest(request), err
+	}
 	if err := s.store.MarkCIRunProviderCallStarted(ctx, request, now); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return s.handleCIRunProviderStartConflict(ctx, client, request)
@@ -375,9 +367,6 @@ func (s *Service) executeCIRunRequest(
 	}
 	request.ProviderCallStartedAt = &now
 	request.Status = CIRunRequestReconciling
-	if err := s.auditCIRun(ctx, request, "provider_started", ""); err != nil {
-		return receiptFromCIRunRequest(request), err
-	}
 	err = client.RerunFailedActionsJobs(ctx, latestBinding.Owner, latestBinding.Repo, request.SourceRunID)
 	if err == nil {
 		return s.reconcileCIRunRequest(ctx, client, latestBinding, request, verified)
@@ -508,6 +497,9 @@ func (s *Service) executeCIRunDispatchFallback(
 		return s.failCIRunRequest(ctx, request, CIRunFailureHeadDrift)
 	}
 	dispatchStartedAt := s.ciRunClock()().UTC()
+	if err := s.auditCIRun(ctx, request, "provider_started", ""); err != nil {
+		return receiptFromCIRunRequest(request), err
+	}
 	if err := s.store.MarkCIRunProviderCallStarted(ctx, request, dispatchStartedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return s.handleCIRunProviderStartConflict(ctx, client, request)
@@ -515,9 +507,6 @@ func (s *Service) executeCIRunDispatchFallback(
 		return nil, err
 	}
 	request.ProviderCallStartedAt = &dispatchStartedAt
-	if err := s.auditCIRun(ctx, request, "provider_started", ""); err != nil {
-		return receiptFromCIRunRequest(request), err
-	}
 	if err := client.DispatchActionsWorkflow(ctx, latestBinding.Owner, latestBinding.Repo,
 		verified.Workflow.ID, latestPR.HeadBranch, inputs); err != nil {
 		return s.handleCIRunMutationError(ctx, request, err)

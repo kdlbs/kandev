@@ -671,6 +671,43 @@ func TestRequestFreshCIRunPersistsProviderFailureClass(t *testing.T) {
 	}
 }
 
+func TestRequestFreshCIRunIdempotencyIsActorScopedAcrossSessions(t *testing.T) {
+	service, client, input := setupCIRunServiceTest(t, false)
+	client.runs = []GitHubActionsRun{*client.run}
+	client.runs[0].Attempt = input.ExpectedSourceAttempt + 1
+	if _, err := service.RequestFreshCIRun(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.store.db.Exec(`INSERT INTO task_sessions(id, task_id) VALUES ('session-2', 'coordinator-1')`); err != nil {
+		t.Fatal(err)
+	}
+	input.ActorSessionID = "session-2"
+	receipt, err := service.RequestFreshCIRun(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Status != CIRunRequestSucceeded || client.reruns != 1 {
+		t.Fatalf("receipt = %+v, provider reruns = %d, want one", receipt, client.reruns)
+	}
+}
+
+func TestRequestFreshCIRunAuditFailurePreventsProviderMutation(t *testing.T) {
+	service, client, input := setupCIRunServiceTest(t, false)
+	client.workflowHook = func() {
+		client.workflowHook = nil
+		if _, err := service.store.db.Exec(`DROP TABLE github_ci_run_audit_events`); err != nil {
+			t.Fatalf("drop audit table: %v", err)
+		}
+	}
+	_, err := service.RequestFreshCIRun(context.Background(), input)
+	if err == nil {
+		t.Fatal("request succeeded despite audit failure")
+	}
+	if client.reruns != 0 || client.dispatches != 0 {
+		t.Fatalf("provider mutated after audit failure: rerun=%d dispatch=%d", client.reruns, client.dispatches)
+	}
+}
+
 func TestWorkflowDispatchDeclarationMustBeUnderTopLevelOn(t *testing.T) {
 	if !workflowDispatchDeclared([]byte("name: E2E\non:\n  workflow_dispatch:\njobs: {}\n")) {
 		t.Fatal("top-level on.workflow_dispatch was not recognized")

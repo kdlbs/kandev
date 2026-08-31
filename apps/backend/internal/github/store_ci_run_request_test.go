@@ -45,6 +45,55 @@ func TestStoreScopedCIRunSchema(t *testing.T) {
 	}
 }
 
+func TestStoreMigratesCIRunGrantGenerationAcrossRestart(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	grant := testCIRunGrant(time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC))
+	if _, err := store.db.Exec(`DROP INDEX idx_github_ci_run_grants_scope`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`DROP TABLE github_ci_run_grants`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`CREATE TABLE github_ci_run_grants (
+		id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, actor_task_id TEXT NOT NULL,
+		target_task_id TEXT NOT NULL, workflow_id TEXT NOT NULL, workflow_step_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL, created_by_user_id TEXT NOT NULL, revoked_at DATETIME,
+		created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO github_ci_run_grants
+		(id, workspace_id, actor_task_id, target_task_id, workflow_id, workflow_step_id,
+		repository_id, created_by_user_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, grant.ID, grant.WorkspaceID,
+		grant.ActorTaskID, grant.TargetTaskID, grant.WorkflowID, grant.WorkflowStepID,
+		grant.RepositoryID, grant.CreatedByUserID, grant.CreatedAt, grant.UpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.initSchema(false); err != nil {
+		t.Fatalf("restart migration: %v", err)
+	}
+	var generation int64
+	if err := store.db.GetContext(ctx, &generation, `SELECT generation FROM github_ci_run_grants WHERE id = ?`, grant.ID); err != nil {
+		t.Fatal(err)
+	}
+	if generation != 1 {
+		t.Fatalf("migrated grant generation = %d, want 1", generation)
+	}
+	if err := store.RevokeCIRunGrant(ctx, grant.WorkspaceID, grant.ID, grant.UpdatedAt.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	grant.Generation = 2
+	grant.ID = "grant-after-restart"
+	if err := store.UpsertCIRunGrant(ctx, grant); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.db.GetContext(ctx, &generation, `SELECT generation FROM github_ci_run_grants WHERE id = ?`, grant.ID); err != nil || generation != 2 {
+		t.Fatalf("persisted replacement grant generation = %d, err %v", generation, err)
+	}
+}
+
 func TestStoreMigratesCIRunSemanticConstraintWithoutLosingAudit(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -60,6 +109,7 @@ func TestStoreMigratesCIRunSemanticConstraintWithoutLosingAudit(t *testing.T) {
 	scopedConstraint := "UNIQUE (\n\t\t\tworkspace_id, target_task_id, workflow_id, workflow_step_id, repository_id," +
 		"\n\t\t\tpr_number, expected_head_sha, source_run_id, expected_source_attempt, evidence_kind\n\t\t)"
 	legacySchema := strings.Replace(ciRunTablesSQL, scopedConstraint, legacyConstraint, 1)
+	legacySchema = strings.Replace(legacySchema, scopedCIRunCallerConstraint, legacyCIRunCallerConstraint, 1)
 	if legacySchema == ciRunTablesSQL {
 		t.Fatal("test did not restore the legacy semantic constraint")
 	}
@@ -104,6 +154,13 @@ func TestStoreMigratesCIRunSemanticConstraintWithoutLosingAudit(t *testing.T) {
 	}
 	if auditCount != 1 {
 		t.Fatalf("preserved audit rows = %d, want 1", auditCount)
+	}
+	var grantGeneration int64
+	if err := store.db.Get(&grantGeneration, `SELECT grant_generation FROM github_ci_run_requests WHERE id = ?`, original.ID); err != nil {
+		t.Fatal(err)
+	}
+	if grantGeneration != grant.Generation {
+		t.Fatalf("migrated grant generation = %d, want %d", grantGeneration, grant.Generation)
 	}
 	if err := store.initSchema(false); err != nil {
 		t.Fatalf("semantic migration replay: %v", err)
@@ -511,7 +568,7 @@ func TestDeleteWorkspaceSettingsRemovesCIRunAuthorityAndAudit(t *testing.T) {
 
 func testCIRunGrant(now time.Time) *CIRunGrant {
 	return &CIRunGrant{
-		ID: "grant-1", WorkspaceID: "workspace-1", ActorTaskID: "coordinator-1",
+		ID: "grant-1", Generation: 3, WorkspaceID: "workspace-1", ActorTaskID: "coordinator-1",
 		TargetTaskID: "target-1", WorkflowID: "workflow-1", WorkflowStepID: "ci-fixup",
 		RepositoryID: "repository-1", CreatedByUserID: "admin-1", CreatedAt: now, UpdatedAt: now,
 	}
@@ -535,7 +592,7 @@ func seedCIRunProviderStartScope(t *testing.T, store *Store, grant *CIRunGrant) 
 
 func testCIRunRequest(grant *CIRunGrant, now time.Time) *CIRunRequest {
 	return &CIRunRequest{
-		ID: "request-1", GrantID: grant.ID, WorkspaceID: grant.WorkspaceID,
+		ID: "request-1", GrantID: grant.ID, GrantGeneration: grant.Generation, WorkspaceID: grant.WorkspaceID,
 		ActorTaskID: grant.ActorTaskID, ActorSessionID: "session-1", TargetTaskID: grant.TargetTaskID,
 		WorkflowID: grant.WorkflowID, WorkflowStepID: grant.WorkflowStepID, RepositoryID: grant.RepositoryID,
 		PRNumber: 42, ExpectedHeadSHA: strings.Repeat("a", 40), SourceRunID: 100,

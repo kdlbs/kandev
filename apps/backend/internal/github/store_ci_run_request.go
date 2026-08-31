@@ -11,7 +11,7 @@ import (
 )
 
 const ciRunRequestColumns = `
-	id, grant_id, workspace_id, actor_task_id, actor_session_id, target_task_id,
+	id, grant_id, grant_generation, workspace_id, actor_task_id, actor_session_id, target_task_id,
 	workflow_id, workflow_step_id, repository_id, pr_number, expected_head_sha,
 	source_run_id, expected_source_attempt, evidence_kind, idempotency_hash,
 	status, execution_owner, execution_lease_expires_at, provider_retry_after,
@@ -33,12 +33,15 @@ func (s *Store) UpsertCIRunGrant(ctx context.Context, grant *CIRunGrant) error {
 	if grant.UpdatedAt.IsZero() {
 		grant.UpdatedAt = now
 	}
+	if grant.Generation <= 0 {
+		grant.Generation = 1
+	}
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO github_ci_run_grants (
-			id, workspace_id, actor_task_id, target_task_id, workflow_id,
+			id, generation, workspace_id, actor_task_id, target_task_id, workflow_id,
 			workflow_step_id, repository_id, created_by_user_id, revoked_at, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		grant.ID, grant.WorkspaceID, grant.ActorTaskID, grant.TargetTaskID, grant.WorkflowID,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		grant.ID, grant.Generation, grant.WorkspaceID, grant.ActorTaskID, grant.TargetTaskID, grant.WorkflowID,
 		grant.WorkflowStepID, grant.RepositoryID, grant.CreatedByUserID, grant.RevokedAt,
 		grant.CreatedAt, grant.UpdatedAt)
 	return err
@@ -106,9 +109,12 @@ func (s *Store) ClaimCIRunRequest(ctx context.Context, request *CIRunRequest) (*
 	if err := validateCIRunRequest(request); err != nil {
 		return nil, false, err
 	}
+	if request.GrantGeneration <= 0 {
+		request.GrantGeneration = 1
+	}
 	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO github_ci_run_requests (`+ciRunRequestColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (`+strings.TrimSuffix(strings.Repeat("?,", len(ciRunRequestArgs(request))), ",")+`)
 		ON CONFLICT DO NOTHING`), ciRunRequestArgs(request)...)
 	if err != nil {
 		return nil, false, err
@@ -179,7 +185,7 @@ func allCIRunStringsPresent(values ...string) bool {
 
 func ciRunRequestArgs(r *CIRunRequest) []any {
 	return []any{
-		r.ID, r.GrantID, r.WorkspaceID, r.ActorTaskID, r.ActorSessionID, r.TargetTaskID,
+		r.ID, r.GrantID, r.GrantGeneration, r.WorkspaceID, r.ActorTaskID, r.ActorSessionID, r.TargetTaskID,
 		r.WorkflowID, r.WorkflowStepID, r.RepositoryID, r.PRNumber, r.ExpectedHeadSHA,
 		r.SourceRunID, r.ExpectedSourceAttempt, r.EvidenceKind, r.IdempotencyHash,
 		r.Status, r.ExecutionOwner, r.ExecutionLeaseExpires, r.ProviderRetryAfter,
@@ -228,8 +234,8 @@ func (s *Store) AcquireCIRunExecution(
 func (s *Store) getCIRunRequestByCallerKey(ctx context.Context, r *CIRunRequest) (*CIRunRequest, error) {
 	var loaded CIRunRequest
 	err := s.ro.GetContext(ctx, &loaded, s.ro.Rebind(`SELECT `+ciRunRequestColumns+`
-		FROM github_ci_run_requests WHERE grant_id = ? AND actor_task_id = ? AND idempotency_hash = ?`),
-		r.GrantID, r.ActorTaskID, r.IdempotencyHash)
+		FROM github_ci_run_requests WHERE actor_task_id = ? AND idempotency_hash = ?`),
+		r.ActorTaskID, r.IdempotencyHash)
 	return &loaded, err
 }
 
@@ -253,10 +259,10 @@ func (s *Store) GetCIRunRequest(ctx context.Context, id string) (*CIRunRequest, 
 	return &request, err
 }
 
-func (s *Store) GetCIRunRequestByCallerKey(ctx context.Context, actorTaskID, actorSessionID, idempotencyHash string) (*CIRunRequest, error) {
+func (s *Store) GetCIRunRequestByCallerKey(ctx context.Context, actorTaskID, idempotencyHash string) (*CIRunRequest, error) {
 	var request CIRunRequest
 	err := s.ro.GetContext(ctx, &request, s.ro.Rebind(`SELECT `+ciRunRequestColumns+`
-		FROM github_ci_run_requests WHERE actor_task_id = ? AND actor_session_id = ? AND idempotency_hash = ?`), actorTaskID, actorSessionID, idempotencyHash)
+		FROM github_ci_run_requests WHERE actor_task_id = ? AND idempotency_hash = ?`), actorTaskID, idempotencyHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -283,6 +289,7 @@ func (s *Store) MarkCIRunProviderCallStarted(
 				SELECT 1 FROM github_ci_run_grants grant
 				JOIN tasks target ON target.id = github_ci_run_requests.target_task_id
 				WHERE grant.id = github_ci_run_requests.grant_id
+					AND grant.generation = github_ci_run_requests.grant_generation
 					AND grant.workspace_id = github_ci_run_requests.workspace_id
 					AND grant.actor_task_id = github_ci_run_requests.actor_task_id
 					AND grant.target_task_id = github_ci_run_requests.target_task_id
@@ -435,6 +442,12 @@ func (s *Store) AppendCIRunAuditEvent(ctx context.Context, event *CIRunAuditEven
 		VALUES (?, ?, ?, ?, ?, ?)`), event.ID, event.RequestID, event.EventType,
 		event.FailureClass, event.DetailsJSON, event.CreatedAt)
 	return err
+}
+
+func (s *Store) HasCIRunAuditEvent(ctx context.Context, requestID, eventType string) (bool, error) {
+	var count int
+	err := s.ro.GetContext(ctx, &count, s.ro.Rebind(`SELECT COUNT(*) FROM github_ci_run_audit_events WHERE request_id = ? AND event_type = ?`), requestID, eventType)
+	return count > 0, err
 }
 
 func validateCIRunAuditDetails(raw string) error {
