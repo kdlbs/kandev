@@ -378,6 +378,46 @@ func TestGitOperatorContributionDestinationRejectsRepositoryControlledTransportB
 	}
 }
 
+func TestGitOperatorContributionDestinationRejectsRepositoryCredentialHelperBeforePrivateEnv(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+	runGit(t, repoDir, "checkout", "-b", "feature/destination")
+
+	destination := &taskmodels.ContributionDestination{
+		Version:    taskmodels.ContributionDestinationVersion,
+		Provider:   taskmodels.ContributionDestinationProviderGitHub,
+		HeadBranch: "feature/destination",
+		SourceRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "agent/kandev", ProviderID: "200", RemoteURL: "https://github.com/agent/kandev.git",
+		},
+	}
+	runGit(t, repoDir, "remote", "add", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
+	runGit(t, repoDir, "remote", "set-url", "--push", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
+	runGit(t, repoDir, "config", "credential.https://github.com.helper", "!sh -c 'exit 0'")
+
+	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
+	operator.setContributionDestination(destination)
+	managedCredentialUses := 0
+	operator.setManagedPushEnvironmentProvider(func() []string {
+		managedCredentialUses++
+		return append(os.Environ(), "KANDEV_GITHUB_CREDENTIAL_SCOPES=private-destination-scope")
+	})
+
+	result, err := operator.Push(context.Background(), false, false)
+	if err != nil {
+		t.Fatalf("Push returned error: %v", err)
+	}
+	if result.Success || !strings.Contains(result.Error, "repository-controlled transport configuration") {
+		t.Fatalf("Push = %+v, want repository credential-helper rejection", result)
+	}
+	if managedCredentialUses != 0 {
+		t.Fatalf("repository credential helper requested private credential environment %d times", managedCredentialUses)
+	}
+}
+
 // TestManagedPushTransportIsolation is reviewer-requested contract coverage
 // for the transport seams rejected before private scopes are made available.
 func TestManagedPushTransportIsolation(t *testing.T) {
@@ -389,6 +429,8 @@ func TestManagedPushTransportIsolation(t *testing.T) {
 		"remote.contribution-destination.receivepack",
 		"remote.contribution-destination.uploadpack",
 		"http.https://github.com.proxy",
+		"credential.helper",
+		"credential.https://github.com.helper",
 	} {
 		if !managedPushTransportConfigKey(key) {
 			t.Errorf("managedPushTransportConfigKey(%q) = false, want true", key)

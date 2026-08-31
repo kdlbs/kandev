@@ -246,7 +246,8 @@ func managedPushTransportConfigKey(key string) bool {
 	return strings.HasPrefix(key, "url.") && (strings.HasSuffix(key, ".insteadof") || strings.HasSuffix(key, ".pushinsteadof")) ||
 		key == "core.sshcommand" || key == "core.gitproxy" ||
 		(strings.HasPrefix(key, "remote.") && (strings.HasSuffix(key, ".receivepack") || strings.HasSuffix(key, ".uploadpack"))) ||
-		(strings.HasPrefix(key, "http.") && strings.HasSuffix(key, ".proxy"))
+		(strings.HasPrefix(key, "http.") && strings.HasSuffix(key, ".proxy")) ||
+		key == "credential.helper" || (strings.HasPrefix(key, "credential.") && strings.HasSuffix(key, ".helper"))
 }
 
 func (g *GitOperator) managedPushEnvironmentValues() []string {
