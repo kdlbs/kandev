@@ -296,6 +296,10 @@ describe("applyCustomLayout", () => {
     };
     expect(serialized.grid.root.data[1].size).toBe(350);
     expect(useDockviewStore.getState().pinnedWidths.get("right")).toBe(350);
+    expect(useDockviewStore.getState().activeLayoutProfile).toEqual({
+      kind: "built-in",
+      id: "default",
+    });
   });
 });
 

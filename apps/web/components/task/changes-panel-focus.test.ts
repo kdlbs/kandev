@@ -9,6 +9,7 @@ import {
 } from "./changes-panel-focus";
 import type { FileInfo, GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 import { RIGHT_TOP_GROUP } from "@/lib/state/layout-manager";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 
 const hashDiffMock = vi.hoisted(() => vi.fn((diff: string) => `hash:${diff}`));
 
@@ -22,6 +23,9 @@ const UPDATED_FINGERPRINT = "repo:path:updated";
 
 beforeEach(() => {
   hashDiffMock.mockClear();
+  useDockviewStore.setState({
+    activeLayoutProfile: { kind: "built-in", id: "default" },
+  });
 });
 
 function activationApi(groupId: string, panelIds: string[]) {
@@ -44,6 +48,16 @@ describe("activateChangesPanel", () => {
 
     expect(activateChangesPanel(api)).toBe("activated");
     expect(setActive).toHaveBeenCalledOnce();
+  });
+
+  it("does not activate Changes in a copied Default custom profile", () => {
+    useDockviewStore.setState({
+      activeLayoutProfile: { kind: "custom", id: "layout-copied-default" },
+    });
+    const { api, setActive } = activationApi(RIGHT_TOP_GROUP, ["files", "changes"]);
+
+    expect(activateChangesPanel(api)).toBe("blocked-layout");
+    expect(setActive).not.toHaveBeenCalled();
   });
 
   it.each([

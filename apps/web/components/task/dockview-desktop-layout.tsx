@@ -9,7 +9,11 @@ import {
   type DockviewReadyEvent,
 } from "dockview-react";
 import { themeKandev } from "@/lib/layout/dockview-theme";
-import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-store";
+import {
+  resolveRestoredLayoutProfile,
+  useDockviewStore,
+  performLayoutSwitch,
+} from "@/lib/state/dockview-store";
 import { restoreEnvLayout } from "./dockview-layout-restore";
 import {
   setupContainerResizeSync,
@@ -330,6 +334,10 @@ function setupReadyDockview({ api, appStore, layout, refs }: ReadyDockviewSetup)
       api,
       layout.initialLayout ?? (layout.compact ? "compact" : undefined),
     );
+  } else {
+    useDockviewStore.setState({
+      activeLayoutProfile: resolveRestoredLayoutProfile(api, currentEnvId),
+    });
   }
 
   useDockviewStore.setState({ currentLayoutEnvId: currentEnvId });

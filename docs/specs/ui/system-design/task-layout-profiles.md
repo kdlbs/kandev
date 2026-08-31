@@ -46,7 +46,7 @@ Users can arrange and save the desktop task workbench only while a task is open,
 - Applying a layout preserves every configured reusable panel regardless of whether the task has repositories, except PR Details, whose runtime visibility is conditional on a linked review. Other panels without applicable content remain available and show their normal empty state.
 - A changed default applies to task environments that have no saved task-specific layout and to an explicit Reset Layout action. It does not overwrite an existing task-specific layout merely because the setting changed.
 - A meaningful Git or commit update can activate Changes for the active desktop task or after the user returns to it.
-- `activateChangesPanel` permits this activation only when the Changes group uses `RIGHT_TOP_GROUP`. The group must contain exactly the `files` and `changes` panels. Other layouts and group contents preserve the selected tab.
+- `activateChangesPanel` permits this activation only when the active profile is the built-in Default profile and the Changes group uses `RIGHT_TOP_GROUP`. The group must contain exactly the `files` and `changes` panels. Other profiles, layouts, and group contents preserve the selected tab.
 - An ordinary reload with already-known changes preserves the saved active panel.
 - Switching between tasks whose sessions share one task environment atomically replaces task-owned Agent tabs in their existing group. The handoff preserves the live split tree and proportions instead of briefly emptying the group or rebuilding the environment layout.
 - Desktop Agent-tab reconciliation preserves the selected tab in each group and the globally focused panel. Eligible pending Changes attention can override the selected tab. Replacing a selected Chat placeholder with the active session keeps Agent selected in that group without transiently selecting a neighboring Plan tab. Focus in another group, such as Files or Changes, remains unchanged. A valid non-Agent tab that was already selected in the Agent group remains selected.
@@ -82,7 +82,7 @@ scales complete saved column widths to the current workbench. It then applies
 the pinned-column safety caps. A code-defined built-in preset continues to use
 its responsive defaults.
 
-Task-specific restored layouts remain device-local environment state and take precedence over the user default. They are not copied into or overwritten by layout-profile edits. The serialized Dockview layout preserves panel structure and transient geometry. A companion environment-scoped preference stores a raw right-column width only after a genuine user sash drag; legacy layouts and layouts without that preference are responsive defaults rather than manual overrides.
+Task-specific restored layouts remain device-local environment state and take precedence over the user default. They are not copied into or overwritten by layout-profile edits. The serialized Dockview layout preserves panel structure and transient geometry. Companion environment-scoped preferences store the active layout-profile identity and a raw right-column width only after a genuine user sash drag; legacy layouts without profile metadata use a shape-based compatibility fallback, and layouts without the width preference are responsive defaults rather than manual overrides.
 
 ## API surface
 
@@ -109,6 +109,7 @@ The frontend treats the returned settings payload as authoritative after each su
 - Custom profiles and the selected custom default survive browser and Kandev restarts through backend user settings and are portable across the user's devices.
 - An unsaved editor draft does not survive navigation or restart.
 - Per-task layout state continues to use its existing environment-scoped persistence and is not made portable by this feature.
+- The environment-scoped profile identity is saved with the task layout so copied custom profiles cannot be mistaken for the built-in Default after a task switch or reload.
 - Existing saved profiles and task-specific layouts are not rewritten to add or remove PR Details. The code-defined templates without PR Details affect fresh environments and explicit Reset Layout actions; custom profiles retain their configured placement while runtime review state controls visibility.
 - A saved default right-column geometry adapts to the current workbench width on reload, monitor switch, and return to a wider monitor. A manual right-column width keeps its raw requested width across those events and is only clamped while the current screen cannot accommodate it.
 - A task handoff within the same environment does not persist an intermediate panel-removal state or change the root split orientation.
@@ -137,6 +138,7 @@ The frontend treats the returned settings payload as authoritative after each su
 - **GIVEN** a default profile without Terminal and a task environment with no saved layout, **WHEN** the user first opens that task, **THEN** the workbench has no Terminal tab and no default user shell is created.
 - **GIVEN** an existing task with a task-specific layout and no pending inactive-task changes, **WHEN** the user changes the default profile and returns to that task, **THEN** the task-specific layout and saved active panel are unchanged.
 - **GIVEN** an existing desktop task that uses the Default top-right Files and Changes group, **WHEN** a meaningful Git or commit update is detected while the task is inactive and the user returns, **THEN** the task-specific geometry is restored and Changes becomes active.
+- **GIVEN** a custom profile copied from the built-in Default with the same top-right group IDs and tabs, **WHEN** a meaningful Git or commit update arrives, **THEN** the copied profile's selected tab remains active and Changes does not take focus.
 - **GIVEN** a desktop task whose Changes group also contains VS Code, **WHEN** a meaningful Git or commit update arrives, **THEN** VS Code remains active and Changes does not take focus.
 - **GIVEN** an existing desktop task with already-known changes and a saved active panel, **WHEN** the user reloads that task without a new Git or commit update, **THEN** the saved active panel remains active.
 - **GIVEN** an existing task with a task-specific layout, **WHEN** the user chooses Reset Layout, **THEN** the latest effective default profile replaces that task's layout.

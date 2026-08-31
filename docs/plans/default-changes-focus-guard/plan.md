@@ -19,6 +19,7 @@ Restrict automatic Changes activation to the Default layout's Files and Changes 
 ### In scope
 
 - Apply one shared eligibility rule to active-task and returning-task updates.
+- Track the active built-in or custom profile identity across preset application, restores, task switches, and reloads.
 - Require the stable Default top-right group.
 - Require exactly the Files and Changes tabs in that group.
 - Preserve the current tab in VS Code, Plan, Preview, compact, and custom group compositions.
@@ -26,14 +27,14 @@ Restrict automatic Changes activation to the Default layout's Files and Changes 
 ### Out of scope
 
 - Change Git-status detection, fingerprinting, or inactive-task pending state.
-- Change layout persistence or panel placement.
+- Change backend layout-profile persistence or panel placement.
 - Change mobile or tablet task layouts.
 
 ## Technical approach
 
 ### Changes activation guard
 
-Update `activateChangesPanel` in `apps/web/components/task/changes-panel-focus.ts`. Use `RIGHT_TOP_GROUP` as the Default-layout identity. Permit activation only when the live group contains exactly `files` and `changes`.
+Update `activateChangesPanel` in `apps/web/components/task/changes-panel-focus.ts`. Require the active profile to be the built-in Default, use `RIGHT_TOP_GROUP` as the layout identity, and permit activation only when the live group contains exactly `files` and `changes`. Persist the active profile identity with each environment-scoped Dockview layout so copied custom profiles remain ineligible after restores and task switches.
 
 Keep both activation callers on this shared helper. `ChangesTab` uses it for active-task count increases. `useChangesPanelAutoFocus` uses it after inactive-task updates.
 
@@ -48,6 +49,7 @@ Replace the E2E expectation that activates Changes in any non-Agent group. The n
 ## Tests
 
 - `AC-UI-TASK-LAYOUT-PROFILES-001.9`: Unit cases cover the eligible Default group, a non-Default group, and a Default group with an extra VS Code tab.
+- `AC-UI-TASK-LAYOUT-PROFILES-001.9`: Unit and store-integration cases cover a copied Default custom profile, built-in override identity, and per-environment profile persistence.
 - `AC-UI-TASK-LAYOUT-PROFILES-001.9`: Existing state tests preserve reload baselining and inactive-task attention.
 
 ## E2E tests
@@ -62,7 +64,8 @@ Replace the E2E expectation that activates Changes in any non-Agent group. The n
 
 ## Verification results
 
-- `pnpm exec vitest run components/task/changes-panel-focus.test.ts`: passed, 19 tests.
+- `pnpm exec vitest run components/task/changes-panel-focus.test.ts`: passed, 20 tests before the fixup and 20 tests after the fixup.
+- `pnpm exec vitest run lib/local-storage.test.ts lib/state/dockview-store.test.ts lib/state/dockview-preset-persistence.test.ts components/task/changes-panel-focus.test.ts`: passed, 92 tests.
 - `pnpm run typecheck`: passed.
 - `pnpm e2e:run tests/layout/changes-panel-focus.spec.ts -- --grep "VS Code group"`: passed.
 - The complete `changes-panel-focus.spec.ts` suite passed, 6 tests, with the desktop PR capture enabled.

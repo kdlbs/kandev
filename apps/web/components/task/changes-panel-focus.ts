@@ -41,12 +41,12 @@ function groupContainsAgentSessionPanel(panel: DockviewPanel): boolean {
 
 function isDefaultChangesGroup(panel: DockviewPanel): boolean {
   const panelIds = panel.group.panels.map((groupPanel) => groupPanel.id);
-  return (
-    panel.group.id === RIGHT_TOP_GROUP &&
-    panelIds.length === 2 &&
-    panelIds.includes("files") &&
-    panelIds.includes("changes")
-  );
+  return panel.group.id === RIGHT_TOP_GROUP && panelIds.length === 2 && panelIds.includes("files");
+}
+
+function isDefaultLayoutProfile(): boolean {
+  const { activeLayoutProfile } = useDockviewStore.getState();
+  return activeLayoutProfile.kind === "built-in" && activeLayoutProfile.id === "default";
 }
 
 /** Activate the Changes panel only in the Default Files and Changes group. */
@@ -58,6 +58,7 @@ export function activateChangesPanel(
   const panel = api.getPanel("changes");
   if (!panel) return "no-panel";
   if (groupContainsAgentSessionPanel(panel)) return "blocked-agent-group";
+  if (!isDefaultLayoutProfile()) return "blocked-layout";
   if (!isDefaultChangesGroup(panel)) return "blocked-layout";
 
   panel.api.setActive();

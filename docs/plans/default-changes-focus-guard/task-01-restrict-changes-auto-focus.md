@@ -22,6 +22,7 @@ Restrict automatic Changes activation to the Default top-right group with exactl
 ## In scope
 
 - Add direct unit coverage for the shared activation guard.
+- Track the active built-in or custom profile identity through layout application and environment-scoped restores.
 - Require `RIGHT_TOP_GROUP` and exact `files` and `changes` membership.
 - Replace the arbitrary non-Agent-group E2E expectation with the VS Code complaint scenario.
 - Preserve Default-layout activation and inactive-task pending behavior.
@@ -29,7 +30,7 @@ Restrict automatic Changes activation to the Default top-right group with exactl
 ## Out of scope
 
 - Change the marker and fingerprint logic.
-- Change Dockview layout construction or persistence.
+- Change backend layout-profile persistence.
 - Change mobile or tablet behavior.
 
 ## Acceptance
@@ -37,6 +38,7 @@ Restrict automatic Changes activation to the Default top-right group with exactl
 - A meaningful update activates Changes in the Default Files and Changes group.
 - A `vscode | files | changes` group keeps VS Code active after the update.
 - A Files and Changes group outside `RIGHT_TOP_GROUP` keeps its active tab.
+- A copied Default custom profile keeps its active tab even when its group IDs and tabs match the built-in Default.
 
 ## Verification
 
@@ -77,7 +79,8 @@ None.
 
 ## Results
 
-- `pnpm exec vitest run components/task/changes-panel-focus.test.ts`: passed, 19 tests.
+- `pnpm exec vitest run components/task/changes-panel-focus.test.ts`: passed, 20 tests before the fixup and 20 tests after the fixup.
+- `pnpm exec vitest run lib/local-storage.test.ts lib/state/dockview-store.test.ts lib/state/dockview-preset-persistence.test.ts components/task/changes-panel-focus.test.ts`: passed, 92 tests.
 - `pnpm run typecheck`: passed.
 - `pnpm e2e:run tests/layout/changes-panel-focus.spec.ts -- --grep "VS Code group"`: passed, 1 test.
 - The complete `changes-panel-focus.spec.ts` suite passed, 6 tests, and produced a fresh desktop PR capture.

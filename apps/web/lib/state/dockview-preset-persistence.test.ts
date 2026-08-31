@@ -4,6 +4,8 @@ import type { DockviewApi } from "dockview-react";
 vi.mock("@/lib/local-storage", () => ({
   setEnvLayout: vi.fn(),
   getEnvLayout: vi.fn(() => null),
+  getEnvLayoutProfile: vi.fn(() => null),
+  setEnvLayoutProfile: vi.fn(),
   getEnvMaximizeState: vi.fn(() => null),
   setEnvMaximizeState: vi.fn(),
   removeEnvMaximizeState: vi.fn(),
@@ -77,7 +79,7 @@ vi.mock("./layout-manager", async (importOriginal) => {
   };
 });
 
-import { removeEnvMaximizeState, setEnvLayout } from "@/lib/local-storage";
+import { removeEnvMaximizeState, setEnvLayout, setEnvLayoutProfile } from "@/lib/local-storage";
 import { persistEnvLayoutNow, useDockviewStore } from "./dockview-store";
 import {
   applyLayout,
@@ -276,6 +278,14 @@ describe("applyBuiltInPreset — persistence at call site", () => {
     expect(useDockviewStore.getState().isRestoringLayout).toBe(false);
     expect(setEnvLayout).toHaveBeenCalledTimes(1);
     expect(setEnvLayout).toHaveBeenCalledWith("env-preset", expect.any(Object));
+    expect(useDockviewStore.getState().activeLayoutProfile).toEqual({
+      kind: "built-in",
+      id: "default",
+    });
+    expect(setEnvLayoutProfile).toHaveBeenCalledWith("env-preset", {
+      kind: "built-in",
+      id: "default",
+    });
   });
 
   it("does not persist when no env is adopted yet", async () => {
@@ -649,10 +659,18 @@ describe("applyCustomLayout — persistence at call site", () => {
     useDockviewStore.setState({ api, currentLayoutEnvId: CUSTOM_ENV_ID });
 
     useDockviewStore.getState().applyCustomLayout(customLayout as unknown as ApplyCustomLayoutArg);
+    expect(useDockviewStore.getState().activeLayoutProfile).toEqual({
+      kind: "custom",
+      id: "custom-1",
+    });
     await flushRaf();
 
     expect(setEnvLayout).toHaveBeenCalledTimes(1);
     expect(setEnvLayout).toHaveBeenCalledWith(CUSTOM_ENV_ID, expect.any(Object));
+    expect(setEnvLayoutProfile).toHaveBeenCalledWith(CUSTOM_ENV_ID, {
+      kind: "custom",
+      id: "custom-1",
+    });
   });
 
   it("does not persist when no env is adopted yet", async () => {

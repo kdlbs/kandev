@@ -14,6 +14,11 @@ import { generateUUID } from "@/lib/utils";
 
 export type BuiltInLayoutProfileId = Exclude<BuiltInPreset, "compact">;
 
+/** Identity of the profile that produced the currently rendered layout. */
+export type LayoutProfileIdentity =
+  | { kind: "built-in"; id: BuiltInPreset }
+  | { kind: "custom"; id: string };
+
 export type BuiltInLayoutProfileDescriptor = {
   id: BuiltInLayoutProfileId;
   /** Canonical English; persisted into a saved override. Not for display. */
