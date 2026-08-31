@@ -294,10 +294,14 @@ func (s *Service) ensurePRWatch(
 // --- Task-PR association ---
 
 // AssociatePRWithTask creates a task-PR association scoped to a specific
-// repository. `repositoryID` is the per-task repository_id (from
-// task_repositories); empty preserves legacy single-repo behavior. Multi-repo
-// callers MUST pass it — empty causes ReplaceTaskPR to wipe the entire task's
-// PR rows (legacy "delete all" branch), which is what older code relied on.
+// repository. `repositoryID` is repositories.ID — the repository_id COLUMN
+// value stored on the task's task_repositories row, NOT that row's own id.
+// Passing the row id instead lets two writers disagree on repository_id for
+// the same task+PR, so both pass the UNIQUE(task_id, repository_id,
+// pr_number) constraint and the PR is associated twice. Empty preserves
+// legacy single-repo behavior. Multi-repo callers MUST pass it — empty
+// causes ReplaceTaskPR to wipe the entire task's PR rows (legacy "delete
+// all" branch), which is what older code relied on.
 func (s *Service) AssociatePRWithTask(ctx context.Context, taskID, repositoryID string, pr *PR) (*TaskPR, error) {
 	// pr here comes from branch-search discovery (poller.detectPRForWatch) or
 	// a batched status result of unknown populated-ness — never assert
@@ -305,6 +309,8 @@ func (s *Service) AssociatePRWithTask(ctx context.Context, taskID, repositoryID 
 	return s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, false, false)
 }
 
+// AssociatePRWithTaskForWorkspace is the workspace-scoped variant of
+// AssociatePRWithTask; `repositoryID` is repositories.ID, same as there.
 func (s *Service) AssociatePRWithTaskForWorkspace(
 	ctx context.Context, workspaceID, taskID, repositoryID string, pr *PR,
 ) (*TaskPR, error) {
@@ -421,7 +427,8 @@ func (s *Service) associatePRWithTask(
 //
 // Returns the persisted TaskPR row so callers can confirm the association
 // and react to errors synchronously, in contrast to AssociatePRByURL's
-// fire-and-forget logging.
+// fire-and-forget logging. `repositoryID` is repositories.ID, same id space
+// as AssociatePRWithTask.
 func (s *Service) AssociateExistingPRByURL(ctx context.Context, taskID, repositoryID, prURL string) (*TaskPR, error) {
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
@@ -441,6 +448,8 @@ func (s *Service) AssociateExistingPRByURL(ctx context.Context, taskID, reposito
 	return tp, nil
 }
 
+// AssociateExistingPRByURLForWorkspace is the workspace-scoped variant of
+// AssociateExistingPRByURL; `repositoryID` is repositories.ID, same as there.
 func (s *Service) AssociateExistingPRByURLForWorkspace(
 	ctx context.Context, workspaceID, userID, taskID, repositoryID, prURL string,
 ) (*TaskPR, error) {

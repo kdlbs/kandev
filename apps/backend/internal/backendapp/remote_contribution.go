@@ -47,6 +47,10 @@ func (c *remoteContributionCoordinator) Resolve(
 	return nil, false, nil
 }
 
+// Associate is a pure pass-through into the provider-specific association
+// call. `repositoryID` is repositories.ID, NOT a task_repositories row id —
+// see AssociatePRWithTask's doc comment for why the two must not be
+// confused.
 func (c *remoteContributionCoordinator) Associate(
 	ctx context.Context, workspaceID, userID, taskID, repositoryID string,
 	resolution *models.RemoteContributionResolution,
