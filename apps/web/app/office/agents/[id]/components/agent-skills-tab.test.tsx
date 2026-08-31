@@ -101,7 +101,7 @@ describe("AgentSkillsTab union seeding", () => {
 });
 
 describe("AgentSkillsTab save", () => {
-  it("sends both skillIds and desiredSkills, converging the columns", async () => {
+  it("sends desiredSkills for both the pre-existing and newly toggled skill, but keeps the pre-existing desired-only id out of skillIds", async () => {
     const otherSkill: Skill = { ...skill, id: "skill-2", slug: "other-skill", name: "Other" };
     vi.mocked(listSkills).mockResolvedValue({ skills: [skill, otherSkill] });
     renderSkillsTab(agentDesiredOnly, [skill, otherSkill]);
@@ -119,7 +119,12 @@ describe("AgentSkillsTab save", () => {
       expect(updateAgentProfile).toHaveBeenCalledWith(
         agentDesiredOnly.id,
         expect.objectContaining({
-          skillIds: expect.arrayContaining([skill.id, otherSkill.id]),
+          // `skill` was only ever a desiredSkills slug (agentDesiredOnly.skillIds
+          // is []): promoting its resolved id into skillIds here would let it
+          // survive a later config-file removal of the slug, since config
+          // import never touches skill_ids. Only the newly toggled catalog
+          // pick belongs in skillIds.
+          skillIds: [otherSkill.id],
           desiredSkills: expect.arrayContaining([skill.slug, otherSkill.slug]),
         }),
       );

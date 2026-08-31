@@ -155,8 +155,21 @@ export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {
         .filter((skill) => skillIds.includes(skill.id))
         .map((skill) => skill.slug);
       const desiredSkills = [...unresolved, ...selectedSlugs];
-      await updateAgentProfile(agent.id, { skillIds, desiredSkills });
-      updateStore(agent.workspaceId, agent.id, { skillIds, desiredSkills });
+      // An id that resolves only from a pre-existing desiredSkills slug
+      // (never from agent.skillIds) must not get mirrored into skill_ids.
+      // Config import owns desired_skills and never touches skill_ids
+      // (see UpdateAgentInstanceConfigFields); once such an id lands in
+      // skill_ids, a later config-file removal of the slug can't detach
+      // the skill, since the runtime unions both columns.
+      const originalSkillIds = new Set(agent.skillIds ?? []);
+      const desiredOnlyIds = new Set(
+        skills
+          .filter((skill) => !originalSkillIds.has(skill.id) && agent.desiredSkills?.includes(skill.slug))
+          .map((skill) => skill.id),
+      );
+      const persistedSkillIds = skillIds.filter((id) => !desiredOnlyIds.has(id));
+      await updateAgentProfile(agent.id, { skillIds: persistedSkillIds, desiredSkills });
+      updateStore(agent.workspaceId, agent.id, { skillIds: persistedSkillIds, desiredSkills });
       setDirty(false);
       toast.success(t("office:skillsUpdated"));
     } catch (err) {
@@ -164,7 +177,16 @@ export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {
     } finally {
       setSaving(false);
     }
-  }, [agent.id, agent.desiredSkills, agent.workspaceId, skillIds, skills, updateStore, t]);
+  }, [
+    agent.id,
+    agent.desiredSkills,
+    agent.skillIds,
+    agent.workspaceId,
+    skillIds,
+    skills,
+    updateStore,
+    t,
+  ]);
 
   if (skills.length === 0) {
     return (
