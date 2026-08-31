@@ -151,7 +151,7 @@ function DialogTitle({ className, ...props }: React.ComponentProps<typeof Dialog
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn("text-sm font-medium", className)}
+      className={cn("text-sm font-medium text-balance wrap-break-word", className)}
       {...props}
     />
   );
@@ -165,7 +165,7 @@ function DialogDescription({
     <DialogPrimitive.Description
       data-slot="dialog-description"
       className={cn(
-        "text-muted-foreground *:[a]:hover:text-foreground text-xs/relaxed *:[a]:underline *:[a]:underline-offset-3",
+        "text-muted-foreground *:[a]:hover:text-foreground text-xs/relaxed text-pretty wrap-break-word *:[a]:underline *:[a]:underline-offset-3",
         className,
       )}
       {...props}

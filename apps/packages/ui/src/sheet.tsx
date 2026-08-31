@@ -99,7 +99,7 @@ function SheetTitle({ className, ...props }: React.ComponentProps<typeof SheetPr
   return (
     <SheetPrimitive.Title
       data-slot="sheet-title"
-      className={cn("text-foreground text-sm font-medium", className)}
+      className={cn("text-foreground text-sm font-medium text-balance wrap-break-word", className)}
       {...props}
     />
   );
@@ -112,7 +112,7 @@ function SheetDescription({
   return (
     <SheetPrimitive.Description
       data-slot="sheet-description"
-      className={cn("text-muted-foreground text-xs/relaxed", className)}
+      className={cn("text-muted-foreground text-xs/relaxed text-pretty wrap-break-word", className)}
       {...props}
     />
   );
