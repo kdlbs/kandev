@@ -385,10 +385,9 @@ test.describe("Session tab management — close behavior", () => {
       await session.clickTab("Changes");
       await expect(session.changesFileRow(localChange)).toBeVisible({ timeout: 20_000 });
 
-      const beforeSecondClick = traffic.frames.length;
       await session.sessionTabBySessionId(session2Id).click();
       await expect
-        .poll(() => receivedGitEvent(session2Id, beforeSecondClick), {
+        .poll(() => receivedGitEvent(session2Id, beforeReload), {
           timeout: 20_000,
           message: "waiting for the second sibling git-status hydration",
         })
