@@ -31,6 +31,7 @@ Kandev keeps growing external integrations and surface-specific behavior directl
 - **AC-PLUGINS-PLUGINS-001.10:** Every Host writer that can wake, redirect, message, create work for, relate, or transition a task shall atomically revalidate exact target/resource versions and the pending-transition predicate with its side effect, and shall return a typed conflict without a partial side effect when either changed.
 - **AC-PLUGINS-PLUGINS-001.11:** A plugin shall access Kandev domain data and commands only through documented capability-gated Host contracts. Global MCP, private REST, direct database access, shell access, and prompt or comment text shall not confer plugin authority.
 - **AC-PLUGINS-PLUGINS-001.12:** When a required Host capability or result state is unknown or unsupported, the plugin shall receive a typed unsupported result and shall not fall back to a broader integration path.
+- **AC-PLUGINS-PLUGINS-001.13:** Before a plugin makes an H1-H5 exact Host request, Kandev shall provide an installation-bound capability context with the approved workspace IDs, current capability revisions, and refresh signaling. A stale context shall fail closed, and an empty approved workspace set shall keep the plugin degraded without granting authority.
 
 ## System design
 

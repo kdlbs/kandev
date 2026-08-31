@@ -351,6 +351,15 @@ Host RPC and global MCP adapters may use consumer-specific request DTOs, but the
 must call the same named domain command/query and cannot duplicate authorization,
 ownership, idempotency, transition, lifecycle, relation, or audit invariants.
 
+Before the first H1-H5 exact request, the plugin calls `GetCapabilityContext` on
+the connection-bound Host. Kandev derives the installation identity from the
+connection and returns the current approved workspace IDs, capability revisions,
+capability IDs, manifest digest, and approval status. The request does not accept
+a workspace, revision, or authority from the plugin. A
+`capability-context-changed` signal causes the plugin to discard its cached context
+and fetch a new one. A stale request returns `DENIED/STALE_CAPABILITY_REVISION`;
+an empty context leaves the plugin degraded and grants no authority.
+
 ## Filesystem sideloading & sync
 
 Besides the URL/upload install pipeline, an operator with shell access to the host

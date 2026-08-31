@@ -61,6 +61,7 @@ test("freezes every H0 Host unit and correction", async () => {
     "H3d",
     "H4",
     "H5",
+    "H6",
     "H7",
   ]) {
     assert.match(
@@ -128,6 +129,56 @@ test("keeps the public Host inventory generic and merge-free", async () => {
   assert.match(inventory, /No Host writer is approved in H0/);
 });
 
+test("defines approval bootstrap and SDK compatibility rules", async () => {
+  const adr = await readADR();
+  const normalized = adr.replace(/\s+/g, " ");
+
+  assert.match(adr, /### H6 capability context bootstrap/);
+  assert.match(adr, /`GetCapabilityContext`/);
+  assert.match(normalized, /before the first exact call/i);
+  assert.match(normalized, /workspace.*approved capability revision/i);
+  assert.match(adr, /capability-context-changed/i);
+  assert.match(normalized, /empty workspace list is a valid degraded state/i);
+  assert.match(adr, /base `pluginsdk\.Host` interface is frozen/);
+  assert.match(adr, /optional extension interfaces/);
+});
+
+test("maps H1 statuses to the common result vocabulary", async () => {
+  const adr = await readADR();
+
+  assert.match(
+    adr,
+    /H1-specific statuses are readback values, not additional `HostCommandResult` states/,
+  );
+  for (const [status, parent, reason] of [
+    ["CONFIGURATION_REQUIRED", "DENIED", "HOST_CONFIGURATION_REQUIRED"],
+    ["BUSY", "CONFLICT", "CONVERSATION_BUSY"],
+    ["FENCED", "CONFLICT", "EXECUTION_GENERATION_FENCED"],
+  ]) {
+    const row = "| `" + status + "` | `" + parent + "` | `" + reason + "` |";
+    assert.ok(adr.includes(row), `missing H1 mapping for ${status}`);
+  }
+});
+
+test("defines the trusted execution-generation token path", async () => {
+  const adr = await readADR();
+  const normalized = adr.replace(/\s+/g, " ");
+
+  for (const required of [
+    "Host mints the token",
+    "server-owned MCP execution context",
+    "`AgentToolContext`",
+    "cannot mint or replace it",
+    "same critical section",
+    "before enabling agent-originated H3a, H3b, H3c, or H5 writes",
+  ]) {
+    assert.ok(
+      normalized.includes(required),
+      `missing provenance rule: ${required}`,
+    );
+  }
+});
+
 test("preserves literal pipes inside decision-table cells", async () => {
   const adr = await readADR();
   const inventoryRows = tableRows(
@@ -179,7 +230,7 @@ test("fences legacy v1 calls from H6 exact authority", async () => {
   }
   assert.match(
     adr,
-    /Every \*\*new exact\*\* Host request introduced by this ADR carries/,
+    /Every \*\*new exact\*\* Host request introduced by this ADR, except the H6/,
   );
   assert.match(adr, /host\.v2\.read:tasks/);
   assert.match(adr, /host\.v2\.write:tasks/);
@@ -231,6 +282,17 @@ test("assigns pending-transition reads only to H2c", async () => {
     h5Row,
     /ListPendingTaskTransitions|TaskTransitionQuery|api_read:/,
   );
+});
+
+test("does not reserve an undefined task flag contract", async () => {
+  const adr = await readADR();
+  const inventory = section(
+    adr,
+    "### Public Host surface inventory",
+    "### H2d exact-head evidence",
+  );
+
+  assert.doesNotMatch(inventory, /SetTaskFlagsExact/);
 });
 
 test("pins immutable migration evidence and forbidden integration paths", async () => {
