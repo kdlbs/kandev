@@ -5,9 +5,51 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/coordinator"
 	orchmodels "github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type handoffAuthorityStore struct {
+	principal *models.WorkspaceAgentPrincipal
+	grants    []*models.CoordinatorGrant
+	audits    []*models.CoordinatorAuditEvent
+}
+
+func (s *handoffAuthorityStore) GetActiveWorkspaceAgentPrincipalForTask(context.Context, string, string) (*models.WorkspaceAgentPrincipal, error) {
+	return s.principal, nil
+}
+func (s *handoffAuthorityStore) ListActiveWorkspaceAgentPrincipalGrants(context.Context, string, string) ([]*models.CoordinatorGrant, error) {
+	return s.grants, nil
+}
+func (s *handoffAuthorityStore) CreateCoordinatorAuditEvent(_ context.Context, event *models.CoordinatorAuditEvent) error {
+	s.audits = append(s.audits, event)
+	return nil
+}
+func (*handoffAuthorityStore) FinishCoordinatorAuditEvent(context.Context, string, string, string) error {
+	return nil
+}
+
+func TestListRelatedForCallerSession_TargetMaterializationFailureAuditsDeniedNoLeak(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("caller", "", "ws-1")
+	store := &handoffAuthorityStore{}
+	svc := newCascadeService(t, tasks, newCascadeWSGroupRepo())
+	svc.SetCoordinatorAuthority(coordinator.New(store, func() bool { return true }))
+
+	_, err := svc.ListRelatedForCallerSession(context.Background(), "caller", "caller-session", "missing-target")
+	if !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("error = %v, want ErrAccessDenied", err)
+	}
+	if len(store.audits) != 1 {
+		t.Fatalf("audits = %#v, want one denied audit", store.audits)
+	}
+	audit := store.audits[0]
+	if audit.PrincipalID != "" || audit.ActorTaskID != "caller" || audit.ActorSessionID != "caller-session" || audit.TargetTaskID != "missing-target" || audit.WorkspaceID != "ws-1" || audit.Decision != "denied" || audit.Detail != "materialization_failure" {
+		t.Fatalf("audit = %#v", audit)
+	}
+}
 
 // setDescription and setState mutate a task the fake repo already holds so a
 // test can model a CREATED sibling (no session) that carries dependency

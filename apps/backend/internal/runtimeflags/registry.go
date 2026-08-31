@@ -69,6 +69,22 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.coordinatorTaskAuthority",
+			EnvVar:          "KANDEV_FEATURES_COORDINATOR_TASK_AUTHORITY",
+			Kind:            KindFeature,
+			Label:           "Workspace agent authority",
+			Description:     "Allows explicitly granted active workspace-agent principals to perform the limited generic task operations their grants authorize.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskHigh,
+			RiskDescription: "Enabling this allows an operator-granted workspace agent to act beyond direct-parent task relationships. Grants remain scoped, revocable, and audited; enable only after reviewing the principal and grants.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CoordinatorTaskAuthority },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CoordinatorTaskAuthority = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.dynamicAgentRouting",
 			EnvVar:      "KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING",
 			Kind:        KindFeature,

@@ -357,6 +357,10 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 		s.runtime.Stop(id)
 	}
 	s.revokeGitCredentialProviderLeases(rec.RepositoryProviders)
+	if err := s.revokePluginWorkspaceAgentPrincipals(ctx, id); err != nil {
+		s.reconcileAbortedUninstall(id, wasRunning)
+		return fmt.Errorf("plugins: uninstall aborted, could not revoke workspace agent principals: %w", err)
+	}
 	if err := s.deletePluginSecrets(ctx, id); err != nil {
 		s.reconcileAbortedUninstall(id, wasRunning)
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin secrets: %w", err)
@@ -364,6 +368,10 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	if err := s.deletePluginUserState(ctx, id); err != nil {
 		s.reconcileAbortedUninstall(id, wasRunning)
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin user state: %w", err)
+	}
+	if err := s.deletePluginAgentConversations(ctx, id); err != nil {
+		s.reconcileAbortedUninstall(id, wasRunning)
+		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin agent conversations: %w", err)
 	}
 	if err := pkgtar.Remove(s.pluginsDir, id); err != nil {
 		return fmt.Errorf("plugins: remove installed package: %w", err)
@@ -376,6 +384,21 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	s.notifyDeliverer()
 	s.notifyAgentToolCatalogChanged()
 	return nil
+}
+
+// revokePluginWorkspaceAgentPrincipals is fail-visible uninstall lifecycle
+// cleanup. Disable and upgrade intentionally preserve durable principals and
+// grants; only uninstall revokes them before removing plugin identity so a
+// reinstall cannot inherit authority. A nil source means this host predates
+// the generic principal feature and has no principals to revoke.
+func (s *Service) revokePluginWorkspaceAgentPrincipals(ctx context.Context, id string) error {
+	s.mu.Lock()
+	source := s.workspaceAgentPrincipals
+	s.mu.Unlock()
+	if source == nil {
+		return nil
+	}
+	return source.RevokePluginWorkspaceAgentPrincipals(ctx, id)
 }
 
 func (s *Service) reconcileAbortedUninstall(id string, wasRunning bool) {
@@ -438,4 +461,25 @@ func (s *Service) deletePluginUserState(ctx context.Context, id string) error {
 		return nil
 	}
 	return s.userStateCleanup.DeleteAllForPlugin(ctx, id)
+}
+
+// deletePluginAgentConversations removes every managed agent conversation
+// (hidden ephemeral task + session) id owns, across every workspace and
+// conversation key. Provenance-safe: the underlying DeleteAllForPlugin only
+// matches ephemeral tasks stamped with id's own plugin_id metadata, so
+// ordinary user tasks and other plugins' managed conversations are never
+// reachable from here. A nil agentConvs (agent_conversation was never wired,
+// or a narrowly constructed test host) is a no-op — a plugin that never used
+// the capability has nothing to clean up. Unlike deletePluginState
+// (plugin_state, best-effort), this is fail-visible: an error aborts the
+// uninstall rather than silently orphaning hidden conversations, matching
+// deletePluginSecrets/deletePluginUserState's ordering (nothing destructive
+// to the package/record has happened yet, so a retry is safe).
+func (s *Service) deletePluginAgentConversations(ctx context.Context, id string) error {
+	svc := s.agentConversationDeps()
+	if svc == nil {
+		return nil
+	}
+	_, err := svc.DeleteAllForPlugin(ctx, id)
+	return err
 }

@@ -37,15 +37,18 @@ import (
 // Resource names gating the Host data API's read RPCs, per ADR 0043: each
 // accessor requires "api_read:<resource>" in the plugin's manifest.
 const (
-	resourceTasks            = "tasks"
-	resourceSessions         = "sessions"
-	resourceWorkspaces       = "workspaces"
-	resourceWorkflows        = "workflows"
-	resourceAgentProfiles    = "agent_profiles"
-	resourceExecutorProfiles = "executor_profiles"
-	resourceRepositories     = "repositories"
-	resourceMessages         = "messages"
-	resourceInteractions     = "interactions"
+	resourceTasks                    = "tasks"
+	resourceTaskRelations            = "task_relations"
+	resourceAutomations              = "automations"
+	resourceWorkspaceAgentPrincipals = "workspace_agent_principals"
+	resourceSessions                 = "sessions"
+	resourceWorkspaces               = "workspaces"
+	resourceWorkflows                = "workflows"
+	resourceAgentProfiles            = "agent_profiles"
+	resourceExecutorProfiles         = "executor_profiles"
+	resourceRepositories             = "repositories"
+	resourceMessages                 = "messages"
+	resourceInteractions             = "interactions"
 )
 
 // apiReadCapability formats resource as the api_read:<resource> capability
@@ -144,6 +147,43 @@ type taskDataSource interface {
 	GetExecutor(ctx context.Context, id string) (*taskmodels.Executor, error)
 }
 
+// taskRelationsSource is the narrow host seam for compact, workspace-scoped
+// relationship graphs. The source owns the target-workspace check and must
+// return no descriptions or documents in its pluginsdk DTO.
+type taskRelationsSource interface {
+	GetTaskRelations(ctx context.Context, workspaceID, taskID string) (*pluginsdk.TaskRelations, error)
+}
+
+// automationSource provides the compact, workspace-scoped Automation
+// descriptor projection for plugin trigger consumers. It intentionally uses
+// pluginsdk DTOs so the plugin package does not import the Automation domain.
+type automationSource interface {
+	ListPluginAutomations(ctx context.Context, workspaceID string) ([]pluginsdk.Automation, error)
+	GetPluginAutomation(ctx context.Context, workspaceID, automationID string) (*pluginsdk.Automation, error)
+}
+
+// workspaceAgentPrincipalSource is the host-owned safe projection of
+// operator-created durable principals. The caller plugin ID is passed by the
+// host, never supplied over the plugin RPC, so foreign installation records
+// are indistinguishable from absent records.
+type workspaceAgentPrincipalSource interface {
+	GetPluginWorkspaceAgentPrincipal(ctx context.Context, pluginID, workspaceID, logicalKey string) (*pluginsdk.WorkspaceAgentPrincipal, *pluginsdk.WorkspaceAgentPrincipalStatus, error)
+	ListPluginWorkspaceAgentPrincipalAudit(ctx context.Context, pluginID, workspaceID, logicalKey string) ([]pluginsdk.WorkspaceAgentPrincipalAuditEvent, error)
+	// AuthorizePluginWorkspaceAgentRun is a server-side preflight for the
+	// existing AgentConversations Ensure/Dispatch run path. It never lets a
+	// plugin grant itself authority; missing/revoked/ungranted principals fail
+	// before a run is launched or prompted.
+	AuthorizePluginWorkspaceAgentRun(ctx context.Context, pluginID, workspaceID, logicalKey string) error
+	// BindPluginWorkspaceAgentRun attaches only a host-created backing run to
+	// the durable principal after Ensure. The source re-checks active status so
+	// a revoke racing creation cannot preserve authorization.
+	BindPluginWorkspaceAgentRun(ctx context.Context, pluginID, workspaceID, logicalKey, taskID, sessionID string) error
+	// RevokePluginWorkspaceAgentPrincipals is host lifecycle cleanup only. It
+	// runs before uninstall removes a plugin record so reinstall cannot inherit
+	// active authority.
+	RevokePluginWorkspaceAgentPrincipals(ctx context.Context, pluginID string) error
+}
+
 // workflowLister is the narrow slice of internal/task/service.Service the
 // Workflows().List RPC needs (workflows themselves are owned by the task
 // service, not internal/workflow/service — only steps are).
@@ -152,9 +192,14 @@ type workflowLister interface {
 }
 
 // workflowStepLister is the narrow slice of internal/workflow/service.Service
-// the Workflows().ListSteps RPC needs.
+// the Workflows().ListSteps RPC needs. GetCoordinatorMonitoring backs the
+// CoordinatorMonitored/CoordinatorPrompt fields ListSteps conditionally merges
+// onto each step for plugins that explicitly declare agent_conversation. Plain
+// api_read:workflows readers receive ordinary workflow shape with the private
+// coordinator policy redacted.
 type workflowStepLister interface {
 	ListStepsByWorkflow(ctx context.Context, workflowID string) ([]*wfmodels.WorkflowStep, error)
+	GetCoordinatorMonitoring(ctx context.Context, workflowID string) ([]wfmodels.CoordinatorStepMonitor, error)
 }
 
 // agentProfileDataSource is the narrow slice of
@@ -211,6 +256,48 @@ type messageDataSource interface {
 // here, writes in host_write.go).
 func (h *pluginHost) Tasks() pluginsdk.TaskReader {
 	return taskReader{host: h}
+}
+
+func (h *pluginHost) TaskRelations() pluginsdk.TaskRelationsReader {
+	if !h.capabilities.CanRead(resourceTaskRelations) {
+		return deniedTaskRelationsReader{}
+	}
+	if h.taskRelations == nil {
+		return h.UnimplementedHostData.TaskRelations()
+	}
+	source := h.taskRelations()
+	if source == nil {
+		return h.UnimplementedHostData.TaskRelations()
+	}
+	return taskRelationsReader{source: source}
+}
+
+func (h *pluginHost) Automations() pluginsdk.AutomationReader {
+	if !h.capabilities.CanRead(resourceAutomations) {
+		return deniedAutomationReader{}
+	}
+	if h.automations == nil {
+		return h.UnimplementedHostData.Automations()
+	}
+	source := h.automations()
+	if source == nil {
+		return h.UnimplementedHostData.Automations()
+	}
+	return automationReader{source: source}
+}
+
+func (h *pluginHost) WorkspaceAgentPrincipals() pluginsdk.WorkspaceAgentPrincipalReader {
+	if !h.capabilities.CanRead(resourceWorkspaceAgentPrincipals) {
+		return deniedWorkspaceAgentPrincipalReader{}
+	}
+	if h.workspaceAgentPrincipals == nil {
+		return h.UnimplementedHostData.WorkspaceAgentPrincipals()
+	}
+	source := h.workspaceAgentPrincipals()
+	if source == nil {
+		return h.UnimplementedHostData.WorkspaceAgentPrincipals()
+	}
+	return workspaceAgentPrincipalReader{pluginID: h.pluginID, source: source}
 }
 
 func (h *pluginHost) Sessions() pluginsdk.SessionReader {
@@ -517,9 +604,24 @@ func (r workflowReader) ListSteps(ctx context.Context, workflowID string) ([]plu
 	if err != nil {
 		return nil, err
 	}
+	if !r.host.capabilities.AgentConversation {
+		dtos := make([]pluginsdk.WorkflowStep, len(steps))
+		for i, step := range steps {
+			dtos[i] = workflowStepModelToDTO(step, wfmodels.CoordinatorStepMonitor{})
+		}
+		return dtos, nil
+	}
+	monitoring, err := r.host.workflowSteps.GetCoordinatorMonitoring(ctx, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	byStepID := make(map[string]wfmodels.CoordinatorStepMonitor, len(monitoring))
+	for _, m := range monitoring {
+		byStepID[m.WorkflowStepID] = m
+	}
 	dtos := make([]pluginsdk.WorkflowStep, len(steps))
 	for i, s := range steps {
-		dtos[i] = workflowStepModelToDTO(s)
+		dtos[i] = workflowStepModelToDTO(s, byStepID[s.ID])
 	}
 	return dtos, nil
 }

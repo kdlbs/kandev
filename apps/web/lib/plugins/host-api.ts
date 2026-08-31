@@ -191,6 +191,32 @@ function PluginChangeRequestDetail(props: ChangeRequestDetailProps) {
   );
 }
 
+const LazyWorkspaceAgentChat = React.lazy(async () => {
+  const module = await import("@/components/agent-conversation/workspace-agent-chat");
+  return { default: module.WorkspaceAgentChat };
+});
+
+/**
+ * Keep the task chat graph (message list, composer, clarification overlay)
+ * off the plugin boot path, exactly as the change-request detail view is.
+ * Only a plugin that actually renders a managed conversation pays for it.
+ */
+function PluginWorkspaceAgentChat(props: React.ComponentProps<typeof LazyWorkspaceAgentChat>) {
+  return React.createElement(
+    React.Suspense,
+    {
+      fallback: React.createElement(
+        "div",
+        { className: "flex h-full items-center justify-center py-8" },
+        React.createElement(Spinner, {
+          "aria-label": t("plugins:loadingWorkspaceAgentChat"),
+        }),
+      ),
+    },
+    React.createElement(LazyWorkspaceAgentChat, props),
+  );
+}
+
 /**
  * Curated `@kandev/ui` subset exposed on `host.ui`, plus a handful of
  * first-party app components (bottom of the map). Plugins must use these
@@ -355,6 +381,12 @@ const PLUGIN_UI: PluginUIApi & Record<string, unknown> = {
   SettingsSection,
   SettingsCard,
   WorkspaceScopedSection,
+  // - WorkspaceAgentChat: host-owned chat component for managed agent
+  //   conversations. Plugins render this on their route page with a
+  //   WorkspaceAgentChatProps descriptor to show the conversation transcript
+  //   and composer. Uses the same shared chat primitives as task and quick
+  //   chat panels. Lazily loaded so the chat graph stays off plugin boot.
+  WorkspaceAgentChat: PluginWorkspaceAgentChat,
 };
 
 function pluginSettingsContributorId(pluginId: string, contributorId: string): string {

@@ -727,7 +727,8 @@ func TestWSAddMessageRetryAcceptsMessagePersistedAfterSessionSwitch(t *testing.T
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
-	h := NewMessageHandlers(svc, &switchingTurnStartOrchestrator{repo: repo}, log)
+	orch := &switchingTurnStartOrchestrator{repo: repo}
+	h := NewMessageHandlers(svc, orch, log)
 
 	req, err := ws.NewRequest("req-retry", ws.ActionMessageAdd, map[string]interface{}{
 		"task_id":           "t1",
@@ -740,6 +741,56 @@ func TestWSAddMessageRetryAcceptsMessagePersistedAfterSessionSwitch(t *testing.T
 	resp, err := h.wsAddMessage(context.Background(), req)
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	assert.Empty(t, repo.messages, "an idempotent retry must not create a second message")
+	assert.Empty(t, orch.getStartedSession(), "an idempotent retry must not restart the created session")
+	assert.Empty(t, orch.getForwardedSession(), "an idempotent retry must not forward the prompt again")
+}
+
+func TestWSAddMessageRetrySkipsQueuedPromptSideEffects(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &messageAddSwitchRepo{
+		tasks: map[string]*models.Task{
+			"t1": {ID: "t1", State: v1.TaskStateInProgress, UpdatedAt: now},
+		},
+		sessions: map[string]*models.TaskSession{
+			"s1": {ID: "s1", TaskID: "t1", State: models.TaskSessionStateWaitingForInput, UpdatedAt: now},
+		},
+		primaryID: "s1",
+		idempotentMessage: &models.Message{
+			ID:            "client-1",
+			TaskID:        "t1",
+			TaskSessionID: "s1",
+			AuthorType:    models.MessageAuthorUser,
+			Content:       "wait for admission",
+			CreatedAt:     now,
+		},
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	require.NoError(t, err)
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	orch := &firstTurnCaptureOrchestrator{
+		turnStartResult: orchestrator.ProcessOnTurnStartResult{Queued: true},
+	}
+	h := NewMessageHandlers(svc, orch, log)
+
+	req, err := ws.NewRequest("req-retry-queued", ws.ActionMessageAdd, map[string]interface{}{
+		"task_id":           "t1",
+		"session_id":        "s1",
+		"client_message_id": "client-1",
+		"content":           "wait for admission",
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsAddMessage(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	assert.Nil(t, orch.queuedPromptCall, "an idempotent retry must not queue the prompt again")
 	assert.Empty(t, repo.messages, "an idempotent retry must not create a second message")
 }
 

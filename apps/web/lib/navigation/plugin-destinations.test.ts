@@ -24,11 +24,14 @@ const HOST_INTERNAL_INSIGHTS_SECTION = "insights" as const;
 const SIDEBAR_FOOTER_SECTION: PluginNavSection = "sidebar-footer";
 
 describe("Type surface", () => {
-  it("assigns all four PluginNavSection members", () => {
+  it("assigns all five PluginNavSection members", () => {
     const main: PluginNavSection = "main";
     const settings: PluginNavSection = "settings";
     const integrations: PluginNavSection = "integrations";
-    expect([main, settings, integrations, SIDEBAR_FOOTER_SECTION]).toHaveLength(4);
+    const afterIntegrations: PluginNavSection = "after-integrations";
+    expect([main, settings, integrations, afterIntegrations, SIDEBAR_FOOTER_SECTION]).toHaveLength(
+      5,
+    );
   });
 
   it("rejects the host's internal section name via a suppressed type error", () => {
@@ -71,6 +74,13 @@ const pluginItems: PluginNavRegistration[] = [
     label: "Tracker",
     path: "/plugins/tracker",
     section: "integrations",
+  },
+  {
+    pluginId: "acme",
+    id: "workspace-agent",
+    label: "Workspace Agent",
+    path: "/plugins/agent",
+    section: "after-integrations",
   },
   {
     pluginId: "acme",
@@ -135,6 +145,16 @@ describe("plugin destinations", () => {
 
     // First-party links keep precedence; plugin items follow.
     expect(ids(resolved)).toEqual(["github", "plugin:acme:tracker"]);
+  });
+
+  it("places an after-integrations item in the dedicated top-level group", () => {
+    const resolved = resolveDestinations({
+      surface: "sidebar",
+      section: "workspace-agents",
+      ctx: KANBAN,
+      pluginItems,
+    });
+    expect(ids(resolved)).toEqual(["plugin:acme:workspace-agent"]);
   });
 
   it("never renders settings-section items as destinations", () => {

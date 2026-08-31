@@ -244,6 +244,21 @@ test("plugin authoring reference documents authenticated actions and live host w
   assert.match(integrations, /Bitbucket/);
 });
 
+test("plugin docs describe compact task-relations authorization", async () => {
+  const authoring = await fs.readFile(
+    path.join(process.cwd(), "docs/public/plugins-authoring.md"),
+    "utf8",
+  );
+  const manifest = await fs.readFile(
+    path.join(process.cwd(), "docs/public/plugins-manifest.md"),
+    "utf8",
+  );
+
+  assert.match(authoring, /TaskRelations\(\)\.Get/);
+  assert.match(manifest, /`task_relations` grants/);
+  assert.match(manifest, /descriptions, documents, metadata, and repository/);
+});
+
 test("rejects public pages that contain an em dash", async () => {
   const dir = await createDocs(
     { "index.md": validPage.replace("Page body.", "Public — copy.") },

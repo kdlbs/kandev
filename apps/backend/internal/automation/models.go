@@ -373,12 +373,16 @@ type RevealWebhookSecretResponse struct {
 
 // AutomationTriggeredEvent is published when a trigger fires.
 type AutomationTriggeredEvent struct {
-	RunID        string          `json:"run_id"`
-	AutomationID string          `json:"automation_id"`
-	TriggerID    string          `json:"trigger_id"`
-	TriggerType  TriggerType     `json:"trigger_type"`
-	TriggerData  json.RawMessage `json:"trigger_data"`
-	DedupKey     string          `json:"dedup_key"`
+	AutomationID string `json:"automation_id"`
+	// WorkspaceID is server-stamped from the persisted automation. It lets a
+	// plugin receiving automation.triggered bind the delivery to its own
+	// workspace-scoped configuration without trusting trigger_data.
+	WorkspaceID string          `json:"workspace_id"`
+	RunID       string          `json:"run_id"`
+	TriggerID   string          `json:"trigger_id"`
+	TriggerType TriggerType     `json:"trigger_type"`
+	TriggerData json.RawMessage `json:"trigger_data"`
+	DedupKey    string          `json:"dedup_key"`
 }
 
 // RepositoryLookup resolves a repository's workspace ownership for

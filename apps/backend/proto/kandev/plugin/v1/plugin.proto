@@ -79,6 +79,22 @@ service Host {
   // Reads — capability api_read:<resource>
   rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
   rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
+  // Compact task relationship graph — capability api_read:task_relations.
+  // Unlike Task, RelationTask intentionally has no description, metadata,
+  // repositories, or document fields. The requested target must belong to
+  // workspace_id; foreign and unknown targets fail as NotFound.
+  rpc GetTaskRelations(GetTaskRelationsRequest) returns (GetTaskRelationsResponse);
+  // Automation descriptors — capability api_read:automations. A plugin uses
+  // the workspace-stamped automation.triggered event as delivery, then reads
+  // the configured prompt/profile through this scoped accessor.
+  rpc ListAutomations(ListAutomationsRequest) returns (ListAutomationsResponse);
+  rpc GetAutomation(GetAutomationRequest) returns (GetAutomationResponse);
+  // Workspace-agent principal projection — capability
+  // api_read:workspace_agent_principals. The host derives plugin-installation
+  // identity from the authenticated registry context; plugins never submit it.
+  rpc GetWorkspaceAgentPrincipal(GetWorkspaceAgentPrincipalRequest) returns (GetWorkspaceAgentPrincipalResponse);
+  rpc GetWorkspaceAgentPrincipalStatus(GetWorkspaceAgentPrincipalStatusRequest) returns (GetWorkspaceAgentPrincipalStatusResponse);
+  rpc ListWorkspaceAgentPrincipalAudit(ListWorkspaceAgentPrincipalAuditRequest) returns (ListWorkspaceAgentPrincipalAuditResponse);
   rpc ListWorkspaces(ListWorkspacesRequest) returns (ListWorkspacesResponse);
   rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
   rpc ListWorkflowSteps(ListWorkflowStepsRequest) returns (ListWorkflowStepsResponse);
@@ -138,6 +154,15 @@ service Host {
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
   rpc PreviewPluginOwnedTaskTree(PreviewPluginOwnedTaskTreeRequest) returns (PreviewPluginOwnedTaskTreeResponse);
   rpc DeletePluginOwnedTaskTree(DeletePluginOwnedTaskTreeRequest) returns (DeletePluginOwnedTaskTreeResponse);
+
+  // Agent conversations — capability agent_conversation. Ensure creates or
+  // repairs one hidden workflowless ephemeral task with a primary session per
+  // (plugin_id, workspace_id, conversation_key). Dispatch sends a prompt to an
+  // ensured conversation with stable occurrence idempotency and busy-session
+  // coalescing. Delete removes only conversations owned by this plugin.
+  rpc EnsureAgentConversation(EnsureAgentConversationRequest) returns (EnsureAgentConversationResponse);
+  rpc DispatchAgentConversation(DispatchAgentConversationRequest) returns (DispatchAgentConversationResponse);
+  rpc DeleteAgentConversation(DeleteAgentConversationRequest) returns (DeleteAgentConversationResponse);
 
   // Interaction responses — capability api_write:interactions. Each routes
   // through the same first-party service the native UI uses, so the agent
@@ -469,6 +494,139 @@ message GetTaskResponse {
   Task task = 1;
 }
 
+message RelationTask {
+  string id = 1;
+  string workspace_id = 2;
+  string identifier = 3;
+  string title = 4;
+  string state = 5;
+}
+message TaskRelations {
+  RelationTask task = 1;
+  RelationTask parent = 2;
+  repeated RelationTask children = 3;
+  repeated RelationTask siblings = 4;
+  repeated RelationTask blockers = 5;
+  repeated RelationTask blocked_by = 6;
+}
+message GetTaskRelationsRequest {
+  string workspace_id = 1;
+  string task_id = 2;
+}
+message GetTaskRelationsResponse {
+  TaskRelations relations = 1;
+}
+
+// Automation is the compact, workspace-scoped configuration projection for a
+// trigger consumer. It deliberately excludes webhook secrets, repository
+// bindings, run history, and implementation-specific task placement fields.
+message AutomationTrigger {
+  string id = 1;
+  string type = 2;
+  // Opaque JSON configuration whose shape depends on type (scheduled, github_pr,
+  // webhook, etc.). The host validates the config; the plugin reads it for
+  // display/guidance only.
+  string config_json = 3;
+  bool enabled = 4;
+}
+
+message Automation {
+  string id = 1;
+  string workspace_id = 2;
+  string name = 3;
+  string description = 4;
+  string agent_profile_id = 5;
+  string executor_profile_id = 6;
+  string prompt = 7;
+  bool enabled = 8;
+  int32 max_concurrent_runs = 9;
+  string updated_at = 10;
+
+  // Workflow and step this automation targets. Coordinator-only (task_mode =
+  // "automation_run") automations may omit the workflow; normal-task
+  // automations require it.
+  string workflow_id = 11;
+  string workflow_step_id = 12;
+  // "automation_run" for coordinator-only hidden runs or "normal_task" for
+  // visible kanban tasks. The coordinator plugin reads this to distinguish
+  // its own target automation from ordinary workspace automations.
+  string task_mode = 13;
+  // "workspace_default", "selected", or "none". Controls how the automation
+  // resolves its repository environment.
+  string repository_mode = 14;
+  // Title template for tasks created by this automation.
+  string task_title_template = 15;
+  // The triggers that activate this automation. Present only when the plugin
+  // also declares api_read:automations AND has a matching event subscription.
+  repeated AutomationTrigger triggers = 16;
+}
+message ListAutomationsRequest {
+  string workspace_id = 1;
+  Page page = 2;
+}
+message ListAutomationsResponse {
+  repeated Automation automations = 1;
+  PageInfo page_info = 2;
+}
+message GetAutomationRequest {
+  string workspace_id = 1;
+  string id = 2;
+}
+message GetAutomationResponse {
+  Automation automation = 1;
+}
+
+// A durable workspace-scoped agent identity. Backing task/session bindings
+// are intentionally omitted: they are replaceable execution details, not an
+// identity a plugin may retain or target.
+message WorkspaceAgentPrincipal {
+  string id = 1;
+  string workspace_id = 2;
+  string logical_key = 3;
+  string created_at = 4;
+  string updated_at = 5;
+}
+message WorkspaceAgentPrincipalStatus {
+  string principal_id = 1;
+  string state = 2; // "active" | "revoked" | "unavailable"
+  repeated string granted_capabilities = 3;
+  string updated_at = 4;
+}
+// Redacted audit projection: task/session identifiers, user identities, and
+// target content are not exposed to plugins.
+message WorkspaceAgentPrincipalAuditEvent {
+  string id = 1;
+  string occurred_at = 2;
+  string action = 3;
+  string capability = 4;
+  string decision = 5;
+  string result = 6;
+  string detail_code = 7;
+}
+message GetWorkspaceAgentPrincipalRequest {
+  string workspace_id = 1;
+  string logical_key = 2;
+}
+message GetWorkspaceAgentPrincipalResponse {
+  WorkspaceAgentPrincipal principal = 1;
+}
+message GetWorkspaceAgentPrincipalStatusRequest {
+  string workspace_id = 1;
+  string logical_key = 2;
+}
+message GetWorkspaceAgentPrincipalStatusResponse {
+  WorkspaceAgentPrincipalStatus status = 1;
+}
+message ListWorkspaceAgentPrincipalAuditRequest {
+  string workspace_id = 1;
+  string logical_key = 2;
+  Page page = 3;
+}
+message ListWorkspaceAgentPrincipalAuditResponse {
+  repeated WorkspaceAgentPrincipalAuditEvent events = 1;
+  PageInfo page_info = 2;
+}
+
 // ── Workspace / Workflow / Steps ─────────────────────────────────────────────
 message Workspace {
   string id = 1;
@@ -532,6 +690,18 @@ message WorkflowStep {
   // config is deliberately not exposed: it carries target task ids, payloads
   // and profile ids. Plugins must ignore action types they do not recognize.
   repeated string on_enter_action_types = 10;
+  // coordinator_monitored and coordinator_prompt carry the Settings >
+  // Workspace > Workflow configuration policy an operator saves for this
+  // step (host-owned storage, not plugin-owned — see
+  // docs/specs/coordinator-plugin/spec.md's "Workflow monitoring policy").
+  // They are populated only for a plugin which declares both
+  // api_read:workflows and agent_conversation; ordinary workflow readers see
+  // the fields redacted as false/empty.
+  // coordinator_monitored is false and coordinator_prompt is "" for a step
+  // that was never checked. A plugin composes coordinator_prompt with its
+  // own base prompt only when coordinator_monitored is true.
+  bool coordinator_monitored = 11;
+  string coordinator_prompt = 12;
 }
 message ListWorkflowStepsRequest {
   string workflow_id = 1;
@@ -920,4 +1090,73 @@ message DeletePluginOwnedTaskTreeResponse {
 // retrying the remaining idempotent cleanup.
 message DeletePluginOwnedTaskTreeProgress {
   repeated string deleted_task_ids = 1;
+}
+
+// ── Agent conversations ─────────────────────────────────────────────────
+
+// AgentConversationDescriptor identifies an existing conversation.
+message AgentConversationDescriptor {
+  string task_id = 1;
+  string session_id = 2;
+  string workspace_id = 3;
+  string conversation_key = 4;
+  // The agent_profile_id the conversation uses; empty when the profile
+  // referenced at ensure time is no longer available.
+  string agent_profile_id = 5;
+}
+
+// AgentConversationSpec controls how Ensure creates a conversation.
+message AgentConversationSpec {
+  string workspace_id = 1;
+  string conversation_key = 2;
+  // Editable base prompt baked into every dispatch to this conversation.
+  // The plugin appends its cycle/report-specific instructions.
+  string base_prompt = 3;
+  // Agent profile id to use. Empty means "use the workspace default".
+  // An explicit profile that is disabled/deleted produces a typed
+  // configuration-required result.
+  string agent_profile_id = 4;
+}
+
+// EnsureAgentConversationRequest carries the Ensure request.
+message EnsureAgentConversationRequest {
+  AgentConversationSpec spec = 1;
+}
+
+// EnsureAgentConversationResponse carries the result.
+message EnsureAgentConversationResponse {
+  AgentConversationDescriptor conv_descriptor = 1;
+  // One of "created", "exists", or "configuration_required".
+  string status = 2;
+}
+
+// DispatchAgentConversationRequest sends a prompt to an ensured conversation.
+message DispatchAgentConversationRequest {
+  string workspace_id = 1;
+  string conversation_key = 2;
+  string text = 3;
+  // Stable idempotency key derived from (trigger, due_timestamp) for
+  // scheduled occurrences, or a unique key for manual invocations.
+  // An already-claimed key returns the prior dispatch result.
+  string occurrence_key = 4;
+}
+
+// DispatchAgentConversationResponse carries the dispatch result.
+message DispatchAgentConversationResponse {
+  string session_id = 1;
+  // One of "started", "sent", "duplicate_occurrence", or "skipped_busy".
+  string status = 2;
+  AgentConversationDescriptor conv_descriptor = 3;
+}
+
+// DeleteAgentConversationRequest deletes all conversations matching the
+// request. Only conversations owned by this plugin are affected.
+message DeleteAgentConversationRequest {
+  string workspace_id = 1;
+  string conversation_key = 2;
+}
+
+// DeleteAgentConversationResponse carries the result.
+message DeleteAgentConversationResponse {
+  int32 deleted_count = 1;
 }

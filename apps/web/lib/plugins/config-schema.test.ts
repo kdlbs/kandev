@@ -75,6 +75,162 @@ describe("parseConfigSchema", () => {
   });
 });
 
+describe("parseConfigSchema formats", () => {
+  it("maps the agent-profile format to an agent profile picker field", () => {
+    const fields = parseConfigSchema({
+      type: "object",
+      properties: {
+        profile: {
+          type: "string",
+          format: "agent-profile",
+          title: "Coordinator agent",
+          description: "Agent profile used for coordinator cycles.",
+          default: "profile-gpt4",
+        },
+      },
+    });
+
+    expect(fields).toEqual([
+      expect.objectContaining({
+        name: "profile",
+        type: "agent_profile",
+        label: "Coordinator agent",
+        description: "Agent profile used for coordinator cycles.",
+        required: false,
+        defaultValue: "profile-gpt4",
+      }),
+    ]);
+  });
+
+  it("maps the textarea format to a textarea field", () => {
+    const fields = parseConfigSchema({
+      type: "object",
+      properties: {
+        base_prompt: {
+          type: "string",
+          format: "textarea",
+          title: "Base prompt",
+          description: "Editable coordinator base prompt.",
+        },
+      },
+    });
+
+    expect(fields).toEqual([
+      expect.objectContaining({
+        name: "base_prompt",
+        type: "textarea",
+        label: "Base prompt",
+        description: "Editable coordinator base prompt.",
+      }),
+    ]);
+  });
+
+  const fixtureCoordinatorPrompt = "You are a coordinator.";
+  it("serializes textarea fields as plain strings", () => {
+    const fields = parseConfigSchema({
+      type: "object",
+      properties: {
+        base_prompt: {
+          type: "string",
+          format: "textarea",
+        },
+      },
+    });
+    const config = serializeConfigValues(fields, { base_prompt: fixtureCoordinatorPrompt });
+    expect(config).toEqual({ base_prompt: fixtureCoordinatorPrompt });
+  });
+
+  it("handles textarea with empty value as omitted", () => {
+    const fields = parseConfigSchema({
+      type: "object",
+      properties: {
+        base_prompt: { type: "string", format: "textarea" },
+      },
+    });
+    const config = serializeConfigValues(fields, { base_prompt: "" });
+    expect(config).not.toHaveProperty("base_prompt");
+  });
+});
+
+describe("parseConfigSchema bounds metadata", () => {
+  it("extracts numeric minimum and maximum bounds", () => {
+    const fields = parseConfigSchema({
+      type: "object",
+      required: ["interval"],
+      properties: {
+        interval: {
+          type: "integer",
+          title: "Monitoring interval",
+          description: "Minutes between cycles.",
+          default: 45,
+          minimum: 5,
+          maximum: 1440,
+        },
+      },
+    });
+
+    expect(fields).toEqual([
+      expect.objectContaining({
+        name: "interval",
+        type: "integer",
+        label: "Monitoring interval",
+        description: "Minutes between cycles.",
+        defaultValue: 45,
+        minimum: 5,
+        maximum: 1440,
+      }),
+    ]);
+  });
+
+  it("serializes numeric values respecting bounds metadata", () => {
+    const fields = parseConfigSchema({
+      type: "object",
+      properties: {
+        interval: {
+          type: "integer",
+          minimum: 5,
+          maximum: 1440,
+        },
+        rate: {
+          type: "number",
+          minimum: 0,
+          maximum: 1,
+        },
+      },
+    });
+
+    // The metadata flows through to the field but does not change serialization
+    // (bounds are enforced by the HTML input and backend, not by serialization).
+    expect(fields.find((f) => f.name === "interval")).toMatchObject({ minimum: 5, maximum: 1440 });
+    expect(fields.find((f) => f.name === "rate")).toMatchObject({ minimum: 0, maximum: 1 });
+  });
+
+  it("serializes textarea fields as plain strings", () => {
+    const fields = parseConfigSchema({
+      type: "object",
+      properties: {
+        base_prompt: {
+          type: "string",
+          format: "textarea",
+        },
+      },
+    });
+    const config = serializeConfigValues(fields, { base_prompt: "You are a coordinator." });
+    expect(config).toEqual({ base_prompt: "You are a coordinator." });
+  });
+
+  it("handles textarea with empty value as omitted", () => {
+    const fields = parseConfigSchema({
+      type: "object",
+      properties: {
+        base_prompt: { type: "string", format: "textarea" },
+      },
+    });
+    const config = serializeConfigValues(fields, { base_prompt: "" });
+    expect(config).not.toHaveProperty("base_prompt");
+  });
+});
+
 describe("buildInitialValues", () => {
   it("prefers stored config, then defaults, then empties", () => {
     const fields = parseConfigSchema(githubSchema);

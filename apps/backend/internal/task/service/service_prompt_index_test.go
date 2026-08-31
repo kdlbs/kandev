@@ -105,8 +105,8 @@ func TestCreateMessageIdempotentReplayReturnsIndexedMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first CreateMessageIdempotent: %v", err)
 	}
-	if created.PromptIndex != 1 {
-		t.Fatalf("created PromptIndex = %d, want 1", created.PromptIndex)
+	if created.Message.PromptIndex != 1 {
+		t.Fatalf("created PromptIndex = %d, want 1", created.Message.PromptIndex)
 	}
 	bus.ClearEvents()
 
@@ -117,8 +117,8 @@ func TestCreateMessageIdempotentReplayReturnsIndexedMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("replay CreateMessageIdempotent: %v", err)
 	}
-	if replayed.ID != "client-id-1" || replayed.PromptIndex != 1 {
-		t.Fatalf("replayed = %s (index %d), want client-id-1 with index 1", replayed.ID, replayed.PromptIndex)
+	if replayed.Message.ID != "client-id-1" || replayed.Message.PromptIndex != 1 {
+		t.Fatalf("replayed = %s (index %d), want client-id-1 with index 1", replayed.Message.ID, replayed.Message.PromptIndex)
 	}
 	if types := eventTypes(bus.GetPublishedEvents()); len(types) != 0 {
 		t.Fatalf("replay published %v, want no duplicate add event", types)

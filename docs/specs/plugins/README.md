@@ -33,6 +33,7 @@ plugin security boundaries.
 
 
 - [Plugin-Contributed Agent Tools](requirements/agent-tools.md)
+- [Coordinator Plugin](../coordinator-plugin/spec.md)
 - [Plugin-Initiated Workflow Step Transitions](requirements/plugin-initiated-step-transitions.md)
 - [Plugin Authoring Experience](requirements/authoring-experience.md)
 - [Plugin Marketplace](requirements/marketplace.md)

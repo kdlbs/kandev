@@ -9,8 +9,14 @@ vi.mock("@/lib/routing/client-router", () => ({
   usePathname: () => "/",
 }));
 
-function renderSection(onNavigate = () => {}) {
-  return render(<MobilePluginNavSection onNavigate={onNavigate} />);
+function renderSection(
+  onNavigate = () => {},
+  section: "plugins" | "workspace-agents" = "plugins",
+  heading = true,
+) {
+  return render(
+    <MobilePluginNavSection onNavigate={onNavigate} section={section} heading={heading} />,
+  );
 }
 
 describe("MobilePluginNavSection", () => {
@@ -84,6 +90,20 @@ describe("MobilePluginNavSection", () => {
     const { container } = renderSection();
 
     expect(container.innerHTML).toBe("");
+  });
+
+  it("renders after-integrations items in the dedicated mobile slot without a second heading", () => {
+    pluginRegistry.forPlugin("plugin-a").registerNavItem({
+      id: "coordinator",
+      label: "Coordinator",
+      path: "/coordinator",
+      section: "after-integrations",
+    });
+
+    renderSection(() => {}, "workspace-agents", false);
+
+    expect(screen.getByTestId("mobile-plugin-nav-item-coordinator")).not.toBeNull();
+    expect(screen.queryByText("Plugins")).toBeNull();
   });
 
   it("renders the named curated icon, falling back to the puzzle glyph", () => {

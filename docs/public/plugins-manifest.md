@@ -161,10 +161,11 @@ ui: # optional native frontend plugin
 | `runtime.executables`              | required when `runtime.type: binary` | map\<string,string\>                  | Key is `<goos>-<goarch>` (e.g. `linux-amd64`, `darwin-arm64`, `windows-amd64`); value is a clean, package-relative path under `server/` (no leading `/`, no `..` segments). At least one entry required; the running host's key must be present at install time. Windows values end in `.exe`.                                                                                                                                                                                                                                                                                                                                                                                   |
 | `min_kandev_version`               | conditionally                        | string                                | Lowest released Kandev version this plugin supports. Required to be at least `0.91.1` when any action uses `access: admin`. Enforced at **install time**: installing onto an older release fails with `requires kandev >= <version>, running <version>` and nothing is registered. Already-installed plugins are never re-checked at load or start. Release values use up to three dotted numeric segments (`0.78.0`) and may have a leading `v`; malformed minimums are rejected. Non-release development and git-describe builds skip the compatibility gate.                                                                                                                  |
 | `capabilities.events`              | no                                   | string[]                              | Bus subjects (or wildcard patterns) this plugin subscribes to. See "Event subscription vocabulary" below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `capabilities.api_read`            | no                                   | string[]                              | Gates the Host data API's read-only accessors. Each entry is a resource name: `tasks`, `sessions`, `messages`, `workspaces`, `workflows`, `agent_profiles`, `executor_profiles`, `repositories`. Calling the matching `Host` accessor (e.g. `Tasks()`) without its resource declared returns gRPC `PermissionDenied`. See "Host data API resource vocabulary" below.                                                                                                                                                                                                                                                                                                             |
+| `capabilities.api_read`            | no                                   | string[]                              | Gates the Host data API's read-only accessors. Each entry is a resource name: `tasks`, `task_relations`, `automations`, `workspace_agent_principals`, `sessions`, `messages`, `workspaces`, `workflows`, `agent_profiles`, `executor_profiles`, `repositories`. Calling the matching Host accessor without its resource declared returns gRPC `PermissionDenied`. See "Host data API resource vocabulary" below.                                                                                                                                                                                                                                                                                                             |
 | `capabilities.api_write`           | no                                   | string[]                              | Gates Host writes independently of `api_read`. `tasks` permits `Host.Tasks().Create` and `.Update`; `messages` permits `Host.Messages().Send`. Undeclared writes return gRPC `PermissionDenied`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `capabilities.state`               | no                                   | bool                                  | Gates `Host.GetState`/`SetState`/`DeleteState`/`ListState`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `capabilities.secrets`             | no                                   | bool                                  | Gates `Host.RevealSecret`/`GetSecret`/`SetSecret`/`DeleteSecret`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `capabilities.agent_conversation`  | no                                   | bool                                  | Gates `Host.EnsureAgentConversation`/`DispatchAgentConversation`/`DeleteAgentConversation`. Creates hidden, workflowless ephemeral task/sessions for persistent workspace-agent plugins such as the coordinator. Calling without this set to `true` returns gRPC `PermissionDenied`.                                                                                                                                                                                                                                                                                                                                                                                              |
 | `capabilities.agent_invoke`        | no                                   | bool                                  | Gates `Host.InvokeUtilityAgent`: a one-shot completion run by the utility agent selected for this plugin. Declare a `utility_agent` config property with `type: string` and `format: utility-agent`; Settings > Plugins renders the picker. The selected utility agent resolves its own enabled ACP profile. Calling without this capability returns gRPC `PermissionDenied`; calling without a valid profile-backed selection returns gRPC `FailedPrecondition`. See ADR 0048.                                                                                                                                                                                                  |
 | `capabilities.auth`                | no                                   | bool                                  | Lets the plugin log a visitor in against an external IdP (OIDC/SAML). Its webhook validates the token, then asserts the identity to Kandev via the `X-Kandev-Auth-Login` response header (`{provider, subject, email, display_name}`); Kandev mints the session and sets the cookie, so the plugin never sees the token. Requires authentication enabled; new users are provisioned as members, and Kandev never creates an admin nor auto-links to an existing admin account. **You MUST only assert an email the IdP verified as owned by the subject; a spoofed email claim is account takeover.** Highest-privilege capability; grant only to trusted plugins. See ADR 0050. |
 | `capabilities.user_state`          | no                                   | bool                                  | Gates `host.storage` (`get`/`set`/`delete`/`list`/`subscribe`), the authenticated per-user browser storage surface at `/api/plugins/{id}/user-state/...`. Unlike `capabilities.state` (the gRPC `Host.SetState` family, written by the plugin's own backend), this is reachable directly from the plugin's frontend bundle with no Go backend required; every read/write is scoped to the calling user. Calling the route without this capability returns `403`. See [Authoring a plugin](plugins-authoring.md) and the per-user-plugin-storage decision record.                                                                                                                 |
@@ -228,9 +229,9 @@ recognizes its shape.
 ## Host data API resource vocabulary
 
 `capabilities.api_read` gates the read-only Host data accessors (ADR 0043,
-ADR 0047): each entry must be one of `tasks`, `sessions`, `messages`,
+ADR 0047): each entry must be one of `tasks`, `task_relations`, `automations`, `workspace_agent_principals`, `sessions`, `messages`,
 `workspaces`, `workflows`, `agent_profiles`, `executor_profiles`, `repositories`. Declaring a
-resource grants the matching `Host` accessor (`Tasks()`, `Sessions()`,
+resource grants the matching `Host` accessor (`Tasks()`, `TaskRelations()`, `Automations()`, `WorkspaceAgentPrincipals()`, `Sessions()`,
 `Messages()`, `Workspaces()`, `Workflows()`, `AgentProfiles()`,
 `Repositories()`), or the optional `pluginsdk.ExecutorProfiles(host)` extension;
 see [Authoring a plugin](plugins-authoring.md). Calling an
@@ -243,6 +244,30 @@ rows/messages as `plugin:<id>`, and does not let a plugin supply that provenance
 A plugin may declare a read resource without its write capability, or vice
 versa. Calling a write without the matching declaration returns gRPC
 `PermissionDenied`.
+
+`task_relations` grants `Host.TaskRelations().Get(ctx, workspaceID, taskID)`.
+It returns only compact task identity and state plus parent, child, sibling,
+blocker, and blocked-task groups. The target and every returned relation must
+belong to `workspaceID`; descriptions, documents, metadata, and repository
+details are intentionally unavailable through this reader.
+
+`automations` grants `Host.Automations().List(ctx, workspaceID, page)` and
+`.Get(ctx, workspaceID, id)`. The descriptor supports a plugin-owned binding to
+the host's `automation.triggered` event and exposes only the configured name,
+prompt, selected agent/executor profiles, enabled state, concurrency limit, and
+timestamps. Webhook secrets, repository bindings, run history, and hidden task
+placement are not exposed. A foreign or unknown id is indistinguishable from
+`NotFound`.
+
+`workspace_agent_principals` grants `Host.WorkspaceAgentPrincipals().Get`,
+`.Status`, and `.ListAudit` for the calling plugin installation's opaque
+workspace/logical-key principal. It is a read-only safe projection: backing
+task/session IDs, operator identity, grant scopes/notes, target identity,
+task content, and credentials are never returned. A foreign workspace or
+plugin installation is indistinguishable from `NotFound`; a revoked principal
+returns status `revoked` and must be treated as fail-closed. Operators, not
+plugins, create, grant, revoke, delete, or rebind principals. Legacy task-ID
+grants are non-transferable and never authorize a principal.
 
 `messages` reads historical **conversation content** (`Messages().List`):
 one user/agent message per row (`id`, `session_id`, `task_id`, `turn_id`,
@@ -269,6 +294,20 @@ persisting:
   but persists the selected agent's stable ID. Add the property to `required`
   when the plugin must always have a selection; optional fields include a
   **Not set** choice.
+- A string property with `format: agent-profile` is rendered as a picker of
+  available agent profiles. The UI displays profile names but persists the
+  selected profile's stable ID. Optional fields include a **Not set** choice.
+- A string property with `format: textarea` is rendered as a multi-line text
+  input instead of a single-line input. Suitable for editable prompts, long
+  instructions, or freeform notes.
+- A numeric property (`type: integer` or `type: number`) may include
+  `minimum` and `maximum` metadata fields. These are stored in the
+  `PluginConfigField` and passed to the form renderer as HTML input
+  constraints. The UI applies them as `min`/`max` attributes on the
+  numeric input element. The manifest and backend validate that `minimum <=
+  maximum` and that both are of the expected numeric type. They do not gate
+  serialization: bounds are enforced by the UI input and the backend
+  service, not by the config-serialization utility.
 - A property with `secret: true`, or `format: "password"`, is treated as a
   **secret field** and must be `type: string` (or untyped); a non-string
   secret is rejected. Secret values are moved into kandev's encrypted vault;

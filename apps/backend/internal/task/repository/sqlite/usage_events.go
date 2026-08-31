@@ -239,7 +239,7 @@ func (r *Repository) ListTaskUsageEvents(ctx context.Context, taskID string, lim
 	`
 	args := []interface{}{taskID}
 	if limit > 0 {
-		query += ` LIMIT ?`
+		query += sqlLimitClause
 		args = append(args, limit)
 	}
 

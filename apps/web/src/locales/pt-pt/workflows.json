@@ -264,5 +264,11 @@
   "noStepsInThisWorkflow": "Este fluxo de trabalho não tem passos",
   "saveBeforeDuplicating": "Guarde o fluxo de trabalho antes de o duplicar.",
   "selectAWorkflowFirst": "Selecione primeiro um fluxo de trabalho",
-  "workflowMutationInProgress": "Aguarde que a alteração atual do fluxo de trabalho termine."
+  "workflowMutationInProgress": "Aguarde que a alteração atual do fluxo de trabalho termine.",
+  "coordinatorMonitoring": "Monitorização do coordenador",
+  "coordinatorMonitoringHelp": "Selecione as etapas que o coordenador deve monitorizar e defina comandos por etapa.",
+  "noStepsToMonitor": "Não há etapas do fluxo de trabalho para monitorizar.",
+  "coordinatorStepPromptPlaceholder": "Comando opcional para esta etapa...",
+  "failedToLoadCoordinatorMonitoring": "Falha ao carregar as definições de monitorização do coordenador",
+  "failedToSaveCoordinatorMonitoring": "Falha ao guardar as definições de monitorização do coordenador"
 }

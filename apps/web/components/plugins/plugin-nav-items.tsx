@@ -7,6 +7,8 @@ import { usePluginRegistry } from "@/lib/plugins/registry";
 
 type PluginNavItemsProps = {
   collapsed: boolean;
+  /** Generic plugin destination placement selected by the host surface. */
+  section?: "plugins" | "workspace-agents";
 };
 
 /**
@@ -22,11 +24,11 @@ type PluginNavItemsProps = {
  * belong here. Resolved directly rather than through `useStaticDestinations`:
  * plugin paths are static, so there is no reason to read workspace context.
  */
-export function PluginNavItems({ collapsed }: PluginNavItemsProps) {
+export function PluginNavItems({ collapsed, section = "plugins" }: PluginNavItemsProps) {
   const registry = usePluginRegistry();
   const destinations = resolveDestinations({
     surface: "sidebar",
-    section: "plugins",
+    section,
     ctx: NO_WORKSPACE_CONTEXT,
     pluginItems: registry.getNavRegistrations(),
   });

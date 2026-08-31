@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/coordinator"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -12,6 +16,29 @@ import (
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
+
+type principalAuthorityStore struct {
+	principal *models.WorkspaceAgentPrincipal
+	grants    []*models.CoordinatorGrant
+	audits    []*models.CoordinatorAuditEvent
+	finished  []string
+	finishErr error
+}
+
+func (s *principalAuthorityStore) GetActiveWorkspaceAgentPrincipalForTask(_ context.Context, _, _ string) (*models.WorkspaceAgentPrincipal, error) {
+	return s.principal, nil
+}
+func (s *principalAuthorityStore) ListActiveWorkspaceAgentPrincipalGrants(_ context.Context, _, _ string) ([]*models.CoordinatorGrant, error) {
+	return s.grants, nil
+}
+func (s *principalAuthorityStore) CreateCoordinatorAuditEvent(_ context.Context, event *models.CoordinatorAuditEvent) error {
+	s.audits = append(s.audits, event)
+	return nil
+}
+func (s *principalAuthorityStore) FinishCoordinatorAuditEvent(_ context.Context, id, result, detail string) error {
+	s.finished = append(s.finished, id+":"+result+":"+detail)
+	return s.finishErr
+}
 
 type recordingTaskStopper struct {
 	result orchestrator.CoordinatorTaskStopResult
@@ -113,48 +140,133 @@ func TestHandleStopTask_AuthorizesOnlyDirectParentInWorkspace(t *testing.T) {
 	}
 }
 
-func TestHandleStopTaskAutomationUsesTrustedCallerWithoutLookingUpSender(t *testing.T) {
+func TestHandleStopTask_RequiresCurrentPrincipalSessionAndAuditsGrant(t *testing.T) {
 	tasks := map[string]*models.Task{
-		"automation-target": {ID: "automation-target", WorkspaceID: "ws-1"},
-		"foreign-sender":    {ID: "foreign-sender", WorkspaceID: "ws-2"},
+		"agent":  {ID: "agent", WorkspaceID: "ws-1"},
+		"target": {ID: "target", WorkspaceID: "ws-1"},
 	}
-	for _, senderID := range []string{"foreign-sender", "missing-sender"} {
-		t.Run(senderID, func(t *testing.T) {
-			var lookups []string
-			stopper := &recordingTaskStopper{result: orchestrator.CoordinatorTaskStopResult{
-				Status: orchestrator.CoordinatorTaskStopStatusStopped,
-			}}
-			h := &Handlers{
-				taskStopper: stopper,
-				stopTaskGetter: func(_ context.Context, taskID string) (*models.Task, error) {
-					lookups = append(lookups, taskID)
-					task, ok := tasks[taskID]
-					if !ok {
-						return nil, taskrepo.ErrTaskNotFound
-					}
-					return task, nil
-				},
-				logger: testLogger(t),
+	store := &principalAuthorityStore{principal: &models.WorkspaceAgentPrincipal{
+		ID: "principal", WorkspaceID: "ws-1", PluginInstallationID: "install", LogicalKey: "agent", BackingTaskID: "agent", BackingSessionID: "current",
+	}, grants: []*models.CoordinatorGrant{{ID: "grant", PrincipalID: "principal", WorkspaceID: "ws-1", ScopeKind: coordinator.ScopeWorkspace, ScopeID: "ws-1", Capabilities: string(coordinator.CapabilityOrchestrate)}}}
+	h := stopTaskTestHandler(t, tasks, nil, &recordingTaskStopper{result: orchestrator.CoordinatorTaskStopResult{Status: orchestrator.CoordinatorTaskStopStatusStopped}})
+	h.SetCoordinatorAuthority(coordinator.New(store, func() bool { return true }))
+
+	stale := makeWSMessage(t, ws.ActionMCPStopTask, map[string]interface{}{"task_id": "target", "sender_task_id": "agent", "sender_session_id": "stale"})
+	resp, err := h.handleStopTask(context.Background(), stale)
+	if err != nil {
+		t.Fatalf("stale handleStopTask: %v", err)
+	}
+	assertWSError(t, resp, ws.ErrorCodeForbidden)
+	if len(store.audits) != 0 {
+		t.Fatalf("stale session audits = %#v", store.audits)
+	}
+
+	current := makeWSMessage(t, ws.ActionMCPStopTask, map[string]interface{}{"task_id": "target", "sender_task_id": "agent", "sender_session_id": "current"})
+	resp, err = h.handleStopTask(context.Background(), current)
+	if err != nil {
+		t.Fatalf("current handleStopTask: %v", err)
+	}
+	if resp.Type != ws.MessageTypeResponse || len(store.audits) != 1 {
+		t.Fatalf("response/audits = %#v / %#v", resp, store.audits)
+	}
+	audit := store.audits[0]
+	if audit.PrincipalID != "principal" || audit.ActorTaskID != "agent" || audit.ActorSessionID != "current" {
+		t.Fatalf("audit provenance = %#v", audit)
+	}
+}
+
+func TestHandleStopTask_AutomationCallerFailsClosedWithoutGrant(t *testing.T) {
+	tasks := map[string]*models.Task{
+		"automation-run": {ID: "automation-run", WorkspaceID: "ws-1"},
+		"target":         {ID: "target", WorkspaceID: "ws-1"},
+	}
+	stopper := &recordingTaskStopper{result: orchestrator.CoordinatorTaskStopResult{Status: orchestrator.CoordinatorTaskStopStatusStopped}}
+	h := stopTaskTestHandler(t, tasks, nil, stopper)
+	store := &principalAuthorityStore{principal: &models.WorkspaceAgentPrincipal{
+		ID: "principal", WorkspaceID: "ws-1", PluginInstallationID: "install", LogicalKey: "coordinator", BackingTaskID: "automation-run", BackingSessionID: "automation-session",
+	}}
+	h.SetCoordinatorAuthority(coordinator.New(store, func() bool { return true }))
+	ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+		AutomationID:    "automation-1",
+		WorkspaceID:     "ws-1",
+		CallerTaskID:    "automation-run",
+		CallerSessionID: "automation-session",
+		Surface:         mcpprofile.SurfaceAutomation,
+	})
+	msg := makeWSMessage(t, ws.ActionMCPStopTask, map[string]interface{}{
+		"task_id": "target", "sender_task_id": "automation-run", "sender_session_id": "automation-session",
+	})
+
+	resp, err := h.handleStopTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeForbidden)
+	require.Empty(t, stopper.calls)
+	require.Empty(t, store.audits)
+}
+
+func TestHandleStopTask_AutomationCallerWithGrantAuditsSuccessAndFinishFailure(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		finishErr  error
+		wantCode   string
+		wantResult string
+	}{
+		{name: "audit success", wantResult: "ok"},
+		{name: "audit finish failure", finishErr: errors.New("audit unavailable"), wantCode: ws.ErrorCodeInternalError, wantResult: "ok"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tasks := map[string]*models.Task{
+				"automation-run": {ID: "automation-run", WorkspaceID: "ws-1"},
+				"target":         {ID: "target", WorkspaceID: "ws-1"},
 			}
+			stopper := &recordingTaskStopper{result: orchestrator.CoordinatorTaskStopResult{Status: orchestrator.CoordinatorTaskStopStatusStopped}}
+			h := stopTaskTestHandler(t, tasks, nil, stopper)
+			store := &principalAuthorityStore{principal: &models.WorkspaceAgentPrincipal{
+				ID: "principal", WorkspaceID: "ws-1", PluginInstallationID: "install", LogicalKey: "coordinator", BackingTaskID: "automation-run", BackingSessionID: "automation-session",
+			}, grants: []*models.CoordinatorGrant{{
+				ID: "grant", PrincipalID: "principal", WorkspaceID: "ws-1", ScopeKind: coordinator.ScopeWorkspace, ScopeID: "ws-1", Capabilities: string(coordinator.CapabilityOrchestrate),
+			}}, finishErr: tt.finishErr}
+			h.SetCoordinatorAuthority(coordinator.New(store, func() bool { return true }))
 			ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
-				AutomationID: "automation-1", WorkspaceID: "ws-1",
-				CallerTaskID: "automation-caller", CallerSessionID: "session-1",
-				Surface: mcpprofile.SurfaceAutomation,
+				AutomationID: "automation-1", WorkspaceID: "ws-1", CallerTaskID: "automation-run", CallerSessionID: "automation-session", Surface: mcpprofile.SurfaceAutomation,
 			})
 			msg := makeWSMessage(t, ws.ActionMCPStopTask, map[string]interface{}{
-				"task_id": "automation-target", "sender_task_id": senderID,
+				"task_id": "target", "sender_task_id": "automation-run", "sender_session_id": "automation-session",
 			})
 
 			resp, err := h.handleStopTask(ctx, msg)
-			if err != nil {
-				t.Fatalf("handleStopTask: %v", err)
+			require.NoError(t, err)
+			if tt.wantCode != "" {
+				assertWSError(t, resp, tt.wantCode)
+			} else {
+				require.Equal(t, ws.MessageTypeResponse, resp.Type)
 			}
-			if resp.Type != ws.MessageTypeResponse {
-				t.Fatalf("response type = %q, want response", resp.Type)
-			}
-			if len(lookups) != 1 || lookups[0] != "automation-target" {
-				t.Fatalf("task lookups = %v, want only target lookup", lookups)
-			}
+			require.Equal(t, []string{"target"}, stopper.calls)
+			require.Len(t, store.audits, 1)
+			require.Equal(t, "allowed", store.audits[0].Decision)
+			require.Equal(t, []string{store.audits[0].ID + ":" + tt.wantResult + ":"}, store.finished)
+		})
+	}
+}
+
+func TestHandleStopTask_AutomationCallerRejectsRevokedAndCrossScope(t *testing.T) {
+	revokedAt := time.Now()
+	for _, tt := range []struct {
+		name      string
+		target    *models.Task
+		principal *models.WorkspaceAgentPrincipal
+	}{
+		{name: "revoked", target: &models.Task{ID: "target", WorkspaceID: "ws-1"}, principal: &models.WorkspaceAgentPrincipal{ID: "principal", WorkspaceID: "ws-1", PluginInstallationID: "install", LogicalKey: "coordinator", BackingTaskID: "automation-run", BackingSessionID: "automation-session", RevokedAt: &revokedAt}},
+		{name: "cross scope", target: &models.Task{ID: "target", WorkspaceID: "ws-2"}, principal: &models.WorkspaceAgentPrincipal{ID: "principal", WorkspaceID: "ws-1", PluginInstallationID: "install", LogicalKey: "coordinator", BackingTaskID: "automation-run", BackingSessionID: "automation-session"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h := stopTaskTestHandler(t, map[string]*models.Task{"automation-run": {ID: "automation-run", WorkspaceID: "ws-1"}, "target": tt.target}, nil, &recordingTaskStopper{})
+			h.SetCoordinatorAuthority(coordinator.New(&principalAuthorityStore{principal: tt.principal, grants: []*models.CoordinatorGrant{{ID: "grant", PrincipalID: "principal", WorkspaceID: "ws-1", ScopeKind: coordinator.ScopeWorkspace, ScopeID: "ws-1", Capabilities: string(coordinator.CapabilityOrchestrate)}}}, func() bool { return true }))
+			ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{AutomationID: "automation-1", WorkspaceID: "ws-1", CallerTaskID: "automation-run", CallerSessionID: "automation-session", Surface: mcpprofile.SurfaceAutomation})
+			msg := makeWSMessage(t, ws.ActionMCPStopTask, map[string]interface{}{"task_id": "target", "sender_task_id": "automation-run", "sender_session_id": "automation-session"})
+			resp, err := h.handleStopTask(ctx, msg)
+			require.NoError(t, err)
+			assertWSError(t, resp, ws.ErrorCodeForbidden)
 		})
 	}
 }

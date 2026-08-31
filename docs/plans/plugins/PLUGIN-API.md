@@ -348,7 +348,10 @@ Tooltip*, including `TooltipProvider`), the recharts wrappers (`ChartContainer`,
 `ChartStyle`), plus first-party app UI: `PageTopbar` (the kandev title bar, for
 routes that opt out of the default chrome and own their layout),
 `TaskCreateDialog` (kandev's real create-task modal, prefilled via
-`initialValues`), `Combobox` (the app's Command+Popover picker), and the
+`initialValues`), `Combobox` (the app's Command+Popover picker),
+`WorkspaceAgentChat` (the host-owned managed conversation chat surface for
+workspace-agent plugins like the coordinator — see the
+[WorkspaceAgentChat](#host.ui.WorkspaceAgentChat) section below), and the
 provider-neutral code-host dashboard set: `ChangeRequestList`,
 `ChangeRequestRow`, `ChangeRequestDetail`, `IntegrationListToolbar`, `IntegrationScopeBar`,
 `IntegrationSaveQueryDialog`, `IntegrationRepositoryFilter`, `IntegrationCursorPagination`,
@@ -635,6 +638,37 @@ Deliberately narrow — not the plan editor's `comments`, `onSelectionChange`,
 `onCommentClick`, `onCommentDeleted`, or `onEditorReady` props, so the plan
 editor's internals can keep evolving without breaking this contract.
 
+### `host.ui.WorkspaceAgentChat` — managed workspace-agent conversation
+
+Host-owned chat surface for persistent workspace-agent plugins such as the
+coordinator. Renders a full managed conversation transcript (message list +
+chat composer + clarification overlay) backed by a hidden, workflowless
+ephemeral task/session. The host resolves the backing session from a stable
+`(workspaceId, conversationKey)` pair; plugins provide the key and receive
+the resolved `sessionId`.
+
+```ts
+interface WorkspaceAgentChatProps {
+  /** Optional plugin-side context; host behavior resolves from sessionId. */
+  workspaceId?: string;
+  /** Optional plugin-side context; host behavior resolves from sessionId. */
+  conversationKey?: string;
+  /** Resolved session ID for the managed conversation. */
+  sessionId: string;
+  /** Optional placeholder in the chat composer. */
+  placeholderOverride?: string;
+}
+```
+
+The `sessionId` is returned by the plugin's `api.invokeAction("conversations.ensure")`
+action declared in the manifest, which calls the host's agent conversation service.
+The current implementation guarantees at most one backing task/session per
+`(pluginId, workspaceId, conversationKey)` tuple within one backend process and
+preserves that mapping across restarts; it does not yet claim durable
+cross-instance uniqueness. See the
+[Agent conversation contract](#agent-conversation-contract) in GRPC-CONTRACT.md for
+the backend RPC details.
+
 ### `host.storage` — authenticated per-user key/value storage
 
 Backed by `PUT/GET/DELETE /api/plugins/{id}/user-state/{scope}/{scopeId}/{key}`
@@ -689,6 +723,9 @@ own write).
 // React. Unknown/missing names render a puzzle glyph in the sidebar.
 // section: "main" (default) renders as a top-level sidebar entry;
 // "integrations" renders inside the sidebar's Integrations section alongside
+// "after-integrations" renders as a top-level destination immediately after
+// the Integrations group on desktop and mobile; use it for a workspace-scoped
+// agent product, not a generic integration;
 // the first-party integration links (GitHub, Jira, ...); "sidebar-footer"
 // renders as an icon button in the sidebar footer's icon row and as a
 // labelled row in the phone menu's Utilities group, subject to the footer's
@@ -698,11 +735,7 @@ own write).
 // unrecognised one, simply degrade to "main"'s placement — nothing is ever
 // silently dropped.
 type PluginIcon = string | React.ComponentType<{ className?: string }>;
-export type PluginNavSection =
-  | "main"
-  | "settings"
-  | "integrations"
-  | "sidebar-footer";
+export type PluginNavSection = "main" | "settings" | "integrations" | "after-integrations" | "sidebar-footer";
 
 interface NavItem {
   id: string;

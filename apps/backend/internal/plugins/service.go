@@ -116,17 +116,21 @@ type Service struct {
 	// pluginHost built before that falls back to Unimplemented for these
 	// accessors regardless of declared capabilities (see host_data.go's
 	// accessor nil-checks).
-	taskData         taskDataSource
-	workflows        workflowLister
-	workflowSteps    workflowStepLister
-	agentProfiles    agentProfileDataSource
-	sessionCodeStats sessionCodeStatsSource
-	messageData      messageDataSource
-	interactionData  interactionDataSource
+	taskData                 taskDataSource
+	taskRelations            taskRelationsSource
+	automations              automationSource
+	workspaceAgentPrincipals workspaceAgentPrincipalSource
+	workflows                workflowLister
+	workflowSteps            workflowStepLister
+	agentProfiles            agentProfileDataSource
+	sessionCodeStats         sessionCodeStatsSource
+	messageData              messageDataSource
+	interactionData          interactionDataSource
 	// taskPRs is guarded by mu and read through taskPRSourceDep, because hosts can
 	// outlive the late SetTaskPRSource wiring.
 	taskPRs    taskPRSource
 	taskWriter taskWriter
+	agentConvs AgentConversationService
 
 	// Utility agent invocation (ADR 0048), wired via SetUtilityAgent.
 	utilityAgents utilityAgentSource
@@ -463,6 +467,52 @@ func (s *Service) interactionResponderDep() interactionResponder {
 	return s.interactionResponder
 }
 
+// SetTaskRelationsSource wires the compact workspace-scoped relation graph
+// separately because HandoffService is assembled after boot-active plugins
+// may already have started. Hosts resolve it at request time.
+func (s *Service) SetTaskRelationsSource(source taskRelationsSource) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.taskRelations = source
+}
+
+// SetAutomationSource wires compact workspace-scoped Automation descriptors
+// for plugins that declare api_read:automations. It is late-bound for the same
+// reason as TaskRelations: an already-running plugin must observe the source
+// once the Automation subsystem finishes booting.
+func (s *Service) SetAutomationSource(source automationSource) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.automations = source
+}
+
+func (s *Service) automationSource() automationSource {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.automations
+}
+
+// SetWorkspaceAgentPrincipalSource wires the host-owned, installation-scoped
+// principal projection. Operator grant/revoke/create/delete paths stay
+// outside this setter and are never exposed through plugin RPCs.
+func (s *Service) SetWorkspaceAgentPrincipalSource(source workspaceAgentPrincipalSource) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workspaceAgentPrincipals = source
+}
+
+func (s *Service) workspaceAgentPrincipalSource() workspaceAgentPrincipalSource {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.workspaceAgentPrincipals
+}
+
+func (s *Service) taskRelationsSource() taskRelationsSource {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.taskRelations
+}
+
 // SetWriteDeps wires the Host data API's late write dependencies (ADR 0043
 // phase 2): the task-message delivery path behind the SendMessage RPC
 // (api_write:messages) and the orchestrator task-starter behind CreateTask's
@@ -487,6 +537,23 @@ func (s *Service) writeDependencies() (taskMessenger, taskStarter) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.messenger, s.taskStarter
+}
+
+// SetAgentConversations wires the managed agent conversation service
+// (AgentConversationService). Wired by backendapp, guarded by s.mu against
+// concurrent reads.
+func (s *Service) SetAgentConversations(svc AgentConversationService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.agentConvs = svc
+}
+
+// agentConversationDeps returns the wired agent conversation service, read
+// live (not snapshotted at hostForPlugin time). Guarded by s.mu.
+func (s *Service) agentConversationDeps() AgentConversationService {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.agentConvs
 }
 
 // SetUtilityAgent wires the dependencies behind Host.InvokeUtilityAgent
@@ -636,26 +703,30 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		rec = &store.Record{} // every capability check below denies; should not happen in practice
 	}
 	return &pluginHost{
-		pluginID:            pluginID,
-		capabilities:        rec.Capabilities,
-		repositoryProviders: rec.RepositoryProviders,
-		configSchema:        rec.ConfigSchema,
-		state:               s.state,
-		secrets:             s.secrets,
-		bus:                 s.eventBus,
-		configs:             s.store,
-		taskData:            s.taskData,
-		workflows:           s.workflows,
-		workflowSteps:       s.workflowSteps,
-		agentProfiles:       s.agentProfiles,
-		sessionCodeStats:    s.sessionCodeStats,
-		messageData:         s.messageData,
-		interactionData:     s.interactionData,
-		taskPRsDep:          s.taskPRSourceDep,
-		taskWriter:          s.taskWriter,
-		utilityDeps:         s.utilityAgentDeps,
-		writeDeps:           s.writeDependencies,
-		interactionDeps:     s.interactionResponderDep,
+		pluginID:                 pluginID,
+		capabilities:             rec.Capabilities,
+		repositoryProviders:      rec.RepositoryProviders,
+		configSchema:             rec.ConfigSchema,
+		state:                    s.state,
+		secrets:                  s.secrets,
+		bus:                      s.eventBus,
+		configs:                  s.store,
+		taskData:                 s.taskData,
+		taskRelations:            s.taskRelationsSource,
+		automations:              s.automationSource,
+		workspaceAgentPrincipals: s.workspaceAgentPrincipalSource,
+		workflows:                s.workflows,
+		workflowSteps:            s.workflowSteps,
+		agentProfiles:            s.agentProfiles,
+		sessionCodeStats:         s.sessionCodeStats,
+		messageData:              s.messageData,
+		interactionData:          s.interactionData,
+		taskPRsDep:               s.taskPRSourceDep,
+		taskWriter:               s.taskWriter,
+		utilityDeps:              s.utilityAgentDeps,
+		writeDeps:                s.writeDependencies,
+		interactionDeps:          s.interactionResponderDep,
+		agentConversations:       s.agentConversationDeps,
 	}
 }
 

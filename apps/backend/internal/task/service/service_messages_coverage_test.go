@@ -207,8 +207,11 @@ func TestCreateMessageIdempotentReplaysExistingRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first CreateMessageIdempotent: %v", err)
 	}
-	if first.ID != "msg-idem" {
-		t.Fatalf("id = %q, want the caller-owned id", first.ID)
+	if !first.Created {
+		t.Fatal("expected the first call to report Created = true")
+	}
+	if first.Message.ID != "msg-idem" {
+		t.Fatalf("id = %q, want the caller-owned id", first.Message.ID)
 	}
 	afterFirst := len(bus.GetPublishedEvents())
 
@@ -218,8 +221,11 @@ func TestCreateMessageIdempotentReplaysExistingRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("replayed CreateMessageIdempotent: %v", err)
 	}
-	if replay.Content != "first" {
-		t.Fatalf("replay content = %q, want the committed first row", replay.Content)
+	if replay.Created {
+		t.Fatal("expected the replay to report Created = false")
+	}
+	if replay.Message.Content != "first" {
+		t.Fatalf("replay content = %q, want the committed first row", replay.Message.Content)
 	}
 	if got := len(bus.GetPublishedEvents()); got != afterFirst {
 		t.Fatalf("replay published %d extra events, want none", got-afterFirst)

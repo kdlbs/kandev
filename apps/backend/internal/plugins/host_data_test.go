@@ -51,6 +51,81 @@ type fakeTaskDataSource struct {
 	listTasksByWorkspaceCalls int
 }
 
+type fakeTaskRelationsSource struct {
+	relations *pluginsdk.TaskRelations
+	err       error
+	workspace string
+	taskID    string
+}
+
+type fakeAutomationSource struct {
+	items        []pluginsdk.Automation
+	item         *pluginsdk.Automation
+	err          error
+	workspaceID  string
+	automationID string
+}
+
+type fakeWorkspaceAgentPrincipalSource struct {
+	principal       *pluginsdk.WorkspaceAgentPrincipal
+	principalStatus *pluginsdk.WorkspaceAgentPrincipalStatus
+	events          []pluginsdk.WorkspaceAgentPrincipalAuditEvent
+	err             error
+	runErr          error
+	bindErr         error
+	revokeErr       error
+	revokedPluginID string
+	pluginID        string
+	workspaceID     string
+	logicalKey      string
+}
+
+func (f *fakeWorkspaceAgentPrincipalSource) GetPluginWorkspaceAgentPrincipal(_ context.Context, pluginID, workspaceID, logicalKey string) (*pluginsdk.WorkspaceAgentPrincipal, *pluginsdk.WorkspaceAgentPrincipalStatus, error) {
+	f.pluginID, f.workspaceID, f.logicalKey = pluginID, workspaceID, logicalKey
+	return f.principal, f.principalStatus, f.err
+}
+
+func (f *fakeWorkspaceAgentPrincipalSource) ListPluginWorkspaceAgentPrincipalAudit(_ context.Context, pluginID, workspaceID, logicalKey string) ([]pluginsdk.WorkspaceAgentPrincipalAuditEvent, error) {
+	f.pluginID, f.workspaceID, f.logicalKey = pluginID, workspaceID, logicalKey
+	return f.events, f.err
+}
+
+func (f *fakeWorkspaceAgentPrincipalSource) AuthorizePluginWorkspaceAgentRun(_ context.Context, pluginID, workspaceID, logicalKey string) error {
+	f.pluginID, f.workspaceID, f.logicalKey = pluginID, workspaceID, logicalKey
+	if f.runErr != nil {
+		return f.runErr
+	}
+	return f.err
+}
+
+func (f *fakeWorkspaceAgentPrincipalSource) BindPluginWorkspaceAgentRun(_ context.Context, pluginID, workspaceID, logicalKey, _, _ string) error {
+	f.pluginID, f.workspaceID, f.logicalKey = pluginID, workspaceID, logicalKey
+	if f.bindErr != nil {
+		return f.bindErr
+	}
+	return f.err
+}
+
+func (f *fakeWorkspaceAgentPrincipalSource) RevokePluginWorkspaceAgentPrincipals(_ context.Context, pluginID string) error {
+	f.revokedPluginID = pluginID
+	return f.revokeErr
+}
+
+func (f *fakeAutomationSource) ListPluginAutomations(_ context.Context, workspaceID string) ([]pluginsdk.Automation, error) {
+	f.workspaceID = workspaceID
+	return f.items, f.err
+}
+
+func (f *fakeAutomationSource) GetPluginAutomation(_ context.Context, workspaceID, automationID string) (*pluginsdk.Automation, error) {
+	f.workspaceID, f.automationID = workspaceID, automationID
+	return f.item, f.err
+}
+
+func (f *fakeTaskRelationsSource) GetTaskRelations(_ context.Context, workspaceID, taskID string) (*pluginsdk.TaskRelations, error) {
+	f.workspace, f.taskID = workspaceID, taskID
+	return f.relations, f.err
+}
+
 func (f *fakeTaskDataSource) ListWorkspaces(context.Context) ([]*taskmodels.Workspace, error) {
 	return f.workspaces, nil
 }
@@ -123,11 +198,20 @@ func (f *fakeWorkflowLister) ListWorkflows(_ context.Context, workspaceID string
 }
 
 type fakeWorkflowStepLister struct {
-	steps map[string][]*wfmodels.WorkflowStep
+	steps      map[string][]*wfmodels.WorkflowStep
+	monitoring map[string][]wfmodels.CoordinatorStepMonitor
+	monErr     error
 }
 
 func (f *fakeWorkflowStepLister) ListStepsByWorkflow(_ context.Context, workflowID string) ([]*wfmodels.WorkflowStep, error) {
 	return f.steps[workflowID], nil
+}
+
+func (f *fakeWorkflowStepLister) GetCoordinatorMonitoring(_ context.Context, workflowID string) ([]wfmodels.CoordinatorStepMonitor, error) {
+	if f.monErr != nil {
+		return nil, f.monErr
+	}
+	return f.monitoring[workflowID], nil
 }
 
 type fakeAgentProfileDataSource struct {
@@ -284,18 +368,21 @@ func (f *fakeTaskStarter) StartTask(_ context.Context, taskID string, launch Tas
 // tests can both drive Host calls and assert against the fakes' recorded
 // state.
 type testDataHost struct {
-	host       *pluginHost
-	tasks      *fakeTaskDataSource
-	workflows  *fakeWorkflowLister
-	steps      *fakeWorkflowStepLister
-	profiles   *fakeAgentProfileDataSource
-	codeStats  *fakeSessionCodeStatsSource
-	messages   *fakeMessageDataSource
-	utilAgents *fakeUtilityAgentSource
-	utilRun    *fakeUtilityRunner
-	taskWriter *fakeTaskWriter
-	messenger  *fakeMessenger
-	starter    *fakeTaskStarter
+	host        *pluginHost
+	tasks       *fakeTaskDataSource
+	workflows   *fakeWorkflowLister
+	steps       *fakeWorkflowStepLister
+	profiles    *fakeAgentProfileDataSource
+	codeStats   *fakeSessionCodeStatsSource
+	messages    *fakeMessageDataSource
+	utilAgents  *fakeUtilityAgentSource
+	utilRun     *fakeUtilityRunner
+	taskWriter  *fakeTaskWriter
+	relations   *fakeTaskRelationsSource
+	automations *fakeAutomationSource
+	principals  *fakeWorkspaceAgentPrincipalSource
+	messenger   *fakeMessenger
+	starter     *fakeTaskStarter
 
 	interactions *fakeInteractionDataSource
 	responder    *fakeInteractionResponder
@@ -306,17 +393,20 @@ type testDataHost struct {
 // resource) so each test only needs to vary caps.
 func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 	d := &testDataHost{
-		tasks:      &fakeTaskDataSource{},
-		workflows:  &fakeWorkflowLister{},
-		steps:      &fakeWorkflowStepLister{},
-		profiles:   &fakeAgentProfileDataSource{resp: &agentsettingsdto.ListAgentsResponse{}},
-		codeStats:  &fakeSessionCodeStatsSource{},
-		messages:   &fakeMessageDataSource{},
-		utilAgents: &fakeUtilityAgentSource{},
-		utilRun:    &fakeUtilityRunner{text: "ok"},
-		taskWriter: &fakeTaskWriter{},
-		messenger:  &fakeMessenger{},
-		starter:    &fakeTaskStarter{},
+		tasks:       &fakeTaskDataSource{},
+		workflows:   &fakeWorkflowLister{},
+		steps:       &fakeWorkflowStepLister{},
+		profiles:    &fakeAgentProfileDataSource{resp: &agentsettingsdto.ListAgentsResponse{}},
+		codeStats:   &fakeSessionCodeStatsSource{},
+		messages:    &fakeMessageDataSource{},
+		utilAgents:  &fakeUtilityAgentSource{},
+		utilRun:     &fakeUtilityRunner{text: "ok"},
+		taskWriter:  &fakeTaskWriter{},
+		relations:   &fakeTaskRelationsSource{},
+		automations: &fakeAutomationSource{},
+		principals:  &fakeWorkspaceAgentPrincipalSource{},
+		messenger:   &fakeMessenger{},
+		starter:     &fakeTaskStarter{},
 
 		interactions: &fakeInteractionDataSource{},
 		responder:    &fakeInteractionResponder{},
@@ -332,7 +422,16 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		messageData:      d.messages,
 		interactionData:  d.interactions,
 		taskWriter:       d.taskWriter,
-		configs:          &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "utility-agent-42"}},
+		taskRelations: func() taskRelationsSource {
+			return d.relations
+		},
+		automations: func() automationSource {
+			return d.automations
+		},
+		workspaceAgentPrincipals: func() workspaceAgentPrincipalSource {
+			return d.principals
+		},
+		configs: &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "utility-agent-42"}},
 		utilityDeps: func() (utilityAgentSource, utilityRunner) {
 			return d.utilAgents, d.utilRun
 		},
@@ -353,6 +452,119 @@ func TestPluginHost_Tasks_DeniedWithoutCapability(t *testing.T) {
 
 	_, err = d.host.Tasks().Get(context.Background(), "task-1")
 	assertPermissionDenied(t, err, "api_read:tasks")
+}
+
+func TestPluginHost_TaskRelations_RequiresDedicatedCapabilityAndForwardsScope(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{})
+	_, err := d.host.TaskRelations().Get(context.Background(), "workspace-a", "task-a")
+	assertPermissionDenied(t, err, "api_read:task_relations")
+
+	d = newTestDataHost(manifest.Capabilities{APIRead: []string{"task_relations"}})
+	d.relations.relations = &pluginsdk.TaskRelations{
+		Task: pluginsdk.RelationTask{ID: "task-a", WorkspaceID: "workspace-a", Title: "Compact", State: "running"},
+	}
+	relations, err := d.host.TaskRelations().Get(context.Background(), "workspace-a", "task-a")
+	if err != nil {
+		t.Fatalf("TaskRelations().Get: %v", err)
+	}
+	if relations.Task.ID != "task-a" || d.relations.workspace != "workspace-a" || d.relations.taskID != "task-a" {
+		t.Fatalf("TaskRelations().Get forwarded (%q, %q), want workspace-a/task-a; result=%+v", d.relations.workspace, d.relations.taskID, relations)
+	}
+}
+
+func TestPluginHost_TaskRelations_HidesForeignAndUnknownTargets(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"task_relations"}})
+	d.relations.err = repoerrors.ErrTaskNotFound
+	_, err := d.host.TaskRelations().Get(context.Background(), "workspace-a", "not-visible")
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("TaskRelations().Get error code = %s, want NotFound: %v", status.Code(err), err)
+	}
+}
+
+func TestPluginHost_TaskRelations_ResolvesLateWiring(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"task_relations"}})
+	var source taskRelationsSource
+	d.host.taskRelations = func() taskRelationsSource { return source }
+	_, err := d.host.TaskRelations().Get(context.Background(), "workspace-a", "task-a")
+	if status.Code(err) != codes.Unimplemented {
+		t.Fatalf("unwired TaskRelations().Get code = %s, want Unimplemented: %v", status.Code(err), err)
+	}
+
+	d.relations.relations = &pluginsdk.TaskRelations{Task: pluginsdk.RelationTask{ID: "task-a", WorkspaceID: "workspace-a"}}
+	source = d.relations
+	relations, err := d.host.TaskRelations().Get(context.Background(), "workspace-a", "task-a")
+	if err != nil || relations.Task.ID != "task-a" {
+		t.Fatalf("late-wired TaskRelations().Get = %+v, %v", relations, err)
+	}
+}
+
+func TestPluginHost_Automations_RequiresDedicatedCapabilityAndScopesReads(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{})
+	_, _, err := d.host.Automations().List(context.Background(), "workspace-a", pluginsdk.Page{})
+	assertPermissionDenied(t, err, "api_read:automations")
+
+	d = newTestDataHost(manifest.Capabilities{APIRead: []string{"automations"}})
+	d.automations.items = []pluginsdk.Automation{{ID: "automation-a", WorkspaceID: "workspace-a", Prompt: "WAKE:CYCLE"}}
+	items, _, err := d.host.Automations().List(context.Background(), "workspace-a", pluginsdk.Page{})
+	if err != nil || len(items) != 1 || d.automations.workspaceID != "workspace-a" {
+		t.Fatalf("Automations().List = %+v, %v; workspace=%q", items, err, d.automations.workspaceID)
+	}
+
+	d.automations.item = &items[0]
+	item, err := d.host.Automations().Get(context.Background(), "workspace-a", "automation-a")
+	if err != nil || item == nil || item.ID != "automation-a" || d.automations.automationID != "automation-a" {
+		t.Fatalf("Automations().Get = %+v, %v; request=%q/%q", item, err, d.automations.workspaceID, d.automations.automationID)
+	}
+}
+
+func TestPluginHost_Automations_HidesForeignAndUnknownTargetsAndResolvesLateWiring(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"automations"}})
+	d.automations.err = status.Error(codes.NotFound, "automation not found")
+	_, err := d.host.Automations().Get(context.Background(), "workspace-a", "foreign")
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("Automations().Get error code = %s, want NotFound: %v", status.Code(err), err)
+	}
+
+	var source automationSource
+	d.host.automations = func() automationSource { return source }
+	_, _, err = d.host.Automations().List(context.Background(), "workspace-a", pluginsdk.Page{})
+	if status.Code(err) != codes.Unimplemented {
+		t.Fatalf("unwired Automations().List error code = %s, want Unimplemented: %v", status.Code(err), err)
+	}
+	source = d.automations
+	d.automations.err = nil
+	d.automations.items = []pluginsdk.Automation{{ID: "automation-a", WorkspaceID: "workspace-a"}}
+	items, _, err := d.host.Automations().List(context.Background(), "workspace-a", pluginsdk.Page{})
+	if err != nil || len(items) != 1 {
+		t.Fatalf("late-wired Automations().List = %+v, %v", items, err)
+	}
+}
+
+func TestPluginHost_WorkspaceAgentPrincipals_GatesAndBindsRegistryIdentity(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{})
+	_, err := d.host.WorkspaceAgentPrincipals().Get(context.Background(), "workspace-a", "agent-key")
+	assertPermissionDenied(t, err, "api_read:workspace_agent_principals")
+
+	d = newTestDataHost(manifest.Capabilities{APIRead: []string{"workspace_agent_principals"}})
+	d.principals.principal = &pluginsdk.WorkspaceAgentPrincipal{ID: "opaque-principal", WorkspaceID: "workspace-a", LogicalKey: "agent-key"}
+	d.principals.principalStatus = &pluginsdk.WorkspaceAgentPrincipalStatus{PrincipalID: "opaque-principal", State: "active", GrantedCapabilities: []string{"orchestrate"}}
+	d.principals.events = []pluginsdk.WorkspaceAgentPrincipalAuditEvent{{ID: "audit-1", Action: "task.stop", Decision: "allowed"}}
+
+	principal, err := d.host.WorkspaceAgentPrincipals().Get(context.Background(), "workspace-a", "agent-key")
+	if err != nil || principal == nil || principal.ID != "opaque-principal" {
+		t.Fatalf("Get principal = %+v, %v", principal, err)
+	}
+	principalStatus, err := d.host.WorkspaceAgentPrincipals().Status(context.Background(), "workspace-a", "agent-key")
+	if err != nil || principalStatus == nil || principalStatus.State != "active" {
+		t.Fatalf("Status = %+v, %v", principalStatus, err)
+	}
+	events, _, err := d.host.WorkspaceAgentPrincipals().ListAudit(context.Background(), "workspace-a", "agent-key", pluginsdk.Page{})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("ListAudit = %+v, %v", events, err)
+	}
+	if d.principals.pluginID != "p1" || d.principals.workspaceID != "workspace-a" || d.principals.logicalKey != "agent-key" {
+		t.Fatalf("principal source context = %q/%q/%q, want p1/workspace-a/agent-key", d.principals.pluginID, d.principals.workspaceID, d.principals.logicalKey)
+	}
 }
 
 func TestPluginHost_Sessions_DeniedWithoutCapability(t *testing.T) {
@@ -569,6 +781,96 @@ func TestPluginHost_Workflows_SucceedsWithCapability(t *testing.T) {
 	wantTypes := []string{"auto_start_agent", "run_code_review"}
 	if !reflect.DeepEqual(steps[1].OnEnterActionTypes, wantTypes) {
 		t.Fatalf("steps[1].OnEnterActionTypes = %+v, want %+v", steps[1].OnEnterActionTypes, wantTypes)
+	}
+}
+
+// TestPluginHost_Workflows_ListStepsMergesCoordinatorMonitoring pins the
+// permanent Host read surface a coordinator-style plugin needs to compose
+// its per-step prompt on every check (criteria 22/23): ListSteps merges the
+// host-owned Settings > Workspace > Workflow configuration policy onto each
+// step by workflow_step_id, an unchecked step reports CoordinatorMonitored
+// false with an empty prompt, and merging never touches unrelated steps or
+// workflows.
+func TestPluginHost_Workflows_ListStepsMergesCoordinatorMonitoring(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"workflows"}, AgentConversation: true})
+	d.steps.steps = map[string][]*wfmodels.WorkflowStep{
+		"wf-1": {
+			{ID: "step-checked", WorkflowID: "wf-1", Name: "Spec", Position: 0, StageType: wfmodels.StageType("work")},
+			{ID: "step-unchecked", WorkflowID: "wf-1", Name: "Review", Position: 1, StageType: wfmodels.StageType("review")},
+		},
+	}
+	d.steps.monitoring = map[string][]wfmodels.CoordinatorStepMonitor{
+		"wf-1": {
+			{WorkflowStepID: "step-checked", Selected: true, Prompt: "Verify the spec covers rollback."},
+		},
+	}
+
+	steps, err := d.host.Workflows().ListSteps(context.Background(), "wf-1")
+	if err != nil {
+		t.Fatalf("ListSteps() unexpected error: %v", err)
+	}
+	if len(steps) != 2 {
+		t.Fatalf("ListSteps() returned %d steps, want 2", len(steps))
+	}
+
+	byID := map[string]pluginsdk.WorkflowStep{}
+	for _, s := range steps {
+		byID[s.ID] = s
+	}
+
+	checked := byID["step-checked"]
+	if !checked.CoordinatorMonitored {
+		t.Fatal("step-checked: CoordinatorMonitored = false, want true")
+	}
+	if checked.CoordinatorPrompt != "Verify the spec covers rollback." {
+		t.Fatalf("step-checked: CoordinatorPrompt = %q", checked.CoordinatorPrompt)
+	}
+
+	unchecked := byID["step-unchecked"]
+	if unchecked.CoordinatorMonitored {
+		t.Fatal("step-unchecked: CoordinatorMonitored = true, want false (never checked)")
+	}
+	if unchecked.CoordinatorPrompt != "" {
+		t.Fatalf("step-unchecked: CoordinatorPrompt = %q, want empty", unchecked.CoordinatorPrompt)
+	}
+}
+
+func TestPluginHost_Workflows_ListStepsRedactsCoordinatorMonitoringWithoutAgentConversation(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"workflows"}})
+	d.steps.steps = map[string][]*wfmodels.WorkflowStep{
+		"wf-1": {{ID: "step-checked", WorkflowID: "wf-1", Name: "Spec", Position: 0, StageType: wfmodels.StageType("work")}},
+	}
+	d.steps.monitoring = map[string][]wfmodels.CoordinatorStepMonitor{
+		"wf-1": {{WorkflowStepID: "step-checked", Selected: true, Prompt: "Private coordinator direction."}},
+	}
+
+	steps, err := d.host.Workflows().ListSteps(context.Background(), "wf-1")
+	if err != nil {
+		t.Fatalf("ListSteps() unexpected error: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("ListSteps() returned %d steps, want 1", len(steps))
+	}
+	if steps[0].CoordinatorMonitored || steps[0].CoordinatorPrompt != "" {
+		t.Fatalf("generic workflow-read capability exposed coordinator policy: %+v", steps[0])
+	}
+}
+
+// TestPluginHost_Workflows_ListStepsPropagatesMonitoringLoadFailure proves a
+// monitoring-store failure fails the whole read loudly (matching every other
+// Host data-read failure mode) rather than silently returning steps with
+// zeroed-out monitoring fields, which would look identical to "nothing is
+// checked" and mislead a plugin into skipping work it should do.
+func TestPluginHost_Workflows_ListStepsPropagatesMonitoringLoadFailure(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"workflows"}, AgentConversation: true})
+	d.steps.steps = map[string][]*wfmodels.WorkflowStep{
+		"wf-1": {{ID: "step-1", WorkflowID: "wf-1", Name: "Todo"}},
+	}
+	d.steps.monErr = errors.New("coordinator monitoring store unavailable")
+
+	_, err := d.host.Workflows().ListSteps(context.Background(), "wf-1")
+	if err == nil {
+		t.Fatal("expected ListSteps() to propagate the monitoring load error")
 	}
 }
 

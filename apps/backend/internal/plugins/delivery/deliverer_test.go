@@ -144,6 +144,33 @@ func TestDeliverer_DeliversOnMatchingEvent(t *testing.T) {
 	}
 }
 
+func TestDeliverer_ExtractsWorkspaceIDFromStructEventPayload(t *testing.T) {
+	type structEvent struct {
+		WorkspaceID  string `json:"workspace_id"`
+		AutomationID string `json:"automation_id"`
+	}
+	receivedCh := make(chan *pluginsdk.Event, 1)
+	transport := &fakeTransport{}
+	transport.setHandler(func(_ string, e *pluginsdk.Event) error {
+		receivedCh <- e
+		return nil
+	})
+	eventBus := bus.NewMemoryEventBus(logger.Default())
+	lister := &fakeLister{}
+	lister.set(PluginRecord{ID: "plug1", EventSubjects: []string{"automation.triggered"}, Status: store.StatusActive})
+	d := newTestDeliverer(t, eventBus, transport, lister)
+	d.Refresh()
+
+	err := eventBus.Publish(context.Background(), "automation.triggered", bus.NewEvent("automation.triggered", "test", structEvent{WorkspaceID: "ws-owned", AutomationID: "auto-1"}))
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	got := requireNoTimeout(t, receivedCh, 2*time.Second, "struct event delivery")
+	if got.WorkspaceID != "ws-owned" || got.Payload["automation_id"] != "auto-1" {
+		t.Fatalf("delivery = %+v, want workspace provenance and payload", got)
+	}
+}
+
 func TestDeliverer_NonMatchingEventIsNotDelivered(t *testing.T) {
 	receivedCh := make(chan struct{}, 1)
 	transport := &fakeTransport{}

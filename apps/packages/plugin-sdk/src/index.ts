@@ -25,7 +25,12 @@ export interface PluginIconProps {
 export type PluginIcon = string | Component<PluginIconProps>;
 
 /** Placement for a registered nav item; see `PluginRegistry.registerNavItem`. */
-export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-footer";
+export type PluginNavSection =
+  | "main"
+  | "settings"
+  | "integrations"
+  | "after-integrations"
+  | "sidebar-footer";
 
 /** Context passed to components registered for the `main-top-bar` slot. */
 export interface MainTopBarSlotProps {
@@ -496,6 +501,11 @@ interface PluginUIShape {
   SettingsSection: unknown;
   SettingsCard: unknown;
   WorkspaceScopedSection: unknown;
+  /** Host-owned workspace agent conversation chat component.
+   * Plugins render this on their route to show a managed conversation
+   * transcript with full send/queue/cancel/clarification behavior.
+   * Props: WorkspaceAgentChatProps. */
+  WorkspaceAgentChat: unknown;
 }
 
 export type SettingsSaveRevision = string | number;
@@ -514,6 +524,29 @@ export type SettingsSaveContributor = {
 export type PluginUIApi = {
   readonly [Name in keyof PluginUIShape]: HostComponent;
 };
+
+/**
+ * Props for the host-owned WorkspaceAgentChat component.
+ *
+ * Plugins receive this component through `host.ui.WorkspaceAgentChat` and
+ * render it on their route page to show a managed conversation transcript
+ * with a send/queue/cancel composer, clarification overlay, and streaming
+ * updates. The host resolves the workspace's managed conversation session
+ * from the descriptor.
+ */
+export interface WorkspaceAgentChatProps {
+  /** Optional plugin-side context; host behavior resolves from sessionId. */
+  workspaceId?: string;
+  /** Optional plugin-side context; host behavior resolves from sessionId. */
+  conversationKey?: string;
+  /** Unique task id for the conversation session (filled by host on open). */
+  sessionId: string;
+  /**
+   * Optional placeholder shown in the chat input when the composer is idle.
+   * Defaults to "Send a message...".
+   */
+  placeholderOverride?: string;
+}
 
 export interface PluginToastApi {
   (message: string, options?: Record<string, unknown>): string | number;

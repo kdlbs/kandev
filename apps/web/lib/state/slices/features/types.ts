@@ -12,6 +12,7 @@ export const defaultFeatureFlags = {
   dynamicAgentRouting: false,
   claudeBackgroundPromptHandoff: false,
   claudeMidTurnSteering: false,
+  coordinatorTaskAuthority: false,
 } as const;
 
 export type FeatureName = keyof typeof defaultFeatureFlags;

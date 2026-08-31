@@ -96,6 +96,32 @@ func (s *Store) Set(ctx context.Context, pluginID, scope, scopeID, key string, v
 	return err
 }
 
+// Claim atomically inserts a new (plugin_id, scope, scope_id, state_key) row
+// only if none exists yet, using INSERT ... ON CONFLICT DO NOTHING against
+// the table's UNIQUE index. Unlike Get-then-Set, this closes the race
+// between two callers — concurrent goroutines, separate processes, or a
+// caller retrying after a backend restart — who both observe "not claimed"
+// and both attempt to claim: SQLite's unique-constraint check serializes the
+// two INSERTs, so only one affects a row. Returns claimed=true when this
+// call performed the insert (it won the claim), false when a row already
+// existed (a prior caller won; the existing value is left untouched).
+func (s *Store) Claim(ctx context.Context, pluginID, scope, scopeID, key string, value json.RawMessage) (bool, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		INSERT INTO plugin_state (id, plugin_id, scope, scope_id, state_key, value_json, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(plugin_id, scope, scope_id, state_key) DO NOTHING
+	`), uuid.New().String(), pluginID, scope, scopeID, key, string(value), now)
+	if err != nil {
+		return false, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected > 0, nil
+}
+
 // Delete removes the row for the given plugin/scope/scopeID/key. It is not
 // an error if no matching row exists.
 func (s *Store) Delete(ctx context.Context, pluginID, scope, scopeID, key string) error {

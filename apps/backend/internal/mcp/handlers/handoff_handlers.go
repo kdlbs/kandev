@@ -26,8 +26,9 @@ func (h *Handlers) handleListRelatedTasks(ctx context.Context, msg *ws.Message) 
 	}
 	svc := h.handoffSvc
 	var req struct {
-		TaskID       string `json:"task_id"`
-		CallerTaskID string `json:"caller_task_id"`
+		TaskID          string `json:"task_id"`
+		CallerTaskID    string `json:"caller_task_id"`
+		CallerSessionID string `json:"caller_session_id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -39,7 +40,7 @@ func (h *Handlers) handleListRelatedTasks(ctx context.Context, msg *ws.Message) 
 	if caller == "" {
 		caller = req.TaskID
 	}
-	related, err := svc.ListRelatedForCaller(ctx, caller, req.TaskID)
+	related, err := svc.ListRelatedForCallerSession(ctx, caller, req.CallerSessionID, req.TaskID)
 	if err != nil {
 		// Access denied is an expected 403; log only genuine
 		// infrastructure errors, then route everything through
@@ -60,8 +61,9 @@ func (h *Handlers) handleListTaskDocuments(ctx context.Context, msg *ws.Message)
 	}
 	svc := h.handoffSvc
 	var req struct {
-		TaskID       string `json:"task_id"`
-		CallerTaskID string `json:"caller_task_id"`
+		TaskID          string `json:"task_id"`
+		CallerTaskID    string `json:"caller_task_id"`
+		CallerSessionID string `json:"caller_session_id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -73,7 +75,7 @@ func (h *Handlers) handleListTaskDocuments(ctx context.Context, msg *ws.Message)
 	if caller == "" {
 		caller = req.TaskID
 	}
-	docs, err := svc.ListDocumentsForCaller(ctx, caller, req.TaskID)
+	docs, err := svc.ListDocumentsForCallerSession(ctx, caller, req.CallerSessionID, req.TaskID)
 	if err != nil {
 		return mapHandoffError(msg, err)
 	}
@@ -90,9 +92,10 @@ func (h *Handlers) handleGetTaskDocument(ctx context.Context, msg *ws.Message) (
 	}
 	svc := h.handoffSvc
 	var req struct {
-		TaskID       string `json:"task_id"`
-		DocumentKey  string `json:"document_key"`
-		CallerTaskID string `json:"caller_task_id"`
+		TaskID          string `json:"task_id"`
+		DocumentKey     string `json:"document_key"`
+		CallerTaskID    string `json:"caller_task_id"`
+		CallerSessionID string `json:"caller_session_id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -104,7 +107,7 @@ func (h *Handlers) handleGetTaskDocument(ctx context.Context, msg *ws.Message) (
 	if caller == "" {
 		caller = req.TaskID
 	}
-	doc, err := svc.GetDocumentForCaller(ctx, caller, req.TaskID, req.DocumentKey)
+	doc, err := svc.GetDocumentForCallerSession(ctx, caller, req.CallerSessionID, req.TaskID, req.DocumentKey)
 	if err != nil {
 		return mapHandoffError(msg, err)
 	}

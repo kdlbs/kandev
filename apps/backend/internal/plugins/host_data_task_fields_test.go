@@ -205,7 +205,7 @@ func TestWorkflowStepModelToDTOCarriesPresentationAndCapacity(t *testing.T) {
 		ID: "s1", Name: "PR Review", Position: 8, Color: "bg-indigo-500",
 		IsStartStep: true, WIPLimit: 3, AgentProfileID: "agent-1",
 	}
-	dto := workflowStepModelToDTO(&step)
+	dto := workflowStepModelToDTO(&step, wfmodels.CoordinatorStepMonitor{})
 	require.Equal(t, "bg-indigo-500", dto.Color)
 	require.True(t, dto.IsStartStep)
 	require.Equal(t, int32(3), dto.WIPLimit)

@@ -115,8 +115,8 @@ test.describe("GitLab workflow sync", () => {
 
     const card = testPage.getByTestId(cardTestId!);
     await expect(card).toBeVisible();
-    await expect(card.getByText("Open")).toBeVisible();
-    await expect(card.getByText("Closed")).toBeVisible();
+    await expect(page.stepNodeByName(card, "Open")).toBeVisible();
+    await expect(page.stepNodeByName(card, "Closed")).toBeVisible();
 
     // Synced workflows are read-only: the description renders the synced
     // value but must not be editable, or a later reconcile would just

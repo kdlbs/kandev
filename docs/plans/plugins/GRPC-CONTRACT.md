@@ -85,7 +85,10 @@ service Host {
 
   // Host data API (ADR 0043, §3a below) — reads, capability api_read:<resource>.
   rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
-  rpc GetTask(GetTaskRequest) returns (Task);
+  rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
+  rpc GetTaskRelations(GetTaskRelationsRequest) returns (GetTaskRelationsResponse);
+  rpc ListAutomations(ListAutomationsRequest) returns (ListAutomationsResponse);
+  rpc GetAutomation(GetAutomationRequest) returns (GetAutomationResponse);
   rpc ListWorkspaces(ListWorkspacesRequest) returns (ListWorkspacesResponse);
   rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
   rpc ListWorkflowSteps(ListWorkflowStepsRequest) returns (ListWorkflowStepsResponse);
@@ -105,6 +108,15 @@ service Host {
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
   rpc PreviewPluginOwnedTaskTree(PreviewPluginOwnedTaskTreeRequest) returns (PreviewPluginOwnedTaskTreeResponse);
   rpc DeletePluginOwnedTaskTree(DeletePluginOwnedTaskTreeRequest) returns (DeletePluginOwnedTaskTreeResponse);
+
+  // Agent conversations — capability agent_conversation. Ensure creates or
+  // retrieves a hidden workflowless ephemeral task/session for the
+  // (plugin_id, workspace_id, conversation_key) tuple. Dispatch sends a prompt
+  // to an ensured conversation with stable occurrence idempotency. Delete
+  // removes only conversations owned by this plugin.
+  rpc EnsureAgentConversation(EnsureAgentConversationRequest) returns (EnsureAgentConversationResponse);
+  rpc DispatchAgentConversation(DispatchAgentConversationRequest) returns (DispatchAgentConversationResponse);
+  rpc DeleteAgentConversation(DeleteAgentConversationRequest) returns (DeleteAgentConversationResponse);
 }
 
 message Event {
@@ -202,7 +214,7 @@ safe.
 ### 3a. Host data API (ADR 0043)
 
 Read/write RPCs let plugins read and write kandev's own domain data —
-tasks, sessions, workspaces, workflows, agent profiles, repositories, messages —
+ tasks, automations, workspace-agent principals, sessions, workspaces, workflows, agent profiles, repositories, messages —
 over the same Host gRPC channel used for state/secrets, instead of opening the
 kandev database file directly. Full message definitions (`Page`, `PageInfo`,
 `Task`, `TaskFilter`, `Workspace`, `Workflow`, `WorkflowStep`, `AgentProfile`,
@@ -219,6 +231,9 @@ plugin's manifest:
 | RPC                     | Capability                   | Resource          |
 | ----------------------- | ---------------------------- | ----------------- |
 | `ListTasks` / `GetTask` | `api_read:tasks`             | tasks             |
+| `GetTaskRelations`      | `api_read:task_relations`    | task_relations    |
+| `ListAutomations` / `GetAutomation` | `api_read:automations` | automations |
+| `GetWorkspaceAgentPrincipal` / `GetWorkspaceAgentPrincipalStatus` / `ListWorkspaceAgentPrincipalAudit` | `api_read:workspace_agent_principals` | workspace_agent_principals |
 | `ListWorkspaces`        | `api_read:workspaces`        | workspaces        |
 | `ListWorkflows`         | `api_read:workflows`         | workflows         |
 | `ListWorkflowSteps`     | `api_read:workflows`         | workflows         |
@@ -236,6 +251,27 @@ identical in shape to the existing state/secrets gating. Declaring the resource
 grants every RPC listed against it; there is no finer-grained gate within a
 resource (e.g. `api_read:workflows` covers both `ListWorkflows` and
 `ListWorkflowSteps`).
+
+**Workspace-agent principal projection.** A plugin with
+`api_read:workspace_agent_principals` may read only the principal identified by
+the authenticated tuple `(workspace, calling plugin installation, logical
+key)`, its active/revoked status, and a paginated redacted audit projection.
+The host never accepts installation identity from the plugin and makes foreign
+workspace/install records indistinguishable from `NotFound`. Principal IDs are
+opaque and durable; backing task/session IDs, user IDs, target IDs, grant
+notes/scopes, task content, and credentials are excluded. Create, grant,
+revoke, delete, and actor rebind are host/operator lifecycle operations, not
+plugin RPCs. Revocation is fail-closed and legacy task-only grants never match
+or migrate implicitly.
+
+**Principal-run binding (deferred).** `api_read:workspace_agent_principals` is currently a read-only projection capability. It does not change the generic `AgentConversations().Ensure` or `.Dispatch` authorization path until an operator provisioning and grant-management surface exists. An arbitrary `ExecuteWorkspaceAgentAction` RPC remains intentionally deferred: its action and scope vocabulary must be generic and host-owned rather than encoding a Coordinator policy into this protocol.
+
+**Lifecycle.** Disable and recognized package upgrade preserve the principal,
+its grants, and its audit identity. Managed conversations follow their generic
+lifecycle independently of this read-only projection. Uninstall stops the
+plugin and revokes every principal for that plugin installation before removing
+its record. Revocation failure is visible and aborts uninstall; no legacy
+task-bound grant is migrated or inherited by reinstall.
 
 **Writes.** `CreateTask`, `UpdateTask`, and `SendMessage` are implemented.
 `CreateTask`/`UpdateTask` are gated by `api_write:tasks` and route through
@@ -363,6 +399,9 @@ type Host interface {                                        // injected before 
     // the corresponding api_read:<resource>; see "Host data API accessors"
     // below for the reader interfaces and Go-native DTOs.
     Tasks() TaskReader
+    TaskRelations() TaskRelationsReader
+    Automations() AutomationReader
+    WorkspaceAgentPrincipals() WorkspaceAgentPrincipalReader
     Sessions() SessionReader
     Workspaces() WorkspaceReader
     Workflows() WorkflowReader
@@ -441,6 +480,11 @@ type TaskReader interface {
     Get(ctx context.Context, id string) (*Task, error)
 }
 
+type AutomationReader interface {
+    List(ctx context.Context, workspaceID string, page Page) ([]Automation, *PageInfo, error)
+    Get(ctx context.Context, workspaceID, id string) (*Automation, error)
+}
+
 type SessionReader interface {
     List(ctx context.Context, filter SessionFilter, page Page) ([]Session, *PageInfo, error)
     CodeStats(ctx context.Context, filter SessionFilter, page Page) ([]SessionCodeStats, *PageInfo, error)
@@ -468,7 +512,7 @@ type RepositoryReader interface {
 }
 ```
 
-`Task`, `Session`, `SessionCodeStats`, `Workspace`, `Workflow`, `WorkflowStep`,
+`Task`, `Automation`, `Session`, `SessionCodeStats`, `Workspace`, `Workflow`, `WorkflowStep`,
 `AgentProfile`, `Repository`, `TaskFilter`, `SessionFilter` are Go-native
 structs in `pluginsdk` (field-for-field mirrors of the proto messages, PascalCase
 Go names for the proto's snake_case fields, `*string` for `optional string`) —
@@ -483,6 +527,27 @@ local checkout path, scripts, or credentials through this DTO.
 the strong identity is workspace + provider + scope + immutable provider repository
 ID. Host/name/owner fields remain routing and display metadata; scoped descriptors do
 not adopt legacy unscoped rows.
+
+`Automation` is a workspace-scoped configuration projection for a plugin that
+has received `automation.triggered`: id, workspace id, name, description,
+agent/executor profile ids, prompt, enabled state, concurrency limit, and update
+time. It deliberately omits webhook secrets, repository bindings, run history,
+and implementation-specific task-placement fields. `GetAutomation` treats an
+unknown or foreign id as `NotFound`.
+
+`WorkflowStep` additionally carries `coordinator_monitored` (bool) and
+`coordinator_prompt` (string): the host-owned Settings > Workspace > Workflow
+configuration policy an operator saves per step (checked or not, plus an
+optional multiline prompt). This is read-only through `ListSteps` — there is
+no write RPC, since the policy is edited only through Kandev's own Settings
+UI, never by a plugin. The fields are populated only when the plugin declares
+both `api_read: ["workflows"]` and `agent_conversation: true`; an ordinary
+workflow reader receives them redacted as `false` and `""`. `coordinator_monitored` is `false` and
+`coordinator_prompt` is `""` for a step nobody has checked. A plugin
+composes its own base prompt with `coordinator_prompt` only when
+`coordinator_monitored` is `true`; an empty prompt on a checked step adds no
+step-specific instruction. See `docs/specs/coordinator-plugin/spec.md`'s
+"Workflow monitoring policy" for the full state model.
 
 **Authoring example** — a plugin declaring `api_read: ["sessions"]` and reading
 computed per-session code stats instead of opening the kandev database:
@@ -532,11 +597,71 @@ the API, never the DB.
   before doing any work — `state` for `GetState`/`SetState`/`DeleteState`/
   `ListState`, `secrets` for `RevealSecret`, `api_read:<resource>` for each Host
   data API read RPC (§3a), `api_write:tasks` for `CreateTask`/`UpdateTask` and
-  `api_write:messages` for `SendMessage` — and returns PermissionDenied with
-  `capability '<name>' not declared` on a miss. `EmitEvent` is ungated. Reads
-  and writes gate independently on the same resource, so a plugin can declare
-  `api_read:tasks` without `api_write:tasks` (or vice versa), and likewise for
-  `messages`.
+  `api_write:messages` for `SendMessage`, `agent_conversation` for
+  `EnsureAgentConversation`/`DispatchAgentConversation`/`DeleteAgentConversation` —
+  and returns PermissionDenied with `capability '<name>' not declared` on a miss.
+  `EmitEvent` is ungated. Reads and writes gate independently on the same resource,
+  so a plugin can declare `api_read:tasks` without `api_write:tasks` (or vice versa),
+  and likewise for `messages`.
+
+### 5a. Agent conversation contract
+
+Gated by `capabilities: { agent_conversation: true }` in the manifest. Three RPCs
+provide managed, hidden conversation sessions keyed by `(plugin_id, workspace_id,
+conversation_key)`:
+
+**`EnsureAgentConversation`** — idempotent create-or-get for a hidden workflowless
+ephemeral task/session. The plugin provides an `AgentConversationSpec` with
+`workspace_id`, `conversation_key`, optional `base_prompt` (baked into every
+dispatch), and optional `agent_profile_id`. The current implementation guarantees
+at most one backing task per tuple within one backend process and preserves that
+mapping across restarts; it does not yet claim durable cross-instance uniqueness.
+Returns an `AgentConversationDescriptor` with `task_id`,
+`session_id`, `workspace_id`, `conversation_key`, and the effective
+`agent_profile_id`.
+
+```proto
+message AgentConversationSpec {
+  string workspace_id = 1;
+  string conversation_key = 2;
+  string base_prompt = 3;
+  string agent_profile_id = 4;
+}
+
+message AgentConversationDescriptor {
+  string task_id = 1;
+  string session_id = 2;
+  string workspace_id = 3;
+  string conversation_key = 4;
+  string agent_profile_id = 5;
+}
+```
+
+**`DispatchAgentConversation`** — sends a prompt to an ensured conversation. The
+plugin provides `workspace_id`, `conversation_key`, `text`, and a stable
+`occurrence_key` for idempotency (e.g. a hash of the trigger event and due
+timestamp). An already-claimed key returns the prior dispatch result silently.
+If the backing session is busy, the prompt is queued; if idle, the agent is
+prompted. Returns the `session_id`, a `status` string (`started`, `sent`,
+`duplicate_occurrence`, or `skipped_busy`), and the
+`AgentConversationDescriptor`.
+
+```proto
+message DispatchAgentConversationRequest {
+  string workspace_id = 1;
+  string conversation_key = 2;
+  string text = 3;
+  string occurrence_key = 4;
+}
+```
+
+**`DeleteAgentConversation`** — deletes all conversations matching the request.
+Only conversations owned by this plugin are affected. Accepts `workspace_id` and
+optional `conversation_key` (omit to delete all conversations for this plugin in
+the workspace). Returns `deleted_count`.
+
+See PLUGIN-API.md for the frontend `WorkspaceAgentChat` component that renders
+the managed conversation transcript for a resolved `session_id`.
 
 ## 6. Package format (`<id>-<version>.tar.gz`)
 

@@ -331,6 +331,312 @@ func tasksToProto(items []Task) ([]*pluginv1.Task, error) {
 	return out, nil
 }
 
+// RelationTask is the compact, description-free task projection returned by
+// TaskRelationsReader. Relationship group membership carries the edge type;
+// this DTO intentionally excludes task documents, free-form metadata, and
+// repository information.
+type RelationTask struct {
+	ID          string
+	WorkspaceID string
+	Identifier  string
+	Title       string
+	State       string
+}
+
+func (t RelationTask) toProto() *pluginv1.RelationTask {
+	return &pluginv1.RelationTask{
+		Id: t.ID, WorkspaceId: t.WorkspaceID, Identifier: t.Identifier,
+		Title: t.Title, State: t.State,
+	}
+}
+
+func relationTaskFromProto(p *pluginv1.RelationTask) RelationTask {
+	if p == nil {
+		return RelationTask{}
+	}
+	return RelationTask{
+		ID:          p.GetId(),
+		WorkspaceID: p.GetWorkspaceId(),
+		Identifier:  p.GetIdentifier(),
+		Title:       p.GetTitle(),
+		State:       p.GetState(),
+	}
+}
+
+func relationTasksToProto(items []RelationTask) []*pluginv1.RelationTask {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]*pluginv1.RelationTask, len(items))
+	for i := range items {
+		out[i] = items[i].toProto()
+	}
+	return out
+}
+
+func relationTasksFromProto(items []*pluginv1.RelationTask) []RelationTask {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]RelationTask, len(items))
+	for i := range items {
+		out[i] = relationTaskFromProto(items[i])
+	}
+	return out
+}
+
+// TaskRelations is a workspace-scoped compact graph for one task. Parent is
+// nil when the parent is absent or outside the authorized workspace.
+type TaskRelations struct {
+	Task      RelationTask
+	Parent    *RelationTask
+	Children  []RelationTask
+	Siblings  []RelationTask
+	Blockers  []RelationTask
+	BlockedBy []RelationTask
+}
+
+func (r TaskRelations) toProto() *pluginv1.TaskRelations {
+	out := &pluginv1.TaskRelations{
+		Task: r.Task.toProto(), Children: relationTasksToProto(r.Children),
+		Siblings: relationTasksToProto(r.Siblings), Blockers: relationTasksToProto(r.Blockers),
+		BlockedBy: relationTasksToProto(r.BlockedBy),
+	}
+	if r.Parent != nil {
+		out.Parent = r.Parent.toProto()
+	}
+	return out
+}
+
+func taskRelationsFromProto(p *pluginv1.TaskRelations) *TaskRelations {
+	if p == nil {
+		return nil
+	}
+	out := &TaskRelations{
+		Task:      relationTaskFromProto(p.GetTask()),
+		Children:  relationTasksFromProto(p.GetChildren()),
+		Siblings:  relationTasksFromProto(p.GetSiblings()),
+		Blockers:  relationTasksFromProto(p.GetBlockers()),
+		BlockedBy: relationTasksFromProto(p.GetBlockedBy()),
+	}
+	if p.GetParent() != nil {
+		parent := relationTaskFromProto(p.GetParent())
+		out.Parent = &parent
+	}
+	return out
+}
+
+// Automation is the compact, workspace-scoped configuration projection a
+// plugin receives after an automation.triggered delivery. It has no secrets,
+// repository bindings, or run history.
+// AutomationTrigger is a triggering rule that activates an automation.
+// ConfigJSON is an opaque JSON string whose shape depends on the trigger type
+// (scheduled → cron expression, github_pr → repo/event filter, etc.). The
+// host validates the config; the plugin reads it for display/guidance only.
+type AutomationTrigger struct {
+	ID         string
+	Type       string
+	ConfigJSON string
+	Enabled    bool
+}
+
+func (t AutomationTrigger) toProto() *pluginv1.AutomationTrigger {
+	return &pluginv1.AutomationTrigger{
+		Id: t.ID, Type: t.Type, ConfigJson: t.ConfigJSON, Enabled: t.Enabled,
+	}
+}
+
+func automationTriggerFromProto(p *pluginv1.AutomationTrigger) *AutomationTrigger {
+	if p == nil {
+		return nil
+	}
+	return &AutomationTrigger{
+		ID: p.GetId(), Type: p.GetType(),
+		ConfigJSON: p.GetConfigJson(), Enabled: p.GetEnabled(),
+	}
+}
+
+func automationTriggersFromProto(items []*pluginv1.AutomationTrigger) []AutomationTrigger {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]AutomationTrigger, len(items))
+	for i, item := range items {
+		out[i] = *automationTriggerFromProto(item)
+	}
+	return out
+}
+
+func automationTriggersToProto(items []AutomationTrigger) []*pluginv1.AutomationTrigger {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]*pluginv1.AutomationTrigger, len(items))
+	for i := range items {
+		out[i] = items[i].toProto()
+	}
+	return out
+}
+
+type Automation struct {
+	ID                string
+	WorkspaceID       string
+	Name              string
+	Description       string
+	AgentProfileID    string
+	ExecutorProfileID string
+	Prompt            string
+	Enabled           bool
+	MaxConcurrentRuns int32
+	UpdatedAt         string
+
+	// Automation setup/binding surface — fields the coordinator plugin needs
+	// to display automation guidance to the operator.
+	WorkflowID        string
+	WorkflowStepID    string
+	TaskMode          string
+	RepositoryMode    string
+	TaskTitleTemplate string
+	Triggers          []AutomationTrigger
+}
+
+func (a Automation) toProto() *pluginv1.Automation {
+	return &pluginv1.Automation{
+		Id: a.ID, WorkspaceId: a.WorkspaceID, Name: a.Name, Description: a.Description,
+		AgentProfileId: a.AgentProfileID, ExecutorProfileId: a.ExecutorProfileID,
+		Prompt: a.Prompt, Enabled: a.Enabled, MaxConcurrentRuns: a.MaxConcurrentRuns,
+		UpdatedAt:  a.UpdatedAt,
+		WorkflowId: a.WorkflowID, WorkflowStepId: a.WorkflowStepID,
+		TaskMode: a.TaskMode, RepositoryMode: a.RepositoryMode,
+		TaskTitleTemplate: a.TaskTitleTemplate,
+		Triggers:          automationTriggersToProto(a.Triggers),
+	}
+}
+
+func automationFromProto(p *pluginv1.Automation) *Automation {
+	if p == nil {
+		return nil
+	}
+	return &Automation{
+		ID: p.GetId(), WorkspaceID: p.GetWorkspaceId(), Name: p.GetName(), Description: p.GetDescription(),
+		AgentProfileID: p.GetAgentProfileId(), ExecutorProfileID: p.GetExecutorProfileId(),
+		Prompt: p.GetPrompt(), Enabled: p.GetEnabled(), MaxConcurrentRuns: p.GetMaxConcurrentRuns(),
+		UpdatedAt:  p.GetUpdatedAt(),
+		WorkflowID: p.GetWorkflowId(), WorkflowStepID: p.GetWorkflowStepId(),
+		TaskMode: p.GetTaskMode(), RepositoryMode: p.GetRepositoryMode(),
+		TaskTitleTemplate: p.GetTaskTitleTemplate(),
+		Triggers:          automationTriggersFromProto(p.GetTriggers()),
+	}
+}
+
+func automationsFromProto(items []*pluginv1.Automation) []Automation {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]Automation, len(items))
+	for i, item := range items {
+		out[i] = *automationFromProto(item)
+	}
+	return out
+}
+
+func automationsToProto(items []Automation) []*pluginv1.Automation {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]*pluginv1.Automation, len(items))
+	for i := range items {
+		out[i] = items[i].toProto()
+	}
+	return out
+}
+
+// WorkspaceAgentPrincipal is the safe, plugin-visible durable identity for a
+// workspace agent. It deliberately omits backing task/session bindings and
+// installation identity, both of which are server-owned execution context.
+type WorkspaceAgentPrincipal struct {
+	ID          string
+	WorkspaceID string
+	LogicalKey  string
+	CreatedAt   string
+	UpdatedAt   string
+}
+
+func (p WorkspaceAgentPrincipal) toProto() *pluginv1.WorkspaceAgentPrincipal {
+	return &pluginv1.WorkspaceAgentPrincipal{Id: p.ID, WorkspaceId: p.WorkspaceID, LogicalKey: p.LogicalKey, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
+}
+
+func workspaceAgentPrincipalFromProto(p *pluginv1.WorkspaceAgentPrincipal) *WorkspaceAgentPrincipal {
+	if p == nil {
+		return nil
+	}
+	return &WorkspaceAgentPrincipal{ID: p.GetId(), WorkspaceID: p.GetWorkspaceId(), LogicalKey: p.GetLogicalKey(), CreatedAt: p.GetCreatedAt(), UpdatedAt: p.GetUpdatedAt()}
+}
+
+// WorkspaceAgentPrincipalStatus is the grant-safe operational projection.
+// A missing principal is represented by a NotFound error; revoked principals
+// remain visible to their owning plugin as state "revoked" so it can guide
+// the operator without learning any backing-task detail.
+type WorkspaceAgentPrincipalStatus struct {
+	PrincipalID         string
+	State               string
+	GrantedCapabilities []string
+	UpdatedAt           string
+}
+
+func (s WorkspaceAgentPrincipalStatus) toProto() *pluginv1.WorkspaceAgentPrincipalStatus {
+	return &pluginv1.WorkspaceAgentPrincipalStatus{PrincipalId: s.PrincipalID, State: s.State, GrantedCapabilities: s.GrantedCapabilities, UpdatedAt: s.UpdatedAt}
+}
+
+func workspaceAgentPrincipalStatusFromProto(s *pluginv1.WorkspaceAgentPrincipalStatus) *WorkspaceAgentPrincipalStatus {
+	if s == nil {
+		return nil
+	}
+	return &WorkspaceAgentPrincipalStatus{PrincipalID: s.GetPrincipalId(), State: s.GetState(), GrantedCapabilities: s.GetGrantedCapabilities(), UpdatedAt: s.GetUpdatedAt()}
+}
+
+// WorkspaceAgentPrincipalAuditEvent is a redacted audit record. It never
+// contains task/session ids, user ids, target ids, paths, or task content.
+type WorkspaceAgentPrincipalAuditEvent struct {
+	ID         string
+	OccurredAt string
+	Action     string
+	Capability string
+	Decision   string
+	Result     string
+	DetailCode string
+}
+
+func (e WorkspaceAgentPrincipalAuditEvent) toProto() *pluginv1.WorkspaceAgentPrincipalAuditEvent {
+	return &pluginv1.WorkspaceAgentPrincipalAuditEvent{Id: e.ID, OccurredAt: e.OccurredAt, Action: e.Action, Capability: e.Capability, Decision: e.Decision, Result: e.Result, DetailCode: e.DetailCode}
+}
+
+func workspaceAgentPrincipalAuditEventFromProto(e *pluginv1.WorkspaceAgentPrincipalAuditEvent) WorkspaceAgentPrincipalAuditEvent {
+	return WorkspaceAgentPrincipalAuditEvent{ID: e.GetId(), OccurredAt: e.GetOccurredAt(), Action: e.GetAction(), Capability: e.GetCapability(), Decision: e.GetDecision(), Result: e.GetResult(), DetailCode: e.GetDetailCode()}
+}
+
+func workspaceAgentPrincipalAuditEventsFromProto(items []*pluginv1.WorkspaceAgentPrincipalAuditEvent) []WorkspaceAgentPrincipalAuditEvent {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]WorkspaceAgentPrincipalAuditEvent, len(items))
+	for i, item := range items {
+		out[i] = workspaceAgentPrincipalAuditEventFromProto(item)
+	}
+	return out
+}
+
+func workspaceAgentPrincipalAuditEventsToProto(items []WorkspaceAgentPrincipalAuditEvent) []*pluginv1.WorkspaceAgentPrincipalAuditEvent {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]*pluginv1.WorkspaceAgentPrincipalAuditEvent, len(items))
+	for i := range items {
+		out[i] = items[i].toProto()
+	}
+	return out
+}
+
 // TaskFilter is the Go-native mirror of kandev.plugin.v1.TaskFilter.
 type TaskFilter struct {
 	WorkspaceIDs     []string
@@ -501,6 +807,18 @@ type WorkflowStep struct {
 	Name       string
 	Position   int32
 	StageType  string
+	// CoordinatorMonitored and CoordinatorPrompt carry the Settings >
+	// Workspace > Workflow configuration policy an operator saves for this
+	// step (host-owned storage — see docs/specs/coordinator-plugin/spec.md's
+	// "Workflow monitoring policy"). They are populated only for a plugin
+	// with api_read:workflows plus agent_conversation; ordinary workflow
+	// readers receive false and an empty string. CoordinatorMonitored is false
+	// and CoordinatorPrompt is "" for a step that was never checked. A plugin
+	// composes CoordinatorPrompt with its own base prompt only when
+	// CoordinatorMonitored is true; an empty prompt on a monitored step adds
+	// no step-specific instruction.
+	CoordinatorMonitored bool
+	CoordinatorPrompt    string
 	// Color is the step's own presentation colour. A plugin rendering a board
 	// reads it rather than inventing a palette, so its columns match the ones
 	// the operator already sees in kandev.
@@ -521,16 +839,18 @@ type WorkflowStep struct {
 
 func (s WorkflowStep) toProto() *pluginv1.WorkflowStep {
 	return &pluginv1.WorkflowStep{
-		Id:                 s.ID,
-		WorkflowId:         s.WorkflowID,
-		Name:               s.Name,
-		Position:           s.Position,
-		StageType:          s.StageType,
-		Color:              s.Color,
-		IsStartStep:        s.IsStartStep,
-		WipLimit:           s.WIPLimit,
-		AgentProfileId:     s.AgentProfileID,
-		OnEnterActionTypes: s.OnEnterActionTypes,
+		Id:                   s.ID,
+		WorkflowId:           s.WorkflowID,
+		Name:                 s.Name,
+		Position:             s.Position,
+		StageType:            s.StageType,
+		CoordinatorMonitored: s.CoordinatorMonitored,
+		CoordinatorPrompt:    s.CoordinatorPrompt,
+		Color:                s.Color,
+		IsStartStep:          s.IsStartStep,
+		WipLimit:             s.WIPLimit,
+		AgentProfileId:       s.AgentProfileID,
+		OnEnterActionTypes:   s.OnEnterActionTypes,
 	}
 }
 
@@ -539,16 +859,18 @@ func workflowStepFromProto(p *pluginv1.WorkflowStep) WorkflowStep {
 		return WorkflowStep{}
 	}
 	return WorkflowStep{
-		ID:                 p.GetId(),
-		WorkflowID:         p.GetWorkflowId(),
-		Name:               p.GetName(),
-		Position:           p.GetPosition(),
-		StageType:          p.GetStageType(),
-		OnEnterActionTypes: nonEmptyStrings(p.GetOnEnterActionTypes()),
-		Color:              p.GetColor(),
-		IsStartStep:        p.GetIsStartStep(),
-		WIPLimit:           p.GetWipLimit(),
-		AgentProfileID:     p.GetAgentProfileId(),
+		ID:                   p.GetId(),
+		WorkflowID:           p.GetWorkflowId(),
+		Name:                 p.GetName(),
+		Position:             p.GetPosition(),
+		StageType:            p.GetStageType(),
+		CoordinatorMonitored: p.GetCoordinatorMonitored(),
+		CoordinatorPrompt:    p.GetCoordinatorPrompt(),
+		OnEnterActionTypes:   nonEmptyStrings(p.GetOnEnterActionTypes()),
+		Color:                p.GetColor(),
+		IsStartStep:          p.GetIsStartStep(),
+		WIPLimit:             p.GetWipLimit(),
+		AgentProfileID:       p.GetAgentProfileId(),
 	}
 }
 
@@ -1337,4 +1659,93 @@ func messageDispatchFromProto(p *pluginv1.SendMessageResponse) *MessageDispatch 
 		return nil
 	}
 	return &MessageDispatch{SessionID: p.GetSessionId(), Status: p.GetStatus()}
+}
+
+// ── Agent conversations ─────────────────────────────────────────────────
+
+// AgentConversationSpec controls how Ensure creates a conversation.
+type AgentConversationSpec struct {
+	WorkspaceID     string
+	ConversationKey string
+	BasePrompt      string
+	AgentProfileID  string
+}
+
+func (s AgentConversationSpec) toProto() *pluginv1.AgentConversationSpec {
+	return &pluginv1.AgentConversationSpec{
+		WorkspaceId:     s.WorkspaceID,
+		ConversationKey: s.ConversationKey,
+		BasePrompt:      s.BasePrompt,
+		AgentProfileId:  s.AgentProfileID,
+	}
+}
+
+func agentConversationSpecFromProto(p *pluginv1.AgentConversationSpec) AgentConversationSpec {
+	if p == nil {
+		return AgentConversationSpec{}
+	}
+	return AgentConversationSpec{
+		WorkspaceID:     p.GetWorkspaceId(),
+		ConversationKey: p.GetConversationKey(),
+		BasePrompt:      p.GetBasePrompt(),
+		AgentProfileID:  p.GetAgentProfileId(),
+	}
+}
+
+// AgentConversationDescriptor identifies an existing conversation.
+type AgentConversationDescriptor struct {
+	TaskID          string
+	SessionID       string
+	WorkspaceID     string
+	ConversationKey string
+	AgentProfileID  string
+}
+
+func (d AgentConversationDescriptor) toProto() *pluginv1.AgentConversationDescriptor {
+	return &pluginv1.AgentConversationDescriptor{
+		TaskId:          d.TaskID,
+		SessionId:       d.SessionID,
+		WorkspaceId:     d.WorkspaceID,
+		ConversationKey: d.ConversationKey,
+		AgentProfileId:  d.AgentProfileID,
+	}
+}
+
+func agentConversationDescriptorFromProto(p *pluginv1.AgentConversationDescriptor) AgentConversationDescriptor {
+	if p == nil {
+		return AgentConversationDescriptor{}
+	}
+	return AgentConversationDescriptor{
+		TaskID:          p.GetTaskId(),
+		SessionID:       p.GetSessionId(),
+		WorkspaceID:     p.GetWorkspaceId(),
+		ConversationKey: p.GetConversationKey(),
+		AgentProfileID:  p.GetAgentProfileId(),
+	}
+}
+
+// AgentConversationDispatch is the outcome of DispatchAgentConversation.
+type AgentConversationDispatch struct {
+	SessionID  string
+	Status     string
+	Descriptor AgentConversationDescriptor
+}
+
+func (d AgentConversationDispatch) toProto() *pluginv1.DispatchAgentConversationResponse {
+	return &pluginv1.DispatchAgentConversationResponse{
+		SessionId:      d.SessionID,
+		Status:         d.Status,
+		ConvDescriptor: d.Descriptor.toProto(),
+	}
+}
+
+func agentConversationDispatchFromProto(p *pluginv1.DispatchAgentConversationResponse) AgentConversationDispatch {
+	if p == nil {
+		return AgentConversationDispatch{}
+	}
+	return AgentConversationDispatch{
+		SessionID:  p.GetSessionId(),
+		Status:     p.GetStatus(),
+		Descriptor: agentConversationDescriptorFromProto(p.GetConvDescriptor()),
+	}
 }

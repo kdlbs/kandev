@@ -27,6 +27,7 @@ type messengerTaskSvc interface {
 	GetTaskSession(ctx context.Context, sessionID string) (*taskmodels.TaskSession, error)
 	GetPrimarySession(ctx context.Context, taskID string) (*taskmodels.TaskSession, error)
 	CreateMessage(ctx context.Context, req *taskservice.CreateMessageRequest) (*taskmodels.Message, error)
+	CreateMessageIdempotent(ctx context.Context, id string, req *taskservice.CreateMessageRequest) (taskservice.CreateMessageIdempotentResult, error)
 	DeleteMessage(ctx context.Context, id string) error
 	WaitForSessionReady(ctx context.Context, sessionID string) error
 }
@@ -126,6 +127,63 @@ func (a pluginsTaskMessengerAdapter) startOrPromptSession(ctx context.Context, t
 		return plugins.PluginMessageResult{}, err
 	}
 	return plugins.PluginMessageResult{SessionID: session.ID, Status: "sent"}, nil
+}
+
+// StartOrPromptIdempotent is the agent-conversation dispatcher's delivery
+// primitive (see internal/task/service's agentConversationDispatcher
+// interface): it starts a never-launched session or prompts/resumes an idle
+// one, exactly like startOrPromptSession, but records the user message with
+// a caller-supplied idempotencyID via CreateMessageIdempotent instead of
+// always minting a new one. A retried occurrence (same idempotencyID —
+// derived by the caller from stable scheduler coordinates) replays the
+// already-committed message row and returns its outcome without dispatching
+// to the orchestrator a second time, so a coordinator wake can never fire
+// the agent twice for one occurrence. The caller (AgentConversationService)
+// has already confirmed the session is not RUNNING/STARTING before calling
+// this — session is passed in rather than re-resolved.
+func (a pluginsTaskMessengerAdapter) StartOrPromptIdempotent(ctx context.Context, taskID string, session *taskmodels.TaskSession, text, source, idempotencyID string) (string, error) {
+	metadata := map[string]interface{}{"source": source}
+	recorded, created := a.recordUserMessageIdempotent(ctx, taskID, session.ID, idempotencyID, text, metadata)
+	if !created {
+		if recorded == nil {
+			return "", errors.New("failed to record idempotent message for agent-conversation dispatch")
+		}
+		if shouldStartMessagedSession(session) {
+			return "started", nil
+		}
+		return "sent", nil
+	}
+	if shouldStartMessagedSession(session) {
+		if _, err := a.orch.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, text, true, false, true, nil, nil); err != nil {
+			a.deleteRecordedMessage(ctx, recorded)
+			return "", fmt.Errorf("failed to start session: %w", err)
+		}
+		return "started", nil
+	}
+	if err := a.promptWithResume(ctx, taskID, session.ID, text); err != nil {
+		a.deleteRecordedMessage(ctx, recorded)
+		return "", err
+	}
+	return "sent", nil
+}
+
+// recordUserMessageIdempotent is recordUserMessage's idempotent counterpart:
+// it persists (or replays) the message under a caller-owned id so a retried
+// occurrence cannot create a second turn. created is false on replay, in
+// which case the orchestrator must not be re-dispatched to.
+func (a pluginsTaskMessengerAdapter) recordUserMessageIdempotent(ctx context.Context, taskID, sessionID, idempotencyID, text string, metadata map[string]interface{}) (message *taskmodels.Message, created bool) {
+	result, err := a.tasks.CreateMessageIdempotent(ctx, idempotencyID, &taskservice.CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		Content:       text,
+		AuthorType:    "user",
+		Metadata:      metadata,
+	})
+	if err != nil {
+		a.log.Warn("plugins: failed to record idempotent user message for agent-conversation dispatch")
+		return nil, false
+	}
+	return result.Message, result.Created
 }
 
 // promptWithResume dispatches the prompt, resuming the agent process first when

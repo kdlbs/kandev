@@ -15,10 +15,10 @@ vi.mock("@/lib/routing/client-router", () => ({
   usePathname: () => pathname,
 }));
 
-function renderNavItems(collapsed = false) {
+function renderNavItems(collapsed = false, section: "plugins" | "workspace-agents" = "plugins") {
   return render(
     <TooltipProvider>
-      <PluginNavItems collapsed={collapsed} />
+      <PluginNavItems collapsed={collapsed} section={section} />
     </TooltipProvider>,
   );
 }
@@ -71,6 +71,22 @@ describe("PluginNavItems", () => {
     renderNavItems();
 
     expect(screen.queryByTestId("plugin-nav-item-integration-item")).toBeNull();
+  });
+
+  it("renders after-integrations items only in the workspace-agent slot", () => {
+    pluginRegistry.forPlugin("plugin-a").registerNavItem({
+      id: "coordinator",
+      label: "Coordinator",
+      path: "/coordinator",
+      section: "after-integrations",
+    });
+
+    renderNavItems();
+    expect(screen.queryByTestId("plugin-nav-item-coordinator")).toBeNull();
+
+    cleanup();
+    renderNavItems(false, "workspace-agents");
+    expect(screen.getByTestId("plugin-nav-item-coordinator")).not.toBeNull();
   });
 
   it("keeps sidebar-footer items out of the main plugin rail", () => {

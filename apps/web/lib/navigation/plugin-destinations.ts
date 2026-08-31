@@ -67,8 +67,9 @@ export function pluginDestinations(items: PluginNavRegistration[]): Destination[
  */
 function sectionFor(
   section: PluginNavRegistration["section"],
-): "integrations" | "insights" | "plugins" {
+): "integrations" | "workspace-agents" | "insights" | "plugins" {
   if (section === "integrations") return "integrations";
+  if (section === "after-integrations") return "workspace-agents";
   if (section === "sidebar-footer") return "insights";
   return "plugins";
 }

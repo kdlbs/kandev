@@ -35,8 +35,8 @@ test.describe("workflow duplication", () => {
     await expect(promptEditorText(copyCard.getByTestId("workflow-prompt-input"))).toContainText(
       "Copied workflow prompt",
     );
-    await expect(copyCard.getByText("Review", { exact: true })).toBeVisible();
-    await expect(copyCard.getByText("Done", { exact: true })).toBeVisible();
+    await expect(settings.stepNodeByName(copyCard, "Review")).toBeVisible();
+    await expect(settings.stepNodeByName(copyCard, "Done")).toBeVisible();
 
     const beforeSave = await apiClient.listWorkflows(seedData.workspaceId);
     expect(beforeSave.workflows).toHaveLength(before.workflows.length);

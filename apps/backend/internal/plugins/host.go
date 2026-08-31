@@ -61,14 +61,24 @@ type pluginHost struct {
 
 	// Host data API (ADR 0043) service-layer dependencies, wired by
 	// Service.hostForPlugin from Service.SetDataSources. See host_data.go.
-	taskData         taskDataSource
-	workflows        workflowLister
-	workflowSteps    workflowStepLister
-	agentProfiles    agentProfileDataSource
-	sessionCodeStats sessionCodeStatsSource
-	messageData      messageDataSource
-	interactionData  interactionDataSource
-	taskPRs          taskPRSource
+	taskData taskDataSource
+	// taskRelations is read at request time because HandoffService is built
+	// after boot-active plugins have started.
+	taskRelations func() taskRelationsSource
+	// automations is late-wired because the Automation service starts after
+	// boot-active plugins. Trigger consumers resolve it at request time.
+	automations func() automationSource
+	// workspaceAgentPrincipals is late-wired with the task repository-backed
+	// projection. It is intentionally separate from AgentConversations:
+	// a backing conversation is an execution resource, never the principal.
+	workspaceAgentPrincipals func() workspaceAgentPrincipalSource
+	workflows                workflowLister
+	workflowSteps            workflowStepLister
+	agentProfiles            agentProfileDataSource
+	sessionCodeStats         sessionCodeStatsSource
+	messageData              messageDataSource
+	interactionData          interactionDataSource
+	taskPRs                  taskPRSource
 	// taskPRsDep resolves the source at read time so a host created before
 	// SetTaskPRSource still observes the late wiring.
 	taskPRsDep func() taskPRSource
@@ -104,6 +114,13 @@ type pluginHost struct {
 	// wiring take effect without a plugin restart. nil on a bare test host.
 	// See host_utility.go.
 	utilityDeps func() (utilityAgentSource, utilityRunner)
+
+	// agentConversations provides the managed workspace agent conversation
+	// operations — EnsureAgentConversation / DispatchAgentConversation /
+	// DeleteAgentConversation. Wired by backendapp via SetAgentConversations
+	// and read through agentConversationsDeps (live, not snapshotted at
+	// hostForPlugin time, for the same late-wiring reason as writeDeps).
+	agentConversations func() AgentConversationService
 }
 
 var _ pluginsdk.Host = (*pluginHost)(nil)
@@ -317,6 +334,17 @@ func (h *pluginHost) EmitEvent(ctx context.Context, name string, payload map[str
 	subject := "plugin." + h.pluginID + "." + name
 	event := bus.NewEvent(subject, "plugin:"+h.pluginID, payload)
 	return h.bus.Publish(ctx, subject, event)
+}
+
+// AgentConversations returns the agent conversation manager. It always
+// returns a non-nil manager: the agent_conversation capability check and the
+// late-wiring check happen inside each method, mirroring
+// PluginOwnedTaskTrees. Returning nil here would not make grpcHostServer's
+// AgentConversationHost type assertion fail (pluginHost always implements the
+// method), so the server would call a method on a nil interface and panic
+// instead of denying the call.
+func (h *pluginHost) AgentConversations() pluginsdk.AgentConversationManager {
+	return &pluginHostAgentConversationManager{host: h}
 }
 
 // unmarshalStateValue decodes a plugin_state row's JSON value into a

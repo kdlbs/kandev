@@ -461,6 +461,10 @@ type FeaturesConfig struct {
 	// kill-switch after rollout because the agent-side fold is undocumented and
 	// can regress without notice.
 	ClaudeMidTurnSteering bool `mapstructure:"claude_mid_turn_steering" json:"claudeMidTurnSteering"`
+
+	// CoordinatorTaskAuthority gates generic operator-granted workspace-agent
+	// authority. It is off unless explicitly enabled.
+	CoordinatorTaskAuthority bool `mapstructure:"coordinator_task_authority" json:"coordinatorTaskAuthority"`
 }
 
 // LoggingConfig holds logging configuration.

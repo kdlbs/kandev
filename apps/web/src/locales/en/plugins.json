@@ -43,6 +43,7 @@
   "loadingSelectedUtilityAgent": "Loading selected utility agent...",
   "loadingSettings": "Loading settings...",
   "loadingUtilityAgents": "Loading utility agents...",
+  "loadingWorkspaceAgentChat": "Loading conversation",
   "manifest": "Manifest",
   "manifestApiVersion": "API version",
   "manifestAuthor": "Author",
