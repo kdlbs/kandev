@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 import {
+  DEEP_PROMPT_MARKER,
   EAGER_HISTORY_PROMPT_MARKER,
   INITIAL_PROMPT_MARKER,
   PRE_PROMPT_MARKER,
@@ -9,14 +10,15 @@ import {
   SHORT_PAGE_BOUNDARY_MARKER,
   TASK_DESCRIPTION_MARKER,
   VISIBLE_PAGE_MARKER,
+  LONG_HISTORY_TAIL_MARKER,
   readMessageRowTopById,
   readStandaloneMessageTop,
   seedCollapsedMessageHistory,
+  seedLongMessageHistory,
   seedShortBoundaryPageHistory,
   seedToolHeavyOpeningHistory,
   seedVisibleMessageHistory,
   scrollToOldestLoadedEdge,
-  scrollUpSlightly,
   watchOlderMessageRequests,
 } from "./message-pagination-helpers";
 
@@ -42,9 +44,49 @@ test.describe("Mobile chat message pagination", () => {
     await dwell(testPage, 500, "negative-assertion", "observe mobile pagination after open");
     const chat = session.activeChat();
 
-    await expect(chat.getByText(TASK_DESCRIPTION_MARKER, { exact: true })).toBeVisible();
+    await expect(chat.getByText(TASK_DESCRIPTION_MARKER, { exact: true })).toHaveCount(0);
     await expect(chat.getByText(EAGER_HISTORY_PROMPT_MARKER, { exact: true })).toHaveCount(0);
     expect(olderRequests).toHaveLength(0);
+  });
+
+  test("continues through more than twenty older pages in one upward reach", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { taskId, sessionId } = await seedLongMessageHistory(
+      apiClient,
+      seedData,
+      "mobile-message-pagination-long-history",
+    );
+    const olderRequests = watchOlderMessageRequests(testPage, sessionId);
+
+    await testPage.goto(`/t/${taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    const chat = session.activeChat();
+    const list = chat.locator(".chat-message-list");
+
+    await expect(chat.getByText(DEEP_PROMPT_MARKER, { exact: true })).toHaveCount(0);
+    const edge = await scrollToOldestLoadedEdge(list, LONG_HISTORY_TAIL_MARKER);
+    expect(Number.isFinite(edge.rowTop)).toBe(true);
+
+    await expect
+      .poll(() => olderRequests.length, {
+        timeout: 30_000,
+        intervals: [100],
+        message: "Long mobile history reaches the deep stored prompt",
+      })
+      .toBeGreaterThan(20);
+    await expect(chat.getByText(DEEP_PROMPT_MARKER, { exact: true })).toBeVisible({
+      timeout: 30_000,
+    });
+
+    const afterLoadTop = await readStandaloneMessageTop(list, LONG_HISTORY_TAIL_MARKER);
+    expect(Math.abs(afterLoadTop - edge.rowTop)).toBeLessThanOrEqual(8);
+    await expect(chat.getByText(TASK_DESCRIPTION_MARKER, { exact: true })).toHaveCount(0);
+    await expect(chat.getByTestId("load-older-messages")).toHaveCount(0);
   });
 
   test("loads one visible page per upward reach without cascading", async ({
@@ -82,7 +124,7 @@ test.describe("Mobile chat message pagination", () => {
     expect(olderRequests).toHaveLength(1);
   });
 
-  test("retries a short boundary page on the next upward movement", async ({
+  test("continues across a short boundary page and stops outside preload", async ({
     testPage,
     apiClient,
     seedData,
@@ -103,15 +145,11 @@ test.describe("Mobile chat message pagination", () => {
     const edge = await scrollToOldestLoadedEdge(list, VISIBLE_PAGE_MARKER);
 
     await expect(chat.getByText(SHORT_PAGE_BOUNDARY_MARKER, { exact: true })).toBeVisible();
-    await expect.poll(() => olderRequests.length).toBe(1);
+    await expect.poll(() => olderRequests.length).toBe(2);
     const heightAfterShortPage = await list.evaluate((element) => element.scrollHeight);
     expect(heightAfterShortPage - edge.scrollHeight).toBeGreaterThan(0);
-    expect(heightAfterShortPage - edge.scrollHeight).toBeLessThan(200);
     await dwell(testPage, 500, "negative-assertion", "observe mobile short-page stop");
-    expect(olderRequests).toHaveLength(1);
-
-    expect(await scrollUpSlightly(list)).toBeGreaterThan(0);
-    await expect.poll(() => olderRequests.length, { timeout: 15_000 }).toBe(2);
+    expect(olderRequests).toHaveLength(2);
   });
 
   test("hides the older control when only hidden pre-prompt rows remain", async ({
@@ -163,7 +201,7 @@ test.describe("Mobile chat message pagination", () => {
     const chat = session.activeChat();
     const list = chat.locator(".chat-message-list");
 
-    await expect(chat.getByText(TASK_DESCRIPTION_MARKER, { exact: true })).toBeVisible();
+    await expect(chat.getByText(TASK_DESCRIPTION_MARKER, { exact: true })).toHaveCount(0);
     await expect(chat.getByText(INITIAL_PROMPT_MARKER, { exact: true })).toHaveCount(0);
 
     const edge = await scrollToOldestLoadedEdge(list, RECENT_AGENT_MARKER);
