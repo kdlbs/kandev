@@ -1888,10 +1888,13 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 	if s.onManualMoveLifecycleStart != nil {
 		s.onManualMoveLifecycleStart()
 	}
-	s.processStepExitAndEnterWithSteps(
+	if err := s.processStepExitAndEnterWithSteps(
 		ctx, taskID, session, fromStep, targetStep,
 		fromStepID, toStepID, taskDescription, false, transitionID,
-	)
+	); errors.Is(err, errRouteEffectLeaseHeld) {
+		s.scheduleTaskLifecycleRetry(taskID)
+		return
+	}
 	if !s.persistManualMoveLifecycleCompletion(ctx, taskID) {
 		return
 	}
@@ -1915,7 +1918,7 @@ func (s *Service) continueQueuedMoveLifecycle(ctx context.Context, taskID, vacat
 // already persisted the step change in the DB).
 func (s *Service) processStepExitAndEnter(ctx context.Context, taskID string, session *models.TaskSession, fromStepID, toStepID, taskDescription string, transitionID int64) {
 	// Process on_exit for the step we're leaving
-	s.processStepExitAndEnterWithSteps(ctx, taskID, session, nil, nil, fromStepID, toStepID, taskDescription, false, transitionID)
+	_ = s.processStepExitAndEnterWithSteps(ctx, taskID, session, nil, nil, fromStepID, toStepID, taskDescription, false, transitionID)
 }
 
 func (s *Service) processStepExitAndEnterWithSteps(
@@ -1924,7 +1927,7 @@ func (s *Service) processStepExitAndEnterWithSteps(
 	session *models.TaskSession,
 	fromStep, targetStep *wfmodels.WorkflowStep,
 	fromStepID, toStepID, taskDescription string, queuePromotion bool, transitionID int64,
-) {
+) error {
 	if fromStep == nil {
 		var err error
 		fromStep, err = s.workflowStepGetter.GetStep(ctx, fromStepID)
@@ -1946,14 +1949,18 @@ func (s *Service) processStepExitAndEnterWithSteps(
 			s.logger.Warn("failed to load target step for on_enter",
 				zap.String("step_id", toStepID),
 				zap.Error(err))
-			return
+			return nil
 		}
 	}
 
 	clearReview := targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent)
-	if err := s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview, transitionID); err != nil && queuePromotion {
-		s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, "task.moved")
+	if err := s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview, transitionID); err != nil {
+		if queuePromotion {
+			s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, "task.moved")
+		}
+		return err
 	}
+	return nil
 }
 
 // finalizeStepEnter optionally clears review status, reloads the session, and
@@ -2008,6 +2015,8 @@ type routeEffectRepository interface {
 
 const routeEffectLease = time.Minute
 
+var errRouteEffectLeaseHeld = errors.New("workflow route effect lease is still held")
+
 func (s *Service) claimRouteEffectForStepEnter(
 	ctx context.Context, taskID, targetStepID string, transitionID int64,
 ) (func(), bool, error) {
@@ -2035,6 +2044,9 @@ func (s *Service) claimRouteEffectForStepEnter(
 		return nil, false, fmt.Errorf("claim route effect for step entry: %w", err)
 	}
 	if !claimed {
+		if effect.Status != routing.EffectCompleted {
+			return nil, false, errRouteEffectLeaseHeld
+		}
 		return func() {}, false, nil
 	}
 	renewCtx := context.WithoutCancel(ctx)
@@ -2049,6 +2061,51 @@ func (s *Service) claimRouteEffectForStepEnter(
 			s.logger.Warn("failed to complete workflow route effect", zap.String("effect_id", effect.ID), zap.Error(completeErr))
 		}
 	}, true, nil
+}
+
+func (s *Service) scheduleTaskLifecycleRetry(taskID string) {
+	if taskID == "" {
+		return
+	}
+	s.taskLifecycleRetryMu.Lock()
+	defer s.taskLifecycleRetryMu.Unlock()
+	if s.taskLifecycleRetryCtx == nil || s.taskLifecycleRetryCtx.Err() != nil {
+		s.taskLifecycleRetryCtx, s.taskLifecycleRetryCancel = context.WithCancel(context.Background())
+	}
+	if s.taskLifecycleRetryTimers == nil {
+		s.taskLifecycleRetryTimers = make(map[string]*time.Timer)
+	}
+	if _, scheduled := s.taskLifecycleRetryTimers[taskID]; scheduled {
+		return
+	}
+	s.taskLifecycleRetryTimers[taskID] = time.AfterFunc(routeEffectLease, func() {
+		s.runTaskLifecycleRetry(taskID)
+	})
+}
+
+func (s *Service) runTaskLifecycleRetry(taskID string) {
+	s.taskLifecycleRetryMu.Lock()
+	delete(s.taskLifecycleRetryTimers, taskID)
+	ctx := s.taskLifecycleRetryCtx
+	s.taskLifecycleRetryMu.Unlock()
+	if ctx == nil || ctx.Err() != nil {
+		return
+	}
+	s.recoverTaskLifecycleToken(ctx, taskID)
+}
+
+func (s *Service) stopTaskLifecycleRetries() {
+	s.taskLifecycleRetryMu.Lock()
+	defer s.taskLifecycleRetryMu.Unlock()
+	if s.taskLifecycleRetryCancel != nil {
+		s.taskLifecycleRetryCancel()
+	}
+	for taskID, timer := range s.taskLifecycleRetryTimers {
+		timer.Stop()
+		delete(s.taskLifecycleRetryTimers, taskID)
+	}
+	s.taskLifecycleRetryCtx = nil
+	s.taskLifecycleRetryCancel = nil
 }
 
 func (s *Service) renewRouteEffectClaim(
