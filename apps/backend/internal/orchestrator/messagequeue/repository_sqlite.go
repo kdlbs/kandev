@@ -1251,34 +1251,49 @@ func (r *sqliteRepository) reserveHead(ctx context.Context, sessionID string, re
 		return nil, true, nil
 	}
 	if msg.IsDurableLifecycle() {
-		if msg.IsReservedInFlight() {
-			ambiguous, err := r.peerDeliveryReservationIsAmbiguous(ctx, tx, msg)
-			if err != nil {
-				return nil, true, err
-			}
-			if ambiguous {
-				result, deleteErr := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ? AND session_id = ? AND metadata_json = ?`), msg.ID, sessionID, storedMetadataJSON)
-				if deleteErr != nil {
-					return nil, true, fmt.Errorf("remove ambiguous lifecycle head: %w", deleteErr)
-				}
-				affected, rowsErr := result.RowsAffected()
-				if rowsErr != nil {
-					return nil, true, fmt.Errorf("remove ambiguous lifecycle head rows affected: %w", rowsErr)
-				}
-				if affected != 1 {
-					return nil, true, ErrEntryNotFound
-				}
-				if commitErr := tx.Commit(); commitErr != nil {
-					return nil, true, fmt.Errorf("commit ambiguous lifecycle head removal: %w", commitErr)
-				}
-				return nil, true, nil
-			}
-		}
-		reserved, err := r.reserveLifecycleHead(ctx, tx, msg, storedMetadataJSON)
+		reserved, err := r.reserveLifecycleCandidate(ctx, tx, msg, storedMetadataJSON)
 		return reserved, true, err
 	}
 	reserved, err := r.reserveOrdinaryHead(ctx, tx, msg)
 	return reserved, true, err
+}
+
+func (r *sqliteRepository) reserveLifecycleCandidate(
+	ctx context.Context, tx *sqlx.Tx, msg *QueuedMessage, storedMetadataJSON string,
+) (*QueuedMessage, error) {
+	if !msg.IsReservedInFlight() {
+		return r.reserveLifecycleHead(ctx, tx, msg, storedMetadataJSON)
+	}
+	ambiguous, err := r.peerDeliveryReservationIsAmbiguous(ctx, tx, msg)
+	if err != nil {
+		return nil, err
+	}
+	if !ambiguous {
+		return r.reserveLifecycleHead(ctx, tx, msg, storedMetadataJSON)
+	}
+	return nil, r.removeAmbiguousLifecycleHead(ctx, tx, msg, storedMetadataJSON)
+}
+
+func (r *sqliteRepository) removeAmbiguousLifecycleHead(
+	ctx context.Context, tx *sqlx.Tx, msg *QueuedMessage, storedMetadataJSON string,
+) error {
+	result, err := tx.ExecContext(ctx, r.db.Rebind(
+		`DELETE FROM queued_messages WHERE id = ? AND session_id = ? AND metadata_json = ?`,
+	), msg.ID, msg.SessionID, storedMetadataJSON)
+	if err != nil {
+		return fmt.Errorf("remove ambiguous lifecycle head: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("remove ambiguous lifecycle head rows affected: %w", err)
+	}
+	if affected != 1 {
+		return ErrEntryNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit ambiguous lifecycle head removal: %w", err)
+	}
+	return nil
 }
 
 func (r *sqliteRepository) reservationCandidate(ctx context.Context, tx *sqlx.Tx, sessionID string) (*QueuedMessage, string, error) {

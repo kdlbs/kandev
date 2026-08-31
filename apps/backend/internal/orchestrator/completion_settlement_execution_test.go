@@ -10,6 +10,15 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+type failingQueueListRepository struct {
+	messagequeue.Repository
+	err error
+}
+
+func (r failingQueueListRepository) ListBySession(context.Context, string) ([]messagequeue.QueuedMessage, error) {
+	return nil, r.err
+}
+
 func TestQueuedUserWorkAdmissionFailureLeavesCompletionPending(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -195,7 +204,7 @@ func TestReconcileDueCompletionIntentsRetriesUnknownRecoveredPromptGeneration(t 
 	}
 }
 
-func TestReconcileDueCompletionIntentsDoesNotSettleAfterQueuedUserWork(t *testing.T) {
+func TestReconcileDueCompletionIntentsDoesNotSettleAfterQueuedUserWorkWithCustomIdentity(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
@@ -218,7 +227,7 @@ func TestReconcileDueCompletionIntentsDoesNotSettleAfterQueuedUserWork(t *testin
 	agentMgr.currentPromptGeneration.Store(1)
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.turnService = &repoTurnService{repo: repo}
-	if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "continue working", "", messagequeue.QueuedByUser, false, nil); err != nil {
+	if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "continue working", "", "user-123", false, nil); err != nil {
 		t.Fatalf("QueueMessage: %v", err)
 	}
 
@@ -237,6 +246,47 @@ func TestReconcileDueCompletionIntentsDoesNotSettleAfterQueuedUserWork(t *testin
 	}
 	if turn.CompletedAt != nil {
 		t.Fatal("queued user work must keep the captured turn open")
+	}
+}
+
+func TestReconcileDueCompletionIntentsRetriesWhenQueuedUserWorkCannotBeChecked(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if err := repo.CreateTurn(ctx, &models.Turn{ID: "turn-1", TaskID: "t1", TaskSessionID: "s1", StartedAt: now}); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	_, _, err := repo.CreateOrGetCompletionIntent(ctx, &models.CompletionIntent{
+		ID: "intent-1", TaskID: "t1", SessionID: "s1", TurnID: "turn-1", WorkflowStepID: "step1",
+		State: models.CompletionIntentStatePending, RequestedAt: now.Add(-time.Second), EligibleAt: now,
+	})
+	if err != nil {
+		t.Fatalf("CreateOrGetCompletionIntent: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.messageQueue = messagequeue.NewService(failingQueueListRepository{
+		Repository: messagequeue.NewMemoryRepository(),
+		err:        errors.New("database is locked"),
+	}, messagequeue.DefaultMaxPerSession, newTestLogger())
+
+	svc.reconcileDueCompletionIntents(ctx)
+
+	intent, err := repo.GetCompletionIntent(ctx, "intent-1")
+	if err != nil {
+		t.Fatalf("GetCompletionIntent: %v", err)
+	}
+	if intent.State != models.CompletionIntentStatePending {
+		t.Fatalf("intent state = %q, want pending retry after queue read failure", intent.State)
+	}
+	turn, err := repo.GetTurn(ctx, "turn-1")
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if turn.CompletedAt != nil {
+		t.Fatal("queue read failure must keep the captured turn open")
 	}
 }
 

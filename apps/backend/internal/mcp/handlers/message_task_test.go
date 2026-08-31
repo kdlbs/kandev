@@ -803,6 +803,35 @@ func TestHandleMessageTask_InterruptReceiptQueuesOnceWhenDispatchIsDeferred(t *t
 	assert.Equal(t, 1, orch.queue.GetStatus(ctx, session.ID).Count)
 }
 
+func TestHandleMessageTask_InterruptReceiptDoesNotReturnQueueFullWhenTargetIsSaturated(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	parent, child, session := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "sender-sess-1", TaskID: parent.ID, State: models.TaskSessionStateRunning}))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "interrupt-full-source-turn", TaskID: parent.ID, TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC()}))
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orch.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	_, err = orch.queue.QueueMessage(ctx, session.ID, child.ID, "already queued", "", messagequeue.QueuedByUser, false, nil)
+	require.NoError(t, err)
+
+	response, err := h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "durable saturated interrupt", parent.ID, deliveryModeInterrupt)))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	assert.Equal(t, "queued", payload["status"])
+	assert.NotEmpty(t, payload["delivery_id"])
+	assert.Equal(t, "retry_wait", payload["delivery_status"])
+	delivery, err := queueRepo.(messagequeue.DeliveryLedger).GetDelivery(ctx, payload["delivery_id"].(string))
+	require.NoError(t, err)
+	assert.Equal(t, "target_queue_full", delivery.LastError)
+	assert.Equal(t, 1, orch.queue.GetStatus(ctx, session.ID).Count)
+}
+
 func TestHandleMessageTask_InterruptSchedulingNeverClaimsDelivery(t *testing.T) {
 	ctx := context.Background()
 	svc, repo := newTestTaskService(t)

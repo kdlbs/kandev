@@ -2844,15 +2844,34 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	// it straight back to that terminal primary.
 	result, err := h.dispatchTaskMessage(dispatchCtx, req.TaskID, session, wrappedPrompt, senderMeta, wantsInterrupt, pinnedTarget)
 	if err != nil {
+		var qfErr *queueFullDispatchError
 		if delivery != nil && directLeaseOwner != "" {
-			_, _ = h.sessionLauncher.GetMessageQueue().RescheduleDelivery(ctx, delivery.ID, directLeaseOwner, "direct_dispatch_failed")
+			deliveryError := "direct_dispatch_failed"
+			isQueueFull := errors.As(err, &qfErr)
+			if isQueueFull {
+				deliveryError = "target_queue_full"
+			}
+			rescheduled, rescheduleErr := h.sessionLauncher.GetMessageQueue().RescheduleDelivery(ctx, delivery.ID, directLeaseOwner, deliveryError)
+			if rescheduleErr != nil {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+					"failed to reschedule message delivery receipt: "+rescheduleErr.Error(), nil)
+			}
+			if isQueueFull {
+				return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+					"task_id":         req.TaskID,
+					"session_id":      rescheduled.TargetSessionID,
+					stopTaskStatusKey: taskMessageStatusQueued,
+					"delivery_id":     rescheduled.ID,
+					"delivery_status": rescheduled.State,
+					"idempotency_key": rescheduled.IdempotencyKey,
+				})
+			}
 		} else if parentReply != nil {
 			if restoreErr := h.restoreParentQuestionPending(ctx, parentReply.message); restoreErr != nil {
 				h.logger.Error("failed to restore parent question after answer dispatch failure",
 					zap.String(parentQuestionIDKey, parentReply.message.ID), zap.Error(restoreErr))
 			}
 		}
-		var qfErr *queueFullDispatchError
 		if errors.As(err, &qfErr) {
 			return ws.NewError(msg.ID, msg.Action, messagequeue.QueueFullErrorCode,
 				fmt.Sprintf("target task has %d queued messages (max %d) — retry after the next turn completes", qfErr.queueSize, qfErr.max),

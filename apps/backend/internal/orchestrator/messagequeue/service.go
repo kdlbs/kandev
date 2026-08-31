@@ -1138,6 +1138,25 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 	}
 }
 
+// HasUserOwnedEntryAtOrAfter is the error-preserving queue read used by
+// stale-turn reconciliation. Unlike GetStatus, it must not turn a transient
+// storage failure into an empty queue because that would make settlement lose
+// evidence of newer user work.
+func (s *Service) HasUserOwnedEntryAtOrAfter(ctx context.Context, sessionID string, at time.Time) (bool, error) {
+	entries, err := s.repo.ListBySession(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range entries {
+		if !entry.IsReservedInFlight() &&
+			!IsReservedQueuedBy(entry.QueuedBy) &&
+			!entry.QueuedAt.Before(at) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // CountPendingByTaskIDs returns the pending prompt count per task, keyed by
 // task_id, for every requested task. Reserved in-flight lifecycle rows are
 // excluded, matching GetStatus. Used by task-list assembly and the status

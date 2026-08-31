@@ -280,17 +280,15 @@ func (s *Service) reconcileCompletionIntentLocked(
 	if !proceed {
 		return nil
 	}
-	claimed, err := store.ClaimCompletionIntentForSettlement(ctx, intent.ID, now, now.Add(completionIntentSettlingLease))
-	if err != nil || !claimed {
-		if err != nil {
-			s.logger.Warn("failed to claim completion intent", zap.String("intent_id", intent.ID), zap.Error(err))
-			return fmt.Errorf("claim completion intent: %w", err)
-		}
+	claimed, err := s.claimCompletionIntent(ctx, store, intent, now)
+	if err != nil {
+		return err
+	}
+	if !claimed {
 		return nil
 	}
-	if s.completionIntentHasQueuedUserWork(ctx, intent) {
-		s.clearPendingStepSignalByID(ctx, intent.SessionID)
-		return s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateReopened, now, "queued_user_work", auditEvent)
+	if done, err := s.reconcileQueuedUserWork(ctx, store, intent, now, auditEvent); done {
+		return err
 	}
 	if turn != nil && turn.ID != intent.TurnID {
 		return s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSuperseded, now, "successor_turn", auditEvent)
@@ -332,17 +330,39 @@ func (s *Service) reconcileCompletionIntentLocked(
 	return s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSettled, now, "quiet_grace", auditEvent)
 }
 
-func (s *Service) completionIntentHasQueuedUserWork(ctx context.Context, intent *models.CompletionIntent) bool {
+func (s *Service) claimCompletionIntent(
+	ctx context.Context, store completionIntentReconciliationStore, intent *models.CompletionIntent, now time.Time,
+) (bool, error) {
+	claimed, err := store.ClaimCompletionIntentForSettlement(ctx, intent.ID, now, now.Add(completionIntentSettlingLease))
+	if err == nil {
+		return claimed, nil
+	}
+	s.logger.Warn("failed to claim completion intent", zap.String("intent_id", intent.ID), zap.Error(err))
+	return false, fmt.Errorf("claim completion intent: %w", err)
+}
+
+func (s *Service) reconcileQueuedUserWork(
+	ctx context.Context, store completionIntentReconciliationStore, intent *models.CompletionIntent,
+	now time.Time, auditEvent *models.SessionControlEvent,
+) (bool, error) {
+	hasQueuedUserWork, err := s.completionIntentHasQueuedUserWork(ctx, intent)
+	if err != nil {
+		s.retryCompletionIntent(ctx, store, intent)
+		return true, fmt.Errorf("check queued user work: %w", err)
+	}
+	if !hasQueuedUserWork {
+		return false, nil
+	}
+	s.clearPendingStepSignalByID(ctx, intent.SessionID)
+	err = s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateReopened, now, "queued_user_work", auditEvent)
+	return true, err
+}
+
+func (s *Service) completionIntentHasQueuedUserWork(ctx context.Context, intent *models.CompletionIntent) (bool, error) {
 	if intent == nil || s.messageQueue == nil {
-		return false
+		return false, nil
 	}
-	status := s.messageQueue.GetStatus(ctx, intent.SessionID)
-	for _, entry := range status.Entries {
-		if entry.QueuedBy == messagequeue.QueuedByUser && !entry.QueuedAt.Before(intent.RequestedAt) {
-			return true
-		}
-	}
-	return false
+	return s.messageQueue.HasUserOwnedEntryAtOrAfter(ctx, intent.SessionID, intent.RequestedAt)
 }
 
 // completionIntentExecutionWasReplaced rejects a completion signal from an
@@ -362,36 +382,44 @@ func (s *Service) completionIntentExecutionWasReplaced(ctx context.Context, inte
 	if running != nil && running.AgentExecutionID != "" && running.AgentExecutionID != intent.AgentExecutionID {
 		return true, nil
 	}
-	if intent.PromptGeneration > 0 {
-		generationReader, ok := s.agentManager.(interface {
-			GetPromptGenerationForSession(context.Context, string) (uint64, error)
-		})
-		if !ok {
-			return false, errors.New("agent runtime does not expose recovered prompt generation")
-		}
-		currentGeneration, err := generationReader.GetPromptGenerationForSession(ctx, intent.SessionID)
-		if err != nil {
-			return false, fmt.Errorf("read recovered prompt generation: %w", err)
-		}
-		if currentGeneration == 0 {
-			return false, errors.New("recovered prompt generation is not yet available")
-		}
-		if currentGeneration != uint64(intent.PromptGeneration) {
-			return true, nil
-		}
-		generationOwner, ok := s.agentManager.(interface {
-			OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
-		})
-		// A generation-bearing completion intent is only safe to settle while
-		// the runtime still assigns that exact prompt cycle to its execution.
-		if !ok || !generationOwner.OwnsPromptGeneration(intent.SessionID, intent.AgentExecutionID, uint64(intent.PromptGeneration)) {
-			return true, nil
-		}
+	replaced, err := s.completionIntentPromptWasReplaced(ctx, intent)
+	if err != nil || replaced {
+		return replaced, err
 	}
 	if running == nil || running.AgentExecutionID == "" {
 		return false, nil
 	}
 	return false, nil
+}
+
+func (s *Service) completionIntentPromptWasReplaced(ctx context.Context, intent *models.CompletionIntent) (bool, error) {
+	if intent.PromptGeneration <= 0 {
+		return false, nil
+	}
+	generationReader, ok := s.agentManager.(interface {
+		GetPromptGenerationForSession(context.Context, string) (uint64, error)
+	})
+	if !ok {
+		return false, errors.New("agent runtime does not expose recovered prompt generation")
+	}
+	currentGeneration, err := generationReader.GetPromptGenerationForSession(ctx, intent.SessionID)
+	if err != nil {
+		return false, fmt.Errorf("read recovered prompt generation: %w", err)
+	}
+	if currentGeneration == 0 {
+		return false, errors.New("recovered prompt generation is not yet available")
+	}
+	if currentGeneration != uint64(intent.PromptGeneration) {
+		return true, nil
+	}
+	generationOwner, ok := s.agentManager.(interface {
+		OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
+	})
+	// A generation-bearing completion intent is only safe to settle while the
+	// runtime still assigns that exact prompt cycle to its execution.
+	return !ok || !generationOwner.OwnsPromptGeneration(
+		intent.SessionID, intent.AgentExecutionID, uint64(intent.PromptGeneration),
+	), nil
 }
 
 func (s *Service) prepareCompletionIntentReconciliation(
