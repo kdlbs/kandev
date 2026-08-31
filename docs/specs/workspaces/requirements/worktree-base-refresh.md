@@ -47,9 +47,10 @@ old copy without my knowledge.
   or recreated worktree.
 - **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.3:** When a required fetch fails
   because of authentication, network access, timeout, cancellation, or another
-  Git error, Kandev shall stop worktree preparation and shall not use a stale
-  local fallback ref. An authenticated zero-ref advertisement is the distinct
-  empty-remote state defined by `REQ-WORKSPACES-EMPTY-REMOTE-REPOSITORIES-001`.
+  Git error that does not prove the requested remote base is absent, Kandev
+  shall stop worktree preparation and shall not use a stale local fallback ref.
+  An authenticated zero-ref advertisement is the distinct empty-remote state
+  defined by `REQ-WORKSPACES-EMPTY-REMOTE-REPOSITORIES-001`.
 - **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.4:** When the required fetch
   succeeds, Kandev shall choose a start ref that contains the fetched remote
   base. It can preserve local-only commits only when the local base also
@@ -69,6 +70,19 @@ old copy without my knowledge.
 - **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.8:** When authenticated refresh
   proves that a remote advertises zero refs, Kandev shall use only the marked
   local baseline defined by the empty-remote repository contract.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.9:** When a task repository is
+  linked to a GitHub pull request, Kandev shall use the pull request's current
+  base branch for materialization when live provider state is available, and
+  shall retain the stored base when the provider lookup is unavailable.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.10:** When polling observes that a
+  linked pull request's non-empty base branch changed, Kandev shall update the
+  matching task repository base without failing the pull-request sync if that
+  secondary update is unavailable.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.11:** When required refresh proves
+  that the requested remote base no longer exists, Kandev shall use a different
+  configured fallback only after that fallback refresh succeeds, and shall
+  identify both branches in a warning. Without a usable fallback, preparation
+  shall fail with a missing-remote-ref classification.
 
 ## Out of scope
 

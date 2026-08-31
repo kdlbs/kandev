@@ -35,6 +35,9 @@ launch.
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.6` | [Multi-repository launch](#multi-repository-launch) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.7` | [Launch-error projection](#launch-error-projection) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.8` | [Empty remote exception](#empty-remote-exception) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.9` | [Pull-request base reconciliation](#pull-request-base-reconciliation) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.10` | [Pull-request base reconciliation](#pull-request-base-reconciliation) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.11` | [Missing-base fallback](#missing-base-fallback) |
 
 ## Components and responsibilities
 
@@ -43,6 +46,9 @@ launch.
   It passes `PullBeforeWorktree`, `RemoteSyncHandled`, and a provider-authenticated
   refresh callback to the lifecycle layer. The callback is not invoked until a
   worktree must be materialized or recreated.
+- `internal/github.Service` supplies live pull-request base state at launch and
+  reconciles changed bases into the task repository through narrow injected
+  interfaces. Provider lookup and task-repository propagation are best-effort.
 - `internal/repoclone.Cloner` performs a strict refresh for a Kandev-managed
   provider checkout when provider credentials belong to the backend refresh
   boundary. `RefreshWorkspaceRepositoryWithCredentialRequest` binds the fetch
@@ -71,6 +77,25 @@ The existing worktree preparation fields have these contracts:
 
 `RemoteSyncHandled` is valid only after a successful strict refresh. A
 best-effort fetch or a failed refresh cannot set it.
+
+The task repository's stored base remains the durable comparison target and
+offline launch fallback. The GitHub task-PR row tracks the provider observation;
+polling propagates a changed non-empty base to the matching task repository.
+
+## Pull-request base reconciliation
+
+The executor reads the pull-request number from task-repository metadata and
+the owner and repository name from the repository entity. For GitHub repository
+rows with a positive pull-request number, it asks an injected resolver for the
+current base before materialization. A successful non-empty result overrides
+the launch request only. A missing resolver, lookup error, or empty result keeps
+the stored base and does not stop launch.
+
+The GitHub polling service compares the previous `TaskPR.BaseBranch` with the
+incoming non-empty base. On change, it updates the task repository whose task
+and repository IDs match. When more than one association matches, the checkout
+branch must also match the pull-request head. Update failures are logged and do
+not fail the authoritative task-PR sync.
 
 ## Refresh policy
 
@@ -132,6 +157,20 @@ not reset, rebase, merge, or delete a branch.
 Git failure classification but exclude tokens, credential helper output, and
 secret-bearing URLs.
 
+## Missing-base fallback
+
+A fetch error that explicitly reports a missing remote ref is the only failed
+fetch eligible for fallback. When the request carries a different non-empty
+fallback base, the manager fetches that branch through the same non-interactive
+route and applies the normal containing-ref checks. Success completes sync,
+uses the fallback ref, and records a warning naming the requested and fallback
+branches.
+
+If the fallback is absent or its refresh fails, preparation remains failed. A
+missing requested or fallback remote ref uses `missing_remote_ref`; auth,
+network, timeout, cancellation, and other Git failures keep their existing
+fail-closed classifications.
+
 ## Empty remote exception
 
 An authenticated remote advertisement with zero refs is not a stale local
@@ -168,10 +207,10 @@ credential configuration.
 
 ## Failure and recovery
 
-- Fetch authentication, network, timeout, cancellation, and Git command errors
-  stop required preparation.
-- A missing fetched remote base on a non-empty remote stops preparation. It
-  cannot fall back to a local ref when refresh is required.
+- Fetch authentication, network, timeout, cancellation, and unclassified Git
+  command errors stop required preparation.
+- A missing fetched remote base can use only a separately refreshed configured
+  fallback. It cannot use an unverified local ref when refresh is required.
 - A failed ancestry probe stops preparation.
 - A divergent base stops preparation and preserves both refs.
 - Disabling pull-before-worktree is the explicit offline opt-out. Kandev does
@@ -193,7 +232,8 @@ blocking task launch.
 
 The existing sync progress callback reports a running event and then either a
 completed event or a failed event. A failed event contains the bounded failure
-class and repository identity, not a fallback-ref success message.
+class and repository identity. A successful missing-base fallback reports a
+completed event and records the branch substitution warning on the worktree.
 
 Structured logs record the repository ID, task ID, session ID, provider,
 configured transport, refresh route, and failure class. Logs do not record

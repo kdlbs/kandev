@@ -206,6 +206,7 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 			zap.Error(err))
 		return nil, err
 	}
+	e.resolvePRBaseForLaunch(ctx, tr, repo, info)
 
 	remoteRefState, err := e.ensureRepoLocalPathForSessionAndState(ctx, tr.TaskID, sessionID, repo)
 	if err != nil {
@@ -254,6 +255,33 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		}
 	}
 	return info, nil
+}
+
+func (e *Executor) resolvePRBaseForLaunch(
+	ctx context.Context, tr *models.TaskRepository, repo *models.Repository, info *repoInfo,
+) {
+	if e.prBaseResolver == nil || info.PRNumber <= 0 || !isGitHubRepository(repo) {
+		return
+	}
+	baseBranch, err := e.prBaseResolver.ResolvePRBaseBranch(
+		ctx, repo.ProviderOwner, repo.ProviderName, info.PRNumber,
+	)
+	baseBranch = strings.TrimSpace(baseBranch)
+	if err != nil || baseBranch == "" {
+		e.logger.Debug("could not resolve live pull request base branch",
+			zap.String("task_id", tr.TaskID),
+			zap.Int("pr_number", info.PRNumber),
+			zap.Error(err))
+		return
+	}
+	if baseBranch != tr.BaseBranch {
+		e.logger.Info("pull request base branch changed since task creation",
+			zap.String("task_id", tr.TaskID),
+			zap.Int("pr_number", info.PRNumber),
+			zap.String("old_base_branch", tr.BaseBranch),
+			zap.String("new_base_branch", baseBranch))
+	}
+	info.BaseBranch = baseBranch
 }
 
 func hasProviderRepositoryIdentity(repo *models.Repository) bool {

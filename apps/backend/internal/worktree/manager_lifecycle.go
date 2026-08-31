@@ -504,6 +504,7 @@ func requestBranchIdentitySlug(req CreateRequest) string {
 // returned for surfacing on the resulting worktree record.
 func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateRequest) (baseRef, warning, detail string, err error) {
 	baseRef = req.BaseBranch
+	resolvedFallback := ""
 	switch {
 	case req.RemoteRefState == repoclone.RemoteRefStateEmpty:
 		baselineRef, baselineErr := m.ensureEmptyRemoteBaseline(ctx, req)
@@ -516,15 +517,22 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 		case req.RemoteSyncHandled:
 			baseRef, err = m.preferRefreshedRemoteRef(ctx, req.RepositoryPath, req.BaseBranch)
 		case req.PullBeforeWorktree:
-			baseRef, err = m.pullBaseBranch(ctx, req.RepositoryPath, req.BaseBranch, req.OnSyncProgress)
+			baseRef, resolvedFallback, err = m.pullBaseBranchWithFallback(
+				ctx, req.RepositoryPath, req.BaseBranch, req.FallbackBaseBranch, req.OnSyncProgress,
+			)
 		}
 	case req.RemoteSyncHandled:
 		baseRef, err = m.preferRefreshedRemoteRef(ctx, req.RepositoryPath, req.BaseBranch)
 	case req.PullBeforeWorktree:
-		baseRef, err = m.pullBaseBranch(ctx, req.RepositoryPath, req.BaseBranch, req.OnSyncProgress)
+		baseRef, resolvedFallback, err = m.pullBaseBranchWithFallback(
+			ctx, req.RepositoryPath, req.BaseBranch, req.FallbackBaseBranch, req.OnSyncProgress,
+		)
 	}
 	if err != nil {
 		return "", "", "", err
+	}
+	if resolvedFallback != "" {
+		return m.finishMissingRemoteBaseFallback(req, resolvedFallback, baseRef)
 	}
 
 	baseExists, baseErr := m.branchExists(ctx, req.RepositoryPath, baseRef)
@@ -538,7 +546,6 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 	}
 
 	fallback := strings.TrimSpace(req.FallbackBaseBranch)
-	resolvedFallback := ""
 	if fallback != "" && fallback != baseRef {
 		resolvedFallback, err = m.resolveFallbackRef(ctx, req, fallback)
 		if err != nil {
@@ -604,6 +611,19 @@ func (m *Manager) finishBaseFallback(req *CreateRequest, baseRef, fallback, reso
 	// Reflect the resolved branch in the persisted worktree record so
 	// downstream consumers (UI, queries, debug logs) see the actual base
 	// rather than the requested-but-missing one.
+	req.BaseBranch = fallback
+	return resolvedFallback, warning, detail, nil
+}
+
+func (m *Manager) finishMissingRemoteBaseFallback(
+	req *CreateRequest, fallback, resolvedFallback string,
+) (string, string, string, error) {
+	m.logger.Warn("requested base branch no longer exists on origin, falling back",
+		zap.String("repository_path", req.RepositoryPath),
+		zap.String("requested_branch", req.BaseBranch),
+		zap.String("fallback_branch", fallback))
+	warning := fmt.Sprintf("Base branch %q no longer exists on origin; using %q instead.", req.BaseBranch, fallback)
+	detail := fmt.Sprintf("Required refresh could not find remote ref %q; fallback branch %q refreshed successfully", req.BaseBranch, fallback)
 	req.BaseBranch = fallback
 	return resolvedFallback, warning, detail, nil
 }

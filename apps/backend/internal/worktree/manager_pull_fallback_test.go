@@ -139,7 +139,7 @@ esac
 	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	req := CreateRequest{
-		RepositoryPath: repoPath, BaseBranch: "main", PullBeforeWorktree: true,
+		RepositoryPath: repoPath, BaseBranch: "main", FallbackBaseBranch: "develop", PullBeforeWorktree: true,
 	}
 	var events []SyncProgressEvent
 	req.OnSyncProgress = captureSyncProgress(&events)

@@ -1401,6 +1401,11 @@ func (s *Service) SetTaskRepositoryBaseBranchUpdater(updater executor.TaskReposi
 	s.executor.SetTaskRepositoryBaseBranchUpdater(updater)
 }
 
+// SetPRBaseResolver wires best-effort pull-request base resolution at launch.
+func (s *Service) SetPRBaseResolver(resolver executor.PRBaseResolver) {
+	s.executor.SetPRBaseResolver(resolver)
+}
+
 // RepositoryHostCloner is the narrow host-materialization contract. It returns
 // only the persisted local path; clone credentials remain private to the
 // orchestrator executor pipeline.

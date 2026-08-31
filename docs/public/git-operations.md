@@ -79,7 +79,7 @@ For a new task branch, the repository default template is:
 feature/{title}-{suffix}
 ```
 
-`{title}` is an ASCII-safe, lower-case task-title slug and `{suffix}` is a short collision-avoidance value. Repository settings can change the template. When `pull_before_worktree` is omitted it defaults to `true`: Kandev must refresh and verify the base branch before creating or recreating the worktree. The public configuration defaults both fetch and fast-forward pull timeouts to 60 seconds. An authentication, network, timeout, missing-ref, divergent-ref, or uncertain-ancestry failure stops task preparation and records a repository-specific launch error. Kandev does not create the worktree from a stale local or remote-tracking fallback.
+`{title}` is an ASCII-safe, lower-case task-title slug and `{suffix}` is a short collision-avoidance value. Repository settings can change the template. When `pull_before_worktree` is omitted it defaults to `true`: Kandev must refresh and verify the base branch before creating or recreating the worktree. The public configuration defaults both fetch and fast-forward pull timeouts to 60 seconds. Authentication, network, timeout, divergent-ref, and uncertain-ancestry failures stop task preparation and record a repository-specific launch error. If Git proves that a requested remote base was deleted, Kandev can refresh and use the repository default instead, with a warning that names both branches. Kandev does not create the worktree from a stale local or remote-tracking fallback.
 
 If the repository is intentionally offline, open its workspace repository settings and disable
 **Always pull before creating a new worktree**. This preserves the local workflow, but it also
@@ -116,7 +116,7 @@ target.
 
 Policies are not available in **Quick Chat**, **Remote**, **Add Sources**, or **Add Branch** flows.
 
-When a task opens an existing branch or GitHub PR, Kandev fetches that branch; for a numbered GitHub PR it can fetch `refs/pull/NUMBER/head`, including fork PRs. If the intended branch is already checked out in another worktree, the new worktree uses a suffixed local branch and tracks the original `origin` branch when available. The required-refresh rule still applies before that new worktree is created.
+When a task opens an existing branch or GitHub PR, Kandev fetches that branch; for a numbered GitHub PR it can fetch `refs/pull/NUMBER/head`, including fork PRs. At materialization, Kandev uses the PR's current GitHub base when available. Polling also keeps the task's stored comparison base aligned after GitHub retargets a stacked PR. If the intended branch is already checked out in another worktree, the new worktree uses a suffixed local branch and tracks the original `origin` branch when available. The required-refresh rule still applies before that new worktree is created.
 
 Tasks created without an initial title can expose the one-shot `set_task_title_kandev` handoff when
 **Settings → General → Task Actions → Agent-generated task titles** is enabled. After the owning

@@ -131,6 +131,7 @@ func provideOrchestrator(
 	orchestratorSvc.SetTitleBranchRuntime(lifecycleMgr)
 	if githubSvc != nil {
 		orchestratorSvc.SetTaskGitCredentialPolicyResolver(githubExecutorCredentialPolicyAdapter{service: githubSvc})
+		orchestratorSvc.SetPRBaseResolver(githubPRBaseResolver{service: githubSvc})
 	}
 	taskSvc.SetExecutionStopper(orchestratorSvc)
 	// Runtime-aware liveness lets durable cleanup treat a not-found stop for a
@@ -256,6 +257,20 @@ type githubCredentialPolicyService interface {
 
 type githubExecutorCredentialPolicyAdapter struct {
 	service githubCredentialPolicyService
+}
+
+type githubPRBaseResolver struct {
+	service *githubpkg.Service
+}
+
+func (r githubPRBaseResolver) ResolvePRBaseBranch(
+	ctx context.Context, owner, repo string, number int,
+) (string, error) {
+	pr, err := r.service.GetPR(ctx, owner, repo, number)
+	if err != nil || pr == nil {
+		return "", err
+	}
+	return pr.BaseBranch, nil
 }
 
 func (a githubExecutorCredentialPolicyAdapter) ResolveTaskGitCredentialPolicy(

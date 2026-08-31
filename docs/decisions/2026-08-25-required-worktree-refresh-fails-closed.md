@@ -4,6 +4,10 @@
 > [ADR-2026-08-30-empty-remote-bootstrap-publication](2026-08-30-empty-remote-bootstrap-publication.md):
 > an authenticated remote that advertises zero refs uses a marked local baseline.
 > Launch still performs no remote mutation.
+>
+> Amended on 2026-08-31: a fetch that proves the requested remote base was
+> deleted can use a different configured fallback only after that fallback is
+> refreshed successfully. Other fetch failures remain fail-closed.
 
 **Status:** accepted
 **Date:** 2026-08-25
@@ -38,10 +42,13 @@ A host or executor checkout uses its reconciled origin and non-interactive Git
 environment. A successful provider refresh marks remote sync as handled so the
 worktree manager does not run a second unauthenticated fetch.
 
-Fetch failure stops preparation. After a successful fetch, Kandev preserves a
-local ref only when it contains the fetched remote ref. It uses the remote ref
-when the remote contains the local ref. Diverged refs and failed ancestry
-checks stop preparation without changing either ref.
+Fetch failure stops preparation except when Git explicitly proves the requested
+remote base is absent and a different configured fallback can be refreshed
+successfully. This exception records the substituted base as a warning and
+never authorizes an unverified local ref. After a successful fetch, Kandev
+preserves a local ref only when it contains the fetched remote ref. It uses the
+remote ref when the remote contains the local ref. Diverged refs and failed
+ancestry checks stop preparation without changing either ref.
 
 Pull-before-worktree disabled remains the explicit offline opt-out. This path
 can use available local refs and makes no freshness guarantee.
@@ -60,6 +67,8 @@ credential material.
 - Local-only commits remain available when the local branch contains current
   remote state.
 - Diverged branches require a user to reconcile history before retrying launch.
+- Stacked pull requests can continue after GitHub retargets them away from a
+  deleted parent branch, provided the replacement base is refreshed.
 - The executor and worktree APIs become fallible at the base-refresh boundary.
 - Multi-repository launch stops before runtime startup when one required
   repository cannot refresh.
@@ -70,6 +79,12 @@ credential material.
 
 Rejected. A warning does not prevent the agent from producing changes against
 known stale state. The failure can remain hidden until push.
+
+### Fail every missing remote base without consulting provider state
+
+Rejected. GitHub can retarget a stacked pull request after its parent branch is
+merged and deleted. The pull-request head remains fetchable, and a separately
+refreshed current or default base preserves the freshness gate.
 
 ### Require remote access for every worktree
 
