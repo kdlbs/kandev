@@ -290,8 +290,8 @@ func (r *failingRevisionsRepo) GetTaskPlan(ctx context.Context, taskID string) (
 }
 
 // newMCPPlanTestHandlersWithFailingRevisionLookup builds Handlers like
-// newMCPPlanTestHandlers, but backed by a plan service whose ListRevisions
-// call always fails.
+// newMCPPlanTestHandlers, but backed by a plan service whose
+// GetLatestRevision call can be armed to fail once (single-shot).
 func newMCPPlanTestHandlersWithFailingRevisionLookup(t *testing.T) (*Handlers, *failingRevisionsRepo) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
@@ -350,7 +350,7 @@ func newMCPPlanTestHandlersWithFailingRevisionLookup(t *testing.T) (*Handlers, *
 // TestMCPPlanTruncationGuard_RevisionLookupFailureOmitsRevisionNumber pins
 // Review round 2 Finding 3: revision numbering starts at 1
 // (NextTaskPlanRevisionNumber), so "plan revision 0" can never be a real
-// revision. When ListRevisions fails after GetPlan has already detected a
+// revision. When GetLatestRevision fails after GetPlan has already detected a
 // truncating write, evaluatePlanWriteGuard must still force a new revision
 // and still warn — silently returning an empty guard here would let the
 // coalescing path overwrite the only surviving copy of the pre-truncation
@@ -385,6 +385,9 @@ func TestMCPPlanTruncationGuard_RevisionLookupFailureOmitsRevisionNumber(t *test
 	}
 	if strings.Contains(guard.warning, "revision 0") {
 		t.Errorf("warning names a nonexistent revision 0 (revision numbering starts at 1): %q", guard.warning)
+	}
+	if guard.priorRevision != 0 {
+		t.Errorf("priorRevision must be 0 when the revision lookup fails, got %d", guard.priorRevision)
 	}
 
 	// Arm the failure again for the guard's own lookup inside the write path.
