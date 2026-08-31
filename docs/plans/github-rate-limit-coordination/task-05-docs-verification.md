@@ -3,7 +3,7 @@ id: 05-docs-verification
 title: Documentation and verification
 status: completed
 wave: 5
-depends_on: [04-agent-rate-snapshot]
+depends_on: [04-operation-rate-errors]
 plan: plan.md
 requirements:
   - REQ-INTEGRATIONS-GITHUB-RATE-001
@@ -17,7 +17,7 @@ system_design: ../../specs/integrations/system-design/github-rate-limit-coordina
 
 ## Acceptance
 
-- Workflow Sync recovery and the agent snapshot contract are documented.
+- Workflow Sync recovery and operation-local rate errors are documented.
 - Structured transition observability avoids repeated skipped-tick warnings.
 - Backend tests/lint, spec/docs validation, and diff hygiene pass.
 
@@ -32,10 +32,9 @@ system_design: ../../specs/integrations/system-design/github-rate-limit-coordina
 
 ## Results
 
-Implemented the public Workflow Sync recovery guidance, the zero-call agent
-snapshot reference, structured classification/deferral/suspension/recovery
-telemetry, and transition-only logging. Focused GitHub and Workflow Sync tests,
-including their race suites, pass.
+Implemented the public Workflow Sync recovery guidance, operation-local rate
+error reference, structured classification and recovery telemetry, and
+transition-only logging. Focused GitHub and Workflow Sync tests pass.
 
 Passing repository gates:
 

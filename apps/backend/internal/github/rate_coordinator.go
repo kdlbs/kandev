@@ -17,11 +17,29 @@ import (
 // requeued instead of waiting inside an execution worker.
 var ErrBackgroundAdmissionDeferred = errors.New("background provider admission deferred")
 
+const (
+	rateLimitBlockSecondary          = "observed_secondary_rate_limit"
+	rateLimitBlockPrimary            = "primary_rate_limit"
+	rateLimitBlockPrimaryReserve     = "primary_reserve"
+	rateLimitBlockBackgroundBusy     = "background_in_flight"
+	rateLimitBlockInteractiveWaiting = "interactive_priority"
+	rateLimitBlockBackgroundPacing   = "background_pacing"
+)
+
+type rateAdmissionDecision struct {
+	interactiveAllowed bool
+	backgroundAllowed  bool
+	interactiveReason  string
+	backgroundReason   string
+}
+
 // AdmissionDeferredError describes the local admission signal that will wake
 // a requeued background request.
 type AdmissionDeferredError struct {
 	Resource       Resource
 	Delay          time.Duration
+	RetryAt        time.Time
+	RetrySource    RetrySource
 	Changed        <-chan struct{}
 	TrackerChanged <-chan struct{}
 	Reason         string
@@ -196,8 +214,9 @@ func (a *RateAdmission) acquire(ctx context.Context, resource Resource) (func(),
 }
 
 func (a *RateAdmission) tryAcquireBackground(_ context.Context, resource Resource) (func(), error) {
+	now := time.Now()
 	trackerChanged := a.principal.tracker.Changed()
-	decision := a.snapshot(resource, time.Now())
+	decision := a.snapshot(resource, now)
 	state := a.resourceState(resource)
 	wait := a.principal.tracker.BackgroundWaitDuration(resource)
 	a.principal.mu.Lock()
@@ -221,17 +240,39 @@ func (a *RateAdmission) tryAcquireBackground(_ context.Context, resource Resourc
 			reason = rateLimitBlockInteractiveWaiting
 		case backgroundBusy:
 			reason = rateLimitBlockBackgroundBusy
-		case nextBackgroundAt.After(time.Now()):
+		case nextBackgroundAt.After(now):
 			reason = rateLimitBlockBackgroundPacing
 		default:
 			reason = "provider_retry"
 		}
 	}
+	retryAt, retrySource := a.retryBoundary(resource, reason, now, wait)
 	incGitHubBackgroundDeferral(resource, reason)
 	return nil, &AdmissionDeferredError{
-		Resource: resource, Delay: wait, Changed: changed,
+		Resource: resource, Delay: wait, RetryAt: retryAt, RetrySource: retrySource, Changed: changed,
 		TrackerChanged: trackerChanged, Reason: reason,
 	}
+}
+
+func (a *RateAdmission) retryBoundary(
+	resource Resource,
+	reason string,
+	now time.Time,
+	delay time.Duration,
+) (time.Time, RetrySource) {
+	switch reason {
+	case rateLimitBlockSecondary:
+		secondary := a.principal.tracker.Secondary(resource)
+		return secondary.RetryAt, secondary.RetrySource
+	case rateLimitBlockPrimary, rateLimitBlockPrimaryReserve:
+		if snapshot, known := a.principal.tracker.Snapshot(resource); known {
+			return snapshot.ResetAt, RetrySourcePrimaryReset
+		}
+	}
+	if delay > 0 {
+		return now.Add(delay).UTC(), RetrySourceConservativeFallback
+	}
+	return time.Time{}, RetrySourceNone
 }
 
 func (a *RateAdmission) acquireInteractive(ctx context.Context, resource Resource) (func(), error) {

@@ -22,19 +22,18 @@ credential generation. GitHub App traffic shares by registration and
 installation.
 
 The coordinator preserves primary bucket snapshots separately from an observed
-secondary retry window. It gives interactive requests priority, reserves the
-last ten percent of known primary quota from background work, and exposes a
-snapshot-only agent contract. Secondary retry time is labelled as provider
-`Retry-After` or Kandev's conservative fallback and is never described as an
-authoritative provider clear time.
+secondary retry window. It gives interactive requests priority and reserves the
+last ten percent of known primary quota from background work. A failed
+Kandev-managed operation returns safe rate-limit details with that operation.
+The details identify the rate kind, resource, retry boundary, and retry source.
 
 ## Consequences
 
 Background Kandev work can no longer independently spend the same upstream
-identity's budget from multiple workspace trackers. Agents can distinguish a
-healthy primary bucket from an active observed secondary throttle without
-making a provider call. External processes using the same credential remain
-outside the coordinator, so snapshots include freshness and unknown states.
+identity's budget from multiple workspace trackers. Callers receive rate-limit
+context from the failed operation, without a separate diagnostic request.
+Successful operations do not carry quota details. External processes using the
+same credential remain outside the coordinator.
 
 Credential replacement for the same upstream identity does not discard an
 active throttle. Process restart loses in-memory provider observations, while

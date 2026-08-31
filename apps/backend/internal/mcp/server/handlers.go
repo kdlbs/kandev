@@ -80,22 +80,6 @@ func (s *Server) getDiagnosticBundleHandler() server.ToolHandlerFunc {
 	}
 }
 
-func (s *Server) getGitHubRateLimitHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		var result map[string]interface{}
-		if err := s.backend.RequestPayload(
-			ctx,
-			ws.ActionMCPGetGitHubRateLimit,
-			map[string]string{"task_id": s.taskID},
-			&result,
-		); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
-	}
-}
-
 func (s *Server) listWorkflowsHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		workspaceID, err := req.RequireString("workspace_id")

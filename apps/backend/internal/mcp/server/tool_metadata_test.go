@@ -28,7 +28,6 @@ func TestCoreToolDescriptionsStayFocused(t *testing.T) {
 		"update_repository_base_branch_kandev": 500,
 		"add_task_dependency_kandev":           500,
 		"list_related_tasks_kandev":            500,
-		"get_github_rate_limit_kandev":         500,
 	}
 	for name, limit := range limits {
 		t.Run(name, func(t *testing.T) {
@@ -67,7 +66,6 @@ func TestCoreToolRiskAnnotations(t *testing.T) {
 		openWorld   bool
 	}{
 		{name: "list_task_sessions_kandev", readOnly: true, destructive: false, idempotent: true, openWorld: false},
-		{name: "get_github_rate_limit_kandev", readOnly: true, destructive: false, idempotent: true, openWorld: false},
 		{name: "archive_task_kandev", readOnly: false, destructive: false, idempotent: true, openWorld: false},
 		{name: "delete_task_kandev", readOnly: false, destructive: true, idempotent: false, openWorld: false},
 		{name: "stop_task_kandev", readOnly: false, destructive: true, idempotent: true, openWorld: false},

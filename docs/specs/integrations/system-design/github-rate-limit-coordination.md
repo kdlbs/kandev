@@ -14,8 +14,9 @@ requirements:
 
 The GitHub integration owns provider response classification, rate observation,
 and provider admission. Workflow Sync consumes the typed failure/retry contract
-and persists its own scheduling state. MCP exposes a task-authorized snapshot
-of the same admission state without refreshing it.
+and persists its own scheduling state. Rate snapshots stay inside the provider
+coordinator. Failed managed operations return safe rate details in their own
+response.
 
 ## Requirement mapping
 
@@ -24,7 +25,7 @@ of the same admission state without refreshing it.
 | `REQ-INTEGRATIONS-GITHUB-RATE-001` | [Response classification](#response-classification) |
 | `REQ-INTEGRATIONS-GITHUB-RATE-002` | [Principal-wide coordinator](#principal-wide-coordinator) |
 | `REQ-INTEGRATIONS-GITHUB-RATE-003` | [Workflow Sync recovery](#workflow-sync-recovery) |
-| `REQ-INTEGRATIONS-GITHUB-RATE-004` | [Agent snapshot](#agent-snapshot) |
+| `REQ-INTEGRATIONS-GITHUB-RATE-004` | [Operation-local failure contract](#operation-local-failure-contract) |
 
 ## Response classification
 
@@ -70,17 +71,22 @@ Explicit Sync now bypasses automatic scheduling state, updates the single error
 on failure, and clears the state on success. GitLab receives generic transient
 backoff but does not use GitHub-specific response classification.
 
-## Agent snapshot
+## Operation-local failure contract
 
-`get_github_rate_limit_kandev` is registered for Kanban and Office task
-profiles. Its backend action derives and authorizes the current task's
-workspace, then calls a snapshot-only GitHub service method. The method does
-not call `FetchRateLimit`, `GetWorkspaceAuthStatus`, or any provider endpoint.
+`GitHubAPIError` carries the classified failure kind, rate resource, retry
+boundary, retry source, and parsed primary snapshot. `AdmissionDeferredError`
+carries the local admission reason, resource, retry boundary, and source.
 
-The DTO returns known primary buckets with observation times, observed
-secondary retry state and source, non-secret principal scope, and separate
-interactive/background admission results. Unknown or stale provider state is
-labelled rather than refreshed.
+An operation converts these fields to a safe response only when a rate limit
+causes that operation to fail. The public rate object uses
+`primary_exhaustion`, `secondary_throttle`, or `interactive_reserve`. It also
+returns `core`, `graphql`, or `search`, plus the retry time, delay, and source.
+Successful operations omit the object.
+
+Manual Workflow Sync returns this object beside its existing error and config.
+Automatic Workflow Sync stores its error class and next attempt. The scheduler,
+telemetry, and logs can read coordinator state without an agent-facing MCP tool.
+Direct `gh` commands from an agent shell stay outside this response path.
 
 ## Persistence and migration
 
@@ -91,17 +97,16 @@ the persisted Workflow Sync next-attempt time prevents restart retry storms.
 
 ## Security
 
-Quota keys and snapshots contain no bearer credentials. MCP access follows the
-current task-to-workspace authorization boundary and cannot inspect an
-arbitrary workspace. Logs use failure kinds, retry sources, workspace IDs, and
-non-secret principals only.
+Quota keys and operation error details contain no bearer credentials. Responses
+exclude provider bodies and coordinator snapshots. Logs use failure kinds,
+retry sources, workspace IDs, and non-secret principals only.
 
 ## Observability
 
 Classification and scheduling transitions emit structured fields. A suspended
 workspace logs once when it enters suspension; skipped poll ticks are silent.
-The rate snapshot exposes observation time and retry source so operators can
-distinguish provider data from Kandev estimates.
+Failed operations label the retry source so callers can distinguish provider
+data from Kandev estimates.
 
 ## Related decisions
 

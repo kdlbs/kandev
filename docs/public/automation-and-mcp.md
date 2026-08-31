@@ -542,23 +542,6 @@ available surface; backend authorization and task/provider validation remain
 authoritative for every call. The existing automation request and response
 payloads are unchanged.
 
-### GitHub rate-limit snapshot
-
-Task and Office agents can call `get_github_rate_limit_kandev` to read the GitHub admission state for their current task's workspace. The tool takes no workspace argument, makes no GitHub request, and remains available independently of the provider-scoped review tools above.
-
-The response includes:
-
-- `core` and `graphql` with `limit`, `remaining`, `reset_at`, `observed_at`, `known`, and `fresh`;
-- `observed_secondary` with `active`, `retry_at`, `observed_at`, `retry_source`, and a sanitized reason;
-- `interactive_allowed`, `background_allowed`, and `blocking_reason`; and
-- the non-secret workspace and upstream quota principal used by Kandev's coordinator.
-
-`known: false` means Kandev has no local observation and deliberately did not spend a provider call to obtain one. `fresh` means the observation belongs to a rate window whose reset has not passed; it is not a provider refresh guarantee. A full primary bucket and `observed_secondary.active: true` can coexist, because GitHub's primary endpoint does not report secondary throttles.
-
-`retry_at` is the boundary Kandev currently enforces. `retry_source: retry_after` means GitHub supplied a `Retry-After` value; `conservative_fallback` means Kandev estimated the boundary because GitHub did not supply one. GitHub exposes neither an authoritative secondary-limit status endpoint nor a guaranteed clear time, so an accepted response can clear the local estimate early.
-
-The coordinator covers requests routed through Kandev's GitHub clients. Another process using the same credential can consume quota or trigger provider abuse protection without updating this snapshot, so use `observed_at` and `known` when judging confidence.
-
 `spawn_session_kandev` creates a named sibling session on the current task by default and can target another task in the same workspace. `message_task_kandev` can address a task's primary session or an explicit session ID: a running agent receives queued input, an idle/created session can be started, and a failed or cancelled session rejects the message.
 
 Without `session_id` the message goes to the task's primary session. If that primary is cancelled or failed, Kandev falls back to the newest session on the task that can still take a message, so a task with a live session stays reachable after its primary was stopped. A session named explicitly by `session_id` is never redirected. When every session is terminal the call fails and names `spawn_session_kandev`, which is the way to give the task a new session.
@@ -590,14 +573,13 @@ Office runs use a smaller MCP surface than regular task-mode sessions. The built
 
 - `ask_user_question_kandev`;
 - `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`;
-- `get_github_rate_limit_kandev`;
 - `list_related_tasks_kandev`;
 - `list_task_documents_kandev`, `get_task_document_kandev`, and `write_task_document_kandev`.
 - `show_rich_output_kandev`;
 - `record_step_decision_kandev` records an `approved` or `rejected` verdict for the current workflow step. It requires a non-empty reason, and a later verdict supersedes the earlier one.
 - `step_complete_kandev`, per ADR 0015: Kandev includes its completion instruction, and acts on its signal, only on Office steps whose auto-advance action explicitly requires that signal (office-default's `work` step is one such step).
 
-These tools cover human questions, the current task plan, local GitHub rate state, related-task discovery, task documents, quorum decisions, and the step-completion signal. Office state changes use the injected `$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools are task-mode only and are not registered in Office mode.
+These tools cover human questions, the current task plan, related-task discovery, task documents, quorum decisions, and the step-completion signal. Office state changes use the injected `$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools are task-mode only and are not registered in Office mode.
 
 ### Runtime credentials
 

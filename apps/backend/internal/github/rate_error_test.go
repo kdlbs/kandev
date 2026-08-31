@@ -111,3 +111,26 @@ func TestFailureKindOfClassifiesNetworkTransportAsTransient(t *testing.T) {
 		t.Fatalf("failure kind = %q, want %q", got, FailureTransient)
 	}
 }
+
+// @covers AC-INTEGRATIONS-GITHUB-RATE-004.1
+// @covers AC-INTEGRATIONS-GITHUB-RATE-004.2
+func TestOperationRateLimitFromAdmissionError(t *testing.T) {
+	now := time.Date(2026, 8, 30, 11, 18, 0, 0, time.UTC)
+	retryAt := now.Add(90 * time.Second)
+	details, ok := OperationRateLimitFromError(&AdmissionDeferredError{
+		Resource: ResourceGraphQL, Reason: rateLimitBlockPrimaryReserve,
+		RetryAt: retryAt, RetrySource: RetrySourcePrimaryReset,
+	}, now)
+	if !ok {
+		t.Fatal("primary reserve admission error was not identified as rate limited")
+	}
+	if details.Kind != OperationRateLimitInteractiveReserve || details.Resource != ResourceGraphQL {
+		t.Fatalf("details = %+v", details)
+	}
+	if details.RetryAt == nil || !details.RetryAt.Equal(retryAt) {
+		t.Fatalf("retry_at = %v, want %s", details.RetryAt, retryAt)
+	}
+	if details.RetryAfterSeconds != 90 || details.Source != "rate_limit_reset" {
+		t.Fatalf("retry details = %+v", details)
+	}
+}

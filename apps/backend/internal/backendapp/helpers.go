@@ -1674,7 +1674,6 @@ func registerMCPAndDebugRoutes(
 	if p.services.GitHub != nil {
 		mcpHandlers.SetTaskPRLister(mcpTaskPRListerAdapter{gh: p.services.GitHub})
 		mcpHandlers.SetTaskPRAutomationService(p.services.GitHub)
-		mcpHandlers.SetGitHubRateLimitService(p.services.GitHub)
 	}
 	if p.services.GitLab != nil {
 		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)

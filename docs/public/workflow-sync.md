@@ -145,7 +145,7 @@ The settings UI uses these backend routes. All require a `workspace_id` query pa
 | `GET` | `/api/v1/workflow-sync/config?workspace_id=ID` | `200` with the configuration, or `204 No Content` when absent. |
 | `POST` | `/api/v1/workflow-sync/config?workspace_id=ID` | Validate/upsert the JSON configuration and return it. Does not sync. |
 | `DELETE` | `/api/v1/workflow-sync/config?workspace_id=ID` | Release synced workflows to manual ownership, delete the configuration, and return `{"deleted":true}`. |
-| `POST` | `/api/v1/workflow-sync/sync?workspace_id=ID` | Run immediately and return the current `config` plus `result` or `error`. |
+| `POST` | `/api/v1/workflow-sync/sync?workspace_id=ID` | Run immediately and return the current `config` plus `result` or `error`. A rate failure also returns `error_code` and `rate_limit`. |
 
 Example (GitHub):
 
@@ -184,6 +184,10 @@ curl -fsS -X POST \
 ```
 
 Except for “not configured,” a completed force-sync request returns HTTP `200` even when the response contains an `error`; inspect the JSON and `config.last_ok`, not only the HTTP status. A force sync without a configuration returns `404`.
+
+A GitHub rate failure sets `error_code` to `github_rate_limited`. Its
+`rate_limit` object contains `kind`, `resource`, `retry_at`,
+`retry_after_seconds`, and `source`. Successful syncs omit these fields.
 
 ## Stop syncing and clean up
 

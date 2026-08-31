@@ -33,6 +33,27 @@ const (
 
 const secondaryFallbackDelay = time.Minute
 
+// RateLimitErrorCode identifies an operation-local GitHub rate failure.
+const RateLimitErrorCode = "github_rate_limited"
+
+// OperationRateLimitKind identifies the rate policy that blocked an operation.
+type OperationRateLimitKind string
+
+const (
+	OperationRateLimitPrimaryExhaustion  OperationRateLimitKind = "primary_exhaustion"
+	OperationRateLimitSecondaryThrottle  OperationRateLimitKind = "secondary_throttle"
+	OperationRateLimitInteractiveReserve OperationRateLimitKind = "interactive_reserve"
+)
+
+// OperationRateLimitDetails contains safe retry context for a failed operation.
+type OperationRateLimitDetails struct {
+	Kind              OperationRateLimitKind `json:"kind"`
+	Resource          Resource               `json:"resource"`
+	RetryAt           *time.Time             `json:"retry_at,omitempty"`
+	RetryAfterSeconds int64                  `json:"retry_after_seconds"`
+	Source            string                 `json:"source,omitempty"`
+}
+
 type githubFailure struct {
 	Kind        FailureKind
 	Resource    Resource
@@ -156,4 +177,91 @@ func FailureKindOf(err error) FailureKind {
 		return FailureTransient
 	}
 	return FailureUnknown
+}
+
+// OperationRateLimitFromError returns the safe rate-limit fields that belong
+// with a failed Kandev-managed GitHub operation. Successful operations do not
+// call this function and do not carry quota details.
+func OperationRateLimitFromError(err error, now time.Time) (*OperationRateLimitDetails, bool) {
+	var apiErr *GitHubAPIError
+	if errors.As(err, &apiErr) {
+		failureKind := apiErr.FailureKind
+		if failureKind == "" {
+			failureKind = FailureKindOf(apiErr)
+		}
+		kind, ok := operationRateLimitKind(failureKind, "")
+		if !ok {
+			return nil, false
+		}
+		resource := apiErr.Resource
+		if resource == "" {
+			resource = resourceForEndpoint(apiErr.Endpoint)
+		}
+		return newOperationRateLimitDetails(
+			kind, resource, apiErr.RetryAt, apiErr.RetrySource, now,
+		), true
+	}
+
+	var deferred *AdmissionDeferredError
+	if errors.As(err, &deferred) {
+		kind, ok := operationRateLimitKind("", deferred.Reason)
+		if !ok {
+			return nil, false
+		}
+		retryAt := deferred.RetryAt
+		if retryAt.IsZero() && deferred.Delay > 0 {
+			retryAt = now.Add(deferred.Delay).UTC()
+		}
+		return newOperationRateLimitDetails(
+			kind, deferred.Resource, retryAt, deferred.RetrySource, now,
+		), true
+	}
+	return nil, false
+}
+
+func operationRateLimitKind(kind FailureKind, admissionReason string) (OperationRateLimitKind, bool) {
+	switch {
+	case kind == FailurePrimaryRateLimit || admissionReason == rateLimitBlockPrimary:
+		return OperationRateLimitPrimaryExhaustion, true
+	case kind == FailureSecondaryRateLimit || admissionReason == rateLimitBlockSecondary:
+		return OperationRateLimitSecondaryThrottle, true
+	case admissionReason == rateLimitBlockPrimaryReserve:
+		return OperationRateLimitInteractiveReserve, true
+	default:
+		return "", false
+	}
+}
+
+func newOperationRateLimitDetails(
+	kind OperationRateLimitKind,
+	resource Resource,
+	retryAt time.Time,
+	retrySource RetrySource,
+	now time.Time,
+) *OperationRateLimitDetails {
+	details := &OperationRateLimitDetails{
+		Kind: kind, Resource: resource, Source: publicRetrySource(retrySource),
+	}
+	if retryAt.IsZero() {
+		return details
+	}
+	retryAt = retryAt.UTC()
+	details.RetryAt = &retryAt
+	if remaining := retryAt.Sub(now); remaining > 0 {
+		details.RetryAfterSeconds = int64((remaining + time.Second - 1) / time.Second)
+	}
+	return details
+}
+
+func publicRetrySource(source RetrySource) string {
+	switch source {
+	case RetrySourceRetryAfter:
+		return "retry_after_header"
+	case RetrySourcePrimaryReset:
+		return "rate_limit_reset"
+	case RetrySourceConservativeFallback:
+		return "conservative_fallback"
+	default:
+		return ""
+	}
 }

@@ -12,9 +12,9 @@ owners:
 
 Kandev coordinates GitHub provider traffic so background synchronization cannot
 starve interactive agents and operators. The integration records the provider
-signals it observes, distinguishes primary quota exhaustion from secondary
-throttling, and exposes its locally enforced state without issuing another
-GitHub request.
+signals it observes and distinguishes primary quota exhaustion from secondary
+throttling. Failed Kandev-managed operations return the rate context that
+affected the operation. The coordinator snapshot remains internal.
 
 ## Terminology
 
@@ -94,24 +94,21 @@ provider bursts.
   execution pool and resume on an admission change or retry boundary. A
   REST-only workflow sync shall be gated by the Core resource only.
 
-### REQ-INTEGRATIONS-GITHUB-RATE-004: Zero-call agent visibility
+### REQ-INTEGRATIONS-GITHUB-RATE-004: Operation-local rate failure context
 
-**Intent:** An agent must be able to decide whether Kandev will admit a GitHub
-call without consuming provider capacity to ask.
+**Intent:** A caller needs rate-limit context from the affected operation, not
+from a separate diagnostic request.
 
 #### Acceptance criteria
 
-- **AC-INTEGRATIONS-GITHUB-RATE-004.1:** When an agent reads GitHub rate state,
-  Kandev shall return observed core and GraphQL quota, observed secondary
-  state, retry time and source, snapshot freshness, and interactive/background
-  admission decisions without issuing a GitHub request.
-- **AC-INTEGRATIONS-GITHUB-RATE-004.2:** When primary quota is full while an
-  observed secondary throttle is active, the response shall preserve both
-  facts and deny admission until Kandev's enforced retry time or an earlier
-  successful response clears it.
-- **AC-INTEGRATIONS-GITHUB-RATE-004.3:** When no bucket has been observed, the
-  response shall mark it unknown rather than fabricate quota or make a
-  provider request.
+- **AC-INTEGRATIONS-GITHUB-RATE-004.1:** When Kandev delays or rejects a managed
+  GitHub operation for a rate limit, the operation shall return the rate kind,
+  resource, retry boundary, retry delay, and retry source.
+- **AC-INTEGRATIONS-GITHUB-RATE-004.2:** When GitHub rejects a managed operation,
+  the returned rate kind shall match the failure that governed that operation.
+  Independent primary and secondary observations shall remain internal.
+- **AC-INTEGRATIONS-GITHUB-RATE-004.3:** A successful operation shall not return
+  quota or coordinator snapshot details.
 
 ## Out of scope
 
@@ -119,4 +116,5 @@ call without consuming provider capacity to ask.
   that GitHub does not expose.
 - Coordinating processes that use the same credential outside Kandev's GitHub
   clients.
+- Wrapping arbitrary `gh` commands that an agent runs directly in its shell.
 - Adding a new settings UI for rate state.

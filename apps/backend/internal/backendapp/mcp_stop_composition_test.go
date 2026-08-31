@@ -9,7 +9,6 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
-	githubsvc "github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -59,8 +58,6 @@ func TestRegisterMCPAndDebugRoutesWiresCoordinatorTaskStopper(t *testing.T) {
 	)
 	registerMCPStopTestCleanup(t, "lifecycle manager", lifecycleMgr.Stop)
 	gateway := gateways.NewGateway(log)
-	githubService := githubsvc.NewService(nil, githubsvc.AuthMethodNone, nil, nil, eventBus, log)
-	t.Cleanup(githubService.Stop)
 	registerMCPAndDebugRoutes(routeParams{
 		router:          gin.New(),
 		gateway:         gateway,
@@ -69,7 +66,7 @@ func TestRegisterMCPAndDebugRoutesWiresCoordinatorTaskStopper(t *testing.T) {
 		orchestratorSvc: orchestratorSvc,
 		lifecycleMgr:    lifecycleMgr,
 		eventBus:        eventBus,
-		services:        &Services{Workflow: harness.workflowSvc, GitHub: githubService},
+		services:        &Services{Workflow: harness.workflowSvc},
 		devMode:         true,
 		log:             log,
 		addCleanup: func(cleanup func() error) {
@@ -79,8 +76,6 @@ func TestRegisterMCPAndDebugRoutesWiresCoordinatorTaskStopper(t *testing.T) {
 
 	require.True(t, gateway.Dispatcher.HasHandler(ws.ActionMCPStopTask),
 		"registerMCPAndDebugRoutes did not register mcp.stop_task")
-	require.True(t, gateway.Dispatcher.HasHandler(ws.ActionMCPGetGitHubRateLimit),
-		"registerMCPAndDebugRoutes did not register mcp.get_github_rate_limit")
 	request, err := ws.NewRequest("stop-1", ws.ActionMCPStopTask, map[string]string{
 		"task_id":        childID,
 		"sender_task_id": parent.ID,

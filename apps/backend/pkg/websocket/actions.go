@@ -441,8 +441,6 @@ const (
 	ActionMCPClarificationTimeout       = "mcp.clarification_timeout"
 	ActionMCPSetTaskTitle               = "mcp.set_task_title"
 	ActionMCPGetDiagnosticBundle        = "mcp.get_diagnostic_bundle"
-	ActionMCPGetGitHubRateLimit         = "mcp.get_github_rate_limit"
-
 	// Office task handoffs (cross-task context).
 	ActionMCPListRelatedTasks  = "mcp.list_related_tasks"
 	ActionMCPListTaskDocuments = "mcp.list_task_documents"
