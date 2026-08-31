@@ -332,7 +332,7 @@ export function mapGitHubComments(feedback: PRFeedback | null) {
       author: githubPerson(comment.author, comment.author_avatar, comment.author_is_bot),
       body: comment.body,
       createdAt: comment.created_at,
-      ...(url ? { url: comment.html_url } : {}),
+      ...(url ? { url } : {}),
       path: comment.path || undefined,
       line: comment.line || undefined,
     };

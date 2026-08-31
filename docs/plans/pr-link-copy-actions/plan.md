@@ -66,6 +66,7 @@ go test ./internal/github
 
 cd ../
 pnpm --filter @kandev/web test -- --run \
+  components/github/pr-detail-panel-mapping.test.ts \
   components/integrations/change-request-detail.test.tsx \
   components/github/pr-detail-panel.test.ts
 ```
@@ -85,7 +86,7 @@ lint, typecheck, and i18n checks after the focused tests pass.
 
 - Backend unit and race tests pass: `go test ./internal/github -count=1` and
   `go test -race ./internal/github -count=1`.
-- Frontend focused tests pass: 41 tests across the shared detail, GitHub panel,
+- Frontend focused tests pass: 43 tests across the shared detail, GitHub panel,
   and GitHub mapping test files.
 - Desktop and Pixel 5 E2E copy-link scenarios pass, including exact clipboard
   values, closed-PR availability, touch targets, and horizontal-overflow checks.
