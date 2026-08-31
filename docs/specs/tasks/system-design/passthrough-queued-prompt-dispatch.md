@@ -77,8 +77,9 @@ completion, and there is no unbounded publisher lifetime to manage.
 
 ## Failure and recovery
 
-- A runtime-status transition failure prevents the PTY write, matching the
-  current prompt-delivery behavior.
+- In the two-phase ready-event path, a runtime-status transition failure
+  prevents the PTY write. The existing immediate `deliverPassthroughPrompt`
+  contract remains non-fatal for `MarkPassthroughRunning` failures.
 - If a PTY write fails after the execution was marked running, the deferred
   callback still publishes after guard release. This preserves the existing
   status/event pairing and allows ordinary recovery paths to observe the

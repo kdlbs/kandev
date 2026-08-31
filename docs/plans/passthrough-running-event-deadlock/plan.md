@@ -60,7 +60,7 @@ delivery, or the immediate passthrough marker used by terminal input.
 
 ## Work orders
 
-- [ ] [Task 01: Defer passthrough running publication](task-01-defer-passthrough-running-publication.md)
+- [x] [Task 01: Defer passthrough running publication](task-01-defer-passthrough-running-publication.md)
 
 ## Verification results
 

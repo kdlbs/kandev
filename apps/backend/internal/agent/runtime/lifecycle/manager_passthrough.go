@@ -60,9 +60,13 @@ func (m *Manager) PreparePassthroughRunning(sessionID string) (func(), error) {
 	}, nil
 }
 
-// MarkPassthroughRunning marks a passthrough execution as running when user submits input.
-// This is called when Enter key is detected in the terminal handler.
-// It updates the execution status and publishes an AgentRunning event.
+// MarkPassthroughRunning marks a passthrough execution as running when the user submits input
+// via the terminal handler. It is a convenience wrapper around PreparePassthroughRunning that
+// publishes the AgentRunning event immediately.
+//
+// Callers that hold the per-session cancellation guard (e.g. handleAgentReady) must use
+// PreparePassthroughRunning directly and defer the returned publisher until after the guard
+// is released, to avoid re-entering the mutex through the synchronous event subscriber.
 func (m *Manager) MarkPassthroughRunning(sessionID string) error {
 	publish, err := m.PreparePassthroughRunning(sessionID)
 	if err != nil {

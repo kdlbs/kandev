@@ -30,7 +30,7 @@ func (m *reentrantPassthroughAgentManager) MarkPassthroughRunning(sessionID stri
 
 func (m *reentrantPassthroughAgentManager) PreparePassthroughRunning(sessionID string) (func(), error) {
 	if m.preparePassthroughRunningFunc == nil {
-		return nil, nil
+		return func() {}, nil
 	}
 	return m.preparePassthroughRunningFunc(sessionID)
 }
