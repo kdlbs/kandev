@@ -90,6 +90,45 @@ func TestSQLiteRepository_SetPendingMoveRejectsStaleAndTerminalTaskGenerations(t
 	assert.Nil(t, pending)
 }
 
+func TestSQLiteRepository_ReplaceSessionRejectsSnapshotAfterTerminalSettlement(t *testing.T) {
+	ctx := context.Background()
+	raw, err := sql.Open("sqlite3", "file::memory:?cache=shared&_foreign_keys=on")
+	require.NoError(t, err)
+	raw.SetMaxOpenConns(1)
+	raw.SetMaxIdleConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+	require.NoError(t, func() error {
+		_, execErr := db.Exec(`
+			CREATE TABLE tasks (
+				id TEXT PRIMARY KEY,
+				workflow_step_id TEXT NOT NULL,
+				state TEXT NOT NULL,
+				archived_at TIMESTAMP NULL,
+				updated_at TIMESTAMP NOT NULL
+			);
+			CREATE TABLE task_sessions (id TEXT PRIMARY KEY);
+			INSERT INTO tasks VALUES ('task-route', 'step-done', 'COMPLETED', NULL, CURRENT_TIMESTAMP);
+		`)
+		return execErr
+	}())
+	repo, err := NewSQLiteRepository(db, db)
+	require.NoError(t, err)
+
+	snapshot := &PendingMove{
+		ID:                     "old-row-generation",
+		MoveID:                 "stable-route-operation",
+		TaskID:                 "task-route",
+		WorkflowStepID:         "step-done",
+		ExpectedWorkflowStepID: "step-review",
+	}
+	require.ErrorIs(t, repo.ReplaceSession(ctx, "session-route", nil, snapshot), ErrPendingMoveGenerationConflict)
+
+	current, err := repo.GetPendingMove(ctx, "session-route")
+	require.NoError(t, err)
+	assert.Nil(t, current, "terminal settlement must not be undone by snapshot restore")
+}
+
 func TestSQLiteRepository_InsertList(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()

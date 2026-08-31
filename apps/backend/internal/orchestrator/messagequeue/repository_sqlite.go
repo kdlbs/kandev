@@ -2498,6 +2498,16 @@ func (r *sqliteRepository) ReplaceSession(ctx context.Context, sessionID string,
 		return fmt.Errorf("begin replace session tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	// A snapshot may outlive terminal settlement, which removes the current
+	// pending row. Validate its source task generation before the session lock so
+	// an old snapshot cannot recreate deferred routing behind an absorbing task.
+	// This keeps restore in the same task-row -> queue-session lock order as
+	// pending-move admission.
+	if pendingMove != nil {
+		if err := r.guardPendingMoveTaskTx(ctx, tx, pendingMove.TaskID, pendingMove.ExpectedWorkflowStepID); err != nil {
+			return err
+		}
+	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
 		return err
 	}
