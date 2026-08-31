@@ -13,6 +13,38 @@ import (
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
+func installManagedPushGitWrapper(t *testing.T) (scopePath, argsPath string) {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapperDir := t.TempDir()
+	scopePath = filepath.Join(wrapperDir, "managed-scope")
+	argsPath = filepath.Join(wrapperDir, "managed-push-args")
+	writeExecutable(t, filepath.Join(wrapperDir, "git"), fmt.Sprintf(`#!/bin/sh
+for arg in "$@"; do
+	if [ "$arg" = push ]; then
+		printf '%%s' "$KANDEV_GITHUB_CREDENTIAL_SCOPES" > %q
+		printf '%%s\n' "$@" > %q
+		exit 0
+	fi
+done
+exec %q "$@"
+`, scopePath, argsPath, realGit))
+	t.Setenv("PATH", wrapperDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return scopePath, argsPath
+}
+
+func readGitTestFile(t *testing.T, path string) string {
+	t.Helper()
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(contents)
+}
+
 func TestGitOperatorRemoteContributionRoutesPushesAndPreflightToSource(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -188,14 +220,10 @@ func TestGitOperatorContributionDestinationPushesWithoutChangingPullRemote(t *te
 	repoDir, cleanup := setupTestRepo(t)
 	defer cleanup()
 
-	targetDir := t.TempDir()
-	runGit(t, targetDir, "init", "--bare")
-	runGit(t, repoDir, "remote", "add", "contrib-destination", targetDir)
 	runGit(t, repoDir, "checkout", "-b", "feature/destination")
 	writeFile(t, repoDir, "destination.txt", "destination\n")
 	runGit(t, repoDir, "add", ".")
 	runGit(t, repoDir, "commit", "-m", "destination")
-	headSHA := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
 
 	destination := &taskmodels.ContributionDestination{
 		Version:    taskmodels.ContributionDestinationVersion,
@@ -211,10 +239,7 @@ func TestGitOperatorContributionDestinationPushesWithoutChangingPullRemote(t *te
 	if err := destination.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, repoDir, "config", "url."+targetDir+".insteadOf", destination.TargetRepository.RemoteURL)
-	// The model derives the actual deterministic remote name. Rename the test
-	// remote after binding so the operator exercises the server-authored name.
-	runGit(t, repoDir, "remote", "rename", "contrib-destination", destination.ContributionRemoteName())
+	runGit(t, repoDir, "remote", "add", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
 	runGit(t, repoDir, "remote", "set-url", "--push", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
 	hookDir := t.TempDir()
 	hookMarker := filepath.Join(t.TempDir(), "pre-push-ran")
@@ -223,10 +248,11 @@ func TestGitOperatorContributionDestinationPushesWithoutChangingPullRemote(t *te
 
 	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
 	operator.setContributionDestination(destination)
+	scopePath, argsPath := installManagedPushGitWrapper(t)
 	managedCredentialUses := 0
 	operator.setManagedPushEnvironmentProvider(func() []string {
 		managedCredentialUses++
-		return os.Environ()
+		return append(os.Environ(), "KANDEV_GITHUB_CREDENTIAL_SCOPES=private-destination-scope")
 	})
 	branch, refspec, err := operator.contributionDestinationRefspec(context.Background())
 	if err != nil || branch != "feature/destination" || refspec != "HEAD:refs/heads/feature/destination" {
@@ -239,15 +265,15 @@ func TestGitOperatorContributionDestinationPushesWithoutChangingPullRemote(t *te
 	if forced.Success || !strings.Contains(forced.Error, "force push is not allowed") {
 		t.Fatalf("forced Push = %+v, want contribution destination rejection", forced)
 	}
-	if _, err := os.Stat(filepath.Join(targetDir, "refs", "heads", "feature", "destination")); !os.IsNotExist(err) {
-		t.Fatalf("forced push mutated destination branch, stat error = %v", err)
-	}
 	pushed, err := operator.Push(context.Background(), false, false)
 	if err != nil || !pushed.Success {
 		t.Fatalf("Push = %+v, err = %v", pushed, err)
 	}
-	if got := strings.TrimSpace(runGit(t, targetDir, "rev-parse", "refs/heads/feature/destination")); got != headSHA {
-		t.Fatalf("destination branch head = %q, want exact task head %q", got, headSHA)
+	if got := strings.TrimSpace(readGitTestFile(t, scopePath)); got != "private-destination-scope" {
+		t.Fatalf("managed push credential scope = %q, want private destination scope", got)
+	}
+	if got := readGitTestFile(t, argsPath); !strings.Contains(got, "HEAD:refs/heads/feature/destination") {
+		t.Fatalf("managed push args = %q, want exact task refspec", got)
 	}
 	if got := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin")); got == "" {
 		t.Fatal("origin remote was removed or rewritten")
@@ -301,6 +327,94 @@ func TestGitOperatorContributionDestinationRejectsNonTaskBranch(t *testing.T) {
 	}
 	if managedCredentialUses != 0 {
 		t.Fatalf("rejected branch exposed managed credential environment %d times", managedCredentialUses)
+	}
+}
+
+func TestGitOperatorContributionDestinationRejectsRepositoryControlledTransportBeforePrivateEnv(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+	runGit(t, repoDir, "checkout", "-b", "feature/destination")
+
+	destination := &taskmodels.ContributionDestination{
+		Version:    taskmodels.ContributionDestinationVersion,
+		Provider:   taskmodels.ContributionDestinationProviderGitHub,
+		HeadBranch: "feature/destination",
+		SourceRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "agent/kandev", ProviderID: "200", RemoteURL: "https://github.com/agent/kandev.git",
+		},
+	}
+	runGit(t, repoDir, "remote", "add", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
+	runGit(t, repoDir, "remote", "set-url", "--push", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
+
+	transportMarker := filepath.Join(t.TempDir(), "private-scope")
+	transport := filepath.Join(t.TempDir(), "transport")
+	writeExecutable(t, transport, "#!/bin/sh\nprintf '%s' \"$KANDEV_GITHUB_CREDENTIAL_SCOPES\" > "+transportMarker+"\nexit 1\n")
+	runGit(t, repoDir, "config", "protocol.ext.allow", "always")
+	runGit(t, repoDir, "config", "url.ext::"+transport+".insteadOf", destination.TargetRepository.RemoteURL)
+
+	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
+	operator.setContributionDestination(destination)
+	managedCredentialUses := 0
+	operator.setManagedPushEnvironmentProvider(func() []string {
+		managedCredentialUses++
+		return append(os.Environ(), "KANDEV_GITHUB_CREDENTIAL_SCOPES=private-destination-scope")
+	})
+
+	result, err := operator.Push(context.Background(), false, false)
+	if err != nil {
+		t.Fatalf("Push returned error: %v", err)
+	}
+	if result.Success || !strings.Contains(result.Error, "repository-controlled transport") {
+		t.Fatalf("Push = %+v, want repository-controlled transport rejection", result)
+	}
+	if _, err := os.Stat(transportMarker); !os.IsNotExist(err) {
+		t.Fatalf("repository-controlled transport received private credential scope: %v", err)
+	}
+	if managedCredentialUses != 0 {
+		t.Fatalf("repository-controlled transport requested private credential environment %d times", managedCredentialUses)
+	}
+}
+
+// TestManagedPushTransportIsolation is reviewer-requested contract coverage
+// for the transport seams rejected before private scopes are made available.
+func TestManagedPushTransportIsolation(t *testing.T) {
+	for _, key := range []string{
+		"url.file:///tmp/target.insteadOf",
+		"url.ssh://git@example.test/.pushInsteadOf",
+		"core.sshCommand",
+		"core.gitProxy",
+		"remote.contribution-destination.receivepack",
+		"remote.contribution-destination.uploadpack",
+		"http.https://github.com.proxy",
+	} {
+		if !managedPushTransportConfigKey(key) {
+			t.Errorf("managedPushTransportConfigKey(%q) = false, want true", key)
+		}
+	}
+
+	operator := NewGitOperator("", newTestLogger(t), nil)
+	operator.setManagedPushEnvironmentProvider(func() []string {
+		return []string{
+			"KANDEV_GITHUB_CREDENTIAL_SCOPES=private-destination-scope",
+			"GIT_SSH_COMMAND=repository-ssh",
+			"GIT_PROXY_COMMAND=repository-proxy",
+			"GIT_CONFIG_GLOBAL=/tmp/repository-config",
+		}
+	})
+	env := strings.Join(operator.managedPushEnvironmentValues(), "\n")
+	for _, forbidden := range []string{"GIT_SSH_COMMAND=", "GIT_PROXY_COMMAND=", "GIT_CONFIG_GLOBAL=/tmp"} {
+		if strings.Contains(env, forbidden) {
+			t.Errorf("managed push environment still contains %q: %q", forbidden, env)
+		}
+	}
+	if !strings.Contains(env, "KANDEV_GITHUB_CREDENTIAL_SCOPES=private-destination-scope") {
+		t.Fatalf("managed push environment dropped private destination scope: %q", env)
+	}
+	if !strings.Contains(env, "GIT_CONFIG_NOSYSTEM=1") || !strings.Contains(env, "GIT_CONFIG_GLOBAL="+os.DevNull) {
+		t.Fatalf("managed push environment does not disable system/global config: %q", env)
 	}
 }
 

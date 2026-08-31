@@ -213,12 +213,65 @@ func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string
 }
 
 func (g *GitOperator) runManagedPushGitCommand(ctx context.Context, args ...string) (string, error) {
+	if err := g.validateManagedPushTransport(ctx); err != nil {
+		return "", err
+	}
 	return g.runGitCommandWithEnvironment(
 		ctx,
-		g.managedPushEnvironment,
+		g.managedPushEnvironmentValues,
 		[]string{"-c", "core.hooksPath=" + os.DevNull},
 		args...,
 	)
+}
+
+// validateManagedPushTransport rejects repository-local configuration that can
+// redirect a managed publication to an unvalidated transport or run a helper
+// with the private destination credential scope.
+func (g *GitOperator) validateManagedPushTransport(ctx context.Context) error {
+	output, err := g.runGitCommand(ctx, "config", "--local", "--list")
+	if err != nil {
+		return fmt.Errorf("inspect managed push transport configuration: %w", err)
+	}
+	for _, entry := range strings.Split(output, "\n") {
+		key, _, _ := strings.Cut(entry, "=")
+		if managedPushTransportConfigKey(key) {
+			return fmt.Errorf("repository-controlled transport configuration %q is not allowed for managed publication", key)
+		}
+	}
+	return nil
+}
+
+func managedPushTransportConfigKey(key string) bool {
+	key = strings.ToLower(strings.TrimSpace(key))
+	return strings.HasPrefix(key, "url.") && (strings.HasSuffix(key, ".insteadof") || strings.HasSuffix(key, ".pushinsteadof")) ||
+		key == "core.sshcommand" || key == "core.gitproxy" ||
+		(strings.HasPrefix(key, "remote.") && (strings.HasSuffix(key, ".receivepack") || strings.HasSuffix(key, ".uploadpack"))) ||
+		(strings.HasPrefix(key, "http.") && strings.HasSuffix(key, ".proxy"))
+}
+
+func (g *GitOperator) managedPushEnvironmentValues() []string {
+	unsafePrefixes := []string{
+		"GIT_SSH=", "GIT_SSH_COMMAND=", "GIT_PROXY_COMMAND=", "GIT_ASKPASS=", "SSH_ASKPASS=",
+		"GIT_CONFIG_GLOBAL=", "GIT_CONFIG_SYSTEM=", "GIT_CONFIG_NOSYSTEM=",
+	}
+	env := filterGitEnv(g.managedPushEnvironment())
+	filtered := make([]string, 0, len(env)+2)
+	for _, assignment := range env {
+		if hasEnvironmentPrefix(assignment, unsafePrefixes) {
+			continue
+		}
+		filtered = append(filtered, assignment)
+	}
+	return append(filtered, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
+}
+
+func hasEnvironmentPrefix(assignment string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(assignment, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (g *GitOperator) runGitCommandWithEnvironment(
