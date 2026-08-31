@@ -1,11 +1,15 @@
 # ADR-2026-08-25-required-worktree-refresh-fails-closed: Required Worktree Refresh Fails Closed
 
+> The local-worktree admission boundary is superseded by
+> [ADR-2026-08-31-local-worktree-refresh-best-effort](2026-08-31-local-worktree-refresh-best-effort.md).
+> Required remote materialization remains fail-closed when no usable local base exists.
+>
 > Amended by
 > [ADR-2026-08-30-empty-remote-bootstrap-publication](2026-08-30-empty-remote-bootstrap-publication.md):
 > an authenticated remote that advertises zero refs uses a marked local baseline.
 > Launch still performs no remote mutation.
 
-**Status:** accepted
+**Status:** accepted (local-worktree boundary superseded by 2026-08-31-local-worktree-refresh-best-effort)
 **Date:** 2026-08-25
 **Area:** backend, security, operations
 
