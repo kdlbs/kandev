@@ -210,9 +210,9 @@ export function AgentProfileDeleteConflictDialog({
             />
             <UtilityAgentConflictSection utilityAgents={utilityAgents} />
             {hasHardBlockers ? (
-              <p className="mt-2">{t("agents:changeTierMappingsFirst")}</p>
+              <p>{t("agents:changeTierMappingsFirst")}</p>
             ) : (
-              <p className="mt-2">{t("agents:deleteAnywayConsequences")}</p>
+              <p>{t("agents:deleteAnywayConsequences")}</p>
             )}
           </div>
         </AlertDialogDescription>

@@ -275,7 +275,9 @@ describe("AgentProfileDeleteConflictDialog layout", () => {
     expect(body.className).toContain("min-w-0");
     expect(body.className).toContain("text-left");
     expect(body.className).toContain("space-y-2");
-    expect(body.querySelectorAll(":scope > p")).toHaveLength(2);
+    const directParagraphs = body.querySelectorAll(":scope > p");
+    expect(directParagraphs).toHaveLength(2);
+    expect(directParagraphs[1]?.className).not.toContain("mt-2");
 
     const taskItem = screen.getByText(longTaskTitle);
     expect(taskItem.tagName).toBe("LI");
