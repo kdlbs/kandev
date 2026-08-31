@@ -245,6 +245,12 @@ counted by that guard at all, so a single pair of counts is either ambiguous
 or actively misleading. `guards` gives the agent the count against each guard
 that exists, which is the question it was actually asking.
 
+This precedence applies only to the agent decision surface. The human decision
+path retains its existing `resolveDeciderRole` behavior and unconditional
+approver precedence, as required by AC-TASKS-QUORUM-RECORDING-001.4a. The two
+paths can therefore persist different roles for the same caller, task, and
+step. Future implementations must preserve this boundary.
+
 **Reason column.** The reason is written to `workflow_step_decisions.comment`,
 the column every Office reader already projects (`office/dashboard/decisions.go:141,428`).
 It is NOT written to `note`, which `Engine.RecordParticipantDecision` currently
