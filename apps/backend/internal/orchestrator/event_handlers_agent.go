@@ -789,12 +789,25 @@ func (s *Service) recordQueuedUserMessage(ctx context.Context, queuedMsg *messag
 		WithAttachments(attachments).
 		WithEntityReferences(references)
 	metaMap := mergeMetadata(meta.ToMap(), metadataWithoutEntityReferences(queuedMsg.Metadata))
+	// Preserve the durable queue identity on the transcript row. Consumers that
+	// poll while a queue drains can collapse queued and delivered observations
+	// of the same prompt without relying on content or timestamps.
+	if metaMap == nil {
+		metaMap = make(map[string]interface{})
+	}
+	if queuedMsg.Metadata == nil {
+		queuedMsg.Metadata = make(map[string]interface{})
+	}
+	transitionID, _ := queuedMsg.Metadata[messagequeue.MetadataInboxTransitionID].(string)
+	if transitionID == "" {
+		transitionID = queuedMsg.ID
+		queuedMsg.Metadata[messagequeue.MetadataInboxTransitionID] = transitionID
+	}
+	metaMap[messagequeue.MetadataInboxTransitionID] = transitionID
+	metaMap["queue_entry_id"] = queuedMsg.ID
 	if err := s.messageCreator.CreateUserMessage(ctx, queuedMsg.TaskID, promptContent, queuedMsg.SessionID, turnID, metaMap); err != nil {
 		s.logger.Error("failed to create user message for queued message", zap.String("session_id", queuedMsg.SessionID), zap.Error(err))
 		return err
-	}
-	if queuedMsg.Metadata == nil {
-		queuedMsg.Metadata = map[string]interface{}{}
 	}
 	queuedMsg.Metadata[metaKeyUserMessageRecorded] = true
 	return nil

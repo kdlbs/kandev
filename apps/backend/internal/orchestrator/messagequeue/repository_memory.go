@@ -352,6 +352,24 @@ func (r *memoryRepository) ListBySession(_ context.Context, sessionID string) ([
 	return out, nil
 }
 
+func (r *memoryRepository) ListByTask(_ context.Context, taskID string) (map[string][]QueuedMessage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string][]QueuedMessage)
+	for sessionID, list := range r.entries {
+		for _, msg := range list {
+			if msg.TaskID != taskID || msg.IsReservedInFlight() {
+				continue
+			}
+			out[sessionID] = append(out[sessionID], *msg)
+		}
+	}
+	for _, entries := range out {
+		sort.Slice(entries, func(i, j int) bool { return entries[i].Position < entries[j].Position })
+	}
+	return out, nil
+}
+
 // CountBySession returns the number of entries for a session.
 func (r *memoryRepository) CountBySession(_ context.Context, sessionID string) (int, error) {
 	r.mu.Lock()

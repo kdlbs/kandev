@@ -533,6 +533,7 @@ func TestServerSurfaceAutomationHasFixedCoordinatorCatalog(t *testing.T) {
 		"add_task_dependency_kandev", "remove_task_dependency_kandev", "message_task_kandev",
 		"stop_task_kandev", "spawn_session_kandev", "list_pending_questions_kandev",
 		"answer_question_kandev", "list_pending_agent_permissions_kandev", "resolve_agent_permission_kandev",
+		"list_task_inbox_kandev",
 	}
 	assert.ElementsMatch(t, want, getRegisteredToolNames(s))
 }
@@ -729,7 +730,7 @@ drained:
 	// as in TestServerModeTask_ToolCount and
 	// TestRegisterTools_LoggedCountMatchesRegisteredTools (list_task_sessions_test.go),
 	// which pin the per-mode registration rather than this SetProviders rebuild.
-	require.Len(t, tools, 36, "final registry should contain the complete GitLab-only task tool set")
+	require.Len(t, tools, 37, "final registry should contain the complete GitLab-only task tool set")
 	assert.Contains(t, tools, "get_task_mr_automation_kandev")
 	assert.NotContains(t, tools, "get_task_pr_automation_kandev")
 }
@@ -909,7 +910,7 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	assert.Contains(t, tools, "add_task_dependency_kandev", "dependency edges must be manageable in task mode")
 	assert.Contains(t, tools, "remove_task_dependency_kandev")
 	assert.Contains(t, tools, "show_rich_output_kandev", "native rich output must be registered in task mode")
-	assert.Equal(t, 38, len(tools))
+	assert.Equal(t, 39, len(tools))
 }
 
 func TestServerStepCompleteTool_TaskAndOfficeOnlyAndDiscoverable(t *testing.T) {

@@ -116,6 +116,7 @@ type firstTurnCaptureOrchestrator struct {
 
 type queuedPromptCall struct {
 	taskID, sessionID, prompt string
+	metadata                  map[string]interface{}
 	userMessageRecorded       bool
 }
 
@@ -147,8 +148,11 @@ func (o *firstTurnCaptureOrchestrator) ProcessOnTurnStart(context.Context, strin
 	return o.turnStartResult, nil
 }
 
-func (o *firstTurnCaptureOrchestrator) QueueUserPrompt(_ context.Context, taskID, sessionID, prompt, _ string, _ bool, _ []v1.MessageAttachment, _ map[string]interface{}, userMessageRecorded bool) error {
-	o.queuedPromptCall = &queuedPromptCall{taskID: taskID, sessionID: sessionID, prompt: prompt, userMessageRecorded: userMessageRecorded}
+func (o *firstTurnCaptureOrchestrator) QueueUserPrompt(_ context.Context, taskID, sessionID, prompt, _ string, _ bool, _ []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error {
+	o.queuedPromptCall = &queuedPromptCall{
+		taskID: taskID, sessionID: sessionID, prompt: prompt,
+		metadata: metadata, userMessageRecorded: userMessageRecorded,
+	}
 	return nil
 }
 

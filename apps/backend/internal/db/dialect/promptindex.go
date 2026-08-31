@@ -58,3 +58,20 @@ func PromptOrderIndexDDL(driver, indexName, table string) string {
 		indexName, table, NormalizedMicrosecond(driver, "created_at"),
 	)
 }
+
+// TaskInboxOrderIndexDDL returns the additive task/author/order index used by
+// the task-wide inbox projection. The ordering expression matches the query's
+// normalized timestamp expression exactly, and IF NOT EXISTS makes schema
+// initialization safe to replay on existing databases.
+func TaskInboxOrderIndexDDL(driver, indexName, table string) string {
+	if IsPostgres(driver) {
+		return fmt.Sprintf(
+			"CREATE INDEX IF NOT EXISTS %s ON %s(task_id, author_type, created_at, id)",
+			indexName, table,
+		)
+	}
+	return fmt.Sprintf(
+		"CREATE INDEX IF NOT EXISTS %s ON %s(task_id, author_type, (%s), id)",
+		indexName, table, NormalizedMicrosecond(driver, "created_at"),
+	)
+}

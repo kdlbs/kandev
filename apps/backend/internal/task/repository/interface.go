@@ -241,6 +241,13 @@ type MessageRepository interface {
 	DeleteMessage(ctx context.Context, id string) error
 }
 
+// TaskInboxMessageRepository is the optional task-wide message query used by
+// the task inbox. It stays separate from MessageRepository so test doubles and
+// lightweight repository adapters do not need to implement an unrelated read.
+type TaskInboxMessageRepository interface {
+	ListTaskInboxMessages(ctx context.Context, taskID string, opts models.TaskInboxMessagesOptions) ([]*models.Message, bool, map[string]int, error)
+}
+
 // AttachmentRepository stores file-backed prompt attachment descriptors.
 // Implementations must keep ownership and aggregate-claim checks in the same
 // transaction as state transitions so a retry cannot partially claim a batch.

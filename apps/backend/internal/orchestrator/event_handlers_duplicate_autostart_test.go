@@ -200,13 +200,21 @@ func TestAutoStartTransientError_BootReadyDrainsOrphanedQueue(t *testing.T) {
 		t.Errorf("queued metadata workflow_step_name = %q, want Merge", name)
 	}
 	mergeUserMsgs := 0
+	var recordedTransitionID string
 	for _, m := range msgCreator.userMessages {
 		if name, _ := m.metadata["workflow_step_name"].(string); name == "Merge" {
 			mergeUserMsgs++
+			recordedTransitionID, _ = m.metadata[inboxTransitionMetadataKey].(string)
 		}
 	}
 	if mergeUserMsgs != 1 {
 		t.Errorf("expected exactly 1 Merge user_message (from recordAutoStartMessage before PromptTask failed), got %d", mergeUserMsgs)
+	}
+	if recordedTransitionID == "" {
+		t.Fatal("recorded workflow message is missing inbox transition identity")
+	}
+	if queuedTransitionID, _ := queued.Metadata[inboxTransitionMetadataKey].(string); queuedTransitionID != recordedTransitionID {
+		t.Errorf("queued transition identity = %q, want recorded message identity %q", queuedTransitionID, recordedTransitionID)
 	}
 
 	// --- Phase 2: user resumes the session — boot_ready must drain the queue ---
@@ -596,13 +604,21 @@ func TestAutoStartCreatedLaunch_QueuesPromptWhenAgentAlreadyRunning(t *testing.T
 
 	// The recorded prompt must survive as a queued message the boot-ready
 	// drain can deliver, not only as an undeliverable chat row.
-	if got := svc.messageQueue.GetStatus(ctx, sessionID).Count; got != 1 {
-		t.Fatalf("expected the prompt to be queued for redelivery, queue count = %d", got)
+	status := svc.messageQueue.GetStatus(ctx, sessionID)
+	if status.Count != 1 {
+		t.Fatalf("expected the prompt to be queued for redelivery, queue count = %d", status.Count)
 	}
 
 	// The chat row was already written, so the drain must not write a second.
 	if len(msgCreator.userMessages) != 1 {
 		t.Fatalf("expected exactly 1 recorded user message, got %d", len(msgCreator.userMessages))
+	}
+	transitionID, _ := msgCreator.userMessages[0].metadata[inboxTransitionMetadataKey].(string)
+	if transitionID == "" {
+		t.Fatalf("expected recorded user message to have a transition ID, got %#v", msgCreator.userMessages[0].metadata)
+	}
+	if got := status.Entries[0].Metadata[inboxTransitionMetadataKey]; got != transitionID {
+		t.Fatalf("queued transition ID = %#v, want recorded transition ID %q", got, transitionID)
 	}
 }
 

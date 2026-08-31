@@ -910,6 +910,33 @@ func (r *sqliteRepository) ListBySession(ctx context.Context, sessionID string) 
 	return out, rows.Err()
 }
 
+func (r *sqliteRepository) ListByTask(ctx context.Context, taskID string) (map[string][]QueuedMessage, error) {
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+		SELECT q.id, q.session_id, q.task_id, q.position, q.content, q.model, q.plan_mode,
+		       q.attachments_json, q.metadata_json, q.queued_at, q.queued_by
+		FROM queued_messages q
+		INNER JOIN task_sessions s ON s.id = q.session_id
+		WHERE q.task_id = ?
+		ORDER BY q.session_id ASC, q.position ASC
+	`), taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list queued by task: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := make(map[string][]QueuedMessage)
+	for rows.Next() {
+		msg, err := scanQueuedRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		if msg.IsReservedInFlight() {
+			continue
+		}
+		out[msg.SessionID] = append(out[msg.SessionID], *msg)
+	}
+	return out, rows.Err()
+}
+
 // CountBySession returns the number of entries for a session.
 func (r *sqliteRepository) CountBySession(ctx context.Context, sessionID string) (int, error) {
 	var n int

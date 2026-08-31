@@ -556,6 +556,23 @@ func (s *Server) listTaskSessionsHandler() server.ToolHandlerFunc {
 	}
 }
 
+func (s *Server) listTaskInboxHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if s.taskID == "" {
+			return mcp.NewToolResultError("list_task_inbox_kandev is available only from a task session"), nil
+		}
+		payload := map[string]interface{}{"task_id": s.taskID, "caller_task_id": s.taskID, "current_session_id": s.sessionID}
+		copyOptionalStringArg(payload, req, "cursor")
+		copyOptionalLimitArg(payload, req)
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListTaskInbox, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
 func (s *Server) listPendingAgentPermissionsHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		taskID, err := req.RequireString(mcpKeyTaskID)

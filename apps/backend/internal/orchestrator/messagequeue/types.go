@@ -42,6 +42,10 @@ func IsReservedQueuedBy(queuedBy string) bool {
 // than appended when a newer pending message supersedes an older one.
 const MetadataCoalesceKey = "coalesce_key"
 
+// MetadataInboxTransitionID identifies one logical inbox delivery across
+// queued, retried, and delivered observations.
+const MetadataInboxTransitionID = "inbox_transition_id"
+
 // MetadataEntityReferences carries persisted entity-reference context for a
 // queued message.
 const MetadataEntityReferences = "entity_references"

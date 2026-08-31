@@ -65,6 +65,16 @@ type ListMessagesOptions struct {
 	Sort   string
 }
 
+// TaskInboxMessagesOptions defines task-wide keyset pagination for delivered
+// user messages. The cursor uses the same created_at and ID ordering as the
+// task inbox projection.
+type TaskInboxMessagesOptions struct {
+	Limit          int
+	AfterCreatedAt time.Time
+	AfterID        string
+	SkipCounts     bool
+}
+
 // SearchMessagesOptions defines options for searching a session's messages.
 type SearchMessagesOptions struct {
 	Query string
