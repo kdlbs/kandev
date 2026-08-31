@@ -637,14 +637,6 @@ func TestHandleArchiveTask_MergedPRRunAcceptsRefreshedTargetAfterResume(t *testi
 
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
 
-	// First firing archives its own target.
-	firstMsg := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{
-		"task_id": firstTarget.ID, "caller_task_id": caller.ID,
-	})
-	resp, err := h.handleArchiveTask(ctx, firstMsg)
-	require.NoError(t, err)
-	require.Equal(t, ws.MessageTypeResponse, resp.Type)
-
 	// A second firing resumes the same continuation task and refreshes its
 	// binding — this is what orchestrator.refreshAutomationContinuationMetadata
 	// does on the reuse path, one key at a time via the same primitive.
@@ -655,16 +647,16 @@ func TestHandleArchiveTask_MergedPRRunAcceptsRefreshedTargetAfterResume(t *testi
 	secondMsg := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{
 		"task_id": secondTarget.ID, "caller_task_id": caller.ID,
 	})
-	resp, err = h.handleArchiveTask(ctx, secondMsg)
+	resp, err := h.handleArchiveTask(ctx, secondMsg)
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 	archived, err := svc.GetTask(ctx, secondTarget.ID)
 	require.NoError(t, err)
 	assert.NotNil(t, archived.ArchivedAt, "the refreshed target must be archivable")
 
-	// ...and the stale first target is correctly refused against the now
-	//-current binding (it was already archived by the first firing; this
-	// proves the guard is not still silently permissive toward it).
+	// ...and the stale first target is correctly refused against the now-current
+	// binding while it is still unarchived, so this assertion specifically tests
+	// the target guard rather than ordinary archive validation.
 	staleMsg := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{
 		"task_id": firstTarget.ID, "caller_task_id": caller.ID,
 	})
