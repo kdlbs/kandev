@@ -59,40 +59,37 @@ function countTextParts(messages: Message[]): number {
 }
 
 function loadTargetsReached(args: {
-  messages: Message[];
-  beforePrompts: number;
-  beforeTextParts: number;
+  loadedPrompts: number;
+  loadedTextParts: number;
   minUserPromptsPerLoad?: number;
   minTextPartsPerLoad?: number;
 }): boolean {
-  const { messages, beforePrompts, beforeTextParts, minUserPromptsPerLoad, minTextPartsPerLoad } =
-    args;
+  const { loadedPrompts, loadedTextParts, minUserPromptsPerLoad, minTextPartsPerLoad } = args;
   return (
-    (!minUserPromptsPerLoad ||
-      countUserPrompts(messages) - beforePrompts >= minUserPromptsPerLoad) &&
-    (!minTextPartsPerLoad || countTextParts(messages) - beforeTextParts >= minTextPartsPerLoad)
+    (!minUserPromptsPerLoad || loadedPrompts >= minUserPromptsPerLoad) &&
+    (!minTextPartsPerLoad || loadedTextParts >= minTextPartsPerLoad)
   );
 }
 
 async function loadPagesToTargets(args: {
-  fetchPage: () => Promise<number>;
-  getMessages: () => Message[];
+  fetchPage: () => Promise<{ count: number; prependedMessages: Message[] }>;
   minUserPromptsPerLoad?: number;
   minTextPartsPerLoad?: number;
 }): Promise<number> {
-  const { fetchPage, getMessages, minUserPromptsPerLoad, minTextPartsPerLoad } = args;
-  const beforePrompts = countUserPrompts(getMessages());
-  const beforeTextParts = countTextParts(getMessages());
+  const { fetchPage, minUserPromptsPerLoad, minTextPartsPerLoad } = args;
   let total = 0;
+  let loadedPrompts = 0;
+  let loadedTextParts = 0;
   for (let page = 0; page < MAX_PAGES_PER_LOAD; page++) {
-    const added = await fetchPage();
-    total += added;
-    if (added === 0) break;
+    const result = await fetchPage();
+    total += result.count;
+    loadedPrompts += countUserPrompts(result.prependedMessages);
+    loadedTextParts += countTextParts(result.prependedMessages);
+    if (result.count === 0) break;
     if (
       loadTargetsReached({
-        messages: getMessages(),
-        beforePrompts,
-        beforeTextParts,
+        loadedPrompts,
+        loadedTextParts,
         minUserPromptsPerLoad,
         minTextPartsPerLoad,
       })
@@ -124,7 +121,7 @@ function useOlderPageFetcher(sessionId: string | null, stateRef: { current: Lazy
       const { hasMore, rawHasMore, isLoadingMore, oldestCursor } = stateRef.current;
       const canLoad = mode === "raw" ? rawHasMore : hasMore;
 
-      if (!sessionId || !oldestCursor) return 0;
+      if (!sessionId || !oldestCursor) return { count: 0, prependedMessages: EMPTY_MESSAGES };
 
       // Check the per-session in-flight map BEFORE the local loading guards: a
       // panel callback during transcript loading or automatic backfill joins
@@ -147,10 +144,10 @@ function useOlderPageFetcher(sessionId: string | null, stateRef: { current: Lazy
               store.getState().messages.metaBySession[sessionId]?.isLoadingMore ??
               stateRef.current.isLoadingMore,
           };
-          return result.count;
+          return result;
         } catch (error) {
           console.error("[useLazyLoadMessages] Error loading messages:", error);
-          return 0;
+          return { count: 0, prependedMessages: EMPTY_MESSAGES };
         }
       }
 
@@ -161,7 +158,7 @@ function useOlderPageFetcher(sessionId: string | null, stateRef: { current: Lazy
           hasMore: canLoad,
           oldestCursor,
         });
-        return 0;
+        return { count: 0, prependedMessages: EMPTY_MESSAGES };
       }
 
       debug("loadMore: requesting older page", {
@@ -187,17 +184,17 @@ function useOlderPageFetcher(sessionId: string | null, stateRef: { current: Lazy
           oldestCursor: result.oldestCursor,
           isLoadingMore: false,
         };
-        return result.count;
+        return result;
       } catch (error) {
         console.error("[useLazyLoadMessages] Error loading messages:", error);
         debug("loadMore: error", { sessionId, error });
         stateRef.current.isLoadingMore = false;
-        return 0;
+        return { count: 0, prependedMessages: EMPTY_MESSAGES };
       }
     },
     [sessionId, stateRef, store],
   );
-  return { fetchPage, store };
+  return { fetchPage };
 }
 
 export function useLazyLoadMessages(sessionId: string | null, options?: LazyLoadMessagesOptions) {
@@ -223,27 +220,28 @@ export function useLazyLoadMessages(sessionId: string | null, options?: LazyLoad
 
   // Visible pagination stops at prompt #1; raw pagination remains available
   // to explicit recovery consumers such as session search.
-  const { fetchPage, store } = useOlderPageFetcher(sessionId, stateRef);
+  const { fetchPage } = useOlderPageFetcher(sessionId, stateRef);
 
   // Optional per-consumer targets accumulate matching rows across pages until
   // every configured threshold, exhaustion, a zero-result page, or the safety
   // cap. Raw rows still determine progress and cursor movement.
   const loadMore = useCallback(async () => {
-    if ((!minUserPromptsPerLoad && !minTextPartsPerLoad) || !sessionId) return fetchPage();
+    if ((!minUserPromptsPerLoad && !minTextPartsPerLoad) || !sessionId) {
+      return (await fetchPage()).count;
+    }
     setIsAccumulating(true);
     try {
       return await loadPagesToTargets({
         fetchPage,
-        getMessages: () => store.getState().messages.bySession[sessionId] ?? EMPTY_MESSAGES,
         minUserPromptsPerLoad,
         minTextPartsPerLoad,
       });
     } finally {
       setIsAccumulating(false);
     }
-  }, [fetchPage, minTextPartsPerLoad, minUserPromptsPerLoad, sessionId, store]);
+  }, [fetchPage, minTextPartsPerLoad, minUserPromptsPerLoad, sessionId]);
 
-  const loadMoreRaw = useCallback(() => fetchPage("raw"), [fetchPage]);
+  const loadMoreRaw = useCallback(async () => (await fetchPage("raw")).count, [fetchPage]);
 
   return {
     loadMore,

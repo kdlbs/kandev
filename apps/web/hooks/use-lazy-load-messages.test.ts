@@ -328,6 +328,33 @@ describe("useLazyLoadMessages minTextPartsPerLoad", () => {
     expect(listTaskSessionMessages).toHaveBeenCalledTimes(2);
   });
 
+  it("does not count live appended text toward the older-text target", async () => {
+    const firstPage = Promise.withResolvers<unknown>();
+    listTaskSessionMessages
+      .mockReturnValueOnce(firstPage.promise)
+      .mockResolvedValueOnce(
+        wireTypedResponse([{ id: "twentieth-older-text", type: "message" }], false),
+      );
+    const { result } = renderHook(() => useLazyLoadMessages("s1", { minTextPartsPerLoad: 20 }));
+
+    const loadPromise = result.current.loadMore();
+    storeMock.bySession = [{ id: "live-text", type: "message" }];
+    await act(async () => {
+      firstPage.resolve(
+        wireTypedResponse(
+          Array.from({ length: 19 }, (_, index) => ({
+            id: `older-text-${index}`,
+            type: "message" as const,
+          })),
+          true,
+        ),
+      );
+      await loadPromise;
+    });
+
+    expect(listTaskSessionMessages).toHaveBeenCalledTimes(2);
+  });
+
   it("counts message, content, and legacy rows but excludes other activity", async () => {
     listTaskSessionMessages
       .mockResolvedValueOnce(
