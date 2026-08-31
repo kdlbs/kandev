@@ -71,6 +71,10 @@ type CreateInstanceRequest struct {
 	// RuntimeConfig.StripEnv by the lifecycle executors.
 	StripEnv []string `json:"strip_env,omitempty"`
 
+	// NamespacesMCPToolsByServer tells the per-instance MCP server to adapt
+	// built-in tool names for an agent that appends the server name itself.
+	NamespacesMCPToolsByServer bool `json:"namespaces_mcp_tools_by_server,omitempty"`
+
 	// BaseBranches maps RepositoryName → base branch ref for the task's
 	// per-repo diff stats. The empty key "" applies to the root /
 	// single-repo tracker. Empty map disables the override and falls back

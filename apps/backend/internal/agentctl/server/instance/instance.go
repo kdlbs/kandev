@@ -169,6 +169,10 @@ type CreateRequest struct {
 	McpProviders []string            `json:"mcp_providers,omitempty"`
 	McpProfile   *mcpprofile.Context `json:"mcp_profile,omitempty"`
 
+	// NamespacesMCPToolsByServer enables the per-instance MCP name adapter for
+	// clients that append the injected server name to every tool.
+	NamespacesMCPToolsByServer bool `json:"namespaces_mcp_tools_by_server,omitempty"`
+
 	// RequiresProcessKill forces the agent's process group to be killed on
 	// shutdown instead of relying on stdin close. Required for agents whose
 	// runtime keeps child processes alive when stdin closes (notably

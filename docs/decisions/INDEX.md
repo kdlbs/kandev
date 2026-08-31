@@ -223,3 +223,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-30-e2e-browser-cache | [Cache host-runner E2E browser provisioning](2026-08-30-e2e-browser-cache.md) | accepted | infra, workflow | 2026-08-30 |
 | 2026-08-30-environment-owned-git-status | [Project Current Git Status From the Task Environment](2026-08-30-environment-owned-git-status.md) | proposed | backend, frontend, protocol | 2026-08-30 |
 | 2026-08-31-passthrough-running-publication | [Defer Passthrough Running Publication Until Guard Release](2026-08-31-passthrough-running-publication.md) | accepted | backend | 2026-08-31 |
+| 2026-08-31-agent-aware-mcp-tool-names | [Preserve Canonical MCP Tool Names Through Agent Namespacing](2026-08-31-agent-aware-mcp-tool-names.md) | accepted | backend, agentctl, protocol | 2026-08-31 |
