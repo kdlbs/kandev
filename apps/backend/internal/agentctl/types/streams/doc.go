@@ -8,18 +8,11 @@
 // reasoning/thinking content, tool invocations, plan updates, and completion
 // or error notifications. This stream carries normalized ACP session updates
 // plus agentctl-synthesized lifecycle and diagnostic events, and works with
-// any ACP-speaking agent (Codex, Claude Code, etc.).
+// any agent that speaks ACP.
 //
 // Message type: AgentEvent
 //
-// Event types (use EventType* constants):
-//   - message_chunk: Streaming text content from the agent
-//   - reasoning: Chain-of-thought or thinking content
-//   - tool_call: A tool invocation has started
-//   - tool_update: Tool status update (running, completed, error)
-//   - plan: Agent plan/task list updates
-//   - complete: The turn or operation has completed
-//   - error: An error occurred
+// Event types are defined by the EventType* constants in AgentEvent.
 //
 // # Permission Stream (/api/v1/acp/permissions/stream)
 //
