@@ -20,6 +20,31 @@ function occurrenceCount(document, value) {
   return document.split(value).length - 1;
 }
 
+function splitMarkdownTableRow(line) {
+  const cells = [];
+  let cell = "";
+  for (let index = 1; index < line.length - 1; index += 1) {
+    if (line[index] === "\\" && line[index + 1] === "|") {
+      cell += "|";
+      index += 1;
+    } else if (line[index] === "|") {
+      cells.push(cell.trim());
+      cell = "";
+    } else {
+      cell += line[index];
+    }
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
+function tableRows(document, start, end) {
+  return section(document, start, end)
+    .split("\n")
+    .filter((line) => line.startsWith("|"))
+    .map(splitMarkdownTableRow);
+}
+
 test("freezes every H0 Host unit and correction", async () => {
   const adr = await readADR();
 
@@ -87,15 +112,48 @@ test("keeps the public Host inventory generic and merge-free", async () => {
   const inventoryRows = inventory
     .split("\n")
     .filter((line) => line.startsWith("| H"));
-  const methodAndCapabilityColumns = inventoryRows.map((line) => {
-    const cells = line.split("|");
-    return `${cells[3]}|${cells[7]}`;
-  }).join("\n");
+  const methodAndCapabilityColumns = inventoryRows
+    .map((line) => {
+      const cells = line.split("|");
+      return `${cells[3]}|${cells[7]}`;
+    })
+    .join("\n");
 
-  assert.doesNotMatch(methodAndCapabilityColumns, /\bmerge(?:[A-Z][A-Za-z0-9_]*)?\b/i);
+  assert.doesNotMatch(
+    methodAndCapabilityColumns,
+    /\bmerge(?:[A-Z][A-Za-z0-9_]*)?\b/i,
+  );
   assert.doesNotMatch(methodAndCapabilityColumns, /api_write:merge/i);
   assert.doesNotMatch(inventory, /api_(?:read|write):[^`\s|]*coordinator/i);
   assert.match(inventory, /No Host writer is approved in H0/);
+});
+
+test("preserves literal pipes inside decision-table cells", async () => {
+  const adr = await readADR();
+  const inventoryRows = tableRows(
+    adr,
+    "### Public Host surface inventory",
+    "### H2d exact-head evidence",
+  );
+  const capabilityRows = tableRows(
+    adr,
+    "The smallest extension is owned by the plugin system:",
+    "No Coordinator principal, role, profile, grant, or audit type is created.",
+  );
+
+  assert.ok(inventoryRows.length > 1, "missing Host inventory table");
+  assert.ok(capabilityRows.length > 1, "missing capability contract table");
+  assert.ok(
+    inventoryRows.every((row) => row.length === 9),
+    "Host inventory row was split by a literal pipe",
+  );
+  assert.ok(
+    capabilityRows.every((row) => row.length === 2),
+    "capability contract row was split by a literal pipe",
+  );
+  assert.match(adr, /task_directive\.issued\\\|resolved\\\|revoked/);
+  assert.match(adr, /task_relation\.added\\\|removed/);
+  assert.match(adr, /status `active\\\|revoked`/);
 });
 
 test("fences legacy v1 calls from H6 exact authority", async () => {
@@ -119,7 +177,10 @@ test("fences legacy v1 calls from H6 exact authority", async () => {
   ]) {
     assert.ok(legacy.includes(required), `missing legacy fence: ${required}`);
   }
-  assert.match(adr, /Every \*\*new exact\*\* Host request introduced by this ADR carries/);
+  assert.match(
+    adr,
+    /Every \*\*new exact\*\* Host request introduced by this ADR carries/,
+  );
   assert.match(adr, /host\.v2\.read:tasks/);
   assert.match(adr, /host\.v2\.write:tasks/);
   assert.doesNotMatch(legacy, /synthetic legacy revision only/i);
@@ -129,14 +190,30 @@ test("defines approval lifetime, result parents, and principal-correct parity", 
   const adr = await readADR();
 
   for (const lifecycle of ["Upgrade", "Rollback", "Uninstall", "Reinstall"]) {
-    assert.match(adr, new RegExp(`\\| ${lifecycle} \\|`), `missing installation lifecycle ${lifecycle}`);
+    assert.match(
+      adr,
+      new RegExp(`\\| ${lifecycle} \\|`),
+      `missing installation lifecycle ${lifecycle}`,
+    );
   }
   assert.match(adr, /Mints a fresh `installation_id`/);
   assert.match(adr, /tombstones the `installation_id`/);
-  assert.match(adr, /\| `DENIED` \| `STALE_CAPABILITY_REVISION`, `CAPABILITY_REVOKED`, `HUMAN_RESERVED`/);
-  assert.match(adr, /\| `CONFLICT` \| `STALE_RESOURCE_VERSION`, `PENDING_TRANSITION_CONFLICT`, `EXECUTION_GENERATION_FENCED`/);
-  assert.match(adr, /Host RPC and global MCP authorization is tested separately before parity/);
-  assert.match(adr.replace(/\s+/g, " "), /A Host approval denial is never expected to equal an MCP authorization verdict/);
+  assert.match(
+    adr,
+    /\| `DENIED` \| `STALE_CAPABILITY_REVISION`, `CAPABILITY_REVOKED`, `HUMAN_RESERVED`/,
+  );
+  assert.match(
+    adr,
+    /\| `CONFLICT` \| `STALE_RESOURCE_VERSION`, `PENDING_TRANSITION_CONFLICT`, `EXECUTION_GENERATION_FENCED`/,
+  );
+  assert.match(
+    adr,
+    /Host RPC and global MCP authorization is tested separately before parity/,
+  );
+  assert.match(
+    adr.replace(/\s+/g, " "),
+    /A Host approval denial is never expected to equal an MCP authorization verdict/,
+  );
 });
 
 test("assigns pending-transition reads only to H2c", async () => {
