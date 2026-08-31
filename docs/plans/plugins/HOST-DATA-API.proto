@@ -5,9 +5,10 @@
 // the contract since it was written. For the live shape, read
 // apps/backend/proto/kandev/plugin/v1/plugin.proto (wire contract) and
 // apps/backend/pkg/pluginsdk/data_types.go (Go SDK mirror) directly — do not
-// infer current fields from this file. Known-diverged messages below: `Task`
-// (17 fields here vs 29 live), `WorkflowStep` (5 here vs 10 live — missing
-// `color`, `is_start_step`, `wip_limit`, `agent_profile_id`,
+// infer current fields from this file. Examples of known-diverged messages
+// (not exhaustive — other messages in this file may also have drifted):
+// `Task` (17 fields here vs 29 live), `WorkflowStep` (5 here vs 10 live —
+// missing `color`, `is_start_step`, `wip_limit`, `agent_profile_id`,
 // `on_enter_action_types`), and `Message` (absent here; the whole
 // `ListMessages` read path from ADR 0047 postdates this draft).
 //
