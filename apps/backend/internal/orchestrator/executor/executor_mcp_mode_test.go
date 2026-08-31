@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
@@ -167,10 +168,10 @@ func TestResolveTaskSessionMCPMode_TitlePendingDoesNotOverrideRestrictedModes(t 
 // at launch. The consumer half of the pin is
 // api.TestHandleSetMcpMode_AcceptsEveryModeTheOrchestratorCanEmit.
 func TestMcpModeConstants_MatchTheAgentctlWireValues(t *testing.T) {
-	require.Equal(t, "config", McpModeConfig)
-	require.Equal(t, "task-title-pending", McpModeTaskTitlePending)
-	require.Equal(t, "office", McpModeOffice)
-	require.Equal(t, "automation", McpModeAutomation)
+	require.Equal(t, mcpmode.Config, McpModeConfig)
+	require.Equal(t, mcpmode.TaskTitlePending, McpModeTaskTitlePending)
+	require.Equal(t, mcpmode.Office, McpModeOffice)
+	require.Equal(t, mcpmode.Automation, McpModeAutomation)
 }
 
 // Every branch of resolveTaskSessionMCPMode, asserted against the exact set
@@ -178,7 +179,7 @@ func TestMcpModeConstants_MatchTheAgentctlWireValues(t *testing.T) {
 // regression: task.Origin == automation_run resolved to a mode the instance
 // API used to answer with 400 "invalid mode".
 func TestResolveTaskSessionMCPMode_EmitsOnlyAgentctlAcceptedModes(t *testing.T) {
-	agentctlAccepted := []string{McpModeConfig, McpModeOffice, McpModeTaskTitlePending, "automation", "task"}
+	agentctlAccepted := mcpmode.InstanceModes()
 
 	tests := []struct {
 		name     string

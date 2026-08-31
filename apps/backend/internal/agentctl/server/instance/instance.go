@@ -162,7 +162,8 @@ type CreateRequest struct {
 	// AssumeMcpHttp overrides MCP capability filtering to assume HTTP support.
 	AssumeMcpHttp bool `json:"assume_mcp_http,omitempty"`
 
-	// McpMode controls which MCP tools are registered: "task" (default), "config", or "office".
+	// McpMode controls which MCP tools are registered: "task" (default),
+	// "task-title-pending", "config", "office", or "automation".
 	McpMode string `json:"mcp_mode,omitempty"`
 
 	// McpProviders limits task-mode review automation tools to attached providers.

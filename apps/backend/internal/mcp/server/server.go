@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
@@ -37,22 +39,22 @@ type BackendClient interface {
 // MCP mode constants control which tools are registered.
 const (
 	// ModeTask registers kanban, plan, and interaction tools (default for task-solving agents).
-	ModeTask = "task"
+	ModeTask = mcpmode.Task
 	// ModeTaskTitlePending registers the task-mode tools plus the one-shot
 	// title tool used while a prompt-first task still has its provisional title.
-	ModeTaskTitlePending = "task-title-pending"
+	ModeTaskTitlePending = mcpmode.TaskTitlePending
 	// ModeConfig registers configuration tools for workflows, agents, and MCP servers.
-	ModeConfig = "config"
+	ModeConfig = mcpmode.Config
 	// ModeExternal registers config tools plus create_task_kandev for external coding agents
 	// (Claude Code, Cursor, etc.) that connect to the backend's MCP endpoint.
 	// No session-scoped tools (plan, ask_user_question) since there is no live session.
-	ModeExternal = "external"
+	ModeExternal = mcpmode.External
 	// ModeOffice registers plan and interaction tools for office agents.
 	// Kanban tools are excluded because office agents use CLI commands instead.
-	ModeOffice = "office"
+	ModeOffice = mcpmode.Office
 	// ModeAutomation registers the fixed workspace coordinator catalog for
 	// scheduled automation agents.
-	ModeAutomation = "automation"
+	ModeAutomation = mcpmode.Automation
 )
 
 const pluginToolArgumentsKey = "arguments"
@@ -97,30 +99,31 @@ func normalizeMode(mode string) string {
 
 // Server wraps the MCP server with backend client for communication.
 type Server struct {
-	backend             BackendClient
-	sessionID           string
-	taskID              string
-	disableAskQuestion  bool
-	mode                string // "task" (default), "task-title-pending", "config", or "office"
-	mcpProviders        []string
-	profile             mcpprofile.Context
-	mcpServer           *server.MCPServer
-	sseServer           *server.SSEServer
-	httpServer          *server.StreamableHTTPServer
-	logger              *logger.Logger
-	mcpLogger           *zap.Logger // optional file logger for MCP debug traces
-	mu                  sync.RWMutex
-	running             bool
-	attachmentMu        sync.RWMutex
-	attachmentAttempt   streams.MCPAttachmentAttempt
-	attachmentAttempts  map[string]streams.MCPAttachmentAttempt
-	attachmentReporter  func(streams.MCPAttachmentEvidence)
-	validatorMu         sync.RWMutex
-	toolValidators      map[string]toolArgumentValidator
-	pluginToolsUpdateMu sync.Mutex
-	pluginToolsMu       sync.Mutex
-	pluginTools         plugintools.Snapshot
-	pluginToolsReady    bool
+	backend                BackendClient
+	sessionID              string
+	taskID                 string
+	disableAskQuestion     bool
+	mode                   string // "task" (default), "task-title-pending", "config", "external", "office", or "automation"
+	mcpProviders           []string
+	profile                mcpprofile.Context
+	legacyModeCapabilities []mcpprofile.Capability
+	mcpServer              *server.MCPServer
+	sseServer              *server.SSEServer
+	httpServer             *server.StreamableHTTPServer
+	logger                 *logger.Logger
+	mcpLogger              *zap.Logger // optional file logger for MCP debug traces
+	mu                     sync.RWMutex
+	running                bool
+	attachmentMu           sync.RWMutex
+	attachmentAttempt      streams.MCPAttachmentAttempt
+	attachmentAttempts     map[string]streams.MCPAttachmentAttempt
+	attachmentReporter     func(streams.MCPAttachmentEvidence)
+	validatorMu            sync.RWMutex
+	toolValidators         map[string]toolArgumentValidator
+	pluginToolsUpdateMu    sync.Mutex
+	pluginToolsMu          sync.Mutex
+	pluginTools            plugintools.Snapshot
+	pluginToolsReady       bool
 }
 
 // New creates a new MCP server for agentctl.
@@ -200,15 +203,16 @@ func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logg
 func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *logger.Logger, mcpLogFile string, profileContext mcpprofile.Context) *Server {
 	profileContext = mcpprofile.New(profileContext.Surface, profileContext.Capabilities, profileContext.Providers)
 	s := &Server{
-		backend:            backend,
-		sessionID:          sessionID,
-		taskID:             taskID,
-		disableAskQuestion: !profileContext.HasCapability(mcpprofile.CapabilityUserQuestion),
-		mode:               modeForProfile(profileContext),
-		mcpProviders:       mcpproviders.Normalize(profileContext.Providers),
-		profile:            profileContext,
-		logger:             log.WithFields(zap.String("component", "mcp-server")),
-		attachmentAttempts: make(map[string]streams.MCPAttachmentAttempt),
+		backend:                backend,
+		sessionID:              sessionID,
+		taskID:                 taskID,
+		disableAskQuestion:     !profileContext.HasCapability(mcpprofile.CapabilityUserQuestion),
+		mode:                   modeForProfile(profileContext),
+		mcpProviders:           mcpproviders.Normalize(profileContext.Providers),
+		profile:                profileContext,
+		legacyModeCapabilities: slices.Clone(profileContext.Capabilities),
+		logger:                 log.WithFields(zap.String("component", "mcp-server")),
+		attachmentAttempts:     make(map[string]streams.MCPAttachmentAttempt),
 	}
 
 	// Set up optional file logger for MCP debug traces
@@ -583,24 +587,26 @@ func (s *Server) SetMode(mode string) {
 	if s.mode == normalizedMode {
 		return
 	}
-	s.mode = normalizedMode
+	previousMode := s.mode
 	capabilities := s.profile.Capabilities
 	if normalizedMode == ModeAutomation {
+		s.legacyModeCapabilities = slices.Clone(capabilities)
 		// The automation surface is a fixed coordinator catalog and never
-		// carries task-local question capabilities — mcpprofile.NewAutomation
-		// and mcpprofile.Legacy both drop them. SetMode carries the previous
-		// profile's capabilities forward, and the user-question tool group is
-		// gated on the capability rather than the surface, so an instance
-		// created in task mode and switched here would otherwise advertise
-		// ask_user_question_kandev on a surface whose execution-time allowlist
-		// refuses it.
+		// carries task-local capabilities. The snapshot lets a later legacy
+		// mode change restore the profile that was active before automation.
 		capabilities = nil
+	} else if previousMode == ModeAutomation {
+		capabilities = slices.Clone(s.legacyModeCapabilities)
 	}
+	s.mode = normalizedMode
 	s.profile = mcpprofile.New(surfaceForMode(normalizedMode), capabilities, s.mcpProviders)
 	if normalizedMode == ModeTaskTitlePending {
 		s.profile = s.profile.WithCapability(mcpprofile.CapabilityTaskTitle)
 	} else {
 		s.profile = s.profile.WithoutCapability(mcpprofile.CapabilityTaskTitle)
+	}
+	if normalizedMode != ModeAutomation {
+		s.legacyModeCapabilities = slices.Clone(s.profile.Capabilities)
 	}
 	s.rebuildTools()
 }
@@ -652,6 +658,13 @@ func (s *Server) SetProfile(profileContext mcpprofile.Context) {
 	profileContext = mcpprofile.New(profileContext.Surface, profileContext.Capabilities, profileContext.Providers)
 	if sameProfile(s.profile, profileContext) {
 		return
+	}
+	if profileContext.Surface == mcpprofile.SurfaceAutomation {
+		if s.profile.Surface != mcpprofile.SurfaceAutomation {
+			s.legacyModeCapabilities = slices.Clone(s.profile.Capabilities)
+		}
+	} else {
+		s.legacyModeCapabilities = slices.Clone(profileContext.Capabilities)
 	}
 	s.profile = profileContext
 	s.mode = modeForProfile(profileContext)
