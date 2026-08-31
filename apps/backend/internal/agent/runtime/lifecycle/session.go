@@ -901,7 +901,7 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 		go func() {
 			promptCtx, cancel := appctx.Detached(ctx, sm.stopCh, 0)
 			defer cancel()
-			_, err := sm.SendPrompt(promptCtx, execution, effectivePrompt, false, acpAttachments, false)
+			_, err := sm.SendPromptWithDispatchCallback(promptCtx, execution, effectivePrompt, false, acpAttachments, false, execution.takeInitialPromptAcceptedCallback())
 			if err != nil {
 				// During graceful shutdown the agent subprocess is terminated,
 				// so an in-flight initial prompt fails with a transport death

@@ -1301,6 +1301,61 @@ func TestCompleteStreamFromCompletedExecutionFlushesAgentText(t *testing.T) {
 		"final complete streams from terminal executions must not re-run task state reconciliation")
 }
 
+// TestStreamEventFromCompletedExecutionDoesNotRearmSuccessorTurnIntent covers
+// the ordering fix in handleAgentStreamEvent: rearmCompletionIntentForActivity
+// resolves the *current* active turn via GetActiveTurn, not the frame's own
+// (possibly retired) execution. Before the fix, the rearm switch ran ahead of
+// shouldDropCompletedExecutionStreamEvent, so a stale message_streaming chunk
+// from a finished execution could still push forward the quiet-grace deadline
+// of a completion intent that belongs to the newer, successor turn.
+func TestStreamEventFromCompletedExecutionDoesNotRearmSuccessorTurnIntent(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	// repoTurnService.StartTurn hardcodes TaskID "task1" on every turn it
+	// creates; seed the session/task under that same ID so the turn's task_id
+	// resolves to a real row and CreateOrGetCompletionIntent's identity
+	// validation (intent.TaskID must match the turn's actual task) passes.
+	seedSession(t, repo, "task1", "s1", "step1")
+
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task1", v1.TaskStateInProgress)
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+	svc.turnService = &repoTurnService{repo: repo}
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+
+	_, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+	svc.markExecutionCompleted("s1", "exec-1")
+	svc.completeTurnForSession(ctx, "s1")
+	nextTurn, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	_, _, err = repo.CreateOrGetCompletionIntent(ctx, &models.CompletionIntent{
+		ID: "intent-successor", TaskID: "task1", SessionID: "s1", TurnID: nextTurn.ID, WorkflowStepID: "step1",
+		State: models.CompletionIntentStatePending, RequestedAt: now, EligibleAt: now,
+	})
+	require.NoError(t, err)
+	before, err := repo.GetCompletionIntent(ctx, "intent-successor")
+	require.NoError(t, err)
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "task1",
+		SessionID:   "s1",
+		ExecutionID: "exec-1", // the completed, retired execution
+		Data: &lifecycle.AgentStreamEventData{
+			Type: streamEventMessageStreaming,
+			Text: "stale chunk from a finished execution",
+		},
+	})
+
+	after, err := repo.GetCompletionIntent(ctx, "intent-successor")
+	require.NoError(t, err)
+	require.True(t, after.EligibleAt.Equal(before.EligibleAt),
+		"a stale frame from a completed execution must not rearm the current active turn's completion intent")
+}
+
 func TestCompleteStreamFromCompletedExecutionPersistsTerminalTurnMetadata(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

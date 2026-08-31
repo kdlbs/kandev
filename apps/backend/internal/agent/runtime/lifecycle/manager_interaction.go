@@ -118,6 +118,20 @@ func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, execution
 	return result, err
 }
 
+// SetInitialPromptAcceptedCallback binds a receipt callback before an already
+// prepared execution starts its first agent process. It must be called before
+// StartAgentProcess, because only dispatchInitialPrompt observes this callback.
+func (m *Manager) SetInitialPromptAcceptedCallback(_ context.Context, executionID string, callback func()) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	execution.promptLifecycleMu.Lock()
+	execution.initialPromptAccepted = callback
+	execution.promptLifecycleMu.Unlock()
+	return nil
+}
+
 // SteerAgentWithDispatchCallback delivers a steer: it hands the prompt into a
 // turn that is still generating rather than serializing behind it. It mirrors
 // PromptAgentWithDispatchCallback's activity accounting; only the underlying

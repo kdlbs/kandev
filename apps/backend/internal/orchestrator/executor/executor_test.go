@@ -1269,6 +1269,7 @@ func TestStartAgentOnExistingWorkspace_CancellationAfterSnapshotWins(t *testing.
 		true,
 		"",
 		nil,
+		nil,
 	)
 	if !errors.Is(err, ErrSessionStateSuperseded) {
 		t.Fatalf("startAgentOnExistingWorkspace error = %v, want ErrSessionStateSuperseded", err)

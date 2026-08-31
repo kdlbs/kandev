@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -88,6 +89,49 @@ type SpawnOrigin struct {
 	TaskID      string
 	SessionID   string
 	SessionName string
+}
+
+// persistSpawnSupervision writes server-verified spawn provenance exactly
+// once. A session without complete verified origin deliberately receives no
+// record, so legacy/externally-created sessions cannot gain authority later.
+// persistSpawnSupervision is idempotent: a retried launch call (e.g. after a
+// transient failure on the first attempt) reaches this with the session row
+// already created, and must not skip or fail persistence just because the
+// same origin was already recorded. It accepts an existing record only when
+// it matches origin exactly; a conflicting record (a different supervisor
+// claiming the same session) fails closed rather than silently overwriting
+// or silently keeping the wrong authority.
+func (s *Service) persistSpawnSupervision(ctx context.Context, sessionID string, origin *SpawnOrigin) error {
+	if sessionID == "" || origin == nil || origin.TaskID == "" || origin.SessionID == "" {
+		return nil
+	}
+	record := models.SessionSpawnSupervision{
+		SupervisorTaskID:    origin.TaskID,
+		SupervisorSessionID: origin.SessionID,
+		SpawnedAt:           time.Now().UTC(),
+	}
+	stored, err := s.repo.SetSessionMetadataKeyIfAbsent(ctx, sessionID, models.SessionMetaKeySpawnSupervision, record)
+	if err != nil {
+		return fmt.Errorf("persist session spawn supervision: %w", err)
+	}
+	if stored {
+		return nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("reload session to verify existing spawn supervision: %w", err)
+	}
+	existing, ok := models.LoadSessionSpawnSupervision(session.Metadata)
+	if !ok {
+		return fmt.Errorf("session spawn supervision key present but unreadable: %s", sessionID)
+	}
+	if existing.SupervisorTaskID != origin.TaskID || existing.SupervisorSessionID != origin.SessionID {
+		return fmt.Errorf(
+			"session spawn supervision conflict: %s already claims supervisor %s/%s, cannot claim %s/%s",
+			sessionID, existing.SupervisorTaskID, existing.SupervisorSessionID, origin.TaskID, origin.SessionID,
+		)
+	}
+	return nil
 }
 
 // LaunchSessionResponse is the unified response for session.launch.

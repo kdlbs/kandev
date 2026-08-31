@@ -763,7 +763,57 @@ func (r *Repository) initSessionSchema() error {
 	if err := r.initMessageTurnSchema(); err != nil {
 		return err
 	}
-	return r.initSubagentContextSchema()
+	if err := r.initSubagentContextSchema(); err != nil {
+		return err
+	}
+	return r.initCompletionIntentSchema()
+}
+
+func (r *Repository) initCompletionIntentSchema() error {
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS session_completion_intents (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		turn_id TEXT NOT NULL,
+		workflow_step_id TEXT NOT NULL,
+		agent_execution_id TEXT NOT NULL DEFAULT '',
+		prompt_generation BIGINT NOT NULL DEFAULT 0,
+		state TEXT NOT NULL,
+		summary TEXT NOT NULL DEFAULT '',
+		handoff TEXT NOT NULL DEFAULT '',
+		blockers TEXT NOT NULL DEFAULT '',
+		requested_at TIMESTAMP NOT NULL,
+		last_post_signal_activity_at TIMESTAMP,
+		eligible_at TIMESTAMP NOT NULL,
+		settled_at TIMESTAMP,
+		outcome TEXT NOT NULL DEFAULT '',
+		UNIQUE(session_id, turn_id, workflow_step_id),
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE,
+		FOREIGN KEY (turn_id) REFERENCES task_session_turns(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_completion_intents_due
+		ON session_completion_intents(state, eligible_at);
+	CREATE TABLE IF NOT EXISTS session_control_events (
+		id TEXT PRIMARY KEY,
+		actor_task_id TEXT NOT NULL,
+		actor_session_id TEXT NOT NULL,
+		target_task_id TEXT NOT NULL,
+		target_session_id TEXT NOT NULL,
+		target_turn_id TEXT NOT NULL,
+		authority_basis TEXT NOT NULL,
+		evidence_code TEXT NOT NULL,
+		result TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (actor_task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		FOREIGN KEY (target_task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		FOREIGN KEY (target_session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_session_control_events_target
+		ON session_control_events(target_session_id, created_at);
+	`)
+	return err
 }
 
 // initSubagentContextSchema creates task_session_subagents, the durable

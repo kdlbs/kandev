@@ -248,6 +248,8 @@ func (r *Repository) taskEnvironmentStateTx(ctx context.Context, tx *sqlx.Tx, en
 // repository inventory and transitions the elected creating environment to
 // ready in one transaction. The materializer ID prevents a sibling session
 // from publishing another session's workspace.
+//
+//nolint:cyclop // The transaction validates ownership and every durable environment invariant.
 func (r *Repository) FinalizeTaskEnvironmentMaterialization(
 	ctx context.Context,
 	env *models.TaskEnvironment,

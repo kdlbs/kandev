@@ -267,6 +267,8 @@ func (m *Manager) ensureEmptyRemoteBaseline(ctx context.Context, req *CreateRequ
 // additional session. It intentionally performs no Git operation and does
 // not run contribution setup or repository scripts: another active session
 // may be using this checkout with uncommitted changes.
+//
+//nolint:cyclop // Reuse must fail closed across the canonical worktree identity checks.
 func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) (*Worktree, error) {
 	if req.WorktreeID == "" || req.TaskEnvironmentID == "" {
 		return nil, ErrReuseWorktreeUnavailable

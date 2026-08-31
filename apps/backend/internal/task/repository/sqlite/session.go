@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/adminmetrics"
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/db"
@@ -2804,6 +2805,21 @@ func (r *Repository) DeleteTaskSession(ctx context.Context, id string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	cancelled, targetQueueEntryIDs, err := r.cancelSessionDeliveryReceipts(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+
+	// Also delete queued_messages rows for cancelled outbound deliveries whose
+	// queue_entry_id points to another session's FIFO. Those rows would
+	// otherwise let the target session dispatch a cancelled prompt.
+	for _, entryID := range targetQueueEntryIDs {
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ?`), entryID); err != nil {
+			if !db.IsMissingTableError(err) {
+				return fmt.Errorf("purge cancelled outbound target queue entry %s: %w", entryID, err)
+			}
+		}
+	}
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_sessions WHERE id = ?`), id)
 	if err != nil {
@@ -2820,7 +2836,57 @@ func (r *Repository) DeleteTaskSession(ctx context.Context, id string) error {
 			return fmt.Errorf("purge queued messages for session %s: %w", id, err)
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	adminmetrics.RecordMessageDeliveryOutcome("cancelled", cancelled)
+	return nil
+}
+
+// cancelSessionDeliveryReceipts tombstones delivery work that cannot outlive a
+// deleted source or target session. A queue worker may run after the session
+// row is gone, so clearing only queued_messages would otherwise let it revive
+// a retained receipt into an orphan prompt. It also returns the queue_entry_id
+// values of cancelled outbound deliveries (where the deleted session is the
+// sender) so the caller can purge the target session's FIFO rows.
+func (r *Repository) cancelSessionDeliveryReceipts(ctx context.Context, tx *sqlx.Tx, sessionID string) (int64, []string, error) {
+	type cancelledRow struct {
+		QueueEntryID string `db:"queue_entry_id"`
+	}
+	var rows []cancelledRow
+	if err := tx.SelectContext(ctx, &rows, r.db.Rebind(`
+		SELECT queue_entry_id FROM message_deliveries
+		WHERE sender_session_id = ? AND target_session_id != ?
+		  AND state NOT IN ('delivered', 'cancelled', 'terminal_failed')
+		  AND queue_entry_id != ''
+	`), sessionID, sessionID); err != nil {
+		if db.IsMissingTableError(err) {
+			return 0, nil, nil
+		}
+		return 0, nil, fmt.Errorf("select cancelled outbound queue entries for session %s: %w", sessionID, err)
+	}
+	targetQueueEntries := make([]string, 0, len(rows))
+	for i := range rows {
+		targetQueueEntries = append(targetQueueEntries, rows[i].QueueEntryID)
+	}
+
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE message_deliveries
+		SET state = 'cancelled', lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+		WHERE (sender_session_id = ? OR target_session_id = ?)
+		  AND state NOT IN ('delivered', 'cancelled', 'terminal_failed')
+	`), time.Now().UTC(), sessionID, sessionID)
+	if db.IsMissingTableError(err) {
+		return 0, nil, nil
+	}
+	if err != nil {
+		return 0, nil, fmt.Errorf("cancel delivery receipts for session %s: %w", sessionID, err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, nil, fmt.Errorf("count cancelled delivery receipts for session %s: %w", sessionID, err)
+	}
+	return count, targetQueueEntries, nil
 }
 
 // Task Session Worktree operations

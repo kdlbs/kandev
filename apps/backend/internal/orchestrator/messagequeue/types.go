@@ -68,6 +68,19 @@ const MetadataLifecycleGeneration = "lifecycle_queue_generation"
 // carries the flag.
 const MetadataLifecycleReserved = "lifecycle_reserved_in_flight"
 
+// MetadataDeliveryID ties a durable queued row to its sender-independent
+// delivery receipt. It is backend-owned and never originates from a client.
+const MetadataDeliveryID = "delivery_id"
+
+// MetadataWorkflowTransitionID binds a workflow control prompt to one
+// committed task_step_transitions row. It is used to suppress an older
+// on-entry prompt after the task moves again.
+const MetadataWorkflowTransitionID = "workflow_transition_id"
+
+// MetadataWorkflowControl marks a durable workflow-owned prompt that uses the
+// separate control lane rather than ordinary FIFO capacity.
+const MetadataWorkflowControl = "workflow_control"
+
 // MetadataSenderTaskID identifies the task that produced an agent message. Two
 // agent entries may only merge when their sender task ids match, so the merge
 // never mixes prompts issued by different agents.
@@ -110,6 +123,13 @@ var (
 	// ErrLifecycleCancelled means an archive/delete purge invalidated a
 	// previously accepted lifecycle entry before it could be retried.
 	ErrLifecycleCancelled = errors.New("lifecycle queue entry cancelled")
+	// ErrDeliveryReceiptsUnsupported is returned by the delivery-receipt
+	// accessors (GetDeliveryReceipt, GetDeliveryReceiptBySourceKey,
+	// RetryDeliveryReceipt, CreateOrGetDeliveryReceipt) when the configured
+	// repository does not implement DeliveryLedger. Distinct from
+	// ErrEntryNotFound so a caller does not misclassify a missing capability
+	// or storage failure as the client-facing "no such receipt" conflict.
+	ErrDeliveryReceiptsUnsupported = errors.New("delivery receipts are not available")
 )
 
 // QueuedMessage represents a single FIFO entry queued for a session.
@@ -142,8 +162,21 @@ func (m *QueuedMessage) IsDurableLifecycle() bool {
 	if durable, _ := m.Metadata[MetadataLifecycleDurable].(bool); durable {
 		return true
 	}
+	if deliveryID, _ := m.Metadata[MetadataDeliveryID].(string); deliveryID != "" {
+		return true
+	}
 	origin, _ := m.Metadata["origin"].(string)
 	return origin == "github_pr_automation"
+}
+
+// IsWorkflowControl reports whether this entry belongs to the capacity-free,
+// transition-keyed workflow control lane.
+func (m *QueuedMessage) IsWorkflowControl() bool {
+	if m == nil {
+		return false
+	}
+	control, _ := m.Metadata[MetadataWorkflowControl].(bool)
+	return control
 }
 
 // IsReservedInFlight reports whether this durable row was already reserved for

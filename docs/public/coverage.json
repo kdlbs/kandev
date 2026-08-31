@@ -104,6 +104,8 @@
         "apps/backend/internal/orchestrator/task_operations.go",
         "apps/backend/internal/mcp/handlers/config_task_handlers.go",
         "apps/backend/internal/mcp/handlers/stop_task.go",
+		"apps/backend/internal/mcp/handlers/settle_stale_session.go",
+		"apps/backend/internal/orchestrator/stale_session_settlement.go",
         "apps/backend/internal/mcp/server/handlers.go",
         "apps/backend/internal/mcp/server/server.go",
         "apps/backend/internal/mcp/server/dependency_handlers.go",
@@ -117,6 +119,8 @@
         "apps/backend/internal/orchestrator/coordinator_stop_test.go",
         "apps/backend/internal/mcp/handlers/handlers_test.go",
         "apps/backend/internal/mcp/handlers/stop_task_test.go",
+		"apps/backend/internal/mcp/handlers/settle_stale_session_test.go",
+		"apps/backend/internal/mcp/server/settle_stale_session_tool_test.go",
         "apps/backend/internal/mcp/server/handlers_test.go",
         "apps/backend/internal/mcp/server/server_test.go",
         "apps/backend/internal/mcp/server/sysprompt_sync_test.go",
@@ -138,6 +142,7 @@
         "remove_task_dependency_kandev",
         "set_task_title_kandev",
         "step_complete_kandev",
+		"settle_stale_session_kandev",
         "stop_task_kandev",
         "update_repository_base_branch_kandev",
         "update_task_kandev",
@@ -156,6 +161,7 @@
       ],
       "sources": [
         "apps/backend/internal/mcp/handlers/spawn_session.go",
+        "apps/backend/internal/mcp/handlers/message_delivery.go",
         "apps/backend/internal/mcp/handlers/parent_question.go",
         "apps/backend/internal/mcp/handlers/agent_permissions.go",
         "apps/backend/internal/mcp/server/question_handlers.go",
@@ -165,6 +171,7 @@
       ],
       "tests": [
         "apps/backend/internal/mcp/handlers/spawn_session_test.go",
+        "apps/backend/internal/mcp/handlers/message_task_test.go",
         "apps/backend/internal/mcp/handlers/parent_question_test.go",
         "apps/backend/internal/mcp/handlers/agent_permissions_test.go",
         "apps/backend/internal/integration/agent_permission_mcp_test.go",
@@ -176,6 +183,7 @@
         "ask_parent_question_kandev",
         "ask_user_question_kandev",
         "get_task_conversation_kandev",
+        "get_message_delivery_kandev",
         "get_task_document_kandev",
         "list_related_tasks_kandev",
         "list_pending_agent_permissions_kandev",
@@ -184,6 +192,7 @@
         "list_task_sessions_kandev",
         "message_task_kandev",
         "resolve_agent_permission_kandev",
+        "retry_message_delivery_kandev",
         "spawn_session_kandev",
         "write_task_document_kandev"
       ]

@@ -36,7 +36,9 @@ func TestPersistTaskEnvironmentRepos_PreservesPhysicalWorktreeOnInventoryOnlyRef
 		},
 		&LaunchAgentResponse{WorkspacePath: "/source/kandev"},
 	)
-	exec.persistTaskEnvironmentRepos(context.Background(), envID, repos)
+	if err := exec.persistTaskEnvironmentRepos(context.Background(), envID, repos); err != nil {
+		t.Fatalf("persist task environment repos: %v", err)
+	}
 
 	row := repo.taskEnvironmentRepos[envID][0]
 	if row.WorktreeID != "wt-existing" || row.WorktreePath != "/tasks/task-1/repo" || row.WorktreeBranch != "feature/task-1" {

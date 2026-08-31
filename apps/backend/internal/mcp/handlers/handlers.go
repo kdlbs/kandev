@@ -5,12 +5,17 @@ package handlers
 
 import (
 	"context"
+	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/adminmetrics"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -124,6 +129,27 @@ type stepCompletionSignalClaimer interface {
 	) (bool, error)
 }
 
+// completionIntentStore is intentionally a narrow optional extension of the
+// session repository. Alternate MCP test doubles and older repositories keep
+// their existing signal-bag behavior, while the production task repository
+// binds a signal to its exact active turn before it is published.
+type completionIntentStore interface {
+	taskrepository.CompletionIntentRepository
+	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
+}
+
+type completionIntentPromptIdentityProvider interface {
+	CaptureCompletionIntentPromptIdentity(ctx context.Context, sessionID string) (string, uint64, error)
+}
+
+// taskMessageActiveTurnReader is the narrow durable source-turn seam used by
+// message_task receipt admission. It deliberately does not share the
+// completion-intent interface: a queued peer report only needs the exact
+// source-turn identity used for idempotency.
+type taskMessageActiveTurnReader interface {
+	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
+}
+
 // conditionalSessionStateUpdater is implemented by repositories that can
 // reject stale session-state writers. Keeping it optional preserves existing
 // handler fakes and alternate repositories while production SQLite gets CAS
@@ -194,6 +220,36 @@ type SessionLauncher interface {
 	RenameSession(ctx context.Context, sessionID, name string) error
 }
 
+// deliveryAcceptanceRetryContextProvider supplies the lifecycle context that
+// owns durable post-acceptance receipt terminalization.
+type deliveryAcceptanceRetryContextProvider interface {
+	DeliveryAcceptanceRetryContext() context.Context
+}
+
+// acceptedPromptCallbackLauncher is an optional stronger dispatch seam.
+// The production orchestrator invokes callback synchronously when agentctl accepts.
+type acceptedPromptCallbackLauncher interface {
+	PromptTaskWithAcceptedCallback(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, afterDispatch func() error) (*orchestrator.PromptResult, error)
+}
+
+// acceptedCreatedSessionCallbackLauncher exposes the initial-prompt acceptance
+// boundary. A created session returns as soon as the runtime is launching, not
+// when agentctl has accepted its first prompt, so receipt finalization must use
+// this callback instead of StartCreatedSession's return.
+type acceptedCreatedSessionCallbackLauncher interface {
+	StartCreatedSessionWithAcceptedCallback(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference, afterDispatch func() error) (*executor.TaskExecution, error)
+}
+
+type taskMessageDirectDeliveryDispatch struct {
+	deliveryID string
+	leaseOwner string
+	mu         sync.Mutex
+	accepted   bool
+	pending    bool
+}
+
+type taskMessageDirectDeliveryContextKey struct{}
+
 // TaskStopper exposes the narrow coordinator halt operation used by
 // stop_task_kandev. The MCP layer owns authorization; lifecycle semantics stay
 // in the orchestrator.
@@ -207,6 +263,12 @@ type TaskStopper interface {
 type AgentPermissionService interface {
 	ListPendingAgentPermissions(ctx context.Context, taskID, sessionID string) ([]streams.PendingAgentPermission, error)
 	ResolveAgentPermission(ctx context.Context, request orchestrator.ResolveAgentPermissionRequest) (*orchestrator.ResolveAgentPermissionResult, error)
+}
+
+// StaleSessionSettler is the exact-turn recovery operation. Authorization is
+// intentionally kept in the MCP handler where trusted caller identity enters.
+type StaleSessionSettler interface {
+	SettleStaleSession(ctx context.Context, request orchestrator.StaleSessionSettlementRequest) (orchestrator.StaleSessionSettlementResult, error)
 }
 
 // TaskTitleBranchRenamer performs the best-effort branch side effect after an
@@ -267,6 +329,7 @@ type Handlers struct {
 	walkthroughService   *service.WalkthroughService
 	sessionLauncher      SessionLauncher
 	taskStopper          TaskStopper
+	staleSessionSettler  StaleSessionSettler
 	titleBranchRenamer   TaskTitleBranchRenamer
 	stopTaskGetter       func(context.Context, string) (*models.Task, error)
 	messageQueue         MessageQueuer
@@ -355,6 +418,9 @@ func NewHandlers(
 	if stopper, ok := sessionLauncher.(TaskStopper); ok {
 		h.taskStopper = stopper
 	}
+	if settler, ok := sessionLauncher.(StaleSessionSettler); ok {
+		h.staleSessionSettler = settler
+	}
 	return h
 }
 
@@ -381,6 +447,11 @@ func (h *Handlers) SetTaskStopper(stopper TaskStopper) {
 // SetAgentPermissionService wires the authorized permission domain service.
 func (h *Handlers) SetAgentPermissionService(svc AgentPermissionService) {
 	h.agentPermissionSvc = svc
+}
+
+// SetStaleSessionSettler wires narrow, evidence-gated session recovery.
+func (h *Handlers) SetStaleSessionSettler(settler StaleSessionSettler) {
+	h.staleSessionSettler = settler
 }
 
 // SetTaskTitleBranchRenamer wires the best-effort branch rename performed
@@ -467,7 +538,10 @@ func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPUpdateRepositoryBaseBranch, h.handleUpdateRepositoryBaseBranch)
 	d.RegisterFunc(ws.ActionMCPStepComplete, h.handleStepComplete)
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
+	d.RegisterFunc(ws.ActionMCPGetMessageDelivery, h.handleGetMessageDelivery)
+	d.RegisterFunc(ws.ActionMCPRetryMessageDelivery, h.handleRetryMessageDelivery)
 	d.RegisterFunc(ws.ActionMCPStopTask, h.handleStopTask)
+	d.RegisterFunc(ws.ActionMCPSettleStaleSession, h.handleSettleStaleSession)
 	d.RegisterFunc(ws.ActionMCPSpawnSession, h.handleSpawnSession)
 }
 
@@ -2318,7 +2392,24 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record signal", nil)
 	}
 	if !stored {
+		// A prior successful bag write can outlive a failed intent write. A
+		// duplicate call repairs that partial admission from the original,
+		// authoritative signal rather than from this retry's potentially
+		// different summary.
+		if existing, ok := models.LoadPendingStepSignal(session.Metadata); ok && existing.StepID == task.WorkflowStepID {
+			if _, err := h.createCompletionIntent(ctx, session, task, existing); err != nil {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record completion intent", nil)
+			}
+		}
 		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, launchStepID, session)
+	}
+	intent, err := h.createCompletionIntent(ctx, session, task, signal)
+	if err != nil {
+		h.logger.Error("failed to persist step-completion intent",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.SessionID),
+			zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record completion intent", nil)
 	}
 
 	// Counted here, at the durable bag write, not after publishStepCompletionEvent
@@ -2338,11 +2429,75 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return errMsg, err
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+	response := map[string]interface{}{
 		"accepted":    true,
 		"step_id":     task.WorkflowStepID,
 		"signaled_at": signal.SignaledAt,
-	})
+	}
+	if intent != nil {
+		response["completion_intent_id"] = intent.ID
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+// createCompletionIntent records the durable exact-turn owner for a signal.
+// A no-turn response remains compatible with old WAITING_FOR_INPUT callers;
+// a live RUNNING provider session always has a durable turn and therefore gets
+// an intent that later reconciliation can settle without trusting memory.
+func (h *Handlers) createCompletionIntent(
+	ctx context.Context,
+	session *models.TaskSession,
+	task *models.Task,
+	signal models.PendingStepCompletionSignal,
+) (*models.CompletionIntent, error) {
+	store, ok := h.sessionRepo.(completionIntentStore)
+	if !ok {
+		return nil, nil
+	}
+	turn, err := store.GetActiveTurnBySessionID(ctx, session.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load active turn: %w", err)
+	}
+	identityProvider, ok := h.sessionLauncher.(completionIntentPromptIdentityProvider)
+	if !ok {
+		return nil, errors.New("completion prompt identity provider is unavailable")
+	}
+	executionID, promptGeneration, err := identityProvider.CaptureCompletionIntentPromptIdentity(ctx, session.ID)
+	if err != nil {
+		return nil, fmt.Errorf("capture completion prompt identity: %w", err)
+	}
+	if executionID == "" || promptGeneration == 0 {
+		return nil, errors.New("completion prompt identity is incomplete")
+	}
+	requestedAt := signal.SignaledAt
+	intent := &models.CompletionIntent{
+		ID:               uuid.NewString(),
+		TaskID:           task.ID,
+		SessionID:        session.ID,
+		TurnID:           turn.ID,
+		WorkflowStepID:   task.WorkflowStepID,
+		AgentExecutionID: executionID,
+		PromptGeneration: int64(promptGeneration),
+		State:            models.CompletionIntentStatePending,
+		Summary:          signal.Summary,
+		Handoff:          signal.Handoff,
+		Blockers:         signal.Blockers,
+		RequestedAt:      requestedAt,
+		EligibleAt:       requestedAt.Add(models.CompletionIntentQuietGrace),
+	}
+	_, stored, err := store.CreateOrGetCompletionIntent(ctx, intent)
+	if err != nil {
+		return nil, fmt.Errorf("create or get completion intent: %w", err)
+	}
+	if count, countErr := store.CountPendingCompletionIntents(ctx); countErr != nil {
+		h.logger.Warn("failed to count pending completion intents", zap.Error(countErr))
+	} else {
+		adminmetrics.RecordCompletionPending(count)
+	}
+	return stored, nil
 }
 
 func (h *Handlers) stepCompletionLaunchStep(ctx context.Context, sessionID, fallback string) (string, error) {
@@ -2513,16 +2668,23 @@ func (h *Handlers) publishStepCompletionEvent(
 // Strict validation: missing sender_task_id, self-message, and unknown sender
 // task all reject with an MCP error rather than silently delivering an
 // unattributed message.
+// messageTaskRequest is the wire payload for message_task_kandev. It is
+// shared by handleMessageTask, existingTaskMessageDelivery, and
+// admitTaskMessageDelivery so the three call sites cannot drift out of
+// field-identical sync with each other.
+type messageTaskRequest struct {
+	TaskID            string `json:"task_id"`
+	SessionID         string `json:"session_id"`
+	Prompt            string `json:"prompt"`
+	SenderTaskID      string `json:"sender_task_id"`
+	SenderSessionID   string `json:"sender_session_id"`
+	DeliveryMode      string `json:"delivery_mode"`
+	IdempotencyKey    string `json:"idempotency_key"`
+	ReplyToQuestionID string `json:"reply_to_question_id"`
+}
+
 func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		TaskID            string `json:"task_id"`
-		SessionID         string `json:"session_id"`
-		Prompt            string `json:"prompt"`
-		SenderTaskID      string `json:"sender_task_id"`
-		SenderSessionID   string `json:"sender_session_id"`
-		DeliveryMode      string `json:"delivery_mode"`
-		ReplyToQuestionID string `json:"reply_to_question_id"`
-	}
+	var req messageTaskRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
@@ -2585,14 +2747,6 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
-	if parentReply != nil && parentReply.alreadyAnswered {
-		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-			"task_id":              req.TaskID,
-			"reply_to_question_id": req.ReplyToQuestionID,
-			stopTaskStatusKey:      "already_answered",
-		})
-	}
-
 	session, pinnedTarget, errResp := h.resolveMessageTargetSession(ctx, msg, req.TaskID, req.SessionID)
 	if errResp != nil {
 		return errResp, nil
@@ -2625,14 +2779,21 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
 			`delivery_mode="interrupt" is only allowed when the sender is the target task's direct parent`, nil)
 	}
-	if parentReply != nil {
-		// Claim the durable question before dispatch. A failed status update after
-		// delivery would make a retry send the same answer a second time.
-		if err := h.markParentQuestionAnswered(ctx, parentReply.message, req.Prompt); err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "parent question could not be claimed: "+err.Error(), nil)
+	if parentReply != nil && parentReply.alreadyAnswered {
+		delivery, lookupErr := h.existingTaskMessageDelivery(ctx, req.TaskID, session, wrappedPrompt, req)
+		if lookupErr != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load message delivery receipt: "+lookupErr.Error(), nil)
 		}
+		response := map[string]interface{}{
+			"task_id": req.TaskID, "reply_to_question_id": req.ReplyToQuestionID, stopTaskStatusKey: "already_answered",
+		}
+		if delivery != nil {
+			response["delivery_id"] = delivery.ID
+			response["delivery_status"] = delivery.State
+			response["idempotency_key"] = delivery.IdempotencyKey
+		}
+		return ws.NewResponse(msg.ID, msg.Action, response)
 	}
-
 	// The sender session is the causal actor for anything this dispatch does
 	// on its own behalf, including RestoreTaskMessageRollback if a later
 	// step fails — thread it onto ctx so that rollback's ledger row (if any)
@@ -2647,12 +2808,45 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 			SessionID: req.SenderSessionID,
 		})
 	}
+	delivery, handled, directLeaseOwner, admissionErr := h.admitTaskMessageDelivery(
+		dispatchCtx, req.TaskID, session, wrappedPrompt, senderMeta, req,
+	)
+	if admissionErr != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to persist message delivery receipt: "+admissionErr.Error(), nil)
+	}
+	// Do not close the question until its response has a durable receipt. A
+	// persistence failure must leave the question visible and retryable.
+	if parentReply != nil {
+		if err := h.markParentQuestionAnswered(ctx, parentReply.message, req.Prompt); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "parent question could not be claimed: "+err.Error(), nil)
+		}
+	}
+	if handled {
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+			"task_id":         req.TaskID,
+			"session_id":      delivery.TargetSessionID,
+			stopTaskStatusKey: taskMessageStatusQueued,
+			"delivery_id":     delivery.ID,
+			"delivery_status": delivery.State,
+			"idempotency_key": delivery.IdempotencyKey,
+		})
+	}
+	if delivery != nil {
+		senderMeta[messagequeue.MetadataDeliveryID] = delivery.ID
+		senderMeta[messagequeue.MetadataLifecycleDurable] = true
+		if directLeaseOwner != "" {
+			dispatchCtx = context.WithValue(dispatchCtx, taskMessageDirectDeliveryContextKey{}, &taskMessageDirectDeliveryDispatch{deliveryID: delivery.ID, leaseOwner: directLeaseOwner})
+		}
+	}
 	// pinnedTarget, not `req.SessionID != ""`: a fallback chosen because the
 	// primary is terminal is pinned too, or the idle dispatch path re-resolves
 	// it straight back to that terminal primary.
 	result, err := h.dispatchTaskMessage(dispatchCtx, req.TaskID, session, wrappedPrompt, senderMeta, wantsInterrupt, pinnedTarget)
 	if err != nil {
-		if parentReply != nil {
+		if delivery != nil && directLeaseOwner != "" {
+			_, _ = h.sessionLauncher.GetMessageQueue().RescheduleDelivery(ctx, delivery.ID, directLeaseOwner, "direct_dispatch_failed")
+		} else if parentReply != nil {
 			if restoreErr := h.restoreParentQuestionPending(ctx, parentReply.message); restoreErr != nil {
 				h.logger.Error("failed to restore parent question after answer dispatch failure",
 					zap.String(parentQuestionIDKey, parentReply.message.ID), zap.Error(restoreErr))
@@ -2666,11 +2860,188 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+	if delivery != nil && directLeaseOwner != "" {
+		if directDispatch, _ := dispatchCtx.Value(taskMessageDirectDeliveryContextKey{}).(*taskMessageDirectDeliveryDispatch); directDispatch != nil && directDispatch.snapshot().accepted {
+			delivery, err = h.sessionLauncher.GetMessageQueue().GetDeliveryReceipt(ctx, delivery.ID)
+		} else if directDispatch != nil && directDispatch.snapshot().pending {
+			// The initial prompt has been handed to the runtime but has not yet
+			// crossed agentctl's acceptance boundary. Leave the receipt reserved;
+			// an expired pre-acceptance reservation is reclaimable after restart.
+			delivery, err = h.sessionLauncher.GetMessageQueue().GetDeliveryReceipt(ctx, delivery.ID)
+		} else {
+			delivery, err = h.finalizeDirectTaskMessageDelivery(ctx, delivery, directLeaseOwner, result)
+		}
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to finalize message delivery receipt: "+err.Error(), nil)
+		}
+	}
+	response := map[string]interface{}{
 		"task_id":         req.TaskID,
 		"session_id":      result.sessionID,
 		stopTaskStatusKey: result.status,
+	}
+	if delivery != nil {
+		response["delivery_id"] = delivery.ID
+		response["delivery_status"] = delivery.State
+		response["idempotency_key"] = delivery.IdempotencyKey
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+func (h *Handlers) finalizeDirectTaskMessageDelivery(ctx context.Context, delivery *messagequeue.Delivery, leaseOwner string, result taskMessageDispatchResult) (*messagequeue.Delivery, error) {
+	queue := h.sessionLauncher.GetMessageQueue()
+	// An interrupt schedules FIFO execution asynchronously. Its accepted-prompt
+	// callback can win before this handler regains control, so never overwrite
+	// that terminal/ambiguous outcome with a post-return direct finalization.
+	if current, err := queue.GetDeliveryReceipt(ctx, delivery.ID); err != nil || current == nil {
+		return current, err
+	} else if current.State == messagequeue.DeliveryQueued || current.State == messagequeue.DeliveryDelivered || current.State == messagequeue.DeliveryAmbiguous {
+		return current, nil
+	}
+	if result.status != taskMessageStatusQueued {
+		return h.confirmAcceptedDirectTaskMessageDelivery(ctx, delivery.ID, leaseOwner)
+	}
+	queueEntryID := result.queuedEntryID
+	if queueEntryID == "" {
+		var found bool
+		var err error
+		queueEntryID, found, err = queue.FindQueueEntryForDelivery(ctx, result.sessionID, delivery.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			return nil, errors.New("queued delivery entry not found")
+		}
+	}
+	return queue.MarkDeliveryQueued(ctx, delivery.ID, leaseOwner, queueEntryID)
+}
+
+func (h *Handlers) existingTaskMessageDelivery(ctx context.Context, targetTaskID string, targetSession *models.TaskSession, prompt string, req messageTaskRequest) (*messagequeue.Delivery, error) {
+	if h.sessionLauncher == nil || targetSession == nil {
+		return nil, nil
+	}
+	queue := h.sessionLauncher.GetMessageQueue()
+	if queue == nil || !queue.SupportsDeliveryReceipts() {
+		return nil, nil
+	}
+	turn, eligible, err := h.taskMessageSourceTurn(ctx, req.SenderTaskID, req.SenderSessionID)
+	if err != nil || !eligible {
+		return nil, err
+	}
+	mode := req.DeliveryMode
+	if mode == "" {
+		mode = deliveryModeQueued
+	}
+	key := req.IdempotencyKey
+	if key == "" {
+		key = deriveTaskMessageDeliveryKey(req.SenderSessionID, turn.ID, targetTaskID, targetSession.ID, mode, req.ReplyToQuestionID, prompt)
+	}
+	return queue.GetDeliveryReceiptBySourceKey(ctx, req.SenderSessionID, turn.ID, key)
+}
+
+// admitTaskMessageDelivery persists every eligible task-mode handoff before
+// dispatch. Busy sessions leave their receipt pending for the worker; direct
+// WAITING/CREATED, interrupt, and reply paths lease the receipt so a replay
+// observes it instead of starting a second prompt.
+func (h *Handlers) admitTaskMessageDelivery(
+	ctx context.Context,
+	targetTaskID string,
+	targetSession *models.TaskSession,
+	prompt string,
+	metadata map[string]interface{},
+	req messageTaskRequest,
+) (*messagequeue.Delivery, bool, string, error) {
+	queue := h.taskMessageReceiptQueue(targetSession)
+	if queue == nil {
+		return nil, false, "", nil
+	}
+	sourceTurn, eligible, err := h.taskMessageSourceTurn(ctx, req.SenderTaskID, req.SenderSessionID)
+	if err != nil {
+		return nil, false, "", err
+	}
+	if !eligible {
+		return nil, false, "", nil
+	}
+	deliveryMode := req.DeliveryMode
+	if deliveryMode == "" {
+		deliveryMode = deliveryModeQueued
+	}
+	key := req.IdempotencyKey
+	if key == "" {
+		key = deriveTaskMessageDeliveryKey(
+			req.SenderSessionID, sourceTurn.ID, targetTaskID, targetSession.ID,
+			deliveryMode, req.ReplyToQuestionID, prompt,
+		)
+	}
+	delivery, created, err := queue.CreateOrGetDeliveryReceipt(ctx, messagequeue.Delivery{
+		SenderTaskID:    req.SenderTaskID,
+		SenderSessionID: req.SenderSessionID,
+		SourceTurnID:    sourceTurn.ID,
+		IdempotencyKey:  key,
+		TargetTaskID:    targetTaskID,
+		TargetSessionID: targetSession.ID,
+		DeliveryMode:    deliveryMode,
+		Content:         prompt,
+		Metadata:        metadata,
+		State:           messagequeue.DeliveryPendingCapacity,
 	})
+	if err != nil {
+		return nil, false, "", err
+	}
+	busy := targetSession.State == models.TaskSessionStateRunning || targetSession.State == models.TaskSessionStateStarting
+	if busy && req.DeliveryMode != deliveryModeInterrupt && req.ReplyToQuestionID == "" {
+		return delivery, true, "", nil
+	}
+	if !created {
+		return delivery, true, "", nil
+	}
+	leaseOwner := "mcp-direct-" + uuid.NewString()
+	delivery, claimed, err := queue.ReserveDeliveryForDirectDispatch(ctx, delivery.ID, leaseOwner)
+	if err != nil {
+		return nil, false, "", err
+	}
+	if !claimed {
+		return delivery, true, "", nil
+	}
+	return delivery, false, leaseOwner, nil
+}
+
+func (h *Handlers) taskMessageReceiptQueue(targetSession *models.TaskSession) *messagequeue.Service {
+	if targetSession == nil || h.sessionLauncher == nil {
+		return nil
+	}
+	if targetSession.State == models.TaskSessionStateFailed || targetSession.State == models.TaskSessionStateCancelled {
+		return nil
+	}
+	queue := h.sessionLauncher.GetMessageQueue()
+	if queue == nil || !queue.SupportsDeliveryReceipts() {
+		return nil
+	}
+	return queue
+}
+
+func (h *Handlers) taskMessageSourceTurn(ctx context.Context, senderTaskID, senderSessionID string) (*models.Turn, bool, error) {
+	turnReader, ok := h.sessionRepo.(taskMessageActiveTurnReader)
+	if !ok || senderSessionID == "" {
+		return nil, false, nil
+	}
+	turn, err := turnReader.GetActiveTurnBySessionID(ctx, senderSessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("load source turn: %w", err)
+	}
+	return turn, turn != nil && turn.TaskID == senderTaskID, nil
+}
+
+func deriveTaskMessageDeliveryKey(
+	senderSessionID, sourceTurnID, targetTaskID, targetSessionID, deliveryMode, replyToQuestionID, prompt string,
+) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		senderSessionID, sourceTurnID, targetTaskID, targetSessionID, deliveryMode, replyToQuestionID, prompt,
+	}, "\x00")))
+	return fmt.Sprintf("derived:%x", sum[:])
 }
 
 // lookupSenderSessionName resolves the sender session's user-supplied name for
@@ -3207,9 +3578,20 @@ func (h *Handlers) dispatchPreparedTaskMessage(ctx context.Context, taskID strin
 			// Record before starting so the message is tied to the turn produced
 			// by launch. If launch fails, delete the row below.
 			recorded := h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
-			if _, err := h.sessionLauncher.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, prompt, true, false, true, nil, nil); err != nil {
+			var startErr error
+			if launcher, ok := h.sessionLauncher.(acceptedCreatedSessionCallbackLauncher); ok {
+				if callback := h.directDeliveryAcceptedCallback(ctx); callback != nil {
+					directDeliveryDispatchFromContext(ctx).setPending()
+					_, startErr = launcher.StartCreatedSessionWithAcceptedCallback(ctx, taskID, session.ID, session.AgentProfileID, prompt, true, false, true, nil, nil, callback)
+				} else {
+					_, startErr = h.sessionLauncher.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, prompt, true, false, true, nil, nil)
+				}
+			} else {
+				_, startErr = h.sessionLauncher.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, prompt, true, false, true, nil, nil)
+			}
+			if startErr != nil {
 				h.deleteRecordedUserMessage(ctx, recorded)
-				return taskMessageDispatchResult{}, fmt.Errorf("failed to start session: %w", err)
+				return taskMessageDispatchResult{}, fmt.Errorf("failed to start session: %w", startErr)
 			}
 			return taskMessageDispatchResult{status: "started", sessionID: session.ID}, nil
 		}
@@ -3294,13 +3676,10 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 // QueueAndInterruptForPeerMessage's doc comment for the full race this
 // closes.
 //
-// The returned status reflects what actually happened: "sent" only when
-// the interrupt actually dispatched the message immediately (the returned
-// bool), or "queued" when the cancel-and-take step ran but genuinely
-// failed to dispatch anything (see cancelAndTakeForPeerMessage's doc
-// comment for that case — it does not include lock contention, since
-// QueueAndInterruptForPeerMessage always waits for the lock rather than
-// skipping a busy one).
+// The returned status remains "queued" until the asynchronous FIFO execution
+// has crossed the agentctl acceptance boundary. The returned bool only means
+// cancellation and scheduling succeeded; it is never evidence that a prompt
+// was accepted.
 // A failure past the queue insert is deliberately NOT surfaced as an error to the caller —
 // the message is already safely persisted and will still be delivered by
 // the normal turn-completion drain, so the interrupt is purely a latency
@@ -3335,11 +3714,11 @@ func (h *Handlers) queueThenInterruptTaskMessage(ctx context.Context, taskID str
 			zap.Error(err))
 		return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queued.ID}, nil
 	}
-	result := taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queued.ID}
-	if dispatched {
-		result.status = taskMessageStatusSent
-	}
-	return result, nil
+	// dispatchTakenQueuedMessage only schedules asynchronous execution. The
+	// durable receipt remains queued until that execution reaches the real
+	// agentctl acceptance callback.
+	_ = dispatched
+	return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queued.ID}, nil
 }
 
 func (h *Handlers) prepareSessionForTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, pinnedTarget bool) (*models.TaskSession, orchestrator.ProcessOnTurnStartResult, error) {
@@ -3661,8 +4040,23 @@ func (h *Handlers) deleteRecordedUserMessage(ctx context.Context, message *model
 // Uses dispatch-only mode so the MCP tool returns once the prompt is accepted
 // rather than blocking for the entire target turn.
 func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, prompt string) (string, error) {
-	_, err := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil, true)
+	promptTask := func() (*orchestrator.PromptResult, error) {
+		if launcher, ok := h.sessionLauncher.(acceptedPromptCallbackLauncher); ok {
+			if callback := h.directDeliveryAcceptedCallback(ctx); callback != nil {
+				return launcher.PromptTaskWithAcceptedCallback(ctx, taskID, sessionID, prompt, "", false, nil, true, callback)
+			}
+		}
+		return h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil, true)
+	}
+	_, err := promptTask()
 	if err == nil {
+		return taskMessageStatusSent, nil
+	}
+	if dispatch := directDeliveryDispatchFromContext(ctx); dispatch != nil && dispatch.snapshot().accepted {
+		return taskMessageStatusSent, nil
+	}
+	var accepted interface{ DetachedResumeAccepted() bool }
+	if errors.As(err, &accepted) && accepted.DetachedResumeAccepted() {
 		return taskMessageStatusSent, nil
 	}
 	if !errors.Is(err, executor.ErrExecutionNotFound) {
@@ -3676,10 +4070,124 @@ func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, 
 	if waitErr := h.taskSvc.WaitForSessionReady(ctx, sessionID); waitErr != nil {
 		return "", fmt.Errorf("session not ready after resume: %w", waitErr)
 	}
-	if _, retryErr := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil, true); retryErr != nil {
+	if _, retryErr := promptTask(); retryErr != nil {
 		return "", fmt.Errorf("failed to send prompt after resume: %w", retryErr)
 	}
 	return taskMessageStatusSent, nil
+}
+
+func (h *Handlers) directDeliveryAcceptedCallback(ctx context.Context) func() error {
+	dispatch := directDeliveryDispatchFromContext(ctx)
+	if dispatch == nil {
+		return nil
+	}
+	// CREATED-session acceptance happens after the transport handler returns.
+	// Retry under the orchestrator-owned lifetime so shutdown cancels it.
+	callbackCtx := ctx
+	if owner, ok := h.sessionLauncher.(deliveryAcceptanceRetryContextProvider); ok {
+		callbackCtx = owner.DeliveryAcceptanceRetryContext()
+	}
+	return func() error {
+		if err := h.markDirectDeliveryAcceptanceUncertainWithRetry(callbackCtx, dispatch.deliveryID, dispatch.leaseOwner); err != nil {
+			return err
+		}
+		// The durable, non-replayable marker committed, so this receipt is now
+		// safe from lease-expiry reclaim no matter what happens next. Report
+		// acceptance immediately rather than risk promptWithAutoResume treating
+		// an already-accepted prompt as undelivered and resuming/reprompting it.
+		dispatch.markAccepted()
+		_, err := h.acknowledgeAcceptedDirectTaskMessageDelivery(callbackCtx, dispatch.deliveryID, dispatch.leaseOwner)
+		return err
+	}
+}
+
+// directDeliveryAcceptanceUncertainMarkerBackoff is the base backoff duration
+// for retrying the durable acceptance-uncertain marker. That single UPDATE is
+// idempotent (guarded by state and lease-owner), so retrying it after a
+// transient database error is safe. Once agentctl has accepted the prompt
+// there is no safe recovery path that prevents replay of an already-accepted
+// prompt, so this must keep trying until the marker commits or the context is
+// cancelled.
+const directDeliveryAcceptanceUncertainMarkerBackoff = 500 * time.Millisecond
+
+func (h *Handlers) markDirectDeliveryAcceptanceUncertainWithRetry(ctx context.Context, deliveryID, leaseOwner string) error {
+	queue := h.sessionLauncher.GetMessageQueue()
+	attempt := 0
+	for {
+		attempt++
+		if _, err := queue.MarkDirectDeliveryAcceptanceUncertain(ctx, deliveryID, leaseOwner); err != nil {
+			select {
+			case <-time.After(time.Duration(attempt) * directDeliveryAcceptanceUncertainMarkerBackoff):
+			case <-ctx.Done():
+				return fmt.Errorf("persist direct delivery acceptance marker cancelled after %d attempt(s): %w", attempt, context.Cause(ctx))
+			}
+			continue
+		}
+		return nil
+	}
+}
+
+// confirmAcceptedDirectTaskMessageDelivery writes the non-replayable marker
+// before attempting the delivered transition. A delivered acknowledgement can
+// fail safely after that point: the persisted ambiguous receipt is the durable
+// callback outcome and the worker will never reclaim it.
+func (h *Handlers) confirmAcceptedDirectTaskMessageDelivery(ctx context.Context, deliveryID, leaseOwner string) (*messagequeue.Delivery, error) {
+	if err := h.markDirectDeliveryAcceptanceUncertainWithRetry(ctx, deliveryID, leaseOwner); err != nil {
+		return nil, err
+	}
+	return h.acknowledgeAcceptedDirectTaskMessageDelivery(ctx, deliveryID, leaseOwner)
+}
+
+// acknowledgeAcceptedDirectTaskMessageDelivery attempts the delivered
+// transition after the non-replayable acceptance marker has already
+// committed. A failure here can be handled safely: the persisted ambiguous
+// receipt is the durable outcome and the worker will never reclaim it.
+func (h *Handlers) acknowledgeAcceptedDirectTaskMessageDelivery(ctx context.Context, deliveryID, leaseOwner string) (*messagequeue.Delivery, error) {
+	queue := h.sessionLauncher.GetMessageQueue()
+	delivery, err := queue.AcknowledgeDirectDelivery(ctx, deliveryID, leaseOwner)
+	if err == nil {
+		return delivery, nil
+	}
+	// The marker already committed, so this is an inspectable ambiguous outcome
+	// rather than a failed dispatch or a reason to replay the accepted prompt.
+	stored, loadErr := queue.GetDeliveryReceipt(ctx, deliveryID)
+	if loadErr != nil {
+		return nil, errors.Join(err, loadErr)
+	}
+	if stored != nil && stored.State == messagequeue.DeliveryAmbiguous {
+		return stored, nil
+	}
+	return nil, err
+}
+
+func directDeliveryDispatchFromContext(ctx context.Context) *taskMessageDirectDeliveryDispatch {
+	dispatch, _ := ctx.Value(taskMessageDirectDeliveryContextKey{}).(*taskMessageDirectDeliveryDispatch)
+	return dispatch
+}
+
+func (d *taskMessageDirectDeliveryDispatch) setPending() {
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	d.pending = true
+	d.mu.Unlock()
+}
+
+func (d *taskMessageDirectDeliveryDispatch) markAccepted() {
+	d.mu.Lock()
+	d.accepted = true
+	d.pending = false
+	d.mu.Unlock()
+}
+
+func (d *taskMessageDirectDeliveryDispatch) snapshot() struct{ accepted, pending bool } {
+	if d == nil {
+		return struct{ accepted, pending bool }{}
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return struct{ accepted, pending bool }{accepted: d.accepted, pending: d.pending}
 }
 
 // publishQueueStatusEvent fires a queue.status_changed event so the frontend
