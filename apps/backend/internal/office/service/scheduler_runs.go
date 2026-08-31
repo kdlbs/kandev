@@ -116,11 +116,17 @@ func (s *Service) releaseTaskCheckoutForRun(ctx context.Context, run *models.Run
 	}
 }
 
-// stampRunFinished records the cooldown timestamp for the agent that ran
-// this run. It is shared by the AgentCompleted/AgentStopped event subscribers
-// so their completion paths cannot drift apart. run.AgentProfileID is the
-// launching agent's own identity (processRun resolves the agent from the run),
-// so no extra agent load is needed here.
+// stampRunFinished closes out a launched run for its agent: it records the
+// cooldown timestamp and returns the agent from "working" to "idle". It is
+// shared by the AgentCompleted/AgentStopped event subscribers so their
+// completion paths cannot drift apart — which is exactly why the status
+// reset belongs here rather than duplicated at each call site. AgentStopped
+// routes to handleAgentCompleted (see event_subscribers.go), so this one
+// seam covers both normal completion and cancellation; the failure path
+// clears the status in HandleAgentFailure instead.
+//
+// run.AgentProfileID is the launching agent's own identity (processRun
+// resolves the agent from the run), so no extra agent load is needed here.
 func (s *Service) stampRunFinished(ctx context.Context, run *models.Run) {
 	if run == nil || run.AgentProfileID == "" {
 		return
@@ -131,6 +137,7 @@ func (s *Service) stampRunFinished(ctx context.Context, run *models.Run) {
 			zap.String("agent_id", run.AgentProfileID),
 			zap.Error(err))
 	}
+	s.clearAgentWorking(ctx, run.AgentProfileID)
 }
 
 // publishRunProcessed emits an OfficeRunProcessed bus event with the

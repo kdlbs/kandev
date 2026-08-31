@@ -343,7 +343,19 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 	// busy on this task" lock that ClaimNextEligibleRun respects, so
 	// new runs (comments, status changes) for the same agent + task
 	// queue up rather than racing the active turn.
-	si.launchAgent(ctx, run, agent, taskID, execCfg.Type, launchCtx)
+	// Mark before launching, not after: launchAgent returns only once the
+	// adapter has been invoked, by which point a fast run's completion
+	// event may already have been processed — a mark-after-launch would
+	// race that reset and strand the agent showing "working" forever.
+	si.svc.markAgentWorking(ctx, agent)
+	if !si.launchAgent(ctx, run, agent, taskID, execCfg.Type, launchCtx) {
+		// The adapter was never invoked, so no AgentCompleted/AgentStopped/
+		// AgentFailed event will arrive to clear the status. Clear it here
+		// instead. Redundant with the failure paths that route through
+		// HandleAgentFailure, and deliberately so: failTasklessRun calls
+		// MarkRunFailed directly and reaches neither of them.
+		si.svc.clearAgentWorking(ctx, agent.ID)
+	}
 }
 
 // assembleAgentPrompt builds the wake-context prompt, decides whether the
