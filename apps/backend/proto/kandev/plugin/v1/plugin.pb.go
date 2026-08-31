@@ -3613,12 +3613,14 @@ type WorkflowStep struct {
 	// The on_enter action TYPES configured on this step, as authored
 	// (e.g. "auto_start_agent", "queue_run"), so a plugin can describe this
 	// step's intent instead of guessing from the step name or stage_type.
-	// A type appearing here means it is configured, not a guarantee of when or
-	// whether it fires: arrival at a step runs its session-independent actions
-	// on every route, while session-shaped actions additionally require a live
-	// arriving session. Action config is deliberately not exposed: it carries
-	// target task ids, payloads and profile ids. Plugins must ignore action
-	// types they do not recognize.
+	// A type appearing here means it is configured, not a guarantee of when
+	// or whether it fires: arrival at a step always runs its
+	// session-independent actions, while session-shaped actions run through
+	// the orchestrator's own synchronous entry handling instead — which
+	// creates the session itself when starting one, as auto_start_agent
+	// does, rather than requiring one to already exist. Action config is
+	// deliberately not exposed: it carries target task ids, payloads and
+	// profile ids. Plugins must ignore action types they do not recognize.
 	OnEnterActionTypes []string `protobuf:"bytes,10,rep,name=on_enter_action_types,json=onEnterActionTypes,proto3" json:"on_enter_action_types,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
