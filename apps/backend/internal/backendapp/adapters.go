@@ -233,6 +233,7 @@ func buildLifecycleLaunchRequest(
 		TaskDescription:               req.TaskDescription,
 		Attachments:                   convertToLifecycleAttachments(req.Attachments),
 		Env:                           req.Env,
+		ManagedGitPushEnv:             req.ManagedGitPushEnv,
 		ApprovedSecretEnvKeys:         append([]string(nil), req.ApprovedSecretEnvKeys...),
 		EnvironmentDefinitions:        append([]runtimeenv.Definition(nil), req.EnvironmentDefinitions...),
 		EnvironmentResolutionRequired: req.EnvironmentResolutionRequired,

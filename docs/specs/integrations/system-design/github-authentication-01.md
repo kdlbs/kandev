@@ -120,11 +120,20 @@ automation under different GitHub Apps without operating separate Kandev deploym
 - Repository preparation validates any contribution destination before issuing credentials, adds a
   collision-resistant dedicated fork remote, and reconstructs it on launch and resume. It never
   accepts a fork inferred from the checkout's current remotes or a caller-provided repository name.
+  Before fork lease issuance, the runtime binding must also contain the task attachment's exact valid
+  checkout branch. Agentctl validates that branch and the explicit non-rewriting
+  `HEAD:refs/heads/<task-branch>` refspec before the managed push subprocess receives the private fork
+  scope. The managed subprocess disables repository-controlled Git hooks. General agent, shell, tracker,
+  and command environments retain canonical scopes only.
 - Managed session preflight runs contributor-fork preparation before it validates repository scopes
   or persists the session. It skips executor-owned and explicit profile-token paths, preserves an
   existing `remote_contribution` or `contribution_destination`, and ignores non-canonical repositories.
   A legacy canonical row may receive only the stable provider ID from the verified destination. A
   running session is not mutated because its credential scopes are immutable.
+- Contributor-fork preparation persists a destination with a metadata-only optimistic mutation on the
+  exact task/repository attachment. A compare-and-swap miss reloads and rechecks the attachment and any
+  existing contribution binding. This preserves concurrent branch, policy, position, and unrelated
+  metadata changes instead of writing an earlier full-row snapshot.
 - Git failures while inspecting or reconciling a managed checkout preserve a bounded,
   credential-redacted diagnostic. Git's dubious-ownership failure is classified as a service/data
   ownership mismatch with guidance to restore the intended Kandev service account or reconcile the
@@ -148,11 +157,12 @@ automation under different GitHub Apps without operating separate Kandev deploym
   pre-existing Bash environment hooks, including hook paths containing `$VAR` or `${VAR}`
   references from the effective child environment. Broker-disabled and executor-inheritance
   processes receive no shell hook or managed-tool path.
-- Under managed routing, every authorized task execution surface receives the same current
+- Under managed routing, every authorized task execution surface receives the same canonical
   task-scoped Git environment: the agent subprocess, terminal shells, passthrough-agent PTYs, and
-  task-scoped command processes. This includes the broker contract, managed indexed Git
-  configuration, and the `agentctl`/`gh` shim-first `PATH`; it does not grant access to a browser
-  client, an unrelated host shell, or another workspace's task environment.
+  task-scoped command processes. This includes the canonical broker contract, managed indexed Git
+  configuration, and the `agentctl`/`gh` shim-first `PATH`. A contributor-fork scope is the exception:
+  agentctl retains it separately for the validated managed-push subprocess. Neither environment grants
+  access to a browser client, an unrelated host shell, or another workspace's task environment.
 - Kandev composes the indexed `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_<n>` /
   `GIT_CONFIG_VALUE_<n>` protocol across host, executor, profile, task, and agentctl boundaries.
   Unrelated entries such as hooks, notes, safe-directory, and URL-rewrite settings survive in their

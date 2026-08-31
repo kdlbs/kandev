@@ -300,7 +300,7 @@ func collectContributionDestinations(req *LaunchRequest) (map[string]models.Cont
 		if req.ContributionDestination == nil {
 			return nil, nil
 		}
-		if err := req.ContributionDestination.Validate(); err != nil {
+		if err := req.ContributionDestination.ValidateForPublication(); err != nil {
 			return nil, fmt.Errorf("validate contribution destination: %w", err)
 		}
 		return map[string]models.ContributionDestination{"": *req.ContributionDestination}, nil
@@ -310,7 +310,7 @@ func collectContributionDestinations(req *LaunchRequest) (map[string]models.Cont
 		if spec.ContributionDestination == nil {
 			continue
 		}
-		if err := spec.ContributionDestination.Validate(); err != nil {
+		if err := spec.ContributionDestination.ValidateForPublication(); err != nil {
 			return nil, fmt.Errorf("validate contribution destination for repository %q: %w", spec.RepoName, err)
 		}
 		key := ""
@@ -881,6 +881,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
 		Protocol:                       string(agentConfig.Runtime().Protocol),
 		Env:                            env,
+		ManagedGitPushEnv:              cloneStringMap(reqWithWorktree.ManagedGitPushEnv),
 		AutoApprovePermissions:         profileInfo != nil && profileInfo.AutoApprove,
 		AutoApprovePermissionsOverride: autoApproveOverride,
 		Metadata:                       metadata,

@@ -48,6 +48,7 @@ type ContainerConfig struct {
 	SessionID                      string
 	ExecutorProfileID              string
 	Credentials                    map[string]string
+	ManagedGitPushEnv              map[string]string
 	AutoApprovePermissions         bool
 	AutoApprovePermissionsOverride *bool
 	ProfileInfo                    *AgentProfileInfo
@@ -94,11 +95,12 @@ func buildContainerCreateInstanceRequest(
 	stripEnv []string,
 ) *agentctl.CreateInstanceRequest {
 	return &agentctl.CreateInstanceRequest{
-		ID:            config.InstanceID,
-		WorkspacePath: "/workspace",
-		AgentCommand:  "",
-		AgentType:     agentType,
-		Env:           config.Credentials,
+		ID:                config.InstanceID,
+		WorkspacePath:     "/workspace",
+		AgentCommand:      "",
+		AgentType:         agentType,
+		Env:               config.Credentials,
+		ManagedGitPushEnv: config.ManagedGitPushEnv,
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			config.AutoApprovePermissions,
 			config.AutoApprovePermissionsOverride,

@@ -659,6 +659,7 @@ func buildSSHCreateInstanceRequest(
 		ContributionDestinations: req.ContributionDestinations,
 		ComparisonTargets:        req.ComparisonTargets,
 		Env:                      sshRemoteContributionEnv(req, agentctlBin),
+		ManagedGitPushEnv:        cloneStringMap(req.ManagedGitPushEnv),
 	}
 }
 

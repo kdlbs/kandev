@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/kandev/kandev/internal/common/securityutil"
 )
 
 const (
@@ -56,8 +58,12 @@ func (b ContributionDestinationCredentialBinding) Validate() error {
 // It is authored by the server after provider verification and persisted on
 // the canonical task-repository attachment.
 type ContributionDestination struct {
-	Version           int                                       `json:"version"`
-	Provider          string                                    `json:"provider"`
+	Version  int    `json:"version"`
+	Provider string `json:"provider"`
+	// HeadBranch is bound at launch from the task-repository checkout branch.
+	// Persisted provider verification records may omit it; managed publication
+	// fails closed unless the runtime binding contains an exact valid branch.
+	HeadBranch        string                                    `json:"head_branch,omitempty"`
 	SourceRepository  ContributionDestinationRepository         `json:"source_repository"`
 	TargetRepository  ContributionDestinationRepository         `json:"target_repository"`
 	CredentialBinding *ContributionDestinationCredentialBinding `json:"credential_binding,omitempty"`
@@ -73,6 +79,9 @@ func (d ContributionDestination) Validate() error {
 	if d.Provider != ContributionDestinationProviderGitHub {
 		return fmt.Errorf("contribution destination provider %q is unsupported", d.Provider)
 	}
+	if d.HeadBranch != "" && !securityutil.IsValidBranchName(d.HeadBranch) {
+		return fmt.Errorf("contribution destination head_branch %q is invalid", d.HeadBranch)
+	}
 	if err := validateContributionDestinationRepository("source_repository", d.SourceRepository); err != nil {
 		return err
 	}
@@ -85,6 +94,19 @@ func (d ContributionDestination) Validate() error {
 	if strings.EqualFold(d.SourceRepository.Path, d.TargetRepository.Path) ||
 		(d.SourceRepository.ProviderID != "" && d.SourceRepository.ProviderID == d.TargetRepository.ProviderID) {
 		return errors.New("contribution destination source and target must be different repositories")
+	}
+	return nil
+}
+
+// ValidateForPublication requires the runtime-only task branch in addition to
+// the persisted provider binding. Callers must pass this gate before making a
+// destination credential redeemable or invoking a managed push.
+func (d ContributionDestination) ValidateForPublication() error {
+	if err := d.Validate(); err != nil {
+		return err
+	}
+	if !securityutil.IsValidBranchName(d.HeadBranch) {
+		return errors.New("contribution destination task branch is missing or invalid")
 	}
 	return nil
 }

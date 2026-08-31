@@ -73,9 +73,20 @@ Runtime materialization preserves canonical `origin` and adds a collision-resist
 the bound fork. The task branch tracks that remote for ordinary `git push`; pull, base comparison, issue
 lookup, and pull-request creation continue to target the canonical repository explicitly. Managed GitHub
 credentials add a second lease only when its owner/repository exactly matches a valid destination binding
-on the same task attachment. The broker authorizer compares canonical, target, and parent provider IDs and
-re-reads the target through the current workspace automation connection at both lease issuance and
-redemption. A path reused by a deleted-and-recreated repository cannot inherit an old lease.
+on the same task attachment and the attachment supplies an exact valid checkout branch. That fork lease is
+not included in the agent, task shell, tracker, or arbitrary command environment. Agentctl retains it in a
+private managed-push environment and makes it available only after validating the destination remote, the
+current branch, and the explicit non-rewriting `HEAD:refs/heads/<task-branch>` refspec. That subprocess
+disables repository-controlled Git hooks so a local `pre-push` hook cannot inherit the private lease. The
+broker authorizer
+compares canonical, target, and parent provider IDs and re-reads the target through the current workspace
+automation connection at both lease issuance and redemption. A path reused by a deleted-and-recreated
+repository cannot inherit an old lease.
+
+Launch-time compatibility preparation persists the destination with a metadata-only compare-and-swap on
+the exact task/repository attachment. Each retry reloads and rechecks existing contribution bindings. It
+must not replace the attachment row or overwrite concurrent base-branch, checkout-branch, position, policy,
+or unrelated metadata changes.
 
 If task policy becomes executor-owned or an explicit executor `GH_TOKEN`/`GITHUB_TOKEN` is present, the
 runtime clears any managed destination from the launch request and uses the separate unmanaged compatibility
@@ -95,8 +106,9 @@ is executor-owned; it must never use that fallback after a managed preparation f
 ## Consequences
 
 - GitHub issue and pull-request integration continue to use `kdlbs/kandev`.
-- Managed mode exposes at most the canonical repository plus one server-verified fork to the task, instead
-  of the executor's ambient GitHub authority.
+- Managed mode exposes the canonical repository scopes to the normal task environment and reserves at most
+  one server-verified fork scope for agentctl's branch-bound managed-push path, instead of exposing the
+  executor's ambient GitHub authority.
 - Fork resolution or creation becomes required synchronous task-creation work for Improve Kandev
   implementation tasks that use managed credentials. Failure leaves no partly launched task.
 - The binding and remote setup must be projected through every supported executor and reconstructed on
@@ -112,6 +124,8 @@ is executor-owned; it must never use that fallback after a managed preparation f
 - Ordinary canonical tasks can publish reviewed work through the same server-authored destination contract
   after starting a fresh managed session; no caller-authored remote, arbitrary fork, or fork creation is
   accepted by this compatibility path.
+- Concurrent edits to the task-repository attachment survive launch-time destination binding; a competing
+  contribution binding causes the compatibility write to become a no-op rather than replacing it.
 - User-managed local repository rows retain their existing remote exemption. Kandev-managed provider rows
   continue to reconcile `origin` to canonical HTTPS.
 

@@ -287,6 +287,7 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		ExecutorProfileID:              getMetadataString(req.Metadata, "executor_profile_id"),
 		InstanceID:                     req.InstanceID,
 		Credentials:                    req.Env,
+		ManagedGitPushEnv:              req.ManagedGitPushEnv,
 		AutoApprovePermissions:         req.AutoApprovePermissions,
 		AutoApprovePermissionsOverride: req.AutoApprovePermissionsOverride,
 		McpServers:                     req.McpServers,
@@ -578,10 +579,11 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		}
 	}
 	return &agentctl.CreateInstanceRequest{
-		ID:            instanceID,
-		WorkspacePath: dockerWorkspacePath,
-		AgentType:     agentType,
-		Env:           cloneStringMap(req.Env),
+		ID:                instanceID,
+		WorkspacePath:     dockerWorkspacePath,
+		AgentType:         agentType,
+		Env:               cloneStringMap(req.Env),
+		ManagedGitPushEnv: cloneStringMap(req.ManagedGitPushEnv),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,

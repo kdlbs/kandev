@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"maps"
 	"strings"
 	"testing"
 
@@ -11,12 +12,14 @@ import (
 )
 
 type fakeContributorForkService struct {
-	policy     github.TaskGitCredentialPolicy
-	policyErr  error
-	resolution github.ContributionForkResolution
-	resolveErr error
-	calls      int
-	create     bool
+	policy         github.TaskGitCredentialPolicy
+	policyErr      error
+	resolution     github.ContributionForkResolution
+	resolveErr     error
+	calls          int
+	create         bool
+	resolveStarted chan struct{}
+	resolveRelease <-chan struct{}
 }
 
 func (f *fakeContributorForkService) DescribeTaskGitCredentialPolicy(
@@ -30,6 +33,12 @@ func (f *fakeContributorForkService) ResolveContributionForkForWorkspace(
 ) (github.ContributionForkResolution, error) {
 	f.calls++
 	f.create = create
+	if f.resolveStarted != nil {
+		close(f.resolveStarted)
+	}
+	if f.resolveRelease != nil {
+		<-f.resolveRelease
+	}
 	return f.resolution, f.resolveErr
 }
 
@@ -72,12 +81,30 @@ func (r *fakeContributorForkTaskRepository) ListTaskRepositories(
 	return r.links, nil
 }
 
-func (r *fakeContributorForkTaskRepository) UpdateTaskRepository(
-	_ context.Context, taskRepository *taskmodels.TaskRepository,
-) error {
+func (r *fakeContributorForkTaskRepository) BindTaskRepositoryContributionDestination(
+	_ context.Context,
+	id, taskID, repositoryID string,
+	destination *taskmodels.ContributionDestination,
+) (*taskmodels.TaskRepository, bool, error) {
+	current := r.links[0]
+	if current.ID != id || current.TaskID != taskID || current.RepositoryID != repositoryID {
+		return nil, false, context.Canceled
+	}
+	bound, err := hasContributorPublicationBinding(current.Metadata)
+	if err != nil || bound {
+		return current, false, err
+	}
+	updated := *current
+	updated.Metadata = maps.Clone(current.Metadata)
+	if updated.Metadata == nil {
+		updated.Metadata = make(map[string]interface{})
+	}
+	if err := taskmodels.PutContributionDestination(updated.Metadata, destination); err != nil {
+		return nil, false, err
+	}
 	r.updates++
-	r.links[0] = taskRepository
-	return nil
+	r.links[0] = &updated
+	return &updated, true, nil
 }
 
 func TestPrepareContributorForkLeaseBindsExistingWorkspaceForkForOrdinaryTask(t *testing.T) {
@@ -113,6 +140,44 @@ func TestPrepareContributorForkLeaseBindsExistingWorkspaceForkForOrdinaryTask(t 
 	got, ok, err := taskmodels.LoadContributionDestination(repo.links[0].Metadata)
 	if err != nil || !ok || got != destination {
 		t.Fatalf("stored destination = %#v, %v, %v; want %#v, true, nil", got, ok, err, destination)
+	}
+}
+
+func TestPrepareContributorForkLeasePreservesConcurrentAttachmentChanges(t *testing.T) {
+	destination := testBoundContributorForkDestination()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	provider := &fakeContributorForkService{
+		policy: github.TaskGitCredentialPolicy{Mode: github.TaskGitCredentialsModeManaged},
+		resolution: github.ContributionForkResolution{
+			Status: github.ContributionForkStatusReady, Destination: &destination,
+		},
+		resolveStarted: started,
+		resolveRelease: release,
+	}
+	repo := ordinaryContributorTaskRepository(canonicalContributorRepository())
+	repo.links[0].BaseBranch = "main"
+	preparer := &githubContributionDestinationPreparer{service: provider, repo: repo}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- preparer.PrepareContributorForkLease(context.Background(), "workspace-1", "task-1")
+	}()
+	<-started
+	concurrent := *repo.links[0]
+	concurrent.BaseBranch = "release/concurrent"
+	concurrent.Metadata = map[string]interface{}{"concurrent": "preserved"}
+	repo.links[0] = &concurrent
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("PrepareContributorForkLease() error = %v", err)
+	}
+
+	if repo.links[0].BaseBranch != "release/concurrent" || repo.links[0].Metadata["concurrent"] != "preserved" {
+		t.Fatalf("concurrent attachment change was overwritten: %#v", repo.links[0])
+	}
+	if _, ok, err := taskmodels.LoadContributionDestination(repo.links[0].Metadata); err != nil || !ok {
+		t.Fatalf("destination missing after concurrent update: ok=%v err=%v metadata=%#v", ok, err, repo.links[0].Metadata)
 	}
 }
 

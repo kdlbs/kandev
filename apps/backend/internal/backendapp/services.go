@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"net/url"
 	"path/filepath"
 	"strconv"
@@ -394,7 +393,9 @@ type contributorForkTaskRepository interface {
 	GetTask(context.Context, string) (*taskmodels.Task, error)
 	GetRepository(context.Context, string) (*taskmodels.Repository, error)
 	ListTaskRepositories(context.Context, string) ([]*taskmodels.TaskRepository, error)
-	UpdateTaskRepository(context.Context, *taskmodels.TaskRepository) error
+	BindTaskRepositoryContributionDestination(
+		context.Context, string, string, string, *taskmodels.ContributionDestination,
+	) (*taskmodels.TaskRepository, bool, error)
 }
 
 // PrepareContributorForkLease is the launch-time path for an ordinary task
@@ -464,15 +465,9 @@ func (p *githubContributionDestinationPreparer) prepareExistingContributorFork(
 	if err := p.reconcileContributorProviderID(ctx, repository, canonicalProviderID); err != nil {
 		return err
 	}
-	updated := *attachment
-	updated.Metadata = maps.Clone(attachment.Metadata)
-	if updated.Metadata == nil {
-		updated.Metadata = make(map[string]interface{})
-	}
-	if err := taskmodels.PutContributionDestination(updated.Metadata, destination); err != nil {
-		return fmt.Errorf("bind contributor publication destination: %w", err)
-	}
-	if err := p.repo.UpdateTaskRepository(ctx, &updated); err != nil {
+	if _, _, err := p.repo.BindTaskRepositoryContributionDestination(
+		ctx, attachment.ID, taskID, attachment.RepositoryID, destination,
+	); err != nil {
 		return fmt.Errorf("persist contributor publication destination: %w", err)
 	}
 	return nil

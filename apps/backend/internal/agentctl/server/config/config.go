@@ -180,6 +180,8 @@ type InstanceConfig struct {
 
 	// AgentEnv is the environment variables to pass to the agent
 	AgentEnv []string
+	// ManagedGitPushEnv overrides AgentEnv only for managed Git operations.
+	ManagedGitPushEnv []string
 
 	// AutoStart starts the agent automatically
 	AutoStart bool
@@ -545,6 +547,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.WorkspaceSourceRoots != nil {
 		cfg.WorkspaceSourceRoots = append([]string(nil), overrides.WorkspaceSourceRoots...)
 	}
+	if overrides.ManagedGitPushEnv != nil {
+		cfg.ManagedGitPushEnv = append([]string(nil), overrides.ManagedGitPushEnv...)
+	}
 }
 
 // applyApprovalOverrides sets approval-related instance overrides. Env is a
@@ -572,6 +577,7 @@ type InstanceOverrides struct {
 	WorkDir                  string
 	AutoStart                *bool
 	Env                      []string
+	ManagedGitPushEnv        []string
 	AutoApprovePermissions   *bool
 	ApprovalPolicy           string
 	AgentType                string

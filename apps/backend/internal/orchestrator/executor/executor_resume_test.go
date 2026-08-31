@@ -1269,6 +1269,28 @@ func TestApplyResumeWorktreeConfigPreservesSelectedRepositoryDestination(t *test
 	}
 }
 
+func TestResolveTaskRepoInfoBindsContributionDestinationToCheckoutBranch(t *testing.T) {
+	destination := resumeTestContributionDestination("200")
+	metadata := map[string]interface{}{}
+	if err := models.PutContributionDestination(metadata, &destination); err != nil {
+		t.Fatal(err)
+	}
+	repo := newMockRepository()
+	repo.repositories["repo-1"] = &models.Repository{ID: "repo-1", Provider: "github"}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	info, err := exec.resolveTaskRepoInfoForSession(context.Background(), "session-1", &models.TaskRepository{
+		ID: "link-1", TaskID: "task-1", RepositoryID: "repo-1",
+		CheckoutBranch: "feature/task-owned", Metadata: metadata,
+	})
+	if err != nil {
+		t.Fatalf("resolveTaskRepoInfoForSession() = %v", err)
+	}
+	if info.ContributionDestination == nil || info.ContributionDestination.HeadBranch != "feature/task-owned" {
+		t.Fatalf("runtime destination = %#v, want exact checkout branch", info.ContributionDestination)
+	}
+}
+
 func resumeTestContributionDestination(providerID string) models.ContributionDestination {
 	return models.ContributionDestination{
 		Version:  models.ContributionDestinationVersion,

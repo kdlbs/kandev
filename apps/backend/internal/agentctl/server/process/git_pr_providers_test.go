@@ -92,8 +92,9 @@ func TestGitOperatorCreatePR_ContributionDestinationUsesCanonicalTargetAndForkHe
 	runGit(t, repoDir, "commit", "-m", "managed destination")
 
 	destination := &taskmodels.ContributionDestination{
-		Version:  taskmodels.ContributionDestinationVersion,
-		Provider: taskmodels.ContributionDestinationProviderGitHub,
+		Version:    taskmodels.ContributionDestinationVersion,
+		Provider:   taskmodels.ContributionDestinationProviderGitHub,
+		HeadBranch: "feature/managed-destination",
 		SourceRepository: taskmodels.ContributionDestinationRepository{
 			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
 		},
@@ -152,8 +153,9 @@ func TestGitOperatorCreatePR_ContributionDestinationRejectsNonGitHubOrigin(t *te
 	runGit(t, repoDir, "commit", "-m", "managed destination")
 
 	destination := &taskmodels.ContributionDestination{
-		Version:  taskmodels.ContributionDestinationVersion,
-		Provider: taskmodels.ContributionDestinationProviderGitHub,
+		Version:    taskmodels.ContributionDestinationVersion,
+		Provider:   taskmodels.ContributionDestinationProviderGitHub,
+		HeadBranch: "feature/managed-destination",
 		SourceRepository: taskmodels.ContributionDestinationRepository{
 			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
 		},

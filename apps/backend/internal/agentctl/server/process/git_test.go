@@ -198,8 +198,9 @@ func TestGitOperatorContributionDestinationPushesWithoutChangingPullRemote(t *te
 	headSHA := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
 
 	destination := &taskmodels.ContributionDestination{
-		Version:  taskmodels.ContributionDestinationVersion,
-		Provider: taskmodels.ContributionDestinationProviderGitHub,
+		Version:    taskmodels.ContributionDestinationVersion,
+		Provider:   taskmodels.ContributionDestinationProviderGitHub,
+		HeadBranch: "feature/destination",
 		SourceRepository: taskmodels.ContributionDestinationRepository{
 			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
 		},
@@ -215,9 +216,22 @@ func TestGitOperatorContributionDestinationPushesWithoutChangingPullRemote(t *te
 	// remote after binding so the operator exercises the server-authored name.
 	runGit(t, repoDir, "remote", "rename", "contrib-destination", destination.ContributionRemoteName())
 	runGit(t, repoDir, "remote", "set-url", "--push", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
+	hookDir := t.TempDir()
+	hookMarker := filepath.Join(t.TempDir(), "pre-push-ran")
+	writeExecutable(t, filepath.Join(hookDir, "pre-push"), "#!/bin/sh\ntouch "+hookMarker+"\n")
+	runGit(t, repoDir, "config", "core.hooksPath", hookDir)
 
 	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
 	operator.setContributionDestination(destination)
+	managedCredentialUses := 0
+	operator.setManagedPushEnvironmentProvider(func() []string {
+		managedCredentialUses++
+		return os.Environ()
+	})
+	branch, refspec, err := operator.contributionDestinationRefspec(context.Background())
+	if err != nil || branch != "feature/destination" || refspec != "HEAD:refs/heads/feature/destination" {
+		t.Fatalf("validated publication = branch %q, refspec %q, err %v", branch, refspec, err)
+	}
 	forced, err := operator.Push(context.Background(), true, false)
 	if err != nil {
 		t.Fatalf("forced Push returned error: %v", err)
@@ -237,6 +251,56 @@ func TestGitOperatorContributionDestinationPushesWithoutChangingPullRemote(t *te
 	}
 	if got := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin")); got == "" {
 		t.Fatal("origin remote was removed or rewritten")
+	}
+	if managedCredentialUses != 1 {
+		t.Fatalf("managed credential environment uses = %d, want exactly one validated push", managedCredentialUses)
+	}
+	if _, err := os.Stat(hookMarker); !os.IsNotExist(err) {
+		t.Fatalf("managed push executed repository-controlled pre-push hook: %v", err)
+	}
+}
+
+func TestGitOperatorContributionDestinationRejectsNonTaskBranch(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	targetDir := t.TempDir()
+	runGit(t, targetDir, "init", "--bare")
+	runGit(t, repoDir, "checkout", "-b", "feature/not-task-owned")
+	destination := &taskmodels.ContributionDestination{
+		Version:    taskmodels.ContributionDestinationVersion,
+		Provider:   taskmodels.ContributionDestinationProviderGitHub,
+		HeadBranch: "feature/task-owned",
+		SourceRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "agent/kandev", ProviderID: "200", RemoteURL: "https://github.com/agent/kandev.git",
+		},
+	}
+	runGit(t, repoDir, "remote", "add", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
+	runGit(t, repoDir, "remote", "set-url", "--push", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
+	runGit(t, repoDir, "config", "url."+targetDir+".insteadOf", destination.TargetRepository.RemoteURL)
+
+	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
+	operator.setContributionDestination(destination)
+	managedCredentialUses := 0
+	operator.setManagedPushEnvironmentProvider(func() []string {
+		managedCredentialUses++
+		return os.Environ()
+	})
+	result, err := operator.Push(context.Background(), false, false)
+	if err != nil {
+		t.Fatalf("Push returned error: %v", err)
+	}
+	if result.Success || !strings.Contains(result.Error, "does not match task branch") {
+		t.Fatalf("Push = %+v, want task-branch rejection", result)
+	}
+	if output := strings.TrimSpace(runGit(t, targetDir, "for-each-ref", "--format=%(refname)", "refs/heads")); output != "" {
+		t.Fatalf("rejected push created remote refs: %q", output)
+	}
+	if managedCredentialUses != 0 {
+		t.Fatalf("rejected branch exposed managed credential environment %d times", managedCredentialUses)
 	}
 }
 

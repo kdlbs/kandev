@@ -385,6 +385,9 @@ type LaunchAgentRequest struct {
 	Priority             string
 	Metadata             map[string]interface{}
 	Env                  map[string]string
+	// ManagedGitPushEnv is delivered only to agentctl's trusted Git operator.
+	// It must never be inherited by the agent process, task shell, or tracker.
+	ManagedGitPushEnv map[string]string
 	// ApprovedSecretEnvKeys contains repository binding keys that SSH may
 	// forward in addition to its managed credential allowlist. Values are
 	// still taken only from Env; the key list is the explicit repository grant.

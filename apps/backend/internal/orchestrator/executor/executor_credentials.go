@@ -55,6 +55,7 @@ type githubCredentialScope struct {
 	Path              string `json:"path"`
 	ProviderID        string `json:"provider_id,omitempty"`
 	ParentProviderID  string `json:"parent_provider_id,omitempty"`
+	managedPushOnly   bool
 }
 
 // GitCredentialLeaseIssuer creates opaque helper leases. *gitcredentials.Broker
@@ -395,11 +396,23 @@ func (e *Executor) configureGitCredentialEnvironment(
 	scopes []githubCredentialScope,
 	helpers map[string]struct{},
 ) error {
-	encodedScopes, err := json.Marshal(scopes)
+	publicScopes := make([]githubCredentialScope, 0, len(scopes))
+	hasManagedPushScope := false
+	for _, scope := range scopes {
+		if scope.managedPushOnly {
+			hasManagedPushScope = true
+			continue
+		}
+		publicScopes = append(publicScopes, scope)
+	}
+	if len(publicScopes) == 0 {
+		return errors.New("managed Git credentials require at least one agent-visible repository scope")
+	}
+	encodedScopes, err := json.Marshal(publicScopes)
 	if err != nil {
 		return fmt.Errorf("encode GitHub credential scopes: %w", err)
 	}
-	primary := scopes[0]
+	primary := publicScopes[0]
 	req.Env[githubauth.CredentialBrokerURLEnv] = e.gitCredentialBrokerURL
 	req.Env[githubauth.CredentialLeaseEnv] = primary.Lease
 	req.Env[githubauth.CredentialReissueCapabilityEnv] = primary.ReissueCapability
@@ -410,6 +423,13 @@ func (e *Executor) configureGitCredentialEnvironment(
 	req.Env[githubauth.CredentialRepoEnv] = primary.Repo
 	req.Env[githubauth.CredentialHostEnv] = primary.Host
 	req.Env[githubauth.CredentialScopesEnv] = string(encodedScopes)
+	if hasManagedPushScope {
+		managedScopes, err := json.Marshal(scopes)
+		if err != nil {
+			return fmt.Errorf("encode managed Git push credential scopes: %w", err)
+		}
+		req.ManagedGitPushEnv = map[string]string{githubauth.CredentialScopesEnv: string(managedScopes)}
+	}
 	req.Env["GIT_TERMINAL_PROMPT"] = "0"
 	switch models.ExecutorType(req.ExecutorType) {
 	case "", models.ExecutorTypeLocal, models.ExecutorTypeWorktree:
@@ -463,7 +483,11 @@ func removeManagedGitHubCredentials(req *LaunchAgentRequest) error {
 }
 
 func removeManagedGitCredentials(req *LaunchAgentRequest) error {
-	if req == nil || req.Env == nil {
+	if req == nil {
+		return nil
+	}
+	req.ManagedGitPushEnv = nil
+	if req.Env == nil {
 		return nil
 	}
 	for _, key := range []string{
@@ -601,7 +625,7 @@ func (e *Executor) issueGitHubContributionDestinationCredentialScope(
 	if destination == nil {
 		return nil, nil
 	}
-	if err := destination.Validate(); err != nil {
+	if err := destination.ValidateForPublication(); err != nil {
 		return nil, fmt.Errorf("validate contribution destination credential scope: %w", err)
 	}
 	if destination.Provider != models.ContributionDestinationProviderGitHub || info.Repository == nil {
@@ -629,10 +653,14 @@ func (e *Executor) issueGitHubContributionDestinationCredentialScope(
 	if strings.EqualFold(destination.TargetRepository.Path, canonicalPath) {
 		return nil, nil
 	}
-	return e.issueGitHubCredentialScopeForIdentity(
+	scope, err := e.issueGitHubCredentialScopeForIdentity(
 		ctx, req, info.RepositoryID, parts[0], parts[1], defaultGitHubHost,
 		destination.TargetRepository.ProviderID, destination.SourceRepository.ProviderID, destination.CredentialBinding,
 	)
+	if scope != nil {
+		scope.managedPushOnly = true
+	}
+	return scope, err
 }
 
 func (e *Executor) issueGitHubCredentialScopeForIdentity(
