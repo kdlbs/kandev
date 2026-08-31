@@ -88,11 +88,27 @@ function resolveGitExcludePath(worktreePath: string): string {
   const gitPath = path.join(worktreePath, ".git");
   const stat = fs.statSync(gitPath);
   if (stat.isFile()) {
-    // linked worktree: ".git" is a "gitdir: <abs>" pointer file
+    // linked worktree: ".git" is a "gitdir: <abs>" pointer file. That
+    // per-worktree gitdir has its own info/ dir, but git reads
+    // info/exclude from the shared common dir (found via the gitdir's
+    // "commondir" file), not from here — mirrors resolveCommonDir in
+    // internal/agent/runtime/lifecycle/skill/inject.go.
     const text = fs.readFileSync(gitPath, "utf8").trim();
     const match = text.match(/^gitdir:\s*(.+)$/m);
     if (!match) throw new Error(`unparseable .git file: ${text}`);
-    return path.join(match[1], "info", "exclude");
+    return path.join(resolveCommonDir(match[1]), "info", "exclude");
   }
   return path.join(gitPath, "info", "exclude");
+}
+
+function resolveCommonDir(gitDir: string): string {
+  const commonDirFile = path.join(gitDir, "commondir");
+  if (!fs.existsSync(commonDirFile)) {
+    return gitDir;
+  }
+  const commonDir = fs.readFileSync(commonDirFile, "utf8").trim();
+  if (!commonDir) {
+    return gitDir;
+  }
+  return path.isAbsolute(commonDir) ? commonDir : path.join(gitDir, commonDir);
 }
