@@ -1,7 +1,7 @@
 ---
 id: "02-normalize-structured-app-confirmations"
 title: "Normalize structured app confirmations"
-status: pending
+status: completed
 wave: 2
 depends_on:
   - "01-standardize-surface-typography-primitives"
@@ -91,4 +91,27 @@ pnpm run i18n:check
 
 ## Results
 
-Pending implementation.
+- RED: The focused component tests failed on the pre-change markup because the
+  Quick Chat description had no local `min-w-0` containment and the
+  agent-profile conflict body had no structured `space-y-2` spacing. Existing
+  behavior tests remained green.
+- GREEN: Added local structured-description classes and semantic list-item
+  containment to the Quick Chat delete and agent-profile delete conflict
+  dialogs. Preserved all localized copy, blocker groups, action variants,
+  callbacks, and existing scroll containment.
+- Added focused component assertions for the rendered description boundary,
+  direct paragraph/list structure, long dynamic task values, class-level
+  containment, and Quick Chat Delete callback behavior.
+- Focused verification passed with 2 test files and 13 tests:
+  `pnpm --filter @kandev/web test --
+  components/quick-chat/quick-chat-delete-dialog.test.tsx
+  components/settings/agent-profile-delete-dialog.test.tsx`
+- Final exact-head checks passed: web typecheck, focused ESLint with
+  `--max-warnings 0`, `pnpm run i18n:check`, Prettier checks for all four
+  owned source/test files, `git diff --check`, and
+  `python3 scripts/lint-spec-files.py --all`.
+- Owned files:
+  `apps/web/components/quick-chat/quick-chat-delete-dialog.tsx`,
+  `apps/web/components/quick-chat/quick-chat-delete-dialog.test.tsx`,
+  `apps/web/components/settings/agent-profile-delete-dialog.tsx`, and
+  `apps/web/components/settings/agent-profile-delete-dialog.test.tsx`.
