@@ -2,12 +2,84 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+func TestQueuedUserWorkAdmissionFailureLeavesCompletionPending(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if err := repo.CreateTurn(ctx, &models.Turn{ID: "turn-rejected", TaskID: "t1", TaskSessionID: "s1", StartedAt: now}); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	_, _, err := repo.CreateOrGetCompletionIntent(ctx, &models.CompletionIntent{
+		ID: "intent-rejected", TaskID: "t1", SessionID: "s1", TurnID: "turn-rejected", WorkflowStepID: "step1",
+		State: models.CompletionIntentStatePending, RequestedAt: now, EligibleAt: now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("CreateOrGetCompletionIntent: %v", err)
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	admissionErr := errors.New("queue is full")
+
+	queued, err := svc.AdmitQueuedUserWork(ctx, "t1", "s1", func(context.Context) (*messagequeue.QueuedMessage, error) {
+		return nil, admissionErr
+	})
+	if !errors.Is(err, admissionErr) || queued != nil {
+		t.Fatalf("AdmitQueuedUserWork = (%+v, %v), want nil, %v", queued, err, admissionErr)
+	}
+	intent, err := repo.GetCompletionIntent(ctx, "intent-rejected")
+	if err != nil {
+		t.Fatalf("GetCompletionIntent: %v", err)
+	}
+	if intent.State != models.CompletionIntentStatePending {
+		t.Fatalf("intent state after rejected queue admission = %q, want pending", intent.State)
+	}
+}
+
+func TestQueuedUserWorkAdmissionReopensRecoveredSettlingIntent(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if err := repo.CreateTurn(ctx, &models.Turn{ID: "turn-settling", TaskID: "t1", TaskSessionID: "s1", StartedAt: now}); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	_, _, err := repo.CreateOrGetCompletionIntent(ctx, &models.CompletionIntent{
+		ID: "intent-settling", TaskID: "t1", SessionID: "s1", TurnID: "turn-settling", WorkflowStepID: "step1",
+		State: models.CompletionIntentStatePending, RequestedAt: now, EligibleAt: now,
+	})
+	if err != nil {
+		t.Fatalf("CreateOrGetCompletionIntent: %v", err)
+	}
+	claimed, err := repo.ClaimCompletionIntentForSettlement(ctx, "intent-settling", now, now.Add(time.Minute))
+	if err != nil || !claimed {
+		t.Fatalf("ClaimCompletionIntentForSettlement = (%v, %v), want true, nil", claimed, err)
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+
+	_, err = svc.AdmitQueuedUserWork(ctx, "t1", "s1", func(admittedCtx context.Context) (*messagequeue.QueuedMessage, error) {
+		return svc.messageQueue.QueueMessage(admittedCtx, "s1", "t1", "continue working", "", messagequeue.QueuedByUser, false, nil)
+	})
+	if err != nil {
+		t.Fatalf("AdmitQueuedUserWork: %v", err)
+	}
+	intent, err := repo.GetCompletionIntent(ctx, "intent-settling")
+	if err != nil {
+		t.Fatalf("GetCompletionIntent: %v", err)
+	}
+	if intent.State != models.CompletionIntentStateReopened {
+		t.Fatalf("intent state after queued work = %q, want reopened", intent.State)
+	}
+}
 
 func TestReconcileDueCompletionIntentsDoesNotSettleReplacedExecution(t *testing.T) {
 	ctx := context.Background()

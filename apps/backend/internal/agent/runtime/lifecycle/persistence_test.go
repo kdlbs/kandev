@@ -128,6 +128,26 @@ func TestPersistExecutorRunningReturnsUpsertFailure(t *testing.T) {
 	}
 }
 
+func TestBeginPromptFailsWhenPromptGenerationCannotPersist(t *testing.T) {
+	writer := &captureExecutorRunningWriter{upsertErr: errors.New("database is locked")}
+	mgr := newTestManager(t)
+	mgr.SetExecutorRunningWriter(writer)
+	if err := mgr.executionStore.Add(&AgentExecution{
+		ID: "exec-prompt", TaskID: "task-1", SessionID: "session-1",
+		Status: v1.AgentStatusReady,
+	}); err != nil {
+		t.Fatalf("Add execution: %v", err)
+	}
+
+	generation, err := mgr.BeginPrompt("exec-prompt")
+	if !errors.Is(err, writer.upsertErr) {
+		t.Fatalf("BeginPrompt error = %v, want %v", err, writer.upsertErr)
+	}
+	if generation != 0 {
+		t.Fatalf("BeginPrompt generation = %d, want 0 when persistence fails", generation)
+	}
+}
+
 func TestBuildRunningFromExecutionPersistsSSHRuntimePID(t *testing.T) {
 	log := newNopLogger(t)
 	client := agentctl.NewClient("127.0.0.1", 43001, log)

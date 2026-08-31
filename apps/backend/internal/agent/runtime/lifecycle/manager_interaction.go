@@ -1549,6 +1549,12 @@ func (m *Manager) updateStatusAndPersist(ctx context.Context, executionID string
 // BeginPrompt advances prompt ownership and marks the execution running before dispatch.
 func (m *Manager) BeginPrompt(executionID string) (uint64, error) {
 	generation, err := m.executionStore.BeginPrompt(executionID)
+	if errors.Is(err, ErrPromptGenerationUnknown) {
+		if restoreErr := m.restoreRecoveredPromptGeneration(context.Background(), executionID); restoreErr != nil {
+			return 0, restoreErr
+		}
+		generation, err = m.executionStore.BeginPrompt(executionID)
+	}
 	if err != nil {
 		if errors.Is(err, ErrExecutionNotFound) {
 			return 0, fmt.Errorf("execution %q not found", executionID)
@@ -1557,9 +1563,34 @@ func (m *Manager) BeginPrompt(executionID string) (uint64, error) {
 	}
 
 	if updated, exists := m.executionStore.Get(executionID); exists {
-		m.persistExecutorRunning(context.Background(), updated)
+		if err := m.persistExecutorRunningResult(context.Background(), updated); err != nil {
+			return 0, fmt.Errorf("persist prompt generation: %w", err)
+		}
 	}
 	return generation, nil
+}
+
+func (m *Manager) restoreRecoveredPromptGeneration(ctx context.Context, executionID string) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	reader, ok := m.runningWriter.(executorRunningReader)
+	if !ok {
+		return ErrPromptGenerationUnknown
+	}
+	prior, err := reader.GetExecutorRunningBySessionID(ctx, execution.SessionID)
+	if err != nil {
+		return fmt.Errorf("reload recovered prompt generation: %w", err)
+	}
+	if prior == nil || prior.AgentExecutionID != executionID {
+		return ErrPromptGenerationUnknown
+	}
+	generation := promptGenerationFromMetadata(prior.Metadata)
+	if generation == 0 {
+		return ErrPromptGenerationUnknown
+	}
+	return m.executionStore.restoreRecoveredPromptGeneration(executionID, generation)
 }
 
 // OwnsPromptGeneration reports whether a ready event's immutable execution and

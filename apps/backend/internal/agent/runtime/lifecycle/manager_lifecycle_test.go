@@ -372,13 +372,20 @@ func TestManager_StartSeedsRecoveredExecution(t *testing.T) {
 }
 
 type recoveredPromptGenerationWriter struct {
-	mu      sync.Mutex
-	running *models.ExecutorRunning
+	mu         sync.Mutex
+	running    *models.ExecutorRunning
+	readErrors []error
+	readCalls  int
 }
 
 func (w *recoveredPromptGenerationWriter) GetExecutorRunningBySessionID(context.Context, string) (*models.ExecutorRunning, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	call := w.readCalls
+	w.readCalls++
+	if call < len(w.readErrors) && w.readErrors[call] != nil {
+		return nil, w.readErrors[call]
+	}
 	copy := *w.running
 	copy.Metadata = maps.Clone(w.running.Metadata)
 	return &copy, nil
@@ -441,5 +448,76 @@ func TestManager_StartRestoresRecoveredPromptGeneration(t *testing.T) {
 	writer.mu.Unlock()
 	if persistedGeneration != 8 {
 		t.Fatalf("persisted prompt generation = %d, want 8", persistedGeneration)
+	}
+}
+
+func TestManager_RecoveredPromptGenerationReadFailureDoesNotReuseGeneration(t *testing.T) {
+	log := newTestRegistryLogger()
+	execRegistry := NewExecutorRegistry(log)
+	execRegistry.Register(&MockExecutor{
+		name: executor.NameStandalone,
+		recoverInstances: []*ExecutorInstance{{
+			InstanceID: "exec-recovered",
+			TaskID:     "task-recovered",
+			SessionID:  "session-recovered",
+		}},
+	})
+	writer := &recoveredPromptGenerationWriter{
+		running: &models.ExecutorRunning{
+			SessionID:        "session-recovered",
+			AgentExecutionID: "exec-recovered",
+			Metadata: map[string]interface{}{
+				"prompt_generation": float64(7),
+			},
+		},
+		readErrors: []error{errors.New("temporary read failure")},
+	}
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil, ExecutorFallbackWarn, "", log)
+	mgr.SetExecutorRunningWriter(writer)
+	t.Cleanup(func() { _ = mgr.Stop() })
+
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	generation, err := mgr.BeginPrompt("exec-recovered")
+	if err != nil {
+		t.Fatalf("BeginPrompt after durable recovery became available: %v", err)
+	}
+	if generation != 8 {
+		t.Fatalf("BeginPrompt generation = %d, want recovered generation 8", generation)
+	}
+}
+
+// Reviewer-requested contract coverage: a recovered execution with no durable
+// generation must not allocate from zero and reuse an earlier prompt identity.
+func TestManager_RecoveredPromptGenerationMissingFailsClosed(t *testing.T) {
+	log := newTestRegistryLogger()
+	execRegistry := NewExecutorRegistry(log)
+	execRegistry.Register(&MockExecutor{
+		name: executor.NameStandalone,
+		recoverInstances: []*ExecutorInstance{{
+			InstanceID: "exec-recovered",
+			TaskID:     "task-recovered",
+			SessionID:  "session-recovered",
+		}},
+	})
+	writer := &recoveredPromptGenerationWriter{running: &models.ExecutorRunning{
+		SessionID:        "session-recovered",
+		AgentExecutionID: "exec-recovered",
+		Metadata:         map[string]interface{}{},
+	}}
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil, ExecutorFallbackWarn, "", log)
+	mgr.SetExecutorRunningWriter(writer)
+	t.Cleanup(func() { _ = mgr.Stop() })
+
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	generation, err := mgr.BeginPrompt("exec-recovered")
+	if !errors.Is(err, ErrPromptGenerationUnknown) {
+		t.Fatalf("BeginPrompt error = %v, want ErrPromptGenerationUnknown", err)
+	}
+	if generation != 0 {
+		t.Fatalf("BeginPrompt generation = %d, want 0", generation)
 	}
 }

@@ -64,10 +64,14 @@ func (s *Service) AdmitQueuedUserWork(
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
-	if err := s.reopenCompletionIntentForQueuedWorkLocked(ctx, taskID, sessionID); err != nil {
+	queued, err := admit(ctx)
+	if err != nil {
 		return nil, err
 	}
-	return admit(ctx)
+	if err := s.reopenCompletionIntentForQueuedWorkLocked(ctx, taskID, sessionID); err != nil {
+		return queued, err
+	}
+	return queued, nil
 }
 
 func (s *Service) reopenCompletionIntentForQueuedWorkLocked(ctx context.Context, taskID, sessionID string) error {
@@ -95,8 +99,8 @@ func (s *Service) reopenCompletionIntentForQueuedWorkLocked(ctx context.Context,
 	if intent.TaskID != taskID {
 		return fmt.Errorf("completion intent task %q does not match queued task %q", intent.TaskID, taskID)
 	}
-	if intent.State == models.CompletionIntentStatePending {
-		reopened, err := store.TransitionCompletionIntent(ctx, intent.ID, models.CompletionIntentStatePending, models.CompletionIntentStateReopened, time.Now().UTC())
+	if intent.State == models.CompletionIntentStatePending || intent.State == models.CompletionIntentStateSettling {
+		reopened, err := store.TransitionCompletionIntent(ctx, intent.ID, intent.State, models.CompletionIntentStateReopened, time.Now().UTC())
 		if err != nil {
 			return fmt.Errorf("reopen completion intent for queued work: %w", err)
 		}
