@@ -239,7 +239,7 @@ jobs:
                         }
                       }
                     `,
-                    { id },
+                    { id: currentPullRequest.id },
                   ),
               );
 
@@ -255,7 +255,7 @@ jobs:
                         }
                       }
                     `,
-                    { id },
+                    { id: currentPullRequest.id },
                   ),
               );
             }

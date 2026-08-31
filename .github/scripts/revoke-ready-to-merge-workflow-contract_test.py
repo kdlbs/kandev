@@ -49,6 +49,14 @@ class RevokeReadyToMergeWorkflowContractTest(unittest.TestCase):
         self.assertIn("attemptCleanup(\n                'auto-merge',", self.workflow)
         self.assertIn("attemptCleanup(\n                'merge queue',", self.workflow)
 
+        auto_merge_mutation = self.workflow.index("disablePullRequestAutoMerge")
+        auto_merge_block = self.workflow[auto_merge_mutation - 200 : auto_merge_mutation + 300]
+        self.assertIn("{ id: currentPullRequest.id }", auto_merge_block)
+
+        queue_mutation = self.workflow.index("dequeuePullRequest")
+        queue_block = self.workflow[queue_mutation - 200 : queue_mutation + 300]
+        self.assertIn("{ id: currentPullRequest.id }", queue_block)
+
     # @covers AC-CI-MERGE-APPROVAL-001.3
     def test_event_label_snapshot_gates_all_cleanup(self) -> None:
         gate = self.workflow.index("if (!hasApprovalLabel)")
