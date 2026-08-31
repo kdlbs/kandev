@@ -602,10 +602,12 @@ func TestHandleArchiveTask_MergedPRRunAcceptsBoundTarget(t *testing.T) {
 // resumed continuation task's metadata is refreshed for a NEW firing (as
 // orchestrator.refreshAutomationContinuationMetadata now does), the guard
 // must bind to the refreshed target, not the stale one from the first
-// firing. It exercises the metadata mutation through the same merge helper
-// production uses (Service.UpdateTaskMetadata) so this proves the guard and
-// the refresh path agree, not just that the guard reads whatever is in the
-// DB.
+// firing. It exercises the metadata mutation through repo.SetTaskMetadataKey
+// — the exact concurrent-key-safe primitive, on the exact same *sqliterepo.
+// Repository type, that orchestrator.refreshAutomationContinuationMetadata
+// calls in production (rather than the unrelated Service.UpdateTaskMetadata
+// full-row path) — so this proves the guard accepts a binding written the
+// same way production writes it, not just whatever happens to be in the DB.
 func TestHandleArchiveTask_MergedPRRunAcceptsRefreshedTargetAfterResume(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
@@ -645,12 +647,9 @@ func TestHandleArchiveTask_MergedPRRunAcceptsRefreshedTargetAfterResume(t *testi
 
 	// A second firing resumes the same continuation task and refreshes its
 	// binding — this is what orchestrator.refreshAutomationContinuationMetadata
-	// does on the reuse path.
-	_, err = svc.UpdateTaskMetadata(ctx, caller.ID, map[string]interface{}{
-		"trigger_type":                       "github_pr_merged",
-		models.MetaKeyAutomationTargetTaskID: secondTarget.ID,
-	})
-	require.NoError(t, err)
+	// does on the reuse path, one key at a time via the same primitive.
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, caller.ID, "trigger_type", "github_pr_merged"))
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, caller.ID, models.MetaKeyAutomationTargetTaskID, secondTarget.ID))
 
 	// The second merge's target is now accepted...
 	secondMsg := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{

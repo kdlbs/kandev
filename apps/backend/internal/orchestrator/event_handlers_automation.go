@@ -9,7 +9,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -432,12 +431,20 @@ func (s *Service) prepareAutomationTask(
 // metadata onto a resumed continuation task and persists it. Without this, a
 // resumed task keeps whatever metadata its FIRST firing stamped — notably
 // automation_target_task_id — so validateAutomationArchiveTarget refuses
-// every merge after the first, forever. Merge, don't replace: existing keys
-// absent from this firing's map must survive, and deferred-launch ownership
-// is server-managed and must never be clobbered by a metadata refresh (mirrors
-// task/service.UpdateTaskMetadata). A write failure is returned rather than
-// swallowed so the caller records a failed run instead of dispatching against
-// a binding that was never actually refreshed.
+// every merge after the first, forever.
+//
+// Each key is patched independently through the concurrent-key-safe
+// SetTaskMetadataKey primitive rather than a full-row UpdateTask: this call
+// site runs on a background goroutine against a task with an active session,
+// racing this package's own metadata-key claim/release primitives (deferred
+// launch, auto-start-claimed, interrupted-at, ...). A full-row write built
+// from an in-memory snapshot taken several DB round-trips earlier could
+// silently resurrect a key one of those primitives had just removed.
+// Deferred-launch ownership is server-managed and is skipped here so a
+// refresh never touches it (mirrors task/service.UpdateTaskMetadata's own
+// skip). A write failure is returned rather than swallowed so the caller
+// records a failed run instead of dispatching against a binding that was
+// never actually refreshed.
 func (s *Service) refreshAutomationContinuationMetadata(ctx context.Context, task *models.Task, metadata map[string]interface{}) error {
 	if task.Metadata == nil {
 		task.Metadata = make(map[string]interface{}, len(metadata))
@@ -446,13 +453,12 @@ func (s *Service) refreshAutomationContinuationMetadata(ctx context.Context, tas
 		if k == models.MetaKeyDeferredLaunch {
 			continue
 		}
+		if err := s.repo.SetTaskMetadataKey(ctx, task.ID, k, v); err != nil {
+			s.logger.Error("failed to refresh automation continuation task metadata",
+				zap.String("task_id", task.ID), zap.String("metadata_key", k), zap.Error(err))
+			return fmt.Errorf("refresh automation continuation metadata key %q: %w", k, err)
+		}
 		task.Metadata[k] = v
-	}
-	task.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
-		s.logger.Error("failed to refresh automation continuation task metadata",
-			zap.String("task_id", task.ID), zap.Error(err))
-		return fmt.Errorf("refresh automation continuation metadata: %w", err)
 	}
 	return nil
 }

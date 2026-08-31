@@ -424,7 +424,11 @@ func TestCreateAutomationTask_BindsMergedPRTarget(t *testing.T) {
 // whatever automation_target_task_id its FIRST firing stamped, so every merge
 // after the first is refused by validateAutomationArchiveTarget forever. The
 // per-firing metadata computed for the SECOND firing must be merged onto the
-// resumed task (and persisted), not discarded at the reuse early return.
+// resumed task (and persisted), not discarded at the reuse early return. It
+// also proves the write goes through the per-key SetTaskMetadataKey primitive
+// rather than a full-row UpdateTask (the persisted deferred-launch value
+// survives even though the firing's own metadata carries a conflicting
+// value for that key — the skip branch is exercised, not vacuously true).
 func TestPrepareAutomationTask_RefreshesTargetMetadataOnResume(t *testing.T) {
 	repo := setupTestRepo(t)
 	now := time.Now().UTC()
@@ -465,6 +469,12 @@ func TestPrepareAutomationTask_RefreshesTargetMetadataOnResume(t *testing.T) {
 		"trigger_id":                         "trg-2",
 		"trigger_type":                       string(automation.TriggerTypeGitHubPRMerged),
 		models.MetaKeyAutomationTargetTaskID: "target-task-2",
+		// Deliberately present (with a different value than the task already
+		// carries) so the skip branch in refreshAutomationContinuationMetadata
+		// actually executes. Without this key in the input map, the assertion
+		// below would pass even with no skip at all — a merge trivially
+		// preserves a key the source map never mentions.
+		models.MetaKeyDeferredLaunch: "attacker-supplied-value",
 	}
 
 	task, session, action, reason, err := svc.prepareAutomationTask(ctx, a, evt, "title", "prompt", metadata)
@@ -479,7 +489,9 @@ func TestPrepareAutomationTask_RefreshesTargetMetadataOnResume(t *testing.T) {
 	require.Equal(t, "target-task-2", persisted.Metadata[models.MetaKeyAutomationTargetTaskID],
 		"the refreshed binding must be persisted, or the guard reads the stale value back out on the next lookup")
 	require.Equal(t, "must-survive", persisted.Metadata[models.MetaKeyDeferredLaunch],
-		"deferred launch ownership is server-managed and must survive a metadata refresh untouched")
+		"deferred launch ownership is server-managed and must not be clobbered by a metadata refresh, even when the firing's own metadata map carries a value for it")
+	require.Equal(t, "must-survive", task.Metadata[models.MetaKeyDeferredLaunch],
+		"the in-memory task must also keep the original value, not the firing's attempted overwrite")
 }
 
 func TestRecordFailedRun_MergedPRDoesNotConsumeDedupKey(t *testing.T) {
