@@ -188,15 +188,17 @@ func TestInheritFromParentEnvironment_ParentSessionWins(t *testing.T) {
 	}
 }
 
-// REGRESSION: when a parent task is archived, the archive cleanup job
-// deletes the parent's task_environments row but nothing removes or
-// updates the parent's session.TaskEnvironmentID pointer. Before this
-// fix, resolveInheritedEnvironment handed that dangling id straight back
-// and inheritFromParentEnvironment bound the child's session to an
-// environment that no longer exists — the child would only discover this
-// much later, at launch time, via an unhelpful "workspace reuse is
-// unsafe" error. The fix must fail closed here instead, and the error
-// must name the archived parent so the operator knows why.
+// REGRESSION: a parent's task_environments row can go missing (deleted by
+// a DELETE cascade, or an explicit ResetTaskEnvironment — archive itself
+// preserves the row and only tears down its runtime resources) while
+// nothing removes or updates the parent's session.TaskEnvironmentID
+// pointer. Before this fix, resolveInheritedEnvironment handed that
+// dangling id straight back and inheritFromParentEnvironment bound the
+// child's session to an environment that no longer exists — the child
+// would only discover this much later, at launch time, via an unhelpful
+// "workspace reuse is unsafe" error. The fix must fail closed here
+// instead, and the error must name the archived parent so the operator
+// knows why.
 func TestInheritFromParentEnvironment_DanglingEnvironmentFailsClosed(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -250,9 +252,10 @@ func TestInheritFromParentEnvironment_DanglingEnvironmentFailsClosed(t *testing.
 // scenario this is not a hypothetical: an inherit_parent child is a member of
 // its parent's workspace group, and MarkOwnerSessionMaterialized records the
 // parent as that group's owner, so the group fallback normally returns the
-// parent's own (now-archived, now-deleted) environment id right back — the
-// same id the parent_session branch just rejected one check earlier. Both
-// branches must fail closed the same way.
+// parent's own environment id right back — the same id the parent_session
+// branch just rejected one check earlier, whether it is now dangling (the
+// row was deleted by something other than archive, which preserves it) or
+// merely live-but-useless. Both branches must fail closed the same way.
 func TestInheritFromParentEnvironment_DanglingGroupEnvironmentFailsClosed(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -273,8 +276,8 @@ func TestInheritFromParentEnvironment_DanglingGroupEnvironmentFailsClosed(t *tes
 
 	// Parent has NO sessions, so the parent_session branch is skipped and
 	// the group fallback is reached. The materializer names an env id with
-	// no matching task_environments row — as if the parent's environment
-	// had already been deleted by archive cleanup.
+	// no matching task_environments row — a dangling reference, regardless
+	// of what deleted the row (archive itself never does).
 	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID: "cs1", TaskID: "child", State: models.TaskSessionStateRunning,
 		IsPrimary: true, StartedAt: now, UpdatedAt: now,

@@ -9,8 +9,9 @@ import (
 
 // REGRESSION: an inherit_parent child created under an already-archived
 // parent must be rejected outright ("born stranded") rather than silently
-// attached to a workspace group whose owner's own task_environments row is
-// about to be (or already was) deleted by archive cleanup. This is the case
+// attached to a workspace group whose owner's runtime resources (worktree,
+// container/sandbox) are already torn down by archive — even though the
+// owner's task_environments row itself survives archive. This is the case
 // where the parent has no workspace group yet, so lookupOrCreateParentGroup
 // would otherwise take the create-new-group branch.
 func TestAttachWorkspacePolicy_InheritParentRefusesArchivedParent_NoExistingGroup(t *testing.T) {

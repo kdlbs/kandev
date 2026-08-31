@@ -997,10 +997,10 @@ func TestLaunchPreparedSession_RejectsUnavailableInheritedEnvironment(t *testing
 // REGRESSION: before this fix, an unavailable inherited environment always
 // produced the bare "inherited task environment is unavailable" message,
 // with no indication of why. When the task inherited from a parent that was
-// archived (archive cleanup deletes the parent's own task_environments row,
-// but never rewrites the child session's dangling TaskEnvironmentID
-// pointer), the error must name the archived parent so the failure is
-// actionable instead of a dead end.
+// archived (archive tears down the parent's runtime resources but preserves
+// its task_environments row, and never rewrites the child session's
+// TaskEnvironmentID pointer either way), the error must name the archived
+// parent so the failure is actionable instead of a dead end.
 func TestLaunchPreparedSession_UnavailableInheritedEnvironmentNamesArchivedParent(t *testing.T) {
 	repo := newMockRepository()
 	archivedAt := time.Now()

@@ -123,7 +123,15 @@ func (s *Service) inheritFromParentEnvironment(ctx context.Context, task *v1.Tas
 //
 // The parent session's TaskEnvironmentID is a bare foreign-key-less string:
 // nothing stops the referenced task_environments row from being deleted out
-// from under it (e.g. archive cleanup removing the parent's own workspace).
+// from under it. Archiving the parent does NOT do this by itself — archive
+// preserves the task_environments row and only tears down its runtime
+// resources (worktree, container/sandbox), so an archived parent's env row
+// still exists but its worktree is gone. The row is deleted only by a
+// DELETE cascade or an explicit ResetTaskEnvironment. Either way — a row
+// genuinely deleted, or a row that survives but names a workspace with no
+// worktree left — the referenced environment is unusable, and this check
+// closes the first case; the worktree-ownership-marker error (see
+// internal/worktree) is what surfaces the second.
 // Handing back a dangling id would bind the new session to an environment
 // that no longer exists, so the id is verified against task_environments
 // before it is trusted on BOTH branches below — a lookup failure (missing
@@ -135,8 +143,9 @@ func (s *Service) inheritFromParentEnvironment(ctx context.Context, task *v1.Tas
 // exactly the id the parent_session branch just rejected: an inherit_parent
 // child is a member of the parent's workspace group, and
 // MarkOwnerSessionMaterialized records the parent as that group's owner, so
-// GetSharedGroupEnvironment normally returns the parent's own (now dangling)
-// environment id right back.
+// GetSharedGroupEnvironment normally returns the parent's own environment
+// id right back — the same id the parent_session branch just rejected,
+// whether that id is now dangling or merely live-but-useless.
 func (s *Service) resolveInheritedEnvironment(ctx context.Context, task *v1.Task) (envID, source string) {
 	parentSessions, err := s.repo.ListTaskSessions(ctx, task.ParentID)
 	if err != nil {

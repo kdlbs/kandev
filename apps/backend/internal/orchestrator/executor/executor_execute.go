@@ -1609,11 +1609,12 @@ func bindSessionToTaskEnvironment(session *models.TaskSession, env *models.TaskE
 // describeInheritedEnvironmentUnavailable builds a diagnostic reason for a
 // missing inherited task_environments row (session.TaskEnvironmentID no
 // longer resolves). For an inherit_parent task it names the parent and, when
-// the parent was archived, calls that out explicitly — archive cleanup
-// removes the parent's own task_environments row but leaves the parent's
-// session.TaskEnvironmentID pointer in place, so a child that inherited it
-// only finds out here. shared_group members have no single parent to name,
-// so they get a generic message instead.
+// the parent was archived, calls that out explicitly — archive tears down
+// the parent's runtime resources (worktree, container/sandbox) but
+// preserves its own task_environments row, and leaves the parent's
+// session.TaskEnvironmentID pointer in place either way, so a child that
+// inherited it only finds out here. shared_group members have no single
+// parent to name, so they get a generic message instead.
 func (e *Executor) describeInheritedEnvironmentUnavailable(ctx context.Context, task *v1.Task) string {
 	if task == nil || task.ParentID == "" {
 		return "inherited task environment is unavailable: shared workspace group environment could not be resolved"

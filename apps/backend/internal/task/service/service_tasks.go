@@ -2244,10 +2244,16 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 	// 5. Publish task.updated event so frontend removes from board
 	s.publishTaskEvent(finalizeCtx, events.TaskUpdated, task, nil)
-	// 5b. An inherit_parent child that has not yet launched depends on this
-	// task's task_environments row, which the cleanup kicked off below will
-	// delete. Mark those children now, while we still know which task was
-	// archived, instead of letting them silently strand.
+	// 5b. Archive cleanup tears down this task's runtime resources (worktree,
+	// container/sandbox) but preserves its task_environments row
+	// (deleteRow: false above) — the row is deleted only by a DELETE cascade
+	// or an explicit ResetTaskEnvironment, never by archive. An inherit_parent
+	// child that has not yet launched and still depends on this task's
+	// environment is therefore left pointing at a row that either dangles
+	// later (if something does delete it) or, more immediately, survives but
+	// now names a workspace whose worktree is gone. Mark those children now,
+	// while we still know which task was archived, instead of letting them
+	// silently strand.
 	s.markOrphanedInheritParentChildren(finalizeCtx, task)
 	s.pullNextTaskOnVacate(finalizeCtx, task.WorkflowStepID, task.ID)
 	s.logger.Info("task archived",
@@ -2270,14 +2276,21 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 // markOrphanedInheritParentChildren stamps an orphan marker on archived's
 // direct, non-archived inherit_parent children that have not materialized
-// their own workspace. Archive cleanup removes archived's own
-// task_environments row, but a child's session.TaskEnvironmentID keeps
-// pointing at that now-deleted row (task_sessions.task_environment_id has
-// no foreign key) — before this, the child kept rendering as an ordinary
-// launchable CREATED card and only discovered the dangling reference days
-// later, at launch time. The fail-closed check in
-// internal/orchestrator's resolveInheritedEnvironment covers the launch
-// path; this covers detection so the card itself can be told apart later.
+// their own workspace. Archive tears down archived's runtime resources
+// (worktree, container/sandbox) but deliberately preserves its own
+// task_environments row (deleteRow: false; the row is deleted only by a
+// DELETE cascade or an explicit ResetTaskEnvironment) — so a child's
+// session.TaskEnvironmentID (task_sessions.task_environment_id has no
+// foreign key) is left pointing at a row that either dangles later, if
+// something else deletes it, or survives but now names a workspace whose
+// worktree is gone. Before this, the child kept rendering as an ordinary
+// launchable CREATED card and only discovered the problem days later, at
+// launch time. The fail-closed check in internal/orchestrator's
+// resolveInheritedEnvironment covers the dangling-row case at launch time;
+// this covers detection at archive time so the card itself can be told
+// apart later, and the worktree-layer ownership-marker message (see
+// internal/worktree/manager_lifecycle.go) covers the live-but-useless case
+// this marker cannot detect on its own.
 // Markers land under the already-open metadata.workspace map (new keys
 // alongside the existing "mode") rather than a new mode value or DTO field,
 // so they stay inert for existing frontend consumers.

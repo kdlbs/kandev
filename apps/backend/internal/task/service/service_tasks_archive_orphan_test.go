@@ -44,13 +44,15 @@ func inheritParentChildTask(id, parentID, workspaceID, workflowID string) *model
 	}
 }
 
-// REGRESSION: archiving a parent task deletes the parent's own
-// task_environments row, but a not-yet-launched inherit_parent child's
-// session.TaskEnvironmentID keeps pointing at that now-deleted row (there is
-// no foreign key). Before this fix the child kept rendering as an ordinary
-// launchable CREATED card, and only discovered the dangling reference days
-// later at launch time. ArchiveTask must stamp an orphan marker on the child
-// immediately, and publish task.updated so any listening UI picks it up.
+// REGRESSION: archiving a parent task tears down its runtime resources
+// (worktree, container/sandbox) but preserves its own task_environments
+// row, so a not-yet-launched inherit_parent child's session.TaskEnvironmentID
+// (there is no foreign key) is left pointing at a workspace whose worktree
+// is gone even though the row itself still exists. Before this fix the
+// child kept rendering as an ordinary launchable CREATED card, and only
+// discovered the problem days later at launch time. ArchiveTask must stamp
+// an orphan marker on the child immediately, and publish task.updated so
+// any listening UI picks it up.
 func TestArchiveTask_MarksUnmaterializedInheritParentChildOrphaned(t *testing.T) {
 	svc, bus, repo := createTestService(t)
 	ctx := context.Background()
