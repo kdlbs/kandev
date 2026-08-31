@@ -7,6 +7,8 @@ import { taskId, workflowId, workspaceId } from "@/lib/types/ids";
 
 const RUNNING_ICON_TEST_ID = "task-state-running";
 const BACKLOG_ICON_TEST_ID = "task-state-backlog";
+const CURRENT_STEP_ID = "step-current";
+const LIVE_UPDATED_AT = "2026-08-24T09:01:00Z";
 
 vi.mock("@kandev/ui/command", () => ({
   CommandEmpty: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -41,6 +43,7 @@ function taskResults(
   tasks: Task[],
   liveTasksById = new Map<string, CommandPanelLiveTask>(),
   lastStepIdByWorkflowId = new Map<string, string>(),
+  stepMap = new Map<string, { name: string; color: string }>(),
 ) {
   return (
     <CommandsListContent
@@ -50,7 +53,7 @@ function taskResults(
       onSelect={vi.fn()}
       taskResults={tasks}
       isSearching={false}
-      stepMap={new Map()}
+      stepMap={stepMap}
       repoMap={new Map()}
       liveTasksById={liveTasksById}
       lastStepIdByWorkflowId={lastStepIdByWorkflowId}
@@ -97,7 +100,7 @@ describe("command panel task activity icons", () => {
       position: loadedTask.position,
       state: "IN_PROGRESS",
       primarySessionState: "RUNNING",
-      updatedAt: "2026-08-24T09:01:00Z",
+      updatedAt: LIVE_UPDATED_AT,
     };
 
     const view = render(taskResults([loadedTask]));
@@ -108,27 +111,73 @@ describe("command panel task activity icons", () => {
     expect(screen.getByTestId(RUNNING_ICON_TEST_ID)).toBeTruthy();
   });
 
+  // @covers AC-UI-COMMAND-PANEL-TASK-ACTIVITY-001.8
   it("does not let an older live projection regress a newer search result", () => {
     const loadedTask = {
       ...task("task-fresh", "Fresh task"),
+      workflow_step_id: CURRENT_STEP_ID,
       state: "TODO" as const,
       updated_at: "2026-08-24T09:02:00Z",
     };
     const staleLiveTask: CommandPanelLiveTask = {
       id: loadedTask.id,
       workflowId: loadedTask.workflow_id,
-      workflowStepId: loadedTask.workflow_step_id,
+      workflowStepId: "step-stale",
       title: loadedTask.title,
       position: loadedTask.position,
       state: "IN_PROGRESS",
       primarySessionState: "RUNNING",
-      updatedAt: "2026-08-24T09:01:00Z",
+      updatedAt: LIVE_UPDATED_AT,
     };
 
-    render(taskResults([loadedTask], new Map([[loadedTask.id, staleLiveTask]])));
+    render(
+      taskResults(
+        [loadedTask],
+        new Map([[loadedTask.id, staleLiveTask]]),
+        new Map(),
+        new Map([
+          [CURRENT_STEP_ID, { name: "Review", color: "bg-purple-500" }],
+          ["step-stale", { name: "Stale step", color: "bg-slate-500" }],
+        ]),
+      ),
+    );
 
     expect(screen.getByTestId(BACKLOG_ICON_TEST_ID)).toBeTruthy();
     expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
+    expect(screen.getByText("Review")).toBeTruthy();
+    expect(screen.queryByText("Stale step")).toBeNull();
+  });
+
+  // @covers AC-UI-COMMAND-PANEL-TASK-ACTIVITY-001.8
+  it("shows the workflow step from a newer live task placement", () => {
+    const loadedTask = {
+      ...task("task-moved", "Moved task"),
+      workflow_step_id: "step-old",
+      updated_at: "2026-08-24T09:00:00Z",
+    };
+    const liveTask: CommandPanelLiveTask = {
+      id: loadedTask.id,
+      workflowId: loadedTask.workflow_id,
+      workflowStepId: CURRENT_STEP_ID,
+      title: loadedTask.title,
+      position: loadedTask.position,
+      state: loadedTask.state,
+      updatedAt: LIVE_UPDATED_AT,
+    };
+
+    render(
+      taskResults(
+        [loadedTask],
+        new Map([[loadedTask.id, liveTask]]),
+        new Map(),
+        new Map([
+          ["step-old", { name: "In Progress", color: "bg-blue-500" }],
+          [CURRENT_STEP_ID, { name: "Review", color: "bg-purple-500" }],
+        ]),
+      ),
+    );
+
+    expect(screen.getByText("Review")).toBeTruthy();
   });
 });
 
@@ -161,7 +210,7 @@ describe("command panel task activity icon edge cases", () => {
       state: "TODO",
       primarySessionState: "IDLE",
       foregroundActivity: null,
-      updatedAt: "2026-08-24T09:01:00Z",
+      updatedAt: LIVE_UPDATED_AT,
     };
 
     render(taskResults([loadedTask], new Map([[loadedTask.id, liveTask]])));

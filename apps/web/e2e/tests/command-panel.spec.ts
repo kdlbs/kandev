@@ -349,12 +349,13 @@ test.describe("Command Panel", () => {
     await expect(idleOption.getByRole("img", { name: "Created" })).toBeVisible();
   });
 
+  // @covers AC-UI-COMMAND-PANEL-TASK-ACTIVITY-001.8
   test("inline task search shows workflow step badge", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    await apiClient.createTask(seedData.workspaceId, "Badged Task E2E", {
+    const task = await apiClient.createTask(seedData.workspaceId, "Badged Task E2E", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
@@ -378,6 +379,11 @@ test.describe("Command Panel", () => {
     const taskOption = dialog.getByRole("option", { name: /Badged Task E2E/ });
     await expect(taskOption).toBeVisible({ timeout: 5_000 });
     await expect(taskOption.getByText(startStep.name)).toBeVisible({ timeout: 5_000 });
+
+    const reviewStep = seedData.steps.find((s) => s.name === "Review")!;
+    await apiClient.moveTask(task.id, seedData.workflowId, reviewStep.id);
+    await expect(taskOption.getByText(reviewStep.name)).toBeVisible({ timeout: 10_000 });
+    await expect(taskOption.getByText(startStep.name)).not.toBeVisible({ timeout: 5_000 });
   });
 
   test("inline task search selects the first matching task after loading", async ({

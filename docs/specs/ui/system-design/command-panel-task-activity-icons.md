@@ -24,7 +24,7 @@ The command panel continues to use the workspace task-list API. The bounded task
 - A shared task-state icon component owns the icon type, color, motion, size, test identifiers, and accessible description.
 - `TaskItem` continues to supply sidebar state to the shared icon component.
 - `CommandPanel` supplies search-result state and live task projections to each result row.
-- `TaskResultItem` shows the shared icon before the task title. It keeps the workflow-step badge as separate metadata.
+- `TaskResultItem` shows the shared icon before the task title. It keeps the workflow-step badge as separate metadata and derives its content from the same effective task placement used by the live activity resolver.
 - `pickFreshestStatusSummary` prevents an older HTTP result from replacing a newer live status summary.
 
 ## Shared icon presentation
@@ -58,6 +58,8 @@ For each result, the UI compares the HTTP summary with the live summary. The sum
 
 A newer task update supplies lifecycle state and interruption state. If no live task exists, the result uses the HTTP fields.
 
+The resolver also selects the effective workflow and workflow-step IDs from that same accepted live projection. `TaskResultItem` uses the effective workflow-step ID to read the step name and color from its existing step map. This keeps the badge current after a task move without a second freshness decision. If the live projection is absent or rejected as stale, the HTTP placement remains authoritative.
+
 This flow does not subscribe to session-detail streams. It follows the bounded task-status delivery contract and its revision rules.
 
 ## Responsive behavior
@@ -78,7 +80,9 @@ An older status summary cannot replace a newer live summary. A malformed optiona
 
 Component tests cover active, preparing, idle, review, completed, and missing-live-data states. They also cover a live update after search results render.
 
-The desktop command-panel test proves that a running task has the sidebar spinner. The test also proves that an idle task has no spinner.
+The desktop command-panel test proves that a running task has the sidebar spinner. The test also proves that an idle task has no spinner and that a newer live workflow placement replaces the stale search-result badge.
+
+A component regression test covers both an accepted newer live step and a stale live step, so the badge follows the same timestamp guard as the activity icon.
 
 The phone command-panel test proves the same icon state and title width. It also proves that the row causes no horizontal overflow.
 

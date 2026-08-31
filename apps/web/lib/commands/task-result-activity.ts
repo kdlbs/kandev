@@ -6,6 +6,7 @@ export type CommandPanelLiveTask = KanbanState["tasks"][number];
 
 export type TaskResultActivity = {
   state: TaskState;
+  workflowStepId: string;
   sessionState?: TaskSessionState;
   foregroundActivity?: ForegroundActivity | null;
   hasPendingClarification: boolean;
@@ -82,6 +83,7 @@ export function resolveTaskResultActivity(
 
   return {
     state: directLiveTask?.state ?? task.state,
+    workflowStepId: effectiveWorkflowStepId,
     sessionState: resolveSessionState(task, liveTask, directLiveTask),
     foregroundActivity: resolveForegroundActivity(task, liveTask, directLiveTask),
     hasPendingClarification: pendingAction === "clarification",

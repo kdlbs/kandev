@@ -117,13 +117,13 @@ function TaskResultItem({
   const { t } = useTranslation();
   const locale = useDateLocale();
   const isArchived = ARCHIVED_STATES.has(task.state);
-  const step = stepMap.get(task.workflow_step_id);
-  const stepHex = step ? STEP_COLOR_MAP[step.color] : undefined;
   const activity = resolveTaskResultActivity(
     task,
     liveTasksById.get(task.id),
     lastStepIdByWorkflowId,
   );
+  const step = stepMap.get(activity.workflowStepId);
+  const stepHex = step ? STEP_COLOR_MAP[step.color] : undefined;
   const rawPath =
     task.primary_working_directory ??
     (task.repositories?.[0] ? repoMap.get(task.repositories[0].repository_id) : undefined);
