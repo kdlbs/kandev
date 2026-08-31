@@ -270,12 +270,8 @@ those raw rows.
 `on_enter_action_types` on a step lists the on-enter action *types* configured
 for that step (e.g. `auto_start_agent`, `queue_run`), never the action
 *config* — target task ids, payloads, and profile ids stay server-side. A type
-appearing in this list means it is configured, not that it executes on every
-transition path: an ordinary task move currently runs only a subset
-(`auto_start_agent`, `configure_session`, `enable_plan_mode`,
-`set_session_mode`, `reset_agent_context`); the rest execute only via
-engine-driven triggers (e.g. Office). Plugins must ignore action types they do
-not recognize.
+appearing in this list means it is configured, not a guarantee of when or
+whether it fires. Plugins must ignore action types they do not recognize.
 
 **Conversation content (`api_read:messages`, ADR 0047).** `ListMessages` reads
 historical user/agent message content — the data a "summarize yesterday"
