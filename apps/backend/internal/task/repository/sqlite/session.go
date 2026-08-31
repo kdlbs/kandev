@@ -877,6 +877,7 @@ func (r *Repository) CreateOfficeTaskSession(ctx context.Context, session *model
 	return tx.Commit()
 }
 
+// createTaskSession inserts a task session through the supplied database handle.
 func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExecutor, session *models.TaskSession) error {
 	if session.ID == "" {
 		session.ID = uuid.New().String()
@@ -1390,6 +1391,8 @@ func (r *Repository) updateTaskSession(
 	return nil
 }
 
+// updateTaskSessionWithStateGuard writes a full session row while an optional
+// expected state guard still matches the stored row.
 func (r *Repository) updateTaskSessionWithStateGuard(
 	ctx context.Context,
 	exec taskSessionExecutor,
