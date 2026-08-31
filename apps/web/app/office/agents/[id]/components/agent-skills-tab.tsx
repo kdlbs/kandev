@@ -145,9 +145,16 @@ export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
-      const desiredSkills = skills
+      // Slugs already on the agent that don't resolve against this
+      // workspace's catalog (e.g. attached cross-workspace, see
+      // GetSkillFromConfig's fallback) are still live attachments at
+      // launch. Only drop a slug the user actually unticked here.
+      const catalogSlugs = new Set(skills.map((skill) => skill.slug));
+      const unresolved = (agent.desiredSkills ?? []).filter((slug) => !catalogSlugs.has(slug));
+      const selectedSlugs = skills
         .filter((skill) => skillIds.includes(skill.id))
         .map((skill) => skill.slug);
+      const desiredSkills = [...unresolved, ...selectedSlugs];
       await updateAgentProfile(agent.id, { skillIds, desiredSkills });
       updateStore(agent.workspaceId, agent.id, { skillIds, desiredSkills });
       setDirty(false);
@@ -157,7 +164,7 @@ export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {
     } finally {
       setSaving(false);
     }
-  }, [agent.id, agent.workspaceId, skillIds, skills, updateStore, t]);
+  }, [agent.id, agent.desiredSkills, agent.workspaceId, skillIds, skills, updateStore, t]);
 
   if (skills.length === 0) {
     return (

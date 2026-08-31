@@ -148,4 +148,33 @@ describe("AgentSkillsTab save", () => {
       );
     });
   });
+
+  it("preserves a desired slug the catalog cannot resolve when an unrelated skill is toggled", async () => {
+    const otherSkill: Skill = { ...skill, id: "skill-2", slug: "other-skill", name: "Other" };
+    const unresolvedSlug = "cross-workspace-only";
+    const agentWithUnresolvedSlug = {
+      ...agentDesiredOnly,
+      desiredSkills: [skill.slug, unresolvedSlug],
+    } as AgentProfile;
+    vi.mocked(listSkills).mockResolvedValue({ skills: [skill, otherSkill] });
+    renderSkillsTab(agentWithUnresolvedSlug, [skill, otherSkill]);
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId(`skill-toggle-checkbox-${skill.slug}`).getAttribute(DATA_STATE),
+      ).toBe(CHECKED);
+    });
+
+    fireEvent.click(screen.getByTestId(`skill-toggle-checkbox-${otherSkill.slug}`));
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() => {
+      expect(updateAgentProfile).toHaveBeenCalledWith(
+        agentWithUnresolvedSlug.id,
+        expect.objectContaining({
+          desiredSkills: expect.arrayContaining([skill.slug, otherSkill.slug, unresolvedSlug]),
+        }),
+      );
+    });
+  });
 });
