@@ -40,7 +40,17 @@ func (p *EventPublisher) PublishAgentEvent(ctx context.Context, eventType string
 func (p *EventPublisher) publishAgentEventWithTurnID(
 	ctx context.Context, eventType string, execution *AgentExecution, turnID string,
 ) {
-	p.publishAgentEventPayload(ctx, eventType, newAgentEventPayloadWithTurnID(execution, turnID))
+	p.publishAgentEventWithTurnIDAndEvidence(ctx, eventType, execution, turnID, nil)
+}
+
+func (p *EventPublisher) publishAgentEventWithTurnIDAndEvidence(
+	ctx context.Context,
+	eventType string,
+	execution *AgentExecution,
+	turnID string,
+	evidence *PromptAttemptEvidence,
+) {
+	p.publishAgentEventPayload(ctx, eventType, newAgentEventPayloadWithTurnIDAndEvidence(execution, turnID, evidence))
 }
 
 // PublishAgentStalled publishes one inactivity signal for a prompt.
@@ -108,7 +118,15 @@ func newAgentEventPayload(execution *AgentExecution) AgentEventPayload {
 }
 
 func newAgentEventPayloadWithTurnID(execution *AgentExecution, turnID string) AgentEventPayload {
-	return AgentEventPayload{
+	return newAgentEventPayloadWithTurnIDAndEvidence(execution, turnID, nil)
+}
+
+func newAgentEventPayloadWithTurnIDAndEvidence(
+	execution *AgentExecution,
+	turnID string,
+	evidence *PromptAttemptEvidence,
+) AgentEventPayload {
+	payload := AgentEventPayload{
 		AgentExecutionID:   execution.ID,
 		RunID:              execution.RunID,
 		TaskID:             execution.TaskID,
@@ -128,6 +146,12 @@ func newAgentEventPayloadWithTurnID(execution *AgentExecution, turnID string) Ag
 		ExitCode:           execution.ExitCode,
 		PromptGeneration:   execution.promptGeneration,
 	}
+	if evidence != nil {
+		payload.EvidenceKnown = evidence.EvidenceKnown
+		payload.OutputObserved = evidence.OutputObserved
+		payload.EffectObserved = evidence.EffectObserved
+	}
+	return payload
 }
 
 // PublishAgentctlEvent publishes an agentctl lifecycle event (starting, ready, error).

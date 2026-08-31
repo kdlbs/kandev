@@ -322,19 +322,21 @@ type Adapter struct {
 
 // promptTurnState holds synchronization for one in-flight session/prompt RPC.
 type promptTurnState struct {
-	endTurn          context.CancelCauseFunc
-	rpcDone          chan struct{}
-	abortCh          chan struct{}
-	handoffCh        chan struct{}
-	providerErrorCh  chan openCodeStderrDiagnostic
-	promptGeneration uint64
-	evidenceMu       sync.Mutex
-	codexSystemError bool
-	codexCapacity    bool
-	allowHandoff     bool
-	handedOff        bool
-	gateOwned        bool
-	finishing        bool
+	endTurn           context.CancelCauseFunc
+	rpcDone           chan struct{}
+	abortCh           chan struct{}
+	handoffCh         chan struct{}
+	providerErrorCh   chan openCodeStderrDiagnostic
+	promptGeneration  uint64
+	evidenceMu        sync.Mutex
+	codexSystemError  bool
+	codexCapacity     bool
+	cursorRetriable   bool
+	cursorRetriableAt time.Time
+	allowHandoff      bool
+	handedOff         bool
+	gateOwned         bool
+	finishing         bool
 }
 
 func (t *promptTurnState) observeCodexEvidence(systemError, capacity bool) {
@@ -363,6 +365,42 @@ func (t *promptTurnState) hasCodexSystemError() bool {
 	t.evidenceMu.Lock()
 	defer t.evidenceMu.Unlock()
 	return t.codexSystemError
+}
+
+func (t *promptTurnState) setCursorRetriable() {
+	if t == nil {
+		return
+	}
+	t.evidenceMu.Lock()
+	if !t.cursorRetriable {
+		t.cursorRetriableAt = time.Now().UTC()
+	}
+	t.cursorRetriable = true
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) clearCursorRetriable() {
+	if t == nil {
+		return
+	}
+	t.evidenceMu.Lock()
+	t.cursorRetriable = false
+	t.cursorRetriableAt = time.Time{}
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) cursorRetriableFailure() bool {
+	failure, _ := t.cursorRetriableFailureAt()
+	return failure
+}
+
+func (t *promptTurnState) cursorRetriableFailureAt() (bool, time.Time) {
+	if t == nil {
+		return false, time.Time{}
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	return t.cursorRetriable, t.cursorRetriableAt
 }
 
 type asyncTurnFinalizer struct {

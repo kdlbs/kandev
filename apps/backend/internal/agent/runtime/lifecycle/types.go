@@ -376,6 +376,20 @@ func (e *AgentExecution) promptActivitySnapshot() (time.Time, bool, uint64) {
 	return e.lastActivityAt, e.agentEventSincePrompt, e.promptActivityEpoch
 }
 
+// promptAttemptEvidenceSnapshot captures the replay-safety state before a
+// terminal completion handler marks that completion as activity. A genuine
+// turn-content event is deliberately conservative evidence of both output and
+// effects because lifecycle does not own the downstream persistence boundary.
+func (e *AgentExecution) promptAttemptEvidenceSnapshot() PromptAttemptEvidence {
+	e.lastActivityAtMu.Lock()
+	defer e.lastActivityAtMu.Unlock()
+	return PromptAttemptEvidence{
+		EvidenceKnown:  true,
+		OutputObserved: e.agentEventSincePrompt,
+		EffectObserved: e.agentEventSincePrompt,
+	}
+}
+
 func (e *AgentExecution) promptActivityEpochSnapshot() uint64 {
 	e.lastActivityAtMu.Lock()
 	defer e.lastActivityAtMu.Unlock()

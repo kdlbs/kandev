@@ -116,7 +116,12 @@ func isUninitializedStartupFailure(execution *AgentExecution, event *agentctl.Ag
 	return event != nil && event.PromptGeneration == 0 && isUninitializedStartupExecution(execution)
 }
 
-func (m *Manager) handleCompleteEventMarkState(execution *AgentExecution, event *agentctl.AgentEvent, isError bool) {
+func (m *Manager) handleCompleteEventMarkState(
+	execution *AgentExecution,
+	event *agentctl.AgentEvent,
+	isError bool,
+	failureEvidence *PromptAttemptEvidence,
+) {
 	if isError {
 		// A process can exit while the startup owner is still waiting for ACP
 		// initialization. Leave that failure non-terminal so the startup path can
@@ -144,7 +149,7 @@ func (m *Manager) handleCompleteEventMarkState(execution *AgentExecution, event 
 			zap.Any("event_data", event.Data),
 			zap.String("agent_command", execution.AgentCommand),
 			zap.String("acp_session_id", execution.ACPSessionID))
-		if err := m.markCompletedWithTurnID(execution.ID, 1, errorMsg, event.TurnID); err != nil {
+		if err := m.markCompletedWithTurnID(execution.ID, 1, errorMsg, event.TurnID, failureEvidence); err != nil {
 			m.logger.Error("failed to mark execution as failed after error completion",
 				zap.String("execution_id", execution.ID),
 				zap.Error(err))
@@ -287,13 +292,14 @@ func (m *Manager) finishPromptCompletion(
 	event *agentctl.AgentEvent,
 	isError bool,
 	claim promptCompletionClaim,
+	failureEvidence *PromptAttemptEvidence,
 ) {
 	handleCompleteEventSignal(execution, event, isError)
 	if event.PromptGeneration == 0 || isError {
 		if isError {
 			setProviderError(execution, event.ProviderError)
 		}
-		m.handleCompleteEventMarkState(execution, event, isError)
+		m.handleCompleteEventMarkState(execution, event, isError, failureEvidence)
 		if claim.locked {
 			execution.promptLifecycleMu.Unlock()
 		}
@@ -339,6 +345,11 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 	claim, claimed := m.claimPromptCompletion(execution, event, isError)
 	if !claimed {
 		return false
+	}
+	var failureEvidence *PromptAttemptEvidence
+	if isError {
+		evidence := execution.promptAttemptEvidenceSnapshot()
+		failureEvidence = &evidence
 	}
 	m.releaseActivity(executionActivityKey(execution.ID))
 
@@ -393,7 +404,7 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 	// the drain races with the first SendPrompt's receive and can steal the signal,
 	// leaving the first SendPrompt hung and the second prompt's completion event
 	// never reaching the event bus.
-	m.finishPromptCompletion(execution, event, isError, claim)
+	m.finishPromptCompletion(execution, event, isError, claim, failureEvidence)
 	return true
 }
 

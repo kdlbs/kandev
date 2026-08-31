@@ -94,6 +94,13 @@ type PromptResolver interface {
 	ResolvePromptContent(ctx context.Context, name, fallback string) string
 }
 
+// TaskRepositoryBaseBranchUpdater projects provider base changes into tasks.
+type TaskRepositoryBaseBranchUpdater interface {
+	UpdateTaskRepositoryBaseBranch(
+		ctx context.Context, taskID, repositoryID, headBranch, baseBranch string,
+	) error
+}
+
 // Service coordinates GitHub integration operations.
 type Service struct {
 	mu                       sync.Mutex
@@ -112,6 +119,7 @@ type Service struct {
 	eventBus                 bus.EventBus
 	logger                   *logger.Logger
 	taskDeleter              TaskDeleter
+	taskRepositoryUpdater    TaskRepositoryBaseBranchUpdater
 	comparisonTargetObserver ComparisonTargetObserver
 	taskIssueStore           TaskIssueStore
 	// cascadeTaskDeleter is the cascade-delete entry point used by the
@@ -276,6 +284,11 @@ func (s *Service) newPATClient(token string) *PATClient {
 
 // SetTaskDeleter sets the task deletion dependency for cleanup operations.
 func (s *Service) SetTaskDeleter(d TaskDeleter) { s.taskDeleter = d }
+
+// SetTaskRepositoryBaseBranchUpdater wires best-effort task base projection.
+func (s *Service) SetTaskRepositoryBaseBranchUpdater(updater TaskRepositoryBaseBranchUpdater) {
+	s.taskRepositoryUpdater = updater
+}
 
 // SetCascadeTaskDeleter wires the cascade-delete dependency used by the
 // watch reset flow (ResetIssueWatch / ResetReviewWatch). Optional — when

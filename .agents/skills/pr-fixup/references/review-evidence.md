@@ -14,7 +14,8 @@ historical audit.
 The summary fields are:
 
 - `failed_checks` and `pending_checks`: actionable check state and run/job URLs.
-- `unresolved_review_thread_count`: all unresolved threads; use
+- `unresolved_review_thread_count`: all unresolved threads, regardless of
+  classification; every one is a completion gate. Use
   `hidden_unresolved_threads` as blockers even outside the current-head filter.
 - `review_evidence`, `checks_head_sha`, and `checks_snapshot_complete`: exact
   head evidence. A head race or incomplete fetch is unknown, never inferred
@@ -32,9 +33,27 @@ for forks, security, or architecture.
 Inspect every non-empty body in
 `review_evidence.exact_current_head_reviews[]`, including `COMMENTED`
 aggregate-bot reviews, and classify it as actionable, already addressed,
-optional, or invalid before declaring reviews clear. `trusted_producer=true`
-qualifies only for the dedicated OpenCode App, never merely because a reviewer
-name matches.
+informational, optional, or invalid before declaring reviews clear.
+`trusted_producer=true` qualifies only for the dedicated OpenCode App, never
+merely because a reviewer name matches.
+
+For review threads, classification and disposition are separate. Expand every
+unresolved thread with `scripts/pr-resolve show <PR> <THREAD_ID>` and record one
+of these outcomes: implement and verify an actionable finding; explain where an
+already-addressed, duplicate, or stale finding is handled; acknowledge an
+informational or optional suggestion; or give concrete code/spec/architecture
+reasoning for an invalid finding. Do not treat a label, internal note, or lack
+of code change as a completed disposition.
+
+When the user requests complete cleanup, including wording such as "clean up
+all review threads" or "leave no threads unresolved", reply to and resolve
+every unresolved thread after its disposition. This includes informational and
+optional threads, which need an acknowledgement, and invalid threads, which
+need the concrete pushback reply before resolution. A request limited to
+selected actionable comments does not authorize writes to other threads. If
+thread writes are not authorized, report each disposition and keep the thread
+unresolved; never report the review state as clean. An invalid finding must
+never be silently ignored.
 
 If `gh`, `scripts/pr-state`, or `scripts/pr-resolve` fails with an
 authentication or transport error (including a broker 401), do not treat empty
@@ -94,10 +113,10 @@ scripts/pr-resolve list <PR>
 Transport/collection failure leaves checks unknown. Parseable pending/failing
 rows remain usable when `gh pr checks` exits 8; never hide diagnostics in a pipe.
 
-When `hidden_unresolved_threads` is non-empty, fetch each thread body with
-`scripts/pr-resolve show <PR> <THREAD_ID>`; use the flat comment command only
-for a comment without thread context. A listed thread that is already resolved
-is stale summary state: re-poll and do not reply again.
+When `hidden_unresolved_threads` is non-empty, fetch and disposition each thread
+body with `scripts/pr-resolve show <PR> <THREAD_ID>`; use the flat comment command
+only for a comment without thread context. A listed thread that is already
+resolved is stale summary state: re-poll and do not reply again.
 
 Poll at 30-second cadence with a 20-minute cap using bounded one-shot commands;
 avoid long inline loops and `gh pr checks --watch`. In default monitoring,
@@ -108,7 +127,9 @@ Queued/in-progress jobs are pending, not speculative-fix triggers. On an
 explicit wait-through-CI request without a fixed deadline, use the same
 20-minute absolute cap: repeat bounded checks until failures, pending checks,
 and unresolved-thread count are all empty/zero, or stop at the deadline and
-report remaining pending checks or unresolved threads. Preserve early stopping
+report remaining pending checks or unresolved threads. A nonzero unresolved
+count is a blocker even when every remaining thread is informational, optional,
+or invalid. Preserve early stopping
 for failures and merged/closed or access-revoked conditions.
 
 For E2E-only pending work, summarize a saved snapshot before printing shards:
