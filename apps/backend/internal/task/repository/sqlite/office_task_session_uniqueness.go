@@ -24,6 +24,14 @@ const officeTaskSessionIndexName = "uniq_office_task_session"
 // uniq_office_task_session in this table (the only other unique constraint is
 // the id primary key), so matching it attributes the violation correctly — a
 // bare "UNIQUE constraint failed" match would also fire on the primary key.
+//
+// SQLite lists the columns in the index's own DEFINITION order, not table
+// column order (verified directly: an index declared ON t(b, a) reports
+// "t.b, t.a"). This message is therefore contingent on the eventual
+// uniq_office_task_session DDL declaring its columns as
+// (task_id, agent_profile_id) in that order — flipping the order in the
+// migration silently deadens this match again, with the code, tests, and
+// comments all still reading correct.
 const sqliteOfficeTaskSessionViolationMessage = "UNIQUE constraint failed: task_sessions.task_id, task_sessions.agent_profile_id"
 
 // isOfficeTaskSessionUniqueViolation reports whether err is a violation of

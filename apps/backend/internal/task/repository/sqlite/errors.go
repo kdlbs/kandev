@@ -37,9 +37,13 @@ var ErrNoPrimarySession = errors.New("no primary session")
 var ErrExternalIDConflict = repoerrors.ErrExternalIDConflict
 
 // ErrOfficeSessionRaceConflict is classified by isOfficeTaskSessionUniqueViolation
-// (office_task_session_uniqueness.go) and returned by CreateTaskSession and by
-// every full-row session update that routes through the unexported
-// updateTaskSessionWithStateGuard — UpdateTaskSession,
+// (office_task_session_uniqueness.go) and returned by every session-create
+// method that routes through the unexported createTaskSession —
+// CreateTaskSession, CreateTaskSessionWithInitialRuntimeSeed,
+// CreateTaskSessionWithWorkspaceBinding,
+// CreateTaskSessionWithSharedGroupWorkspaceBinding, and
+// CreateOfficeTaskSession — and by every full-row session update that routes
+// through the unexported updateTaskSessionWithStateGuard — UpdateTaskSession,
 // UpdateTaskSessionWithMetadata, UpdateTaskSessionIfCurrentState, and
 // UpdateTaskSessionIfCurrentStateRemovingMetadataKeys — when a write violates
 // uniq_office_task_session — i.e. two callers raced past their
