@@ -212,8 +212,10 @@ describe("ChangeRequestDetail copy actions", () => {
         "https://bitbucket.org/workspace/repo/pull-requests/42#comment-2",
       );
     });
-    expect(requestCopy.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(REQUEST_COPIED_LABEL);
-    expect(rootCopy.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(COMMENT_COPIED_LABEL);
+    await waitFor(() => {
+      expect(requestCopy.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(REQUEST_COPIED_LABEL);
+      expect(rootCopy.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(COMMENT_COPIED_LABEL);
+    });
   });
 
   it("omits copy actions when a request or comment URL is unavailable", () => {
