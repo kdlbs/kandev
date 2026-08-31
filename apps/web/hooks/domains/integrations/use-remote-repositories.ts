@@ -34,6 +34,7 @@ export type UseRemoteRepositoriesResult = {
   availableProviders: RemoteRepositoryProvider[];
   loading: boolean;
   error: Error | null;
+  sourceErrors?: RemoteRepositorySourceError[];
   unavailable: boolean;
   search: (query: string) => void;
   refresh?: () => void;
@@ -65,6 +66,12 @@ async function loadAzureRepositories(workspaceId: string): Promise<RemoteReposit
 type RemoteRepositoryLoad = {
   repos: RemoteRepository[];
   availableProviders: RemoteRepositoryProvider[];
+  sourceErrors: RemoteRepositorySourceError[];
+};
+
+export type RemoteRepositorySourceError = {
+  provider: RemoteRepositoryProvider;
+  error: Error;
 };
 
 type RepositoryRequest = {
@@ -73,6 +80,7 @@ type RepositoryRequest = {
 };
 
 async function loadBuiltInRepositories(workspaceId: string): Promise<RemoteRepositoryLoad> {
+  if (!workspaceId) return { repos: [], availableProviders: [], sourceErrors: [] };
   const githubRequest = workspaceId
     ? fetchAccessibleRepos({ workspaceId, limit: 100 })
     : Promise.reject(new Error("workspace is required for GitHub repositories"));
@@ -124,7 +132,7 @@ async function loadPluginRepositories(
   query: string,
   signal: AbortSignal,
 ): Promise<RemoteRepositoryLoad> {
-  if (!workspaceId) return { repos: [], availableProviders: [] };
+  if (!workspaceId) return { repos: [], availableProviders: [], sourceErrors: [] };
   return settleRepositoryRequests(
     pluginProviders.map((provider) => ({
       provider: provider.id,
@@ -140,9 +148,15 @@ async function settleRepositoryRequests(
   const availableProviders = results.flatMap((result, index) =>
     result.status === "fulfilled" ? [requests[index]!.provider] : [],
   );
+  const sourceErrors = results.flatMap((result, index) =>
+    result.status === "rejected"
+      ? [{ provider: requests[index]!.provider, error: toError(result.reason) }]
+      : [],
+  );
   return {
     repos: results.flatMap((result) => (result.status === "fulfilled" ? result.value : [])),
     availableProviders,
+    sourceErrors,
   };
 }
 
@@ -205,84 +219,134 @@ function readString(value: unknown): string | undefined {
   return typeof value === "string" && value ? value : undefined;
 }
 
-export function useRemoteRepositories(workspaceId: string): UseRemoteRepositoriesResult {
-  const [builtInRepos, setBuiltInRepos] = useState<RemoteRepository[]>([]);
-  const [pluginRepos, setPluginRepos] = useState<RemoteRepository[]>([]);
-  const [query, setQuery] = useState("");
-  const debouncedQuery = useDebouncedValue(query, 250);
-  const [builtInsLoading, setBuiltInsLoading] = useState(true);
-  const [pluginsLoading, setPluginsLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-  const [builtInProviders, setBuiltInProviders] = useState<RemoteRepositoryProvider[]>([]);
-  const [pluginProviderIds, setPluginProviderIds] = useState<RemoteRepositoryProvider[]>([]);
-  const [refreshVersion, setRefreshVersion] = useState(0);
-  const pluginGeneration = useRef(0);
-  const registry = usePluginRegistry();
-  const registryVersion = registry.getVersion();
-  const pluginProviders = useMemo(
-    () => registry.getRepositoryProviders(),
-    [registry, registryVersion],
-  );
+function toError(cause: unknown): Error {
+  return cause instanceof Error ? cause : new Error(String(cause));
+}
+
+type RepositorySourceState = {
+  repos: RemoteRepository[];
+  availableProviders: RemoteRepositoryProvider[];
+  sourceErrors: RemoteRepositorySourceError[];
+  loading: boolean;
+};
+
+function useBuiltInRepositorySource(
+  workspaceId: string,
+  refreshVersion: number,
+): RepositorySourceState {
+  const [repos, setRepos] = useState<RemoteRepository[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sourceErrors, setSourceErrors] = useState<RemoteRepositorySourceError[]>([]);
+  const [availableProviders, setAvailableProviders] = useState<RemoteRepositoryProvider[]>([]);
 
   useEffect(() => {
     let cancelled = false;
-    setBuiltInRepos([]);
-    setBuiltInProviders([]);
-    setError(null);
-    setBuiltInsLoading(true);
+    setRepos([]);
+    setAvailableProviders([]);
+    setSourceErrors([]);
+    setLoading(true);
     loadBuiltInRepositories(workspaceId)
       .then((result) => {
         if (cancelled) return;
-        setBuiltInRepos(result.repos);
-        setBuiltInProviders(result.availableProviders);
+        setRepos(result.repos);
+        setAvailableProviders(result.availableProviders);
+        setSourceErrors(result.sourceErrors);
       })
       .catch((cause) => {
-        if (!cancelled) setError(cause instanceof Error ? cause : new Error(String(cause)));
+        if (!cancelled) setSourceErrors([{ provider: "built-in", error: toError(cause) }]);
       })
       .finally(() => {
-        if (!cancelled) setBuiltInsLoading(false);
+        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
     };
   }, [refreshVersion, workspaceId]);
 
+  return { repos, availableProviders, sourceErrors, loading };
+}
+
+function usePluginRepositorySource(
+  workspaceId: string,
+  pluginProviders: PluginRepositoryProviderRegistration[],
+  debouncedQuery: string,
+  refreshVersion: number,
+): RepositorySourceState {
+  const [repos, setRepos] = useState<RemoteRepository[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sourceErrors, setSourceErrors] = useState<RemoteRepositorySourceError[]>([]);
+  const [availableProviders, setAvailableProviders] = useState<RemoteRepositoryProvider[]>([]);
+  const generationRef = useRef(0);
+
   useEffect(() => {
-    setPluginRepos([]);
-    setPluginProviderIds([]);
+    setRepos([]);
+    setAvailableProviders([]);
+    setSourceErrors([]);
   }, [workspaceId, pluginProviders]);
 
   useEffect(() => {
-    const generation = ++pluginGeneration.current;
+    const generation = ++generationRef.current;
     const controller = new AbortController();
-    setPluginsLoading(true);
+    setSourceErrors([]);
+    setLoading(true);
     loadPluginRepositories(workspaceId, pluginProviders, debouncedQuery, controller.signal)
       .then((result) => {
-        if (generation !== pluginGeneration.current) return;
-        setPluginRepos(result.repos);
-        setPluginProviderIds(result.availableProviders);
+        if (generation !== generationRef.current) return;
+        setRepos(result.repos);
+        setAvailableProviders(result.availableProviders);
+        setSourceErrors(result.sourceErrors);
       })
       .catch((cause) => {
-        if (generation !== pluginGeneration.current || controller.signal.aborted) return;
-        setError(cause instanceof Error ? cause : new Error(String(cause)));
+        if (generation !== generationRef.current || controller.signal.aborted) return;
+        setSourceErrors([{ provider: "plugin", error: toError(cause) }]);
       })
       .finally(() => {
-        if (generation === pluginGeneration.current) setPluginsLoading(false);
+        if (generation === generationRef.current) setLoading(false);
       });
     return () => controller.abort();
   }, [debouncedQuery, pluginProviders, refreshVersion, workspaceId]);
 
+  return { repos, availableProviders, sourceErrors, loading };
+}
+
+export function useRemoteRepositories(workspaceId: string): UseRemoteRepositoriesResult {
+  const [query, setQuery] = useState("");
+  const debouncedQuery = useDebouncedValue(query, 250);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const registry = usePluginRegistry();
+  const registryVersion = registry.getVersion();
+  const pluginProviders = useMemo(
+    () => registry.getRepositoryProviders(),
+    [registry, registryVersion],
+  );
+  const builtInSource = useBuiltInRepositorySource(workspaceId, refreshVersion);
+  const pluginSource = usePluginRepositorySource(
+    workspaceId,
+    pluginProviders,
+    debouncedQuery,
+    refreshVersion,
+  );
+
   const repos = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    const allRepos = [...builtInRepos, ...pluginRepos];
+    const allRepos = [...builtInSource.repos, ...pluginSource.repos];
     if (!needle) return allRepos;
-    return allRepos.filter((repo) => repo.fullName.toLowerCase().includes(needle));
-  }, [builtInRepos, pluginRepos, query]);
+    return allRepos.filter((repo) =>
+      [repo.fullName, repo.providerHost, repo.url].some((value) =>
+        value?.toLowerCase().includes(needle),
+      ),
+    );
+  }, [builtInSource.repos, pluginSource.repos, query]);
   const availableProviders = useMemo(
-    () => [...builtInProviders, ...pluginProviderIds],
-    [builtInProviders, pluginProviderIds],
+    () => [...builtInSource.availableProviders, ...pluginSource.availableProviders],
+    [builtInSource.availableProviders, pluginSource.availableProviders],
   );
-  const loading = builtInsLoading || pluginsLoading;
+  const loading = builtInSource.loading || pluginSource.loading;
+  const sourceErrors = useMemo(
+    () => [...builtInSource.sourceErrors, ...pluginSource.sourceErrors],
+    [builtInSource.sourceErrors, pluginSource.sourceErrors],
+  );
+  const error = sourceErrors[0]?.error ?? null;
   const search = useCallback((value: string) => setQuery(value), []);
   const refresh = useCallback(() => setRefreshVersion((version) => version + 1), []);
   const matchesURL = useCallback(
@@ -296,6 +360,7 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
     availableProviders,
     loading,
     error,
+    sourceErrors,
     unavailable: !loading && availableProviders.length === 0,
     search,
     refresh,

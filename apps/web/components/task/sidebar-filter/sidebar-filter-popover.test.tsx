@@ -34,6 +34,7 @@ const state = {
   kanbanMulti: { snapshots: {} },
   workflows: { items: [] },
   agentProfiles: { items: [] },
+  executors: { items: [] },
   userSettings: { sidebarTaskColorAutomation: { enabled: false, rules: [] } },
   setUserSettings: vi.fn(),
 };

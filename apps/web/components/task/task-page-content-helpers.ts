@@ -177,6 +177,7 @@ export function buildArchivedValue(task: Task | null, repository: Repository | n
   const isArchived = !!task?.archived_at;
   return {
     isArchived,
+    archivedTask: isArchived ? (task ?? undefined) : undefined,
     archivedTaskId: isArchived ? task?.id : undefined,
     archivedTaskTitle: isArchived ? task?.title : undefined,
     archivedTaskRepositoryLabel: isArchived && repository ? repositorySlug(repository) : undefined,

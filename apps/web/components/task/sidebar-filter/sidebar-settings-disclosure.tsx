@@ -49,7 +49,7 @@ export function SidebarSettingsDisclosure({
         data-testid={`${testId}-toggle`}
         onClick={() => setExpanded(!expanded)}
       >
-        <span className="min-w-0">
+        <span className="min-w-0 pt-1">
           <span className="block text-[11px] font-medium uppercase leading-none tracking-wide text-muted-foreground">
             {title}
           </span>

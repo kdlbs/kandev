@@ -40,4 +40,19 @@ describe("automatic color rule options", () => {
     expect(options.priority[0]?.key).toBe(taskColorRuleOptionKey("critical"));
     expect(options.origin.some((option) => option.value === "kanban")).toBe(true);
   });
+
+  it("uses executor profile ids instead of agent profile ids", () => {
+    const options = buildTaskColorRuleOptions(
+      {
+        workflows: [],
+        snapshots: {},
+        executorProfiles: [{ id: "executor-profile-1", name: "Docker" }],
+      },
+      (key) => key,
+    );
+
+    expect(options.executor_profile).toEqual([
+      expect.objectContaining({ value: "executor-profile-1", label: "Docker" }),
+    ]);
+  });
 });

@@ -26,6 +26,10 @@ import {
 } from "./session-task-switcher-sheet-selection";
 import { taskPendingSelectionSnapshot } from "../task-select-helpers";
 import { useTranslation } from "react-i18next";
+import { useArchivedTaskState } from "../task-archived-context";
+import { buildArchivedSidebarItem } from "../task-session-sidebar-archived-item";
+import type { SidebarItemContext } from "../task-session-sidebar-item";
+import type { TaskSwitcherItem } from "../task-switcher";
 
 function findSheetTask(
   state: ReturnType<ReturnType<typeof useAppStoreApi>["getState"]>,
@@ -60,6 +64,7 @@ export function useSheetData(workspaceId: string | null) {
   );
   const acknowledgedAgentErrors = useAppStore((state) => state.acknowledgedAgentErrors);
   const dismissedAgentErrors = useAppStore((state) => state.dismissedAgentErrors);
+  const archivedState = useArchivedTaskState();
 
   const selectedTaskId = activeTaskId;
 
@@ -84,7 +89,28 @@ export function useSheetData(workspaceId: string | null) {
       stepColorById: new Map(allSteps.map((step) => [step.id, step.color])),
       automaticColorSettings,
     };
-    return allTasks.map((task) => toSheetItem(task, ctx));
+    const items: TaskSwitcherItem[] = allTasks.map((task) => toSheetItem(task, ctx));
+    if (
+      archivedState.isArchived &&
+      archivedState.archivedTaskId &&
+      !items.some((task) => task.id === archivedState.archivedTaskId)
+    ) {
+      const archivedContext: SidebarItemContext = {
+        repositorySlugById: ctx.repositoryPathsById,
+        titleById: new Map(allTasks.map((task) => [task.id, task.title])),
+        workflowNameById: ctx.workflowNameById,
+        stepTitleById: ctx.stepTitleById,
+        wipQueueByTaskId: ctx.wipQueueByTaskId,
+        acknowledgedAgentErrors: ctx.acknowledgedAgentErrors,
+        dismissedAgentErrors: ctx.dismissedAgentErrors,
+        workspaceId: ctx.workspaceId,
+        repositoriesById: ctx.repositoriesById,
+        stepColorById: ctx.stepColorById,
+        automaticColorSettings: ctx.automaticColorSettings,
+      };
+      items.unshift(buildArchivedSidebarItem(archivedState, archivedContext));
+    }
+    return items;
   }, [
     repositoriesByWorkspace,
     allTasks,
@@ -95,6 +121,7 @@ export function useSheetData(workspaceId: string | null) {
     dismissedAgentErrors,
     wipQueueByTaskId,
     automaticColorSettings,
+    archivedState,
   ]);
 
   const dialogSteps = useMemo(

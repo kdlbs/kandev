@@ -22,6 +22,7 @@ export type TaskColorFacts = {
   workflowStepColor?: string;
   state?: TaskState | string;
   priority?: TaskPriority | string;
+  /** Undefined origins represent legacy Kanban tasks during matching. */
   origin?: TaskOrigin | string;
   primaryExecutorProfileId?: string;
   repositories: readonly TaskRepositoryRuleIdentity[];

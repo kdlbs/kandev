@@ -47,7 +47,7 @@ vi.mock("@/components/state-provider", () => ({
       workspaces: { activeId: "workspace-1" },
       kanbanMulti: { snapshots: {} },
       workflows: { items: [] },
-      agentProfiles: { items: [] },
+      executors: { items: [] },
     }),
 }));
 

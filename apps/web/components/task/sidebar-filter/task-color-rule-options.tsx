@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import type { SidebarTaskColorDimension } from "@/lib/task-color-automation-settings";
-import type { TaskOrigin, TaskPriority, TaskState } from "@/lib/types/http";
+import type { ExecutorProfile, TaskOrigin, TaskPriority, TaskState } from "@/lib/types/http";
 
 export type TaskColorRuleOption = {
   key: string;
@@ -20,7 +20,7 @@ export type TaskColorRuleOptionMap = Record<SidebarTaskColorDimension, TaskColor
 
 type Snapshots = AppState["kanbanMulti"]["snapshots"];
 type Workflow = AppState["workflows"]["items"][number];
-type ExecutorProfile = AppState["agentProfiles"]["items"][number];
+type ExecutorProfileOption = Pick<ExecutorProfile, "id" | "name">;
 
 const TASK_STATES: readonly TaskState[] = [
   "CREATED",
@@ -85,7 +85,7 @@ export function buildTaskColorRuleOptions(
   sources: {
     snapshots: Snapshots;
     workflows: readonly Workflow[];
-    executorProfiles: readonly ExecutorProfile[];
+    executorProfiles: readonly ExecutorProfileOption[];
     activeWorkspaceId?: string | null;
   },
   translate: (key: string) => string,
@@ -142,7 +142,7 @@ export function buildTaskColorRuleOptions(
     .map((profile) => ({
       key: taskColorRuleOptionKey(profile.id),
       value: profile.id,
-      label: profile.label || profile.id,
+      label: profile.name || profile.id,
       available: true,
     }))
     .sort((a, b) => a.label.localeCompare(b.label));
@@ -180,7 +180,11 @@ export function buildTaskColorRuleOptions(
 export function useTaskColorRuleOptions(): TaskColorRuleOptionMap {
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const workflows = useAppStore((state) => state.workflows.items);
-  const executorProfiles = useAppStore((state) => state.agentProfiles.items);
+  const executors = useAppStore((state) => state.executors.items);
+  const executorProfiles = useMemo(
+    () => executors.flatMap((executor) => executor.profiles ?? []),
+    [executors],
+  );
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
   const { t, i18n } = useTranslation();
 

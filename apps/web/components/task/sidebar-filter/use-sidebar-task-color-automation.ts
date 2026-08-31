@@ -50,8 +50,8 @@ export function useSidebarTaskColorAutomation() {
       void sync(next)
         .then((response) => {
           const mapped = mapUserSettingsResponse(response, store.getState().userSettings);
-          confirmedRef.current = mapped.sidebarTaskColorAutomation;
           if (operation === operationRef.current) {
+            confirmedRef.current = mapped.sidebarTaskColorAutomation;
             localRef.current = mapped.sidebarTaskColorAutomation;
             store.getState().setUserSettings(mapped);
           }

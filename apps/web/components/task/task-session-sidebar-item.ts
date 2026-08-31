@@ -10,7 +10,7 @@ import type { SidebarTaskColorAutomation } from "@/lib/task-color-automation-set
 import { taskColorFacts } from "@/lib/sidebar/task-color-projection";
 import { resolveAutomaticTaskColor } from "@/lib/sidebar/task-color-rules";
 
-type SidebarItemContext = {
+export type SidebarItemContext = {
   repositorySlugById: Map<string, string | undefined>;
   titleById: Map<string, string>;
   workflowNameById: Map<string, string>;

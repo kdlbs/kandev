@@ -73,4 +73,25 @@ describe("repository rule identity", () => {
       ]),
     ).toBe(true);
   });
+
+  it("removes repeated trailing separators while preserving the root", () => {
+    expect(
+      repositoryIdentityForTaskRepository({
+        repository_id: "repo-1",
+        local_path: "/work/project///",
+      }),
+    ).toEqual({ kind: "local", path: "/work/project" });
+    expect(
+      repositoryIdentityForTaskRepository({
+        repository_id: "repo-1",
+        local_path: "\\work\\project\\\\",
+      }),
+    ).toEqual({ kind: "local", path: "/work/project" });
+    expect(
+      repositoryIdentityForTaskRepository({
+        repository_id: "repo-1",
+        local_path: "////",
+      }),
+    ).toEqual({ kind: "local", path: "/" });
+  });
 });

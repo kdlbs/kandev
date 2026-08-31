@@ -603,6 +603,8 @@ func (s *Service) addPrimarySessionEventFields(ctx context.Context, taskID strin
 	}
 	if sessionInfo.ExecutorProfileID != "" {
 		data["primary_executor_profile_id"] = sessionInfo.ExecutorProfileID
+	} else {
+		data["primary_executor_profile_id"] = nil
 	}
 	data["primary_agent_profile_id"] = nil
 	data["primary_agent_name"] = nil

@@ -50,7 +50,7 @@ export function useRepositoryRuleCatalog(
     query,
     setQuery,
     loading: repositoryOptions.repositoriesRefreshing || remoteRepositories.loading,
-    error: remoteRepositories.error,
+    error: repositoryOptions.error ?? remoteRepositories.error,
     refresh,
   };
 }

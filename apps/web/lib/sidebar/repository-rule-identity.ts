@@ -142,11 +142,11 @@ export function isRepositoryRuleTarget(value: unknown): value is RepositoryRuleT
 }
 
 export function normalizeLocalRepositoryPath(path: string): string {
-  const normalized = path
-    .replaceAll("\\", "/")
-    .replace(/\/+$|^\/+/, (match) => (match.startsWith("/") ? "/" : ""));
-  if (normalized.length > 1 && normalized.endsWith("/")) return normalized.slice(0, -1);
-  return normalized;
+  const normalized = path.replaceAll("\\", "/");
+  if (normalized === "") return "";
+  const withoutTrailing = normalized.replace(/\/+$/, "");
+  if (withoutTrailing === "" && normalized.startsWith("/")) return "/";
+  return withoutTrailing.replace(/^\/+/, "/");
 }
 
 function providerTarget(

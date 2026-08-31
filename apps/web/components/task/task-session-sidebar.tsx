@@ -121,7 +121,7 @@ function useSidebarData(workspaceId: string | null) {
       archivedState.archivedTaskId &&
       !items.some((t) => t.id === archivedState.archivedTaskId)
     ) {
-      items.unshift(buildArchivedSidebarItem(archivedState));
+      items.unshift(buildArchivedSidebarItem(archivedState, mapCtx));
     }
     return items;
   }, [
