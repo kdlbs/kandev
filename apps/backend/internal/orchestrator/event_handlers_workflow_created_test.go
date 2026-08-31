@@ -562,3 +562,64 @@ func TestRecoverTaskLifecycleAttemptDoesNotRetryUnactionableAutoStart(t *testing
 		})
 	}
 }
+
+// TestRecoverAutoStartOnCreatePreservesTokenOnSessionListError covers the
+// ListTaskSessions error branch in recoverAutoStartOnCreate: a transient
+// repo failure there must leave MetaKeyAutoStartOnCreate in place and report
+// "retry" rather than either discarding the token (which would silently
+// abandon the recovery) or falling through to handleTaskCreated (which could
+// launch a second agent onto a task the failed lookup couldn't rule out as
+// already running).
+func TestRecoverAutoStartOnCreatePreservesTokenOnSessionListError(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+	requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
+
+	metadata := map[string]interface{}{
+		models.MetaKeyAutoStartOnCreate: true,
+		models.MetaKeyAgentProfileID:    "routine-assignee",
+	}
+	requireNoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:             "t-list-error",
+		WorkspaceID:    "ws1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: "step1",
+		Title:          "Routine run",
+		Description:    "prompt",
+		State:          v1.TaskStateCreated,
+		Metadata:       metadata,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}))
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Routine Start", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{
+				{Type: wfmodels.OnEnterAutoStartAgent},
+			},
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t-list-error"] = &v1.Task{
+		ID: "t-list-error", WorkspaceID: "ws1", WorkflowID: "wf1",
+		Description: "prompt", State: v1.TaskStateCreated, Metadata: metadata,
+	}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, &mockAgentManager{})
+	svc.repo = listTaskSessionsErrorRepo{sessionExecutorStore: svc.repo}
+
+	if !svc.recoverTaskLifecycleAttempt(ctx, "t-list-error") {
+		t.Fatal("recoverTaskLifecycleAttempt reported no retry after a ListTaskSessions error; a transient lookup failure must stay retryable, not be treated as resolved")
+	}
+	if calls := stepGetter.GetStepCalls(); calls != 0 {
+		t.Fatalf("GetStepCalls() = %d, want 0 (a failed session lookup must not fall through to a launch attempt)", calls)
+	}
+	reloaded, err := repo.GetTask(ctx, "t-list-error")
+	requireNoError(t, err)
+	if _, present := reloaded.Metadata[models.MetaKeyAutoStartOnCreate]; !present {
+		t.Fatal("MetaKeyAutoStartOnCreate was discarded despite the session lookup failing; a token that could not be verified as spent must survive for the next attempt")
+	}
+}

@@ -931,7 +931,10 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 		s.logger.Warn("failed to list auto-start-on-create tokens for recovery", zap.Error(err))
 		return
 	}
-	jobs := make(map[string]struct{}, len(pending)+len(promotions)+len(manualPending)+len(manualCompleted)+len(autoStarts))
+	// autoStarts is the raw, pre-filter list; only entries that pass
+	// autoStartOnCreateActionable below are added to jobs, so it is left out
+	// of this capacity hint rather than causing routine over-allocation.
+	jobs := make(map[string]struct{}, len(pending)+len(promotions)+len(manualPending)+len(manualCompleted))
 	for _, task := range pending {
 		if task != nil {
 			jobs[task.ID] = struct{}{}
