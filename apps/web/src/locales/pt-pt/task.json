@@ -1438,6 +1438,7 @@
   "sortCustom": "Personalizada",
   "sortCustomDescription": "A ordem manual que definiu para as tarefas.",
   "sortDirection": "Sentido da ordenação {{direction}}",
+  "sortSummary": "{{sort}}: {{direction}}",
   "sortLastActivity": "Última atividade",
   "sortLastActivityDescription": "Última ação do utilizador ou turno do agente. Ver uma tarefa não conta como atividade.",
   "sortStatus": "Estado",

@@ -1437,6 +1437,7 @@
   "sortCustom": "自訂",
   "sortCustomDescription": "你為任務設定的手動順序。",
   "sortDirection": "排序方向 {{direction}}",
+  "sortSummary": "{{sort}}，{{direction}}",
   "sortLastActivity": "最後活動",
   "sortLastActivityDescription": "最近一次使用者操作或代理程式回合。檢視任務不會改變此時間。",
   "sortStatus": "狀態",

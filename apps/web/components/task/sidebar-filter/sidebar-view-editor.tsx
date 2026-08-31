@@ -15,7 +15,7 @@ import { cloneSidebarTaskRowPresentation } from "@/lib/state/slices/ui/sidebar-t
 import { DIMENSION_METAS } from "./filter-dimension-registry";
 import { FilterClauseEditor } from "./filter-clause-editor";
 import { GroupPicker } from "./group-picker";
-import { SortPicker } from "./sort-picker";
+import { SortPicker, sortKeyLabelKey } from "./sort-picker";
 import { TaskRowSettings } from "./task-row-settings";
 import { SidebarSettingsDisclosure } from "./sidebar-settings-disclosure";
 import { AutomaticColorSettings } from "./automatic-color-settings";
@@ -48,6 +48,13 @@ export function SidebarViewEditor({
   onRemoveClause,
 }: Props) {
   const { t } = useTranslation();
+  const sortSummary =
+    current.sort.key === "custom"
+      ? t(sortKeyLabelKey(current.sort.key))
+      : t("task:sortSummary", {
+          sort: t(sortKeyLabelKey(current.sort.key)),
+          direction: t("task:sortDirection", { direction: current.sort.direction }),
+        });
   return (
     <>
       <div className="border-b p-2">
@@ -62,9 +69,8 @@ export function SidebarViewEditor({
       />
       <SidebarSettingsDisclosure
         title={t("task:sort")}
-        summary={t("task:sortDirection", { direction: current.sort.direction })}
+        summary={sortSummary}
         testId="sidebar-sort-settings"
-        defaultExpanded
         className={`border-b ${isDrawerLayout ? "pt-2" : "pt-0"}`}
         contentClassName="pt-1"
       >
@@ -74,7 +80,6 @@ export function SidebarViewEditor({
         title={t("task:groupBy")}
         summary={t(GROUP_SUMMARY_KEYS[current.group])}
         testId="sidebar-group-settings"
-        defaultExpanded
         className={isDrawerLayout ? "pt-2" : "pt-0"}
         contentClassName="pt-1"
       >

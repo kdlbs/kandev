@@ -1494,6 +1494,7 @@
   "sortCustom": "Ćũśţōḿ",
   "sortCustomDescription": "Ţĥē ḿàńũàĺ ōŕďēŕ ŷōũ śēţ ƒōŕ ţàśķś.",
   "sortDirection": "Śōŕţ ďĩŕēćţĩōń {{direction}}",
+  "sortSummary": "{{sort}}，{{direction}}",
   "sortLastActivity": "Ĺàśţ àćţĩvĩţŷ",
   "sortLastActivityDescription": "Ĺàśţ ũśēŕ ōŕ àĝēńţ àćţĩōń. Vĩēŵĩńĝ à ţàśķ ďōēś ńōţ ćĥàńĝē ĩţ.",
   "sortStatus": "Śţàţũś",

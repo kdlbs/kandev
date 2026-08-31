@@ -5,6 +5,6 @@ export function createAutomaticColorRule(number: number): SidebarTaskColorRule {
     id: `automatic-color-${Date.now().toString(36)}-${number}`,
     enabled: false,
     condition: { dimension: "task_state", value: null, label: "" },
-    output: { kind: "fixed", color: "gray" },
+    output: { kind: "fixed", color: "blue" },
   };
 }

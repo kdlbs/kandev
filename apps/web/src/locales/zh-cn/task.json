@@ -1437,6 +1437,7 @@
   "sortCustom": "自定义",
   "sortCustomDescription": "你为任务设置的手动顺序。",
   "sortDirection": "排序方向 {{direction}}",
+  "sortSummary": "{{sort}}，{{direction}}",
   "sortLastActivity": "最后活动",
   "sortLastActivityDescription": "最近一次用户操作或智能体回合。查看任务不会改变此时间。",
   "sortStatus": "状态",

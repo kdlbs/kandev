@@ -71,9 +71,35 @@ describe("AutomaticColorSettings", () => {
         expect.objectContaining({
           enabled: false,
           condition: { dimension: "task_state", value: null, label: "" },
-          output: { kind: "fixed", color: "gray" },
+          output: { kind: "fixed", color: "blue" },
         }),
       ],
+    });
+  });
+
+  it("keeps an enabled rule editable when its target is unavailable", () => {
+    mocks.value = {
+      enabled: true,
+      rules: [
+        {
+          id: "missing",
+          enabled: true,
+          condition: { dimension: "task_state", value: "IN_PROGRESS", label: "In progress" },
+          output: { kind: "fixed", color: "red" },
+        },
+      ],
+    };
+    render(<AutomaticColorSettings isDrawerLayout={false} />);
+    fireEvent.click(screen.getByTestId("automatic-color-settings-toggle"));
+
+    const enabledSwitch = screen.getByTestId(
+      "automatic-color-rule-enabled-missing",
+    ) as HTMLButtonElement;
+    expect(enabledSwitch.disabled).toBe(false);
+    fireEvent.click(enabledSwitch);
+    expect(mocks.update).toHaveBeenCalledWith({
+      enabled: true,
+      rules: [expect.objectContaining({ id: "missing", enabled: false })],
     });
   });
 

@@ -312,7 +312,7 @@ export function isCompleteRule(
   selectedOption: TaskColorRuleOption | undefined,
 ): boolean {
   if (rule.condition.value === null || rule.condition.value === undefined) return false;
-  if (!selectedOption?.available) return false;
+  if (!selectedOption) return false;
   return rule.output.kind === "workflow_step"
     ? rule.condition.dimension === "workflow_step"
     : FIXED_AUTOMATIC_TASK_COLORS.includes(rule.output.color);

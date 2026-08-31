@@ -1494,6 +1494,7 @@
   "sortCustom": "Custom",
   "sortCustomDescription": "The manual order you set for tasks.",
   "sortDirection": "Sort direction {{direction}}",
+  "sortSummary": "{{sort}}, {{direction}}",
   "sortLastActivity": "Last activity",
   "sortLastActivityDescription": "Last user or agent action. Viewing a task does not change it.",
   "sortStatus": "Status",

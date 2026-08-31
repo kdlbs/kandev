@@ -50,7 +50,7 @@ afterEach(() => {
 });
 
 describe("SidebarFilterPopover task-row editor", () => {
-  it("keeps the editor collapsed until the user opens it", () => {
+  it("keeps view settings collapsed until the user opens them", () => {
     render(
       <SidebarFilterPopover
         trigger={<button type="button">Open</button>}
@@ -61,6 +61,15 @@ describe("SidebarFilterPopover task-row editor", () => {
 
     expect(screen.getByTestId("task-row-settings-toggle")).toBeTruthy();
     expect(screen.queryByTestId("task-row-details-toggle")).toBeNull();
+    expect(screen.queryByTestId("sort-key-select")).toBeNull();
+    expect(screen.queryByTestId("group-key-select")).toBeNull();
+    expect(screen.getByText("Status, Sort direction asc", { exact: true })).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("sidebar-sort-settings-toggle"));
+    expect(screen.getByTestId("sort-key-select")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("sidebar-group-settings-toggle"));
+    expect(screen.getByTestId("group-key-select")).toBeTruthy();
+
     fireEvent.click(screen.getByTestId("task-row-settings-toggle"));
     expect(screen.getByTestId("task-row-details-toggle")).toBeTruthy();
     expect(state.updateSidebarDraft).not.toHaveBeenCalled();
@@ -77,6 +86,7 @@ describe("SidebarFilterPopover task-row editor", () => {
       );
 
     renderEditor();
+    fireEvent.click(screen.getByTestId("sidebar-group-settings-toggle"));
     fireEvent.click(screen.getByTestId("group-key-select"));
     for (const { label, description } of [
       { label: "None", description: "Keep all tasks in one list." },
