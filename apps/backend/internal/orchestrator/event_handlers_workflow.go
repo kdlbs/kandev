@@ -1891,7 +1891,11 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 	if err := s.processStepExitAndEnterWithSteps(
 		ctx, taskID, session, fromStep, targetStep,
 		fromStepID, toStepID, taskDescription, false, transitionID,
-	); errors.Is(err, errRouteEffectLeaseHeld) {
+	); err != nil {
+		if !errors.Is(err, errRouteEffectLeaseHeld) {
+			s.logger.Warn("manual move lifecycle processing failed; scheduling retry",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
 		s.scheduleTaskLifecycleRetry(taskID)
 		return
 	}
@@ -1913,9 +1917,9 @@ func (s *Service) continueQueuedMoveLifecycle(ctx context.Context, taskID, vacat
 	}
 }
 
-// processStepExitAndEnter runs the on_exit → clear review → reload session → on_enter
-// sequence for a step transition. Used by handleTaskMovedWithSession (where MoveTask
-// already persisted the step change in the DB).
+// processStepExitAndEnter runs the claim → prepare session → on_exit → on_enter
+// sequence for a step transition. Used by handleTaskMovedWithSession (where
+// MoveTask already persisted the step change in the DB).
 func (s *Service) processStepExitAndEnter(ctx context.Context, taskID string, session *models.TaskSession, fromStepID, toStepID, taskDescription string, transitionID int64) {
 	// Process on_exit for the step we're leaving
 	_ = s.processStepExitAndEnterWithSteps(ctx, taskID, session, nil, nil, fromStepID, toStepID, taskDescription, false, transitionID)
@@ -1928,20 +1932,6 @@ func (s *Service) processStepExitAndEnterWithSteps(
 	fromStep, targetStep *wfmodels.WorkflowStep,
 	fromStepID, toStepID, taskDescription string, queuePromotion bool, transitionID int64,
 ) error {
-	if fromStep == nil {
-		var err error
-		fromStep, err = s.workflowStepGetter.GetStep(ctx, fromStepID)
-		if err != nil || fromStep == nil {
-			s.logger.Warn("failed to load from-step for on_exit",
-				zap.String("step_id", fromStepID),
-				zap.Error(err))
-		} else {
-			s.processOnExit(ctx, taskID, session, fromStep)
-		}
-	} else {
-		s.processOnExit(ctx, taskID, session, fromStep)
-	}
-
 	if targetStep == nil {
 		var err error
 		targetStep, err = s.workflowStepGetter.GetStep(ctx, toStepID)
@@ -1953,13 +1943,42 @@ func (s *Service) processStepExitAndEnterWithSteps(
 		}
 	}
 
+	finishEffect, claimed, effectErr := s.claimRouteEffectForStepEnter(
+		ctx, taskID, targetStep.ID, transitionID,
+	)
+	if effectErr != nil {
+		return effectErr
+	}
+	if !claimed {
+		return nil
+	}
+	effectCompleted := false
+	defer func() { finishEffect(effectCompleted) }()
+
 	clearReview := targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent)
-	if err := s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview, transitionID); err != nil {
+	preparedSession, err := s.prepareStepEnter(ctx, taskID, session.ID, clearReview)
+	if err != nil {
 		if queuePromotion {
 			s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, "task.moved")
 		}
 		return err
 	}
+
+	if fromStep == nil {
+		var err error
+		fromStep, err = s.workflowStepGetter.GetStep(ctx, fromStepID)
+		if err != nil || fromStep == nil {
+			s.logger.Warn("failed to load from-step for on_exit",
+				zap.String("step_id", fromStepID),
+				zap.Error(err))
+		} else {
+			s.processOnExit(ctx, taskID, preparedSession, fromStep)
+		}
+	} else {
+		s.processOnExit(ctx, taskID, preparedSession, fromStep)
+	}
+	s.processOnEnter(ctx, taskID, preparedSession, targetStep, taskDescription, 0)
+	effectCompleted = true
 	return nil
 }
 
@@ -1967,32 +1986,19 @@ func (s *Service) processStepExitAndEnterWithSteps(
 // processes on_enter actions for the target step. Shared by executeStepTransition
 // and processStepExitAndEnter.
 func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID string, targetStep *wfmodels.WorkflowStep, taskDescription string, clearReview bool, transitionID int64) error {
-	if clearReview {
-		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
-			s.logger.Warn("failed to clear session review status",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-			return fmt.Errorf("clear session review status: %w", err)
-		}
-	}
-
-	// Reload session after on_exit may have changed metadata
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	session, err := s.prepareStepEnter(ctx, taskID, sessionID, clearReview)
 	if err != nil {
-		s.logger.Warn("failed to load session for on_enter",
-			zap.String("session_id", sessionID), zap.Error(err))
-		s.setSessionWaitingForInput(ctx, taskID, sessionID)
-		return fmt.Errorf("load session for on_enter: %w", err)
+		return err
 	}
 
-	completeEffect, claimed, effectErr := s.claimRouteEffectForStepEnter(ctx, taskID, targetStep.ID, transitionID)
+	finishEffect, claimed, effectErr := s.claimRouteEffectForStepEnter(ctx, taskID, targetStep.ID, transitionID)
 	if effectErr != nil {
 		return effectErr
 	}
 	if !claimed {
 		return nil
 	}
-	defer completeEffect()
+	defer finishEffect(true)
 
 	// entryID 0: this path (manual move / legacy on_turn_start/complete) does
 	// not attach a step-entry ResultHolder before ApplyTransition, so no
@@ -2003,6 +2009,30 @@ func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID strin
 	// plan's scope note for why E2-E5 dispatch is deferred.
 	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, 0)
 	return nil
+}
+
+func (s *Service) prepareStepEnter(
+	ctx context.Context, taskID, sessionID string, clearReview bool,
+) (*models.TaskSession, error) {
+	if clearReview {
+		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
+			s.logger.Warn("failed to clear session review status",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			return nil, fmt.Errorf("clear session review status: %w", err)
+		}
+	}
+
+	// Load the current session snapshot used by the destination lifecycle.
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to load session for on_enter",
+			zap.String("session_id", sessionID), zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return nil, fmt.Errorf("load session for on_enter: %w", err)
+	}
+
+	return session, nil
 }
 
 type routeEffectRepository interface {
@@ -2019,10 +2049,10 @@ var errRouteEffectLeaseHeld = errors.New("workflow route effect lease is still h
 
 func (s *Service) claimRouteEffectForStepEnter(
 	ctx context.Context, taskID, targetStepID string, transitionID int64,
-) (func(), bool, error) {
+) (func(bool), bool, error) {
 	effects, ok := s.repo.(routeEffectRepository)
 	if !ok {
-		return func() {}, true, nil
+		return func(bool) {}, true, nil
 	}
 	var effect routing.Effect
 	var found bool
@@ -2036,7 +2066,7 @@ func (s *Service) claimRouteEffectForStepEnter(
 		return nil, false, fmt.Errorf("read route effect for step entry: %w", err)
 	}
 	if !found {
-		return func() {}, true, nil
+		return func(bool) {}, true, nil
 	}
 	token := uuid.NewString()
 	claimed, err := effects.ClaimWorkflowRouteEffect(ctx, effect.ID, token, time.Now().UTC(), routeEffectLease)
@@ -2054,7 +2084,7 @@ func (s *Service) claimRouteEffectForStepEnter(
 			return nil, false, fmt.Errorf("re-read route effect after failed claim: %w", err)
 		}
 		if found && latest.ID == effect.ID && latest.Status == routing.EffectCompleted {
-			return func() {}, false, nil
+			return func(bool) {}, false, nil
 		}
 		return nil, false, errRouteEffectLeaseHeld
 	}
@@ -2062,9 +2092,12 @@ func (s *Service) claimRouteEffectForStepEnter(
 	stopRenewal := make(chan struct{})
 	renewalStopped := make(chan struct{})
 	go s.renewRouteEffectClaim(renewCtx, effects, effect.ID, token, stopRenewal, renewalStopped)
-	return func() {
+	return func(complete bool) {
 		close(stopRenewal)
 		<-renewalStopped
+		if !complete {
+			return
+		}
 		completed, completeErr := effects.CompleteWorkflowRouteEffect(renewCtx, effect.ID, token, time.Now().UTC())
 		if completeErr != nil || !completed {
 			s.logger.Warn("failed to complete workflow route effect", zap.String("effect_id", effect.ID), zap.Error(completeErr))
@@ -5297,14 +5330,14 @@ func (s *Service) launchProcessOnEnter(
 				onComplete()
 			}
 		}()
-		completeEffect, claimed, err := s.claimRouteEffectForStepEnter(ctx, taskID, targetStep.ID, transitionID)
+		finishEffect, claimed, err := s.claimRouteEffectForStepEnter(ctx, taskID, targetStep.ID, transitionID)
 		if err != nil || !claimed {
 			if err != nil {
 				s.logger.Warn("failed to claim workflow route effect", zap.String("task_id", taskID), zap.Error(err))
 			}
 			return
 		}
-		defer completeEffect()
+		defer finishEffect(true)
 		s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, entryID)
 	}()
 }

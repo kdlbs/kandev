@@ -2,12 +2,14 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/workflow/routing"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -17,6 +19,51 @@ import (
 type renewingRouteEffectRepository struct {
 	mu       sync.Mutex
 	renewals int
+}
+
+type countingLifecycleRepository struct {
+	*sqliterepo.Repository
+	mu                 sync.Mutex
+	disables           int
+	destinationEntries int
+}
+
+type failingStepEnterRepository struct {
+	*countingLifecycleRepository
+}
+
+func (*failingStepEnterRepository) GetTaskSession(
+	context.Context, string,
+) (*models.TaskSession, error) {
+	return nil, errors.New("injected session reload failure")
+}
+
+func (r *countingLifecycleRepository) SetSessionMetadataKey(
+	ctx context.Context, sessionID, key string, value interface{},
+) error {
+	if enabled, ok := value.(bool); key == "plan_mode" && ok && !enabled {
+		r.mu.Lock()
+		r.disables++
+		r.mu.Unlock()
+	}
+	if mode, ok := value.(string); key == models.SessionMetaKeySessionMode && ok && mode == "destination" {
+		r.mu.Lock()
+		r.destinationEntries++
+		r.mu.Unlock()
+	}
+	return r.Repository.SetSessionMetadataKey(ctx, sessionID, key, value)
+}
+
+func (r *countingLifecycleRepository) destinationEntryCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.destinationEntries
+}
+
+func (r *countingLifecycleRepository) disableCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.disables
 }
 
 func (*renewingRouteEffectRepository) GetWorkflowRouteEffectByTransition(context.Context, string, int64) (routing.Effect, bool, error) {
@@ -65,8 +112,12 @@ func TestRenewRouteEffectClaimKeepsLongRunningOwnerLive(t *testing.T) {
 func TestManualMoveRecoveryRetriesFreshClaimAfterLeaseExpiry(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx := context.Background()
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "leased-effect-task", "leased-effect-session", "source-step")
+		baseRepo := setupTestRepo(t)
+		seedSession(t, baseRepo, "leased-effect-task", "leased-effect-session", "source-step")
+		require.NoError(t, baseRepo.SetSessionMetadataKey(
+			ctx, "leased-effect-session", "plan_mode", true,
+		))
+		repo := &countingLifecycleRepository{Repository: baseRepo}
 		task, err := repo.GetTask(ctx, "leased-effect-task")
 		require.NoError(t, err)
 		task.WorkflowStepID = "destination-step"
@@ -88,14 +139,20 @@ func TestManualMoveRecoveryRetriesFreshClaimAfterLeaseExpiry(t *testing.T) {
 		require.True(t, claimed)
 
 		steps := newMockStepGetter()
-		steps.steps["source-step"] = &wfmodels.WorkflowStep{ID: "source-step", WorkflowID: "wf1", Name: "Source"}
+		steps.steps["source-step"] = &wfmodels.WorkflowStep{
+			ID: "source-step", WorkflowID: "wf1", Name: "Source",
+			Events: wfmodels.StepEvents{OnExit: []wfmodels.OnExitAction{{
+				Type: wfmodels.OnExitDisablePlanMode,
+			}}},
+		}
 		steps.steps["destination-step"] = &wfmodels.WorkflowStep{
 			ID: "destination-step", WorkflowID: "wf1", Name: "Destination",
 			Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{
 				Type: wfmodels.OnEnterSetSessionMode, Config: map[string]interface{}{"mode": "destination"},
 			}}},
 		}
-		svc := createTestService(repo, steps, newMockTaskRepo())
+		svc := createTestService(baseRepo, steps, newMockTaskRepo())
+		svc.repo = repo
 		svc.startTaskLifecycleRetries()
 		t.Cleanup(svc.stopTaskLifecycleRetries)
 		session, err := repo.GetTaskSession(ctx, "leased-effect-session")
@@ -105,6 +162,8 @@ func TestManualMoveRecoveryRetriesFreshClaimAfterLeaseExpiry(t *testing.T) {
 			ctx, task.ID, session, steps.steps["source-step"], steps.steps["destination-step"],
 			"source-step", "destination-step", task.Description, 0,
 		)
+		require.Zero(t, repo.disableCount(),
+			"a process that does not own the route effect must not execute source on_exit")
 		stored, err := repo.GetTask(ctx, task.ID)
 		require.NoError(t, err)
 		require.Contains(t, stored.Metadata, models.MetaKeyManualMoveLifecyclePending,
@@ -117,6 +176,10 @@ func TestManualMoveRecoveryRetriesFreshClaimAfterLeaseExpiry(t *testing.T) {
 		require.NoError(t, err)
 		require.NotContains(t, stored.Metadata, models.MetaKeyManualMoveLifecyclePending)
 		require.Contains(t, stored.Metadata, models.MetaKeyManualMoveLifecycleCompleted)
+		require.Equal(t, 1, repo.disableCount(),
+			"lease recovery must execute source on_exit exactly once")
+		require.Equal(t, 1, repo.destinationEntryCount(),
+			"lease recovery must execute destination on_enter exactly once")
 		session, err = repo.GetTaskSession(ctx, "leased-effect-session")
 		require.NoError(t, err)
 		require.Equal(t, "destination", session.Metadata[models.SessionMetaKeySessionMode])
@@ -125,6 +188,60 @@ func TestManualMoveRecoveryRetriesFreshClaimAfterLeaseExpiry(t *testing.T) {
 			`SELECT status FROM workflow_route_effects WHERE id = ?`, "leased-effect").Scan(&status))
 		require.Equal(t, routing.EffectCompleted, status)
 	})
+}
+
+func TestManualMoveLifecycleDoesNotExitOrCompleteWhenStepEnterPreparationFails(t *testing.T) {
+	ctx := context.Background()
+	baseRepo := setupTestRepo(t)
+	seedSession(t, baseRepo, "failed-entry-task", "failed-entry-session", "source-step")
+	repo := &failingStepEnterRepository{countingLifecycleRepository: &countingLifecycleRepository{
+		Repository: baseRepo,
+	}}
+	task, err := baseRepo.GetTask(ctx, "failed-entry-task")
+	require.NoError(t, err)
+	task.WorkflowStepID = "destination-step"
+	task.Metadata = map[string]interface{}{
+		models.MetaKeyManualMoveLifecyclePending: map[string]interface{}{"from_step_id": "source-step"},
+	}
+	require.NoError(t, baseRepo.UpdateTask(ctx, task))
+
+	steps := newMockStepGetter()
+	steps.steps["source-step"] = &wfmodels.WorkflowStep{
+		ID: "source-step", WorkflowID: "wf1", Name: "Source",
+		Events: wfmodels.StepEvents{OnExit: []wfmodels.OnExitAction{{
+			Type: wfmodels.OnExitDisablePlanMode,
+		}}},
+	}
+	steps.steps["destination-step"] = &wfmodels.WorkflowStep{
+		ID: "destination-step", WorkflowID: "wf1", Name: "Destination",
+		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{
+			Type: wfmodels.OnEnterSetSessionMode, Config: map[string]interface{}{"mode": "destination"},
+		}}},
+	}
+	svc := createTestService(baseRepo, steps, newMockTaskRepo())
+	svc.repo = repo
+	svc.startTaskLifecycleRetries()
+	t.Cleanup(svc.stopTaskLifecycleRetries)
+	session, err := baseRepo.GetTaskSession(ctx, "failed-entry-session")
+	require.NoError(t, err)
+
+	svc.processManualMoveLifecycleWithFeederBarrier(
+		ctx, task.ID, session, steps.steps["source-step"], steps.steps["destination-step"],
+		"source-step", "destination-step", task.Description, 0,
+	)
+
+	stored, err := baseRepo.GetTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Contains(t, stored.Metadata, models.MetaKeyManualMoveLifecyclePending)
+	require.NotContains(t, stored.Metadata, models.MetaKeyManualMoveLifecycleCompleted,
+		"failed destination preparation must not be persisted as a completed lifecycle")
+	require.Zero(t, repo.disableCount(),
+		"source on_exit must wait until destination preparation can succeed")
+	require.Zero(t, repo.destinationEntryCount())
+	svc.taskLifecycleRetryMu.Lock()
+	_, retryScheduled := svc.taskLifecycleRetryTimers[task.ID]
+	svc.taskLifecycleRetryMu.Unlock()
+	require.True(t, retryScheduled)
 }
 
 func TestTaskLifecycleRetryCannotRestartAfterStop(t *testing.T) {
@@ -262,11 +379,11 @@ func TestRouteEffectCompletedDuringClaimIsNotReportedAsLeased(t *testing.T) {
 	svc := createTestService(baseRepo, newMockStepGetter(), newMockTaskRepo())
 	svc.repo = repo
 
-	complete, claimed, err := svc.claimRouteEffectForStepEnter(
+	finish, claimed, err := svc.claimRouteEffectForStepEnter(
 		context.Background(), "task", "destination", 0,
 	)
 
 	require.NoError(t, err)
 	require.False(t, claimed)
-	require.NotNil(t, complete)
+	require.NotNil(t, finish)
 }
