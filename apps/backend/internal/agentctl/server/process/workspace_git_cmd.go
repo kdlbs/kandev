@@ -3,7 +3,6 @@ package process
 import (
 	"bytes"
 	"context"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -34,25 +33,128 @@ func gitWorkClass(ctx context.Context) subproc.GitWorkClass {
 // See: https://git-scm.com/docs/git#Documentation/git.txt-codeGITOPTIONALLOCKSltbooleangtcode
 const gitOptionalLocksOff = "GIT_OPTIONAL_LOCKS=0"
 
+const defaultGitSSHCommand = "ssh -oBatchMode=yes"
+
 // pollingGitCommand builds an exec.Cmd with optional Git locks disabled. The
 // lock policy is independent from the admission class: fresh interactive
 // status also needs lockless reads while still using the interactive queue.
 func (wt *WorkspaceTracker) pollingGitCommand(ctx context.Context, args ...string) *exec.Cmd {
 	cmd := subproc.NewGitCommand(ctx, args...)
 	cmd.Dir = wt.workDir
-	cmd.Env = gitCommandEnv(ctx, true)
+	cmd.Env = wt.gitCommandEnv(ctx, true)
 	return cmd
 }
 
-func gitCommandEnv(ctx context.Context, lockless bool) []string {
-	env := os.Environ()
+func (wt *WorkspaceTracker) gitCommandEnv(ctx context.Context, lockless bool) []string {
+	env := wt.gitEnvironmentSnapshot()
 	if lockless {
 		env = replaceGitEnvAssignment(env, gitOptionalLocksOff)
 	}
 	if indexPath := gitIndexFile(ctx); indexPath != "" {
 		env = replaceGitEnvAssignment(env, "GIT_INDEX_FILE="+indexPath)
 	}
+	for _, assignment := range []string{
+		"GIT_TERMINAL_PROMPT=0",
+		"GCM_INTERACTIVE=Never",
+		"GIT_ASKPASS=echo",
+		"SSH_ASKPASS=/bin/false",
+	} {
+		env = replaceGitEnvAssignment(env, assignment)
+	}
+	if command, ok := gitEnvValue(env, "GIT_SSH_COMMAND"); ok && strings.TrimSpace(command) != "" {
+		env = replaceGitEnvAssignment(env, "GIT_SSH_COMMAND="+forceGitSSHBatchMode(command))
+	} else {
+		env = replaceGitEnvAssignment(env, "GIT_SSH_COMMAND="+defaultGitSSHCommand)
+	}
 	return env
+}
+
+func gitEnvValue(env []string, key string) (string, bool) {
+	prefix := key + "="
+	var value string
+	found := false
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			value = strings.TrimPrefix(entry, prefix)
+			found = true
+		}
+	}
+	return value, found
+}
+
+// forceGitSSHBatchMode places BatchMode=yes immediately after a direct
+// OpenSSH executable. OpenSSH uses the first command-line value for an option,
+// so this prevents a later BatchMode=no in the inherited command from
+// restoring terminal prompting while preserving the command's other options.
+// Shell prefixes and custom wrappers are not parsed here. They use the safe
+// default instead of receiving an option in the wrong position.
+func forceGitSSHBatchMode(command string) string {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return defaultGitSSHCommand
+	}
+	commandEnd := shellWordEnd(command)
+	if commandEnd == 0 {
+		return defaultGitSSHCommand
+	}
+	executable, ok := shellWordValue(command[:commandEnd])
+	if !ok || !isOpenSSHExecutable(executable) {
+		return defaultGitSSHCommand
+	}
+	return command[:commandEnd] + " -oBatchMode=yes" + command[commandEnd:]
+}
+
+func shellWordValue(word string) (string, bool) {
+	if word == "" {
+		return "", false
+	}
+	if word[0] == '\'' || word[0] == '"' {
+		if len(word) < 2 || word[len(word)-1] != word[0] {
+			return "", false
+		}
+		return word[1 : len(word)-1], true
+	}
+	if strings.ContainsAny(word, "'\"") {
+		return "", false
+	}
+	return word, true
+}
+
+func isOpenSSHExecutable(executable string) bool {
+	lastSeparator := strings.LastIndexAny(executable, `/\`)
+	base := executable[lastSeparator+1:]
+	return base == "ssh" || base == "ssh.exe"
+}
+
+func shellWordEnd(command string) int {
+	var quote byte
+	escaped := false
+	for index := 0; index < len(command); index++ {
+		character := command[index]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if quote != 0 {
+			if quote == '"' && character == '\\' {
+				escaped = true
+				continue
+			}
+			if character == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch character {
+		case '\\':
+			escaped = true
+		case '\'', '"':
+			quote = character
+		case ' ', '\t', '\n', '\r':
+			return index
+		}
+	}
+	return len(command)
 }
 
 func replaceGitEnvAssignment(env []string, assignment string) []string {
@@ -79,7 +181,7 @@ func (wt *WorkspaceTracker) gitCommand(ctx context.Context, lockless bool, args 
 	}
 	cmd := subproc.NewGitCommand(ctx, args...)
 	cmd.Dir = wt.workDir
-	cmd.Env = gitCommandEnv(ctx, false)
+	cmd.Env = wt.gitCommandEnv(ctx, false)
 	return cmd
 }
 
