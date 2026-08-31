@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { createDebugLogger } from "@/lib/debug/log";
 import {
@@ -11,9 +11,8 @@ const debug = createDebugLogger("messages:lazyload");
 
 export const OLDER_PAGE_LIMIT = 20;
 
-/** Safety cap on message pages fetched inside a single loadMore call when
- * `minUserPromptsPerLoad` is set, so a pathological session cannot loop
- * forever. */
+/** Safety cap on message pages fetched inside a single accumulating loadMore
+ * call, so a pathological session cannot loop forever. */
 const MAX_PAGES_PER_LOAD = 10;
 const EMPTY_MESSAGES: Message[] = [];
 
@@ -22,9 +21,12 @@ export type LazyLoadMessagesOptions = {
    * returning. A fixed message page can contain only a few user prompts among
    * agent replies, so the panel requests pages until the threshold is met,
    * pagination is exhausted, a zero-result page stops progress, or
-   * MAX_PAGES_PER_LOAD is reached. Default: single page (transcript behavior
-   * unchanged). */
+   * MAX_PAGES_PER_LOAD is reached. Default: single page. */
   minUserPromptsPerLoad?: number;
+  /** Accumulate at least this many NEW text parts per loadMore call. Text parts
+   * are message/content rows (plus legacy untyped rows); tool and activity rows
+   * remain loaded but do not advance this target. */
+  minTextPartsPerLoad?: number;
 };
 
 function describeSkip(args: {
@@ -50,6 +52,56 @@ function countUserPrompts(messages: Message[]): number {
   return messages.filter((message) => message.author_type === "user").length;
 }
 
+function countTextParts(messages: Message[]): number {
+  return messages.filter(
+    (message) => !message.type || message.type === "message" || message.type === "content",
+  ).length;
+}
+
+function loadTargetsReached(args: {
+  messages: Message[];
+  beforePrompts: number;
+  beforeTextParts: number;
+  minUserPromptsPerLoad?: number;
+  minTextPartsPerLoad?: number;
+}): boolean {
+  const { messages, beforePrompts, beforeTextParts, minUserPromptsPerLoad, minTextPartsPerLoad } =
+    args;
+  return (
+    (!minUserPromptsPerLoad ||
+      countUserPrompts(messages) - beforePrompts >= minUserPromptsPerLoad) &&
+    (!minTextPartsPerLoad || countTextParts(messages) - beforeTextParts >= minTextPartsPerLoad)
+  );
+}
+
+async function loadPagesToTargets(args: {
+  fetchPage: () => Promise<number>;
+  getMessages: () => Message[];
+  minUserPromptsPerLoad?: number;
+  minTextPartsPerLoad?: number;
+}): Promise<number> {
+  const { fetchPage, getMessages, minUserPromptsPerLoad, minTextPartsPerLoad } = args;
+  const beforePrompts = countUserPrompts(getMessages());
+  const beforeTextParts = countTextParts(getMessages());
+  let total = 0;
+  for (let page = 0; page < MAX_PAGES_PER_LOAD; page++) {
+    const added = await fetchPage();
+    total += added;
+    if (added === 0) break;
+    if (
+      loadTargetsReached({
+        messages: getMessages(),
+        beforePrompts,
+        beforeTextParts,
+        minUserPromptsPerLoad,
+        minTextPartsPerLoad,
+      })
+    )
+      break;
+  }
+  return total;
+}
+
 function useVisibleHasMore(sessionId: string | null, rawHasMore: boolean): boolean {
   const firstPromptLoaded = useAppStore((state) =>
     sessionId ? containsFirstPrompt(state.messages.bySession[sessionId] ?? EMPTY_MESSAGES) : false,
@@ -57,30 +109,16 @@ function useVisibleHasMore(sessionId: string | null, rawHasMore: boolean): boole
   return visibleHasMore(rawHasMore, firstPromptLoaded);
 }
 
-export function useLazyLoadMessages(sessionId: string | null, options?: LazyLoadMessagesOptions) {
-  const { minUserPromptsPerLoad } = options ?? {};
-  // Use refs for values that should not trigger callback recreation
-  const rawHasMore = useAppStore((state) =>
-    sessionId ? (state.messages.metaBySession[sessionId]?.hasMore ?? false) : false,
-  );
-  const hasMore = useVisibleHasMore(sessionId, rawHasMore);
-  const oldestCursor = useAppStore((state) =>
-    sessionId ? (state.messages.metaBySession[sessionId]?.oldestCursor ?? null) : null,
-  );
-  const isLoadingMore = useAppStore((state) =>
-    sessionId ? (state.messages.metaBySession[sessionId]?.isLoadingMore ?? false) : false,
-  );
+type LazyLoadState = {
+  hasMore: boolean;
+  rawHasMore: boolean;
+  oldestCursor: string | null;
+  isLoadingMore: boolean;
+};
 
-  // Store current values in refs to avoid recreating loadMore on every state change
-  const stateRef = useRef({ hasMore, rawHasMore, oldestCursor, isLoadingMore });
-  useEffect(() => {
-    stateRef.current = { hasMore, rawHasMore, oldestCursor, isLoadingMore };
-  }, [hasMore, rawHasMore, oldestCursor, isLoadingMore]);
-
+/** Builds the coordinated single-page loader shared by visible and raw consumers. */
+function useOlderPageFetcher(sessionId: string | null, stateRef: { current: LazyLoadState }) {
   const store = useAppStoreApi();
-
-  // Visible pagination stops at prompt #1; raw pagination is for explicit
-  // recovery such as session search. Both paths share the coordinator.
   const fetchPage = useCallback(
     async (mode: "visible" | "raw" = "visible") => {
       const { hasMore, rawHasMore, isLoadingMore, oldestCursor } = stateRef.current;
@@ -103,10 +141,8 @@ export function useLazyLoadMessages(sessionId: string | null, options?: LazyLoad
             oldestCursor: result.oldestCursor,
             // The coordinator clears the store's shared isLoadingMore when the
             // session's LAST flight settles (this join may be one of several).
-            // Reflect the settled store value so a follow-up page in the
-            // minUserPromptsPerLoad loop is not blocked by a stale in-flight
-            // flag, while still blocking fresh requests when other flights
-            // remain in flight.
+            // Reflect the settled store value so a follow-up page in an
+            // accumulation loop is not blocked by a stale in-flight flag.
             isLoadingMore:
               store.getState().messages.metaBySession[sessionId]?.isLoadingMore ??
               stateRef.current.isLoadingMore,
@@ -134,7 +170,7 @@ export function useLazyLoadMessages(sessionId: string | null, options?: LazyLoad
         limit: OLDER_PAGE_LIMIT,
       });
 
-      // Update ref synchronously so concurrent calls are blocked immediately
+      // Update ref synchronously so concurrent calls are blocked immediately.
       stateRef.current.isLoadingMore = true;
       try {
         const result = await requestOlderMessages({
@@ -143,8 +179,7 @@ export function useLazyLoadMessages(sessionId: string | null, options?: LazyLoad
           limit: OLDER_PAGE_LIMIT,
           store,
         });
-        // Sync ref immediately so the next intersection callback sees correct state
-        // (the useEffect sync may not have run yet between store update and next observer fire)
+        // Sync immediately; the effect may not run before the next page starts.
         const loadedMessages = store.getState().messages.bySession[sessionId] ?? EMPTY_MESSAGES;
         stateRef.current = {
           hasMore: visibleHasMore(result.hasMore, containsFirstPrompt(loadedMessages)),
@@ -160,27 +195,61 @@ export function useLazyLoadMessages(sessionId: string | null, options?: LazyLoad
         return 0;
       }
     },
-    [sessionId, store],
+    [sessionId, stateRef, store],
+  );
+  return { fetchPage, store };
+}
+
+export function useLazyLoadMessages(sessionId: string | null, options?: LazyLoadMessagesOptions) {
+  const { minUserPromptsPerLoad, minTextPartsPerLoad } = options ?? {};
+  const [isAccumulating, setIsAccumulating] = useState(false);
+  // Use refs for values that should not trigger callback recreation
+  const rawHasMore = useAppStore((state) =>
+    sessionId ? (state.messages.metaBySession[sessionId]?.hasMore ?? false) : false,
+  );
+  const hasMore = useVisibleHasMore(sessionId, rawHasMore);
+  const oldestCursor = useAppStore((state) =>
+    sessionId ? (state.messages.metaBySession[sessionId]?.oldestCursor ?? null) : null,
+  );
+  const isLoadingMore = useAppStore((state) =>
+    sessionId ? (state.messages.metaBySession[sessionId]?.isLoadingMore ?? false) : false,
   );
 
-  // `minUserPromptsPerLoad` accumulates prompts across pages until the
-  // threshold, exhaustion, a zero-result page, or the safety cap.
+  // Store current values in refs to avoid recreating loadMore on every state change
+  const stateRef = useRef<LazyLoadState>({ hasMore, rawHasMore, oldestCursor, isLoadingMore });
+  useEffect(() => {
+    stateRef.current = { hasMore, rawHasMore, oldestCursor, isLoadingMore };
+  }, [hasMore, rawHasMore, oldestCursor, isLoadingMore]);
+
+  // Visible pagination stops at prompt #1; raw pagination remains available
+  // to explicit recovery consumers such as session search.
+  const { fetchPage, store } = useOlderPageFetcher(sessionId, stateRef);
+
+  // Optional per-consumer targets accumulate matching rows across pages until
+  // every configured threshold, exhaustion, a zero-result page, or the safety
+  // cap. Raw rows still determine progress and cursor movement.
   const loadMore = useCallback(async () => {
-    if (!minUserPromptsPerLoad || !sessionId) return fetchPage();
-    const countPrompts = () =>
-      countUserPrompts(store.getState().messages.bySession[sessionId] ?? EMPTY_MESSAGES);
-    const before = countPrompts();
-    let total = 0;
-    for (let page = 0; page < MAX_PAGES_PER_LOAD; page++) {
-      const added = await fetchPage();
-      total += added;
-      if (added === 0) break;
-      if (countPrompts() - before >= minUserPromptsPerLoad) break;
+    if ((!minUserPromptsPerLoad && !minTextPartsPerLoad) || !sessionId) return fetchPage();
+    setIsAccumulating(true);
+    try {
+      return await loadPagesToTargets({
+        fetchPage,
+        getMessages: () => store.getState().messages.bySession[sessionId] ?? EMPTY_MESSAGES,
+        minUserPromptsPerLoad,
+        minTextPartsPerLoad,
+      });
+    } finally {
+      setIsAccumulating(false);
     }
-    return total;
-  }, [fetchPage, minUserPromptsPerLoad, sessionId, store]);
+  }, [fetchPage, minTextPartsPerLoad, minUserPromptsPerLoad, sessionId, store]);
 
   const loadMoreRaw = useCallback(() => fetchPage("raw"), [fetchPage]);
 
-  return { loadMore, loadMoreRaw, hasMore, rawHasMore, isLoadingMore };
+  return {
+    loadMore,
+    loadMoreRaw,
+    hasMore,
+    rawHasMore,
+    isLoadingMore: isLoadingMore || isAccumulating,
+  };
 }

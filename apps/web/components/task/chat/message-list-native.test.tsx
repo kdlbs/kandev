@@ -51,6 +51,7 @@ const MISSING_SCROLL_CONTAINER_ERROR = "scroll container did not render";
 const TARGET_MESSAGE_ID = "target";
 const HANDLE_RENDER_ERROR = "handle did not render";
 const HARNESS_RENDER_ERROR = "harness did not render";
+const NATIVE_SCROLL_MANAGEMENT_TEST_ID = "native-scroll-management-container";
 const TEST_MESSAGES = [{} as Message];
 /** Always returns false: the harness never locks programmatic scrolling. */
 const NEVER_LOCKED = () => false;
@@ -195,12 +196,14 @@ function NativeScrollManagementHarness({
   metrics,
   loadMore = async () => 0,
   sessionId = null,
+  isLoadingMore = false,
   recoveryRef,
 }: {
   items: RenderItem[];
   metrics?: NativeScrollMetrics;
   loadMore?: () => Promise<number>;
   sessionId?: string | null;
+  isLoadingMore?: boolean;
   recoveryRef?: { current: boolean };
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -214,13 +217,13 @@ function NativeScrollManagementHarness({
     hasUnreadDivider: false,
     messagesLoading: false,
     hasMore: true,
-    isLoadingMore: false,
+    isLoadingMore,
     loadMore,
   });
   if (recoveryRef) recoveryRef.current = showRecovery;
   useNativeScrollMetrics(scrollRef, metrics);
   return (
-    <div data-testid="native-scroll-management-container" ref={scrollRef}>
+    <div data-testid={NATIVE_SCROLL_MANAGEMENT_TEST_ID} ref={scrollRef}>
       <div ref={sentinelRef} />
     </div>
   );
@@ -268,7 +271,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
   it("retries a disarmed short page on the next upward scroll", () => {
     const metrics = { scrollHeight: 1000, scrollTop: 100, clientHeight: 400 };
     render(<NativeScrollManagementHarness items={[]} metrics={metrics} />);
-    const scroller = screen.getByTestId("native-scroll-management-container");
+    const scroller = screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID);
 
     act(() => {
       metrics.scrollTop = 80;
@@ -420,7 +423,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
 
     act(() => {
       metrics.scrollTop = 40;
-      screen.getByTestId("native-scroll-management-container").dispatchEvent(new Event("scroll"));
+      screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID).dispatchEvent(new Event("scroll"));
     });
     metrics.scrollHeight = 200;
     rerender(
@@ -443,7 +446,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
 
     act(() => {
       metrics.scrollTop = 40;
-      screen.getByTestId("native-scroll-management-container").dispatchEvent(new Event("scroll"));
+      screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID).dispatchEvent(new Event("scroll"));
     });
     metrics.scrollHeight = 200;
     rerender(
@@ -454,6 +457,71 @@ describe("useNativeScrollManagement transcript pagination", () => {
     );
 
     expect(metrics.scrollTop).toBe(140);
+  });
+
+  it("anchors each committed prepend while an accumulated load remains active", () => {
+    const metrics = { scrollHeight: 100, scrollTop: 40, clientHeight: 50 };
+    const activity = transcriptActivity("activity-old", "turn-1");
+    const newest = transcriptMessage("newest");
+    const { rerender } = render(
+      <NativeScrollManagementHarness items={[activity, newest]} metrics={metrics} />,
+    );
+
+    act(() => {
+      metrics.scrollTop = 40;
+      screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID).dispatchEvent(new Event("scroll"));
+    });
+    rerender(
+      <NativeScrollManagementHarness items={[activity, newest]} metrics={metrics} isLoadingMore />,
+    );
+    metrics.scrollHeight = 200;
+    rerender(
+      <NativeScrollManagementHarness
+        items={[transcriptActivity("activity-new", "turn-1"), newest]}
+        metrics={metrics}
+        isLoadingMore
+      />,
+    );
+
+    expect(metrics.scrollTop).toBe(140);
+  });
+
+  it("freezes the prepend baseline synchronously when an older load starts", async () => {
+    const page = Promise.withResolvers<number>();
+    const metrics = { scrollHeight: 100, scrollTop: 40, clientHeight: 50 };
+    const activity = transcriptActivity("activity-old", "turn-1");
+    const newest = transcriptMessage("newest");
+    const { rerender } = render(
+      <NativeScrollManagementHarness
+        items={[activity, newest]}
+        metrics={metrics}
+        loadMore={() => page.promise}
+      />,
+    );
+
+    act(() => {
+      metrics.scrollTop = 40;
+      screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID).dispatchEvent(new Event("scroll"));
+    });
+    const wrappedLoadMore = sharedSentinelCalls.at(-1)?.[4] as () => Promise<number>;
+    const pendingLoad = wrappedLoadMore();
+    act(() => {
+      metrics.scrollTop = 80;
+      screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID).dispatchEvent(new Event("scroll"));
+    });
+    metrics.scrollHeight = 200;
+    rerender(
+      <NativeScrollManagementHarness
+        items={[transcriptActivity("activity-new", "turn-1"), newest]}
+        metrics={metrics}
+        loadMore={() => page.promise}
+        isLoadingMore
+      />,
+    );
+
+    expect(metrics.scrollTop).toBe(140);
+    page.resolve(20);
+    await pendingLoad;
   });
 });
 
