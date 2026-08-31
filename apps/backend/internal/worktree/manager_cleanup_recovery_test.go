@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,9 +28,19 @@ type cancellingCleanupScriptHandler struct {
 	cancel context.CancelFunc
 }
 
-type swappingCleanupScriptHandler struct {
-	path string
+type failingReleaseStore struct {
+	*SQLiteStore
+	failUpdate bool
 }
+
+func (s *failingReleaseStore) UpdateWorktree(ctx context.Context, wt *Worktree) error {
+	if s.failUpdate {
+		return errors.New("injected release failure")
+	}
+	return s.SQLiteStore.UpdateWorktree(ctx, wt)
+}
+
+type swappingCleanupScriptHandler struct{}
 
 func (h *swappingCleanupScriptHandler) ExecuteSetupScript(context.Context, ScriptExecutionRequest) error {
 	return nil
@@ -88,6 +99,28 @@ func TestCleanupWorktrees_RejectsPathlessRetryWithoutImmutableHead(t *testing.T)
 	assertWorktreeReferenceStatus(t, store, wt.ID, StatusActive)
 }
 
+func TestCleanupWorktreesPreservingBranches_RetriesAfterReleaseFailure(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	seedReferenceCleanupSession(t, store, "task-preserve-retry", "session-preserve-retry", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-preserve-retry", "session-preserve-retry")
+
+	mgr.store = &failingReleaseStore{SQLiteStore: store, failUpdate: true}
+	if err := mgr.CleanupWorktreesPreservingBranches(context.Background(), []*Worktree{wt}); err == nil {
+		t.Fatal("cleanup succeeded despite injected reference-release failure")
+	}
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Fatalf("worktree path remains after first removal: %v", err)
+	}
+	assertCleanupBranchPresent(t, wt.RepositoryPath, wt.Branch)
+
+	mgr.store = store
+	if err := mgr.CleanupWorktreesPreservingBranches(context.Background(), []*Worktree{wt}); err != nil {
+		t.Fatalf("retry pathless branch-preserving cleanup: %v", err)
+	}
+	assertCleanupBranchPresent(t, wt.RepositoryPath, wt.Branch)
+	assertWorktreeReferenceStatus(t, store, wt.ID, StatusDeleted)
+}
+
 func TestCleanupWorktrees_PreservesReplacementAfterPostAuditPathSwap(t *testing.T) {
 	mgr, store := newReferenceCleanupTestManager(t)
 	seedReferenceCleanupSession(t, store, "task-path-swap", "session-path-swap", models.TaskSessionStateCompleted)
@@ -95,7 +128,7 @@ func TestCleanupWorktrees_PreservesReplacementAfterPostAuditPathSwap(t *testing.
 	wt.CleanupHeadOID = strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
 
 	mgr.SetRepositoryProvider(&fakeRepoProvider{repo: &Repository{ID: wt.RepositoryID, CleanupScript: "swap"}})
-	mgr.SetScriptMessageHandler(&swappingCleanupScriptHandler{path: wt.Path})
+	mgr.SetScriptMessageHandler(&swappingCleanupScriptHandler{})
 	if err := mgr.CleanupWorktrees(context.Background(), []*Worktree{wt}); err == nil {
 		t.Fatal("cleanup accepted a path replacement after audit")
 	}

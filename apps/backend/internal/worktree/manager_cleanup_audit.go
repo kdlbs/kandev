@@ -43,7 +43,7 @@ func (m *Manager) auditWorktreeCleanup(
 			_ = pathHandle.Close()
 		}
 	}()
-	branchRef, branchOID, err := m.cleanupBranchIdentity(ctx, wt, pathPresent)
+	branchRef, branchOID, err := m.cleanupBranchIdentity(ctx, wt, pathPresent, removeBranch)
 	if err != nil {
 		return worktreeCleanupAudit{}, err
 	}
@@ -119,7 +119,9 @@ func (m *Manager) openCleanupPathHandle(
 	return handle, nil
 }
 
-func (m *Manager) cleanupBranchIdentity(ctx context.Context, wt *Worktree, pathPresent bool) (string, string, error) {
+func (m *Manager) cleanupBranchIdentity(
+	ctx context.Context, wt *Worktree, pathPresent, requireImmutableIdentity bool,
+) (string, string, error) {
 	branchRef := ""
 	if wt.Branch != "" {
 		branchRef = "refs/heads/" + wt.Branch
@@ -148,7 +150,7 @@ func (m *Manager) cleanupBranchIdentity(ctx context.Context, wt *Worktree, pathP
 		// classifier will fail closed rather than deleting another checkout.
 		return branchRef, "", nil
 	}
-	if expectedOID == "" {
+	if expectedOID == "" && requireImmutableIdentity {
 		return "", "", fmt.Errorf("cleanup branch %q has no immutable expected commit", wt.Branch)
 	}
 	output, err := m.runBoundedGitInspect(ctx, wt.RepositoryPath, "rev-parse", "--verify", branchRef+"^{commit}")
