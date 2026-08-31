@@ -1907,6 +1907,8 @@ export class ApiClient {
       line?: number;
       side?: string;
       comment_type?: string;
+      html_url?: string;
+      in_reply_to?: number | null;
       created_at?: string;
       updated_at?: string;
     }>;

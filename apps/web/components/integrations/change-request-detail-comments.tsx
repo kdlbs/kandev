@@ -136,6 +136,8 @@ function CommentThreadBlock({
             body={thread.root.body}
             createdAt={thread.root.createdAt}
             metadata={commentMetadata(thread.root)}
+            copyUrl={thread.root.url}
+            copyTestId={`change-request-comment-copy-${thread.root.id}`}
             onAdd={
               props.onAddContext
                 ? () =>
@@ -162,6 +164,8 @@ function CommentThreadBlock({
           body={reply.body}
           createdAt={reply.createdAt}
           metadata={commentMetadata(reply, true)}
+          copyUrl={reply.url}
+          copyTestId={`change-request-comment-copy-${reply.id}`}
           onAdd={
             props.onAddContext
               ? () => props.onAddContext?.("comment", buildCommentContext(reply, detail.url))
