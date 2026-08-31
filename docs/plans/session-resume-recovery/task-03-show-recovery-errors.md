@@ -42,9 +42,13 @@ continuation action.
 - Reuse `EnsureSessionErrorBanner` alert anatomy and error description rules.
 - Show **Continue on a new branch** only for the typed branch-loss details.
 - Offer visible read-only workspace restore after manual resume failure.
+- Retain manual resume and read-only restore causes independently, including
+  branch details associated with the resume failure.
 - Keep automatic read-only fallback and return a visible notice with the first
   failure cause.
 - Return both causes when automatic resume and restore fail.
+- Clear stale automatic feedback when the shared session state becomes active
+  after an external manual recovery.
 - Render the hook result in task, preview, and Quick Chat consumers.
 - Map `branch_recreated` status metadata to localized honest warning copy.
 - Add every new key to all six locale catalogs. Generate Traditional Chinese
@@ -67,6 +71,8 @@ continuation action.
 - A successful automatic read-only restore states why resume failed and that
   the workspace is read-only.
 - A double failure displays the resume cause and the restore cause.
+- A manual resume failure followed by a restore failure displays both causes
+  and keeps any branch-continuation action tied to the resume failure.
 - Only branch-loss details expose **Continue on a new branch**.
 - A successful branch replacement clears the blocking error and the persisted
   warning states that conversation history continued while old code did not.

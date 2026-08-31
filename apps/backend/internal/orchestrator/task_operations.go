@@ -1993,6 +1993,11 @@ func (s *Service) ResumeTaskSessionWithOptions(
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.
 	// Session resume can take time and shouldn't be tied to the WS request lifecycle.
 	resumeCtx := context.WithoutCancel(ctx)
+	persistBranchRecovery := func() {
+		if options.AllowBranchReplacement {
+			s.persistBranchRecoveryWarnings(resumeCtx, taskID, sessionID, branchRecoveryBefore)
+		}
+	}
 	execution, err := s.executor.ResumeSessionWithOptions(resumeCtx, session, true, options)
 	var readySession *models.TaskSession
 	if err != nil {
@@ -2000,6 +2005,7 @@ func (s *Service) ResumeTaskSessionWithOptions(
 		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
 			execution, readySession, err = s.recoverAlreadyRunningResume(resumeCtx, taskID, sessionID, options)
 			if err != nil && errors.Is(err, ErrAgentNotReadyForPrompt) {
+				persistBranchRecovery()
 				return nil, err
 			}
 		}
@@ -2014,6 +2020,7 @@ func (s *Service) ResumeTaskSessionWithOptions(
 			if task, taskErr := s.repo.GetTask(resumeCtx, taskID); taskErr == nil && task != nil && task.ArchivedAt != nil {
 				return nil, executor.ErrTaskArchived
 			}
+			persistBranchRecovery()
 			// Use resumeCtx (WithoutCancel) for the failure-recording writes too —
 			// if the caller's ctx was already cancelled (e.g. WS client navigated
 			// away), the SessionStateFailed and TaskStateFailed updates would
@@ -2031,13 +2038,12 @@ func (s *Service) ResumeTaskSessionWithOptions(
 	if readySession == nil {
 		readySession, err = s.waitForResumedSessionReady(resumeCtx, sessionID)
 		if err != nil {
+			persistBranchRecovery()
 			return nil, err
 		}
 	}
 	execution.SessionState = v1.TaskSessionState(readySession.State)
-	if options.AllowBranchReplacement {
-		s.persistBranchRecoveryWarnings(resumeCtx, taskID, sessionID, branchRecoveryBefore)
-	}
+	persistBranchRecovery()
 
 	// Backfill the initial user message when a prior failed launch never got
 	// to recordInitialMessage. Without this, the resume can succeed and the

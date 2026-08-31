@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   asRecoveryError,
@@ -20,22 +20,37 @@ type SessionRecoveryActionsOptions = {
 export function useSessionRecoveryActions({ taskId, sessionId }: SessionRecoveryActionsOptions) {
   const { t } = useTranslation();
   const [busyAction, setBusyAction] = useState<SessionRecoveryBusyAction>(null);
-  const [recoveryError, setRecoveryError] = useState<Error | null>(null);
+  const [resumeError, setResumeError] = useState<Error | null>(null);
+  const [restoreError, setRestoreError] = useState<Error | null>(null);
   const [branchDetails, setBranchDetails] = useState<BranchRecoveryDetails | null>(null);
   const [lastFailedAction, setLastFailedAction] = useState<SessionRecoveryAction | null>(null);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
+
+  const recoveryError = useMemo(() => {
+    if (resumeError && restoreError) {
+      return new Error(
+        t("task:resumeAndRestoreFailed", {
+          resumeError: resumeError.message,
+          restoreError: restoreError.message,
+        }),
+      );
+    }
+    return restoreError ?? resumeError;
+  }, [restoreError, resumeError, t]);
 
   const handleRecover = useCallback(
     async (action: SessionRecoveryAction) => {
       setBusyAction(action);
       try {
         await requestSessionRecover(taskId, sessionId, action, t("task:failedToResumeSession"));
-        setRecoveryError(null);
+        setResumeError(null);
+        setRestoreError(null);
         setBranchDetails(null);
         setLastFailedAction(null);
         setRecoveryNotice(null);
       } catch (cause) {
-        setRecoveryError(asRecoveryError(cause, t("task:failedToResumeSession")));
+        setResumeError(asRecoveryError(cause, t("task:failedToResumeSession")));
+        setRestoreError(null);
         setBranchDetails(branchRecoveryDetails(cause));
         setLastFailedAction(action);
         setRecoveryNotice(null);
@@ -49,21 +64,23 @@ export function useSessionRecoveryActions({ taskId, sessionId }: SessionRecovery
   );
 
   const handleRestore = useCallback(async () => {
-    const failedMessage = recoveryError?.message ?? t("task:failedToResumeSession");
+    const failedMessage = resumeError?.message ?? t("task:failedToResumeSession");
     setBusyAction("restore");
+    setRestoreError(null);
     try {
       await restoreSessionWorkspace(taskId, sessionId, t("task:failedToRestoreWorkspace"));
-      setRecoveryError(null);
+      setResumeError(null);
+      setRestoreError(null);
       setBranchDetails(null);
       setLastFailedAction(null);
       setRecoveryNotice(t("task:resumeFailedWorkspaceReadOnly", { error: failedMessage }));
     } catch (cause) {
-      setRecoveryError(asRecoveryError(cause, t("task:failedToRestoreWorkspace")));
+      setRestoreError(asRecoveryError(cause, t("task:failedToRestoreWorkspace")));
       setRecoveryNotice(null);
     } finally {
       setBusyAction(null);
     }
-  }, [recoveryError, sessionId, taskId, t]);
+  }, [resumeError, sessionId, taskId, t]);
 
   const handleRetry = useCallback(() => {
     return handleRecover(lastFailedAction ?? "resume");

@@ -26,7 +26,8 @@ system_design:
 ## Summary
 
 Map confirmed branch loss to structured recovery details. Persist one warning
-status message after each successful explicit branch replacement.
+status message after each confirmed explicit branch replacement, including a
+replacement committed before a later repository preparation failure.
 
 ## In scope
 
@@ -40,10 +41,13 @@ status message after each successful explicit branch replacement.
 - Compare repository state after successful recovery.
 - Build a stable decision ID from session, repository, original branch, new
   branch, and base branch.
-- Claim warning persistence with `SetSessionMetadataKeyIfAbsent`.
+- Claim warning persistence with a state-guarded
+  `SetSessionMetadataKeyIfAbsentIfState` value that includes a timestamp.
 - Create a `status` message with `variant = warning`,
   `kind = branch_recreated`, and complete structured metadata.
 - Release the claim after message creation fails.
+- Reclaim a stale timestamped claim only when no matching warning message
+  exists, covering a process crash between the claim and message write.
 - Persist one warning for each replaced repository in a multi-repository task.
 - Publish the created message through the existing message adapter path.
 
@@ -65,6 +69,9 @@ status message after each successful explicit branch replacement.
   warning kind and required metadata.
 - Repeated persistence, event replay, and reload do not create a duplicate.
 - A failed message write releases the claim and a later attempt can succeed.
+- A crash before message creation leaves a reclaimable claim, while a matching
+  persisted warning prevents duplicate creation.
+- A later preparation failure does not lose warnings for earlier replacements.
 - Each replaced repository in a multi-repository task receives its own warning.
 
 ## Verification
@@ -97,7 +104,10 @@ rtk go test ./internal/orchestrator -run 'Test.*(BranchRecovery|BranchRecreated|
 ## Risks
 
 - A claim made before launch can suppress a warning for a failed replacement.
-  Claim only after successful recovery and after old and new branches differ.
+  Claim only after the old and new branches differ, and persist it even when a
+  later repository fails so committed replacements remain visible.
+- A process can stop between the claim and message write. Timestamp the claim
+  and reclaim it only after it is stale and no matching message exists.
 - A decision ID without repository identity can collapse distinct warnings in
   a multi-repository task.
 - Persisted content can bypass localization if it contains user-facing prose.
@@ -123,8 +133,9 @@ rtk go test ./internal/orchestrator -run 'Test.*(BranchRecovery|BranchRecreated|
   message preserved for generic clients. Only an error chain matching
   `ErrBranchUnrecoverable` advertises `resume_new_branch`.
 - Implemented before-and-after repository branch snapshots, atomic warning
-  claims, claim release after write failure, and idempotent status-message
-  persistence for each replaced repository.
+  claims, claim release after write failure, stale-claim reclamation after a
+  crash, and idempotent status-message persistence for each replaced repository,
+  including partial preparation failures.
 - GREEN: `rtk go test ./internal/orchestrator -run
   'Test.*(BranchRecovery|BranchRecreated|WarningClaim)' -race` (3 passed).
 - GREEN: focused handler and orchestrator recovery tests pass with

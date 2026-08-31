@@ -73,8 +73,10 @@ generation to replace only a confirmed lost branch.
 
 The second work order adds the typed recovery protocol and durable warning.
 The WebSocket handler maps confirmed branch loss to a conflict with structured
-recovery details. The orchestrator compares repository branch state around a
-successful explicit recovery and persists one claimed warning for each change.
+recovery details. The orchestrator compares repository branch state around
+workspace preparation, persists one claimed warning for each replacement even
+when a later repository fails, and reclaims timestamped claims left by a crash
+when no matching warning exists.
 
 The third work order makes every frontend recovery path observable. It retains
 WebSocket error details, uses the existing alert pattern, and exposes explicit
@@ -107,8 +109,9 @@ behavior and full quality gates.
 - Worktree tests prove normal error propagation and explicit branch creation
   from the configured base.
 - Executor and orchestrator tests prove session and token preservation.
-- Persistence tests prove complete warning metadata, atomic claims, retry after
-  write failure, and duplicate suppression.
+- Persistence tests prove complete warning metadata, state-guarded claims,
+  retry after write failure or a stale claim, partial multi-repository failure
+  handling, and duplicate suppression.
 - Frontend unit tests prove errors are not swallowed and typed recovery actions
   appear only for the matching backend details.
 - Status-message tests prove honest localized branch warning rendering.
@@ -127,8 +130,10 @@ behavior and full quality gates.
 - Multi-repository preparation can partially update task environment records.
   Preserve the existing launch failure boundary and test valid repository
   reuse beside one replaced repository.
-- Warning creation can duplicate on replay or disappear after a transient
-  database error. Use the existing claim and release pattern.
+- Warning creation can duplicate on replay, disappear after a transient
+  database error, or leave a claim behind if the process crashes before the
+  message write. Use state-guarded timestamped claims, release on write
+  failure, and reclaim only stale claims without a matching warning message.
 - Localized copy can imply code recovery. Keep the conversation and code
   outcomes in separate sentences in every locale.
 - Recovery actions can overflow narrow chat cards. Reuse the stacked mobile
@@ -156,6 +161,10 @@ verification results are recorded below.
 - Task 04 passes the desktop and mobile branch-recovery E2E scenarios. Fresh
   PR evidence is available in `apps/web/.pr-assets/` with one manifest entry
   for each viewport.
+- PR fixup hardens replacement eligibility against transient fetch failures,
+  preserves warnings after partial preparation failure, retains both manual
+  recovery causes, clears stale automatic feedback after an external recovery,
+  and reclaims crash-stale warning claims.
 - Full backend tests pass with the managed-process configuration variables
   cleared, backend lint and changed-file golangci-lint pass, the production
   web build passes, and specification lint passes.

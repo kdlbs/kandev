@@ -1034,10 +1034,10 @@ func (m *Manager) fetchBranchToLocalWithPolicy(
 	}
 
 	if required {
-		if isRemoteBranchMissingError(outputStr) {
+		if isRemoteBranchMissingError(outputStr) || isRemoteRefMissingError(errors.New(outputStr)) {
 			return nil, fmt.Errorf(
 				"required refresh of checkout branch %q found no remote ref: %w",
-				branch, ErrInvalidBaseBranch,
+				branch, newConfirmedRemoteRefMissingError(outputStr),
 			)
 		}
 		reason := classifyGitFallbackReason(err, outputStr, fetchCtxErr)
@@ -1058,7 +1058,17 @@ func (m *Manager) fetchBranchToLocalWithPolicy(
 		return nil, fmt.Errorf("could not verify local branch %q after fetch failure (%s): %w", branch, strings.TrimSpace(outputStr), existsErr)
 	}
 	if !exists {
-		return nil, fmt.Errorf("%w: branch %q not found locally or on remote: %s", ErrInvalidBaseBranch, branch, outputStr)
+		if isRemoteRefMissingError(errors.New(outputStr)) {
+			return nil, fmt.Errorf(
+				"branch %q not found locally or on remote: %w",
+				branch, newConfirmedRemoteRefMissingError(outputStr),
+			)
+		}
+		reason := classifyGitFallbackReason(err, outputStr, fetchCtxErr)
+		return nil, fmt.Errorf(
+			"could not fetch branch %q and no local branch is available (%s): %w",
+			branch, reason, syncFailureCause(reason, err, fetchCtxErr),
+		)
 	}
 
 	reason := classifyGitFallbackReason(err, outputStr, fetchCtxErr)
@@ -1923,7 +1933,7 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 				// Only a confirmed-missing remote ref means the work is gone;
 				// transient fetch failures (network, auth) keep their own error
 				// so callers don't treat a reachable branch as unrecoverable.
-				if isRemoteRefMissingError(fetchErr) || errors.Is(fetchErr, ErrInvalidBaseBranch) {
+				if errors.Is(fetchErr, ErrRemoteRefMissing) || isRemoteRefMissingError(fetchErr) {
 					err := &BranchUnrecoverableError{Branch: existing.Branch}
 					if req.AllowBranchReplacement {
 						return m.replaceUnrecoverableWorktree(ctx, existing, req, err)

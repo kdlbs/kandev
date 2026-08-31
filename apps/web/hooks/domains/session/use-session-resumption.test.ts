@@ -320,6 +320,47 @@ describe("useSessionResumption", () => {
       session_id: SESSION_ID,
     });
   });
+
+  it("clears stale feedback when an external recovery makes the live session active", async () => {
+    mockPreventAutoStart = true;
+    mockSessionItems = {
+      s1: {
+        started_at: STARTED_AT,
+        updated_at: STARTED_AT,
+        state: FAILED_STATE,
+      },
+    };
+    mockRequest.mockResolvedValueOnce({
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: FAILED_STATE,
+      is_agent_running: false,
+      is_resumable: true,
+      needs_resume: true,
+      updated_at: STARTED_AT,
+    });
+
+    const { result, rerender } = renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
+    await waitFor(() => expect(mockSetResumeSkipped).toHaveBeenCalledWith(SESSION_ID, true));
+
+    mockRequest.mockResolvedValueOnce({
+      success: false,
+      task_id: TASK_ID,
+      session_id: SESSION_ID,
+      state: FAILED_STATE,
+      error: "Stale automatic recovery failure",
+    });
+    await act(async () => {
+      await result.current.resumeSession();
+    });
+    expect(result.current.error).toBe("Stale automatic recovery failure");
+
+    mockSessionItems.s1.state = "RUNNING";
+    rerender();
+
+    await waitFor(() => expect(result.current.error).toBeNull());
+    expect(result.current.notice).toBeNull();
+  });
 });
 
 describe("useSessionResumption prevent-auto-start gate", () => {

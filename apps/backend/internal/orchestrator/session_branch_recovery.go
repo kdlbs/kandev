@@ -3,9 +3,11 @@ package orchestrator
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -74,6 +76,15 @@ type branchRecoverySnapshot struct {
 	SessionID     string
 	EnvironmentID string
 	Repositories  []branchRecoveryRepoSnapshot
+}
+
+const (
+	branchRecoveryWarningKeyPrefix       = "branch_recreated_warning:"
+	branchRecoveryWarningClaimStaleAfter = 5 * time.Minute
+)
+
+type branchRecoveryWarningClaim struct {
+	ClaimedAt time.Time `json:"claimed_at"`
 }
 
 type branchRecoveryStore interface {
@@ -281,7 +292,7 @@ func (s *Service) persistBranchRecoveryWarning(
 	previous, current branchRecoveryRepoSnapshot,
 ) {
 	decisionID := branchRecoveryDecisionID(taskID, sessionID, previous.RepositoryID, previous.WorktreeBranch, current.WorktreeBranch, current.BaseBranch)
-	key := "branch_recreated_warning:" + decisionID
+	key := branchRecoveryWarningKeyPrefix + decisionID
 	release, claimed := s.claimBranchRecoveryWarning(ctx, sessionID, key)
 	if !claimed {
 		return
@@ -318,24 +329,121 @@ func (s *Service) claimBranchRecoveryWarning(ctx context.Context, sessionID, key
 	}
 	claimCtx := context.WithoutCancel(ctx)
 	if claimer, ok := s.repo.(failedSessionMetadataClaimer); ok {
-		session, err := s.repo.GetTaskSession(claimCtx, sessionID)
-		if err != nil || session == nil {
-			return func() {}, false
-		}
-		claimed, err := claimer.SetSessionMetadataKeyIfAbsentIfState(claimCtx, sessionID, key, true, session.State)
-		if err != nil || !claimed {
-			return func() {}, false
-		}
-		return func() {
-			releaser, ok := s.repo.(failedSessionMetadataClaimReleaser)
-			if !ok {
-				return
-			}
-			_, _ = releaser.RemoveSessionMetadataKeyIfState(claimCtx, sessionID, key, session.State)
-		}, true
+		return s.claimBranchRecoveryWarningWithState(claimCtx, sessionID, key, claimer)
 	}
-	claimed, err := s.repo.SetSessionMetadataKeyIfAbsent(claimCtx, sessionID, key, true)
+	return s.claimBranchRecoveryWarningWithoutState(claimCtx, sessionID, key)
+}
+
+func (s *Service) claimBranchRecoveryWarningWithState(
+	ctx context.Context,
+	sessionID, key string,
+	claimer failedSessionMetadataClaimer,
+) (func(), bool) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return func() {}, false
+	}
+	claim := branchRecoveryWarningClaim{ClaimedAt: time.Now().UTC()}
+	claimed, err := claimer.SetSessionMetadataKeyIfAbsentIfState(ctx, sessionID, key, claim, session.State)
+	if err != nil {
+		return func() {}, false
+	}
+	if !claimed {
+		session, claimed = s.reclaimBranchRecoveryWarningClaim(ctx, sessionID, key, session.State)
+		if claimed {
+			claimed, err = claimer.SetSessionMetadataKeyIfAbsentIfState(ctx, sessionID, key, claim, session.State)
+		}
+	}
+	if err != nil || !claimed {
+		return func() {}, false
+	}
+	return func() {
+		s.releaseBranchRecoveryWarningClaim(ctx, sessionID, key, session.State)
+	}, true
+}
+
+func (s *Service) claimBranchRecoveryWarningWithoutState(ctx context.Context, sessionID, key string) (func(), bool) {
+	claimed, err := s.repo.SetSessionMetadataKeyIfAbsent(
+		ctx, sessionID, key, branchRecoveryWarningClaim{ClaimedAt: time.Now().UTC()},
+	)
 	return func() {}, err == nil && claimed
+}
+
+func (s *Service) reclaimBranchRecoveryWarningClaim(
+	ctx context.Context,
+	sessionID, key string,
+	expectedState models.TaskSessionState,
+) (*models.TaskSession, bool) {
+	if !s.reclaimStaleBranchRecoveryWarningClaim(ctx, sessionID, key, expectedState) {
+		return nil, false
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	return session, err == nil && session != nil
+}
+
+func (s *Service) releaseBranchRecoveryWarningClaim(ctx context.Context, sessionID, key string, expectedState models.TaskSessionState) {
+	releaser, ok := s.repo.(failedSessionMetadataClaimReleaser)
+	if !ok {
+		return
+	}
+	_, _ = releaser.RemoveSessionMetadataKeyIfState(ctx, sessionID, key, expectedState)
+}
+
+// reclaimStaleBranchRecoveryWarningClaim releases a timestamped claim left by
+// a crashed process. A matching persisted warning wins over reclamation so a
+// crash after message insertion cannot cause a duplicate warning.
+func (s *Service) reclaimStaleBranchRecoveryWarningClaim(
+	ctx context.Context,
+	sessionID, key string,
+	expectedState models.TaskSessionState,
+) bool {
+	releaser, ok := s.repo.(failedSessionMetadataClaimReleaser)
+	if !ok {
+		return false
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.State != expectedState || session.Metadata == nil {
+		return false
+	}
+	claim, ok := branchRecoveryWarningClaimFromMetadata(session.Metadata[key])
+	if !ok || time.Since(claim.ClaimedAt) < branchRecoveryWarningClaimStaleAfter {
+		return false
+	}
+	decisionID := strings.TrimPrefix(key, branchRecoveryWarningKeyPrefix)
+	if decisionID == "" || decisionID == key {
+		return false
+	}
+	messages, err := s.repo.ListMessages(ctx, sessionID)
+	if err != nil || branchRecoveryWarningMessageExists(messages, decisionID) {
+		return false
+	}
+	removed, err := releaser.RemoveSessionMetadataKeyIfState(ctx, sessionID, key, session.State)
+	return err == nil && removed
+}
+
+func branchRecoveryWarningClaimFromMetadata(value interface{}) (branchRecoveryWarningClaim, bool) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return branchRecoveryWarningClaim{}, false
+	}
+	var claim branchRecoveryWarningClaim
+	if err := json.Unmarshal(data, &claim); err != nil || claim.ClaimedAt.IsZero() {
+		return branchRecoveryWarningClaim{}, false
+	}
+	return claim, true
+}
+
+func branchRecoveryWarningMessageExists(messages []*models.Message, decisionID string) bool {
+	for _, message := range messages {
+		if message == nil || message.Metadata == nil {
+			continue
+		}
+		if message.Metadata["kind"] != "branch_recreated" || message.Metadata["decision_id"] != decisionID {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func branchRecoveryDecisionID(parts ...string) string {

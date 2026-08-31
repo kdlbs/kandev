@@ -26,6 +26,11 @@ var (
 	// ErrInvalidBaseBranch is returned when the base branch does not exist.
 	ErrInvalidBaseBranch = errors.New("base branch does not exist")
 
+	// ErrRemoteRefMissing is returned when Git confirms that the requested
+	// remote ref is unavailable. It is narrower than ErrInvalidBaseBranch so
+	// callers can distinguish a deleted branch from a failed fetch.
+	ErrRemoteRefMissing = errors.New("remote ref does not exist")
+
 	// ErrWorktreeCorrupted is returned when the worktree directory is corrupted or invalid.
 	ErrWorktreeCorrupted = errors.New("worktree directory is corrupted")
 
@@ -108,6 +113,25 @@ type BranchUnrecoverableError struct {
 	Branch string
 }
 
+type confirmedRemoteRefMissingError struct {
+	detail string
+}
+
+func (e *confirmedRemoteRefMissingError) Error() string {
+	if e == nil || e.detail == "" {
+		return ErrRemoteRefMissing.Error()
+	}
+	return fmt.Sprintf("%s: %s", ErrRemoteRefMissing, e.detail)
+}
+
+func (e *confirmedRemoteRefMissingError) Unwrap() []error {
+	return []error{ErrRemoteRefMissing, ErrInvalidBaseBranch}
+}
+
+func newConfirmedRemoteRefMissingError(detail string) error {
+	return &confirmedRemoteRefMissingError{detail: strings.TrimSpace(detail)}
+}
+
 func (e *BranchUnrecoverableError) Error() string {
 	if e == nil || e.Branch == "" {
 		return ErrBranchUnrecoverable.Error()
@@ -164,6 +188,7 @@ func isRemoteRefMissingError(err error) bool {
 	return strings.Contains(msg, "couldn't find remote ref") ||
 		strings.Contains(msg, "does not appear to be a git repository") ||
 		strings.Contains(msg, "no such remote") ||
+		strings.Contains(msg, "no remote configured") ||
 		strings.Contains(msg, "cannot determine remote head") ||
 		strings.Contains(msg, "remote head refers to nonexistent ref")
 }

@@ -195,6 +195,34 @@ describe("ActionMessage — recovery card retires once the agent is back", () =>
     expect(screen.getByTestId("recovery-restore-workspace-button")).toBeTruthy();
   });
 
+  it("retains both causes when manual resume and read-only restore fail", async () => {
+    requestMock
+      .mockRejectedValueOnce(
+        new WebSocketRequestError("The saved branch is no longer available.", "CONFLICT", {
+          kind: "branch_unrecoverable",
+          recovery_action: "resume_new_branch",
+          original_branch: "feature/lost",
+          base_branch: "main",
+        }),
+      )
+      .mockRejectedValueOnce(new Error("Workspace restore failed."));
+
+    renderWithTranscript("WAITING_FOR_INPUT", []);
+    fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
+    expect(await screen.findByTestId("session-recovery-error")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("recovery-restore-workspace-button"));
+
+    const recoveryError = await screen.findByTestId("session-recovery-error");
+    expect(recoveryError.textContent).toContain(
+      "Resume failed: The saved branch is no longer available.",
+    );
+    expect(recoveryError.textContent).toContain(
+      "Workspace restore failed: Workspace restore failed.",
+    );
+    expect(screen.getByTestId("recovery-new-branch-button")).toBeTruthy();
+  });
+
   it("does not offer branch continuation for an ordinary recovery failure", async () => {
     requestMock.mockRejectedValueOnce(new Error("Provider is unavailable"));
 

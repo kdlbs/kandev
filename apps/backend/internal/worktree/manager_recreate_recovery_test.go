@@ -196,6 +196,56 @@ func TestRecreate_BranchGoneEverywhereReturnsUnrecoverable(t *testing.T) {
 	}
 }
 
+func TestRecreate_DoesNotReplaceAfterTransientFetchFailure(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	runGit(t, repoPath, "remote", "set-url", "origin", "https://127.0.0.1:1/unavailable.git")
+	archiveDeletesLocalBranch(t, repoPath, "feature/pr-branch")
+
+	cfg := newTestConfig(t)
+	store := newMockStore()
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	existing := &Worktree{
+		ID:                "wt-transient-fetch",
+		SessionID:         "session-transient-fetch",
+		TaskID:            "task-transient-fetch",
+		TaskDirName:       "task-transient-fetch",
+		TaskEnvironmentID: "env-transient-fetch",
+		RepositoryID:      "repo-1",
+		RepositoryPath:    repoPath,
+		Path:              filepath.Join(cfg.TasksBasePath, "task-transient-fetch", "repo-1"),
+		Branch:            "feature/pr-branch",
+		Status:            StatusDeleted,
+	}
+	store.worktrees[existing.ID] = existing
+
+	_, err = mgr.recreate(context.Background(), existing, CreateRequest{
+		SessionID:              existing.SessionID,
+		TaskID:                 existing.TaskID,
+		TaskEnvironmentID:      existing.TaskEnvironmentID,
+		RepositoryID:           existing.RepositoryID,
+		RepositoryPath:         repoPath,
+		TaskDirName:            existing.TaskDirName,
+		RepoName:               "repo-1",
+		BaseBranch:             "main",
+		AllowBranchReplacement: true,
+	})
+	if err == nil {
+		t.Fatal("recreate() succeeded after a transient fetch failure")
+	}
+	if errors.Is(err, ErrBranchUnrecoverable) {
+		t.Fatalf("recreate() misclassified transient fetch failure as branch loss: %v", err)
+	}
+	if errors.Is(err, ErrInvalidBaseBranch) {
+		t.Fatalf("recreate() misclassified transient fetch failure as invalid branch: %v", err)
+	}
+	if errors.Is(err, ErrRemoteRefMissing) {
+		t.Fatalf("recreate() reported confirmed remote ref loss for transient fetch failure: %v", err)
+	}
+}
+
 func TestRecreate_AllowsExplicitReplacementWithFreshBranchAndPath(t *testing.T) {
 	repoPath := initGitRepoWithRemote(t)
 	runGit(t, repoPath, "push", "origin", "--delete", "feature/pr-branch")

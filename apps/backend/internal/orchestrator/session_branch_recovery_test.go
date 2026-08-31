@@ -90,6 +90,63 @@ func TestPersistBranchRecoveryWarningsIsIdempotent(t *testing.T) {
 	require.Equal(t, "repo-branch-recovery", warning.metadata["repository_id"])
 }
 
+func TestPersistBranchRecoveryWarningsReclaimsStaleClaim(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-stale-claim", "session-stale-claim", "step1")
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-stale-claim", WorkspaceID: "ws1", Name: "backend", DefaultBranch: "main",
+		CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "task-repo-stale-claim", TaskID: "task-stale-claim", RepositoryID: "repo-stale-claim",
+		BaseBranch: "main", Position: 0, CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-stale-claim", TaskID: "task-stale-claim",
+		ExecutorType: string(models.ExecutorTypeWorktree), WorkspacePath: t.TempDir(), Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "env-repo-stale-claim", RepositoryID: "repo-stale-claim", BranchSlug: "task-stale-claim",
+			WorktreeID: "worktree-stale-claim", WorktreeBranch: "feature/lost", Position: 0,
+			CreatedAt: now, UpdatedAt: now,
+		}},
+	}))
+	session, err := repo.GetTaskSession(ctx, "session-stale-claim")
+	require.NoError(t, err)
+	session.TaskEnvironmentID = "env-stale-claim"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	decisionID := branchRecoveryDecisionID(
+		"task-stale-claim", "session-stale-claim", "repo-stale-claim", "feature/lost", "feature/recreated", "main",
+	)
+	claimed, err := repo.SetSessionMetadataKeyIfAbsent(
+		ctx,
+		"session-stale-claim",
+		branchRecoveryWarningKeyPrefix+decisionID,
+		branchRecoveryWarningClaim{ClaimedAt: time.Now().Add(-(branchRecoveryWarningClaimStaleAfter + time.Minute))},
+	)
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	service := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	messages := &mockMessageCreator{}
+	service.messageCreator = messages
+	before, err := service.captureBranchRecoverySnapshot(ctx, "task-stale-claim", "session-stale-claim")
+	require.NoError(t, err)
+
+	row, err := repo.ListTaskEnvironmentRepos(ctx, "env-stale-claim")
+	require.NoError(t, err)
+	require.Len(t, row, 1)
+	row[0].WorktreeBranch = "feature/recreated"
+	require.NoError(t, repo.UpdateTaskEnvironmentRepo(ctx, row[0]))
+
+	service.persistBranchRecoveryWarnings(ctx, "task-stale-claim", "session-stale-claim", before)
+
+	require.Len(t, messages.sessionMessages, 1)
+	require.Equal(t, "branch_recreated", messages.sessionMessages[0].metadata["kind"])
+}
+
 func TestBranchRecoveryErrorLeavesOrdinaryErrorsUntouched(t *testing.T) {
 	cause := errors.New("ordinary resume failure")
 	service := &Service{}

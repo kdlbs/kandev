@@ -38,9 +38,12 @@ prepare the task workspace. Worktree preparation calls
 `worktree.Manager.Create`, which can recreate an invalid worktree.
 
 `Manager.recreate` returns a wrapped `worktree.ErrBranchUnrecoverable` only
-after it cannot find the branch locally and receives confirmed missing-ref
-evidence from the configured remote. The wrapped error already reaches
-`Service.RecoverSession` and the `session.recover` WebSocket handler.
+after it cannot find the branch locally and receives the distinct
+`worktree.ErrRemoteRefMissing` sentinel from confirmed missing-ref evidence
+at the configured remote. Authentication, network, timeout, and other fetch
+failures remain their original failure class and cannot authorize replacement.
+The wrapped error already reaches `Service.RecoverSession` and the
+`session.recover` WebSocket handler.
 
 The web client currently converts WebSocket failures to a plain `Error` and
 several resume call sites then discard that error. Automatic resume also hides
@@ -121,8 +124,9 @@ stops launch through the existing atomic preparation boundary.
 ## Warning persistence
 
 The orchestrator captures repository branch state before explicit recovery and
-loads it again after workspace preparation succeeds. Each confirmed branch
-replacement produces one `status` message through `CreateSessionMessage`. The
+loads it again after workspace preparation completes. Each confirmed branch
+replacement produces one `status` message through `CreateSessionMessage`, even
+when a later repository preparation failure aborts the overall resume. The
 message metadata is:
 
 ```text
@@ -139,12 +143,15 @@ decision_id: <stable replacement identity>
 The content is a neutral internal status value. The frontend selects localized
 copy from `metadata.kind` and the structured branch fields.
 
-Before message creation, the orchestrator uses
-`SetSessionMetadataKeyIfAbsent` with a key derived from the session,
-repository, original branch, new branch, and base branch. This follows the
-model-selection warning claim pattern. A duplicate claim skips message
-creation. A failed message write releases the claim so a later retry can
-persist the warning.
+Before message creation, the orchestrator uses a state-guarded
+`SetSessionMetadataKeyIfAbsentIfState` claim with a timestamp and a key derived
+from the session, repository, original branch, new branch, and base branch.
+This follows the model-selection warning claim pattern. A duplicate active
+claim skips message creation. A stale timestamped claim is reclaimed only
+when the session state still matches and no matching warning message exists,
+so a process crash between claiming and message creation can be retried. A
+failed message write releases the claim so a later retry can persist the
+warning.
 
 Direct orchestrator persistence is preferred over a runtime stream event. The
 orchestrator makes the branch decision and already owns the old and new branch
@@ -170,10 +177,14 @@ succeeds, the hook returns a nonblocking notice with the resume cause and the
 read-only state. If restore also fails, it returns both causes. Task, preview,
 and Quick Chat consumers render this state instead of ignoring it.
 
-The recovery result uses separate error and notice fields. A later successful
-resume clears the error. A read-only restore clears the blocking error and
-keeps the informational notice until the session state changes or the user
-dismisses it.
+The recovery result uses separate error and notice fields. Manual resume and
+read-only restore retain separate causes, so a second failure does not hide the
+first cause or its branch details. A later successful resume clears both. A
+read-only restore clears the blocking error and keeps the informational notice
+until the session state changes or the user dismisses it. The automatic
+resumption hook also clears stale feedback when the shared live session state
+transitions to `STARTING`, `RUNNING`, or `WAITING_FOR_INPUT` after an external
+manual recovery.
 
 ## Frontend status rendering
 
@@ -218,7 +229,10 @@ Backend tests start with the current failure:
 - `RecoverSession` validates `resume_new_branch` and passes replacement
   permission only for that action.
 - Successful replacement persists complete warning metadata once. Replay and
-  retry do not duplicate it, and a failed write releases the claim.
+  retry do not duplicate it, a failed write releases the claim, and a stale
+  claim left by a crash can be reclaimed when no warning exists.
+- A warning from an earlier repository replacement survives a later
+  multi-repository preparation failure.
 - The WebSocket handler maps the sentinel to a conflict with recovery details.
 
 Frontend unit tests cover the typed WebSocket error, both manual recovery

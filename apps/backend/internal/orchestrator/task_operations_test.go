@@ -5662,6 +5662,78 @@ func TestResumeTaskSession_AlreadyFailedMissingRemoteRefCreatesNeutralRecoveryMe
 	}
 }
 
+func TestResumeTaskSession_PersistsBranchRecoveryWarningWhenPreparationFailsLater(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	seedTaskAndSession(t, repo, "task-partial-recovery", "session-partial-recovery", models.TaskSessionStateFailed)
+	now := time.Now().UTC()
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-partial-recovery", WorkspaceID: "ws1", Name: "backend", DefaultBranch: "main",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "task-repo-partial-recovery", TaskID: "task-partial-recovery", RepositoryID: "repo-partial-recovery",
+		BaseBranch: "main", Position: 0, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTaskRepository: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-partial-recovery", TaskID: "task-partial-recovery",
+		ExecutorType: string(models.ExecutorTypeWorktree), WorkspacePath: t.TempDir(), Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "env-repo-partial-recovery", RepositoryID: "repo-partial-recovery", BranchSlug: "backend",
+			WorktreeID: "worktree-partial-recovery", WorktreeBranch: "feature/lost", Position: 0,
+			CreatedAt: now, UpdatedAt: now,
+		}},
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-partial-recovery")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	session.AgentProfileID = "profile-partial-recovery"
+	session.TaskEnvironmentID = "env-partial-recovery"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("UpdateTaskSession: %v", err)
+	}
+
+	launchErr := errors.New("second repository preparation failed")
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			rows, err := repo.ListTaskEnvironmentRepos(ctx, "env-partial-recovery")
+			if err != nil {
+				return nil, err
+			}
+			rows[0].WorktreeBranch = "feature/replaced"
+			if err := repo.UpdateTaskEnvironmentRepo(ctx, rows[0]); err != nil {
+				return nil, err
+			}
+			return nil, launchErr
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+
+	_, err = svc.ResumeTaskSessionWithOptions(ctx, "task-partial-recovery", "session-partial-recovery", executor.ResumeOptions{
+		AllowBranchReplacement: true,
+	})
+	if !errors.Is(err, launchErr) {
+		t.Fatalf("ResumeTaskSessionWithOptions error = %v, want %v", err, launchErr)
+	}
+	if len(messages.sessionMessages) != 1 {
+		t.Fatalf("warning messages = %d, want one warning after partial preparation", len(messages.sessionMessages))
+	}
+	if got := messages.sessionMessages[0].metadata["kind"]; got != "branch_recreated" {
+		t.Fatalf("warning kind = %v, want branch_recreated", got)
+	}
+}
+
 func TestResumeTaskSession_UnrelatedLaunchFailureDoesNotCreateRecoveryMessage(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

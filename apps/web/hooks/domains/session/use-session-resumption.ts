@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { launchSession } from "@/lib/services/session-launch-service";
 import {
   buildResumeRequest,
   buildRestoreWorkspaceRequest,
 } from "@/lib/services/session-launch-helpers";
+import { useSessionRecoveryFeedback } from "./use-session-recovery-feedback";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
   sessionId as toSessionId,
@@ -635,6 +636,8 @@ export function useSessionResumption(
     setResumeSkipped,
     getLiveSession: (sid: string) => storeApi.getState().taskSessions.items[sid] ?? null,
   };
+
+  useSessionRecoveryFeedback(sessionId, session?.state, error, notice, setters);
 
   const { sessionStatus } = useSessionResetAndCheck({
     taskId,
