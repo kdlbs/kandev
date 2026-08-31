@@ -266,6 +266,8 @@ func modeForProfile(profileContext mcpprofile.Context) string {
 		return ModeExternal
 	case mcpprofile.SurfaceOfficeTask:
 		return ModeOffice
+	case mcpprofile.SurfaceAutomation:
+		return ModeAutomation
 	case mcpprofile.SurfaceKanbanTask:
 		if profileContext.HasCapability(mcpprofile.CapabilityTaskTitle) {
 			return ModeTaskTitlePending
@@ -582,7 +584,19 @@ func (s *Server) SetMode(mode string) {
 		return
 	}
 	s.mode = normalizedMode
-	s.profile = mcpprofile.New(surfaceForMode(normalizedMode), s.profile.Capabilities, s.mcpProviders)
+	capabilities := s.profile.Capabilities
+	if normalizedMode == ModeAutomation {
+		// The automation surface is a fixed coordinator catalog and never
+		// carries task-local question capabilities — mcpprofile.NewAutomation
+		// and mcpprofile.Legacy both drop them. SetMode carries the previous
+		// profile's capabilities forward, and the user-question tool group is
+		// gated on the capability rather than the surface, so an instance
+		// created in task mode and switched here would otherwise advertise
+		// ask_user_question_kandev on a surface whose execution-time allowlist
+		// refuses it.
+		capabilities = nil
+	}
+	s.profile = mcpprofile.New(surfaceForMode(normalizedMode), capabilities, s.mcpProviders)
 	if normalizedMode == ModeTaskTitlePending {
 		s.profile = s.profile.WithCapability(mcpprofile.CapabilityTaskTitle)
 	} else {
