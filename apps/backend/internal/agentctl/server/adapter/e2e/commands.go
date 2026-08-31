@@ -21,7 +21,10 @@ func acpCommand(t *testing.T, a agents.Agent) string {
 	if len(argv) == 0 {
 		t.Fatalf("BuildCommand returned an empty argv")
 	}
-	for _, tok := range argv {
+	for i, tok := range argv {
+		if tok == "" {
+			t.Fatalf("BuildCommand argv token %d is empty; it cannot round-trip through the string-shaped AgentSpec.Command", i)
+		}
 		if hasUnicodeWhitespace(tok) {
 			t.Fatalf("BuildCommand argv token %q contains whitespace; it cannot round-trip through the string-shaped AgentSpec.Command", tok)
 		}
