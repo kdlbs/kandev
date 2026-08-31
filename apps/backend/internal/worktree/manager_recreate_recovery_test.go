@@ -67,25 +67,14 @@ func TestRecreate_FetchesBranchFromOriginWhenLocalDeleted(t *testing.T) {
 	}
 }
 
-func TestRecreate_RequiredBaseRefreshFailureStopsPreparation(t *testing.T) {
+func TestRecreate_RefreshFailureUsesLocalBase(t *testing.T) {
 	repoPath := initGitRepoWithRemote(t)
 	worktreePath := filepath.Join(t.TempDir(), "task-required", "repo-1")
 	if err := os.MkdirAll(worktreePath, 0755); err != nil {
 		t.Fatalf("create worktree placeholder: %v", err)
 	}
-
-	scriptDir := writeFakeGitScript(t, `
-case "${1:-}" in
-  fetch)
-    echo "fatal: Authentication failed" >&2
-    exit 1
-    ;;
-  *)
-    exit 0
-    ;;
-esac
-`)
-	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	branchSHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "feature/pr-branch"))
+	runGit(t, repoPath, "remote", "set-url", "origin", "https://user:super-secret@127.0.0.1:1/missing.git")
 
 	mgr := newRecreateTestManager(t)
 	existing := &Worktree{
@@ -107,11 +96,15 @@ esac
 		BaseBranch:         "main",
 		PullBeforeWorktree: true,
 	})
-	if err == nil {
-		t.Fatal("recreate() succeeded after required base refresh failure")
+	if err != nil {
+		t.Fatalf("recreate() error = %v", err)
 	}
 	if _, statErr := os.Stat(worktreePath); statErr != nil {
-		t.Fatalf("required refresh failure removed the existing worktree path: %v", statErr)
+		t.Fatalf("recreate() did not restore the worktree path: %v", statErr)
+	}
+	gotSHA := strings.TrimSpace(runGit(t, worktreePath, "rev-parse", "HEAD"))
+	if gotSHA != branchSHA {
+		t.Fatalf("recreated worktree HEAD = %q, want local branch %q", gotSHA, branchSHA)
 	}
 }
 

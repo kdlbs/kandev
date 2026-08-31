@@ -59,6 +59,7 @@ export type ChangeRequestDetailComment = {
   author: ChangeRequestDetailPerson;
   body: string;
   createdAt?: string;
+  url?: string;
   path?: string;
   line?: number;
   resolved?: boolean;

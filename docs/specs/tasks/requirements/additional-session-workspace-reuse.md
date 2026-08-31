@@ -34,6 +34,10 @@ preserving independent session runtime state.
 - **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001.4:** Unsafe or unsupported
   reuse shall fail with a typed, recoverable API error without creating a
   session or replacement workspace.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001.5:** Desktop and mobile
+  workspace views shall show one current Git status for sessions that share a
+  task environment. A response from a non-canonical workspace or an older
+  observation shall not replace that status.
 
 ### REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002: Canonical Workspace Identity Continuity
 
@@ -115,6 +119,8 @@ an optional session name remains best effort after a successful launch.
 
 - A named or unnamed additional session sees the same uncommitted tracked and
   untracked files as the task's first session.
+- A late status response from a sibling session does not clear or replace the
+  current task-environment status in desktop or mobile workspace views.
 - Git worktree inventory, HEAD, index, branch and status remain unchanged by
   an additional launch.
 - A terminal primary or zero-session task can reuse its retained ready

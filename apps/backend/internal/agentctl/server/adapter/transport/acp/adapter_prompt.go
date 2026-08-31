@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -242,6 +243,30 @@ func (a *Adapter) sendPrompt(
 	// Drop any Cursor `cursor/task` metadata for this session that never matched
 	// a subagent tool_call this turn.
 	a.sweepCursorTaskMetaOnPromptEnd(sessionID)
+
+	if cursorRetriable, occurredAt := turn.cursorRetriableFailureAt(); cursorRetriable {
+		const safeMessage = cursorRetriableStreamResetMessage
+		if occurredAt.IsZero() {
+			occurredAt = time.Now().UTC()
+		}
+		a.logger.Info("cursor prompt ended with retriable stream-reset evidence",
+			zap.String("session_id", sessionID),
+			zap.Uint64("prompt_generation", promptGeneration))
+		a.cancelAsyncTurnComplete(sessionID)
+		a.sendUpdate(AgentEvent{
+			Type:             streams.EventTypeError,
+			SessionID:        sessionID,
+			PromptGeneration: promptGeneration,
+			Error:            safeMessage,
+			ProviderError: &streams.ProviderError{
+				Source:     streams.ProviderErrorSourceCursorACP,
+				ProviderID: acpcompat.CursorAgentID,
+				Message:    safeMessage,
+				OccurredAt: occurredAt,
+			},
+		})
+		return nil
+	}
 
 	if a.agentID == codexAgentID && turn.codexCapacityFailure() {
 		const safeMessage = codexModelCapacityErrorMessage

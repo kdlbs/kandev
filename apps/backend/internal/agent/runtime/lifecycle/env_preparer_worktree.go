@@ -610,6 +610,8 @@ func applySyncProgressEvent(step *PrepareStep, event worktree.SyncProgressEvent)
 	}
 	step.Output = event.Output
 	step.Error = event.Error
+	step.Warning = event.Warning
+	step.WarningDetail = event.WarningDetail
 	switch event.Status {
 	case worktree.SyncProgressRunning:
 		step.Status = PrepareStepRunning

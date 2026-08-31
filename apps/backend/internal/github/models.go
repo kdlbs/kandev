@@ -340,6 +340,7 @@ type PRReview struct {
 // PRComment represents a review comment on specific code.
 type PRComment struct {
 	ID           int64     `json:"id"`
+	HTMLURL      string    `json:"html_url,omitempty"`
 	Author       string    `json:"author"`
 	AuthorAvatar string    `json:"author_avatar"`
 	AuthorIsBot  bool      `json:"author_is_bot"`

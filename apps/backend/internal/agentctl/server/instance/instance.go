@@ -123,7 +123,7 @@ type CreateRequest struct {
 	// AgentCommand is an optional command to start the agent. If empty, a default is used.
 	AgentCommand string `json:"agent_command,omitempty"`
 
-	// Protocol is the protocol adapter to use (acp, codex, auggie). If empty, default is used.
+	// Protocol is the protocol adapter to use (acp). If empty, default is used.
 	Protocol string `json:"protocol,omitempty"`
 
 	// AgentType identifies the agent (e.g., "auggie", "codex", "claude-code").
