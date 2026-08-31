@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,30 @@ func (h *cleanupOrderRecordingScriptHandler) ExecuteCleanupScript(context.Contex
 
 type cancellingCleanupScriptHandler struct {
 	cancel context.CancelFunc
+}
+
+type failingReleaseStore struct {
+	*SQLiteStore
+	failUpdate bool
+}
+
+func (s *failingReleaseStore) UpdateWorktree(ctx context.Context, wt *Worktree) error {
+	if s.failUpdate {
+		return errors.New("injected release failure")
+	}
+	return s.SQLiteStore.UpdateWorktree(ctx, wt)
+}
+
+func TestCleanupWorktreesPreservingBranches_RetainsBranchWhenReleaseFails(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	seedReferenceCleanupSession(t, store, "task-preserve-retry", "session-preserve-retry", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-preserve-retry", "session-preserve-retry")
+
+	mgr.store = &failingReleaseStore{SQLiteStore: store, failUpdate: true}
+	if err := mgr.CleanupWorktreesPreservingBranches(context.Background(), []*Worktree{wt}); err == nil {
+		t.Fatal("cleanup succeeded despite injected reference-release failure")
+	}
+	assertCleanupBranchPresent(t, wt.RepositoryPath, wt.Branch)
 }
 
 func (h *cancellingCleanupScriptHandler) ExecuteSetupScript(context.Context, ScriptExecutionRequest) error {

@@ -355,12 +355,11 @@ func (m *Manager) removeWorktreeWithReceipt(
 	if err := m.completeAuditedWorktreeCleanup(ctx, wt, audit, removeBranch); err != nil {
 		return receipt, fmt.Errorf("complete worktree cleanup %s: %w", wt.ID, err)
 	}
-	if !removeBranch {
-		receipt = m.compactManagedBranch(ctx, wt)
-	}
-
 	if err := m.finalizeRemovedWorktree(ctx, wt); err != nil {
 		return receipt, err
+	}
+	if !removeBranch {
+		receipt = m.compactManagedBranch(ctx, wt)
 	}
 
 	m.logger.Info("removed worktree",
