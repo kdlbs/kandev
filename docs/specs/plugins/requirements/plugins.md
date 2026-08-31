@@ -27,6 +27,10 @@ Kandev keeps growing external integrations and surface-specific behavior directl
 - **AC-PLUGINS-PLUGINS-001.6:** The Settings > Plugins install dialog SHALL show the primary Install action as busy while an install is in flight, including an animated loading indicator and an installing label, while keeping the action disabled until the pipeline settles.
 - **AC-PLUGINS-PLUGINS-001.7:** Capability-based access control: a plugin can only call Host RPCs it declared in its manifest; undeclared capabilities are rejected with a gRPC `PermissionDenied` status.
 - **AC-PLUGINS-PLUGINS-001.8:** **Kandev owns the plugin process lifecycle**: it extracts the package, spawns the binary, performs the go-plugin handshake, health-checks it (`Ping`), and restarts it on crash or health-check failure. Operators no longer run or manage plugin processes themselves. The remote/self-hosted tier (`base_url` registration of an operator-run process kandev never spawns) is removed; see "Out of scope".
+- **AC-PLUGINS-PLUGINS-001.9:** For every newly introduced Host capability, Kandev shall authorize the request only when the plugin manifest declaration, the current Human-approved workspace capability revision, and immutable Human-reserved policy all allow it. A missing, stale, or revoked approval shall fail closed.
+- **AC-PLUGINS-PLUGINS-001.10:** Every Host writer that can wake, redirect, message, create work for, relate, or transition a task shall atomically revalidate exact target/resource versions and the pending-transition predicate with its side effect, and shall return a typed conflict without a partial side effect when either changed.
+- **AC-PLUGINS-PLUGINS-001.11:** A plugin shall access Kandev domain data and commands only through documented capability-gated Host contracts. Global MCP, private REST, direct database access, shell access, and prompt or comment text shall not confer plugin authority.
+- **AC-PLUGINS-PLUGINS-001.12:** When a required Host capability or result state is unknown or unsupported, the plugin shall receive a typed unsupported result and shall not fall back to a broader integration path.
 
 ## System design
 
