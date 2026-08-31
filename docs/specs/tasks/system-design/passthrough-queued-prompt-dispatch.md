@@ -45,7 +45,9 @@ dispatch pipeline begins.
 The lifecycle boundary provides a two-phase passthrough-running operation for
 callers that already hold a session serialization guard:
 
-1. Mark the execution running and capture an immutable `agent.running` payload.
+1. Under the execution-store lock, revalidate the current session and
+   passthrough execution, claim the Ready-to-Running transition, and capture an
+   immutable `agent.running` payload.
 2. Return a one-shot publication callback that emits the captured payload.
 
 The existing immediate `MarkPassthroughRunning` operation uses the same
@@ -84,6 +86,8 @@ completion, and there is no unbounded publisher lifetime to manage.
   callback still publishes after guard release. This preserves the existing
   status/event pairing and allows ordinary recovery paths to observe the
   runtime transition.
+- Concurrent preparation calls observe the same locked transition, so at most
+  one call claims Ready-to-Running and creates a publication.
 - The publication callback uses an immutable payload captured at the status
   transition. Later execution mutation cannot relabel the event.
 - The event bus remains synchronous. A handler error is logged through the

@@ -38,8 +38,9 @@ orchestrator integration, and regression proof atomic.
 Add a lifecycle primitive in
 `internal/agent/runtime/lifecycle/manager_passthrough.go` that marks the
 execution running and returns a callback closing over an immutable event
-payload. Refactor `MarkPassthroughRunning` to call the primitive and publish
-immediately, preserving all existing callers.
+payload. Claim the transition and capture the payload under the execution-store
+lock, then persist after releasing it. Refactor `MarkPassthroughRunning` to call
+the primitive and publish immediately, preserving all existing callers.
 
 Expose the deferred form through `backendapp.lifecycleAdapter`. In the
 orchestrator, detect that narrow capability in the ordinary passthrough branch
@@ -56,7 +57,7 @@ delivery, or the immediate passthrough marker used by terminal input.
 | Acceptance criterion | Evidence |
 | --- | --- |
 | `AC-TASKS-PASSTHROUGH-QUEUED-PROMPT-DISPATCH-001.1` | Extend the ordinary passthrough queued-message test to assert one PTY write, one queue consumption, and the successor running transition. |
-| `AC-TASKS-PASSTHROUGH-QUEUED-PROMPT-DISPATCH-001.2` | Add a synchronous re-entry regression in `internal/orchestrator` and lifecycle tests proving publication is deferred, immutable, and immediate callers still publish once. |
+| `AC-TASKS-PASSTHROUGH-QUEUED-PROMPT-DISPATCH-001.2` | Add a synchronous re-entry regression in `internal/orchestrator` and lifecycle tests proving publication is deferred, immutable, atomic under competing mutation, at-most-once under concurrent preparation, and immediate callers still publish once. |
 
 ## Work orders
 
@@ -64,9 +65,9 @@ delivery, or the immediate passthrough marker used by terminal input.
 
 ## Verification results
 
-- `go test -tags fts5 ./internal/orchestrator ./internal/agent/runtime/lifecycle ./internal/backendapp -run 'TestHandleAgentReady_PassthroughQueuedMessageSynchronousRunningEvent|TestPreparePassthroughRunning|TestMarkPassthroughRunning' -count=1` passed in all three packages.
-- `go test -tags fts5 ./internal/orchestrator ./internal/agent/runtime/lifecycle ./internal/backendapp -count=1` passed 5,084 tests.
-- `go test -race -tags fts5 ./internal/orchestrator ./internal/agent/runtime/lifecycle -run 'TestHandleAgentReady_PassthroughQueuedMessageSynchronousRunningEvent|TestHandleAgentReady_PassthroughQueuedMessagePublishesAfterWriteFailure|TestPreparePassthroughRunningDefersAndSnapshotsPublication|TestMarkPassthroughRunningPublishesOnceAndGuards' -count=1` passed four tests in both packages.
+- `go test -tags fts5 ./internal/orchestrator ./internal/agent/runtime/lifecycle ./internal/backendapp -run 'TestHandleAgentReady_PassthroughQueuedMessageSynchronousRunningEvent|TestPreparePassthroughRunning|TestMarkPassthroughRunning' -count=1` passed five tests in all three packages.
+- `go test -tags fts5 ./internal/orchestrator ./internal/agent/runtime/lifecycle ./internal/backendapp -count=1` passed 5,086 tests.
+- `go test -race -tags fts5 ./internal/orchestrator ./internal/agent/runtime/lifecycle -run 'TestHandleAgentReady_PassthroughQueuedMessageSynchronousRunningEvent|TestHandleAgentReady_PassthroughQueuedMessagePublishesAfterWriteFailure|TestPreparePassthroughRunningDefersAndSnapshotsPublication|TestPreparePassthroughRunningCapturesSnapshotBeforeCompetingMutation|TestPreparePassthroughRunningClaimsTransitionOnceConcurrently|TestMarkPassthroughRunningPublishesOnceAndGuards' -count=1` passed six tests in both packages.
 
 ## Risks
 

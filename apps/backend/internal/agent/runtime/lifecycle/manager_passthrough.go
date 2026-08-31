@@ -37,21 +37,46 @@ func (m *Manager) PreparePassthroughRunning(sessionID string) (func(), error) {
 		return nil, fmt.Errorf("no agent execution found for session: %s", sessionID)
 	}
 
-	if execution.PassthroughProcessID == "" {
-		return nil, fmt.Errorf("session %s is not in passthrough mode", sessionID)
-	}
+	var payload AgentEventPayload
+	var updated *AgentExecution
+	var alreadyRunning bool
+	var validationErr error
+	if err := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+		// Revalidate the session mapping and passthrough mode while claiming the
+		// transition. The initial lookup only supplies the execution ID to lock.
+		if current.SessionID != sessionID {
+			validationErr = fmt.Errorf("no agent execution found for session: %s", sessionID)
+			return
+		}
+		if current.PassthroughProcessID == "" {
+			validationErr = fmt.Errorf("session %s is not in passthrough mode", sessionID)
+			return
+		}
 
-	// Only publish if not already running (prevents duplicate events).
-	if execution.Status == v1.AgentStatusRunning {
-		return func() {}, nil
-	}
-	if err := m.UpdateStatus(execution.ID, v1.AgentStatusRunning); err != nil {
+		// Only publish if not already running (prevents duplicate events).
+		if current.Status == v1.AgentStatusRunning {
+			alreadyRunning = true
+			return
+		}
+		current.Status = v1.AgentStatusRunning
+		updated = current
+		// Capture the payload under the same lock as the status claim so a
+		// competing stop/failure cannot relabel the deferred event.
+		payload = newAgentEventPayload(current)
+	}); err != nil {
+		if errors.Is(err, ErrExecutionNotFound) {
+			return nil, fmt.Errorf("no agent execution found for session: %s", sessionID)
+		}
 		return nil, err
 	}
+	if validationErr != nil {
+		return nil, validationErr
+	}
+	if alreadyRunning {
+		return func() {}, nil
+	}
+	m.persistExecutorRunning(context.Background(), updated)
 
-	// Capture the payload before returning so a later execution mutation cannot
-	// change the event delivered by the deferred callback.
-	payload := newAgentEventPayload(execution)
 	var publishOnce sync.Once
 	return func() {
 		publishOnce.Do(func() {

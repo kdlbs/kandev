@@ -48,6 +48,9 @@ and immediate-publication behavior outside that guarded path.
 - Guarded delivery marks runtime state and writes all PTY chunks before it
   publishes the captured `agent.running` event. Publication still occurs after
   a post-transition PTY write error.
+- The lifecycle transition and immutable payload capture are atomic under the
+  execution-store lock. Concurrent preparation calls publish at most one
+  `agent.running` event, and a competing status mutation cannot relabel it.
 - Existing immediate callers publish exactly once, and deferred publication
   uses immutable captured event data.
 
@@ -98,6 +101,7 @@ None.
 - Forwarded the capability through the production lifecycle adapter without widening `executor.AgentManagerClient`; the guarded ordinary ready drain uses it and releases its session guard before publication.
 - Preserved immediate `MarkPassthroughRunning` behavior for terminal input, prompt delivery, and test/legacy adapters without the optional capability.
 - Added lifecycle snapshot/idempotence coverage plus synchronous ready-event re-entry coverage, including publication after a PTY write failure.
-- `go test -tags fts5 ./internal/orchestrator ./internal/agent/runtime/lifecycle ./internal/backendapp -run 'TestHandleAgentReady_PassthroughQueuedMessageSynchronousRunningEvent|TestPreparePassthroughRunning|TestMarkPassthroughRunning' -count=1` passed.
-- `go test -tags fts5 ./internal/orchestrator ./internal/agent/runtime/lifecycle ./internal/backendapp -count=1` passed 5,084 tests.
-- `go test -race -tags fts5 ./internal/orchestrator ./internal/agent/runtime/lifecycle -run 'TestHandleAgentReady_PassthroughQueuedMessageSynchronousRunningEvent|TestHandleAgentReady_PassthroughQueuedMessagePublishesAfterWriteFailure|TestPreparePassthroughRunningDefersAndSnapshotsPublication|TestMarkPassthroughRunningPublishesOnceAndGuards' -count=1` passed.
+- Made the Ready-to-Running claim and event snapshot atomic under the execution-store lock; added deterministic competing-mutation and concurrent-prepare coverage.
+- `go test -tags fts5 ./internal/orchestrator ./internal/agent/runtime/lifecycle ./internal/backendapp -run 'TestHandleAgentReady_PassthroughQueuedMessageSynchronousRunningEvent|TestPreparePassthroughRunning|TestMarkPassthroughRunning' -count=1` passed five tests in all three packages.
+- `go test -tags fts5 ./internal/orchestrator ./internal/agent/runtime/lifecycle ./internal/backendapp -count=1` passed 5,086 tests.
+- `go test -race -tags fts5 ./internal/orchestrator ./internal/agent/runtime/lifecycle -run 'TestHandleAgentReady_PassthroughQueuedMessageSynchronousRunningEvent|TestHandleAgentReady_PassthroughQueuedMessagePublishesAfterWriteFailure|TestPreparePassthroughRunningDefersAndSnapshotsPublication|TestPreparePassthroughRunningCapturesSnapshotBeforeCompetingMutation|TestPreparePassthroughRunningClaimsTransitionOnceConcurrently|TestMarkPassthroughRunningPublishesOnceAndGuards' -count=1` passed six tests.

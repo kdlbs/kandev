@@ -42,7 +42,8 @@ concurrent cancellation or prompt delivery. The running-event subscriber can
 acquire the session guard, so the session does not deadlock and later lifecycle
 operations remain responsive.
 
-The lifecycle manager must snapshot event data before it returns the deferred
+The lifecycle manager must atomically claim the runtime transition and snapshot
+event data under the execution-store lock before it returns the deferred
 callback. A caller must invoke the callback exactly once after it releases its
 guard. This rule also applies when a later PTY write fails after the runtime
 status transition.
