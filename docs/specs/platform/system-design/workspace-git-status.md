@@ -124,7 +124,7 @@ A branch name alone is not a complete comparison identity. A task may be attache
 
 The instance's effective Git environment is authoritative for Kandev-owned workspace Git commands. This environment contains executor credentials and managed credential-helper entries. The process manager gives a detached environment copy to each workspace tracker. This rule applies to root, repository, submodule, rescan, and lazy trackers.
 
-Each tracker starts Git with its instance environment, not the ambient environment of agentctl. The command environment preserves managed `GIT_CONFIG_*` entries and any explicit SSH command. It also enforces the established non-interactive controls:
+Each tracker starts Git with its instance environment, not the ambient environment of agentctl. The command environment preserves managed `GIT_CONFIG_*` entries and the command and options from any explicit SSH command, while placing `BatchMode=yes` before inherited batch-mode options. It also enforces the established non-interactive controls:
 
 - `GIT_TERMINAL_PROMPT=0`
 - `GCM_INTERACTIVE=Never`

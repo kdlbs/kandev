@@ -18,7 +18,7 @@ Add focused tests that prove these behaviors:
 
 - a tracker Git shim receives managed `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_*`, and `GIT_CONFIG_VALUE_*` entries from `InstanceConfig.AgentEnv`
 - the shim receives `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=Never`, `GIT_ASKPASS=echo`, and `SSH_ASKPASS=/bin/false`
-- an instance `GIT_SSH_COMMAND` remains unchanged
+- an instance `GIT_SSH_COMMAND` keeps its command and options while forcing `BatchMode=yes`
 - `ssh -oBatchMode=yes` is present when the instance does not supply an SSH command
 - an ambient credential value does not replace the instance value
 - root, repository, submodule, rescan, and lazy trackers receive detached environment copies
@@ -31,7 +31,7 @@ Record the focused red command before production changes.
 - Store a detached Git environment on `WorkspaceTracker`.
 - Build the environment from `InstanceConfig.AgentEnv`, not `os.Environ()`.
 - Add established prompt controls with last-value precedence.
-- Preserve an explicit `GIT_SSH_COMMAND`. Add the batch-mode default only when this variable is absent.
+- Preserve an explicit `GIT_SSH_COMMAND` and its options while placing `BatchMode=yes` before any inherited batch-mode option. Add the default command when this variable is absent.
 - Route `runGitOutput` and `runPollingGitOutput` through the same environment builder.
 - Apply the environment in the process manager's central tracker configuration path.
 - Cover trackers that the manager creates during rescan, reconciliation, submodule discovery, and lazy lookup.
@@ -74,5 +74,9 @@ Record the red and green commands. Record the final environment precedence and p
 
 - Red: `cd apps/backend && go test ./internal/agentctl/server/process -run 'TestWorkspaceGitEnvironment|TestManagerTrackerGitEnvironment|TestRunGitOutput' -count=1` failed because tracker commands used ambient credentials and prompt settings.
 - Green: the same focused command passed 5 tests after the change; the full process package passed 752 tests before Task 02 and 787 tests across process and instance after the complete package change.
-- Precedence: the manager snapshots `InstanceConfig.AgentEnv`; each tracker receives a detached copy; lockless and per-observation `GIT_INDEX_FILE` overlays are applied; non-interactive controls override inherited values; the batch-mode SSH default is appended only when the instance has no `GIT_SSH_COMMAND`.
+- Precedence: the manager snapshots `InstanceConfig.AgentEnv`; each tracker receives a detached copy; lockless and per-observation `GIT_INDEX_FILE` overlays are applied; non-interactive controls override inherited values; an explicit SSH command keeps its options with `BatchMode=yes` placed first, while the default SSH command is used when the instance has no command.
 - Coverage: root, repository, submodule, rescan, reconciliation, and lazy tracker construction all pass through `configureTracker` or `newTrackerForRepo`, which applies the manager snapshot before Git work starts.
+
+## PR fixup record
+
+- Review fix: explicit SSH commands now receive `-oBatchMode=yes` immediately after the command word, so a later inherited `BatchMode=no` cannot re-enable terminal prompting.

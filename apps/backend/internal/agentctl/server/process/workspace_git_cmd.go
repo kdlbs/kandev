@@ -33,6 +33,8 @@ func gitWorkClass(ctx context.Context) subproc.GitWorkClass {
 // See: https://git-scm.com/docs/git#Documentation/git.txt-codeGITOPTIONALLOCKSltbooleangtcode
 const gitOptionalLocksOff = "GIT_OPTIONAL_LOCKS=0"
 
+const defaultGitSSHCommand = "ssh -oBatchMode=yes"
+
 // pollingGitCommand builds an exec.Cmd with optional Git locks disabled. The
 // lock policy is independent from the admission class: fresh interactive
 // status also needs lockless reads while still using the interactive queue.
@@ -59,20 +61,72 @@ func (wt *WorkspaceTracker) gitCommandEnv(ctx context.Context, lockless bool) []
 	} {
 		env = replaceGitEnvAssignment(env, assignment)
 	}
-	if !hasGitEnvKey(env, "GIT_SSH_COMMAND") {
-		env = append(env, "GIT_SSH_COMMAND=ssh -oBatchMode=yes")
+	if command, ok := gitEnvValue(env, "GIT_SSH_COMMAND"); ok && strings.TrimSpace(command) != "" {
+		env = replaceGitEnvAssignment(env, "GIT_SSH_COMMAND="+forceGitSSHBatchMode(command))
+	} else {
+		env = replaceGitEnvAssignment(env, "GIT_SSH_COMMAND="+defaultGitSSHCommand)
 	}
 	return env
 }
 
-func hasGitEnvKey(env []string, key string) bool {
+func gitEnvValue(env []string, key string) (string, bool) {
 	prefix := key + "="
+	var value string
+	found := false
 	for _, entry := range env {
 		if strings.HasPrefix(entry, prefix) {
-			return true
+			value = strings.TrimPrefix(entry, prefix)
+			found = true
 		}
 	}
-	return false
+	return value, found
+}
+
+// forceGitSSHBatchMode places BatchMode=yes immediately after the configured
+// SSH command. OpenSSH uses the first command-line value for an option, so
+// this prevents a later BatchMode=no in the inherited command from restoring
+// terminal prompting while preserving the command's other options.
+func forceGitSSHBatchMode(command string) string {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return defaultGitSSHCommand
+	}
+	commandEnd := shellWordEnd(command)
+	if commandEnd == 0 {
+		return defaultGitSSHCommand
+	}
+	return command[:commandEnd] + " -oBatchMode=yes" + command[commandEnd:]
+}
+
+func shellWordEnd(command string) int {
+	var quote byte
+	escaped := false
+	for index := 0; index < len(command); index++ {
+		character := command[index]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if quote != 0 {
+			if quote == '"' && character == '\\' {
+				escaped = true
+				continue
+			}
+			if character == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch character {
+		case '\\':
+			escaped = true
+		case '\'', '"':
+			quote = character
+		case ' ', '\t', '\n', '\r':
+			return index
+		}
+	}
+	return len(command)
 }
 
 func replaceGitEnvAssignment(env []string, assignment string) []string {

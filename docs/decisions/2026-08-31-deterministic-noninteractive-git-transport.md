@@ -18,7 +18,7 @@ One possible repair retries the target through SSH after an HTTPS error. This re
 
 Kandev-owned Git network commands are non-interactive. They cannot read credentials, confirmation, or host-trust answers from the launcher terminal.
 
-Each workspace tracker uses a detached copy of the instance's effective Git environment. The environment preserves managed credential-helper entries and explicit SSH configuration. Kandev adds the established prompt controls and keeps the existing command deadline.
+Each workspace tracker uses a detached copy of the instance's effective Git environment. The environment preserves managed credential-helper entries and explicit SSH command options. Kandev adds the established prompt controls and puts `BatchMode=yes` before inherited batch-mode options, then keeps the existing command deadline.
 
 Kandev selects one transport before it starts the command. An authentication or transport error does not cause an automatic retry through SSH, HTTPS, or another transport.
 
@@ -31,7 +31,7 @@ Comparison-target network work does not delay instance readiness or Git-status U
 - A Git authentication error cannot capture the launcher terminal.
 - Instance creation and Git-status UI requests do not wait for comparison-target network work.
 - Managed HTTPS credentials can reach comparison-target commands through the instance environment.
-- Explicit SSH configuration remains available for commands that already select SSH.
+- Explicit SSH configuration remains available for commands that already select SSH, with terminal prompting disabled.
 - A user must select or configure another transport explicitly. Kandev does not guess after an error.
 - Private comparison targets remain unavailable when the selected credential scope cannot read them.
 

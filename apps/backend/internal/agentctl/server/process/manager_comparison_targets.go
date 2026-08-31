@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
@@ -90,11 +91,10 @@ func (m *Manager) prepareTrackerComparisonTarget(tracker *WorkspaceTracker) {
 	}
 	repositoryName := tracker.RepositoryName()
 	target := m.comparisonTargetFor(repositoryName)
-	if !m.comparisonTargetIsCurrent(repositoryName, target) {
+	previousResolution := tracker.ComparisonResolution()
+	if !m.setComparisonTargetIfCurrent(tracker, repositoryName, target) {
 		return
 	}
-	previousResolution := tracker.ComparisonResolution()
-	tracker.SetComparisonTarget(target)
 	if target != nil || previousResolution.Explicit {
 		m.refreshComparisonTrackerDetached(tracker)
 	}
@@ -102,16 +102,11 @@ func (m *Manager) prepareTrackerComparisonTarget(tracker *WorkspaceTracker) {
 		m.cancelComparisonTargetOperation(repositoryName)
 		return
 	}
-	if tracker.gitIndexPath == "" {
+	if tracker.gitIndexPath == "" || target.Validate() != nil {
 		m.cancelComparisonTargetOperation(repositoryName)
-		tracker.SetComparisonTargetUnavailable(target, comparisonTargetErrorInvalid)
-		m.refreshComparisonTrackerDetached(tracker)
-		return
-	}
-	if target.Validate() != nil {
-		m.cancelComparisonTargetOperation(repositoryName)
-		tracker.SetComparisonTargetUnavailable(target, comparisonTargetErrorInvalid)
-		m.refreshComparisonTrackerDetached(tracker)
+		if m.setComparisonTargetUnavailableIfCurrent(tracker, repositoryName, target, comparisonTargetErrorInvalid) {
+			m.refreshComparisonTrackerDetached(tracker)
+		}
 		return
 	}
 
@@ -131,7 +126,6 @@ func (m *Manager) prepareTrackerComparisonTarget(tracker *WorkspaceTracker) {
 		m.comparisonTargetOpsMu.Unlock()
 		cancel()
 		release()
-		m.prepareTrackerComparisonTarget(tracker)
 		return
 	}
 	if existing := m.comparisonTargetOps[repositoryName]; existing != nil {
@@ -190,22 +184,99 @@ func (m *Manager) runComparisonTargetOperation(
 	}
 	materialized, err := materializeComparisonTarget(ctx, runner, operation.target)
 	if err != nil {
-		if !m.comparisonTargetIsCurrent(repositoryName, &operation.target) {
+		code := comparisonTargetErrorCode(err)
+		if !m.publishComparisonTargetUnavailable(repositoryName, operation, code) {
 			return
 		}
-		code := comparisonTargetErrorCode(err)
-		operation.tracker.SetComparisonTargetUnavailable(&operation.target, code)
+		m.refreshComparisonTrackerDetached(operation.tracker)
 		m.logger.Warn("comparison target unavailable",
 			zap.String("repository", repositoryName),
 			zap.String("error_code", code),
 			zap.Error(err))
 		return
 	}
-	if !m.comparisonTargetIsCurrent(repositoryName, &operation.target) {
+	if !m.publishComparisonTargetReady(repositoryName, operation, materialized.Ref) {
 		return
 	}
-	operation.tracker.SetComparisonTargetReady(&operation.target, materialized.Ref)
 	m.refreshComparisonTrackerDetached(operation.tracker)
+}
+
+func (m *Manager) setComparisonTargetUnavailableIfCurrent(
+	tracker *WorkspaceTracker,
+	repositoryName string,
+	target *models.ComparisonTarget,
+	code string,
+) bool {
+	m.comparisonTargetsMu.RLock()
+	defer m.comparisonTargetsMu.RUnlock()
+	if !comparisonTargetMatches(m.cfg, repositoryName, target) {
+		return false
+	}
+	tracker.SetComparisonTargetUnavailable(target, code)
+	return true
+}
+
+func (m *Manager) setComparisonTargetIfCurrent(
+	tracker *WorkspaceTracker,
+	repositoryName string,
+	target *models.ComparisonTarget,
+) bool {
+	m.comparisonTargetsMu.RLock()
+	defer m.comparisonTargetsMu.RUnlock()
+	if !comparisonTargetMatches(m.cfg, repositoryName, target) {
+		return false
+	}
+	tracker.SetComparisonTarget(target)
+	return true
+}
+
+func (m *Manager) publishComparisonTargetReady(
+	repositoryName string,
+	operation *comparisonTargetOperation,
+	ref string,
+) bool {
+	m.comparisonTargetOpsMu.Lock()
+	defer m.comparisonTargetOpsMu.Unlock()
+	m.comparisonTargetsMu.RLock()
+	defer m.comparisonTargetsMu.RUnlock()
+	if m.comparisonTargetOps[repositoryName] != operation ||
+		!comparisonTargetMatches(m.cfg, repositoryName, &operation.target) {
+		return false
+	}
+	operation.tracker.SetComparisonTargetReady(&operation.target, ref)
+	return true
+}
+
+func (m *Manager) publishComparisonTargetUnavailable(
+	repositoryName string,
+	operation *comparisonTargetOperation,
+	code string,
+) bool {
+	m.comparisonTargetOpsMu.Lock()
+	defer m.comparisonTargetOpsMu.Unlock()
+	m.comparisonTargetsMu.RLock()
+	defer m.comparisonTargetsMu.RUnlock()
+	if m.comparisonTargetOps[repositoryName] != operation ||
+		!comparisonTargetMatches(m.cfg, repositoryName, &operation.target) {
+		return false
+	}
+	operation.tracker.SetComparisonTargetUnavailable(&operation.target, code)
+	return true
+}
+
+func comparisonTargetMatches(
+	cfg *config.InstanceConfig,
+	repositoryName string,
+	target *models.ComparisonTarget,
+) bool {
+	if cfg == nil || cfg.ComparisonTargets == nil {
+		return target == nil
+	}
+	current, ok := cfg.ComparisonTargets[repositoryName]
+	if target == nil {
+		return !ok
+	}
+	return ok && current.Equal(*target)
 }
 
 func (m *Manager) comparisonTargetIsCurrent(repositoryName string, target *models.ComparisonTarget) bool {

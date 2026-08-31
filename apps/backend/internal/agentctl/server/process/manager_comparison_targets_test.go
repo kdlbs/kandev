@@ -79,8 +79,41 @@ func TestComparisonTargetMaterializationPublishesBoundedFetchFailureNoTransportF
 	if got := strings.Count(log, "fetch --no-tags"); got != 1 {
 		t.Fatalf("comparison fetch count = %d, want one; commands:\n%s", got, log)
 	}
+	waitForComparisonFile(t, markers.statusStarted)
 	if resolution.Ref != "" {
 		t.Fatalf("failed comparison ref = %q, want empty", resolution.Ref)
+	}
+}
+
+func TestComparisonTargetPublicationRequiresActiveOperation(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+	first := comparisonTargetProcessTestTarget()
+	second := first
+	second.TargetBranch = "develop"
+	mgr := NewManager(&config.InstanceConfig{
+		WorkDir:           repoDir,
+		ComparisonTargets: map[string]models.ComparisonTarget{"": first},
+	}, newTestLogger(t))
+	t.Cleanup(func() { _ = mgr.StopForTeardown(context.Background()) })
+
+	tracker := mgr.GetWorkspaceTracker()
+	tracker.SetComparisonTarget(&first)
+	_, cancel := context.WithCancel(context.Background())
+	operation := &comparisonTargetOperation{target: first, tracker: tracker, cancel: cancel}
+	mgr.comparisonTargetOpsMu.Lock()
+	mgr.comparisonTargetOps = map[string]*comparisonTargetOperation{"": operation}
+	mgr.comparisonTargetOpsMu.Unlock()
+	mgr.comparisonTargetsMu.Lock()
+	mgr.cfg.ComparisonTargets[""] = second
+	mgr.comparisonTargetsMu.Unlock()
+
+	if mgr.publishComparisonTargetReady("", operation, first.ComparisonRef()) {
+		t.Fatal("superseded comparison operation published ready state")
+	}
+	resolution := tracker.ComparisonResolution()
+	if resolution.Status != comparisonTargetStatusUnavailable || resolution.ErrorCode != comparisonTargetErrorPending {
+		t.Fatalf("comparison resolution = %#v, want pending state", resolution)
 	}
 }
 

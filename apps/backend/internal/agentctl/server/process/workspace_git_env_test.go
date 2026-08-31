@@ -61,7 +61,7 @@ func TestManagerTrackerGitEnvironmentUsesInstanceEnvironment(t *testing.T) {
 	}
 }
 
-func TestWorkspaceGitEnvironmentPreservesExplicitSSHCommand(t *testing.T) {
+func TestWorkspaceGitEnvironmentForcesExplicitSSHBatchMode(t *testing.T) {
 	tracker := NewWorkspaceTracker(t.TempDir(), newTestLogger(t))
 	tracker.SetGitEnvironment([]string{
 		"GIT_SSH_COMMAND=ssh -i /instance/key -oBatchMode=no",
@@ -73,8 +73,9 @@ func TestWorkspaceGitEnvironmentPreservesExplicitSSHCommand(t *testing.T) {
 		"regular": regular,
 		"polling": polling,
 	} {
-		if got := env["GIT_SSH_COMMAND"]; got != "ssh -i /instance/key -oBatchMode=no" {
-			t.Errorf("%s GIT_SSH_COMMAND = %q, want explicit instance command", name, got)
+		want := "ssh -oBatchMode=yes -i /instance/key -oBatchMode=no"
+		if got := env["GIT_SSH_COMMAND"]; got != want {
+			t.Errorf("%s GIT_SSH_COMMAND = %q, want %q", name, got, want)
 		}
 	}
 }
