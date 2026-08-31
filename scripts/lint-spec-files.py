@@ -486,10 +486,16 @@ def check_legacy_size_ratchet(
         if current_ceiling is None:
             continue
         if current_ceiling > previous_ceiling:
+            relative = Path(relative_text)
+            violation_path = (
+                root / relative
+                if is_canonical_legacy_path(relative_text, relative)
+                else root / SIZE_EXCEPTIONS_PATH
+            )
             violations.append(
                 Violation(
                     "legacy-size-ratchet",
-                    root / relative_text,
+                    violation_path,
                     1,
                     f"frozen ceiling increased from {previous_ceiling} to {current_ceiling}; lower it or migrate the file",
                 )

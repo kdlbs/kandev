@@ -162,6 +162,20 @@ migration: in_progress
         self.assertEqual(self.rules(violations), ["legacy-size-ratchet"])
         self.assertEqual(violations[0].path, self.root / "docs/specs/legacy/spec.md")
 
+    def test_rejects_a_raised_absolute_ceiling_without_crashing(self) -> None:
+        previous_exceptions = {"/etc/passwd": 100}
+        current_exceptions = {"/etc/passwd": 200}
+
+        violations = load_linter().check_legacy_size_ratchet(
+            self.root, current_exceptions, previous_exceptions
+        )
+
+        self.assertEqual(self.rules(violations), ["legacy-size-ratchet"])
+        # main() calls violation.path.relative_to(root) on every violation; a
+        # noncanonical (e.g. absolute) historical path must not produce a
+        # violation path that raises there.
+        violations[0].path.relative_to(self.root)
+
     def test_loads_the_previous_ceiling_from_git_history_and_flags_a_raise(self) -> None:
         self.config["limits"]["legacy"] = 10
         self.git("init")
