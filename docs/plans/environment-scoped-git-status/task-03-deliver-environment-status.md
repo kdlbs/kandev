@@ -102,3 +102,9 @@ Task 02 publishes environment identity and writes environment-scoped rows.
 - Verified the required environment-focused tests and all affected backend
   packages. The package run passed 2,348 tests.
 - The final seven-package backend run passed 7,537 tests.
+- Status-summary rebuilds now include the task-owned environment when no
+  session rows remain. Delivery readers accept that owner binding while still
+  supporting shared environments through session bindings.
+- Recovered live Git status events now resolve and publish the session's
+  environment identity. The final eight-package backend run passed 7,624
+  tests.

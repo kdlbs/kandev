@@ -386,9 +386,9 @@ func mostRecentGitSnapshotObservationQuery(driver string) string {
 		`JOIN task_environments e ON e.id = g.task_environment_id ` +
 		`JOIN task_environment_repos er ON er.task_environment_id = g.task_environment_id ` +
 		`JOIN repositories repository ON repository.id = er.repository_id ` +
-		`WHERE EXISTS (SELECT 1 FROM task_sessions binding ` +
+		`WHERE (e.task_id = ? OR EXISTS (SELECT 1 FROM task_sessions binding ` +
 		`WHERE binding.task_environment_id = g.task_environment_id AND binding.task_id = ?) ` +
-		`AND er.repository_id = ? AND er.deleted_at IS NULL ` +
+		`) AND er.repository_id = ? AND er.deleted_at IS NULL ` +
 		`AND (` + repositoryNameExpr + ` = repository.name ` +
 		`OR EXISTS (SELECT 1 FROM task_sessions provenance ` +
 		`WHERE provenance.id = g.session_id AND provenance.repository_id = er.repository_id) ` +
@@ -408,9 +408,13 @@ func (r *Repository) mostRecentInputObservation(
 	queries := make([]string, 0, len(mostRecentInputObservationQueries)+1)
 	queries = append(queries, mostRecentGitSnapshotObservationQuery(r.ro.DriverName()))
 	queries = append(queries, mostRecentInputObservationQueries...)
-	for _, q := range queries {
+	for index, q := range queries {
 		var raw interface{}
-		err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(q), taskID, repositoryID).Scan(&raw)
+		args := []interface{}{taskID, repositoryID}
+		if index == 0 {
+			args = []interface{}{taskID, taskID, repositoryID}
+		}
+		err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(q), args...).Scan(&raw)
 		if err != nil {
 			if dbutil.IsMissingTableError(err) {
 				continue

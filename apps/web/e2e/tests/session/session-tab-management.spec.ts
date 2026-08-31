@@ -423,10 +423,7 @@ test.describe("Session tab management — close behavior", () => {
             getState: () => {
               environmentIdBySessionId: Record<string, string>;
               gitStatus: {
-                byEnvironmentRepo: Record<
-                  string,
-                  Record<string, { files?: Record<string, unknown> } | undefined>
-                >;
+                byEnvironmentId: Record<string, { files?: Record<string, unknown> } | undefined>;
               };
             };
           };
@@ -434,7 +431,7 @@ test.describe("Session tab management — close behavior", () => {
         const state = (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState();
         const environmentId = state?.environmentIdBySessionId[sid];
         if (!environmentId) return null;
-        return state.gitStatus.byEnvironmentRepo[environmentId]?.[""]?.files ?? {};
+        return state.gitStatus.byEnvironmentId[environmentId]?.files ?? {};
       }, sessionId);
 
     try {

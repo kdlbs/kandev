@@ -140,7 +140,8 @@ func (s *Service) rebuildMissingSummaries(
 		return summaries
 	}
 	prByTask, prObserved := s.loadSummaryPRs(ctx, taskIDs(missing))
-	gitByEnvironment, gitObserved := s.loadSummaryGit(ctx, taskEnvironmentIDsForTasks(missing, sessionsByTask))
+	environmentIDsByTask, environmentIDs := s.taskEnvironmentIDsForTasks(ctx, missing, sessionsByTask)
+	gitByEnvironment, gitObserved := s.loadSummaryGit(ctx, environmentIDs)
 	queuedByTask := s.loadQueuedSummaryCounts(ctx, taskIDs(missing))
 	activityAtByTask := activityByTask
 	now := time.Now().UTC()
@@ -149,6 +150,7 @@ func (s *Service) rebuildMissingSummaries(
 		s.rebuildMissingSummary(ctx, task, summaries, s.rebuildInput(
 			taskLaunchErrorSummary(task),
 			sessionsByTask[task.ID],
+			environmentIDsByTask[task.ID],
 			pendingBySession,
 			gitByEnvironment,
 			gitObserved,
@@ -460,25 +462,58 @@ func taskIDs(tasks []*models.Task) []string {
 	return ids
 }
 
-func taskEnvironmentIDsForTasks(tasks []*models.Task, sessionsByTask map[string][]*models.TaskSession) []string {
+func (s *Service) taskEnvironmentIDsForTasks(
+	ctx context.Context,
+	tasks []*models.Task,
+	sessionsByTask map[string][]*models.TaskSession,
+) (map[string][]string, []string) {
 	seen := make(map[string]struct{})
+	seenByTask := make(map[string]map[string]struct{}, len(tasks))
+	idsByTask := make(map[string][]string, len(tasks))
 	ids := make([]string, 0)
+	add := func(taskID, environmentID string) {
+		if environmentID == "" {
+			return
+		}
+		taskSeen := seenByTask[taskID]
+		if taskSeen == nil {
+			taskSeen = make(map[string]struct{})
+			seenByTask[taskID] = taskSeen
+		}
+		if _, ok := taskSeen[environmentID]; ok {
+			return
+		}
+		taskSeen[environmentID] = struct{}{}
+		idsByTask[taskID] = append(idsByTask[taskID], environmentID)
+		if _, ok := seen[environmentID]; ok {
+			return
+		}
+		seen[environmentID] = struct{}{}
+		ids = append(ids, environmentID)
+	}
 	for _, task := range tasks {
 		if task == nil {
 			continue
+		}
+		if s != nil && s.taskEnvironments != nil {
+			environment, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, task.ID)
+			if err != nil {
+				if s.logger != nil {
+					s.logger.Warn("failed to load task environment for status summary repair",
+						zap.String("task_id", task.ID), zap.Error(err))
+				}
+			} else if environment != nil {
+				add(task.ID, environment.ID)
+			}
 		}
 		for _, session := range sessionsByTask[task.ID] {
 			if session == nil || session.TaskEnvironmentID == "" {
 				continue
 			}
-			if _, ok := seen[session.TaskEnvironmentID]; ok {
-				continue
-			}
-			seen[session.TaskEnvironmentID] = struct{}{}
-			ids = append(ids, session.TaskEnvironmentID)
+			add(task.ID, session.TaskEnvironmentID)
 		}
 	}
-	return ids
+	return idsByTask, ids
 }
 
 func (s *Service) loadSummaryPRs(
@@ -525,6 +560,7 @@ func (s *Service) loadSummaryGit(
 func (s *Service) rebuildInput(
 	taskError *statussummary.ActiveErrorSummary,
 	sessions []*models.TaskSession,
+	taskEnvironmentIDs []string,
 	pendingBySession map[string]models.TaskPendingAction,
 	gitByEnvironment map[string][]*models.GitSnapshot,
 	gitObserved bool,
@@ -552,7 +588,6 @@ func (s *Service) rebuildInput(
 		input.LastActivityAt = &activityCopy
 	}
 	countProvider, hasCountProvider := s.foregroundActivity.(activeSubagentCountProvider)
-	seenEnvironments := make(map[string]struct{}, len(sessions))
 	for _, session := range sessions {
 		if session == nil || session.ID == "" {
 			continue
@@ -591,14 +626,9 @@ func (s *Service) rebuildInput(
 		if action := string(pendingBySession[session.ID]); strings.TrimSpace(action) != "" {
 			input.PendingActions[session.ID] = action
 		}
-		if session.TaskEnvironmentID == "" {
-			continue
-		}
-		if _, seen := seenEnvironments[session.TaskEnvironmentID]; seen {
-			continue
-		}
-		seenEnvironments[session.TaskEnvironmentID] = struct{}{}
-		for _, snapshot := range gitByEnvironment[session.TaskEnvironmentID] {
+	}
+	for _, environmentID := range taskEnvironmentIDs {
+		for _, snapshot := range gitByEnvironment[environmentID] {
 			if snapshot == nil {
 				continue
 			}

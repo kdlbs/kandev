@@ -208,11 +208,11 @@ func (r *Repository) SnapshotsForPair(ctx context.Context, taskID, repositoryID 
 		JOIN task_environments e ON e.id = g.task_environment_id
 		JOIN task_environment_repos er ON er.task_environment_id = g.task_environment_id
 		JOIN repositories repository ON repository.id = er.repository_id
-		WHERE EXISTS (
+		WHERE (e.task_id = ? OR EXISTS (
 			SELECT 1 FROM task_sessions binding
 			WHERE binding.task_environment_id = g.task_environment_id
 			  AND binding.task_id = ?
-		) AND er.repository_id = ? AND er.deleted_at IS NULL
+		)) AND er.repository_id = ? AND er.deleted_at IS NULL
 		  AND (`+repositoryNameExpr+` = repository.name
 		    OR EXISTS (
 				SELECT 1 FROM task_sessions provenance
@@ -225,7 +225,7 @@ func (r *Repository) SnapshotsForPair(ctx context.Context, taskID, repositoryID 
 				  AND other.repository_id <> er.repository_id
 				  AND other.deleted_at IS NULL
 			)))
-	`), taskID, repositoryID)
+	`), taskID, taskID, repositoryID)
 	if err != nil {
 		return nil, err
 	}

@@ -51,9 +51,9 @@ Prove that an old sibling snapshot cannot restore removed files after reload.
 ## Verification
 
 ```bash
-cd apps/web && pnpm test -- lib/ws/handlers/git-status.test.ts lib/state/slices/session-runtime/set-git-status-return.test.ts lib/state/slices/session-runtime/git-status-normalizer.test.ts
-cd apps/web && pnpm run build:e2e
-cd apps/web && pnpm e2e:run tests/session/session-tab-management.spec.ts --project=chromium -g "does not restore removed Changes files after sibling hydration"
+(cd apps/web && pnpm test -- lib/ws/handlers/git-status.test.ts lib/state/slices/session-runtime/set-git-status-return.test.ts lib/state/slices/session-runtime/git-status-normalizer.test.ts)
+(cd apps/web && pnpm run build:e2e)
+(cd apps/web && pnpm e2e:run tests/session/session-tab-management.spec.ts --project=chromium -g "does not restore removed Changes files after sibling hydration")
 ```
 
 ## Files likely touched
@@ -105,3 +105,5 @@ is needed because this task changes no mobile presentation or interaction.
   browser regression.
 - Verified 26 focused frontend tests, typecheck, the E2E build, and the
   Chromium regression. The browser test passed.
+- The browser regression helper now reads the stable single-repository
+  environment status shape. The final targeted Chromium run passed.

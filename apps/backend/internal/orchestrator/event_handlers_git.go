@@ -166,10 +166,13 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 			zap.String("task_id", data.TaskID))
 		return
 	}
+	if data.TaskEnvironmentID == "" {
+		data.TaskEnvironmentID, _ = s.resolveGitSnapshotEnvironmentID(ctx, data.SessionID)
+	}
 
 	// Forward status_update event to WebSocket subject for frontend
 	// The frontend uses this for real-time updates during active sessions
-	if s.eventBus != nil {
+	if s.eventBus != nil && data.TaskEnvironmentID != "" {
 		event := bus.NewEvent(events.GitWSEvent, "orchestrator", &data)
 		_ = s.eventBus.Publish(ctx, events.BuildGitWSEventSubject(data.SessionID), event)
 	}

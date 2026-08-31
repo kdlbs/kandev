@@ -627,7 +627,7 @@ func taskGitObservation(
 	if snapshot == nil {
 		return statussummary.GitObservation{}, false
 	}
-	repository := ""
+	repository := statussummary.RootRepositoryKey
 	if session != nil {
 		repository = session.ID
 	}

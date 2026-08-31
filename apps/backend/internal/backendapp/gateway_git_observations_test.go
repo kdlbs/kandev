@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/task/statussummary"
 )
 
 func TestTaskGitObservationConvertsSnapshotFields(t *testing.T) {
@@ -47,6 +48,18 @@ func TestTaskGitObservationConvertsSnapshotFields(t *testing.T) {
 	}
 	if _, ok := taskGitObservation(session, nil); ok {
 		t.Fatal("nil snapshot should be skipped")
+	}
+}
+
+func TestTaskGitObservationUsesStableRootKeyWithoutRepositoryMetadata(t *testing.T) {
+	observation, ok := taskGitObservation(nil, &models.GitSnapshot{
+		TaskEnvironmentID: "environment-root",
+	})
+	if !ok {
+		t.Fatal("taskGitObservation returned ok=false")
+	}
+	if observation.Repository != statussummary.RootRepositoryKey {
+		t.Fatalf("root repository key = %q, want %q", observation.Repository, statussummary.RootRepositoryKey)
 	}
 }
 

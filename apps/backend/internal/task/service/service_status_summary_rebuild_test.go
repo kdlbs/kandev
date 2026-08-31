@@ -375,6 +375,46 @@ func TestReconcileTaskStatusSummariesUsesNewestSnapshotOncePerSharedEnvironment(
 	}
 }
 
+func TestReconcileTaskStatusSummariesUsesTaskEnvironmentWithoutSessions(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	svc.statusSummaries = repo
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	const environmentID = "environment-summary-without-sessions"
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: "task-1", WorkspacePath: "/workspace/summary-without-sessions",
+		Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateGitSnapshot(ctx, &models.GitSnapshot{
+		ID:                "snapshot-without-session",
+		TaskEnvironmentID: environmentID,
+		Files:             map[string]interface{}{"main.go": true},
+		Metadata:          map[string]interface{}{"repository_name": "root", "branch_additions": 4},
+		CreatedAt:         time.Date(2026, 8, 31, 13, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("CreateGitSnapshot: %v", err)
+	}
+
+	got, err := svc.ReconcileTaskStatusSummaries(
+		ctx,
+		[]*models.Task{{ID: "task-1", WorkspaceID: "ws-1"}},
+		map[string][]*models.TaskSession{},
+		map[string]models.TaskPendingAction{},
+		map[string]*statussummary.TaskStatusSummary{},
+	)
+	if err != nil {
+		t.Fatalf("ReconcileTaskStatusSummaries: %v", err)
+	}
+	if got["task-1"] == nil || got["task-1"].Git == nil {
+		t.Fatalf("summary = %+v, want Git summary from task-owned environment", got["task-1"])
+	}
+	if got["task-1"].Git.Additions != 4 || got["task-1"].Git.ChangedFiles != 1 {
+		t.Fatalf("Git summary = %+v, want additions=4 and changed_files=1", got["task-1"].Git)
+	}
+}
+
 // The rebuild path is what runs after a restart, so it is where a stale record
 // used to come back. A session whose error was cleared must rebuild clean.
 func TestReconcileTaskStatusSummariesSkipsClearedAgentErrors(t *testing.T) {
