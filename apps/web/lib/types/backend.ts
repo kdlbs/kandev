@@ -253,7 +253,6 @@ export type WorkflowPayload = {
   description?: string;
   prompt?: string;
   agent_profile_id?: string;
-  profile_session_policy?: WorkflowProfileSessionPolicy;
   hidden?: boolean;
   /** Phase 2 (ADR-0004) UX hint — frontend-only. */
   style?: "kanban" | "office" | "custom";
@@ -275,6 +274,7 @@ export type StepPayload = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
+  profile_session_policy?: WorkflowProfileSessionPolicy;
   wip_limit?: number;
   pull_from_step_id?: string | null;
   /** Phase 2 (ADR-0004) UX hint — frontend-only. */

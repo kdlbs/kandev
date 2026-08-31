@@ -702,34 +702,34 @@ func mapWorkspaceItemState(workspace taskdto.WorkspaceDTO) map[string]any {
 // mapWorkflowItemState maps a workflow DTO to its SPA boot shape.
 func mapWorkflowItemState(workflow taskdto.WorkflowDTO) map[string]any {
 	return map[string]any{
-		"id":                     workflow.ID,
-		"workspaceId":            workflow.WorkspaceID,
-		"name":                   workflow.Name,
-		"description":            workflow.Description,
-		"sortOrder":              workflow.SortOrder,
-		"agent_profile_id":       nullString(workflow.AgentProfileID),
-		"profile_session_policy": string(workflow.ProfileSessionPolicy),
-		"hidden":                 workflow.Hidden,
-		"style":                  workflow.Style,
+		"id":               workflow.ID,
+		"workspaceId":      workflow.WorkspaceID,
+		"name":             workflow.Name,
+		"description":      workflow.Description,
+		"sortOrder":        workflow.SortOrder,
+		"agent_profile_id": nullString(workflow.AgentProfileID),
+		"hidden":           workflow.Hidden,
+		"style":            workflow.Style,
 	}
 }
 
 // mapKanbanStepState maps a workflow step DTO to the kanban step boot shape.
 func mapKanbanStepState(step taskdto.WorkflowStepDTO) map[string]any {
 	return map[string]any{
-		"id":                    step.ID,
-		"title":                 step.Name,
-		"color":                 defaultString(step.Color, "bg-neutral-400"),
-		"position":              step.Position,
-		"events":                step.Events,
-		"allow_manual_move":     step.AllowManualMove,
-		"prompt":                step.Prompt,
-		"is_start_step":         step.IsStartStep,
-		"show_in_command_panel": step.ShowInCommandPanel,
-		"agent_profile_id":      nullString(step.AgentProfileID),
-		"stage_type":            nullString(step.StageType),
-		"wip_limit":             step.WIPLimit,
-		"pull_from_step_id":     nullString(step.PullFromStepID),
+		"id":                     step.ID,
+		"title":                  step.Name,
+		"color":                  defaultString(step.Color, "bg-neutral-400"),
+		"position":               step.Position,
+		"events":                 step.Events,
+		"allow_manual_move":      step.AllowManualMove,
+		"prompt":                 step.Prompt,
+		"is_start_step":          step.IsStartStep,
+		"show_in_command_panel":  step.ShowInCommandPanel,
+		"agent_profile_id":       nullString(step.AgentProfileID),
+		"profile_session_policy": string(step.ProfileSessionPolicy),
+		"stage_type":             nullString(step.StageType),
+		"wip_limit":              step.WIPLimit,
+		"pull_from_step_id":      nullString(step.PullFromStepID),
 	}
 }
 

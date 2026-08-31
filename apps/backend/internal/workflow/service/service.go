@@ -291,9 +291,8 @@ func (s *Service) GetNextStepByPosition(ctx context.Context, workflowID string, 
 // WorkflowMeta is the subset of workflow fields needed at step entry
 // (agent profile default + optional workflow-level prompt).
 type WorkflowMeta struct {
-	AgentProfileID       string
-	Prompt               string
-	ProfileSessionPolicy taskmodels.WorkflowProfileSessionPolicy
+	AgentProfileID string
+	Prompt         string
 }
 
 // GetWorkflowMeta returns agent profile id and prompt for a workflow in one
@@ -305,9 +304,8 @@ func (s *Service) GetWorkflowMeta(ctx context.Context, workflowID string) (Workf
 		return WorkflowMeta{}, err
 	}
 	return WorkflowMeta{
-		AgentProfileID:       wf.AgentProfileID,
-		Prompt:               wf.Prompt,
-		ProfileSessionPolicy: taskmodels.NormalizeWorkflowProfileSessionPolicy(string(wf.ProfileSessionPolicy)),
+		AgentProfileID: wf.AgentProfileID,
+		Prompt:         wf.Prompt,
 	}, nil
 }
 
@@ -387,6 +385,7 @@ func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templ
 			ShowInCommandPanel:         stepDef.ShowInCommandPanel,
 			AutoArchiveAfterHours:      stepDef.AutoArchiveAfterHours,
 			AgentProfileID:             stepDef.AgentProfileID,
+			ProfileSessionPolicy:       taskmodels.NormalizeWorkflowProfileSessionPolicy(string(stepDef.ProfileSessionPolicy)),
 			AutoAdvanceRequiresSignal:  stepDef.AutoAdvanceRequiresSignal,
 			CancelTriggersTurnComplete: stepDef.CancelTriggersTurnComplete,
 			WIPLimit:                   stepDef.WIPLimit,
@@ -800,11 +799,6 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 		wf.Prompt = pw.Prompt
 		needsUpdate = true
 	}
-	profileSessionPolicy := taskmodels.NormalizeWorkflowProfileSessionPolicy(string(pw.ProfileSessionPolicy))
-	if wf.ProfileSessionPolicy != profileSessionPolicy {
-		wf.ProfileSessionPolicy = profileSessionPolicy
-		needsUpdate = true
-	}
 	if needsUpdate {
 		if err := s.workflowProvider.UpdateWorkflow(ctx, wf); err != nil {
 			return nil, fmt.Errorf("set workflow fields: %w", err)
@@ -873,6 +867,7 @@ func (s *Service) stepFromPortableWithMatcher(workflowID string, sp models.StepP
 		ShowInCommandPanel:         sp.ShowInCommandPanel,
 		AllowManualMove:            sp.AllowManualMove,
 		AutoArchiveAfterHours:      sp.AutoArchiveAfterHours,
+		ProfileSessionPolicy:       taskmodels.NormalizeWorkflowProfileSessionPolicy(string(sp.ProfileSessionPolicy)),
 		AutoAdvanceRequiresSignal:  sp.AutoAdvanceRequiresSignal,
 		CancelTriggersTurnComplete: sp.CancelTriggersTurnComplete,
 		WIPLimit:                   sp.WIPLimit,

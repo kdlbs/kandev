@@ -210,7 +210,6 @@ function buildResourceState(p: BuildSessionPageStateParams) {
           name: w.name,
           hidden: w.hidden,
           style: w.style,
-          profile_session_policy: w.profile_session_policy,
         })),
       } as Partial<AppState>["workflows"],
     })),

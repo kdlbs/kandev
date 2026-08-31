@@ -205,20 +205,6 @@ describe("useWorkflows — explicit workspace selection", () => {
       ]),
     );
   });
-
-  it("normalizes malformed workflow policy responses to the safe default", async () => {
-    mockListWorkflows.mockResolvedValueOnce({
-      workflows: [{ ...makeWorkflow("wf-B", "ws-B"), profile_session_policy: 42 }],
-    });
-
-    renderHook(() => useWorkflows("ws-B", true));
-
-    await waitFor(() =>
-      expect(mockSetWorkflows).toHaveBeenCalledWith([
-        expect.objectContaining({ id: "wf-B", profile_session_policy: "complete" }),
-      ]),
-    );
-  });
 });
 
 describe("useEnsureWorkspaceWorkflows", () => {

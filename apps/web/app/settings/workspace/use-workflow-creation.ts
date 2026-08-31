@@ -10,6 +10,7 @@ import {
   type WorkflowStep,
   type WorkflowTemplate,
   type Workspace,
+  normalizeWorkflowProfileSessionPolicy,
 } from "@/lib/types/http";
 import { createWorkflowDuplication } from "./workflow-duplication";
 
@@ -68,6 +69,9 @@ function toDraftStep(
     is_start_step: definition.is_start_step,
     show_in_command_panel: definition.show_in_command_panel,
     agent_profile_id: definition.agent_profile_id,
+    profile_session_policy: normalizeWorkflowProfileSessionPolicy(
+      definition.profile_session_policy,
+    ),
     auto_advance_requires_signal: definition.auto_advance_requires_signal,
     cancel_triggers_turn_complete: definition.cancel_triggers_turn_complete,
     wip_limit: definition.wip_limit,
@@ -126,7 +130,6 @@ export function useWorkflowCreation({
       // Persisted workflow name; the fallback is data, not copy.
       name: newWorkflowName.trim() || template?.name || "New Workflow",
       description: template?.description,
-      profile_session_policy: "complete",
       workflow_template_id: template?.id,
       created_at: "",
       updated_at: "",

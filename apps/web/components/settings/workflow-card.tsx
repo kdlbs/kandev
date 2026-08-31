@@ -33,7 +33,6 @@ import { useWorkflowMutationGuard } from "./workflow-mutation-guard";
 import { useWorkflowDraftContributor } from "./use-workflow-draft-contributor";
 import { WorkflowPromptSection } from "./workflow-prompt-section";
 import { WorkflowDescriptionField } from "./workflow-description-field";
-import { WorkflowProfileSessionPolicyField } from "./workflow-profile-session-policy";
 import { useWorkflowDuplication } from "@/app/settings/workspace/use-workflow-duplication";
 
 const TEMP_WORKFLOW_PREFIX = "temp-workflow-";
@@ -52,7 +51,6 @@ type WorkflowCardProps = {
     description?: string;
     prompt?: string;
     agent_profile_id?: string;
-    profile_session_policy?: Workflow["profile_session_policy"];
   }) => void;
   onDeleteWorkflow: () => Promise<unknown>;
   onDuplicateWorkflow: (steps: WorkflowStep[]) => void;
@@ -177,7 +175,6 @@ type WorkflowCardBodyProps = {
     description?: string;
     prompt?: string;
     agent_profile_id?: string;
-    profile_session_policy?: Workflow["profile_session_policy"];
   }) => void;
   workflowLoading: boolean;
   workflowSteps: WorkflowStep[];
@@ -310,12 +307,6 @@ function WorkflowCardBody({
           readOnly={readOnly}
         />
       </div>
-      <WorkflowProfileSessionPolicyField
-        workflow={workflow}
-        savedWorkflow={savedWorkflow}
-        onChange={(profile_session_policy) => onUpdateWorkflow({ profile_session_policy })}
-        readOnly={readOnly}
-      />
       <WorkflowDescriptionField
         workflow={workflow}
         savedWorkflow={savedWorkflow}

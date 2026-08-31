@@ -236,14 +236,17 @@ test.describe("Workflow settings on mobile", () => {
     await page.goto(seedData.workspaceId);
 
     const card = await page.findWorkflowCard("E2E Workflow");
-    const policySelect = page.workflowProfileSessionPolicySelect(card);
+    const policySelect = await page
+      .selectStep(card, seedData.steps[0]!.name, true)
+      .then(() => page.stepAgentProfileSelect(card));
     await expect(policySelect).toBeVisible();
     await policySelect.tap();
 
-    const option = testPage.getByRole("listbox").getByRole("option", {
-      name: "Park and reuse the previous session",
-      exact: false,
-    });
+    const policyNavigation = page.stepProfileSessionPolicySelect();
+    await expect(policyNavigation).toBeVisible();
+    await policyNavigation.tap();
+    const stepId = seedData.steps[0]!.id;
+    const option = testPage.getByTestId(`${stepId}-profile-session-policy-park_reuse`);
     await expect(option).toBeVisible();
 
     const viewportWidth = await testPage.evaluate(() => window.innerWidth);
@@ -258,14 +261,15 @@ test.describe("Workflow settings on mobile", () => {
     await option.tap();
     await page.saveChanges(true);
 
-    const savedWorkflow = (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
-      (workflow) => workflow.id === seedData.workflowId,
+    const savedStep = (await apiClient.listWorkflowSteps(seedData.workflowId)).steps.find(
+      (step) => step.id === stepId,
     );
-    expect(savedWorkflow?.profile_session_policy).toBe("park_reuse");
+    expect(savedStep?.profile_session_policy).toBe("park_reuse");
 
     await page.goto(seedData.workspaceId);
     const reloadedCard = await page.findWorkflowCard("E2E Workflow");
-    await expect(page.workflowProfileSessionPolicySelect(reloadedCard)).toContainText(
+    await page.selectStep(reloadedCard, seedData.steps[0]!.name, true);
+    await expect(page.stepAgentProfileSelect(reloadedCard)).toContainText(
       "Park and reuse the previous session",
     );
     expect(

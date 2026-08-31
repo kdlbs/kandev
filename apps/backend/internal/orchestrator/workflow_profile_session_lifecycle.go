@@ -27,6 +27,39 @@ type workflowProfileSwitchStopConsumed struct {
 	expiresAt time.Time
 }
 
+type workflowProfileSwitchGuardContextKey struct{}
+
+type workflowProfileSwitchGuardContext struct {
+	sessionID           string
+	terminalExecutionID string
+}
+
+// withWorkflowProfileSwitchGuardHeld carries the ownership already held by a
+// caller into the synchronous workflow lifecycle path. Profile switching can
+// be reached from handlers that already hold the session guard; reacquiring a
+// non-reentrant mutex there would deadlock. Async step-entry work clears this
+// marker before it starts, so it acquires the guard itself.
+func withWorkflowProfileSwitchGuardHeld(ctx context.Context, sessionID, terminalExecutionID string) context.Context {
+	return context.WithValue(ctx, workflowProfileSwitchGuardContextKey{}, workflowProfileSwitchGuardContext{
+		sessionID:           sessionID,
+		terminalExecutionID: terminalExecutionID,
+	})
+}
+
+func withoutWorkflowProfileSwitchGuard(ctx context.Context) context.Context {
+	return context.WithValue(ctx, workflowProfileSwitchGuardContextKey{}, workflowProfileSwitchGuardContext{})
+}
+
+func workflowProfileSwitchGuardIsHeld(ctx context.Context, sessionID string) bool {
+	state, _ := ctx.Value(workflowProfileSwitchGuardContextKey{}).(workflowProfileSwitchGuardContext)
+	return state.sessionID != "" && state.sessionID == sessionID
+}
+
+func workflowProfileSwitchTerminalEventMatches(ctx context.Context, executionID string) bool {
+	state, _ := ctx.Value(workflowProfileSwitchGuardContextKey{}).(workflowProfileSwitchGuardContext)
+	return state.terminalExecutionID != "" && state.terminalExecutionID == executionID
+}
+
 // parkSessionForProfileSwitch keeps the source answerable while ensuring the
 // old runtime's terminal event cannot advance the destination workflow step.
 // The bool reports whether the source was durably parked. Runtime teardown is
@@ -39,62 +72,176 @@ func (s *Service) parkSessionForProfileSwitch(
 	if session == nil {
 		return false, errors.New("cannot park a nil workflow profile session")
 	}
-
-	executionID, lookupErr := s.agentManager.GetExecutionIDForSession(ctx, session.ID)
-	if lookupErr != nil && !executor.IsNoExecutionForSessionError(lookupErr) {
-		return false, fmt.Errorf("look up runtime for parked session %q: %w", session.ID, lookupErr)
+	if workflowProfileSwitchGuardIsHeld(ctx, session.ID) {
+		parked, executionID, err := s.parkSessionForProfileSwitchClaimLocked(ctx, taskID, session)
+		if err != nil || !parked || executionID == "" {
+			return parked, err
+		}
+		// The caller owns the guard and must keep it through its surrounding
+		// lifecycle decision. Schedule teardown after the durable park claim;
+		// the caller will release the guard when it returns, allowing a
+		// synchronous terminal callback from StopAgent to make progress.
+		go s.stopParkedWorkflowProfileSession(context.WithoutCancel(ctx), session.ID, executionID)
+		return true, nil
 	}
 
-	var intent models.WorkflowProfileSwitchStopIntent
-	if executionID != "" {
-		if _, ok := s.repo.(workflowProfileSwitchStopIntentRemover); !ok {
-			return false, fmt.Errorf("parked workflow profile switch requires stamped session metadata support")
-		}
-		if _, ok := s.repo.(workflowProfileSwitchStopIntentMarker); !ok {
-			return false, fmt.Errorf("parked workflow profile switch requires stamped session metadata support")
-		}
-		intent = models.WorkflowProfileSwitchStopIntent{
-			ExecutionID: executionID,
-			Stamp:       uuid.NewString(),
-		}
-		if err := s.repo.SetSessionMetadataKey(
-			ctx,
-			session.ID,
-			models.SessionMetaKeyWorkflowProfileSwitchStopIntent,
-			intent,
-		); err != nil {
-			return false, fmt.Errorf("record parked workflow profile switch: %w", err)
-		}
+	lock, release := s.acquireCancelInFlightGuard(session.ID)
+	lock.Lock()
+	ctx = withWorkflowProfileSwitchGuardHeld(ctx, session.ID, "")
+	parked, executionID, err := s.parkSessionForProfileSwitchClaimLocked(ctx, taskID, session)
+	lock.Unlock()
+	release()
+	if err != nil || !parked || executionID == "" {
+		return parked, err
+	}
+
+	// StopAgent can synchronously deliver the terminal callback through the
+	// same event bus. The durable claim has already linearized ownership, so
+	// release the guard before entering runtime teardown.
+	s.stopParkedWorkflowProfileSession(context.WithoutCancel(ctx), session.ID, executionID)
+	return true, nil
+}
+
+// parkSessionForProfileSwitchLocked performs only the durable park claim. It
+// intentionally does not stop the runtime: callers hold the session guard,
+// while StopAgent may synchronously wait for a terminal callback that needs
+// that same guard.
+func (s *Service) parkSessionForProfileSwitchLocked(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+) (bool, error) {
+	parked, _, err := s.parkSessionForProfileSwitchClaimLocked(ctx, taskID, session)
+	return parked, err
+}
+
+// parkSessionForProfileSwitchClaimLocked performs the park claim while the
+// source session's cancel-in-flight guard is held. Terminal lifecycle handlers
+// use the same guard, so the exact execution either reaches a terminal marker
+// before this claim or its delayed callback observes the durable stop intent
+// after this method has committed the parked state.
+func (s *Service) parkSessionForProfileSwitchClaimLocked(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+) (bool, string, error) {
+	if session == nil {
+		return false, "", errors.New("cannot park a nil workflow profile session")
+	}
+
+	if !workflowProfileSwitchGuardIsHeld(ctx, session.ID) {
+		lock, release := s.acquireCancelInFlightGuard(session.ID)
+		defer release()
+		lock.Lock()
+		defer lock.Unlock()
+		ctx = withWorkflowProfileSwitchGuardHeld(ctx, session.ID, "")
+	}
+	currentSession, executionID, err := s.loadProfileSwitchParkCandidate(ctx, session.ID)
+	if err != nil {
+		return false, "", err
+	}
+
+	intent, err := s.recordProfileSwitchStopIntent(ctx, currentSession.ID, executionID)
+	if err != nil {
+		return false, "", err
 	}
 
 	changed, finalState, err := s.transitionTaskSessionState(
 		ctx,
 		taskID,
-		session.ID,
+		currentSession.ID,
 		models.TaskSessionStateWaitingForInput,
 		"",
 		nil,
 	)
 	if err != nil {
-		s.clearParkedProfileSwitchIntent(ctx, session.ID, intent.Stamp)
-		return false, fmt.Errorf("park workflow profile session %q: %w", session.ID, err)
+		s.clearParkedProfileSwitchIntent(ctx, currentSession.ID, intent.Stamp)
+		return false, "", fmt.Errorf("park workflow profile session %q: %w", currentSession.ID, err)
 	}
 	if !changed && finalState != models.TaskSessionStateWaitingForInput {
-		s.clearParkedProfileSwitchIntent(ctx, session.ID, intent.Stamp)
-		return false, fmt.Errorf("park workflow profile session %q: state changed to %s", session.ID, finalState)
+		s.clearParkedProfileSwitchIntent(ctx, currentSession.ID, intent.Stamp)
+		return false, "", fmt.Errorf("park workflow profile session %q: state changed to %s", currentSession.ID, finalState)
 	}
 
 	// There is no runtime to stop after a backend restart or a prior teardown.
 	// The session is still safely answerable in WAITING_FOR_INPUT.
 	if executionID == "" {
-		return true, nil
+		return true, "", nil
+	}
+	return true, executionID, nil
+}
+
+// loadProfileSwitchParkCandidate reloads the source under the caller's
+// per-session lifecycle guard and validates that its exact runtime execution
+// has not already been claimed by a natural terminal event.
+func (s *Service) loadProfileSwitchParkCandidate(
+	ctx context.Context,
+	sessionID string,
+) (*models.TaskSession, string, error) {
+	currentSession, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, "", fmt.Errorf("reload workflow profile session %q before park: %w", sessionID, err)
+	}
+	if currentSession == nil {
+		return nil, "", fmt.Errorf("reload workflow profile session %q before park: session is nil", sessionID)
+	}
+	if isTerminalSessionState(currentSession.State) {
+		return nil, "", fmt.Errorf("cannot park workflow profile session %q after it became %s", sessionID, currentSession.State)
+	}
+
+	executionID, lookupErr := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	if lookupErr != nil && !executor.IsNoExecutionForSessionError(lookupErr) {
+		return nil, "", fmt.Errorf("look up runtime for parked session %q: %w", sessionID, lookupErr)
+	}
+	if executionID != "" && s.isExecutionCompleted(sessionID, executionID) &&
+		!workflowProfileSwitchTerminalEventMatches(ctx, executionID) {
+		return nil, "", fmt.Errorf("cannot park workflow profile session %q after execution %q reached a natural terminal event", sessionID, executionID)
+	}
+	return currentSession, executionID, nil
+}
+
+// recordProfileSwitchStopIntent stamps the exact execution before the source
+// state changes. The marker is consumed by delayed terminal callbacks and is
+// cleared only when the state transition cannot be committed.
+func (s *Service) recordProfileSwitchStopIntent(
+	ctx context.Context,
+	sessionID string,
+	executionID string,
+) (models.WorkflowProfileSwitchStopIntent, error) {
+	if executionID == "" {
+		return models.WorkflowProfileSwitchStopIntent{}, nil
+	}
+	if _, ok := s.repo.(workflowProfileSwitchStopIntentRemover); !ok {
+		return models.WorkflowProfileSwitchStopIntent{}, fmt.Errorf("parked workflow profile switch requires stamped session metadata support")
+	}
+	if _, ok := s.repo.(workflowProfileSwitchStopIntentMarker); !ok {
+		return models.WorkflowProfileSwitchStopIntent{}, fmt.Errorf("parked workflow profile switch requires stamped session metadata support")
+	}
+
+	intent := models.WorkflowProfileSwitchStopIntent{
+		ExecutionID: executionID,
+		Stamp:       uuid.NewString(),
+	}
+	if err := s.repo.SetSessionMetadataKey(
+		ctx,
+		sessionID,
+		models.SessionMetaKeyWorkflowProfileSwitchStopIntent,
+		intent,
+	); err != nil {
+		return models.WorkflowProfileSwitchStopIntent{}, fmt.Errorf("record parked workflow profile switch: %w", err)
+	}
+	return intent, nil
+}
+
+func (s *Service) stopParkedWorkflowProfileSession(ctx context.Context, sessionID, executionID string) {
+	if s.agentManager == nil || executionID == "" {
+		return
 	}
 	if err := s.agentManager.StopAgent(ctx, executionID, false); err != nil {
 		s.logger.Warn("failed to stop runtime for parked workflow profile session",
-			zap.String("session_id", session.ID),
+			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
-	return true, nil
 }
 
 func (s *Service) clearParkedProfileSwitchIntent(ctx context.Context, sessionID, stamp string) {

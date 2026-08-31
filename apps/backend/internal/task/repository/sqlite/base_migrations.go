@@ -256,7 +256,6 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("workflows.source", `ALTER TABLE workflows ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`)
 	r.migrate.Apply("workflows.source_path", `ALTER TABLE workflows ADD COLUMN source_path TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("workflows.prompt", `ALTER TABLE workflows ADD COLUMN prompt TEXT NOT NULL DEFAULT ''`)
-	r.migrate.Apply("workflows.profile_session_policy", `ALTER TABLE workflows ADD COLUMN profile_session_policy TEXT NOT NULL DEFAULT 'complete'`)
 	if err := r.ensureImproveKandevWorkflowTemplateUniqueness(); err != nil {
 		return err
 	}
@@ -289,6 +288,7 @@ func (r *Repository) runMigrations() error {
 	// migrations are idempotent and preserve the false default for legacy rows.
 	r.migrate.Apply("workflow_steps.auto_advance_requires_signal", `ALTER TABLE workflow_steps ADD COLUMN auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflow_steps.cancel_triggers_turn_complete", `ALTER TABLE workflow_steps ADD COLUMN cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("workflow_steps.profile_session_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_policy TEXT NOT NULL DEFAULT 'complete'`)
 
 	// Slack-style unread divider: the read cursor a session advances to the
 	// latest message id whenever it becomes the visible chat panel. The

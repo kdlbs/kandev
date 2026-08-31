@@ -10,15 +10,14 @@ import (
 )
 
 type WorkflowDTO struct {
-	ID                   string                              `json:"id"`
-	WorkspaceID          string                              `json:"workspace_id"`
-	Name                 string                              `json:"name"`
-	Description          *string                             `json:"description,omitempty"`
-	Prompt               *string                             `json:"prompt,omitempty"`
-	AgentProfileID       string                              `json:"agent_profile_id,omitempty"`
-	SortOrder            int                                 `json:"sort_order"`
-	Hidden               bool                                `json:"hidden,omitempty"`
-	ProfileSessionPolicy models.WorkflowProfileSessionPolicy `json:"profile_session_policy"`
+	ID             string  `json:"id"`
+	WorkspaceID    string  `json:"workspace_id"`
+	Name           string  `json:"name"`
+	Description    *string `json:"description,omitempty"`
+	Prompt         *string `json:"prompt,omitempty"`
+	AgentProfileID string  `json:"agent_profile_id,omitempty"`
+	SortOrder      int     `json:"sort_order"`
+	Hidden         bool    `json:"hidden,omitempty"`
 	// Style is a Phase 2 (ADR-0004) UX hint read by the frontend ONLY.
 	// Allowed values: "kanban" | "office" | "custom".
 	Style string `json:"style,omitempty"`
@@ -622,20 +621,19 @@ func FromWorkflow(workflow *models.Workflow) WorkflowDTO {
 	}
 
 	return WorkflowDTO{
-		ID:                   workflow.ID,
-		WorkspaceID:          workflow.WorkspaceID,
-		Name:                 workflow.Name,
-		Description:          description,
-		Prompt:               prompt,
-		AgentProfileID:       workflow.AgentProfileID,
-		SortOrder:            workflow.SortOrder,
-		Hidden:               workflow.Hidden,
-		ProfileSessionPolicy: models.NormalizeWorkflowProfileSessionPolicy(string(workflow.ProfileSessionPolicy)),
-		Style:                workflow.Style,
-		Source:               workflow.Source,
-		SourcePath:           workflow.SourcePath,
-		CreatedAt:            workflow.CreatedAt,
-		UpdatedAt:            workflow.UpdatedAt,
+		ID:             workflow.ID,
+		WorkspaceID:    workflow.WorkspaceID,
+		Name:           workflow.Name,
+		Description:    description,
+		Prompt:         prompt,
+		AgentProfileID: workflow.AgentProfileID,
+		SortOrder:      workflow.SortOrder,
+		Hidden:         workflow.Hidden,
+		Style:          workflow.Style,
+		Source:         workflow.Source,
+		SourcePath:     workflow.SourcePath,
+		CreatedAt:      workflow.CreatedAt,
+		UpdatedAt:      workflow.UpdatedAt,
 	}
 }
 
@@ -1063,20 +1061,21 @@ func steerEligible(sessionID string, state models.TaskSessionState, provider For
 
 // WorkflowStepDTO represents a workflow step for API responses
 type WorkflowStepDTO struct {
-	ID                    string         `json:"id"`
-	WorkflowID            string         `json:"workflow_id"`
-	Name                  string         `json:"name"`
-	Position              int            `json:"position"`
-	Color                 string         `json:"color"`
-	Prompt                string         `json:"prompt,omitempty"`
-	Events                *StepEventsDTO `json:"events,omitempty"`
-	AllowManualMove       bool           `json:"allow_manual_move"`
-	IsStartStep           bool           `json:"is_start_step"`
-	ShowInCommandPanel    bool           `json:"show_in_command_panel"`
-	AutoArchiveAfterHours int            `json:"auto_archive_after_hours,omitempty"`
-	AgentProfileID        string         `json:"agent_profile_id,omitempty"`
-	WIPLimit              int            `json:"wip_limit"`
-	PullFromStepID        string         `json:"pull_from_step_id,omitempty"`
+	ID                    string                              `json:"id"`
+	WorkflowID            string                              `json:"workflow_id"`
+	Name                  string                              `json:"name"`
+	Position              int                                 `json:"position"`
+	Color                 string                              `json:"color"`
+	Prompt                string                              `json:"prompt,omitempty"`
+	Events                *StepEventsDTO                      `json:"events,omitempty"`
+	AllowManualMove       bool                                `json:"allow_manual_move"`
+	IsStartStep           bool                                `json:"is_start_step"`
+	ShowInCommandPanel    bool                                `json:"show_in_command_panel"`
+	AutoArchiveAfterHours int                                 `json:"auto_archive_after_hours,omitempty"`
+	AgentProfileID        string                              `json:"agent_profile_id,omitempty"`
+	ProfileSessionPolicy  models.WorkflowProfileSessionPolicy `json:"profile_session_policy"`
+	WIPLimit              int                                 `json:"wip_limit"`
+	PullFromStepID        string                              `json:"pull_from_step_id,omitempty"`
 	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend.
 	// Allowed values: "work" | "review" | "approval" | "custom".
 	StageType                  string    `json:"stage_type,omitempty"`

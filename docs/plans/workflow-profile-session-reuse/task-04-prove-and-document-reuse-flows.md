@@ -1,6 +1,6 @@
 ---
 id: "04-prove-and-document-reuse-flows"
-title: "Prove and document reuse flows"
+title: "Prove mixed step policies and document behavior"
 status: done
 wave: 4
 depends_on:
@@ -13,22 +13,26 @@ acceptance_criteria:
   - AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.3
   - AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.6
   - AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.7
+  - AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.10
+  - AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.11
 system_design:
   - ../../specs/tasks/system-design/workflow-profile-session-lifecycle.md
 ---
 
-# Task 04: Prove and Document Reuse Flows
+# Task 04: Prove Mixed Step Policies and Document Behavior
 
 ## Summary
 
-Prove the policy from the workflow editor through runtime session identity on
-desktop and through touch-safe save/reload on mobile. Document the three choices
-and their session-count and conversation-continuity trade-offs.
+Prove per-step policy from the combined selector through runtime session
+identity on desktop and through touch-safe save and reload on mobile. Document
+destination-step ownership and conversation-continuity trade-offs.
 
 ## In scope
 
-- Desktop Playwright policy and `A -> B -> A` runtime scenarios.
-- Mobile Playwright policy persistence, hit-area, and overflow scenario.
+- Desktop Playwright mixed-step save/reload and `A -> B -> A` runtime
+  scenarios.
+- Mobile Playwright profile search, nested policy navigation, persistence,
+  focus, hit-area, safe-area, and overflow scenarios.
 - Public Tasks and Workflows how-to update and docs validation.
 
 ## Out of scope
@@ -38,18 +42,21 @@ and their session-count and conversation-continuity trade-offs.
 
 ## Acceptance
 
-- Desktop UI selection persists and runtime IDs prove reuse versus fresh
-  profile re-entry.
-- Mobile touch selection persists after reload, remains viewport-contained, and
-  has no document horizontal overflow.
-- Public documentation states the default and when to choose each policy.
+- Two steps save and reload different policy values.
+- Desktop runtime IDs prove reuse versus fresh entry from the destination step's
+  setting.
+- Mobile selection persists after reload, returns focus correctly, remains
+  viewport-contained, and has no document horizontal overflow.
+- Public documentation states the per-step default and when to choose each
+  policy.
 
 ## Verification
 
 ```bash
-(cd apps/web && pnpm e2e:run tests/workflow/workflow-agent-switch.spec.ts -- --grep 'profile session policy')
-(cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/workflow/mobile-workflow-settings.spec.ts -- --grep 'profile session policy')
-node --test scripts/validate-public-docs.test.mjs && node scripts/validate-public-docs.mjs
+(cd apps/web && pnpm e2e:run e2e/tests/workflow/workflow-agent-switch.spec.ts -- --grep 'profile session policy')
+(cd apps/web && pnpm e2e:run --no-build --project mobile-chrome e2e/tests/workflow/mobile-workflow-settings.spec.ts -- --grep 'profile session')
+node --test scripts/validate-public-docs.test.mjs
+node scripts/validate-public-docs.mjs
 ```
 
 ## Files likely touched
@@ -67,6 +74,8 @@ Task 03.
 
 - The desktop scenario must wait on observable session state and identity, not a
   fixed delay.
+- The test must assign policies to destination steps explicitly. A workflow-wide
+  fixture would fail to prove the ownership change.
 - The mobile run may use `--no-build` only after the desktop managed runner has
   built the current backend and frontend artifacts.
 
@@ -76,21 +85,15 @@ Task 03.
 
 ## Inputs
 
-- Requirement AC 001.2, 001.3, 001.6, and 001.7.
+- Requirement AC 001.2, 001.3, 001.6, 001.7, 001.10, and 001.11.
 - Existing workflow-agent-switch and mobile workflow settings fixtures.
 - Docs-maintainer how-to guidance.
 
 ## Results
 
-Added desktop coverage for policy save and reload, `A -> B -> A` reuse with
-`park_reuse`, and fresh-session re-entry with `park_new`. Added mobile coverage
-for touch selection, 44px hit areas, save and reload, and document overflow.
-Updated `docs/public/tasks-and-workflows.md` with the default, all three policy
-choices, runtime behavior, and selection guidance.
-
-Verification:
-
-- Desktop profile-session E2E passed: 2 tests.
-- Mobile profile-session E2E passed: 1 test.
-- `node --test scripts/validate-public-docs.test.mjs` passed: 61 tests.
-- `node scripts/validate-public-docs.mjs` passed: 41 published pages validated.
+Added desktop save/reload coverage and `A -> B -> A` identity assertions for
+both `park_reuse` and `park_new`. Added mobile touch coverage for profile search,
+nested policy selection, 44px hit areas, save/reload, focus return, safe-area
+containment, and document overflow. Updated public workflow guidance and
+validated 61 documentation tests across 41 published pages. Both desktop
+policy tests and the targeted mobile selector tests passed.

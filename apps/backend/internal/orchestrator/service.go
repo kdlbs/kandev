@@ -186,9 +186,8 @@ type taskQueuePromotionPublisher interface {
 // WorkflowMeta is the subset of workflow fields needed at step entry
 // (agent profile default + optional workflow-level prompt).
 type WorkflowMeta struct {
-	AgentProfileID       string
-	Prompt               string
-	ProfileSessionPolicy models.WorkflowProfileSessionPolicy
+	AgentProfileID string
+	Prompt         string
 }
 
 // WorkflowStepGetter retrieves workflow step information for prompt building.

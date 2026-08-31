@@ -63,7 +63,6 @@ function useWorkflowDraftPersistence(args: WorkflowDraftContributorArgs) {
       workflow.description ?? "",
       workflow.prompt ?? "",
       workflow.agent_profile_id ?? "",
-      workflow.profile_session_policy ?? "complete",
     ],
     steps: workflowSteps,
   });

@@ -142,6 +142,11 @@ async function configureProfileSessionPolicyWorkflow(
   ] as const) {
     await apiClient.updateWorkflowStep(step.id, {
       agent_profile_id: profileId,
+      // The destination step controls how the source profile session is
+      // retained. Keep the first profile parked while entering Profile B;
+      // the UI below changes Profile A Again from the default to the policy
+      // under test.
+      profile_session_policy: step === stepB ? policy : "complete",
       events: { on_enter: [{ type: "auto_start_agent" }] },
     });
   }
@@ -149,17 +154,23 @@ async function configureProfileSessionPolicyWorkflow(
   await page.goto(seedData.workspaceId);
   const card = await page.findWorkflowCard(`Profile Session Policy ${policy}`);
   await expect(card).toBeVisible();
-  await page.setWorkflowProfileSessionPolicy(card, PROFILE_SESSION_POLICY_LABELS[policy]);
+  await page.setStepProfileSessionPolicy(
+    card,
+    "Profile A Again",
+    stepAAgain.id,
+    PROFILE_SESSION_POLICY_LABELS[policy],
+  );
   await page.saveChanges();
 
-  const savedWorkflow = (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
-    (item) => item.id === workflow.id,
+  const savedStep = (await apiClient.listWorkflowSteps(workflow.id)).steps.find(
+    (item) => item.id === stepAAgain.id,
   );
-  expect(savedWorkflow?.profile_session_policy).toBe(policy);
+  expect(savedStep?.profile_session_policy).toBe(policy);
 
   await page.goto(seedData.workspaceId);
   const reloadedCard = await page.findWorkflowCard(`Profile Session Policy ${policy}`);
-  await expect(page.workflowProfileSessionPolicySelect(reloadedCard)).toContainText(
+  await page.selectStep(reloadedCard, "Profile A Again");
+  await expect(page.stepAgentProfileSelect(reloadedCard)).toContainText(
     PROFILE_SESSION_POLICY_LABELS[policy],
   );
 
@@ -172,17 +183,27 @@ async function waitForProfileSession(
   profileId: string,
 ) {
   let sessionId = "";
+  let details = "";
   await expect
     .poll(
       async () => {
         const { sessions } = await apiClient.listTaskSessions(taskId);
+        details = sessions
+          .map(
+            (session) =>
+              `${session.id}:${session.agent_profile_id}:${session.state}:${session.is_primary}`,
+          )
+          .join(", ");
         const session = sessions.find((item) => item.agent_profile_id === profileId);
         sessionId = session?.id ?? "";
         return session?.state === "WAITING_FOR_INPUT";
       },
       { timeout: 30_000, message: `profile ${profileId} never became answerable` },
     )
-    .toBe(true);
+    .toBe(true)
+    .catch((error: Error) => {
+      throw new Error(`${error.message}; last observed sessions: ${details}`);
+    });
   return sessionId;
 }
 

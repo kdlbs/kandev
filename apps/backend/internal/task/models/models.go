@@ -1064,9 +1064,6 @@ type Workflow struct {
 	// Hidden workflows are excluded from management and picker UIs by default.
 	// Used by system-only flows like Improve Kandev.
 	Hidden bool `json:"hidden,omitempty"`
-	// ProfileSessionPolicy controls whether profile-switch source sessions are
-	// completed, parked for reuse, or parked while each re-entry starts fresh.
-	ProfileSessionPolicy WorkflowProfileSessionPolicy `json:"profile_session_policy"`
 	// Style is a Phase 2 (ADR-0004) UX hint read by the frontend ONLY.
 	// Allowed values: "kanban" | "office" | "custom". Empty / unknown
 	// values fall back to "kanban" via the schema default. Backend code

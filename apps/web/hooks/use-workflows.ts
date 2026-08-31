@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { listWorkflows } from "@/lib/api";
 import type { WorkflowsState } from "@/lib/state/slices";
-import { normalizeWorkflowProfileSessionPolicy } from "@/lib/types/http";
 import { isCurrentWorkspaceContext } from "@/lib/state/workspace-context";
 import type { AppState } from "@/lib/state/store";
 import type { StoreApi } from "zustand";
@@ -44,9 +43,6 @@ function useWorkflowsFetchEffect(
           prompt: workflow.prompt,
           sortOrder: workflow.sort_order ?? 0,
           agent_profile_id: workflow.agent_profile_id,
-          profile_session_policy: normalizeWorkflowProfileSessionPolicy(
-            workflow.profile_session_policy,
-          ),
           hidden: workflow.hidden,
           style: workflow.style,
         }));

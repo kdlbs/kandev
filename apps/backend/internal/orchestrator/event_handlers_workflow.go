@@ -339,6 +339,7 @@ func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID stri
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	ctx = withWorkflowProfileSwitchGuardHeld(ctx, sessionID, "")
 	if err := s.waitForCancellationWithGuard(ctx, sessionID, lock.Unlock, lock.Lock); err != nil {
 		return ProcessOnTurnStartResult{}, err
 	}
@@ -2014,23 +2015,13 @@ func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.Wo
 	return ""
 }
 
-// resolveStepProfileSessionPolicy returns the workflow-wide lifecycle policy
-// for a profile switch. Step overrides affect only the profile; the policy is
-// always owned by the destination workflow. Invalid or unavailable values use
-// the compatibility default.
-func (s *Service) resolveStepProfileSessionPolicy(ctx context.Context, step *wfmodels.WorkflowStep) models.WorkflowProfileSessionPolicy {
-	if step == nil || s.workflowStepGetter == nil || step.WorkflowID == "" {
+// resolveStepProfileSessionPolicy returns the destination step's lifecycle
+// policy. Invalid or absent values use the compatibility default.
+func (s *Service) resolveStepProfileSessionPolicy(step *wfmodels.WorkflowStep) models.WorkflowProfileSessionPolicy {
+	if step == nil {
 		return models.WorkflowProfileSessionPolicyComplete
 	}
-	meta, err := s.getWorkflowMeta(ctx, step.WorkflowID)
-	if err != nil {
-		s.logger.Warn("failed to resolve workflow profile-session policy, using complete",
-			zap.String("workflow_id", step.WorkflowID),
-			zap.String("step_id", step.ID),
-			zap.Error(err))
-		return models.WorkflowProfileSessionPolicyComplete
-	}
-	return models.NormalizeWorkflowProfileSessionPolicy(string(meta.ProfileSessionPolicy))
+	return models.NormalizeWorkflowProfileSessionPolicy(string(step.ProfileSessionPolicy))
 }
 
 // tagSessionAsWorkflowSwitched records that a session's profile came from a
@@ -2291,9 +2282,18 @@ func (s *Service) createNewSessionForStepWithPolicy(
 	// was selected by the workflow step override rather than direct user choice.
 	s.tagSessionAsWorkflowSwitched(ctx, newSession.ID)
 
+	// Promote the new session to primary so it's loaded when navigating back to this task.
+	// Use SetPrimarySession (not repo.SetSessionPrimary) to broadcast a task.updated WS
+	// event — the frontend reads primarySessionId from the task to render the star icon.
+	if err := s.SetPrimarySession(ctx, newSession.ID); err != nil {
+		return nil, fmt.Errorf("failed to promote new workflow session: %w", err)
+	}
+
 	// Transfer any queued message (e.g. a move_task_kandev hand-off prompt) and
-	// pending move from the old session to the new one — the queue is keyed by
-	// session ID, and without this the prompt would never reach the new agent.
+	// pending move from the old session to the new one only after promotion
+	// succeeds. If promotion fails, the source remains primary and its queue
+	// must remain attached to that source rather than being stranded on an
+	// unpromoted destination.
 	if s.messageQueue != nil {
 		if err := s.messageQueue.TransferSession(ctx, currentSession.ID, newSession.ID); err != nil {
 			s.logger.Error("transfer queue to new session failed; queued prompts on the previous session will not be drained",
@@ -2306,13 +2306,6 @@ func (s *Service) createNewSessionForStepWithPolicy(
 			// failed). The error is surfaced via logs and the orphaned entries
 			// stay safely in the old session for manual recovery.
 		}
-	}
-
-	// Promote the new session to primary so it's loaded when navigating back to this task.
-	// Use SetPrimarySession (not repo.SetSessionPrimary) to broadcast a task.updated WS
-	// event — the frontend reads primarySessionId from the task to render the star icon.
-	if err := s.SetPrimarySession(ctx, newSession.ID); err != nil {
-		return nil, fmt.Errorf("failed to promote new workflow session: %w", err)
 	}
 
 	parked, err := s.finishWorkflowProfileSwitchSource(ctx, taskID, currentSession, policy)
@@ -2417,7 +2410,7 @@ func (s *Service) prepareWorkflowStepSession(
 		}
 		return session, false, nil
 	}
-	policy := s.resolveStepProfileSessionPolicy(ctx, step)
+	policy := s.resolveStepProfileSessionPolicy(step)
 	newSession, err := s.switchSessionForStepWithPolicy(ctx, taskID, session, effectiveProfile, policy)
 	if err != nil {
 		return nil, false, err
@@ -2439,7 +2432,7 @@ func (s *Service) preflightWorkflowStepCredentials(
 	if effectiveProfile == "" || effectiveProfile == currentSession.AgentProfileID {
 		return nil
 	}
-	policy := s.resolveStepProfileSessionPolicy(ctx, targetStep)
+	policy := s.resolveStepProfileSessionPolicy(targetStep)
 	targetSession := currentSession
 	if policy != models.WorkflowProfileSessionPolicyParkNew {
 		existing, err := s.findReusableSessionForProfile(ctx, taskID, effectiveProfile, currentSession.ID)
@@ -5196,7 +5189,10 @@ func (s *Service) applyEngineTransitionWithCommit(
 	if stepEntry != nil {
 		stepEntryID = stepEntry.EntryID
 	}
-	s.launchProcessOnEnter(context.WithoutCancel(ctx), taskID, session, targetStep, taskDescription, stepEntryID)
+	// The caller may still hold the source session guard, but this work runs
+	// asynchronously after that guard is released. Clear the synchronous
+	// ownership marker so profile-switch parking acquires its own guard.
+	s.launchProcessOnEnter(withoutWorkflowProfileSwitchGuard(context.WithoutCancel(ctx)), taskID, session, targetStep, taskDescription, stepEntryID)
 	return true
 }
 

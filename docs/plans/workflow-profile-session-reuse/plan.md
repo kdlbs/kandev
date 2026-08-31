@@ -1,6 +1,6 @@
 ---
 created: 2026-08-31
-status: implemented
+status: complete
 requirements:
   - REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-001
 system_design:
@@ -8,120 +8,158 @@ system_design:
 legacy_specs: []
 ---
 
-# Implementation Plan: Workflow Profile Session Reuse
+# Implementation Plan: Workflow Step Profile Session Reuse
 
 ## Overview
 
-Add a backward-compatible workflow policy that controls whether fixed-profile
-handoffs complete, park and reuse, or park and replace task sessions. Delivery
-starts with the portable workflow contract, then implements execution-safe
-parking, exposes the workflow setting, and proves desktop/mobile behavior.
+Move profile-session behavior from the workflow to each destination step and
+present it with the step's agent profile in one robust selector. Delivery first
+establishes the portable step contract, then points the existing safe
+profile-switch lifecycle at that contract, replaces the workflow-level UX, and
+proves mixed-policy workflows on desktop and mobile.
 
 ## Scope
 
 ### In scope
 
-- Workflow persistence, API projection, export/import, and sync round-trip.
-- Profile-switch routing for `complete`, `park_reuse`, and `park_new`.
+- Step persistence, API projection, templates, export/import, and sync
+  round-trip.
+- Removal of the unshipped workflow-level policy contract and UI.
+- Destination-step routing for `complete`, `park_reuse`, and `park_new`.
 - Execution-stamped suppression of completion events caused by parked switches.
-- Workflow editor draft/save/read-only behavior and localized explanations.
+- A combined searchable step agent-profile and session-behavior selector.
+- Step draft/save/read-only behavior, localized explanations, desktop popover,
+  and mobile inset drawer.
 - Desktop runtime E2E, mobile configuration E2E, and public workflow guidance.
 
 ### Out of scope
 
-- Per-step lifecycle policies.
+- Workflow-wide or transition-edge lifecycle policies.
 - Office and automation thread behavior.
 - A new task-session state or automatic parked-session retention cleanup.
 - Reuse across different agent profiles or revival of terminal sessions.
+- Combining conditional original-session model configuration with profile
+  session behavior.
 
 ## Technical approach
 
-### Portable workflow policy
+### Portable step policy
 
-Add `WorkflowProfileSessionPolicy` and `profile_session_policy` to the workflow
-domain model. Persist it in `workflows`, normalize empty/unknown values to
-`complete`, and carry it through workflow update DTOs, workflow metadata,
-portable export/import, and sync. Existing workflows and imports remain
-`complete` without a backfill that changes behavior.
+Keep the normalized `WorkflowProfileSessionPolicy` enum, but move
+`profile_session_policy` from the workflow model to `WorkflowStep` and
+`StepDefinition`. Persist it in `workflow_steps`, normalize empty or unknown
+values to `complete`, and carry it through step create/update DTOs, templates,
+duplication, portable `StepPortable`, import, and workflow sync.
+
+Remove the workflow-level database field, workflow DTO field,
+`WorkflowPortable` field, workflow metadata projection, frontend workflow
+field, and Workflow details control. The workflow-level implementation is
+unshipped, so implementation must leave one authoritative location rather than
+support both.
 
 ### Profile-switch lifecycle
 
-Extend `WorkflowMeta` so fixed-profile routing reads policy with the already
-cached profile/prompt query. Parameterize session selection and source cleanup:
+Retain the execution-safe parking implementation and source-session outcomes.
+Change policy resolution to normalize `destinationStep.ProfileSessionPolicy`
+directly. The existing engine still resolves the destination step; no action,
+transition, or state-machine contract changes.
+
 `park_reuse` uses the existing conditional nonterminal promotion,
 `park_new` always prepares a destination, and `complete` retains current
-behavior.
+eligible-nonterminal reuse behavior. Parked cleanup writes an
+execution-stamped metadata intent before setting `WAITING_FOR_INPUT` and
+stopping the old execution. Completion and stopped handlers consume the matching
+intent and skip workflow advancement. Preserve the terminal-candidate,
+primary-promotion, teardown-failure, and queue-rollback guards.
 
-For parked cleanup, write an execution-stamped metadata intent before setting
-`WAITING_FOR_INPUT` and stopping the old execution. Agent completion/stopped
-handlers consume the matching intent and skip workflow advancement. Preserve
-the existing terminal-candidate and primary-promotion race guards.
+### Combined step agent selector
 
-### Workflow editor
+Replace `StepAgentProfileSelect` with a dedicated combined selector. The
+closed trigger shows the profile and a compact session-behavior summary. The
+desktop popover follows `ModelConfigSelector`: a searchable profile list,
+then a separated **Session behavior** configuration row that opens a nested
+three-option view with descriptions and Back navigation.
 
-Add the field to `Workflow`, draft merge, dirty tracking, save payloads, and
-duplication/import-visible state. Render one self-explaining select in Workflow
-details and disable it for synced workflows. Add all copy to five locale
-catalogs. Generate the Traditional Chinese pair with the existing script.
+The component updates `agent_profile_id` and `profile_session_policy` in the
+same step draft. Dirty tracking and coordinated save compare and persist both.
+Synced workflows display both values read-only. The existing
+`configure_session` incompatibility remains explicit and does not silently
+discard either value.
 
-### Public documentation
-
-Update the how-to page `docs/public/tasks-and-workflows.md` with the three
-policies, the default, the runtime-stop guarantee, and guidance for choosing
-continuity versus a fresh conversation.
+Do not force this workflow-specific data into the model selector's types. Reuse
+or extract small hierarchical picker primitives only where that keeps profile
+health, workflow-default fallback, and step validation independent.
 
 ### Mobile design contract
 
-Use the existing one-column Workflow details composition and responsive Radix
-select. The phone control uses touch-sized triggers and rows. It retains the
-document as the single scroll owner and wraps explanatory copy. It relies on
-the existing safe-area-aware floating Save action. No new drawer, route, or
-fixed control is needed.
+Use the same trigger in the step card. On phone viewports, present the selector
+as an inset bottom drawer rather than a compressed popover or short select. The
+drawer has a fixed navigation header, one internal scroll owner, `100dvh`
+constraints, safe-area padding, touch targets of at least 44 px, focus return,
+keyboard-safe search, wrapped descriptions, and no page-level horizontal
+overflow. Desktop and mobile share filtering, validation, draft updates, dirty
+tracking, and save logic.
+
+### Public documentation
+
+Update `docs/public/tasks-and-workflows.md` to locate the setting on each step,
+explain destination-step semantics and defaults, and show when repeated steps
+should reuse context or start a fresh conversation.
 
 ## Tests
 
-- Map AC 001.1, 001.2, 001.3, 001.4, 001.5, and 001.9 to focused orchestrator
-  profile-switch and delayed-callback tests in
-  `event_handlers_workflow_profile_session_policy_test.go` and adjacent
-  completion tests.
-- Map AC 001.6 to repository, workflow metadata, export/import, and sync tests.
-- Map AC 001.7 and 001.8 to frontend draft/dirty/component tests, including
-  read-only behavior and localized labels.
+- Map AC 001.1, 001.6, and 001.10 to workflow-step repository, request,
+  template, export/import, and sync tests.
+- Map AC 001.1 through 001.5 and 001.9 to focused orchestrator profile-switch and
+  delayed-callback tests that supply different destination-step policies in one
+  workflow.
+- Map AC 001.7, 001.8, and 001.11 to frontend selector, draft, dirty,
+  read-only, desktop, and mobile presentation tests.
 
 ## E2E tests
 
-- Extend `apps/web/e2e/tests/workflow/workflow-agent-switch.spec.ts` with a
-  workflow setting save/reload and `A -> B -> A` runtime scenario for
+- Extend `apps/web/e2e/tests/workflow/workflow-agent-switch.spec.ts` with
+  per-step save/reload and `A -> B -> A` runtime scenarios for
   `park_reuse` and `park_new`.
-- Extend `apps/web/e2e/tests/workflow/mobile-workflow-settings.spec.ts` with a
-  touch-driven policy change, save/reload, 44px hit-area checks, and no document
-  horizontal overflow.
+- Extend `apps/web/e2e/tests/workflow/mobile-workflow-settings.spec.ts` with
+  profile search, nested policy selection, save/reload, focus return, 44 px
+  hit-area checks, safe-area containment, and no document horizontal overflow.
 
 ## Work orders
 
-- [x] [Task 01: Add portable workflow policy](task-01-add-portable-workflow-policy.md)
-- [x] [Task 02: Implement safe session parking](task-02-implement-safe-session-parking.md)
-- [x] [Task 03: Expose workflow policy](task-03-expose-workflow-policy.md)
-- [x] [Task 04: Prove reuse flows and document behavior](task-04-prove-and-document-reuse-flows.md)
+- [x] [Task 01: Move policy to workflow steps](task-01-add-portable-workflow-policy.md)
+- [x] [Task 02: Route sessions from the destination step](task-02-implement-safe-session-parking.md)
+- [x] [Task 03: Build the combined step agent selector](task-03-expose-workflow-policy.md)
+- [x] [Task 04: Prove mixed step policies and document behavior](task-04-prove-and-document-reuse-flows.md)
 
 ## Verification results
 
-- Task 01: `go test -tags fts5 ./internal/task/repository/sqlite ./internal/workflow/models ./internal/workflow/service ./internal/workflow/handlers ./internal/workflowsync -run 'ProfileSessionPolicy|WorkflowMeta' -count=1` passed.
-- Task 02: `go test -tags fts5 ./internal/orchestrator -run 'Test(SwitchSessionForStep|HandleAgentCompleted|HandleAgentStopped).*ProfileSessionPolicy' -count=1 -v` passed (11 tests), including durable consumed-intent, teardown-failure, and queue-rollback coverage.
-- Task 03: the focused web tests passed (32 tests), `pnpm run typecheck` passed, `pnpm run i18n:check` passed, and `pnpm run i18n:ratchet` passed.
-- Task 04: the desktop profile-session E2E passed (2 tests), the mobile profile-session E2E passed (1 test), and public docs validation passed (61 tests and 41 pages).
-- Changed backend packages: `go test -tags fts5 -count=1 ./internal/backendapp ./internal/orchestrator ./internal/task/... ./internal/workflow/...` passed (7,212 tests across 27 packages).
-- Changed Go files are gofmt-clean, and `git diff --check` passed.
+- Task 01: Step persistence, portable export/import, template, and sync tests
+  passed as part of the affected backend package suite.
+- Task 02: Profile-switch, durable stop-intent, queue-rollback, and lifecycle
+  race tests passed as part of the focused orchestrator suite.
+- Task 03: Focused frontend tests passed (52 tests), together with lint,
+  typecheck, i18n checks, and the new-code ratchet.
+- Task 04: Desktop policy E2E passed (2 tests), mobile selector E2E passed (2
+  targeted tests), and public docs validation passed (61 tests and 41 pages).
+- Backend affected packages passed: `go test -tags fts5 -count=1
+  ./internal/backendapp ./internal/orchestrator ./internal/task/... ./internal/workflow/...`
+  (7,209 tests across 27 packages).
+- `make build`, `make e2e-plugin-package`, and specification lint passed.
 
 ## Risks
 
+- Leaving a workflow-level field in any contract creates two policy authorities
+  with unclear precedence.
 - A delayed completion from the stopped source execution can advance the new
   step unless suppression is bound to the exact execution identity.
 - Clearing a generic metadata flag can race with a later resumed execution.
-  Compare-and-remove must use the stored stamp.
+  Stamped consumption must leave a durable tombstone.
 - `park_new` intentionally permits multiple nonterminal sessions with one
   profile and can grow task session counts.
-- Export/import and workflow sync can silently reset the policy if one portable
-  mapping path is omitted.
-- Frontend draft reconciliation can overwrite an unsaved policy unless it is
-  added to both displayed and saved merge logic.
+- Portable step import and workflow sync can silently reset the policy if one
+  step mapping or equality check is omitted.
+- Frontend draft reconciliation can overwrite an unsaved step policy unless it
+  is added to both displayed and saved merge logic.
+- The combined selector can become cramped or trap focus on phones unless its
+  responsive presentation has one scroll owner and explicit nested navigation.

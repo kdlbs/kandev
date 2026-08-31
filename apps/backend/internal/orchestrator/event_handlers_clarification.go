@@ -75,6 +75,7 @@ func (s *Service) handleClarificationStaleDismissed(ctx context.Context, event *
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	writeCtx = withWorkflowProfileSwitchGuardHeld(writeCtx, data.SessionID, "")
 	if s.isCancelInFlight(data.SessionID) {
 		s.logger.Debug("ignoring stale clarification dismissal while cancellation is in progress",
 			zap.String("task_id", data.TaskID),

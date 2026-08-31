@@ -41,18 +41,17 @@ import (
 
 // mockStepGetter implements WorkflowStepGetter for testing.
 type mockStepGetter struct {
-	steps                        map[string]*wfmodels.WorkflowStep // stepID -> step
-	getStepFunc                  func(context.Context, string) (*wfmodels.WorkflowStep, error)
-	workflowAgentProfileID       string            // returned by GetWorkflowMeta
-	workflowAgentProfiles        []string          // optional profiles returned per call
-	workflowPrompts              map[string]string // workflowID -> prompt
-	workflowProfileSessionPolicy models.WorkflowProfileSessionPolicy
-	workflowMetaCalls            int           // GetWorkflowMeta invocations
-	workflowMetaErr              error         // optional error from GetWorkflowMeta
-	workflowMetaDelay            time.Duration // optional sleep before returning meta
-	workflowMetaMu               sync.Mutex    // guards workflowMetaCalls for concurrent tests
-	getStepCalls                 int           // GetStep invocations, guarded by getStepMu
-	getStepMu                    sync.Mutex
+	steps                  map[string]*wfmodels.WorkflowStep // stepID -> step
+	getStepFunc            func(context.Context, string) (*wfmodels.WorkflowStep, error)
+	workflowAgentProfileID string            // returned by GetWorkflowMeta
+	workflowAgentProfiles  []string          // optional profiles returned per call
+	workflowPrompts        map[string]string // workflowID -> prompt
+	workflowMetaCalls      int               // GetWorkflowMeta invocations
+	workflowMetaErr        error             // optional error from GetWorkflowMeta
+	workflowMetaDelay      time.Duration     // optional sleep before returning meta
+	workflowMetaMu         sync.Mutex        // guards workflowMetaCalls for concurrent tests
+	getStepCalls           int               // GetStep invocations, guarded by getStepMu
+	getStepMu              sync.Mutex
 }
 
 func newMockStepGetter() *mockStepGetter {
@@ -131,9 +130,8 @@ func (m *mockStepGetter) GetWorkflowMeta(_ context.Context, workflowID string) (
 		profileID = m.workflowAgentProfiles[callNumber-1]
 	}
 	return WorkflowMeta{
-		AgentProfileID:       profileID,
-		Prompt:               prompt,
-		ProfileSessionPolicy: m.workflowProfileSessionPolicy,
+		AgentProfileID: profileID,
+		Prompt:         prompt,
 	}, nil
 }
 
@@ -306,6 +304,7 @@ type mockAgentManager struct {
 	stopAgentWithReasonFunc func(context.Context, string, string, bool) error
 	stopAgentArgs           []stopAgentCall // tracks StopAgent calls (no reason)
 	stopAgentErr            error           // optional error to return from StopAgent
+	stopAgentFunc           func(context.Context, string, bool) error
 
 	// Prompt tracking — capturedPrompts records prompts only (legacy, several
 	// tests assert on it directly). capturedPromptCalls records the same with
@@ -454,11 +453,16 @@ func (m *mockAgentManager) StartAgentProcess(ctx context.Context, sessionID stri
 	return err
 }
 func (m *mockAgentManager) IsAgentCommandConfigured(_ string) bool { return true }
-func (m *mockAgentManager) StopAgent(_ context.Context, agentExecutionID string, force bool) error {
+func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID string, force bool) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.stopAgentArgs = append(m.stopAgentArgs, stopAgentCall{ExecutionID: agentExecutionID, Force: force})
-	return m.stopAgentErr
+	hook := m.stopAgentFunc
+	err := m.stopAgentErr
+	m.mu.Unlock()
+	if hook != nil {
+		return hook(ctx, agentExecutionID, force)
+	}
+	return err
 }
 func (m *mockAgentManager) StopAgentWithReason(ctx context.Context, agentExecutionID, reason string, force bool) error {
 	m.mu.Lock()

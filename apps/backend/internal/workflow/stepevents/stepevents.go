@@ -79,6 +79,7 @@ func payload(step *models.WorkflowStep) map[string]interface{} {
 		"wip_limit":                     step.WIPLimit,
 		"pull_from_step_id":             step.PullFromStepID,
 		"agent_profile_id":              step.AgentProfileID,
+		"profile_session_policy":        string(step.ProfileSessionPolicy),
 		"stage_type":                    string(step.StageType),
 		"auto_advance_requires_signal":  step.AutoAdvanceRequiresSignal,
 		"cancel_triggers_turn_complete": step.CancelTriggersTurnComplete,

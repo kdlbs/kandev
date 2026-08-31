@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import type { Workflow, WorkflowStep } from "@/lib/types/http";
+import {
+  normalizeWorkflowProfileSessionPolicy,
+  type Workflow,
+  type WorkflowStep,
+} from "@/lib/types/http";
 import { generateUUID } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 import { useToast } from "@/components/toast-provider";
@@ -249,7 +253,6 @@ export async function persistWorkflowDraft({
     description: workflow.description ?? "",
     prompt: workflow.prompt ?? "",
     agent_profile_id: workflow.agent_profile_id ?? "",
-    profile_session_policy: workflow.profile_session_policy ?? "complete",
   });
   progress.workflow = updatedWorkflow;
   await reconcileTemplateSteps({ workflow, draftSteps, updatedWorkflow, progress, isNewWorkflow });
@@ -276,7 +279,6 @@ async function ensurePersistedWorkflow(
         name: workflow.name.trim(),
         description: workflow.description ?? undefined,
         prompt: workflow.prompt ?? undefined,
-        profile_session_policy: workflow.profile_session_policy ?? "complete",
         workflow_template_id: workflow.workflow_template_id ?? undefined,
       })
     : workflow;
@@ -321,6 +323,7 @@ async function createMissingSteps(
       color: step.color,
       stage_type: step.stage_type ?? "custom",
       cancel_triggers_turn_complete: step.cancel_triggers_turn_complete ?? false,
+      profile_session_policy: normalizeWorkflowProfileSessionPolicy(step.profile_session_policy),
     });
     mappings.set(step.id, created.id);
   }
@@ -404,6 +407,7 @@ function stepUpdatePayload(step: WorkflowStep): Partial<WorkflowStep> {
     show_in_command_panel: step.show_in_command_panel ?? false,
     auto_archive_after_hours: step.auto_archive_after_hours ?? 0,
     agent_profile_id: step.agent_profile_id ?? "",
+    profile_session_policy: normalizeWorkflowProfileSessionPolicy(step.profile_session_policy),
     auto_advance_requires_signal: step.auto_advance_requires_signal ?? false,
     cancel_triggers_turn_complete: step.cancel_triggers_turn_complete ?? false,
     wip_limit: step.wip_limit ?? 0,

@@ -31,13 +31,13 @@ func TestMapKanbanStateIncludesWIPAdmissionFields(t *testing.T) {
 	}
 }
 
-func TestMapWorkflowItemStateIncludesProfileSessionPolicy(t *testing.T) {
-	workflow := mapWorkflowItemState(taskdto.WorkflowDTO{
-		ID:                   "workflow-policy",
+func TestMapKanbanStepStateIncludesProfileSessionPolicy(t *testing.T) {
+	step := mapKanbanStepState(taskdto.WorkflowStepDTO{
+		ID:                   "step-policy",
 		ProfileSessionPolicy: "park_reuse",
 	})
-	if workflow["profile_session_policy"] != "park_reuse" {
-		t.Fatalf("profile_session_policy = %#v, want park_reuse", workflow["profile_session_policy"])
+	if step["profile_session_policy"] != "park_reuse" {
+		t.Fatalf("profile_session_policy = %#v, want park_reuse", step["profile_session_policy"])
 	}
 }
 

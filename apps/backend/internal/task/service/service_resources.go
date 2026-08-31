@@ -514,14 +514,13 @@ func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest
 		return nil, err
 	}
 	workflow := &models.Workflow{
-		ID:                   uuid.New().String(),
-		WorkspaceID:          req.WorkspaceID,
-		Name:                 req.Name,
-		Description:          req.Description,
-		Prompt:               req.Prompt,
-		WorkflowTemplateID:   req.WorkflowTemplateID,
-		Hidden:               req.Hidden,
-		ProfileSessionPolicy: models.NormalizeWorkflowProfileSessionPolicy(req.ProfileSessionPolicy),
+		ID:                 uuid.New().String(),
+		WorkspaceID:        req.WorkspaceID,
+		Name:               req.Name,
+		Description:        req.Description,
+		Prompt:             req.Prompt,
+		WorkflowTemplateID: req.WorkflowTemplateID,
+		Hidden:             req.Hidden,
 	}
 
 	if err := s.workflows.CreateWorkflow(ctx, workflow); err != nil {
@@ -574,9 +573,6 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 	}
 	if req.AgentProfileID != nil {
 		workflow.AgentProfileID = strings.TrimSpace(*req.AgentProfileID)
-	}
-	if req.ProfileSessionPolicy != nil {
-		workflow.ProfileSessionPolicy = models.NormalizeWorkflowProfileSessionPolicy(*req.ProfileSessionPolicy)
 	}
 	workflow.UpdatedAt = time.Now().UTC()
 

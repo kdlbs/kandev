@@ -376,35 +376,17 @@ describe("persistWorkflowDraft", () => {
       expect.objectContaining({ pull_from_step_id: SERVER_STEP_ONE }),
     );
   });
-
-  it("persists the workflow profile session policy", async () => {
-    const draftWorkflow = {
-      ...workflow,
-      profile_session_policy: "park_new" as const,
-    } as Workflow;
-
-    await persistWorkflowDraft({
-      workflow: draftWorkflow,
-      draftSteps: [],
-      savedSteps: [],
-      progress: createWorkflowDraftSaveProgress(),
-    });
-
-    expect(updateWorkflowAction).toHaveBeenCalledWith(
-      workflow.id,
-      expect.objectContaining({ profile_session_policy: "park_new" }),
-    );
-  });
 });
 
 describe("persistWorkflowDraft cancellation policy", () => {
-  it("forwards cancellation policy when creating a missing template step", async () => {
+  it("forwards step session policy and cancellation policy when creating a missing step", async () => {
     const draftWorkflow = { ...workflow, id: CLIENT_WORKFLOW_ID } as Workflow;
     const drafts = [
       {
         ...step(CLIENT_STEP_ONE, "Todo", 0, true),
         workflow_id: draftWorkflow.id,
         cancel_triggers_turn_complete: true,
+        profile_session_policy: "park_new",
       },
     ] as WorkflowStep[];
     vi.mocked(createWorkflowAction).mockResolvedValue({
@@ -429,6 +411,7 @@ describe("persistWorkflowDraft cancellation policy", () => {
     expect(createWorkflowStepAction).toHaveBeenCalledWith(
       expect.objectContaining({
         cancel_triggers_turn_complete: true,
+        profile_session_policy: "park_new",
       }),
     );
   });

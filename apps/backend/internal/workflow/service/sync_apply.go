@@ -361,6 +361,7 @@ func stepMatchesDefinition(existing, desired *models.WorkflowStep) bool {
 		existing.ShowInCommandPanel == desired.ShowInCommandPanel &&
 		existing.AutoArchiveAfterHours == desired.AutoArchiveAfterHours &&
 		existing.AgentProfileID == desired.AgentProfileID &&
+		existing.ProfileSessionPolicy == desired.ProfileSessionPolicy &&
 		existing.WIPLimit == desired.WIPLimit &&
 		existing.PullFromStepID == desired.PullFromStepID &&
 		existing.AutoAdvanceRequiresSignal == desired.AutoAdvanceRequiresSignal &&
@@ -415,10 +416,7 @@ func (s *Service) applyWorkflowFields(ctx context.Context, wf *taskmodels.Workfl
 	if pw.AgentProfile != nil && s.matchProfile != nil {
 		profileID = s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode, wf.AgentProfileID)
 	}
-	policy := taskmodels.NormalizeWorkflowProfileSessionPolicy(string(pw.ProfileSessionPolicy))
-	currentPolicy := taskmodels.NormalizeWorkflowProfileSessionPolicy(string(wf.ProfileSessionPolicy))
-	wf.ProfileSessionPolicy = currentPolicy
-	if wf.Description == pw.Description && wf.Prompt == pw.Prompt && wf.AgentProfileID == profileID && currentPolicy == policy {
+	if wf.Description == pw.Description && wf.Prompt == pw.Prompt && wf.AgentProfileID == profileID {
 		return false, nil
 	}
 	oldProfileID := wf.AgentProfileID
@@ -426,7 +424,6 @@ func (s *Service) applyWorkflowFields(ctx context.Context, wf *taskmodels.Workfl
 	wf.Description = pw.Description
 	wf.Prompt = pw.Prompt
 	wf.AgentProfileID = profileID
-	wf.ProfileSessionPolicy = policy
 	if err := s.workflowProvider.UpdateWorkflow(ctx, wf); err != nil {
 		return true, err
 	}

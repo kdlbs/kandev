@@ -403,17 +403,11 @@ export class ApiClient {
     return this.request("GET", "/api/v1/workspaces");
   }
 
-  async createWorkflow(
-    workspaceId: string,
-    name: string,
-    templateId?: string,
-    profileSessionPolicy?: "complete" | "park_reuse" | "park_new",
-  ): Promise<Workflow> {
+  async createWorkflow(workspaceId: string, name: string, templateId?: string): Promise<Workflow> {
     return this.request("POST", "/api/v1/workflows", {
       workspace_id: workspaceId,
       name,
       ...(templateId ? { workflow_template_id: templateId } : {}),
-      ...(profileSessionPolicy ? { profile_session_policy: profileSessionPolicy } : {}),
     });
   }
 
@@ -792,6 +786,7 @@ export class ApiClient {
     position: number,
     opts?: {
       is_start_step?: boolean;
+      profile_session_policy?: "complete" | "park_reuse" | "park_new";
       events?: {
         on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -804,6 +799,9 @@ export class ApiClient {
       name,
       position,
       ...(opts?.is_start_step != null ? { is_start_step: opts.is_start_step } : {}),
+      ...(opts?.profile_session_policy
+        ? { profile_session_policy: opts.profile_session_policy }
+        : {}),
       ...(opts?.events != null ? { events: opts.events } : {}),
     });
   }
@@ -1184,7 +1182,6 @@ export class ApiClient {
       description?: string;
       prompt?: string;
       agent_profile_id?: string;
-      profile_session_policy?: "complete" | "park_reuse" | "park_new";
     },
   ): Promise<Workflow> {
     return this.request("PATCH", `/api/v1/workflows/${workflowId}`, updates);
@@ -1214,6 +1211,7 @@ export class ApiClient {
       pull_from_step_id?: string | null;
       cancel_triggers_turn_complete?: boolean;
       stage_type?: "work" | "review" | "approval" | "custom";
+      profile_session_policy?: "complete" | "park_reuse" | "park_new";
     },
   ): Promise<void> {
     await this.request("PUT", `/api/v1/workflow/steps/${stepId}`, { id: stepId, ...updates });

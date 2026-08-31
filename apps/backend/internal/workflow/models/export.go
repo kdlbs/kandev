@@ -39,30 +39,30 @@ type AgentProfileMatcher func(agentName, model, mode, currentID string) string
 
 // WorkflowPortable is a workflow without instance-specific fields (IDs, timestamps).
 type WorkflowPortable struct {
-	Name                 string                                  `json:"name" yaml:"name"`
-	Description          string                                  `json:"description,omitempty" yaml:"description,omitempty"`
-	Prompt               string                                  `json:"prompt,omitempty" yaml:"prompt,omitempty"`
-	ProfileSessionPolicy taskmodels.WorkflowProfileSessionPolicy `json:"profile_session_policy,omitempty" yaml:"profile_session_policy,omitempty"`
-	AgentProfile         *AgentProfilePortable                   `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
-	Steps                []StepPortable                          `json:"steps" yaml:"steps"`
+	Name         string                `json:"name" yaml:"name"`
+	Description  string                `json:"description,omitempty" yaml:"description,omitempty"`
+	Prompt       string                `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+	AgentProfile *AgentProfilePortable `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
+	Steps        []StepPortable        `json:"steps" yaml:"steps"`
 }
 
 // StepPortable is a workflow step without instance-specific fields.
 type StepPortable struct {
-	Name                       string                `json:"name" yaml:"name"`
-	Position                   int                   `json:"position" yaml:"position"`
-	Color                      string                `json:"color" yaml:"color"`
-	Prompt                     string                `json:"prompt,omitempty" yaml:"prompt,omitempty"`
-	Events                     StepEvents            `json:"events" yaml:"events"`
-	IsStartStep                bool                  `json:"is_start_step" yaml:"is_start_step"`
-	ShowInCommandPanel         bool                  `json:"show_in_command_panel" yaml:"show_in_command_panel"`
-	AllowManualMove            bool                  `json:"allow_manual_move" yaml:"allow_manual_move"`
-	AutoArchiveAfterHours      int                   `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
-	AgentProfile               *AgentProfilePortable `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
-	AutoAdvanceRequiresSignal  bool                  `json:"auto_advance_requires_signal" yaml:"auto_advance_requires_signal"`
-	CancelTriggersTurnComplete bool                  `json:"cancel_triggers_turn_complete" yaml:"cancel_triggers_turn_complete"`
-	WIPLimit                   int                   `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
-	PullFromStepPosition       *int                  `json:"pull_from_step_position,omitempty" yaml:"pull_from_step_position,omitempty"`
+	Name                       string                                  `json:"name" yaml:"name"`
+	Position                   int                                     `json:"position" yaml:"position"`
+	Color                      string                                  `json:"color" yaml:"color"`
+	Prompt                     string                                  `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+	Events                     StepEvents                              `json:"events" yaml:"events"`
+	IsStartStep                bool                                    `json:"is_start_step" yaml:"is_start_step"`
+	ShowInCommandPanel         bool                                    `json:"show_in_command_panel" yaml:"show_in_command_panel"`
+	AllowManualMove            bool                                    `json:"allow_manual_move" yaml:"allow_manual_move"`
+	AutoArchiveAfterHours      int                                     `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
+	AgentProfile               *AgentProfilePortable                   `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
+	ProfileSessionPolicy       taskmodels.WorkflowProfileSessionPolicy `json:"profile_session_policy,omitempty" yaml:"profile_session_policy,omitempty"`
+	AutoAdvanceRequiresSignal  bool                                    `json:"auto_advance_requires_signal" yaml:"auto_advance_requires_signal"`
+	CancelTriggersTurnComplete bool                                    `json:"cancel_triggers_turn_complete" yaml:"cancel_triggers_turn_complete"`
+	WIPLimit                   int                                     `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
+	PullFromStepPosition       *int                                    `json:"pull_from_step_position,omitempty" yaml:"pull_from_step_position,omitempty"`
 }
 
 // BuildWorkflowExport builds a portable WorkflowExport from domain models.
@@ -99,6 +99,7 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 			ShowInCommandPanel:         s.ShowInCommandPanel,
 			AllowManualMove:            s.AllowManualMove,
 			AutoArchiveAfterHours:      s.AutoArchiveAfterHours,
+			ProfileSessionPolicy:       taskmodels.NormalizeWorkflowProfileSessionPolicy(string(s.ProfileSessionPolicy)),
 			AutoAdvanceRequiresSignal:  s.AutoAdvanceRequiresSignal,
 			CancelTriggersTurnComplete: s.CancelTriggersTurnComplete,
 			WIPLimit:                   s.WIPLimit,
@@ -113,11 +114,10 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 	}
 
 	wp := WorkflowPortable{
-		Name:                 wf.Name,
-		Description:          wf.Description,
-		Prompt:               wf.Prompt,
-		ProfileSessionPolicy: taskmodels.NormalizeWorkflowProfileSessionPolicy(string(wf.ProfileSessionPolicy)),
-		Steps:                portableSteps,
+		Name:        wf.Name,
+		Description: wf.Description,
+		Prompt:      wf.Prompt,
+		Steps:       portableSteps,
 	}
 	if resolveProfile != nil && wf.AgentProfileID != "" {
 		wp.AgentProfile = resolveProfile(wf.AgentProfileID)

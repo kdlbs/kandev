@@ -206,6 +206,7 @@ func (r *Repository) ensureRunnerProjectionTables() {
 			show_in_command_panel INTEGER DEFAULT 1,
 			auto_archive_after_hours INTEGER DEFAULT 0,
 			agent_profile_id TEXT NOT NULL DEFAULT '',
+			profile_session_policy TEXT NOT NULL DEFAULT 'complete',
 			stage_type TEXT NOT NULL DEFAULT 'custom',
 			auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
 			cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0,

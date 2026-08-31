@@ -120,7 +120,7 @@ reviews must wait for approval instead of advancing automatically.
 
 Choose **Add Workflow**, give it a name, select **Custom**, and save it. Expand each step to edit its behavior. Reorder steps by dragging them; transition actions that say “next” or “previous” follow the saved position order.
 
-Workflow-level settings include the name and default agent profile. A step can override that profile; switching profiles creates a different session with fresh context. A step also has these controls:
+Workflow-level settings include the name and default agent profile. Each step can override that profile and choose its session behavior when the effective profile changes. The choices are to complete the previous session, park it for reuse, or park it while starting a fresh session on return. Steps with the same effective profile keep the current session. A step also has these controls:
 
 | Control | Behavior |
 |---------|----------|
@@ -129,7 +129,7 @@ Workflow-level settings include the name and default agent profile. A step can o
 | Start step | Where a task is created when no agent starts with it. The editor keeps at most one. If none is set, task creation falls back to the first step by position. Creating a task that starts an agent immediately uses the first Auto-start agent step instead, so a Start step with no entry actions is a genuine parking column. |
 | Auto-start agent | Adds `auto_start_agent` to `on_enter`. It still needs a valid agent and executor configuration. |
 | Plan mode | Adds `enable_plan_mode` on entry. Add the matching disable behavior on completion or exit when later steps should edit files. |
-| Reset agent context | Starts the step with fresh conversation context. It is redundant when the step changes agent profile. |
+| Reset agent context | Starts the step with fresh conversation context. It is disabled when the step changes agent profile because the destination step's session-handling choice controls whether that switch reuses or creates a conversation. |
 | Allow manual move | Allows board drag/drop into the step. It is a product-UI rule, not a security boundary for API clients. |
 | Show in command panel | Includes tasks in this step in the command panel. |
 | Auto-archive | Archives eligible tasks after the configured number of hours. `0` disables it; the background sweep runs every five minutes and uses task `updated_at`, so timing is approximate. |

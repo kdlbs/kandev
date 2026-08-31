@@ -62,7 +62,9 @@ test.describe("Workflow agent profile", () => {
 
     // Click on the first step to open the config panel
     const firstStepName = seedData.steps[0]?.name;
+    const firstStepId = seedData.steps[0]?.id;
     expect(firstStepName).toBeDefined();
+    expect(firstStepId).toBeDefined();
     const stepNode = page.stepNodeByName(card, firstStepName!);
     await stepNode.click();
 
@@ -74,14 +76,12 @@ test.describe("Workflow agent profile", () => {
     const { agents } = await apiClient.listAgents();
     const agentProfile = agents.flatMap((a) => a.profiles ?? [])[0];
     expect(agentProfile).toBeDefined();
-    const profileLabel = `${agentProfile.agentDisplayName} \u2022 ${agentProfile.name}`;
-
     // Select an agent profile for this step
     await testPage.addStyleTag({
       content: '[data-slot="tooltip-content"] { display: none !important; }',
     });
     await stepProfileSelect.click();
-    await testPage.getByRole("option", { name: profileLabel }).click();
+    await testPage.getByTestId(`${firstStepId}-profile-option-${agentProfile.id}`).click();
 
     expect(
       (await apiClient.listWorkflowSteps(seedData.workflowId)).steps[0]?.agent_profile_id,

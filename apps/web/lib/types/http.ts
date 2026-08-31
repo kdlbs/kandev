@@ -113,6 +113,7 @@ export type StepDefinition = {
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   agent_profile_id?: AgentProfileId;
+  profile_session_policy?: WorkflowProfileSessionPolicy;
   execution_profile_id?: AgentProfileId;
   route_generation?: number;
   route_state?: string;
@@ -138,6 +139,7 @@ export type WorkflowStep = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
+  profile_session_policy?: WorkflowProfileSessionPolicy;
   wip_limit?: number;
   pull_from_step_id?: string | null;
   /**
@@ -241,7 +243,6 @@ export type Workflow = {
   prompt?: string;
   workflow_template_id?: string | null;
   agent_profile_id?: AgentProfileId;
-  profile_session_policy?: WorkflowProfileSessionPolicy;
   sort_order?: number;
   hidden?: boolean;
   /**

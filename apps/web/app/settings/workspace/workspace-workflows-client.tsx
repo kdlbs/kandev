@@ -163,9 +163,7 @@ export function hasNewerWorkflowMetadata(current: Workflow, savedFrom: Workflow)
     current.name !== savedFrom.name ||
     (current.description ?? "") !== (savedFrom.description ?? "") ||
     (current.prompt ?? "") !== (savedFrom.prompt ?? "") ||
-    (current.agent_profile_id ?? "") !== (savedFrom.agent_profile_id ?? "") ||
-    (current.profile_session_policy ?? "complete") !==
-      (savedFrom.profile_session_policy ?? "complete")
+    (current.agent_profile_id ?? "") !== (savedFrom.agent_profile_id ?? "")
   );
 }
 
@@ -197,7 +195,6 @@ function useWorkflowActions({
       description?: string;
       prompt?: string;
       agent_profile_id?: string;
-      profile_session_policy?: Workflow["profile_session_policy"];
     },
   ) => {
     setWorkflowItems((prev) =>
@@ -305,7 +302,6 @@ type WorkflowListProps = {
       description?: string;
       prompt?: string;
       agent_profile_id?: string;
-      profile_session_policy?: Workflow["profile_session_policy"];
     },
   ) => void;
   onDelete: (id: string) => void;

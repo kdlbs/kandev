@@ -244,23 +244,40 @@ export class WorkflowSettingsPage {
     return card.getByTestId("workflow-agent-profile-select");
   }
 
-  /** The workflow-level profile session policy select trigger within a workflow card. */
-  workflowProfileSessionPolicySelect(card: Locator): Locator {
-    return card.getByTestId("workflow-profile-session-policy-select");
-  }
-
-  /** Select and apply a workflow-level profile session policy. */
-  async setWorkflowProfileSessionPolicy(card: Locator, optionName: string, touch = false) {
-    await this.activate(this.workflowProfileSessionPolicySelect(card), touch);
-    await this.activate(
-      this.page.getByRole("listbox").getByRole("option", { name: optionName, exact: false }),
-      touch,
-    );
-  }
-
-  /** The step agent profile override select trigger in the step config panel within a workflow card. */
+  /** The step agent profile and session policy selector in a workflow card. */
   stepAgentProfileSelect(card: Locator): Locator {
     return card.getByTestId("step-agent-profile-select");
+  }
+
+  /** The nested session behavior entry in the selected step's profile selector. */
+  stepProfileSessionPolicySelect(): Locator {
+    // DrawerContent is portalled outside the workflow card on mobile. The
+    // settings page has one open step selector at a time, so the suffix is
+    // enough to address its nested navigation surface in either layout.
+    return this.page.locator('[data-testid$="-profile-session-policy-select"]');
+  }
+
+  /** Set the destination step's profile-session policy through the combined selector. */
+  async setStepProfileSessionPolicy(
+    card: Locator,
+    stepName: string,
+    stepId: string,
+    optionName: string,
+    touch = false,
+  ) {
+    await this.selectStep(card, stepName, touch);
+    await this.activate(this.stepAgentProfileSelect(card), touch);
+    await this.activate(this.stepProfileSessionPolicySelect(), touch);
+    await this.activate(
+      this.page
+        .getByTestId(
+          new RegExp(`^${stepId}-profile-session-policy-(complete|park_reuse|park_new)$`),
+        )
+        .filter({
+          hasText: optionName,
+        }),
+      touch,
+    );
   }
 
   /** Hover over a step node to reveal the trash button, then click it. */

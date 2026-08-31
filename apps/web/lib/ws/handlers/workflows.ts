@@ -2,6 +2,7 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import type { WorkflowPayload } from "@/lib/types/backend";
+import { normalizeWorkflowProfileSessionPolicy } from "@/lib/types/http";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function stepFromPayload(step: any) {
@@ -16,6 +17,7 @@ function stepFromPayload(step: any) {
     prompt: step.prompt,
     is_start_step: step.is_start_step,
     agent_profile_id: step.agent_profile_id,
+    profile_session_policy: normalizeWorkflowProfileSessionPolicy(step.profile_session_policy),
     wip_limit: step.wip_limit,
     pull_from_step_id: step.pull_from_step_id ?? null,
     stage_type: step.stage_type,
@@ -37,7 +39,6 @@ function applyWorkflowCreated(state: AppState, payload: WorkflowPayload): AppSta
           name: payload.name,
           hidden: isHidden,
           style: payload.style,
-          profile_session_policy: payload.profile_session_policy ?? "complete",
         },
         ...state.workflows.items,
       ],
@@ -55,8 +56,6 @@ function applyWorkflowUpdated(state: AppState, payload: WorkflowPayload): AppSta
           description: payload.description,
           prompt: payload.prompt,
           agent_profile_id: payload.agent_profile_id,
-          profile_session_policy:
-            payload.profile_session_policy ?? item.profile_session_policy ?? "complete",
           hidden: payload.hidden !== undefined ? Boolean(payload.hidden) : item.hidden,
           style: payload.style ?? item.style,
         }

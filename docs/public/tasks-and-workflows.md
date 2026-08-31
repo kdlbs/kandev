@@ -419,23 +419,6 @@ Regular Kanban does not currently expose label editing or label filters. Do not 
 
 Open **Settings → Workspaces → _workspace_ → Workflows**, then open a workflow card. A workflow has a name, an optional **Default Agent Profile**, and ordered steps. When the workflow has a default profile, users cannot choose another profile in the task-creation dialog.
 
-The **Session handling when the profile changes** setting controls profile
-handoffs for the workflow. It applies when the destination step uses a
-different fixed **Agent profile**. Consecutive steps with the same profile
-keep the current session.
-
-| Choice | Result |
-| --- | --- |
-| **Complete the previous session** | Completes the old session. A later return reuses the newest eligible nonterminal conversation when one exists; otherwise, it starts fresh. |
-| **Park and reuse the previous session** | Stops the old runtime and keeps the session available. A later return to that profile continues the newest eligible conversation. |
-| **Park and start a new session** | Stops the old runtime and keeps the session available. Each later return to that profile starts a fresh conversation. |
-
-Existing workflows use **Complete the previous session** by default. A parked
-session is not an active process. You can answer it later, or Kandev can reuse
-it when the workflow uses the matching policy. If Kandev cannot prepare the
-destination session or record the parked switch, it keeps the current session
-recoverable and reports the error.
-
 You can add, reorder, edit, and delete steps. Deleting a step that still contains tasks opens a migration flow instead of silently stranding them. A GitHub-synchronized workflow is read-only in Kandev; change its source file in the synchronized repository.
 
 ### Configure each step
@@ -445,16 +428,28 @@ New steps allow manual moves by default. **Show in command panel** also defaults
 | Setting                   | Effect                                                                                                                                                                                           |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Start step**            | Where a task is created when no agent starts with it. Only one step per workflow should be selected. If none is selected, Kandev falls back to the first positional step. This setting places tasks; it never starts agents, which is **Auto-start agent** below. |
-| Agent profile             | Overrides the workflow/task profile when entering this step. A different profile follows the workflow's session-handling policy: it reuses an eligible nonterminal session when allowed, or creates a fresh conversation. The fixed profile override and original-session options are mutually exclusive. |
+| **Agent profile and session handling** | The combined selector overrides the workflow/task profile when entering this step and chooses what happens when the effective profile changes. Consecutive steps with the same profile keep the current session. The fixed profile override and original-session options are mutually exclusive. |
 | **Override original session options** | Keeps the original conversation tab while applying model and ACP configuration rules for the task's starting agent family. The options editor appears below WIP settings only when this is checked. |
 | **Auto-start agent**      | Starts an agent whenever a task enters the step.                                                                                                                                                 |
 | **Plan mode**             | Enables plan mode when the task enters the step.                                                                                                                                                 |
-| **Reset agent context**   | Starts with fresh conversation context on entry. It is disabled when the step has a profile override because the workflow's profile-session policy controls whether that switch reuses or creates a conversation. |
+| **Reset agent context**   | Starts with fresh conversation context on entry. It is disabled when the step has a profile override because the destination step's profile-session policy controls whether that switch reuses or creates a conversation. |
 | **Allow manual move**     | Allows dragging a task into this step. Treat it as workflow UX, not as a security or approval boundary.                                                                                          |
 | **Show in command panel** | Includes tasks in this step in the default, empty-search **Cmd+K** task list. Typed task search currently searches every step and can also return archived tasks, regardless of this setting.    |
 | **Auto-archive**          | Archives inactive tasks after the configured number of hours. Enabling it starts at 24 hours; the minimum is 1.                                                                                  |
 | **WIP limit**             | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited. Overflow remains visible as queued cards; manual moves into a full step succeed and queue there. |
 | **Pull from**             | Optional one-hop feeder step. When capacity opens or eligible work arrives in the feeder, Kandev promotes queued work from the destination first, then the feeder. Direct moves and automatic transitions queue in the destination without using the feeder. A full feeder rejects new overflow creation. |
+
+For a profile change, choose one session behavior in the combined selector:
+
+- **Complete the previous session** completes the old session. A later return reuses the newest eligible nonterminal conversation when one exists; otherwise, it starts fresh.
+- **Park and reuse the previous session** stops the old runtime and keeps the session available. A later return to that profile continues the newest eligible conversation.
+- **Park and start a new session** stops the old runtime and keeps the session available. Each later return to that profile starts a fresh conversation.
+
+Existing steps use **Complete the previous session** by default. A parked session
+is not an active process. You can answer it later, or Kandev can reuse it when
+the destination step uses the matching policy. If Kandev cannot prepare the
+destination session or record the parked switch, it keeps the current session
+recoverable and reports the error.
 
 When **Reset agent context** creates a fresh ACP session, Kandev preserves the
 selected ACP model, permission mode, and provider options. It restores these

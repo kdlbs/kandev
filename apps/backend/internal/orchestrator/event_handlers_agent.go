@@ -497,6 +497,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
 	defer release()
 	lock.Lock()
+	ctx = withWorkflowProfileSwitchGuardHeld(ctx, data.SessionID, "")
 	guardLocked := true
 	defer func() {
 		if guardLocked {
@@ -1177,6 +1178,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	ctx = withWorkflowProfileSwitchGuardHeld(ctx, data.SessionID, data.AgentExecutionID)
 	if s.isCancelInFlight(data.SessionID) {
 		s.logger.Debug("deferring agent.completed while cancellation is in progress",
 			zap.String("task_id", data.TaskID),
@@ -2210,6 +2212,22 @@ func buildRecoveryActions(taskID, sessionID string, hasResumeToken, isAuthError,
 
 // handleAgentStopped handles agent stopped events (manual stop or cancellation)
 func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEventData) {
+	if data.SessionID == "" {
+		s.handleAgentStoppedLocked(ctx, data)
+		return
+	}
+	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+	s.handleAgentStoppedLocked(ctx, data)
+}
+
+// handleAgentStoppedLocked performs stopped-event reconciliation while the
+// source session's cancel-in-flight guard is held. This ordering is shared
+// with profile-switch parking so a natural stop cannot consume a park intent
+// that was written for a later teardown.
+func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.AgentEventData) {
 	s.logger.Info("handling agent stopped",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
