@@ -1187,6 +1187,17 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		if envErr != nil || inherited == nil {
 			return nil, fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsafe, e.describeInheritedEnvironmentUnavailable(ctx, task))
 		}
+		// The row surviving is not enough: archive preserves task_environments
+		// rows and only tears down their runtime resources, so a row owned by
+		// an archived task still "exists" here even though its worktree is
+		// gone. Reject on the owner's lifecycle, not just the row's presence,
+		// so this fails closed with a clear reason instead of binding to a
+		// removed workspace and surfacing a confusing failure deeper in the
+		// launch (or worse, silently reusing whatever now occupies that path).
+		if owner, ownerErr := e.repo.GetTask(ctx, inherited.TaskID); ownerErr == nil && owner != nil && owner.ArchivedAt != nil {
+			return nil, fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsafe,
+				models.DescribeInheritedEnvironmentUnavailable(inherited.TaskID, owner))
+		}
 		existingEnv = inherited
 	}
 	assignLaunchTaskEnvironmentID(session, existingEnv)

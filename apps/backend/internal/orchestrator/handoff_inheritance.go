@@ -123,21 +123,18 @@ func (s *Service) inheritFromParentEnvironment(ctx context.Context, task *v1.Tas
 //
 // The parent session's TaskEnvironmentID is a bare foreign-key-less string:
 // nothing stops the referenced task_environments row from being deleted out
-// from under it. Archiving the parent does NOT do this by itself — archive
-// preserves the task_environments row and only tears down its runtime
-// resources (worktree, container/sandbox), so an archived parent's env row
-// still exists but its worktree is gone. The row is deleted only by a
-// DELETE cascade or an explicit ResetTaskEnvironment. Either way — a row
-// genuinely deleted, or a row that survives but names a workspace with no
-// worktree left — the referenced environment is unusable, and this check
-// closes the first case; the worktree-ownership-marker error (see
-// internal/worktree) is what surfaces the second.
-// Handing back a dangling id would bind the new session to an environment
-// that no longer exists, so the id is verified against task_environments
-// before it is trusted on BOTH branches below — a lookup failure (missing
-// row, or a transient repo error) falls through past the parent_session
-// branch to the workspace_group fallback, and a dangling workspace_group id
-// falls through that too, ultimately failing closed via
+// from under it, and archiving the parent does NOT do this by itself —
+// archive preserves the task_environments row and only tears down its
+// runtime resources (worktree, container/sandbox), so an archived parent's
+// env row still exists but its worktree is gone. A definitively archived
+// parent is therefore rejected up front, before either branch below is even
+// attempted — see parentTaskArchived. The row can also be deleted outright
+// by a DELETE cascade or an explicit ResetTaskEnvironment; that case is
+// caught by verifying the id against task_environments on both branches
+// below, same as the archived-parent check: a lookup failure (missing row,
+// a transient repo error, or an unresolvable parent) falls through past the
+// parent_session branch to the workspace_group fallback, and a dangling
+// workspace_group id falls through that too, ultimately failing closed via
 // inheritFromParentEnvironment's envID == "" branch instead of silently
 // proceeding. Without the second check, the group branch would hand back
 // exactly the id the parent_session branch just rejected: an inherit_parent
@@ -147,6 +144,12 @@ func (s *Service) inheritFromParentEnvironment(ctx context.Context, task *v1.Tas
 // id right back — the same id the parent_session branch just rejected,
 // whether that id is now dangling or merely live-but-useless.
 func (s *Service) resolveInheritedEnvironment(ctx context.Context, task *v1.Task) (envID, source string) {
+	if s.parentTaskArchived(ctx, task) {
+		s.logger.Warn("inherit_parent: parent task is archived, environment inheritance unavailable",
+			zap.String("task_id", task.ID),
+			zap.String("parent_task_id", task.ParentID))
+		return "", ""
+	}
 	parentSessions, err := s.repo.ListTaskSessions(ctx, task.ParentID)
 	if err != nil {
 		s.logger.Warn("inherit_parent: list parent sessions failed",
@@ -175,6 +178,25 @@ func (s *Service) resolveInheritedEnvironment(ctx context.Context, task *v1.Task
 			zap.String("task_environment_id", envID))
 	}
 	return "", ""
+}
+
+// parentTaskArchived reports whether task's parent is definitively archived.
+// This is a positive-confirmation gate, not another fail-closed layer: a
+// lookup failure (missing row, transient repo error) returns false here so
+// resolution proceeds to the existence checks below, which already fail
+// closed via taskEnvironmentExists and the envID == "" branch when the
+// parent cannot be resolved at all. Only a confirmed ArchivedAt short-circuits
+// resolution before either branch is attempted.
+func (s *Service) parentTaskArchived(ctx context.Context, task *v1.Task) bool {
+	parent, err := s.repo.GetTask(ctx, task.ParentID)
+	if err != nil {
+		s.logger.Warn("inherit_parent: load parent task failed",
+			zap.String("task_id", task.ID),
+			zap.String("parent_task_id", task.ParentID),
+			zap.Error(err))
+		return false
+	}
+	return parent != nil && parent.ArchivedAt != nil
 }
 
 // taskEnvironmentExists reports whether id still names a live

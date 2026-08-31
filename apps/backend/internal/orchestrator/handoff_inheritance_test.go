@@ -245,6 +245,70 @@ func TestInheritFromParentEnvironment_DanglingEnvironmentFailsClosed(t *testing.
 	}
 }
 
+// REGRESSION (review round on PR #3235): archive deliberately preserves the
+// parent's task_environments row and only tears down its runtime resources,
+// so taskEnvironmentExists alone cannot detect an archived parent — the row
+// genuinely still exists. Before this fix, resolveInheritedEnvironment handed
+// that retained id straight back and inheritFromParentEnvironment bound the
+// child's session to it, deferring rejection to a much later, more confusing
+// failure inside the worktree layer (or, if that layer's checks did not
+// trigger, silently launching against a removed workspace). The check must
+// reject on the parent's own ArchivedAt state, not merely on row presence.
+func TestInheritFromParentEnvironment_RetainedEnvironmentFromArchivedParentFailsClosed(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	ws := &models.Workspace{ID: "ws1", Name: "WS", CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateWorkspace(ctx, ws)
+	wf := &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateWorkflow(ctx, wf)
+	parent := &models.Task{
+		ID: "parent", WorkflowID: "wf1", Title: "P", State: v1.TaskStateInProgress,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	_ = repo.CreateTask(ctx, parent)
+	// ArchiveTask, not a pre-set struct field: CreateTask's INSERT has no
+	// archived_at column, so setting the field before create is silently
+	// dropped and the row would come back unarchived.
+	if err := repo.ArchiveTask(ctx, "parent"); err != nil {
+		t.Fatalf("archive parent: %v", err)
+	}
+	child := &models.Task{ID: "child", ParentID: "parent", WorkflowID: "wf1", Title: "C", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateTask(ctx, child)
+	// Archive preserves the row — it is NOT dangling, unlike the sibling
+	// "DanglingEnvironmentFailsClosed" test above.
+	_ = repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-parent", TaskID: "parent",
+		ExecutorType: string(models.ExecutorTypeLocalDocker), Status: models.TaskEnvironmentStatusReady,
+	})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "ps1", TaskID: "parent", State: models.TaskSessionStateRunning,
+		IsPrimary: true, TaskEnvironmentID: "env-parent", StartedAt: now, UpdatedAt: now,
+	})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "cs1", TaskID: "child", State: models.TaskSessionStateRunning,
+		IsPrimary: true, StartedAt: now, UpdatedAt: now,
+	})
+
+	err := svc.inheritFromParentEnvironment(ctx, &v1.Task{ID: "child", ParentID: "parent"}, "cs1")
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("inheritFromParentEnvironment error = %v, want workspace reuse unsafe", err)
+	}
+	if !strings.Contains(err.Error(), "parent") || !strings.Contains(err.Error(), "archived") {
+		t.Fatalf("error %q does not name the archived parent", err.Error())
+	}
+
+	got, getErr := repo.GetTaskSession(ctx, "cs1")
+	if getErr != nil || got == nil {
+		t.Fatalf("get session: %v", getErr)
+	}
+	if got.TaskEnvironmentID != "" {
+		t.Errorf("child session must not be bound to the archived parent's retained environment; got %q", got.TaskEnvironmentID)
+	}
+}
+
 // REGRESSION: the workspace_group fallback branch of resolveInheritedEnvironment
 // used to hand back GetSharedGroupEnvironment's id without checking it still
 // names a live task_environments row — the exact dangling-id class the
