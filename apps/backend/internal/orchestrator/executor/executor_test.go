@@ -994,6 +994,49 @@ func TestLaunchPreparedSession_RejectsUnavailableInheritedEnvironment(t *testing
 	}
 }
 
+// REGRESSION: before this fix, an unavailable inherited environment always
+// produced the bare "inherited task environment is unavailable" message,
+// with no indication of why. When the task inherited from a parent that was
+// archived (archive cleanup deletes the parent's own task_environments row,
+// but never rewrites the child session's dangling TaskEnvironmentID
+// pointer), the error must name the archived parent so the failure is
+// actionable instead of a dead end.
+func TestLaunchPreparedSession_UnavailableInheritedEnvironmentNamesArchivedParent(t *testing.T) {
+	repo := newMockRepository()
+	archivedAt := time.Now()
+	repo.tasks["task-parent"] = &models.Task{ID: "task-parent", ArchivedAt: &archivedAt}
+	session := &models.TaskSession{
+		ID:                "session-child",
+		TaskID:            "task-child",
+		AgentProfileID:    "profile-123",
+		TaskEnvironmentID: "env-parent",
+		State:             models.TaskSessionStateCreated,
+		StartedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+	}
+	repo.sessions[session.ID] = session
+	repo.getTaskEnvironmentFunc = func(_ context.Context, _ string) (*models.TaskEnvironment, error) {
+		return nil, errors.New("environment row disappeared")
+	}
+
+	executor := newTestExecutor(t, &mockAgentManager{
+		launchAgentFunc: func(context.Context, *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			t.Fatal("LaunchAgent must not be called for an unavailable inherited environment")
+			return nil, nil
+		},
+	}, repo)
+
+	_, err := executor.LaunchPreparedSession(context.Background(),
+		&v1.Task{ID: session.TaskID, ParentID: "task-parent", WorkspaceID: "ws-1"}, session.ID,
+		LaunchOptions{AgentProfileID: session.AgentProfileID, Prompt: "test", StartAgent: true})
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("LaunchPreparedSession() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+	if !strings.Contains(err.Error(), "task-parent") || !strings.Contains(err.Error(), "archived") {
+		t.Fatalf("error %q does not name the archived parent", err.Error())
+	}
+}
+
 func TestLaunchPreparedSession_SessionNotBelongsToTask(t *testing.T) {
 	repo := newMockRepository()
 

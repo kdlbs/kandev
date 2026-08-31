@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,6 +88,10 @@ func TestPrepareSessionForStart_PropagatesInheritedEnvironment(t *testing.T) {
 	_ = repo.CreateTask(ctx, parent)
 	child := &models.Task{ID: "child", ParentID: "parent", WorkspaceID: "ws1", WorkflowID: "wf1", Title: "C", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now}
 	_ = repo.CreateTask(ctx, child)
+	_ = repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-parent", TaskID: "parent",
+		ExecutorType: string(models.ExecutorTypeLocalDocker), Status: models.TaskEnvironmentStatusReady,
+	})
 	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID: "ps1", TaskID: "parent", State: models.TaskSessionStateRunning,
 		IsPrimary: true, TaskEnvironmentID: "env-parent", StartedAt: now, UpdatedAt: now,
@@ -157,6 +162,10 @@ func TestInheritFromParentEnvironment_ParentSessionWins(t *testing.T) {
 	_ = repo.CreateTask(ctx, parent)
 	child := &models.Task{ID: "child", ParentID: "parent", WorkflowID: "wf1", Title: "C", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now}
 	_ = repo.CreateTask(ctx, child)
+	_ = repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-parent", TaskID: "parent",
+		ExecutorType: string(models.ExecutorTypeLocalDocker), Status: models.TaskEnvironmentStatusReady,
+	})
 	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID: "ps1", TaskID: "parent", State: models.TaskSessionStateRunning,
 		IsPrimary: true, TaskEnvironmentID: "env-parent",
@@ -172,6 +181,61 @@ func TestInheritFromParentEnvironment_ParentSessionWins(t *testing.T) {
 	got, _ := repo.GetTaskSession(ctx, "cs1")
 	if got.TaskEnvironmentID != "env-parent" {
 		t.Errorf("parent session env should win; got %q", got.TaskEnvironmentID)
+	}
+}
+
+// REGRESSION: when a parent task is archived, the archive cleanup job
+// deletes the parent's task_environments row but nothing removes or
+// updates the parent's session.TaskEnvironmentID pointer. Before this
+// fix, resolveInheritedEnvironment handed that dangling id straight back
+// and inheritFromParentEnvironment bound the child's session to an
+// environment that no longer exists — the child would only discover this
+// much later, at launch time, via an unhelpful "workspace reuse is
+// unsafe" error. The fix must fail closed here instead, and the error
+// must name the archived parent so the operator knows why.
+func TestInheritFromParentEnvironment_DanglingEnvironmentFailsClosed(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	ws := &models.Workspace{ID: "ws1", Name: "WS", CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateWorkspace(ctx, ws)
+	wf := &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateWorkflow(ctx, wf)
+	archivedAt := now
+	parent := &models.Task{
+		ID: "parent", WorkflowID: "wf1", Title: "P", State: v1.TaskStateInProgress,
+		ArchivedAt: &archivedAt, CreatedAt: now, UpdatedAt: now,
+	}
+	_ = repo.CreateTask(ctx, parent)
+	child := &models.Task{ID: "child", ParentID: "parent", WorkflowID: "wf1", Title: "C", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateTask(ctx, child)
+	// Parent session still points at "env-gone", but (as archive cleanup
+	// would leave it) no task_environments row for that id exists.
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "ps1", TaskID: "parent", State: models.TaskSessionStateRunning,
+		IsPrimary: true, TaskEnvironmentID: "env-gone", StartedAt: now, UpdatedAt: now,
+	})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "cs1", TaskID: "child", State: models.TaskSessionStateRunning,
+		IsPrimary: true, StartedAt: now, UpdatedAt: now,
+	})
+
+	err := svc.inheritFromParentEnvironment(ctx, &v1.Task{ID: "child", ParentID: "parent"}, "cs1")
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("inheritFromParentEnvironment error = %v, want workspace reuse unsafe", err)
+	}
+	if !strings.Contains(err.Error(), "parent") {
+		t.Fatalf("error %q does not name the archived parent", err.Error())
+	}
+
+	got, getErr := repo.GetTaskSession(ctx, "cs1")
+	if getErr != nil || got == nil {
+		t.Fatalf("get session: %v", getErr)
+	}
+	if got.TaskEnvironmentID != "" {
+		t.Errorf("child session must not be bound to the dangling environment; got %q", got.TaskEnvironmentID)
 	}
 }
 

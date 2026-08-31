@@ -90,7 +90,9 @@ func (s *Service) inheritFromParentEnvironment(ctx context.Context, task *v1.Tas
 	}
 	envID, source := s.resolveInheritedEnvironment(ctx, task)
 	if envID == "" {
-		return fmt.Errorf("%w: parent workspace is unavailable", models.ErrWorkspaceReuseUnsafe)
+		parent, _ := s.repo.GetTask(ctx, task.ParentID)
+		return fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsafe,
+			models.DescribeInheritedEnvironmentUnavailable(task.ParentID, parent))
 	}
 	target, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || target == nil {
@@ -118,6 +120,16 @@ func (s *Service) inheritFromParentEnvironment(ctx context.Context, task *v1.Tas
 // what lets a child task re-launch after the parent's session has been
 // stopped — without it, the child would silently launch into a fresh env
 // and the workspace inheritance contract would break.
+//
+// The parent session's TaskEnvironmentID is a bare foreign-key-less string:
+// nothing stops the referenced task_environments row from being deleted out
+// from under it (e.g. archive cleanup removing the parent's own workspace).
+// Handing back a dangling id would bind the new session to an environment
+// that no longer exists, so the id is verified against task_environments
+// before it is trusted — a lookup failure (missing row, or a transient repo
+// error) falls through to the workspace_group fallback rather than being
+// returned, and ultimately fails closed via inheritFromParentEnvironment's
+// envID == "" branch instead of silently proceeding.
 func (s *Service) resolveInheritedEnvironment(ctx context.Context, task *v1.Task) (envID, source string) {
 	parentSessions, err := s.repo.ListTaskSessions(ctx, task.ParentID)
 	if err != nil {
@@ -126,7 +138,13 @@ func (s *Service) resolveInheritedEnvironment(ctx context.Context, task *v1.Task
 			zap.String("parent_task_id", task.ParentID),
 			zap.Error(err))
 	} else if parent := findPrimarySession(parentSessions); parent != nil && parent.TaskEnvironmentID != "" {
-		return parent.TaskEnvironmentID, "parent_session"
+		if s.taskEnvironmentExists(ctx, parent.TaskEnvironmentID) {
+			return parent.TaskEnvironmentID, "parent_session"
+		}
+		s.logger.Warn("inherit_parent: parent session environment no longer exists",
+			zap.String("task_id", task.ID),
+			zap.String("parent_task_id", task.ParentID),
+			zap.String("task_environment_id", parent.TaskEnvironmentID))
 	}
 	if s.workspaceMaterializer == nil {
 		return "", ""
@@ -135,6 +153,15 @@ func (s *Service) resolveInheritedEnvironment(ctx context.Context, task *v1.Task
 		return envID, "workspace_group"
 	}
 	return "", ""
+}
+
+// taskEnvironmentExists reports whether id still names a live
+// task_environments row. Any error (not-found or transient) is treated as
+// "does not exist" so callers fail closed rather than trusting a reference
+// that could not be positively confirmed.
+func (s *Service) taskEnvironmentExists(ctx context.Context, id string) bool {
+	env, err := s.repo.GetTaskEnvironment(ctx, id)
+	return err == nil && env != nil
 }
 
 // inheritFromSharedGroup propagates the workspace group's materialized

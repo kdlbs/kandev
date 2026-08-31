@@ -1183,12 +1183,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// child task id, so without this fallback the launch path creates a
 	// fresh worktree and the inheritance contract silently breaks.
 	if existingEnv == nil && session.TaskEnvironmentID != "" {
-		inherited, err := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
-		if err != nil {
-			return nil, fmt.Errorf("%w: inherited task environment is unavailable", models.ErrWorkspaceReuseUnsafe)
-		}
-		if inherited == nil {
-			return nil, fmt.Errorf("%w: inherited task environment is unavailable", models.ErrWorkspaceReuseUnsafe)
+		inherited, envErr := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+		if envErr != nil || inherited == nil {
+			return nil, fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsafe, e.describeInheritedEnvironmentUnavailable(ctx, task))
 		}
 		existingEnv = inherited
 	}
@@ -1607,6 +1604,22 @@ func bindSessionToTaskEnvironment(session *models.TaskSession, env *models.TaskE
 	}
 	session.TaskEnvironmentID = env.ID
 	session.WorkspacePath = env.WorkspacePath
+}
+
+// describeInheritedEnvironmentUnavailable builds a diagnostic reason for a
+// missing inherited task_environments row (session.TaskEnvironmentID no
+// longer resolves). For an inherit_parent task it names the parent and, when
+// the parent was archived, calls that out explicitly — archive cleanup
+// removes the parent's own task_environments row but leaves the parent's
+// session.TaskEnvironmentID pointer in place, so a child that inherited it
+// only finds out here. shared_group members have no single parent to name,
+// so they get a generic message instead.
+func (e *Executor) describeInheritedEnvironmentUnavailable(ctx context.Context, task *v1.Task) string {
+	if task == nil || task.ParentID == "" {
+		return "inherited task environment is unavailable: shared workspace group environment could not be resolved"
+	}
+	parent, _ := e.repo.GetTask(ctx, task.ParentID)
+	return models.DescribeInheritedEnvironmentUnavailable(task.ParentID, parent)
 }
 
 func assignLaunchTaskEnvironmentID(session *models.TaskSession, existingEnv *models.TaskEnvironment) {
