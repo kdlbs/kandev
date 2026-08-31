@@ -5,6 +5,7 @@ package e2e
 import (
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 )
@@ -21,10 +22,23 @@ func acpCommand(t *testing.T, a agents.Agent) string {
 		t.Fatalf("BuildCommand returned an empty argv")
 	}
 	for _, tok := range argv {
-		if strings.ContainsAny(tok, " \t\n") {
+		if hasUnicodeWhitespace(tok) {
 			t.Fatalf("BuildCommand argv token %q contains whitespace; it cannot round-trip through the string-shaped AgentSpec.Command", tok)
 		}
 	}
 
 	return strings.Join(argv, " ")
+}
+
+// hasUnicodeWhitespace matches the full unicode.IsSpace set, mirroring the
+// splitter (strings.Fields) that ParseCommand and requireBinary use in
+// harness.go so this guard cannot miss a token that would still round-trip
+// incorrectly.
+func hasUnicodeWhitespace(s string) bool {
+	for _, r := range s {
+		if unicode.IsSpace(r) {
+			return true
+		}
+	}
+	return false
 }
