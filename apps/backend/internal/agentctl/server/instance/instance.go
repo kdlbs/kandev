@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -178,6 +179,10 @@ type CreateRequest struct {
 	// StripEnv lists environment variables to strip from the agent's child
 	// process environment entirely (not just set to empty).
 	StripEnv []string `json:"strip_env,omitempty"`
+
+	// ProviderGatewayAuth, when set, authenticates the ACP agent against an
+	// OpenAI-compatible gateway right after initialize.
+	ProviderGatewayAuth *acpprovider.GatewayAuth `json:"provider_gateway_auth,omitempty"`
 
 	// BaseBranches maps RepositoryName → base branch ref for per-repo diff
 	// stats. The empty key "" applies to the root / single-repo tracker.

@@ -867,6 +867,20 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	if profileInfo != nil {
 		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
 	}
+
+	providerGatewayAuth, providerKeyEnvVar, providerKey, err := m.resolveProviderGatewayAuth(ctx, profileInfo, agentConfig)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if providerKey != "" && providerKeyEnvVar != "" {
+		if env == nil {
+			env = map[string]string{}
+		}
+		// The profile-declared provider key wins over any inherited value so a
+		// stale shell-exported OPENAI_API_KEY cannot shadow it.
+		env[providerKeyEnvVar] = providerKey
+	}
+
 	execReq := &ExecutorCreateRequest{
 		InstanceID:                     executionID,
 		TaskID:                         reqWithWorktree.TaskID,
@@ -898,6 +912,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		RemoteContributions:            remoteContributions,
 		ContributionDestinations:       contributionDestinations,
 		ComparisonTargets:              comparisonTargets,
+		ProviderGatewayAuth:            providerGatewayAuth,
 	}
 
 	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)

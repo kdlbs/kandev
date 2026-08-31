@@ -184,6 +184,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		McpProfile:               req.McpProfile,
 		RequiresProcessKill:      req.RequiresProcessKill,
 		StripEnv:                 req.StripEnv,
+		ProviderGatewayAuth:      req.ProviderGatewayAuth,
 		BaseBranches:             req.BaseBranches,
 		ComparisonTargets:        req.ComparisonTargets,
 		RemoteContributions:      req.RemoteContributions,

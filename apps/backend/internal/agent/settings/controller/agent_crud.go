@@ -33,6 +33,7 @@ func (c *Controller) GetAgent(ctx context.Context, id string) (*dto.AgentDTO, er
 	}
 	c.applyCapabilityStatus(&result, agent.Name)
 	c.applyBillingType(&result, agent.Name)
+	c.applyProviderSupport(&result, agent.Name)
 	return &result, nil
 }
 
@@ -53,6 +54,7 @@ func (c *Controller) ListAgents(ctx context.Context) (*dto.ListAgentsResponse, e
 		}
 		c.applyCapabilityStatus(&entry, agent.Name)
 		c.applyBillingType(&entry, agent.Name)
+		c.applyProviderSupport(&entry, agent.Name)
 		payload = append(payload, entry)
 	}
 	c.sortAgentsByDisplayOrder(payload)
@@ -213,6 +215,16 @@ func (c *Controller) applyBillingType(d *dto.AgentDTO, agentName string) {
 	bt := string(ag.BillingType())
 	for i := range d.Profiles {
 		d.Profiles[i].BillingType = bt
+	}
+}
+
+// applyProviderSupport populates the computed ProviderSupported flag on each
+// profile in the DTO from the registered agent implementation. Mirrors
+// applyBillingType — a read-time capability lookup, never persisted.
+func (c *Controller) applyProviderSupport(d *dto.AgentDTO, agentName string) {
+	supported := c.providerSupported(agentName)
+	for i := range d.Profiles {
+		d.Profiles[i].ProviderSupported = supported
 	}
 }
 

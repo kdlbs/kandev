@@ -27,6 +27,7 @@ import (
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/task/models"
@@ -265,6 +266,10 @@ type InstanceConfig struct {
 	// StripEnv lists environment variables to strip from the agent's child
 	// process environment entirely (not just set to empty).
 	StripEnv []string
+
+	// ProviderGatewayAuth authenticates the ACP agent against an
+	// OpenAI-compatible gateway right after initialize.
+	ProviderGatewayAuth *acpprovider.GatewayAuth
 
 	// BaseBranches maps RepositoryName → base branch ref for per-repo diff
 	// stats. The empty key "" applies to the root / single-repo tracker.
@@ -530,6 +535,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if len(overrides.StripEnv) > 0 {
 		cfg.StripEnv = overrides.StripEnv
 	}
+	if overrides.ProviderGatewayAuth != nil {
+		cfg.ProviderGatewayAuth = overrides.ProviderGatewayAuth
+	}
 	if len(overrides.BaseBranches) > 0 {
 		cfg.BaseBranches = overrides.BaseBranches
 	}
@@ -586,6 +594,7 @@ type InstanceOverrides struct {
 	McpProfile               *mcpprofile.Context
 	RequiresProcessKill      bool
 	StripEnv                 []string
+	ProviderGatewayAuth      *acpprovider.GatewayAuth
 	BaseBranches             map[string]string
 	ComparisonTargets        map[string]models.ComparisonTarget
 	RemoteContributions      map[string]models.RemoteContribution

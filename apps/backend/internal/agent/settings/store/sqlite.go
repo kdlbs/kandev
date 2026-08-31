@@ -106,6 +106,9 @@ func (r *sqliteRepository) initSchema() error {
 		settings TEXT NOT NULL DEFAULT '{}',
 		permissions TEXT NOT NULL DEFAULT '{}',
 		command_prefix TEXT NOT NULL DEFAULT '',
+		provider_kind TEXT NOT NULL DEFAULT '',
+		provider_base_url TEXT NOT NULL DEFAULT '',
+		provider_api_key_secret_id TEXT NOT NULL DEFAULT '',
 		FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
 	);
 
@@ -189,6 +192,13 @@ func (r *sqliteRepository) initSchema() error {
 	// recreates agent_profiles would otherwise lose columns added before it.
 	r.migrate.Apply("agent_profiles.fallback_model", `ALTER TABLE agent_profiles ADD COLUMN fallback_model TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("agent_profiles.auto_fallback", `ALTER TABLE agent_profiles ADD COLUMN auto_fallback INTEGER NOT NULL DEFAULT 0`)
+
+	// OpenAI-compatible providers: added after the table-recreation block for
+	// the same reason as command_prefix / fallback_model — a legacy DB that
+	// recreates agent_profiles copies only pre-existing columns.
+	r.migrate.Apply("agent_profiles.provider_kind", `ALTER TABLE agent_profiles ADD COLUMN provider_kind TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("agent_profiles.provider_base_url", `ALTER TABLE agent_profiles ADD COLUMN provider_base_url TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("agent_profiles.provider_api_key_secret_id", `ALTER TABLE agent_profiles ADD COLUMN provider_api_key_secret_id TEXT NOT NULL DEFAULT ''`)
 
 	return nil
 }
@@ -878,7 +888,8 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			max_concurrent_sessions, cooldown_sec, skip_idle_runs,
 			consecutive_failures, failure_threshold,
 			executor_preference, budget_monthly_cents, settings, permissions,
-			command_prefix, fallback_model, auto_fallback
+			command_prefix, fallback_model, auto_fallback,
+			provider_kind, provider_base_url, provider_api_key_secret_id
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?,
@@ -889,6 +900,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			?, ?, ?,
 			?, ?,
 			?, ?, ?, ?,
+			?, ?, ?,
 			?, ?, ?
 		)
 	`),
@@ -906,6 +918,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 		profile.CommandPrefix,
 		profile.FallbackModel,
 		dialect.BoolToInt(profile.AutoFallback),
+		profile.ProviderKind, profile.ProviderBaseURL, profile.ProviderAPIKeySecretID,
 	)
 	return err
 }
@@ -1141,7 +1154,8 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 			consecutive_failures = ?, failure_threshold = ?,
 			executor_preference = ?,
 			budget_monthly_cents = ?, settings = ?, permissions = ?,
-			command_prefix = ?, fallback_model = ?, auto_fallback = ?
+			command_prefix = ?, fallback_model = ?, auto_fallback = ?,
+			provider_kind = ?, provider_base_url = ?, provider_api_key_secret_id = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`), profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
@@ -1158,6 +1172,7 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 		profile.CommandPrefix,
 		profile.FallbackModel,
 		dialect.BoolToInt(profile.AutoFallback),
+		profile.ProviderKind, profile.ProviderBaseURL, profile.ProviderAPIKeySecretID,
 		profile.ID)
 	if err != nil {
 		return err
@@ -1228,7 +1243,9 @@ const agentProfileSelectColumns = `
 		COALESCE(budget_monthly_cents, 0),
 		COALESCE(settings, '{}'), COALESCE(permissions, '{}'),
 		COALESCE(command_prefix, ''),
-		COALESCE(fallback_model, ''), COALESCE(auto_fallback, 0)
+		COALESCE(fallback_model, ''), COALESCE(auto_fallback, 0),
+		COALESCE(provider_kind, ''), COALESCE(provider_base_url, ''),
+		COALESCE(provider_api_key_secret_id, '')
 	FROM agent_profiles`
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
@@ -1451,6 +1468,9 @@ func scanAgentProfile(scanner interface {
 		&profile.CommandPrefix,
 		&profile.FallbackModel,
 		&autoFallback,
+		&profile.ProviderKind,
+		&profile.ProviderBaseURL,
+		&profile.ProviderAPIKeySecretID,
 	); err != nil {
 		return nil, err
 	}
