@@ -83,6 +83,7 @@ type UpdateUserSettingsRequest struct {
 	ThreadActiveViewID                *string
 	ThreadViewDraft                   **models.ThreadViewDraft
 	SidebarTaskPrefs                  *models.SidebarTaskPrefs
+	SidebarTaskColorAutomation        *models.SidebarTaskColorAutomation
 	TaskCreateLastUsed                *models.TaskCreateLastUsed
 	JiraSavedViews                    **json.RawMessage
 	JiraTaskPresets                   **json.RawMessage
@@ -225,6 +226,9 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 		if err := applyThreadViewState(settings, req); err != nil {
 			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 		}
+		if err := applySidebarTaskColorAutomation(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
 		if err := applyUserPreferenceBlobs(settings, req); err != nil {
 			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 		}
@@ -234,6 +238,31 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 		return nil, err
 	}
 	return settings, nil
+}
+
+// applySidebarTaskColorAutomation replaces the complete personal automatic
+// color rule set after validating its discriminated target and output shape.
+func applySidebarTaskColorAutomation(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.SidebarTaskColorAutomation == nil {
+		return nil
+	}
+	value := *req.SidebarTaskColorAutomation
+	if err := models.ValidateSidebarTaskColorAutomation(value); err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("automatic colors must be serializable: %w", err)
+	}
+	var replacement models.SidebarTaskColorAutomation
+	if err := json.Unmarshal(encoded, &replacement); err != nil {
+		return fmt.Errorf("automatic colors must be serializable: %w", err)
+	}
+	if replacement.Rules == nil {
+		replacement.Rules = []models.SidebarTaskColorRule{}
+	}
+	settings.SidebarTaskColorAutomation = replacement
+	return nil
 }
 
 // updateUserSettingsCAS applies a full-blob user-settings write under
@@ -973,6 +1002,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"thread_active_view_id":                    settings.ThreadActiveViewID,
 		"thread_view_draft":                        settings.ThreadViewDraft,
 		"sidebar_task_prefs":                       settings.SidebarTaskPrefs,
+		"sidebar_task_color_automation":            settings.SidebarTaskColorAutomation,
 		"task_create_last_used":                    settings.TaskCreateLastUsed,
 		"jira_saved_views":                         settings.JiraSavedViews,
 		"jira_task_presets":                        settings.JiraTaskPresets,

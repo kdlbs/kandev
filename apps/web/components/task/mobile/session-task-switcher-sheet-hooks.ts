@@ -55,6 +55,9 @@ export function useSheetData(workspaceId: string | null) {
   const steps = useAppStore((state) => state.kanban.steps);
   const workspaces = useAppStore((state) => state.workspaces.items);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const automaticColorSettings = useAppStore(
+    (state) => state.userSettings.sidebarTaskColorAutomation,
+  );
   const acknowledgedAgentErrors = useAppStore((state) => state.acknowledgedAgentErrors);
   const dismissedAgentErrors = useAppStore((state) => state.dismissedAgentErrors);
 
@@ -62,6 +65,11 @@ export function useSheetData(workspaceId: string | null) {
 
   const tasksWithRepositories = useMemo(() => {
     const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
+    const repositoriesById = new Map(
+      Object.values(repositoriesByWorkspace)
+        .flat()
+        .map((repo: Repository) => [repo.id, repo]),
+    );
     const ctx: SheetItemCtx = {
       repositoryPathsById: new Map(
         repositories.map((repo: Repository) => [repo.id, repositorySlug(repo)]),
@@ -71,6 +79,10 @@ export function useSheetData(workspaceId: string | null) {
       acknowledgedAgentErrors,
       dismissedAgentErrors,
       wipQueueByTaskId,
+      workspaceId: workspaceId ?? undefined,
+      repositoriesById,
+      stepColorById: new Map(allSteps.map((step) => [step.id, step.color])),
+      automaticColorSettings,
     };
     return allTasks.map((task) => toSheetItem(task, ctx));
   }, [
@@ -82,6 +94,7 @@ export function useSheetData(workspaceId: string | null) {
     acknowledgedAgentErrors,
     dismissedAgentErrors,
     wipQueueByTaskId,
+    automaticColorSettings,
   ]);
 
   const dialogSteps = useMemo(
@@ -263,6 +276,7 @@ function buildKanbanTaskUpsert(
   const taskSessionId = meta?.taskSessionId ?? null;
   return {
     id: task.id,
+    workspaceId: task.workspace_id,
     parentTaskId: task.parent_id ?? undefined,
     workspaceMode: workspaceModeFromMetadata(task.metadata),
     workflowId: task.workflow_id,
@@ -271,11 +285,14 @@ function buildKanbanTaskUpsert(
     description: task.description,
     position: task.position ?? 0,
     state: task.state,
+    priority: task.priority,
+    origin: task.origin,
     repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
     repositories: mapTaskRepositories(task.repositories),
     updatedAt: task.updated_at,
     ...mergeSessionFields(task, existing, taskSessionId),
     primaryExecutorId: task.primary_executor_id ?? undefined,
+    primaryExecutorProfileId: task.primary_executor_profile_id ?? undefined,
     primaryExecutorType: task.primary_executor_type ?? undefined,
     primaryExecutorName: task.primary_executor_name ?? undefined,
     isRemoteExecutor: task.is_remote_executor ?? false,

@@ -42,6 +42,36 @@ func TestMapUserSettingsStateIncludesTasksListShowDetails(t *testing.T) {
 	}
 }
 
+func TestMapUserSettingsStateIncludesSidebarTaskColorAutomation(t *testing.T) {
+	automation := usermodels.SidebarTaskColorAutomation{
+		Enabled: true,
+		Rules: []usermodels.SidebarTaskColorRule{{
+			ID:      "failed-red",
+			Enabled: true,
+			Condition: usermodels.SidebarTaskColorCondition{
+				Dimension: usermodels.SidebarTaskColorDimensionTaskState,
+				Value:     "FAILED",
+				Label:     "Failed",
+			},
+			Output: usermodels.SidebarTaskColorOutput{
+				Kind:  usermodels.SidebarTaskColorOutputFixed,
+				Color: "red",
+			},
+		}},
+	}
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{SidebarTaskColorAutomation: automation},
+	}, "workspace-1")
+
+	got, ok := state["sidebarTaskColorAutomation"].(usermodels.SidebarTaskColorAutomation)
+	if !ok || !got.Enabled || len(got.Rules) != 1 || got.Rules[0].ID != "failed-red" {
+		t.Fatalf(
+			"sidebarTaskColorAutomation = %#v, want the persisted rule set",
+			state["sidebarTaskColorAutomation"],
+		)
+	}
+}
+
 // TestMapUserSettingsStateIncludesNormalizedMCPTaskAgentProfileDefault verifies boot state normalizes the MCP task agent profile default.
 func TestMapUserSettingsStateIncludesNormalizedMCPTaskAgentProfileDefault(t *testing.T) {
 	state := mapUserSettingsState(userdto.UserSettingsResponse{

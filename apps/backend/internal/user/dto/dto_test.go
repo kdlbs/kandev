@@ -16,6 +16,30 @@ func TestFromUserSettingsIncludesAtomicRevision(t *testing.T) {
 	}
 }
 
+func TestSidebarTaskColorAutomationDTOContract(t *testing.T) {
+	value := models.SidebarTaskColorAutomation{
+		Enabled: true,
+		Rules: []models.SidebarTaskColorRule{{
+			ID:        "blocked",
+			Enabled:   true,
+			Condition: models.SidebarTaskColorCondition{Dimension: models.SidebarTaskColorDimensionTaskState, Value: "BLOCKED", Label: "Blocked"},
+			Output:    models.SidebarTaskColorOutput{Kind: models.SidebarTaskColorOutputFixed, Color: "red"},
+		}},
+	}
+	got := FromUserSettings(&models.UserSettings{SidebarTaskColorAutomation: value})
+	if !reflect.DeepEqual(got.SidebarTaskColorAutomation, value) {
+		t.Fatalf("SidebarTaskColorAutomation = %#v, want %#v", got.SidebarTaskColorAutomation, value)
+	}
+
+	var request UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"sidebar_task_color_automation":{"enabled":true,"rules":[]}}`), &request); err != nil {
+		t.Fatalf("decode automatic color patch: %v", err)
+	}
+	if request.SidebarTaskColorAutomation == nil || !request.SidebarTaskColorAutomation.Enabled {
+		t.Fatalf("SidebarTaskColorAutomation patch = %#v, want explicit enabled value", request.SidebarTaskColorAutomation)
+	}
+}
+
 // TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences verifies the patch request exposes the Azure DevOps browse preferences field.
 func TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences(t *testing.T) {
 	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("AzureDevOpsBrowsePreferences")

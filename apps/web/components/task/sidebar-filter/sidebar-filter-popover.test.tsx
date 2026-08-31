@@ -30,10 +30,17 @@ const state = {
   discardSidebarDraft: vi.fn(),
   deleteSidebarView: vi.fn(),
   renameSidebarView: vi.fn(),
+  workspaces: { activeId: null },
+  kanbanMulti: { snapshots: {} },
+  workflows: { items: [] },
+  agentProfiles: { items: [] },
+  userSettings: { sidebarTaskColorAutomation: { enabled: false, rules: [] } },
+  setUserSettings: vi.fn(),
 };
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (value: typeof state) => unknown) => selector(state),
+  useAppStoreApi: () => ({ getState: () => state }),
 }));
 
 afterEach(() => {

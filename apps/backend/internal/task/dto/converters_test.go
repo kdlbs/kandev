@@ -80,6 +80,44 @@ func TestFromTaskSerializesAutopilot(t *testing.T) {
 	}
 }
 
+func TestFromTaskWithSessionInfoSerializesExecutorProfileID(t *testing.T) {
+	profileID := "executor-profile-1"
+	task := &models.Task{ID: "task-executor-profile"}
+
+	got := FromTaskWithSessionInfo(
+		task,
+		nil,
+		nil,
+		models.ReviewStatusNone,
+		nil,
+		&profileID,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+
+	if got.PrimaryExecutorProfileID == nil || *got.PrimaryExecutorProfileID != profileID {
+		t.Fatalf("PrimaryExecutorProfileID = %v, want %q", got.PrimaryExecutorProfileID, profileID)
+	}
+}
+
+func TestFromTaskUsesExecutorProfileIDMetadata(t *testing.T) {
+	task := &models.Task{
+		ID: "task-executor-profile-metadata",
+		Metadata: map[string]interface{}{
+			models.MetaKeyExecutorProfileID: "executor-profile-2",
+		},
+	}
+
+	got := FromTask(task)
+	if got.PrimaryExecutorProfileID == nil || *got.PrimaryExecutorProfileID != "executor-profile-2" {
+		t.Fatalf("PrimaryExecutorProfileID = %v, want metadata value", got.PrimaryExecutorProfileID)
+	}
+}
+
 func TestFromWorkflowStep_PreservesWIPFields(t *testing.T) {
 	step := &wfmodels.WorkflowStep{
 		ID:             "step-1",

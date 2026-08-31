@@ -9,6 +9,7 @@ import type {
   Executor,
   NotificationProvider,
   SavedLayout,
+  SidebarTaskColorAutomation,
   ToolStatus,
   LspStatusLocation,
   LastSeenDisplay,
@@ -434,6 +435,7 @@ export type UserSettingsState = {
   threadActiveViewId: string | null;
   threadViewDraft: ThreadViewDraft | null;
   sidebarTaskPrefs: SidebarTaskPrefsState;
+  sidebarTaskColorAutomation: SidebarTaskColorAutomation;
   taskCreateLastUsed: TaskCreateLastUsedState;
   jiraSavedViews: unknown;
   jiraTaskPresets: unknown;

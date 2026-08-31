@@ -19,8 +19,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { IconChevronDown, IconGripVertical } from "@tabler/icons-react";
-import { Button } from "@kandev/ui/button";
+import { IconGripVertical } from "@tabler/icons-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
 import { useTranslation } from "react-i18next";
@@ -31,6 +30,7 @@ import {
   type SidebarTaskRowPresentation,
   type SidebarTaskRowTrailing,
 } from "@/lib/state/slices/ui/sidebar-task-row-presentation";
+import { SidebarSettingsDisclosure } from "./sidebar-settings-disclosure";
 
 const DETAIL_LABEL_KEYS: Record<SidebarTaskRowDetail, string> = {
   relative_time: "task:taskRowRelativeTime",
@@ -308,44 +308,28 @@ export function TaskRowSettings({
   onChange: (value: SidebarTaskRowPresentation) => void;
 }) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
   const detailCountLabel = t("task:taskRowDetailsCount", {
     count: value.visibleDetails.length,
   });
   const trailingLabel = t(TRAILING_LABEL_KEYS[value.trailing]);
 
   return (
-    <section className="border-t px-2 pb-2 pt-2" data-testid="task-row-settings">
-      <Button
-        type="button"
-        variant="ghost"
-        className="flex min-h-11 w-full items-center justify-between px-1 text-left"
-        aria-expanded={expanded}
-        aria-controls="task-row-settings-content"
-        data-testid="task-row-settings-toggle"
-        onClick={() => setExpanded((current) => !current)}
-      >
-        <span className="min-w-0">
-          <span className="block text-[11px] font-medium uppercase leading-none tracking-wide text-muted-foreground">
-            {t("task:taskRow")}
+    <SidebarSettingsDisclosure
+      title={t("task:taskRow")}
+      summary={
+        <span className="flex min-w-0 items-center gap-1">
+          <span className="truncate">
+            {value.detailsEnabled ? detailCountLabel : t("task:taskRowDetailsHidden")}
           </span>
-          <span className="mt-1 block truncate text-xs text-muted-foreground">
-            {value.detailsEnabled ? detailCountLabel : t("task:taskRowDetailsHidden")} {" · "}
-            {trailingLabel}
-          </span>
+          <span className="truncate">{trailingLabel}</span>
         </span>
-        <IconChevronDown
-          className={`size-4 shrink-0 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`}
-          aria-hidden="true"
-        />
-      </Button>
-
-      {expanded && (
-        <div id="task-row-settings-content" className="space-y-2 pt-1">
-          <TaskRowDetailsSection value={value} sort={sort} onChange={onChange} />
-          <TaskRowTrailingSelect value={value} onChange={onChange} />
-        </div>
-      )}
-    </section>
+      }
+      testId="task-row-settings"
+      className="border-t"
+      contentClassName="space-y-2 pt-1"
+    >
+      <TaskRowDetailsSection value={value} sort={sort} onChange={onChange} />
+      <TaskRowTrailingSelect value={value} onChange={onChange} />
+    </SidebarSettingsDisclosure>
   );
 }

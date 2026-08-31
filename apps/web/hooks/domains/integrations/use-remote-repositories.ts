@@ -36,6 +36,7 @@ export type UseRemoteRepositoriesResult = {
   error: Error | null;
   unavailable: boolean;
   search: (query: string) => void;
+  refresh?: () => void;
   matchesURL?: (url: string) => boolean;
 };
 
@@ -214,6 +215,7 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
   const [error, setError] = useState<Error | null>(null);
   const [builtInProviders, setBuiltInProviders] = useState<RemoteRepositoryProvider[]>([]);
   const [pluginProviderIds, setPluginProviderIds] = useState<RemoteRepositoryProvider[]>([]);
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const pluginGeneration = useRef(0);
   const registry = usePluginRegistry();
   const registryVersion = registry.getVersion();
@@ -243,7 +245,7 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [refreshVersion, workspaceId]);
 
   useEffect(() => {
     setPluginRepos([]);
@@ -268,7 +270,7 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
         if (generation === pluginGeneration.current) setPluginsLoading(false);
       });
     return () => controller.abort();
-  }, [workspaceId, pluginProviders, debouncedQuery]);
+  }, [debouncedQuery, pluginProviders, refreshVersion, workspaceId]);
 
   const repos = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -282,6 +284,7 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
   );
   const loading = builtInsLoading || pluginsLoading;
   const search = useCallback((value: string) => setQuery(value), []);
+  const refresh = useCallback(() => setRefreshVersion((version) => version + 1), []);
   const matchesURL = useCallback(
     (url: string) =>
       looksLikeSupportedRemoteURL(url) ||
@@ -295,6 +298,7 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
     error,
     unavailable: !loading && availableProviders.length === 0,
     search,
+    refresh,
     matchesURL,
   };
 }

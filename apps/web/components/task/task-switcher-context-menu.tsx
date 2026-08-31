@@ -307,7 +307,13 @@ function SingleSelectionMenuItems({
         onArchiveTask={onArchiveTask}
         onBulkArchive={onBulkArchive}
       />
-      {!task.isArchived && <TaskColorMenu taskId={task.id} disabled={isDeleting} />}
+      {!task.isArchived && (
+        <TaskColorMenu
+          taskId={task.id}
+          disabled={isDeleting}
+          automaticColorSource={task.automaticColorSource}
+        />
+      )}
       <TaskNestContextMenuItems task={task} disabled={isDeleting} />
       <TaskPluginPrimaryMenuItems task={task} disabled={isDeleting} />
       <TaskPluginLinkMenu
