@@ -100,7 +100,7 @@ func TestInjectSkills_AddsFrontmatterWhenMissing(t *testing.T) {
 		t.Fatalf("injectSkills: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(worktree, ".agents", "skills", "kandev-kandev-team-admin", "SKILL.md"))
+	data, err := os.ReadFile(filepath.Join(worktree, ".agents", "skills", "kandev-team-admin", "SKILL.md"))
 	if err != nil {
 		t.Fatalf("read SKILL.md: %v", err)
 	}
@@ -110,6 +110,41 @@ func TestInjectSkills_AddsFrontmatterWhenMissing(t *testing.T) {
 	}
 	if !strings.Contains(got, "# Team\n\nUse the team commands.") {
 		t.Errorf("SKILL.md missing original body:\n%s", got)
+	}
+}
+
+func TestDirName_IsIdempotentOnKandevPrefix(t *testing.T) {
+	cases := []struct {
+		slug string
+		want string
+	}{
+		{slug: "code-review", want: "kandev-code-review"},
+		{slug: "kandev-task-ops", want: "kandev-task-ops"},
+	}
+	for _, tc := range cases {
+		if got := DirName(tc.slug); got != tc.want {
+			t.Errorf("DirName(%q) = %q, want %q", tc.slug, got, tc.want)
+		}
+	}
+}
+
+func TestInjectSkills_DoesNotDoublePrefixAlreadyPrefixedSlug(t *testing.T) {
+	worktree := t.TempDir()
+	ensureGit(t, worktree)
+
+	if err := injectSkills(worktree, ".agents/skills", []Skill{
+		{Slug: "kandev-protocol", Content: "# Protocol"},
+	}); err != nil {
+		t.Fatalf("injectSkills: %v", err)
+	}
+
+	path := filepath.Join(worktree, ".agents", "skills", "kandev-protocol", "SKILL.md")
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("expected single-prefixed dir %s: %v", path, err)
+	}
+	doublePrefixed := filepath.Join(worktree, ".agents", "skills", "kandev-kandev-protocol")
+	if _, err := os.Stat(doublePrefixed); !os.IsNotExist(err) {
+		t.Errorf("skill dir should not be double-prefixed: %s", doublePrefixed)
 	}
 }
 

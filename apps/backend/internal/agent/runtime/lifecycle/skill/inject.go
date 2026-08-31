@@ -48,7 +48,7 @@ func injectSkills(worktreePath, projectSkillDir string, skills []Skill) error {
 		if !isValidSlug(sk.Slug) {
 			continue
 		}
-		dir := filepath.Join(skillsDir, "kandev-"+sk.Slug)
+		dir := filepath.Join(skillsDir, DirName(sk.Slug))
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("mkdir skill %s: %w", sk.Slug, err)
 		}
@@ -213,9 +213,23 @@ func resolveGitDir(worktreePath string) (string, error) {
 // SpritesProjectSkillPath returns the on-sprite path where a single
 // skill's SKILL.md must be uploaded for the given agent's project
 // skill dir. The sprite's CWD is always /workspace, so this is just
-// /workspace/<projectSkillDir>/kandev-<slug>/SKILL.md.
+// /workspace/<projectSkillDir>/<DirName(slug)>/SKILL.md.
 func SpritesProjectSkillPath(projectSkillDir, slug string) string {
-	return "/workspace/" + projectSkillDir + "/kandev-" + slug + "/SKILL.md"
+	return "/workspace/" + projectSkillDir + "/" + DirName(slug) + "/SKILL.md"
+}
+
+// DirName returns the on-disk directory name for a skill slug within a
+// project skill directory. The "kandev-" prefix marks Kandev-owned
+// directories so cleanup can safely remove them without touching a
+// user's own skills (see cleanKandevSkills). Applying it is idempotent:
+// a slug that already carries the prefix (bundled system skills are
+// slugged "kandev-*" at source) is not prefixed a second time, which
+// would otherwise leave the skill unloadable under its declared name.
+func DirName(slug string) string {
+	if strings.HasPrefix(slug, "kandev-") {
+		return slug
+	}
+	return "kandev-" + slug
 }
 
 func renderSkillMarkdown(sk Skill) string {

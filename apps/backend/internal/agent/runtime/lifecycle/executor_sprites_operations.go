@@ -18,6 +18,7 @@ import (
 	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/scriptengine"
 )
@@ -120,12 +121,12 @@ func (r *SpritesExecutor) uploadSkillFiles(
 	// init in /workspace just keeps the script's failures non-fatal.
 	r.cleanSpriteKandevSkills(stepCtx, sprite, projectSkillDir)
 
-	// Upload each skill into /workspace/<projectSkillDir>/kandev-<slug>/SKILL.md.
+	// Upload each skill into /workspace/<projectSkillDir>/<skill.DirName(slug)>/SKILL.md.
 	for _, sk := range manifest.Skills {
 		if !validSlugRe.MatchString(sk.Slug) {
 			continue
 		}
-		skillRoot := fmt.Sprintf("/workspace/%s/kandev-%s", projectSkillDir, sk.Slug)
+		skillRoot := fmt.Sprintf("/workspace/%s/%s", projectSkillDir, skill.DirName(sk.Slug))
 		skillPath := skillRoot + "/SKILL.md"
 		if err := r.writeFileWithRetry(stepCtx, sprite, skillPath, []byte(sk.Content), 0o644); err != nil {
 			r.logger.Warn("failed to upload skill file",
