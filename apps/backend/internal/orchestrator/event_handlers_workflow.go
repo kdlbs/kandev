@@ -2211,18 +2211,21 @@ func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, cu
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare new session: %w", err)
 	}
+	newSession, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get new session: %w", err)
+	}
+	launchProfileID, err := s.resolveDynamicLaunchExecution(ctx, newSession, newAgentProfileID, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve workflow replacement profile: %w", err)
+	}
 	if _, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{
-		AgentProfileID: newAgentProfileID,
+		AgentProfileID: launchProfileID,
 		ExecutorID:     currentSession.ExecutorID,
 		WorkflowStepID: dbTask.WorkflowStepID,
 		StartAgent:     false,
 	}); err != nil {
 		return nil, fmt.Errorf("failed to attach workflow replacement workspace: %w", err)
-	}
-
-	newSession, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get new session: %w", err)
 	}
 
 	// Tag the session as workflow-spawned for provenance: its agent profile
