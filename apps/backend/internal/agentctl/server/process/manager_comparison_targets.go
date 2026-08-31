@@ -110,26 +110,35 @@ func (m *Manager) prepareTrackerComparisonTarget(tracker *WorkspaceTracker) {
 		return
 	}
 
+	m.scheduleComparisonTargetOperation(repositoryName, tracker, *target)
+}
+
+func (m *Manager) scheduleComparisonTargetOperation(
+	repositoryName string,
+	tracker *WorkspaceTracker,
+	target models.ComparisonTarget,
+) {
+	m.comparisonTargetOpsMu.Lock()
+	if m.comparisonTargetOpsStopping {
+		m.comparisonTargetOpsMu.Unlock()
+		return
+	}
 	operationCtx, release, err := m.beginComparisonTargetOperation()
 	if err != nil {
+		m.comparisonTargetOpsMu.Unlock()
 		return
 	}
 	operationCtx, cancel := context.WithTimeout(operationCtx, gitCommandTimeout)
-	operation := &comparisonTargetOperation{
-		target:  *target,
-		tracker: tracker,
-		cancel:  cancel,
-	}
+	operation := &comparisonTargetOperation{target: target, tracker: tracker, cancel: cancel}
 
-	m.comparisonTargetOpsMu.Lock()
-	if !m.comparisonTargetIsCurrent(repositoryName, target) {
+	if !m.comparisonTargetIsCurrent(repositoryName, &target) {
 		m.comparisonTargetOpsMu.Unlock()
 		cancel()
 		release()
 		return
 	}
 	if existing := m.comparisonTargetOps[repositoryName]; existing != nil {
-		if existing.tracker == tracker && existing.target.Equal(*target) {
+		if existing.tracker == tracker && existing.target.Equal(target) {
 			m.comparisonTargetOpsMu.Unlock()
 			cancel()
 			release()
@@ -318,8 +327,9 @@ func (m *Manager) cancelComparisonTargetOperation(repositoryName string) {
 	m.comparisonTargetOpsMu.Unlock()
 }
 
-func (m *Manager) stopComparisonTargetOperations(ctx context.Context) error {
+func (m *Manager) stopComparisonTargetOperations(ctx context.Context) (error, bool) {
 	m.comparisonTargetOpsMu.Lock()
+	m.comparisonTargetOpsStopping = true
 	for _, operation := range m.comparisonTargetOps {
 		operation.cancel()
 	}
@@ -332,8 +342,16 @@ func (m *Manager) stopComparisonTargetOperations(ctx context.Context) error {
 	}()
 	select {
 	case <-done:
-		return nil
+		return nil, true
 	case <-ctx.Done():
-		return ctx.Err()
+		return ctx.Err(), false
 	}
+}
+
+func (m *Manager) reopenComparisonTargetOperations() {
+	m.comparisonTargetOpsMu.Lock()
+	if !m.comparisonTargetOpsPermanent {
+		m.comparisonTargetOpsStopping = false
+	}
+	m.comparisonTargetOpsMu.Unlock()
 }

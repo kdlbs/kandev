@@ -188,9 +188,11 @@ type Manager struct {
 	// comparisonTargetOps tracks one cancellable materialization per
 	// repository scope. The wait group lets teardown observe all operations
 	// that were admitted before shutdown.
-	comparisonTargetOps   map[string]*comparisonTargetOperation
-	comparisonTargetOpsMu sync.Mutex
-	comparisonTargetOpsWG sync.WaitGroup
+	comparisonTargetOps          map[string]*comparisonTargetOperation
+	comparisonTargetOpsMu        sync.Mutex
+	comparisonTargetOpsWG        sync.WaitGroup
+	comparisonTargetOpsStopping  bool
+	comparisonTargetOpsPermanent bool
 
 	// streamSubscribers tracks every workspace-stream subscriber attached
 	// via SubscribeWorkspaceStream so RescanRepositories can wire new
@@ -294,6 +296,14 @@ func (m *Manager) admitStart() (func(), error) {
 // CloseAdmission rejects new process owners without waiting for in-flight
 // handlers. Instance teardown calls it before shutting down HTTP.
 func (m *Manager) CloseAdmission() {
+	m.comparisonTargetOpsMu.Lock()
+	m.comparisonTargetOpsStopping = true
+	m.comparisonTargetOpsPermanent = true
+	for _, operation := range m.comparisonTargetOps {
+		operation.cancel()
+	}
+	m.comparisonTargetOpsMu.Unlock()
+
 	m.admissionMu.Lock()
 	m.stopping = true
 	lifetimeCancel := m.lifetimeCancel
@@ -1859,7 +1869,10 @@ func (m *Manager) stop(ctx context.Context) error {
 
 	// Stop trackers before the status guard: passthrough never calls Start() so the early return below would otherwise leak them.
 	m.stopWorkspaceTrackers()
-	comparisonStopErr := m.stopComparisonTargetOperations(ctx)
+	comparisonStopErr, comparisonTargetsDrained := m.stopComparisonTargetOperations(ctx)
+	if comparisonTargetsDrained {
+		defer m.reopenComparisonTargetOperations()
+	}
 
 	status := m.Status()
 	if status == StatusStopped || status == StatusStopping {
@@ -1867,9 +1880,6 @@ func (m *Manager) stop(ctx context.Context) error {
 			zap.String("status", string(status)),
 			zap.Int("pid", m.agentPID()))
 		if status == StatusStopped {
-			if comparisonStopErr != nil {
-				return comparisonStopErr
-			}
 			// The agent process reaches StatusStopped on its own whenever the
 			// child exits without an explicit Stop (waitForExit stores it). The
 			// adapter and stopCh were never torn down in that case, so do it
@@ -1878,18 +1888,18 @@ func (m *Manager) stop(ctx context.Context) error {
 			// after a normal stop, in which case behaviour is unchanged.
 			tornDown := m.closeAdapterAndStdin()
 			if err := m.stopShellAndProcesses(ctx); err != nil {
-				return err
+				return errors.Join(comparisonStopErr, err)
 			}
 			switch {
 			case m.mainReapPending.Load():
 				if err := m.waitForProcessExit(ctx); err != nil {
-					return err
+					return errors.Join(comparisonStopErr, err)
 				}
 				m.mainReapPending.Store(false)
 			case tornDown:
 				m.drainAfterLateTeardown(ctx)
 			}
-			return nil
+			return comparisonStopErr
 		}
 		return nil
 	}

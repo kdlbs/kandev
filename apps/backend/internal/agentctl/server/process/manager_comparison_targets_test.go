@@ -1,11 +1,11 @@
-//go:build !windows
-
 package process
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +13,17 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+const comparisonTargetGitShimModeEnv = "KANDEV_TEST_COMPARISON_GIT_SHIM_MODE"
+
+func init() {
+	switch os.Getenv(comparisonTargetGitShimModeEnv) {
+	case "comparison":
+		runComparisonTargetGitShim()
+	case "sleep":
+		time.Sleep(time.Hour)
+	}
+}
 
 func TestComparisonTargetPreparationNonBlocking(t *testing.T) {
 	previousTimeout := gitCommandTimeout
@@ -24,11 +35,12 @@ func TestComparisonTargetPreparationNonBlocking(t *testing.T) {
 	target := comparisonTargetProcessTestTarget()
 	mgr := NewManager(&config.InstanceConfig{
 		WorkDir:           repoDir,
+		AgentEnv:          []string{comparisonTargetGitShimModeEnv + "=sleep"},
 		ComparisonTargets: map[string]models.ComparisonTarget{"": target},
 	}, newTestLogger(t))
 	t.Cleanup(func() { _ = mgr.StopForTeardown(context.Background()) })
 
-	shimDir := installSleepGitShim(t)
+	shimDir := installComparisonTargetSleepGitShim(t)
 	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	started := time.Now()
@@ -229,6 +241,7 @@ func newComparisonTargetTestManager(
 		statusStarted: filepath.Join(t.TempDir(), "status.started"),
 	}
 	instanceEnv := []string{
+		comparisonTargetGitShimModeEnv + "=comparison",
 		"KANDEV_TEST_GIT_LOG=" + markers.commandLog,
 		"KANDEV_TEST_FETCH_STARTED=" + markers.fetchStarted,
 		"KANDEV_TEST_STATUS_STARTED=" + markers.statusStarted,
@@ -249,55 +262,104 @@ func newComparisonTargetTestManager(
 
 func installComparisonTargetGitShim(t *testing.T) string {
 	t.Helper()
+	return installComparisonTargetGitShimMode(t, "comparison")
+}
+
+func installComparisonTargetSleepGitShim(t *testing.T) string {
+	t.Helper()
+	return installComparisonTargetGitShimMode(t, "sleep")
+}
+
+func installComparisonTargetGitShimMode(t *testing.T, mode string) string {
+	t.Helper()
 	dir := t.TempDir()
-	shim := filepath.Join(dir, "git")
-	const script = `#!/bin/sh
-printf '%s\n' "$*" >> "$KANDEV_TEST_GIT_LOG"
-case "$1 $2" in
-  "remote get-url")
-    exit 1
-    ;;
-  "remote add"|"config remote."*)
-    exit 0
-    ;;
-  "fetch --no-tags")
-    if [ "${KANDEV_TEST_FETCH_ERROR:-0}" = "1" ]; then
-      exit 1
-    fi
-    case "$*" in
-      *"refs/heads/main:"*)
-        : > "$KANDEV_TEST_FETCH_STARTED"
-        if [ -n "${KANDEV_TEST_FETCH_GATE:-}" ]; then
-          while [ ! -e "$KANDEV_TEST_FETCH_GATE" ]; do
-            /bin/sleep 0.01
-          done
-        fi
-        ;;
-    esac
-    ;;
-  "rev-parse --git-dir")
-    printf '.git\n'
-    ;;
-  "rev-parse --verify")
-    printf '0123456789abcdef0123456789abcdef01234567\n'
-    ;;
-  "status --porcelain")
-    : > "$KANDEV_TEST_STATUS_STARTED"
-    ;;
-esac
-exit 0
-`
-	if err := os.WriteFile(shim, []byte(script), 0o755); err != nil {
+	shimName := "git"
+	if runtime.GOOS == "windows" {
+		shimName += ".exe"
+	}
+	shim := filepath.Join(dir, shimName)
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("find test executable: %v", err)
+	}
+	contents, err := os.ReadFile(executable)
+	if err != nil {
+		t.Fatalf("read test executable: %v", err)
+	}
+	if err := os.WriteFile(shim, contents, 0o755); err != nil {
 		t.Fatalf("write Git shim: %v", err)
 	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(shim, 0o755); err != nil {
+			t.Fatalf("make Git shim executable: %v", err)
+		}
+	}
+	t.Setenv(comparisonTargetGitShimModeEnv, mode)
 	return dir
+}
+
+func runComparisonTargetGitShim() {
+	args := os.Args[1:]
+	if logPath := os.Getenv("KANDEV_TEST_GIT_LOG"); logPath != "" {
+		if file, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o666); err == nil {
+			_, _ = fmt.Fprintln(file, strings.Join(args, " "))
+			_ = file.Close()
+		}
+	}
+	if len(args) < 2 {
+		os.Exit(0)
+	}
+	if args[0] == "config" && strings.HasPrefix(args[1], "remote.") {
+		os.Exit(0)
+	}
+	switch args[0] + " " + args[1] {
+	case "remote get-url":
+		os.Exit(1)
+	case "remote add":
+		os.Exit(0)
+	case "fetch --no-tags":
+		if os.Getenv("KANDEV_TEST_FETCH_ERROR") == "1" {
+			os.Exit(1)
+		}
+		joined := strings.Join(args, " ")
+		if strings.Contains(joined, "refs/heads/main:") {
+			touchComparisonTargetShimMarker("KANDEV_TEST_FETCH_STARTED")
+			waitForComparisonTargetShimGate()
+		}
+	case "rev-parse --git-dir":
+		_, _ = os.Stdout.WriteString(".git\n")
+	case "rev-parse --verify":
+		_, _ = os.Stdout.WriteString("0123456789abcdef0123456789abcdef01234567\n")
+	case "status --porcelain":
+		touchComparisonTargetShimMarker("KANDEV_TEST_STATUS_STARTED")
+	}
+	os.Exit(0)
+}
+
+func touchComparisonTargetShimMarker(envKey string) {
+	if path := os.Getenv(envKey); path != "" {
+		_ = os.WriteFile(path, nil, 0o600)
+	}
+}
+
+func waitForComparisonTargetShimGate() {
+	gate := os.Getenv("KANDEV_TEST_FETCH_GATE")
+	if gate == "" {
+		return
+	}
+	for {
+		if _, err := os.Stat(gate); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func waitForComparisonFile(t *testing.T, path string) {
 	t.Helper()
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
-	timeout := time.NewTimer(3 * time.Second)
+	timeout := time.NewTimer(15 * time.Second)
 	defer timeout.Stop()
 	for {
 		if _, err := os.Stat(path); err == nil {
@@ -320,7 +382,7 @@ func waitForComparisonResolution(
 	t.Helper()
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
-	timeout := time.NewTimer(3 * time.Second)
+	timeout := time.NewTimer(15 * time.Second)
 	defer timeout.Stop()
 	for {
 		resolution := tracker.ComparisonResolution()

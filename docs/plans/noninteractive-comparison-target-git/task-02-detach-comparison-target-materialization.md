@@ -86,3 +86,9 @@ Record the red and green commands. Record startup timing proof, cancellation pro
 - Startup proof: `TestCreateInstanceDoesNotWaitForComparisonTarget`, `TestComparisonTargetPreparationNonBlocking`, `TestUpdateComparisonTargetsDoesNotWaitForMaterialization`, and `TestGetWorkspaceTrackerForDoesNotWaitForMaterialization` return before the controllable Git work completes and observe pending state.
 - Lifecycle proof: ready and bounded unavailable states publish only for the current target; stale operations are superseded; manager teardown cancels and drains an unfinished materialization.
 - Transport proof: `TestComparisonTargetMaterializationPublishesBoundedFetchFailureNoTransportFallback` observes one HTTPS fetch attempt, no SSH command, and no second fetch. The existing fork pull-request browser scenario passed both its ready and unavailable cases.
+
+## PR fixup record
+
+- Review fix: comparison-target admission is closed under the same mutex as `WaitGroup.Add` during teardown, normal `Stop` reopens it only after draining, and teardown remains permanently closed.
+- Review fix: the `StatusStopped` cleanup path now continues through adapter, shell, and process teardown when comparison-target shutdown returns an error.
+- Test portability: lifecycle coverage uses a copied test executable as the Git shim, so state, cancellation, stale-result, and startup assertions also compile on Windows.

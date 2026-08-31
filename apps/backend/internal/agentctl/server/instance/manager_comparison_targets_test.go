@@ -1,5 +1,3 @@
-//go:build !windows
-
 package instance
 
 import (
@@ -8,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -17,6 +16,14 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/pkg/agent"
 )
+
+const instanceComparisonGitShimModeEnv = "KANDEV_TEST_INSTANCE_COMPARISON_GIT_SHIM_MODE"
+
+func init() {
+	if os.Getenv(instanceComparisonGitShimModeEnv) == "instance" {
+		runInstanceComparisonGitShim()
+	}
+}
 
 func TestCreateInstanceDoesNotWaitForComparisonTarget(t *testing.T) {
 	isolateInstanceTestGitEnv(t)
@@ -63,10 +70,10 @@ func TestCreateInstanceDoesNotWaitForComparisonTarget(t *testing.T) {
 		if result.err != nil {
 			t.Fatalf("CreateInstance: %v", result.err)
 		}
-		if elapsed := time.Since(started); elapsed >= 300*time.Millisecond {
+		if elapsed := time.Since(started); elapsed >= 5*time.Second {
 			t.Fatalf("CreateInstance took %v, want it to return before comparison-target Git work completes", elapsed)
 		}
-	case <-time.After(300 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		t.Fatal("CreateInstance waited for comparison-target Git work")
 	}
 	if result.response == nil {
@@ -115,35 +122,57 @@ func runInstanceTestGit(t *testing.T, dir string, args ...string) {
 func installInstanceComparisonGitShim(t *testing.T, startedMarker string) string {
 	t.Helper()
 	dir := t.TempDir()
-	shim := filepath.Join(dir, "git")
-	script := `#!/bin/sh
-case "$1 $2" in
-  "rev-parse --git-dir")
-    printf '.git\n'
-    ;;
-  "remote get-url")
-    : > "$KANDEV_TEST_COMPARISON_STARTED"
-    /bin/sleep 0.5
-    exit 1
-    ;;
-  "rev-parse --verify")
-    printf '0123456789abcdef0123456789abcdef01234567\n'
-    ;;
-esac
-exit 0
-`
-	if err := os.WriteFile(shim, []byte(script), 0o755); err != nil {
+	shimName := "git"
+	if runtime.GOOS == "windows" {
+		shimName += ".exe"
+	}
+	shim := filepath.Join(dir, shimName)
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("find test executable: %v", err)
+	}
+	contents, err := os.ReadFile(executable)
+	if err != nil {
+		t.Fatalf("read test executable: %v", err)
+	}
+	if err := os.WriteFile(shim, contents, 0o755); err != nil {
 		t.Fatalf("write Git shim: %v", err)
 	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(shim, 0o755); err != nil {
+			t.Fatalf("make Git shim executable: %v", err)
+		}
+	}
+	t.Setenv(instanceComparisonGitShimModeEnv, "instance")
 	t.Setenv("KANDEV_TEST_COMPARISON_STARTED", startedMarker)
 	return dir
+}
+
+func runInstanceComparisonGitShim() {
+	args := os.Args[1:]
+	if len(args) < 2 {
+		os.Exit(0)
+	}
+	switch args[0] + " " + args[1] {
+	case "rev-parse --git-dir":
+		_, _ = os.Stdout.WriteString(".git\n")
+	case "remote get-url":
+		if marker := os.Getenv("KANDEV_TEST_COMPARISON_STARTED"); marker != "" {
+			_ = os.WriteFile(marker, nil, 0o600)
+		}
+		time.Sleep(15 * time.Second)
+		os.Exit(1)
+	case "rev-parse --verify":
+		_, _ = os.Stdout.WriteString("0123456789abcdef0123456789abcdef01234567\n")
+	}
+	os.Exit(0)
 }
 
 func waitForInstanceFile(t *testing.T, path string) {
 	t.Helper()
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
-	timeout := time.NewTimer(2 * time.Second)
+	timeout := time.NewTimer(20 * time.Second)
 	defer timeout.Stop()
 	for {
 		if _, err := os.Stat(path); err == nil {
