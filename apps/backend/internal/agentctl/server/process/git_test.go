@@ -195,6 +195,7 @@ func TestGitOperatorContributionDestinationPushesWithoutChangingPullRemote(t *te
 	writeFile(t, repoDir, "destination.txt", "destination\n")
 	runGit(t, repoDir, "add", ".")
 	runGit(t, repoDir, "commit", "-m", "destination")
+	headSHA := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
 
 	destination := &taskmodels.ContributionDestination{
 		Version:  taskmodels.ContributionDestinationVersion,
@@ -217,12 +218,22 @@ func TestGitOperatorContributionDestinationPushesWithoutChangingPullRemote(t *te
 
 	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
 	operator.setContributionDestination(destination)
+	forced, err := operator.Push(context.Background(), true, false)
+	if err != nil {
+		t.Fatalf("forced Push returned error: %v", err)
+	}
+	if forced.Success || !strings.Contains(forced.Error, "force push is not allowed") {
+		t.Fatalf("forced Push = %+v, want contribution destination rejection", forced)
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, "refs", "heads", "feature", "destination")); !os.IsNotExist(err) {
+		t.Fatalf("forced push mutated destination branch, stat error = %v", err)
+	}
 	pushed, err := operator.Push(context.Background(), false, false)
 	if err != nil || !pushed.Success {
 		t.Fatalf("Push = %+v, err = %v", pushed, err)
 	}
-	if got := strings.TrimSpace(runGit(t, targetDir, "rev-parse", "refs/heads/feature/destination")); got == "" {
-		t.Fatal("destination branch was not pushed")
+	if got := strings.TrimSpace(runGit(t, targetDir, "rev-parse", "refs/heads/feature/destination")); got != headSHA {
+		t.Fatalf("destination branch head = %q, want exact task head %q", got, headSHA)
 	}
 	if got := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin")); got == "" {
 		t.Fatal("origin remote was removed or rewritten")

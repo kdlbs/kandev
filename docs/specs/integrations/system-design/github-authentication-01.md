@@ -66,12 +66,15 @@ automation under different GitHub Apps without operating separate Kandev deploym
   workspace automation connection. **Inherit executor Git credentials** injects no GitHub broker
   helper or `gh` shim: Local and Worktree tasks use host-visible Git/SSH credentials, while remote
   tasks use credentials configured in that executor.
-- A task that is explicitly created for a pre-PR fork contribution under managed task credentials
-  may carry one server-authored, versioned `contribution_destination` on its canonical repository
-  attachment. Managed routing may issue one additional lease for that exact fork. The fork is a
-  push destination only: canonical repository identity, `origin`, issue lookup, and pull-request
-  targeting remain unchanged. Executor-owned identities are opaque and do not receive a
-  workspace-authored destination binding.
+- A task using managed task credentials may carry one server-authored, versioned
+  `contribution_destination` on its canonical repository attachment. The dedicated Improve Kandev
+  creation path may resolve or create the workspace human actor's fork before first launch. Before
+  any later session is persisted, an ordinary task attached to canonical `kdlbs/kandev` may reuse an
+  already-existing writable fork after the same provider verification, but this compatibility path
+  never creates a fork and never trusts checkout remotes. Managed routing may issue one additional
+  lease for that exact fork. The fork is a push destination only: canonical repository identity,
+  `origin`, issue lookup, and pull-request targeting remain unchanged. Executor-owned identities are
+  opaque and do not receive a workspace-authored destination binding.
 - Every newly created workspace attempts to persist **Inherit executor Git credentials** as its
   initial task policy. After a successful settings write, if creation is performed by an internal
   trusted caller, an auth-disabled synthetic administrator, or a real administrator while host
@@ -117,6 +120,11 @@ automation under different GitHub Apps without operating separate Kandev deploym
 - Repository preparation validates any contribution destination before issuing credentials, adds a
   collision-resistant dedicated fork remote, and reconstructs it on launch and resume. It never
   accepts a fork inferred from the checkout's current remotes or a caller-provided repository name.
+- Managed session preflight runs contributor-fork preparation before it validates repository scopes
+  or persists the session. It skips executor-owned and explicit profile-token paths, preserves an
+  existing `remote_contribution` or `contribution_destination`, and ignores non-canonical repositories.
+  A legacy canonical row may receive only the stable provider ID from the verified destination. A
+  running session is not mutated because its credential scopes are immutable.
 - Git failures while inspecting or reconciling a managed checkout preserve a bounded,
   credential-redacted diagnostic. Git's dubious-ownership failure is classified as a service/data
   ownership mismatch with guidance to restore the intended Kandev service account or reconcile the

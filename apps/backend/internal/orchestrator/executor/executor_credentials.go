@@ -89,6 +89,14 @@ type TaskGitCredentialPolicyResolver interface {
 	ResolveTaskGitCredentialPolicy(context.Context, string) (TaskGitCredentialPolicy, error)
 }
 
+// ContributorForkLeasePreparer persists a provider-verified contributor fork
+// destination before a managed session receives its immutable credential
+// scopes. Implementations must be idempotent and must not trust checkout
+// remotes as repository identity.
+type ContributorForkLeasePreparer interface {
+	PrepareContributorForkLease(context.Context, string, string) error
+}
+
 // SetGitHubCredentialBroker configures renewable workspace automation credentials.
 // brokerURL is the full credential-resolution endpoint URL.
 func (e *Executor) SetGitHubCredentialBroker(issuer GitCredentialLeaseIssuer, brokerURL string) {
@@ -105,6 +113,12 @@ func (e *Executor) SetAgentctlBinaryPath(path string) {
 // SetTaskGitCredentialPolicyResolver configures workspace-specific task Git routing.
 func (e *Executor) SetTaskGitCredentialPolicyResolver(resolver TaskGitCredentialPolicyResolver) {
 	e.githubCredentialPolicyResolver = resolver
+}
+
+// SetContributorForkLeasePreparer configures the server-owned preparation
+// boundary used before managed credential preflight.
+func (e *Executor) SetContributorForkLeasePreparer(preparer ContributorForkLeasePreparer) {
+	e.contributorForkLeasePreparer = preparer
 }
 
 func (e *Executor) applyGitCredentialSnapshot(
@@ -285,6 +299,11 @@ func (e *Executor) preflightManagedGitCredentials(
 	}
 	if executorProfileHasGitHubToken(execConfig) {
 		return nil
+	}
+	if e.contributorForkLeasePreparer != nil {
+		if err := e.contributorForkLeasePreparer.PrepareContributorForkLease(ctx, workspaceID, taskID); err != nil {
+			return fmt.Errorf("prepare contributor fork credential lease: %w", err)
+		}
 	}
 	taskRepos, err := e.repo.ListTaskRepositories(ctx, taskID)
 	if err != nil {

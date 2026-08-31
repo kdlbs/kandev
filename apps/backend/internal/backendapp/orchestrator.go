@@ -131,6 +131,9 @@ func provideOrchestrator(
 	orchestratorSvc.SetTitleBranchRuntime(lifecycleMgr)
 	if githubSvc != nil {
 		orchestratorSvc.SetTaskGitCredentialPolicyResolver(githubExecutorCredentialPolicyAdapter{service: githubSvc})
+		orchestratorSvc.SetContributorForkLeasePreparer(&githubContributionDestinationPreparer{
+			service: githubSvc, taskSvc: taskSvc, repo: taskRepo,
+		})
 	}
 	taskSvc.SetExecutionStopper(orchestratorSvc)
 	// Runtime-aware liveness lets durable cleanup treat a not-found stop for a

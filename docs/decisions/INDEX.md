@@ -178,7 +178,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-12-setup-timeout-owns-launch-budget | [One Setup Timeout Owns Launch Budgets](2026-08-12-setup-timeout-owns-launch-budget.md) | accepted | backend | 2026-08-12 |
 | 2026-08-10-no-em-dash-public-copy | [Keep Em Dashes Out of Public Copy](2026-08-10-no-em-dash-public-copy.md) | accepted | frontend, infra | 2026-08-10 |
 | 2026-08-14-current-turn-clarification-ownership | [Current Turn Owns Active Clarification](2026-08-14-current-turn-clarification-ownership.md) | accepted (amended 2026-08-15, 2026-08-24) | backend, frontend, protocol, workflow | 2026-08-14 |
-| 2026-08-12-task-bound-fork-destinations | [Bind Fork Push Destinations to Tasks](2026-08-12-task-bound-fork-destinations.md) | accepted (amended 2026-08-13) | backend, frontend, workflow, security, GitHub | 2026-08-12 |
+| 2026-08-12-task-bound-fork-destinations | [Bind Fork Push Destinations to Tasks](2026-08-12-task-bound-fork-destinations.md) | accepted (amended 2026-08-13 and 2026-08-31) | backend, frontend, workflow, security, GitHub | 2026-08-12 |
 | 2026-08-13-hard-delete-task-contribution-links | [Hard delete owns task contribution links](2026-08-13-hard-delete-task-contribution-links.md) | accepted | backend | 2026-08-13 |
 | 2026-08-15-office-mode-follows-active-workspace | [Office Mode Follows the Active Workspace](2026-08-15-office-mode-follows-active-workspace.md) | accepted | frontend, backend | 2026-08-15 |
 | 2026-08-16-session-mcp-tool-catalog | [Keep MCP Tool Catalogs Session Owned](2026-08-16-session-mcp-tool-catalog.md) | superseded by 2026-08-18-session-mcp-tool-definition-details | backend, agentctl, frontend, protocol, security | 2026-08-16 |

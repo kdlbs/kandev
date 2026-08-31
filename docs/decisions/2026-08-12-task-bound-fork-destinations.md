@@ -1,6 +1,6 @@
 # ADR-2026-08-12-task-bound-fork-destinations: Bind Fork Push Destinations to Tasks
 
-**Status:** accepted (amended 2026-08-13)
+**Status:** accepted (amended 2026-08-13 and 2026-08-31)
 **Date:** 2026-08-12
 **Area:** backend, frontend, workflow, security, GitHub
 
@@ -26,6 +26,12 @@ Managed credential leases are fixed when the task runtime starts. Preparing a fo
 enters its PR workflow step is therefore too late for a long-lived managed session unless the whole
 environment is recreated. Managed fork resolution must complete before the first task launch.
 
+Ordinary tasks can also predate the dedicated Improve Kandev creation path or be created through another
+workflow while still carrying reviewed work for the canonical repository. A manually added fork remote
+does not prove provider identity and must not broaden the task's credential scope. A new session may,
+however, reuse an already-existing fork after the workspace automation connection verifies the same
+source, target, parent, actor, and credential-generation identities used by the dedicated flow.
+
 Path-only metadata does not prove identity when the workspace automation connection changes, GitHub
 deletes and recreates a repository at the same owner/name, or a fork is renamed. The destination contract
 must bind both the credential identity and the provider-owned repository identities.
@@ -48,6 +54,14 @@ verifies write access, and persists the binding. A same-name repository with a d
 Exact-name lookup is only the fast path. If it returns a provider 404, Kandev searches the canonical
 repository's fork network and re-reads each same-owner candidate through the provider before accepting it.
 This reuses renamed forks without trusting list payloads or creating a duplicate.
+
+Before a new managed session is persisted for any task attached to canonical `kdlbs/kandev`, Kandev may
+reuse an existing writable fork owned by that workspace's human automation identity. This launch-time path
+is read-only at GitHub: it never creates a fork, never trusts a checkout remote, and leaves the task on its
+canonical lease when no confirmed fork exists. If a legacy canonical repository row lacks its stable
+provider ID, Kandev may backfill only the ID returned in the verified destination before persisting the
+binding. Existing live sessions keep their immutable launch-time scopes and require a fresh session to use
+the new destination.
 
 Fork ownership must match the identity that supplies managed task credentials. A human PAT or named GitHub
 CLI automation connection may own and create a fork. A GitHub App may contribute directly when its
@@ -95,6 +109,9 @@ is executor-owned; it must never use that fallback after a managed preparation f
   backend-authored English text.
 - Existing `remote_contribution` bindings remain the authority for tasks attached to an already-open pull
   request. The new binding covers only the period before a pull request exists.
+- Ordinary canonical tasks can publish reviewed work through the same server-authored destination contract
+  after starting a fresh managed session; no caller-authored remote, arbitrary fork, or fork creation is
+  accepted by this compatibility path.
 - User-managed local repository rows retain their existing remote exemption. Kandev-managed provider rows
   continue to reconcile `origin` to canonical HTTPS.
 

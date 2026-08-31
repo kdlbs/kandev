@@ -854,6 +854,7 @@ type Executor struct {
 	repoCloner                      RepoCloner
 	repoUpdater                     RepoUpdater
 	taskRepositoryBaseBranchUpdater TaskRepositoryBaseBranchUpdater
+	contributorForkLeasePreparer    ContributorForkLeasePreparer
 }
 
 // taskEnvLock returns the per-task mutex for env persistence, creating one on
