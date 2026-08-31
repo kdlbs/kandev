@@ -260,4 +260,25 @@ describe("AgentProfileDeleteConflictDialog layout", () => {
     expect(body.contains(footer)).toBe(false);
     expect(within(footer).getByRole("button", { name: "Cancel" })).toBeTruthy();
   });
+
+  // @covers AC-UI-SURFACE-TEXT-HIERARCHY-001.2, AC-UI-SURFACE-TEXT-HIERARCHY-001.3
+  it("keeps long conflict labels in one left-aligned semantic description", () => {
+    const longTaskTitle = `Profile task ${"x".repeat(320)}`;
+    renderConflictDialog({
+      activeSessions: [{ task_id: "long-task", task_title: longTaskTitle, is_ephemeral: false }],
+      watchers: [],
+      routingTiers: [],
+      automations: [],
+    });
+
+    const body = screen.getByTestId("agent-profile-delete-conflict-body");
+    expect(body.className).toContain("min-w-0");
+    expect(body.className).toContain("text-left");
+    expect(body.className).toContain("space-y-2");
+    expect(body.querySelectorAll(":scope > p")).toHaveLength(2);
+
+    const taskItem = screen.getByText(longTaskTitle);
+    expect(taskItem.tagName).toBe("LI");
+    expect(taskItem.className).toContain("min-w-0");
+  });
 });
