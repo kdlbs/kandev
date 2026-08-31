@@ -255,7 +255,7 @@ def parse_size_exceptions(text: str, source: Path) -> tuple[dict[str, int], list
                     "malformed-size-exception",
                     source,
                     line_number,
-                    f"expected `path<TAB>size`, found `{raw_line}`",
+                    "expected `path<TAB>size` with an ASCII decimal size",
                 )
             )
             continue
@@ -276,8 +276,17 @@ def parse_size_exceptions(text: str, source: Path) -> tuple[dict[str, int], list
 
 def load_size_exceptions(root: Path) -> tuple[dict[str, int], list[Violation]]:
     path = root / SIZE_EXCEPTIONS_PATH
-    if not path.exists():
+    if not path.exists() and not path.is_symlink():
         return {}, []
+    if not is_safe_regular_file(path, root):
+        return {}, [
+            Violation(
+                "invalid-size-exception-catalog",
+                path,
+                1,
+                "size exception catalog must be a regular file inside the repository",
+            )
+        ]
     return parse_size_exceptions(path.read_text(encoding="utf-8"), path)
 
 
@@ -350,6 +359,27 @@ def classify_path(relative: Path) -> tuple[str, str | None]:
     return "legacy", None
 
 
+def is_safe_regular_file(path: Path, root: Path) -> bool:
+    if path.is_symlink() or not path.is_file():
+        return False
+    try:
+        path.resolve(strict=True).relative_to(root.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def is_canonical_legacy_path(relative_text: str, relative: Path) -> bool:
+    return (
+        "\x00" not in relative_text
+        and not relative.is_absolute()
+        and relative.as_posix() == relative_text
+        and relative.parts[:2] == ("docs", "specs")
+        and relative.suffix == ".md"
+        and all(part not in {".", ".."} for part in relative.parts)
+    )
+
+
 def check_size(
     path: Path, relative: Path, kind: str, config: dict, exceptions: dict[str, int]
 ) -> list[Violation]:
@@ -379,6 +409,16 @@ def check_size_exception_catalog(
     default_limit = config["limits"]["legacy"]
     for relative_text, ceiling in exceptions.items():
         relative = Path(relative_text)
+        if not is_canonical_legacy_path(relative_text, relative):
+            violations.append(
+                Violation(
+                    "invalid-size-exception",
+                    root / relative,
+                    1,
+                    "size exceptions must reference canonical legacy Markdown files under docs/specs",
+                )
+            )
+            continue
         path = root / relative
         if not path.exists():
             violations.append(
@@ -387,6 +427,16 @@ def check_size_exception_catalog(
                     path,
                     1,
                     "legacy size exception references a missing file",
+                )
+            )
+            continue
+        if not is_safe_regular_file(path, root / "docs/specs"):
+            violations.append(
+                Violation(
+                    "invalid-size-exception",
+                    path,
+                    1,
+                    "size exceptions must reference regular files inside docs/specs",
                 )
             )
             continue

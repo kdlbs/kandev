@@ -194,6 +194,32 @@ migration: in_progress
         self.assertIn("file-size", self.rules(violations))
         self.assertIn("frozen ceiling 12", violations[0].message)
 
+    def test_rejects_a_symlinked_size_exception_sidecar(self) -> None:
+        outside = tempfile.TemporaryDirectory()
+        self.addCleanup(outside.cleanup)
+        target = Path(outside.name) / "not-a-sidecar.txt"
+        target.write_text("not a sidecar\n", encoding="utf-8")
+        sidecar = self.root / "docs/specs/spec-lint-exceptions.tsv"
+        sidecar.parent.mkdir(parents=True, exist_ok=True)
+        sidecar.symlink_to(target)
+
+        violations = load_linter().lint_specs(self.root, self.config)
+
+        self.assertEqual(self.rules(violations), ["invalid-size-exception-catalog"])
+
+    def test_rejects_noncanonical_size_exception_targets(self) -> None:
+        self.write(
+            "docs/specs/spec-lint-exceptions.tsv",
+            "other/specs/not-a-spec.md\t100\n"
+            "docs/specs/legacy/not-a-spec.txt\t100\n",
+        )
+        self.write("other/specs/not-a-spec.md", "x")
+        self.write("docs/specs/legacy/not-a-spec.txt", "x")
+
+        violations = load_linter().lint_specs(self.root, self.config)
+
+        self.assertEqual(self.rules(violations), ["invalid-size-exception", "invalid-size-exception"])
+
     def test_flags_a_malformed_size_exception_line(self) -> None:
         self.write("docs/specs/spec-lint-exceptions.tsv", "docs/specs/legacy/spec.md\n")
         self.write("docs/specs/legacy/spec.md", "x" * 5)
