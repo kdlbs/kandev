@@ -44,6 +44,20 @@ func (s *stubSyncRepo) ListSystemSkills(
 	return out, nil
 }
 
+func (s *stubSyncRepo) ListNonSystemSkills(
+	_ context.Context, workspaceID string,
+) ([]*models.Skill, error) {
+	ws := s.rows[workspaceID]
+	out := make([]*models.Skill, 0, len(ws))
+	for _, sk := range ws {
+		if !sk.IsSystem {
+			out = append(out, sk)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Slug < out[j].Slug })
+	return out, nil
+}
+
 func (s *stubSyncRepo) GetSkillBySlug(
 	_ context.Context, workspaceID, slug string,
 ) (*models.Skill, error) {
@@ -67,9 +81,19 @@ func (s *stubSyncRepo) CreateSkill(_ context.Context, skill *models.Skill) error
 	return nil
 }
 
+// UpdateSkill mirrors the real repository's update-by-ID semantics
+// (sqlite.Repository.UpdateSkill writes `WHERE id = ?`): it locates
+// the row by ID, not by the caller-supplied slug, so a slug rewrite
+// (e.g. normalizeUserSkillSlugs) re-keys the map instead of failing
+// to find a row under its now-stale old slug.
 func (s *stubSyncRepo) UpdateSkill(_ context.Context, skill *models.Skill) error {
-	if ws, ok := s.rows[skill.WorkspaceID]; ok {
-		if _, ok := ws[skill.Slug]; ok {
+	ws, ok := s.rows[skill.WorkspaceID]
+	if !ok {
+		return errors.New("not found for update")
+	}
+	for slug, sk := range ws {
+		if sk.ID == skill.ID {
+			delete(ws, slug)
 			copy := *skill
 			ws[skill.Slug] = &copy
 			return nil

@@ -13,6 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -34,6 +35,10 @@ func newTestSkillService(t *testing.T) *skills.SkillService {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("provide settings store: %v", err)
+	}
 
 	repo, err := sqlite.NewWithDB(db, db, nil)
 	if err != nil {
@@ -292,24 +297,27 @@ func TestListSkillsWithUsage(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	// The lazy system-skill sync fires on the first ListSkills call
-	// for a workspace, populating bundled system rows alongside the
-	// user skill created above. The test asserts the *user* skill
-	// appears with the correct usage count; the system rows are
-	// validated separately in system_sync_test.go.
+	// The lazy system-skill sync fires on the first ListSkills call for
+	// a workspace, populating bundled system rows alongside the user
+	// skill created above. It also normalizes the well-formed but
+	// non-canonical "my-skill" slug to "kandev-my-skill" (AC-003.8),
+	// so the test looks for the row under its normalized slug. The
+	// normalization mechanics themselves are covered in
+	// system_sync_migration_test.go; this test only asserts the *user*
+	// skill survives sync with the correct usage count.
 	list, err := svc.ListSkillsWithUsage(ctx, "ws-1")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	var userRow *skills.SkillWithUsage
 	for _, row := range list {
-		if row.Slug == "my-skill" {
+		if row.Slug == "kandev-my-skill" {
 			userRow = row
 			break
 		}
 	}
 	if userRow == nil {
-		t.Fatalf("user skill not found in list of %d rows", len(list))
+		t.Fatalf("normalized user skill not found in list of %d rows", len(list))
 	}
 	if userRow.UsedByCount != 0 {
 		t.Errorf("used_by_count = %d, want 0", userRow.UsedByCount)
