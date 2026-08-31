@@ -59,6 +59,7 @@ signals, and task-scoped scheduling contracts.
 - [Multi-branch tasks](requirements/multi-branch.md)
 - [Parent-Child Message Interrupt](requirements/parent-child-message-interrupt.md)
 - [Parent-Child Task Stop](requirements/parent-child-task-stop.md)
+- [Passthrough Queued Prompt Dispatch](requirements/passthrough-queued-prompt-dispatch.md)
 - [Prevent Agent Auto-Start On Open](requirements/prevent-agent-autostart-on-open.md)
 - [Prompt attachments](requirements/prompt-attachments.md)
 - [Quick Chat Sessions, Persistence, and Expiration](requirements/quick-chat-expiration.md)
@@ -110,6 +111,7 @@ signals, and task-scoped scheduling contracts.
 ### System design
 
 - [Additional Session Workspace Reuse](system-design/additional-session-workspace-reuse.md)
+- [Environment-Owned Git Status](system-design/environment-owned-git-status.md)
 - [Attach Workspace Sources](system-design/attach-workspace-sources.md)
 - [Quick Chat Agent Titles](system-design/quick-chat-agent-titles.md)
 - [Quick Chat Session Resumption](system-design/quick-chat-session-resumption.md)
@@ -118,6 +120,7 @@ signals, and task-scoped scheduling contracts.
 - [External task ID idempotency](system-design/external-id-idempotency.md)
 - [Task model unification](system-design/model-unification.md)
 - [Remote Contribution Tasks](system-design/remote-contribution-tasks.md)
+- [Passthrough Queued Prompt Dispatch](system-design/passthrough-queued-prompt-dispatch.md)
 - [Task Archive Confirmation](system-design/archive-confirmation.md)
 - [Task plan write lifecycle](system-design/plan-write-lifecycle.md)
 - [Task Runtime Cleanup](system-design/runtime-cleanup.md)
@@ -134,7 +137,7 @@ signals, and task-scoped scheduling contracts.
 
 ## Migration record
 
-Migration remains in progress. The four requirements above now have
+Migration remains in progress. The five requirements above now have
 authoritative, wrapper-free requirement/design pairs. Other migrated files still
 need the same extraction before this system can return to a complete migration
 state.

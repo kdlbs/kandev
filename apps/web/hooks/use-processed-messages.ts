@@ -144,6 +144,7 @@ export type GroupedRenderOptions = {
 };
 
 export type ProcessedMessagesOptions = {
+  historyInitialized?: boolean;
   hasOlderMessages?: boolean;
   lastAgentError?: LastAgentError | null;
   currentTurnId?: string | null;
@@ -479,9 +480,13 @@ function useVisibleMessages(
 export function shouldShowTaskDescriptionFallback(
   taskDescription: string | null,
   visibleMessages: Message[],
+  options: Pick<ProcessedMessagesOptions, "historyInitialized" | "hasOlderMessages"> = {},
 ): boolean {
   return (
-    Boolean(taskDescription) && !visibleMessages.some((message) => message.author_type === "user")
+    Boolean(taskDescription) &&
+    options.historyInitialized === true &&
+    options.hasOlderMessages === false &&
+    !visibleMessages.some((message) => message.author_type === "user")
   );
 }
 
@@ -533,8 +538,8 @@ export function useProcessedMessages(
   const visibleMessages = useVisibleMessages(messages, toolCallIds, subagentChildIds, scope);
 
   const showTaskDescriptionFallback = useMemo(
-    () => shouldShowTaskDescriptionFallback(taskDescription, visibleMessages),
-    [taskDescription, visibleMessages],
+    () => shouldShowTaskDescriptionFallback(taskDescription, visibleMessages, options),
+    [taskDescription, visibleMessages, options.historyInitialized, options.hasOlderMessages],
   );
   const taskDescriptionMessage: Message | null = useMemo(
     () =>

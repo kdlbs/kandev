@@ -155,6 +155,7 @@ export type PRReview = {
 
 export type PRComment = {
   id: number;
+  html_url?: string;
   author: string;
   author_avatar: string;
   author_is_bot: boolean;

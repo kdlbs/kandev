@@ -38,6 +38,7 @@ export type PerRepoOperationResult = {
   success: boolean;
   output: string;
   error?: string;
+  error_code?: string;
 };
 
 /**
@@ -284,6 +285,7 @@ function aggregatePerRepoResults(
       operation,
       output: only.output,
       error: only.error,
+      error_code: only.error_code,
     };
   }
   const allSucceeded = perRepo.every((r) => r.success);
@@ -297,6 +299,7 @@ function aggregatePerRepoResults(
     operation,
     output: joined,
     error: firstFailure?.error,
+    error_code: firstFailure?.error_code,
     per_repo: perRepo,
   };
 }
@@ -336,6 +339,7 @@ async function fanOutAcrossRepositoryWaves(
       success: result.success,
       output: result.output,
       error: result.error,
+      error_code: result.error_code,
     })),
     operation,
   );

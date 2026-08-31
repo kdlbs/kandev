@@ -54,6 +54,7 @@ outcomes that expose those contracts.
 - [Jira Ticket Status Filter](requirements/jira-status-filter.md)
 - [MCP Tool Argument Validation](requirements/mcp-tool-argument-validation.md)
 - [Pull request outcome attribution](requirements/pr-outcome-attribution.md)
+- [Pull request link copy actions](requirements/pr-link-copy-actions.md)
 - [Provider-Aware Review Automation Runtime](requirements/provider-aware-review-automation.md)
 - [Slack Integration](requirements/slack.md)
 
@@ -76,6 +77,7 @@ outcomes that expose those contracts.
 - [GitHub PR Merge Queue](system-design/github-pr-merge-queue.md)
 - [GitHub PR Merge Queue Recovery](system-design/github-pr-merge-queue-recovery.md)
 - [GitHub task pull request sync coordination](system-design/github-task-pr-sync-coordination.md)
+- [Pull request link copy actions](system-design/pr-link-copy-actions.md)
 - [GitLab Integration System Design Part 1](system-design/gitlab-integration-01.md)
 - [GitLab Integration System Design Part 2](system-design/gitlab-integration-02.md)
 - [GitLab MR Status Chip System Design Part 1](system-design/gitlab-mr-status-chip-01.md)

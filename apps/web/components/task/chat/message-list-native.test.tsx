@@ -7,11 +7,16 @@ import type { RenderItem } from "@/hooks/use-processed-messages";
 
 const sharedSentinelCalls = vi.hoisted(() => [] as unknown[][]);
 const sharedSentinelUserGesture = vi.hoisted(() => vi.fn());
+const sharedSentinelRetry = vi.hoisted(() => vi.fn());
 
 vi.mock("@/hooks/use-lazy-load-sentinel", () => ({
   useLazyLoadSentinel: (...args: unknown[]) => {
     sharedSentinelCalls.push(args);
-    return { sentinelRef: () => {}, onUserGesture: sharedSentinelUserGesture };
+    return {
+      sentinelRef: () => {},
+      onUserGesture: sharedSentinelUserGesture,
+      retry: sharedSentinelRetry,
+    };
   },
 }));
 
@@ -31,7 +36,9 @@ vi.mock("@/components/state-provider", () => ({
 
 import { useScrollToDividerOrBottom } from "./message-list-native";
 import {
+  isElementInPreloadRegion,
   resolvePaginationStopReason,
+  TRANSCRIPT_SENTINEL_ROOT_MARGIN,
   useAutoScroll,
   useNativeScrollManagement,
   useScrollToMessage,
@@ -144,6 +151,7 @@ afterEach(() => {
   cleanup();
   sharedSentinelCalls.length = 0;
   sharedSentinelUserGesture.mockReset();
+  sharedSentinelRetry.mockReset();
   vi.restoreAllMocks();
 });
 
@@ -155,29 +163,16 @@ function transcriptActivity(id: string, turnId = id): RenderItem {
   return { type: "turn_group", id, turnId, messages: [] };
 }
 
-function NativeScrollManagementHarness({
-  items,
-  metrics,
-  loadMore = async () => 0,
-}: {
-  items: RenderItem[];
-  metrics?: { scrollHeight: number; scrollTop: number; clientHeight: number };
-  loadMore?: () => Promise<number>;
-}) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  useNativeScrollManagement({
-    scrollRef,
-    items,
-    messages: [],
-    isWorking: false,
-    sessionId: null,
-    enabled: false,
-    hasUnreadDivider: false,
-    messagesLoading: false,
-    hasMore: true,
-    isLoadingMore: false,
-    loadMore,
-  });
+type NativeScrollMetrics = {
+  scrollHeight: number;
+  scrollTop: number;
+  clientHeight: number;
+};
+
+function useNativeScrollMetrics(
+  scrollRef: { current: HTMLDivElement | null },
+  metrics?: NativeScrollMetrics,
+) {
   useLayoutEffect(() => {
     const element = scrollRef.current;
     if (!element || !metrics) return;
@@ -192,8 +187,43 @@ function NativeScrollManagementHarness({
         },
       },
     });
-  }, [metrics]);
-  return <div data-testid="native-scroll-management-container" ref={scrollRef} />;
+  }, [metrics, scrollRef]);
+}
+
+function NativeScrollManagementHarness({
+  items,
+  metrics,
+  loadMore = async () => 0,
+  sessionId = null,
+  recoveryRef,
+}: {
+  items: RenderItem[];
+  metrics?: NativeScrollMetrics;
+  loadMore?: () => Promise<number>;
+  sessionId?: string | null;
+  recoveryRef?: { current: boolean };
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const { sentinelRef, showRecovery } = useNativeScrollManagement({
+    scrollRef,
+    items,
+    messages: [],
+    isWorking: false,
+    sessionId,
+    enabled: false,
+    hasUnreadDivider: false,
+    messagesLoading: false,
+    hasMore: true,
+    isLoadingMore: false,
+    loadMore,
+  });
+  if (recoveryRef) recoveryRef.current = showRecovery;
+  useNativeScrollMetrics(scrollRef, metrics);
+  return (
+    <div data-testid="native-scroll-management-container" ref={scrollRef}>
+      <div ref={sentinelRef} />
+    </div>
+  );
 }
 
 describe("resolvePaginationStopReason", () => {
@@ -210,6 +240,30 @@ describe("resolvePaginationStopReason", () => {
   );
 });
 
+describe("isElementInPreloadRegion", () => {
+  it("uses current root and sentinel geometry instead of a stale intersection", () => {
+    const root = document.createElement("div");
+    const sentinel = document.createElement("div");
+    Object.defineProperty(root, "getBoundingClientRect", {
+      configurable: true,
+      value: () => createRect(100, 400),
+    });
+    Object.defineProperty(sentinel, "getBoundingClientRect", {
+      configurable: true,
+      value: () => createRect(-102, 1),
+    });
+
+    expect(isElementInPreloadRegion(root, sentinel, TRANSCRIPT_SENTINEL_ROOT_MARGIN)).toBe(false);
+
+    Object.defineProperty(sentinel, "getBoundingClientRect", {
+      configurable: true,
+      value: () => createRect(-50, 1),
+    });
+    expect(isElementInPreloadRegion(root, sentinel, TRANSCRIPT_SENTINEL_ROOT_MARGIN)).toBe(true);
+  });
+});
+
+// eslint-disable-next-line max-lines-per-function -- pagination invariants share one fixture and lifecycle.
 describe("useNativeScrollManagement transcript pagination", () => {
   it("retries a disarmed short page on the next upward scroll", () => {
     const metrics = { scrollHeight: 1000, scrollTop: 100, clientHeight: 400 };
@@ -229,18 +283,98 @@ describe("useNativeScrollManagement transcript pagination", () => {
     expect(sharedSentinelUserGesture).toHaveBeenCalledTimes(1);
   });
 
-  it("re-arms the native sentinel with a visible-boundary continuation decision", () => {
+  it("re-arms the native sentinel with a current-geometry continuation decision", () => {
     render(<NativeScrollManagementHarness items={[]} />);
 
     const options = sharedSentinelCalls[0]?.[5];
     expect(options).toEqual({
+      rootMargin: "200px 0px 0px 0px",
       rearmWhileIntersecting: true,
       shouldContinueWhileIntersecting: expect.any(Function),
       onLoadSettled: expect.any(Function),
+      isRequestCurrent: expect.any(Function),
     });
   });
 
-  it("continues only while an older page keeps the same visible boundary", async () => {
+  it("shows recovery only after no progress and clears it after success or session change", () => {
+    const recoveryRef = { current: false };
+    const { rerender } = render(
+      <NativeScrollManagementHarness items={[]} sessionId="session-1" recoveryRef={recoveryRef} />,
+    );
+    const options = sharedSentinelCalls.at(-1)?.[5] as {
+      onLoadSettled: (result: {
+        count: number;
+        rejected: boolean;
+        continuation: "no-progress" | "continued";
+      }) => void;
+    };
+
+    act(() => {
+      options.onLoadSettled({ count: 0, rejected: false, continuation: "no-progress" });
+    });
+    expect(recoveryRef.current).toBe(true);
+
+    act(() => {
+      options.onLoadSettled({ count: 20, rejected: false, continuation: "continued" });
+    });
+    expect(recoveryRef.current).toBe(false);
+
+    act(() => {
+      options.onLoadSettled({ count: 0, rejected: true, continuation: "no-progress" });
+    });
+    expect(recoveryRef.current).toBe(true);
+    rerender(
+      <NativeScrollManagementHarness items={[]} sessionId="session-2" recoveryRef={recoveryRef} />,
+    );
+    expect(recoveryRef.current).toBe(false);
+  });
+
+  it("ignores a settlement from the previous session epoch", async () => {
+    const recoveryRef = { current: false };
+    let resolveLoad: (value: number) => void = () => {};
+    const loadMore = vi.fn(
+      () =>
+        new Promise<number>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    const { rerender } = render(
+      <NativeScrollManagementHarness
+        items={[]}
+        sessionId="session-1"
+        loadMore={loadMore}
+        recoveryRef={recoveryRef}
+      />,
+    );
+    const initialCall = sharedSentinelCalls.at(-1);
+    const loadPage = initialCall?.[4] as () => Promise<number>;
+    const oldOptions = initialCall?.[5] as {
+      onLoadSettled: (result: {
+        count: number;
+        rejected: boolean;
+        continuation: "rejected";
+      }) => void;
+    };
+    const pendingLoad = loadPage();
+
+    rerender(
+      <NativeScrollManagementHarness
+        items={[]}
+        sessionId="session-2"
+        loadMore={loadMore}
+        recoveryRef={recoveryRef}
+      />,
+    );
+    act(() => {
+      oldOptions.onLoadSettled({ count: 0, rejected: true, continuation: "rejected" });
+    });
+    expect(recoveryRef.current).toBe(false);
+
+    resolveLoad(0);
+    await pendingLoad;
+  });
+
+  it("continues while the sentinel remains in preload even when the visible boundary changes", async () => {
     const loadMore = vi.fn(async () => 20);
     const newest = transcriptMessage("newest");
     const { rerender } = render(
@@ -273,7 +407,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
     options = sharedSentinelCalls.at(-1)?.[5] as {
       shouldContinueWhileIntersecting: () => boolean;
     };
-    expect(options.shouldContinueWhileIntersecting()).toBe(false);
+    expect(options.shouldContinueWhileIntersecting()).toBe(true);
   });
 
   it("anchors a prepend below a fixed task description row", () => {

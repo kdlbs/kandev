@@ -2440,11 +2440,14 @@ dispatchLoop:
 				result.aborted = true
 				break dispatchLoop
 			}
-		case wfmodels.OnEnterQueueRun, wfmodels.OnEnterRunCodeReview:
-			// Engine-owned per the spec, but their on_enter dispatch (AC-A7/
-			// AC-A8) is explicitly deferred to a later Build round — see
-			// docs/specs/workflow-on-enter-action-dispatch/spec.md. This is a
-			// known, recognized type, not the AC-A6 default warning case.
+		case wfmodels.OnEnterQueueRun, wfmodels.OnEnterRunCodeReview, wfmodels.OnEnterEnsureParticipantSeat:
+			// Session-independent, ledger-owned: engine.DispatchStepEntry
+			// (internal/workflow/engine/entrydispatch.go) dispatches these
+			// synchronously after commit via every step-transition writer
+			// (Repository.dispatchStepEntry in step_entry_dispatch.go).
+			// processOnEnter must not also dispatch them here or they would
+			// run twice — see docs/specs/workflow-on-enter-action-dispatch/spec.md.
+			// This is a known, recognized type, not the AC-A6 default warning case.
 		default:
 			// AC-A6: a genuinely unrecognized on_enter action type. Warn
 			// instead of silently discarding it — this is the exact failure
@@ -3291,18 +3294,22 @@ func (s *Service) dispatchTakenQueuedMessage(ctx context.Context, sessionID stri
 	return true
 }
 
+type passthroughRunningPreparer interface {
+	PreparePassthroughRunning(sessionID string) (func(), error)
+}
+
 // deliverPassthroughPrompt writes a prompt to PTY stdin and marks the session as running.
 // Uses the per-agent PlanPassthroughStdinChunks so Claude's inter-chunk SubmitDelay is
 // honored here too (queued / workflow-auto-start path); other agents stay on the single
 // atomic write. Falls back to the simple "\r" append if config resolution fails so a
 // transient lookup error never silently swallows the prompt.
+//
+// Callers that already hold the per-session cancellation guard must use
+// PreparePassthroughRunning + writePassthroughPrompt instead (see handleAgentReady); this
+// function publishes agent.running synchronously and will re-enter the guard via the event
+// subscriber. Remaining callers: autoStartPassthroughPrompt (workflow auto-start) and the
+// legacy non-preparer fallback in handleAgentReady.
 func (s *Service) deliverPassthroughPrompt(ctx context.Context, sessionID, content string) error {
-	pt, cfgErr := s.agentManager.ResolvePassthroughConfig(ctx, sessionID)
-	if cfgErr != nil {
-		s.logger.Warn("failed to resolve passthrough config, falling back to \\r submit",
-			zap.String("session_id", sessionID),
-			zap.Error(cfgErr))
-	}
 	// Mark RUNNING before any writes so concurrent PromptTask / queued-message
 	// delivery is blocked by checkSessionPromptable during the inter-chunk
 	// SubmitDelay window (150ms for Claude). Mark error is non-fatal.
@@ -3310,6 +3317,19 @@ func (s *Service) deliverPassthroughPrompt(ctx context.Context, sessionID, conte
 		s.logger.Warn("failed to mark passthrough as running before prompt",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+	}
+	return s.writePassthroughPrompt(ctx, sessionID, content)
+}
+
+// writePassthroughPrompt writes a prompt to PTY stdin without changing runtime
+// state. The ready-event path uses this after preparing the running state so it
+// can publish the captured event after releasing the session guard.
+func (s *Service) writePassthroughPrompt(ctx context.Context, sessionID, content string) error {
+	pt, cfgErr := s.agentManager.ResolvePassthroughConfig(ctx, sessionID)
+	if cfgErr != nil {
+		s.logger.Warn("failed to resolve passthrough config, falling back to \\r submit",
+			zap.String("session_id", sessionID),
+			zap.Error(cfgErr))
 	}
 	if cfgErr != nil {
 		if err := s.agentManager.WritePassthroughStdin(ctx, sessionID, content+"\r"); err != nil {

@@ -252,7 +252,7 @@ domain structs. See [ADR 0043](../../../decisions/0043-plugin-host-data-api.md) 
 | `ListTasks` / `GetTask` | `api_read:tasks`             | Tasks (id, workspace, workflow, title, description, state, priority, timestamps, parent, identifier, repositories, metadata)                                                                                                                      |
 | `ListWorkspaces`        | `api_read:workspaces`        | Workspaces (id, name, owner, defaults, timestamps)                                                                                                                                                                                                |
 | `ListWorkflows`         | `api_read:workflows`         | Workflows for a workspace                                                                                                                                                                                                                         |
-| `ListWorkflowSteps`     | `api_read:workflows`         | Steps for a workflow (id, name, position, stage type)                                                                                                                                                                                             |
+| `ListWorkflowSteps`     | `api_read:workflows`         | Steps for a workflow (`id`, `workflow_id`, `name`, `position`, `stage_type`, `color`, `is_start_step`, `wip_limit`, `agent_profile_id`, `on_enter_action_types`)                                                                                   |
 | `ListAgentProfiles`     | `api_read:agent_profiles`    | Agent profiles (id, agent id, display name, model, mode)                                                                                                                                                                                          |
 | `ListExecutorProfiles`  | `api_read:executor_profiles` | Executor profiles (id, display name, executor type)                                                                                                                                                                                               |
 | `ListRepositories`      | `api_read:repositories`      | Repositories for a workspace (id, name, default branch)                                                                                                                                                                                           |
@@ -266,6 +266,12 @@ the token business. `SessionCodeStats` is a deliberately computed shape — the
 aggregate the agent-stats plugin previously re-derived by hand from
 `task_session_commits` and `task_session_git_snapshots` — so plugins never touch
 those raw rows.
+
+`on_enter_action_types` on a step lists the on-enter action *types* configured
+for that step (e.g. `auto_start_agent`, `queue_run`), never the action
+*config* — target task ids, payloads, and profile ids stay server-side. A type
+appearing in this list means it is configured, not a guarantee of when or
+whether it fires. Plugins must ignore action types they do not recognize.
 
 **Conversation content (`api_read:messages`, ADR 0047).** `ListMessages` reads
 historical user/agent message content — the data a "summarize yesterday"
