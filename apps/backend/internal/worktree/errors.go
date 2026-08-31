@@ -101,6 +101,32 @@ var (
 	ErrWorktreePathOwnedByAnotherTask = errors.New("worktree path is owned by another task")
 )
 
+// BranchUnrecoverableError identifies the branch that could not be restored.
+// It wraps ErrBranchUnrecoverable so callers can preserve the existing
+// sentinel check while presenting a branch-specific recovery action.
+type BranchUnrecoverableError struct {
+	Branch string
+}
+
+func (e *BranchUnrecoverableError) Error() string {
+	if e == nil || e.Branch == "" {
+		return ErrBranchUnrecoverable.Error()
+	}
+	return fmt.Sprintf("%s: %q", ErrBranchUnrecoverable, e.Branch)
+}
+
+func (e *BranchUnrecoverableError) Unwrap() error {
+	return ErrBranchUnrecoverable
+}
+
+// BranchName returns the branch that was requested by the persisted worktree.
+func (e *BranchUnrecoverableError) BranchName() string {
+	if e == nil {
+		return ""
+	}
+	return e.Branch
+}
+
 // containsAuthFailure checks if git output indicates an authentication failure.
 func containsAuthFailure(lowerOutput string) bool {
 	return strings.Contains(lowerOutput, "authentication failed") ||

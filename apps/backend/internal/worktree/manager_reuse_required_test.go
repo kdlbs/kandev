@@ -28,6 +28,48 @@ func TestCreate_ReuseRequiredRejectsMissingCanonicalWorktree(t *testing.T) {
 	}
 }
 
+func TestCreate_ReuseRequiredReportsUnrecoverableBranch(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	runGit(t, repoPath, "push", "origin", "--delete", "feature/pr-branch")
+	runGit(t, repoPath, "branch", "-D", "feature/pr-branch")
+	runGit(t, repoPath, "fetch", "--prune", "origin")
+
+	store := newMockStore()
+	store.worktrees["canonical-worktree"] = &Worktree{
+		ID:                "canonical-worktree",
+		TaskID:            "task-1",
+		TaskEnvironmentID: "environment-1",
+		RepositoryID:      "repository-1",
+		Path:              filepath.Join(t.TempDir(), "missing-worktree"),
+		Branch:            "feature/pr-branch",
+		Status:            StatusActive,
+	}
+	mgr, err := NewManager(newTestConfig(t), store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	_, err = mgr.Create(context.Background(), CreateRequest{
+		TaskID:            "task-1",
+		TaskEnvironmentID: "environment-1",
+		RepositoryID:      "repository-1",
+		RepositoryPath:    repoPath,
+		BaseBranch:        "main",
+		WorktreeID:        "canonical-worktree",
+		ReuseRequired:     true,
+	})
+	if !errors.Is(err, ErrBranchUnrecoverable) {
+		t.Fatalf("Create() error = %v, want ErrBranchUnrecoverable", err)
+	}
+	if !errors.Is(err, ErrReuseWorktreeUnavailable) {
+		t.Fatalf("Create() error = %v, want ErrReuseWorktreeUnavailable context", err)
+	}
+	var branchErr *BranchUnrecoverableError
+	if !errors.As(err, &branchErr) || branchErr.BranchName() != "feature/pr-branch" {
+		t.Fatalf("Create() error = %v, want branch-specific unrecoverable error", err)
+	}
+}
+
 // TestCreate_RecreatesPersistedWorktreeWhenTasksBaseWasRemoved verifies that
 // normal reuse treats a removed managed tasks root as a missing worktree. The
 // persisted task-root identity still identifies the original safe slot, so the

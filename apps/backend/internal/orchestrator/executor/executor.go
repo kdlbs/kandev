@@ -371,6 +371,9 @@ type LaunchAgentRequest struct {
 	// WorkspaceReuseRequired selects attach-only preparation of an already-ready
 	// task environment. It must never be inferred from a sibling execution ID.
 	WorkspaceReuseRequired bool
+	// AllowBranchReplacement is granted only by the explicit new-branch recovery
+	// action. It permits lifecycle to replace a confirmed missing worktree branch.
+	AllowBranchReplacement bool
 	TaskTitle              string // Human-readable task title for semantic worktree naming
 	AgentProfileID         string
 	TurnID                 string // Durable Kandev turn for the initial prompt, when present
@@ -489,11 +492,13 @@ type RepoSpec struct {
 	ContributionDestination *models.ContributionDestination
 	ComparisonTarget        *models.ComparisonTarget
 	WorktreeID              string
-	WorktreeBranchPrefix    string
-	WorktreeBranchTemplate  string
-	WorktreeBranchTicket    string
-	PullBeforeWorktree      bool
-	RemoteSyncHandled       bool
+	// AllowBranchReplacement permits explicit branch replacement for this repo.
+	AllowBranchReplacement bool
+	WorktreeBranchPrefix   string
+	WorktreeBranchTemplate string
+	WorktreeBranchTicket   string
+	PullBeforeWorktree     bool
+	RemoteSyncHandled      bool
 	// RefreshRepository is an optional provider-authenticated refresh deferred
 	// until worktree materialization. A valid reusable worktree bypasses it.
 	RefreshRepository          func(context.Context) error

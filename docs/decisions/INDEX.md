@@ -220,3 +220,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-30-empty-remote-bootstrap-publication | [Keep Empty Remote Bootstrap Local Until Publication](2026-08-30-empty-remote-bootstrap-publication.md) | accepted | backend, frontend, protocol, security | 2026-08-30 |
 | 2026-08-30-bound-untracked-dependency-enumeration | [Bound Untracked Dependency Enumeration](2026-08-30-bound-untracked-dependency-enumeration.md) | accepted | backend | 2026-08-30 |
 | 2026-08-30-e2e-browser-cache | [Cache host-runner E2E browser provisioning](2026-08-30-e2e-browser-cache.md) | accepted | infra, workflow | 2026-08-30 |
+| 2026-08-31-explicit-new-branch-session-recovery | [Require Explicit User Action Before Continuing a Session on a Replacement Branch](2026-08-31-explicit-new-branch-session-recovery.md) | accepted | backend, frontend, protocol | 2026-08-31 |

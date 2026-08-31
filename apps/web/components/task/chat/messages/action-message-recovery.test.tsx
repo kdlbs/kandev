@@ -11,6 +11,7 @@ import {
   type TaskSessionState,
 } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
+import { WebSocketRequestError } from "@/lib/ws/client";
 
 const requestMock = vi.fn().mockResolvedValue({});
 
@@ -173,6 +174,36 @@ describe("ActionMessage — recovery card retires once the agent is back", () =>
 
     expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(FRESH_TEST_ID)).toBeNull();
+  });
+
+  it("keeps a typed branch failure visible with explicit recovery choices", async () => {
+    requestMock.mockRejectedValueOnce(
+      new WebSocketRequestError("The saved branch is no longer available.", "CONFLICT", {
+        kind: "branch_unrecoverable",
+        recovery_action: "resume_new_branch",
+        original_branch: "feature/lost",
+        base_branch: "main",
+      }),
+    );
+
+    renderWithTranscript("WAITING_FOR_INPUT", []);
+    fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
+
+    expect(await screen.findByTestId("session-recovery-error")).toBeTruthy();
+    expect(screen.getByText("The saved branch is no longer available.")).toBeTruthy();
+    expect(screen.getByTestId("recovery-new-branch-button")).toBeTruthy();
+    expect(screen.getByTestId("recovery-restore-workspace-button")).toBeTruthy();
+  });
+
+  it("does not offer branch continuation for an ordinary recovery failure", async () => {
+    requestMock.mockRejectedValueOnce(new Error("Provider is unavailable"));
+
+    renderWithTranscript("WAITING_FOR_INPUT", []);
+    fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
+
+    expect(await screen.findByText("Provider is unavailable")).toBeTruthy();
+    expect(screen.queryByTestId("recovery-new-branch-button")).toBeNull();
+    expect(screen.getByTestId("recovery-restore-workspace-button")).toBeTruthy();
   });
 });
 

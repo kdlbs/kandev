@@ -194,6 +194,85 @@ func TestRecreate_BranchGoneEverywhereReturnsUnrecoverable(t *testing.T) {
 	if !errors.Is(err, ErrBranchUnrecoverable) {
 		t.Fatalf("recreate() err = %v, want ErrBranchUnrecoverable", err)
 	}
+	var branchErr interface{ BranchName() string }
+	if !errors.As(err, &branchErr) {
+		t.Fatalf("recreate() err = %v, want a typed branch recovery error", err)
+	}
+	if got := branchErr.BranchName(); got != existing.Branch {
+		t.Fatalf("branch recovery error names %q, want %q", got, existing.Branch)
+	}
+}
+
+func TestRecreate_AllowsExplicitReplacementWithFreshBranchAndPath(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	runGit(t, repoPath, "push", "origin", "--delete", "feature/pr-branch")
+	archiveDeletesLocalBranch(t, repoPath, "feature/pr-branch")
+	runGit(t, repoPath, "fetch", "--prune", "origin")
+
+	cfg := newTestConfig(t)
+	store := newMockStore()
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	existing := &Worktree{
+		ID:                "wt-replace",
+		SessionID:         "session-replace",
+		TaskID:            "task-replace",
+		TaskDirName:       "task-replace",
+		TaskEnvironmentID: "env-replace",
+		RepositoryID:      "repo-1",
+		RepositoryPath:    repoPath,
+		Path:              filepath.Join(cfg.TasksBasePath, "task-replace", "repo-1-primary"),
+		Branch:            "feature/pr-branch",
+		BranchSlug:        "primary",
+		BaseBranch:        "main",
+		Status:            StatusDeleted,
+	}
+	store.worktrees[existing.ID] = existing
+
+	wt, err := mgr.recreate(context.Background(), existing, CreateRequest{
+		SessionID:              existing.SessionID,
+		TaskID:                 existing.TaskID,
+		TaskEnvironmentID:      existing.TaskEnvironmentID,
+		RepositoryID:           existing.RepositoryID,
+		RepositoryPath:         repoPath,
+		BaseBranch:             "main",
+		TaskDirName:            existing.TaskDirName,
+		RepoName:               "repo-1",
+		BranchIdentitySlug:     existing.BranchSlug,
+		PullBeforeWorktree:     true,
+		AllowBranchReplacement: true,
+	})
+	if err != nil {
+		t.Fatalf("recreate() explicit replacement: %v", err)
+	}
+	if wt.ID != existing.ID {
+		t.Fatalf("replacement worktree ID = %q, want stable ID %q", wt.ID, existing.ID)
+	}
+	if wt.Branch == existing.Branch {
+		t.Fatalf("replacement branch = %q, want a fresh branch", wt.Branch)
+	}
+	if wt.Path == existing.Path {
+		t.Fatalf("replacement path = %q, want a fresh path", wt.Path)
+	}
+	if wt.BranchSlug != existing.BranchSlug {
+		t.Fatalf("replacement branch slug = %q, want stable identity %q", wt.BranchSlug, existing.BranchSlug)
+	}
+	if wt.Status != StatusActive || wt.DeletedAt != nil {
+		t.Fatalf("replacement status = %q, deleted_at = %v, want active and nil", wt.Status, wt.DeletedAt)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "--abbrev-ref", "HEAD")); got != wt.Branch {
+		t.Fatalf("replacement HEAD branch = %q, want %q", got, wt.Branch)
+	}
+	mainSHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "main"))
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != mainSHA {
+		t.Fatalf("replacement HEAD = %q, want main SHA %q", got, mainSHA)
+	}
+	stored := store.worktrees[existing.ID]
+	if stored == nil || stored.Branch != wt.Branch || stored.Path != wt.Path {
+		t.Fatalf("stored replacement = %#v, want branch %q and path %q", stored, wt.Branch, wt.Path)
+	}
 }
 
 // TestBranchRecoveryStatus covers the three probe outcomes used by the
