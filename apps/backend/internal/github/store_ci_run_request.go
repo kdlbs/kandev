@@ -50,7 +50,7 @@ func (s *Store) GetActiveCIRunGrant(
 ) (*CIRunGrant, error) {
 	var grant CIRunGrant
 	err := s.ro.GetContext(ctx, &grant, s.ro.Rebind(`
-		SELECT id, workspace_id, actor_task_id, target_task_id, workflow_id,
+		SELECT id, generation, workspace_id, actor_task_id, target_task_id, workflow_id,
 			workflow_step_id, repository_id, created_by_user_id, revoked_at, created_at, updated_at
 		FROM github_ci_run_grants
 		WHERE workspace_id = ? AND actor_task_id = ? AND target_task_id = ?
@@ -70,7 +70,7 @@ func (s *Store) GetAuthorizedCIRunGrant(
 ) (*CIRunGrant, error) {
 	var grant CIRunGrant
 	err := s.ro.GetContext(ctx, &grant, s.ro.Rebind(`
-		SELECT grant.id, grant.workspace_id, grant.actor_task_id, grant.target_task_id,
+		SELECT grant.id, grant.generation, grant.workspace_id, grant.actor_task_id, grant.target_task_id,
 			grant.workflow_id, grant.workflow_step_id, grant.repository_id,
 			grant.created_by_user_id, grant.revoked_at, grant.created_at, grant.updated_at
 		FROM github_ci_run_grants grant
@@ -250,6 +250,16 @@ func (s *Store) GetCIRunRequest(ctx context.Context, id string) (*CIRunRequest, 
 	var request CIRunRequest
 	err := s.ro.GetContext(ctx, &request, s.ro.Rebind(`SELECT `+ciRunRequestColumns+`
 		FROM github_ci_run_requests WHERE id = ?`), id)
+	return &request, err
+}
+
+func (s *Store) GetCIRunRequestByCallerKey(ctx context.Context, actorTaskID, actorSessionID, idempotencyHash string) (*CIRunRequest, error) {
+	var request CIRunRequest
+	err := s.ro.GetContext(ctx, &request, s.ro.Rebind(`SELECT `+ciRunRequestColumns+`
+		FROM github_ci_run_requests WHERE actor_task_id = ? AND actor_session_id = ? AND idempotency_hash = ?`), actorTaskID, actorSessionID, idempotencyHash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
 	return &request, err
 }
 

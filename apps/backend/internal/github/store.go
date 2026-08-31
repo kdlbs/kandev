@@ -440,6 +440,7 @@ const createTablesSQL = `
 const ciRunTablesSQL = `
 	CREATE TABLE IF NOT EXISTS github_ci_run_grants (
 		id TEXT PRIMARY KEY,
+		generation BIGINT NOT NULL DEFAULT 1 CHECK (generation > 0),
 		workspace_id TEXT NOT NULL,
 		actor_task_id TEXT NOT NULL,
 		target_task_id TEXT NOT NULL,

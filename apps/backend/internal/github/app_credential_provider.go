@@ -34,10 +34,15 @@ func (p *CachedInstallationCredentialProvider) ResolveInstallation(
 		repositories = []string{req.RepoName}
 	}
 	var permissions InstallationPermissions
-	if req.Purpose == CredentialPurposeScopedActionsWrite {
+	switch req.Purpose {
+	case CredentialPurposeScopedActionsWrite, CredentialPurposeScopedActionsDispatch:
 		permissions = InstallationPermissions{
 			"actions": PermissionWrite, "contents": PermissionRead,
 			"metadata": PermissionRead, "pull_requests": PermissionRead,
+		}
+	case CredentialPurposeScopedActionsRerun:
+		permissions = InstallationPermissions{
+			"actions": PermissionWrite, "metadata": PermissionRead, "pull_requests": PermissionRead,
 		}
 	}
 	token, err := p.tokens.GetForWorkspace(

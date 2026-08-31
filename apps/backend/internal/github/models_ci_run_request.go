@@ -33,6 +33,7 @@ var ErrCIRunIdempotencyConflict = errors.New("CI run idempotency key was reused 
 
 type CIRunGrant struct {
 	ID              string     `json:"id" db:"id"`
+	Generation      int64      `json:"generation" db:"generation"`
 	WorkspaceID     string     `json:"workspace_id" db:"workspace_id"`
 	ActorTaskID     string     `json:"actor_task_id" db:"actor_task_id"`
 	TargetTaskID    string     `json:"target_task_id" db:"target_task_id"`
@@ -48,6 +49,7 @@ type CIRunGrant struct {
 type CIRunRequest struct {
 	ID                    string             `json:"id" db:"id"`
 	GrantID               string             `json:"grant_id" db:"grant_id"`
+	GrantGeneration       int64              `json:"grant_generation" db:"grant_generation"`
 	WorkspaceID           string             `json:"workspace_id" db:"workspace_id"`
 	ActorTaskID           string             `json:"actor_task_id" db:"actor_task_id"`
 	ActorSessionID        string             `json:"actor_session_id" db:"actor_session_id"`
@@ -92,18 +94,27 @@ type CIRunAuditEvent struct {
 }
 
 type CIRunReceipt struct {
-	RequestID      string             `json:"request_id"`
-	TaskID         string             `json:"task_id"`
-	RunID          int64              `json:"run_id"`
-	WorkflowID     int64              `json:"workflow_id"`
-	WorkflowName   string             `json:"workflow_name,omitempty"`
-	WorkflowPath   string             `json:"workflow_path,omitempty"`
-	HeadRepository string             `json:"head_repository"`
-	HeadRef        string             `json:"head_ref"`
-	HeadSHA        string             `json:"head_sha"`
-	Attempt        int                `json:"attempt"`
-	Operation      CIRunOperation     `json:"operation"`
-	EvidenceKind   CIRunEvidenceKind  `json:"evidence_kind"`
-	Status         CIRunRequestStatus `json:"status"`
-	FailureClass   string             `json:"failure_class,omitempty"`
+	RequestID       string             `json:"request_id"`
+	TaskID          string             `json:"task_id"`
+	RunID           int64              `json:"run_id"`
+	WorkflowID      int64              `json:"workflow_id"`
+	WorkflowName    string             `json:"workflow_name,omitempty"`
+	WorkflowPath    string             `json:"workflow_path,omitempty"`
+	HeadRepository  string             `json:"head_repository"`
+	HeadRef         string             `json:"head_ref"`
+	HeadSHA         string             `json:"head_sha"`
+	Attempt         int                `json:"attempt"`
+	Operation       CIRunOperation     `json:"operation"`
+	EvidenceKind    CIRunEvidenceKind  `json:"evidence_kind"`
+	Status          CIRunRequestStatus `json:"status"`
+	FailureClass    string             `json:"failure_class,omitempty"`
+	Repository      string             `json:"repository,omitempty"`
+	PRNumber        int                `json:"pr_number,omitempty"`
+	ExpectedHeadSHA string             `json:"expected_head_sha,omitempty"`
+	SourceRunID     int64              `json:"source_run_id,omitempty"`
+	SourceAttempt   int                `json:"source_attempt,omitempty"`
+	ProviderEvent   string             `json:"provider_event,omitempty"`
+	EvidenceVerdict string             `json:"evidence_verdict,omitempty"`
+	CreatedAt       time.Time          `json:"created_at"`
+	UpdatedAt       time.Time          `json:"updated_at"`
 }
