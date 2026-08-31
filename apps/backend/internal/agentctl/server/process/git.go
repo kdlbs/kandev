@@ -273,7 +273,7 @@ func (g *GitOperator) managedPushEnvironmentValues() []string {
 
 func hasEnvironmentPrefix(assignment string, prefixes []string) bool {
 	for _, prefix := range prefixes {
-		if strings.HasPrefix(assignment, prefix) {
+		if len(assignment) >= len(prefix) && strings.EqualFold(assignment[:len(prefix)], prefix) {
 			return true
 		}
 	}

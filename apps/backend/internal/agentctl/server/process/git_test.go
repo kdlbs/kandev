@@ -45,6 +45,32 @@ func readGitTestFile(t *testing.T, path string) string {
 	return string(contents)
 }
 
+func TestManagedPushEnvironmentValuesFiltersGitOverridesCaseInsensitively(t *testing.T) {
+	operator := NewGitOperator(t.TempDir(), newTestLogger(t), nil)
+	operator.setManagedPushEnvironmentProvider(func() []string {
+		return []string{
+			"git_config_count=1",
+			"git_config_key_0=http.extraHeader",
+			"git_config_value_0=Authorization: Bearer repository-token",
+			"gIt_SsH_cOmMaNd=repository-controlled-ssh",
+			"SAFE_VALUE=preserved",
+		}
+	})
+
+	got := operator.managedPushEnvironmentValues()
+	for _, assignment := range got {
+		upper := strings.ToUpper(assignment)
+		if (strings.HasPrefix(upper, "GIT_CONFIG_") &&
+			upper != "GIT_CONFIG_NOSYSTEM=1" && !strings.HasPrefix(upper, "GIT_CONFIG_GLOBAL=")) ||
+			strings.HasPrefix(strings.ToUpper(assignment), "GIT_SSH_COMMAND=") {
+			t.Fatalf("managed push environment retained Git override %q", assignment)
+		}
+	}
+	if !strings.Contains(strings.Join(got, "\n"), "SAFE_VALUE=preserved") {
+		t.Fatalf("managed push environment dropped safe value: %v", got)
+	}
+}
+
 func TestGitOperatorRemoteContributionRoutesPushesAndPreflightToSource(t *testing.T) {
 	cases := []struct {
 		name         string
