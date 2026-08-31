@@ -1,0 +1,329 @@
+package sqlite
+
+// Tests for the in-transaction office-session live-pair guard (Change 1) and
+// the live-preferring lookup ordering (Change 2). See
+// docs/specs/office/{requirements,system-design}/task-session-identity*.md.
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/jmoiron/sqlx"
+	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/testutil"
+)
+
+// insertOfficeSessionWithStartedAt is insertOfficeSession
+// (office_task_session_uniqueness_test.go) with an explicit started_at, so
+// ordering tests can control which row is "newer" independent of insertion
+// order.
+func insertOfficeSessionWithStartedAt(t *testing.T, db *sqlx.DB, s officeSessionSeed, startedAt time.Time) {
+	t.Helper()
+	now := time.Now().UTC()
+	_, err := db.Exec(db.Rebind(`
+		INSERT INTO task_sessions (
+			id, task_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
+			repository_id, base_branch, base_commit_sha,
+			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
+			state, error_message, metadata, started_at, completed_at, updated_at,
+			is_primary, review_status, is_passthrough, task_environment_id
+		) VALUES (?, ?, ?, '', '', '', '', '', '',
+		          '{}', '{}', '{}', '{}',
+		          ?, '', '{}', ?, NULL, ?,
+		          0, '', 0, '')
+	`), s.id, s.taskID, s.agentProfileID, string(s.state), startedAt, now)
+	if err != nil {
+		t.Fatalf("insert office session %s: %v", s.id, err)
+	}
+}
+
+// TestCreateOfficeTaskSessionRefusesConcurrentLivePair races two
+// CreateOfficeTaskSession calls for the SAME (task_id, agent_profile_id)
+// pair. Unlike TestCreateOfficeTaskSessionMarksOnlyTheFirstConcurrentSessionAsOrigin
+// (which races two DIFFERENT pairs and asserts both succeed), this must
+// converge to exactly one live row: one call succeeds, the other is refused
+// with ErrOfficeSessionRaceConflict, and the refused call's row is never
+// written (AC-001.1, AC-001.2, AC-001.6).
+func TestCreateOfficeTaskSessionRefusesConcurrentLivePair(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-office-live-pair-race"
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Office live pair race"}))
+
+	agent := "agent-live-pair"
+	sessions := []*models.TaskSession{
+		{ID: "office-live-pair-1", TaskID: taskID, AgentProfileID: agent, State: models.TaskSessionStateCreated},
+		{ID: "office-live-pair-2", TaskID: taskID, AgentProfileID: agent, State: models.TaskSessionStateCreated},
+	}
+	errs := make([]error, len(sessions))
+	var wg sync.WaitGroup
+	for i, session := range sessions {
+		wg.Add(1)
+		go func(i int, session *models.TaskSession) {
+			defer wg.Done()
+			errs[i] = repo.CreateOfficeTaskSession(ctx, session)
+		}(i, session)
+	}
+	wg.Wait()
+
+	successCount, conflictCount := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			successCount++
+		case errors.Is(err, ErrOfficeSessionRaceConflict):
+			conflictCount++
+		default:
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	require.Equal(t, 1, successCount, "exactly one concurrent create should win the pair")
+	require.Equal(t, 1, conflictCount, "the loser should be refused with ErrOfficeSessionRaceConflict")
+
+	created, err := repo.ListTaskSessions(ctx, taskID)
+	require.NoError(t, err)
+	require.Len(t, created, 1, "the refused call must not have written a row")
+}
+
+func TestPostgresCreateOfficeTaskSessionRefusesConcurrentLivePair(t *testing.T) {
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 2)
+	repo, err := NewWithDB(db, db, nil)
+	require.NoError(t, err)
+	ctx := context.Background()
+	const taskID = "task-office-live-pair-race-pg"
+	now := time.Now().UTC()
+	_, err = db.Exec(db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), taskID, "", "Office live pair race (Postgres)", now, now)
+	require.NoError(t, err)
+
+	agent := "agent-live-pair-pg"
+	sessions := []*models.TaskSession{
+		{ID: "office-live-pair-pg-1", TaskID: taskID, AgentProfileID: agent, State: models.TaskSessionStateCreated},
+		{ID: "office-live-pair-pg-2", TaskID: taskID, AgentProfileID: agent, State: models.TaskSessionStateCreated},
+	}
+	errs := make([]error, len(sessions))
+	var wg sync.WaitGroup
+	for i, session := range sessions {
+		wg.Add(1)
+		go func(i int, session *models.TaskSession) {
+			defer wg.Done()
+			errs[i] = repo.CreateOfficeTaskSession(ctx, session)
+		}(i, session)
+	}
+	wg.Wait()
+
+	successCount, conflictCount := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			successCount++
+		case errors.Is(err, ErrOfficeSessionRaceConflict):
+			conflictCount++
+		default:
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	require.Equal(t, 1, successCount)
+	require.Equal(t, 1, conflictCount)
+
+	created, err := repo.ListTaskSessions(ctx, taskID)
+	require.NoError(t, err)
+	require.Len(t, created, 1)
+}
+
+// TestCreateOfficeTaskSessionAllowsCreateWhenExistingPairRowIsTerminal proves
+// the guard's predicate is complement-of-terminal, not "any row for this
+// pair": a pair whose only existing row is terminal must still allow a fresh
+// create (AC-001.3, AC-001.4).
+func TestCreateOfficeTaskSessionAllowsCreateWhenExistingPairRowIsTerminal(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-office-terminal-pair-retry"
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Office terminal pair retry"}))
+
+	agent := "agent-terminal-retry"
+	require.NoError(t, repo.CreateOfficeTaskSession(ctx, &models.TaskSession{
+		ID: "office-terminal-retry-1", TaskID: taskID, AgentProfileID: agent,
+		State: models.TaskSessionStateCompleted,
+	}))
+
+	err := repo.CreateOfficeTaskSession(ctx, &models.TaskSession{
+		ID: "office-terminal-retry-2", TaskID: taskID, AgentProfileID: agent,
+		State: models.TaskSessionStateCreated,
+	})
+	require.NoError(t, err, "a terminal-only pair must not block a fresh create")
+
+	created, err := repo.ListTaskSessions(ctx, taskID)
+	require.NoError(t, err)
+	require.Len(t, created, 2)
+}
+
+// TestCreateOfficeTaskSessionRefusesLiveWhenTerminalRowsAlsoExist proves the
+// guard fires even when older terminal rows coexist with the live one — the
+// predicate is "any live row exists", not "all rows are live".
+func TestCreateOfficeTaskSessionRefusesLiveWhenTerminalRowsAlsoExist(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-office-live-amid-terminal"
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Office live amid terminal"}))
+
+	agent := "agent-live-amid-terminal"
+	require.NoError(t, repo.CreateOfficeTaskSession(ctx, &models.TaskSession{
+		ID: "office-live-amid-terminal-old", TaskID: taskID, AgentProfileID: agent,
+		State: models.TaskSessionStateCompleted,
+	}))
+	require.NoError(t, repo.CreateOfficeTaskSession(ctx, &models.TaskSession{
+		ID: "office-live-amid-terminal-live", TaskID: taskID, AgentProfileID: agent,
+		State: models.TaskSessionStateRunning,
+	}))
+
+	err := repo.CreateOfficeTaskSession(ctx, &models.TaskSession{
+		ID: "office-live-amid-terminal-blocked", TaskID: taskID, AgentProfileID: agent,
+		State: models.TaskSessionStateCreated,
+	})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrOfficeSessionRaceConflict))
+
+	created, err := repo.ListTaskSessions(ctx, taskID)
+	require.NoError(t, err)
+	require.Len(t, created, 2, "the refused create must not have written a row")
+}
+
+// TestCreateOfficeTaskSessionSkipsGuardForEmptyAgentProfileID proves the
+// guard is bypassed entirely when agent_profile_id is empty (AC-001.5):
+// two rows for the same task with no agent profile are unrestricted, exactly
+// like today's kanban behavior.
+func TestCreateOfficeTaskSessionSkipsGuardForEmptyAgentProfileID(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-office-empty-agent-bypass"
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Office empty agent bypass"}))
+
+	require.NoError(t, repo.CreateOfficeTaskSession(ctx, &models.TaskSession{
+		ID: "office-empty-agent-1", TaskID: taskID, State: models.TaskSessionStateCreated,
+	}))
+	err := repo.CreateOfficeTaskSession(ctx, &models.TaskSession{
+		ID: "office-empty-agent-2", TaskID: taskID, State: models.TaskSessionStateCreated,
+	})
+	require.NoError(t, err, "empty agent_profile_id must bypass the live-pair guard")
+
+	created, err := repo.ListTaskSessions(ctx, taskID)
+	require.NoError(t, err)
+	require.Len(t, created, 2)
+}
+
+// TestGetTaskSessionByTaskAndAgentPrefersLiveOverNewerTerminal is the
+// 62201cdb-shaped livelock regression test: a terminal row started AFTER a
+// live row must not shadow it. Before Change 2, ORDER BY started_at DESC
+// alone would return the newer terminal row, causing the office scheduler to
+// treat a live pair as if it had no session and create a duplicate.
+func TestGetTaskSessionByTaskAndAgentPrefersLiveOverNewerTerminal(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-office-lookup-livelock"
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Office lookup livelock"}))
+	agent := "agent-lookup-livelock"
+
+	older := time.Now().UTC().Add(-time.Hour)
+	newer := time.Now().UTC()
+	insertOfficeSessionWithStartedAt(t, repo.db, officeSessionSeed{
+		id: "lookup-livelock-live", taskID: taskID, agentProfileID: agent,
+		state: models.TaskSessionStateRunning,
+	}, older)
+	insertOfficeSessionWithStartedAt(t, repo.db, officeSessionSeed{
+		id: "lookup-livelock-terminal", taskID: taskID, agentProfileID: agent,
+		state: models.TaskSessionStateCompleted,
+	}, newer)
+
+	got, err := repo.GetTaskSessionByTaskAndAgent(ctx, taskID, agent)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, "lookup-livelock-live", got.ID, "the live row must win over a newer terminal row")
+}
+
+// TestGetTaskSessionByTaskAndAgentOrdersLiveByStartedAtDescThenIDDesc covers
+// the total tiebreak: multiple live rows for the same pair (legacy
+// duplicate-pair data, AC-003.6) resolve deterministically by started_at
+// DESC, then id DESC when started_at ties exactly.
+func TestGetTaskSessionByTaskAndAgentOrdersLiveByStartedAtDescThenIDDesc(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-office-lookup-tiebreak"
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Office lookup tiebreak"}))
+	agent := "agent-lookup-tiebreak"
+
+	same := time.Now().UTC()
+	insertOfficeSessionWithStartedAt(t, repo.db, officeSessionSeed{
+		id: "lookup-tiebreak-a", taskID: taskID, agentProfileID: agent,
+		state: models.TaskSessionStateCreated,
+	}, same)
+	insertOfficeSessionWithStartedAt(t, repo.db, officeSessionSeed{
+		id: "lookup-tiebreak-b", taskID: taskID, agentProfileID: agent,
+		state: models.TaskSessionStateCreated,
+	}, same)
+
+	got, err := repo.GetTaskSessionByTaskAndAgent(ctx, taskID, agent)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, "lookup-tiebreak-b", got.ID, "equal started_at must tiebreak on id DESC")
+}
+
+func TestPostgresGetTaskSessionByTaskAndAgentPrefersLiveOverNewerTerminal(t *testing.T) {
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 2)
+	repo, err := NewWithDB(db, db, nil)
+	require.NoError(t, err)
+	ctx := context.Background()
+	const taskID = "task-office-lookup-livelock-pg"
+	now := time.Now().UTC()
+	_, err = db.Exec(db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), taskID, "", "Office lookup livelock (Postgres)", now, now)
+	require.NoError(t, err)
+	agent := "agent-lookup-livelock-pg"
+
+	older := now.Add(-time.Hour)
+	newer := now
+	insertOfficeSessionWithStartedAt(t, db, officeSessionSeed{
+		id: "lookup-livelock-pg-live", taskID: taskID, agentProfileID: agent,
+		state: models.TaskSessionStateRunning,
+	}, older)
+	insertOfficeSessionWithStartedAt(t, db, officeSessionSeed{
+		id: "lookup-livelock-pg-terminal", taskID: taskID, agentProfileID: agent,
+		state: models.TaskSessionStateCompleted,
+	}, newer)
+
+	got, err := repo.GetTaskSessionByTaskAndAgent(ctx, taskID, agent)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, "lookup-livelock-pg-live", got.ID)
+}
+
+// TestGetTaskSessionByTaskAndAgentReturnsNilForAbsentPairOrEmptyIdentifiers
+// covers AC-002's nil,nil contract: no matching row, and both
+// empty-identifier short-circuits, must not be treated as an error.
+func TestGetTaskSessionByTaskAndAgentReturnsNilForAbsentPairOrEmptyIdentifiers(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-office-lookup-absent"
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Office lookup absent"}))
+
+	got, err := repo.GetTaskSessionByTaskAndAgent(ctx, taskID, "agent-never-seen")
+	require.NoError(t, err)
+	require.Nil(t, got)
+
+	got, err = repo.GetTaskSessionByTaskAndAgent(ctx, "", "agent-never-seen")
+	require.NoError(t, err)
+	require.Nil(t, got)
+
+	got, err = repo.GetTaskSessionByTaskAndAgent(ctx, taskID, "")
+	require.NoError(t, err)
+	require.Nil(t, got)
+}

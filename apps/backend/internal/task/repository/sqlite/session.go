@@ -871,6 +871,20 @@ func (r *Repository) CreateOfficeTaskSession(ctx context.Context, session *model
 		session.Metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
 	}
 
+	if session.AgentProfileID != "" {
+		var liveCount int
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT COUNT(*) FROM task_sessions
+			WHERE task_id = ? AND agent_profile_id = ?
+			  AND state NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')
+		`), session.TaskID, session.AgentProfileID).Scan(&liveCount); err != nil {
+			return fmt.Errorf("check live office session for pair: %w", err)
+		}
+		if liveCount > 0 {
+			return ErrOfficeSessionRaceConflict
+		}
+	}
+
 	if err := r.createTaskSession(ctx, tx, session); err != nil {
 		return err
 	}
@@ -1214,10 +1228,15 @@ func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID st
 
 // GetTaskSessionByTaskAndAgent retrieves the office task session for the given
 // (task_id, agent_profile_id) pair. This pair is NOT unique at the schema
-// level — no index enforces it (see ErrOfficeSessionRaceConflict's doc
-// comment for why) — so both live and terminal rows can accumulate for the
-// same pair, and ORDER BY started_at DESC LIMIT 1 is load-bearing to pick the
-// most recent one. Returns nil, nil when no session exists for the pair.
+// level — the office creation guard (CreateOfficeTaskSession) constrains it
+// only at the moment of insert, so legacy duplicate-pair data and rows
+// created outside that guard can still leave multiple rows for the same
+// pair. The ORDER BY therefore prefers a live row over a terminal one
+// regardless of which is newer — a terminal row created after a live row
+// (e.g. a stale duplicate resolving while the real session is still running)
+// must not shadow the live one — then falls back to started_at DESC, then id
+// DESC as a total tiebreak. Returns nil, nil when no session exists for the
+// pair.
 func (r *Repository) GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error) {
 	if taskID == "" || agentInstanceID == "" {
 		return nil, nil
@@ -1225,7 +1244,11 @@ func (r *Repository) GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, a
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
 		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+`
 		 WHERE ts.task_id = ? AND ts.agent_profile_id = ?
-		 ORDER BY ts.started_at DESC LIMIT 1`,
+		 ORDER BY
+		   CASE WHEN ts.state IN ('COMPLETED', 'FAILED', 'CANCELLED') THEN 1 ELSE 0 END,
+		   ts.started_at DESC,
+		   ts.id DESC
+		 LIMIT 1`,
 	), taskID, agentInstanceID)
 	session, err := r.scanTaskSession(ctx, row, "task_sessions: no matching row")
 	if errors.Is(err, models.ErrTaskSessionNotFound) {

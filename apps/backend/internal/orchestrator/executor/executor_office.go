@@ -80,21 +80,55 @@ func (e *Executor) EnsureSessionForAgentWithCreation(
 		}
 	}
 
-	created, err := e.createOfficeSession(ctx, task, agentInstanceID, agentProfileID, executorID, executorProfileID)
-	if err != nil && errors.Is(err, taskrepo.ErrOfficeSessionRaceConflict) {
-		// Lost the race against a concurrent caller. Re-read and reuse.
-		raced, lookupErr := e.repo.GetTaskSessionByTaskAndAgent(ctx, task.ID, agentInstanceID)
-		if lookupErr == nil && raced != nil {
-			if rebindErr := e.rebindOfficeSessionExecutionProfile(ctx, raced, agentProfileID); rebindErr != nil {
-				return nil, false, rebindErr
-			}
-			reused, _ := e.tryReuseExistingSession(ctx, raced)
-			if reused != nil {
-				return reused, false, nil
-			}
+	return e.createOfficeSessionWithBoundedRecovery(ctx, task, agentInstanceID, agentProfileID, executorID, executorProfileID)
+}
+
+// maxOfficeSessionCreateAttempts bounds EnsureSessionForAgentWithCreation's
+// create-then-recover loop (AC-003.3): one initial attempt plus one retry
+// after losing a create race and finding no live winner to reuse yet.
+// Unbounded retry would spin forever if the guard and the recovery lookup
+// disagree in a way that never resolves.
+const maxOfficeSessionCreateAttempts = 2
+
+// createOfficeSessionWithBoundedRecovery attempts to create a fresh office
+// session, and on losing the race to a concurrent creator (
+// taskrepo.ErrOfficeSessionRaceConflict) re-reads the pair and reuses the
+// winner instead of surfacing the conflict. A non-conflict create failure,
+// or a failure while re-reading after a conflict, is returned as itself —
+// never laundered into the sentinel and never as a nil session with a nil
+// error.
+func (e *Executor) createOfficeSessionWithBoundedRecovery(
+	ctx context.Context, task *v1.Task, agentInstanceID, agentProfileID, executorID, executorProfileID string,
+) (*models.TaskSession, bool, error) {
+	var lastErr error
+	for attempt := 0; attempt < maxOfficeSessionCreateAttempts; attempt++ {
+		created, err := e.createOfficeSession(ctx, task, agentInstanceID, agentProfileID, executorID, executorProfileID)
+		if err == nil {
+			return created, true, nil
 		}
+		lastErr = err
+		if !errors.Is(err, taskrepo.ErrOfficeSessionRaceConflict) {
+			return nil, false, err
+		}
+
+		raced, lookupErr := e.repo.GetTaskSessionByTaskAndAgent(ctx, task.ID, agentInstanceID)
+		if lookupErr != nil {
+			return nil, false, fmt.Errorf("lookup (task,agent) session after create race: %w", lookupErr)
+		}
+		if raced == nil {
+			continue
+		}
+		if rebindErr := e.rebindOfficeSessionExecutionProfile(ctx, raced, agentProfileID); rebindErr != nil {
+			return nil, false, rebindErr
+		}
+		reused, decision := e.tryReuseExistingSession(ctx, raced)
+		if decision != reuseDecisionTerminal {
+			return reused, false, nil
+		}
+		// The winner turned out terminal by the time we read it; retry the
+		// create rather than reusing a row that can't be reused.
 	}
-	return created, err == nil, err
+	return nil, false, lastErr
 }
 
 func (e *Executor) rebindOfficeSessionExecutionProfile(
@@ -279,10 +313,27 @@ func (e *Executor) persistOfficeSession(ctx context.Context, taskID string, sess
 	return e.persistOfficeSessionFallback(ctx, taskID, session)
 }
 
+// persistOfficeSessionFallback is the in-process equivalent of
+// CreateOfficeTaskSession for repositories that don't implement
+// officeTaskSessionCreator. Callers hold e.officeSessionLock(taskID) for the
+// duration, which is this fallback's only mutual-exclusion primitive — so
+// the live-pair guard below must run inside that same critical section,
+// restricted to the (task, agent) pair before classifying terminality,
+// exactly like the repository-native guard.
 func (e *Executor) persistOfficeSessionFallback(ctx context.Context, taskID string, session *models.TaskSession) error {
 	existingSessions, err := e.repo.ListTaskSessions(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("list task sessions before creating office session: %w", err)
+	}
+	if session.AgentProfileID != "" {
+		for _, existing := range existingSessions {
+			if existing.AgentProfileID != session.AgentProfileID {
+				continue
+			}
+			if !isStopTerminalSessionState(existing.State) {
+				return taskrepo.ErrOfficeSessionRaceConflict
+			}
+		}
 	}
 	if len(existingSessions) == 0 {
 		if session.Metadata == nil {
