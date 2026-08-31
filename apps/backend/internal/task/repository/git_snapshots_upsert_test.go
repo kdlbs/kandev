@@ -746,7 +746,7 @@ func TestDeleteLiveMonitorSnapshots(t *testing.T) {
 		Metadata:     map[string]interface{}{"branch_additions": float64(5)},
 	}
 	if err := repo.CreateGitSnapshot(ctx, completed); err != nil {
-		t.Fatalf("create agent_completed: %v", err)
+		t.Fatalf("create non-live snapshot: %v", err)
 	}
 
 	// Verify both exist.
