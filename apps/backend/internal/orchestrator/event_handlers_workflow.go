@@ -953,7 +953,11 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 		}
 	}
 	for _, task := range autoStarts {
-		if task != nil {
+		// ListTasksWithMetadataKey matches key EXISTENCE, which is broader
+		// than what handleTaskCreated will act on. Rows it refuses keep their
+		// key forever, so admitting them would schedule work that can never
+		// converge, on every single startup.
+		if autoStartOnCreateActionable(task) {
 			jobs[task.ID] = struct{}{}
 		}
 	}
@@ -1064,13 +1068,8 @@ func (s *Service) recoverTaskLifecycleAttempt(ctx context.Context, taskID string
 	if _, pending := task.Metadata[models.MetaKeyQueuePromotionPending]; pending {
 		s.handleTaskQueuePromoted(ctx, watcher.TaskEventData{TaskID: taskID})
 	}
-	if hasAutoStartOnCreatePending(task) {
-		// Re-enters handleTaskCreated exactly like a live task.created
-		// delivery would, so it re-runs the same office/opt-in/claim guards
-		// rather than duplicating them here. A surviving token proves no
-		// launch ever happened (the claim precedes the launch in the live
-		// path), so there is no "already started" case to special-case.
-		s.handleTaskCreated(ctx, watcher.TaskEventData{TaskID: taskID})
+	if autoStartOnCreateActionable(task) {
+		s.recoverAutoStartOnCreate(ctx, task)
 	}
 	latest, err := s.repo.GetTask(ctx, taskID)
 	if err != nil || latest == nil {
@@ -1078,7 +1077,7 @@ func (s *Service) recoverTaskLifecycleAttempt(ctx context.Context, taskID string
 	}
 	return queuedMoveExitPending(latest) || manualMoveLifecyclePending(latest) ||
 		manualMoveLifecycleCompleted(latest) || hasQueuePromotionPending(latest) ||
-		hasAutoStartOnCreatePending(latest)
+		autoStartOnCreateActionable(latest)
 }
 
 func (s *Service) recoverQueuedMoveExit(ctx context.Context, task *models.Task) bool {
@@ -1142,17 +1141,60 @@ func hasQueuePromotionPending(task *models.Task) bool {
 	return pending
 }
 
-// hasAutoStartOnCreatePending reports whether a task still carries the
-// create-time auto-start opt-in (models.MetaKeyAutoStartOnCreate). A live
-// task.created delivery claims (removes) this key before launching, so a
-// surviving key at startup means that delivery was lost — e.g. to a
-// transient GetTask error in handleTaskCreated before the claim ever ran.
-func hasAutoStartOnCreatePending(task *models.Task) bool {
-	if task == nil || task.Metadata == nil {
+// autoStartOnCreateActionable reports whether the startup sweep can still act
+// on a task's create-time auto-start opt-in (models.MetaKeyAutoStartOnCreate).
+//
+// It must stay identical to handleTaskCreated's own guard, because the sweep
+// both admits jobs and decides "retry" with it. ListTasksWithMetadataKey
+// matches key existence, but handleTaskCreated requires a positive bool and
+// skips office tasks, and it returns BEFORE claiming the key in either case.
+// Treating existence alone as "pending" therefore produced a token no code
+// path could clear: recovery saw it still present, reported retry, and burned
+// the whole attempt budget on every startup, with the row re-listed on the
+// next one indefinitely. Every other key in this sweep is cleared by its
+// handler, and docs/specs/startup-listener-before-recovery/spec.md attributes
+// a non-converging boot loop to lifecycle tokens that stay pending, so a token
+// class the sweep cannot drain is a regression rather than a cosmetic mismatch.
+func autoStartOnCreateActionable(task *models.Task) bool {
+	if task == nil || task.IsFromOffice {
 		return false
 	}
-	_, pending := task.Metadata[models.MetaKeyAutoStartOnCreate]
-	return pending
+	return models.HasAutoStartOnCreateIntent(task.Metadata)
+}
+
+// recoverAutoStartOnCreate replays a lost task.created delivery for a task that
+// still carries an actionable create-time opt-in.
+//
+// The opt-in is NOT proof that no launch happened. handleTaskCreated is the
+// only function that claims this key; a manual StartTask, a task.moved
+// auto-start and handleTaskQueuePromoted all launch without touching it. So
+// after a lost delivery — the very failure this sweep repairs — an operator
+// starting the task by hand leaves the token behind, and replaying it here
+// would launch a second agent onto a task that is already running or already
+// finished. Neither autoStartTaskForStep nor startTask has an existing-session
+// guard, so that launch would go all the way through.
+func (s *Service) recoverAutoStartOnCreate(ctx context.Context, task *models.Task) {
+	sessions, err := s.repo.ListTaskSessions(ctx, task.ID)
+	if err != nil {
+		// Leave the token untouched. The caller's exit check still sees it as
+		// actionable and spends one of its bounded attempts retrying.
+		s.logger.Warn("failed to check existing sessions before auto-start-on-create recovery",
+			zap.String("task_id", task.ID), zap.Error(err))
+		return
+	}
+	if len(sessions) > 0 {
+		// The task was started by one of those other paths, so this one-shot
+		// token is spent. Claim it rather than merely skipping, so the row
+		// converges instead of being re-scanned on every future startup.
+		if s.claimTaskEventMetadata(ctx, task, models.MetaKeyAutoStartOnCreate) {
+			s.logger.Info("discarded spent auto-start-on-create token: task already has a session",
+				zap.String("task_id", task.ID), zap.Int("session_count", len(sessions)))
+		}
+		return
+	}
+	// Re-enter handleTaskCreated exactly like a live delivery would, so the
+	// office/opt-in/claim guards run once, in one place.
+	s.handleTaskCreated(ctx, watcher.TaskEventData{TaskID: task.ID})
 }
 
 func waitForLifecycleRecovery(ctx context.Context) bool {
