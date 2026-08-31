@@ -12,6 +12,10 @@ import (
 // formatted message, which includes the task id and is therefore brittle.
 var ErrTaskNotFound = repoerrors.ErrTaskNotFound
 
+// ErrMessageNotFound is returned when a message cursor or around target no
+// longer exists. Callers should classify it with errors.Is.
+var ErrMessageNotFound = repoerrors.ErrMessageNotFound
+
 // ErrWorkspaceNotFound is returned by Repository workspace methods when no row
 // matches the supplied id.
 var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound

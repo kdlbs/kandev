@@ -1046,6 +1046,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		return err
 	}
 	next := s.prepareTaskPRSyncState(ctx, tp, status)
+	baseBranchChanged := tp.BaseBranch != next.baseBranch && strings.TrimSpace(next.baseBranch) != ""
 
 	changedFields := taskPRChangedFields(tp, status, next)
 	changed := len(changedFields) > 0
@@ -1094,7 +1095,25 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		)
 	}
 
-	return s.persistAndPublishTaskPRSync(ctx, taskID, status.PR, tp, changed, status.OutcomeFieldsPopulated)
+	return s.persistAndPublishTaskPRSync(
+		ctx, taskID, status.PR, tp, changed, status.OutcomeFieldsPopulated, baseBranchChanged,
+	)
+}
+
+func (s *Service) propagateTaskRepositoryBaseBranch(ctx context.Context, tp *TaskPR, changed bool) {
+	if !changed || s.taskRepositoryUpdater == nil || tp == nil {
+		return
+	}
+	if err := s.taskRepositoryUpdater.UpdateTaskRepositoryBaseBranch(
+		ctx, tp.TaskID, tp.RepositoryID, tp.HeadBranch, tp.BaseBranch,
+	); err != nil && s.logger != nil {
+		s.logger.Warn("failed to propagate pull request base branch to task repository",
+			zap.String("task_id", tp.TaskID),
+			zap.String("repository_id", tp.RepositoryID),
+			zap.Int("pr_number", tp.PRNumber),
+			zap.String("base_branch", tp.BaseBranch),
+			zap.Error(err))
+	}
 }
 
 // persistAndPublishTaskPRSync writes the reconciled sync state and, on
@@ -1110,7 +1129,8 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 // SyncTaskPR to keep that function within the repo's complexity limits and
 // to make the re-read-before-publish behavior directly testable.
 func (s *Service) persistAndPublishTaskPRSync(
-	ctx context.Context, taskID string, pr *PR, tp *TaskPR, changed, outcomeFieldsPopulated bool,
+	ctx context.Context, taskID string, pr *PR, tp *TaskPR,
+	changed, outcomeFieldsPopulated, baseBranchChanged bool,
 ) error {
 	// AC-38/AC-18c: the counter fires at the populated-ness decision point,
 	// before the write is attempted, and survives write failure — it
@@ -1120,6 +1140,7 @@ func (s *Service) persistAndPublishTaskPRSync(
 	if err := s.store.UpdateTaskPR(ctx, tp); err != nil {
 		return fmt.Errorf("update task PR: %w", err)
 	}
+	s.propagateTaskRepositoryBaseBranch(ctx, tp, baseBranchChanged)
 	// Provider payloads carry the authoritative head/base repository identity
 	// and branch. Reconcile after the TaskPR write so a malformed or
 	// unmatchable payload never prevents the review association from persisting.

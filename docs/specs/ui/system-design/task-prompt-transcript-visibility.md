@@ -18,7 +18,11 @@ loads older history only after upward navigation, and preserves prompt `#1` as
 the visible start even when older internal rows remain on the backend.
 
 The design changes no backend query, persistence rule, message order, or API
-field. It uses existing cursor metadata and the existing `prompt_index` field.
+field. It keeps transcript pagination separate from Prompt History pagination:
+Prompt History can request user messages with the `author_type=user` filter,
+while transcript navigation can request an around window for a message that is
+not loaded. Both projections use the existing cursor metadata, message API,
+and `prompt_index` field.
 
 ## Requirement mapping
 
@@ -37,9 +41,16 @@ field. It uses existing cursor metadata and the existing `prompt_index` field.
   the task-description fallback only after the session start is known.
 - `useLazyLoadMessages` owns the prompt-`#1` visible boundary and older-page
   requests. It keeps raw pagination available to explicit recovery consumers.
-- The native transcript owns upward intent, committed sentinel geometry,
-  scroll restoration, and retry-control visibility.
+- The native transcript consumes `useLazyLoadMessages`. Prompt History consumes
+  its own user-message request and pagination state.
+- The native transcript owns upward intent, committed sentinel geometry, scroll
+  restoration, and retry-control visibility.
 - `useLazyLoadSentinel` owns observer lifecycle and request serialization.
+- Transcript navigation first uses loaded messages. When a selected prompt is
+  absent, it requests an around window and merges the result before scrolling.
+- `requestOlderMessages` keeps transcript request coordination and raw cursor
+  metadata unchanged. Prompt History has a separate request coordinator and
+  cursor metadata.
 
 ## History state
 
@@ -140,9 +151,15 @@ failure is distinguishable from leaving the preload region.
 ## Responsive behavior
 
 Desktop and mobile continue to use the existing full-height task Chat surface,
-shared store, shared hooks, and one vertical transcript scroll owner. No new
-mobile composition or navigation is introduced. The recovery button uses the
-same placement on both surfaces with a coarse-pointer touch target.
+shared store, shared hooks, and one vertical transcript scroll owner. Prompt
+History uses the same row selection callback on both surfaces. A selected
+prompt returns the phone to Chat and uses the around-window path when the row is
+not loaded. The recovery button uses the same placement on both surfaces with a
+coarse-pointer touch target.
+
+## Around-window navigation
+
+The chat panel sends `GET /api/v1/task-sessions/:id/messages?around=<message-id>&sort=desc&limit=N` after it confirms that the target belongs to the active session. The backend returns the target and newer rows in newest-first order. The chat panel merges the response into `messages.bySession`, waits for the target row to render, and then scrolls to it. The target token is session-scoped and is cleared only after a successful scroll or a confirmed missing target. A stale response cannot consume a newer selection.
 
 The nearest mobile exemplar is `apps/web/components/task/task-layout.tsx` and
 the existing `mobile-message-pagination.spec.ts` flow. The mobile scenario

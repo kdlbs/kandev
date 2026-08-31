@@ -856,6 +856,43 @@ func (a githubTaskIssueStoreAdapter) UpdateTaskMetadata(ctx context.Context, tas
 	return task, nil
 }
 
+func (a githubTaskIssueStoreAdapter) UpdateTaskRepositoryBaseBranch(
+	ctx context.Context, taskID, repositoryID, headBranch, baseBranch string,
+) error {
+	taskRepos, err := a.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	taskRepo, err := selectTaskRepositoryForPR(taskRepos, repositoryID, headBranch)
+	if err != nil {
+		return err
+	}
+	_, err = a.svc.UpdateRepositoryBaseBranch(ctx, taskservice.UpdateRepositoryBaseBranchRequest{
+		TaskID: taskID, TaskRepositoryID: taskRepo.ID, BaseBranch: baseBranch,
+	})
+	return err
+}
+
+func selectTaskRepositoryForPR(
+	taskRepos []*models.TaskRepository, repositoryID, headBranch string,
+) (*models.TaskRepository, error) {
+	matches := make([]*models.TaskRepository, 0, 1)
+	for _, taskRepo := range taskRepos {
+		if taskRepo != nil && taskRepo.RepositoryID == repositoryID {
+			matches = append(matches, taskRepo)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	for _, taskRepo := range matches {
+		if taskRepo.CheckoutBranch == headBranch {
+			return taskRepo, nil
+		}
+	}
+	return nil, fmt.Errorf("task repository for repository %q and branch %q not found", repositoryID, headBranch)
+}
+
 func wrapGitHubTaskIssueStoreError(err error) error {
 	if errors.Is(err, taskrepo.ErrTaskNotFound) {
 		return fmt.Errorf("%w: %w", githubsvc.ErrTaskNotFound, err)

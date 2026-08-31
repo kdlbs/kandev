@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -269,6 +271,50 @@ func insertMsgWithType(t *testing.T, repo *Repository, id, sessionID, turnID, ms
 	if err != nil {
 		t.Fatalf("insert message %s: %v", id, err)
 	}
+}
+
+func TestListMessagesPaginatedFiltersUserAuthors(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-filter", "sess-filter", "turn-filter")
+	now := time.Now().UTC()
+	for _, message := range []*models.Message{
+		{ID: "user-1", TaskSessionID: "sess-filter", TaskID: "task-filter", TurnID: "turn-filter", AuthorType: models.MessageAuthorUser, Type: models.MessageTypeMessage, CreatedAt: now},
+		{ID: "agent-1", TaskSessionID: "sess-filter", TaskID: "task-filter", TurnID: "turn-filter", AuthorType: models.MessageAuthorAgent, Type: models.MessageTypeMessage, CreatedAt: now.Add(time.Second)},
+		{ID: "user-2", TaskSessionID: "sess-filter", TaskID: "task-filter", TurnID: "turn-filter", AuthorType: models.MessageAuthorUser, Type: models.MessageTypeMessage, CreatedAt: now.Add(2 * time.Second)},
+	} {
+		require.NoError(t, repo.CreateMessage(ctx, message))
+	}
+
+	page, hasMore, err := repo.ListMessagesPaginated(ctx, "sess-filter", models.ListMessagesOptions{
+		AuthorType: string(models.MessageAuthorUser), Limit: 2,
+	})
+
+	require.NoError(t, err)
+	require.False(t, hasMore)
+	require.Equal(t, []string{"user-1", "user-2"}, messageIDs(page))
+}
+
+func TestListMessagesPaginatedAroundIncludesTarget(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-around", "sess-around", "turn-around")
+	now := time.Now().UTC()
+	for index, id := range []string{"m1", "m2", "m3", "m4"} {
+		require.NoError(t, repo.CreateMessage(ctx, &models.Message{
+			ID: id, TaskSessionID: "sess-around", TaskID: "task-around", TurnID: "turn-around",
+			AuthorType: models.MessageAuthorAgent, Type: models.MessageTypeMessage,
+			CreatedAt: now.Add(time.Duration(index) * time.Second),
+		}))
+	}
+
+	page, hasMore, err := repo.ListMessagesPaginated(ctx, "sess-around", models.ListMessagesOptions{
+		Around: "m2", Limit: 2, Sort: "desc",
+	})
+
+	require.NoError(t, err)
+	require.True(t, hasMore)
+	require.Equal(t, []string{"m3", "m2"}, messageIDs(page))
 }
 
 func TestListMessagesByTurnID(t *testing.T) {

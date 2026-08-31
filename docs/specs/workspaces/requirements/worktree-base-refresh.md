@@ -66,6 +66,22 @@ local branches without publishing them first.
 - **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.10:** When the caller cancels
   preparation, Kandev shall stop without creating a fallback worktree.
 
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.11:** When a task repository is
+  linked to a GitHub pull request, Kandev shall use the pull request's current
+  base branch for materialization when live provider state is available, and
+  shall retain the stored base when the provider lookup is unavailable.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.12:** When polling observes that a
+  linked pull request's non-empty base branch changed, Kandev shall update the
+  matching task repository base without failing the pull-request sync if that
+  secondary update is unavailable.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.13:** When required refresh for a
+  pull-request task proves that the requested remote base no longer exists,
+  Kandev shall use a different configured fallback only after that fallback
+  refresh succeeds, and shall identify both branches in a warning. Without a
+  usable fallback, preparation shall fail with a missing-remote-ref
+  classification. Authentication, network, timeout, cancellation, divergent,
+  uncertain, and other unproven failures remain fatal for pull-request tasks.
+
 ## Compatibility
 
 This requirement replaces the universal fail-closed refresh behavior from
