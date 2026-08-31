@@ -624,10 +624,11 @@ type Service struct {
 	// taskLifecycleRetryTimers keep a durable lifecycle token live while a
 	// route effect is still leased by another process. Timers are task-scoped,
 	// deduplicated, and cancelled with the orchestrator service.
-	taskLifecycleRetryMu     sync.Mutex
-	taskLifecycleRetryCtx    context.Context
-	taskLifecycleRetryCancel context.CancelFunc
-	taskLifecycleRetryTimers map[string]*time.Timer
+	taskLifecycleRetryMu      sync.Mutex
+	taskLifecycleRetryCtx     context.Context
+	taskLifecycleRetryCancel  context.CancelFunc
+	taskLifecycleRetryTimers  map[string]*time.Timer
+	taskLifecycleRetryWorkers sync.WaitGroup
 	// engineOptions are applied each time initWorkflowEngine runs. Wired
 	// from cmd/kandev (Phase 3.2) to plug Phase 2 ADR-0004 dependencies
 	// — RunQueueAdapter, ParticipantStore, DecisionStore, and the CEO /
@@ -2413,6 +2414,7 @@ func (s *Service) Start(ctx context.Context) error {
 	if s.workflowStore != nil {
 		s.workflowStore.ReconcileQueuedTasks(ctx)
 	}
+	s.startTaskLifecycleRetries()
 	s.reconcileTaskLifecycleTokens(ctx)
 	// Chains whose predecessor completed while the process was down: the
 	// dependencies_resolved event is in-memory and is not replayed, so without

@@ -2044,10 +2044,19 @@ func (s *Service) claimRouteEffectForStepEnter(
 		return nil, false, fmt.Errorf("claim route effect for step entry: %w", err)
 	}
 	if !claimed {
-		if effect.Status != routing.EffectCompleted {
-			return nil, false, errRouteEffectLeaseHeld
+		latest := effect
+		if transitionID != 0 {
+			latest, found, err = effects.GetWorkflowRouteEffectByTransition(ctx, taskID, transitionID)
+		} else {
+			latest, found, err = effects.GetCurrentWorkflowRouteEffect(ctx, taskID, targetStepID)
 		}
-		return func() {}, false, nil
+		if err != nil {
+			return nil, false, fmt.Errorf("re-read route effect after failed claim: %w", err)
+		}
+		if found && latest.ID == effect.ID && latest.Status == routing.EffectCompleted {
+			return func() {}, false, nil
+		}
+		return nil, false, errRouteEffectLeaseHeld
 	}
 	renewCtx := context.WithoutCancel(ctx)
 	stopRenewal := make(chan struct{})
@@ -2069,8 +2078,9 @@ func (s *Service) scheduleTaskLifecycleRetry(taskID string) {
 	}
 	s.taskLifecycleRetryMu.Lock()
 	defer s.taskLifecycleRetryMu.Unlock()
-	if s.taskLifecycleRetryCtx == nil || s.taskLifecycleRetryCtx.Err() != nil {
-		s.taskLifecycleRetryCtx, s.taskLifecycleRetryCancel = context.WithCancel(context.Background())
+	ctx := s.taskLifecycleRetryCtx
+	if ctx == nil || ctx.Err() != nil {
+		return
 	}
 	if s.taskLifecycleRetryTimers == nil {
 		s.taskLifecycleRetryTimers = make(map[string]*time.Timer)
@@ -2078,17 +2088,30 @@ func (s *Service) scheduleTaskLifecycleRetry(taskID string) {
 	if _, scheduled := s.taskLifecycleRetryTimers[taskID]; scheduled {
 		return
 	}
+	s.taskLifecycleRetryWorkers.Add(1)
 	s.taskLifecycleRetryTimers[taskID] = time.AfterFunc(routeEffectLease, func() {
-		s.runTaskLifecycleRetry(taskID)
+		defer s.taskLifecycleRetryWorkers.Done()
+		s.runTaskLifecycleRetry(ctx, taskID)
 	})
 }
 
-func (s *Service) runTaskLifecycleRetry(taskID string) {
+func (s *Service) startTaskLifecycleRetries() {
+	s.taskLifecycleRetryMu.Lock()
+	defer s.taskLifecycleRetryMu.Unlock()
+	if s.taskLifecycleRetryCtx != nil && s.taskLifecycleRetryCtx.Err() == nil {
+		return
+	}
+	s.taskLifecycleRetryCtx, s.taskLifecycleRetryCancel = context.WithCancel(context.Background())
+	if s.taskLifecycleRetryTimers == nil {
+		s.taskLifecycleRetryTimers = make(map[string]*time.Timer)
+	}
+}
+
+func (s *Service) runTaskLifecycleRetry(ctx context.Context, taskID string) {
 	s.taskLifecycleRetryMu.Lock()
 	delete(s.taskLifecycleRetryTimers, taskID)
-	ctx := s.taskLifecycleRetryCtx
 	s.taskLifecycleRetryMu.Unlock()
-	if ctx == nil || ctx.Err() != nil {
+	if ctx.Err() != nil {
 		return
 	}
 	s.recoverTaskLifecycleToken(ctx, taskID)
@@ -2096,16 +2119,19 @@ func (s *Service) runTaskLifecycleRetry(taskID string) {
 
 func (s *Service) stopTaskLifecycleRetries() {
 	s.taskLifecycleRetryMu.Lock()
-	defer s.taskLifecycleRetryMu.Unlock()
 	if s.taskLifecycleRetryCancel != nil {
 		s.taskLifecycleRetryCancel()
 	}
 	for taskID, timer := range s.taskLifecycleRetryTimers {
-		timer.Stop()
+		if timer.Stop() {
+			s.taskLifecycleRetryWorkers.Done()
+		}
 		delete(s.taskLifecycleRetryTimers, taskID)
 	}
 	s.taskLifecycleRetryCtx = nil
 	s.taskLifecycleRetryCancel = nil
+	s.taskLifecycleRetryMu.Unlock()
+	s.taskLifecycleRetryWorkers.Wait()
 }
 
 func (s *Service) renewRouteEffectClaim(
