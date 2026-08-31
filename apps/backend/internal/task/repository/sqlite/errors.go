@@ -37,10 +37,14 @@ var ErrNoPrimarySession = errors.New("no primary session")
 var ErrExternalIDConflict = repoerrors.ErrExternalIDConflict
 
 // ErrOfficeSessionRaceConflict is classified by isOfficeTaskSessionUniqueViolation
-// (office_task_session_uniqueness.go) and returned by CreateTaskSession and
-// UpdateTaskSessionIfCurrentState when a write violates uniq_office_task_session
-// — i.e. two callers raced past their SELECT-then-INSERT (or a resume raced a
-// fresh create) for the same (task_id, agent_profile_id) pair while both rows
+// (office_task_session_uniqueness.go) and returned by CreateTaskSession and by
+// every full-row session update that routes through the unexported
+// updateTaskSessionWithStateGuard — UpdateTaskSession,
+// UpdateTaskSessionWithMetadata, UpdateTaskSessionIfCurrentState, and
+// UpdateTaskSessionIfCurrentStateRemovingMetadataKeys — when a write violates
+// uniq_office_task_session — i.e. two callers raced past their
+// SELECT-then-INSERT (or a resume raced a fresh create) for the same
+// (task_id, agent_profile_id) pair while both rows
 // are "live" (CREATED, STARTING, RUNNING, IDLE, or WAITING_FOR_INPUT).
 // Terminal rows for the same pair are unaffected — the index only
 // constrains the live set. Callers should re-read and reuse the winning row

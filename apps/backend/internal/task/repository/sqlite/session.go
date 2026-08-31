@@ -916,10 +916,12 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 	if err != nil {
 		return fmt.Errorf("failed to serialize repository snapshot: %w", err)
 	}
-	// agent_profile_id is NULL-able. Empty string would defeat the partial
-	// unique index since SQLite treats two empty strings as equal — store NULL
-	// for kanban / quick-chat rows and a real value only for office sessions
-	// (per ADR 0005, kanban and office now share the same column).
+	// agent_profile_id is NULL-able and stored as NULL when empty. No unique
+	// index currently constrains (task_id, agent_profile_id) — see
+	// ErrOfficeSessionRaceConflict's doc comment (errors.go). Per ADR 0005,
+	// kanban and office share this column, and every row (kanban included)
+	// carries a non-NULL value in practice — nothing here scopes NULL to
+	// kanban specifically.
 	var agentProfileID interface{}
 	if session.AgentProfileID != "" {
 		agentProfileID = session.AgentProfileID
@@ -1416,8 +1418,10 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 	// would clobber metadata set via those side-channel paths since the
 	// caller's in-memory copy may be stale.
 
-	// agent_profile_id is stored as NULL when empty so the partial unique
-	// index over (task_id, agent_profile_id) ignores kanban / quick-chat rows.
+	// agent_profile_id is stored as NULL when empty. No unique index
+	// currently constrains (task_id, agent_profile_id) — see
+	// ErrOfficeSessionRaceConflict's doc comment (errors.go) for why, and
+	// for what still guards this pair despite that.
 	var agentProfileID interface{}
 	if session.AgentProfileID != "" {
 		agentProfileID = session.AgentProfileID
