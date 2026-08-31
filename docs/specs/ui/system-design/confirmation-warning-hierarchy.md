@@ -50,9 +50,11 @@ The task subject sentence stays outside that model because archive and delete
 describe different task outcomes. Single-task delete uses direct declarative
 copy naming the task and its irreversibility. Archive uses corresponding
 archive copy without describing archive as irreversible. Bulk strings retain
-locale-aware count handling. All catalog changes land together in `en`,
-`pt-pt`, `zh-cn`, `zh-hk`, and `zh-tw`; the Traditional Chinese catalogs are
-generated through the repository's `i18n:zh-hant` workflow.
+locale-aware count handling. Translations land together in the five real
+catalogs: `en`, `pt-pt`, `zh-cn`, `zh-hk`, and `zh-tw`. The Traditional Chinese
+catalogs are generated through the repository's `i18n:zh-hant` workflow. The
+QA-only `pseudo` locale remains hidden in production, must stay synchronized
+with `en` under `i18n:check`, and is regenerated with `pnpm run i18n:pseudo`.
 
 A shared task-local renderer presents effects as a semantic list and notes as
 supporting prose. Full dialogs use paragraphs and a list. The existing compact

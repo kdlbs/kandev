@@ -69,9 +69,9 @@ dialogs contained and touch-safe.
 1. Change or add cleanup-summary and component expectations for the structured
    model, semantic markup, direct outcome copy, body/footer composition, and
    action variants. Record the expected RED failures.
-2. Implement the model and renderer, then update English and Portuguese copy;
-   generate Traditional Chinese from the Chinese source catalog using the
-   repository workflow.
+2. Implement the model and renderer, then update `en`, `pt-pt`, and `zh-cn` in
+   that order. Run `pnpm run i18n:zh-hant` after `zh-cn`; it generates `zh-tw`
+   first and then `zh-hk` from that updated source catalog.
 3. Run focused tests GREEN, then translation parity, typecheck, and focused
    lint. Do not hand-edit generated Traditional Chinese values after generation.
 

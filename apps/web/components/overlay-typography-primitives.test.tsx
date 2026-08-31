@@ -15,6 +15,56 @@ const PRETTY_TEXT_CLASS = "text-pretty";
 const WORD_CONTAINMENT_CLASS = "wrap-anywhere";
 const ZERO_MIN_WIDTH_CLASS = "min-w-0";
 
+function verifyConsumerWrappingOverrides() {
+  // @covers AC-UI-SURFACE-TEXT-HIERARCHY-001.3, AC-UI-SURFACE-TEXT-HIERARCHY-001.4
+  render(
+    <div>
+      <section>
+        <AlertTitle data-testid="alert-override-title" className="text-pretty" />
+        <AlertDescription data-testid="alert-override-description" className="text-balance" />
+      </section>
+      <AlertDialog>
+        <section>
+          <AlertDialogTitle data-testid="alert-dialog-override-title" className="text-pretty" />
+          <AlertDialogDescription
+            data-testid="alert-dialog-override-description"
+            className="text-balance"
+          />
+        </section>
+      </AlertDialog>
+      <Dialog>
+        <section>
+          <DialogTitle data-testid="dialog-override-title" className="text-pretty" />
+          <DialogDescription data-testid="dialog-override-description" className="text-balance" />
+        </section>
+      </Dialog>
+      <Drawer>
+        <section>
+          <DrawerTitle data-testid="drawer-override-title" className="text-pretty" />
+          <DrawerDescription data-testid="drawer-override-description" className="text-balance" />
+        </section>
+      </Drawer>
+      <Sheet>
+        <section>
+          <SheetTitle data-testid="sheet-override-title" className="text-pretty" />
+          <SheetDescription data-testid="sheet-override-description" className="text-balance" />
+        </section>
+      </Sheet>
+    </div>,
+  );
+
+  for (const name of primitiveFamilies) {
+    const title = screen.getByTestId(`${name}-override-title`);
+    const description = screen.getByTestId(`${name}-override-description`);
+    expect(title.classList.contains(PRETTY_TEXT_CLASS)).toBe(true);
+    expect(title.classList.contains(BALANCED_TEXT_CLASS)).toBe(false);
+    expect(title.classList.contains(WORD_CONTAINMENT_CLASS)).toBe(true);
+    expect(description.classList.contains(BALANCED_TEXT_CLASS)).toBe(true);
+    expect(description.classList.contains(PRETTY_TEXT_CLASS)).toBe(false);
+    expect(description.classList.contains(WORD_CONTAINMENT_CLASS)).toBe(true);
+  }
+}
+
 describe("surface typography primitives", () => {
   it("uses semantic wrapping defaults for every shared surface family", () => {
     // @covers AC-UI-SURFACE-TEXT-HIERARCHY-001.1, AC-UI-SURFACE-TEXT-HIERARCHY-001.3
@@ -78,29 +128,6 @@ describe("surface typography primitives", () => {
   });
 
   it("lets consumers override the shared wrapping default", () => {
-    // @covers AC-UI-SURFACE-TEXT-HIERARCHY-001.3, AC-UI-SURFACE-TEXT-HIERARCHY-001.4
-    render(
-      <>
-        <AlertTitle data-testid="override-title" className="text-pretty" />
-        <AlertDescription data-testid="override-description" className="text-balance" />
-      </>,
-    );
-
-    expect(screen.getByTestId("override-title").classList.contains(PRETTY_TEXT_CLASS)).toBe(true);
-    expect(screen.getByTestId("override-title").classList.contains(BALANCED_TEXT_CLASS)).toBe(
-      false,
-    );
-    expect(screen.getByTestId("override-description").classList.contains(BALANCED_TEXT_CLASS)).toBe(
-      true,
-    );
-    expect(screen.getByTestId("override-description").classList.contains(PRETTY_TEXT_CLASS)).toBe(
-      false,
-    );
-    expect(screen.getByTestId("override-title").classList.contains(WORD_CONTAINMENT_CLASS)).toBe(
-      true,
-    );
-    expect(
-      screen.getByTestId("override-description").classList.contains(WORD_CONTAINMENT_CLASS),
-    ).toBe(true);
+    verifyConsumerWrappingOverrides();
   });
 });
