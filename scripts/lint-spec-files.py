@@ -246,7 +246,7 @@ def parse_size_exceptions(text: str, source: Path) -> tuple[dict[str, int], list
         if not raw_line.strip():
             continue
         parts = raw_line.split("\t")
-        if len(parts) != 2 or not parts[0] or not parts[1].isdigit():
+        if len(parts) != 2 or not parts[0] or not re.fullmatch(r"[0-9]+", parts[1]):
             violations.append(
                 Violation(
                     "malformed-size-exception",

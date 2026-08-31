@@ -152,8 +152,28 @@ migration: in_progress
         self.assertEqual(self.rules(violations), ["legacy-size-ratchet"])
         self.assertEqual(violations[0].path, self.root / "docs/specs/legacy/spec.md")
 
+    def test_loads_a_valid_sidecar_from_disk_and_enforces_its_ceiling(self) -> None:
+        self.write("docs/specs/spec-lint-exceptions.tsv", "docs/specs/legacy/spec.md\t12\n")
+        path = self.write("docs/specs/legacy/spec.md", "x" * 12)
+        self.config["limits"]["legacy"] = 10
+
+        self.assertEqual(load_linter().lint_specs(self.root, self.config), [])
+
+        path.write_text("x" * 13, encoding="utf-8")
+        violations = load_linter().lint_specs(self.root, self.config)
+        self.assertIn("file-size", self.rules(violations))
+        self.assertIn("frozen ceiling 12", violations[0].message)
+
     def test_flags_a_malformed_size_exception_line(self) -> None:
         self.write("docs/specs/spec-lint-exceptions.tsv", "docs/specs/legacy/spec.md\n")
+        self.write("docs/specs/legacy/spec.md", "x" * 5)
+
+        violations = load_linter().lint_specs(self.root, self.config)
+
+        self.assertIn("malformed-size-exception", self.rules(violations))
+
+    def test_flags_a_non_ascii_digit_as_a_malformed_size_exception_line(self) -> None:
+        self.write("docs/specs/spec-lint-exceptions.tsv", "docs/specs/legacy/spec.md\t²\n")
         self.write("docs/specs/legacy/spec.md", "x" * 5)
 
         violations = load_linter().lint_specs(self.root, self.config)
