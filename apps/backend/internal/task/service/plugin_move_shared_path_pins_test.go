@@ -207,7 +207,12 @@ func TestSharedMovePath_ConcurrentDifferentStepMovesRecordDistinctTransitions(t 
 	for _, dest := range []string{"step-a", "step-b"} {
 		go func(step string) {
 			defer wg.Done()
-			_, err := svc.MoveTaskWithOptions(pluginMoveContext("plugin:acme"), "task-racing", "wf-source", step, 0, pluginMoveOptions())
+			opts := pluginMoveOptions()
+			// Both requests represent the same source generation. Pin it here so
+			// scheduler serialization cannot turn this intended race into two
+			// legitimate sequential moves before the second call reads the task.
+			opts.ExpectedWorkflowStepID = "step-source"
+			_, err := svc.MoveTaskWithOptions(pluginMoveContext("plugin:acme"), "task-racing", "wf-source", step, 0, opts)
 			results <- err
 		}(dest)
 	}
