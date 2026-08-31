@@ -354,17 +354,18 @@ func TestLoadPendingStepSignal_RoundTrip(t *testing.T) {
 	t.Run("json-rehydrated map", func(t *testing.T) {
 		meta := map[string]interface{}{
 			models.SessionMetaKeyPendingStepCompletion: map[string]interface{}{
-				"step_id":     "step-2",
-				"source":      "manual_fallback",
-				"summary":     "user marked complete",
-				"signaled_at": "2026-06-04T12:00:00Z",
+				"operation_id": "route-operation-2",
+				"step_id":      "step-2",
+				"source":       "manual_fallback",
+				"summary":      "user marked complete",
+				"signaled_at":  "2026-06-04T12:00:00Z",
 			},
 		}
 		got, ok := models.LoadPendingStepSignal(meta)
 		if !ok {
 			t.Fatal("expected models.LoadPendingStepSignal to recognise map shape")
 		}
-		if got.StepID != "step-2" || got.Source != "manual_fallback" || got.Summary != "user marked complete" {
+		if got.OperationID != "route-operation-2" || got.StepID != "step-2" || got.Source != "manual_fallback" || got.Summary != "user marked complete" {
 			t.Errorf("map round-trip mismatch: %+v", got)
 		}
 	})

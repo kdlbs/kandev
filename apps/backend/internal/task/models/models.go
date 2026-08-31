@@ -789,11 +789,12 @@ func LoadPendingStepSignal(metadata map[string]interface{}) (PendingStepCompleti
 		return v, true
 	case map[string]interface{}:
 		out := PendingStepCompletionSignal{
-			StepID:   StringFromAny(v["step_id"]),
-			Source:   StringFromAny(v["source"]),
-			Summary:  StringFromAny(v["summary"]),
-			Handoff:  StringFromAny(v["handoff"]),
-			Blockers: StringFromAny(v["blockers"]),
+			OperationID: StringFromAny(v["operation_id"]),
+			StepID:      StringFromAny(v["step_id"]),
+			Source:      StringFromAny(v["source"]),
+			Summary:     StringFromAny(v["summary"]),
+			Handoff:     StringFromAny(v["handoff"]),
+			Blockers:    StringFromAny(v["blockers"]),
 		}
 		if ts, ok := v["signaled_at"].(string); ok {
 			if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil {

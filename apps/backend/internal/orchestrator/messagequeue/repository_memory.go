@@ -978,6 +978,11 @@ func (r *memoryRepository) TransferSession(_ context.Context, oldSessionID, newS
 	if oldSessionID == newSessionID {
 		return nil
 	}
+	if move, ok := r.pendingMoves[oldSessionID]; ok {
+		if destination, exists := r.pendingMoves[newSessionID]; exists && destination.ID != move.ID {
+			return ErrPendingMoveGenerationConflict
+		}
+	}
 	destinationAutoRun := r.autoRunLocked(oldSessionID) && r.autoRunLocked(newSessionID)
 	if list, ok := r.entries[oldSessionID]; ok {
 		// Mirror the SQLite repo: shift transferred positions past the
@@ -1008,9 +1013,6 @@ func (r *memoryRepository) TransferSession(_ context.Context, oldSessionID, newS
 		delete(r.nextPosition, oldSessionID)
 	}
 	if move, ok := r.pendingMoves[oldSessionID]; ok {
-		if destination, exists := r.pendingMoves[newSessionID]; exists && destination.ID != move.ID {
-			return ErrPendingMoveGenerationConflict
-		}
 		r.pendingMoves[newSessionID] = move
 		delete(r.pendingMoves, oldSessionID)
 	}
