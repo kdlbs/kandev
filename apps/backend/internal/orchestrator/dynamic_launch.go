@@ -62,6 +62,7 @@ func (d *dynamicTaskDownstream) Launch(
 		return dynamicruntime.DownstreamExecution{}, fmt.Errorf("%w: %v", classified, err)
 	}
 	d.service.bindDynamicAttemptExecution(d.sessionID, execution.AgentExecutionID)
+	d.service.bindPromptAttemptToExecution(ctx, d.sessionID, execution.AgentExecutionID)
 	d.execution = execution
 	acpSessionID := ""
 	if session, sessionErr := d.service.repo.GetTaskSession(ctx, d.sessionID); sessionErr == nil && session != nil {
@@ -204,7 +205,7 @@ func (s *Service) launchPreparedSessionWithDynamicFallbackWithContinuation(
 	continuationInput *dynamicruntime.ContinuationInput,
 ) (*executor.TaskExecution, error) {
 	if s.profileExecutionResolver == nil {
-		return s.executor.LaunchPreparedSession(ctx, task, sessionID, options)
+		return s.launchConcretePreparedSession(ctx, task, sessionID, options)
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -215,7 +216,7 @@ func (s *Service) launchPreparedSessionWithDynamicFallbackWithContinuation(
 		return nil, err
 	}
 	if !dynamic {
-		return s.executor.LaunchPreparedSession(ctx, task, sessionID, options)
+		return s.launchConcretePreparedSession(ctx, task, sessionID, options)
 	}
 	downstream := &dynamicTaskDownstream{
 		service: s, task: task, sessionID: sessionID, options: options,
@@ -248,6 +249,22 @@ func (s *Service) launchPreparedSessionWithDynamicFallbackWithContinuation(
 		result.Execution.ExecutionProfileID = session.ExecutionProfileID
 	}
 	return downstream.execution, nil
+}
+
+func (s *Service) launchConcretePreparedSession(
+	ctx context.Context,
+	task *v1.Task,
+	sessionID string,
+	options executor.LaunchOptions,
+) (*executor.TaskExecution, error) {
+	if options.StartAgent && (options.Prompt != "" || len(options.Attachments) > 0) {
+		s.beginInitialPromptAttempt(sessionID, false)
+	}
+	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, options)
+	if execution != nil {
+		s.bindPromptAttemptToExecution(ctx, sessionID, execution.AgentExecutionID)
+	}
+	return execution, err
 }
 
 func (s *Service) dynamicContinuationForLaunch(

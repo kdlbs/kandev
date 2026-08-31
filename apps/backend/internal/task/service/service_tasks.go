@@ -2670,7 +2670,7 @@ func (s *Service) runTaskCleanup(
 	stopTargets = refreshedTargets
 	s.registerTaskRuntimeStopOwners(stopTargets, true)
 
-	stopOutcome := s.stopTaskRuntimeTargetsWithTaskDeleted(cleanupCtx, id, stopTargets, stopReason, stopFailMsg, taskDeleted)
+	stopOutcome := s.stopTaskRuntimeTargetsWithTaskDeleted(cleanupCtx, id, stopTargets, stopReason, stopFailMsg, taskDeleted, true)
 
 	cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, stopTargets, envCleanup,
 		taskCleanupPreserveRows(stopOutcome))
@@ -2883,6 +2883,7 @@ func (s *Service) stopTaskRuntimeTargetsWithTaskDeleted(
 	stopTargets []taskStopTarget,
 	stopReason, stopFailMsg string,
 	taskDeleted bool,
+	waitForStop ...bool,
 ) taskRuntimeStopOutcome {
 	outcome := taskRuntimeStopOutcome{
 		failed:   make(map[string]struct{}),
@@ -2891,11 +2892,12 @@ func (s *Service) stopTaskRuntimeTargetsWithTaskDeleted(
 	if s.executionStopper == nil || len(stopTargets) == 0 {
 		return outcome
 	}
+	wait := len(waitForStop) > 0 && waitForStop[0]
 	for _, target := range stopTargets {
 		if context.Cause(ctx) != nil {
 			return outcome
 		}
-		s.stopTaskRuntimeTarget(ctx, taskID, target, stopReason, stopFailMsg, taskDeleted, &outcome)
+		s.stopTaskRuntimeTarget(ctx, taskID, target, stopReason, stopFailMsg, taskDeleted, wait, &outcome)
 	}
 	return outcome
 }
@@ -2905,14 +2907,14 @@ func (s *Service) stopTaskRuntimeTarget(
 	taskID string,
 	target taskStopTarget,
 	stopReason, stopFailMsg string,
-	taskDeleted bool,
+	taskDeleted, waitForStop bool,
 	outcome *taskRuntimeStopOutcome,
 ) {
 	if target.executionID != "" {
 		s.stopTaskRuntimeExecution(ctx, taskID, target, stopReason, stopFailMsg, outcome)
 		return
 	}
-	s.stopTaskRuntimeSession(ctx, taskID, target, stopReason, stopFailMsg, taskDeleted, outcome)
+	s.stopTaskRuntimeSession(ctx, taskID, target, stopReason, stopFailMsg, taskDeleted, waitForStop, outcome)
 }
 
 func (s *Service) stopTaskRuntimeExecution(
@@ -2940,9 +2942,19 @@ func (s *Service) stopTaskRuntimeSession(
 	target taskStopTarget,
 	stopReason, stopFailMsg string,
 	taskDeleted bool,
+	waitForStop bool,
 	outcome *taskRuntimeStopOutcome,
 ) {
-	err := s.executionStopper.StopSession(ctx, target.sessionID, stopReason, true)
+	var err error
+	if waitForStop {
+		if synchronous, ok := s.executionStopper.(synchronousTaskExecutionStopper); ok {
+			err = synchronous.StopSessionSynchronously(ctx, target.sessionID, stopReason, true)
+		} else {
+			err = s.executionStopper.StopSession(ctx, target.sessionID, stopReason, true)
+		}
+	} else {
+		err = s.executionStopper.StopSession(ctx, target.sessionID, stopReason, true)
+	}
 	if err == nil {
 		return
 	}

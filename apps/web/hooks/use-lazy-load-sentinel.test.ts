@@ -289,17 +289,11 @@ describe("useLazyLoadSentinel — re-arm, disarm, and stale completions", () => 
     await waitFor(() => expect(loadMore).toHaveBeenCalledTimes(2));
   });
 
-  it("reports the actual continuation outcome after all firing guards", async () => {
+  it("uses the caller continuation predicate even after an observer exit", async () => {
     const scrollRef = makeScrollRef();
     const onLoadSettled = vi.fn();
     const shouldContinueWhileIntersecting = vi.fn(() => true);
-    let resolveLoad: (value: number) => void = () => {};
-    const loadMore = vi.fn(
-      () =>
-        new Promise<number>((resolve) => {
-          resolveLoad = resolve;
-        }),
-    );
+    const loadMore = vi.fn().mockResolvedValueOnce(20).mockResolvedValueOnce(0);
     const { result } = renderHook(() =>
       useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
         rearmWhileIntersecting: true,
@@ -312,17 +306,14 @@ describe("useLazyLoadSentinel — re-arm, disarm, and stale completions", () => 
 
     fire(records[0], true, node);
     fire(records[0], false, node);
-    await act(async () => resolveLoad(20));
 
-    await waitFor(() =>
-      expect(onLoadSettled).toHaveBeenCalledWith({
-        count: 20,
-        rejected: false,
-        continuation: "sentinel-left-preload",
-      }),
-    );
-    expect(loadMore).toHaveBeenCalledTimes(1);
-    expect(shouldContinueWhileIntersecting).not.toHaveBeenCalled();
+    await waitFor(() => expect(loadMore).toHaveBeenCalledTimes(2));
+    expect(shouldContinueWhileIntersecting).toHaveBeenCalledTimes(1);
+    expect(onLoadSettled).toHaveBeenNthCalledWith(1, {
+      count: 20,
+      rejected: false,
+      continuation: "continued",
+    });
   });
 });
 
@@ -336,7 +327,7 @@ describe("useLazyLoadSentinel — stickToBottomWhileLoading", () => {
     Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 600 });
     scroller.scrollTop = 200;
     let resolveLoad: (value: number) => void = () => {};
-    const loadMore = vi.fn(
+    const loadMore = vi.fn().mockImplementationOnce(
       () =>
         new Promise<number>((resolve) => {
           resolveLoad = resolve;
@@ -622,6 +613,103 @@ describe("useLazyLoadSentinel — failure recovery and stale completions", () =>
     fire(records[0], true, node);
     await act(async () => {});
     expect(loadMore).toHaveBeenCalledTimes(3);
+  });
+
+  it("allows an explicit retry after the sentinel leaves preload", async () => {
+    const scrollRef = makeScrollRef();
+    const loadMore = vi.fn().mockResolvedValueOnce(0).mockResolvedValueOnce(20);
+    const { result } = renderHook(() =>
+      useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
+        rearmWhileIntersecting: true,
+      }),
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+
+    fire(records[0], true, node);
+    await act(async () => {});
+    fire(records[0], false, node);
+
+    act(() => result.current.retry());
+    await waitFor(() => expect(loadMore).toHaveBeenCalledTimes(2));
+  });
+
+  it("ignores a request settlement invalidated by the owning view", async () => {
+    const scrollRef = makeScrollRef();
+    let resolveLoad: (value: number) => void = () => {};
+    let requestCurrent = true;
+    const onLoadSettled = vi.fn();
+    const loadMore = vi.fn().mockImplementationOnce(
+      () =>
+        new Promise<number>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    loadMore.mockResolvedValueOnce(0);
+    const { result } = renderHook(() =>
+      useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
+        rearmWhileIntersecting: true,
+        isRequestCurrent: () => requestCurrent,
+        onLoadSettled,
+      }),
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+
+    fire(records[0], true, node);
+    requestCurrent = false;
+    await act(async () => resolveLoad(0));
+
+    expect(onLoadSettled).toHaveBeenCalledWith({
+      count: 0,
+      rejected: false,
+      continuation: "stale",
+    });
+
+    requestCurrent = true;
+    fire(records[0], true, node);
+    await waitFor(() => expect(loadMore).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("useLazyLoadSentinel — stale view handoff", () => {
+  it("replays an eligible intersection after a stale request releases the lock", async () => {
+    const scrollRef = makeScrollRef();
+    let activeView = "A";
+    let resolveA: (value: number) => void = () => {};
+    const loadA = vi.fn(
+      () =>
+        new Promise<number>((resolve) => {
+          resolveA = resolve;
+        }),
+    );
+    const loadB = vi.fn(async () => 0);
+    const { result, rerender } = renderHook(
+      ({ view }: { view: string }) =>
+        useLazyLoadSentinel(scrollRef, true, false, false, view === "A" ? loadA : loadB, {
+          rearmWhileIntersecting: true,
+          isRequestCurrent: () => activeView === view,
+        }),
+      { initialProps: { view: "A" } },
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+
+    fire(records[0], true, node);
+    expect(loadA).toHaveBeenCalledTimes(1);
+
+    activeView = "B";
+    rerender({ view: "B" });
+    fire(records[1], true, node);
+
+    // B's observer sees the eligible sentinel, but A still owns the shared
+    // in-flight lock until its stale request settles.
+    expect(loadB).not.toHaveBeenCalled();
+    await act(async () => resolveA(20));
+
+    // No exit/re-entry or recovery click: releasing A must replay B's current
+    // intersection through the normal sentinel path.
+    await waitFor(() => expect(loadB).toHaveBeenCalledTimes(1));
   });
 });
 

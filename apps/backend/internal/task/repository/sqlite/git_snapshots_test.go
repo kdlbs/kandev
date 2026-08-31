@@ -508,6 +508,55 @@ func TestUpsertLatestLiveGitSnapshotKeepsOneLiveRowPerSession(t *testing.T) {
 	assertJSONMapEqual(t, "Files", all[0].Files, map[string]interface{}{"a.go": "modified"})
 }
 
+func TestUpsertLatestLiveGitSnapshotKeepsOneLiveRowPerRepository(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedSessionForGit(t, repo, "task-snap-multi-repo", "session-snap-multi-repo")
+	base := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
+
+	for _, snapshot := range []*models.GitSnapshot{
+		{
+			ID: "live-root-1", SessionID: "session-snap-multi-repo", HeadCommit: "root-1",
+			Metadata: map[string]interface{}{"repository_name": "", "timestamp": "2026-06-01T09:01:00Z"}, CreatedAt: base.Add(time.Minute),
+		},
+		{
+			ID: "live-frontend-1", SessionID: "session-snap-multi-repo", HeadCommit: "frontend-1",
+			Metadata: map[string]interface{}{"repository_name": "frontend", "timestamp": "2026-06-01T09:01:00Z"}, CreatedAt: base.Add(time.Minute),
+		},
+		{
+			ID: "live-root-2", SessionID: "session-snap-multi-repo", HeadCommit: "root-2",
+			Metadata: map[string]interface{}{"repository_name": "", "timestamp": "2026-06-01T09:02:00Z"}, CreatedAt: base.Add(2 * time.Minute),
+		},
+	} {
+		if err := repo.UpsertLatestLiveGitSnapshot(ctx, snapshot); err != nil {
+			t.Fatalf("UpsertLatestLiveGitSnapshot(%s): %v", snapshot.ID, err)
+		}
+	}
+
+	liveRows := countRows(t, repo,
+		`SELECT COUNT(1) FROM task_session_git_snapshots WHERE session_id = ? AND triggered_by = ?`,
+		"session-snap-multi-repo", TriggeredByLiveMonitor)
+	if liveRows != 2 {
+		t.Fatalf("live_monitor rows = %d, want one row per repository", liveRows)
+	}
+
+	all, err := repo.GetGitSnapshotsBySession(ctx, "session-snap-multi-repo", 0)
+	if err != nil {
+		t.Fatalf("GetGitSnapshotsBySession: %v", err)
+	}
+	byRepository := make(map[string]string, len(all))
+	for _, snapshot := range all {
+		repositoryName, _ := snapshot.Metadata["repository_name"].(string)
+		byRepository[repositoryName] = snapshot.HeadCommit
+	}
+	if got := byRepository[""]; got != "root-2" {
+		t.Errorf("root live snapshot = %q, want root-2", got)
+	}
+	if got := byRepository["frontend"]; got != "frontend-1" {
+		t.Errorf("frontend live snapshot = %q, want frontend-1", got)
+	}
+}
+
 func TestUpsertLatestLiveGitSnapshotGeneratesIDAndRejectsNil(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

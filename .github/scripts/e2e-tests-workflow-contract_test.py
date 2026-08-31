@@ -122,6 +122,85 @@ class DesktopE2EWorkflowContractTest(unittest.TestCase):
         self.assertIn('artifact.name === "e2e-timing-profile"', workflow)
         self.assertIn("!artifact.expired", workflow)
 
+    # @covers AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-002.1
+    # @covers AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-002.2
+    def test_container_job_reuses_verified_browser_cache_with_fallback(self) -> None:
+        workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
+        container_job = job_block(workflow, "e2e-containers", "desktop-e2e")
+
+        self.assertIn(
+            "uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+            container_job,
+        )
+        self.assertIn(
+            "uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+            container_job,
+        )
+        self.assertIn("id: playwright_image", container_job)
+        self.assertLess(
+            container_job.index("- name: Log in to GHCR"),
+            container_job.index("- name: Resolve immutable Playwright runtime image"),
+        )
+        self.assertIn(
+            "if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository\n        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f",
+            container_job,
+        )
+        self.assertIn(
+            "image=ghcr.io/kdlbs/kandev-ci:runtime-latest",
+            container_job,
+        )
+        self.assertIn(
+            'docker buildx imagetools inspect "$image"',
+            container_job,
+        )
+        self.assertIn("for attempt in 1 2 3; do", container_job)
+        self.assertIn(
+            'if candidate="$(docker buildx imagetools inspect "$image"',
+            container_job,
+        )
+        self.assertIn('sleep "$((attempt * 2))"', container_job)
+        self.assertIn("path: /tmp/ms-playwright", container_job)
+        self.assertIn(
+            "key: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ steps.playwright_image.outputs.digest }}-${{ github.run_id }}-${{ github.run_attempt }}",
+            container_job,
+        )
+        self.assertIn(
+            "restore-keys: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ steps.playwright_image.outputs.digest }}-",
+            container_job,
+        )
+        self.assertIn("id: playwright_cache", container_job)
+        self.assertIn("id: playwright_cache_verify", container_job)
+        self.assertIn("PLAYWRIGHT_BROWSERS_PATH=/tmp/ms-playwright", container_job)
+        self.assertIn(
+            "if: steps.playwright_cache.outputs.cache-hit != ''",
+            container_job,
+        )
+        self.assertIn(
+            "if: steps.playwright_cache.outputs.cache-hit == '' || steps.playwright_cache_verify.outcome != 'success'",
+            container_job,
+        )
+        self.assertIn(
+            "github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository",
+            container_job,
+        )
+        self.assertIn(
+            "PLAYWRIGHT_RUNTIME_REF: ${{ steps.playwright_image.outputs.ref }}",
+            container_job,
+        )
+        self.assertIn('docker pull "$PLAYWRIGHT_RUNTIME_REF"', container_job)
+        self.assertIn('"$PLAYWRIGHT_RUNTIME_REF" \\', container_job)
+        self.assertNotIn('docker pull "${{ steps.playwright_image.outputs.ref }}"', container_job)
+        self.assertIn(
+            "if: success() && (steps.playwright_cache.outputs.cache-hit == '' || steps.playwright_cache_verify.outcome != 'success')",
+            container_job,
+        )
+        self.assertIn("GITHUB_STEP_SUMMARY", container_job)
+        self.assertIn("id: browser_setup_timer", container_job)
+        self.assertIn('echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"', container_job)
+        self.assertIn('setup_mode="cache-hit"', container_job)
+        self.assertIn('setup_mode="image-fallback"', container_job)
+        self.assertGreaterEqual(container_job.count("continue-on-error: true"), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

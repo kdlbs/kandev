@@ -1,7 +1,16 @@
 // kandev.plugin.v1 Host data API — folded into
 // apps/backend/proto/kandev/plugin/v1/plugin.proto and fully wired (reads and
 // writes both implemented). This file is the frozen design draft kept for
-// reference alongside the ADRs.
+// reference alongside the ADRs: a point-in-time SNAPSHOT that has NOT tracked
+// the contract since it was written. For the live shape, read
+// apps/backend/proto/kandev/plugin/v1/plugin.proto (wire contract) and
+// apps/backend/pkg/pluginsdk/data_types.go (Go SDK mirror) directly — do not
+// infer current fields from this file. Examples of known-diverged messages
+// (not exhaustive — other messages in this file may also have drifted):
+// `Task` (17 fields here vs 29 live), `WorkflowStep` (5 here vs 10 live —
+// missing `color`, `is_start_step`, `wip_limit`, `agent_profile_id`,
+// `on_enter_action_types`), and `Message` (absent here; the whole
+// `ListMessages` read path from ADR 0047 postdates this draft).
 //
 // Extends the existing capability-gated Host service so plugins read AND write
 // kandev data through a typed, versioned contract instead of touching the
@@ -133,6 +142,9 @@ message Workflow {
 message ListWorkflowsRequest { string workspace_id = 1; Page page = 2; }
 message ListWorkflowsResponse { repeated Workflow workflows = 1; PageInfo page_info = 2; }
 
+// DIVERGED from the live contract — see canonical
+// apps/backend/proto/kandev/plugin/v1/plugin.proto for fields 6-10
+// (color, is_start_step, wip_limit, agent_profile_id, on_enter_action_types).
 message WorkflowStep {
   string id = 1;
   string workflow_id = 2;

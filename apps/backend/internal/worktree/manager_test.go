@@ -830,6 +830,9 @@ case "${1:-}" in
     exit 0
     ;;
   rev-parse)
+    if [ "${2:-}" = "--verify" ]; then
+      exit 1
+    fi
     if [ "${2:-}" = "--abbrev-ref" ]; then
       echo "master"
     fi
