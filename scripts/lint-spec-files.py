@@ -22,6 +22,7 @@ VALID_REQUIREMENT_STATUSES = {"draft", "active", "deprecated"}
 VALID_DESIGN_STATUSES = {"draft", "current", "superseded"}
 VALID_SYSTEM_STATUSES = {"draft", "active", "retired"}
 VALID_MIGRATION_STATUSES = {"in_progress", "complete"}
+SIZE_EXCEPTIONS_PATH = "docs/specs/spec-lint-exceptions.tsv"
 REQ_ID_PATTERN = r"REQ-[A-Z0-9]+(?:-[A-Z0-9]+)*-\d{3}"
 AC_ID_PATTERN = r"AC-[A-Z0-9]+(?:-[A-Z0-9]+)*-\d{3}\.\d+"
 REQ_HEADING = re.compile(rf"^###\s+(?P<id>{REQ_ID_PATTERN}):\s+\S")
@@ -33,13 +34,20 @@ def load_config(root: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def lint_specs(root: Path, config: dict | None = None) -> list[Violation]:
+def lint_specs(
+    root: Path,
+    config: dict | None = None,
+    exceptions: dict[str, int] | None = None,
+) -> list[Violation]:
     config = config or load_config(root)
     validate_config(config)
-    previous_config = load_previous_config(root)
+    exception_violations: list[Violation] = []
+    if exceptions is None:
+        exceptions, exception_violations = load_size_exceptions(root)
+    previous_exceptions = load_previous_size_exceptions(root)
     specs_root = root / "docs/specs"
     if not specs_root.exists():
-        return []
+        return exception_violations
 
     paths = sorted(path for path in specs_root.rglob("*.md") if path.is_file())
     migrated_systems = set()
@@ -69,7 +77,7 @@ def lint_specs(root: Path, config: dict | None = None) -> list[Violation]:
     for path in paths:
         relative = path.relative_to(root)
         kind, system = classify_path(relative)
-        violations.extend(check_size(path, relative, kind, config))
+        violations.extend(check_size(path, relative, kind, config, exceptions))
         inside = relative.relative_to("docs/specs").parts
         if inside and inside[0] in migrated_systems and kind == "legacy":
             violations.append(
@@ -196,14 +204,20 @@ def lint_specs(root: Path, config: dict | None = None) -> list[Violation]:
                 )
             )
 
-    violations.extend(check_size_exception_catalog(root, config))
-    violations.extend(check_legacy_size_ratchet(root, config, previous_config))
+    violations.extend(check_size_exception_catalog(root, config, exceptions))
+    violations.extend(check_legacy_size_ratchet(root, exceptions, previous_exceptions))
+    violations.extend(exception_violations)
     return sorted(violations, key=lambda item: (item.path.as_posix(), item.line, item.rule))
 
 
 def validate_config(config: dict) -> None:
     if config.get("version") != 1:
         raise ValueError("specification lint configuration must use version 1")
+    if "legacy_size_exceptions" in config:
+        raise ValueError(
+            "specification lint configuration must not contain legacy_size_exceptions; "
+            f"register exceptions in {SIZE_EXCEPTIONS_PATH} instead"
+        )
     required_limits = {
         "guide",
         "legacy",
@@ -224,8 +238,48 @@ def validate_config(config: dict) -> None:
         raise ValueError("specification size limits must be positive integers")
 
 
-def load_previous_config(root: Path) -> dict | None:
-    """Load the nearest prior config so legacy ceilings cannot increase silently."""
+def parse_size_exceptions(text: str, source: Path) -> tuple[dict[str, int], list[Violation]]:
+    """Parse `path<TAB>size` records, one per line, flagging malformed or duplicate lines."""
+    exceptions: dict[str, int] = {}
+    violations: list[Violation] = []
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        if not raw_line.strip():
+            continue
+        parts = raw_line.split("\t")
+        if len(parts) != 2 or not parts[0] or not parts[1].isdigit():
+            violations.append(
+                Violation(
+                    "malformed-size-exception",
+                    source,
+                    line_number,
+                    f"expected `path<TAB>size`, found `{raw_line}`",
+                )
+            )
+            continue
+        relative_text, size_text = parts
+        if relative_text in exceptions:
+            violations.append(
+                Violation(
+                    "duplicate-size-exception",
+                    source,
+                    line_number,
+                    f"{relative_text} already has a frozen ceiling of {exceptions[relative_text]} bytes",
+                )
+            )
+            continue
+        exceptions[relative_text] = int(size_text)
+    return exceptions, violations
+
+
+def load_size_exceptions(root: Path) -> tuple[dict[str, int], list[Violation]]:
+    path = root / SIZE_EXCEPTIONS_PATH
+    if not path.exists():
+        return {}, []
+    return parse_size_exceptions(path.read_text(encoding="utf-8"), path)
+
+
+def load_previous_size_exceptions(root: Path) -> dict[str, int] | None:
+    """Load the nearest prior sidecar so legacy ceilings cannot increase silently."""
     try:
         parents_output = subprocess.run(
             ["git", "rev-list", "--parents", "-n", "1", "HEAD"],
@@ -255,18 +309,17 @@ def load_previous_config(root: Path) -> dict | None:
 
     for revision in candidates:
         try:
-            config_text = subprocess.run(
-                ["git", "show", f"{revision}:docs/specs/spec-lint.json"],
+            exceptions_text = subprocess.run(
+                ["git", "show", f"{revision}:{SIZE_EXCEPTIONS_PATH}"],
                 cwd=root,
                 check=True,
                 capture_output=True,
                 text=True,
             ).stdout
-            previous_config = json.loads(config_text)
-        except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
+        except (OSError, subprocess.CalledProcessError):
             continue
-        if isinstance(previous_config, dict):
-            return previous_config
+        exceptions, _ = parse_size_exceptions(exceptions_text, root / SIZE_EXCEPTIONS_PATH)
+        return exceptions
     return None
 
 
@@ -294,12 +347,14 @@ def classify_path(relative: Path) -> tuple[str, str | None]:
     return "legacy", None
 
 
-def check_size(path: Path, relative: Path, kind: str, config: dict) -> list[Violation]:
+def check_size(
+    path: Path, relative: Path, kind: str, config: dict, exceptions: dict[str, int]
+) -> list[Violation]:
     if kind == "unknown":
         return []
     size = path.stat().st_size
     default_limit = config["limits"][kind]
-    exception = config.get("legacy_size_exceptions", {}).get(relative.as_posix())
+    exception = exceptions.get(relative.as_posix())
     limit = exception if kind == "legacy" and exception is not None else default_limit
     if size <= limit:
         return []
@@ -314,10 +369,12 @@ def check_size(path: Path, relative: Path, kind: str, config: dict) -> list[Viol
     ]
 
 
-def check_size_exception_catalog(root: Path, config: dict) -> list[Violation]:
+def check_size_exception_catalog(
+    root: Path, config: dict, exceptions: dict[str, int]
+) -> list[Violation]:
     violations = []
     default_limit = config["limits"]["legacy"]
-    for relative_text, ceiling in config.get("legacy_size_exceptions", {}).items():
+    for relative_text, ceiling in exceptions.items():
         relative = Path(relative_text)
         path = root / relative
         if not path.exists():
@@ -364,19 +421,15 @@ def check_size_exception_catalog(root: Path, config: dict) -> list[Violation]:
 
 
 def check_legacy_size_ratchet(
-    root: Path, config: dict, previous_config: dict | None
+    root: Path, exceptions: dict[str, int], previous_exceptions: dict[str, int] | None
 ) -> list[Violation]:
-    if previous_config is None:
-        return []
-    previous_exceptions = previous_config.get("legacy_size_exceptions", {})
-    current_exceptions = config.get("legacy_size_exceptions", {})
-    if not isinstance(previous_exceptions, dict) or not isinstance(current_exceptions, dict):
+    if previous_exceptions is None:
         return []
 
     violations = []
     for relative_text, previous_ceiling in previous_exceptions.items():
-        current_ceiling = current_exceptions.get(relative_text)
-        if not isinstance(previous_ceiling, int) or not isinstance(current_ceiling, int):
+        current_ceiling = exceptions.get(relative_text)
+        if current_ceiling is None:
             continue
         if current_ceiling > previous_ceiling:
             violations.append(
