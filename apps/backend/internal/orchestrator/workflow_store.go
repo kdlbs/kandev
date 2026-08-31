@@ -61,6 +61,19 @@ type workflowMoveAdmissionCASRepository interface {
 	) (applied bool, err error)
 }
 
+type workflowMoveAdmissionStateCASRepository interface {
+	UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+		ctx context.Context,
+		task *models.Task,
+		expectedStepID string,
+		targetStepID string,
+		limit int,
+		admittedState *v1.TaskState,
+		queueExitPending bool,
+		expectedWorkflowID string,
+	) (admitted bool, applied bool, err error)
+}
+
 type workflowQueuedTaskPromoter interface {
 	PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, fromStepID, destinationStepID string, limit int) (bool, error)
 }
@@ -583,11 +596,6 @@ func (s *workflowStore) applyTransitionIfAtStepRawOptions(
 	if err := markDeferredMoveApplied(task, moveID); err != nil {
 		return nil, task.WorkflowID, false, err
 	}
-	casRepo, ok := s.repo.(workflowMoveAdmissionCASRepository)
-	if !ok {
-		return nil, "", false, fmt.Errorf("workflow step CAS admission repository unavailable for step %s", toStepID)
-	}
-
 	oldWorkflowID := task.WorkflowID
 	task.WorkflowID = targetStep.WorkflowID
 	task.WorkflowStepID = toStepID
@@ -606,9 +614,7 @@ func (s *workflowStore) applyTransitionIfAtStepRawOptions(
 		}
 	}
 
-	applied, err := casRepo.UpdateTaskWithWorkflowStepAdmissionIfAtStep(
-		ctx, task, expectedStepID, toStepID, targetStep.WIPLimit,
-	)
+	applied, err := s.commitCASRoute(ctx, task, targetStep, expectedStepID, oldWorkflowID)
 	if err != nil {
 		return nil, "", false, fmt.Errorf("update task workflow step (CAS): %w", err)
 	}
@@ -631,6 +637,33 @@ func (s *workflowStore) applyTransitionIfAtStepRawOptions(
 		return nil, oldWorkflowID, false, nil
 	}
 	return task, oldWorkflowID, true, nil
+}
+
+func (s *workflowStore) commitCASRoute(
+	ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep, expectedStepID, expectedWorkflowID string,
+) (bool, error) {
+	next, err := s.workflowStepGetter.GetNextStepByPosition(ctx, targetStep.WorkflowID, targetStep.Position)
+	if err != nil {
+		return false, fmt.Errorf("load next step after %s: %w", targetStep.ID, err)
+	}
+	if wfmodels.IsTerminalStep(targetStep, next) {
+		stateRepo, ok := s.repo.(workflowMoveAdmissionStateCASRepository)
+		if !ok {
+			return false, fmt.Errorf("workflow terminal state CAS repository unavailable for step %s", targetStep.ID)
+		}
+		completed := v1.TaskStateCompleted
+		_, applied, err := stateRepo.UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+			ctx, task, expectedStepID, targetStep.ID, targetStep.WIPLimit, &completed, false, expectedWorkflowID,
+		)
+		return applied, err
+	}
+	casRepo, ok := s.repo.(workflowMoveAdmissionCASRepository)
+	if !ok {
+		return false, fmt.Errorf("workflow step CAS admission repository unavailable for step %s", targetStep.ID)
+	}
+	return casRepo.UpdateTaskWithWorkflowStepAdmissionIfAtStep(
+		ctx, task, expectedStepID, targetStep.ID, targetStep.WIPLimit,
+	)
 }
 
 func routeObservationContext(ctx context.Context, task *models.Task, targetStepID string) context.Context {

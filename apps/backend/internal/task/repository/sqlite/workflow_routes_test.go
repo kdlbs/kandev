@@ -82,6 +82,12 @@ func TestWorkflowRouteEffectClaimAndCrashRecovery(t *testing.T) {
 	claimed, err = repo.ClaimWorkflowRouteEffect(ctx, effectID, "worker-b", now.Add(30*time.Second), time.Minute)
 	require.NoError(t, err)
 	assert.False(t, claimed, "a live owner is never duplicated")
+	renewed, err := repo.RenewWorkflowRouteEffect(ctx, effectID, "worker-a", now.Add(45*time.Second))
+	require.NoError(t, err)
+	require.True(t, renewed)
+	claimed, err = repo.ClaimWorkflowRouteEffect(ctx, effectID, "worker-b", now.Add(90*time.Second), time.Minute)
+	require.NoError(t, err)
+	assert.False(t, claimed, "a renewed long-running owner keeps its claim")
 
 	claimed, err = repo.ClaimWorkflowRouteEffect(ctx, effectID, "recovery", now.Add(2*time.Minute), time.Minute)
 	require.NoError(t, err)

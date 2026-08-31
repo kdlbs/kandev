@@ -86,19 +86,27 @@ func TestMoveTaskAuthorizationAllowsOnlyCurrentCoordinatorGrant(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
-	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-route", Name: "Route", CreatedAt: now, UpdatedAt: now}))
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+		ID: "ws-route", Name: "Route", OwnerID: "owner", CreatedAt: now, UpdatedAt: now,
+	}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-route", WorkspaceID: "ws-route", Name: "Route", CreatedAt: now, UpdatedAt: now}))
 	for _, task := range []*models.Task{
-		{ID: "task-coordinator", WorkspaceID: "ws-route", WorkflowID: "wf-route", Title: "Coordinator", CreatedAt: now, UpdatedAt: now},
+		{
+			ID: "task-coordinator", WorkspaceID: "ws-route", WorkflowID: "wf-route", Title: "Coordinator",
+			Origin: models.TaskOriginAutomationRun, Metadata: map[string]interface{}{"automation_id": "automation"},
+			CreatedAt: now, UpdatedAt: now,
+		},
 		{ID: "task-sibling", WorkspaceID: "ws-route", WorkflowID: "wf-route", Title: "Sibling", CreatedAt: now, UpdatedAt: now},
 	} {
 		require.NoError(t, repo.CreateTask(ctx, task))
 	}
+	var grants int
+	require.NoError(t, repo.DB().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM workspace_coordinator_grants`).Scan(&grants))
+	require.Zero(t, grants, "task creation alone must not attest Coordinator authority")
+	require.NoError(t, repo.DesignateAutomationCoordinator(ctx, "task-coordinator", "automation"))
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-coordinator", TaskID: "task-coordinator", State: models.TaskSessionStateRunning, IsPrimary: true, StartedAt: now, UpdatedAt: now}))
 	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{ID: "execution-coordinator", SessionID: "session-coordinator", TaskID: "task-coordinator", ExecutorID: "executor", Status: models.ExecutorRunningStatusRunning, AgentExecutionID: "execution-coordinator"}))
-	_, err := repo.DB().ExecContext(ctx, `INSERT INTO workspace_coordinator_grants (workspace_id, coordinator_task_id, created_by_user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, "ws-route", "task-coordinator", "owner", now, now)
-	require.NoError(t, err)
-
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
 	payload, err := json.Marshal(map[string]interface{}{"task_id": "task-sibling", "workflow_id": "wf-route", "workflow_step_id": "step-done"})
 	require.NoError(t, err)
@@ -109,6 +117,12 @@ func TestMoveTaskAuthorizationAllowsOnlyCurrentCoordinatorGrant(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, guarded)
 	require.NotNil(t, replacement)
+
+	principal.AutomationID = "different-automation"
+	guarded, _, err = h.authorizeAutomationRequest(mcpscope.WithPrincipal(ctx, principal), msg)
+	require.NoError(t, err)
+	require.NotNil(t, guarded, "the grant must remain bound to the persisted automation identity")
+	principal.AutomationID = "automation"
 
 	principal.CallerExecutionID = "expired-execution"
 	guarded, _, err = h.authorizeAutomationRequest(mcpscope.WithPrincipal(ctx, principal), msg)

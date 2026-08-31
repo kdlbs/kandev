@@ -66,6 +66,13 @@ type Effect struct {
 	ClaimToken   string
 }
 
+// Result reports the durable identities allocated by the repository
+// transaction to the lifecycle owner that must claim the destination effect.
+type Result struct {
+	TransitionID int64
+	EffectID     string
+}
+
 const (
 	EffectPending   = "pending"
 	EffectClaimed   = "claimed"
@@ -73,6 +80,7 @@ const (
 )
 
 type operationContextKey struct{}
+type resultContextKey struct{}
 
 func WithOperation(ctx context.Context, operation Operation) context.Context {
 	return context.WithValue(ctx, operationContextKey{}, operation)
@@ -81,4 +89,13 @@ func WithOperation(ctx context.Context, operation Operation) context.Context {
 func FromContext(ctx context.Context) (Operation, bool) {
 	operation, ok := ctx.Value(operationContextKey{}).(Operation)
 	return operation, ok && operation.ID != ""
+}
+
+func WithResultHolder(ctx context.Context, result *Result) context.Context {
+	return context.WithValue(ctx, resultContextKey{}, result)
+}
+
+func ResultHolderFromContext(ctx context.Context) (*Result, bool) {
+	result, ok := ctx.Value(resultContextKey{}).(*Result)
+	return result, ok && result != nil
 }

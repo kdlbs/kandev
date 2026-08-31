@@ -156,6 +156,10 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 		if err := r.recordWorkflowRouteOperationTx(ctx, tx, operation); err != nil {
 			return 0, err
 		}
+		if result, ok := routing.ResultHolderFromContext(ctx); ok {
+			result.TransitionID = id
+			result.EffectID = operation.EffectID
+		}
 	}
 	return id, nil
 }

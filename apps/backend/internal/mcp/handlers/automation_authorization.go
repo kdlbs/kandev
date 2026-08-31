@@ -103,7 +103,7 @@ func (h *Handlers) authorizeAutomationRequest(ctx context.Context, msg *ws.Messa
 	if msg.Action == ws.ActionMCPMoveTask {
 		granted, err := h.taskSvc.IsCurrentCoordinatorGrant(
 			ctx, principal.WorkspaceID, principal.CallerTaskID,
-			principal.CallerSessionID, principal.CallerExecutionID,
+			principal.CallerSessionID, principal.CallerExecutionID, principal.AutomationID,
 		)
 		if err != nil || !granted {
 			return automationNotFound(msg)

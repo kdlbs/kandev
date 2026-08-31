@@ -16,7 +16,7 @@ type workflowRouteOperationReader interface {
 }
 
 type currentCoordinatorGrantReader interface {
-	IsCurrentCoordinatorGrant(context.Context, string, string, string, string) (bool, error)
+	IsCurrentCoordinatorGrant(context.Context, string, string, string, string, string) (bool, error)
 }
 
 // RecordWorkflowRouteOperation persists a non-transitioning routing outcome.
@@ -48,11 +48,11 @@ func (s *Service) GetWorkflowRouteOperation(
 // cancellation; routing owns no second grant representation.
 func (s *Service) IsCurrentCoordinatorGrant(
 	ctx context.Context,
-	workspaceID, taskID, sessionID, executionID string,
+	workspaceID, taskID, sessionID, executionID, automationID string,
 ) (bool, error) {
 	reader, ok := s.tasks.(currentCoordinatorGrantReader)
 	if !ok {
 		return false, fmt.Errorf("workspace coordinator grant repository unavailable")
 	}
-	return reader.IsCurrentCoordinatorGrant(ctx, workspaceID, taskID, sessionID, executionID)
+	return reader.IsCurrentCoordinatorGrant(ctx, workspaceID, taskID, sessionID, executionID, automationID)
 }

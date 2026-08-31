@@ -96,6 +96,36 @@ func (r *Repository) GetWorkflowRouteEffectByTransition(
 	return effect, true, nil
 }
 
+// GetCurrentWorkflowRouteEffect returns the newest route effect whose target
+// is still the task's persisted lane. Startup lifecycle recovery uses this
+// durable correlation when the original in-memory task.moved payload is gone.
+func (r *Repository) GetCurrentWorkflowRouteEffect(
+	ctx context.Context, taskID, targetStepID string,
+) (routing.Effect, bool, error) {
+	var effect routing.Effect
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT effect.id, effect.operation_id, effect.task_id, effect.transition_id,
+			effect.target_step_id, effect.status, effect.claim_token
+		FROM workflow_route_effects effect
+		JOIN tasks task
+			ON task.id = effect.task_id
+			AND task.workflow_step_id = effect.target_step_id
+		WHERE effect.task_id = ? AND effect.target_step_id = ?
+		ORDER BY effect.transition_id DESC
+		LIMIT 1
+	`), taskID, targetStepID).Scan(
+		&effect.ID, &effect.OperationID, &effect.TaskID, &effect.TransitionID,
+		&effect.TargetStepID, &effect.Status, &effect.ClaimToken,
+	)
+	if err == sql.ErrNoRows {
+		return routing.Effect{}, false, nil
+	}
+	if err != nil {
+		return routing.Effect{}, false, fmt.Errorf("read current workflow route effect: %w", err)
+	}
+	return effect, true, nil
+}
+
 func (r *Repository) initWorkflowRoutingSchema() error {
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS workflow_route_operations (
@@ -170,6 +200,27 @@ func (r *Repository) ClaimWorkflowRouteEffect(ctx context.Context, effectID, tok
 		return false, fmt.Errorf("read workflow route effect claim: %w", err)
 	}
 	return claimed == 1, nil
+}
+
+// RenewWorkflowRouteEffect extends the lease only for its current claim
+// token. A stale worker can neither keep nor complete a claim recovered by a
+// successor.
+func (r *Repository) RenewWorkflowRouteEffect(
+	ctx context.Context, effectID, token string, now time.Time,
+) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE workflow_route_effects
+		SET claimed_at = ?, updated_at = ?
+		WHERE id = ? AND status = 'claimed' AND claim_token = ?
+	`), now, now, effectID, token)
+	if err != nil {
+		return false, fmt.Errorf("renew workflow route effect: %w", err)
+	}
+	renewed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read workflow route effect renewal: %w", err)
+	}
+	return renewed == 1, nil
 }
 
 // CompleteWorkflowRouteEffect records successful delivery for the exact claim
