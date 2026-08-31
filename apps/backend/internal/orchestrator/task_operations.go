@@ -4088,6 +4088,12 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// Only bounded-ack callers preserve request context; ordinary prompts can take minutes.
 	promptCtx := options.executorContext(ctx)
 	s.bindPromptTurnID(promptCtx, session, rollback.turnID)
+	s.beginInteractivePromptAttempt(
+		promptCtx,
+		sessionID,
+		session.AgentExecutionID,
+		s.isDynamicPromptSession(session),
+	)
 	dispatchOutcome := &promptDispatchOutcome{}
 	onDispatched := s.promptDispatchCallback(
 		promptCtx, taskID, sessionID, rollback.reservedTurn, foregroundDispatch, dispatchOutcome,
@@ -4276,6 +4282,8 @@ func (s *Service) promptDispatchCallback(
 	outcome *promptDispatchOutcome,
 ) func() {
 	return func() {
+		executionID, _ := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+		s.bindPromptAttemptToExecution(ctx, sessionID, executionID)
 		var publicationErr error
 		if reservedTurn != nil && s.turnService != nil {
 			// Agentctl has already accepted the prompt. Publication must not inherit

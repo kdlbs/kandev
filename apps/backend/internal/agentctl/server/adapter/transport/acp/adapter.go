@@ -331,6 +331,7 @@ type promptTurnState struct {
 	evidenceMu       sync.Mutex
 	codexSystemError bool
 	codexCapacity    bool
+	cursorRetriable  bool
 	allowHandoff     bool
 	handedOff        bool
 	gateOwned        bool
@@ -363,6 +364,33 @@ func (t *promptTurnState) hasCodexSystemError() bool {
 	t.evidenceMu.Lock()
 	defer t.evidenceMu.Unlock()
 	return t.codexSystemError
+}
+
+func (t *promptTurnState) setCursorRetriable() {
+	if t == nil {
+		return
+	}
+	t.evidenceMu.Lock()
+	t.cursorRetriable = true
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) clearCursorRetriable() {
+	if t == nil {
+		return
+	}
+	t.evidenceMu.Lock()
+	t.cursorRetriable = false
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) cursorRetriableFailure() bool {
+	if t == nil {
+		return false
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	return t.cursorRetriable
 }
 
 type asyncTurnFinalizer struct {

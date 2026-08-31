@@ -2,9 +2,41 @@ package acp
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
+
+const (
+	cursorRetriableStreamResetPrefix  = "Error: RetriableError:"
+	cursorRetriableStreamResetMessage = "Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)"
+	cursorRetriableStreamResetMaxTail = 256
+)
+
+// isCursorRetriableStreamReset recognizes Cursor's transport control chunk.
+// The prefix check keeps the common per-token path allocation-free; only a
+// chunk with the exact control prefix pays for the bounded case-insensitive
+// fingerprint scan.
+func isCursorRetriableStreamReset(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if !strings.HasPrefix(trimmed, cursorRetriableStreamResetPrefix) {
+		return false
+	}
+	if len(trimmed)-len(cursorRetriableStreamResetPrefix) > cursorRetriableStreamResetMaxTail {
+		return false
+	}
+	return containsFolded(trimmed, "RetriableError") &&
+		(containsFolded(trimmed, "http/2 stream closed") || containsFolded(trimmed, "CANCEL (0x8)"))
+}
+
+func containsFolded(text, needle string) bool {
+	for i := 0; i+len(needle) <= len(text); i++ {
+		if strings.EqualFold(text[i:i+len(needle)], needle) {
+			return true
+		}
+	}
+	return false
+}
 
 type cursorTaskMeta struct {
 	ToolCallID  string
