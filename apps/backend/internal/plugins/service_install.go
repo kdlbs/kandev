@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/plugins/manifest"
@@ -114,7 +115,11 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	// not a manifest fact) must be carried forward or an auto-update would
 	// silently reset the very toggle that triggered it.
 	if hadOldRec {
+		rec.InstallationID = oldRec.InstallationID
 		rec.AutoUpdate = oldRec.AutoUpdate
+	}
+	if rec.InstallationID == "" {
+		rec.InstallationID = uuid.NewString()
 	}
 	if err := s.store.Save(rec); err != nil {
 		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
@@ -357,6 +362,9 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 		s.runtime.Stop(id)
 	}
 	s.revokeGitCredentialProviderLeases(rec.RepositoryProviders)
+	if err := s.approvalTombstoneInstallation(rec.InstallationID); err != nil {
+		return fmt.Errorf("plugins: tombstone approval history: %w", err)
+	}
 	if err := s.deletePluginSecrets(ctx, id); err != nil {
 		s.reconcileAbortedUninstall(id, wasRunning)
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin secrets: %w", err)

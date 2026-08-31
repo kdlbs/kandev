@@ -1,0 +1,247 @@
+package plugins
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"sync"
+	"time"
+)
+
+type ApprovalState string
+
+const (
+	ApprovalStateActive  ApprovalState = "active"
+	ApprovalStateRevoked ApprovalState = "revoked"
+)
+
+type CapabilityApproval struct {
+	InstallationID     string        `json:"installation_id"`
+	WorkspaceID        string        `json:"workspace_id"`
+	Revision           uint64        `json:"revision"`
+	ManifestDigest     string        `json:"manifest_digest"`
+	CapabilityIDs      []string      `json:"capability_ids"`
+	State              ApprovalState `json:"state"`
+	HumanActor         string        `json:"human_actor"`
+	HumanPolicyVersion string        `json:"human_policy_version"`
+	CreatedAt          time.Time     `json:"created_at"`
+	UpdatedAt          time.Time     `json:"updated_at"`
+	TombstonedAt       *time.Time    `json:"tombstoned_at,omitempty"`
+}
+
+type CapabilityApprovalEventType string
+
+const (
+	CapabilityApprovalEventGrant         CapabilityApprovalEventType = "grant"
+	CapabilityApprovalEventNarrow        CapabilityApprovalEventType = "narrow"
+	CapabilityApprovalEventRevoke        CapabilityApprovalEventType = "revoke"
+	CapabilityApprovalEventUpgradeReview CapabilityApprovalEventType = "upgrade_review"
+)
+
+type CapabilityApprovalEvent struct {
+	AuditID        string                      `json:"audit_id"`
+	InstallationID string                      `json:"installation_id"`
+	WorkspaceID    string                      `json:"workspace_id"`
+	BeforeRevision uint64                      `json:"before_revision"`
+	AfterRevision  uint64                      `json:"after_revision"`
+	BeforeDigest   string                      `json:"before_digest"`
+	AfterDigest    string                      `json:"after_digest"`
+	Actor          string                      `json:"actor"`
+	Reason         string                      `json:"reason"`
+	Type           CapabilityApprovalEventType `json:"type"`
+	ObservedAt     time.Time                   `json:"observed_at"`
+}
+
+type approvalLedgerFile struct {
+	Approvals  map[string]CapabilityApproval `json:"approvals"`
+	Events     []CapabilityApprovalEvent     `json:"events"`
+	Tombstones map[string]time.Time          `json:"tombstones"`
+}
+
+type approvalLedger struct {
+	dir string
+	mu  sync.Mutex
+}
+
+func newApprovalLedger(dir string) *approvalLedger {
+	return &approvalLedger{dir: dir}
+}
+
+func (l *approvalLedger) path() string {
+	return filepath.Join(l.dir, "approvals.json")
+}
+
+func (l *approvalLedger) load() (*approvalLedgerFile, error) {
+	data, err := os.ReadFile(l.path())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &approvalLedgerFile{
+				Approvals:  map[string]CapabilityApproval{},
+				Tombstones: map[string]time.Time{},
+			}, nil
+		}
+		return nil, err
+	}
+	var file approvalLedgerFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		return nil, err
+	}
+	if file.Approvals == nil {
+		file.Approvals = map[string]CapabilityApproval{}
+	}
+	if file.Tombstones == nil {
+		file.Tombstones = map[string]time.Time{}
+	}
+	return &file, nil
+}
+
+func (l *approvalLedger) save(file *approvalLedgerFile) error {
+	if err := os.MkdirAll(l.dir, 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(file, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(l.dir, ".approvals-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, l.path())
+}
+
+func approvalKey(installationID, workspaceID string) string {
+	return installationID + "\x00" + workspaceID
+}
+
+func (l *approvalLedger) grant(installationID, workspaceID string, revision uint64, manifestDigest string, capabilityIDs []string, actor, reason, auditID string, at time.Time) (CapabilityApproval, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	file, err := l.load()
+	if err != nil {
+		return CapabilityApproval{}, err
+	}
+	key := approvalKey(installationID, workspaceID)
+	current := file.Approvals[key]
+	if current.Revision != 0 && current.Revision != revision-1 {
+		return CapabilityApproval{}, fmt.Errorf("plugins: approval revision conflict")
+	}
+	approval := CapabilityApproval{
+		InstallationID:     installationID,
+		WorkspaceID:        workspaceID,
+		Revision:           revision,
+		ManifestDigest:     manifestDigest,
+		CapabilityIDs:      append([]string{}, capabilityIDs...),
+		State:              ApprovalStateActive,
+		HumanActor:         actor,
+		HumanPolicyVersion: "immutable",
+		CreatedAt:          at,
+		UpdatedAt:          at,
+	}
+	if current.Revision != 0 {
+		approval.CreatedAt = current.CreatedAt
+	}
+	file.Approvals[key] = approval
+	file.Events = append(file.Events, CapabilityApprovalEvent{
+		AuditID: auditID, InstallationID: installationID, WorkspaceID: workspaceID,
+		BeforeRevision: current.Revision, AfterRevision: revision,
+		BeforeDigest: current.ManifestDigest, AfterDigest: manifestDigest,
+		Actor: actor, Reason: reason, Type: CapabilityApprovalEventGrant, ObservedAt: at,
+	})
+	return approval, l.save(file)
+}
+
+func (l *approvalLedger) revoke(installationID, workspaceID string, actor, reason, auditID string, at time.Time) (CapabilityApproval, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	file, err := l.load()
+	if err != nil {
+		return CapabilityApproval{}, err
+	}
+	key := approvalKey(installationID, workspaceID)
+	current, ok := file.Approvals[key]
+	if !ok {
+		return CapabilityApproval{}, fmt.Errorf("plugins: approval not found")
+	}
+	next := current
+	next.Revision++
+	next.State = ApprovalStateRevoked
+	next.HumanActor = actor
+	next.UpdatedAt = at
+	file.Approvals[key] = next
+	file.Events = append(file.Events, CapabilityApprovalEvent{
+		AuditID: auditID, InstallationID: installationID, WorkspaceID: workspaceID,
+		BeforeRevision: current.Revision, AfterRevision: next.Revision,
+		BeforeDigest: current.ManifestDigest, AfterDigest: current.ManifestDigest,
+		Actor: actor, Reason: reason, Type: CapabilityApprovalEventRevoke, ObservedAt: at,
+	})
+	return next, l.save(file)
+}
+
+func (l *approvalLedger) tombstoneInstallation(installationID string, at time.Time) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	file, err := l.load()
+	if err != nil {
+		return err
+	}
+	file.Tombstones[installationID] = at
+	for key, approval := range file.Approvals {
+		if approval.InstallationID != installationID {
+			continue
+		}
+		approval.Revision++
+		approval.State = ApprovalStateRevoked
+		approval.UpdatedAt = at
+		file.Approvals[key] = approval
+	}
+	return l.save(file)
+}
+
+func (l *approvalLedger) get(installationID, workspaceID string) (CapabilityApproval, bool, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	file, err := l.load()
+	if err != nil {
+		return CapabilityApproval{}, false, err
+	}
+	approval, ok := file.Approvals[approvalKey(installationID, workspaceID)]
+	return approval, ok, nil
+}
+
+func (l *approvalLedger) listByInstallation(installationID string) ([]CapabilityApproval, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	file, err := l.load()
+	if err != nil {
+		return nil, err
+	}
+	var out []CapabilityApproval
+	for _, approval := range file.Approvals {
+		if approval.InstallationID == installationID {
+			out = append(out, approval)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].WorkspaceID == out[j].WorkspaceID {
+			return out[i].Revision < out[j].Revision
+		}
+		return out[i].WorkspaceID < out[j].WorkspaceID
+	})
+	return out, nil
+}
