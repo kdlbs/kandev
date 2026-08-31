@@ -238,6 +238,61 @@ func TestCreateStartSession_OfficeRunnerReusesPersistentSession(t *testing.T) {
 	}
 }
 
+func TestCreateStartSession_OfficeUnassignedReusesResolvedProfileSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-office-unassigned", Name: "Office", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-office-unassigned", WorkspaceID: "ws-office-unassigned", Name: "Office", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := seedWorkflowStep(t, repo, "step-office-unassigned"); err != nil {
+		t.Fatalf("create workflow step: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-office-unassigned", WorkspaceID: "ws-office-unassigned", WorkflowID: "wf-office-unassigned", WorkflowStepID: "step-office-unassigned",
+		Title: "Office task", State: v1.TaskStateInProgress, ProjectID: "office-project",
+		Metadata:  map[string]interface{}{models.MetaKeyAgentProfileID: "ceo-reviewer"},
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	task, err := repo.GetTask(ctx, "task-office-unassigned")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if !task.IsFromOffice {
+		t.Fatal("office task was not projected as office-owned")
+	}
+	if task.AssigneeAgentProfileID != "" {
+		t.Fatalf("task unexpectedly has an assignee: %q", task.AssigneeAgentProfileID)
+	}
+
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	firstID, firstCreated, err := svc.createStartSession(ctx, task.ToAPI(), "ceo-reviewer", "", "", "", "")
+	if err != nil {
+		t.Fatalf("first create start session: %v", err)
+	}
+	if !firstCreated {
+		t.Fatal("first office launch should create a session")
+	}
+
+	secondID, secondCreated, err := svc.createStartSession(ctx, task.ToAPI(), "ceo-reviewer", "", "", "", "")
+	if err != nil {
+		t.Fatalf("second create start session: %v", err)
+	}
+	if secondCreated {
+		t.Fatal("second office launch should reuse the profile session")
+	}
+	if secondID != firstID {
+		t.Fatalf("reused session = %q, want first session %q", secondID, firstID)
+	}
+}
+
 // TestCreateStartSession_ReviewerRunFlagOff is the regression baseline: a
 // review run whose agent (ceo-reviewer) differs from the task's runner seat
 // (pm-runner) lands in the runner's session when features.officeSessionIdentity

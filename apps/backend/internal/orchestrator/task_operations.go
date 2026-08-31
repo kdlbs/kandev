@@ -1588,9 +1588,11 @@ func (s *Service) recordDynamicRouteResolutionFailure(
 }
 
 // createStartSession picks the right session-creation path for the task:
-// Office tasks with an assignee use the per-(task, agent) EnsureSessionForAgent
-// (so runs reuse one row across turns); kanban / quick-chat fall through to
-// the per-launch PrepareSession used since day one.
+// Office tasks use the per-(task, agent) EnsureSessionForAgent path (so runs
+// reuse one row across turns); kanban / quick-chat fall through to the
+// per-launch PrepareSession used since day one. An Office task can be created
+// before its runner seat is projected, so the run's captured identity or its
+// resolved execution profile supplies the owner until the seat is assigned.
 //
 // The session-owner identity passed to EnsureSessionForAgentWithCreation is,
 // by default, the task's runner seat (dbTask.AssigneeAgentProfileID) — even
@@ -1605,21 +1607,41 @@ func (s *Service) createStartSession(
 	agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID string,
 ) (string, bool, error) {
 	dbTask, err := s.repo.GetTask(ctx, task.ID)
-	if err == nil && dbTask != nil && dbTask.IsFromOffice && dbTask.AssigneeAgentProfileID != "" {
-		sessionOwnerID := dbTask.AssigneeAgentProfileID
-		if s.config.OfficeSessionIdentity && officeAgentProfileID != "" {
-			sessionOwnerID = officeAgentProfileID
-		}
-		session, created, ensureErr := s.executor.EnsureSessionForAgentWithCreation(
-			ctx, task, sessionOwnerID, agentProfileID, executorID, executorProfileID,
-		)
-		if ensureErr != nil {
-			return "", false, ensureErr
-		}
-		return session.ID, created, nil
+	if err != nil || dbTask == nil || !dbTask.IsFromOffice {
+		sessionID, prepareErr := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+		return sessionID, prepareErr == nil, prepareErr
 	}
-	sessionID, err := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
-	return sessionID, err == nil, err
+
+	sessionOwnerID := s.officeSessionOwnerID(dbTask, agentProfileID, officeAgentProfileID)
+	if sessionOwnerID == "" {
+		sessionID, prepareErr := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+		return sessionID, prepareErr == nil, prepareErr
+	}
+	session, created, ensureErr := s.executor.EnsureSessionForAgentWithCreation(
+		ctx, task, sessionOwnerID, agentProfileID, executorID, executorProfileID,
+	)
+	if ensureErr != nil {
+		return "", false, ensureErr
+	}
+	return session.ID, created, nil
+}
+
+// officeSessionOwnerID selects the stable identity for an Office session. A
+// projected runner wins by default. When identity separation is enabled, a
+// scheduler-captured participant identity wins for assigned runs. Before a
+// runner seat is projected, the captured identity or execution profile keeps
+// the session on the Office path instead of creating a generic workspace row.
+func (s *Service) officeSessionOwnerID(task *models.Task, agentProfileID, officeAgentProfileID string) string {
+	if task.AssigneeAgentProfileID == "" {
+		if officeAgentProfileID != "" {
+			return officeAgentProfileID
+		}
+		return agentProfileID
+	}
+	if s.config.OfficeSessionIdentity && officeAgentProfileID != "" {
+		return officeAgentProfileID
+	}
+	return task.AssigneeAgentProfileID
 }
 
 // moveTaskToWorkflowStep moves a task to the target workflow step if provided and different from current.
