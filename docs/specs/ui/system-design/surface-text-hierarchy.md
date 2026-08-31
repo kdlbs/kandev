@@ -40,10 +40,13 @@ new surface families from diverging by accident.
 
 ## Shared primitive contract
 
-The five title primitives add `min-w-0`, `text-balance`, and word containment.
-The five description primitives add `min-w-0`, `text-pretty`, and word
-containment. The zero minimum lets grid and flex items shrink before emergency
-word breaks are considered. The two broken description primitives remove both
+The five title primitives add `min-w-0`, `text-balance`, and
+`wrap-anywhere`. The five description primitives add `min-w-0`, `text-pretty`,
+and `wrap-anywhere`. The zero minimum lets grid and flex items shrink, while
+`overflow-wrap: anywhere` also lowers the text's min-content contribution and
+contains arbitrary unbroken values. `overflow-wrap: break-word` is not
+sufficient for this contract because it preserves the unbroken value's
+min-content width. The two broken description primitives remove both
 `text-balance` and the `md:text-pretty` switch. These classes live on the
 semantic primitive rather than in every consumer:
 

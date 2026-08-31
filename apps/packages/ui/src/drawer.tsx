@@ -88,7 +88,7 @@ function DrawerTitle({ className, ...props }: React.ComponentProps<typeof Drawer
     <DrawerPrimitive.Title
       data-slot="drawer-title"
       className={cn(
-        "text-foreground min-w-0 text-sm font-medium text-balance wrap-break-word",
+        "text-foreground min-w-0 text-sm font-medium text-balance wrap-anywhere",
         className,
       )}
       {...props}
@@ -104,7 +104,7 @@ function DrawerDescription({
     <DrawerPrimitive.Description
       data-slot="drawer-description"
       className={cn(
-        "text-muted-foreground min-w-0 text-xs/relaxed text-pretty wrap-break-word",
+        "text-muted-foreground min-w-0 text-xs/relaxed text-pretty wrap-anywhere",
         className,
       )}
       {...props}

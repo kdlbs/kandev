@@ -99,9 +99,12 @@ None.
   classes.
 - Review-remediation RED: The focused contract failed when it required a zero
   minimum width alongside emergency word wrapping for grid and flex items.
+- Exact-head media RED: Managed Playwright geometry at 390x844 showed
+  `wrap-break-word` allowing a long unbroken task name to render past the
+  confirmation's right edge.
 - GREEN: Alert, AlertDialog, Dialog, Drawer, and Sheet titles now use
-  `min-w-0 text-balance wrap-break-word`; descriptions use
-  `min-w-0 text-pretty wrap-break-word` at every breakpoint. Alert and
+  `min-w-0 text-balance wrap-anywhere`; descriptions use
+  `min-w-0 text-pretty wrap-anywhere` at every breakpoint. Alert and
   AlertDialog no longer apply `text-balance md:text-pretty` to descriptions.
 - GREEN: `pnpm --filter @kandev/web test --
 components/overlay-typography-primitives.test.tsx` (1 file, 2 tests).

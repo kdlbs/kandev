@@ -12,7 +12,7 @@ afterEach(() => cleanup());
 const primitiveFamilies = ["alert", "alert-dialog", "dialog", "drawer", "sheet"] as const;
 const BALANCED_TEXT_CLASS = "text-balance";
 const PRETTY_TEXT_CLASS = "text-pretty";
-const WORD_CONTAINMENT_CLASS = "wrap-break-word";
+const WORD_CONTAINMENT_CLASS = "wrap-anywhere";
 const ZERO_MIN_WIDTH_CLASS = "min-w-0";
 
 describe("surface typography primitives", () => {
