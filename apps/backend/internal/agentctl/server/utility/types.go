@@ -3,6 +3,8 @@
 // designed for quick tasks like generating commit messages or PR descriptions.
 package utility
 
+import "github.com/kandev/kandev/internal/common/acpprovider"
+
 // PromptRequest is the request for executing an inference prompt.
 type PromptRequest struct {
 	// Prompt is the fully resolved prompt text to send to the LLM.
@@ -203,6 +205,11 @@ type InferenceConfigDTO struct {
 	StripEnv      []string `json:"strip_env,omitempty"`
 	CLIFlags      []string `json:"cli_flags,omitempty"`
 	CommandPrefix []string `json:"command_prefix,omitempty"`
+	// ProviderGatewayAuth, when set, makes the probe/inference subprocess
+	// authenticate against a Kandev-configured OpenAI-compatible provider
+	// (base URL + bearer key) right after the ACP initialize handshake, the
+	// same mechanism the live session adapter uses.
+	ProviderGatewayAuth *acpprovider.GatewayAuth `json:"provider_gateway_auth,omitempty"`
 }
 
 // PromptResponse is the response from executing a utility prompt.

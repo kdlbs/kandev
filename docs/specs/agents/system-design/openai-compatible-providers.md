@@ -178,20 +178,30 @@ the env map exactly as `OPENAI_API_KEY` does now for native Codex.
 
 ## Probe and inference reach
 
-`InferenceConfigDTO` gains `ProviderArgs []string` and keeps using `Env`. The
-backend caller (`lifecycle/utility.go`) runs the same `providerinject.Build`
-when the resolved profile is `openai_compatible` and populates those fields.
-`acp_executor.go` appends `ProviderArgs` to `cmdArgs` next to `CLIFlags` and
-merges the provider env in `sanitizeEnvForAgent` with reserved-key precedence
-(AC-003.1, AC-003.2). The agent-models probe path shares the same builder via
-the profile context it already receives.
+> **Design update (2026-08-31):** the CLI-args model below is superseded by the
+> ACP gateway auth mechanism (see the Provider injection update). `providerinject`
+> and `ProviderArgs` do not exist.
+
+`InferenceConfigDTO` gains `ProviderGatewayAuth *acpprovider.GatewayAuth` and
+keeps using `Env`. The profile-scoped backend caller
+(`lifecycle/utility.go: ExecuteInferenceProfilePrompt`) calls the shared
+`Manager.resolveProviderGatewayAuth` when the resolved profile is
+`openai_compatible`, populating the field and exporting the revealed key as
+`OPENAI_API_KEY`; an `openai_compatible` profile pointed at an agent with no
+provider spec fails closed with `ErrProviderMisconfigured` (AC-003.2). The
+utility ACP executor (`acp_executor.go`) advertises the gateway client
+capability and sends `authenticate(gateway)` right after `initialize` in both
+`executeACPSession` and `probeACPSessionWithContext`; a failure aborts rather
+than falling back to the vendor endpoint (AC-003.1, AC-003.2). No separate
+profile-scoped model probe exists today; provider profiles use free-text model
+entry (AC-001.2), and the probe executor is ready for any caller that supplies
+`ProviderGatewayAuth`.
 
 Upstream failure surfacing: `describeACPFailure` already special-cases
-timeout/cancel; extend the inference/probe error path to carry a sanitized tail
-of the child's stderr when the ACP session fails during `session/new` or
-`prompt`, so a provider `401` is legible instead of "peer disconnected"
-(AC-003.3). Sanitization strips the key and any tmp paths, reusing the existing
-`stderrBuffer.tail()` + redaction helpers.
+timeout/cancel; `withUpstreamHint` additionally appends a sanitized HTTP status
+line (allowlisted `4xx`/`5xx` shapes only, tmp paths scrubbed) from the child's
+stderr tail when the call was routed through a provider gateway, so a provider
+`401` is legible instead of only "peer disconnected" (AC-003.3).
 
 ## Credential delivery
 

@@ -1,7 +1,7 @@
 ---
 id: task-04-probe-inference-reach
 title: Probe and inference/utility provider reach
-status: pending
+status: done
 wave: 4
 depends_on:
   - task-03-session-injection

@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	"go.uber.org/zap"
 )
 
@@ -131,7 +132,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		e.logger.Warn("ACP inference: dropping unsupported MCP server transport",
 			zap.String("name", name))
 	}
-	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.AgentID, req.Prompt, model, modelConfigOptions, req.Mode, req.AutoApprovePermissions, mcpServers)
+	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.AgentID, req.Prompt, model, modelConfigOptions, req.Mode, req.AutoApprovePermissions, mcpServers, cfg.ProviderGatewayAuth)
 	if err != nil {
 		e.logger.Error("ACP inference failed",
 			zap.String("agent_id", req.AgentID),
@@ -139,7 +140,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 			zap.String("stderr", stderr.tail()))
 		return &PromptResponse{
 			Success:    false,
-			Error:      err.Error(),
+			Error:      withUpstreamHint(err, cfg.ProviderGatewayAuth, stderr.tail()),
 			DurationMs: int(time.Since(startTime).Milliseconds()),
 		}, nil
 	}
@@ -169,6 +170,7 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	mode string,
 	autoApprovePermissions *bool,
 	mcpServers []acp.McpServer,
+	gatewayAuth *acpprovider.GatewayAuth,
 ) (string, error) {
 	// Collect response text from updates
 	var responseText strings.Builder
@@ -210,10 +212,8 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	// mode — so opting out here would reject the very model ids the rest of
 	// the product hands out.
 	_, err := conn.Initialize(ctx, acp.InitializeRequest{
-		ProtocolVersion: acp.ProtocolVersionNumber,
-		ClientCapabilities: acp.ClientCapabilities{
-			Meta: acpcompat.ClientCapabilityMeta(agentID, nil),
-		},
+		ProtocolVersion:    acp.ProtocolVersionNumber,
+		ClientCapabilities: clientCapabilitiesForInference(agentID, gatewayAuth),
 		ClientInfo: &acp.Implementation{
 			Name:    "kandev-inference",
 			Version: "1.0.0",
@@ -221,6 +221,9 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	})
 	if err != nil {
 		return "", describeACPFailure(ctx, "initialize", err)
+	}
+	if err := applyInferenceGatewayAuth(ctx, conn, gatewayAuth); err != nil {
+		return "", err
 	}
 
 	// Create new session. ACP requires McpServers to be a non-nil slice;
@@ -521,7 +524,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	defer cleanupACPCommand(ctx, cmd, lifecycle, e.logger)
 
 	resp, err := e.probeACPSessionWithContext(
-		ctx, stdin, stdout, workDir, req.AgentID, req.Model, req.Mode, req.ConfigOptions,
+		ctx, stdin, stdout, workDir, req.AgentID, req.Model, req.Mode, req.ConfigOptions, cfg.ProviderGatewayAuth,
 	)
 	if err != nil {
 		// The tail goes to the log rather than into the response: handlers
@@ -534,7 +537,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 			zap.String("stderr", stderr.tail()))
 		return &ProbeResponse{
 			Success:    false,
-			Error:      err.Error(),
+			Error:      withUpstreamHint(err, cfg.ProviderGatewayAuth, stderr.tail()),
 			DurationMs: int(time.Since(startTime).Milliseconds()),
 		}, nil
 	}
@@ -858,6 +861,7 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	model string,
 	mode string,
 	requestedConfigOptions map[string]string,
+	gatewayAuth *acpprovider.GatewayAuth,
 ) (*ProbeResponse, error) {
 	updates := newACPProbeNotificationState(agentID)
 
@@ -877,10 +881,8 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	// session uses, and a model id the UI cannot select. The probe intentionally
 	// omits the live adapter's terminal_output base capability.
 	initResp, err := conn.Initialize(ctx, acp.InitializeRequest{
-		ProtocolVersion: acp.ProtocolVersionNumber,
-		ClientCapabilities: acp.ClientCapabilities{
-			Meta: acpcompat.ClientCapabilityMeta(agentID, nil),
-		},
+		ProtocolVersion:    acp.ProtocolVersionNumber,
+		ClientCapabilities: clientCapabilitiesForInference(agentID, gatewayAuth),
 		ClientInfo: &acp.Implementation{
 			Name:    "kandev-probe",
 			Version: "1.0.0",
@@ -888,6 +890,9 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	})
 	if err != nil {
 		return nil, describeACPFailure(ctx, "initialize", err)
+	}
+	if err := applyInferenceGatewayAuth(ctx, conn, gatewayAuth); err != nil {
+		return nil, err
 	}
 
 	sessionResp, err := conn.NewSession(ctx, acp.NewSessionRequest{
@@ -1288,6 +1293,63 @@ func describeACPFailure(ctx context.Context, phase string, err error) error {
 	default:
 		return fmt.Errorf("ACP %s failed: %w", phase, err)
 	}
+}
+
+// clientCapabilitiesForInference builds the probe/inference client capabilities,
+// advertising the ACP gateway auth capability when a provider gateway is
+// configured so the agent accepts the follow-up authenticate call.
+func clientCapabilitiesForInference(agentID string, gw *acpprovider.GatewayAuth) acp.ClientCapabilities {
+	caps := acp.ClientCapabilities{Meta: acpcompat.ClientCapabilityMeta(agentID, nil)}
+	if gw != nil {
+		caps.Auth = acp.AuthCapabilities{Meta: acpprovider.ClientAuthMeta()}
+	}
+	return caps
+}
+
+// applyInferenceGatewayAuth authenticates an ephemeral probe/inference session
+// against a Kandev-configured OpenAI-compatible provider right after initialize.
+// It is a no-op unless a gateway is configured; a failure aborts rather than
+// letting the subprocess fall back to its built-in vendor endpoint.
+func applyInferenceGatewayAuth(ctx context.Context, conn *acp.ClientSideConnection, gw *acpprovider.GatewayAuth) error {
+	if gw == nil {
+		return nil
+	}
+	if _, err := conn.Authenticate(ctx, acp.AuthenticateRequest{
+		MethodId: acp.AuthMethodId(gw.MethodID),
+		Meta:     gw.Meta,
+	}); err != nil {
+		return fmt.Errorf("OpenAI-compatible provider authentication failed: %w", err)
+	}
+	return nil
+}
+
+// upstreamStatusLineRE matches a recognizable HTTP status line in a child's
+// stderr tail (e.g. "HTTP 401", "status: 403", "429 Too Many Requests"). An
+// allowlist of shapes keeps free-text stderr out of the client payload.
+var upstreamStatusLineRE = regexp.MustCompile(`(?i)\b(?:HTTP[/ ]?[\d.]*\s*)?(?:status[:= ]+)?([45]\d\d)\b(?:\s+[A-Za-z][A-Za-z ]{2,40})?`)
+
+// withUpstreamHint appends a sanitized upstream status indication to a failed
+// probe/inference error when the call was routed through a provider gateway, so
+// a provider 401/403/429 is legible instead of only "peer disconnected". The
+// bearer key and any tmp paths are stripped; nothing is appended when no status
+// line is recognizable.
+func withUpstreamHint(err error, gw *acpprovider.GatewayAuth, stderrTail string) string {
+	msg := err.Error()
+	if gw == nil || stderrTail == "" {
+		return msg
+	}
+	hint := upstreamStatusLineRE.FindString(scrubTmpPaths(stderrTail))
+	hint = strings.TrimSpace(hint)
+	if hint == "" {
+		return msg
+	}
+	return fmt.Sprintf("%s (provider responded: %s)", msg, hint)
+}
+
+var tmpPathRE = regexp.MustCompile(`(?:/tmp|/var/folders|[A-Za-z]:\\[^\s"']*Temp)[^\s"']*`)
+
+func scrubTmpPaths(s string) string {
+	return tmpPathRE.ReplaceAllString(s, "<path>")
 }
 
 // sanitizeEnvForAgent returns a child-process environment with agent-declared

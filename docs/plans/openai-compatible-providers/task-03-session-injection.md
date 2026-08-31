@@ -1,7 +1,7 @@
 ---
 id: task-03-session-injection
 title: Live session injection and credential-delivery fixes
-status: in_progress
+status: done
 wave: 3
 depends_on:
   - task-02-providerinject

@@ -23,8 +23,8 @@ a profile-declared key unreliable.
 | --- | --- | --- | --- | --- |
 | task-01 | Provider primitive on the agent profile | 1 | — | done |
 | task-02 | ACP gateway builder (`internal/common/acpprovider`) | 2 | task-01 | done |
-| task-03 | Live session injection + credential-delivery fixes | 3 | task-02 | in_progress (plumbing done; adapter test pending) |
-| task-04 | Probe and inference/utility provider reach | 4 | task-03 | pending |
+| task-03 | Live session injection + credential-delivery fixes | 3 | task-02 | done |
+| task-04 | Probe and inference/utility provider reach | 4 | task-03 | done |
 | task-05 | Profile editor provider section (frontend) | 3 | task-01 | pending |
 
 Dependency order: 01 → 02 → 03 → 04. 05 runs any time after 01. 03 and 05 are
