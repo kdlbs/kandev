@@ -26,6 +26,12 @@ describe("DeleteSessionDialog", () => {
     expect(dialog.textContent).toContain("permanently delete the conversation history");
     expect(dialog.textContent).toContain("task workspace and its files are kept");
     expect(dialog.textContent).toContain("only session for this task");
+    const description = dialog.querySelector('[data-slot="alert-dialog-description"]');
+    expect(description).not.toBeNull();
+    expect(description?.id).toBe(dialog.getAttribute("aria-describedby"));
+    expect(description?.classList.contains("min-w-0")).toBe(true);
+    expect(description?.classList.contains("text-left")).toBe(true);
+    expect(description?.querySelectorAll("p")).toHaveLength(2);
     // No uncommitted/unpushed warning belongs on session deletion.
     expect(dialog.textContent).not.toContain("uncommitted");
     expect(dialog.textContent).not.toContain("unpushed");
