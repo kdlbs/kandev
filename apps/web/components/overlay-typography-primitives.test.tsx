@@ -13,6 +13,7 @@ const primitiveFamilies = ["alert", "alert-dialog", "dialog", "drawer", "sheet"]
 const BALANCED_TEXT_CLASS = "text-balance";
 const PRETTY_TEXT_CLASS = "text-pretty";
 const WORD_CONTAINMENT_CLASS = "wrap-break-word";
+const ZERO_MIN_WIDTH_CLASS = "min-w-0";
 
 describe("surface typography primitives", () => {
   it("uses semantic wrapping defaults for every shared surface family", () => {
@@ -66,8 +67,10 @@ describe("surface typography primitives", () => {
       const title = screen.getByTestId(`${name}-title`);
       const description = screen.getByTestId(`${name}-description`);
       expect(title.classList.contains(BALANCED_TEXT_CLASS)).toBe(true);
+      expect(title.classList.contains(ZERO_MIN_WIDTH_CLASS)).toBe(true);
       expect(title.classList.contains(WORD_CONTAINMENT_CLASS)).toBe(true);
       expect(description.classList.contains(PRETTY_TEXT_CLASS)).toBe(true);
+      expect(description.classList.contains(ZERO_MIN_WIDTH_CLASS)).toBe(true);
       expect(description.classList.contains(WORD_CONTAINMENT_CLASS)).toBe(true);
       expect(description.classList.contains(BALANCED_TEXT_CLASS)).toBe(false);
       expect(description.classList.contains("md:text-pretty")).toBe(false);
