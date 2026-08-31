@@ -672,6 +672,47 @@ describe("useLazyLoadSentinel — failure recovery and stale completions", () =>
   });
 });
 
+describe("useLazyLoadSentinel — stale view handoff", () => {
+  it("replays an eligible intersection after a stale request releases the lock", async () => {
+    const scrollRef = makeScrollRef();
+    let activeView = "A";
+    let resolveA: (value: number) => void = () => {};
+    const loadA = vi.fn(
+      () =>
+        new Promise<number>((resolve) => {
+          resolveA = resolve;
+        }),
+    );
+    const loadB = vi.fn(async () => 0);
+    const { result, rerender } = renderHook(
+      ({ view }: { view: string }) =>
+        useLazyLoadSentinel(scrollRef, true, false, false, view === "A" ? loadA : loadB, {
+          rearmWhileIntersecting: true,
+          isRequestCurrent: () => activeView === view,
+        }),
+      { initialProps: { view: "A" } },
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+
+    fire(records[0], true, node);
+    expect(loadA).toHaveBeenCalledTimes(1);
+
+    activeView = "B";
+    rerender({ view: "B" });
+    fire(records[1], true, node);
+
+    // B's observer sees the eligible sentinel, but A still owns the shared
+    // in-flight lock until its stale request settles.
+    expect(loadB).not.toHaveBeenCalled();
+    await act(async () => resolveA(20));
+
+    // No exit/re-entry or recovery click: releasing A must replay B's current
+    // intersection through the normal sentinel path.
+    await waitFor(() => expect(loadB).toHaveBeenCalledTimes(1));
+  });
+});
+
 describe("useLazyLoadSentinel — stale observers", () => {
   it("does not disarm the replacement observer from a stale zero completion", async () => {
     const scrollRef = makeScrollRef();

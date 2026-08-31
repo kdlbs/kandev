@@ -358,6 +358,31 @@ function useRetryWhenSentinelBecomesEligible({
   }, [hasMore, blocked, isLoadingMore, fireLoad, refs]);
 }
 
+/** Returns true when a stale request can hand its current intersection to the
+ * replacement view after the shared in-flight lock is released. */
+function shouldReplayCurrentIntersection(
+  refs: SentinelMutableRefs,
+  previousObserver: IntersectionObserver,
+  previousNode: HTMLDivElement,
+): boolean {
+  const { hasMore, blocked, isLoadingMore } = refs.stateRef.current;
+  const { joinInFlightWhileLoading } = refs.optionsRef.current;
+  return Boolean(
+    refs.mountedRef.current &&
+    refs.observerRef.current &&
+    refs.sentinelNodeRef.current &&
+    (refs.observerRef.current !== previousObserver ||
+      refs.sentinelNodeRef.current !== previousNode) &&
+    refs.intersectingRef.current &&
+    !refs.disarmedRef.current &&
+    !refs.loadInFlightRef.current &&
+    !refs.continuationScheduledRef.current &&
+    hasMore &&
+    !blocked &&
+    (!isLoadingMore || joinInFlightWhileLoading),
+  );
+}
+
 /**
  * Observes a sentinel element to trigger older-message lazy loading, shared by
  * the native transcript (top-of-list sentinel, no automatic re-arm) and the
@@ -382,7 +407,8 @@ function useRetryWhenSentinelBecomesEligible({
  * another request was in flight, an eligibility transition retries it while
  * it remains intersecting; this closes the gap where IntersectionObserver does
  * not emit a second entry after the blocked state changes. Stale completions
- * (unmount, observer cleanup, sentinel replacement) never re-arm.
+ * never re-arm their original observer, but replay an eligible intersection
+ * already observed by a replacement observer after the in-flight lock clears.
  */
 // eslint-disable-next-line max-params, max-lines-per-function -- plan-mandated sentinel state machine; eligibility retry and deferred re-arm stay coordinated with the extracted observer/settle/pin helpers
 export function useLazyLoadSentinel(
@@ -508,12 +534,16 @@ export function useLazyLoadSentinel(
       rejected = true;
     } finally {
       const outcome = { count, rejected };
-      if (isRequestCurrent && !isRequestCurrent()) {
+      const staleRequest = Boolean(isRequestCurrent && !isRequestCurrent());
+      if (staleRequest) {
         onLoadSettled?.({ ...outcome, continuation: "stale" });
       } else {
         settleLoad(node, observer, outcome, onLoadSettled);
       }
       loadInFlightRef.current = false;
+      if (staleRequest && shouldReplayCurrentIntersection(refs, observer, node)) {
+        void fireLoadRef.current?.();
+      }
     }
   }, [loadMore, refreshPinned, settleLoad]);
   fireLoadRef.current = fireLoad;
