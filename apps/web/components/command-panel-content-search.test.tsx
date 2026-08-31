@@ -164,6 +164,7 @@ function viewProps(overrides: Partial<CommandPanelViewProps> = {}): CommandPanel
     taskResults: [],
     stepMap: new Map(),
     repoMap: new Map(),
+    liveTasksById: new Map(),
     handleTaskSelect: vi.fn(),
     ...overrides,
   };

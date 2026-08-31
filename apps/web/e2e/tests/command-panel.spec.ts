@@ -308,6 +308,47 @@ test.describe("Command Panel", () => {
     await expect(dialog.getByText("Searchable E2E Task")).toBeVisible({ timeout: 5_000 });
   });
 
+  test("task activity icon distinguishes running and idle search results", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const runningTask = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Running Activity Icon E2E",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:steer-fold-setup",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await apiClient.createTask(seedData.workspaceId, "Idle Activity Icon E2E", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await expect(kanban.taskCardByTitle(runningTask.title)).toBeVisible({ timeout: 10_000 });
+
+    await openCommandPanel(testPage);
+    const dialog = commandDialog(testPage);
+    const input = dialog.getByRole("combobox");
+    await input.fill("Running Activity Icon");
+    const runningOption = dialog.getByRole("option").filter({ hasText: runningTask.title });
+    await expect(runningOption).toBeVisible({ timeout: 10_000 });
+    await expect(runningOption.getByTestId("task-state-running")).toBeVisible();
+    await expect(runningOption.getByRole("img", { name: "In progress" })).toBeVisible();
+
+    await input.fill("Idle Activity Icon");
+    const idleOption = dialog.getByRole("option").filter({ hasText: "Idle Activity Icon E2E" });
+    await expect(idleOption).toBeVisible({ timeout: 10_000 });
+    await expect(idleOption.getByTestId("task-state-backlog")).toBeVisible();
+    await expect(idleOption.getByRole("img", { name: "Created" })).toBeVisible();
+  });
+
   test("inline task search shows workflow step badge", async ({
     testPage,
     apiClient,

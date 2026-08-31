@@ -390,11 +390,30 @@ function useCommandPanelHandlers({
   };
 }
 
+function useCommandPanelLiveTasks() {
+  const kanbanTasks = useAppStore((state) => state.kanban.tasks);
+  const kanbanSnapshots = useAppStore((state) => state.kanbanMulti?.snapshots ?? {});
+  return useMemo(() => {
+    const tasks = new Map<string, (typeof kanbanTasks)[number]>();
+    for (const snapshot of Object.values(kanbanSnapshots)) {
+      for (const task of snapshot.tasks) tasks.set(task.id, task);
+    }
+    for (const task of kanbanTasks) tasks.set(task.id, task);
+    return tasks;
+  }, [kanbanSnapshots, kanbanTasks]);
+}
+
+function useCommandPanelRepositories(workspaceId: string | null) {
+  const repositories = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  return workspaceId ? (repositories[workspaceId] ?? []) : [];
+}
+
 export function CommandPanel() {
   const { open, setOpen, mode: panelMode, setMode, modeRequestVersion } = useCommandPanelOpen();
   const commands = useCommands();
   const pathname = usePathname();
   const kanbanSteps = useAppStore((state) => state.kanban.steps);
+  const liveTasksById = useCommandPanelLiveTasks();
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
@@ -404,8 +423,7 @@ export function CommandPanel() {
   const worktreePath = useAppStore((s) =>
     activeSessionId ? (s.taskSessions.items[activeSessionId]?.worktree_path ?? null) : null,
   );
-  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
-  const repositories = workspaceId ? (reposByWorkspace[workspaceId] ?? []) : [];
+  const repositories = useCommandPanelRepositories(workspaceId);
   const handleTaskNavigation = useCommandPanelTaskNavigation(pathname, activeTaskId);
 
   const state = useCommandPanelState(panelMode, setMode);
@@ -490,6 +508,7 @@ export function CommandPanel() {
       taskResults={taskResults}
       stepMap={handlers.stepMap}
       repoMap={handlers.repoMap}
+      liveTasksById={liveTasksById}
       handleTaskSelect={handlers.handleTaskSelect}
     />
   );
