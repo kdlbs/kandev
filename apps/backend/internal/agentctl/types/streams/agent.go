@@ -101,8 +101,8 @@ const (
 )
 
 // AgentEvent is the message type streamed from the agent process.
-// This represents protocol-agnostic events from the agent, normalized from
-// various underlying protocols (ACP, Codex, Claude Code, etc.).
+// This represents agent-agnostic events normalized from ACP session updates
+// across different agents (Codex, Claude Code, etc.).
 //
 // Stream endpoint: ws://.../api/v1/agent/events
 type AgentEvent struct {
@@ -115,7 +115,7 @@ type AgentEvent struct {
 
 	// OperationID identifies the current in-flight operation (turn, prompt, etc.).
 	// Used to target specific operations for cancellation or status updates.
-	// For Codex this is the turn ID, for other protocols it may be empty.
+	// For Codex this is the turn ID, for other agents it may be empty.
 	OperationID string `json:"operation_id,omitempty"`
 
 	// PromptGeneration is the lifecycle-owned identity assigned when this
