@@ -351,6 +351,7 @@ func TestHandleCreateTask_AssociateReceivesRepositoryIDNotRowID(t *testing.T) {
 		t.Fatalf("create task returned error: %s", string(resp.Payload))
 	}
 
+	require.NotEmpty(t, remote.taskID, "Associate must have been called")
 	taskRepos, err := repo.ListTaskRepositories(ctx, remote.taskID)
 	require.NoError(t, err)
 	require.Len(t, taskRepos, 1)
