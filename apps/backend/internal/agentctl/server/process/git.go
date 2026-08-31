@@ -243,6 +243,9 @@ func (g *GitOperator) validateManagedPushTransport(ctx context.Context) error {
 
 func managedPushTransportConfigKey(key string) bool {
 	key = strings.ToLower(strings.TrimSpace(key))
+	if key == "include.path" || (strings.HasPrefix(key, "includeif.") && strings.HasSuffix(key, ".path")) {
+		return true
+	}
 	return strings.HasPrefix(key, "url.") && (strings.HasSuffix(key, ".insteadof") || strings.HasSuffix(key, ".pushinsteadof")) ||
 		key == "core.sshcommand" || key == "core.gitproxy" ||
 		(strings.HasPrefix(key, "remote.") && (strings.HasSuffix(key, ".receivepack") || strings.HasSuffix(key, ".uploadpack"))) ||

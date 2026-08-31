@@ -378,6 +378,65 @@ func TestGitOperatorContributionDestinationRejectsRepositoryControlledTransportB
 	}
 }
 
+func TestGitOperatorContributionDestinationRejectsIncludedTransportBeforePrivateEnv(t *testing.T) {
+	for _, directive := range []string{"include.path", "includeIf.onbranch:feature/destination.path"} {
+		t.Run(directive, func(t *testing.T) {
+			repoDir, cleanup := setupTestRepo(t)
+			t.Cleanup(cleanup)
+			runGit(t, repoDir, "checkout", "-b", "feature/destination")
+
+			destination := &taskmodels.ContributionDestination{
+				Version:    taskmodels.ContributionDestinationVersion,
+				Provider:   taskmodels.ContributionDestinationProviderGitHub,
+				HeadBranch: "feature/destination",
+				SourceRepository: taskmodels.ContributionDestinationRepository{
+					Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+				},
+				TargetRepository: taskmodels.ContributionDestinationRepository{
+					Host: "github.com", Path: "agent/kandev", ProviderID: "200", RemoteURL: "https://github.com/agent/kandev.git",
+				},
+			}
+			if err := destination.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, repoDir, "remote", "add", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
+			runGit(t, repoDir, "remote", "set-url", "--push", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
+
+			transportMarker := filepath.Join(t.TempDir(), "private-scope")
+			transport := filepath.Join(t.TempDir(), "transport")
+			writeExecutable(t, transport, "#!/bin/sh\nprintf '%s' \"$KANDEV_GITHUB_CREDENTIAL_SCOPES\" > "+transportMarker+"\nexit 1\n")
+			includedConfig := filepath.Join(t.TempDir(), "included.gitconfig")
+			config := fmt.Sprintf("[protocol \"ext\"]\n\tallow = always\n[url \"ext::%s\"]\n\tinsteadOf = %s\n", transport, destination.TargetRepository.RemoteURL)
+			if err := os.WriteFile(includedConfig, []byte(config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, repoDir, "config", "--local", directive, includedConfig)
+
+			operator := NewGitOperator(repoDir, newTestLogger(t), nil)
+			operator.setContributionDestination(destination)
+			managedCredentialUses := 0
+			operator.setManagedPushEnvironmentProvider(func() []string {
+				managedCredentialUses++
+				return append(os.Environ(), "KANDEV_GITHUB_CREDENTIAL_SCOPES=private-destination-scope")
+			})
+
+			result, err := operator.Push(context.Background(), false, false)
+			if err != nil {
+				t.Fatalf("Push returned error: %v", err)
+			}
+			if result.Success || !strings.Contains(result.Error, "repository-controlled transport") {
+				t.Fatalf("Push = %+v, want included repository transport rejection", result)
+			}
+			if _, err := os.Stat(transportMarker); !os.IsNotExist(err) {
+				t.Fatalf("included repository transport received private credential scope: %v", err)
+			}
+			if managedCredentialUses != 0 {
+				t.Fatalf("included repository transport requested private credential environment %d times", managedCredentialUses)
+			}
+		})
+	}
+}
+
 func TestGitOperatorContributionDestinationRejectsRepositoryHTTPHeaderBeforePrivateEnv(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
 	t.Cleanup(cleanup)
@@ -499,6 +558,8 @@ exec %q "$@"
 // for the transport seams rejected before private scopes are made available.
 func TestManagedPushTransportIsolation(t *testing.T) {
 	for _, key := range []string{
+		"include.path",
+		"includeIf.onbranch:feature/destination.path",
 		"url.file:///tmp/target.insteadOf",
 		"url.ssh://git@example.test/.pushInsteadOf",
 		"core.sshCommand",
