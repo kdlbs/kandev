@@ -279,6 +279,5 @@ describe("AgentProfileDeleteConflictDialog layout", () => {
 
     const taskItem = screen.getByText(longTaskTitle);
     expect(taskItem.tagName).toBe("LI");
-    expect(taskItem.className).toContain("min-w-0");
   });
 });

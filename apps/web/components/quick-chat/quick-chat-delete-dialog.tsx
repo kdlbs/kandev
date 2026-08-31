@@ -33,9 +33,9 @@ export function QuickChatDeleteDialog({
             <div>
               <p>{t("chat:deleteQuickChatIntro")}</p>
               <ul className="list-disc list-inside space-y-1">
-                <li className="min-w-0">{t("chat:allConversationHistory")}</li>
-                <li className="min-w-0">{t("chat:theTaskAndItsData")}</li>
-                <li className="min-w-0">{t("chat:theAssociatedWorktree")}</li>
+                <li>{t("chat:allConversationHistory")}</li>
+                <li>{t("chat:theTaskAndItsData")}</li>
+                <li>{t("chat:theAssociatedWorktree")}</li>
               </ul>
               <p>{t("chat:thisActionCannotBeUndone")}</p>
             </div>

@@ -246,7 +246,7 @@ function UtilityAgentConflictSection({
       <p className="font-medium text-sm">{t("agents:conflictUtilityAgentsTitle")}</p>
       <ul className="list-disc list-inside space-y-0.5">
         {utilityAgents.map((agent) => (
-          <li key={agent.id} className="min-w-0 text-sm">
+          <li key={agent.id} className="text-sm">
             {agent.name || agent.id}
           </li>
         ))}
@@ -270,7 +270,7 @@ function SessionConflictSection({
       <p className="font-medium text-sm">{title}</p>
       <ul className="list-disc list-inside space-y-0.5">
         {sessions.map((t) => (
-          <li key={t.task_id} className="min-w-0 text-sm">
+          <li key={t.task_id} className="text-sm">
             {t.task_title || fallback}
           </li>
         ))}
@@ -292,7 +292,7 @@ function WatcherConflictSection({
       <p className="font-medium text-sm">{t("agents:conflictWatchersTitle")}</p>
       <ul className="list-disc list-inside space-y-0.5">
         {entries.map(([kind, items]) => (
-          <li key={kind} className="min-w-0 text-sm">
+          <li key={kind} className="text-sm">
             <span className="font-medium">
               {watcherKindLabel(t, kind as WatcherReference["kind"])}:
             </span>{" "}
@@ -321,7 +321,7 @@ function AutomationConflictSection({
       <p className="font-medium text-sm">{t("agents:conflictAutomationsTitle")}</p>
       <ul className="list-disc list-inside space-y-0.5">
         {automations.map((ref) => (
-          <li key={ref.id} className="min-w-0 text-sm">
+          <li key={ref.id} className="text-sm">
             <Trans
               i18nKey="agents:conflictAutomationRow"
               values={{
@@ -354,10 +354,7 @@ function RoutingTierConflictSection({
       <p className="font-medium text-sm">{t("agents:conflictTierMappingsTitle")}</p>
       <ul className="list-disc list-inside space-y-0.5">
         {routingTiers.map((ref) => (
-          <li
-            key={`${ref.workspace_id}-${ref.provider_id}-${ref.tier}`}
-            className="min-w-0 text-sm"
-          >
+          <li key={`${ref.workspace_id}-${ref.provider_id}-${ref.tier}`} className="text-sm">
             <Trans
               i18nKey="agents:conflictTierMappingRow"
               values={{
