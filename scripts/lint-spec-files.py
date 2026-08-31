@@ -413,9 +413,10 @@ def check_size_exception_catalog(
             violations.append(
                 Violation(
                     "invalid-size-exception",
-                    root / relative,
+                    root / SIZE_EXCEPTIONS_PATH,
                     1,
-                    "size exceptions must reference canonical legacy Markdown files under docs/specs",
+                    "size exceptions must reference canonical legacy Markdown files under "
+                    f"docs/specs (got `{relative_text}`)",
                 )
             )
             continue

@@ -220,6 +220,18 @@ migration: in_progress
 
         self.assertEqual(self.rules(violations), ["invalid-size-exception", "invalid-size-exception"])
 
+    def test_rejects_an_absolute_size_exception_target_without_crashing(self) -> None:
+        self.write("docs/specs/spec-lint-exceptions.tsv", "/etc/passwd\t100\n")
+
+        violations = load_linter().lint_specs(self.root, self.config)
+
+        self.assertEqual(self.rules(violations), ["invalid-size-exception"])
+        # main() calls violation.path.relative_to(root) on every violation; an
+        # absolute (or otherwise out-of-tree) target must not produce a violation
+        # path that raises there.
+        for violation in violations:
+            violation.path.relative_to(self.root)
+
     def test_flags_a_malformed_size_exception_line(self) -> None:
         self.write("docs/specs/spec-lint-exceptions.tsv", "docs/specs/legacy/spec.md\n")
         self.write("docs/specs/legacy/spec.md", "x" * 5)
