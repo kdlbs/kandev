@@ -3,6 +3,7 @@ package models
 import (
 	"fmt"
 	"maps"
+	"math"
 
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
@@ -479,6 +480,9 @@ func remapConfigKey(config map[string]any, fromKey, toKey string, lookup func(an
 func toInt(v any) (int, bool) {
 	switch val := v.(type) {
 	case float64:
+		if math.IsNaN(val) || math.IsInf(val, 0) || math.Trunc(val) != val {
+			return 0, false
+		}
 		return int(val), true
 	case int:
 		return val, true

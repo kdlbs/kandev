@@ -261,7 +261,8 @@ These seven triggers round-trip through export and import (fixed by
 in `export.go` now carries all eleven `StepEvents` fields, not just
 `on_enter`/`on_turn_start`/`on_turn_complete`/`on_exit`). What still does not
 round-trip is Office step *metadata* with no portable representation:
-`stage_type`, step participants (reviewers/approvers), and recorded decisions
+`stage_type`, step participants (reviewers/approvers), recorded decisions,
+task data, and step history
 (see the note under [`StepPortable`](#stepportable)).
 
 ---
