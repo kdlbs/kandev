@@ -46,11 +46,17 @@ describe("setGitStatus change reporting (single deep compare)", () => {
     );
   });
 
-  it("does not rewrite byEnvironmentId for a duplicate snapshot", () => {
+  it("advances the timestamp watermark for a duplicate snapshot", () => {
     store.getState().setGitStatus(SESSION, status());
-    const ref = store.getState().gitStatus.byEnvironmentId[SESSION];
     store.getState().setGitStatus(SESSION, status({ timestamp: NEWER_TIMESTAMP }));
-    expect(store.getState().gitStatus.byEnvironmentId[SESSION]).toBe(ref);
+    expect(store.getState().gitStatus.byEnvironmentId[SESSION]).toMatchObject({
+      modified: ["a.ts"],
+      timestamp: NEWER_TIMESTAMP,
+    });
+    expect(store.getState().gitStatus.byEnvironmentRepo[SESSION][""]).toMatchObject({
+      modified: ["a.ts"],
+      timestamp: NEWER_TIMESTAMP,
+    });
   });
 
   it("returns true when a file's diff content changes", () => {

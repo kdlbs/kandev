@@ -672,6 +672,42 @@ describe("isElementFullyVisible", () => {
 });
 
 describe("MessageListStatus", () => {
+  it("does not render the older control during routine pagination", () => {
+    render(
+      <MessageListStatus
+        isLoadingMore={false}
+        hasMore
+        showLoadingState={false}
+        messagesLoading={false}
+        isInitialLoading={false}
+        messagesCount={1}
+        onLoadMore={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId("load-older-messages")).toBeNull();
+  });
+
+  it("renders one explicit retry control during recovery", () => {
+    const onLoadMore = vi.fn();
+    render(
+      <MessageListStatus
+        isLoadingMore={false}
+        hasMore
+        showRecovery
+        showLoadingState={false}
+        messagesLoading={false}
+        isInitialLoading={false}
+        messagesCount={1}
+        onLoadMore={onLoadMore}
+      />,
+    );
+
+    const button = screen.getByTestId("load-older-messages");
+    button.click();
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+  });
+
   it("renders a conversation loading indicator while existing content remains visible", () => {
     render(
       <MessageListStatus
