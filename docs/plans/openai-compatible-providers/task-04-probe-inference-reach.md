@@ -20,20 +20,25 @@ system_design:
 
 ## Summary
 
-Carry provider injection through `InferenceConfigDTO` (`ProviderArgs []string`,
-reuse `Env`), populate it from the resolved profile in the backend utility
-caller, and apply it in `acp_executor.go` for both the inference and probe
+Carry `acpprovider.GatewayAuth` through `InferenceConfigDTO`
+(`ProviderGatewayAuth *acpprovider.GatewayAuth`, reuse `Env`), populate it from
+the resolved profile in the backend utility caller, and apply the same
+`authenticate(gateway)` in `acp_executor.go` for both the inference and probe
 subprocesses. Surface a sanitized upstream failure (e.g. provider `401`) instead
 of "peer disconnected".
 
 ## Scope
 
-- `InferenceConfigDTO.ProviderArgs` + backend population in
-  `lifecycle/utility.go` (run `providerinject.Build` when the profile is
-  `openai_compatible`).
-- `acp_executor.go`: append `ProviderArgs` next to `CLIFlags`; merge provider
-  env in `sanitizeEnvForAgent` with reserved-key precedence.
-- Agent-models probe path: same builder via the profile context it receives.
+- `InferenceConfigDTO.ProviderGatewayAuth` + backend population in
+  `lifecycle/utility.go` (call `Manager.resolveProviderGatewayAuth` when the
+  resolved profile is `openai_compatible`).
+- `acp_executor.go`: advertise the gateway client capability and issue
+  `authenticate(gateway)` after `initialize` in both `executeACPSession` and
+  `probeACPSessionWithContext`; merge the provider key env in
+  `sanitizeEnvForAgent` with reserved-key precedence.
+- Agent-models probe path: the probe executor accepts `ProviderGatewayAuth` and
+  applies the same `authenticate`. Provider profiles use free-text model entry,
+  so no per-profile probe caller is wired (AC-003.1, revised).
 - Error path: on `session/new` / `prompt` failure include a redacted stderr tail
   (key + tmp paths stripped) so an upstream status is legible.
 
@@ -44,7 +49,8 @@ of "peer disconnected".
 ## Implementation acceptance conditions
 
 1. A profile-scoped utility prompt on an `openai_compatible` Codex profile
-   reaches a stub OpenAI server with the injected bearer key.
+   reaches a stub OpenAI server with the bearer key from
+   `authenticate(gateway)`.
 2. The sessionless probe executor accepts `ProviderGatewayAuth` and issues the
    gateway `authenticate` when supplied (AC-003.1, revised: provider profiles
    use free-text model entry, so no per-profile probe caller is wired).
@@ -63,7 +69,7 @@ of "peer disconnected".
 - `apps/backend/internal/agentctl/server/utility/types.go`
 - `apps/backend/internal/agentctl/server/utility/acp_executor.go`
 - `apps/backend/internal/agent/runtime/lifecycle/utility.go`
-- `apps/backend/internal/agent/runtime/lifecycle/` agent-models probe caller
+- `apps/backend/internal/agentctl/server/utility/acp_provider_gateway_test.go`
 - sibling `*_test.go`
 
 ## Risks
@@ -71,18 +77,12 @@ of "peer disconnected".
 - Redaction of the stderr tail must be conservative; prefer an allowlist of
   recognizable HTTP status lines over free-text passthrough.
 
-## REDESIGN NOTE (2026-08-31)
+## History
 
-Verified against `@agentclientprotocol/codex-acp` 1.7.0: the bridge ignores CLI
-args, so `-c` overrides do not reach codex. codex-acp instead exposes a
-first-class ACP **gateway provider**: advertise
-`clientCapabilities.auth._meta.gateway=true` in `initialize`, then send
-`authenticate({methodId:"gateway", _meta:{gateway:{baseUrl, headers:{Authorization:"Bearer <key>"}, providerName}}})`.
-See the "Design update" block in the system design. This work order is re-scoped:
-`providerinject.Build` returns ACP gateway `authenticate` params (not CLI args);
-task-03 wires the `authenticate` call + capability into the agentctl ACP adapter
-session-init path and carries base URL + revealed key through the instance
-config; task-04 does the same for the utility/probe ACP executor. The two
-`profile_env.go` credential fixes in task-03 still stand as written. The
-already-merged task-02 pure package keeps its shape (`Injection` → gateway
-params) and tests are updated accordingly.
+An earlier revision carried provider config as `InferenceConfigDTO.ProviderArgs
+[]string` (CLI `-c` flags applied next to `CLIFlags`). The `acp-debug` capture
+(2026-08-31, `codex-acp` 1.7.0) showed the bridge ignores CLI args and offers a
+first-class `gateway` auth method, so the DTO now carries
+`ProviderGatewayAuth *acpprovider.GatewayAuth` and the executor issues the same
+`authenticate(gateway)` used by the live-session path. `providerinject` and
+`ProviderArgs` never shipped.

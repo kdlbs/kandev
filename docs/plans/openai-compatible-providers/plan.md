@@ -32,15 +32,14 @@ parallel-safe (backend lifecycle vs `apps/web`).
 
 ## Risks
 
-- **codex-acp `-c` acceptance.** The design assumes `@agentclientprotocol/codex-acp`
-  forwards `-c key=value` overrides to Codex the same way `mcpconfig.CodexStrategy`
-  relies on for MCP. task-02 must verify this against the pinned bridge version
-  (see `apps/backend/internal/agent/agents/ACP_BRIDGE_VERSIONS.md`) with an
-  `acp-debug` capture before the renderer shape is locked. If `-c` is not
-  forwarded, fall back to a generated `config.toml` fragment written into the
-  session's isolated `SessionDirTemplate` home (still never the host `$HOME`).
-- **`wire_api`.** Only `responses` is currently accepted by this Codex version;
-  the spec is a fixed constant, revisit if the bridge adds `chat`.
+- **codex-acp gateway auth surface.** `@agentclientprotocol/codex-acp` 1.7.0
+  ignores CLI arguments; provider config is delivered through its first-class ACP
+  `gateway` auth method instead (verified with an `acp-debug` capture against the
+  pinned bridge; see `apps/backend/internal/agent/agents/ACP_BRIDGE_VERSIONS.md`).
+  If a future agent needs a `config.toml` fragment instead, it writes into the
+  session's isolated `SessionDirTemplate` home, never the host `$HOME`.
+- **`wire_api`.** codex-acp's gateway method fixes `apiType` to `openai` →
+  `wire_api: "responses"`; revisit if the bridge adds `chat`.
 - **`mergeEnvFillMissing` precedence flip.** Scope strictly to `ReservedKeys`;
   a broad flip would change behavior for every existing profile env var. Covered
   by AC-004.3 and a regression test in task-03.

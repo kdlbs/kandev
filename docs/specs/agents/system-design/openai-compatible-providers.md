@@ -21,8 +21,9 @@ each CLI's configuration. This design uses, but does not own:
 - **agentctl process/adapter launch** and the **one-shot ACP inference/probe**
   path (`internal/agentctl/server/utility`, `internal/agentctl/server/process`)
   as the injection sites.
-- **MCP passthrough `-c` override strategy** (`internal/agent/mcpconfig`) as the
-  existing pattern for Codex command-line configuration overrides.
+- **agentctl ACP adapter** (`internal/agentctl/server/adapter/transport/acp`) as
+  the site that advertises the gateway auth capability and replays the profile's
+  `authenticate` call.
 
 ## Requirement mapping
 
@@ -36,94 +37,85 @@ each CLI's configuration. This design uses, but does not own:
 ## Components and responsibilities
 
 - **`AgentProfile` model + settings repo** (`internal/agent/settings`): stores
-  and validates the three new provider fields; keeps them in the existing
-  JSON-encoded profile blob so no column migration is needed.
+  and validates the three new provider fields; persists them as three real
+  columns via idempotent `ADD COLUMN` migrations (see [Persistence](#persistence)).
 - **Agent capability**: a new optional method on the agent interface,
   `OpenAICompatibleProvider() *OpenAICompatibleProviderSpec` (nil = unsupported).
   `CodexACP` returns a non-nil spec; every other agent returns nil initially.
-- **`providerinject` package** (new, `internal/agent/providerinject/`): pure
-  function `Build(spec, profileProvider, revealedKey) (Injection, error)` where
-  `Injection` is `{ CLIArgs []string; Env map[string]string; ReservedKeys
-  []string }`. No I/O, no `*Manager`. Mirrors the `mcpconfig` strategy shape.
-- **Profile resolver / lifecycle** (`internal/agent/runtime/lifecycle`): calls
-  `providerinject.Build`, merges `CLIArgs` into the agent argv (alongside the
-  existing MCP `-c` args and `CLIFlags`), and merges `Env` with
-  provider-key-wins precedence.
+- **`acpprovider` package** (`internal/common/acpprovider/`): tier-neutral data
+  primitive. `BuildGatewayAuth` turns a spec + base URL + revealed key into a
+  `GatewayAuth{ MethodID, Meta }` value; `ValidateBaseURL` /
+  `ValidateCredentialedBaseURL` are the shared save-time and launch-time URL
+  checks. No I/O, no `*Manager`; neither the backend nor agentctl imports the
+  other.
+- **Profile resolver / lifecycle** (`internal/agent/runtime/lifecycle`):
+  `Manager.resolveProviderGatewayAuth` reveals the key, validates the base URL,
+  adapts a loopback host to the launching runtime, and produces the `GatewayAuth`
+  that rides through `CreateInstanceRequest` to agentctl.
+- **agentctl ACP adapter** (`internal/agentctl/server/adapter/transport/acp`):
+  advertises `clientCapabilities.auth._meta.gateway=true` in `initialize` and,
+  for an `openai_compatible` launch, issues the `authenticate` gateway call right
+  after the `initialize` round-trip.
 - **Utility path** (`internal/agentctl/server/utility` + the backend caller in
-  `lifecycle/utility.go`): carries the same `CLIArgs` / `Env` through
-  `InferenceConfigDTO` and applies them in `acp_executor.go`.
+  `lifecycle/utility.go`): carries the same `GatewayAuth` through
+  `InferenceConfigDTO` and applies the identical `authenticate` in
+  `acp_executor.go` for the inference and probe subprocesses.
 - **Frontend profile editor** (`apps/web`): provider-kind select, base-URL
   input, API-key secret picker, gated on the capability flag; client-side
   absolute-URL and no-slash-in-model validation.
 
 ## Provider injection
 
-> **Design update (2026-08-31, verified against `@agentclientprotocol/codex-acp`
-> 1.7.0 / `@openai/codex` 0.151.0):** codex-acp does **not** parse or forward
-> CLI arguments, so the `-c model_provider*` override approach below is dead for
-> the ACP path. Instead codex-acp exposes a **first-class ACP "gateway"
-> provider**:
->
-> - `getCodexAuthMethods` adds `GatewayAuthMethod` (`id: "gateway"`) to the
->   `initialize` response **only when** the client advertises
->   `clientCapabilities.auth._meta.gateway === true`.
-> - Kandev then sends `authenticate({ methodId: "gateway", _meta: { gateway: {
->   baseUrl, headers, providerName } } })`. `authenticateWithGateway` applies it
->   live (`restartRequired: "false"`); `apiType` is fixed to `openai` →
->   `wire_api: "responses"`.
-> - The **API key travels in `headers`** (`{"Authorization": "Bearer <key>"}`),
->   not a file and not `ps`-visible args. `OPENAI_API_KEY` / `CODEX_API_KEY` in
->   the process env remain a fallback codex-acp reads on its own.
-> - codex-acp also exposes runtime `providers/list` / `providers/set` /
->   `providers/disable` RPCs over ACP for the same gateway config.
->
-> **Revised injection model:** the primitive still lives on the profile
-> (task-01, unchanged). `providerinject.Build` produces an
-> `ACPGatewayAuth{ MethodID, Meta }` value (base URL + `Authorization` header +
-> provider name), not CLI args. The agentctl ACP adapter advertises
-> `auth._meta.gateway=true` and, after `initialize`, issues the `authenticate`
-> gateway call whenever the launching profile is `openai_compatible`. This
-> removes the isolated-home file-materialization work entirely and works
-> identically under the standalone and Docker executors. task-02/03/04 are
-> re-scoped around this; task-01 and task-05 are unaffected.
+Verified against `@agentclientprotocol/codex-acp` 1.7.0 / `@openai/codex`
+0.151.0: codex-acp does **not** parse or forward CLI arguments, so provider
+configuration is delivered through codex-acp's first-class ACP **"gateway"
+provider**, not `-c` overrides and not a `config.toml` fragment.
 
-The historical CLI-override design is retained below for context only.
+- `getCodexAuthMethods` adds `GatewayAuthMethod` (`id: "gateway"`) to the
+  `initialize` response **only when** the client advertises
+  `clientCapabilities.auth._meta.gateway === true`.
+- Kandev then sends `authenticate({ methodId: "gateway", _meta: { gateway: {
+  baseUrl, headers, providerName } } })`. `authenticateWithGateway` applies it
+  live (`restartRequired: "false"`); `apiType` is fixed to `openai` →
+  `wire_api: "responses"`.
+- The **API key travels in `headers`** (`{"Authorization": "Bearer <key>"}`),
+  never a file and never a `ps`-visible arg. `OPENAI_API_KEY` / `CODEX_API_KEY`
+  in the process env stay a fallback codex-acp reads on its own.
+- codex-acp also exposes runtime `providers/list` / `providers/set` /
+  `providers/disable` RPCs over ACP for the same gateway config.
 
-`OpenAICompatibleProviderSpec` (Codex value):
+The provider primitive lives on the profile (task-01).
+`acpprovider.BuildGatewayAuth` turns it into a `GatewayAuth{ MethodID, Meta }`
+value. The agentctl ACP adapter advertises `auth._meta.gateway=true` and, after
+`initialize`, issues the `authenticate` gateway call whenever the launching
+profile is `openai_compatible`. No host file is materialized and the path is
+identical under the standalone and Docker executors.
+
+`OpenAICompatibleProviderSpec` (Codex value,
+`internal/agent/agents/openai_compatible_provider.go`):
 
 ```go
 OpenAICompatibleProviderSpec{
-    // Fixed, non-reserved id used for the synthesized provider block.
-    ProviderID: "kandev_openai_compat",
-    WireAPI:    "responses", // current codex-acp only accepts "responses"
-    KeyEnvVar:  "OPENAI_API_KEY",
-    // How Build renders the injection.
-    Render: RenderCodexConfigOverrides,
+    AuthMethodID: "gateway",
+    ProviderName: "Kandev",
+    KeyEnvVar:    "OPENAI_API_KEY",
 }
 ```
 
-`RenderCodexConfigOverrides` produces, for base URL `B` and provider id `P`:
-
-```
--c model_provider="P"
--c model_providers.P.name="kandev-openai-compat"
--c model_providers.P.base_url="B"
--c model_providers.P.wire_api="responses"
--c model_providers.P.env_key="OPENAI_API_KEY"
-```
-
-and `Env["OPENAI_API_KEY"] = revealedKey`, `ReservedKeys = ["OPENAI_API_KEY"]`.
-The model id itself is applied through the existing profile `Model` /
-session-model path unchanged. `-c` overrides sit above `config.toml` in Codex's
-precedence and are the same mechanism `mcpconfig.CodexStrategy` already uses, so
-no host file is written (satisfies AC-002.1, AC-002.3). The fixed `ProviderID`
-is chosen to never equal a reserved built-in id (AC-002.2).
+`acpprovider.BuildGatewayAuth(spec.AuthMethodID, spec.ProviderName, baseURL,
+revealedKey)` returns `GatewayAuth{ MethodID: "gateway", Meta }` where `Meta` is
+`{"gateway": {"baseUrl": B, "providerName": "Kandev", "headers":
+{"Authorization": "Bearer <key>"}}}`. `headers` is omitted when the profile
+references no key, and `providerName` when the spec leaves it blank. The model id
+is applied through the existing profile `Model` / session-model path unchanged,
+so no host file is written (satisfies AC-002.1, AC-002.3). `ProviderName` never
+equals a reserved built-in id (AC-002.2).
 
 Adding another agent later = implement `OpenAICompatibleProvider()` with its own
-`Render` (env-only for CLIs that read `OPENAI_BASE_URL`, a generated config
-fragment in the isolated agent home for CLIs that require a file). The file case
-uses the session's existing isolated home dir (`SessionDirTemplate`), never
-`$HOME` (AC-002.4).
+spec. A CLI that authenticates differently (env-only when it reads
+`OPENAI_BASE_URL`, a generated config fragment when it requires a file) renders
+from the same profile primitive; the file case uses the session's existing
+isolated home dir (`SessionDirTemplate`), never `$HOME` (AC-002.4).
 
 ## Data and contracts
 
@@ -163,30 +155,29 @@ Validation (settings service, shared helper so create/update/duplicate agree):
 
 ## Control flow
 
-Live session start (`lifecycle`):
+Live session start (`lifecycle` → agentctl ACP adapter):
 
 1. Resolve profile. If `ProviderKind == openai_compatible` and the agent spec is
-   non-nil, reveal `ProviderAPIKeySecretID` via the existing global-secret
-   reveal.
-2. `providerinject.Build(spec, profile, key)` → `Injection`.
-3. Append `Injection.CLIArgs` to the agent argv after MCP `-c` args, before
-   `CLIFlags`.
-4. Merge `Injection.Env` into the subprocess env with `ReservedKeys` overriding
-   any inherited value (see [Credential delivery](#credential-delivery)).
-5. Reveal failure or empty base URL → abort start with a sanitized
-   `PROVIDER_MISCONFIGURED` error; never continue to the vendor default
-   (AC-002.5).
+   non-nil, `Manager.resolveProviderGatewayAuth` reveals
+   `ProviderAPIKeySecretID` via the existing global-secret reveal.
+2. It validates the base URL (`ValidateCredentialedBaseURL` when a key is set,
+   `ValidateBaseURL` otherwise) and adapts a loopback host to the launching
+   runtime (see [Executor reachability](#executor-reachability)).
+3. `acpprovider.BuildGatewayAuth(...)` → `GatewayAuth`, carried to agentctl in
+   `CreateInstanceRequest.ProviderGatewayAuth`.
+4. The ACP adapter advertises `auth._meta.gateway=true` in `initialize`, then
+   issues `authenticate(gateway)` before the first `session/new`; auth failure
+   aborts the launch.
+5. Reveal failure, empty base URL, or an agent with no provider spec → abort
+   start with a sanitized `PROVIDER_MISCONFIGURED` error; never continue to the
+   vendor default (AC-002.5).
 
-Data crossing boundaries: `Injection.CLIArgs` and `Injection.Env` travel to
-agentctl through the existing `CreateInstanceRequest` argv/env fields (same
-channel as MCP `-c` args today). The revealed key crosses process boundary in
-the env map exactly as `OPENAI_API_KEY` does now for native Codex.
+Data crossing boundaries: `GatewayAuth` travels to agentctl through the
+`CreateInstanceRequest.ProviderGatewayAuth` field. The revealed key rides inside
+its `Meta` headers and, as codex-acp's own fallback, in the subprocess env as
+`OPENAI_API_KEY` exactly as for native Codex.
 
 ## Probe and inference reach
-
-> **Design update (2026-08-31):** the CLI-args model below is superseded by the
-> ACP gateway auth mechanism (see the Provider injection update). `providerinject`
-> and `ProviderArgs` do not exist.
 
 `InferenceConfigDTO` gains `ProviderGatewayAuth *acpprovider.GatewayAuth` and
 keeps using `Env`. The profile-scoped backend caller
@@ -220,8 +211,8 @@ Two corrections in `internal/agent/runtime/lifecycle/profile_env.go`:
    errors still propagate unchanged. The provider key is revealed on its own
    dedicated path (step 1 above), so a required-key failure still aborts the
    launch there (AC-004.1).
-2. `mergeEnvFillMissing` gains a `reserved []string` parameter (the
-   `Injection.ReservedKeys`). Keys in `reserved` are written even when already
+2. `mergeEnvFillMissing` gains a `reserved []string` parameter (the provider key
+   env var from the spec). Keys in `reserved` are written even when already
    present in `dst`; all other keys keep fill-missing semantics. Only the
    provider injection passes a non-empty `reserved` set (AC-004.2, AC-004.3).
 
@@ -296,8 +287,8 @@ new columns.
 - `warn` log on a dropped profile env secret, with the key name.
 - `info` log at session start when provider injection is applied:
   `provider_kind`, `provider_id`, redacted base URL host, agent id. No key.
-- Reuse existing ACP frame debug logging; the injected `-c` args appear in the
-  launch command log already emitted for agent subprocesses.
+- Reuse existing ACP frame debug logging; the `authenticate` gateway frame (key
+  redacted) rides the ACP frame log already emitted for agent subprocesses.
 
 ## Related decisions
 
