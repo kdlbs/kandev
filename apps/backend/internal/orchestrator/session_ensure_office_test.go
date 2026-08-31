@@ -79,6 +79,59 @@ func TestFindExistingSession_OfficeTaskWithViewerAgent(t *testing.T) {
 	}
 }
 
+func TestFindExistingSession_OfficeTaskWithOnlyOtherAgentSessionReturnsNil(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedOfficeTaskAndSessions(t, repo)
+	if err := repo.DeleteTaskSession(context.Background(), "s-assignee"); err != nil {
+		t.Fatalf("delete assignee session: %v", err)
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	if got := svc.findExistingSession(context.Background(), "t-office"); got != nil {
+		t.Fatalf("expected no assignee session, got %q", got.SessionID)
+	}
+}
+
+func TestPrepareTaskSession_OfficeFlagUsesAssigneeForSessionIdentity(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedOfficeTaskAndSessions(t, repo)
+	if err := repo.DeleteTaskSession(ctx, "s-assignee"); err != nil {
+		t.Fatalf("delete assignee session: %v", err)
+	}
+	if err := repo.DeleteTaskSession(ctx, "s-reviewer"); err != nil {
+		t.Fatalf("delete reviewer session: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t-office"] = &v1.Task{
+		ID:          "t-office",
+		WorkspaceID: "ws-r",
+		WorkflowID:  "wf-r",
+		Title:       "Office",
+		State:       v1.TaskStateInProgress,
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+	svc.config.OfficeSessionIdentity = true
+
+	sessionID, err := svc.PrepareTaskSession(
+		ctx, "t-office", "execution-profile", "", "", "", false,
+	)
+	if err != nil {
+		t.Fatalf("PrepareTaskSession: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("get prepared session: %v", err)
+	}
+	if session.AgentProfileID != "agent-assignee" {
+		t.Fatalf("session identity = %q, want agent-assignee", session.AgentProfileID)
+	}
+	if session.ExecutionProfileID != "execution-profile" {
+		t.Fatalf("execution profile = %q, want execution-profile", session.ExecutionProfileID)
+	}
+}
+
 // TestFindExistingSession_KanbanTask_UsesPrimary keeps the kanban-side
 // is_primary lookup intact under the new gating.
 func TestFindExistingSession_KanbanTask_UsesPrimary(t *testing.T) {
