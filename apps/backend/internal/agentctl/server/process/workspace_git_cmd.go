@@ -82,10 +82,12 @@ func gitEnvValue(env []string, key string) (string, bool) {
 	return value, found
 }
 
-// forceGitSSHBatchMode places BatchMode=yes immediately after the configured
-// SSH command. OpenSSH uses the first command-line value for an option, so
-// this prevents a later BatchMode=no in the inherited command from restoring
-// terminal prompting while preserving the command's other options.
+// forceGitSSHBatchMode places BatchMode=yes immediately after a direct
+// OpenSSH executable. OpenSSH uses the first command-line value for an option,
+// so this prevents a later BatchMode=no in the inherited command from
+// restoring terminal prompting while preserving the command's other options.
+// Shell prefixes and custom wrappers are not parsed here. They use the safe
+// default instead of receiving an option in the wrong position.
 func forceGitSSHBatchMode(command string) string {
 	command = strings.TrimSpace(command)
 	if command == "" {
@@ -95,7 +97,33 @@ func forceGitSSHBatchMode(command string) string {
 	if commandEnd == 0 {
 		return defaultGitSSHCommand
 	}
+	executable, ok := shellWordValue(command[:commandEnd])
+	if !ok || !isOpenSSHExecutable(executable) {
+		return defaultGitSSHCommand
+	}
 	return command[:commandEnd] + " -oBatchMode=yes" + command[commandEnd:]
+}
+
+func shellWordValue(word string) (string, bool) {
+	if word == "" {
+		return "", false
+	}
+	if word[0] == '\'' || word[0] == '"' {
+		if len(word) < 2 || word[len(word)-1] != word[0] {
+			return "", false
+		}
+		return word[1 : len(word)-1], true
+	}
+	if strings.ContainsAny(word, "'\"") {
+		return "", false
+	}
+	return word, true
+}
+
+func isOpenSSHExecutable(executable string) bool {
+	lastSeparator := strings.LastIndexAny(executable, `/\`)
+	base := executable[lastSeparator+1:]
+	return base == "ssh" || base == "ssh.exe"
 }
 
 func shellWordEnd(command string) int {

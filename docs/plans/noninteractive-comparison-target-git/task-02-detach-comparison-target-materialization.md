@@ -92,3 +92,4 @@ Record the red and green commands. Record startup timing proof, cancellation pro
 - Review fix: comparison-target admission is closed under the same mutex as `WaitGroup.Add` during teardown, normal `Stop` reopens it only after draining, and teardown remains permanently closed.
 - Review fix: the `StatusStopped` cleanup path now continues through adapter, shell, and process teardown when comparison-target shutdown returns an error.
 - Test portability: lifecycle coverage uses a copied test executable as the Git shim, so state, cancellation, stale-result, and startup assertions also compile on Windows.
+- Test determinism: preparation, target updates, and lazy tracker creation now use completion channels plus a closed fetch gate instead of wall-clock performance thresholds.

@@ -80,6 +80,22 @@ func TestWorkspaceGitEnvironmentForcesExplicitSSHBatchMode(t *testing.T) {
 	}
 }
 
+func TestForceGitSSHBatchModeSupportsDirectOpenSSHOnly(t *testing.T) {
+	tests := map[string]string{
+		"ssh -i /instance/key -oBatchMode=no": "ssh -oBatchMode=yes -i /instance/key -oBatchMode=no",
+		`'path with spaces/ssh' -i key`:       `'path with spaces/ssh' -oBatchMode=yes -i key`,
+		`env FOO=bar ssh -i key`:              defaultGitSSHCommand,
+		`FOO=bar ssh -i key`:                  defaultGitSSHCommand,
+		`exec ssh -i key`:                     defaultGitSSHCommand,
+		`plink -i key`:                        defaultGitSSHCommand,
+	}
+	for command, want := range tests {
+		if got := forceGitSSHBatchMode(command); got != want {
+			t.Errorf("forceGitSSHBatchMode(%q) = %q, want %q", command, got, want)
+		}
+	}
+}
+
 func TestWorkspaceGitEnvironmentSnapshotsAreDetached(t *testing.T) {
 	instanceEnv := []string{"KANDEV_TEST_TRACKER_VALUE=initial"}
 	workspace := t.TempDir()

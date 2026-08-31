@@ -14,45 +14,45 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-const comparisonTargetGitShimModeEnv = "KANDEV_TEST_COMPARISON_GIT_SHIM_MODE"
+const (
+	comparisonTargetGitShimModeEnv = "KANDEV_TEST_COMPARISON_GIT_SHIM_MODE"
+	comparisonTargetCallTimeout    = 15 * time.Second
+)
 
 func init() {
-	switch os.Getenv(comparisonTargetGitShimModeEnv) {
-	case "comparison":
+	if os.Getenv(comparisonTargetGitShimModeEnv) == "comparison" {
 		runComparisonTargetGitShim()
-	case "sleep":
-		time.Sleep(time.Hour)
 	}
 }
 
 func TestComparisonTargetPreparationNonBlocking(t *testing.T) {
-	previousTimeout := gitCommandTimeout
-	gitCommandTimeout = 200 * time.Millisecond
-	t.Cleanup(func() { gitCommandTimeout = previousTimeout })
-
 	repoDir, cleanup := setupTestRepo(t)
 	t.Cleanup(cleanup)
 	target := comparisonTargetProcessTestTarget()
-	mgr := NewManager(&config.InstanceConfig{
-		WorkDir:           repoDir,
-		AgentEnv:          []string{comparisonTargetGitShimModeEnv + "=sleep"},
-		ComparisonTargets: map[string]models.ComparisonTarget{"": target},
-	}, newTestLogger(t))
-	t.Cleanup(func() { _ = mgr.StopForTeardown(context.Background()) })
+	gate := filepath.Join(t.TempDir(), "fetch.gate")
+	mgr, markers := newComparisonTargetTestManager(t, repoDir, target, map[string]string{
+		"KANDEV_TEST_FETCH_GATE": gate,
+	})
+	t.Cleanup(func() { _ = os.WriteFile(gate, nil, 0o600) })
 
-	shimDir := installComparisonTargetSleepGitShim(t)
-	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	started := time.Now()
-	mgr.PrepareComparisonTargets(context.Background())
-	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
-		t.Fatalf("PrepareComparisonTargets took %v, want it to return before Git work completes", elapsed)
-	}
+	done := make(chan struct{}, 1)
+	go func() {
+		mgr.PrepareComparisonTargets(context.Background())
+		close(done)
+	}()
+	waitForComparisonCall(t, done, "PrepareComparisonTargets")
 
 	resolution := mgr.GetWorkspaceTracker().ComparisonResolution()
 	if !resolution.Explicit || resolution.Status != comparisonTargetStatusUnavailable ||
 		resolution.ErrorCode != comparisonTargetErrorPending {
 		t.Fatalf("comparison resolution = %#v, want explicit pending state", resolution)
+	}
+	waitForComparisonFile(t, markers.fetchStarted)
+	if _, err := os.Stat(gate); err == nil {
+		t.Fatal("comparison fetch gate opened before PrepareComparisonTargets returned")
+	}
+	if err := os.WriteFile(gate, nil, 0o600); err != nil {
+		t.Fatalf("release comparison fetch: %v", err)
 	}
 }
 
@@ -183,14 +183,19 @@ func TestUpdateComparisonTargetsDoesNotWaitForMaterialization(t *testing.T) {
 	})
 	mgr.UpdateComparisonTargets(context.Background(), nil)
 
-	shimDir := installComparisonTargetGitShim(t)
-	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	started := time.Now()
-	mgr.UpdateComparisonTargets(context.Background(), map[string]models.ComparisonTarget{"": target})
-	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
-		t.Fatalf("UpdateComparisonTargets took %v, want it to return before Git work completes", elapsed)
-	}
+	done := make(chan struct{}, 1)
+	go func() {
+		mgr.UpdateComparisonTargets(context.Background(), map[string]models.ComparisonTarget{"": target})
+		close(done)
+	}()
+	waitForComparisonCall(t, done, "UpdateComparisonTargets")
 	waitForComparisonFile(t, markers.fetchStarted)
+	if resolution := mgr.GetWorkspaceTracker().ComparisonResolution(); resolution.ErrorCode != comparisonTargetErrorPending {
+		t.Fatalf("comparison resolution = %#v, want pending state", resolution)
+	}
+	if err := os.WriteFile(gate, nil, 0o600); err != nil {
+		t.Fatalf("release comparison fetch: %v", err)
+	}
 }
 
 func TestGetWorkspaceTrackerForDoesNotWaitForMaterialization(t *testing.T) {
@@ -205,20 +210,37 @@ func TestGetWorkspaceTrackerForDoesNotWaitForMaterialization(t *testing.T) {
 	})
 	mgr.UpdateComparisonTargets(context.Background(), map[string]models.ComparisonTarget{"lazy": target})
 
-	shimDir := installComparisonTargetGitShim(t)
-	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	started := time.Now()
-	tracker, err := mgr.GetWorkspaceTrackerFor("lazy")
-	if err != nil {
-		t.Fatalf("GetWorkspaceTrackerFor: %v", err)
+	resultCh := make(chan struct {
+		tracker *WorkspaceTracker
+		err     error
+	}, 1)
+	go func() {
+		tracker, err := mgr.GetWorkspaceTrackerFor("lazy")
+		resultCh <- struct {
+			tracker *WorkspaceTracker
+			err     error
+		}{tracker: tracker, err: err}
+	}()
+	var result struct {
+		tracker *WorkspaceTracker
+		err     error
 	}
-	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
-		t.Fatalf("GetWorkspaceTrackerFor took %v, want it to return before Git work completes", elapsed)
+	select {
+	case result = <-resultCh:
+	case <-time.After(comparisonTargetCallTimeout):
+		t.Fatal("timed out waiting for GetWorkspaceTrackerFor")
 	}
+	if result.err != nil {
+		t.Fatalf("GetWorkspaceTrackerFor: %v", result.err)
+	}
+	tracker := result.tracker
 	waitForComparisonFile(t, markers.fetchStarted)
 	resolution := tracker.ComparisonResolution()
 	if !resolution.Explicit || resolution.ErrorCode != comparisonTargetErrorPending {
 		t.Fatalf("lazy comparison resolution = %#v, want pending", resolution)
+	}
+	if err := os.WriteFile(gate, nil, 0o600); err != nil {
+		t.Fatalf("release comparison fetch: %v", err)
 	}
 }
 
@@ -263,11 +285,6 @@ func newComparisonTargetTestManager(
 func installComparisonTargetGitShim(t *testing.T) string {
 	t.Helper()
 	return installComparisonTargetGitShimMode(t, "comparison")
-}
-
-func installComparisonTargetSleepGitShim(t *testing.T) string {
-	t.Helper()
-	return installComparisonTargetGitShimMode(t, "sleep")
 }
 
 func installComparisonTargetGitShimMode(t *testing.T, mode string) string {
@@ -359,7 +376,7 @@ func waitForComparisonFile(t *testing.T, path string) {
 	t.Helper()
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
-	timeout := time.NewTimer(15 * time.Second)
+	timeout := time.NewTimer(comparisonTargetCallTimeout)
 	defer timeout.Stop()
 	for {
 		if _, err := os.Stat(path); err == nil {
@@ -373,6 +390,15 @@ func waitForComparisonFile(t *testing.T, path string) {
 	}
 }
 
+func waitForComparisonCall(t *testing.T, done <-chan struct{}, operation string) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(comparisonTargetCallTimeout):
+		t.Fatalf("timed out waiting for %s to return", operation)
+	}
+}
+
 func waitForComparisonResolution(
 	t *testing.T,
 	tracker *WorkspaceTracker,
@@ -382,7 +408,7 @@ func waitForComparisonResolution(
 	t.Helper()
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
-	timeout := time.NewTimer(15 * time.Second)
+	timeout := time.NewTimer(comparisonTargetCallTimeout)
 	defer timeout.Stop()
 	for {
 		resolution := tracker.ComparisonResolution()

@@ -29,7 +29,7 @@ As a result, Git can read a user name and password from the terminal that launch
 - Kandev-owned comparison-target commands never read the launcher terminal.
 - Workspace trackers use the exact instance Git credential environment.
 - Managed `GIT_CONFIG_*` credential-helper entries remain intact.
-- Explicit SSH command and options remain intact. Kandev forces `BatchMode=yes` before inherited batch-mode options.
+- Direct OpenSSH commands and their options remain intact. Kandev forces `BatchMode=yes` before inherited batch-mode options; unsupported shell prefixes and wrappers use the safe non-interactive default.
 - Git command deadlines and throttle admission remain in force.
 - A target is pending and fail-closed before its fetch starts.
 - Instance readiness, live target updates, rescan, and lazy tracker creation do not wait for network Git.
@@ -78,7 +78,7 @@ Task 02 depends on Task 01. Background commands must use the correct environment
 
 Both work orders are implemented. Validation results are recorded in the work-order implementation records; the remaining delivery steps cover commit, PR creation, and post-PR fixup.
 
-The first PR fixup also serialized comparison-target publication with active-operation identity, removed stale-result recursion, and forced explicit SSH commands into batch mode. The second PR fixup gates target admission during manager teardown and preserves adapter and shell cleanup when target shutdown reports an error. Portable lifecycle fixtures run on Windows as well as Unix.
+The first PR fixup also serialized comparison-target publication with active-operation identity, removed stale-result recursion, and forced direct OpenSSH commands into batch mode. The second PR fixup gates target admission during manager teardown and preserves adapter and shell cleanup when target shutdown reports an error. Portable lifecycle fixtures run on Windows as well as Unix, and their nonblocking assertions use closed fetch gates rather than wall-clock thresholds.
 
 ## Validation
 
