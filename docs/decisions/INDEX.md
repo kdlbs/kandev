@@ -218,4 +218,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-28-bind-github-auto-merge-attempts-to-reviewed-head | [Bind GitHub Auto-Merge Attempts to the Reviewed Head](2026-08-28-bind-github-auto-merge-attempts-to-reviewed-head.md) | accepted | backend, frontend, protocol, security, GitHub | 2026-08-28 |
 | 2026-08-30-context-reset-quiesces-active-turn | [Quiesce Active Turns Before Context Reset](2026-08-30-context-reset-quiesces-active-turn.md) | accepted | backend, workflow | 2026-08-30 |
 | 2026-08-30-e2e-browser-cache | [Cache host-runner E2E browser provisioning](2026-08-30-e2e-browser-cache.md) | accepted | infra, workflow | 2026-08-30 |
-| 2026-08-31-generic-plugin-host-boundary | [Generic plugin Host boundary and capability approvals](2026-08-31-generic-plugin-host-boundary.md) | accepted | backend, frontend, protocol, security, workflow | 2026-08-31 |
+| 2026-08-31-generic-plugin-host-boundary | [Generic plugin Host boundary](2026-08-31-generic-plugin-host-boundary.md) | proposed | backend, frontend, protocol, security, workflow | 2026-08-31 |
