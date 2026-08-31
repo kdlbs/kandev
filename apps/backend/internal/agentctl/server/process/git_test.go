@@ -378,7 +378,7 @@ func TestGitOperatorContributionDestinationRejectsRepositoryControlledTransportB
 	}
 }
 
-func TestGitOperatorContributionDestinationRejectsRepositoryCredentialHelperBeforePrivateEnv(t *testing.T) {
+func TestGitOperatorContributionDestinationRejectsRepositoryHTTPHeaderBeforePrivateEnv(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
 	t.Cleanup(cleanup)
 	runGit(t, repoDir, "checkout", "-b", "feature/destination")
@@ -396,7 +396,7 @@ func TestGitOperatorContributionDestinationRejectsRepositoryCredentialHelperBefo
 	}
 	runGit(t, repoDir, "remote", "add", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
 	runGit(t, repoDir, "remote", "set-url", "--push", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
-	runGit(t, repoDir, "config", "credential.https://github.com.helper", "!sh -c 'exit 0'")
+	runGit(t, repoDir, "config", "http.extraHeader", "Authorization: Bearer repository-token")
 
 	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
 	operator.setContributionDestination(destination)
@@ -411,7 +411,7 @@ func TestGitOperatorContributionDestinationRejectsRepositoryCredentialHelperBefo
 		t.Fatalf("Push returned error: %v", err)
 	}
 	if result.Success || !strings.Contains(result.Error, "repository-controlled transport configuration") {
-		t.Fatalf("Push = %+v, want repository credential-helper rejection", result)
+		t.Fatalf("Push = %+v, want repository HTTP header rejection", result)
 	}
 	if managedCredentialUses != 0 {
 		t.Fatalf("repository credential helper requested private credential environment %d times", managedCredentialUses)
@@ -429,6 +429,7 @@ func TestManagedPushTransportIsolation(t *testing.T) {
 		"remote.contribution-destination.receivepack",
 		"remote.contribution-destination.uploadpack",
 		"http.https://github.com.proxy",
+		"http.extraHeader",
 		"credential.helper",
 		"credential.https://github.com.helper",
 	} {
@@ -444,10 +445,16 @@ func TestManagedPushTransportIsolation(t *testing.T) {
 			"GIT_SSH_COMMAND=repository-ssh",
 			"GIT_PROXY_COMMAND=repository-proxy",
 			"GIT_CONFIG_GLOBAL=/tmp/repository-config",
+			"GIT_CONFIG_COUNT=1",
+			"GIT_CONFIG_KEY_0=http.extraHeader",
+			"GIT_CONFIG_VALUE_0=Authorization: Bearer repository-token",
 		}
 	})
 	env := strings.Join(operator.managedPushEnvironmentValues(), "\n")
-	for _, forbidden := range []string{"GIT_SSH_COMMAND=", "GIT_PROXY_COMMAND=", "GIT_CONFIG_GLOBAL=/tmp"} {
+	for _, forbidden := range []string{
+		"GIT_SSH_COMMAND=", "GIT_PROXY_COMMAND=", "GIT_CONFIG_GLOBAL=/tmp",
+		"GIT_CONFIG_COUNT=", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_",
+	} {
 		if strings.Contains(env, forbidden) {
 			t.Errorf("managed push environment still contains %q: %q", forbidden, env)
 		}

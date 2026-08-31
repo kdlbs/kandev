@@ -246,7 +246,7 @@ func managedPushTransportConfigKey(key string) bool {
 	return strings.HasPrefix(key, "url.") && (strings.HasSuffix(key, ".insteadof") || strings.HasSuffix(key, ".pushinsteadof")) ||
 		key == "core.sshcommand" || key == "core.gitproxy" ||
 		(strings.HasPrefix(key, "remote.") && (strings.HasSuffix(key, ".receivepack") || strings.HasSuffix(key, ".uploadpack"))) ||
-		(strings.HasPrefix(key, "http.") && strings.HasSuffix(key, ".proxy")) ||
+		(strings.HasPrefix(key, "http.") && (strings.HasSuffix(key, ".proxy") || strings.HasSuffix(key, ".extraheader"))) ||
 		key == "credential.helper" || (strings.HasPrefix(key, "credential.") && strings.HasSuffix(key, ".helper"))
 }
 
@@ -254,6 +254,7 @@ func (g *GitOperator) managedPushEnvironmentValues() []string {
 	unsafePrefixes := []string{
 		"GIT_SSH=", "GIT_SSH_COMMAND=", "GIT_PROXY_COMMAND=", "GIT_ASKPASS=", "SSH_ASKPASS=",
 		"GIT_CONFIG_GLOBAL=", "GIT_CONFIG_SYSTEM=", "GIT_CONFIG_NOSYSTEM=",
+		"GIT_CONFIG_COUNT=", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_",
 	}
 	env := filterGitEnv(g.managedPushEnvironment())
 	filtered := make([]string, 0, len(env)+2)
