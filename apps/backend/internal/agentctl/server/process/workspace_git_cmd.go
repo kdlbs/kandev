@@ -3,7 +3,6 @@ package process
 import (
 	"bytes"
 	"context"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -40,19 +39,40 @@ const gitOptionalLocksOff = "GIT_OPTIONAL_LOCKS=0"
 func (wt *WorkspaceTracker) pollingGitCommand(ctx context.Context, args ...string) *exec.Cmd {
 	cmd := subproc.NewGitCommand(ctx, args...)
 	cmd.Dir = wt.workDir
-	cmd.Env = gitCommandEnv(ctx, true)
+	cmd.Env = wt.gitCommandEnv(ctx, true)
 	return cmd
 }
 
-func gitCommandEnv(ctx context.Context, lockless bool) []string {
-	env := os.Environ()
+func (wt *WorkspaceTracker) gitCommandEnv(ctx context.Context, lockless bool) []string {
+	env := wt.gitEnvironmentSnapshot()
 	if lockless {
 		env = replaceGitEnvAssignment(env, gitOptionalLocksOff)
 	}
 	if indexPath := gitIndexFile(ctx); indexPath != "" {
 		env = replaceGitEnvAssignment(env, "GIT_INDEX_FILE="+indexPath)
 	}
+	for _, assignment := range []string{
+		"GIT_TERMINAL_PROMPT=0",
+		"GCM_INTERACTIVE=Never",
+		"GIT_ASKPASS=echo",
+		"SSH_ASKPASS=/bin/false",
+	} {
+		env = replaceGitEnvAssignment(env, assignment)
+	}
+	if !hasGitEnvKey(env, "GIT_SSH_COMMAND") {
+		env = append(env, "GIT_SSH_COMMAND=ssh -oBatchMode=yes")
+	}
 	return env
+}
+
+func hasGitEnvKey(env []string, key string) bool {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func replaceGitEnvAssignment(env []string, assignment string) []string {
@@ -79,7 +99,7 @@ func (wt *WorkspaceTracker) gitCommand(ctx context.Context, lockless bool, args 
 	}
 	cmd := subproc.NewGitCommand(ctx, args...)
 	cmd.Dir = wt.workDir
-	cmd.Env = gitCommandEnv(ctx, false)
+	cmd.Env = wt.gitCommandEnv(ctx, false)
 	return cmd
 }
 

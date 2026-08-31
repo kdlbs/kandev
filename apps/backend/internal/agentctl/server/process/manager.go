@@ -179,6 +179,18 @@ type Manager struct {
 	// from branch-only overrides. Updating one target must not race tracker
 	// creation or rewrite siblings' authoritative state.
 	comparisonTargetsMu sync.RWMutex
+	// trackerGitEnv is the process manager's detached snapshot of the instance
+	// environment used by workspace trackers. Each tracker receives its own
+	// copy so tracker-local changes cannot affect another tracker.
+	trackerGitEnv   []string
+	trackerGitEnvMu sync.RWMutex
+
+	// comparisonTargetOps tracks one cancellable materialization per
+	// repository scope. The wait group lets teardown observe all operations
+	// that were admitted before shutdown.
+	comparisonTargetOps   map[string]*comparisonTargetOperation
+	comparisonTargetOpsMu sync.Mutex
+	comparisonTargetOpsWG sync.WaitGroup
 
 	// streamSubscribers tracks every workspace-stream subscriber attached
 	// via SubscribeWorkspaceStream so RescanRepositories can wire new
@@ -353,6 +365,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		lifetimeCtx:          lifetimeCtx,
 		lifetimeCancel:       lifetimeCancel,
 		workspaceSourceRoots: canonicalWorkspaceSourceRoots(cfg.WorkspaceSourceRoots),
+		trackerGitEnv:        append([]string(nil), cfg.AgentEnv...),
 	}
 	// Build the root plus any immediate sibling repositories and recursively
 	// declared initialized submodules. The root remains a real empty-named
@@ -715,9 +728,9 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 	if t, ok := m.workspaceTrackersBySubpath[cleaned]; ok {
 		return t, nil
 	}
-	t := NewWorkspaceTracker(full, m.logger)
+	t := NewWorkspaceTrackerForRepo(full, cleaned, m.logger)
 	m.configureTracker(t, cleaned, m.currentWorkspaceSourceRoots())
-	m.prepareTrackerComparisonTarget(context.Background(), t)
+	m.prepareTrackerComparisonTarget(t)
 	m.workspaceTrackersBySubpath[cleaned] = t
 	return t, nil
 }
@@ -898,7 +911,9 @@ func (m *Manager) findRepositoryTracker(repositoryName string) *WorkspaceTracker
 // otherwise sit at its construction default and be demoted by the grace timer
 // 60s later, while the user is looking at it.
 func (m *Manager) newTrackerForRepo(path, repositoryName string) *WorkspaceTracker {
-	return NewWorkspaceTrackerForRepo(path, repositoryName, m.logger)
+	tracker := NewWorkspaceTrackerForRepo(path, repositoryName, m.logger)
+	tracker.SetGitEnvironment(m.trackerGitEnvironment())
+	return tracker
 }
 
 // applyWorkspacePollModeLocked gives newly built trackers the last mode the
@@ -1047,6 +1062,27 @@ func (m *Manager) gitEnvironment() []string {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 	return append([]string(nil), m.cfg.AgentEnv...)
+}
+
+func (m *Manager) trackerGitEnvironment() []string {
+	m.trackerGitEnvMu.RLock()
+	defer m.trackerGitEnvMu.RUnlock()
+	return append([]string(nil), m.trackerGitEnv...)
+}
+
+func (m *Manager) setTrackerGitEnvironment(env []string) {
+	detached := append([]string(nil), env...)
+	m.trackerGitEnvMu.Lock()
+	m.trackerGitEnv = detached
+	m.trackerGitEnvMu.Unlock()
+
+	root, trackers := m.snapshotTrackers()
+	if root != nil {
+		root.SetGitEnvironment(detached)
+	}
+	for _, tracker := range trackers {
+		tracker.SetGitEnvironment(detached)
+	}
 }
 
 // resolveSubpath normalises and validates a repo subpath relative to
@@ -1350,6 +1386,7 @@ func (m *Manager) buildAdapterConfig() error {
 	if m.adapterCfg.OneShotConfig != nil {
 		m.adapterCfg.OneShotConfig.Env = m.cfg.AgentEnv
 	}
+	m.setTrackerGitEnvironment(m.cfg.AgentEnv)
 	return nil
 }
 
@@ -1822,6 +1859,7 @@ func (m *Manager) stop(ctx context.Context) error {
 
 	// Stop trackers before the status guard: passthrough never calls Start() so the early return below would otherwise leak them.
 	m.stopWorkspaceTrackers()
+	comparisonStopErr := m.stopComparisonTargetOperations(ctx)
 
 	status := m.Status()
 	if status == StatusStopped || status == StatusStopping {
@@ -1829,6 +1867,9 @@ func (m *Manager) stop(ctx context.Context) error {
 			zap.String("status", string(status)),
 			zap.Int("pid", m.agentPID()))
 		if status == StatusStopped {
+			if comparisonStopErr != nil {
+				return comparisonStopErr
+			}
 			// The agent process reaches StatusStopped on its own whenever the
 			// child exits without an explicit Stop (waitForExit stores it). The
 			// adapter and stopCh were never torn down in that case, so do it
@@ -1861,7 +1902,7 @@ func (m *Manager) stop(ctx context.Context) error {
 		zap.String("protocol", m.agentProtocol()))
 	m.status.Store(StatusStopping)
 
-	auxiliaryStopErr := m.stopShellAndProcesses(ctx)
+	auxiliaryStopErr := errors.Join(comparisonStopErr, m.stopShellAndProcesses(ctx))
 	m.closeAdapterAndStdin()
 	m.killProcessGroupIfRequired()
 	mainStopErr := m.waitForProcessExit(ctx)

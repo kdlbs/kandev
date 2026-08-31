@@ -3,7 +3,6 @@ package process
 import (
 	"context"
 	"errors"
-	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -38,23 +37,24 @@ func (m *Manager) getComparisonTargets() map[string]models.ComparisonTarget {
 	return result
 }
 
-// PrepareComparisonTargets materializes all desired targets before tracker
-// polling starts. A failed target becomes explicitly unavailable; it never
-// becomes an implicit origin/local comparison.
-func (m *Manager) PrepareComparisonTargets(ctx context.Context) {
+// PrepareComparisonTargets schedules materialization for all desired targets
+// before tracker polling starts. A failed target becomes explicitly
+// unavailable; it never becomes an implicit origin/local comparison.
+func (m *Manager) PrepareComparisonTargets(_ context.Context) {
 	root, trackers := m.snapshotTrackers()
 	if root != nil {
-		m.prepareTrackerComparisonTarget(ctx, root)
+		m.prepareTrackerComparisonTarget(root)
 	}
 	for _, tracker := range trackers {
-		m.prepareTrackerComparisonTarget(ctx, tracker)
+		m.prepareTrackerComparisonTarget(tracker)
 	}
 }
 
 // UpdateComparisonTargets replaces the desired map and refreshes only trackers
 // whose target changed. Existing ready siblings keep their state and are not
-// refetched when another repository is updated.
-func (m *Manager) UpdateComparisonTargets(ctx context.Context, targets map[string]models.ComparisonTarget) {
+// refetched when another repository is updated. Target materialization runs in
+// the manager lifetime, not in the request context.
+func (m *Manager) UpdateComparisonTargets(_ context.Context, targets map[string]models.ComparisonTarget) {
 	previous := m.getComparisonTargets()
 	m.comparisonTargetsMu.Lock()
 	if len(targets) == 0 {
@@ -74,9 +74,8 @@ func (m *Manager) UpdateComparisonTargets(ctx context.Context, targets map[strin
 		if tracker == nil || comparisonTargetMapsEqual(previous, current, tracker.RepositoryName()) {
 			continue
 		}
-		m.prepareTrackerComparisonTarget(ctx, tracker)
+		m.prepareTrackerComparisonTarget(tracker)
 	}
-	go m.refreshComparisonTrackersDetached(all)
 }
 
 func comparisonTargetMapsEqual(previous, current map[string]models.ComparisonTarget, key string) bool {
@@ -85,7 +84,7 @@ func comparisonTargetMapsEqual(previous, current map[string]models.ComparisonTar
 	return leftOK == rightOK && (!leftOK || left.Equal(right))
 }
 
-func (m *Manager) prepareTrackerComparisonTarget(ctx context.Context, tracker *WorkspaceTracker) {
+func (m *Manager) prepareTrackerComparisonTarget(tracker *WorkspaceTracker) {
 	if tracker == nil {
 		return
 	}
@@ -94,38 +93,119 @@ func (m *Manager) prepareTrackerComparisonTarget(ctx context.Context, tracker *W
 	if !m.comparisonTargetIsCurrent(repositoryName, target) {
 		return
 	}
+	previousResolution := tracker.ComparisonResolution()
 	tracker.SetComparisonTarget(target)
+	if target != nil || previousResolution.Explicit {
+		m.refreshComparisonTrackerDetached(tracker)
+	}
 	if target == nil {
+		m.cancelComparisonTargetOperation(repositoryName)
 		return
 	}
 	if tracker.gitIndexPath == "" {
-		if !m.comparisonTargetIsCurrent(repositoryName, target) {
-			return
-		}
+		m.cancelComparisonTargetOperation(repositoryName)
 		tracker.SetComparisonTargetUnavailable(target, comparisonTargetErrorInvalid)
+		m.refreshComparisonTrackerDetached(tracker)
 		return
 	}
+	if target.Validate() != nil {
+		m.cancelComparisonTargetOperation(repositoryName)
+		tracker.SetComparisonTargetUnavailable(target, comparisonTargetErrorInvalid)
+		m.refreshComparisonTrackerDetached(tracker)
+		return
+	}
+
+	operationCtx, release, err := m.beginComparisonTargetOperation()
+	if err != nil {
+		return
+	}
+	operationCtx, cancel := context.WithTimeout(operationCtx, gitCommandTimeout)
+	operation := &comparisonTargetOperation{
+		target:  *target,
+		tracker: tracker,
+		cancel:  cancel,
+	}
+
+	m.comparisonTargetOpsMu.Lock()
+	if !m.comparisonTargetIsCurrent(repositoryName, target) {
+		m.comparisonTargetOpsMu.Unlock()
+		cancel()
+		release()
+		m.prepareTrackerComparisonTarget(tracker)
+		return
+	}
+	if existing := m.comparisonTargetOps[repositoryName]; existing != nil {
+		if existing.tracker == tracker && existing.target.Equal(*target) {
+			m.comparisonTargetOpsMu.Unlock()
+			cancel()
+			release()
+			return
+		}
+		existing.cancel()
+	}
+	if m.comparisonTargetOps == nil {
+		m.comparisonTargetOps = make(map[string]*comparisonTargetOperation)
+	}
+	m.comparisonTargetOps[repositoryName] = operation
+	m.comparisonTargetOpsWG.Add(1)
+	m.comparisonTargetOpsMu.Unlock()
+
+	go m.runComparisonTargetOperation(repositoryName, operation, operationCtx, release)
+}
+
+type comparisonTargetOperation struct {
+	target  models.ComparisonTarget
+	tracker *WorkspaceTracker
+	cancel  context.CancelFunc
+}
+
+func (m *Manager) beginComparisonTargetOperation() (context.Context, func(), error) {
+	if m.lifetimeCtx == nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		return ctx, cancel, nil
+	}
+	return m.BeginOwnedOperation(m.lifetimeCtx)
+}
+
+func (m *Manager) runComparisonTargetOperation(
+	repositoryName string,
+	operation *comparisonTargetOperation,
+	ctx context.Context,
+	release func(),
+) {
+	defer m.comparisonTargetOpsWG.Done()
+	defer release()
+	defer operation.cancel()
+	defer func() {
+		m.comparisonTargetOpsMu.Lock()
+		if m.comparisonTargetOps[repositoryName] == operation {
+			delete(m.comparisonTargetOps, repositoryName)
+		}
+		m.comparisonTargetOpsMu.Unlock()
+	}()
+
 	runner := func(runCtx context.Context, args ...string) (string, error) {
-		output, err := tracker.runGitOutput(runCtx, args...)
+		output, err := operation.tracker.runGitOutput(runCtx, args...)
 		return string(output), err
 	}
-	materialized, err := materializeComparisonTarget(ctx, runner, *target)
+	materialized, err := materializeComparisonTarget(ctx, runner, operation.target)
 	if err != nil {
-		if !m.comparisonTargetIsCurrent(repositoryName, target) {
+		if !m.comparisonTargetIsCurrent(repositoryName, &operation.target) {
 			return
 		}
 		code := comparisonTargetErrorCode(err)
-		tracker.SetComparisonTargetUnavailable(target, code)
+		operation.tracker.SetComparisonTargetUnavailable(&operation.target, code)
 		m.logger.Warn("comparison target unavailable",
 			zap.String("repository", repositoryName),
 			zap.String("error_code", code),
 			zap.Error(err))
 		return
 	}
-	if !m.comparisonTargetIsCurrent(repositoryName, target) {
+	if !m.comparisonTargetIsCurrent(repositoryName, &operation.target) {
 		return
 	}
-	tracker.SetComparisonTargetReady(target, materialized.Ref)
+	operation.tracker.SetComparisonTargetReady(&operation.target, materialized.Ref)
+	m.refreshComparisonTrackerDetached(operation.tracker)
 }
 
 func (m *Manager) comparisonTargetIsCurrent(repositoryName string, target *models.ComparisonTarget) bool {
@@ -144,19 +224,45 @@ func comparisonTargetErrorCode(err error) string {
 	return comparisonTargetErrorRemoteSetup
 }
 
-func (m *Manager) refreshComparisonTrackersDetached(trackers []*WorkspaceTracker) {
-	var group sync.WaitGroup
-	for _, tracker := range trackers {
-		if tracker == nil {
-			continue
-		}
-		group.Add(1)
-		go func(tracker *WorkspaceTracker) {
-			defer group.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			tracker.RefreshGitStatus(ctx)
-		}(tracker)
+func (m *Manager) refreshComparisonTrackerDetached(tracker *WorkspaceTracker) {
+	if tracker == nil {
+		return
 	}
-	group.Wait()
+	go func() {
+		ctx := tracker.cancelCtx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		tracker.RefreshGitStatus(ctx)
+	}()
+}
+
+func (m *Manager) cancelComparisonTargetOperation(repositoryName string) {
+	m.comparisonTargetOpsMu.Lock()
+	if operation := m.comparisonTargetOps[repositoryName]; operation != nil {
+		operation.cancel()
+	}
+	m.comparisonTargetOpsMu.Unlock()
+}
+
+func (m *Manager) stopComparisonTargetOperations(ctx context.Context) error {
+	m.comparisonTargetOpsMu.Lock()
+	for _, operation := range m.comparisonTargetOps {
+		operation.cancel()
+	}
+	m.comparisonTargetOpsMu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		m.comparisonTargetOpsWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
