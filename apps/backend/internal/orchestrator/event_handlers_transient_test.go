@@ -32,14 +32,21 @@ func newTransientTestService(t *testing.T) (*Service, *mockMessageCreator) {
 	return svc, mc
 }
 
+func armTransientPromptEvidence(svc *Service) {
+	svc.beginPromptAttempt("s1", "execution-1", 7, false)
+}
+
 func TestHandleTransientFailure_SchedulesRetryAndEmitsWarning(t *testing.T) {
 	svc, mc := newTransientTestService(t)
 	t.Cleanup(svc.cancelAllTransientRetries)
+	armTransientPromptEvidence(svc)
 
 	took := svc.handleTransientFailure(context.Background(), watcher.AgentEventData{
-		TaskID:       "t1",
-		SessionID:    "s1",
-		ErrorMessage: overloaded529,
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "execution-1",
+		PromptGeneration: 7,
+		ErrorMessage:     overloaded529,
 	})
 	if !took {
 		t.Fatal("handleTransientFailure = false, want true (should own the transient failure)")
@@ -86,12 +93,15 @@ func TestHandleTransientFailure_SchedulesRetryAndEmitsWarning(t *testing.T) {
 func TestHandleTransientFailure_ModelCapacityUsesProviderNeutralPolicy(t *testing.T) {
 	svc, mc := newTransientTestService(t)
 	t.Cleanup(svc.cancelAllTransientRetries)
+	armTransientPromptEvidence(svc)
 
 	took := svc.handleTransientFailure(context.Background(), watcher.AgentEventData{
-		TaskID:       "t1",
-		SessionID:    "s1",
-		AgentID:      "codex-acp",
-		ErrorMessage: "Selected model is at capacity. Please try a different model.",
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "execution-1",
+		AgentID:          "codex-acp",
+		PromptGeneration: 7,
+		ErrorMessage:     "Selected model is at capacity. Please try a different model.",
 	})
 	if !took {
 		t.Fatal("model-capacity failure was not owned by the Kanban short-retry policy")
@@ -217,14 +227,17 @@ func TestHandleTransientFailure_NonTransientReturnsFalse(t *testing.T) {
 func TestHandleTransientFailure_ExhaustedFallsThrough(t *testing.T) {
 	svc, mc := newTransientTestService(t)
 	t.Cleanup(svc.cancelAllTransientRetries)
+	armTransientPromptEvidence(svc)
 
 	// Pre-seed an entry that has already used the full budget.
 	svc.transientRetries.Store("s1", &transientRetryEntry{attempt: transientMaxAttempts, cancel: func() {}})
 
 	took := svc.handleTransientFailure(context.Background(), watcher.AgentEventData{
-		TaskID:       "t1",
-		SessionID:    "s1",
-		ErrorMessage: overloaded529,
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "execution-1",
+		PromptGeneration: 7,
+		ErrorMessage:     overloaded529,
 	})
 	if took {
 		t.Fatal("handleTransientFailure = true after budget exhausted, want false (fall through to recovery)")
@@ -551,8 +564,15 @@ func TestTransientRetryDelayHonorsShortProviderReset(t *testing.T) {
 func TestHandleTransientFailure_AttemptCounterIncrements(t *testing.T) {
 	svc, _ := newTransientTestService(t)
 	t.Cleanup(svc.cancelAllTransientRetries)
+	armTransientPromptEvidence(svc)
 
-	data := watcher.AgentEventData{TaskID: "t1", SessionID: "s1", ErrorMessage: overloaded529}
+	data := watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "execution-1",
+		PromptGeneration: 7,
+		ErrorMessage:     overloaded529,
+	}
 
 	svc.handleTransientFailure(context.Background(), data)
 	svc.handleTransientFailure(context.Background(), data)

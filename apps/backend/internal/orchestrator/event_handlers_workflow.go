@@ -2440,11 +2440,14 @@ dispatchLoop:
 				result.aborted = true
 				break dispatchLoop
 			}
-		case wfmodels.OnEnterQueueRun, wfmodels.OnEnterRunCodeReview:
-			// Engine-owned per the spec, but their on_enter dispatch (AC-A7/
-			// AC-A8) is explicitly deferred to a later Build round — see
-			// docs/specs/workflow-on-enter-action-dispatch/spec.md. This is a
-			// known, recognized type, not the AC-A6 default warning case.
+		case wfmodels.OnEnterQueueRun, wfmodels.OnEnterRunCodeReview, wfmodels.OnEnterEnsureParticipantSeat:
+			// Session-independent, ledger-owned: engine.DispatchStepEntry
+			// (internal/workflow/engine/entrydispatch.go) dispatches these
+			// synchronously after commit via every step-transition writer
+			// (Repository.dispatchStepEntry in step_entry_dispatch.go).
+			// processOnEnter must not also dispatch them here or they would
+			// run twice — see docs/specs/workflow-on-enter-action-dispatch/spec.md.
+			// This is a known, recognized type, not the AC-A6 default warning case.
 		default:
 			// AC-A6: a genuinely unrecognized on_enter action type. Warn
 			// instead of silently discarding it — this is the exact failure

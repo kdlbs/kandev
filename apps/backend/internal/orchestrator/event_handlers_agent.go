@@ -1356,7 +1356,8 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 }
 
 func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.AgentEventData) {
-	data = s.withDynamicAttemptEvidence(data)
+	data = s.withPromptAttemptEvidence(data)
+	defer s.clearPromptAttemptEvidence(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
 	s.logger.Warn("handling agent failed",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),

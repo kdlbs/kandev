@@ -1737,11 +1737,15 @@ func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage s
 		exitCode,
 		errorMessage,
 		execution.promptTurnIDSnapshot(),
+		nil,
 	)
 }
 
 func (m *Manager) markCompletedWithTurnID(
-	executionID string, exitCode int, errorMessage, turnID string,
+	executionID string,
+	exitCode int,
+	errorMessage, turnID string,
+	failureEvidence *PromptAttemptEvidence,
 ) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
@@ -1771,6 +1775,10 @@ func (m *Manager) markCompletedWithTurnID(
 			zap.String("execution_id", execution.ID),
 			zap.Int("exit_code", exitCode))
 		return nil
+	}
+	if (exitCode != 0 || errorMessage != "") && failureEvidence == nil {
+		evidence := execution.promptAttemptEvidenceSnapshot()
+		failureEvidence = &evidence
 	}
 
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
@@ -1808,6 +1816,12 @@ func (m *Manager) markCompletedWithTurnID(
 	if execution.Status == v1.AgentStatusFailed {
 		eventType = events.AgentFailed
 		m.classifyAndMaybeRemediate(execution, exitCode, errorMessage)
+	}
+	if eventType == events.AgentFailed {
+		m.eventPublisher.publishAgentEventWithTurnIDAndEvidence(
+			context.Background(), eventType, execution, turnID, failureEvidence,
+		)
+		return nil
 	}
 	m.eventPublisher.publishAgentEventWithTurnID(context.Background(), eventType, execution, turnID)
 

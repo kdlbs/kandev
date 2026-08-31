@@ -75,9 +75,9 @@ export async function seedLongMessageHistory(
     type: "message",
     content: LONG_HISTORY_TAIL_MARKER,
   });
-  // Keep the initial bounded window scrollable while the collapsed tool group
-  // above the anchor remains height-stable across older-page commits.
-  await apiClient.seedAgentMessages(sessionId, 20, "LONG-HISTORY-VISIBLE-TAIL");
+  // Keep the initial bounded window taller than the sentinel preload margin
+  // so opening the task does not start pagination before the test scrolls up.
+  await apiClient.seedAgentMessages(sessionId, 40, "LONG-HISTORY-VISIBLE-TAIL");
 
   return { taskId: task.id, sessionId };
 }

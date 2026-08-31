@@ -211,8 +211,6 @@ describe("ChangeRequestDetail copy actions", () => {
         3,
         "https://bitbucket.org/workspace/repo/pull-requests/42#comment-2",
       );
-    });
-    await waitFor(() => {
       expect(requestCopy.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(REQUEST_COPIED_LABEL);
       expect(rootCopy.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(COMMENT_COPIED_LABEL);
     });

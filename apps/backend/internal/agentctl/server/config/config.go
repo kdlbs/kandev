@@ -112,7 +112,7 @@ type PortConfig struct {
 // InstanceDefaults provides default values for new instances.
 // These can be overridden when creating an instance.
 type InstanceDefaults struct {
-	// Protocol for agent communication (acp, codex, mcp)
+	// Protocol for agent communication (acp)
 	Protocol agent.Protocol
 
 	// AgentCommand is the command to run the agent (e.g., "auggie --acp")
@@ -453,10 +453,10 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 
 	applyOverrides(cfg, overrides)
 
-	// Inject local kandev MCP server for MCP tunneling through the agent stream
-	// This ensures the kandev MCP server is available for protocols that read MCP config
-	// at startup time (e.g., Codex via -c flags). The MCP server uses the agent stream
-	// WebSocket connection (bidirectional) to forward tool calls to the backend.
+	// Inject local kandev MCP server for MCP tunneling through the agent stream.
+	// This adds the kandev MCP server as an entry in InstanceConfig.McpServers.
+	// The MCP server uses the agent stream WebSocket connection (bidirectional)
+	// to forward tool calls to the backend.
 	if port > 0 {
 		cfg.McpServers = injectKandevMcpServer(cfg.McpServers, port)
 	}
