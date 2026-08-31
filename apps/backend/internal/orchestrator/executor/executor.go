@@ -858,6 +858,7 @@ type Executor struct {
 	repoUpdater                     RepoUpdater
 	taskRepositoryBaseBranchUpdater TaskRepositoryBaseBranchUpdater
 	contributorForkLeasePreparer    ContributorForkLeasePreparer
+	prBaseResolver                  PRBaseResolver
 }
 
 // taskEnvLock returns the per-task mutex for env persistence, creating one on
@@ -1016,6 +1017,11 @@ type TaskRepositoryBaseBranchUpdater interface {
 	UpdateTaskRepositoryBaseBranch(ctx context.Context, taskID, taskRepositoryID, baseBranch string) error
 }
 
+// PRBaseResolver returns the current base branch for one provider pull request.
+type PRBaseResolver interface {
+	ResolvePRBaseBranch(ctx context.Context, workspaceID, owner, repo string, number int) (string, error)
+}
+
 // ExecutorConfig holds configuration for the Executor
 type ExecutorConfig struct {
 	ShellPrefs  ShellPreferenceProvider
@@ -1108,6 +1114,11 @@ func (e *Executor) SetRepoCloner(cloner RepoCloner, updater RepoUpdater) {
 // successful worktree fallback self-healing.
 func (e *Executor) SetTaskRepositoryBaseBranchUpdater(updater TaskRepositoryBaseBranchUpdater) {
 	e.taskRepositoryBaseBranchUpdater = updater
+}
+
+// SetPRBaseResolver wires best-effort pull-request base resolution at launch.
+func (e *Executor) SetPRBaseResolver(resolver PRBaseResolver) {
+	e.prBaseResolver = resolver
 }
 
 // SetOnAgentStartFailed sets a callback for agent process start failures.

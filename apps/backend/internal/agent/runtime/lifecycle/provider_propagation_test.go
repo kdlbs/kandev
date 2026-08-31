@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/agents"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -56,6 +58,30 @@ func TestAgentctlMappingsKeepManagedPushEnvironmentSeparate(t *testing.T) {
 	for backend, got := range requests {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s managed push env = %#v, want %#v", backend, got, want)
+		}
+	}
+}
+
+func TestAgentctlMCPToolNamePresentationCapabilityPropagatesThroughExecutors(t *testing.T) {
+	agent := &fakeRuntimeAgent{
+		MockAgent:          agents.NewMockAgent(),
+		id:                 "auggie",
+		namespacesMCPTools: true,
+	}
+	req := &ExecutorCreateRequest{AgentConfig: agent}
+	sprites := spriteCreateInstanceRequest(req)
+	ssh := buildSSHCreateInstanceRequest(req, "/workspace", "/remote/agentctl")
+
+	requests := map[string]*agentctl.CreateInstanceRequest{
+		"standalone": buildStandaloneCreateInstanceRequest(req, nil, "", false, false, false, false, nil),
+		"container":  buildContainerCreateInstanceRequest(ContainerConfig{AgentConfig: agent}, "", false, false, false, false, nil),
+		"docker":     buildReconnectCreateInstanceRequest(req, "previous-execution"),
+		"sprites":    &sprites,
+		"ssh":        &ssh,
+	}
+	for executor, request := range requests {
+		if !request.NamespacesMCPToolsByServer {
+			t.Errorf("%s request lost NamespacesMCPToolsByServer", executor)
 		}
 	}
 }

@@ -227,6 +227,29 @@ func TestNewACPAgents_AllCommandSurfaces(t *testing.T) {
 	}
 }
 
+// TestAuggieRuntime_DeclaresServerNamespacedMCPTools covers
+// AC-TASKS-MCP-TOOL-NAMES-001.1 and .2.
+func TestAuggieRuntime_DeclaresServerNamespacedMCPTools(t *testing.T) {
+	tests := []struct {
+		name string
+		new  func() Agent
+		want bool
+	}{
+		{name: "auggie", new: func() Agent { return NewAuggie() }, want: true},
+		{name: "cursor", new: func() Agent { return NewCursorACP() }, want: false},
+		{name: "codex", new: func() Agent { return NewCodexACP() }, want: false},
+		{name: "claude", new: func() Agent { return NewClaudeACP() }, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.new().Runtime().NamespacesMCPToolsByServer
+			if got != tt.want {
+				t.Errorf("NamespacesMCPToolsByServer = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestNewACPAgents_SessionDirTemplate pins the session root each agent
 // declares. The lifecycle manager turns SessionDirTemplate into the
 // bind-mount source under <kandev-home>/agent-sessions/<instance>/, so an

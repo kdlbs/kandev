@@ -418,6 +418,83 @@ func TestGitOperatorContributionDestinationRejectsRepositoryHTTPHeaderBeforePriv
 	}
 }
 
+func TestGitOperatorContributionDestinationStripsGitConfigParametersBeforePush(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		parameters string
+	}{
+		{
+			name:       "http extra header",
+			parameters: "'http.extraHeader=Authorization: Bearer repository-token'",
+		},
+		{
+			name:       "url rewrite helper",
+			parameters: "'protocol.ext.allow=always' 'url.ext::helper.insteadOf=https://github.com/agent/kandev.git'",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repoDir, cleanup := setupTestRepo(t)
+			t.Cleanup(cleanup)
+			runGit(t, repoDir, "checkout", "-b", "feature/destination")
+
+			destination := &taskmodels.ContributionDestination{
+				Version:    taskmodels.ContributionDestinationVersion,
+				Provider:   taskmodels.ContributionDestinationProviderGitHub,
+				HeadBranch: "feature/destination",
+				SourceRepository: taskmodels.ContributionDestinationRepository{
+					Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+				},
+				TargetRepository: taskmodels.ContributionDestinationRepository{
+					Host: "github.com", Path: "agent/kandev", ProviderID: "200", RemoteURL: "https://github.com/agent/kandev.git",
+				},
+			}
+			runGit(t, repoDir, "remote", "add", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
+			runGit(t, repoDir, "remote", "set-url", "--push", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
+
+			helperMarker := filepath.Join(t.TempDir(), "injected-helper-scope")
+			helper := filepath.Join(t.TempDir(), "injected-helper")
+			writeExecutable(t, helper, "#!/bin/sh\nprintf '%s' \"$KANDEV_GITHUB_CREDENTIAL_SCOPES\" > "+helperMarker+"\nexit 1\n")
+			realGit, err := exec.LookPath("git")
+			if err != nil {
+				t.Fatal(err)
+			}
+			wrapperDir := t.TempDir()
+			writeExecutable(t, filepath.Join(wrapperDir, "git"), fmt.Sprintf(`#!/bin/sh
+for arg in "$@"; do
+	if [ "$arg" = push ]; then
+		if [ -n "$GIT_CONFIG_PARAMETERS" ]; then
+			exec %q
+		fi
+		exit 0
+	fi
+done
+exec %q "$@"
+`, helper, realGit))
+			t.Setenv("PATH", wrapperDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			operator := NewGitOperator(repoDir, newTestLogger(t), nil)
+			operator.setContributionDestination(destination)
+			operator.setManagedPushEnvironmentProvider(func() []string {
+				return append(os.Environ(),
+					"KANDEV_GITHUB_CREDENTIAL_SCOPES=private-destination-scope",
+					"GIT_CONFIG_PARAMETERS="+tc.parameters,
+				)
+			})
+
+			result, err := operator.Push(context.Background(), false, false)
+			if err != nil {
+				t.Fatalf("Push returned error: %v", err)
+			}
+			if !result.Success {
+				t.Fatalf("Push failed: %+v", result)
+			}
+			if _, err := os.Stat(helperMarker); !os.IsNotExist(err) {
+				t.Fatalf("injected helper received private credential scope: %v", err)
+			}
+		})
+	}
+}
+
 // TestManagedPushTransportIsolation is reviewer-requested contract coverage
 // for the transport seams rejected before private scopes are made available.
 func TestManagedPushTransportIsolation(t *testing.T) {
@@ -448,12 +525,13 @@ func TestManagedPushTransportIsolation(t *testing.T) {
 			"GIT_CONFIG_COUNT=1",
 			"GIT_CONFIG_KEY_0=http.extraHeader",
 			"GIT_CONFIG_VALUE_0=Authorization: Bearer repository-token",
+			"GIT_CONFIG_PARAMETERS='http.extraHeader=Authorization: Bearer repository-token'",
 		}
 	})
 	env := strings.Join(operator.managedPushEnvironmentValues(), "\n")
 	for _, forbidden := range []string{
 		"GIT_SSH_COMMAND=", "GIT_PROXY_COMMAND=", "GIT_CONFIG_GLOBAL=/tmp",
-		"GIT_CONFIG_COUNT=", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_",
+		"GIT_CONFIG_COUNT=", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_", "GIT_CONFIG_PARAMETERS=",
 	} {
 		if strings.Contains(env, forbidden) {
 			t.Errorf("managed push environment still contains %q: %q", forbidden, env)

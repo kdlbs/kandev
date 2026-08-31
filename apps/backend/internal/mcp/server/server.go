@@ -57,6 +57,8 @@ const (
 
 const pluginToolArgumentsKey = "arguments"
 
+const mcpToolNameSuffix = "_kandev"
+
 // MCP payload keys reused across tool registrations. Extracted so a future
 // wire-protocol rename touches every tool in one place AND so goconst
 // doesn't flag the literals as repeated string occurrences.
@@ -97,30 +99,42 @@ func normalizeMode(mode string) string {
 
 // Server wraps the MCP server with backend client for communication.
 type Server struct {
-	backend             BackendClient
-	sessionID           string
-	taskID              string
-	disableAskQuestion  bool
-	mode                string // "task" (default), "task-title-pending", "config", or "office"
-	mcpProviders        []string
-	profile             mcpprofile.Context
-	mcpServer           *server.MCPServer
-	sseServer           *server.SSEServer
-	httpServer          *server.StreamableHTTPServer
-	logger              *logger.Logger
-	mcpLogger           *zap.Logger // optional file logger for MCP debug traces
-	mu                  sync.RWMutex
-	running             bool
-	attachmentMu        sync.RWMutex
-	attachmentAttempt   streams.MCPAttachmentAttempt
-	attachmentAttempts  map[string]streams.MCPAttachmentAttempt
-	attachmentReporter  func(streams.MCPAttachmentEvidence)
-	validatorMu         sync.RWMutex
-	toolValidators      map[string]toolArgumentValidator
-	pluginToolsUpdateMu sync.Mutex
-	pluginToolsMu       sync.Mutex
-	pluginTools         plugintools.Snapshot
-	pluginToolsReady    bool
+	backend                    BackendClient
+	sessionID                  string
+	taskID                     string
+	disableAskQuestion         bool
+	mode                       string // "task" (default), "task-title-pending", "config", or "office"
+	mcpProviders               []string
+	profile                    mcpprofile.Context
+	namespacesMCPToolsByServer bool
+	mcpServer                  *server.MCPServer
+	sseServer                  *server.SSEServer
+	httpServer                 *server.StreamableHTTPServer
+	logger                     *logger.Logger
+	mcpLogger                  *zap.Logger // optional file logger for MCP debug traces
+	mu                         sync.RWMutex
+	running                    bool
+	attachmentMu               sync.RWMutex
+	attachmentAttempt          streams.MCPAttachmentAttempt
+	attachmentAttempts         map[string]streams.MCPAttachmentAttempt
+	attachmentReporter         func(streams.MCPAttachmentEvidence)
+	validatorMu                sync.RWMutex
+	toolValidators             map[string]toolArgumentValidator
+	pluginToolsUpdateMu        sync.Mutex
+	pluginToolsMu              sync.Mutex
+	pluginTools                plugintools.Snapshot
+	pluginToolsReady           bool
+}
+
+// ServerOption configures the per-instance MCP transport.
+type ServerOption func(*Server)
+
+// WithMCPToolNamespacingByServer enables presentation compatibility for an
+// agent that appends the injected MCP server name to every tool.
+func WithMCPToolNamespacingByServer(enabled bool) ServerOption {
+	return func(s *Server) {
+		s.namespacesMCPToolsByServer = enabled
+	}
 }
 
 // New creates a new MCP server for agentctl.
@@ -152,11 +166,11 @@ func New(backend BackendClient, sessionID, taskID string, port int, log *logger.
 // The profile keeps base surfaces and additive capability groups separate so
 // callers can add or remove one context-specific group without copying a full
 // mode branch.
-func NewWithProfile(backend BackendClient, sessionID, taskID string, port int, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, profileContext mcpprofile.Context) *Server {
+func NewWithProfile(backend BackendClient, sessionID, taskID string, port int, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, profileContext mcpprofile.Context, options ...ServerOption) *Server {
 	if disableAskQuestion {
 		profileContext = profileContext.WithoutCapability(mcpprofile.CapabilityUserQuestion)
 	}
-	s := newServerWithProfile(backend, sessionID, taskID, log, mcpLogFile, profileContext)
+	s := newServerWithProfile(backend, sessionID, taskID, log, mcpLogFile, profileContext, options...)
 	s.sseServer = server.NewSSEServer(s.mcpServer,
 		server.WithBaseURL(fmt.Sprintf("http://localhost:%d", port)),
 	)
@@ -197,7 +211,7 @@ func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logg
 	return newServerWithProfile(backend, sessionID, taskID, log, mcpLogFile, mcpprofile.Legacy(mcpMode, disableAskQuestion, mcpProviders))
 }
 
-func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *logger.Logger, mcpLogFile string, profileContext mcpprofile.Context) *Server {
+func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *logger.Logger, mcpLogFile string, profileContext mcpprofile.Context, options ...ServerOption) *Server {
 	profileContext = mcpprofile.New(profileContext.Surface, profileContext.Capabilities, profileContext.Providers)
 	s := &Server{
 		backend:            backend,
@@ -209,6 +223,11 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 		profile:            profileContext,
 		logger:             log.WithFields(zap.String("component", "mcp-server")),
 		attachmentAttempts: make(map[string]streams.MCPAttachmentAttempt),
+	}
+	for _, option := range options {
+		if option != nil {
+			option(s)
+		}
 	}
 
 	// Set up optional file logger for MCP debug traces
@@ -238,7 +257,11 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 	hooks.AddAfterInitialize(func(ctx context.Context, _ any, _ *mcp.InitializeRequest, _ *mcp.InitializeResult) {
 		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceInitializeObserved, 0, "")
 	})
+	hooks.AddBeforeCallTool(func(_ context.Context, _ any, request *mcp.CallToolRequest) {
+		s.restoreCanonicalToolName(request)
+	})
 	hooks.AddAfterListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest, result *mcp.ListToolsResult) {
+		s.presentTransportToolNames(result)
 		s.observeMCPToolsList(mcpConnectionID(ctx), result.Tools)
 	})
 	hooks.AddBeforeListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest) {
@@ -256,6 +279,39 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 	s.registerTools()
 	s.running = true
 	return s
+}
+
+func (s *Server) presentTransportToolNames(result *mcp.ListToolsResult) {
+	if !s.namespacesMCPToolsByServer || result == nil {
+		return
+	}
+	registeredTools := s.mcpServer.ListTools()
+	for index := range result.Tools {
+		name := result.Tools[index].Name
+		if !strings.HasSuffix(name, mcpToolNameSuffix) {
+			continue
+		}
+		transportName := strings.TrimSuffix(name, mcpToolNameSuffix)
+		// Keep plugin tools named "name" distinct from canonical tools named
+		// "name_kandev" when both are present in the live registry.
+		if _, collision := registeredTools[transportName]; collision {
+			continue
+		}
+		result.Tools[index].Name = transportName
+	}
+}
+
+func (s *Server) restoreCanonicalToolName(request *mcp.CallToolRequest) {
+	if !s.namespacesMCPToolsByServer || request == nil {
+		return
+	}
+	if s.mcpServer.GetTool(request.Params.Name) != nil {
+		return
+	}
+	canonicalName := request.Params.Name + mcpToolNameSuffix
+	if s.mcpServer.GetTool(canonicalName) != nil {
+		request.Params.Name = canonicalName
+	}
 }
 
 func modeForProfile(profileContext mcpprofile.Context) string {

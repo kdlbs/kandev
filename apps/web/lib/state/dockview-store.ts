@@ -987,6 +987,12 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
         safeHeight: measured.height,
         buildDefault: (a, intentName) => get().buildDefaultLayout(a, intentName),
         getDefaultLayout: () => get().userDefaultLayout ?? getPresetLayout(get().defaultPreset),
+        getDefaultPinnedWidths: (width) => {
+          const defaultLayout = get().userDefaultLayout;
+          return defaultLayout
+            ? resolveCustomLayoutPinnedWidths(defaultLayout.columns, width)
+            : new Map();
+        },
         initialLayout,
       });
       set(ids);
@@ -1082,6 +1088,18 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
   };
 }
 
+function resolveBuildDefaultPinnedWidths(
+  state: LayoutState,
+  userDefaultLayout: LayoutState | null,
+  basePreset: BuiltInPreset | undefined,
+  availableWidth: number,
+): Map<string, number> {
+  if (!userDefaultLayout || basePreset) return new Map();
+  // Intent panel injection preserves column widths, so the effective state
+  // still carries the saved custom-default geometry used for scaling.
+  return resolveCustomLayoutPinnedWidths(state.columns, availableWidth);
+}
+
 /**
  * Build and apply the default layout — the user's saved default or the active
  * preset, optionally injected with an intent's panels/active-panel overrides —
@@ -1096,7 +1114,6 @@ function performBuildDefault(
 ): void {
   const { userDefaultLayout } = get();
   const intent = intentName ? resolveNamedIntent(intentName) : null;
-  const freshPinned = new Map<string, number>();
   // Capture dimensions before layout change — api.width can become stale
   // after fromJSON inside applyLayout
   const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
@@ -1107,7 +1124,6 @@ function performBuildDefault(
         `pre=${formatWidthsSnapshot(snapshotColumnWidths(api))}`,
     );
   }
-  set({ isRestoringLayout: true, pinnedWidths: freshPinned });
 
   const basePreset = intent?.preset as BuiltInPreset | undefined;
   let state = basePreset
@@ -1121,7 +1137,15 @@ function performBuildDefault(
     state = applyActivePanelOverrides(state, intent.activePanels);
   }
 
-  const ids = applyLayout(api, state, freshPinned, safeWidth, safeHeight);
+  const pinnedWidths = resolveBuildDefaultPinnedWidths(
+    state,
+    userDefaultLayout,
+    basePreset,
+    safeWidth,
+  );
+  set({ isRestoringLayout: true, pinnedWidths });
+
+  const ids = applyLayout(api, state, pinnedWidths, safeWidth, safeHeight);
   const hasSidebar = state.columns.some((c) => c.id === "sidebar");
   const hasRight = state.columns.length > (hasSidebar ? 2 : 1);
   set({ ...ids, sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });

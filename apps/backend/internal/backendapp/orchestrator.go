@@ -134,6 +134,7 @@ func provideOrchestrator(
 		orchestratorSvc.SetContributorForkLeasePreparer(&githubContributionDestinationPreparer{
 			service: githubSvc, taskSvc: taskSvc, repo: taskRepo,
 		})
+		orchestratorSvc.SetPRBaseResolver(githubPRBaseResolver{service: githubSvc})
 	}
 	taskSvc.SetExecutionStopper(orchestratorSvc)
 	// Runtime-aware liveness lets durable cleanup treat a not-found stop for a
@@ -259,6 +260,20 @@ type githubCredentialPolicyService interface {
 
 type githubExecutorCredentialPolicyAdapter struct {
 	service githubCredentialPolicyService
+}
+
+type githubPRBaseResolver struct {
+	service *githubpkg.Service
+}
+
+func (r githubPRBaseResolver) ResolvePRBaseBranch(
+	ctx context.Context, workspaceID, owner, repo string, number int,
+) (string, error) {
+	pr, err := r.service.GetPRForAutomation(ctx, workspaceID, owner, repo, number)
+	if err != nil || pr == nil {
+		return "", err
+	}
+	return pr.BaseBranch, nil
 }
 
 func (a githubExecutorCredentialPolicyAdapter) ResolveTaskGitCredentialPolicy(
