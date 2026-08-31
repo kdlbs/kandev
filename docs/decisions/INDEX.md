@@ -190,6 +190,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-20-settings-prompt-editor-provider-ownership | [Settings Prompt Editors Own Monaco Completion Providers](2026-08-20-settings-prompt-editor-provider-ownership.md) | accepted | frontend | 2026-08-20 |
 | 2026-08-14-kandev-native-agent-rich-output | [Keep Agent Rich Output Host Native](2026-08-14-kandev-native-agent-rich-output.md) | accepted | backend, frontend, protocol, security | 2026-08-14 |
 | 2026-08-19-repository-qualified-comparison-targets | [Qualify Git Comparison Targets by Repository](2026-08-19-repository-qualified-comparison-targets.md) | accepted | backend, agentctl, frontend, protocol, GitHub, GitLab | 2026-08-19 |
+| 2026-08-31-deterministic-noninteractive-git-transport | [Keep Internal Git Transport Deterministic and Non-interactive](2026-08-31-deterministic-noninteractive-git-transport.md) | accepted | backend, agentctl, protocol, security, operations | 2026-08-31 |
 | 2026-08-20-startup-configuration-source-parity | [Startup Configuration Uses One Typed Source Model](2026-08-20-startup-configuration-source-parity.md) | accepted | backend, agentctl, frontend, cli, security, operations | 2026-08-20 |
 | 2026-08-20-acp-client-non-underscore-extension-methods | [Route Non-Underscore Inbound Client Methods to the Extension Handler](2026-08-20-acp-client-non-underscore-extension-methods.md) | accepted | backend, protocol | 2026-08-20 |
 | 2026-08-22-persistent-fork-approval-labels | [Persist Fork Approval Labels Across Pushes](2026-08-22-persistent-fork-approval-labels.md) | accepted (amended by 2026-08-24-unified-fork-approval-label) | infra, workflow, security | 2026-08-22 |
@@ -221,3 +222,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-30-bound-untracked-dependency-enumeration | [Bound Untracked Dependency Enumeration](2026-08-30-bound-untracked-dependency-enumeration.md) | accepted | backend | 2026-08-30 |
 | 2026-08-30-e2e-browser-cache | [Cache host-runner E2E browser provisioning](2026-08-30-e2e-browser-cache.md) | accepted | infra, workflow | 2026-08-30 |
 | 2026-08-30-environment-owned-git-status | [Project Current Git Status From the Task Environment](2026-08-30-environment-owned-git-status.md) | proposed | backend, frontend, protocol | 2026-08-30 |
+| 2026-08-31-passthrough-running-publication | [Defer Passthrough Running Publication Until Guard Release](2026-08-31-passthrough-running-publication.md) | accepted | backend | 2026-08-31 |

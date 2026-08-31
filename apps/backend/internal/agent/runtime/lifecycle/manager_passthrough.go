@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -25,27 +26,78 @@ import (
 
 var errPassthroughProcessReplaced = errors.New("passthrough process was replaced")
 
-// MarkPassthroughRunning marks a passthrough execution as running when user submits input.
-// This is called when Enter key is detected in the terminal handler.
-// It updates the execution status and publishes an AgentRunning event.
-func (m *Manager) MarkPassthroughRunning(sessionID string) error {
+// PreparePassthroughRunning marks a passthrough execution as running and
+// returns a one-shot callback that publishes the corresponding AgentRunning
+// event. Callers that hold a session serialization guard must invoke the
+// callback after releasing that guard because event subscribers may re-enter
+// it synchronously.
+func (m *Manager) PreparePassthroughRunning(sessionID string) (func(), error) {
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
-		return fmt.Errorf("no agent execution found for session: %s", sessionID)
+		return nil, fmt.Errorf("no agent execution found for session: %s", sessionID)
 	}
 
-	if execution.PassthroughProcessID == "" {
-		return fmt.Errorf("session %s is not in passthrough mode", sessionID)
-	}
-
-	// Only publish if not already running (prevents duplicate events)
-	if execution.Status != v1.AgentStatusRunning {
-		if err := m.UpdateStatus(execution.ID, v1.AgentStatusRunning); err != nil {
-			return err
+	var payload AgentEventPayload
+	var updated *AgentExecution
+	var alreadyRunning bool
+	var validationErr error
+	if err := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+		// Revalidate the session mapping and passthrough mode while claiming the
+		// transition. The initial lookup only supplies the execution ID to lock.
+		if current.SessionID != sessionID {
+			validationErr = fmt.Errorf("no agent execution found for session: %s", sessionID)
+			return
 		}
-		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
-	}
+		if current.PassthroughProcessID == "" {
+			validationErr = fmt.Errorf("session %s is not in passthrough mode", sessionID)
+			return
+		}
 
+		// Only publish if not already running (prevents duplicate events).
+		if current.Status == v1.AgentStatusRunning {
+			alreadyRunning = true
+			return
+		}
+		current.Status = v1.AgentStatusRunning
+		updated = current
+		// Capture the payload under the same lock as the status claim so a
+		// competing stop/failure cannot relabel the deferred event.
+		payload = newAgentEventPayload(current)
+	}); err != nil {
+		if errors.Is(err, ErrExecutionNotFound) {
+			return nil, fmt.Errorf("no agent execution found for session: %s", sessionID)
+		}
+		return nil, err
+	}
+	if validationErr != nil {
+		return nil, validationErr
+	}
+	if alreadyRunning {
+		return func() {}, nil
+	}
+	m.persistExecutorRunning(context.Background(), updated)
+
+	var publishOnce sync.Once
+	return func() {
+		publishOnce.Do(func() {
+			m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentRunning, payload)
+		})
+	}, nil
+}
+
+// MarkPassthroughRunning marks a passthrough execution as running when the user submits input
+// via the terminal handler. It is a convenience wrapper around PreparePassthroughRunning that
+// publishes the AgentRunning event immediately.
+//
+// Callers that hold the per-session cancellation guard (e.g. handleAgentReady) must use
+// PreparePassthroughRunning directly and defer the returned publisher until after the guard
+// is released, to avoid re-entering the mutex through the synchronous event subscriber.
+func (m *Manager) MarkPassthroughRunning(sessionID string) error {
+	publish, err := m.PreparePassthroughRunning(sessionID)
+	if err != nil {
+		return err
+	}
+	publish()
 	return nil
 }
 

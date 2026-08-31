@@ -3106,6 +3106,14 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 	return s.executor.Stop(ctx, sessionID, reason, force)
 }
 
+// StopSessionSynchronously is the internal cleanup variant of StopSession. It
+// skips user authorization because task cleanup may run after the task/session
+// rows have been removed, and it waits for the executor process to exit before
+// returning to the destructive worktree cleanup path.
+func (s *Service) StopSessionSynchronously(ctx context.Context, sessionID string, reason string, force bool) error {
+	return s.executor.StopSessionSynchronously(ctx, sessionID, reason, force)
+}
+
 // DeleteSession deletes a session that is not currently running.
 func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	if err := s.authorizeSession(ctx, sessionID); err != nil {
