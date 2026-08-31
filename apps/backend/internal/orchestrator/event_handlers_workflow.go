@@ -1943,7 +1943,7 @@ func (s *Service) processStepExitAndEnterWithSteps(
 		}
 	}
 
-	finishEffect, claimed, effectErr := s.claimRouteEffectForStepEnter(
+	effectClaim, claimed, effectErr := s.claimRouteEffectForStepEnter(
 		ctx, taskID, targetStep.ID, transitionID,
 	)
 	if effectErr != nil {
@@ -1952,8 +1952,12 @@ func (s *Service) processStepExitAndEnterWithSteps(
 	if !claimed {
 		return nil
 	}
-	effectCompleted := false
-	defer func() { finishEffect(effectCompleted) }()
+	claimFinished := false
+	defer func() {
+		if !claimFinished {
+			_ = effectClaim.finish(false)
+		}
+	}()
 
 	clearReview := targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent)
 	preparedSession, err := s.prepareStepEnter(ctx, taskID, session.ID, clearReview)
@@ -1961,6 +1965,9 @@ func (s *Service) processStepExitAndEnterWithSteps(
 		if queuePromotion {
 			s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, "task.moved")
 		}
+		return err
+	}
+	if err := effectClaim.fence(); err != nil {
 		return err
 	}
 
@@ -1978,8 +1985,8 @@ func (s *Service) processStepExitAndEnterWithSteps(
 		s.processOnExit(ctx, taskID, preparedSession, fromStep)
 	}
 	s.processOnEnter(ctx, taskID, preparedSession, targetStep, taskDescription, 0)
-	effectCompleted = true
-	return nil
+	claimFinished = true
+	return effectClaim.finish(true)
 }
 
 // finalizeStepEnter optionally clears review status, reloads the session, and
@@ -1991,14 +1998,22 @@ func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID strin
 		return err
 	}
 
-	finishEffect, claimed, effectErr := s.claimRouteEffectForStepEnter(ctx, taskID, targetStep.ID, transitionID)
+	effectClaim, claimed, effectErr := s.claimRouteEffectForStepEnter(ctx, taskID, targetStep.ID, transitionID)
 	if effectErr != nil {
 		return effectErr
 	}
 	if !claimed {
 		return nil
 	}
-	defer finishEffect(true)
+	claimFinished := false
+	defer func() {
+		if !claimFinished {
+			_ = effectClaim.finish(false)
+		}
+	}()
+	if err := effectClaim.fence(); err != nil {
+		return err
+	}
 
 	// entryID 0: this path (manual move / legacy on_turn_start/complete) does
 	// not attach a step-entry ResultHolder before ApplyTransition, so no
@@ -2008,7 +2023,8 @@ func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID strin
 	// docs/specs/workflow-on-enter-action-dispatch/spec.md and the task
 	// plan's scope note for why E2-E5 dispatch is deferred.
 	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, 0)
-	return nil
+	claimFinished = true
+	return effectClaim.finish(true)
 }
 
 func (s *Service) prepareStepEnter(
@@ -2046,13 +2062,68 @@ type routeEffectRepository interface {
 const routeEffectLease = time.Minute
 
 var errRouteEffectLeaseHeld = errors.New("workflow route effect lease is still held")
+var errRouteEffectClaimLost = errors.New("workflow route effect claim was lost")
+
+type routeEffectClaim struct {
+	effects        routeEffectRepository
+	ctx            context.Context
+	effectID       string
+	token          string
+	stopRenewal    chan struct{}
+	renewalStopped chan struct{}
+	renewalResult  chan error
+}
+
+func (c *routeEffectClaim) fence() error {
+	if c.effects == nil {
+		return nil
+	}
+	renewed, err := c.effects.RenewWorkflowRouteEffect(
+		c.ctx, c.effectID, c.token, time.Now().UTC(),
+	)
+	if err != nil {
+		return fmt.Errorf("fence workflow route effect claim: %w", err)
+	}
+	if !renewed {
+		return errRouteEffectClaimLost
+	}
+	return nil
+}
+
+func (c *routeEffectClaim) finish(complete bool) error {
+	if c.effects == nil {
+		return nil
+	}
+	close(c.stopRenewal)
+	<-c.renewalStopped
+	if renewalErr, ok := <-c.renewalResult; ok {
+		return renewalErr
+	}
+	if !complete {
+		return nil
+	}
+	completed, err := c.effects.CompleteWorkflowRouteEffect(
+		c.ctx, c.effectID, c.token, time.Now().UTC(),
+	)
+	if err != nil {
+		return fmt.Errorf("complete workflow route effect: %w", err)
+	}
+	if !completed {
+		return errRouteEffectClaimLost
+	}
+	return nil
+}
+
+func noOpRouteEffectClaim() *routeEffectClaim {
+	return &routeEffectClaim{}
+}
 
 func (s *Service) claimRouteEffectForStepEnter(
 	ctx context.Context, taskID, targetStepID string, transitionID int64,
-) (func(bool), bool, error) {
+) (*routeEffectClaim, bool, error) {
 	effects, ok := s.repo.(routeEffectRepository)
 	if !ok {
-		return func(bool) {}, true, nil
+		return noOpRouteEffectClaim(), true, nil
 	}
 	var effect routing.Effect
 	var found bool
@@ -2066,7 +2137,7 @@ func (s *Service) claimRouteEffectForStepEnter(
 		return nil, false, fmt.Errorf("read route effect for step entry: %w", err)
 	}
 	if !found {
-		return func(bool) {}, true, nil
+		return noOpRouteEffectClaim(), true, nil
 	}
 	token := uuid.NewString()
 	claimed, err := effects.ClaimWorkflowRouteEffect(ctx, effect.ID, token, time.Now().UTC(), routeEffectLease)
@@ -2084,24 +2155,20 @@ func (s *Service) claimRouteEffectForStepEnter(
 			return nil, false, fmt.Errorf("re-read route effect after failed claim: %w", err)
 		}
 		if found && latest.ID == effect.ID && latest.Status == routing.EffectCompleted {
-			return func(bool) {}, false, nil
+			return noOpRouteEffectClaim(), false, nil
 		}
 		return nil, false, errRouteEffectLeaseHeld
 	}
 	renewCtx := context.WithoutCancel(ctx)
 	stopRenewal := make(chan struct{})
 	renewalStopped := make(chan struct{})
-	go s.renewRouteEffectClaim(renewCtx, effects, effect.ID, token, stopRenewal, renewalStopped)
-	return func(complete bool) {
-		close(stopRenewal)
-		<-renewalStopped
-		if !complete {
-			return
-		}
-		completed, completeErr := effects.CompleteWorkflowRouteEffect(renewCtx, effect.ID, token, time.Now().UTC())
-		if completeErr != nil || !completed {
-			s.logger.Warn("failed to complete workflow route effect", zap.String("effect_id", effect.ID), zap.Error(completeErr))
-		}
+	renewalResult := make(chan error, 1)
+	go s.renewRouteEffectClaim(
+		renewCtx, effects, effect.ID, token, stopRenewal, renewalStopped, renewalResult,
+	)
+	return &routeEffectClaim{
+		effects: effects, ctx: renewCtx, effectID: effect.ID, token: token,
+		stopRenewal: stopRenewal, renewalStopped: renewalStopped, renewalResult: renewalResult,
 	}, true, nil
 }
 
@@ -2173,8 +2240,10 @@ func (s *Service) renewRouteEffectClaim(
 	effectID, token string,
 	stop <-chan struct{},
 	stopped chan<- struct{},
+	result chan<- error,
 ) {
 	defer close(stopped)
+	defer close(result)
 	ticker := time.NewTicker(routeEffectLease / 3)
 	defer ticker.Stop()
 	for {
@@ -2189,6 +2258,7 @@ func (s *Service) renewRouteEffectClaim(
 			}
 			if !renewed {
 				s.logger.Warn("workflow route effect claim was lost", zap.String("effect_id", effectID))
+				result <- errRouteEffectClaimLost
 				return
 			}
 		}
@@ -5330,15 +5400,30 @@ func (s *Service) launchProcessOnEnter(
 				onComplete()
 			}
 		}()
-		finishEffect, claimed, err := s.claimRouteEffectForStepEnter(ctx, taskID, targetStep.ID, transitionID)
+		effectClaim, claimed, err := s.claimRouteEffectForStepEnter(ctx, taskID, targetStep.ID, transitionID)
 		if err != nil || !claimed {
 			if err != nil {
 				s.logger.Warn("failed to claim workflow route effect", zap.String("task_id", taskID), zap.Error(err))
 			}
 			return
 		}
-		defer finishEffect(true)
+		claimFinished := false
+		defer func() {
+			if !claimFinished {
+				_ = effectClaim.finish(false)
+			}
+		}()
+		if err := effectClaim.fence(); err != nil {
+			s.logger.Warn("lost workflow route effect before on_enter",
+				zap.String("task_id", taskID), zap.Error(err))
+			return
+		}
 		s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, entryID)
+		claimFinished = true
+		if err := effectClaim.finish(true); err != nil {
+			s.logger.Warn("failed to complete workflow route effect",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
 	}()
 }
 
