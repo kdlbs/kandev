@@ -31,6 +31,7 @@ The Kandev session must keep its logical profile and route attribution.
   `resolveDynamicLaunchExecution` before `LaunchPreparedSession`.
 - Pass the concrete execution profile to workspace attachment without changing
   the logical session profile.
+- Remove or terminalize the prepared replacement when route resolution fails.
 - Verify the selected route remains sticky for the later created-session start.
 
 ## Out of scope
@@ -46,13 +47,14 @@ The Kandev session must keep its logical profile and route attribution.
   replacement workspace attachment.
 - The replacement session stores the dynamic logical profile and selected
   concrete execution profile before it becomes primary.
-- A resolution or attachment error leaves the prior session active.
+- A resolution or attachment error leaves the prior session active and does not
+  leave a reusable partial replacement.
 - Concrete-profile switching remains unchanged.
 
 ## Verification
 
 ```bash
-cd apps/backend && go test -tags fts5 ./internal/orchestrator -run 'TestCreateNewSessionForStep(_(ResolvesDynamicProfileBeforeWorkspaceAttach|TerminalPrimaryReusesCanonicalEnvironment)|KeepsCurrentSessionWhenWorkspaceAttachFails)' -count=1
+cd apps/backend && go test -tags fts5 ./internal/orchestrator -run 'TestCreateNewSessionForStep(_(ResolvesDynamicProfileBeforeWorkspaceAttach|RemovesPreparedSessionWhenDynamicResolutionFails|TerminalPrimaryReusesCanonicalEnvironment)|KeepsCurrentSessionWhenWorkspaceAttachFails)' -count=1
 ```
 
 ## Files likely touched
@@ -88,15 +90,26 @@ None.
 
 ## Results
 
-RED: the new regression test failed because lifecycle received
+RED: the dynamic-profile regression failed because lifecycle received
 `profile-dynamic`. Lifecycle rejected that virtual profile before it attached
-the retained task environment.
+the retained task environment. The resolution-failure cleanup test also found
+a prepared replacement row left behind.
 
 The workflow replacement path now resolves the prepared session before the
 workspace attachment. It stores the concrete execution profile and route
 generation, keeps the logical dynamic profile, and passes the concrete profile
 to lifecycle. A second resolution reuses the stored route.
 
+The path validates the destination before preparation and removes a prepared
+replacement when route selection fails. If removal fails, it terminalizes the
+row so later workflow switches cannot reuse it. The regression now starts the
+created session through `StartCreatedSession` and reloads the persisted row.
+
 Verification:
 
-- `cd apps/backend && go test -tags fts5 ./internal/orchestrator -run 'TestCreateNewSessionForStep(_(ResolvesDynamicProfileBeforeWorkspaceAttach|TerminalPrimaryReusesCanonicalEnvironment)|KeepsCurrentSessionWhenWorkspaceAttachFails)' -count=1`: six tests passed.
+- `cd apps/backend && go test -tags fts5 ./internal/orchestrator -run 'TestCreateNewSessionForStep(_(ResolvesDynamicProfileBeforeWorkspaceAttach|RemovesPreparedSessionWhenDynamicResolutionFails|TerminalPrimaryReusesCanonicalEnvironment)|KeepsCurrentSessionWhenWorkspaceAttachFails)' -count=1`: seven tests passed.
+
+PR fixup: addressed two exact-head review findings. The test now proves
+persisted sticky attribution across the replacement and created-session start
+boundaries. Resolution failures no longer leave a partial replacement that a
+later workflow switch could promote.

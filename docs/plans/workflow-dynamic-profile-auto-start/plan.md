@@ -41,9 +41,9 @@ selected concrete execution profile.
 
 ## Technical approach
 
-In `Service.createNewSessionForStep`, load the new session before workspace
-attachment. This function is in
-`apps/backend/internal/orchestrator/event_handlers_workflow.go`.
+In `Service.createNewSessionForStep`, validate the destination before creating
+the replacement session, then load the new session before workspace attachment.
+This function is in `apps/backend/internal/orchestrator/event_handlers_workflow.go`.
 
 Resolve the logical profile with `resolveDynamicLaunchExecution`. Pass the
 returned concrete profile ID to `Executor.LaunchPreparedSession`.
@@ -51,6 +51,9 @@ returned concrete profile ID to `Executor.LaunchPreparedSession`.
 Keep `TaskSession.AgentProfileID` unchanged. The resolver persists
 `ExecutionProfileID`, route generation, route reason, and the concrete profile
 snapshot before lifecycle receives the launch request.
+
+If route selection fails after session preparation, delete the replacement row.
+If deletion fails, mark the replacement terminal so it cannot be reused.
 
 The later `StartCreatedSession` call must reuse the persisted route through
 `ResolveExisting`. It must not claim a second generation or select another
@@ -63,8 +66,10 @@ candidate. Concrete profiles keep the same effective profile ID.
   `TestCreateNewSessionForStep_ResolvesDynamicProfileBeforeWorkspaceAttach` in
   `apps/backend/internal/orchestrator/event_handlers_workflow_dynamic_profile_test.go`.
   The test uses real SQLite stores and the real dynamic resolver. It rejects a
-  lifecycle launch that receives the virtual profile. It also verifies both
-  logical and concrete session attribution.
+  lifecycle launch that receives the virtual profile, starts the created
+  session through `StartCreatedSession`, and reloads persisted attribution. A
+  second test verifies that route-resolution failure removes the prepared row
+  and keeps the current session reusable.
 - Existing concrete workflow-switch tests in
   `apps/backend/internal/orchestrator/event_handlers_workflow_profile_test.go`
   remain the control for unchanged concrete behavior.
@@ -81,9 +86,9 @@ API contracts do not change.
 
 ## Verification results
 
-The focused orchestrator test command passed all six tests. It covers the new
-dynamic-profile regression, three terminal-session states, and the existing
-workspace-attachment failure behavior.
+The focused orchestrator test command passed all seven tests. It covers the
+dynamic-profile regression, resolution-failure cleanup, three terminal-session
+states, and the existing workspace-attachment failure behavior.
 
 ## Risks
 
