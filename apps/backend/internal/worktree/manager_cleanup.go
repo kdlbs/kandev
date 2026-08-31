@@ -192,7 +192,7 @@ func (m *Manager) RemoveByID(ctx context.Context, worktreeID string, removeBranc
 	if err != nil {
 		return err
 	}
-	m.enrichCleanupWorktreeFromCache(wt)
+	wt = m.enrichCleanupWorktreeFromCache(wt)
 	receipt, err := m.removeWorktreeWithReceipt(ctx, wt, removeBranch)
 	if !removeBranch {
 		m.logger.Info("managed branch cleanup receipt", receipt.reasonFields()...)
@@ -207,15 +207,20 @@ func (m *Manager) RemoveByIDWithReceipt(ctx context.Context, worktreeID string) 
 	if err != nil {
 		return newBranchCleanupReceipt(), err
 	}
-	m.enrichCleanupWorktreeFromCache(wt)
+	wt = m.enrichCleanupWorktreeFromCache(wt)
 	receipt, err := m.removeWorktreeWithReceipt(ctx, wt, false)
 	m.logger.Info("managed branch cleanup receipt", receipt.reasonFields()...)
 	return receipt, err
 }
 
-func (m *Manager) enrichCleanupWorktreeFromCache(wt *Worktree) {
-	if wt == nil || (wt.RepositoryPath != "" && wt.BaseBranch != "" && wt.CleanupHeadOID != "") {
-		return
+func (m *Manager) enrichCleanupWorktreeFromCache(wt *Worktree) *Worktree {
+	if wt == nil {
+		return nil
+	}
+	clone := *wt
+	wt = &clone
+	if wt.RepositoryPath != "" && wt.BaseBranch != "" && wt.CleanupHeadOID != "" {
+		return wt
 	}
 	m.mu.RLock()
 	cached := m.worktrees[cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug)]
@@ -229,7 +234,7 @@ func (m *Manager) enrichCleanupWorktreeFromCache(wt *Worktree) {
 	}
 	m.mu.RUnlock()
 	if cached == nil || cached.ID != wt.ID {
-		return
+		return wt
 	}
 	if wt.RepositoryPath == "" {
 		wt.RepositoryPath = cached.RepositoryPath
@@ -240,6 +245,7 @@ func (m *Manager) enrichCleanupWorktreeFromCache(wt *Worktree) {
 	if wt.CleanupHeadOID == "" {
 		wt.CleanupHeadOID = cached.CleanupHeadOID
 	}
+	return wt
 }
 
 // CaptureCleanupHeadOIDs records the checkout commit for each worktree before
@@ -252,7 +258,7 @@ func (m *Manager) CaptureCleanupHeadOIDs(ctx context.Context, worktrees []*Workt
 		if wt == nil || wt.ID == "" {
 			continue
 		}
-		m.enrichCleanupWorktreeFromCache(wt)
+		wt = m.enrichCleanupWorktreeFromCache(wt)
 		if strings.TrimSpace(wt.RepositoryPath) == "" || strings.TrimSpace(wt.Path) == "" {
 			// Older environment rows can outlive their repository/session rows.
 			// Keep them in the durable snapshot, but let the later cleanup audit
@@ -653,7 +659,7 @@ func (m *Manager) cleanupWorktreesWithReceipt(
 			continue
 		}
 		seen[wt.ID] = struct{}{}
-		m.enrichCleanupWorktreeFromCache(wt)
+		wt = m.enrichCleanupWorktreeFromCache(wt)
 		branchReceipt, err := m.removeWorktreeWithReceipt(ctx, wt, removeBranch)
 		receipt.merge(branchReceipt)
 		if err != nil {
