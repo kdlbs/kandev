@@ -75,7 +75,7 @@ describe("surface typography primitives", () => {
   });
 
   it("lets consumers override the shared wrapping default", () => {
-    // @covers AC-UI-SURFACE-TEXT-HIERARCHY-001.4
+    // @covers AC-UI-SURFACE-TEXT-HIERARCHY-001.3, AC-UI-SURFACE-TEXT-HIERARCHY-001.4
     render(
       <>
         <AlertTitle data-testid="override-title" className="text-pretty" />
@@ -93,5 +93,11 @@ describe("surface typography primitives", () => {
     expect(screen.getByTestId("override-description").classList.contains(PRETTY_TEXT_CLASS)).toBe(
       false,
     );
+    expect(screen.getByTestId("override-title").classList.contains(WORD_CONTAINMENT_CLASS)).toBe(
+      true,
+    );
+    expect(
+      screen.getByTestId("override-description").classList.contains(WORD_CONTAINMENT_CLASS),
+    ).toBe(true);
   });
 });

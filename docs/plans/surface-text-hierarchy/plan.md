@@ -1,6 +1,6 @@
 ---
 created: 2026-08-31
-status: draft
+status: in-progress
 requirements:
   - REQ-UI-SURFACE-TEXT-HIERARCHY-001
   - REQ-UI-TASK-CLEANUP-CONFIRMATION-001
