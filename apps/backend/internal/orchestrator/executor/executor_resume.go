@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
@@ -914,7 +915,27 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 	}
 	req.WorktreeBranchTicket = worktree.TicketForBranchName(task.Identifier, metadata)
 
-	execConfig := e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
+	existingRunning, runningErr := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
+		return nil, "", executorConfig{}, nil, nil,
+			fmt.Errorf("load runtime inventory for session %q: %w", session.ID, runningErr)
+	}
+	recordedKubernetes := existingRunning != nil && existingRunning.Runtime == agentruntime.RuntimeKubernetes
+	if recordedKubernetes {
+		applyAuthoritativeKubernetesRunningMetadata(metadata, existingRunning.Metadata)
+	}
+	var execConfig executorConfig
+	if recordedKubernetes {
+		var configErr error
+		execConfig, configErr = e.applyRecordedKubernetesExecutorConfigToResumeRequest(
+			ctx, req, session, metadata, existingRunning,
+		)
+		if configErr != nil {
+			return nil, "", executorConfig{}, nil, existingRunning, configErr
+		}
+	} else {
+		execConfig = e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
+	}
 
 	existingEnv, err := e.resolveResumeTaskEnvironment(ctx, task.ID, session)
 	if err != nil {
@@ -951,7 +972,7 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 	profileContext.Providers = req.McpProviders
 	req.McpProfile = &profileContext
 
-	existingRunning := e.applyRunningRecordToResumeRequest(ctx, req, task, session, startAgent)
+	existingRunning = e.applyRunningRecordToResumeRequest(req, task, session, startAgent, existingRunning)
 	if err := e.applyResumeWorkspaceFolders(ctx, task.ID, req); err != nil {
 		return nil, "", execConfig, existingEnv, nil, err
 	}
@@ -966,6 +987,60 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 	}
 
 	return req, repositoryID, execConfig, existingEnv, existingRunning, nil
+}
+
+func applyAuthoritativeKubernetesRunningMetadata(
+	metadata map[string]interface{},
+	recorded map[string]interface{},
+) {
+	for key := range metadata {
+		if isKubernetesRecordedMetadataKey(key) {
+			delete(metadata, key)
+		}
+	}
+	for key, value := range recorded {
+		if isKubernetesRecordedMetadataKey(key) && lifecycle.ShouldPersistMetadataKey(key) {
+			metadata[key] = value
+		}
+	}
+}
+
+func isKubernetesRecordedMetadataKey(key string) bool {
+	return strings.HasPrefix(key, "kubernetes_") ||
+		key == lifecycle.MetadataKeyIsRemote ||
+		key == lifecycle.MetadataKeyExecutorProfileID ||
+		key == lifecycle.MetadataKeyAuthTokenSecret ||
+		key == lifecycle.MetadataKeyBootstrapNonceSecret
+}
+
+func (e *Executor) applyRecordedKubernetesExecutorConfigToResumeRequest(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	session *models.TaskSession,
+	metadata map[string]interface{},
+	running *models.ExecutorRunning,
+) (executorConfig, error) {
+	executorID := strings.TrimSpace(running.ExecutorID)
+	if executorID == "" {
+		return executorConfig{}, errors.New("resume Kubernetes executor: recorded executor ID is missing")
+	}
+	current, err := e.repo.GetExecutor(ctx, executorID)
+	if err != nil {
+		return executorConfig{}, fmt.Errorf("resume Kubernetes executor %q: %w", executorID, err)
+	}
+	if current == nil || current.Type != models.ExecutorTypeKubernetes {
+		return executorConfig{}, fmt.Errorf("resume Kubernetes executor %q: current Kubernetes executor is unavailable", executorID)
+	}
+	metadata["executor_id"] = executorID
+	config := executorConfig{
+		ExecutorID: executorID, ExecutorType: string(current.Type), ExecutorCfg: current.Config,
+		Metadata: metadata, Resumable: current.Resumable, RuntimeName: string(current.Type),
+	}
+	session.ExecutorID = executorID
+	req.ExecutorType = config.ExecutorType
+	req.ExecutorConfig = config.ExecutorCfg
+	req.Metadata = metadata
+	return config, nil
 }
 
 func (e *Executor) applyResumeWorkspaceFolders(
@@ -1058,9 +1133,14 @@ func isArchiveCancelledResumeSession(session *models.TaskSession) bool {
 
 // applyRunningRecordToResumeRequest loads the ExecutorRunning record and applies
 // resume-related fields (remote reconnect, resume token) to the request.
-func (e *Executor) applyRunningRecordToResumeRequest(ctx context.Context, req *LaunchAgentRequest, task *v1.Task, session *models.TaskSession, startAgent bool) *models.ExecutorRunning {
-	running, runErr := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
-	if runErr != nil || running == nil {
+func (e *Executor) applyRunningRecordToResumeRequest(
+	req *LaunchAgentRequest,
+	task *v1.Task,
+	session *models.TaskSession,
+	startAgent bool,
+	running *models.ExecutorRunning,
+) *models.ExecutorRunning {
+	if running == nil {
 		// Archive cleanup tears down the executors_running row entirely, so an
 		// archive-cancelled session reaches this point with running == nil —
 		// exactly the shape GetTaskSessionStatus's resumeReasonArchiveCancelledResumable

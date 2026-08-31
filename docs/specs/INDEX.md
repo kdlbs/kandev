@@ -62,6 +62,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [duplicated-tab-stale-data](fix-duplicated-tab-stale-data/spec.md) | building |
 | [health-endpoint-version](health-endpoint-version/spec.md) | building |
 | [go-dev-launcher](go-dev-launcher/spec.md) | draft |
+| [kubernetes-executor](kubernetes-executor/spec.md) | shipped |
 
 ## tasks/ — task & workflow model
 

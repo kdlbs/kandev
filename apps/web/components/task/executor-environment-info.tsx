@@ -10,6 +10,8 @@ import {
   type SSHLiveStatus,
   type TaskEnvironment,
 } from "@/lib/api/domains/task-environment-api";
+import type { KubernetesSession } from "@/lib/types/http-kubernetes";
+import { formatDateTime } from "@/lib/i18n/formats";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { resolveExecutorEnvironmentStatus, type StatusTone } from "./executor-environment-status";
 import { useTranslation } from "react-i18next";
@@ -27,11 +29,17 @@ export function EnvironmentInfo({
   env,
   container,
   ssh,
+  kubernetes,
+  kubernetesLoaded = false,
+  kubernetesError = null,
   loading,
 }: {
   env: TaskEnvironment | null;
   container: ContainerLiveStatus | null;
   ssh?: SSHLiveStatus | null;
+  kubernetes?: KubernetesSession | null;
+  kubernetesLoaded?: boolean;
+  kubernetesError?: string | null;
   loading: boolean;
 }) {
   const { t } = useTranslation();
@@ -56,9 +64,22 @@ export function EnvironmentInfo({
     <div className="px-3 pt-2.5 pb-1.5 space-y-1.5">
       <div className="flex items-center justify-between gap-2">
         <span className="font-medium text-foreground">{formatExecutorType(env.executor_type)}</span>
-        <StatusBadge env={env} container={container} />
+        <StatusBadge
+          env={env}
+          container={container}
+          kubernetes={kubernetes ?? null}
+          kubernetesLoaded={kubernetesLoaded}
+          kubernetesError={kubernetesError}
+        />
       </div>
-      <EnvironmentFields env={env} container={container} ssh={ssh ?? null} />
+      <EnvironmentFields
+        env={env}
+        container={container}
+        ssh={ssh ?? null}
+        kubernetes={kubernetes ?? null}
+        kubernetesLoaded={kubernetesLoaded}
+        kubernetesError={kubernetesError}
+      />
     </div>
   );
 }
@@ -66,13 +87,25 @@ export function EnvironmentInfo({
 function StatusBadge({
   env,
   container,
+  kubernetes,
+  kubernetesLoaded,
+  kubernetesError,
 }: {
   env: TaskEnvironment;
   container: ContainerLiveStatus | null;
+  kubernetes: KubernetesSession | null;
+  kubernetesLoaded: boolean;
+  kubernetesError: string | null;
 }) {
   // For container-backed envs the live state is the source of truth; for the
   // others fall back to the recorded TaskEnvironment.status.
-  const { label, tone } = resolveExecutorEnvironmentStatus(env, container);
+  const { label, tone } = resolveExecutorEnvironmentStatus(
+    env,
+    container,
+    env.executor_type === "k8s"
+      ? { session: kubernetes, loaded: kubernetesLoaded, error: kubernetesError }
+      : undefined,
+  );
   const className = TONE_CLASSES[tone];
   return (
     <Badge variant="outline" className={`text-[10px] uppercase ${className}`}>
@@ -85,14 +118,29 @@ function EnvironmentFields({
   env,
   container,
   ssh,
+  kubernetes,
+  kubernetesLoaded,
+  kubernetesError,
 }: {
   env: TaskEnvironment;
   container: ContainerLiveStatus | null;
   ssh: SSHLiveStatus | null;
+  kubernetes: KubernetesSession | null;
+  kubernetesLoaded: boolean;
+  kubernetesError: string | null;
 }) {
   const { t } = useTranslation();
-  const fields = useMemo(() => buildFields(env, container, ssh), [env, container, ssh]);
+  const fields = useMemo(
+    () => buildFields(env, container, ssh, kubernetes),
+    [container, env, kubernetes, ssh],
+  );
   if (fields.length === 0) {
+    if (env.executor_type === "k8s") {
+      let message = t("task:loadingStatus");
+      if (kubernetesError) message = kubernetesError;
+      else if (kubernetesLoaded) message = t("task:executorEnvironmentIsUnavailable");
+      return <p className="text-xs text-muted-foreground">{message}</p>;
+    }
     return <p className="text-xs text-muted-foreground">{t("task:noResourceDetailsAvailable")}</p>;
   }
   return (
@@ -155,6 +203,7 @@ function buildFields(
   env: TaskEnvironment,
   container: ContainerLiveStatus | null,
   ssh: SSHLiveStatus | null,
+  kubernetes: KubernetesSession | null,
 ): FieldRow[] {
   const rows: FieldRow[] = [];
 
@@ -189,7 +238,33 @@ function buildFields(
     addSshRows(rows, ssh);
   }
 
+  if (env.executor_type === "k8s" && kubernetes) {
+    addKubernetesRows(rows, kubernetes);
+  }
+
   return rows;
+}
+
+function addKubernetesRows(rows: FieldRow[], session: KubernetesSession) {
+  if (session.pod_name) {
+    rows.push({ label: t("executors:kubernetesPod"), value: session.pod_name, copy: true });
+  }
+  if (session.pod_phase) {
+    rows.push({ label: t("task:status"), value: session.pod_phase });
+  }
+  if (session.container_state) {
+    rows.push({ label: t("task:container"), value: session.container_state });
+  }
+  rows.push({ label: t("task:restarts"), value: String(session.restarts) });
+  if (session.workspace_kind) {
+    rows.push({ label: t("task:workspaceMode"), value: session.workspace_kind });
+  }
+  if (session.created_at) {
+    rows.push({ label: t("task:created"), value: formatDateTime(session.created_at) });
+  }
+  if (session.failure_reason) {
+    rows.push({ label: t("task:error"), value: session.failure_reason });
+  }
 }
 
 function addSshRows(rows: FieldRow[], ssh: SSHLiveStatus) {
@@ -274,6 +349,8 @@ function formatExecutorType(type: string): string {
       return t("task:executorTypeRemoteDocker");
     case "ssh":
       return "SSH";
+    case "k8s":
+      return t("executors:typeKubernetes");
     default:
       return type || t("task:executorTypeUnknown");
   }

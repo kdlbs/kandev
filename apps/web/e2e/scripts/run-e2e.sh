@@ -48,6 +48,7 @@ log() { printf '\033[36m[e2e]\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[31m[e2e] %s\033[0m\n' "$*" >&2; exit 1; }
 
 docker_up() { command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }
+is_container_project() { [[ "$PROJECT" == containers || "$PROJECT" == kubernetes-compat ]]; }
 
 resolve_runtime_image() {
   if [[ -n "$RUNTIME_IMAGE" ]]; then echo "$RUNTIME_IMAGE"; return; fi
@@ -106,8 +107,8 @@ build_fe() {
 build_backend_host() {
   log "building backend (host)"
   local targets=(build)
-  # The Playwright project is `containers`; `KANDEV_E2E_DOCKER` remains only an env alias.
-  [[ "$PROJECT" == containers ]] && targets+=(build-agentctl-linux build-mock-agent-linux)
+  # Both real-runtime projects need the Linux helpers copied into the Kind image.
+  is_container_project && targets+=(build-agentctl-linux build-mock-agent-linux)
   make -C "$BACKEND_DIR" "${targets[@]}" >/dev/null || die "backend build failed"
 }
 
@@ -195,7 +196,7 @@ log "mode=$MODE  shards=$SHARDS  project=$PROJECT  strict=$STRICT"
 STRICT_ENV=()
 [[ "$STRICT" == 1 ]] && STRICT_ENV=(KANDEV_E2E_WS_ASSERT=1)
 CONTAINER_ENV=()
-[[ "$PROJECT" == containers ]] && CONTAINER_ENV=(KANDEV_E2E_CONTAINERS=1)
+is_container_project && CONTAINER_ENV=(KANDEV_E2E_CONTAINERS=1)
 
 # ---------------------------------------------------------------------------
 # HOST mode
@@ -238,7 +239,7 @@ run_docker() {
   local strict_flag=()
   [[ "$STRICT" == 1 ]] && strict_flag=(-e KANDEV_E2E_WS_ASSERT=1)
   local container_flag=()
-  [[ "$PROJECT" == containers ]] && container_flag=(-e KANDEV_E2E_CONTAINERS=1)
+  is_container_project && container_flag=(-e KANDEV_E2E_CONTAINERS=1)
   local capture_flag=()
   [[ -n "${CAPTURE_PR_ASSETS:-}" ]] && capture_flag=(-e CAPTURE_PR_ASSETS)
   local pw="git config --global --add safe.directory /work 2>/dev/null; cd /work/apps/web && pnpm exec playwright test --config e2e/playwright.config.ts --project=\"$PROJECT\""

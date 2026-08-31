@@ -139,7 +139,8 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	}
 	execution.beginStartupAttempt()
 
-	if execution.agentctl == nil {
+	client := execution.GetAgentCtlClient()
+	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
 
@@ -153,7 +154,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	}
 
 	// Wait for agentctl to be ready
-	if err := execution.agentctl.WaitForReady(operationCtx, 60*time.Second); err != nil {
+	if err := client.WaitForReady(operationCtx, 60*time.Second); err != nil {
 		m.updateExecutionError(executionID, "agentctl not ready: "+err.Error())
 		return fmt.Errorf("agentctl not ready: %w", err)
 	}
@@ -200,7 +201,11 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 }
 
 func (m *Manager) preflightRemoteContributionPushes(ctx context.Context, execution *AgentExecution) error {
-	if execution == nil || execution.agentctl == nil {
+	if execution == nil {
+		return nil
+	}
+	client := execution.GetAgentCtlClient()
+	if client == nil {
 		return nil
 	}
 	bindings, err := remoteContributionsFromMetadata(execution.MetadataSnapshot())
@@ -216,7 +221,7 @@ func (m *Manager) preflightRemoteContributionPushes(ctx context.Context, executi
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		result, err := execution.agentctl.GitPushPreflight(ctx, key)
+		result, err := client.GitPushPreflight(ctx, key)
 		if err != nil {
 			return fmt.Errorf("repository %q: %w", key, err)
 		}
@@ -424,11 +429,16 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 	ctx, cancel := appctx.Detached(context.Background(), m.stopCh, 60*time.Second)
 	defer cancel()
 
+	client := execution.GetAgentCtlClient()
+	if client == nil {
+		m.updateExecutionError(execution.ID, "agentctl client is unavailable")
+		return
+	}
 	m.logger.Debug("waiting for agentctl to be ready",
 		zap.String("execution_id", execution.ID),
-		zap.String("url", execution.agentctl.BaseURL()))
+		zap.String("url", client.BaseURL()))
 
-	if err := execution.agentctl.WaitForReady(ctx, 60*time.Second); err != nil {
+	if err := client.WaitForReady(ctx, 60*time.Second); err != nil {
 		m.logger.Error("agentctl not ready",
 			zap.String("execution_id", execution.ID),
 			zap.Duration("duration", time.Since(opStart)),

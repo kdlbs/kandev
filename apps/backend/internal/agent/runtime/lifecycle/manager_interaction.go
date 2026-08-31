@@ -165,7 +165,8 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
 
-	if execution.agentctl == nil {
+	client := execution.GetAgentCtlClient()
+	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
 
@@ -174,7 +175,7 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 		zap.String("task_id", execution.TaskID),
 		zap.String("session_id", execution.SessionID))
 
-	cancelErr := execution.agentctl.Cancel(ctx)
+	cancelErr := client.Cancel(ctx)
 	streamDisconnected := errors.Is(cancelErr, agentctlclient.ErrAgentStreamNotConnected)
 	if cancelErr != nil &&
 		!errors.Is(cancelErr, agentctlclient.ErrTurnCancelNotAcknowledged) &&
@@ -327,13 +328,14 @@ func (m *Manager) SetSessionMode(ctx context.Context, executionID, _ string, mod
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
-	if execution.agentctl == nil {
+	client := execution.GetAgentCtlClient()
+	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
 	if !execution.isSessionInitialized() || execution.ACPSessionID == "" {
 		return fmt.Errorf("execution %q ACP session is not ready", executionID)
 	}
-	return execution.agentctl.SetMode(ctx, execution.ACPSessionID, modeID)
+	return client.SetMode(ctx, execution.ACPSessionID, modeID)
 }
 
 // SetSessionModeBySessionID changes the session mode for a running agent by session ID.
@@ -365,10 +367,11 @@ func (m *Manager) SetSessionModel(ctx context.Context, executionID, modelID stri
 		return m.RestartAgentProcess(ctx, executionID)
 	}
 
-	if execution.agentctl == nil {
+	client := execution.GetAgentCtlClient()
+	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
-	return execution.agentctl.SetModel(ctx, modelID)
+	return client.SetModel(ctx, modelID)
 }
 
 // SetSessionModelBySessionID changes the session model for a running agent by session ID.
@@ -386,13 +389,14 @@ func (m *Manager) SetSessionConfigOption(ctx context.Context, executionID, confi
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
-	if execution.agentctl == nil {
+	client := execution.GetAgentCtlClient()
+	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
 	if !execution.isSessionInitialized() || execution.ACPSessionID == "" {
 		return fmt.Errorf("execution %q ACP session is not ready", executionID)
 	}
-	return execution.agentctl.SetConfigOption(ctx, configID, value)
+	return client.SetConfigOption(ctx, configID, value)
 }
 
 // SetSessionConfigOptionBySessionID changes an ACP session config option by task session ID.
@@ -410,10 +414,11 @@ func (m *Manager) AuthenticateBySessionID(ctx context.Context, sessionID, method
 	if !exists {
 		return fmt.Errorf("no agent running for session %q", sessionID)
 	}
-	if execution.agentctl == nil {
+	client := execution.GetAgentCtlClient()
+	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
-	return execution.agentctl.Authenticate(ctx, methodID)
+	return client.Authenticate(ctx, methodID)
 }
 
 // reapplySessionModeAfterReset re-applies the active session permission mode
@@ -448,10 +453,11 @@ func (m *Manager) applySessionModeAfterReset(
 	execution *AgentExecution,
 	newSessionID, mode string,
 ) error {
-	if execution.agentctl == nil || mode == "" {
+	client := execution.GetAgentCtlClient()
+	if client == nil || mode == "" {
 		return nil
 	}
-	if err := execution.agentctl.SetMode(ctx, newSessionID, mode); err != nil {
+	if err := client.SetMode(ctx, newSessionID, mode); err != nil {
 		return fmt.Errorf("failed to restore session mode %q: %w", mode, err)
 	}
 	availableModes := []streams.SessionModeInfo(nil)
@@ -478,13 +484,14 @@ func (m *Manager) reapplySessionModelAfterReset(
 	execution *AgentExecution,
 	newSessionID, modelID string,
 ) error {
-	if execution.agentctl == nil || modelID == "" {
+	client := execution.GetAgentCtlClient()
+	if client == nil || modelID == "" {
 		return nil
 	}
 	policy := m.resolveStartModelPolicy(ctx, execution.AgentProfileID)
 	policy.Model = modelID
 	decision, err := applyStartModelPolicy(
-		ctx, m.logger, execution.agentctl, execution.GetModelState(), policy,
+		ctx, m.logger, client, execution.GetModelState(), policy,
 	)
 	if err != nil {
 		m.logger.Warn("failed to re-apply session model after context reset",
@@ -509,10 +516,14 @@ func (m *Manager) reapplySessionModelAfterReset(
 }
 
 func cacheFreshSessionModelState(execution *AgentExecution) bool {
-	if execution == nil || execution.agentctl == nil {
+	if execution == nil {
 		return false
 	}
-	state := execution.agentctl.GetLastSessionModelState()
+	client := execution.GetAgentCtlClient()
+	if client == nil {
+		return false
+	}
+	state := client.GetLastSessionModelState()
 	if state == nil {
 		return false
 	}
@@ -696,7 +707,7 @@ func (m *Manager) restoreSessionRuntimeConfig(
 	sessionID string,
 	config models.SessionRuntimeConfig,
 ) error {
-	if execution == nil || execution.agentctl == nil {
+	if execution == nil || execution.GetAgentCtlClient() == nil {
 		return fmt.Errorf("cannot restore session runtime configuration without an agentctl client")
 	}
 	if err := m.reapplySessionModelAfterReset(ctx, execution, sessionID, config.Model); err != nil {
@@ -713,7 +724,7 @@ func (m *Manager) restoreSessionRuntimeConfig(
 	sort.Strings(optionIDs)
 	for _, id := range optionIDs {
 		value := options[id]
-		if err := execution.agentctl.SetConfigOption(ctx, id, value); err != nil {
+		if err := execution.GetAgentCtlClient().SetConfigOption(ctx, id, value); err != nil {
 			return fmt.Errorf("restore session runtime option %q: %w", id, err)
 		}
 	}
@@ -734,7 +745,8 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		return m.RestartAgentProcess(ctx, executionID)
 	}
 
-	if execution.agentctl == nil {
+	client := execution.GetAgentCtlClient()
+	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
 
@@ -766,7 +778,7 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 	}
 
 	// Try session-level reset (only ACP adapters support this)
-	newSessionID, err := execution.agentctl.ResetSession(ctx, execution.WorkspacePath, mcpServers)
+	newSessionID, err := client.ResetSession(ctx, execution.WorkspacePath, mcpServers)
 	if err != nil {
 		m.logger.Info("session reset not supported, falling back to process restart",
 			zap.String("execution_id", executionID), zap.Error(err))
@@ -873,8 +885,19 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, reason string, force bool) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
+		handled, err := m.stopPersistedKubernetesExecution(ctx, executionID, reason, force)
+		if handled {
+			return err
+		}
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	execution.remoteInstanceLifecycleMu.Lock()
+	defer execution.remoteInstanceLifecycleMu.Unlock()
+	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
+		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	execution.agentctlLifecycleMu.Lock()
+	defer execution.agentctlLifecycleMu.Unlock()
 	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStopping)
 	if err != nil {
 		return err
@@ -888,30 +911,18 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		zap.Bool("force", force),
 		zap.Stringer("runtime", execution.RuntimeName))
 
-	// Try to gracefully stop via agentctl first, then always close connections
-	agentStopFailed := false
-	if execution.agentctl != nil {
-		if !force {
-			if err := execution.agentctl.Stop(ctx); err != nil {
-				agentStopFailed = true
-				// During shutdown the instance may already be stopping through
-				// another lifecycle path, so a failed HTTP call is expected.
-				if m.IsShuttingDown() {
-					m.logger.Debug("failed to stop agent via agentctl",
-						zap.String("execution_id", executionID),
-						zap.Error(err))
-				} else {
-					m.logger.Warn("failed to stop agent via agentctl",
-						zap.String("execution_id", executionID),
-						zap.Error(err))
-				}
-			}
-		}
-		execution.agentctl.Close()
-	}
+	// Try to gracefully stop via agentctl first, then always close connections.
+	agentStopFailed := m.stopExecutionAgentctl(ctx, executionID, execution, force)
 
 	// Stop the agent execution via the runtime that created it
-	_ = m.stopAgentViaBackend(ctx, executionID, execution, reason, force, agentStopFailed)
+	if err := m.stopAgentViaBackend(ctx, executionID, execution, reason, force, agentStopFailed); err != nil {
+		return fmt.Errorf("stop runtime for execution %s: %w", executionID, err)
+	}
+	if execution.RuntimeName == executor.NameKubernetes && (force || shouldRunExecutorCleanup(reason)) {
+		if err := m.deleteKubernetesRuntimeSecrets(ctx, execution.MetadataSnapshot()); err != nil {
+			return fmt.Errorf("delete runtime secrets for execution %s: %w", executionID, err)
+		}
+	}
 
 	// Update execution status and remove from tracking
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
@@ -934,6 +945,35 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
 
 	return nil
+}
+
+func (m *Manager) stopExecutionAgentctl(
+	ctx context.Context,
+	executionID string,
+	execution *AgentExecution,
+	force bool,
+) bool {
+	client := execution.GetAgentCtlClient()
+	if client == nil {
+		return false
+	}
+	defer client.Close()
+	if force {
+		return false
+	}
+	if err := client.Stop(ctx); err != nil {
+		// During shutdown the instance may already be stopping through another
+		// lifecycle path, so a failed HTTP call is expected.
+		if m.IsShuttingDown() {
+			m.logger.Debug("failed to stop agent via agentctl",
+				zap.String("execution_id", executionID), zap.Error(err))
+		} else {
+			m.logger.Warn("failed to stop agent via agentctl",
+				zap.String("execution_id", executionID), zap.Error(err))
+		}
+		return true
+	}
+	return false
 }
 
 // StopBySessionID stops the agent for a specific session
@@ -971,7 +1011,8 @@ func (m *Manager) restartAgentProcess(
 		return m.restartPassthroughProcess(ctx, execution)
 	}
 
-	if execution.agentctl == nil {
+	client := execution.GetAgentCtlClient()
+	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
 
@@ -985,8 +1026,8 @@ func (m *Manager) restartAgentProcess(
 	// barrier that flips the client into a closed state and would block
 	// every StreamUpdates/StreamWorkspace call that this same restart path
 	// makes a few lines below.
-	execution.agentctl.CloseUpdatesStream()
-	execution.agentctl.CloseWorkspaceStream()
+	client.CloseUpdatesStream()
+	client.CloseWorkspaceStream()
 
 	// 2. Stop the agent subprocess via agentctl (keeps agentctl server alive)
 	m.stopAgentProcessForRestart(ctx, execution)
@@ -995,7 +1036,7 @@ func (m *Manager) restartAgentProcess(
 	m.resetAgentRestartState(executionID, preparation.commands)
 
 	// 4. Wait for agentctl to be ready (it should still be running)
-	if err := execution.agentctl.WaitForReady(ctx, 30*time.Second); err != nil {
+	if err := client.WaitForReady(ctx, 30*time.Second); err != nil {
 		m.updateExecutionError(executionID, "agentctl not ready after restart: "+err.Error())
 		return fmt.Errorf("agentctl not ready after restart: %w", err)
 	}
@@ -1008,7 +1049,7 @@ func (m *Manager) restartAgentProcess(
 	}
 
 	// 6. Wait for agent process to initialize
-	if err := execution.agentctl.WaitForReady(ctx, 10*time.Second); err != nil {
+	if err := client.WaitForReady(ctx, 10*time.Second); err != nil {
 		m.logger.Warn("agent process slow to initialize after restart, continuing",
 			zap.String("execution_id", executionID),
 			zap.Error(err))
@@ -1048,7 +1089,11 @@ func (m *Manager) restartAgentProcess(
 }
 
 func (m *Manager) stopAgentProcessForRestart(ctx context.Context, execution *AgentExecution) {
-	if err := execution.agentctl.Stop(ctx); err != nil {
+	client := execution.GetAgentCtlClient()
+	if client == nil {
+		return
+	}
+	if err := client.Stop(ctx); err != nil {
 		m.logger.Warn("failed to stop agent subprocess during restart",
 			zap.String("execution_id", execution.ID),
 			zap.Error(err))
@@ -1147,7 +1192,7 @@ func (m *Manager) initializeACPSessionForRestart(
 	// Initialize ACP session (always session/new since ACPSessionID was cleared)
 	result, err := m.sessionManager.InitializeSession(
 		ctx,
-		execution.agentctl,
+		execution.GetAgentCtlClient(),
 		agentConfig,
 		"", // empty — force session/new
 		execution.WorkspacePath,
@@ -1376,11 +1421,12 @@ func (m *Manager) ProbeAgentRunningForSession(ctx context.Context, sessionID str
 	}
 
 	// Probe agentctl status to verify the agent process is running
-	if execution.agentctl == nil {
+	client := execution.GetAgentCtlClient()
+	if client == nil {
 		return false, fmt.Errorf("agentctl client is unavailable")
 	}
 
-	status, err := execution.agentctl.GetStatus(ctx)
+	status, err := client.GetStatus(ctx)
 	if err != nil {
 		m.logger.Debug("failed to get agentctl status",
 			zap.String("session_id", sessionID),
@@ -1411,14 +1457,15 @@ func (m *Manager) IsAgentReadyForPrompt(ctx context.Context, sessionID string) b
 		return m.IsAgentRunningForSession(ctx, sessionID)
 	}
 
-	if execution.Status != v1.AgentStatusReady || execution.agentctl == nil {
+	client := execution.GetAgentCtlClient()
+	if execution.Status != v1.AgentStatusReady || client == nil {
 		return false
 	}
 	if !execution.isSessionInitialized() || execution.ACPSessionID == "" {
 		return false
 	}
 
-	return execution.agentctl.HasAgentStream()
+	return client.HasAgentStream()
 }
 
 func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string) error {
@@ -1426,7 +1473,8 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	if !exists {
 		return fmt.Errorf("session %q has no execution: %w", sessionID, ErrExecutionNotFound)
 	}
-	if execution.PassthroughProcessID != "" || execution.IsPassthrough || execution.agentctl == nil {
+	client := execution.GetAgentCtlClient()
+	if execution.PassthroughProcessID != "" || execution.IsPassthrough || client == nil {
 		return nil
 	}
 	// InitializeAndPrompt owns the first updates stream. Starting a recovery
@@ -1435,7 +1483,7 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	if !execution.isSessionInitialized() || execution.ACPSessionID == "" {
 		return nil
 	}
-	if execution.agentctl.HasAgentStream() {
+	if client.HasAgentStream() {
 		return nil
 	}
 	if m.streamManager == nil {
@@ -1451,7 +1499,7 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	if !execution.agentctl.HasAgentStream() {
+	if !client.HasAgentStream() {
 		return fmt.Errorf("agent stream not connected")
 	}
 	if execution.Status == v1.AgentStatusFailed && execution.isSessionInitialized() && execution.ACPSessionID != "" {
@@ -1461,7 +1509,11 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 }
 
 func (m *Manager) restoreRecoveredFailedExecution(ctx context.Context, execution *AgentExecution) error {
-	status, err := execution.agentctl.GetStatus(ctx)
+	client := execution.GetAgentCtlClient()
+	if client == nil {
+		return fmt.Errorf("agentctl client is unavailable")
+	}
+	status, err := client.GetStatus(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to verify agent status after stream recovery: %w", err)
 	}
@@ -1890,7 +1942,8 @@ func (m *Manager) RespondToPermission(executionID, pendingID, optionID string, c
 		return fmt.Errorf("agent execution not found: %s", executionID)
 	}
 
-	if execution.agentctl == nil {
+	client := execution.GetAgentCtlClient()
+	if client == nil {
 		return fmt.Errorf("agent execution has no agentctl client: %s", executionID)
 	}
 
@@ -1903,7 +1956,7 @@ func (m *Manager) RespondToPermission(executionID, pendingID, optionID string, c
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	return execution.agentctl.RespondToPermission(ctx, pendingID, optionID, cancelled)
+	return client.RespondToPermission(ctx, pendingID, optionID, cancelled)
 }
 
 // RespondToPermissionBySessionID sends a response to a permission request using session ID.
@@ -1936,6 +1989,7 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 	runtimeInstance := &ExecutorInstance{
 		InstanceID:           execution.ID,
 		TaskID:               execution.TaskID,
+		SessionID:            execution.SessionID,
 		ContainerID:          execution.ContainerID,
 		StandaloneInstanceID: execution.standaloneInstanceID,
 		StandalonePort:       execution.standalonePort,

@@ -16,8 +16,13 @@ func (m *Manager) ExportACPDebug(
 		return nil, fmt.Errorf("task session ID is required")
 	}
 	execution, ok := m.GetExecutionBySessionID(taskSessionID)
-	if !ok || execution == nil || execution.agentctl == nil || execution.ACPSessionID == "" {
+	if !ok || execution == nil || execution.ACPSessionID == "" {
 		return nil, fmt.Errorf("ACP executor is unavailable")
 	}
-	return execution.agentctl.ExportACPDebug(ctx, execution.ACPSessionID, maxBytes)
+	client, release := execution.acquireAgentctlClient()
+	defer release()
+	if client == nil {
+		return nil, fmt.Errorf("ACP executor is unavailable")
+	}
+	return client.ExportACPDebug(ctx, execution.ACPSessionID, maxBytes)
 }

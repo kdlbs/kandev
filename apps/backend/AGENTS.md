@@ -23,6 +23,7 @@ apps/backend/
 │   │   ├── dto/          # Agent data transfer objects
 │   │   ├── executor/     # Executor types, checks, and service
 │   │   ├── handlers/     # Agent event handlers
+│   │   ├── kubernetes/   # Kubernetes config, Pod/PVC composition, admission, and client streaming
 │   │   ├── registry/     # Agent type registry and defaults
 │   │   ├── settings/     # Agent settings
 │   │   ├── mcpconfig/    # MCP server configuration
@@ -69,6 +70,7 @@ apps/backend/
 │   │   └── secretadapter/ # Upsert-style adapter over secrets.SecretStore
 │   ├── i18n/             # Localization for backend-rendered browser/share artifacts
 │   ├── jira/             # Jira/Atlassian Cloud integration (config, REST client, poller)
+│   ├── kubernetes/       # Kubernetes diagnostics and exact recorded-session status API
 │   ├── linear/           # Linear integration (config, GraphQL client, poller)
 │   ├── lsp/              # LSP server
 │   ├── mcp/              # MCP protocol support
@@ -101,15 +103,9 @@ apps/backend/
 - Handles event-driven state transitions via workflow engine
 - Located in `internal/orchestrator/`
 
-**Cancellation progress projection:** `orchestrator.Service.CancellationPending(sessionID)` is a
-runtime-only, session-scoped view of accepted cancellation work. Serialization that carries the
-boolean with ordering identity uses the atomic `CancellationPendingSnapshot(sessionID)` provider,
-whose process-local revision increments on first-begin and last-end transitions. The task DTO
-package exposes both the compatibility boolean provider and snapshot seam; boot state, task-session
-HTTP/WS lists and detail responses, and the session-scoped WebSocket notification must project
-explicit `true`/`false` values plus the revision. Keep count, revision, and publication queue updates
-in one critical section, drain event-bus sends outside it, and never persist this transient marker or
-turn it into a coarse session lifecycle state.
+**Cancellation progress projection:** `orchestrator.Service.CancellationPending(sessionID)` is a runtime-only, session-scoped view of accepted cancellation work. Serialization that carries the boolean with ordering identity uses the atomic `CancellationPendingSnapshot(sessionID)` provider, whose process-local revision increments on first-begin and last-end transitions.
+The task DTO package exposes both the compatibility boolean provider and snapshot seam; boot state, task-session HTTP/WS lists and detail responses, and the session-scoped WebSocket notification must project explicit `true`/`false` values plus the revision.
+Keep count, revision, and publication queue updates in one critical section, drain event-bus sends outside it, and never persist this transient marker or turn it into a coarse session lifecycle state.
 
 **Watcher Dispatch Coordinator** (`internal/orchestrator/watcher_dispatch.go`) is the single pipeline that turns a freshly-observed external issue (Linear, Jira, future) into a Kandev task. Bus subscribers for each integration forward the event to `WatcherDispatchCoordinator.Dispatch` with a per-integration `WatcherSource` implementation (`source_linear.go`, `source_jira.go`). Source methods carry the integration-specific bits (reserve dedup, build task request, attach task ID, release, auto-start params); the coordinator owns the cross-cutting pipeline (create task, decide auto-start, error/release handling). Add a new watcher = implement `WatcherSource` + register a one-line bus subscriber. Do NOT add another `createXIssueTask` mirror.
 
@@ -140,7 +136,7 @@ replace state verification, installation association, or HMAC verification.
 
 **Lifecycle Manager** (`internal/agent/runtime/lifecycle/`) manages agent instances under the runtime:
 - `Manager` (`manager.go`, `manager_*.go`) - central coordinator for agent lifecycle
-- `ExecutorBackend` interface (`executor_backend.go`) - abstracts execution environment (Docker, Standalone, Sprites, Remote Docker)
+- `ExecutorBackend` interface (`executor_backend.go`) - abstracts execution environment (Docker, Standalone, Sprites, SSH, Kubernetes, Remote Docker)
 - `ExecutionStore` (`execution_store.go`) - thread-safe in-memory execution tracking
 - `session.go` - ACP session initialization and resume
 - `streams.go` - WebSocket stream connections to agentctl
@@ -164,7 +160,11 @@ Standalone agentctl is launched in its own process group so terminal Ctrl+C is h
 - `local_pc` - Standalone process on host
 - `local_docker` - Docker container on host
 - `sprites` - Sprites cloud environment
-- `remote_docker`, `remote_vps`, `k8s` - Planned
+- `ssh` - Remote SSH host
+- `k8s` - Namespaced Kubernetes Pod with optional PVC workspace
+- `remote_docker`, `remote_vps` - Planned
+
+**Kubernetes lifecycle:** `executors_running` is the authoritative resource inventory. Persist the exact Pod/PVC names, UIDs, full `kandev.ai/*` identity, workload snapshot, and internal runtime-secret references before reporting a launch as durable. Ordinary stop and backend shutdown preserve resources; terminal cleanup deletes the Pod and only a Kandev-created PVC after exact identity checks and confirmed absence. Reconnect uses the current executor connection config but the recorded workload/resource snapshot, and any ambiguity fails closed. Keep agentctl reachable only through a process-local loopback port-forward; never add a Service or place resolved credentials in a Pod spec.
 
 **Remote SSH executor platforms:** Treat supported remote OS/arch values as an end-to-end contract. Platform probe/normalization, lifecycle support checks, agentctl helper resolution, platform default shell, SSH readiness endpoints, frontend response types, and tests must stay aligned. Preserve raw unsupported platform details in user-facing errors, but use normalized values for supported-platform matching. Keep shell defaults platform-aware: Darwin defaults to `zsh`, Linux defaults to `bash`, unless an explicit shell is saved.
 

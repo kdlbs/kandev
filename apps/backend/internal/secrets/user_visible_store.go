@@ -8,12 +8,17 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-const internalGitHubSecretPrefix = "github:"
+const (
+	internalGitHubSecretPrefix  = "github:"
+	internalRuntimeSecretPrefix = "kandev-runtime:"
+)
 
 // IsInternalID reports whether a secret is owned by backend infrastructure
 // and must never be listed, revealed, or selected as an agent credential.
 func IsInternalID(id string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(id)), internalGitHubSecretPrefix)
+	normalized := strings.ToLower(strings.TrimSpace(id))
+	return strings.HasPrefix(normalized, internalGitHubSecretPrefix) ||
+		strings.HasPrefix(normalized, internalRuntimeSecretPrefix)
 }
 
 // UserVisibleStore restricts a SecretStore to user-managed credentials. The

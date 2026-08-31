@@ -21,7 +21,8 @@ export function getWorkspaceSourceCapabilities(
     executorType === "local_docker" ||
     executorType === "remote_docker" ||
     executorType === "ssh" ||
-    executorType === "sprites";
+    executorType === "sprites" ||
+    executorType === "k8s";
   return {
     canAddFolders: usesLiveCheckout || executorType === "worktree",
     canChooseCheckoutBranch: !usesLiveCheckout,

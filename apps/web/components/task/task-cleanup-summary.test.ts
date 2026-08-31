@@ -45,6 +45,12 @@ describe("getCleanupSummary (single task)", () => {
     expect(lines[0]).toMatch(/best-effort/i);
   });
 
+  it("describes exact Kubernetes Pod and workspace cleanup", () => {
+    const { lines } = getCleanupSummary("k8s");
+    expect(lines[0]).toMatch(/Kubernetes Pod/i);
+    expect(lines[0]).toMatch(/existing claims are kept/i);
+  });
+
   it("always appends the agent-session-stop line", () => {
     expect(getCleanupSummary("local").lines).toContain(AGENT_STOP_LINE);
     expect(getCleanupSummary("worktree").lines).toContain(AGENT_STOP_LINE);
@@ -98,6 +104,11 @@ describe("getBulkCleanupSummary", () => {
     expect(lines.some((l) => /2 remote task directories/.test(l) && /best-effort/.test(l))).toBe(
       true,
     );
+  });
+
+  it("groups Kubernetes tasks with exact resource cleanup wording", () => {
+    const { lines } = getBulkCleanupSummary(["k8s", "k8s"]);
+    expect(lines.some((line) => /2 Kubernetes Pods/.test(line))).toBe(true);
   });
 
   it("emits worktree/container/sandbox lines before the local-reassurance line", () => {

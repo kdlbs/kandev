@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agentruntime"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 
@@ -77,9 +78,10 @@ type pendingTaskTitleSetter interface {
 type taskStopTarget struct {
 	sessionID   string
 	executionID string
+	runtime     agentruntime.Runtime
 	// terminal indicates the session is already in a terminal state (CANCELLED,
-	// COMPLETED, FAILED, IDLE). Stop failures for terminal sessions are expected
-	// and must not block environment cleanup — the agent is already gone.
+	// COMPLETED, FAILED, IDLE). Most local stop failures are expected there, but
+	// Kubernetes exact cleanup failures must keep their authoritative row.
 	terminal bool
 }
 
@@ -2479,6 +2481,7 @@ func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSes
 			target := taskStopTarget{
 				sessionID:   running.SessionID,
 				executionID: strings.TrimSpace(running.AgentExecutionID),
+				runtime:     running.Runtime,
 				terminal:    isCleanableSessionState(sessionStates[running.SessionID]),
 			}
 			targets = append(targets, target)
@@ -2546,6 +2549,7 @@ func taskStopTargetsFromRunningRows(runningRows []*models.ExecutorRunning) []tas
 		targets = append(targets, taskStopTarget{
 			sessionID:   strings.TrimSpace(running.SessionID),
 			executionID: strings.TrimSpace(running.AgentExecutionID),
+			runtime:     running.Runtime,
 		})
 	}
 	return targets
@@ -2569,6 +2573,9 @@ func mergeTaskStopTargets(live, snapshot []taskStopTarget) []taskStopTarget {
 		key := target.sessionID + "\x00" + target.executionID
 		if index, exists := seen[key]; exists {
 			targets[index].terminal = targets[index].terminal || target.terminal
+			if targets[index].runtime == "" {
+				targets[index].runtime = target.runtime
+			}
 			return
 		}
 		seen[key] = len(targets)
@@ -2639,6 +2646,15 @@ func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, sto
 		}
 		if target.executionID != "" {
 			if err := s.executionStopper.StopExecution(ctx, target.executionID, stopReason, true); err != nil {
+				if target.runtime == agentruntime.RuntimeKubernetes {
+					outcome.failed[target.sessionID] = struct{}{}
+					s.logger.Warn(stopFailMsg,
+						zap.String("task_id", taskID),
+						zap.String("session_id", target.sessionID),
+						zap.String("execution_id", target.executionID),
+						zap.Error(err))
+					continue
+				}
 				if runtimeStopAlreadyComplete(err) {
 					continue
 				}
@@ -2659,6 +2675,14 @@ func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, sto
 			continue
 		}
 		if err := s.executionStopper.StopSession(ctx, target.sessionID, stopReason, true); err != nil {
+			if target.runtime == agentruntime.RuntimeKubernetes {
+				outcome.failed[target.sessionID] = struct{}{}
+				s.logger.Warn(stopFailMsg,
+					zap.String("task_id", taskID),
+					zap.String("session_id", target.sessionID),
+					zap.Error(err))
+				continue
+			}
 			if target.terminal {
 				s.logger.Debug("stop failed for terminal session (expected), proceeding with cleanup",
 					zap.String("task_id", taskID),

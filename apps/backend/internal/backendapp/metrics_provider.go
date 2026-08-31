@@ -43,10 +43,5 @@ func (p lifecycleMetricProvider) MetricExecutions() []metrics.ExecutionSource {
 }
 
 func shouldCollectExecutionMetrics(runtime agentruntime.Runtime) bool {
-	switch runtime {
-	case agentruntime.RuntimeDocker, agentruntime.RuntimeRemoteDocker, agentruntime.RuntimeSprites, agentruntime.RuntimeSSH:
-		return true
-	default:
-		return false
-	}
+	return runtime.IsContainerized() || runtime == agentruntime.RuntimeSSH
 }

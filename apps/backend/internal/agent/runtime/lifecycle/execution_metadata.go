@@ -93,3 +93,29 @@ func (e *AgentExecution) MetadataSnapshot() map[string]interface{} {
 	}
 	return snapshot
 }
+
+func (e *AgentExecution) replaceMetadataSnapshot(metadata map[string]interface{}) {
+	if e == nil {
+		return
+	}
+	e.metadataMu.Lock()
+	defer e.metadataMu.Unlock()
+	e.metadata = make(map[string]interface{}, len(metadata))
+	for key, value := range metadata {
+		e.metadata[key] = value
+	}
+}
+
+func (e *AgentExecution) mergeMetadata(metadata map[string]interface{}) {
+	if e == nil || len(metadata) == 0 {
+		return
+	}
+	e.metadataMu.Lock()
+	defer e.metadataMu.Unlock()
+	if e.metadata == nil {
+		e.metadata = make(map[string]interface{}, len(metadata))
+	}
+	for key, value := range metadata {
+		e.metadata[key] = value
+	}
+}

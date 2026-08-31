@@ -264,7 +264,10 @@ type mockRepository struct {
 
 	// Optional hook to inject behavior into GetTaskSession (e.g. simulate a
 	// transient DB error); if nil, the default map lookup is used.
+	getTaskFunc                        func(ctx context.Context, id string) (*models.Task, error)
 	getTaskSessionFunc                 func(ctx context.Context, id string) (*models.TaskSession, error)
+	getExecutorRunningFunc             func(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+	hasExecutorRunningFunc             func(ctx context.Context, sessionID string) (bool, error)
 	getTaskEnvironmentByTaskIDFunc     func(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	createTaskSessionFunc              func(ctx context.Context, session *models.TaskSession) error
 	updateTaskSessionStateFunc         func(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
@@ -667,6 +670,9 @@ func (m *mockRepository) ListWorkspaces(ctx context.Context) ([]*models.Workspac
 // Task operations
 func (m *mockRepository) CreateTask(ctx context.Context, task *models.Task) error { return nil }
 func (m *mockRepository) GetTask(ctx context.Context, id string) (*models.Task, error) {
+	if m.getTaskFunc != nil {
+		return m.getTaskFunc(ctx, id)
+	}
 	if task, ok := m.tasks[id]; ok {
 		return task, nil
 	}
@@ -1032,6 +1038,9 @@ func (m *mockRepository) ListExecutorsRunning(ctx context.Context) ([]*models.Ex
 	return nil, nil
 }
 func (m *mockRepository) GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error) {
+	if m.getExecutorRunningFunc != nil {
+		return m.getExecutorRunningFunc(ctx, sessionID)
+	}
 	if running, ok := m.executorsRunning[sessionID]; ok {
 		return running, nil
 	}
@@ -1041,6 +1050,9 @@ func (m *mockRepository) DeleteExecutorRunningBySessionID(ctx context.Context, s
 	return nil
 }
 func (m *mockRepository) HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error) {
+	if m.hasExecutorRunningFunc != nil {
+		return m.hasExecutorRunningFunc(ctx, sessionID)
+	}
 	if m.executorsRunning != nil {
 		_, ok := m.executorsRunning[sessionID]
 		return ok, nil

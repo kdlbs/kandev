@@ -3,6 +3,10 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -10,6 +14,9 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // statusProviderExecutor is an ExecutorBackend that also implements
@@ -20,6 +27,101 @@ type statusProviderExecutor struct {
 	status   *RemoteStatus
 	err      error
 	observed []*ExecutorInstance
+}
+
+type refreshingStatusExecutor struct {
+	statusProviderExecutor
+	refresh        *RemoteInstanceRefresh
+	refreshEntered chan struct{}
+	releaseRefresh chan struct{}
+	once           sync.Once
+	mu             sync.Mutex
+	refreshCalls   int
+	committed      bool
+	stopEntered    chan struct{}
+	stopOnce       sync.Once
+	onStop         func()
+}
+
+func (e *refreshingStatusExecutor) RefreshRemoteInstance(
+	_ context.Context,
+	_ *ExecutorInstance,
+) (*RemoteInstanceRefresh, error) {
+	e.mu.Lock()
+	if e.committed {
+		e.mu.Unlock()
+		return nil, nil
+	}
+	e.refreshCalls++
+	e.mu.Unlock()
+	e.once.Do(func() { close(e.refreshEntered) })
+	<-e.releaseRefresh
+	return e.refresh, nil
+}
+
+func (e *refreshingStatusExecutor) GetRemoteStatus(_ context.Context, instance *ExecutorInstance) (*RemoteStatus, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.observed = append(e.observed, instance)
+	return e.status, e.err
+}
+
+func (e *refreshingStatusExecutor) StopInstance(context.Context, *ExecutorInstance, bool) error {
+	if e.stopEntered != nil {
+		e.stopOnce.Do(func() { close(e.stopEntered) })
+	}
+	if e.onStop != nil {
+		e.onStop()
+	}
+	return nil
+}
+
+type synchronizedRunningWriter struct {
+	mu      sync.Mutex
+	running *models.ExecutorRunning
+}
+
+func (w *synchronizedRunningWriter) GetExecutorRunningBySessionID(
+	context.Context, string,
+) (*models.ExecutorRunning, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.running == nil {
+		return nil, models.ErrExecutorRunningNotFound
+	}
+	return w.running, nil
+}
+
+func (w *synchronizedRunningWriter) UpsertExecutorRunning(
+	_ context.Context, running *models.ExecutorRunning,
+) error {
+	w.mu.Lock()
+	w.running = running
+	w.mu.Unlock()
+	return nil
+}
+
+func (w *synchronizedRunningWriter) DeleteExecutorRunningBySessionID(context.Context, string) error {
+	w.mu.Lock()
+	w.running = nil
+	w.mu.Unlock()
+	return nil
+}
+
+func (w *synchronizedRunningWriter) RepairExecutorRunningDead(context.Context, string) error {
+	return nil
+}
+
+func (w *synchronizedRunningWriter) clear() {
+	w.mu.Lock()
+	w.running = nil
+	w.mu.Unlock()
+}
+
+func (w *synchronizedRunningWriter) snapshot() *models.ExecutorRunning {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.running
 }
 
 func (e *statusProviderExecutor) GetRemoteStatus(_ context.Context, instance *ExecutorInstance) (*RemoteStatus, error) {
@@ -96,6 +198,281 @@ func TestPollOneRemoteStatusStoresProviderError(t *testing.T) {
 	require.True(t, ok, "a failed poll must still record a status so the UI can show degraded")
 	require.Equal(t, "sprite unreachable", status.ErrorMessage)
 	require.Equal(t, agentruntime.RuntimeSprites, status.RuntimeName)
+}
+
+func TestPollOneRemoteStatusAtomicallyRefreshesRestartedKubernetesAgentctl(t *testing.T) {
+	var configureCalls atomic.Int32
+	var startCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+		case "/api/v1/agent/configure":
+			configureCalls.Add(1)
+			_, _ = w.Write([]byte(`{"success":true}`))
+		case "/api/v1/start":
+			startCalls.Add(1)
+			_, _ = w.Write([]byte(`{"success":true,"command":"agent"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	newClient := newTestAgentctlClient(t, server.URL, newTestLogger())
+	oldClient := newReadyAgentctlClient(t, newTestLogger())
+
+	refresh := &RemoteInstanceRefresh{Instance: &ExecutorInstance{
+		InstanceID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+		RuntimeName: agentruntime.RuntimeKubernetes, Client: newClient,
+		AuthToken: "rotated-token", BootstrapNonce: "durable-nonce",
+		Metadata: map[string]interface{}{
+			MetadataKeyKubernetesAgentctlRemotePort: "41002",
+		},
+	}, ProcessRestarted: true}
+	provider := &refreshingStatusExecutor{
+		statusProviderExecutor: statusProviderExecutor{
+			MockExecutor: MockExecutor{name: executor.NameKubernetes},
+			status:       &RemoteStatus{State: kubernetesStatusRunning},
+		},
+		refresh: refresh, refreshEntered: make(chan struct{}), releaseRefresh: make(chan struct{}),
+	}
+	refresh.Commit = func(publish func()) error {
+		provider.mu.Lock()
+		provider.committed = true
+		provider.mu.Unlock()
+		if publish != nil {
+			publish()
+		}
+		return nil
+	}
+	refresh.Abort = func() { t.Error("successful refresh was aborted") }
+	mgr := newRemoteStatusManager(t, provider)
+	store := newInMemorySecretStore()
+	for id, value := range map[string]string{
+		"kandev-runtime:exec-1:agentctl-auth":      "old-token",
+		"kandev-runtime:exec-1:agentctl-bootstrap": "durable-nonce",
+	} {
+		require.NoError(t, store.Create(context.Background(), &secrets.SecretWithValue{
+			Secret: secrets.Secret{ID: id, Name: id}, Value: value,
+		}))
+	}
+	mgr.SetSecretStore(store)
+	writer := &captureExecutorRunningWriter{}
+	mgr.SetExecutorRunningWriter(writer)
+	execution := &AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+		AgentProfileID: "profile-1", RuntimeName: agentruntime.RuntimeKubernetes,
+		Status: v1.AgentStatusRunning, AgentCommand: "agent", agentctl: oldClient,
+		metadata: map[string]interface{}{
+			MetadataKeyAuthTokenSecret:              "kandev-runtime:exec-1:agentctl-auth",
+			MetadataKeyBootstrapNonceSecret:         "kandev-runtime:exec-1:agentctl-bootstrap",
+			MetadataKeyKubernetesAgentctlRemotePort: "41001",
+		},
+	}
+	execution.setRuntimeEnvironment(map[string]string{"FOO": "bar"})
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	firstDone := make(chan struct{})
+	go func() {
+		mgr.pollOneRemoteStatus(context.Background(), execution)
+		close(firstDone)
+	}()
+	<-provider.refreshEntered
+	if execution.remoteInstanceLifecycleMu.TryLock() {
+		execution.remoteInstanceLifecycleMu.Unlock()
+		close(provider.releaseRefresh)
+		<-firstDone
+		t.Fatal("active remote refresh did not own the execution lifecycle boundary")
+	}
+	secondDone := make(chan struct{})
+	go func() {
+		mgr.pollOneRemoteStatus(context.Background(), execution)
+		close(secondDone)
+	}()
+	close(provider.releaseRefresh)
+	<-firstDone
+	<-secondDone
+
+	provider.mu.Lock()
+	refreshCalls := provider.refreshCalls
+	committed := provider.committed
+	provider.mu.Unlock()
+	require.Equal(t, 1, refreshCalls, "concurrent polls must share one refresh")
+	require.True(t, committed)
+	require.Same(t, newClient, execution.GetAgentCtlClient())
+	require.Equal(t, int32(1), configureCalls.Load())
+	require.Equal(t, int32(1), startCalls.Load())
+	revealed, err := store.Reveal(context.Background(), "kandev-runtime:exec-1:agentctl-auth")
+	require.NoError(t, err)
+	require.Equal(t, "rotated-token", revealed)
+	store.mu.RLock()
+	secretCount := len(store.store)
+	store.mu.RUnlock()
+	require.Equal(t, 2, secretCount, "token rotation must reuse the internal secret reference")
+	require.NotNil(t, writer.running)
+	require.Equal(t, "41002", getMetadataString(writer.running.Metadata, MetadataKeyKubernetesAgentctlRemotePort))
+}
+
+func TestPollOneRemoteStatusReattachesKubernetesClientWithoutRestartingAgent(t *testing.T) {
+	var configureCalls atomic.Int32
+	var startCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+		case "/api/v1/agent/configure":
+			configureCalls.Add(1)
+			_, _ = w.Write([]byte(`{"success":true}`))
+		case "/api/v1/start":
+			startCalls.Add(1)
+			_, _ = w.Write([]byte(`{"success":true,"command":"agent"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	newClient := newTestAgentctlClient(t, server.URL, newTestLogger())
+	oldClient := newReadyAgentctlClient(t, newTestLogger())
+	releaseRefresh := make(chan struct{})
+	close(releaseRefresh)
+	refresh := &RemoteInstanceRefresh{Instance: &ExecutorInstance{
+		InstanceID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+		RuntimeName: agentruntime.RuntimeKubernetes, Client: newClient,
+		AuthToken: "old-token", BootstrapNonce: "durable-nonce",
+		Metadata: map[string]interface{}{
+			MetadataKeyKubernetesAgentctlRemotePort: "41001",
+		},
+	}}
+	provider := &refreshingStatusExecutor{
+		statusProviderExecutor: statusProviderExecutor{
+			MockExecutor: MockExecutor{name: executor.NameKubernetes},
+			status:       &RemoteStatus{State: kubernetesStatusRunning},
+		},
+		refresh: refresh, refreshEntered: make(chan struct{}), releaseRefresh: releaseRefresh,
+	}
+	refresh.Commit = func(publish func()) error {
+		provider.mu.Lock()
+		provider.committed = true
+		provider.mu.Unlock()
+		if publish != nil {
+			publish()
+		}
+		return nil
+	}
+	refresh.Abort = func() { t.Error("successful refresh was aborted") }
+	mgr := newRemoteStatusManager(t, provider)
+	store := newInMemorySecretStore()
+	for id, value := range map[string]string{
+		"kandev-runtime:exec-1:agentctl-auth":      "old-token",
+		"kandev-runtime:exec-1:agentctl-bootstrap": "durable-nonce",
+	} {
+		require.NoError(t, store.Create(context.Background(), &secrets.SecretWithValue{
+			Secret: secrets.Secret{ID: id, Name: id}, Value: value,
+		}))
+	}
+	mgr.SetSecretStore(store)
+	mgr.SetExecutorRunningWriter(&captureExecutorRunningWriter{})
+	execution := &AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+		AgentProfileID: "profile-1", RuntimeName: agentruntime.RuntimeKubernetes,
+		Status: v1.AgentStatusRunning, AgentCommand: "agent", agentctl: oldClient,
+		metadata: map[string]interface{}{
+			MetadataKeyAuthTokenSecret:              "kandev-runtime:exec-1:agentctl-auth",
+			MetadataKeyBootstrapNonceSecret:         "kandev-runtime:exec-1:agentctl-bootstrap",
+			MetadataKeyKubernetesAgentctlRemotePort: "41001",
+		},
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	mgr.pollOneRemoteStatus(context.Background(), execution)
+
+	require.Same(t, newClient, execution.GetAgentCtlClient())
+	require.Zero(t, configureCalls.Load(), "local transport reattachment must not restart the remote agent")
+	require.Zero(t, startCalls.Load(), "local transport reattachment must not restart the remote agent")
+}
+
+func TestStopAgentSerializesWithActiveKubernetesRefresh(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/health" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(server.Close)
+	newClient := newTestAgentctlClient(t, server.URL, newTestLogger())
+	oldClient := newReadyAgentctlClient(t, newTestLogger())
+	writer := &synchronizedRunningWriter{}
+	refresh := &RemoteInstanceRefresh{Instance: &ExecutorInstance{
+		InstanceID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+		RuntimeName: agentruntime.RuntimeKubernetes, Client: newClient,
+		AuthToken: "old-token", BootstrapNonce: "durable-nonce",
+		Metadata: map[string]interface{}{
+			MetadataKeyKubernetesAgentctlRemotePort: "41001",
+		},
+	}}
+	provider := &refreshingStatusExecutor{
+		statusProviderExecutor: statusProviderExecutor{
+			MockExecutor: MockExecutor{name: executor.NameKubernetes},
+			status:       &RemoteStatus{State: kubernetesStatusRunning},
+		},
+		refresh: refresh, refreshEntered: make(chan struct{}), releaseRefresh: make(chan struct{}),
+		stopEntered: make(chan struct{}), onStop: writer.clear,
+	}
+	refresh.Commit = func(publish func()) error {
+		provider.mu.Lock()
+		provider.committed = true
+		provider.mu.Unlock()
+		if publish != nil {
+			publish()
+		}
+		return nil
+	}
+	refresh.Abort = func() { t.Error("successful refresh was aborted") }
+	mgr := newRemoteStatusManager(t, provider)
+	store := newInMemorySecretStore()
+	for id, value := range map[string]string{
+		"kandev-runtime:exec-1:agentctl-auth":      "old-token",
+		"kandev-runtime:exec-1:agentctl-bootstrap": "durable-nonce",
+	} {
+		require.NoError(t, store.Create(context.Background(), &secrets.SecretWithValue{
+			Secret: secrets.Secret{ID: id, Name: id}, Value: value,
+		}))
+	}
+	mgr.SetSecretStore(store)
+	mgr.SetExecutorRunningWriter(writer)
+	execution := &AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+		AgentProfileID: "profile-1", RuntimeName: agentruntime.RuntimeKubernetes,
+		Status: v1.AgentStatusRunning, AgentCommand: "agent", agentctl: oldClient,
+		metadata: map[string]interface{}{
+			MetadataKeyAuthTokenSecret:              "kandev-runtime:exec-1:agentctl-auth",
+			MetadataKeyBootstrapNonceSecret:         "kandev-runtime:exec-1:agentctl-bootstrap",
+			MetadataKeyKubernetesAgentctlRemotePort: "41001",
+		},
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	refreshDone := make(chan struct{})
+	go func() {
+		mgr.pollOneRemoteStatus(context.Background(), execution)
+		close(refreshDone)
+	}()
+	<-provider.refreshEntered
+	stopDone := make(chan error, 1)
+	go func() {
+		stopDone <- mgr.StopAgentWithReason(context.Background(), execution.ID, StopReasonTaskDeleted, true)
+	}()
+	close(provider.releaseRefresh)
+	<-refreshDone
+	require.NoError(t, <-stopDone)
+
+	require.Nil(t, writer.snapshot(), "terminal stop must remain the final persistence owner")
+	_, exists := mgr.executionStore.Get(execution.ID)
+	require.False(t, exists)
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	require.Empty(t, store.store)
 }
 
 func TestPollOneRemoteStatusSkipsUnsupportedExecutions(t *testing.T) {
@@ -228,6 +605,7 @@ func TestPollRemoteStatusForRecordsPopulatesCacheBeforeResume(t *testing.T) {
 		{SessionID: "session-no-runtime"},                                     // skipped
 		{SessionID: "session-unregistered", Runtime: agentruntime.RuntimeSSH}, // skipped
 		{
+			TaskID:           "task-1",
 			SessionID:        "session-1",
 			Runtime:          agentruntime.RuntimeSprites,
 			AgentExecutionID: "exec-1",
@@ -238,6 +616,7 @@ func TestPollRemoteStatusForRecordsPopulatesCacheBeforeResume(t *testing.T) {
 
 	require.Len(t, provider.observed, 1, "only the complete, registered record is polled")
 	require.Equal(t, "exec-1", provider.observed[0].InstanceID)
+	require.Equal(t, "task-1", provider.observed[0].TaskID)
 	require.Equal(t, "container-1", provider.observed[0].ContainerID)
 	require.Equal(t, "kandev-abc", provider.observed[0].Metadata[MetadataKeySpriteName])
 

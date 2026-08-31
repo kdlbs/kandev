@@ -10,7 +10,7 @@ describe("getWorkspaceSourceCapabilities", () => {
     expect(getWorkspaceSourceCapabilities(executorType).canAddFolders).toBe(true);
   });
 
-  it.each(["local_docker", "remote_docker", "ssh", "sprites"] as const)(
+  it.each(["local_docker", "remote_docker", "ssh", "sprites", "k8s"] as const)(
     "hides folders for %s",
     (executorType) => {
       expect(getWorkspaceSourceCapabilities(executorType).canAddFolders).toBe(false);
@@ -27,7 +27,7 @@ describe("getWorkspaceSourceCapabilities", () => {
     },
   );
 
-  it.each(["worktree", "local_docker", "remote_docker", "ssh", "sprites"] as const)(
+  it.each(["worktree", "local_docker", "remote_docker", "ssh", "sprites", "k8s"] as const)(
     "offers a checkout branch for owned clones on %s",
     (executorType) => {
       expect(getWorkspaceSourceCapabilities(executorType)).toMatchObject({
@@ -36,7 +36,7 @@ describe("getWorkspaceSourceCapabilities", () => {
     },
   );
 
-  it.each(["local_docker", "remote_docker", "ssh", "sprites"] as const)(
+  it.each(["local_docker", "remote_docker", "ssh", "sprites", "k8s"] as const)(
     "requires a cloneable origin for a selected local repository on %s",
     (executorType) => {
       expect(getWorkspaceSourceCapabilities(executorType)).toMatchObject({

@@ -71,8 +71,8 @@ func (m *Manager) Start(ctx context.Context) error {
 				context.Background(), execution.TaskID, execution.SessionID, execution.ID,
 			)
 			execution.SetSessionSpan(recoverySpan)
-			if execution.agentctl != nil {
-				execution.agentctl.SetTraceContext(execution.SessionTraceContext())
+			if client := execution.GetAgentCtlClient(); client != nil {
+				client.SetTraceContext(execution.SessionTraceContext())
 			}
 
 			// Create short-lived init span so recovery-phase operations are visible
@@ -88,8 +88,8 @@ func (m *Manager) Start(ctx context.Context) error {
 					zap.String("execution_id", execution.ID),
 					zap.String("session_id", execution.SessionID),
 					zap.Error(err))
-				if execution.agentctl != nil {
-					execution.agentctl.Close()
+				if client := execution.GetAgentCtlClient(); client != nil {
+					client.Close()
 				}
 				execution.EndSessionSpan()
 				initSpan.End()
@@ -326,8 +326,8 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 	execution.EndSessionSpan()
 
 	// Close agentctl connection if it exists
-	if execution.agentctl != nil {
-		execution.agentctl.Close()
+	if client := execution.GetAgentCtlClient(); client != nil {
+		client.Close()
 	}
 
 	// Remove from execution store
@@ -352,7 +352,7 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 //   - Removes the execution from the in-memory store
 //   - Makes the sessionID available for new executions
 //   - Does NOT stop the agent process (call StopAgent first)
-//   - Does NOT close the agentctl client (call execution.agentctl.Close() first)
+//   - Does NOT close the agentctl client (call execution.GetAgentCtlClient().Close() first)
 //   - Does NOT clean up resources (worktrees, containers, etc.)
 //
 // After calling this, the executionID and sessionID can no longer be used to query

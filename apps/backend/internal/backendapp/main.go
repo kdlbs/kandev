@@ -486,7 +486,7 @@ func startAgentInfrastructure(
 		eventBus,
 		repos.AgentSettings,
 		agentRegistry,
-		userSecretStore,
+		repos.Secrets,
 		services.Task.TaskBaseBranches,
 		services.ManagedRuntimeSelections,
 	)

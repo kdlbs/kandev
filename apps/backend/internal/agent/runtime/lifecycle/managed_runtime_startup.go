@@ -27,12 +27,17 @@ func (m *Manager) managedRuntimeNpmStartupFailure(
 	execution *AgentExecution,
 	initErr error,
 ) *routingerr.Error {
-	if execution == nil || execution.agentctl == nil || initErr == nil {
+	if execution == nil || initErr == nil {
+		return nil
+	}
+	client, release := execution.acquireAgentctlClient()
+	defer release()
+	if client == nil {
 		return nil
 	}
 	stderrCtx, cancel := context.WithTimeout(ctx, managedRuntimeStartupStderrTimeout)
 	defer cancel()
-	lines, err := execution.agentctl.GetAgentStderr(stderrCtx)
+	lines, err := client.GetAgentStderr(stderrCtx)
 	if err != nil {
 		return nil
 	}
@@ -136,7 +141,7 @@ func (m *Manager) prepareManagedRuntimeStartupRetry(
 	initErr error,
 	agentConfig agents.Agent,
 ) (*managedRuntimeStartupRetry, bool) {
-	if execution == nil || execution.RuntimeName != agentruntime.RuntimeStandalone || execution.agentctl == nil {
+	if execution == nil || execution.RuntimeName != agentruntime.RuntimeStandalone || execution.GetAgentCtlClient() == nil {
 		return nil, false
 	}
 	managed, ok := agentConfig.(agents.ManagedNPMRuntimeAgent)
@@ -167,14 +172,19 @@ func (m *Manager) stopAndInvalidateManagedRuntime(
 	execution *AgentExecution,
 	retry *managedRuntimeStartupRetry,
 ) (needsFailure bool, err error) {
-	if stopErr := execution.agentctl.Stop(ctx); stopErr != nil {
+	client, release := execution.acquireAgentctlClient()
+	defer release()
+	if client == nil {
+		return false, errors.New("managed runtime agentctl client is unavailable")
+	}
+	if stopErr := client.Stop(ctx); stopErr != nil {
 		if aborted := managedRuntimeRecoveryAborted(ctx, m); aborted != nil {
 			return false, aborted
 		}
 		m.logger.Warn("managed runtime process stop failed before retry; continuing",
 			zap.String("execution_id", execution.ID), zap.Error(stopErr))
 	}
-	execution.agentctl.CloseUpdatesStream()
+	client.CloseUpdatesStream()
 	if aborted := managedRuntimeRecoveryAborted(ctx, m); aborted != nil {
 		return false, aborted
 	}

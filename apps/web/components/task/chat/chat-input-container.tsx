@@ -93,6 +93,7 @@ type ChatInputContainerProps = {
   hasAgentCommands?: boolean;
   isFailed?: boolean;
   isCompleted?: boolean;
+  sessionErrorMessage?: string;
   needsRecovery?: boolean;
   executorUnavailable?: boolean;
   executorUnavailableReason?: string;
@@ -216,8 +217,15 @@ function buildEditorAreaProps(
   };
 }
 
-function buildStoppedBannerProps(p: ChatInputContainerProps) {
-  if (!p.executorUnavailable) return {};
+type StoppedBannerSource = Pick<
+  ChatInputContainerProps,
+  "executorUnavailable" | "executorUnavailableReason" | "sessionErrorMessage"
+>;
+
+export function buildStoppedBannerProps(p: StoppedBannerSource) {
+  if (!p.executorUnavailable) {
+    return p.sessionErrorMessage ? { message: p.sessionErrorMessage } : {};
+  }
   return {
     message: t("task:executorEnvironmentIsUnavailable"),
     detail: p.executorUnavailableReason,

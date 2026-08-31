@@ -115,6 +115,12 @@ describe("TaskTopBar executor environment controls", () => {
 
     expect(screen.getByTestId("executor-settings-button")).toBeTruthy();
   });
+
+  it("shows the executor environment button for Kubernetes executors", () => {
+    renderTopBar(<TaskTopBar taskId="task-1" remoteExecutorType="k8s" />);
+
+    expect(screen.getByTestId("executor-settings-button")).toBeTruthy();
+  });
 });
 
 describe("TaskTopBar GitHub issue link", () => {

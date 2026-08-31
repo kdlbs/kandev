@@ -240,6 +240,12 @@ export const SETTINGS_CRUMB_ROUTES: readonly SettingsCrumbRoute[] = [
     title: { value: "executorName", fallback: { key: EXECUTOR_KEY } },
   },
   {
+    pattern: /^\/settings\/executors\/k8s\/([^/]+)$/,
+    params: ["executorId"],
+    crumbs: [],
+    title: { value: "executorName", fallback: { key: EXECUTOR_KEY } },
+  },
+  {
     pattern: /^\/settings\/executors\/([^/]+)$/,
     params: ["executorProfileId"],
     crumbs: [],

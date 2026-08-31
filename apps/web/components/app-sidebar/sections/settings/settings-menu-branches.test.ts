@@ -326,6 +326,20 @@ describe("buildExecutorsBranch", () => {
       "/settings/executor/exec-1/profile/exec-profile-1",
     ]);
   });
+
+  it("uses Kubernetes-aware connection and profile routes", () => {
+    const [executor] = buildExecutorsBranch([
+      {
+        id: "cluster/primary",
+        name: "Kubernetes",
+        type: "k8s",
+        profiles: [{ id: "profile/primary", name: "Primary" }],
+      },
+    ]);
+
+    expect(executor.href).toBe("/settings/executors/k8s/cluster%2Fprimary");
+    expect(hrefsOf(executor.children ?? [])).toEqual(["/settings/executors/profile%2Fprimary"]);
+  });
 });
 
 describe("findActiveNodePath", () => {

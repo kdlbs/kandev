@@ -7,6 +7,10 @@ import { WORKSPACE_INTEGRATIONS } from "@/lib/settings-discovery/catalog/integra
 import { WORKSPACES_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/workspaces";
 import { INTEGRATION_ICONS } from "@/lib/settings/integration-icons";
 import {
+  executorConnectionSettingsPath,
+  executorProfileSettingsPath,
+} from "@/lib/settings/executor-settings-routes";
+import {
   WORKSPACE_SETTINGS_TABS,
   workspaceSettingsHref,
 } from "@/lib/settings/workspace-settings-tabs";
@@ -307,16 +311,13 @@ export function buildAgentsBranch(
 /**
  * One node per executor, holding its profiles.
  *
- * Uses the executor-scoped spellings (`/settings/executor/<id>` and
- * `/settings/executor/<id>/profile/<id>`) rather than the flat
- * `/settings/executors/<profileId>` the Executors page links to. Both are live
- * routes for the same profile, but only the scoped pair has an executor
- * breadcrumb — so it is the one whose crumb chain matches the branch the user
- * clicked through.
+ * Most executors use the scoped legacy spellings so their executor breadcrumb
+ * matches the branch. Kubernetes uses its dedicated connection page and the
+ * Kubernetes-aware flat profile editor instead.
  */
 export function buildExecutorsBranch(executors: ReadonlyArray<BranchExecutor>): SettingsMenuNode[] {
   return executors.map((executor) => {
-    const executorHref = `/settings/executor/${encodeURIComponent(executor.id)}`;
+    const executorHref = executorConnectionSettingsPath(executor);
     return {
       key: `executor:${executor.id}`,
       href: executorHref,
@@ -325,7 +326,7 @@ export function buildExecutorsBranch(executors: ReadonlyArray<BranchExecutor>): 
       // Same split as agents: the executor ships with kandev, the profiles do not.
       children: (executor.profiles ?? []).map((profile) => ({
         key: `executor:${executor.id}:profile:${profile.id}`,
-        href: `${executorHref}/profile/${profile.id}`,
+        href: executorProfileSettingsPath(executor, profile.id),
         label: { text: profile.name },
         isUserRecord: true,
       })),

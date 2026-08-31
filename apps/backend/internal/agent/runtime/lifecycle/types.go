@@ -99,7 +99,10 @@ type AgentExecution struct {
 	PrepareResult *EnvPrepareResult `json:"-"`
 
 	// agentctl client for this execution
-	agentctl *agentctl.Client
+	agentctl                  *agentctl.Client
+	agentctlOverride          atomic.Pointer[agentctl.Client]
+	agentctlLifecycleMu       sync.RWMutex
+	remoteInstanceLifecycleMu sync.Mutex
 	// agentctlReady records the successful health check independently of the
 	// agent process and workspace stream lifecycles. Prepared sessions have a
 	// healthy agentctl before either of those is started or attached.
@@ -467,7 +470,41 @@ func (e *AgentExecution) setPromptTurnID(turnID string) {
 
 // GetAgentCtlClient returns the agentctl client for this execution
 func (ae *AgentExecution) GetAgentCtlClient() *agentctl.Client {
+	if ae == nil {
+		return nil
+	}
+	if current := ae.agentctlOverride.Load(); current != nil {
+		return current
+	}
 	return ae.agentctl
+}
+
+// acquireAgentctlClient pins the current client for one bounded operation.
+// Remote replacement and terminal stop take the write side before publishing
+// or closing a client, so an in-flight operation never observes that client
+// being closed underneath it.
+func (ae *AgentExecution) acquireAgentctlClient() (*agentctl.Client, func()) {
+	if ae == nil {
+		return nil, func() {}
+	}
+	ae.agentctlLifecycleMu.RLock()
+	client := ae.GetAgentCtlClient()
+	if client == nil {
+		ae.agentctlLifecycleMu.RUnlock()
+		return nil, func() {}
+	}
+	return client, ae.agentctlLifecycleMu.RUnlock
+}
+
+// replaceAgentctlClient atomically publishes a replacement connection while
+// retaining the construction-time field for test/source compatibility.
+func (ae *AgentExecution) replaceAgentctlClient(client *agentctl.Client) *agentctl.Client {
+	if ae == nil || client == nil {
+		return nil
+	}
+	previous := ae.GetAgentCtlClient()
+	ae.agentctlOverride.Store(client)
+	return previous
 }
 
 // MarkAgentctlReady records that agentctl passed its startup health check.
@@ -484,10 +521,11 @@ func (ae *AgentExecution) IsAgentctlReady() bool {
 // execution. Returns an empty string when no agentctl client is set (e.g.
 // before the execution has been wired to an agentctl instance).
 func (ae *AgentExecution) AgentctlURL() string {
-	if ae.agentctl == nil {
+	client := ae.GetAgentCtlClient()
+	if client == nil {
 		return ""
 	}
-	return ae.agentctl.BaseURL()
+	return client.BaseURL()
 }
 
 // SetWorkspaceStream sets the unified workspace stream for this execution

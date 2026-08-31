@@ -5,6 +5,7 @@ import Link from "@/components/routing/app-link";
 import { IconArrowLeft, IconMenu2, IconGitBranch, IconCheck } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
+import { ExecutorSettingsButton } from "@/components/task/executor-settings-button";
 import { LineStat } from "@/components/diff-stat";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
@@ -82,7 +83,7 @@ function MobileTaskTitle({
   );
 }
 
-function RemoteExecutorIndicator({
+export function MobileRemoteExecutorIndicator({
   taskId,
   sessionId,
   remoteExecutorType,
@@ -101,6 +102,9 @@ function RemoteExecutorIndicator({
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
 }) {
+  if (remoteExecutorType === "k8s") {
+    return <ExecutorSettingsButton taskId={taskId} sessionId={sessionId} />;
+  }
   return (
     <RemoteCloudTooltip
       taskId={taskId ?? ""}
@@ -412,7 +416,7 @@ function MobileTopBarActions({
         />
       )}
       {isRemoteExecutor && (
-        <RemoteExecutorIndicator
+        <MobileRemoteExecutorIndicator
           taskId={taskId}
           sessionId={sessionId}
           remoteExecutorType={remoteExecutorType}

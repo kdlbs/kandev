@@ -6,7 +6,14 @@ export type CleanupSummary = {
 };
 
 // mock_remote is test-only — intentionally absent so it falls through to GENERIC_LINE.
-type KnownExecutor = "local" | "worktree" | "local_docker" | "remote_docker" | "sprites" | "ssh";
+type KnownExecutor =
+  | "local"
+  | "worktree"
+  | "local_docker"
+  | "remote_docker"
+  | "sprites"
+  | "ssh"
+  | "k8s";
 
 /**
  * Catalog keys, not copy.
@@ -23,6 +30,7 @@ const SINGLE_KEYS: Record<KnownExecutor, string> = {
   remote_docker: "task:cleanupSingleRemoteDocker",
   sprites: "task:cleanupSingleSprites",
   ssh: "task:cleanupSingleSsh",
+  k8s: "task:cleanupSingleKubernetes",
 };
 
 const GENERIC_KEY = "task:cleanupAgentSessionsStopped";
@@ -57,6 +65,7 @@ const PLURAL_KEYS: Record<KnownExecutor, string> = {
   remote_docker: "task:cleanupBulkRemoteDocker",
   sprites: "task:cleanupBulkSprites",
   ssh: "task:cleanupBulkSsh",
+  k8s: "task:cleanupBulkKubernetes",
 };
 
 /** Bulk variant — groups N tasks by executor type and emits one line per group. */
@@ -79,6 +88,7 @@ export function getBulkCleanupSummary(
     "remote_docker",
     "sprites",
     "ssh",
+    "k8s",
     "local",
   ];
 
