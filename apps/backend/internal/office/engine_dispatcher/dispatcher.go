@@ -74,6 +74,16 @@ type RecordDecisionInput struct {
 	DeciderID     string
 	Role          string
 	Comment       string
+	// SessionID is the deciding agent's own calling session, when known
+	// (the MCP agent path). Optional: blank means "resolve the task's
+	// active session" (AC-16), which is the only behavior available to
+	// the human dashboard path and is unchanged. When set, RecordDecision
+	// binds to this exact session — after it validates the session
+	// belongs to TaskID and is still in an active state — instead of the
+	// task-scoped active-session lookup, so a decision always
+	// re-evaluates against the deciding agent's own session rather than
+	// an arbitrary sibling session on the same task.
+	SessionID string
 }
 
 // RecordDecisionResult mirrors engine.RecordDecisionResult plus the
@@ -260,19 +270,40 @@ func isReusableSessionForTrigger(trigger engine.Trigger, state taskmodels.TaskSe
 }
 
 // RecordDecision is the AC-57a write-side engine decision entry point:
-// it resolves the task's active session per AC-16/16a, then delegates the
+// it resolves a session per AC-16/16a, then delegates the
 // write-and-reevaluate to Engine.RecordParticipantDecision. AC-16a's
 // "no session resolvable" case is not an error here — an empty sessionID
 // tells the engine to record the decision and skip re-evaluation
 // (reported under AC-23/F39 by the engine itself), matching the existing
 // blank-session behavior RecordParticipantDecision already implements.
+//
+// Session resolution has two modes, since RecordDecision is the single
+// funnel both the human dashboard path and the agent MCP path call
+// through:
+//   - in.SessionID set (agent path): resolved via resolveDeciderSessionID,
+//     which binds to that exact session rather than the task-scoped
+//     active-session lookup below. This is what prevents a task carrying
+//     more than one concurrent active session (WO-72) from having an
+//     agent's decision re-evaluate against an arbitrary sibling session's
+//     state instead of its own.
+//   - in.SessionID blank (human path): today's task-scoped
+//     resolveActiveSessionID lookup, unchanged.
 func (d *Dispatcher) RecordDecision(ctx context.Context, in RecordDecisionInput) (RecordDecisionResult, error) {
 	if in.TaskID == "" {
 		return RecordDecisionResult{}, fmt.Errorf("task_id is required")
 	}
-	sessionID, err := d.resolveActiveSessionID(ctx, in.TaskID)
-	if err != nil {
-		return RecordDecisionResult{}, fmt.Errorf("resolve active session: %w", err)
+	var sessionID string
+	var err error
+	if in.SessionID != "" {
+		sessionID, err = d.resolveDeciderSessionID(ctx, in.TaskID, in.SessionID)
+		if err != nil {
+			return RecordDecisionResult{}, fmt.Errorf("resolve decider session: %w", err)
+		}
+	} else {
+		sessionID, err = d.resolveActiveSessionID(ctx, in.TaskID)
+		if err != nil {
+			return RecordDecisionResult{}, fmt.Errorf("resolve active session: %w", err)
+		}
 	}
 	result, err := d.engine.RecordParticipantDecision(ctx, sessionID, engine.DecisionInfo{
 		TaskID:        in.TaskID,
@@ -368,9 +399,64 @@ func (d *Dispatcher) resolveActiveSessionID(ctx context.Context, taskID string) 
 	return session.ID, nil
 }
 
+// isActiveDeciderSessionState mirrors the state filter in
+// GetActiveTaskSessionByTaskID's SQL exactly (task/repository/sqlite/session.go):
+// CREATED/STARTING/RUNNING/WAITING_FOR_INPUT. There is no shared
+// models-level predicate for this set, so keep the two in sync by hand if
+// either changes.
+func isActiveDeciderSessionState(state taskmodels.TaskSessionState) bool {
+	switch state {
+	case taskmodels.TaskSessionStateCreated,
+		taskmodels.TaskSessionStateStarting,
+		taskmodels.TaskSessionStateRunning,
+		taskmodels.TaskSessionStateWaitingForInput:
+		return true
+	default:
+		return false
+	}
+}
+
+// resolveDeciderSessionID validates a caller-supplied session id (the
+// RecordDecisionInput.SessionID agent path) rather than resolving the
+// task's active session from scratch. Returns "" (not an error) when the
+// session is missing, belongs to a different task, or has moved out of the
+// active state set (isActiveDeciderSessionState) — RecordDecision treats
+// that identically to AC-16a's "no active session resolvable": the
+// decision is still recorded and re-evaluation is skipped, never an error,
+// because the verdict itself remains valid even though the deciding
+// session has since ended or was misidentified. It deliberately does not
+// fall back to resolveActiveSessionID: a caller that named its own session
+// and got it wrong should not have the decision silently attributed to an
+// unrelated sibling session instead.
+func (d *Dispatcher) resolveDeciderSessionID(ctx context.Context, taskID, sessionID string) (string, error) {
+	session, err := d.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, taskmodels.ErrTaskSessionNotFound) {
+			return "", nil
+		}
+		return "", err
+	}
+	if session == nil || session.TaskID != taskID || !isActiveDeciderSessionState(session.State) {
+		return "", nil
+	}
+	return session.ID, nil
+}
+
 // resolveLatestSessionID returns the F38 "any session" id (the task's
 // most recent session regardless of state), or "" when the task has never
 // had one.
+//
+// Stays task-scoped even after WO-72 lets a task carry multiple concurrent
+// sessions (unlike RecordDecision's resolveDeciderSessionID above), because
+// its only caller (EvaluateStepQuorum) only needs a session id to satisfy
+// TransitionStore.LoadState's signature: the read-only guards snapshot
+// consumes state.CurrentStepID (task-row derived) and state.WorkflowID,
+// neither of which varies between a task's concurrent sessions. The
+// per-session MachineState.Data bag LoadState also populates is unused
+// here — grep confirms no reader of engine.MachineState.Data outside
+// tests/PersistData's write path — so an arbitrary sibling session is
+// behaviorally indistinguishable from the "right" one on this specific
+// path. If a guard ever starts reading Data, revisit this.
 func (d *Dispatcher) resolveLatestSessionID(ctx context.Context, taskID string) (string, error) {
 	session, err := d.sessions.GetTaskSessionByTaskID(ctx, taskID)
 	if err != nil {

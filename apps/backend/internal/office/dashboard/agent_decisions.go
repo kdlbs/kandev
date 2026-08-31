@@ -25,6 +25,15 @@ type RecordAgentDecisionInput struct {
 	AgentProfileID string
 	Decision       string
 	Reason         string
+	// SessionID is the deciding agent's own calling session (the MCP path
+	// resolves it from the transport session before calling in). Optional:
+	// blank falls back to RecordDecision's task-scoped active-session
+	// lookup, which is the only behavior available to the human dashboard
+	// path. Threaded straight through to
+	// officeenginedispatcher.RecordDecisionInput.SessionID; see that
+	// field's doc comment for why this matters once a task can carry more
+	// than one concurrent active session (WO-72).
+	SessionID string
 }
 
 // AgentDecisionValidationError marks an error caused by a caller-provided
@@ -146,6 +155,7 @@ func (s *DashboardService) RecordAgentDecision(
 		DeciderID:     in.AgentProfileID,
 		Role:          role,
 		Comment:       in.Reason,
+		SessionID:     in.SessionID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("record decision: %w", err)

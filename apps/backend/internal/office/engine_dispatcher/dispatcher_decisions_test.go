@@ -157,6 +157,101 @@ func TestDispatcher_RecordDecision_KeepsResultWhenReevaluationFails(t *testing.T
 	}
 }
 
+// TestDispatcher_RecordDecision_UsesSuppliedSessionOverActiveSibling is the
+// regression proof for the wrong-binding defect: once a task can carry more
+// than one concurrent active session (WO-72), a task-scoped
+// resolveActiveSessionID pick (started_at DESC) can return an unrelated
+// sibling instead of the session that actually made the decision. When the
+// caller supplies its own session id and that session belongs to the task
+// and is still active, RecordDecision must bind to that exact session, not
+// whichever session resolveActiveSessionID would have picked.
+func TestDispatcher_RecordDecision_UsesSuppliedSessionOverActiveSibling(t *testing.T) {
+	eng := &fakeEngine{decisionResult: engine.RecordDecisionResult{DecisionID: "decision-1"}}
+	sessions := &fakeSessions{
+		// The started_at DESC "active" winner is a sibling agent's session.
+		activeSession: &taskmodels.TaskSession{
+			ID: "sess-assignee", TaskID: "task-1", State: taskmodels.TaskSessionStateRunning,
+		},
+		byID: map[string]*taskmodels.TaskSession{
+			"sess-reviewer": {ID: "sess-reviewer", TaskID: "task-1", State: taskmodels.TaskSessionStateRunning},
+		},
+	}
+	d := New(eng, sessions, logger.Default())
+
+	if _, err := d.RecordDecision(context.Background(), RecordDecisionInput{
+		TaskID: "task-1", StepID: "review", ParticipantID: "participant-1",
+		Decision: "approved", SessionID: "sess-reviewer",
+	}); err != nil {
+		t.Fatalf("RecordDecision: %v", err)
+	}
+	if eng.decisionSession != "sess-reviewer" {
+		t.Errorf("session id = %q, want sess-reviewer (the deciding agent's own session, not the active sibling sess-assignee)", eng.decisionSession)
+	}
+}
+
+// TestDispatcher_RecordDecision_SuppliedSessionForDifferentTaskSkipsReevaluation
+// covers a supplied session that exists but belongs to a different task: it
+// must not be trusted (a cross-task session id is not this decider's own
+// session), and RecordDecision must not silently fall back to the
+// task-scoped active-session lookup either — the caller explicitly named a
+// session, and that session doesn't check out, so it is treated exactly
+// like AC-16a's "no session resolvable": the decision is recorded (the
+// write succeeds either way, so this only proves binding) but
+// re-evaluation is skipped with a blank session id.
+func TestDispatcher_RecordDecision_SuppliedSessionForDifferentTaskSkipsReevaluation(t *testing.T) {
+	eng := &fakeEngine{decisionResult: engine.RecordDecisionResult{DecisionID: "decision-1"}}
+	sessions := &fakeSessions{
+		// If RecordDecision wrongly fell back to the active-session lookup
+		// when the supplied session fails validation, this would surface as
+		// eng.decisionSession == "sess-active-fallback" instead of "".
+		activeSession: &taskmodels.TaskSession{
+			ID: "sess-active-fallback", TaskID: "task-1", State: taskmodels.TaskSessionStateRunning,
+		},
+		byID: map[string]*taskmodels.TaskSession{
+			"sess-foreign": {ID: "sess-foreign", TaskID: "task-2", State: taskmodels.TaskSessionStateRunning},
+		},
+	}
+	d := New(eng, sessions, logger.Default())
+
+	if _, err := d.RecordDecision(context.Background(), RecordDecisionInput{
+		TaskID: "task-1", StepID: "review", ParticipantID: "participant-1",
+		Decision: "approved", SessionID: "sess-foreign",
+	}); err != nil {
+		t.Fatalf("RecordDecision: %v", err)
+	}
+	if eng.decisionSession != "" {
+		t.Errorf("session id = %q, want blank: a foreign-task session must not bind, and must not fall back to the active-session lookup", eng.decisionSession)
+	}
+}
+
+// TestDispatcher_RecordDecision_SuppliedSessionTerminalStateSkipsReevaluation
+// covers a supplied session that belongs to the task but has since moved to
+// a terminal state (COMPLETED/FAILED/CANCELLED/IDLE) — a stale session id
+// from a decision that took a while to record. Same AC-16a-style skip as
+// the foreign-task case: recorded, re-evaluation skipped, no fallback.
+func TestDispatcher_RecordDecision_SuppliedSessionTerminalStateSkipsReevaluation(t *testing.T) {
+	eng := &fakeEngine{decisionResult: engine.RecordDecisionResult{DecisionID: "decision-1"}}
+	sessions := &fakeSessions{
+		activeSession: &taskmodels.TaskSession{
+			ID: "sess-active-fallback", TaskID: "task-1", State: taskmodels.TaskSessionStateRunning,
+		},
+		byID: map[string]*taskmodels.TaskSession{
+			"sess-done": {ID: "sess-done", TaskID: "task-1", State: taskmodels.TaskSessionStateCompleted},
+		},
+	}
+	d := New(eng, sessions, logger.Default())
+
+	if _, err := d.RecordDecision(context.Background(), RecordDecisionInput{
+		TaskID: "task-1", StepID: "review", ParticipantID: "participant-1",
+		Decision: "approved", SessionID: "sess-done",
+	}); err != nil {
+		t.Fatalf("RecordDecision: %v", err)
+	}
+	if eng.decisionSession != "" {
+		t.Errorf("session id = %q, want blank: a terminal-state session must not bind, and must not fall back to the active-session lookup", eng.decisionSession)
+	}
+}
+
 // TestDispatcher_RecordDecision_RejectsEmptyTaskID mirrors HandleTrigger's
 // existing input validation for the new write-side entry point.
 func TestDispatcher_RecordDecision_RejectsEmptyTaskID(t *testing.T) {

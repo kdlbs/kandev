@@ -140,6 +140,17 @@ type dashboardTransitionStore struct {
 	workflowID string
 	steps      map[string]engine.StepSpec
 	applied    map[string]bool
+	// loadStateSessionIDs captures every sessionID LoadState was called
+	// with, in call order. A single RecordAgentDecision call can trigger
+	// more than one LoadState: RecordParticipantDecision's re-evaluation
+	// subpath calls it first with the decision's bound session, and the
+	// dashboard's post-write agentDecisionGuardsSnapshot diagnostic can
+	// call EvaluateStepQuorum afterward, which resolves and loads state
+	// for the task-scoped active session (deliberately unrelated — see
+	// resolveLatestSessionID's doc comment). A test that wants the
+	// write-path session must read loadStateSessionIDs[0], not just the
+	// most recent call.
+	loadStateSessionIDs []string
 }
 
 func newDashboardTransitionStore(db *sqlx.DB) *dashboardTransitionStore {
@@ -154,6 +165,7 @@ func newDashboardTransitionStore(db *sqlx.DB) *dashboardTransitionStore {
 func (s *dashboardTransitionStore) LoadState(
 	ctx context.Context, taskID, sessionID string,
 ) (engine.MachineState, error) {
+	s.loadStateSessionIDs = append(s.loadStateSessionIDs, sessionID)
 	var stepID string
 	if err := s.db.QueryRowContext(ctx,
 		`SELECT workflow_step_id FROM tasks WHERE id = ?`, taskID,
@@ -278,4 +290,61 @@ func newTestEngineDispatcherWithReevaluation(
 		engine.WithDecisionStore(workflowadapters.NewDecisionAdapter(wfRepo)),
 	)
 	return officeenginedispatcher.New(eng, singleTaskSessionResolver{taskID: taskID, session: session}, log)
+}
+
+// twoSessionResolver models a task carrying two concurrent active sessions
+// (the WO-72 scenario this defect fix targets): active is the session a
+// task-scoped started_at-DESC lookup would return, and other is a second,
+// separate session reachable only by exact id via GetTaskSession. Used to
+// prove RecordAgentDecision's SessionID binds to the deciding agent's own
+// session end-to-end (through the real engine), not the active sibling.
+type twoSessionResolver struct {
+	taskID string
+	active *taskmodels.TaskSession
+	other  *taskmodels.TaskSession
+}
+
+func (r twoSessionResolver) GetActiveTaskSessionByTaskID(
+	_ context.Context, taskID string,
+) (*taskmodels.TaskSession, error) {
+	if taskID == r.taskID {
+		return r.active, nil
+	}
+	return nil, taskmodels.ErrTaskSessionNotFound
+}
+
+func (r twoSessionResolver) GetTaskSessionByTaskID(
+	ctx context.Context, taskID string,
+) (*taskmodels.TaskSession, error) {
+	return r.GetActiveTaskSessionByTaskID(ctx, taskID)
+}
+
+func (r twoSessionResolver) GetTaskSession(
+	_ context.Context, id string,
+) (*taskmodels.TaskSession, error) {
+	if r.active != nil && id == r.active.ID {
+		return r.active, nil
+	}
+	if r.other != nil && id == r.other.ID {
+		return r.other, nil
+	}
+	return nil, taskmodels.ErrTaskSessionNotFound
+}
+
+// newTestEngineDispatcherWithResolver is like
+// newTestEngineDispatcherWithReevaluation but accepts an arbitrary
+// officeenginedispatcher.SessionResolver instead of always wiring
+// singleTaskSessionResolver — needed by tests modeling more than one
+// session on a task (twoSessionResolver above).
+func newTestEngineDispatcherWithResolver(
+	wfRepo *workflowrepo.Repository, log *logger.Logger,
+	store *dashboardTransitionStore, resolver officeenginedispatcher.SessionResolver,
+) *officeenginedispatcher.Dispatcher {
+	eng := engine.New(
+		store,
+		noopCallbackRegistry{},
+		engine.WithParticipantStore(workflowadapters.NewParticipantAdapter(wfRepo)),
+		engine.WithDecisionStore(workflowadapters.NewDecisionAdapter(wfRepo)),
+	)
+	return officeenginedispatcher.New(eng, resolver, log)
 }

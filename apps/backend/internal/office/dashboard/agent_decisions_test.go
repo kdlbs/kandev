@@ -5,9 +5,11 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
@@ -229,5 +231,73 @@ func TestRecordAgentDecision_RejectsWhenEngineDispatcherNotWired(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error when engine dispatcher is not wired")
+	}
+}
+
+// TestRecordAgentDecision_BindsToSuppliedSessionOverActiveSibling is the
+// end-to-end proof (through the real engine, not a fake) that
+// RecordAgentDecisionInput.SessionID actually reaches
+// RecordParticipantDecision's re-evaluation subpath: once a task can carry
+// more than one concurrent active session (WO-72), a task-scoped
+// active-session lookup (started_at DESC) could return an unrelated sibling
+// instead of the session that made this decision. deps.svc.RecordAgentDecision
+// is only the entry point — twoSessionResolver models the two-session
+// scenario and dashboardTransitionStore.lastLoadStateSessionID captures
+// which session id the engine's LoadState was actually called with, so this
+// asserts the binding itself rather than just that the write succeeded
+// (which it does either way).
+func TestRecordAgentDecision_BindsToSuppliedSessionOverActiveSibling(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "ad9", "ws-d", "AD9", "in_review", 2)
+	mustAddParticipant(t, deps, "ad9", "agent-1", models.ParticipantRoleApprover)
+
+	store := newDashboardTransitionStore(deps.db)
+	// Leave workflowID blank (unlike the "wf-test" default): a non-empty
+	// WorkflowID would route ResolveParticipantRole's slate construction
+	// through the workflow-scoped participant query, which joins against a
+	// workflow_steps row this test does not seed. Every other
+	// RecordAgentDecision test resolves participants task-scoped (no
+	// workflow_steps row involved either), and that's the behavior this
+	// test needs too — only the session binding is under test here.
+	store.workflowID = ""
+	activeSibling := &taskmodels.TaskSession{
+		ID: "sess-sibling", TaskID: "ad9", State: taskmodels.TaskSessionStateRunning,
+	}
+	reviewerSession := &taskmodels.TaskSession{
+		ID: "sess-reviewer", TaskID: "ad9", State: taskmodels.TaskSessionStateRunning,
+	}
+	resolver := twoSessionResolver{taskID: "ad9", active: activeSibling, other: reviewerSession}
+	deps.svc.SetWorkflowEngineDispatcher(
+		newTestEngineDispatcherWithResolver(deps.wfRepo, logger.Default(), store, resolver),
+	)
+
+	_, err := deps.svc.RecordAgentDecision(context.Background(), dashboard.RecordAgentDecisionInput{
+		TaskID:         "ad9",
+		AgentProfileID: "agent-1",
+		Decision:       engine.DecisionApproved,
+		Reason:         "lgtm",
+		SessionID:      "sess-reviewer",
+	})
+	if err != nil {
+		t.Fatalf("RecordAgentDecision: %v", err)
+	}
+	// loadStateSessionIDs also picks up two calls that are not the write
+	// path under test: ResolveParticipantRole's own LoadState(ctx, taskID,
+	// "") probe (blank sessionID, runs first) and the dashboard's
+	// post-write guards-snapshot diagnostic, which deliberately reads the
+	// task-scoped active session ("sess-sibling") instead — see
+	// resolveLatestSessionID's doc comment. The first *non-blank* session
+	// id is RecordParticipantDecision's re-evaluation subpath, which is
+	// what RecordDecision bound.
+	var boundSessionID string
+	for _, id := range store.loadStateSessionIDs {
+		if id != "" {
+			boundSessionID = id
+			break
+		}
+	}
+	if boundSessionID != "sess-reviewer" {
+		t.Errorf("bound session id = %q (all LoadState calls: %v), want sess-reviewer (the deciding agent's own session, not the active sibling sess-sibling)",
+			boundSessionID, store.loadStateSessionIDs)
 	}
 }
