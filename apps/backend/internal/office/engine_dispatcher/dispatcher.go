@@ -401,14 +401,27 @@ func (d *Dispatcher) resolveDeciderSessionID(ctx context.Context, taskID, sessio
 	session, err := d.sessions.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, taskmodels.ErrTaskSessionNotFound) {
+			d.logSessionUnresolvable(taskID, sessionID, "not_found")
 			return "", nil
 		}
 		return "", err
 	}
-	if session == nil || session.TaskID != taskID || !isActiveSessionState(session.State) {
+	if session == nil || session.TaskID != taskID {
+		d.logSessionUnresolvable(taskID, sessionID, "foreign")
+		return "", nil
+	}
+	if !isActiveSessionState(session.State) {
+		d.logSessionUnresolvable(taskID, sessionID, "terminal")
 		return "", nil
 	}
 	return session.ID, nil
+}
+
+func (d *Dispatcher) logSessionUnresolvable(taskID, sessionID, reason string) {
+	d.logger.Debug("resolveDeciderSessionID: session unresolvable, falling back to blank",
+		zap.String("task_id", taskID),
+		zap.String("supplied_session_id", sessionID),
+		zap.String("reason", reason))
 }
 
 func isActiveSessionState(state taskmodels.TaskSessionState) bool {
