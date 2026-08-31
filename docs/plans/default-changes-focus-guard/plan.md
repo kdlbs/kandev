@@ -1,0 +1,77 @@
+---
+created: 2026-08-31
+status: done
+requirements:
+  - REQ-UI-TASK-LAYOUT-PROFILES-001
+system_design:
+  - ../../specs/ui/system-design/task-layout-profiles.md
+legacy_specs: []
+---
+
+# Implementation Plan: Restrict Changes Auto-focus
+
+## Overview
+
+Restrict automatic Changes activation to the Default layout's Files and Changes group. The implementation and its regression tests form one sequential work order.
+
+## Scope
+
+### In scope
+
+- Apply one shared eligibility rule to active-task and returning-task updates.
+- Require the stable Default top-right group.
+- Require exactly the Files and Changes tabs in that group.
+- Preserve the current tab in VS Code, Plan, Preview, compact, and custom group compositions.
+
+### Out of scope
+
+- Change Git-status detection, fingerprinting, or inactive-task pending state.
+- Change layout persistence or panel placement.
+- Change mobile or tablet task layouts.
+
+## Technical approach
+
+### Changes activation guard
+
+Update `activateChangesPanel` in `apps/web/components/task/changes-panel-focus.ts`. Use `RIGHT_TOP_GROUP` as the Default-layout identity. Permit activation only when the live group contains exactly `files` and `changes`.
+
+Keep both activation callers on this shared helper. `ChangesTab` uses it for active-task count increases. `useChangesPanelAutoFocus` uses it after inactive-task updates.
+
+Keep an ineligible pending update available for a later eligible layout. Do not change the pending-state cleanup rules.
+
+### Regression coverage
+
+Add direct unit coverage for the activation guard in `apps/web/components/task/changes-panel-focus.test.ts`.
+
+Replace the E2E expectation that activates Changes in any non-Agent group. The new scenario selects the VS Code preset, leaves VS Code active, and creates another Git update. The test proves that the `vscode | files | changes` group does not lose focus.
+
+## Tests
+
+- `AC-UI-TASK-LAYOUT-PROFILES-001.9`: Unit cases cover the eligible Default group, a non-Default group, and a Default group with an extra VS Code tab.
+- `AC-UI-TASK-LAYOUT-PROFILES-001.9`: Existing state tests preserve reload baselining and inactive-task attention.
+
+## E2E tests
+
+- `AC-UI-TASK-LAYOUT-PROFILES-001.9`: Update `apps/web/e2e/tests/layout/changes-panel-focus.spec.ts` with the reported VS Code group scenario.
+- Existing Default-layout scenarios continue to prove eligible activation for active and returning tasks.
+- No mobile E2E case is required. Mobile and tablet task layouts do not mount `DockviewDesktopLayout` or this focus hook.
+
+## Work orders
+
+- [x] [Task 01: Restrict Changes auto-focus](task-01-restrict-changes-auto-focus.md) *(done)*
+
+## Verification results
+
+- `pnpm exec vitest run components/task/changes-panel-focus.test.ts`: passed, 19 tests.
+- `pnpm run typecheck`: passed.
+- `pnpm e2e:run tests/layout/changes-panel-focus.spec.ts -- --grep "VS Code group"`: passed.
+- The complete `changes-panel-focus.spec.ts` suite passed, 6 tests, with the desktop PR capture enabled.
+- `python3 ../../scripts/lint-spec-files.test.py`: passed, 20 tests.
+- `python3 scripts/lint-spec-files.py --all`: passed when run from the repository root.
+- `git diff --check`: passed.
+
+## Risks
+
+- A loose panel-membership check can allow another editor tab to lose focus.
+- A guard that uses the current fallback group can misidentify a non-Default layout as the Default layout.
+- Removing pending state for an ineligible layout can lose later attention after a switch to the Default layout.
