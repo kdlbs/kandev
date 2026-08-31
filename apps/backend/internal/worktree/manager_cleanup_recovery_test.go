@@ -10,6 +10,32 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+type cleanupOrderRecordingScriptHandler struct {
+	cleanupRuns int
+}
+
+func (h *cleanupOrderRecordingScriptHandler) ExecuteSetupScript(context.Context, ScriptExecutionRequest) error {
+	return nil
+}
+
+func (h *cleanupOrderRecordingScriptHandler) ExecuteCleanupScript(context.Context, ScriptExecutionRequest) error {
+	h.cleanupRuns++
+	return nil
+}
+
+type cancellingCleanupScriptHandler struct {
+	cancel context.CancelFunc
+}
+
+func (h *cancellingCleanupScriptHandler) ExecuteSetupScript(context.Context, ScriptExecutionRequest) error {
+	return nil
+}
+
+func (h *cancellingCleanupScriptHandler) ExecuteCleanupScript(context.Context, ScriptExecutionRequest) error {
+	h.cancel()
+	return nil
+}
+
 func TestCleanupWorktrees_RecoversAfterPathOnlyRemoval(t *testing.T) {
 	mgr, store := newReferenceCleanupTestManager(t)
 	seedReferenceCleanupSession(t, store, "task-partial", "session-partial", models.TaskSessionStateCompleted)
@@ -35,10 +61,11 @@ func TestCleanupWorktrees_PartialFailureRemainsRetryable(t *testing.T) {
 	if err := os.RemoveAll(wt.Path); err != nil {
 		t.Fatalf("remove worktree path without shared Git metadata: %v", err)
 	}
-	cancelled, cancel := context.WithCancel(context.Background())
-	cancel()
-	if err := mgr.CleanupWorktrees(cancelled, []*Worktree{wt}); err == nil {
-		t.Fatal("cleanup with unavailable Git metadata writer returned nil")
+	cleanupCtx, cancel := context.WithCancel(context.Background())
+	mgr.SetRepositoryProvider(&fakeRepoProvider{repo: &Repository{ID: wt.RepositoryID, CleanupScript: "true"}})
+	mgr.SetScriptMessageHandler(&cancellingCleanupScriptHandler{cancel: cancel})
+	if err := mgr.CleanupWorktrees(cleanupCtx, []*Worktree{wt}); err == nil {
+		t.Fatal("cleanup cancelled after audit returned nil")
 	}
 	assertWorktreeReferenceStatus(t, store, wt.ID, StatusActive)
 	assertCleanupBranchPresent(t, wt.RepositoryPath, wt.Branch)
@@ -68,11 +95,13 @@ func TestCleanupWorktrees_IsIdempotentAfterVerifiedRemoval(t *testing.T) {
 
 func TestCleanupWorktrees_RefusesUniqueWork(t *testing.T) {
 	tests := []struct {
-		name string
-		add  func(*testing.T, *Worktree)
+		name          string
+		add           func(*testing.T, *Worktree)
+		expectRemoval bool
 	}{
 		{
-			name: "unmerged commit",
+			name:          "unmerged commit",
+			expectRemoval: true,
 			add: func(t *testing.T, wt *Worktree) {
 				t.Helper()
 				runGit(t, wt.Path, "commit", "--allow-empty", "-m", "unique local work")
@@ -109,7 +138,7 @@ func TestCleanupWorktrees_RefusesUniqueWork(t *testing.T) {
 
 			err := mgr.CleanupWorktrees(context.Background(), []*Worktree{wt})
 			assertCleanupBranchPresent(t, wt.RepositoryPath, wt.Branch)
-			if test.name == "unmerged commit" {
+			if test.expectRemoval {
 				if err != nil {
 					t.Fatalf("cleanup preserving unique commit: %v", err)
 				}
@@ -174,11 +203,94 @@ func TestCleanupWorktrees_RefusesUnrelatedReplacementAtRecordedPath(t *testing.T
 	assertWorktreeReferenceStatus(t, store, wt.ID, StatusActive)
 }
 
+func TestCleanupWorktrees_AuditsBeforeCleanupScript(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	seedReferenceCleanupSession(t, store, "task-script-order", "session-script-order", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-script-order", "session-script-order")
+	if err := os.WriteFile(filepath.Join(wt.Path, "README.md"), []byte("keep this edit\n"), 0o644); err != nil {
+		t.Fatalf("modify tracked file: %v", err)
+	}
+
+	provider := &fakeRepoProvider{repo: &Repository{ID: wt.RepositoryID, CleanupScript: "git clean -fd"}}
+	handler := &cleanupOrderRecordingScriptHandler{}
+	mgr.SetRepositoryProvider(provider)
+	mgr.SetScriptMessageHandler(handler)
+
+	if err := mgr.CleanupWorktrees(context.Background(), []*Worktree{wt}); err == nil {
+		t.Fatal("cleanup of dirty worktree returned nil")
+	}
+	if handler.cleanupRuns != 0 {
+		t.Fatalf("cleanup script ran %d times before the audit rejected the worktree, want 0", handler.cleanupRuns)
+	}
+	if _, err := os.Stat(filepath.Join(wt.Path, "README.md")); err != nil {
+		t.Fatalf("dirty worktree was changed before audit: %v", err)
+	}
+}
+
+func TestCleanupWorktrees_RejectsChangedHeadFromCleanupSnapshot(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	seedReferenceCleanupSession(t, store, "task-head-snapshot", "session-head-snapshot", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-head-snapshot", "session-head-snapshot")
+	wt.CleanupHeadOID = strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
+	runGit(t, wt.Path, "commit", "--allow-empty", "-m", "advance cleanup branch")
+
+	if err := mgr.CleanupWorktrees(context.Background(), []*Worktree{wt}); err == nil {
+		t.Fatal("cleanup accepted a worktree whose HEAD changed after the snapshot")
+	}
+	if _, err := os.Stat(wt.Path); err != nil {
+		t.Fatalf("changed worktree path was removed: %v", err)
+	}
+	assertCleanupBranchPresent(t, wt.RepositoryPath, wt.Branch)
+	assertWorktreeReferenceStatus(t, store, wt.ID, StatusActive)
+}
+
+func TestCleanupWorktrees_AllowsMissingBranchMetadataForOwnedPath(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	seedReferenceCleanupSession(t, store, "task-detached-metadata", "session-detached-metadata", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-detached-metadata", "session-detached-metadata")
+	wt.CleanupHeadOID = strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
+	wt.Branch = ""
+
+	if err := mgr.CleanupWorktrees(context.Background(), []*Worktree{wt}); err != nil {
+		t.Fatalf("cleanup with missing branch metadata: %v", err)
+	}
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Fatalf("owned path remains after branchless cleanup: %v", err)
+	}
+	assertWorktreeReferenceStatus(t, store, wt.ID, StatusDeleted)
+}
+
+func TestCleanupWorktrees_BatchEnrichesCachedRepositoryPath(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	seedReferenceCleanupSession(t, store, "task-batch-cache", "session-batch-cache", models.TaskSessionStateCompleted)
+	created := createReferenceCleanupWorktree(t, mgr, "task-batch-cache", "session-batch-cache")
+	persisted := *created
+	persisted.RepositoryPath = ""
+	persisted.BaseBranch = ""
+
+	if err := mgr.CleanupWorktrees(context.Background(), []*Worktree{&persisted}); err != nil {
+		t.Fatalf("batch cleanup with an incomplete store projection: %v", err)
+	}
+	assertNoCleanupRegistration(t, created.RepositoryPath, created.Path)
+	assertCleanupBranchAbsent(t, created.RepositoryPath, created.Branch)
+	assertWorktreeReferenceStatus(t, store, created.ID, StatusDeleted)
+}
+
 func assertNoCleanupRegistration(t *testing.T, repoPath, worktreePath string) {
 	t.Helper()
 	out := runGit(t, repoPath, "worktree", "list", "--porcelain")
-	if strings.Contains(out, worktreePath) {
-		t.Fatalf("worktree registration remains for %q:\n%s", worktreePath, out)
+	want, err := normalizedWorktreeTargetPath(worktreePath)
+	if err != nil {
+		t.Fatalf("normalize expected worktree path: %v", err)
+	}
+	for _, registration := range parseWorktreeRegistrations(strings.ReplaceAll(out, "\n", "\x00")) {
+		got, normalizeErr := normalizedWorktreeTargetPath(registration.path)
+		if normalizeErr != nil {
+			t.Fatalf("normalize registered worktree path %q: %v", registration.path, normalizeErr)
+		}
+		if got == want {
+			t.Fatalf("worktree registration remains for %q:\n%s", worktreePath, out)
+		}
 	}
 }
 

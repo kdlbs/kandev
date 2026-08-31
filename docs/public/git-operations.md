@@ -259,13 +259,13 @@ Read-only Git actions used by the Changes panel include `session.commit_diff`, `
 
 ## Cleanup and data loss
 
-Worktree cleanup runs the repository cleanup script, forcibly removes the Git worktree directory, and may remove the local branch:
+Worktree cleanup audits the Git worktree and checkout before it runs the repository cleanup script. It then removes the Git worktree directory and may remove the local branch:
 
 - Normal task deletion audits each owned worktree before mutation. Tracked or untracked changes keep the checkout in place and make durable cleanup retry. A clean branch is removed only when its current commit is already contained by the recorded base or repository default; a clean branch with unique commits is preserved after its checkout is reclaimed. Remote branches are never deleted.
 - **Reset Environment** is allowed only when no task session is `STARTING` or `RUNNING`. It can optionally push first; a failed requested push aborts the reset. Teardown removes the worktree but deliberately preserves the local branch, then the next launch materializes a fresh environment.
 - Office handoff cleanup also preserves the branch when it releases a worktree.
 
-Before deleting a task or performing a hard reset, commit and push anything you need. A cleanup-script failure does not by itself save the directory: Kandev logs the failure and then applies the same audit. If `git worktree remove --force` fails for an exactly owned registration, managed cleanup can remove the recorded directory and prune the stale registration. Registration pruning and local-branch deletion are verified before the durable cleanup job succeeds; a partial failure remains retryable.
+Before deleting a task or performing a hard reset, commit and push anything you need. Kandev does not run a cleanup script when the audit finds uncommitted or untracked work. Cleanup scripts should perform transient teardown only; files they create are removed with the audited checkout. If an audited cleanup script fails, Kandev logs the failure and continues with the same recorded worktree. An audited directory is removed through its pinned no-follow handle, and un-audited fallback cleanup can remove a managed directory without following replacement links. Git metadata is then pruned. Registration pruning and local-branch deletion are verified before the durable cleanup job succeeds; a partial failure remains retryable.
 
 ## Troubleshooting
 

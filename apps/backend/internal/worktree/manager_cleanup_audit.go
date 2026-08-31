@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"go.uber.org/zap"
+
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 )
 
 type worktreeCleanupAudit struct {
@@ -16,27 +18,38 @@ type worktreeCleanupAudit struct {
 	deleteBranch bool
 	pathPresent  bool
 	registration worktreeRegistrationOwnership
+	pathHandle   storageworkspaces.DirectoryHandle
 }
 
 func (m *Manager) auditWorktreeCleanup(
 	ctx context.Context, wt *Worktree, removeBranch bool,
-) (worktreeCleanupAudit, error) {
+) (audit worktreeCleanupAudit, err error) {
 	if wt == nil || wt.RepositoryPath == "" || wt.Path == "" {
 		return worktreeCleanupAudit{}, errors.New("worktree cleanup requires repository and worktree paths")
 	}
-	if err := m.validateExistingWorktreePathOwner(wt.Path, wt); err != nil {
+	if err = m.validateExistingWorktreePathOwner(wt.Path, wt); err != nil {
 		return worktreeCleanupAudit{}, err
 	}
 	pathPresent, err := cleanupPathPresent(wt.Path)
 	if err != nil {
 		return worktreeCleanupAudit{}, err
 	}
+	pathHandle, err := m.openCleanupPathHandle(wt.Path, pathPresent)
+	if err != nil {
+		return worktreeCleanupAudit{}, err
+	}
+	defer func() {
+		if err != nil && pathHandle != nil {
+			_ = pathHandle.Close()
+		}
+	}()
 	branchRef, branchOID, err := m.cleanupBranchIdentity(ctx, wt)
 	if err != nil {
 		return worktreeCleanupAudit{}, err
 	}
-	registration, err := inspectCleanupRegistrationOwnership(
+	registration, err := inspectWorktreeRegistrationOwnershipWithOptions(
 		ctx, wt.RepositoryPath, wt.Path, branchRef, branchOID,
+		worktreeRegistrationOwnershipOptions{allowAnyBranchAtPath: branchRef == ""},
 	)
 	if err != nil {
 		return worktreeCleanupAudit{}, fmt.Errorf("inspect worktree cleanup registration: %w", err)
@@ -55,7 +68,7 @@ func (m *Manager) auditWorktreeCleanup(
 	}
 	return worktreeCleanupAudit{
 		branchRef: branchRef, branchOID: branchOID, deleteBranch: deleteBranch,
-		pathPresent: pathPresent, registration: registration,
+		pathPresent: pathPresent, registration: registration, pathHandle: pathHandle,
 	}, nil
 }
 
@@ -67,7 +80,7 @@ func (m *Manager) auditCleanupBranchDisposition(
 	pathPresent bool,
 	removeBranch bool,
 ) (bool, error) {
-	if !removeBranch || branchOID == "" {
+	if !removeBranch || branchRef == "" || branchOID == "" {
 		return false, nil
 	}
 	if pathPresent {
@@ -90,68 +103,50 @@ func cleanupPathPresent(path string) (bool, error) {
 	return true, nil
 }
 
-func (m *Manager) cleanupBranchIdentity(ctx context.Context, wt *Worktree) (string, string, error) {
-	if wt.Branch == "" {
-		return "", "", nil
+func (m *Manager) openCleanupPathHandle(
+	path string, pathPresent bool,
+) (storageworkspaces.DirectoryHandle, error) {
+	if !pathPresent {
+		return nil, nil
 	}
-	branchRef := "refs/heads/" + wt.Branch
+	handle, err := m.openNoFollowWorktreePath(path)
+	if err != nil {
+		return nil, err
+	}
+	if handle == nil {
+		return nil, fmt.Errorf("worktree cleanup path disappeared during audit: %s", path)
+	}
+	return handle, nil
+}
+
+func (m *Manager) cleanupBranchIdentity(ctx context.Context, wt *Worktree) (string, string, error) {
+	branchRef := ""
+	if wt.Branch != "" {
+		branchRef = "refs/heads/" + wt.Branch
+	}
+	expectedOID := strings.TrimSpace(wt.CleanupHeadOID)
+	if branchRef == "" {
+		return branchRef, expectedOID, nil
+	}
 	exists, err := m.branchExists(ctx, wt.RepositoryPath, branchRef)
 	if err != nil {
 		return "", "", fmt.Errorf("verify cleanup branch %q: %w", wt.Branch, err)
 	}
 	if !exists {
+		// The local branch is already gone. A stale registration, if any, must
+		// not be adopted without a live ref identity, so the strict ownership
+		// classifier will fail closed rather than deleting another checkout.
 		return branchRef, "", nil
 	}
 	output, err := m.runBoundedGitInspect(ctx, wt.RepositoryPath, "rev-parse", "--verify", branchRef+"^{commit}")
 	if err != nil {
 		return "", "", fmt.Errorf("resolve cleanup branch %q: %w", wt.Branch, err)
 	}
-	return branchRef, strings.TrimSpace(output), nil
-}
-
-func inspectCleanupRegistrationOwnership(
-	ctx context.Context, repoPath, worktreePath, branchRef, branchOID string,
-) (worktreeRegistrationOwnership, error) {
-	cmd := newGitCommand(ctx, "worktree", "list", "--porcelain", "-z")
-	cmd.Dir = repoPath
-	output, err := runGitCmdCombinedOutput(ctx, cmd)
-	if err != nil {
-		return worktreeRegistrationAbsent, err
+	branchOID := strings.TrimSpace(output)
+	if expectedOID != "" && branchOID != expectedOID {
+		return branchRef, "", fmt.Errorf("cleanup branch %q advanced from audited commit %s to %s", wt.Branch, expectedOID, branchOID)
 	}
-	wantPath, err := normalizedWorktreeTargetPath(worktreePath)
-	if err != nil {
-		return worktreeRegistrationAbsent, err
-	}
-	return classifyCleanupRegistrationOwnership(
-		parseWorktreeRegistrations(string(output)), wantPath, branchRef, branchOID,
-	)
-}
-
-func classifyCleanupRegistrationOwnership(
-	registrations []worktreeRegistration, wantPath, branchRef, branchOID string,
-) (worktreeRegistrationOwnership, error) {
-	owned := false
-	for _, registration := range registrations {
-		currentPath, err := normalizedWorktreeTargetPath(registration.path)
-		if err != nil {
-			return worktreeRegistrationAbsent, err
-		}
-		if currentPath != wantPath {
-			if branchRef != "" && registration.branch == branchRef {
-				return worktreeRegistrationCompeting, nil
-			}
-			continue
-		}
-		matchesOID := branchOID == "" || registration.head == branchOID
-		if registration.branch != branchRef || !matchesOID || owned {
-			return worktreeRegistrationCompeting, nil
-		}
-		owned = true
-	}
-	if owned {
-		return worktreeRegistrationOwned, nil
-	}
-	return worktreeRegistrationAbsent, nil
+	return branchRef, branchOID, nil
 }
 
 func (m *Manager) verifyCleanRedundantCheckout(
@@ -171,9 +166,23 @@ func (m *Manager) verifyCleanupBranchRedundant(
 	ctx context.Context, wt *Worktree, branchRef string,
 ) (bool, error) {
 	base := strings.TrimPrefix(wt.BaseBranch, "origin/")
-	candidates := []string{"refs/remotes/origin/HEAD", "HEAD"}
+	candidates := []string{"refs/remotes/origin/HEAD"}
 	if base != "" && base != wt.Branch {
 		candidates = append([]string{"refs/remotes/origin/" + base, "refs/heads/" + base}, candidates...)
+	}
+	if base == "" {
+		// Session metadata can be gone by the time a durable delete job runs.
+		// Keep the offline fallback limited to conventional named branches.
+		candidates = append(candidates, "refs/heads/main", "refs/heads/master")
+	}
+	// A local HEAD is a valid fallback only when it is attached to a named
+	// branch. A detached HEAD can point at an arbitrary commit and must never
+	// be treated as proof that the task branch is merged.
+	if headRef, err := m.runBoundedGitInspect(ctx, wt.RepositoryPath, "symbolic-ref", "--quiet", "--verify", "HEAD"); err == nil {
+		headRef = strings.TrimSpace(headRef)
+		if strings.HasPrefix(headRef, "refs/heads/") && headRef != "refs/heads/"+wt.Branch {
+			candidates = append(candidates, headRef)
+		}
 	}
 	foundBase := false
 	for _, candidate := range candidates {
@@ -202,19 +211,13 @@ func (m *Manager) verifyCleanupBranchRedundant(
 func (m *Manager) completeAuditedWorktreeCleanup(
 	ctx context.Context, wt *Worktree, audit worktreeCleanupAudit, removeBranch bool,
 ) error {
+	if audit.pathHandle != nil {
+		defer func() { _ = audit.pathHandle.Close() }()
+	}
 	switch audit.registration {
 	case worktreeRegistrationOwned:
-		if err := m.removeWorktreeDir(ctx, wt.Path, wt.RepositoryPath); err != nil {
-			return fmt.Errorf("remove owned worktree path: %w", err)
-		}
-		registration, err := inspectCleanupRegistrationOwnership(
-			ctx, wt.RepositoryPath, wt.Path, audit.branchRef, audit.branchOID,
-		)
-		if err != nil {
-			return fmt.Errorf("verify removed worktree registration: %w", err)
-		}
-		if registration != worktreeRegistrationAbsent {
-			return fmt.Errorf("worktree registration remains after cleanup: %s", wt.Path)
+		if err := m.completeOwnedWorktreeCleanup(ctx, wt, audit); err != nil {
+			return err
 		}
 	case worktreeRegistrationAbsent:
 		if audit.pathPresent {
@@ -224,6 +227,36 @@ func (m *Manager) completeAuditedWorktreeCleanup(
 	default:
 		return fmt.Errorf("refusing to remove competing worktree registration: %s", wt.Path)
 	}
+	return m.deleteAuditedCleanupBranch(ctx, wt, audit, removeBranch)
+}
+
+func (m *Manager) completeOwnedWorktreeCleanup(
+	ctx context.Context, wt *Worktree, audit worktreeCleanupAudit,
+) error {
+	if audit.pathHandle != nil {
+		if err := audit.pathHandle.VerifyPath(wt.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("worktree path changed after audit: %w", err)
+		}
+	}
+	if err := m.removeWorktreeDir(ctx, wt.Path, wt.RepositoryPath, audit.pathHandle); err != nil {
+		return fmt.Errorf("remove owned worktree path: %w", err)
+	}
+	registration, err := inspectWorktreeRegistrationOwnershipWithOptions(
+		ctx, wt.RepositoryPath, wt.Path, audit.branchRef, audit.branchOID,
+		worktreeRegistrationOwnershipOptions{allowAnyBranchAtPath: audit.branchRef == ""},
+	)
+	if err != nil {
+		return fmt.Errorf("verify removed worktree registration: %w", err)
+	}
+	if registration != worktreeRegistrationAbsent {
+		return fmt.Errorf("worktree registration remains after cleanup: %s", wt.Path)
+	}
+	return nil
+}
+
+func (m *Manager) deleteAuditedCleanupBranch(
+	ctx context.Context, wt *Worktree, audit worktreeCleanupAudit, removeBranch bool,
+) error {
 	if !removeBranch || audit.branchOID == "" {
 		return nil
 	}

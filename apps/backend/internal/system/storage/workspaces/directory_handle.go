@@ -1,6 +1,7 @@
 package workspaces
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,13 +11,14 @@ import (
 
 // DirectoryHandle keeps a directory pinned while a worktree decision is made.
 // Implementations open every path component without following links and use
-// the resulting descriptor or native handle for subsequent reads and writes.
-// This prevents a path replacement between validation and the side effect
-// from redirecting the operation to another task root.
+// the resulting descriptor or native handle for subsequent reads, writes, and
+// removal. This prevents a path replacement between validation and the side
+// effect from redirecting the operation to another task root.
 type DirectoryHandle interface {
 	Close() error
 	VerifyPath(path string) error
 	IsValidWorktree() bool
+	RemoveDirectory(ctx context.Context) error
 	ReadFile(name string) ([]byte, error)
 	WriteFile(name string, data []byte, mode os.FileMode) error
 }
