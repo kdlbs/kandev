@@ -4372,25 +4372,23 @@ func (s *Service) claimLifecyclePromptDispatch(
 	taskID, sessionID, claimEntryID string,
 	afterClaim func() error,
 ) (*models.TaskSession, promptClaimRollback, error) {
-	session, previousSessionState, err := s.claimLifecycleSessionRunning(
+	session, previousSessionState, turnID, createdTurn, err := s.claimLifecycleSessionRunning(
 		ctx, taskID, sessionID, claimEntryID,
 	)
 	if err != nil {
 		return nil, promptClaimRollback{}, err
 	}
-	rollback := promptClaimRollback{previousSessionState: previousSessionState}
+	rollback := promptClaimRollback{
+		previousSessionState: previousSessionState,
+		turnID:               turnID,
+		createdTurn:          createdTurn,
+	}
 	rollback.previousTaskState, rollback.taskStateClaimed, err = s.reconcileLifecycleClaim(
 		ctx, taskID, sessionID, previousSessionState, session,
 	)
 	if err != nil {
-		return nil, promptClaimRollback{}, err
-	}
-	rollback.turnID, rollback.createdTurn, _, err = s.startTurnForSessionWithOwnershipChecked(
-		ctx, sessionID, false, nil,
-	)
-	if err != nil {
 		s.rollbackPromptClaimAfterAdmissionFailure(ctx, taskID, sessionID, rollback)
-		return nil, promptClaimRollback{}, fmt.Errorf("persist lifecycle prompt turn: %w", err)
+		return nil, promptClaimRollback{}, err
 	}
 	if err := s.acknowledgePromptClaim(ctx, taskID, sessionID, afterClaim, rollback); err != nil {
 		return nil, promptClaimRollback{}, err
@@ -4779,7 +4777,7 @@ func (s *Service) claimSessionRunningForPrompt(
 func (s *Service) claimLifecycleSessionRunning(
 	ctx context.Context,
 	taskID, sessionID, claimEntryID string,
-) (*models.TaskSession, models.TaskSessionState, error) {
+) (*models.TaskSession, models.TaskSessionState, string, bool, error) {
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
 	lock.Lock()
@@ -4787,49 +4785,59 @@ func (s *Service) claimLifecycleSessionRunning(
 	// Match ordinary prompt admission: a reset-owned cancellation must reject
 	// lifecycle admission before its cancellation wait can observe ctx.Err().
 	if s.isSessionResetInProgress(sessionID) {
-		return nil, "", ErrSessionResetInProgress
+		return nil, "", "", false, ErrSessionResetInProgress
 	}
 	if err := s.waitForCancellationWithGuard(ctx, sessionID, lock.Unlock, lock.Lock); err != nil {
-		return nil, "", err
+		return nil, "", "", false, err
 	}
 	if s.isSessionResetInProgress(sessionID) {
-		return nil, "", ErrSessionResetInProgress
+		return nil, "", "", false, ErrSessionResetInProgress
 	}
 
 	if claimEntryID != "" && !s.isCurrentQueuedDispatch(sessionID, claimEntryID) {
-		return nil, "", errQueuedDispatchSuperseded
+		return nil, "", "", false, errQueuedDispatchSuperseded
 	}
 	if err := s.validateLifecyclePromptSelection(ctx, taskID, sessionID); err != nil {
-		return nil, "", err
+		return nil, "", "", false, err
 	}
 	claim, err := s.repo.ClaimPromptableTaskSessionIfActive(ctx, sessionID)
 	if err != nil {
-		return nil, "", fmt.Errorf("%w: %v", errLifecyclePromptClaim, err)
+		return nil, "", "", false, fmt.Errorf("%w: %v", errLifecyclePromptClaim, err)
 	}
 	switch claim.Status {
 	case models.PromptableTaskSessionInactive:
-		return nil, "", errLifecyclePromptInactive
+		return nil, "", "", false, errLifecyclePromptInactive
 	case models.PromptableTaskSessionBusy:
-		return nil, "", fmt.Errorf("%w: lifecycle prompt session is busy", ErrAgentPromptInProgress)
+		return nil, "", "", false, fmt.Errorf("%w: lifecycle prompt session is busy", ErrAgentPromptInProgress)
 	}
 	if claimEntryID != "" && !s.isCurrentQueuedDispatch(sessionID, claimEntryID) {
 		s.restoreLifecycleClaim(ctx, taskID, sessionID, claim.PreviousState)
-		return nil, "", errQueuedDispatchSuperseded
+		return nil, "", "", false, errQueuedDispatchSuperseded
 	}
 	if s.isSessionResetInProgress(sessionID) {
 		s.restoreLifecycleClaim(ctx, taskID, sessionID, claim.PreviousState)
-		return nil, "", ErrSessionResetInProgress
+		return nil, "", "", false, ErrSessionResetInProgress
 	}
 	freshSession, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || freshSession == nil {
 		s.restoreLifecycleClaim(ctx, taskID, sessionID, claim.PreviousState)
-		return nil, "", errLifecyclePromptInactive
+		return nil, "", "", false, errLifecyclePromptInactive
+	}
+	// Keep the lifecycle admission guard through durable turn creation. A reset
+	// that follows this claim must observe this turn and quiesce it before it
+	// replaces the provider context.
+	turnID, createdTurn, _, err := s.startTurnForSessionWithOwnershipChecked(ctx, sessionID, false, nil)
+	if err != nil {
+		failureCtx, cancel := (promptTaskOptions{}).failureContext(ctx)
+		defer cancel()
+		s.restoreLifecycleClaim(failureCtx, taskID, sessionID, claim.PreviousState)
+		return nil, "", "", false, fmt.Errorf("persist lifecycle prompt turn: %w", err)
 	}
 	s.releaseQueuedDispatchPendingIfCurrent(
 		sessionID,
 		s.queuedDispatchReservationForEntry(sessionID, claimEntryID),
 	)
-	return freshSession, claim.PreviousState, nil
+	return freshSession, claim.PreviousState, turnID, createdTurn, nil
 }
 
 func (s *Service) validateLifecyclePromptSelection(
