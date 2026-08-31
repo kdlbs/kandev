@@ -310,59 +310,18 @@ func TestHandleCreateTask_AssociatesExistingRemoteContribution(t *testing.T) {
 	taskRepos, err := repo.ListTaskRepositories(ctx, task.ID)
 	require.NoError(t, err)
 	require.Len(t, taskRepos, 1)
+	if remote.repositoryID != taskRepos[0].RepositoryID {
+		t.Fatalf("Associate received repositoryID %q, want task_repositories.repository_id %q",
+			remote.repositoryID, taskRepos[0].RepositoryID)
+	}
+	if remote.repositoryID == taskRepos[0].ID {
+		t.Fatalf("Associate received task_repositories row id %q instead of repository_id",
+			remote.repositoryID)
+	}
 	binding, found, err := models.LoadRemoteContribution(taskRepos[0].Metadata)
 	require.NoError(t, err)
 	if !found || binding.SourceRepository.Path != "contributor/widget" {
 		t.Fatalf("persisted remote contribution = (%+v, found=%v)", binding, found)
-	}
-}
-
-// TestHandleCreateTask_AssociateReceivesRepositoryIDNotRowID guards against
-// regressing handlers.go's Associate call back to task_repositories.ID: that
-// id space collides with no other row's repository_id, so two writers using
-// different id spaces for the same task+PR both pass the UNIQUE(task_id,
-// repository_id, pr_number) constraint and the PR renders twice.
-func TestHandleCreateTask_AssociateReceivesRepositoryIDNotRowID(t *testing.T) {
-	svc, repo := newTestTaskService(t)
-	ctx := context.Background()
-	workspaces, err := svc.ListWorkspaces(ctx)
-	require.NoError(t, err)
-	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
-	require.NoError(t, err)
-	remote := &recordingRemoteContributionService{resolution: testRemoteContributionResolution()}
-	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
-	h.SetRemoteContributionService(remote)
-
-	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
-		"workspace_id":     workspaces[0].ID,
-		"workflow_id":      workflows[0].ID,
-		"title":            "Remote contribution repository id",
-		"description":      "Work on the existing contribution",
-		"agent_profile_id": "profile-remote",
-		"start_agent":      false,
-		"repositories": []map[string]interface{}{{
-			"github_url":  "https://github.com/acme/widget/pull/7",
-			"base_branch": "main",
-		}},
-	}))
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-	if resp.Type == ws.MessageTypeError {
-		t.Fatalf("create task returned error: %s", string(resp.Payload))
-	}
-
-	require.NotEmpty(t, remote.taskID, "Associate must have been called")
-	taskRepos, err := repo.ListTaskRepositories(ctx, remote.taskID)
-	require.NoError(t, err)
-	require.Len(t, taskRepos, 1)
-
-	if remote.repositoryID != taskRepos[0].RepositoryID {
-		t.Fatalf("Associate received repositoryID %q, want task_repositories row's repository_id %q",
-			remote.repositoryID, taskRepos[0].RepositoryID)
-	}
-	if remote.repositoryID == taskRepos[0].ID {
-		t.Fatalf("Associate received the task_repositories row id %q instead of its repository_id column",
-			remote.repositoryID)
 	}
 }
 

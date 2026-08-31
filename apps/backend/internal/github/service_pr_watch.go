@@ -329,6 +329,9 @@ func (s *Service) AssociatePRWithTaskForWorkspace(
 func (s *Service) associatePRWithTask(
 	ctx context.Context, workspaceID, taskID, repositoryID string, pr *PR, restoreDetached, outcomeFieldsPopulated bool,
 ) (*TaskPR, error) {
+	if err := s.validateTaskRepositoryID(ctx, taskID, repositoryID); err != nil {
+		return nil, err
+	}
 	// Multi-branch: scope the "already-current" short-circuit by exact
 	// pr_number too. A task can hold multiple PR rows per (task, repo) on
 	// different branches; the legacy by-repo lookup returns whichever row
@@ -437,6 +440,9 @@ func (s *Service) AssociateExistingPRByURL(ctx context.Context, taskID, reposito
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidPRURL, err)
 	}
+	if err := s.validateTaskRepositoryID(ctx, taskID, repositoryID); err != nil {
+		return nil, err
+	}
 	pr, err := s.client.GetPR(ctx, owner, repo, prNumber)
 	if err != nil {
 		return nil, fmt.Errorf("fetch PR: %w", err)
@@ -456,6 +462,9 @@ func (s *Service) AssociateExistingPRByURLForWorkspace(
 	owner, repo, prNumber, err := parsePRURL(prURL)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidPRURL, err)
+	}
+	if err := s.validateTaskRepositoryID(ctx, taskID, repositoryID); err != nil {
+		return nil, err
 	}
 	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
 		return nil, err
@@ -490,6 +499,11 @@ func (s *Service) AssociatePRByURL(ctx context.Context, sessionID, taskID, repos
 		s.logger.Error("failed to parse PR URL", zap.String("url", prURL), zap.Error(err))
 		return
 	}
+	if err := s.validateTaskRepositoryID(ctx, taskID, repositoryID); err != nil {
+		s.logger.Error("invalid task repository for PR association",
+			zap.String("task_id", taskID), zap.String("repository_id", repositoryID), zap.Error(err))
+		return
+	}
 
 	pr, err := s.client.GetPR(ctx, owner, repo, prNumber)
 	if err != nil {
@@ -520,6 +534,9 @@ func (s *Service) AssociatePRByURLForWorkspace(
 	owner, repo, prNumber, err := parsePRURL(prURL)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidPRURL, err)
+	}
+	if err := s.validateTaskRepositoryID(ctx, taskID, repositoryID); err != nil {
+		return err
 	}
 	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
 		return err
