@@ -442,6 +442,7 @@ function ProfileEditor({
   const providerInvalidKey = providerConfigInvalidReasonKey({
     providerKind: draft.providerKind,
     providerBaseUrl: draft.providerBaseUrl,
+    providerApiKeySecretId: draft.providerApiKeySecretId,
     model: draft.model,
   });
   useSettingsSaveContributor({

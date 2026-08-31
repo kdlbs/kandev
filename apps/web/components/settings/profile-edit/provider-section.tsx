@@ -12,6 +12,7 @@ import { SettingsCardHeader } from "@/components/settings/settings-card-header";
 import { isProviderConfigDirty } from "@/components/settings/agent-profile-dirty";
 import {
   PROVIDER_KIND_OPENAI_COMPATIBLE,
+  isCredentialTransportSafe,
   isOpenAICompatibleProvider,
   isValidProviderBaseUrl,
 } from "@/lib/settings/provider-config-validation";
@@ -104,7 +105,10 @@ function OpenAICompatibleProviderFields({
 }: ProviderSectionProps) {
   const { t } = useTranslation();
   const baseUrl = draft.providerBaseUrl ?? "";
-  const baseUrlInvalid = baseUrl.trim() !== "" && !isValidProviderBaseUrl(baseUrl);
+  const hasApiKey = (draft.providerApiKeySecretId ?? "").trim() !== "";
+  const baseUrlInvalid =
+    baseUrl.trim() !== "" &&
+    (!isValidProviderBaseUrl(baseUrl) || (hasApiKey && !isCredentialTransportSafe(baseUrl)));
   const modelHasSlash = (draft.model ?? "").includes("/");
   const keyDirty =
     (draft.providerApiKeySecretId ?? "") !== (savedProfile.providerApiKeySecretId ?? "");

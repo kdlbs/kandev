@@ -53,6 +53,24 @@ func TestClientAuthMeta(t *testing.T) {
 	}
 }
 
+func TestValidateCredentialedBaseURL(t *testing.T) {
+	ok := []string{
+		"https://router.example/v1", "http://localhost:20128/v1",
+		"http://127.0.0.1/v1", "http://[::1]:8080/v1",
+	}
+	for _, raw := range ok {
+		if err := ValidateCredentialedBaseURL(raw); err != nil {
+			t.Errorf("ValidateCredentialedBaseURL(%q) = %v, want nil", raw, err)
+		}
+	}
+	bad := []string{"http://router.example/v1", "http://10.0.0.4:9000/v1", "http://host.docker.internal/v1", ""}
+	for _, raw := range bad {
+		if err := ValidateCredentialedBaseURL(raw); err == nil {
+			t.Errorf("ValidateCredentialedBaseURL(%q) = nil, want error", raw)
+		}
+	}
+}
+
 func TestIsLoopbackBaseURL(t *testing.T) {
 	loopback := []string{
 		"http://localhost:20128/v1", "http://127.0.0.1:20128/v1",

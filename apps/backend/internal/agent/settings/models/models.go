@@ -114,7 +114,9 @@ type AgentProfile struct {
 	ProviderKind string `json:"provider_kind,omitempty" db:"provider_kind"`
 	// ProviderBaseURL is the absolute http(s) endpoint root of the
 	// OpenAI-compatible provider, e.g. "http://localhost:20128/v1". Required
-	// when ProviderKind == ProviderKindOpenAICompatible; inert otherwise.
+	// when ProviderKind == ProviderKindOpenAICompatible; inert otherwise. When
+	// ProviderAPIKeySecretID is set the URL must be https or a loopback host so
+	// the bearer key is never sent in cleartext.
 	ProviderBaseURL string `json:"provider_base_url,omitempty" db:"provider_base_url"`
 	// ProviderAPIKeySecretID references a Kandev global secret holding the
 	// bearer key for the provider. The value itself is never stored on the

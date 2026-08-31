@@ -152,6 +152,12 @@ Validation (settings service, shared helper so create/update/duplicate agree):
 - `provider_kind == openai_compatible` requires `provider_supported`,
   a `provider_base_url` that `url.Parse`s to an absolute `http`/`https` URL, and
   a `Model` without `/` (AC-001.2, AC-001.5, AC-003 setup).
+- When `provider_api_key_secret_id` is set, the base URL check is the stricter
+  `acpprovider.ValidateCredentialedBaseURL`: `http` is allowed only to a
+  loopback host, everything else must be `https`, so the bearer key is never
+  sent in cleartext (AC-001.6). The runtime resolver
+  (`Manager.resolveProviderGatewayAuth`) applies the same check before building
+  the `authenticate` params, so a legacy row cannot bypass it.
 - `provider_kind != openai_compatible` clears the other two fields on write so
   stored values cannot linger active (AC-001.4).
 
@@ -192,10 +198,11 @@ provider spec fails closed with `ErrProviderMisconfigured` (AC-003.2). The
 utility ACP executor (`acp_executor.go`) advertises the gateway client
 capability and sends `authenticate(gateway)` right after `initialize` in both
 `executeACPSession` and `probeACPSessionWithContext`; a failure aborts rather
-than falling back to the vendor endpoint (AC-003.1, AC-003.2). No separate
-profile-scoped model probe exists today; provider profiles use free-text model
-entry (AC-001.2), and the probe executor is ready for any caller that supplies
-`ProviderGatewayAuth`.
+than falling back to the vendor endpoint (AC-003.1, AC-003.2). Provider profiles
+take their model as free-text (AC-001.2), so there is no per-profile model probe
+to wire and none is required for the model picker; the probe executor accepts
+`ProviderGatewayAuth` and applies the same gateway `authenticate`, so a
+profile-scoped probe caller added later needs no new plumbing (AC-003.1).
 
 Upstream failure surfacing: `describeACPFailure` already special-cases
 timeout/cancel; `withUpstreamHint` additionally appends a sanitized HTTP status
@@ -225,6 +232,7 @@ Two corrections in `internal/agent/runtime/lifecycle/profile_env.go`:
 | Secret store absent / reveal fails for the provider key | `PROVIDER_MISCONFIGURED`, launch aborts, no vendor fallback |
 | One unrelated profile env secret fails | that entry dropped + warn log; launch proceeds |
 | Base URL empty or not absolute http(s) | rejected at save; at launch (legacy row) → `PROVIDER_MISCONFIGURED` |
+| Cleartext `http` base URL to a non-loopback host **with** an API key | rejected at save; at launch (legacy row) → `PROVIDER_MISCONFIGURED` (bearer key would go in the clear) |
 | Model contains `/` | rejected at save; at launch → `PROVIDER_MISCONFIGURED` |
 | Provider returns 401/5xx during probe/inference | sanitized upstream status in the error, retryable |
 | Agent has no `OpenAICompatibleProvider()` but row has stale fields | fields inert; `native` behavior |
@@ -266,6 +274,15 @@ new columns.
 - The API key is a Kandev secret, revealed only into the target subprocess env,
   never returned by any profile API, never written to a file on disk for the
   Codex path.
+- **Transport for the credentialed gateway:** when an API key is referenced the
+  base URL must be `https` or a loopback host, enforced at save
+  (`normalizeProviderConfig`) and again at launch
+  (`resolveProviderGatewayAuth`), both via
+  `acpprovider.ValidateCredentialedBaseURL` so the two cannot drift. This stops
+  the bearer key from being sent over cleartext `http`. Kandev validates the
+  configured URL only; the agent's own HTTP client governs redirect following,
+  which is why a loopback rewrite target (`host.docker.internal`) is not treated
+  as credential-safe for a non-loopback original.
 - Base URL is operator-supplied; it is not fetched or probed by the backend
   outside the agent subprocess, so it is not an SSRF vector beyond what the
   agent CLI already does with its own config.

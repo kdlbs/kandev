@@ -77,6 +77,26 @@ func ValidateBaseURL(raw string) error {
 	return nil
 }
 
+// ValidateCredentialedBaseURL is ValidateBaseURL plus a transport-safety rule
+// for a gateway that carries a bearer credential: cleartext http:// is allowed
+// only to a loopback host, so the Authorization header is never sent in the
+// clear over the network. https is always allowed. Kandev enforces this on the
+// configured URL only; how the agent's own HTTP client follows redirects is out
+// of scope here.
+func ValidateCredentialedBaseURL(raw string) error {
+	if err := ValidateBaseURL(raw); err != nil {
+		return err
+	}
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("base URL is not a valid URL")
+	}
+	if u.Scheme == "http" && !isLoopbackHostname(u.Hostname()) {
+		return fmt.Errorf("base URL must use https when an API key is set (http is allowed only for a localhost provider)")
+	}
+	return nil
+}
+
 // IsLoopbackBaseURL reports whether raw points at the local loopback interface
 // ("localhost", 127.0.0.0/8, or ::1). Such a URL is unreachable from an agent
 // running inside a container: the container's own loopback is not the host's.

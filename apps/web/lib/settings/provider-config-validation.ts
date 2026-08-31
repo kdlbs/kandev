@@ -14,8 +14,32 @@ export const PROVIDER_KIND_OPENAI_COMPATIBLE = "openai_compatible";
 export type ProviderConfigDraft = {
   providerKind?: string;
   providerBaseUrl?: string;
+  providerApiKeySecretId?: string;
   model?: string;
 };
+
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+
+function isLoopbackHostname(hostname: string): boolean {
+  if (LOOPBACK_HOSTNAMES.has(hostname)) return true;
+  return /^127(?:\.\d{1,3}){3}$/.test(hostname);
+}
+
+/**
+ * True when `raw` is safe to send a bearer credential to: https, or http only
+ * to a loopback host. Mirrors `acpprovider.ValidateCredentialedBaseURL` so the
+ * editor blocks the same cleartext-credential leak the backend rejects.
+ */
+export function isCredentialTransportSafe(raw: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw.trim());
+  } catch {
+    return false;
+  }
+  if (parsed.protocol === "https:") return true;
+  return parsed.protocol === "http:" && isLoopbackHostname(parsed.hostname);
+}
 
 export function isOpenAICompatibleProvider(kind: string | undefined): boolean {
   return kind === PROVIDER_KIND_OPENAI_COMPATIBLE;
@@ -42,7 +66,14 @@ export function isValidProviderBaseUrl(raw: string): boolean {
  */
 export function providerConfigInvalidReasonKey(draft: ProviderConfigDraft): string | undefined {
   if (!isOpenAICompatibleProvider(draft.providerKind)) return undefined;
-  if (!isValidProviderBaseUrl(draft.providerBaseUrl ?? "")) {
+  const baseUrl = draft.providerBaseUrl ?? "";
+  if (!isValidProviderBaseUrl(baseUrl)) {
+    return "agents:providerBaseUrlInvalid";
+  }
+  if ((draft.providerApiKeySecretId ?? "").trim() !== "" && !isCredentialTransportSafe(baseUrl)) {
+    // Reuses the base-URL-invalid key (no new catalog entry): the precise
+    // "use https for a credentialed provider" reason comes from the backend on
+    // save. The point here is to block the cleartext-credential save up front.
     return "agents:providerBaseUrlInvalid";
   }
   if ((draft.model ?? "").includes("/")) {

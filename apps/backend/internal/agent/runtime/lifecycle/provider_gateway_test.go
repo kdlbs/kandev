@@ -94,6 +94,14 @@ func TestResolveProviderGatewayAuth_FailsClosed(t *testing.T) {
 	if _, _, _, err := m.resolveProviderGatewayAuth(context.Background(), &remote, agents.NewCodexACP(), agentruntime.RuntimeRemoteDocker); !errors.Is(err, ErrProviderMisconfigured) {
 		t.Errorf("remote loopback: err = %v", err)
 	}
+
+	// Cleartext http to a non-loopback host while carrying a credential is rejected.
+	insecure := *base
+	insecure.ProviderBaseURL = "http://router.example/v1"
+	insecure.ProviderAPIKeySecretID = "sec-key"
+	if _, _, _, err := m.resolveProviderGatewayAuth(context.Background(), &insecure, agents.NewCodexACP(), agentruntime.RuntimeStandalone); !errors.Is(err, ErrProviderMisconfigured) {
+		t.Errorf("credentialed cleartext: err = %v", err)
+	}
 }
 
 func TestResolveProviderGatewayAuth_LocalDockerRewritesLoopback(t *testing.T) {

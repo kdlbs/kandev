@@ -45,8 +45,9 @@ of "peer disconnected".
 
 1. A profile-scoped utility prompt on an `openai_compatible` Codex profile
    reaches a stub OpenAI server with the injected bearer key.
-2. The sessionless model probe for that profile context applies the same
-   injection.
+2. The sessionless probe executor accepts `ProviderGatewayAuth` and issues the
+   gateway `authenticate` when supplied (AC-003.1, revised: provider profiles
+   use free-text model entry, so no per-profile probe caller is wired).
 3. A stubbed provider `401` produces an error whose message contains a
    sanitized upstream indication, not only "peer disconnected", and no key.
 

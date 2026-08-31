@@ -73,6 +73,14 @@ without me editing CLI config files on the host.
   containing a slash is rejected at save time for an `openai_compatible`
   profile, with a message explaining that the target CLI routes slash-prefixed
   models to its built-in vendor provider.
+- **AC-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-001.6:** When an API-key secret is
+  referenced, the base URL must be `https` or an explicit loopback host
+  (`localhost`, `127.0.0.0/8`, `::1`); a cleartext `http` URL to any other host
+  is rejected at save time and again at launch, so the bearer key is never put
+  on the wire in the clear. A URL with no key reference keeps the plain
+  absolute-`http(s)` rule. Kandev validates the configured URL only; how the
+  agent's own HTTP client follows redirects is outside Kandev's control and is
+  not a substitute for pointing the profile at an `https` endpoint.
 
 ### REQ-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-002: Injection into the live agent session
 
@@ -119,9 +127,12 @@ my router-backed profile, so that the provider primitive is not Codex-chat only.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-003.1:** The sessionless ACP probe
-  used by the agent-models surfaces applies the same provider injection as a
-  live session when it runs for an `openai_compatible` profile context.
+- **AC-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-003.1:** `openai_compatible` profiles
+  take their model as free-text (AC-001.2), so no per-profile model probe is
+  required for the model picker to work. The sessionless ACP probe executor
+  nonetheless accepts `ProviderGatewayAuth` and applies the same gateway
+  `authenticate` as a live session, so a probe that is later run for a
+  provider-profile context reaches the declared endpoint with no further work.
 - **AC-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-003.2:** The one-shot inference
   executor applies the same provider injection, so a profile-scoped utility
   prompt reaches the declared endpoint with the declared key.

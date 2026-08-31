@@ -376,6 +376,7 @@ function providerInvalidKey(
     const key = providerConfigInvalidReasonKey({
       providerKind: profile.providerKind,
       providerBaseUrl: profile.providerBaseUrl,
+      providerApiKeySecretId: profile.providerApiKeySecretId,
       model: profile.model,
     });
     if (key) return key;

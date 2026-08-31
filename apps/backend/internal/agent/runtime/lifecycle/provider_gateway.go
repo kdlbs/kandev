@@ -36,7 +36,13 @@ func (m *Manager) resolveProviderGatewayAuth(
 		return nil, "", "", fmt.Errorf("%w: agent %q does not support an OpenAI-compatible provider",
 			ErrProviderMisconfigured, profileInfo.AgentName)
 	}
-	if verr := acpprovider.ValidateBaseURL(profileInfo.ProviderBaseURL); verr != nil {
+	validateBaseURL := acpprovider.ValidateBaseURL
+	if profileInfo.ProviderAPIKeySecretID != "" {
+		// The revealed key rides in an Authorization header to this URL; refuse a
+		// cleartext non-loopback destination rather than leak it on the wire.
+		validateBaseURL = acpprovider.ValidateCredentialedBaseURL
+	}
+	if verr := validateBaseURL(profileInfo.ProviderBaseURL); verr != nil {
 		return nil, "", "", fmt.Errorf("%w: %v", ErrProviderMisconfigured, verr)
 	}
 	baseURL, verr := providerBaseURLForRuntime(profileInfo.ProviderBaseURL, runtime)

@@ -857,7 +857,8 @@ func (c *Controller) providerSupported(agentName string) bool {
 // is openai_compatible the agent must support it, the base URL must be an
 // absolute http(s) URL, and the model id must not contain '/' (the target CLI
 // routes a slash-prefixed model to its built-in vendor provider). The secret
-// ref, when set, must resolve to a global secret.
+// ref, when set, must resolve to a global secret, and the base URL must then be
+// https or a loopback host so the bearer key is never sent in cleartext.
 func (c *Controller) normalizeProviderConfig(ctx context.Context, p *models.AgentProfile, agentName string) error {
 	if strings.TrimSpace(p.ProviderKind) != models.ProviderKindOpenAICompatible {
 		p.ProviderKind = models.ProviderKindNative
@@ -870,13 +871,17 @@ func (c *Controller) normalizeProviderConfig(ctx context.Context, p *models.Agen
 		return fmt.Errorf("%w: agent %q does not support an OpenAI-compatible provider", ErrInvalidProviderConfig, agentName)
 	}
 	p.ProviderBaseURL = strings.TrimSpace(p.ProviderBaseURL)
-	if err := acpprovider.ValidateBaseURL(p.ProviderBaseURL); err != nil {
+	p.ProviderAPIKeySecretID = strings.TrimSpace(p.ProviderAPIKeySecretID)
+	validateBaseURL := acpprovider.ValidateBaseURL
+	if p.ProviderAPIKeySecretID != "" {
+		validateBaseURL = acpprovider.ValidateCredentialedBaseURL
+	}
+	if err := validateBaseURL(p.ProviderBaseURL); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidProviderConfig, err)
 	}
 	if strings.Contains(p.Model, "/") {
 		return fmt.Errorf("%w: model id %q must not contain '/'", ErrInvalidProviderConfig, p.Model)
 	}
-	p.ProviderAPIKeySecretID = strings.TrimSpace(p.ProviderAPIKeySecretID)
 	if p.ProviderAPIKeySecretID != "" && c.secretStore != nil {
 		if err := secrets.ValidateGlobalReference(ctx, c.secretStore, p.ProviderAPIKeySecretID); err != nil {
 			return fmt.Errorf("%w: API key secret must be global", ErrInvalidProviderConfig)

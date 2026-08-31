@@ -95,5 +95,7 @@ hidden unless the profile API projection reports `provider_supported`.
   `agent-profile-normalize.test.ts` provider round-trip; e2e
   `agent-profile-provider.spec.ts` + `mobile-agent-profile-provider.spec.ts`
   (need the full e2e stack to run).
-- No profile-scoped model probe exists; provider profiles use free-text model
-  entry (AC-001.2), so AC-003.1's probe injection is executor-ready only.
+- Provider profiles take their model as free-text (AC-001.2), so no per-profile
+  model probe is wired and none is required; AC-003.1 (revised) makes this the
+  intended design, with the probe executor accepting `ProviderGatewayAuth` for a
+  future caller.

@@ -95,6 +95,7 @@ func TestCreateProfile_OpenAICompatibleProvider_Rejections(t *testing.T) {
 		{"relative base URL", CreateProfileRequest{AgentID: codexID, Name: "a", Model: "code", ProviderKind: models.ProviderKindOpenAICompatible, ProviderBaseURL: "/v1"}},
 		{"slash in model", CreateProfileRequest{AgentID: codexID, Name: "a", Model: "openai/gpt-4o", ProviderKind: models.ProviderKindOpenAICompatible, ProviderBaseURL: "http://localhost:20128/v1"}},
 		{"agent unsupported", CreateProfileRequest{AgentID: claudeID, Name: "a", Model: "sonnet", ProviderKind: models.ProviderKindOpenAICompatible, ProviderBaseURL: "http://localhost:20128/v1"}},
+		{"cleartext http with API key", CreateProfileRequest{AgentID: codexID, Name: "a", Model: "code", ProviderKind: models.ProviderKindOpenAICompatible, ProviderBaseURL: "http://router.example/v1", ProviderAPIKeySecretID: "sec-1"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -102,6 +103,34 @@ func TestCreateProfile_OpenAICompatibleProvider_Rejections(t *testing.T) {
 				t.Fatalf("err = %v, want ErrInvalidProviderConfig", err)
 			}
 		})
+	}
+}
+
+func TestCreateProfile_CredentialedProviderTransport(t *testing.T) {
+	ctrl, _, ctx, codexID, _ := newProviderTestController(t)
+
+	// https with a key is fine.
+	if _, err := ctrl.CreateProfile(ctx, CreateProfileRequest{
+		AgentID: codexID, Name: "https", Model: "code",
+		ProviderKind: models.ProviderKindOpenAICompatible, ProviderBaseURL: "https://router.example/v1",
+		ProviderAPIKeySecretID: "sec-1",
+	}); err != nil {
+		t.Fatalf("https + key: %v", err)
+	}
+	// http to loopback with a key is fine (never leaves the host).
+	if _, err := ctrl.CreateProfile(ctx, CreateProfileRequest{
+		AgentID: codexID, Name: "loopback", Model: "code",
+		ProviderKind: models.ProviderKindOpenAICompatible, ProviderBaseURL: "http://localhost:20128/v1",
+		ProviderAPIKeySecretID: "sec-1",
+	}); err != nil {
+		t.Fatalf("http loopback + key: %v", err)
+	}
+	// http to a non-loopback host with no key stays allowed.
+	if _, err := ctrl.CreateProfile(ctx, CreateProfileRequest{
+		AgentID: codexID, Name: "nokey", Model: "code",
+		ProviderKind: models.ProviderKindOpenAICompatible, ProviderBaseURL: "http://router.example/v1",
+	}); err != nil {
+		t.Fatalf("http non-loopback, no key: %v", err)
 	}
 }
 
