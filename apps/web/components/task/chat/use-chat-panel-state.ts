@@ -432,6 +432,7 @@ function useSessionData(
     messages,
     isLoading: messagesLoading,
     isInitialMessagesLoading,
+    historyInitialized,
     hasMore: hasOlderMessages,
   } = useSessionMessages(resolvedSessionId);
   const turns = useAppStore((state) =>
@@ -443,6 +444,7 @@ function useSessionData(
   );
   const lastAgentError = useMemo(() => readLastAgentError(session?.metadata), [session?.metadata]);
   const processed = useProcessedMessages(messages, taskId, resolvedSessionId, taskDescription, {
+    historyInitialized,
     hasOlderMessages,
     lastAgentError,
     currentTurnId,

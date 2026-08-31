@@ -254,7 +254,7 @@ function mapGitHubIdentity(taskPR: TaskPR, feedback: PRFeedback | null) {
   const live = feedback?.pr;
   return {
     title: live?.title ?? taskPR.pr_title,
-    url: live?.html_url || live?.url || taskPR.pr_url,
+    url: live?.html_url || taskPR.pr_url,
     state: live?.state ?? taskPR.state,
     draft: live?.draft,
     author: githubPerson(live?.author_login ?? taskPR.author_login),
@@ -323,16 +323,20 @@ function mapGitHubChecks(feedback: PRFeedback | null) {
   }));
 }
 
-function mapGitHubComments(feedback: PRFeedback | null) {
-  return (feedback?.comments ?? []).map((comment) => ({
-    id: String(comment.id),
-    parentId: comment.in_reply_to ? String(comment.in_reply_to) : undefined,
-    author: githubPerson(comment.author, comment.author_avatar, comment.author_is_bot),
-    body: comment.body,
-    createdAt: comment.created_at,
-    path: comment.path || undefined,
-    line: comment.line || undefined,
-  }));
+export function mapGitHubComments(feedback: PRFeedback | null) {
+  return (feedback?.comments ?? []).map((comment) => {
+    const url = comment.html_url?.trim();
+    return {
+      id: String(comment.id),
+      parentId: comment.in_reply_to ? String(comment.in_reply_to) : undefined,
+      author: githubPerson(comment.author, comment.author_avatar, comment.author_is_bot),
+      body: comment.body,
+      createdAt: comment.created_at,
+      ...(url ? { url } : {}),
+      path: comment.path || undefined,
+      line: comment.line || undefined,
+    };
+  });
 }
 
 function mapGitHubDetail(

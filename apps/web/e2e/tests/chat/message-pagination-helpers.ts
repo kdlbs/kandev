@@ -9,6 +9,8 @@ export const PRE_PROMPT_MARKER = "HIDDEN-PRE-PROMPT-MARKER-6N3V";
 export const EAGER_HISTORY_PROMPT_MARKER = "EAGER-HISTORY-PROMPT-MARKER-3J6W";
 export const VISIBLE_PAGE_MARKER = "VISIBLE-PAGE-MARKER-8D5H";
 export const SHORT_PAGE_BOUNDARY_MARKER = "SHORT-PAGE-BOUNDARY-MARKER-5T1C";
+export const DEEP_PROMPT_MARKER = "DEEP-PROMPT-MARKER-2P7N";
+export const LONG_HISTORY_TAIL_MARKER = "LONG-HISTORY-TAIL-MARKER-6V4R";
 
 /** Seeds an older prompt followed by a tool-only newest window. */
 export async function seedToolHeavyOpeningHistory(
@@ -36,6 +38,47 @@ export async function seedToolHeavyOpeningHistory(
     state: "IDLE",
     commandCount: 150,
   });
+  return { taskId: task.id, sessionId };
+}
+
+/** Seeds a prompt more than twenty older pages behind a bounded tool-only
+ * newest window. All newer activity shares one turn so collapsed rendering
+ * keeps the sentinel in preload while the cursor pages are committed. */
+export async function seedLongMessageHistory(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+): Promise<{ taskId: string; sessionId: string }> {
+  const task = await apiClient.createTask(seedData.workspaceId, title, {
+    description: TASK_DESCRIPTION_MARKER,
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+    repository_ids: [seedData.repositoryId],
+  });
+  const { session_id: sessionId } = await apiClient.seedTaskSession(task.id, {
+    state: "IDLE",
+    repositoryId: seedData.repositoryId,
+  });
+
+  await apiClient.seedSessionMessage(sessionId, {
+    type: "message",
+    content: INITIAL_PROMPT_MARKER,
+    authorType: "user",
+  });
+  await apiClient.seedSessionMessage(sessionId, {
+    type: "message",
+    content: DEEP_PROMPT_MARKER,
+    authorType: "user",
+  });
+  await apiClient.seedToolCallMessages(sessionId, 520, { status: "complete" });
+  await apiClient.seedSessionMessage(sessionId, {
+    type: "message",
+    content: LONG_HISTORY_TAIL_MARKER,
+  });
+  // Keep the initial bounded window scrollable while the collapsed tool group
+  // above the anchor remains height-stable across older-page commits.
+  await apiClient.seedAgentMessages(sessionId, 20, "LONG-HISTORY-VISIBLE-TAIL");
+
   return { taskId: task.id, sessionId };
 }
 
@@ -78,9 +121,8 @@ export async function seedCollapsedMessageHistory(
     await apiClient.seedTaskSession(task.id, {
       sessionId,
       state: "IDLE",
-      commandCount: 80,
     });
-    await apiClient.seedToolCallMessages(sessionId, 60);
+    await apiClient.seedToolCallMessages(sessionId, 140, { status: "complete" });
   } else {
     for (let i = 0; i < 20; i += 1) {
       await apiClient.seedSessionMessage(sessionId, {
@@ -107,6 +149,9 @@ export async function seedCollapsedMessageHistory(
     type: "message",
     content: RECENT_AGENT_MARKER,
   });
+  if (options?.promptOutsideInitialWindow) {
+    await apiClient.seedAgentMessages(sessionId, 20, "RECENT-VISIBLE-TAIL");
+  }
 
   return { taskId: task.id, sessionId };
 }
@@ -136,9 +181,9 @@ export async function seedVisibleMessageHistory(
   return { taskId: task.id, sessionId };
 }
 
-/** Seeds a boundary-changing older page whose rendered height stays inside
- * the sentinel's 200px preload margin: one short message plus one collapsed
- * group containing the other 19 backend rows. */
+/** Seeds a short standalone boundary page followed by a collapsed page. The
+ * first older page remains inside the sentinel preload margin, so the native
+ * transcript must continue once before the second page moves it out. */
 export async function seedShortBoundaryPageHistory(
   apiClient: ApiClient,
   seedData: SeedData,
