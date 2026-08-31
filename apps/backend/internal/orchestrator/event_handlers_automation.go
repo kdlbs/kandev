@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -389,6 +390,9 @@ func (s *Service) prepareAutomationTask(
 		}
 	}
 	if task != nil {
+		if err := s.refreshAutomationContinuationMetadata(ctx, task, metadata); err != nil {
+			return nil, nil, action, reason, err
+		}
 		return task, continuationSession, action, reason, nil
 	}
 
@@ -422,6 +426,35 @@ func (s *Service) prepareAutomationTask(
 		reason = "previous continuation was unavailable; created a replacement task"
 	}
 	return task, nil, action, reason, nil
+}
+
+// refreshAutomationContinuationMetadata merges this firing's freshly-computed
+// metadata onto a resumed continuation task and persists it. Without this, a
+// resumed task keeps whatever metadata its FIRST firing stamped — notably
+// automation_target_task_id — so validateAutomationArchiveTarget refuses
+// every merge after the first, forever. Merge, don't replace: existing keys
+// absent from this firing's map must survive, and deferred-launch ownership
+// is server-managed and must never be clobbered by a metadata refresh (mirrors
+// task/service.UpdateTaskMetadata). A write failure is returned rather than
+// swallowed so the caller records a failed run instead of dispatching against
+// a binding that was never actually refreshed.
+func (s *Service) refreshAutomationContinuationMetadata(ctx context.Context, task *models.Task, metadata map[string]interface{}) error {
+	if task.Metadata == nil {
+		task.Metadata = make(map[string]interface{}, len(metadata))
+	}
+	for k, v := range metadata {
+		if k == models.MetaKeyDeferredLaunch {
+			continue
+		}
+		task.Metadata[k] = v
+	}
+	task.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpdateTask(ctx, task); err != nil {
+		s.logger.Error("failed to refresh automation continuation task metadata",
+			zap.String("task_id", task.ID), zap.Error(err))
+		return fmt.Errorf("refresh automation continuation metadata: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) findAutomationContinuation(ctx context.Context, a *automation.Automation, evt *automation.AutomationTriggeredEvent) (*models.Task, *models.TaskSession, string) {

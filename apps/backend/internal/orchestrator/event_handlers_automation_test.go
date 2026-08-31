@@ -419,6 +419,69 @@ func TestCreateAutomationTask_BindsMergedPRTarget(t *testing.T) {
 	require.Equal(t, "target-task-1", creator.got.Metadata[models.MetaKeyAutomationTargetTaskID])
 }
 
+// TestPrepareAutomationTask_RefreshesTargetMetadataOnResume is the regression
+// guard for the reuse_thread + github_pr_merged defect: a resumed task keeps
+// whatever automation_target_task_id its FIRST firing stamped, so every merge
+// after the first is refused by validateAutomationArchiveTarget forever. The
+// per-firing metadata computed for the SECOND firing must be merged onto the
+// resumed task (and persisted), not discarded at the reuse early return.
+func TestPrepareAutomationTask_RefreshesTargetMetadataOnResume(t *testing.T) {
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+		ID: "ws-1", Name: "Test", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:          "continuation-task",
+		WorkspaceID: "ws-1",
+		Origin:      models.TaskOriginAutomationRun,
+		Metadata: map[string]interface{}{
+			models.MetaKeyAutomationTaskMode:       string(automation.TaskModeAutomationRun),
+			models.MetaKeyAutomationRepositoryMode: string(automation.RepositoryModeNone),
+			models.MetaKeyAutomationTargetTaskID:   "target-task-1",
+			models.MetaKeyDeferredLaunch:           "must-survive",
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "continuation-session", TaskID: "continuation-task",
+		State: models.TaskSessionStateWaitingForInput, StartedAt: now, UpdatedAt: now,
+	}))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	a := &automation.Automation{
+		ID: "a-merged", WorkspaceID: "ws-1", ContinuationTaskID: "continuation-task",
+		ContinuationPolicy: automation.ContinuationPolicyReuseThread,
+		TaskMode:           automation.TaskModeAutomationRun,
+		RepositoryMode:     automation.RepositoryModeNone,
+	}
+	evt := &automation.AutomationTriggeredEvent{
+		TriggerType: automation.TriggerTypeGitHubPRMerged,
+		TriggerData: json.RawMessage(`{"task_id":"target-task-2"}`),
+	}
+	metadata := map[string]interface{}{
+		"trigger_id":                         "trg-2",
+		"trigger_type":                       string(automation.TriggerTypeGitHubPRMerged),
+		models.MetaKeyAutomationTargetTaskID: "target-task-2",
+	}
+
+	task, session, action, reason, err := svc.prepareAutomationTask(ctx, a, evt, "title", "prompt", metadata)
+	require.NoError(t, err)
+	require.Equal(t, automation.ThreadActionResumed, action, "reason=%q", reason)
+	require.NotNil(t, session)
+	require.Equal(t, "target-task-2", task.Metadata[models.MetaKeyAutomationTargetTaskID],
+		"the in-memory task must carry the SECOND firing's target, not the first")
+
+	persisted, err := repo.GetTask(ctx, "continuation-task")
+	require.NoError(t, err)
+	require.Equal(t, "target-task-2", persisted.Metadata[models.MetaKeyAutomationTargetTaskID],
+		"the refreshed binding must be persisted, or the guard reads the stale value back out on the next lookup")
+	require.Equal(t, "must-survive", persisted.Metadata[models.MetaKeyDeferredLaunch],
+		"deferred launch ownership is server-managed and must survive a metadata refresh untouched")
+}
+
 func TestRecordFailedRun_MergedPRDoesNotConsumeDedupKey(t *testing.T) {
 	autoSvc := &stubAutomationService{}
 	svc := &Service{automationService: autoSvc}

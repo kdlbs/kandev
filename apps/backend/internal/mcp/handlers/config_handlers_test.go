@@ -597,6 +597,83 @@ func TestHandleArchiveTask_MergedPRRunAcceptsBoundTarget(t *testing.T) {
 	assert.NotNil(t, archived.ArchivedAt)
 }
 
+// TestHandleArchiveTask_MergedPRRunAcceptsRefreshedTargetAfterResume is the
+// regression guard for the reuse_thread + github_pr_merged defect: once a
+// resumed continuation task's metadata is refreshed for a NEW firing (as
+// orchestrator.refreshAutomationContinuationMetadata now does), the guard
+// must bind to the refreshed target, not the stale one from the first
+// firing. It exercises the metadata mutation through the same merge helper
+// production uses (Service.UpdateTaskMetadata) so this proves the guard and
+// the refresh path agree, not just that the guard reads whatever is in the
+// DB.
+func TestHandleArchiveTask_MergedPRRunAcceptsRefreshedTargetAfterResume(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-resume", Name: "Resume"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-resume", WorkspaceID: "ws-resume", Name: "Board"}))
+
+	firstTarget := &models.Task{
+		ID: "first-target", WorkspaceID: "ws-resume", WorkflowID: "wf-resume",
+		Title: "First merge target", State: v1.TaskStateTODO,
+	}
+	require.NoError(t, repo.CreateTask(ctx, firstTarget))
+	secondTarget := &models.Task{
+		ID: "second-target", WorkspaceID: "ws-resume", WorkflowID: "wf-resume",
+		Title: "Second merge target", State: v1.TaskStateTODO,
+	}
+	require.NoError(t, repo.CreateTask(ctx, secondTarget))
+	caller := &models.Task{
+		ID: "automation-run", WorkspaceID: "ws-resume", WorkflowID: "wf-resume",
+		Title: "Automation run", State: v1.TaskStateTODO,
+		Origin: models.TaskOriginAutomationRun,
+		Metadata: map[string]interface{}{
+			"trigger_type":                       "github_pr_merged",
+			models.MetaKeyAutomationTargetTaskID: firstTarget.ID,
+		},
+	}
+	require.NoError(t, repo.CreateTask(ctx, caller))
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+
+	// First firing archives its own target.
+	firstMsg := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{
+		"task_id": firstTarget.ID, "caller_task_id": caller.ID,
+	})
+	resp, err := h.handleArchiveTask(ctx, firstMsg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	// A second firing resumes the same continuation task and refreshes its
+	// binding — this is what orchestrator.refreshAutomationContinuationMetadata
+	// does on the reuse path.
+	_, err = svc.UpdateTaskMetadata(ctx, caller.ID, map[string]interface{}{
+		"trigger_type":                       "github_pr_merged",
+		models.MetaKeyAutomationTargetTaskID: secondTarget.ID,
+	})
+	require.NoError(t, err)
+
+	// The second merge's target is now accepted...
+	secondMsg := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{
+		"task_id": secondTarget.ID, "caller_task_id": caller.ID,
+	})
+	resp, err = h.handleArchiveTask(ctx, secondMsg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	archived, err := svc.GetTask(ctx, secondTarget.ID)
+	require.NoError(t, err)
+	assert.NotNil(t, archived.ArchivedAt, "the refreshed target must be archivable")
+
+	// ...and the stale first target is correctly refused against the now
+	//-current binding (it was already archived by the first firing; this
+	// proves the guard is not still silently permissive toward it).
+	staleMsg := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{
+		"task_id": firstTarget.ID, "caller_task_id": caller.ID,
+	})
+	resp, err = h.handleArchiveTask(ctx, staleMsg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
 func TestHandleArchiveTask_MergedPRRunRejectsMissingBinding(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
