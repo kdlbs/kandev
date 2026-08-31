@@ -328,8 +328,16 @@ func (s *Server) handleSetMcpMode(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if req.Mode != mcp.ModeTask && req.Mode != mcp.ModeTaskTitlePending && req.Mode != mcp.ModeConfig && req.Mode != mcp.ModeOffice {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', or 'office'"})
+	// This allowlist and the orchestrator's resolveTaskSessionMCPMode are one
+	// contract: the existing-workspace launch path forwards whatever that
+	// resolver returned, before the agent starts. v0.92.1 taught the resolver
+	// (and normalizeMode) "automation" without widening this side, so every
+	// automation-origin task launched on a prepared workspace died here on 400.
+	// ModeExternal stays rejected on purpose: it belongs to the backend's own
+	// MCP endpoint for external coding agents, and no launch path can emit it.
+	if req.Mode != mcp.ModeTask && req.Mode != mcp.ModeTaskTitlePending && req.Mode != mcp.ModeConfig &&
+		req.Mode != mcp.ModeOffice && req.Mode != mcp.ModeAutomation {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', 'office', or 'automation'"})
 		return
 	}
 	s.mcpServer.SetMode(req.Mode)
