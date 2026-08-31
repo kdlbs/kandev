@@ -175,6 +175,11 @@ contract prevent safe parallel implementation.
   verified owner-environment summary hydration without sessions, delivery
   reads after session deletion, recovered live status identity, frontend
   typecheck and lint, and the targeted Chromium regression.
+- The migration-order fix carried existing environment-owned snapshots through
+  the worktree shadow swap, rehomed snapshots from losing environments, and
+  rebound the Postgres foreign key to the shadow parent without cascading
+  deletion. The final affected-package run passed 7,749 tests across nine
+  backend packages, and backend lint reported 0 issues.
 
 ## Risks
 

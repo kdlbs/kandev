@@ -108,3 +108,5 @@ Task 02 publishes environment identity and writes environment-scoped rows.
 - Recovered live Git status events now resolve and publish the session's
   environment identity. The final eight-package backend run passed 7,624
   tests.
+- The final affected-package run passed 7,749 tests across nine backend
+  packages after the replayable worktree/snapshot cutover fix.

@@ -99,3 +99,7 @@ None.
   and environment-ranked current reads.
 - Verified with SQLite repository/cutover tests and the repository package
   suite. Postgres parity tests are included and skip when no DSN is configured.
+- Added hybrid worktree-cutover coverage with a final-shape environment-owned
+  snapshot. The cutover rehomes snapshots from losing environments and
+  rebinds the Postgres snapshot foreign key before the old environment table is
+  dropped, preserving snapshots without DROP CASCADE.
