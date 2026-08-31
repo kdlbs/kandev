@@ -2411,40 +2411,6 @@ func (r *Repository) ListTaskSessionsByTaskEnvironment(ctx context.Context, envi
 	return r.loadWorktreesBatch(ctx, sessions)
 }
 
-// GetTaskSessionWorkspacePaths returns the workspace paths recorded on the
-// session rows for a task. Session projections intentionally replace these
-// values with the linked task environment's effective path, but status source
-// selection must still reject a historical session that was recorded against
-// a different workspace before the environment path was repaired.
-func (r *Repository) GetTaskSessionWorkspacePaths(ctx context.Context, taskID string) (map[string]string, error) {
-	paths := make(map[string]string)
-	if taskID == "" {
-		return paths, nil
-	}
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, workspace_path
-		FROM task_sessions
-		WHERE task_id = ?
-	`), taskID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	for rows.Next() {
-		var sessionID string
-		var workspacePath sql.NullString
-		if err := rows.Scan(&sessionID, &workspacePath); err != nil {
-			return nil, err
-		}
-		paths[sessionID] = workspacePath.String
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return paths, nil
-}
-
 // GetTaskSessionWorkspacePathsByTaskEnvironment returns only the raw workspace
 // paths recorded on session rows bound to an environment. It deliberately does
 // not use the effective environment projection because an empty or historical

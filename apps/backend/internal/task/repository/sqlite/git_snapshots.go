@@ -64,6 +64,54 @@ const snapshotRankExpr = `
 			created_at DESC,
 			id DESC`
 
+// snapshotRepositoryExpr returns the normalized repository partition key used
+// by the multi-repository status selector. Missing and explicit-empty names
+// both represent the root repository and therefore share the empty key.
+func snapshotRepositoryExpr(driver, tableName string) string {
+	return "COALESCE(" + dialect.JSONExtract(driver, tableName+".metadata", "repository_name") + ", '')"
+}
+
+// snapshotRankExprForRepository mirrors snapshotRankExpr for the per-repository
+// status selector. The legacy session-wide selectors intentionally keep using
+// snapshotRankExpr. Every correlated generation check below compares the
+// candidate row with the same normalized repository key used by the window
+// partition, so another repository cannot change this row's rank.
+func snapshotRankExprForRepository(driver string) string {
+	outerRepository := snapshotRepositoryExpr(driver, "task_session_git_snapshots")
+	newerRepository := snapshotRepositoryExpr(driver, "newer")
+	archiveRepository := snapshotRepositoryExpr(driver, "archive")
+	return fmt.Sprintf(`
+			CASE
+				WHEN snapshot_type = 'archive' AND (
+					EXISTS (
+						SELECT 1 FROM task_sessions ts
+						JOIN tasks t ON t.id = ts.task_id
+						WHERE ts.id = task_session_git_snapshots.session_id
+						  AND t.archived_at IS NOT NULL
+					)
+					OR NOT EXISTS (
+						SELECT 1 FROM task_session_git_snapshots newer
+						WHERE newer.session_id = task_session_git_snapshots.session_id
+						  AND %s = %s
+						  AND newer.snapshot_type <> 'archive'
+						  AND newer.created_at > task_session_git_snapshots.created_at
+					)
+				) THEN 0
+				WHEN triggered_by = 'agent_completed' AND EXISTS (
+					SELECT 1 FROM task_session_git_snapshots archive
+					WHERE archive.session_id = task_session_git_snapshots.session_id
+					  AND %s = %s
+					  AND archive.snapshot_type = 'archive'
+					  AND archive.created_at > task_session_git_snapshots.created_at
+				) THEN 3
+				WHEN triggered_by = 'agent_completed' THEN 1
+				WHEN snapshot_type = 'archive' THEN 3
+				ELSE 2
+			END,
+			created_at DESC,
+			id DESC`, newerRepository, outerRepository, archiveRepository, outerRepository)
+}
+
 // UpsertLatestLiveGitSnapshot keeps at most one cached "live monitor" snapshot
 // per session and repository by deleting the previous row for that repository
 // and inserting the new one in a single transaction. This is the cache that
@@ -299,7 +347,8 @@ func (r *Repository) GetLatestGitStatusSnapshotsBySessionIDs(
 	if len(sessionIDs) == 0 {
 		return result, nil
 	}
-	repositoryExpr := "COALESCE(" + dialect.JSONExtract(r.db.DriverName(), "metadata", "repository_name") + ", '')"
+	repositoryExpr := snapshotRepositoryExpr(r.db.DriverName(), "task_session_git_snapshots")
+	rankExpr := snapshotRankExprForRepository(r.db.DriverName())
 	for _, chunk := range chunkIDs(sessionIDs, sqliteMaxHostParams) {
 		placeholders, args := buildInPlaceholders(chunk)
 		query := `
@@ -310,7 +359,7 @@ func (r *Repository) GetLatestGitStatusSnapshotsBySessionIDs(
 				       ahead, behind, files, triggered_by, metadata, created_at,
 				       ROW_NUMBER() OVER (
 					       PARTITION BY session_id, ` + repositoryExpr + `
-					       ORDER BY` + snapshotRankExpr + `
+					       ORDER BY` + rankExpr + `
 				       ) AS row_number
 				FROM task_session_git_snapshots
 				WHERE session_id IN (` + placeholders + `)

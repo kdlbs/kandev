@@ -1601,6 +1601,14 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 	return execution, nil
 }
 
+func bindSessionToTaskEnvironment(session *models.TaskSession, env *models.TaskEnvironment) {
+	if session == nil || env == nil {
+		return
+	}
+	session.TaskEnvironmentID = env.ID
+	session.WorkspacePath = env.WorkspacePath
+}
+
 func assignLaunchTaskEnvironmentID(session *models.TaskSession, existingEnv *models.TaskEnvironment) {
 	if existingEnv != nil && existingEnv.ID != "" {
 		session.TaskEnvironmentID = existingEnv.ID
@@ -2243,7 +2251,7 @@ func (e *Executor) persistTaskEnvironment(
 		// session elected to materialize a still-CREATING canonical environment
 		// (shared_group), which must run the normal finalize path below.
 		if existingEnv.TaskID != "" && existingEnv.TaskID != taskID && !isInitialMaterializer {
-			session.TaskEnvironmentID = existingEnv.ID
+			bindSessionToTaskEnvironment(session, existingEnv)
 			return nil
 		}
 		previousStatus := existingEnv.Status
@@ -2299,7 +2307,7 @@ func (e *Executor) persistTaskEnvironment(
 						zap.String("task_id", taskID), zap.String("env_id", existingEnv.ID), zap.Error(err))
 					return fmt.Errorf("finalize task environment materialization: %w", err)
 				}
-				session.TaskEnvironmentID = existingEnv.ID
+				bindSessionToTaskEnvironment(session, existingEnv)
 				e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
 				return nil
 			}
@@ -2351,7 +2359,7 @@ func (e *Executor) persistTaskEnvironment(
 				zap.Error(err))
 			return fmt.Errorf("update task environment: %w", err)
 		}
-		session.TaskEnvironmentID = existingEnv.ID
+		bindSessionToTaskEnvironment(session, existingEnv)
 		e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
 		return nil
 	}
@@ -2381,7 +2389,7 @@ func (e *Executor) persistTaskEnvironment(
 			zap.Error(err))
 		return fmt.Errorf("create task environment: %w", err)
 	}
-	session.TaskEnvironmentID = env.ID
+	bindSessionToTaskEnvironment(session, env)
 	e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
 	return nil
 }
