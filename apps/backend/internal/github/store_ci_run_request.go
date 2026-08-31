@@ -237,9 +237,11 @@ func (s *Store) getCIRunRequestBySemanticKey(ctx context.Context, r *CIRunReques
 	var loaded CIRunRequest
 	err := s.ro.GetContext(ctx, &loaded, s.ro.Rebind(`SELECT `+ciRunRequestColumns+`
 		FROM github_ci_run_requests
-		WHERE target_task_id = ? AND repository_id = ? AND pr_number = ?
+		WHERE workspace_id = ? AND target_task_id = ? AND workflow_id = ? AND workflow_step_id = ?
+			AND repository_id = ? AND pr_number = ? AND expected_head_sha = ?
 			AND source_run_id = ? AND expected_source_attempt = ? AND evidence_kind = ?`),
-		r.TargetTaskID, r.RepositoryID, r.PRNumber, r.SourceRunID,
+		r.WorkspaceID, r.TargetTaskID, r.WorkflowID, r.WorkflowStepID,
+		r.RepositoryID, r.PRNumber, r.ExpectedHeadSHA, r.SourceRunID,
 		r.ExpectedSourceAttempt, r.EvidenceKind)
 	return &loaded, err
 }

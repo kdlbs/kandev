@@ -492,7 +492,10 @@ const ciRunTablesSQL = `
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
 		UNIQUE (grant_id, actor_task_id, idempotency_hash),
-		UNIQUE (target_task_id, repository_id, pr_number, source_run_id, expected_source_attempt, evidence_kind)
+		UNIQUE (
+			workspace_id, target_task_id, workflow_id, workflow_step_id, repository_id,
+			pr_number, expected_head_sha, source_run_id, expected_source_attempt, evidence_kind
+		)
 	);
 
 	CREATE TABLE IF NOT EXISTS github_ci_run_audit_events (
@@ -650,6 +653,9 @@ func (s *Store) initSchemaUpgrades() error {
 	if err := s.addCIRunRecoveryColumns(); err != nil {
 		return err
 	}
+	if err := s.migrateCIRunSemanticConstraint(); err != nil {
+		return err
+	}
 	if err := s.addTaskGitCredentialsMode(); err != nil {
 		return err
 	}
@@ -715,6 +721,60 @@ func (s *Store) addCIRunRecoveryColumns() error {
 		}
 	}
 	return nil
+}
+
+const legacyCIRunSemanticConstraint = "UNIQUE (target_task_id, repository_id, pr_number, source_run_id, expected_source_attempt, evidence_kind)"
+
+const scopedCIRunSemanticConstraint = "UNIQUE (workspace_id, target_task_id, workflow_id, workflow_step_id, repository_id, pr_number, expected_head_sha, source_run_id, expected_source_attempt, evidence_kind)"
+
+func (s *Store) migrateCIRunSemanticConstraint() error {
+	var existingSQL string
+	if err := s.db.QueryRow(`SELECT sql FROM sqlite_master
+		WHERE type = 'table' AND name = 'github_ci_run_requests'`).Scan(&existingSQL); err != nil {
+		return fmt.Errorf("read github_ci_run_requests schema: %w", err)
+	}
+	if !strings.Contains(existingSQL, legacyCIRunSemanticConstraint) {
+		return nil
+	}
+	requestSchema := strings.Replace(existingSQL,
+		"github_ci_run_requests", "github_ci_run_requests_new", 1)
+	requestSchema = strings.Replace(requestSchema,
+		legacyCIRunSemanticConstraint, scopedCIRunSemanticConstraint, 1)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	statements := []string{
+		requestSchema,
+		`INSERT INTO github_ci_run_requests_new (` + ciRunRequestColumns + `)
+			SELECT ` + ciRunRequestColumns + ` FROM github_ci_run_requests`,
+		`CREATE TABLE github_ci_run_audit_events_new (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL,
+			event_type TEXT NOT NULL,
+			failure_class TEXT NOT NULL DEFAULT '',
+			details_json TEXT NOT NULL DEFAULT '{}',
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (request_id) REFERENCES github_ci_run_requests_new(id) ON DELETE CASCADE
+		)`,
+		`INSERT INTO github_ci_run_audit_events_new
+			(id, request_id, event_type, failure_class, details_json, created_at)
+			SELECT id, request_id, event_type, failure_class, details_json, created_at
+			FROM github_ci_run_audit_events`,
+		`DROP TABLE github_ci_run_audit_events`,
+		`DROP TABLE github_ci_run_requests`,
+		`ALTER TABLE github_ci_run_requests_new RENAME TO github_ci_run_requests`,
+		`ALTER TABLE github_ci_run_audit_events_new RENAME TO github_ci_run_audit_events`,
+		`CREATE INDEX idx_github_ci_run_audit_request
+			ON github_ci_run_audit_events(request_id, created_at)`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement); err != nil {
+			return fmt.Errorf("migrate github_ci_run_requests semantic constraint: %w", err)
+		}
+	}
+	return tx.Commit()
 }
 
 var taskPRMergeQueueColumnDDL = []struct {

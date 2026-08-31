@@ -173,3 +173,28 @@ func TestRequestFreshCIRunTakesOverExpiredPreProviderLease(t *testing.T) {
 		t.Fatalf("receipt = %+v, provider reruns = %d", receipt, client.reruns)
 	}
 }
+
+func TestRequestFreshCIRunDoesNotReplaySucceededReceiptForDifferentHead(t *testing.T) {
+	service, client, input := setupCIRunServiceTest(t, false)
+	client.runs = []GitHubActionsRun{*client.run}
+	client.runs[0].Attempt = input.ExpectedSourceAttempt + 1
+	first, err := service.RequestFreshCIRun(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stale := input
+	stale.ExpectedHeadSHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	stale.IdempotencyKey = "different-head"
+	receipt, err := service.RequestFreshCIRun(context.Background(), stale)
+	var ciErr *CIRunRequestError
+	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureHeadDrift {
+		t.Fatalf("error = %#v, want head_drift", err)
+	}
+	if receipt == nil || receipt.RequestID == first.RequestID || receipt.Status != CIRunRequestFailed {
+		t.Fatalf("receipt = %+v, want a distinct failed request from %+v", receipt, first)
+	}
+	if client.reruns != 1 {
+		t.Fatalf("provider reruns = %d, want only the original request", client.reruns)
+	}
+}

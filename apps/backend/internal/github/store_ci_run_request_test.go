@@ -45,6 +45,81 @@ func TestStoreScopedCIRunSchema(t *testing.T) {
 	}
 }
 
+func TestStoreMigratesCIRunSemanticConstraintWithoutLosingAudit(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	for _, statement := range []string{
+		`DROP TABLE github_ci_run_audit_events`,
+		`DROP TABLE github_ci_run_requests`,
+	} {
+		if _, err := store.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	legacyConstraint := `UNIQUE (target_task_id, repository_id, pr_number, source_run_id, expected_source_attempt, evidence_kind)`
+	scopedConstraint := "UNIQUE (\n\t\t\tworkspace_id, target_task_id, workflow_id, workflow_step_id, repository_id," +
+		"\n\t\t\tpr_number, expected_head_sha, source_run_id, expected_source_attempt, evidence_kind\n\t\t)"
+	legacySchema := strings.Replace(ciRunTablesSQL, scopedConstraint, legacyConstraint, 1)
+	if legacySchema == ciRunTablesSQL {
+		t.Fatal("test did not restore the legacy semantic constraint")
+	}
+	if _, err := store.db.Exec(legacySchema); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	grant := testCIRunGrant(now)
+	if err := store.UpsertCIRunGrant(ctx, grant); err != nil {
+		t.Fatal(err)
+	}
+	original, _, err := store.ClaimCIRunRequest(ctx, testCIRunRequest(grant, now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendCIRunAuditEvent(ctx, &CIRunAuditEvent{
+		ID: "audit-before-semantic-migration", RequestID: original.ID,
+		EventType: "claimed", DetailsJSON: `{}`, CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.initSchema(false); err != nil {
+		t.Fatalf("migrate semantic constraint: %v", err)
+	}
+	differentHead := testCIRunRequest(grant, now)
+	differentHead.ID = "request-different-head"
+	differentHead.ExpectedHeadSHA = strings.Repeat("b", 40)
+	differentHead.IdempotencyHash = strings.Repeat("b", 64)
+	claimed, created, err := store.ClaimCIRunRequest(ctx, differentHead)
+	if err != nil {
+		t.Fatalf("claim after migration: %v", err)
+	}
+	if !created || claimed.ID != differentHead.ID {
+		t.Fatalf("claim = %+v, created %v; want migrated distinct request", claimed, created)
+	}
+	var auditCount int
+	if err := store.db.Get(&auditCount, `SELECT COUNT(*) FROM github_ci_run_audit_events
+		WHERE id = ? AND request_id = ?`, "audit-before-semantic-migration", original.ID); err != nil {
+		t.Fatal(err)
+	}
+	if auditCount != 1 {
+		t.Fatalf("preserved audit rows = %d, want 1", auditCount)
+	}
+	if err := store.initSchema(false); err != nil {
+		t.Fatalf("semantic migration replay: %v", err)
+	}
+	if _, err := store.db.Exec(`DELETE FROM github_ci_run_requests WHERE id = ?`, original.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.db.Get(&auditCount, `SELECT COUNT(*) FROM github_ci_run_audit_events
+		WHERE request_id = ?`, original.ID); err != nil {
+		t.Fatal(err)
+	}
+	if auditCount != 0 {
+		t.Fatalf("audit rows after request delete = %d, want cascade cleanup", auditCount)
+	}
+}
+
 func TestStoreCIRunExecutionLeaseExpiresBeforeProviderStart(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -271,6 +346,62 @@ func TestStoreClaimCIRunRequestIsIdempotentAndConcurrent(t *testing.T) {
 	idempotencyConflict.PRNumber = 43
 	if _, _, err := store.ClaimCIRunRequest(ctx, &idempotencyConflict); !errors.Is(err, ErrCIRunIdempotencyConflict) {
 		t.Fatalf("idempotency reuse error = %v", err)
+	}
+}
+
+func TestStoreClaimCIRunRequestDoesNotCoalesceDifferentSemanticScope(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	grant := testCIRunGrant(now)
+	if err := store.UpsertCIRunGrant(ctx, grant); err != nil {
+		t.Fatal(err)
+	}
+	original := testCIRunRequest(grant, now)
+	if _, created, err := store.ClaimCIRunRequest(ctx, original); err != nil || !created {
+		t.Fatalf("original claim = created %v, error %v", created, err)
+	}
+
+	tests := []struct {
+		name string
+		edit func(*CIRunRequest)
+	}{
+		{name: "expected head", edit: func(request *CIRunRequest) {
+			request.ExpectedHeadSHA = strings.Repeat("b", 40)
+		}},
+		{name: "workspace", edit: func(request *CIRunRequest) {
+			request.WorkspaceID = "workspace-2"
+		}},
+		{name: "workflow", edit: func(request *CIRunRequest) {
+			request.WorkflowID = "workflow-2"
+		}},
+		{name: "workflow step", edit: func(request *CIRunRequest) {
+			request.WorkflowStepID = "ci-fixup-2"
+		}},
+	}
+	for index, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := *original
+			request.ID = "request-scope-" + tt.name
+			request.IdempotencyHash = strings.Repeat(string(rune('b'+index)), 64)
+			tt.edit(&request)
+
+			claimed, created, err := store.ClaimCIRunRequest(ctx, &request)
+			if err != nil {
+				t.Fatalf("claim: %v", err)
+			}
+			if !created || claimed.ID != request.ID {
+				t.Fatalf("claim = %+v, created %v; want distinct request %q", claimed, created, request.ID)
+			}
+		})
+	}
+
+	var count int
+	if err := store.db.Get(&count, `SELECT COUNT(*) FROM github_ci_run_requests`); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1+len(tests) {
+		t.Fatalf("request rows = %d, want %d", count, 1+len(tests))
 	}
 }
 
