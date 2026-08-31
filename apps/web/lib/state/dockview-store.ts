@@ -987,6 +987,12 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
         safeHeight: measured.height,
         buildDefault: (a, intentName) => get().buildDefaultLayout(a, intentName),
         getDefaultLayout: () => get().userDefaultLayout ?? getPresetLayout(get().defaultPreset),
+        getDefaultPinnedWidths: (width) => {
+          const defaultLayout = get().userDefaultLayout;
+          return defaultLayout
+            ? resolveCustomLayoutPinnedWidths(defaultLayout.columns, width)
+            : new Map();
+        },
         initialLayout,
       });
       set(ids);
@@ -1089,6 +1095,8 @@ function resolveBuildDefaultPinnedWidths(
   availableWidth: number,
 ): Map<string, number> {
   if (!userDefaultLayout || basePreset) return new Map();
+  // Intent panel injection preserves column widths, so the effective state
+  // still carries the saved custom-default geometry used for scaling.
   return resolveCustomLayoutPinnedWidths(state.columns, availableWidth);
 }
 

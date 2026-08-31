@@ -74,10 +74,11 @@ The built-in layouts are code-defined templates. A customization is stored in `s
 The editor persists the existing declarative `LayoutState`: ordered columns contain ordered groups, groups contain ordered panels and an active panel, and captured tree/size data preserves split placement and proportions. New editor-created profiles use only the reusable panel registry. The canonical `pr-detail` ID is reusable; keyed panels such as `pr-detail|owner/repository/123` and `mr-detail|host/project/123` remain task-specific runtime tabs and are not accepted by the profile editor. A legacy profile with an unreadable layout remains listed for rename, duplication, deletion, or default removal, but cannot enter the visual editor or become a new default until replaced with a valid reusable layout.
 
 Every application path for a reusable profile uses the same geometry resolver.
-These paths include workbench selection, fresh task setup, and Reset Layout. The
-resolver scales complete saved column widths to the current workbench. It then
-applies the pinned-column safety caps. A code-defined built-in preset continues
-to use its responsive defaults.
+These paths include workbench selection, fresh task setup, Reset Layout, and
+the fast environment-switch path for an unsaved task environment. The resolver
+scales complete saved column widths to the current workbench. It then applies
+the pinned-column safety caps. A code-defined built-in preset continues to use
+its responsive defaults.
 
 Task-specific restored layouts remain device-local environment state and take precedence over the user default. They are not copied into or overwritten by layout-profile edits. The serialized Dockview layout preserves panel structure and transient geometry. A companion environment-scoped preference stores a raw right-column width only after a genuine user sash drag; legacy layouts and layouts without that preference are responsive defaults rather than manual overrides.
 

@@ -18,7 +18,7 @@ Restore the saved proportions when a custom profile supplies the effective deskt
 
 The saved profile contains its column widths and nested split sizes. Explicit profile selection resolves those values for the current workbench.
 
-Fresh task setup and Reset Layout use `performBuildDefault`. This function passes an empty pinned-width map to `applyLayout`. The layout manager then substitutes responsive built-in widths for pinned columns.
+Fresh task setup and Reset Layout use `performBuildDefault`. This function passes an empty pinned-width map to `applyLayout`. The layout manager then substitutes responsive built-in widths for pinned columns. A fast environment switch can take the same shortcut without calling `performBuildDefault`, so it must receive the same resolved custom-default widths.
 
 ## Scope
 
@@ -26,6 +26,7 @@ Fresh task setup and Reset Layout use `performBuildDefault`. This function passe
 
 - Preserve saved custom-default proportions for fresh desktop task environments.
 - Preserve the same proportions after Reset Layout.
+- Preserve the proportions when a fast switch enters an unsaved environment.
 - Scale complete saved geometry to the current workbench before safety caps apply.
 - Keep the runtime pinned-width state consistent with the applied geometry.
 
@@ -38,7 +39,7 @@ Fresh task setup and Reset Layout use `performBuildDefault`. This function passe
 
 ## Technical approach
 
-Update `performBuildDefault` in `apps/web/lib/state/dockview-store.ts`. Detect when the base state comes from `userDefaultLayout` instead of an intent or built-in preset.
+Update `performBuildDefault` in `apps/web/lib/state/dockview-store.ts`. Detect when the base state comes from `userDefaultLayout` instead of an intent or built-in preset. Pass the same resolver result into the fast environment-switch path for an unsaved environment.
 
 For that path, call `resolveCustomLayoutPinnedWidths` with the final state and measured workbench width. Pass the result to `applyLayout` and store it in `pinnedWidths`.
 
@@ -48,6 +49,7 @@ Keep an empty pinned-width map for code-defined presets and named intents. This 
 
 - **AC-UI-TASK-LAYOUT-PROFILES-001.9:** Add a focused test to `apps/web/lib/state/dockview-preset-persistence.test.ts`. The test proves that Reset Layout sends scaled custom-default widths to `applyLayout`.
 - **AC-UI-TASK-LAYOUT-PROFILES-001.10:** Use a saved 700/300 profile on an 800px workbench. The expected right width is 240px before the safety caps.
+- Add focused fast-switch coverage in `apps/web/lib/state/dockview-env-switch-pinned.test.ts` for an unsaved environment with a custom default.
 - Keep existing built-in and explicit custom-layout tests green.
 
 ## E2E tests

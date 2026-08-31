@@ -25,6 +25,7 @@ Make fresh desktop tasks and Reset Layout use the geometry from the effective cu
 - Add a failing store regression for custom-default proportions.
 - Resolve saved custom-default widths for the measured workbench.
 - Store and apply the same pinned-width map.
+- Pass the resolved widths through the fast environment-switch path.
 - Extend the existing desktop layout-profile E2E scenario.
 
 ## Out of scope
@@ -37,6 +38,7 @@ Make fresh desktop tasks and Reset Layout use the geometry from the effective cu
 
 - A fresh desktop task uses the proportions from the effective custom default.
 - Reset Layout applies the same saved proportions.
+- A fast switch into an unsaved environment applies the same saved proportions.
 - Built-in presets and named intents continue to use responsive default widths.
 
 ## Verification
@@ -50,7 +52,9 @@ cd apps/web && pnpm run typecheck
 ## Files likely touched
 
 - `apps/web/lib/state/dockview-store.ts`
+- `apps/web/lib/state/dockview-env-switch.ts`
 - `apps/web/lib/state/dockview-preset-persistence.test.ts`
+- `apps/web/lib/state/dockview-env-switch-pinned.test.ts`
 - `apps/web/e2e/tests/settings/layout-profiles.spec.ts`
 - `docs/plans/custom-default-layout-proportions/plan.md`
 - `docs/plans/custom-default-layout-proportions/task-01-restore-custom-default-proportions.md`
@@ -80,10 +84,12 @@ None.
 
 - Updated `performBuildDefault` to resolve scaled pinned widths when the
   effective default comes from a saved custom profile.
+- Passed the same scaled widths into fast environment switches when the target
+  environment has no task-specific saved layout.
 - Stored and applied the same width map. Named built-in intents keep their
   responsive preset widths.
-- Added store regressions for the scaled custom default and the named-intent
-  safeguard.
+- Added store and fast-switch regressions for the scaled custom default and the
+  named-intent safeguard.
 - Extended the existing layout-profile E2E test with a 75/25 split assertion
   for fresh tasks and Reset Layout.
 - Updated the public layout-profile guidance and the durable requirements and

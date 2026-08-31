@@ -352,41 +352,6 @@ describe("resetLayout — effective default persistence", () => {
     expect(useDockviewStore.getState().pinnedWidths).toBe(appliedWidths);
   });
 
-  it("keeps named preset widths responsive", () => {
-    const api = makeStoreApi();
-    const planLayout = {
-      columns: [
-        {
-          id: "center",
-          width: 600,
-          groups: [{ panels: [{ id: "chat", component: "chat", title: "Agent" }] }],
-        },
-        {
-          id: "right",
-          pinned: true,
-          width: 200,
-          groups: [{ panels: [{ id: "plan", component: "plan", title: "Plan" }] }],
-        },
-      ],
-    };
-    vi.mocked(resolveNamedIntent).mockReturnValue({ preset: "plan" });
-    vi.mocked(getPresetLayout).mockReturnValue(planLayout);
-    useDockviewStore.setState({
-      api,
-      userDefaultLayout: {
-        columns: [
-          { id: "center", width: 700, groups: [] },
-          { id: "right", pinned: true, width: 300, groups: [] },
-        ],
-      },
-    });
-
-    useDockviewStore.getState().buildDefaultLayout(api, "plan");
-
-    expect(applyLayout).toHaveBeenLastCalledWith(api, planLayout, new Map(), 800, 600);
-    expect(useDockviewStore.getState().pinnedWidths).toEqual(new Map());
-  });
-
   it("applies the current user default and persists it for the active environment", async () => {
     const api = makeStoreApi();
     const userDefaultLayout = {
@@ -428,6 +393,69 @@ describe("resetLayout — effective default persistence", () => {
     expect(removeEnvMaximizeState).toHaveBeenCalledWith("env-reset");
     await flushRaf();
     expect(setEnvLayout).toHaveBeenCalledWith("env-reset", expect.any(Object));
+  });
+});
+
+describe("buildDefaultLayout — effective default widths", () => {
+  beforeEach(resetStoreForIntegration);
+
+  it("uses scaled proportions when building a custom default without an intent", () => {
+    const api = makeStoreApi();
+    useDockviewStore.setState({
+      api,
+      userDefaultLayout: {
+        columns: [
+          { id: "center", width: 700, groups: [] },
+          { id: "right", pinned: true, width: 300, groups: [] },
+        ],
+      },
+    });
+
+    useDockviewStore.getState().buildDefaultLayout(api);
+
+    expect(applyLayout).toHaveBeenLastCalledWith(
+      api,
+      expect.anything(),
+      new Map([["right", 240]]),
+      800,
+      600,
+    );
+    expect(useDockviewStore.getState().pinnedWidths).toEqual(new Map([["right", 240]]));
+  });
+
+  it("keeps named preset widths responsive", () => {
+    const api = makeStoreApi();
+    const planLayout = {
+      columns: [
+        {
+          id: "center",
+          width: 600,
+          groups: [{ panels: [{ id: "chat", component: "chat", title: "Agent" }] }],
+        },
+        {
+          id: "right",
+          pinned: true,
+          width: 200,
+          groups: [{ panels: [{ id: "plan", component: "plan", title: "Plan" }] }],
+        },
+      ],
+    };
+    vi.mocked(resolveNamedIntent).mockReturnValue({ preset: "plan" });
+    vi.mocked(getPresetLayout).mockReturnValue(planLayout);
+    useDockviewStore.setState({
+      api,
+      userDefaultLayout: {
+        columns: [
+          { id: "center", width: 700, groups: [] },
+          { id: "right", pinned: true, width: 300, groups: [] },
+        ],
+      },
+    });
+
+    useDockviewStore.getState().buildDefaultLayout(api, "plan");
+
+    expect(applyLayout).toHaveBeenLastCalledWith(api, planLayout, new Map(), 800, 600);
+    expect(useDockviewStore.getState().pinnedWidths).toEqual(new Map());
   });
 });
 
