@@ -221,5 +221,5 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-30-empty-remote-bootstrap-publication | [Keep Empty Remote Bootstrap Local Until Publication](2026-08-30-empty-remote-bootstrap-publication.md) | accepted | backend, frontend, protocol, security | 2026-08-30 |
 | 2026-08-30-bound-untracked-dependency-enumeration | [Bound Untracked Dependency Enumeration](2026-08-30-bound-untracked-dependency-enumeration.md) | accepted | backend | 2026-08-30 |
 | 2026-08-30-e2e-browser-cache | [Cache host-runner E2E browser provisioning](2026-08-30-e2e-browser-cache.md) | accepted | infra, workflow | 2026-08-30 |
-| 2026-08-30-environment-owned-git-status | [Project Current Git Status From the Task Environment](2026-08-30-environment-owned-git-status.md) | proposed | backend, frontend, protocol | 2026-08-30 |
+| 2026-08-30-environment-owned-git-status | [Persist Current Git Status with the Task Environment](2026-08-30-environment-owned-git-status.md) | accepted | backend, frontend, protocol | 2026-08-31 |
 | 2026-08-31-passthrough-running-publication | [Defer Passthrough Running Publication Until Guard Release](2026-08-31-passthrough-running-publication.md) | accepted | backend | 2026-08-31 |

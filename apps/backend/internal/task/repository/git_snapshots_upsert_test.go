@@ -9,8 +9,8 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
-// seedTaskAndSession creates the parent rows the git_snapshots foreign key
-// requires (task → task_session). Returns the session ID.
+// seedTaskAndSession creates the parent task, environment, and session rows
+// required by the environment-owned git snapshot table.
 func seedTaskAndSession(t *testing.T, ctx context.Context, repo *sqlite.Repository, taskID, sessionID string) {
 	t.Helper()
 	if err := repo.CreateTask(ctx, &models.Task{
@@ -22,11 +22,20 @@ func seedTaskAndSession(t *testing.T, ctx context.Context, repo *sqlite.Reposito
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	environmentID := "env-" + taskID
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: taskID,
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("create task environment: %v", err)
+	}
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID:             sessionID,
-		TaskID:         taskID,
-		AgentProfileID: "profile-1",
-		State:          models.TaskSessionStateStarting,
+		ID:                sessionID,
+		TaskID:            taskID,
+		TaskEnvironmentID: environmentID,
+		AgentProfileID:    "profile-1",
+		State:             models.TaskSessionStateStarting,
 	}); err != nil {
 		t.Fatalf("create task session: %v", err)
 	}

@@ -32,8 +32,14 @@ func newMessageTestService(t *testing.T) (*Service, *MockEventBus, *sqliterepo.R
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-msg", TaskID: "task-msg", Status: models.TaskEnvironmentStatusReady,
+		WorkspacePath: "/workspace/messages",
+	}); err != nil {
+		t.Fatalf("create task environment: %v", err)
+	}
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID: "sess-msg", TaskID: "task-msg", State: models.TaskSessionStateCreated,
+		ID: "sess-msg", TaskID: "task-msg", TaskEnvironmentID: "env-msg", State: models.TaskSessionStateCreated,
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}

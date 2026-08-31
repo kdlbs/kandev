@@ -140,7 +140,7 @@ func (s *Service) rebuildMissingSummaries(
 		return summaries
 	}
 	prByTask, prObserved := s.loadSummaryPRs(ctx, taskIDs(missing))
-	gitBySession, gitObserved := s.loadSummaryGit(ctx, sessionIDsForTasks(missing, sessionsByTask))
+	gitByEnvironment, gitObserved := s.loadSummaryGit(ctx, taskEnvironmentIDsForTasks(missing, sessionsByTask))
 	queuedByTask := s.loadQueuedSummaryCounts(ctx, taskIDs(missing))
 	activityAtByTask := activityByTask
 	now := time.Now().UTC()
@@ -150,7 +150,7 @@ func (s *Service) rebuildMissingSummaries(
 			taskLaunchErrorSummary(task),
 			sessionsByTask[task.ID],
 			pendingBySession,
-			gitBySession,
+			gitByEnvironment,
 			gitObserved,
 			prByTask[task.ID],
 			prObserved,
@@ -460,7 +460,7 @@ func taskIDs(tasks []*models.Task) []string {
 	return ids
 }
 
-func sessionIDsForTasks(tasks []*models.Task, sessionsByTask map[string][]*models.TaskSession) []string {
+func taskEnvironmentIDsForTasks(tasks []*models.Task, sessionsByTask map[string][]*models.TaskSession) []string {
 	seen := make(map[string]struct{})
 	ids := make([]string, 0)
 	for _, task := range tasks {
@@ -468,14 +468,14 @@ func sessionIDsForTasks(tasks []*models.Task, sessionsByTask map[string][]*model
 			continue
 		}
 		for _, session := range sessionsByTask[task.ID] {
-			if session == nil || session.ID == "" {
+			if session == nil || session.TaskEnvironmentID == "" {
 				continue
 			}
-			if _, ok := seen[session.ID]; ok {
+			if _, ok := seen[session.TaskEnvironmentID]; ok {
 				continue
 			}
-			seen[session.ID] = struct{}{}
-			ids = append(ids, session.ID)
+			seen[session.TaskEnvironmentID] = struct{}{}
+			ids = append(ids, session.TaskEnvironmentID)
 		}
 	}
 	return ids
@@ -500,26 +500,33 @@ func (s *Service) loadSummaryPRs(
 
 func (s *Service) loadSummaryGit(
 	ctx context.Context,
-	sessionIDs []string,
-) (map[string]*models.GitSnapshot, bool) {
-	if s.gitSnapshots == nil || len(sessionIDs) == 0 {
+	taskEnvironmentIDs []string,
+) (map[string][]*models.GitSnapshot, bool) {
+	if s.gitSnapshots == nil || len(taskEnvironmentIDs) == 0 {
 		return nil, false
 	}
-	snapshots, err := s.gitSnapshots.GetLatestGitSnapshotsBySessionIDs(ctx, sessionIDs)
+	snapshots, err := s.gitSnapshots.GetLatestGitStatusSnapshotsByTaskEnvironmentIDs(ctx, taskEnvironmentIDs)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn("failed to load Git state for status summary repair", zap.Error(err))
 		}
 		return nil, false
 	}
-	return snapshots, true
+	byEnvironment := make(map[string][]*models.GitSnapshot, len(taskEnvironmentIDs))
+	for _, snapshot := range snapshots {
+		if snapshot == nil || snapshot.TaskEnvironmentID == "" {
+			continue
+		}
+		byEnvironment[snapshot.TaskEnvironmentID] = append(byEnvironment[snapshot.TaskEnvironmentID], snapshot)
+	}
+	return byEnvironment, true
 }
 
 func (s *Service) rebuildInput(
 	taskError *statussummary.ActiveErrorSummary,
 	sessions []*models.TaskSession,
 	pendingBySession map[string]models.TaskPendingAction,
-	gitBySession map[string]*models.GitSnapshot,
+	gitByEnvironment map[string][]*models.GitSnapshot,
 	gitObserved bool,
 	prs []statussummary.PullRequestInput,
 	prObserved bool,
@@ -545,6 +552,7 @@ func (s *Service) rebuildInput(
 		input.LastActivityAt = &activityCopy
 	}
 	countProvider, hasCountProvider := s.foregroundActivity.(activeSubagentCountProvider)
+	seenEnvironments := make(map[string]struct{}, len(sessions))
 	for _, session := range sessions {
 		if session == nil || session.ID == "" {
 			continue
@@ -583,9 +591,19 @@ func (s *Service) rebuildInput(
 		if action := string(pendingBySession[session.ID]); strings.TrimSpace(action) != "" {
 			input.PendingActions[session.ID] = action
 		}
-		if snapshot := gitBySession[session.ID]; snapshot != nil {
+		if session.TaskEnvironmentID == "" {
+			continue
+		}
+		if _, seen := seenEnvironments[session.TaskEnvironmentID]; seen {
+			continue
+		}
+		seenEnvironments[session.TaskEnvironmentID] = struct{}{}
+		for _, snapshot := range gitByEnvironment[session.TaskEnvironmentID] {
+			if snapshot == nil {
+				continue
+			}
 			input.Git = append(input.Git, statussummary.RebuildGit{
-				Repository: snapshotRepositoryKey(snapshot, session.ID),
+				Repository: snapshotRepositoryKey(snapshot, ""),
 				Summary:    gitSummaryFromSnapshot(snapshot),
 			})
 		}
