@@ -53,5 +53,14 @@ test.describe("Session tab rename", () => {
     await expect(input).not.toBeVisible();
     await tab.dblclick();
     await expect(maximizeButton.locator(".tabler-icon-arrows-minimize")).toBeVisible();
+
+    await tab.click({ button: "right" });
+    await session.contextMenuItem("Rename").click();
+    await input.click();
+    await expect(input).toBeFocused();
+    await input.fill("implementation");
+    await input.dblclick();
+    await expect(maximizeButton.locator(".tabler-icon-arrows-minimize")).toBeVisible();
+    await testPage.keyboard.press("Escape");
   });
 });
