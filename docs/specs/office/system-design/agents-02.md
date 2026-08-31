@@ -106,7 +106,7 @@ Each agent type defines `ProjectSkillDir` in its `RuntimeConfig`:
 | `grok-acp` (Grok) | `.grok/skills` |
 | `codex-acp`, `opencode-acp`, `gemini`, `copilot-acp`, `auggie`, `amp-acp` | `.agents/skills` |
 
-Default (if unset): `.agents/skills`. Skills are written to `<worktree>/<ProjectSkillDir>/kandev-<slug>/SKILL.md`. The `kandev-` prefix distinguishes injected skills from team-committed skills already in the repo.
+Default (if unset): `.agents/skills`. Skills are written to `<worktree>/<ProjectSkillDir>/<DirName(slug)>/SKILL.md`, where `DirName` prefixes the slug with `kandev-` unless it already carries that prefix (so a bundled system skill slugged `kandev-protocol` lands at `kandev-protocol/`, not `kandev-kandev-protocol/`). The `kandev-` prefix distinguishes injected skills from team-committed skills already in the repo.
 
 Before writing skills, all existing `kandev-*` directories in the target path are deleted (clean-slate). Removed skills don't linger; updated skills get fresh content.
 
@@ -138,7 +138,7 @@ When the scheduler processes a wakeup:
 2. Check guard conditions (status, cooldown, checkout, budget).
 3. Export agent instructions from DB to `~/.kandev/runtime/<ws>/instructions/<agentId>/`.
 4. Create or reuse session worktree (CWD for the agent process).
-5. Clean `kandev-*` from the skill dir; write desired skills to `<worktree>/<ProjectSkillDir>/kandev-<slug>/SKILL.md`; ensure `.git/info/exclude` has `kandev-*` patterns.
+5. Clean `kandev-*` from the skill dir; write desired skills to `<worktree>/<ProjectSkillDir>/<DirName(slug)>/SKILL.md`; ensure `.git/info/exclude` has `kandev-*` patterns.
 6. Build prompt: read `AGENTS.md` content, append path directive, prepend to user-turn prompt, add wake context. For CEO heartbeat: add workspace status section.
 7. Set env vars (`KANDEV_API_KEY`, `KANDEV_TASK_ID`, `KANDEV_CLI`, etc.).
 8. Set `KANDEV_WAKE_PAYLOAD_JSON` with pre-computed task context, or `KANDEV_WAKE_PAYLOAD_PATH` when the payload is too large for inline env.

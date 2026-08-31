@@ -122,11 +122,25 @@ func (r *SpritesExecutor) uploadSkillFiles(
 	r.cleanSpriteKandevSkills(stepCtx, sprite, projectSkillDir)
 
 	// Upload each skill into /workspace/<projectSkillDir>/<skill.DirName(slug)>/SKILL.md.
+	// skill.DirName is not injective (a "kandev-"-prefixed slug and its
+	// unprefixed counterpart collide on the same directory) — the first
+	// skill in manifest order claims a directory; later collisions are
+	// skipped and logged rather than overwriting the first upload.
+	claimedDirs := make(map[string]string, len(manifest.Skills))
 	for _, sk := range manifest.Skills {
 		if !validSlugRe.MatchString(sk.Slug) {
 			continue
 		}
-		skillRoot := fmt.Sprintf("/workspace/%s/%s", projectSkillDir, skill.DirName(sk.Slug))
+		dirName := skill.DirName(sk.Slug)
+		if owner, ok := claimedDirs[dirName]; ok {
+			r.logger.Warn("skipping sprite skill upload: directory name collides with an already-uploaded skill",
+				zap.String("slug", sk.Slug),
+				zap.String("collides_with_slug", owner),
+				zap.String("dir", dirName))
+			continue
+		}
+		claimedDirs[dirName] = sk.Slug
+		skillRoot := fmt.Sprintf("/workspace/%s/%s", projectSkillDir, dirName)
 		skillPath := skillRoot + "/SKILL.md"
 		if err := r.writeFileWithRetry(stepCtx, sprite, skillPath, []byte(sk.Content), 0o644); err != nil {
 			r.logger.Warn("failed to upload skill file",
