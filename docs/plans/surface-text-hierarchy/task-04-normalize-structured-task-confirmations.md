@@ -101,6 +101,6 @@ pnpm run i18n:check
   compact popover and inline descriptions remain unchanged.
 - Added a shared session-delete description renderer plus focused coverage for
   all three surfaces, including a 180-character dynamic task title.
-- Focused verification passed with 3 test files and 9 tests. Web typecheck,
+- Focused verification passed with 3 test files and 11 tests. Web typecheck,
   focused ESLint with `--max-warnings 0`, `pnpm run i18n:check`, targeted
   Prettier, and `git diff --check` also passed on the integrated stack.

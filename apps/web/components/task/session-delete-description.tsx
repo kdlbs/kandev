@@ -13,14 +13,13 @@ export function SessionDeleteDescription({
 }) {
   const { t } = useTranslation();
   const primaryNotice = isPrimary && !isOnlySession;
-  const onlySessionNotice = isOnlySession;
 
   if (structured) {
     return (
       <>
         <p>{t("task:thisWillPermanentlyDeleteTheConversation")}</p>
         {primaryNotice && <p className="font-medium">{t("task:thisIsThePrimarySessionAnother")}</p>}
-        {onlySessionNotice && <p className="font-medium">{t("task:thisIsTheOnlySessionFor")}</p>}
+        {isOnlySession && <p className="font-medium">{t("task:thisIsTheOnlySessionFor")}</p>}
       </>
     );
   }
@@ -31,7 +30,7 @@ export function SessionDeleteDescription({
       {primaryNotice && (
         <span className="mt-2 block font-medium">{t("task:thisIsThePrimarySessionAnother")}</span>
       )}
-      {onlySessionNotice && (
+      {isOnlySession && (
         <span className="mt-2 block font-medium">{t("task:thisIsTheOnlySessionFor")}</span>
       )}
     </>
