@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -25,27 +26,49 @@ import (
 
 var errPassthroughProcessReplaced = errors.New("passthrough process was replaced")
 
+// PreparePassthroughRunning marks a passthrough execution as running and
+// returns a one-shot callback that publishes the corresponding AgentRunning
+// event. Callers that hold a session serialization guard must invoke the
+// callback after releasing that guard because event subscribers may re-enter
+// it synchronously.
+func (m *Manager) PreparePassthroughRunning(sessionID string) (func(), error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return nil, fmt.Errorf("no agent execution found for session: %s", sessionID)
+	}
+
+	if execution.PassthroughProcessID == "" {
+		return nil, fmt.Errorf("session %s is not in passthrough mode", sessionID)
+	}
+
+	// Only publish if not already running (prevents duplicate events).
+	if execution.Status == v1.AgentStatusRunning {
+		return func() {}, nil
+	}
+	if err := m.UpdateStatus(execution.ID, v1.AgentStatusRunning); err != nil {
+		return nil, err
+	}
+
+	// Capture the payload before returning so a later execution mutation cannot
+	// change the event delivered by the deferred callback.
+	payload := newAgentEventPayload(execution)
+	var publishOnce sync.Once
+	return func() {
+		publishOnce.Do(func() {
+			m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentRunning, payload)
+		})
+	}, nil
+}
+
 // MarkPassthroughRunning marks a passthrough execution as running when user submits input.
 // This is called when Enter key is detected in the terminal handler.
 // It updates the execution status and publishes an AgentRunning event.
 func (m *Manager) MarkPassthroughRunning(sessionID string) error {
-	execution, exists := m.executionStore.GetBySessionID(sessionID)
-	if !exists {
-		return fmt.Errorf("no agent execution found for session: %s", sessionID)
+	publish, err := m.PreparePassthroughRunning(sessionID)
+	if err != nil {
+		return err
 	}
-
-	if execution.PassthroughProcessID == "" {
-		return fmt.Errorf("session %s is not in passthrough mode", sessionID)
-	}
-
-	// Only publish if not already running (prevents duplicate events)
-	if execution.Status != v1.AgentStatusRunning {
-		if err := m.UpdateStatus(execution.ID, v1.AgentStatusRunning); err != nil {
-			return err
-		}
-		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
-	}
-
+	publish()
 	return nil
 }
 

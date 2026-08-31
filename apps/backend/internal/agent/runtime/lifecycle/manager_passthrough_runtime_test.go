@@ -135,6 +135,48 @@ func TestMarkPassthroughRunningPublishesOnceAndGuards(t *testing.T) {
 		"an already-running execution must not publish a duplicate AgentRunning event")
 }
 
+func TestPreparePassthroughRunningDefersAndSnapshotsPublication(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	startedAt := time.Date(2026, 8, 31, 8, 0, 0, 0, time.UTC)
+	execution := &AgentExecution{
+		ID:                   "exec-pty",
+		RunID:                "run-before",
+		TaskID:               "task-before",
+		SessionID:            "session-pty",
+		AgentID:              "agent-before",
+		AgentProfileID:       "profile-before",
+		PassthroughProcessID: "pty-1",
+		Status:               v1.AgentStatusReady,
+		StartedAt:            startedAt,
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	preparer, ok := interface{}(mgr).(interface {
+		PreparePassthroughRunning(string) (func(), error)
+	})
+	require.True(t, ok, "the lifecycle manager must expose deferred passthrough preparation")
+	publish, err := preparer.PreparePassthroughRunning("session-pty")
+	require.NoError(t, err)
+	require.NotNil(t, publish)
+	require.Equal(t, v1.AgentStatusRunning, execution.Status)
+	require.Empty(t, eventBus.PublishedEvents, "preparation must not publish while the caller still owns its guard")
+
+	execution.RunID = "run-after"
+	execution.TaskID = "task-after"
+	execution.Status = v1.AgentStatusFailed
+
+	publish()
+	publish()
+
+	require.Len(t, eventBus.PublishedEvents, 1, "deferred publication must be one-shot")
+	payload, ok := eventBus.PublishedEvents[0].Event.Data.(AgentEventPayload)
+	require.True(t, ok)
+	require.Equal(t, "run-before", payload.RunID)
+	require.Equal(t, "task-before", payload.TaskID)
+	require.Equal(t, "session-pty", payload.SessionID)
+	require.Equal(t, string(v1.AgentStatusRunning), payload.Status)
+}
+
 func TestPassthroughAccessorsRequirePassthroughSessionAndRunner(t *testing.T) {
 	ctx := context.Background()
 	mgr := newTestManager(t)

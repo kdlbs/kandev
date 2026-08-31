@@ -120,6 +120,7 @@ var _ interface {
 	OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool
 	GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error)
 	CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error
+	PreparePassthroughRunning(sessionID string) (func(), error)
 } = (*lifecycleAdapter)(nil)
 
 // newLifecycleAdapter creates a new lifecycle adapter
@@ -655,6 +656,10 @@ func (a *lifecycleAdapter) ResolvePassthroughConfig(ctx context.Context, session
 
 func (a *lifecycleAdapter) MarkPassthroughRunning(sessionID string) error {
 	return a.mgr.MarkPassthroughRunning(sessionID)
+}
+
+func (a *lifecycleAdapter) PreparePassthroughRunning(sessionID string) (func(), error) {
+	return a.mgr.PreparePassthroughRunning(sessionID)
 }
 
 func (a *lifecycleAdapter) PollRemoteStatusForRecords(ctx context.Context, records []executor.RemoteStatusPollRequest) {
