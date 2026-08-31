@@ -242,7 +242,7 @@ func TestRecordAgentDecision_RejectsWhenEngineDispatcherNotWired(t *testing.T) {
 // active-session lookup (started_at DESC) could return an unrelated sibling
 // instead of the session that made this decision. deps.svc.RecordAgentDecision
 // is only the entry point — twoSessionResolver models the two-session
-// scenario and dashboardTransitionStore.lastLoadStateSessionID captures
+// scenario and dashboardTransitionStore.loadStateSessionIDs captures
 // which session id the engine's LoadState was actually called with, so this
 // asserts the binding itself rather than just that the write succeeded
 // (which it does either way).

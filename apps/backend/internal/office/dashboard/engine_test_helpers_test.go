@@ -142,13 +142,16 @@ type dashboardTransitionStore struct {
 	applied    map[string]bool
 	// loadStateSessionIDs captures every sessionID LoadState was called
 	// with, in call order. A single RecordAgentDecision call can trigger
-	// more than one LoadState: RecordParticipantDecision's re-evaluation
-	// subpath calls it first with the decision's bound session, and the
-	// dashboard's post-write agentDecisionGuardsSnapshot diagnostic can
-	// call EvaluateStepQuorum afterward, which resolves and loads state
-	// for the task-scoped active session (deliberately unrelated — see
-	// resolveLatestSessionID's doc comment). A test that wants the
-	// write-path session must read loadStateSessionIDs[0], not just the
+	// more than one LoadState: ResolveParticipantRole's own slate-building
+	// probe calls it first with a blank sessionID, then
+	// RecordParticipantDecision's re-evaluation subpath calls it with the
+	// decision's bound session, and the dashboard's post-write
+	// agentDecisionGuardsSnapshot diagnostic can call EvaluateStepQuorum
+	// afterward, which resolves and loads state for the task-scoped active
+	// session (deliberately unrelated — see resolveLatestSessionID's doc
+	// comment). A test that wants the write-path session must read the
+	// first non-blank entry in loadStateSessionIDs, not index 0 (which is
+	// ResolveParticipantRole's blank-sessionID probe) and not just the
 	// most recent call.
 	loadStateSessionIDs []string
 }
