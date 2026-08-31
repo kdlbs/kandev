@@ -252,6 +252,30 @@ func TestDispatcher_RecordDecision_SuppliedSessionTerminalStateSkipsReevaluation
 	}
 }
 
+// TestDispatcher_RecordDecision_SuppliedSessionStoreLookupErrorPropagated
+// proves a genuine session-store failure on the supplied-SessionID path is
+// not silently treated as resolveDeciderSessionID's "not found" case
+// (dispatcher.go's errors.Is(err, ErrTaskSessionNotFound) branch) — mirrors
+// TestDispatcher_RecordDecision_PropagatesActiveSessionLookupError for the
+// blank-SessionID path above.
+func TestDispatcher_RecordDecision_SuppliedSessionStoreLookupErrorPropagated(t *testing.T) {
+	dbErr := errors.New("db down")
+	eng := &fakeEngine{decisionResult: engine.RecordDecisionResult{DecisionID: "decision-1"}}
+	sessions := &fakeSessions{byIDErr: dbErr}
+	d := New(eng, sessions, logger.Default())
+
+	_, err := d.RecordDecision(context.Background(), RecordDecisionInput{
+		TaskID: "task-1", StepID: "review", ParticipantID: "participant-1",
+		Decision: "approved", SessionID: "sess-any",
+	})
+	if !errors.Is(err, dbErr) {
+		t.Fatalf("err = %v, want wrapped db error", err)
+	}
+	if eng.decisionCalled {
+		t.Error("engine should not be called when the supplied-session lookup fails")
+	}
+}
+
 // TestDispatcher_RecordDecision_RejectsEmptyTaskID mirrors HandleTrigger's
 // existing input validation for the new write-side entry point.
 func TestDispatcher_RecordDecision_RejectsEmptyTaskID(t *testing.T) {
