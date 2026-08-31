@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import importlib.util
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -41,6 +42,15 @@ class SpecLinterTest(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         return path
+
+    def git(self, *args: str) -> None:
+        subprocess.run(
+            ["git", *args],
+            cwd=self.root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
     def valid_requirement(self) -> str:
         return """---
@@ -152,6 +162,26 @@ migration: in_progress
         self.assertEqual(self.rules(violations), ["legacy-size-ratchet"])
         self.assertEqual(violations[0].path, self.root / "docs/specs/legacy/spec.md")
 
+    def test_loads_the_previous_ceiling_from_git_history_and_flags_a_raise(self) -> None:
+        self.config["limits"]["legacy"] = 10
+        self.git("init")
+        self.git("config", "user.email", "test@example.com")
+        self.git("config", "user.name", "Spec Lint Test")
+        self.write("docs/specs/spec-lint-exceptions.tsv", "docs/specs/legacy/spec.md\t12\n")
+        self.write("docs/specs/legacy/spec.md", "x" * 12)
+        self.git("add", "-A")
+        self.git("commit", "-m", "freeze the legacy ceiling at 12")
+        self.write("README.md", "placeholder\n")
+        self.git("add", "-A")
+        self.git("commit", "-m", "unrelated follow-up commit")
+
+        self.write("docs/specs/spec-lint-exceptions.tsv", "docs/specs/legacy/spec.md\t13\n")
+        self.write("docs/specs/legacy/spec.md", "x" * 13)
+
+        violations = load_linter().lint_specs(self.root, self.config)
+
+        self.assertIn("legacy-size-ratchet", self.rules(violations))
+
     def test_loads_a_valid_sidecar_from_disk_and_enforces_its_ceiling(self) -> None:
         self.write("docs/specs/spec-lint-exceptions.tsv", "docs/specs/legacy/spec.md\t12\n")
         path = self.write("docs/specs/legacy/spec.md", "x" * 12)
@@ -181,6 +211,7 @@ migration: in_progress
         self.assertIn("malformed-size-exception", self.rules(violations))
 
     def test_flags_a_duplicate_size_exception_path(self) -> None:
+        self.config["limits"]["legacy"] = 11
         self.write(
             "docs/specs/spec-lint-exceptions.tsv",
             "docs/specs/legacy/spec.md\t12\ndocs/specs/legacy/spec.md\t13\n",
@@ -189,7 +220,7 @@ migration: in_progress
 
         violations = load_linter().lint_specs(self.root, self.config)
 
-        self.assertIn("duplicate-size-exception", self.rules(violations))
+        self.assertEqual(self.rules(violations), ["duplicate-size-exception"])
 
     def test_rejects_a_residual_legacy_size_exceptions_key_in_config(self) -> None:
         self.config["legacy_size_exceptions"] = {}

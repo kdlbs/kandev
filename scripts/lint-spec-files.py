@@ -41,10 +41,13 @@ def lint_specs(
 ) -> list[Violation]:
     config = config or load_config(root)
     validate_config(config)
+    exceptions_provided_by_caller = exceptions is not None
     exception_violations: list[Violation] = []
     if exceptions is None:
         exceptions, exception_violations = load_size_exceptions(root)
-    previous_exceptions = load_previous_size_exceptions(root)
+    previous_exceptions = (
+        None if exceptions_provided_by_caller else load_previous_size_exceptions(root)
+    )
     specs_root = root / "docs/specs"
     if not specs_root.exists():
         return exception_violations
