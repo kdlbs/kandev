@@ -114,6 +114,13 @@ test.describe("mobile: worktree branch resume recovery", () => {
     await expect(fixture.session.recoveryError()).toHaveCount(0);
     await assertNoDocumentHorizontalOverflow(testPage, "mobile replacement branch warning");
 
+    // Verify the recovered provider accepts a follow-up turn on the same
+    // session after the replacement worktree is ready.
+    await fixture.session.sendMessageViaButton("/e2e:simple-message");
+    await fixture.session.expectChatResponseVisible("simple mock response", 1, {
+      timeout: 60_000,
+    });
+
     await testPage.screenshot({
       path: testInfo.outputPath("session-resume-recovery-mobile.png"),
       fullPage: true,

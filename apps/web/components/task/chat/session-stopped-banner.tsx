@@ -73,6 +73,7 @@ function StoppedRecoveryFeedback({
         <EnsureSessionErrorBanner
           error={recoveryError}
           onRetry={onRetry}
+          retryDisabled={busyAction !== null}
           workspaceId={workspaceId}
           compact
           action={

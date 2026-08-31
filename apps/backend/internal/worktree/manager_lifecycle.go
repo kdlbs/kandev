@@ -320,10 +320,17 @@ func (m *Manager) classifyUnavailableReusableWorktree(
 	if localExists {
 		return nil
 	}
-	branch := strings.TrimPrefix(strings.TrimPrefix(wt.Branch, "refs/heads/"), "origin/")
+	branch := normalizeOriginBranchName(wt.Branch)
 	remoteExists, err := m.branchExists(ctx, req.RepositoryPath, "refs/remotes/origin/"+branch)
 	if err != nil {
 		return fmt.Errorf("%w: verify saved remote branch %q: %w", ErrReuseWorktreeUnavailable, wt.Branch, err)
+	}
+	if remoteExists {
+		return nil
+	}
+	remoteExists, err = m.remoteBranchExists(ctx, req.RepositoryPath, branch)
+	if err != nil {
+		return fmt.Errorf("%w: verify authoritative remote branch %q: %w", ErrReuseWorktreeUnavailable, wt.Branch, err)
 	}
 	if remoteExists {
 		return nil

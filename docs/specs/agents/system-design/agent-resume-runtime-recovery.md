@@ -45,6 +45,14 @@ failures remain their original failure class and cannot authorize replacement.
 The wrapped error already reaches `Service.RecoverSession` and the
 `session.recover` WebSocket handler.
 
+Attach-only reuse has one additional evidence boundary. If the local branch and
+`refs/remotes/origin/<branch>` are both absent, the manager runs a bounded,
+noninteractive `git ls-remote` probe against the configured remote. Only a
+confirmed missing remote ref produces `ErrBranchUnrecoverable`; an
+authentication, network, timeout, or other probe failure remains an ordinary
+reuse failure. A pruned tracking ref therefore cannot be mistaken for remote
+branch deletion.
+
 The web client currently converts WebSocket failures to a plain `Error` and
 several resume call sites then discard that error. Automatic resume also hides
 the resume error when read-only workspace restore succeeds.
@@ -112,6 +120,12 @@ is enabled, the manager performs these steps:
    branch, and ready state.
 6. Continue normal agent launch with the original session resume identity.
 
+The update is compensating. If the existing task-environment repository record
+cannot be persisted after the new checkout is created, the manager removes the
+new checkout and deletes its newly created branch with an exact-tip check. The
+previous record remains authoritative, so a retry does not accumulate orphan
+checkouts or branches.
+
 This path does not copy commits, uncommitted files, or Git state from the lost
 branch. It does not reuse the lost branch name. Pull-request and contribution
 refs from the lost branch do not become the starting ref for the replacement.
@@ -153,6 +167,12 @@ so a process crash between claiming and message creation can be retried. A
 failed message write releases the claim so a later retry can persist the
 warning.
 
+The comparison and warning attempt happen on every terminal path after resume
+workspace preparation can materialize a replacement. Provider startup and
+readiness failures therefore cannot bypass the warning, and a later retry does
+not lose the old branch identity by taking the already-replaced branch as its
+new baseline.
+
 Direct orchestrator persistence is preferred over a runtime stream event. The
 orchestrator makes the branch decision and already owns the old and new branch
 state. A runtime event would add a second source without adding evidence.
@@ -171,6 +191,10 @@ The alert shows the backend message and these applicable actions:
 - **Continue on a new branch** only for `branch_unrecoverable` details.
 - **Start fresh** with the existing confirmation because it loses provider
   conversation history.
+
+The shared Retry control is disabled while its corresponding recovery request
+is pending. All three recovery surfaces use the same busy state, so repeated
+clicks cannot overlap resume requests.
 
 Automatic page-load resume can keep its current read-only fallback. If restore
 succeeds, the hook returns a nonblocking notice with the resume cause and the
@@ -231,6 +255,13 @@ Backend tests start with the current failure:
 - Successful replacement persists complete warning metadata once. Replay and
   retry do not duplicate it, a failed write releases the claim, and a stale
   claim left by a crash can be reclaimed when no warning exists.
+- Attach-only reuse probes the authoritative remote before classifying missing
+  local and tracking refs as branch loss; transient probe failures do not
+  authorize replacement.
+- Replacement persistence failure removes the newly created checkout and branch
+  while retaining the old task-environment repository record.
+- Warning persistence is attempted after every terminal resume path that can
+  follow materialization, including provider startup and readiness failure.
 - A warning from an earlier repository replacement survives a later
   multi-repository preparation failure.
 - The WebSocket handler maps the sentinel to a conflict with recovery details.

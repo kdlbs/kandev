@@ -78,6 +78,7 @@ export function SessionRecoveryActionButtons({
         <EnsureSessionErrorBanner
           error={recoveryError}
           onRetry={() => void onRetry()}
+          retryDisabled={busyAction !== null}
           compact
           action={
             branchDetails

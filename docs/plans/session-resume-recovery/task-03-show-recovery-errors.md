@@ -15,6 +15,7 @@ acceptance_criteria:
   - AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.3
   - AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.4
   - AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.5
+  - AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.6
   - AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.1
   - AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.4
   - AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.5
@@ -39,6 +40,8 @@ continuation action.
 - Make the shared session recovery helper reject with the typed error.
 - Retain the last error in `SessionStoppedBanner` after busy state ends.
 - Retain the last error in `RunErrorEntry` after busy state ends.
+- Disable the shared Retry control while a recovery request is pending on all
+  recovery surfaces.
 - Reuse `EnsureSessionErrorBanner` alert anatomy and error description rules.
 - Show **Continue on a new branch** only for the typed branch-loss details.
 - Offer visible read-only workspace restore after manual resume failure.
@@ -78,6 +81,8 @@ continuation action.
   warning states that conversation history continued while old code did not.
 - Desktop and mobile use the same capabilities and existing responsive action
   layout.
+- Repeated Retry clicks while a request is pending do not overlap recovery
+  requests.
 
 ## Verification
 

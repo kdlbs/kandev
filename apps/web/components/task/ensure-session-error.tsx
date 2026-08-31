@@ -61,6 +61,7 @@ type BannerProps = {
   workspaceId?: string | null;
   action?: RecoveryAction;
   secondaryAction?: RecoveryAction;
+  retryDisabled?: boolean;
   testId?: string;
   compact?: boolean;
 };
@@ -72,6 +73,7 @@ export function EnsureSessionErrorBanner({
   workspaceId,
   action,
   secondaryAction,
+  retryDisabled,
   testId = "ensure-session-error-banner",
   compact = false,
 }: BannerProps) {
@@ -124,6 +126,7 @@ export function EnsureSessionErrorBanner({
               size="sm"
               className="min-h-11 cursor-pointer px-2 text-xs"
               onClick={onRetry}
+              disabled={retryDisabled}
               data-testid="ensure-session-error-retry"
             >
               <IconRefresh className="size-3" />
@@ -156,6 +159,7 @@ export function SessionRecoveryFeedback({
   workspaceId,
   action,
   secondaryAction,
+  retryDisabled,
   testId = "session-recovery-error",
 }: {
   error: string | null;
@@ -164,6 +168,7 @@ export function SessionRecoveryFeedback({
   workspaceId?: string | null;
   action?: RecoveryAction;
   secondaryAction?: RecoveryAction;
+  retryDisabled?: boolean;
   testId?: string;
 }) {
   return (
@@ -174,6 +179,7 @@ export function SessionRecoveryFeedback({
         workspaceId={workspaceId}
         action={action}
         secondaryAction={secondaryAction}
+        retryDisabled={retryDisabled}
         testId={testId}
       />
       {notice ? <SessionRecoveryNotice message={notice} /> : null}
@@ -182,7 +188,12 @@ export function SessionRecoveryFeedback({
 }
 
 /** Full-panel centered state for the kanban preview's empty-sessions slot. */
-export function EnsureSessionErrorEmptyState({ error, onRetry, workspaceId }: BannerProps) {
+export function EnsureSessionErrorEmptyState({
+  error,
+  onRetry,
+  workspaceId,
+  retryDisabled,
+}: BannerProps) {
   const { t } = useTranslation();
   const info = describeEnsureError(error, workspaceId);
   if (!info) return null;
@@ -208,6 +219,7 @@ export function EnsureSessionErrorEmptyState({ error, onRetry, workspaceId }: Ba
           size="sm"
           className="cursor-pointer"
           onClick={onRetry}
+          disabled={retryDisabled}
           data-testid="ensure-session-error-retry"
         >
           {t("task:retry")}

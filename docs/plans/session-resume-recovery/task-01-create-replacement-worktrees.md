@@ -16,6 +16,8 @@ acceptance_criteria:
   - AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.3
   - AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.7
   - AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.8
+  - AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.9
+  - AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.10
 system_design:
   - ../../specs/agents/system-design/agent-resume-runtime-recovery.md
 ---
@@ -39,13 +41,19 @@ without clearing the existing provider conversation identity.
   executor resume request and lifecycle workspace preparation.
 - Add the permission to `worktree.CreateRequest`.
 - Run normal local and remote branch recovery before replacement is eligible.
+- When local and tracking refs are absent, run a bounded authoritative remote
+  probe and distinguish confirmed absence from authentication or network
+  failure.
 - Generate the replacement directory and branch with the existing branch
   template and suffix helpers.
 - Create the new worktree from the configured task base branch.
 - Update the existing task environment repository record.
+- Remove a newly created checkout and branch if that record update fails.
 - Preserve valid worktrees in a multi-repository task.
 - Prove that the task session, ACP session ID, and stored resume token remain
   unchanged.
+- Prove the service-level `resume_new_branch` request keeps one task session,
+  the configured base branch, and the original provider identity.
 
 ## Out of scope
 
@@ -68,6 +76,10 @@ without clearing the existing provider conversation identity.
 - A multi-repository task retains each valid worktree and replaces only each
   confirmed lost branch.
 - Network and authentication failures remain errors and create no branch.
+- A missing tracking ref does not advertise branch replacement when the remote
+  branch still exists.
+- Failed replacement persistence leaves the old environment record in place
+  and no replacement checkout or branch on disk or in Git.
 
 ## Verification
 
@@ -108,6 +120,10 @@ None.
   all physical worktree changes in the existing task repository record.
 - A token assertion only in memory can miss persistence changes. Reload the
   session and executor records in the test.
+- Remote-tracking refs can be pruned while the authoritative remote branch
+  remains. Probe the remote before emitting typed branch loss.
+- Persistence can fail after `git worktree add`; compensate the exact new path
+  and branch without deleting the old recorded checkout.
 
 ## Parallelism
 
@@ -130,6 +146,9 @@ None.
   repository record.
 - Preserved the task session, ACP session ID, resume token, and valid sibling
   worktrees through the executor and lifecycle request chain.
+- Added service-level coverage for `RecoverSession("resume_new_branch")`,
+  including one-session identity, configured base branch, ACP request identity,
+  and persisted resume-token assertions.
 - GREEN: `rtk go test ./internal/worktree -run
   'Test.*(Recreate|BranchUnrecoverable|ReplacementBranch)' -race` (17 passed).
 - GREEN: `rtk go test ./internal/agent/runtime/lifecycle -run

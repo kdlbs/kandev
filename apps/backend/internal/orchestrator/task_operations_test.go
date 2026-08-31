@@ -4390,23 +4390,24 @@ func TestIssue1884_StepProfileSignalGateStaysInTaskMode(t *testing.T) {
 // mockMessageCreator implements MessageCreator for testing.
 // Only CreateUserMessage is tracked; all other methods are no-op stubs.
 type mockMessageCreator struct {
-	mu                 sync.Mutex
-	userMessages       []mockUserMessage
-	sessionMessages    []mockSessionMessage
-	sessionMessageDone chan struct{}
-	sessionMessageOnce sync.Once
-	sessionMessageErr  error
-	agentMessages      []mockAgentMessage
-	agentMessageWrites int
-	agentStreamWrites  int
-	thinkingWrites     int
-	toolCallWrites     int
-	toolUpdateWrites   int
-	userMessageErr     error
-	permissionClaimFn  func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
-	permissionFinishFn func(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
-	permissionAuditFn  func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error)
-	permissionUpdateFn func(context.Context, string, string, string, string, models.PermissionStatus) error
+	mu                     sync.Mutex
+	userMessages           []mockUserMessage
+	sessionMessages        []mockSessionMessage
+	sessionMessageAttempts int
+	sessionMessageDone     chan struct{}
+	sessionMessageOnce     sync.Once
+	sessionMessageErr      error
+	agentMessages          []mockAgentMessage
+	agentMessageWrites     int
+	agentStreamWrites      int
+	thinkingWrites         int
+	toolCallWrites         int
+	toolUpdateWrites       int
+	userMessageErr         error
+	permissionClaimFn      func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
+	permissionFinishFn     func(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
+	permissionAuditFn      func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error)
+	permissionUpdateFn     func(context.Context, string, string, string, string, models.PermissionStatus) error
 }
 
 type mockUserMessage struct {
@@ -4451,6 +4452,7 @@ func (m *mockMessageCreator) UpdateToolCallMessage(context.Context, string, stri
 func (m *mockMessageCreator) CreateSessionMessage(_ context.Context, taskID, content, sessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.sessionMessageAttempts++
 	if m.sessionMessageErr != nil {
 		return m.sessionMessageErr
 	}
@@ -5436,6 +5438,109 @@ func TestResumeTaskSession_FailedKeepsResumeToken(t *testing.T) {
 	if er.ResumeToken != "acp-session-xyz" {
 		t.Errorf("expected resume token to be preserved on FAILED resume, got %q", er.ResumeToken)
 	}
+}
+
+// TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity proves
+// the service-level recovery action carries the explicit replacement permission
+// without turning it into a fresh session or provider conversation. Worktree
+// materialization itself is covered by the lifecycle tests; this boundary test
+// verifies the request that reaches that materializer.
+func TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+
+	var captured *executor.LaunchAgentRequest
+	startAgentProcessCalled := false
+	agentMgr := &sessionUpdatingAgentManager{
+		mockAgentManager: &mockAgentManager{
+			launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+				captured = req
+				return &executor.LaunchAgentResponse{
+					AgentExecutionID: "exec-recovered",
+					Status:           v1.AgentStatusStarting,
+				}, nil
+			},
+		},
+		repo:          repo,
+		sessionID:     "session-recover-new-branch",
+		taskID:        "task-recover-new-branch",
+		onStartCalled: &startAgentProcessCalled,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task-recover-new-branch", "session-recover-new-branch", models.TaskSessionStateFailed)
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateExecutor(ctx, &models.Executor{
+		ID:        "executor-recover-new-branch",
+		Name:      "Worktree",
+		Type:      models.ExecutorTypeWorktree,
+		Status:    models.ExecutorStatusActive,
+		Resumable: true,
+	}))
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+		ID:            "repo-recover-new-branch",
+		WorkspaceID:   "ws1",
+		Name:          "backend",
+		SourceType:    "local",
+		LocalPath:     t.TempDir(),
+		DefaultBranch: "main",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}))
+	require.NoError(t, repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID:           "task-repo-recover-new-branch",
+		TaskID:       "task-recover-new-branch",
+		RepositoryID: "repo-recover-new-branch",
+		BaseBranch:   "main",
+		Position:     0,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}))
+
+	session, err := repo.GetTaskSession(ctx, "session-recover-new-branch")
+	require.NoError(t, err)
+	session.AgentProfileID = "profile-recover-new-branch"
+	session.ExecutorID = "executor-recover-new-branch"
+	session.RepositoryID = "repo-recover-new-branch"
+	session.BaseBranch = "main"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "running-recover-new-branch",
+		SessionID:        "session-recover-new-branch",
+		TaskID:           "task-recover-new-branch",
+		AgentExecutionID: "exec-before-recovery",
+		ResumeToken:      "acp-session-recover-new-branch",
+		Resumable:        true,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}))
+
+	response, err := svc.RecoverSession(ctx, "task-recover-new-branch", "session-recover-new-branch", "resume_new_branch")
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	require.Equal(t, "task-recover-new-branch", response.TaskID)
+	require.Equal(t, "session-recover-new-branch", response.SessionID)
+	require.NotNil(t, captured)
+	require.Equal(t, "session-recover-new-branch", captured.SessionID)
+	require.Equal(t, "acp-session-recover-new-branch", captured.ACPSessionID)
+	require.True(t, captured.AllowBranchReplacement)
+	require.True(t, captured.UseWorktree)
+	require.Equal(t, "main", captured.Branch)
+	require.Equal(t, "main", captured.BaseBranch)
+	require.True(t, startAgentProcessCalled)
+
+	reloadedSession, err := repo.GetTaskSession(ctx, "session-recover-new-branch")
+	require.NoError(t, err)
+	require.Equal(t, session.ID, reloadedSession.ID)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, reloadedSession.State)
+	reloadedRunning, err := repo.GetExecutorRunningBySessionID(ctx, "session-recover-new-branch")
+	require.NoError(t, err)
+	require.Equal(t, "acp-session-recover-new-branch", reloadedRunning.ResumeToken)
+	sessions, err := repo.ListTaskSessions(ctx, "task-recover-new-branch")
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
 }
 
 // TestResumeTaskSession_ArchiveCancelledSessionResumesSuccessfully is the

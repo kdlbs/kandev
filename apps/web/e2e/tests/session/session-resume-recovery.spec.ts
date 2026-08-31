@@ -110,6 +110,15 @@ test.describe("worktree branch resume recovery", () => {
     await expect(fixture.session.recoveryError()).toHaveCount(0);
     await assertNoDocumentHorizontalOverflow(testPage, "replacement branch warning");
 
+    // A resumed session must accept a real follow-up turn after the branch
+    // replacement. The original response remains visible, and the second
+    // response proves the provider session continued instead of stopping at
+    // workspace preparation.
+    await fixture.session.sendMessage("/e2e:simple-message");
+    await fixture.session.expectChatResponseVisible("simple mock response", 1, {
+      timeout: 60_000,
+    });
+
     await testPage.screenshot({
       path: testInfo.outputPath("session-resume-recovery-desktop.png"),
       fullPage: true,

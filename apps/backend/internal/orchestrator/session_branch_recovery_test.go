@@ -147,6 +147,50 @@ func TestPersistBranchRecoveryWarningsReclaimsStaleClaim(t *testing.T) {
 	require.Equal(t, "branch_recreated", messages.sessionMessages[0].metadata["kind"])
 }
 
+func TestPersistBranchRecoveryWarningReleasesClaimWhenMessageWriteFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-warning-write-failure", "session-warning-write-failure", "step1")
+	writeErr := errors.New("message write failed")
+	messages := &mockMessageCreator{sessionMessageErr: writeErr}
+	service := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	service.messageCreator = messages
+	previous := branchRecoveryRepoSnapshot{
+		RepositoryID:   "repo-warning-write-failure",
+		BranchSlug:     "primary",
+		WorktreeBranch: "feature/lost",
+		BaseBranch:     "main",
+	}
+	current := previous
+	current.WorktreeBranch = "feature/recreated"
+
+	service.persistBranchRecoveryWarning(
+		ctx,
+		"task-warning-write-failure",
+		"session-warning-write-failure",
+		previous,
+		current,
+	)
+	if len(messages.sessionMessages) != 0 {
+		t.Fatalf("failed message write was recorded as a success: %+v", messages.sessionMessages)
+	}
+
+	messages.sessionMessageErr = nil
+	service.persistBranchRecoveryWarning(
+		ctx,
+		"task-warning-write-failure",
+		"session-warning-write-failure",
+		previous,
+		current,
+	)
+	if len(messages.sessionMessages) != 1 {
+		t.Fatalf("warning messages = %d, want one retry after the initial write failure", len(messages.sessionMessages))
+	}
+	if messages.sessionMessageAttempts != 2 {
+		t.Fatalf("message write attempts = %d, want one failed attempt and one retry", messages.sessionMessageAttempts)
+	}
+}
+
 func TestBranchRecoveryErrorLeavesOrdinaryErrorsUntouched(t *testing.T) {
 	cause := errors.New("ordinary resume failure")
 	service := &Service{}

@@ -318,6 +318,81 @@ func TestRecreate_AllowsExplicitReplacementWithFreshBranchAndPath(t *testing.T) 
 	}
 }
 
+type replacementUpdateErrorStore struct {
+	*mockStore
+	err       error
+	attempted *Worktree
+}
+
+func (s *replacementUpdateErrorStore) UpdateWorktree(_ context.Context, wt *Worktree) error {
+	copy := *wt
+	s.attempted = &copy
+	return s.err
+}
+
+func TestRecreate_CleansReplacementWhenPersistenceFails(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	runGit(t, repoPath, "push", "origin", "--delete", "feature/pr-branch")
+	archiveDeletesLocalBranch(t, repoPath, "feature/pr-branch")
+	runGit(t, repoPath, "fetch", "--prune", "origin")
+
+	cfg := newTestConfig(t)
+	storeErr := errors.New("replacement persistence failed")
+	store := &replacementUpdateErrorStore{mockStore: newMockStore(), err: storeErr}
+	existing := &Worktree{
+		ID:                "wt-replace-persist-failure",
+		SessionID:         "session-replace-persist-failure",
+		TaskID:            "task-replace-persist-failure",
+		TaskDirName:       "task-replace-persist-failure",
+		TaskEnvironmentID: "env-replace-persist-failure",
+		RepositoryID:      "repo-1",
+		RepositoryPath:    repoPath,
+		Path:              filepath.Join(cfg.TasksBasePath, "task-replace-persist-failure", "repo-1-old"),
+		Branch:            "feature/pr-branch",
+		BaseBranch:        "main",
+		Status:            StatusDeleted,
+	}
+	store.worktrees[existing.ID] = existing
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	_, err = mgr.recreate(context.Background(), existing, CreateRequest{
+		SessionID:              existing.SessionID,
+		TaskID:                 existing.TaskID,
+		TaskEnvironmentID:      existing.TaskEnvironmentID,
+		RepositoryID:           existing.RepositoryID,
+		RepositoryPath:         repoPath,
+		BaseBranch:             existing.BaseBranch,
+		TaskDirName:            existing.TaskDirName,
+		RepoName:               "repo-1",
+		BranchIdentitySlug:     "primary",
+		PullBeforeWorktree:     true,
+		AllowBranchReplacement: true,
+	})
+	if !errors.Is(err, storeErr) {
+		t.Fatalf("recreate() error = %v, want %v", err, storeErr)
+	}
+	if store.attempted == nil {
+		t.Fatal("replacement persistence was not attempted")
+	}
+	if _, statErr := os.Stat(store.attempted.Path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("replacement worktree path still exists after persistence failure: %q (%v)", store.attempted.Path, statErr)
+	}
+	branchExists, branchErr := mgr.branchExists(context.Background(), repoPath, "refs/heads/"+store.attempted.Branch)
+	if branchErr != nil {
+		t.Fatalf("verify replacement branch cleanup: %v", branchErr)
+	}
+	if branchExists {
+		t.Fatalf("replacement branch %q still exists after persistence failure", store.attempted.Branch)
+	}
+	stored := store.worktrees[existing.ID]
+	if stored == nil || stored.Path != existing.Path || stored.Branch != existing.Branch || stored.Status != StatusDeleted {
+		t.Fatalf("stored worktree = %#v, want the original deleted record %#v", stored, existing)
+	}
+}
+
 // TestBranchRecoveryStatus covers the three probe outcomes used by the
 // unarchive HTTP response: local, remote (only the remote-tracking ref
 // remains after archive deleted the local branch), and missing.

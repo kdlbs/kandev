@@ -39,6 +39,7 @@ Preserve the observable behavior documented for Agent Resume and Runtime Recover
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.3:** If resume and read-only workspace restore both fail, the recovery surface shows both causes. It does not replace them with only a generic message.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.4:** A user can select read-only workspace restore after a manual resume failure. Kandev does not silently replace a manual Resume request with read-only restore.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.5:** Desktop, narrow desktop, and mobile task views use the existing inline alert and chat recovery patterns. Recovery actions remain reachable by keyboard and touch without horizontal overflow.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.6:** A Retry recovery control is disabled while its recovery request is in flight on every recovery surface. A repeated attempt cannot create overlapping `session.recover` requests.
 
 ### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003: Explicit continuation after branch loss
 
@@ -54,6 +55,9 @@ Preserve the observable behavior documented for Agent Resume and Runtime Recover
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.6:** Warning persistence is idempotent for one branch replacement. Reconnect, replay, and page reload do not create duplicate messages.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.7:** In a task with multiple repositories, Kandev replaces only worktrees whose branches are confirmed unrecoverable. Valid worktrees continue to use their current branches. Kandev persists one warning for each replaced branch.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.8:** Other resume failures do not offer branch replacement. **Start fresh** keeps its current behavior and remains the only recovery action that intentionally clears the stored conversation identity.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.9:** Attach-only worktree preflight treats a branch as unrecoverable only after a bounded noninteractive probe confirms that the configured remote does not contain it. Authentication, network, timeout, and other probe failures remain ordinary recovery failures.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.10:** If replacement checkout creation succeeds but persistence of the existing task-environment repository record fails, Kandev removes the replacement checkout and its newly created branch. The prior record remains authoritative for retry.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.11:** Once explicit replacement has materialized, Kandev attempts warning persistence on every terminal resume path, including provider startup and readiness failures. A later retry can recover a warning after a failed message write.
 
 ## Migrated source detail
 
@@ -132,6 +136,12 @@ without repairing it.
 - The branch replacement option is available only for a typed error that wraps
   `worktree.ErrBranchUnrecoverable`. Network, authentication, and transient Git
   errors remain failures.
+- Attach-only branch-loss classification uses a bounded noninteractive remote
+  probe when local and remote-tracking refs are absent. A missing tracking ref
+  alone is not proof that the configured remote branch was deleted.
+- Replacement persistence is compensating: if the existing task-environment
+  repository update fails after checkout creation, the new checkout and branch
+  are removed and the old database record is left unchanged.
 - The persisted warning uses an atomic metadata claim before message creation.
   A failed message write releases the claim so a later retry can persist it.
 
@@ -183,6 +193,18 @@ without repairing it.
 - **GIVEN** branch continuation succeeds, **WHEN** the chat reloads or replays
   events, **THEN** one warning identifies the old branch, new branch, and base
   branch and states that the old code was not recovered.
+- **GIVEN** local and remote-tracking refs are absent but the configured remote
+  still contains the branch, **WHEN** attach-only preflight runs, **THEN** it
+  returns an ordinary reuse failure and does not advertise branch replacement.
+- **GIVEN** attach-only preflight cannot authenticate to or reach the remote,
+  **WHEN** the branch refs are absent locally, **THEN** it returns the probe
+  failure and does not classify the branch as unrecoverable.
+- **GIVEN** replacement checkout creation succeeds but the task-environment
+  update fails, **WHEN** recovery returns, **THEN** no replacement checkout or
+  branch remains and the prior environment record is unchanged.
+- **GIVEN** replacement materializes before provider startup or readiness fails,
+  **WHEN** the resume attempt reaches a terminal path, **THEN** one warning is
+  persisted or remains retryable without changing the session identity.
 
 ## Out of scope
 

@@ -17,6 +17,7 @@ acceptance_criteria:
   - AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.6
   - AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.7
   - AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.8
+  - AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.11
 system_design:
   - ../../specs/agents/system-design/agent-resume-runtime-recovery.md
 ---
@@ -49,6 +50,8 @@ replacement committed before a later repository preparation failure.
 - Reclaim a stale timestamped claim only when no matching warning message
   exists, covering a process crash between the claim and message write.
 - Persist one warning for each replaced repository in a multi-repository task.
+- Persist the branch transition on every terminal resume path after workspace
+  preparation can materialize it, including provider startup/readiness failure.
 - Publish the created message through the existing message adapter path.
 
 ## Out of scope
@@ -72,6 +75,8 @@ replacement committed before a later repository preparation failure.
 - A crash before message creation leaves a reclaimable claim, while a matching
   persisted warning prevents duplicate creation.
 - A later preparation failure does not lose warnings for earlier replacements.
+- A provider startup or readiness failure after replacement still leaves one
+  warning persisted or retryable.
 - Each replaced repository in a multi-repository task receives its own warning.
 
 ## Verification

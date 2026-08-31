@@ -70,6 +70,49 @@ func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) (bo
 	return true, nil
 }
 
+// remoteBranchExists performs an authoritative, bounded probe for a branch on
+// origin. A successful `ls-remote --exit-code` with exit status 2 means the
+// remote answered and did not advertise the requested ref. Any other failure
+// remains an error because transport, authentication, and timeout failures do
+// not prove that the branch was deleted.
+func (m *Manager) remoteBranchExists(ctx context.Context, repoPath, branch string) (bool, error) {
+	branch = normalizeOriginBranchName(branch)
+	if branch == "" {
+		return false, fmt.Errorf("remote branch name is empty: %w", ErrGitCommandFailed)
+	}
+	output, err := m.runBoundedGitInspect(
+		ctx,
+		repoPath,
+		"ls-remote",
+		"--exit-code",
+		"--heads",
+		"origin",
+		"refs/heads/"+branch,
+	)
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 2 {
+		return false, nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false, err
+	}
+	if containsAuthFailure(strings.ToLower(output)) {
+		return false, ErrAuthFailed
+	}
+	return false, ErrGitCommandFailed
+}
+
+func normalizeOriginBranchName(branch string) string {
+	branch = strings.TrimSpace(branch)
+	for _, prefix := range []string{"refs/remotes/origin/", "refs/heads/", "origin/"} {
+		branch = strings.TrimPrefix(branch, prefix)
+	}
+	return branch
+}
+
 // runBoundedGitInspect runs a non-interactive local git inspection after
 // acquiring the lifecycle throttle. The timeout starts after admission so
 // queue wait does not consume the command's inspection budget.

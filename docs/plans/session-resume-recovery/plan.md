@@ -48,8 +48,14 @@ from code recovery.
 - Add the explicit `resume_new_branch` recovery action.
 - Create a unique branch from the configured task base after confirmed branch
   loss.
+- Confirm branch loss with a bounded authoritative remote probe when local and
+  remote-tracking refs are absent.
+- Compensate replacement checkout and branch creation if environment-record
+  persistence fails.
 - Keep the same task session, ACP session ID, and resume token.
 - Persist one `branch_recreated` warning per replaced repository branch.
+- Persist that warning on every terminal path after replacement materializes.
+- Disable shared Retry controls while recovery requests are pending.
 - Render honest localized warning copy in desktop and mobile chat.
 - Add backend, frontend, desktop E2E, and mobile E2E regressions.
 
@@ -69,14 +75,17 @@ The first work order adds a TDD boundary at the worktree and resume layers.
 Normal resume continues to return `ErrBranchUnrecoverable`. The explicit action
 passes a narrow replacement permission through executor workspace preparation.
 The worktree manager then uses its normal base selection and branch-name
-generation to replace only a confirmed lost branch.
+generation to replace only a confirmed lost branch. Attach-only preflight uses
+authoritative remote evidence, and replacement persistence compensates newly
+created filesystem and Git state if its database update fails.
 
 The second work order adds the typed recovery protocol and durable warning.
 The WebSocket handler maps confirmed branch loss to a conflict with structured
 recovery details. The orchestrator compares repository branch state around
-workspace preparation, persists one claimed warning for each replacement even
-when a later repository fails, and reclaims timestamped claims left by a crash
-when no matching warning exists.
+workspace preparation, persists one claimed warning for each replacement on
+every terminal resume path even when a later repository or provider step
+fails, and reclaims timestamped claims left by a crash when no matching warning
+exists.
 
 The third work order makes every frontend recovery path observable. It retains
 WebSocket error details, uses the existing alert pattern, and exposes explicit
@@ -107,8 +116,10 @@ behavior and full quality gates.
 ## Verification strategy
 
 - Worktree tests prove normal error propagation and explicit branch creation
-  from the configured base.
-- Executor and orchestrator tests prove session and token preservation.
+  from the configured base, authoritative remote classification, transient
+  probe handling, and compensation after persistence failure.
+- Executor and orchestrator tests prove service-level session, ACP identity, and
+  token preservation for `resume_new_branch`.
 - Persistence tests prove complete warning metadata, state-guarded claims,
   retry after write failure or a stale claim, partial multi-repository failure
   handling, and duplicate suppression.
@@ -138,6 +149,13 @@ behavior and full quality gates.
   outcomes in separate sentences in every locale.
 - Recovery actions can overflow narrow chat cards. Reuse the stacked mobile
   layout and assert target size and document width.
+- Remote branch probes can be mistaken for proof of deletion if their failure
+  class is collapsed. Keep confirmed absence distinct from auth and transport
+  failures.
+- A persistence error after filesystem mutation can orphan a replacement. Keep
+  cleanup exact to the new path and branch tip so the prior record stays safe.
+- A retry button that ignores the shared busy state can overlap recovery
+  requests and repeat branch preparation.
 
 ## Package handoff
 
@@ -164,7 +182,10 @@ verification results are recorded below.
 - PR fixup hardens replacement eligibility against transient fetch failures,
   preserves warnings after partial preparation failure, retains both manual
   recovery causes, clears stale automatic feedback after an external recovery,
-  and reclaims crash-stale warning claims.
+  reclaims crash-stale warning claims, compensates failed replacement
+  persistence, and prevents overlapping retry requests.
+- PR fixup adds a service-level `resume_new_branch` regression that reloads one
+  task session and its original ACP resume token after the action.
 - Full backend tests pass with the managed-process configuration variables
   cleared, backend lint and changed-file golangci-lint pass, the production
   web build passes, and specification lint passes.

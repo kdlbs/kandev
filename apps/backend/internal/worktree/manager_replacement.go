@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -42,6 +43,9 @@ func (m *Manager) replaceUnrecoverableWorktree(
 
 	replacement := replacementRecord(existing, replacementReq, branchName, worktreePath, fallbackWarning, fallbackDetail)
 	if err := m.persistReplacementWorktree(ctx, &replacement); err != nil {
+		if cleanupErr := m.cleanupFailedReplacement(ctx, &replacement); cleanupErr != nil {
+			return nil, errors.Join(err, fmt.Errorf("cleanup replacement after persistence failure: %w", cleanupErr))
+		}
 		return nil, err
 	}
 	m.copyConfiguredFiles(ctx, replacementReq, &replacement)
@@ -53,6 +57,55 @@ func (m *Manager) replaceUnrecoverableWorktree(
 		zap.String("new_branch", replacement.Branch),
 		zap.String("path", replacement.Path))
 	return &replacement, nil
+}
+
+// cleanupFailedReplacement removes the physical checkout and the branch that
+// gitAddWorktree created before the replacement record could be persisted. The
+// original record remains authoritative when this compensation runs.
+func (m *Manager) cleanupFailedReplacement(ctx context.Context, replacement *Worktree) error {
+	if replacement == nil {
+		return nil
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), m.inspectTimeout)
+	defer cancel()
+
+	var cleanupErrs []error
+	if err := m.removeWorktreeDir(cleanupCtx, replacement.Path, replacement.RepositoryPath); err != nil {
+		cleanupErrs = append(cleanupErrs, fmt.Errorf("remove replacement worktree: %w", err))
+	}
+	if err := m.cleanupFailedReplacementBranch(cleanupCtx, replacement); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	return errors.Join(cleanupErrs...)
+}
+
+func (m *Manager) cleanupFailedReplacementBranch(ctx context.Context, replacement *Worktree) error {
+	branchRef := "refs/heads/" + replacement.Branch
+	exists, err := m.branchExists(ctx, replacement.RepositoryPath, branchRef)
+	if err != nil {
+		return fmt.Errorf("verify replacement branch: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	output, err := m.runBoundedGitInspect(
+		ctx,
+		replacement.RepositoryPath,
+		"rev-parse",
+		"--verify",
+		branchRef+"^{commit}",
+	)
+	if err != nil {
+		return fmt.Errorf("resolve replacement branch: %w", err)
+	}
+	_, err = deleteBranchRefIfOwned(ctx, replacement.RepositoryPath, newBranchAddSnapshot{
+		branchRef: branchRef,
+		branchOID: strings.TrimSpace(output),
+	})
+	if err != nil {
+		return fmt.Errorf("delete replacement branch: %w", err)
+	}
+	return nil
 }
 
 func replacementRequest(existing *Worktree, req CreateRequest) (CreateRequest, error) {
