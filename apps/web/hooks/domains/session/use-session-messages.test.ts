@@ -356,11 +356,13 @@ describe("session subscription hydration ordering", () => {
 
   it("does not request messages before subscription acknowledgement", async () => {
     const readiness = deferred<void>();
+    const response = deferred<{ messages: Message[]; has_more: boolean }>();
     mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness.promise);
     mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
       ready: readiness.promise,
       unsubscribe: vi.fn(),
     });
+    mockWebSocketClient.request.mockReturnValue(response.promise);
 
     const { unmount } = renderHook(() => useSessionMessages("sess-1"));
 
@@ -379,6 +381,11 @@ describe("session subscription hydration ordering", () => {
       10000,
     );
     expect(mockWebSocketClient.request).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      response.resolve({ messages: [], has_more: false });
+      await response.promise;
+    });
     unmount();
   });
 

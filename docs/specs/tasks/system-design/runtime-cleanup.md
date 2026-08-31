@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-RUNTIME-CLEANUP-001
 created: 2026-06-22
-updated: 2026-08-28
+updated: 2026-08-31
 owners:
   - cfl
 ---
@@ -217,7 +217,7 @@ migration lock. The migration never performs filesystem or Git cleanup.
 `task_resource_cleanup_jobs` is the durable task-lifecycle cleanup intent. It has
 no foreign key to `tasks`, so delete cleanup survives deletion of the owning row.
 It stores the trigger, state, retry timing, last error, and a JSON snapshot of the
-runtime, environment, worktree, and path handles captured before task mutation.
+runtime, environment, worktree OIDs, and path handles captured before task mutation.
 Only one non-terminal row exists for an operation ID; repeated event delivery
 reuses the same cleanup job. `attempts` counts successful worker claims. A
 terminal `failed` row retains its final error and completion timestamp for
@@ -330,6 +330,7 @@ The durable cleanup job wraps that resource lifecycle:
   `completed_at`, and is excluded from automatic due-job selection.
 - If cleanup cannot prove that a session worktree belongs to the task being
   cleaned, destructive worktree deletion fails closed and skips that worktree.
+  Stale Git state is removed only with pinned path, branch, and commit ownership.
 - If an agentctl process exits unexpectedly, its owned agent subprocess group is
   killed before agentctl shutdown completes.
 - If the user sends Ctrl+C to a standalone Kandev process tree, agentctl does

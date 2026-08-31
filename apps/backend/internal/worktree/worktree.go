@@ -70,6 +70,12 @@ type Worktree struct {
 	// Branch is the Git branch name checked out in this worktree.
 	Branch string `json:"branch"`
 
+	// CleanupHeadOID is the immutable checkout identity captured by the durable
+	// task-cleanup snapshot. It is intentionally internal: ordinary worktree
+	// callers do not need to provide it, while durable cleanup uses it to fail
+	// closed if the recorded path or branch advanced before teardown.
+	CleanupHeadOID string `json:"-"`
+
 	// BaseBranch is the branch this worktree was created from.
 	BaseBranch string `json:"base_branch"`
 
