@@ -51,8 +51,9 @@ An Office participant can submit a validated verdict with a reason, and the resu
   the task's current `workflow_step_id`, THE SYSTEM SHALL record the decision
   under `approver`. WHEN the caller holds those two roles at different steps,
   THE SYSTEM SHALL record the decision under the role whose seat sits at the
-  task's current `workflow_step_id`, and SHALL NOT apply approver-wins across
-  steps.
+  task's current `workflow_step_id` (which is guaranteed to be one of the two
+  roles by the precondition of AC-TASKS-QUORUM-RECORDING-001.1), and SHALL NOT
+  apply approver-wins across steps.
 - **AC-TASKS-QUORUM-RECORDING-001.4a:** THE SYSTEM SHALL apply
   AC-TASKS-QUORUM-RECORDING-001.4 to the agent decision surface only. The human decision path
   resolves the role step-blind and retains unconditional approver-wins, so the

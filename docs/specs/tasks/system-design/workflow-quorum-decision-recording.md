@@ -232,12 +232,18 @@ generate.
 
 There is deliberately NO scalar `required_count` / `received_count` pair. A step
 may configure several guards, and AC-TASKS-QUORUM-RECORDING-001.4's approver-wins precedence can resolve the
-caller to `approver` while every guard at that step names `reviewer` — which is
-`Office Default`'s Review exactly, per `## Live workflow configuration`. In that
-case AC-TASKS-QUORUM-BINDING-001.7 means the decision is never counted by that guard at all, so a single
-pair of counts is either ambiguous or actively misleading. `guards` gives the
-agent the count against each guard that exists, which is the question it was
-actually asking.
+caller to `approver` while every guard at that step names `reviewer` — this happens
+when both seats sit at the task's current `workflow_step_id`, which `Office
+Default`'s Review reaches whenever a thin workspace seats one agent in both
+roles there (AC-OFFICE-REVIEW-SEATS-002.4/002.5), per `## Live workflow
+configuration`. A caller whose approver seat instead sits at an earlier step,
+such as Work, now resolves to `reviewer` at Review under
+AC-TASKS-QUORUM-RECORDING-001.4's step-preferring rule and is counted
+normally by that guard; approver-wins no longer reaches across steps. In the
+same-step case, AC-TASKS-QUORUM-BINDING-001.7 means the decision is never
+counted by that guard at all, so a single pair of counts is either ambiguous
+or actively misleading. `guards` gives the agent the count against each guard
+that exists, which is the question it was actually asking.
 
 **Reason column.** The reason is written to `workflow_step_decisions.comment`,
 the column every Office reader already projects (`office/dashboard/decisions.go:141,428`).
