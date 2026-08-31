@@ -1032,10 +1032,11 @@ type Service struct {
 	// context. key: sessionID, value: capturedPrompt. Replaced every turn.
 	lastTurnPrompt sync.Map
 
-	// dynamicAttemptEvidence is keyed by logical session. A dynamic attempt is
-	// replaced at every concrete launch, and its execution ID fences late
-	// stream/lifecycle events from a predecessor. Fallback requires an explicit
-	// no-output/no-effect result from this map.
+	// dynamicAttemptEvidence is keyed by logical session and stores the current
+	// concrete or dynamic prompt attempt. It is replaced for every attempt, and
+	// its execution ID and prompt generation fence late stream/lifecycle events
+	// from a predecessor. Automatic recovery requires an explicit no-output,
+	// no-effect result from this map.
 	dynamicAttemptEvidence sync.Map
 
 	// Service state
@@ -1398,6 +1399,11 @@ func (s *Service) SetRepoCloner(cloner executor.RepoCloner, updater executor.Rep
 // self-healing into the executor.
 func (s *Service) SetTaskRepositoryBaseBranchUpdater(updater executor.TaskRepositoryBaseBranchUpdater) {
 	s.executor.SetTaskRepositoryBaseBranchUpdater(updater)
+}
+
+// SetPRBaseResolver wires best-effort pull-request base resolution at launch.
+func (s *Service) SetPRBaseResolver(resolver executor.PRBaseResolver) {
+	s.executor.SetPRBaseResolver(resolver)
 }
 
 // RepositoryHostCloner is the narrow host-materialization contract. It returns

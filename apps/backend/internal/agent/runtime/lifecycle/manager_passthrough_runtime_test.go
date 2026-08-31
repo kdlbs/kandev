@@ -16,6 +16,7 @@ import (
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/events"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -133,6 +134,152 @@ func TestMarkPassthroughRunningPublishesOnceAndGuards(t *testing.T) {
 	require.NoError(t, mgr.MarkPassthroughRunning("session-pty"))
 	require.Len(t, bus.PublishedEvents, 1,
 		"an already-running execution must not publish a duplicate AgentRunning event")
+}
+
+func TestPreparePassthroughRunningDefersAndSnapshotsPublication(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	startedAt := time.Date(2026, 8, 31, 8, 0, 0, 0, time.UTC)
+	execution := &AgentExecution{
+		ID:                   "exec-pty",
+		RunID:                "run-before",
+		TaskID:               "task-before",
+		SessionID:            "session-pty",
+		AgentID:              "agent-before",
+		AgentProfileID:       "profile-before",
+		PassthroughProcessID: "pty-1",
+		Status:               v1.AgentStatusReady,
+		StartedAt:            startedAt,
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	preparer, ok := interface{}(mgr).(interface {
+		PreparePassthroughRunning(string) (func(), error)
+	})
+	require.True(t, ok, "the lifecycle manager must expose deferred passthrough preparation")
+	publish, err := preparer.PreparePassthroughRunning("session-pty")
+	require.NoError(t, err)
+	require.NotNil(t, publish)
+	require.Equal(t, v1.AgentStatusRunning, execution.Status)
+	require.Empty(t, eventBus.PublishedEvents, "preparation must not publish while the caller still owns its guard")
+
+	execution.RunID = "run-after"
+	execution.TaskID = "task-after"
+	execution.Status = v1.AgentStatusFailed
+
+	publish()
+	publish()
+
+	require.Len(t, eventBus.PublishedEvents, 1, "deferred publication must be one-shot")
+	payload, ok := eventBus.PublishedEvents[0].Event.Data.(AgentEventPayload)
+	require.True(t, ok)
+	require.Equal(t, "run-before", payload.RunID)
+	require.Equal(t, "task-before", payload.TaskID)
+	require.Equal(t, "session-pty", payload.SessionID)
+	require.Equal(t, string(v1.AgentStatusRunning), payload.Status)
+}
+
+type competingExecutionWriter struct {
+	mutate func()
+}
+
+func (w *competingExecutionWriter) GetExecutorRunningBySessionID(context.Context, string) (*taskmodels.ExecutorRunning, error) {
+	if w.mutate != nil {
+		w.mutate()
+	}
+	return nil, taskmodels.ErrExecutorRunningNotFound
+}
+
+func (*competingExecutionWriter) UpsertExecutorRunning(context.Context, *taskmodels.ExecutorRunning) error {
+	return nil
+}
+
+func (*competingExecutionWriter) DeleteExecutorRunningBySessionID(context.Context, string) error {
+	return nil
+}
+
+func (*competingExecutionWriter) RepairExecutorRunningDead(context.Context, string) error {
+	return nil
+}
+
+func TestPreparePassthroughRunningCapturesSnapshotBeforeCompetingMutation(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := &AgentExecution{
+		ID:                   "exec-pty",
+		RunID:                "run-before",
+		TaskID:               "task-before",
+		SessionID:            "session-pty",
+		PassthroughProcessID: "pty-1",
+		Status:               v1.AgentStatusReady,
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+	mgr.SetExecutorRunningWriter(&competingExecutionWriter{
+		mutate: func() {
+			require.NoError(t, mgr.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+				current.RunID = "run-after"
+				current.TaskID = "task-after"
+				current.Status = v1.AgentStatusFailed
+			}))
+		},
+	})
+
+	publish, err := mgr.PreparePassthroughRunning(execution.SessionID)
+	require.NoError(t, err)
+	publish()
+
+	require.Len(t, eventBus.PublishedEvents, 1)
+	payload, ok := eventBus.PublishedEvents[0].Event.Data.(AgentEventPayload)
+	require.True(t, ok)
+	require.Equal(t, "run-before", payload.RunID)
+	require.Equal(t, "task-before", payload.TaskID)
+	require.Equal(t, string(v1.AgentStatusRunning), payload.Status)
+}
+
+func TestPreparePassthroughRunningClaimsTransitionOnceConcurrently(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := &AgentExecution{
+		ID:                   "exec-pty",
+		RunID:                "run-before",
+		TaskID:               "task-before",
+		SessionID:            "session-pty",
+		PassthroughProcessID: "pty-1",
+		Status:               v1.AgentStatusReady,
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	start := make(chan struct{})
+	results := make(chan struct {
+		publish func()
+		err     error
+	}, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			publish, err := mgr.PreparePassthroughRunning(execution.SessionID)
+			results <- struct {
+				publish func()
+				err     error
+			}{publish: publish, err: err}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	for result := range results {
+		require.NoError(t, result.err)
+		require.NotNil(t, result.publish)
+		result.publish()
+	}
+
+	require.Len(t, eventBus.PublishedEvents, 1,
+		"concurrent prepare calls must claim one Ready to Running transition")
+	payload, ok := eventBus.PublishedEvents[0].Event.Data.(AgentEventPayload)
+	require.True(t, ok)
+	require.Equal(t, "run-before", payload.RunID)
+	require.Equal(t, string(v1.AgentStatusRunning), payload.Status)
 }
 
 func TestPassthroughAccessorsRequirePassthroughSessionAndRunner(t *testing.T) {

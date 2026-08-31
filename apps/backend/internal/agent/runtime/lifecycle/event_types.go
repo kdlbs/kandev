@@ -28,6 +28,22 @@ type AgentEventPayload struct {
 	ProviderError      *streams.ProviderError `json:"provider_error,omitempty"`
 	ExitCode           *int                   `json:"exit_code,omitempty"`
 	PromptGeneration   uint64                 `json:"prompt_generation,omitempty"`
+	// Prompt replay evidence is populated on terminal failure events. It is
+	// captured by lifecycle before the terminal event is published so consumers
+	// do not have to infer output or effects from independently subscribed
+	// stream events.
+	EvidenceKnown  bool `json:"evidence_known,omitempty"`
+	OutputObserved bool `json:"output_observed,omitempty"`
+	EffectObserved bool `json:"effect_observed,omitempty"`
+}
+
+// PromptAttemptEvidence is the immutable lifecycle snapshot attached to a
+// terminal failure event. Lifecycle conservatively treats any genuine turn
+// content as both output and effect evidence, which fails replay closed.
+type PromptAttemptEvidence struct {
+	EvidenceKnown  bool
+	OutputObserved bool
+	EffectObserved bool
 }
 
 // AgentStalledPayload describes a prompt that has stopped receiving agent events.

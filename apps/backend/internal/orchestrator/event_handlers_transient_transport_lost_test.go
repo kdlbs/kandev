@@ -15,11 +15,14 @@ const realPeerDisconnected = `{"code":-32603,"message":"Internal error","data":{
 func TestHandleTransientFailure_TransportLostSchedulesRetry(t *testing.T) {
 	svc, mc := newTransientTestService(t)
 	t.Cleanup(svc.cancelAllTransientRetries)
+	armTransientPromptEvidence(svc)
 
 	took := svc.handleTransientFailure(context.Background(), watcher.AgentEventData{
-		TaskID:       "t1",
-		SessionID:    "s1",
-		ErrorMessage: realPeerDisconnected,
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "execution-1",
+		PromptGeneration: 7,
+		ErrorMessage:     realPeerDisconnected,
 	})
 	if !took {
 		t.Fatal("handleTransientFailure = false, want true (should own the transport-lost failure)")
