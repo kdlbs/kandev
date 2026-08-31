@@ -92,6 +92,33 @@ func TestFindExistingSession_OfficeTaskWithOnlyOtherAgentSessionReturnsNil(t *te
 	}
 }
 
+func TestFindExistingSession_OfficeTaskUsesResolvedMetadataProfile(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	seedOfficeTaskAndSessions(t, repo)
+	if err := repo.DeleteTaskSession(ctx, "s-assignee"); err != nil {
+		t.Fatalf("delete assignee session: %v", err)
+	}
+	task, err := repo.GetTask(ctx, "t-office")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	task.AssigneeAgentProfileID = ""
+	task.Metadata = map[string]interface{}{"agent_profile_id": "agent-reviewer"}
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	resp := svc.findExistingSession(ctx, "t-office")
+	if resp == nil {
+		t.Fatal("expected metadata-resolved session, got nil")
+	}
+	if resp.SessionID != "s-reviewer" {
+		t.Fatalf("session_id = %q, want s-reviewer", resp.SessionID)
+	}
+}
+
 func TestPrepareTaskSession_OfficeFlagUsesAssigneeForSessionIdentity(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

@@ -172,14 +172,24 @@ func (s *Service) findExistingSession(ctx context.Context, taskID string) *Ensur
 // Returns nil when no per-agent session has been created yet or when no
 // relevant agent identity is available. An Office task must not fall through to
 // the generic primary/newest lookup, because that lookup can return another
-// participant's session. The "create on demand" branch is handled by
-// EnsureSession after this pure lookup.
+// participant's session. When the task has no projected runner (for example,
+// a task created with only metadata.agent_profile_id), resolve the same profile
+// EnsureSession would use for creation and look up that exact session. The
+// "create on demand" branch is handled by EnsureSession after this pure lookup.
 func (s *Service) findOfficeSessionForResume(ctx context.Context, taskID string) (*EnsureSessionResponse, bool) {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil || task == nil || !task.IsFromOffice {
 		return nil, false
 	}
 	agentID := s.agentForViewer(ctx, task)
+	if agentID == "" {
+		// A task can be Office-owned without a projected runner. This is
+		// common for API-created review tasks whose concrete profile lives in
+		// metadata. Match the profile resolution used by EnsureSession so an
+		// already-created run session is reused while still avoiding a
+		// participant-agnostic newest-session fallback.
+		agentID, _ = s.resolveTaskAgentProfile(ctx, task)
+	}
 	if agentID == "" {
 		return nil, true
 	}
