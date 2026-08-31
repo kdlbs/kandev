@@ -6,8 +6,9 @@
 //
 // Streams real-time events from the agent process including message chunks,
 // reasoning/thinking content, tool invocations, plan updates, and completion
-// or error notifications. This stream carries ACP session updates and works
-// with any ACP-speaking agent (Codex, Claude Code, etc.).
+// or error notifications. This stream carries normalized ACP session updates
+// plus agentctl-synthesized lifecycle and diagnostic events, and works with
+// any ACP-speaking agent (Codex, Claude Code, etc.).
 //
 // Message type: AgentEvent
 //

@@ -101,8 +101,10 @@ const (
 )
 
 // AgentEvent is the message type streamed from the agent process.
-// This represents agent-agnostic events normalized from ACP session updates
-// across different agents (Codex, Claude Code, etc.).
+// This represents agent-agnostic events. Most normalize ACP session updates
+// from different agents (Codex, Claude Code, etc.); agentctl also synthesizes
+// lifecycle and diagnostic events (process exit, MCP attachment, permission
+// cancellation) that never came from the agent.
 //
 // Stream endpoint: ws://.../api/v1/agent/events
 type AgentEvent struct {
