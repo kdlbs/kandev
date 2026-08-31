@@ -3,6 +3,7 @@ package worktree
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -288,6 +289,53 @@ func TestCreateWorktree_ManagedRefreshFailureKeepsMissingCheckoutBranchStrict(t 
 	})
 	if !errors.Is(err, ErrInvalidBaseBranch) {
 		t.Fatalf("Create() error = %v, want missing checkout branch to remain strict", err)
+	}
+}
+
+func TestCreateWorktree_ManagedRefreshFailureUsesLocalCheckoutBranch(t *testing.T) {
+	repoPath, _ := initGitRepoWithOriginAheadLocal(t)
+	checkoutBranch := "feature/local-only"
+	runGit(t, repoPath, "checkout", "-b", checkoutBranch)
+	writeRepoFile(t, repoPath, "local-checkout-only.txt", "unpushed checkout work\n")
+	runGit(t, repoPath, "add", "local-checkout-only.txt")
+	runGit(t, repoPath, "commit", "-m", "local-only checkout commit")
+	localCheckoutHead := strings.TrimSpace(runGit(t, repoPath, "rev-parse", checkoutBranch))
+	runGit(t, repoPath, "checkout", "main")
+	runGit(t, repoPath, "remote", "set-url", "origin", "https://user:super-secret@127.0.0.1:1/missing.git")
+
+	mgr := newRecreateTestManager(t)
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:             "task-managed-local-checkout",
+		SessionID:          "session-managed-local-checkout",
+		RepositoryID:       "repo-managed-local-checkout",
+		RepositoryPath:     repoPath,
+		BaseBranch:         "main",
+		CheckoutBranch:     checkoutBranch,
+		PullBeforeWorktree: true,
+		RefreshRepository: func(context.Context) error {
+			return errors.New("provider refresh unavailable")
+		},
+		TaskDirName: "task-managed-local-checkout",
+		RepoName:    "repo",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v, want the existing local checkout branch", err)
+	}
+	if wt.Branch != checkoutBranch {
+		t.Fatalf("worktree branch = %q, want %q", wt.Branch, checkoutBranch)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != localCheckoutHead {
+		t.Fatalf("worktree HEAD = %q, want local checkout HEAD %q", got, localCheckoutHead)
+	}
+	if wt.FetchWarning == "" {
+		t.Fatal("local checkout fallback did not surface a fetch warning")
+	}
+	wantDetail := fmt.Sprintf("The local checkout branch %q was verified after refresh failed. Kandev did not change Git refs.", checkoutBranch)
+	if wt.FetchWarningDetail != wantDetail {
+		t.Fatalf("fetch warning detail = %q, want bounded detail %q", wt.FetchWarningDetail, wantDetail)
+	}
+	if strings.Contains(wt.FetchWarning, "super-secret") || strings.Contains(wt.FetchWarningDetail, "super-secret") {
+		t.Fatalf("checkout fallback warning exposed provider credentials: warning=%q detail=%q", wt.FetchWarning, wt.FetchWarningDetail)
 	}
 }
 

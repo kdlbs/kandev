@@ -727,8 +727,16 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 				branchName = req.CheckoutBranch
 				checkoutMode.CheckoutBranch = ""
 			} else {
+				checkoutRefreshRequired := req.PullBeforeWorktree
+				if req.baseRefreshFallback && req.PRNumber == 0 {
+					// A provider refresh failure does not make an existing local
+					// checkout branch remote-only. Let the fetch helper verify and
+					// reuse that local branch when its refresh also fails. If the
+					// branch is absent locally, the helper still returns an error.
+					checkoutRefreshRequired = false
+				}
 				fetchResult, err = m.fetchBranchToLocalWithPolicy(
-					ctx, req.RepositoryPath, req.CheckoutBranch, req.PRNumber, req.PullBeforeWorktree,
+					ctx, req.RepositoryPath, req.CheckoutBranch, req.PRNumber, checkoutRefreshRequired,
 				)
 				if err != nil {
 					return nil, err
@@ -737,6 +745,9 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 					startPoint = fetchResult.StartPoint
 				} else {
 					startPoint = req.CheckoutBranch
+				}
+				if req.baseRefreshFallback && fetchResult.Warning != "" {
+					fetchResult.WarningDetail = localCheckoutBranchRefreshDetail(req.CheckoutBranch)
 				}
 			}
 		}

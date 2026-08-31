@@ -453,6 +453,10 @@ func localBaseRefreshWarning(reason, selectedRef string) (string, string) {
 	), fmt.Sprintf("The selected %s was verified before refresh. Kandev did not change Git refs.", baseKind)
 }
 
+func localCheckoutBranchRefreshDetail(branch string) string {
+	return fmt.Sprintf("The local checkout branch %q was verified after refresh failed. Kandev did not change Git refs.", branch)
+}
+
 func syncContextFailureReason(err error) string {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "timeout"
