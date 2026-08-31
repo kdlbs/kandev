@@ -96,10 +96,18 @@ git diff --name-only -- '*.go' | xargs -r gofmt -l
 
 - Generalized process-local prompt evidence to cover concrete and dynamic
   attempts with execution and prompt-generation fencing.
+- Added lifecycle-owned terminal evidence so NATS delivery order between
+  stream and failure subscriptions cannot authorize replay after prior activity.
+- Registered the cached prompt and replay identity before model-switch startup,
+  then bound it to the replacement execution.
 - Automatic concrete replay now requires known, output-free, tool-free evidence
   and continues to use the existing same-provider retry owner and budget.
+- Tightened Cursor matching to the complete normalized diagnostic and covered
+  tool-update preservation, consumed-event handling, and timestamp capture.
 - Verification passed:
   `cd apps/backend && go test -race -tags fts5 ./internal/orchestrator -run 'Test(HandleTransientFailure.*Replay|PromptAttemptEvidence|CursorTransportLost)'`.
-  The full orchestrator race suite passed with 2261 tests. Backend lint and
-  changed-lines lint passed with 0 issues. The full backend test target was
+- The remediation identity-fence suite passed, including the dynamic missing-record
+  regression. The full lifecycle race suite passed with 2088 tests, and the full
+  orchestrator race suite passed with 2261 tests.
+- Backend lint and changed-lines lint passed with 0 issues. The full backend test target was
   attempted; only unrelated host-config and missing-fixture failures remained.

@@ -244,8 +244,11 @@ func (a *Adapter) sendPrompt(
 	// a subagent tool_call this turn.
 	a.sweepCursorTaskMetaOnPromptEnd(sessionID)
 
-	if turn.cursorRetriableFailure() {
+	if cursorRetriable, occurredAt := turn.cursorRetriableFailureAt(); cursorRetriable {
 		const safeMessage = cursorRetriableStreamResetMessage
+		if occurredAt.IsZero() {
+			occurredAt = time.Now().UTC()
+		}
 		a.logger.Info("cursor prompt ended with retriable stream-reset evidence",
 			zap.String("session_id", sessionID),
 			zap.Uint64("prompt_generation", promptGeneration))
@@ -259,7 +262,7 @@ func (a *Adapter) sendPrompt(
 				Source:     streams.ProviderErrorSourceCursorACP,
 				ProviderID: acpcompat.CursorAgentID,
 				Message:    safeMessage,
-				OccurredAt: time.Now().UTC(),
+				OccurredAt: occurredAt,
 			},
 		})
 		return nil

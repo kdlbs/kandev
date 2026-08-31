@@ -13,29 +13,21 @@ const (
 	cursorRetriableStreamResetMaxTail = 256
 )
 
-// isCursorRetriableStreamReset recognizes Cursor's transport control chunk.
-// The prefix check keeps the common per-token path allocation-free; only a
-// chunk with the exact control prefix pays for the bounded case-insensitive
-// fingerprint scan.
+// isCursorRetriableStreamReset recognizes Cursor's complete transport control
+// chunk. The prefix check keeps the common per-token path allocation-free;
+// requiring the complete diagnostic prevents ordinary provider prose from
+// combining the control prefix with an unrelated transport fragment.
 func isCursorRetriableStreamReset(text string) bool {
 	trimmed := strings.TrimSpace(text)
-	if !strings.HasPrefix(trimmed, cursorRetriableStreamResetPrefix) {
+	if len(trimmed) < len(cursorRetriableStreamResetPrefix) ||
+		!strings.EqualFold(trimmed[:len(cursorRetriableStreamResetPrefix)], cursorRetriableStreamResetPrefix) {
 		return false
 	}
 	if len(trimmed)-len(cursorRetriableStreamResetPrefix) > cursorRetriableStreamResetMaxTail {
 		return false
 	}
-	return containsFolded(trimmed, "RetriableError") &&
-		(containsFolded(trimmed, "http/2 stream closed") || containsFolded(trimmed, "CANCEL (0x8)"))
-}
-
-func containsFolded(text, needle string) bool {
-	for i := 0; i+len(needle) <= len(text); i++ {
-		if strings.EqualFold(text[i:i+len(needle)], needle) {
-			return true
-		}
-	}
-	return false
+	return strings.EqualFold(trimmed, cursorRetriableStreamResetMessage) ||
+		strings.EqualFold(trimmed, cursorRetriableStreamResetMessage+" [canceled]")
 }
 
 type cursorTaskMeta struct {

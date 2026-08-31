@@ -47,6 +47,8 @@ func TestHandleTransientFailure_ReplayRejectsOutputOrToolEvidence(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			svc, _ := newTransientTestService(t)
 			t.Cleanup(svc.cancelAllTransientRetries)
+			svc.beginPromptAttempt("s1", "execution-1", 7, false)
+			svc.observePromptAttempt("s1", "execution-1", 7, tc.data.OutputObserved, tc.data.EffectObserved)
 			data := tc.data
 			data.TaskID = "t1"
 			data.SessionID = "s1"

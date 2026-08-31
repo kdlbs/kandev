@@ -116,8 +116,10 @@ structured diagnostic.
 
 The deterministic catalogue adds the dedicated rule
 `cursor.retriable_stream_reset.v1` before the generic transport-loss rule. The
-rule requires `RetriableError` plus `CANCEL (0x8)` or `http/2 stream closed`.
-It maps to `agent_transport_lost` with high confidence and class `transient`.
+rule requires the complete normalized Cursor diagnostic
+`Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)`
+(with the existing bracketed `canceled` decoration allowed). It maps to
+`agent_transport_lost` with high confidence and class `transient`.
 It retains the existing `AutoRetryable` invariant. The rule applies the shared
 context-cancellation veto. Cursor's `[canceled]` token does not satisfy that
 veto. It lacks `context canceled`, `context deadline exceeded`, or
@@ -195,13 +197,19 @@ Cursor recovery choices. They preserve the provider-neutral safety boundary in
 
 The orchestrator records replay evidence for every interactive prompt, not only
 dynamic route attempts. The evidence remains scoped by session, execution, and
-prompt generation. The concrete-profile `handleTransientFailure` path requires
-the same known, no-output, no-tool condition before scheduling. A missing record
-is unsafe. Dynamic profiles retain `dynamicPreResultSafe` and their configured
-policy owner. `agent_transport_lost` remains same-provider recovery evidence and
-does not gain permission to switch candidates merely because Cursor supplied
-the new fingerprint. No orchestration branch inspects `cursor-acp`,
-`cursor_acp`, or the raw diagnostic.
+prompt generation. Lifecycle snapshots the current prompt's evidence before it
+marks a terminal completion as activity and carries that immutable snapshot on
+`agent.failed`. This prevents separate NATS subscriptions for `agent.stream.*`
+and `agent.failed` from changing the replay decision based on delivery order.
+The concrete-profile `handleTransientFailure` path requires the same known,
+no-output, no-tool condition before scheduling. A missing record is unsafe.
+Dynamic profiles retain `dynamicPreResultSafe` and their configured policy
+owner. A model-switch restart reserves the cached prompt and replay identity
+before `StartAgentProcess` can dispatch the replacement prompt, then binds the
+identity to the replacement execution. `agent_transport_lost` remains
+same-provider recovery evidence and does not gain permission to switch
+candidates merely because Cursor supplied the new fingerprint. No orchestration
+branch inspects `cursor-acp`, `cursor_acp`, or the raw diagnostic.
 
 ### Per-class policy
 

@@ -143,12 +143,11 @@ const transportLostRuleID = "acp.transport_lost.v1"
 // error strings, which must keep falling through to manual recovery.
 var transportLostRe = regexp.MustCompile(`(?i)peer disconnected|connection closed`)
 
-// cursorRetriableStreamResetRe matches Cursor's bounded control diagnostic.
-// Anchor the prefix so a user-authored sentence that quotes the diagnostic
-// cannot become automatic retry evidence. The rest stays bounded to one line
-// so unrelated text cannot bridge into the transport fingerprint.
+// cursorRetriableStreamResetRe matches Cursor's complete control diagnostic.
+// Requiring the whole normalized message prevents ordinary provider prose from
+// combining the control prefix with an unrelated transport fragment.
 var cursorRetriableStreamResetRe = regexp.MustCompile(
-	`(?i)^\s*Error:\s*RetriableError:\s*[^\r\n]{0,256}(?:http/2 stream closed|CANCEL \(0x8\))`,
+	`(?i)^\s*Error:\s*RetriableError:\s*HTTP/2 stream closed with error code CANCEL \(0x8\)(?:\s+\[canceled\])?\s*$`,
 )
 
 // overloadedRe matches the transient 529 Overloaded signature: either the

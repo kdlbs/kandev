@@ -55,6 +55,11 @@ func TestCursorRetriableStreamResetRejectsUnrelatedEvidence(t *testing.T) {
 			text:       "The provider returned Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)",
 		},
 		{
+			name:       "unrelated explanation before fingerprint",
+			generation: 7,
+			text:       "Error: RetriableError: explanation for CANCEL (0x8)",
+		},
+		{
 			name:       "partial marker",
 			generation: 7,
 			text:       "Error: RetriableError:",
@@ -121,6 +126,23 @@ func TestCursorRetriableStreamResetClearsOnProgressAndRearmsOnLaterMarker(t *tes
 	events := drainEvents(a)
 	if len(events) != 1 || events[0].Type != streams.EventTypeMessageChunk || events[0].Text != "Cursor resumed generation" {
 		t.Fatalf("events = %+v, want only resumed provider progress", events)
+	}
+}
+
+func TestCursorRetriableStreamResetNotClearedByToolUpdate(t *testing.T) {
+	a, _ := newCursorPromptTurn(t, 7)
+	a.handleACPUpdate(cursorMessageNotification("session-1", cursorRetriableStreamResetChunk), 7)
+
+	completed := acpsdk.ToolCallStatus("completed")
+	a.handleACPUpdate(makeNotification("session-1", acpsdk.SessionUpdate{
+		ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
+			ToolCallId: "tool-1",
+			Status:     &completed,
+		},
+	}), 7)
+
+	if !a.currentPromptTurn().cursorRetriableFailure() {
+		t.Fatal("tool update cleared pending Cursor retriable evidence")
 	}
 }
 

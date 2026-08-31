@@ -147,13 +147,23 @@ func (s *Service) withPromptAttemptEvidence(data watcher.AgentEventData) watcher
 	if data.SessionID == "" {
 		return data
 	}
+	// Lifecycle captures terminal failure evidence before publishing the
+	// failure event. That snapshot is authoritative when stream and lifecycle
+	// events travel through separate bus subscriptions; retain it while still
+	// using the process-local record to fence the session, execution, and
+	// generation identity.
+	lifecycleEvidenceKnown := data.EvidenceKnown
+	lifecycleOutputObserved := data.OutputObserved
+	lifecycleEffectObserved := data.EffectObserved
 	evidence, ok := s.promptAttemptForSession(data.SessionID)
 	if !ok {
-		if !data.DynamicRouteAttempt {
-			data.EvidenceKnown = false
-			data.OutputObserved = false
-			data.EffectObserved = false
-		}
+		// Lifecycle evidence is only authoritative after the process-local
+		// attempt record fences the session, execution, and generation. Without
+		// that record, a terminal snapshot could authorize a replacement for an
+		// unrelated or already-cleared attempt.
+		data.EvidenceKnown = false
+		data.OutputObserved = false
+		data.EffectObserved = false
 		return data
 	}
 	evidence.mu.Lock()
@@ -170,9 +180,15 @@ func (s *Service) withPromptAttemptEvidence(data watcher.AgentEventData) watcher
 	if evidence.dynamic {
 		data.DynamicRouteAttempt = true
 	}
-	data.EvidenceKnown = evidence.evidenceKnown
-	data.OutputObserved = evidence.output
-	data.EffectObserved = evidence.effect
+	if lifecycleEvidenceKnown {
+		data.EvidenceKnown = true
+		data.OutputObserved = lifecycleOutputObserved || evidence.output
+		data.EffectObserved = lifecycleEffectObserved || evidence.effect
+	} else {
+		data.EvidenceKnown = evidence.evidenceKnown
+		data.OutputObserved = evidence.output
+		data.EffectObserved = evidence.effect
+	}
 	return data
 }
 
@@ -183,7 +199,8 @@ func (s *Service) withDynamicAttemptEvidence(data watcher.AgentEventData) watche
 
 func (s *Service) promptAttemptPreResultSafe(data watcher.AgentEventData) bool {
 	if data.SessionID == "" || data.DynamicRouteAttempt ||
-		data.AgentExecutionID == "" || data.PromptGeneration == 0 {
+		data.AgentExecutionID == "" || data.PromptGeneration == 0 ||
+		!data.EvidenceKnown || data.OutputObserved || data.EffectObserved {
 		return false
 	}
 	evidence, ok := s.promptAttemptForSession(data.SessionID)

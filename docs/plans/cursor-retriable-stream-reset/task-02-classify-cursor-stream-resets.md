@@ -77,7 +77,7 @@ None.
 
 ## Results
 
-- Added `cursor.retriable_stream_reset.v1` with bounded, anchored matching and
-  the existing cancellation veto.
+- Added `cursor.retriable_stream_reset.v1` with complete normalized-diagnostic
+  matching and the existing cancellation veto.
 - Verification passed:
   `cd apps/backend && go test -race ./internal/agent/runtime/routingerr -run 'Test(ClassifyCursorRetriable|MatchRuntimeEnvironmentRules_CursorRetriable|IsTransientProviderError_Cursor)'`.

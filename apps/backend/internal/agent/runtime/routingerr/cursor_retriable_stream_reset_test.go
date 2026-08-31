@@ -38,6 +38,10 @@ func TestMatchRuntimeEnvironmentRules_CursorRetriable(t *testing.T) {
 			text: "Error: RetriableError: HTTP/2 stream reset with error code CANCEL",
 		},
 		{
+			name: "unrelated explanation before fingerprint",
+			text: "Error: RetriableError: explanation for CANCEL (0x8)",
+		},
+		{
 			name: "missing transport fingerprint",
 			text: "Error: RetriableError: provider is busy",
 		},

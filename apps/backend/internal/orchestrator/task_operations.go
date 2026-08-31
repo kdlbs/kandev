@@ -4019,16 +4019,22 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		return nil, fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)
 	}
 
+	// Cache and reserve the replay identity before model switching. A restart
+	// based switch dispatches its prompt from StartAgentProcess, before the
+	// ordinary PromptTask admission path can initialize these records.
+	s.rememberTurnPrompt(sessionID, prompt, model, planMode, attachments)
+	if modelSwitchRequired(session, model) {
+		s.beginInitialPromptAttempt(sessionID, s.isDynamicPromptSession(session))
+	}
+
 	if result, handled, switchErr := s.trySwitchModelForPrompt(
 		ctx, taskID, sessionID, model, effectivePrompt, session, foregroundDispatch,
 	); handled {
+		if switchErr != nil {
+			s.clearPromptAttemptEvidence(sessionID, "", 0)
+		}
 		return result, switchErr
 	}
-
-	// Cache the raw prompt so a transient-provider-error (529) retry can
-	// re-drive this turn after backoff without the caller's context. Stores
-	// the pre-injection prompt; PromptTask re-applies config/plan transforms.
-	s.rememberTurnPrompt(sessionID, prompt, model, planMode, attachments)
 
 	session, rollback, err := s.claimPromptDispatch(
 		ctx, taskID, sessionID, options.claimEntryID, options.lifecyclePrompt,
@@ -4325,6 +4331,9 @@ func (s *Service) trySwitchModelForPrompt(ctx context.Context, taskID, sessionID
 	if err != nil {
 		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, dispatch)
 		return result, true, err
+	}
+	if executionID, executionErr := s.agentManager.GetExecutionIDForSession(ctx, sessionID); executionErr == nil && executionID != "" {
+		s.bindPromptAttemptToExecution(ctx, sessionID, executionID)
 	}
 	revealedBackground := s.acceptForegroundDispatch(dispatch)
 	if revealedBackground || dispatch.yieldedBeforeBegin || s.acceptedForegroundDispatchClaim(dispatch) {
@@ -4963,9 +4972,9 @@ func (s *Service) handlePromptError(ctx context.Context, taskID, sessionID strin
 
 // trySwitchModel handles model switching for a prompt. Returns (result, true, nil) if a switch was
 // performed, (nil, false, err) on error, or (nil, false, nil) if no switch was needed.
-func (s *Service) trySwitchModel(ctx context.Context, taskID, sessionID, model, effectivePrompt string, session *models.TaskSession) (*PromptResult, bool, error) {
-	if model == "" {
-		return nil, false, nil
+func modelSwitchRequired(session *models.TaskSession, model string) bool {
+	if model == "" || session == nil {
+		return false
 	}
 	var currentModel string
 	if session.AgentProfileSnapshot != nil {
@@ -4973,8 +4982,18 @@ func (s *Service) trySwitchModel(ctx context.Context, taskID, sessionID, model, 
 			currentModel = m
 		}
 	}
-	if currentModel == model {
+	return currentModel != model
+}
+
+func (s *Service) trySwitchModel(ctx context.Context, taskID, sessionID, model, effectivePrompt string, session *models.TaskSession) (*PromptResult, bool, error) {
+	if !modelSwitchRequired(session, model) {
 		return nil, false, nil
+	}
+	var currentModel string
+	if session.AgentProfileSnapshot != nil {
+		if m, ok := session.AgentProfileSnapshot["model"].(string); ok {
+			currentModel = m
+		}
 	}
 	s.logger.Info("switching model",
 		zap.String("task_id", taskID),

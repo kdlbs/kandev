@@ -23,8 +23,8 @@ contracts and completes the end-to-end behavior.
 
 ### In scope
 
-- Cursor-only, prompt-generation-scoped detection of the exact terminal stream
-  reset control frame.
+- Cursor-only, prompt-generation-scoped detection of the complete terminal
+  stream reset control frame.
 - Suppression of the control frame and one post-barrier structured error.
 - Suppression of a Kandev retry when Cursor resumes its own attempt after the
   marker.
@@ -66,7 +66,8 @@ contracts and completes the end-to-end behavior.
 - Add `cursor.retriable_stream_reset.v1` to
   `apps/backend/internal/agent/runtime/routingerr/runtime_rules.go` before the
   generic transport-loss rule.
-- Require `RetriableError` plus `CANCEL (0x8)` or `http/2 stream closed`.
+- Require the complete normalized Cursor diagnostic, with the existing
+  bracketed `canceled` decoration allowed.
   Apply the existing context-cancellation veto without changing
   `transportLostRe`.
 - Assert the full `Classify` result is `CodeAgentTransportLost`,
@@ -80,9 +81,15 @@ contracts and completes the end-to-end behavior.
   prompts also retain output and tool observations. The evidence has session,
   execution, and prompt-generation scope. Preserve `DynamicRouteAttempt` as
   routing identity. Do not turn concrete prompts into dynamic attempts.
+- Carry a conservative terminal evidence snapshot from lifecycle on
+  `agent.failed`, captured before completion bookkeeping marks the terminal
+  event as activity. The orchestrator must prefer this immutable snapshot over
+  stream-subscription timing while retaining local identity fencing.
 - Begin or replace concrete prompt evidence at prompt dispatch. Bind it to the
   execution and generation. Update it from `event_handlers_streaming.go`. Clear
   only the matching completed or replaced attempt.
+- Cache and reserve replay identity before a model-switch restart can dispatch
+  its replacement prompt, then bind it to the replacement execution.
 - Make `handleTransientFailure` require known evidence with no output or tool
   activity before it schedules any automatic prompt replay. Missing, stale,
   output-bearing, or tool-bearing evidence falls through to manual recovery.
@@ -121,6 +128,8 @@ contracts and completes the end-to-end behavior.
 - Task 01: `cd apps/backend && go test -race ./internal/agentctl/server/adapter/transport/acp -run 'Test(CursorRetriable|ObserveCursorRetriable|SendPrompt.*Cursor)'` passed.
 - Task 02: `cd apps/backend && go test -race ./internal/agent/runtime/routingerr -run 'Test(ClassifyCursorRetriable|MatchRuntimeEnvironmentRules_CursorRetriable|IsTransientProviderError_Cursor)'` passed.
 - Task 03 targeted suite: `cd apps/backend && go test -race -tags fts5 ./internal/orchestrator -run 'Test(HandleTransientFailure.*Replay|PromptAttemptEvidence|CursorTransportLost)'` passed.
+- Remediation identity-fence suite: `cd apps/backend && go test -race -tags fts5 ./internal/orchestrator -run 'TestDynamicAttemptEvidence|TestDynamicPreResultRequiresExplicitKnownEvidence|TestHandleTransientFailure.*Replay|TestCursorTransportLost'` passed.
+- Full lifecycle race suite: `go test -race ./internal/agent/runtime/lifecycle` passed, 2088 tests.
 - Full orchestrator race suite: `go test -race -tags fts5 ./internal/orchestrator` passed, 2261 tests.
 - `make -C apps/backend lint` and changed-lines `golangci-lint` passed with 0 issues.
 - Changed Go files reported no `gofmt` differences; `git diff --check` passed.

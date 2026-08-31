@@ -172,6 +172,7 @@ func (a *Adapter) handleACPUpdate(
 	sessionID := string(n.SessionId)
 
 	suppressed := a.dialect.suppresses(n)
+	handled := suppressed
 	var event, leadingEvent *AgentEvent
 	if !suppressed {
 		event = a.convertNotification(n)
@@ -180,6 +181,7 @@ func (a *Adapter) handleACPUpdate(
 			// Suppress provider control/evidence chunks. The adapter emits one
 			// normalized error after the prompt barrier instead.
 			event = nil
+			handled = true
 		}
 		if n.Update.UsageUpdate != nil {
 			lifecycleEvent := usageLifecycleEvent(
@@ -222,7 +224,7 @@ func (a *Adapter) handleACPUpdate(
 			event.Type, rawData, event)
 		a.sendUpdate(*event)
 		a.maybeScheduleAsyncTurnComplete(*event)
-	} else if !suppressed {
+	} else if !handled {
 		if updateJSON, err := json.Marshal(n.Update); err == nil {
 			a.logger.Warn("unhandled ACP session notification",
 				zap.String("session_id", sessionID),
