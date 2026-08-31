@@ -84,11 +84,59 @@ test("keeps the public Host inventory generic and merge-free", async () => {
   );
 
   assert.doesNotMatch(inventory, /coordinator/i);
-  assert.doesNotMatch(inventory, /\bMerge[A-Z][A-Za-z]*\b/);
-  assert.doesNotMatch(inventory, /`(?:[A-Za-z0-9_.]*\.)?merge[A-Za-z0-9_]*`/i);
-  assert.doesNotMatch(inventory, /`api_write:[^`]*merge[^`]*`/i);
+  const inventoryRows = inventory
+    .split("\n")
+    .filter((line) => line.startsWith("| H"));
+  const methodAndCapabilityColumns = inventoryRows.map((line) => {
+    const cells = line.split("|");
+    return `${cells[3]}|${cells[7]}`;
+  }).join("\n");
+
+  assert.doesNotMatch(methodAndCapabilityColumns, /\bmerge(?:[A-Z][A-Za-z0-9_]*)?\b/i);
+  assert.doesNotMatch(methodAndCapabilityColumns, /api_write:merge/i);
   assert.doesNotMatch(inventory, /api_(?:read|write):[^`\s|]*coordinator/i);
   assert.match(inventory, /No Host writer is approved in H0/);
+});
+
+test("fences legacy v1 calls from H6 exact authority", async () => {
+  const adr = await readADR();
+  const legacy = section(
+    adr,
+    "### Legacy v1 compatibility fence",
+    "### Public Host surface inventory",
+  );
+
+  for (const required of [
+    "GetConfig(GetConfigRequest {})",
+    "GetConfigRequest {})` | Ungated, plugin-global operator configuration",
+    "ListTasks",
+    "ListSessions",
+    "CreateTask",
+    "api_read:<resource>",
+    "api_write:<resource>",
+    "No synthetic legacy revision exists.",
+    "cannot bypass\nthe H6/C1/C2 safeguards",
+  ]) {
+    assert.ok(legacy.includes(required), `missing legacy fence: ${required}`);
+  }
+  assert.match(adr, /Every \*\*new exact\*\* Host request introduced by this ADR carries/);
+  assert.match(adr, /host\.v2\.read:tasks/);
+  assert.match(adr, /host\.v2\.write:tasks/);
+  assert.doesNotMatch(legacy, /synthetic legacy revision only/i);
+});
+
+test("defines approval lifetime, result parents, and principal-correct parity", async () => {
+  const adr = await readADR();
+
+  for (const lifecycle of ["Upgrade", "Rollback", "Uninstall", "Reinstall"]) {
+    assert.match(adr, new RegExp(`\\| ${lifecycle} \\|`), `missing installation lifecycle ${lifecycle}`);
+  }
+  assert.match(adr, /Mints a fresh `installation_id`/);
+  assert.match(adr, /tombstones the `installation_id`/);
+  assert.match(adr, /\| `DENIED` \| `STALE_CAPABILITY_REVISION`, `CAPABILITY_REVOKED`, `HUMAN_RESERVED`/);
+  assert.match(adr, /\| `CONFLICT` \| `STALE_RESOURCE_VERSION`, `PENDING_TRANSITION_CONFLICT`, `EXECUTION_GENERATION_FENCED`/);
+  assert.match(adr, /Host RPC and global MCP authorization is tested separately before parity/);
+  assert.match(adr.replace(/\s+/g, " "), /A Host approval denial is never expected to equal an MCP authorization verdict/);
 });
 
 test("assigns pending-transition reads only to H2c", async () => {

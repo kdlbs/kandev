@@ -56,10 +56,10 @@ undocumented REST, direct database access, shelling into Kandev, or prompt/comme
 text treated as authority. Core must not gain a Coordinator table, field, profile,
 role, principal, grant, setting, tool, or audit vocabulary.
 
-### Contract-wide DTOs and result vocabulary
+### Exact DTOs and result vocabulary
 
-Every Host request carries `request_id`, `workspace_id`, and
-`capability_revision`. Every writer also carries `idempotency_key`, exact target
+Every **new exact** Host request introduced by this ADR carries `request_id`,
+`workspace_id`, and `capability_revision`. Every new exact writer also carries `idempotency_key`, exact target
 resource versions, and a `PendingTransitionGuard` that is either
 `expect_none` or `{ pending_transition_id, resource_version }`. An
 agent-originated writer additionally carries `ManagedExecutionProvenance` with
@@ -70,6 +70,15 @@ Every list request carries `Page { limit, cursor, snapshot_version }`; responses
 carry `PageInfo { next_cursor, has_more, snapshot_version }`. Cursors are opaque
 and bound to workspace, filters, snapshot version, capability revision, and
 installation. Every mutable/readback resource carries `resource_version`.
+
+This requirement does not retroactively add fields to any shipped `v1` request.
+The legacy compatibility table below names the only compatibility path. A new
+exact RPC has a distinct `*Exact` wire method, DTO, and `host.v2.*` capability;
+it never accepts a missing workspace or revision as a synthetic legacy approval,
+and it never reuses `api_read:*` or `api_write:*` as authority. Implementations
+reject absent exact fields as `INVALID`, except that an existing v1 method
+continues to use its listed v1 behavior. The Host derives `installation_id` in
+both cases; it is never caller input.
 
 Writers return a typed `HostCommandResult` with one of these stable states:
 
@@ -88,12 +97,41 @@ Writers return a typed `HostCommandResult` with one of these stable states:
 | `PARTIAL` | Only a contract that explicitly defines durable progress may use this; completed receipts are included. |
 
 `HostCommandResult` also carries `audit_id`, `result_resource_version`, and an
-authoritative readback or readback reference. Stable conflict reasons are
-`STALE_CAPABILITY_REVISION`, `STALE_RESOURCE_VERSION`,
-`PENDING_TRANSITION_CONFLICT`, `EXECUTION_GENERATION_FENCED`,
-`DIRECTIVE_REVOKED`, `IDEMPOTENCY_MISMATCH`, and `HUMAN_RESERVED`.
+authoritative readback or readback reference. Each stable reason has exactly one
+parent state and retry model:
+
+| Parent state | Stable reasons | Client behavior |
+| --- | --- | --- |
+| `DENIED` | `STALE_CAPABILITY_REVISION`, `CAPABILITY_REVOKED`, `HUMAN_RESERVED`, `MISSING_CAPABILITY_APPROVAL`, `PROVENANCE_REJECTED` | Fail closed. Park the action and require Human approval, reconfiguration, or an eligible fresh installation; never retry automatically. |
+| `CONFLICT` | `STALE_RESOURCE_VERSION`, `PENDING_TRANSITION_CONFLICT`, `EXECUTION_GENERATION_FENCED`, `DIRECTIVE_REVOKED`, `DIRECTIVE_EXPIRED`, `DIRECTIVE_ALREADY_RESOLVED`, `IDEMPOTENCY_MISMATCH` | Do not repeat the side effect. Read back authoritative state; retry only with a newly constructed operation when that state permits it. |
+| `NOT_FOUND` | `WORKSPACE_TARGET_NOT_FOUND` | Stop against this identity and refresh the caller’s projection. |
+| `INVALID` | `MISSING_EXACT_FIELD`, `MALFORMED_PRECONDITION`, `UNSUPPORTED_LEGACY_SHAPE` | Correct the request or use the documented v1 method; no automatic retry. |
+| `UNSUPPORTED` | `HOST_VERSION_UNSUPPORTED`, `PROVIDER_CONTRACT_UNSUPPORTED`, `UNKNOWN_RESULT_VALUE` | Park pending an upgrade or a separately supported contract. |
+| `RATE_LIMITED` | `PROVIDER_RATE_LIMITED` | Retry only after the supplied reset/Retry-After boundary. |
+| `UNAVAILABLE` | `DEPENDENCY_UNAVAILABLE` | Retry the same idempotency identity using bounded backoff. |
+
 Transport status codes may classify the same outcome, but clients branch on the
 typed result and tolerate unknown enum values as `UNSUPPORTED`.
+
+### Legacy v1 compatibility fence
+
+The current `kandev.plugin.v1.Host` surface is a shipped, manifest-declaration
+API, not the H6 approval protocol. It remains callable only with the following
+named method/capability behavior; its omitted fields mean **v1 compatibility**,
+not an approval revision. A v1 call cannot invoke a new exact writer, issue a
+directive, consume a continuation, or gain a `host.v2.*` capability.
+
+| Existing v1 methods | Existing authority | Absent-field behavior | H0 boundary |
+| --- | --- | --- | --- |
+| `GetState`, `SetState`, `DeleteState`, `ListState`; `GetSecret`, `SetSecret`, `DeleteSecret`; `RevealSecret`; `EmitEvent`; `InvokeUtilityAgent` | Their existing manifest declarations (`state`, `secrets`, `events`, `agent_invoke`) | No workspace or capability revision is inferred. Existing plugin-scoped semantics continue. | Not an H1-H5 exact operation; no H6 authority is created. |
+| `GetConfig(GetConfigRequest {})` | Ungated, plugin-global operator configuration | The empty request remains empty and has no workspace, approval, or capability revision. It returns only the calling plugin’s own config under the existing secret policy. | It is explicitly outside H6. A future scoped configuration operation, if needed, must be a new versioned successor and cannot change `GetConfig`. |
+| `ListTasks`, `GetTask`, `ListWorkspaces`, `ListWorkflows`, `ListWorkflowSteps`, `ListAgentProfiles`, `ListExecutorProfiles`, `ListRepositories`, `ListSessions`, `ListSessionCodeStats`, `ListMessages`, `ListPendingInteractions`, `GetInteraction` | The exact existing `api_read:<resource>` declaration documented in `plugin.proto` | Existing request fields remain optional/as shipped; no workspace or revision is synthesized. | H2 exact projections use separately named `*Exact` methods and `host.v2.read:*` capabilities. v1 reads cannot satisfy an H0 exact-read receipt. |
+| `CreateTask`, `UpdateTask`, `MoveTask`, `SendMessage`, `PreviewPluginOwnedTaskTree`, `DeletePluginOwnedTaskTree`, `RespondToPermission`, `AnswerClarification`, `CancelClarification` | The exact existing `api_write:<resource>` declaration documented in `plugin.proto` | Existing request fields remain as shipped; no workspace, H6 revision, guard, or provenance is invented. | They are not H3/H4/H5 exact writers. A plugin needing an H0 writer must call the new exact method with a `host.v2.write:*` approval. |
+
+No synthetic legacy revision exists. Existing installed plugins keep only the
+v1 behavior they already had, subject to their existing manifest declaration and
+ordinary lifecycle. This is deliberately not an H6 approval and cannot bypass
+the H6/C1/C2 safeguards.
 
 ### Public Host surface inventory
 
@@ -105,20 +143,20 @@ versions, idempotency identity, provenance when present, and the command result.
 
 | Unit | Permanent service / namespace | Permanent method names | Request DTO | Response and result states | Page, version, idempotency, and preconditions | Declared capability | Audit / event identity | Shared domain owner |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| H1 managed conversations | `Host.ManagedAgentConversations` | `EnsureManagedAgentConversation` / `Ensure`; `DispatchManagedAgentConversation` / `Dispatch`; `GetManagedAgentConversationStatus` / `Status`; `ListManagedAgentConversations` / `List`; `DeleteManagedAgentConversation` / `Delete` | `EnsureManagedAgentConversationRequest`, `DispatchManagedAgentConversationRequest`, `ManagedAgentConversationStatusRequest`, `ListManagedAgentConversationsRequest`, `DeleteManagedAgentConversationRequest` | `ManagedAgentConversationResult`: common states plus `CONFIGURATION_REQUIRED`, `BUSY`, `FENCED`, and descriptor/status readback | List uses `Page`; every descriptor has `resource_version`; writers carry idempotency, capability revision, exact descriptor version, transition guard, and generation token where continuing a run | `api_read:managed_agent_conversations`; `api_write:managed_agent_conversations` | `HostReadReceipt`; `HostAuditReceipt`; `managed_agent_conversation.*` with `audit_id` | `ManagedAgentConversationQuery` and `ManagedAgentConversationCommand`; H1 |
+| H1 managed conversations | `Host.ManagedAgentConversations` | `EnsureManagedAgentConversationExact`; `DispatchManagedAgentConversationExact`; `GetManagedAgentConversationStatusExact`; `ListManagedAgentConversationsExact`; `DeleteManagedAgentConversationExact` | Corresponding `*ExactRequest` DTOs | `ManagedAgentConversationResult`: common states plus `CONFIGURATION_REQUIRED`, `BUSY`, `FENCED`, and descriptor/status readback | List uses `Page`; every descriptor has `resource_version`; writers carry idempotency, capability revision, exact descriptor version, transition guard, and generation token where continuing a run | `host.v2.read:managed_agent_conversations`; `host.v2.write:managed_agent_conversations` | `HostReadReceipt`; `HostAuditReceipt`; `managed_agent_conversation.*` with `audit_id` | `ManagedAgentConversationQuery` and `ManagedAgentConversationCommand`; H1 |
 | H1 generic chat UI | `host.ui.WorkspaceAgentChat` | `WorkspaceAgentChat(props)` | `WorkspaceAgentChatProps { workspaceId, conversationId, resourceVersion, readOnly?, onStatus? }` | Host-owned loading, ready, configuration-required, fenced, error, and read-only states | The component consumes H1 versions and never receives authority through props | No new capability; backing H1 calls remain gated | UI lifecycle generation and H1 receipts | Host UI primitive; H1 |
-| H2a topology and runtime projections | `Host.Workspaces`, `Host.Workflows`, `Host.Tasks`, `Host.Sessions`, `Host.Interactions` | `ListWorkspaces`; `ListWorkflows`; `ListWorkflowSteps`; `ListTasks`; `GetTask`; `ListSessions`; `ListPendingInteractions`; `GetInteraction` | Existing filters become workspace-explicit and add `Page`; exact getters use workspace plus id | Bounded projection DTOs with per-item `resource_version`; pending interactions preserve their typed terminal states | Every list uses page/snapshot binding; no read filter grants authority | Existing `api_read:workspaces`, `api_read:workflows`, `api_read:tasks`, `api_read:sessions`, `api_read:interactions` | `HostReadReceipt`; no mutation event | `WorkspaceTopologyQuery`, `TaskProjectionQuery`, `SessionProjectionQuery`, `InteractionQuery`; H2a |
-| H2b communications | `Host.Messages`, `Host.TaskInbox`, `Host.TaskDirectives` | `ListSanitizedMessages`; `ListTaskInbox`; `GetTaskDirective`; `ListTaskDirectives` | Workspace/task/session filters, sanitization level, directive id, `Page` | Sanitized message, durable inbox item, and directive status/readback; terminal directive states remain queryable | Snapshot-bound pages; items carry resource versions and canonical digests | `api_read:messages`, `api_read:task_inbox`, `api_read:task_directives` | `HostReadReceipt`; no mutation event | `TaskCommunicationQuery`, `TaskInboxQuery`, `TaskDirectiveQuery`; H2b |
-| H2c relations and pending transitions | `Host.TaskRelations`, `Host.TaskTransitions` | `GetTaskRelations`; `ListTaskRelations`; `ListPendingTaskTransitions` | Exact task/workspace filters plus `Page` | Relation graph with edge versions and child/dependency closure; pending transition with predicate and resource version | Snapshot-bound pages; versions are consumable by H3b/H3c/H5 | `api_read:task_relations`, `api_read:task_transitions` | `HostReadReceipt`; no mutation event | `TaskRelationQuery`, `TaskTransitionQuery`; H2c |
-| H2d exact change evidence | `Host.ChangeRequests` | `GetChangeRequestEvidence`; `ListChangeRequestEvidence` | Canonical provider, workspace, repository, base, head, immutable head/merge-ref identity, and `Page` for the result or a named nested collection | Exact checks/jobs, review, thread, mergeability, divergence, rate budget, and receipt projections described below | Snapshot/resource version binds provider, repository, base, immutable head, merge ref, provider connection generation, and nested cursors | `api_read:change_requests` | `HostReadReceipt` plus provider read receipt | `ChangeEvidenceQuery`; H2d |
-| H2e terminal provenance | `Host.TerminalResources` | `GetTerminalResourceProvenance` | Exact workspace/task, optional closure depth, and `Page` plus section key for every nested collection | Canonical change disposition, resources, consumers, closure, interactions, cleanup ownership, and prior receipts described below | One exact provenance `resource_version`; every nested page binds to it; no cleanup authority is implied | `api_read:terminal_resources` | `HostReadReceipt`; no mutation event | `TerminalResourceQuery`; H2e |
-| H3a messaging and directives | `Host.Messages`, `Host.TaskDirectives` | `SendMessageExact`; `IssueTaskDirective`; `ResolveTaskDirectiveExact` | `SendMessageExactRequest`, `IssueTaskDirectiveRequest`, `ResolveTaskDirectiveExactRequest` | Common results; directive readback includes pending, resolved, revoked, expired, and generation-fenced states | Capability revision, idempotency, target/session versions, transition guard; agent origin adds managed execution provenance; directive semantics are frozen below | `api_write:messages`, `api_write:task_directives` | `HostAuditReceipt`; `message.dispatched`; `task_directive.issued|resolved|revoked` | `MessageCommand`, `TaskDirectiveCommand`; H3a |
-| H3b task writers | `Host.Tasks` | `CreateTaskExact`; `MoveTaskExact`; `UpdateTaskExact`; `SetTaskLabelsExact`; `SetTaskFlagsExact` | Exact create/placement, move, field-mask, label, and flag requests | Common results with authoritative task readback | Capability revision, idempotency, exact task/workflow/step versions as applicable, transition guard, optional managed execution provenance | `api_write:tasks` | `HostAuditReceipt`; existing `task.*` events gain `audit_id` | `TaskCommand`; H3b |
-| H3c relation writers | `Host.TaskRelations` | `AddTaskRelationExact`; `RemoveTaskRelationExact` | Exact workspace, source, target, relation kind, edge/endpoint versions | Common results with authoritative relation-graph readback | Capability revision, idempotency, endpoint and edge versions, transition guard, optional managed execution provenance | `api_write:task_relations` | `HostAuditReceipt`; `task_relation.added|removed` | `TaskRelationCommand`; H3c |
+| H2a topology and runtime projections | `Host.Workspaces`, `Host.Workflows`, `Host.Tasks`, `Host.Sessions`, `Host.Interactions` | `ListWorkspacesExact`; `ListWorkflowsExact`; `ListWorkflowStepsExact`; `ListTasksExact`; `GetTaskExact`; `ListSessionsExact`; `ListPendingInteractionsExact`; `GetInteractionExact` | New exact workspace-explicit filters plus `Page`; exact getters use workspace plus id | Bounded projection DTOs with per-item `resource_version`; pending interactions preserve their typed terminal states | Every list uses page/snapshot binding; no read filter grants authority | `host.v2.read:workspaces`, `host.v2.read:workflows`, `host.v2.read:tasks`, `host.v2.read:sessions`, `host.v2.read:interactions` | `HostReadReceipt`; no mutation event | `WorkspaceTopologyQuery`, `TaskProjectionQuery`, `SessionProjectionQuery`, `InteractionQuery`; H2a |
+| H2b communications | `Host.Messages`, `Host.TaskInbox`, `Host.TaskDirectives` | `ListSanitizedMessagesExact`; `ListTaskInboxExact`; `GetTaskDirectiveExact`; `ListTaskDirectivesExact` | New exact workspace/task/session filters, sanitization level, directive id, `Page` | Sanitized message, durable inbox item, and directive status/readback; terminal directive states remain queryable | Snapshot-bound pages; items carry resource versions and canonical digests | `host.v2.read:messages`, `host.v2.read:task_inbox`, `host.v2.read:task_directives` | `HostReadReceipt`; no mutation event | `TaskCommunicationQuery`, `TaskInboxQuery`, `TaskDirectiveQuery`; H2b |
+| H2c relations and pending transitions | `Host.TaskRelations`, `Host.TaskTransitions` | `GetTaskRelationsExact`; `ListTaskRelationsExact`; `ListPendingTaskTransitionsExact` | New exact task/workspace filters plus `Page` | Relation graph with edge versions and child/dependency closure; pending transition with predicate and resource version | Snapshot-bound pages; versions are consumable by H3b/H3c/H5 | `host.v2.read:task_relations`, `host.v2.read:task_transitions` | `HostReadReceipt`; no mutation event | `TaskRelationQuery`, `TaskTransitionQuery`; H2c |
+| H2d exact change evidence | `Host.ChangeRequests` | `GetChangeRequestEvidenceExact`; `ListChangeRequestEvidenceExact` | Canonical provider, workspace, repository, base, head, immutable head/merge-ref identity, and `Page` for the result or a named nested collection | Exact checks/jobs, review, thread, mergeability, divergence, rate budget, and receipt projections described below | Snapshot/resource version binds provider, repository, base, immutable head, merge ref, provider connection generation, and nested cursors | `host.v2.read:change_requests` | `HostReadReceipt` plus provider read receipt | `ChangeEvidenceQuery`; H2d |
+| H2e terminal provenance | `Host.TerminalResources` | `GetTerminalResourceProvenanceExact` | Exact workspace/task, optional closure depth, and `Page` plus section key for every nested collection | Canonical change disposition, resources, consumers, closure, interactions, cleanup ownership, and prior receipts described below | One exact provenance `resource_version`; every nested page binds to it; no cleanup authority is implied | `host.v2.read:terminal_resources` | `HostReadReceipt`; no mutation event | `TerminalResourceQuery`; H2e |
+| H3a messaging and directives | `Host.Messages`, `Host.TaskDirectives` | `SendMessageExact`; `IssueTaskDirectiveExact`; `ResolveTaskDirectiveExact` | `SendMessageExactRequest`, `IssueTaskDirectiveExactRequest`, `ResolveTaskDirectiveExactRequest` | Common results; directive readback includes pending, resolved, revoked, expired, and generation-fenced states | Capability revision, idempotency, target/session versions, transition guard; agent origin adds managed execution provenance; directive semantics are frozen below | `host.v2.write:messages`, `host.v2.write:task_directives` | `HostAuditReceipt`; `message.dispatched`; `task_directive.issued|resolved|revoked` | `MessageCommand`, `TaskDirectiveCommand`; H3a |
+| H3b task writers | `Host.Tasks` | `CreateTaskExact`; `MoveTaskExact`; `UpdateTaskExact`; `SetTaskLabelsExact`; `SetTaskFlagsExact` | Exact create/placement, move, field-mask, label, and flag requests | Common results with authoritative task readback | Capability revision, idempotency, exact task/workflow/step versions as applicable, transition guard, optional managed execution provenance | `host.v2.write:tasks` | `HostAuditReceipt`; existing `task.*` events gain `audit_id` | `TaskCommand`; H3b |
+| H3c relation writers | `Host.TaskRelations` | `AddTaskRelationExact`; `RemoveTaskRelationExact` | Exact workspace, source, target, relation kind, edge/endpoint versions | Common results with authoritative relation-graph readback | Capability revision, idempotency, endpoint and edge versions, transition guard, optional managed execution provenance | `host.v2.write:task_relations` | `HostAuditReceipt`; `task_relation.added|removed` | `TaskRelationCommand`; H3c |
 | H3d provider actions | No Host writer is approved in H0 | No RPC or SDK method is reserved | None | `UNSUPPORTED` if a plugin assumes one | None | None | None | Deferred independently as recorded below; H3d |
-| H4 exact execution lifecycle | `Host.TaskRuns`, `Host.Sessions` | `EnsureTaskRunExact`; `RecoverSessionExact` | Exact task/workstep/session, desired execution identity, prompt/action digest, dispatch idempotency, expected versions | Common results plus one admissible `execution_generation_token` and authoritative run/session readback | Capability revision, idempotency, exact task/workstep/session/run versions, transition guard; replacement must fence the prior generation first | `api_write:task_runs`, `api_write:sessions` | `HostAuditReceipt`; `task_run.ensured`; `session.recovered`; generation-fenced lifecycle events | `TaskRunCommand`, `SessionRecoveryCommand`; H4 |
-| H5 pending transitions | `Host.TaskTransitions` | `CancelPendingTaskTransitionExact` | Exact transition id/version and cancellation reason | Common results plus optional single-use continuation token and authoritative readback | Cancel requires capability revision, idempotency, exact transition version, and current target version | `api_write:task_transitions` | `HostAuditReceipt`; `task_transition.cancelled` | `TaskTransitionCommand`; H5 |
-| H7 generic config and UI | manifest config schema, `Host.GetConfig`, `host.ui`, plugin registry | formats `agent-profile` and `textarea`; numeric `minimum`/`maximum`; `WorkspaceAgentChat`; `registerIntegrationSettings`; Integrations navigation | JSON Schema config and existing registry DTOs | Typed validation/configuration-required states; revocable registration handles | Config revision and UI lifecycle generation; backend access still uses its own capability revision | No new capability merely for rendering/config; each backing API remains gated | Config revision and owner lifecycle generation; no domain event | Plugin config/registry owners; H7 |
+| H4 exact execution lifecycle | `Host.TaskRuns`, `Host.Sessions` | `EnsureTaskRunExact`; `RecoverSessionExact` | Exact task/workstep/session, desired execution identity, prompt/action digest, dispatch idempotency, expected versions | Common results plus one admissible `execution_generation_token` and authoritative run/session readback | Capability revision, idempotency, exact task/workstep/session/run versions, transition guard; replacement must fence the prior generation first | `host.v2.write:task_runs`, `host.v2.write:sessions` | `HostAuditReceipt`; `task_run.ensured`; `session.recovered`; generation-fenced lifecycle events | `TaskRunCommand`, `SessionRecoveryCommand`; H4 |
+| H5 pending transitions | `Host.TaskTransitions` | `CancelPendingTaskTransitionExact` | Exact transition id/version and cancellation reason | Common results plus optional single-use continuation token and authoritative readback | Cancel requires capability revision, idempotency, exact transition version, and current target version | `host.v2.write:task_transitions` | `HostAuditReceipt`; `task_transition.cancelled` | `TaskTransitionCommand`; H5 |
+| H7 generic config and UI | manifest config schema, legacy `Host.GetConfig`, `host.ui`, plugin registry | legacy `GetConfig(GetConfigRequest {})`; formats `agent-profile` and `textarea`; numeric `minimum`/`maximum`; `WorkspaceAgentChat`; `registerIntegrationSettings`; Integrations navigation | Existing JSON Schema config and registry DTOs | Typed validation/configuration-required states; revocable registration handles | `GetConfig` remains plugin-global v1; a later exact scoped config API must use a new DTO/version | No H6 capability for legacy config rendering; each new exact backing API uses its own `host.v2.*` capability | Config revision and owner lifecycle generation; no domain event | Plugin config/registry owners; H7 |
 
 No public Host name in this inventory depends on any product plugin being
 installed.
@@ -158,10 +196,11 @@ workspace_id, capability_revision }`. It authorizes deterministic scheduler,
 startup repair, reconciliation, event recovery, and outbox retry without requiring a
 live managed conversation.
 
-An agent-originated write additionally binds the exact managed conversation,
+An agent-originated exact write additionally binds the exact managed conversation,
 session, and execution-generation fencing token. This provenance proves which
 execution requested an operation; it never creates, delegates, or widens installation
-authority. A missing, revoked, or stale approval revision is `DENIED`; a stale
+authority. A missing, revoked, or stale approval revision is
+`DENIED/STALE_CAPABILITY_REVISION` or `DENIED/CAPABILITY_REVOKED`; a stale
 execution token is `CONFLICT/EXECUTION_GENERATION_FENCED`.
 
 ### C2: atomic pending-transition safety
@@ -246,12 +285,23 @@ The smallest extension is owned by the plugin system:
 | `PluginCapabilityApproval` | One current row per `(installation_id, workspace_id)` with monotonic `revision`, manifest capability digest, approved capability IDs/classes, status `active|revoked`, approving Human actor, issued/updated timestamps, and immutable Human-policy version. |
 | `PluginCapabilityApprovalEvent` | Append-only grant, narrow, revoke, and upgrade-review events with `audit_id`, before/after revisions and digests, actor, reason, and timestamp. |
 | Authorization | The effective set is `manifest declaration ∩ current workspace approval ∩ immutable Human policy`. The request revision must exactly equal the active revision. |
-| Revocation | Revocation increments the revision, denies new calls immediately, fences outstanding directives/tokens, and makes retry/readback return typed stale-revision results. |
-| Upgrade | Equal or narrower declarations retain the approved set at a new recorded manifest digest. Any widening remains unavailable until a Human approves a new revision; activation fails closed for required unavailable capabilities. |
-| Compatibility | Existing installed plugins retain their currently shipped v1 capabilities through a synthetic legacy revision only for already-shipped RPCs. Every H1-H5 capability named here requires an explicit workspace approval revision; no legacy declaration implicitly gains it. |
+| Revocation | Revocation increments the revision, denies new exact calls immediately, fences outstanding directives/tokens, and returns `DENIED/CAPABILITY_REVOKED` to an old approval. |
+| Upgrade | Equal or narrower declarations retain the approved set at a new recorded manifest digest and a new approval revision. Any widening remains unavailable until a Human approves a new revision; activation fails closed for required unavailable capabilities. |
+| Compatibility | The legacy-v1 compatibility fence governs shipped RPCs. Every H1-H5 exact capability named here requires an explicit `host.v2.*` workspace approval revision; no v1 declaration implicitly gains it. |
 | Audit | Every H1-H5 read receipt and write receipt records installation, workspace, exact approval revision, method/capability, request/idempotency digest, result, resource versions, and managed execution provenance when present. |
 
 No Coordinator principal, role, profile, grant, or audit type is created.
+
+`installation_id` is a Host-minted opaque UUID created at install and never
+derived from plugin ID, package digest, workspace, or path. Its lifecycle is
+part of the approval authority:
+
+| Lifecycle event | `installation_id` and approval behavior |
+| --- | --- |
+| Upgrade | Retains the same `installation_id`; records the new manifest digest and a new approval revision. Equal/narrower capability declarations preserve only the intersected active approvals. A widened declaration is inactive until a Human grants the widened `host.v2.*` set. |
+| Rollback | Retains the same `installation_id`; records the rollback manifest digest and a new approval revision. It restores no prior approval implicitly: the active set is the current manifest intersection and current Human approval. |
+| Uninstall | Immediately revokes every active approval, increments each revision, fences directives/tokens, and tombstones the `installation_id` plus approval-event history for audit. It cannot be reused for authorization. |
+| Reinstall | Mints a fresh `installation_id` even for the same plugin ID/package/workspace. It starts with no H6 approval; a Human must create new workspace approvals. Tombstoned authority and old receipts remain historical only. |
 
 ### Human-reserved and non-delegable matrix
 
@@ -310,10 +360,13 @@ excluded.
   stale approval revision, or older Host yields `UNSUPPORTED`/`DENIED`; the plugin
   parks the action and reports a configuration/upgrade requirement. It must not fall
   back to MCP, private REST, SQL, or shell.
-- Host RPC and global MCP parity tests instantiate both adapters over the same named
-  domain query/command, assert the same authorization and conflict verdicts, and
-  compare authoritative readback. Consumer-specific DTO differences are allowed only
-  outside those invariants.
+- Host RPC and global MCP authorization is tested separately before parity: Host
+  authenticates `PluginInstallationPrincipal` and H6 approval/revision, while MCP
+  authenticates its ordinary user/session principal and policy. Only after each
+  adapter authorizes its own principal do parity tests invoke the same named domain
+  query/command and compare shared-domain preconditions, idempotency, conflicts,
+  mutation, audit/readback, and error vocabulary. A Host approval denial is never
+  expected to equal an MCP authorization verdict.
 - Events are at-least-once hints with `event_schema_version`, `resource_version`,
   `audit_id`, installation/workspace/capability revision, and immutable resource
   identity. Unknown events may be ignored. Dropped, duplicated, delayed, or reordered
