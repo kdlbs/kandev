@@ -1098,7 +1098,7 @@ func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*Que
 	return msg, nil
 }
 
-// ReserveHead returns the lowest-position entry, deleting ordinary rows and reserving durable lifecycle rows.
+// ReserveHead prioritizes workflow control, deleting ordinary rows and reserving durable lifecycle rows.
 func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*QueuedMessage, error) {
 	msg, _, err := r.reserveHead(ctx, sessionID, false)
 	return msg, err
@@ -1216,7 +1216,7 @@ func (r *sqliteRepository) getAutoRunTx(ctx context.Context, tx *sqlx.Tx, sessio
 	return enabled != 0, nil
 }
 
-// ReserveHeadIfAutoRun reads policy and reserves the FIFO head under one lock.
+// ReserveHeadIfAutoRun reads policy and reserves the control-priority head under one lock.
 func (r *sqliteRepository) ReserveHeadIfAutoRun(ctx context.Context, sessionID string) (*QueuedMessage, bool, error) {
 	return r.reserveHead(ctx, sessionID, true)
 }
@@ -1243,20 +1243,12 @@ func (r *sqliteRepository) reserveHead(ctx context.Context, sessionID string, re
 		}
 	}
 
-	row := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT id, session_id, task_id, position, content, model, plan_mode,
-		       attachments_json, metadata_json, queued_at, queued_by
-		FROM queued_messages
-		WHERE session_id = ?
-		ORDER BY position ASC
-		LIMIT 1
-	`), sessionID)
-	msg, storedMetadataJSON, err := scanQueuedRowWithMetadataJSON(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, true, nil
-	}
+	msg, storedMetadataJSON, err := r.reservationCandidate(ctx, tx, sessionID)
 	if err != nil {
-		return nil, true, fmt.Errorf("reserve head: %w", err)
+		return nil, true, err
+	}
+	if msg == nil {
+		return nil, true, nil
 	}
 	if msg.IsDurableLifecycle() {
 		if msg.IsReservedInFlight() {
@@ -1287,6 +1279,43 @@ func (r *sqliteRepository) reserveHead(ctx context.Context, sessionID string, re
 	}
 	reserved, err := r.reserveOrdinaryHead(ctx, tx, msg)
 	return reserved, true, err
+}
+
+func (r *sqliteRepository) reservationCandidate(ctx context.Context, tx *sqlx.Tx, sessionID string) (*QueuedMessage, string, error) {
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		WHERE session_id = ?
+		ORDER BY position ASC
+	`), sessionID)
+	if err != nil {
+		return nil, "", fmt.Errorf("list reservation candidates: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var selected *QueuedMessage
+	var selectedMetadataJSON string
+	for rows.Next() {
+		candidate, metadataJSON, scanErr := scanQueuedRowWithMetadataJSON(rows)
+		if scanErr != nil {
+			return nil, "", fmt.Errorf("scan reservation candidate: %w", scanErr)
+		}
+		if selected == nil {
+			selected = candidate
+			selectedMetadataJSON = metadataJSON
+		}
+		if candidate.IsWorkflowControl() {
+			selected = candidate
+			selectedMetadataJSON = metadataJSON
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", fmt.Errorf("iterate reservation candidates: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, "", fmt.Errorf("close reservation candidates: %w", err)
+	}
+	return selected, selectedMetadataJSON, nil
 }
 
 func (r *sqliteRepository) reserveLifecycleHead(

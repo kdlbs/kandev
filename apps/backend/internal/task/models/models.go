@@ -748,6 +748,7 @@ func (state CompletionIntentState) CanTransitionTo(next CompletionIntentState) b
 			next == CompletionIntentStateRejected
 	case CompletionIntentStateSettling:
 		return next == CompletionIntentStatePending ||
+			next == CompletionIntentStateReopened ||
 			next == CompletionIntentStateSettled ||
 			next == CompletionIntentStateSuperseded ||
 			next == CompletionIntentStateRejected

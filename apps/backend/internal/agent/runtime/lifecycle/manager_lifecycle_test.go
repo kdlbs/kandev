@@ -4,14 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -365,5 +368,78 @@ func TestManager_StartSeedsRecoveredExecution(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for recovered execution base-branch seed")
+	}
+}
+
+type recoveredPromptGenerationWriter struct {
+	mu      sync.Mutex
+	running *models.ExecutorRunning
+}
+
+func (w *recoveredPromptGenerationWriter) GetExecutorRunningBySessionID(context.Context, string) (*models.ExecutorRunning, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	copy := *w.running
+	copy.Metadata = maps.Clone(w.running.Metadata)
+	return &copy, nil
+}
+
+func (w *recoveredPromptGenerationWriter) UpsertExecutorRunning(_ context.Context, running *models.ExecutorRunning) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	copy := *running
+	copy.Metadata = maps.Clone(running.Metadata)
+	w.running = &copy
+	return nil
+}
+
+func (*recoveredPromptGenerationWriter) DeleteExecutorRunningBySessionID(context.Context, string) error {
+	return nil
+}
+
+func (*recoveredPromptGenerationWriter) RepairExecutorRunningDead(context.Context, string) error {
+	return nil
+}
+
+func TestManager_StartRestoresRecoveredPromptGeneration(t *testing.T) {
+	log := newTestRegistryLogger()
+	execRegistry := NewExecutorRegistry(log)
+	execRegistry.Register(&MockExecutor{
+		name: executor.NameStandalone,
+		recoverInstances: []*ExecutorInstance{{
+			InstanceID: "exec-recovered",
+			TaskID:     "task-recovered",
+			SessionID:  "session-recovered",
+		}},
+	})
+	writer := &recoveredPromptGenerationWriter{running: &models.ExecutorRunning{
+		SessionID:        "session-recovered",
+		AgentExecutionID: "exec-recovered",
+		Metadata: map[string]interface{}{
+			"prompt_generation": float64(7),
+		},
+	}}
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil, ExecutorFallbackWarn, "", log)
+	mgr.SetExecutorRunningWriter(writer)
+	t.Cleanup(func() { _ = mgr.Stop() })
+
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if !mgr.OwnsPromptGeneration("session-recovered", "exec-recovered", 7) {
+		t.Fatal("recovered execution did not restore prompt generation 7")
+	}
+	generation, err := mgr.BeginPrompt("exec-recovered")
+	if err != nil {
+		t.Fatalf("BeginPrompt: %v", err)
+	}
+	if generation != 8 {
+		t.Fatalf("next prompt generation = %d, want 8", generation)
+	}
+	writer.mu.Lock()
+	persistedGeneration := promptGenerationFromMetadata(writer.running.Metadata)
+	writer.mu.Unlock()
+	if persistedGeneration != 8 {
+		t.Fatalf("persisted prompt generation = %d, want 8", persistedGeneration)
 	}
 }

@@ -1161,6 +1161,42 @@ func TestHandleMessageTask_BusyTargetPersistsIdempotentDeliveryReceipt(t *testin
 	assert.Equal(t, 1, orchestrator.queue.GetStatus(ctx, session.ID).Count)
 }
 
+func TestHandleMessageTask_DerivedIdempotencyIgnoresSenderPresentationChanges(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	h, orchestrator := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orchestrator.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
+		ID: "sender-turn-derived", TaskID: sender.ID, TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC(),
+	}))
+	_, err = orchestrator.queue.QueueMessage(ctx, session.ID, target.ID, "already queued", "", messagequeue.QueuedByUser, false, nil)
+	require.NoError(t, err)
+
+	message := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "same raw report", sender.ID))
+	first, err := h.handleMessageTask(ctx, message)
+	require.NoError(t, err)
+	var firstPayload map[string]interface{}
+	require.NoError(t, json.Unmarshal(first.Payload, &firstPayload))
+
+	sender.Title = "Renamed sender task"
+	require.NoError(t, repo.UpdateTask(ctx, sender))
+	senderSession, err := repo.GetTaskSession(ctx, "sender-sess-1")
+	require.NoError(t, err)
+	senderSession.Name = "Renamed sender session"
+	require.NoError(t, repo.UpdateTaskSession(ctx, senderSession))
+
+	second, err := h.handleMessageTask(ctx, message)
+	require.NoError(t, err)
+	var secondPayload map[string]interface{}
+	require.NoError(t, json.Unmarshal(second.Payload, &secondPayload))
+	assert.Equal(t, firstPayload["delivery_id"], secondPayload["delivery_id"])
+	assert.Equal(t, firstPayload["idempotency_key"], secondPayload["idempotency_key"])
+}
+
 func TestHandleMessageTask_WaitingReceiptIsDeliveredOnce(t *testing.T) {
 	ctx := context.Background()
 	svc, repo := newTestTaskService(t)

@@ -13,6 +13,7 @@ func TestCompletionIntentStateCanTransitionTo(t *testing.T) {
 		{name: "settling retries", from: CompletionIntentStateSettling, to: CompletionIntentStatePending, want: true},
 		{name: "settling settles", from: CompletionIntentStateSettling, to: CompletionIntentStateSettled, want: true},
 		{name: "pending reopens", from: CompletionIntentStatePending, to: CompletionIntentStateReopened, want: true},
+		{name: "settling reopens for accepted user work", from: CompletionIntentStateSettling, to: CompletionIntentStateReopened, want: true},
 		{name: "settled cannot reopen", from: CompletionIntentStateSettled, to: CompletionIntentStateReopened, want: false},
 		{name: "reopened cannot settle", from: CompletionIntentStateReopened, to: CompletionIntentStateSettling, want: false},
 		{name: "superseded terminal", from: CompletionIntentStateSuperseded, to: CompletionIntentStateSettled, want: false},

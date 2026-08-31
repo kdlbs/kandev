@@ -2780,7 +2780,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 			`delivery_mode="interrupt" is only allowed when the sender is the target task's direct parent`, nil)
 	}
 	if parentReply != nil && parentReply.alreadyAnswered {
-		delivery, lookupErr := h.existingTaskMessageDelivery(ctx, req.TaskID, session, wrappedPrompt, req)
+		delivery, lookupErr := h.existingTaskMessageDelivery(ctx, req.TaskID, session, req)
 		if lookupErr != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load message delivery receipt: "+lookupErr.Error(), nil)
 		}
@@ -2916,7 +2916,7 @@ func (h *Handlers) finalizeDirectTaskMessageDelivery(ctx context.Context, delive
 	return queue.MarkDeliveryQueued(ctx, delivery.ID, leaseOwner, queueEntryID)
 }
 
-func (h *Handlers) existingTaskMessageDelivery(ctx context.Context, targetTaskID string, targetSession *models.TaskSession, prompt string, req messageTaskRequest) (*messagequeue.Delivery, error) {
+func (h *Handlers) existingTaskMessageDelivery(ctx context.Context, targetTaskID string, targetSession *models.TaskSession, req messageTaskRequest) (*messagequeue.Delivery, error) {
 	if h.sessionLauncher == nil || targetSession == nil {
 		return nil, nil
 	}
@@ -2934,7 +2934,7 @@ func (h *Handlers) existingTaskMessageDelivery(ctx context.Context, targetTaskID
 	}
 	key := req.IdempotencyKey
 	if key == "" {
-		key = deriveTaskMessageDeliveryKey(req.SenderSessionID, turn.ID, targetTaskID, targetSession.ID, mode, req.ReplyToQuestionID, prompt)
+		key = deriveTaskMessageDeliveryKey(req.SenderSessionID, turn.ID, targetTaskID, targetSession.ID, mode, req.ReplyToQuestionID, req.Prompt)
 	}
 	return queue.GetDeliveryReceiptBySourceKey(ctx, req.SenderSessionID, turn.ID, key)
 }
@@ -2970,7 +2970,7 @@ func (h *Handlers) admitTaskMessageDelivery(
 	if key == "" {
 		key = deriveTaskMessageDeliveryKey(
 			req.SenderSessionID, sourceTurn.ID, targetTaskID, targetSession.ID,
-			deliveryMode, req.ReplyToQuestionID, prompt,
+			deliveryMode, req.ReplyToQuestionID, req.Prompt,
 		)
 	}
 	delivery, created, err := queue.CreateOrGetDeliveryReceipt(ctx, messagequeue.Delivery{

@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/adminmetrics"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -41,6 +42,72 @@ type completionIntentReconciliationStore interface {
 		ctx context.Context, id string, from, to models.CompletionIntentState, settledAt time.Time,
 		event *models.SessionControlEvent,
 	) (bool, error)
+}
+
+type completionIntentReopenStore interface {
+	GetCompletionIntentForTurn(ctx context.Context, sessionID, turnID string) (*models.CompletionIntent, error)
+	TransitionCompletionIntent(ctx context.Context, id string, from, to models.CompletionIntentState, settledAt time.Time) (bool, error)
+}
+
+// AdmitQueuedUserWork serializes a user-owned queue admission with exact-turn
+// settlement. A valid request reopens pending completion before its queue write
+// so the reconciler cannot close the captured turn between those operations.
+func (s *Service) AdmitQueuedUserWork(
+	ctx context.Context,
+	taskID, sessionID string,
+	admit func(context.Context) (*messagequeue.QueuedMessage, error),
+) (*messagequeue.QueuedMessage, error) {
+	if admit == nil {
+		return nil, errors.New("queued user-work admission callback is nil")
+	}
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+	if err := s.reopenCompletionIntentForQueuedWorkLocked(ctx, taskID, sessionID); err != nil {
+		return nil, err
+	}
+	return admit(ctx)
+}
+
+func (s *Service) reopenCompletionIntentForQueuedWorkLocked(ctx context.Context, taskID, sessionID string) error {
+	if sessionID == "" || s.turnService == nil {
+		return nil
+	}
+	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if errors.Is(err, sql.ErrNoRows) || turn == nil {
+		return s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyPendingStepCompletion, nil)
+	}
+	if err != nil {
+		return fmt.Errorf("load active turn before queued work: %w", err)
+	}
+	store, ok := s.repo.(completionIntentReopenStore)
+	if !ok {
+		return s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyPendingStepCompletion, nil)
+	}
+	intent, err := store.GetCompletionIntentForTurn(ctx, sessionID, turn.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyPendingStepCompletion, nil)
+	}
+	if err != nil {
+		return fmt.Errorf("load completion intent before queued work: %w", err)
+	}
+	if intent.TaskID != taskID {
+		return fmt.Errorf("completion intent task %q does not match queued task %q", intent.TaskID, taskID)
+	}
+	if intent.State == models.CompletionIntentStatePending {
+		reopened, err := store.TransitionCompletionIntent(ctx, intent.ID, models.CompletionIntentStatePending, models.CompletionIntentStateReopened, time.Now().UTC())
+		if err != nil {
+			return fmt.Errorf("reopen completion intent for queued work: %w", err)
+		}
+		if !reopened {
+			return errors.New("completion intent changed before queued work could reopen it")
+		}
+	}
+	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyPendingStepCompletion, nil); err != nil {
+		return fmt.Errorf("clear pending completion signal for queued work: %w", err)
+	}
+	return nil
 }
 
 // CaptureCompletionIntentPromptIdentity returns the runtime-owned prompt
@@ -217,6 +284,10 @@ func (s *Service) reconcileCompletionIntentLocked(
 		}
 		return nil
 	}
+	if s.completionIntentHasQueuedUserWork(ctx, intent) {
+		s.clearPendingStepSignalByID(ctx, intent.SessionID)
+		return s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateReopened, now, "queued_user_work", auditEvent)
+	}
 	if turn != nil && turn.ID != intent.TurnID {
 		return s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSuperseded, now, "successor_turn", auditEvent)
 	}
@@ -257,6 +328,19 @@ func (s *Service) reconcileCompletionIntentLocked(
 	return s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSettled, now, "quiet_grace", auditEvent)
 }
 
+func (s *Service) completionIntentHasQueuedUserWork(ctx context.Context, intent *models.CompletionIntent) bool {
+	if intent == nil || s.messageQueue == nil {
+		return false
+	}
+	status := s.messageQueue.GetStatus(ctx, intent.SessionID)
+	for _, entry := range status.Entries {
+		if entry.QueuedBy == messagequeue.QueuedByUser && !entry.QueuedAt.Before(intent.RequestedAt) {
+			return true
+		}
+	}
+	return false
+}
+
 // completionIntentExecutionWasReplaced rejects a completion signal from an
 // execution that has been superseded in the durable runtime projection. The
 // captured turn might still be open while a replacement execution starts, so
@@ -271,7 +355,26 @@ func (s *Service) completionIntentExecutionWasReplaced(ctx context.Context, inte
 	if err != nil {
 		return false, fmt.Errorf("look up running execution for session %s: %w", intent.SessionID, err)
 	}
+	if running != nil && running.AgentExecutionID != "" && running.AgentExecutionID != intent.AgentExecutionID {
+		return true, nil
+	}
 	if intent.PromptGeneration > 0 {
+		generationReader, ok := s.agentManager.(interface {
+			GetPromptGenerationForSession(context.Context, string) (uint64, error)
+		})
+		if !ok {
+			return false, errors.New("agent runtime does not expose recovered prompt generation")
+		}
+		currentGeneration, err := generationReader.GetPromptGenerationForSession(ctx, intent.SessionID)
+		if err != nil {
+			return false, fmt.Errorf("read recovered prompt generation: %w", err)
+		}
+		if currentGeneration == 0 {
+			return false, errors.New("recovered prompt generation is not yet available")
+		}
+		if currentGeneration != uint64(intent.PromptGeneration) {
+			return true, nil
+		}
 		generationOwner, ok := s.agentManager.(interface {
 			OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
 		})
@@ -284,7 +387,7 @@ func (s *Service) completionIntentExecutionWasReplaced(ctx context.Context, inte
 	if running == nil || running.AgentExecutionID == "" {
 		return false, nil
 	}
-	return running.AgentExecutionID != intent.AgentExecutionID, nil
+	return false, nil
 }
 
 func (s *Service) prepareCompletionIntentReconciliation(

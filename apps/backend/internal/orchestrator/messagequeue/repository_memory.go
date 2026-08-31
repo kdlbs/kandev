@@ -388,7 +388,7 @@ func (r *memoryRepository) TakeHead(_ context.Context, sessionID string) (*Queue
 	return &out, nil
 }
 
-// ReserveHead returns the lowest-position entry, deleting ordinary rows and reserving durable lifecycle rows.
+// ReserveHead prioritizes workflow control, deleting ordinary rows and reserving durable lifecycle rows.
 func (r *memoryRepository) ReserveHead(_ context.Context, sessionID string) (*QueuedMessage, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -400,7 +400,13 @@ func (r *memoryRepository) reserveHeadLocked(sessionID string) *QueuedMessage {
 	if len(list) == 0 {
 		return nil
 	}
-	head := list[0]
+	headIndex := 0
+	for i, entry := range list {
+		if entry.IsWorkflowControl() {
+			headIndex = i
+		}
+	}
+	head := list[headIndex]
 	out := *head
 	if head.IsDurableLifecycle() {
 		// Mirror the SQLite reservation: the stored row is flagged in flight so
@@ -411,7 +417,7 @@ func (r *memoryRepository) reserveHeadLocked(sessionID string) *QueuedMessage {
 		head.Metadata = markReservedMetadata(out.Metadata)
 		return &out
 	}
-	r.entries[sessionID] = list[1:]
+	r.entries[sessionID] = append(list[:headIndex], list[headIndex+1:]...)
 	if len(r.entries[sessionID]) == 0 {
 		delete(r.entries, sessionID)
 		delete(r.nextPosition, sessionID)
@@ -453,7 +459,7 @@ func (r *memoryRepository) PauseAutoRunIfPending(_ context.Context, sessionID st
 	return false, nil
 }
 
-// ReserveHeadIfAutoRun atomically checks policy and reserves the FIFO head.
+// ReserveHeadIfAutoRun atomically checks policy and reserves the control-priority head.
 func (r *memoryRepository) ReserveHeadIfAutoRun(_ context.Context, sessionID string) (*QueuedMessage, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

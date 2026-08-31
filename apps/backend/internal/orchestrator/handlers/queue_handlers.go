@@ -84,6 +84,14 @@ type QueueSendNowDispatcher interface {
 	SendQueuedNow(ctx context.Context, sessionID, scope, entryID string) (int, error)
 }
 
+type queuedUserWorkAdmitter interface {
+	AdmitQueuedUserWork(
+		ctx context.Context,
+		taskID, sessionID string,
+		admit func(context.Context) (*messagequeue.QueuedMessage, error),
+	) (*messagequeue.QueuedMessage, error)
+}
+
 // QueueAccessAuthorizer scopes queue reads and mutations to visible sessions.
 type QueueAccessAuthorizer interface {
 	AuthorizeSessionAccess(ctx context.Context, sessionID string) error
@@ -116,6 +124,7 @@ type QueueHandlers struct {
 	queueDrainer        QueueDrainer
 	queueAutoRun        QueueAutoRunController
 	queueDispatcher     QueueSendNowDispatcher
+	queuedWorkAdmitter  queuedUserWorkAdmitter
 	accessAuthorizer    QueueAccessAuthorizer
 	sessionTaskResolver SessionTaskResolver
 	eventBus            bus.EventBus
@@ -160,6 +169,9 @@ func NewQueueHandlers(
 	}
 	if controller, ok := queueDrainer.(QueueAutoRunController); ok {
 		handlers.queueAutoRun = controller
+	}
+	if admitter, ok := queueDrainer.(queuedUserWorkAdmitter); ok {
+		handlers.queuedWorkAdmitter = admitter
 	}
 	return handlers
 }
@@ -238,7 +250,15 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		WithContextFiles(req.ContextFiles).
 		WithEntityReferences(req.EntityReferences).
 		ToMap()
-	queued, err := h.admitQueuedMessage(ctx, &req, queuedBy, metadata)
+	admit := func(admittedCtx context.Context) (*messagequeue.QueuedMessage, error) {
+		return h.admitQueuedMessage(admittedCtx, &req, queuedBy, metadata)
+	}
+	var queued *messagequeue.QueuedMessage
+	if h.queuedWorkAdmitter != nil {
+		queued, err = h.queuedWorkAdmitter.AdmitQueuedUserWork(ctx, req.TaskID, req.SessionID, admit)
+	} else {
+		queued, err = admit(ctx)
+	}
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
 			status := h.queueService.GetStatus(ctx, req.SessionID)

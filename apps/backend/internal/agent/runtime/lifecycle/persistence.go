@@ -72,6 +72,13 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 	}
 
 	metadata := execution.MetadataSnapshot()
+	persistentMetadata := FilterPersistentMetadata(metadata)
+	if generation := execution.promptGenerationSnapshot(); generation > 0 {
+		if persistentMetadata == nil {
+			persistentMetadata = make(map[string]interface{})
+		}
+		persistentMetadata[MetadataKeyPromptGeneration] = generation
+	}
 	running := &models.ExecutorRunning{
 		ID:                 execution.SessionID,
 		SessionID:          execution.SessionID,
@@ -88,7 +95,7 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		WorktreeID:         getMetadataString(metadata, MetadataKeyWorktreeID),
 		WorktreePath:       getMetadataString(metadata, "worktree_path"),
 		WorktreeBranch:     getMetadataString(metadata, MetadataKeyWorktreeBranch),
-		Metadata:           FilterPersistentMetadata(metadata),
+		Metadata:           persistentMetadata,
 		LastSeenAt:         lastSeenAt,
 	}
 	if prior != nil {
