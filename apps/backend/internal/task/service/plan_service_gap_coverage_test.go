@@ -191,3 +191,63 @@ func TestPlanService_IdenticalContentRepeatIsNotDeduplicated(t *testing.T) {
 		t.Errorf("expected the appended revision's content to equal its predecessor's (not deduplicated away), got %q", full.Content)
 	}
 }
+
+// nilReadPlanRepo makes GetTaskPlan legitimately report "no row found" (nil,
+// nil - not an error) from its callCount'th invocation onward (1-based). This
+// is distinct from flakyPlanReadRepo, which forces an error: AC-005.8's
+// Verification section requires both post-write-re-read outcomes be tested
+// separately, since finalizePlanIdentity treats `err != nil` and `saved ==
+// nil` as the same branch but they are reached by genuinely different
+// conditions (a failed read vs. a read that legitimately finds nothing).
+type nilReadPlanRepo struct {
+	*sqliterepo.Repository
+	callCount  int
+	nilFromNth int
+}
+
+func (r *nilReadPlanRepo) GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error) {
+	r.callCount++
+	if r.nilFromNth > 0 && r.callCount >= r.nilFromNth {
+		return nil, nil
+	}
+	return r.Repository.GetTaskPlan(ctx, taskID)
+}
+
+// TestCreatePlanPostWriteReReadFindsNoRowStillReportsWrittenPlan covers the
+// second half of AC-005.8 for the create/absent-head path: the pre-write read
+// genuinely finds no row, the write commits a real INSERT, and the post-write
+// re-read also genuinely finds no row (not an error). The in-memory plan
+// (with its real, freshly-assigned ID) must still be reported as successful,
+// exactly as the sibling error-injection test
+// (TestCreatePlanPostWriteReReadFailureStillReportsWrittenPlan) already
+// covers for the error case.
+func TestCreatePlanPostWriteReReadFindsNoRowStillReportsWrittenPlan(t *testing.T) {
+	_, eventBus, repo := createTestService(t)
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-nilread-create")
+
+	// 1st GetTaskPlan (pre-write) hits the real repo and finds no row; the
+	// 2nd (post-write re-read) is forced to legitimately return (nil, nil).
+	nilRead := &nilReadPlanRepo{Repository: repo, nilFromNth: 2}
+	svc := NewPlanService(nilRead, eventBus, log)
+
+	result, err := svc.CreatePlan(ctx, CreatePlanRequest{TaskID: "task-nilread-create", Title: "T", Content: "v1"})
+	if err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+	if result.Plan == nil || result.Plan.Content != "v1" || result.Plan.Title != "T" {
+		t.Fatalf("expected the in-memory plan reflecting the committed write, got %+v", result.Plan)
+	}
+	if result.Plan.ID == "" {
+		t.Error("expected a real ID from the fresh INSERT even though the post-write re-read legitimately found no row (head was genuinely absent, not unknown)")
+	}
+
+	saved, err := repo.GetTaskPlan(ctx, "task-nilread-create")
+	if err != nil {
+		t.Fatalf("verify GetTaskPlan: %v", err)
+	}
+	if saved == nil || saved.ID != result.Plan.ID {
+		t.Fatalf("expected the reported ID to match the actually-persisted row: saved=%+v reported=%+v", saved, result.Plan)
+	}
+}
