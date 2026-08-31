@@ -3,13 +3,14 @@ package worktree
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 )
 
-// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.11
+// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.13
 func TestCreateWorktree_MissingRemoteBaseUsesRefreshedFallback(t *testing.T) {
-	repoPath := initGitRepoWithRemote(t)
+	repoPath, wantHead := initManagedPRCheckoutBranch(t, 42, "feature/pr-branch")
 	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
 	if err != nil {
 		t.Fatalf("NewManager failed: %v", err)
@@ -25,6 +26,7 @@ func TestCreateWorktree_MissingRemoteBaseUsesRefreshedFallback(t *testing.T) {
 		BaseBranch:         "feature/deleted-parent",
 		FallbackBaseBranch: "main",
 		CheckoutBranch:     "feature/pr-branch",
+		PRNumber:           42,
 		PullBeforeWorktree: true,
 		TaskDirName:        "task-stacked-pr",
 		RepoName:           "repo-1",
@@ -43,7 +45,6 @@ func TestCreateWorktree_MissingRemoteBaseUsesRefreshedFallback(t *testing.T) {
 	if !strings.Contains(wt.BaseBranchFallbackWarning, "no longer exists on origin") {
 		t.Fatalf("fallback warning = %q, want missing-origin explanation", wt.BaseBranchFallbackWarning)
 	}
-	wantHead := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "origin/feature/pr-branch"))
 	gotHead := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
 	if gotHead != wantHead {
 		t.Fatalf("worktree HEAD = %s, want checkout branch head %s", gotHead, wantHead)
@@ -58,7 +59,7 @@ func TestCreateWorktree_MissingRemoteBaseUsesRefreshedFallback(t *testing.T) {
 	}
 }
 
-// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.11
+// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.13
 func TestCreateWorktree_MissingRemoteBaseWithoutFallbackReportsMissingRef(t *testing.T) {
 	repoPath := initGitRepoWithRemote(t)
 	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
@@ -74,6 +75,7 @@ func TestCreateWorktree_MissingRemoteBaseWithoutFallbackReportsMissingRef(t *tes
 		RepositoryPath:     repoPath,
 		BaseBranch:         "feature/deleted-parent",
 		CheckoutBranch:     "feature/pr-branch",
+		PRNumber:           42,
 		PullBeforeWorktree: true,
 		TaskDirName:        "task-stacked-pr",
 		RepoName:           "repo-1",
@@ -91,7 +93,7 @@ func TestCreateWorktree_MissingRemoteBaseWithoutFallbackReportsMissingRef(t *tes
 	}
 }
 
-// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.11
+// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.13
 func TestCreateWorktree_MissingRemoteBaseAndFallbackReportsMissingRef(t *testing.T) {
 	repoPath := initGitRepoWithRemote(t)
 	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
@@ -107,6 +109,7 @@ func TestCreateWorktree_MissingRemoteBaseAndFallbackReportsMissingRef(t *testing
 		BaseBranch:         "feature/deleted-parent",
 		FallbackBaseBranch: "feature/deleted-fallback",
 		CheckoutBranch:     "feature/pr-branch",
+		PRNumber:           42,
 		PullBeforeWorktree: true,
 		TaskDirName:        "task-stacked-pr",
 		RepoName:           "repo-1",
@@ -119,5 +122,48 @@ func TestCreateWorktree_MissingRemoteBaseAndFallbackReportsMissingRef(t *testing
 	}
 	if errors.Is(err, ErrInvalidBaseBranch) {
 		t.Fatalf("Create() error = %v, want required-refresh failure", err)
+	}
+}
+
+// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.13
+func TestCreateWorktree_PRBaseTransientRefreshFailureRemainsFatal(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    echo "fatal: Authentication failed" >&2
+    exit 1
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	var events []SyncProgressEvent
+
+	_, err = mgr.Create(context.Background(), CreateRequest{
+		TaskID:             "task-stacked-pr",
+		SessionID:          "session-stacked-pr",
+		RepositoryID:       "repo-1",
+		RepositoryPath:     repoPath,
+		BaseBranch:         "main",
+		FallbackBaseBranch: "develop",
+		CheckoutBranch:     "feature/pr-branch",
+		PRNumber:           42,
+		PullBeforeWorktree: true,
+		TaskDirName:        "task-stacked-pr",
+		RepoName:           "repo-1",
+		OnSyncProgress:     captureSyncProgress(&events),
+	})
+	if err == nil || !strings.Contains(err.Error(), "non_interactive_auth_failed") {
+		t.Fatalf("Create() error = %v, want fatal auth classification", err)
+	}
+	if len(events) == 0 || events[len(events)-1].Status != SyncProgressFailed {
+		t.Fatalf("final sync progress = %#v, want failed", events)
 	}
 }

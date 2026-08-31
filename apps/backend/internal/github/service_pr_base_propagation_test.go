@@ -11,7 +11,7 @@ type recordingTaskRepositoryUpdater struct {
 	calls []taskRepositoryUpdateCall
 }
 
-// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.10
+// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.12
 func TestSyncTaskPR_DoesNotPropagateUnchangedBase(t *testing.T) {
 	svc, store, _ := setupSyncTest(t)
 	ctx := context.Background()
@@ -34,7 +34,7 @@ func TestSyncTaskPR_DoesNotPropagateUnchangedBase(t *testing.T) {
 	}
 }
 
-// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.10
+// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.12
 func TestSyncTaskPR_TaskRepositoryUpdateFailureIsBestEffort(t *testing.T) {
 	svc, store, _ := setupSyncTest(t)
 	ctx := context.Background()
@@ -77,7 +77,7 @@ func (u *recordingTaskRepositoryUpdater) UpdateTaskRepositoryBaseBranch(
 	return u.err
 }
 
-// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.10
+// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.12
 func TestSyncTaskPR_PropagatesChangedBaseToTaskRepository(t *testing.T) {
 	svc, store, _ := setupSyncTest(t)
 	ctx := context.Background()

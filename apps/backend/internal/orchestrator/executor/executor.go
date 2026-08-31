@@ -1015,7 +1015,7 @@ type TaskRepositoryBaseBranchUpdater interface {
 
 // PRBaseResolver returns the current base branch for one provider pull request.
 type PRBaseResolver interface {
-	ResolvePRBaseBranch(ctx context.Context, owner, repo string, number int) (string, error)
+	ResolvePRBaseBranch(ctx context.Context, workspaceID, owner, repo string, number int) (string, error)
 }
 
 // ExecutorConfig holds configuration for the Executor

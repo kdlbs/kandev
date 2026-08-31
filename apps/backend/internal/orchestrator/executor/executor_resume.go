@@ -177,7 +177,11 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		return nil, fmt.Errorf("load remote contribution for task repository %q: %w", tr.ID, err)
 	} else if found {
 		if tr.BaseBranch != "" && tr.BaseBranch != binding.BaseBranch {
-			return nil, fmt.Errorf("task repository %q base branch does not match remote contribution", tr.ID)
+			e.logger.Debug("reconciling remote contribution base branch with task repository",
+				zap.String("task_repository_id", tr.ID),
+				zap.String("old_base_branch", binding.BaseBranch),
+				zap.String("new_base_branch", tr.BaseBranch))
+			binding.BaseBranch = tr.BaseBranch
 		}
 		if tr.CheckoutBranch != "" && tr.CheckoutBranch != binding.HeadBranch {
 			return nil, fmt.Errorf("task repository %q checkout branch does not match remote contribution", tr.ID)
@@ -264,7 +268,7 @@ func (e *Executor) resolvePRBaseForLaunch(
 		return
 	}
 	baseBranch, err := e.prBaseResolver.ResolvePRBaseBranch(
-		ctx, repo.ProviderOwner, repo.ProviderName, info.PRNumber,
+		ctx, repo.WorkspaceID, repo.ProviderOwner, repo.ProviderName, info.PRNumber,
 	)
 	baseBranch = strings.TrimSpace(baseBranch)
 	if err != nil || baseBranch == "" {
@@ -282,6 +286,9 @@ func (e *Executor) resolvePRBaseForLaunch(
 			zap.String("new_base_branch", baseBranch))
 	}
 	info.BaseBranch = baseBranch
+	if info.RemoteContribution != nil {
+		info.RemoteContribution.BaseBranch = baseBranch
+	}
 }
 
 func hasProviderRepositoryIdentity(repo *models.Repository) bool {

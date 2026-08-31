@@ -264,9 +264,9 @@ type githubPRBaseResolver struct {
 }
 
 func (r githubPRBaseResolver) ResolvePRBaseBranch(
-	ctx context.Context, owner, repo string, number int,
+	ctx context.Context, workspaceID, owner, repo string, number int,
 ) (string, error) {
-	pr, err := r.service.GetPR(ctx, owner, repo, number)
+	pr, err := r.service.GetPRForAutomation(ctx, workspaceID, owner, repo, number)
 	if err != nil || pr == nil {
 		return "", err
 	}

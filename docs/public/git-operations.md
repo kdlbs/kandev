@@ -79,12 +79,13 @@ For a new task branch, the repository default template is:
 feature/{title}-{suffix}
 ```
 
-`{title}` is an ASCII-safe, lower-case task-title slug and `{suffix}` is a short collision-avoidance value. Repository settings can change the template. When `pull_before_worktree` is omitted it defaults to `true`: Kandev must refresh and verify the base branch before creating or recreating the worktree. The public configuration defaults both fetch and fast-forward pull timeouts to 60 seconds. Authentication, network, timeout, divergent-ref, and uncertain-ancestry failures stop task preparation and record a repository-specific launch error. If Git proves that a requested remote base was deleted, Kandev can refresh and use the repository default instead, with a warning that names both branches. Kandev does not create the worktree from a stale local or remote-tracking fallback.
+`{title}` is an ASCII-safe, lower-case task-title slug and `{suffix}` is a short collision-avoidance value. Repository settings can change the template. When `pull_before_worktree` is omitted it defaults to `true`: Kandev attempts to refresh and verify the base branch before creating or recreating the worktree. The public configuration defaults both fetch and fast-forward pull timeouts to 60 seconds. When a usable local base exists, authentication, network, timeout, missing-ref, divergent-ref, and uncertain-ancestry errors produce a credential-safe warning and Kandev creates the worktree from that local base. The warning states that remote changes may be missing. When no usable local base exists, Kandev must materialize the requested branch from the remote; a failed refresh or missing remote ref stops task preparation with a repository-specific launch error. Explicit remote-only refs and remote executors keep this strict materialization behavior.
+For a numbered GitHub PR, Kandev uses the current PR base when available. If Git proves that the requested PR base was deleted, Kandev can refresh and use a configured fallback branch, often the repository default, with a warning that names both branches; unproven PR refresh failures remain fatal. Kandev does not create the worktree from an unverified local or remote-tracking fallback.
 
 If the repository is intentionally offline, open its workspace repository settings and disable
-**Always pull before creating a new worktree**. This preserves the local workflow, but it also
-opts out of the freshness guarantee and allows the task to use the local base state. Re-enable the
-setting before relying on remote changes for later task launches.
+**Always pull before creating a new worktree**. This skips the refresh attempt for host worktrees,
+but it is not required for a normal local-only base. Keep the setting enabled when remote freshness
+is important for later task launches.
 
 ### Named branch policies
 
