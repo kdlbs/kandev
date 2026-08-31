@@ -121,6 +121,12 @@ func (r *Resolver) resolvePrincipalWorkspace(ctx context.Context, task *models.T
 }
 
 func principalSurface(task *models.Task) (string, mcpprofile.Surface, error) {
+	if configMode, _ := task.Metadata["config_mode"].(bool); configMode {
+		// Config chat is a user-created, workspace-scoped administrative
+		// session. It is intentionally distinct from autonomous coordinator
+		// automation and therefore does not borrow an automation grant.
+		return "", mcpprofile.SurfaceConfiguration, nil
+	}
 	if task.Origin != models.TaskOriginAutomationRun {
 		if task.IsFromOffice {
 			return "", mcpprofile.SurfaceOfficeTask, nil

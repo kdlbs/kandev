@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -133,9 +134,10 @@ func (h *Handlers) authorizeAutomationRequest(ctx context.Context, msg *ws.Messa
 }
 
 // authorizeOrdinaryMoveRequest keeps the ordinary kanban/office agent's move
-// authority task-local. Coordinator automation has a separate, server-attested
-// surface above for same-workspace cross-task routing. The payload's caller
-// fields are always replaced with the principal derived from the live stream.
+// authority task-local. A user-created configuration session has its own
+// workspace-scoped administrative authority; coordinator automation remains
+// separately bound to a live durable grant above. The payload's caller fields
+// are always replaced with the principal derived from the live stream.
 func (h *Handlers) authorizeOrdinaryMoveRequest(
 	ctx context.Context,
 	principal mcpscope.Principal,
@@ -150,7 +152,12 @@ func (h *Handlers) authorizeOrdinaryMoveRequest(
 			"Invalid payload: "+err.Error(), nil)
 		return response, nil, responseErr
 	}
-	if jsonStringField(fields, "task_id") != principal.CallerTaskID ||
+	if principal.Surface == mcpprofile.SurfaceConfiguration {
+		if !h.authorizeAutomationScalarFields(ctx, principal, msg.Action, fields) ||
+			!h.authorizeAutomationReferenceFields(ctx, principal, msg.Action, fields) {
+			return automationNotFound(msg)
+		}
+	} else if jsonStringField(fields, "task_id") != principal.CallerTaskID ||
 		!h.authorizeAutomationReferenceFields(ctx, principal, msg.Action, fields) {
 		return automationNotFound(msg)
 	}

@@ -115,3 +115,21 @@ func TestMoveTaskAuthorizationAllowsOnlyCurrentCoordinatorGrant(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, guarded)
 }
+
+func TestMoveTaskAuthorizationAllowsWorkspaceScopedConfigurationSession(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-config", Name: "Config", CreatedAt: now, UpdatedAt: now}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-config", WorkspaceID: "ws-config", Name: "Config", CreatedAt: now, UpdatedAt: now}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "config-task", WorkspaceID: "ws-config", WorkflowID: "wf-config", Title: "Config", CreatedAt: now, UpdatedAt: now}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "target-task", WorkspaceID: "ws-config", WorkflowID: "wf-config", Title: "Target", CreatedAt: now, UpdatedAt: now}))
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	payload, err := json.Marshal(map[string]interface{}{"task_id": "target-task", "workflow_id": "wf-config", "workflow_step_id": "step-done"})
+	require.NoError(t, err)
+	principal := mcpscope.Principal{WorkspaceID: "ws-config", CallerTaskID: "config-task", CallerSessionID: "config-session", Surface: mcpprofile.SurfaceConfiguration}
+	guarded, replacement, err := h.authorizeAutomationRequest(mcpscope.WithPrincipal(ctx, principal), &ws.Message{ID: "config-route", Action: ws.ActionMCPMoveTask, Payload: payload})
+	require.NoError(t, err)
+	assert.Nil(t, guarded)
+	assert.NotNil(t, replacement)
+}
