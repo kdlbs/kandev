@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
 created: 2026-07-19
-updated: 2026-08-27
+updated: 2026-08-30
 owners:
   - kandev
 ---
@@ -18,7 +18,7 @@ This design preserves the technical source detail for `REQ-PLATFORM-WORKSPACE-GI
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-PLATFORM-WORKSPACE-GIT-STATUS-001` | [Migrated source detail](#migrated-source-detail), [Mixed index and working-tree changes](#mixed-index-and-working-tree-changes), [API surface](#api-surface) |
+| `REQ-PLATFORM-WORKSPACE-GIT-STATUS-001` | [Migrated source detail](#migrated-source-detail), [Generated untracked dependency trees](#generated-untracked-dependency-trees), [Mixed index and working-tree changes](#mixed-index-and-working-tree-changes), [API surface](#api-surface) |
 
 ## Migrated source detail
 
@@ -33,11 +33,25 @@ Users opening or focusing Changes and Review need a current workspace snapshot w
 - Overlapping live observations for the same repository share one underlying observation. Different repositories in a multi-repository task may still be observed in parallel.
 - Every non-cancelled caller receives the same completed snapshot or error from a shared observation. A caller whose own context is cancelled returns promptly without cancelling or otherwise poisoning the result for other callers.
 - Tracker shutdown or the bounded shared-observation deadline cancels the underlying work. Cancelled work does not publish or cache a partial snapshot.
-- After Git output is parsed, changed-file and synthetic untracked-diff enrichment performs work proportional to the number of changed entries plus the bounded content processed.
+- After Git output is parsed, changed-file and synthetic untracked-diff enrichment performs work proportional to the number of eligible changed entries plus the bounded content processed.
 - Existing diff limits remain in force: 10 MiB maximum source file size, 256 KiB maximum per emitted diff representation, and a 2 MiB enrichment threshold per status snapshot. Every flattened or layer-specific representation participates in that threshold. Because the threshold is checked before enriching each representation, the final accepted representation may preserve the existing overshoot of up to the 256 KiB cap. Existing skip reasons remain unchanged.
-- Large changed sets retain every path and its status metadata. Once the total diff budget is exhausted, files that are not enriched retain `budget_exceeded` as their diff skip reason.
+- Large changed sets retain every eligible path and its status metadata. Once the total diff budget is exhausted, files that are not enriched retain `budget_exceeded` as their diff skip reason.
 - Multi-repository responses retain repository identity and partial-success behavior.
 - Verification tooling preserves shared managed Go and lint caches for reuse while keeping invocation scratch and command output outside repository worktrees. The root-level `.verify-cache` and `.tmp` paths are ignored as safeguards against legacy or misconfigured verification runs.
+
+### Generated untracked dependency trees
+
+Agentctl owns the complete workspace snapshot. It collects tracked and untracked state through separate Git queries so a generated dependency tree cannot force Git to emit every package file.
+
+The tracked query uses `git status --porcelain --untracked-files=no`. It preserves index and working-tree changes for every tracked path, including a tracked path below `node_modules`. The untracked query uses `git ls-files --others --exclude-standard --exclude=node_modules/ -z`. Git applies the extra exclusion while it walks the worktree. The `-z` result preserves path names without quoting or line splitting. Agentctl adds each returned path to the existing untracked status projection before diff enrichment.
+
+For each full observation, agentctl pins both queries to a temporary snapshot of the Git index. Git writes the real index atomically, so the snapshot keeps tracking membership stable across the pair without blocking concurrent user Git operations. The snapshot is removed after the observation.
+
+The extra exclusion applies to directories named `node_modules` at any repository depth. It also covers pnpm's nested `node_modules/.pnpm` store. It does not cover `.next`, `dist`, `build`, or other generated names. Those paths continue to follow Git's repository, global, and command-level ignore rules.
+
+The full status observer and the untracked monitor fingerprint use one shared argument definition. The monitor therefore does not stat dependency-tree files, and changes limited to an untracked dependency tree do not start a full refresh. Filtering parsed status output is not sufficient because Git and agentctl have already paid the enumeration cost at that point.
+
+The status model, HTTP routes, WebSocket events, and frontend stores do not change. A completed polling refresh replaces any older cached snapshot through the existing tracker path. This contract follows [ADR-2026-08-30-bound-untracked-dependency-enumeration](../../../decisions/2026-08-30-bound-untracked-dependency-enumeration.md).
 
 ### Mixed index and working-tree changes
 
@@ -129,6 +143,9 @@ Existing Git-status routes remain in place. Their result and stream payloads add
 | A mixed path's layer diff exceeds its cap or the snapshot budget | The affected facet retains status metadata and reports the existing `truncated` or `budget_exceeded` skip reason; the other facet remains independently usable. |
 | One caller cancels while a shared observation is running | That caller returns its context cancellation promptly; other callers remain eligible to receive the shared result. |
 | The tracker stops or the shared deadline expires | Underlying work is cancelled and no partial result is published or cached. |
+| A repository has an untracked `node_modules` tree without an ignore rule | Git excludes the tree during untracked enumeration. The snapshot contains no dependency-tree paths or synthetic diffs. |
+| A tracked path exists below `node_modules` | The tracked status query preserves its staged or unstaged change in the snapshot. |
+| Only untracked dependency-tree content changes | The monitor fingerprint remains unchanged and does not start a full status refresh. |
 | One repository fails during a multi-repository request | Successful repository entries remain available and the failure is reported on its repository entry. |
 | Stored base commit is a strict ancestor of `merge-base(HEAD, <resolved integration candidate>)` and the target is not a live non-default upstream branch | Commit enumeration and cumulative diff use the freshly computed merge-base, not the stale stored SHA; the count reflects only the branch's own commits. |
 | Comparison target is a live non-default upstream branch (e.g. `origin/develop`) whose merge-base is an ancestor of the integration merge-base | The target's own merge-base is preserved; the range is NOT re-anchored to the integration line. |
@@ -147,7 +164,10 @@ Existing Git-status routes remain in place. Their result and stream payloads add
 - **GIVEN** simultaneous fresh requests for two repositories, **WHEN** multi-repository status runs, **THEN** one observation per repository may run in parallel and each response remains identified with its repository.
 - **GIVEN** one waiter cancels during a shared observation, **WHEN** other waiters remain, **THEN** the cancelled waiter returns promptly and the remaining waiters receive the completed result.
 - **GIVEN** tracker shutdown or the shared-observation deadline while enrichment is running, **WHEN** cancellation reaches the observation, **THEN** filesystem iteration stops and no partial snapshot is cached.
-- **GIVEN** approximately 15,000 untracked text files, **WHEN** fresh status is computed, **THEN** every path is present, emitted diff content obeys the existing limits, files not enriched after total-budget exhaustion have `budget_exceeded`, and post-porcelain enrichment remains linear in the number of entries.
+- **GIVEN** approximately 15,000 eligible untracked text files outside dependency trees, **WHEN** fresh status is computed, **THEN** every path is present, emitted diff content obeys the existing limits, files not enriched after total-budget exhaustion have `budget_exceeded`, and post-porcelain enrichment remains linear in the number of entries.
+- **GIVEN** an untracked `node_modules` tree with thousands of package files and no matching ignore rule, **WHEN** fresh status is computed, **THEN** the tree is excluded before per-file status and diff work while an ordinary untracked source file remains visible.
+- **GIVEN** a tracked file below `node_modules`, **WHEN** the file changes, **THEN** its tracked status remains visible in the workspace snapshot.
+- **GIVEN** a stable workspace fingerprint, **WHEN** only untracked files below `node_modules` change, **THEN** the next monitor check keeps the same untracked fingerprint and does not start a full status refresh.
 - **GIVEN** a tracked file with one staged edit and a different unstaged edit, **WHEN** fresh status is computed, **THEN** its one path entry contains staged and unstaged facets with independent line totals and `HEAD -> index` and `index -> working tree` diffs.
 - **GIVEN** a newly added staged file that receives another unstaged edit, **WHEN** Changes opens on desktop or mobile, **THEN** the same path appears in both Staged and Unstaged, selecting each row shows only that layer, and the overall changed-file count remains one.
 - **GIVEN** a mixed path visible in both sections, **WHEN** the user stages or unstages it, **THEN** one repository-qualified Git mutation runs and the next snapshot shows only the facet that remains.
@@ -181,7 +201,9 @@ Existing Git-status routes remain in place. Their result and stream payloads add
 - Redesigning the desktop Changes panel or compressing it into the mobile layout.
 - Adding hunk-level staging or changing the existing whole-file stage, unstage, and discard semantics.
 - Defining new behavior for Git's unmerged/conflict porcelain states; those continue to follow their existing handling.
+- Suppressing untracked `.next`, `dist`, `build`, or other generated directories without a Git ignore rule.
+- Adding client-side dependency-tree filtering or changing status payload fields.
 
 ## Implementation plan
 
-See [Workspace Git Status Scalability plan](../../../plans/workspace-git-status-scalability/plan.md), [Fork PR Comparison Targets plan](../../../plans/fork-pr-comparison-targets/plan.md), and [Mixed Staged and Unstaged Changes plan](../../../plans/mixed-staged-unstaged-changes/plan.md).
+See [Workspace Git Status Scalability plan](../../../plans/workspace-git-status-scalability/plan.md), [Workspace Git Status Dependency-Tree Exclusion plan](../../../plans/workspace-git-status-dependency-tree-exclusion/plan.md), [Fork PR Comparison Targets plan](../../../plans/fork-pr-comparison-targets/plan.md), and [Mixed Staged and Unstaged Changes plan](../../../plans/mixed-staged-unstaged-changes/plan.md).

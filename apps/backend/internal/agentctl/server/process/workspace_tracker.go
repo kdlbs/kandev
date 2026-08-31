@@ -158,6 +158,9 @@ type WorkspaceTracker struct {
 	gitStatusObserveMu      sync.Mutex
 	gitStatusObserveWG      sync.WaitGroup
 	gitStatusWaiterJoined   func() // Optional test synchronization hook; nil in production.
+	// gitStatusBetweenQueries is an optional test hook invoked between the
+	// tracked and untracked queries. It is nil in production.
+	gitStatusBetweenQueries func()
 
 	// Control
 	stopCh          chan struct{}

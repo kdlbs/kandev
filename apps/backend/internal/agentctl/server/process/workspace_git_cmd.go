@@ -40,8 +40,34 @@ const gitOptionalLocksOff = "GIT_OPTIONAL_LOCKS=0"
 func (wt *WorkspaceTracker) pollingGitCommand(ctx context.Context, args ...string) *exec.Cmd {
 	cmd := subproc.NewGitCommand(ctx, args...)
 	cmd.Dir = wt.workDir
-	cmd.Env = append(os.Environ(), gitOptionalLocksOff)
+	cmd.Env = gitCommandEnv(ctx, true)
 	return cmd
+}
+
+func gitCommandEnv(ctx context.Context, lockless bool) []string {
+	env := os.Environ()
+	if lockless {
+		env = replaceGitEnvAssignment(env, gitOptionalLocksOff)
+	}
+	if indexPath := gitIndexFile(ctx); indexPath != "" {
+		env = replaceGitEnvAssignment(env, "GIT_INDEX_FILE="+indexPath)
+	}
+	return env
+}
+
+func replaceGitEnvAssignment(env []string, assignment string) []string {
+	key, _, ok := strings.Cut(assignment, "=")
+	if !ok {
+		return env
+	}
+	prefix := key + "="
+	filtered := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return append(filtered, assignment)
 }
 
 // gitCommand builds a git command for the already-admitted execution context.
@@ -53,6 +79,7 @@ func (wt *WorkspaceTracker) gitCommand(ctx context.Context, lockless bool, args 
 	}
 	cmd := subproc.NewGitCommand(ctx, args...)
 	cmd.Dir = wt.workDir
+	cmd.Env = gitCommandEnv(ctx, false)
 	return cmd
 }
 
