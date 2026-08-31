@@ -141,7 +141,7 @@ func (r *Repository) getTaskRepositoryForUpdate(ctx context.Context, tx *sqlx.Tx
 		SELECT id, task_id, repository_id, base_branch, checkout_branch, position, metadata, created_at, updated_at
 		FROM task_repositories WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
-		query += " FOR UPDATE"
+		query += postgresForUpdateClause
 	}
 	taskRepo := &models.TaskRepository{}
 	var metadataJSON string

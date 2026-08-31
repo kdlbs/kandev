@@ -116,7 +116,7 @@ func (r *Repository) lockMetadataRow(
 ) (string, error) {
 	query := "SELECT metadata FROM " + table + " WHERE id = ?"
 	if dialect.IsPostgres(r.db.DriverName()) {
-		query += " FOR UPDATE"
+		query += postgresForUpdateClause
 	}
 	var raw sql.NullString
 	if err := tx.QueryRowxContext(ctx, r.db.Rebind(query), entityID).Scan(&raw); err != nil {

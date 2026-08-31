@@ -43,20 +43,20 @@ func (r *Repository) IsCurrentCoordinatorGrant(
 	var metadataJSON string
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT task.metadata
-		FROM workspace_coordinator_grants grant
+		FROM workspace_coordinator_grants coordinator_grant
 		JOIN tasks task
-			ON task.id = grant.coordinator_task_id
-			AND task.workspace_id = grant.workspace_id
+			ON task.id = coordinator_grant.coordinator_task_id
+			AND task.workspace_id = coordinator_grant.workspace_id
 		JOIN workspaces workspace
-			ON workspace.id = grant.workspace_id
-			AND COALESCE(workspace.owner_id, '') = grant.created_by_user_id
+			ON workspace.id = coordinator_grant.workspace_id
+			AND COALESCE(workspace.owner_id, '') = coordinator_grant.created_by_user_id
 		JOIN task_sessions session
 			ON session.id = ? AND session.task_id = task.id
 		JOIN executors_running execution
 			ON execution.session_id = session.id
 			AND execution.task_id = task.id
 			AND execution.agent_execution_id = ?
-		WHERE grant.workspace_id = ? AND grant.coordinator_task_id = ?
+		WHERE coordinator_grant.workspace_id = ? AND coordinator_grant.coordinator_task_id = ?
 			AND task.origin = ?
 			AND session.state IN ('STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 			AND execution.status IN ('starting', 'running', 'ready')
@@ -120,7 +120,7 @@ func (r *Repository) DesignateAutomationCoordinator(
 	defer func() { _ = tx.Rollback() }()
 	query := `SELECT workspace_id, origin, metadata FROM tasks WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
-		query += ` FOR UPDATE`
+		query += postgresForUpdateClause
 	}
 	var task models.Task
 	var metadataJSON string

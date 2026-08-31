@@ -28,7 +28,7 @@ type stepTransitionTx interface {
 func (r *Repository) readTaskStepInTx(ctx context.Context, tx stepTransitionTx, taskID string) (workflowID, stepID string, found bool, err error) {
 	query := `SELECT workflow_id, workflow_step_id FROM tasks WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
-		query += ` FOR UPDATE`
+		query += postgresForUpdateClause
 	}
 	var wf, step sql.NullString
 	err = tx.QueryRowContext(ctx, r.db.Rebind(query), taskID).Scan(&wf, &step)
