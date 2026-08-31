@@ -5,8 +5,13 @@ package executor
 // (Change 3). See
 // docs/specs/office/{requirements,system-design}/task-session-identity*.md.
 // mockRepository does not implement officeTaskSessionCreator, so every
-// EnsureSessionForAgent* test in this package already exercises
+// EnsureSessionForAgent* test in this package that uses it directly exercises
 // persistOfficeSessionFallback rather than a repository-native creator.
+// officeTaskSessionCreatingRepository (below) is the one exception: it wraps
+// mockRepository to add officeTaskSessionCreator, for tests that must prove
+// persistOfficeSession's other branch — the one taken in production, where
+// the repository's own transaction is the only serialization and the
+// executor's per-task fallback lock is never acquired at all.
 
 import (
 	"context"
@@ -109,6 +114,43 @@ func TestPersistOfficeSessionFallbackSkipsGuardForEmptyAgentProfileID(t *testing
 	}
 }
 
+// TestPersistOfficeSessionFallbackIgnoresLiveSessionForDifferentAgentOnSameTask
+// proves the fallback guard restricts to the (task, agent_profile_id) PAIR
+// before it ever asks whether an existing row is terminal: a different
+// agent's live (non-terminal) session on the same task must not block
+// creating a session for a new agent. Without the pair restriction running
+// first, a task-wide "any non-terminal session exists" check would also
+// reject this call — and every other fallback test in this file seeds either
+// no other agent's session or only a terminal one, so none of them would
+// catch that regression.
+func TestPersistOfficeSessionFallbackIgnoresLiveSessionForDifferentAgentOnSameTask(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	ctx := context.Background()
+	const taskID = "task-office-fallback-other-agent-live"
+
+	repo.sessions["fallback-other-agent-live"] = &models.TaskSession{
+		ID: "fallback-other-agent-live", TaskID: taskID, AgentProfileID: "agent-a",
+		State: models.TaskSessionStateRunning, StartedAt: time.Now().UTC(),
+	}
+
+	fresh := &models.TaskSession{
+		ID: "fallback-other-agent-new", TaskID: taskID, AgentProfileID: "agent-b",
+		State: models.TaskSessionStateCreated,
+	}
+	if err := exec.persistOfficeSessionFallback(ctx, taskID, fresh); err != nil {
+		t.Fatalf("persistOfficeSessionFallback: %v, want nil (a different agent's live session must not block creation)", err)
+	}
+
+	sessions, err := repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("sessions for task = %d, want 2", len(sessions))
+	}
+}
+
 // TestEnsureSessionForAgentWithCreation_ConcurrentCallersConvergeOnOneSession
 // is the executor-level convergence test: N concurrent callers for the same
 // (task, agent) pair, none of which observe an existing row at lookup time
@@ -116,6 +158,9 @@ func TestPersistOfficeSessionFallbackSkipsGuardForEmptyAgentProfileID(t *testing
 // per-task mutex in persistOfficeSession serialize the real race), must
 // converge on exactly one row — the losers recover via re-read-and-reuse
 // rather than surfacing the conflict to their caller (AC-003.1, AC-003.2).
+// AC-003.2 is specifically a one-creator/N-1-reusers contract, not just a
+// same-ID contract, so this also captures and asserts the "created by this
+// call" boolean each caller receives: exactly one true among the n results.
 func TestEnsureSessionForAgentWithCreation_ConcurrentCallersConvergeOnOneSession(t *testing.T) {
 	const n = 4
 	repo := newMockRepository()
@@ -123,16 +168,18 @@ func TestEnsureSessionForAgentWithCreation_ConcurrentCallersConvergeOnOneSession
 	task := officeTestTask()
 
 	results := make([]*models.TaskSession, n)
+	created := make([]bool, n)
 	errs := make([]error, n)
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			session, _, err := exec.EnsureSessionForAgentWithCreation(
+			session, wasCreated, err := exec.EnsureSessionForAgentWithCreation(
 				context.Background(), task, "agent-convergence", "profile-1", "exec-1", "",
 			)
 			results[i] = session
+			created[i] = wasCreated
 			errs[i] = err
 		}(i)
 	}
@@ -151,6 +198,17 @@ func TestEnsureSessionForAgentWithCreation_ConcurrentCallersConvergeOnOneSession
 		if session.ID != firstID {
 			t.Fatalf("caller %d converged on %q, want %q (all callers must share one row)", i, session.ID, firstID)
 		}
+	}
+
+	creatorCount := 0
+	for i, wasCreated := range created {
+		if wasCreated {
+			creatorCount++
+		}
+		t.Logf("caller %d created=%v", i, wasCreated)
+	}
+	if creatorCount != 1 {
+		t.Fatalf("callers reporting created=true = %d, want exactly 1 (one creator, %d reusers)", creatorCount, n-1)
 	}
 
 	sessions, err := repo.ListTaskSessions(context.Background(), task.ID)
@@ -225,5 +283,250 @@ func TestEnsureSessionForAgentWithCreation_NonConflictCreateFailureNotLaundered(
 	}
 	if errors.Is(err, taskrepo.ErrOfficeSessionRaceConflict) {
 		t.Fatalf("non-conflict failure %v must not classify as ErrOfficeSessionRaceConflict", err)
+	}
+}
+
+// TestTryReuseExistingSession_IdleCASMismatchDoesNotResurrectTerminalSession
+// proves the IDLE→RUNNING flip in tryReuseExistingSession is guarded by a CAS
+// on the observed state (SEC-001): a caller that read the row as IDLE before
+// a concurrent terminal transition (COMPLETED/FAILED/CANCELLED) landed must
+// not have its stale write resurrect the now-terminal row to RUNNING. Drives
+// the CAS mismatch directly — the mock's underlying row is already COMPLETED
+// while the argument passed to tryReuseExistingSession still reflects the
+// stale IDLE read — rather than relying on goroutine timing.
+func TestTryReuseExistingSession_IdleCASMismatchDoesNotResurrectTerminalSession(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	ctx := context.Background()
+
+	const taskID = "task-idle-cas-mismatch"
+	current := &models.TaskSession{ID: "idle-cas-mismatch", TaskID: taskID, State: models.TaskSessionStateCompleted}
+	repo.sessions[current.ID] = current
+
+	staleView := &models.TaskSession{ID: current.ID, TaskID: taskID, State: models.TaskSessionStateIdle}
+	result, decision := exec.tryReuseExistingSession(ctx, staleView)
+
+	if decision != reuseDecisionTerminal {
+		t.Fatalf("decision = %v, want reuseDecisionTerminal", decision)
+	}
+	if result != nil {
+		t.Fatalf("result = %#v, want nil", result)
+	}
+	stored := repo.sessions[current.ID]
+	if stored.State != models.TaskSessionStateCompleted {
+		t.Fatalf("stored session state = %v, want unchanged COMPLETED (must not be resurrected to RUNNING)", stored.State)
+	}
+}
+
+// TestTryReuseExistingSession_IdleFlipsToRunningWhenStateStillMatches proves
+// the happy path still works with the CAS write: an IDLE row whose state has
+// not changed since the read flips to RUNNING and is returned as reused.
+func TestTryReuseExistingSession_IdleFlipsToRunningWhenStateStillMatches(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	ctx := context.Background()
+
+	const taskID = "task-idle-cas-match"
+	current := &models.TaskSession{ID: "idle-cas-match", TaskID: taskID, State: models.TaskSessionStateIdle}
+	repo.sessions[current.ID] = current
+
+	view := &models.TaskSession{ID: current.ID, TaskID: taskID, State: models.TaskSessionStateIdle}
+	result, decision := exec.tryReuseExistingSession(ctx, view)
+
+	if decision != reuseDecisionReused {
+		t.Fatalf("decision = %v, want reuseDecisionReused", decision)
+	}
+	if result == nil || result.State != models.TaskSessionStateRunning {
+		t.Fatalf("result = %#v, want non-nil session with State RUNNING", result)
+	}
+	if repo.updateTaskSessionIfCurrentCalls != 1 {
+		t.Fatalf("UpdateTaskSessionIfCurrentState calls = %d, want 1", repo.updateTaskSessionIfCurrentCalls)
+	}
+	stored := repo.sessions[current.ID]
+	if stored.State != models.TaskSessionStateRunning {
+		t.Fatalf("stored session state = %v, want RUNNING", stored.State)
+	}
+}
+
+// officeTaskSessionCreatingRepository wraps mockRepository to additionally
+// implement officeTaskSessionCreator, mirroring the live-pair-then-create
+// transaction in the real Repository.CreateOfficeTaskSession (session.go):
+// count live (non-terminal) sessions for the (task, agent_profile) pair,
+// refuse with ErrOfficeSessionRaceConflict if any exist, otherwise mark
+// task-initial origin on the first session for the task and persist. The
+// whole check-then-write runs under creatingMu, standing in for the real
+// implementation's DB transaction — persistOfficeSession takes this branch
+// precisely when it will NOT also acquire the executor's own per-task lock,
+// so this double's serialization must come from the same place production's
+// does: the "transaction," not caller-side locking.
+type officeTaskSessionCreatingRepository struct {
+	*mockRepository
+	creatingMu               sync.Mutex
+	createOfficeTaskSessionN int
+}
+
+func newOfficeTaskSessionCreatingRepository() *officeTaskSessionCreatingRepository {
+	return &officeTaskSessionCreatingRepository{mockRepository: newMockRepository()}
+}
+
+func (r *officeTaskSessionCreatingRepository) CreateOfficeTaskSession(
+	ctx context.Context, session *models.TaskSession,
+) error {
+	r.creatingMu.Lock()
+	defer r.creatingMu.Unlock()
+	r.createOfficeTaskSessionN++
+
+	r.mu.Lock()
+	var sessionCount, liveCount int
+	for _, existing := range r.sessions {
+		if existing.TaskID != session.TaskID {
+			continue
+		}
+		sessionCount++
+		if session.AgentProfileID != "" && existing.AgentProfileID == session.AgentProfileID &&
+			!isStopTerminalSessionState(existing.State) {
+			liveCount++
+		}
+	}
+	r.mu.Unlock()
+
+	if liveCount > 0 {
+		return taskrepo.ErrOfficeSessionRaceConflict
+	}
+	if sessionCount == 0 {
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		session.Metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
+	}
+	return r.CreateTaskSession(ctx, session)
+}
+
+// TestEnsureSessionForAgentWithCreation_ConvergesThroughRepositoryNativeCreator
+// is TestEnsureSessionForAgentWithCreation_ConcurrentCallersConvergeOnOneSession's
+// counterpart for the officeTaskSessionCreator branch of persistOfficeSession:
+// N concurrent callers for the same (task, agent) pair, racing against a
+// repository double that implements officeTaskSessionCreator, must still
+// converge on exactly one row via that branch specifically — not the
+// in-process fallback lock, which is never acquired on this path. Proves the
+// interface-detection routing in persistOfficeSession is exercised end to
+// end, not just the mock-fallback convergence covered elsewhere in this file.
+func TestEnsureSessionForAgentWithCreation_ConvergesThroughRepositoryNativeCreator(t *testing.T) {
+	const n = 4
+	repo := newOfficeTaskSessionCreatingRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	task := officeTestTask()
+
+	results := make([]*models.TaskSession, n)
+	created := make([]bool, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			session, wasCreated, err := exec.EnsureSessionForAgentWithCreation(
+				context.Background(), task, "agent-native-creator-convergence", "profile-1", "exec-1", "",
+			)
+			results[i] = session
+			created[i] = wasCreated
+			errs[i] = err
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("caller %d: %v", i, err)
+		}
+		if results[i] == nil {
+			t.Fatalf("caller %d: session = nil, want non-nil", i)
+		}
+	}
+	firstID := results[0].ID
+	for i, session := range results {
+		if session.ID != firstID {
+			t.Fatalf("caller %d converged on %q, want %q (all callers must share one row)", i, session.ID, firstID)
+		}
+	}
+
+	creatorCount := 0
+	for _, wasCreated := range created {
+		if wasCreated {
+			creatorCount++
+		}
+	}
+	if creatorCount != 1 {
+		t.Fatalf("callers reporting created=true = %d, want exactly 1 (one creator, %d reusers)", creatorCount, n-1)
+	}
+
+	// A caller whose initial GetTaskSessionByTaskAndAgent lookup lands after
+	// the winner's row is already committed reuses it directly and never
+	// reaches CreateOfficeTaskSession at all, so the call count is not
+	// pinned to n — only bounded by it. What must hold regardless of
+	// interleaving: at least one call happened (the interface branch was
+	// actually exercised) and no caller needed the bounded-recovery loop's
+	// second create attempt (which would push the count past n).
+	if repo.createOfficeTaskSessionN < 1 || repo.createOfficeTaskSessionN > n {
+		t.Fatalf("CreateOfficeTaskSession calls = %d, want between 1 and %d (repository-native branch exercised, no runaway recovery retries)",
+			repo.createOfficeTaskSessionN, n)
+	}
+	if len(repo.createTaskSessionCalls) != 1 {
+		t.Fatalf("underlying CreateTaskSession calls = %d, want exactly 1 (no duplicate CREATED event)", len(repo.createTaskSessionCalls))
+	}
+	sessions, err := repo.ListTaskSessions(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions for task = %d, want exactly 1", len(sessions))
+	}
+}
+
+// TestEnsureSessionForAgentWithCreation_RecoveryLookupFailurePropagatesAsItself
+// exercises the AC-003.7 re-read-error arm in
+// createOfficeSessionWithBoundedRecovery: after a create attempt loses the
+// race (ErrOfficeSessionRaceConflict), the recovery re-read via
+// GetTaskSessionByTaskAndAgent can itself fail for an unrelated reason (a
+// transient DB error, say). That failure must surface as itself — wrapped,
+// not laundered into ErrOfficeSessionRaceConflict and not swallowed into a
+// nil-session/nil-error result — exactly like the sibling non-conflict
+// create-failure case already covered above.
+func TestEnsureSessionForAgentWithCreation_RecoveryLookupFailurePropagatesAsItself(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	task := officeTestTask()
+
+	repo.createTaskSessionFunc = func(_ context.Context, _ *models.TaskSession) error {
+		return taskrepo.ErrOfficeSessionRaceConflict
+	}
+	wantErr := errors.New("db unavailable")
+	var lookups int
+	repo.getTaskSessionByTaskAndAgentFunc = func(_ context.Context, _, _ string) (*models.TaskSession, error) {
+		lookups++
+		if lookups == 1 {
+			// EnsureSessionForAgentWithCreation's initial lookup: no existing
+			// row, so it proceeds to create (which will lose the race above).
+			return nil, nil
+		}
+		// The bounded-recovery re-read after losing the create race: this is
+		// the AC-003.7 arm under test.
+		return nil, wantErr
+	}
+
+	session, wasCreated, err := exec.EnsureSessionForAgentWithCreation(
+		context.Background(), task, "agent-recovery-lookup-failure", "profile-1", "exec-1", "",
+	)
+	if session != nil {
+		t.Fatalf("session = %#v, want nil", session)
+	}
+	if wasCreated {
+		t.Fatal("wasCreated = true, want false")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want errors.Is match against the underlying lookup failure", err)
+	}
+	if errors.Is(err, taskrepo.ErrOfficeSessionRaceConflict) {
+		t.Fatalf("recovery lookup failure %v must not classify as ErrOfficeSessionRaceConflict", err)
 	}
 }

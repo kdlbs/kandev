@@ -216,13 +216,7 @@ func (e *Executor) tryReuseExistingSession(
 ) (*models.TaskSession, reuseDecision) {
 	switch session.State {
 	case models.TaskSessionStateIdle:
-		if err := e.repo.UpdateTaskSessionState(ctx, session.ID, models.TaskSessionStateRunning, ""); err != nil {
-			e.logger.Warn("failed to flip office session IDLE→RUNNING; returning row anyway",
-				zap.String("session_id", session.ID), zap.Error(err))
-		} else {
-			session.State = models.TaskSessionStateRunning
-		}
-		return session, reuseDecisionReused
+		return e.tryFlipIdleSessionToRunning(ctx, session)
 	case models.TaskSessionStateCreated, models.TaskSessionStateStarting,
 		models.TaskSessionStateRunning, models.TaskSessionStateWaitingForInput:
 		return session, reuseDecisionReused
@@ -231,6 +225,44 @@ func (e *Executor) tryReuseExistingSession(
 	default:
 		return session, reuseDecisionReused
 	}
+}
+
+// tryFlipIdleSessionToRunning flips an IDLE row to RUNNING guarded by a
+// CAS on the observed state, rather than an unconditional write. A blind
+// write here could resurrect a row to RUNNING after a concurrent terminal
+// transition (COMPLETED/FAILED/CANCELLED) landed between the read that
+// classified this session as IDLE and this write — the same two-pool gap
+// documented for creates, reachable via both the initial lookup and the
+// bounded-recovery re-read. A CAS mismatch means exactly that race
+// happened, so the fresh state — not the write's absence of an error — is
+// what decides the outcome.
+func (e *Executor) tryFlipIdleSessionToRunning(
+	ctx context.Context, session *models.TaskSession,
+) (*models.TaskSession, reuseDecision) {
+	updated := *session
+	updated.State = models.TaskSessionStateRunning
+	changed, err := e.repo.UpdateTaskSessionIfCurrentState(ctx, &updated, models.TaskSessionStateIdle)
+	if err != nil {
+		e.logger.Warn("failed to flip office session IDLE→RUNNING; returning row anyway",
+			zap.String("session_id", session.ID), zap.Error(err))
+		return session, reuseDecisionReused
+	}
+	if changed {
+		*session = updated
+		return session, reuseDecisionReused
+	}
+
+	fresh, err := e.repo.GetTaskSession(ctx, session.ID)
+	if err != nil || fresh == nil {
+		e.logger.Warn("failed to reload office session after IDLE→RUNNING race; returning stale row",
+			zap.String("session_id", session.ID), zap.Error(err))
+		return session, reuseDecisionReused
+	}
+	if isStopTerminalSessionState(fresh.State) {
+		return nil, reuseDecisionTerminal
+	}
+	*session = *fresh
+	return session, reuseDecisionReused
 }
 
 // createOfficeSession inserts a fresh task_sessions row for the given

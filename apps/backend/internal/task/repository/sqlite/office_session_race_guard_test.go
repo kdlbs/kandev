@@ -275,6 +275,39 @@ func TestGetTaskSessionByTaskAndAgentOrdersLiveByStartedAtDescThenIDDesc(t *test
 	require.Equal(t, "lookup-tiebreak-b", got.ID, "equal started_at must tiebreak on id DESC")
 }
 
+// TestGetTaskSessionByTaskAndAgentOrdersLiveByStartedAtDescBeforeID exercises
+// the started_at DESC clause itself, not just its id DESC tiebreak: two live
+// rows with DISTINCT started_at values, where the row with the LATER
+// started_at has the lexicographically SMALLER id. Ordering by id DESC alone
+// (or with started_at DESC dropped or reordered after id) would pick the
+// wrong row here, unlike TestGetTaskSessionByTaskAndAgentOrdersLiveByStartedAtDescThenIDDesc
+// above, whose two rows share one started_at and so cannot tell started_at
+// DESC apart from an id-only ordering.
+func TestGetTaskSessionByTaskAndAgentOrdersLiveByStartedAtDescBeforeID(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-office-lookup-started-at-precedence"
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Office lookup started_at precedence"}))
+	agent := "agent-lookup-started-at-precedence"
+
+	older := time.Now().UTC().Add(-time.Hour)
+	newer := time.Now().UTC()
+	insertOfficeSessionWithStartedAt(t, repo.db, officeSessionSeed{
+		id: "lookup-started-at-precedence-z-older", taskID: taskID, agentProfileID: agent,
+		state: models.TaskSessionStateCreated,
+	}, older)
+	insertOfficeSessionWithStartedAt(t, repo.db, officeSessionSeed{
+		id: "lookup-started-at-precedence-a-newer", taskID: taskID, agentProfileID: agent,
+		state: models.TaskSessionStateCreated,
+	}, newer)
+
+	got, err := repo.GetTaskSessionByTaskAndAgent(ctx, taskID, agent)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, "lookup-started-at-precedence-a-newer", got.ID,
+		"the later started_at must win even though its id sorts lower than the older row's")
+}
+
 func TestPostgresGetTaskSessionByTaskAndAgentPrefersLiveOverNewerTerminal(t *testing.T) {
 	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 2)
 	repo, err := NewWithDB(db, db, nil)
@@ -304,6 +337,44 @@ func TestPostgresGetTaskSessionByTaskAndAgentPrefersLiveOverNewerTerminal(t *tes
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, "lookup-livelock-pg-live", got.ID)
+}
+
+// TestPostgresGetTaskSessionByTaskAndAgentOrdersLiveByStartedAtDescBeforeID
+// is the PostgreSQL dialect counterpart of
+// TestGetTaskSessionByTaskAndAgentOrdersLiveByStartedAtDescBeforeID: two live
+// rows with distinct started_at values where the later row has the
+// lexicographically smaller id, proving the query orders by started_at DESC
+// ahead of id DESC rather than the reverse.
+func TestPostgresGetTaskSessionByTaskAndAgentOrdersLiveByStartedAtDescBeforeID(t *testing.T) {
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 2)
+	repo, err := NewWithDB(db, db, nil)
+	require.NoError(t, err)
+	ctx := context.Background()
+	const taskID = "task-office-lookup-started-at-precedence-pg"
+	now := time.Now().UTC()
+	_, err = db.Exec(db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), taskID, "", "Office lookup started_at precedence (Postgres)", now, now)
+	require.NoError(t, err)
+	agent := "agent-lookup-started-at-precedence-pg"
+
+	older := now.Add(-time.Hour)
+	newer := now
+	insertOfficeSessionWithStartedAt(t, db, officeSessionSeed{
+		id: "lookup-started-at-precedence-pg-z-older", taskID: taskID, agentProfileID: agent,
+		state: models.TaskSessionStateCreated,
+	}, older)
+	insertOfficeSessionWithStartedAt(t, db, officeSessionSeed{
+		id: "lookup-started-at-precedence-pg-a-newer", taskID: taskID, agentProfileID: agent,
+		state: models.TaskSessionStateCreated,
+	}, newer)
+
+	got, err := repo.GetTaskSessionByTaskAndAgent(ctx, taskID, agent)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, "lookup-started-at-precedence-pg-a-newer", got.ID,
+		"the later started_at must win even though its id sorts lower than the older row's")
 }
 
 // TestGetTaskSessionByTaskAndAgentReturnsNilForAbsentPairOrEmptyIdentifiers
