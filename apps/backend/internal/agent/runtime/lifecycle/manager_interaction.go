@@ -810,6 +810,7 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		case <-exec.promptDoneCh:
 		default:
 		}
+		exec.dispatchedPromptPending.Store(false)
 	})
 
 	// Restore the complete captured configuration. A strict-mode model that is
@@ -1151,6 +1152,7 @@ func (m *Manager) resetAgentRestartState(executionID string, commands agentComma
 		case <-exec.promptDoneCh:
 		default:
 		}
+		exec.dispatchedPromptPending.Store(false)
 	})
 }
 
