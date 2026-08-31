@@ -8,9 +8,16 @@ package acpprovider
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 )
+
+// DockerHostGatewayHost is the hostname a container uses to reach a service
+// bound to the Docker host's loopback interface. Docker Desktop resolves it
+// automatically; on Linux the agent container is created with
+// `--add-host host.docker.internal:host-gateway`.
+const DockerHostGatewayHost = "host.docker.internal"
 
 // GatewayAuth is the ACP `authenticate` request an agent's OpenAI-compatible
 // gateway provider expects. Meta is placed verbatim into
@@ -68,4 +75,48 @@ func ValidateBaseURL(raw string) error {
 		return fmt.Errorf("base URL must include a host")
 	}
 	return nil
+}
+
+// IsLoopbackBaseURL reports whether raw points at the local loopback interface
+// ("localhost", 127.0.0.0/8, or ::1). Such a URL is unreachable from an agent
+// running inside a container: the container's own loopback is not the host's.
+func IsLoopbackBaseURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	return isLoopbackHostname(u.Hostname())
+}
+
+// RewriteLoopbackHostForDocker swaps a loopback hostname in raw for
+// host.docker.internal, keeping scheme, port, and path. The second return value
+// is false (and raw is returned unchanged) when the host is not loopback or raw
+// does not parse. Use it when the target agent runs in a local Docker container
+// and the provider is expected to be a service on the developer's host.
+func RewriteLoopbackHostForDocker(raw string) (string, bool) {
+	trimmed := strings.TrimSpace(raw)
+	u, err := url.Parse(trimmed)
+	if err != nil || !isLoopbackHostname(u.Hostname()) {
+		return raw, false
+	}
+	if port := u.Port(); port != "" {
+		u.Host = net.JoinHostPort(DockerHostGatewayHost, port)
+	} else {
+		u.Host = DockerHostGatewayHost
+	}
+	return u.String(), true
+}
+
+func isLoopbackHostname(host string) bool {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }

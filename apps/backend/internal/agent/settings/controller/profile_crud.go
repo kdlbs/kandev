@@ -457,6 +457,7 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		}
 		profile.UpdatedAt = updatedAt
 		result := toProfileDTO(profile)
+		c.decorateProviderSupportByAgentID(ctx, &result)
 		return &result, nil
 	}
 	if req.CLIFlags != nil {
@@ -480,23 +481,8 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		}
 		profile.CommandPrefix = strings.TrimSpace(*req.CommandPrefix)
 	}
-	if req.touchesProvider() {
-		if req.ProviderKind != nil {
-			profile.ProviderKind = *req.ProviderKind
-		}
-		if req.ProviderBaseURL != nil {
-			profile.ProviderBaseURL = *req.ProviderBaseURL
-		}
-		if req.ProviderAPIKeySecretID != nil {
-			profile.ProviderAPIKeySecretID = *req.ProviderAPIKeySecretID
-		}
-		agentName := ""
-		if ag, agErr := c.repo.GetAgent(ctx, profile.AgentID); agErr == nil && ag != nil {
-			agentName = ag.Name
-		}
-		if err := c.normalizeProviderConfig(ctx, profile, agentName); err != nil {
-			return nil, err
-		}
+	if err := c.applyProviderConfigUpdate(ctx, req, profile); err != nil {
+		return nil, err
 	}
 	profile.UserModified = true
 	if dynamic != nil {
@@ -519,6 +505,7 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		return nil, err
 	}
 	result := toProfileDTO(profile)
+	c.decorateProviderSupportByAgentID(ctx, &result)
 	if dynamicRepo != nil && dynamic != nil {
 		result.Dynamic, err = dynamicProfileDTO(dynamic, dynamicRoutes)
 		if err != nil {
@@ -526,6 +513,38 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		}
 	}
 	return &result, nil
+}
+
+// applyProviderConfigUpdate applies any provider-field overrides carried by req,
+// then re-normalizes the provider configuration when those fields changed or
+// when only the model changed on a profile that already routes through an
+// OpenAI-compatible provider. That last case matters because a model id
+// containing '/' otherwise slips back to the target CLI's built-in vendor
+// provider without ever being rejected.
+func (c *Controller) applyProviderConfigUpdate(
+	ctx context.Context, req UpdateProfileRequest, profile *models.AgentProfile,
+) error {
+	if req.touchesProvider() {
+		if req.ProviderKind != nil {
+			profile.ProviderKind = *req.ProviderKind
+		}
+		if req.ProviderBaseURL != nil {
+			profile.ProviderBaseURL = *req.ProviderBaseURL
+		}
+		if req.ProviderAPIKeySecretID != nil {
+			profile.ProviderAPIKeySecretID = *req.ProviderAPIKeySecretID
+		}
+	}
+	modelChangedOnProviderProfile := req.Model != nil &&
+		strings.TrimSpace(profile.ProviderKind) == models.ProviderKindOpenAICompatible
+	if !req.touchesProvider() && !modelChangedOnProviderProfile {
+		return nil
+	}
+	agentName := ""
+	if ag, agErr := c.repo.GetAgent(ctx, profile.AgentID); agErr == nil && ag != nil {
+		agentName = ag.Name
+	}
+	return c.normalizeProviderConfig(ctx, profile, agentName)
 }
 
 func (c *Controller) updateDynamicProfileAtomically(
@@ -621,6 +640,7 @@ func (c *Controller) DuplicateProfile(ctx context.Context, req DuplicateProfileR
 		})
 		if err == nil {
 			result := toProfileDTO(clone)
+			c.decorateProviderSupportByAgentID(ctx, &result)
 			return &result, nil
 		}
 		// A source deleted between the snapshot read and the transaction is a
@@ -1240,6 +1260,19 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 // profile DTO from the agent registry.
 func (c *Controller) decorateProviderSupport(agentName string, d *dto.AgentProfileDTO) {
 	d.ProviderSupported = c.providerSupported(agentName)
+}
+
+// decorateProviderSupportByAgentID resolves the profile's agent family from the
+// DTO's AgentID and sets the computed ProviderSupported flag. Mutation responses
+// (update, duplicate) run through this: the frontend swaps its cached profile
+// for the response, so an undecorated DTO hides the provider section until the
+// agent list is fetched again.
+func (c *Controller) decorateProviderSupportByAgentID(ctx context.Context, d *dto.AgentProfileDTO) {
+	ag, err := c.repo.GetAgent(ctx, d.AgentID)
+	if err != nil || ag == nil {
+		return
+	}
+	d.ProviderSupported = c.providerSupported(ag.Name)
 }
 
 func profileKind(profile *models.AgentProfile) string {

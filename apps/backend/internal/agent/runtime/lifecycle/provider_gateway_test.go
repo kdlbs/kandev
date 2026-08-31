@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 )
@@ -20,7 +21,7 @@ func providerGatewayManager(t *testing.T, store secrets.SecretStore) *Manager {
 func TestResolveProviderGatewayAuth_NativeProfileReturnsNil(t *testing.T) {
 	m := providerGatewayManager(t, newInMemorySecretStore())
 	auth, _, _, err := m.resolveProviderGatewayAuth(context.Background(),
-		&AgentProfileInfo{AgentName: "codex-acp"}, agents.NewCodexACP())
+		&AgentProfileInfo{AgentName: "codex-acp"}, agents.NewCodexACP(), agentruntime.RuntimeStandalone)
 	if err != nil || auth != nil {
 		t.Fatalf("native profile: auth=%v err=%v", auth, err)
 	}
@@ -39,7 +40,7 @@ func TestResolveProviderGatewayAuth_Success(t *testing.T) {
 		ProviderKind:           settingsmodels.ProviderKindOpenAICompatible,
 		ProviderBaseURL:        "http://localhost:20128/v1",
 		ProviderAPIKeySecretID: "sec-key",
-	}, agents.NewCodexACP())
+	}, agents.NewCodexACP(), agentruntime.RuntimeStandalone)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -70,21 +71,43 @@ func TestResolveProviderGatewayAuth_FailsClosed(t *testing.T) {
 	// Agent without provider support.
 	if _, _, _, err := m.resolveProviderGatewayAuth(context.Background(),
 		&AgentProfileInfo{AgentName: "claude-acp", ProviderKind: settingsmodels.ProviderKindOpenAICompatible, ProviderBaseURL: "http://h/v1"},
-		agents.NewClaudeACP()); !errors.Is(err, ErrProviderMisconfigured) {
+		agents.NewClaudeACP(), agentruntime.RuntimeStandalone); !errors.Is(err, ErrProviderMisconfigured) {
 		t.Errorf("unsupported agent: err = %v", err)
 	}
 
 	// Bad base URL.
 	bad := *base
 	bad.ProviderBaseURL = "not-a-url"
-	if _, _, _, err := m.resolveProviderGatewayAuth(context.Background(), &bad, agents.NewCodexACP()); !errors.Is(err, ErrProviderMisconfigured) {
+	if _, _, _, err := m.resolveProviderGatewayAuth(context.Background(), &bad, agents.NewCodexACP(), agentruntime.RuntimeStandalone); !errors.Is(err, ErrProviderMisconfigured) {
 		t.Errorf("bad url: err = %v", err)
 	}
 
 	// Missing secret.
 	missing := *base
 	missing.ProviderAPIKeySecretID = "does-not-exist"
-	if _, _, _, err := m.resolveProviderGatewayAuth(context.Background(), &missing, agents.NewCodexACP()); !errors.Is(err, ErrProviderMisconfigured) {
+	if _, _, _, err := m.resolveProviderGatewayAuth(context.Background(), &missing, agents.NewCodexACP(), agentruntime.RuntimeStandalone); !errors.Is(err, ErrProviderMisconfigured) {
 		t.Errorf("missing secret: err = %v", err)
+	}
+
+	// Loopback base URL on a remote containerized runtime is rejected with guidance.
+	remote := *base
+	if _, _, _, err := m.resolveProviderGatewayAuth(context.Background(), &remote, agents.NewCodexACP(), agentruntime.RuntimeRemoteDocker); !errors.Is(err, ErrProviderMisconfigured) {
+		t.Errorf("remote loopback: err = %v", err)
+	}
+}
+
+func TestResolveProviderGatewayAuth_LocalDockerRewritesLoopback(t *testing.T) {
+	m := providerGatewayManager(t, newInMemorySecretStore())
+	auth, _, _, err := m.resolveProviderGatewayAuth(context.Background(), &AgentProfileInfo{
+		AgentName:       "codex-acp",
+		ProviderKind:    settingsmodels.ProviderKindOpenAICompatible,
+		ProviderBaseURL: "http://127.0.0.1:20128/v1",
+	}, agents.NewCodexACP(), agentruntime.RuntimeDocker)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	gw := auth.Meta["gateway"].(map[string]any)
+	if gw["baseUrl"] != "http://host.docker.internal:20128/v1" {
+		t.Errorf("baseUrl = %v", gw["baseUrl"])
 	}
 }

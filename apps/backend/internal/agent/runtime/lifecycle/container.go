@@ -562,8 +562,13 @@ exec /usr/local/bin/agentctl`,
 		Mounts:       mounts,
 		PortBindings: dockerAgentctlPortBindings(),
 		NetworkMode:  cm.networkName,
-		Memory:       memoryBytes,
-		CPUQuota:     cpuQuota,
+		// Give every agent container the host.docker.internal alias so a profile
+		// whose OpenAI-compatible provider is a service on the developer's host
+		// (loopback URLs are rewritten to this hostname) resolves on Linux too,
+		// matching Docker Desktop. Requires Docker Engine 20.10+.
+		ExtraHosts: []string{acpprovider.DockerHostGatewayHost + ":host-gateway"},
+		Memory:     memoryBytes,
+		CPUQuota:   cpuQuota,
 		Labels: map[string]string{
 			"kandev.managed":             boolStringTrue,
 			"kandev.instance_id":         config.InstanceID,

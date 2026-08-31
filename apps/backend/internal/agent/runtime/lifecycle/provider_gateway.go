@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 )
 
@@ -25,6 +26,7 @@ func (m *Manager) resolveProviderGatewayAuth(
 	ctx context.Context,
 	profileInfo *AgentProfileInfo,
 	agentConfig agents.Agent,
+	runtime agentruntime.Runtime,
 ) (auth *acpprovider.GatewayAuth, keyEnvVar, apiKey string, err error) {
 	if profileInfo == nil || profileInfo.ProviderKind != settingsmodels.ProviderKindOpenAICompatible {
 		return nil, "", "", nil
@@ -37,6 +39,10 @@ func (m *Manager) resolveProviderGatewayAuth(
 	if verr := acpprovider.ValidateBaseURL(profileInfo.ProviderBaseURL); verr != nil {
 		return nil, "", "", fmt.Errorf("%w: %v", ErrProviderMisconfigured, verr)
 	}
+	baseURL, verr := providerBaseURLForRuntime(profileInfo.ProviderBaseURL, runtime)
+	if verr != nil {
+		return nil, "", "", verr
+	}
 	key := ""
 	if profileInfo.ProviderAPIKeySecretID != "" {
 		revealed, revErr := m.revealGlobalSecret(ctx, profileInfo.ProviderAPIKeySecretID)
@@ -48,6 +54,30 @@ func (m *Manager) resolveProviderGatewayAuth(
 		}
 		key = revealed
 	}
-	gw := acpprovider.BuildGatewayAuth(spec.AuthMethodID, spec.ProviderName, profileInfo.ProviderBaseURL, key)
+	gw := acpprovider.BuildGatewayAuth(spec.AuthMethodID, spec.ProviderName, baseURL, key)
 	return &gw, spec.KeyEnvVar, key, nil
+}
+
+// providerBaseURLForRuntime adapts a loopback provider base URL to the agent's
+// execution environment. An agent in a local Docker container reaches a service
+// on the developer's host through host.docker.internal, so a loopback URL is
+// rewritten. Other containerized runtimes (remote Docker, Sprites) have no route
+// to the developer's loopback at all, so a loopback URL is rejected with
+// actionable guidance instead of failing opaquely at connect time. Host runtimes
+// keep the URL as-is.
+func providerBaseURLForRuntime(rawURL string, runtime agentruntime.Runtime) (string, error) {
+	if !acpprovider.IsLoopbackBaseURL(rawURL) {
+		return rawURL, nil
+	}
+	switch runtime {
+	case agentruntime.RuntimeDocker:
+		rewritten, _ := acpprovider.RewriteLoopbackHostForDocker(rawURL)
+		return rewritten, nil
+	case agentruntime.RuntimeRemoteDocker, agentruntime.RuntimeSprites:
+		return "", fmt.Errorf(
+			"%w: provider base URL %q is on localhost, which an agent running in a %s environment cannot reach; use a hostname or IP reachable from that environment",
+			ErrProviderMisconfigured, rawURL, runtime)
+	default:
+		return rawURL, nil
+	}
 }

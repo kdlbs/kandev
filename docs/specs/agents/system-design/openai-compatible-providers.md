@@ -228,6 +228,28 @@ Two corrections in `internal/agent/runtime/lifecycle/profile_env.go`:
 | Model contains `/` | rejected at save; at launch → `PROVIDER_MISCONFIGURED` |
 | Provider returns 401/5xx during probe/inference | sanitized upstream status in the error, retryable |
 | Agent has no `OpenAICompatibleProvider()` but row has stale fields | fields inert; `native` behavior |
+| Loopback base URL, local Docker executor | base URL host rewritten to `host.docker.internal` at launch (the agent container also gets the `host.docker.internal:host-gateway` alias so this resolves on Linux) |
+| Loopback base URL, remote Docker / Sprites executor | `PROVIDER_MISCONFIGURED` at launch: the developer's loopback is unreachable and there is no sane rewrite; the error tells the user to use a routable host |
+
+## Executor reachability
+
+The gateway base URL is dereferenced by the agent process, whose network
+namespace depends on the executor. `Manager.resolveProviderGatewayAuth` adapts a
+loopback URL (`localhost`, `127.0.0.0/8`, `::1`) to the launching runtime
+(`internal/common/acpprovider`: `IsLoopbackBaseURL`,
+`RewriteLoopbackHostForDocker`):
+
+- **Standalone / SSH host runtimes:** unchanged, the agent shares the host's
+  loopback.
+- **Local Docker:** the host is rewritten to `host.docker.internal`, and every
+  agent container is created with `--add-host host.docker.internal:host-gateway`
+  (`docker.ContainerConfig.ExtraHosts`) so the alias resolves on Linux as it
+  already does on Docker Desktop. Requires Docker Engine 20.10+.
+- **Remote Docker / Sprites:** a loopback URL is rejected with
+  `PROVIDER_MISCONFIGURED` rather than silently pointing the agent at the remote
+  box's own loopback.
+
+Non-loopback URLs are never modified.
 
 ## Persistence
 

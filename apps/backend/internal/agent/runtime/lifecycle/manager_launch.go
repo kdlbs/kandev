@@ -868,7 +868,8 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
 	}
 
-	providerGatewayAuth, providerKeyEnvVar, providerKey, err := m.resolveProviderGatewayAuth(ctx, profileInfo, agentConfig)
+	providerGatewayAuth, providerKeyEnvVar, providerKey, err := m.resolveProviderGatewayAuth(
+		ctx, profileInfo, agentConfig, models.ExecutorType(reqWithWorktree.ExecutorType).Runtime())
 	if err != nil {
 		return nil, nil, nil, err
 	}

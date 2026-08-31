@@ -42,6 +42,11 @@ type ContainerConfig struct {
 	Labels       map[string]string
 	AutoRemove   bool
 	PortBindings []PortBindingConfig
+	// ExtraHosts are `host:ip` entries added to the container's /etc/hosts
+	// (Docker HostConfig.ExtraHosts). Used to install the
+	// `host.docker.internal:host-gateway` alias on Linux so an agent can reach
+	// services bound to the developer's host loopback.
+	ExtraHosts []string
 }
 
 // PortBindingConfig describes a container port to publish on the Docker host.
@@ -293,6 +298,7 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 		NetworkMode:  container.NetworkMode(cfg.NetworkMode),
 		AutoRemove:   cfg.AutoRemove,
 		PortBindings: portBindings,
+		ExtraHosts:   cfg.ExtraHosts,
 		Resources: container.Resources{
 			Memory:   cfg.Memory,
 			CPUQuota: cfg.CPUQuota,
@@ -799,6 +805,7 @@ func (c *Client) CreateContainerInteractive(ctx context.Context, cfg ContainerCo
 		NetworkMode:  container.NetworkMode(cfg.NetworkMode),
 		AutoRemove:   cfg.AutoRemove,
 		PortBindings: portBindings,
+		ExtraHosts:   cfg.ExtraHosts,
 		Resources: container.Resources{
 			Memory:   cfg.Memory,
 			CPUQuota: cfg.CPUQuota,

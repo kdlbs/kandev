@@ -146,3 +146,64 @@ func TestUpdateProfile_SwitchToNativeClearsProviderFields(t *testing.T) {
 		t.Errorf("switch to native did not clear provider fields: %+v", updated)
 	}
 }
+
+// A model change on an existing OpenAI-compatible profile must be re-validated
+// even when the request carries no provider fields, or a slash-prefixed model id
+// silently routes back to the CLI's built-in vendor provider.
+func TestUpdateProfile_ModelChangeRevalidatesProvider(t *testing.T) {
+	ctrl, _, ctx, codexID, _ := newProviderTestController(t)
+
+	created, err := ctrl.CreateProfile(ctx, CreateProfileRequest{
+		AgentID:         codexID,
+		Name:            "9router",
+		Model:           "code",
+		ProviderKind:    models.ProviderKindOpenAICompatible,
+		ProviderBaseURL: "http://localhost:20128/v1",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	bad := "openai/gpt-4o"
+	if _, err := ctrl.UpdateProfile(ctx, UpdateProfileRequest{ID: created.ID, Model: &bad}); !errors.Is(err, ErrInvalidProviderConfig) {
+		t.Fatalf("model-only update err = %v, want ErrInvalidProviderConfig", err)
+	}
+
+	ok := "claude-via-router"
+	updated, err := ctrl.UpdateProfile(ctx, UpdateProfileRequest{ID: created.ID, Model: &ok})
+	if err != nil {
+		t.Fatalf("valid model update: %v", err)
+	}
+	if !updated.ProviderSupported {
+		t.Errorf("ProviderSupported = false on update response, want true")
+	}
+}
+
+// Update and Duplicate responses must carry ProviderSupported: the frontend
+// swaps its cached profile for them and would otherwise hide the provider
+// section until the agent list is refetched.
+func TestUpdateAndDuplicateProfile_DecorateProviderSupport(t *testing.T) {
+	ctrl, _, ctx, codexID, _ := newProviderTestController(t)
+
+	created, err := ctrl.CreateProfile(ctx, CreateProfileRequest{AgentID: codexID, Name: "p", Model: "code"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	name := "p renamed"
+	updated, err := ctrl.UpdateProfile(ctx, UpdateProfileRequest{ID: created.ID, Name: &name})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if !updated.ProviderSupported {
+		t.Errorf("UpdateProfile response ProviderSupported = false, want true")
+	}
+
+	dup, err := ctrl.DuplicateProfile(ctx, DuplicateProfileRequest{ID: created.ID})
+	if err != nil {
+		t.Fatalf("duplicate: %v", err)
+	}
+	if !dup.ProviderSupported {
+		t.Errorf("DuplicateProfile response ProviderSupported = false, want true")
+	}
+}

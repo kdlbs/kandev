@@ -52,3 +52,35 @@ func TestClientAuthMeta(t *testing.T) {
 		t.Fatal("ClientAuthMeta must advertise gateway:true")
 	}
 }
+
+func TestIsLoopbackBaseURL(t *testing.T) {
+	loopback := []string{
+		"http://localhost:20128/v1", "http://127.0.0.1:20128/v1",
+		"https://127.5.5.5/v1", "http://[::1]:8080/v1", "http://LocalHost/v1",
+	}
+	for _, raw := range loopback {
+		if !IsLoopbackBaseURL(raw) {
+			t.Errorf("IsLoopbackBaseURL(%q) = false, want true", raw)
+		}
+	}
+	for _, raw := range []string{"https://router.example/v1", "http://10.0.0.4:9000/v1", "http://host.docker.internal/v1"} {
+		if IsLoopbackBaseURL(raw) {
+			t.Errorf("IsLoopbackBaseURL(%q) = true, want false", raw)
+		}
+	}
+}
+
+func TestRewriteLoopbackHostForDocker(t *testing.T) {
+	got, rewritten := RewriteLoopbackHostForDocker("http://localhost:20128/v1")
+	if !rewritten || got != "http://host.docker.internal:20128/v1" {
+		t.Errorf("rewrite with port = (%q, %v)", got, rewritten)
+	}
+	got, rewritten = RewriteLoopbackHostForDocker("http://127.0.0.1/v1")
+	if !rewritten || got != "http://host.docker.internal/v1" {
+		t.Errorf("rewrite no port = (%q, %v)", got, rewritten)
+	}
+	got, rewritten = RewriteLoopbackHostForDocker("https://router.example/v1")
+	if rewritten || got != "https://router.example/v1" {
+		t.Errorf("non-loopback should be untouched = (%q, %v)", got, rewritten)
+	}
+}

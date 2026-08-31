@@ -99,13 +99,14 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 		return nil, fmt.Errorf("agent %q inference not supported", agentName)
 	}
 	agentConfig, _ := ia.(agents.Agent)
-	gatewayAuth, providerKeyEnvVar, providerKey, err := m.resolveProviderGatewayAuth(ctx, profile, agentConfig)
-	if err != nil {
-		return nil, err
-	}
 	execution, err := m.GetOrEnsureExecution(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("no execution available for session %s: %w", sessionID, err)
+	}
+	gatewayAuth, providerKeyEnvVar, providerKey, err := m.resolveProviderGatewayAuth(
+		ctx, profile, agentConfig, execution.RuntimeName)
+	if err != nil {
+		return nil, err
 	}
 	client := execution.GetAgentCtlClient()
 	if client == nil {

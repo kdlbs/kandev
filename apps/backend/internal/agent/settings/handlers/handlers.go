@@ -634,20 +634,25 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 }
 
 type updateProfileRequest struct {
-	Name           *string                     `json:"name,omitempty"`
-	Model          *string                     `json:"model,omitempty"`
-	FallbackModel  *string                     `json:"fallback_model,omitempty"`
-	AutoFallback   *bool                       `json:"auto_fallback,omitempty"`
-	Mode           *string                     `json:"mode,omitempty"`
-	ConfigOptions  *map[string]string          `json:"config_options,omitempty"`
-	AllowIndexing  *bool                       `json:"allow_indexing,omitempty"`
-	AutoApprove    *bool                       `json:"auto_approve,omitempty"`
-	CLIPassthrough *bool                       `json:"cli_passthrough,omitempty"`
-	Enabled        *bool                       `json:"enabled,omitempty"`
-	CLIFlags       *[]dto.CLIFlagDTO           `json:"cli_flags,omitempty"`
-	EnvVars        *[]dto.ProfileEnvVarDTO     `json:"env_vars,omitempty"`
-	CommandPrefix  *string                     `json:"command_prefix,omitempty"`
-	Dynamic        *dto.DynamicAgentProfileDTO `json:"dynamic,omitempty"`
+	Name           *string                 `json:"name,omitempty"`
+	Model          *string                 `json:"model,omitempty"`
+	FallbackModel  *string                 `json:"fallback_model,omitempty"`
+	AutoFallback   *bool                   `json:"auto_fallback,omitempty"`
+	Mode           *string                 `json:"mode,omitempty"`
+	ConfigOptions  *map[string]string      `json:"config_options,omitempty"`
+	AllowIndexing  *bool                   `json:"allow_indexing,omitempty"`
+	AutoApprove    *bool                   `json:"auto_approve,omitempty"`
+	CLIPassthrough *bool                   `json:"cli_passthrough,omitempty"`
+	Enabled        *bool                   `json:"enabled,omitempty"`
+	CLIFlags       *[]dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
+	EnvVars        *[]dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	CommandPrefix  *string                 `json:"command_prefix,omitempty"`
+	// Provider* replace their value when non-nil. The settings editor always
+	// sends the full triple on save, so a switch back to Native persists.
+	ProviderKind           *string                     `json:"provider_kind,omitempty"`
+	ProviderBaseURL        *string                     `json:"provider_base_url,omitempty"`
+	ProviderAPIKeySecretID *string                     `json:"provider_api_key_secret_id,omitempty"`
+	Dynamic                *dto.DynamicAgentProfileDTO `json:"dynamic,omitempty"`
 }
 
 func (h *Handlers) httpUpdateProfile(c *gin.Context) {
@@ -675,8 +680,12 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		CLIFlags:       body.CLIFlags,
 		EnvVars:        body.EnvVars,
 		CommandPrefix:  body.CommandPrefix,
-		Dynamic:        body.Dynamic,
-		Force:          c.Query("force") == queryTrue,
+
+		ProviderKind:           body.ProviderKind,
+		ProviderBaseURL:        body.ProviderBaseURL,
+		ProviderAPIKeySecretID: body.ProviderAPIKeySecretID,
+		Dynamic:                body.Dynamic,
+		Force:                  c.Query("force") == queryTrue,
 	})
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {
