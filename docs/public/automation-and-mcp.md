@@ -577,13 +577,14 @@ and credentials are not tool arguments.
 
 Kandev verifies the linked open PR and live head, then verifies that the source
 is a completed failed pull-request run from the canonical base repository and
-exact PR head. This also works when GitHub omits the run's `pull_requests`
-array: the base repository, head repository, head ref, and head SHA must all
-match. The server first asks GitHub to rerun failed jobs from the named attempt.
-If GitHub says the run is not rerunnable, Kandev can dispatch only a reviewed
-same-repository PR-head workflow with server-fixed inputs. The workflow file at
-the live PR ref must byte-match its trusted base-branch copy. It never
-dispatches a fork ref.
+exact PR head. A non-empty run association list must include that exact PR and
+cannot fall back to another identity. When GitHub omits the run's
+`pull_requests` array, the base repository, head repository, head ref, and head
+SHA must all match instead. The server first asks GitHub to rerun failed jobs
+from the named attempt. If GitHub says the run is not rerunnable, Kandev can
+dispatch only a reviewed same-repository PR-head workflow with server-fixed
+inputs. The workflow file at the live PR ref must byte-match its trusted
+base-branch copy. It never dispatches a fork ref.
 
 `current_merge` requests currently return `merge_evidence_unavailable` because
 GitHub's REST run record does not expose enough runtime merge-SHA evidence to
@@ -598,16 +599,20 @@ or concurrent calls reuse the same receipt. A worker crash before provider
 start can be taken over after its short execution lease expires. After provider
 start, timeouts, connection loss, and HTTP 5xx responses are reconciled from
 GitHub rather than blindly sent again. A definitive rate-limit response records
-GitHub's reset time and retries the same request only after that time. Receipts and audit
-events contain task/run/workflow/head identities and a failure class. A rerun
+GitHub's reset time and retries the same request only after that time. When
+GitHub definitively rejects a rerun as ineligible, Kandev persists the fallback
+dispatch phase first; crash recovery resumes that phase without rerunning the
+rejected attempt. Receipts and audit events contain task/run/workflow/head
+identities and a failure class. A rerun
 receipt is successful only after Kandev observes the exact next attempt. A
 dispatch receipt is successful only after Kandev observes exactly one new run
-created after the provider call began. Ambiguous evidence remains reconciling
-and never claims an unrelated run. Receipts never contain an installation
-token, private key, authorization header, or raw provider body. This behavior
-is part of the canonical server implementation. A deployment-local script,
-broad token, proxy customization, Docker access, or operator shortcut does not
-implement the platform contract.
+created after the provider call began and newer than the run-ID watermark
+recorded immediately before dispatch. Ambiguous evidence remains reconciling and
+never claims an unrelated run. Receipts never contain an installation token,
+private key, authorization header, or raw provider body. This behavior is part
+of the canonical server implementation. A deployment-local script, broad token,
+proxy customization, Docker access, or operator shortcut does not implement the
+platform contract.
 
 When `create_task_kandev.repositories[].repository_url` is a canonical GitHub pull request URL or a GitLab merge request URL on the configured host, Kandev resolves the contribution before creating the task. The contribution must still be open, have a valid source branch and head commit, and permit the target project to contribute; Kandev keeps the target repository as `origin`, fetches the exact source commit, and routes commits to the contributor's existing source branch. The existing pull request or merge request is associated with the task and reused for later changes, so Kandev does not open a duplicate. Provider-authored title, description, comments, and diff content are not copied into trusted task context. Configure the task's Git credentials as described in [task Git credentials](integrations.md#choose-task-git-credentials); Kandev runs a write preflight before starting the agent.
 

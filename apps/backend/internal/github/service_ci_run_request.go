@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -122,6 +123,9 @@ func (s *Service) continueCIRunRequest(
 	verified, err := verifyCIRunProviderBinding(ctx, client, binding, input)
 	if err != nil {
 		return s.handleCIRunPreflightError(ctx, request, err)
+	}
+	if request.Operation == CIRunOperationWorkflowDispatch {
+		return s.executeCIRunDispatchFallback(ctx, client, binding, request, verified)
 	}
 	return s.executeCIRunRequest(ctx, client, request, verified)
 }
@@ -309,6 +313,9 @@ func sourceRunMatches(
 			return true
 		}
 	}
+	if len(run.PullRequests) > 0 {
+		return false
+	}
 	return strings.EqualFold(run.HeadRepository, pr.HeadRepoOwner+"/"+pr.HeadRepoName) &&
 		run.HeadBranch == pr.HeadBranch
 }
@@ -323,7 +330,12 @@ func (s *Service) executeCIRunRequest(
 	if err != nil {
 		return s.failCIRunAdmission(ctx, request, err)
 	}
-	verified.PR = latestPR
+	verified, err = revalidateCIRunProviderSource(
+		ctx, client, latestBinding, request, latestPR, verified.Workflow,
+	)
+	if err != nil {
+		return s.handleCIRunPreflightError(ctx, request, err)
+	}
 	now := s.ciRunClock()().UTC()
 	request.Operation = CIRunOperationRerunFailedJobs
 	request.ProviderWorkflowID = verified.Workflow.ID
@@ -345,7 +357,61 @@ func (s *Service) executeCIRunRequest(
 	if ciRunFailureFromError(err) != CIRunFailureRerunIneligible {
 		return s.handleCIRunMutationError(ctx, request, err)
 	}
-	return s.executeCIRunDispatchFallback(ctx, client, latestBinding, request, verified)
+	if err := s.store.PrepareCIRunDispatchFallback(ctx, request, s.ciRunClock()().UTC()); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return s.reloadCIRunResult(ctx, request)
+		}
+		return nil, err
+	}
+	_ = s.auditCIRun(ctx, request, "rerun_ineligible", CIRunFailureRerunIneligible)
+	return s.continueCIRunRequest(ctx, latestBinding, request, inputFromCIRunRequest(request))
+}
+
+func revalidateCIRunProviderSource(
+	ctx context.Context,
+	client ciRunActionsClient,
+	binding *ciRunBinding,
+	request *CIRunRequest,
+	pr *PR,
+	expectedWorkflow *GitHubActionsWorkflow,
+) (*verifiedCIRun, error) {
+	input := inputFromCIRunRequest(request)
+	if expectedWorkflow == nil || expectedWorkflow.ID <= 0 {
+		return nil, &CIRunRequestError{Class: CIRunFailureSourceRunMismatch}
+	}
+	workflow, err := client.GetActionsWorkflow(
+		ctx, binding.Owner, binding.Repo, expectedWorkflow.ID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if workflow == nil || workflow.ID != expectedWorkflow.ID ||
+		workflow.State != string(AppRegistrationStatusActive) || workflow.Path == "" ||
+		workflow.Path != expectedWorkflow.Path {
+		return nil, &CIRunRequestError{Class: CIRunFailureSourceRunMismatch}
+	}
+	// Keep the source run as the final provider read before persisting and sending
+	// the rerun so a newly advanced attempt cannot reuse stale admission evidence.
+	run, err := client.GetActionsRun(ctx, binding.Owner, binding.Repo, request.SourceRunID)
+	if err != nil {
+		return nil, err
+	}
+	if !sourceRunMatches(run, pr, binding, input) || workflow.ID != run.WorkflowID ||
+		(run.WorkflowPath != "" && workflow.Path != run.WorkflowPath) {
+		return nil, &CIRunRequestError{Class: CIRunFailureSourceRunMismatch}
+	}
+	return &verifiedCIRun{PR: pr, Run: run, Workflow: workflow}, nil
+}
+
+func inputFromCIRunRequest(request *CIRunRequest) RequestFreshCIRunInput {
+	return RequestFreshCIRunInput{
+		ActorTaskID: request.ActorTaskID, ActorSessionID: request.ActorSessionID,
+		TargetTaskID: request.TargetTaskID, RepositoryID: request.RepositoryID,
+		PRNumber: request.PRNumber, ExpectedHeadSHA: request.ExpectedHeadSHA,
+		ExpectedWorkflowStepID: request.WorkflowStepID, SourceRunID: request.SourceRunID,
+		ExpectedSourceAttempt: request.ExpectedSourceAttempt, EvidenceKind: request.EvidenceKind,
+		IdempotencyKey: "recovery-only",
+	}
 }
 
 func (s *Service) executeCIRunDispatchFallback(
@@ -388,6 +454,12 @@ func (s *Service) executeCIRunDispatchFallback(
 		return s.failCIRunRequest(ctx, request, CIRunFailureDispatchDenied)
 	}
 	request.Operation = CIRunOperationWorkflowDispatch
+	baseline, err := client.ListActionsWorkflowRuns(ctx, latestBinding.Owner, latestBinding.Repo,
+		verified.Workflow.ID, request.ExpectedHeadSHA)
+	if err != nil {
+		return s.handleCIRunPreflightError(ctx, request, err)
+	}
+	request.ProviderRunWatermark = maxCIRunID(baseline)
 	dispatchStartedAt := s.ciRunClock()().UTC()
 	if err := s.store.MarkCIRunProviderCallStarted(ctx, request, dispatchStartedAt); err != nil {
 		return nil, err
@@ -399,6 +471,16 @@ func (s *Service) executeCIRunDispatchFallback(
 		return s.handleCIRunMutationError(ctx, request, err)
 	}
 	return s.reconcileCIRunRequest(ctx, client, latestBinding, request, verified)
+}
+
+func maxCIRunID(runs []GitHubActionsRun) int64 {
+	var maximum int64
+	for i := range runs {
+		if runs[i].ID > maximum {
+			maximum = runs[i].ID
+		}
+	}
+	return maximum
 }
 
 func (s *Service) revalidateCIRunAdmission(
@@ -534,7 +616,12 @@ func (s *Service) reconcileCIRunRequest(
 	request.Status = CIRunRequestReconciling
 	request.FailureClass = string(CIRunFailureProviderCallAmbiguous)
 	request.UpdatedAt = s.ciRunClock()().UTC()
-	_ = s.store.CompleteCIRunRequest(ctx, request)
+	if err := s.store.CompleteCIRunRequest(ctx, request); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return s.reloadCIRunResult(ctx, request)
+		}
+		return nil, err
+	}
 	return receiptFromCIRunRequest(request), &CIRunRequestError{Class: CIRunFailureProviderCallAmbiguous}
 }
 
@@ -553,6 +640,7 @@ func reconciledCIRunMatches(run *GitHubActionsRun, workflowID int64, request *CI
 	return request.Operation == CIRunOperationWorkflowDispatch &&
 		request.ProviderCallStartedAt != nil && !run.CreatedAt.IsZero() &&
 		!run.CreatedAt.Before(request.ProviderCallStartedAt.Truncate(time.Second)) &&
+		run.ID > request.ProviderRunWatermark &&
 		run.ID != request.SourceRunID && run.Attempt == 1 && run.Event == "workflow_dispatch"
 }
 
@@ -577,6 +665,9 @@ func (s *Service) completeCIRunSuccess(
 	request.FailureClass = ""
 	request.UpdatedAt = s.ciRunClock()().UTC()
 	if err := s.store.CompleteCIRunRequest(ctx, request); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return s.reloadCIRunResult(ctx, request)
+		}
 		return nil, err
 	}
 	_ = s.auditCIRun(ctx, request, "succeeded", "")
@@ -593,6 +684,9 @@ func (s *Service) failCIRunRequest(
 	request.FailureClass = string(class)
 	request.UpdatedAt = s.ciRunClock()().UTC()
 	if err := s.store.CompleteCIRunRequest(ctx, request); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return s.reloadCIRunResult(ctx, request)
+		}
 		return nil, err
 	}
 	_ = s.auditCIRun(ctx, request, "failed", class)
@@ -610,11 +704,36 @@ func (s *Service) handleCIRunMutationError(
 		request.Status = CIRunRequestReconciling
 		request.FailureClass = string(class)
 		request.UpdatedAt = s.ciRunClock()().UTC()
-		_ = s.store.CompleteCIRunRequest(ctx, request)
+		if err := s.store.CompleteCIRunRequest(ctx, request); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return s.reloadCIRunResult(ctx, request)
+			}
+			return nil, err
+		}
 		_ = s.auditCIRun(ctx, request, "provider_ambiguous", class)
 		return receiptFromCIRunRequest(request), &CIRunRequestError{Class: class}
 	}
 	return s.failCIRunRequest(ctx, request, class)
+}
+
+func (s *Service) reloadCIRunResult(
+	ctx context.Context, request *CIRunRequest,
+) (*CIRunReceipt, error) {
+	loaded, err := s.store.GetCIRunRequest(ctx, request.ID)
+	if err != nil {
+		return nil, err
+	}
+	if loaded.Status == CIRunRequestFailed {
+		return receiptFromCIRunRequest(loaded), &CIRunRequestError{
+			Class: CIRunFailureClass(loaded.FailureClass),
+		}
+	}
+	if loaded.Status == CIRunRequestReconciling {
+		return receiptFromCIRunRequest(loaded), &CIRunRequestError{
+			Class: CIRunFailureProviderCallAmbiguous,
+		}
+	}
+	return receiptFromCIRunRequest(loaded), nil
 }
 
 func (s *Service) handleCIRunPreflightError(

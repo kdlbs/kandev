@@ -15,7 +15,7 @@ const ciRunRequestColumns = `
 	workflow_id, workflow_step_id, repository_id, pr_number, expected_head_sha,
 	source_run_id, expected_source_attempt, evidence_kind, idempotency_hash,
 	status, execution_owner, execution_lease_expires_at, provider_retry_after,
-	operation, provider_call_started_at, provider_run_id,
+	operation, provider_call_started_at, provider_call_revision, provider_run_watermark, provider_run_id,
 	provider_workflow_id, provider_workflow_name, provider_workflow_path,
 	provider_attempt, provider_head_repo, provider_head_ref,
 	provider_head_sha, failure_class, created_at, updated_at`
@@ -108,7 +108,7 @@ func (s *Store) ClaimCIRunRequest(ctx context.Context, request *CIRunRequest) (*
 	}
 	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO github_ci_run_requests (`+ciRunRequestColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT DO NOTHING`), ciRunRequestArgs(request)...)
 	if err != nil {
 		return nil, false, err
@@ -183,7 +183,8 @@ func ciRunRequestArgs(r *CIRunRequest) []any {
 		r.WorkflowID, r.WorkflowStepID, r.RepositoryID, r.PRNumber, r.ExpectedHeadSHA,
 		r.SourceRunID, r.ExpectedSourceAttempt, r.EvidenceKind, r.IdempotencyHash,
 		r.Status, r.ExecutionOwner, r.ExecutionLeaseExpires, r.ProviderRetryAfter,
-		r.Operation, r.ProviderCallStartedAt, r.ProviderRunID, r.ProviderWorkflowID,
+		r.Operation, r.ProviderCallStartedAt, r.ProviderCallRevision, r.ProviderRunWatermark,
+		r.ProviderRunID, r.ProviderWorkflowID,
 		r.ProviderWorkflowName, r.ProviderWorkflowPath, r.ProviderAttempt,
 		r.ProviderHeadRepo, r.ProviderHeadRef, r.ProviderHeadSHA,
 		r.FailureClass, r.CreatedAt, r.UpdatedAt,
@@ -259,14 +260,18 @@ func (s *Store) MarkCIRunProviderCallStarted(
 	}
 	result, err := s.db.ExecContext(ctx, s.db.Rebind(`UPDATE github_ci_run_requests
 		SET provider_call_started_at = ?,
-			status = ?, operation = ?, provider_workflow_id = ?,
+			provider_call_revision = provider_call_revision + 1,
+			status = ?, operation = ?, failure_class = '', provider_retry_after = NULL,
+			provider_workflow_id = ?,
 			provider_workflow_name = ?, provider_workflow_path = ?, provider_head_repo = ?,
-			provider_head_ref = ?, provider_head_sha = ?, updated_at = ?
-		WHERE id = ? AND execution_owner = ?`),
+			provider_head_ref = ?, provider_head_sha = ?, provider_run_watermark = ?, updated_at = ?
+		WHERE id = ? AND execution_owner = ? AND status = ?
+			AND provider_call_started_at IS NULL AND provider_call_revision = ?`),
 		at.UTC(), CIRunRequestReconciling, request.Operation, request.ProviderWorkflowID,
 		request.ProviderWorkflowName, request.ProviderWorkflowPath, request.ProviderHeadRepo,
-		request.ProviderHeadRef, request.ProviderHeadSHA,
-		at.UTC(), request.ID, request.ExecutionOwner)
+		request.ProviderHeadRef, request.ProviderHeadSHA, request.ProviderRunWatermark,
+		at.UTC(), request.ID, request.ExecutionOwner, CIRunRequestPending,
+		request.ProviderCallRevision)
 	if err != nil {
 		return err
 	}
@@ -274,6 +279,47 @@ func (s *Store) MarkCIRunProviderCallStarted(
 	if affected != 1 {
 		return sql.ErrNoRows
 	}
+	startedAt := at.UTC()
+	request.ProviderCallStartedAt = &startedAt
+	request.ProviderCallRevision++
+	request.Status = CIRunRequestReconciling
+	request.UpdatedAt = startedAt
+	return nil
+}
+
+func (s *Store) PrepareCIRunDispatchFallback(
+	ctx context.Context, request *CIRunRequest, at time.Time,
+) error {
+	if request == nil || request.ID == "" || request.ExecutionOwner == "" ||
+		request.Operation != CIRunOperationRerunFailedJobs || request.ProviderCallStartedAt == nil {
+		return errors.New("complete rerun fallback identity is required")
+	}
+	at = at.UTC()
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`UPDATE github_ci_run_requests
+		SET status = ?, operation = ?, provider_call_started_at = NULL,
+			provider_run_watermark = 0, failure_class = '', execution_owner = '',
+			execution_lease_expires_at = NULL, provider_retry_after = NULL, updated_at = ?
+		WHERE id = ? AND execution_owner = ? AND status = ? AND operation = ?
+			AND provider_call_started_at IS NOT NULL AND provider_call_revision = ?`),
+		CIRunRequestPending, CIRunOperationWorkflowDispatch, at, request.ID,
+		request.ExecutionOwner, CIRunRequestReconciling, CIRunOperationRerunFailedJobs,
+		request.ProviderCallRevision)
+	if err != nil {
+		return err
+	}
+	affected, _ := result.RowsAffected()
+	if affected != 1 {
+		return sql.ErrNoRows
+	}
+	request.Status = CIRunRequestPending
+	request.Operation = CIRunOperationWorkflowDispatch
+	request.ProviderCallStartedAt = nil
+	request.ProviderRunWatermark = 0
+	request.FailureClass = ""
+	request.ExecutionOwner = ""
+	request.ExecutionLeaseExpires = nil
+	request.ProviderRetryAfter = nil
+	request.UpdatedAt = at
 	return nil
 }
 
@@ -316,18 +362,38 @@ func (s *Store) CompleteCIRunRequest(ctx context.Context, request *CIRunRequest)
 	if request == nil || request.ID == "" {
 		return errors.New("CI run request is required")
 	}
-	_, err := s.db.ExecContext(ctx, s.db.Rebind(`UPDATE github_ci_run_requests SET
+	query := `UPDATE github_ci_run_requests SET
 		status = ?, operation = ?, provider_run_id = ?, provider_workflow_id = ?,
 		provider_workflow_name = ?, provider_workflow_path = ?,
 		provider_attempt = ?, provider_head_repo = ?, provider_head_ref = ?,
 		provider_head_sha = ?, failure_class = ?, execution_owner = '',
 		execution_lease_expires_at = NULL, provider_retry_after = NULL,
-		updated_at = ? WHERE id = ?`),
+		updated_at = ? WHERE id = ?`
+	args := []any{
 		request.Status, request.Operation, request.ProviderRunID, request.ProviderWorkflowID,
 		request.ProviderWorkflowName, request.ProviderWorkflowPath, request.ProviderAttempt,
 		request.ProviderHeadRepo, request.ProviderHeadRef,
-		request.ProviderHeadSHA, request.FailureClass, request.UpdatedAt, request.ID)
-	return err
+		request.ProviderHeadSHA, request.FailureClass, request.UpdatedAt, request.ID,
+	}
+	if request.ProviderCallStartedAt == nil {
+		if request.ExecutionOwner == "" {
+			return errors.New("pre-provider completion owner is required")
+		}
+		query += ` AND status = ? AND execution_owner = ? AND provider_call_started_at IS NULL`
+		args = append(args, CIRunRequestPending, request.ExecutionOwner)
+	} else {
+		query += ` AND status = ? AND operation = ? AND provider_call_revision = ?`
+		args = append(args, CIRunRequestReconciling, request.Operation, request.ProviderCallRevision)
+	}
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(query), args...)
+	if err != nil {
+		return err
+	}
+	affected, _ := result.RowsAffected()
+	if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) AppendCIRunAuditEvent(ctx context.Context, event *CIRunAuditEvent) error {

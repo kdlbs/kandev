@@ -23,6 +23,7 @@ func TestStoreScopedCIRunSchema(t *testing.T) {
 			"idempotency_hash", "provider_call_started_at", "failure_class",
 			"provider_workflow_name", "provider_workflow_path",
 			"execution_owner", "execution_lease_expires_at", "provider_retry_after",
+			"provider_call_revision", "provider_run_watermark",
 		},
 		"github_ci_run_audit_events": {
 			"request_id", "event_type", "failure_class", "details_json",
@@ -77,6 +78,133 @@ func TestStoreCIRunExecutionLeaseExpiresBeforeProviderStart(t *testing.T) {
 	request.ExecutionOwner = "worker-2"
 	if err := store.MarkCIRunProviderCallStarted(ctx, request, now.Add(31*time.Second)); err != nil {
 		t.Fatalf("current owner provider start: %v", err)
+	}
+}
+
+func TestStoreCIRunTerminalWriteRejectsStaleLeaseOwner(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	grant := testCIRunGrant(now)
+	if err := store.UpsertCIRunGrant(ctx, grant); err != nil {
+		t.Fatal(err)
+	}
+	request, _, err := store.ClaimCIRunRequest(ctx, testCIRunRequest(grant, now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acquired, err := store.AcquireCIRunExecution(ctx, request, "worker-1", now, time.Second); err != nil || !acquired {
+		t.Fatalf("worker-1 acquire = %v, %v", acquired, err)
+	}
+	stale := *request
+	if acquired, err := store.AcquireCIRunExecution(ctx, request, "worker-2", now.Add(time.Second), time.Minute); err != nil || !acquired {
+		t.Fatalf("worker-2 takeover = %v, %v", acquired, err)
+	}
+	stale.Status = CIRunRequestFailed
+	stale.FailureClass = string(CIRunFailureProviderUnavailable)
+	stale.UpdatedAt = now.Add(2 * time.Second)
+	if err := store.CompleteCIRunRequest(ctx, &stale); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("stale terminal write error = %v, want sql.ErrNoRows", err)
+	}
+	loaded, err := store.GetCIRunRequest(ctx, request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Status != CIRunRequestPending || loaded.ExecutionOwner != "worker-2" {
+		t.Fatalf("stale owner overwrote request: %+v", loaded)
+	}
+}
+
+func TestStoreCIRunAmbiguousWriteCannotDowngradeSuccess(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	grant := testCIRunGrant(now)
+	if err := store.UpsertCIRunGrant(ctx, grant); err != nil {
+		t.Fatal(err)
+	}
+	request, _, err := store.ClaimCIRunRequest(ctx, testCIRunRequest(grant, now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acquired, err := store.AcquireCIRunExecution(ctx, request, "worker-1", now, time.Minute); err != nil || !acquired {
+		t.Fatalf("acquire = %v, %v", acquired, err)
+	}
+	request.Operation = CIRunOperationRerunFailedJobs
+	request.ProviderWorkflowID = 77
+	startedAt := now.Add(time.Second)
+	if err := store.MarkCIRunProviderCallStarted(ctx, request, startedAt); err != nil {
+		t.Fatal(err)
+	}
+	request.ProviderCallStartedAt = &startedAt
+	ambiguous := *request
+	request.Status = CIRunRequestSucceeded
+	request.ProviderRunID = request.SourceRunID
+	request.ProviderAttempt = request.ExpectedSourceAttempt + 1
+	request.UpdatedAt = now.Add(2 * time.Second)
+	if err := store.CompleteCIRunRequest(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	ambiguous.Status = CIRunRequestReconciling
+	ambiguous.FailureClass = string(CIRunFailureProviderCallAmbiguous)
+	ambiguous.UpdatedAt = now.Add(3 * time.Second)
+	if err := store.CompleteCIRunRequest(ctx, &ambiguous); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("late ambiguous write error = %v, want sql.ErrNoRows", err)
+	}
+	loaded, err := store.GetCIRunRequest(ctx, request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Status != CIRunRequestSucceeded || loaded.ProviderRunID != request.SourceRunID {
+		t.Fatalf("success was downgraded: %+v", loaded)
+	}
+}
+
+func TestStoreCIRunProviderRevisionRejectsEarlierAttempt(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 30, 12, 0, 0, 123_456_789, time.UTC)
+	grant := testCIRunGrant(now)
+	if err := store.UpsertCIRunGrant(ctx, grant); err != nil {
+		t.Fatal(err)
+	}
+	request, _, err := store.ClaimCIRunRequest(ctx, testCIRunRequest(grant, now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acquired, err := store.AcquireCIRunExecution(ctx, request, "worker-1", now, time.Minute); err != nil || !acquired {
+		t.Fatalf("first acquire = %v, %v", acquired, err)
+	}
+	request.Operation = CIRunOperationRerunFailedJobs
+	request.ProviderWorkflowID = 77
+	if err := store.MarkCIRunProviderCallStarted(ctx, request, now); err != nil {
+		t.Fatal(err)
+	}
+	earlierAttempt := *request
+	if err := store.DeferCIRunForRateLimit(ctx, request, now.Add(time.Minute), now); err != nil {
+		t.Fatal(err)
+	}
+	if acquired, err := store.AcquireCIRunExecution(
+		ctx, request, "worker-2", now.Add(2*time.Minute), time.Minute,
+	); err != nil || !acquired {
+		t.Fatalf("retry acquire = %v, %v", acquired, err)
+	}
+	if err := store.MarkCIRunProviderCallStarted(ctx, request, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	earlierAttempt.Status = CIRunRequestReconciling
+	earlierAttempt.FailureClass = string(CIRunFailureProviderCallAmbiguous)
+	earlierAttempt.UpdatedAt = now.Add(3 * time.Minute)
+	if err := store.CompleteCIRunRequest(ctx, &earlierAttempt); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("earlier provider attempt error = %v, want sql.ErrNoRows", err)
+	}
+	loaded, err := store.GetCIRunRequest(ctx, request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ProviderCallRevision != 2 || loaded.Status != CIRunRequestReconciling ||
+		loaded.FailureClass != "" {
+		t.Fatalf("earlier provider attempt overwrote retry: %+v", loaded)
 	}
 }
 
@@ -174,7 +302,14 @@ func TestStoreCIRunRequestProviderStartAndAuditAreRedacted(t *testing.T) {
 		t.Fatal("provider call start was not persisted")
 	}
 	dispatchStartedAt := now.Add(2 * time.Second)
-	req.Operation = CIRunOperationWorkflowDispatch
+	if err := store.PrepareCIRunDispatchFallback(ctx, req, dispatchStartedAt); err != nil {
+		t.Fatal(err)
+	}
+	if acquired, err := store.AcquireCIRunExecution(
+		ctx, req, "worker-2", dispatchStartedAt, 30*time.Second,
+	); err != nil || !acquired {
+		t.Fatalf("acquire dispatch worker = %v, %v", acquired, err)
+	}
 	if err := store.MarkCIRunProviderCallStarted(ctx, req, dispatchStartedAt); err != nil {
 		t.Fatal(err)
 	}

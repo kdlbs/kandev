@@ -67,6 +67,8 @@ type CIRunRequest struct {
 	ProviderRetryAfter    *time.Time         `json:"provider_retry_after,omitempty" db:"provider_retry_after"`
 	Operation             CIRunOperation     `json:"operation,omitempty" db:"operation"`
 	ProviderCallStartedAt *time.Time         `json:"provider_call_started_at,omitempty" db:"provider_call_started_at"`
+	ProviderCallRevision  int64              `json:"-" db:"provider_call_revision"`
+	ProviderRunWatermark  int64              `json:"-" db:"provider_run_watermark"`
 	ProviderRunID         int64              `json:"provider_run_id,omitempty" db:"provider_run_id"`
 	ProviderWorkflowID    int64              `json:"provider_workflow_id,omitempty" db:"provider_workflow_id"`
 	ProviderWorkflowName  string             `json:"provider_workflow_name,omitempty" db:"provider_workflow_name"`

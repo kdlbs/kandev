@@ -478,6 +478,8 @@ const ciRunTablesSQL = `
 		provider_retry_after DATETIME,
 		operation TEXT NOT NULL DEFAULT '',
 		provider_call_started_at DATETIME,
+		provider_call_revision BIGINT NOT NULL DEFAULT 0,
+		provider_run_watermark BIGINT NOT NULL DEFAULT 0,
 		provider_run_id BIGINT NOT NULL DEFAULT 0,
 		provider_workflow_id BIGINT NOT NULL DEFAULT 0,
 		provider_workflow_name TEXT NOT NULL DEFAULT '',
@@ -694,6 +696,8 @@ var ciRunRecoveryColumnDDL = []struct {
 	{"execution_owner", "TEXT NOT NULL DEFAULT ''"},
 	{"execution_lease_expires_at", "DATETIME"},
 	{"provider_retry_after", "DATETIME"},
+	{"provider_call_revision", "BIGINT NOT NULL DEFAULT 0"},
+	{"provider_run_watermark", "BIGINT NOT NULL DEFAULT 0"},
 }
 
 func (s *Store) addCIRunRecoveryColumns() error {

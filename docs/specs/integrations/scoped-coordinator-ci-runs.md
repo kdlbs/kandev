@@ -26,11 +26,12 @@ owner/name, ref, workflow, dispatch inputs, or credentials.
 The backend resolves and checks all authority again. It binds the actor, grant,
 workspace, task, workflow, current step, task repository, linked PR, provider
 repository identity, exact PR head, and source run before any provider write.
-For fork PRs whose Actions run omits the `pull_requests` array, the source run
-must match the canonical base repository plus exact head repository, ref, and
-SHA. In every case, the source must be a completed failed `pull_request` run.
-A changed head or any unlinked, cross-workspace, or ungranted target fails
-closed.
+When the Actions run has PR associations, they must include the exact linked PR;
+an association with another PR cannot fall back to tuple matching. Only when
+GitHub returns an empty `pull_requests` array may a fork source match through the
+canonical base repository plus exact head repository, ref, and SHA. In every
+case, the source must be a completed failed `pull_request` run. A changed head
+or any unlinked, cross-workspace, or ungranted target fails closed.
 
 ## Provider policy
 
@@ -55,6 +56,10 @@ unique within the actor/grant scope, and a second unique identity covers the
 semantic source run attempt. Concurrent or retried claims return the same
 logical operation. Once `provider_call_started_at` is recorded, an interrupted
 or ambiguous call is reconciled from GitHub. It is never blindly sent again.
+When GitHub definitively rejects the rerun as ineligible, Kandev durably changes
+the same request to pre-dispatch work before inspecting or sending the fallback.
+Recovery resumes that dispatch phase and does not submit the rejected rerun
+again.
 Before provider start, one execution lease owns the transition and an expired
 lease can be taken over after a worker crash. Provider start succeeds only for
 the current lease owner. A definitive rate-limit response records the reset
@@ -62,8 +67,10 @@ time and makes the same row eligible again only after that time. Mutation
 timeouts, connection loss, and HTTP 5xx responses remain ambiguous and may
 only reconcile.
 Rerun reconciliation accepts only the exact next attempt. Dispatch
-reconciliation accepts only one new first attempt created at or after the
-dispatch call began; zero or multiple candidates remain ambiguous.
+reconciliation records the greatest matching run ID immediately before the
+provider call, then accepts only one first attempt created at or after the call
+whose run ID is greater than that watermark. Zero or multiple candidates remain
+ambiguous.
 
 ## Receipt and audit
 
