@@ -715,10 +715,11 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 			// origin, the caller's intent is "create a new branch with this
 			// name" rather than "fetch this existing ref" — the historical
 			// fetch-then-check-out path errored ("not found locally or on
-			// remote") in that case and rolled back. We drop CheckoutBranch
-			// from the request copy and pass the desired name as the fallback
-			// (new) branch name so gitAddWorktree creates it from baseRef.
-			if req.PRNumber == 0 && !m.checkoutBranchExistsAnywhere(ctx, req.RepositoryPath, req.CheckoutBranch) {
+			// remote") in that case and rolled back. We keep that behavior for
+			// ordinary branch creation, but a provider refresh fallback must
+			// still materialize the requested checkout branch or fail. The
+			// provider may have been the only route to the remote ref.
+			if req.PRNumber == 0 && !req.baseRefreshFallback && !m.checkoutBranchExistsAnywhere(ctx, req.RepositoryPath, req.CheckoutBranch) {
 				m.logger.Info("checkout branch missing locally and on origin; creating new branch with this name",
 					zap.String("repository_path", req.RepositoryPath),
 					zap.String("requested_branch", req.CheckoutBranch),

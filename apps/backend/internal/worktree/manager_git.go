@@ -146,6 +146,7 @@ func (m *Manager) resolveRefreshedBaseRefWithFallback(
 		zap.String("branch", baseBranch),
 		zap.String("reason", reason),
 		zap.String("fallback_ref", baseBranch),
+		zap.Error(err),
 	)
 	return baseBranch, warning, detail, nil
 }

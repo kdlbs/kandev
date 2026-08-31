@@ -293,7 +293,7 @@ test.describe("task launch failure recovery", () => {
     const { workflow, waiting, review } = await recoveryWorkflow(
       apiClient,
       seedData.workspaceId,
-      `Local base refresh ${Date.now()}`,
+      "Local base refresh",
     );
     const task = await apiClient.createTask(
       seedData.workspaceId,

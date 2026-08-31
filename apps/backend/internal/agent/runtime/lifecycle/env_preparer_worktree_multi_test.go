@@ -307,6 +307,8 @@ func TestWorktreePreparer_MultiRepo_RequiredRefreshIdentifiesFailingRepository(t
 		TaskDirName:  "refresh-fail_eee",
 		Repositories: []RepoPrepareSpec{
 			{TaskRepositoryID: "tr-good", RepositoryID: "repo-good", RepositoryPath: repoA, RepoName: "good", BaseBranch: "main"},
+			// The absent local and remote base keeps this repository strict so
+			// the test can identify which attachment caused preparation to fail.
 			{TaskRepositoryID: "tr-bad", RepositoryID: "repo-bad", RepositoryPath: repoB, RepoName: "backend", BaseBranch: "remote-only", PullBeforeWorktree: true},
 		},
 	}

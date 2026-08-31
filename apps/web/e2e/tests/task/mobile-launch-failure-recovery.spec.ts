@@ -163,7 +163,7 @@ test.describe("mobile task launch failure recovery", () => {
 
     const workflow = await apiClient.createWorkflow(
       seedData.workspaceId,
-      `Mobile local base refresh ${Date.now()}`,
+      "Mobile local base refresh",
     );
     const waiting = await apiClient.createWorkflowStep(workflow.id, "Waiting", 0);
     const review = await apiClient.createWorkflowStep(workflow.id, "Review", 1);

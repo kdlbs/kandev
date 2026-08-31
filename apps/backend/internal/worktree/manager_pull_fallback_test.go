@@ -137,6 +137,9 @@ func TestCreateWorktree_PullEnabledUsesLocalOnlyBase(t *testing.T) {
 	if len(events) != 2 || events[0].Status != SyncProgressRunning || events[1].Status != SyncProgressCompleted {
 		t.Fatalf("sync progress = %#v, want running then completed", events)
 	}
+	if events[1].Warning == "" || events[1].WarningDetail == "" {
+		t.Fatalf("sync progress = %#v, want bounded fallback warning and detail", events)
+	}
 	if strings.Contains(syncOutputs(events), "super-secret") {
 		t.Fatalf("sync progress exposed credential-bearing Git output: %#v", events)
 	}
@@ -262,6 +265,29 @@ func TestCreateWorktree_ManagedRefreshFailureUsesLocalBaseWarning(t *testing.T) 
 	}
 	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != localHead {
 		t.Fatalf("managed-refresh fallback HEAD = %q, want local base %q", got, localHead)
+	}
+}
+
+func TestCreateWorktree_ManagedRefreshFailureKeepsMissingCheckoutBranchStrict(t *testing.T) {
+	repoPath, _ := initGitRepoWithOriginAheadLocal(t)
+	mgr := newRecreateTestManager(t)
+
+	_, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:             "task-managed-missing-checkout",
+		SessionID:          "session-managed-missing-checkout",
+		RepositoryID:       "repo-managed-missing-checkout",
+		RepositoryPath:     repoPath,
+		BaseBranch:         "main",
+		CheckoutBranch:     "feature/remote-only",
+		PullBeforeWorktree: true,
+		RefreshRepository: func(context.Context) error {
+			return errors.New("provider refresh unavailable")
+		},
+		TaskDirName: "task-managed-missing-checkout",
+		RepoName:    "repo",
+	})
+	if !errors.Is(err, ErrInvalidBaseBranch) {
+		t.Fatalf("Create() error = %v, want missing checkout branch to remain strict", err)
 	}
 }
 

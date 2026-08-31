@@ -207,7 +207,6 @@ Normal stop keeps the task environment available. Task deletion or **Reset Envir
 Typical failures:
 
 - dirty or conflicting source repository state;
-- base branch missing locally or remotely;
 - a base branch is missing locally and remote materialization cannot provide it;
 - a remote-only executor cannot verify its refresh or checkout;
 - worktree path already registered in Git metadata;

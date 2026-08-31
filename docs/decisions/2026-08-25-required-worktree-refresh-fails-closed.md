@@ -2,7 +2,7 @@
 
 > The local-worktree admission boundary is superseded by
 > [ADR-2026-08-31-local-worktree-refresh-best-effort](2026-08-31-local-worktree-refresh-best-effort.md).
-> Required remote materialization remains fail closed when no usable local base exists.
+> Required remote materialization remains fail-closed when no usable local base exists.
 >
 > Amended by
 > [ADR-2026-08-30-empty-remote-bootstrap-publication](2026-08-30-empty-remote-bootstrap-publication.md):
