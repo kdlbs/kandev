@@ -123,8 +123,19 @@ func (s *HandoffService) markOrphanedInheritParentChild(
 // before it ever runs (resource_cleanup_jobs.go's cancelIfTaskUnarchived),
 // so the claim can already be false the moment the parent is restored. It
 // must not be left standing regardless.
+//
+// Deliberately uses ListChildrenIncludingArchived rather than ListChildren:
+// a child can itself be archived at the moment its parent is restored (e.g.
+// its own Done step's auto_archive_after_hours fired first), and nothing
+// else ever revisits that child's own marker on its later unarchive — that
+// call only clears the child's OWN children, never itself. Using the
+// archived-excluding list here would make the marker permanent for exactly
+// that ordering. The mark path (markOrphanedInheritParentChildren) stays on
+// ListChildren deliberately: marking an already-archived child is wrong,
+// and the cascade=true archive path (deepest-first) depends on that filter
+// to skip children that are already archived by the same cascade.
 func (s *HandoffService) clearOrphanedInheritParentChildren(ctx context.Context, parentID string) {
-	children, err := s.tasks.ListChildren(ctx, parentID)
+	children, err := s.tasks.ListChildrenIncludingArchived(ctx, parentID)
 	if err != nil {
 		s.logf().Warn("list children for orphan clearing failed",
 			zap.String("task_id", parentID), zap.Error(err))

@@ -213,6 +213,86 @@ func TestHandoffUnarchiveTaskTree_ManualRoot_ClearsOrphanMarkerOnChildren(t *tes
 	}
 }
 
+// REGRESSION: clearOrphanedInheritParentChildren used to call ListChildren,
+// which (matching the sqlite ListChildren SQL filter, `archived_at IS
+// NULL`) excludes archived rows. A child archived independently BETWEEN its
+// parent's archive and the parent's unarchive was therefore invisible to
+// the clear — and nothing else ever revisits it afterward: the child's own
+// later unarchive scopes clearOrphanedInheritParentChildren to the CHILD's
+// own children, never the child itself. The marker would survive
+// permanently, falsely asserting parent_archived about a parent that is now
+// restored. Fixed by switching the clear path to
+// ListChildrenIncludingArchived (the mark path deliberately stays on
+// ListChildren — see the comment on clearOrphanedInheritParentChildren).
+func TestHandoffUnarchiveTaskTree_ClearsOrphanMarkerOnArchivedChild(t *testing.T) {
+	svc, bus, repo := createTestService(t)
+	ctx := context.Background()
+	const parentID = "task-handoff-unarchive-archived-child-parent"
+	const childID = "task-handoff-unarchive-archived-child-child"
+
+	workspaceID, workflowID := seedArchiveOrphanParentAndChild(t, repo, parentID)
+	if err := repo.CreateTask(ctx, inheritParentChildTask(childID, parentID, workspaceID, workflowID)); err != nil {
+		t.Fatalf("CreateTask(child): %v", err)
+	}
+
+	handoff := NewHandoffService(repo, repo, nil, nil, nil, nil)
+	handoff.SetTaskEventPublisher(svc)
+
+	if _, err := handoff.ArchiveTaskTree(ctx, parentID, false); err != nil {
+		t.Fatalf("ArchiveTaskTree: %v", err)
+	}
+	child, err := repo.GetTask(ctx, childID)
+	if err != nil {
+		t.Fatalf("GetTask(child) after parent archive: %v", err)
+	}
+	workspace, _ := child.Metadata["workspace"].(map[string]interface{})
+	if orphaned, _ := workspace["orphaned"].(bool); !orphaned {
+		t.Fatal("setup failure: child was not marked orphaned by parent archive")
+	}
+
+	// The child is archived independently — e.g. its own Done step's
+	// auto_archive_after_hours fired — BEFORE the parent is restored.
+	if err := svc.ArchiveTask(ctx, childID); err != nil {
+		t.Fatalf("ArchiveTask(child): %v", err)
+	}
+
+	bus.ClearEvents()
+	if _, err := handoff.UnarchiveTaskTree(ctx, parentID); err != nil {
+		t.Fatalf("UnarchiveTaskTree: %v", err)
+	}
+
+	child, err = repo.GetTask(ctx, childID)
+	if err != nil {
+		t.Fatalf("GetTask(child) after parent unarchive: %v", err)
+	}
+	if child.ArchivedAt == nil {
+		t.Fatal("child was unexpectedly unarchived by the parent's cascade unarchive")
+	}
+	workspace, _ = child.Metadata["workspace"].(map[string]interface{})
+	if workspace == nil {
+		t.Fatal("child metadata.workspace missing after parent unarchive")
+	}
+	for _, key := range []string{"orphaned", "orphaned_reason", "orphaned_parent_id", "orphaned_at"} {
+		if _, ok := workspace[key]; ok {
+			t.Errorf("archived child metadata.workspace[%q] = %v, want cleared after parent unarchive", key, workspace[key])
+		}
+	}
+
+	found := false
+	for _, evt := range bus.GetPublishedEvents() {
+		if evt.Type != events.TaskUpdated {
+			continue
+		}
+		data, ok := evt.Data.(map[string]interface{})
+		if ok && data["task_id"] == childID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("no task.updated event published for un-orphaned archived child")
+	}
+}
+
 // A child orphaned by an EARLIER, still-archived parent must not be
 // disturbed by unarchiving an unrelated parent — clearing is scoped to
 // children whose orphaned_parent_id matches the task actually restored.

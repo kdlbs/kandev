@@ -126,10 +126,17 @@ func (s *Service) inheritFromParentEnvironment(ctx context.Context, task *v1.Tas
 // from under it (e.g. archive cleanup removing the parent's own workspace).
 // Handing back a dangling id would bind the new session to an environment
 // that no longer exists, so the id is verified against task_environments
-// before it is trusted — a lookup failure (missing row, or a transient repo
-// error) falls through to the workspace_group fallback rather than being
-// returned, and ultimately fails closed via inheritFromParentEnvironment's
-// envID == "" branch instead of silently proceeding.
+// before it is trusted on BOTH branches below — a lookup failure (missing
+// row, or a transient repo error) falls through past the parent_session
+// branch to the workspace_group fallback, and a dangling workspace_group id
+// falls through that too, ultimately failing closed via
+// inheritFromParentEnvironment's envID == "" branch instead of silently
+// proceeding. Without the second check, the group branch would hand back
+// exactly the id the parent_session branch just rejected: an inherit_parent
+// child is a member of the parent's workspace group, and
+// MarkOwnerSessionMaterialized records the parent as that group's owner, so
+// GetSharedGroupEnvironment normally returns the parent's own (now dangling)
+// environment id right back.
 func (s *Service) resolveInheritedEnvironment(ctx context.Context, task *v1.Task) (envID, source string) {
 	parentSessions, err := s.repo.ListTaskSessions(ctx, task.ParentID)
 	if err != nil {
@@ -150,7 +157,13 @@ func (s *Service) resolveInheritedEnvironment(ctx context.Context, task *v1.Task
 		return "", ""
 	}
 	if envID := s.workspaceMaterializer.GetSharedGroupEnvironment(ctx, task.ID); envID != "" {
-		return envID, "workspace_group"
+		if s.taskEnvironmentExists(ctx, envID) {
+			return envID, "workspace_group"
+		}
+		s.logger.Warn("inherit_parent: workspace group environment no longer exists",
+			zap.String("task_id", task.ID),
+			zap.String("parent_task_id", task.ParentID),
+			zap.String("task_environment_id", envID))
 	}
 	return "", ""
 }

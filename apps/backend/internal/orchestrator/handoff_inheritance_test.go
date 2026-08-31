@@ -48,6 +48,10 @@ func TestInheritFromParentEnvironment_FallsBackToGroupEnv(t *testing.T) {
 	_ = repo.CreateTask(ctx, parent)
 	child := &models.Task{ID: "child", ParentID: "parent", WorkflowID: "wf1", Title: "C", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now}
 	_ = repo.CreateTask(ctx, child)
+	_ = repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-group", TaskID: "parent",
+		ExecutorType: string(models.ExecutorTypeLocalDocker), Status: models.TaskEnvironmentStatusReady,
+	})
 
 	// Parent intentionally has NO sessions — the fallback path must
 	// kick in and consult the materializer for the child's group env.
@@ -236,6 +240,57 @@ func TestInheritFromParentEnvironment_DanglingEnvironmentFailsClosed(t *testing.
 	}
 	if got.TaskEnvironmentID != "" {
 		t.Errorf("child session must not be bound to the dangling environment; got %q", got.TaskEnvironmentID)
+	}
+}
+
+// REGRESSION: the workspace_group fallback branch of resolveInheritedEnvironment
+// used to hand back GetSharedGroupEnvironment's id without checking it still
+// names a live task_environments row — the exact dangling-id class the
+// parent_session branch above was fixed to reject. In the card's primary
+// scenario this is not a hypothetical: an inherit_parent child is a member of
+// its parent's workspace group, and MarkOwnerSessionMaterialized records the
+// parent as that group's owner, so the group fallback normally returns the
+// parent's own (now-archived, now-deleted) environment id right back — the
+// same id the parent_session branch just rejected one check earlier. Both
+// branches must fail closed the same way.
+func TestInheritFromParentEnvironment_DanglingGroupEnvironmentFailsClosed(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetWorkspaceMaterializer(&stubMaterializer{
+		envByTask: map[string]string{"child": "env-group-gone"},
+	})
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	ws := &models.Workspace{ID: "ws1", Name: "WS", CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateWorkspace(ctx, ws)
+	wf := &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateWorkflow(ctx, wf)
+	parent := &models.Task{ID: "parent", WorkflowID: "wf1", Title: "P", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateTask(ctx, parent)
+	child := &models.Task{ID: "child", ParentID: "parent", WorkflowID: "wf1", Title: "C", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateTask(ctx, child)
+
+	// Parent has NO sessions, so the parent_session branch is skipped and
+	// the group fallback is reached. The materializer names an env id with
+	// no matching task_environments row — as if the parent's environment
+	// had already been deleted by archive cleanup.
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "cs1", TaskID: "child", State: models.TaskSessionStateRunning,
+		IsPrimary: true, StartedAt: now, UpdatedAt: now,
+	})
+
+	err := svc.inheritFromParentEnvironment(ctx, &v1.Task{ID: "child", ParentID: "parent"}, "cs1")
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("inheritFromParentEnvironment error = %v, want workspace reuse unsafe", err)
+	}
+
+	got, getErr := repo.GetTaskSession(ctx, "cs1")
+	if getErr != nil || got == nil {
+		t.Fatalf("get session: %v", getErr)
+	}
+	if got.TaskEnvironmentID != "" {
+		t.Errorf("child session must not be bound to the dangling group environment; got %q", got.TaskEnvironmentID)
 	}
 }
 
