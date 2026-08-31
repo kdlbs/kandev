@@ -9,23 +9,16 @@ import (
 )
 
 // TestActiveSessionStateMatchesSQLFilter cross-checks GetActiveTaskSessionByTaskID's
-// SQL state filter against models.IsActiveSessionState for every TaskSessionState
-// constant, enumerated literally so a newly added state is a compile-visible
-// omission rather than a silent skip. Editing the SQL filter without updating the
-// predicate (or vice versa) fails this test instead of only a stale comment.
+// SQL state filter against models.IsActiveSessionState for every state in
+// models.AllTaskSessionStates, the package's single canonical state list. Editing
+// the SQL filter without updating the predicate (or vice versa) fails this test
+// instead of only a stale comment — but only for states already present in
+// AllTaskSessionStates: Go does not enforce switch/slice exhaustiveness, so a new
+// TaskSessionState constant added to models.go without also being added to
+// AllTaskSessionStates is not caught by this test (or by any linter — the
+// exhaustive linter is not enabled in this repo).
 func TestActiveSessionStateMatchesSQLFilter(t *testing.T) {
-	allStates := []models.TaskSessionState{
-		models.TaskSessionStateCreated,
-		models.TaskSessionStateStarting,
-		models.TaskSessionStateRunning,
-		models.TaskSessionStateIdle,
-		models.TaskSessionStateWaitingForInput,
-		models.TaskSessionStateCompleted,
-		models.TaskSessionStateFailed,
-		models.TaskSessionStateCancelled,
-	}
-
-	for _, state := range allStates {
+	for _, state := range models.AllTaskSessionStates {
 		t.Run(string(state), func(t *testing.T) {
 			repo := newRepoForSessionTests(t)
 			ctx := context.Background()
