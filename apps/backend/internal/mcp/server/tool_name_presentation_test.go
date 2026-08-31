@@ -102,6 +102,24 @@ func TestMCPToolNamePresentation_UsesLiveRegistry(t *testing.T) {
 	assert.NotContains(t, names, "list_workflows_kandev_kandev")
 }
 
+func TestMCPToolNamePresentation_PreservesPluginAliasCollision(t *testing.T) {
+	s := namespacedTestServer(t, &testBackend{}, mcpprofile.Legacy(ModeTask, false, nil))
+	for _, name := range []string{"plugin_echo", "plugin_echo_kandev"} {
+		s.mcpServer.AddTool(mcplib.NewTool(name), func(context.Context, mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+			return mcplib.NewToolResultText("ok"), nil
+		})
+	}
+
+	names := transportToolNames(t, s)
+	counts := make(map[string]int)
+	for _, name := range names {
+		counts[name]++
+	}
+
+	assert.Equal(t, 1, counts["plugin_echo"])
+	assert.Equal(t, 1, counts["plugin_echo_kandev"])
+}
+
 func namespacedTestServer(t *testing.T, backend BackendClient, profile mcpprofile.Context) *Server {
 	t.Helper()
 	return NewWithProfile(

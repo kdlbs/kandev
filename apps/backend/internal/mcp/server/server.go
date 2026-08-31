@@ -291,10 +291,13 @@ func (s *Server) presentTransportToolNames(result *mcp.ListToolsResult) {
 		if !strings.HasSuffix(name, mcpToolNameSuffix) {
 			continue
 		}
-		if _, ok := registeredTools[name]; !ok {
+		transportName := strings.TrimSuffix(name, mcpToolNameSuffix)
+		// Keep plugin tools named "name" distinct from canonical tools named
+		// "name_kandev" when both are present in the live registry.
+		if _, collision := registeredTools[transportName]; collision {
 			continue
 		}
-		result.Tools[index].Name = strings.TrimSuffix(name, mcpToolNameSuffix)
+		result.Tools[index].Name = transportName
 	}
 }
 
