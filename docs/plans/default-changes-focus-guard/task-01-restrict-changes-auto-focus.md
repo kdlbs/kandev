@@ -8,7 +8,7 @@ plan: "plan.md"
 requirements:
   - REQ-UI-TASK-LAYOUT-PROFILES-001
 acceptance_criteria:
-  - AC-UI-TASK-LAYOUT-PROFILES-001.9
+  - AC-UI-TASK-LAYOUT-PROFILES-001.11
 system_design:
   - ../../specs/ui/system-design/task-layout-profiles.md
 ---
@@ -83,7 +83,7 @@ None.
 
 ## Inputs
 
-- `AC-UI-TASK-LAYOUT-PROFILES-001.9`
+- `AC-UI-TASK-LAYOUT-PROFILES-001.11`
 - The Changes-attention control flow in the task-layout system design.
 - Commit `f100fc97a5`, which expanded activation from the Default group to every non-Agent group.
 

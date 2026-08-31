@@ -50,14 +50,14 @@ Add store and profile-identity coverage for a reserved customized Default used a
 
 ## Tests
 
-- `AC-UI-TASK-LAYOUT-PROFILES-001.9`: Unit cases cover the eligible Default group, a non-Default group, and a Default group with an extra VS Code tab.
-- `AC-UI-TASK-LAYOUT-PROFILES-001.9`: Unit and store-integration cases cover a copied Default custom profile, built-in override identity, and per-environment profile persistence.
-- `AC-UI-TASK-LAYOUT-PROFILES-001.9`: Existing state tests preserve reload baselining and inactive-task attention.
-- `AC-UI-TASK-LAYOUT-PROFILES-001.9`: A reserved customized Default keeps built-in identity through a fresh build and Reset Layout; arbitrary saved profile IDs remain custom.
+- `AC-UI-TASK-LAYOUT-PROFILES-001.11`: Unit cases cover the eligible Default group, a non-Default group, and a Default group with an extra VS Code tab.
+- `AC-UI-TASK-LAYOUT-PROFILES-001.11`: Unit and store-integration cases cover a copied Default custom profile, built-in override identity, and per-environment profile persistence.
+- `AC-UI-TASK-LAYOUT-PROFILES-001.11`: Existing state tests preserve reload baselining and inactive-task attention.
+- `AC-UI-TASK-LAYOUT-PROFILES-001.11`: A reserved customized Default keeps built-in identity through a fresh build and Reset Layout; arbitrary saved profile IDs remain custom.
 
 ## E2E tests
 
-- `AC-UI-TASK-LAYOUT-PROFILES-001.9`: Update `apps/web/e2e/tests/layout/changes-panel-focus.spec.ts` with the reported VS Code group scenario.
+- `AC-UI-TASK-LAYOUT-PROFILES-001.11`: Update `apps/web/e2e/tests/layout/changes-panel-focus.spec.ts` with the reported VS Code group scenario.
 - Existing Default-layout scenarios continue to prove eligible activation for active and returning tasks.
 - No mobile E2E case is required. Mobile and tablet task layouts do not mount `DockviewDesktopLayout` or this focus hook.
 

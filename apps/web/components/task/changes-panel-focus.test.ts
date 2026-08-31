@@ -41,7 +41,7 @@ function activationApi(groupId: string, panelIds: string[]) {
   return { api, setActive };
 }
 
-// @covers AC-UI-TASK-LAYOUT-PROFILES-001.9
+// @covers AC-UI-TASK-LAYOUT-PROFILES-001.11
 describe("activateChangesPanel", () => {
   it("activates Changes in the Default Files and Changes group", () => {
     const { api, setActive } = activationApi(RIGHT_TOP_GROUP, ["files", "changes"]);

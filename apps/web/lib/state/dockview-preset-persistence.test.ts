@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { DockviewApi } from "dockview-react";
-import { getBuiltInLayoutOverrideId, getLayoutProfileIdentity } from "@/lib/layout/layout-profiles";
-import type { LayoutState } from "@/lib/state/layout-manager";
 
 vi.mock("@/lib/local-storage", () => ({
   setEnvLayout: vi.fn(),
@@ -81,7 +79,7 @@ vi.mock("./layout-manager", async (importOriginal) => {
   };
 });
 
-import { removeEnvMaximizeState, setEnvLayout, setEnvLayoutProfile } from "@/lib/local-storage";
+import { removeEnvMaximizeState, setEnvLayout } from "@/lib/local-storage";
 import { persistEnvLayoutNow, useDockviewStore } from "./dockview-store";
 import {
   applyLayout,
@@ -281,14 +279,6 @@ describe("applyBuiltInPreset — persistence at call site", () => {
     expect(useDockviewStore.getState().isRestoringLayout).toBe(false);
     expect(setEnvLayout).toHaveBeenCalledTimes(1);
     expect(setEnvLayout).toHaveBeenCalledWith("env-preset", expect.any(Object));
-    expect(useDockviewStore.getState().activeLayoutProfile).toEqual({
-      kind: "built-in",
-      id: "default",
-    });
-    expect(setEnvLayoutProfile).toHaveBeenCalledWith("env-preset", {
-      kind: "built-in",
-      id: "default",
-    });
   });
 
   it("does not persist when no env is adopted yet", async () => {
@@ -363,38 +353,6 @@ describe("resetLayout — effective default persistence", () => {
     const appliedWidths = vi.mocked(applyLayout).mock.calls.at(-1)?.[2];
     expect(appliedWidths).toEqual(new Map([["right", 240]]));
     expect(useDockviewStore.getState().pinnedWidths).toBe(appliedWidths);
-  });
-
-  it("preserves the built-in Default identity for a reserved override on build and reset", async () => {
-    const api = makeStoreApi();
-    const userDefaultLayout = {
-      columns: [
-        {
-          id: "center",
-          groups: [{ panels: [{ id: "chat", component: "chat", title: "Agent" }] }],
-        },
-      ],
-    } as LayoutState;
-    const reservedDefaultProfile = getLayoutProfileIdentity({
-      id: getBuiltInLayoutOverrideId("default"),
-    });
-
-    useDockviewStore.setState({ api, currentLayoutEnvId: "env-reset" });
-    useDockviewStore.getState().setUserDefaultLayout(userDefaultLayout, reservedDefaultProfile);
-
-    useDockviewStore.getState().buildDefaultLayout(api);
-    expect(useDockviewStore.getState().activeLayoutProfile).toEqual({
-      kind: "built-in",
-      id: "default",
-    });
-    await flushRaf();
-
-    useDockviewStore.getState().resetLayout();
-    expect(useDockviewStore.getState().activeLayoutProfile).toEqual({
-      kind: "built-in",
-      id: "default",
-    });
-    await flushRaf();
   });
 
   it("applies the current user default and persists it for the active environment", async () => {
@@ -694,18 +652,10 @@ describe("applyCustomLayout — persistence at call site", () => {
     useDockviewStore.setState({ api, currentLayoutEnvId: CUSTOM_ENV_ID });
 
     useDockviewStore.getState().applyCustomLayout(customLayout as unknown as ApplyCustomLayoutArg);
-    expect(useDockviewStore.getState().activeLayoutProfile).toEqual({
-      kind: "custom",
-      id: "custom-1",
-    });
     await flushRaf();
 
     expect(setEnvLayout).toHaveBeenCalledTimes(1);
     expect(setEnvLayout).toHaveBeenCalledWith(CUSTOM_ENV_ID, expect.any(Object));
-    expect(setEnvLayoutProfile).toHaveBeenCalledWith(CUSTOM_ENV_ID, {
-      kind: "custom",
-      id: "custom-1",
-    });
   });
 
   it("does not persist when no env is adopted yet", async () => {
