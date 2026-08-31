@@ -2316,10 +2316,7 @@ func (s *Service) markOrphanedInheritParentChild(ctx context.Context, archived, 
 	}
 
 	workspace, _ := child.Metadata["workspace"].(map[string]interface{})
-	workspace["orphaned"] = true
-	workspace["orphaned_reason"] = "parent_archived"
-	workspace["orphaned_parent_id"] = archived.ID
-	workspace["orphaned_at"] = time.Now().UTC().Format(time.RFC3339)
+	stampOrphanedWorkspaceMetadata(workspace, archived.ID)
 
 	if err := s.tasks.UpdateTask(ctx, child); err != nil {
 		s.logger.Warn("mark orphaned inherit_parent child failed",

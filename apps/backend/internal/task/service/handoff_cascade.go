@@ -238,6 +238,12 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 			// path so the cascade looks identical to a single-task archive
 			// from the frontend's perspective.
 			s.publishUpdatedTask(ctx, all[i])
+			// Stamp any inherit_parent children of this archived task as
+			// orphaned. WS/HTTP archive always prefer this cascade path
+			// over Service.ArchiveTask whenever a HandoffService is wired
+			// (see backendapp's registerRoutes), so without this call the
+			// marker only ever fires via the MCP archive_task_kandev tool.
+			s.markOrphanedInheritParentChildren(ctx, &models.Task{ID: all[i]})
 			// Tear down runtime resources (container/sandbox/worktree).
 			// Cancellation above stopped the agent but does not remove the
 			// container. Archive preserves the env row (deleteEnvRow=false).
@@ -701,6 +707,10 @@ func (s *HandoffService) UnarchiveTaskTree(ctx context.Context, rootID string) (
 			// archived_at=null to put the card back on the kanban, same
 			// as ArchiveTaskTree publishes per archived task.
 			s.publishUpdatedTask(ctx, id)
+			// This task may itself be a parent whose inherit_parent
+			// children were marked orphaned by this same archive; the
+			// marker's "parent_archived" claim is no longer true.
+			s.clearOrphanedInheritParentChildren(ctx, id)
 		} else {
 			out.SkippedTaskIDs = append(out.SkippedTaskIDs, id)
 		}
@@ -754,6 +764,7 @@ func (s *HandoffService) unarchiveManualRoot(ctx context.Context, root *models.T
 	}
 	out.ArchivedTaskIDs = append(out.ArchivedTaskIDs, root.ID)
 	s.publishUpdatedTask(ctx, root.ID)
+	s.clearOrphanedInheritParentChildren(ctx, root.ID)
 	// Legacy archives never released group memberships, but the group may
 	// have been cleaned since (e.g. by a later cascade on another member).
 	// Restore the group's materialized workspace if it was cleaned. Best
