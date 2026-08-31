@@ -10,16 +10,6 @@ import { SessionPage } from "../../pages/session-page";
 
 const LONG_TASK_TITLE = `Desktop cleanup confirmation ${"X".repeat(31)}`;
 
-async function computedTextContract(locator: Locator) {
-  return locator.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return {
-      textWrap: style.getPropertyValue("text-wrap"),
-      textAlign: style.textAlign,
-    };
-  });
-}
-
 async function assertDesktopDeleteDialog(dialog: Locator): Promise<void> {
   await waitForFiniteAnimations(dialog);
 
@@ -30,9 +20,6 @@ async function assertDesktopDeleteDialog(dialog: Locator): Promise<void> {
   await expect(title).toHaveCSS("text-wrap", "balance");
   await expect(description).toHaveCSS("text-wrap", "pretty");
   await expect(description).toHaveCSS("text-align", "left");
-  expect((await computedTextContract(title)).textWrap).toBe("balance");
-  expect((await computedTextContract(description)).textWrap).toBe("pretty");
-  expect((await computedTextContract(description)).textAlign).toBe("left");
 
   const labelledBy = await dialog.getAttribute("aria-labelledby");
   const describedBy = await dialog.getAttribute("aria-describedby");
@@ -148,7 +135,6 @@ test.describe("Desktop confirmation text hierarchy", () => {
     const renameTitle = renameDialog.locator('[data-slot="dialog-title"]');
     await expect(renameTitle).toBeVisible();
     await expect(renameTitle).toHaveCSS("text-wrap", "balance");
-    expect((await computedTextContract(renameTitle)).textWrap).toBe("balance");
     const renameLabelledBy = await renameDialog.getAttribute("aria-labelledby");
     expect(renameLabelledBy).toBe(await renameTitle.getAttribute("id"));
     await assertLocatorWithinViewportX(renameDialog, "desktop rename Dialog");

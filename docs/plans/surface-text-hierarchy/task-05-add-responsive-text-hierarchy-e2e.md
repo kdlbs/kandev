@@ -131,3 +131,8 @@ tests/task/confirmation-text-hierarchy.spec.ts` (2 tests).
 tests/task/dialog-long-text-overflow.spec.ts
 tests/task/sidebar-delete-confirm.spec.ts` (2 tests).
 - GREEN: `pnpm run e2e:sleep-ratchet` and focused ESLint for both new specs.
+- Review remediation synchronized the completed parent plan and removed
+  redundant direct computed-style reads in favor of Playwright's retrying CSS
+  assertions. Final reruns remained green: mobile 4/4, desktop 2/2, and existing
+  long-dialog/delete regressions 2/2; focused lint, Prettier, the sleep ratchet,
+  diff checks, and specification lint also passed.

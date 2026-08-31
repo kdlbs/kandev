@@ -15,17 +15,6 @@ import { SessionPage } from "../../pages/session-page";
 
 const LONG_TASK_TITLE = `Mobile cleanup confirmation ${"X".repeat(32)}`;
 
-async function computedTextContract(locator: Locator) {
-  return locator.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return {
-      textWrap: style.getPropertyValue("text-wrap"),
-      textAlign: style.textAlign,
-      overflowWrap: style.overflowWrap,
-    };
-  });
-}
-
 async function enablePseudoLocale(page: Page): Promise<void> {
   await page.evaluate(() => {
     document.cookie = "kandev_locale=pseudo; path=/; max-age=31536000; SameSite=Lax";
@@ -97,10 +86,7 @@ async function assertPhoneDeleteDialog(dialog: Locator, width: number): Promise<
   await expect(title).toHaveCSS("text-wrap", "balance");
   await expect(description).toHaveCSS("text-wrap", "pretty");
   await expect(description).toHaveCSS("text-align", "left");
-  expect((await computedTextContract(title)).textWrap).toBe("balance");
-  expect((await computedTextContract(description)).textWrap).toBe("pretty");
-  expect((await computedTextContract(description)).textAlign).toBe("left");
-  expect((await computedTextContract(description)).overflowWrap).toMatch(/anywhere|break-word/);
+  await expect(description).toHaveCSS("overflow-wrap", /anywhere|break-word/);
 
   const labelledBy = await dialog.getAttribute("aria-labelledby");
   const describedBy = await dialog.getAttribute("aria-describedby");
@@ -281,8 +267,6 @@ test.describe("Mobile confirmation text hierarchy", () => {
     const description = alert.locator('[data-slot="alert-description"]');
     await expect(title).toHaveCSS("text-wrap", "balance");
     await expect(description).toHaveCSS("text-wrap", "pretty");
-    expect((await computedTextContract(title)).textWrap).toBe("balance");
-    expect((await computedTextContract(description)).textWrap).toBe("pretty");
     await assertNoDescendantOverflowsRight(alert, "phone runtime Alert");
     await assertNoDocumentHorizontalOverflow(testPage, "phone runtime Alert");
 
