@@ -2,17 +2,15 @@ package skill
 
 import (
 	"path/filepath"
-	"regexp"
 	"strings"
+
+	"github.com/kandev/kandev/internal/common/skillslug"
 )
 
-// validSlugRe matches slugs that are safe for use in shell commands
-// and on-disk paths. Anything outside this set is dropped during
+// isValidSlug reports whether the given slug is safe for use in shell
+// commands and on-disk paths. Anything outside this set is dropped during
 // delivery to avoid path-traversal or shell-quoting hazards.
-var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
-
-// isValidSlug reports whether the given slug is safe.
-func isValidSlug(s string) bool { return s != "" && validSlugRe.MatchString(s) }
+func isValidSlug(s string) bool { return skillslug.WellFormed(s) }
 
 // isValidPathComponent reports whether the given filename is a single
 // safe path component (no separators, no traversal). Used when writing

@@ -86,8 +86,92 @@ func TestValidateAndPrepareSkill_AutoGeneratesSlug(t *testing.T) {
 	if err := svc.ValidateAndPrepareSkill(ctx, skill); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
-	if skill.Slug != "code-review" {
-		t.Errorf("slug = %q, want %q", skill.Slug, "code-review")
+	if skill.Slug != "kandev-code-review" {
+		t.Errorf("slug = %q, want %q", skill.Slug, "kandev-code-review")
+	}
+}
+
+// TestValidateAndPrepareSkill_NormalizesExplicitSlugToCanonical covers
+// AC-001.12: a well-formed but non-canonical caller-supplied slug is
+// normalized to canonical before persisting.
+func TestValidateAndPrepareSkill_NormalizesExplicitSlugToCanonical(t *testing.T) {
+	svc := newTestSkillService(t)
+	ctx := context.Background()
+
+	skill := &models.Skill{
+		WorkspaceID: "ws-1",
+		Name:        "My Skill",
+		Slug:        "my-skill",
+		SourceType:  "inline",
+	}
+	if err := svc.ValidateAndPrepareSkill(ctx, skill); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if skill.Slug != "kandev-my-skill" {
+		t.Errorf("slug = %q, want %q", skill.Slug, "kandev-my-skill")
+	}
+}
+
+// TestValidateAndPrepareSkill_CanonicalSlugUnchanged covers AC-001.6: a
+// slug that is already canonical is left byte-identical.
+func TestValidateAndPrepareSkill_CanonicalSlugUnchanged(t *testing.T) {
+	svc := newTestSkillService(t)
+	ctx := context.Background()
+
+	skill := &models.Skill{
+		WorkspaceID: "ws-1",
+		Name:        "Already Canonical",
+		Slug:        "kandev-already-canonical",
+		SourceType:  "inline",
+	}
+	if err := svc.ValidateAndPrepareSkill(ctx, skill); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if skill.Slug != "kandev-already-canonical" {
+		t.Errorf("slug = %q, want %q", skill.Slug, "kandev-already-canonical")
+	}
+}
+
+// TestValidateAndPrepareSkill_RejectsNotWellFormedSlug covers AC-001.11: a
+// not-well-formed caller-supplied slug is rejected outright, never coerced.
+func TestValidateAndPrepareSkill_RejectsNotWellFormedSlug(t *testing.T) {
+	svc := newTestSkillService(t)
+	ctx := context.Background()
+
+	skill := &models.Skill{
+		WorkspaceID: "ws-1",
+		Name:        "Bad Slug",
+		Slug:        "not a valid slug!",
+		SourceType:  "inline",
+	}
+	err := svc.ValidateAndPrepareSkill(ctx, skill)
+	if err == nil {
+		t.Fatal("expected error for not-well-formed slug")
+	}
+	if skill.Slug == "kandev-not a valid slug!" {
+		t.Errorf("slug was coerced into a well-formed value: %q", skill.Slug)
+	}
+}
+
+// TestValidateAndPrepareSkill_UniquenessCheckedOnCanonicalValue covers the
+// second half of AC-001.12: a request whose canonical slug already exists
+// is rejected, even when the request itself supplied the non-canonical
+// form.
+func TestValidateAndPrepareSkill_UniquenessCheckedOnCanonicalValue(t *testing.T) {
+	svc := newTestSkillService(t)
+	ctx := context.Background()
+
+	existing := &models.Skill{WorkspaceID: "ws-1", Name: "Existing", Slug: "kandev-my-skill", SourceType: "inline"}
+	if err := svc.ValidateAndPrepareSkill(ctx, existing); err != nil {
+		t.Fatalf("validate existing: %v", err)
+	}
+	if err := svc.CreateSkill(ctx, existing); err != nil {
+		t.Fatalf("create existing: %v", err)
+	}
+
+	colliding := &models.Skill{WorkspaceID: "ws-1", Name: "Colliding", Slug: "my-skill", SourceType: "inline"}
+	if err := svc.ValidateAndPrepareSkill(ctx, colliding); err == nil {
+		t.Fatal("expected duplicate slug error against the canonical form")
 	}
 }
 
@@ -140,6 +224,47 @@ func TestValidateAndPrepareSkill_RejectsSameSlugInSameWorkspace(t *testing.T) {
 	err := svc.ValidateAndPrepareSkill(ctx, s2)
 	if err == nil {
 		t.Fatal("expected duplicate slug error in same workspace")
+	}
+}
+
+// --- ValidateSkillUpdate tests ---
+
+func TestValidateSkillUpdate_NormalizesWellFormedSlugToCanonical(t *testing.T) {
+	svc := newTestSkillService(t)
+	ctx := context.Background()
+
+	skill := &models.Skill{WorkspaceID: "ws-1", Name: "Existing", Slug: "kandev-existing", SourceType: "inline"}
+	if err := svc.ValidateAndPrepareSkill(ctx, skill); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if err := svc.CreateSkill(ctx, skill); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	skill.Slug = "renamed"
+	if err := svc.ValidateSkillUpdate(ctx, skill); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if skill.Slug != "kandev-renamed" {
+		t.Errorf("slug = %q, want %q", skill.Slug, "kandev-renamed")
+	}
+}
+
+func TestValidateSkillUpdate_RejectsNotWellFormedSlug(t *testing.T) {
+	svc := newTestSkillService(t)
+	ctx := context.Background()
+
+	skill := &models.Skill{WorkspaceID: "ws-1", Name: "Existing", Slug: "kandev-existing", SourceType: "inline"}
+	if err := svc.ValidateAndPrepareSkill(ctx, skill); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if err := svc.CreateSkill(ctx, skill); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	skill.Slug = "not a valid slug!"
+	if err := svc.ValidateSkillUpdate(ctx, skill); err == nil {
+		t.Fatal("expected error for not-well-formed slug")
 	}
 }
 

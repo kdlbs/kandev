@@ -117,6 +117,27 @@ func (r *Repository) ListSystemSkills(
 	return skills, nil
 }
 
+// ListNonSystemSkills returns all is_system = false (or NULL) skills
+// for a workspace, ordered by slug. Used by the system-skill sync's
+// slug-migration pass: user/provider-imported rows that need a
+// well-formed-but-non-canonical slug normalized to canonical, and the
+// conflict check before inserting a newly-bundled canonical slug.
+func (r *Repository) ListNonSystemSkills(
+	ctx context.Context, workspaceID string,
+) ([]*models.Skill, error) {
+	var skills []*models.Skill
+	err := r.ro.SelectContext(ctx, &skills, r.ro.Rebind(
+		`SELECT * FROM office_skills WHERE workspace_id = ? AND is_system = 0 ORDER BY slug`),
+		workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if skills == nil {
+		return []*models.Skill{}, nil
+	}
+	return skills, nil
+}
+
 // UpdateSkill updates an existing skill.
 func (r *Repository) UpdateSkill(ctx context.Context, skill *models.Skill) error {
 	skill.UpdatedAt = time.Now().UTC()
