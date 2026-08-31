@@ -252,7 +252,10 @@ export class WorkflowSettingsPage {
   /** Select and apply a workflow-level profile session policy. */
   async setWorkflowProfileSessionPolicy(card: Locator, optionName: string, touch = false) {
     await this.activate(this.workflowProfileSessionPolicySelect(card), touch);
-    await this.activate(this.page.getByRole("option", { name: optionName, exact: false }), touch);
+    await this.activate(
+      this.page.getByRole("listbox").getByRole("option", { name: optionName, exact: false }),
+      touch,
+    );
   }
 
   /** The step agent profile override select trigger in the step config panel within a workflow card. */

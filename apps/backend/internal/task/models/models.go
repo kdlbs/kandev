@@ -266,11 +266,15 @@ const (
 )
 
 // WorkflowProfileSwitchStopIntent binds a deliberate parked-session stop to
-// one exact runtime execution. Stamp is compared before the metadata key is
-// removed, so a delayed event cannot consume a newer switch intent.
+// one exact runtime execution. Stamp is compared before the metadata value is
+// marked consumed, so a delayed event cannot consume a newer switch intent.
 type WorkflowProfileSwitchStopIntent struct {
 	ExecutionID string `json:"execution_id"`
 	Stamp       string `json:"stamp"`
+	// Consumed is a durable tombstone for the matching terminal callback. It
+	// remains in session metadata so delayed callbacks after a restart cannot
+	// advance the workflow.
+	Consumed bool `json:"consumed,omitempty"`
 }
 
 // SessionMetaKeySessionMode records the agent's last-known session permission

@@ -908,8 +908,9 @@ type Service struct {
 	// completed-execution stream markers.
 	executionTeardownClaims sync.Map
 	// parkedProfileSwitchStops remembers exact executions whose deliberate
-	// parked-switch lifecycle event was already consumed. It closes the
-	// duplicate-event gap after the durable stop intent is compare-and-removed.
+	// parked-switch lifecycle event was already consumed. It is a short-lived
+	// duplicate-delivery optimization; the durable consumed tombstone lives in
+	// session metadata.
 	parkedProfileSwitchStops sync.Map
 
 	// steerInFlight tracks sessions with an unacknowledged mid-turn steer.

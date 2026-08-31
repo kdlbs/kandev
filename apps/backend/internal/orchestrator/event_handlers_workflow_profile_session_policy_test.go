@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -17,6 +18,7 @@ import (
 type failParkIntentRepo struct {
 	repoStore
 	remover workflowProfileSwitchStopIntentRemover
+	marker  workflowProfileSwitchStopIntentMarker
 }
 
 func (r failParkIntentRepo) SetSessionMetadataKey(context.Context, string, string, interface{}) error {
@@ -25,6 +27,10 @@ func (r failParkIntentRepo) SetSessionMetadataKey(context.Context, string, strin
 
 func (r failParkIntentRepo) RemoveSessionMetadataKeyIfStamp(ctx context.Context, sessionID, key, stamp string) (bool, error) {
 	return r.remover.RemoveSessionMetadataKeyIfStamp(ctx, sessionID, key, stamp)
+}
+
+func (r failParkIntentRepo) SetSessionMetadataKeyIfStamp(ctx context.Context, sessionID, key, expectedStamp string, value interface{}) (bool, error) {
+	return r.marker.SetSessionMetadataKeyIfStamp(ctx, sessionID, key, expectedStamp, value)
 }
 
 type failProfileSwitchPromotionRepo struct {
@@ -39,6 +45,7 @@ func (r failProfileSwitchPromotionRepo) SetSessionPrimary(context.Context, strin
 type profileSwitchFixture struct {
 	repo       *sqliterepo.Repository
 	svc        *Service
+	agentMgr   *mockAgentManager
 	stepGetter *mockStepGetter
 	current    *models.TaskSession
 }
@@ -102,7 +109,7 @@ func newProfileSwitchFixture(t *testing.T, policy models.WorkflowProfileSessionP
 		},
 	}
 	return &profileSwitchFixture{
-		repo: repo, stepGetter: stepGetter, current: current,
+		repo: repo, stepGetter: stepGetter, current: current, agentMgr: agentMgr,
 		svc: createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr),
 	}
 }
@@ -263,8 +270,9 @@ func TestHandleAgentCompleted_ProfileSessionPolicySuppressesParkedSwitch(t *test
 	if session.State != models.TaskSessionStateWaitingForInput {
 		t.Fatalf("session state = %s, want WAITING_FOR_INPUT", session.State)
 	}
-	if _, ok := session.Metadata[models.SessionMetaKeyWorkflowProfileSwitchStopIntent]; ok {
-		t.Fatal("matching completion must consume the parked-switch stop intent")
+	intent, ok := workflowProfileSwitchStopIntentFromMetadata(session.Metadata)
+	if !ok || !intent.Consumed {
+		t.Fatalf("matching completion stop intent = %#v, want durable consumed tombstone", session.Metadata[models.SessionMetaKeyWorkflowProfileSwitchStopIntent])
 	}
 }
 
@@ -290,8 +298,48 @@ func TestHandleAgentStopped_ProfileSessionPolicySuppressesParkedSwitch(t *testin
 	if session.State != models.TaskSessionStateWaitingForInput {
 		t.Fatalf("session state = %s, want WAITING_FOR_INPUT", session.State)
 	}
-	if _, ok := session.Metadata[models.SessionMetaKeyWorkflowProfileSwitchStopIntent]; ok {
-		t.Fatal("matching stopped event must consume the parked-switch stop intent")
+	intent, ok := workflowProfileSwitchStopIntentFromMetadata(session.Metadata)
+	if !ok || !intent.Consumed {
+		t.Fatalf("matching stopped stop intent = %#v, want durable consumed tombstone", session.Metadata[models.SessionMetaKeyWorkflowProfileSwitchStopIntent])
+	}
+}
+
+func TestHandleAgentCompleted_ProfileSessionPolicySuppressesParkedSwitchAfterRestart(t *testing.T) {
+	ctx := context.Background()
+	repo, svc, turnID := newParkedProfileSwitchEventFixture(t)
+	event := watcher.AgentEventData{
+		TaskID: "t1", SessionID: "session-a", AgentExecutionID: "execution-a",
+	}
+
+	svc.handleAgentCompleted(ctx, event)
+
+	// A new Service has no in-memory duplicate marker. The persisted consumed
+	// tombstone must still suppress a delayed callback after a restart.
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", WorkspaceID: "ws1", WorkflowID: "wf1", State: v1.TaskStateInProgress}
+	svcAfterRestart := createTestServiceWithScheduler(
+		repo,
+		newMockStepGetter(),
+		taskRepo,
+		&mockAgentManager{repoForExecutionLookup: repo},
+	)
+	svcAfterRestart.turnService = &repoTurnService{repo: repo}
+	svcAfterRestart.handleAgentCompleted(ctx, event)
+
+	turn, err := repo.GetTurn(ctx, turnID)
+	if err != nil {
+		t.Fatalf("reload turn: %v", err)
+	}
+	if turn.CompletedAt != nil {
+		t.Fatal("delayed completion after restart must not complete the source turn")
+	}
+	session, err := repo.GetTaskSession(ctx, event.SessionID)
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	intent, ok := workflowProfileSwitchStopIntentFromMetadata(session.Metadata)
+	if !ok || !intent.Consumed {
+		t.Fatalf("restart stop intent = %#v, want durable consumed tombstone", session.Metadata[models.SessionMetaKeyWorkflowProfileSwitchStopIntent])
 	}
 }
 
@@ -428,7 +476,12 @@ func TestSwitchSessionForStep_ParkNewProfileSessionPolicyRoundTrip(t *testing.T)
 func TestSwitchSessionForStep_ParkProfileSessionPolicyPreservesSourceWhenIntentWriteFails(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionPolicyParkReuse)
-	fixture.svc.repo = failParkIntentRepo{repoStore: fixture.repo, remover: fixture.repo}
+	if _, err := fixture.svc.messageQueue.QueueMessage(
+		ctx, fixture.current.ID, "t1", "queued handoff", "", messagequeue.QueuedByUser, false, nil,
+	); err != nil {
+		t.Fatalf("queue handoff: %v", err)
+	}
+	fixture.svc.repo = failParkIntentRepo{repoStore: fixture.repo, remover: fixture.repo, marker: fixture.repo}
 
 	_, _, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, &wfmodels.WorkflowStep{
 		ID: "step-b", WorkflowID: "wf1", Position: 1,
@@ -449,6 +502,82 @@ func TestSwitchSessionForStep_ParkProfileSessionPolicyPreservesSourceWhenIntentW
 	}
 	if _, ok := source.Metadata[models.SessionMetaKeyWorkflowProfileSwitchStopIntent]; ok {
 		t.Fatal("failed intent write must not leave stop metadata")
+	}
+	status := fixture.svc.messageQueue.GetStatus(ctx, fixture.current.ID)
+	if status.Count != 1 || status.Entries[0].Content != "queued handoff" {
+		t.Fatalf("source queue after intent failure = %+v, want queued handoff restored", status.Entries)
+	}
+}
+
+func TestSwitchSessionForStep_ParkProfileSessionPolicyRestoresQueueAfterReuseParkingFails(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionPolicyParkReuse)
+	stepB := &wfmodels.WorkflowStep{ID: "step-b", WorkflowID: "wf1", Position: 1}
+
+	profileB, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, stepB)
+	if err != nil || !switched || profileB == nil {
+		t.Fatalf("initial switch to profile-b = session=%+v switched=%t err=%v", profileB, switched, err)
+	}
+	currentB, err := fixture.repo.GetTaskSession(ctx, profileB.ID)
+	if err != nil {
+		t.Fatalf("reload profile-b source: %v", err)
+	}
+	if _, err := fixture.svc.messageQueue.QueueMessage(
+		ctx, currentB.ID, "t1", "queued reuse handoff", "", messagequeue.QueuedByUser, false, nil,
+	); err != nil {
+		t.Fatalf("queue reuse handoff: %v", err)
+	}
+
+	fixture.svc.repo = failParkIntentRepo{repoStore: fixture.repo, remover: fixture.repo, marker: fixture.repo}
+	fixture.stepGetter.workflowAgentProfileID = "profile-a"
+	_, _, err = fixture.svc.prepareWorkflowStepSession(ctx, "t1", currentB, &wfmodels.WorkflowStep{
+		ID: "step-a", WorkflowID: "wf1", Position: 2,
+	})
+	if err == nil {
+		t.Fatal("reuse profile switch error = nil, want stop-intent persistence failure")
+	}
+
+	restored, err := fixture.repo.GetTaskSession(ctx, currentB.ID)
+	if err != nil {
+		t.Fatalf("reload restored source: %v", err)
+	}
+	if !restored.IsPrimary || restored.State != models.TaskSessionStateCreated {
+		t.Fatalf("restored source = primary %t state %s, want primary created", restored.IsPrimary, restored.State)
+	}
+	status := fixture.svc.messageQueue.GetStatus(ctx, currentB.ID)
+	if status.Count != 1 || status.Entries[0].Content != "queued reuse handoff" {
+		t.Fatalf("source queue after reuse parking failure = %+v, want queued reuse handoff restored", status.Entries)
+	}
+	originalAStatus := fixture.svc.messageQueue.GetStatus(ctx, fixture.current.ID)
+	if originalAStatus.Count != 0 {
+		t.Fatalf("reused destination queue after rollback = %+v, want empty", originalAStatus.Entries)
+	}
+}
+
+func TestSwitchSessionForStep_ParkProfileSessionPolicyContinuesWhenRuntimeStopFails(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionPolicyParkReuse)
+	fixture.agentMgr.stopAgentErr = errors.New("runtime teardown failed")
+
+	selected, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, &wfmodels.WorkflowStep{
+		ID: "step-b", WorkflowID: "wf1", Position: 1,
+	})
+	if err != nil {
+		t.Fatalf("profile switch with runtime stop failure: %v", err)
+	}
+	if !switched || selected == nil || selected.ID == fixture.current.ID {
+		t.Fatalf("selected session = %+v switched=%t, want destination session", selected, switched)
+	}
+	source, err := fixture.repo.GetTaskSession(ctx, fixture.current.ID)
+	if err != nil {
+		t.Fatalf("reload parked source: %v", err)
+	}
+	if source.State != models.TaskSessionStateWaitingForInput || source.IsPrimary {
+		t.Fatalf("source after runtime stop failure = state %s primary %t, want parked nonprimary", source.State, source.IsPrimary)
+	}
+	intent, ok := workflowProfileSwitchStopIntentFromMetadata(source.Metadata)
+	if !ok || intent.Consumed {
+		t.Fatalf("source stop intent after runtime stop failure = %#v, want active intent", source.Metadata[models.SessionMetaKeyWorkflowProfileSwitchStopIntent])
 	}
 }
 

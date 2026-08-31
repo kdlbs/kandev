@@ -19,15 +19,18 @@ type workflowProfileSwitchStopIntentRemover interface {
 	RemoveSessionMetadataKeyIfStamp(context.Context, string, string, string) (bool, error)
 }
 
+type workflowProfileSwitchStopIntentMarker interface {
+	SetSessionMetadataKeyIfStamp(context.Context, string, string, string, interface{}) (bool, error)
+}
+
 type workflowProfileSwitchStopConsumed struct {
 	expiresAt time.Time
 }
 
 // parkSessionForProfileSwitch keeps the source answerable while ensuring the
 // old runtime's terminal event cannot advance the destination workflow step.
-// The bool reports whether the source was durably parked. A true result with
-// an error means the source is parked but runtime teardown failed, so callers
-// must retain the intent instead of rolling the source back.
+// The bool reports whether the source was durably parked. Runtime teardown is
+// best effort after the parked state and stop intent are committed.
 func (s *Service) parkSessionForProfileSwitch(
 	ctx context.Context,
 	taskID string,
@@ -45,6 +48,9 @@ func (s *Service) parkSessionForProfileSwitch(
 	var intent models.WorkflowProfileSwitchStopIntent
 	if executionID != "" {
 		if _, ok := s.repo.(workflowProfileSwitchStopIntentRemover); !ok {
+			return false, fmt.Errorf("parked workflow profile switch requires stamped session metadata support")
+		}
+		if _, ok := s.repo.(workflowProfileSwitchStopIntentMarker); !ok {
 			return false, fmt.Errorf("parked workflow profile switch requires stamped session metadata support")
 		}
 		intent = models.WorkflowProfileSwitchStopIntent{
@@ -84,7 +90,9 @@ func (s *Service) parkSessionForProfileSwitch(
 		return true, nil
 	}
 	if err := s.agentManager.StopAgent(ctx, executionID, false); err != nil {
-		return true, fmt.Errorf("stop parked workflow profile session %q: %w", session.ID, err)
+		s.logger.Warn("failed to stop runtime for parked workflow profile session",
+			zap.String("session_id", session.ID),
+			zap.Error(err))
 	}
 	return true, nil
 }
@@ -110,9 +118,9 @@ func (s *Service) clearParkedProfileSwitchIntent(ctx context.Context, sessionID,
 }
 
 // consumeParkedProfileSwitchStopIntent returns true only for the execution
-// recorded by the parked switch. It remembers the consumed execution briefly
-// so duplicate completed/stopped deliveries remain harmless after the first
-// compare-and-remove has deleted the durable intent.
+// recorded by the parked switch. It marks the matching intent consumed with a
+// stamped compare-and-set and keeps that tombstone durable. The in-memory
+// marker is only an optimization for duplicate deliveries in this process.
 func (s *Service) consumeParkedProfileSwitchStopIntent(
 	ctx context.Context,
 	data watcher.AgentEventData,
@@ -139,39 +147,49 @@ func (s *Service) consumeParkedProfileSwitchStopIntent(
 		return false
 	}
 
-	// Claim the execution before the database compare-and-remove. A duplicate
-	// event racing this one must fail closed while the first callback removes
-	// the durable record.
+	// A durable consumed tombstone handles callbacks after a process restart.
+	// Re-arm the short-lived in-memory marker so same-process duplicates avoid a
+	// metadata round trip.
+	if intent.Consumed {
+		s.rememberParkedProfileSwitchStop(key)
+		return true
+	}
+
+	// Claim the execution before the database compare-and-set. A duplicate event
+	// racing this one must fail closed while the first callback marks the
+	// durable tombstone.
 	s.rememberParkedProfileSwitchStop(key)
-	remover, ok := s.repo.(workflowProfileSwitchStopIntentRemover)
+	marker, ok := s.repo.(workflowProfileSwitchStopIntentMarker)
 	if !ok {
-		s.logger.Error("cannot consume parked workflow profile switch intent: repository lacks stamped removal",
+		s.logger.Error("cannot consume parked workflow profile switch intent: repository lacks stamped metadata marking",
 			zap.String("session_id", data.SessionID),
 			zap.String("agent_execution_id", data.AgentExecutionID))
 		return true
 	}
-	removed, err := remover.RemoveSessionMetadataKeyIfStamp(
+	intent.Consumed = true
+	marked, err := marker.SetSessionMetadataKeyIfStamp(
 		ctx,
 		data.SessionID,
 		models.SessionMetaKeyWorkflowProfileSwitchStopIntent,
 		intent.Stamp,
+		intent,
 	)
 	if err != nil {
-		s.logger.Error("failed to consume parked workflow profile switch intent; suppressing lifecycle transition",
+		s.logger.Error("failed to mark parked workflow profile switch intent consumed; suppressing lifecycle transition",
 			zap.String("session_id", data.SessionID),
 			zap.String("agent_execution_id", data.AgentExecutionID),
 			zap.String("stop_intent_stamp", intent.Stamp),
 			zap.Error(err))
 		return true
 	}
-	if !removed {
+	if !marked {
 		s.logger.Debug("parked workflow profile switch intent was already consumed or superseded",
 			zap.String("session_id", data.SessionID),
 			zap.String("agent_execution_id", data.AgentExecutionID),
 			zap.String("stop_intent_stamp", intent.Stamp))
 		return true
 	}
-	s.logger.Debug("consumed parked workflow profile switch intent",
+	s.logger.Debug("marked parked workflow profile switch intent consumed",
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID),
 		zap.String("stop_intent_stamp", intent.Stamp))
@@ -196,11 +214,13 @@ func workflowProfileSwitchStopIntentFromMetadata(
 		return validWorkflowProfileSwitchStopIntent(models.WorkflowProfileSwitchStopIntent{
 			ExecutionID: stringMetadataValue(value["execution_id"]),
 			Stamp:       stringMetadataValue(value["stamp"]),
+			Consumed:    boolMetadataValue(value["consumed"]),
 		})
 	case map[string]string:
 		return validWorkflowProfileSwitchStopIntent(models.WorkflowProfileSwitchStopIntent{
 			ExecutionID: value["execution_id"],
 			Stamp:       value["stamp"],
+			Consumed:    value["consumed"] == "true",
 		})
 	default:
 		return models.WorkflowProfileSwitchStopIntent{}, false
@@ -219,6 +239,11 @@ func validWorkflowProfileSwitchStopIntent(
 func stringMetadataValue(value interface{}) string {
 	valueString, _ := value.(string)
 	return valueString
+}
+
+func boolMetadataValue(value interface{}) bool {
+	valueBool, _ := value.(bool)
+	return valueBool
 }
 
 func (s *Service) rememberParkedProfileSwitchStop(key string) {

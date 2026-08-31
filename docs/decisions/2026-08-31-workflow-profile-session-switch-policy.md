@@ -22,7 +22,9 @@ starting a fresh conversation on every profile re-entry.
 Each workflow stores one portable `profile_session_policy` enum:
 
 - `complete` preserves the current behavior. The source session becomes
-  `COMPLETED`, and a later profile re-entry creates a new session.
+  `COMPLETED`, and a later profile re-entry reuses the newest independently
+  eligible nonterminal session when one exists; otherwise, it creates a new
+  session.
 - `park_reuse` stops the source runtime but leaves its session nonterminal and
   answerable. A later profile re-entry reuses the newest eligible nonterminal
   session for that profile.
@@ -37,9 +39,11 @@ Parked workflow sessions use the existing `WAITING_FOR_INPUT` state and retain
 their provider resume token, messages, task environment, and executor profile.
 Kandev does not add a parallel lifecycle state. Before stopping an execution for
 a parked switch, the orchestrator records an execution-stamped workflow-switch
-stop intent. Completion and stopped handlers suppress only the matching old
-execution event. A later execution with a different identity remains eligible
-for ordinary turn-complete processing.
+stop intent. Completion and stopped handlers atomically mark the matching
+intent consumed and suppress only the matching old execution event. The
+consumed tombstone remains durable across delayed delivery and backend
+restart. A later execution with a different identity remains eligible for
+ordinary turn-complete processing.
 
 The setting is workflow-scoped rather than step-scoped. It is exported,
 imported, and synchronized with the workflow definition.

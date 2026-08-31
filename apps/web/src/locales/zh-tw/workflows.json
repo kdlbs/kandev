@@ -143,7 +143,7 @@
   "profileSessionPolicyCompleteDescription": "關閉舊工作階段，並讓新的設定檔從全新對話開始。",
   "profileSessionPolicyParkNew": "暫停並開始新工作階段",
   "profileSessionPolicyParkNewDescription": "停止舊執行時，但保留它。每次返回該設定檔時都開始全新對話。",
-  "profileSessionPolicyParkReuse": "暫停並重復使用之前的工作階段",
+  "profileSessionPolicyParkReuse": "暫停並重複使用之前的工作階段",
   "profileSessionPolicyParkReuseDescription": "停止舊執行時，但保留其對話。返回同一設定檔時繼續使用它。",
   "projectPathOrLink": "專案路徑或連結",
   "promptSourceStepPrompt": "重新進入「{{stepName}}」會傳送其步驟提示詞，而不是任務描述。",

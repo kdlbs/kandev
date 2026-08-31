@@ -25,6 +25,7 @@ import type {
   TaskState,
   ToolStatus,
   UserSettings,
+  WorkflowProfileSessionPolicy,
 } from "@/lib/types/http";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { GitEventPayload } from "@/lib/types/git-events";
@@ -252,7 +253,7 @@ export type WorkflowPayload = {
   description?: string;
   prompt?: string;
   agent_profile_id?: string;
-  profile_session_policy?: "complete" | "park_reuse" | "park_new";
+  profile_session_policy?: WorkflowProfileSessionPolicy;
   hidden?: boolean;
   /** Phase 2 (ADR-0004) UX hint — frontend-only. */
   style?: "kanban" | "office" | "custom";

@@ -89,7 +89,10 @@ Task 01.
 Implemented policy-aware fixed-profile switching with execution-stamped parked
 session stop intents. Parked sessions remain nonprimary and
 `WAITING_FOR_INPUT`, preserve their provider resume identity, and suppress only
-the matching stopped/completed execution callback. Added round-trip tests for
-`park_reuse` and `park_new`, delayed callback identity tests, intent-write
-failure coverage, and destination-promotion failure coverage. The focused
-orchestrator verification passed with 8 tests.
+the matching stopped/completed execution callback. Consumed stop intents remain
+durable across delayed delivery and restart. Runtime teardown failure does not
+abort a committed park, and failed parking restores transferred queue state.
+Added round-trip tests for `park_reuse` and `park_new`, delayed callback identity
+tests, intent-write failure coverage, destination-promotion failure coverage,
+teardown-failure coverage, and queue-rollback coverage. The focused
+orchestrator verification passed with 11 tests.

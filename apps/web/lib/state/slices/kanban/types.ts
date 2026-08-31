@@ -3,6 +3,7 @@ import type {
   TaskPendingAction,
   TaskPriority,
   TaskState as TaskStatus,
+  WorkflowProfileSessionPolicy,
 } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
@@ -183,7 +184,7 @@ export type WorkflowsState = {
     prompt?: string;
     sortOrder?: number;
     agent_profile_id?: string;
-    profile_session_policy?: "complete" | "park_reuse" | "park_new";
+    profile_session_policy?: WorkflowProfileSessionPolicy;
     hidden?: boolean;
     /**
      * Phase 2 (ADR-0004) UX hint. Read by `<TaskMetaRail>` to choose the

@@ -240,7 +240,7 @@ test.describe("Workflow settings on mobile", () => {
     await expect(policySelect).toBeVisible();
     await policySelect.tap();
 
-    const option = testPage.getByRole("option", {
+    const option = testPage.getByRole("listbox").getByRole("option", {
       name: "Park and reuse the previous session",
       exact: false,
     });

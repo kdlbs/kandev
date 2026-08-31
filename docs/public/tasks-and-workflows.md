@@ -426,7 +426,7 @@ keep the current session.
 
 | Choice | Result |
 | --- | --- |
-| **Complete the previous session** | Completes the old session. A later return to that profile starts a fresh conversation. |
+| **Complete the previous session** | Completes the old session. A later return reuses the newest eligible nonterminal conversation when one exists; otherwise, it starts fresh. |
 | **Park and reuse the previous session** | Stops the old runtime and keeps the session available. A later return to that profile continues the newest eligible conversation. |
 | **Park and start a new session** | Stops the old runtime and keeps the session available. Each later return to that profile starts a fresh conversation. |
 
@@ -445,11 +445,11 @@ New steps allow manual moves by default. **Show in command panel** also defaults
 | Setting                   | Effect                                                                                                                                                                                           |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Start step**            | Where a task is created when no agent starts with it. Only one step per workflow should be selected. If none is selected, Kandev falls back to the first positional step. This setting places tasks; it never starts agents, which is **Auto-start agent** below. |
-| Agent profile             | Overrides the workflow/task profile when entering this step. A different profile creates a new session with fresh conversation context. The fixed profile override and original-session options are mutually exclusive. |
+| Agent profile             | Overrides the workflow/task profile when entering this step. A different profile follows the workflow's session-handling policy: it reuses an eligible nonterminal session when allowed, or creates a fresh conversation. The fixed profile override and original-session options are mutually exclusive. |
 | **Override original session options** | Keeps the original conversation tab while applying model and ACP configuration rules for the task's starting agent family. The options editor appears below WIP settings only when this is checked. |
 | **Auto-start agent**      | Starts an agent whenever a task enters the step.                                                                                                                                                 |
 | **Plan mode**             | Enables plan mode when the task enters the step.                                                                                                                                                 |
-| **Reset agent context**   | Starts with fresh conversation context on entry. It is disabled when the step has a profile override because the profile switch already creates a fresh session.                                 |
+| **Reset agent context**   | Starts with fresh conversation context on entry. It is disabled when the step has a profile override because the workflow's profile-session policy controls whether that switch reuses or creates a conversation. |
 | **Allow manual move**     | Allows dragging a task into this step. Treat it as workflow UX, not as a security or approval boundary.                                                                                          |
 | **Show in command panel** | Includes tasks in this step in the default, empty-search **Cmd+K** task list. Typed task search currently searches every step and can also return archived tasks, regardless of this setting.    |
 | **Auto-archive**          | Archives inactive tasks after the configured number of hours. Enabling it starts at 24 hours; the minimum is 1.                                                                                  |

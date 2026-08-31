@@ -82,7 +82,8 @@ fixed control is needed.
 
 - Map AC 001.1, 001.2, 001.3, 001.4, 001.5, and 001.9 to focused orchestrator
   profile-switch and delayed-callback tests in
-  `event_handlers_workflow_profile_test.go` and adjacent completion tests.
+  `event_handlers_workflow_profile_session_policy_test.go` and adjacent
+  completion tests.
 - Map AC 001.6 to repository, workflow metadata, export/import, and sync tests.
 - Map AC 001.7 and 001.8 to frontend draft/dirty/component tests, including
   read-only behavior and localized labels.
@@ -106,7 +107,7 @@ fixed control is needed.
 ## Verification results
 
 - Task 01: `go test -tags fts5 ./internal/task/repository/sqlite ./internal/workflow/models ./internal/workflow/service ./internal/workflow/handlers ./internal/workflowsync -run 'ProfileSessionPolicy|WorkflowMeta' -count=1` passed.
-- Task 02: `go test -tags fts5 ./internal/orchestrator -run 'Test(SwitchSessionForStep|HandleAgentCompleted|HandleAgentStopped).*ProfileSessionPolicy' -count=1 -v` passed (8 tests).
+- Task 02: `go test -tags fts5 ./internal/orchestrator -run 'Test(SwitchSessionForStep|HandleAgentCompleted|HandleAgentStopped).*ProfileSessionPolicy' -count=1 -v` passed (11 tests), including durable consumed-intent, teardown-failure, and queue-rollback coverage.
 - Task 03: the focused web tests passed (32 tests), `pnpm run typecheck` passed, `pnpm run i18n:check` passed, and `pnpm run i18n:ratchet` passed.
 - Task 04: the desktop profile-session E2E passed (2 tests), the mobile profile-session E2E passed (1 test), and public docs validation passed (61 tests and 41 pages).
 - Changed backend packages: `go test -tags fts5 -count=1 ./internal/backendapp ./internal/orchestrator ./internal/task/... ./internal/workflow/...` passed (7,212 tests across 27 packages).

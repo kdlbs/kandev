@@ -2172,25 +2172,6 @@ func (s *Service) findReusableSessionForProfile(ctx context.Context, taskID, pro
 	return best, nil
 }
 
-// reuseSessionForStep promotes an existing nonterminal session to primary
-// and stops + completes the previous session. The agent for the reused
-// session is not relaunched here — when a prompt arrives, the
-// autoStart/PromptTask paths handle the launch (including lazy-resume via
-// ResumeSession for a session that was previously launched and is currently
-// WAITING_FOR_INPUT). Before it promotes the candidate, it atomically checks
-// that the persisted row is still nonterminal. This closes the lookup-to-
-// promotion race where an agent completion could otherwise make a stale ACP
-// conversation primary again.
-func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, currentSession, existing *models.TaskSession) (*models.TaskSession, error) {
-	return s.reuseSessionForStepWithPolicy(
-		ctx,
-		taskID,
-		currentSession,
-		existing,
-		models.WorkflowProfileSessionPolicyComplete,
-	)
-}
-
 func (s *Service) reuseSessionForStepWithPolicy(
 	ctx context.Context,
 	taskID string,
@@ -2239,6 +2220,7 @@ func (s *Service) reuseSessionForStepWithPolicy(
 	if err != nil {
 		if policy != models.WorkflowProfileSessionPolicyComplete && !parked && currentSession.IsPrimary {
 			s.restoreWorkflowProfileSwitchSourcePrimary(ctx, currentSession)
+			s.restoreWorkflowProfileSwitchSourceQueue(ctx, existing.ID, currentSession.ID)
 		}
 		return nil, err
 	}
@@ -2337,6 +2319,7 @@ func (s *Service) createNewSessionForStepWithPolicy(
 	if err != nil {
 		if policy != models.WorkflowProfileSessionPolicyComplete && !parked && currentSession.IsPrimary {
 			s.restoreWorkflowProfileSwitchSourcePrimary(ctx, currentSession)
+			s.restoreWorkflowProfileSwitchSourceQueue(ctx, newSession.ID, currentSession.ID)
 		}
 		return nil, err
 	}
@@ -2360,6 +2343,18 @@ func (s *Service) restoreWorkflowProfileSwitchSourcePrimary(ctx context.Context,
 	if err := s.SetPrimarySession(ctx, session.ID); err != nil {
 		s.logger.Warn("failed to restore source session after parked profile switch failure",
 			zap.String("session_id", session.ID),
+			zap.Error(err))
+	}
+}
+
+func (s *Service) restoreWorkflowProfileSwitchSourceQueue(ctx context.Context, fromSessionID, toSessionID string) {
+	if s.messageQueue == nil {
+		return
+	}
+	if err := s.messageQueue.TransferSession(ctx, fromSessionID, toSessionID); err != nil {
+		s.logger.Error("failed to return queued state to restored source session",
+			zap.String("from_session_id", fromSessionID),
+			zap.String("to_session_id", toSessionID),
 			zap.Error(err))
 	}
 }

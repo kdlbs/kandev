@@ -41,7 +41,8 @@ that I intend.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.1:** When a workflow has no profile
   session policy or selects **Complete previous session**, Kandev shall mark the
   session switched away from as completed. A later re-entry to that profile
-  shall create a new session.
+  shall reuse the newest independently eligible nonterminal session when one
+  exists; otherwise, it shall create a new session.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.2:** When a workflow selects **Keep
   and reuse previous session**, Kandev shall stop the runtime switched away from
   while keeping its session nonterminal and answerable. A later profile re-entry

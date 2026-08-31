@@ -47,7 +47,7 @@ values:
 
 | Value | Source session | Profile re-entry |
 | --- | --- | --- |
-| `complete` | Set `COMPLETED`, then stop runtime | Prepare a new session |
+| `complete` | Set `COMPLETED`, then stop runtime | Reuse newest eligible nonterminal session, or prepare a new one |
 | `park_reuse` | Set `WAITING_FOR_INPUT`, then stop runtime | Reuse newest eligible nonterminal session |
 | `park_new` | Set `WAITING_FOR_INPUT`, then stop runtime | Prepare a new session |
 
@@ -67,8 +67,9 @@ promoted.
 
 Before a parked runtime stop, session metadata stores a workflow-switch stop
 intent containing the exact agent execution ID and a unique stamp. Matching
-completion/stopped handlers remove the stamp with compare-and-remove semantics.
-They do not use a generic session-state check or a boolean cancellation marker.
+completion/stopped handlers mark the intent consumed with stamped
+compare-and-set semantics and retain the durable tombstone. They do not use a
+generic session-state check or an unscoped boolean cancellation marker.
 
 ## Control flow
 
@@ -106,9 +107,9 @@ stopping or completing the source session. It does not silently downgrade to
 ordinary session cleanup.
 
 If runtime stop fails after the parked state is committed, Kandev reports the
-failure and retains the execution-stamped intent. A retry can address the same
-execution without allowing its delayed completion to advance the destination
-step.
+failure and retains the execution-stamped intent. The switch still succeeds,
+and a retry can address the same execution without allowing its delayed
+completion to advance the destination step.
 
 A candidate that becomes terminal between lookup and primary promotion is not
 revived. `park_reuse` prepares a new destination, preserving the existing
@@ -123,10 +124,11 @@ The task repository adds the replayable workflow column migration for SQLite
 and PostgreSQL and includes the field in create, read, list, and update queries.
 Workflow export/import and synced YAML preserve the enum.
 
-The stop-intent metadata is transient coordination state stored on the session
-so delayed callbacks can be matched safely. It is removed by the matching
-callback. A stale stamp after restart is harmless because a resumed execution
-has a different ID. Resume can remove stale stamps when practical.
+The stop-intent metadata is coordination state stored on the session so delayed
+callbacks can be matched safely. The matching callback marks it consumed and
+keeps the tombstone durable across delayed delivery and restart. A newer parked
+switch overwrites it with a new execution ID and stamp. A stale stamp after
+restart is harmless because a resumed execution has a different ID.
 
 ## Frontend and mobile behavior
 

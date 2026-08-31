@@ -211,9 +211,9 @@ export type TaskPendingActionRevision = {
 export type WorkflowProfileSessionPolicy = "complete" | "park_reuse" | "park_new";
 
 export function normalizeWorkflowProfileSessionPolicy(
-  value: string | null | undefined,
+  value: unknown,
 ): WorkflowProfileSessionPolicy {
-  switch (value?.trim()) {
+  switch (typeof value === "string" ? value.trim() : undefined) {
     case "park_reuse":
       return "park_reuse";
     case "park_new":
