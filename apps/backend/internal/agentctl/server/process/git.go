@@ -243,14 +243,34 @@ func (g *GitOperator) validateManagedPushTransport(ctx context.Context) error {
 
 func managedPushTransportConfigKey(key string) bool {
 	key = strings.ToLower(strings.TrimSpace(key))
-	if key == "include.path" || (strings.HasPrefix(key, "includeif.") && strings.HasSuffix(key, ".path")) {
+	if key == "include.path" || managedPushConfigKeyWithSuffix(key, "includeif.", ".path") {
 		return true
 	}
-	return strings.HasPrefix(key, "url.") && (strings.HasSuffix(key, ".insteadof") || strings.HasSuffix(key, ".pushinsteadof")) ||
-		key == "core.sshcommand" || key == "core.gitproxy" ||
-		(strings.HasPrefix(key, "remote.") && (strings.HasSuffix(key, ".receivepack") || strings.HasSuffix(key, ".uploadpack"))) ||
-		(strings.HasPrefix(key, "http.") && (strings.HasSuffix(key, ".proxy") || strings.HasSuffix(key, ".extraheader"))) ||
-		key == "credential.helper" || (strings.HasPrefix(key, "credential.") && strings.HasSuffix(key, ".helper"))
+	if managedPushConfigKeyWithSuffixes(key, "url.", ".insteadof", ".pushinsteadof") {
+		return true
+	}
+	if key == "core.sshcommand" || key == "core.gitproxy" || key == "credential.helper" {
+		return true
+	}
+	return managedPushConfigKeyWithSuffixes(key, "remote.", ".receivepack", ".uploadpack") ||
+		managedPushConfigKeyWithSuffixes(key, "http.", ".proxy", ".extraheader") ||
+		managedPushConfigKeyWithSuffix(key, "credential.", ".helper")
+}
+
+func managedPushConfigKeyWithSuffix(key, prefix, suffix string) bool {
+	return strings.HasPrefix(key, prefix) && strings.HasSuffix(key, suffix)
+}
+
+func managedPushConfigKeyWithSuffixes(key, prefix string, suffixes ...string) bool {
+	if !strings.HasPrefix(key, prefix) {
+		return false
+	}
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(key, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (g *GitOperator) managedPushEnvironmentValues() []string {
