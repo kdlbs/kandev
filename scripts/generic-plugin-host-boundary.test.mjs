@@ -91,6 +91,23 @@ test("keeps the public Host inventory generic and merge-free", async () => {
   assert.match(inventory, /No Host writer is approved in H0/);
 });
 
+test("assigns pending-transition reads only to H2c", async () => {
+  const adr = await readADR();
+  const inventory = section(
+    adr,
+    "### Public Host surface inventory",
+    "### H2d exact-head evidence",
+  );
+  const h5Row = inventory.split("\n").find((line) => line.startsWith("| H5 "));
+
+  assert.ok(h5Row, "missing H5 inventory row");
+  assert.match(h5Row, /CancelPendingTaskTransitionExact/);
+  assert.doesNotMatch(
+    h5Row,
+    /ListPendingTaskTransitions|TaskTransitionQuery|api_read:/,
+  );
+});
+
 test("pins immutable migration evidence and forbidden integration paths", async () => {
   const adr = await readADR();
   const normalized = adr.replace(/\s+/g, " ");
