@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -32,6 +33,30 @@ type GitHubAPIError struct {
 	StatusCode int
 	Endpoint   string
 	Body       string
+	RetryAfter *time.Time
+}
+
+func githubAPIRetryAfter(resp *http.Response) *time.Time {
+	if resp == nil {
+		return nil
+	}
+	if raw := resp.Header.Get("X-RateLimit-Reset"); raw != "" {
+		if unix, err := strconv.ParseInt(raw, 10, 64); err == nil && unix > 0 {
+			reset := time.Unix(unix, 0).UTC()
+			return &reset
+		}
+	}
+	if raw := resp.Header.Get("Retry-After"); raw != "" {
+		if seconds, err := strconv.Atoi(raw); err == nil && seconds >= 0 {
+			reset := time.Now().UTC().Add(time.Duration(seconds) * time.Second)
+			return &reset
+		}
+		if parsed, err := http.ParseTime(raw); err == nil {
+			reset := parsed.UTC()
+			return &reset
+		}
+	}
+	return nil
 }
 
 func (e *GitHubAPIError) Error() string {
@@ -905,7 +930,8 @@ func (c *PATClient) requestJSON(
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
-		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(respBody)}
+		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint,
+			Body: string(respBody), RetryAfter: githubAPIRetryAfter(resp)}
 	}
 	if result == nil {
 		return nil
@@ -964,7 +990,8 @@ func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, body)
-		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(body)}
+		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint,
+			Body: string(body), RetryAfter: githubAPIRetryAfter(resp)}
 	}
 	return json.NewDecoder(resp.Body).Decode(result)
 }

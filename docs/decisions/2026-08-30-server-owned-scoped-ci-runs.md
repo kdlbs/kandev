@@ -34,6 +34,12 @@ Provider mutations use a durable two-key ledger: the caller idempotency key is
 unique in its actor/grant scope, while source run plus attempt is unique for the
 semantic operation. The row is committed before the provider call. Once the
 call is marked started, retries reconcile provider state rather than resending.
+Before that boundary, a short execution lease allows another caller to resume
+the same row after a worker crash; provider start is a compare-and-swap against
+the current lease owner. A definitive rate-limit response clears the start
+boundary and persists GitHub's reset time so the same row can retry only after
+that instant. Mutation timeouts, connection loss, and HTTP 5xx responses remain
+ambiguous and reconciliation-only.
 Rerun reconciliation accepts only the exact next attempt; dispatch
 reconciliation accepts only one new first attempt created after the provider
 call began. Receipts and audit records contain only stable identities and

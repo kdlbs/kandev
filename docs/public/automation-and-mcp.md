@@ -594,8 +594,11 @@ run. Other stable failures include `not_authorized`, `head_drift`,
 `provider_unavailable`, and `provider_call_ambiguous`.
 
 Each logical request is durably claimed before the provider mutation. Repeated
-or concurrent calls reuse the same receipt, and an interrupted provider call
-is reconciled from GitHub rather than blindly sent again. Receipts and audit
+or concurrent calls reuse the same receipt. A worker crash before provider
+start can be taken over after its short execution lease expires. After provider
+start, timeouts, connection loss, and HTTP 5xx responses are reconciled from
+GitHub rather than blindly sent again. A definitive rate-limit response records
+GitHub's reset time and retries the same request only after that time. Receipts and audit
 events contain task/run/workflow/head identities and a failure class. A rerun
 receipt is successful only after Kandev observes the exact next attempt. A
 dispatch receipt is successful only after Kandev observes exactly one new run

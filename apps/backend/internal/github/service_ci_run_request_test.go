@@ -351,7 +351,13 @@ func TestRequestFreshCIRunDeniesStaticScopeMismatches(t *testing.T) {
 	}{
 		{name: "cross workspace actor", edit: func(s *Service, _ *RequestFreshCIRunInput) {
 			_, _ = s.store.db.Exec(`UPDATE tasks SET workspace_id = 'workspace-other' WHERE id = 'coordinator-1'`)
-		}, want: CIRunFailureCrossWorkspace},
+		}, want: CIRunFailureNotAuthorized},
+		{name: "missing target", edit: func(s *Service, _ *RequestFreshCIRunInput) {
+			_, _ = s.store.db.Exec(`DELETE FROM tasks WHERE id = 'target-1'`)
+		}, want: CIRunFailureNotAuthorized},
+		{name: "unrelated target", edit: func(_ *Service, in *RequestFreshCIRunInput) {
+			in.TargetTaskID = "other-task"
+		}, want: CIRunFailureNotAuthorized},
 		{name: "wrong current step", edit: func(_ *Service, in *RequestFreshCIRunInput) {
 			in.ExpectedWorkflowStepID = "review"
 		}, want: CIRunFailureWorkflowStepMismatch},
@@ -363,7 +369,7 @@ func TestRequestFreshCIRunDeniesStaticScopeMismatches(t *testing.T) {
 		}, want: CIRunFailureNotAuthorized},
 		{name: "unlinked repository", edit: func(_ *Service, in *RequestFreshCIRunInput) {
 			in.RepositoryID = "repository-other"
-		}, want: CIRunFailureRepositoryMismatch},
+		}, want: CIRunFailureNotAuthorized},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -510,32 +516,62 @@ func TestRequestFreshCIRunDeniesForkDispatchAndPreservesProviderClasses(t *testi
 }
 
 func TestRequestFreshCIRunPersistsProviderFailureClass(t *testing.T) {
-	for _, class := range []CIRunFailureClass{
-		CIRunFailureProviderRateLimited, CIRunFailureProviderUnavailable,
-	} {
-		t.Run(string(class), func(t *testing.T) {
-			service, client, input := setupCIRunServiceTest(t, false)
-			client.rerunErr = &CIRunProviderError{Class: class, StatusCode: 503, Retryable: true}
-			_, err := service.RequestFreshCIRun(context.Background(), input)
-			var ciErr *CIRunRequestError
-			if !errors.As(err, &ciErr) || ciErr.Class != class {
-				t.Fatalf("error = %#v, want %q", err, class)
-			}
-			var storedClass string
-			if err := service.store.ro.Get(&storedClass,
-				`SELECT failure_class FROM github_ci_run_requests LIMIT 1`); err != nil {
-				t.Fatal(err)
-			}
-			if storedClass != string(class) {
-				t.Fatalf("stored failure class = %q", storedClass)
-			}
-		})
+	service, client, input := setupCIRunServiceTest(t, false)
+	client.rerunErr = &CIRunProviderError{
+		Class: CIRunFailureProviderUnavailable, StatusCode: 503, Retryable: true,
+	}
+	_, err := service.RequestFreshCIRun(context.Background(), input)
+	var ciErr *CIRunRequestError
+	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureProviderUnavailable {
+		t.Fatalf("error = %#v, want provider_unavailable", err)
+	}
+	var storedClass string
+	if err := service.store.ro.Get(&storedClass,
+		`SELECT failure_class FROM github_ci_run_requests LIMIT 1`); err != nil {
+		t.Fatal(err)
+	}
+	if storedClass != string(CIRunFailureProviderUnavailable) {
+		t.Fatalf("stored failure class = %q", storedClass)
+	}
+}
+
+func TestRequestFreshCIRunRetriesRateLimitedMutationAfterReset(t *testing.T) {
+	service, client, input := setupCIRunServiceTest(t, false)
+	now := service.ciRunClock()().UTC()
+	reset := now.Add(time.Minute)
+	client.rerunErr = &CIRunProviderError{
+		Class: CIRunFailureProviderRateLimited, StatusCode: 429,
+		Retryable: true, RetryAfter: &reset,
+	}
+
+	_, err := service.RequestFreshCIRun(context.Background(), input)
+	var ciErr *CIRunRequestError
+	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureProviderRateLimited {
+		t.Fatalf("first error = %#v, want provider_rate_limited", err)
+	}
+	_, err = service.RequestFreshCIRun(context.Background(), input)
+	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureProviderRateLimited || client.reruns != 1 {
+		t.Fatalf("early retry error = %#v, provider reruns = %d", err, client.reruns)
+	}
+
+	service.ciRunNow = func() time.Time { return reset.Add(time.Second) }
+	client.rerunErr = nil
+	client.runs = []GitHubActionsRun{*client.run}
+	client.runs[0].Attempt = input.ExpectedSourceAttempt + 1
+	receipt, err := service.RequestFreshCIRun(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Status != CIRunRequestSucceeded || client.reruns != 2 {
+		t.Fatalf("receipt = %+v, provider reruns = %d", receipt, client.reruns)
 	}
 }
 
 func TestRequestFreshCIRunReconcilesAmbiguousMutationWithoutResending(t *testing.T) {
 	service, client, input := setupCIRunServiceTest(t, false)
-	client.rerunErr = &CIRunProviderError{Class: CIRunFailureProviderCallAmbiguous}
+	client.rerunErr = classifyCIRunProviderError(
+		&GitHubAPIError{StatusCode: 503, Endpoint: "/rerun"}, true, true,
+	)
 	_, err := service.RequestFreshCIRun(context.Background(), input)
 	var ciErr *CIRunRequestError
 	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureProviderCallAmbiguous {
@@ -556,6 +592,38 @@ func TestRequestFreshCIRunReconcilesAmbiguousMutationWithoutResending(t *testing
 	}
 	if client.reruns != 1 {
 		t.Fatalf("provider reruns = %d, want one ambiguous send only", client.reruns)
+	}
+}
+
+func TestRequestFreshCIRunTakesOverExpiredPreProviderLease(t *testing.T) {
+	service, client, input := setupCIRunServiceTest(t, false)
+	now := service.ciRunClock()().UTC()
+	binding, err := service.loadCIRunBinding(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, _, err := service.store.ClaimCIRunRequest(
+		context.Background(), newCIRunRequest(binding, input, now),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquired, err := service.store.AcquireCIRunExecution(
+		context.Background(), request, "crashed-worker", now, 30*time.Second,
+	)
+	if err != nil || !acquired {
+		t.Fatalf("seed crashed lease = %v, %v", acquired, err)
+	}
+	service.ciRunNow = func() time.Time { return now.Add(31 * time.Second) }
+	client.runs = []GitHubActionsRun{*client.run}
+	client.runs[0].Attempt = input.ExpectedSourceAttempt + 1
+
+	receipt, err := service.RequestFreshCIRun(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Status != CIRunRequestSucceeded || client.reruns != 1 {
+		t.Fatalf("receipt = %+v, provider reruns = %d", receipt, client.reruns)
 	}
 }
 

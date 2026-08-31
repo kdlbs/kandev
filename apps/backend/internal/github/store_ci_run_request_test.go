@@ -22,6 +22,7 @@ func TestStoreScopedCIRunSchema(t *testing.T) {
 			"expected_head_sha", "source_run_id", "expected_source_attempt",
 			"idempotency_hash", "provider_call_started_at", "failure_class",
 			"provider_workflow_name", "provider_workflow_path",
+			"execution_owner", "execution_lease_expires_at", "provider_retry_after",
 		},
 		"github_ci_run_audit_events": {
 			"request_id", "event_type", "failure_class", "details_json",
@@ -40,6 +41,42 @@ func TestStoreScopedCIRunSchema(t *testing.T) {
 	}
 	if err := store.initSchema(false); err != nil {
 		t.Fatalf("schema replay: %v", err)
+	}
+}
+
+func TestStoreCIRunExecutionLeaseExpiresBeforeProviderStart(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	grant := testCIRunGrant(now)
+	if err := store.UpsertCIRunGrant(ctx, grant); err != nil {
+		t.Fatal(err)
+	}
+	request, _, err := store.ClaimCIRunRequest(ctx, testCIRunRequest(grant, now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquired, err := store.AcquireCIRunExecution(ctx, request, "worker-1", now, 30*time.Second)
+	if err != nil || !acquired {
+		t.Fatalf("first acquire = %v, %v", acquired, err)
+	}
+	acquired, err = store.AcquireCIRunExecution(ctx, request, "worker-2", now.Add(29*time.Second), 30*time.Second)
+	if err != nil || acquired {
+		t.Fatalf("early takeover = %v, %v", acquired, err)
+	}
+	acquired, err = store.AcquireCIRunExecution(ctx, request, "worker-2", now.Add(30*time.Second), 30*time.Second)
+	if err != nil || !acquired {
+		t.Fatalf("expired takeover = %v, %v", acquired, err)
+	}
+	request.Operation = CIRunOperationRerunFailedJobs
+	request.ProviderWorkflowID = 77
+	request.ExecutionOwner = "worker-1"
+	if err := store.MarkCIRunProviderCallStarted(ctx, request, now.Add(31*time.Second)); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("stale owner provider start error = %v, want sql.ErrNoRows", err)
+	}
+	request.ExecutionOwner = "worker-2"
+	if err := store.MarkCIRunProviderCallStarted(ctx, request, now.Add(31*time.Second)); err != nil {
+		t.Fatalf("current owner provider start: %v", err)
 	}
 }
 
@@ -117,6 +154,9 @@ func TestStoreCIRunRequestProviderStartAndAuditAreRedacted(t *testing.T) {
 	req, _, err := store.ClaimCIRunRequest(ctx, testCIRunRequest(grant, now))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if acquired, err := store.AcquireCIRunExecution(ctx, req, "worker-1", now, 30*time.Second); err != nil || !acquired {
+		t.Fatalf("acquire provider worker = %v, %v", acquired, err)
 	}
 	req.Operation = CIRunOperationRerunFailedJobs
 	req.ProviderWorkflowID = 77

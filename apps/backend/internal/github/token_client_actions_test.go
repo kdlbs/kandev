@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -122,7 +123,7 @@ func TestTokenClientActionsProviderFailureClassesAreRedacted(t *testing.T) {
 		{name: "rerun ineligible", status: 422, body: `{"message":"This workflow run cannot be rerun"}`, want: CIRunFailureRerunIneligible},
 		{name: "permission", status: 403, body: `{"message":"Must have admin rights to Repository token-secret"}`, want: CIRunFailureInstallationPermission},
 		{name: "rate limit", status: 429, body: `{"message":"rate limit exceeded"}`, want: CIRunFailureProviderRateLimited, wantRetry: true},
-		{name: "outage", status: 503, body: `private provider outage token-secret`, want: CIRunFailureProviderUnavailable, wantRetry: true},
+		{name: "ambiguous mutation outage", status: 503, body: `private provider outage token-secret`, want: CIRunFailureProviderCallAmbiguous},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -141,6 +142,23 @@ func TestTokenClientActionsProviderFailureClassesAreRedacted(t *testing.T) {
 				t.Fatalf("provider error leaked response body: %v", err)
 			}
 		})
+	}
+}
+
+func TestTokenClientActionsRateLimitCarriesResetTime(t *testing.T) {
+	reset := time.Date(2026, 8, 30, 13, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", reset.Unix()))
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+	client := newPATClientPointingAt(t, server.URL)
+
+	err := client.RerunFailedActionsJobs(context.Background(), "kdlbs", "kandev", 100)
+	var providerErr *CIRunProviderError
+	if !errors.As(err, &providerErr) || providerErr.RetryAfter == nil ||
+		!providerErr.RetryAfter.Equal(reset) {
+		t.Fatalf("error = %#v, want reset %v", err, reset)
 	}
 }
 

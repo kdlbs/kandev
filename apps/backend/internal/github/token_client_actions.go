@@ -37,6 +37,7 @@ type CIRunProviderError struct {
 	Class      CIRunFailureClass
 	StatusCode int
 	Retryable  bool
+	RetryAfter *time.Time
 }
 
 func (e *CIRunProviderError) Error() string {
@@ -200,9 +201,12 @@ func classifyCIRunProviderError(err error, mutation, rerun bool) error {
 		return &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: apiErr.StatusCode}
 	case apiErr.StatusCode == http.StatusTooManyRequests ||
 		(apiErr.StatusCode == http.StatusForbidden && strings.Contains(body, "rate limit")):
-		return &CIRunProviderError{Class: CIRunFailureProviderRateLimited, StatusCode: apiErr.StatusCode, Retryable: true}
+		return &CIRunProviderError{Class: CIRunFailureProviderRateLimited, StatusCode: apiErr.StatusCode,
+			Retryable: true, RetryAfter: apiErr.RetryAfter}
 	case apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden:
 		return &CIRunProviderError{Class: CIRunFailureInstallationPermission, StatusCode: apiErr.StatusCode}
+	case mutation && apiErr.StatusCode >= http.StatusInternalServerError:
+		return &CIRunProviderError{Class: CIRunFailureProviderCallAmbiguous, StatusCode: apiErr.StatusCode}
 	case apiErr.StatusCode >= http.StatusInternalServerError:
 		return &CIRunProviderError{Class: CIRunFailureProviderUnavailable, StatusCode: apiErr.StatusCode, Retryable: true}
 	default:

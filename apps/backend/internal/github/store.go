@@ -473,6 +473,9 @@ const ciRunTablesSQL = `
 		evidence_kind TEXT NOT NULL CHECK (evidence_kind IN ('pr_head', 'current_merge')),
 		idempotency_hash TEXT NOT NULL,
 		status TEXT NOT NULL CHECK (status IN ('pending', 'reconciling', 'succeeded', 'failed')),
+		execution_owner TEXT NOT NULL DEFAULT '',
+		execution_lease_expires_at DATETIME,
+		provider_retry_after DATETIME,
 		operation TEXT NOT NULL DEFAULT '',
 		provider_call_started_at DATETIME,
 		provider_run_id BIGINT NOT NULL DEFAULT 0,
@@ -642,6 +645,9 @@ func (s *Store) applyIdempotentSchemaColumns() {
 }
 
 func (s *Store) initSchemaUpgrades() error {
+	if err := s.addCIRunRecoveryColumns(); err != nil {
+		return err
+	}
 	if err := s.addTaskGitCredentialsMode(); err != nil {
 		return err
 	}
@@ -677,6 +683,32 @@ func (s *Store) initSchemaUpgrades() error {
 	}
 	if err := s.addTaskPRMergeQueueColumns(); err != nil {
 		return err
+	}
+	return nil
+}
+
+var ciRunRecoveryColumnDDL = []struct {
+	name string
+	ddl  string
+}{
+	{"execution_owner", "TEXT NOT NULL DEFAULT ''"},
+	{"execution_lease_expires_at", "DATETIME"},
+	{"provider_retry_after", "DATETIME"},
+}
+
+func (s *Store) addCIRunRecoveryColumns() error {
+	columns, err := s.tableColumns("github_ci_run_requests")
+	if err != nil {
+		return fmt.Errorf("read github_ci_run_requests columns: %w", err)
+	}
+	for _, column := range ciRunRecoveryColumnDDL {
+		if _, ok := columns[column.name]; ok {
+			continue
+		}
+		stmt := "ALTER TABLE github_ci_run_requests ADD COLUMN " + column.name + " " + column.ddl
+		if _, err := s.db.Exec(stmt); err != nil && !dbutil.IsDuplicateColumnError(err) {
+			return fmt.Errorf("add github_ci_run_requests.%s: %w", column.name, err)
+		}
 	}
 	return nil
 }

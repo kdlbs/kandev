@@ -62,6 +62,9 @@ type CIRunRequest struct {
 	EvidenceKind          CIRunEvidenceKind  `json:"evidence_kind" db:"evidence_kind"`
 	IdempotencyHash       string             `json:"-" db:"idempotency_hash"`
 	Status                CIRunRequestStatus `json:"status" db:"status"`
+	ExecutionOwner        string             `json:"-" db:"execution_owner"`
+	ExecutionLeaseExpires *time.Time         `json:"-" db:"execution_lease_expires_at"`
+	ProviderRetryAfter    *time.Time         `json:"provider_retry_after,omitempty" db:"provider_retry_after"`
 	Operation             CIRunOperation     `json:"operation,omitempty" db:"operation"`
 	ProviderCallStartedAt *time.Time         `json:"provider_call_started_at,omitempty" db:"provider_call_started_at"`
 	ProviderRunID         int64              `json:"provider_run_id,omitempty" db:"provider_run_id"`

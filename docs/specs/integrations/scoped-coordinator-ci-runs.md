@@ -55,6 +55,12 @@ unique within the actor/grant scope, and a second unique identity covers the
 semantic source run attempt. Concurrent or retried claims return the same
 logical operation. Once `provider_call_started_at` is recorded, an interrupted
 or ambiguous call is reconciled from GitHub. It is never blindly sent again.
+Before provider start, one execution lease owns the transition and an expired
+lease can be taken over after a worker crash. Provider start succeeds only for
+the current lease owner. A definitive rate-limit response records the reset
+time and makes the same row eligible again only after that time. Mutation
+timeouts, connection loss, and HTTP 5xx responses remain ambiguous and may
+only reconcile.
 Rerun reconciliation accepts only the exact next attempt. Dispatch
 reconciliation accepts only one new first attempt created at or after the
 dispatch call began; zero or multiple candidates remain ambiguous.
