@@ -132,7 +132,7 @@ func TestPostgresWritePlanRevisionUpsertAndImplementationMarker(t *testing.T) {
 	first := &models.TaskPlanRevision{
 		TaskID: "task-plan-pg", Title: "Plan", Content: "one", AuthorKind: "agent", AuthorName: "claude",
 	}
-	if err := repo.WritePlanRevision(ctx, head, first, nil); err != nil {
+	if err := repo.WritePlanRevision(ctx, head, first, nil, false, false); err != nil {
 		t.Fatalf("WritePlanRevision(first): %v", err)
 	}
 	if head.Title != "Plan" || head.CreatedBy != authorKindAgent {
@@ -172,7 +172,7 @@ func TestPostgresWritePlanRevisionUpsertAndImplementationMarker(t *testing.T) {
 	second := &models.TaskPlanRevision{
 		TaskID: "task-plan-pg", Title: "Plan v2", Content: "two", AuthorKind: "user", AuthorName: "jcfs",
 	}
-	if err := repo.WritePlanRevision(ctx, head, second, nil); err != nil {
+	if err := repo.WritePlanRevision(ctx, head, second, nil, false, false); err != nil {
 		t.Fatalf("WritePlanRevision(second): %v", err)
 	}
 	if second.RevisionNumber != 2 {
@@ -216,7 +216,7 @@ func TestPostgresWritePlanRevisionMissingTask(t *testing.T) {
 	err = repo.WritePlanRevision(ctx,
 		&models.TaskPlan{ID: "plan-pg-missing", TaskID: taskID, Title: "Plan", Content: "body"},
 		&models.TaskPlanRevision{TaskID: taskID, Title: "Plan", Content: "body", AuthorKind: "agent"},
-		nil)
+		nil, false, false)
 	if !errors.Is(err, ErrTaskNotFound) {
 		t.Fatalf("WritePlanRevision error = %v, want ErrTaskNotFound", err)
 	}

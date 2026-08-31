@@ -70,7 +70,7 @@ func TestPlanService_CreatePlan(t *testing.T) {
 	ctx := context.Background()
 	seedTask(t, ctx, repo, "task-1")
 
-	plan, err := svc.CreatePlan(ctx, CreatePlanRequest{
+	result, err := svc.CreatePlan(ctx, CreatePlanRequest{
 		TaskID:  "task-1",
 		Title:   "My Plan",
 		Content: "Plan content",
@@ -78,6 +78,7 @@ func TestPlanService_CreatePlan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
+	plan := result.Plan
 	if plan.TaskID != "task-1" {
 		t.Errorf("expected task_id=task-1, got %s", plan.TaskID)
 	}
@@ -98,7 +99,7 @@ func TestPlanService_CreatePlanUpsert(t *testing.T) {
 	seedTask(t, ctx, repo, "task-1")
 
 	// First create
-	plan1, err := svc.CreatePlan(ctx, CreatePlanRequest{
+	result1, err := svc.CreatePlan(ctx, CreatePlanRequest{
 		TaskID:  "task-1",
 		Title:   "Original",
 		Content: "v1",
@@ -108,7 +109,7 @@ func TestPlanService_CreatePlanUpsert(t *testing.T) {
 	}
 
 	// Second create with same task_id should upsert, not error
-	plan2, err := svc.CreatePlan(ctx, CreatePlanRequest{
+	result2, err := svc.CreatePlan(ctx, CreatePlanRequest{
 		TaskID:  "task-1",
 		Title:   "Updated",
 		Content: "v2",
@@ -116,6 +117,7 @@ func TestPlanService_CreatePlanUpsert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second CreatePlan (upsert) failed: %v", err)
 	}
+	plan1, plan2 := result1.Plan, result2.Plan
 
 	if plan2.ID != plan1.ID {
 		t.Errorf("upsert should preserve plan ID: got %s, want %s", plan2.ID, plan1.ID)
@@ -170,10 +172,11 @@ func TestPlanService_UpdatePlan(t *testing.T) {
 
 	_, _ = svc.CreatePlan(ctx, CreatePlanRequest{TaskID: "task-1", Title: "T1", Content: "c1"})
 
-	updated, err := svc.UpdatePlan(ctx, UpdatePlanRequest{TaskID: "task-1", Content: "c2"})
+	updateResult, err := svc.UpdatePlan(ctx, UpdatePlanRequest{TaskID: "task-1", Content: "c2"})
 	if err != nil {
 		t.Fatalf("UpdatePlan failed: %v", err)
 	}
+	updated := updateResult.Plan
 	if updated.Content != "c2" {
 		t.Errorf("expected content=c2, got %s", updated.Content)
 	}
@@ -237,7 +240,7 @@ func TestPlanService_MarkImplementationStartedIsDurableAndIdempotent(t *testing.
 		t.Fatalf("expected idempotent actor marker user, got %v", idempotent.ImplementationStartedBy)
 	}
 
-	updated, err := svc.UpdatePlan(ctx, UpdatePlanRequest{
+	updateResult, err := svc.UpdatePlan(ctx, UpdatePlanRequest{
 		TaskID:    "task-impl",
 		Content:   "Ship the toolbar after review",
 		CreatedBy: "user",
@@ -245,6 +248,7 @@ func TestPlanService_MarkImplementationStartedIsDurableAndIdempotent(t *testing.
 	if err != nil {
 		t.Fatalf("UpdatePlan failed: %v", err)
 	}
+	updated := updateResult.Plan
 	if updated.ImplementationStartedAt == nil || !updated.ImplementationStartedAt.Equal(firstStartedAt) {
 		t.Fatalf("expected update to preserve implementation marker, got %v", updated.ImplementationStartedAt)
 	}

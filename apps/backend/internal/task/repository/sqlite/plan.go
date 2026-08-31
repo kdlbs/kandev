@@ -248,11 +248,16 @@ func (r *Repository) NextTaskPlanRevisionNumber(ctx context.Context, taskID stri
 //
 // On success, rev is mutated to reflect the persisted state (ID, RevisionNumber, CreatedAt,
 // UpdatedAt).
+//
+// preserveTitle and preserveCreatedBy apply only when an existing HEAD row is found (the
+// ON CONFLICT branch): true keeps the row's stored title / created_by instead of overwriting
+// it with head's value. A fresh insert always uses head's value regardless of these flags.
 func (r *Repository) WritePlanRevision(
 	ctx context.Context,
 	head *models.TaskPlan,
 	rev *models.TaskPlanRevision,
 	coalesceLatestID *string,
+	preserveTitle, preserveCreatedBy bool,
 ) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -261,7 +266,7 @@ func (r *Repository) WritePlanRevision(
 	defer func() { _ = tx.Rollback() }()
 
 	now := time.Now().UTC()
-	if err := upsertPlanHead(ctx, tx, r.db, head, now); err != nil {
+	if err := upsertPlanHead(ctx, tx, r.db, head, now, preserveTitle, preserveCreatedBy); err != nil {
 		return err
 	}
 	if coalesceLatestID != nil && *coalesceLatestID != "" {
@@ -311,7 +316,14 @@ func scanPlanRow(row *sql.Row) (*models.TaskPlan, error) {
 	return plan, nil
 }
 
-func upsertPlanHead(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, head *models.TaskPlan, now time.Time) error {
+func upsertPlanHead(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	db *sqlx.DB,
+	head *models.TaskPlan,
+	now time.Time,
+	preserveTitle, preserveCreatedBy bool,
+) error {
 	if head.ID == "" {
 		head.ID = uuid.New().String()
 	}
@@ -329,11 +341,12 @@ func upsertPlanHead(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, head *models.
 		INSERT INTO task_plans (id, task_id, title, content, created_by, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_id) DO UPDATE SET
-			title = excluded.title,
+			title = CASE WHEN ? THEN task_plans.title ELSE excluded.title END,
 			content = excluded.content,
-			created_by = excluded.created_by,
+			created_by = CASE WHEN ? THEN task_plans.created_by ELSE excluded.created_by END,
 			updated_at = excluded.updated_at
-	`), head.ID, head.TaskID, head.Title, head.Content, head.CreatedBy, head.CreatedAt, head.UpdatedAt); err != nil {
+	`), head.ID, head.TaskID, head.Title, head.Content, head.CreatedBy, head.CreatedAt, head.UpdatedAt,
+		preserveTitle, preserveCreatedBy); err != nil {
 		if internaldb.IsForeignKeyViolation(err) {
 			return fmt.Errorf("upsert task plan head for task %s: %w", head.TaskID, ErrTaskNotFound)
 		}
