@@ -845,7 +845,7 @@ func (s *Service) handleTaskCreated(ctx context.Context, data watcher.TaskEventD
 		}
 		return
 	}
-	if task.IsFromOffice || !models.HasAutoStartOnCreateIntent(task.Metadata) {
+	if !autoStartOnCreateActionable(task) {
 		return
 	}
 	if !s.claimTaskEventMetadata(ctx, task, models.MetaKeyAutoStartOnCreate) {
