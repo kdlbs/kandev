@@ -27,6 +27,25 @@ type cancellingCleanupScriptHandler struct {
 	cancel context.CancelFunc
 }
 
+type swappingCleanupScriptHandler struct {
+	path string
+}
+
+func (h *swappingCleanupScriptHandler) ExecuteSetupScript(context.Context, ScriptExecutionRequest) error {
+	return nil
+}
+
+func (h *swappingCleanupScriptHandler) ExecuteCleanupScript(_ context.Context, req ScriptExecutionRequest) error {
+	replacement := req.WorkingDir + "-replacement"
+	if err := os.Rename(req.WorkingDir, replacement); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(req.WorkingDir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(req.WorkingDir, "replacement.txt"), []byte("preserve me\n"), 0o644)
+}
+
 func (h *cancellingCleanupScriptHandler) ExecuteSetupScript(context.Context, ScriptExecutionRequest) error {
 	return nil
 }
@@ -40,6 +59,7 @@ func TestCleanupWorktrees_RecoversAfterPathOnlyRemoval(t *testing.T) {
 	mgr, store := newReferenceCleanupTestManager(t)
 	seedReferenceCleanupSession(t, store, "task-partial", "session-partial", models.TaskSessionStateCompleted)
 	wt := createReferenceCleanupWorktree(t, mgr, "task-partial", "session-partial")
+	wt.CleanupHeadOID = strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
 
 	if err := os.RemoveAll(wt.Path); err != nil {
 		t.Fatalf("remove worktree path without shared Git metadata: %v", err)
@@ -53,10 +73,49 @@ func TestCleanupWorktrees_RecoversAfterPathOnlyRemoval(t *testing.T) {
 	assertWorktreeReferenceStatus(t, store, wt.ID, StatusDeleted)
 }
 
+func TestCleanupWorktrees_RejectsPathlessRetryWithoutImmutableHead(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	seedReferenceCleanupSession(t, store, "task-no-snapshot", "session-no-snapshot", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-no-snapshot", "session-no-snapshot")
+
+	if err := os.RemoveAll(wt.Path); err != nil {
+		t.Fatalf("remove worktree path without shared Git metadata: %v", err)
+	}
+	if err := mgr.CleanupWorktrees(context.Background(), []*Worktree{wt}); err == nil {
+		t.Fatal("cleanup accepted pathless worktree without immutable cleanup identity")
+	}
+	assertCleanupBranchPresent(t, wt.RepositoryPath, wt.Branch)
+	assertWorktreeReferenceStatus(t, store, wt.ID, StatusActive)
+}
+
+func TestCleanupWorktrees_PreservesReplacementAfterPostAuditPathSwap(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	seedReferenceCleanupSession(t, store, "task-path-swap", "session-path-swap", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-path-swap", "session-path-swap")
+	wt.CleanupHeadOID = strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
+
+	mgr.SetRepositoryProvider(&fakeRepoProvider{repo: &Repository{ID: wt.RepositoryID, CleanupScript: "swap"}})
+	mgr.SetScriptMessageHandler(&swappingCleanupScriptHandler{path: wt.Path})
+	if err := mgr.CleanupWorktrees(context.Background(), []*Worktree{wt}); err == nil {
+		t.Fatal("cleanup accepted a path replacement after audit")
+	}
+
+	replacement := filepath.Join(filepath.Dir(wt.Path), filepath.Base(wt.Path)+"-replacement")
+	if got, err := os.ReadFile(filepath.Join(wt.Path, "replacement.txt")); err != nil || string(got) != "preserve me\n" {
+		t.Fatalf("replacement path changed: contents=%q err=%v", got, err)
+	}
+	if _, err := os.Stat(replacement); err != nil {
+		t.Fatalf("renamed original worktree missing: %v", err)
+	}
+	assertCleanupBranchPresent(t, wt.RepositoryPath, wt.Branch)
+	assertWorktreeReferenceStatus(t, store, wt.ID, StatusActive)
+}
+
 func TestCleanupWorktrees_PartialFailureRemainsRetryable(t *testing.T) {
 	mgr, store := newReferenceCleanupTestManager(t)
 	seedReferenceCleanupSession(t, store, "task-retry", "session-retry", models.TaskSessionStateCompleted)
 	wt := createReferenceCleanupWorktree(t, mgr, "task-retry", "session-retry")
+	wt.CleanupHeadOID = strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
 
 	if err := os.RemoveAll(wt.Path); err != nil {
 		t.Fatalf("remove worktree path without shared Git metadata: %v", err)
@@ -82,6 +141,7 @@ func TestCleanupWorktrees_IsIdempotentAfterVerifiedRemoval(t *testing.T) {
 	mgr, store := newReferenceCleanupTestManager(t)
 	seedReferenceCleanupSession(t, store, "task-idempotent", "session-idempotent", models.TaskSessionStateCompleted)
 	wt := createReferenceCleanupWorktree(t, mgr, "task-idempotent", "session-idempotent")
+	wt.CleanupHeadOID = strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
 
 	for attempt := 1; attempt <= 2; attempt++ {
 		if err := mgr.CleanupWorktrees(context.Background(), []*Worktree{wt}); err != nil {
