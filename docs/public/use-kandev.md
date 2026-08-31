@@ -151,17 +151,25 @@ Remote repository and issue/PR URLs are not added from this settings page. Use t
 
 Detected capabilities come from the installed CLI and can change after an agent upgrade or login. A model or mode shown in documentation is not guaranteed for every account. If no built-in adapter fits, **Add TUI Agent** creates a passthrough integration; passthrough has a different resume, usage, and MCP contract from an ACP-capable agent.
 
-For the first task on an existing repository, keep the seeded **Worktree** executor profile. It creates a separate Git checkout so concurrent Kandev tasks do not edit the same working tree. A worktree is Git isolation, not operating-system isolation. Choose **Local** only when direct edits in the selected checkout are intentional. A repository initialized from **New Task** is the exception: it has no commit to support a worktree, so Kandev switches that task to a direct Local profile. See [Agents and profiles](agents-and-profiles.md) and [Executors](executors.md) before using Docker, SSH, Sprites, custom scripts, or shared infrastructure.
+For the first task on an existing repository, keep the seeded **Worktree** executor profile. It creates a separate Git checkout so concurrent Kandev tasks do not edit the same working tree. A worktree is Git isolation, not operating-system isolation. Choose **Local** only when direct edits in the selected checkout are intentional. A repository initialized from **New Task** already has one empty initial commit and no project files, and Kandev selects a direct Local profile for that flow. See [Agents and profiles](agents-and-profiles.md) and [Executors](executors.md) before using Docker, SSH, Sprites, custom scripts, or shared infrastructure.
 
 ## Create and start the first task
 
 1. Select **New Task** from the sidebar or task board.
 2. Enter a specific title and a description with the expected outcome, constraints, and validation. A non-empty description enables the normal start and create-only actions.
-3. Under **Repo**, select the workspace repository and base branch. To start a new project, open the repository selector, choose **Create new repository**, enter one folder name, and select its parent folder. Kandev creates an empty `main` repository with no initial commit. Select **None** only for work that genuinely needs a plain workspace directory.
+3. Under **Repo**, select the workspace repository and base branch. To start a new project, open the repository selector, choose **Create new repository**, enter one folder name, and select its parent folder. Kandev creates an empty `main` repository with one empty initial commit and no project files. Select **None** only for work that genuinely needs a plain workspace directory.
 4. Choose the Development workflow and an agent profile. For an existing repository, choose the Worktree executor profile. For a newly initialized repository, keep the Local profile that Kandev selects automatically. Kandev remembers compatible recent choices, so re-check them after changing repository, agent, or trust boundary.
 5. Select **Start task**. Its menu also offers **Start task in plan mode** and **Create without starting agent**. On an empty description, the primary action is **Start Plan Mode**.
 
 Starting creates the task and its initial session. Workflow step configuration determines whether entry actions or later transitions start another session, inject a prompt, or stop at a human gate. With a structured ACP profile, create-only prepares the session/workspace without starting an agent turn. A passthrough/TUI profile is the exception: the backend upgrades prepare-only to a full launch because the native PTY must exist.
+
+### Start from an empty remote
+
+When the selected repository's remote has no refs, Kandev creates an empty local baseline during task preparation so the agent can use the normal Worktree executor. It adds no project files and does not publish the baseline during launch, resume, or worktree recovery.
+
+After the agent creates and commits work, open **Changes** and choose **Push** or **Create pull request**. Kandev publishes the selected base branch before the task branch and uses the task runtime's Git credentials. Read or clone access alone does not authorize this first publication. Provider change-request creation starts only after both branches are available on the remote.
+
+If another actor initializes the remote first, Kandev stops without replacing that history. Reconcile the remote with the task branch before retrying. If the base was published but the task branch was not, retry **Push**; Kandev keeps the local task branch. The same flow is available from the touch-sized **Changes** menu on phones.
 
 The dialog also supports multiple repositories, remote GitHub rows, and a single-repository **Fork a new branch** option when the Local executor is selected. Important boundaries:
 
@@ -214,7 +222,7 @@ Common corrections:
 - If an agent is absent after installation, run **Rescan** and inspect the host terminal's `PATH`.
 - If a profile has no usable model or mode, authenticate the CLI, rescan, and reopen the profile. Capability probing can heal selections that an upgraded CLI removed.
 - If repository validation fails, use an absolute path to an existing, accessible Git working tree. Discovery roots control automatic scans only; they do not restrict an explicit path.
-- If a worktree cannot be prepared, resolve dirty/conflicting branch state, remote authentication, pull errors, setup-script failures, and disk exhaustion before retrying.
+- If a worktree cannot be prepared, resolve dirty/conflicting branch state, remote authentication, pull errors, setup-script failures, and disk exhaustion before retrying. If another actor initialized an empty remote, reconcile that history with the local task branch first.
 - If the browser did not open, use the URL printed by the launcher or start with `--headless`; do not assume port `38429` when the launcher selected a fallback.
 
 For backup, update, log, database, and recovery details, see [Operations](operations.md). For release-specific disagreement, record the version from **Settings > System > About** and compare it with the matching GitHub tag.
