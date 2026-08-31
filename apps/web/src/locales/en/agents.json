@@ -295,5 +295,17 @@
   "savingProfile": "Saving...",
   "saveProfile": "Save profile",
   "createProfile": "Create profile",
-  "creatingProfile": "Creating..."
+  "creatingProfile": "Creating...",
+  "providerSectionTitle": "AI provider",
+  "providerSectionDescription": "Route this profile's model calls through a self-hosted OpenAI-compatible router instead of the agent's built-in provider.",
+  "providerKindLabel": "Provider",
+  "providerKindNative": "Native (agent default)",
+  "providerKindOpenAICompatible": "OpenAI-compatible provider",
+  "providerKindHelp": "Native keeps the agent CLI's own provider configuration. OpenAI-compatible sends requests to the base URL below with the selected key, and works with 9router, LiteLLM, vLLM, and self-hosted OpenRouter.",
+  "providerBaseUrlLabel": "Base URL",
+  "providerBaseUrlHelp": "The absolute http or https root of your router. The agent appends the OpenAI-compatible route paths such as /chat/completions.",
+  "providerBaseUrlInvalid": "Enter an absolute http or https URL.",
+  "providerApiKeyLabel": "API key",
+  "providerApiKeyHelp": "Kandev secret holding the bearer token sent to the provider. Leave unset for a router that needs no auth.",
+  "providerModelSlash": "Remove the slash from the model name: an OpenAI-compatible provider expects a bare model id."
 }

@@ -1,7 +1,7 @@
 ---
 id: task-05-profile-editor
 title: Profile editor provider section (frontend)
-status: pending
+status: done
 wave: 3
 depends_on:
   - task-01-provider-primitive
@@ -71,3 +71,29 @@ hidden unless the profile API projection reports `provider_supported`.
 
 - Secret picker reuse: confirm the existing profile env-var secret component can
   be driven for a single-value field without the key/value pair UI.
+
+## IMPLEMENTATION NOTE (2026-08-31)
+
+- Section component: `apps/web/components/settings/profile-edit/provider-section.tsx`
+  (kind select + `OpenAICompatibleProviderFields` sub-component), rendered from
+  `agent-profile-page.tsx` `ProfileEditorBody`, gated on `draft.providerSupported`.
+- Validation: `apps/web/lib/settings/provider-config-validation.ts`
+  (`providerConfigInvalidReasonKey` returns an i18n key), wired into the
+  `useSettingsSaveContributor` `canSave` / `invalidReason`.
+- Wire mapping: `provider_kind` / `provider_base_url` / `provider_api_key_secret_id`
+  in `agent-profile.ts` types, `agent-profile-normalize.ts` (both directions;
+  `provider_supported` read-only, never sent back), `agent-profile-page-state.ts`
+  save payload (base URL + key cleared when kind is not `openai_compatible`),
+  `agent-profile-dirty.ts` (`isProviderConfigDirty`), `app/actions/agents.ts`.
+- i18n: 12 keys in `en` / `pt-pt` / `zh-cn`; `zh-hk` / `zh-tw` hand-added
+  (`pnpm run i18n:zh-hant` fails on a pre-existing `dynamicProfileSettings`
+  residual unrelated to this change); pseudo regenerated; `i18n:check` passes.
+- Test support: `MockAgent` advertises `OpenAICompatibleProviderAgent`
+  (`internal/agent/agents/mock.go`) so `mock-agent` profiles report
+  `provider_supported: true` for e2e and utility coverage.
+- Tests: `lib/settings/provider-config-validation.test.ts`,
+  `agent-profile-normalize.test.ts` provider round-trip; e2e
+  `agent-profile-provider.spec.ts` + `mobile-agent-profile-provider.spec.ts`
+  (need the full e2e stack to run).
+- No profile-scoped model probe exists; provider profiles use free-text model
+  entry (AC-001.2), so AC-003.1's probe injection is executor-ready only.

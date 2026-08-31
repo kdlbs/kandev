@@ -135,6 +135,13 @@ export function useProfileSave({
               : undefined,
           cli_flags: draft.cliFlags,
           command_prefix: draft.commandPrefix ?? "",
+          provider_kind: draft.providerKind ?? "",
+          provider_base_url:
+            (draft.providerKind ?? "") === "openai_compatible" ? (draft.providerBaseUrl ?? "") : "",
+          provider_api_key_secret_id:
+            (draft.providerKind ?? "") === "openai_compatible"
+              ? (draft.providerApiKeySecretId ?? "")
+              : "",
           env_vars: draft.envVars ?? [],
         },
         force,

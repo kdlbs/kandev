@@ -146,6 +146,9 @@ export async function updateAgentProfileAction(
     enabled?: boolean;
     cli_flags?: CLIFlag[];
     command_prefix?: string;
+    provider_kind?: string;
+    provider_base_url?: string;
+    provider_api_key_secret_id?: string;
     env_vars?: ProfileEnvVar[];
     dynamic?: DynamicProfilePayload;
   },
