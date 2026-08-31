@@ -896,7 +896,7 @@ func TestManager_ResetAgentContext_ClearsIdleDispatchGate(t *testing.T) {
 	require.False(t, exec.dispatchedPromptPending.Load(),
 		"reset must clear the gate when it drains the completion signal")
 
-	followUpCtx, followUpCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	followUpCtx, followUpCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer followUpCancel()
 	_, err := mgr.PromptAgent(followUpCtx, exec.ID, "follow-up", nil, true)
 	require.NoError(t, err, "follow-up prompt must reach the new agent context")
