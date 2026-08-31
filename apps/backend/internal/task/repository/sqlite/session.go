@@ -946,10 +946,12 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name)
 
-	if err != nil && strings.Contains(err.Error(), "uniq_office_task_session") {
+	if err != nil && isOfficeTaskSessionUniqueViolation(err) {
 		// Two callers raced past their SELECT-then-INSERT for the same
 		// (task_id, agent_profile_id) — surface a typed sentinel so callers
 		// can classify with errors.Is rather than driver-message matching.
+		// Currently unreachable: no index enforces this pair yet (see
+		// ErrOfficeSessionRaceConflict's doc comment).
 		return fmt.Errorf("%w: %w", ErrOfficeSessionRaceConflict, err)
 	}
 	return err
@@ -1208,9 +1210,11 @@ func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID st
 }
 
 // GetTaskSessionByTaskAndAgent retrieves the office task session for the given
-// (task_id, agent_profile_id) pair. The pair is unique across non-NULL
-// agent_profile_id rows, so at most one row matches. Returns nil, nil when
-// no session exists for the pair.
+// (task_id, agent_profile_id) pair. This pair is NOT unique at the schema
+// level — no index enforces it (see ErrOfficeSessionRaceConflict's doc
+// comment for why) — so both live and terminal rows can accumulate for the
+// same pair, and ORDER BY started_at DESC LIMIT 1 is load-bearing to pick the
+// most recent one. Returns nil, nil when no session exists for the pair.
 func (r *Repository) GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error) {
 	if taskID == "" || agentInstanceID == "" {
 		return nil, nil
@@ -1441,6 +1445,16 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 	}
 	result, err := exec.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
+		if isOfficeTaskSessionUniqueViolation(err) {
+			// A terminal-session resume (updateSessionStarting) or another
+			// full-row update raced another live row into the same
+			// (task_id, agent_profile_id) slot — same classification as the
+			// createTaskSession INSERT path, so callers can errors.Is this
+			// regardless of which write hit the constraint. Currently
+			// unreachable: no index enforces this pair yet (see
+			// ErrOfficeSessionRaceConflict's doc comment).
+			return false, fmt.Errorf("%w: %w", ErrOfficeSessionRaceConflict, err)
+		}
 		return false, err
 	}
 	rows, err := result.RowsAffected()
