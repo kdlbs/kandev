@@ -3943,12 +3943,11 @@ func (promptTaskOptions) failureContext(ctx context.Context) (context.Context, c
 
 // promptTask is PromptTask's implementation. Its options carry queued-dispatch
 // ownership and the bounded-context exception. When options.claimEntryID is
-// non-empty, this
-// acquires sessionID's cancelInFlight guard around a second ownership check
-// and the "mark the session RUNNING" step immediately before startTurnForSession
-// and the (potentially long-blocking) executor.Prompt call below it. The worker
-// claims the handoff before visible side effects; this check keeps the final
-// session transition tied to that same ownership record.
+// non-empty, this acquires sessionID's cancelInFlight guard around a second
+// ownership check and the "mark the session RUNNING" step immediately before
+// startTurnForSession and the (potentially long-blocking) executor.Prompt call
+// below it. The worker claims the handoff before visible side effects; this
+// check keeps the final session transition tied to that same ownership record.
 //
 // A bare (unguarded) "check the token, then separately call
 // setSessionRunning" would still let two settling dispatches for the same
@@ -3958,10 +3957,10 @@ func (promptTaskOptions) failureContext(ctx context.Context) (context.Context, c
 // *and* the mark through the same per-session guard used for every other
 // cancel/take-and-dispatch decision (see the Service.cancelInFlight field
 // doc comment) makes "exactly one dispatch wins" a property of mutual
-// exclusion instead of a racy read. The guard is held only for this
-// fast, DB-only step — released well before the long-running
-// executor.Prompt call — matching every other guard holder's
-// bounded-hold-time contract in this file.
+// exclusion instead of a racy read. Ordinary prompts release the guard after
+// this fast, DB-only step. Lifecycle prompts hold the same guard until agentctl
+// accepts the prompt, so a context reset cannot cancel the claimed turn in the
+// gap before provider dispatch.
 //
 // Every return path *before* this step (invalid session, not promptable,
 // ensureSessionRunning failure, a model switch) is covered by
@@ -4048,7 +4047,11 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
 	}
 	var releaseDispatchGuard func()
-	if options.requireNonterminalSession {
+	if rollback.dispatchGuardRelease != nil {
+		releaseDispatchGuard = rollback.dispatchGuardRelease
+		defer releaseDispatchGuard()
+	}
+	if options.requireNonterminalSession && releaseDispatchGuard == nil {
 		var guard *sync.Mutex
 		guard, releaseDispatchGuard = s.acquireCancelInFlightGuard(sessionID)
 		guard.Lock()
@@ -4333,6 +4336,7 @@ type promptClaimRollback struct {
 	createdTurn          bool
 	reservedTurn         *models.Turn
 	reservedTurnAccepted bool
+	dispatchGuardRelease func()
 }
 
 func (s *Service) claimPromptDispatch(
@@ -4390,9 +4394,26 @@ func (s *Service) claimLifecyclePromptDispatch(
 		s.rollbackPromptClaimAfterAdmissionFailure(ctx, taskID, sessionID, rollback)
 		return nil, promptClaimRollback{}, err
 	}
+	dispatchGuard := s.lockCancelInFlightGuard(sessionID)
+	var releaseGuardOnce sync.Once
+	releaseDispatchGuard := func() {
+		releaseGuardOnce.Do(dispatchGuard.release)
+	}
+	keepDispatchGuard := false
+	defer func() {
+		if !keepDispatchGuard {
+			releaseDispatchGuard()
+		}
+	}()
+	rollback.dispatchGuardRelease = releaseDispatchGuard
+	if err := s.validateLifecyclePromptTurn(ctx, sessionID, rollback.turnID); err != nil {
+		s.rollbackPromptClaimAfterAdmissionFailure(ctx, taskID, sessionID, rollback)
+		return nil, promptClaimRollback{}, err
+	}
 	if err := s.acknowledgePromptClaim(ctx, taskID, sessionID, afterClaim, rollback); err != nil {
 		return nil, promptClaimRollback{}, err
 	}
+	keepDispatchGuard = true
 	return session, rollback, nil
 }
 
@@ -4430,6 +4451,9 @@ func (s *Service) rollbackPromptClaim(
 	taskID, sessionID string,
 	rollback promptClaimRollback,
 ) {
+	if rollback.dispatchGuardRelease != nil {
+		rollback.dispatchGuardRelease()
+	}
 	s.restoreLifecycleClaim(ctx, taskID, sessionID, rollback.previousSessionState)
 	if rollback.taskStateClaimed {
 		s.restoreLifecycleTaskState(ctx, taskID, rollback.previousTaskState)
@@ -4854,6 +4878,26 @@ func (s *Service) validateLifecyclePromptSelection(
 	}
 	if selectedSession.ID != sessionID {
 		return &lifecyclePromptReselectedError{sessionID: selectedSession.ID}
+	}
+	return nil
+}
+
+func (s *Service) validateLifecyclePromptTurn(
+	ctx context.Context,
+	sessionID, turnID string,
+) error {
+	if s.isSessionResetInProgress(sessionID) {
+		return ErrSessionResetInProgress
+	}
+	if s.turnService == nil || turnID == "" {
+		return nil
+	}
+	activeTurn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("verify lifecycle prompt turn: %w", err)
+	}
+	if activeTurn == nil || activeTurn.ID != turnID {
+		return ErrSessionResetInProgress
 	}
 	return nil
 }

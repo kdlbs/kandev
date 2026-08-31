@@ -391,7 +391,6 @@ func TestResetAgentContext_SeesLifecycleTurnBeforeProviderReset(t *testing.T) {
 	claimed := make(chan struct{}, 1)
 	svc.repo = lifecycleClaimSignalRepo{repoStore: repo, claimed: claimed}
 	svc.taskRuntimeStateMu.Lock()
-	defer svc.taskRuntimeStateMu.Unlock()
 
 	promptDone := make(chan error, 1)
 	go func() {
@@ -406,7 +405,8 @@ func TestResetAgentContext_SeesLifecycleTurnBeforeProviderReset(t *testing.T) {
 	}()
 
 	// The lifecycle claim is now blocked before its task-state reconciliation.
-	// Reset must still see and cancel its turn before replacing provider context.
+	// Reset must still see and cancel its turn before replacing provider context;
+	// the lifecycle claim must then reject the cancelled turn.
 	requireResetEvents(t, manager.events, "cancel", "reset")
 	if resetOK := <-resetDone; !resetOK {
 		t.Fatal("resetAgentContext returned false")
@@ -415,11 +415,10 @@ func TestResetAgentContext_SeesLifecycleTurnBeforeProviderReset(t *testing.T) {
 	svc.taskRuntimeStateMu.Unlock()
 	select {
 	case err := <-promptDone:
-		if err != nil {
-			t.Fatalf("lifecycle prompt claim: %v", err)
+		if !errors.Is(err, ErrSessionResetInProgress) {
+			t.Fatalf("lifecycle prompt claim error = %v, want %v", err, ErrSessionResetInProgress)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for lifecycle prompt claim")
 	}
-	svc.taskRuntimeStateMu.Lock()
 }
