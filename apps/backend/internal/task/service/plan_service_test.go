@@ -478,7 +478,10 @@ func TestPlanService_GetLatestRevision(t *testing.T) {
 	}
 
 	list, _ := svc.ListRevisions(ctx, "task-latest")
-	if len(list) == 0 || list[0].RevisionNumber != latest.RevisionNumber {
+	if len(list) == 0 {
+		t.Fatal("GetLatestRevision: ListRevisions returned no revisions after two writes")
+	}
+	if list[0].RevisionNumber != latest.RevisionNumber {
 		t.Errorf("GetLatestRevision disagrees with ListRevisions()[0]: got %d, want %d",
 			latest.RevisionNumber, list[0].RevisionNumber)
 	}

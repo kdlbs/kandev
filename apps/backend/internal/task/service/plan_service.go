@@ -423,9 +423,9 @@ func (s *PlanService) ListRevisions(ctx context.Context, taskID string) ([]*mode
 }
 
 // GetLatestRevision returns the most recent revision for a task, or nil if
-// none exist. Unlike ListRevisions, it does not load every revision's
-// content — callers that only need the latest revision number (e.g. the
-// plan write guard) should use this instead.
+// none exist. Unlike ListRevisions, it fetches only the latest revision row
+// instead of every revision — callers that only need the latest revision
+// number (e.g. the plan write guard) should use this instead.
 func (s *PlanService) GetLatestRevision(ctx context.Context, taskID string) (*models.TaskPlanRevision, error) {
 	if taskID == "" {
 		return nil, ErrTaskIDRequired
