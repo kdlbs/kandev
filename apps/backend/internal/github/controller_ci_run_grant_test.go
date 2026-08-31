@@ -64,3 +64,75 @@ func TestCIRunGrantEndpointAllowsWorkspaceOwnerAndListsGrants(t *testing.T) {
 		t.Fatalf("grant = %+v", grant)
 	}
 }
+
+func TestCIRunGrantEndpointsRejectSyntheticMissingAndForeignIdentities(t *testing.T) {
+	service, _, _ := setupCIRunServiceTest(t, false)
+	service.SetWorkspaceAuthorizer(func(ctx context.Context, workspaceID string) error {
+		identity, _ := authn.IdentityFromContext(ctx)
+		if workspaceID == "workspace-1" && identity.UserID == "owner-1" {
+			return nil
+		}
+		return errors.New("workspace is not visible")
+	})
+	if _, err := service.store.db.Exec(`DELETE FROM github_ci_run_grants`); err != nil {
+		t.Fatal(err)
+	}
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	NewController(service, nil).RegisterHTTPRoutes(router)
+	body, _ := json.Marshal(CreateCIRunGrantInput{
+		WorkspaceID: "workspace-1", ActorTaskID: "coordinator-1", TargetTaskID: "target-1",
+		WorkflowID: "workflow-1", WorkflowStepID: "ci-fixup", RepositoryID: "repository-1",
+	})
+
+	identities := []struct {
+		name string
+		id   *authn.Identity
+	}{
+		{name: "synthetic", id: &authn.Identity{UserID: "owner-1", Role: authn.RoleAdmin, Synthetic: true}},
+		{name: "missing"},
+		{name: "foreign", id: &authn.Identity{UserID: "foreign-1", Role: authn.RoleMember}},
+	}
+	for _, tc := range identities {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/github/ci-run-grants", bytes.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			if tc.id != nil {
+				request = request.WithContext(authn.WithIdentity(context.Background(), *tc.id))
+			}
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			if recorder.Code == http.StatusCreated {
+				t.Fatalf("unauthorized create succeeded: body=%s", recorder.Body.String())
+			}
+		})
+	}
+
+	for _, tc := range identities {
+		t.Run(tc.name+" list", func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/github/ci-run-grants?workspace_id=workspace-1", nil)
+			if tc.id != nil {
+				request = request.WithContext(authn.WithIdentity(context.Background(), *tc.id))
+			}
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			if recorder.Code == http.StatusOK {
+				t.Fatalf("unauthorized list succeeded: body=%s", recorder.Body.String())
+			}
+		})
+	}
+
+	for _, tc := range identities {
+		t.Run(tc.name+" revoke", func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodDelete, "/api/v1/github/ci-run-grants/grant-1?workspace_id=workspace-1", nil)
+			if tc.id != nil {
+				request = request.WithContext(authn.WithIdentity(context.Background(), *tc.id))
+			}
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			if recorder.Code == http.StatusOK {
+				t.Fatalf("unauthorized revoke succeeded: body=%s", recorder.Body.String())
+			}
+		})
+	}
+}

@@ -9,9 +9,14 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 )
 
-func (c *Controller) httpCreateCIRunGrant(ctx *gin.Context) {
+func realCIRunGrantIdentity(ctx *gin.Context) (authn.Identity, bool) {
 	identity, ok := authn.FromGin(ctx)
-	if !ok || identity.UserID == "" {
+	return identity, ok && identity.UserID != "" && !identity.Synthetic
+}
+
+func (c *Controller) httpCreateCIRunGrant(ctx *gin.Context) {
+	identity, ok := realCIRunGrantIdentity(ctx)
+	if !ok {
 		ctx.JSON(http.StatusForbidden, gin.H{"error": "authenticated workspace owner authorization is required"})
 		return
 	}
@@ -29,8 +34,8 @@ func (c *Controller) httpCreateCIRunGrant(ctx *gin.Context) {
 }
 
 func (c *Controller) httpListCIRunGrants(ctx *gin.Context) {
-	identity, ok := authn.FromGin(ctx)
-	if !ok || identity.UserID == "" {
+	identity, ok := realCIRunGrantIdentity(ctx)
+	if !ok {
 		ctx.JSON(http.StatusForbidden, gin.H{"error": "authenticated workspace owner authorization is required"})
 		return
 	}
@@ -43,8 +48,8 @@ func (c *Controller) httpListCIRunGrants(ctx *gin.Context) {
 }
 
 func (c *Controller) httpRevokeCIRunGrant(ctx *gin.Context) {
-	identity, ok := authn.FromGin(ctx)
-	if !ok || identity.UserID == "" {
+	identity, ok := realCIRunGrantIdentity(ctx)
+	if !ok {
 		ctx.JSON(http.StatusForbidden, gin.H{"error": "authenticated workspace owner authorization is required"})
 		return
 	}
