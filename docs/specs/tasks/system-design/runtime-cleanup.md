@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-RUNTIME-CLEANUP-001
 created: 2026-06-22
-updated: 2026-08-28
+updated: 2026-08-31
 owners:
   - cfl
 ---
@@ -330,6 +330,7 @@ The durable cleanup job wraps that resource lifecycle:
   `completed_at`, and is excluded from automatic due-job selection.
 - If cleanup cannot prove that a session worktree belongs to the task being
   cleaned, destructive worktree deletion fails closed and skips that worktree.
+  Stale Git state is removed only with exact path, branch, and commit ownership.
 - If an agentctl process exits unexpectedly, its owned agent subprocess group is
   killed before agentctl shutdown completes.
 - If the user sends Ctrl+C to a standalone Kandev process tree, agentctl does

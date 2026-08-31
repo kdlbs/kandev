@@ -168,7 +168,26 @@ func (m *Manager) RemoveByID(ctx context.Context, worktreeID string, removeBranc
 	if err != nil {
 		return err
 	}
+	m.enrichCleanupWorktreeFromCache(wt)
 	return m.removeWorktree(ctx, wt, removeBranch)
+}
+
+func (m *Manager) enrichCleanupWorktreeFromCache(wt *Worktree) {
+	if wt == nil || (wt.RepositoryPath != "" && wt.BaseBranch != "") {
+		return
+	}
+	m.mu.RLock()
+	cached := m.worktrees[cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug)]
+	m.mu.RUnlock()
+	if cached == nil || cached.ID != wt.ID {
+		return
+	}
+	if wt.RepositoryPath == "" {
+		wt.RepositoryPath = cached.RepositoryPath
+	}
+	if wt.BaseBranch == "" {
+		wt.BaseBranch = cached.BaseBranch
+	}
 }
 
 // removeWorktree performs the actual removal of a worktree.
@@ -204,32 +223,12 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 	// Execute cleanup script BEFORE removing directory
 	m.runWorktreeCleanupScript(ctx, wt)
 
-	// Remove worktree directory
-	if err := m.removeWorktreeDir(ctx, wt.Path, wt.RepositoryPath); err != nil {
-		m.logger.Warn("failed to remove worktree directory",
-			zap.String("path", wt.Path),
-			zap.Error(err))
+	audit, err := m.auditWorktreeCleanup(ctx, wt, removeBranch)
+	if err != nil {
+		return fmt.Errorf("audit worktree cleanup %s: %w", wt.ID, err)
 	}
-
-	// Optionally remove the branch from the main repository
-	if removeBranch {
-		m.logger.Info("deleting branch from main repository",
-			zap.String("branch", wt.Branch),
-			zap.String("repository_path", wt.RepositoryPath))
-
-		cmd := newGitCommand(ctx, "branch", "-D", wt.Branch)
-		cmd.Dir = wt.RepositoryPath
-		if output, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
-			m.logger.Warn("failed to delete branch from main repository",
-				zap.String("branch", wt.Branch),
-				zap.String("repository_path", wt.RepositoryPath),
-				zap.String("output", string(output)),
-				zap.Error(err))
-		} else {
-			m.logger.Info("successfully deleted branch from main repository",
-				zap.String("branch", wt.Branch),
-				zap.String("repository_path", wt.RepositoryPath))
-		}
+	if err := m.completeAuditedWorktreeCleanup(ctx, wt, audit, removeBranch); err != nil {
+		return fmt.Errorf("complete worktree cleanup %s: %w", wt.ID, err)
 	}
 
 	// Update store
