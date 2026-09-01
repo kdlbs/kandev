@@ -12,6 +12,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -25,6 +26,18 @@ import (
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
+
+// errIdempotencyKeyConflict signals that insertRun's CreateRun failed
+// because idx_run_idempotency rejected a duplicate idempotency_key —
+// distinct from the earlier CheckIdempotencyKey miss, which only looks
+// within IdempotencyWindowHours. Two independent producers deriving the
+// same operation id for the same event can both pass that windowed check
+// before either commits (or the colliding row can simply be older than the
+// window); the unique index is what actually stops the second insert.
+// QueueRun treats this the same as a windowed dedupe hit: QueueOutcomeDeduped,
+// not an error, so the losing producer's caller doesn't abort or log a
+// spurious failure for what is really a no-op.
+var errIdempotencyKeyConflict = errors.New("idempotency key conflict")
 
 // RunQueueAdapter is the interface the workflow engine uses to enqueue
 // runs from queue_run actions. Phase 2 final's parallel agent
@@ -207,6 +220,11 @@ func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutco
 
 	row, err := s.insertRun(ctx, agentInstanceID, req, payload)
 	if err != nil {
+		if errors.Is(err, errIdempotencyKeyConflict) {
+			s.log.Debug("run skipped (idempotency index race)",
+				zap.String("key", req.IdempotencyKey))
+			return QueueOutcomeDeduped, nil
+		}
 		return "", err
 	}
 
@@ -241,6 +259,9 @@ func (s *Service) insertRun(
 		RequestedAt:    time.Now().UTC(),
 	}
 	if err := s.repo.CreateRun(ctx, row); err != nil {
+		if runssqlite.IsIdempotencyKeyUniqueViolation(err) {
+			return nil, errIdempotencyKeyConflict
+		}
 		return nil, fmt.Errorf("enqueue run: %w", err)
 	}
 	return row, nil

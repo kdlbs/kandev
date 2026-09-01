@@ -1075,13 +1075,23 @@ func (s *Service) queueChildrenCompletedRun(ctx context.Context, parentID string
 		return err
 	}
 
+	// Derived the same way as ParentWakeReconciler's recovery dispatch
+	// (wakeOperationID) so both producers land on the identical operation
+	// id for the same parent + child set. That shared id is what lets
+	// idx_run_idempotency actually dedupe the pair when the reconciler
+	// races this edge-triggered path for the same completion wave.
+	childSetKey, err := s.repo.GetChildSetKey(ctx, parentID)
+	if err != nil {
+		return fmt.Errorf("get child set key: %w", err)
+	}
+
 	children, _, err := s.repo.GetChildSummaries(ctx, parentID)
 	if err != nil {
 		s.logger.Error("get child summaries failed", zap.Error(err))
 		children = nil
 	}
 
-	key := fmt.Sprintf("children_completed:%s", parentID)
+	key := wakeOperationID(parentID, childSetKey)
 	summaries := make([]engine.ChildSummary, 0, len(children))
 	prsByTask := s.lookupChildPRLinks(ctx, children)
 	for _, c := range children {
