@@ -71,6 +71,53 @@ func TestCancelPendingMoveDoesNotLogArguments(t *testing.T) {
 	require.False(t, loggedArguments)
 }
 
+func TestReadPendingMoveInvalidArgumentsReachBackendAudit(t *testing.T) {
+	valid := map[string]interface{}{
+		"task_id": "33333333-3333-4333-8333-333333333333",
+	}
+	cases := map[string]map[string]interface{}{
+		"missing required field": clonePendingMoveArguments(valid, func(args map[string]interface{}) {
+			delete(args, "task_id")
+		}),
+		"wrong field type": clonePendingMoveArguments(valid, func(args map[string]interface{}) {
+			args["task_id"] = float64(42)
+		}),
+		"unknown field": clonePendingMoveArguments(valid, func(args map[string]interface{}) {
+			args["workspace_id"] = "forged-workspace"
+		}),
+	}
+
+	for name, arguments := range cases {
+		t.Run(name, func(t *testing.T) {
+			backend := &testBackend{response: map[string]interface{}{"audited": true}}
+			server := NewWithProfile(backend, "session", "task", 10005, newTestLogger(t), "", false, mcpprofile.NewAutomation())
+
+			result := callTool(t, server, "read_pending_move_kandev", arguments)
+
+			assert.False(t, result.IsError)
+			assert.Equal(t, ws.ActionMCPReadPendingMove, backend.lastAction)
+			assert.Equal(t, arguments, backend.lastPayload)
+		})
+	}
+}
+
+func TestReadPendingMoveDoesNotLogArguments(t *testing.T) {
+	core, observed := observer.New(zap.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+	backend := &testBackend{response: map[string]interface{}{"found": false}}
+	server := NewWithProfile(backend, "session", "task", 10005, log, "", false, mcpprofile.NewAutomation())
+
+	callTool(t, server, "read_pending_move_kandev", map[string]interface{}{
+		"task_id": "33333333-3333-4333-8333-333333333333",
+	})
+
+	entries := observed.FilterMessage("MCP tool call").All()
+	require.Len(t, entries, 1)
+	_, loggedArguments := entries[0].ContextMap()["args"]
+	require.False(t, loggedArguments)
+}
+
 func clonePendingMoveArguments(
 	source map[string]interface{},
 	mutate func(map[string]interface{}),

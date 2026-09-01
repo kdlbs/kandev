@@ -104,6 +104,26 @@ func TestHandleReadPendingMoveRejectsAndAuditsCallerFields(t *testing.T) {
 	}
 }
 
+func TestHandleReadPendingMoveRejectsTrailingJSON(t *testing.T) {
+	reader := &recordingPendingMoveReader{err: messagequeue.ErrPendingMoveInvalidArgument}
+	h := &Handlers{pendingMoveReader: reader, logger: testLogger(t)}
+	msg := &ws.Message{
+		ID:      "test-id",
+		Type:    ws.MessageTypeRequest,
+		Action:  ws.ActionMCPReadPendingMove,
+		Payload: []byte(`{"task_id":"33333333-3333-4333-8333-333333333333"} {}`),
+	}
+
+	resp, err := h.handleReadPendingMove(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("handleReadPendingMove: %v", err)
+	}
+	assertWSError(t, resp, PendingMoveInvalidArgumentCode)
+	if reader.calls != 1 || reader.taskID != "" {
+		t.Fatalf("trailing JSON was not audited safely: calls=%d taskID=%q", reader.calls, reader.taskID)
+	}
+}
+
 func TestHandleReadPendingMoveNilReaderIsInternal(t *testing.T) {
 	h := &Handlers{logger: testLogger(t)}
 	msg := makeWSMessage(t, ws.ActionMCPReadPendingMove, readPendingMovePayload())

@@ -185,44 +185,16 @@ func (r *sqliteRepository) AuditInvalidPendingMoveCensus(
 	return err
 }
 
-// ReadPendingMoveCensus is the in-memory Repository's read-only census used by
-// unit tests that do not exercise the SQLite relation authorization.
+// ReadPendingMoveCensus fails closed for the relation-free in-memory repository.
 func (r *memoryRepository) ReadPendingMoveCensus(
 	_ context.Context,
-	actor PendingMoveCancellationActor,
-	taskID string,
-	correlationID string,
+	_ PendingMoveCancellationActor,
+	_ string,
+	_ string,
 ) (*PendingMoveCensusResult, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if actor.Kind != pendingMoveActorKindCoordinator || actor.CallerTaskID == taskID {
-		return nil, ErrPendingMoveNotFoundOrChanged
-	}
-	for sessionID, stored := range r.pendingMoves {
-		if stored.TaskID != taskID {
-			continue
-		}
-		return &PendingMoveCensusResult{
-			Found:                true,
-			CorrelationID:        correlationID,
-			ActorKind:            actor.Kind,
-			ActorID:              actor.ID,
-			PendingMoveID:        stored.ID,
-			MoveID:               stored.MoveID,
-			TaskID:               taskID,
-			SessionID:            sessionID,
-			WorkflowID:           stored.WorkflowID,
-			TargetWorkflowStepID: stored.WorkflowStepID,
-			QueuedAt:             stored.QueuedAt,
-		}, nil
-	}
-	return &PendingMoveCensusResult{
-		Found:         false,
-		CorrelationID: correlationID,
-		ActorKind:     actor.Kind,
-		ActorID:       actor.ID,
-		TaskID:        taskID,
-	}, nil
+	// The census shares cancellation's authorization boundary, which the
+	// relation-free in-memory queue cannot establish.
+	return nil, ErrPendingMoveNotFoundOrChanged
 }
 
 func (r *memoryRepository) AuditInvalidPendingMoveCensus(

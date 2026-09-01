@@ -405,13 +405,15 @@ func (r *Repository) migrateLegacyWorkspaceCoordinatorGrantSchema() error {
 			)`,
 			`INSERT INTO workspace_coordinator_grants_new
 				(workspace_id, coordinator_task_id, created_by_user_id, created_at, updated_at)
-			SELECT grant.workspace_id, grant.coordinator_task_id, grant.created_by_user_id,
-				grant.created_at, grant.updated_at
-			FROM workspace_coordinator_grants grant
+			SELECT coordinator_grant.workspace_id, coordinator_grant.coordinator_task_id,
+				coordinator_grant.created_by_user_id, coordinator_grant.created_at,
+				coordinator_grant.updated_at
+			FROM workspace_coordinator_grants coordinator_grant
 			JOIN tasks task
-				ON task.id = grant.coordinator_task_id
-				AND task.workspace_id = grant.workspace_id
-			WHERE grant.workspace_id <> '' AND grant.coordinator_task_id <> ''`,
+				ON task.id = coordinator_grant.coordinator_task_id
+				AND task.workspace_id = coordinator_grant.workspace_id
+			WHERE coordinator_grant.workspace_id <> ''
+				AND coordinator_grant.coordinator_task_id <> ''`,
 			`DROP TABLE workspace_coordinator_grants`,
 			`ALTER TABLE workspace_coordinator_grants_new RENAME TO workspace_coordinator_grants`,
 		},
@@ -436,13 +438,13 @@ func (r *Repository) migrateLegacyPostgresWorkspaceCoordinatorGrantSchema() erro
 	}
 
 	_, err := r.db.Exec(`
-		DELETE FROM workspace_coordinator_grants grant
-		WHERE grant.workspace_id = ''
-			OR grant.coordinator_task_id = ''
+		DELETE FROM workspace_coordinator_grants coordinator_grant
+		WHERE coordinator_grant.workspace_id = ''
+			OR coordinator_grant.coordinator_task_id = ''
 			OR NOT EXISTS (
 				SELECT 1 FROM tasks task
-				WHERE task.id = grant.coordinator_task_id
-					AND task.workspace_id = grant.workspace_id
+				WHERE task.id = coordinator_grant.coordinator_task_id
+					AND task.workspace_id = coordinator_grant.workspace_id
 			);
 		ALTER TABLE workspace_coordinator_grants
 			DROP CONSTRAINT workspace_coordinator_grants_coordinator_task_id_fkey;

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 
 	"github.com/kandev/kandev/internal/auth/authn"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
@@ -37,9 +38,7 @@ func (h *Handlers) handleCancelPendingMove(ctx context.Context, msg *ws.Message)
 		return ws.NewError(msg.ID, msg.Action, PendingMoveCancelFailedCode, pendingMoveCancelFailedMessage, nil)
 	}
 	var req cancelPendingMoveRequest
-	decoder := json.NewDecoder(bytes.NewReader(msg.Payload))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&req); err != nil {
+	if err := decodePendingMoveRequest(msg.Payload, &req); err != nil {
 		_, auditErr := h.pendingMoveCanceller.ExactCancelPendingMove(
 			ctx, actor, messagequeue.ExactPendingMoveMatch{}, msg.ID,
 		)
@@ -61,6 +60,18 @@ func (h *Handlers) handleCancelPendingMove(ctx context.Context, msg *ws.Message)
 		return pendingMoveCancellationError(msg, err)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, result)
+}
+
+func decodePendingMoveRequest(payload json.RawMessage, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("pending move payload must contain exactly one JSON document")
+	}
+	return nil
 }
 
 func pendingMoveCancellationActor(ctx context.Context) messagequeue.PendingMoveCancellationActor {

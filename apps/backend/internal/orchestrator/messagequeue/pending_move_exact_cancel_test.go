@@ -216,6 +216,46 @@ func TestSQLiteRepository_ExactCancelPendingMove(t *testing.T) {
 	}
 }
 
+func TestMemoryRepository_ExactPendingMoveAdministrationFailsClosed(t *testing.T) {
+	repo := NewMemoryRepository()
+	ctx := context.Background()
+	const (
+		sessionID = "22222222-2222-4222-8222-222222222222"
+		taskID    = "33333333-3333-4333-8333-333333333333"
+	)
+	move := &PendingMove{
+		MoveID: "44444444-4444-4444-8444-444444444444", TaskID: taskID,
+		WorkflowID:     "55555555-5555-4555-8555-555555555555",
+		WorkflowStepID: "77777777-7777-4777-8777-777777777777",
+	}
+	if err := repo.SetPendingMove(ctx, sessionID, move); err != nil {
+		t.Fatalf("seed memory pending move: %v", err)
+	}
+	actor := PendingMoveCancellationActor{
+		Kind: "coordinator", ID: "99999999-9999-4999-8999-999999999999",
+		CallerTaskID: "99999999-9999-4999-8999-999999999999",
+	}
+	match := ExactPendingMoveMatch{
+		PendingMoveID: move.ID, SessionID: sessionID, TaskID: taskID, MoveID: move.MoveID,
+		WorkflowID:                    move.WorkflowID,
+		ExpectedCurrentWorkflowStepID: "66666666-6666-4666-8666-666666666666",
+		ExpectedTargetWorkflowStepID:  move.WorkflowStepID,
+	}
+
+	cancelled, cancelErr := repo.ExactCancelPendingMove(ctx, actor, match, "correlation-memory-cancel")
+	if cancelled != nil || !errors.Is(cancelErr, ErrPendingMoveNotFoundOrChanged) {
+		t.Fatalf("memory cancellation result=%#v err=%v, want fail-closed denial", cancelled, cancelErr)
+	}
+	census, readErr := repo.ReadPendingMoveCensus(ctx, actor, taskID, "correlation-memory-read")
+	if census != nil || !errors.Is(readErr, ErrPendingMoveNotFoundOrChanged) {
+		t.Fatalf("memory census result=%#v err=%v, want fail-closed denial", census, readErr)
+	}
+	stored, err := repo.GetPendingMove(ctx, sessionID)
+	if err != nil || stored == nil || stored.ID != move.ID {
+		t.Fatalf("fail-closed memory administration mutated row: move=%#v err=%v", stored, err)
+	}
+}
+
 // @covers AC-TASKS-PENDING-MOVE-CANCELLATION-002.3
 func TestSQLiteRepository_ExactCancelPendingMoveRejectsOutOfTreeTarget(t *testing.T) {
 	fixture := newExactCancelFixture(t)

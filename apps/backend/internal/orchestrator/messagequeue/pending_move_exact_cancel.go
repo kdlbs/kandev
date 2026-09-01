@@ -193,9 +193,9 @@ func (r *sqliteRepository) deleteExactCancelTarget(
 					ON execution.session_id = caller_session.id
 					AND execution.task_id = caller.id
 					AND execution.agent_execution_id = ?
-				JOIN workspace_coordinator_grants grant
-					ON grant.workspace_id = caller.workspace_id
-					AND grant.coordinator_task_id = caller.id
+				JOIN workspace_coordinator_grants coordinator_grant
+					ON coordinator_grant.workspace_id = caller.workspace_id
+					AND coordinator_grant.coordinator_task_id = caller.id
 				WHERE caller.id = ? AND caller.workspace_id = ? AND workspace.owner_id = ?
 					AND caller_session.state IN ('STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 					AND execution.status IN ('starting', 'running', 'ready')
@@ -250,9 +250,9 @@ func (r *sqliteRepository) exactCancelActorAuthorized(
 			ON execution.session_id = caller_session.id
 			AND execution.task_id = caller.id
 			AND execution.agent_execution_id = ?
-		JOIN workspace_coordinator_grants grant
-			ON grant.workspace_id = caller.workspace_id
-			AND grant.coordinator_task_id = caller.id
+		JOIN workspace_coordinator_grants coordinator_grant
+			ON coordinator_grant.workspace_id = caller.workspace_id
+			AND coordinator_grant.coordinator_task_id = caller.id
 		WHERE caller.id = ? AND caller.workspace_id = ? AND workspace.owner_id = ?
 			AND caller_session.state IN ('STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 			AND execution.status IN ('starting', 'running', 'ready')
@@ -373,33 +373,14 @@ func (r *sqliteRepository) AuditInvalidPendingMoveCancellation(
 
 func (r *memoryRepository) ExactCancelPendingMove(
 	_ context.Context,
-	actor PendingMoveCancellationActor,
-	match ExactPendingMoveMatch,
-	correlationID string,
+	_ PendingMoveCancellationActor,
+	_ ExactPendingMoveMatch,
+	_ string,
 ) (*PendingMoveCancellationResult, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	stored, ok := r.pendingMoves[match.SessionID]
-	if actor.Kind != pendingMoveActorKindCoordinator || actor.CallerTaskID == match.TaskID || !ok ||
-		stored.ID != match.PendingMoveID || stored.TaskID != match.TaskID || stored.MoveID != match.MoveID ||
-		stored.WorkflowID != match.WorkflowID || stored.WorkflowStepID != match.ExpectedTargetWorkflowStepID {
-		return nil, ErrPendingMoveNotFoundOrChanged
-	}
-	delete(r.pendingMoves, match.SessionID)
-	return &PendingMoveCancellationResult{
-		Cancelled:                  true,
-		CorrelationID:              correlationID,
-		ActorKind:                  actor.Kind,
-		ActorID:                    actor.ID,
-		PendingMoveID:              stored.ID,
-		MoveID:                     stored.MoveID,
-		TaskID:                     stored.TaskID,
-		SessionID:                  match.SessionID,
-		WorkflowID:                 stored.WorkflowID,
-		PriorCurrentWorkflowStepID: match.ExpectedCurrentWorkflowStepID,
-		PriorTargetWorkflowStepID:  stored.WorkflowStepID,
-		QueuedAt:                   stored.QueuedAt,
-	}, nil
+	// The in-memory queue has no authoritative task, workflow, grant, or live
+	// execution relations. Administrative deletion must fail closed rather
+	// than silently skipping predicates the repository cannot verify.
+	return nil, ErrPendingMoveNotFoundOrChanged
 }
 
 func (r *memoryRepository) AuditInvalidPendingMoveCancellation(

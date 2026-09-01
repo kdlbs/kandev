@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -89,6 +90,30 @@ func TestHandleCancelPendingMoveRejectsAndAuditsCallerFields(t *testing.T) {
 	assertWSError(t, resp, PendingMoveInvalidArgumentCode)
 	if canceller.calls != 1 || canceller.match != (messagequeue.ExactPendingMoveMatch{}) {
 		t.Fatalf("invalid caller fields were not audited safely: calls=%d match=%#v", canceller.calls, canceller.match)
+	}
+}
+
+func TestHandleCancelPendingMoveRejectsTrailingJSON(t *testing.T) {
+	canceller := &recordingPendingMoveCanceller{err: messagequeue.ErrPendingMoveInvalidArgument}
+	h := &Handlers{pendingMoveCanceller: canceller, logger: testLogger(t)}
+	payload, err := json.Marshal(exactCancelPayload())
+	if err != nil {
+		t.Fatalf("marshal cancellation payload: %v", err)
+	}
+	msg := &ws.Message{
+		ID:      "test-id",
+		Type:    ws.MessageTypeRequest,
+		Action:  ws.ActionMCPCancelPendingMove,
+		Payload: append(payload, []byte(` {}`)...),
+	}
+
+	resp, err := h.handleCancelPendingMove(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("handleCancelPendingMove: %v", err)
+	}
+	assertWSError(t, resp, PendingMoveInvalidArgumentCode)
+	if canceller.calls != 1 || canceller.match != (messagequeue.ExactPendingMoveMatch{}) {
+		t.Fatalf("trailing JSON was not audited safely: calls=%d match=%#v", canceller.calls, canceller.match)
 	}
 }
 

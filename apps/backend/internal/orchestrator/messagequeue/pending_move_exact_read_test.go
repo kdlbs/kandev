@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // @covers AC-TASKS-PENDING-MOVE-CANCELLATION-004.1
@@ -156,15 +158,66 @@ func TestSQLiteRepository_ReadPendingMoveCensusRejectsOutOfTreeTarget(t *testing
 	}
 }
 
+// @covers AC-TASKS-PENDING-MOVE-CANCELLATION-004.6
+func TestSQLiteRepository_ReadPendingMoveCensusAuditFailureIsSanitized(t *testing.T) {
+	fixture := newExactCancelFixture(t)
+	if _, err := fixture.sql.Exec(`
+		CREATE TRIGGER fail_pending_move_census_audit
+		BEFORE INSERT ON pending_move_cancellation_audit
+		WHEN NEW.action = 'read'
+		BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END;
+	`); err != nil {
+		t.Fatalf("install census audit failure trigger: %v", err)
+	}
+
+	result, err := fixture.repo.ReadPendingMoveCensus(
+		context.Background(), fixture.actor, exactTargetTaskID, "correlation-census-audit-failure",
+	)
+	if result != nil || !errors.Is(err, ErrPendingMoveReadFailed) {
+		t.Fatalf("result=%#v err=%v, want sanitized read failure", result, err)
+	}
+	move, getErr := fixture.repo.GetPendingMove(context.Background(), exactTargetSessionID)
+	if getErr != nil || move == nil || move.ID != fixture.match.PendingMoveID {
+		t.Fatalf("failed census mutated pending row: move=%#v err=%v", move, getErr)
+	}
+}
+
 // @covers AC-TASKS-PENDING-MOVE-CANCELLATION-004.4
 func TestService_ReadPendingMoveRejectsInvalidTaskID(t *testing.T) {
-	svc := setupService(t)
-	actor := PendingMoveCancellationActor{
-		Kind: "coordinator", ID: exactCallerTaskID, UserID: "owner-a", WorkspaceID: exactWorkspaceID,
-		CallerTaskID: exactCallerTaskID, CallerSessionID: exactCallerSessionID, CallerExecutionID: exactCallerExecutionID,
-	}
-	result, err := svc.ReadPendingMove(context.Background(), actor, "not-a-uuid", "correlation-invalid")
-	if result != nil || !errors.Is(err, ErrPendingMoveInvalidArgument) {
-		t.Fatalf("result=%#v err=%v, want invalid argument", result, err)
+	for _, tc := range []struct {
+		name      string
+		taskID    string
+		present   bool
+		canonical bool
+	}{
+		{name: "missing", taskID: "", present: false, canonical: false},
+		{name: "malformed", taskID: "not-a-uuid", present: true, canonical: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newExactCancelFixture(t)
+			svc := NewService(fixture.repo, DefaultMaxPerSession, logger.Default())
+			correlationID := "correlation-invalid-census-" + tc.name
+
+			result, err := svc.ReadPendingMove(context.Background(), fixture.actor, tc.taskID, correlationID)
+			if result != nil || !errors.Is(err, ErrPendingMoveInvalidArgument) {
+				t.Fatalf("result=%#v err=%v, want invalid argument", result, err)
+			}
+			var audit struct {
+				TaskID               string `db:"task_id"`
+				Action               string `db:"action"`
+				IdentifiersPresent   bool   `db:"identifiers_present"`
+				IdentifiersCanonical bool   `db:"identifiers_canonical"`
+			}
+			if err := fixture.sql.Get(&audit, `
+				SELECT task_id, action, identifiers_present, identifiers_canonical
+				FROM pending_move_cancellation_audit WHERE correlation_id = ?
+			`, correlationID); err != nil {
+				t.Fatalf("read invalid census audit: %v", err)
+			}
+			if audit.TaskID != "" || audit.Action != "read" ||
+				audit.IdentifiersPresent != tc.present || audit.IdentifiersCanonical != tc.canonical {
+				t.Fatalf("invalid census audit leaked target or shape: %#v", audit)
+			}
+		})
 	}
 }

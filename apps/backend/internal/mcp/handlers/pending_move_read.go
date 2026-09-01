@@ -1,9 +1,7 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -29,9 +27,7 @@ func (h *Handlers) handleReadPendingMove(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, PendingMoveReadFailedCode, pendingMoveReadFailedMessage, nil)
 	}
 	var req readPendingMoveRequest
-	decoder := json.NewDecoder(bytes.NewReader(msg.Payload))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&req); err != nil {
+	if err := decodePendingMoveRequest(msg.Payload, &req); err != nil {
 		_, auditErr := h.pendingMoveReader.ReadPendingMove(ctx, actor, "", msg.ID)
 		if auditErr != nil {
 			return pendingMoveReadError(msg, auditErr)
