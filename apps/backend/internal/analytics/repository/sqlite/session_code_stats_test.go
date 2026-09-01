@@ -82,6 +82,13 @@ func TestListSessionCodeStats_PeakPendingWinsOverLatestSnapshot(t *testing.T) {
 		`{}`,
 		nowStr,
 	)
+	// A migrated environment-owned snapshot can lose capture provenance after
+	// its session is deleted. It must not contribute to a per-session stat.
+	execOrFatal(t, dbConn, `INSERT INTO task_session_git_snapshots (id, session_id, snapshot_type, files, created_at) VALUES (?, NULL, 'working_tree', ?, ?)`,
+		"snap-no-provenance",
+		`{"deleted-session.go":{"additions":999,"deletions":999}}`,
+		nowStr,
+	)
 
 	results, err := repo.ListSessionCodeStats(ctx, models.SessionCodeStatsFilter{})
 	if err != nil {

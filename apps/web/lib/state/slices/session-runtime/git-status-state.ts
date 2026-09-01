@@ -194,7 +194,7 @@ function advancesGitStatusTimestamp(existing: GitStatusEntry, incoming: GitStatu
 
 type GitStatusUpdateContext = {
   state: SessionRuntimeSliceState;
-  sessionId: string;
+  taskEnvironmentId: string;
   envKey: string;
   repoName: string;
   repoMap: Record<string, GitStatusEntry>;
@@ -205,7 +205,7 @@ type GitStatusUpdateContext = {
 };
 
 function logRejectedGitStatus(
-  sessionId: string,
+  taskEnvironmentId: string,
   envKey: string,
   repoName: string,
   existing: GitStatusEntry | undefined,
@@ -213,9 +213,8 @@ function logRejectedGitStatus(
 ) {
   if (!isDebug()) return;
   debugGit("setGitStatus", {
-    sessionId,
+    taskEnvironmentId,
     envKey,
-    usingFallbackKey: envKey === sessionId,
     repoName,
     prevTimestamp: existing?.timestamp,
     nextTimestamp: incoming.timestamp,
@@ -226,9 +225,8 @@ function logRejectedGitStatus(
 function logAcceptedGitStatus(context: GitStatusUpdateContext) {
   if (!isDebug()) return;
   debugGit("setGitStatus", {
-    sessionId: context.sessionId,
+    taskEnvironmentId: context.taskEnvironmentId,
     envKey: context.envKey,
-    usingFallbackKey: context.envKey === context.sessionId,
     repoName: context.repoName,
     prevFileCount: Object.keys(context.existing?.files ?? {}).length,
     nextFileCount: Object.keys(context.incoming.files ?? {}).length,
@@ -281,15 +279,16 @@ function mirrorLegacyGitStatus(context: GitStatusUpdateContext): boolean {
  * handler can invalidate derived caches without repeating the deep comparison. */
 export function applyGitStatus(
   state: SessionRuntimeSliceState,
-  sessionId: string,
+  taskEnvironmentId: string,
   gitStatus: GitStatusEntry,
 ): boolean {
-  const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
+  if (!taskEnvironmentId) return false;
+  const envKey = taskEnvironmentId;
   const repoName = gitStatus.repository_name ?? "";
   const repoMap = (state.gitStatus.byEnvironmentRepo[envKey] ??= {});
   const existingRepo = repoMap[repoName];
   if (!acceptsGitStatusTimestamp(existingRepo, gitStatus)) {
-    logRejectedGitStatus(sessionId, envKey, repoName, existingRepo, gitStatus);
+    logRejectedGitStatus(taskEnvironmentId, envKey, repoName, existingRepo, gitStatus);
     return false;
   }
 
@@ -299,7 +298,7 @@ export function applyGitStatus(
   const changed = !existingRepo || hasGitStatusChanged(existingRepo, gitStatus);
   const context: GitStatusUpdateContext = {
     state,
-    sessionId,
+    taskEnvironmentId,
     envKey,
     repoName,
     repoMap,

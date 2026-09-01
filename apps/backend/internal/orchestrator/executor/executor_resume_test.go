@@ -106,6 +106,31 @@ func setupLiveResumeTestFixture(repo *mockRepository) {
 	}
 }
 
+func TestBuildResumeRequestWithOptions_ForwardsBranchReplacementPermission(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	req, _, _, _, _, err := exec.buildResumeRequestAtCredentialBoundaryWithOptions(
+		context.Background(), repo.tasks["task-1"].ToAPI(), repo.sessions["sess-1"], true, nil,
+		ResumeOptions{AllowBranchReplacement: true},
+	)
+	if err != nil {
+		t.Fatalf("buildResumeRequestWithOptions returned error: %v", err)
+	}
+	if !req.AllowBranchReplacement {
+		t.Fatal("resume request lost explicit branch replacement permission")
+	}
+
+	normalReq, _, _, _, _, err := exec.buildResumeRequest(context.Background(), repo.tasks["task-1"].ToAPI(), repo.sessions["sess-1"], true)
+	if err != nil {
+		t.Fatalf("normal buildResumeRequest returned error: %v", err)
+	}
+	if normalReq.AllowBranchReplacement {
+		t.Fatal("normal resume unexpectedly enabled branch replacement")
+	}
+}
+
 type resumeCredentialStateIssuer struct {
 	repo          *mockRepository
 	observedState models.TaskSessionState

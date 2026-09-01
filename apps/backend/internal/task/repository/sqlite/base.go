@@ -31,6 +31,10 @@ type Repository struct {
 	// cutover: when set to a cutover step name, the migration aborts at that
 	// step so tests can prove rollback restores the pre-upgrade state.
 	failCutoverAfter string
+	// failGitSnapshotCutoverAfter is a test-only failpoint for the Git snapshot
+	// ownership cutover. It is separate from the worktree failpoint because the
+	// two migrations can be exercised independently in the same repository.
+	failGitSnapshotCutoverAfter string
 	// failUsageEventAttempts/failUsageEventErr are a test-only failpoint for
 	// CreateTaskUsageEvent's AC-32 transient-retry loop: while
 	// failUsageEventAttempts > 0, insertUsageEventAndRollup returns

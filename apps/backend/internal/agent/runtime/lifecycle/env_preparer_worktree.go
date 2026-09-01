@@ -306,7 +306,8 @@ func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 		RefreshRepositoryWithState: req.RefreshRepositoryWithState,
 		RemoteRefState:             req.RemoteRefState,
 		WorktreeID:                 req.WorktreeID,
-		ReuseRequired:              req.WorkspaceReuseRequired,
+		ReuseRequired:              req.WorkspaceReuseRequired && !req.AllowBranchReplacement,
+		AllowBranchReplacement:     req.AllowBranchReplacement,
 		TaskDirName:                req.TaskDirName,
 		RepoName:                   req.RepoName,
 		BranchSlug:                 req.BranchSlug,
@@ -532,6 +533,7 @@ func (p *WorktreePreparer) prepareOneRepo(
 	subReq.ContributionDestination = spec.ContributionDestination
 	subReq.WorktreeID = spec.WorktreeID
 	subReq.WorkspaceReuseRequired = req.WorkspaceReuseRequired || spec.WorkspaceReuseRequired
+	subReq.AllowBranchReplacement = req.AllowBranchReplacement || spec.AllowBranchReplacement
 	subReq.WorktreeBranchPrefix = spec.WorktreeBranchPrefix
 	subReq.WorktreeBranchTemplate = spec.WorktreeBranchTemplate
 	subReq.WorktreeBranchTicket = spec.WorktreeBranchTicket
@@ -608,6 +610,8 @@ func applySyncProgressEvent(step *PrepareStep, event worktree.SyncProgressEvent)
 	}
 	step.Output = event.Output
 	step.Error = event.Error
+	step.Warning = event.Warning
+	step.WarningDetail = event.WarningDetail
 	switch event.Status {
 	case worktree.SyncProgressRunning:
 		step.Status = PrepareStepRunning

@@ -2,6 +2,7 @@ package delivery_test
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -13,10 +14,45 @@ import (
 func seedTaskSession(t *testing.T, db *sqlx.DB, id, taskID, repositoryID string) {
 	t.Helper()
 	now := time.Now().UTC()
+	environmentID := "env-" + id
+	var existingEnvironmentID string
+	err := db.Get(&existingEnvironmentID, db.Rebind(`
+		SELECT id FROM task_environments WHERE task_id = ?
+	`), taskID)
+	switch err {
+	case nil:
+		environmentID = existingEnvironmentID
+	case sql.ErrNoRows:
+		if _, err := db.Exec(db.Rebind(`
+			INSERT INTO task_environments (id, task_id, status, workspace_path, created_at, updated_at)
+			VALUES (?, ?, 'ready', ?, ?, ?)
+		`), environmentID, taskID, "/workspace/"+id, now, now); err != nil {
+			t.Fatalf("seed task_environment %s: %v", environmentID, err)
+		}
+	default:
+		t.Fatalf("find task_environment for task %s: %v", taskID, err)
+	}
+	if repositoryID != "" {
+		var existingRepoID string
+		err := db.Get(&existingRepoID, db.Rebind(`
+			SELECT id FROM task_environment_repos
+			WHERE task_environment_id = ? AND repository_id = ?
+		`), environmentID, repositoryID)
+		if err == sql.ErrNoRows {
+			if _, err := db.Exec(db.Rebind(`
+				INSERT INTO task_environment_repos (id, task_environment_id, repository_id, status, created_at, updated_at)
+				VALUES (?, ?, ?, 'active', ?, ?)
+			`), "env-repo-"+id, environmentID, repositoryID, now, now); err != nil {
+				t.Fatalf("seed task_environment_repo %s: %v", id, err)
+			}
+		} else if err != nil {
+			t.Fatalf("find task_environment_repo for %s: %v", repositoryID, err)
+		}
+	}
 	if _, err := db.Exec(db.Rebind(`
-		INSERT INTO task_sessions (id, task_id, repository_id, started_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)
-	`), id, taskID, repositoryID, now, now); err != nil {
+		INSERT INTO task_sessions (id, task_id, repository_id, task_environment_id, started_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`), id, taskID, repositoryID, environmentID, now, now); err != nil {
 		t.Fatalf("seed task_session %s: %v", id, err)
 	}
 }
@@ -34,10 +70,14 @@ func seedTaskRepository(t *testing.T, db *sqlx.DB, id, taskID, repositoryID stri
 
 func seedGitSnapshot(t *testing.T, db *sqlx.DB, id, sessionID, branch, headCommit string, ahead int, createdAt time.Time) {
 	t.Helper()
+	var environmentID string
+	if err := db.Get(&environmentID, db.Rebind(`SELECT task_environment_id FROM task_sessions WHERE id = ?`), sessionID); err != nil {
+		t.Fatalf("resolve snapshot environment for %s: %v", sessionID, err)
+	}
 	if _, err := db.Exec(db.Rebind(`
-		INSERT INTO task_session_git_snapshots (id, session_id, snapshot_type, branch, head_commit, ahead, created_at)
-		VALUES (?, ?, 'test', ?, ?, ?, ?)
-	`), id, sessionID, branch, headCommit, ahead, createdAt); err != nil {
+		INSERT INTO task_session_git_snapshots (id, task_environment_id, session_id, snapshot_type, branch, head_commit, ahead, created_at)
+		VALUES (?, ?, ?, 'test', ?, ?, ?, ?)
+	`), id, environmentID, sessionID, branch, headCommit, ahead, createdAt); err != nil {
 		t.Fatalf("seed snapshot %s: %v", id, err)
 	}
 }
@@ -162,9 +202,9 @@ func TestSnapshotsForPair_NullHeadCommitNormalizesToEmpty(t *testing.T) {
 
 	at0 := time.Now().UTC().Add(-time.Hour)
 	if _, err := db.Exec(db.Rebind(`
-		INSERT INTO task_session_git_snapshots (id, session_id, snapshot_type, branch, head_commit, ahead, created_at)
-		VALUES (?, ?, 'test', ?, NULL, ?, ?)
-	`), "snap-null", "sess-1", "feature", 2, at0); err != nil {
+		INSERT INTO task_session_git_snapshots (id, task_environment_id, session_id, snapshot_type, branch, head_commit, ahead, created_at)
+		VALUES (?, (SELECT task_environment_id FROM task_sessions WHERE id = ?), ?, 'test', ?, NULL, ?, ?)
+	`), "snap-null", "sess-1", "sess-1", "feature", 2, at0); err != nil {
 		t.Fatalf("seed null-head snapshot: %v", err)
 	}
 
@@ -175,6 +215,110 @@ func TestSnapshotsForPair_NullHeadCommitNormalizesToEmpty(t *testing.T) {
 	}
 	if len(snaps) != 1 || snaps[0].HeadCommit != "" {
 		t.Fatalf("snaps = %+v, want exactly one snapshot with HeadCommit normalized to empty", snaps)
+	}
+}
+
+func TestSnapshotsForPairSurviveCaptureSessionDeletion(t *testing.T) {
+	repo, db := newTestRepo(t)
+	seedWorkspace(t, db, "ws-1")
+	seedRepository(t, db, "repo-1", "ws-1")
+	seedTask(t, db, "task-1", "ws-1")
+	now := time.Now().UTC()
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_environments (id, task_id, status, workspace_path, created_at, updated_at)
+		VALUES ('env-shared', 'task-1', 'ready', '/workspace/shared', ?, ?)
+	`), now, now); err != nil {
+		t.Fatalf("seed shared environment: %v", err)
+	}
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_environment_repos (id, task_environment_id, repository_id, status, created_at, updated_at)
+		VALUES ('env-repo-shared', 'env-shared', 'repo-1', 'active', ?, ?)
+	`), now, now); err != nil {
+		t.Fatalf("seed shared environment repository: %v", err)
+	}
+	for _, sessionID := range []string{"sess-binding", "sess-capture"} {
+		if _, err := db.Exec(db.Rebind(`
+			INSERT INTO task_sessions (id, task_id, repository_id, task_environment_id, started_at, updated_at)
+			VALUES (?, 'task-1', 'repo-1', 'env-shared', ?, ?)
+		`), sessionID, now, now); err != nil {
+			t.Fatalf("seed session %s: %v", sessionID, err)
+		}
+	}
+	seedGitSnapshot(t, db, "snap-capture", "sess-capture", "feature", "abcd", 2, now)
+	if _, err := db.Exec(db.Rebind(`DELETE FROM task_sessions WHERE id = ?`), "sess-capture"); err != nil {
+		t.Fatalf("delete capture session: %v", err)
+	}
+
+	snapshots, err := repo.SnapshotsForPair(context.Background(), "task-1", "repo-1")
+	if err != nil {
+		t.Fatalf("SnapshotsForPair: %v", err)
+	}
+	if len(snapshots) != 1 || snapshots[0].HeadCommit != "abcd" || snapshots[0].SessionID != "" {
+		t.Fatalf("snapshots = %+v, want environment-owned snapshot with cleared provenance", snapshots)
+	}
+}
+
+func TestSnapshotsForPairSurviveWithoutCaptureSessions(t *testing.T) {
+	repo, db := newTestRepo(t)
+	seedWorkspace(t, db, "ws-1")
+	seedRepository(t, db, "repo-1", "ws-1")
+	seedTask(t, db, "task-1", "ws-1")
+	now := time.Now().UTC()
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_environments (id, task_id, status, workspace_path, created_at, updated_at)
+		VALUES ('env-without-sessions', 'task-1', 'ready', '/workspace/without-sessions', ?, ?)
+	`), now, now); err != nil {
+		t.Fatalf("seed task environment: %v", err)
+	}
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_environment_repos (id, task_environment_id, repository_id, status, created_at, updated_at)
+		VALUES ('env-repo-without-sessions', 'env-without-sessions', 'repo-1', 'active', ?, ?)
+	`), now, now); err != nil {
+		t.Fatalf("seed environment repository: %v", err)
+	}
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_session_git_snapshots (
+			id, task_environment_id, session_id, snapshot_type, branch, head_commit, metadata, created_at
+		) VALUES ('snap-without-session', 'env-without-sessions', NULL, 'test', 'feature', 'abcd', ?, ?)
+	`), `{"repository_name":"repo-1"}`, now); err != nil {
+		t.Fatalf("seed environment snapshot: %v", err)
+	}
+
+	snapshots, err := repo.SnapshotsForPair(context.Background(), "task-1", "repo-1")
+	if err != nil {
+		t.Fatalf("SnapshotsForPair: %v", err)
+	}
+	if len(snapshots) != 1 || snapshots[0].HeadCommit != "abcd" || snapshots[0].SessionID != "" {
+		t.Fatalf("snapshots = %+v, want the environment snapshot without session provenance", snapshots)
+	}
+}
+
+func TestSnapshotsForPairDoesNotDuplicateAcrossEnvironmentBranches(t *testing.T) {
+	repo, db := newTestRepo(t)
+	seedWorkspace(t, db, "ws-1")
+	seedRepository(t, db, "repo-1", "ws-1")
+	seedTask(t, db, "task-1", "ws-1")
+	seedTaskSession(t, db, "sess-1", "task-1", "repo-1")
+	now := time.Now().UTC()
+	var environmentID string
+	if err := db.Get(&environmentID, db.Rebind(`SELECT task_environment_id FROM task_sessions WHERE id = ?`), "sess-1"); err != nil {
+		t.Fatalf("resolve task environment: %v", err)
+	}
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_environment_repos (
+			id, task_environment_id, repository_id, branch_slug, status, created_at, updated_at
+		) VALUES ('env-repo-branch', ?, 'repo-1', 'branch-2', 'active', ?, ?)
+	`), environmentID, now, now); err != nil {
+		t.Fatalf("seed second environment branch: %v", err)
+	}
+	seedGitSnapshot(t, db, "snap-1", "sess-1", "feature", "abcd", 2, now)
+
+	snapshots, err := repo.SnapshotsForPair(context.Background(), "task-1", "repo-1")
+	if err != nil {
+		t.Fatalf("SnapshotsForPair: %v", err)
+	}
+	if len(snapshots) != 1 || snapshots[0].HeadCommit != "abcd" {
+		t.Fatalf("snapshots = %+v, want one snapshot despite two environment branches", snapshots)
 	}
 }
 

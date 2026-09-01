@@ -765,17 +765,20 @@ func (ae *AgentExecution) EndSessionSpan() {
 // the top level. When LaunchRequest.Repositories is set, each entry produces
 // one prepared worktree under the shared TaskDirName.
 type RepoLaunchSpec struct {
-	TaskRepositoryID       string
-	RepositoryID           string
-	RepositoryPath         string
-	RepositoryURL          string // Clone URL for remote executors that need to clone
-	RepoName               string // Repository name used as subdirectory inside TaskDirName
-	BaseBranch             string
-	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch         string
-	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution     *models.RemoteContribution
-	WorktreeID             string // Existing worktree ID to reuse (skip creation if set)
+	TaskRepositoryID   string
+	RepositoryID       string
+	RepositoryPath     string
+	RepositoryURL      string // Clone URL for remote executors that need to clone
+	RepoName           string // Repository name used as subdirectory inside TaskDirName
+	BaseBranch         string
+	DefaultBranch      string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch     string
+	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution *models.RemoteContribution
+	WorktreeID         string // Existing worktree ID to reuse (skip creation if set)
+	// AllowBranchReplacement permits the explicit new-branch recovery action for
+	// this repository while retaining its environment record.
+	AllowBranchReplacement bool
 	WorktreeBranchPrefix   string
 	WorktreeBranchTemplate string
 	WorktreeBranchTicket   string
@@ -849,6 +852,9 @@ type LaunchRequest struct {
 	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
 	// WorkspaceReuseRequired selects attach-only environment preparation.
 	WorkspaceReuseRequired bool
+	// AllowBranchReplacement is an explicit user-selected recovery permission.
+	// Normal resume leaves it false so a missing branch remains a visible error.
+	AllowBranchReplacement bool
 	TaskTitle              string // Human-readable task title for semantic worktree naming
 	// AgentProfileID is the stable Office identity for routed Office launches.
 	// For non-Office launches it is also the concrete execution profile.
@@ -895,7 +901,7 @@ type LaunchRequest struct {
 	ExecutorType        string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
 	ExecutorConfig      map[string]string // Executor config (docker_host, git_token, etc.)
 	PreviousExecutionID string            // Previous execution ID for runtime reconnect
-	McpMode             string            // MCP tool mode: "task" (default), "config", or "office"
+	McpMode             string            // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
 	McpProviders        []string          // Normalized provider capabilities attached to the task
 	McpProfile          *mcpprofile.Context
 
@@ -977,6 +983,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		ComparisonTarget:           r.ComparisonTarget,
 		ContributionDestination:    r.ContributionDestination,
 		WorktreeID:                 r.WorktreeID,
+		AllowBranchReplacement:     r.AllowBranchReplacement,
 		WorktreeBranchPrefix:       r.WorktreeBranchPrefix,
 		WorktreeBranchTemplate:     r.WorktreeBranchTemplate,
 		WorktreeBranchTicket:       r.WorktreeBranchTicket,

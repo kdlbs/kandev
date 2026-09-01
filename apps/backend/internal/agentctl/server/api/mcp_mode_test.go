@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 )
@@ -57,7 +58,7 @@ func setMcpProviders(t *testing.T, s *Server, providers []string) *httptest.Resp
 func TestHandleSetMcpMode_AcceptsSupportedModes(t *testing.T) {
 	s := newTestServerWithMCP(t)
 
-	for _, mode := range []string{mcpserver.ModeTask, mcpserver.ModeTaskTitlePending, mcpserver.ModeConfig, mcpserver.ModeOffice} {
+	for _, mode := range mcpmode.InstanceModes() {
 		t.Run(mode, func(t *testing.T) {
 			rec := setMcpMode(t, s, mode)
 			if rec.Code != http.StatusOK {
@@ -72,6 +73,31 @@ func TestHandleSetMcpMode_AcceptsSupportedModes(t *testing.T) {
 			}
 			if body.Mode != mode {
 				t.Fatalf("mode = %q, want %q", body.Mode, mode)
+			}
+		})
+	}
+}
+
+// orchestratorEmittableModes is every non-default value the backend's
+// orchestrator/executor resolveTaskSessionMCPMode can put on this route. The
+// values come from the shared wire contract. The producer half of the pin is
+// executor.TestMcpModeConstants_MatchTheAgentctlWireValues.
+//
+// handleSetMcpMode and that resolver are two allowlists over one field.
+// v0.92.1 taught the resolver "automation" and left this one alone; the
+// existing-workspace launch path calls SetMcpMode before starting the agent,
+// so every automation-origin task failed with HTTP 400 at launch.
+var orchestratorEmittableModes = []string{
+	mcpmode.Config, mcpmode.Office, mcpmode.TaskTitlePending, mcpmode.Automation,
+}
+
+func TestHandleSetMcpMode_AcceptsEveryModeTheOrchestratorCanEmit(t *testing.T) {
+	s := newTestServerWithMCP(t)
+
+	for _, mode := range orchestratorEmittableModes {
+		t.Run(mode, func(t *testing.T) {
+			if rec := setMcpMode(t, s, mode); rec.Code != http.StatusOK {
+				t.Fatalf("mode %q: status = %d, want %d; body=%s", mode, rec.Code, http.StatusOK, rec.Body.String())
 			}
 		})
 	}

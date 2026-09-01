@@ -3,6 +3,9 @@ import { create } from "zustand";
 import type { DockviewApi, AddPanelOptions, SerializedDockview } from "dockview-react";
 import {
   setEnvLayout,
+  getEnvLayout,
+  getEnvLayoutProfile,
+  setEnvLayoutProfile,
   getEnvMaximizeState,
   setEnvMaximizeState,
   removeEnvMaximizeState,
@@ -10,6 +13,7 @@ import {
   setGlobalSidebarWidth,
   getManualRightWidth,
 } from "@/lib/local-storage";
+import { getLayoutProfileIdentity, type LayoutProfileIdentity } from "@/lib/layout/layout-profiles";
 import { setPinnedTarget, clearPinnedTarget } from "./layout-manager";
 import { applyLayoutFixups, focusOrAddPanel } from "./dockview-layout-builders";
 import {
@@ -65,6 +69,57 @@ const debugSave = createDebugLogger("dockview:save");
 const debugWidths = createDebugLogger("dockview:widths");
 
 const RIGHT_PANEL_IDS = new Set(["changes", "files", TERMINAL_DEFAULT_ID]);
+
+const DEFAULT_LAYOUT_PROFILE: LayoutProfileIdentity = { kind: "built-in", id: "default" };
+
+function profileForCustomLayout(layout: Pick<SavedLayoutConfig, "id">): LayoutProfileIdentity {
+  return getLayoutProfileIdentity(layout);
+}
+
+function inferLayoutProfileFromApi(api: DockviewApi): LayoutProfileIdentity {
+  const changesPanel = api.getPanel("changes");
+  const panelIds = changesPanel?.group.panels.map((panel) => panel.id) ?? [];
+  if (
+    changesPanel?.group.id === RIGHT_TOP_GROUP &&
+    panelIds.length === 2 &&
+    panelIds.includes("files")
+  ) {
+    return DEFAULT_LAYOUT_PROFILE;
+  }
+  return { kind: "custom", id: "restored-layout" };
+}
+
+/** Resolve the profile identity for an env restore, with a legacy shape fallback. */
+export function resolveRestoredLayoutProfile(
+  api: DockviewApi,
+  envId: string | null,
+): LayoutProfileIdentity {
+  return (envId && getEnvLayoutProfile(envId)) || inferLayoutProfileFromApi(api);
+}
+
+function resolveEnvSwitchProfile(args: {
+  hasFirstAdoptionRouteLayout: boolean;
+  savedEnvLayout: object | null;
+  savedLayoutProfile: LayoutProfileIdentity | null;
+  currentLayoutProfile: LayoutProfileIdentity;
+  api: DockviewApi;
+}): LayoutProfileIdentity {
+  if (args.hasFirstAdoptionRouteLayout) return args.currentLayoutProfile;
+  if (args.savedLayoutProfile) return args.savedLayoutProfile;
+  if (args.savedEnvLayout) return inferLayoutProfileFromApi(args.api);
+  return args.currentLayoutProfile;
+}
+
+function resolveDefaultLayoutProfile(
+  basePreset: BuiltInPreset | undefined,
+  userDefaultLayout: LayoutState | null,
+  userDefaultLayoutProfile: LayoutProfileIdentity,
+  defaultPreset: BuiltInPreset,
+): LayoutProfileIdentity {
+  if (basePreset) return { kind: "built-in", id: basePreset };
+  if (userDefaultLayout) return userDefaultLayoutProfile;
+  return { kind: "built-in", id: defaultPreset };
+}
 
 // Re-export types and constants used by other modules
 export type { BuiltInPreset } from "./layout-manager";
@@ -220,6 +275,8 @@ type DockviewStore = {
   sidebarGroupId: string;
   sidebarVisible: boolean;
   rightPanelsVisible: boolean;
+  /** Identity of the active built-in or saved custom layout profile. */
+  activeLayoutProfile: LayoutProfileIdentity;
   toggleSidebar: () => void;
   toggleRightPanels: () => void;
   setSidebarVisible: (visible: boolean) => void;
@@ -248,7 +305,8 @@ type DockviewStore = {
   pinnedWidths: Map<string, number>;
   setPinnedWidth: (columnId: string, width: number) => void;
   userDefaultLayout: LayoutState | null;
-  setUserDefaultLayout: (layout: LayoutState | null) => void;
+  userDefaultLayoutProfile: LayoutProfileIdentity;
+  setUserDefaultLayout: (layout: LayoutState | null, profile: LayoutProfileIdentity) => void;
   activeFilePath: string | null;
   activeFileRepo: string | null;
   activePanelComponent: string | null;
@@ -638,7 +696,10 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       preserveChatScrollDuringLayout();
       // Capture before layout change; api.width can become stale in rAF.
       const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
-      set({ isRestoringLayout: true });
+      set({
+        isRestoringLayout: true,
+        activeLayoutProfile: { kind: "built-in", id: preset },
+      });
       const presetState = getPresetLayout(preset);
       const state = mergeCurrentPanelsIntoPreset(api, presetState);
       // resetWidths (explicit pick from the layout selector) → preset defaults;
@@ -687,7 +748,10 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       captureLiveWidths(api, set);
       preserveChatScrollDuringLayout();
       const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
-      set({ isRestoringLayout: true });
+      set({
+        isRestoringLayout: true,
+        activeLayoutProfile: profileForCustomLayout(layout),
+      });
       const { appliedState, oldFormatRestoreFailed } = restoreCustomLayout({
         api,
         layout,
@@ -821,6 +885,33 @@ function restoreMaximizeFromStorage(
   return true;
 }
 
+function restoreIncomingMaximize(args: {
+  api: DockviewApi;
+  envId: string;
+  set: StoreSet;
+  activeSessionId: string | null;
+  currentSessionIds: string[];
+  hasFirstAdoptionRouteLayout: boolean;
+  savedLayoutProfile: LayoutProfileIdentity | null;
+}): boolean {
+  if (args.hasFirstAdoptionRouteLayout) return false;
+  if (
+    !restoreMaximizeFromStorage(
+      args.api,
+      args.envId,
+      args.set,
+      args.activeSessionId,
+      args.currentSessionIds,
+    )
+  ) {
+    return false;
+  }
+  args.set({
+    activeLayoutProfile: args.savedLayoutProfile ?? inferLayoutProfileFromApi(args.api),
+  });
+  return true;
+}
+
 // Persist settled layout to env storage; auto-save in setupLayoutPersistence is gated by isRestoringLayout, so preset/custom actions must call this after the flag clears.
 /**
  * Persist the settled layout to the env's storage slot. No-op when maximized
@@ -838,6 +929,7 @@ export function persistEnvLayoutNow(
   if (preMaximizeLayout !== null) return;
   try {
     setEnvLayout(envId, api.toJSON());
+    setEnvLayoutProfile(envId, useDockviewStore.getState().activeLayoutProfile);
   } catch {
     /* ignore serialization/storage failures */
   }
@@ -886,6 +978,7 @@ function saveOutgoingEnv(
       const { width, height } = measureDockviewContainer(api);
       const preMaxSerialized = toSerializedDockview(preMaximizeLayout, width, height, pinnedWidths);
       setEnvLayout(oldEnvId, preMaxSerialized as unknown as object);
+      setEnvLayoutProfile(oldEnvId, useDockviewStore.getState().activeLayoutProfile);
     } catch (err) {
       console.warn("saveOutgoingEnv: serialize failed", err);
       /* fall back: skip writing rather than overwrite with maximized JSON */
@@ -895,6 +988,7 @@ function saveOutgoingEnv(
     try {
       const json = api.toJSON();
       setEnvLayout(oldEnvId, json);
+      setEnvLayoutProfile(oldEnvId, useDockviewStore.getState().activeLayoutProfile);
       if (isDebug()) {
         debugWidths(
           `save-outgoing env=${oldEnvId} ${formatWidthsSnapshot(snapshotColumnWidths(api))} ` +
@@ -963,6 +1057,8 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
     saveOutgoingEnv(api, effectiveOld, preMaximizeLayout, get().pinnedWidths);
     set({ preMaximizeLayout: null, maximizedGroupId: null });
     const manualRightWidth = getManualRightWidth(newEnvId);
+    const savedEnvLayout = getEnvLayout(newEnvId);
+    const savedLayoutProfile = getEnvLayoutProfile(newEnvId);
     set({
       isRestoringLayout: true,
       currentLayoutEnvId: newEnvId,
@@ -972,8 +1068,15 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
       const hasFirstAdoptionRouteLayout =
         oldEnvId === null && currentLayoutEnvId === null && Boolean(initialLayout);
       if (
-        !hasFirstAdoptionRouteLayout &&
-        restoreMaximizeFromStorage(api, newEnvId, set, activeSessionId, currentSessionIds)
+        restoreIncomingMaximize({
+          api,
+          envId: newEnvId,
+          set,
+          activeSessionId,
+          currentSessionIds,
+          hasFirstAdoptionRouteLayout,
+          savedLayoutProfile,
+        })
       )
         return;
       const measured = measureDockviewContainer(api);
@@ -987,9 +1090,24 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
         safeHeight: measured.height,
         buildDefault: (a, intentName) => get().buildDefaultLayout(a, intentName),
         getDefaultLayout: () => get().userDefaultLayout ?? getPresetLayout(get().defaultPreset),
+        getDefaultPinnedWidths: (width) => {
+          const defaultLayout = get().userDefaultLayout;
+          return defaultLayout
+            ? resolveCustomLayoutPinnedWidths(defaultLayout.columns, width)
+            : new Map();
+        },
         initialLayout,
       });
-      set(ids);
+      set({
+        ...ids,
+        activeLayoutProfile: resolveEnvSwitchProfile({
+          hasFirstAdoptionRouteLayout,
+          savedEnvLayout,
+          savedLayoutProfile,
+          currentLayoutProfile: get().activeLayoutProfile,
+          api,
+        }),
+      });
       enforceFromStore(api, get);
       set({ isRestoringLayout: false });
       if (isDebug()) {
@@ -1082,6 +1200,18 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
   };
 }
 
+function resolveBuildDefaultPinnedWidths(
+  state: LayoutState,
+  userDefaultLayout: LayoutState | null,
+  basePreset: BuiltInPreset | undefined,
+  availableWidth: number,
+): Map<string, number> {
+  if (!userDefaultLayout || basePreset) return new Map();
+  // Intent panel injection preserves column widths, so the effective state
+  // still carries the saved custom-default geometry used for scaling.
+  return resolveCustomLayoutPinnedWidths(state.columns, availableWidth);
+}
+
 /**
  * Build and apply the default layout — the user's saved default or the active
  * preset, optionally injected with an intent's panels/active-panel overrides —
@@ -1094,9 +1224,8 @@ function performBuildDefault(
   get: StoreGet,
   intentName?: string,
 ): void {
-  const { userDefaultLayout } = get();
+  const { userDefaultLayout, userDefaultLayoutProfile } = get();
   const intent = intentName ? resolveNamedIntent(intentName) : null;
-  const freshPinned = new Map<string, number>();
   // Capture dimensions before layout change — api.width can become stale
   // after fromJSON inside applyLayout
   const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
@@ -1107,9 +1236,14 @@ function performBuildDefault(
         `pre=${formatWidthsSnapshot(snapshotColumnWidths(api))}`,
     );
   }
-  set({ isRestoringLayout: true, pinnedWidths: freshPinned });
-
   const basePreset = intent?.preset as BuiltInPreset | undefined;
+  const activeLayoutProfile = resolveDefaultLayoutProfile(
+    basePreset,
+    userDefaultLayout,
+    userDefaultLayoutProfile,
+    get().defaultPreset,
+  );
+
   let state = basePreset
     ? getPresetLayout(basePreset)
     : (userDefaultLayout ?? getPresetLayout(get().defaultPreset));
@@ -1121,7 +1255,15 @@ function performBuildDefault(
     state = applyActivePanelOverrides(state, intent.activePanels);
   }
 
-  const ids = applyLayout(api, state, freshPinned, safeWidth, safeHeight);
+  const pinnedWidths = resolveBuildDefaultPinnedWidths(
+    state,
+    userDefaultLayout,
+    basePreset,
+    safeWidth,
+  );
+  set({ isRestoringLayout: true, pinnedWidths, activeLayoutProfile });
+
+  const ids = applyLayout(api, state, pinnedWidths, safeWidth, safeHeight);
   const hasSidebar = state.columns.some((c) => c.id === "sidebar");
   const hasRight = state.columns.length > (hasSidebar ? 2 : 1);
   set({ ...ids, sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });
@@ -1289,6 +1431,7 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   sidebarGroupId: SIDEBAR_GROUP,
   sidebarVisible: false,
   rightPanelsVisible: true,
+  activeLayoutProfile: DEFAULT_LAYOUT_PROFILE,
   pinnedWidths: new Map(),
   setPinnedWidth: (columnId, width) => {
     set((prev) => {
@@ -1298,7 +1441,9 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
     });
   },
   userDefaultLayout: null,
-  setUserDefaultLayout: (layout) => set({ userDefaultLayout: layout }),
+  userDefaultLayoutProfile: DEFAULT_LAYOUT_PROFILE,
+  setUserDefaultLayout: (layout, profile) =>
+    set({ userDefaultLayout: layout, userDefaultLayoutProfile: profile }),
   ...buildVisibilityActions(set, get),
   ...buildPresetActions(set, get),
   defaultPreset: "default",

@@ -659,6 +659,31 @@ export class SessionPage {
     return this.page.getByTestId("recovery-resume-button");
   }
 
+  /** Error returned by a manual session recovery action. */
+  recoveryError(): Locator {
+    return this.activeChat().getByTestId("session-recovery-error");
+  }
+
+  /** Explicit action for continuing a conversation on a replacement branch. */
+  recoveryNewBranchButton(): Locator {
+    return this.activeChat().getByTestId("recovery-new-branch-button");
+  }
+
+  /** Read-only workspace restore action shown after a recovery failure. */
+  recoveryRestoreWorkspaceButton(): Locator {
+    return this.activeChat().getByTestId("recovery-restore-workspace-button");
+  }
+
+  /** Non-blocking notice shown after automatic read-only workspace restore. */
+  recoveryReadOnlyNotice(): Locator {
+    return this.activeChat().getByTestId("session-recovery-notice");
+  }
+
+  /** Persisted warning shown after the original branch is replaced. */
+  branchRecreatedWarning(): Locator {
+    return this.activeChat().getByTestId("branch-recreated-warning");
+  }
+
   /** "Start fresh session" button shown after agent crash. */
   recoveryFreshButton(): Locator {
     return this.page.getByTestId("recovery-fresh-button");

@@ -624,6 +624,15 @@ func (m *mockRepository) GetLatestGitSnapshot(ctx context.Context, sessionID str
 func (m *mockRepository) GetLatestGitSnapshotsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]*models.GitSnapshot, error) {
 	return make(map[string]*models.GitSnapshot), nil
 }
+func (m *mockRepository) GetLatestGitSnapshotByTaskEnvironmentID(ctx context.Context, taskEnvironmentID string) (*models.GitSnapshot, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetLatestGitSnapshotsByTaskEnvironmentIDs(ctx context.Context, taskEnvironmentIDs []string) (map[string]*models.GitSnapshot, error) {
+	return make(map[string]*models.GitSnapshot), nil
+}
+func (m *mockRepository) GetLatestGitStatusSnapshotsByTaskEnvironmentIDs(ctx context.Context, taskEnvironmentIDs []string) ([]*models.GitSnapshot, error) {
+	return nil, nil
+}
 func (m *mockRepository) GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
 	return nil, nil
 }

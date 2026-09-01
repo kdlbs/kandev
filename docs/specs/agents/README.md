@@ -63,6 +63,7 @@ surface shared by task and Office consumers.
 
 ### System design
 
+- [Agent Resume and Runtime Recovery](system-design/agent-resume-runtime-recovery.md)
 - [Injected Skill Naming](system-design/injected-skill-naming.md)
 - [Injected Skill Naming Migration](system-design/injected-skill-naming-migration.md)
 - [Dynamic Agent Routing System Design Part 1](system-design/dynamic-agent-routing-01.md)

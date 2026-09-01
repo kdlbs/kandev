@@ -54,6 +54,7 @@ signals, and task-scoped scheduling contracts.
 - [Task Labels](requirements/labels.md)
 - [Link Existing Task to External References](requirements/link-existing-task-github-issue.md)
 - [MCP-Created Task Agent Profile Default](requirements/mcp-task-agent-profile-default.md)
+- [MCP Tool Name Stability](requirements/mcp-tool-name-stability.md)
 - [Missing task route recovery](requirements/missing-task-route-recovery.md)
 - [Task model unification](requirements/model-unification.md)
 - [Multi-branch tasks](requirements/multi-branch.md)
@@ -119,6 +120,7 @@ signals, and task-scoped scheduling contracts.
 - [External task ID idempotency operations](system-design/external-id-idempotency-operations.md)
 - [External task ID idempotency](system-design/external-id-idempotency.md)
 - [Task model unification](system-design/model-unification.md)
+- [MCP Tool Name Stability](system-design/mcp-tool-name-stability.md)
 - [Remote Contribution Tasks](system-design/remote-contribution-tasks.md)
 - [Passthrough Queued Prompt Dispatch](system-design/passthrough-queued-prompt-dispatch.md)
 - [Task Archive Confirmation](system-design/archive-confirmation.md)
@@ -137,7 +139,7 @@ signals, and task-scoped scheduling contracts.
 
 ## Migration record
 
-Migration remains in progress. The five requirements above now have
+Migration remains in progress. The six requirements above now have
 authoritative, wrapper-free requirement/design pairs. Other migrated files still
 need the same extraction before this system can return to a complete migration
 state.

@@ -110,8 +110,7 @@ export type GitStatusEntry = {
 };
 
 export type GitStatusState = {
-  /** Git status keyed by environment ID (shared across sessions in the same environment).
-   *  Falls back to session ID when no environment exists.
+  /** Git status keyed by delivered environment ID (shared across sessions in the same environment).
    *  For multi-repo workspaces this holds the most recently received status
    *  (whichever repo emitted last); per-repo state lives in byEnvironmentRepo.
    */
@@ -472,7 +471,7 @@ export type SessionRuntimeSliceActions = {
   setActiveProcess: (sessionId: string, processId: string) => void;
   /** Returns true when the update meaningfully changed git state (so callers
    *  can invalidate derived caches without repeating the deep comparison). */
-  setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => boolean;
+  setGitStatus: (taskEnvironmentId: string, gitStatus: GitStatusEntry) => boolean;
   clearGitStatus: (sessionId: string) => void;
   bumpWorkspaceFilesRefresh: (sessionId: string) => void;
   /** Drops the pre-multi-repo (empty-repo-name) git-status entries so a

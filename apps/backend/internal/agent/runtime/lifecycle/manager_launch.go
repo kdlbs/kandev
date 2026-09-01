@@ -602,6 +602,13 @@ func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchReq
 	return
 }
 
+func shouldPrepareEnvironment(req *LaunchRequest) bool {
+	if req == nil || req.ACPSessionID == "" {
+		return true
+	}
+	return req.UseWorktree && req.RepositoryPath != ""
+}
+
 // resolveScratchWorkspace creates and returns the scratch workspace path for a
 // repo-less task. Returns empty string when the path could not be created.
 func (m *Manager) resolveScratchWorkspace(ctx context.Context, req *LaunchRequest) string {
@@ -1028,6 +1035,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		TaskRepositoryID:           req.TaskRepositoryID,
 		UseWorktree:                req.UseWorktree,
 		WorkspaceReuseRequired:     req.WorkspaceReuseRequired,
+		AllowBranchReplacement:     req.AllowBranchReplacement,
 		WorktreeID:                 req.WorktreeID,
 		SetupScript:                req.SetupScript,
 		RepoSetupScript:            repoSetupScript,
@@ -1073,6 +1081,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				PRNumber:                   r.PRNumber,
 				RemoteContribution:         r.RemoteContribution,
 				WorktreeID:                 r.WorktreeID,
+				AllowBranchReplacement:     req.AllowBranchReplacement || r.AllowBranchReplacement,
 				WorktreeBranchPrefix:       r.WorktreeBranchPrefix,
 				WorktreeBranchTemplate:     r.WorktreeBranchTemplate,
 				WorktreeBranchTicket:       r.WorktreeBranchTicket,
@@ -1391,9 +1400,11 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	reqWithWorktree.EnvironmentFinalized = true
 
 	// 4b. Run environment preparation (if preparer registered for this executor type).
-	// Skip on resume (ACPSessionID set) — workspace was already prepared during initial launch.
+	// Native ACP resume normally reuses the already-prepared workspace, but a
+	// worktree resume must re-enter preparation so a missing branch can be
+	// reported and an explicit replacement action can materialize it.
 	var prepResult *EnvPrepareResult
-	if req.ACPSessionID == "" {
+	if shouldPrepareEnvironment(req) {
 		prepResult = m.runEnvironmentPreparerWithProgress(ctx, &reqWithWorktree, workspacePath, progressRecorder.Callback(0))
 	} else {
 		m.logger.Debug("skipping environment preparation for resumed session",
@@ -1419,7 +1430,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 
 	// 7. Build runtime request and create instance (agent not started yet)
 	var runtimeProgress PrepareProgressCallback
-	if req.ACPSessionID == "" {
+	if shouldPrepareEnvironment(req) {
 		runtimeProgress = progressRecorder.Callback(progressRecorder.Len())
 	}
 	execReq, execInstance, rt, err := m.launchBuildExecutorRequest(ctx, executionID, &reqWithWorktree, agentConfig, profileInfo, mainRepoGitDir, worktreeID, worktreeBranch, runtimeProgress)

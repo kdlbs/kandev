@@ -130,6 +130,7 @@ var startupExclusions = []CatalogExclusion{
 	{EnvVar: "KANDEV_FEATURES_AUTH", Class: "profile", Reason: "runtime feature flag registry"},
 	{EnvVar: "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF", Class: "debug", Reason: "runtime feature flag registry"},
 	{EnvVar: "KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING", Class: "debug", Reason: "runtime feature flag registry"},
+	{EnvVar: "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY", Class: "debug", Reason: "runtime feature flag registry"},
 	{EnvVar: "KANDEV_DEBUG_AGENT_MESSAGES", Class: "debug", Reason: "ACP frame diagnostics"},
 	{EnvVar: "KANDEV_DEBUG_ACP_MAX_FILES", Class: "debug", Reason: "ACP debug retention"},
 	{EnvVar: "KANDEV_DEBUG_ACP_RETENTION_HOURS", Class: "debug", Reason: "ACP debug retention"},
