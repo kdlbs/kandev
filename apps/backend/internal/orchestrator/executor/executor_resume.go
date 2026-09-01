@@ -177,7 +177,11 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		return nil, fmt.Errorf("load remote contribution for task repository %q: %w", tr.ID, err)
 	} else if found {
 		if tr.BaseBranch != "" && tr.BaseBranch != binding.BaseBranch {
-			return nil, fmt.Errorf("task repository %q base branch does not match remote contribution", tr.ID)
+			e.logger.Debug("reconciling remote contribution base branch with task repository",
+				zap.String("task_repository_id", tr.ID),
+				zap.String("old_base_branch", binding.BaseBranch),
+				zap.String("new_base_branch", tr.BaseBranch))
+			binding.BaseBranch = tr.BaseBranch
 		}
 		if tr.CheckoutBranch != "" && tr.CheckoutBranch != binding.HeadBranch {
 			return nil, fmt.Errorf("task repository %q checkout branch does not match remote contribution", tr.ID)
@@ -206,6 +210,7 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 			zap.Error(err))
 		return nil, err
 	}
+	e.resolvePRBaseForLaunch(ctx, tr, repo, info)
 
 	remoteRefState, err := e.ensureRepoLocalPathForSessionAndState(ctx, tr.TaskID, sessionID, repo)
 	if err != nil {
@@ -254,6 +259,36 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		}
 	}
 	return info, nil
+}
+
+func (e *Executor) resolvePRBaseForLaunch(
+	ctx context.Context, tr *models.TaskRepository, repo *models.Repository, info *repoInfo,
+) {
+	if e.prBaseResolver == nil || info.PRNumber <= 0 || !isGitHubRepository(repo) {
+		return
+	}
+	baseBranch, err := e.prBaseResolver.ResolvePRBaseBranch(
+		ctx, repo.WorkspaceID, repo.ProviderOwner, repo.ProviderName, info.PRNumber,
+	)
+	baseBranch = strings.TrimSpace(baseBranch)
+	if err != nil || baseBranch == "" {
+		e.logger.Debug("could not resolve live pull request base branch",
+			zap.String("task_id", tr.TaskID),
+			zap.Int("pr_number", info.PRNumber),
+			zap.Error(err))
+		return
+	}
+	if baseBranch != tr.BaseBranch {
+		e.logger.Info("pull request base branch changed since task creation",
+			zap.String("task_id", tr.TaskID),
+			zap.Int("pr_number", info.PRNumber),
+			zap.String("old_base_branch", tr.BaseBranch),
+			zap.String("new_base_branch", baseBranch))
+	}
+	info.BaseBranch = baseBranch
+	if info.RemoteContribution != nil {
+		info.RemoteContribution.BaseBranch = baseBranch
+	}
 }
 
 func hasProviderRepositoryIdentity(repo *models.Repository) bool {
@@ -703,9 +738,37 @@ func buildPrepareResultMetadata(result *lifecycle.EnvPrepareResult) map[string]i
 	return lifecycle.SerializePrepareResult(result)
 }
 
+// ResumeOptions controls explicit recovery behavior for a session resume.
+// Branch replacement is intentionally opt-in; ordinary resume preserves the
+// original worktree branch and reports when it is unrecoverable.
+type ResumeOptions struct {
+	AllowBranchReplacement bool
+}
+
 // ResumeSession restarts an existing task session using its stored worktree.
 // When startAgent is false, only the executor runtime is started (agent process is not launched).
 func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSession, startAgent bool) (*TaskExecution, error) {
+	return e.resumeSession(ctx, session, startAgent, ResumeOptions{})
+}
+
+// ResumeSessionWithOptions restarts an existing task session with an explicit
+// recovery permission. It keeps the same session and provider resume identity.
+func (e *Executor) ResumeSessionWithOptions(
+	ctx context.Context,
+	session *models.TaskSession,
+	startAgent bool,
+	options ResumeOptions,
+) (*TaskExecution, error) {
+	return e.resumeSession(ctx, session, startAgent, options)
+}
+
+//nolint:cyclop,gocognit,funlen // Resume coordinates the established launch, rollback, and stale-execution recovery sequence.
+func (e *Executor) resumeSession(
+	ctx context.Context,
+	session *models.TaskSession,
+	startAgent bool,
+	options ResumeOptions,
+) (*TaskExecution, error) {
 	if session != nil {
 		resumeSnapshot := *session
 		resumeSnapshot.Metadata = cloneMetadata(session.Metadata)
@@ -743,8 +806,8 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 			return nil
 		}
 	}
-	req, _, execCfg, existingEnv, _, err := e.buildResumeRequestAtCredentialBoundary(
-		ctx, task, session, startAgent, beforeCredentialLease,
+	req, _, execCfg, existingEnv, _, err := e.buildResumeRequestAtCredentialBoundaryWithOptions(
+		ctx, task, session, startAgent, beforeCredentialLease, options,
 	)
 	if err != nil {
 		if resumeStatePersisted {
@@ -1050,7 +1113,7 @@ func (e *Executor) validateAndLockResume(ctx context.Context, session *models.Ta
 // repository details, worktree settings, and ACP resume token.
 // Returns the request, repository ID, executor config, existing ExecutorRunning record (may be nil), and error.
 func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, session *models.TaskSession, startAgent bool) (*LaunchAgentRequest, string, executorConfig, *models.TaskEnvironment, *models.ExecutorRunning, error) {
-	return e.buildResumeRequestAtCredentialBoundary(ctx, task, session, startAgent, nil)
+	return e.buildResumeRequestAtCredentialBoundaryWithOptions(ctx, task, session, startAgent, nil, ResumeOptions{})
 }
 
 // buildResumeRequestAtCredentialBoundary prepares a resume request and invokes
@@ -1064,23 +1127,72 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 	startAgent bool,
 	beforeCredentialLease func() error,
 ) (*LaunchAgentRequest, string, executorConfig, *models.TaskEnvironment, *models.ExecutorRunning, error) {
+	return e.buildResumeRequestAtCredentialBoundaryWithOptions(
+		ctx, task, session, startAgent, beforeCredentialLease, ResumeOptions{},
+	)
+}
+
+func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	startAgent bool,
+	beforeCredentialLease func() error,
+	options ResumeOptions,
+) (*LaunchAgentRequest, string, executorConfig, *models.TaskEnvironment, *models.ExecutorRunning, error) {
+	req, metadata := newResumeLaunchRequest(task, session, startAgent, options)
+	execConfig := e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
+	repositoryID, existingEnv, allRepos, err := e.prepareResumeRepositorySettings(
+		ctx, task, session, req,
+	)
+	if err != nil {
+		return nil, "", execConfig, existingEnv, nil, err
+	}
+	if err := e.applyResumeMCPSettings(ctx, task.ID, session, req); err != nil {
+		return nil, "", execConfig, existingEnv, nil, err
+	}
+
+	existingRunning := e.applyRunningRecordToResumeRequest(ctx, req, task, session, startAgent)
+	if err := e.applyResumeWorkspaceFolders(ctx, task.ID, req); err != nil {
+		return nil, "", execConfig, existingEnv, existingRunning, err
+	}
+	if err := e.configureResumeGitHubCredentials(
+		ctx, req, session, allRepos, beforeCredentialLease,
+	); err != nil {
+		return nil, "", execConfig, existingEnv, existingRunning, err
+	}
+	e.injectGitLabWorkspaceCredentials(ctx, req)
+	if err := e.resolveLaunchEnvironment(ctx, req, execConfig.ProfileEnvVars, allRepos); err != nil {
+		return nil, "", execConfig, existingEnv, existingRunning, err
+	}
+
+	return req, repositoryID, execConfig, existingEnv, existingRunning, nil
+}
+
+func newResumeLaunchRequest(
+	task *v1.Task,
+	session *models.TaskSession,
+	startAgent bool,
+	options ResumeOptions,
+) (*LaunchAgentRequest, map[string]interface{}) {
 	executionProfileID := session.ExecutionProfileID
 	if executionProfileID == "" {
 		executionProfileID = session.AgentProfileID
 	}
 	req := &LaunchAgentRequest{
-		TaskID:               task.ID,
-		WorkspaceID:          task.WorkspaceID,
-		SessionID:            session.ID,
-		TaskTitle:            task.Title,
-		AgentProfileID:       executionProfileID,
-		OfficeAgentProfileID: session.AgentProfileID,
-		StartAgent:           startAgent,
-		TaskDescription:      task.Description,
-		Priority:             task.Priority,
-		IsEphemeral:          task.IsEphemeral,
-		IsPassthrough:        session.IsPassthrough,
-		TaskEnvironmentID:    session.TaskEnvironmentID,
+		TaskID:                 task.ID,
+		WorkspaceID:            task.WorkspaceID,
+		SessionID:              session.ID,
+		TaskTitle:              task.Title,
+		AgentProfileID:         executionProfileID,
+		OfficeAgentProfileID:   session.AgentProfileID,
+		StartAgent:             startAgent,
+		TaskDescription:        task.Description,
+		Priority:               task.Priority,
+		IsEphemeral:            task.IsEphemeral,
+		IsPassthrough:          session.IsPassthrough,
+		TaskEnvironmentID:      session.TaskEnvironmentID,
+		AllowBranchReplacement: options.AllowBranchReplacement,
 	}
 
 	metadata := map[string]interface{}{}
@@ -1096,12 +1208,18 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 		metadata["worktree_id"] = session.Worktrees[0].WorktreeID
 	}
 	req.WorktreeBranchTicket = worktree.TicketForBranchName(task.Identifier, metadata)
+	return req, metadata
+}
 
-	execConfig := e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
-
+func (e *Executor) prepareResumeRepositorySettings(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+) (string, *models.TaskEnvironment, []*repoInfo, error) {
 	existingEnv, err := e.resolveResumeTaskEnvironment(ctx, task.ID, session)
 	if err != nil {
-		return nil, "", execConfig, nil, nil, err
+		return "", nil, nil, err
 	}
 	if session.TaskEnvironmentID != "" {
 		req.TaskEnvironmentID = session.TaskEnvironmentID
@@ -1115,52 +1233,52 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 
 	allRepos, err := e.resolveAllRepoInfoForSession(ctx, task.ID, session.ID)
 	if err != nil {
-		return nil, "", execConfig, nil, nil, err
+		return "", nil, nil, err
 	}
 	req.McpProviders = deriveMCPProviders(allRepos)
 	repositoryID, err := e.applyResumeRepoConfig(ctx, task, session, req, existingEnv, allRepos)
 	if err != nil {
-		return nil, "", execConfig, nil, nil, err
+		return "", nil, nil, err
 	}
-	if len(allRepos) > 0 {
-		req.PullBeforeWorktree = allRepos[0].PullBeforeWorktree
-		req.RemoteSyncHandled = allRepos[0].RemoteSyncHandled
-		req.RefreshRepository = allRepos[0].RefreshRepository
-		req.RefreshRepositoryWithState = allRepos[0].RefreshRepositoryWithState
-		req.RemoteRefState = allRepos[0].RemoteRefState
-	}
+	applyResumeRepositoryFlags(req, allRepos)
 	if err := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); err != nil {
-		return nil, "", execConfig, existingEnv, nil, err
+		return "", existingEnv, nil, err
 	}
 
 	e.reuseExistingEnvironment(ctx, req, existingEnv)
+	return repositoryID, existingEnv, allRepos, nil
+}
 
-	req.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session, true)
-	if err != nil {
-		return nil, "", execConfig, nil, nil, err
+func applyResumeRepositoryFlags(req *LaunchAgentRequest, repositories []*repoInfo) {
+	if len(repositories) == 0 {
+		return
 	}
-	profileContext, err := e.resolveTaskSessionMCPProfile(ctx, task.ID, session, true)
+	first := repositories[0]
+	req.PullBeforeWorktree = first.PullBeforeWorktree
+	req.RemoteSyncHandled = first.RemoteSyncHandled
+	req.RefreshRepository = first.RefreshRepository
+	req.RefreshRepositoryWithState = first.RefreshRepositoryWithState
+	req.RemoteRefState = first.RemoteRefState
+}
+
+func (e *Executor) applyResumeMCPSettings(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+) error {
+	mode, err := e.resolveTaskSessionMCPMode(ctx, taskID, session, true)
 	if err != nil {
-		return nil, "", execConfig, nil, nil, err
+		return err
 	}
+	profileContext, err := e.resolveTaskSessionMCPProfile(ctx, taskID, session, true)
+	if err != nil {
+		return err
+	}
+	req.McpMode = mode
 	profileContext.Providers = req.McpProviders
 	req.McpProfile = &profileContext
-
-	existingRunning := e.applyRunningRecordToResumeRequest(ctx, req, task, session, startAgent)
-	if err := e.applyResumeWorkspaceFolders(ctx, task.ID, req); err != nil {
-		return nil, "", execConfig, existingEnv, nil, err
-	}
-	if err := e.configureResumeGitHubCredentials(
-		ctx, req, session, allRepos, beforeCredentialLease,
-	); err != nil {
-		return nil, "", execConfig, existingEnv, existingRunning, err
-	}
-	e.injectGitLabWorkspaceCredentials(ctx, req)
-	if err := e.resolveLaunchEnvironment(ctx, req, execConfig.ProfileEnvVars, allRepos); err != nil {
-		return nil, "", execConfig, existingEnv, existingRunning, err
-	}
-
-	return req, repositoryID, execConfig, existingEnv, existingRunning, nil
+	return nil
 }
 
 func (e *Executor) applyResumeWorkspaceFolders(

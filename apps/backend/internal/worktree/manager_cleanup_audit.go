@@ -43,7 +43,7 @@ func (m *Manager) auditWorktreeCleanup(
 			_ = pathHandle.Close()
 		}
 	}()
-	branchRef, branchOID, err := m.cleanupBranchIdentity(ctx, wt)
+	branchRef, branchOID, err := m.cleanupBranchIdentity(ctx, wt, pathPresent, removeBranch)
 	if err != nil {
 		return worktreeCleanupAudit{}, err
 	}
@@ -119,12 +119,24 @@ func (m *Manager) openCleanupPathHandle(
 	return handle, nil
 }
 
-func (m *Manager) cleanupBranchIdentity(ctx context.Context, wt *Worktree) (string, string, error) {
+func (m *Manager) cleanupBranchIdentity(
+	ctx context.Context, wt *Worktree, pathPresent, requireImmutableIdentity bool,
+) (string, string, error) {
 	branchRef := ""
 	if wt.Branch != "" {
 		branchRef = "refs/heads/" + wt.Branch
 	}
 	expectedOID := strings.TrimSpace(wt.CleanupHeadOID)
+	if expectedOID == "" && pathPresent {
+		output, err := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--verify", "HEAD^{commit}")
+		if err != nil {
+			return "", "", fmt.Errorf("capture cleanup worktree HEAD: %w", err)
+		}
+		expectedOID = strings.TrimSpace(output)
+		if expectedOID == "" {
+			return "", "", errors.New("capture cleanup worktree HEAD returned an empty commit")
+		}
+	}
 	if branchRef == "" {
 		return branchRef, expectedOID, nil
 	}
@@ -137,6 +149,9 @@ func (m *Manager) cleanupBranchIdentity(ctx context.Context, wt *Worktree) (stri
 		// not be adopted without a live ref identity, so the strict ownership
 		// classifier will fail closed rather than deleting another checkout.
 		return branchRef, "", nil
+	}
+	if expectedOID == "" && requireImmutableIdentity {
+		return "", "", fmt.Errorf("cleanup branch %q has no immutable expected commit", wt.Branch)
 	}
 	output, err := m.runBoundedGitInspect(ctx, wt.RepositoryPath, "rev-parse", "--verify", branchRef+"^{commit}")
 	if err != nil {

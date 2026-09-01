@@ -5,6 +5,7 @@ type GitEventBase = {
   session_id: string;
   task_id?: string;
   agent_id?: string;
+  task_environment_id?: string;
   timestamp: string;
 };
 
@@ -27,7 +28,7 @@ export type GitStatusData = {
   behind: number;
   remote_ahead: number;
   remote_behind: number;
-  files: Record<string, FileInfo>;
+  files?: Record<string, FileInfo>;
   branch_additions?: number;
   branch_deletions?: number;
   /**
@@ -89,7 +90,11 @@ export type GitSnapshotData = {
 };
 
 // Individual event variants
-export type GitStatusUpdateEvent = GitEventBase & {
+type GitStatusEventBase = Omit<GitEventBase, "task_environment_id"> & {
+  task_environment_id: string;
+};
+
+export type GitStatusUpdateEvent = GitStatusEventBase & {
   type: "status_update";
   status: GitStatusData;
 };

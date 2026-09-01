@@ -124,7 +124,7 @@ func createTestDB(t *testing.T) *sqlx.DB {
 	);
 	CREATE TABLE IF NOT EXISTS task_session_git_snapshots (
 		id TEXT PRIMARY KEY,
-		session_id TEXT NOT NULL,
+		session_id TEXT,
 		snapshot_type TEXT NOT NULL DEFAULT '',
 		files TEXT DEFAULT '{}',
 		created_at TIMESTAMP NOT NULL

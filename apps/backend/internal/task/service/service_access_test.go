@@ -345,6 +345,12 @@ func TestPlanAndWalkthroughScoping(t *testing.T) {
 	if _, err := plan.GetPlan(ctxAs("user-b"), "task-b"); errors.Is(err, repoerrors.ErrTaskNotFound) {
 		t.Fatalf("owner plan get must pass the auth gate: %v", err)
 	}
+	if _, err := plan.GetLatestRevision(ctxAs("user-a"), "task-b"); !errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("foreign latest revision get: %v", err)
+	}
+	if _, err := plan.GetLatestRevision(ctxAs("user-b"), "task-b"); errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("owner latest revision get must pass the auth gate: %v", err)
+	}
 
 	wt := NewWalkthroughService(repo, nil, log)
 	wt.SetTaskAuthorizer(svc.AuthorizeTaskAccess)

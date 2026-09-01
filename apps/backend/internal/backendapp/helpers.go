@@ -94,6 +94,7 @@ import (
 	workflowhandlers "github.com/kandev/kandev/internal/workflow/handlers"
 	"github.com/kandev/kandev/internal/workflowsync"
 	"github.com/kandev/kandev/internal/worktree"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -269,14 +270,15 @@ func appendSessionStateMessageWithCancellation(
 // appendLiveGitStatusMessage adds git status notification(s) from the canonical
 // task-environment workspace. Multi-repo workspaces emit one notification per
 // repo (stamped with repository_name); single-repo emits a single untagged
-// notification. Sessions without a task environment retain the legacy
-// session-scoped behavior.
+// notification. A session without an environment has no authoritative status
+// scope and therefore emits nothing.
 func appendLiveGitStatusMessage(ctx context.Context, taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, sessionID string, session *models.TaskSession, result []*ws.Message, log *logger.Logger) []*ws.Message {
 	sources, ok := resolveGitStatusSources(ctx, taskRepo, session, log)
 	if !ok {
 		return result
 	}
-	if msgs := tryGetLiveGitStatus(ctx, lifecycleMgr, sessionID, sources, log); len(msgs) > 0 {
+	msgs, live := tryGetLiveGitStatusWithState(ctx, lifecycleMgr, sessionID, sources, log)
+	if live {
 		return append(result, msgs...)
 	}
 	return appendDBSnapshotGitStatus(ctx, taskRepo, sessionID, sources, result, log)
@@ -285,10 +287,24 @@ func appendLiveGitStatusMessage(ctx context.Context, taskRepo *sqliterepo.Reposi
 // tryGetLiveGitStatus attempts to get live git status from agentctl.
 // Returns one notification per repo (one entry for single-repo workspaces).
 // Returns nil when no eligible source has a live execution or agentctl is
-// stuck.
+// stuck. Callers that need to distinguish a failed live query from an absent
+// live execution should use tryGetLiveGitStatusWithState.
 func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, requestedSessionID string, sources *gitStatusSources, log *logger.Logger) []*ws.Message {
+	msgs, _ := tryGetLiveGitStatusWithState(ctx, lifecycleMgr, requestedSessionID, sources, log)
+	return msgs
+}
+
+// tryGetLiveGitStatusWithState probes every eligible execution in the
+// environment under one deadline. The boolean is true as soon as an eligible
+// non-terminal execution is found, even when agentctl cannot answer. This
+// prevents a stale persisted snapshot from replacing an authoritative but
+// currently unavailable live source.
+func tryGetLiveGitStatusWithState(ctx context.Context, lifecycleMgr *lifecycle.Manager, requestedSessionID string, sources *gitStatusSources, log *logger.Logger) ([]*ws.Message, bool) {
 	if lifecycleMgr == nil {
-		return nil
+		return nil, false
+	}
+	if sources == nil || sources.environmentID == "" {
+		return nil, false
 	}
 
 	// Bound the complete source probe, not each source independently. Shared
@@ -297,9 +313,10 @@ func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, r
 	rpcCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
+	live := false
 	for _, sourceSessionID := range sources.sessionIDs {
 		if err := rpcCtx.Err(); err != nil {
-			return nil
+			return nil, live
 		}
 		execution, ok := lifecycleMgr.GetExecutionBySessionID(sourceSessionID)
 		if !ok {
@@ -308,16 +325,34 @@ func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, r
 		if !executionMatchesGitStatusSource(sources, execution, sourceSessionID, log) {
 			continue
 		}
-		if msgs := tryGetLiveGitStatusFromExecution(rpcCtx, execution, requestedSessionID, sourceSessionID, log); len(msgs) > 0 {
-			return msgs
+		if !isLiveGitStatusExecution(execution) {
+			continue
+		}
+		live = true
+		if msgs := tryGetLiveGitStatusFromExecution(rpcCtx, execution, requestedSessionID, sourceSessionID, sources.environmentID, log); len(msgs) > 0 {
+			return msgs, true
 		}
 	}
-	return nil
+	return nil, live
+}
+
+func isLiveGitStatusExecution(execution *lifecycle.AgentExecution) bool {
+	if execution == nil {
+		return false
+	}
+	switch execution.Status {
+	case v1.AgentStatusCompleted, v1.AgentStatusFailed, v1.AgentStatusStopped:
+		return false
+	default:
+		// An empty status is retained as live for recovered/legacy in-memory
+		// executions that have been registered but not promoted yet.
+		return true
+	}
 }
 
 func executionMatchesGitStatusSource(sources *gitStatusSources, execution *lifecycle.AgentExecution, sessionID string, log *logger.Logger) bool {
-	if execution == nil || sources.environmentID == "" {
-		return execution != nil
+	if execution == nil || sources == nil || sources.environmentID == "" {
+		return false
 	}
 	if execution.TaskEnvironmentID != "" && execution.TaskEnvironmentID != sources.environmentID {
 		log.Debug("rejecting live git status source",
@@ -336,10 +371,10 @@ func executionMatchesGitStatusSource(sources *gitStatusSources, execution *lifec
 	return true
 }
 
-func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.AgentExecution, requestedSessionID, sourceSessionID string, log *logger.Logger) []*ws.Message {
+func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.AgentExecution, requestedSessionID, sourceSessionID, taskEnvironmentID string, log *logger.Logger) []*ws.Message {
 	agentClient := execution.GetAgentCtlClient()
 	if agentClient == nil {
-		log.Debug("no agentctl client available for session, will fall back to DB snapshot",
+		log.Debug("no agentctl client available for live git status",
 			zap.String("source_session_id", sourceSessionID))
 		return nil
 	}
@@ -347,7 +382,7 @@ func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.
 	// Force fresh git query: cache can wedge when the poll loop misses a HEAD change.
 	multi, err := agentClient.GetGitStatusMultiFresh(ctx)
 	if err != nil {
-		log.Debug("failed to get live git status, will fall back to DB snapshot",
+		log.Debug("failed to get live git status",
 			zap.String("source_session_id", sourceSessionID),
 			zap.Error(err))
 		return nil
@@ -361,7 +396,7 @@ func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.
 		if !repo.Status.Success {
 			continue
 		}
-		notification := buildGitStatusNotification(requestedSessionID, repo.RepositoryName, repo.Status)
+		notification := buildGitStatusNotification(requestedSessionID, taskEnvironmentID, repo.RepositoryName, repo.Status)
 		if notification != nil {
 			out = append(out, notification)
 		}
@@ -380,7 +415,10 @@ func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.
 // the frontend can route through its existing git-status handler. The
 // repository_name is stamped on the inner status payload so the frontend
 // stores it under byEnvironmentRepo[envKey][repository_name].
-func buildGitStatusNotification(sessionID, repositoryName string, status client.GitStatusResult) *ws.Message {
+func buildGitStatusNotification(sessionID, taskEnvironmentID, repositoryName string, status client.GitStatusResult) *ws.Message {
+	if taskEnvironmentID == "" {
+		return nil
+	}
 	statusPayload := map[string]interface{}{
 		branchFieldKey:          status.Branch,
 		"remote_branch":         status.RemoteBranch,
@@ -408,10 +446,11 @@ func buildGitStatusNotification(sessionID, repositoryName string, status client.
 		statusPayload["repository_name"] = repositoryName
 	}
 	gitEventData := map[string]interface{}{
-		"type":       "status_update",
-		"session_id": sessionID,
-		"timestamp":  status.Timestamp,
-		"status":     statusPayload,
+		"type":                "status_update",
+		"session_id":          sessionID,
+		"task_environment_id": taskEnvironmentID,
+		"timestamp":           status.Timestamp,
+		"status":              statusPayload,
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionGitEvent, gitEventData)
 	if err != nil {
@@ -424,13 +463,14 @@ func buildGitStatusNotification(sessionID, repositoryName string, status client.
 // eligible DB snapshot. The selected source is always routed as the requested
 // subscription session.
 func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Repository, sessionID string, sources *gitStatusSources, result []*ws.Message, log *logger.Logger) []*ws.Message {
-	logFields := []zap.Field{zap.String("requested_session_id", sessionID)}
-	if sources.environmentID != "" {
-		logFields = append(logFields, zap.String("task_environment_id", sources.environmentID))
+	if taskRepo == nil || sources == nil || sources.environmentID == "" {
+		return result
 	}
+	logFields := []zap.Field{zap.String("requested_session_id", sessionID)}
+	logFields = append(logFields, zap.String("task_environment_id", sources.environmentID))
 	log.Debug("falling back to DB snapshot for git status", logFields...)
 
-	snapshots, err := taskRepo.GetLatestGitStatusSnapshotsBySessionIDs(ctx, sources.sessionIDs)
+	snapshots, err := taskRepo.GetLatestGitStatusSnapshotsByTaskEnvironmentIDs(ctx, []string{sources.environmentID})
 	if err != nil {
 		log.Warn("failed to load DB snapshots for git status",
 			zap.String("requested_session_id", sessionID),
@@ -454,9 +494,7 @@ func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Reposit
 			zap.String("requested_session_id", sessionID),
 			zap.String("source_session_id", snapshot.SessionID),
 		}
-		if sources.environmentID != "" {
-			logFields = append(logFields, zap.String("task_environment_id", sources.environmentID))
-		}
+		logFields = append(logFields, zap.String("task_environment_id", sources.environmentID))
 		if repositoryName != "" {
 			logFields = append(logFields, zap.String("repository_name", repositoryName))
 		}
@@ -469,7 +507,7 @@ func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Reposit
 }
 
 func buildGitSnapshotNotification(sessionID, repositoryName string, snapshot *models.GitSnapshot) *ws.Message {
-	if snapshot == nil {
+	if snapshot == nil || snapshot.TaskEnvironmentID == "" {
 		return nil
 	}
 	metadata := snapshot.Metadata
@@ -499,10 +537,11 @@ func buildGitSnapshotNotification(sessionID, repositoryName string, snapshot *mo
 		statusPayload["repository_name"] = repositoryName
 	}
 	gitEventData := map[string]interface{}{
-		"type":       "status_update",
-		"session_id": sessionID,
-		"timestamp":  metadata["timestamp"],
-		"status":     statusPayload,
+		"type":                "status_update",
+		"session_id":          sessionID,
+		"task_environment_id": snapshot.TaskEnvironmentID,
+		"timestamp":           metadata["timestamp"],
+		"status":              statusPayload,
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionGitEvent, gitEventData)
 	if err != nil {

@@ -33,6 +33,7 @@ type TaskEventData struct {
 type AgentEventData struct {
 	TaskID             string                 `json:"task_id"`
 	SessionID          string                 `json:"session_id"`
+	TaskEnvironmentID  string                 `json:"task_environment_id,omitempty"`
 	AgentExecutionID   string                 `json:"agent_execution_id"`
 	AgentID            string                 `json:"agent_id,omitempty"`
 	AgentProfileID     string                 `json:"agent_profile_id"`

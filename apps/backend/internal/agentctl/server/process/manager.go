@@ -1340,7 +1340,6 @@ func (m *Manager) buildAdapterConfig() error {
 	m.adapterCfg = &adapter.Config{
 		WorkDir:                   m.cfg.WorkDir,
 		AutoApprove:               m.cfg.AutoApprovePermissions,
-		ApprovalPolicy:            m.cfg.ApprovalPolicy,
 		McpServers:                mcpServers,
 		AgentID:                   m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
 		AssumeMcpSse:              m.cfg.AssumeMcpSse,
@@ -1422,7 +1421,7 @@ func (m *Manager) buildFinalCommand() error {
 	m.cmd.Dir = m.cfg.WorkDir
 	m.cmd.Env = m.cfg.AgentEnv
 	// Create a new process group so we can kill all child processes together.
-	// This is important for adapters like OpenCode that spawn child processes
+	// This is important for agents like OpenCode that spawn child processes
 	// (npx -> sh -> node -> opencode binary).
 	setAgentProcGroup(m.cmd)
 
@@ -1672,7 +1671,7 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 	m.cfg.AgentCommand = command
 	m.cfg.AgentArgs = args
 
-	// Set approval policy if provided (for Codex)
+	// Set approval policy if provided
 	if approvalPolicy != "" {
 		m.cfg.ApprovalPolicy = approvalPolicy
 	}
@@ -1718,7 +1717,7 @@ func (m *Manager) createAdapter() error {
 	}
 	m.adapter = adpt
 
-	// Set stderr provider for adapters that support it (Codex, StreamJSON)
+	// Set stderr provider if the adapter implements the optional StderrProviderSetter interface
 	if setter, ok := m.adapter.(adapter.StderrProviderSetter); ok {
 		setter.SetStderrProvider(m)
 	}
@@ -2055,7 +2054,7 @@ func (m *Manager) drainAfterLateTeardown(ctx context.Context) {
 }
 
 // killProcessGroupIfRequired immediately kills the entire process group for
-// adapters (such as OpenCode) that are known not to exit when stdin is closed.
+// agents (such as OpenCode) that are known not to exit when stdin is closed.
 // Other adapters still get process-group cleanup in waitForProcessExit after
 // their graceful stdin-close path has had a chance to finish.
 func (m *Manager) killProcessGroupIfRequired() {

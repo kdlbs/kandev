@@ -1,8 +1,8 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageListHandle } from "./chat/message-list-shared";
 
-const { mockDockviewState } = vi.hoisted(() => {
+const { mockDockviewState, mockAppStoreState, mockAppStoreApi } = vi.hoisted(() => {
   const state = {
     scrollTarget: null as null | {
       sessionId: string;
@@ -25,7 +25,16 @@ const { mockDockviewState } = vi.hoisted(() => {
       if (state.scrollTarget?.sessionId === sessionId) state.scrollTarget = null;
     }),
   };
-  return { mockDockviewState: state };
+  const appStoreState = {
+    messages: { bySession: { "session-1": [{ id: "message-1" }] } },
+  };
+  return {
+    mockDockviewState: state,
+    mockAppStoreState: appStoreState,
+    mockAppStoreApi: {
+      getState: () => ({ messages: appStoreState.messages, mergeMessages: vi.fn() }),
+    },
+  };
 });
 
 vi.mock("@/lib/state/dockview-store", () => ({
@@ -35,7 +44,17 @@ vi.mock("@/lib/state/dockview-store", () => ({
   ),
 }));
 
-import { useScrollTargetConsumption } from "./task-chat-panel";
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: vi.fn(),
+  useAppStoreApi: () => mockAppStoreApi,
+}));
+
+vi.mock("@/hooks/domains/session/load-message-window", () => ({
+  loadMessageWindowAround: vi.fn(),
+}));
+
+import { usePendingMessageScroll, useScrollTargetConsumption } from "./task-chat-panel";
+import { loadMessageWindowAround } from "@/hooks/domains/session/load-message-window";
 
 let pendingFrames: Array<(() => void) | undefined> = [];
 
@@ -79,6 +98,7 @@ const PROPS = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(loadMessageWindowAround).mockReset();
   pendingFrames = [];
   vi.stubGlobal("requestAnimationFrame", (callback: () => void) => {
     pendingFrames.push(callback);
@@ -88,6 +108,7 @@ beforeEach(() => {
     pendingFrames[id - 1] = undefined;
   });
   mockDockviewState.scrollTarget = null;
+  mockAppStoreState.messages.bySession["session-1"] = [{ id: "message-1" }];
 });
 
 afterEach(() => {
@@ -185,6 +206,111 @@ describe("useScrollTargetConsumption — success-path consumption", () => {
 
     expect(messageListRef.current?.scrollToMessage).not.toHaveBeenCalled();
     expect(mockDockviewState.clearScrollTarget).not.toHaveBeenCalled();
+  });
+});
+
+describe("usePendingMessageScroll — non-Dockview target loading", () => {
+  it("loads an absent target and scrolls it after the transcript merge", async () => {
+    const targetMessage = { id: "target" };
+    vi.mocked(loadMessageWindowAround).mockImplementationOnce(async () => {
+      mockAppStoreState.messages.bySession["session-1"] = [targetMessage];
+      return { kind: "merged", merged: true, current: true, targetFound: true };
+    });
+    const messageListRef = { current: scrollHandle(true) };
+    const onConsumed = vi.fn();
+    const { rerender } = renderHook(
+      ({ readinessKey }) =>
+        usePendingMessageScroll({
+          messageListRef,
+          sessionId: "session-1",
+          messageId: "target",
+          onConsumed,
+          readinessKey,
+          isInitialMessagesLoading: false,
+        }),
+      { initialProps: { readinessKey: "0" } },
+    );
+
+    // The first attempt sees no target row and starts one around request.
+    messageListRef.current = scrollHandle(false);
+    await flushFrames();
+    expect(loadMessageWindowAround).toHaveBeenCalledWith(
+      "session-1",
+      "target",
+      expect.any(Function),
+      expect.anything(),
+    );
+
+    // The merged row becomes renderable and the retained target is consumed.
+    messageListRef.current = scrollHandle(true);
+    rerender({ readinessKey: "1" });
+    await flushFrames();
+    expect(messageListRef.current?.scrollToMessage).toHaveBeenCalledWith("target", {
+      align: "start",
+      behavior: "auto",
+    });
+    expect(onConsumed).toHaveBeenCalledWith("target");
+  });
+
+  it("keeps a failed around request retryable instead of leaving a stuck target", async () => {
+    vi.mocked(loadMessageWindowAround).mockImplementation(async () => {
+      throw new Error("offline");
+    });
+    const messageListRef = { current: scrollHandle(false) };
+    const { result } = renderHook(() =>
+      usePendingMessageScroll({
+        messageListRef,
+        sessionId: "session-1",
+        messageId: "target",
+        onConsumed: undefined,
+        readinessKey: "0",
+        isInitialMessagesLoading: false,
+      }),
+    );
+
+    await flushFrames();
+    await waitFor(() => expect(result.current.hasError).toBe(true));
+
+    vi.mocked(loadMessageWindowAround).mockImplementationOnce(async () => {
+      mockAppStoreState.messages.bySession["session-1"] = [{ id: "target" }];
+      return { kind: "merged", merged: true, current: true, targetFound: true };
+    });
+    act(() => result.current.retry());
+    await flushFrames();
+
+    expect(result.current.hasError).toBe(false);
+    expect(loadMessageWindowAround).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the request guard valid when transcript readiness changes mid-request", async () => {
+    const pending = Promise.withResolvers<{
+      kind: "merged";
+      merged: true;
+      current: true;
+      targetFound: true;
+    }>();
+    vi.mocked(loadMessageWindowAround).mockReturnValueOnce(pending.promise);
+    const messageListRef = { current: scrollHandle(false) };
+    const { result, rerender } = renderHook(
+      ({ readinessKey }) =>
+        usePendingMessageScroll({
+          messageListRef,
+          sessionId: "session-1",
+          messageId: "target",
+          onConsumed: undefined,
+          readinessKey,
+          isInitialMessagesLoading: false,
+        }),
+      { initialProps: { readinessKey: "0" } },
+    );
+
+    await flushFrames();
+    rerender({ readinessKey: "1" });
+    await flushFrames();
+    expect(loadMessageWindowAround).toHaveBeenCalledTimes(1);
+
+    pending.reject(new Error("offline"));
+    await waitFor(() => expect(result.current.hasError).toBe(true));
   });
 });
 

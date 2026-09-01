@@ -847,16 +847,17 @@ func (r *Repository) ClearStepReferences(ctx context.Context, workflowID, stepID
 
 	for _, step := range steps {
 		modified := false
-		for i, action := range step.Events.OnTurnComplete {
-			if action.Type == models.OnTurnCompleteMoveToStep && action.Config != nil {
-				if refID, ok := action.Config["step_id"].(string); ok && refID == stepID {
-					// Remove this action
-					step.Events.OnTurnComplete = append(step.Events.OnTurnComplete[:i], step.Events.OnTurnComplete[i+1:]...)
-					modified = true
-					break
-				}
-			}
-		}
+		var changed bool
+		step.Events.OnTurnStart, changed = removeStepReferences(step.Events.OnTurnStart, func(action models.OnTurnStartAction) bool {
+			return action.Type == models.OnTurnStartMoveToStep && referencesStep(action.Config, stepID)
+		})
+		modified = modified || changed
+		step.Events.OnTurnComplete, changed = removeStepReferences(step.Events.OnTurnComplete, func(action models.OnTurnCompleteAction) bool {
+			return action.Type == models.OnTurnCompleteMoveToStep && referencesStep(action.Config, stepID)
+		})
+		modified = modified || changed
+		step.Events, changed = clearGenericStepReferences(step.Events, stepID)
+		modified = modified || changed
 		if step.PullFromStepID == stepID {
 			step.PullFromStepID = ""
 			modified = true
@@ -869,6 +870,50 @@ func (r *Repository) ClearStepReferences(ctx context.Context, workflowID, stepID
 	}
 
 	return nil
+}
+
+func removeStepReferences[T any](actions []T, shouldRemove func(T) bool) ([]T, bool) {
+	filtered := actions[:0]
+	modified := false
+	for _, action := range actions {
+		if shouldRemove(action) {
+			modified = true
+			continue
+		}
+		filtered = append(filtered, action)
+	}
+	if !modified {
+		return actions, false
+	}
+	return filtered, true
+}
+
+func referencesStep(config map[string]interface{}, stepID string) bool {
+	refID, ok := config["step_id"].(string)
+	return ok && refID == stepID
+}
+
+func clearGenericStepReferences(events models.StepEvents, stepID string) (models.StepEvents, bool) {
+	shouldRemove := func(action models.GenericAction) bool {
+		return action.Type == models.GenericActionMoveToStep && referencesStep(action.Config, stepID)
+	}
+	modified := false
+	var changed bool
+	events.OnComment, changed = removeStepReferences(events.OnComment, shouldRemove)
+	modified = modified || changed
+	events.OnBlockerResolved, changed = removeStepReferences(events.OnBlockerResolved, shouldRemove)
+	modified = modified || changed
+	events.OnChildrenCompleted, changed = removeStepReferences(events.OnChildrenCompleted, shouldRemove)
+	modified = modified || changed
+	events.OnApprovalResolved, changed = removeStepReferences(events.OnApprovalResolved, shouldRemove)
+	modified = modified || changed
+	events.OnHeartbeat, changed = removeStepReferences(events.OnHeartbeat, shouldRemove)
+	modified = modified || changed
+	events.OnBudgetAlert, changed = removeStepReferences(events.OnBudgetAlert, shouldRemove)
+	modified = modified || changed
+	events.OnAgentError, changed = removeStepReferences(events.OnAgentError, shouldRemove)
+	modified = modified || changed
+	return events, modified
 }
 
 // DeleteStep deletes a workflow step by ID.
