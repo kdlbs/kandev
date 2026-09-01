@@ -769,6 +769,7 @@ func (s *PlanService) RevertPlan(ctx context.Context, req RevertPlanRequest) (*m
 		AuthorName:         authorName,
 		RevertOfRevisionID: &targetID,
 	}
+	rev.WorkflowStepID, rev.WorkflowStepName, rev.WorkflowStepColor = s.currentWorkflowStepStamp(ctx, req.TaskID)
 	if err := s.repo.WritePlanRevision(ctx, plan, rev, nil, false, false); err != nil {
 		s.logPlanWriteError(req.TaskID, err)
 		return nil, err
@@ -858,11 +859,21 @@ func revisionPayload(rev *models.TaskPlanRevision) map[string]interface{} {
 		"title":           rev.Title,
 		"author_kind":     rev.AuthorKind,
 		"author_name":     rev.AuthorName,
+		"content_length":  utf8.RuneCountInString(rev.Content),
 		"created_at":      rev.CreatedAt,
 		"updated_at":      rev.UpdatedAt,
 	}
 	if rev.RevertOfRevisionID != nil {
 		p["revert_of_revision_id"] = *rev.RevertOfRevisionID
+	}
+	if rev.WorkflowStepID != "" {
+		p["workflow_step_id"] = rev.WorkflowStepID
+	}
+	if rev.WorkflowStepName != "" {
+		p["workflow_step_name"] = rev.WorkflowStepName
+	}
+	if rev.WorkflowStepColor != "" {
+		p["workflow_step_color"] = rev.WorkflowStepColor
 	}
 	return p
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -837,5 +838,104 @@ func TestPlanService_CoalescePreservesOriginalWorkflowStep(t *testing.T) {
 	}
 	if list[0].WorkflowStepID != "step-build" || list[0].WorkflowStepName != "Build" {
 		t.Errorf("expected coalesced revision to keep original step-build stamp, got %+v", list[0])
+	}
+}
+
+// TestPlanService_RevisionEventCarriesContentLengthAndWorkflowStep pins the
+// live WebSocket path to the same metadata the HTTP list/get paths already
+// expose: a client with the task panel open, relying solely on
+// task_plan.revision.created pushes, must still see content_length and the
+// workflow step stamp without a refetch.
+func TestPlanService_RevisionEventCarriesContentLengthAndWorkflowStep(t *testing.T) {
+	svc, eventBus, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-ws-meta")
+	task, err := repo.GetTask(ctx, "task-ws-meta")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	task.WorkflowStepID = "step-build"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+	svc.SetWorkflowStepGetter(&fakePlanWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-build": {ID: "step-build", Name: "Build", Color: "bg-blue-500"},
+	}})
+
+	if _, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-ws-meta", Content: "hello", AuthorKind: "agent", AuthorName: "Claude",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	var payload map[string]interface{}
+	for _, evt := range eventBus.GetPublishedEvents() {
+		if evt.Type == events.TaskPlanRevisionCreated {
+			payload, _ = evt.Data.(map[string]interface{})
+		}
+	}
+	if payload == nil {
+		t.Fatalf("expected a %s event, got %#v", events.TaskPlanRevisionCreated, eventBus.GetPublishedEvents())
+	}
+	if payload["content_length"] != 5 {
+		t.Errorf("expected content_length 5 (len of \"hello\"), got %#v", payload["content_length"])
+	}
+	if payload["workflow_step_id"] != "step-build" {
+		t.Errorf("expected workflow_step_id step-build, got %#v", payload["workflow_step_id"])
+	}
+	if payload["workflow_step_name"] != "Build" {
+		t.Errorf("expected workflow_step_name Build, got %#v", payload["workflow_step_name"])
+	}
+	if payload["workflow_step_color"] != "bg-blue-500" {
+		t.Errorf("expected workflow_step_color bg-blue-500, got %#v", payload["workflow_step_color"])
+	}
+}
+
+// TestPlanService_RevertPlanStampsWorkflowStep pins the fix for RevertPlan
+// bypassing upsertPlan's currentWorkflowStepStamp call: a revert performed
+// while the task sits on a workflow step must produce a revision row with
+// that step's badge, not an empty one, matching its non-revert neighbours.
+func TestPlanService_RevertPlanStampsWorkflowStep(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-revert-step")
+	svc.SetWorkflowStepGetter(&fakePlanWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-review": {ID: "step-review", Name: "Review", Color: "bg-purple-500"},
+	}})
+
+	_, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-revert-step", Content: "v1", AuthorKind: "agent", AuthorName: "Claude",
+	})
+	if err != nil {
+		t.Fatalf("create v1: %v", err)
+	}
+	list, _ := svc.ListRevisions(ctx, "task-revert-step")
+	v1 := list[0]
+
+	task, err := repo.GetTask(ctx, "task-revert-step")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	task.WorkflowStepID = "step-review"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("move task to step-review: %v", err)
+	}
+
+	if _, err := svc.RevertPlan(ctx, RevertPlanRequest{
+		TaskID: "task-revert-step", TargetRevisionID: v1.ID, AuthorName: "Alice",
+	}); err != nil {
+		t.Fatalf("revert: %v", err)
+	}
+
+	list, _ = svc.ListRevisions(ctx, "task-revert-step")
+	if len(list) != 2 {
+		t.Fatalf("expected 2 revisions (original + revert), got %d", len(list))
+	}
+	revertRev := list[0]
+	if revertRev.RevertOfRevisionID == nil {
+		t.Fatalf("expected the newest revision to be the revert, got %+v", revertRev)
+	}
+	if revertRev.WorkflowStepID != "step-review" || revertRev.WorkflowStepName != "Review" {
+		t.Errorf("expected revert-created revision to carry the current step-review stamp, got %+v", revertRev)
 	}
 }
