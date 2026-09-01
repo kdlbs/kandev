@@ -31,6 +31,7 @@ type (
 	GitCommitNotification       = streams.GitCommitNotification
 	GitResetNotification        = streams.GitResetNotification
 	GitBranchSwitchNotification = streams.GitBranchSwitchNotification
+	FileChangeFacet             = streams.FileChangeFacet
 	FileInfo                    = streams.FileInfo
 
 	// File stream types

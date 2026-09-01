@@ -3,7 +3,11 @@
 import type { ExecutorType } from "./executor";
 import type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
 import type { UserSettings } from "./http-user-settings";
-import type { TaskRepository, WorkspaceFolder } from "./http-workspace-sources";
+import type {
+  RepositoryBranchPolicy,
+  TaskRepository,
+  WorkspaceFolder,
+} from "./http-workspace-sources";
 import type {
   AgentProfileId,
   RepositoryId,
@@ -36,8 +40,13 @@ export type {
   UserSettingsUpdatePayload,
 } from "./http-user-settings";
 export type {
+  AgentProfileRecentUseApiRecord,
+  AgentProfileRecentUseContext,
+} from "./http-agent-profile-recent-use";
+export type {
   AttachTaskWorkspaceSourcesRequest,
   AttachTaskWorkspaceSourcesResponse,
+  RepositoryBranchPolicy,
   TaskRepository,
   WorkspaceFolder,
   WorkspaceFolderSourceRequest,
@@ -104,6 +113,11 @@ export type StepDefinition = {
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   agent_profile_id?: AgentProfileId;
+  execution_profile_id?: AgentProfileId;
+  route_generation?: number;
+  route_state?: string;
+  route_reason?: string;
+  downstream_acp_session_id?: string;
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
@@ -414,7 +428,13 @@ export type Task = ActiveSubagentCountFields & {
 };
 
 // Task origin values mirror models.TaskOrigin* constants in the Go backend.
-export type TaskOrigin = "manual" | "agent_created" | "routine" | "onboarding";
+export type TaskOrigin =
+  | "manual"
+  | "agent_created"
+  | "routine"
+  | "onboarding"
+  | "automation_run"
+  | "automation_task";
 
 // isFromOffice reads the backend-computed flag (predicate lives in SQL at
 // apps/backend/internal/task/repository/sqlite/task.go). Use to gate
@@ -424,6 +444,7 @@ export const isFromOffice = (task: Task | null | undefined): boolean => !!task?.
 export type CreateTaskResponse = Task & {
   session_id?: string;
   agent_execution_id?: string;
+  agent_profile_id?: AgentProfileId;
 };
 
 // Backend workflow step DTO (flat fields, as returned from API)
@@ -473,6 +494,23 @@ export type TaskSession = ActiveSubagentCountFields & {
   /** Optional user-supplied label shown on the session tab. */
   name?: string;
   agent_profile_id?: AgentProfileId;
+  /** Logical profile selected by the user; dynamic profiles resolve this to a concrete launch profile. */
+  execution_profile_id?: AgentProfileId;
+  /** Monotonic dynamic-route generation used for stale action rejection. */
+  route_generation?: number;
+  /** Durable dynamic-route state, such as starting, waiting, or action_required. */
+  route_state?: string;
+  /** Stable reason code for the current dynamic-route state. */
+  route_reason?: string;
+  /** Classified provider cause currently driving route recovery. */
+  route_error_code?: string;
+  route_error_class?: "transient" | "hard" | "unclassified" | string;
+  route_catalogue_version?: string;
+  route_retry_ordinal?: number;
+  route_deadline?: string;
+  route_pending_outcome?: "skip" | "stop" | string;
+  /** Downstream ACP session ID for the currently selected concrete candidate. */
+  downstream_acp_session_id?: string;
   container_id?: string;
   executor_id?: string;
   environment_id?: string;
@@ -611,6 +649,11 @@ export type ListTasksResponse = {
 
 export type ListRepositorySetsResponse = {
   repository_sets: RepositorySet[];
+  total: number;
+};
+
+export type ListRepositoryBranchPoliciesResponse = {
+  repository_branch_policies: RepositoryBranchPolicy[];
   total: number;
 };
 
@@ -793,6 +836,8 @@ export type Turn = {
   task_id: TaskId;
   started_at: string;
   completed_at?: string;
+  execution_profile_id?: AgentProfileId;
+  route_generation?: number;
   metadata?: Record<string, unknown>;
   created_at: string;
   updated_at: string;

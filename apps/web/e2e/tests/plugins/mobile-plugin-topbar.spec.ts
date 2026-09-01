@@ -124,8 +124,6 @@ test.describe("Mobile topbar action strip", () => {
       expect(hitTarget, `${label} keeps a 44px hit area`).toBe(true);
     };
 
-    await expectTouchTarget(terminalHitTarget, "Quick Terminal");
-
     const brandBefore = await requireBox(brand, "brand before scroll");
     const menuBefore = await requireBox(menu, "menu before scroll");
     await expect(strip).toHaveAttribute("data-can-scroll-left", "false");
@@ -154,6 +152,10 @@ test.describe("Mobile topbar action strip", () => {
     await expect(leftFade).toBeVisible();
     await expect(rightFade).toHaveCount(0);
     await expect(search).toBeInViewport();
+    // Touch targets are probed at the end position: with the title crumb on
+    // the bar the native actions start beyond the strip's initial viewport,
+    // and `document.elementFromPoint` can only hit what is scrolled into view.
+    await expectTouchTarget(terminalHitTarget, "Quick Terminal");
     await expectTouchTarget(quickChatHitTarget, "Quick Chat");
     await assertNoDocumentHorizontalOverflow(testPage, "mobile topbar scrolled layout");
 

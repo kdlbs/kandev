@@ -1,6 +1,6 @@
 // System pages — frontend types mirroring the
 // `apps/backend/internal/system/` HTTP surface (see
-// docs/specs/system-page/spec.md "Backend surface").
+// docs/specs/system-page/requirements/system-page.md "Backend surface").
 
 export interface SystemInfo {
   version: string;
@@ -36,6 +36,7 @@ export interface DiskUsageResponse {
 export interface DatabaseStats {
   driver: string;
   path: string;
+  backup_directory: string;
   size_bytes: number;
   wal_size_bytes: number;
   schema_version: string;
@@ -47,7 +48,6 @@ export type SnapshotKind = "auto" | "manual";
 
 export interface SnapshotInfo {
   name: string;
-  path: string;
   size_bytes: number;
   /** ISO timestamp. */
   mtime: string;
@@ -195,7 +195,7 @@ export interface MessageQueueSettingsValue {
 /** Partial PATCH payload: omitted fields are left unchanged server-side. */
 export type MessageQueueSettingsPatch = Partial<MessageQueueSettingsValue>;
 
-export type MessageQueueSettingsSource = "default" | "setting" | "environment";
+export type MessageQueueSettingsSource = "default" | "setting" | "configuration" | "environment";
 
 export interface MessageQueueEffectiveSettings extends MessageQueueSettingsValue {
   source: MessageQueueSettingsSource;

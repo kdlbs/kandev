@@ -72,6 +72,7 @@ func Provide(cfg *config.Config, dbPool *db.Pool, secrets SecretVault, eventBus 
 	}
 
 	svc := NewService(pluginStore, registry, eventBus, log)
+	svc.warnLoadedWebhookAccessIssues()
 	svc.SetState(stateStore)
 	svc.SetUserState(userStateStore)
 	svc.SetSecrets(secrets)

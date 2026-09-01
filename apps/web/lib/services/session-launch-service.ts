@@ -46,6 +46,7 @@ export type LaunchSessionResponse = {
   state: string;
   worktree_path?: string;
   worktree_branch?: string;
+  error?: string;
 };
 
 export async function launchSession(
@@ -64,7 +65,12 @@ export type EnsureSessionResponse = {
   session_id?: string;
   state: string;
   agent_profile_id?: string;
-  source: "existing_primary" | "existing_newest" | "created_prepare" | "created_start";
+  source:
+    | "existing_primary"
+    | "existing_newest"
+    | "created_prepare"
+    | "created_start"
+    | "skipped_terminal_pr";
   newly_created: boolean;
   workspace_path?: string;
 };

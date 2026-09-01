@@ -39,6 +39,8 @@ type StreamManager struct {
 	// stream's task. Nil leaves dispatch unscoped (single-user instances and
 	// isolated tests); set via Manager.SetMCPIdentityScoper.
 	mcpIdentityScoper MCPIdentityScoper
+	// mcpPrincipalScoper attaches the trusted task/session/surface principal.
+	mcpPrincipalScoper MCPPrincipalScoper
 	// stopCh is the Manager-owned shutdown signal. The retry/backoff and
 	// connected `<-ws.Done() / <-stop>` select read from it so they drain on
 	// Manager.Stop. May be nil when isolated tests don't care about external

@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
@@ -25,6 +26,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 	"go.uber.org/zap"
@@ -50,10 +52,22 @@ type errorWrapper struct {
 // PendingPermission represents a permission request waiting for user response
 type PendingPermission struct {
 	ID         string
+	RequestID  string
 	Request    *adapter.PermissionRequest
+	Snapshot   streams.PendingAgentPermission
 	ResponseCh chan *adapter.PermissionResponse
 	CreatedAt  time.Time
+	State      string
 }
+
+// PermissionOperationError carries a stable code across the agentctl stream.
+type PermissionOperationError struct {
+	Code string
+}
+
+func (e *PermissionOperationError) Error() string { return e.Code }
+
+const maxPermissionTombstones = 256
 
 // PermissionNotification is sent when the agent requests permission
 type PermissionNotification struct {
@@ -80,6 +94,7 @@ const processDefaultExitGrace = 5 * time.Second
 
 const processGroupTerminateGrace = 2 * time.Second
 const processGroupPollInterval = 50 * time.Millisecond
+const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
@@ -93,6 +108,9 @@ type Manager struct {
 	stdin              io.WriteCloser
 	stdout             io.ReadCloser
 	stderr             io.ReadCloser
+	stderrPipeMu       sync.Mutex
+	stderrReader       io.ReadCloser
+	stderrWriter       io.WriteCloser
 	status             atomic.Value // Status
 	exitCode           atomic.Int32
 	exitErr            atomic.Value // error
@@ -157,6 +175,25 @@ type Manager struct {
 	// same map under workspaceTrackersMu.
 	baseBranchesMu sync.RWMutex
 
+	// comparisonTargetsMu guards the provider-qualified target map separately
+	// from branch-only overrides. Updating one target must not race tracker
+	// creation or rewrite siblings' authoritative state.
+	comparisonTargetsMu sync.RWMutex
+	// trackerGitEnv is the process manager's detached snapshot of the instance
+	// environment used by workspace trackers. Each tracker receives its own
+	// copy so tracker-local changes cannot affect another tracker.
+	trackerGitEnv   []string
+	trackerGitEnvMu sync.RWMutex
+
+	// comparisonTargetOps tracks one cancellable materialization per
+	// repository scope. The wait group lets teardown observe all operations
+	// that were admitted before shutdown.
+	comparisonTargetOps          map[string]*comparisonTargetOperation
+	comparisonTargetOpsMu        sync.Mutex
+	comparisonTargetOpsWG        sync.WaitGroup
+	comparisonTargetOpsStopping  bool
+	comparisonTargetOpsPermanent bool
+
 	// streamSubscribers tracks every workspace-stream subscriber attached
 	// via SubscribeWorkspaceStream so RescanRepositories can wire new
 	// per-repo trackers into the same channels without re-subscription. The
@@ -183,8 +220,10 @@ type Manager struct {
 	updatesCh chan adapter.AgentEvent
 
 	// Pending permission requests waiting for user response
-	pendingPermissions map[string]*PendingPermission
-	permissionMu       sync.RWMutex
+	pendingPermissions       map[string]*PendingPermission
+	permissionTombstones     map[string]string
+	permissionTombstoneOrder []string
+	permissionMu             sync.RWMutex
 
 	// VS Code server manager (lazy-initialized on demand)
 	vscode   *VscodeManager
@@ -257,6 +296,14 @@ func (m *Manager) admitStart() (func(), error) {
 // CloseAdmission rejects new process owners without waiting for in-flight
 // handlers. Instance teardown calls it before shutting down HTTP.
 func (m *Manager) CloseAdmission() {
+	m.comparisonTargetOpsMu.Lock()
+	m.comparisonTargetOpsStopping = true
+	m.comparisonTargetOpsPermanent = true
+	for _, operation := range m.comparisonTargetOps {
+		operation.cancel()
+	}
+	m.comparisonTargetOpsMu.Unlock()
+
 	m.admissionMu.Lock()
 	m.stopping = true
 	lifetimeCancel := m.lifetimeCancel
@@ -328,6 +375,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		lifetimeCtx:          lifetimeCtx,
 		lifetimeCancel:       lifetimeCancel,
 		workspaceSourceRoots: canonicalWorkspaceSourceRoots(cfg.WorkspaceSourceRoots),
+		trackerGitEnv:        append([]string(nil), cfg.AgentEnv...),
 	}
 	// Build the root plus any immediate sibling repositories and recursively
 	// declared initialized submodules. The root remains a real empty-named
@@ -551,6 +599,55 @@ func (m *Manager) snapshotTrackers() (*WorkspaceTracker, []*WorkspaceTracker) {
 	return m.workspaceTracker, repos
 }
 
+// GitPollStats aggregates completed git-status poll tick counts and their
+// mean duration across this instance's root and per-repo workspace trackers.
+// Backs the diagnostic agentctl_git_poll_ms metric (api.handleSystemMetrics).
+// count == 0 means no tracker has completed a tick yet.
+func (m *Manager) GitPollStats() (count int64, meanMillis float64) {
+	root, trackers := m.snapshotTrackers()
+	var totalCount, totalNanos int64
+	accumulate := func(wt *WorkspaceTracker) {
+		if wt == nil {
+			return
+		}
+		c, n := wt.GitPollTickStats()
+		totalCount += c
+		totalNanos += n
+	}
+	accumulate(root)
+	for _, t := range trackers {
+		accumulate(t)
+	}
+	if totalCount == 0 {
+		return 0, 0
+	}
+	return totalCount, float64(totalNanos) / float64(totalCount) / float64(time.Millisecond)
+}
+
+// MonitorPollStats aggregates completed workspace monitor scans and their
+// mean duration across this instance's root and per-repo workspace trackers.
+// The initial scan is included. count == 0 means no scan has completed yet.
+func (m *Manager) MonitorPollStats() (count int64, meanMillis float64) {
+	root, trackers := m.snapshotTrackers()
+	var totalCount, totalNanos int64
+	accumulate := func(wt *WorkspaceTracker) {
+		if wt == nil {
+			return
+		}
+		c, n := wt.MonitorTickStats()
+		totalCount += c
+		totalNanos += n
+	}
+	accumulate(root)
+	for _, t := range trackers {
+		accumulate(t)
+	}
+	if totalCount == 0 {
+		return 0, 0
+	}
+	return totalCount, float64(totalNanos) / float64(totalCount) / float64(time.Millisecond)
+}
+
 // StartAllWorkspaceTrackers starts root + per-repo trackers (idempotent) so file-change events fire in passthrough mode.
 func (m *Manager) StartAllWorkspaceTrackers(ctx context.Context) {
 	root, trackers := m.snapshotTrackers()
@@ -641,8 +738,9 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 	if t, ok := m.workspaceTrackersBySubpath[cleaned]; ok {
 		return t, nil
 	}
-	t := NewWorkspaceTracker(full, m.logger)
-	t.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), cleaned))
+	t := NewWorkspaceTrackerForRepo(full, cleaned, m.logger)
+	m.configureTracker(t, cleaned, m.currentWorkspaceSourceRoots())
+	m.prepareTrackerComparisonTarget(t)
 	m.workspaceTrackersBySubpath[cleaned] = t
 	return t, nil
 }
@@ -823,7 +921,9 @@ func (m *Manager) findRepositoryTracker(repositoryName string) *WorkspaceTracker
 // otherwise sit at its construction default and be demoted by the grace timer
 // 60s later, while the user is looking at it.
 func (m *Manager) newTrackerForRepo(path, repositoryName string) *WorkspaceTracker {
-	return NewWorkspaceTrackerForRepo(path, repositoryName, m.logger)
+	tracker := NewWorkspaceTrackerForRepo(path, repositoryName, m.logger)
+	tracker.SetGitEnvironment(m.trackerGitEnvironment())
+	return tracker
 }
 
 // applyWorkspacePollModeLocked gives newly built trackers the last mode the
@@ -974,6 +1074,27 @@ func (m *Manager) gitEnvironment() []string {
 	return append([]string(nil), m.cfg.AgentEnv...)
 }
 
+func (m *Manager) trackerGitEnvironment() []string {
+	m.trackerGitEnvMu.RLock()
+	defer m.trackerGitEnvMu.RUnlock()
+	return append([]string(nil), m.trackerGitEnv...)
+}
+
+func (m *Manager) setTrackerGitEnvironment(env []string) {
+	detached := append([]string(nil), env...)
+	m.trackerGitEnvMu.Lock()
+	m.trackerGitEnv = detached
+	m.trackerGitEnvMu.Unlock()
+
+	root, trackers := m.snapshotTrackers()
+	if root != nil {
+		root.SetGitEnvironment(detached)
+	}
+	for _, tracker := range trackers {
+		tracker.SetGitEnvironment(detached)
+	}
+}
+
 // resolveSubpath normalises and validates a repo subpath relative to
 // cfg.WorkDir. Returns ("", "", nil) for the root (empty/"."); otherwise
 // returns the cleaned relative path and the absolute full path.
@@ -1107,12 +1228,17 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	// Start the subprocess now that pipes are connected
 	if err := m.cmd.Start(); err != nil {
+		_ = m.closeStderrPipe()
 		m.status.Store(StatusError)
 		return formatAgentStartError(err, m.cfg.AgentEnv)
+	}
+	if err := m.closeStderrWriter(); err != nil {
+		m.logger.Debug("failed to close parent stderr pipe", zap.Error(err))
 	}
 	processLifecycle, err := installProcessLifecycle(m.cmd)
 	if err != nil {
 		reapErr := killAndWaitStartedCommand(m.cmd)
+		_ = m.closeStderrReader()
 		m.status.Store(StatusError)
 		return errors.Join(fmt.Errorf("failed to install agent process lifecycle: %w", err), reapErr)
 	}
@@ -1134,14 +1260,17 @@ func (m *Manager) Start(ctx context.Context) error {
 		default:
 			reapErr = killAndWaitStartedCommand(m.cmd)
 		}
+		_ = m.closeStderrReader()
 		m.status.Store(StatusError)
 		return errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
 	}
 
-	// Start stderr reader and exit waiter
+	// Start stderr reader and exit waiter. Keep the completion channel local to
+	// this process generation so a delayed reader cannot signal a replacement.
+	stderrDone := make(chan struct{})
 	m.wg.Add(2)
-	go m.readStderr()
-	go m.waitForExit()
+	go m.readStderr(stderrDone)
+	go m.waitForExit(stderrDone)
 
 	// Forward adapter updates to our channel
 	m.wg.Add(1)
@@ -1209,18 +1338,18 @@ func (m *Manager) buildAdapterConfig() error {
 		}
 	}
 	m.adapterCfg = &adapter.Config{
-		WorkDir:             m.cfg.WorkDir,
-		AutoApprove:         m.cfg.AutoApprovePermissions,
-		ApprovalPolicy:      m.cfg.ApprovalPolicy,
-		McpServers:          mcpServers,
-		AgentID:             m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
-		AssumeMcpSse:        m.cfg.AssumeMcpSse,
-		AssumeMcpHttp:       m.cfg.AssumeMcpHttp,
-		RequiresProcessKill: m.cfg.RequiresProcessKill,
+		WorkDir:                   m.cfg.WorkDir,
+		AutoApprove:               m.cfg.AutoApprovePermissions,
+		McpServers:                mcpServers,
+		AgentID:                   m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
+		AssumeMcpSse:              m.cfg.AssumeMcpSse,
+		AssumeMcpHttp:             m.cfg.AssumeMcpHttp,
+		RequiresProcessKill:       m.cfg.RequiresProcessKill,
+		NotificationQueueCapacity: m.cfg.NotificationQueueCapacity,
 	}
 
 	// Configure one-shot mode when a continue command is provided.
-	// One-shot adapters (e.g., Amp) spawn a new subprocess per prompt.
+	// One-shot adapters spawn a new subprocess per prompt.
 	continueArgs := m.cfg.ContinueArgs
 	if continueArgs == nil && m.cfg.ContinueCommand != "" {
 		continueArgs = config.ParseCommand(m.cfg.ContinueCommand)
@@ -1266,6 +1395,7 @@ func (m *Manager) buildAdapterConfig() error {
 	if m.adapterCfg.OneShotConfig != nil {
 		m.adapterCfg.OneShotConfig.Env = m.cfg.AgentEnv
 	}
+	m.setTrackerGitEnvironment(m.cfg.AgentEnv)
 	return nil
 }
 
@@ -1291,7 +1421,7 @@ func (m *Manager) buildFinalCommand() error {
 	m.cmd.Dir = m.cfg.WorkDir
 	m.cmd.Env = m.cfg.AgentEnv
 	// Create a new process group so we can kill all child processes together.
-	// This is important for adapters like OpenCode that spawn child processes
+	// This is important for agents like OpenCode that spawn child processes
 	// (npx -> sh -> node -> opencode binary).
 	setAgentProcGroup(m.cmd)
 
@@ -1398,13 +1528,45 @@ func (m *Manager) startProcessPipes() error {
 		_ = m.stdin.Close()
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
-	m.stderr, err = m.cmd.StderrPipe()
+	stderrReader, stderrWriter, err := os.Pipe()
 	if err != nil {
 		_ = m.stdin.Close()
 		_ = m.stdout.Close()
 		return fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
+	m.stderr = stderrReader
+	m.stderrPipeMu.Lock()
+	m.stderrReader = stderrReader
+	m.stderrWriter = stderrWriter
+	m.stderrPipeMu.Unlock()
+	m.cmd.Stderr = stderrWriter
 	return nil
+}
+
+func (m *Manager) closeStderrReader() error {
+	m.stderrPipeMu.Lock()
+	reader := m.stderrReader
+	m.stderrReader = nil
+	m.stderrPipeMu.Unlock()
+	if reader == nil {
+		return nil
+	}
+	return reader.Close()
+}
+
+func (m *Manager) closeStderrWriter() error {
+	m.stderrPipeMu.Lock()
+	writer := m.stderrWriter
+	m.stderrWriter = nil
+	m.stderrPipeMu.Unlock()
+	if writer == nil {
+		return nil
+	}
+	return writer.Close()
+}
+
+func (m *Manager) closeStderrPipe() error {
+	return errors.Join(m.closeStderrWriter(), m.closeStderrReader())
 }
 
 // startAgentShell auto-creates a shell session when ShellEnabled is configured.
@@ -1509,12 +1671,12 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 	m.cfg.AgentCommand = command
 	m.cfg.AgentArgs = args
 
-	// Set approval policy if provided (for Codex)
+	// Set approval policy if provided
 	if approvalPolicy != "" {
 		m.cfg.ApprovalPolicy = approvalPolicy
 	}
 
-	// Store continue command for one-shot adapters (e.g., Amp)
+	// Store continue command for one-shot adapters
 	if continueArgsPresent {
 		m.cfg.ContinueCommand = continueCommand
 		m.cfg.ContinueArgs = continueArgs
@@ -1555,7 +1717,7 @@ func (m *Manager) createAdapter() error {
 	}
 	m.adapter = adpt
 
-	// Set stderr provider for adapters that support it (Codex, StreamJSON)
+	// Set stderr provider if the adapter implements the optional StderrProviderSetter interface
 	if setter, ok := m.adapter.(adapter.StderrProviderSetter); ok {
 		setter.SetStderrProvider(m)
 	}
@@ -1706,6 +1868,10 @@ func (m *Manager) stop(ctx context.Context) error {
 
 	// Stop trackers before the status guard: passthrough never calls Start() so the early return below would otherwise leak them.
 	m.stopWorkspaceTrackers()
+	comparisonStopErr, comparisonTargetsDrained := m.stopComparisonTargetOperations(ctx)
+	if comparisonTargetsDrained {
+		defer m.reopenComparisonTargetOperations()
+	}
 
 	status := m.Status()
 	if status == StatusStopped || status == StatusStopping {
@@ -1721,18 +1887,18 @@ func (m *Manager) stop(ctx context.Context) error {
 			// after a normal stop, in which case behaviour is unchanged.
 			tornDown := m.closeAdapterAndStdin()
 			if err := m.stopShellAndProcesses(ctx); err != nil {
-				return err
+				return errors.Join(comparisonStopErr, err)
 			}
 			switch {
 			case m.mainReapPending.Load():
 				if err := m.waitForProcessExit(ctx); err != nil {
-					return err
+					return errors.Join(comparisonStopErr, err)
 				}
 				m.mainReapPending.Store(false)
 			case tornDown:
 				m.drainAfterLateTeardown(ctx)
 			}
-			return nil
+			return comparisonStopErr
 		}
 		return nil
 	}
@@ -1745,7 +1911,7 @@ func (m *Manager) stop(ctx context.Context) error {
 		zap.String("protocol", m.agentProtocol()))
 	m.status.Store(StatusStopping)
 
-	auxiliaryStopErr := m.stopShellAndProcesses(ctx)
+	auxiliaryStopErr := errors.Join(comparisonStopErr, m.stopShellAndProcesses(ctx))
 	m.closeAdapterAndStdin()
 	m.killProcessGroupIfRequired()
 	mainStopErr := m.waitForProcessExit(ctx)
@@ -1888,7 +2054,7 @@ func (m *Manager) drainAfterLateTeardown(ctx context.Context) {
 }
 
 // killProcessGroupIfRequired immediately kills the entire process group for
-// adapters (such as OpenCode) that are known not to exit when stdin is closed.
+// agents (such as OpenCode) that are known not to exit when stdin is closed.
 // Other adapters still get process-group cleanup in waitForProcessExit after
 // their graceful stdin-close path has had a chance to finish.
 func (m *Manager) killProcessGroupIfRequired() {
@@ -2182,9 +2348,10 @@ func waitForProcessGroupExit(ctx context.Context, pid int) bool {
 	}
 }
 
-// readStderr reads and logs stderr from the agent
-func (m *Manager) readStderr() {
+// readStderr reads and logs stderr from the agent.
+func (m *Manager) readStderr(stderrDone chan<- struct{}) {
 	defer m.wg.Done()
+	defer close(stderrDone)
 
 	scanner := bufio.NewScanner(m.stderr)
 	for scanner.Scan() {
@@ -2200,6 +2367,9 @@ func (m *Manager) readStderr() {
 		if m.stderrSanitizer != nil {
 			line, keep = m.stderrSanitizer.SanitizeStderrLine(rawLine)
 		}
+		if !keep {
+			line, keep = safeManagedNpmStderrLine(rawLine)
+		}
 		if !keep || line == "" {
 			continue
 		}
@@ -2211,6 +2381,20 @@ func (m *Manager) readStderr() {
 
 	if err := scanner.Err(); err != nil {
 		m.logger.Debug("stderr reader error", zap.Error(err))
+	}
+}
+
+func (m *Manager) waitForStderrDrain(stderrDone <-chan struct{}) {
+	if stderrDone == nil {
+		return
+	}
+	timer := time.NewTimer(processStderrDrainTimeout)
+	defer timer.Stop()
+	select {
+	case <-stderrDone:
+	case <-timer.C:
+		m.logger.Warn("timed out waiting for agent stderr to drain")
+		_ = m.closeStderrReader()
 	}
 }
 
@@ -2255,12 +2439,18 @@ func (m *Manager) ClearStderrBuffer() {
 }
 
 // waitForExit waits for the process to exit
-func (m *Manager) waitForExit() {
+func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 	defer m.wg.Done()
 	defer close(m.doneCh)
 
 	pid := m.agentPID()
+	// The manager owns stderr's read/write pipe, so Wait can reap the process
+	// without closing the reader. The reader drains the pipe concurrently.
 	err := m.cmd.Wait()
+	// Wait has observed process exit; now bound the reader drain in case a child
+	// process inherited the stderr writer and kept the pipe open.
+	m.waitForStderrDrain(stderrDone)
+	_ = m.closeStderrReader()
 	intentionalStop := m.Status() == StatusStopping
 
 	switch {
@@ -2354,7 +2544,6 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		zap.String("pending_id", pendingID),
 		zap.String("session_id", req.SessionID),
 		zap.String("tool_call_id", req.ToolCallID),
-		zap.String("title", req.Title),
 		zap.Bool("auto_approve", m.cfg.AutoApprovePermissions))
 
 	// If auto-approve is enabled, immediately approve with the first "allow" option
@@ -2363,22 +2552,36 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 	}
 
 	// Create pending permission with response channel
+	createdAt := time.Now().UTC()
 	pending := &PendingPermission{
 		ID:         pendingID,
+		RequestID:  uuid.NewString(),
 		Request:    req,
 		ResponseCh: make(chan *adapter.PermissionResponse, 1),
-		CreatedAt:  time.Now(),
+		CreatedAt:  createdAt,
+		State:      streams.PermissionStatusPending,
 	}
+	pending.Snapshot = m.permissionSnapshot(pending)
 
 	// Store pending permission
 	m.permissionMu.Lock()
+	if replaced := m.pendingPermissions[pendingID]; replaced != nil {
+		m.addPermissionTombstoneLocked(replaced.RequestID, streams.PermissionErrorStale)
+		select {
+		case replaced.ResponseCh <- &adapter.PermissionResponse{Cancelled: true}:
+		default:
+		}
+	}
 	m.pendingPermissions[pendingID] = pending
 	m.permissionMu.Unlock()
 
 	// Clean up when done
 	defer func() {
 		m.permissionMu.Lock()
-		delete(m.pendingPermissions, pendingID)
+		if current := m.pendingPermissions[pendingID]; current == pending {
+			delete(m.pendingPermissions, pendingID)
+			m.addPermissionTombstoneLocked(pending.RequestID, streams.PermissionErrorStale)
+		}
 		m.permissionMu.Unlock()
 	}()
 
@@ -2399,6 +2602,20 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 	case <-ctx.Done():
 		m.logger.Warn("permission request context cancelled",
 			zap.String("pending_id", pendingID))
+		// Claim the terminal transition ourselves so a concurrent resolve/cancel/
+		// respond call that is already past the state check cannot also "win" and
+		// report success for a request this goroutine is about to stop listening on.
+		if _, err := m.consumePermission(pendingID, pending.RequestID, nil,
+			&adapter.PermissionResponse{Cancelled: true}, streams.PermissionErrorStale); err != nil {
+			// Someone else consumed it first; deliver whatever they sent instead of
+			// fabricating our own cancellation.
+			select {
+			case resp := <-pending.ResponseCh:
+				return resp, nil
+			default:
+				return &adapter.PermissionResponse{Cancelled: true}, nil
+			}
+		}
 		// Send cancellation notification so the backend can update the permission message status
 		m.sendPermissionCancelledNotification(pending)
 		return &adapter.PermissionResponse{Cancelled: true}, nil
@@ -2430,7 +2647,6 @@ func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (*adapte
 
 	m.logger.Info("auto-approving permission request",
 		zap.String("option_id", selectedOption.OptionID),
-		zap.String("option_name", selectedOption.Name),
 		zap.String("kind", string(selectedOption.Kind)))
 
 	return &adapter.PermissionResponse{
@@ -2442,24 +2658,28 @@ func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (*adapte
 // Uses a blocking send with timeout to ensure delivery. If delivery fails within 5 seconds,
 // auto-cancels the permission so the agent doesn't hang waiting for a response.
 func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
-	// Convert options to streams.PermissionOption (types.PermissionOption is an alias)
-	options := make([]streams.PermissionOption, len(pending.Request.Options))
-	copy(options, pending.Request.Options)
-
+	options := make([]streams.PermissionOption, len(pending.Snapshot.Options))
+	for i, option := range pending.Snapshot.Options {
+		options[i] = streams.PermissionOption{
+			OptionID: option.OptionID,
+			Name:     option.Name,
+			Kind:     option.Kind,
+		}
+	}
 	event := adapter.AgentEvent{
 		Type:              adapter.EventTypePermissionRequest,
-		SessionID:         pending.Request.SessionID,
+		SessionID:         m.permissionSessionID(pending),
 		ToolCallID:        pending.Request.ToolCallID,
+		RequestID:         pending.RequestID,
 		PendingID:         pending.ID,
-		PermissionTitle:   pending.Request.Title,
+		PermissionTitle:   pending.Snapshot.Title,
 		PermissionOptions: options,
-		ActionType:        pending.Request.ActionType,
-		ActionDetails:     pending.Request.ActionDetails,
+		ActionType:        pending.Snapshot.Action.Type,
+		ActionDetails:     permissionActionDetailsForEvent(pending.Snapshot.Action),
 	}
 
 	m.logger.Info("sending permission notification via updates channel",
 		zap.String("pending_id", pending.ID),
-		zap.String("title", pending.Request.Title),
 		zap.String("action_type", pending.Request.ActionType))
 
 	timer := time.NewTimer(5 * time.Second)
@@ -2483,7 +2703,8 @@ func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 func (m *Manager) sendPermissionCancelledNotification(pending *PendingPermission) {
 	event := adapter.AgentEvent{
 		Type:      adapter.EventTypePermissionCancelled,
-		SessionID: pending.Request.SessionID,
+		SessionID: m.permissionSessionID(pending),
+		RequestID: pending.RequestID,
 		PendingID: pending.ID,
 	}
 
@@ -2500,31 +2721,252 @@ func (m *Manager) sendPermissionCancelledNotification(pending *PendingPermission
 	}
 }
 
-// RespondToPermission responds to a pending permission request
-func (m *Manager) RespondToPermission(pendingID string, optionID string, cancelled bool) error {
+func (m *Manager) permissionSessionID(pending *PendingPermission) string {
+	if m.cfg != nil && m.cfg.SessionID != "" {
+		return m.cfg.SessionID
+	}
+	if pending != nil && pending.Request != nil {
+		return pending.Request.SessionID
+	}
+	return ""
+}
+
+func (m *Manager) permissionSnapshot(pending *PendingPermission) streams.PendingAgentPermission {
+	title, titleRedacted := securityutil.SanitizePermissionText(pending.Request.Title)
+	action := securityutil.ProjectPermissionAction(
+		pending.Request.ActionType,
+		pending.Request.Title,
+		pending.Request.ActionDetails,
+	)
+	options := make([]streams.PermissionChoice, 0, len(pending.Request.Options))
+	for _, option := range pending.Request.Options {
+		name, nameRedacted := securityutil.SanitizePermissionText(option.Name)
+		action.Redacted = action.Redacted || nameRedacted
+		options = append(options, streams.PermissionChoice{
+			OptionID: option.OptionID,
+			Name:     name,
+			Kind:     option.Kind,
+		})
+	}
+	action.Redacted = action.Redacted || titleRedacted
+	taskID := ""
+	if m.cfg != nil {
+		taskID = m.cfg.TaskID
+	}
+	return streams.PendingAgentPermission{
+		TaskID:     taskID,
+		SessionID:  m.permissionSessionID(pending),
+		RequestID:  pending.RequestID,
+		PendingID:  pending.ID,
+		ToolCallID: pending.Request.ToolCallID,
+		Title:      title,
+		Action: streams.PermissionAction{
+			Type:        action.Type,
+			Description: action.Description,
+			Command:     action.Command,
+			CWD:         action.CWD,
+			Path:        action.Path,
+			Destination: action.Destination,
+			Server:      action.Server,
+			Tool:        action.Tool,
+			Redacted:    action.Redacted,
+		},
+		Options:   options,
+		CreatedAt: pending.CreatedAt,
+		Status:    streams.PermissionStatusPending,
+	}
+}
+
+func permissionActionDetailsForEvent(action streams.PermissionAction) map[string]any {
+	projected := securityutil.PermissionActionProjection{
+		Type:        action.Type,
+		Description: action.Description,
+		Command:     action.Command,
+		CWD:         action.CWD,
+		Path:        action.Path,
+		Destination: action.Destination,
+		Server:      action.Server,
+		Tool:        action.Tool,
+		Redacted:    action.Redacted,
+	}
+	return securityutil.PermissionActionDetailsForEvent(projected)
+}
+
+// ListPendingPermissions returns bounded immutable snapshots of live requests.
+func (m *Manager) ListPendingPermissions() []streams.PendingAgentPermission {
 	m.permissionMu.RLock()
-	pending, ok := m.pendingPermissions[pendingID]
+	permissions := make([]streams.PendingAgentPermission, 0, len(m.pendingPermissions))
+	for _, pending := range m.pendingPermissions {
+		if pending == nil || pending.State != streams.PermissionStatusPending {
+			continue
+		}
+		snapshot := pending.Snapshot
+		snapshot.Options = append([]streams.PermissionChoice(nil), pending.Snapshot.Options...)
+		permissions = append(permissions, snapshot)
+	}
 	m.permissionMu.RUnlock()
 
-	if !ok {
-		return fmt.Errorf("pending permission not found: %s", pendingID)
+	sort.Slice(permissions, func(i, j int) bool {
+		if permissions[i].CreatedAt.Equal(permissions[j].CreatedAt) {
+			return permissions[i].RequestID < permissions[j].RequestID
+		}
+		return permissions[i].CreatedAt.Before(permissions[j].CreatedAt)
+	})
+	if len(permissions) > 100 {
+		permissions = permissions[:100]
+	}
+	return permissions
+}
+
+// consumePermission is the single terminal-transition chokepoint for a live
+// permission request. Every path that can end a request generation — explicit
+// resolve, explicit cancel, the internal respond endpoint, or the request
+// context finishing — must go through this so exactly one caller observes a
+// pending->resolving transition and delivers the response; every later caller
+// gets a stable error instead of silently "succeeding" against an entry
+// nobody is listening on anymore. optionalRequestID empty skips the identity
+// check (RespondToPermission has no requestID). validate runs after the
+// pending/requestID/state checks but before the state mutates, so a rejected
+// option (for example) never claims the transition.
+func (m *Manager) consumePermission(
+	pendingID, optionalRequestID string,
+	validate func(*PendingPermission) error,
+	resp *adapter.PermissionResponse,
+	terminalCode string,
+) (*PendingPermission, error) {
+	m.permissionMu.Lock()
+	defer m.permissionMu.Unlock()
+
+	pending := m.pendingPermissions[pendingID]
+	if pending == nil {
+		code := m.permissionTombstones[optionalRequestID]
+		if code == "" {
+			code = streams.PermissionErrorNotFound
+		}
+		return nil, &PermissionOperationError{Code: code}
+	}
+	if optionalRequestID != "" && pending.RequestID != optionalRequestID {
+		return nil, &PermissionOperationError{Code: streams.PermissionErrorStale}
+	}
+	if pending.State != streams.PermissionStatusPending {
+		return nil, &PermissionOperationError{Code: streams.PermissionErrorInProgress}
+	}
+	if validate != nil {
+		if err := validate(pending); err != nil {
+			return nil, err
+		}
 	}
 
+	pending.State = streams.PermissionStatusResolving
+	select {
+	case pending.ResponseCh <- resp:
+		delete(m.pendingPermissions, pendingID)
+		m.addPermissionTombstoneLocked(pending.RequestID, terminalCode)
+		return pending, nil
+	default:
+		delete(m.pendingPermissions, pendingID)
+		m.addPermissionTombstoneLocked(pending.RequestID, streams.PermissionErrorDeliveryFailed)
+		return nil, &PermissionOperationError{Code: streams.PermissionErrorDeliveryFailed}
+	}
+}
+
+// ResolvePermission validates and consumes one exact live request generation.
+// The provider response is sent at most once while the identity lock is held.
+func (m *Manager) ResolvePermission(requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error) {
+	var selected *streams.PermissionChoice
+	validate := func(pending *PendingPermission) error {
+		for i := range pending.Snapshot.Options {
+			if pending.Snapshot.Options[i].OptionID == optionID {
+				selected = &pending.Snapshot.Options[i]
+				return nil
+			}
+		}
+		return &PermissionOperationError{Code: streams.PermissionErrorOptionNotOffered}
+	}
+	_, err := m.consumePermission(pendingID, requestID, validate,
+		&adapter.PermissionResponse{OptionID: optionID}, streams.PermissionErrorAlreadyResolved)
+	if err != nil {
+		return nil, err
+	}
+	m.logger.Info("resolved permission request",
+		zap.String("request_id", requestID),
+		zap.String("pending_id", pendingID),
+		zap.String("option_id", optionID))
+	return &streams.PermissionResolveResponse{
+		RequestID:  requestID,
+		PendingID:  pendingID,
+		OptionID:   optionID,
+		OptionKind: selected.Kind,
+		Status:     "resolved",
+	}, nil
+}
+
+// CancelPermission dismisses one exact live request generation. This is an
+// internal compatibility path for the web UI when a provider offers no reject
+// option; it is deliberately separate from option-only external resolution.
+func (m *Manager) CancelPermission(requestID, pendingID string) (*streams.PermissionCancelResponse, error) {
+	_, err := m.consumePermission(pendingID, requestID, nil,
+		&adapter.PermissionResponse{Cancelled: true}, streams.PermissionErrorAlreadyResolved)
+	if err != nil {
+		return nil, err
+	}
+	return &streams.PermissionCancelResponse{RequestID: requestID, PendingID: pendingID, Status: "cancelled"}, nil
+}
+
+func (m *Manager) addPermissionTombstoneLocked(requestID, code string) {
+	if requestID == "" {
+		return
+	}
+	if m.permissionTombstones == nil {
+		m.permissionTombstones = make(map[string]string)
+	}
+	if _, exists := m.permissionTombstones[requestID]; !exists {
+		m.permissionTombstoneOrder = append(m.permissionTombstoneOrder, requestID)
+	}
+	m.permissionTombstones[requestID] = code
+	for len(m.permissionTombstoneOrder) > maxPermissionTombstones {
+		oldest := m.permissionTombstoneOrder[0]
+		m.permissionTombstoneOrder = m.permissionTombstoneOrder[1:]
+		delete(m.permissionTombstones, oldest)
+	}
+}
+
+// RespondToPermission responds to a pending permission request
+func (m *Manager) RespondToPermission(pendingID string, optionID string, cancelled bool) error {
+	validate := func(pending *PendingPermission) error {
+		if !cancelled && !permissionOffersOption(pending, optionID) {
+			return fmt.Errorf("permission option not offered: %s", optionID)
+		}
+		return nil
+	}
+	_, err := m.consumePermission(pendingID, "", validate, &adapter.PermissionResponse{
+		OptionID:  optionID,
+		Cancelled: cancelled,
+	}, streams.PermissionErrorAlreadyResolved)
+	if err != nil {
+		var opErr *PermissionOperationError
+		if errors.As(err, &opErr) {
+			return fmt.Errorf("pending permission %s: %s", pendingID, opErr.Code)
+		}
+		return err
+	}
 	m.logger.Info("responding to permission request",
 		zap.String("pending_id", pendingID),
 		zap.String("option_id", optionID),
 		zap.Bool("cancelled", cancelled))
+	return nil
+}
 
-	// Send response (non-blocking since channel is buffered)
-	select {
-	case pending.ResponseCh <- &adapter.PermissionResponse{
-		OptionID:  optionID,
-		Cancelled: cancelled,
-	}:
-		return nil
-	default:
-		return fmt.Errorf("response channel full for pending permission: %s", pendingID)
+func permissionOffersOption(pending *PendingPermission, optionID string) bool {
+	if pending == nil || pending.Request == nil {
+		return false
 	}
+	for _, option := range pending.Request.Options {
+		if option.OptionID == optionID {
+			return true
+		}
+	}
+	return false
 }
 
 // CancelPendingPermissions cancels all pending permission requests.
@@ -2540,10 +2982,10 @@ func (m *Manager) CancelPendingPermissions() {
 	for _, p := range pending {
 		m.logger.Info("cancelling pending permission before new prompt",
 			zap.String("pending_id", p.ID))
-		select {
-		case p.ResponseCh <- &adapter.PermissionResponse{Cancelled: true}:
-		default:
-		}
+		// Best-effort: another terminal path may have already consumed this
+		// exact generation between the snapshot above and this call.
+		_, _ = m.consumePermission(p.ID, p.RequestID, nil,
+			&adapter.PermissionResponse{Cancelled: true}, streams.PermissionErrorAlreadyResolved)
 	}
 }
 

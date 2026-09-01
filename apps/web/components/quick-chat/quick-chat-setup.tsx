@@ -10,6 +10,7 @@ import { useAgentProfileOptions } from "@/components/task-create-dialog-options"
 import { WorkspaceRepoChips } from "@/components/task-create-dialog-workspace-repo-chips";
 import { useRepositoriesState } from "@/components/task-create-dialog-repositories-state";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import type { QuickChatRepositoryInput } from "@/lib/api/domains/workspace-api";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
@@ -27,6 +28,30 @@ type QuickChatSetupProps = {
   onCancel: () => void;
   onKindChange: (kind: QuickChatSessionKind) => void;
 };
+
+function useQuickChatAgentSelection(
+  agentProfiles: AgentProfileOption[],
+  defaultAgentId: string,
+  dynamicRoutingEnabled: boolean,
+) {
+  const selectableDefault =
+    defaultAgentId &&
+    agentProfiles.some(
+      (profile) =>
+        profile.id === defaultAgentId && isSelectableAgentProfile(profile, dynamicRoutingEnabled),
+    )
+      ? defaultAgentId
+      : "";
+  const [agentProfileId, setAgentProfileId] = useState(selectableDefault);
+  const hasSelectedEnabledProfile = agentProfiles.some(
+    (profile) =>
+      profile.id === agentProfileId && isSelectableAgentProfile(profile, dynamicRoutingEnabled),
+  );
+  useEffect(() => {
+    if (!hasSelectedEnabledProfile) setAgentProfileId(selectableDefault);
+  }, [hasSelectedEnabledProfile, selectableDefault]);
+  return { agentProfileId, setAgentProfileId, hasSelectedEnabledProfile };
+}
 
 function repositoryAddState(
   t: TFunction,
@@ -76,7 +101,7 @@ function AgentField({
   onChange: (value: string) => void;
 }) {
   const { t } = useTranslation();
-  const options = useAgentProfileOptions(profiles);
+  const options = useAgentProfileOptions(profiles, "quick_chat");
   return (
     <section className="space-y-2" aria-labelledby="quick-chat-agent-label">
       <div>
@@ -211,28 +236,15 @@ export function QuickChatSetup({
   onKindChange,
 }: QuickChatSetupProps) {
   const { t } = useTranslation();
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
   const agentProfiles = useAppStore((state) => state.agentProfiles.items ?? []);
   const defaultAgentId = useAppStore(
     (state) =>
       state.workspaces.items.find((workspace) => workspace.id === workspaceId)
         ?.default_agent_profile_id ?? "",
   );
-  // A workspace default pointing at a disabled profile must not be applied —
-  // the selector would otherwise auto-start a new chat with a profile the
-  // user explicitly took out of rotation.
-  const selectableDefault =
-    defaultAgentId &&
-    agentProfiles.some((p) => p.id === defaultAgentId && isSelectableAgentProfile(p))
-      ? defaultAgentId
-      : "";
-  const [agentProfileId, setAgentProfileId] = useState(selectableDefault);
-  const hasSelectedEnabledProfile = agentProfiles.some(
-    (profile) => profile.id === agentProfileId && isSelectableAgentProfile(profile),
-  );
-  useEffect(() => {
-    if (hasSelectedEnabledProfile) return;
-    setAgentProfileId(selectableDefault);
-  }, [hasSelectedEnabledProfile, selectableDefault]);
+  const { agentProfileId, setAgentProfileId, hasSelectedEnabledProfile } =
+    useQuickChatAgentSelection(agentProfiles, defaultAgentId, dynamicRoutingEnabled);
   const { repositories, isLoading } = useRepositories(workspaceId, true);
   const repoState = useRepositoriesState();
   const isStarting = pendingAgentId !== null;

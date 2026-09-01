@@ -63,6 +63,21 @@ type Agent interface {
 	InstallScript() string
 }
 
+// VirtualAgent marks an agent family that is visible to settings and profile
+// configuration but cannot launch an inference process itself.
+type VirtualAgent interface {
+	Agent
+	IsVirtual() bool
+}
+
+// IsVirtualAgent reports whether an agent is a non-launchable virtual family.
+// Keeping this as an optional capability lets existing concrete agents remain
+// unchanged while callers can fail closed at launch and discovery boundaries.
+func IsVirtualAgent(agent Agent) bool {
+	virtual, ok := agent.(VirtualAgent)
+	return ok && virtual.IsVirtual()
+}
+
 // InferenceAgent is an optional capability marker for agents that support
 // one-shot LLM inference via the host utility manager. The actual model list
 // is populated dynamically from the ACP probe — agents no longer declare a
@@ -200,7 +215,7 @@ type CommandOptions struct {
 	// the native binary (e.g. "copilot --acp") instead of "npx -y <pkg>".
 	PreferNativeBinary bool
 	// ManagedRuntimeVersion is an internal exact version override for trusted
-	// managed npm ACP runtimes. Empty preserves the legacy unversioned command.
+	// managed npm ACP runtimes. Empty uses the built-in exact version pin.
 	ManagedRuntimeVersion string
 }
 
@@ -260,6 +275,11 @@ type RuntimeConfig struct {
 	// final child env after adapter merge; the inference executor strips
 	// them from the one-shot probe/inference subprocess env.
 	StripEnv []string
+	// NamespacesMCPToolsByServer is true for clients that add the MCP server
+	// name to every tool before presenting it to the model. The per-instance
+	// Kandev MCP server removes that presentation suffix before the client adds
+	// it back, so the model sees the canonical tool name.
+	NamespacesMCPToolsByServer bool
 }
 
 // MountTemplate defines a mount with template variables.

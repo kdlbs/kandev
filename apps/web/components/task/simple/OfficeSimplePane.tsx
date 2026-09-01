@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import {
@@ -17,18 +17,11 @@ import { Button } from "@kandev/ui/button";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import {
-  Breadcrumb,
-  BreadcrumbList,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@kandev/ui/breadcrumb";
 import { TaskProperties } from "./task-properties";
 import { ChatActivityTabs } from "./chat-activity-tabs";
 import { ExecutionIndicator } from "@/app/office/components/execution-indicator";
-import { OfficeTopbarPortal } from "@/app/office/components/office-topbar-portal";
+import { useOfficeTopbar } from "@/app/office/components/office-topbar-context";
+import type { ParentCrumb } from "@/components/page-topbar";
 import { TaskDocuments } from "./task-documents";
 import { TaskDetailContextPanel } from "../task-detail-context-panel";
 import { useTaskContext } from "@/hooks/use-task-context";
@@ -40,6 +33,8 @@ import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { NewTaskDialog } from "@/app/office/components/new-task-dialog";
 import { ActiveSessionRefProvider } from "./components/active-session-ref-context";
 import { TopbarWorkingIndicator } from "./components/topbar-working-indicator";
+import { TaskTitleEditable } from "./components/task-title-editable";
+import { TaskDescriptionEditable } from "./components/task-description-editable";
 import { TreeCancelDialog } from "@/components/task/TreeCancelDialog";
 import {
   cancelTaskTree,
@@ -58,6 +53,7 @@ import type {
   TimelineEvent,
 } from "@/app/office/tasks/[id]/types";
 import { toast } from "@/lib/toast/sonner";
+import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 
 const COMMENTABLE_DONE_SESSION_STATES = new Set<TaskSession["state"]>([
   "CREATED",
@@ -77,6 +73,17 @@ type OfficeSimplePaneProps = {
   onToggleAdvanced?: () => void;
   onCommentsChanged?: () => void;
 };
+
+function useChatTaskWithLiveStatusSummary(task: Task): Task {
+  const statusSummary = useTaskStatusSummary(task.id, task.statusSummary);
+  return useMemo(
+    () => ({
+      ...task,
+      statusSummary,
+    }),
+    [statusSummary, task],
+  );
+}
 
 function sessionSortTime(session: TaskSession): number {
   const value = session.updatedAt ?? session.completedAt ?? session.startedAt ?? "";
@@ -98,33 +105,52 @@ function commentsReadOnly(task: Task, sessions: TaskSession[]): boolean {
   return !session || !COMMENTABLE_DONE_SESSION_STATES.has(session.state);
 }
 
-function TaskBreadcrumb({ task }: { task: Task }) {
+/** The task's ancestry as crumb data: the Tasks list, then the parent task when there is one. */
+function taskCrumbParents(task: Task, tasksLabel: string): ParentCrumb[] {
+  const parents: ParentCrumb[] = [{ label: tasksLabel, href: "/office/tasks" }];
+  // Guard on the fields the crumb renders: parentId feeds the href and
+  // parentTitle the label. parentIdentifier alone must not produce a crumb
+  // that links to /office/tasks/undefined.
+  if (task.parentId && task.parentTitle) {
+    parents.push({ label: task.parentTitle, href: `/office/tasks/${task.parentId}` });
+  }
+  return parents;
+}
+
+function useSimplePaneTopbar(task: Task, onToggleAdvanced?: () => void) {
   const { t } = useTranslation();
-  return (
-    <Breadcrumb aria-label={t("common:breadcrumb")}>
-      <BreadcrumbList className="text-sm">
-        <BreadcrumbItem>
-          <BreadcrumbLink asChild>
-            <Link href="/office/tasks">{t("task:tasks")}</Link>
-          </BreadcrumbLink>
-        </BreadcrumbItem>
-        {task.parentIdentifier && (
-          <>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbLink asChild>
-                <Link href={`/office/tasks/${task.parentId}`}>{task.parentTitle}</Link>
-              </BreadcrumbLink>
-            </BreadcrumbItem>
-          </>
+  useOfficeTopbar({
+    title: task.title,
+    parents: taskCrumbParents(task, t("task:tasks")),
+    leftActions: <TopbarWorkingIndicator taskId={task.id} />,
+    actions: (
+      <>
+        <ExecutionIndicator status={task.rawStatus ?? task.status} />
+        {onToggleAdvanced && (
+          <div className="flex items-center gap-2">
+            <Label
+              htmlFor="advanced-toggle"
+              className="text-xs text-muted-foreground cursor-pointer"
+            >
+              {t("task:advanced")}
+            </Label>
+            <Switch
+              id="advanced-toggle"
+              checked={false}
+              onCheckedChange={() => onToggleAdvanced()}
+            />
+          </div>
         )}
-        <BreadcrumbSeparator />
-        <BreadcrumbItem>
-          <BreadcrumbPage>{task.title}</BreadcrumbPage>
-        </BreadcrumbItem>
-      </BreadcrumbList>
-    </Breadcrumb>
-  );
+        <Link
+          href={`/t/${task.id}`}
+          className="text-xs text-muted-foreground underline-offset-2 hover:underline cursor-pointer whitespace-nowrap"
+          data-testid="task-cross-link"
+        >
+          {t("task:openInAdvancedView")}
+        </Link>
+      </>
+    ),
+  });
 }
 
 function TaskHeaderRow({ task, activeHold }: { task: Task; activeHold: TreeHold | null }) {
@@ -465,42 +491,16 @@ export function OfficeSimplePane({
   onToggleAdvanced,
   onCommentsChanged,
 }: OfficeSimplePaneProps) {
-  const { t } = useTranslation();
   const [subIssueOpen, setSubIssueOpen] = useState(false);
   const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
   const { treePreview, activeHold, refreshTreePreview } = useTaskTreePreview(task.id);
+  const chatTask = useChatTaskWithLiveStatusSummary(task);
+
+  useSimplePaneTopbar(task, onToggleAdvanced);
 
   return (
     <ActiveSessionRefProvider>
       <div className="flex h-full">
-        <OfficeTopbarPortal>
-          <TaskBreadcrumb task={task} />
-          <TopbarWorkingIndicator taskId={task.id} />
-          <span className="flex-1" />
-          <ExecutionIndicator status={task.rawStatus ?? task.status} />
-          {onToggleAdvanced && (
-            <div className="flex items-center gap-2">
-              <Label
-                htmlFor="advanced-toggle"
-                className="text-xs text-muted-foreground cursor-pointer"
-              >
-                {t("task:advanced")}
-              </Label>
-              <Switch
-                id="advanced-toggle"
-                checked={false}
-                onCheckedChange={() => onToggleAdvanced()}
-              />
-            </div>
-          )}
-          <Link
-            href={`/t/${task.id}`}
-            className="text-xs text-muted-foreground underline-offset-2 hover:underline cursor-pointer whitespace-nowrap"
-            data-testid="task-cross-link"
-          >
-            {t("task:openInAdvancedView")}
-          </Link>
-        </OfficeTopbarPortal>
         <div ref={setScrollParent} className="flex-1 min-w-0 overflow-y-auto p-6">
           <TaskHeaderRow task={task} activeHold={activeHold} />
           {task.executionPolicy && (
@@ -509,12 +509,12 @@ export function OfficeSimplePane({
               executionState={task.executionState}
             />
           )}
-          <h1 className="text-xl font-semibold mt-4">{task.title}</h1>
-          {task.description && (
-            <div className="prose prose-sm mt-4 max-w-none text-sm whitespace-pre-wrap">
-              {task.description}
-            </div>
-          )}
+          <TaskTitleEditable taskId={task.id} title={task.title} />
+          <TaskDescriptionEditable
+            taskId={task.id}
+            description={task.description}
+            sessions={sessions}
+          />
           <TaskActionRow
             task={task}
             treePreview={treePreview}
@@ -525,7 +525,7 @@ export function OfficeSimplePane({
           <TaskDocuments taskId={task.id} />
           <TaskContextSection taskId={task.id} revisionKey={task.updatedAt} />
           <ChatActivityTabs
-            task={task}
+            task={chatTask}
             comments={comments}
             timeline={timeline}
             activity={activity}

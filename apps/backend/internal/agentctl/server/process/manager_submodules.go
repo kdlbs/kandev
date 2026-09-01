@@ -78,10 +78,12 @@ func (m *Manager) buildWorkspaceTrackerGraph(
 }
 
 func (m *Manager) configureTracker(tracker *WorkspaceTracker, repositoryName string, roots []string) {
+	tracker.SetGitEnvironment(m.trackerGitEnvironment())
 	tracker.SetAllowedSourceRoots(roots)
 	if !tracker.IsSubmodule() {
 		tracker.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), repositoryName))
 	}
+	tracker.SetComparisonTarget(m.comparisonTargetFor(repositoryName))
 }
 
 func (m *Manager) buildRepositoryScopeTrackers(
@@ -122,6 +124,7 @@ func (m *Manager) reconcileWorkspaceTrackerGraph(
 		root = oldRoot
 		rootReused = true
 		syncTrackerConfiguration(root, desiredRoot, roots)
+		m.prepareTrackerComparisonTarget(root)
 		desiredRoot.Stop()
 	}
 	if !rootReused {
@@ -135,6 +138,7 @@ func (m *Manager) reconcileWorkspaceTrackerGraph(
 		identity := repositoryTrackerIdentity(desired.RepositoryName(), desired.workDir)
 		if existing := oldByIdentity[identity]; existing != nil {
 			syncTrackerConfiguration(existing, desired, roots)
+			m.prepareTrackerComparisonTarget(existing)
 			desired.Stop()
 			retained = append(retained, existing)
 			used[existing] = struct{}{}
@@ -217,6 +221,13 @@ func (m *Manager) replaceWorkspaceTrackerGraph(
 
 func syncTrackerConfiguration(target, source *WorkspaceTracker, roots []string) {
 	target.SetAllowedSourceRoots(roots)
+	targetComparison := source.ComparisonTargetSnapshot()
+	sourceComparison := source.ComparisonResolution()
+	if targetComparison != nil && sourceComparison.Status == comparisonTargetStatusReady && sourceComparison.Ref != "" {
+		target.SetComparisonTargetReady(targetComparison, sourceComparison.Ref)
+	} else {
+		target.SetComparisonTarget(targetComparison)
+	}
 	if source.IsSubmodule() {
 		target.SetComparisonAnchor(source.ComparisonAnchor())
 		return

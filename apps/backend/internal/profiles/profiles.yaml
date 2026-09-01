@@ -54,6 +54,13 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Dynamic agent profiles and provider-error routing. Off in every shipped
+  # profile until the complete guarded implementation is ready.
+  KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # High-risk Claude-only background prompt handoff experiment. Off in every
   # profile so it is exercised only by contributors who deliberately opt in.
   KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF:
@@ -65,6 +72,15 @@ features:
   # still generating. Off in every profile; e2e specs that need it set the env
   # var per-spec so the default stays honest.
   KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
+  # High-risk Office per-agent session identity experiment: keys an Office
+  # task's session on the run's own agent instead of the runner seat. Off in
+  # every profile until the companion (task_id, agent_profile_id) unique-index
+  # fix has shipped, since pre-existing duplicate rows would otherwise be exposed.
+  KANDEV_FEATURES_OFFICE_SESSION_IDENTITY:
     prod: "false"
     dev:  "false"
     e2e:  "false"

@@ -53,6 +53,18 @@ func (s *fakeStore) ApplyTransition(_ context.Context, _, _, fromStepID, toStepI
 	return nil
 }
 
+func (s *fakeStore) ApplyTransitionIfAtStep(
+	_ context.Context, _, _, expectedStepID, toStepID string, _ Trigger,
+) (bool, error) {
+	if s.state.CurrentStepID != expectedStepID {
+		return false, nil
+	}
+	s.transitionFrom = expectedStepID
+	s.transitionTo = toStepID
+	s.state.CurrentStepID = toStepID
+	return true, nil
+}
+
 func (s *fakeStore) PersistData(_ context.Context, _ string, data map[string]any) error {
 	s.persistedData = data
 	return nil
@@ -131,6 +143,48 @@ func TestHandleTrigger_SetSessionMode_InvokesCallback(t *testing.T) {
 	}
 	if got.SetSessionMode == nil || got.SetSessionMode.Mode != "acceptEdits" {
 		t.Fatalf("expected dispatched mode acceptEdits, got %+v", got.SetSessionMode)
+	}
+}
+
+// TestHandleTriggerSessionShapedOnly_ExecutesSessionShapedRunsSessionIndependent
+// covers the workflow-switch route's use of HandleTriggerSessionShapedOnly:
+// it must still execute the session-shaped kinds (auto_start_agent here) —
+// that is this route's actual production path for them — while skipping the
+// session-independent kinds DispatchStepEntry now owns exclusively.
+func TestHandleTriggerSessionShapedOnly_ExecutesSessionShapedRunsSessionIndependent(t *testing.T) {
+	compiled := CompileStep(&wfmodels.WorkflowStep{
+		ID: "step-1", WorkflowID: "wf1",
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{
+				{Type: wfmodels.OnEnterAutoStartAgent},
+				{Type: wfmodels.OnEnterClearDecisions},
+			},
+		},
+	})
+	store := &fakeStore{
+		state:     MachineState{TaskID: "t1", SessionID: "s1", WorkflowID: "wf1", CurrentStepID: "step-1"},
+		stepsByID: map[string]StepSpec{"step-1": compiled},
+		applied:   map[string]bool{},
+	}
+
+	shaped := &recordingCallback{}
+	independent := &recordingCallback{}
+	eng := New(store, MapRegistry{
+		ActionAutoStartAgent: shaped,
+		ActionClearDecisions: independent,
+	})
+
+	if _, err := eng.HandleTriggerSessionShapedOnly(context.Background(), HandleInput{
+		TaskID: "t1", SessionID: "s1", Trigger: TriggerOnEnter,
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(shaped.calls) != 1 {
+		t.Fatalf("expected auto_start_agent (session-shaped) to fire once, got %d", len(shaped.calls))
+	}
+	if len(independent.calls) != 0 {
+		t.Fatalf("expected clear_decisions (session-independent) not to fire, got %d calls", len(independent.calls))
 	}
 }
 

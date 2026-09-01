@@ -1421,7 +1421,11 @@ export const i18nGuardFiles = [
   "components/github/pr-shared.tsx",
   "components/github/pr-status-chip.tsx",
   "components/github/pr-topbar-button.tsx",
+  "components/gitlab/mr-auto-fix-prompt-dialog.tsx",
+  "components/gitlab/mr-automation-controls.tsx",
+  "components/gitlab/mr-automation-rows.tsx",
   "components/gitlab/mr-commits-section.tsx",
+  "components/gitlab/mr-task-status-summary.tsx",
   "components/gitlab/mr-detail-panel.tsx",
   "components/gitlab/mr-discussions-section.tsx",
   "components/gitlab/mr-files-section.tsx",
@@ -1584,6 +1588,9 @@ export const i18nGuardFiles = [
   "components/kanban-board.tsx",
   "components/kanban-card-content.tsx",
   "components/kanban-card-menu-items.tsx",
+  // Extracted out of kanban-card-content.tsx, which is guarded: without its own
+  // entry the card title markup would silently leave whole-file guard coverage.
+  "components/kanban-card-title.tsx",
   "components/kanban-column.tsx",
   "components/kanban-display-dropdown.tsx",
   "components/kanban-with-preview.tsx",
@@ -1655,9 +1662,8 @@ export const i18nGuardFiles = [
   //
   // Deliberately left in English inside these trees, because they are data or
   // protocol rather than copy: sidebar-filter *values* (`state`, `in_progress`,
-  // …) and sort/group keys, which are persisted in a saved view; the `"main"`
-  // default base-branch name in `session-mobile-top-bar-git-controls.tsx`; the
-  // share API's `applied_rules` redaction ids and share URLs/tokens; terminal
+  // …) and sort/group keys, which are persisted in a saved view; the share
+  // API's `applied_rules` redaction ids and share URLs/tokens; terminal
   // key sequences and key-cap glyphs in `mobile-terminal-keybar-helpers.tsx`
   // (only their spoken aria-labels are translated); and the `group:` bucket on
   // the command-palette entry in `sidebar-filter-bar.tsx`, which is shared

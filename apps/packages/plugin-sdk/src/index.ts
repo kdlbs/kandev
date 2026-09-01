@@ -304,6 +304,20 @@ export interface TaskFilterRegistration {
   matches(context: { taskId: string }, selected: string[]): boolean;
 }
 
+export interface TaskListFacetValue {
+  value: string;
+  label: string;
+  color?: string;
+}
+
+/** A synchronous, page-local facet contribution for the host task list. */
+export interface TaskListFacetRegistration {
+  id: string;
+  label: string;
+  getValues(context: { taskId: string; workspaceId?: string }): readonly TaskListFacetValue[];
+  subscribe?(listener: () => void): () => void;
+}
+
 export type PluginStorageScope = "instance" | "workspace" | "task" | "session" | "repository";
 
 export interface PluginStorageEntry {
@@ -692,6 +706,7 @@ export interface PluginRegistry {
   registerTaskPanel(registration: TaskPanelRegistration): void;
   registerTaskMenuAction(registration: TaskMenuActionRegistration): void;
   registerTaskFilter(registration: TaskFilterRegistration): void;
+  registerTaskListFacet(registration: TaskListFacetRegistration): void;
 }
 
 export type PluginHost = PluginHostApi;

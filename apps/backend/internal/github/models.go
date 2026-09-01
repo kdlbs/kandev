@@ -246,40 +246,79 @@ const TaskCIAutoFixMaxRounds = 10
 
 // PR represents a GitHub Pull Request.
 type PR struct {
-	ID                  int64               `json:"id"`
-	NodeID              string              `json:"node_id"`
-	Number              int                 `json:"number"`
-	Title               string              `json:"title"`
-	URL                 string              `json:"url"`
-	HTMLURL             string              `json:"html_url"`
-	State               string              `json:"state"` // open, closed, merged
-	HeadBranch          string              `json:"head_branch"`
-	HeadSHA             string              `json:"head_sha"`
-	BaseBranch          string              `json:"base_branch"`
-	AuthorLogin         string              `json:"author_login"`
-	RepoOwner           string              `json:"repo_owner"`
-	RepoName            string              `json:"repo_name"`
-	HeadRepoID          int64               `json:"head_repo_id,omitempty"`
-	HeadRepoNodeID      string              `json:"head_repo_node_id,omitempty"`
-	HeadRepoOwner       string              `json:"head_repo_owner,omitempty"`
-	HeadRepoName        string              `json:"head_repo_name,omitempty"`
-	HeadRepoCloneURL    string              `json:"head_repo_clone_url,omitempty"`
-	BaseRepoID          int64               `json:"base_repo_id,omitempty"`
-	BaseRepoOwner       string              `json:"base_repo_owner,omitempty"`
-	BaseRepoName        string              `json:"base_repo_name,omitempty"`
-	BaseDefaultBranch   string              `json:"base_default_branch,omitempty"`
-	MaintainerCanModify bool                `json:"maintainer_can_modify"`
-	Body                string              `json:"body"`
-	Draft               bool                `json:"draft"`
-	Mergeable           bool                `json:"mergeable"`
-	MergeableState      string              `json:"mergeable_state"` // clean, blocked, behind, dirty, has_hooks, unstable, draft, unknown, ""
-	Additions           int                 `json:"additions"`
-	Deletions           int                 `json:"deletions"`
-	RequestedReviewers  []RequestedReviewer `json:"requested_reviewers"`
-	CreatedAt           time.Time           `json:"created_at"`
-	UpdatedAt           time.Time           `json:"updated_at"`
-	MergedAt            *time.Time          `json:"merged_at,omitempty"`
-	ClosedAt            *time.Time          `json:"closed_at,omitempty"`
+	ID                  int64  `json:"id"`
+	NodeID              string `json:"node_id"`
+	Number              int    `json:"number"`
+	Title               string `json:"title"`
+	URL                 string `json:"url"`
+	HTMLURL             string `json:"html_url"`
+	State               string `json:"state"` // open, closed, merged
+	HeadBranch          string `json:"head_branch"`
+	HeadSHA             string `json:"head_sha"`
+	BaseBranch          string `json:"base_branch"`
+	AuthorLogin         string `json:"author_login"`
+	RepoOwner           string `json:"repo_owner"`
+	RepoName            string `json:"repo_name"`
+	HeadRepoID          int64  `json:"head_repo_id,omitempty"`
+	HeadRepoNodeID      string `json:"head_repo_node_id,omitempty"`
+	HeadRepoOwner       string `json:"head_repo_owner,omitempty"`
+	HeadRepoName        string `json:"head_repo_name,omitempty"`
+	HeadRepoCloneURL    string `json:"head_repo_clone_url,omitempty"`
+	BaseRepoID          int64  `json:"base_repo_id,omitempty"`
+	BaseRepoOwner       string `json:"base_repo_owner,omitempty"`
+	BaseRepoName        string `json:"base_repo_name,omitempty"`
+	BaseDefaultBranch   string `json:"base_default_branch,omitempty"`
+	MaintainerCanModify bool   `json:"maintainer_can_modify"`
+	Body                string `json:"body"`
+	Draft               bool   `json:"draft"`
+	Mergeable           bool   `json:"mergeable"`
+	MergeableState      string `json:"mergeable_state"` // clean, blocked, behind, dirty, has_hooks, unstable, draft, unknown, ""
+	// The mock provider uses these optional fields to reproduce GraphQL merge
+	// queue observations through its REST-shaped status path. Production REST
+	// payloads leave them empty; GraphQL remains the authoritative queue source.
+	MergeQueueState                       string              `json:"merge_queue_state,omitempty"`
+	MergeQueuePosition                    *int                `json:"merge_queue_position,omitempty"`
+	MergeQueueEntryID                     string              `json:"merge_queue_entry_id,omitempty"`
+	MergeQueueEntryHeadSHA                string              `json:"merge_queue_entry_head_sha,omitempty"`
+	MergeQueueEstimatedTimeToMergeSeconds *int                `json:"merge_queue_estimated_time_to_merge_seconds,omitempty"`
+	MergeQueueLastRemovalID               string              `json:"merge_queue_last_removal_id,omitempty"`
+	MergeQueueLastRemovedAt               *time.Time          `json:"merge_queue_last_removed_at,omitempty"`
+	MergeQueueLastRemovalReason           string              `json:"merge_queue_last_removal_reason,omitempty"`
+	MergeQueueLastRemovalBeforeSHA        string              `json:"merge_queue_last_removal_before_sha,omitempty"`
+	Additions                             int                 `json:"additions"`
+	Deletions                             int                 `json:"deletions"`
+	RequestedReviewers                    []RequestedReviewer `json:"requested_reviewers"`
+	CreatedAt                             time.Time           `json:"created_at"`
+	UpdatedAt                             time.Time           `json:"updated_at"`
+	MergedAt                              *time.Time          `json:"merged_at,omitempty"`
+	ClosedAt                              *time.Time          `json:"closed_at,omitempty"`
+	// ChangedFiles is the number of files touched by the PR. 0 is a real
+	// observation, distinct from "never observed" — see ChangedFilesObserved,
+	// which is what actually carries that distinction (AC-12a).
+	ChangedFiles int `json:"changed_files,omitempty"`
+	// MergedByLogin is "" when the PR was never merged, or upstream reported
+	// no merger. Callers that persist this must write NULL for "", never "".
+	MergedByLogin string `json:"merged_by_login,omitempty"`
+	// AutoMergeEnabled reports whether upstream observed auto-merge armed at
+	// fetch time. GitHub clears auto_merge once it fires, so this can only
+	// ever mean "armed at this instant" — never "merged by auto-merge".
+	AutoMergeEnabled bool `json:"auto_merge_enabled,omitempty"`
+	// IsDraftObserved reports whether Draft was decoded from an explicit,
+	// non-null upstream isDraft/draft value, as opposed to json.Unmarshal
+	// defaulting an absent or null field to false. Internal bookkeeping only
+	// (json:"-"): AC-12a requires resolveTaskPROutcomeFields to write NULL
+	// for is_draft when this is false, rather than persisting a fabricated
+	// "false".
+	IsDraftObserved bool `json:"-"`
+	// ChangedFilesObserved mirrors IsDraftObserved for ChangedFiles. It is
+	// what actually distinguishes a genuine "0 files changed" observation
+	// from "changedFiles was absent or null" (AC-12a) — ChangedFiles alone
+	// cannot, since both cases decode to the Go zero value.
+	ChangedFilesObserved bool `json:"-"`
+	// These flags are only used by the in-memory E2E provider to distinguish an
+	// observed empty queue entry/event from a REST payload with no queue data.
+	mergeQueuePopulated         bool `json:"-"`
+	mergeQueueRecoveryPopulated bool `json:"-"`
 }
 
 // RequestedReviewer represents a pending reviewer request on a PR.
@@ -301,6 +340,7 @@ type PRReview struct {
 // PRComment represents a review comment on specific code.
 type PRComment struct {
 	ID           int64     `json:"id"`
+	HTMLURL      string    `json:"html_url,omitempty"`
 	Author       string    `json:"author"`
 	AuthorAvatar string    `json:"author_avatar"`
 	AuthorIsBot  bool      `json:"author_is_bot"`
@@ -338,15 +378,25 @@ type PRFeedback struct {
 // PRStatus contains lightweight PR state used by the background poller.
 // Unlike PRFeedback, it skips comments to reduce API calls.
 type PRStatus struct {
-	PR                 *PR    `json:"pr"`
-	ReviewState        string `json:"review_state"`    // "approved", "changes_requested", "pending", ""
-	ChecksState        string `json:"checks_state"`    // "success", "failure", "pending", ""
-	MergeableState     string `json:"mergeable_state"` // "clean", "blocked", "behind", "dirty", "has_hooks", "unstable", "draft", "unknown", ""
-	ReviewCount        int    `json:"review_count"`
-	PendingReviewCount int    `json:"pending_review_count"`
-	RequiredReviews    *int   `json:"required_reviews,omitempty"` // nil when no branch protection rule found
-	ChecksTotal        int    `json:"checks_total"`
-	ChecksPassing      int    `json:"checks_passing"`
+	PR                     *PR    `json:"pr"`
+	ReviewState            string `json:"review_state"`    // "approved", "changes_requested", "pending", ""
+	ChecksState            string `json:"checks_state"`    // "success", "failure", "pending", ""
+	MergeableState         string `json:"mergeable_state"` // "clean", "blocked", "behind", "dirty", "has_hooks", "unstable", "draft", "unknown", ""
+	MergeQueueState        string `json:"merge_queue_state"`
+	MergeQueuePosition     *int   `json:"merge_queue_position,omitempty"`
+	MergeQueueEntryID      string `json:"merge_queue_entry_id,omitempty"`
+	MergeQueueEntryHeadSHA string `json:"merge_queue_entry_head_sha,omitempty"`
+	// A nil estimate is an observed absence when mergeQueuePopulated is true.
+	MergeQueueEstimatedTimeToMergeSeconds *int       `json:"merge_queue_estimated_time_to_merge_seconds,omitempty"`
+	MergeQueueLastRemovalID               string     `json:"merge_queue_last_removal_id,omitempty"`
+	MergeQueueLastRemovedAt               *time.Time `json:"merge_queue_last_removed_at,omitempty"`
+	MergeQueueLastRemovalReason           string     `json:"merge_queue_last_removal_reason,omitempty"`
+	MergeQueueLastRemovalBeforeSHA        string     `json:"merge_queue_last_removal_before_sha,omitempty"`
+	ReviewCount                           int        `json:"review_count"`
+	PendingReviewCount                    int        `json:"pending_review_count"`
+	RequiredReviews                       *int       `json:"required_reviews,omitempty"` // nil when no branch protection rule found
+	ChecksTotal                           int        `json:"checks_total"`
+	ChecksPassing                         int        `json:"checks_passing"`
 	// ChecksPopulated reports whether the sync path actually computed
 	// ChecksTotal / ChecksPassing. The batched GraphQL poller doesn't (it
 	// only carries the rollup state), so SyncTaskPR uses this flag to
@@ -367,6 +417,25 @@ type PRStatus struct {
 	// the REST value back to 0 (the popover's "Approved (1)" turning
 	// into "Approved (0)" until a new REST call landed).
 	ReviewCountsPopulated bool `json:"review_counts_populated,omitempty"`
+	// OutcomeFieldsPopulated mirrors ChecksPopulated for is_draft,
+	// changed_files, and merged_by_login: set only by sync paths that fetched
+	// a full single pull request or a batched GraphQL result, so a zero/empty
+	// value is a real observation rather than "I didn't look."
+	OutcomeFieldsPopulated bool `json:"outcome_fields_populated,omitempty"`
+	// ClosedByLogin is the closed-event actor's login, populated only by the
+	// GraphQL path (closed_by is absent from the REST pulls endpoint and the
+	// gh CLI's PR field set).
+	ClosedByLogin string `json:"closed_by_login,omitempty"`
+	// ClosureAttributionPopulated is set only when a GraphQL sync observed a
+	// closed-event actor with a non-empty login. REST and gh CLI single-PR
+	// syncs can never set this — they have no closing-actor field to read.
+	ClosureAttributionPopulated bool `json:"closure_attribution_populated,omitempty"`
+	// mergeQueuePopulated distinguishes a GraphQL observation (including a
+	// null mergeQueueEntry) from REST and gh CLI reads that have no queue data.
+	mergeQueuePopulated bool
+	// mergeQueueRecoveryPopulated distinguishes a GraphQL observation of the
+	// latest removal event (including no event) from REST and gh CLI reads.
+	mergeQueueRecoveryPopulated bool
 }
 
 // PRSearchPage is a paginated slice of PR search results, with the total
@@ -407,28 +476,49 @@ type PRWatch struct {
 	UpdatedAt       time.Time  `json:"updated_at" db:"updated_at"`
 }
 
+// TaskPR "source" values, recording which write path created the
+// association. Empty ("") is the default for rows written before this
+// column existed and is never backfilled.
+const (
+	// TaskPRSourceWatch is a PR observed via push detection or discovered by
+	// a PR watch (branch-based association).
+	TaskPRSourceWatch = "watch"
+	// TaskPRSourceURLLink is a PR the user explicitly linked by URL.
+	TaskPRSourceURLLink = "url_link"
+)
+
 // TaskPR associates a PR with a task. RepositoryID identifies which task
 // repository this PR belongs to (multi-repo tasks can have one PR per repo).
 // Empty for legacy rows persisted before multi-repo support.
 type TaskPR struct {
-	ID                 string `json:"id" db:"id"`
-	WorkspaceID        string `json:"workspace_id" db:"workspace_id"`
-	TaskID             string `json:"task_id" db:"task_id"`
-	RepositoryID       string `json:"repository_id,omitempty" db:"repository_id"`
-	Owner              string `json:"owner" db:"owner"`
-	Repo               string `json:"repo" db:"repo"`
-	PRNumber           int    `json:"pr_number" db:"pr_number"`
-	PRURL              string `json:"pr_url" db:"pr_url"`
-	PRTitle            string `json:"pr_title" db:"pr_title"`
-	HeadBranch         string `json:"head_branch" db:"head_branch"`
-	BaseBranch         string `json:"base_branch" db:"base_branch"`
-	AuthorLogin        string `json:"author_login" db:"author_login"`
-	State              string `json:"state" db:"state"`                     // open, closed, merged
-	ReviewState        string `json:"review_state" db:"review_state"`       // approved, changes_requested, pending, ""
-	ChecksState        string `json:"checks_state" db:"checks_state"`       // success, failure, pending, ""
-	MergeableState     string `json:"mergeable_state" db:"mergeable_state"` // clean, blocked, behind, dirty, has_hooks, unstable, draft, unknown, ""
-	ReviewCount        int    `json:"review_count" db:"review_count"`
-	PendingReviewCount int    `json:"pending_review_count" db:"pending_review_count"`
+	ID                                    string     `json:"id" db:"id"`
+	WorkspaceID                           string     `json:"workspace_id" db:"workspace_id"`
+	TaskID                                string     `json:"task_id" db:"task_id"`
+	RepositoryID                          string     `json:"repository_id,omitempty" db:"repository_id"`
+	Owner                                 string     `json:"owner" db:"owner"`
+	Repo                                  string     `json:"repo" db:"repo"`
+	PRNumber                              int        `json:"pr_number" db:"pr_number"`
+	PRURL                                 string     `json:"pr_url" db:"pr_url"`
+	PRTitle                               string     `json:"pr_title" db:"pr_title"`
+	HeadBranch                            string     `json:"head_branch" db:"head_branch"`
+	BaseBranch                            string     `json:"base_branch" db:"base_branch"`
+	AuthorLogin                           string     `json:"author_login" db:"author_login"`
+	State                                 string     `json:"state" db:"state"`                     // open, closed, merged
+	ReviewState                           string     `json:"review_state" db:"review_state"`       // approved, changes_requested, pending, ""
+	ChecksState                           string     `json:"checks_state" db:"checks_state"`       // success, failure, pending, ""
+	MergeableState                        string     `json:"mergeable_state" db:"mergeable_state"` // clean, blocked, behind, dirty, has_hooks, unstable, draft, unknown, ""
+	HeadSHA                               string     `json:"head_sha" db:"head_sha"`
+	MergeQueueState                       string     `json:"merge_queue_state" db:"merge_queue_state"`
+	MergeQueuePosition                    *int       `json:"merge_queue_position" db:"merge_queue_position"`
+	MergeQueueEntryID                     string     `json:"merge_queue_entry_id" db:"merge_queue_entry_id"`
+	MergeQueueEntryHeadSHA                string     `json:"merge_queue_entry_head_sha" db:"merge_queue_entry_head_sha"`
+	MergeQueueEstimatedTimeToMergeSeconds *int       `json:"merge_queue_estimated_time_to_merge_seconds" db:"merge_queue_estimated_time_to_merge_seconds"`
+	MergeQueueLastRemovalID               string     `json:"merge_queue_last_removal_id" db:"merge_queue_last_removal_id"`
+	MergeQueueLastRemovedAt               *time.Time `json:"merge_queue_last_removed_at,omitempty" db:"merge_queue_last_removed_at"`
+	MergeQueueLastRemovalReason           string     `json:"merge_queue_last_removal_reason" db:"merge_queue_last_removal_reason"`
+	MergeQueueLastRemovalBeforeSHA        string     `json:"merge_queue_last_removal_before_sha" db:"merge_queue_last_removal_before_sha"`
+	ReviewCount                           int        `json:"review_count" db:"review_count"`
+	PendingReviewCount                    int        `json:"pending_review_count" db:"pending_review_count"`
 	// RequiredReviews is the branch protection's required_approving_review_count.
 	// Nil when no protection rule exists or the token lacks scope to read it.
 	RequiredReviews         *int       `json:"required_reviews,omitempty" db:"required_reviews"`
@@ -444,7 +534,69 @@ type TaskPR struct {
 	LastSyncedAt            *time.Time `json:"last_synced_at,omitempty" db:"last_synced_at"`
 	DetachedAt              *time.Time `json:"-" db:"detached_at"`
 	UpdatedAt               time.Time  `json:"updated_at" db:"updated_at"`
+
+	// Source records which write path created this association: see
+	// TaskPRSourceWatch / TaskPRSourceURLLink. Empty on rows written before
+	// this column existed; never backfilled.
+	Source string `json:"source" db:"source"`
+
+	// --- PR outcome attribution (five nullable columns, never backfilled) ---
+	//
+	// Every field below is NULL on any row that predates this feature's
+	// activation instant (kandev_meta key taskPROutcomeActivatedAtMetaKey)
+	// and stays NULL until a post-activation observation writes it. None has a
+	// non-NULL default, and none is ever
+	// inferred, backfilled, or defaulted to a zero value. No `omitempty` on
+	// any of these json tags: AC-30 requires the keys to always be present,
+	// because `null` vs. absent is exactly the distinction this feature
+	// exists to preserve.
+	//
+	// Writer-health invariants (auditable, not a dashboard):
+	//   - AC-36: for any row where merged_at >= activation, MergedByLogin
+	//     must be non-NULL. merged_at is only ever written by the sync
+	//     writer, so a row that merged after activation was necessarily
+	//     observed by a post-activation writer; a NULL there is a writer
+	//     fault, not a data gap.
+	//   - AC-37: for any row where last_synced_at >= activation, IsDraft
+	//     must be non-NULL whenever the row's most recent sync was a
+	//     populating one. IsDraft is supplied by every populating sync path,
+	//     so it is the primary canary for "the writer stopped."
+	//   - AC-39: neither invariant applies to rows whose merged_at /
+	//     closed_at predates the activation instant — those rows are
+	//     legitimately and permanently NULL.
+
+	// IsDraft is never observed by a populating sync when NULL.
+	IsDraft *bool `json:"is_draft" db:"is_draft"`
+	// ChangedFiles is never observed when NULL, distinct from 0 (a real
+	// "no files changed" observation).
+	ChangedFiles *int `json:"changed_files" db:"changed_files"`
+	// MergedByLogin is NULL when the PR was never merged, or merged but
+	// never observed by a populating sync.
+	MergedByLogin *string `json:"merged_by_login" db:"merged_by_login"`
+	// ClosedByLogin is NULL when the PR was never closed, or closure was
+	// never observed by the GraphQL path specifically. GitHub's closed_by
+	// is absent from the REST pulls endpoint and from the gh CLI's PR field
+	// set (only the issues endpoint carries it), so this column is sourced
+	// from a GraphQL closed-event actor selection only. A PR whose only
+	// post-closure sync came through REST or gh CLI keeps this NULL
+	// permanently, because terminal rows are excluded from the orphan sweep
+	// (service_pr_unwatched.go). This gap is accepted (AC-15) and must be
+	// stated wherever this column is consumed.
+	ClosedByLogin *string `json:"closed_by_login" db:"closed_by_login"`
+	// AutoMergeObservedAt is a latched observation, never a merge cause.
+	// GitHub clears `auto_merge` once it fires, so a poller can only ever
+	// learn "auto-merge was armed at some instant while we were looking."
+	// It is set once (the first time armed auto-merge is observed) and is
+	// never cleared or overwritten afterwards, including when a later sync
+	// observes auto-merge disarmed or absent. It must not be read, named,
+	// or charted as "merged by auto-merge."
+	AutoMergeObservedAt *time.Time `json:"auto_merge_observed_at" db:"auto_merge_observed_at"`
 }
+
+// GetWorkspaceID lets workspace-scoped notification handlers route the typed
+// in-process task PR event to the owning workspace instead of broadcasting it
+// as an unattributed instance-wide update.
+func (p TaskPR) GetWorkspaceID() string { return p.WorkspaceID }
 
 // TaskCIOptions stores task-level PR automation preferences.
 //
@@ -595,6 +747,11 @@ type TaskCIPRAutomationState struct {
 	AutoFixExhaustedAt       *time.Time `json:"auto_fix_exhausted_at" db:"auto_fix_exhausted_at"`
 	LastMergeSignature       string     `json:"last_merge_signature" db:"last_merge_signature"`
 	LastMergeAttemptAt       *time.Time `json:"last_merge_attempt_at,omitempty" db:"last_merge_attempt_at"`
+	LastMergeResult          string     `json:"last_merge_result" db:"last_merge_result"`
+	MergeRetryPending        bool       `json:"-" db:"merge_retry_pending"`
+	LastQueueAttemptHeadSHA  string     `json:"last_queue_attempt_head_sha" db:"last_queue_attempt_head_sha"`
+	LastQueueFixEventID      string     `json:"last_queue_fix_event_id" db:"last_queue_fix_event_id"`
+	LastQueueRemovalCause    string     `json:"last_queue_removal_cause" db:"last_queue_removal_cause"`
 	ReviewRequestInitialized bool       `json:"review_request_initialized" db:"review_request_initialized"`
 	LastReviewRequested      bool       `json:"last_review_requested" db:"last_review_requested"`
 	LastObservedPRState      string     `json:"last_observed_pr_state" db:"last_observed_pr_state"`
@@ -602,29 +759,55 @@ type TaskCIPRAutomationState struct {
 	LastLifecyclePromptAt    *time.Time `json:"last_lifecycle_prompt_at,omitempty" db:"last_lifecycle_prompt_at"`
 	LastLifecycleSessionID   *string    `json:"last_lifecycle_session_id,omitempty" db:"last_lifecycle_session_id"`
 	LastError                *string    `json:"last_error,omitempty" db:"last_error"`
+	LastErrorKind            string     `json:"last_error_kind" db:"last_error_kind"`
 	CreatedAt                time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt                time.Time  `json:"updated_at" db:"updated_at"`
 }
 
+const (
+	TaskCIMergeResultInFlight = "in_flight"
+	TaskCIMergeResultFailed   = "failed"
+	TaskCIMergeResultAccepted = "accepted"
+	TaskCIErrorKindAutoMerge  = "auto_merge"
+	TaskCIErrorKindAutoFix    = "auto_fix"
+)
+
 // TaskCIFixAttempt records an auto-fix prompt attempt for a task PR.
 type TaskCIFixAttempt struct {
-	TaskID         string
-	RepositoryID   string
-	PRNumber       int
-	Signature      string
-	CheckpointJSON string
-	SessionID      string
-	EnqueuedAt     time.Time
-	IncrementRound bool
+	TaskID              string
+	RepositoryID        string
+	PRNumber            int
+	Signature           string
+	CheckpointJSON      string
+	SessionID           string
+	EnqueuedAt          time.Time
+	IncrementRound      bool
+	QueueRemovalEventID string
+	QueueRemovalCause   string
 }
 
 // TaskCIMergeAttempt records an auto-merge attempt for a task PR.
 type TaskCIMergeAttempt struct {
-	TaskID       string
-	RepositoryID string
-	PRNumber     int
-	Signature    string
-	AttemptedAt  time.Time
+	TaskID           string
+	RepositoryID     string
+	PRNumber         int
+	Signature        string
+	AttemptedAt      time.Time
+	AttemptedHeadSHA string
+}
+
+// TaskCIMergeQueueObservation records queue membership and removal evidence
+// observed by the PR status poller so automation survives process restarts.
+type TaskCIMergeQueueObservation struct {
+	TaskID                 string
+	RepositoryID           string
+	PRNumber               int
+	ActiveQueueHeadSHA     string
+	MergeSignature         string
+	RemovalEventID         string
+	RemovalCause           string
+	RemovalObservedHeadSHA string
+	Accepted               bool
 }
 
 // TaskPRLifecyclePrompt records an accepted lifecycle prompt checkpoint.

@@ -582,13 +582,15 @@ func TestSyncAgentFromDiscovery_UnknownAgentSkipped(t *testing.T) {
 // TestDetectAgents_E2EMockBypassesFilesystem verifies that when
 // KANDEV_E2E_MOCK=true, detectAgents returns results synthesised from the
 // registry without calling c.discovery.Detect (which would panic here
-// because c.discovery is nil). Every enabled agent must appear as Available.
+// because c.discovery is nil). Every enabled inference agent must appear as
+// Available, while virtual families remain outside host discovery.
 func TestDetectAgents_E2EMockBypassesFilesystem(t *testing.T) {
 	t.Setenv("KANDEV_E2E_MOCK", "true")
 
 	ctrl := newTestController(map[string]agents.Agent{
-		"mock-agent": &testAgent{id: "mock-agent", name: "mock-agent", enabled: true},
-		"other-mock": &testAgent{id: "other-mock", name: "other-mock", enabled: true},
+		"mock-agent":          &testAgent{id: "mock-agent", name: "mock-agent", enabled: true},
+		"other-mock":          &testAgent{id: "other-mock", name: "other-mock", enabled: true},
+		agents.DynamicAgentID: agents.NewDynamicAgent(),
 	})
 
 	// c.discovery is nil — if detectAgents called it the test would panic.
@@ -597,9 +599,12 @@ func TestDetectAgents_E2EMockBypassesFilesystem(t *testing.T) {
 		t.Fatalf("detectAgents() error = %v", err)
 	}
 	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
+		t.Fatalf("expected 2 inference results, got %d", len(results))
 	}
 	for _, r := range results {
+		if r.Name == agents.DynamicAgentID {
+			t.Fatal("virtual Dynamic family must not appear in host discovery")
+		}
 		if !r.Available {
 			t.Errorf("agent %q: Available = false, want true in E2E mock mode", r.Name)
 		}
@@ -676,7 +681,8 @@ func TestController_PreviewAgentCommand_CopilotKeepsManagedPackage(t *testing.T)
 	if err != nil {
 		t.Fatalf("PreviewAgentCommand() error = %v", err)
 	}
-	want := []string{"npx", "--yes", "--prefer-offline", "@github/copilot", "--acp"}
+	managed := agents.NewCopilotACP()
+	want := []string{"npx", "--yes", "--prefer-offline", managed.ManagedNPMRuntime().PackageSpec(""), "--acp"}
 	if got := res.Command; !slices.Equal(got, want) {
 		t.Errorf("preview with copilot on PATH = %v, want %v", got, want)
 	}

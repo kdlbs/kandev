@@ -51,6 +51,12 @@ func createTestPlanService(t *testing.T) (*PlanService, *MockEventBus, *sqlitere
 	return svc, eventBus, repo
 }
 
+func TestResolveCoalesceWindowUsesTypedStartupValue(t *testing.T) {
+	if got := resolveCoalesceWindow(2400 * time.Millisecond); got != 2400*time.Millisecond {
+		t.Fatalf("coalesce window = %s, want 2.4s", got)
+	}
+}
+
 type nilMarkPlanRepo struct {
 	*sqliterepo.Repository
 }
@@ -64,7 +70,7 @@ func TestPlanService_CreatePlan(t *testing.T) {
 	ctx := context.Background()
 	seedTask(t, ctx, repo, "task-1")
 
-	plan, err := svc.CreatePlan(ctx, CreatePlanRequest{
+	result, err := svc.CreatePlan(ctx, CreatePlanRequest{
 		TaskID:  "task-1",
 		Title:   "My Plan",
 		Content: "Plan content",
@@ -72,6 +78,7 @@ func TestPlanService_CreatePlan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
+	plan := result.Plan
 	if plan.TaskID != "task-1" {
 		t.Errorf("expected task_id=task-1, got %s", plan.TaskID)
 	}
@@ -92,7 +99,7 @@ func TestPlanService_CreatePlanUpsert(t *testing.T) {
 	seedTask(t, ctx, repo, "task-1")
 
 	// First create
-	plan1, err := svc.CreatePlan(ctx, CreatePlanRequest{
+	result1, err := svc.CreatePlan(ctx, CreatePlanRequest{
 		TaskID:  "task-1",
 		Title:   "Original",
 		Content: "v1",
@@ -102,7 +109,7 @@ func TestPlanService_CreatePlanUpsert(t *testing.T) {
 	}
 
 	// Second create with same task_id should upsert, not error
-	plan2, err := svc.CreatePlan(ctx, CreatePlanRequest{
+	result2, err := svc.CreatePlan(ctx, CreatePlanRequest{
 		TaskID:  "task-1",
 		Title:   "Updated",
 		Content: "v2",
@@ -110,6 +117,7 @@ func TestPlanService_CreatePlanUpsert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second CreatePlan (upsert) failed: %v", err)
 	}
+	plan1, plan2 := result1.Plan, result2.Plan
 
 	if plan2.ID != plan1.ID {
 		t.Errorf("upsert should preserve plan ID: got %s, want %s", plan2.ID, plan1.ID)
@@ -164,10 +172,11 @@ func TestPlanService_UpdatePlan(t *testing.T) {
 
 	_, _ = svc.CreatePlan(ctx, CreatePlanRequest{TaskID: "task-1", Title: "T1", Content: "c1"})
 
-	updated, err := svc.UpdatePlan(ctx, UpdatePlanRequest{TaskID: "task-1", Content: "c2"})
+	updateResult, err := svc.UpdatePlan(ctx, UpdatePlanRequest{TaskID: "task-1", Content: "c2"})
 	if err != nil {
 		t.Fatalf("UpdatePlan failed: %v", err)
 	}
+	updated := updateResult.Plan
 	if updated.Content != "c2" {
 		t.Errorf("expected content=c2, got %s", updated.Content)
 	}
@@ -231,7 +240,7 @@ func TestPlanService_MarkImplementationStartedIsDurableAndIdempotent(t *testing.
 		t.Fatalf("expected idempotent actor marker user, got %v", idempotent.ImplementationStartedBy)
 	}
 
-	updated, err := svc.UpdatePlan(ctx, UpdatePlanRequest{
+	updateResult, err := svc.UpdatePlan(ctx, UpdatePlanRequest{
 		TaskID:    "task-impl",
 		Content:   "Ship the toolbar after review",
 		CreatedBy: "user",
@@ -239,6 +248,7 @@ func TestPlanService_MarkImplementationStartedIsDurableAndIdempotent(t *testing.
 	if err != nil {
 		t.Fatalf("UpdatePlan failed: %v", err)
 	}
+	updated := updateResult.Plan
 	if updated.ImplementationStartedAt == nil || !updated.ImplementationStartedAt.Equal(firstStartedAt) {
 		t.Fatalf("expected update to preserve implementation marker, got %v", updated.ImplementationStartedAt)
 	}
@@ -430,6 +440,98 @@ func TestPlanService_AppendsWhenWindowExpired(t *testing.T) {
 	list, _ := svc.ListRevisions(ctx, "task-win")
 	if len(list) != 2 {
 		t.Fatalf("expected 2 separate revisions, got %d", len(list))
+	}
+}
+
+// TestPlanService_GetLatestRevision pins the cheap latest-revision accessor:
+// it must report the same revision number ListRevisions()[0] would, without
+// requiring callers to load every revision's content just to read one int.
+func TestPlanService_GetLatestRevision(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-latest")
+	svc.coalesceWindow = 0 // disable coalescing so each write is a new revision
+
+	// No plan yet: nil, nil.
+	latest, err := svc.GetLatestRevision(ctx, "task-latest")
+	if err != nil {
+		t.Fatalf("GetLatestRevision (no plan): %v", err)
+	}
+	if latest != nil {
+		t.Errorf("expected nil latest revision before any plan exists, got %+v", latest)
+	}
+
+	_, _ = svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-latest", Content: "v1",
+		AuthorKind: "agent", AuthorName: "Claude",
+	})
+	_, _ = svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-latest", Content: "v2",
+		AuthorKind: "agent", AuthorName: "Claude",
+	})
+
+	latest, err = svc.GetLatestRevision(ctx, "task-latest")
+	if err != nil {
+		t.Fatalf("GetLatestRevision: %v", err)
+	}
+	if latest == nil {
+		t.Fatal("expected a latest revision after two writes, got nil")
+	}
+	if latest.RevisionNumber != 2 || latest.Content != "v2" {
+		t.Errorf("latest = %+v, want revision 2 with content v2", latest)
+	}
+
+	list, _ := svc.ListRevisions(ctx, "task-latest")
+	if len(list) == 0 {
+		t.Fatal("GetLatestRevision: ListRevisions returned no revisions after two writes")
+	}
+	if list[0].RevisionNumber != latest.RevisionNumber {
+		t.Errorf("GetLatestRevision disagrees with ListRevisions()[0]: got %d, want %d",
+			latest.RevisionNumber, list[0].RevisionNumber)
+	}
+}
+
+func TestPlanService_GetLatestRevisionRequiresTaskID(t *testing.T) {
+	svc, _, _ := createTestPlanService(t)
+	ctx := context.Background()
+
+	_, err := svc.GetLatestRevision(ctx, "")
+	if err != ErrTaskIDRequired {
+		t.Errorf("expected ErrTaskIDRequired, got %v", err)
+	}
+}
+
+func TestPlanService_ForceNewRevisionPreventsCoalesce(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-force")
+	svc.coalesceWindow = 10 * time.Minute // same generous window as the coalesce test
+
+	_, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-force", Content: "v1",
+		AuthorKind: "agent", AuthorName: "Claude",
+	})
+	if err != nil {
+		t.Fatalf("initial create: %v", err)
+	}
+	// Same author, same window — would coalesce by default (see
+	// TestPlanService_CoalescesWithinWindow) but must not when a truncating
+	// write forces a new revision so the pre-write content survives.
+	_, err = svc.UpdatePlan(ctx, UpdatePlanRequest{
+		TaskID: "task-force", Content: "v2",
+		AuthorKind: "agent", AuthorName: "Claude",
+		ForceNewRevision: true,
+	})
+	if err != nil {
+		t.Fatalf("forced update: %v", err)
+	}
+
+	list, err := svc.ListRevisions(ctx, "task-force")
+	if err != nil {
+		t.Fatalf("ListRevisions: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("expected 2 separate revisions (forced), got %d", len(list))
 	}
 }
 

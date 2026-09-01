@@ -128,7 +128,7 @@ func (s *Service) MergePR(ctx context.Context, owner, repo string, number int, m
 	if s.client == nil {
 		return "", ErrNoClient
 	}
-	return s.mergePRWithClient(ctx, s.client, "legacy", owner, repo, number, mergeMethod)
+	return s.mergePRWithClient(ctx, s.client, "legacy", owner, repo, number, MergePRRequest{MergeMethod: mergeMethod})
 }
 
 // MergePRForWorkspace performs a user-triggered merge using the workspace's
@@ -153,7 +153,7 @@ func (s *Service) MergePRForWorkspace(
 		return AuthPrincipal{}, "", err
 	}
 	outcome, err := s.mergePRWithClient(
-		ctx, resolved.Client, resolved.CacheScope, owner, repo, number, mergeMethod,
+		ctx, resolved.Client, resolved.CacheScope, owner, repo, number, MergePRRequest{MergeMethod: mergeMethod},
 	)
 	return resolved.Principal, outcome, err
 }
@@ -165,9 +165,9 @@ func (s *Service) mergePRWithClient(
 	owner string,
 	repo string,
 	number int,
-	mergeMethod string,
+	request MergePRRequest,
 ) (MergeOutcome, error) {
-	if mergeMethod == "" {
+	if request.MergeMethod == "" {
 		// Resolve to an allowed method up-front so we don't rely on GitHub's
 		// "default to merge" behavior, which 405s on repos that disallow
 		// merge commits (squash-only / rebase-only). Best-effort: if the
@@ -176,11 +176,11 @@ func (s *Service) mergePRWithClient(
 		// blocking the merge attempt.
 		if methods, err := s.getRepoMergeMethods(ctx, client, cacheScope, owner, repo); err == nil {
 			if pick := pickDefaultMergeMethod(methods); pick != "" {
-				mergeMethod = pick
+				request.MergeMethod = pick
 			}
 		}
 	}
-	return client.MergePR(ctx, owner, repo, number, mergeMethod)
+	return client.MergePR(ctx, owner, repo, number, request)
 }
 
 // GetRepoMergeMethods returns the merge methods a repo allows, cached for
@@ -270,6 +270,22 @@ func (s *Service) GetPRForWorkspace(
 		if errors.Is(err, ErrGitHubNotConfigured) {
 			return getPRAnonymous(ctx, owner, repo, number)
 		}
+		return nil, err
+	}
+	return resolved.Client.GetPR(ctx, owner, repo, number)
+}
+
+// GetPRForAutomation fetches pull-request details through the workspace-owned
+// automation credential. It is used by background launch paths that have a
+// repository workspace but no interactive user identity.
+func (s *Service) GetPRForAutomation(
+	ctx context.Context, workspaceID, owner, repo string, number int,
+) (*PR, error) {
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
+		return nil, err
+	}
+	resolved, err := s.resolveAutomationClient(ctx, workspaceID, owner, repo)
+	if err != nil {
 		return nil, err
 	}
 	return resolved.Client.GetPR(ctx, owner, repo, number)
@@ -624,6 +640,28 @@ func timeEqual(a, b *time.Time) bool {
 
 // intPtrEqual compares two nullable int pointers for equality.
 func intPtrEqual(a, b *int) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+// boolPtrEqual compares two nullable bool pointers for equality.
+func boolPtrEqual(a, b *bool) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+// stringPtrEqual compares two nullable string pointers for equality.
+func stringPtrEqual(a, b *string) bool {
 	if a == nil && b == nil {
 		return true
 	}

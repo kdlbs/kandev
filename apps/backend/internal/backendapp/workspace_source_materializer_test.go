@@ -174,6 +174,20 @@ func TestWorkspaceSourceMaterializer_RemoteMaterializesAdditionalRepositories(t 
 			if len(remote.calls) != 1 || len(remote.calls[0]) != 1 || remote.calls[0][0].Destination != "added-main" {
 				t.Fatalf("remote projection=%+v; want only additional repository", remote.calls)
 			}
+			inventory, err := repo.ListTaskEnvironmentRepos(ctx, env.ID)
+			if err != nil {
+				t.Fatalf("ListTaskEnvironmentRepos: %v", err)
+			}
+			found := false
+			for _, row := range inventory {
+				if row.RepositoryID == "repo-added" && row.BranchSlug == "main" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("environment inventory = %+v; want repo-added/main", inventory)
+			}
 		})
 	}
 }

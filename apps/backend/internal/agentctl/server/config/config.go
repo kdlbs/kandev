@@ -21,8 +21,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -88,6 +90,13 @@ type Config struct {
 	// rely on the default.
 	IdleReaperInterval time.Duration
 
+	// NotificationQueueCapacity is the resolved ACP inbound notification
+	// queue capacity for every instance created by this server.
+	NotificationQueueCapacity int
+
+	// OTLPEndpoint is the resolved endpoint used by agentctl transport tracing.
+	OTLPEndpoint string
+
 	// mu protects BootstrapNonce from concurrent access during handshake.
 	mu sync.Mutex
 }
@@ -103,7 +112,7 @@ type PortConfig struct {
 // InstanceDefaults provides default values for new instances.
 // These can be overridden when creating an instance.
 type InstanceDefaults struct {
-	// Protocol for agent communication (acp, codex, mcp)
+	// Protocol for agent communication (acp)
 	Protocol agent.Protocol
 
 	// AgentCommand is the command to run the agent (e.g., "auggie --acp")
@@ -202,6 +211,10 @@ type InstanceConfig struct {
 	// ProcessBufferMaxBytes caps per-process output buffer size
 	ProcessBufferMaxBytes int64
 
+	// NotificationQueueCapacity is the ACP inbound notification queue size
+	// inherited from the server startup contract.
+	NotificationQueueCapacity int
+
 	// SessionID is the session ID for this agent instance (used in MCP tool calls)
 	SessionID string
 
@@ -210,7 +223,8 @@ type InstanceConfig struct {
 
 	// ContinueCommand is the command template for follow-up prompts in one-shot agents.
 	// When set, the adapter spawns a new process per prompt using this command for
-	// continuation (thread ID appended at runtime). Only used by Amp.
+	// continuation (thread ID appended at runtime). No production adapter is
+	// one-shot today; see OneShotAdapter in adapter/adapter.go.
 	ContinueCommand string
 
 	// ContinueArgs is the structured argv for ContinueCommand.
@@ -230,7 +244,8 @@ type InstanceConfig struct {
 	AssumeMcpHttp bool
 
 	// McpMode controls which MCP tools are registered for this instance.
-	// "task" (default), "config", and "office" select distinct tool surfaces.
+	// "task" (default), "task-title-pending", "config", "office", and
+	// "automation" select distinct tool surfaces.
 	McpMode string
 
 	// McpProviders limits task-mode review automation tools to attached providers.
@@ -238,6 +253,10 @@ type InstanceConfig struct {
 
 	// McpProfile is the backend-owned typed MCP tool profile.
 	McpProfile *mcpprofile.Context
+
+	// NamespacesMCPToolsByServer enables the per-instance MCP name adapter for
+	// clients that append the injected server name to every tool.
+	NamespacesMCPToolsByServer bool
 
 	// AuthToken is a shared secret for authenticating requests.
 	// Inherited from the parent Config at instance creation time.
@@ -259,6 +278,11 @@ type InstanceConfig struct {
 	// origin/main → master priority list inside workspace_git_status.go.
 	BaseBranches map[string]string
 
+	// ComparisonTargets maps repository subpaths to provider-qualified,
+	// credential-free comparison bindings. Targets are installed before
+	// tracker polling so an unavailable target cannot fall back to origin.
+	ComparisonTargets map[string]models.ComparisonTarget
+
 	// RemoteContributions maps workspace repository subpaths to the
 	// server-authored contribution binding used for source-routed writes.
 	RemoteContributions      map[string]models.RemoteContribution
@@ -267,10 +291,63 @@ type InstanceConfig struct {
 	// WorkspaceSourceRoots are canonical durable source roots permitted for
 	// linked workspace file operations.
 	WorkspaceSourceRoots []string
+
+	// CreateReadyMillis is written once by instance.Manager.CreateInstance
+	// with the elapsed milliseconds from CreateInstance's entry (including
+	// the creation-queue mutex wait) to the instant this instance's HTTP
+	// server starts listening. Backs the diagnostic agentctl_create_ready_ms
+	// metric (api.handleSystemMetrics). A pointer so InstanceConfig can be
+	// read concurrently by the metrics handler while instance.Manager holds
+	// the only writer; zero means "not yet recorded" (a create still in
+	// flight, or a config built directly by a test/harness that never goes
+	// through CreateInstance).
+	CreateReadyMillis *atomic.Int64
 }
 
-// Load loads the configuration from environment variables.
+// Load loads the configuration from environment variables. Managed launches
+// should use LoadWithStartup so their resolved child contract is explicit.
 func Load() *Config {
+	return load(nil)
+}
+
+// LoadWithStartup loads the configuration and applies the resolved backend
+// startup contract. The contract is validated before it is used so a managed
+// child cannot silently fall back to a different timeout or queue size.
+func LoadWithStartup(startup commonconfig.AgentctlStartupConfig) (*Config, error) {
+	if err := startup.Validate(); err != nil {
+		return nil, err
+	}
+	return load(&startup), nil
+}
+
+// StartupConfigFromEnv reads the private managed-child contract. A missing
+// variable means agentctl was started directly and should retain legacy
+// environment compatibility. A present but malformed variable is fatal to
+// that managed launch.
+func StartupConfigFromEnv() (commonconfig.AgentctlStartupConfig, bool, error) {
+	raw, found := os.LookupEnv(commonconfig.InternalAgentctlStartupConfigEnv)
+	if !found {
+		return commonconfig.AgentctlStartupConfig{}, false, nil
+	}
+	startup, err := commonconfig.DecodeAgentctlStartupConfig(raw)
+	if err != nil {
+		return commonconfig.AgentctlStartupConfig{}, true, err
+	}
+	return startup, true, nil
+}
+
+func load(startup *commonconfig.AgentctlStartupConfig) *Config {
+	idleTimeout := getEnvDuration("KANDEV_ACP_IDLE_TIMEOUT", time.Hour)
+	idleReaperInterval := getEnvDuration("KANDEV_ACP_IDLE_REAPER_INTERVAL", time.Minute)
+	notificationQueueCapacity := getEnvInt("KANDEV_ACP_NOTIF_QUEUE", 131072)
+	otlpEndpoint := getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	if startup != nil {
+		idleTimeout = startup.IdleTimeout
+		idleReaperInterval = startup.IdleReaperInterval
+		notificationQueueCapacity = startup.NotificationQueueCapacity
+		otlpEndpoint = startup.OTLPEndpoint
+	}
+
 	cfg := &Config{
 		Port: getEnvInt("AGENTCTL_PORT", 39429),
 		Ports: PortConfig{
@@ -286,14 +363,16 @@ func Load() *Config {
 			HealthCheckInterval:    getEnvInt("AGENTCTL_HEALTH_CHECK_INTERVAL", 5),
 			ProcessBufferMaxBytes:  getEnvInt64("AGENTCTL_PROCESS_BUFFER_MAX_BYTES", 2*1024*1024),
 		},
-		ShellEnabled:       getEnvBool("AGENTCTL_SHELL_ENABLED", true),
-		LogLevel:           getEnvWithFallback("AGENTCTL_LOG_LEVEL", "KANDEV_LOG_LEVEL", "info"),
-		LogFormat:          getEnv("AGENTCTL_LOG_FORMAT", "json"),
-		McpLogFile:         getEnv("KANDEV_MCP_LOG_FILE", ""),
-		VscodeCommand:      getEnv("AGENTCTL_VSCODE_COMMAND", "code-server"),
-		ListenHostOverride: getEnv("AGENTCTL_LISTEN_HOST", ""),
-		IdleTimeout:        getEnvDuration("KANDEV_ACP_IDLE_TIMEOUT", time.Hour),
-		IdleReaperInterval: getEnvDuration("KANDEV_ACP_IDLE_REAPER_INTERVAL", time.Minute),
+		ShellEnabled:              getEnvBool("AGENTCTL_SHELL_ENABLED", true),
+		LogLevel:                  getEnvWithFallback("AGENTCTL_LOG_LEVEL", "KANDEV_LOG_LEVEL", "info"),
+		LogFormat:                 getEnv("AGENTCTL_LOG_FORMAT", "json"),
+		McpLogFile:                getEnv("KANDEV_MCP_LOG_FILE", ""),
+		VscodeCommand:             getEnv("AGENTCTL_VSCODE_COMMAND", "code-server"),
+		ListenHostOverride:        getEnv("AGENTCTL_LISTEN_HOST", ""),
+		IdleTimeout:               idleTimeout,
+		IdleReaperInterval:        idleReaperInterval,
+		NotificationQueueCapacity: notificationQueueCapacity,
+		OTLPEndpoint:              otlpEndpoint,
 	}
 
 	// Bootstrap nonce mode: agentctl generates its own token and the backend
@@ -360,27 +439,29 @@ func generateSelfToken() string {
 // If port is 0, it should be allocated by the caller.
 func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *InstanceConfig {
 	cfg := &InstanceConfig{
-		Port:                   port,
-		Protocol:               c.Defaults.Protocol,
-		AgentCommand:           c.Defaults.AgentCommand,
-		WorkDir:                c.Defaults.WorkDir,
-		AutoStart:              c.Defaults.AutoStart,
-		AutoApprovePermissions: c.Defaults.AutoApprovePermissions,
-		ShellEnabled:           c.ShellEnabled,
-		LogLevel:               c.LogLevel,
-		LogFormat:              c.LogFormat,
-		ProcessBufferMaxBytes:  c.Defaults.ProcessBufferMaxBytes,
-		VscodeCommand:          c.VscodeCommand,
-		McpMode:                "task",
-		AuthToken:              c.AuthToken,
+		Port:                      port,
+		Protocol:                  c.Defaults.Protocol,
+		AgentCommand:              c.Defaults.AgentCommand,
+		WorkDir:                   c.Defaults.WorkDir,
+		AutoStart:                 c.Defaults.AutoStart,
+		AutoApprovePermissions:    c.Defaults.AutoApprovePermissions,
+		ShellEnabled:              c.ShellEnabled,
+		LogLevel:                  c.LogLevel,
+		LogFormat:                 c.LogFormat,
+		ProcessBufferMaxBytes:     c.Defaults.ProcessBufferMaxBytes,
+		NotificationQueueCapacity: c.NotificationQueueCapacity,
+		VscodeCommand:             c.VscodeCommand,
+		McpMode:                   "task",
+		AuthToken:                 c.AuthToken,
+		CreateReadyMillis:         &atomic.Int64{},
 	}
 
 	applyOverrides(cfg, overrides)
 
-	// Inject local kandev MCP server for MCP tunneling through the agent stream
-	// This ensures the kandev MCP server is available for protocols that read MCP config
-	// at startup time (e.g., Codex via -c flags). The MCP server uses the agent stream
-	// WebSocket connection (bidirectional) to forward tool calls to the backend.
+	// Inject local kandev MCP server for MCP tunneling through the agent stream.
+	// This adds the kandev MCP server as an entry in InstanceConfig.McpServers.
+	// The MCP server uses the agent stream WebSocket connection (bidirectional)
+	// to forward tool calls to the backend.
 	if port > 0 {
 		cfg.McpServers = injectKandevMcpServer(cfg.McpServers, port)
 	}
@@ -448,6 +529,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 		profileContext := *overrides.McpProfile
 		cfg.McpProfile = &profileContext
 	}
+	if overrides.NamespacesMCPToolsByServer {
+		cfg.NamespacesMCPToolsByServer = true
+	}
 	if overrides.RequiresProcessKill {
 		cfg.RequiresProcessKill = true
 	}
@@ -456,6 +540,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	}
 	if len(overrides.BaseBranches) > 0 {
 		cfg.BaseBranches = overrides.BaseBranches
+	}
+	if len(overrides.ComparisonTargets) > 0 {
+		cfg.ComparisonTargets = cloneComparisonTargets(overrides.ComparisonTargets)
 	}
 	if len(overrides.RemoteContributions) > 0 {
 		cfg.RemoteContributions = cloneRemoteContributions(overrides.RemoteContributions)
@@ -487,30 +574,43 @@ func applyApprovalOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 
 // InstanceOverrides allows overriding default values when creating an instance
 type InstanceOverrides struct {
-	InstanceID               string
-	Protocol                 agent.Protocol
-	AgentCommand             string
-	WorkDir                  string
-	AutoStart                *bool
-	Env                      []string
-	AutoApprovePermissions   *bool
-	ApprovalPolicy           string
-	AgentType                string
-	McpServers               []McpServerConfig
-	SessionID                string
-	TaskID                   string
-	DisableAskQuestion       bool
-	AssumeMcpSse             bool
-	AssumeMcpHttp            bool
-	McpMode                  string
-	McpProviders             []string
-	McpProfile               *mcpprofile.Context
-	RequiresProcessKill      bool
-	StripEnv                 []string
-	BaseBranches             map[string]string
-	RemoteContributions      map[string]models.RemoteContribution
-	ContributionDestinations map[string]models.ContributionDestination
-	WorkspaceSourceRoots     []string
+	InstanceID                 string
+	Protocol                   agent.Protocol
+	AgentCommand               string
+	WorkDir                    string
+	AutoStart                  *bool
+	Env                        []string
+	AutoApprovePermissions     *bool
+	ApprovalPolicy             string
+	AgentType                  string
+	McpServers                 []McpServerConfig
+	SessionID                  string
+	TaskID                     string
+	DisableAskQuestion         bool
+	AssumeMcpSse               bool
+	AssumeMcpHttp              bool
+	McpMode                    string
+	McpProviders               []string
+	McpProfile                 *mcpprofile.Context
+	NamespacesMCPToolsByServer bool
+	RequiresProcessKill        bool
+	StripEnv                   []string
+	BaseBranches               map[string]string
+	ComparisonTargets          map[string]models.ComparisonTarget
+	RemoteContributions        map[string]models.RemoteContribution
+	ContributionDestinations   map[string]models.ContributionDestination
+	WorkspaceSourceRoots       []string
+}
+
+func cloneComparisonTargets(values map[string]models.ComparisonTarget) map[string]models.ComparisonTarget {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]models.ComparisonTarget, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func cloneRemoteContributions(values map[string]models.RemoteContribution) map[string]models.RemoteContribution {

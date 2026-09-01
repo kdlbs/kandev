@@ -19,6 +19,9 @@ import { getFileCategory } from "@/lib/utils/file-types";
 import type { ChangedFile } from "./changes-panel-helpers";
 import type { OpenDiffOptions } from "./changes-diff-target";
 import { useTranslation } from "react-i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+
+const COARSE_POINTER_TARGET_CLASS = "min-h-11 min-w-11";
 
 const splitPath = (path: string) => {
   const lastSlash = path.lastIndexOf("/");
@@ -42,7 +45,7 @@ type FileRowProps = {
   // in two repos) cannot be disambiguated by path alone.
   onStage: (path: string, repo?: string) => void;
   onUnstage: (path: string, repo?: string) => void;
-  onDiscard: (path: string, repo?: string) => void;
+  onDiscard: (path: string, repo?: string, anchor?: HTMLElement) => void;
   onEditFile: (path: string, repo?: string) => void;
   /**
    * Tree mode: skip the folder prefix, swap the left-side stage button for a
@@ -69,6 +72,7 @@ export function FileRow({
   treeMode,
   indentPx,
 }: FileRowProps) {
+  const { isFinePointer } = useResponsiveBreakpoint();
   const { folder, file: name } = splitPath(file.path);
   const showFolder = !treeMode && folder;
 
@@ -83,6 +87,7 @@ export function FileRow({
       onOpenDiff(file.path, {
         source: "uncommitted",
         repositoryName: file.repositoryName,
+        ...(file.changeLayer ? { changeLayer: file.changeLayer } : {}),
       });
     }
   };
@@ -110,6 +115,7 @@ export function FileRow({
           <TreeModeFileActionSlot
             name={name}
             isPending={isPending}
+            isFinePointer={isFinePointer}
             staged={file.staged}
             path={file.path}
             repo={file.repositoryName}
@@ -120,6 +126,7 @@ export function FileRow({
           <StageButton
             isPending={isPending}
             staged={file.staged}
+            touchSized={!isFinePointer}
             path={file.path}
             repo={file.repositoryName}
             onStage={onStage}
@@ -138,13 +145,11 @@ export function FileRow({
         </button>
       </div>
       <div className="grid items-center shrink-0 [&>*]:col-start-1 [&>*]:row-start-1">
-        <div className="flex items-center gap-2 justify-end transition-opacity group-hover:opacity-0 pointer-events-none">
-          <LineStat added={file.plus} removed={file.minus} />
-          <FileStatusIcon status={file.status} oldPath={file.oldPath} />
-        </div>
+        <FileRowStats file={file} isFinePointer={isFinePointer} />
         <FileRowActions
           path={file.path}
           repo={file.repositoryName}
+          isFinePointer={isFinePointer}
           onDiscard={onDiscard}
           onEditFile={onEditFile}
         />
@@ -153,9 +158,24 @@ export function FileRow({
   );
 }
 
+function FileRowStats({ file, isFinePointer }: { file: ChangedFile; isFinePointer: boolean }) {
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 justify-end transition-opacity pointer-events-none",
+        isFinePointer ? "group-hover:opacity-0" : "opacity-0",
+      )}
+    >
+      <LineStat added={file.plus} removed={file.minus} />
+      <FileStatusIcon status={file.status} oldPath={file.oldPath} />
+    </div>
+  );
+}
+
 function TreeModeFileActionSlot({
   name,
   isPending,
+  isFinePointer,
   staged,
   path,
   repo,
@@ -164,6 +184,7 @@ function TreeModeFileActionSlot({
 }: {
   name: string;
   isPending: boolean;
+  isFinePointer: boolean;
   staged: boolean;
   path: string;
   repo?: string;
@@ -173,16 +194,27 @@ function TreeModeFileActionSlot({
   return (
     <div
       data-testid="file-row-icon-action-slot"
-      className="grid size-4 shrink-0 items-center justify-center [&>*]:col-start-1 [&>*]:row-start-1"
+      className={cn(
+        "grid shrink-0 items-center justify-center [&>*]:col-start-1 [&>*]:row-start-1",
+        isFinePointer ? "size-4" : "size-11",
+      )}
     >
-      <FileIcon
-        fileName={name}
-        className="size-4 transition-opacity group-hover:opacity-0 pointer-events-none"
-      />
-      <div className="opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto">
+      {isFinePointer && (
+        <FileIcon
+          fileName={name}
+          className="size-4 transition-opacity group-hover:opacity-0 pointer-events-none"
+        />
+      )}
+      <div
+        className={cn(
+          isFinePointer &&
+            "opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto",
+        )}
+      >
         <StageButton
           isPending={isPending}
           staged={staged}
+          touchSized={!isFinePointer}
           path={path}
           repo={repo}
           onStage={onStage}
@@ -196,6 +228,7 @@ function TreeModeFileActionSlot({
 function StageButton({
   isPending,
   staged,
+  touchSized,
   path,
   repo,
   onStage,
@@ -203,6 +236,7 @@ function StageButton({
 }: {
   isPending: boolean;
   staged: boolean;
+  touchSized?: boolean;
   path: string;
   repo?: string;
   onStage: (path: string, repo?: string) => void;
@@ -211,7 +245,12 @@ function StageButton({
   const { t } = useTranslation();
   if (isPending) {
     return (
-      <div className="flex-shrink-0 flex items-center justify-center size-4">
+      <div
+        className={cn(
+          "flex-shrink-0 flex items-center justify-center size-4",
+          touchSized && COARSE_POINTER_TARGET_CLASS,
+        )}
+      >
         <IconLoader2 className="h-3 w-3 animate-spin text-muted-foreground" />
       </div>
     );
@@ -221,7 +260,10 @@ function StageButton({
       <button
         type="button"
         title={t("task:unstageFile")}
-        className="group/unstage flex-shrink-0 flex items-center justify-center size-4 rounded bg-emerald-500/20 text-emerald-600 hover:bg-rose-500/20 hover:text-rose-600 cursor-pointer"
+        className={cn(
+          "group/unstage flex-shrink-0 flex items-center justify-center size-4 rounded bg-emerald-500/20 text-emerald-600 hover:bg-rose-500/20 hover:text-rose-600 cursor-pointer",
+          touchSized && COARSE_POINTER_TARGET_CLASS,
+        )}
         onClick={(e) => {
           e.stopPropagation();
           onUnstage(path, repo);
@@ -236,7 +278,10 @@ function StageButton({
     <button
       type="button"
       title={t("task:stageFile")}
-      className="flex-shrink-0 flex items-center justify-center size-4 rounded border border-dashed border-muted-foreground/50 text-muted-foreground hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/10 cursor-pointer"
+      className={cn(
+        "flex-shrink-0 flex items-center justify-center size-4 rounded border border-dashed border-muted-foreground/50 text-muted-foreground hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/10 cursor-pointer",
+        touchSized && COARSE_POINTER_TARGET_CLASS,
+      )}
       onClick={(e) => {
         e.stopPropagation();
         onStage(path, repo);
@@ -250,28 +295,39 @@ function StageButton({
 function FileRowActions({
   path,
   repo,
+  isFinePointer,
   onDiscard,
   onEditFile,
 }: {
   path: string;
   repo?: string;
-  onDiscard: (path: string, repo?: string) => void;
+  isFinePointer: boolean;
+  onDiscard: (path: string, repo?: string, anchor?: HTMLElement) => void;
   onEditFile: (path: string, repo?: string) => void;
 }) {
   const { t } = useTranslation();
   return (
     <div
       data-testid="file-row-hover-actions"
-      className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto"
+      className={cn(
+        "flex items-center gap-1 justify-end transition-opacity",
+        isFinePointer
+          ? "opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto"
+          : "opacity-100 pointer-events-auto",
+      )}
     >
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
-            className="text-muted-foreground hover:text-foreground cursor-pointer"
+            aria-label={t("task:discardChanges2")}
+            className={cn(
+              "text-muted-foreground hover:text-foreground cursor-pointer",
+              !isFinePointer && COARSE_POINTER_TARGET_CLASS,
+            )}
             onClick={(e) => {
               e.stopPropagation();
-              onDiscard(path, repo);
+              onDiscard(path, repo, e.currentTarget);
             }}
           >
             <IconArrowBackUp className="h-3.5 w-3.5" />
@@ -283,7 +339,11 @@ function FileRowActions({
         <TooltipTrigger asChild>
           <button
             type="button"
-            className="text-muted-foreground hover:text-foreground cursor-pointer"
+            aria-label={t("common:edit")}
+            className={cn(
+              "text-muted-foreground hover:text-foreground cursor-pointer",
+              !isFinePointer && COARSE_POINTER_TARGET_CLASS,
+            )}
             onClick={(e) => {
               e.stopPropagation();
               onEditFile(path, repo);
@@ -356,7 +416,7 @@ export function BulkActionBar({
   selectedPaths: Set<string>;
   onBulkStage?: (paths: string[]) => void;
   onBulkUnstage?: (paths: string[]) => void;
-  onBulkDiscard?: (paths: string[]) => void;
+  onBulkDiscard?: (paths: string[], anchor?: HTMLElement) => void;
 }) {
   const { t } = useTranslation();
   const paths = [...selectedPaths];
@@ -392,7 +452,7 @@ export function BulkActionBar({
           size="sm"
           variant="outline"
           className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer text-destructive hover:text-destructive"
-          onClick={() => onBulkDiscard(paths)}
+          onClick={(e) => onBulkDiscard(paths, e.currentTarget)}
         >
           {t("task:discardCount", { selectionCount })}
         </Button>

@@ -17,8 +17,10 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
@@ -57,7 +59,7 @@ type sshSessionState struct {
 // Each session owns its own *ssh.Client (no shared pool). One SSH connection
 // per session keeps teardown simple — closing the executor instance closes
 // the client — at the cost of an extra TCP+handshake per session on the same
-// host. See docs/specs/ssh-executor/spec.md for the full design.
+// host. See docs/specs/executors/requirements/ssh-executor.md for the full design.
 type SSHExecutor struct {
 	agentctlResolver *AgentctlResolver
 	secretStore      secrets.SecretStore
@@ -192,6 +194,9 @@ func (r *SSHExecutor) workdirRoot(md map[string]interface{}) string {
 // instead of starting a second remote agentctl on top of the live one.
 func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
 	baseCtx := preparationContext(ctx)
+	if err := validateAgentctlStartupConfig(req.AgentctlStartupConfig); err != nil {
+		return nil, fmt.Errorf("invalid agentctl startup configuration: %w", err)
+	}
 	resumed, ok := r.resumedStateForCreate(req)
 	if ok {
 		return r.buildResumedInstance(req, resumed), nil
@@ -228,17 +233,33 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	}
 
 	workdir := r.workdirRoot(req.Metadata)
-	taskDir, err := r.prepareRemoteTaskDir(baseCtx, client, workdir, req)
-	if err != nil {
-		return nil, err
-	}
-	r.maybeUploadCredentials(baseCtx, client, req, platform)
-	if err := r.runPrepareScript(baseCtx, client, taskDir, req, platform, agentctlBin); err != nil {
-		return nil, err
+	taskDir := ""
+	if req.WorkspaceReuseRequired {
+		// A sibling SSH execution gets its own agentctl/session directory, but
+		// must use the already materialized task directory verbatim. In
+		// particular it must not run the remote prepare script or checkout
+		// verification, either of which can mutate an active shared checkout.
+		taskDir, err = reuseRequiredRemoteTaskDir(req)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		taskDir, err = r.prepareRemoteTaskDir(baseCtx, client, workdir, req)
+		if err != nil {
+			return nil, err
+		}
+		r.maybeUploadCredentials(baseCtx, client, req, platform)
+		if err := r.runPrepareScript(baseCtx, client, taskDir, req, platform, agentctlBin); err != nil {
+			return nil, err
+		}
 	}
 	launchCtx, launchCancel := withLaunchPhaseTimeout(baseCtx)
 	defer launchCancel()
-	if err := r.verifyPrimaryCheckout(launchCtx, client, taskDir, req, platform); err != nil {
+	if !req.WorkspaceReuseRequired {
+		if err := r.verifyPrimaryCheckout(launchCtx, client, taskDir, req, platform); err != nil {
+			return nil, err
+		}
+	} else if err := ensureReuseRequiredRemoteTaskDirExists(launchCtx, client, taskDir); err != nil {
 		return nil, err
 	}
 	sessionDir, err := r.prepareRemoteSessionDir(launchCtx, client, taskDir, req)
@@ -271,6 +292,17 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	released = true // ownership transferred to session state; released on StopInstance
 
 	return r.buildInstance(req, target, fwd, taskDir, sessionDir, port, pid, workdir, authToken), nil
+}
+
+func reuseRequiredRemoteTaskDir(req *ExecutorCreateRequest) (string, error) {
+	if req == nil {
+		return "", fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
+	}
+	taskDir := strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeySSHRemoteTaskDir))
+	if taskDir == "" {
+		return "", fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
+	}
+	return taskDir, nil
 }
 
 func (r *SSHExecutor) resumedStateForCreate(req *ExecutorCreateRequest) (*sshSessionState, bool) {
@@ -384,6 +416,7 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	env := sshAgentctlLaunchEnv(
 		managedGitCredentialBrokerEnv(sshRemoteContributionEnv(req, agentctlBin)),
 		nonce,
+		req.AgentctlStartupConfig,
 	)
 	shell := sshShellForRemote(req.Metadata, platform)
 	controlPort, pid, err := startRemoteAgentctl(ctx, client, shell, agentctlBin, taskDir, sessionDir, env, r.logger)
@@ -428,7 +461,7 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	return instancePort, pid, fwd, authToken, nil
 }
 
-func sshAgentctlLaunchEnv(base map[string]string, nonce string) map[string]string {
+func sshAgentctlLaunchEnv(base map[string]string, nonce string, startup ...commonconfig.AgentctlStartupConfig) map[string]string {
 	env := make(map[string]string, len(base))
 	for key, value := range base {
 		env[key] = value
@@ -439,6 +472,11 @@ func sshAgentctlLaunchEnv(base map[string]string, nonce string) map[string]strin
 	delete(env, "AGENTCTL_AUTH_TOKEN")
 	env["AGENTCTL_BOOTSTRAP_NONCE"] = nonce
 	env["AGENTCTL_LISTEN_HOST"] = sshAgentctlLoopbackHost
+	if len(startup) > 0 {
+		for key, value := range agentctlStartupEnvironment(startup[0]) {
+			env[key] = value
+		}
+	}
 	return env
 }
 
@@ -915,7 +953,7 @@ func (r *SSHExecutor) preflightAgentBinary(
 		return nil
 	}
 
-	cmd := req.AgentConfig.BuildCommand(agents.CommandOptions{Runtime: agentruntime.RuntimeSSH})
+	cmd := buildRemotePreflightAgentCommand(req)
 	args := cmd.Args()
 	if len(args) == 0 {
 		return nil
@@ -933,6 +971,16 @@ func (r *SSHExecutor) preflightAgentBinary(
 	}
 	r.report(req.OnProgress, stepName, PrepareStepCompleted, out)
 	return nil
+}
+
+func buildRemotePreflightAgentCommand(req *ExecutorCreateRequest) agents.Command {
+	if req == nil || req.AgentConfig == nil {
+		return agents.Command{}
+	}
+	return req.AgentConfig.BuildCommand(agents.CommandOptions{
+		Runtime:               agentruntime.RuntimeSSH,
+		ManagedRuntimeVersion: req.ManagedRuntimeVersion,
+	})
 }
 
 // probeNativeBinary probes the remote for the agent's standalone CLI (if it

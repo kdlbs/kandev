@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { Button } from "@kandev/ui/button";
@@ -9,8 +10,11 @@ import { toast } from "@/lib/toast/sonner";
 import { useAutomations } from "@/hooks/domains/settings/use-automations";
 import { AutomationsTable } from "./automations-table";
 import { AutomationBoardMoveNotice } from "./board-move-notice";
+import { AutomationsExportButton } from "./automations-export-button";
 import { useAutomationEnabledDrafts } from "./use-automation-enabled-drafts";
 import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
+import { AutomationDeleteConfirmDialog } from "./automation-delete-confirm-dialog";
+import type { Automation } from "@/lib/types/automation";
 
 type AutomationsListPageProps = {
   workspaceId: string;
@@ -21,6 +25,8 @@ export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
   const router = useRouter();
   const { items, loading, enable, disable, trigger, remove } = useAutomations(workspaceId);
   const enabledDrafts = useAutomationEnabledDrafts({ automations: items, enable, disable });
+  const [automationToDelete, setAutomationToDelete] = useState<Automation | null>(null);
+  const [deletingAutomationId, setDeletingAutomationId] = useState<string | null>(null);
 
   const handleTrigger = async (id: string) => {
     // Triggering can legitimately do nothing — the concurrency cap turns the
@@ -42,8 +48,25 @@ export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    await remove(id);
+  const handleDelete = (id: string) => {
+    const automation = items.find((item) => item.id === id);
+    if (automation) setAutomationToDelete(automation);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!automationToDelete || deletingAutomationId) return;
+    const { id } = automationToDelete;
+    setDeletingAutomationId(id);
+    try {
+      await remove(id);
+      setAutomationToDelete(null);
+    } catch (error) {
+      toast.error(t("automations:failedToDeleteAutomation"), {
+        description: error instanceof Error ? error.message : t("common:requestFailed"),
+      });
+    } finally {
+      setDeletingAutomationId(null);
+    }
   };
 
   return (
@@ -52,16 +75,19 @@ export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
         tab="automations"
         description={t("automations:listDescription")}
         action={
-          <Button
-            type="button"
-            size="sm"
-            data-testid="new-automation-button"
-            className="cursor-pointer"
-            onClick={() => router.push(`/settings/workspaces/${workspaceId}/automations/new`)}
-          >
-            <IconPlus className="h-4 w-4 mr-2" />
-            {t("automations:newAutomation")}
-          </Button>
+          <div className="flex items-center gap-2">
+            <AutomationsExportButton workspaceId={workspaceId} />
+            <Button
+              type="button"
+              size="sm"
+              data-testid="new-automation-button"
+              className="min-h-11 cursor-pointer md:min-h-7"
+              onClick={() => router.push(`/settings/workspaces/${workspaceId}/automations/new`)}
+            >
+              <IconPlus className="h-4 w-4 mr-2" />
+              {t("automations:newAutomation")}
+            </Button>
+          </div>
         }
       />
       <Separator />
@@ -83,6 +109,17 @@ export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
           onDelete={handleDelete}
         />
       )}
+      <AutomationDeleteConfirmDialog
+        open={automationToDelete !== null}
+        automationName={automationToDelete?.name ?? ""}
+        isDeleting={deletingAutomationId !== null}
+        onOpenChange={(open) => {
+          if (!open && deletingAutomationId !== automationToDelete?.id) {
+            setAutomationToDelete(null);
+          }
+        }}
+        onConfirm={handleConfirmDelete}
+      />
     </div>
   );
 }

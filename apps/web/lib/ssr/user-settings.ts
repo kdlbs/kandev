@@ -83,7 +83,9 @@ export function createDefaultUserSettings(): UserSettingsState {
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     appStatusBarEnabled: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
+    quickChatTabOrderByWorkspace: {},
     hiddenWorkflowStepIds: {},
+    workflowIdsWithAutoHideEmptySteps: [],
     loaded: false,
   };
 }
@@ -333,7 +335,11 @@ export function buildCoreFields(
       parseAppStatusBarOrder,
     ),
     appStatusBarEnabled: s.app_status_bar_enabled ?? current.appStatusBarEnabled,
+    quickChatTabOrderByWorkspace:
+      s.quick_chat_tab_order_by_workspace ?? current.quickChatTabOrderByWorkspace,
     hiddenWorkflowStepIds: s.kanban_hidden_step_ids ?? current.hiddenWorkflowStepIds,
+    workflowIdsWithAutoHideEmptySteps:
+      s.workflow_ids_with_auto_hide_empty_steps ?? current.workflowIdsWithAutoHideEmptySteps,
     ...buildTerminalFields(s, current),
     ...buildSystemMetricsDisplayFields(s, current),
   };

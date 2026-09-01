@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/prompt-attachments.md
+spec: docs/specs/tasks/requirements/prompt-attachments.md
 created: 2026-08-04
 status: in_progress
 ---
@@ -187,7 +187,7 @@ application WebSocket remains capped at 32 MiB.
   explaining that current web-client attachment bytes use HTTP staging and only
   descriptors cross the socket; legacy inline callers must still obey the
   lower compatibility limit.
-- Reconcile `docs/specs/office/live-updates.md` where it currently attributes
+- Reconcile `docs/specs/office/requirements/live-updates.md` where it currently attributes
   the 32 MiB socket ceiling to base64 image traffic.
 
 ---

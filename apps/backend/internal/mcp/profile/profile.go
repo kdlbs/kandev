@@ -3,7 +3,11 @@
 // agent can receive a profile, but it cannot request arbitrary tool names.
 package profile
 
-import "slices"
+import (
+	"slices"
+
+	"github.com/kandev/kandev/internal/common/mcpmode"
+)
 
 type Surface string
 
@@ -12,6 +16,7 @@ const (
 	SurfaceOfficeTask    Surface = "office-task"
 	SurfaceConfiguration Surface = "configuration"
 	SurfaceExternal      Surface = "external"
+	SurfaceAutomation    Surface = "automation"
 )
 
 type Capability string
@@ -42,6 +47,13 @@ func New(surface Surface, capabilities []Capability, providers []string) Context
 	return ctx
 }
 
+// NewAutomation returns the fixed profile used by automation task sessions.
+// Automation tasks coordinate workspace work and never receive task-local
+// question capabilities.
+func NewAutomation() Context {
+	return New(SurfaceAutomation, nil, nil)
+}
+
 func (c Context) HasCapability(capability Capability) bool {
 	return slices.Contains(c.Capabilities, capability)
 }
@@ -69,16 +81,18 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 	surface := SurfaceKanbanTask
 	capabilities := []Capability{}
 	switch mode {
-	case "office":
+	case mcpmode.Office:
 		surface = SurfaceOfficeTask
-	case "config":
+	case mcpmode.Config:
 		surface = SurfaceConfiguration
-	case "external":
+	case mcpmode.External:
 		surface = SurfaceExternal
-	case "task-title-pending":
+	case mcpmode.Automation:
+		surface = SurfaceAutomation
+	case mcpmode.TaskTitlePending:
 		capabilities = append(capabilities, CapabilityTaskTitle)
 	}
-	if !disableAskQuestion && surface != SurfaceExternal {
+	if !disableAskQuestion && surface != SurfaceExternal && surface != SurfaceAutomation {
 		capabilities = append(capabilities, CapabilityUserQuestion)
 	}
 	return New(surface, capabilities, providers)
@@ -86,7 +100,7 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 
 func normalizeSurface(surface Surface) Surface {
 	switch surface {
-	case SurfaceKanbanTask, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal:
+	case SurfaceKanbanTask, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation:
 		return surface
 	default:
 		return SurfaceKanbanTask

@@ -126,7 +126,7 @@ Workflow-level settings include the name and default agent profile. A step can o
 |---------|----------|
 | Name and color | Board label and presentation. Color is stored as a CSS utility class. |
 | Prompt | Step-specific agent prompt. `{{task_prompt}}` inserts the task description. Type `@` to reference a saved prompt by name. |
-| Start step | Preferred initial step. The editor keeps at most one. If none is set, task creation falls back to the first step by position. |
+| Start step | Where a task is created when no agent starts with it. The editor keeps at most one. If none is set, task creation falls back to the first step by position. Creating a task that starts an agent immediately uses the first Auto-start agent step instead, so a Start step with no entry actions is a genuine parking column. |
 | Auto-start agent | Adds `auto_start_agent` to `on_enter`. It still needs a valid agent and executor configuration. |
 | Plan mode | Adds `enable_plan_mode` on entry. Add the matching disable behavior on completion or exit when later steps should edit files. |
 | Reset agent context | Starts the step with fresh conversation context. It is redundant when the step changes agent profile. |
@@ -146,6 +146,12 @@ promotion.
 
 Pull candidates are selected by board position, then priority, queue time, creation time, and ID. A candidate that cannot be moved is skipped. Pulling runs for every limited step; a feeder is only needed for overflow created outside the destination step.
 
+### Complete prompts while editing
+
+Workflow and step prompt fields use the inline prompt editor. Type `@` after whitespace to select a saved prompt. In a step prompt, type `{{` to select `{{task_prompt}}` and other tokens supported by that step. The completion menu inserts the reference into the draft; it does not save the workflow. Use **Save changes** when the prompt is ready.
+
+The workflow-level prompt supports saved-prompt references but does not expand step-only variables. `{{task_prompt}}` is available in a step prompt because it is replaced with the task description when that step runs.
+
 ## Events and actions
 
 <details>
@@ -160,7 +166,7 @@ The standard Kanban editor exposes these events:
 | `on_turn_complete` | A normal agent turn finishes when its signal requirements are satisfied. An explicit user cancellation qualifies when the step enables its cancellation policy, even if the completion signal is absent. A pending clarification always blocks completion. | Move next, previous, or to a selected step; disable plan mode. |
 | `on_exit` | A task leaves a step. | Disable plan mode. |
 
-The portable format also recognizes `set_session_mode`, `clear_decisions`, `queue_run`, and `queue_run_for_each_participant` in `on_enter`; these are advanced/runtime-dependent actions and most are not offered by the Kanban editor. Office event triggers have a broader model, but do not round-trip through Kanban import/export. See the exact boundary in [Workflow Import / Export](workflow-import-export.md).
+The portable format also recognizes `set_session_mode`, `clear_decisions`, `queue_run`, and `queue_run_for_each_participant` in `on_enter`; these are advanced/runtime-dependent actions and most are not offered by the Kanban editor. The seven Office/Phase-2 event triggers round-trip through Kanban import/export; what does not round-trip is Office step metadata (stage type, participants, decisions, task data, step history). See the exact boundary in [Workflow Import / Export](workflow-import-export.md).
 
 Keep one transition action per event. A “next” action on the last step or “previous” on the first has nowhere to go and leaves the task in place. A missing target step, a failed agent launch, missing credentials, or a full feeder can prevent the intended progression; inspect the task/session error and backend logs before changing the workflow. A full destination step queues the task instead of rejecting the move.
 
@@ -213,7 +219,7 @@ A task may contain several repositories, but a workflow step is not bound to one
 
 ## Troubleshooting
 
-- **Task starts in the wrong column:** confirm exactly one Start step, save the workflow, and check whether the creator supplied an explicit `workflow_step_id`.
+- **Task starts in the wrong column:** confirm exactly one Start step, save the workflow, and check whether the creator supplied an explicit `workflow_step_id`. Remember that a create which starts an agent targets the first Auto-start agent step, not the Start step.
 - **Agent does not start:** verify the effective workflow/step agent profile, its health, executor profile, repository access, and the `auto_start_agent` entry action.
 - **Task stays after a turn:** check for an absent transition, a pending clarification, the explicit-completion toggle, a queued WIP card waiting for capacity, or an invalid target left by an older definition.
 - **Task stays after a cancel:** check for a pending clarification, the cancelled-turn completion policy, an absent or blocked transition, a queued WIP card, or an invalid target left by an older definition.

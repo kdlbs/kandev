@@ -697,6 +697,14 @@ func (m *Manager) prepareExecutionCreateRequest(
 	if !ok {
 		return nil, fmt.Errorf("agent type %q not found in registry", info.AgentID)
 	}
+	managedRuntimeVersion, err := m.resolveManagedRuntimeVersion(
+		ctx,
+		models.ExecutorType(info.ExecutorType).Runtime(),
+		agentConfig,
+	)
+	if err != nil {
+		return nil, err
+	}
 
 	executionProfileID := workspaceExecutionProfileID(info)
 	profileInfo := m.resolveWorkspaceExecutionProfile(ctx, executionProfileID)
@@ -722,11 +730,31 @@ func (m *Manager) prepareExecutionCreateRequest(
 	if err != nil {
 		return nil, err
 	}
+	comparisonTargets, err := comparisonTargetsFromMetadata(metadata)
+	if err != nil {
+		return nil, err
+	}
+	if len(comparisonTargets) == 0 {
+		comparisonTargets, err = comparisonTargetsFromWorkspaceRepositories(info.WorkspaceRepositories)
+		if err != nil {
+			return nil, err
+		}
+	}
 	autoApprove := false
 	var autoApproveOverride *bool
 	if profileInfo != nil {
 		autoApprove = profileInfo.AutoApprove
 		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
+	}
+	authToken := m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret)
+	if isDockerExecutorType(info.ExecutorType) {
+		controlToken, err := m.revealContainerControlAuthToken(ctx, info.Metadata, getMetadataString(info.Metadata, MetadataKeyContainerID) != "")
+		if err != nil {
+			return nil, fmt.Errorf("resolve container control token: %w", err)
+		}
+		if controlToken != "" {
+			authToken = controlToken
+		}
 	}
 
 	preparation := &executionCreatePreparation{
@@ -735,6 +763,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			TaskID:                         taskID,
 			SessionID:                      info.SessionID,
 			TaskEnvironmentID:              info.TaskEnvironmentID,
+			WorkspaceReuseRequired:         info.TaskEnvironmentID != "",
 			AgentProfileID:                 executionProfileID,
 			OfficeAgentProfileID:           info.AgentProfileID,
 			WorkspacePath:                  info.WorkspacePath,
@@ -747,10 +776,13 @@ func (m *Manager) prepareExecutionCreateRequest(
 			Metadata:                       metadata,
 			ApprovedSecretEnvKeys:          append([]string(nil), envPreparation.approvedSecretEnvKeys...),
 			PreviousExecutionID:            info.AgentExecutionID,
-			AuthToken:                      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
+			AuthToken:                      authToken,
 			BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
+			AgentctlStartupConfig:          m.agentctlStartupConfig,
 			RemoteContributions:            remoteContributions,
 			ContributionDestinations:       contributionDestinations,
+			ManagedRuntimeVersion:          managedRuntimeVersion,
+			ComparisonTargets:              comparisonTargets,
 		},
 		profileInfo: profileInfo,
 	}
@@ -948,11 +980,15 @@ const (
 	// It lets the backend re-handshake after a container restart starts a new
 	// agentctl process with a fresh auth token.
 	MetadataKeyBootstrapNonceSecret = "env_secret_id_AGENTCTL_BOOTSTRAP_NONCE"
+	// MetadataKeyContainerControlAuthSecret stores the encrypted agentctl
+	// control token owned by a Docker task environment, not an agent session.
+	MetadataKeyContainerControlAuthSecret = "env_secret_id_CONTAINER_AGENTCTL_CONTROL_TOKEN"
 )
 
 func (m *Manager) persistRuntimeSecrets(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
 	m.persistAuthToken(ctx, instance, execution)
 	m.persistBootstrapNonce(ctx, instance, execution)
+	m.persistContainerControlAuthToken(ctx, instance, execution)
 }
 
 func (m *Manager) persistRequiredKubernetesRuntimeSecrets(
@@ -996,6 +1032,13 @@ func (m *Manager) persistAuthToken(ctx context.Context, instance *ExecutorInstan
 
 func (m *Manager) persistBootstrapNonce(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
 	m.persistRuntimeSecret(ctx, instance, execution, MetadataKeyBootstrapNonceSecret, "agentctl-bootstrap", instance.BootstrapNonce)
+}
+
+func (m *Manager) persistContainerControlAuthToken(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
+	if instance == nil || instance.ContainerID == "" {
+		return
+	}
+	m.persistRuntimeSecret(ctx, instance, execution, MetadataKeyContainerControlAuthSecret, "agentctl-container-control", instance.AuthToken)
 }
 
 func (m *Manager) persistRuntimeSecret(
@@ -1147,22 +1190,52 @@ func isProvisionalKubernetesInventory(metadata map[string]interface{}) bool {
 	}
 }
 
-func (m *Manager) revealRuntimeSecret(ctx context.Context, metadata map[string]interface{}, metadataKey string) string {
-	if m.secretStore == nil {
-		return ""
-	}
+// revealRuntimeSecretValue reveals a configured runtime secret and preserves
+// storage errors for callers that need to report a failed launch.
+func (m *Manager) revealRuntimeSecretValue(ctx context.Context, metadata map[string]interface{}, metadataKey string) (string, error) {
 	secretID := getMetadataString(metadata, metadataKey)
 	if secretID == "" {
-		return ""
+		return "", nil
+	}
+	if m.secretStore == nil {
+		return "", errors.New("runtime secret store is unavailable")
 	}
 	value, err := revealGlobalSecret(ctx, m.secretStore, secretID)
+	if err != nil {
+		return "", fmt.Errorf("reveal runtime secret %q: %w", metadataKey, err)
+	}
+	return value, nil
+}
+
+func (m *Manager) revealRuntimeSecret(ctx context.Context, metadata map[string]interface{}, metadataKey string) string {
+	value, err := m.revealRuntimeSecretValue(ctx, metadata, metadataKey)
 	if err != nil {
 		m.logger.Warn("failed to reveal runtime secret",
 			zap.String("metadata_key", metadataKey),
 			zap.Error(err))
-		return ""
 	}
 	return value
+}
+
+func (m *Manager) revealContainerControlAuthToken(ctx context.Context, metadata map[string]interface{}, allowLegacyFallback bool) (string, error) {
+	secretID := getMetadataString(metadata, MetadataKeyContainerControlAuthSecret)
+	if secretID == "" {
+		if !allowLegacyFallback {
+			return "", nil
+		}
+		return m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret), nil
+	}
+	if m.secretStore == nil {
+		return "", errors.New("container control-token secret store is unavailable")
+	}
+	token, err := revealGlobalSecret(ctx, m.secretStore, secretID)
+	if err != nil {
+		return "", fmt.Errorf("reveal container control token: %w", err)
+	}
+	if token == "" {
+		return "", errors.New("container control token is empty")
+	}
+	return token, nil
 }
 
 // truncateID safely truncates an ID string to maxLen characters.

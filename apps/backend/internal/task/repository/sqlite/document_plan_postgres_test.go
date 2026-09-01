@@ -132,7 +132,7 @@ func TestPostgresWritePlanRevisionUpsertAndImplementationMarker(t *testing.T) {
 	first := &models.TaskPlanRevision{
 		TaskID: "task-plan-pg", Title: "Plan", Content: "one", AuthorKind: "agent", AuthorName: "claude",
 	}
-	if err := repo.WritePlanRevision(ctx, head, first, nil); err != nil {
+	if err := repo.WritePlanRevision(ctx, head, first, nil, false, false); err != nil {
 		t.Fatalf("WritePlanRevision(first): %v", err)
 	}
 	if head.Title != "Plan" || head.CreatedBy != authorKindAgent {
@@ -172,7 +172,7 @@ func TestPostgresWritePlanRevisionUpsertAndImplementationMarker(t *testing.T) {
 	second := &models.TaskPlanRevision{
 		TaskID: "task-plan-pg", Title: "Plan v2", Content: "two", AuthorKind: "user", AuthorName: "jcfs",
 	}
-	if err := repo.WritePlanRevision(ctx, head, second, nil); err != nil {
+	if err := repo.WritePlanRevision(ctx, head, second, nil, false, false); err != nil {
 		t.Fatalf("WritePlanRevision(second): %v", err)
 	}
 	if second.RevisionNumber != 2 {
@@ -193,6 +193,31 @@ func TestPostgresWritePlanRevisionUpsertAndImplementationMarker(t *testing.T) {
 			gotHead.ImplementationStartedAt, startedAt)
 	}
 
+	// The dialect-sensitive preservation branches must return the stored metadata and use
+	// the stored title in the revision snapshot.
+	head.Title = "ignored title"
+	head.Content = "three"
+	head.CreatedBy = "user"
+	preserved := &models.TaskPlanRevision{
+		TaskID: "task-plan-pg", Title: "ignored title", Content: "three", AuthorKind: "agent", AuthorName: "claude",
+	}
+	if err := repo.WritePlanRevision(ctx, head, preserved, nil, true, true); err != nil {
+		t.Fatalf("WritePlanRevision(preserve): %v", err)
+	}
+	if head.Title != "Plan v2" || head.CreatedBy != authorKindAgent {
+		t.Errorf("preserved HEAD metadata = %q/%q, want Plan v2/%s", head.Title, head.CreatedBy, authorKindAgent)
+	}
+	if preserved.Title != "Plan v2" {
+		t.Errorf("preserved revision title = %q, want Plan v2", preserved.Title)
+	}
+	gotHead, err = repo.GetTaskPlan(ctx, "task-plan-pg")
+	if err != nil {
+		t.Fatalf("GetTaskPlan after preserve: %v", err)
+	}
+	if gotHead.Title != "Plan v2" || gotHead.CreatedBy != authorKindAgent || gotHead.Content != "three" {
+		t.Errorf("preserved HEAD = %+v, want Plan v2/%s/three", gotHead, authorKindAgent)
+	}
+
 	// The sentinel path on a task with no plan row.
 	if _, err := repo.MarkTaskPlanImplementationStarted(ctx, "task-plan-pg-absent", "s", "a"); !errors.Is(err, ErrTaskPlanNotFound) {
 		t.Errorf("error = %v, want ErrTaskPlanNotFound", err)
@@ -201,5 +226,29 @@ func TestPostgresWritePlanRevisionUpsertAndImplementationMarker(t *testing.T) {
 	missing, err := repo.GetTaskPlan(ctx, "task-plan-pg-absent")
 	if err != nil || missing != nil {
 		t.Errorf("GetTaskPlan(missing) = %+v, %v; want nil, nil", missing, err)
+	}
+}
+
+func TestPostgresWritePlanRevisionMissingTask(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	taskID := "task-plan-pg-missing"
+
+	err = repo.WritePlanRevision(ctx,
+		&models.TaskPlan{ID: "plan-pg-missing", TaskID: taskID, Title: "Plan", Content: "body"},
+		&models.TaskPlanRevision{TaskID: taskID, Title: "Plan", Content: "body", AuthorKind: "agent"},
+		nil, false, false)
+	if !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("WritePlanRevision error = %v, want ErrTaskNotFound", err)
+	}
+	if got := countRows(t, repo, `SELECT COUNT(1) FROM task_plans WHERE task_id = ?`, taskID); got != 0 {
+		t.Fatalf("plan HEAD rows = %d, want 0 after rollback", got)
+	}
+	if got := countRows(t, repo, `SELECT COUNT(1) FROM task_plan_revisions WHERE task_id = ?`, taskID); got != 0 {
+		t.Fatalf("plan revision rows = %d, want 0 after rollback", got)
 	}
 }

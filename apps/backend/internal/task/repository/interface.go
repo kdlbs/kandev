@@ -15,6 +15,7 @@ import (
 var ErrWorkspaceNameMismatch = repoerrors.ErrWorkspaceNameMismatch
 var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 var ErrTaskNotFound = repoerrors.ErrTaskNotFound
+var ErrTaskParentMismatch = repoerrors.ErrTaskParentMismatch
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
 var ErrRepositoryNotFound = repoerrors.ErrRepositoryNotFound
 var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
@@ -172,6 +173,13 @@ type TaskRepoRepository interface {
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
 	ListTaskRepositoriesByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*models.TaskRepository, error)
 	UpdateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error
+	// UpdateTaskRepositoryComparisonTarget atomically replaces or removes the
+	// provider-owned comparison target on one exact attachment. When target is
+	// nil, expected limits removal to the same provider change when supplied.
+	UpdateTaskRepositoryComparisonTarget(ctx context.Context, id string, target *models.ComparisonTarget, expected *models.ComparisonTarget) (*models.TaskRepository, bool, error)
+	// UpdateTaskRepositoryBaseBranchAndClearComparisonTarget changes the manual
+	// base branch and clears any provider-owned comparison target in one write.
+	UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(ctx context.Context, id, baseBranch string) (*models.TaskRepository, bool, error)
 	DeleteTaskRepository(ctx context.Context, id string) error
 	DeleteTaskRepositoriesByTask(ctx context.Context, taskID string) error
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
@@ -208,15 +216,23 @@ type MessageRepository interface {
 	GetMessageWithPromptIndex(ctx context.Context, id string) (*models.Message, error)
 	GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error)
 	GetMessageByPendingID(ctx context.Context, sessionID, pendingID string) (*models.Message, error)
+	GetPermissionMessageByIdentity(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.Message, error)
 	FindMessageByPendingID(ctx context.Context, pendingID string) (*models.Message, error)
 	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*models.Message, error)
 	FindMessageByPendingIDAndQuestion(ctx context.Context, sessionID, pendingID, questionID string) (*models.Message, error)
 	FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error)
 	GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error)
+	// ListPendingInteractions returns the durable request rows behind the
+	// compact pending-action projection, under the same turn/session authority
+	// (ADR 0052). Clarification bundles come back as one row per question.
+	ListPendingInteractions(ctx context.Context, filter models.PendingInteractionFilter) ([]*models.Message, error)
 	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*models.Message, bool, error)
 	FinalizeClarificationResponseDelivery(ctx context.Context, pendingID, terminalStatus string, claimedMessages []*models.Message) ([]*models.Message, bool, error)
 	RestoreActiveClarificationBundle(ctx context.Context, pendingID, terminalStatus string, claimedMessages []*models.Message) ([]*models.Message, bool, error)
 	UpdateMessage(ctx context.Context, message *models.Message) error
+	ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
+	FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
+	GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error)
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
 	ListMessagesByTurnID(ctx context.Context, turnID string) ([]*models.Message, error)
 	ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error)
@@ -353,6 +369,10 @@ type TaskResourceCleanupRepository interface {
 	CreateTaskResourceCleanupJob(ctx context.Context, job *models.TaskResourceCleanupJob) error
 	HasActiveTaskResourceCleanupJob(ctx context.Context, taskID string) (bool, error)
 	UpdateTaskResourceCleanupSnapshot(ctx context.Context, operationID, snapshot string) error
+	// UpdateClaimedTaskResourceCleanupSnapshot persists outcomes produced by one
+	// exact running cleanup attempt. A newer retry or cancellation wins when
+	// the claim no longer matches.
+	UpdateClaimedTaskResourceCleanupSnapshot(ctx context.Context, id string, attempt int, snapshot string) (bool, error)
 	GetTaskResourceCleanupJob(ctx context.Context, id string) (*models.TaskResourceCleanupJob, error)
 	GetTaskResourceCleanupJobByOperationID(ctx context.Context, operationID string) (*models.TaskResourceCleanupJob, error)
 	ListPreparedTaskResourceCleanupJobs(ctx context.Context) ([]*models.TaskResourceCleanupJob, error)
@@ -370,6 +390,9 @@ type GitSnapshotRepository interface {
 	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	GetLatestGitSnapshotsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]*models.GitSnapshot, error)
+	GetLatestGitSnapshotByTaskEnvironmentID(ctx context.Context, taskEnvironmentID string) (*models.GitSnapshot, error)
+	GetLatestGitSnapshotsByTaskEnvironmentIDs(ctx context.Context, taskEnvironmentIDs []string) (map[string]*models.GitSnapshot, error)
+	GetLatestGitStatusSnapshotsByTaskEnvironmentIDs(ctx context.Context, taskEnvironmentIDs []string) ([]*models.GitSnapshot, error)
 	GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	GetGitSnapshotsBySession(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error)
 	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) (bool, error)
@@ -424,6 +447,19 @@ type RepositorySetRepository interface {
 	// cannot land apart. A nil repositoryIDs leaves membership untouched.
 	UpdateRepositorySet(ctx context.Context, set *models.RepositorySet, repositoryIDs *[]string) error
 	DeleteRepositorySet(ctx context.Context, id string) (bool, error)
+}
+
+// RepositoryBranchPolicyRepository stores reusable branch workflows owned by
+// a repository. The batch method is an atomic, one-time Gitflow starter.
+type RepositoryBranchPolicyRepository interface {
+	CreateRepositoryBranchPolicy(ctx context.Context, policy *models.RepositoryBranchPolicy) error
+	GetRepositoryBranchPolicy(ctx context.Context, id string) (*models.RepositoryBranchPolicy, error)
+	GetRepositoryBranchPolicyByName(ctx context.Context, repositoryID, name string) (*models.RepositoryBranchPolicy, error)
+	ListRepositoryBranchPolicies(ctx context.Context, repositoryID string) ([]*models.RepositoryBranchPolicy, error)
+	ListRepositoryBranchPoliciesByWorkspace(ctx context.Context, workspaceID string) ([]*models.RepositoryBranchPolicy, error)
+	UpdateRepositoryBranchPolicy(ctx context.Context, policy *models.RepositoryBranchPolicy) error
+	DeleteRepositoryBranchPolicy(ctx context.Context, id string) (bool, error)
+	CreateRepositoryBranchPoliciesIfEmpty(ctx context.Context, repositoryID string, policies []*models.RepositoryBranchPolicy) error
 }
 
 // RepositorySecretBindingRepository stores normalized repository environment
@@ -562,12 +598,19 @@ type PlanRepository interface {
 	// WritePlanRevision atomically upserts the HEAD plan and writes/merges a revision in a
 	// single transaction. Pass a non-nil coalesceLatestID to merge into an existing revision;
 	// otherwise a new revision is appended with revision_number computed inside the tx.
-	WritePlanRevision(ctx context.Context, head *models.TaskPlan, rev *models.TaskPlanRevision, coalesceLatestID *string) error
+	//
+	// preserveTitle and preserveCreatedBy gate the HEAD upsert's ON CONFLICT branch only: when
+	// true, an existing row keeps its stored title / created_by rather than taking head's value.
+	// They have no effect on a fresh insert, which always uses head's value. Callers set a flag
+	// only when the value they would otherwise overwrite with could not be read (see
+	// docs/specs/tasks/system-design/plan-write-consistency.md, "Existing behavior that must
+	// change"); every other caller passes false.
+	WritePlanRevision(ctx context.Context, head *models.TaskPlan, rev *models.TaskPlanRevision, coalesceLatestID *string, preserveTitle, preserveCreatedBy bool) error
 }
 
 // SubagentContextRepository persists the durable, queryable record of a
 // subagent (Task tool) invocation. See
-// docs/specs/subagent-context-persistence/spec.md.
+// docs/specs/agents/requirements/subagent-context-persistence.md.
 type SubagentContextRepository interface {
 	// UpsertSubagentContext inserts or merges one subagent invocation row,
 	// keyed on (task_session_id, tool_call_id). A single atomic statement —
@@ -575,4 +618,15 @@ type SubagentContextRepository interface {
 	UpsertSubagentContext(ctx context.Context, sc *models.SubagentContext) error
 	ListSubagentContextsBySession(ctx context.Context, sessionID string) ([]*models.SubagentContext, error)
 	ListSubagentContextsByTurn(ctx context.Context, turnID string) ([]*models.SubagentContext, error)
+}
+
+// UsageRepository serves the task-cost-ledger read surface
+// (docs/specs/task-cost-ledger/spec.md AC-18, AC-19, AC-20): per-task and
+// per-session aggregate totals over task_usage_events. The ledger write path
+// (CreateTaskUsageEvent, ListTaskUsageEvents) is deliberately not part of
+// this interface - it is consumed only by internal/task/usage's own narrow
+// Repository interface, never through the Service layer.
+type UsageRepository interface {
+	GetTaskUsageTotals(ctx context.Context, taskID string) (*models.TaskUsageTotals, error)
+	GetSessionUsageTotals(ctx context.Context, sessionID string) (*models.TaskUsageTotals, error)
 }

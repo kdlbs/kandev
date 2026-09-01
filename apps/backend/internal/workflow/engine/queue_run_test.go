@@ -9,13 +9,20 @@ import (
 
 // fakeRunQueue records every QueueRun call.
 type fakeRunQueue struct {
-	calls []QueueRunRequest
-	err   error
+	calls   []QueueRunRequest
+	err     error
+	outcome QueueOutcome
 }
 
-func (f *fakeRunQueue) QueueRun(_ context.Context, req QueueRunRequest) error {
+func (f *fakeRunQueue) QueueRun(_ context.Context, req QueueRunRequest) (QueueOutcome, error) {
 	f.calls = append(f.calls, req)
-	return f.err
+	if f.err != nil {
+		return "", f.err
+	}
+	if f.outcome == "" {
+		return QueueOutcomeQueued, nil
+	}
+	return f.outcome, nil
 }
 
 // fakePrimary returns a fixed agent profile id for any step.
@@ -63,14 +70,18 @@ func (s *sequencePrimary) WorkflowStepIDForTask(_ context.Context, _ string) (st
 	return "step-1", nil
 }
 
-// fakeParticipants returns a static slice for any step.
+// fakeParticipants returns a static slice for any step. ListStepParticipants
+// and ListTaskParticipants both return the same f.list, matching (and
+// exercising) the union/dedupe path that gatherParticipantSlate feeds into
+// canonicalizeByTaskRoleAgent/collapseByRoleAgent.
 type fakeParticipants struct {
-	list          []ParticipantInfo
-	err           error
-	taskStepID    string
-	stepID        *string
-	taskID        *string
-	resolveTaskID *string
+	list              []ParticipantInfo
+	err               error
+	taskStepID        string
+	stepID            *string
+	taskID            *string
+	resolveTaskID     *string
+	taskParticipantID *string
 }
 
 func (f fakeParticipants) ListStepParticipants(_ context.Context, stepID, taskID string) ([]ParticipantInfo, error) {
@@ -88,6 +99,13 @@ func (f fakeParticipants) WorkflowStepIDForTask(_ context.Context, taskID string
 		*f.resolveTaskID = taskID
 	}
 	return f.taskStepID, f.err
+}
+
+func (f fakeParticipants) ListTaskParticipants(_ context.Context, taskID string) ([]ParticipantInfo, error) {
+	if f.taskParticipantID != nil {
+		*f.taskParticipantID = taskID
+	}
+	return f.list, f.err
 }
 
 // fakeCEO returns a fixed agent profile id (or empty / err).
@@ -386,19 +404,28 @@ func TestQueueRunCallback_TargetParticipantRole(t *testing.T) {
 	}
 }
 
+// A cross-task participant_role target must stay step-scoped to the target
+// task's resolved current step (WO-30 review round 1: the any-step slate is
+// only safe for the same-task case, since only there does in.State.WorkflowID
+// scope the read to the task's actual current workflow — see
+// resolveParticipantRoleStepScoped). This asserts the single
+// ListStepParticipants(stepID, taskID) call the pre-WO-30 code made, and that
+// the any-step/any-workflow ListTaskParticipants query is never reached.
 func TestQueueRunCallback_ParticipantRoleUsesResolvedTargetStep(t *testing.T) {
 	q := &fakeRunQueue{}
 	var listedStepID string
-	var listedTaskID string
+	var listedStepTaskID string
+	var listedPerTaskID string
 	var stepResolverTaskID string
 	parts := fakeParticipants{
 		list: []ParticipantInfo{
 			{ID: "p-target", Role: "reviewer", AgentProfileID: "rev-target"},
 		},
-		taskStepID:    "target-step",
-		stepID:        &listedStepID,
-		taskID:        &listedTaskID,
-		resolveTaskID: &stepResolverTaskID,
+		taskStepID:        "target-step",
+		stepID:            &listedStepID,
+		taskID:            &listedStepTaskID,
+		resolveTaskID:     &stepResolverTaskID,
+		taskParticipantID: &listedPerTaskID,
 	}
 	cb := QueueRunCallback{Adapter: q, Participants: parts}
 	in := newQueueRunInput("participant_role:reviewer", "target-task")
@@ -416,8 +443,11 @@ func TestQueueRunCallback_ParticipantRoleUsesResolvedTargetStep(t *testing.T) {
 	if listedStepID != "target-step" {
 		t.Fatalf("participants listed for step %q, want target-step", listedStepID)
 	}
-	if listedTaskID != "target-task" {
-		t.Fatalf("participants listed for task %q, want target-task", listedTaskID)
+	if listedStepTaskID != "target-task" {
+		t.Fatalf("cross-task participant lookup must stay step-scoped to task_id=target-task, got %q", listedStepTaskID)
+	}
+	if listedPerTaskID != "" {
+		t.Fatalf("cross-task participant_role must not reach the any-step/any-workflow ListTaskParticipants query, got task_id %q", listedPerTaskID)
 	}
 	got := q.calls[0]
 	if got.WorkflowStepID != "target-step" {
@@ -767,5 +797,65 @@ func TestQueueRunForEachParticipantCallback_MissingDeps_Errors(t *testing.T) {
 	})
 	if err == nil || !errors.Is(err, ErrActionNotYetWired) {
 		t.Fatalf("expected ErrActionNotYetWired, got %v", err)
+	}
+}
+
+// selectiveFailRunQueue fails QueueRun only for the agent profile ids listed
+// in failFor, recording every call (including the ones it fails) so a test
+// can assert the fan-out kept going past the failure.
+type selectiveFailRunQueue struct {
+	calls   []QueueRunRequest
+	failFor map[string]error
+}
+
+func (f *selectiveFailRunQueue) QueueRun(_ context.Context, req QueueRunRequest) (QueueOutcome, error) {
+	f.calls = append(f.calls, req)
+	if err, ok := f.failFor[req.AgentProfileID]; ok {
+		return "", err
+	}
+	return "", nil
+}
+
+// TestQueueRunForEachParticipantCallback_OneParticipantFailureDoesNotAbortFanOut
+// pins AC-C1: a single participant's QueueRun error must not stop the
+// remaining participants from being queued. Before this fix the loop
+// returned on the first error, so rev-B and rev-C never got a call.
+func TestQueueRunForEachParticipantCallback_OneParticipantFailureDoesNotAbortFanOut(t *testing.T) {
+	boom := errors.New("boom")
+	q := &selectiveFailRunQueue{failFor: map[string]error{"rev-A": boom}}
+	parts := fakeParticipants{list: []ParticipantInfo{
+		{ID: "p1", Role: "reviewer", AgentProfileID: "rev-A"},
+		{ID: "p2", Role: "reviewer", AgentProfileID: "rev-B"},
+		{ID: "p3", Role: "reviewer", AgentProfileID: "rev-C"},
+	}}
+	cb := QueueRunForEachParticipantCallback{Adapter: q, Participants: parts}
+	in := ActionInput{
+		Trigger: TriggerOnEnter,
+		State:   MachineState{TaskID: "task-1"},
+		Step:    StepSpec{ID: "step-1"},
+		Action: Action{
+			Kind: ActionQueueRunForEachParticipant,
+			QueueRunForEachParticipant: &QueueRunForEachParticipantAction{
+				Role: "reviewer",
+			},
+		},
+	}
+
+	_, err := cb.Execute(context.Background(), in)
+	if err == nil {
+		t.Fatalf("expected the joined error from rev-A's failure to be returned")
+	}
+	if !errors.Is(err, boom) {
+		t.Fatalf("expected the returned error to wrap the participant failure, got %v", err)
+	}
+	if len(q.calls) != 3 {
+		t.Fatalf("expected all 3 participants to receive a QueueRun attempt despite rev-A's failure, got %d calls: %#v", len(q.calls), q.calls)
+	}
+	got := []string{q.calls[0].AgentProfileID, q.calls[1].AgentProfileID, q.calls[2].AgentProfileID}
+	want := []string{"rev-A", "rev-B", "rev-C"}
+	for i, w := range want {
+		if got[i] != w {
+			t.Fatalf("call %d agent = %q, want %q (order: %#v)", i, got[i], w, got)
+		}
 	}
 }

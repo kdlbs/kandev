@@ -5,6 +5,7 @@ import type {
   FilterClause,
   GroupKey,
   SidebarSliceState,
+  SidebarTaskRowPresentation,
   SidebarView,
   SidebarViewDraft,
   SortSpec,
@@ -167,12 +168,18 @@ export type QuickChatState = {
   sessionOwnership: Record<string, QuickChatSessionOwnership>;
   syncRevisionByWorkspace: Record<string, number>;
   tombstonedSessions: Record<string, QuickChatSessionTombstone>;
+  /** Optimistic mixed-tab order keyed by workspace until the save settles. */
+  tabOrderByWorkspace: Record<string, string[]>;
+  tabOrderSyncErrorByWorkspace: Record<string, string | null>;
+  tabOrderSyncPendingByWorkspace: Record<string, boolean>;
 };
 
 export type SessionFailureNotification = {
   sessionId: string;
   taskId: string;
   message: string;
+  /** Typed launch failures point users to the persistent task card. */
+  isLaunchFailure?: boolean;
 };
 
 export type TaskDeletedNotification = {
@@ -373,6 +380,15 @@ export type UISliceActions = {
   recordQuickChatSettled: (sessionId: string, updatedAt: string) => boolean;
   /** Removes a server-backed quick-chat session and suppresses late task events. */
   removeQuickChatSession: (sessionId: string) => void;
+  /** Sets the optimistic mixed conversation/terminal order for a workspace. */
+  setQuickChatTabOrder: (workspaceId: string, order: string[]) => void;
+  /** Clears a matching optimistic order after its authoritative save succeeds. */
+  clearQuickChatTabOrder: (workspaceId: string, expectedOrder: string[]) => void;
+  /** Updates the pending/error state for a workspace order save. */
+  setQuickChatTabOrderSyncState: (
+    workspaceId: string,
+    state: { pending: boolean; error: string | null },
+  ) => void;
   setQuickChatInitialPrompt: (sessionId: string, prompt?: string) => void;
   setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
   setTaskDeletedNotification: (n: TaskDeletedNotification | null) => void;
@@ -383,7 +399,12 @@ export type UISliceActions = {
   setSidebarActiveView: (viewId: string) => void;
   createSidebarView: () => string | null;
   updateSidebarDraft: (
-    patch: Partial<{ filters: FilterClause[]; sort: SortSpec; group: GroupKey }>,
+    patch: Partial<{
+      filters: FilterClause[];
+      sort: SortSpec;
+      group: GroupKey;
+      taskRow: SidebarTaskRowPresentation;
+    }>,
   ) => void;
   saveSidebarDraftAs: (name: string) => void;
   saveSidebarDraftOverwrite: () => void;

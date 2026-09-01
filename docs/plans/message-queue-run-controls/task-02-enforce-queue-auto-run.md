@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-persist-queue-auto-run"]
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-run.md"
+spec: "../../specs/ui/requirements/message-queue-run.md"
 ---
 
 # Task 02: Enforce queue Auto-run

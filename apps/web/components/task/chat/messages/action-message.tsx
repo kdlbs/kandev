@@ -1,41 +1,18 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo, memo, type ReactElement } from "react";
+import { useState, useEffect, useMemo, memo, type ReactElement } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import {
-  IconAlertTriangle,
-  IconArchive,
-  IconTrash,
-  IconRefresh,
-  IconPlayerPlay,
-  IconSparkles,
-  IconGitCommit,
-  IconX,
-} from "@tabler/icons-react";
+import { IconAlertTriangle } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
-import { Button } from "@kandev/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { getWebSocketClient } from "@/lib/ws/connection";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
-import { useTaskRemoval } from "@/hooks/use-task-removal";
-import { deleteTask } from "@/lib/api/domains/kanban-api";
+import { useActionMessageSession, useAgentBootOutcomeAfterMessage } from "./action-message-state";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { MessageAction } from "@/components/task/chat/types";
 import { ActionMessageDetails, type ActionMeta } from "./action-message-details";
 import { formatDateTime } from "@/lib/i18n/formats";
 import { parseRetryAt, retryCountdownLabel } from "./transient-retry";
-
-const ICON_MAP: Record<string, React.ElementType> = {
-  archive: IconArchive,
-  trash: IconTrash,
-  refresh: IconRefresh,
-  "player-play": IconPlayerPlay,
-  sparkles: IconSparkles,
-  "git-commit": IconGitCommit,
-  "alert-triangle": IconAlertTriangle,
-  x: IconX,
-};
+import { hasSessionRecoveryResolutionAfter } from "@/hooks/processed-message-filtering";
+import { ActionButtons } from "./action-message-actions";
+import { SessionRecoveryActionButtons, sessionRecoveryAction } from "./action-message-recovery";
 
 function isSessionActive(state?: TaskSessionState) {
   return state === "RUNNING" || state === "STARTING" || state === "COMPLETED";
@@ -46,9 +23,34 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
   // state transition doesn't re-render every message in the list (only the
   // rare action messages that actually depend on it).
   const { t } = useTranslation();
-  const { sessionState, sessionError, activeTurnId } = useActionMessageSession(comment.session_id);
+  const { sessionState, sessionError, sessionMetadata, activeTurnId } = useActionMessageSession(
+    comment.session_id,
+  );
   const metadata = comment.metadata as ActionMeta | undefined;
   const message = comment.content || t("task:anErrorOccurred");
+  const isRecoveryMessage = metadata?.recovery_actions === true;
+  // The recovery acknowledgment lives here, on the message row that stays
+  // mounted, not on SettledFailureMessage: a successful resume drives the
+  // session through STARTING/RUNNING (which unmounts the card via
+  // isSessionActive) and back to WAITING_FOR_INPUT once the agent is idle.
+  // Local state on the card would reset on that remount and the recovery banner
+  // would reappear until the next user message.
+  const [recoveryRequested, setRecoveryRequested] = useState(false);
+  // Durable counterpart to the click acknowledgment: the transcript itself
+  // records that the agent booted again after this failure. It survives a
+  // reload or task switch and also covers auto-resume-on-open, where the card
+  // would otherwise linger until the next prompt flipped the session to RUNNING.
+  const { agentRebooted, agentBootFailed } = useAgentBootOutcomeAfterMessage(
+    comment,
+    isRecoveryMessage,
+  );
+  const recoveryResolvedDurably = isRecoveryMessage
+    ? hasSessionRecoveryResolutionAfter(sessionMetadata, comment.created_at)
+    : false;
+  // The click acknowledgment only covers the wait for that outcome. A recovery
+  // that came back failed — a failed boot row, or a session driven to FAILED —
+  // must surface its card again, buttons included, or the retry is unreachable.
+  const recoveryFailedAgain = agentBootFailed || sessionState === "FAILED";
 
   if (metadata?.action_visibility === "running") {
     if (sessionState === "RUNNING" && comment.turn_id && activeTurnId === comment.turn_id) {
@@ -74,6 +76,11 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
       sessionError={sessionError}
       sessionState={sessionState}
       taskId={comment.task_id}
+      sessionId={comment.session_id}
+      recoveryResolved={
+        recoveryResolvedDurably || agentRebooted || (recoveryRequested && !recoveryFailedAgain)
+      }
+      onRecoveryRequested={() => setRecoveryRequested(true)}
     />
   );
 });
@@ -84,12 +91,18 @@ function SettledActionMessage({
   sessionError,
   sessionState,
   taskId,
+  sessionId,
+  recoveryResolved,
+  onRecoveryRequested,
 }: {
   metadata: ActionMeta | undefined;
   message: string;
   sessionError?: string;
   sessionState?: TaskSessionState;
   taskId?: string;
+  sessionId?: string;
+  recoveryResolved: boolean;
+  onRecoveryRequested: () => void;
 }) {
   // A retry card is persisted against the failed turn, so hide it while the
   // replacement turn is starting or running to avoid showing stale progress.
@@ -106,6 +119,9 @@ function SettledActionMessage({
       sessionError={sessionError}
       sessionState={sessionState}
       taskId={taskId}
+      sessionId={sessionId}
+      recoveryResolved={recoveryResolved}
+      onRecoveryRequested={onRecoveryRequested}
     />
   );
 }
@@ -116,18 +132,26 @@ function SettledFailureMessage({
   sessionError,
   sessionState,
   taskId,
+  sessionId,
+  recoveryResolved,
+  onRecoveryRequested,
 }: {
   metadata: ActionMeta | undefined;
   message: string;
   sessionError?: string;
   sessionState?: TaskSessionState;
   taskId?: string;
+  sessionId?: string;
+  recoveryResolved: boolean;
+  onRecoveryRequested: () => void;
 }) {
-  const [recoveryRequested, setRecoveryRequested] = useState(false);
-
-  // A waiting session can still need recovery, so only hide this persisted
-  // card after its own Resume request is acknowledged (or the session starts).
-  if (isSessionActive(sessionState) || (metadata?.recovery_actions && recoveryRequested))
+  // A waiting session can still need recovery, so only hide this persisted card
+  // once its own recovery resolved: either the Resume click was acknowledged or
+  // the transcript shows the agent booted again after this failure. A resumed
+  // agent settles at WAITING_FOR_INPUT, which isSessionActive deliberately
+  // excludes, so without that second signal the card outlives the failure it
+  // describes.
+  if (isSessionActive(sessionState) || (metadata?.recovery_actions && recoveryResolved))
     return null;
 
   const specialRecovery = renderSpecialRecovery({
@@ -135,7 +159,7 @@ function SettledFailureMessage({
     message,
     sessionError,
     taskId,
-    onRecoveryRequested: () => setRecoveryRequested(true),
+    onRecoveryRequested,
   });
   if (specialRecovery) return specialRecovery;
 
@@ -144,7 +168,6 @@ function SettledFailureMessage({
     metadata?.variant === "warning"
       ? "text-amber-600 dark:text-amber-400"
       : "text-red-600 dark:text-red-400";
-
   return (
     <div className="w-full">
       <div className="flex items-start gap-3 w-full rounded px-2 py-1 -mx-2">
@@ -154,18 +177,50 @@ function SettledFailureMessage({
         <div className="flex-1 min-w-0 pt-0.5">
           <div className={cn("text-xs break-words", textClass)}>{message}</div>
           <ActionMessageDetails metadata={metadata} />
-          {metadata?.actions && metadata.actions.length > 0 && (
-            <ActionButtons
-              actions={metadata.actions}
-              taskId={taskId}
-              onRecoveryRequested={
-                metadata.recovery_actions ? () => setRecoveryRequested(true) : undefined
-              }
-            />
-          )}
+          {renderSettledActionButtons({
+            actions: metadata?.actions,
+            taskId,
+            sessionId,
+            isRecoveryMessage: metadata?.recovery_actions === true,
+            onRecoveryRequested,
+          })}
         </div>
       </div>
     </div>
+  );
+}
+
+function renderSettledActionButtons({
+  actions,
+  taskId,
+  sessionId,
+  isRecoveryMessage,
+  onRecoveryRequested,
+}: {
+  actions?: MessageAction[];
+  taskId?: string;
+  sessionId?: string;
+  isRecoveryMessage: boolean;
+  onRecoveryRequested: () => void;
+}): ReactElement | null {
+  if (!actions || actions.length === 0) return null;
+  const hasSessionRecoveryAction = actions.some((action) => sessionRecoveryAction(action));
+  if (hasSessionRecoveryAction && taskId && sessionId) {
+    return (
+      <SessionRecoveryActionButtons
+        actions={actions}
+        taskId={taskId}
+        sessionId={sessionId}
+        onRecoveryRequested={onRecoveryRequested}
+      />
+    );
+  }
+  return (
+    <ActionButtons
+      actions={actions}
+      taskId={taskId}
+      onRecoveryRequested={isRecoveryMessage ? onRecoveryRequested : undefined}
+    />
   );
 }
 
@@ -393,21 +448,6 @@ function ProviderQuotaRecovery({
   );
 }
 
-function useActionMessageSession(sessionId: Message["session_id"]) {
-  const sessionState = useAppStore((state) =>
-    sessionId ? (state.taskSessions.items[sessionId]?.state ?? undefined) : undefined,
-  );
-  const sessionError = useAppStore((state) =>
-    sessionId
-      ? (state.taskSessions.items[sessionId]?.error_message as string | undefined)
-      : undefined,
-  );
-  const activeTurnId = useAppStore((state) =>
-    sessionId ? (state.turns.activeBySession[sessionId] ?? undefined) : undefined,
-  );
-  return { sessionState, sessionError, activeTurnId };
-}
-
 function RunningActionNotice({
   actions,
   message,
@@ -475,137 +515,4 @@ function MissingBranchRecovery({
       </div>
     </section>
   );
-}
-
-function ActionButtons({
-  actions,
-  taskId,
-  onRecoveryRequested,
-  compact = false,
-  labelOverride,
-}: {
-  actions: MessageAction[];
-  taskId?: string;
-  onRecoveryRequested?: () => void;
-  compact?: boolean;
-  labelOverride?: string;
-}) {
-  return (
-    <div
-      className={cn(
-        compact
-          ? "flex shrink-0 items-center"
-          : "mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center",
-      )}
-    >
-      {actions.map((action, i) => (
-        <ActionButton
-          key={action.test_id ?? i}
-          action={action}
-          messageTaskId={taskId}
-          onCompleted={onRecoveryRequested}
-          compact={compact}
-          labelOverride={labelOverride}
-        />
-      ))}
-    </div>
-  );
-}
-
-function ActionButton({
-  action,
-  messageTaskId,
-  onCompleted,
-  compact = false,
-  labelOverride,
-}: {
-  action: MessageAction;
-  messageTaskId?: string;
-  onCompleted?: () => void;
-  compact?: boolean;
-  labelOverride?: string;
-}): ReactElement | null {
-  const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
-  const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
-  const taskId = messageTaskId || activeTaskId;
-  const store = useAppStoreApi();
-  const archiveAndSwitch = useArchiveAndSwitchTask();
-  const { removeTaskFromBoard } = useTaskRemoval({ store });
-
-  const execute = useCallback(async () => {
-    if (state === "busy") return;
-    setState("busy");
-    try {
-      switch (action.type) {
-        case "archive_task": {
-          if (taskId) await archiveAndSwitch(taskId);
-          break;
-        }
-        case "delete_task": {
-          if (taskId) {
-            const { activeTaskId, activeSessionId } = store.getState().tasks;
-            await deleteTask(taskId);
-            await removeTaskFromBoard(taskId, {
-              wasActiveTaskId: activeTaskId,
-              wasActiveSessionId: activeSessionId,
-            });
-          }
-          break;
-        }
-        case "ws_request": {
-          const client = getWebSocketClient();
-          const params = action.params as
-            | { method: string; payload: Record<string, unknown> }
-            | undefined;
-          if (!client || !params) throw new Error("WebSocket recovery request is unavailable");
-          await client.request(params.method, params.payload);
-          break;
-        }
-      }
-      setState("done");
-      if (action.type === "ws_request") onCompleted?.();
-    } catch {
-      setState("error");
-      setTimeout(() => setState("idle"), 3000);
-    }
-  }, [action, state, taskId, store, archiveAndSwitch, removeTaskFromBoard]);
-
-  // Once a ws_request has been fired, hide this button: it's no longer
-  // actionable. If the recovery succeeds the whole ActionMessage unmounts via
-  // isSessionActive; if it fails, a newer status/error message renders fresh
-  // buttons, so this stale one would just confuse the user.
-  if (state === "done" && action.type === "ws_request") return null;
-
-  const Icon = action.icon ? ICON_MAP[action.icon] : null;
-  const disabled = state === "busy" || state === "done";
-  const isDestructive = action.variant === "destructive";
-
-  const button = (
-    <Button
-      variant={compact ? "ghost" : "outline"}
-      size="sm"
-      className={cn(
-        compact
-          ? "h-auto min-h-11 shrink-0 px-2 text-xs cursor-pointer sm:min-h-8"
-          : "h-auto min-h-11 w-full gap-1.5 text-xs cursor-pointer sm:min-h-8 sm:w-auto",
-        isDestructive && "text-destructive hover:text-destructive",
-      )}
-      disabled={disabled}
-      onClick={execute}
-      data-testid={action.test_id}
-    >
-      {Icon && <Icon className="h-3 w-3" />}
-      {labelOverride ?? action.label}
-    </Button>
-  );
-
-  if (action.tooltip) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>{button}</TooltipTrigger>
-        <TooltipContent side="top">{action.tooltip}</TooltipContent>
-      </Tooltip>
-    );
-  }
-  return button;
 }

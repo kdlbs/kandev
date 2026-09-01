@@ -1,14 +1,27 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
+import { pluginRegistry } from "@/lib/plugins/registry";
+import type { PluginTaskMenuContext } from "@/lib/plugins/types";
 import { TaskItemWithContextMenu } from "./task-switcher-context-menu";
 import type { TaskSwitcherItem } from "./task-switcher-types";
 
-afterEach(() => cleanup());
+const PLUGIN_ID = "example-task-actions";
+const PLUGIN_ACTION_LABEL = "Inspect task";
+
+afterEach(() => {
+  cleanup();
+  pluginRegistry.unregisterPlugin(PLUGIN_ID);
+});
 
 function task(overrides: Partial<TaskSwitcherItem> = {}): TaskSwitcherItem {
   return { id: "task-1", title: "Task 1", state: "IN_PROGRESS", ...overrides };
+}
+
+function ArchiveAwareRow({ archiveConfirmation }: { archiveConfirmation?: ReactNode }) {
+  return <div data-testid="task-row">Task 1{archiveConfirmation}</div>;
 }
 
 /**
@@ -35,7 +48,7 @@ function renderWithDragHandle(overrides: Partial<TaskSwitcherItem> = {}) {
           onClick={onClick}
         >
           <TaskItemWithContextMenu task={task(overrides)} onArchiveTask={onArchiveTask}>
-            <div data-testid="task-row">Task 1</div>
+            <ArchiveAwareRow />
           </TaskItemWithContextMenu>
         </div>
       </ToastProvider>
@@ -48,6 +61,54 @@ async function openContextMenu() {
   fireEvent.contextMenu(screen.getByTestId("task-row"));
   await screen.findByRole("menuitem", { name: /color/i });
 }
+
+function renderPluginMenu(run: (context: PluginTaskMenuContext) => void = vi.fn()) {
+  pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
+    id: "inspect-task",
+    label: PLUGIN_ACTION_LABEL,
+    group: "primary",
+    run,
+  });
+  render(
+    <StateProvider initialState={{ workspaces: { items: [], activeId: "workspace-1" } }}>
+      <ToastProvider>
+        <TaskItemWithContextMenu task={task({ workflowStepId: "step-1" })}>
+          <div data-testid="plugin-task-row">Task 1</div>
+        </TaskItemWithContextMenu>
+      </ToastProvider>
+    </StateProvider>,
+  );
+  fireEvent.contextMenu(screen.getByTestId("plugin-task-row"));
+}
+
+describe("TaskItemWithContextMenu — plugin primary actions", () => {
+  it("runs a generic primary action with the sidebar task context", async () => {
+    const run = vi.fn();
+    renderPluginMenu(run);
+
+    fireEvent.click(screen.getByRole("menuitem", { name: PLUGIN_ACTION_LABEL }));
+    await Promise.resolve();
+
+    expect(run).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      taskId: "task-1",
+      taskTitle: "Task 1",
+      workflowStepId: "step-1",
+      presentation: "desktop",
+    });
+  });
+
+  it("removes an action from an already-open menu when its plugin unregisters", async () => {
+    renderPluginMenu();
+    expect(screen.getByRole("menuitem", { name: PLUGIN_ACTION_LABEL })).not.toBeNull();
+
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("menuitem", { name: PLUGIN_ACTION_LABEL })).toBeNull();
+    });
+  });
+});
 
 // happy-dom's TouchEvent drops the touches/changedTouches init, so the touch
 // events in the cancellation tests stub it faithfully.
@@ -124,8 +185,13 @@ describe("TaskItemWithContextMenu — pointer containment", () => {
 
     fireEvent.click(screen.getByRole("menuitem", { name: /archive/i }));
 
-    expect(onArchiveTask).toHaveBeenCalledTimes(1);
-    expect(onArchiveTask).toHaveBeenCalledWith("task-1");
+    expect(onArchiveTask).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Archive$/ }));
+    await waitFor(() => {
+      expect(onArchiveTask).toHaveBeenCalledTimes(1);
+      expect(onArchiveTask).toHaveBeenCalledWith("task-1", { cascade: false });
+    });
     expect(onClick).not.toHaveBeenCalled();
   });
 });

@@ -338,7 +338,7 @@ function CapabilitiesRowContent({
     <div className={gapCls}>
       <div className="flex items-end gap-2" data-testid="profile-capabilities-model-row">
         <div
-          className={`flex-1 min-w-0 ${gapCls}`}
+          className={`${hasModes ? "flex-1" : "w-full md:max-w-xl"} min-w-0 ${gapCls}`}
           data-settings-dirty={profileModelIsDirty(profile, baselineProfile)}
           data-settings-dirty-level="container"
         >
@@ -404,21 +404,47 @@ function NameField({
   const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between gap-4">
-      <div className="flex-1 space-y-2">
-        <SettingsFieldLabel>{t("agents:profileName")}</SettingsFieldLabel>
-        <Input
-          data-testid="profile-name-input"
-          value={profile.name}
-          onChange={(event) => onChange({ name: event.target.value })}
-          placeholder={t("agents:defaultProfile")}
-          data-settings-dirty={baselineName !== undefined && profile.name !== baselineName}
-        />
-      </div>
+      <ProfileNameField
+        value={profile.name}
+        onChange={(value) => onChange({ name: value })}
+        dirty={baselineName !== undefined && profile.name !== baselineName}
+      />
       {canRemove && onRemove && (
         <Button size="sm" variant="ghost" className="cursor-pointer" onClick={onRemove}>
           {t("agents:remove")}
         </Button>
       )}
+    </div>
+  );
+}
+
+export type ProfileNameFieldProps = {
+  value: string;
+  onChange: (value: string) => void;
+  dirty?: boolean;
+  id?: string;
+  testId?: string;
+};
+
+export function ProfileNameField({
+  value,
+  onChange,
+  dirty = false,
+  id,
+  testId = "profile-name-input",
+}: ProfileNameFieldProps) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex-1 space-y-2">
+      <SettingsFieldLabel htmlFor={id}>{t("agents:profileName")}</SettingsFieldLabel>
+      <Input
+        id={id}
+        data-testid={testId}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={t("agents:defaultProfile")}
+        data-settings-dirty={dirty}
+      />
     </div>
   );
 }

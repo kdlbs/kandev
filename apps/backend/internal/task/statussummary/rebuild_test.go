@@ -86,6 +86,44 @@ func TestBuildFromAuthoritativeAggregatesDurableSources(t *testing.T) {
 	}
 }
 
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.10
+func TestBuildFromAuthoritativeAggregatesAutomationOnlyForOpenPullRequests(t *testing.T) {
+	got := BuildFromAuthoritative(RebuildInput{
+		PRObserved: true,
+		PullRequests: []PullRequestInput{
+			{Key: "repo-a#1", State: prStateOpen, Number: 1, AutoFixEnabled: true},
+			{Key: "repo-a#2", State: prStateOpen, Number: 2, AutoMergeEnabled: true},
+			{Key: "repo-a#3", State: prStateMerged, Number: 3, AutoFixEnabled: true, AutoMergeEnabled: true},
+			{Key: "repo-a#4", State: prStateClosed, Number: 4, AutoFixEnabled: true, AutoMergeEnabled: true},
+		},
+	})
+
+	if got.PullRequest == nil {
+		t.Fatal("pull request summary is nil")
+	}
+	if !got.PullRequest.AutoFixEnabled || !got.PullRequest.AutoMergeEnabled {
+		t.Fatalf("automation flags = %+v, want both active flags", got.PullRequest)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.10
+func TestBuildFromAuthoritativeOmitsAutomationForTerminalPullRequests(t *testing.T) {
+	got := BuildFromAuthoritative(RebuildInput{
+		PRObserved: true,
+		PullRequests: []PullRequestInput{
+			{Key: "repo-a#3", State: prStateMerged, Number: 3, AutoFixEnabled: true},
+			{Key: "repo-a#4", State: prStateClosed, Number: 4, AutoMergeEnabled: true},
+		},
+	})
+
+	if got.PullRequest == nil {
+		t.Fatal("pull request summary is nil")
+	}
+	if got.PullRequest.AutoFixEnabled || got.PullRequest.AutoMergeEnabled {
+		t.Fatalf("terminal automation flags = %+v, want both false", got.PullRequest)
+	}
+}
+
 func TestDeriveForegroundActivityPrefersGeneratingOverBackground(t *testing.T) {
 	got := deriveForegroundActivity([]string{activityBackground, activityGenerating})
 	if got != activityGenerating {
@@ -106,6 +144,23 @@ func TestBuildFromAuthoritativeLeavesUnavailableOptionalSourcesEmpty(t *testing.
 	}
 	if got.PullRequest != nil {
 		t.Fatalf("pull request summary = %+v, want nil when source was not observed", got.PullRequest)
+	}
+}
+
+func TestBuildFromAuthoritativeSuppressesGitTotalsWhenComparisonIsUnavailable(t *testing.T) {
+	got := BuildFromAuthoritative(RebuildInput{
+		GitObserved: true,
+		Git: []RebuildGit{
+			{Repository: "fork", Summary: GitSummary{Additions: 8, Deletions: 2, ChangedFiles: 3, Ahead: 1}},
+			{Repository: "upstream", Summary: GitSummary{ComparisonUnavailable: true}},
+		},
+	})
+
+	if got.Git == nil {
+		t.Fatal("Git summary is nil")
+	}
+	if want := (GitSummary{ComparisonUnavailable: true}); *got.Git != want {
+		t.Fatalf("Git summary = %+v, want %+v", *got.Git, want)
 	}
 }
 

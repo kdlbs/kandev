@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, memo, forwardRef, useImperativeHandle } fro
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { RenderItem } from "@/hooks/use-processed-messages";
-import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
+import { OLDER_PAGE_LIMIT, useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
 import { MessageListFooter } from "./message-list-footer";
 import { useNativeScrollManagement } from "./message-list-native-scroll";
@@ -93,6 +93,7 @@ type NativeMessageListScrollParams = {
   onFirstMessageHiddenChange: ((isHidden: boolean) => void) | undefined;
   /** Changes when transcript status rows can add/remove space above messages. */
   scrollLayoutKey: string;
+  isVisible: boolean;
 };
 
 type ScrollToDividerOptions = {
@@ -120,20 +121,23 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     firstMessageId,
     onFirstMessageHiddenChange,
     scrollLayoutKey,
+    isVisible,
   } = params;
-  const { handleScrollToMessage, sentinelRef, markNotNearBottom } = useNativeScrollManagement({
-    scrollRef,
-    items,
-    messages,
-    isWorking,
-    sessionId,
-    enabled,
-    hasUnreadDivider: Boolean(dividerBeforeItemKey),
-    messagesLoading,
-    hasMore,
-    isLoadingMore,
-    loadMore,
-  });
+  const { handleScrollToMessage, sentinelRef, markNotNearBottom, retryLoadMore, showRecovery } =
+    useNativeScrollManagement({
+      scrollRef,
+      items,
+      messages,
+      isWorking,
+      sessionId,
+      enabled,
+      hasUnreadDivider: Boolean(dividerBeforeItemKey),
+      messagesLoading,
+      hasMore,
+      isLoadingMore,
+      loadMore,
+      isVisible,
+    });
   const anchoredBarOffsetPx = anchoredBarScrollOffsetPx(anchoredBarHeight);
   useEffect(() => {
     scrollRef.current?.style.setProperty("--anchored-bar-h", `${anchoredBarOffsetPx}px`);
@@ -152,7 +156,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     firstMessageId,
     onFirstMessageHiddenChange,
   );
-  return { handleScrollToMessage, sentinelRef };
+  return { handleScrollToMessage, sentinelRef, retryLoadMore, showRecovery };
 }
 
 type MessageRowProps = {
@@ -169,6 +173,12 @@ type MessageRowProps = {
   onScrollToMessage: (messageId: string, options?: { align?: "start" | "center" }) => void;
   dividerBeforeItemKey?: string | null;
 };
+
+function getItemTurnId(item: RenderItem): string | undefined {
+  if (item.type === "turn_group") return item.turnId ?? undefined;
+  if (item.type === "message") return item.message.turn_id ?? undefined;
+  return undefined;
+}
 
 /** One transcript row, keyed and DOM-id'd by `getItemKey` so the scroll
  * affordances (and `scrollToMessage`) can locate it directly. */
@@ -190,6 +200,8 @@ function MessageRow({
   return (
     <div
       id={`msg-${key}`}
+      data-turn-id={getItemTurnId(item)}
+      tabIndex={-1}
       className="pb-2 scroll-mt-[calc(4rem+env(safe-area-inset-top))] sm:scroll-mt-[var(--anchored-bar-h,0px)]"
       style={{ overflowAnchor: "none" }}
     >
@@ -228,7 +240,8 @@ type NativeMessageListBodyProps = {
   isLoadingMore: boolean;
   isInitialLoading: boolean;
   showLoadingState: boolean;
-  loadMore: () => Promise<number>;
+  retryLoadMore: () => void;
+  showRecovery: boolean;
   sentinelRef: (node: HTMLDivElement | null) => void;
   lastTurnGroupId: string | null;
   activeTurnId: string | null;
@@ -370,7 +383,8 @@ function NativeMessageListBody({
   isLoadingMore,
   isInitialLoading,
   showLoadingState,
-  loadMore,
+  retryLoadMore,
+  showRecovery,
   sentinelRef,
   lastTurnGroupId,
   activeTurnId,
@@ -391,7 +405,8 @@ function NativeMessageListBody({
         messagesLoading={messagesLoading}
         isInitialLoading={isInitialLoading}
         messagesCount={messages.length}
-        onLoadMore={loadMore}
+        onLoadMore={retryLoadMore}
+        showRecovery={showRecovery}
       />
 
       {items.map((item) => (
@@ -459,6 +474,7 @@ export const NativeMessageList = memo(
       stickyPromptBar,
       dividerBeforeItemKey,
       anchoredBarHeight,
+      isVisible = true,
     }: MessageListProps,
     ref,
   ) {
@@ -470,39 +486,43 @@ export const NativeMessageList = memo(
       isWorking,
       sessionState,
     });
-    const { loadMore, hasMore, isLoadingMore } = useLazyLoadMessages(sessionId);
+    const { loadMore, hasMore, isLoadingMore } = useLazyLoadMessages(sessionId, {
+      minTextPartsPerLoad: OLDER_PAGE_LIMIT,
+    });
     const { activeTurnId } = useSessionTurn(sessionId);
     const effectiveActiveTurnId = getEffectiveActiveTurnId(activeTurnId, isWorking);
     const streamingMessageId = getStreamingAgentMessageId(messages);
     const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
     const autoScrollEnabled = useTranscriptAutoScrollEnabled(sessionId);
-    const { handleScrollToMessage, sentinelRef } = useNativeMessageListScroll({
-      scrollRef,
-      ref,
-      items,
-      messages,
-      isWorking,
-      sessionId,
-      enabled: autoScrollEnabled,
-      dividerBeforeItemKey,
-      anchoredBarHeight,
-      messagesLoading,
-      hasMore,
-      isLoadingMore,
-      loadMore,
-      lastPromptMessageId,
-      onLastPromptEdgeChange,
-      firstMessageId,
-      onFirstMessageHiddenChange,
-      scrollLayoutKey: [
-        messagesLoading,
-        isInitialLoading,
-        showLoadingState,
-        isLoadingMore,
-        hasMore,
+    const { handleScrollToMessage, sentinelRef, retryLoadMore, showRecovery } =
+      useNativeMessageListScroll({
+        scrollRef,
+        ref,
+        items,
+        messages,
         isWorking,
-      ].join(":"),
-    });
+        sessionId,
+        enabled: autoScrollEnabled,
+        dividerBeforeItemKey,
+        anchoredBarHeight,
+        messagesLoading,
+        hasMore,
+        isLoadingMore,
+        loadMore,
+        lastPromptMessageId,
+        onLastPromptEdgeChange,
+        firstMessageId,
+        onFirstMessageHiddenChange,
+        scrollLayoutKey: [
+          messagesLoading,
+          isInitialLoading,
+          showLoadingState,
+          isLoadingMore,
+          hasMore,
+          isWorking,
+        ].join(":"),
+        isVisible,
+      });
 
     return (
       <SessionPanelContent
@@ -529,7 +549,8 @@ export const NativeMessageList = memo(
           isLoadingMore={isLoadingMore}
           isInitialLoading={isInitialLoading}
           showLoadingState={showLoadingState}
-          loadMore={loadMore}
+          retryLoadMore={retryLoadMore}
+          showRecovery={showRecovery}
           sentinelRef={sentinelRef}
           lastTurnGroupId={lastTurnGroupId}
           activeTurnId={effectiveActiveTurnId}

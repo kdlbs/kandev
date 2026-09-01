@@ -98,6 +98,8 @@ func TestActionConstants_MatchWebSocketActions(t *testing.T) {
 	assert.Equal(t, "mcp.delete_agent_profile", ws.ActionMCPDeleteAgentProfile)
 	assert.Equal(t, "mcp.get_mcp_config", ws.ActionMCPGetMcpConfig)
 	assert.Equal(t, "mcp.update_mcp_config", ws.ActionMCPUpdateMcpConfig)
+	assert.Equal(t, "mcp.list_shared_prompts", ws.ActionMCPListSharedPrompts)
+	assert.Equal(t, "mcp.get_shared_prompt", ws.ActionMCPGetSharedPrompt)
 	assert.Equal(t, "mcp.list_executors", ws.ActionMCPListExecutors)
 	assert.Equal(t, "mcp.list_executor_profiles", ws.ActionMCPListExecutorProfiles)
 	assert.Equal(t, "mcp.create_executor_profile", ws.ActionMCPCreateExecutorProfile)

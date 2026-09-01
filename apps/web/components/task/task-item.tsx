@@ -1,39 +1,26 @@
 "use client";
 
-import { memo } from "react";
-import {
-  IconAlertCircle,
-  IconChevronDown,
-  IconCircleCheck,
-  IconCircleDashed,
-  IconDots,
-  IconMessageQuestion,
-  IconProgressCheck,
-  IconPinFilled,
-  IconShieldQuestion,
-} from "@tabler/icons-react";
-import { IssueTaskIcon } from "@/components/github/issue-task-icon";
-import { TaskContributionIcons } from "./task-contribution-icons";
+import { memo, type ReactNode } from "react";
+import { IconChevronDown } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { computeRowIndent, resolveRowDepth } from "@/lib/sidebar/row-indent";
 import { TaskItemStatsRow } from "./task-item-stats-row";
 import { useTaskColor } from "@/hooks/use-task-color";
 import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
 import type { ForegroundActivity, TaskState, TaskSessionState } from "@/lib/types/http";
-import {
-  InterruptedTaskIcon,
-  isTerminalInterruptedState,
-  shouldUseQuestionTaskIcon,
-  shouldUsePermissionTaskIcon,
-} from "@/lib/ui/state-icons";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
-import { classifyTask } from "./task-classify";
+import { TaskRowMetadata } from "./task-row-plugin-slots";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
-import { TaskAutopilotIcon } from "@/components/task/task-autopilot-icon";
+import { TaskItemComparisonUnavailable } from "./task-item-comparison-unavailable";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
-import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
+import { TaskItemLeadingBadges } from "./task-item-leading-badges";
+import {
+  resolveTaskRowPresentation,
+  type ResolvedTaskRowPresentation,
+} from "./task-row-presentation";
+import { TaskItemTrailing } from "./task-item-trailing";
+import { TaskStateIcon } from "./task-state-icon";
 
 type DiffStats = {
   additions: number;
@@ -64,6 +51,7 @@ type TaskItemProps = {
    */
   onSelect?: (e: React.MouseEvent | React.KeyboardEvent) => void;
   diffStats?: DiffStats;
+  comparisonUnavailable?: boolean;
   isRemoteExecutor?: boolean;
   remoteExecutorId?: string;
   remoteExecutorType?: string;
@@ -72,8 +60,11 @@ type TaskItemProps = {
   lastActivityAt?: string;
   showActivityTime?: boolean;
   menuOpen?: boolean;
+  archiveConfirmation?: ReactNode;
   isDeleting?: boolean;
   taskId?: string;
+  /** Drives the `task-row-metadata` plugin slot's `workflowStepId`. */
+  workflowStepId?: string | null;
   primarySessionId?: string | null;
   hasPendingClarification?: boolean;
   hasPendingPermission?: boolean;
@@ -95,7 +86,18 @@ type TaskItemProps = {
   subtasksCollapsed?: boolean;
   /** Toggles subtask visibility when the chevron is clicked. */
   onToggleSubtasks?: () => void;
-  repositories?: string[];
+  /**
+   * The task's repository as a stable slug (or name). A multi-repository task
+   * carries its primary repository here for compatibility. The complete
+   * ordered repository combination is projected through
+   * `TaskSwitcherItem.repositories` for sidebar grouping.
+   */
+  repositoryPath?: string;
+  /**
+   * Whether this row should name its repository. False when the list is grouped
+   * by repository, where the section header already says it.
+   */
+  showRepository?: boolean;
   prInfo?: { number: number; state: string; aggregateState?: string };
   /** Number of prompts currently en-queued for this task (mail badge). */
   queuedCount?: number;
@@ -104,21 +106,8 @@ type TaskItemProps = {
   issueInfo?: { url: string; number: number };
   isPinned?: boolean;
   agentErrorMessage?: string | null;
+  taskRowPresentation?: import("@/lib/state/slices/ui/sidebar-task-row-presentation").SidebarTaskRowPresentation;
 };
-
-// Delegates to the shared classifier in task-switcher so the sidebar bucket
-// and the per-task running spinner always agree. A task whose workflow state
-// is REVIEW or COMPLETED must not render as "running" when its session
-// transiently cycles through STARTING/RUNNING (e.g. during an agent auto-
-// resume after a backend restart).
-function computeIsInProgress(state?: TaskState, sessionState?: TaskSessionState): boolean {
-  return classifyTask(sessionState, state) === "in_progress";
-}
-
-function computeIsPreparing(state?: TaskState, sessionState?: TaskSessionState): boolean {
-  if (state === "SCHEDULING") return true;
-  return sessionState === "STARTING" && classifyTask(sessionState, state) !== "review";
-}
 
 function handleTaskItemKeyDown(
   e: React.KeyboardEvent<HTMLDivElement>,
@@ -148,13 +137,19 @@ function taskItemRowClassName(
   isSelected: boolean,
   isMultiSelected: boolean,
   isRoot: boolean,
+  hasDetails: boolean,
 ): string {
+  const rowSurfaceClass = isSelected
+    ? "border-y border-primary/50 bg-primary/15 hover:bg-primary/20"
+    : "hover:bg-foreground/[0.05]";
+
   return cn(
-    "group relative flex w-full items-start gap-2 py-2 pr-3 text-left text-sm outline-none cursor-pointer",
-    "transition-colors duration-75 hover:bg-foreground/[0.05]",
-    isSelected && "bg-primary/10",
-    // When a row is both the active task and multi-selected, keep the stronger
-    // active background and just add the selection ring on top.
+    "group relative flex w-full gap-2 py-2 pr-3 text-left text-sm outline-none cursor-pointer",
+    hasDetails ? "items-start" : "items-center",
+    "transition-colors duration-75",
+    rowSurfaceClass,
+    // When a row is multi-selected, keep the active background when applicable
+    // and add only the existing selection ring for the multi-selection state.
     isMultiSelected && !isSelected && "bg-primary/5",
     isMultiSelected && "ring-1 ring-inset ring-primary/40",
     isRoot && "pl-3",
@@ -169,156 +164,15 @@ function taskItemRowClick(
   return (e) => (onSelect ? onSelect(e) : onClick?.());
 }
 
-function BackgroundWorkTaskIcon() {
-  const { t } = useTranslation();
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          aria-label={t("task:backgroundWorkIsRunning")}
-          tabIndex={0}
-          className="mt-[1px] flex shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1"
-        >
-          <IconCircleDashed
-            aria-hidden="true"
-            data-testid="task-state-background-running"
-            className="h-3.5 w-3.5 shrink-0 animate-spin text-violet-500"
-          />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="right">{t("task:backgroundWorkIsRunning")}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function TaskStateIcon({
-  sessionState,
-  state,
-  foregroundActivity,
-  isInProgress,
-  hasPendingClarification,
-  hasPendingPermission,
-  isOnLastWorkflowStep,
-  interrupted,
-}: {
-  sessionState?: TaskSessionState;
-  state?: TaskState;
-  foregroundActivity?: ForegroundActivity | null;
-  isInProgress: boolean;
-  hasPendingClarification?: boolean;
-  hasPendingPermission?: boolean;
-  isOnLastWorkflowStep?: boolean;
-  /** True when the task's session was mid-turn when the backend died. */
-  interrupted?: boolean;
-}) {
-  if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
-    return (
-      <IconShieldQuestion
-        data-testid="task-state-pending-permission"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-amber-500"
-      />
-    );
-  }
-  if (hasPendingClarification) {
-    return (
-      <IconMessageQuestion
-        data-testid="task-state-waiting-for-input"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500"
-      />
-    );
-  }
-  if (foregroundActivity === "generating") {
-    return (
-      <IconCircleDashed
-        data-testid="task-state-running"
-        data-loading-phase="running"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500 animate-spin"
-      />
-    );
-  }
-  if (foregroundActivity === "background") {
-    return <BackgroundWorkTaskIcon />;
-  }
-  if (shouldUseQuestionTaskIcon(state)) {
-    return (
-      <IconMessageQuestion
-        data-testid="task-state-waiting-for-input"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500"
-      />
-    );
-  }
-  if (computeIsPreparing(state, sessionState)) {
-    return (
-      <IconCircleDashed
-        data-testid="task-state-running"
-        data-loading-phase="preparing"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground/40 [animation-duration:2s]"
-      />
-    );
-  }
-  // When the aggregate is unknown, a live turn safely falls back to the
-  // established generating spinner rather than a done affordance.
-  if (isInProgress) {
-    return (
-      <IconCircleDashed
-        data-testid="task-state-running"
-        data-loading-phase="running"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500 animate-spin"
-      />
-    );
-  }
-  // The task's session was mid-turn when the backend died (startup
-  // reconciliation marker). Show the red interruption icon instead of the
-  // idle/done affordances; every active/pending state above already won, and
-  // terminal states keep their own icons.
-  if (interrupted && !isTerminalInterruptedState(state, sessionState)) {
-    return <InterruptedTaskIcon className="mt-[1px] h-3.5 w-3.5 shrink-0" />;
-  }
-  if (classifyTask(sessionState, state) === "review") {
-    if (isOnLastWorkflowStep) {
-      return (
-        <IconCircleCheck
-          data-testid="task-state-workflow-complete"
-          className="mt-[1px] h-3.5 w-3.5 shrink-0 text-green-500"
-        />
-      );
-    }
-    return (
-      <IconProgressCheck
-        data-testid="task-state-turn-finished"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-green-500"
-      />
-    );
-  }
-  return (
-    <IconCircleDashed
-      data-testid="task-state-backlog"
-      className="mt-[1px] h-3.5 w-3.5 shrink-0 text-muted-foreground/40"
-    />
-  );
-}
-
-function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpen: boolean }) {
-  return (
-    <div
-      data-testid="sidebar-task-diff-stats"
-      className={cn(
-        "mobile-task-diff-stats shrink-0 self-center font-mono text-[11px] transition-opacity duration-100",
-        menuOpen
-          ? "opacity-0"
-          : "[@media(hover:hover)]:group-hover:opacity-0 group-focus-within/actions:opacity-0",
-      )}
-    >
-      <span className="text-emerald-500">+{diffStats.additions}</span>{" "}
-      <span className="text-rose-500">-{diffStats.deletions}</span>
-    </div>
-  );
+function TaskItemTitle({ title }: { title: string }) {
+  return <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>;
 }
 
 function TaskItemContent({
   title,
   autopilot,
   taskId,
+  workflowStepId,
   isRemoteExecutor,
   remoteExecutorId,
   remoteExecutorType,
@@ -326,19 +180,20 @@ function TaskItemContent({
   primarySessionId,
   isArchived,
   isPinned,
-  repositories,
-  updatedAt,
-  lastActivityAt,
-  showActivityTime,
+  repositoryPath,
   prInfo,
   queuedCount,
   wipQueue,
   issueInfo,
   agentErrorMessage,
+  comparisonUnavailable,
+  resolvedTaskRow,
+  relativeTime,
 }: {
   title: string;
   autopilot?: boolean;
   taskId?: string;
+  workflowStepId?: string | null;
   isRemoteExecutor?: boolean;
   remoteExecutorId?: string;
   remoteExecutorType?: string;
@@ -346,32 +201,31 @@ function TaskItemContent({
   primarySessionId?: string | null;
   isArchived?: boolean;
   isPinned?: boolean;
-  repositories?: string[];
-  updatedAt?: string;
-  lastActivityAt?: string;
-  showActivityTime?: boolean;
+  repositoryPath?: string;
   prInfo?: { number: number; state: string; aggregateState?: string };
   queuedCount?: number;
   wipQueue?: WipQueueStatus;
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
+  comparisonUnavailable?: boolean;
+  resolvedTaskRow: ResolvedTaskRowPresentation;
+  relativeTime?: string;
 }) {
   const { t } = useTranslation();
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
-        <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
-        {autopilot && <TaskAutopilotIcon />}
-        {isPinned && (
-          <IconPinFilled
-            data-testid="task-pinned-icon"
-            className="h-3 w-3 shrink-0 text-muted-foreground/60"
-          />
-        )}
-        <TaskContributionIcons taskId={taskId} prInfo={prInfo} />
-        {taskId ? <RegisteredChangeRequestTaskIcon taskId={taskId} /> : null}
-        {issueInfo && <IssueTaskIcon issueInfo={issueInfo} />}
-        {agentErrorMessage && <TaskAgentErrorIcon message={agentErrorMessage} />}
+        <TaskItemTitle title={title} />
+        <TaskItemLeadingBadges
+          autopilot={autopilot}
+          isPinned={isPinned}
+          taskId={taskId}
+          prInfo={prInfo}
+          showChangeRequestStatus={resolvedTaskRow.trailing !== "change_request_status"}
+          issueInfo={issueInfo}
+          agentErrorMessage={agentErrorMessage}
+        />
+        <TaskItemComparisonUnavailable unavailable={comparisonUnavailable} />
         {isRemoteExecutor && (
           <RemoteCloudTooltip
             taskId={taskId ?? ""}
@@ -388,45 +242,68 @@ function TaskItemContent({
           </span>
         )}
       </span>
-      {repositories && repositories.length > 1 && (
-        <span className="truncate text-[11px] text-muted-foreground/50">
-          {repositories.join(" · ")}
-        </span>
+      {taskId && resolvedTaskRow.detailsEnabled && (
+        <TaskRowMetadata
+          taskId={taskId}
+          workflowStepId={workflowStepId ?? null}
+          surface="sidebar"
+        />
       )}
-      <TaskItemStatsRow
-        updatedAt={showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt}
-        prInfo={prInfo}
-        primarySessionId={primarySessionId}
-        queuedCount={queuedCount}
-        wipQueue={wipQueue}
-      />
+      {resolvedTaskRow.detailsEnabled && (
+        <TaskItemStatsRow
+          updatedAt={relativeTime}
+          repositoryLabel={resolvedTaskRow.showRepository ? repositoryPath : undefined}
+          prInfo={resolvedTaskRow.showPullRequestNumber ? prInfo : undefined}
+          primarySessionId={primarySessionId}
+          queuedCount={queuedCount}
+          wipQueue={wipQueue}
+          detailOrder={resolvedTaskRow.detailOrder}
+          showRelativeTime={resolvedTaskRow.showRelativeTime}
+          showRepository={resolvedTaskRow.showRepository}
+          showPullRequestNumber={resolvedTaskRow.showPullRequestNumber}
+        />
+      )}
     </div>
   );
 }
 
-function TaskAgentErrorIcon({ message }: { message: string }) {
-  const { t } = useTranslation();
+function TaskItemActions({
+  archiveConfirmation,
+  resolvedTaskRow,
+  diffStats,
+  menuOpen,
+  effectiveMenuOpen,
+  relativeTime,
+  taskId,
+  prInfo,
+}: {
+  archiveConfirmation?: ReactNode;
+  resolvedTaskRow: ResolvedTaskRowPresentation;
+  diffStats?: DiffStats;
+  menuOpen: boolean;
+  effectiveMenuOpen: boolean;
+  relativeTime?: string;
+  taskId?: string;
+  prInfo?: { number: number; state: string; aggregateState?: string };
+}) {
+  if (archiveConfirmation) {
+    return (
+      <div className="min-w-0 basis-full flex items-center justify-end">{archiveConfirmation}</div>
+    );
+  }
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          data-testid="task-agent-error-icon"
-          className="inline-flex shrink-0 cursor-help text-destructive"
-          aria-label={t("task:taskHasAnAgentError")}
-        >
-          <IconAlertCircle className="h-3.5 w-3.5" aria-hidden="true" />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="right" className="max-w-[320px] whitespace-pre-wrap break-words">
-        {message}
-      </TooltipContent>
-    </Tooltip>
+    <TaskItemTrailing
+      trailing={resolvedTaskRow.trailing}
+      diffStats={diffStats}
+      menuOpen={menuOpen}
+      effectiveMenuOpen={effectiveMenuOpen}
+      relativeTime={relativeTime}
+      taskId={taskId}
+      prInfo={prInfo}
+    />
   );
 }
 
-// The row keeps its state and accessibility affordances together for keyboard
-// selection, so this small exception avoids splitting that interaction across
-// multiple components.
 // eslint-disable-next-line max-lines-per-function
 export const TaskItem = memo(function TaskItem({
   title,
@@ -440,6 +317,8 @@ export const TaskItem = memo(function TaskItem({
   onClick,
   onSelect,
   diffStats,
+  archiveConfirmation,
+  comparisonUnavailable,
   isRemoteExecutor,
   remoteExecutorId,
   remoteExecutorType,
@@ -450,6 +329,7 @@ export const TaskItem = memo(function TaskItem({
   menuOpen = false,
   isDeleting,
   taskId,
+  workflowStepId,
   primarySessionId,
   hasPendingClarification,
   hasPendingPermission,
@@ -459,7 +339,8 @@ export const TaskItem = memo(function TaskItem({
   subtaskCount,
   subtasksCollapsed,
   onToggleSubtasks,
-  repositories,
+  repositoryPath,
+  showRepository = true,
   prInfo,
   queuedCount,
   wipQueue,
@@ -467,9 +348,11 @@ export const TaskItem = memo(function TaskItem({
   isPinned,
   agentErrorMessage,
   isOnLastWorkflowStep = false,
+  taskRowPresentation,
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
-  const hasDiffStats = !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
+  const resolvedTaskRow = resolveTaskRowPresentation(taskRowPresentation, { showRepository });
+  const relativeTime = showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt;
   const taskColor = useTaskColor(taskId);
   const indent = computeRowIndent(resolveRowDepth(depth, isSubTask));
 
@@ -483,7 +366,15 @@ export const TaskItem = memo(function TaskItem({
       onClick={taskItemRowClick(onSelect, onClick)}
       onKeyDown={(e) => handleTaskItemKeyDown(e, onSelect, onClick)}
       style={indent.depth > 0 ? { paddingLeft: indent.paddingLeftPx } : undefined}
-      className={taskItemRowClassName(isSelected, isMultiSelected, indent.depth === 0)}
+      className={cn(
+        taskItemRowClassName(
+          isSelected,
+          isMultiSelected,
+          indent.depth === 0,
+          resolvedTaskRow.detailsEnabled,
+        ),
+        archiveConfirmation && "flex-wrap",
+      )}
     >
       <SelectionBar isSelected={isSelected} color={taskColor} />
       <RowConnector depth={indent.depth} leftPx={indent.connectorLeftPx} />
@@ -491,16 +382,17 @@ export const TaskItem = memo(function TaskItem({
         sessionState={sessionState}
         state={state}
         foregroundActivity={foregroundActivity}
-        isInProgress={computeIsInProgress(state, sessionState)}
         hasPendingClarification={hasPendingClarification}
         hasPendingPermission={hasPendingPermission}
         interrupted={interrupted}
         isOnLastWorkflowStep={isOnLastWorkflowStep}
+        showBackgroundTooltip
       />
       <TaskItemContent
         title={title}
         autopilot={autopilot}
         taskId={taskId}
+        workflowStepId={workflowStepId}
         isRemoteExecutor={isRemoteExecutor}
         remoteExecutorId={remoteExecutorId}
         remoteExecutorType={remoteExecutorType}
@@ -508,32 +400,32 @@ export const TaskItem = memo(function TaskItem({
         primarySessionId={primarySessionId}
         isArchived={isArchived}
         isPinned={isPinned}
-        repositories={repositories}
-        updatedAt={updatedAt}
-        lastActivityAt={lastActivityAt}
-        showActivityTime={showActivityTime}
+        repositoryPath={repositoryPath}
         prInfo={prInfo}
         queuedCount={queuedCount}
         wipQueue={wipQueue}
         issueInfo={issueInfo}
         agentErrorMessage={agentErrorMessage}
+        comparisonUnavailable={comparisonUnavailable}
+        resolvedTaskRow={resolvedTaskRow}
+        relativeTime={relativeTime}
       />
-      {hasDiffStats ? (
-        <div className="mobile-task-actions-with-stats group/actions relative shrink-0 self-center flex items-center">
-          <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />
-          <div className="mobile-task-actions-slot absolute inset-0 flex items-center justify-end">
-            <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} />
-          </div>
-        </div>
-      ) : (
-        <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} rowFocus />
-      )}
+      <TaskItemActions
+        archiveConfirmation={archiveConfirmation}
+        resolvedTaskRow={resolvedTaskRow}
+        diffStats={diffStats}
+        menuOpen={menuOpen}
+        effectiveMenuOpen={effectiveMenuOpen}
+        relativeTime={relativeTime}
+        taskId={taskId}
+        prInfo={prInfo}
+      />
       {!!subtaskCount && subtaskCount > 0 && !!onToggleSubtasks && (
         <SubtaskToggle
           taskId={taskId}
-          count={subtaskCount!}
+          count={subtaskCount}
           collapsed={!!subtasksCollapsed}
-          onToggle={onToggleSubtasks!}
+          onToggle={onToggleSubtasks}
         />
       )}
     </div>
@@ -554,22 +446,14 @@ function RowConnector({ depth, leftPx }: { depth: number; leftPx: number }) {
 }
 
 function SelectionBar({ isSelected, color }: { isSelected: boolean; color: TaskColor | null }) {
-  if (color) {
-    return (
-      <div
-        className={cn(
-          "absolute left-0 top-0 bottom-0 w-[3px] transition-opacity",
-          TASK_COLOR_BAR_CLASS[color],
-          isSelected ? "opacity-100" : "opacity-60",
-        )}
-      />
-    );
-  }
+  if (!color) return null;
+
   return (
     <div
       className={cn(
-        "absolute left-0 top-0 bottom-0 w-[2px] bg-primary transition-opacity",
-        isSelected ? "opacity-100" : "opacity-0",
+        "absolute left-0 top-0 bottom-0 w-[3px] transition-opacity",
+        TASK_COLOR_BAR_CLASS[color],
+        isSelected ? "opacity-100" : "opacity-60",
       )}
     />
   );
@@ -604,58 +488,5 @@ function SubtaskToggle({
       <IconChevronDown className={cn("h-3 w-3 transition-transform", collapsed && "-rotate-90")} />
       <span>{count}</span>
     </button>
-  );
-}
-
-function TaskMenuButton({
-  visible,
-  expanded,
-  rowFocus = false,
-}: {
-  visible: boolean;
-  expanded: boolean;
-  rowFocus?: boolean;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div
-      className={cn(
-        "mobile-task-actions self-center shrink-0 flex items-center transition-opacity duration-100",
-        !visible && "[@media(hover:none)]:hidden",
-        visible
-          ? "opacity-100"
-          : cn(
-              "opacity-0 pointer-events-none [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-hover:pointer-events-auto",
-              rowFocus
-                ? "group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
-                : "focus-within:opacity-100 focus-within:pointer-events-auto",
-            ),
-      )}
-    >
-      <button
-        type="button"
-        className={cn(
-          "mobile-task-actions-button flex size-6 items-center justify-center rounded-md cursor-pointer touch-manipulation",
-          "text-muted-foreground hover:text-foreground hover:bg-foreground/10",
-          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring transition-colors",
-        )}
-        onClick={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-          e.currentTarget.dispatchEvent(
-            new MouseEvent("contextmenu", {
-              bubbles: true,
-              clientX: e.clientX,
-              clientY: e.clientY,
-            }),
-          );
-        }}
-        aria-label={t("task:taskActions")}
-        aria-haspopup="menu"
-        aria-expanded={expanded}
-      >
-        <IconDots className="h-4 w-4" />
-      </button>
-    </div>
   );
 }

@@ -25,8 +25,8 @@ test.describe("Kanban card archive — cascade subtasks toggle", () => {
     await kanban.openTaskActionsMenu(lonely.id);
     await testPage.getByRole("menuitem", { name: "Archive" }).click();
 
-    const dialog = testPage.getByRole("alertdialog");
-    await expect(dialog).toBeVisible();
+    const confirmation = testPage.getByTestId("task-archive-confirm-popover");
+    await expect(confirmation).toBeVisible();
     // No subtasks → no checkbox.
     await expect(testPage.getByTestId("archive-cascade-checkbox")).toHaveCount(0);
   });

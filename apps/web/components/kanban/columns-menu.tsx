@@ -7,11 +7,13 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { IconColumns3 } from "@tabler/icons-react";
 import { cn } from "@kandev/ui/lib/utils";
 import { useTranslation } from "react-i18next";
+import { sortWorkflowStepsByPosition } from "@/lib/kanban/auto-hide-empty-columns";
 
 export type ColumnsMenuStep = { id: string; title: string; position: number };
 
@@ -23,6 +25,8 @@ export type ColumnsMenuProps = {
   /** Persisted hidden ids for this workflow; ids with no live step are inert. */
   hiddenStepIds: string[];
   onToggle: (workflowId: string, stepId: string) => void;
+  autoHideEmpty: boolean;
+  onToggleAutoHide: (workflowId: string) => void;
   /**
    * Phone rows must clear 44 CSS px. Content is identical either way — this
    * only relaxes menu density for touch.
@@ -45,13 +49,12 @@ export function ColumnsMenu({
   steps,
   hiddenStepIds,
   onToggle,
+  autoHideEmpty,
+  onToggleAutoHide,
   touchTargets = false,
 }: ColumnsMenuProps) {
   const { t } = useTranslation();
-  const orderedSteps = useMemo(
-    () => [...steps].sort((a, b) => a.position - b.position || a.id.localeCompare(b.id)),
-    [steps],
-  );
+  const orderedSteps = useMemo(() => sortWorkflowStepsByPosition(steps), [steps]);
   const hiddenSet = useMemo(() => new Set(hiddenStepIds), [hiddenStepIds]);
 
   return (
@@ -71,6 +74,19 @@ export function ColumnsMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuLabel>{t("kanban:displayOptions")}</DropdownMenuLabel>
+        <DropdownMenuCheckboxItem
+          data-testid={`columns-menu-auto-hide-empty-${workflowId}`}
+          className={touchTargets ? "min-h-11" : undefined}
+          checked={autoHideEmpty}
+          onCheckedChange={() => onToggleAutoHide(workflowId)}
+          onSelect={(event) => event.preventDefault()}
+        >
+          <span className="min-w-0 flex-1 whitespace-normal">
+            {t("kanban:autoHideEmptyColumns")}
+          </span>
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuSeparator />
         <DropdownMenuLabel>{t("kanban:columns")}</DropdownMenuLabel>
         {orderedSteps.map((step) => (
           <DropdownMenuCheckboxItem

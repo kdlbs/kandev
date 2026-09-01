@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
@@ -100,6 +101,7 @@ func (s *Server) setupRoutes() {
 
 		// Process control
 		api.POST("/agent/configure", s.handleAgentConfigure)
+		api.POST("/agent/managed-runtime/cache-repair", s.handleManagedRuntimeCacheRepair)
 		api.POST("/start", s.handleStart)
 		api.POST("/stop", s.handleStop)
 
@@ -128,6 +130,9 @@ func (s *Server) setupRoutes() {
 		// and triggers a fresh git-status emit so the UI updates without
 		// waiting for the next poll tick.
 		api.POST("/workspace/base-branches", s.handleSetBaseBranches)
+		// Provider-qualified comparison targets are authenticated internal state;
+		// the backend uses this route after association, retarget, and resume.
+		api.POST("/workspace/comparison-targets", s.handleSetComparisonTargets)
 
 		// Workspace file operations (simple HTTP)
 		api.GET("/workspace/tree", s.handleFileTree)
@@ -324,8 +329,10 @@ func (s *Server) handleSetMcpMode(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if req.Mode != mcp.ModeTask && req.Mode != mcp.ModeTaskTitlePending && req.Mode != mcp.ModeConfig && req.Mode != mcp.ModeOffice {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', or 'office'"})
+	// ModeExternal stays rejected on purpose: it belongs to the backend's own
+	// MCP endpoint for external coding agents, and no launch path can emit it.
+	if !mcpmode.IsInstanceMode(req.Mode) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', 'office', or 'automation'"})
 		return
 	}
 	s.mcpServer.SetMode(req.Mode)
@@ -424,10 +431,10 @@ func (s *Server) handleStart(c *gin.Context) {
 type AgentConfigureRequest struct {
 	Command         string            `json:"command"`
 	AgentArgs       optionalArgs      `json:"agent_args"`
-	ContinueCommand string            `json:"continue_command,omitempty"` // For one-shot agents (Amp): command for follow-up prompts
+	ContinueCommand string            `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
 	ContinueArgs    optionalArgs      `json:"continue_args"`
 	Env             map[string]string `json:"env,omitempty"`
-	ApprovalPolicy  string            `json:"approval_policy,omitempty"` // For Codex: "untrusted", "on-failure", "on-request", "never"
+	ApprovalPolicy  string            `json:"approval_policy,omitempty"` // "untrusted", "on-failure", "on-request", or "never"
 }
 
 type optionalArgs struct {

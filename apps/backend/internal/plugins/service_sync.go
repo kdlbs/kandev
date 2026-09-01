@@ -22,7 +22,7 @@ const tarballSuffix = ".tar.gz"
 // Sync scans the plugins directory for filesystem-level changes an operator
 // made outside the install/enable/disable/uninstall API — directory
 // sideloads and dropped tarballs — and reconciles the registry with what
-// actually exists on disk, per docs/specs/plugins/spec.md ("Filesystem
+// actually exists on disk, per docs/specs/plugins/requirements/plugins.md ("Filesystem
 // sideloading & sync"):
 //
 //  1. Dir sideloads: an extracted <id>/<version>/manifest.yaml with no
@@ -208,6 +208,7 @@ func (s *Service) registerSideload(id, version string) error {
 		return fmt.Errorf("persist sideloaded record: %w", err)
 	}
 	s.registry.Add(rec)
+	s.warnWebhookAccessIssues(rec.Manifest)
 	return nil
 }
 

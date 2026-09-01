@@ -4,6 +4,8 @@ import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import { statusSummaryActiveErrorPreview } from "@/lib/task-status-summary";
 import { workflowStepTitle } from "./task-session-sidebar-aggregate";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
+import { resolveTaskRepositorySlugs } from "@/lib/sidebar/sidebar-task-repositories";
+import { taskPRInfoFromSummary } from "./task-pr-info";
 
 type SidebarItemContext = {
   repositorySlugById: Map<string, string | undefined>;
@@ -19,26 +21,10 @@ function summaryDiffStats(
   summary: TaskStatusSummary | null | undefined,
 ): { additions: number; deletions: number } | undefined {
   const git = summary?.git;
-  if (!git) return undefined;
+  if (!git || git.comparison_unavailable) return undefined;
   const additions = git.additions ?? 0;
   const deletions = git.deletions ?? 0;
   return additions > 0 || deletions > 0 ? { additions, deletions } : undefined;
-}
-
-function capitalize(value: string): string {
-  return value.length > 0 ? value[0].toUpperCase() + value.slice(1) : value;
-}
-
-function summaryPRInfo(
-  summary: TaskStatusSummary | null | undefined,
-): { number: number; state: string; aggregateState?: string } | undefined {
-  const pullRequest = summary?.pull_request;
-  if (!pullRequest?.number) return undefined;
-  return {
-    number: pullRequest.number,
-    state: capitalize(pullRequest.state ?? pullRequest.aggregate_state ?? "open"),
-    aggregateState: pullRequest.aggregate_state,
-  };
 }
 
 function repositoryPathFromSummary(
@@ -114,9 +100,10 @@ function sidebarStatus(
       repositoryPathFromSummary(summary) ??
       (task.repositoryId ? context.repositorySlugById.get(task.repositoryId) : undefined),
     diffStats: summaryDiffStats(summary),
+    comparisonUnavailable: summary?.git?.comparison_unavailable === true,
     hasPendingClarification: pending.clarification,
     hasPendingPermission: pending.permission,
-    prInfo: summaryPRInfo(summary),
+    prInfo: taskPRInfoFromSummary(summary),
     issueInfo: issueInfoForTask(task),
     queuedCount: summary?.queued_prompt_count,
     wipQueue: context.wipQueueByTaskId?.get(task.id),
@@ -151,6 +138,7 @@ export function buildSidebarItem(
     parentTaskTitle: task.parentTaskId ? context.titleById.get(task.parentTaskId) : undefined,
     parentTaskId: task.parentTaskId ?? undefined,
     workspaceMode: task.workspaceMode,
+    repositories: resolveTaskRepositorySlugs(task.repositories, context.repositorySlugById),
     repositoryLinks: task.repositories,
     isPRReview: task.isPRReview ?? false,
     isIssueWatch: task.isIssueWatch ?? false,

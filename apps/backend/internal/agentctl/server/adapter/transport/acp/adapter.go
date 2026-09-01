@@ -76,8 +76,12 @@ const (
 )
 
 // acpNotifQueueCapacity returns the per-connection inbound notification queue
-// capacity, honoring KANDEV_ACP_NOTIF_QUEUE when set and parseable.
-func acpNotifQueueCapacity() int {
+// capacity. Managed servers pass the resolved value explicitly; the legacy
+// environment fallback remains for directly constructed adapters.
+func acpNotifQueueCapacity(configured ...int) int {
+	if len(configured) > 0 && configured[0] != 0 {
+		return clampACPNotifQueueCapacity(configured[0])
+	}
 	raw := os.Getenv("KANDEV_ACP_NOTIF_QUEUE")
 	if raw == "" {
 		return acpNotifQueueDefault
@@ -86,6 +90,10 @@ func acpNotifQueueCapacity() int {
 	if err != nil || n <= 0 {
 		return acpNotifQueueDefault
 	}
+	return clampACPNotifQueueCapacity(n)
+}
+
+func clampACPNotifQueueCapacity(n int) int {
 	if n < acpNotifQueueMin {
 		return acpNotifQueueMin
 	}
@@ -177,6 +185,13 @@ type Adapter struct {
 	// Tool call tracking for result normalization
 	// Maps toolCallId -> NormalizedPayload so we can update with results
 	activeToolCalls map[string]*streams.NormalizedPayload
+	// cursorTaskMetaBySession stores Cursor's non-standard `cursor/task`
+	// metadata until the matching subagent tool_call appears, keyed by session
+	// then wire tool-call ID. An entry is drained either when its tool_call
+	// arrives (applyPendingCursorTaskMetaLocked) or when the session is cleared
+	// on turn end / reset (clearCursorTaskMetaLocked), so it never outlives the
+	// turn that produced it.
+	cursorTaskMetaBySession map[string]map[string]cursorTaskMeta
 	// toolCallParents preserves nested tool lineage while a handed-off
 	// predecessor continues streaming beside its human successor.
 	toolCallParents map[string]string
@@ -307,19 +322,21 @@ type Adapter struct {
 
 // promptTurnState holds synchronization for one in-flight session/prompt RPC.
 type promptTurnState struct {
-	endTurn          context.CancelCauseFunc
-	rpcDone          chan struct{}
-	abortCh          chan struct{}
-	handoffCh        chan struct{}
-	providerErrorCh  chan openCodeStderrDiagnostic
-	promptGeneration uint64
-	evidenceMu       sync.Mutex
-	codexSystemError bool
-	codexCapacity    bool
-	allowHandoff     bool
-	handedOff        bool
-	gateOwned        bool
-	finishing        bool
+	endTurn           context.CancelCauseFunc
+	rpcDone           chan struct{}
+	abortCh           chan struct{}
+	handoffCh         chan struct{}
+	providerErrorCh   chan openCodeStderrDiagnostic
+	promptGeneration  uint64
+	evidenceMu        sync.Mutex
+	codexSystemError  bool
+	codexCapacity     bool
+	cursorRetriable   bool
+	cursorRetriableAt time.Time
+	allowHandoff      bool
+	handedOff         bool
+	gateOwned         bool
+	finishing         bool
 }
 
 func (t *promptTurnState) observeCodexEvidence(systemError, capacity bool) {
@@ -350,6 +367,42 @@ func (t *promptTurnState) hasCodexSystemError() bool {
 	return t.codexSystemError
 }
 
+func (t *promptTurnState) setCursorRetriable() {
+	if t == nil {
+		return
+	}
+	t.evidenceMu.Lock()
+	if !t.cursorRetriable {
+		t.cursorRetriableAt = time.Now().UTC()
+	}
+	t.cursorRetriable = true
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) clearCursorRetriable() {
+	if t == nil {
+		return
+	}
+	t.evidenceMu.Lock()
+	t.cursorRetriable = false
+	t.cursorRetriableAt = time.Time{}
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) cursorRetriableFailure() bool {
+	failure, _ := t.cursorRetriableFailureAt()
+	return failure
+}
+
+func (t *promptTurnState) cursorRetriableFailureAt() (bool, time.Time) {
+	if t == nil {
+		return false, time.Time{}
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	return t.cursorRetriable, t.cursorRetriableAt
+}
+
 type asyncTurnFinalizer struct {
 	timer       *time.Timer
 	seq         uint64
@@ -375,6 +428,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		updatesCh:                 make(chan AgentEvent, 100),
 		notifQueue:                make(chan notifWork, notifQueueCapacity),
 		activeToolCalls:           make(map[string]*streams.NormalizedPayload),
+		cursorTaskMetaBySession:   make(map[string]map[string]cursorTaskMeta),
 		toolCallParents:           make(map[string]string),
 		handoffProtectedToolCalls: make(map[string]struct{}),
 		activeMonitors:            make(map[string]map[string]string),
@@ -437,6 +491,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		acpclient.WithWorkspaceRoot(a.cfg.WorkDir),
 		acpclient.WithUpdateHandler(a.enqueueACPUpdate),
 		acpclient.WithPermissionHandler(a.handlePermissionRequest),
+		acpclient.WithCursorTaskHandler(a.handleCursorTask),
 	)
 
 	// Create ACP SDK connection. Raise the inbound notification queue cap
@@ -445,7 +500,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	// down. The internal notifQueueCapacity channel sits in front of this
 	// queue and is drained by our update worker. Requires a coder/acp-go-sdk
 	// fork with WithMaxQueuedNotifications; see go.mod replace directive.
-	notifQueueCap := acpNotifQueueCapacity()
+	notifQueueCap := acpNotifQueueCapacity(a.cfg.NotificationQueueCapacity)
 	a.acpConn = acp.NewClientSideConnection(a.acpClient, a.stdin, a.stdout,
 		acp.WithMaxQueuedNotifications(notifQueueCap))
 	a.acpConn.SetLogger(slog.Default().With("component", "acp-conn"))
@@ -683,6 +738,7 @@ func (a *Adapter) Close() error {
 	a.updateSendWg.Wait()
 	a.mu.Lock()
 	a.clearCodexSubagentCorrelationsLocked("")
+	a.clearCursorTaskMetaLocked("")
 	a.clearPromptHandoffToolTrackingLocked()
 	clear(a.usageBySession)
 	a.mu.Unlock()

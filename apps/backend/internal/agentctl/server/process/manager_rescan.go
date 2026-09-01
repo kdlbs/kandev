@@ -189,8 +189,8 @@ func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string,
 		zap.Int("children", len(children)))
 
 	bareRoot := m.newTrackerForRepo(workDir, "")
-	bareRoot.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), ""))
-	bareRoot.SetAllowedSourceRoots(roots)
+	m.configureTracker(bareRoot, "", roots)
+	m.prepareTrackerComparisonTarget(bareRoot)
 	bareRoot.Start(ctx)
 	for _, sub := range subs {
 		bareRoot.AttachWorkspaceStreamSubscriber(sub)
@@ -199,8 +199,8 @@ func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string,
 	newRepoTrackers := make([]*WorkspaceTracker, 0, len(children))
 	for _, child := range children {
 		tracker := m.newTrackerForRepo(child.path, child.name)
-		tracker.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), child.name))
-		tracker.SetAllowedSourceRoots(roots)
+		m.configureTracker(tracker, child.name, roots)
+		m.prepareTrackerComparisonTarget(tracker)
 		tracker.Start(ctx)
 		for _, sub := range subs {
 			tracker.AttachWorkspaceStreamSubscriber(sub)
@@ -246,8 +246,8 @@ func (m *Manager) appendNewRepoTrackers(ctx context.Context, workDir string, chi
 			zap.String("repository_name", child.name),
 			zap.String("path", child.path))
 		tracker := m.newTrackerForRepo(child.path, child.name)
-		tracker.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), child.name))
-		tracker.SetAllowedSourceRoots(roots)
+		m.configureTracker(tracker, child.name, roots)
+		m.prepareTrackerComparisonTarget(tracker)
 		tracker.Start(ctx)
 		for _, sub := range subs {
 			tracker.AttachWorkspaceStreamSubscriber(sub)
@@ -311,8 +311,8 @@ func (m *Manager) reconcileRepoTrackers(ctx context.Context, workDir string, chi
 			continue
 		}
 		tracker := m.newTrackerForRepo(child.path, child.name)
-		tracker.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), child.name))
-		tracker.SetAllowedSourceRoots(roots)
+		m.configureTracker(tracker, child.name, roots)
+		m.prepareTrackerComparisonTarget(tracker)
 		tracker.Start(ctx)
 		for _, sub := range subs {
 			tracker.AttachWorkspaceStreamSubscriber(sub)

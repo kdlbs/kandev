@@ -7,11 +7,18 @@ import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconX, IconRocket } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useToast } from "@/components/toast-provider";
 import { startQuickChat } from "@/lib/api/domains/workspace-api";
 import type { Repository } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
+import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import { useTranslation } from "react-i18next";
+import {
+  orderAgentProfilesByRecentUse,
+  recordAgentProfileRecentUseBestEffort,
+} from "@/lib/agent-profile-recent-use";
+import type { AgentProfileRecentUseRecord } from "@/lib/agent-profile-recent-use";
 
 type QuickChatPickerDialogProps = {
   open: boolean;
@@ -26,13 +33,32 @@ type FormState = {
   setSelectedAgentId: (id: string) => void;
   repositories: Repository[];
   agentProfiles: AgentProfileOption[];
+  recentProfileIds?: string[];
 };
 
 const NONE_VALUE = "__none__";
 
+function recordQuickChatProfileUse(
+  sessionId: string | undefined,
+  profileId: string | undefined,
+  onSuccess: (record: AgentProfileRecentUseRecord) => void,
+) {
+  if (!sessionId || !profileId) return;
+  recordAgentProfileRecentUseBestEffort("quick_chat", profileId, onSuccess);
+}
+
 function QuickChatFormBody({ state }: { state: FormState }) {
   const { t } = useTranslation();
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
   const { selectedRepoId, setSelectedRepoId, selectedAgentId, setSelectedAgentId } = state;
+  const selectableProfiles = state.agentProfiles.filter((profile) =>
+    isSelectableAgentProfile(profile, dynamicRoutingEnabled),
+  );
+  const orderedProfiles = orderAgentProfilesByRecentUse(
+    selectableProfiles,
+    state.recentProfileIds,
+    selectedAgentId,
+  );
   return (
     <div className="p-4 space-y-4">
       <p className="text-sm text-muted-foreground">{t("chat:quickChatDialogIntro")}</p>
@@ -66,7 +92,7 @@ function QuickChatFormBody({ state }: { state: FormState }) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={NONE_VALUE}>{t("chat:useWorkspaceDefaultOption")}</SelectItem>
-            {state.agentProfiles.map((profile) => (
+            {orderedProfiles.map((profile) => (
               <SelectItem key={profile.id} value={profile.id}>
                 {profile.label}
               </SelectItem>
@@ -87,11 +113,16 @@ export const QuickChatPickerDialog = memo(function QuickChatPickerDialog({
   const { t } = useTranslation();
   const { toast } = useToast();
   const openQuickChat = useAppStore((s) => s.openQuickChat);
+  const applyAgentProfileRecentUse = useAppStore((s) => s.applyAgentProfileRecentUse);
+  const agentGeneratedTaskTitles = useAppStore((s) => s.userSettings.agentGeneratedTaskTitles);
   const [isStarting, setIsStarting] = useState(false);
   const [selectedRepoId, setSelectedRepoId] = useState<string>("");
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
   const repositories = useAppStore((s) => s.repositories.itemsByWorkspaceId?.[workspaceId] ?? []);
   const agentProfiles = useAppStore((s) => s.agentProfiles.items ?? []);
+  const recentProfileIds = useAppStore(
+    (s) => s.agentProfileRecentUse?.records.quick_chat?.profileIds,
+  );
 
   const handleStart = useCallback(async () => {
     if (isStarting) return;
@@ -100,10 +131,15 @@ export const QuickChatPickerDialog = memo(function QuickChatPickerDialog({
       const response = await startQuickChat(workspaceId, {
         repository_id: selectedRepoId || undefined,
         agent_profile_id: selectedAgentId || undefined,
+        ...(agentGeneratedTaskTitles ? { auto_title: true } : {}),
       });
+      const effectiveProfileId = response.agent_profile_id ?? (selectedAgentId || undefined);
+      recordQuickChatProfileUse(response.session_id, effectiveProfileId, (record) =>
+        applyAgentProfileRecentUse("quick_chat", record),
+      );
       onOpenChange(false);
       // Open the quick chat modal with the new session
-      openQuickChat(response.session_id, workspaceId, undefined, "chat", response.task_id);
+      openQuickChat(response.session_id, workspaceId, effectiveProfileId, "chat", response.task_id);
     } catch (error) {
       toast({
         title: t("chat:failedToStartQuickChat"),
@@ -117,9 +153,11 @@ export const QuickChatPickerDialog = memo(function QuickChatPickerDialog({
     workspaceId,
     selectedRepoId,
     selectedAgentId,
+    agentGeneratedTaskTitles,
     isStarting,
     onOpenChange,
     openQuickChat,
+    applyAgentProfileRecentUse,
     toast,
   ]);
 
@@ -130,6 +168,7 @@ export const QuickChatPickerDialog = memo(function QuickChatPickerDialog({
     setSelectedAgentId,
     repositories,
     agentProfiles,
+    recentProfileIds,
   };
 
   return (

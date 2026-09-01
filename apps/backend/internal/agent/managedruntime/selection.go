@@ -20,6 +20,7 @@ const selectionKeyPrefix = "managed_runtime.active."
 type SettingsStore interface {
 	Get(context.Context, string) ([]byte, bool, error)
 	Save(context.Context, string, []byte) error
+	Delete(context.Context, string) error
 }
 
 // SelectionStore is the runtime-facing seam for reading and persisting an
@@ -27,6 +28,7 @@ type SettingsStore interface {
 type SelectionStore interface {
 	Get(context.Context, string, string) (Selection, bool, error)
 	Save(context.Context, string, string, string) error
+	Delete(context.Context, string, string) error
 }
 
 // SelectionReader is the read-only seam used by runtime command builders.
@@ -95,6 +97,19 @@ func (s *Store) Save(ctx context.Context, agentID, packageName, version string) 
 		return fmt.Errorf("marshal managed runtime selection: %w", err)
 	}
 	return s.settings.Save(ctx, selectionKey(agentID), raw)
+}
+
+// Delete removes the operator selection for one trusted package. The built-in
+// default remains outside the settings store and becomes effective after this
+// operation succeeds.
+func (s *Store) Delete(ctx context.Context, agentID, packageName string) error {
+	if s == nil || s.settings == nil {
+		return errSettingsMissing
+	}
+	if agentID == "" || packageName == "" {
+		return fmt.Errorf("%w: agent and package are required", ErrInvalidSelection)
+	}
+	return s.settings.Delete(ctx, selectionKey(agentID))
 }
 
 func selectionKey(agentID string) string {

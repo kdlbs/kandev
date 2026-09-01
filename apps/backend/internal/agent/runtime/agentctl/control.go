@@ -45,7 +45,7 @@ type CreateInstanceRequest struct {
 	ID                     string              `json:"id,omitempty"`
 	WorkspacePath          string              `json:"workspace_path"`
 	AgentCommand           string              `json:"agent_command,omitempty"`
-	Protocol               string              `json:"protocol,omitempty"`       // Protocol adapter to use (acp, rest, mcp, codex)
+	Protocol               string              `json:"protocol,omitempty"`       // Protocol adapter to use (currently "acp")
 	AgentType              string              `json:"agent_type,omitempty"`     // Agent type ID for debug file naming (e.g., "codex", "auggie")
 	WorkspaceFlag          string              `json:"workspace_flag,omitempty"` // CLI flag for workspace path (e.g., "--workspace-root")
 	Env                    map[string]string   `json:"env,omitempty"`
@@ -57,7 +57,7 @@ type CreateInstanceRequest struct {
 	DisableAskQuestion     bool                `json:"disable_ask_question,omitempty"` // Disable ask_user_question MCP tool (TUI agents)
 	AssumeMcpSse           bool                `json:"assume_mcp_sse,omitempty"`       // Assume agent supports SSE MCP servers
 	AssumeMcpHttp          bool                `json:"assume_mcp_http,omitempty"`      // Assume agent supports HTTP MCP servers
-	McpMode                string              `json:"mcp_mode,omitempty"`             // MCP tool mode: "task" (default), "config", or "office"
+	McpMode                string              `json:"mcp_mode,omitempty"`             // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
 	McpProviders           []string            `json:"mcp_providers,omitempty"`        // Supported review-automation providers
 	McpProfile             *mcpprofile.Context `json:"mcp_profile,omitempty"`          // Backend-owned typed MCP tool profile
 	// RequiresProcessKill tells agentctl to skip the graceful stdin-close wait
@@ -71,6 +71,10 @@ type CreateInstanceRequest struct {
 	// RuntimeConfig.StripEnv by the lifecycle executors.
 	StripEnv []string `json:"strip_env,omitempty"`
 
+	// NamespacesMCPToolsByServer tells the per-instance MCP server to adapt
+	// built-in tool names for an agent that appends the server name itself.
+	NamespacesMCPToolsByServer bool `json:"namespaces_mcp_tools_by_server,omitempty"`
+
 	// BaseBranches maps RepositoryName → base branch ref for the task's
 	// per-repo diff stats. The empty key "" applies to the root /
 	// single-repo tracker. Empty map disables the override and falls back
@@ -81,6 +85,7 @@ type CreateInstanceRequest struct {
 	// the workspace root.
 	RemoteContributions      map[string]models.RemoteContribution      `json:"remote_contributions,omitempty"`
 	ContributionDestinations map[string]models.ContributionDestination `json:"contribution_destinations,omitempty"`
+	ComparisonTargets        map[string]models.ComparisonTarget        `json:"comparison_targets,omitempty"`
 	// WorkspaceSourceRoots are canonical host roots explicitly attached to the
 	// workspace. Agentctl permits file operations through links only beneath
 	// these roots.
@@ -300,7 +305,11 @@ func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) e
 		_ = resp.Body.Close()
 	}()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+	// A retry may observe 404 after agentctl completed the first delete but its
+	// response was lost. The desired postcondition is already satisfied.
+	if resp.StatusCode != http.StatusOK &&
+		resp.StatusCode != http.StatusNoContent &&
+		resp.StatusCode != http.StatusNotFound {
 		var errResp struct {
 			Error string `json:"error"`
 		}

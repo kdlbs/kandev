@@ -1,3 +1,4 @@
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toSheetItem } from "./session-task-switcher-sheet-item";
 import {
@@ -7,6 +8,7 @@ import {
   selectTaskFromSheet,
 } from "./session-task-switcher-sheet-selection";
 import type { TaskPendingAction, TaskSession } from "@/lib/types/http";
+import { useSheetArchiveActions } from "./session-task-switcher-sheet-hooks";
 
 type SheetTask = Parameters<typeof toSheetItem>[0];
 type SheetCtx = Parameters<typeof toSheetItem>[1];
@@ -63,26 +65,6 @@ describe("toSheetItem", () => {
 
   it("preserves the archived marker for projected rows", () => {
     expect(toSheetItem(task({ isArchived: true }), emptyCtx()).isArchived).toBe(true);
-  });
-});
-
-describe("toSheetItem remote executor projection", () => {
-  it("carries the exact remote executor scope onto the mobile sheet row", () => {
-    const item = toSheetItem(
-      task({
-        isRemoteExecutor: true,
-        primaryExecutorId: "executor-1",
-        primaryExecutorType: "k8s",
-        primaryExecutorName: "Cluster executor",
-        primarySessionId: "session-1",
-      }),
-      emptyCtx(),
-    );
-
-    expect(item.remoteExecutorId).toBe("executor-1");
-    expect(item.remoteExecutorType).toBe("k8s");
-    expect(item.remoteExecutorName).toBe("Cluster executor");
-    expect(item.primarySessionId).toBe("session-1");
   });
 });
 
@@ -171,6 +153,34 @@ describe("toSheetItem status", () => {
         dismissedAgentErrors: { "session-1": "older-error" },
       }).agentErrorMessage,
     ).toBe(ERROR_PREVIEW);
+  });
+});
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.10
+describe("toSheetItem automation indicators", () => {
+  it("carries bounded automation indicators onto the mobile sheet row", () => {
+    const item = toSheetItem(
+      task({
+        statusSummary: {
+          revision: 1,
+          updated_at: UPDATED_AT,
+          pull_request: {
+            number: 42,
+            state: "open",
+            auto_fix_enabled: true,
+            auto_merge_enabled: true,
+          },
+        },
+      }),
+      emptyCtx(),
+    );
+
+    expect(item.prInfo).toEqual({
+      number: 42,
+      state: "Open",
+      autoFixEnabled: true,
+      autoMergeEnabled: true,
+    });
   });
 });
 
@@ -600,5 +610,36 @@ describe("selectTaskFromSheet sheet lifecycle", () => {
     expect(setActiveSession).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
     expect(onOpenChange.mock.calls).toEqual([[false], [true]]);
+  });
+});
+
+describe("useSheetArchiveActions", () => {
+  it("tracks the directly archived row while its request is pending", async () => {
+    let resolveArchive: () => void = () => undefined;
+    const archiveAndSwitch = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveArchive = resolve;
+        }),
+    );
+    const store = {
+      getState: () => ({}),
+    } as Parameters<typeof useSheetArchiveActions>[0];
+    const { result } = renderHook(() =>
+      useSheetArchiveActions(
+        store,
+        archiveAndSwitch as Parameters<typeof useSheetArchiveActions>[1],
+      ),
+    );
+
+    act(() => result.current.handleArchiveTask("task-1", { cascade: false }));
+
+    await waitFor(() => expect(result.current.archivingTaskId).toBe("task-1"));
+    expect(result.current.isArchiving).toBe(true);
+
+    await act(async () => resolveArchive());
+
+    await waitFor(() => expect(result.current.archivingTaskId).toBeNull());
+    expect(result.current.isArchiving).toBe(false);
   });
 });

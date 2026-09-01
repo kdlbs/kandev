@@ -31,11 +31,22 @@ describe("isPrependUpdate", () => {
     ).toBe(false);
   });
 
-  it("is not a prepend when item count did not grow", () => {
+  it("is a prepend layout update when a synthetic row is replaced one-for-one", () => {
     expect(
       isPrependUpdate({
         prevItemCount: 20,
         nextItemCount: 20,
+        prevFirstKey: "msg-0",
+        nextFirstKey: "msg-5",
+      }),
+    ).toBe(true);
+  });
+
+  it("is not a prepend when the rendered item count shrinks", () => {
+    expect(
+      isPrependUpdate({
+        prevItemCount: 20,
+        nextItemCount: 19,
         prevFirstKey: "msg-0",
         nextFirstKey: "msg-5",
       }),

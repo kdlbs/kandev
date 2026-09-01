@@ -40,6 +40,17 @@ export type ProcessState = {
   devProcessBySessionId: Record<string, string>;
 };
 
+export type GitChangeLayer = "staged" | "unstaged";
+
+export type FileChangeFacet = {
+  status: "modified" | "added" | "deleted" | "untracked" | "renamed";
+  additions?: number;
+  deletions?: number;
+  old_path?: string;
+  diff?: string;
+  diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+};
+
 export type FileInfo = {
   path: string;
   status: "modified" | "added" | "deleted" | "untracked" | "renamed";
@@ -49,6 +60,10 @@ export type FileInfo = {
   old_path?: string;
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  staged_change?: FileChangeFacet;
+  unstaged_change?: FileChangeFacet;
+  /** Frontend-only projection used when one raw path appears in both change sections. */
+  change_layer?: GitChangeLayer;
   /** Exact old-side ref for cumulative committed diffs. */
   base_ref?: string;
   /**
@@ -74,6 +89,9 @@ export type GitStatusEntry = {
   behind: number;
   head_commit?: string;
   base_commit?: string;
+  comparison_target?: string;
+  comparison_status?: string;
+  comparison_error_code?: string;
   remote_ahead?: number;
   remote_behind?: number;
   remote_head_commit?: string;
@@ -92,8 +110,7 @@ export type GitStatusEntry = {
 };
 
 export type GitStatusState = {
-  /** Git status keyed by environment ID (shared across sessions in the same environment).
-   *  Falls back to session ID when no environment exists.
+  /** Git status keyed by delivered environment ID (shared across sessions in the same environment).
    *  For multi-repo workspaces this holds the most recently received status
    *  (whichever repo emitted last); per-repo state lives in byEnvironmentRepo.
    */
@@ -139,6 +156,8 @@ export type CumulativeDiff = {
   head_commit: string;
   total_commits: number;
   files: Record<string, FileInfo>;
+  /** Bounded machine-readable failure reason for an unavailable comparison. */
+  error_code?: string;
   /**
    * Files dropped from `files` because the cumulative range exceeded the
    * backend's per-request file cap (a mid-rebase base→working-tree diff can
@@ -452,7 +471,7 @@ export type SessionRuntimeSliceActions = {
   setActiveProcess: (sessionId: string, processId: string) => void;
   /** Returns true when the update meaningfully changed git state (so callers
    *  can invalidate derived caches without repeating the deep comparison). */
-  setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => boolean;
+  setGitStatus: (taskEnvironmentId: string, gitStatus: GitStatusEntry) => boolean;
   clearGitStatus: (sessionId: string) => void;
   bumpWorkspaceFilesRefresh: (sessionId: string) => void;
   /** Drops the pre-multi-repo (empty-repo-name) git-status entries so a

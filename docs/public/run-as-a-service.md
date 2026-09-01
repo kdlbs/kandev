@@ -52,13 +52,13 @@ kandev service status
 kandev service logs
 ```
 
-The installer writes the managed unit or plist and starts the process. It does **not** poll `/health`; use `status` and `logs` first. The logs print the actual listener URL because the launcher selects a free fallback port when `38429` is unavailable. Copy that URL and append `/health`; for example, if the log reports port `43127`:
+The installer writes the managed unit or plist and starts the process. It does **not** poll `/health`; use `status` and `logs` first. The logs print the actual listener URL because the launcher selects a free fallback port when `38429` is unavailable. Copy that URL and append `/ready`; for example, if the log reports port `43127`:
 
 ```bash
-curl --fail http://127.0.0.1:43127/health
+curl --fail http://127.0.0.1:43127/ready
 ```
 
-`/health` reports backend readiness after routes and the agent registry are initialized and the HTTP listener is accepting connections. It is not a deep health check of the database, message bus, executors, or remote providers.
+`/ready` reports backend readiness after routes and the agent registry are initialized and the HTTP listener is accepting connections. It is not a deep health check of the database, message bus, executors, or remote providers.
 
 ### System service
 
@@ -89,14 +89,28 @@ recursively chown the data tree or add a broad Git `safe.directory` exception.
 
 ## Bind safely
 
-The backend config loader searches `config.yaml` in its working directory and then `/etc/kandev`. launchd sets the working directory to the Kandev home, but the generated systemd unit does not. For a shared conventional path, create `/etc/kandev/config.yaml` before first start, or stop and restart after changing it:
+The backend config loader searches `config.yaml` in its working directory,
+then `<KANDEV_HOME_DIR>/config.yaml` (or `~/.kandev/config.yaml`), then
+`/etc/kandev/config.yaml`. launchd sets the working directory to the Kandev
+home; the generated systemd unit uses the selected home and carries the exact
+selected file into the managed backend. Kandev uses only the first existing
+candidate and does not merge files. For a shared conventional path, create
+`/etc/kandev/config.yaml` before first start, or stop and restart after
+changing it:
 
 ```yaml
 server:
   host: 127.0.0.1
 ```
 
-The working-directory file wins when both exist, so on macOS merge or remove a conflicting `<KANDEV_HOME_DIR>/config.yaml` if `/etc/kandev/config.yaml` should be authoritative. The service unit has an intentionally small fixed environment and does not inherit arbitrary exports from the installing shell. Put supported settings in the configuration file; see [Configuration](configuration.md). A system service needs permission to read the file, while secret-bearing configuration should not be world-readable.
+The working-directory file wins when both exist, followed by the home file and
+then `/etc/kandev/config.yaml`. If the first existing file is unreadable or
+invalid, startup fails instead of falling through. A home configuration file
+cannot set `homeDir`. The service unit has an intentionally small fixed
+environment and does not inherit arbitrary exports from the installing shell.
+Put supported settings in the configuration file; see
+[Configuration](configuration.md). A system service needs permission to read
+the file, while secret-bearing configuration should use owner-only mode `0600`.
 
 To access a loopback-only instance remotely, use SSH port forwarding:
 

@@ -13,6 +13,7 @@ import (
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentctlshared "github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -34,6 +35,46 @@ func (e *Executor) Stop(ctx context.Context, sessionID string, reason string, fo
 		return ErrExecutionNotFound
 	}
 	return e.stopWithSession(ctx, session, reason, force)
+}
+
+// StopSessionSynchronously cancels a session and waits for its agent process to
+// stop. Durable task cleanup uses this optional capability before it removes a
+// worktree, so an agent cannot continue writing into the audited directory
+// after cleanup starts. Interactive callers keep the legacy asynchronous Stop
+// behavior.
+func (e *Executor) StopSessionSynchronously(ctx context.Context, sessionID, reason string, force bool) error {
+	session, err := e.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		if !errors.Is(err, models.ErrTaskSessionNotFound) {
+			return ErrExecutionNotFound
+		}
+		return e.stopMissingSessionSynchronously(ctx, sessionID, reason, force, err)
+	}
+	result, err := e.StopSessionDetailed(ctx, session, reason, force)
+	if err != nil {
+		return err
+	}
+	if result.ExecutionID == "" {
+		return nil
+	}
+	return e.StopExecution(ctx, result.ExecutionID, reason, force)
+}
+
+func (e *Executor) stopMissingSessionSynchronously(
+	ctx context.Context, sessionID, reason string, force bool, sessionErr error,
+) error {
+	// Task deletion can remove the session row before the durable cleanup
+	// worker runs. Still ask the lifecycle manager for the exact execution so a
+	// late process cannot keep writing to the worktree.
+	executionID, lookupErr := e.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	switch {
+	case lookupErr == nil && executionID != "":
+		return e.StopExecution(ctx, executionID, reason, force)
+	case executionID == "" || errors.Is(lookupErr, lifecycle.ErrNoExecutionForSession):
+		return fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, sessionErr)
+	default:
+		return fmt.Errorf("%w: lookup execution for session %q: %w", ErrExecutionNotFound, sessionID, lookupErr)
+	}
 }
 
 // SessionStopResult describes the synchronous, logical portion of a stop. A
@@ -605,7 +646,7 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 	}
 
 	req.Env = e.applyPreferredShellEnv(ctx, req.ExecutorType, req.Env)
-	if err := e.stopPreparedModelSwitchAgent(ctx, executionID, req.ExecutorType); err != nil {
+	if err := e.stopPreparedModelSwitchAgent(ctx, executionID); err != nil {
 		return nil, err
 	}
 
@@ -766,17 +807,15 @@ func validateKubernetesModelSwitchConfig(
 
 func (e *Executor) stopPreparedModelSwitchAgent(
 	ctx context.Context,
-	executionID, executorType string,
+	executionID string,
 ) error {
 	e.logger.Info("stopping current agent for model switch",
 		zap.String("agent_execution_id", executionID))
 	if err := e.agentManager.StopAgent(ctx, executionID, false); err != nil {
-		if models.ExecutorType(executorType) == models.ExecutorTypeKubernetes {
-			return fmt.Errorf("stop Kubernetes agent for model switch: %w", err)
-		}
-		e.logger.Warn("failed to stop agent for model switch, continuing anyway",
+		e.logger.Warn("failed to stop agent for model switch",
 			zap.Error(err),
 			zap.String("agent_execution_id", executionID))
+		return fmt.Errorf("failed to stop agent for model switch: %w", err)
 	}
 	return nil
 }
@@ -873,6 +912,12 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 		return nil, err
 	}
 	req.McpProviders = deriveMCPProviders(allRepos)
+	for _, repoInfo := range allRepos {
+		if repoInfo.RepositoryID == session.RepositoryID {
+			req.ComparisonTarget = repoInfo.ComparisonTarget
+			break
+		}
+	}
 	profileContext.Providers = req.McpProviders
 	if err := e.resolveLaunchEnvironment(ctx, req, execConfig.ProfileEnvVars, allRepos); err != nil {
 		return nil, err
@@ -1024,4 +1069,48 @@ func (e *Executor) RespondToPermission(ctx context.Context, sessionID, pendingID
 		zap.Bool("cancelled", cancelled))
 
 	return e.agentManager.RespondToPermissionBySessionID(ctx, sessionID, pendingID, optionID, cancelled)
+}
+
+// ListPendingPermissions returns live safe snapshots without starting an agent.
+func (e *Executor) ListPendingPermissions(ctx context.Context, sessionID string) ([]streams.PendingAgentPermission, error) {
+	permissions, err := e.agentManager.ListPendingPermissionsBySessionID(ctx, sessionID)
+	if errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+		return nil, ErrExecutionNotFound
+	}
+	return permissions, err
+}
+
+// ResolvePermission selects one exact option on the current live request.
+func (e *Executor) ResolvePermission(ctx context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error) {
+	result, err := e.agentManager.ResolvePermissionBySessionID(ctx, sessionID, requestID, pendingID, optionID)
+	if errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+		return nil, ErrExecutionNotFound
+	}
+	return result, err
+}
+
+func (e *Executor) CancelPermission(ctx context.Context, sessionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error) {
+	result, err := e.agentManager.CancelPermissionBySessionID(ctx, sessionID, requestID, pendingID)
+	if errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+		return nil, ErrExecutionNotFound
+	}
+	return result, err
+}
+
+// IsNoExecutionForSessionError reports whether err is (or wraps)
+// lifecycle.ErrNoExecutionForSession — "no live execution is tracked for
+// this session" (process gone, backend restarted), as opposed to a
+// transient lookup failure. Exposed here so callers outside
+// internal/agent/runtime/ can distinguish this one specific, meaningful
+// absence without importing internal/agent/runtime/lifecycle directly,
+// which the architecture guard reserves for the runtime tier and its
+// already-approved low-level adapters (this package is one).
+func IsNoExecutionForSessionError(err error) bool {
+	return errors.Is(err, lifecycle.ErrNoExecutionForSession)
+}
+
+// IsCancelEscalatedError reports whether the lifecycle manager locally
+// released a stuck prompt after the agent failed to acknowledge cancellation.
+func IsCancelEscalatedError(err error) bool {
+	return errors.Is(err, lifecycle.ErrCancelEscalated)
 }

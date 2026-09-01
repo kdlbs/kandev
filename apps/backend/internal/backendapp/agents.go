@@ -2,7 +2,9 @@ package backendapp
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -30,7 +32,10 @@ func provideLifecycleManager(
 	agentRegistry *registry.Registry,
 	rawSecretStore secrets.SecretStore,
 	baseBranchProvider lifecycle.BaseBranchProvider,
+	comparisonTargetProvider lifecycle.ComparisonTargetProvider,
 	managedRuntimeSelections managedruntime.SelectionReader,
+	mcpIdentityScoper lifecycle.MCPIdentityScoper,
+	mcpPrincipalScoper lifecycle.MCPPrincipalScoper,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
 	secretStores := newLifecycleSecretStores(rawSecretStore)
@@ -92,7 +97,7 @@ func provideLifecycleManager(
 	}
 	credsMgr.AddProvider(credentials.NewEnvProvider("KANDEV_"))
 	credsMgr.AddProvider(credentials.NewAugmentSessionProvider())
-	if credsFile := os.Getenv("KANDEV_CREDENTIALS_FILE"); credsFile != "" {
+	if credsFile := credentialFilePath(cfg); credsFile != "" {
 		credsMgr.AddProvider(credentials.NewFileProvider(credsFile))
 	}
 
@@ -125,6 +130,9 @@ func provideLifecycleManager(
 	registerKubernetesPreparer(preparerRegistry, log)
 	lifecycleMgr.SetPreparerRegistry(preparerRegistry)
 	lifecycleMgr.SetSecretStore(secretStores.runtime)
+	if err := lifecycleMgr.SetAgentctlStartupConfig(cfg.ManagedAgentctlStartupConfig()); err != nil {
+		return nil, fmt.Errorf("configure managed agentctl startup: %w", err)
+	}
 	// Record the standalone agentctl control-server PID (populated by
 	// provideAgentctlLauncher, which runs before this) so local/standalone
 	// executor rows carry a real host-local liveness handle.
@@ -141,6 +149,19 @@ func provideLifecycleManager(
 	// Wire the base-branch provider before Start so recovered executions are
 	// seeded during startup as well as newly-created executions.
 	lifecycleMgr.SetBaseBranchProvider(baseBranchProvider)
+	// Wire the comparison-target provider before Start so recovered executions
+	// hydrate the exact provider-qualified ref before their first status poll.
+	lifecycleMgr.SetComparisonTargetProvider(comparisonTargetProvider)
+	// Recovered executions can dispatch MCP calls as soon as Start resumes
+	// their streams. Install both trusted scopes before Start, not after route
+	// registration, so the first recovered call has the same authority boundary
+	// as every later call.
+	if mcpIdentityScoper != nil {
+		lifecycleMgr.SetMCPIdentityScoper(mcpIdentityScoper)
+	}
+	if mcpPrincipalScoper != nil {
+		lifecycleMgr.SetMCPPrincipalScoper(mcpPrincipalScoper)
+	}
 
 	if err := lifecycleMgr.Start(ctx); err != nil {
 		return nil, err
@@ -176,4 +197,11 @@ func registerKubernetesBackend(
 func registerKubernetesPreparer(registry *lifecycle.PreparerRegistry, log *logger.Logger) {
 	registry.Register(models.ExecutorTypeKubernetes, lifecycle.NewKubernetesPreparer(log))
 	log.Info("Kubernetes preparer registered")
+}
+
+func credentialFilePath(cfg *config.Config) string {
+	if cfg != nil {
+		return strings.TrimSpace(cfg.Credentials.File)
+	}
+	return strings.TrimSpace(os.Getenv("KANDEV_CREDENTIALS_FILE"))
 }

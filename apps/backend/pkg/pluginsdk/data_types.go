@@ -110,6 +110,78 @@ type Task struct {
 	IsEphemeral  bool
 	Repositories []TaskRepository
 	Metadata     map[string]any
+	// ArchivedAt is nil for a live task. Only ever populated when the read asked
+	// for archived tasks (TaskFilter.IncludeArchived).
+	ArchivedAt *string
+	// PullRequests are the changes opened for this task, newest first. The link
+	// is not derivable from any other field on Task: CheckoutBranch is the BASE
+	// branch, and a PR title is rewritten to conventional-commit form.
+	PullRequests []TaskPullRequest
+	// WorkflowStepID is where on the board the task stands. State says how it is
+	// going; this says where it is.
+	WorkflowStepID         string
+	Position               int32
+	AssigneeAgentProfileID string
+	Labels                 []string
+	Autopilot              bool
+	WIPAdmitted            bool
+	QueuedForStepID        string
+	QueuedAt               *string
+	ProjectID              string
+	ExternalID             string
+}
+
+// TaskPullRequest is one change opened for a task. Provider-neutral by design:
+// review metadata specific to one forge stays out of the plugin contract.
+type TaskPullRequest struct {
+	Number     int64
+	URL        string
+	Title      string
+	State      string // "open" | "closed" | "merged"
+	HeadBranch string
+	BaseBranch string
+	IsDraft    bool
+	Provider   string // "github" | "gitlab"
+	MergedAt   *string
+	ClosedAt   *string
+	// Readiness, already synced by kandev's PR watcher. Carried so a plugin
+	// asking "what can merge" does not re-fetch all of it from the forge.
+	ReviewState             string
+	ChecksState             string
+	MergeableState          string
+	UnresolvedReviewThreads int32
+	ChecksTotal             int32
+	ChecksPassing           int32
+	Additions               int32
+	Deletions               int32
+	AuthorLogin             string
+}
+
+func (r TaskPullRequest) toProto() *pluginv1.TaskPullRequest {
+	return &pluginv1.TaskPullRequest{
+		Number: r.Number, Url: r.URL, Title: r.Title, State: r.State,
+		HeadBranch: r.HeadBranch, BaseBranch: r.BaseBranch, IsDraft: r.IsDraft,
+		Provider: r.Provider, MergedAt: r.MergedAt, ClosedAt: r.ClosedAt,
+		ReviewState: r.ReviewState, ChecksState: r.ChecksState,
+		MergeableState: r.MergeableState, UnresolvedReviewThreads: r.UnresolvedReviewThreads,
+		ChecksTotal: r.ChecksTotal, ChecksPassing: r.ChecksPassing,
+		Additions: r.Additions, Deletions: r.Deletions, AuthorLogin: r.AuthorLogin,
+	}
+}
+
+func taskPullRequestFromProto(p *pluginv1.TaskPullRequest) TaskPullRequest {
+	if p == nil {
+		return TaskPullRequest{}
+	}
+	return TaskPullRequest{
+		Number: p.GetNumber(), URL: p.GetUrl(), Title: p.GetTitle(), State: p.GetState(),
+		HeadBranch: p.GetHeadBranch(), BaseBranch: p.GetBaseBranch(), IsDraft: p.GetIsDraft(),
+		Provider: p.GetProvider(), MergedAt: p.MergedAt, ClosedAt: p.ClosedAt,
+		ReviewState: p.GetReviewState(), ChecksState: p.GetChecksState(),
+		MergeableState: p.GetMergeableState(), UnresolvedReviewThreads: p.GetUnresolvedReviewThreads(),
+		ChecksTotal: p.GetChecksTotal(), ChecksPassing: p.GetChecksPassing(),
+		Additions: p.GetAdditions(), Deletions: p.GetDeletions(), AuthorLogin: p.GetAuthorLogin(),
+	}
 }
 
 func (t Task) toProto() (*pluginv1.Task, error) {
@@ -142,7 +214,42 @@ func (t Task) toProto() (*pluginv1.Task, error) {
 		IsEphemeral:  t.IsEphemeral,
 		Repositories: repos,
 		Metadata:     metadata,
+
+		ArchivedAt:             t.ArchivedAt,
+		PullRequests:           taskPullRequestsToProto(t.PullRequests),
+		WorkflowStepId:         t.WorkflowStepID,
+		Position:               t.Position,
+		AssigneeAgentProfileId: t.AssigneeAgentProfileID,
+		Labels:                 t.Labels,
+		Autopilot:              t.Autopilot,
+		WipAdmitted:            t.WIPAdmitted,
+		QueuedForStepId:        t.QueuedForStepID,
+		QueuedAt:               t.QueuedAt,
+		ProjectId:              t.ProjectID,
+		ExternalId:             t.ExternalID,
 	}, nil
+}
+
+func taskPullRequestsToProto(in []TaskPullRequest) []*pluginv1.TaskPullRequest {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]*pluginv1.TaskPullRequest, len(in))
+	for i := range in {
+		out[i] = in[i].toProto()
+	}
+	return out
+}
+
+func taskPullRequestsFromProto(in []*pluginv1.TaskPullRequest) []TaskPullRequest {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]TaskPullRequest, len(in))
+	for i, r := range in {
+		out[i] = taskPullRequestFromProto(r)
+	}
+	return out
 }
 
 func taskFromProto(p *pluginv1.Task) (Task, error) {
@@ -178,6 +285,19 @@ func taskFromProto(p *pluginv1.Task) (Task, error) {
 		IsEphemeral:  p.GetIsEphemeral(),
 		Repositories: repos,
 		Metadata:     metadata,
+
+		ArchivedAt:             p.ArchivedAt,
+		PullRequests:           taskPullRequestsFromProto(p.GetPullRequests()),
+		WorkflowStepID:         p.GetWorkflowStepId(),
+		Position:               p.GetPosition(),
+		AssigneeAgentProfileID: p.GetAssigneeAgentProfileId(),
+		Labels:                 p.GetLabels(),
+		Autopilot:              p.GetAutopilot(),
+		WIPAdmitted:            p.GetWipAdmitted(),
+		QueuedForStepID:        p.GetQueuedForStepId(),
+		QueuedAt:               p.QueuedAt,
+		ProjectID:              p.GetProjectId(),
+		ExternalID:             p.GetExternalId(),
 	}, nil
 }
 
@@ -218,6 +338,12 @@ type TaskFilter struct {
 	States           []string
 	ParentID         *string
 	IncludeEphemeral bool
+	// IncludeArchived defaults false, matching the behaviour before this field
+	// existed: a plugin that does not ask still sees only live tasks. A plugin
+	// reporting on delivery needs true — an archived task is usually a
+	// delivered one, and omitting it makes finished work look like it never
+	// happened.
+	IncludeArchived bool
 }
 
 func (f TaskFilter) toProto() *pluginv1.TaskFilter {
@@ -227,6 +353,7 @@ func (f TaskFilter) toProto() *pluginv1.TaskFilter {
 		States:           f.States,
 		ParentId:         f.ParentID,
 		IncludeEphemeral: f.IncludeEphemeral,
+		IncludeArchived:  f.IncludeArchived,
 	}
 }
 
@@ -240,6 +367,7 @@ func taskFilterFromProto(p *pluginv1.TaskFilter) TaskFilter {
 		States:           p.GetStates(),
 		ParentID:         p.ParentId,
 		IncludeEphemeral: p.GetIncludeEphemeral(),
+		IncludeArchived:  p.GetIncludeArchived(),
 	}
 }
 
@@ -373,15 +501,33 @@ type WorkflowStep struct {
 	Name       string
 	Position   int32
 	StageType  string
+	// Color is the step's own presentation colour. A plugin rendering a board
+	// reads it rather than inventing a palette, so its columns match the ones
+	// the operator already sees in kandev.
+	Color          string
+	IsStartStep    bool
+	WIPLimit       int32 // 0 means unlimited
+	AgentProfileID string
+	// OnEnterActionTypes lists the on_enter action types configured on this
+	// step, as authored. A type appearing here means it is configured, not a
+	// guarantee of when or whether it fires. Config maps are deliberately not
+	// exposed. Nil when the step has no on_enter actions, never an empty
+	// non-nil slice. Callers must ignore action types they do not recognize.
+	OnEnterActionTypes []string
 }
 
 func (s WorkflowStep) toProto() *pluginv1.WorkflowStep {
 	return &pluginv1.WorkflowStep{
-		Id:         s.ID,
-		WorkflowId: s.WorkflowID,
-		Name:       s.Name,
-		Position:   s.Position,
-		StageType:  s.StageType,
+		Id:                 s.ID,
+		WorkflowId:         s.WorkflowID,
+		Name:               s.Name,
+		Position:           s.Position,
+		StageType:          s.StageType,
+		Color:              s.Color,
+		IsStartStep:        s.IsStartStep,
+		WipLimit:           s.WIPLimit,
+		AgentProfileId:     s.AgentProfileID,
+		OnEnterActionTypes: s.OnEnterActionTypes,
 	}
 }
 
@@ -390,12 +536,27 @@ func workflowStepFromProto(p *pluginv1.WorkflowStep) WorkflowStep {
 		return WorkflowStep{}
 	}
 	return WorkflowStep{
-		ID:         p.GetId(),
-		WorkflowID: p.GetWorkflowId(),
-		Name:       p.GetName(),
-		Position:   p.GetPosition(),
-		StageType:  p.GetStageType(),
+		ID:                 p.GetId(),
+		WorkflowID:         p.GetWorkflowId(),
+		Name:               p.GetName(),
+		Position:           p.GetPosition(),
+		StageType:          p.GetStageType(),
+		OnEnterActionTypes: nonEmptyStrings(p.GetOnEnterActionTypes()),
+		Color:              p.GetColor(),
+		IsStartStep:        p.GetIsStartStep(),
+		WIPLimit:           p.GetWipLimit(),
+		AgentProfileID:     p.GetAgentProfileId(),
 	}
+}
+
+// nonEmptyStrings enforces the documented nil-not-empty invariant at the SDK
+// decode boundary, independent of what a caller happened to serialize onto
+// the wire.
+func nonEmptyStrings(s []string) []string {
+	if len(s) == 0 {
+		return nil
+	}
+	return s
 }
 
 func workflowStepsFromProto(items []*pluginv1.WorkflowStep) []WorkflowStep {
@@ -1034,8 +1195,13 @@ func pluginTaskLaunchOptionsFromProto(p *pluginv1.PluginTaskLaunchOptions) *Plug
 // UpdateTaskInput is the Go-native mirror of
 // kandev.plugin.v1.UpdateTaskRequest. Every field except ID is optional: a nil
 // pointer leaves that field untouched, a non-nil pointer overwrites it. The
-// conservative field surface (title/description/state/workflow_step_id) is the
-// documented plugin-writable mask.
+// conservative field surface (title/description/state) is the documented
+// plugin-writable mask. WorkflowStepID is rejected when non-nil — it exists
+// on this struct only for wire-shape symmetry with UpdateTaskRequest; use
+// TaskReader.Move (see host.go) to transition a task between workflow steps,
+// which routes through the same validation, WIP admission, task.moved
+// publication, auto-start gates, and queue reconciliation the board's own
+// move uses.
 type UpdateTaskInput struct {
 	ID             string
 	Title          *string
@@ -1065,6 +1231,88 @@ func updateTaskInputFromProto(p *pluginv1.UpdateTaskRequest) UpdateTaskInput {
 		State:          p.State,
 		WorkflowStepID: p.WorkflowStepId,
 	}
+}
+
+// MoveTaskInput is the Go-native mirror of kandev.plugin.v1.MoveTaskRequest.
+// Unlike Update, Move transitions the task through the same path the board's
+// own move uses, so on_enter actions (auto-start included) actually fire.
+// WorkflowID is optional: nil inherits the task's current workflow; a
+// pointer to "" is rejected rather than treated as inherit. Position is not
+// optional: an omitted position and a position of zero are the same
+// request, both placing the task at the top of the target step.
+type MoveTaskInput struct {
+	TaskID         string
+	WorkflowStepID string
+	WorkflowID     *string
+	Position       int32
+}
+
+func (in MoveTaskInput) toProto() *pluginv1.MoveTaskRequest {
+	return &pluginv1.MoveTaskRequest{
+		TaskId:         in.TaskID,
+		WorkflowStepId: in.WorkflowStepID,
+		WorkflowId:     in.WorkflowID,
+		Position:       in.Position,
+	}
+}
+
+func moveTaskInputFromProto(p *pluginv1.MoveTaskRequest) MoveTaskInput {
+	if p == nil {
+		return MoveTaskInput{}
+	}
+	return MoveTaskInput{
+		TaskID:         p.GetTaskId(),
+		WorkflowStepID: p.GetWorkflowStepId(),
+		WorkflowID:     p.WorkflowId,
+		Position:       p.GetPosition(),
+	}
+}
+
+// MoveTaskOutcome is the Go-native mirror of kandev.plugin.v1.MoveTaskResponse.
+// Transitioned reports whether a ledger row was written for this move (false
+// when the task was already on the target step). QueuedForStepID is the sole
+// admission discriminator, reported on both values of Transitioned: nil means
+// admitted (when Transitioned) or not applicable (when not); non-nil means
+// queued for that step holding no WIP slot. FromStepID is the step the task
+// left; empty when Transitioned is false.
+type MoveTaskOutcome struct {
+	Task            *Task
+	Transitioned    bool
+	QueuedForStepID *string
+	FromStepID      string
+}
+
+func (o MoveTaskOutcome) toProto() (*pluginv1.MoveTaskResponse, error) {
+	var protoTask *pluginv1.Task
+	if o.Task != nil {
+		var err error
+		protoTask, err = o.Task.toProto()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &pluginv1.MoveTaskResponse{
+		Task:            protoTask,
+		Transitioned:    o.Transitioned,
+		QueuedForStepId: o.QueuedForStepID,
+		FromStepId:      o.FromStepID,
+	}, nil
+}
+
+func moveTaskOutcomeFromProto(p *pluginv1.MoveTaskResponse) (*MoveTaskOutcome, error) {
+	if p == nil {
+		return nil, nil
+	}
+	task, err := taskFromProto(p.GetTask())
+	if err != nil {
+		return nil, err
+	}
+	return &MoveTaskOutcome{
+		Task:            &task,
+		Transitioned:    p.GetTransitioned(),
+		QueuedForStepID: p.QueuedForStepId,
+		FromStepID:      p.GetFromStepId(),
+	}, nil
 }
 
 // MessageDispatch is the Go-native mirror of

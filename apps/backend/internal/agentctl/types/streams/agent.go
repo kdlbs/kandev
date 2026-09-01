@@ -101,21 +101,22 @@ const (
 )
 
 // AgentEvent is the message type streamed from the agent process.
-// This represents protocol-agnostic events from the agent, normalized from
-// various underlying protocols (ACP, Codex, Claude Code, etc.).
+// This represents agent-agnostic events. ACP session updates are normalized
+// into this shape; agentctl also synthesizes lifecycle and diagnostic events
+// (process exit, MCP attachment, permission cancellation) that never came from
+// the agent.
 //
 // Stream endpoint: ws://.../api/v1/agent/events
 type AgentEvent struct {
-	// Type identifies the event type. Use EventType* constants:
-	// "message_chunk", "reasoning", "tool_call", "tool_update", "plan", "complete", "error"
+	// Type identifies the event type. Use the EventType* constants for supported
+	// values.
 	Type string `json:"type"`
 
 	// SessionID is the current session identifier.
 	SessionID string `json:"session_id,omitempty"`
 
-	// OperationID identifies the current in-flight operation (turn, prompt, etc.).
-	// Used to target specific operations for cancellation or status updates.
-	// For Codex this is the turn ID, for other protocols it may be empty.
+	// OperationID identifies an operation when the agent exposes an operation ID.
+	// It may be empty when no operation ID is available.
 	OperationID string `json:"operation_id,omitempty"`
 
 	// PromptGeneration is the lifecycle-owned identity assigned when this
@@ -198,6 +199,9 @@ type AgentEvent struct {
 	MCPAttachmentAttempt *MCPAttachmentAttempt `json:"mcp_attachment_attempt,omitempty"`
 
 	// --- Permission request fields (for "permission_request" type) ---
+	// RequestID is the Kandev-generated identity for this exact request
+	// generation. It is distinct from the provider-controlled PendingID.
+	RequestID string `json:"request_id,omitempty"`
 
 	// PendingID uniquely identifies this pending permission request.
 	PendingID string `json:"pending_id,omitempty"`
@@ -291,7 +295,7 @@ type AgentEvent struct {
 	// prompt while another prompt for the same session is still in flight. It is
 	// the negotiated precondition for prompt handoff and mid-turn steering, and
 	// does not by itself promise the agent will fold that prompt into the running
-	// turn. See docs/specs/platform/mid-turn-steering.md.
+	// turn. See docs/specs/platform/requirements/mid-turn-steering.md.
 	SupportsPromptQueueing bool `json:"supports_prompt_queueing"`
 
 	// AuthMethods lists authentication methods from ACP initialize.
@@ -538,7 +542,7 @@ type ConfigOptionValue struct {
 // per-turn total — see normalizeCodexPromptUsage in
 // server/adapter/transport/acp/dialect_codex.go). Rows flagged estimated
 // still count toward budget totals at face value per
-// docs/specs/office/costs.md.
+// docs/specs/office/requirements/costs.md.
 type PromptUsage struct {
 	InputTokens  int64 `json:"input_tokens"`
 	OutputTokens int64 `json:"output_tokens"`

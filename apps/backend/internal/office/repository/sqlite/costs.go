@@ -2,14 +2,12 @@ package sqlite
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/office/models"
 )
@@ -28,7 +26,7 @@ import (
 var ErrDuplicateUsageEvent = errors.New("duplicate usage_event_id")
 
 // usageEventIndexName is the partial unique index enforcing at most one row
-// per non-NULL usage_event_id (docs/specs/office/costs.md).
+// per non-NULL usage_event_id (docs/specs/office/requirements/costs.md).
 const usageEventIndexName = "uniq_office_cost_usage_event"
 
 // sqliteUsageEventViolationMessage is the substring go-sqlite3 puts in a
@@ -59,39 +57,19 @@ func isUsageEventUniqueViolation(err error) bool {
 // CreateCostEvent records a new cost event. A UsageEventID collision
 // (redelivery of the same prompt-usage event) is reported as
 // ErrDuplicateUsageEvent rather than the raw driver error, so callers can
-// treat it as an idempotent no-op.
-//
-// Delegates to CreateCostEventTx using r.db as the executor; a caller that
-// needs this atomic with another write (e.g. the office cost subscriber's
-// session-usage rollup) should call the Tx variant directly with a shared
-// transaction instead.
+// treat it as an idempotent no-op. Office's cost subscriber no longer
+// shares this insert with a task_sessions rollup write (that pairing now
+// happens entirely inside internal/task/usage's writer via its own
+// insertUsageEventAndRollup — docs/specs/task-cost-ledger/spec.md AC-10,
+// AC-21), so this always executes against r.db directly with no
+// transaction parameter to plumb through.
 func (r *Repository) CreateCostEvent(ctx context.Context, event *models.CostEvent) error {
-	return r.CreateCostEventTx(ctx, nil, event)
-}
-
-// CreateCostEventTx is CreateCostEvent's transactional twin: executes
-// against tx when non-nil (falling back to r.db, the shared writer
-// connection, when tx is nil) so a caller can make this atomic with another
-// write in the same transaction — see BeginTx and
-// shared.SessionUsageWriterTx's doc comment for why (docs/specs/office/costs.md,
-// PR #2606 review).
-func (r *Repository) CreateCostEventTx(ctx context.Context, tx *sqlx.Tx, event *models.CostEvent) error {
 	if event.ID == "" {
 		event.ID = uuid.New().String()
 	}
 	event.CreatedAt = time.Now().UTC()
 
-	var exec interface {
-		ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
-		Rebind(query string) string
-	}
-	if tx != nil {
-		exec = tx
-	} else {
-		exec = r.db
-	}
-
-	_, err := exec.ExecContext(ctx, exec.Rebind(`
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO office_cost_events (
 			id, session_id, task_id, agent_profile_id, project_id,
 			model, provider, tokens_in, tokens_cached_in,
@@ -160,21 +138,28 @@ func (r *Repository) GetCostsByAgent(ctx context.Context, workspaceID string) ([
 	return results, nil
 }
 
-// GetCostsByProject returns aggregated costs grouped by project, filtered by workspace.
-// group_label resolves to the project name; empty when project_id is unset
-// or the project row has been deleted.
+// GetCostsByProject returns aggregated costs grouped by project, filtered by
+// workspace. Attribution is live: it groups by the task's *current*
+// project_id, not the office_cost_events.project_id snapshot written at
+// usage-event time. Unlike agent attribution (see GetCostsByAgent, and
+// costContractVersion's doc comment in prompt_usage_cost.go), a task's
+// project is an organisational grouping the user is expected to change
+// after the work is done — reassigning a finished task must move its whole
+// cost history onto the new project immediately, not strand it as
+// "unassigned". group_label resolves to the project name; empty when
+// project_id is unset or the project row has been deleted.
 func (r *Repository) GetCostsByProject(ctx context.Context, workspaceID string) ([]*models.CostBreakdown, error) {
 	var results []*models.CostBreakdown
 	err := r.ro.SelectContext(ctx, &results, r.ro.Rebind(`
-		SELECT e.project_id AS group_key,
+		SELECT COALESCE(t.project_id, '') AS group_key,
 			COALESCE(MAX(NULLIF(op.name, '')), '') AS group_label,
 			SUM(e.cost_subcents) AS total_subcents,
 			COUNT(*) AS count
 		FROM office_cost_events e
 		JOIN tasks t ON t.id = e.task_id
-		LEFT JOIN office_projects op ON op.id = e.project_id
+		LEFT JOIN office_projects op ON op.id = t.project_id
 		WHERE t.workspace_id = ?
-		GROUP BY e.project_id
+		GROUP BY COALESCE(t.project_id, '')
 	`), workspaceID)
 	if err != nil {
 		return nil, err
@@ -310,13 +295,19 @@ func (r *Repository) GetCostForAgentSince(ctx context.Context, agentID string, s
 	return total, err
 }
 
-// GetCostForProject returns the total cost in subcents for a specific project.
+// GetCostForProject returns the total cost in subcents for a specific
+// project. Like GetCostsByProject, this joins to tasks and uses the task's
+// current project_id rather than the office_cost_events.project_id
+// snapshot, so a project budget (costs/budgets.go) counts the same set of
+// events as the "cost by project" panel — see GetCostsByProject's doc
+// comment for why project attribution is live.
 func (r *Repository) GetCostForProject(ctx context.Context, projectID string) (int64, error) {
 	var total int64
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
-		SELECT COALESCE(SUM(cost_subcents), 0)
-		FROM office_cost_events
-		WHERE project_id = ?
+		SELECT COALESCE(SUM(e.cost_subcents), 0)
+		FROM office_cost_events e
+		JOIN tasks t ON t.id = e.task_id
+		WHERE t.project_id = ?
 	`), projectID).Scan(&total)
 	return total, err
 }
@@ -329,9 +320,10 @@ func (r *Repository) GetCostForProjectSince(ctx context.Context, projectID strin
 	}
 	var total int64
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
-		SELECT COALESCE(SUM(cost_subcents), 0)
-		FROM office_cost_events
-		WHERE project_id = ? AND occurred_at >= ?
+		SELECT COALESCE(SUM(e.cost_subcents), 0)
+		FROM office_cost_events e
+		JOIN tasks t ON t.id = e.task_id
+		WHERE t.project_id = ? AND e.occurred_at >= ?
 	`), projectID, since.UTC()).Scan(&total)
 	return total, err
 }

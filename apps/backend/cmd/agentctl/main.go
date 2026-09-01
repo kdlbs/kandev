@@ -27,9 +27,12 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/githubauth"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
+	"github.com/kandev/kandev/internal/profiles"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )
@@ -43,28 +46,54 @@ var (
 )
 
 func main() {
+	os.Exit(runMain())
+}
+
+func runMain() int {
 	if code, handled := runGitHubUtilityCommand(); handled {
-		os.Exit(code)
+		return code
 	}
 
 	// Dispatch kandev CLI subcommands before flag parsing or server startup.
 	// When invoked as "agentctl kandev <cmd>", this runs the CLI and exits
 	// without starting the HTTP server.
 	if len(os.Args) > 1 && os.Args[1] == "kandev" {
-		os.Exit(runKandevCLI(os.Args[2:]))
+		return runKandevCLI(os.Args[2:])
 	}
 
 	cleanupGitHubCLIShim, err := prepareGitHubCLIShim()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return 1
 	}
 	defer cleanupGitHubCLIShim()
 
 	flag.Parse()
 
-	// Load configuration
-	cfg := config.Load()
+	// Load configuration. Managed launches receive a validated, resolved child
+	// contract from the backend. Direct invocations retain legacy environment
+	// compatibility when that private contract is absent.
+	startup, managed, err := config.StartupConfigFromEnv()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to load managed agentctl configuration: %v\n", err)
+		return 1
+	}
+	var cfg *config.Config
+	if managed {
+		cfg, err = config.LoadWithStartup(startup)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to load managed agentctl configuration: %v\n", err)
+			return 1
+		}
+		tracing.ConfigureEndpoint(startup.OTLPEndpoint)
+	} else {
+		cfg = config.Load()
+		tracing.ConfigureEndpoint(cfg.OTLPEndpoint)
+	}
+	if _, _, err := profiles.ApplyProfile(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to apply profile defaults: %v\n", err)
+		return 1
+	}
 
 	// Override with CLI flags if provided
 	if *protocolFlag != "" {
@@ -88,7 +117,7 @@ func main() {
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	defer func() {
 		_ = log.Sync()
@@ -99,6 +128,7 @@ func main() {
 		zap.String("log_level", cfg.LogLevel))
 
 	run(cfg, log)
+	return 0
 }
 
 func runGitHubUtilityCommand() (int, bool) {
@@ -181,10 +211,12 @@ func run(cfg *config.Config, log *logger.Logger) {
 
 		// Create MCP server using the channel-based backend client
 		var mcpSrv *mcpserver.Server
+		mcpNamePresentationOption := mcpserver.WithMCPToolNamespacingByServer(instCfg.NamespacesMCPToolsByServer)
 		if instCfg.McpProfile != nil {
-			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, *instCfg.McpProfile)
+			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, *instCfg.McpProfile, mcpNamePresentationOption)
 		} else {
-			mcpSrv = mcpserver.New(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, instCfg.McpMode, instCfg.McpProviders)
+			legacyProfile := mcpprofile.Legacy(instCfg.McpMode, instCfg.DisableAskQuestion, instCfg.McpProviders)
+			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, legacyProfile, mcpNamePresentationOption)
 		}
 		mcpSrv.SetAttachmentReporter(procMgr.PublishMCPAttachment)
 		instLog.Info("MCP server enabled (channel-based)",

@@ -1,10 +1,11 @@
 import { test, expect } from "../../fixtures/office-fixture";
 import { waitForHttp } from "../../helpers/causal-waits";
+import { officeTopbarTitle } from "../../helpers/office-topbar";
 
 test.describe("Org chart", () => {
   test("org chart shows CEO agent node", async ({ testPage, officeSeed: _ }) => {
     await testPage.goto("/office/workspace/org");
-    await expect(testPage.getByRole("heading", { name: /Org/i }).first()).toBeVisible({
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Org/i, {
       timeout: 10_000,
     });
     // CEO agent from onboarding should appear as a node
@@ -23,7 +24,7 @@ test.describe("Org chart", () => {
     const workerId = worker.id as string;
 
     await testPage.goto("/office/workspace/org");
-    await expect(testPage.getByRole("heading", { name: /Org/i }).first()).toBeVisible({
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Org/i, {
       timeout: 10_000,
     });
     const edgesBefore = await testPage.getByTestId("org-edge").count();
@@ -39,7 +40,7 @@ test.describe("Org chart", () => {
     await saved;
 
     await testPage.getByRole("link", { name: /Agent topology/i }).click();
-    await expect(testPage.getByRole("heading", { name: /Org/i }).first()).toBeVisible({
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Org/i, {
       timeout: 10_000,
     });
     const orgChart = testPage.getByTestId("org-chart-edges").locator("..");

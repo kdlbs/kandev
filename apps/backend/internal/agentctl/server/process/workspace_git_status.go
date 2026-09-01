@@ -231,6 +231,12 @@ func (wt *WorkspaceTracker) computeGitStatus(ctx context.Context) (types.GitStat
 		Renamed:        []string{},
 		Files:          make(map[string]types.FileInfo),
 	}
+	comparison := wt.ComparisonResolution()
+	if comparison.Explicit {
+		update.ComparisonTarget = comparison.Display
+		update.ComparisonStatus = comparison.Status
+		update.ComparisonErrorCode = comparison.ErrorCode
+	}
 
 	// Bare trackers (multi-repo task roots) sit on a directory that isn't
 	// itself a git repo. Without this guard, `git status` would ascend the
@@ -251,6 +257,10 @@ func (wt *WorkspaceTracker) computeGitStatus(ctx context.Context) (types.GitStat
 
 	if err := wt.getGitBranchInfo(ctx, &update); err != nil {
 		return update, err
+	}
+	if comparison.Explicit && comparison.Status == comparisonTargetStatusReady && update.BaseCommit == "" {
+		update.ComparisonStatus = comparisonTargetStatusUnavailable
+		update.ComparisonErrorCode = comparisonTargetErrorMergeBase
 	}
 	if err := ctx.Err(); err != nil {
 		return update, err
@@ -421,6 +431,10 @@ func (wt *WorkspaceTracker) ResolveBaseAnchor(ctx context.Context) (sha, baseBra
 // would silently overwrite the cached counts with 0/0 and hide a legitimate
 // "Pull N" / "Push N" indicator in the UI.
 func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *types.GitStatusUpdate, prior types.GitStatusUpdate) {
+	comparison := wt.ComparisonResolution()
+	if comparison.Explicit && comparison.Status != comparisonTargetStatusReady {
+		return
+	}
 	// Always compare against the base branch (task-stored value if set,
 	// otherwise origin/main / origin/master). Using the remote tracking
 	// branch (origin/<feature-branch>) gives wrong counts after rebase
@@ -437,22 +451,48 @@ func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *ty
 		compareRef = ""
 	}
 	if compareRef == "" {
+		if comparison.Explicit {
+			update.ComparisonStatus = comparisonTargetStatusUnavailable
+			update.ComparisonErrorCode = comparisonTargetErrorRefUnavailable
+			return
+		}
 		carryAheadBehind(update, prior)
 		return
 	}
 	countOut, err := wt.runGitOutput(ctx, "rev-list", "--left-right", "--count", update.Branch+"..."+compareRef)
 	if err != nil {
+		if comparison.Explicit {
+			update.ComparisonStatus = comparisonTargetStatusUnavailable
+			update.ComparisonErrorCode = comparisonTargetErrorRefUnavailable
+			return
+		}
 		wt.logger.Debug("getAheadBehindCounts: rev-list failed, carrying forward", zap.Error(err))
 		carryAheadBehind(update, prior)
 		return
 	}
 	parts := strings.Fields(string(countOut))
 	if len(parts) != 2 {
+		if comparison.Explicit {
+			update.ComparisonStatus = comparisonTargetStatusUnavailable
+			update.ComparisonErrorCode = comparisonTargetErrorRefUnavailable
+			return
+		}
 		carryAheadBehind(update, prior)
 		return
 	}
-	update.Ahead, _ = strconv.Atoi(parts[0])
-	update.Behind, _ = strconv.Atoi(parts[1])
+	ahead, aheadErr := strconv.Atoi(parts[0])
+	behind, behindErr := strconv.Atoi(parts[1])
+	if aheadErr != nil || behindErr != nil || ahead < 0 || behind < 0 {
+		if comparison.Explicit {
+			update.ComparisonStatus = comparisonTargetStatusUnavailable
+			update.ComparisonErrorCode = comparisonTargetErrorRefUnavailable
+			return
+		}
+		carryAheadBehind(update, prior)
+		return
+	}
+	update.Ahead = ahead
+	update.Behind = behind
 }
 
 // getRemoteAheadBehindCounts populates RemoteAhead/RemoteBehind relative to
@@ -603,6 +643,13 @@ func (r baseBranchResolution) log(wt *WorkspaceTracker) {
 // resolveBaseBranchWithReason is resolveBaseBranch's decision, separated so the
 // outcome is assertable in tests rather than only observable through logs.
 func (wt *WorkspaceTracker) resolveBaseBranchWithReason(ctx context.Context) baseBranchResolution {
+	comparison := wt.ComparisonResolution()
+	if comparison.Explicit {
+		if comparison.Status == comparisonTargetStatusReady && comparison.Ref != "" {
+			return baseBranchResolution{ref: comparison.Ref, stored: comparison.Display, reason: baseBranchStored}
+		}
+		return baseBranchResolution{stored: comparison.Display, reason: baseBranchUnresolved}
+	}
 	stored := wt.BaseBranch()
 	if wt.IsSubmodule() {
 		anchor := wt.ComparisonAnchor()
@@ -635,6 +682,13 @@ func (wt *WorkspaceTracker) resolveBaseBranchWithReason(ctx context.Context) bas
 // aheadBehindFallbackCandidates list — local main/master are excluded
 // because they can show stale, in-progress work for divergence counts.
 func (wt *WorkspaceTracker) resolveAheadBehindRef(ctx context.Context) string {
+	comparison := wt.ComparisonResolution()
+	if comparison.Explicit {
+		if comparison.Status == comparisonTargetStatusReady {
+			return comparison.Ref
+		}
+		return ""
+	}
 	if wt.IsSubmodule() {
 		return wt.resolveBaseBranch(ctx)
 	}
@@ -732,23 +786,44 @@ func carryRemoteSnapshot(update *types.GitStatusUpdate, prior types.GitStatusUpd
 	update.RemoteBehind = prior.RemoteBehind
 }
 
-// parseGitStatusOutput runs git status --porcelain and populates the file lists and map.
+// parseGitStatusOutput collects tracked status and eligible untracked paths,
+// then populates the file lists and map.
 func (wt *WorkspaceTracker) parseGitStatusOutput(ctx context.Context, update *types.GitStatusUpdate) error {
-	// --untracked-files=all shows all files in untracked directories, not just
-	// the directory name. GIT_OPTIONAL_LOCKS=0 prevents the status read from
-	// taking .git/index.lock, while the carried observation class keeps fresh
-	// user requests interactive.
+	class := gitWorkClass(ctx)
+	indexSnapshot, cleanup, err := snapshotGitIndex(ctx, wt.gitIndexPath)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	statusCtx := withGitIndexFile(ctx, indexSnapshot)
+
+	// The tracked query must not receive the dependency-tree exclusion: tracked
+	// paths below node_modules remain part of the workspace status. The
+	// lockless read and carried observation class preserve the existing Git
+	// admission and index-lock behavior.
 	statusOut, err := wt.runGitOutputClass(
-		ctx,
-		gitWorkClass(ctx),
+		statusCtx,
+		class,
 		true,
-		"status", "--porcelain", "--untracked-files=all",
+		"status", "--porcelain", "--untracked-files=no",
 	)
 	if err != nil {
 		return err
 	}
 
-	return wt.applyPorcelainOutput(ctx, statusOut, update)
+	if err := wt.applyPorcelainOutput(ctx, statusOut, update); err != nil {
+		return err
+	}
+
+	if wt.gitStatusBetweenQueries != nil {
+		wt.gitStatusBetweenQueries()
+	}
+
+	untrackedOut, err := wt.runGitOutputClass(statusCtx, class, true, gitUntrackedFilesArgs...)
+	if err != nil {
+		return err
+	}
+	return wt.applyUntrackedOutput(ctx, untrackedOut, update)
 }
 
 func (wt *WorkspaceTracker) applyPorcelainOutput(
@@ -793,12 +868,16 @@ func (wt *WorkspaceTracker) applyPorcelainLine(line string, update *types.GitSta
 
 	// For renames the format is "old -> new" (each part may be independently
 	// quoted), so we must split first and unquote each part separately.
-	filePath := rawPath
-	if indexStatus != 'R' {
-		filePath = unquoteGitPath(rawPath)
+	filePath := unquoteGitPath(rawPath)
+	oldPath := ""
+	if indexStatus == 'R' {
+		if idx := strings.Index(rawPath, " -> "); idx != -1 {
+			oldPath = unquoteGitPath(rawPath[:idx])
+			filePath = unquoteGitPath(rawPath[idx+4:])
+		}
 	}
 
-	fileInfo := types.FileInfo{Path: filePath}
+	fileInfo := types.FileInfo{Path: filePath, OldPath: oldPath}
 
 	// Determine staged status based on index and worktree status.
 	// Prioritize worktree changes as they represent the current state.
@@ -835,14 +914,35 @@ func (wt *WorkspaceTracker) applyPorcelainLine(line string, update *types.GitSta
 	case indexStatus == 'R':
 		fileInfo.Status = "renamed"
 		fileInfo.Staged = true
-		// Renamed files have format "old -> new"; each part may be quoted independently.
-		if idx := strings.Index(rawPath, " -> "); idx != -1 {
-			fileInfo.OldPath = unquoteGitPath(rawPath[:idx])
-			filePath = unquoteGitPath(rawPath[idx+4:])
-			fileInfo.Path = filePath
-		}
 		update.Renamed = append(update.Renamed, filePath)
 	}
 
+	// A path can have both an index and a working-tree change (for example MM
+	// or AM). Keep the flattened compatibility projection above, but preserve
+	// both independently for consumers that understand mixed paths.
+	if stagedChange := porcelainChangeFacet(indexStatus, oldPath); stagedChange != nil {
+		if unstagedChange := porcelainChangeFacet(workTreeStatus, ""); unstagedChange != nil {
+			fileInfo.StagedChange = stagedChange
+			fileInfo.UnstagedChange = unstagedChange
+		}
+	}
+
 	update.Files[filePath] = fileInfo
+}
+
+func porcelainChangeFacet(status byte, oldPath string) *types.FileChangeFacet {
+	change := &types.FileChangeFacet{OldPath: oldPath}
+	switch status {
+	case 'M':
+		change.Status = fileStatusModified
+	case 'A':
+		change.Status = "added"
+	case 'D':
+		change.Status = fileStatusDeleted
+	case 'R':
+		change.Status = "renamed"
+	default:
+		return nil
+	}
+	return change
 }

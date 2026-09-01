@@ -80,3 +80,8 @@ func (s *Store) Save(ctx context.Context, key string, value []byte) error {
 	`), key, string(value), time.Now().UTC())
 	return err
 }
+
+func (s *Store) Delete(ctx context.Context, key string) error {
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM settings WHERE key = ?`), key)
+	return err
+}

@@ -9,6 +9,7 @@ import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/ty
 import type { EntityReference } from "@/lib/types/entity-reference";
 import { useChatInputContainer } from "./use-chat-input-container";
 import { SessionStoppedBanner } from "./session-stopped-banner";
+import { useSessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
 import {
   ChatInputBody,
   type ChatInputContextAreaProps,
@@ -287,6 +288,7 @@ function useChatPromptEnhancement({
 }
 
 export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInputContainerProps>(
+  // eslint-disable-next-line complexity -- top-level component chooses the stopped or editor surface after shared hook setup.
   function ChatInputContainer(props, ref) {
     const { sessionId, taskId, taskTitle, taskDescription, isAgentBusy, isStarting, isSending } =
       props;
@@ -320,6 +322,11 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       onSubmit: props.onSubmit,
     });
 
+    const recoveryActions = useSessionRecoveryActions({
+      taskId: taskId ?? "",
+      sessionId: sessionId ?? "",
+    });
+
     const promptEnhancement = useChatPromptEnhancement({
       inputRef: s.inputRef,
       taskId,
@@ -337,6 +344,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
           taskId={taskId}
           sessionId={sessionId}
           workspaceId={props.workspaceId}
+          recoveryActions={recoveryActions}
           {...buildStoppedBannerProps(props)}
         />
       );

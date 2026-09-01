@@ -5,14 +5,14 @@ status: pending
 wave: 3
 depends_on: ["02-orchestrator-resolution", "03-frontend-multi-repo-picker"]
 plan: "plan.md"
-spec: "../../specs/office/automations-settings.md"
+spec: "../../specs/office/requirements/automations-settings.md"
 ---
 
 # Task 04: E2E coverage for multi-repository automation editing
 
 ## Inputs
 
-- `docs/specs/office/automations-settings.md` — Scenarios section (executor
+- `docs/specs/office/requirements/automations-settings.md` — Scenarios section (executor
   gating + repeatable list rendering).
 - `apps/web/e2e/README.md` — project/tag conventions (which Playwright
   project this belongs in; this feature has no Docker/SSH dependency, so it

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -722,6 +723,89 @@ func TestRespondToPermission_NotFound(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "permission request not found") {
 		t.Fatalf("expected 'permission request not found' error, got: %v", err)
+	}
+}
+
+func TestListPendingPermissions(t *testing.T) {
+	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
+		if msg.Action != "agent.permissions.list" {
+			t.Errorf("action = %q, want agent.permissions.list", msg.Action)
+		}
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, streams.PermissionListResponse{
+			Permissions: []streams.PendingAgentPermission{{
+				RequestID: "request-1",
+				PendingID: "pending-1",
+				Status:    streams.PermissionStatusPending,
+			}},
+			Total: 1,
+		})
+		return resp
+	})
+	defer ts.Close()
+	defer c.Close()
+
+	permissions, err := c.ListPendingPermissions(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(permissions) != 1 || permissions[0].RequestID != "request-1" {
+		t.Fatalf("unexpected permissions: %+v", permissions)
+	}
+}
+
+func TestResolvePermissionPreservesStableErrorCode(t *testing.T) {
+	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
+		if msg.Action != "agent.permissions.resolve" {
+			t.Errorf("action = %q, want agent.permissions.resolve", msg.Action)
+		}
+		var request streams.PermissionResolveRequest
+		if err := msg.ParsePayload(&request); err != nil {
+			t.Error(err)
+		}
+		if request.RequestID != "request-1" || request.PendingID != "pending-1" || request.OptionID != "unknown" {
+			t.Errorf("unexpected request: %+v", request)
+		}
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, streams.PermissionErrorOptionNotOffered, map[string]any{
+			"permission_code": streams.PermissionErrorOptionNotOffered,
+		})
+		return resp
+	})
+	defer ts.Close()
+	defer c.Close()
+
+	_, err := c.ResolvePermission(t.Context(), "request-1", "pending-1", "unknown")
+	var operationErr *PermissionOperationError
+	if !errors.As(err, &operationErr) {
+		t.Fatalf("error = %v, want PermissionOperationError", err)
+	}
+	if operationErr.Code != streams.PermissionErrorOptionNotOffered {
+		t.Fatalf("code = %q, want %q", operationErr.Code, streams.PermissionErrorOptionNotOffered)
+	}
+}
+
+func TestCancelPermissionSendsExactGeneration(t *testing.T) {
+	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
+		if msg.Action != "agent.permissions.cancel" {
+			t.Errorf("action = %q, want agent.permissions.cancel", msg.Action)
+		}
+		var request streams.PermissionCancelRequest
+		if err := msg.ParsePayload(&request); err != nil {
+			t.Error(err)
+		}
+		if request.RequestID != "request-1" || request.PendingID != "pending-1" {
+			t.Errorf("unexpected cancellation tuple: %+v", request)
+		}
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, streams.PermissionCancelResponse{
+			RequestID: request.RequestID, PendingID: request.PendingID, Status: "cancelled",
+		})
+		return resp
+	})
+	defer ts.Close()
+	defer c.Close()
+
+	result, err := c.CancelPermission(t.Context(), "request-1", "pending-1")
+	if err != nil || result.Status != "cancelled" {
+		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
 

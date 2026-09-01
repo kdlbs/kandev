@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-schema-and-repository"]
 plan: "plan.md"
-spec: "../../specs/native-code-review/spec.md"
+spec: "../../specs/agents/requirements/native-code-review.md"
 ---
 
 # Task 03: ReviewService, validation, and bus/WS events

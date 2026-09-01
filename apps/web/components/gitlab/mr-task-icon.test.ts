@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   aggregateMRChipStatus,
   aggregateMRStatusColor,
+  areAllOpenMRsReadyToMerge,
   compareChipMR,
   getMRStatusColor,
-  getMRTooltip,
   isMRReadyToMerge,
   mrChipStatus,
   MR_CHIP_STATUS_RANK,
@@ -92,37 +92,6 @@ describe("getMRStatusColor", () => {
   it("order: a running pipeline beats approved (row 8 is only reached if row 6 didn't match) — approved with pending CI is not emerald", () => {
     const mr = makeMR({ approval_state: "approved", pipeline_state: "pending" });
     expect(getMRStatusColor(mr)).toBe(YELLOW);
-  });
-});
-
-// AC37: colour is never the only carrier of MR state — the tooltip text
-// states it explicitly for any non-open MR.
-describe("getMRTooltip", () => {
-  it("states the MR state for a non-open MR", () => {
-    expect(getMRTooltip(makeMR({ state: "merged" }))).toContain("State: merged");
-    expect(getMRTooltip(makeMR({ state: "closed" }))).toContain("State: closed");
-  });
-
-  it("omits the state line for an open MR", () => {
-    expect(getMRTooltip(makeMR({ state: "open" }))).not.toContain("State:");
-  });
-
-  it("flags a ready-to-merge MR", () => {
-    expect(
-      getMRTooltip(
-        makeMR({
-          approval_state: "approved",
-          pipeline_state: "success",
-          merge_status: "can_be_merged",
-        }),
-      ),
-    ).toContain("Ready to merge");
-  });
-
-  it("flags a draft MR without claiming it's ready to merge", () => {
-    const tooltip = getMRTooltip(makeMR({ draft: true }));
-    expect(tooltip).toContain("Draft");
-    expect(tooltip).not.toContain("Ready to merge");
   });
 });
 
@@ -469,5 +438,33 @@ describe("compareChipMR", () => {
     expect(compareChipMR(a, b)).toBeLessThan(0);
     expect(compareChipMR(b, a)).toBeGreaterThan(0);
     expect(compareChipMR(a, a)).toBe(0);
+  });
+});
+
+// AC7: data-mr-ready-to-merge on the multi-MR badge, mirroring github's
+// areAllOpenPRsReadyToMerge.
+describe("areAllOpenMRsReadyToMerge", () => {
+  const readyMR = makeMR({
+    approval_state: "approved",
+    pipeline_state: "success",
+    merge_status: "can_be_merged",
+  });
+
+  it("is false when there are no open MRs", () => {
+    expect(areAllOpenMRsReadyToMerge([makeMR({ state: "merged" })])).toBe(false);
+  });
+
+  it("is true when every open MR is ready to merge", () => {
+    expect(areAllOpenMRsReadyToMerge([readyMR, { ...readyMR, id: "b", mr_iid: 2 }])).toBe(true);
+  });
+
+  it("is false when any open MR is not ready to merge", () => {
+    const notReady = makeMR({ id: "b", mr_iid: 2, pipeline_state: "pending" });
+    expect(areAllOpenMRsReadyToMerge([readyMR, notReady])).toBe(false);
+  });
+
+  it("ignores terminal siblings when deciding readiness", () => {
+    const merged = makeMR({ id: "c", mr_iid: 3, state: "merged" });
+    expect(areAllOpenMRsReadyToMerge([readyMR, merged])).toBe(true);
   });
 });

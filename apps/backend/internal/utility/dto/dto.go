@@ -53,20 +53,21 @@ type UpdateUtilityAgentRequest struct {
 
 // UtilityAgentCallDTO represents a call for API responses.
 type UtilityAgentCallDTO struct {
-	ID             string  `json:"id"`
-	UtilityID      string  `json:"utility_id"`
-	SessionID      string  `json:"session_id"`
-	ResolvedPrompt string  `json:"resolved_prompt"`
-	Response       string  `json:"response"`
-	Model          string  `json:"model"`
-	AgentProfileID string  `json:"agent_profile_id"`
-	PromptTokens   int     `json:"prompt_tokens"`
-	ResponseTokens int     `json:"response_tokens"`
-	DurationMs     int     `json:"duration_ms"`
-	Status         string  `json:"status"`
-	ErrorMessage   string  `json:"error_message"`
-	CreatedAt      string  `json:"created_at"`
-	CompletedAt    *string `json:"completed_at,omitempty"`
+	ID                 string  `json:"id"`
+	UtilityID          string  `json:"utility_id"`
+	SessionID          string  `json:"session_id"`
+	ResolvedPrompt     string  `json:"resolved_prompt"`
+	Response           string  `json:"response"`
+	Model              string  `json:"model"`
+	AgentProfileID     string  `json:"agent_profile_id"`
+	ExecutionProfileID string  `json:"execution_profile_id,omitempty"`
+	PromptTokens       int     `json:"prompt_tokens"`
+	ResponseTokens     int     `json:"response_tokens"`
+	DurationMs         int     `json:"duration_ms"`
+	Status             string  `json:"status"`
+	ErrorMessage       string  `json:"error_message"`
+	CreatedAt          string  `json:"created_at"`
+	CompletedAt        *string `json:"completed_at,omitempty"`
 }
 
 // UtilityAgentCallsResponse is the response for listing calls.
@@ -100,19 +101,20 @@ func FromUtilityAgent(agent *models.UtilityAgent) UtilityAgentDTO {
 // FromUtilityAgentCall converts a call model to a DTO.
 func FromUtilityAgentCall(call *models.UtilityAgentCall) UtilityAgentCallDTO {
 	dto := UtilityAgentCallDTO{
-		ID:             call.ID,
-		UtilityID:      call.UtilityID,
-		SessionID:      call.SessionID,
-		ResolvedPrompt: call.ResolvedPrompt,
-		Response:       call.Response,
-		Model:          call.Model,
-		AgentProfileID: call.AgentProfileID,
-		PromptTokens:   call.PromptTokens,
-		ResponseTokens: call.ResponseTokens,
-		DurationMs:     call.DurationMs,
-		Status:         call.Status,
-		ErrorMessage:   call.ErrorMessage,
-		CreatedAt:      call.CreatedAt.UTC().Format(time.RFC3339),
+		ID:                 call.ID,
+		UtilityID:          call.UtilityID,
+		SessionID:          call.SessionID,
+		ResolvedPrompt:     call.ResolvedPrompt,
+		Response:           call.Response,
+		Model:              call.Model,
+		AgentProfileID:     call.AgentProfileID,
+		ExecutionProfileID: call.ExecutionProfileID,
+		PromptTokens:       call.PromptTokens,
+		ResponseTokens:     call.ResponseTokens,
+		DurationMs:         call.DurationMs,
+		Status:             call.Status,
+		ErrorMessage:       call.ErrorMessage,
+		CreatedAt:          call.CreatedAt.UTC().Format(time.RFC3339),
 	}
 	if call.CompletedAt != nil {
 		formatted := call.CompletedAt.UTC().Format(time.RFC3339)

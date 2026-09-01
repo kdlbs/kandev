@@ -29,6 +29,7 @@ import {
 } from "@/components/settings/profile-edit/env-vars-card";
 import { ProfileScriptCards } from "@/components/settings/profile-edit/profile-script-cards";
 import { SSHAgentReadinessCard } from "@/components/settings/ssh-agent-readiness-card";
+import { SSHTaskDirReclamationCard } from "@/components/settings/ssh-task-dir-reclamation-card";
 import {
   type GitIdentityMode,
   type GitIdentityState,
@@ -68,10 +69,8 @@ import {
 import type { Executor, ExecutorProfile } from "@/lib/types/http";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import { executorProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
-import {
-  buildSaveConfig,
-  getExecutorProfileRuntimeFlags,
-} from "@/components/settings/profile-edit/serialize-executor-config";
+import { buildSaveConfig } from "@/components/settings/profile-edit/serialize-executor-config";
+import { useProfileRuntimeFormState } from "@/components/settings/profile-edit/use-profile-runtime-form-state";
 import { KubernetesProfileSections } from "@/components/settings/kubernetes-profile-sections";
 import { KubernetesReadOnlyNotice } from "@/components/settings/kubernetes-read-only-notice";
 import { KubernetesProfileClusterSection } from "@/components/settings/kubernetes-profile-cluster-section";
@@ -291,12 +290,7 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
   const [mcpPolicy, setMcpPolicy] = useState(profile.mcp_policy ?? "");
   const [prepareScript, setPrepareScript] = useState(profile.prepare_script ?? "");
   const [cleanupScript, setCleanupScript] = useState(profile.cleanup_script ?? "");
-  const [dockerfile, setDockerfile] = useState(profile.config?.dockerfile ?? "");
-  const [imageTag, setImageTag] = useState(profile.config?.image_tag ?? "");
-  const [sshShell, setSshShell] = useState(profile.config?.ssh_shell ?? "");
-  const [kubernetesProfile, setKubernetesProfile] = useState(() =>
-    parseKubernetesProfileConfig(profile.config),
-  );
+  const runtime = useProfileRuntimeFormState(executor, profile);
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar, resetEnvVars } = useEnvVarRows(
     profile.env_vars,
   );
@@ -304,9 +298,8 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
   const [spritesSecretId, setSpritesSecretId] = useState<string | null>(() =>
     deriveSpritesSecretId(profile.env_vars),
   );
-  const flags = getExecutorProfileRuntimeFlags(executor.type);
   const remoteAuth = useRemoteAuthState(profile);
-  const gitIdentity = useGitIdentityState(flags.isRemote, profile);
+  const gitIdentity = useGitIdentityState(runtime.isRemote, profile);
   const mcpPolicyErrorKey = useMemo(() => validateMcpPolicy(mcpPolicy), [mcpPolicy]);
 
   useEffect(() => {
@@ -316,11 +309,11 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
   }, []);
 
   const buildEnvVars = useCallback(
-    () => buildProfileEnvVars(envVarRows, flags.isSprites, spritesSecretId),
-    [envVarRows, flags.isSprites, spritesSecretId],
+    () => buildProfileEnvVars(envVarRows, runtime.isSprites, spritesSecretId),
+    [envVarRows, runtime.isSprites, spritesSecretId],
   );
 
-  const prepareDesc = flags.isRemote
+  const prepareDesc = runtime.isRemote
     ? t("executors:prepareScriptDescriptionRemote", { trigger: "{{" })
     : t("executors:prepareScriptDescriptionLocal");
 
@@ -329,17 +322,15 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     setMcpPolicy(profile.mcp_policy ?? "");
     setPrepareScript(profile.prepare_script ?? "");
     setCleanupScript(profile.cleanup_script ?? "");
-    setDockerfile(profile.config?.dockerfile ?? "");
-    setImageTag(profile.config?.image_tag ?? "");
-    setSshShell(profile.config?.ssh_shell ?? "");
-    setKubernetesProfile(parseKubernetesProfileConfig(profile.config));
+    runtime.resetRuntime();
     resetEnvVars(profile.env_vars);
     setSpritesSecretId(deriveSpritesSecretId(profile.env_vars));
     remoteAuth.reset();
     gitIdentity.reset();
-  }, [gitIdentity, profile, remoteAuth, resetEnvVars]);
+  }, [gitIdentity, profile, remoteAuth, resetEnvVars, runtime]);
 
   return {
+    ...runtime,
     name,
     setName,
     mcpPolicy,
@@ -348,12 +339,6 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     setPrepareScript,
     cleanupScript,
     setCleanupScript,
-    dockerfile,
-    setDockerfile,
-    imageTag,
-    setImageTag,
-    sshShell,
-    setSshShell,
     envVarRows,
     addEnvVar,
     removeEnvVar,
@@ -377,13 +362,6 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     setGitUserName: gitIdentity.setGitUserName,
     gitUserEmail: gitIdentity.gitUserEmail,
     setGitUserEmail: gitIdentity.setGitUserEmail,
-    isRemote: flags.isRemote,
-    isDocker: flags.isDocker,
-    isSprites: flags.isSprites,
-    isSSH: executor.type === "ssh",
-    isKubernetes: flags.isKubernetes,
-    kubernetesProfile,
-    setKubernetesProfile,
     mcpPolicyErrorKey,
     buildEnvVars,
     prepareDesc,
@@ -409,6 +387,14 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
           shell={form.sshShell}
           baselineShell={profile.config?.ssh_shell ?? ""}
           onShellChange={form.setSshShell}
+        />
+      )}
+      {executor.type === "ssh" && (
+        <SSHTaskDirReclamationCard
+          executor={executor}
+          profile={profile}
+          enabled={form.sshReclaimTaskDir}
+          onEnabledChange={form.setSshReclaimTaskDir}
         />
       )}
       {form.isSprites && (

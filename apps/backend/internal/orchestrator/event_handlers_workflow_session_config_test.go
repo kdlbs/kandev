@@ -31,7 +31,7 @@ func TestProcessOnEnterConfigureSessionAppliesMatchingOriginalSession(t *testing
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
 	step := configureSessionStep("step-config", "codex", "set", "gpt-5.6-luna", map[string]string{"reasoning_effort": "max"})
 
-	svc.processOnEnter(ctx, "task-config", session, step, "")
+	svc.processOnEnter(ctx, "task-config", session, step, "", 0)
 
 	if len(agent.setSessionModelCalls) != 1 || agent.setSessionModelCalls[0].ModelID != "gpt-5.6-luna" {
 		t.Fatalf("model calls = %#v, want one luna switch", agent.setSessionModelCalls)
@@ -70,7 +70,7 @@ func TestProcessOnEnterConfigureSessionSkipsNonMatchingAgent(t *testing.T) {
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
 	step := configureSessionStep("step-config-skip", "codex", "set", "gpt-5.6-luna", map[string]string{"reasoning_effort": "max"})
 
-	svc.processOnEnter(ctx, "task-config-skip", session, step, "")
+	svc.processOnEnter(ctx, "task-config-skip", session, step, "", 0)
 
 	if len(agent.setSessionModelCalls) != 0 || len(agent.setSessionConfigCalls) != 0 {
 		t.Fatalf("non-matching agent was configured: model=%#v config=%#v", agent.setSessionModelCalls, agent.setSessionConfigCalls)
@@ -104,7 +104,7 @@ func TestProcessOnEnterConfigureSessionRestoreOriginal(t *testing.T) {
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
 	step := configureSessionStep("step-config-restore", "claude", "restore_original", "", nil)
 
-	svc.processOnEnter(ctx, "task-config-restore", session, step, "")
+	svc.processOnEnter(ctx, "task-config-restore", session, step, "", 0)
 
 	if len(agent.setSessionModelCalls) != 1 || agent.setSessionModelCalls[0].ModelID != "claude-sonnet-original" {
 		t.Fatalf("restore model calls = %#v", agent.setSessionModelCalls)
@@ -175,7 +175,7 @@ func TestProcessOnEnterConfigureSessionMatchesAgentDisplayName(t *testing.T) {
 	svc.messageCreator = messages
 	step := configureSessionStep("step-config-display", "Claude", "set", "opus[1m]", nil)
 
-	svc.processOnEnter(ctx, "task-config-display", session, step, "")
+	svc.processOnEnter(ctx, "task-config-display", session, step, "", 0)
 
 	if len(agent.setSessionModelCalls) != 1 || agent.setSessionModelCalls[0].ModelID != "opus[1m]" {
 		t.Fatalf("model calls = %#v, want one opus[1m] switch", agent.setSessionModelCalls)
@@ -217,7 +217,7 @@ func TestProcessOnEnterConfigureSessionUnknownAgentFamilyWarns(t *testing.T) {
 	svc.messageCreator = messages
 	step := configureSessionStep("step-config-unknown", "grok-9000", "set", "opus[1m]", nil)
 
-	svc.processOnEnter(ctx, "task-config-unknown", session, step, "")
+	svc.processOnEnter(ctx, "task-config-unknown", session, step, "", 0)
 
 	if len(agent.setSessionModelCalls) != 0 {
 		t.Fatalf("unknown family was configured: %#v", agent.setSessionModelCalls)
@@ -251,7 +251,7 @@ func TestProcessOnEnterConfigureSessionKnownOtherAgentStaysSilent(t *testing.T) 
 	svc.messageCreator = messages
 	step := configureSessionStep("step-config-other", "Codex", "set", "gpt-5.6-luna", nil)
 
-	svc.processOnEnter(ctx, "task-config-other", session, step, "")
+	svc.processOnEnter(ctx, "task-config-other", session, step, "", 0)
 
 	if len(agent.setSessionModelCalls) != 0 {
 		t.Fatalf("non-matching agent was configured: %#v", agent.setSessionModelCalls)
@@ -324,7 +324,7 @@ func TestProcessOnEnterConfigureSessionWithoutResolverRequiresExactAgentName(t *
 	svc.agentFamilyResolver = nil
 
 	svc.processOnEnter(ctx, "task-config-noresolver", session,
-		configureSessionStep("step-config-noresolver", "Claude", "set", "opus[1m]", nil), "")
+		configureSessionStep("step-config-noresolver", "Claude", "set", "opus[1m]", nil), "", 0)
 	if len(agent.setSessionModelCalls) != 0 {
 		t.Fatalf("display name matched without a resolver: %#v", agent.setSessionModelCalls)
 	}
@@ -335,7 +335,7 @@ func TestProcessOnEnterConfigureSessionWithoutResolverRequiresExactAgentName(t *
 	}
 
 	svc.processOnEnter(ctx, "task-config-noresolver", session,
-		configureSessionStep("step-config-noresolver", "claude-acp", "set", "opus[1m]", nil), "")
+		configureSessionStep("step-config-noresolver", "claude-acp", "set", "opus[1m]", nil), "", 0)
 	if len(agent.setSessionModelCalls) != 1 || agent.setSessionModelCalls[0].ModelID != "opus[1m]" {
 		t.Fatalf("exact agent name did not match without a resolver: %#v", agent.setSessionModelCalls)
 	}
@@ -461,7 +461,7 @@ func TestProcessOnEnterConfigureSessionAmbiguousAgentFamilyWarns(t *testing.T) {
 			svc.agentFamilyResolver = shadowed
 
 			svc.processOnEnter(ctx, "task-ambiguous", session,
-				configureSessionStep("step-ambiguous", "Claude", "set", "opus[1m]", nil), "")
+				configureSessionStep("step-ambiguous", "Claude", "set", "opus[1m]", nil), "", 0)
 
 			if len(agent.setSessionModelCalls) != 0 {
 				t.Fatalf("ambiguous family was applied to an agent: %#v", agent.setSessionModelCalls)
@@ -503,7 +503,7 @@ func TestProcessOnEnterConfigureSessionUnrelatedAmbiguousRuleStillApplies(t *tes
 	svc.processOnEnter(ctx, "task-unrelated", session, multiRuleConfigureSessionStep("step-unrelated",
 		configureSessionRule{agentName: "Codex", model: "gpt-5.6-luna"},
 		configureSessionRule{agentName: "Claude", model: "opus[1m]"},
-	), "")
+	), "", 0)
 
 	if len(agent.setSessionModelCalls) != 1 || agent.setSessionModelCalls[0].ModelID != "gpt-5.6-luna" {
 		t.Fatalf("model calls = %#v, want one gpt-5.6-luna switch", agent.setSessionModelCalls)
@@ -567,7 +567,7 @@ func TestProcessOnEnterConfigureSessionRelevantAmbiguityRefusesDespiteExactRule(
 			svc.agentFamilyResolver = shadowed
 
 			svc.processOnEnter(ctx, "task-relevant", session,
-				multiRuleConfigureSessionStep("step-relevant", tc.rules...), "")
+				multiRuleConfigureSessionStep("step-relevant", tc.rules...), "", 0)
 
 			if len(agent.setSessionModelCalls) != 0 {
 				t.Fatalf("relevant ambiguity applied a model: %#v", agent.setSessionModelCalls)
@@ -610,7 +610,7 @@ func TestProcessOnEnterConfigureSessionAmbiguousSessionFamilyRefuses(t *testing.
 
 	// The rule names one agent unambiguously; the session is the ambiguous side.
 	svc.processOnEnter(ctx, "task-session-ambiguous", session,
-		configureSessionStep("step-session-ambiguous", "claude-acp", "set", "opus[1m]", nil), "")
+		configureSessionStep("step-session-ambiguous", "claude-acp", "set", "opus[1m]", nil), "", 0)
 
 	if len(agent.setSessionModelCalls) != 0 {
 		t.Fatalf("ambiguous session family applied a model: %#v", agent.setSessionModelCalls)
@@ -640,7 +640,7 @@ func TestProcessOnEnterConfigureSessionConflictingRulesWarn(t *testing.T) {
 	svc.processOnEnter(ctx, "task-conflict", session, multiRuleConfigureSessionStep("step-conflict",
 		configureSessionRule{agentName: "Claude", model: "opus[1m]"},
 		configureSessionRule{agentName: "claude-acp", model: "sonnet"},
-	), "")
+	), "", 0)
 
 	if len(agent.setSessionModelCalls) != 0 {
 		t.Fatalf("conflicting rules applied a model: %#v", agent.setSessionModelCalls)
@@ -669,7 +669,7 @@ func TestProcessOnEnterConfigureSessionDistinctFamiliesStillApply(t *testing.T) 
 		configureSessionRule{agentName: "Codex", model: "gpt-5.6-luna"},
 		configureSessionRule{agentName: "Claude", model: "opus[1m]"},
 		configureSessionRule{agentName: "Gemini", model: "gemini-pro"},
-	), "")
+	), "", 0)
 
 	if len(agent.setSessionModelCalls) != 1 || agent.setSessionModelCalls[0].ModelID != "opus[1m]" {
 		t.Fatalf("model calls = %#v, want one opus[1m] switch", agent.setSessionModelCalls)

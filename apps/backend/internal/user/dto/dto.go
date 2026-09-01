@@ -71,7 +71,9 @@ type UserSettingsDTO struct {
 	SystemMetricsDisplay              models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                                `json:"app_status_bar_enabled"`
 	AppStatusBarOrder                 models.AppStatusBarOrder            `json:"app_status_bar_order"`
+	QuickChatTabOrderByWorkspace      map[string][]string                 `json:"quick_chat_tab_order_by_workspace"`
 	KanbanHiddenStepIDs               map[string][]string                 `json:"kanban_hidden_step_ids"`
+	WorkflowIDsWithAutoHideEmptySteps []string                            `json:"workflow_ids_with_auto_hide_empty_steps"`
 	Revision                          int64                               `json:"revision"`
 	UpdatedAt                         string                              `json:"updated_at"`
 }
@@ -84,6 +86,31 @@ type UserResponse struct {
 type UserSettingsResponse struct {
 	Settings     UserSettingsDTO `json:"settings"`
 	ShellOptions []ShellOption   `json:"shell_options"`
+}
+
+type AgentProfileRecentUseDTO struct {
+	Context    models.AgentProfileRecentUseContext `json:"context"`
+	ProfileIDs []string                            `json:"profile_ids"`
+	Revision   int64                               `json:"revision"`
+	UpdatedAt  string                              `json:"updated_at"`
+}
+
+// FromAgentProfileRecentUse maps the persisted context history to its API
+// representation without exposing the owning user id.
+func FromAgentProfileRecentUse(record *models.AgentProfileRecentUse) AgentProfileRecentUseDTO {
+	if record == nil {
+		return AgentProfileRecentUseDTO{}
+	}
+	return AgentProfileRecentUseDTO{
+		Context:    record.Context,
+		ProfileIDs: append([]string{}, record.ProfileIDs...),
+		Revision:   record.Revision,
+		UpdatedAt:  record.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+type RecordAgentProfileRecentUseRequest struct {
+	AgentProfileID string `json:"agent_profile_id"`
 }
 
 type ShellOption struct {
@@ -147,7 +174,9 @@ type UpdateUserSettingsRequest struct {
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch `json:"system_metrics_display,omitempty"`
 	AppStatusBarEnabled               *bool                              `json:"app_status_bar_enabled,omitempty"`
 	AppStatusBarOrder                 *models.AppStatusBarOrder          `json:"app_status_bar_order,omitempty"`
+	QuickChatTabOrderByWorkspace      *map[string][]string               `json:"quick_chat_tab_order_by_workspace,omitempty"`
 	KanbanHiddenStepIDs               *map[string][]string               `json:"kanban_hidden_step_ids,omitempty"`
+	WorkflowIDsWithAutoHideEmptySteps *[]string                          `json:"workflow_ids_with_auto_hide_empty_steps,omitempty"`
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -297,7 +326,9 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		SystemMetricsDisplay:              settings.SystemMetricsDisplay,
 		AppStatusBarEnabled:               settings.AppStatusBarEnabled,
 		AppStatusBarOrder:                 settings.AppStatusBarOrder,
+		QuickChatTabOrderByWorkspace:      settings.QuickChatTabOrderByWorkspace,
 		KanbanHiddenStepIDs:               settings.KanbanHiddenStepIDs,
+		WorkflowIDsWithAutoHideEmptySteps: append([]string{}, settings.WorkflowIDsWithAutoHideEmptySteps...),
 		Revision:                          settings.Revision,
 		UpdatedAt:                         settings.UpdatedAt.Format(time.RFC3339),
 	}

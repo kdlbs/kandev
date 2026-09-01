@@ -65,6 +65,10 @@ func newKubernetesWorkspaceSourceTestService(t *testing.T) (*Service, string) {
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 		ID: "env-k8s", TaskID: result.Task.ID, ExecutorType: string(models.ExecutorTypeKubernetes),
 		Status: models.TaskEnvironmentStatusReady, CreatedAt: now, UpdatedAt: now,
+		Repos: []*models.TaskEnvironmentRepo{{
+			RepositoryID: "repo-k8s",
+			Position:     0,
+		}},
 	}); err != nil {
 		t.Fatal(err)
 	}

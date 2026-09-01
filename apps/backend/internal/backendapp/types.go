@@ -4,6 +4,8 @@ import (
 	"errors"
 
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	authservice "github.com/kandev/kandev/internal/auth"
@@ -68,6 +70,8 @@ type Repositories struct {
 
 type Services struct {
 	ManagedRuntimeSelections managedruntime.SelectionStore
+	DynamicProfileResolver   *agentruntime.ProfileExecutionResolver
+	DynamicBindingResolver   *dynamicruntime.CredentialBindingResolver
 	Task                     *taskservice.Service
 	User                     *userservice.Service
 	Editor                   *editorservice.Service

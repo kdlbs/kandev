@@ -31,21 +31,27 @@ type handlerRepo interface {
 }
 
 type TaskHandlers struct {
-	service                    *service.Service
-	orchestrator               OrchestratorStarter
-	foregroundActivity         dto.ForegroundActivityProvider
-	cancellationPending        dto.CancellationPendingProvider
-	repo                       handlerRepo
-	planService                *service.PlanService
-	handoffSvc                 *service.HandoffService
-	workspaceRestorer          WorkspaceQuarantineRestorer
-	unarchiveRecoveryTimeout   time.Duration
-	taskCreateLastUsedRecorder taskCreateLastUsedRecorder
-	onTaskCreatedWithPR        func(ctx context.Context, taskID, sessionID, prURL, branch string)
-	logger                     *logger.Logger
+	service                       *service.Service
+	orchestrator                  OrchestratorStarter
+	foregroundActivity            dto.ForegroundActivityProvider
+	cancellationPending           dto.CancellationPendingProvider
+	repo                          handlerRepo
+	planService                   *service.PlanService
+	handoffSvc                    *service.HandoffService
+	workspaceRestorer             WorkspaceQuarantineRestorer
+	unarchiveRecoveryTimeout      time.Duration
+	taskCreateLastUsedRecorder    taskCreateLastUsedRecorder
+	agentProfileRecentUseRecorder agentProfileRecentUseRecorder
+	onTaskCreatedWithPR           func(ctx context.Context, taskID, sessionID, prURL, branch string)
+	logger                        *logger.Logger
 }
 
 const defaultUnarchiveRecoveryTimeout = 30 * time.Second
+
+// agentProfileRecentUseTimeout bounds detached preference persistence. The
+// launch response does not wait for this best-effort write, and a stuck store
+// must not leave an unbounded background goroutine behind.
+const agentProfileRecentUseTimeout = 5 * time.Second
 
 func (h *TaskHandlers) detachedRecoveryTimeout() time.Duration {
 	if h.unarchiveRecoveryTimeout > 0 {
@@ -60,6 +66,14 @@ type WorkspaceQuarantineRestorer interface {
 
 type taskCreateLastUsedRecorder interface {
 	RecordTaskCreateLastUsed(ctx context.Context, patch usermodels.TaskCreateLastUsed) error
+}
+
+type agentProfileRecentUseRecorder interface {
+	RecordAgentProfileRecentUse(
+		ctx context.Context,
+		contextValue usermodels.AgentProfileRecentUseContext,
+		profileID string,
+	) (*usermodels.AgentProfileRecentUse, error)
 }
 
 // SetHandoffService wires the office task-handoffs service used by the
@@ -88,6 +102,21 @@ func (h *TaskHandlers) SetWorkspaceQuarantineRestorer(restorer WorkspaceQuaranti
 
 func (h *TaskHandlers) SetTaskCreateLastUsedRecorder(recorder taskCreateLastUsedRecorder) {
 	h.taskCreateLastUsedRecorder = recorder
+}
+
+func (h *TaskHandlers) SetAgentProfileRecentUseRecorder(recorder agentProfileRecentUseRecorder) {
+	h.agentProfileRecentUseRecorder = recorder
+}
+
+func (h *TaskHandlers) recordSuccessfulTaskCreateProfileAsync(ctx context.Context, profileID string) {
+	if h.agentProfileRecentUseRecorder == nil || profileID == "" {
+		return
+	}
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), agentProfileRecentUseTimeout)
+	go func() {
+		defer cancel()
+		h.recordSuccessfulTaskCreateProfile(recordCtx, profileID)
+	}()
 }
 
 // SetOnTaskCreatedWithPR sets a callback invoked when a task is created with a PR URL
@@ -138,7 +167,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/workflows/:id/tasks", h.httpListTasks)
 	api.GET("/workspaces/:id/tasks", h.httpListTasksByWorkspace)
-	// Task create-idempotency (docs/specs/tasks/external-id-idempotency):
+	// Task create-idempotency (docs/specs/tasks/requirements/external-id-idempotency.md):
 	// side-effect-free lookup, and an operator-only release. Both take
 	// external_id as a query parameter.
 	api.GET("/workspaces/:id/tasks/by-external-id", h.httpGetTaskByExternalID)
@@ -165,6 +194,11 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/:id/archive", h.httpArchiveTask)
 	api.POST("/tasks/:id/unarchive", h.httpUnarchiveTask)
 	api.GET("/tasks/:id/subtask-count", h.httpTaskSubtaskCount)
+
+	// Task-cost-ledger read surface (docs/specs/task-cost-ledger/spec.md
+	// AC-18): per-task and per-session usage/cost totals.
+	api.GET("/tasks/:id/usage", h.httpGetTaskUsageTotals)
+	api.GET("/tasks/:id/sessions/:sessionId/usage", h.httpGetTaskSessionUsageTotals)
 
 	// Task dependencies ("this task is blocked by that one"). Task-scoped
 	// equivalents of the Office-only blocker routes; both go through the single
@@ -221,19 +255,23 @@ func convertToServiceRepos(repos []dto.TaskRepositoryInput) []service.TaskReposi
 	result := make([]service.TaskRepositoryInput, len(repos))
 	for i, r := range repos {
 		result[i] = service.TaskRepositoryInput{
-			RepositoryID:   r.RepositoryID,
-			BaseBranch:     r.BaseBranch,
-			CheckoutBranch: r.CheckoutBranch,
-			PRNumber:       r.PRNumber,
-			LocalPath:      r.LocalPath,
-			Name:           r.Name,
-			DefaultBranch:  r.DefaultBranch,
-			GitHubURL:      r.GitHubURL,
-			RemoteURL:      r.RemoteURL,
-			Provider:       r.Provider,
-			ProviderRepoID: r.ProviderRepoID,
-			ProviderOwner:  r.ProviderOwner,
-			ProviderName:   r.ProviderName,
+			RepositoryID:       r.RepositoryID,
+			BaseBranch:         r.BaseBranch,
+			CheckoutBranch:     r.CheckoutBranch,
+			BranchPolicyID:     r.BranchPolicyID,
+			PRNumber:           r.PRNumber,
+			LocalPath:          r.LocalPath,
+			Name:               r.Name,
+			DefaultBranch:      r.DefaultBranch,
+			GitHubURL:          r.GitHubURL,
+			RemoteURL:          r.RemoteURL,
+			Provider:           r.Provider,
+			ProviderHost:       r.ProviderHost,
+			ProviderScope:      r.ProviderScope,
+			ProviderRepoID:     r.ProviderRepoID,
+			ProviderOwner:      r.ProviderOwner,
+			ProviderName:       r.ProviderName,
+			PreserveBaseBranch: r.PreserveBaseBranch,
 		}
 	}
 	return result

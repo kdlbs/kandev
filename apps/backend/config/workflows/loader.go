@@ -213,6 +213,7 @@ var (
 		string(models.OnEnterClearDecisions):             true,
 		string(models.OnEnterQueueRunForEachParticipant): true,
 		string(models.OnEnterQueueRun):                   true,
+		string(models.OnEnterEnsureParticipantSeat):      true,
 	}
 	validOnTurnStart = map[string]bool{
 		string(models.OnTurnStartMoveToNext):     true,

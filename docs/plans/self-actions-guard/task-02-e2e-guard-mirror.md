@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-frontend-disable-last-admin"]
 plan: "plan.md"
-spec: "../../specs/auth/self-actions-guard.md"
+spec: "../../specs/auth/requirements/self-actions-guard.md"
 ---
 
 # Task 02: E2E coverage for guard-matched buttons

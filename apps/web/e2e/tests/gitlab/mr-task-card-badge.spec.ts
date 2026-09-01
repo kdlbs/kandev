@@ -3,6 +3,18 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { GITLAB_HOST, GITLAB_PROJECT } from "../../helpers/gitlab";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
+import type { Page } from "@playwright/test";
+
+// Mirrors visibleTaskPRSummary in e2e/tests/pr/pr-status-badge.spec.ts:
+// scoped to the visible (non-closed) tooltip portal so a leftover
+// force-mounted measurement copy never matches.
+function visibleMRTaskStatusSummary(page: Page) {
+  return page
+    .locator(
+      '[data-slot="tooltip-content"]:not([data-state="closed"]) > [data-testid="mr-task-status-summary"]',
+    )
+    .first();
+}
 
 let nextIID = 400;
 
@@ -229,8 +241,73 @@ test.describe("GitLab MR badge on the Kanban card", () => {
     });
     expect(order).toBe("pr-then-mr");
 
-    // AC37: state is never colour-only — the tooltip names it explicitly.
+    // AC37: state is never colour-only — the structured summary names it
+    // explicitly via a State row (AC4/AC24: "Merged", not the raw enum value).
     await mrIcon.hover();
-    await expect(testPage.getByRole("tooltip")).toContainText("merged");
+    const summary = visibleMRTaskStatusSummary(testPage);
+    await expect(summary.getByTestId("mr-task-status-state")).toContainText("Merged");
+  });
+
+  test("AC1/AC7/AC20/AC24: hovering and focusing the badge render the structured MR summary, and Escape dismisses it", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await ensureGitLabConfigured(apiClient, seedData);
+    const iid = nextMRIID();
+    const mrTitle = "Make the MR badge read like the GitHub one";
+    await seedMR(apiClient, seedData.workspaceId, iid, { title: mrTitle, state: "open" });
+    await apiClient.mockGitLabAddPipelines(seedData.workspaceId, GITLAB_PROJECT, [
+      {
+        id: iid + 50_000,
+        iid: 1,
+        status: "success",
+        source: "push",
+        ref: `feature/badge-${iid}`,
+        sha: `sha-${iid}`,
+        web_url: "",
+        jobs_total: 2,
+        jobs_passing: 2,
+      },
+    ]);
+    const task = await seedBoardTask(apiClient, seedData, "Structured MR summary task");
+    await linkMR(apiClient, seedData, task.id, iid);
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const card = kanban.taskCard(task.id);
+    await expect(card).toBeVisible({ timeout: 45_000 });
+
+    const icon = card.getByTestId(`mr-task-icon-${task.id}`);
+    await expect(icon).toBeVisible({ timeout: 15_000 });
+    await expect(icon).toHaveAttribute("role", "img");
+
+    await icon.hover();
+    const summary = visibleMRTaskStatusSummary(testPage);
+    await expect(summary).toBeVisible();
+    await expect(summary.getByTestId("mr-task-status-iid")).toHaveText(`MR !${iid}`);
+    await expect(summary.getByTestId("mr-task-status-title")).toHaveText(mrTitle);
+    const ciRow = summary.getByTestId("mr-task-status-ci");
+    await expect(ciRow).toContainText("CI");
+    await expect(ciRow).toContainText("Passed");
+    // No pipe-delimited string anywhere in the summary (AC1).
+    await expect(summary).not.toContainText("|");
+
+    // AC20: no document-level horizontal overflow while the summary is open.
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+
+    // AC7: keyboard focus opens the same summary, and Escape dismisses it.
+    await testPage.mouse.move(0, 0);
+    await icon.focus();
+    await expect(icon).toBeFocused();
+    const focusedSummary = visibleMRTaskStatusSummary(testPage);
+    await expect(focusedSummary).toBeVisible();
+    await testPage.keyboard.press("Escape");
+    await expect(focusedSummary).toBeHidden();
   });
 });

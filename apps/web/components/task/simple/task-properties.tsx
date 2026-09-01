@@ -17,6 +17,7 @@ import { SubIssuesRow } from "./components/sub-issues-row";
 import { ReviewersPicker } from "./components/reviewers-picker";
 import { ApproversPicker } from "./components/approvers-picker";
 import { PendingApprovalBadge } from "./components/pending-approval-badge";
+import { QuorumStatusBadge } from "./components/quorum-status-badge";
 import { useTranslation } from "react-i18next";
 
 type TaskPropertiesProps = {
@@ -32,7 +33,7 @@ function formatDate(dateStr: string): string {
 }
 
 // formatCurrency converts subcents (hundredths of a cent — the office
-// cost storage unit per docs/specs/office-costs/spec.md) to a USD string.
+// cost storage unit per docs/specs/office/requirements/costs.md) to a USD string.
 function formatCurrency(subcents: number): string {
   return new Intl.NumberFormat(undefined, {
     style: "currency",
@@ -58,6 +59,7 @@ function IdentitySection({ task }: { task: Task }) {
     <>
       <PropertyRow label={t("common:status")} valueClassName="ml-auto">
         <span className="flex items-center gap-2 ml-auto">
+          <QuorumStatusBadge task={task} />
           <PendingApprovalBadge task={task} />
           <StatusPicker task={task} />
         </span>

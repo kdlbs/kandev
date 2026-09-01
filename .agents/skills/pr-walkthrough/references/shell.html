@@ -1,0 +1,1105 @@
+<!doctype html>
+<!--
+  PR WALKTHROUGH SHELL (self-contained, file:// loadable).
+  This is a fixed design asset. build.py reads it, replaces
+  the topbar placeholders (PR title, PR files URL, PR number, repo) and the
+  content marker inside <main>, then writes the page. Placeholder tokens use
+  double curly braces and appear only once each, in the live markup below.
+  The CSS and JS below stay identical for every walkthrough.
+-->
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="https://kandev.ai/favicon.ico" sizes="32x32" />
+  <link rel="icon" href="https://kandev.ai/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="https://kandev.ai/apple-touch-icon.png" sizes="180x180" />
+  <title>{{PR_TITLE}} - Walkthrough</title>
+
+  <!-- External package resources use exact-version CDN URLs. Website brand
+       assets intentionally use live kandev.ai URLs so new pages match the
+       current site branding. Tailwind loads here as a classic script. The
+       four ESM libraries below are declared in this import map so every
+       package URL is visible at the top. -->
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "mermaid": "https://cdn.jsdelivr.net/npm/mermaid@11.17.0/dist/mermaid.esm.min.mjs",
+        "marked": "https://cdn.jsdelivr.net/npm/marked@12.0.2/+esm",
+        "dompurify": "https://cdn.jsdelivr.net/npm/dompurify@3.4.14/+esm",
+        "shiki": "https://cdn.jsdelivr.net/npm/shiki@3.23.0/+esm"
+      }
+    }
+  </script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: { maxWidth: { content: '72rem' }, colors: {
+        brand: { DEFAULT: '#6366f1', soft: '#818cf8', deep: '#4f46e5' },
+      } } },
+    };
+  </script>
+  <style>
+    /* Visual language shared with the documentation shell: Figtree for UI
+       copy, Geist Mono for code, indigo actions, dark-gray surfaces, and
+       compact shadcn-style radii. */
+    @font-face {
+      font-family: 'Figtree'; font-style: normal; font-weight: 300 900; font-display: swap;
+      src: url('https://cdn.jsdelivr.net/gh/kdlbs/landing@71c3f609df07d6ff67fbe7c9213482d0c0c22c70/public/fonts/figtree/figtree-300-normal.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Geist Mono'; font-style: normal; font-weight: 100 900; font-display: swap;
+      src: url('https://cdn.jsdelivr.net/gh/kdlbs/landing@71c3f609df07d6ff67fbe7c9213482d0c0c22c70/public/fonts/geist-mono/geist-mono-100-normal.woff2') format('woff2');
+    }
+    :root {
+      color-scheme: light;
+      --wt-bg: #f5f5f5;
+      --wt-fg: #0a0a0a;
+      --wt-muted: #666666;
+      --wt-border: rgba(204, 204, 204, .5);
+      --wt-surface: #f1f1f1;
+      --wt-primary: #4f46e5;
+      --wt-primary-soft: #818cf8;
+      --wt-primary-deep: #4f46e5;
+      --wt-dark-surface: #1e1e1e;
+      --wt-radius: .5rem;
+    }
+    html.dark {
+      color-scheme: dark;
+      --wt-bg: #121212;
+      --wt-fg: #ebebeb;
+      --wt-muted: #b3b3b3;
+      --wt-border: rgba(102, 102, 102, .2);
+      --wt-surface: #191919;
+      --wt-primary: #6366f1;
+    }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0; overflow-x: hidden; background: var(--wt-bg); color: var(--wt-fg);
+      font-family: 'Figtree', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+      letter-spacing: -.01em;
+    }
+    .wt-topbar {
+      background: rgba(245, 245, 245, .95); border-color: var(--wt-border);
+      box-shadow: 0 1px 0 rgba(0, 0, 0, .02);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    }
+    html.dark .wt-topbar { background: rgba(18, 18, 18, .95); }
+    .wt-main { line-height: 1.7; }
+    .wt-main h2, .wt-main h3 { letter-spacing: -.035em; }
+    .wt-main h2 { font-weight: 650; }
+    .wt-main section { border-color: var(--wt-border); }
+    .wt-main .rounded-xl { border-radius: var(--wt-radius); }
+    .wt-main .rounded-lg { border-radius: .375rem; }
+    .wt-main .border-slate-200, .wt-main .border-slate-200\/70 { border-color: var(--wt-border) !important; }
+    .wt-main .bg-slate-50\/60 { background: var(--wt-surface) !important; }
+    .wt-footer { border-color: var(--wt-border); color: var(--wt-muted); }
+    .wt-brand { display: inline-flex; align-items: center; gap: .5rem; min-height: 2.5rem; color: var(--wt-fg); text-decoration: none; }
+    .wt-brand:hover { color: var(--wt-primary); }
+    .wt-brand-mark {
+      display: inline-flex; align-items: center; justify-content: center; width: 1.75rem; height: 1.75rem;
+      overflow: hidden; border-radius: .375rem; background: var(--wt-surface);
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, .08), 0 8px 18px rgba(99, 102, 241, .22);
+    }
+    html.dark .wt-brand-mark { box-shadow: 0 0 0 1px rgba(255, 255, 255, .1), 0 8px 18px rgba(99, 102, 241, .22); }
+    .wt-brand-mark img { display: block; width: 100%; height: 100%; object-fit: cover; }
+    .wt-brand-name { font-size: .875rem; font-weight: 650; }
+    .wt-brand-divider { width: 1px; height: 1rem; background: var(--wt-border); }
+    .wt-brand-pr { font-size: .8125rem; font-weight: 600; white-space: nowrap; }
+    .wt-mobile-nav { position: relative; }
+    .wt-mobile-nav summary {
+      display: inline-flex; align-items: center; min-height: 2.5rem; padding: 0 .625rem; border: 1px solid var(--wt-border);
+      border-radius: .375rem; color: var(--wt-muted); cursor: pointer; list-style: none; font-size: .75rem; font-weight: 600;
+    }
+    .wt-mobile-nav summary::-webkit-details-marker { display: none; }
+    .wt-mobile-nav summary::after { content: '⌄'; margin-left: .35rem; font-size: .75rem; }
+    .wt-mobile-nav[open] summary { color: var(--wt-fg); border-color: rgba(79, 70, 229, .5); }
+    .wt-mobile-menu {
+      position: absolute; top: calc(100% + .5rem); left: 0; z-index: 50; min-width: 10rem; padding: .3rem;
+      border: 1px solid var(--wt-border); border-radius: .5rem; background: var(--wt-bg);
+      box-shadow: 0 12px 28px rgba(13, 13, 16, .14);
+    }
+    html.dark .wt-mobile-menu { background: var(--wt-dark-surface); }
+    .wt-mobile-menu a {
+      display: block; min-height: 2.5rem; padding: .65rem .75rem; border-radius: .375rem; color: var(--wt-muted);
+      font-size: .8125rem; font-weight: 550; text-decoration: none;
+    }
+    .wt-mobile-menu a:hover, .wt-mobile-menu a:focus-visible { background: rgba(79, 70, 229, .09); color: var(--wt-primary); outline: none; }
+    .wt-theme-toggle {
+      display: inline-flex; align-items: center; justify-content: center; min-width: 2.5rem; min-height: 2.5rem;
+      border: 1px solid var(--wt-border); border-radius: .375rem; color: var(--wt-muted); background: transparent; cursor: pointer;
+    }
+    .wt-theme-toggle:hover { border-color: rgba(79, 70, 229, .5); color: var(--wt-primary); background: rgba(79, 70, 229, .07); }
+    /* Shiki dual-theme via defaultColor:false. Light by default, dark on html.dark. */
+    .shiki, .shiki span { color: var(--shiki-light); background-color: var(--shiki-light-bg); }
+    html.dark .shiki, html.dark .shiki span { color: var(--shiki-dark) !important; background-color: var(--shiki-dark-bg) !important; }
+    .shiki { padding: 14px 16px; border-radius: var(--wt-radius); overflow-x: auto; font-family: 'Geist Mono', ui-monospace, monospace; font-size: .82rem; line-height: 1.55; border: 1px solid var(--wt-border); scrollbar-width: thin; scrollbar-color: transparent transparent; }
+    .shiki::-webkit-scrollbar { height: 6px; }
+    .shiki::-webkit-scrollbar-track { background: transparent; }
+    .shiki::-webkit-scrollbar-thumb { background: transparent; border-radius: 999px; }
+    .shiki:hover, .shiki:focus-within { scrollbar-color: rgba(100,116,139,.55) transparent; }
+    .shiki:hover::-webkit-scrollbar-thumb, .shiki:focus-within::-webkit-scrollbar-thumb { background: rgba(100,116,139,.55); }
+    html.dark .shiki:hover, html.dark .shiki:focus-within { scrollbar-color: rgba(148,163,184,.5) transparent; }
+    html.dark .shiki:hover::-webkit-scrollbar-thumb, html.dark .shiki:focus-within::-webkit-scrollbar-thumb { background: rgba(148,163,184,.5); }
+    /* GitHub-style diff lines. applyLineDiff() tags changed lines with
+       .diff.add / .diff.remove from the data-added / data-removed indices
+       build.py emits. Each .line is a full-width block so the tint spans the
+       whole row, and a +/- glyph sits in the gutter. */
+    .shiki.has-diff code { display: inline-block; min-width: 100%; }
+    /* Each row is a full-width block so its tint spans the whole line. Shiki
+       renders one <span class="line"> per row and separates rows with a literal
+       newline text node; stripNewlines() removes those in JS so no untinted
+       blank box appears between rows. An empty line still needs to occupy one
+       row: an inserted zero-width space (via ::after on .diff-blank) gives it
+       height without adding a visible glyph, so blank added lines tint solid. */
+    .shiki .line { display: block; width: 100%; padding: 0 16px 0 1.4em; margin: 0 -16px; position: relative; }
+    .shiki .line.diff-blank::after { content: "\200b"; }
+    .shiki .line.diff::before { position: absolute; left: 4px; top: 0; opacity: .75; }
+    .shiki .line.diff.add { background: #e6ffec; }
+    /* A blank added/removed line keeps its tint but shows no +/- glyph: an empty
+       row does not need a marker, and drawing one reintroduces the overflow. */
+    .shiki .line.diff.add:not(.diff-blank)::before { content: "+"; color: #1a7f37; }
+    .shiki .line.diff.remove { background: #ffebe9; }
+    .shiki .line.diff.remove:not(.diff-blank)::before { content: "-"; color: #cf222e; }
+    html.dark .shiki .line.diff.add { background: rgba(46,160,67,.15) !important; }
+    html.dark .shiki .line.diff.add::before { color: #3fb950; }
+    html.dark .shiki .line.diff.remove { background: rgba(248,81,73,.15) !important; }
+    html.dark .shiki .line.diff.remove::before { color: #f85149; }
+    /* Token spans carry their own editor background from Shiki. On a diff line
+       that background paints over the line tint, so make the spans transparent
+       and let the .line tint show through. */
+    .shiki .line.diff, .shiki .line.diff span,
+    html.dark .shiki .line.diff, html.dark .shiki .line.diff span { background: transparent !important; }
+    /* Risk heatmap: the JS tags flagged lines with .risk-medium / .risk-high
+       after Shiki renders. The signal is a colored left bar (inset box-shadow),
+       so it coexists with the diff add/remove background on the same line. A
+       faint tint is added only on non-diff lines, where there is no diff color
+       to preserve. A right-edge dot marks the line as hoverable for its note. */
+    .shiki .line.risk-medium { box-shadow: inset 3px 0 0 0 #eab308; }
+    .shiki .line.risk-high { box-shadow: inset 3px 0 0 0 #ef4444; }
+    .shiki .line.risk-medium:not(.diff) { background: rgba(234,179,8,.10); }
+    .shiki .line.risk-high:not(.diff) { background: rgba(239,68,68,.10); }
+    html.dark .shiki .line.risk-medium:not(.diff) { background: rgba(234,179,8,.14) !important; }
+    html.dark .shiki .line.risk-high:not(.diff) { background: rgba(239,68,68,.14) !important; }
+    .shiki .line.risk-line { cursor: help; }
+    .shiki .line.risk-line::after {
+      content: ""; position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+      width: 7px; height: 7px; border-radius: 999px; opacity: .9;
+    }
+    .shiki .line.risk-medium.risk-line::after { background: #eab308; }
+    .shiki .line.risk-high.risk-line::after { background: #ef4444; }
+    /* Block risk chip in the code label row. Colored by initRisk (riskStyle),
+       same thresholds as the risk section and topbar badge. */
+    .block-risk-chip {
+      display: inline-flex; align-items: center; gap: .25rem; margin-left: .5rem;
+      padding: .05rem .45rem; border-radius: 999px; font-size: .66rem;
+      font-weight: 700; letter-spacing: .01em; vertical-align: middle; cursor: help;
+    }
+    .block-risk-chip .block-risk-word { font-weight: 600; opacity: .75; }
+    .block-risk-chip .block-risk-level { font-weight: 700; }
+    .block-risk-only { font-weight: 700; }
+    /* Hover tooltip for a flagged line's note, positioned by the JS. */
+    #risk-tip {
+      position: fixed; z-index: 60; max-width: 320px; pointer-events: none;
+      background: #0f172a; color: #f8fafc; font-size: .72rem; line-height: 1.4;
+      padding: .4rem .55rem; border-radius: .4rem; box-shadow: 0 6px 20px rgba(0,0,0,.25);
+      opacity: 0; transition: opacity .1s ease;
+    }
+    html.dark #risk-tip { background: #1e293b; border: 1px solid rgba(255,255,255,.1); }
+    #risk-tip.show { opacity: 1; }
+    #risk-tip .rt-sev { font-weight: 700; text-transform: uppercase; font-size: .62rem; letter-spacing: .04em; }
+    #risk-tip .rt-sev.medium { color: #fbbf24; }
+    #risk-tip .rt-sev.high { color: #f87171; }
+    /* Review split button: a primary link plus a dropdown toggle sharing one
+       rounded shell. The menu is absolutely positioned under the shell. */
+    .review-split { position: relative; display: inline-flex; align-items: stretch; height: 2.125rem; }
+    .review-split-main { display: inline-flex; align-items: center; height: 100%; padding: 0 .625rem; font-size: .8125rem;
+      font-weight: 600; line-height: 1; white-space: nowrap; color: #fff; background: var(--wt-primary); border-radius: .375rem 0 0 .375rem; }
+    .review-split-main:hover { filter: brightness(1.08); }
+    .review-split-toggle { display: inline-flex; align-items: center; justify-content: center; height: 100%; width: 1.5rem;
+      font-size: .625rem; line-height: 1; color: #fff; background: var(--wt-primary);
+      border-radius: 0 .375rem .375rem 0; border-left: 1px solid rgba(255,255,255,.25); cursor: pointer; }
+    .review-split-toggle:hover { filter: brightness(1.08); }
+    .review-split-menu { position: absolute; right: 0; top: calc(100% + .375rem); min-width: 220px; z-index: 50;
+      background: var(--wt-bg); border: 1px solid var(--wt-border); border-radius: .375rem; padding: .25rem;
+      box-shadow: 0 10px 30px rgba(2,6,23,.18); }
+    html.dark .review-split-menu { background: var(--wt-dark-surface); border-color: var(--wt-border); box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+    .review-split-item { display: block; width: 100%; text-align: left; padding: .5rem .625rem; font-size: .8125rem;
+      white-space: nowrap; border-radius: .375rem; color: inherit; cursor: pointer; background: transparent; }
+    .review-split-item:hover { background: rgba(148,163,184,.15); }
+    .prose-body { line-height: 1.7; }
+    /* Mermaid sizes the SVG to its intrinsic width, which is often far
+       narrower than the container, so the diagram reads tiny. The render JS
+       reads the viewBox aspect and sets the width/height inline: a normal
+       diagram fills the width; a very wide "LR" chain gets a fixed height and
+       scrolls sideways so nodes stay legible. These are the fallbacks. */
+    .mermaid-host { width: 100%; }
+    .mermaid-host svg { width: 100%; max-width: 100%; height: auto; }
+    .anchor-target { scroll-margin-top: 5rem; }
+
+    /* ---- Interactive code canvas ---- */
+    /* Full-bleed: the canvas breaks out of the centered content column to span
+       the whole viewport width, so the graph gets horizontal room without the
+       user maximizing. The prose around it (h2, intro, and the list details)
+       stays inside max-w-content. The margin/transform pair recentres a
+       100vw-wide box against the centered column it lives in. */
+    #canvas-wrap.canvas-full-bleed { width: 100vw; margin-left: 50%; transform: translateX(-50vw); }
+    /* 100vw counts the scrollbar, so clip the tiny horizontal overflow it adds. */
+    body { overflow-x: hidden; }
+    /* Suppress text selection so panning does not highlight node text. */
+    #canvas-wrap { cursor: grab; user-select: none; -webkit-user-select: none; }
+    #canvas-wrap.panning { cursor: grabbing; }
+    /* The panel is for reading, so allow selecting its text. */
+    #canvas-wrap .cpanel { user-select: text; -webkit-user-select: text; }
+    /* Maximize: the canvas fills the viewport for closer exploration.
+       An opaque background hides the page content behind the fixed layer. */
+    #canvas-wrap.maximized {
+      position: fixed; inset: 0; z-index: 60; height: auto !important;
+      width: auto; border-radius: 0; margin: 0;
+      /* Override the full-bleed recentring so the fixed layer fills the viewport. */
+      transform: none;
+      background: var(--wt-surface);
+    }
+    html.dark #canvas-wrap.maximized { background: var(--wt-dark-surface); }
+    html.canvas-max, body.canvas-max { overflow: hidden; }
+    #canvas-stage { will-change: transform; }
+    /* Boundary boxes. Each box groups the nodes that live in one service,
+       job, or runtime. Boxes sit behind the nodes and pass clicks through. */
+    .cgroup {
+      position: absolute; box-sizing: border-box; z-index: 1; pointer-events: none;
+      border-radius: .625rem; border: 1.5px dashed rgba(79,70,229,.34);
+      background: rgba(79,70,229,.035);
+    }
+    html.dark .cgroup { border-color: rgba(129,140,248,.35); background: rgba(129,140,248,.045); }
+    .cgroup-label {
+      position: absolute; top: -12px; left: 16px;
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: .72rem; font-weight: 700; letter-spacing: .02em;
+      padding: 3px 10px; border-radius: 999px;
+      background: var(--wt-bg); color: var(--wt-primary-deep); border: 1px solid rgba(79,70,229,.3);
+    }
+    html.dark .cgroup-label { background: var(--wt-dark-surface); color: #c7d2fe; border-color: rgba(129,140,248,.35); }
+    .cgroup-label .dot { width: 8px; height: 8px; border-radius: 999px; background: currentColor; opacity: .7; }
+    .cnode {
+      position: absolute; width: 340px; box-sizing: border-box; z-index: 2;
+      border-radius: .5rem; border: 1px solid var(--wt-border);
+      background: var(--wt-bg); box-shadow: 0 1px 2px rgba(13,13,16,.06);
+      overflow: hidden;
+    }
+    html.dark .cnode { background: var(--wt-dark-surface); border-color: var(--wt-border); box-shadow: 0 1px 2px rgba(0,0,0,.4); }
+    /* The selected node is highlighted while its detail panel is open. */
+    .cnode.selected { z-index: 10; border-color: var(--wt-primary); box-shadow: 0 0 0 2px rgba(79,70,229,.32), 0 12px 30px rgba(13,13,16,.16); }
+    html.dark .cnode.selected { border-color: var(--wt-primary-soft); box-shadow: 0 0 0 2px rgba(129,140,248,.45), 0 12px 30px rgba(0,0,0,.55); }
+    .cnode-head { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px 8px; border-bottom: 1px solid rgba(148,163,184,.18); }
+    html.dark .cnode-head { border-color: rgba(255,255,255,.08); }
+    .cnode-title { font-weight: 600; font-size: .9rem; }
+    .cnode-file { font-family: 'Geist Mono', ui-monospace, monospace; font-size: .72rem; color: var(--wt-muted); text-decoration: none; }
+    .cnode-file:hover { color: var(--wt-primary); }
+    html.dark .cnode-file { color: #94a3b8; }
+    .cnode-sig { font-family: 'Geist Mono', ui-monospace, monospace; font-size: .74rem; padding: 8px 12px; color: #52525b; white-space: pre-wrap; word-break: break-word; }
+    html.dark .cnode-sig { color: #cbd5e1; }
+    /* A small hint that the node opens a detail panel on click. */
+    .cnode-more { font-size: .68rem; font-weight: 600; color: var(--wt-primary-deep); padding: 0 12px 9px; }
+    html.dark .cnode-more { color: #a5b4fc; }
+    /* Per-node detail source. Hidden in the flow; copied into the panel on click. */
+    .cnode-detail { display: none; }
+    .cedge-src { display: none; }
+
+    /* ---- Right-side detail panel ---- */
+    .cpanel {
+      position: absolute; top: 0; right: 0; bottom: 0; width: 620px; max-width: 95%;
+      z-index: 40; transform: translateX(100%); transition: transform .18s ease;
+      background: var(--wt-bg); border-left: 1px solid var(--wt-border);
+      box-shadow: -12px 0 30px rgba(13,13,16,.12);
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    html.dark .cpanel { background: var(--wt-dark-surface); border-color: var(--wt-border); box-shadow: -12px 0 30px rgba(0,0,0,.5); }
+    .cpanel.open { transform: translateX(0); }
+    /* Drag the left edge to resize the panel. */
+    .cpanel-resizer {
+      position: absolute; top: 0; left: -3px; bottom: 0; width: 8px;
+      cursor: ew-resize; z-index: 41; touch-action: none;
+    }
+    .cpanel-resizer::before {
+      content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px;
+      background: transparent; transition: background .15s ease;
+    }
+    .cpanel-resizer:hover::before, .cpanel.resizing .cpanel-resizer::before { background: var(--wt-primary); }
+    .cpanel.resizing { transition: none; }
+    .cpanel-head {
+      display: flex; align-items: flex-start; gap: 10px; padding: 14px 16px;
+      border-bottom: 1px solid rgba(148,163,184,.2);
+    }
+    html.dark .cpanel-head { border-color: rgba(255,255,255,.08); }
+    .cpanel-title { font-weight: 700; font-size: 1rem; line-height: 1.3; }
+    .cpanel-file { display: inline-block; margin-top: 4px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: .72rem; color: var(--wt-muted); text-decoration: none; }
+    .cpanel-file:hover { color: var(--wt-primary); }
+    html.dark .cpanel-file { color: #94a3b8; }
+    .cpanel-close {
+      margin-left: auto; flex: none; width: 30px; height: 30px; border-radius: 8px;
+      border: 1px solid rgba(148,163,184,.35); background: transparent; cursor: pointer;
+      font-size: 1.1rem; line-height: 1; color: inherit;
+    }
+    .cpanel-close:hover { background: rgba(148,163,184,.15); }
+    .cpanel-body { padding: 14px 16px 20px; overflow: auto; }
+    .cpanel-desc { font-size: .86rem; line-height: 1.6; color: #475569; margin-bottom: 12px; }
+    html.dark .cpanel-desc { color: #cbd5e1; }
+    .cpanel-block-label { font-size: .72rem; font-weight: 700; color: #64748b; margin: 14px 0 6px; }
+    html.dark .cpanel-block-label { color: #94a3b8; }
+    .cpanel-block-label:first-child { margin-top: 0; }
+    /* Rendered Markdown inside the panel (tables, lists, links). */
+    .md-rendered { font-size: .84rem; line-height: 1.6; color: #334155; }
+    html.dark .md-rendered { color: #cbd5e1; }
+    .md-rendered table { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: .8rem; }
+    .md-rendered th, .md-rendered td { border: 1px solid rgba(148,163,184,.3); padding: 5px 9px; text-align: left; }
+    .md-rendered th { background: rgba(148,163,184,.12); font-weight: 700; }
+    html.dark .md-rendered th, html.dark .md-rendered td { border-color: rgba(255,255,255,.12); }
+    html.dark .md-rendered th { background: rgba(255,255,255,.06); }
+    .md-rendered a { color: #4f46e5; text-decoration: none; }
+    .md-rendered a:hover { text-decoration: underline; }
+    html.dark .md-rendered a { color: #818cf8; }
+    .md-rendered code { font-family: 'Geist Mono', ui-monospace, monospace; font-size: .92em; background: rgba(148,163,184,.15); padding: 1px 5px; border-radius: 4px; }
+    .md-rendered ul, .md-rendered ol { padding-left: 1.25rem; margin: 6px 0; }
+    .md-rendered p { margin: 6px 0; }
+    .cedge-path { stroke: var(--wt-primary); stroke-width: 2; fill: none; }
+    html.dark .cedge-path { stroke: var(--wt-primary-soft); }
+    .cedge-arrow { fill: var(--wt-primary); stroke: none; }
+    html.dark .cedge-arrow { fill: var(--wt-primary-soft); }
+    .cedge-label {
+      position: absolute; transform: translate(-50%, -50%);
+      font-size: .7rem; padding: 2px 7px; border-radius: 999px;
+      background: #eef2ff; color: var(--wt-primary-deep); border: 1px solid #c7d2fe; white-space: nowrap;
+    }
+    html.dark .cedge-label { background: #1e1b4b; color: #c7d2fe; border-color: #3730a3; }
+
+    /* ---- Risk meter ---- */
+    .risk-track { height: 10px; border-radius: 999px; background: linear-gradient(90deg,#22c55e,#eab308,#ef4444); }
+    .risk-knob { width: 3px; height: 18px; border-radius: 2px; background: #0f172a; box-shadow: 0 0 0 2px #fff; }
+    html.dark .risk-knob { background: #f8fafc; box-shadow: 0 0 0 2px var(--wt-bg); }
+
+    @media (max-width: 640px) {
+      .wt-main h2 { font-size: 1.5rem; line-height: 1.2; }
+      .wt-main h3 { font-size: 1rem; }
+      .review-split-main { padding: 0 .5rem; font-size: .75rem; }
+      .review-split-toggle { width: 1.35rem; }
+      .cnode { width: 320px; }
+      .cpanel { width: 100%; max-width: 100%; border-left: 0; }
+      .cpanel-head { padding: 12px 14px; }
+      .cpanel-body { padding: 12px 14px 18px; }
+      .mermaid-host { overflow-x: auto; }
+    }
+  </style>
+</head>
+<body class="antialiased">
+
+  <!-- Floating tooltip for a risky code line's note (positioned by JS). -->
+  <div id="risk-tip" role="tooltip" hidden></div>
+
+  <!-- ============================ TOPBAR ============================ -->
+  <header class="wt-topbar sticky top-0 z-40 border-b">
+    <div class="mx-auto max-w-content px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
+      <a href="{{PR_URL}}" target="_blank" rel="noopener"
+         class="wt-brand shrink-0" title="Open the pull request on GitHub">
+        <span class="wt-brand-mark" aria-hidden="true">
+          <img src="https://kandev.ai/brand/kandev-github-org.png" alt="" />
+        </span>
+        <span class="wt-brand-name hidden sm:inline">Kandev</span>
+        <span class="wt-brand-divider hidden sm:inline" aria-hidden="true"></span>
+        <span class="wt-brand-pr">PR #{{PR_NUMBER}}</span>
+      </a>
+      <nav class="hidden md:flex items-center gap-4 text-sm text-slate-500 dark:text-slate-400">
+        <a href="#why" class="hover:text-brand">Why</a>
+        <a id="nav-architecture" href="#architecture" class="hover:text-brand">Architecture</a>
+        <a href="#changes" class="hover:text-brand">Changes</a>
+        <a id="nav-data" href="#data" class="hover:text-brand">Data</a>
+        <a href="#risk" class="hover:text-brand">Risk</a>
+        <a href="#review" class="hover:text-brand">Review</a>
+      </nav>
+      <details id="mobile-nav" class="wt-mobile-nav md:hidden">
+        <summary aria-label="Jump to walkthrough section">Sections</summary>
+        <nav class="wt-mobile-menu" aria-label="Walkthrough sections">
+          <a href="#why">Why</a>
+          <a id="mobile-nav-architecture" href="#architecture">Architecture</a>
+          <a href="#changes">Changes</a>
+          <a id="mobile-nav-data" href="#data">Data</a>
+          <a href="#risk">Risk</a>
+          <a href="#review">Review</a>
+        </nav>
+      </details>
+      <div class="flex items-center gap-2">
+        <!-- Risk badge: score and level, colored by initRisk from data-score
+             with the same thresholds as the risk section. Links to #risk. -->
+        <a id="topbar-risk" href="#risk" data-score="{{RISK_SCORE}}"
+           class="hidden sm:inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold"
+           title="Jump to the risk section">
+          <span class="opacity-70 font-normal">Risk</span>
+          <span id="topbar-risk-score">{{RISK_SCORE}}</span>
+          <span id="topbar-risk-level"></span>
+        </a>
+        <!-- Review split button: primary opens the GitHub review pane; the
+             dropdown copies a gh CLI approve command. No credentials live in
+             this page, so it never approves directly. build.py fills the PR
+             files URL (the PR URL plus /files) and the repo (owner/repo). -->
+        <div id="review-split" class="review-split">
+          <a class="review-split-main" href="{{PR_FILES_URL}}#submit-review"
+             target="_blank" rel="noopener" title="Review on GitHub">Review</a>
+          <button id="review-split-toggle" class="review-split-toggle" aria-haspopup="true"
+            aria-expanded="false" aria-label="More review actions">▾</button>
+          <div id="review-split-menu" class="review-split-menu" role="menu" hidden>
+            <button id="copy-approve-cmd" class="review-split-item" role="menuitem"
+              data-cmd="gh pr review {{PR_NUMBER}} --repo {{REPO}} --approve">
+              Copy approve command
+            </button>
+          </div>
+        </div>
+        <button id="theme-toggle" class="wt-theme-toggle" aria-label="Toggle theme">
+          <span class="hidden dark:inline">☀︎</span><span class="inline dark:hidden">☾</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="wt-main mx-auto max-w-content px-4 py-9 sm:px-6 sm:py-12 prose-body">
+    {{CONTENT}}
+  </main>
+
+  <footer class="wt-footer mx-auto max-w-content px-4 py-8 text-xs border-t sm:px-6">
+    Generated walkthrough. Prose uses Simplified Technical English.
+  </footer>
+
+  <script type="module">
+    // ---- Theme toggle (persisted) ----
+    const root = document.documentElement;
+    const saved = localStorage.getItem('wt-theme');
+    if (saved === 'light') root.classList.remove('dark');
+    else if (saved === 'dark') root.classList.add('dark');
+    document.getElementById('theme-toggle').addEventListener('click', () => {
+      root.classList.toggle('dark');
+      localStorage.setItem('wt-theme', root.classList.contains('dark') ? 'dark' : 'light');
+    });
+
+    // ---- Hide nav links whose section the renderer omitted ----
+    // build.py drops the Architecture and Data sections on a PR that has no
+    // such data, so their topbar anchors would scroll nowhere. Hide each link
+    // unless its section exists.
+    for (const id of ['architecture', 'data']) {
+      if (!document.getElementById(id)) {
+        const link = document.getElementById('nav-' + id);
+        if (link) link.hidden = true;
+        const mobileLink = document.getElementById('mobile-nav-' + id);
+        if (mobileLink) mobileLink.hidden = true;
+      }
+    }
+    const mobileNav = document.getElementById('mobile-nav');
+    if (mobileNav) {
+      mobileNav.querySelectorAll('a').forEach((link) => {
+        link.addEventListener('click', () => mobileNav.removeAttribute('open'));
+      });
+    }
+
+    // ---- Review split button: dropdown + copy approve command ----
+    (function initReviewSplit() {
+      const split = document.getElementById('review-split');
+      const toggle = document.getElementById('review-split-toggle');
+      const menu = document.getElementById('review-split-menu');
+      const copyBtn = document.getElementById('copy-approve-cmd');
+      if (!split || !toggle || !menu || !copyBtn) return;
+      const setOpen = (open) => {
+        menu.hidden = !open;
+        toggle.setAttribute('aria-expanded', String(open));
+      };
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setOpen(menu.hidden);
+      });
+      // clipboard API is blocked on many file:// origins, so fall back to a
+      // hidden textarea + execCommand.
+      const copyText = async (text) => {
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+            return true;
+          }
+        } catch (_) { /* fall through */ }
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.select();
+          const ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+          return ok;
+        } catch (_) { return false; }
+      };
+      copyBtn.addEventListener('click', async () => {
+        const ok = await copyText(copyBtn.dataset.cmd || '');
+        const original = copyBtn.textContent;
+        copyBtn.textContent = ok ? 'Copied to clipboard' : 'Copy failed, select manually';
+        setTimeout(() => { copyBtn.textContent = original; setOpen(false); }, 1200);
+      });
+      document.addEventListener('click', (e) => { if (!split.contains(e.target)) setOpen(false); });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setOpen(false); });
+    })();
+
+    // ---- Risk meter: place the knob and set the level from data-score ----
+    (function initRisk() {
+      // One source of truth for the level text and color, shared by the risk
+      // section pill and the topbar badge so they never diverge.
+      const clampScore = (v) => Math.min(10, Math.max(1, Number(v) || 1));
+      const riskStyle = (score) => {
+        if (score <= 3) return { text: 'Low', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' };
+        if (score <= 6) return { text: 'Medium', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300' };
+        return { text: 'High', cls: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300' };
+      };
+
+      // Risk section: place the knob and color the level pill.
+      const meter = document.getElementById('risk-meter');
+      if (meter) {
+        const score = clampScore(meter.dataset.score);
+        const { text, cls } = riskStyle(score);
+        const knob = document.getElementById('risk-knob-wrap');
+        if (knob) knob.style.left = ((score - 1) / 9 * 100) + '%';
+        const level = document.getElementById('risk-level');
+        if (level) {
+          // Keep any author-set label text; only add the color classes.
+          if (!level.textContent.trim() || level.textContent.includes('{{')) level.textContent = text;
+          level.className = 'ml-auto rounded-full px-3 py-1 text-sm font-semibold ' + cls;
+        }
+      }
+
+      // Topbar badge: same score, same color, plus the level word.
+      const badge = document.getElementById('topbar-risk');
+      if (badge && !badge.dataset.score.includes('{{')) {
+        const score = clampScore(badge.dataset.score);
+        const { text, cls } = riskStyle(score);
+        const badgeLevel = document.getElementById('topbar-risk-level');
+        if (badgeLevel) badgeLevel.textContent = text;
+        badge.className = 'hidden sm:inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold hover:opacity-90 transition-opacity ' + cls;
+      } else if (badge) {
+        // No score supplied (badge placeholder unreplaced): hide it.
+        badge.style.display = 'none';
+      }
+
+      // Per-block risk chips: same score, same color thresholds, plus the word.
+      document.querySelectorAll('.block-risk-chip').forEach((chip) => {
+        const score = clampScore(chip.dataset.score);
+        const { text, cls } = riskStyle(score);
+        const lvl = chip.querySelector('.block-risk-level');
+        if (lvl) lvl.textContent = text;
+        chip.className = 'block-risk-chip ' + cls;
+      });
+    })();
+
+    // ---- Mermaid (ESM, pinned via the head import map) ----
+    // Diagrams render once with the theme active at load. Both themes stay readable
+    // in light and dark, so a later toggle does not re-render them.
+    // The diagram source is agent-generated from PR content and this page is
+    // published, so the rendered SVG goes through DOMPurify before innerHTML.
+    // In securityLevel 'loose' Mermaid does not sanitize HTML in node labels, so
+    // an unsanitized label could carry an event handler that runs on assignment.
+    // Mermaid v11 renders node labels as HTML (div/span) inside <foreignObject>.
+    // The plain svg profile treats those children as SVG and strips them, so the
+    // labels vanish and shapes render empty. ADD_TAGS + HTML_INTEGRATION_POINTS
+    // keep the label markup while script/on* handlers are still removed.
+    Promise.all([import('mermaid'), import('dompurify')])
+      .then(([{ default: mermaid }, { default: DOMPurify }]) => {
+      const dark = root.classList.contains('dark');
+      mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default', securityLevel: 'loose' });
+      const sanitizeSvg = (svg) => DOMPurify.sanitize(svg, {
+        USE_PROFILES: { svg: true, svgFilters: true, html: true },
+        ADD_TAGS: ['foreignObject'],
+        ADD_ATTR: ['dominant-baseline', 'xmlns', 'requiredExtensions'],
+        HTML_INTEGRATION_POINTS: { foreignobject: true },
+      });
+      document.querySelectorAll('pre.mermaid-src').forEach((pre, i) => {
+        const host = document.createElement('div');
+        host.className = 'mermaid-host';
+        pre.replaceWith(host);
+        mermaid.render('m' + i, pre.textContent).then(({ svg }) => {
+          host.innerHTML = sanitizeSvg(svg);
+          const el = host.querySelector('svg');
+          if (el) {
+            // Render every diagram at its intrinsic size and never scale it up.
+            // Mermaid designs each node at a comfortable size; the earlier code
+            // forced a fixed height on wide "LR" chains and full width on tall
+            // "TD" charts, and both of those upscaled the nodes (a 94px-tall LR
+            // strip stretched to 190px doubled every node). Instead, read the
+            // viewBox and pin the SVG to its natural width and height. max-width
+            // 100% lets a diagram wider than the column shrink to fit while
+            // keeping its aspect ratio, and the host scrolls sideways only when
+            // the natural width genuinely exceeds the available space. Nothing
+            // is ever magnified, so nodes stay legible at their designed size.
+            const vb = (el.getAttribute('viewBox') || '').split(/\s+/).map(Number);
+            const w = Math.round(vb[2] || el.clientWidth || 1);
+            el.style.width = w + 'px';
+            el.style.height = 'auto';
+            el.style.maxWidth = '100%';
+            el.style.display = 'block';
+            el.style.margin = '0 auto';
+            host.style.overflowX = 'auto';
+          }
+        });
+      });
+    }).catch((e) => console.warn('Mermaid failed:', e));
+
+    // ---- Markdown render (ESM, pinned via the head import map) ----
+    // A code block marked data-render="markdown" renders as HTML, not as a code
+    // excerpt. Use it for content the reader wants rendered, such as the PR
+    // comment the change produces.
+    // marked does not sanitize raw HTML, and markdown blocks can carry
+    // PR-controlled text on a published page, so DOMPurify sanitizes the
+    // rendered HTML before it goes into innerHTML to block script injection.
+    const mdReady = Promise.all([import('marked'), import('dompurify')])
+      .then(([{ marked }, { default: DOMPurify }]) => {
+        document.querySelectorAll('pre.code-block[data-render="markdown"]').forEach((b) => {
+          const src = b.querySelector('code').textContent;
+          const div = document.createElement('div');
+          div.className = 'md-rendered';
+          div.innerHTML = DOMPurify.sanitize(marked.parse(src, { breaks: false }));
+          b.replaceWith(div);
+        });
+      }).catch((e) => console.warn('Markdown failed:', e));
+
+    // ---- Shiki dual-theme highlight (ESM, pinned via the head import map) ----
+    // Returns a promise so the canvas can lay out after node heights settle.
+    const shikiReady = Promise.all([
+      mdReady,
+      import('shiki'),
+    ]).then(async ([, { createHighlighter, bundledLanguages }]) => {
+      // Markdown blocks were replaced above, so only code excerpts remain.
+      const blocks = [...document.querySelectorAll('pre.code-block')];
+      // lang values come from agent JSON, so an unknown id is a realistic
+      // input. createHighlighter rejects the whole batch if any single lang is
+      // not Shiki-bundled, which would blank every block on the page. Resolve
+      // each lang against the bundled set and fall back to 'text', so one bad
+      // id degrades that block alone instead of the whole page.
+      const langOf = (b) =>
+        (b.dataset.lang && b.dataset.lang in bundledLanguages) ? b.dataset.lang : 'text';
+      const langs = [...new Set(blocks.map(langOf))];
+      const hl = await createHighlighter({ themes: ['github-light', 'github-dark'], langs });
+      for (const b of blocks) {
+        const isDiff = b.dataset.diff === 'true';
+        const riskRaw = b.dataset.risk || '';
+        const code = b.querySelector('code').textContent;
+        const html = hl.codeToHtml(code, {
+          lang: langOf(b),
+          themes: { light: 'github-light', dark: 'github-dark' },
+          defaultColor: false,
+        });
+        const tpl = document.createElement('template');
+        tpl.innerHTML = html.trim();
+        const out = tpl.content.firstElementChild; // the .shiki <pre>
+        stripLineNewlines(out);
+        if (isDiff) { out.classList.add('has-diff'); applyLineDiff(out, b.dataset); }
+        b.replaceWith(out);
+        if (riskRaw) applyLineRisk(out, riskRaw);
+      }
+    }).catch((e) => { console.warn('Shiki failed:', e); });
+
+    // ---- Strip inter-line newlines ----
+    // Shiki emits one <span class="line"> per row separated by a literal "\n"
+    // text node. With .line as a block, each of those newlines renders as an
+    // extra untinted blank row, showing a dark gap under every line. Remove the
+    // text nodes that sit directly between the line spans; the block display
+    // already puts each row on its own line.
+    function stripLineNewlines(pre) {
+      const code = pre.querySelector('code');
+      if (!code) return;
+      for (const node of [...code.childNodes]) {
+        if (node.nodeType === Node.TEXT_NODE && !node.textContent.trim()) {
+          node.remove();
+        }
+      }
+    }
+
+    // ---- Per-line diff tint ----
+    // build.py records the added/removed line numbers in data-added / data-removed
+    // (1-based, comma-separated) and emits clean code with no "[!code]" marker.
+    // Tinting by index is robust: a comment token inside a string (for example a
+    // Rust r#"...//..."# literal) can never be mistaken for a diff marker.
+    function applyLineDiff(pre, ds) {
+      const rows = [...pre.querySelectorAll('.line')];
+      const tag = (raw, cls) => {
+        for (const n of (raw || '').split(',')) {
+          const i = parseInt(n, 10);
+          if (i >= 1 && i <= rows.length) {
+            const row = rows[i - 1];
+            row.classList.add('diff', cls);
+            // An empty added/removed line keeps its tint but drops the +/-
+            // glyph, so it cannot overflow onto the next row.
+            if (!row.textContent.trim()) row.classList.add('diff-blank');
+          }
+        }
+      };
+      tag(ds.added, 'add');
+      tag(ds.removed, 'remove');
+    }
+
+    // ---- Per-line risk heatmap ----
+    // After Shiki renders a block, tag the lines whose text contains a flagged
+    // "match" substring. The tint bar is CSS (.risk-medium / .risk-high); the
+    // note shows in a shared floating tooltip on hover. Matching by code text
+    // (not line index) keeps flags stable when the excerpt is edited.
+    function applyLineRisk(pre, riskRaw) {
+      let lines;
+      try { lines = JSON.parse(riskRaw); } catch (e) { return; }
+      if (!Array.isArray(lines) || !lines.length) return;
+      const rows = [...pre.querySelectorAll('.line')];
+      for (const flag of lines) {
+        const sev = (flag.severity || '').toLowerCase();
+        if (sev !== 'medium' && sev !== 'high') continue; // "low" draws nothing
+        const needle = flag.match || '';
+        if (!needle) continue;
+        for (const row of rows) {
+          if (!row.textContent.includes(needle)) continue;
+          row.classList.add('risk-' + sev, 'risk-line');
+          row.dataset.riskSev = sev;
+          row.dataset.riskNote = flag.note || '';
+          break; // tag the first matching line only, so N flags -> N lines
+        }
+      }
+    }
+
+    // Shared floating tooltip for any .risk-line, wired once via delegation.
+    (function initRiskTip() {
+      const tip = document.getElementById('risk-tip');
+      if (!tip) return;
+      const show = (row) => {
+        const sev = row.dataset.riskSev || '';
+        const note = row.dataset.riskNote || '';
+        tip.innerHTML = '<span class="rt-sev ' + sev + '">' + sev + ' risk</span>'
+          + (note ? '<div>' + note.replace(/[&<>]/g, (c) =>
+              ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])) + '</div>' : '');
+        tip.hidden = false;
+        const r = row.getBoundingClientRect();
+        tip.style.left = Math.min(r.left, window.innerWidth - 340) + 'px';
+        tip.style.top = (r.bottom + 6) + 'px';
+        requestAnimationFrame(() => tip.classList.add('show'));
+      };
+      const hide = () => { tip.classList.remove('show'); tip.hidden = true; };
+      document.addEventListener('mouseover', (e) => {
+        const row = e.target.closest && e.target.closest('.risk-line');
+        if (row) show(row); else if (!e.target.closest('#risk-tip')) hide();
+      });
+      document.addEventListener('mouseout', (e) => {
+        if (e.target.closest && e.target.closest('.risk-line')) hide();
+      });
+      window.addEventListener('scroll', hide, true);
+    })();
+
+    // ---- Interactive code canvas: pan, zoom, expand, arrows ----
+    (function initCanvas() {
+      const wrap = document.getElementById('canvas-wrap');
+      const stage = document.getElementById('canvas-stage');
+      const svg = document.getElementById('canvas-edges');
+      if (!wrap || !stage || !svg) return;
+
+      const SVGNS = 'http://www.w3.org/2000/svg';
+      let tx = 0, ty = 0, scale = 1;
+      const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+      const apply = () => { stage.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`; };
+
+      // Spread edges that share a node across that node's edge. The old
+      // midpoint route made every branch leave and enter at the same pixel,
+      // which stacked paths and labels on dense graphs.
+      function laneOffset(index, count, span, maxGap = 48) {
+        const total = Math.max(1, Number(count) || 1);
+        if (total === 1) return 0;
+        const slot = clamp(Number(index) || 0, 0, total - 1);
+        const gap = Math.min(maxGap, (span * .62) / (total - 1));
+        return (slot - (total - 1) / 2) * gap;
+      }
+
+      function cubicPoint(p0, p1, p2, p3, t) {
+        const u = 1 - t;
+        return {
+          x: u ** 3 * p0.x + 3 * u ** 2 * t * p1.x + 3 * u * t ** 2 * p2.x + t ** 3 * p3.x,
+          y: u ** 3 * p0.y + 3 * u ** 2 * t * p1.y + 3 * u * t ** 2 * p2.y + t ** 3 * p3.y,
+        };
+      }
+
+      // Draw one arrow per .cedge, from the FROM node edge to the TO node edge.
+      function drawEdges() {
+        svg.innerHTML = '';
+        document.querySelectorAll('.cedge-label').forEach((n) => n.remove());
+        const edges = [...stage.querySelectorAll('.cedge')];
+        for (const e of edges) {
+          const a = stage.querySelector(`.cnode[data-id="${e.dataset.from}"]`);
+          const b = stage.querySelector(`.cnode[data-id="${e.dataset.to}"]`);
+          if (!a || !b) continue;
+          const ax = a.offsetLeft, ay = a.offsetTop, aw = a.offsetWidth, ah = a.offsetHeight;
+          const bx = b.offsetLeft, by = b.offsetTop, bw = b.offsetWidth, bh = b.offsetHeight;
+          const acx = ax + aw / 2, acy = ay + ah / 2;
+          const bcx = bx + bw / 2, bcy = by + bh / 2;
+          // Anchor on the near vertical or horizontal edge of each node.
+          const dx = bcx - acx, dy = bcy - acy;
+          const horizontal = Math.abs(dx) >= Math.abs(dy);
+          const fromLane = laneOffset(
+            e.dataset.fromLane, e.dataset.fromLanes, horizontal ? ah : aw,
+          );
+          const toLane = laneOffset(
+            e.dataset.toLane, e.dataset.toLanes, horizontal ? bh : bw,
+          );
+          // Reciprocal or parallel edges have the same endpoint geometry even
+          // when their source/target slots differ. Give the whole node pair a
+          // smaller parallel offset so those routes do not collapse into one.
+          const pairLane = laneOffset(
+            e.dataset.pairLane, e.dataset.pairLanes,
+            (horizontal ? Math.min(ah, bh) : Math.min(aw, bw)) * .6,
+          );
+          let x1, y1, x2, y2;
+          if (horizontal) {
+            x1 = dx >= 0 ? ax + aw : ax; y1 = acy + fromLane + pairLane;
+            x2 = dx >= 0 ? bx : bx + bw; y2 = bcy + toLane + pairLane;
+          } else {
+            x1 = acx + fromLane + pairLane; y1 = dy >= 0 ? ay + ah : ay;
+            x2 = bcx + toLane + pairLane; y2 = dy >= 0 ? by : by + bh;
+          }
+          const direction = horizontal ? (dx >= 0 ? 1 : -1) : (dy >= 0 ? 1 : -1);
+          const curve = Math.max(52, (horizontal ? Math.abs(x2 - x1) : Math.abs(y2 - y1)) * .42);
+          const p0 = { x: x1, y: y1 };
+          const p1 = horizontal
+            ? { x: x1 + direction * curve, y: y1 }
+            : { x: x1, y: y1 + direction * curve };
+          const p2 = horizontal
+            ? { x: x2 - direction * curve, y: y2 }
+            : { x: x2, y: y2 - direction * curve };
+          const p3 = { x: x2, y: y2 };
+          const path = document.createElementNS(SVGNS, 'path');
+          path.setAttribute('d', `M ${p0.x} ${p0.y} C ${p1.x} ${p1.y}, ${p2.x} ${p2.y}, ${p3.x} ${p3.y}`);
+          path.setAttribute('class', 'cedge-path');
+          path.setAttribute('marker-end', 'url(#arrow)');
+          svg.appendChild(path);
+          if (e.dataset.label) {
+            const labelPoint = cubicPoint(p0, p1, p2, p3, .5);
+            const labelSpan = horizontal ? Math.min(ah, bh) : Math.min(aw, bw);
+            const labelFromLane = laneOffset(
+              e.dataset.fromLane, e.dataset.fromLanes, labelSpan, 192,
+            );
+            const labelToLane = laneOffset(
+              e.dataset.toLane, e.dataset.toLanes, labelSpan, 192,
+            );
+            // Prefer the endpoint with the stronger fan-out. This keeps labels
+            // apart when two different routes happen to share a midpoint.
+            const endpointLabelLane = Math.abs(labelToLane) >= Math.abs(labelFromLane)
+              ? labelToLane : labelFromLane;
+            const pairLabelLane = laneOffset(
+              e.dataset.pairLane, e.dataset.pairLanes,
+              labelSpan * .6, 96,
+            );
+            const labelLane = Number(e.dataset.pairLanes) > 1
+              ? pairLabelLane : endpointLabelLane;
+            if (horizontal) labelPoint.y += labelLane;
+            else labelPoint.x += labelLane;
+            const lab = document.createElement('div');
+            lab.className = 'cedge-label';
+            lab.textContent = e.dataset.label;
+            lab.style.left = labelPoint.x + 'px';
+            lab.style.top = labelPoint.y + 'px';
+            stage.appendChild(lab);
+          }
+        }
+      }
+
+      // Arrowhead marker.
+      const defs = document.createElementNS(SVGNS, 'defs');
+      defs.innerHTML = '<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="cedge-arrow"/></marker>';
+      svg.appendChild(defs);
+
+      // Wrap each boundary box around its member nodes. build.py sizes the boxes
+      // from an estimated node height, but real heights depend on content (a
+      // wrapped title, a tall signature). After Shiki settles heights, remeasure
+      // each group from its nodes' actual geometry so the dashed box never clips
+      // a node that grew past the estimate.
+      const GROUP_PAD = 20, GROUP_TOP_PAD = 28;
+      function sizeGroups() {
+        for (const box of stage.querySelectorAll('.cgroup')) {
+          const g = box.dataset.group;
+          if (!g) continue;
+          const nodes = [...stage.querySelectorAll(`.cnode[data-group="${CSS.escape(g)}"]`)];
+          if (!nodes.length) continue;
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          for (const n of nodes) {
+            minX = Math.min(minX, n.offsetLeft); minY = Math.min(minY, n.offsetTop);
+            maxX = Math.max(maxX, n.offsetLeft + n.offsetWidth);
+            maxY = Math.max(maxY, n.offsetTop + n.offsetHeight);
+          }
+          box.style.left = (minX - GROUP_PAD) + 'px';
+          box.style.top = (minY - GROUP_TOP_PAD) + 'px';
+          box.style.width = (maxX - minX + GROUP_PAD * 2) + 'px';
+          box.style.height = (maxY - minY + GROUP_TOP_PAD + GROUP_PAD) + 'px';
+        }
+      }
+
+      // Fit all nodes into view.
+      function fit() {
+        // Include boundary boxes so their labels and edges are not clipped.
+        const items = [...stage.querySelectorAll('.cnode, .cgroup')];
+        if (!items.length) { tx = ty = 0; scale = 1; apply(); return; }
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const n of items) {
+          minX = Math.min(minX, n.offsetLeft); minY = Math.min(minY, n.offsetTop);
+          maxX = Math.max(maxX, n.offsetLeft + n.offsetWidth); maxY = Math.max(maxY, n.offsetTop + n.offsetHeight);
+        }
+        const pad = 60;
+        const cw = wrap.clientWidth, ch = wrap.clientHeight;
+        const bw = (maxX - minX) + pad * 2, bh = (maxY - minY) + pad * 2;
+        // Cap at 1: a CSS transform that scales the stage above 1 upscales the
+        // already-rendered node text and blurs it. A small graph is shown at its
+        // natural, crisp size; the user can zoom in with the + button if needed.
+        scale = clamp(Math.min(cw / bw, ch / bh), 0.3, 1);
+        tx = (cw - bw * scale) / 2 - (minX - pad) * scale;
+        ty = (ch - bh * scale) / 2 - (minY - pad) * scale;
+        apply();
+      }
+
+      // Zoom around a screen point.
+      function zoomAt(clientX, clientY, factor) {
+        const rect = wrap.getBoundingClientRect();
+        const px = clientX - rect.left, py = clientY - rect.top;
+        const ns = clamp(scale * factor, 0.3, 2.5);
+        const k = ns / scale;
+        tx = px - (px - tx) * k; ty = py - (py - ty) * k;
+        scale = ns; apply();
+      }
+
+      // No wheel-to-zoom: the wheel must scroll the page, even with the pointer
+      // over the canvas. Zoom is manual, through the +/- buttons. The panel keeps
+      // its own wheel handler (below) so scrolling code in the panel does not
+      // bubble to the page.
+
+      // Drag to pan. A click on a node (no drag) toggles the node body.
+      let panning = false, moved = false, sx = 0, sy = 0, otx = 0, oty = 0;
+      wrap.addEventListener('pointerdown', (ev) => {
+        panning = true; moved = false; sx = ev.clientX; sy = ev.clientY; otx = tx; oty = ty;
+        wrap.classList.add('panning'); wrap.setPointerCapture(ev.pointerId);
+      });
+      wrap.addEventListener('pointermove', (ev) => {
+        if (!panning) return;
+        const ddx = ev.clientX - sx, ddy = ev.clientY - sy;
+        if (Math.abs(ddx) + Math.abs(ddy) > 4) moved = true;
+        tx = otx + ddx; ty = oty + ddy; apply();
+      });
+      wrap.addEventListener('pointerup', (ev) => {
+        panning = false; wrap.classList.remove('panning');
+        try { wrap.releasePointerCapture(ev.pointerId); } catch (_) {}
+        if (!moved) {
+          // Pointer capture makes ev.target the wrap element, so resolve the
+          // real element under the pointer to find the clicked node.
+          const hit = document.elementFromPoint(ev.clientX, ev.clientY);
+          if (!hit) return;
+          if (hit.closest && hit.closest('.cpanel')) return; // clicks inside the panel
+          const node = hit.closest && hit.closest('.cnode');
+          if (node && !(hit.closest && hit.closest('a'))) {
+            openPanel(node);
+          } else if (!node) {
+            // A click on empty canvas closes the open panel.
+            closePanel();
+          }
+        }
+      });
+
+      // ---- Right-side detail panel ----
+      const panel = document.getElementById('canvas-panel');
+      const panelTitle = document.getElementById('cpanel-title');
+      const panelFile = document.getElementById('cpanel-file');
+      const panelBody = document.getElementById('cpanel-body');
+      const panelClose = document.getElementById('cpanel-close');
+      let selectedNode = null;
+
+      function openPanel(node) {
+        const detail = node.querySelector('.cnode-detail');
+        if (!detail || !panel) return;
+        if (selectedNode) selectedNode.classList.remove('selected');
+        selectedNode = node; node.classList.add('selected');
+
+        panelTitle.textContent = detail.dataset.title || node.querySelector('.cnode-title')?.textContent || '';
+        const url = detail.dataset.fileUrl || '';
+        if (url) {
+          panelFile.textContent = (detail.dataset.file || 'View diff') + ' ↗';
+          panelFile.href = url; panelFile.style.display = '';
+        } else {
+          panelFile.style.display = 'none';
+        }
+        // Clone the detail content (description + code blocks) into the panel.
+        panelBody.innerHTML = '';
+        [...detail.children].forEach((c) => panelBody.appendChild(c.cloneNode(true)));
+        panel.classList.add('open'); panel.setAttribute('aria-hidden', 'false');
+      }
+
+      function closePanel() {
+        if (!panel) return;
+        panel.classList.remove('open'); panel.setAttribute('aria-hidden', 'true');
+        if (selectedNode) { selectedNode.classList.remove('selected'); selectedNode = null; }
+      }
+
+      if (panelClose) panelClose.addEventListener('click', (e) => { e.stopPropagation(); closePanel(); });
+      // The panel sits inside the canvas. Stop its pointer events from panning.
+      if (panel) {
+        panel.addEventListener('pointerdown', (e) => e.stopPropagation());
+        panel.addEventListener('wheel', (e) => e.stopPropagation());
+      }
+
+      // Drag the left edge to resize the panel. The width grows as the pointer
+      // moves left toward the canvas.
+      const panelResizer = document.getElementById('cpanel-resizer');
+      if (panel && panelResizer) {
+        panelResizer.addEventListener('pointerdown', (e) => {
+          e.preventDefault(); e.stopPropagation();
+          const startX = e.clientX;
+          const startW = panel.getBoundingClientRect().width;
+          panel.classList.add('resizing');
+          panelResizer.setPointerCapture(e.pointerId);
+          const onMove = (mv) => {
+            const next = startW + (startX - mv.clientX);
+            const maxW = (wrap.clientWidth || window.innerWidth) * 0.95;
+            panel.style.width = Math.max(320, Math.min(next, maxW)) + 'px';
+          };
+          const onUp = (up) => {
+            panel.classList.remove('resizing');
+            try { panelResizer.releasePointerCapture(up.pointerId); } catch (_) {}
+            panelResizer.removeEventListener('pointermove', onMove);
+            panelResizer.removeEventListener('pointerup', onUp);
+          };
+          panelResizer.addEventListener('pointermove', onMove);
+          panelResizer.addEventListener('pointerup', onUp);
+        });
+      }
+
+      // Maximize: fill the viewport, then re-fit. Toggle back to inline size.
+      function toggleMax() {
+        const on = wrap.classList.toggle('maximized');
+        document.documentElement.classList.toggle('canvas-max', on);
+        document.body.classList.toggle('canvas-max', on);
+        wrap.querySelectorAll('.label-max').forEach((s) => { s.style.display = on ? 'none' : 'inline'; });
+        wrap.querySelectorAll('.label-min').forEach((s) => { s.style.display = on ? 'inline' : 'none'; });
+        requestAnimationFrame(() => { drawEdges(); fit(); });
+      }
+
+      wrap.querySelectorAll('[data-cz]').forEach((btn) => {
+        btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const rect = wrap.getBoundingClientRect();
+          if (btn.dataset.cz === 'in') zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, 1.2);
+          else if (btn.dataset.cz === 'out') zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, 1 / 1.2);
+          else if (btn.dataset.cz === 'max') toggleMax();
+          else fit();
+        });
+      });
+
+      // Esc closes the detail panel first, then leaves the maximized canvas.
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        if (panel && panel.classList.contains('open')) { closePanel(); return; }
+        if (wrap.classList.contains('maximized')) toggleMax();
+      });
+
+      // Lay out after Shiki settles node heights, then fit.
+      shikiReady.finally(() => { requestAnimationFrame(() => { sizeGroups(); drawEdges(); fit(); }); });
+      window.addEventListener('resize', () => { sizeGroups(); drawEdges(); fit(); });
+    })();
+  </script>
+</body>
+</html>

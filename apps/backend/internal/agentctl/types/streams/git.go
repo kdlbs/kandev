@@ -76,6 +76,15 @@ type GitStatusUpdate struct {
 	// BaseCommit is the base branch HEAD commit SHA (for comparison/diff).
 	BaseCommit string `json:"base_commit,omitempty"`
 
+	// ComparisonTarget is the credential-free provider target display identity
+	// used when an explicit cross-repository comparison is active.
+	ComparisonTarget string `json:"comparison_target,omitempty"`
+	// ComparisonStatus is "ready" or "unavailable" for an explicit target.
+	ComparisonStatus string `json:"comparison_status,omitempty"`
+	// ComparisonErrorCode is a bounded machine-readable failure code. Raw Git
+	// and provider errors never enter the workspace stream.
+	ComparisonErrorCode string `json:"comparison_error_code,omitempty"`
+
 	// Files contains detailed information about each changed file.
 	Files map[string]FileInfo `json:"files,omitempty"`
 
@@ -86,6 +95,29 @@ type GitStatusUpdate struct {
 	// BranchDeletions is the total number of deleted lines across all changes on
 	// this branch compared to the merge-base (committed + staged + unstaged).
 	BranchDeletions int `json:"branch_deletions,omitempty"`
+}
+
+// FileChangeFacet is one layer of a mixed file change. A mixed path can have
+// one change between HEAD and the index plus another between the index and the
+// working tree.
+type FileChangeFacet struct {
+	// Status indicates the layer status: "modified", "added", "deleted", or "renamed".
+	Status string `json:"status"`
+
+	// Additions is the number of added lines in this layer.
+	Additions int `json:"additions,omitempty"`
+
+	// Deletions is the number of deleted lines in this layer.
+	Deletions int `json:"deletions,omitempty"`
+
+	// OldPath is the original path for a rename in this layer.
+	OldPath string `json:"old_path,omitempty"`
+
+	// Diff contains the unified diff content for this layer.
+	Diff string `json:"diff,omitempty"`
+
+	// DiffSkipReason explains why this layer's diff was omitted or truncated.
+	DiffSkipReason string `json:"diff_skip_reason,omitempty"`
 }
 
 // FileInfo represents detailed information about a file's git status.
@@ -115,6 +147,12 @@ type FileInfo struct {
 	// DiffSkipReason explains why diff content was omitted or truncated.
 	// Values: "too_large", "binary", "truncated", "budget_exceeded".
 	DiffSkipReason string `json:"diff_skip_reason,omitempty"`
+
+	// StagedChange and UnstagedChange preserve the two layers when the same
+	// path has both index and working-tree changes. Single-layer paths keep the
+	// compact legacy fields above and omit both facets.
+	StagedChange   *FileChangeFacet `json:"staged_change,omitempty"`
+	UnstagedChange *FileChangeFacet `json:"unstaged_change,omitempty"`
 }
 
 // GitCommitNotification is sent when a new commit is detected in the workspace.

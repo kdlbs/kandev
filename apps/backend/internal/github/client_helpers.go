@@ -143,10 +143,19 @@ func newPRStatus(pr *PR, reviews []PRReview, checks []CheckRun) *PRStatus {
 	reviewState, pendingReviewCount := deriveReviewSyncState(pr, reviews)
 	total, passing := countCheckResults(checks)
 	return &PRStatus{
-		PR:             pr,
-		ReviewState:    reviewState,
-		ChecksState:    computeOverallCheckStatus(checks),
-		MergeableState: pr.MergeableState,
+		PR:                                    pr,
+		ReviewState:                           reviewState,
+		ChecksState:                           computeOverallCheckStatus(checks),
+		MergeableState:                        pr.MergeableState,
+		MergeQueueState:                       pr.MergeQueueState,
+		MergeQueuePosition:                    pr.MergeQueuePosition,
+		MergeQueueEntryID:                     pr.MergeQueueEntryID,
+		MergeQueueEntryHeadSHA:                pr.MergeQueueEntryHeadSHA,
+		MergeQueueEstimatedTimeToMergeSeconds: pr.MergeQueueEstimatedTimeToMergeSeconds,
+		MergeQueueLastRemovalID:               pr.MergeQueueLastRemovalID,
+		MergeQueueLastRemovedAt:               pr.MergeQueueLastRemovedAt,
+		MergeQueueLastRemovalReason:           pr.MergeQueueLastRemovalReason,
+		MergeQueueLastRemovalBeforeSHA:        pr.MergeQueueLastRemovalBeforeSHA,
 		// ReviewCount is the number of distinct reviewers whose latest review
 		// state is APPROVED — it's the value the popover renders as
 		// "Approved (N)" / "Approved N / M required". Counting raw review
@@ -160,6 +169,14 @@ func newPRStatus(pr *PR, reviews []PRReview, checks []CheckRun) *PRStatus {
 		// from the batched-GraphQL path that only carries rollup state.
 		ChecksPopulated:       true,
 		ReviewCountsPopulated: true,
+		// This path fetched a full single pull request (REST or gh CLI), so
+		// is_draft/changed_files/merged_by_login are real observations, not
+		// "I didn't look" (AC-10). ClosureAttributionPopulated stays false:
+		// neither REST caller can see the closing actor — that's GraphQL-only
+		// (AC-15).
+		OutcomeFieldsPopulated:      true,
+		mergeQueuePopulated:         pr.mergeQueuePopulated,
+		mergeQueueRecoveryPopulated: pr.mergeQueueRecoveryPopulated,
 	}
 }
 
@@ -297,6 +314,7 @@ func convertRawComments(raw []ghComment) []PRComment {
 	for i, c := range raw {
 		comments[i] = PRComment{
 			ID:           c.ID,
+			HTMLURL:      c.HTMLURL,
 			Author:       c.User.Login,
 			AuthorAvatar: c.User.AvatarURL,
 			AuthorIsBot:  isGitHubBot(c.User.Type),
@@ -316,6 +334,7 @@ func convertRawComments(raw []ghComment) []PRComment {
 // ghIssueComment is the JSON shape for issue comments from the GitHub API.
 type ghIssueComment struct {
 	ID        int64     `json:"id"`
+	HTMLURL   string    `json:"html_url"`
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -332,6 +351,7 @@ func convertRawIssueComments(raw []ghIssueComment) []PRComment {
 	for i, c := range raw {
 		comments[i] = PRComment{
 			ID:           c.ID,
+			HTMLURL:      c.HTMLURL,
 			Author:       c.User.Login,
 			AuthorAvatar: c.User.AvatarURL,
 			AuthorIsBot:  isGitHubBot(c.User.Type),

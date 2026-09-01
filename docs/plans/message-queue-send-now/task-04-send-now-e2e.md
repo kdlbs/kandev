@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["02-replacement-turn-dispatch", "03-send-now-queue-controls"]
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-send-now.md"
+spec: "../../specs/ui/requirements/message-queue-send-now.md"
 ---
 
 # Task 04: Prove Send Now end to end

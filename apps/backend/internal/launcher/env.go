@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/profiles"
 )
 
 const healthTokenBytes = 32
@@ -29,16 +32,31 @@ func launchHealthToken() (string, error) {
 	return newHealthToken()
 }
 
-func backendEnv(ports portConfig, logLevel, consoleLogLevel string, debug bool, healthToken string, extra []string) []string {
-	env := os.Environ()
+func backendEnv(ports portConfig, logLevel, consoleLogLevel string, debug bool, healthToken string, extra []string, configs ...*config.Config) []string {
+	if len(configs) > 0 {
+		return backendEnvForConfig(ports, logLevel, consoleLogLevel, debug, healthToken, extra, configs[0])
+	}
+	return backendEnvForConfig(ports, logLevel, consoleLogLevel, debug, healthToken, extra, nil)
+}
+
+func backendEnvForConfig(ports portConfig, logLevel, consoleLogLevel string, debug bool, healthToken string, extra []string, cfg *config.Config) []string {
+	env := stripAppliedProfileEnvironment(os.Environ())
 	env = upsertEnv(env, "KANDEV_SERVER_PORT", fmt.Sprint(ports.BackendPort))
 	env = upsertEnv(env, "KANDEV_AGENT_STANDALONE_PORT", fmt.Sprint(ports.AgentctlPort))
-	env = upsertEnv(env, "KANDEV_DATABASE_PATH", resolveDatabasePath())
+	if cfg != nil && cfg.SourceFor("database.path") == config.SourceEnvironment && strings.TrimSpace(cfg.Database.Path) != "" {
+		env = upsertEnv(env, "KANDEV_DATABASE_PATH", resolveDatabasePathForConfig(cfg))
+	}
+	if configPath := configFileForChild(cfg); configPath != "" {
+		env = upsertEnv(env, config.InternalConfigFileEnv, configPath)
+		if cfg.Source.HomeFile {
+			env = upsertEnv(env, config.InternalConfigHomeFileEnv, "1")
+		}
+	}
 	env = upsertEnv(env, "KANDEV_DESKTOP_HEALTH_TOKEN", healthToken)
 	if ports.WebPort != 0 {
 		env = upsertEnv(env, "KANDEV_WEB_INTERNAL_URL", fmt.Sprintf("http://localhost:%d", ports.WebPort))
 	}
-	if logLevel != "" {
+	if logLevel != "" && (cfg == nil || cfg.SourceFor("logging.level") != config.SourceConfiguration || cfg.Logging.Level != logLevel) {
 		env = upsertEnv(env, "KANDEV_LOG_LEVEL", logLevel)
 	}
 	env = upsertEnv(env, "KANDEV_CONSOLE_LOG_LEVEL", consoleLogLevel)
@@ -54,6 +72,22 @@ func backendEnv(ports portConfig, logLevel, consoleLogLevel string, debug bool, 
 		}
 	}
 	return env
+}
+
+func stripAppliedProfileEnvironment(env []string) []string {
+	defaults, err := profiles.EnvironmentDefaults()
+	if err != nil {
+		return env
+	}
+	filtered := make([]string, 0, len(env))
+	for _, item := range env {
+		key, value, ok := strings.Cut(item, "=")
+		if ok && profiles.WasApplied(key) && defaults[key] == value {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
 }
 
 func upsertEnv(env []string, key, value string) []string {

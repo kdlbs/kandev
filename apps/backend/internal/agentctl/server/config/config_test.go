@@ -8,7 +8,38 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
+
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 )
+
+func TestLoadWithStartupUsesExplicitManagedValues(t *testing.T) {
+	t.Setenv("KANDEV_ACP_IDLE_TIMEOUT", "bad")
+	t.Setenv("KANDEV_ACP_IDLE_REAPER_INTERVAL", "bad")
+	t.Setenv("KANDEV_ACP_NOTIF_QUEUE", "1024")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://inherited:4318")
+
+	startup := commonconfig.AgentctlStartupConfig{
+		Configured:                true,
+		IdleTimeout:               2 * time.Hour,
+		IdleReaperInterval:        3 * time.Minute,
+		NotificationQueueCapacity: 4096,
+		OTLPEndpoint:              "http://configured:4318",
+	}
+	cfg, err := LoadWithStartup(startup)
+	if err != nil {
+		t.Fatalf("LoadWithStartup: %v", err)
+	}
+	if cfg.IdleTimeout != startup.IdleTimeout || cfg.IdleReaperInterval != startup.IdleReaperInterval {
+		t.Fatalf("managed durations = %s/%s, want %s/%s", cfg.IdleTimeout, cfg.IdleReaperInterval, startup.IdleTimeout, startup.IdleReaperInterval)
+	}
+	if cfg.NotificationQueueCapacity != startup.NotificationQueueCapacity {
+		t.Fatalf("managed queue capacity = %d, want %d", cfg.NotificationQueueCapacity, startup.NotificationQueueCapacity)
+	}
+	if cfg.OTLPEndpoint != startup.OTLPEndpoint {
+		t.Fatalf("managed OTLP endpoint = %q, want %q", cfg.OTLPEndpoint, startup.OTLPEndpoint)
+	}
+}
 
 func TestNewInstanceConfigNormalizesMcpProviders(t *testing.T) {
 	cfg := (&Config{}).NewInstanceConfig(0, &InstanceOverrides{
@@ -18,6 +49,17 @@ func TestNewInstanceConfigNormalizesMcpProviders(t *testing.T) {
 	want := []string{"github", "gitlab"}
 	if !reflect.DeepEqual(cfg.McpProviders, want) {
 		t.Fatalf("McpProviders = %v, want %v", cfg.McpProviders, want)
+	}
+}
+
+// TestNewInstanceConfig_PropagatesMCPToolNamePresentationCapability covers
+// AC-TASKS-MCP-TOOL-NAMES-001.5 at the agentctl instance boundary.
+func TestNewInstanceConfig_PropagatesMCPToolNamePresentationCapability(t *testing.T) {
+	cfg := (&Config{}).NewInstanceConfig(0, &InstanceOverrides{
+		NamespacesMCPToolsByServer: true,
+	})
+	if !cfg.NamespacesMCPToolsByServer {
+		t.Fatal("InstanceConfig did not retain NamespacesMCPToolsByServer")
 	}
 }
 

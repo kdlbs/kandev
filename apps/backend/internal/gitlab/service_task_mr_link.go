@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 var (
@@ -157,6 +158,11 @@ func bracketedHostname(hostname string) string {
 
 // AssociateExistingMRByURL validates a workspace-owned task/repository pair,
 // fetches the configured-host MR, and idempotently persists its association.
+// `repositoryID` is repositories.ID (or empty to auto-resolve the task's
+// single repository) — the same id space AssociatePRWithTask uses on the
+// GitHub side. A row id from task_repositories instead fails closed here
+// (ValidateTaskMRRepositoryIdentity / ResolveTaskMRRepository reject it)
+// rather than silently duplicating the association.
 func (s *Service) AssociateExistingMRByURL(
 	ctx context.Context,
 	workspaceID, taskID, repositoryID, mrURL string,
@@ -193,6 +199,7 @@ func (s *Service) AssociateExistingMRByURL(
 	if err := store.UpsertTaskMR(ctx, association); err != nil {
 		return nil, fmt.Errorf("upsert task MR: %w", err)
 	}
+	s.reconcileComparisonTarget(ctx, taskID, client.Host(), status.MR)
 	s.publishTaskMRUpdated(ctx, workspaceID, association)
 	return association, nil
 }
@@ -285,7 +292,30 @@ func (s *Service) UnlinkTaskMR(ctx context.Context, workspaceID, associationID s
 	if store == nil {
 		return errors.New("gitlab store not configured")
 	}
-	return store.DeleteTaskMRForWorkspace(ctx, workspaceID, associationID)
+	association, lookupErr := store.GetTaskMRByID(ctx, associationID)
+	if lookupErr != nil {
+		return lookupErr
+	}
+	if association != nil && s.comparisonTargetObserver != nil && association.RepositoryID != "" {
+		if err := s.comparisonTargetObserver.RemoveComparisonTargetForChange(
+			ctx,
+			association.TaskID,
+			association.RepositoryID,
+			taskmodels.ComparisonTargetProviderGitLab,
+			taskmodels.ComparisonTargetKindMergeRequest,
+			association.MRIID,
+		); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("GitLab comparison target detach cleanup failed",
+					zap.String("task_id", association.TaskID), zap.Int("mr_iid", association.MRIID), zap.Error(err))
+			}
+			return err
+		}
+	}
+	if err := store.DeleteTaskMRForWorkspace(ctx, workspaceID, associationID); err != nil {
+		return err
+	}
+	return nil
 }
 
 func taskMRFromStatus(taskID, repositoryID, host, projectPath string, status *MRStatus) *TaskMR {

@@ -32,8 +32,14 @@ func newMessageTestService(t *testing.T) (*Service, *MockEventBus, *sqliterepo.R
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-msg", TaskID: "task-msg", Status: models.TaskEnvironmentStatusReady,
+		WorkspacePath: "/workspace/messages",
+	}); err != nil {
+		t.Fatalf("create task environment: %v", err)
+	}
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID: "sess-msg", TaskID: "task-msg", State: models.TaskSessionStateCreated,
+		ID: "sess-msg", TaskID: "task-msg", TaskEnvironmentID: "env-msg", State: models.TaskSessionStateCreated,
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -558,10 +564,10 @@ func TestUpdatePermissionMessageSetsStatus(t *testing.T) {
 	ctx := context.Background()
 	seedMessage(t, repo, &models.Message{
 		ID: "msg-permission", Type: models.MessageTypePermissionRequest, Content: "Allow?",
-		Metadata: map[string]interface{}{"pending_id": "pend-1"},
+		Metadata: map[string]interface{}{"request_id": "req-1", "pending_id": "pend-1"},
 	})
 
-	if err := svc.UpdatePermissionMessage(ctx, "sess-msg", "pend-1", models.PermissionStatusApproved); err != nil {
+	if err := svc.UpdatePermissionMessage(ctx, "task-msg", "sess-msg", "req-1", "pend-1", models.PermissionStatusApproved); err != nil {
 		t.Fatalf("UpdatePermissionMessage: %v", err)
 	}
 	stored, err := repo.GetMessage(ctx, "msg-permission")
@@ -575,8 +581,12 @@ func TestUpdatePermissionMessageSetsStatus(t *testing.T) {
 		t.Fatalf("published %v, want exactly one %s", types, events.MessageUpdated)
 	}
 
-	if err := svc.UpdatePermissionMessage(ctx, "sess-msg", "pend-missing", models.PermissionStatusApproved); err == nil {
+	if err := svc.UpdatePermissionMessage(ctx, "task-msg", "sess-msg", "req-1", "pend-missing", models.PermissionStatusApproved); err == nil {
 		t.Fatal("an unknown pending id must fail")
+	}
+
+	if err := svc.UpdatePermissionMessage(ctx, "task-msg", "sess-msg", "req-stale", "pend-1", models.PermissionStatusApproved); err == nil {
+		t.Fatal("a stale request id reusing the same pending id must not match")
 	}
 }
 
@@ -585,14 +595,14 @@ func TestUpdatePermissionMessageExpiryCancelsRelatedToolCall(t *testing.T) {
 	ctx := context.Background()
 	seedMessage(t, repo, &models.Message{
 		ID: "msg-perm-expire", Type: models.MessageTypePermissionRequest, Content: "Allow?",
-		Metadata: map[string]interface{}{"pending_id": "pend-exp", "tool_call_id": "tc-exp"},
+		Metadata: map[string]interface{}{"request_id": "req-exp", "pending_id": "pend-exp", "tool_call_id": "tc-exp"},
 	})
 	seedMessage(t, repo, &models.Message{
 		ID: "msg-tool-expire", Type: models.MessageTypeToolExecute, Content: "run",
 		Metadata: map[string]interface{}{"tool_call_id": "tc-exp", "status": "running"},
 	})
 
-	if err := svc.UpdatePermissionMessage(ctx, "sess-msg", "pend-exp", models.PermissionStatusExpired); err != nil {
+	if err := svc.UpdatePermissionMessage(ctx, "task-msg", "sess-msg", "req-exp", "pend-exp", models.PermissionStatusExpired); err != nil {
 		t.Fatalf("UpdatePermissionMessage: %v", err)
 	}
 

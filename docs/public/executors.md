@@ -43,6 +43,8 @@ download requirements.
 
 Open **Settings > Executors**, then choose **Local**, **Worktree**, **Docker**, **Kubernetes**, **Sprites.dev**, or **SSH** under **Create New Profile**. Local and Worktree profiles already exist in a new database.
 
+![Settings > Executors showing existing Local, Worktree, and Sprites profiles plus Local, Worktree, Docker, Sprites.dev, and SSH profile creation options.](../screenshots/settings-executors.png)
+
 <DocsVideo
   webm="./media/feature-guides/profile-executor-selection.webm"
   mp4="./media/feature-guides/profile-executor-selection.mp4"
@@ -126,7 +128,7 @@ Do not treat the two script fields as universal hooks:
 Keep working prepare scripts noninteractive and idempotent. Kandev resolves supported placeholders and appends its managed branch checkout for Docker, Kubernetes, Sprites, and SSH after the user script. A profile cleanup script must never remove paths outside the environment it owns.
 
 The common preparation limit is configured through
-`KANDEV_TASK_PREPARATION_TIMEOUT`; see [Configuration](./configuration.md#setup-and-launch-timing)
+`KANDEV_TASK_PREPARATION_TIMEOUT`; see [Configuration](configuration.md#setup-and-launch-timing)
 for duration syntax, fallback behavior, and the derived launch-phase limit.
 
 Two current preparation exceptions are easy to miss:
@@ -173,18 +175,42 @@ ownership check and does not change **Inherit executor Git credentials** mode. A
 already open keeps the environment from its launch; reopen it after a new session launch, resume,
 or a Git credential-policy change.
 
+### Workspace automation identity and task Git transport
+
+The workspace GitHub connection is the automation identity Kandev uses for provider operations,
+such as finding or creating a pull request. The task Git credential policy is separate: it decides
+whether Git uses Kandev-managed credentials or the selected executor's own Git and SSH setup.
+Changing the workspace connection does not install an SSH key in an executor.
+
+For **Inherit executor Git credentials**, configure the executor where Git runs. Local and Worktree
+use the Kandev host's Git configuration, SSH agent, known-hosts file, and credential helpers.
+Docker uses the credentials in the container, while SSH and Sprites use the credentials configured
+on the remote environment. A host `gh` login or `~/.ssh` file is not automatically available in a
+Docker, SSH, or Sprite executor.
+
+To make host GitHub CLI operations prefer SSH, run this on the Kandev host:
+
+```bash
+gh config set git_protocol ssh --host github.com
+```
+
+Restart Kandev after changing the host GitHub protocol. The restart lets Kandev reconcile managed
+repository origins before the next task launch. For an SSH or Docker executor, configure the
+equivalent GitHub SSH access, known-hosts entry, and agent or key on that executor instead.
+
 ## Worktree
 
 Worktree creates a dedicated host Git worktree and runs the standalone `agentctl` service against it. It separates branches and files between tasks, but the process still has the Kandev user's host permissions, network access, and readable credentials.
 
-Repository settings control base branch, branch naming, pull-before-create, repository setup/cleanup scripts, and optional copies of ignored files. Copy ignored files narrowly: `.env` and similar files often contain production secrets. Multi-repository tasks receive one materialized worktree per attachment; use the per-repository setup scripts because the profile-level prepare script is currently skipped for that path.
+Repository settings control base branch, branch naming, pull-before-create, repository setup/cleanup scripts, and optional copies of ignored files. With **Always pull before creating a new worktree** enabled, a host Worktree refresh is best effort when the selected local base exists. An authentication, network, timeout, missing-ref, divergent-ref, or uncertain-ancestry error produces a credential-safe warning and the host worktree uses the verified local base. The warning states that remote changes may be missing. For a numbered GitHub PR, the current PR base is used when available. A proven deleted remote base can use a separately refreshed configured fallback branch, often the repository default, and produces a warning; authentication, network, timeout, and other unproven PR refresh failures remain fatal. If no usable local base exists, or if the executor must materialize the repository remotely, refresh and checkout remain required and a failure stops the launch. Disable this setting only for an intentional offline local workflow. Copy ignored files narrowly: `.env` and similar files often contain production secrets. Multi-repository tasks receive one materialized worktree per attachment; use the per-repository setup scripts because the profile-level prepare script is currently skipped for that path.
 
 Normal stop keeps the task environment available. Task deletion or **Reset Environment** removes the tracked worktree when configured to clean worktrees. Preserve or push valuable changes first; see [Git Operations](git-operations.md).
 
 Typical failures:
 
 - dirty or conflicting source repository state;
-- base branch missing locally or remotely;
+- a base branch is missing locally and remote materialization cannot provide it;
+- a remote-only executor cannot verify its refresh or checkout;
 - worktree path already registered in Git metadata;
 - setup dependencies absent on the host;
 - repository cleanup failure leaving a stale worktree.
@@ -343,14 +369,14 @@ Released Kandev bundles include helpers for all four platform combinations. The 
 
 ### Create the connection
 
-Choose **Settings > Executors > SSH**. Enter a name plus either a Host or a host alias from `~/.ssh/config`. The backend resolver can inherit `HostName`, `Port`, `User`, `IdentityFile`, and one `ProxyJump`; explicit form values win. The current create form defaults and persists Port `22` and identity source `ssh-agent`, so enter a non-22 alias port and desired identity source explicitly instead of assuming those two values inherit. `IdentitiesOnly` and arbitrary OpenSSH directives are not consumed by Kandev.
+Choose **Settings > Executors > SSH**. Enter a name plus either a Host or a host alias from your OpenSSH client configuration. The backend resolver can inherit `HostName`, `Port`, `User`, `IdentityAgent`, `IdentityFile`, and one `ProxyJump`; explicit form values win. The current create form defaults and persists Port `22` and identity source `ssh-agent`, so enter a non-22 alias port and desired identity source explicitly instead of assuming those two values inherit. `IdentitiesOnly` and arbitrary OpenSSH directives are not consumed by Kandev.
 
 Authentication choices are:
 
-- `ssh-agent (SSH_AUTH_SOCK)`; or
+- ssh-agent, using the host's expanded `IdentityAgent` when configured and otherwise `$SSH_AUTH_SOCK`; or
 - an unencrypted private-key file.
 
-Password and keyboard-interactive authentication are not supported. A passphrase-protected key file must first be loaded with `ssh-add`, then used through ssh-agent.
+`IdentityAgent none` disables agent authentication for that host. Kandev expands `~`, `${VAR}`, whole-value `$VAR`, `SSH_AUTH_SOCK`, and the `%%`, `%d`, `%h`, `%i`, `%j`, `%k`, `%L`, `%l`, `%n`, `%p`, `%r`, and `%u` OpenSSH tokens in agent socket paths; `%C` is not supported. Password and keyboard-interactive authentication are not supported. A passphrase-protected key file must first be loaded with `ssh-add`, then used through ssh-agent.
 
 Run **Test Connection**, independently verify the observed SHA256 host fingerprint, select **Trust this host**, then save. Kandev pins the final target fingerprint and refuses a changed key. With ProxyJump, the target remains pinned, but bastion handling is weaker: Kandev checks `~/.ssh/known_hosts` when available and rejects a changed known key, while an unknown bastion key is accepted on first use. Verify and pre-populate the bastion key yourself.
 

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
@@ -31,6 +32,7 @@ type Launcher struct {
 	port             int
 	logger           *logger.Logger
 	onUnexpectedExit func()
+	startupConfig    commonconfig.AgentctlStartupConfig
 
 	cmd    *exec.Cmd
 	exited chan struct{}
@@ -65,6 +67,7 @@ type Config struct {
 	Host             string // Host to bind to (default: localhost)
 	Port             int    // Control port (default: 39429)
 	OnUnexpectedExit func() // Called once when the child exits without Stop.
+	StartupConfig    commonconfig.AgentctlStartupConfig
 }
 
 // New creates a new Launcher.
@@ -84,6 +87,7 @@ func New(cfg Config, log *logger.Logger) *Launcher {
 		host:             cfg.Host,
 		port:             cfg.Port,
 		onUnexpectedExit: cfg.OnUnexpectedExit,
+		startupConfig:    cfg.StartupConfig,
 		logger:           log.WithFields(zap.String("component", "agentctl-launcher")),
 		exited:           make(chan struct{}),
 	}
@@ -230,8 +234,17 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 	// CommandContext sends SIGKILL on cancellation, preventing graceful shutdown.
 	l.cmd = exec.Command(l.binaryPath, fmt.Sprintf("-port=%d", l.port))
 
-	// Inject bootstrap nonce; agentctl generates its own auth token.
-	l.cmd.Env = append(os.Environ(), "AGENTCTL_BOOTSTRAP_NONCE="+nonce)
+	// Inject bootstrap nonce and the resolved child contract. Remove inherited
+	// copies first so a managed child cannot observe a conflicting host value.
+	overrides := []string{"AGENTCTL_BOOTSTRAP_NONCE=" + nonce}
+	if l.startupConfig.Configured {
+		encoded, err := commonconfig.EncodeAgentctlStartupConfig(l.startupConfig)
+		if err != nil {
+			return err
+		}
+		overrides = append(overrides, commonconfig.InternalAgentctlStartupConfigEnv+"="+encoded)
+	}
+	l.cmd.Env = environmentWithOverrides(os.Environ(), overrides...)
 	l.cmd.SysProcAttr = buildSysProcAttr()
 
 	pipeWrite, err := setupLivenessPipe(l.cmd)
@@ -272,6 +285,27 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 	go l.monitorExit()
 
 	return nil
+}
+
+func environmentWithOverrides(base []string, overrides ...string) []string {
+	keys := make(map[string]struct{}, len(overrides))
+	for _, entry := range overrides {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok && key != "" {
+			keys[key] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(base)+len(overrides))
+	for _, entry := range base {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok {
+			if _, overridden := keys[key]; overridden {
+				continue
+			}
+		}
+		result = append(result, entry)
+	}
+	return append(result, overrides...)
 }
 
 // performHandshake retrieves agentctl's self-generated auth token using the nonce.
@@ -484,21 +518,94 @@ func (l *Launcher) pipeOutput(name string, scanner *bufio.Scanner) {
 	}
 }
 
-// childLogLevel extracts the level token from a line emitted by the agentctl
-// child's console-format zap logger: "<ts>\t<LEVEL>\t<caller>\t<msg>", where
-// LEVEL is capitalized and may be wrapped in ANSI color codes. It returns the
-// uppercased level ("INFO"/"WARN"/…) or "" when the line does not match that
-// shape.
+// childLogLevel extracts a recognized level from the agentctl child's trusted
+// structured log formats. It returns the uppercased level ("INFO"/"WARN"/…)
+// or "" when the line does not match one of those formats.
 func childLogLevel(line string) string {
 	// A well-formed console record is "<ts>\t<LEVEL>\t<caller>\t<msg>", so the
 	// level token must be bounded by at least a following caller field. Requiring
 	// three segments rejects truncated lines (e.g. "<ts>\t<token>") whose second
 	// field is not actually a level, so they fall back to WARN.
 	fields := strings.SplitN(line, "\t", 4)
-	if len(fields) < 3 {
+	if len(fields) >= 3 {
+		if level := recognizedChildLogLevel(stripANSI(fields[1])); level != "" {
+			return level
+		}
+	}
+
+	if level := childSlogTextLevel(line); level != "" {
+		return level
+	}
+
+	// slog.Default uses the standard log package's date/time prefix followed by
+	// the level and message, for example "2026/08/12 10:00:00 INFO message".
+	defaultFields := strings.Fields(line)
+	if len(defaultFields) < 3 {
 		return ""
 	}
-	level := strings.ToUpper(stripANSI(fields[1]))
+	if _, err := time.Parse("2006/01/02 15:04:05", defaultFields[0]+" "+defaultFields[1]); err != nil {
+		return ""
+	}
+	return recognizedChildLogLevel(stripANSI(defaultFields[2]))
+}
+
+func childSlogTextLevel(line string) string {
+	fields, ok := splitSlogTextFields(line)
+	if !ok || len(fields) < 3 || !strings.HasPrefix(fields[0], "time=") ||
+		!strings.HasPrefix(fields[1], "level=") {
+		return ""
+	}
+	for _, field := range fields[2:] {
+		if strings.HasPrefix(field, "msg=") {
+			return recognizedChildLogLevel(stripANSI(strings.TrimPrefix(fields[1], "level=")))
+		}
+	}
+	return ""
+}
+
+func splitSlogTextFields(line string) ([]string, bool) {
+	fields := make([]string, 0, 4)
+	start := -1
+	inQuotes := false
+	escaped := false
+	for i := 0; i < len(line); i++ {
+		ch := line[i]
+		if start < 0 {
+			if ch == ' ' || ch == '\t' {
+				continue
+			}
+			start = i
+		}
+		if inQuotes {
+			switch {
+			case escaped:
+				escaped = false
+			case ch == '\\':
+				escaped = true
+			case ch == '"':
+				inQuotes = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inQuotes = true
+		case ' ', '\t':
+			fields = append(fields, line[start:i])
+			start = -1
+		}
+	}
+	if inQuotes || escaped {
+		return nil, false
+	}
+	if start >= 0 {
+		fields = append(fields, line[start:])
+	}
+	return fields, true
+}
+
+func recognizedChildLogLevel(level string) string {
+	level = strings.ToUpper(level)
 	switch level {
 	case "DEBUG", "INFO", "WARN", "ERROR", "FATAL", "PANIC", "DPANIC":
 		return level

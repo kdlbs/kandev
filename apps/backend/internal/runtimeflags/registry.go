@@ -69,6 +69,23 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.dynamicAgentRouting",
+			EnvVar:      "KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING",
+			Kind:        KindFeature,
+			Label:       "Dynamic agent routing",
+			Description: "Enables reusable dynamic agent profiles and provider-error routing across task, utility, and Office execution.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Dynamic routing can change the concrete provider used by a logical session and is still experimental. " +
+				"Enable it only on a controlled installation and review route recovery behavior before using it for unattended work.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.DynamicAgentRouting },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.DynamicAgentRouting = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.claudeBackgroundPromptHandoff",
 			EnvVar:      "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF",
 			Kind:        KindFeature,
@@ -102,6 +119,23 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.ClaudeMidTurnSteering },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.ClaudeMidTurnSteering = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.officeSessionIdentity",
+			EnvVar:      "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY",
+			Kind:        KindFeature,
+			Label:       "Office per-agent session identity",
+			Description: "Keys an Office task's session identity on the run's own agent instead of the task's runner seat, and binds an agent's decision re-evaluation to its own calling session.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Changes durable Office session identity: each participant agent gets its own session per task instead of sharing the runner's, and existing session rows are not migrated. " +
+				"Enable only after the companion (task_id, agent_profile_id) unique-index fix has shipped, since pre-existing duplicate rows are otherwise exposed.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.OfficeSessionIdentity },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.OfficeSessionIdentity = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

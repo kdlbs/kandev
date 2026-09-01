@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -15,6 +16,24 @@ func (s *Service) ListRunEventsForTest(
 	ctx context.Context, runID string,
 ) ([]*models.RunEvent, error) {
 	return s.repo.ListRunEvents(ctx, runID, -1, 0)
+}
+
+// GetContinuationSummaryForTest exposes the repo's continuation-summary
+// read so tests can verify refreshContinuationSummary's upsert without
+// duplicating the raw agent_continuation_summaries query.
+func (s *Service) GetContinuationSummaryForTest(
+	ctx context.Context, agentProfileID, scope string,
+) (*sqlite.AgentContinuationSummary, error) {
+	return s.repo.GetContinuationSummary(ctx, agentProfileID, scope)
+}
+
+// LoadContinuationSummaryForTest exposes SchedulerIntegration's private
+// loadContinuationSummary so tests can drive the real reader path
+// (as assembleAgentPrompt calls it) without duplicating its scope logic.
+func (si *SchedulerIntegration) LoadContinuationSummaryForTest(
+	ctx context.Context, run *models.Run, agentID, taskID string,
+) string {
+	return si.loadContinuationSummary(ctx, run, agentID, taskID)
 }
 
 // ListTasksTouchedByRunForTest exposes the repo's read query so the
@@ -50,12 +69,52 @@ func BuildPromptContextForTest(svc *Service, ctx context.Context, reason, payloa
 	return si.buildPromptContext(ctx, reason, payload)
 }
 
+// CoalesceRoutineWakeupForTest creates a wakeup-request carrying the
+// given routine_id and coalesces it into an already-claimed run, exactly
+// as the wakeup dispatcher does when a routine fire lands on an
+// in-flight run (wakeup.Dispatcher.Dispatch -> MarkWakeupRequestCoalesced).
+// Used by WO-16's continuation-scope regression tests to reproduce the
+// claim-time vs completion-time snapshot drift without standing up the
+// full wakeup dispatcher.
+func (s *Service) CoalesceRoutineWakeupForTest(
+	ctx context.Context, t *testing.T, agentProfileID, runID, routineID string,
+) {
+	t.Helper()
+	req := &sqlite.WakeupRequest{
+		ID:             "wakeup-" + runID + "-" + routineID,
+		AgentProfileID: agentProfileID,
+		Source:         "routine",
+		Reason:         "routine_trigger",
+		Payload:        fmt.Sprintf(`{"routine_id":%q}`, routineID),
+	}
+	if err := s.repo.CreateWakeupRequest(ctx, req); err != nil {
+		t.Fatalf("create wakeup request: %v", err)
+	}
+	if err := s.repo.MarkWakeupRequestCoalesced(ctx, req.ID, runID); err != nil {
+		t.Fatalf("coalesce wakeup request into run: %v", err)
+	}
+}
+
 // ExecSQL executes raw SQL against the service's database for test setup.
 func (s *Service) ExecSQL(t *testing.T, query string, args ...interface{}) {
 	t.Helper()
 	if _, err := s.repo.ExecRaw(context.Background(), query, args...); err != nil {
 		t.Fatalf("exec sql: %v", err)
 	}
+}
+
+// GetTaskSessionRollupForTest reads task_sessions' AC-10 rollup columns
+// directly, so tests can assert the Office cost subscriber never writes them
+// (docs/specs/task-cost-ledger/spec.md AC-21).
+func (s *Service) GetTaskSessionRollupForTest(t *testing.T, sessionID string) (tokensIn, tokensCachedIn, tokensOut, costSubcents int64) {
+	t.Helper()
+	if err := s.repo.ReaderDB().QueryRowx(
+		`SELECT tokens_in, tokens_cached_in, tokens_out, cost_subcents FROM task_sessions WHERE id = ?`,
+		sessionID,
+	).Scan(&tokensIn, &tokensCachedIn, &tokensOut, &costSubcents); err != nil {
+		t.Fatalf("read task_sessions rollup: %v", err)
+	}
+	return
 }
 
 // GetWorkspaceGroupForTest exposes workspace-group rows for deletion-order tests.
@@ -78,11 +137,28 @@ func (s *Service) GetTaskAssigneeForTest(ctx context.Context, taskID string) (st
 	return s.repo.GetTaskAssignee(ctx, taskID)
 }
 
+// GetAgentRuntimeForTest exposes the repo's runtime lookup for service
+// package tests asserting the last_run_finished_at stamp.
+func (s *Service) GetAgentRuntimeForTest(ctx context.Context, agentID string) (*sqlite.RuntimeState, error) {
+	return s.repo.GetAgentRuntime(ctx, agentID)
+}
+
 // RunSchedulerTick runs a single scheduler tick for testing.
 // This exercises the full processRun pipeline including task launch.
 func RunSchedulerTick(svc *Service, ctx context.Context) {
 	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
 	si.tick(ctx)
+}
+
+// ProcessRunForTest exposes processRun directly for external test packages
+// that need to drive a specific run through the pipeline after mutating
+// state RunSchedulerTick's atomic claim+process cannot isolate — e.g. the
+// agent-inactive race window, where ClaimNextRun's own query already
+// excludes non-idle/working agents so the run must be claimed first and the
+// agent paused afterward, then handed to processRun directly.
+func ProcessRunForTest(svc *Service, ctx context.Context, run *models.Run) {
+	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
+	si.processRun(ctx, run)
 }
 
 // BuildEnvVarsForTest exposes buildEnvVars for external test packages.
@@ -117,3 +193,10 @@ func BuildSkillManifestForTest(
 // Skill delivery test helpers were removed in ADR 0005 Wave E along
 // with the office-tier delivery code. Coverage moved into
 // internal/agent/runtime/lifecycle/skill.
+
+// GetWakeReceiptForTest exposes the repo's parent_child_wake_receipts read
+// so ParentWakeReconciler tests can assert a paused/unresolved-assignee
+// skip leaves no partial receipt behind.
+func (s *Service) GetWakeReceiptForTest(ctx context.Context, parentTaskID string) (*sqlite.WakeReceipt, error) {
+	return s.repo.GetWakeReceipt(ctx, parentTaskID)
+}

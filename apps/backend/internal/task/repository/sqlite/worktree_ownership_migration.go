@@ -43,8 +43,11 @@ func finalTaskEnvironmentsDDL(tableName string) string {
 			executor_profile_id TEXT DEFAULT '',
 			control_port INTEGER DEFAULT 0,
 			status TEXT NOT NULL DEFAULT 'creating',
+			materialization_session_id TEXT DEFAULT '',
 			workspace_path TEXT DEFAULT '',
 			container_id TEXT DEFAULT '',
+			container_bootstrap_nonce_secret_id TEXT DEFAULT '',
+			container_control_auth_token_secret_id TEXT DEFAULT '',
 			sandbox_id TEXT DEFAULT '',
 			task_dir_name TEXT DEFAULT '',
 			created_at TIMESTAMP NOT NULL,
@@ -97,6 +100,11 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 	if !exists {
 		return nil
 	}
+	restoreForeignKeys, err := r.prepareTaskWorktreeCutoverForeignKeys()
+	if err != nil {
+		return err
+	}
+	defer restoreForeignKeys()
 
 	tx, err := r.db.Beginx()
 	if err != nil {
@@ -152,7 +160,7 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 	if err := r.maybeFailCutover("pre_swap"); err != nil {
 		return err
 	}
-	if err := r.cutoverSwap(tx); err != nil {
+	if err := r.cutoverSwap(cut, tx); err != nil {
 		return err
 	}
 	if err := r.maybeFailCutover("post_swap"); err != nil {
@@ -166,8 +174,11 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 }
 
 func (r *Repository) cutoverLegacyEnvironmentColumns(tx *sqlx.Tx) (map[string]bool, error) {
-	columns := make(map[string]bool, 4)
-	for _, column := range []string{"repository_id", "worktree_id", "worktree_path", "worktree_branch"} {
+	columns := make(map[string]bool, 6)
+	for _, column := range []string{
+		"repository_id", "worktree_id", "worktree_path", "worktree_branch",
+		"container_bootstrap_nonce_secret_id", "container_control_auth_token_secret_id",
+	} {
 		has, err := r.columnExists(tx, "task_environments", column)
 		if err != nil {
 			return nil, err
@@ -192,10 +203,9 @@ func (r *Repository) logCutoverDemotions(c *worktreeCutover) {
 // cutoverAcquireLocks serializes the cutover for the active database engine:
 // PostgreSQL takes a migration advisory lock plus exclusive locks on every
 // affected ownership table (aborting on lock timeout); SQLite relies on the
-// transaction becoming the writer lock. FK enforcement stays ON — the swap
-// drops task_environment_repos before task_environments, so no DROP violates
-// a foreign key (PRAGMA foreign_keys would be a no-op inside the transaction
-// anyway).
+// transaction becoming the writer lock. SQLite FK enforcement is disabled for
+// the duration of the cutover because SQLite cannot rebind an existing FK to a
+// shadow parent table in place.
 func (r *Repository) cutoverAcquireLocks(tx *sqlx.Tx) error {
 	if !dialect.IsPostgres(r.db.DriverName()) {
 		return nil
@@ -207,8 +217,9 @@ func (r *Repository) cutoverAcquireLocks(tx *sqlx.Tx) error {
 		return fmt.Errorf("cutover: acquire migration advisory lock: %w", err)
 	}
 	if _, err := tx.Exec(`
-		LOCK TABLE task_session_worktrees, task_environments,
-			task_environment_repos, task_sessions, task_resource_cleanup_jobs
+		LOCK TABLE task_session_git_snapshots, task_session_worktrees,
+			task_environments, task_environment_repos, task_sessions,
+			task_resource_cleanup_jobs
 		IN ACCESS EXCLUSIVE MODE`); err != nil {
 		return fmt.Errorf("cutover: lock ownership tables: %w", err)
 	}

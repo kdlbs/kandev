@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/gitconfigenv"
@@ -56,10 +57,11 @@ type ContainerConfig struct {
 	McpMode                        string
 	McpProviders                   []string
 	McpProfile                     *mcpprofile.Context
-	PrepareScript                  string                 // Script to run inside container before agent starts (e.g., clone repo)
-	ImageTagOverride               string                 // If set, replaces the agent runtime's default image (e.g. profile.config.image_tag)
-	LocalClonePath                 string                 // Host path for file:// repository clone URLs; mounted read-only at the same path.
-	BootstrapNonce                 string                 // one-time nonce for agentctl handshake (set internally)
+	PrepareScript                  string // Script to run inside container before agent starts (e.g., clone repo)
+	ImageTagOverride               string // If set, replaces the agent runtime's default image (e.g. profile.config.image_tag)
+	LocalClonePath                 string // Host path for file:// repository clone URLs; mounted read-only at the same path.
+	BootstrapNonce                 string // one-time nonce for agentctl handshake (set internally)
+	AgentctlStartupConfig          commonconfig.AgentctlStartupConfig
 	Metadata                       map[string]interface{} // Optional metadata (e.g., office runtime dir)
 	// BaseBranches maps RepositoryName → base branch ref; forwarded into
 	// agentctl's CreateInstanceRequest so each WorkspaceTracker resolves
@@ -67,6 +69,7 @@ type ContainerConfig struct {
 	BaseBranches             map[string]string
 	RemoteContributions      map[string]models.RemoteContribution
 	ContributionDestinations map[string]models.ContributionDestination
+	ComparisonTargets        map[string]models.ComparisonTarget
 }
 
 func boolPtr(v bool) *bool {
@@ -82,6 +85,14 @@ func autoApprovePermissionsOverride(enabled bool, override *bool) *bool {
 		return boolPtr(true)
 	}
 	return nil
+}
+
+func namespacesMCPToolsByServerFromAgent(agent agents.Agent) bool {
+	if agent == nil {
+		return false
+	}
+	rt := agent.Runtime()
+	return rt != nil && rt.NamespacesMCPToolsByServer
 }
 
 func buildContainerCreateInstanceRequest(
@@ -100,20 +111,22 @@ func buildContainerCreateInstanceRequest(
 			config.AutoApprovePermissions,
 			config.AutoApprovePermissionsOverride,
 		),
-		AutoStart:                false,
-		McpServers:               config.McpServers,
-		SessionID:                config.SessionID,
-		DisableAskQuestion:       disableAskQuestion,
-		AssumeMcpSse:             assumeMcpSse,
-		AssumeMcpHttp:            assumeMcpHttp,
-		McpMode:                  config.McpMode,
-		McpProviders:             config.McpProviders,
-		McpProfile:               config.McpProfile,
-		RequiresProcessKill:      requiresProcessKill,
-		StripEnv:                 stripEnv,
-		BaseBranches:             config.BaseBranches,
-		RemoteContributions:      config.RemoteContributions,
-		ContributionDestinations: config.ContributionDestinations,
+		AutoStart:                  false,
+		McpServers:                 config.McpServers,
+		SessionID:                  config.SessionID,
+		DisableAskQuestion:         disableAskQuestion,
+		AssumeMcpSse:               assumeMcpSse,
+		AssumeMcpHttp:              assumeMcpHttp,
+		McpMode:                    config.McpMode,
+		McpProviders:               config.McpProviders,
+		McpProfile:                 config.McpProfile,
+		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromAgent(config.AgentConfig),
+		RequiresProcessKill:        requiresProcessKill,
+		StripEnv:                   stripEnv,
+		BaseBranches:               config.BaseBranches,
+		RemoteContributions:        config.RemoteContributions,
+		ContributionDestinations:   config.ContributionDestinations,
+		ComparisonTargets:          config.ComparisonTargets,
 	}
 }
 
@@ -655,6 +668,9 @@ func (cm *ContainerManager) expandMountSource(source, workspacePath string) stri
 
 // buildEnvVars builds environment variables for the container
 func (cm *ContainerManager) buildEnvVars(config ContainerConfig) ([]string, error) {
+	if err := validateAgentctlStartupConfig(config.AgentctlStartupConfig); err != nil {
+		return nil, fmt.Errorf("invalid agentctl startup configuration: %w", err)
+	}
 	ag := config.AgentConfig
 	rt := ag.Runtime()
 	env := make([]string, 0)
@@ -733,8 +749,23 @@ func (cm *ContainerManager) buildEnvVars(config ContainerConfig) ([]string, erro
 	if config.BootstrapNonce != "" {
 		env = append(env, "AGENTCTL_BOOTSTRAP_NONCE="+config.BootstrapNonce)
 	}
+	env = removeEnvKey(env, commonconfig.InternalAgentctlStartupConfigEnv)
+	for key, value := range agentctlStartupEnvironment(config.AgentctlStartupConfig) {
+		env = append(env, key+"="+value)
+	}
 
 	return env, nil
+}
+
+func removeEnvKey(env []string, key string) []string {
+	prefix := key + "="
+	filtered := env[:0]
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
 
 // generateBootstrapNonce creates a cryptographically random 32-byte hex-encoded nonce.

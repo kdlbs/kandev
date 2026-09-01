@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
-import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
-import { IconChevronRight, IconTrash } from "@tabler/icons-react";
+import { IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { toast } from "@/lib/toast/sonner";
@@ -11,7 +10,7 @@ import { useAppStore } from "@/components/state-provider";
 import { selectOfficeProjects } from "@/lib/state/slices/office/selectors";
 import { getProject, deleteProject } from "@/lib/api/domains/office-api";
 import type { Project } from "@/lib/state/slices/office/types";
-import { OfficeTopbarPortal } from "../../components/office-topbar-portal";
+import { useOfficeTopbar } from "../../components/office-topbar-context";
 import { ProjectHeader } from "./project-header";
 import { ProjectReposSection } from "./project-repos-section";
 import { ProjectExecutorSection } from "./project-executor-section";
@@ -54,6 +53,15 @@ export default function ProjectDetailPage({ params }: PageProps) {
     };
   }, [activeWorkspaceId, id, storeProject, t]);
 
+  useOfficeTopbar(
+    project
+      ? {
+          title: project.name,
+          parents: [{ label: t("office:projects"), href: "/office/projects" }],
+        }
+      : null,
+  );
+
   const handleDelete = async () => {
     if (!project) return;
     try {
@@ -75,42 +83,29 @@ export default function ProjectDetailPage({ params }: PageProps) {
   }
 
   return (
-    <>
-      <OfficeTopbarPortal>
-        <Link
-          href="/office/projects"
-          className="text-sm text-muted-foreground hover:text-foreground cursor-pointer"
-        >
-          {t("office:projects")}
-        </Link>
-        <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
-        <span className="text-sm font-medium truncate">{project.name}</span>
-      </OfficeTopbarPortal>
+    <div className="p-6 max-w-3xl space-y-6">
+      <ProjectHeader project={project} />
 
-      <div className="p-6 max-w-3xl space-y-6">
-        <ProjectHeader project={project} />
+      <Separator />
 
-        <Separator />
+      <ProjectReposSection project={project} />
 
-        <ProjectReposSection project={project} />
+      <Separator />
 
-        <Separator />
+      <ProjectExecutorSection project={project} />
 
-        <ProjectExecutorSection project={project} />
+      <Separator />
 
-        <Separator />
+      <ProjectTasksSection projectId={project.id} workspaceId={project.workspaceId} />
 
-        <ProjectTasksSection projectId={project.id} workspaceId={project.workspaceId} />
+      <Separator />
 
-        <Separator />
-
-        <div className="flex justify-end">
-          <Button variant="destructive" size="sm" onClick={handleDelete} className="cursor-pointer">
-            <IconTrash className="h-4 w-4 mr-1" />
-            {t("office:deleteProject")}
-          </Button>
-        </div>
+      <div className="flex justify-end">
+        <Button variant="destructive" size="sm" onClick={handleDelete} className="cursor-pointer">
+          <IconTrash className="h-4 w-4 mr-1" />
+          {t("office:deleteProject")}
+        </Button>
       </div>
-    </>
+    </div>
   );
 }

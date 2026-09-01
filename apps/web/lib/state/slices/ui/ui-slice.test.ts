@@ -682,6 +682,7 @@ describe("sidebar view backend state", () => {
         filters: [],
         sort: { key: "updatedAt", direction: "desc" },
         group: "workflow",
+        task_row: expect.any(Object),
       },
     });
   });
@@ -717,6 +718,7 @@ describe("sidebar view backend state", () => {
         filters: [],
         sort: { key: "updatedAt", direction: "desc" },
         group: "state",
+        task_row: expect.any(Object),
       },
     });
   });

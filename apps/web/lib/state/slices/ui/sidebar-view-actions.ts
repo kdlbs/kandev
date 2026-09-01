@@ -8,6 +8,7 @@ import type {
   SidebarViewDraft,
   SortSpec,
 } from "./sidebar-view-types";
+import { cloneSidebarTaskRowPresentation } from "./sidebar-task-row-presentation";
 import { toApiSidebarDraft, toApiSidebarView } from "./sidebar-view-wire";
 import { createDefaultSidebarView, MAX_SIDEBAR_VIEWS } from "./sidebar-view-builtins";
 import { t } from "@/lib/i18n";
@@ -50,18 +51,21 @@ type SidebarSnapshot = {
   draft: SidebarViewDraft | null;
 };
 
-type ViewMutationSyncState = {
+type SidebarWriteJournal = {
   latestRequestId: number;
   failedRollback?: SidebarSnapshot;
+  failedWriteKind?: SidebarWriteKind;
 };
 
-const viewMutationSyncStates = new WeakMap<ImmerSet, ViewMutationSyncState>();
+type SidebarWriteKind = "views" | "local";
 
-function getViewMutationSyncState(set: ImmerSet): ViewMutationSyncState {
-  const existing = viewMutationSyncStates.get(set);
+const sidebarWriteJournals = new WeakMap<ImmerSet, SidebarWriteJournal>();
+
+function getSidebarWriteJournal(set: ImmerSet): SidebarWriteJournal {
+  const existing = sidebarWriteJournals.get(set);
   if (existing) return existing;
   const created = { latestRequestId: 0 };
-  viewMutationSyncStates.set(set, created);
+  sidebarWriteJournals.set(set, created);
   return created;
 }
 
@@ -69,7 +73,7 @@ function snapshotSidebar(s: UISliceState["sidebarViews"]): SidebarSnapshot {
   return {
     views: s.views.map(cloneView),
     activeViewId: s.activeViewId,
-    draft: s.draft ? { ...s.draft } : null,
+    draft: cloneDraft(s.draft),
   };
 }
 
@@ -79,6 +83,46 @@ function toSidebarSettingsPayload(s: SidebarSnapshot | UISliceState["sidebarView
     sidebar_active_view_id: s.activeViewId,
     sidebar_draft: s.draft ? toApiSidebarDraft(s.draft) : null,
   };
+}
+
+function rollbackSidebarState(
+  set: ImmerSet,
+  rollback: SidebarSnapshot,
+  after: SidebarSnapshot,
+  error?: unknown,
+): void {
+  set((draft) => {
+    draft.sidebarViews.views = rollback.views;
+    const activeViewStillExists = rollback.views.some(
+      (view) => view.id === draft.sidebarViews.activeViewId,
+    );
+    if (draft.sidebarViews.activeViewId === after.activeViewId || !activeViewStillExists) {
+      draft.sidebarViews.activeViewId = rollback.activeViewId;
+    }
+    const currentDraft = draft.sidebarViews.draft;
+    const draftBaseStillExists =
+      !currentDraft || rollback.views.some((view) => view.id === currentDraft.baseViewId);
+    if (draftsEqual(currentDraft, after.draft) || !draftBaseStillExists) {
+      draft.sidebarViews.draft = rollback.draft;
+    }
+    if (error !== undefined) {
+      draft.sidebarViews.syncError =
+        error instanceof Error ? error.message : t("sidebar:failedToSyncSidebarViews");
+    }
+  });
+}
+
+function restoreFailedViewMutation(set: ImmerSet, rollback: SidebarSnapshot): void {
+  set((draft) => {
+    draft.sidebarViews.views = rollback.views;
+    if (!rollback.views.some((view) => view.id === draft.sidebarViews.activeViewId)) {
+      draft.sidebarViews.activeViewId = rollback.activeViewId;
+    }
+    const currentDraft = draft.sidebarViews.draft;
+    if (currentDraft && !rollback.views.some((view) => view.id === currentDraft.baseViewId)) {
+      draft.sidebarViews.draft = rollback.draft;
+    }
+  });
 }
 
 function draftsEqual(a: SidebarViewDraft | null, b: SidebarViewDraft | null): boolean {
@@ -100,19 +144,42 @@ function enqueueSidebarSettingsSync(
   return request;
 }
 
-function syncSidebarViewState(
+function syncSidebarWrite(
   set: ImmerSet,
-  payload: {
-    sidebar_active_view_id: string;
-    sidebar_draft: ReturnType<typeof toApiSidebarDraft> | null;
-  },
+  before: SidebarSnapshot,
+  after: SidebarSnapshot,
+  payload: UserSettingsUpdatePayload,
+  kind: SidebarWriteKind,
 ) {
-  enqueueSidebarSettingsSync(set, payload).catch((err) => {
-    const message = err instanceof Error ? err.message : t("sidebar:failedToSyncSidebarViews");
-    set((draft) => {
-      draft.sidebarViews.syncError = message;
-    });
-  });
+  const journal = getSidebarWriteJournal(set);
+  const thisRequestId = ++journal.latestRequestId;
+  enqueueSidebarSettingsSync(set, payload).then(
+    () => {
+      if (
+        thisRequestId === journal.latestRequestId &&
+        journal.failedWriteKind === "views" &&
+        kind === "local" &&
+        journal.failedRollback
+      ) {
+        restoreFailedViewMutation(set, journal.failedRollback);
+      }
+      journal.failedRollback = undefined;
+      journal.failedWriteKind = undefined;
+    },
+    (err) => {
+      const rollback = journal.failedRollback ?? before;
+      journal.failedRollback = rollback;
+      journal.failedWriteKind ??= kind;
+      set((draft) => {
+        draft.sidebarViews.syncError =
+          err instanceof Error ? err.message : t("sidebar:failedToSyncSidebarViews");
+      });
+      if (thisRequestId !== journal.latestRequestId) return;
+      rollbackSidebarState(set, rollback, after, err);
+      journal.failedRollback = undefined;
+      journal.failedWriteKind = undefined;
+    },
+  );
 }
 
 function mutateViews(
@@ -128,45 +195,13 @@ function mutateViews(
   if (!committed) return;
   const after = get().sidebarViews;
   const afterSnapshot = snapshotSidebar(after);
-  const syncState = getViewMutationSyncState(set);
-  const thisRequestId = ++syncState.latestRequestId;
-  const request = enqueueSidebarSettingsSync(set, toSidebarSettingsPayload(after));
-  request.then(
-    () => {
-      syncState.failedRollback = undefined;
-    },
-    (err) => {
-      const rollback = syncState.failedRollback ?? snapshot;
-      syncState.failedRollback = rollback;
-      if (thisRequestId !== syncState.latestRequestId) return;
-      const message = err instanceof Error ? err.message : t("sidebar:failedToSyncSidebarViews");
-      set((draft) => {
-        draft.sidebarViews.views = rollback.views;
-        const activeViewStillExists = rollback.views.some(
-          (view) => view.id === draft.sidebarViews.activeViewId,
-        );
-        if (
-          draft.sidebarViews.activeViewId === afterSnapshot.activeViewId ||
-          !activeViewStillExists
-        ) {
-          draft.sidebarViews.activeViewId = rollback.activeViewId;
-        }
-        const currentDraft = draft.sidebarViews.draft;
-        const draftBaseStillExists =
-          !currentDraft || rollback.views.some((view) => view.id === currentDraft.baseViewId);
-        if (draftsEqual(currentDraft, afterSnapshot.draft) || !draftBaseStillExists) {
-          draft.sidebarViews.draft = rollback.draft;
-        }
-        draft.sidebarViews.syncError = message;
-      });
-      syncState.failedRollback = undefined;
-    },
-  );
+  syncSidebarWrite(set, snapshot, afterSnapshot, toSidebarSettingsPayload(after), "views");
 }
 
 function buildSidebarLocalActions(set: ImmerSet, get: () => UISlice) {
   return {
     setSidebarActiveView: (viewId: string) => {
+      const before = snapshotSidebar(get().sidebarViews);
       let committed = false;
       set((draft) => {
         if (!draft.sidebarViews.views.some((v) => v.id === viewId)) return;
@@ -175,11 +210,27 @@ function buildSidebarLocalActions(set: ImmerSet, get: () => UISlice) {
         draft.sidebarViews.draft = null;
       });
       if (!committed) return;
-      syncSidebarViewState(set, { sidebar_active_view_id: viewId, sidebar_draft: null });
+      const after = snapshotSidebar(get().sidebarViews);
+      syncSidebarWrite(
+        set,
+        before,
+        after,
+        {
+          sidebar_active_view_id: after.activeViewId,
+          sidebar_draft: after.draft ? toApiSidebarDraft(after.draft) : null,
+        },
+        "local",
+      );
     },
     updateSidebarDraft: (
-      patch: Partial<{ filters: FilterClause[]; sort: SortSpec; group: GroupKey }>,
+      patch: Partial<{
+        filters: FilterClause[];
+        sort: SortSpec;
+        group: GroupKey;
+        taskRow: SidebarView["taskRow"];
+      }>,
     ) => {
+      const before = snapshotSidebar(get().sidebarViews);
       let committed = false;
       set((draft) => {
         const active = draft.sidebarViews.views.find(
@@ -192,30 +243,46 @@ function buildSidebarLocalActions(set: ImmerSet, get: () => UISlice) {
           filters: active.filters,
           sort: active.sort,
           group: active.group,
+          taskRow: cloneSidebarTaskRowPresentation(active.taskRow),
         };
         const next: SidebarViewDraft = {
           baseViewId: active.id,
           filters: patch.filters ?? current.filters,
           sort: patch.sort ?? current.sort,
           group: patch.group ?? current.group,
+          taskRow: cloneSidebarTaskRowPresentation(patch.taskRow ?? current.taskRow),
         };
         draft.sidebarViews.draft = next;
       });
       if (!committed) return;
-      const { activeViewId, draft } = get().sidebarViews;
-      syncSidebarViewState(set, {
-        sidebar_active_view_id: activeViewId,
-        sidebar_draft: draft ? toApiSidebarDraft(draft) : null,
-      });
+      const after = snapshotSidebar(get().sidebarViews);
+      syncSidebarWrite(
+        set,
+        before,
+        after,
+        {
+          sidebar_active_view_id: after.activeViewId,
+          sidebar_draft: after.draft ? toApiSidebarDraft(after.draft) : null,
+        },
+        "local",
+      );
     },
     discardSidebarDraft: () => {
+      const before = snapshotSidebar(get().sidebarViews);
       set((draft) => {
         draft.sidebarViews.draft = null;
       });
-      syncSidebarViewState(set, {
-        sidebar_active_view_id: get().sidebarViews.activeViewId,
-        sidebar_draft: null,
-      });
+      const after = snapshotSidebar(get().sidebarViews);
+      syncSidebarWrite(
+        set,
+        before,
+        after,
+        {
+          sidebar_active_view_id: after.activeViewId,
+          sidebar_draft: null,
+        },
+        "local",
+      );
     },
     clearSidebarSyncError: () =>
       set((draft) => {
@@ -257,6 +324,7 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => UISlice) {
           sort: s.draft.sort,
           group: s.draft.group,
           collapsedGroups: [],
+          taskRow: cloneSidebarTaskRowPresentation(s.draft.taskRow),
         });
         s.activeViewId = s.views[s.views.length - 1].id;
         s.draft = null;
@@ -269,6 +337,7 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => UISlice) {
         view.filters = s.draft.filters;
         view.sort = s.draft.sort;
         view.group = s.draft.group;
+        view.taskRow = cloneSidebarTaskRowPresentation(s.draft.taskRow);
         s.draft = null;
       }),
     duplicateSidebarView: (viewId: string, name: string) =>
@@ -282,6 +351,7 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => UISlice) {
           sort: source.sort,
           group: source.group,
           collapsedGroups: [],
+          taskRow: source.taskRow ? cloneSidebarTaskRowPresentation(source.taskRow) : undefined,
         });
         s.activeViewId = s.views[s.views.length - 1].id;
       }),
@@ -325,5 +395,17 @@ function cloneView(v: SidebarView): SidebarView {
     sort: { ...v.sort },
     group: v.group,
     collapsedGroups: [...v.collapsedGroups],
+    taskRow: v.taskRow ? cloneSidebarTaskRowPresentation(v.taskRow) : undefined,
+  };
+}
+
+function cloneDraft(draft: SidebarViewDraft | null): SidebarViewDraft | null {
+  if (!draft) return null;
+  return {
+    baseViewId: draft.baseViewId,
+    filters: draft.filters.map((filter) => ({ ...filter })),
+    sort: { ...draft.sort },
+    group: draft.group,
+    taskRow: draft.taskRow ? cloneSidebarTaskRowPresentation(draft.taskRow) : undefined,
   };
 }

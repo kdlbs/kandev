@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func (p *Projector) applySourceEventLocked(state *projectionState, eventType string, data map[string]interface{}) bool {
@@ -85,13 +86,24 @@ func applyTaskActivityEventLocked(state *projectionState, eventType string, data
 		}
 		candidate = timeValue(data["queued_at"])
 	case events.TurnStarted:
+		if isLifecycleOnlyTurn(data) {
+			return false
+		}
 		candidate = timeValue(data["started_at"])
 	case events.TurnCompleted:
+		if isLifecycleOnlyTurn(data) {
+			return false
+		}
 		candidate = timeValue(data["completed_at"])
 	default:
 		return false
 	}
 	return advanceTaskActivity(state, candidate)
+}
+
+func isLifecycleOnlyTurn(data map[string]interface{}) bool {
+	metadata, _ := data["metadata"].(map[string]interface{})
+	return boolValue(metadata[models.TurnMetaKeyLifecycleOnly])
 }
 
 func isUserQueuedPrompt(data map[string]interface{}) bool {
@@ -295,6 +307,9 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	if err := p.restoreSessionObservations(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreTaskLaunchError(ctx, taskID, state); err != nil {
+		return err
+	}
 	if err := p.restoreGitObservations(ctx, taskID, state); err != nil {
 		return err
 	}
@@ -315,9 +330,14 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 			isPrimary: true,
 		}
 	}
-	if summary.ActiveError != nil && summary.ActiveError.SessionID != "" {
+	if summary.ActiveError != nil {
 		copy := *summary.ActiveError
-		state.errors[summary.ActiveError.SessionID] = &copy
+		copy.RecoveryActions = normalizeRecoveryActions(copy.RecoveryActions)
+		if copy.SessionID != "" {
+			state.errors[copy.SessionID] = &copy
+		} else {
+			state.taskError = &copy
+		}
 	}
 	if summary.Git != nil {
 		copy := *summary.Git
@@ -362,6 +382,8 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	state.pendingObserved = false
 	state.errors = make(map[string]*ActiveErrorSummary)
 	state.errorsObserved = false
+	state.taskError = nil
+	state.taskErrorObserved = false
 	state.git = make(map[string]GitSummary)
 	state.gitBaseline = nil
 	state.gitObserved = false
@@ -373,6 +395,9 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 		return err
 	}
 	if err := p.restoreSessionObservations(ctx, taskID, state); err != nil {
+		return err
+	}
+	if err := p.restoreTaskLaunchError(ctx, taskID, state); err != nil {
 		return err
 	}
 	if err := p.restoreGitObservations(ctx, taskID, state); err != nil {
@@ -424,6 +449,50 @@ func (p *Projector) restoreSessionObservations(
 		state.errorsObserved = true
 	}
 	return nil
+}
+
+func (p *Projector) restoreTaskLaunchError(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+) error {
+	if p.loadTaskLaunchError == nil {
+		return nil
+	}
+	observation, err := p.loadTaskLaunchError(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load task launch error for status summary %q: %w", taskID, err)
+	}
+	if !observation.Observed {
+		return nil
+	}
+	state.taskErrorObserved = true
+	state.taskError = normalizeRebuildError(observation.Error, p.now().UTC())
+	return nil
+}
+
+func (p *Projector) refreshTaskLaunchError(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+) (bool, error) {
+	observation, err := p.loadTaskLaunchError(ctx, taskID)
+	if err != nil {
+		return false, fmt.Errorf("refresh task launch error for status summary %q: %w", taskID, err)
+	}
+	if !observation.Observed {
+		return false, nil
+	}
+	next := normalizeRebuildError(observation.Error, p.now().UTC())
+	if errorEqual(state.taskError, next) && state.taskErrorObserved {
+		if state.current == nil && next != nil {
+			return true, nil
+		}
+		return false, nil
+	}
+	state.taskErrorObserved = true
+	state.taskError = next
+	return true, nil
 }
 
 func (p *Projector) restoreGitObservations(ctx context.Context, taskID string, state *projectionState) error {
@@ -683,11 +752,12 @@ func (p *Projector) applyGitEventLocked(state *projectionState, data map[string]
 		state.gitObserved = true
 	}
 	observation := GitSummary{
-		Additions:    nonNegativeInt(status, "branch_additions", "additions"),
-		Deletions:    nonNegativeInt(status, "branch_deletions", "deletions"),
-		ChangedFiles: changedFileCount(status),
-		Ahead:        nonNegativeInt(status, "ahead"),
-		Behind:       nonNegativeInt(status, "behind"),
+		Additions:             nonNegativeInt(status, "branch_additions", "additions"),
+		Deletions:             nonNegativeInt(status, "branch_deletions", "deletions"),
+		ChangedFiles:          changedFileCount(status),
+		Ahead:                 nonNegativeInt(status, "ahead"),
+		Behind:                nonNegativeInt(status, "behind"),
+		ComparisonUnavailable: stringField(status, "comparison_status") == "unavailable",
 	}
 	if equalGitSummary(state.git[repository], observation) {
 		return false
@@ -713,10 +783,26 @@ func (p *Projector) applyPREventLocked(state *projectionState, data map[string]i
 		reviewState:           stringField(data, "review_state"),
 		checksState:           stringField(data, "checks_state"),
 		mergeableState:        stringField(data, "mergeable_state"),
+		mergeQueueState:       stringField(data, "merge_queue_state"),
 		unresolvedReviewCount: intValueOrZero(data["unresolved_review_threads"]),
 		pendingReviewCount:    intValueOrZero(data["pending_review_count"]),
 		checksTotal:           intValueOrZero(data["checks_total"]),
 		checksPassing:         intValueOrZero(data["checks_passing"]),
+	}
+	// PR refresh events do not carry the per-PR automation switches. Preserve
+	// the last authoritative values from the CI-options projection instead of
+	// treating an omitted field as an explicit disable. A future producer may
+	// include either field; in that case its bool is authoritative, including
+	// false.
+	if existing, ok := state.prs[key]; ok {
+		observation.autoFixEnabled = existing.autoFixEnabled
+		observation.autoMergeEnabled = existing.autoMergeEnabled
+	}
+	if value, ok := data["auto_fix_enabled"].(bool); ok {
+		observation.autoFixEnabled = value
+	}
+	if value, ok := data["auto_merge_enabled"].(bool); ok {
+		observation.autoMergeEnabled = value
 	}
 	if value, ok := intValue(data["required_reviews"]); ok {
 		observation.requiredReviews = maxInt(value, 0)

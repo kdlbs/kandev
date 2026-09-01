@@ -14,6 +14,8 @@ type AgentEventPayload struct {
 	RunID              string                 `json:"run_id,omitempty"`
 	TaskID             string                 `json:"task_id"`
 	SessionID          string                 `json:"session_id,omitempty"`
+	TaskEnvironmentID  string                 `json:"task_environment_id,omitempty"`
+	TurnID             string                 `json:"turn_id,omitempty"`
 	AgentID            string                 `json:"agent_id,omitempty"`
 	AgentProfileID     string                 `json:"agent_profile_id"`
 	ExecutionProfileID string                 `json:"execution_profile_id,omitempty"`
@@ -27,6 +29,22 @@ type AgentEventPayload struct {
 	ProviderError      *streams.ProviderError `json:"provider_error,omitempty"`
 	ExitCode           *int                   `json:"exit_code,omitempty"`
 	PromptGeneration   uint64                 `json:"prompt_generation,omitempty"`
+	// Prompt replay evidence is populated on terminal failure events. It is
+	// captured by lifecycle before the terminal event is published so consumers
+	// do not have to infer output or effects from independently subscribed
+	// stream events.
+	EvidenceKnown  bool `json:"evidence_known,omitempty"`
+	OutputObserved bool `json:"output_observed,omitempty"`
+	EffectObserved bool `json:"effect_observed,omitempty"`
+}
+
+// PromptAttemptEvidence is the immutable lifecycle snapshot attached to a
+// terminal failure event. Lifecycle conservatively treats any genuine turn
+// content as both output and effect evidence, which fails replay closed.
+type PromptAttemptEvidence struct {
+	EvidenceKnown  bool
+	OutputObserved bool
+	EffectObserved bool
 }
 
 // AgentStalledPayload describes a prompt that has stopped receiving agent events.
@@ -148,6 +166,13 @@ type AgentStreamEventData struct {
 	// PendingID identifies a permission request (for "permission_cancelled" events).
 	PendingID string `json:"pending_id,omitempty"`
 
+	// RequestID is the Kandev-generated identity for the exact permission
+	// request this event concerns (for "permission_cancelled" events). A
+	// provider may reuse PendingID for a later, unrelated request, so a
+	// delayed cancellation must be matched against RequestID too before it
+	// is allowed to expire a permission message.
+	RequestID string `json:"request_id,omitempty"`
+
 	// Normalized contains the typed tool payload data.
 	// This is used to populate message metadata with structured tool information.
 	Normalized *streams.NormalizedPayload `json:"normalized,omitempty"`
@@ -262,11 +287,12 @@ const (
 // GitEventPayload is a unified payload for all git-related WebSocket events.
 // Uses discriminated union pattern with Type field.
 type GitEventPayload struct {
-	Type      GitEventType `json:"type"`
-	TaskID    string       `json:"task_id,omitempty"`
-	SessionID string       `json:"session_id"`
-	AgentID   string       `json:"agent_id,omitempty"`
-	Timestamp string       `json:"timestamp"`
+	Type              GitEventType `json:"type"`
+	TaskID            string       `json:"task_id,omitempty"`
+	SessionID         string       `json:"session_id"`
+	TaskEnvironmentID string       `json:"task_environment_id,omitempty"`
+	AgentID           string       `json:"agent_id,omitempty"`
+	Timestamp         string       `json:"timestamp"`
 
 	// For status_update
 	Status *GitStatusData `json:"status,omitempty"`
@@ -290,17 +316,20 @@ func (p GitEventPayload) GetSessionID() string {
 }
 
 type GitStatusData struct {
-	Branch       string   `json:"branch"`
-	RemoteBranch string   `json:"remote_branch,omitempty"`
-	HeadCommit   string   `json:"head_commit,omitempty"`
-	BaseCommit   string   `json:"base_commit,omitempty"`
-	Modified     []string `json:"modified"`
-	Added        []string `json:"added"`
-	Deleted      []string `json:"deleted"`
-	Untracked    []string `json:"untracked"`
-	Renamed      []string `json:"renamed"`
-	Ahead        int      `json:"ahead"`
-	Behind       int      `json:"behind"`
+	Branch              string   `json:"branch"`
+	RemoteBranch        string   `json:"remote_branch,omitempty"`
+	HeadCommit          string   `json:"head_commit,omitempty"`
+	BaseCommit          string   `json:"base_commit,omitempty"`
+	ComparisonTarget    string   `json:"comparison_target,omitempty"`
+	ComparisonStatus    string   `json:"comparison_status,omitempty"`
+	ComparisonErrorCode string   `json:"comparison_error_code,omitempty"`
+	Modified            []string `json:"modified"`
+	Added               []string `json:"added"`
+	Deleted             []string `json:"deleted"`
+	Untracked           []string `json:"untracked"`
+	Renamed             []string `json:"renamed"`
+	Ahead               int      `json:"ahead"`
+	Behind              int      `json:"behind"`
 	// RemoteAhead/RemoteBehind compare against this branch's own upstream
 	// (@{upstream}), unlike Ahead/Behind which are relative to the base
 	// branch and never reach zero just because the branch was pushed. Push
@@ -407,6 +436,7 @@ type PermissionRequestEventPayload struct {
 	AgentID       string                 `json:"agent_id"`
 	TaskID        string                 `json:"task_id"`
 	SessionID     string                 `json:"session_id"`
+	RequestID     string                 `json:"request_id"`
 	PendingID     string                 `json:"pending_id"`
 	ToolCallID    string                 `json:"tool_call_id"`
 	Title         string                 `json:"title"`

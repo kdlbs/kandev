@@ -30,6 +30,8 @@ A task can therefore display a pull or merge request while its worktree cannot p
 
 Select **Settings > Workspaces > _Workspace_ > Integrations**, then choose a provider. The direct routes are:
 
+![Settings > Workspaces > Default > Integrations showing Azure DevOps, GitHub, GitLab, Jira, Linear, and Sentry connections.](../screenshots/settings-integrations.png)
+
 - `/settings/workspace/{workspaceId}/integrations/github`
 - `/settings/workspace/{workspaceId}/integrations/gitlab`
 - `/settings/workspace/{workspaceId}/integrations/azure-devops`
@@ -42,6 +44,14 @@ Compatibility routes under **Settings > Integrations** use the active workspace 
 GitHub, GitLab, Azure DevOps, Jira, and Linear configuration are workspace-specific. GitHub supports one automation connection per workspace and, for App-backed workspaces, one personal identity per Kandev user and workspace. The current GitHub integration targets `github.com`; GitLab supports `gitlab.com` and self-managed origins. Sentry supports multiple named instances per workspace. Do not assume that configuring one workspace gives another the same provider scope.
 
 Provider secrets saved by these forms use Kandev's encrypted secret store. The backend must still decrypt them to make API requests. Limit access to settings and the Kandev data directory, and use the narrowest provider scope that works.
+
+### Author prompt fields
+
+Quick actions and provider watch prompts use the same inline prompt editor. Type `{{` to open the provider's placeholder list, or type `@` after whitespace to find a [saved prompt](developer-tools.md#saved-prompts). Select an item to insert it into the draft. The menu shows the exact tokens supported by that provider and prompt type.
+
+Common quick-action tokens are `{{url}}` and `{{title}}`. Jira quick actions also provide `{{key}}` and `{{description}}`. Watch prompts expose provider data such as `pr.*`, `issue.*`, `mr.*`, `work_item.*`, or `pull_request.*`, depending on the integration and watch type.
+
+Selecting a completion changes the local draft only. Use the route-level **Save changes** action to persist it; **Reset** restores the provider defaults and **Cancel** or discard returns to the last saved draft. Saved-prompt references are expanded when the watch or action runs, so later edits to the referenced prompt apply without changing each integration setting.
 
 ### The Enabled switch
 
@@ -304,9 +314,19 @@ Repository scope, authentication, and watch filters are workspace-specific. Repo
 
 ### Automate a linked pull request
 
-For a task with linked GitHub pull requests, open the PR status control above the task chat input. The automation controls, **Auto-fix CI & address comments**, **Auto-merge when ready**, **Your review is requested**, **PR merged**, and **PR closed without merging**, are scoped to whichever linked PR's tab is selected. Enabling a control for one linked PR does not enable it for the task's other linked PRs; Kandev tracks delivery and deduplication separately for each linked PR. The saved auto-fix prompt override applies to every linked PR.
+For a task with linked GitHub pull requests, open the PR status control above the task chat input. The automation controls, **Auto-fix CI & address comments**, **Auto-merge or requeue when ready**, **Your review is requested**, **PR merged**, and **PR closed without merging**, are scoped to whichever linked PR's tab is selected. Enabling a control for one linked PR does not enable it for the task's other linked PRs; Kandev tracks delivery and deduplication separately for each linked PR. The saved auto-fix prompt override applies to every linked PR.
 
 This is a GitHub-only lifecycle feature. Kandev reuses the existing lightweight task PR poller, which checks watched linked PRs roughly once per minute; it does not add a separate scheduler. Saving enabled options also evaluates the task's current linked PRs without waiting for the next poll.
+
+When GitHub puts a linked pull request in a merge queue, the PR status control shows its queue state. It also shows the queue position and estimated merge time when GitHub provides them. The same status appears in the task summary, the mobile PR chip, and Review.
+
+The existing two automation switches also control merge-queue recovery. Auto-fix sends one actionable queue removal to the linked task agent and counts it as one auto-fix round. Auto-merge submits an eligible pull request through GitHub's queue-aware merge action. If GitHub removes a queue attempt, Kandev records the reason and waits for a new pull-request head before it submits another attempt; it never retries the same head automatically. An active queue entry is adopted when auto-merge is enabled, so enabling the option does not submit a duplicate request. Unknown, manual, and branch-protection removals remain visible but do not start automatic repair.
+
+Each automatic merge request uses the pull-request head that passed the readiness checks. If GitHub reports a different head, Kandev stops the request. After a failed request, Kandev does not automatically repeat the same readiness state.
+
+Use **Retry** to request one new evaluation for the selected linked pull request. Kandev refreshes the pull request and applies all current readiness and GitHub policy rules. **Retry** accepts the evaluation request. It does not report a completed merge.
+
+Use **Refresh** for a state-loading error or another automation error. Refresh loads state only and does not authorize a merge. If GitHub shows an active queue entry or a merged pull request, Kandev marks the attempt accepted. It removes only the obsolete automatic-merge error.
 
 **Your review is requested** matches the GitHub account connected to the task's workspace. The first observation is a quiet baseline. Any later transition to a request for that account wakes the agent, including the first new request after baselining and a re-review request after changes. Clearing a request rearms the next transition. If the workspace's connected GitHub account changes, Kandev quietly rebinds the task and re-establishes every linked PR's baseline; switching accounts does not itself create a prompt.
 
@@ -364,7 +384,9 @@ These actions use the connected GitLab user's permissions and do not bypass prot
 
 ### Automate a linked merge request
 
-For a task with a linked GitLab merge request, open the MR topbar control. The **Automation** group has the same two task-level controls as GitHub's PRs: **Auto-fix CI and address comments** and **Auto-merge when ready**. Below it, expand **Review follow-up** for three lifecycle booleans: **Your review is requested**, **MR merged**, and **MR closed without merging**. Enabling any control applies it to every MR linked to that task; Kandev tracks delivery and deduplication separately for each linked MR.
+For a task with a linked GitLab merge request, open the MR topbar control. The **Automation** group has the same two controls as GitHub's PRs: **Auto-fix CI and address comments** and **Auto-merge when ready**. Below it, expand **Review follow-up** for three lifecycle booleans: **Your review is requested**, **MR merged**, and **MR closed without merging**.
+
+All five belong to a single merge request. A task with several linked MRs shows one **Automation** group per MR, each labelled with its MR number, so you can automate one MR and leave the rest untouched; Kandev tracks delivery and deduplication separately for each. The auto-fix prompt override is the one setting that stays task-level; editing it applies to every linked MR. An agent calling `update_task_mr_automation_kandev` can name a merge request to target it alone, or omit the merge-request fields to apply the change to every MR linked to the task.
 
 Kandev reuses the existing lightweight task MR poller, which checks linked MRs roughly once per minute; it does not add a separate scheduler. Saving enabled options also evaluates the task's current linked MRs without waiting for the next poll.
 
@@ -539,10 +561,13 @@ Enter the site URL (a missing scheme is normalized to HTTPS), choose **Cloud** o
 | Deployment | Method | Required values |
 |---|---|---|
 | Jira Cloud | API token (recommended) | Atlassian account email and API token. |
+| Jira Cloud | OAuth 2.0 | Approval from the Atlassian account in a browser window. |
 | Jira Cloud | Browser session | Only the value of the `cloud.session.token` or `tenant.session.token` cookie. Do not include the cookie name or `=`. |
 | Server/Data Center | Personal access token | Bearer personal access token with the required read/write access. |
 
 Cloud API tokens are not accepted for Server/Data Center, and Server/Data Center PATs are not the Cloud token flow. Browser-session JWTs expire and are less reliable than an API token; Kandev surfaces the decoded expiry and warns as it approaches.
+
+For OAuth, select **Connect with Atlassian**. Then approve the connection in the browser window. Kandev completes the connection when Atlassian returns the result. If the automatic return fails, paste the full callback URL into Kandev.
 
 When editing, a blank secret preserves the saved credential only if the URL, account identity, and authentication method still match. Supply a new secret when changing those identity fields. Save, select **Test connection**, and check the background health result.
 

@@ -12,6 +12,7 @@ import (
 	agenthandlers "github.com/kandev/kandev/internal/agent/handlers"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
 	"github.com/kandev/kandev/internal/entityrefs"
@@ -117,7 +118,9 @@ func provideGateway(
 	githubSvc *github.Service,
 	gitlabSvc *gitlab.Service,
 	referenceValidator entityrefs.SubmissionValidator,
+	authSvc *auth.Service,
 	dataDir string,
+	lspMaxConnections ...int,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, *terminalservice.Service, error) {
 	gateway, err := gateways.Provide(log)
 	if err != nil {
@@ -142,7 +145,7 @@ func provideGateway(
 	scriptSvc := &scriptServiceAdapter{taskSvc: taskSvc}
 	if lifecycleMgr != nil {
 		gateway.SetLifecycleManager(lifecycleMgr, userSvc, scriptSvc)
-		gateway.SetLSPHandler(lifecycleMgr, userSvc)
+		gateway.SetLSPHandler(lifecycleMgr, userSvc, lspMaxConnections...)
 		gateway.SetVscodeProxy(lifecycleMgr)
 		gateway.SetPortProxy(lifecycleMgr)
 		gateway.SetPortTunnel(lifecycleMgr)
@@ -309,6 +312,9 @@ func provideGateway(
 			LoadSessionObservations: func(ctx context.Context, taskID string) (statussummary.SessionObservationSnapshot, error) {
 				return loadTaskSessionObservations(ctx, taskRepo, activityProvider, taskID)
 			},
+			LoadTaskLaunchError: func(ctx context.Context, taskID string) (statussummary.TaskLaunchErrorObservation, error) {
+				return loadTaskLaunchErrorObservation(ctx, taskRepo, taskID)
+			},
 			LoadPendingActions: func(ctx context.Context, taskID string) (map[string]string, error) {
 				return loadTaskPendingActions(ctx, taskRepo, taskID)
 			},
@@ -368,7 +374,15 @@ func provideGateway(
 		gateway.Hub.Broadcast(msg)
 	})
 
-	notificationSvc := notificationservice.NewService(notificationRepo, taskRepo, gateway.Hub, log)
+	// taskRepo is a typed pointer that may be nil here, and a nil pointer in a
+	// non-nil interface would defeat the service's own nil check when it
+	// resolves a notification's owning workspace.
+	var notificationTasks notificationservice.TaskContextReader
+	if taskRepo != nil {
+		notificationTasks = taskRepo
+	}
+	notificationSvc := notificationservice.NewService(
+		notificationRepo, notificationTasks, gateway.Hub, log, notificationAuthEnforced(authSvc))
 	notificationCtrl := notificationcontroller.NewController(notificationSvc)
 	if eventBus != nil {
 		_, err = eventBus.Subscribe(events.TurnCompleted, func(ctx context.Context, event *bus.Event) error {
@@ -412,7 +426,8 @@ func provideGateway(
 			}
 			itemType, _ := data["type"].(string)
 			title, _ := data["title"].(string)
-			notificationSvc.HandleInboxItem(ctx, itemType, title)
+			workspaceID, _ := data["workspace_id"].(string)
+			notificationSvc.HandleInboxItem(ctx, workspaceID, itemType, title)
 			return nil
 		})
 		if err != nil {
@@ -482,15 +497,50 @@ func loadTaskSessionObservations(
 		}
 		if lastError, ok := models.LoadLastAgentError(session.Metadata); ok && !lastError.IsDismissed() {
 			input.ActiveError = &statussummary.ActiveErrorSummary{
-				SessionID:  session.ID,
-				Stamp:      lastError.Stamp(),
-				OccurredAt: lastError.OccurredAt,
-				Preview:    lastError.Message,
+				SessionID:        session.ID,
+				TaskRepositoryID: lastError.TaskRepositoryID,
+				Stamp:            lastError.Stamp(),
+				OccurredAt:       lastError.OccurredAt,
+				Preview:          lastError.Message,
+				Category:         lastError.Code,
+				RecoveryActions:  lastError.RecoveryActions,
 			}
 		}
 		snapshot.Sessions = append(snapshot.Sessions, input)
 	}
 	return snapshot, nil
+}
+
+func loadTaskLaunchErrorObservation(
+	ctx context.Context,
+	taskRepo *sqliterepo.Repository,
+	taskID string,
+) (statussummary.TaskLaunchErrorObservation, error) {
+	task, err := taskRepo.GetTask(ctx, taskID)
+	if err != nil {
+		return statussummary.TaskLaunchErrorObservation{}, err
+	}
+	if task == nil {
+		return statussummary.TaskLaunchErrorObservation{}, fmt.Errorf("task %q not found", taskID)
+	}
+	if _, present := task.Metadata[models.MetaKeyLastLaunchError]; !present {
+		return statussummary.TaskLaunchErrorObservation{Observed: true}, nil
+	}
+	errorValue, ok := models.LoadTaskLaunchError(task.Metadata)
+	if !ok {
+		return statussummary.TaskLaunchErrorObservation{}, nil
+	}
+	return statussummary.TaskLaunchErrorObservation{
+		Observed: true,
+		Error: &statussummary.ActiveErrorSummary{
+			TaskRepositoryID: errorValue.TaskRepositoryID,
+			Stamp:            errorValue.Stamp(),
+			OccurredAt:       errorValue.OccurredAt,
+			Preview:          errorValue.Message,
+			Category:         errorValue.Code,
+			RecoveryActions:  errorValue.RecoveryActions,
+		},
+	}, nil
 }
 
 func loadTaskPendingActions(
@@ -536,19 +586,33 @@ func loadTaskGitObservations(
 	if err != nil {
 		return nil, err
 	}
-	sessionIDs := make([]string, 0, len(sessions))
+	environmentIDs := make([]string, 0, len(sessions)+1)
+	seenEnvironmentIDs := make(map[string]struct{}, len(sessions)+1)
 	for _, session := range sessions {
-		if session != nil && session.ID != "" {
-			sessionIDs = append(sessionIDs, session.ID)
+		if session == nil || session.TaskEnvironmentID == "" {
+			continue
+		}
+		if _, seen := seenEnvironmentIDs[session.TaskEnvironmentID]; seen {
+			continue
+		}
+		seenEnvironmentIDs[session.TaskEnvironmentID] = struct{}{}
+		environmentIDs = append(environmentIDs, session.TaskEnvironmentID)
+	}
+	if environment, err := taskRepo.GetTaskEnvironmentByTaskID(ctx, taskID); err != nil {
+		return nil, err
+	} else if environment != nil && environment.ID != "" {
+		if _, seen := seenEnvironmentIDs[environment.ID]; !seen {
+			seenEnvironmentIDs[environment.ID] = struct{}{}
+			environmentIDs = append(environmentIDs, environment.ID)
 		}
 	}
-	snapshots, err := taskRepo.GetLatestGitSnapshotsBySessionIDs(ctx, sessionIDs)
+	snapshots, err := taskRepo.GetLatestGitStatusSnapshotsByTaskEnvironmentIDs(ctx, environmentIDs)
 	if err != nil {
 		return nil, err
 	}
 	observations := make([]statussummary.GitObservation, 0, len(snapshots))
-	for _, session := range sessions {
-		observation, ok := taskGitObservation(session, snapshots[session.ID])
+	for _, snapshot := range snapshots {
+		observation, ok := taskGitObservation(nil, snapshot)
 		if ok {
 			observations = append(observations, observation)
 		}
@@ -560,21 +624,26 @@ func taskGitObservation(
 	session *models.TaskSession,
 	snapshot *models.GitSnapshot,
 ) (statussummary.GitObservation, bool) {
-	if session == nil || snapshot == nil {
+	if snapshot == nil {
 		return statussummary.GitObservation{}, false
 	}
-	repository := session.ID
+	repository := statussummary.RootRepositoryKey
+	if session != nil {
+		repository = session.ID
+	}
 	if name, ok := snapshot.Metadata["repository_name"].(string); ok && name != "" {
 		repository = name
 	}
+	comparisonStatus, _ := snapshot.Metadata["comparison_status"].(string)
 	return statussummary.GitObservation{
 		Repository: repository,
 		Summary: statussummary.GitSummary{
-			Additions:    nonNegativeMetadataInt(snapshot.Metadata, "branch_additions"),
-			Deletions:    nonNegativeMetadataInt(snapshot.Metadata, "branch_deletions"),
-			ChangedFiles: len(snapshot.Files),
-			Ahead:        maxNonNegative(snapshot.Ahead),
-			Behind:       maxNonNegative(snapshot.Behind),
+			Additions:             nonNegativeMetadataInt(snapshot.Metadata, "branch_additions"),
+			Deletions:             nonNegativeMetadataInt(snapshot.Metadata, "branch_deletions"),
+			ChangedFiles:          len(snapshot.Files),
+			Ahead:                 maxNonNegative(snapshot.Ahead),
+			Behind:                maxNonNegative(snapshot.Behind),
+			ComparisonUnavailable: comparisonStatus == "unavailable",
 		},
 	}, true
 }

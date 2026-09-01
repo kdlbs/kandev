@@ -81,7 +81,10 @@ export function isContainerRun(env: NodeJS.ProcessEnv, argv = process.argv): boo
   return selectedProjects.some((projects) =>
     projects
       .split(",")
-      .some((project) => project === "containers" || project === "kubernetes-compat"),
+      .some(
+        (project) =>
+          project === "containers" || project === "kubernetes-compat" || project === "docker",
+      ),
   );
 }
 

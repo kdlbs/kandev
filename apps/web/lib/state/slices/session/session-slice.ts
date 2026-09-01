@@ -1,4 +1,4 @@
-/* eslint-disable max-lines -- slice file is one line over the 600 cap after adding the isLoadingMore metadata flag; splitting the slice would orphan its actions from their state type */
+/* eslint-disable max-lines -- session state intentionally keeps its coordinated actions together. */
 import type { StateCreator } from "zustand";
 import { original } from "immer";
 import type { Message, TaskSession } from "@/lib/types/http";
@@ -9,6 +9,12 @@ import {
   mergePendingActionProjection,
 } from "./task-session-projection-actions";
 import { reconcileMessages } from "./message-signature";
+import {
+  buildPromptMessageActions,
+  fanOutTranscriptPrompts,
+  removePromptMessage,
+  updatePromptMessage,
+} from "./prompt-message-actions";
 import {
   migrateEnvKeyedData,
   purgeSessionRuntimeState,
@@ -33,6 +39,7 @@ function ensureMessageMeta(
     metaBySession[sessionId] = {
       isLoading: false,
       isLoadingMore: false,
+      historyInitialized: false,
       hasMore: false,
       oldestCursor: null,
     };
@@ -44,6 +51,7 @@ function applyMessageMeta(
   metaBySession: SessionSliceState["messages"]["metaBySession"],
   sessionId: string,
   meta: {
+    historyInitialized?: boolean;
     hasMore?: boolean;
     oldestCursor?: string | null;
     isLoading?: boolean;
@@ -51,6 +59,9 @@ function applyMessageMeta(
   },
 ) {
   ensureMessageMeta(metaBySession, sessionId);
+  if (meta.historyInitialized !== undefined) {
+    metaBySession[sessionId].historyInitialized = meta.historyInitialized;
+  }
   if (meta.hasMore !== undefined) metaBySession[sessionId].hasMore = meta.hasMore;
   if (meta.isLoading !== undefined) metaBySession[sessionId].isLoading = meta.isLoading;
   if (meta.isLoadingMore !== undefined) metaBySession[sessionId].isLoadingMore = meta.isLoadingMore;
@@ -68,6 +79,17 @@ function mergeMessageFields(target: Record<string, unknown>, source: Record<stri
       target[key] = source[key];
     }
   }
+}
+
+function mergeMessageAtIndex(messages: Message[], message: Message): void {
+  const index = messages.findIndex((candidate) => candidate.id === message.id);
+  if (index === -1) return;
+  const merged = { ...messages[index] };
+  mergeMessageFields(
+    merged as unknown as Record<string, unknown>,
+    message as unknown as Record<string, unknown>,
+  );
+  messages[index] = merged;
 }
 
 /** Return a new messages array with the message matching `messageId` removed. */
@@ -152,11 +174,31 @@ function mergeCancellationProjection(
 /** Merge an incoming session update with an existing session, preserving nullable fields. */
 function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSession {
   const cancellation = mergeCancellationProjection(existing, incoming);
+  const incomingRouteGeneration = incoming.route_generation;
+  const existingRouteGeneration = existing.route_generation;
+  const routeIsStale =
+    existingRouteGeneration !== undefined &&
+    (incomingRouteGeneration === undefined || incomingRouteGeneration < existingRouteGeneration);
   const pendingAction = mergePendingActionProjection(existing, incoming);
   return {
     ...existing,
     ...incoming,
     ...cancellation,
+    ...(routeIsStale
+      ? {
+          execution_profile_id: existing.execution_profile_id,
+          route_generation: existing.route_generation,
+          route_state: existing.route_state,
+          route_reason: existing.route_reason,
+          route_error_code: existing.route_error_code,
+          route_error_class: existing.route_error_class,
+          route_catalogue_version: existing.route_catalogue_version,
+          route_retry_ordinal: existing.route_retry_ordinal,
+          route_deadline: existing.route_deadline,
+          route_pending_outcome: existing.route_pending_outcome,
+          downstream_acp_session_id: existing.downstream_acp_session_id,
+        }
+      : {}),
     ...pendingAction,
     agent_profile_snapshot: incoming.agent_profile_snapshot ?? existing.agent_profile_snapshot,
     worktree_id: incoming.worktree_id ?? existing.worktree_id,
@@ -166,6 +208,36 @@ function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSes
     repository_id: incoming.repository_id ?? existing.repository_id,
     base_branch: incoming.base_branch ?? existing.base_branch,
     task_environment_id: incoming.task_environment_id ?? existing.task_environment_id,
+  };
+}
+
+/** Normalize and merge a complete session record without erasing a newer live activity event. */
+function mergeTaskSessionSnapshot(
+  existing: TaskSession | undefined,
+  incoming: TaskSession,
+  currentActivityEpoch: number,
+  requestActivityEpoch: number | undefined,
+): TaskSession {
+  const snapshot = {
+    ...incoming,
+    foreground_activity: incoming.foreground_activity ?? null,
+    active_subagent_count: incoming.active_subagent_count ?? 0,
+    supports_steering: incoming.supports_steering ?? false,
+  };
+  if (!existing) return snapshot;
+
+  const merged = mergeTaskSession(existing, snapshot);
+  const activityChangedDuringRequest =
+    requestActivityEpoch === undefined
+      ? currentActivityEpoch > 0
+      : currentActivityEpoch > requestActivityEpoch;
+  if (!activityChangedDuringRequest) return merged;
+
+  return {
+    ...merged,
+    foreground_activity: existing.foreground_activity,
+    active_subagent_count: existing.active_subagent_count,
+    supports_steering: existing.supports_steering,
   };
 }
 
@@ -217,6 +289,7 @@ function reconcileActiveTurnForIdleSession(draft: SessionSliceState, session: Ta
 
 export const defaultSessionState: SessionSliceState = {
   messages: { bySession: {}, metaBySession: {} },
+  messagePrompts: { bySession: {}, metaBySession: {}, generationBySession: {} },
   turns: {
     bySession: {},
     activeBySession: {},
@@ -224,7 +297,7 @@ export const defaultSessionState: SessionSliceState = {
     reconcileEpochBySession: {},
     settledBoundaryBySession: {},
   },
-  taskSessions: { items: {} },
+  taskSessions: { items: {}, activityEpochBySession: {} },
   taskSessionsByTask: { itemsByTaskId: {}, loadingByTaskId: {}, loadedByTaskId: {} },
   sessionAgentctl: { itemsBySessionId: {} },
   worktrees: { items: {} },
@@ -255,7 +328,39 @@ export const defaultSessionState: SessionSliceState = {
 type ImmerSet = Parameters<typeof createSessionSlice>[0];
 type ImmerGet = () => SessionSlice;
 
-/** Create the message store actions (set, add, update, remove, merge, prepend, metadata) backed by the given Immer setter. */
+function buildSetMessagesLoading(set: ImmerSet) {
+  return (sessionId: string, loading: boolean) =>
+    set((draft) => {
+      applyMessageMeta(draft.messages.metaBySession, sessionId, { isLoading: loading });
+    });
+}
+function buildSetMessagesMetadata(set: ImmerSet) {
+  return (sessionId: string, meta: Parameters<SessionSlice["setMessagesMetadata"]>[1]) =>
+    set((draft) => {
+      applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
+    });
+}
+
+/** Builds the transcript update action and keeps the prompt cache in sync. */
+function buildUpdateMessage(set: ImmerSet) {
+  return (message: Parameters<SessionSlice["updateMessage"]>[0]) =>
+    set((draft) => {
+      const messages = draft.messages.bySession[message.session_id];
+      if (messages) {
+        const index = messages.findIndex((entry) => entry.id === message.id);
+        if (index !== -1) {
+          const merged = { ...messages[index] };
+          mergeMessageFields(
+            merged as unknown as Record<string, unknown>,
+            message as unknown as Record<string, unknown>,
+          );
+          messages[index] = merged;
+        }
+      }
+      updatePromptMessage(draft, message);
+    });
+}
+
 function buildMessageActions(set: ImmerSet) {
   return {
     setMessages: (
@@ -273,7 +378,7 @@ function buildMessageActions(set: ImmerSet) {
         const sessionId = message.session_id;
         if (!draft.messages.bySession[sessionId]) draft.messages.bySession[sessionId] = [];
         const existingIndex = draft.messages.bySession[sessionId].findIndex(
-          (m) => m.id === message.id,
+          (entry) => entry.id === message.id,
         );
         if (existingIndex === -1) {
           draft.messages.bySession[sessionId].push(message);
@@ -286,19 +391,16 @@ function buildMessageActions(set: ImmerSet) {
             message as unknown as Record<string, unknown>,
           );
         }
+        fanOutTranscriptPrompts(draft, [message]);
       }),
-    updateMessage: (message: Parameters<SessionSlice["updateMessage"]>[0]) =>
+    updateMessage: buildUpdateMessage(set),
+    updateMessages: (messages: Parameters<SessionSlice["updateMessages"]>[0]) =>
       set((draft) => {
-        const messages = draft.messages.bySession[message.session_id];
-        if (!messages) return;
-        const index = messages.findIndex((m) => m.id === message.id);
-        if (index === -1) return;
-        const merged = { ...messages[index] };
-        mergeMessageFields(
-          merged as unknown as Record<string, unknown>,
-          message as unknown as Record<string, unknown>,
-        );
-        messages[index] = merged;
+        for (const message of messages) {
+          const sessionMessages = draft.messages.bySession[message.session_id];
+          if (sessionMessages) mergeMessageAtIndex(sessionMessages, message);
+          updatePromptMessage(draft, message);
+        }
       }),
     removeMessage: (
       sessionId: Parameters<SessionSlice["removeMessage"]>[0],
@@ -306,8 +408,8 @@ function buildMessageActions(set: ImmerSet) {
     ) =>
       set((draft) => {
         const messages = draft.messages.bySession[sessionId];
-        if (!messages) return;
-        draft.messages.bySession[sessionId] = removeMessageByID(messages, messageId);
+        if (messages) draft.messages.bySession[sessionId] = removeMessageByID(messages, messageId);
+        removePromptMessage(draft, sessionId, messageId);
       }),
     mergeMessages: (
       sessionId: string,
@@ -327,6 +429,7 @@ function buildMessageActions(set: ImmerSet) {
         }
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
+        fanOutTranscriptPrompts(draft, messages);
       }),
     prependMessages: (
       sessionId: string,
@@ -341,25 +444,13 @@ function buildMessageActions(set: ImmerSet) {
           ...existing,
         ];
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
-        // isLoadingMore is owned by the shared pagination coordinator (raised
-        // on the session's first in-flight request, cleared only when the
-        // last one settles); a prepend must not clear it mid-flight.
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
+        fanOutTranscriptPrompts(draft, messages);
       }),
-    setMessagesMetadata: (
-      sessionId: string,
-      meta: Parameters<SessionSlice["setMessagesMetadata"]>[1],
-    ) =>
-      set((draft) => {
-        applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
-      }),
-    setMessagesLoading: (sessionId: string, loading: boolean) =>
-      set((draft) => {
-        applyMessageMeta(draft.messages.metaBySession, sessionId, { isLoading: loading });
-      }),
+    setMessagesMetadata: buildSetMessagesMetadata(set),
+    setMessagesLoading: buildSetMessagesLoading(set),
   };
 }
-
 /** Create the task-plan store actions (set, loading, saving, clear, seen, revisions, preview, compare) backed by the given Immer setter and getter. */
 function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
   return {
@@ -537,7 +628,67 @@ function nextPair(
   return [current[1], revisionId];
 }
 
-/** Create the task-session store actions (set, read cursor, remove, list, upsert from event, loading) backed by the given Immer setter. */
+/** Build actions that reconcile complete session snapshots with partial live events. */
+function buildTaskSessionReconciliationActions(set: ImmerSet) {
+  return {
+    setTaskSessionsForTask: (
+      taskId: string,
+      sessions: Parameters<SessionSlice["setTaskSessionsForTask"]>[1],
+      activityEpochsAtRequestStart: Parameters<SessionSlice["setTaskSessionsForTask"]>[2],
+    ) =>
+      set((draft) => {
+        const merged = sessions.map((session) => {
+          const existing = draft.taskSessions.items[session.id];
+          return mergeTaskSessionSnapshot(
+            existing,
+            session,
+            draft.taskSessions.activityEpochBySession?.[session.id] ?? 0,
+            activityEpochsAtRequestStart[session.id],
+          );
+        });
+        draft.taskSessionsByTask.itemsByTaskId[taskId] = merged;
+        draft.taskSessionsByTask.loadingByTaskId[taskId] = false;
+        draft.taskSessionsByTask.loadedByTaskId[taskId] = true;
+        for (const session of merged) {
+          draft.taskSessions.items[session.id] = session;
+          syncEnvironmentMapping(draft, session.id, session.task_environment_id);
+          syncPrepareProgress(draft, session);
+          reconcileActiveTurnForIdleSession(draft, session);
+        }
+      }),
+    upsertTaskSessionFromEvent: (
+      taskId: string,
+      session: Parameters<SessionSlice["upsertTaskSessionFromEvent"]>[1],
+    ) =>
+      set((draft) => {
+        if (Object.prototype.hasOwnProperty.call(session, "foreground_activity")) {
+          const epochs = (draft.taskSessions.activityEpochBySession ??= {});
+          epochs[session.id] = (epochs[session.id] ?? 0) + 1;
+        }
+        const existing = draft.taskSessions.items[session.id];
+        if (!existing && draft.taskSessionsByTask.loadedByTaskId[taskId]) {
+          // State events intentionally carry partial session rows. When one
+          // introduces a new session, let useTaskSessions hydrate fields such
+          // as repository_id instead of treating the old list as authoritative.
+          draft.taskSessionsByTask.loadedByTaskId[taskId] = false;
+        }
+        const merged = existing ? mergeTaskSession(existing, session) : session;
+        draft.taskSessions.items[session.id] = merged;
+        const list = draft.taskSessionsByTask.itemsByTaskId[taskId];
+        if (list) {
+          const idx = list.findIndex((s) => s.id === session.id);
+          if (idx >= 0) list[idx] = merged;
+          else list.push(merged);
+        } else {
+          draft.taskSessionsByTask.itemsByTaskId[taskId] = [merged];
+        }
+        syncEnvironmentMapping(draft, session.id, merged.task_environment_id);
+        reconcileActiveTurnForIdleSession(draft, merged);
+      }),
+  };
+}
+
+/** Create the basic task-session set, read-cursor, removal, and loading actions. */
 function buildTaskSessionActions(set: ImmerSet) {
   return {
     setTaskSession: (session: Parameters<SessionSlice["setTaskSession"]>[0]) =>
@@ -575,6 +726,9 @@ function buildTaskSessionActions(set: ImmerSet) {
     removeTaskSession: (taskId: string, sessionId: string) =>
       set((draft) => {
         delete draft.taskSessions.items[sessionId];
+        if (draft.taskSessions.activityEpochBySession) {
+          delete draft.taskSessions.activityEpochBySession[sessionId];
+        }
         const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[taskId];
         if (sessionsByTask) {
           draft.taskSessionsByTask.itemsByTaskId[taskId] = sessionsByTask.filter(
@@ -584,6 +738,10 @@ function buildTaskSessionActions(set: ImmerSet) {
         // Drop the conversation history owned by this session.
         delete draft.messages.bySession[sessionId];
         delete draft.messages.metaBySession[sessionId];
+        delete draft.messagePrompts.bySession[sessionId];
+        delete draft.messagePrompts.metaBySession[sessionId];
+        const generations = (draft.messagePrompts.generationBySession ??= {});
+        generations[sessionId] = (generations[sessionId] ?? 0) + 1;
         delete draft.turns.bySession[sessionId];
         delete draft.turns.activeBySession[sessionId];
         delete draft.turns.loadedBySession[sessionId];
@@ -592,50 +750,6 @@ function buildTaskSessionActions(set: ImmerSet) {
         // Cascade into the runtime slice (shell/process/git buffers + per-session
         // maps); this also removes the environmentIdBySessionId mapping.
         purgeSessionRuntimeState(draft as unknown as SessionRuntimeSliceState, sessionId);
-      }),
-    setTaskSessionsForTask: (
-      taskId: string,
-      sessions: Parameters<SessionSlice["setTaskSessionsForTask"]>[1],
-    ) =>
-      set((draft) => {
-        const merged = sessions.map((session) => {
-          const existing = draft.taskSessions.items[session.id];
-          return existing ? mergeTaskSession(existing, session) : session;
-        });
-        draft.taskSessionsByTask.itemsByTaskId[taskId] = merged;
-        draft.taskSessionsByTask.loadingByTaskId[taskId] = false;
-        draft.taskSessionsByTask.loadedByTaskId[taskId] = true;
-        for (const session of merged) {
-          draft.taskSessions.items[session.id] = session;
-          syncEnvironmentMapping(draft, session.id, session.task_environment_id);
-          syncPrepareProgress(draft, session);
-          reconcileActiveTurnForIdleSession(draft, session);
-        }
-      }),
-    upsertTaskSessionFromEvent: (
-      taskId: string,
-      session: Parameters<SessionSlice["upsertTaskSessionFromEvent"]>[1],
-    ) =>
-      set((draft) => {
-        const existing = draft.taskSessions.items[session.id];
-        if (!existing && draft.taskSessionsByTask.loadedByTaskId[taskId]) {
-          // State events intentionally carry partial session rows. When one
-          // introduces a new session, let useTaskSessions hydrate fields such
-          // as repository_id instead of treating the old list as authoritative.
-          draft.taskSessionsByTask.loadedByTaskId[taskId] = false;
-        }
-        const merged = existing ? mergeTaskSession(existing, session) : session;
-        draft.taskSessions.items[session.id] = merged;
-        const list = draft.taskSessionsByTask.itemsByTaskId[taskId];
-        if (list) {
-          const idx = list.findIndex((s) => s.id === session.id);
-          if (idx >= 0) list[idx] = merged;
-          else list.push(merged);
-        } else {
-          draft.taskSessionsByTask.itemsByTaskId[taskId] = [merged];
-        }
-        syncEnvironmentMapping(draft, session.id, merged.task_environment_id);
-        reconcileActiveTurnForIdleSession(draft, merged);
       }),
     setTaskSessionsLoading: (taskId: string, loading: boolean) =>
       set((draft) => {
@@ -653,8 +767,10 @@ export const createSessionSlice: StateCreator<
 > = (set, get) => ({
   ...defaultSessionState,
   ...buildMessageActions(set),
+  ...buildPromptMessageActions(set),
   ...buildTurnActions(set),
   ...buildTaskSessionActions(set),
+  ...buildTaskSessionReconciliationActions(set),
   ...buildTaskSessionProjectionActions(set),
   setSessionAgentctlStatus: (sessionId, status) =>
     set((draft) => {

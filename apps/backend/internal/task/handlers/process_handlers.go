@@ -63,6 +63,7 @@ func RegisterProcessRoutes(
 
 	// Session-level ACP operations (mode/model switching)
 	session := api.Group("/task-sessions/:id")
+	session.GET("/agentctl/metrics", handlers.httpGetAgentctlMetrics)
 	session.POST("/set-mode", handlers.httpSetSessionMode)
 	session.POST("/set-model", handlers.httpSetSessionModel)
 	session.POST("/set-config-option", handlers.httpSetSessionConfigOption)

@@ -120,6 +120,9 @@ export type ChangesPanelBodyProps = {
   reviewedCount: number;
   totalFileCount: number;
   aheadCount: number;
+  comparisonTargets: string[];
+  comparisonUnavailable: boolean;
+  comparisonErrorCode: string | null;
   isLoading: boolean;
   loadingOperation: string | null;
   dialogs: DialogsType;
@@ -134,7 +137,7 @@ export type ChangesPanelBodyProps = {
   onUnstage: (path: string, repo?: string) => Promise<void>;
   onBulkStage: (paths: string[]) => void;
   onBulkUnstage: (paths: string[]) => void;
-  onBulkDiscard: (paths: string[]) => void;
+  onBulkDiscard: (paths: string[], anchor?: HTMLElement) => void;
   onPush: () => void;
   onForcePush: () => void;
   stagedFileCount: number;
@@ -494,6 +497,9 @@ export function buildChangesPanelBodyProps(
     reviewedCount: data.reviewedCount,
     totalFileCount: data.totalFileCount,
     aheadCount: git.ahead,
+    comparisonTargets: git.comparisonTargets,
+    comparisonUnavailable: git.comparisonUnavailable,
+    comparisonErrorCode: git.comparisonErrorCode,
     isLoading: git.isLoading,
     loadingOperation: git.loadingOperation,
     dialogs: data.dialogs,

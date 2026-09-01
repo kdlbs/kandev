@@ -10,6 +10,7 @@ import type {
   FileInfo,
   SessionCommit,
   CumulativeDiff,
+  GitStatusEntry,
 } from "@/lib/state/slices/session-runtime/types";
 import type {
   GitOperationResult as RawGitOperationResult,
@@ -21,9 +22,10 @@ import {
   runRepositoryScopeWaves,
 } from "./use-session-git-repository-order";
 import { useMultiRepoSummary } from "./use-session-git-summary";
-import { deriveSessionGitValues } from "./use-session-git-derived";
+import { deriveComparisonValues, deriveSessionGitValues } from "./use-session-git-derived";
 import { useScopedStageOperations } from "./use-scoped-stage-operations";
 import { normalizeGitStatusFiles } from "@/lib/state/slices/session-runtime/git-status-normalizer";
+import { splitFilesByChangeLayer } from "./git-change-facets";
 
 /**
  * Per-repo result emitted by frontend-side fan-outs (commit, push, pull,
@@ -36,6 +38,7 @@ export type PerRepoOperationResult = {
   success: boolean;
   output: string;
   error?: string;
+  error_code?: string;
 };
 
 /**
@@ -88,6 +91,9 @@ export type SessionGit = {
   canPush: boolean; // pushAhead > 0
   canPull: boolean; // pullBehind > 0
   canCreatePR: boolean; // hasCommits
+  comparisonTargets: string[];
+  comparisonUnavailable: boolean;
+  comparisonErrorCode: string | null;
 
   // Operation state
   isLoading: boolean;
@@ -279,6 +285,7 @@ function aggregatePerRepoResults(
       operation,
       output: only.output,
       error: only.error,
+      error_code: only.error_code,
     };
   }
   const allSucceeded = perRepo.every((r) => r.success);
@@ -292,6 +299,7 @@ function aggregatePerRepoResults(
     operation,
     output: joined,
     error: firstFailure?.error,
+    error_code: firstFailure?.error_code,
     per_repo: perRepo,
   };
 }
@@ -331,6 +339,7 @@ async function fanOutAcrossRepositoryWaves(
       success: result.success,
       output: result.output,
       error: result.error,
+      error_code: result.error_code,
     })),
     operation,
   );
@@ -622,8 +631,10 @@ function useFileDerivations(
       allFilesCount: allFiles.length,
     });
   }, [statusByRepo, gitStatus, allFiles]);
-  const unstagedFiles = useMemo(() => allFiles.filter((f) => !f.staged), [allFiles]);
-  const stagedFiles = useMemo(() => allFiles.filter((f) => f.staged), [allFiles]);
+  const { stagedFiles, unstagedFiles } = useMemo(
+    () => splitFilesByChangeLayer(allFiles),
+    [allFiles],
+  );
   const repoForPath = useMemo(() => {
     const m = new Map<string, string>();
     for (const f of allFiles) {
@@ -687,6 +698,7 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     stagedFiles,
     commits,
   );
+  const comparison = deriveComparisonValues(comparisonStatuses(statusByRepo, gitStatus));
   const remoteOps = useRemoteOpsFanOut({
     gitOps,
     repoNamesForControls,
@@ -702,6 +714,7 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
 
   return {
     ...derived,
+    ...comparison,
     repoNames: repoNamesForControls,
     perRepoStatus,
 
@@ -739,4 +752,12 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     reset: gitOps.reset,
     createPR: gitOps.createPR,
   };
+}
+
+function comparisonStatuses(
+  statusByRepo: Array<{ status: GitStatusEntry }>,
+  gitStatus: GitStatusEntry | null | undefined,
+): GitStatusEntry[] {
+  if (statusByRepo.length > 0) return statusByRepo.map(({ status }) => status);
+  return gitStatus ? [gitStatus] : [];
 }

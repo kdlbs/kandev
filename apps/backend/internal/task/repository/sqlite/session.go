@@ -113,9 +113,9 @@ func (r *Repository) insertTurnRow(ctx context.Context, execer taskSessionExecut
 	}
 
 	_, err := execer.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`), turn.ID, turn.TaskSessionID, turn.TaskID, turn.StartedAt, turn.CompletedAt, metadataJSON, turn.CreatedAt, turn.UpdatedAt)
+		INSERT INTO task_session_turns (id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), turn.ID, turn.TaskSessionID, turn.TaskID, turn.ExecutionProfileID, turn.RouteGeneration, turn.StartedAt, turn.CompletedAt, metadataJSON, turn.CreatedAt, turn.UpdatedAt)
 	return err
 }
 
@@ -188,7 +188,7 @@ func scanTurn(scanner turnScanner) (*models.Turn, error) {
 	turn := &models.Turn{}
 	var metadataJSON string
 	var completedAt sql.NullTime
-	err := scanner.Scan(&turn.ID, &turn.TaskSessionID, &turn.TaskID, &turn.StartedAt, &completedAt, &metadataJSON, &turn.CreatedAt, &turn.UpdatedAt)
+	err := scanner.Scan(&turn.ID, &turn.TaskSessionID, &turn.TaskID, &turn.ExecutionProfileID, &turn.RouteGeneration, &turn.StartedAt, &completedAt, &metadataJSON, &turn.CreatedAt, &turn.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -210,23 +210,27 @@ func scanTurnRow(row *sql.Row) (*models.Turn, error) {
 // GetTurn retrieves a turn by ID
 func (r *Repository) GetTurn(ctx context.Context, id string) (*models.Turn, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
+		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns WHERE id = ?
 	`), id)
 	return scanTurnRow(row)
 }
 
-// GetActiveTurnBySessionID gets the currently active (non-completed) turn for a session
+// GetActiveTurnBySessionID gets the currently active (non-completed) turn for
+// a session. This is not the same query as "current turn": it keeps its own
+// completed_at IS NULL filter alongside currentTurnAuthority's predicate and
+// ordering (D10) so AbandonOpenTurns' re-bury loop keeps working.
 func (r *Repository) GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error) {
+	predicate, orderBy := currentTurnAuthority(r.ro.DriverName(), "turn_row")
 	query := fmt.Sprintf(`
-		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
+		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns turn_row
 		WHERE turn_row.task_session_id = ?
 		  AND turn_row.completed_at IS NULL
 		  AND %s
-		ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
+		ORDER BY %s
 		LIMIT 1
-	`, turnAuthorityPredicate(r.ro.DriverName(), "turn_row"))
+	`, predicate, orderBy)
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID)
 	return scanTurnRow(row)
 }
@@ -248,9 +252,9 @@ func (r *Repository) UpdateTurn(ctx context.Context, turn *models.Turn) error {
 	updatedAt := r.nowUTC()
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_session_turns
-		SET completed_at = ?, metadata = ?, updated_at = ?
+		SET completed_at = ?, metadata = ?, execution_profile_id = ?, route_generation = ?, updated_at = ?
 		WHERE id = ? AND task_session_id = ? AND updated_at = ?
-	`), turn.CompletedAt, metadataJSON, updatedAt, turn.ID, turn.TaskSessionID, turn.UpdatedAt)
+	`), turn.CompletedAt, metadataJSON, turn.ExecutionProfileID, turn.RouteGeneration, updatedAt, turn.ID, turn.TaskSessionID, turn.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -429,7 +433,7 @@ func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) (
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTurnsBySession")
 	defer span.End()
 	query := fmt.Sprintf(`
-		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
+		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns turn_row
 		WHERE turn_row.task_session_id = ? AND %s
 		ORDER BY turn_row.started_at ASC, turn_row.created_at ASC, turn_row.id ASC
@@ -469,12 +473,14 @@ func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) (
 // the two column names that used to live here have collapsed into one.
 const taskSessionSelectCols = `ts.id, ts.task_id,
 	COALESCE(er.agent_execution_id, ''), COALESCE(er.container_id, ''),
-	ts.agent_profile_id, ts.execution_profile_id, ts.executor_id, ts.executor_profile_id, ts.environment_id,
+	ts.agent_profile_id, ts.execution_profile_id, ts.route_generation, ts.route_state, ts.route_reason, ts.downstream_acp_session_id,
+	ts.executor_id, ts.executor_profile_id, ts.environment_id,
 	ts.repository_id, ts.base_branch, ts.base_commit_sha,
 	COALESCE(NULLIF(te.workspace_path, ''), ts.workspace_path),
 	ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
 	ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
-	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name, ts.last_read_message_id`
+	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name, ts.last_read_message_id,
+	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out`
 
 // taskSessionFromClause is the FROM clause that pairs with taskSessionSelectCols.
 // Always reference task_sessions as `ts` and executors_running as `er` in WHERE/ORDER.
@@ -520,16 +526,266 @@ func (r *Repository) CreateTaskSessionWithInitialRuntimeSeed(ctx context.Context
 		return err
 	}
 
+	if err := r.applyInitialRuntimeSeedTx(ctx, tx, session); err != nil {
+		return err
+	}
+	if err := r.createTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// CreateTaskSessionWithWorkspaceBinding atomically elects the first session
+// allowed to materialize a task workspace, or attaches a later session to its
+// ready canonical environment. The transaction deliberately happens before a
+// session row is committed: a preparing or unsafe workspace therefore leaves
+// no orphan session for a caller to clean up.
+//
+// The candidate is persisted only when this call wins the election. It may be
+// a worktree environment without a workspace path because that path is not
+// known until the elected launch has completed preparation.
+//
+//nolint:cyclop // The state cases are the durable workspace binding state machine.
+func (r *Repository) CreateTaskSessionWithWorkspaceBinding(
+	ctx context.Context,
+	session *models.TaskSession,
+	candidate *models.TaskEnvironment,
+) error {
+	if candidate == nil {
+		return fmt.Errorf("workspace binding candidate is required")
+	}
+	if candidate.TaskID != session.TaskID {
+		return fmt.Errorf("workspace binding task mismatch")
+	}
+	if session.ID == "" {
+		session.ID = uuid.New().String()
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
+		return err
+	}
+
+	var envID, status, materializationSessionID string
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT id, status, materialization_session_id FROM task_environments WHERE task_id = ?
+	`), session.TaskID).Scan(&envID, &status, &materializationSessionID)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		if candidate.ID == "" {
+			candidate.ID = uuid.New().String()
+		}
+		candidate.Status = models.TaskEnvironmentStatusCreating
+		candidate.MaterializationSessionID = session.ID
+		candidate.CreatedAt = r.nowUTC()
+		candidate.UpdatedAt = candidate.CreatedAt
+		if err := r.insertCreatingWorkspaceEnvironment(ctx, tx, candidate); err != nil {
+			return err
+		}
+		session.TaskEnvironmentID = candidate.ID
+	case err != nil:
+		return fmt.Errorf("load workspace binding: %w", err)
+	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusCreating:
+		abandoned, err := r.failAbandonedWorkspaceMaterialization(ctx, tx, envID, materializationSessionID)
+		if err != nil {
+			return err
+		}
+		if abandoned {
+			if err := tx.Commit(); err != nil {
+				return fmt.Errorf("persist abandoned workspace materialization failure: %w", err)
+			}
+			return fmt.Errorf("%w: the initial workspace materialization did not complete", models.ErrWorkspaceReuseUnsafe)
+		}
+		return fmt.Errorf("%w: retry after the initial workspace launch completes", models.ErrWorkspacePreparing)
+	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusReady || models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusStopped:
+		session.TaskEnvironmentID = envID
+	default:
+		return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+	}
+
+	if err := r.applyInitialRuntimeSeedTx(ctx, tx, session); err != nil {
+		return err
+	}
+	if err := r.createTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// CreateTaskSessionWithSharedGroupWorkspaceBinding atomically elects the
+// shared group's first materializer. The elected environment is published to
+// the group while it is still creating, so another member can never create a
+// second physical workspace: it receives workspace_preparing until the elected
+// owner finalizes the canonical environment.
+func (r *Repository) CreateTaskSessionWithSharedGroupWorkspaceBinding(
+	ctx context.Context,
+	session *models.TaskSession,
+	candidate *models.TaskEnvironment,
+	groupID string,
+) error {
+	if candidate == nil || groupID == "" {
+		return fmt.Errorf("shared workspace binding requires a candidate and group")
+	}
+	if candidate.TaskID != session.TaskID {
+		return fmt.Errorf("shared workspace binding task mismatch")
+	}
+	if session.ID == "" {
+		session.ID = uuid.New().String()
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
+		return err
+	}
+
+	if candidate.ID == "" {
+		candidate.ID = uuid.New().String()
+	}
+	candidate.Status = models.TaskEnvironmentStatusCreating
+	candidate.MaterializationSessionID = session.ID
+	candidate.CreatedAt = r.nowUTC()
+	candidate.UpdatedAt = candidate.CreatedAt
+
+	res, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_workspace_groups
+		SET materialized_environment_id = ?, updated_at = ?
+		WHERE id = ?
+		  AND materialized_environment_id = ''
+		  AND EXISTS (
+			SELECT 1 FROM task_workspace_group_members
+			WHERE workspace_group_id = ? AND task_id = ? AND released_at IS NULL
+		  )
+	`), candidate.ID, candidate.UpdatedAt, groupID, groupID, session.TaskID)
+	if err != nil {
+		return fmt.Errorf("elect shared workspace materializer: %w", err)
+	}
+	won, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect shared workspace election: %w", err)
+	}
+	if won == 0 {
+		return r.bindReadySharedGroupEnvironment(ctx, tx, session, groupID)
+	}
+
+	if err := r.insertCreatingWorkspaceEnvironment(ctx, tx, candidate); err != nil {
+		return err
+	}
+	session.TaskEnvironmentID = candidate.ID
+	if err := r.applyInitialRuntimeSeedTx(ctx, tx, session); err != nil {
+		return err
+	}
+	if err := r.createTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) bindReadySharedGroupEnvironment(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	session *models.TaskSession,
+	groupID string,
+) error {
+	var environmentID, status string
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT COALESCE(e.id, ''), COALESCE(e.status, '')
+		FROM task_workspace_groups g
+		JOIN task_workspace_group_members m
+		  ON m.workspace_group_id = g.id AND m.task_id = ? AND m.released_at IS NULL
+		LEFT JOIN task_environments e ON e.id = g.materialized_environment_id
+		WHERE g.id = ?
+	`), session.TaskID, groupID).Scan(&environmentID, &status)
+	if errors.Is(err, sql.ErrNoRows) || environmentID == "" {
+		return fmt.Errorf("%w: shared workspace group is unavailable", models.ErrWorkspaceReuseUnsafe)
+	}
+	if err != nil {
+		return fmt.Errorf("load shared workspace environment: %w", err)
+	}
+	switch models.TaskEnvironmentStatus(status) {
+	case models.TaskEnvironmentStatusReady, models.TaskEnvironmentStatusStopped:
+		session.TaskEnvironmentID = environmentID
+	case models.TaskEnvironmentStatusCreating:
+		return fmt.Errorf("%w: retry after the shared workspace launch completes", models.ErrWorkspacePreparing)
+	default:
+		return fmt.Errorf("%w: shared workspace is not attachable", models.ErrWorkspaceReuseUnsafe)
+	}
+	if err := r.applyInitialRuntimeSeedTx(ctx, tx, session); err != nil {
+		return err
+	}
+	if err := r.createTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) insertCreatingWorkspaceEnvironment(ctx context.Context, tx *sqlx.Tx, candidate *models.TaskEnvironment) error {
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO task_environments (
+			id, task_id, executor_type, executor_id, executor_profile_id,
+			control_port, status, materialization_session_id, workspace_path,
+			container_id, sandbox_id, task_dir_name, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), candidate.ID, candidate.TaskID, candidate.ExecutorType, candidate.ExecutorID,
+		candidate.ExecutorProfileID, candidate.ControlPort, string(candidate.Status),
+		candidate.MaterializationSessionID, candidate.WorkspacePath, candidate.ContainerID,
+		candidate.SandboxID, candidate.TaskDirName, candidate.CreatedAt, candidate.UpdatedAt); err != nil {
+		return fmt.Errorf("create workspace binding: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) failAbandonedWorkspaceMaterialization(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	environmentID string,
+	ownerID string,
+) (bool, error) {
+	var ownerState models.TaskSessionState
+	ownerErr := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT state FROM task_sessions WHERE id = ?`), ownerID).Scan(&ownerState)
+	abandoned := ownerID == "" || errors.Is(ownerErr, sql.ErrNoRows) || isTerminalWorkspaceMaterializerState(ownerState)
+	if ownerErr != nil && !errors.Is(ownerErr, sql.ErrNoRows) {
+		return false, fmt.Errorf("load workspace materialization owner: %w", ownerErr)
+	}
+	if !abandoned {
+		return false, nil
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_environments
+		SET status = ?, materialization_session_id = '', updated_at = ?
+		WHERE id = ? AND status = ?
+	`), string(models.TaskEnvironmentStatusFailed), r.nowUTC(), environmentID, string(models.TaskEnvironmentStatusCreating)); err != nil {
+		return false, fmt.Errorf("fail abandoned workspace materialization: %w", err)
+	}
+	return true, nil
+}
+
+func isTerminalWorkspaceMaterializerState(state models.TaskSessionState) bool {
+	switch state {
+	case models.TaskSessionStateCompleted, models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+// applyInitialRuntimeSeedTx preserves CreateTaskSessionWithInitialRuntimeSeed's
+// one-time seed semantics for the workspace-binding creation path.
+func (r *Repository) applyInitialRuntimeSeedTx(ctx context.Context, tx *sqlx.Tx, session *models.TaskSession) error {
 	initialRuntimeConfig, hasInitialRuntimeConfig, initialRuntimeConfigProfileID, hasInitialRuntimeSeedKey, err := r.loadInitialSessionRuntimeSeedTx(ctx, tx, session.TaskID)
 	if err != nil {
 		return err
 	}
-
 	var sessionCount int
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(
-		`SELECT COUNT(*) FROM task_sessions WHERE task_id = ?`,
-	), session.TaskID).Scan(&sessionCount); err != nil {
-		return fmt.Errorf("check task sessions before initial runtime session: %w", err)
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(*) FROM task_sessions WHERE task_id = ?`), session.TaskID).Scan(&sessionCount); err != nil {
+		return fmt.Errorf("check task sessions before workspace binding: %w", err)
 	}
 	if sessionCount == 0 {
 		if session.Metadata == nil {
@@ -540,13 +796,7 @@ func (r *Repository) CreateTaskSessionWithInitialRuntimeSeed(ctx context.Context
 			session.Metadata[models.SessionMetaKeyRuntimeConfigOverrides] = initialRuntimeConfig
 		}
 	} else if models.IsOriginalTaskSession(session.Metadata) {
-		// PrepareSession performs a read before this transaction. If another
-		// launch won the race, do not persist the stale origin marker.
 		delete(session.Metadata, models.SessionMetaKeyOrigin)
-	}
-
-	if err := r.createTaskSession(ctx, tx, session); err != nil {
-		return err
 	}
 	if hasInitialRuntimeSeedKey {
 		if _, err := r.removeTaskMetadataKeyWithExecutor(ctx, tx, session.TaskID, models.MetaKeyInitialSessionRuntimeConfig); err != nil {
@@ -556,7 +806,7 @@ func (r *Repository) CreateTaskSessionWithInitialRuntimeSeed(ctx context.Context
 			return fmt.Errorf("consume initial runtime seed profile: %w", err)
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (r *Repository) loadInitialSessionRuntimeSeedTx(
@@ -591,7 +841,10 @@ func (r *Repository) loadInitialSessionRuntimeSeedTx(
 // CreateOfficeTaskSession creates an Office session and atomically marks it as
 // the task's initial session when no earlier session exists. The task row lock
 // serializes callers across PostgreSQL connections; SQLite's single writer
-// connection serializes the transaction.
+// connection serializes the transaction. Within that same transaction it also
+// enforces office-session uniqueness for the (task_id, agent_profile_id) pair:
+// if a live row already exists for the pair, the insert is refused with
+// ErrOfficeSessionRaceConflict rather than creating a second live session.
 func (r *Repository) CreateOfficeTaskSession(ctx context.Context, session *models.TaskSession) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -621,12 +874,27 @@ func (r *Repository) CreateOfficeTaskSession(ctx context.Context, session *model
 		session.Metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
 	}
 
+	if session.AgentProfileID != "" {
+		var liveCount int
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT COUNT(*) FROM task_sessions
+			WHERE task_id = ? AND agent_profile_id = ?
+			  AND state NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')
+		`), session.TaskID, session.AgentProfileID).Scan(&liveCount); err != nil {
+			return fmt.Errorf("check live office session for pair: %w", err)
+		}
+		if liveCount > 0 {
+			return ErrOfficeSessionRaceConflict
+		}
+	}
+
 	if err := r.createTaskSession(ctx, tx, session); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
+// createTaskSession inserts a task session through the supplied database handle.
 func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExecutor, session *models.TaskSession) error {
 	if session.ID == "" {
 		session.ID = uuid.New().String()
@@ -666,36 +934,38 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 	if err != nil {
 		return fmt.Errorf("failed to serialize repository snapshot: %w", err)
 	}
-	// agent_profile_id is NULL-able. Empty string would defeat the partial
-	// unique index since SQLite treats two empty strings as equal — store NULL
-	// for kanban / quick-chat rows and a real value only for office sessions
-	// (per ADR 0005, kanban and office now share the same column).
+	// agent_profile_id is NULL-able and stored as NULL when empty. No unique
+	// index currently constrains (task_id, agent_profile_id) — see
+	// ErrOfficeSessionRaceConflict's doc comment (errors.go). Per ADR 0005,
+	// kanban and office share this column, and every row (kanban included)
+	// carries a non-NULL value in practice — nothing here scopes NULL to
+	// kanban specifically.
 	var agentProfileID interface{}
 	if session.AgentProfileID != "" {
 		agentProfileID = session.AgentProfileID
 	}
 	_, err = exec.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_sessions (
-			id, task_id, agent_profile_id, execution_profile_id, executor_id, executor_profile_id, environment_id,
+			id, task_id, agent_profile_id, execution_profile_id, route_generation, route_state, route_reason, downstream_acp_session_id,
+			executor_id, executor_profile_id, environment_id,
 			repository_id, base_branch, base_commit_sha, workspace_path,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
 			is_primary, review_status, is_passthrough, task_environment_id, name
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		)
 	`), session.ID, session.TaskID, agentProfileID,
-		session.ExecutionProfileID, session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID, session.RepositoryID, session.BaseBranch, session.BaseCommitSHA, session.WorkspacePath,
+		session.ExecutionProfileID, session.RouteGeneration, session.RouteState, session.RouteReason, session.DownstreamACPSessionID,
+		session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID, session.RepositoryID, session.BaseBranch, session.BaseCommitSHA, session.WorkspacePath,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt,
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name)
 
-	if err != nil && strings.Contains(err.Error(), "uniq_office_task_session") {
-		// Two callers raced past their SELECT-then-INSERT for the same
-		// (task_id, agent_profile_id) — surface a typed sentinel so callers
-		// can classify with errors.Is rather than driver-message matching.
-		return fmt.Errorf("%w: %w", ErrOfficeSessionRaceConflict, err)
-	}
 	return err
 }
 
@@ -730,11 +1000,13 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 
 	err := row.Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &agentProfileID,
-		&session.ExecutionProfileID, &session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
+		&session.ExecutionProfileID, &session.RouteGeneration, &session.RouteState, &session.RouteReason, &session.DownstreamACPSessionID,
+		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
+		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut,
 	)
 
 	if err == sql.ErrNoRows {
@@ -783,8 +1055,52 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		return nil, fmt.Errorf("failed to load session worktrees: %w", err)
 	}
 	session.Worktrees = worktrees
+	if err := r.hydrateDynamicRoutePolicy(ctx, session); err != nil {
+		return nil, err
+	}
 
 	return session, nil
+}
+
+// hydrateDynamicRoutePolicy projects the durable route decision into session
+// responses. The route row remains the source of truth, so this projection
+// survives a backend restart without adding a second mutable policy store to
+// task_sessions.
+func (r *Repository) hydrateDynamicRoutePolicy(ctx context.Context, session *models.TaskSession) error {
+	if session == nil || session.RouteGeneration <= 0 {
+		return nil
+	}
+	var policyStateJSON string
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT policy_state_json FROM dynamic_route_states WHERE session_id = ?`,
+	), session.ID).Scan(&policyStateJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to load dynamic route policy projection: %w", err)
+	}
+	var projection struct {
+		FailureCode      string     `json:"failure_code"`
+		FailureClass     string     `json:"failure_class"`
+		CatalogueVersion string     `json:"catalogue_version"`
+		RetryOrdinal     int64      `json:"retry_ordinal"`
+		Deadline         *time.Time `json:"deadline"`
+		PendingOutcome   string     `json:"pending_outcome"`
+	}
+	if policyStateJSON == "" {
+		return nil
+	}
+	if err := json.Unmarshal([]byte(policyStateJSON), &projection); err != nil {
+		return fmt.Errorf("failed to decode dynamic route policy projection: %w", err)
+	}
+	session.RouteErrorCode = projection.FailureCode
+	session.RouteErrorClass = projection.FailureClass
+	session.RouteCatalogueVersion = projection.CatalogueVersion
+	session.RouteRetryOrdinal = projection.RetryOrdinal
+	session.RouteDeadline = projection.Deadline
+	session.RoutePendingOutcome = projection.PendingOutcome
+	return nil
 }
 
 // GetTaskSession retrieves an agent session by ID
@@ -906,9 +1222,16 @@ func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID st
 }
 
 // GetTaskSessionByTaskAndAgent retrieves the office task session for the given
-// (task_id, agent_profile_id) pair. The pair is unique across non-NULL
-// agent_profile_id rows, so at most one row matches. Returns nil, nil when
-// no session exists for the pair.
+// (task_id, agent_profile_id) pair. This pair is NOT unique at the schema
+// level — the office creation guard (CreateOfficeTaskSession) constrains it
+// only at the moment of insert, so legacy duplicate-pair data and rows
+// created outside that guard can still leave multiple rows for the same
+// pair. The ORDER BY therefore prefers a live row over a terminal one
+// regardless of which is newer — a terminal row created after a live row
+// (e.g. a stale duplicate resolving while the real session is still running)
+// must not shadow the live one — then falls back to started_at DESC, then id
+// DESC as a total tiebreak. Returns nil, nil when no session exists for the
+// pair.
 func (r *Repository) GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error) {
 	if taskID == "" || agentInstanceID == "" {
 		return nil, nil
@@ -916,7 +1239,11 @@ func (r *Repository) GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, a
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
 		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+`
 		 WHERE ts.task_id = ? AND ts.agent_profile_id = ?
-		 ORDER BY ts.started_at DESC LIMIT 1`,
+		 ORDER BY
+		   CASE WHEN ts.state IN ('COMPLETED', 'FAILED', 'CANCELLED') THEN 1 ELSE 0 END,
+		   ts.started_at DESC,
+		   ts.id DESC
+		 LIMIT 1`,
 	), taskID, agentInstanceID)
 	session, err := r.scanTaskSession(ctx, row, "task_sessions: no matching row")
 	if errors.Is(err, models.ErrTaskSessionNotFound) {
@@ -1082,6 +1409,8 @@ func (r *Repository) updateTaskSession(
 	return nil
 }
 
+// updateTaskSessionWithStateGuard writes a full session row while an optional
+// expected state guard still matches the stored row.
 func (r *Repository) updateTaskSessionWithStateGuard(
 	ctx context.Context,
 	exec taskSessionExecutor,
@@ -1110,21 +1439,25 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 	// would clobber metadata set via those side-channel paths since the
 	// caller's in-memory copy may be stale.
 
-	// agent_profile_id is stored as NULL when empty so the partial unique
-	// index over (task_id, agent_profile_id) ignores kanban / quick-chat rows.
+	// agent_profile_id is stored as NULL when empty. No unique index
+	// constrains (task_id, agent_profile_id) at this UPDATE path — office
+	// session-uniqueness enforcement lives only in CreateOfficeTaskSession's
+	// in-transaction guard (see ErrOfficeSessionRaceConflict's doc comment).
 	var agentProfileID interface{}
 	if session.AgentProfileID != "" {
 		agentProfileID = session.AgentProfileID
 	}
 	query := `
 		UPDATE task_sessions SET
-			agent_profile_id = ?, execution_profile_id = ?, executor_id = ?, executor_profile_id = ?, environment_id = ?,
+			agent_profile_id = ?, execution_profile_id = ?, route_generation = ?, route_state = ?, route_reason = ?, downstream_acp_session_id = ?,
+			executor_id = ?, executor_profile_id = ?, environment_id = ?,
 			repository_id = ?, base_branch = ?, base_commit_sha = ?, workspace_path = ?,
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
 			state = ?, error_message = ?, completed_at = ?, updated_at = ?,
 			is_primary = ?, review_status = ?, is_passthrough = ?, task_environment_id = ?
 		WHERE id = ?`
-	args := []interface{}{agentProfileID, session.ExecutionProfileID, session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID,
+	args := []interface{}{agentProfileID, session.ExecutionProfileID, session.RouteGeneration, session.RouteState, session.RouteReason, session.DownstreamACPSessionID,
+		session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID,
 		session.RepositoryID, session.BaseBranch, session.BaseCommitSHA, session.WorkspacePath,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, session.CompletedAt, session.UpdatedAt,
@@ -1418,22 +1751,21 @@ func (r *Repository) updateSessionMetadataJSON(
 }
 
 // SetSessionMetadataKey atomically sets a single key in the session's metadata
-// using SQLite's json_set. Unlike UpdateSessionMetadata (which does a full
-// replacement), this preserves all other metadata keys.
+// using the active database dialect. Unlike UpdateSessionMetadata (which does
+// a full replacement), this preserves all other metadata keys.
 func (r *Repository) SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error {
 	valueJSON, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("failed to serialize metadata value: %w", err)
 	}
-	now := time.Now().UTC()
-	path := "$." + key
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_sessions SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?, json(?)), updated_at = ? WHERE id = ?
-	`), path, string(valueJSON), now, sessionID)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(metadataKeyUpdateQuery("task_sessions", r.db.DriverName())), metadataKeyUpdateArgs(r.db.DriverName(), key, string(valueJSON), r.nowUTC(), sessionID)...)
 	if err != nil {
 		return err
 	}
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
 	if rows == 0 {
 		return fmt.Errorf("agent session not found: %s", sessionID)
 	}
@@ -1595,6 +1927,76 @@ func (r *Repository) SetSessionMetadataKeyIfAbsentOrDifferentStep(
 	return rows > 0, nil
 }
 
+// SetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStep claims a pending
+// completion signal only while the session's task remains on the turn's
+// launch step. The task row is locked before the session metadata write so a
+// concurrent workflow move cannot turn a stale signal into a valid successor
+// signal.
+func (r *Repository) SetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStep(
+	ctx context.Context,
+	taskID, sessionID, key, stepID string,
+	value interface{},
+) (bool, error) {
+	valueJSON, err := json.Marshal(value)
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize metadata value: %w", err)
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	_, currentStepID, found, err := r.readTaskStepInTx(ctx, tx, taskID)
+	if err != nil {
+		return false, err
+	}
+	if !found || currentStepID != stepID {
+		return false, nil
+	}
+
+	var sessionTaskID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(
+		`SELECT task_id FROM task_sessions WHERE id = ?`,
+	), sessionID).Scan(&sessionTaskID); err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	if sessionTaskID != taskID {
+		return false, nil
+	}
+
+	now := time.Now().UTC()
+	driver := r.db.DriverName()
+	path := key
+	stepPath := key
+	if !dialect.IsPostgres(driver) {
+		path = "$." + key
+		stepPath = path + ".step_id"
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(setSessionMetadataKeyIfAbsentOrDifferentStepQuery(driver)),
+		path, string(valueJSON), now, sessionID, stepPath, stepID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	committed = true
+	return rows > 0, nil
+}
+
 // SetSessionMetadataKeyIfAbsentIfState atomically claims a metadata key only
 // while the session remains in expectedState. It is used when a terminal
 // transition owns a one-time side effect that must not be emitted by a stale
@@ -1643,6 +2045,48 @@ func (r *Repository) RemoveSessionMetadataKeyIfState(
 	}
 	rows, _ := result.RowsAffected()
 	return rows > 0, nil
+}
+
+// RemoveSessionMetadataKeyIfStamp removes a metadata object only when its
+// nested stamp still equals expectedStamp. The comparison and key removal are
+// one statement so a successful recovery cannot erase a newer session error.
+func (r *Repository) RemoveSessionMetadataKeyIfStamp(
+	ctx context.Context,
+	sessionID, key, expectedStamp string,
+) (bool, error) {
+	if strings.TrimSpace(expectedStamp) == "" {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	driver := r.db.DriverName()
+	var query string
+	var args []interface{}
+	if dialect.IsPostgres(driver) {
+		query = `
+			UPDATE task_sessions
+			SET metadata = (CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END #- ARRAY[?]::text[])::text,
+				updated_at = ?
+			WHERE id = ?
+				AND jsonb_extract_path_text(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ?, 'stamp') = ?
+		`
+		args = []interface{}{key, now, sessionID, key, expectedStamp}
+	} else {
+		path := "$" + "." + key
+		query = `
+			UPDATE task_sessions
+			SET metadata = json_remove(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?),
+				updated_at = ?
+			WHERE id = ?
+				AND json_extract(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = ?
+		`
+		args = []interface{}{path, now, sessionID, path + ".stamp", expectedStamp}
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
 }
 
 func setSessionMetadataKeyIfAbsentQuery(driver string) string {
@@ -1803,29 +2247,16 @@ func (r *Repository) GetLastAgentMessage(ctx context.Context, sessionID string) 
 	return content, nil
 }
 
-// IncrementTaskSessionUsage adds the given deltas to the cumulative
+// IncrementTaskSessionUsageTx adds the given deltas to the cumulative
 // tokens / cost columns on task_sessions, including cached input tokens
 // (tokens_cached_in mirrors office_cost_events.tokens_cached_in and is kept
-// separate from tokens_in because it is priced differently). Used by the
-// office cost subscriber after a cost event lands so the per-session totals
-// stay in sync without re-summing office_cost_events. The model + DTO
-// don't surface these columns yet (DB-only per the office-costs
-// wedge); the cost explorer follow-up will expose them.
-//
-// Delegates to IncrementTaskSessionUsageTx using r.db as the executor; a
-// caller that needs this atomic with another write (e.g. the office cost
-// subscriber's ledger insert) should call the Tx variant directly with a
-// shared transaction instead.
-func (r *Repository) IncrementTaskSessionUsage(
-	ctx context.Context, sessionID string, tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
-) error {
-	return r.IncrementTaskSessionUsageTx(ctx, nil, sessionID, tokensIn, tokensCachedIn, tokensOut, costSubcents)
-}
-
-// IncrementTaskSessionUsageTx implements shared.SessionUsageWriterTx: same
-// write as IncrementTaskSessionUsage, but executed against tx when non-nil
-// (falling back to r.db, the shared writer connection, when tx is nil) so a
-// caller can make this atomic with another write in the same transaction.
+// separate from tokens_in because it is priced differently). Surfaced on
+// models.TaskSession and dto.TaskSessionDTO. internal/task/usage's writer is
+// the sole production caller (docs/specs/task-cost-ledger/spec.md AC-10,
+// AC-21) — it inserts a task_usage_events row and increments this rollup in
+// one transaction (insertUsageEventAndRollup in this package), so this
+// method is executed against tx when non-nil (falling back to r.db, the
+// shared writer connection, when tx is nil).
 func (r *Repository) IncrementTaskSessionUsageTx(
 	ctx context.Context, tx *sqlx.Tx, sessionID string, tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
 ) error {
@@ -1984,6 +2415,64 @@ func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*mo
 	return r.loadWorktreesBatch(ctx, sessions)
 }
 
+// ListTaskSessionsByTaskEnvironment returns every session bound to an
+// environment, including inherited sessions whose task differs from the
+// environment owner's task. The environment binding, rather than task row
+// ownership, is the source-selection boundary for shared workspaces.
+func (r *Repository) ListTaskSessionsByTaskEnvironment(ctx context.Context, environmentID string) ([]*models.TaskSession, error) {
+	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTaskSessionsByTaskEnvironment")
+	defer span.End()
+	if environmentID == "" {
+		return []*models.TaskSession{}, nil
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(
+		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+` WHERE ts.task_environment_id = ? ORDER BY ts.started_at DESC`,
+	), environmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	sessions, err := r.scanTaskSessions(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	return r.loadWorktreesBatch(ctx, sessions)
+}
+
+// GetTaskSessionWorkspacePathsByTaskEnvironment returns only the raw workspace
+// paths recorded on session rows bound to an environment. It deliberately does
+// not use the effective environment projection because an empty or historical
+// session path must remain distinguishable from the canonical path.
+func (r *Repository) GetTaskSessionWorkspacePathsByTaskEnvironment(ctx context.Context, environmentID string) (map[string]string, error) {
+	paths := make(map[string]string)
+	if environmentID == "" {
+		return paths, nil
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT id, workspace_path
+		FROM task_sessions
+		WHERE task_environment_id = ?
+	`), environmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var sessionID string
+		var workspacePath sql.NullString
+		if err := rows.Scan(&sessionID, &workspacePath); err != nil {
+			return nil, err
+		}
+		paths[sessionID] = workspacePath.String
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return paths, nil
+}
+
 // ListActiveTaskSessions returns all active agent sessions across all tasks
 func (r *Repository) ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListActiveTaskSessions")
@@ -2117,7 +2606,7 @@ func (r *Repository) GetActiveTaskInfoByAgentProfile(ctx context.Context, agentP
 	// let one nightly report block its profile's deletion forever. Those are
 	// excluded, which makes them non-resumable if the profile goes: replying to
 	// an old run afterwards fails. That is the accepted trade — see
-	// docs/specs/office/automations-settings.md.
+	// docs/specs/office/requirements/automations-settings.md.
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT DISTINCT t.id, t.title, t.is_ephemeral
 		FROM task_sessions ts
@@ -2276,11 +2765,13 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 
 	err := rows.Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &agentProfileID,
-		&session.ExecutionProfileID, &session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
+		&session.ExecutionProfileID, &session.RouteGeneration, &session.RouteState, &session.RouteReason, &session.DownstreamACPSessionID,
+		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
+		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut,
 	)
 	if err != nil {
 		return nil, err
@@ -2737,22 +3228,37 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 // (`SELECT ... FOR UPDATE`) before touching its sessions, so a second
 // concurrent promotion for the same task blocks until the first commits.
 func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) error {
+	_, err := r.setSessionPrimary(ctx, sessionID, false)
+	return err
+}
+
+// SetSessionPrimaryIfNonterminal marks a session primary only while it remains
+// nonterminal. It is used by workflow profile switching so a completed agent
+// cannot be promoted from a stale lookup and have its ACP conversation resumed.
+func (r *Repository) SetSessionPrimaryIfNonterminal(ctx context.Context, sessionID string) (bool, error) {
+	return r.setSessionPrimary(ctx, sessionID, true)
+}
+
+func (r *Repository) setSessionPrimary(ctx context.Context, sessionID string, requireNonterminal bool) (bool, error) {
 	now := time.Now().UTC()
 
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// First, get the task_id for this session
+	// First, get the task_id for this session. Do not lock the target row here:
+	// every primary promotion must take the owning task lock first so concurrent
+	// promotions keep one lock order.
 	var taskID string
-	err = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_sessions WHERE id = ?`), sessionID).Scan(&taskID)
+	query := `SELECT task_id FROM task_sessions WHERE id = ?`
+	err = tx.QueryRowContext(ctx, r.db.Rebind(query), sessionID).Scan(&taskID)
 	if err == sql.ErrNoRows {
-		return fmt.Errorf("session not found: %s", sessionID)
+		return primarySessionNotPromoted(sessionID, requireNonterminal)
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Serialize concurrent promotions for the same task across Postgres
@@ -2762,7 +3268,20 @@ func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) er
 		var lockedTaskID string
 		err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT id FROM tasks WHERE id = ? FOR UPDATE`), taskID).Scan(&lockedTaskID)
 		if err != nil && err != sql.ErrNoRows {
-			return err
+			return false, err
+		}
+	}
+
+	// Once the task lock is held, lock and validate the target row before
+	// promoting it. This serializes the nonterminal check with a concurrent
+	// state transition without reversing the task -> session lock order above.
+	if requireNonterminal {
+		valid, err := r.lockNonterminalPrimarySession(ctx, tx, sessionID)
+		if err != nil {
+			return false, err
+		}
+		if !valid {
+			return false, nil
 		}
 	}
 
@@ -2771,20 +3290,25 @@ func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) er
 		UPDATE task_sessions SET is_primary = 0, updated_at = ? WHERE task_id = ?
 	`), now, taskID)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Set primary flag on the specified session
-	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_sessions SET is_primary = 1, updated_at = ? WHERE id = ?
-	`), now, sessionID)
+	promoteQuery := `UPDATE task_sessions SET is_primary = 1, updated_at = ? WHERE id = ?`
+	if requireNonterminal {
+		promoteQuery += ` AND state IN ('CREATED', 'STARTING', 'RUNNING', 'IDLE', 'WAITING_FOR_INPUT')`
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(promoteQuery), now, sessionID)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("session not found: %s", sessionID)
+		return primarySessionNotPromoted(sessionID, requireNonterminal)
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }

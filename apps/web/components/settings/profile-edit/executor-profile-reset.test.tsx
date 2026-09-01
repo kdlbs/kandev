@@ -43,6 +43,7 @@ const profile: ExecutorProfile = {
     dockerfile: "FROM persisted",
     image_tag: "persisted:latest",
     ssh_shell: "/bin/zsh",
+    ssh_reclaim_task_dir: "true",
     platform: "linux/arm64",
     main_container: "persisted-agent",
     pod_template_yaml: "persisted pod template",
@@ -80,6 +81,7 @@ function editEveryProfileField(form: ReturnType<typeof useProfileFormState>) {
   form.setDockerfile("FROM edited");
   form.setImageTag("edited:latest");
   form.setSshShell("/bin/bash");
+  form.setSshReclaimTaskDir(false);
   form.setKubernetesProfile({
     ...form.kubernetesProfile,
     mainContainer: "edited-agent",
@@ -119,6 +121,7 @@ describe("executor profile reset", () => {
       dockerfile: form.dockerfile,
       imageTag: form.imageTag,
       sshShell: form.sshShell,
+      sshReclaimTaskDir: form.sshReclaimTaskDir,
       kubernetesProfile: form.kubernetesProfile,
       envVarRows: form.envVarRows,
       spritesSecretId: form.spritesSecretId,
@@ -137,6 +140,7 @@ describe("executor profile reset", () => {
       dockerfile: profile.config?.dockerfile,
       imageTag: profile.config?.image_tag,
       sshShell: profile.config?.ssh_shell,
+      sshReclaimTaskDir: true,
       kubernetesProfile: parseKubernetesProfileConfig(profile.config),
       envVarRows: envVarsToRows(profile.env_vars),
       spritesSecretId: deriveSpritesSecretId(profile.env_vars),

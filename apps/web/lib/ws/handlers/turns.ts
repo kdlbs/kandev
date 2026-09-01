@@ -1,9 +1,10 @@
 import type { StoreApi } from "zustand";
 import { createDebugLogger } from "@/lib/debug/log";
+import { isTerminalToolCallStatus } from "@/lib/utils/tool-call-status";
 import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
-import { sessionId, taskId } from "@/lib/types/http";
+import { agentProfileId, sessionId, taskId } from "@/lib/types/http";
 import { maybeEmitEmptyTurnNotice } from "@/lib/ws/handlers/empty-turn-notice";
 import type { MessageUpdateScheduler } from "@/lib/ws/handlers/messages";
 
@@ -17,7 +18,7 @@ function completePendingToolCalls(store: StoreApi<AppState>, sessionId: string):
   for (const message of messages) {
     if (message.type === "permission_request") continue;
     const metadata = message.metadata as Record<string, unknown> | undefined;
-    if (metadata?.tool_call_id && metadata.status !== "complete" && metadata.status !== "error") {
+    if (metadata?.tool_call_id && !isTerminalToolCallStatus(String(metadata.status ?? ""))) {
       store.getState().updateMessage({
         ...message,
         metadata: { ...metadata, status: "complete" },
@@ -48,6 +49,10 @@ export function registerTurnsHandlers(
         task_id: taskId(payload.task_id),
         started_at: payload.started_at,
         completed_at: payload.completed_at,
+        execution_profile_id: payload.execution_profile_id
+          ? agentProfileId(payload.execution_profile_id)
+          : undefined,
+        route_generation: payload.route_generation,
         metadata: payload.metadata,
         created_at: payload.created_at,
         updated_at: payload.updated_at,
@@ -89,6 +94,10 @@ export function registerTurnsHandlers(
         task_id: taskId(payload.task_id),
         started_at: payload.started_at,
         completed_at: payload.completed_at || new Date().toISOString(),
+        execution_profile_id: payload.execution_profile_id
+          ? agentProfileId(payload.execution_profile_id)
+          : undefined,
+        route_generation: payload.route_generation,
         metadata: payload.metadata,
         created_at: payload.created_at,
         updated_at: payload.updated_at,

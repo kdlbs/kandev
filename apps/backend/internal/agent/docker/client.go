@@ -12,9 +12,11 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/containerd/errdefs"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -389,6 +391,12 @@ func (c *Client) StopContainer(ctx context.Context, containerID string, timeout 
 		Timeout: &timeoutSeconds,
 	})
 	if err != nil {
+		if errdefs.IsNotFound(err) {
+			// Container teardown is intentionally idempotent. A container can
+			// disappear between the task resource snapshot and this stop call
+			// (for example, after an explicit environment reset).
+			return nil
+		}
 		c.logger.Error("Failed to stop container", zap.String("container_id", containerID), zap.Error(err))
 		return fmt.Errorf("failed to stop container %s: %w", containerID, err)
 	}
@@ -409,12 +417,32 @@ func (c *Client) RemoveContainer(ctx context.Context, containerID string, force 
 		RemoveVolumes: true,
 	})
 	if err != nil {
+		if errdefs.IsNotFound(err) {
+			// Remove is a convergence operation. Another cleanup owner may have
+			// removed the container already, which is the desired end state.
+			return nil
+		}
+		if containerRemovalInProgress(err) {
+			// A concurrent cleanup owner is already removing the container. Treat
+			// this conflict as success because both callers converge on removal.
+			return nil
+		}
 		c.logger.Error("Failed to remove container", zap.String("container_id", containerID), zap.Error(err))
 		return fmt.Errorf("failed to remove container %s: %w", containerID, err)
 	}
 
 	c.logger.Info("Container removed", zap.String("container_id", containerID))
 	return nil
+}
+
+func containerRemovalInProgress(err error) bool {
+	if !errdefs.IsConflict(err) {
+		return false
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "removal of container") &&
+		strings.Contains(message, "already in progress")
 }
 
 func (c *Client) containerRemover() containerRemover {
@@ -433,6 +461,11 @@ func (c *Client) KillContainer(ctx context.Context, containerID string, signal s
 
 	_, err := c.cli.ContainerKill(ctx, containerID, client.ContainerKillOptions{Signal: signal})
 	if err != nil {
+		if errdefs.IsNotFound(err) {
+			// A forced cleanup may race with Docker auto-removal or another
+			// teardown pass. Missing already means the container is stopped.
+			return nil
+		}
 		c.logger.Error("Failed to kill container", zap.String("container_id", containerID), zap.Error(err))
 		return fmt.Errorf("failed to kill container %s: %w", containerID, err)
 	}
