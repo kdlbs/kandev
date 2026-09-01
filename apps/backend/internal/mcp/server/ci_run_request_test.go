@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -46,6 +47,20 @@ func TestRequestFreshCIRunToolRejectsExtraAuthorityFields(t *testing.T) {
 		"expected_workflow_step_id": "ci-fixup", "source_run_id": 100,
 		"expected_source_attempt": 1, "evidence_kind": "pr_head",
 		"idempotency_key": "consumer-42-attempt-1", "ref": "main",
+	})
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction)
+}
+
+func TestRequestFreshCIRunToolRejectsNonHexHeadSHA(t *testing.T) {
+	backend := &testBackend{}
+	server := newTaskModeServer(t, backend, "coordinator-1")
+	result := callTool(t, server, "request_fresh_ci_run_kandev", map[string]any{
+		"task_id": "target-1", "repository_id": "repository-1", "pr_number": 42,
+		"expected_head_sha":         strings.Repeat("z", 40),
+		"expected_workflow_step_id": "ci-fixup", "source_run_id": 100,
+		"expected_source_attempt": 1, "evidence_kind": "pr_head",
+		"idempotency_key": "consumer-42-attempt-1",
 	})
 	assert.True(t, result.IsError)
 	assert.Empty(t, backend.lastAction)

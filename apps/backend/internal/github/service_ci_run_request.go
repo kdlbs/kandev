@@ -140,6 +140,9 @@ func validateFreshCIRunInput(input RequestFreshCIRunInput) CIRunFailureClass {
 		len(input.IdempotencyKey) > 256 {
 		return CIRunFailureTaskMismatch
 	}
+	if err := validateGitHubCommitSHA(input.ExpectedHeadSHA); err != nil {
+		return CIRunFailureTaskMismatch
+	}
 	if input.EvidenceKind != CIRunEvidencePRHead && input.EvidenceKind != CIRunEvidenceCurrentMerge {
 		return CIRunFailureTaskMismatch
 	}

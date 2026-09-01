@@ -35,6 +35,19 @@ type fakeCIRunActionsClient struct {
 	dispatchInputs  map[string]string
 }
 
+func TestValidateFreshCIRunInputRejectsNonHexHeadSHA(t *testing.T) {
+	input := RequestFreshCIRunInput{
+		ActorTaskID: "coordinator-1", ActorSessionID: "session-1", TargetTaskID: "target-1",
+		RepositoryID: "repository-1", PRNumber: 42, ExpectedHeadSHA: strings.Repeat("z", 40),
+		ExpectedWorkflowStepID: "ci-fixup", SourceRunID: 100, ExpectedSourceAttempt: 1,
+		EvidenceKind: CIRunEvidencePRHead, IdempotencyKey: "consumer-42-attempt-1",
+	}
+
+	if failure := validateFreshCIRunInput(input); failure != CIRunFailureTaskMismatch {
+		t.Fatalf("validateFreshCIRunInput() = %q, want %q", failure, CIRunFailureTaskMismatch)
+	}
+}
+
 func (f *fakeCIRunActionsClient) GetPR(context.Context, string, string, int) (*PR, error) {
 	f.prCalls++
 	if f.prCalls <= len(f.prSequence) {

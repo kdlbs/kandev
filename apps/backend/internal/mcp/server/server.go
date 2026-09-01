@@ -1159,7 +1159,7 @@ func (s *Server) registerKanbanTools() {
 				mcp.WithString("task_id", mcp.Required(), mcp.Description("Target task with the linked pull request")),
 				mcp.WithString("repository_id", mcp.Required(), mcp.Description("Target task's linked repository ID")),
 				mcp.WithNumber("pr_number", mcp.Required(), mcp.Min(1)),
-				mcp.WithString("expected_head_sha", mcp.Required(), mcp.MinLength(40), mcp.MaxLength(40)),
+				mcp.WithString("expected_head_sha", mcp.Required(), mcp.Pattern("^[0-9a-fA-F]{40}$")),
 				mcp.WithString("expected_workflow_step_id", mcp.Required()),
 				mcp.WithNumber("source_run_id", mcp.Required(), mcp.Min(1)),
 				mcp.WithNumber("expected_source_attempt", mcp.Required(), mcp.Min(1)),
