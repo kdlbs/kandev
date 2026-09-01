@@ -10,10 +10,11 @@ import (
 )
 
 // TestIdleSkip_RoutineDispatchNoTasks_Skipped is the WO-46 regression test.
-// Production routine dispatch (internal/office/routines) queues runs with
-// reason "routine_dispatch", not RunReasonHeartbeat — checkIdleSkip must
-// recognize that reason too, or the idle-skip gate is unreachable in
-// production even though the existing RunReasonHeartbeat-driven tests pass.
+// Production cron-driven routine dispatch (internal/office/routines) queues
+// runs with reason "routine_dispatch_cron", not RunReasonHeartbeat —
+// checkIdleSkip must recognize that reason too, or the idle-skip gate is
+// unreachable in production even though the existing
+// RunReasonHeartbeat-driven tests pass.
 func TestIdleSkip_RoutineDispatchNoTasks_Skipped(t *testing.T) {
 	mock := &mockTaskStarter{}
 	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
@@ -31,7 +32,7 @@ func TestIdleSkip_RoutineDispatchNoTasks_Skipped(t *testing.T) {
 	}
 	// Worker defaults to skip_idle_runs=true, no tasks assigned.
 
-	if err := svc.QueueRun(ctx, agent.ID, shared.RunReasonRoutineDispatch, `{}`, ""); err != nil {
+	if err := svc.QueueRun(ctx, agent.ID, shared.RunReasonRoutineDispatchCron, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -97,7 +98,7 @@ func TestIdleSkip_RoutineDispatch_CoordinatorNotSkipped(t *testing.T) {
 		t.Fatalf("CEO role should default to SkipIdleRuns=false")
 	}
 
-	if err := svc.QueueRun(ctx, agent.ID, shared.RunReasonRoutineDispatch, `{}`, ""); err != nil {
+	if err := svc.QueueRun(ctx, agent.ID, shared.RunReasonRoutineDispatchCron, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 

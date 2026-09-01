@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/shared"
 )
 
 // Concurrency policy values stored on office_routines.concurrency_policy.
@@ -141,13 +142,33 @@ func (d *Dispatcher) Dispatch(ctx context.Context, requestID string) error {
 	case PolicySkipIfActive:
 		return d.repo.MarkWakeupRequestSkipped(ctx, req.ID, "policy:skip_if_active")
 	case PolicyCoalesceIfActive:
-		return d.repo.MarkWakeupRequestCoalesced(ctx, req.ID, inflight.ID)
+		return d.coalesceIntoInflightRun(ctx, req, inflight)
 	}
 	// Unknown policies fall back to coalesce — the safest "do something"
 	// behaviour. Surface a warning so misconfigured rows are visible.
 	d.log.Warn("unknown wakeup concurrency policy; coalescing",
 		zap.String("policy", policy),
 		zap.String("agent_id", req.AgentProfileID))
+	return d.coalesceIntoInflightRun(ctx, req, inflight)
+}
+
+// coalesceIntoInflightRun merges req into inflight, promoting the run's
+// reason first when the merge would otherwise let a periodic
+// classification survive on top of an event/user-triggered request —
+// see docs/specs/office/scheduler.md ("Event-triggered wakeups always
+// proceed"). Promotion is monotonic (periodic → event only): a
+// periodic request coalescing into an already event-classified run
+// never demotes it back to periodic.
+func (d *Dispatcher) coalesceIntoInflightRun(
+	ctx context.Context, req *officesqlite.WakeupRequest, inflight *models.Run,
+) error {
+	if req.Reason != "" &&
+		shared.IsPeriodicTasklessWake(inflight.Reason) &&
+		!shared.IsPeriodicTasklessWake(req.Reason) {
+		if err := d.repo.UpdateRunReason(ctx, inflight.ID, req.Reason); err != nil {
+			return fmt.Errorf("promote run reason for %s: %w", inflight.ID, err)
+		}
+	}
 	return d.repo.MarkWakeupRequestCoalesced(ctx, req.ID, inflight.ID)
 }
 

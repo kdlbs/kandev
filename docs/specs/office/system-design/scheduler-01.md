@@ -189,7 +189,8 @@ Coordinator agents default to `false` because their heartbeat purpose is self-di
 
 | Source | Skippable? |
 |--------|-----------|
-| `routine` (lightweight, heartbeat-style) | Yes |
+| `routine`, cron-triggered (lightweight, heartbeat-style) | Yes |
+| `routine`, manual "Fire now" or webhook-triggered | No |
 | `task_assigned`, `comment`, `task_blockers_resolved`, `task_children_completed`, `approval_resolved`, `agent_error`, `budget_alert`, `self`, `user` | No |
 
 Skipped wakeups are not silently discarded:

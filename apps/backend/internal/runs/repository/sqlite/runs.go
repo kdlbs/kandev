@@ -607,6 +607,17 @@ func (r *Repository) FindInflightRunForAgent(
 	return &run, nil
 }
 
+// UpdateRunReason overwrites a run's reason. Used by the wakeup
+// dispatcher to promote an in-flight run's reason when an
+// event-classified wakeup-request coalesces into it, so a periodic
+// classification never survives merging in a manual/webhook trigger.
+func (r *Repository) UpdateRunReason(ctx context.Context, runID, reason string) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE runs SET reason = ? WHERE id = ?
+	`), reason, runID)
+	return err
+}
+
 // ListRunsForAgentPaged returns runs for an agent ordered by
 // (requested_at DESC, id DESC), starting strictly after the given
 // cursor. Pass cursor.IsZero() == true to fetch the first page.
