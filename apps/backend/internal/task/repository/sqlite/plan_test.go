@@ -84,6 +84,15 @@ func assertPlanRevisionEqual(t *testing.T, got, want *models.TaskPlanRevision) {
 	if got.AuthorName != want.AuthorName {
 		t.Errorf("AuthorName = %q, want %q", got.AuthorName, want.AuthorName)
 	}
+	if got.WorkflowStepID != want.WorkflowStepID {
+		t.Errorf("WorkflowStepID = %q, want %q", got.WorkflowStepID, want.WorkflowStepID)
+	}
+	if got.WorkflowStepName != want.WorkflowStepName {
+		t.Errorf("WorkflowStepName = %q, want %q", got.WorkflowStepName, want.WorkflowStepName)
+	}
+	if got.WorkflowStepColor != want.WorkflowStepColor {
+		t.Errorf("WorkflowStepColor = %q, want %q", got.WorkflowStepColor, want.WorkflowStepColor)
+	}
 	assertOptionalString(t, "RevertOfRevisionID", got.RevertOfRevisionID, want.RevertOfRevisionID)
 	assertTimeEqual(t, "CreatedAt", got.CreatedAt, want.CreatedAt)
 	assertTimeEqual(t, "UpdatedAt", got.UpdatedAt, want.UpdatedAt)
@@ -317,6 +326,9 @@ func TestInsertTaskPlanRevisionRoundTripsEveryField(t *testing.T) {
 		ID: "planrev-full", TaskID: "task-planrev-full", RevisionNumber: 4,
 		Title: "Plan v4", Content: "four", AuthorKind: "user", AuthorName: "jcfs",
 		RevertOfRevisionID: &revertOf,
+		WorkflowStepID:     "step-build",
+		WorkflowStepName:   "Build",
+		WorkflowStepColor:  "bg-blue-500",
 		CreatedAt:          time.Date(2026, 6, 6, 6, 6, 6, 789000000, time.UTC),
 	}
 	if err := repo.InsertTaskPlanRevision(ctx, want); err != nil {
@@ -706,7 +718,9 @@ func TestWritePlanRevisionCoalescesIntoExistingRevision(t *testing.T) {
 	first := &models.TaskPlanRevision{
 		ID: "planrev-merge", TaskID: "task-writeplan-merge", Title: "v1", Content: "one",
 		AuthorKind: "agent", AuthorName: "claude",
-		CreatedAt: time.Date(2026, 2, 2, 2, 2, 2, 0, time.UTC),
+		WorkflowStepID:   "step-build",
+		WorkflowStepName: "Build",
+		CreatedAt:        time.Date(2026, 2, 2, 2, 2, 2, 0, time.UTC),
 	}
 	if err := repo.WritePlanRevision(ctx, head, first, nil, false, false); err != nil {
 		t.Fatalf("WritePlanRevision(first): %v", err)
@@ -717,6 +731,10 @@ func TestWritePlanRevisionCoalescesIntoExistingRevision(t *testing.T) {
 	merged := &models.TaskPlanRevision{
 		TaskID: "task-writeplan-merge", Title: "v1 edited", Content: "one edited",
 		AuthorKind: "ignored", AuthorName: "ignored",
+		// Different step than `first` — proves the merge UPDATE (title/content/
+		// updated_at only) doesn't re-stamp the persisted step columns.
+		WorkflowStepID:   "step-review",
+		WorkflowStepName: "Review",
 	}
 	coalesceID := "planrev-merge"
 	if err := repo.WritePlanRevision(ctx, head, merged, &coalesceID, false, false); err != nil {
@@ -742,6 +760,9 @@ func TestWritePlanRevisionCoalescesIntoExistingRevision(t *testing.T) {
 	}
 	if got.AuthorKind != "agent" || got.AuthorName != "claude" {
 		t.Errorf("author = %q/%q, want the original agent/claude preserved", got.AuthorKind, got.AuthorName)
+	}
+	if got.WorkflowStepID != "step-build" || got.WorkflowStepName != "Build" {
+		t.Errorf("workflow step = %q/%q, want the original step-build/Build preserved (merge must not re-stamp)", got.WorkflowStepID, got.WorkflowStepName)
 	}
 	if !got.CreatedAt.Equal(first.CreatedAt) {
 		t.Errorf("CreatedAt = %v, want %v preserved", got.CreatedAt, first.CreatedAt)

@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 var (
@@ -43,6 +44,15 @@ type planRepo interface {
 	GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	GetTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
+	GetTask(ctx context.Context, id string) (*models.Task, error)
+}
+
+// PlanWorkflowStepGetter resolves a workflow step's display info so plan
+// revisions can be stamped with the step the task was on at write time.
+// Narrower than taskservice.WorkflowStepGetter (GetStep only) since that's
+// all this stamp needs; callers wire the same underlying adapter.
+type PlanWorkflowStepGetter interface {
+	GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
 }
 
 // PlanService provides task plan business logic.
@@ -55,6 +65,9 @@ type PlanService struct {
 	// authorizeTask gates plan access by the task's workspace ownership
 	// (opt-in auth). Nil = unscoped (internal callers / auth disabled).
 	authorizeTask func(ctx context.Context, taskID string) error
+	// workflowStepGetter resolves the task's current workflow step for the
+	// write-time stamp. Nil is safe: stamped fields stay empty.
+	workflowStepGetter PlanWorkflowStepGetter
 }
 
 // NewPlanService creates a new task plan service. The concrete repository
@@ -79,6 +92,13 @@ func NewPlanService(repo planRepo, eventBus bus.EventBus, log *logger.Logger, co
 // authorizer must return nil for contexts without a request identity.
 func (s *PlanService) SetTaskAuthorizer(fn func(ctx context.Context, taskID string) error) {
 	s.authorizeTask = fn
+}
+
+// SetWorkflowStepGetter wires the workflow step lookup used to stamp plan
+// revisions with the task's step at write time. Optional; leaving it unset
+// keeps every existing caller working with the stamp fields left empty.
+func (s *PlanService) SetWorkflowStepGetter(getter PlanWorkflowStepGetter) {
+	s.workflowStepGetter = getter
 }
 
 func (s *PlanService) authorize(ctx context.Context, taskID string) error {
@@ -397,11 +417,19 @@ func (s *PlanService) buildRevision(
 	var coalesceID *string
 	if coalesce {
 		coalesceID = &latest.ID
-		// Preserve the original revision's author + number on merge.
+		// Preserve the original revision's author, number, and workflow-step
+		// stamp on merge — the DB row's stamp columns aren't touched by the
+		// merge UPDATE either, so this keeps the in-memory rev (used for the
+		// revision event payload) consistent with what's actually persisted.
 		rev.RevisionNumber = latest.RevisionNumber
 		rev.AuthorKind = latest.AuthorKind
 		rev.AuthorName = latest.AuthorName
 		rev.CreatedAt = latest.CreatedAt
+		rev.WorkflowStepID = latest.WorkflowStepID
+		rev.WorkflowStepName = latest.WorkflowStepName
+		rev.WorkflowStepColor = latest.WorkflowStepColor
+	} else {
+		rev.WorkflowStepID, rev.WorkflowStepName, rev.WorkflowStepColor = s.currentWorkflowStepStamp(ctx, req.TaskID)
 	}
 
 	return revisionBuild{
@@ -471,6 +499,26 @@ func agentDisplayNameFromSnapshot(snapshot map[string]interface{}) string {
 		}
 	}
 	return ""
+}
+
+// currentWorkflowStepStamp resolves the task's current workflow step display
+// snapshot for a new revision write. Returns empty strings whenever the
+// getter isn't wired, the task or its step can't be read, or the task has no
+// step set — this is observability metadata, not a guard, so any failure
+// here degrades to "no step recorded" rather than failing the write.
+func (s *PlanService) currentWorkflowStepStamp(ctx context.Context, taskID string) (id, name, color string) {
+	if s.workflowStepGetter == nil {
+		return "", "", ""
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil || task.WorkflowStepID == "" {
+		return "", "", ""
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	if err != nil || step == nil {
+		return "", "", ""
+	}
+	return step.ID, step.Name, step.Color
 }
 
 func (s *PlanService) canCoalesce(latest *models.TaskPlanRevision, authorKind, authorName string, now time.Time) bool {

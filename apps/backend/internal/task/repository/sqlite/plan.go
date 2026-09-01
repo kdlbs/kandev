@@ -14,7 +14,7 @@ import (
 
 // revisionSelectCols lists the task_plan_revisions columns in the fixed order used by
 // every SELECT in this file (and by scanRevisionRow / scanRevisionRows).
-const revisionSelectCols = `id, task_id, revision_number, title, content, author_kind, author_name, revert_of_revision_id, created_at, updated_at`
+const revisionSelectCols = `id, task_id, revision_number, title, content, author_kind, author_name, revert_of_revision_id, workflow_step_id, workflow_step_name, workflow_step_color, created_at, updated_at`
 
 // authorKindAgent matches the task_plan_revisions.author_kind column DEFAULT
 // and is the fallback for unknown values when persisting plan history rows.
@@ -137,11 +137,13 @@ func (r *Repository) InsertTaskPlanRevision(ctx context.Context, rev *models.Tas
 
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_plan_revisions
-			(id, task_id, revision_number, title, content, author_kind, author_name, revert_of_revision_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(`+revisionSelectCols+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		rev.ID, rev.TaskID, rev.RevisionNumber, rev.Title, rev.Content,
-		rev.AuthorKind, rev.AuthorName, rev.RevertOfRevisionID, rev.CreatedAt, rev.UpdatedAt)
+		rev.AuthorKind, rev.AuthorName, rev.RevertOfRevisionID,
+		rev.WorkflowStepID, rev.WorkflowStepName, rev.WorkflowStepColor,
+		rev.CreatedAt, rev.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to insert task plan revision: %w", err)
 	}
@@ -200,7 +202,9 @@ func (r *Repository) ListTaskPlanRevisions(ctx context.Context, taskID string, l
 		var revertOf sql.NullString
 		if err := rows.Scan(
 			&rev.ID, &rev.TaskID, &rev.RevisionNumber, &rev.Title, &rev.Content,
-			&rev.AuthorKind, &rev.AuthorName, &revertOf, &rev.CreatedAt, &rev.UpdatedAt,
+			&rev.AuthorKind, &rev.AuthorName, &revertOf,
+			&rev.WorkflowStepID, &rev.WorkflowStepName, &rev.WorkflowStepColor,
+			&rev.CreatedAt, &rev.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan task plan revision: %w", err)
 		}
@@ -409,10 +413,12 @@ func insertNewRevisionInTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, rev *m
 	if _, err := tx.ExecContext(ctx, db.Rebind(`
 		INSERT INTO task_plan_revisions
 			(`+revisionSelectCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		rev.ID, rev.TaskID, rev.RevisionNumber, rev.Title, rev.Content,
-		rev.AuthorKind, rev.AuthorName, rev.RevertOfRevisionID, rev.CreatedAt, rev.UpdatedAt); err != nil {
+		rev.AuthorKind, rev.AuthorName, rev.RevertOfRevisionID,
+		rev.WorkflowStepID, rev.WorkflowStepName, rev.WorkflowStepColor,
+		rev.CreatedAt, rev.UpdatedAt); err != nil {
 		return fmt.Errorf("insert plan revision: %w", err)
 	}
 	return nil
@@ -423,7 +429,9 @@ func (r *Repository) scanRevisionRow(row *sql.Row) (*models.TaskPlanRevision, er
 	var revertOf sql.NullString
 	err := row.Scan(
 		&rev.ID, &rev.TaskID, &rev.RevisionNumber, &rev.Title, &rev.Content,
-		&rev.AuthorKind, &rev.AuthorName, &revertOf, &rev.CreatedAt, &rev.UpdatedAt,
+		&rev.AuthorKind, &rev.AuthorName, &revertOf,
+		&rev.WorkflowStepID, &rev.WorkflowStepName, &rev.WorkflowStepColor,
+		&rev.CreatedAt, &rev.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
