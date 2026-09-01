@@ -76,10 +76,11 @@ make forged or stale caller identity fail closed.
   those identities.
 - **AC-TASKS-PENDING-MOVE-CANCELLATION-002.3:** A Coordinator request shall be
   authorized only while the workspace grant, caller task/session/execution,
-  target task/session/workflow, and workspace-owner identity are all live and
-  consistent in the cancellation transaction. Coordinator-grant persistence
-  shall also reject empty identifiers and make a cross-workspace task/grant
-  pair unrepresentable.
+  reachable target task/session/workflow, and workspace-owner identity are all
+  live and consistent in the cancellation transaction. A terminal lifecycle
+  transition shall durably revoke execution liveness before releasing the
+  execution. Coordinator-grant persistence shall also reject empty identifiers
+  and make a cross-workspace task/grant pair unrepresentable.
 - **AC-TASKS-PENDING-MOVE-CANCELLATION-002.4:** Ordinary agents, synthetic or forged
   principals, self-targets, revoked or stopped Coordinators, non-owner callers,
   and cross-workspace requests shall make no mutation and shall receive the

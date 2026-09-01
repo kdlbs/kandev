@@ -199,11 +199,25 @@ func (r *sqliteRepository) deleteExactCancelTarget(
 				WHERE caller.id = ? AND caller.workspace_id = ? AND workspace.owner_id = ?
 					AND caller_session.state IN ('STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 					AND execution.status IN ('starting', 'running', 'ready')
+					AND EXISTS (
+						WITH RECURSIVE target_ancestors(id, parent_id, depth) AS (
+							SELECT id, parent_id, 0 FROM tasks
+							WHERE id = ? AND workspace_id = caller.workspace_id
+							UNION ALL
+							SELECT parent.id, parent.parent_id, target_ancestors.depth + 1
+							FROM tasks parent
+							JOIN target_ancestors ON target_ancestors.parent_id = parent.id
+							WHERE target_ancestors.depth < 64
+								AND parent.workspace_id = caller.workspace_id
+						)
+						SELECT 1 FROM target_ancestors WHERE id = caller.id
+					)
 			)
 	`), match.PendingMoveID, match.SessionID, match.TaskID, match.MoveID,
 		match.WorkflowID, match.ExpectedTargetWorkflowStepID,
 		actor.WorkspaceID, match.ExpectedCurrentWorkflowStepID,
-		actor.CallerSessionID, actor.CallerExecutionID, actor.CallerTaskID, actor.WorkspaceID, actor.UserID)
+		actor.CallerSessionID, actor.CallerExecutionID, actor.CallerTaskID, actor.WorkspaceID, actor.UserID,
+		match.TaskID)
 	if err != nil {
 		return false, fmt.Errorf("delete exact pending move: %w", err)
 	}
@@ -242,7 +256,20 @@ func (r *sqliteRepository) exactCancelActorAuthorized(
 		WHERE caller.id = ? AND caller.workspace_id = ? AND workspace.owner_id = ?
 			AND caller_session.state IN ('STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 			AND execution.status IN ('starting', 'running', 'ready')
-	`), actor.CallerSessionID, actor.CallerExecutionID, actor.CallerTaskID, actor.WorkspaceID, actor.UserID)
+			AND EXISTS (
+				WITH RECURSIVE target_ancestors(id, parent_id, depth) AS (
+					SELECT id, parent_id, 0 FROM tasks
+					WHERE id = ? AND workspace_id = caller.workspace_id
+					UNION ALL
+					SELECT parent.id, parent.parent_id, target_ancestors.depth + 1
+					FROM tasks parent
+					JOIN target_ancestors ON target_ancestors.parent_id = parent.id
+					WHERE target_ancestors.depth < 64
+						AND parent.workspace_id = caller.workspace_id
+				)
+				SELECT 1 FROM target_ancestors WHERE id = caller.id
+			)
+	`), actor.CallerSessionID, actor.CallerExecutionID, actor.CallerTaskID, actor.WorkspaceID, actor.UserID, match.TaskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

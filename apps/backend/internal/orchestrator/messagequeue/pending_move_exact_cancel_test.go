@@ -57,6 +57,7 @@ func newExactCancelFixtureWithDB(t *testing.T, db *sqlx.DB) exactCancelFixture {
 		CREATE TABLE tasks (
 			id TEXT PRIMARY KEY,
 			workspace_id TEXT NOT NULL,
+			parent_id TEXT NOT NULL DEFAULT '',
 			workflow_id TEXT NOT NULL,
 			workflow_step_id TEXT NOT NULL,
 			metadata TEXT NOT NULL DEFAULT '{}',
@@ -91,10 +92,10 @@ func newExactCancelFixtureWithDB(t *testing.T, db *sqlx.DB) exactCancelFixture {
 	execExactFixtureSQL(t, db, `INSERT INTO workflow_steps (id, workflow_id) VALUES (?, ?), (?, ?)`,
 		exactCurrentStepID, exactCurrentWorkflowID, exactTargetStepID, exactTargetWorkflowID)
 	execExactFixtureSQL(t, db, `
-		INSERT INTO tasks (id, workspace_id, workflow_id, workflow_step_id) VALUES
-			(?, ?, ?, ?), (?, ?, ?, ?)
+		INSERT INTO tasks (id, workspace_id, parent_id, workflow_id, workflow_step_id) VALUES
+			(?, ?, '', ?, ?), (?, ?, ?, ?, ?)
 	`, exactCallerTaskID, exactWorkspaceID, exactCurrentWorkflowID, exactCurrentStepID,
-		exactTargetTaskID, exactWorkspaceID, exactCurrentWorkflowID, exactCurrentStepID)
+		exactTargetTaskID, exactWorkspaceID, exactCallerTaskID, exactCurrentWorkflowID, exactCurrentStepID)
 	execExactFixtureSQL(t, db, `
 		INSERT INTO task_sessions (id, task_id, state, agent_execution_id) VALUES
 			(?, ?, 'RUNNING', ?), (?, ?, 'WAITING_FOR_INPUT', '')
@@ -212,6 +213,42 @@ func TestSQLiteRepository_ExactCancelPendingMove(t *testing.T) {
 	if audit.Outcome != PendingMoveCancellationOutcomeCancelled || !audit.Changed ||
 		audit.PendingMoveID != fixture.match.PendingMoveID || audit.ActorID != exactCallerTaskID {
 		t.Fatalf("success audit = %#v", audit)
+	}
+}
+
+// @covers AC-TASKS-PENDING-MOVE-CANCELLATION-002.3
+func TestSQLiteRepository_ExactCancelPendingMoveRejectsOutOfTreeTarget(t *testing.T) {
+	fixture := newExactCancelFixture(t)
+	const unrelatedTaskID = "12121212-1212-4212-8212-121212121212"
+	const unrelatedSessionID = "13131313-1313-4313-8313-131313131313"
+	const unrelatedMoveID = "14141414-1414-4414-8414-141414141414"
+
+	execExactFixtureSQL(t, fixture.sql, `
+		INSERT INTO tasks (id, workspace_id, parent_id, workflow_id, workflow_step_id)
+		VALUES (?, ?, '', ?, ?)
+	`, unrelatedTaskID, exactWorkspaceID, exactCurrentWorkflowID, exactCurrentStepID)
+	execExactFixtureSQL(t, fixture.sql, `
+		INSERT INTO task_sessions (id, task_id, state) VALUES (?, ?, 'WAITING_FOR_INPUT')
+	`, unrelatedSessionID, unrelatedTaskID)
+	move := &PendingMove{
+		MoveID: unrelatedMoveID, TaskID: unrelatedTaskID, WorkflowID: exactTargetWorkflowID,
+		WorkflowStepID: exactTargetStepID,
+	}
+	if err := fixture.repo.SetPendingMove(context.Background(), unrelatedSessionID, move); err != nil {
+		t.Fatalf("seed unrelated pending move: %v", err)
+	}
+	match := fixture.match
+	match.PendingMoveID = move.ID
+	match.SessionID = unrelatedSessionID
+	match.TaskID = unrelatedTaskID
+	match.MoveID = unrelatedMoveID
+
+	result, err := fixture.repo.ExactCancelPendingMove(context.Background(), fixture.actor, match, "correlation-out-of-tree")
+	if result != nil || !errors.Is(err, ErrPendingMoveNotFoundOrChanged) {
+		t.Fatalf("out-of-tree cancellation result=%#v err=%v, want stable denial", result, err)
+	}
+	if got, getErr := fixture.repo.GetPendingMove(context.Background(), unrelatedSessionID); getErr != nil || got == nil {
+		t.Fatalf("out-of-tree cancellation changed pending move=%#v err=%v", got, getErr)
 	}
 }
 

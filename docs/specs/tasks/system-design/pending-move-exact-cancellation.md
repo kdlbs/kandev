@@ -95,6 +95,9 @@ transaction accepts only `actor_kind = coordinator` and validates:
 - the caller task and session belong to that workspace;
 - the caller session still carries the same active execution ID and a live
   executor state;
+- the target task is reachable through the caller Coordinator's named task
+  tree (the caller or one of its descendants), rather than merely sharing a
+  workspace;
 - the caller is not targeting its own task;
 - target task, target session, current step, target step, and workflow form one
   same-workspace relation.
@@ -102,6 +105,10 @@ transaction accepts only `actor_kind = coordinator` and validates:
 This is fail closed: a missing grant, stopped execution, forged principal,
 broken relation, or cross-workspace target follows the same zero-mutation path.
 Denial evidence omits target identifiers that were not safe to establish.
+
+Lifecycle stop persists the terminal executor status before it removes the
+execution from the in-memory registry. The cancellation transaction therefore
+cannot accept a stale durable execution row after a stop has linearized.
 
 ## Transaction flow
 

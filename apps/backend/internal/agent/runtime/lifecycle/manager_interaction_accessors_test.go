@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -351,6 +352,8 @@ func TestStopAgentForcePassesForceToBackend(t *testing.T) {
 	execRegistry.Register(stopTracker)
 	mgr := NewManager(newTestRegistry(), &MockEventBus{}, execRegistry, nil, nil, nil, ExecutorFallbackWarn, "", log)
 	cleanupManagerStopCh(t, mgr)
+	writer := &captureExecutorRunningWriter{}
+	mgr.SetExecutorRunningWriter(writer)
 
 	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
 		ID: "exec-force", SessionID: "session-force", RuntimeName: executor.NameStandalone,
@@ -360,6 +363,8 @@ func TestStopAgentForcePassesForceToBackend(t *testing.T) {
 
 	require.True(t, stopTracker.forced, "force must be forwarded to StopInstance")
 	require.Equal(t, StopReasonBackendShutdown, stopTracker.stopReason)
+	require.NotNil(t, writer.running, "a stopped execution must durably revoke its MCP attestation before removal")
+	require.Equal(t, models.ExecutorRunningStatusStopped, writer.running.Status)
 }
 
 func TestStopAgentWithReason_BackendFailureKeepsExecutionRetryable(t *testing.T) {
