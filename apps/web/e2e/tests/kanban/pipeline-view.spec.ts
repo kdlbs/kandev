@@ -108,4 +108,66 @@ test.describe("Pipeline view", () => {
     await expect(kanban.pipelineTask(t2.id)).toHaveCount(0);
     await expect(kanban.multiSelectToolbar).not.toBeVisible();
   });
+
+  test("title click opens the preview panel when 'Open preview on click' is on", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.saveUserSettings({ enable_preview_on_click: true });
+
+    const task = await apiClient.createTask(seedData.workspaceId, "Pipeline Preview Task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.switchToPipelineView();
+
+    await kanban
+      .pipelineTask(task.id)
+      .getByRole("button", { name: "Pipeline Preview Task" })
+      .click();
+
+    // Preview panel opens in place (URL carries taskId=), not a full-page navigation to /t/:id.
+    await expect(testPage).toHaveURL(/taskId=/, { timeout: 10_000 });
+    await expect(testPage.getByTestId("task-preview-panel")).toBeVisible();
+  });
+
+  test("the 3-dots actions trigger stays reachable and reachable without scrolling on a long pipeline", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 1600, height: 900 });
+
+    // Grow the workflow to 9 steps so the row overflows a real desktop viewport,
+    // matching the geometry measured for defect 2 (130px pill + 25px connector each).
+    const { steps: existingSteps } = await apiClient.listWorkflowSteps(seedData.workflowId);
+    const targetStepCount = 9;
+    for (let position = existingSteps.length; position < targetStepCount; position++) {
+      await apiClient.createWorkflowStep(seedData.workflowId, `Extra Step ${position}`, position);
+    }
+
+    const task = await apiClient.createTask(seedData.workspaceId, "Pipeline Overflow Task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.switchToPipelineView();
+
+    const trigger = kanban.pipelineTaskActionsTrigger(task.id);
+    await expect(trigger).toBeVisible();
+
+    const box = await trigger.boundingBox();
+    const viewportSize = testPage.viewportSize();
+    expect(box).not.toBeNull();
+    expect(viewportSize).not.toBeNull();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(viewportSize!.width);
+
+    // Reachable without scrolling: click opens the dropdown menu directly.
+    await trigger.click();
+    await expect(testPage.getByRole("menuitem", { name: "Delete task" })).toBeVisible();
+  });
 });
