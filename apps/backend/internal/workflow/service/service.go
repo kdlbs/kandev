@@ -817,17 +817,20 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 // queue work on.
 //
 // Transition targets need no check here. An export names them by position:
-// WorkflowExport.Validate rejects a raw `step_id` under on_turn_start and
-// on_turn_complete and requires each position to exist in the document, and
-// ConvertPositionToStepID then maps every one onto a step this import just
-// created. The Phase 2 triggers carry no reference at all, because that
-// converter drops those lists. If either of those stops being true, the
-// same-workflow check for step targets belongs here.
+// WorkflowExport.Validate rejects a raw `step_id` under on_turn_start,
+// on_turn_complete, and the seven ADR-0004 Phase 2 GenericAction triggers
+// (validateGenericStepPositionRefs), and requires each position to exist in
+// the document. ConvertPositionToStepID then maps every one — including the
+// Phase 2 triggers' move_to_step actions — onto a step this import just
+// created. If either of those stops being true, the same-workflow check for
+// step targets belongs here.
 //
 // A queue_run task target has no positional form, and an on_enter action is
 // copied through the conversion verbatim, so a hand-written document can name
 // any task in the install — authorize it against the importing caller exactly
-// as the step-write API does.
+// as the step-write API does. CollectStepEventReferences already walks the
+// Phase 2 triggers' queue_run actions alongside on_enter, so no separate pass
+// is needed for those.
 func (s *Service) validateImportedStepReferences(
 	ctx context.Context, step *models.WorkflowStep, name string,
 ) error {

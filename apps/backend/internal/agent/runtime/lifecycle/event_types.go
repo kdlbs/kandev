@@ -14,6 +14,7 @@ type AgentEventPayload struct {
 	RunID              string                 `json:"run_id,omitempty"`
 	TaskID             string                 `json:"task_id"`
 	SessionID          string                 `json:"session_id,omitempty"`
+	TaskEnvironmentID  string                 `json:"task_environment_id,omitempty"`
 	TurnID             string                 `json:"turn_id,omitempty"`
 	AgentID            string                 `json:"agent_id,omitempty"`
 	AgentProfileID     string                 `json:"agent_profile_id"`
@@ -286,11 +287,12 @@ const (
 // GitEventPayload is a unified payload for all git-related WebSocket events.
 // Uses discriminated union pattern with Type field.
 type GitEventPayload struct {
-	Type      GitEventType `json:"type"`
-	TaskID    string       `json:"task_id,omitempty"`
-	SessionID string       `json:"session_id"`
-	AgentID   string       `json:"agent_id,omitempty"`
-	Timestamp string       `json:"timestamp"`
+	Type              GitEventType `json:"type"`
+	TaskID            string       `json:"task_id,omitempty"`
+	SessionID         string       `json:"session_id"`
+	TaskEnvironmentID string       `json:"task_environment_id,omitempty"`
+	AgentID           string       `json:"agent_id,omitempty"`
+	Timestamp         string       `json:"timestamp"`
 
 	// For status_update
 	Status *GitStatusData `json:"status,omitempty"`

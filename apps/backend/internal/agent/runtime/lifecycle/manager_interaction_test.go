@@ -250,6 +250,10 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 						"success": true,
 					})
 				}
+			case "agent.prompt":
+				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+					"success": true,
+				})
 			case "agent.stderr":
 				stderrLines := m.stderrLines
 				if len(stderrLines) == 0 {
@@ -406,6 +410,7 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 	exec.assistantHistoryBuffer.WriteString("old response")
 	exec.needsResumeContext = true
 	exec.resumeContextInjected = true
+	exec.dispatchedPromptPending.Store(true)
 	exec.promptDoneCh <- PromptCompletionSignal{StopReason: "stale"}
 
 	mgr.executionStore.Add(exec)
@@ -442,6 +447,9 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 	case <-exec.promptDoneCh:
 		t.Fatalf("expected stale prompt signal to be drained")
 	default:
+	}
+	if exec.dispatchedPromptPending.Load() {
+		t.Fatal("expected stale dispatch gate to be cleared")
 	}
 
 	httpActions := mock.getHTTPActions()
@@ -852,6 +860,47 @@ func TestManager_ResetAgentContext_ReappliesSessionMode(t *testing.T) {
 	require.Nil(t, exec.protocolMessageIDs)
 	require.Nil(t, exec.protocolThinkingIDs)
 	require.Zero(t, exec.assistantHistoryBuffer.Len())
+}
+
+// @covers AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.3
+func TestManager_ResetAgentContext_ClearsIdleDispatchGate(t *testing.T) {
+	mgr := newTestManager(t)
+	mock := newRestartMockAgentctlServer(t, false, false)
+
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	require.NoError(t, client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil))
+
+	exec := &AgentExecution{
+		ID:                 "exec-idle-reset",
+		TaskID:             "task-1",
+		SessionID:          "session-1",
+		AgentProfileID:     "profile-1",
+		ACPSessionID:       "old-session",
+		AgentCommand:       "auggie --model test",
+		Status:             v1.AgentStatusRunning,
+		WorkspacePath:      "/workspace",
+		sessionInitialized: true,
+		agentctl:           client,
+		promptDoneCh:       make(chan PromptCompletionSignal, 1),
+	}
+	exec.dispatchedPromptPending.Store(true)
+	exec.promptDoneCh <- PromptCompletionSignal{StopReason: "end_turn"}
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	require.NoError(t, mgr.ResetAgentContext(ctx, exec.ID))
+	require.False(t, exec.dispatchedPromptPending.Load(),
+		"reset must clear the gate when it drains the completion signal")
+
+	followUpCtx, followUpCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer followUpCancel()
+	_, err := mgr.PromptAgent(followUpCtx, exec.ID, "follow-up", nil, true)
+	require.NoError(t, err, "follow-up prompt must reach the new agent context")
+	require.Contains(t, mock.getWSActions(), "agent.prompt")
 }
 
 // TestManager_ResetAgentContext_ReappliesSessionModel is the regression test

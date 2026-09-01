@@ -21,6 +21,7 @@ test("@search the palette scope strip wraps below the field on a phone", async (
     "Mobile palette scopes",
     seedData.agentProfileId,
     {
+      description: "/e2e:steer-fold-setup",
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
@@ -57,8 +58,10 @@ test("@search the palette scope strip wraps below the field on a phone", async (
 
   // A task row keeps its title on a narrow screen; the metadata is what yields.
   await input.fill("Mobile palette scopes");
-  const taskRow = dialog.getByRole("option").filter({ hasText: "Mobile palette scopes" });
-  await expect(taskRow.first()).toBeVisible({ timeout: 15_000 });
-  const titleBox = (await taskRow.first().getByText("Mobile palette scopes").boundingBox())!;
+  const taskRow = dialog.getByRole("option").filter({ hasText: "Mobile palette scopes" }).first();
+  await expect(taskRow).toBeVisible({ timeout: 15_000 });
+  await expect(taskRow.getByTestId("task-state-running")).toBeVisible();
+  await expect(taskRow.getByRole("img", { name: "In progress" })).toBeVisible();
+  const titleBox = (await taskRow.getByText("Mobile palette scopes").first().boundingBox())!;
   expect(titleBox.width).toBeGreaterThan(60);
 });

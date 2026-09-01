@@ -26,9 +26,16 @@ func TestPostgresGitSnapshotLifecycle(t *testing.T) {
 	}
 	ctx := context.Background()
 	seedPostgresTask(t, repo, "task-git-pg")
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-task-git-pg", TaskID: "task-git-pg",
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
 	for _, sessionID := range []string{"session-git-pg-a", "session-git-pg-b"} {
 		if err := repo.CreateTaskSession(ctx, &models.TaskSession{
-			ID: sessionID, TaskID: "task-git-pg", State: models.TaskSessionStateWaitingForInput,
+			ID: sessionID, TaskID: "task-git-pg", TaskEnvironmentID: "env-task-git-pg", State: models.TaskSessionStateWaitingForInput,
 		}); err != nil {
 			t.Fatalf("CreateTaskSession(%s): %v", sessionID, err)
 		}

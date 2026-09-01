@@ -1042,6 +1042,9 @@ esac
 	if !errors.Is(err, ErrInvalidBaseBranch) {
 		t.Fatalf("error = %v, want ErrInvalidBaseBranch", err)
 	}
+	if !errors.Is(err, ErrRemoteRefMissing) {
+		t.Fatalf("error = %v, want confirmed remote-ref-missing sentinel", err)
+	}
 }
 
 func TestFetchBranchToLocal_FetchFailsNoBranch(t *testing.T) {

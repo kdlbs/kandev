@@ -310,6 +310,14 @@ func TestHandleCreateTask_AssociatesExistingRemoteContribution(t *testing.T) {
 	taskRepos, err := repo.ListTaskRepositories(ctx, task.ID)
 	require.NoError(t, err)
 	require.Len(t, taskRepos, 1)
+	if remote.repositoryID != taskRepos[0].RepositoryID {
+		t.Fatalf("Associate received repositoryID %q, want task_repositories.repository_id %q",
+			remote.repositoryID, taskRepos[0].RepositoryID)
+	}
+	if remote.repositoryID == taskRepos[0].ID {
+		t.Fatalf("Associate received task_repositories row id %q instead of repository_id",
+			remote.repositoryID)
+	}
 	binding, found, err := models.LoadRemoteContribution(taskRepos[0].Metadata)
 	require.NoError(t, err)
 	if !found || binding.SourceRepository.Path != "contributor/widget" {

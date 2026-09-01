@@ -43,6 +43,7 @@ func (r *Repository) initSchema() error {
 		r.healDuplicateTaskEnvironments,
 		r.ensureTaskEnvironmentTaskUniqueIndex,
 		r.healSessionTaskEnvironmentIDs,
+		r.migrateGitSnapshotOwnership,
 		r.ensureWorkspaceIndexes,
 		r.ensureMessageMetadataIndexes,
 		r.ensurePromptOrderIndex,
@@ -1016,7 +1017,8 @@ func (r *Repository) initGitSchema() error {
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS task_session_git_snapshots (
 		id TEXT PRIMARY KEY,
-		session_id TEXT NOT NULL,
+		task_environment_id TEXT NOT NULL,
+		session_id TEXT,
 		snapshot_type TEXT NOT NULL,
 		branch TEXT NOT NULL,
 		remote_branch TEXT DEFAULT '',
@@ -1028,7 +1030,8 @@ func (r *Repository) initGitSchema() error {
 		triggered_by TEXT DEFAULT '',
 		metadata TEXT DEFAULT '{}',
 		created_at TIMESTAMP NOT NULL,
-		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+		FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE,
+		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE SET NULL
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_git_snapshots_session ON task_session_git_snapshots(session_id, created_at DESC);

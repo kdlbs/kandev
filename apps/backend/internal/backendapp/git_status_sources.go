@@ -27,7 +27,10 @@ func resolveGitStatusSources(
 		return nil, false
 	}
 	if requested.TaskEnvironmentID == "" {
-		return &gitStatusSources{sessionIDs: []string{requested.ID}}, true
+		log.Debug("cannot resolve task environment for git status",
+			zap.String("session_id", requested.ID),
+			zap.String("reason", "session_environment_missing"))
+		return nil, false
 	}
 	if taskRepo == nil {
 		log.Debug("cannot resolve task environment for git status",

@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -32,9 +33,10 @@ func TestPublishGitStatus_PropagatesRepositoryName(t *testing.T) {
 	defer func() { _ = sub.Unsubscribe() }()
 
 	exec := &AgentExecution{
-		ID:        "exec-1",
-		TaskID:    "task-1",
-		SessionID: "sess-multi",
+		ID:                "exec-1",
+		TaskID:            "task-1",
+		SessionID:         "sess-multi",
+		TaskEnvironmentID: "env-multi",
 	}
 	pub.PublishGitStatus(exec, &agentctl.GitStatusUpdate{
 		Timestamp:        time.Now(),
@@ -71,6 +73,17 @@ func TestPublishGitStatus_PropagatesRepositoryName(t *testing.T) {
 		}
 		if payload.Status.RemoteHeadCommit != "upstream-head" || payload.Status.RemoteAhead != 2 || payload.Status.RemoteBehind != 1 {
 			t.Errorf("upstream evidence was dropped: head=%q ahead=%d behind=%d", payload.Status.RemoteHeadCommit, payload.Status.RemoteAhead, payload.Status.RemoteBehind)
+		}
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("marshal git event payload: %v", err)
+		}
+		var fields map[string]interface{}
+		if err := json.Unmarshal(encoded, &fields); err != nil {
+			t.Fatalf("decode git event payload: %v", err)
+		}
+		if got, _ := fields["task_environment_id"].(string); got != "env-multi" {
+			t.Errorf("task_environment_id = %q, want env-multi", got)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for git status event")
