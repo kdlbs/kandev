@@ -196,6 +196,51 @@ func TestCreateOfficeTaskSessionRefusesLiveWhenTerminalRowsAlsoExist(t *testing.
 	require.Len(t, created, 2, "the refused create must not have written a row")
 }
 
+// TestCreateOfficeTaskSessionRefusalLeavesExistingRowsUnmodified closes
+// Review round 5's Finding C: AC-001.6 requires a refused create to leave
+// every existing row for the pair unmodified — no row updated, cancelled,
+// merged, or deleted, and no metadata moved between rows. Every other
+// refusal test in this file asserts row COUNT only, which a future
+// row-healing regression (e.g. cancelling the stale duplicate inside the
+// guard) could satisfy while still mutating a row. This snapshots the full
+// pre-existing rows before the refused call and asserts they are unchanged
+// afterward.
+func TestCreateOfficeTaskSessionRefusalLeavesExistingRowsUnmodified(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-office-refusal-leaves-rows-unmodified"
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Office refusal leaves rows unmodified"}))
+
+	agent := "agent-refusal-unmodified"
+	require.NoError(t, repo.CreateOfficeTaskSession(ctx, &models.TaskSession{
+		ID: "refusal-unmodified-old", TaskID: taskID, AgentProfileID: agent,
+		State: models.TaskSessionStateCompleted,
+	}))
+	require.NoError(t, repo.CreateOfficeTaskSession(ctx, &models.TaskSession{
+		ID: "refusal-unmodified-live", TaskID: taskID, AgentProfileID: agent,
+		State:                  models.TaskSessionStateRunning,
+		ExecutionProfileID:     "profile-before-refusal",
+		DownstreamACPSessionID: "acp-session-before-refusal",
+	}))
+
+	before, err := repo.ListTaskSessions(ctx, taskID)
+	require.NoError(t, err)
+	require.Len(t, before, 2)
+
+	err = repo.CreateOfficeTaskSession(ctx, &models.TaskSession{
+		ID: "refusal-unmodified-blocked", TaskID: taskID, AgentProfileID: agent,
+		State: models.TaskSessionStateCreated,
+	})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrOfficeSessionRaceConflict))
+
+	after, err := repo.ListTaskSessions(ctx, taskID)
+	require.NoError(t, err)
+	require.Len(t, after, 2, "the refused create must not have written a row")
+	require.Equal(t, before, after,
+		"a refused create must leave every existing row for the pair byte-identical — no update, cancel, merge, or metadata move")
+}
+
 // TestCreateOfficeTaskSessionSkipsGuardForEmptyAgentProfileID proves the
 // guard is bypassed entirely when agent_profile_id is empty (AC-001.5):
 // two rows for the same task with no agent profile are unrestricted, exactly
@@ -265,10 +310,20 @@ func TestCreateOfficeTaskSessionRefusesLiveRowCreatedByNonOfficePath(t *testing.
 // as `state IN ('CREATED','RUNNING')` instead of `state NOT IN (terminal
 // set)`, every other test here would stay green while a pair whose only row
 // sits in one of these two states would wrongly allow a duplicate create.
+//
+// IDLE and a fabricated out-of-enum state close Review round 5's Finding B:
+// IDLE is an office session's dominant resting state between turns, and no
+// guard test at any layer previously seeded it as the blocking row — an
+// allow-list regression omitting IDLE would have shipped green. The
+// fabricated state proves the complement form extends to states that don't
+// exist yet, per AC-001.4's "a state added later is treated identically"
+// requirement.
 func TestCreateOfficeTaskSessionRefusesLiveForNonCanonicalLiveStates(t *testing.T) {
 	for _, state := range []models.TaskSessionState{
 		models.TaskSessionStateStarting,
 		models.TaskSessionStateWaitingForInput,
+		models.TaskSessionStateIdle,
+		models.TaskSessionState("PAUSED_FUTURE_STATE"),
 	} {
 		t.Run(string(state), func(t *testing.T) {
 			repo := newRepoForSessionTests(t)

@@ -966,14 +966,6 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name)
 
-	if err != nil && isOfficeTaskSessionUniqueViolation(err) {
-		// Two callers raced past their SELECT-then-INSERT for the same
-		// (task_id, agent_profile_id) — surface a typed sentinel so callers
-		// can classify with errors.Is rather than driver-message matching.
-		// Currently unreachable: no index enforces this pair yet (see
-		// ErrOfficeSessionRaceConflict's doc comment).
-		return fmt.Errorf("%w: %w", ErrOfficeSessionRaceConflict, err)
-	}
 	return err
 }
 
@@ -1448,9 +1440,9 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 	// caller's in-memory copy may be stale.
 
 	// agent_profile_id is stored as NULL when empty. No unique index
-	// currently constrains (task_id, agent_profile_id) — see
-	// ErrOfficeSessionRaceConflict's doc comment (errors.go) for why, and
-	// for what still guards this pair despite that.
+	// constrains (task_id, agent_profile_id) at this UPDATE path — office
+	// session-uniqueness enforcement lives only in CreateOfficeTaskSession's
+	// in-transaction guard (see ErrOfficeSessionRaceConflict's doc comment).
 	var agentProfileID interface{}
 	if session.AgentProfileID != "" {
 		agentProfileID = session.AgentProfileID
@@ -1478,16 +1470,6 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 	}
 	result, err := exec.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
-		if isOfficeTaskSessionUniqueViolation(err) {
-			// A terminal-session resume (updateSessionStarting) or another
-			// full-row update raced another live row into the same
-			// (task_id, agent_profile_id) slot — same classification as the
-			// createTaskSession INSERT path, so callers can errors.Is this
-			// regardless of which write hit the constraint. Currently
-			// unreachable: no index enforces this pair yet (see
-			// ErrOfficeSessionRaceConflict's doc comment).
-			return false, fmt.Errorf("%w: %w", ErrOfficeSessionRaceConflict, err)
-		}
 		return false, err
 	}
 	rows, err := result.RowsAffected()

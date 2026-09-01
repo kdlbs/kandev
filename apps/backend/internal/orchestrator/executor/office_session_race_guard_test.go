@@ -160,10 +160,17 @@ func TestPersistOfficeSessionFallbackIgnoresLiveSessionForDifferentAgentOnSameTa
 // rewritten as an allow-list of just those two states, every other fallback
 // test here would stay green while a pair whose only row sits in STARTING or
 // WAITING_FOR_INPUT would wrongly allow a duplicate create.
+//
+// IDLE and a fabricated out-of-enum state close Review round 5's Finding B at
+// the executor layer: IDLE is an office session's dominant resting state
+// between turns and no fallback test previously seeded it as the blocking
+// row.
 func TestPersistOfficeSessionFallbackRefusesLiveForNonCanonicalLiveStates(t *testing.T) {
 	for _, state := range []models.TaskSessionState{
 		models.TaskSessionStateStarting,
 		models.TaskSessionStateWaitingForInput,
+		models.TaskSessionStateIdle,
+		models.TaskSessionState("PAUSED_FUTURE_STATE"),
 	} {
 		t.Run(string(state), func(t *testing.T) {
 			repo := newMockRepository()
@@ -394,6 +401,35 @@ func TestTryReuseExistingSession_IdleFlipsToRunningWhenStateStillMatches(t *test
 	stored := repo.sessions[current.ID]
 	if stored.State != models.TaskSessionStateRunning {
 		t.Fatalf("stored session state = %v, want RUNNING", stored.State)
+	}
+}
+
+// TestTryReuseExistingSession_UnrecognizedStateIsTreatedAsReusable closes the
+// reuse-side half of Review round 5's Finding B: AC-001.4 requires "a state
+// added later" to be treated identically by the create-side guard (complement
+// of terminal, proven above at the SQLite and fallback layers) and by this
+// reuse rule. tryReuseExistingSession's default arm returns
+// reuseDecisionReused for anything outside the three explicitly-handled
+// groups (IDLE, the four other live states, and the three terminal states) —
+// this proves a fabricated out-of-enum state hits that default arm rather
+// than being silently treated as terminal.
+func TestTryReuseExistingSession_UnrecognizedStateIsTreatedAsReusable(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	ctx := context.Background()
+
+	const taskID = "task-unrecognized-state-reusable"
+	unrecognized := models.TaskSessionState("PAUSED_FUTURE_STATE")
+	current := &models.TaskSession{ID: "unrecognized-state-reusable", TaskID: taskID, State: unrecognized}
+	repo.sessions[current.ID] = current
+
+	result, decision := exec.tryReuseExistingSession(ctx, current)
+
+	if decision != reuseDecisionReused {
+		t.Fatalf("decision = %v, want reuseDecisionReused for unrecognized state %q", decision, unrecognized)
+	}
+	if result == nil || result.State != unrecognized {
+		t.Fatalf("result = %#v, want non-nil session with unchanged state %q", result, unrecognized)
 	}
 }
 
