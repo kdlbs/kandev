@@ -183,7 +183,7 @@
   "clarificationAnswerOverLimit_other": "{{count}} characters over the {{max}}-character limit.",
   "clarificationAnswerRuneCount": "{{current}} / {{max}}",
   "clarificationExpired": "This question is no longer active, so your answer was not recorded.",
-  "clarificationSubmitFailed": "Could not send your answer.",
+  "clarificationResponseFailed": "Could not send your response.",
   "cleanup": "Cleanup",
   "clearAllAnnotations": "Clear all annotations",
   "clickAnywhereToStartWriting": "Click anywhere to start writing",

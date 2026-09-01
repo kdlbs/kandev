@@ -68,6 +68,21 @@ function resolveQuestionMessages(messages: readonly Message[] | null | undefined
   return [];
 }
 
+function useResetOverlayStateOnBundleChange(
+  pendingId: string | null,
+  setCustomDrafts: (drafts: Record<string, string>) => void,
+  setActiveIndex: (index: number) => void,
+) {
+  useEffect(() => {
+    // The hook resets its answer and retry state when a new pending bundle
+    // replaces the current one. Drafts and carousel navigation are overlay-
+    // local state, so they need the same lifecycle fence as well. Question IDs
+    // can repeat across bundles, which makes an ID-only draft key unsafe.
+    setCustomDrafts({});
+    setActiveIndex(0);
+  }, [pendingId, setCustomDrafts, setActiveIndex]);
+}
+
 function sortMessagesByQuestionIndex(messages: Message[]): Message[] {
   return messages.slice().sort((a, b) => {
     const ai = (a.metadata as ClarificationRequestMetadata | undefined)?.question_index ?? 0;
@@ -582,6 +597,7 @@ export function ClarificationInputOverlay({
   const isSubmitting = group.submitState === "submitting";
   const [customDrafts, setCustomDrafts] = useState<Record<string, string>>({});
   const [rawActiveIndex, setActiveIndex] = useState(0);
+  useResetOverlayStateOnBundleChange(group.pendingId, setCustomDrafts, setActiveIndex);
   // Clamp the active index to the current bundle size so late-arriving
   // messages or shrunk bundles never put us out of range.
   const total = sortedMessages.length;

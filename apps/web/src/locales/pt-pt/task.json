@@ -182,7 +182,7 @@
   "clarificationAnswerOverLimit_other": "{{count}} carateres acima do limite de {{max}} carateres.",
   "clarificationAnswerRuneCount": "{{current}} / {{max}}",
   "clarificationExpired": "Esta pergunta já não está ativa, pelo que a sua resposta não foi registada.",
-  "clarificationSubmitFailed": "Não foi possível enviar a sua resposta.",
+  "clarificationResponseFailed": "Não foi possível enviar a sua resposta.",
   "cleanup": "Limpeza",
   "clearAllAnnotations": "Limpar todas as anotações",
   "clickAnywhereToStartWriting": "Clique em qualquer sítio para começar a escrever",

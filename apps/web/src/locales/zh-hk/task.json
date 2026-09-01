@@ -182,7 +182,7 @@
   "clarificationAnswerOverLimit_other": "超出 {{max}} 字符限制 {{count}} 個字符。",
   "clarificationAnswerRuneCount": "{{current}} / {{max}}",
   "clarificationExpired": "此問題已不再有效，您的回答未被記錄。",
-  "clarificationSubmitFailed": "無法傳送您的回答。",
+  "clarificationResponseFailed": "無法傳送您的回覆。",
   "cleanup": "清理",
   "clearAllAnnotations": "清除全部標註",
   "clickAnywhereToStartWriting": "點擊任意位置開始編寫",

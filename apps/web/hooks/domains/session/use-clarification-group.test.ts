@@ -354,7 +354,9 @@ describe("useClarificationGroup — retry", () => {
       clarMessage({ id: "m-a", pendingId: "pA", questionId: "qA", index: 0, total: 1 }),
     ];
     const bundleB = [
-      clarMessage({ id: "m-b", pendingId: "pB", questionId: "qB", index: 0, total: 1 }),
+      // Reusing a question ID is valid and must not make the old retry action
+      // look compatible with the replacement bundle.
+      clarMessage({ id: "m-b", pendingId: "pB", questionId: "qA", index: 0, total: 1 }),
     ];
 
     const { result, rerender } = renderHook(({ msgs }) => useClarificationGroup(msgs), {

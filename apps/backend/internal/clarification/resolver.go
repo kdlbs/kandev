@@ -216,13 +216,13 @@ func (r *Resolver) claimAndDeliver(
 	status, response := buildOutcomeResponse(pendingID, questions, outcome, r.now())
 
 	claimCtx, cancel := clarificationClaimContext(ctx)
+	defer cancel()
 	completedMessages, claimed, claimErr := r.messages.CompleteActiveClarificationBundle(
 		claimCtx,
 		pendingID,
 		status,
 		responsesFromAnswers(response.Answers),
 	)
-	cancel()
 	if claimErr != nil {
 		r.logger.Error("failed to claim clarification response",
 			zap.String("pending_id", pendingID), zap.Error(claimErr))

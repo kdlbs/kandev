@@ -3,7 +3,9 @@
 // button, and a 409 caused by the bundle going inactive must never be
 // reported to the user as a successful answer.
 import { test, expect } from "../../fixtures/test-base";
-import { seedClarificationSession } from "../../helpers/clarification";
+import { activeSessionId, seedClarificationSession } from "../../helpers/clarification";
+import { watchWs } from "../../helpers/causal-waits";
+import { waitForSessionSettled } from "./quick-chat-helpers";
 
 test.describe("Clarification submit failure feedback", () => {
   test("surfaces a failed submit with a retry that preserves the answer", async ({
@@ -12,6 +14,7 @@ test.describe("Clarification submit failure feedback", () => {
     seedData,
   }) => {
     test.setTimeout(60_000);
+    const ws = watchWs(testPage);
     const session = await seedClarificationSession(
       testPage,
       apiClient,
@@ -19,6 +22,8 @@ test.describe("Clarification submit failure feedback", () => {
       "Clarification Submit Failure",
       { scenario: "clarification" },
     );
+    const sessionId = await activeSessionId(testPage);
+    if (!sessionId) throw new Error("expected an active session for clarification retry");
 
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
 
@@ -47,10 +52,12 @@ test.describe("Clarification submit failure feedback", () => {
     await expect(postgres).toHaveAttribute("data-selected", "true");
     await expect(session.idleInput()).toHaveCount(0);
 
+    const settled = waitForSessionSettled(ws, sessionId);
     await testPage.getByTestId("clarification-retry").click();
 
+    await settled;
     await expect(errorBanner).toHaveCount(0);
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(session.idleInput()).toBeVisible();
     expect(attempt).toBe(2);
   });
 

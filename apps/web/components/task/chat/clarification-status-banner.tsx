@@ -26,13 +26,13 @@ export function ClarificationStatusBanner({
       >
         <span className="flex items-center gap-1.5">
           <IconAlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
-          {t("task:clarificationSubmitFailed")}
+          {t("task:clarificationResponseFailed")}
         </span>
         <Button
           type="button"
           size="sm"
           variant="outline"
-          className="cursor-pointer"
+          className="min-h-11 min-w-11 cursor-pointer md:min-h-0 md:min-w-0"
           onClick={onRetry}
           data-testid="clarification-retry"
         >
