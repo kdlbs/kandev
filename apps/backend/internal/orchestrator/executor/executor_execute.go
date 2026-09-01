@@ -1026,6 +1026,65 @@ func taskUsesDeferredEnvironmentInheritance(metadata map[string]interface{}) boo
 	return mode == "inherit_parent"
 }
 
+func taskUsesInheritedWorkspace(task *v1.Task) bool {
+	if task == nil {
+		return false
+	}
+	workspace, ok := task.Metadata["workspace"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	mode, _ := workspace["mode"].(string)
+	return mode == "inherit_parent" || mode == "shared_group"
+}
+
+func (e *Executor) resolveLaunchTaskEnvironment(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+) (*models.TaskEnvironment, error) {
+	existingEnv, err := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
+	if err != nil {
+		return nil, fmt.Errorf("lookup existing task environment: %w", err)
+	}
+	if existingEnv != nil || session == nil || session.TaskEnvironmentID == "" {
+		return existingEnv, nil
+	}
+
+	// Child tasks created by office task-handoffs may have had
+	// session.TaskEnvironmentID rewritten to point at the parent's or shared
+	// group's environment. The by-task-id lookup misses that row because it
+	// indexes by the child task id, so validate the inherited row's owner before
+	// allowing any launch path to reuse it.
+	inherited, envErr := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+	if envErr != nil || inherited == nil {
+		return nil, fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsafe, e.describeInheritedEnvironmentUnavailable(ctx, task))
+	}
+	if err := e.validateInheritedEnvironmentOwner(ctx, task, inherited); err != nil {
+		return nil, err
+	}
+	return inherited, nil
+}
+
+func (e *Executor) validateInheritedEnvironmentOwner(
+	ctx context.Context,
+	task *v1.Task,
+	env *models.TaskEnvironment,
+) error {
+	if env == nil || env.TaskID == "" || (task != nil && env.TaskID == task.ID) {
+		return nil
+	}
+	owner, err := e.repo.GetTask(ctx, env.TaskID)
+	if err != nil || owner == nil {
+		return fmt.Errorf("%w: inherited task environment owner %s could not be verified", models.ErrWorkspaceReuseUnsafe, env.TaskID)
+	}
+	if owner.ArchivedAt != nil {
+		return fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsafe,
+			models.DescribeInheritedEnvironmentUnavailable(env.TaskID, owner))
+	}
+	return nil
+}
+
 func sharedWorkspaceGroupID(metadata map[string]interface{}) string {
 	workspace, ok := metadata["workspace"].(map[string]interface{})
 	if !ok {
@@ -1138,6 +1197,15 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, err
 	}
 
+	// Resolve and validate the environment before the existing-runtime fast
+	// path. A persisted executor row can outlive the parent task that owns an
+	// inherited environment, so returning through that path without this check
+	// would restart an agent in a workspace that is no longer valid.
+	existingEnv, err := e.resolveLaunchTaskEnvironment(ctx, task, session)
+	if err != nil {
+		return nil, err
+	}
+
 	// Fast path: workspace already launched (executors_running row exists).
 	// Only start the agent subprocess if requested; otherwise return early.
 	// If startAgentOnExistingWorkspace returns ErrStaleExecution, the in-memory
@@ -1166,32 +1234,6 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		primaryRepo = &repoInfo{}
 	}
 
-	// Resolve the env ID before LaunchAgent so the in-memory AgentExecution
-	// is env-scoped from the first shell/layout request, not only after DB
-	// persistence succeeds. GetTaskEnvironmentByTaskID returns (nil, nil)
-	// when no row exists; a real DB error must propagate so the launch
-	// fails closed instead of silently launching a fresh environment that
-	// orphans the existing container/sandbox/worktree.
-	existingEnv, err := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
-	if err != nil {
-		return nil, fmt.Errorf("lookup existing task environment: %w", err)
-	}
-	// Child tasks created by office task-handoffs may have had
-	// session.TaskEnvironmentID rewritten to point at the parent's /
-	// shared group's env (see internal/orchestrator/handoff_inheritance.go).
-	// The by-task-id lookup misses that row because it indexes by the
-	// child task id, so without this fallback the launch path creates a
-	// fresh worktree and the inheritance contract silently breaks.
-	if existingEnv == nil && session.TaskEnvironmentID != "" {
-		inherited, err := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
-		if err != nil {
-			return nil, fmt.Errorf("%w: inherited task environment is unavailable", models.ErrWorkspaceReuseUnsafe)
-		}
-		if inherited == nil {
-			return nil, fmt.Errorf("%w: inherited task environment is unavailable", models.ErrWorkspaceReuseUnsafe)
-		}
-		existingEnv = inherited
-	}
 	assignLaunchTaskEnvironmentID(session, existingEnv)
 
 	// A sibling can be prepared while the elected materializer is still
@@ -1607,6 +1649,23 @@ func bindSessionToTaskEnvironment(session *models.TaskSession, env *models.TaskE
 	}
 	session.TaskEnvironmentID = env.ID
 	session.WorkspacePath = env.WorkspacePath
+}
+
+// describeInheritedEnvironmentUnavailable builds a diagnostic reason for a
+// missing inherited task_environments row (session.TaskEnvironmentID no
+// longer resolves). For an inherit_parent task it names the parent and, when
+// the parent was archived, calls that out explicitly — archive tears down
+// the parent's runtime resources (worktree, container/sandbox) but
+// preserves its own task_environments row, and leaves the parent's
+// session.TaskEnvironmentID pointer in place either way, so a child that
+// inherited it only finds out here. shared_group members have no single
+// parent to name, so they get a generic message instead.
+func (e *Executor) describeInheritedEnvironmentUnavailable(ctx context.Context, task *v1.Task) string {
+	if task == nil || task.ParentID == "" {
+		return "inherited task environment is unavailable: shared workspace group environment could not be resolved"
+	}
+	parent, _ := e.repo.GetTask(ctx, task.ParentID)
+	return models.DescribeInheritedEnvironmentUnavailable(task.ParentID, parent)
 }
 
 func assignLaunchTaskEnvironmentID(session *models.TaskSession, existingEnv *models.TaskEnvironment) {

@@ -335,17 +335,109 @@ func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitE
 // called verbatim for every non-GitLab (including unknown/legacy-empty
 // provider) repository — this passes the shared repository identity into the
 // existing provider-specific path. Extracted from trackPushAndAssociatePR to
-// keep that function inside the statement budget.
+// keep that function inside the statement budget. The taskID the write lands
+// under may be redirected away from the observing task; see
+// resolveEffectivePushTaskID.
 func (s *Service) dispatchPushDetection(ctx context.Context, sessionID, taskID, repositoryName, branch string) {
+	// Identity (owner/name/repositoryID) MUST resolve against the observing
+	// task, not the redirected one: the physical checkout, session, and
+	// task_repositories rows belong to whichever task's session actually saw
+	// the push (a subtask sharing a parent's worktree still has its own
+	// session row). Only the write destination below is redirected.
 	identity := s.resolvePushRepositoryIdentity(ctx, sessionID, taskID, repositoryName)
+	effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sessionID, taskID, identity.repositoryID)
 	if identity.provider == gitlabProviderName {
-		s.detectPushAndAssociateMRWithIdentity(ctx, sessionID, taskID, repositoryName, branch, identity)
+		s.detectPushAndAssociateMRWithIdentity(ctx, sessionID, effectiveTaskID, repositoryName, branch, identity)
 		return
 	}
 	if s.githubService == nil {
 		return
 	}
-	s.detectPushAndAssociatePRWithIdentity(ctx, sessionID, taskID, repositoryName, branch, identity)
+	s.detectPushAndAssociatePRWithIdentity(ctx, sessionID, effectiveTaskID, repositoryName, branch, identity)
+}
+
+// resolveEffectivePushTaskID redirects a push-detected PR/MR association from
+// the observing task to its workspace-group owner task. A subtask sharing its
+// parent's worktree via inherit_parent/shared_group workspace modes observes
+// the SAME branch pushes as every other member of the group, so writing the
+// association under the observing task's own ID binds one PR/MR to several
+// unrelated tasks (the group owner plus whichever subtasks happened to be
+// running when the push landed). Falls back to the original taskID — leaving
+// the pre-fix behavior for that call — when there is no active group, the
+// repo doesn't support group lookups, the lookup fails, the resolved owner
+// task can't be loaded or is archived (an archived owner is not a valid
+// association target), or the owner task doesn't hold repositoryID itself
+// (redirecting would make the downstream write get rejected by
+// validateTaskRepositoryID and dropped — see associatePRWithTask — which is
+// worse than leaving the association under the observing task). repositoryID
+// may be "" (identity couldn't be resolved yet); the ownership check is
+// skipped in that case, matching validateTaskRepositoryID's own no-op on an
+// empty repositoryID.
+//
+// This is the single boundary every watch-creation and association call site
+// routes through — dispatchPushDetection, ensureSessionPRWatch,
+// CheckSessionPR, buildTaskBranchList (feeding the poller's
+// reconcileWatches), and resetPRWatchForBranchSwitch — so no
+// member-attributed github_pr_watches row is ever created and the poller's
+// own AssociatePRWithTask(watch.TaskID, ...) writes under the
+// already-redirected task.
+type sessionWorkspaceGroupOwnerResolver interface {
+	GetWorkspaceGroupOwnerTaskIDForSession(ctx context.Context, taskID, sessionID string) (string, error)
+}
+
+func (s *Service) resolveEffectivePushTaskIDForSession(
+	ctx context.Context, sessionID, taskID, repositoryID string,
+) string {
+	if taskID == "" {
+		return taskID
+	}
+	store, ok := s.repo.(repoStore)
+	if !ok {
+		return taskID
+	}
+	var ownerTaskID string
+	var err error
+	if sessionID != "" {
+		if sessionResolver, ok := any(store).(sessionWorkspaceGroupOwnerResolver); ok {
+			ownerTaskID, err = sessionResolver.GetWorkspaceGroupOwnerTaskIDForSession(ctx, taskID, sessionID)
+		} else {
+			// Keep compatibility with repository test doubles and older adapters.
+			ownerTaskID, err = store.GetWorkspaceGroupOwnerTaskID(ctx, taskID)
+		}
+	} else {
+		ownerTaskID, err = store.GetWorkspaceGroupOwnerTaskID(ctx, taskID)
+	}
+	if err != nil || ownerTaskID == "" || ownerTaskID == taskID {
+		return taskID
+	}
+	ownerTask, err := s.repo.GetTask(ctx, ownerTaskID)
+	if err != nil || ownerTask == nil || ownerTask.ArchivedAt != nil {
+		return taskID
+	}
+	if repositoryID != "" && !s.taskHoldsRepository(ctx, store, ownerTaskID, repositoryID) {
+		return taskID
+	}
+	s.logger.Info("redirecting push-detected PR/MR association to workspace group owner",
+		zap.String("from_task_id", taskID),
+		zap.String("to_task_id", ownerTaskID))
+	return ownerTaskID
+}
+
+// taskHoldsRepository reports whether taskID has a task_repositories row for
+// repositoryID. Used by resolveEffectivePushTaskID to avoid redirecting into
+// a write that validateTaskRepositoryID would reject and associatePRWithTask
+// would then silently drop.
+func (s *Service) taskHoldsRepository(ctx context.Context, store repoStore, taskID, repositoryID string) bool {
+	taskRepos, err := store.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return false
+	}
+	for _, tr := range taskRepos {
+		if tr != nil && tr.RepositoryID == repositoryID {
+			return true
+		}
+	}
+	return false
 }
 
 type pushRepositoryIdentity struct {
@@ -1052,8 +1144,9 @@ func (s *Service) resetPRWatchForBranchSwitch(ctx context.Context, taskID, sessi
 	if workspaceID == "" {
 		return
 	}
+	effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sessionID, taskID, repositoryID)
 	if _, err := s.githubService.EnsurePRWatchForWorkspace(
-		ctx, workspaceID, sessionID, taskID, repositoryID, owner, repoName, newBranch,
+		ctx, workspaceID, sessionID, effectiveTaskID, repositoryID, owner, repoName, newBranch,
 	); err != nil {
 		s.logger.Error("failed to add PR watch after branch switch",
 			zap.String("session_id", sessionID), zap.String("new_branch", newBranch),

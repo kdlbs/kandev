@@ -2,7 +2,9 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -27,6 +29,7 @@ func TestResolveResumeTaskEnvironment_ReusesInheritedEnvironment(t *testing.T) {
 		ExecutorType: string(models.ExecutorTypeLocal),
 		Status:       models.TaskEnvironmentStatusReady,
 	}
+	repo.tasks["task-parent"] = &models.Task{ID: "task-parent"}
 	session := &models.TaskSession{
 		ID:                "sess-child",
 		TaskID:            "task-child",
@@ -80,6 +83,95 @@ func TestResolveResumeTaskEnvironment_MissingReferenceFallsThroughToCreate(t *te
 	}
 	if env != nil {
 		t.Fatalf("resolved env = %+v, want nil so the create path runs", env)
+	}
+}
+
+func TestResolveResumeTaskEnvironment_InheritedMissingReferenceFailsClosed(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	repo.getTaskEnvironmentFunc = func(_ context.Context, _ string) (*models.TaskEnvironment, error) {
+		return nil, repoerrors.ErrTaskEnvironmentNotFound
+	}
+
+	session := &models.TaskSession{
+		ID:                "sess-child",
+		TaskID:            "task-child",
+		TaskEnvironmentID: "env-missing",
+	}
+	repo.tasks[session.TaskID] = &models.Task{
+		ID:       session.TaskID,
+		Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
+	}
+
+	env, err := exec.resolveResumeTaskEnvironment(context.Background(), session.TaskID, session)
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("resolveResumeTaskEnvironmentForTask() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+	if env != nil {
+		t.Fatalf("resolved env = %+v, want nil", env)
+	}
+}
+
+func TestResolveResumeTaskEnvironment_RejectsArchivedInheritedOwner(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	archivedAt := time.Now()
+	repo.tasks["task-parent"] = &models.Task{ID: "task-parent", ArchivedAt: &archivedAt}
+	repo.taskEnvironments["env-parent"] = &models.TaskEnvironment{
+		ID:     "env-parent",
+		TaskID: "task-parent",
+		Status: models.TaskEnvironmentStatusReady,
+	}
+
+	session := &models.TaskSession{
+		ID:                "sess-child",
+		TaskID:            "task-child",
+		TaskEnvironmentID: "env-parent",
+	}
+	repo.tasks[session.TaskID] = &models.Task{
+		ID:       session.TaskID,
+		Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
+	}
+
+	env, err := exec.resolveResumeTaskEnvironment(context.Background(), session.TaskID, session)
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("resolveResumeTaskEnvironmentForTask() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+	if env != nil {
+		t.Fatalf("resolved env = %+v, want nil", env)
+	}
+}
+
+func TestResolveResumeTaskEnvironment_RejectsUnverifiableInheritedOwner(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	repo.taskEnvironments["env-parent"] = &models.TaskEnvironment{
+		ID:     "env-parent",
+		TaskID: "task-parent",
+		Status: models.TaskEnvironmentStatusReady,
+	}
+	repo.getTaskFunc = func(_ context.Context, id string) (*models.Task, error) {
+		if id == "task-child" {
+			return &models.Task{
+				ID:       id,
+				Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
+			}, nil
+		}
+		return nil, errors.New("owner lookup failed")
+	}
+
+	session := &models.TaskSession{
+		ID:                "sess-child",
+		TaskID:            "task-child",
+		TaskEnvironmentID: "env-parent",
+	}
+
+	env, err := exec.resolveResumeTaskEnvironment(context.Background(), session.TaskID, session)
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("resolveResumeTaskEnvironment() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+	if env != nil {
+		t.Fatalf("resolved env = %+v, want nil", env)
 	}
 }
 
