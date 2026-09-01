@@ -9,6 +9,8 @@ import {
   RECENT_AGENT_MARKER,
   SHORT_PAGE_BOUNDARY_MARKER,
   TASK_DESCRIPTION_MARKER,
+  TEXT_BATCH_ANCHOR_MARKER,
+  TEXT_BATCH_MARKER,
   VISIBLE_PAGE_MARKER,
   LONG_HISTORY_TAIL_MARKER,
   readMessageRowTopById,
@@ -16,6 +18,7 @@ import {
   seedCollapsedMessageHistory,
   seedLongMessageHistory,
   seedShortBoundaryPageHistory,
+  seedTextSparseMessageHistory,
   seedToolHeavyOpeningHistory,
   seedVisibleMessageHistory,
   scrollToOldestLoadedEdge,
@@ -71,6 +74,9 @@ test.describe("Mobile chat message pagination", () => {
     await expect(chat.getByText(DEEP_PROMPT_MARKER, { exact: true })).toHaveCount(0);
     const edge = await scrollToOldestLoadedEdge(list, LONG_HISTORY_TAIL_MARKER);
     expect(Number.isFinite(edge.rowTop)).toBe(true);
+    // Isolate prepend stability from the browser settling the synthetic edge scroll.
+    await expect.poll(() => olderRequests.length).toBeGreaterThan(0);
+    const anchoredTop = await readStandaloneMessageTop(list, LONG_HISTORY_TAIL_MARKER);
 
     await expect
       .poll(() => olderRequests.length, {
@@ -84,7 +90,7 @@ test.describe("Mobile chat message pagination", () => {
     });
 
     const afterLoadTop = await readStandaloneMessageTop(list, LONG_HISTORY_TAIL_MARKER);
-    expect(Math.abs(afterLoadTop - edge.rowTop)).toBeLessThanOrEqual(8);
+    expect(Math.abs(afterLoadTop - anchoredTop)).toBeLessThanOrEqual(8);
     await expect(chat.getByText(TASK_DESCRIPTION_MARKER, { exact: true })).toHaveCount(0);
     await expect(chat.getByTestId("load-older-messages")).toHaveCount(0);
   });
@@ -150,6 +156,36 @@ test.describe("Mobile chat message pagination", () => {
     expect(heightAfterShortPage - edge.scrollHeight).toBeGreaterThan(0);
     await dwell(testPage, 500, "negative-assertion", "observe mobile short-page stop");
     expect(olderRequests).toHaveLength(2);
+  });
+
+  test("counts text parts instead of tool activity per upward reach", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { taskId, sessionId } = await seedTextSparseMessageHistory(
+      apiClient,
+      seedData,
+      "mobile-message-pagination-counts-text-parts",
+    );
+    const olderRequests = watchOlderMessageRequests(testPage, sessionId);
+
+    await testPage.goto(`/t/${taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    const chat = session.activeChat();
+    const list = chat.locator(".chat-message-list");
+
+    await expect(chat.getByText(TEXT_BATCH_MARKER, { exact: true })).toHaveCount(0);
+    const edge = await scrollToOldestLoadedEdge(list, TEXT_BATCH_ANCHOR_MARKER);
+    expect(Number.isFinite(edge.rowTop)).toBe(true);
+
+    await expect.poll(() => olderRequests.length).toBe(2);
+    await expect(chat.getByText(TEXT_BATCH_MARKER, { exact: true })).toBeVisible();
+    const afterLoadTop = await readStandaloneMessageTop(list, TEXT_BATCH_ANCHOR_MARKER);
+    expect(Math.abs(afterLoadTop - edge.rowTop)).toBeLessThanOrEqual(8);
+    await expect(chat.getByTestId("load-older-messages")).toHaveCount(0);
   });
 
   test("hides the older control when only hidden pre-prompt rows remain", async ({

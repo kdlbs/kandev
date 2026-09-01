@@ -9,6 +9,8 @@ export const PRE_PROMPT_MARKER = "HIDDEN-PRE-PROMPT-MARKER-6N3V";
 export const EAGER_HISTORY_PROMPT_MARKER = "EAGER-HISTORY-PROMPT-MARKER-3J6W";
 export const VISIBLE_PAGE_MARKER = "VISIBLE-PAGE-MARKER-8D5H";
 export const SHORT_PAGE_BOUNDARY_MARKER = "SHORT-PAGE-BOUNDARY-MARKER-5T1C";
+export const TEXT_BATCH_MARKER = "TEXT-BATCH-MARKER-1F9L";
+export const TEXT_BATCH_ANCHOR_MARKER = "TEXT-BATCH-ANCHOR-MARKER-4C7N";
 export const DEEP_PROMPT_MARKER = "DEEP-PROMPT-MARKER-2P7N";
 export const LONG_HISTORY_TAIL_MARKER = "LONG-HISTORY-TAIL-MARKER-6V4R";
 
@@ -215,6 +217,53 @@ export async function seedShortBoundaryPageHistory(
   return { taskId: task.id, sessionId };
 }
 
+/** Seeds one older page of standalone tool rows between the newest window and
+ * twenty older text rows. One upward reach should cross the tool-only page and
+ * expose the text batch without requiring another gesture. */
+export async function seedTextSparseMessageHistory(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+): Promise<{ taskId: string; sessionId: string }> {
+  const task = await apiClient.createTask(seedData.workspaceId, title, {
+    description: TASK_DESCRIPTION_MARKER,
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+    repository_ids: [seedData.repositoryId],
+  });
+  const { session_id: sessionId } = await apiClient.seedTaskSession(task.id, {
+    state: "IDLE",
+    repositoryId: seedData.repositoryId,
+  });
+
+  await apiClient.seedSessionMessage(sessionId, {
+    type: "message",
+    content: INITIAL_PROMPT_MARKER,
+    authorType: "user",
+  });
+  await apiClient.seedSessionMessage(sessionId, {
+    type: "message",
+    content: TEXT_BATCH_MARKER,
+  });
+  await apiClient.seedAgentMessages(sessionId, 19, "TEXT-BATCH-OLDER-FILLER");
+  for (let index = 0; index < 20; index += 1) {
+    await apiClient.seedSessionMessage(sessionId, {
+      type: "tool_call",
+      content: `standalone completed tool ${index + 1}`,
+      metadata: { status: "complete" },
+      newTurn: true,
+    });
+  }
+  await apiClient.seedSessionMessage(sessionId, {
+    type: "message",
+    content: TEXT_BATCH_ANCHOR_MARKER,
+    newTurn: true,
+  });
+  await apiClient.seedAgentMessages(sessionId, 99, "TEXT-BATCH-VISIBLE-TAIL");
+
+  return { taskId: task.id, sessionId };
+}
+
 /** Reads a rendered standalone message's viewport position from the list. */
 export async function readStandaloneMessageTop(list: Locator, marker: string): Promise<number> {
   return list.evaluate((element, messageMarker) => {
@@ -253,14 +302,4 @@ export async function scrollToOldestLoadedEdge(
       scrollHeight: element.scrollHeight,
     };
   }, marker);
-}
-
-/** Applies a small upward movement after prepend restoration. */
-export async function scrollUpSlightly(list: Locator): Promise<number> {
-  return list.evaluate((element) => {
-    const previous = element.scrollTop;
-    element.scrollTop = Math.max(0, previous - 24);
-    element.dispatchEvent(new Event("scroll", { bubbles: true }));
-    return previous - element.scrollTop;
-  });
 }

@@ -1,12 +1,15 @@
 import type { useAppStoreApi } from "@/components/state-provider";
 import { listTaskSessionMessages } from "@/lib/api";
 import { createDebugLogger } from "@/lib/debug/log";
+import type { Message } from "@/lib/types/http";
 
 const debug = createDebugLogger("messages:pagination");
 
 export type OlderPageResult = {
-  /** Messages actually prepended by this page. */
+  /** Rows returned by this page. */
   count: number;
+  /** Rows actually prepended after deduplication and session-lifecycle checks. */
+  prependedMessages: Message[];
   /** The page size this request used (first-request-wins per (session, cursor)). */
   effectiveLimit: number;
   /** Post-merge pagination metadata. */
@@ -123,11 +126,22 @@ async function performRequest(
   // unconditional prepend would resurrect orphaned conversation state. A
   // request can only legitimately be in flight when the session's message
   // state existed at start, so its absence now means it was purged.
-  if (store.getState().messages?.bySession?.[sessionId] !== undefined) {
+  const existingMessages = store.getState().messages?.bySession?.[sessionId];
+  const existingIds = new Set(existingMessages?.map((message) => message.id));
+  const prependedMessages = existingMessages
+    ? ordered.filter((message) => !existingIds.has(message.id))
+    : [];
+  if (existingMessages !== undefined) {
     store.getState().prependMessages(sessionId, ordered, {
       hasMore,
       oldestCursor: newOldestCursor,
     });
   }
-  return { count: ordered.length, effectiveLimit: limit, hasMore, oldestCursor: newOldestCursor };
+  return {
+    count: ordered.length,
+    prependedMessages,
+    effectiveLimit: limit,
+    hasMore,
+    oldestCursor: newOldestCursor,
+  };
 }
