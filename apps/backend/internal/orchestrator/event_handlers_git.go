@@ -376,10 +376,11 @@ func (s *Service) dispatchPushDetection(ctx context.Context, sessionID, taskID, 
 //
 // This is the single boundary every watch-creation and association call site
 // routes through — dispatchPushDetection, ensureSessionPRWatch,
-// CheckSessionPR, and buildTaskBranchList (feeding the poller's
-// reconcileWatches) — so no member-attributed github_pr_watches row is ever
-// created and the poller's own AssociatePRWithTask(watch.TaskID, ...) writes
-// under the already-redirected task.
+// CheckSessionPR, buildTaskBranchList (feeding the poller's
+// reconcileWatches), and resetPRWatchForBranchSwitch — so no
+// member-attributed github_pr_watches row is ever created and the poller's
+// own AssociatePRWithTask(watch.TaskID, ...) writes under the
+// already-redirected task.
 func (s *Service) resolveEffectivePushTaskID(ctx context.Context, taskID, repositoryID string) string {
 	if taskID == "" {
 		return taskID
@@ -1126,8 +1127,9 @@ func (s *Service) resetPRWatchForBranchSwitch(ctx context.Context, taskID, sessi
 	if workspaceID == "" {
 		return
 	}
+	effectiveTaskID := s.resolveEffectivePushTaskID(ctx, taskID, repositoryID)
 	if _, err := s.githubService.EnsurePRWatchForWorkspace(
-		ctx, workspaceID, sessionID, taskID, repositoryID, owner, repoName, newBranch,
+		ctx, workspaceID, sessionID, effectiveTaskID, repositoryID, owner, repoName, newBranch,
 	); err != nil {
 		s.logger.Error("failed to add PR watch after branch switch",
 			zap.String("session_id", sessionID), zap.String("new_branch", newBranch),

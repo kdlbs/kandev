@@ -320,6 +320,83 @@ func (s *Service) AssociatePRWithTaskForWorkspace(
 	return s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, false, false, TaskPRSourceWatch)
 }
 
+// resolveEffectiveAssociationTaskID redirects a watch-sourced association
+// write to the workspace-group owner task, independently of whatever
+// producer called in. It exists as defense-in-depth alongside
+// internal/orchestrator's resolveEffectivePushTaskID: that helper redirects
+// every watch/association call site the orchestrator package controls, but
+// Review Round 2 (F4) found a fifth orchestrator producer it had missed, and
+// F5 found that redirect alone does nothing for github_pr_watches rows that
+// already carry a member task_id from before the fix existed — those stale
+// watches keep feeding poller.go's AssociatePRWithTask(watch.TaskID, ...)
+// forever, since nothing ever rewrites a watch's task_id. Applying the same
+// redirect again at this single private write funnel closes both gaps at
+// once: it does not matter which orchestrator producer supplied taskID, or
+// whether the watch driving it predates this fix, because every watch-sourced
+// write is re-checked here before it lands.
+//
+// Only applied to source == TaskPRSourceWatch. TaskPRSourceURLLink
+// (AssociateExistingPRByURL/ForWorkspace) is a deliberate cross-task action —
+// the user explicitly chose to link a specific PR to the task whose card they
+// were viewing, independent of worktree sharing — and must never be
+// silently rerouted to a different task.
+//
+// Falls back to taskID unchanged (matching resolveEffectivePushTaskID's own
+// fallback semantics) whenever the redirect can't be safely applied: no
+// resolver wired, taskID empty, no group/no distinct owner, the lookup
+// errors, the owner task can't be loaded or is archived, or the owner
+// doesn't hold repositoryID itself (redirecting would just make
+// validateTaskRepositoryID reject the owner and drop the association, which
+// is worse than leaving it under the observing task — the same reasoning
+// Round 2 applied to resolveEffectivePushTaskID's own repository check).
+func (s *Service) resolveEffectiveAssociationTaskID(ctx context.Context, taskID, repositoryID string) string {
+	if taskID == "" {
+		return taskID
+	}
+	resolver := s.workspaceGroupOwnerResolver
+	if resolver == nil {
+		return taskID
+	}
+	ownerTaskID, err := resolver.GetWorkspaceGroupOwnerTaskID(ctx, taskID)
+	if err != nil || ownerTaskID == "" || ownerTaskID == taskID {
+		return taskID
+	}
+	store := s.getTaskIssueStore()
+	if store == nil {
+		return taskID
+	}
+	ownerTask, err := store.GetTask(ctx, ownerTaskID)
+	if err != nil || ownerTask == nil || ownerTask.ArchivedAt != nil {
+		return taskID
+	}
+	if repositoryID != "" && !s.associationOwnerHoldsRepository(ctx, store, ownerTaskID, repositoryID) {
+		return taskID
+	}
+	s.logger.Info("redirecting watch-sourced PR association to workspace group owner",
+		zap.String("from_task_id", taskID),
+		zap.String("to_task_id", ownerTaskID),
+		zap.String("repository_id", repositoryID))
+	return ownerTaskID
+}
+
+// associationOwnerHoldsRepository reports whether taskID has a
+// task_repositories row for repositoryID. Used by
+// resolveEffectiveAssociationTaskID to avoid redirecting into a write that
+// validateTaskRepositoryID would reject and associatePRWithTask would then
+// silently drop.
+func (s *Service) associationOwnerHoldsRepository(ctx context.Context, store TaskIssueStore, taskID, repositoryID string) bool {
+	taskRepos, err := store.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return false
+	}
+	for _, tr := range taskRepos {
+		if tr != nil && tr.RepositoryID == repositoryID {
+			return true
+		}
+	}
+	return false
+}
+
 // associatePRWithTask creates the task-PR association. outcomeFieldsPopulated
 // tells it whether pr came from a full single-PR fetch (AC-10) — only the
 // direct GetPR-based callers in this file set it true; the two public
@@ -328,11 +405,16 @@ func (s *Service) AssociatePRWithTaskForWorkspace(
 // carry real observations for these fields (AC-11). source is only applied
 // when this call creates a brand-new row (see TaskPRSourceWatch /
 // TaskPRSourceURLLink) — an existing or restored row keeps its original
-// source classification (no backfill).
+// source classification (no backfill). taskID is redirected to the
+// workspace-group owner before anything else runs when source is
+// TaskPRSourceWatch — see resolveEffectiveAssociationTaskID.
 func (s *Service) associatePRWithTask(
 	ctx context.Context, workspaceID, taskID, repositoryID string, pr *PR,
 	restoreDetached, outcomeFieldsPopulated bool, source string,
 ) (*TaskPR, error) {
+	if source == TaskPRSourceWatch {
+		taskID = s.resolveEffectiveAssociationTaskID(ctx, taskID, repositoryID)
+	}
 	if err := s.validateTaskRepositoryID(ctx, taskID, repositoryID); err != nil {
 		return nil, err
 	}
