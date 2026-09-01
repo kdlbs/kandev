@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -16,14 +17,17 @@ import (
 // neither creates a parallel grant representation.
 func (r *Repository) initCoordinatorGrantSchema() error {
 	_, err := r.db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_workspace_id_id
+			ON tasks(workspace_id, id);
 		CREATE TABLE IF NOT EXISTS workspace_coordinator_grants (
-			workspace_id TEXT PRIMARY KEY,
-			coordinator_task_id TEXT NOT NULL,
+			workspace_id TEXT PRIMARY KEY NOT NULL CONSTRAINT workspace_coordinator_grants_workspace_id_nonempty CHECK (workspace_id <> ''),
+			coordinator_task_id TEXT NOT NULL CONSTRAINT workspace_coordinator_grants_task_id_nonempty CHECK (coordinator_task_id <> ''),
 			created_by_user_id TEXT NOT NULL,
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,
 			FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
-			FOREIGN KEY (coordinator_task_id) REFERENCES tasks(id) ON DELETE CASCADE
+			FOREIGN KEY (workspace_id, coordinator_task_id)
+				REFERENCES tasks(workspace_id, id) ON DELETE CASCADE
 		);
 		CREATE INDEX IF NOT EXISTS idx_workspace_coordinator_grants_task
 			ON workspace_coordinator_grants(coordinator_task_id);
@@ -32,6 +36,100 @@ func (r *Repository) initCoordinatorGrantSchema() error {
 		return fmt.Errorf("init workspace coordinator grant schema: %w", err)
 	}
 	return nil
+}
+
+// migrateCoordinatorGrantSchema upgrades the pre-routing grant table, whose
+// task-only foreign key did not bind the coordinator task to the grant's
+// workspace. A table rebuild is required on both supported dialects because
+// SQLite cannot alter foreign keys and keeping the weak constraint would leave
+// the security contract ambiguous on PostgreSQL.
+func (r *Repository) migrateCoordinatorGrantSchema() error {
+	current, err := r.coordinatorGrantSchemaCurrent()
+	if err != nil || current {
+		return err
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin coordinator grant schema migration: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(r.db.Rebind(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_workspace_id_id ON tasks(workspace_id, id)`)); err != nil {
+		return fmt.Errorf("ensure task workspace identity: %w", err)
+	}
+	if _, err := tx.Exec(`ALTER TABLE workspace_coordinator_grants RENAME TO workspace_coordinator_grants_legacy`); err != nil {
+		return fmt.Errorf("rename legacy coordinator grants: %w", err)
+	}
+	if _, err := tx.Exec(`
+		CREATE TABLE workspace_coordinator_grants (
+			workspace_id TEXT PRIMARY KEY NOT NULL CONSTRAINT workspace_coordinator_grants_workspace_id_nonempty CHECK (workspace_id <> ''),
+			coordinator_task_id TEXT NOT NULL CONSTRAINT workspace_coordinator_grants_task_id_nonempty CHECK (coordinator_task_id <> ''),
+			created_by_user_id TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+			FOREIGN KEY (workspace_id, coordinator_task_id)
+				REFERENCES tasks(workspace_id, id) ON DELETE CASCADE
+		)`); err != nil {
+		return fmt.Errorf("create corrected coordinator grants: %w", err)
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO workspace_coordinator_grants
+			(workspace_id, coordinator_task_id, created_by_user_id, created_at, updated_at)
+		SELECT workspace_id, coordinator_task_id, created_by_user_id, created_at, updated_at
+		FROM workspace_coordinator_grants_legacy`); err != nil {
+		return fmt.Errorf("copy coordinator grants: %w", err)
+	}
+	if _, err := tx.Exec(`DROP TABLE workspace_coordinator_grants_legacy`); err != nil {
+		return fmt.Errorf("drop legacy coordinator grants: %w", err)
+	}
+	if _, err := tx.Exec(`DROP INDEX IF EXISTS idx_workspace_coordinator_grants_task`); err != nil {
+		return fmt.Errorf("drop legacy coordinator grant index: %w", err)
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_workspace_coordinator_grants_task ON workspace_coordinator_grants(coordinator_task_id)`); err != nil {
+		return fmt.Errorf("create coordinator grant index: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit coordinator grant schema migration: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) coordinatorGrantSchemaCurrent() (bool, error) {
+	if dialect.IsPostgres(r.db.DriverName()) {
+		var current bool
+		err := r.db.QueryRow(`
+			SELECT EXISTS (
+				SELECT 1 FROM pg_constraint c
+				JOIN pg_class table_ref ON table_ref.oid = c.conrelid
+				WHERE table_ref.relname = 'workspace_coordinator_grants'
+				  AND c.contype = 'f'
+				  AND LOWER(pg_get_constraintdef(c.oid)) LIKE 'foreign key (workspace_id, coordinator_task_id) references %tasks%(workspace_id, id) on delete cascade%'
+			) AND EXISTS (
+				SELECT 1 FROM pg_indexes
+				WHERE tablename = 'tasks' AND indexdef ILIKE '%(workspace_id, id)%'
+			) AND EXISTS (
+				SELECT 1 FROM pg_constraint
+				WHERE conrelid = 'workspace_coordinator_grants'::regclass
+				  AND conname = 'workspace_coordinator_grants_workspace_id_nonempty'
+			) AND EXISTS (
+				SELECT 1 FROM pg_constraint
+				WHERE conrelid = 'workspace_coordinator_grants'::regclass
+				  AND conname = 'workspace_coordinator_grants_task_id_nonempty'
+			)`).Scan(&current)
+		return current, err
+	}
+	var schema string
+	err := r.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'workspace_coordinator_grants'`).Scan(&schema)
+	if err == sql.ErrNoRows {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	normalized := strings.ToLower(strings.Join(strings.Fields(schema), " "))
+	return strings.Contains(normalized, "foreign key (workspace_id, coordinator_task_id) references tasks(workspace_id, id) on delete cascade") &&
+		strings.Contains(normalized, "check (workspace_id <> '')") &&
+		strings.Contains(normalized, "check (coordinator_task_id <> '')"), nil
 }
 
 // IsCurrentCoordinatorGrant verifies both the durable same-workspace grant and
