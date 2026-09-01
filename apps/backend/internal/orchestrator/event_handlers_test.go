@@ -3132,6 +3132,56 @@ func TestHandleAgentStopped_PreservesRecoveryState(t *testing.T) {
 	})
 }
 
+func TestHandleAgentStopped_DefersUntilSessionGuardIsReleased(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	lock, release := svc.acquireCancelInFlightGuard("s1")
+	lock.Lock()
+	defer release()
+
+	eventDone := make(chan struct{})
+	go func() {
+		svc.handleAgentStopped(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+		})
+		close(eventDone)
+	}()
+
+	// The handler must return while the current lifecycle owner still holds the
+	// mutex. This is required for synchronous stop callbacks from the in-memory
+	// event bus; the deferred reconciliation waits for the owner below.
+	select {
+	case <-eventDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("agent.stopped handler blocked behind the session guard")
+	}
+
+	lockedSession, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load session while guard is held: %v", err)
+	}
+	if lockedSession.State != models.TaskSessionStateRunning {
+		t.Fatalf("session state changed before guard release: %q", lockedSession.State)
+	}
+
+	lock.Unlock()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		updated, err := repo.GetTaskSession(ctx, "s1")
+		if err == nil && updated.State == models.TaskSessionStateCancelled {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("deferred agent.stopped reconciliation did not run after guard release")
+}
+
 // waitForStopCall polls until the mock agent manager has received at least one
 // StopAgentWithReason call, or fails the test after a timeout.
 func waitForStopCall(t *testing.T, agentMgr *mockAgentManager) {

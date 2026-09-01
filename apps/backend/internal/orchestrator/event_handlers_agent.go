@@ -1175,9 +1175,21 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 	// the event waited, the guarded state reload below observes CANCELLED and
 	// suppresses all workflow/on_enter side effects.
 	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	if !lock.TryLock() {
+		go func() {
+			defer release()
+			lock.Lock()
+			defer lock.Unlock()
+			s.handleAgentCompletedAfterGuard(context.WithoutCancel(ctx), data)
+		}()
+		return
+	}
 	defer release()
-	lock.Lock()
 	defer lock.Unlock()
+	s.handleAgentCompletedAfterGuard(ctx, data)
+}
+
+func (s *Service) handleAgentCompletedAfterGuard(ctx context.Context, data watcher.AgentEventData) {
 	ctx = withWorkflowProfileSwitchGuardHeld(ctx, data.SessionID, data.AgentExecutionID)
 	if s.isCancelInFlight(data.SessionID) {
 		s.logger.Debug("deferring agent.completed while cancellation is in progress",
@@ -2217,8 +2229,16 @@ func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEven
 		return
 	}
 	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	if !lock.TryLock() {
+		go func() {
+			defer release()
+			lock.Lock()
+			defer lock.Unlock()
+			s.handleAgentStoppedLocked(context.WithoutCancel(ctx), data)
+		}()
+		return
+	}
 	defer release()
-	lock.Lock()
 	defer lock.Unlock()
 	s.handleAgentStoppedLocked(ctx, data)
 }

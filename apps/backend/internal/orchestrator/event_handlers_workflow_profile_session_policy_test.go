@@ -13,6 +13,7 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 type failParkIntentRepo struct {
@@ -458,6 +459,14 @@ func TestParkSessionForProfileSwitch_DelayedTerminalEventsConsumeClaim(t *testin
 			guardHeld = false
 			release()
 			coordinatorStopAwaitSignal(t, eventDone, "delayed "+tt.name+" event")
+			require.Eventually(t, func() bool {
+				session, err := fixture.repo.GetTaskSession(ctx, fixture.current.ID)
+				if err != nil {
+					return false
+				}
+				intent, ok := workflowProfileSwitchStopIntentFromMetadata(session.Metadata)
+				return ok && intent.Consumed
+			}, 2*time.Second, 10*time.Millisecond, "delayed %s event did not consume the stop intent", tt.name)
 
 			session, err := fixture.repo.GetTaskSession(ctx, fixture.current.ID)
 			if err != nil {
