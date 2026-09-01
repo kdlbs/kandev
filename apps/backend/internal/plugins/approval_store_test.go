@@ -3,6 +3,9 @@ package plugins
 import (
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/plugins/manifest"
+	"github.com/kandev/kandev/internal/plugins/store"
 )
 
 func TestApprovalLedgerGrantRevokeAndTombstone(t *testing.T) {
@@ -130,8 +133,8 @@ func TestAuthorizePluginCapabilityDeniesHumanReservedCapability(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{}
 	svc.SetPluginsDir(dir)
-	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"merge"}, "human", "grant", "audit-1"); err != nil {
-		t.Fatalf("grant: %v", err)
+	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"merge"}, "human", "grant", "audit-1"); err == nil {
+		t.Fatal("approvalGrant persisted a Human-reserved capability")
 	}
 
 	decision := svc.authorizePluginCapability("inst-1", "ws-1", "merge", 1, "req", "method")
@@ -140,5 +143,72 @@ func TestAuthorizePluginCapabilityDeniesHumanReservedCapability(t *testing.T) {
 	}
 	if decision.Reason != ApprovalDenyHumanReserved {
 		t.Fatalf("reason = %q, want human_reserved", decision.Reason)
+	}
+}
+
+func TestApprovalGrantRetryIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	ledger := newApprovalLedger(dir)
+	at := time.Now().UTC()
+	first, err := ledger.grant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-1", at)
+	if err != nil {
+		t.Fatalf("first grant: %v", err)
+	}
+	second, err := ledger.grant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-1", at.Add(time.Second))
+	if err != nil {
+		t.Fatalf("idempotent retry: %v", err)
+	}
+	if second.Revision != first.Revision || !second.UpdatedAt.Equal(first.UpdatedAt) {
+		t.Fatalf("retry changed approval: first=%#v second=%#v", first, second)
+	}
+	file, err := ledger.load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(file.Events) != 1 {
+		t.Fatalf("event count = %d, want one idempotent event", len(file.Events))
+	}
+}
+
+func TestApprovalTombstoneAppendsWorkspaceEventAndMarksRow(t *testing.T) {
+	dir := t.TempDir()
+	ledger := newApprovalLedger(dir)
+	at := time.Now().UTC()
+	if _, err := ledger.grant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-1", at); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	if err := ledger.tombstoneInstallation("inst-1", at.Add(time.Second)); err != nil {
+		t.Fatalf("tombstone: %v", err)
+	}
+	row, ok, err := ledger.get("inst-1", "ws-1")
+	if err != nil || !ok {
+		t.Fatalf("get: ok=%v err=%v", ok, err)
+	}
+	if row.TombstonedAt == nil {
+		t.Fatal("tombstone did not mark current approval")
+	}
+	file, err := ledger.load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(file.Events) != 2 || file.Events[1].Type != CapabilityApprovalEventRevoke || file.Events[1].AuditID == "" {
+		t.Fatalf("tombstone events = %#v", file.Events)
+	}
+}
+
+func TestAuthorizePluginCapabilityRequiresCurrentInstalledManifest(t *testing.T) {
+	dir := t.TempDir()
+	svc := &Service{registry: NewRegistry()}
+	svc.SetPluginsDir(dir)
+	svc.registry.Add(&store.Record{
+		Manifest:       manifest.Manifest{ID: "plugin-a", Capabilities: manifest.Capabilities{APIRead: []string{"tasks"}}},
+		InstallationID: "inst-1",
+	})
+	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, ManifestCapabilityDigest(svc.registry.List()[0].Manifest), []string{"api_read:tasks", "api_write:tasks"}, "human", "grant", "audit-1"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	decision := svc.authorizePluginCapability("inst-1", "ws-1", "api_write:tasks", 1, "req", "method")
+	if decision.Allowed || decision.Reason != ApprovalDenyUndeclaredCapability {
+		t.Fatalf("decision = %#v, want manifest intersection denial", decision)
 	}
 }

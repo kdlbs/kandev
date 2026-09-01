@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/plugins/manifest"
 )
 
 // ApprovalDecision is the typed allow/deny result for the generic plugin
@@ -76,6 +78,9 @@ func CanonicalCapabilityList(caps []string) ([]string, error) {
 		if capability == "" {
 			return nil, errors.New("plugins: empty capability")
 		}
+		if isHumanReservedCapability(capability) {
+			return nil, fmt.Errorf("plugins: Human-reserved capability %q cannot be approved", capability)
+		}
 		if strings.ContainsAny(capability, "*?") {
 			return nil, fmt.Errorf("plugins: wildcard capability %q is unsupported", capability)
 		}
@@ -87,4 +92,19 @@ func CanonicalCapabilityList(caps []string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// ManifestCapabilityDigest is the canonical digest of the exact capabilities
+// declared by an installed manifest. Legacy api_read/api_write declarations
+// are intentionally represented as exact capability IDs and never broadened.
+func ManifestCapabilityDigest(m manifest.Manifest) string {
+	caps := make([]string, 0, len(m.Capabilities.APIRead)+len(m.Capabilities.APIWrite))
+	for _, resource := range m.Capabilities.APIRead {
+		caps = append(caps, "api_read:"+strings.TrimSpace(resource))
+	}
+	for _, resource := range m.Capabilities.APIWrite {
+		caps = append(caps, "api_write:"+strings.TrimSpace(resource))
+	}
+	canonical, _ := CanonicalCapabilityList(caps)
+	return CanonicalApprovalDigest(canonical...)
 }

@@ -3,6 +3,8 @@ package plugins
 import (
 	"fmt"
 	"time"
+
+	"github.com/kandev/kandev/internal/plugins/store"
 )
 
 func (s *Service) approvalLedger() *approvalLedger {
@@ -21,7 +23,11 @@ func (s *Service) approvalGrant(installationID, workspaceID string, revision uin
 	if ledger == nil {
 		return CapabilityApproval{}, fmt.Errorf("plugins: approval ledger not configured")
 	}
-	return ledger.grant(installationID, workspaceID, revision, manifestDigest, capabilityIDs, actor, reason, auditID, time.Now().UTC())
+	canonical, err := CanonicalCapabilityList(capabilityIDs)
+	if err != nil {
+		return CapabilityApproval{}, err
+	}
+	return ledger.grant(installationID, workspaceID, revision, manifestDigest, canonical, actor, reason, auditID, time.Now().UTC())
 }
 
 func (s *Service) approvalRevoke(installationID, workspaceID, actor, reason, auditID string) (CapabilityApproval, error) {
@@ -29,7 +35,14 @@ func (s *Service) approvalRevoke(installationID, workspaceID, actor, reason, aud
 	if ledger == nil {
 		return CapabilityApproval{}, fmt.Errorf("plugins: approval ledger not configured")
 	}
-	return ledger.revoke(installationID, workspaceID, actor, reason, auditID, time.Now().UTC())
+	current, ok, err := ledger.get(installationID, workspaceID)
+	if err != nil || !ok {
+		if err != nil {
+			return CapabilityApproval{}, err
+		}
+		return CapabilityApproval{}, fmt.Errorf("plugins: approval not found")
+	}
+	return ledger.revokeIfRevision(installationID, workspaceID, current.Revision, actor, reason, auditID, time.Now().UTC(), false)
 }
 
 func (s *Service) approvalTombstoneInstallation(installationID string) error {
@@ -87,6 +100,21 @@ func (s *Service) authorizePluginCapability(installationID, workspaceID, capabil
 		decision.Reason = ApprovalDenyForeignInstallation
 		return decision
 	}
+	if s.registry != nil {
+		installed := s.installedRecordByInstallationID(installationID)
+		if installed == nil {
+			decision.Reason = ApprovalDenyForeignInstallation
+			return decision
+		}
+		if current.ManifestDigest != ManifestCapabilityDigest(installed.Manifest) {
+			decision.Reason = ApprovalDenyUnavailableCapability
+			return decision
+		}
+		if !manifestDeclaresCapability(installed, capabilityID) {
+			decision.Reason = ApprovalDenyUndeclaredCapability
+			return decision
+		}
+	}
 	if current.State != ApprovalStateActive {
 		decision.Reason = ApprovalDenyRevokedApproval
 		return decision
@@ -106,6 +134,29 @@ func (s *Service) authorizePluginCapability(installationID, workspaceID, capabil
 	}
 	decision.Reason = ApprovalDenyUndeclaredCapability
 	return decision
+}
+
+func (s *Service) installedRecordByInstallationID(installationID string) *store.Record {
+	for _, record := range s.registry.List() {
+		if record.InstallationID == installationID {
+			return record
+		}
+	}
+	return nil
+}
+
+func manifestDeclaresCapability(record *store.Record, capabilityID string) bool {
+	for _, resource := range record.Capabilities.APIRead {
+		if capabilityID == "api_read:"+resource {
+			return true
+		}
+	}
+	for _, resource := range record.Capabilities.APIWrite {
+		if capabilityID == "api_write:"+resource {
+			return true
+		}
+	}
+	return false
 }
 
 func isHumanReservedCapability(capabilityID string) bool {

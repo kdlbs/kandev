@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -59,6 +60,11 @@ type approvalLedgerFile struct {
 	Events     []CapabilityApprovalEvent     `json:"events"`
 	Tombstones map[string]time.Time          `json:"tombstones"`
 }
+
+var (
+	ErrApprovalRevisionConflict    = errors.New("plugins: approval revision conflict")
+	ErrApprovalIdempotencyConflict = errors.New("plugins: approval idempotency conflict")
+)
 
 type approvalLedger struct {
 	dir string
@@ -130,6 +136,11 @@ func approvalKey(installationID, workspaceID string) string {
 }
 
 func (l *approvalLedger) grant(installationID, workspaceID string, revision uint64, manifestDigest string, capabilityIDs []string, actor, reason, auditID string, at time.Time) (CapabilityApproval, error) {
+	canonical, err := CanonicalCapabilityList(capabilityIDs)
+	if err != nil {
+		return CapabilityApproval{}, err
+	}
+	capabilityIDs = canonical
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	file, err := l.load()
@@ -138,8 +149,19 @@ func (l *approvalLedger) grant(installationID, workspaceID string, revision uint
 	}
 	key := approvalKey(installationID, workspaceID)
 	current := file.Approvals[key]
+	if auditID != "" {
+		for _, event := range file.Events {
+			if event.AuditID != auditID || event.InstallationID != installationID || event.WorkspaceID != workspaceID {
+				continue
+			}
+			if current.Revision == revision && current.ManifestDigest == manifestDigest && equalStrings(current.CapabilityIDs, capabilityIDs) {
+				return current, nil
+			}
+			return CapabilityApproval{}, ErrApprovalIdempotencyConflict
+		}
+	}
 	if current.Revision != 0 && current.Revision != revision-1 {
-		return CapabilityApproval{}, fmt.Errorf("plugins: approval revision conflict")
+		return CapabilityApproval{}, ErrApprovalRevisionConflict
 	}
 	approval := CapabilityApproval{
 		InstallationID:     installationID,
@@ -167,6 +189,10 @@ func (l *approvalLedger) grant(installationID, workspaceID string, revision uint
 }
 
 func (l *approvalLedger) revoke(installationID, workspaceID string, actor, reason, auditID string, at time.Time) (CapabilityApproval, error) {
+	return l.revokeIfRevision(installationID, workspaceID, 0, actor, reason, auditID, at, true)
+}
+
+func (l *approvalLedger) revokeIfRevision(installationID, workspaceID string, expectedRevision uint64, actor, reason, auditID string, at time.Time, allowCurrent bool) (CapabilityApproval, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	file, err := l.load()
@@ -177,6 +203,17 @@ func (l *approvalLedger) revoke(installationID, workspaceID string, actor, reaso
 	current, ok := file.Approvals[key]
 	if !ok {
 		return CapabilityApproval{}, fmt.Errorf("plugins: approval not found")
+	}
+	for _, event := range file.Events {
+		if event.AuditID == auditID && event.InstallationID == installationID && event.WorkspaceID == workspaceID && event.Type == CapabilityApprovalEventRevoke {
+			return current, nil
+		}
+	}
+	if allowCurrent {
+		expectedRevision = current.Revision
+	}
+	if current.Revision != expectedRevision {
+		return CapabilityApproval{}, ErrApprovalRevisionConflict
 	}
 	next := current
 	next.Revision++
@@ -208,9 +245,30 @@ func (l *approvalLedger) tombstoneInstallation(installationID string, at time.Ti
 		approval.Revision++
 		approval.State = ApprovalStateRevoked
 		approval.UpdatedAt = at
+		tombstonedAt := at
+		approval.TombstonedAt = &tombstonedAt
 		file.Approvals[key] = approval
+		file.Events = append(file.Events, CapabilityApprovalEvent{
+			AuditID:        CanonicalApprovalDigest(installationID, approval.WorkspaceID, fmt.Sprint(approval.Revision), "uninstall"),
+			InstallationID: installationID, WorkspaceID: approval.WorkspaceID,
+			BeforeRevision: approval.Revision - 1, AfterRevision: approval.Revision,
+			BeforeDigest: approval.ManifestDigest, AfterDigest: approval.ManifestDigest,
+			Actor: "host", Reason: "installation uninstalled", Type: CapabilityApprovalEventRevoke, ObservedAt: at,
+		})
 	}
 	return l.save(file)
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (l *approvalLedger) get(installationID, workspaceID string) (CapabilityApproval, bool, error) {
