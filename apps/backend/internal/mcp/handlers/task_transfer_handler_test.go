@@ -23,6 +23,7 @@ type recordingTaskTransferService struct {
 	replayActor models.TaskTransferActor
 	replayOK    bool
 	replayErr   error
+	auditErr    error
 	auditCtxErr []error
 }
 
@@ -51,7 +52,7 @@ func (s *recordingTaskTransferService) AuditTaskTransferAttempt(
 ) error {
 	s.audits = append(s.audits, command)
 	s.auditCtxErr = append(s.auditCtxErr, ctx.Err())
-	return nil
+	return s.auditErr
 }
 
 type fixedTaskTransferAuthorizer struct {
@@ -133,6 +134,45 @@ func TestHandleTransferTaskRejectsClientAuditOnlyFieldWithoutTransfer(t *testing
 	)
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeError, response.Type)
+	require.Empty(t, transfer.commands)
+	require.Len(t, transfer.audits, 1)
+}
+
+func TestAuditTaskTransferAttemptActionRecordsAuditWithoutTransfer(t *testing.T) {
+	transfer := &recordingTaskTransferService{}
+	h := &Handlers{taskTransferSvc: transfer, logger: testLogger(t)}
+	dispatcher := ws.NewDispatcher()
+	h.registerTaskConfigMutationHandlers(&guardedMCPDispatcher{Dispatcher: dispatcher, handlers: h})
+
+	message := transferTaskMessage(t)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(message.Payload, &payload))
+	payload["unknown_field"] = true
+	message = makeWSMessage(t, ws.ActionMCPAuditTaskTransferAttempt, payload)
+	response, err := dispatcher.Dispatch(
+		authn.WithIdentity(context.Background(), authn.Identity{UserID: "human-1"}),
+		message,
+	)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+	require.Empty(t, transfer.commands)
+	require.Len(t, transfer.audits, 1)
+}
+
+func TestAuditTaskTransferAttemptActionReturnsErrorWhenAuditFails(t *testing.T) {
+	transfer := &recordingTaskTransferService{auditErr: errors.New("audit unavailable")}
+	h := &Handlers{taskTransferSvc: transfer, logger: testLogger(t)}
+
+	response, err := h.handleAuditTaskTransferAttempt(
+		context.Background(),
+		&ws.Message{
+			ID:      "audit",
+			Action:  ws.ActionMCPAuditTaskTransferAttempt,
+			Payload: transferTaskMessage(t).Payload,
+		},
+	)
+	require.NoError(t, err)
+	assertWSError(t, response, ws.ErrorCodeInternalError)
 	require.Empty(t, transfer.commands)
 	require.Len(t, transfer.audits, 1)
 }

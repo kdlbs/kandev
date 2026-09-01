@@ -94,11 +94,11 @@ func TestTransferTaskSchemaRejectionIsForwardedForAudit(t *testing.T) {
 	s := newTestServer(t, backend)
 	result := callTool(t, s, "transfer_task_kandev", map[string]interface{}{"task_id": "task-1"})
 	require.True(t, result.IsError)
-	require.Equal(t, ws.ActionMCPTransferTask, backend.lastAction)
+	require.Equal(t, ws.ActionMCPAuditTaskTransferAttempt, backend.lastAction)
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	require.Equal(t, "task-1", payload["task_id"])
-	require.Equal(t, true, payload["_audit_only"])
+	require.NotContains(t, payload, "_audit_only")
 }
 
 func TestTransferTaskSchemaRejectionAuditsAfterRequestCancellation(t *testing.T) {
@@ -108,7 +108,7 @@ func TestTransferTaskSchemaRejectionAuditsAfterRequestCancellation(t *testing.T)
 	cancel()
 	result := callToolContext(t, ctx, s, "transfer_task_kandev", map[string]interface{}{"task_id": "task-1"})
 	require.True(t, result.IsError)
-	require.Equal(t, ws.ActionMCPTransferTask, backend.lastAction)
+	require.Equal(t, ws.ActionMCPAuditTaskTransferAttempt, backend.lastAction)
 	require.NoError(t, backend.contextErr)
 }
 

@@ -638,7 +638,7 @@ func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.
 }
 
 func (s *Server) auditRejectedTransferTool(ctx context.Context, arguments any) {
-	payload := map[string]any{"_audit_only": true}
+	payload := make(map[string]any)
 	if provided, ok := arguments.(map[string]any); ok {
 		for key, value := range provided {
 			payload[key] = value
@@ -647,7 +647,7 @@ func (s *Server) auditRejectedTransferTool(ctx context.Context, arguments any) {
 	var ignored map[string]interface{}
 	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rejectedTransferToolAuditTimeout)
 	defer cancel()
-	if err := s.backend.RequestPayload(auditCtx, ws.ActionMCPTransferTask, payload, &ignored); err != nil {
+	if err := s.backend.RequestPayload(auditCtx, ws.ActionMCPAuditTaskTransferAttempt, payload, &ignored); err != nil {
 		s.logger.Warn("failed to audit rejected transfer tool call", zap.Error(err))
 	}
 }

@@ -105,10 +105,32 @@ func decodeTaskTransferRequest(payload []byte, request *taskTransferRequest) err
 	return nil
 }
 
+func (h *Handlers) handleAuditTaskTransferAttempt(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var request taskTransferRequest
+	if err := json.Unmarshal(msg.Payload, &request); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid task transfer audit payload", nil)
+	}
+	if err := h.recordRejectedTaskTransfer(ctx, request, "failed"); err != nil {
+		h.logger.Error("audit rejected task transfer", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "task transfer audit failed", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"audited": true})
+}
+
 func (h *Handlers) auditRejectedTaskTransfer(ctx context.Context, request taskTransferRequest, result string) {
+	if err := h.recordRejectedTaskTransfer(ctx, request, result); err != nil {
+		h.logger.Error("audit rejected task transfer", zap.Error(err))
+	}
+}
+
+func (h *Handlers) recordRejectedTaskTransfer(
+	ctx context.Context,
+	request taskTransferRequest,
+	result string,
+) error {
 	auditor, ok := h.taskTransferSvc.(taskTransferAttemptAuditor)
 	if !ok {
-		return
+		return errors.New("task transfer audit unavailable")
 	}
 	updatedAt, _ := time.Parse(time.RFC3339Nano, request.ExpectedTaskUpdatedAt)
 	principal, inSession := mcpscope.PrincipalFromContext(ctx)
@@ -132,9 +154,7 @@ func (h *Handlers) auditRejectedTaskTransfer(ctx context.Context, request taskTr
 	}
 	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rejectedTaskTransferAuditTimeout)
 	defer cancel()
-	if err := auditor.AuditTaskTransferAttempt(auditCtx, command, result); err != nil {
-		h.logger.Error("audit rejected task transfer", zap.Error(err))
-	}
+	return auditor.AuditTaskTransferAttempt(auditCtx, command, result)
 }
 
 func (h *Handlers) taskTransferCommand(
