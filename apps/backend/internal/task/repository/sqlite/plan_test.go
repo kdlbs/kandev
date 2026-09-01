@@ -594,6 +594,95 @@ func TestWritePlanRevisionCreatesHeadAndFirstRevision(t *testing.T) {
 	assertPlanRevisionEqual(t, gotRev, rev)
 }
 
+func seedPlanWorkflowStep(t *testing.T, repo *Repository, taskID, workflowID, stepID, name, color string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: workflowID, Name: workflowID}); err != nil {
+		t.Fatalf("CreateWorkflow(%s): %v", workflowID, err)
+	}
+	now := time.Now().UTC()
+	if _, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO workflow_steps (id, workflow_id, name, position, color, created_at, updated_at)
+		VALUES (?, ?, ?, 0, ?, ?, ?)
+	`), stepID, workflowID, name, color, now, now); err != nil {
+		t.Fatalf("insert workflow step %s: %v", stepID, err)
+	}
+	if _, err := repo.db.Exec(repo.db.Rebind(`
+		UPDATE tasks SET workflow_id = ?, workflow_step_id = ? WHERE id = ?
+	`), workflowID, stepID, taskID); err != nil {
+		t.Fatalf("set task workflow step %s: %v", stepID, err)
+	}
+}
+
+func TestWritePlanRevisionStampsCurrentWorkflowStep(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedTaskForDocs(t, repo, "task-writeplan-step")
+	seedPlanWorkflowStep(t, repo, "task-writeplan-step", "workflow-writeplan-step", "step-build", "Build", "bg-blue-500")
+
+	head := &models.TaskPlan{TaskID: "task-writeplan-step", Content: "first"}
+	rev := &models.TaskPlanRevision{
+		TaskID: "task-writeplan-step", Title: "Plan", Content: "first", AuthorKind: "agent",
+	}
+	if err := repo.WritePlanRevision(ctx, head, rev, nil, false, false); err != nil {
+		t.Fatalf("WritePlanRevision: %v", err)
+	}
+
+	if rev.WorkflowStepID != "step-build" || rev.WorkflowStepName != "Build" || rev.WorkflowStepColor != "bg-blue-500" {
+		t.Fatalf("workflow step stamp = %q/%q/%q, want step-build/Build/bg-blue-500", rev.WorkflowStepID, rev.WorkflowStepName, rev.WorkflowStepColor)
+	}
+}
+
+func TestPlanRevisionWorkflowColumnsReplayMigration(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedTaskForDocs(t, repo, "task-plan-replay")
+
+	for _, column := range []string{"workflow_step_id", "workflow_step_name", "workflow_step_color"} {
+		if _, err := repo.db.Exec("ALTER TABLE task_plan_revisions DROP COLUMN " + column); err != nil {
+			t.Fatalf("drop legacy column %s: %v", column, err)
+		}
+	}
+	now := time.Now().UTC()
+	if _, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO task_plan_revisions
+			(id, task_id, revision_number, title, content, author_kind, author_name, revert_of_revision_id, created_at, updated_at)
+		VALUES (?, ?, 1, ?, ?, ?, ?, NULL, ?, ?)
+	`), "legacy-plan-revision", "task-plan-replay", "Plan", "legacy", "agent", "Agent", now, now); err != nil {
+		t.Fatalf("insert legacy plan revision: %v", err)
+	}
+
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("run legacy plan migrations: %v", err)
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("replay legacy plan migrations: %v", err)
+	}
+
+	var stepID, stepName, stepColor string
+	if err := repo.db.QueryRow(repo.db.Rebind(`
+		SELECT workflow_step_id, workflow_step_name, workflow_step_color
+		FROM task_plan_revisions WHERE id = ?
+	`), "legacy-plan-revision").Scan(&stepID, &stepName, &stepColor); err != nil {
+		t.Fatalf("read migrated legacy revision: %v", err)
+	}
+	if stepID != "" || stepName != "" || stepColor != "" {
+		t.Fatalf("legacy workflow fields = %q/%q/%q, want empty defaults", stepID, stepName, stepColor)
+	}
+
+	seedPlanWorkflowStep(t, repo, "task-plan-replay", "workflow-plan-replay", "step-review", "Review", "bg-purple-500")
+	head := &models.TaskPlan{TaskID: "task-plan-replay", Content: "new"}
+	rev := &models.TaskPlanRevision{
+		TaskID: "task-plan-replay", Title: "Plan", Content: "new", AuthorKind: "user", AuthorName: "You",
+	}
+	if err := repo.WritePlanRevision(ctx, head, rev, nil, false, false); err != nil {
+		t.Fatalf("write stamped revision after migration: %v", err)
+	}
+	if rev.WorkflowStepID != "step-review" || rev.WorkflowStepName != "Review" || rev.WorkflowStepColor != "bg-purple-500" {
+		t.Fatalf("post-migration workflow stamp = %q/%q/%q, want step-review/Review/bg-purple-500", rev.WorkflowStepID, rev.WorkflowStepName, rev.WorkflowStepColor)
+	}
+}
+
 func TestWritePlanRevisionMissingTask(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()
@@ -713,6 +802,7 @@ func TestWritePlanRevisionCoalescesIntoExistingRevision(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()
 	seedTaskForDocs(t, repo, "task-writeplan-merge")
+	seedPlanWorkflowStep(t, repo, "task-writeplan-merge", "workflow-writeplan-merge", "step-build", "Build", "bg-blue-500")
 
 	head := &models.TaskPlan{ID: "plan-merge", TaskID: "task-writeplan-merge", Title: "v1", Content: "one"}
 	first := &models.TaskPlanRevision{

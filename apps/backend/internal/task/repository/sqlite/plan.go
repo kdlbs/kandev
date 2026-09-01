@@ -270,6 +270,11 @@ func (r *Repository) WritePlanRevision(
 	defer func() { _ = tx.Rollback() }()
 
 	now := time.Now().UTC()
+	if coalesceLatestID == nil || *coalesceLatestID == "" {
+		if err := r.lockTaskForPlanRevision(ctx, tx, rev.TaskID); err != nil {
+			return err
+		}
+	}
 	if err := upsertPlanHead(ctx, tx, r.db, head, now, preserveTitle, preserveCreatedBy); err != nil {
 		return err
 	}
@@ -389,7 +394,7 @@ func mergeRevisionInTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, rev *model
 	}
 	rev.ID = latestID
 	rev.UpdatedAt = now
-	return nil
+	return readRevisionWorkflowStampInTx(ctx, tx, db, rev)
 }
 
 func insertNewRevisionInTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, rev *models.TaskPlanRevision, now time.Time) error {
@@ -410,16 +415,48 @@ func insertNewRevisionInTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, rev *m
 		rev.CreatedAt = now
 	}
 	rev.UpdatedAt = now
-	if _, err := tx.ExecContext(ctx, db.Rebind(`
+	result, err := tx.ExecContext(ctx, db.Rebind(`
 		INSERT INTO task_plan_revisions
-			(`+revisionSelectCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(id, task_id, revision_number, title, content, author_kind, author_name, revert_of_revision_id, workflow_step_id, workflow_step_name, workflow_step_color, created_at, updated_at)
+		SELECT ?, ?, ?, ?, ?, ?, ?, ?,
+			COALESCE(ws.id, ''), COALESCE(ws.name, ''), COALESCE(ws.color, ''), ?, ?
+		FROM tasks AS t
+		LEFT JOIN workflow_steps AS ws ON ws.id = t.workflow_step_id
+		WHERE t.id = ?
 	`),
 		rev.ID, rev.TaskID, rev.RevisionNumber, rev.Title, rev.Content,
 		rev.AuthorKind, rev.AuthorName, rev.RevertOfRevisionID,
-		rev.WorkflowStepID, rev.WorkflowStepName, rev.WorkflowStepColor,
-		rev.CreatedAt, rev.UpdatedAt); err != nil {
+		rev.CreatedAt, rev.UpdatedAt, rev.TaskID)
+	if err != nil {
 		return fmt.Errorf("insert plan revision: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count inserted plan revision: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, rev.TaskID)
+	}
+	return readRevisionWorkflowStampInTx(ctx, tx, db, rev)
+}
+
+func (r *Repository) lockTaskForPlanRevision(ctx context.Context, tx *sqlx.Tx, taskID string) error {
+	_, _, found, err := r.readTaskStepInTx(ctx, tx, taskID)
+	if err != nil {
+		return fmt.Errorf("read task for plan revision: %w", err)
+	}
+	if !found {
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+	}
+	return nil
+}
+
+func readRevisionWorkflowStampInTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, rev *models.TaskPlanRevision) error {
+	if err := tx.QueryRowContext(ctx, db.Rebind(`
+		SELECT workflow_step_id, workflow_step_name, workflow_step_color
+		FROM task_plan_revisions WHERE id = ?
+	`), rev.ID).Scan(&rev.WorkflowStepID, &rev.WorkflowStepName, &rev.WorkflowStepColor); err != nil {
+		return fmt.Errorf("read persisted plan revision workflow stamp: %w", err)
 	}
 	return nil
 }

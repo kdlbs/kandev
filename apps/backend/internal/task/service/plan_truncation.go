@@ -1,6 +1,6 @@
 package service
 
-import "unicode/utf8"
+import "github.com/kandev/kandev/internal/task/models"
 
 const (
 	// planTruncationMinPriorChars is the floor below which a shrinking write
@@ -34,9 +34,9 @@ const (
 // against the content the write's own read observed, so a concurrent writer
 // cannot change what "prior" means out from under this decision.
 func planTruncationDetected(priorContent, newContent string) bool {
-	priorLen := utf8.RuneCountInString(priorContent)
+	priorLen := models.PlanContentLength(priorContent)
 	if priorLen < planTruncationMinPriorChars {
 		return false
 	}
-	return float64(utf8.RuneCountInString(newContent)) < float64(priorLen)*planTruncationMaxRetainRatio
+	return float64(models.PlanContentLength(newContent)) < float64(priorLen)*planTruncationMaxRetainRatio
 }

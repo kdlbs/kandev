@@ -38,6 +38,22 @@ func seedTask(t *testing.T, ctx context.Context, repo *sqliterepo.Repository, ta
 	})
 }
 
+func seedWorkflowStep(t *testing.T, repo *sqliterepo.Repository, taskID, stepID, name, color string) {
+	t.Helper()
+	now := time.Now().UTC()
+	if _, err := repo.DB().ExecContext(context.Background(), `
+		INSERT INTO workflow_steps (id, workflow_id, name, position, color, created_at, updated_at)
+		VALUES (?, 'wf-plan', ?, 0, ?, ?, ?)
+	`, stepID, name, color, now, now); err != nil {
+		t.Fatalf("insert workflow step %s: %v", stepID, err)
+	}
+	if _, err := repo.DB().ExecContext(context.Background(), `
+		UPDATE tasks SET workflow_step_id = ? WHERE id = ?
+	`, stepID, taskID); err != nil {
+		t.Fatalf("set task workflow step %s: %v", stepID, err)
+	}
+}
+
 func seedSession(t *testing.T, ctx context.Context, repo *sqliterepo.Repository, taskID, sessionID string) {
 	t.Helper()
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID}); err != nil {
@@ -738,19 +754,12 @@ func TestPlanService_StampsWorkflowStepAtWriteTime(t *testing.T) {
 	svc, _, repo := createTestPlanService(t)
 	ctx := context.Background()
 	seedTask(t, ctx, repo, "task-step")
-	task, err := repo.GetTask(ctx, "task-step")
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	task.WorkflowStepID = "step-build"
-	if err := repo.UpdateTask(ctx, task); err != nil {
-		t.Fatalf("update task: %v", err)
-	}
+	seedWorkflowStep(t, repo, "task-step", "step-build", "Build", "bg-blue-500")
 	svc.SetWorkflowStepGetter(&fakePlanWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
 		"step-build": {ID: "step-build", Name: "Build", Color: "bg-blue-500"},
 	}})
 
-	_, err = svc.CreatePlan(ctx, CreatePlanRequest{
+	_, err := svc.CreatePlan(ctx, CreatePlanRequest{
 		TaskID: "task-step", Content: "v1", AuthorKind: "agent", AuthorName: "Claude",
 	})
 	if err != nil {
@@ -806,15 +815,7 @@ func TestPlanService_CoalescePreservesOriginalWorkflowStep(t *testing.T) {
 		"step-review": {ID: "step-review", Name: "Review", Color: "bg-purple-500"},
 	}}
 	svc.SetWorkflowStepGetter(getter)
-
-	task, err := repo.GetTask(ctx, "task-co-step")
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	task.WorkflowStepID = "step-build"
-	if err := repo.UpdateTask(ctx, task); err != nil {
-		t.Fatalf("update task: %v", err)
-	}
+	seedWorkflowStep(t, repo, "task-co-step", "step-build", "Build", "bg-blue-500")
 	if _, err := svc.CreatePlan(ctx, CreatePlanRequest{
 		TaskID: "task-co-step", Content: "v1", AuthorKind: "agent", AuthorName: "Claude",
 	}); err != nil {
@@ -822,10 +823,7 @@ func TestPlanService_CoalescePreservesOriginalWorkflowStep(t *testing.T) {
 	}
 
 	// Task moves to a new step before the coalescing second write arrives.
-	task.WorkflowStepID = "step-review"
-	if err := repo.UpdateTask(ctx, task); err != nil {
-		t.Fatalf("move task: %v", err)
-	}
+	seedWorkflowStep(t, repo, "task-co-step", "step-review", "Review", "bg-purple-500")
 	if _, err := svc.CreatePlan(ctx, CreatePlanRequest{
 		TaskID: "task-co-step", Content: "v2", AuthorKind: "agent", AuthorName: "Claude",
 	}); err != nil {
@@ -850,14 +848,7 @@ func TestPlanService_RevisionEventCarriesContentLengthAndWorkflowStep(t *testing
 	svc, eventBus, repo := createTestPlanService(t)
 	ctx := context.Background()
 	seedTask(t, ctx, repo, "task-ws-meta")
-	task, err := repo.GetTask(ctx, "task-ws-meta")
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	task.WorkflowStepID = "step-build"
-	if err := repo.UpdateTask(ctx, task); err != nil {
-		t.Fatalf("update task: %v", err)
-	}
+	seedWorkflowStep(t, repo, "task-ws-meta", "step-build", "Build", "bg-blue-500")
 	svc.SetWorkflowStepGetter(&fakePlanWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
 		"step-build": {ID: "step-build", Name: "Build", Color: "bg-blue-500"},
 	}})
@@ -912,14 +903,7 @@ func TestPlanService_RevertPlanStampsWorkflowStep(t *testing.T) {
 	list, _ := svc.ListRevisions(ctx, "task-revert-step")
 	v1 := list[0]
 
-	task, err := repo.GetTask(ctx, "task-revert-step")
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	task.WorkflowStepID = "step-review"
-	if err := repo.UpdateTask(ctx, task); err != nil {
-		t.Fatalf("move task to step-review: %v", err)
-	}
+	seedWorkflowStep(t, repo, "task-revert-step", "step-review", "Review", "bg-purple-500")
 
 	if _, err := svc.RevertPlan(ctx, RevertPlanRequest{
 		TaskID: "task-revert-step", TargetRevisionID: v1.ID, AuthorName: "Alice",

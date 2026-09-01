@@ -16,10 +16,7 @@ import { WorkflowStepMessageBadge } from "./chat/messages/workflow-step-message-
 import { PlanRevisionPreviewDialog } from "./task-plan-preview-dialog";
 import { PlanRevisionDiffDialog } from "./task-plan-diff-dialog";
 import { RevertConfirmDialog } from "./task-plan-revert-confirm-dialog";
-import {
-  RevisionInlineConfirmation,
-  RevisionRestoreAction,
-} from "./task-plan-revision-restore-actions";
+import { TaskPlanRevisionRow } from "./task-plan-revision-row";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
@@ -387,22 +384,25 @@ function RevisionList({
   return (
     <ul className="divide-y">
       {revisions.map((rev, i) => (
-        <RevisionRow
+        <TaskPlanRevisionRow
           key={rev.id}
           revision={rev}
-          // revisions are sorted newest-first, so the entry one index later
-          // is the version this row was written on top of.
-          previousRevision={revisions[i + 1] ?? null}
           isCurrent={i === 0}
           isSaving={isSaving}
-          agentName={agentName}
           rowConfirmTarget={rowConfirmTarget}
           isFinePointer={isFinePointer}
           onRevertRequest={onRevertRequest}
           onRevertCancel={onRevertCancel}
           onRevert={onRevert}
-          onRowClick={onRowClick}
-        />
+        >
+          <RevisionRowBody
+            revision={rev}
+            previousRevision={revisions[i + 1] ?? null}
+            isCurrent={i === 0}
+            agentName={agentName}
+            onRowClick={onRowClick}
+          />
+        </TaskPlanRevisionRow>
       ))}
     </ul>
   );
@@ -436,72 +436,6 @@ function RevisionAuthor({
   );
 }
 
-type RevisionRowProps = {
-  revision: TaskPlanRevision;
-  previousRevision: TaskPlanRevision | null;
-  isCurrent: boolean;
-  isSaving: boolean;
-  agentName: string | null;
-  rowConfirmTarget: TaskPlanRevision | null;
-  isFinePointer: boolean;
-  onRevertRequest: (revision: TaskPlanRevision) => void;
-  onRevertCancel: () => void;
-  onRevert: (revision: TaskPlanRevision) => Promise<void>;
-  onRowClick: (rev: TaskPlanRevision) => void;
-};
-
-function RevisionRow({
-  revision,
-  previousRevision,
-  isCurrent,
-  isSaving,
-  agentName,
-  rowConfirmTarget,
-  isFinePointer,
-  onRevertRequest,
-  onRevertCancel,
-  onRevert,
-  onRowClick,
-}: RevisionRowProps) {
-  return (
-    <li
-      className="px-3 py-2.5 hover:bg-accent/30"
-      data-testid="plan-revision-row"
-      data-revision-id={revision.id}
-      data-revision-number={revision.revision_number}
-    >
-      <div className="flex min-w-0 items-center gap-3">
-        <RevisionRowBody
-          revision={revision}
-          previousRevision={previousRevision}
-          isCurrent={isCurrent}
-          agentName={agentName}
-          onRowClick={onRowClick}
-        />
-        <RevisionRestoreAction
-          revision={revision}
-          isCurrent={isCurrent}
-          isSaving={isSaving}
-          rowConfirmTarget={rowConfirmTarget}
-          isFinePointer={isFinePointer}
-          onRevertRequest={onRevertRequest}
-          onRevertCancel={onRevertCancel}
-          onRevert={onRevert}
-        />
-      </div>
-      <RevisionInlineConfirmation
-        revision={revision}
-        isCurrent={isCurrent}
-        isSaving={isSaving}
-        isFinePointer={isFinePointer}
-        rowConfirmTarget={rowConfirmTarget}
-        onRevertCancel={onRevertCancel}
-        onRevert={onRevert}
-      />
-    </li>
-  );
-}
-
 /** Signed, thousands-separated delta string ("+1,234" / "−40,612"), or null
  * when either side's character count is unknown or unchanged. Uses U+2212
  * (minus sign) rather than a hyphen for the negative case, matching the
@@ -523,10 +457,13 @@ function RevisionRowBody({
   isCurrent,
   agentName,
   onRowClick,
-}: Pick<
-  RevisionRowProps,
-  "revision" | "previousRevision" | "isCurrent" | "agentName" | "onRowClick"
->) {
+}: {
+  revision: TaskPlanRevision;
+  previousRevision: TaskPlanRevision | null;
+  isCurrent: boolean;
+  agentName: string | null;
+  onRowClick: (revision: TaskPlanRevision) => void;
+}) {
   const { t } = useTranslation();
   // Force re-render every 30s so the precise timestamp ("5m ago", "Today,
   // 14:32", …) refreshes as the revision ages — `formatPreciseTime` derives

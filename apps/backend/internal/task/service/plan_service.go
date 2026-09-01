@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"time"
-	"unicode/utf8"
 
 	"go.uber.org/zap"
 
@@ -318,8 +317,8 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest, req
 
 	result := PlanWriteResult{TruncationDetected: rb.truncationDetected}
 	if rb.truncationDetected {
-		result.ReplacedRunes = utf8.RuneCountInString(rb.replacedContent)
-		result.NewRunes = utf8.RuneCountInString(req.Content)
+		result.ReplacedRunes = models.PlanContentLength(rb.replacedContent)
+		result.NewRunes = models.PlanContentLength(req.Content)
 		if latestState == planRevisionFound && latest.Content == rb.replacedContent {
 			result.PriorRevisionNumber = latest.RevisionNumber
 		}
@@ -860,7 +859,7 @@ func revisionPayload(rev *models.TaskPlanRevision) map[string]interface{} {
 		"title":           rev.Title,
 		"author_kind":     rev.AuthorKind,
 		"author_name":     rev.AuthorName,
-		"content_length":  utf8.RuneCountInString(rev.Content),
+		"content_length":  models.PlanContentLength(rev.Content),
 		"created_at":      rev.CreatedAt,
 		"updated_at":      rev.UpdatedAt,
 	}
