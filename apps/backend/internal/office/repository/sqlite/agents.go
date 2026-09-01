@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/office/models"
 )
@@ -112,7 +113,43 @@ func (r *Repository) CreateAgentInstance(ctx context.Context, agent *models.Agen
 		}
 		agent.AgentID = defaultAgentID
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	return r.insertAgentInstance(ctx, r.db, agent, displayName, status, desiredSkills, skillIDs, permissions, threshold)
+}
+
+// CreateAgentInstanceTx is CreateAgentInstance scoped to a caller-owned
+// transaction, letting config sync write a new agent and its ownership
+// manifest row atomically (AC-OFFICE-CONFIG-SYNC-003.14). Unlike
+// CreateAgentInstance, the caller must have already filled ID, WorkspaceID,
+// and AgentID: the FK-inheritance lookup CreateAgentInstance does against
+// r.ro would not see this transaction's own uncommitted writes, so it is not
+// safe to repeat here.
+func (r *Repository) CreateAgentInstanceTx(ctx context.Context, tx *sqlx.Tx, agent *models.AgentInstance) error {
+	if agent.WorkspaceID == "" {
+		return fmt.Errorf("create agent instance: workspace_id is required")
+	}
+	now := time.Now().UTC()
+	agent.CreatedAt = now
+	agent.UpdatedAt = now
+	desiredSkills := normalizeAgentJSONArray(agent.DesiredSkills)
+	skillIDs := normalizeAgentJSONArray(agent.SkillIDs)
+	permissions := normalizeAgentJSONObject(agent.Permissions)
+	threshold := failureThresholdToColumn(agent.FailureThreshold)
+	status := string(agent.Status)
+	if status == "" {
+		status = "idle"
+	}
+	displayName := agent.AgentDisplayName
+	if displayName == "" {
+		displayName = agent.Name
+	}
+	return r.insertAgentInstance(ctx, tx, agent, displayName, status, desiredSkills, skillIDs, permissions, threshold)
+}
+
+func (r *Repository) insertAgentInstance(
+	ctx context.Context, ext sqlx.ExtContext, agent *models.AgentInstance,
+	displayName, status, desiredSkills, skillIDs, permissions string, threshold int,
+) error {
+	_, err := ext.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO agent_profiles (
 			id, agent_id, name, agent_display_name, model, mode,
 			auto_approve, dangerously_skip_permissions, allow_indexing,
@@ -290,9 +327,25 @@ type AgentInstanceConfigFields struct {
 func (r *Repository) UpdateAgentInstanceConfigFields(
 	ctx context.Context, id string, fields AgentInstanceConfigFields,
 ) error {
+	return r.updateAgentInstanceConfigFields(ctx, r.db, id, fields)
+}
+
+// UpdateAgentInstanceConfigFieldsTx is UpdateAgentInstanceConfigFields scoped
+// to a caller-owned transaction, letting config sync write an entity's
+// projection and its ownership manifest row atomically
+// (AC-OFFICE-CONFIG-SYNC-003.14).
+func (r *Repository) UpdateAgentInstanceConfigFieldsTx(
+	ctx context.Context, tx *sqlx.Tx, id string, fields AgentInstanceConfigFields,
+) error {
+	return r.updateAgentInstanceConfigFields(ctx, tx, id, fields)
+}
+
+func (r *Repository) updateAgentInstanceConfigFields(
+	ctx context.Context, ext sqlx.ExtContext, id string, fields AgentInstanceConfigFields,
+) error {
 	desiredSkills := normalizeAgentJSONArray(fields.DesiredSkills)
 	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err := ext.ExecContext(ctx, r.db.Rebind(`
 		UPDATE agent_profiles SET
 			role = ?, icon = ?, budget_monthly_cents = ?,
 			max_concurrent_sessions = ?, desired_skills = ?,
@@ -309,8 +362,18 @@ func (r *Repository) UpdateAgentInstanceConfigFields(
 // A narrow update prevents that pass from reverting runtime-owned fields from
 // the stale agent snapshot used for name resolution.
 func (r *Repository) UpdateAgentReportsTo(ctx context.Context, id, reportsTo string) error {
+	return r.updateAgentReportsTo(ctx, r.db, id, reportsTo)
+}
+
+// UpdateAgentReportsToTx is UpdateAgentReportsTo scoped to a caller-owned
+// transaction.
+func (r *Repository) UpdateAgentReportsToTx(ctx context.Context, tx *sqlx.Tx, id, reportsTo string) error {
+	return r.updateAgentReportsTo(ctx, tx, id, reportsTo)
+}
+
+func (r *Repository) updateAgentReportsTo(ctx context.Context, ext sqlx.ExtContext, id, reportsTo string) error {
 	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err := ext.ExecContext(ctx, r.db.Rebind(`
 		UPDATE agent_profiles
 		SET reports_to = ?, updated_at = ?
 		WHERE id = ? AND `+agentInstanceFilter+`
@@ -430,8 +493,19 @@ func (r *Repository) AgentProfileExists(ctx context.Context, id string) (bool, e
 // office reads (which all filter `deleted_at IS NULL`) immediately stop
 // returning the row, while preserving the audit trail.
 func (r *Repository) DeleteAgentInstance(ctx context.Context, id string) error {
+	return r.deleteAgentInstance(ctx, r.db, id)
+}
+
+// DeleteAgentInstanceTx is DeleteAgentInstance scoped to a caller-owned
+// transaction, letting config sync delete an entity and its ownership
+// manifest row atomically.
+func (r *Repository) DeleteAgentInstanceTx(ctx context.Context, tx *sqlx.Tx, id string) error {
+	return r.deleteAgentInstance(ctx, tx, id)
+}
+
+func (r *Repository) deleteAgentInstance(ctx context.Context, ext sqlx.ExtContext, id string) error {
 	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(
+	_, err := ext.ExecContext(ctx, r.db.Rebind(
 		`UPDATE agent_profiles SET deleted_at = ?, updated_at = ? WHERE id = ?`), now, now, id)
 	return err
 }
