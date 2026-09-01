@@ -155,3 +155,76 @@ func TestStore_ManifestUpsertUpdateAndDelete(t *testing.T) {
 	// Deleting a missing entry is a no-op.
 	require.NoError(t, store.DeleteManifestEntry(ctx, "ws-1", "skill", "reviewer"))
 }
+
+// TestStore_UpsertManifestEntryTx_CommitPersists verifies reconcile can
+// write a manifest row inside a caller-owned transaction shared with an
+// office repository entity write (AC-OFFICE-CONFIG-SYNC-003.14's
+// per-entity atomicity).
+func TestStore_UpsertManifestEntryTx_CommitPersists(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+
+	tx, err := store.Writer().BeginTxx(ctx, nil)
+	require.NoError(t, err)
+	require.NoError(t, store.UpsertManifestEntryTx(ctx, tx, "ws-1", "agent", "ceo", "agent-1", "agents/ceo.yml"))
+	require.NoError(t, tx.Commit())
+
+	entries, err := store.ListManifest(ctx, "ws-1")
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "agent-1", entries[0].EntityID)
+	assert.Equal(t, "agents/ceo.yml", entries[0].SourcePath)
+}
+
+// TestStore_UpsertManifestEntryTx_RollbackDiscards verifies a rolled-back
+// manifest write leaves no row behind — matches the entity write it would
+// have been paired with also rolling back.
+func TestStore_UpsertManifestEntryTx_RollbackDiscards(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+
+	tx, err := store.Writer().BeginTxx(ctx, nil)
+	require.NoError(t, err)
+	require.NoError(t, store.UpsertManifestEntryTx(ctx, tx, "ws-1", "agent", "ceo", "agent-1", "agents/ceo.yml"))
+	require.NoError(t, tx.Rollback())
+
+	entries, err := store.ListManifest(ctx, "ws-1")
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+}
+
+// TestStore_DeleteManifestEntryTx_CommitRemoves verifies the
+// transaction-scoped delete used by reconcile's "Removed upstream" apply
+// case.
+func TestStore_DeleteManifestEntryTx_CommitRemoves(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	require.NoError(t, store.UpsertManifestEntry(ctx, "ws-1", "project", "website", "proj-1", "projects/website.yml"))
+
+	tx, err := store.Writer().BeginTxx(ctx, nil)
+	require.NoError(t, err)
+	require.NoError(t, store.DeleteManifestEntryTx(ctx, tx, "ws-1", "project", "website"))
+	require.NoError(t, tx.Commit())
+
+	entries, err := store.ListManifest(ctx, "ws-1")
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+}
+
+// TestStore_DeleteManifestEntryTx_RollbackKeepsRow verifies a rolled-back
+// delete leaves the manifest row intact.
+func TestStore_DeleteManifestEntryTx_RollbackKeepsRow(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	require.NoError(t, store.UpsertManifestEntry(ctx, "ws-1", "project", "website", "proj-1", "projects/website.yml"))
+
+	tx, err := store.Writer().BeginTxx(ctx, nil)
+	require.NoError(t, err)
+	require.NoError(t, store.DeleteManifestEntryTx(ctx, tx, "ws-1", "project", "website"))
+	require.NoError(t, tx.Rollback())
+
+	entries, err := store.ListManifest(ctx, "ws-1")
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "proj-1", entries[0].EntityID)
+}

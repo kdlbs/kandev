@@ -235,8 +235,23 @@ func (s *Store) ListManifest(ctx context.Context, workspaceID string) ([]Manifes
 
 // UpsertManifestEntry records or refreshes ownership of one entity.
 func (s *Store) UpsertManifestEntry(ctx context.Context, workspaceID, kind, entityKey, entityID, sourcePath string) error {
+	return s.upsertManifestEntry(ctx, s.db, workspaceID, kind, entityKey, entityID, sourcePath)
+}
+
+// UpsertManifestEntryTx is UpsertManifestEntry scoped to a caller-owned
+// transaction, letting reconcile write an entity and its ownership manifest
+// row atomically (AC-OFFICE-CONFIG-SYNC-003.14). The transaction must have
+// been started against the same writer connection pool this Store and the
+// office repository share (see Writer()).
+func (s *Store) UpsertManifestEntryTx(ctx context.Context, tx *sqlx.Tx, workspaceID, kind, entityKey, entityID, sourcePath string) error {
+	return s.upsertManifestEntry(ctx, tx, workspaceID, kind, entityKey, entityID, sourcePath)
+}
+
+func (s *Store) upsertManifestEntry(
+	ctx context.Context, ext sqlx.ExtContext, workspaceID, kind, entityKey, entityID, sourcePath string,
+) error {
 	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+	_, err := ext.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO office_config_sync_manifest (workspace_id, kind, entity_key, entity_id, source_path, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id, kind, entity_key) DO UPDATE SET
@@ -250,7 +265,17 @@ func (s *Store) UpsertManifestEntry(ctx context.Context, workspaceID, kind, enti
 // DeleteManifestEntry removes ownership tracking for one entity. Deleting a
 // missing entry is a no-op.
 func (s *Store) DeleteManifestEntry(ctx context.Context, workspaceID, kind, entityKey string) error {
-	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+	return s.deleteManifestEntry(ctx, s.db, workspaceID, kind, entityKey)
+}
+
+// DeleteManifestEntryTx is DeleteManifestEntry scoped to a caller-owned
+// transaction.
+func (s *Store) DeleteManifestEntryTx(ctx context.Context, tx *sqlx.Tx, workspaceID, kind, entityKey string) error {
+	return s.deleteManifestEntry(ctx, tx, workspaceID, kind, entityKey)
+}
+
+func (s *Store) deleteManifestEntry(ctx context.Context, ext sqlx.ExtContext, workspaceID, kind, entityKey string) error {
+	_, err := ext.ExecContext(ctx, s.db.Rebind(`
 		DELETE FROM office_config_sync_manifest WHERE workspace_id = ? AND kind = ? AND entity_key = ?
 	`), workspaceID, kind, entityKey)
 	return err
