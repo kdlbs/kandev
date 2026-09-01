@@ -443,6 +443,33 @@ func isActiveSessionState(state taskmodels.TaskSessionState) bool {
 // filters by task, so unlike resolveDeciderSessionID (which validates a
 // caller-supplied session id and must check task ownership itself), there
 // is no cross-task session id to smuggle in here.
+//
+// This resolver is deliberately task-scoped, and stays that way after
+// features.officeSessionIdentity gives each participant agent its own
+// session per task. Picking "the newest session" only stays well-defined
+// because EvaluateStepQuorum — its sole caller — reads just CurrentStepID
+// and WorkflowID off the loaded MachineState, and both are derived from the
+// task row rather than the session (see orchestrator.assembleMachineState).
+//
+// MachineState.Data is the one genuinely per-session field: it is populated
+// from session.Metadata["workflow_data"], so with several live sessions per
+// task "newest" would no longer name a specific agent's bag. That is latent,
+// not live — Data currently has no readers anywhere in internal/workflow/
+// (set_workflow_data writes it through SetSessionMetadataKey and nothing
+// reads it back), so which session is chosen is unobservable today.
+//
+// The first caller that genuinely needs per-session state must session-scope
+// its own call — pass the deciding session explicitly, as RecordDecision now
+// does via resolveDeciderSessionID — rather than adding a defensive check
+// here. Guarding this resolver would make a wrong-scoped read look safe and
+// remove the pressure to fix it properly.
+//
+// The invariant this relies on is pinned by
+// TestEvaluateStepQuorum_InsensitiveToWhichLiveSessionIsNewest
+// (internal/workflow/engine): it evaluates one step through two live
+// sessions carrying different Data and requires an identical snapshot, so a
+// guard that starts reading Data fails there loudly instead of silently
+// resolving another agent's bag through this function.
 func (d *Dispatcher) resolveLatestSessionID(ctx context.Context, taskID string) (string, error) {
 	session, err := d.sessions.GetTaskSessionByTaskID(ctx, taskID)
 	if err != nil {
