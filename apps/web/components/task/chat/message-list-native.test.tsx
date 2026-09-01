@@ -8,6 +8,7 @@ import type { RenderItem } from "@/hooks/use-processed-messages";
 const sharedSentinelCalls = vi.hoisted(() => [] as unknown[][]);
 const sharedSentinelUserGesture = vi.hoisted(() => vi.fn());
 const sharedSentinelRetry = vi.hoisted(() => vi.fn());
+const sharedSentinelRecheck = vi.hoisted(() => vi.fn());
 
 vi.mock("@/hooks/use-lazy-load-sentinel", () => ({
   useLazyLoadSentinel: (...args: unknown[]) => {
@@ -16,6 +17,7 @@ vi.mock("@/hooks/use-lazy-load-sentinel", () => ({
       sentinelRef: () => {},
       onUserGesture: sharedSentinelUserGesture,
       retry: sharedSentinelRetry,
+      recheck: sharedSentinelRecheck,
     };
   },
 }));
@@ -46,6 +48,7 @@ import {
 
 const DIVIDER_KEY = "m2";
 const DIVIDER_SCROLL_CONTAINER_TEST_ID = "divider-scroll-container";
+const NATIVE_SCROLL_CONTAINER_TEST_ID = "native-scroll-management-container";
 const SCROLL_TO_MESSAGE_ROOT = "scroll-to-message-root";
 const MISSING_SCROLL_CONTAINER_ERROR = "scroll container did not render";
 const TARGET_MESSAGE_ID = "target";
@@ -152,6 +155,7 @@ afterEach(() => {
   sharedSentinelCalls.length = 0;
   sharedSentinelUserGesture.mockReset();
   sharedSentinelRetry.mockReset();
+  sharedSentinelRecheck.mockReset();
   vi.restoreAllMocks();
 });
 
@@ -196,12 +200,14 @@ function NativeScrollManagementHarness({
   loadMore = async () => 0,
   sessionId = null,
   recoveryRef,
+  isVisible = true,
 }: {
   items: RenderItem[];
   metrics?: NativeScrollMetrics;
   loadMore?: () => Promise<number>;
   sessionId?: string | null;
   recoveryRef?: { current: boolean };
+  isVisible?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { sentinelRef, showRecovery } = useNativeScrollManagement({
@@ -216,11 +222,12 @@ function NativeScrollManagementHarness({
     hasMore: true,
     isLoadingMore: false,
     loadMore,
+    isVisible,
   });
   if (recoveryRef) recoveryRef.current = showRecovery;
   useNativeScrollMetrics(scrollRef, metrics);
   return (
-    <div data-testid="native-scroll-management-container" ref={scrollRef}>
+    <div data-testid={NATIVE_SCROLL_CONTAINER_TEST_ID} ref={scrollRef}>
       <div ref={sentinelRef} />
     </div>
   );
@@ -265,10 +272,79 @@ describe("isElementInPreloadRegion", () => {
 
 // eslint-disable-next-line max-lines-per-function -- pagination invariants share one fixture and lifecycle.
 describe("useNativeScrollManagement transcript pagination", () => {
+  it("rechecks restored geometry once when a hidden transcript becomes visible", () => {
+    const requestAnimationFrame = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        callback(0);
+        return 1;
+      });
+    const { rerender } = render(<NativeScrollManagementHarness items={[]} isVisible={false} />);
+
+    rerender(<NativeScrollManagementHarness items={[]} isVisible />);
+
+    expect(sharedSentinelRecheck).toHaveBeenCalledTimes(1);
+    requestAnimationFrame.mockRestore();
+  });
+
+  it("rechecks pagination on upward input at the hard top without a scroll event", () => {
+    const metrics = { scrollHeight: 1000, scrollTop: 0, clientHeight: 400 };
+    render(<NativeScrollManagementHarness items={[]} metrics={metrics} />);
+    const scroller = screen.getByTestId(NATIVE_SCROLL_CONTAINER_TEST_ID);
+
+    act(() => {
+      scroller.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 }));
+    });
+
+    expect(sharedSentinelRecheck).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not recheck a restored transcript while explicit recovery is active", () => {
+    const requestAnimationFrame = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        callback(0);
+        return 1;
+      });
+    const recoveryRef = { current: false };
+    const { rerender } = render(
+      <NativeScrollManagementHarness
+        items={[]}
+        sessionId="session-1"
+        recoveryRef={recoveryRef}
+        isVisible={false}
+      />,
+    );
+    const options = sharedSentinelCalls.at(-1)?.[5] as {
+      onLoadSettled: (result: {
+        count: number;
+        rejected: boolean;
+        continuation: "no-progress";
+      }) => void;
+    };
+    act(() => {
+      options.onLoadSettled({ count: 0, rejected: false, continuation: "no-progress" });
+    });
+    sharedSentinelRecheck.mockClear();
+
+    rerender(
+      <NativeScrollManagementHarness
+        items={[]}
+        sessionId="session-1"
+        recoveryRef={recoveryRef}
+        isVisible
+      />,
+    );
+
+    expect(recoveryRef.current).toBe(true);
+    expect(sharedSentinelRecheck).not.toHaveBeenCalled();
+    requestAnimationFrame.mockRestore();
+  });
+
   it("retries a disarmed short page on the next upward scroll", () => {
     const metrics = { scrollHeight: 1000, scrollTop: 100, clientHeight: 400 };
     render(<NativeScrollManagementHarness items={[]} metrics={metrics} />);
-    const scroller = screen.getByTestId("native-scroll-management-container");
+    const scroller = screen.getByTestId(NATIVE_SCROLL_CONTAINER_TEST_ID);
 
     act(() => {
       metrics.scrollTop = 80;
@@ -291,6 +367,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
       rootMargin: "200px 0px 0px 0px",
       rearmWhileIntersecting: true,
       shouldContinueWhileIntersecting: expect.any(Function),
+      isCurrentGeometryEligible: expect.any(Function),
       onLoadSettled: expect.any(Function),
       isRequestCurrent: expect.any(Function),
     });
@@ -420,7 +497,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
 
     act(() => {
       metrics.scrollTop = 40;
-      screen.getByTestId("native-scroll-management-container").dispatchEvent(new Event("scroll"));
+      screen.getByTestId(NATIVE_SCROLL_CONTAINER_TEST_ID).dispatchEvent(new Event("scroll"));
     });
     metrics.scrollHeight = 200;
     rerender(
@@ -443,7 +520,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
 
     act(() => {
       metrics.scrollTop = 40;
-      screen.getByTestId("native-scroll-management-container").dispatchEvent(new Event("scroll"));
+      screen.getByTestId(NATIVE_SCROLL_CONTAINER_TEST_ID).dispatchEvent(new Event("scroll"));
     });
     metrics.scrollHeight = 200;
     rerender(

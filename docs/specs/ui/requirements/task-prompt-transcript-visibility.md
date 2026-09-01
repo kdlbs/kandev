@@ -45,6 +45,7 @@ start.
 - **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.10:** Opening a task shall request only the bounded newest window until the user navigates upward.
 - **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.11:** Desktop and mobile transcripts shall provide the same history boundary, continuous upward loading, recovery, and scroll-position behavior.
 - **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.12:** When a previously opened session is revisited after more than one message page was persisted while it was inactive, the transcript shall reconcile to a contiguous newest window and upward pagination shall reach every persisted user prompt without gaps or duplicate rows.
+- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.13:** When a previously hidden transcript becomes visible with its restored viewport at the oldest loaded edge and older history remains, the transcript shall resume older-history loading without requiring the user to move away from and return to that edge.
 
 ## Exclusions
 

@@ -93,6 +93,7 @@ type NativeMessageListScrollParams = {
   onFirstMessageHiddenChange: ((isHidden: boolean) => void) | undefined;
   /** Changes when transcript status rows can add/remove space above messages. */
   scrollLayoutKey: string;
+  isVisible: boolean;
 };
 
 type ScrollToDividerOptions = {
@@ -120,6 +121,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     firstMessageId,
     onFirstMessageHiddenChange,
     scrollLayoutKey,
+    isVisible,
   } = params;
   const { handleScrollToMessage, sentinelRef, markNotNearBottom, retryLoadMore, showRecovery } =
     useNativeScrollManagement({
@@ -134,6 +136,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
       hasMore,
       isLoadingMore,
       loadMore,
+      isVisible,
     });
   const anchoredBarOffsetPx = anchoredBarScrollOffsetPx(anchoredBarHeight);
   useEffect(() => {
@@ -471,6 +474,7 @@ export const NativeMessageList = memo(
       stickyPromptBar,
       dividerBeforeItemKey,
       anchoredBarHeight,
+      isVisible = true,
     }: MessageListProps,
     ref,
   ) {
@@ -515,6 +519,7 @@ export const NativeMessageList = memo(
           hasMore,
           isWorking,
         ].join(":"),
+        isVisible,
       });
 
     return (

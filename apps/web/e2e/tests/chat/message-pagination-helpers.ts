@@ -11,6 +11,46 @@ export const VISIBLE_PAGE_MARKER = "VISIBLE-PAGE-MARKER-8D5H";
 export const SHORT_PAGE_BOUNDARY_MARKER = "SHORT-PAGE-BOUNDARY-MARKER-5T1C";
 export const DEEP_PROMPT_MARKER = "DEEP-PROMPT-MARKER-2P7N";
 export const LONG_HISTORY_TAIL_MARKER = "LONG-HISTORY-TAIL-MARKER-6V4R";
+export const RESTORED_SESSION_OLDER_MARKER = "RESTORED-SESSION-OLDER-MARKER-1C9F";
+export const RESTORED_SESSION_TAIL_MARKER = "RESTORED-SESSION-TAIL-MARKER-8B3K";
+
+/** Seeds two sessions so the target transcript hydrates behind the active
+ * primary Dockview tab with its oldest-page sentinel at hidden geometry. */
+export async function seedRestoredInactiveSessionHistory(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+): Promise<{ taskId: string; primarySessionId: string; targetSessionId: string }> {
+  const task = await apiClient.createTask(seedData.workspaceId, title, {
+    description: TASK_DESCRIPTION_MARKER,
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+    repository_ids: [seedData.repositoryId],
+  });
+  const { session_id: primarySessionId } = await apiClient.seedTaskSession(task.id, {
+    state: "IDLE",
+    repositoryId: seedData.repositoryId,
+  });
+  await apiClient.seedSessionMessage(primarySessionId, {
+    type: "message",
+    content: "RESTORED-SESSION-PRIMARY-MARKER-4H2D",
+  });
+  const { session_id: targetSessionId } = await apiClient.seedTaskSession(task.id, {
+    state: "IDLE",
+    repositoryId: seedData.repositoryId,
+  });
+  await apiClient.seedSessionMessage(targetSessionId, {
+    type: "message",
+    content: INITIAL_PROMPT_MARKER,
+    authorType: "user",
+  });
+  await apiClient.seedSessionMessage(targetSessionId, {
+    type: "message",
+    content: RESTORED_SESSION_OLDER_MARKER,
+  });
+  await apiClient.seedAgentMessages(targetSessionId, 110, RESTORED_SESSION_TAIL_MARKER);
+  return { taskId: task.id, primarySessionId, targetSessionId };
+}
 
 /** Seeds an older prompt followed by a tool-only newest window. */
 export async function seedToolHeavyOpeningHistory(
