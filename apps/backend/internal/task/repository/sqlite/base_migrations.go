@@ -366,12 +366,99 @@ func (r *Repository) ensureWorkspaceCoordinatorGrantSchema() error {
 			FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
 			FOREIGN KEY (workspace_id, coordinator_task_id)
 				REFERENCES tasks(workspace_id, id) ON DELETE CASCADE
-		);
-		CREATE INDEX IF NOT EXISTS idx_workspace_coordinator_grants_task
-			ON workspace_coordinator_grants(coordinator_task_id);
+		)
 	`)
 	if err != nil {
 		return fmt.Errorf("ensure workspace coordinator grant schema: %w", err)
+	}
+	if err := r.migrateLegacyWorkspaceCoordinatorGrantSchema(); err != nil {
+		return err
+	}
+	_, err = r.db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_workspace_coordinator_grants_task
+			ON workspace_coordinator_grants(coordinator_task_id)
+	`)
+	if err != nil {
+		return fmt.Errorf("ensure workspace coordinator grant schema: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) migrateLegacyWorkspaceCoordinatorGrantSchema() error {
+	if dialect.IsPostgres(r.db.DriverName()) {
+		return r.migrateLegacyPostgresWorkspaceCoordinatorGrantSchema()
+	}
+	return r.recreateTableNamed(
+		"workspace_coordinator_grants.recreate_composite_task_fk",
+		"workspace_coordinator_grants",
+		"FOREIGN KEY (coordinator_task_id) REFERENCES tasks(id) ON DELETE CASCADE",
+		[]string{
+			`CREATE TABLE workspace_coordinator_grants_new (
+				workspace_id TEXT PRIMARY KEY CHECK (workspace_id <> ''),
+				coordinator_task_id TEXT NOT NULL CHECK (coordinator_task_id <> ''),
+				created_by_user_id TEXT NOT NULL,
+				created_at TIMESTAMP NOT NULL,
+				updated_at TIMESTAMP NOT NULL,
+				FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+				FOREIGN KEY (workspace_id, coordinator_task_id)
+					REFERENCES tasks(workspace_id, id) ON DELETE CASCADE
+			)`,
+			`INSERT INTO workspace_coordinator_grants_new
+				(workspace_id, coordinator_task_id, created_by_user_id, created_at, updated_at)
+			SELECT grant.workspace_id, grant.coordinator_task_id, grant.created_by_user_id,
+				grant.created_at, grant.updated_at
+			FROM workspace_coordinator_grants grant
+			JOIN tasks task
+				ON task.id = grant.coordinator_task_id
+				AND task.workspace_id = grant.workspace_id
+			WHERE grant.workspace_id <> '' AND grant.coordinator_task_id <> ''`,
+			`DROP TABLE workspace_coordinator_grants`,
+			`ALTER TABLE workspace_coordinator_grants_new RENAME TO workspace_coordinator_grants`,
+		},
+	)
+}
+
+func (r *Repository) migrateLegacyPostgresWorkspaceCoordinatorGrantSchema() error {
+	var hasLegacyTaskForeignKey bool
+	if err := r.db.Get(&hasLegacyTaskForeignKey, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM pg_constraint
+			WHERE conrelid = 'workspace_coordinator_grants'::regclass
+				AND contype = 'f'
+				AND pg_get_constraintdef(oid) LIKE
+					'FOREIGN KEY (coordinator_task_id) REFERENCES tasks(id)%'
+		)`); err != nil {
+		return fmt.Errorf("inspect legacy workspace coordinator grant schema: %w", err)
+	}
+	if !hasLegacyTaskForeignKey {
+		return nil
+	}
+
+	_, err := r.db.Exec(`
+		DELETE FROM workspace_coordinator_grants grant
+		WHERE grant.workspace_id = ''
+			OR grant.coordinator_task_id = ''
+			OR NOT EXISTS (
+				SELECT 1 FROM tasks task
+				WHERE task.id = grant.coordinator_task_id
+					AND task.workspace_id = grant.workspace_id
+			);
+		ALTER TABLE workspace_coordinator_grants
+			DROP CONSTRAINT workspace_coordinator_grants_coordinator_task_id_fkey;
+		ALTER TABLE workspace_coordinator_grants
+			ADD CONSTRAINT workspace_coordinator_grants_workspace_task_fkey
+			FOREIGN KEY (workspace_id, coordinator_task_id)
+			REFERENCES tasks(workspace_id, id) ON DELETE CASCADE;
+		ALTER TABLE workspace_coordinator_grants
+			ADD CONSTRAINT workspace_coordinator_grants_workspace_id_nonempty
+			CHECK (workspace_id <> '');
+		ALTER TABLE workspace_coordinator_grants
+			ADD CONSTRAINT workspace_coordinator_grants_coordinator_task_id_nonempty
+			CHECK (coordinator_task_id <> '');
+	`)
+	if err != nil {
+		return fmt.Errorf("migrate legacy workspace coordinator grant schema: %w", err)
 	}
 	return nil
 }
