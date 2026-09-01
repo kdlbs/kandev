@@ -929,16 +929,14 @@ func (e *Engine) ResolveParticipantRole(
 			return "", "", fmt.Errorf("resolve participant role: %w", seatsErr)
 		}
 		if seat, ok := seatFor(seats, agentProfileID); ok {
+			if seat.StepID == stepID {
+				return string(r), seat.ID, nil
+			}
 			matches = append(matches, roleSeat{role: string(r), seat: seat})
 		}
 	}
 	if len(matches) == 0 {
 		return "", "", ErrParticipantNotFound
-	}
-	for _, m := range matches {
-		if m.seat.StepID == stepID {
-			return m.role, m.seat.ID, nil
-		}
 	}
 	return matches[0].role, matches[0].seat.ID, nil
 }
