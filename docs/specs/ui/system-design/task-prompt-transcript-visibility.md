@@ -44,9 +44,16 @@ and `prompt_index` field.
   pagination available to explicit recovery consumers.
 - The native transcript consumes `useLazyLoadMessages`. Prompt History consumes
   its own user-message request and pagination state.
-- The native transcript owns upward intent, committed sentinel geometry,
-  scroll restoration, and retry-control visibility.
-- `useLazyLoadSentinel` owns observer lifecycle and request serialization.
+- `TaskChatPanel` supplies the native transcript with the host's real visibility
+  state. Dockview hosts use panel activation; mobile and other direct hosts use
+  their existing mounted visibility.
+- The native transcript owns upward intent, committed sentinel geometry, scroll
+  restoration, host-visibility recovery, and retry-control visibility.
+- `SessionPanelContent` restores the saved scroll offset after a hidden panel
+  receives non-zero geometry. The native transcript waits for that restore to
+  commit before it asks the sentinel to re-evaluate the viewport.
+- `useLazyLoadSentinel` owns observer lifecycle, current-geometry eligibility,
+  request serialization, and guarded retries from lifecycle or user intent.
 - Transcript navigation first uses loaded messages. When a selected prompt is
   absent, it requests an around window and merges the result before scrolling.
 - `requestOlderMessages` keeps transcript request coordination and raw cursor
@@ -136,6 +143,21 @@ The transcript starts a load cycle when the user reaches the oldest loaded
 edge. Before each request it captures a stable rendered-row anchor. After the
 page commits, scroll restoration keeps that anchor at the same visual position.
 
+A hidden Dockview panel can keep its transcript mounted while its scroll root
+has zero geometry. When that panel becomes visible, the native transcript
+waits until `SessionPanelContent` has restored the saved scroll offset, then
+performs one current-geometry eligibility check. If the restored sentinel is
+inside the preload region and pagination is otherwise eligible, that check
+starts or resumes the normal load cycle. It does not use an intersection entry
+captured while the panel was hidden.
+
+An upward wheel, touch, keyboard, or scrollbar action at the hard top can
+produce no `scroll` event because `scrollTop` cannot decrease below zero. The
+native transcript therefore treats directional input at that boundary as
+fresh pagination intent and checks current sentinel geometry. Input and panel
+activation use the same request guards and cannot bypass loading, visible-start,
+failure-recovery, or session-epoch stops.
+
 Continuation uses committed sentinel geometry, not the identity of the oldest
 standalone row:
 
@@ -161,6 +183,12 @@ automatic cycle is disarmed and the explicit older-page retry control is
 visible. A successful retry clears recovery state and resumes the geometry
 rule. Session changes, prompt `#1`, and raw exhaustion also clear it.
 
+Panel activation does not retry a request that already entered recovery state.
+The lifecycle check repairs a missed observer transition only; request failure
+and no-progress outcomes still require the explicit retry control. Repeated
+active renders and resize notifications do not create additional pagination
+intent.
+
 Routine successful pagination does not render the retry control. The control
 keeps the existing localized label and has a coarse-pointer hit area of at
 least 44 pixels without increasing fine-pointer desktop density.
@@ -182,6 +210,12 @@ prompt returns the phone to Chat and uses the around-window path when the row is
 not loaded. The recovery button uses the same placement on both surfaces with a
 coarse-pointer touch target.
 
+Dockview activation recovery is desktop-specific because inactive desktop tabs
+remain mounted with zero geometry. The eligibility and hard-top gesture rules
+remain in the shared native transcript path. Mobile has no hidden Dockview tab,
+so it keeps mounted visibility and must retain the same upward pagination,
+anchor, and failure-recovery behavior.
+
 ## Around-window navigation
 
 The chat panel sends `GET /api/v1/task-sessions/:id/messages?around=<message-id>&sort=desc&limit=N` after it confirms that the target belongs to the active session. The backend returns the target and newer rows in newest-first order. The chat panel merges the response into `messages.bySession`, waits for the target row to render, and then scrolls to it. The target token is session-scoped and is cleared only after a successful scroll or a confirmed missing target. A stale response cannot consume a newer selection.
@@ -199,10 +233,10 @@ anchor behavior as desktop.
 - Session-state tests cover initialization through boot hydration, newest
   fetch, purge, and refetch without inferring exhaustion from defaults.
 - Sentinel tests cover committed in-region continuation, out-of-region stop,
-  stale observer entries, no-progress recovery, successful retry, and session
-  reset.
-- Native transcript tests cover recovery-control visibility and prepend anchor
-  preservation.
+  stale observer entries, one-shot lifecycle rechecks, hard-top intent,
+  no-progress recovery, successful retry, and session reset.
+- Native transcript tests cover hidden-to-visible recovery, recovery-control
+  visibility, and prepend anchor preservation.
 - Lazy-load hook tests cover mixed `message`, `content`, legacy, and tool rows,
   the 20-text-part target, every early stop, and unchanged raw/single-page
   consumers.
@@ -215,3 +249,8 @@ anchor behavior as desktop.
   must still cross that page and reveal the targeted older text batch.
 - Existing prompt-`#1`, hidden pre-prompt, and inactive-session reconciliation
   scenarios remain covered.
+- A desktop browser test restores two session tabs with the target tab inactive,
+  suppresses the fresh observer entry that can be missed during restoration,
+  activates the target, supplies upward input at the hard top, and proves that
+  the next request carries an older-page cursor instead of repeating only the
+  newest 100-row window.

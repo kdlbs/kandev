@@ -105,8 +105,8 @@ the final composition.
 
 - [x] [Task 01: Standardize surface typography primitives](task-01-standardize-surface-typography-primitives.md) (completed)
 - [x] [Task 02: Normalize structured app confirmations](task-02-normalize-structured-app-confirmations.md) (completed)
-- [ ] [Task 03: Refine task cleanup confirmations](task-03-refine-task-cleanup-confirmations.md)
-- [ ] [Task 04: Normalize structured task confirmations](task-04-normalize-structured-task-confirmations.md)
+- [x] [Task 03: Refine task cleanup confirmations](task-03-refine-task-cleanup-confirmations.md) (completed)
+- [x] [Task 04: Normalize structured task confirmations](task-04-normalize-structured-task-confirmations.md) (completed)
 - [ ] [Task 05: Add responsive text hierarchy E2E](task-05-add-responsive-text-hierarchy-e2e.md)
 
 ## Risks

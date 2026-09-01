@@ -1,7 +1,7 @@
 ---
 id: "04-normalize-structured-task-confirmations"
 title: "Normalize structured task confirmations"
-status: pending
+status: completed
 wave: 2
 depends_on:
   - "01-standardize-surface-typography-primitives"
@@ -93,4 +93,18 @@ pnpm run i18n:check
 
 ## Results
 
-Pending implementation.
+- RED: Focused assertions failed against the pre-change wrapperless fragments
+  and spans because the three dialogs lacked the required semantic paragraph
+  structure, left alignment, containment, and single description boundary.
+- GREEN: Session deletion, task detachment, and environment reset now render
+  structured paragraphs inside one `min-w-0 text-left` AlertDialog description;
+  compact popover and inline descriptions remain unchanged.
+- Added a shared session-delete description renderer plus focused coverage for
+  all three surfaces, including a 180-character dynamic task title.
+- Focused verification passed with 3 test files and 11 tests. Web typecheck,
+  focused ESLint with `--max-warnings 0`, `pnpm run i18n:check`, targeted
+  Prettier, and `git diff --check` also passed on the integrated stack.
+- Exact-head E2E integration exposed that the archive-only wide popover had
+  lost its specified pretty prose wrapping. The wide size contract now applies
+  `text-pretty` to its description while the default popover remains unchanged;
+  the shared popover and archive confirmation suites pass 20 tests.

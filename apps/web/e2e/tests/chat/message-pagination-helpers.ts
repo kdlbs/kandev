@@ -13,6 +13,65 @@ export const TEXT_BATCH_MARKER = "TEXT-BATCH-MARKER-1F9L";
 export const TEXT_BATCH_ANCHOR_MARKER = "TEXT-BATCH-ANCHOR-MARKER-4C7N";
 export const DEEP_PROMPT_MARKER = "DEEP-PROMPT-MARKER-2P7N";
 export const LONG_HISTORY_TAIL_MARKER = "LONG-HISTORY-TAIL-MARKER-6V4R";
+export const RESTORED_SESSION_OLDER_MARKER = "RESTORED-SESSION-OLDER-MARKER-1C9F";
+export const RESTORED_SESSION_TAIL_MARKER = "RESTORED-SESSION-TAIL-MARKER-8B3K";
+
+/** Simulates the browser missing a fresh transcript sentinel entry after a
+ * hidden/restored geometry transition. Current-geometry recovery must remain
+ * independently reachable from panel activation or hard-top input. */
+export async function suppressChatPaginationIntersections(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const NativeIntersectionObserver = window.IntersectionObserver;
+    window.IntersectionObserver = class extends NativeIntersectionObserver {
+      constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+        super((entries, observer) => {
+          callback(
+            entries.filter((entry) => !entry.target.closest(".chat-message-list")),
+            observer,
+          );
+        }, options);
+      }
+    };
+  });
+}
+
+/** Seeds two sessions so the target transcript hydrates behind the active
+ * primary Dockview tab with its oldest-page sentinel at hidden geometry. */
+export async function seedRestoredInactiveSessionHistory(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+): Promise<{ taskId: string; primarySessionId: string; targetSessionId: string }> {
+  const task = await apiClient.createTask(seedData.workspaceId, title, {
+    description: TASK_DESCRIPTION_MARKER,
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+    repository_ids: [seedData.repositoryId],
+  });
+  const { session_id: primarySessionId } = await apiClient.seedTaskSession(task.id, {
+    state: "IDLE",
+    repositoryId: seedData.repositoryId,
+  });
+  await apiClient.seedSessionMessage(primarySessionId, {
+    type: "message",
+    content: "RESTORED-SESSION-PRIMARY-MARKER-4H2D",
+  });
+  const { session_id: targetSessionId } = await apiClient.seedTaskSession(task.id, {
+    state: "IDLE",
+    repositoryId: seedData.repositoryId,
+  });
+  await apiClient.seedSessionMessage(targetSessionId, {
+    type: "message",
+    content: INITIAL_PROMPT_MARKER,
+    authorType: "user",
+  });
+  await apiClient.seedSessionMessage(targetSessionId, {
+    type: "message",
+    content: RESTORED_SESSION_OLDER_MARKER,
+  });
+  await apiClient.seedAgentMessages(targetSessionId, 110, RESTORED_SESSION_TAIL_MARKER);
+  return { taskId: task.id, primarySessionId, targetSessionId };
+}
 
 /** Seeds an older prompt followed by a tool-only newest window. */
 export async function seedToolHeavyOpeningHistory(

@@ -22,11 +22,42 @@ import {
   seedToolHeavyOpeningHistory,
   seedVisibleMessageHistory,
   scrollToOldestLoadedEdge,
+  suppressChatPaginationIntersections,
   watchOlderMessageRequests,
 } from "./message-pagination-helpers";
 
 test.describe("Mobile chat message pagination", () => {
   test.describe.configure({ timeout: 180_000 });
+
+  test("uses a hard-top touch gesture to recover a missed sentinel entry", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await suppressChatPaginationIntersections(testPage);
+    const { taskId, sessionId } = await seedVisibleMessageHistory(
+      apiClient,
+      seedData,
+      "mobile-message-pagination-hard-top-touch-recovery",
+    );
+    const olderRequests = watchOlderMessageRequests(testPage, sessionId);
+
+    await testPage.goto(`/t/${taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    const list = session.activeChat().locator(".chat-message-list");
+    await list.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    expect(await list.evaluate((element) => element.scrollTop)).toBe(0);
+
+    await list.dispatchEvent("touchstart", { touches: [{ identifier: 1, clientY: 300 }] });
+    await list.dispatchEvent("touchmove", { touches: [{ identifier: 1, clientY: 350 }] });
+
+    await expect.poll(() => olderRequests.length).toBeGreaterThan(0);
+    expect(new URL(olderRequests[0]).searchParams.get("before")).toBeTruthy();
+  });
 
   test("does not load older history while opening a task", async ({
     testPage,

@@ -362,6 +362,8 @@ function useLazyLoadSentinel(params: {
   const requestRef = useRef<PaginationRequest | null>(null);
   const sessionEpochRef = useSessionEpoch(sessionId);
   const { showRecovery, reportRecovery } = usePaginationRecovery(sessionId, hasMore);
+  const showRecoveryRef = useRef(showRecovery);
+  showRecoveryRef.current = showRecovery;
 
   const reportSettle = useCallback(
     (result: LazyLoadSentinelSettleResult) => {
@@ -432,6 +434,9 @@ function useLazyLoadSentinel(params: {
       rootMargin: TRANSCRIPT_SENTINEL_ROOT_MARGIN,
       rearmWhileIntersecting: true,
       shouldContinueWhileIntersecting,
+      // Continuation and lifecycle/input eligibility both require the
+      // sentinel to remain inside the transcript's current preload region.
+      isCurrentGeometryEligible: shouldContinueWhileIntersecting,
       onLoadSettled: reportSettle,
       isRequestCurrent,
     },
@@ -443,11 +448,18 @@ function useLazyLoadSentinel(params: {
     },
     [sharedSentinel.sentinelRef],
   );
+  const onUserGesture = useCallback(() => {
+    if (!showRecoveryRef.current) sharedSentinel.onUserGesture();
+  }, [sharedSentinel.onUserGesture]);
+  const recheck = useCallback(() => {
+    if (!showRecoveryRef.current) sharedSentinel.recheck();
+  }, [sharedSentinel.recheck]);
 
   return {
     sentinelRef,
-    onUserGesture: sharedSentinel.onUserGesture,
+    onUserGesture,
     retry: sharedSentinel.retry,
+    recheck,
     showRecovery,
   };
 }
@@ -461,21 +473,79 @@ function useLazyLoadSentinel(params: {
 function useRetryPaginationOnUpwardScroll(
   scrollRef: React.RefObject<HTMLDivElement | null>,
   onUserGesture: () => void,
+  recheck: () => void,
   isProgrammaticScrollLocked: () => boolean,
 ) {
   useEffect(() => {
     const scroller = scrollRef.current;
     if (!scroller) return;
     let previousScrollTop = scroller.scrollTop;
+    let touchStartY: number | null = null;
+    let touchHandled = false;
+    const canRecheckHardTop = () => scroller.scrollTop <= 0 && !isProgrammaticScrollLocked();
     const onScroll = () => {
       const nextScrollTop = scroller.scrollTop;
       const movedUp = nextScrollTop < previousScrollTop;
       previousScrollTop = nextScrollTop;
       if (movedUp && !isProgrammaticScrollLocked()) onUserGesture();
     };
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0 && canRecheckHardTop()) recheck();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      const movesUp = event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home";
+      if (movesUp && canRecheckHardTop()) recheck();
+    };
+    const onTouchStart = (event: TouchEvent) => {
+      touchStartY = event.touches[0]?.clientY ?? null;
+      touchHandled = false;
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      const nextY = event.touches[0]?.clientY;
+      if (
+        !touchHandled &&
+        touchStartY !== null &&
+        nextY !== undefined &&
+        nextY > touchStartY &&
+        canRecheckHardTop()
+      ) {
+        touchHandled = true;
+        recheck();
+      }
+    };
     scroller.addEventListener("scroll", onScroll, { passive: true });
-    return () => scroller.removeEventListener("scroll", onScroll);
-  }, [isProgrammaticScrollLocked, onUserGesture, scrollRef]);
+    scroller.addEventListener("wheel", onWheel, { passive: true });
+    scroller.addEventListener("keydown", onKeyDown);
+    scroller.addEventListener("touchstart", onTouchStart, { passive: true });
+    scroller.addEventListener("touchmove", onTouchMove, { passive: true });
+    return () => {
+      scroller.removeEventListener("scroll", onScroll);
+      scroller.removeEventListener("wheel", onWheel);
+      scroller.removeEventListener("keydown", onKeyDown);
+      scroller.removeEventListener("touchstart", onTouchStart);
+      scroller.removeEventListener("touchmove", onTouchMove);
+    };
+  }, [isProgrammaticScrollLocked, onUserGesture, recheck, scrollRef]);
+}
+
+/** Rechecks pagination after Dockview restores a hidden panel's scroll offset.
+ * Two frames place this after SessionPanelContent's one-frame restore without
+ * treating the initial visible mount as pagination intent. */
+function useRecheckPaginationOnVisible(isVisible: boolean, recheck: () => void) {
+  const previousVisibleRef = useRef(isVisible);
+  useEffect(() => {
+    const becameVisible = !previousVisibleRef.current && isVisible;
+    previousVisibleRef.current = isVisible;
+    if (!becameVisible) return;
+    let secondFrame: number | null = null;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(recheck);
+    });
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      if (secondFrame !== null) cancelAnimationFrame(secondFrame);
+    };
+  }, [isVisible, recheck]);
 }
 
 /** Duration a programmatic scroll's guard stays held if the browser never
@@ -949,6 +1019,7 @@ export function useNativeScrollManagement(params: {
   hasMore: boolean;
   isLoadingMore: boolean;
   loadMore: () => Promise<number>;
+  isVisible: boolean;
 }) {
   const {
     scrollRef,
@@ -962,6 +1033,7 @@ export function useNativeScrollManagement(params: {
     hasMore,
     isLoadingMore,
     loadMore,
+    isVisible,
   } = params;
   const programmaticScrollLockRef = useRef(false);
   const isProgrammaticScrollLocked = useCallback(() => programmaticScrollLockRef.current, []);
@@ -994,6 +1066,7 @@ export function useNativeScrollManagement(params: {
     sentinelRef,
     onUserGesture,
     retry: retryLoadMore,
+    recheck,
     showRecovery,
   } = useLazyLoadSentinel({
     scrollRef,
@@ -1004,7 +1077,8 @@ export function useNativeScrollManagement(params: {
     isLoadingMore,
     loadMore: loadMoreWithPrependBaseline,
   });
-  useRetryPaginationOnUpwardScroll(scrollRef, onUserGesture, isProgrammaticScrollLocked);
+  useRetryPaginationOnUpwardScroll(scrollRef, onUserGesture, recheck, isProgrammaticScrollLocked);
+  useRecheckPaginationOnVisible(isVisible, recheck);
   useInitialScrollPosition(scrollRef, items.length, sessionId, enabled, isNearBottomRef);
 
   return {
