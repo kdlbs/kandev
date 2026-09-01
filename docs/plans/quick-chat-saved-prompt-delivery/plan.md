@@ -88,7 +88,7 @@ first. Desktop and phone tests then prove the Quick Chat outcome.
 
 Implemented and verified.
 
-- `cd apps/backend && rtk go test ./internal/prompts/service ./internal/sysprompt ./internal/orchestrator ./internal/task/handlers ./cmd/mock-agent -count=1` - 3,281 passed.
+- `cd apps/backend && rtk go test ./internal/prompts/service ./internal/sysprompt ./internal/orchestrator ./internal/task/handlers ./cmd/mock-agent -count=1` - 3,283 passed.
 - `cd apps/web && rtk pnpm exec tsc --noEmit --pretty false` - passed.
 - `cd apps/backend && rtk make e2e-plugin-package` - passed.
 - `cd apps/web && rtk pnpm e2e:run --project chromium tests/chat/quick-chat-saved-prompt-delivery.spec.ts` - 1 passed.
@@ -98,8 +98,10 @@ Implemented and verified.
 
 - Removing browser compatibility blocks must match only prompt-definition
   blocks. It must not remove file, task, plan, or entity-reference context.
-- Start-created sessions can prepare references again downstream. The operation
-  must remain idempotent and produce one expansion.
+- Start-created sessions compose workflow prompts downstream. When direct
+  acceptance already produced trusted context, that exact block must survive
+  without a second mutable-record lookup; workflow-only prompts may still
+  expand at launch.
 - A saved prompt can change between composer selection and message acceptance.
   The accepted backend record is intentionally authoritative.
 - The mock directive must be bounded to the canonical expansion block. Visible

@@ -83,8 +83,10 @@ sanitization rules.
    removes untrusted lookalikes.
 7. The handler persists the canonical content. It sends that same content to
    `StartCreatedSession`, `PromptTask`, or the current turn-start queue path.
-8. Downstream launch-time expansion can run again. The existing idempotent
-   replacement produces one equivalent expansion block.
+8. If the message carries acceptance-time trusted expansion content, downstream
+   workflow composition preserves that exact block instead of resolving the
+   mutable prompt repository again. Workflow-only prompts, which have no
+   accepted direct-message context, continue to use launch-time expansion.
 
 An eagerly started Quick Chat is already in `WAITING_FOR_INPUT` at step 2. The
 new preparation step therefore runs before the title-owner system-context
@@ -140,5 +142,5 @@ expansion reached the session during diagnosis.
 
 ## Related decisions
 
-- [Keep Saved-Prompt Expansion Server Owned](../../../decisions/2026-09-01-server-owned-saved-prompt-expansion.md)
+- [Keep Saved-Prompt Expansion Server-Owned](../../../decisions/2026-09-01-server-owned-saved-prompt-expansion.md)
 - [Apply Agent-Generated Titles to Quick Chat](../../../decisions/2026-08-26-quick-chat-agent-titles.md)

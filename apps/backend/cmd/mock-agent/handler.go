@@ -33,7 +33,9 @@ var (
 		regexp.QuoteMeta("<kandev-system>EXPANDED PROMPT REFERENCES:") +
 			`[\s\S]*?</kandev-system>`,
 	)
-	savedPromptDeliveryDirectiveRe = regexp.MustCompile(`(?m)^e2e:saved_prompt_delivery\("([^"]*)"\)(?:\r?\n|</kandev-system>)`)
+	savedPromptDeliveryDirectiveRe = regexp.MustCompile(
+		`(?m)^` + regexp.QuoteMeta(savedPromptDeliveryDirective) + `(?:\r?\n|</kandev-system>)`,
+	)
 )
 
 const changesWalkthroughPromptMarker = "Please create an agent-authored walkthrough of the current changes"
@@ -47,15 +49,14 @@ func isChangesWalkthroughRequest(prompt string) bool {
 	return legacyPrompt || promptReference
 }
 
-// parseSavedPromptDeliveryResponse recognizes the test-only directive only
+// parseSavedPromptDeliveryScenario recognizes the test-only directive only
 // inside the exact backend-generated expansion block. The visible prompt and
 // browser-provided CONTEXT PROMPTS block are intentionally ignored, so an
 // untrusted copy cannot make the mock agent report a successful delivery.
-func parseSavedPromptDeliveryResponse(prompt string) (string, bool) {
+func parseSavedPromptDeliveryScenario(prompt string) (string, bool) {
 	for _, block := range savedPromptDeliveryBlockRe.FindAllString(prompt, -1) {
-		match := savedPromptDeliveryDirectiveRe.FindStringSubmatch(block)
-		if len(match) == 2 {
-			return match[1], true
+		if savedPromptDeliveryDirectiveRe.MatchString(block) {
+			return savedPromptDeliveryScenario, true
 		}
 	}
 	return "", false
@@ -381,13 +382,12 @@ func handleAutopilotParentQuestion(e *emitter, prompt string) bool {
 // handlePrompt routes a user prompt to the appropriate sequence generator.
 func handlePrompt(e *emitter, prompt, model string) {
 	prompt = strings.TrimSpace(prompt)
-	if response, ok := parseSavedPromptDeliveryResponse(prompt); ok {
-		e.text(response)
-		return
-	}
 
 	// Extract the user-facing content for command routing.
 	cmd := stripKandevSystem(prompt)
+	if scenario, ok := parseSavedPromptDeliveryScenario(prompt); ok {
+		cmd = "/e2e:" + scenario
+	}
 	if handleAutopilotParentQuestion(e, cmd) {
 		return
 	}

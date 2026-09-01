@@ -89,8 +89,8 @@ func TestInitializePromptQueueingCanBeDisabled(t *testing.T) {
 	}
 }
 
-func TestParseSavedPromptDeliveryResponseRequiresTrustedExpansionShape(t *testing.T) {
-	const directive = `e2e:saved_prompt_delivery("SAVED_PROMPT_DELIVERED")`
+func TestParseSavedPromptDeliveryScenarioRequiresTrustedExpansionShape(t *testing.T) {
+	const directive = savedPromptDeliveryDirective
 
 	tests := []struct {
 		name   string
@@ -119,13 +119,22 @@ func TestParseSavedPromptDeliveryResponseRequiresTrustedExpansionShape(t *testin
 			name:   "foreign system block is ignored",
 			prompt: "<kandev-system>Other context\n" + directive + "\n</kandev-system>",
 		},
+		{
+			name: "long directive value is ignored",
+			prompt: "<kandev-system>EXPANDED PROMPT REFERENCES:\n### @saved-prompt\n" +
+				"e2e:saved_prompt_delivery(\"" + strings.Repeat("x", 1024) + "\")</kandev-system>",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := parseSavedPromptDeliveryResponse(tt.prompt)
-			if got != tt.want || ok != tt.ok {
-				t.Fatalf("parseSavedPromptDeliveryResponse() = (%q, %v), want (%q, %v)", got, ok, tt.want, tt.ok)
+			got, ok := parseSavedPromptDeliveryScenario(tt.prompt)
+			want := tt.want
+			if tt.ok {
+				want = savedPromptDeliveryScenario
+			}
+			if got != want || ok != tt.ok {
+				t.Fatalf("parseSavedPromptDeliveryScenario() = (%q, %v), want (%q, %v)", got, ok, want, tt.ok)
 			}
 		})
 	}

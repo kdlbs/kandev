@@ -633,11 +633,14 @@ func (s *Service) startCreatedSession(
 			return nil, fmt.Errorf("failed to claim first-turn task title: %w", err)
 		}
 	}
-	effectivePrompt, planModeActive, generatedPromptReferenceContext := s.applyWorkflowAndPlanMode(
+	effectivePrompt, planModeActive, generatedPromptReferenceContext := s.applyWorkflowAndPlanModeWithPromptContext(
 		ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
-		planMode, task.IsEphemeral, session.IsPassthrough,
+		planMode, task.IsEphemeral, session.IsPassthrough, promptReferenceContext,
 	)
 	if generatedPromptReferenceContext != "" {
+		// The workflow helper preserves a direct message's acceptance-time
+		// context. Auto-started workflow prompts have no prior context, so their
+		// launch-time expansion becomes the trusted value here.
 		promptReferenceContext = generatedPromptReferenceContext
 	}
 
@@ -1799,7 +1802,38 @@ func (s *Service) postLaunchStart(ctx context.Context, taskID string, execution 
 // applyWorkflowAndPlanMode applies workflow step configuration and plan mode injection to a prompt.
 // Returns the effective prompt and whether plan mode is active (from either the step or the caller).
 // For ephemeral tasks (quick chat), workflow step processing is skipped since they have no workflow.
-func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, taskID string, sessionID string, workflowStepID string, planMode bool, isEphemeral bool, isPassthrough bool) (string, bool, string) {
+func (s *Service) applyWorkflowAndPlanMode(
+	ctx context.Context,
+	prompt string,
+	taskID string,
+	sessionID string,
+	workflowStepID string,
+	planMode bool,
+	isEphemeral bool,
+	isPassthrough bool,
+) (string, bool, string) {
+	return s.applyWorkflowAndPlanModeWithPromptContext(
+		ctx, prompt, taskID, sessionID, workflowStepID, planMode,
+		isEphemeral, isPassthrough, "",
+	)
+}
+
+// applyWorkflowAndPlanModeWithPromptContext composes a workflow prompt while
+// preserving a direct message's acceptance-time saved-prompt expansion. A
+// direct message already has canonical reference content, so resolving it
+// again would make persistence and ACP dispatch depend on mutable prompt
+// records. Workflow-only prompts still use the normal expansion path.
+func (s *Service) applyWorkflowAndPlanModeWithPromptContext(
+	ctx context.Context,
+	prompt string,
+	taskID string,
+	sessionID string,
+	workflowStepID string,
+	planMode bool,
+	isEphemeral bool,
+	isPassthrough bool,
+	trustedPromptContext string,
+) (string, bool, string) {
 	effectivePrompt := prompt
 	promptReferenceContext := ""
 
@@ -1813,9 +1847,15 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 				zap.Error(err))
 		} else {
 			stepHasPlanMode = step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
-			effectivePrompt, promptReferenceContext = s.buildWorkflowPromptWithContext(
-				ctx, effectivePrompt, step, taskID, sessionID, isPassthrough,
-			)
+			if trustedPromptContext != "" {
+				effectivePrompt, promptReferenceContext = s.buildWorkflowPromptWithTrustedContext(
+					ctx, effectivePrompt, step, taskID, sessionID, isPassthrough, trustedPromptContext,
+				)
+			} else {
+				effectivePrompt, promptReferenceContext = s.buildWorkflowPromptWithContext(
+					ctx, effectivePrompt, step, taskID, sessionID, isPassthrough,
+				)
+			}
 		}
 	}
 
@@ -1900,6 +1940,24 @@ func (s *Service) buildWorkflowPromptWithContext(
 	sessionID string,
 	isPassthrough bool,
 ) (string, string) {
+	return s.buildWorkflowPromptWithTrustedContext(
+		ctx, basePrompt, step, taskID, sessionID, isPassthrough, "",
+	)
+}
+
+// buildWorkflowPromptWithTrustedContext composes a workflow prompt without
+// re-expanding an already canonical direct message. If the workflow step
+// replaces the base prompt, it restores the exact trusted block so the
+// accepted saved-prompt context remains available to the agent.
+func (s *Service) buildWorkflowPromptWithTrustedContext(
+	ctx context.Context,
+	basePrompt string,
+	step *wfmodels.WorkflowStep,
+	taskID string,
+	sessionID string,
+	isPassthrough bool,
+	trustedPromptContext string,
+) (string, string) {
 	_ = sessionID
 	var parts []string
 
@@ -1924,6 +1982,13 @@ func (s *Service) buildWorkflowPromptWithContext(
 	}
 
 	joined := strings.Join(parts, "\n\n")
+	if trustedPromptContext != "" {
+		trustedBlock := sysprompt.Wrap(trustedPromptContext)
+		if !strings.Contains(joined, trustedBlock) {
+			joined += "\n\n" + trustedBlock
+		}
+		return joined, trustedPromptContext
+	}
 	return s.expandPromptReferencesWithContext(ctx, joined, isPassthrough)
 }
 

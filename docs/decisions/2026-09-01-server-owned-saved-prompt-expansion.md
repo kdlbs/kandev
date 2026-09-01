@@ -1,4 +1,4 @@
-# ADR-2026-09-01-server-owned-saved-prompt-expansion: Keep Saved-Prompt Expansion Server Owned
+# ADR-2026-09-01-server-owned-saved-prompt-expansion: Keep Saved-Prompt Expansion Server-Owned
 
 **Status:** accepted
 **Date:** 2026-09-01
@@ -45,6 +45,9 @@ visible terminal input.
   it and creates current context.
 - The direct-message path gains one saved-prompt lookup when the message
   contains `@`.
+- The eager created-session path carries the exact acceptance-time expansion
+  through workflow composition and launch. It does not re-read direct saved
+  prompts after the message is accepted.
 
 ## Alternatives Considered
 

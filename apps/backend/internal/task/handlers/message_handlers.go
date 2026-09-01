@@ -161,7 +161,7 @@ func (h *MessageHandlers) injectMessageContext(
 	if task.IsFromOffice {
 		return sysprompt.InjectOfficeContextWithOptions(
 			req.TaskID, req.TaskSessionID, content, requiresSignal,
-			referenceContext, pullRequestTargetContext, trustedPromptContext,
+			referenceContext, trustedPromptContext, pullRequestTargetContext,
 		)
 	}
 	if sessionResp.Session.IsPassthrough {
@@ -177,7 +177,7 @@ func (h *MessageHandlers) injectMessageContext(
 		Autopilot:                      task.Autopilot,
 		IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
 		IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
-	}, referenceContext, pullRequestTargetContext, trustedPromptContext)
+	}, referenceContext, trustedPromptContext, pullRequestTargetContext)
 }
 
 func (h *MessageHandlers) prepareDirectPrompt(
@@ -908,12 +908,8 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
 	startCreated bool,
-	trustedPromptContexts ...string,
+	trustedPromptContext string,
 ) {
-	trustedPromptContext := ""
-	if len(trustedPromptContexts) > 0 {
-		trustedPromptContext = trustedPromptContexts[0]
-	}
 	// For CREATED sessions, start the agent with this message as the initial prompt
 	if startCreated {
 		var err error

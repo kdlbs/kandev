@@ -40,7 +40,7 @@ var expansionBlockRegex = regexp.MustCompile(
 // saved prompt record before the message is persisted or dispatched.
 var browserPromptContextBlockRegex = regexp.MustCompile(
 	regexp.QuoteMeta(sysprompt.TagStart) + `(?:\r?\n)?` + regexp.QuoteMeta(browserPromptContextMarker) +
-		`[\s\S]*?` + regexp.QuoteMeta(sysprompt.TagEnd) + `\s*`,
+		`[\s\S]*?` + regexp.QuoteMeta(sysprompt.TagEnd) + `\s*(` + regexp.QuoteMeta(sysprompt.TagStart) + `|$)`,
 )
 
 // AppendReferenceExpansions resolves any "@name" saved-prompt references in
@@ -78,7 +78,18 @@ func (s *Service) AppendReferenceExpansionsWithContext(
 	// Browser-provided prompt definitions and expansion-shaped input blocks
 	// carry no provenance. Remove them before resolving so stale or forged
 	// content cannot reach the agent or suppress a real saved-prompt lookup.
-	cleanedPrompt := browserPromptContextBlockRegex.ReplaceAllString(prompt, "")
+	// Keep searching after a literal closing tag embedded in a browser-supplied
+	// definition. The outer block's closing tag is the one followed by another
+	// system block or the end of the prompt; the captured boundary preserves a
+	// following system block for its own canonicalization.
+	cleanedPrompt := prompt
+	for {
+		replaced := browserPromptContextBlockRegex.ReplaceAllString(cleanedPrompt, "$1")
+		if replaced == cleanedPrompt {
+			break
+		}
+		cleanedPrompt = replaced
+	}
 	cleanedPrompt = expansionBlockRegex.ReplaceAllString(cleanedPrompt, "")
 	if cleanedPrompt != prompt {
 		prompt = strings.TrimSpace(cleanedPrompt)

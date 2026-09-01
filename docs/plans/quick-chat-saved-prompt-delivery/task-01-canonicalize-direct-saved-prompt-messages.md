@@ -74,7 +74,8 @@ None.
 ## Risks
 
 - A broad block matcher can remove unrelated hidden context.
-- Duplicate preparation can add more than one expansion if idempotence changes.
+- Created-session workflow composition must preserve acceptance-time context
+  rather than re-reading mutable saved-prompt records.
 
 ## Parallelism
 
@@ -95,4 +96,4 @@ startup seam.
 
 Verification:
 
-- `cd apps/backend && rtk go test ./internal/prompts/service ./internal/sysprompt ./internal/orchestrator ./internal/task/handlers ./cmd/mock-agent -count=1` - 3,281 passed.
+- `cd apps/backend && rtk go test ./internal/prompts/service ./internal/sysprompt ./internal/orchestrator ./internal/task/handlers ./cmd/mock-agent -count=1` - 3,283 passed.
