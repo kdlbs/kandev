@@ -6,7 +6,15 @@ import type { ClarificationAnswer, ClarificationRequestMetadata, Message } from 
 import { getBackendConfig } from "@/lib/config";
 import { useAppStoreApi } from "@/components/state-provider";
 
-type SubmitState = "idle" | "submitting" | "ok" | "error";
+type SubmitState = "idle" | "submitting" | "ok" | "error" | "expired";
+
+// The only stable machine-readable 409 cause the backend sends today
+// (internal/clarification/handlers.go's writeResolutionResult, guarded by
+// IsNotActiveError). A duplicate submit never produces a 409 -- it resolves
+// through the 200 win/loss envelope below (claimed: true/false) -- so any
+// 409 this client doesn't recognize is treated the same as "not_active"
+// rather than risked as a silent success.
+const CLARIFICATION_CONFLICT_NOT_ACTIVE = "not_active";
 
 // The bundle status the backend can report on a resolved response (R10).
 // Upstream's claim cannot produce a cancelled winner, so a loss only ever
@@ -43,6 +51,10 @@ export type ClarificationGroupApi = {
   // freshly recorded answer yet).
   submitCollected: (override?: Record<string, ClarificationAnswer>) => Promise<void>;
   skipAll: (reason?: string) => Promise<void>;
+  // Re-attempts whichever of submitCollected/skipAll was last invoked, using
+  // its original arguments (the skip reason, or the live-recorded answers
+  // for a submit). A no-op before either has been called.
+  retry: () => Promise<void>;
 };
 
 function questionIdsFromMessages(messages: readonly Message[]): string[] {
@@ -58,6 +70,26 @@ function questionIdsFromMessages(messages: readonly Message[]): string[] {
       return meta?.question_id ?? meta?.question?.id ?? "";
     })
     .filter(Boolean);
+}
+
+// classifyConflictResult reads a 409 response's body for a machine-readable
+// `code` (added alongside the existing human `error` string). A bodyless 409
+// (legacy backend) or an explicit "not_active" code both mean the bundle is
+// no longer active. Any other code is unrecognized by this client -- fail
+// closed to "error" rather than guessing it is still safe to report success.
+async function classifyConflictResult(res: Response): Promise<ClarificationRespondResult> {
+  let code: string | undefined;
+  try {
+    const parsed = (await res.json()) as { code?: string };
+    code = parsed.code;
+  } catch {
+    // No body (legacy backend) -- falls through to the "not_active" default.
+  }
+  if (code === undefined || code === CLARIFICATION_CONFLICT_NOT_ACTIVE) {
+    return { state: "expired" };
+  }
+  console.error("Clarification request failed: unrecognized 409 code", code);
+  return { state: "error" };
 }
 
 // postClarification posts the respond body and, on a 200, parses the R10
@@ -83,11 +115,7 @@ async function postClarification(
     console.error("Clarification request failed:", err);
     return { state: "error" };
   }
-  // 409 Conflict means a duplicate submit (the user clicked Submit twice in
-  // quick succession). Treat it as success — the first submit already won
-  // and resolved the bundle on the backend, so the overlay should close. No
-  // body to parse here (legacy status, predates the R10 envelope).
-  if (res.status === 409) return { state: "ok" };
+  if (res.status === 409) return await classifyConflictResult(res);
   if (!res.ok) {
     console.error("Clarification request failed:", res.status, res.statusText);
     return { state: "error" };
@@ -219,6 +247,103 @@ function safeApplyResolvedStatus(
   }
 }
 
+type UseClarificationSubmissionArgs = {
+  pendingId: string | null;
+  questionIds: string[];
+  answersRef: { current: Record<string, ClarificationAnswer> };
+  submitBundleRef: { current: readonly Message[] };
+  inflightRef: { current: boolean };
+  setSubmitState: (state: SubmitState) => void;
+  updateMessage: (message: Message) => void;
+  defaultSkipReason: string;
+};
+
+// Submission plumbing shared by useClarificationGroup: submitCollected/skipAll
+// each POST through runClarificationRequest, and retry() replays whichever of
+// the two was last attempted (lastActionRef) using its original arguments, so
+// the caller (the overlay) never has to track which UI action produced the
+// current error/expired state.
+function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
+  const {
+    pendingId,
+    questionIds,
+    answersRef,
+    submitBundleRef,
+    inflightRef,
+    setSubmitState,
+    updateMessage,
+    defaultSkipReason,
+  } = args;
+  const lastActionRef = useRef<
+    | { kind: "submit"; answers: Record<string, ClarificationAnswer> }
+    | { kind: "skip"; reason: string }
+    | null
+  >(null);
+
+  const submitCollected = useCallback(
+    async (override?: Record<string, ClarificationAnswer>) => {
+      if (!pendingId) return;
+      if (inflightRef.current) return;
+      const current = { ...answersRef.current, ...(override ?? {}) };
+      const haveAll = questionIds.every((id) => Boolean(current[id]));
+      if (!haveAll) return;
+      const ordered = questionIds
+        .map((id) => current[id])
+        .filter((a): a is ClarificationAnswer => Boolean(a));
+      lastActionRef.current = { kind: "submit", answers: current };
+      await runClarificationRequest({
+        post: () => postClarificationBatch(pendingId, ordered),
+        ownStatus: "answered",
+        ownAnswers: current,
+        bundle: submitBundleRef.current.slice(),
+        inflightRef,
+        setSubmitState,
+        updateMessage,
+      });
+    },
+    [
+      pendingId,
+      questionIds,
+      answersRef,
+      submitBundleRef,
+      inflightRef,
+      setSubmitState,
+      updateMessage,
+    ],
+  );
+
+  const skipAll = useCallback(
+    async (reason?: string) => {
+      if (!pendingId) return;
+      if (inflightRef.current) return;
+      const effectiveReason = reason ?? defaultSkipReason;
+      lastActionRef.current = { kind: "skip", reason: effectiveReason };
+      await runClarificationRequest({
+        post: () => postClarificationSkip(pendingId, effectiveReason),
+        ownStatus: "rejected",
+        ownAnswers: {},
+        bundle: submitBundleRef.current.slice(),
+        inflightRef,
+        setSubmitState,
+        updateMessage,
+      });
+    },
+    [pendingId, submitBundleRef, inflightRef, setSubmitState, updateMessage, defaultSkipReason],
+  );
+
+  const retry = useCallback(async () => {
+    const action = lastActionRef.current;
+    if (!action) return;
+    if (action.kind === "submit") {
+      await submitCollected(action.answers);
+    } else {
+      await skipAll(action.reason);
+    }
+  }, [submitCollected, skipAll]);
+
+  return { submitCollected, skipAll, retry };
+}
+
 // useClarificationGroup tracks the per-question answers for a multi-question
 // clarification bundle. The carousel UI owns navigation; this hook just stores
 // the local answer state and exposes:
@@ -278,47 +403,18 @@ export function useClarificationGroup(
   const submitBundleRef = useRef<readonly Message[]>([]);
   submitBundleRef.current = messages ?? [];
 
-  const submitCollected = useCallback(
-    async (override?: Record<string, ClarificationAnswer>) => {
-      if (!pendingId) return;
-      if (inflightRef.current) return;
-      const current = { ...answersRef.current, ...(override ?? {}) };
-      const haveAll = questionIds.every((id) => Boolean(current[id]));
-      if (!haveAll) return;
-      const ordered = questionIds
-        .map((id) => current[id])
-        .filter((a): a is ClarificationAnswer => Boolean(a));
-      await runClarificationRequest({
-        post: () => postClarificationBatch(pendingId, ordered),
-        ownStatus: "answered",
-        ownAnswers: current,
-        bundle: submitBundleRef.current.slice(),
-        inflightRef,
-        setSubmitState,
-        updateMessage: storeApi.getState().updateMessage,
-      });
-    },
-    [pendingId, questionIds, storeApi],
-  );
-
   // i18n-exempt: the default reason is POSTed as the clarification answer and
   // reaches the agent verbatim; it is not rendered in the UI.
-  const skipAll = useCallback(
-    async (reason?: string) => {
-      if (!pendingId) return;
-      if (inflightRef.current) return;
-      await runClarificationRequest({
-        post: () => postClarificationSkip(pendingId, reason ?? t("task:userSkippedClarification")),
-        ownStatus: "rejected",
-        ownAnswers: {},
-        bundle: submitBundleRef.current.slice(),
-        inflightRef,
-        setSubmitState,
-        updateMessage: storeApi.getState().updateMessage,
-      });
-    },
-    [pendingId, storeApi, t],
-  );
+  const { submitCollected, skipAll, retry } = useClarificationSubmission({
+    pendingId,
+    questionIds,
+    answersRef,
+    submitBundleRef,
+    inflightRef,
+    setSubmitState,
+    updateMessage: storeApi.getState().updateMessage,
+    defaultSkipReason: t("task:userSkippedClarification"),
+  });
 
   return {
     pendingId,
@@ -330,5 +426,6 @@ export function useClarificationGroup(
     clearAnswer,
     submitCollected,
     skipAll,
+    retry,
   };
 }

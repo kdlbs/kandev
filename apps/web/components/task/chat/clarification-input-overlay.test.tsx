@@ -33,6 +33,7 @@ vi.mock("@kandev/ui/tooltip", () => ({
 }));
 
 const fetchMock = vi.fn();
+const TESTID_OPTION = "clarification-option";
 
 function clarMessage(opts: {
   id: string;
@@ -346,6 +347,46 @@ describe("ClarificationInputOverlay — labelled Skip button", () => {
       rejected: true,
       reject_reason: "User skipped",
     });
+  });
+});
+
+describe("ClarificationInputOverlay — submit failure feedback", () => {
+  it("shows a retry banner on a failed submit, preserves the answer, and never resolves", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("nope", { status: 500 }));
+    const { onResolved } = renderOverlay([
+      clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ]);
+
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+
+    await vi.waitFor(() => screen.getByTestId("clarification-submit-error"));
+    expect(onResolved).not.toHaveBeenCalled();
+    expect(screen.getByTestId(TESTID_OPTION).getAttribute("data-selected")).toBe("true");
+
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    fireEvent.click(screen.getByTestId("clarification-retry"));
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId("clarification-submit-error")).toBeNull();
+  });
+
+  it("shows a non-retryable expired banner when the bundle is no longer active", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ code: "not_active", error: "clarification request is no longer active" }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const { onResolved } = renderOverlay([
+      clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ]);
+
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+
+    await vi.waitFor(() => screen.getByTestId("clarification-expired"));
+    expect(onResolved).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("clarification-retry")).toBeNull();
   });
 });
 

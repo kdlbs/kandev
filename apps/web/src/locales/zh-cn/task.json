@@ -181,6 +181,8 @@
   "clarificationAnswerOverLimit_one": "超出 {{max}} 字符限制 {{count}} 个字符。",
   "clarificationAnswerOverLimit_other": "超出 {{max}} 字符限制 {{count}} 个字符。",
   "clarificationAnswerRuneCount": "{{current}} / {{max}}",
+  "clarificationExpired": "此问题已不再有效，您的回答未被记录。",
+  "clarificationSubmitFailed": "无法发送您的回答。",
   "cleanup": "清理",
   "clearAllAnnotations": "清除全部标注",
   "clickAnywhereToStartWriting": "点击任意位置开始编写",

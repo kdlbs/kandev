@@ -215,9 +215,9 @@ func (r *Resolver) claimAndDeliver(
 ) (*Resolution, bool, error) {
 	status, response := buildOutcomeResponse(pendingID, questions, outcome, r.now())
 
-	persistenceCtx, cancel := clarificationPersistenceContext(ctx)
+	claimCtx, cancel := clarificationClaimContext(ctx)
 	completedMessages, claimed, claimErr := r.messages.CompleteActiveClarificationBundle(
-		persistenceCtx,
+		claimCtx,
 		pendingID,
 		status,
 		responsesFromAnswers(response.Answers),

@@ -182,6 +182,8 @@
   "clarificationAnswerOverLimit_one": "{{count}} character over the {{max}}-character limit.",
   "clarificationAnswerOverLimit_other": "{{count}} characters over the {{max}}-character limit.",
   "clarificationAnswerRuneCount": "{{current}} / {{max}}",
+  "clarificationExpired": "This question is no longer active, so your answer was not recorded.",
+  "clarificationSubmitFailed": "Could not send your answer.",
   "cleanup": "Cleanup",
   "clearAllAnnotations": "Clear all annotations",
   "clickAnywhereToStartWriting": "Click anywhere to start writing",

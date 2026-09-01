@@ -190,12 +190,26 @@ describe("useClarificationGroup — submit + skip", () => {
     });
     expect(result.current.submitState).toBe("error");
   });
+});
 
-  // 409 Conflict means a duplicate submit landed after the first one already
-  // resolved the bundle on the backend. Treat it as success so the overlay
-  // closes instead of getting stuck in an unrecoverable error state.
-  it("submitState transitions to 'ok' on 409 (duplicate submit)", async () => {
-    fetchMock.mockResolvedValueOnce(new Response("conflict", { status: 409 }));
+describe("useClarificationGroup — submit failure and conflict handling", () => {
+  beforeEach(setupFetchMock);
+
+  // A 409 from /respond is the backend's "no longer active" outcome
+  // (errClarificationNotActive / IsNotActiveError): the bundle expired
+  // (session went terminal, task archived, or a later turn superseded it).
+  // A genuine duplicate submit never reaches this status — it resolves
+  // through the 200 win/loss envelope (claimed: true/false) instead. So a
+  // 409 must NOT be reported to the user as a successful submit.
+  it("submitState transitions to 'expired' on 409 with the not_active code", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ error: "clarification request is no longer active", code: "not_active" }),
+        {
+          status: 409,
+        },
+      ),
+    );
     const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
     const { result } = renderHook(() => useClarificationGroup(msgs));
 
@@ -204,18 +218,129 @@ describe("useClarificationGroup — submit + skip", () => {
         q1: { question_id: "q1", selected_options: ["o1"] },
       });
     });
-    expect(result.current.submitState).toBe("ok");
+    expect(result.current.submitState).toBe("expired");
   });
 
-  it("skipAll transitions to 'ok' on 409 too", async () => {
-    fetchMock.mockResolvedValueOnce(new Response("conflict", { status: 409 }));
+  it("submitState transitions to 'expired' on a bodyless 409 (legacy backend)", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 409 }));
+    const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
+    const { result } = renderHook(() => useClarificationGroup(msgs));
+
+    await act(async () => {
+      await result.current.submitCollected({
+        q1: { question_id: "q1", selected_options: ["o1"] },
+      });
+    });
+    expect(result.current.submitState).toBe("expired");
+  });
+
+  it("submitState transitions to 'error' on an unrecognized 409 code (fail closed, never silently 'ok')", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "unexpected", code: "some_future_code" }), {
+        status: 409,
+      }),
+    );
+    const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
+    const { result } = renderHook(() => useClarificationGroup(msgs));
+
+    await act(async () => {
+      await result.current.submitCollected({
+        q1: { question_id: "q1", selected_options: ["o1"] },
+      });
+    });
+    expect(result.current.submitState).toBe("error");
+  });
+
+  it("skipAll transitions to 'expired' on 409 too", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 409 }));
     const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
     const { result } = renderHook(() => useClarificationGroup(msgs));
 
     await act(async () => {
       await result.current.skipAll();
     });
+    expect(result.current.submitState).toBe("expired");
+  });
+
+  it("submitCollected preserves recorded answers when the submit fails", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("nope", { status: 500 }));
+    const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
+    const { result } = renderHook(() => useClarificationGroup(msgs));
+
+    await act(async () => {
+      result.current.recordAnswer("q1", { question_id: "q1", selected_options: ["o1"] });
+    });
+    await act(async () => {
+      await result.current.submitCollected();
+    });
+
+    expect(result.current.submitState).toBe("error");
+    expect(result.current.answers["q1"]).toEqual({ question_id: "q1", selected_options: ["o1"] });
+  });
+});
+
+describe("useClarificationGroup — retry", () => {
+  beforeEach(setupFetchMock);
+
+  it("retry() re-POSTs the same batch after a failed submit", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("nope", { status: 500 }));
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
+    const { result } = renderHook(() => useClarificationGroup(msgs));
+
+    await act(async () => {
+      await result.current.submitCollected({
+        q1: { question_id: "q1", selected_options: ["o1"] },
+      });
+    });
+    expect(result.current.submitState).toBe("error");
+
+    await act(async () => {
+      await result.current.retry();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [, secondInit] = fetchMock.mock.calls[1];
+    expect(JSON.parse(String(secondInit.body))).toEqual({
+      answers: [{ question_id: "q1", selected_options: ["o1"] }],
+      rejected: false,
+    });
     expect(result.current.submitState).toBe("ok");
+  });
+
+  it("retry() re-POSTs the original skip reason after a failed skip", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("nope", { status: 500 }));
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
+    const { result } = renderHook(() => useClarificationGroup(msgs));
+
+    await act(async () => {
+      await result.current.skipAll("Too vague");
+    });
+    expect(result.current.submitState).toBe("error");
+
+    await act(async () => {
+      await result.current.retry();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [, secondInit] = fetchMock.mock.calls[1];
+    expect(JSON.parse(String(secondInit.body))).toEqual({
+      rejected: true,
+      reject_reason: "Too vague",
+    });
+    expect(result.current.submitState).toBe("ok");
+  });
+
+  it("retry() is a no-op before any submit/skip has been attempted", async () => {
+    const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
+    const { result } = renderHook(() => useClarificationGroup(msgs));
+
+    await act(async () => {
+      await result.current.retry();
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

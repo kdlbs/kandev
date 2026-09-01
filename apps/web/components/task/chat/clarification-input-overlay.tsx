@@ -19,6 +19,7 @@ import {
   countRunes,
 } from "./clarification-overlay-parts";
 import { ClarificationHeaderActions } from "./clarification-overlay-header";
+import { ClarificationStatusBanner } from "./clarification-status-banner";
 import { ClarificationMarkdown } from "./clarification-markdown";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
@@ -648,6 +649,9 @@ export function ClarificationInputOverlay({
           collapseContentId={collapseContentId}
         />
       </div>
+      {(group.submitState === "error" || group.submitState === "expired") && (
+        <ClarificationStatusBanner state={group.submitState} onRetry={() => void group.retry()} />
+      )}
       {sharedContext && (
         <div
           data-testid="clarification-context"
