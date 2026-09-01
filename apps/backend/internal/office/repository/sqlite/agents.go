@@ -95,23 +95,12 @@ func (r *Repository) CreateAgentInstance(ctx context.Context, agent *models.Agen
 	// agent_profiles.agent_id is FK → agents (CLI tool registrations).
 	// When the caller doesn't supply one (e.g. office's createAgent handler
 	// receives only role + name), best-effort inherit from any existing
-	// agent in the same workspace so the FK is satisfied. Falls back to
-	// the first registered CLI tool. If neither yields a value (tests with
-	// no CLI tools registered, or FK enforcement disabled), leave it empty
-	// and let the underlying FK constraint speak for itself in production.
+	// agent in the same workspace so the FK is satisfied. If neither yields
+	// a value (tests with no CLI tools registered, or FK enforcement
+	// disabled), leave it empty and let the underlying FK constraint speak
+	// for itself in production.
 	if agent.AgentID == "" {
-		var defaultAgentID string
-		_ = r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
-			SELECT agent_id FROM agent_profiles
-			WHERE workspace_id = ? AND agent_id != '' AND deleted_at IS NULL
-			ORDER BY created_at ASC LIMIT 1
-		`), agent.WorkspaceID).Scan(&defaultAgentID)
-		if defaultAgentID == "" {
-			_ = r.ro.QueryRowxContext(ctx, r.ro.Rebind(
-				`SELECT id FROM agents ORDER BY created_at ASC LIMIT 1`,
-			)).Scan(&defaultAgentID)
-		}
-		agent.AgentID = defaultAgentID
+		agent.AgentID = r.DefaultAgentID(ctx, agent.WorkspaceID)
 	}
 	return r.insertAgentInstance(ctx, r.db, agent, displayName, status, desiredSkills, skillIDs, permissions, threshold)
 }
@@ -467,6 +456,29 @@ func (r *Repository) AgentInstanceExistsByName(
 	var exists bool
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), args...).Scan(&exists)
 	return exists, err
+}
+
+// DefaultAgentID returns the workspace's best-effort default CLI tool
+// registration for a new agent_profiles row that doesn't specify one: the
+// oldest agent_id already in use by an Office agent in the workspace, or
+// failing that, the oldest registered CLI tool overall. Returns "" if
+// neither yields a value. Used by CreateAgentInstance's own fallback and by
+// config sync, whose agent definition files have no field for this FK
+// (AC-OFFICE-CONFIG-SYNC-003.5c's owned fields are role/icon/budget/max
+// concurrent sessions/desired skills/executor preference only).
+func (r *Repository) DefaultAgentID(ctx context.Context, workspaceID string) string {
+	var defaultAgentID string
+	_ = r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT agent_id FROM agent_profiles
+		WHERE workspace_id = ? AND agent_id != '' AND deleted_at IS NULL
+		ORDER BY created_at ASC LIMIT 1
+	`), workspaceID).Scan(&defaultAgentID)
+	if defaultAgentID == "" {
+		_ = r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+			`SELECT id FROM agents ORDER BY created_at ASC LIMIT 1`,
+		)).Scan(&defaultAgentID)
+	}
+	return defaultAgentID
 }
 
 // AgentProfileExists reports whether an agent_profiles row with id exists

@@ -217,3 +217,38 @@ func TestDeleteAgentInstanceTx_RollbackKeepsRow(t *testing.T) {
 		t.Fatalf("GetAgentInstance() error = %v, want row to survive rollback", err)
 	}
 }
+
+// TestDefaultAgentID_NoAgentsReturnsEmpty verifies a workspace with no
+// registered CLI tools and no existing Office agents yields "", the signal
+// config sync's agent-create path uses to leave AgentID unset rather than
+// invent a value.
+func TestDefaultAgentID_NoAgentsReturnsEmpty(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	if got := repo.DefaultAgentID(ctx, "ws-empty"); got != "" {
+		t.Errorf("DefaultAgentID() = %q, want empty", got)
+	}
+}
+
+// TestDefaultAgentID_InheritsFromExistingWorkspaceAgent verifies config
+// sync's agent-create path (which cannot repeat CreateAgentInstance's
+// FK-inheritance lookup inside its own uncommitted transaction) can resolve
+// the same default by calling DefaultAgentID beforehand.
+func TestDefaultAgentID_InheritsFromExistingWorkspaceAgent(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	existing := fullAgentInstance("agent-tx-8", "ws-1", "Grace")
+	existing.AgentID = "cli-claude"
+	if err := repo.CreateAgentInstance(ctx, existing); err != nil {
+		t.Fatalf("CreateAgentInstance: %v", err)
+	}
+
+	if got := repo.DefaultAgentID(ctx, "ws-1"); got != "cli-claude" {
+		t.Errorf("DefaultAgentID() = %q, want %q", got, "cli-claude")
+	}
+	if got := repo.DefaultAgentID(ctx, "ws-other"); got != "" {
+		t.Errorf("DefaultAgentID() for unrelated workspace = %q, want empty", got)
+	}
+}
