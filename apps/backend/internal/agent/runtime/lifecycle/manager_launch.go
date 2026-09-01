@@ -1148,7 +1148,7 @@ func (m *Manager) launchApplyPrepareResult(
 }
 
 func (m *Manager) publishLaunchPrepareCompleted(req *LaunchRequest, result *EnvPrepareResult, recorder *prepareProgressRecorder, workspacePath string, success bool, err error) {
-	if req.ACPSessionID != "" {
+	if req.ACPSessionID != "" && !shouldPrepareEnvironment(req) {
 		return
 	}
 
