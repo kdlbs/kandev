@@ -841,7 +841,10 @@ func (r *Repository) loadInitialSessionRuntimeSeedTx(
 // CreateOfficeTaskSession creates an Office session and atomically marks it as
 // the task's initial session when no earlier session exists. The task row lock
 // serializes callers across PostgreSQL connections; SQLite's single writer
-// connection serializes the transaction.
+// connection serializes the transaction. Within that same transaction it also
+// enforces office-session uniqueness for the (task_id, agent_profile_id) pair:
+// if a live row already exists for the pair, the insert is refused with
+// ErrOfficeSessionRaceConflict rather than creating a second live session.
 func (r *Repository) CreateOfficeTaskSession(ctx context.Context, session *models.TaskSession) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {

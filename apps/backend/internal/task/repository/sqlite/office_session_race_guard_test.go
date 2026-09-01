@@ -375,6 +375,42 @@ func TestPostgresGetTaskSessionByTaskAndAgentPrefersLiveOverNewerTerminal(t *tes
 	require.Equal(t, "lookup-livelock-pg-live", got.ID)
 }
 
+// TestPostgresGetTaskSessionByTaskAndAgentOrdersLiveByStartedAtDescThenIDDesc
+// is the PostgreSQL dialect counterpart of
+// TestGetTaskSessionByTaskAndAgentOrdersLiveByStartedAtDescThenIDDesc: two
+// live rows sharing one started_at value tiebreak deterministically on id
+// DESC, proving the ordering clause carries the same total order on this
+// dialect, not just SQLite's.
+func TestPostgresGetTaskSessionByTaskAndAgentOrdersLiveByStartedAtDescThenIDDesc(t *testing.T) {
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 2)
+	repo, err := NewWithDB(db, db, nil)
+	require.NoError(t, err)
+	ctx := context.Background()
+	const taskID = "task-office-lookup-tiebreak-pg"
+	now := time.Now().UTC()
+	_, err = db.Exec(db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), taskID, "", "Office lookup tiebreak (Postgres)", now, now)
+	require.NoError(t, err)
+	agent := "agent-lookup-tiebreak-pg"
+
+	same := now
+	insertOfficeSessionWithStartedAt(t, db, officeSessionSeed{
+		id: "lookup-tiebreak-pg-a", taskID: taskID, agentProfileID: agent,
+		state: models.TaskSessionStateCreated,
+	}, same)
+	insertOfficeSessionWithStartedAt(t, db, officeSessionSeed{
+		id: "lookup-tiebreak-pg-b", taskID: taskID, agentProfileID: agent,
+		state: models.TaskSessionStateCreated,
+	}, same)
+
+	got, err := repo.GetTaskSessionByTaskAndAgent(ctx, taskID, agent)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, "lookup-tiebreak-pg-b", got.ID, "equal started_at must tiebreak on id DESC")
+}
+
 // TestPostgresGetTaskSessionByTaskAndAgentOrdersLiveByStartedAtDescBeforeID
 // is the PostgreSQL dialect counterpart of
 // TestGetTaskSessionByTaskAndAgentOrdersLiveByStartedAtDescBeforeID: two live
