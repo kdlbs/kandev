@@ -312,26 +312,94 @@ describe("setTaskSessionsForTask preserves WS-seeded fields", () => {
   });
 });
 
-// ADR-0049 — a fresh page-load / second tab receives the
-// fine-grained busy substate on the boot payload (and now on the REST/WS session
-// endpoints). Hydration and any subsequent list refresh must not drop it, or the
-// coarse busy affordance would persist until the next WS flip — the exact gap
-// this batch closes.
-describe("setTaskSession preserves foreground_activity across merges", () => {
-  it("keeps a boot-seeded background substate when a later list update omits the field", () => {
+describe("session foreground activity reconciliation", () => {
+  // @covers AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.9
+  it("clears stale activity when an authoritative settled snapshot omits the field", () => {
     const store = makeStore();
 
-    // Boot payload seeds the RUNNING session as background-idle.
-    store.getState().setTaskSession(makeSession({ foreground_activity: "background" }));
+    store
+      .getState()
+      .setTaskSession(
+        makeSession({ state: "WAITING_FOR_INPUT", foreground_activity: "background" }),
+      );
     expect(store.getState().taskSessions.items[SESSION_ID].foreground_activity).toBe("background");
 
-    // A later list/get refresh that omits the field (older code path, or a race)
-    // must not clobber the boot value — mergeTaskSession spreads absent keys through.
-    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession({ repository_id: "repo-1" })]);
+    store
+      .getState()
+      .setTaskSessionsForTask(TASK_ID, [
+        makeSession({ state: "WAITING_FOR_INPUT", repository_id: "repo-1" }),
+      ]);
 
     const session = store.getState().taskSessions.items[SESSION_ID];
-    expect(session.foreground_activity).toBe("background");
+    expect(session.foreground_activity).toBeNull();
     expect(session.repository_id).toBe("repo-1");
+  });
+
+  it("preserves activity when a partial event omits the field", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(TASK_ID, makeSession({ foreground_activity: "background" }));
+    store.getState().upsertTaskSessionFromEvent(TASK_ID, makeSession({ repository_id: "repo-1" }));
+
+    expect(store.getState().taskSessions.items[SESSION_ID].foreground_activity).toBe("background");
+  });
+
+  // @covers AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.7
+  // @covers AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.9
+  it("preserves a repeated activity event newer than an in-flight snapshot", () => {
+    const store = makeStore();
+
+    store.getState().upsertTaskSessionFromEvent(
+      TASK_ID,
+      makeSession({
+        foreground_activity: "background",
+        active_subagent_count: 1,
+        supports_steering: false,
+      }),
+    );
+    const activityEpochsAtRequestStart = { [SESSION_ID]: 1 };
+    store.getState().upsertTaskSessionFromEvent(
+      TASK_ID,
+      makeSession({
+        foreground_activity: "background",
+        active_subagent_count: 2,
+        supports_steering: true,
+      }),
+    );
+
+    store.getState().setTaskSessionsForTask(
+      TASK_ID,
+      [
+        makeSession({
+          foreground_activity: "generating",
+          active_subagent_count: 0,
+          supports_steering: false,
+          repository_id: "repo-1",
+        }),
+      ],
+      activityEpochsAtRequestStart,
+    );
+
+    expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
+      foreground_activity: "background",
+      active_subagent_count: 2,
+      supports_steering: true,
+      repository_id: "repo-1",
+    });
+  });
+
+  it("removes the activity epoch with the session", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(TASK_ID, makeSession({ foreground_activity: "background" }));
+
+    expect(store.getState().taskSessions.activityEpochBySession?.[SESSION_ID]).toBe(1);
+    store.getState().removeTaskSession(TASK_ID, SESSION_ID);
+    expect(store.getState().taskSessions.activityEpochBySession?.[SESSION_ID]).toBeUndefined();
   });
 
   it("applies an explicit substate flip from an enriched update", () => {

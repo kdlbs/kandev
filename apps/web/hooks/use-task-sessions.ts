@@ -22,8 +22,14 @@ async function hydrateTaskSessions({
   getStoreState: () => AppState;
   setTaskSessionsForTask: AppState["setTaskSessionsForTask"];
 }): Promise<boolean> {
-  const sessionIdsAtRequestStart = new Set(
-    storedTaskSessions(getStoreState, taskId).map((session) => session.id),
+  const stateAtRequestStart = getStoreState();
+  const sessionsAtRequestStart = storedTaskSessions(() => stateAtRequestStart, taskId);
+  const sessionIdsAtRequestStart = new Set(sessionsAtRequestStart.map((session) => session.id));
+  const activityEpochsAtRequestStart = Object.fromEntries(
+    sessionsAtRequestStart.map((session) => [
+      session.id,
+      stateAtRequestStart.taskSessions.activityEpochBySession?.[session.id] ?? 0,
+    ]),
   );
   try {
     const response = await listTaskSessions(taskId, { cache: "no-store" });
@@ -32,7 +38,11 @@ async function hydrateTaskSessions({
     const sessionsAddedDuringLoad = storedTaskSessions(getStoreState, taskId).filter(
       (session) => !sessionIdsAtRequestStart.has(session.id) && !fetchedSessionIds.has(session.id),
     );
-    setTaskSessionsForTask(taskId, [...fetchedSessions, ...sessionsAddedDuringLoad]);
+    setTaskSessionsForTask(
+      taskId,
+      [...fetchedSessions, ...sessionsAddedDuringLoad],
+      activityEpochsAtRequestStart,
+    );
     return sessionsAddedDuringLoad.length > 0;
   } catch (error) {
     console.error("Failed to load task sessions:", error);
