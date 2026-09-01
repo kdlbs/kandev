@@ -129,10 +129,14 @@ while preventing owner-wide access, self-targeting, and task-local questions.
   the automation, workspace, caller task, caller session, and surface
   identities. Handlers shall use it as the workspace boundary and audit the
   source as `automation_mcp`.
-- **AC-OFFICE-AUTOMATION-CONTINUITY-004.4:** Mutations, messages, stopping,
-  spawning, and blocker discovery or resolution through `SurfaceAutomation`
-  shall reject the automation's own hidden task and every session on it, as
-  well as foreign workspaces.
+- **AC-OFFICE-AUTOMATION-CONTINUITY-004.4:** Messages, stopping, spawning, and
+  blocker discovery or resolution through `SurfaceAutomation` shall reject the
+  automation's own hidden task and every session on it, as well as foreign
+  workspaces. Archiving is exempt from the self-target rejection: an
+  automation shall be able to archive its own hidden task, since that is its
+  normal end-of-run completion signal. Every other mutation on the
+  automation's own hidden task, and archiving of every other task and session
+  on it, remains rejected, as does any foreign-workspace target.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-004.5:** A task spawned on another task
   shall receive that target task's normal profile and shall not inherit
   `SurfaceAutomation` from its caller.
