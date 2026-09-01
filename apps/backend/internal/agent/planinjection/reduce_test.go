@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -426,5 +427,28 @@ func TestContainTagsRemovesRealTagLiterals(t *testing.T) {
 	in := sysprompt.TagStart + "content" + sysprompt.TagEnd
 	if got := ContainTags(in); got != "content" {
 		t.Fatalf("ContainTags(%q) = %q, want %q", in, got, "content")
+	}
+}
+
+// TestContainTagsHandlesLargeAdversarialNestingInLinearTime is a regression
+// test for a quadratic-time defect: an implementation that rescans the
+// whole text after every removal is O(n^2) on this construction, because
+// stripping one layer of nesting exposes the next occurrence only after a
+// full rescan. Measured on the rescan-based implementation: a 480,000-byte
+// input of this shape took ~5s and the trend was still climbing. A
+// linear-time implementation collapses this in well under a second.
+func TestContainTagsHandlesLargeAdversarialNestingInLinearTime(t *testing.T) {
+	const k = 20000
+	input := strings.Repeat("<kandev", k) + strings.Repeat("-system>", k)
+
+	start := time.Now()
+	out := ContainTags(input)
+	elapsed := time.Since(start)
+
+	if out != "" {
+		t.Fatalf("ContainTags did not fully collapse the nested construction; %d bytes remained: %q", len(out), out)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("ContainTags took %v on a %d-byte adversarial input; want well under a second from a linear-time implementation", elapsed, len(input))
 	}
 }

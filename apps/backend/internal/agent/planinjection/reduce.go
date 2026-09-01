@@ -5,6 +5,7 @@
 package planinjection
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -27,21 +28,32 @@ const (
 	cutMarker              = "[Kandev: section truncated here]"
 )
 
+var (
+	tagStartBytes = []byte(sysprompt.TagStart)
+	tagEndBytes   = []byte(sysprompt.TagEnd)
+)
+
 // ContainTags removes every occurrence of the <kandev-system> and
-// </kandev-system> literals from text, one combined loop rescanning for
-// both literals until a full scan finds neither. A single pass, or two
-// independent per-literal loops, can each be evaded by an input where
-// removing one literal constructs the other; only a loop that rechecks both
-// literals after every removal is safe.
+// </kandev-system> literals from text. A single pass, or two independent
+// per-literal loops, can each be evaded by an input where removing one
+// literal constructs the other, so every byte is appended to an output
+// buffer one at a time and, after each append, the buffer's tail is checked
+// against both literals and popped immediately on a match — equivalent to
+// rescanning for both literals after every removal until neither remains,
+// but in one linear pass instead of a multi-pass rescan, which is
+// quadratic on adversarially nested input.
 func ContainTags(text string) string {
-	for {
-		next := strings.ReplaceAll(text, sysprompt.TagStart, "")
-		next = strings.ReplaceAll(next, sysprompt.TagEnd, "")
-		if next == text {
-			return next
+	buf := make([]byte, 0, len(text))
+	for i := 0; i < len(text); i++ {
+		buf = append(buf, text[i])
+		switch {
+		case bytes.HasSuffix(buf, tagEndBytes):
+			buf = buf[:len(buf)-len(tagEndBytes)]
+		case bytes.HasSuffix(buf, tagStartBytes):
+			buf = buf[:len(buf)-len(tagStartBytes)]
 		}
-		text = next
 	}
+	return string(buf)
 }
 
 // Reduce bounds document to at most budget bytes. Under budget it returns
