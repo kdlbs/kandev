@@ -5247,6 +5247,78 @@ func TestStartTaskPublishesCreatedSessionBeforeLaunch(t *testing.T) {
 	assert.True(t, publishedBeforeLaunch, "created session event must arrive before the runtime starts")
 }
 
+// TestStartTaskWithEnv_OfficeCreateThenReusePublishesOneCreatedEvent drives
+// two sequential office wakeups for the same (task, agent) pair through the
+// full StartTaskWithEnv path — not just the repository call-count proxy used
+// by office_session_race_guard_test.go's convergence tests — and asserts on
+// the actual event bus. The first wakeup has no live session and must create
+// one, publishing exactly one TaskSessionStateChanged/CREATED event for it.
+// The second wakeup reuses that same live session (EnsureSessionForAgentWithCreation)
+// and must not publish a second CREATED event for it: office wakeups often
+// share a session across many turns, and a duplicate CREATED event would make
+// the frontend re-adopt an already-running session as if it were new.
+func TestStartTaskWithEnv_OfficeCreateThenReusePublishesOneCreatedEvent(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "existing-session", models.TaskSessionStateCompleted)
+	dbTask, err := repo.GetTask(ctx, "task1")
+	require.NoError(t, err)
+	dbTask.ProjectID = "office-project"
+	require.NoError(t, repo.UpdateTask(ctx, dbTask))
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:          "task1",
+		Title:       "Office task",
+		Description: "Do the work",
+		State:       v1.TaskStateInProgress,
+	}
+	eventBus := &mockEventBus{}
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-" + req.SessionID}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.eventBus = eventBus
+	env := validOfficeRuntimeEnv()
+
+	firstExec, err := svc.StartTaskWithEnv(
+		ctx, "task1", "office-runner", "", "", "", "Do the work",
+		"", false, false, nil, env,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, firstExec)
+	firstSessionID := firstExec.SessionID
+	require.NotEqual(t, "existing-session", firstSessionID,
+		"a completed session must not be reused as the live office session")
+
+	secondExec, err := svc.StartTaskWithEnv(
+		ctx, "task1", "office-runner", "", "", "", "Do the work",
+		"", false, false, nil, env,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, secondExec)
+	require.Equal(t, firstSessionID, secondExec.SessionID,
+		"second office wakeup for the same (task, agent) pair must reuse the live session")
+
+	createdEventsForSession := 0
+	for _, published := range eventBus.published() {
+		if published.Subject != events.TaskSessionStateChanged {
+			continue
+		}
+		data, ok := published.Event.Data.(map[string]any)
+		if !ok {
+			continue
+		}
+		if data[metaKeySessionID] == firstSessionID && data[metaKeyNewState] == string(models.TaskSessionStateCreated) {
+			createdEventsForSession++
+		}
+	}
+	require.Equal(t, 1, createdEventsForSession,
+		"create+reuse across two office wakeups must publish exactly one CREATED event, not zero and not two")
+}
+
 func TestStartTask_PreservesOnlyResolvedWorkflowPromptExpansion(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

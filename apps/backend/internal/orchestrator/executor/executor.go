@@ -56,6 +56,15 @@ type executorStore interface {
 	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionIfCurrentState(ctx context.Context, session *models.TaskSession, expected models.TaskSessionState) (bool, error)
+	// UpdateTaskSessionStateIfCurrent transitions only the state-related
+	// columns (state, error_message, completed_at, updated_at) guarded by a
+	// CAS on the row's current state. Prefer this over
+	// UpdateTaskSessionIfCurrentState for a pure state transition: the latter
+	// writes the full row from the caller's (possibly stale) in-memory copy,
+	// which can silently revert a concurrent update to unrelated fields
+	// (profile snapshot, routing, execution identifiers) that landed between
+	// the caller's read and its write.
+	UpdateTaskSessionStateIfCurrent(ctx context.Context, id string, expected, status models.TaskSessionState, errorMessage string) (bool, time.Time, error)
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
 	GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error)

@@ -239,6 +239,27 @@ type PromptReferenceExpander interface {
 	) (expandedPrompt, trustedContext string)
 }
 
+// DirectPromptPreparer canonicalizes a user-submitted structured prompt before
+// the task service persists it. The returned trusted context is the exact
+// server-generated content that may be preserved by system-context
+// canonicalization.
+type DirectPromptPreparer interface {
+	PrepareDirectPrompt(ctx context.Context, prompt string, isPassthrough bool) (string, string)
+}
+
+// DirectPromptStarter starts a prepared direct-message session while retaining
+// the trusted saved-prompt context prepared before message persistence.
+type DirectPromptStarter interface {
+	StartCreatedSessionWithPromptContext(
+		ctx context.Context,
+		taskID, sessionID, agentProfileID, prompt string,
+		skipMessageRecord, planMode, autoStart bool,
+		attachments []v1.MessageAttachment,
+		references []v1.EntityReference,
+		promptReferenceContext string,
+	) (*executor.TaskExecution, error)
+}
+
 // repoStore is the repository interface accepted by NewService.
 // It covers both the orchestrator's own needs (sessionExecutorStore) and
 // the executor package's needs (executor.executorStore).
@@ -272,6 +293,9 @@ type repoStore interface {
 	UpdateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
 	// Session history + plan (for context handover)
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
+	// GetWorkspaceGroupOwnerTaskID resolves push-detected PR/MR associations
+	// to the workspace-group owner task; see resolveEffectivePushTaskID.
+	GetWorkspaceGroupOwnerTaskID(ctx context.Context, taskID string) (string, error)
 }
 
 // sessionExecutorStore is the minimal repository interface needed by the orchestrator service.
@@ -285,6 +309,7 @@ type sessionExecutorStore interface {
 	RenameTaskSession(ctx context.Context, id, name string) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionIfCurrentState(ctx context.Context, session *models.TaskSession, expected models.TaskSessionState) (bool, error)
+	UpdateTaskSessionStateIfCurrent(ctx context.Context, id string, expected, status models.TaskSessionState, errorMessage string) (bool, time.Time, error)
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	ClaimPromptableTaskSessionIfActive(ctx context.Context, id string) (models.PromptableTaskSessionClaim, error)
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error

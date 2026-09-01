@@ -360,6 +360,16 @@ func (h *Handlers) handleDeleteTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
 
+	// Keep MCP task lifecycle mutations on the same HandoffService path as
+	// HTTP/WS when it is wired. This releases workspace-group membership and
+	// preserves shared-environment ownership before the task row is removed.
+	if h.handoffSvc != nil {
+		if _, err := h.handoffSvc.DeleteTaskTree(ctx, taskID, false); err != nil {
+			h.logger.Error("failed to delete task", zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete task", nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+	}
 	if err := h.taskSvc.DeleteTask(ctx, taskID); err != nil {
 		h.logger.Error("failed to delete task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete task", nil)
@@ -384,6 +394,18 @@ func (h *Handlers) handleArchiveTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
 
+	if h.handoffSvc != nil {
+		out, err := h.handoffSvc.ArchiveTaskTree(ctx, taskID, false)
+		if err != nil {
+			h.logger.Error("failed to archive task", zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to archive task", nil)
+		}
+		response := map[string]interface{}{"success": true}
+		if out != nil && len(out.ArchivedTaskIDs) == 0 && len(out.SkippedTaskIDs) > 0 {
+			response["already_archived"] = true
+		}
+		return ws.NewResponse(msg.ID, msg.Action, response)
+	}
 	if err := h.taskSvc.ArchiveTask(ctx, taskID); err != nil {
 		// Archiving is a goal-state operation: a task that is already archived
 		// is in the requested state, so report success instead of an opaque

@@ -165,6 +165,12 @@ const (
 // resolved for the role at all. WorkspaceID is populated on every result,
 // including Unfillable ones, so the AC-OFFICE-REVIEW-SEATS-004.1 warning
 // record can identify the workspace without a second lookup.
+//
+// SelfReview is true both when the chosen agent is the task's runner and
+// when it already holds another seat on this task (the office seat
+// caster's best-effort cross-step exclusion, AC-OFFICE-REVIEW-SEATS-002.3,
+// ran out of alternatives). It is a counter label on RecordSeatProvenance,
+// not a persisted or user-visible field.
 type ParticipantSeatCastResult struct {
 	AgentProfileID string
 	WorkspaceID    string
@@ -175,13 +181,18 @@ type ParticipantSeatCastResult struct {
 
 // ParticipantSeatCaster resolves which agent should fill a role's seat when
 // none exists yet, per REQ-002's five-step deterministic algorithm. The
-// office package implements this against the workspace's CEO-role agent
-// roster; the engine treats the result as opaque.
+// office package implements this against role-specific workspace agent pools;
+// the engine treats the result as opaque.
 type ParticipantSeatCaster interface {
 	// stepID is the immutable workflow step that the task entered. Callers
 	// must pass this value instead of asking the adapter to re-read mutable
-	// task state after the transition commits.
-	CastParticipantSeat(ctx context.Context, taskID, stepID, role string) (ParticipantSeatCastResult, error)
+	// task state after the transition commits. workflowID scopes any
+	// cross-step exclusion read the caster performs to the task's current
+	// workflow, so participant rows left over from a workflow the task has
+	// since switched away from (switch_workflow durably keeps them; see
+	// ListParticipantsForTaskWorkflow's doc comment) never count as already
+	// seated for the new workflow's casting decision.
+	CastParticipantSeat(ctx context.Context, workflowID, taskID, stepID, role string) (ParticipantSeatCastResult, error)
 }
 
 // AgentProfileResolver answers whether an agent profile id still resolves to

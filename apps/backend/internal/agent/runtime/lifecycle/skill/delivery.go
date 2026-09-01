@@ -38,7 +38,7 @@ func (d *Deployer) deliver(_ context.Context, manifest *Manifest, executorType, 
 // inside and outside the container, so a single write satisfies both.
 func (d *Deployer) deliverLocal(manifest *Manifest, worktreePath string) DeployResult {
 	if worktreePath != "" && manifest.ProjectSkillDir != "" {
-		if err := injectSkills(worktreePath, manifest.ProjectSkillDir, manifest.Skills); err != nil {
+		if err := injectSkills(worktreePath, manifest.ProjectSkillDir, manifest.Skills, d.logger); err != nil {
 			d.logger.Warn("failed to inject skills into worktree",
 				zap.String("worktree", worktreePath),
 				zap.String("dir", manifest.ProjectSkillDir),

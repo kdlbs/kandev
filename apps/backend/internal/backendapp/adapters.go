@@ -822,6 +822,28 @@ func (w *orchestratorWrapper) StartCreatedSession(ctx context.Context, taskID, s
 	return err
 }
 
+// PrepareDirectPrompt forwards the backend-owned direct-message preparation
+// seam used by the WebSocket message handler.
+func (w *orchestratorWrapper) PrepareDirectPrompt(ctx context.Context, prompt string, isPassthrough bool) (string, string) {
+	return w.svc.PrepareDirectPrompt(ctx, prompt, isPassthrough)
+}
+
+// StartCreatedSessionWithPromptContext forwards direct-message startup while
+// preserving the trusted saved-prompt context through the second canonicalizer.
+func (w *orchestratorWrapper) StartCreatedSessionWithPromptContext(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+) (*executor.TaskExecution, error) {
+	return w.svc.StartCreatedSessionWithPromptContext(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+	)
+}
+
 type githubTaskIssueStoreAdapter struct {
 	svc *taskservice.Service
 }

@@ -7,16 +7,12 @@ import type { WorkflowStep } from "@/components/kanban-column";
 import type { ForegroundActivity, TaskPendingAction } from "@/lib/types/http";
 import { Graph2StepNode } from "./graph2-step-node";
 
-// The node renders inside the SPA router; stub it so the component mounts.
-vi.mock("@/lib/routing/client-router", () => ({
-  useRouter: () => ({ push: vi.fn() }),
-}));
-
 afterEach(() => {
   cleanup();
 });
 
-const STEP: WorkflowStep = { id: "step-1", title: "In Progress", color: "#888" };
+const STEP_TITLE = "In Progress";
+const STEP: WorkflowStep = { id: "step-1", title: STEP_TITLE, color: "#888" };
 const ICON_CHECK = ".tabler-icon-check";
 const ICON_LOADER2 = ".tabler-icon-loader-2";
 
@@ -40,7 +36,7 @@ function renderCurrentNode(foregroundActivity?: ForegroundActivity | null) {
         hasPrev={false}
         hasNext={false}
         onMoveTask={() => undefined}
-        onPreviewTask={() => undefined}
+        onOpenTask={() => undefined}
       />
     </StateProvider>,
   );
@@ -83,7 +79,7 @@ describe("Graph2StepNode — auto-start-failed marker", () => {
             hasPrev={false}
             hasNext={false}
             onMoveTask={() => undefined}
-            onPreviewTask={() => undefined}
+            onOpenTask={() => undefined}
           />
         </TooltipProvider>
       </StateProvider>,
@@ -135,7 +131,7 @@ describe("Graph2StepNode — waiting-for-input variants", () => {
           hasPrev={false}
           hasNext={false}
           onMoveTask={() => undefined}
-          onPreviewTask={() => undefined}
+          onOpenTask={() => undefined}
         />
       </StateProvider>,
     );
@@ -171,12 +167,12 @@ describe("Graph2StepNode — hidden destination disclosure", () => {
             nextStepTitle="Done"
             nextStepHidden={nextStepHidden}
             onMoveTask={() => undefined}
-            onPreviewTask={() => undefined}
+            onOpenTask={() => undefined}
           />
         </TooltipProvider>
       </StateProvider>,
     );
-    const currentStep = screen.getByRole("button", { name: "In Progress" });
+    const currentStep = screen.getByRole("button", { name: STEP_TITLE });
     fireEvent.mouseEnter(currentStep.parentElement!);
     return screen.getByRole("button", { name: "Move to Done" });
   }
@@ -206,14 +202,37 @@ describe("Graph2StepNode — hidden destination disclosure", () => {
             nextStepTitle="Done"
             nextStepHidden
             onMoveTask={() => undefined}
-            onPreviewTask={() => undefined}
+            onOpenTask={() => undefined}
           />
         </TooltipProvider>
       </StateProvider>,
     );
 
-    fireEvent.focus(screen.getByRole("button", { name: "In Progress" }));
+    fireEvent.focus(screen.getByRole("button", { name: STEP_TITLE }));
 
     expect(screen.getByRole("button", { name: "Move to Done" })).not.toBeNull();
+  });
+});
+
+describe("Graph2StepNode — pill click routes through onOpenTask", () => {
+  it("calls onOpenTask and does not navigate directly on its own", () => {
+    const onOpenTask = vi.fn();
+    render(
+      <StateProvider>
+        <Graph2StepNode
+          step={STEP}
+          phase="current"
+          task={makeTask()}
+          hasPrev={false}
+          hasNext={false}
+          onMoveTask={() => undefined}
+          onOpenTask={onOpenTask}
+        />
+      </StateProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: STEP_TITLE }));
+
+    expect(onOpenTask).toHaveBeenCalledWith(makeTask());
   });
 });
