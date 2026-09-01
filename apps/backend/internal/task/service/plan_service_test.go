@@ -439,6 +439,64 @@ func TestPlanService_AppendsWhenWindowExpired(t *testing.T) {
 	}
 }
 
+// TestPlanService_GetLatestRevision pins the cheap latest-revision accessor:
+// it must report the same revision number ListRevisions()[0] would, without
+// requiring callers to load every revision's content just to read one int.
+func TestPlanService_GetLatestRevision(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-latest")
+	svc.coalesceWindow = 0 // disable coalescing so each write is a new revision
+
+	// No plan yet: nil, nil.
+	latest, err := svc.GetLatestRevision(ctx, "task-latest")
+	if err != nil {
+		t.Fatalf("GetLatestRevision (no plan): %v", err)
+	}
+	if latest != nil {
+		t.Errorf("expected nil latest revision before any plan exists, got %+v", latest)
+	}
+
+	_, _ = svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-latest", Content: "v1",
+		AuthorKind: "agent", AuthorName: "Claude",
+	})
+	_, _ = svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-latest", Content: "v2",
+		AuthorKind: "agent", AuthorName: "Claude",
+	})
+
+	latest, err = svc.GetLatestRevision(ctx, "task-latest")
+	if err != nil {
+		t.Fatalf("GetLatestRevision: %v", err)
+	}
+	if latest == nil {
+		t.Fatal("expected a latest revision after two writes, got nil")
+	}
+	if latest.RevisionNumber != 2 || latest.Content != "v2" {
+		t.Errorf("latest = %+v, want revision 2 with content v2", latest)
+	}
+
+	list, _ := svc.ListRevisions(ctx, "task-latest")
+	if len(list) == 0 {
+		t.Fatal("GetLatestRevision: ListRevisions returned no revisions after two writes")
+	}
+	if list[0].RevisionNumber != latest.RevisionNumber {
+		t.Errorf("GetLatestRevision disagrees with ListRevisions()[0]: got %d, want %d",
+			latest.RevisionNumber, list[0].RevisionNumber)
+	}
+}
+
+func TestPlanService_GetLatestRevisionRequiresTaskID(t *testing.T) {
+	svc, _, _ := createTestPlanService(t)
+	ctx := context.Background()
+
+	_, err := svc.GetLatestRevision(ctx, "")
+	if err != ErrTaskIDRequired {
+		t.Errorf("expected ErrTaskIDRequired, got %v", err)
+	}
+}
+
 func TestPlanService_ForceNewRevisionPreventsCoalesce(t *testing.T) {
 	svc, _, repo := createTestPlanService(t)
 	ctx := context.Background()

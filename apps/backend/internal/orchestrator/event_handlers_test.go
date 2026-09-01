@@ -274,7 +274,10 @@ type mockAgentManager struct {
 	// getGitLogFunc, when non-nil, overrides GetGitLog. Lets tests model a
 	// commit reconcile sweep (or archive capture) observing new commits, or
 	// simulate the agent process being gone (nil, nil).
-	getGitLogFunc func(ctx context.Context, sessionID, baseCommit string, limit int, targetBranch string) (*client.GitLogResult, error)
+	getGitLogFunc         func(ctx context.Context, sessionID, baseCommit string, limit int, targetBranch string) (*client.GitLogResult, error)
+	getCumulativeDiffFunc func(ctx context.Context, sessionID, baseCommit string) (*client.CumulativeDiffResult, error)
+	getGitStatusFunc      func(ctx context.Context, sessionID string) (*client.GitStatusResult, error)
+	getGitStatusFreshFunc func(ctx context.Context, sessionID string) (*client.GitStatusResult, error)
 	// isAgentRunningFn, when non-nil, overrides isAgentRunning for
 	// IsAgentRunningForSession. Lets tests model state changes mid-sequence
 	// (e.g. stream disconnect between PromptAgent call and queue write).
@@ -776,17 +779,27 @@ func (m *mockAgentManager) GetGitLog(ctx context.Context, sessionID, baseCommit 
 	}
 	return nil, nil
 }
-func (m *mockAgentManager) GetCumulativeDiff(_ context.Context, _, _ string) (*client.CumulativeDiffResult, error) {
+
+func (m *mockAgentManager) GetCumulativeDiff(ctx context.Context, sessionID, baseCommit string) (*client.CumulativeDiffResult, error) {
+	if m.getCumulativeDiffFunc != nil {
+		return m.getCumulativeDiffFunc(ctx, sessionID, baseCommit)
+	}
 	return nil, nil
 }
-func (m *mockAgentManager) GetGitStatus(_ context.Context, _ string) (*client.GitStatusResult, error) {
+func (m *mockAgentManager) GetGitStatus(ctx context.Context, sessionID string) (*client.GitStatusResult, error) {
+	if m.getGitStatusFunc != nil {
+		return m.getGitStatusFunc(ctx, sessionID)
+	}
 	return &client.GitStatusResult{
 		Success:    true,
 		Branch:     "main",
 		HeadCommit: "mock-commit",
 	}, nil
 }
-func (m *mockAgentManager) GetGitStatusFresh(_ context.Context, _ string) (*client.GitStatusResult, error) {
+func (m *mockAgentManager) GetGitStatusFresh(ctx context.Context, sessionID string) (*client.GitStatusResult, error) {
+	if m.getGitStatusFreshFunc != nil {
+		return m.getGitStatusFreshFunc(ctx, sessionID)
+	}
 	return nil, nil
 }
 func (m *mockAgentManager) WaitForAgentctlReady(_ context.Context, _ string) error {

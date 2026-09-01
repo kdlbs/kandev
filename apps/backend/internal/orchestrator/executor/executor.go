@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -371,6 +372,9 @@ type LaunchAgentRequest struct {
 	// WorkspaceReuseRequired selects attach-only preparation of an already-ready
 	// task environment. It must never be inferred from a sibling execution ID.
 	WorkspaceReuseRequired bool
+	// AllowBranchReplacement is granted only by the explicit new-branch recovery
+	// action. It permits lifecycle to replace a confirmed missing worktree branch.
+	AllowBranchReplacement bool
 	TaskTitle              string // Human-readable task title for semantic worktree naming
 	AgentProfileID         string
 	TurnID                 string // Durable Kandev turn for the initial prompt, when present
@@ -398,7 +402,7 @@ type LaunchAgentRequest struct {
 	ExecutorType                  string              // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
 	ExecutorConfig                map[string]string   // Executor config (docker_host, git_token, etc.)
 	PreviousExecutionID           string              // Previous execution ID for runtime reconnect
-	McpMode                       string              // MCP tool mode: "task" (default), "config", or "office"
+	McpMode                       string              // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
 	McpProviders                  []string            // Normalized provider capabilities attached to the task
 	McpProfile                    *mcpprofile.Context // Backend-owned base surface and additive MCP capabilities
 	IsEphemeral                   bool                // Ephemeral task (quick chat) — enables fallback workspace creation
@@ -489,11 +493,13 @@ type RepoSpec struct {
 	ContributionDestination *models.ContributionDestination
 	ComparisonTarget        *models.ComparisonTarget
 	WorktreeID              string
-	WorktreeBranchPrefix    string
-	WorktreeBranchTemplate  string
-	WorktreeBranchTicket    string
-	PullBeforeWorktree      bool
-	RemoteSyncHandled       bool
+	// AllowBranchReplacement permits explicit branch replacement for this repo.
+	AllowBranchReplacement bool
+	WorktreeBranchPrefix   string
+	WorktreeBranchTemplate string
+	WorktreeBranchTicket   string
+	PullBeforeWorktree     bool
+	RemoteSyncHandled      bool
 	// RefreshRepository is an optional provider-authenticated refresh deferred
 	// until worktree materialization. A valid reusable worktree bypasses it.
 	RefreshRepository          func(context.Context) error
@@ -516,21 +522,21 @@ type RepoSpec struct {
 
 // McpModeConfig activates config-mode MCP tools (workflow steps, agents, MCP
 // config, tasks). Used when plan_mode is enabled on a session.
-const McpModeConfig = "config"
+const McpModeConfig = mcpmode.Config
 
 // McpModeTaskTitlePending exposes the task-mode MCP surface plus the one-shot
 // title tool while a prompt-first task still has its provisional title.
-const McpModeTaskTitlePending = "task-title-pending"
+const McpModeTaskTitlePending = mcpmode.TaskTitlePending
 
 // McpModeOffice restricts the MCP toolset for office (autonomous) agents to
 // interaction + plan tools. Office agents manage tasks via the kandev CLI
 // (exposed through agentctl + $KANDEV_CLI), not MCP — see
 // docs/specs/office/system-design/agents-03.md.
-const McpModeOffice = "office"
+const McpModeOffice = mcpmode.Office
 
 // McpModeAutomation selects the fixed coordinator MCP surface for tasks
 // created by a user-configured automation.
-const McpModeAutomation = "automation"
+const McpModeAutomation = mcpmode.Automation
 
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
@@ -854,6 +860,7 @@ type Executor struct {
 	repoCloner                      RepoCloner
 	repoUpdater                     RepoUpdater
 	taskRepositoryBaseBranchUpdater TaskRepositoryBaseBranchUpdater
+	prBaseResolver                  PRBaseResolver
 }
 
 // taskEnvLock returns the per-task mutex for env persistence, creating one on
@@ -1012,6 +1019,11 @@ type TaskRepositoryBaseBranchUpdater interface {
 	UpdateTaskRepositoryBaseBranch(ctx context.Context, taskID, taskRepositoryID, baseBranch string) error
 }
 
+// PRBaseResolver returns the current base branch for one provider pull request.
+type PRBaseResolver interface {
+	ResolvePRBaseBranch(ctx context.Context, workspaceID, owner, repo string, number int) (string, error)
+}
+
 // ExecutorConfig holds configuration for the Executor
 type ExecutorConfig struct {
 	ShellPrefs  ShellPreferenceProvider
@@ -1104,6 +1116,11 @@ func (e *Executor) SetRepoCloner(cloner RepoCloner, updater RepoUpdater) {
 // successful worktree fallback self-healing.
 func (e *Executor) SetTaskRepositoryBaseBranchUpdater(updater TaskRepositoryBaseBranchUpdater) {
 	e.taskRepositoryBaseBranchUpdater = updater
+}
+
+// SetPRBaseResolver wires best-effort pull-request base resolution at launch.
+func (e *Executor) SetPRBaseResolver(resolver PRBaseResolver) {
+	e.prBaseResolver = resolver
 }
 
 // SetOnAgentStartFailed sets a callback for agent process start failures.

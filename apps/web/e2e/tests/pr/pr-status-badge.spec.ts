@@ -712,6 +712,7 @@ test.describe("PR status badge", () => {
     // Re-enter from a neutral point after the PR update to deliver a fresh hover transition.
     await testPage.mouse.move(viewport!.width - 1, viewport!.height - 1);
     await icon.hover();
+    await icon.focus();
 
     const multiSummary = visibleTaskPRSummary(testPage);
     await expect(multiSummary).toBeVisible();

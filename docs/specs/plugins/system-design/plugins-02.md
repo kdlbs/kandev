@@ -341,6 +341,25 @@ undeclared capability returns gRPC `PermissionDenied` with message
 service instance is bound to the plugin's own ID at spawn time, the check
 evaluates directly against that plugin's installed manifest.
 
+### Generic Host boundary
+
+Manifest declaration remains the package-authored maximum capability set. A
+capability that needs workspace approval also uses the current
+`(installation, workspace)` approval and immutable Human-reserved policy. The Host
+enforces this intersection. The plugin cannot supply an installation identity or
+grant itself authority.
+
+The generic service and capability-family boundaries, domain ownership, versioning,
+and migration rules are recorded in
+[ADR-2026-08-31-generic-plugin-host-boundary](../../../decisions/2026-08-31-generic-plugin-host-boundary.md).
+Host RPC and global MCP adapters can use different request DTOs, but both call the
+same named domain command or query. Neither adapter duplicates authorization,
+ownership, idempotency, transition, lifecycle, relation, or audit invariants.
+
+The Host can provide a connection-bound capability context for discovery. The
+context reports supported capability families and approved workspace scope. It does
+not grant authority. The Host checks current approval for every request.
+
 ## Filesystem sideloading & sync
 
 Besides the URL/upload install pipeline, an operator with shell access to the host

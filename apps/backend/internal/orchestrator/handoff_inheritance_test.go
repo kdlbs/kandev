@@ -97,7 +97,7 @@ func TestPrepareSessionForStart_PropagatesInheritedEnvironment(t *testing.T) {
 		ParentID: "parent",
 		Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
 	}
-	sessionID, _, err := svc.prepareSessionForStart(ctx, childTask, "profile-1", "exec-1", "", "")
+	sessionID, _, err := svc.prepareSessionForStart(ctx, childTask, "profile-1", "profile-1", "exec-1", "", "")
 	if err != nil {
 		t.Fatalf("prepareSessionForStart: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestPrepareSessionForStart_InheritedWorkspaceMissingCompensatesSession(t *t
 		ID:       "child-missing",
 		ParentID: "parent-missing",
 		Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
-	}, "profile-1", "exec-1", "", "")
+	}, "profile-1", "profile-1", "exec-1", "", "")
 	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
 		t.Fatalf("prepareSessionForStart error = %v, want workspace reuse unsafe", err)
 	}

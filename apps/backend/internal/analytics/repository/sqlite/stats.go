@@ -791,10 +791,11 @@ func peakPendingSnapshotSubquery(drv string) string {
 				MAX(snap.deletions) AS peak_deletions
 			FROM (
 				SELECT g.id AS snapshot_id, g.session_id,
-					SUM(COALESCE((f.jvalue->>'additions')::numeric, 0)) AS additions,
-					SUM(COALESCE((f.jvalue->>'deletions')::numeric, 0)) AS deletions
+				SUM(COALESCE((f.jvalue->>'additions')::numeric, 0)) AS additions,
+				SUM(COALESCE((f.jvalue->>'deletions')::numeric, 0)) AS deletions
 				FROM task_session_git_snapshots g,
 					jsonb_each(g.files::jsonb) AS f(jkey, jvalue)
+				WHERE g.session_id IS NOT NULL
 				GROUP BY g.id, g.session_id
 			) snap
 			GROUP BY snap.session_id`
@@ -808,6 +809,7 @@ func peakPendingSnapshotSubquery(drv string) string {
 				SUM(COALESCE(json_extract(f.value, '$.additions'), 0)) AS additions,
 				SUM(COALESCE(json_extract(f.value, '$.deletions'), 0)) AS deletions
 			FROM task_session_git_snapshots g, json_each(g.files) f
+			WHERE g.session_id IS NOT NULL
 			GROUP BY g.id, g.session_id
 		) snap
 		GROUP BY snap.session_id`

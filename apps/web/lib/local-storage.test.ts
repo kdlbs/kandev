@@ -3,6 +3,7 @@ import {
   cleanupTaskStorage,
   clearGlobalSidebarWidth,
   getGlobalSidebarWidth,
+  getEnvLayoutProfile,
   getManualRightWidth,
   getOpenFileTabs,
   getStoredAutoScrollEnabled,
@@ -11,7 +12,9 @@ import {
   markPRMergedBannerDismissed,
   markPRPanelOffered,
   restoreAttachmentPreview,
+  removeEnvLayoutProfile,
   setGlobalSidebarWidth,
+  setEnvLayoutProfile,
   setManualRightWidth,
   clearManualRightWidth,
   setOpenFileTabs,
@@ -191,6 +194,44 @@ describe("manual right width storage", () => {
 
     expect(getManualRightWidth("env-a")).toBeNull();
     expect(getManualRightWidth("env-b")).toBe(420);
+  });
+});
+
+describe("dockview layout profile storage", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it("round-trips profile identity per environment", () => {
+    setEnvLayoutProfile("env-a", { kind: "custom", id: "layout-copied-default" });
+
+    expect(getEnvLayoutProfile("env-a")).toEqual({
+      kind: "custom",
+      id: "layout-copied-default",
+    });
+    expect(getEnvLayoutProfile("env-b")).toBeNull();
+  });
+
+  it("ignores malformed profile identity and supports explicit removal", () => {
+    window.sessionStorage.setItem(
+      "kandev.dockview.env-layout-profile-v1.env-a",
+      JSON.stringify({ kind: "custom" }),
+    );
+    expect(getEnvLayoutProfile("env-a")).toBeNull();
+
+    setEnvLayoutProfile("env-a", { kind: "built-in", id: "default" });
+    removeEnvLayoutProfile("env-a");
+    expect(getEnvLayoutProfile("env-a")).toBeNull();
+  });
+
+  it("cleans profile identity with the deleted environment", () => {
+    setEnvLayoutProfile("env-a", { kind: "built-in", id: "default" });
+    setEnvLayoutProfile("env-b", { kind: "custom", id: "other" });
+
+    cleanupTaskStorage("task-a", [], ["env-a"]);
+
+    expect(getEnvLayoutProfile("env-a")).toBeNull();
+    expect(getEnvLayoutProfile("env-b")).toEqual({ kind: "custom", id: "other" });
   });
 });
 

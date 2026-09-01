@@ -173,7 +173,7 @@ func TestCreateStartSession_KanbanRunnerCreatesDistinctSession(t *testing.T) {
 	if isOffice {
 		t.Fatal("kanban task with a runner was classified as office-owned")
 	}
-	sessionID, _, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "", "", "")
+	sessionID, _, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "copilot-runner", "", "", "")
 	if err != nil {
 		t.Fatalf("create start session: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestCreateStartSession_OfficeRunnerReusesPersistentSession(t *testing.T) {
 	if !isOffice {
 		t.Fatal("office-owned assigned task was not classified as office")
 	}
-	sessionID, created, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "", "", "")
+	sessionID, created, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "copilot-runner", "", "", "")
 	if err != nil {
 		t.Fatalf("create start session: %v", err)
 	}
@@ -235,6 +235,177 @@ func TestCreateStartSession_OfficeRunnerReusesPersistentSession(t *testing.T) {
 	}
 	if sessionID != "existing-office-session" {
 		t.Fatalf("office launch session = %q, want existing-office-session", sessionID)
+	}
+}
+
+func TestCreateStartSession_OfficeUnassignedReusesResolvedProfileSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-office-unassigned", Name: "Office", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-office-unassigned", WorkspaceID: "ws-office-unassigned", Name: "Office", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := seedWorkflowStep(t, repo, "step-office-unassigned"); err != nil {
+		t.Fatalf("create workflow step: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-office-unassigned", WorkspaceID: "ws-office-unassigned", WorkflowID: "wf-office-unassigned", WorkflowStepID: "step-office-unassigned",
+		Title: "Office task", State: v1.TaskStateInProgress, ProjectID: "office-project",
+		Metadata:  map[string]interface{}{models.MetaKeyAgentProfileID: "ceo-reviewer"},
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	task, err := repo.GetTask(ctx, "task-office-unassigned")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if !task.IsFromOffice {
+		t.Fatal("office task was not projected as office-owned")
+	}
+	if task.AssigneeAgentProfileID != "" {
+		t.Fatalf("task unexpectedly has an assignee: %q", task.AssigneeAgentProfileID)
+	}
+
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	firstID, firstCreated, err := svc.createStartSession(ctx, task.ToAPI(), "ceo-reviewer", "", "", "", "")
+	if err != nil {
+		t.Fatalf("first create start session: %v", err)
+	}
+	if !firstCreated {
+		t.Fatal("first office launch should create a session")
+	}
+
+	secondID, secondCreated, err := svc.createStartSession(ctx, task.ToAPI(), "ceo-reviewer", "", "", "", "")
+	if err != nil {
+		t.Fatalf("second create start session: %v", err)
+	}
+	if secondCreated {
+		t.Fatal("second office launch should reuse the profile session")
+	}
+	if secondID != firstID {
+		t.Fatalf("reused session = %q, want first session %q", secondID, firstID)
+	}
+}
+
+// TestCreateStartSession_ReviewerRunFlagOff is the regression baseline: a
+// review run whose agent (ceo-reviewer) differs from the task's runner seat
+// (pm-runner) lands in the runner's session when features.officeSessionIdentity
+// is off (the default), reproducing the FORBIDDEN bug this task fixes —
+// record_step_decision_kandev resolves the session's AgentProfileID as the
+// decider identity, so the reviewer's own decision is checked against seats
+// the runner (not the reviewer) occupies.
+func TestCreateStartSession_ReviewerRunFlagOff(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-review", Name: "Review", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-review", WorkspaceID: "ws-review", Name: "Review", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := seedWorkflowStep(t, repo, "step-review-start"); err != nil {
+		t.Fatalf("create workflow step: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-review", WorkspaceID: "ws-review", WorkflowID: "wf-review", WorkflowStepID: "step-review-start",
+		Title: "Review task", State: v1.TaskStateInProgress, ProjectID: "office-project", AssigneeAgentProfileID: "pm-runner",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "runner-session", TaskID: "task-review", AgentProfileID: "pm-runner",
+		State: models.TaskSessionStateRunning, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create runner session: %v", err)
+	}
+
+	task, err := repo.GetTask(ctx, "task-review")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+
+	// A reviewer run: the run's own agent (ceo-reviewer) differs from the
+	// task's runner seat (pm-runner).
+	sessionID, _, err := svc.createStartSession(ctx, task.ToAPI(), "ceo-reviewer", "ceo-reviewer", "", "", "")
+	if err != nil {
+		t.Fatalf("create start session: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.AgentProfileID != "pm-runner" {
+		t.Fatalf("session owner = %q, want pm-runner (flag off preserves runner-keyed identity)", session.AgentProfileID)
+	}
+}
+
+// TestCreateStartSession_ReviewerRunFlagOnGetsOwnSession is the fix's green
+// case: with features.officeSessionIdentity on, the same reviewer run lands
+// in a session keyed on the run's own agent (ceo-reviewer), not the task's
+// runner seat (pm-runner).
+func TestCreateStartSession_ReviewerRunFlagOnGetsOwnSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-review2", Name: "Review2", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-review2", WorkspaceID: "ws-review2", Name: "Review2", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := seedWorkflowStep(t, repo, "step-review2-start"); err != nil {
+		t.Fatalf("create workflow step: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-review2", WorkspaceID: "ws-review2", WorkflowID: "wf-review2", WorkflowStepID: "step-review2-start",
+		Title: "Review task", State: v1.TaskStateInProgress, ProjectID: "office-project", AssigneeAgentProfileID: "pm-runner",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "runner-session2", TaskID: "task-review2", AgentProfileID: "pm-runner",
+		State: models.TaskSessionStateRunning, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create runner session: %v", err)
+	}
+
+	task, err := repo.GetTask(ctx, "task-review2")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	svc.config.OfficeSessionIdentity = true
+
+	sessionID, created, err := svc.createStartSession(ctx, task.ToAPI(), "ceo-reviewer", "ceo-reviewer", "", "", "")
+	if err != nil {
+		t.Fatalf("create start session: %v", err)
+	}
+	if !created {
+		t.Fatal("reviewer run should create its own session, not reuse the runner's")
+	}
+	if sessionID == "runner-session2" {
+		t.Fatal("reviewer run landed in the runner's session instead of its own")
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.AgentProfileID != "ceo-reviewer" {
+		t.Fatalf("session owner = %q, want ceo-reviewer", session.AgentProfileID)
 	}
 }
 
@@ -4390,23 +4561,24 @@ func TestIssue1884_StepProfileSignalGateStaysInTaskMode(t *testing.T) {
 // mockMessageCreator implements MessageCreator for testing.
 // Only CreateUserMessage is tracked; all other methods are no-op stubs.
 type mockMessageCreator struct {
-	mu                 sync.Mutex
-	userMessages       []mockUserMessage
-	sessionMessages    []mockSessionMessage
-	sessionMessageDone chan struct{}
-	sessionMessageOnce sync.Once
-	sessionMessageErr  error
-	agentMessages      []mockAgentMessage
-	agentMessageWrites int
-	agentStreamWrites  int
-	thinkingWrites     int
-	toolCallWrites     int
-	toolUpdateWrites   int
-	userMessageErr     error
-	permissionClaimFn  func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
-	permissionFinishFn func(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
-	permissionAuditFn  func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error)
-	permissionUpdateFn func(context.Context, string, string, string, string, models.PermissionStatus) error
+	mu                     sync.Mutex
+	userMessages           []mockUserMessage
+	sessionMessages        []mockSessionMessage
+	sessionMessageAttempts int
+	sessionMessageDone     chan struct{}
+	sessionMessageOnce     sync.Once
+	sessionMessageErr      error
+	agentMessages          []mockAgentMessage
+	agentMessageWrites     int
+	agentStreamWrites      int
+	thinkingWrites         int
+	toolCallWrites         int
+	toolUpdateWrites       int
+	userMessageErr         error
+	permissionClaimFn      func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
+	permissionFinishFn     func(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
+	permissionAuditFn      func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error)
+	permissionUpdateFn     func(context.Context, string, string, string, string, models.PermissionStatus) error
 }
 
 type mockUserMessage struct {
@@ -4451,6 +4623,7 @@ func (m *mockMessageCreator) UpdateToolCallMessage(context.Context, string, stri
 func (m *mockMessageCreator) CreateSessionMessage(_ context.Context, taskID, content, sessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.sessionMessageAttempts++
 	if m.sessionMessageErr != nil {
 		return m.sessionMessageErr
 	}
@@ -5438,6 +5611,109 @@ func TestResumeTaskSession_FailedKeepsResumeToken(t *testing.T) {
 	}
 }
 
+// TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity proves
+// the service-level recovery action carries the explicit replacement permission
+// without turning it into a fresh session or provider conversation. Worktree
+// materialization itself is covered by the lifecycle tests; this boundary test
+// verifies the request that reaches that materializer.
+func TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+
+	var captured *executor.LaunchAgentRequest
+	startAgentProcessCalled := false
+	agentMgr := &sessionUpdatingAgentManager{
+		mockAgentManager: &mockAgentManager{
+			launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+				captured = req
+				return &executor.LaunchAgentResponse{
+					AgentExecutionID: "exec-recovered",
+					Status:           v1.AgentStatusStarting,
+				}, nil
+			},
+		},
+		repo:          repo,
+		sessionID:     "session-recover-new-branch",
+		taskID:        "task-recover-new-branch",
+		onStartCalled: &startAgentProcessCalled,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task-recover-new-branch", "session-recover-new-branch", models.TaskSessionStateFailed)
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateExecutor(ctx, &models.Executor{
+		ID:        "executor-recover-new-branch",
+		Name:      "Worktree",
+		Type:      models.ExecutorTypeWorktree,
+		Status:    models.ExecutorStatusActive,
+		Resumable: true,
+	}))
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+		ID:            "repo-recover-new-branch",
+		WorkspaceID:   "ws1",
+		Name:          "backend",
+		SourceType:    "local",
+		LocalPath:     t.TempDir(),
+		DefaultBranch: "main",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}))
+	require.NoError(t, repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID:           "task-repo-recover-new-branch",
+		TaskID:       "task-recover-new-branch",
+		RepositoryID: "repo-recover-new-branch",
+		BaseBranch:   "main",
+		Position:     0,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}))
+
+	session, err := repo.GetTaskSession(ctx, "session-recover-new-branch")
+	require.NoError(t, err)
+	session.AgentProfileID = "profile-recover-new-branch"
+	session.ExecutorID = "executor-recover-new-branch"
+	session.RepositoryID = "repo-recover-new-branch"
+	session.BaseBranch = "main"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "running-recover-new-branch",
+		SessionID:        "session-recover-new-branch",
+		TaskID:           "task-recover-new-branch",
+		AgentExecutionID: "exec-before-recovery",
+		ResumeToken:      "acp-session-recover-new-branch",
+		Resumable:        true,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}))
+
+	response, err := svc.RecoverSession(ctx, "task-recover-new-branch", "session-recover-new-branch", "resume_new_branch")
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	require.Equal(t, "task-recover-new-branch", response.TaskID)
+	require.Equal(t, "session-recover-new-branch", response.SessionID)
+	require.NotNil(t, captured)
+	require.Equal(t, "session-recover-new-branch", captured.SessionID)
+	require.Equal(t, "acp-session-recover-new-branch", captured.ACPSessionID)
+	require.True(t, captured.AllowBranchReplacement)
+	require.True(t, captured.UseWorktree)
+	require.Equal(t, "main", captured.Branch)
+	require.Equal(t, "main", captured.BaseBranch)
+	require.True(t, startAgentProcessCalled)
+
+	reloadedSession, err := repo.GetTaskSession(ctx, "session-recover-new-branch")
+	require.NoError(t, err)
+	require.Equal(t, session.ID, reloadedSession.ID)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, reloadedSession.State)
+	reloadedRunning, err := repo.GetExecutorRunningBySessionID(ctx, "session-recover-new-branch")
+	require.NoError(t, err)
+	require.Equal(t, "acp-session-recover-new-branch", reloadedRunning.ResumeToken)
+	sessions, err := repo.ListTaskSessions(ctx, "task-recover-new-branch")
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+}
+
 // TestResumeTaskSession_ArchiveCancelledSessionResumesSuccessfully is the
 // end-to-end regression for "Can't resume this un-archived task": a session
 // cancelled by an archive (Service.ArchiveTask / cascade archive) must resume
@@ -5659,6 +5935,78 @@ func TestResumeTaskSession_AlreadyFailedMissingRemoteRefCreatesNeutralRecoveryMe
 	defer taskRepo.mu.Unlock()
 	if taskRepo.stateWrites["task1"] != 0 {
 		t.Fatalf("already failed resume rewrote task state %d times", taskRepo.stateWrites["task1"])
+	}
+}
+
+func TestResumeTaskSession_PersistsBranchRecoveryWarningWhenPreparationFailsLater(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	seedTaskAndSession(t, repo, "task-partial-recovery", "session-partial-recovery", models.TaskSessionStateFailed)
+	now := time.Now().UTC()
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-partial-recovery", WorkspaceID: "ws1", Name: "backend", DefaultBranch: "main",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "task-repo-partial-recovery", TaskID: "task-partial-recovery", RepositoryID: "repo-partial-recovery",
+		BaseBranch: "main", Position: 0, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTaskRepository: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-partial-recovery", TaskID: "task-partial-recovery",
+		ExecutorType: string(models.ExecutorTypeWorktree), WorkspacePath: t.TempDir(), Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "env-repo-partial-recovery", RepositoryID: "repo-partial-recovery", BranchSlug: "backend",
+			WorktreeID: "worktree-partial-recovery", WorktreeBranch: "feature/lost", Position: 0,
+			CreatedAt: now, UpdatedAt: now,
+		}},
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-partial-recovery")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	session.AgentProfileID = "profile-partial-recovery"
+	session.TaskEnvironmentID = "env-partial-recovery"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("UpdateTaskSession: %v", err)
+	}
+
+	launchErr := errors.New("second repository preparation failed")
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			rows, err := repo.ListTaskEnvironmentRepos(ctx, "env-partial-recovery")
+			if err != nil {
+				return nil, err
+			}
+			rows[0].WorktreeBranch = "feature/replaced"
+			if err := repo.UpdateTaskEnvironmentRepo(ctx, rows[0]); err != nil {
+				return nil, err
+			}
+			return nil, launchErr
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+
+	_, err = svc.ResumeTaskSessionWithOptions(ctx, "task-partial-recovery", "session-partial-recovery", executor.ResumeOptions{
+		AllowBranchReplacement: true,
+	})
+	if !errors.Is(err, launchErr) {
+		t.Fatalf("ResumeTaskSessionWithOptions error = %v, want %v", err, launchErr)
+	}
+	if len(messages.sessionMessages) != 1 {
+		t.Fatalf("warning messages = %d, want one warning after partial preparation", len(messages.sessionMessages))
+	}
+	if got := messages.sessionMessages[0].metadata["kind"]; got != "branch_recreated" {
+		t.Fatalf("warning kind = %v, want branch_recreated", got)
 	}
 }
 
