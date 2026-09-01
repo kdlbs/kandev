@@ -68,7 +68,7 @@ func TestWorkflowRoutingSchemaReplayAndCommittedReadback(t *testing.T) {
 
 // TestWorkflowRouteOperationPendingToCommittedFillsTurnAndTarget reproduces
 // the real two-phase step_complete flow: handleStepComplete first records a
-// pending operation with a placeholder target_step_id (”) and the real
+// pending operation with a placeholder target_step_id ("") and the real
 // turn_id, then the turn-end engine commit records the *same* OperationID
 // with the real target_step_id but no turn_id (the committed-side context
 // never carries turn_id — see executeStepTransition/finishTurn in
@@ -119,6 +119,63 @@ func TestWorkflowRouteOperationPendingToCommittedFillsTurnAndTarget(t *testing.T
 		SELECT COUNT(*) FROM tasks WHERE id = ? AND workflow_step_id = 'step-done'
 	`, task.ID).Scan(&moved))
 	assert.Equal(t, 1, moved, "the task must actually advance, not roll back")
+}
+
+func TestWorkflowRouteOperationRejectsConflictingProgressiveIdentity(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*routing.Operation)
+	}{
+		{
+			name: "workspace",
+			mutate: func(operation *routing.Operation) {
+				operation.WorkspaceID = "different-workspace"
+			},
+		},
+		{
+			name: "target step",
+			mutate: func(operation *routing.Operation) {
+				operation.TargetStepID = "step-review"
+			},
+		},
+		{
+			name: "turn",
+			mutate: func(operation *routing.Operation) {
+				operation.TurnID = "turn-456"
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newStepTransitionsTestRepo(t)
+			ctx := context.Background()
+			task := createStepTransitionsTestTask(
+				t, repo, "task-route-conflict-"+strings.ReplaceAll(tt.name, " ", "-"),
+				"workflow-route", "step-work",
+			)
+			operation := routing.Operation{
+				ID:     "route-conflict-" + strings.ReplaceAll(tt.name, " ", "-"),
+				TaskID: task.ID, WorkspaceID: task.WorkspaceID,
+				Producer: routing.ProducerStepComplete, ExpectedStepID: "step-work",
+				ObservedStepID: "step-work", TargetStepID: "step-done",
+				SessionID: "session-route", TurnID: "turn-123",
+				ActorKind: "agent", ActorID: "session-route", Outcome: routing.OutcomePending,
+			}
+			require.NoError(t, repo.RecordWorkflowRouteOperation(ctx, operation))
+
+			conflicting := operation
+			tt.mutate(&conflicting)
+			require.ErrorIs(t, repo.RecordWorkflowRouteOperation(ctx, conflicting), routing.ErrOperationIdentityConflict)
+
+			stored, found, err := repo.GetWorkflowRouteOperation(ctx, operation.ID)
+			require.NoError(t, err)
+			require.True(t, found)
+			assert.Equal(t, operation.WorkspaceID, stored.WorkspaceID)
+			assert.Equal(t, operation.TargetStepID, stored.TargetStepID)
+			assert.Equal(t, operation.TurnID, stored.TurnID)
+		})
+	}
 }
 
 func TestWorkflowRouteEffectClaimAndCrashRecovery(t *testing.T) {

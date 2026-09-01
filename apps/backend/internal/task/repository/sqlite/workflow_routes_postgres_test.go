@@ -161,6 +161,30 @@ func TestPostgresWorkflowRouteOperationPendingToCommittedFillsIdentity(t *testin
 	require.Equal(t, "pg-step-done", stored.WorkflowStepID, "the task must actually advance, not roll back")
 }
 
+func TestPostgresWorkflowRouteOperationRejectsConflictingProgressiveIdentity(t *testing.T) {
+	repo := newWorkflowRoutesPostgresRepo(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "pg-conflict-workspace", Name: "Conflict"}))
+	task := &models.Task{
+		ID: "pg-conflict-task", WorkspaceID: "pg-conflict-workspace",
+		WorkflowStepID: "pg-step-work", Title: "Conflict",
+	}
+	require.NoError(t, repo.CreateTask(ctx, task))
+
+	operation := routing.Operation{
+		ID: "pg-conflicting-step-complete-op", TaskID: task.ID, WorkspaceID: task.WorkspaceID,
+		Producer: routing.ProducerStepComplete, ExpectedStepID: "pg-step-work",
+		ObservedStepID: "pg-step-work", TargetStepID: "pg-step-done",
+		SessionID: "pg-session-route", TurnID: "pg-turn-123",
+		ActorKind: "agent", ActorID: "pg-session-route", Outcome: routing.OutcomePending,
+	}
+	require.NoError(t, repo.RecordWorkflowRouteOperation(ctx, operation))
+
+	conflicting := operation
+	conflicting.TurnID = "pg-turn-456"
+	require.ErrorIs(t, repo.RecordWorkflowRouteOperation(ctx, conflicting), routing.ErrOperationIdentityConflict)
+}
+
 func TestPostgresWorkflowRouteEffectLeaseCanBeRenewed(t *testing.T) {
 	repo := newWorkflowRoutesPostgresRepo(t)
 	ctx := context.Background()
