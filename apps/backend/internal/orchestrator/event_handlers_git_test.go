@@ -449,6 +449,12 @@ func TestHandleBranchSwitched_RedirectsToWorkspaceGroupOwner(t *testing.T) {
 	if err := testRepo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("link session to environment: %v", err)
 	}
+	if _, err := testRepo.DB().Exec(
+		`UPDATE task_workspace_groups SET materialized_environment_id = ? WHERE id = ?`,
+		"env-s1", "group1",
+	); err != nil {
+		t.Fatalf("bind workspace group to environment: %v", err)
+	}
 
 	svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
 	ghSvc := &mockGitHubService{}
