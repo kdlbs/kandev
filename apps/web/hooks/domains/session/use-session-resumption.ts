@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { launchSession } from "@/lib/services/session-launch-service";
 import {
   buildResumeRequest,
   buildRestoreWorkspaceRequest,
 } from "@/lib/services/session-launch-helpers";
+import { useSessionRecoveryFeedback } from "./use-session-recovery-feedback";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
   sessionId as toSessionId,
@@ -58,6 +59,7 @@ type ResumeResponse = {
 export type ResumeStateSetter = {
   setResumptionState: (s: ResumptionState) => void;
   setError: (e: string | null) => void;
+  setNotice?: (notice: string | null) => void;
   setWorktreePath: (p: string | null) => void;
   setWorktreeBranch: (p: string | null) => void;
   setTaskSession: (s: {
@@ -156,48 +158,69 @@ export async function resumeWithSilentFallback(
   setters: ResumeStateSetter,
 ): Promise<boolean> {
   setters.setResumptionState("resuming");
-  if (
-    await tryLaunch(
-      buildResumeRequest(taskId, sessionId).request,
-      taskId,
-      sessionId,
-      session,
-      setters,
-    )
-  ) {
+  const resumeAttempt = await tryLaunch(
+    buildResumeRequest(taskId, sessionId).request,
+    taskId,
+    sessionId,
+    session,
+    setters,
+  );
+  if (resumeAttempt.ok) {
+    setters.setNotice?.(null);
     return true;
   }
   // Resume failed (returned success=false OR threw). Fall back to read-only
   // workspace restore so the user keeps file/terminal/git access.
-  if (
-    await tryLaunch(
-      buildRestoreWorkspaceRequest(taskId, sessionId).request,
-      taskId,
-      sessionId,
-      session,
-      setters,
-    )
-  ) {
+  const restoreAttempt = await tryLaunch(
+    buildRestoreWorkspaceRequest(taskId, sessionId).request,
+    taskId,
+    sessionId,
+    session,
+    setters,
+  );
+  if (restoreAttempt.ok) {
+    setters.setError(null);
+    setters.setNotice?.(
+      t("task:resumeFailedWorkspaceReadOnly", { error: resumeAttempt.error.message }),
+    );
     return true;
   }
   setters.setResumptionState("error");
-  setters.setError(t("task:failedToResumeAndRestore"));
+  setters.setNotice?.(null);
+  setters.setError(
+    t("task:resumeAndRestoreFailed", {
+      resumeError: resumeAttempt.error.message,
+      restoreError: restoreAttempt.error.message,
+    }),
+  );
   return false;
 }
 
-/** Run a single launch attempt; returns true on success, false on any failure.
+type LaunchAttempt = { ok: true } | { ok: false; error: Error };
+
+/** Run a single launch attempt and retain its failure for the fallback notice.
  *  Logs caught errors to the console so silent fallback paths remain debuggable
- *  (errors otherwise vanish into the implicit `false` return). */
+ *  (errors otherwise vanish into the fallback state). */
 async function tryLaunch(
   request: import("@/lib/services/session-launch-service").LaunchSessionRequest,
   taskId: string,
   sessionId: string,
   session: SessionLike,
   setters: ResumeStateSetter,
-): Promise<boolean> {
+): Promise<LaunchAttempt> {
   try {
     const resp = await launchSession(request);
-    if (!resp.success) return false;
+    if (!resp.success) {
+      return {
+        ok: false,
+        error: new Error(
+          resp.error ??
+            (request.intent === "restore_workspace"
+              ? t("task:failedToRestoreWorkspace")
+              : t("task:failedToResumeSession")),
+        ),
+      };
+    }
     applyResumeResponse(
       {
         success: true,
@@ -216,14 +239,17 @@ async function tryLaunch(
     if (request.intent === "restore_workspace" && setters.setAgentctlReady) {
       setters.setAgentctlReady(sessionId);
     }
-    return true;
+    return { ok: true };
   } catch (err) {
     console.error("[tryLaunch] session launch failed", {
       intent: request.intent,
       sessionId,
       err,
     });
-    return false;
+    return {
+      ok: false,
+      error: err instanceof Error ? err : new Error(t("common:unknownError")),
+    };
   }
 }
 
@@ -370,6 +396,7 @@ async function checkAndResume({
   if (!client) return;
   setters.setResumptionState("checking");
   setters.setError(null);
+  setters.setNotice?.(null);
   try {
     const status = await client.request<SessionStatus>("task.session.status", {
       task_id: taskId,
@@ -425,6 +452,7 @@ async function checkAndResume({
   } catch (err) {
     setters.setResumptionState("error");
     setters.setError(err instanceof Error ? err.message : t("common:unknownError"));
+    setters.setNotice?.(null);
   }
 }
 
@@ -432,6 +460,7 @@ interface UseSessionResumptionReturn {
   resumptionState: ResumptionState;
   sessionStatus: SessionStatus | null;
   error: string | null;
+  notice: string | null;
   taskSessionState: TaskSessionState | null;
   worktreePath: string | null;
   worktreeBranch: string | null;
@@ -483,6 +512,7 @@ function useSessionResetAndCheck({
     remoteStatusRetryCount.current = 0;
     setters.setResumptionState("idle");
     setters.setError(null);
+    setters.setNotice?.(null);
     setters.setWorktreePath(null);
     setters.setWorktreeBranch(null);
   }, [sessionId, taskId]); // eslint-disable-line react-hooks/exhaustive-deps -- intentional reset on dep change
@@ -549,6 +579,9 @@ function buildGuardedSetters(
     setError: (e) => {
       if (guard()) setters.setError(e);
     },
+    setNotice: (notice) => {
+      if (guard()) setters.setNotice?.(notice);
+    },
     setWorktreePath: (p) => {
       if (guard()) setters.setWorktreePath(p);
     },
@@ -577,6 +610,7 @@ export function useSessionResumption(
 ): UseSessionResumptionReturn {
   const [resumptionState, setResumptionState] = useState<ResumptionState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [worktreePath, setWorktreePath] = useState<string | null>(null);
   const [worktreeBranch, setWorktreeBranch] = useState<string | null>(null);
   const connectionStatus = useAppStore((state) => state.connection.status);
@@ -594,6 +628,7 @@ export function useSessionResumption(
   const setters: ResumeStateSetter = {
     setResumptionState,
     setError,
+    setNotice,
     setWorktreePath,
     setWorktreeBranch,
     setTaskSession,
@@ -601,6 +636,8 @@ export function useSessionResumption(
     setResumeSkipped,
     getLiveSession: (sid: string) => storeApi.getState().taskSessions.items[sid] ?? null,
   };
+
+  useSessionRecoveryFeedback(sessionId, session?.state, error, notice, setters);
 
   const { sessionStatus } = useSessionResetAndCheck({
     taskId,
@@ -616,11 +653,13 @@ export function useSessionResumption(
     if (!taskId || !sessionId) return false;
     setResumptionState("resuming");
     setError(null);
+    setNotice(null);
     try {
       const { request } = buildResumeRequest(taskId, sessionId);
       const response = await launchSession(request);
       if (response.success) {
         setResumptionState("resumed");
+        setNotice(null);
         if (response.state) {
           setTaskSession({
             id: toSessionId(sessionId),
@@ -643,7 +682,7 @@ export function useSessionResumption(
         return true;
       }
       setResumptionState("error");
-      setError(t("task:failedToResumeSession"));
+      setError(response.error ?? t("task:failedToResumeSession"));
       return false;
     } catch (err) {
       setResumptionState("error");
@@ -655,6 +694,7 @@ export function useSessionResumption(
     sessionId,
     session,
     setTaskSession,
+    setNotice,
     setWorktreePath,
     setWorktreeBranch,
     setResumeSkipped,
@@ -664,6 +704,7 @@ export function useSessionResumption(
     resumptionState,
     sessionStatus,
     error,
+    notice,
     taskSessionState: session?.state ?? null,
     worktreePath,
     worktreeBranch,

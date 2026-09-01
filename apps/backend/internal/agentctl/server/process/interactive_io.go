@@ -191,14 +191,18 @@ func (r *InteractiveRunner) resetIdleTimer(proc *interactiveProcess) {
 }
 
 func (r *InteractiveRunner) emitTurnComplete(proc *interactiveProcess) {
+	// Invoke the callback before releasing firstIdleCh. Callers that inject the
+	// initial prompt use the callback to consume the startup completion boundary;
+	// waking the injector first could let it clear that marker before the
+	// callback observes it.
+	if r.turnCompleteCallback != nil {
+		r.turnCompleteCallback(proc.info.SessionID, proc.info.ID)
+	}
 	// Close firstIdleCh exactly once — used by callers that want to react to
 	// the very first idle window (e.g. auto-injecting the task prompt).
 	proc.firstIdleOnce.Do(func() {
 		close(proc.firstIdleCh)
 	})
-	if r.turnCompleteCallback != nil {
-		r.turnCompleteCallback(proc.info.SessionID, proc.info.ID)
-	}
 	r.logger.Debug("turn complete detected",
 		zap.String("process_id", proc.info.ID),
 		zap.String("session_id", proc.info.SessionID))

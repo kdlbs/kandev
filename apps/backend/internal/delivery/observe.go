@@ -8,6 +8,7 @@ import (
 	"time"
 
 	dbutil "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 // CandidatePair is a (task, repository) pair eligible for evaluation.
@@ -184,12 +185,14 @@ func (r *Repository) TaskInfo(ctx context.Context, id string) (TaskInfo, error) 
 	return TaskInfo{WorkspaceID: row.WorkspaceID, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}, nil
 }
 
-// SnapshotsForPair reads every task_session_git_snapshots row for the
-// pair's sessions, joined through task_sessions.
+// SnapshotsForPair reads every environment-owned snapshot for an environment
+// bound to the task and repository pair. SessionID is nullable provenance,
+// so capture-session deletion does not remove an environment observation.
 func (r *Repository) SnapshotsForPair(ctx context.Context, taskID, repositoryID string) ([]Snapshot, error) {
+	repositoryNameExpr := "COALESCE(" + dialect.JSONExtract(r.ro.DriverName(), "g.metadata", "repository_name") + ", '')"
 	var rows []struct {
-		SessionID string `db:"session_id"`
-		Branch    string `db:"branch"`
+		SessionID sql.NullString `db:"session_id"`
+		Branch    string         `db:"branch"`
 		// head_commit is TEXT DEFAULT '', not NOT NULL
 		// (base_schema.go), and spec "Classification" normalization
 		// explicitly anticipates a real NULL there — scan into
@@ -200,18 +203,36 @@ func (r *Repository) SnapshotsForPair(ctx context.Context, taskID, repositoryID 
 		CreatedAt  time.Time      `db:"created_at"`
 	}
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
-		SELECT g.session_id, g.branch, g.head_commit, g.ahead, g.created_at
+		SELECT DISTINCT g.session_id, g.branch, g.head_commit, g.ahead, g.created_at
 		FROM task_session_git_snapshots g
-		JOIN task_sessions s ON s.id = g.session_id
-		WHERE s.task_id = ? AND s.repository_id = ?
-	`), taskID, repositoryID)
+		JOIN task_environments e ON e.id = g.task_environment_id
+		JOIN task_environment_repos er ON er.task_environment_id = g.task_environment_id
+		JOIN repositories repository ON repository.id = er.repository_id
+		WHERE (e.task_id = ? OR EXISTS (
+			SELECT 1 FROM task_sessions binding
+			WHERE binding.task_environment_id = g.task_environment_id
+			  AND binding.task_id = ?
+		)) AND er.repository_id = ? AND er.deleted_at IS NULL
+		  AND (`+repositoryNameExpr+` = repository.name
+		    OR EXISTS (
+				SELECT 1 FROM task_sessions provenance
+				WHERE provenance.id = g.session_id
+				  AND provenance.repository_id = er.repository_id
+			)
+		    OR (`+repositoryNameExpr+` = '' AND NOT EXISTS (
+				SELECT 1 FROM task_environment_repos other
+				WHERE other.task_environment_id = g.task_environment_id
+				  AND other.repository_id <> er.repository_id
+				  AND other.deleted_at IS NULL
+			)))
+	`), taskID, taskID, repositoryID)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]Snapshot, len(rows))
 	for i, row := range rows {
 		out[i] = Snapshot{
-			SessionID: row.SessionID, Branch: row.Branch, HeadCommit: row.HeadCommit.String,
+			SessionID: row.SessionID.String, Branch: row.Branch, HeadCommit: row.HeadCommit.String,
 			Ahead: row.Ahead, CreatedAt: row.CreatedAt,
 		}
 	}

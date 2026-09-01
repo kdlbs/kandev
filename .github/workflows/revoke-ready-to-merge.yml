@@ -1,0 +1,263 @@
+name: Revoke stale merge approval
+
+on:
+  pull_request_target:
+    types: [synchronize]
+
+concurrency:
+  group: revoke-ready-to-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  pull-requests: write
+
+jobs:
+  revoke:
+    name: Revoke stale merge approval
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Revoke stale merge approval
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const approvalLabel = 'ready-to-merge';
+            const eventPullRequest = context.payload.pull_request;
+            const pullNumber = eventPullRequest?.number;
+            const senderLogin = context.payload.sender?.login;
+            const failures = [];
+            const results = [];
+
+            function errorMessages(error) {
+              const messages = [];
+              if (typeof error?.message === 'string') {
+                messages.push(error.message);
+              }
+              if (Array.isArray(error?.errors)) {
+                for (const entry of error.errors) {
+                  if (typeof entry?.message === 'string') {
+                    messages.push(entry.message);
+                  }
+                }
+              }
+              if (typeof error?.response?.data?.message === 'string') {
+                messages.push(error.response.data.message);
+              }
+              return [...new Set(messages)];
+            }
+
+            function errorText(error) {
+              return errorMessages(error).join('; ') || 'unknown error';
+            }
+
+            function recordResult(operation, outcome) {
+              results.push([operation, outcome]);
+            }
+
+            function recordFailure(operation, error) {
+              const message = errorText(error);
+              core.error(`${operation}: ${message}`);
+              failures.push(`${operation}: ${message}`);
+              recordResult(operation, 'failed');
+            }
+
+            function isExpectedAlreadyCleanError(operation, error) {
+              const messages = errorMessages(error);
+              if (
+                operation === 'label' &&
+                (error?.status === 404 || error?.response?.status === 404)
+              ) {
+                return messages.includes('Label does not exist');
+              }
+
+              const expectedMessages = {
+                'auto-merge': ['Pull request is not set to auto-merge'],
+                'merge queue': ['Pull request is not in the merge queue'],
+              };
+              return (expectedMessages[operation] ?? []).some(message =>
+                messages.includes(message),
+              );
+            }
+
+            async function attemptCleanup(operation, id, mutation) {
+              if (!id) {
+                core.info(`${operation}: no active state`);
+                recordResult(operation, 'already clean; no mutation required');
+                return;
+              }
+
+              try {
+                await mutation(id);
+                core.info(`${operation}: cleanup completed`);
+                recordResult(operation, 'cleanup completed');
+              } catch (error) {
+                if (isExpectedAlreadyCleanError(operation, error)) {
+                  core.info(`${operation}: already clean`);
+                  recordResult(operation, 'already clean; concurrent cleanup won');
+                  return;
+                }
+                recordFailure(`${operation} cleanup`, error);
+              }
+            }
+
+            async function finish() {
+              core.summary.addHeading(`Merge approval cleanup for PR #${pullNumber}`);
+              core.summary.addTable([
+                [
+                  { data: 'Operation', header: true },
+                  { data: 'Outcome', header: true },
+                ],
+                ...results,
+              ]);
+              if (failures.length > 0) {
+                core.summary.addQuote(`Failures: ${failures.join('; ')}`);
+              }
+              await core.summary.write();
+              if (failures.length > 0) {
+                core.setFailed(failures.join('; '));
+              }
+            }
+
+            if (!Number.isInteger(pullNumber)) {
+              recordFailure(
+                'event validation',
+                new Error('synchronize event has no pull-request number'),
+              );
+              await finish();
+              return;
+            }
+
+            let permission;
+            let permissionError;
+            if (!senderLogin) {
+              permissionError = new Error('synchronize event has no sender login');
+            } else {
+              try {
+                const response =
+                  await github.rest.repos.getCollaboratorPermissionLevel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    username: senderLogin,
+                  });
+                permission = response.data.permission;
+                if (!['admin', 'write', 'read', 'none'].includes(permission)) {
+                  permissionError = new Error(
+                    `permission response was unexpected: ${permission ?? 'missing'}`,
+                  );
+                }
+              } catch (error) {
+                permissionError = error;
+              }
+            }
+
+            if (permissionError) {
+              const message = errorText(permissionError);
+              core.warning(`Could not resolve pusher permission: ${message}`);
+              failures.push(`permission lookup: ${message}`);
+              recordResult('pusher permission', 'lookup failed; treated as untrusted');
+            } else {
+              core.info(`Pusher permission: ${permission}`);
+              recordResult('pusher permission', permission);
+            }
+
+            if (permission === 'write' || permission === 'admin') {
+              core.info('Write-capable pusher; leaving merge approval state unchanged');
+              recordResult('cleanup', 'skipped for write-capable pusher');
+              await finish();
+              return;
+            }
+
+            const eventLabels = Array.isArray(eventPullRequest?.labels)
+              ? eventPullRequest.labels
+              : [];
+            const hasApprovalLabel = eventLabels.some(
+              label => label?.name === approvalLabel,
+            );
+            if (!hasApprovalLabel) {
+              core.info('Event snapshot has no ready-to-merge label; skipping cleanup');
+              recordResult('cleanup', 'skipped; approval label absent from event snapshot');
+              await finish();
+              return;
+            }
+
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pullNumber,
+                name: approvalLabel,
+              });
+              core.info('Removed ready-to-merge label');
+              recordResult('label', 'removed');
+            } catch (error) {
+              if (isExpectedAlreadyCleanError('label', error)) {
+                core.info('ready-to-merge label was already removed');
+                recordResult('label', 'already clean; concurrent removal won');
+              } else {
+                recordFailure('label removal', error);
+              }
+            }
+
+            let currentPullRequest;
+            try {
+              const state = await github.graphql(
+                `
+                  query($owner: String!, $repo: String!, $number: Int!) {
+                    repository(owner: $owner, name: $repo) {
+                      pullRequest(number: $number) {
+                        id
+                        autoMergeRequest { id }
+                        mergeQueueEntry { id }
+                      }
+                    }
+                  }
+                `,
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  number: pullNumber,
+                },
+              );
+              currentPullRequest = state.repository?.pullRequest;
+              if (!currentPullRequest) {
+                throw new Error(`pull request #${pullNumber} was not found`);
+              }
+            } catch (error) {
+              recordFailure('merge state read', error);
+            }
+
+            if (currentPullRequest) {
+              await attemptCleanup(
+                'auto-merge',
+                currentPullRequest.autoMergeRequest?.id,
+                id =>
+                  github.graphql(
+                    `
+                      mutation($id: ID!) {
+                        disablePullRequestAutoMerge(input: { pullRequestId: $id }) {
+                          pullRequest { id }
+                        }
+                      }
+                    `,
+                    { id: currentPullRequest.id },
+                  ),
+              );
+
+              await attemptCleanup(
+                'merge queue',
+                currentPullRequest.mergeQueueEntry?.id,
+                id =>
+                  github.graphql(
+                    `
+                      mutation($id: ID!) {
+                        dequeuePullRequest(input: { id: $id }) {
+                          mergeQueueEntry { id }
+                        }
+                      }
+                    `,
+                    { id: currentPullRequest.id },
+                  ),
+              );
+            }
+
+            await finish();

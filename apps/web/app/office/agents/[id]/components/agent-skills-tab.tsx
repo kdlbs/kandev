@@ -164,7 +164,9 @@ export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {
       const originalSkillIds = new Set(agent.skillIds ?? []);
       const desiredOnlyIds = new Set(
         skills
-          .filter((skill) => !originalSkillIds.has(skill.id) && agent.desiredSkills?.includes(skill.slug))
+          .filter(
+            (skill) => !originalSkillIds.has(skill.id) && agent.desiredSkills?.includes(skill.slug),
+          )
           .map((skill) => skill.id),
       );
       const persistedSkillIds = skillIds.filter((id) => !desiredOnlyIds.has(id));
