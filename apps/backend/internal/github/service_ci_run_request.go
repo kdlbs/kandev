@@ -1,7 +1,6 @@
 package github
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -464,101 +463,6 @@ func inputFromCIRunRequest(request *CIRunRequest) RequestFreshCIRunInput {
 	}
 }
 
-//nolint:cyclop // ordered trust gates must remain visible
-func (s *Service) executeCIRunDispatchFallback(
-	ctx context.Context,
-	client ciRunActionsClient,
-	binding *ciRunBinding,
-	request *CIRunRequest,
-	verified *verifiedCIRun,
-) (*CIRunReceipt, error) {
-	if s.resolver != nil {
-		dispatchClient, principal, resolveErr := s.resolveCIRunClientForPurpose(
-			ctx, binding.WorkspaceID, binding.Owner, binding.Repo, CIRunOperationWorkflowDispatch,
-		)
-		if resolveErr != nil {
-			return s.failCIRunRequest(ctx, request, ciRunFailureFromError(resolveErr))
-		}
-		client = dispatchClient
-		setCIRunProviderPrincipal(request, principal)
-	}
-	if !sameRepositoryPR(verified.PR, binding) {
-		return s.failCIRunRequest(ctx, request, CIRunFailureForkDispatchDisallowed)
-	}
-	if strings.TrimSpace(verified.PR.HeadBranch) == "" {
-		return s.failCIRunRequest(ctx, request, CIRunFailureDispatchRefUnavailable)
-	}
-	inputs, ok := reviewedWorkflowDispatchInputs(verified.Workflow.Path)
-	if !ok {
-		return s.failCIRunRequest(ctx, request, CIRunFailureDispatchDenied)
-	}
-	source, err := client.GetRepoFileContent(ctx, binding.Owner, binding.Repo,
-		verified.Workflow.Path, verified.PR.BaseBranch)
-	if err != nil {
-		return s.handleCIRunWorkflowContentReadError(ctx, request, err)
-	}
-	if !workflowDispatchDeclared(source) {
-		return s.failCIRunRequest(ctx, request, CIRunFailureDispatchDenied)
-	}
-	latestBinding, latestPR, err := s.revalidateCIRunAdmission(ctx, client, request)
-	if err != nil {
-		return s.failCIRunAdmission(ctx, request, err)
-	}
-	headSource, err := client.GetRepoFileContent(ctx, latestBinding.Owner, latestBinding.Repo,
-		verified.Workflow.Path, latestPR.HeadBranch)
-	if err != nil {
-		return s.handleCIRunWorkflowContentReadError(ctx, request, err)
-	}
-	if !bytes.Equal(source, headSource) {
-		return s.failCIRunRequest(ctx, request, CIRunFailureDispatchDenied)
-	}
-	request.Operation = CIRunOperationWorkflowDispatch
-	baseline, err := client.ListActionsWorkflowRuns(ctx, latestBinding.Owner, latestBinding.Repo,
-		verified.Workflow.ID, request.ExpectedHeadSHA)
-	if err != nil {
-		return s.handleCIRunPreflightError(ctx, request, err)
-	}
-	request.ProviderRunWatermark = maxCIRunID(baseline)
-	// Re-read the PR after all workflow and watermark reads. Dispatch accepts
-	// only a mutable branch ref, so no earlier head check is sufficient.
-	latestBinding, latestPR, err = s.revalidateCIRunAdmission(ctx, client, request)
-	if err != nil || latestPR.HeadBranch != verified.PR.HeadBranch {
-		if err != nil {
-			return s.failCIRunAdmission(ctx, request, err)
-		}
-		return s.failCIRunRequest(ctx, request, CIRunFailureHeadDrift)
-	}
-	dispatchStartedAt := s.ciRunClock()().UTC()
-	request.ProviderURL = ciRunDispatchProviderURL(latestBinding.Owner, latestBinding.Repo, verified.Workflow.ID)
-	if err := s.auditCIRun(ctx, request, "provider_started", ""); err != nil {
-		return receiptFromCIRunRequest(request), err
-	}
-	if err := s.store.MarkCIRunProviderCallStarted(ctx, request, dispatchStartedAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return s.handleCIRunProviderStartConflict(ctx, client, request)
-		}
-		return nil, err
-	}
-	request.ProviderCallStartedAt = &dispatchStartedAt
-	metadata, err := dispatchCIRunWorkflow(ctx, client, latestBinding.Owner, latestBinding.Repo,
-		verified.Workflow.ID, latestPR.HeadBranch, inputs)
-	applyCIRunProviderMetadata(request, metadata, err)
-	if err != nil {
-		return s.handleCIRunMutationError(ctx, request, err)
-	}
-	return s.reconcileCIRunRequest(ctx, client, latestBinding, request, verified)
-}
-
-func maxCIRunID(runs []GitHubActionsRun) int64 {
-	var maximum int64
-	for i := range runs {
-		if runs[i].ID > maximum {
-			maximum = runs[i].ID
-		}
-	}
-	return maximum
-}
-
 func (s *Service) revalidateCIRunAdmission(
 	ctx context.Context,
 	client ciRunActionsClient,
@@ -610,40 +514,6 @@ func (s *Service) failCIRunAdmission(
 		return s.failCIRunRequest(ctx, request, requestErr.Class)
 	}
 	return s.handleCIRunPreflightError(ctx, request, err)
-}
-
-func sameRepositoryPR(pr *PR, binding *ciRunBinding) bool {
-	return pr != nil && strings.EqualFold(pr.HeadRepoOwner, binding.Owner) &&
-		strings.EqualFold(pr.HeadRepoName, binding.Repo)
-}
-
-const reviewedDispatchWorkflow = ".github/workflows/e2e-tests.yml"
-
-func reviewedWorkflowDispatchInputs(path string) (map[string]string, bool) {
-	if path != reviewedDispatchWorkflow {
-		return nil, false
-	}
-	return map[string]string{"fail_on_flaky": "false"}, true
-}
-
-func workflowDispatchDeclared(source []byte) bool {
-	inOnBlock := false
-	for _, line := range strings.Split(string(source), "\n") {
-		withoutComment := strings.SplitN(line, "#", 2)[0]
-		trimmed := strings.TrimSpace(withoutComment)
-		if trimmed == "" {
-			continue
-		}
-		indent := len(withoutComment) - len(strings.TrimLeft(withoutComment, " \t"))
-		if indent == 0 {
-			inOnBlock = trimmed == "on:"
-			continue
-		}
-		if inOnBlock && (trimmed == "workflow_dispatch:" || trimmed == "workflow_dispatch: {}") {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *Service) resumeCIRunRequest(
@@ -704,6 +574,31 @@ func (s *Service) reconcileCIRunRequest(
 		verified.Run = matched
 		return s.completeCIRunSuccess(ctx, request, verified, matched.ID, matched.Attempt, request.Operation)
 	}
+	return s.completeCIRunAmbiguous(ctx, request)
+}
+
+func (s *Service) reconcileReturnedCIRun(
+	ctx context.Context,
+	client ciRunActionsClient,
+	binding *ciRunBinding,
+	request *CIRunRequest,
+	verified *verifiedCIRun,
+	runID int64,
+) (*CIRunReceipt, error) {
+	run, err := client.GetActionsRun(ctx, binding.Owner, binding.Repo, runID)
+	if err != nil {
+		return s.handleCIRunReconciliationReadError(ctx, request, err)
+	}
+	if !reconciledCIRunMatches(run, request.ProviderWorkflowID, request) {
+		return s.completeCIRunAmbiguous(ctx, request)
+	}
+	verified.Run = run
+	return s.completeCIRunSuccess(ctx, request, verified, run.ID, run.Attempt, request.Operation)
+}
+
+func (s *Service) completeCIRunAmbiguous(
+	ctx context.Context, request *CIRunRequest,
+) (*CIRunReceipt, error) {
 	request.Status = CIRunRequestReconciling
 	request.FailureClass = string(CIRunFailureProviderCallAmbiguous)
 	request.UpdatedAt = s.ciRunClock()().UTC()

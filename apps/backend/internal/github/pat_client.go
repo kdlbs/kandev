@@ -925,6 +925,17 @@ func (c *PATClient) requestJSONWithMetadata(
 	body []byte,
 	result interface{},
 ) (GitHubRequestMetadata, error) {
+	return c.requestJSONWithMetadataVersion(ctx, method, endpoint, body, result, githubAPIVersion)
+}
+
+func (c *PATClient) requestJSONWithMetadataVersion(
+	ctx context.Context,
+	method string,
+	endpoint string,
+	body []byte,
+	result interface{},
+	apiVersion string,
+) (GitHubRequestMetadata, error) {
 	u := githubAPIBase + endpoint
 	metadata := GitHubRequestMetadata{URL: u}
 	req, err := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(body))
@@ -932,6 +943,9 @@ func (c *PATClient) requestJSONWithMetadata(
 		return metadata, err
 	}
 	c.setGitHubHeaders(req)
+	if apiVersion != "" {
+		req.Header.Set("X-GitHub-Api-Version", apiVersion)
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
@@ -952,7 +966,11 @@ func (c *PATClient) requestJSONWithMetadata(
 	if result == nil {
 		return metadata, nil
 	}
-	return metadata, json.NewDecoder(resp.Body).Decode(result)
+	err = json.NewDecoder(resp.Body).Decode(result)
+	if errors.Is(err, io.EOF) {
+		return metadata, nil
+	}
+	return metadata, err
 }
 
 // delete sends a DELETE request. 2xx and 404 both return nil-or-typed-error per caller intent.

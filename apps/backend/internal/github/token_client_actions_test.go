@@ -90,6 +90,8 @@ func TestTokenClientActionsWritesUseClosedProviderInputs(t *testing.T) {
 			if len(inputs) != 1 || inputs["fail_on_flaky"] != "false" {
 				t.Fatalf("dispatch inputs = %#v", inputs)
 			}
+			w.WriteHeader(http.StatusNoContent)
+			return
 		}
 		w.WriteHeader(http.StatusCreated)
 	}))
@@ -129,6 +131,35 @@ func TestTokenClientActionsWriteMetadataCarriesProviderRequestIdentity(t *testin
 	if metadata.RequestID != "github-request-1" ||
 		metadata.URL != githubAPIBase+"/repos/kdlbs/kandev/actions/runs/100/rerun-failed-jobs" {
 		t.Fatalf("metadata = %+v", metadata)
+	}
+}
+
+func TestTokenClientDispatchRequestsRunDetails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if version := r.Header.Get("X-GitHub-Api-Version"); version != scopedActionsAPIVersion {
+			t.Fatalf("API version = %q, want %q", version, scopedActionsAPIVersion)
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["return_run_details"] != true {
+			t.Fatalf("return_run_details = %#v, want true", payload["return_run_details"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"workflow_run_id":101,"run_url":"https://api.github.com/runs/101"}`))
+	}))
+	defer server.Close()
+	client := newPATClientPointingAt(t, server.URL)
+
+	metadata, err := client.DispatchActionsWorkflowWithMetadata(
+		context.Background(), "kdlbs", "kandev", 77, "feature/x", nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadata.RunID != 101 {
+		t.Fatalf("workflow run ID = %d, want 101", metadata.RunID)
 	}
 }
 

@@ -581,6 +581,13 @@ func seedCIRunProviderStartScope(t *testing.T, store *Store, grant *CIRunGrant) 
 	for _, statement := range []string{
 		`ALTER TABLE tasks ADD COLUMN workflow_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tasks ADD COLUMN workflow_step_id TEXT NOT NULL DEFAULT ''`,
+		`CREATE TABLE repositories (
+			id TEXT PRIMARY KEY, workspace_id TEXT, provider TEXT,
+			provider_owner TEXT, provider_name TEXT, provider_repo_id TEXT
+		)`,
+		`CREATE TABLE task_repositories (
+			id TEXT PRIMARY KEY, task_id TEXT, repository_id TEXT
+		)`,
 	} {
 		if _, err := store.db.Exec(statement); err != nil {
 			t.Fatal(err)
@@ -590,6 +597,24 @@ func seedCIRunProviderStartScope(t *testing.T, store *Store, grant *CIRunGrant) 
 		VALUES (?, ?, ?, ?)`, grant.TargetTaskID, grant.WorkspaceID, grant.WorkflowID, grant.WorkflowStepID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := store.db.Exec(`INSERT INTO repositories VALUES (?, ?, 'github', 'kdlbs', 'kandev', '123')`,
+		grant.RepositoryID, grant.WorkspaceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO task_repositories VALUES ('task-repository-1', ?, ?)`,
+		grant.TargetTaskID, grant.RepositoryID); err != nil {
+		t.Fatal(err)
+	}
+	now := grant.CreatedAt
+	if err := store.CreateTaskPR(context.Background(), &TaskPR{
+		ID: "task-pr-1", WorkspaceID: grant.WorkspaceID, TaskID: grant.TargetTaskID,
+		RepositoryID: grant.RepositoryID, Owner: "kdlbs", Repo: "kandev", PRNumber: 42,
+		PRURL: "https://github.com/kdlbs/kandev/pull/42", PRTitle: "test",
+		HeadBranch: "feature/x", BaseBranch: "main", State: defaultPRState,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func testCIRunRequest(grant *CIRunGrant, now time.Time) *CIRunRequest {
@@ -597,7 +622,8 @@ func testCIRunRequest(grant *CIRunGrant, now time.Time) *CIRunRequest {
 		ID: "request-1", GrantID: grant.ID, GrantGeneration: grant.Generation, WorkspaceID: grant.WorkspaceID,
 		ActorTaskID: grant.ActorTaskID, ActorSessionID: "session-1", TargetTaskID: grant.TargetTaskID,
 		WorkflowID: grant.WorkflowID, WorkflowStepID: grant.WorkflowStepID, RepositoryID: grant.RepositoryID,
-		PRNumber: 42, ExpectedHeadSHA: strings.Repeat("a", 40), SourceRunID: 100,
+		CanonicalRepository: "kdlbs/kandev",
+		PRNumber:            42, ExpectedHeadSHA: strings.Repeat("a", 40), SourceRunID: 100,
 		ExpectedSourceAttempt: 1, EvidenceKind: CIRunEvidencePRHead,
 		IdempotencyHash: strings.Repeat("a", 64), Status: CIRunRequestPending,
 		CreatedAt: now, UpdatedAt: now,

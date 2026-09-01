@@ -289,7 +289,7 @@ func TestRequestFreshCIRunDoesNotClaimALaterRerunAttempt(t *testing.T) {
 func TestRequestFreshCIRunDispatchesOnlyReviewedSameRepoWorkflow(t *testing.T) {
 	service, client, input := setupCIRunServiceTest(t, false)
 	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
-	client.workflowSource = []byte("name: E2E\non:\n  workflow_dispatch:\n    inputs:\n      fail_on_flaky:\n")
+	client.workflowSource = []byte("name: E2E\non:\n  workflow_dispatch:\n    inputs:\n      fail_on_flaky:\n        type: boolean\n        default: false\n")
 	client.runs = []GitHubActionsRun{{
 		ID: 101, Attempt: 1, WorkflowID: 77, WorkflowName: "E2E",
 		WorkflowPath: ".github/workflows/e2e-tests.yml", HeadSHA: input.ExpectedHeadSHA,

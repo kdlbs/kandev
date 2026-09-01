@@ -48,7 +48,10 @@ type CIRunProviderError struct {
 type GitHubRequestMetadata struct {
 	RequestID string
 	URL       string
+	RunID     int64
 }
+
+const scopedActionsAPIVersion = "2026-03-10"
 
 func (e *CIRunProviderError) Error() string {
 	if e.StatusCode > 0 {
@@ -181,14 +184,21 @@ func (c *TokenClient) DispatchActionsWorkflowWithMetadata(
 	inputs map[string]string,
 ) (GitHubRequestMetadata, error) {
 	payload, err := json.Marshal(struct {
-		Ref    string            `json:"ref"`
-		Inputs map[string]string `json:"inputs,omitempty"`
-	}{Ref: ref, Inputs: inputs})
+		Ref              string            `json:"ref"`
+		Inputs           map[string]string `json:"inputs,omitempty"`
+		ReturnRunDetails bool              `json:"return_run_details"`
+	}{Ref: ref, Inputs: inputs, ReturnRunDetails: true})
 	if err != nil {
 		return GitHubRequestMetadata{}, err
 	}
 	endpoint := fmt.Sprintf("/repos/%s/%s/actions/workflows/%d/dispatches", owner, repo, workflowID)
-	metadata, err := c.requestJSONWithMetadata(ctx, http.MethodPost, endpoint, payload, nil)
+	var response struct {
+		WorkflowRunID int64 `json:"workflow_run_id"`
+	}
+	metadata, err := c.requestJSONWithMetadataVersion(
+		ctx, http.MethodPost, endpoint, payload, &response, scopedActionsAPIVersion,
+	)
+	metadata.RunID = response.WorkflowRunID
 	return metadata, classifyCIRunProviderError(err, true, false)
 }
 

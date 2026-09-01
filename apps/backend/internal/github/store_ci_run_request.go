@@ -354,6 +354,15 @@ func (s *Store) MarkCIRunProviderCallStarted(
 			AND EXISTS (
 				SELECT 1 FROM github_ci_run_grants grant
 				JOIN tasks target ON target.id = github_ci_run_requests.target_task_id
+				JOIN task_repositories attachment
+					ON attachment.task_id = target.id
+					AND attachment.repository_id = github_ci_run_requests.repository_id
+				JOIN repositories repository
+					ON repository.id = attachment.repository_id
+				JOIN github_task_prs task_pr
+					ON task_pr.task_id = target.id
+					AND task_pr.repository_id = attachment.repository_id
+					AND task_pr.pr_number = github_ci_run_requests.pr_number
 				WHERE grant.id = github_ci_run_requests.grant_id
 					AND grant.generation = github_ci_run_requests.grant_generation
 					AND grant.workspace_id = github_ci_run_requests.workspace_id
@@ -366,6 +375,14 @@ func (s *Store) MarkCIRunProviderCallStarted(
 					AND target.workspace_id = github_ci_run_requests.workspace_id
 					AND target.workflow_id = github_ci_run_requests.workflow_id
 					AND target.workflow_step_id = github_ci_run_requests.workflow_step_id
+					AND repository.workspace_id = github_ci_run_requests.workspace_id
+					AND repository.provider = 'github'
+					AND LOWER(repository.provider_owner || '/' || repository.provider_name) =
+						LOWER(github_ci_run_requests.canonical_repository)
+					AND task_pr.detached_at IS NULL
+					AND task_pr.state = ?
+					AND LOWER(task_pr.owner || '/' || task_pr.repo) =
+						LOWER(github_ci_run_requests.canonical_repository)
 			)`),
 		at.UTC(), CIRunRequestReconciling, request.Operation, request.ProviderWorkflowID,
 		request.ProviderWorkflowName, request.ProviderWorkflowPath, request.ProviderHeadRepo,
@@ -373,7 +390,7 @@ func (s *Store) MarkCIRunProviderCallStarted(
 		request.ProviderEvent, request.ProviderPrincipalJSON, request.ProviderRequestID,
 		request.ProviderURL, request.ProviderRunWatermark,
 		at.UTC(), request.ID, request.ExecutionOwner, CIRunRequestPending,
-		request.ProviderCallRevision)
+		request.ProviderCallRevision, defaultPRState)
 	if err != nil {
 		return err
 	}
