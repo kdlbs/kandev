@@ -20,36 +20,30 @@ const pagination = vi.hoisted(() => ({
   hasMore: false,
   isLoadingMore: false,
   messagesLoading: false,
+  fetchFailed: false,
+  retryPrompts: vi.fn(),
   loadMore: vi.fn(async () => 0),
-}));
-
-const lazyLoadOptions = vi.hoisted(() => ({
-  current: null as null | { minUserPromptsPerLoad?: number },
 }));
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (value: typeof state) => unknown) => selector(state),
 }));
 
-vi.mock("@/hooks/domains/session/use-session-messages", () => ({
-  useSessionMessages: (sessionId: string | null) => ({
-    messages: sessionId ? (messagesBySession[sessionId] ?? []) : [],
+vi.mock("@/hooks/domains/session/use-session-prompts", () => ({
+  useSessionPrompts: (sessionId: string | null) => ({
+    prompts: sessionId ? (messagesBySession[sessionId] ?? []) : [],
     isLoading: pagination.messagesLoading,
+    fetchFailed: pagination.fetchFailed,
+    retryPrompts: pagination.retryPrompts,
   }),
 }));
 
-vi.mock("@/hooks/use-lazy-load-messages", () => ({
-  useLazyLoadMessages: (
-    _sessionId: string | null,
-    options?: { minUserPromptsPerLoad?: number },
-  ) => {
-    lazyLoadOptions.current = options ?? null;
-    return {
-      loadMore: pagination.loadMore,
-      hasMore: pagination.hasMore,
-      isLoadingMore: pagination.isLoadingMore,
-    };
-  },
+vi.mock("@/hooks/use-lazy-load-prompts", () => ({
+  useLazyLoadPrompts: () => ({
+    loadMore: pagination.loadMore,
+    hasMore: pagination.hasMore,
+    isLoadingMore: pagination.isLoadingMore,
+  }),
 }));
 
 vi.mock("@/hooks/domains/session/use-session-turns", () => ({
@@ -266,8 +260,9 @@ beforeEach(() => {
   pagination.hasMore = false;
   pagination.isLoadingMore = false;
   pagination.messagesLoading = false;
+  pagination.fetchFailed = false;
+  pagination.retryPrompts.mockReset();
   pagination.loadMore.mockResolvedValue(0);
-  lazyLoadOptions.current = null;
   state.tasks.activeSessionId = SESSION_A;
   state.taskSessions.items = {
     [SESSION_A]: { name: "Agent A", is_passthrough: false },
@@ -369,6 +364,17 @@ describe("PromptHistoryPanelContent — rows and test IDs", () => {
 
     expect(screen.getByTestId(PANEL_TEST_ID).textContent).toBe(EMPTY_TEXT);
     expect(screen.queryByTestId(/^prompt-history-row-/)).toBeNull();
+  });
+
+  it("keeps the mobile retry control at the touch-target minimum", () => {
+    pagination.fetchFailed = true;
+
+    render(<PromptHistoryPanelContent />);
+
+    const retry = screen.getByTestId("prompt-history-retry");
+    expect(retry.className).toContain("min-h-11");
+    fireEvent.click(retry);
+    expect(pagination.retryPrompts).toHaveBeenCalledOnce();
   });
 });
 
@@ -706,12 +712,12 @@ describe("PromptHistoryPanelContent — expand/collapse behavior", () => {
 });
 
 describe("PromptHistoryPanelContent — auto-load behavior", () => {
-  it("requests at least 10 user prompts per older-page load", () => {
+  it("renders the older-page sentinel while prompt pages remain", () => {
     pagination.hasMore = true;
     messagesBySession[SESSION_A] = [message({ id: "m1", prompt_index: 2, content: "prompt" })];
     render(<PromptHistoryPanelContent />);
 
-    expect(lazyLoadOptions.current).toEqual({ minUserPromptsPerLoad: 10 });
+    expect(screen.getByTestId("prompt-history-sentinel")).toBeTruthy();
   });
 
   it("sticks to the bottom after a load while the user is pinned, so older pages keep loading", async () => {

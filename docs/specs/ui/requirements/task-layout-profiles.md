@@ -29,6 +29,7 @@ Users can arrange and save the desktop task workbench only while a task is open,
 - **AC-UI-TASK-LAYOUT-PROFILES-001.8:** When the active task gains a linked GitHub pull request or GitLab merge request, Kandev adds the canonical panel as an inactive tab in the group and tab index configured by the selected custom Default. If that layout does not configure PR Details, Kandev adds it beside the live Agent panel. The user's current tab remains selected.
 - **AC-UI-TASK-LAYOUT-PROFILES-001.9:** When a saved profile is the effective desktop default, Kandev shall preserve its split proportions in fresh task environments and Reset Layout.
 - **AC-UI-TASK-LAYOUT-PROFILES-001.10:** When the workbench size differs from the saved profile, Kandev shall scale its proportions and apply the desktop safety caps.
+- **AC-UI-TASK-LAYOUT-PROFILES-001.11:** When a meaningful Git or commit update arrives, Kandev activates Changes only in the desktop Default layout's top-right group. That group must contain exactly the Files and Changes tabs. All other layouts and group contents keep the selected tab active.
 
 ## System design
 

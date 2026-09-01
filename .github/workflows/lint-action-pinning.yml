@@ -72,6 +72,9 @@ jobs:
       - name: Test E2E workflow contract
         run: python3 .github/scripts/e2e-tests-workflow-contract_test.py
 
+      - name: Test stale merge approval revocation workflow contract
+        run: python3 .github/scripts/revoke-ready-to-merge-workflow-contract_test.py
+
       - name: Test managed runtime pin update workflow contract
         run: python3 .github/scripts/update-agent-runtime-pins-workflow-contract_test.py
 

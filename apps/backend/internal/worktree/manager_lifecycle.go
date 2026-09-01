@@ -1,3 +1,5 @@
+//revive:disable:file-length-limit // Legacy lifecycle coordination remains in one file; replacement recovery lives in manager_replacement.go.
+
 package worktree
 
 import (
@@ -293,9 +295,50 @@ func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) 
 		defer func() { _ = handle.Close() }()
 	}
 	if !valid {
+		if err := m.classifyUnavailableReusableWorktree(ctx, req, wt); err != nil {
+			return nil, err
+		}
 		return nil, ErrReuseWorktreeUnavailable
 	}
 	return wt, nil
+}
+
+// classifyUnavailableReusableWorktree distinguishes a missing checkout from a
+// branch that no longer exists in either the local repository or its
+// remote-tracking refs. Attach-only reuse must not recreate a checkout, but a
+// confirmed missing branch still needs the typed recovery signal used by the
+// explicit new-branch action.
+func (m *Manager) classifyUnavailableReusableWorktree(
+	ctx context.Context,
+	req CreateRequest,
+	wt *Worktree,
+) error {
+	if wt == nil || wt.Branch == "" || !m.isGitRepo(req.RepositoryPath) {
+		return nil
+	}
+	localExists, err := m.branchExists(ctx, req.RepositoryPath, wt.Branch)
+	if err != nil {
+		return fmt.Errorf("%w: verify saved branch %q: %w", ErrReuseWorktreeUnavailable, wt.Branch, err)
+	}
+	if localExists {
+		return nil
+	}
+	branch := normalizeOriginBranchName(wt.Branch)
+	remoteExists, err := m.branchExists(ctx, req.RepositoryPath, "refs/remotes/origin/"+branch)
+	if err != nil {
+		return fmt.Errorf("%w: verify saved remote branch %q: %w", ErrReuseWorktreeUnavailable, wt.Branch, err)
+	}
+	if remoteExists {
+		return nil
+	}
+	remoteExists, err = m.remoteBranchExists(ctx, req.RepositoryPath, branch)
+	if err != nil {
+		return fmt.Errorf("%w: verify authoritative remote branch %q: %w", ErrReuseWorktreeUnavailable, wt.Branch, err)
+	}
+	if remoteExists {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", ErrReuseWorktreeUnavailable, &BranchUnrecoverableError{Branch: wt.Branch})
 }
 
 // tryReuseExisting looks for an existing worktree to reuse, recreating it if
@@ -729,7 +772,8 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 			}
 			if selectedRef == "" {
 				if req.PRNumber > 0 {
-					return nil, fmt.Errorf("%w: refreshed pull request head %d was not materialized", ErrBranchUnrecoverable, req.PRNumber)
+					err := &BranchUnrecoverableError{Branch: req.CheckoutBranch}
+					return nil, fmt.Errorf("%w: refreshed pull request head %d was not materialized", err, req.PRNumber)
 				}
 				branchName = req.CheckoutBranch
 				checkoutMode.CheckoutBranch = ""
@@ -1032,10 +1076,10 @@ func (m *Manager) fetchBranchToLocalWithPolicy(
 	}
 
 	if required {
-		if isRemoteBranchMissingError(outputStr) {
+		if isRemoteBranchMissingError(outputStr) || isRemoteRefMissingError(errors.New(outputStr)) {
 			return nil, fmt.Errorf(
 				"required refresh of checkout branch %q found no remote ref: %w",
-				branch, ErrInvalidBaseBranch,
+				branch, newConfirmedRemoteRefMissingError(outputStr),
 			)
 		}
 		reason := classifyGitFallbackReason(err, outputStr, fetchCtxErr)
@@ -1056,7 +1100,17 @@ func (m *Manager) fetchBranchToLocalWithPolicy(
 		return nil, fmt.Errorf("could not verify local branch %q after fetch failure (%s): %w", branch, strings.TrimSpace(outputStr), existsErr)
 	}
 	if !exists {
-		return nil, fmt.Errorf("%w: branch %q not found locally or on remote: %s", ErrInvalidBaseBranch, branch, outputStr)
+		if isRemoteRefMissingError(errors.New(outputStr)) {
+			return nil, fmt.Errorf(
+				"branch %q not found locally or on remote: %w",
+				branch, newConfirmedRemoteRefMissingError(outputStr),
+			)
+		}
+		reason := classifyGitFallbackReason(err, outputStr, fetchCtxErr)
+		return nil, fmt.Errorf(
+			"could not fetch branch %q and no local branch is available (%s): %w",
+			branch, reason, syncFailureCause(reason, err, fetchCtxErr),
+		)
 	}
 
 	reason := classifyGitFallbackReason(err, outputStr, fetchCtxErr)
@@ -1887,7 +1941,11 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 			return nil, prepareErr
 		}
 		if selectedRef == "" {
-			return nil, fmt.Errorf("%w: refreshed branch %q was not materialized", ErrBranchUnrecoverable, sourceBranch)
+			err := &BranchUnrecoverableError{Branch: sourceBranch}
+			if req.AllowBranchReplacement {
+				return m.replaceUnrecoverableWorktree(ctx, existing, req, err)
+			}
+			return nil, fmt.Errorf("%w: refreshed branch %q was not materialized", err, sourceBranch)
 		}
 		if selectedRef != existing.Branch {
 			refreshedStartPoint = selectedRef
@@ -1917,8 +1975,12 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 				// Only a confirmed-missing remote ref means the work is gone;
 				// transient fetch failures (network, auth) keep their own error
 				// so callers don't treat a reachable branch as unrecoverable.
-				if isRemoteRefMissingError(fetchErr) {
-					return nil, fmt.Errorf("%w: %q", ErrBranchUnrecoverable, existing.Branch)
+				if errors.Is(fetchErr, ErrRemoteRefMissing) || isRemoteRefMissingError(fetchErr) {
+					err := &BranchUnrecoverableError{Branch: existing.Branch}
+					if req.AllowBranchReplacement {
+						return m.replaceUnrecoverableWorktree(ctx, existing, req, err)
+					}
+					return nil, err
 				}
 				return nil, fetchErr
 			}
