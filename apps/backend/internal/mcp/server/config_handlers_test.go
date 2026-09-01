@@ -101,6 +101,21 @@ func TestTransferTaskSchemaRejectionIsForwardedForAudit(t *testing.T) {
 	require.NotContains(t, payload, "_audit_only")
 }
 
+func TestTransferTaskSchemaTypeRejectionIsForwardedForAudit(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+	result := callTool(t, s, "transfer_task_kandev", map[string]interface{}{
+		"task_id":                      42,
+		"expected_source_workspace_id": "ws-source",
+	})
+	require.True(t, result.IsError)
+	require.Equal(t, ws.ActionMCPAuditTaskTransferAttempt, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	require.EqualValues(t, 42, payload["task_id"])
+	require.Equal(t, "ws-source", payload["expected_source_workspace_id"])
+}
+
 func TestTransferTaskSchemaRejectionAuditsAfterRequestCancellation(t *testing.T) {
 	backend := &testBackend{}
 	s := newTestServer(t, backend)

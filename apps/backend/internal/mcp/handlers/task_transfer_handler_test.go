@@ -172,6 +172,7 @@ func TestAuditTaskTransferAttemptActionRecordsSchemaRejectedFieldTypes(t *testin
 	require.Equal(t, ws.MessageTypeResponse, response.Type)
 	require.Empty(t, transfer.commands)
 	require.Len(t, transfer.audits, 1)
+	require.Empty(t, transfer.audits[0].TaskID)
 	require.Equal(t, "ws-source", transfer.audits[0].ExpectedSourceWorkspaceID)
 }
 
