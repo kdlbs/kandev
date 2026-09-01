@@ -11,14 +11,13 @@ owners:
 
 ## Purpose and ownership
 
-The UI system owns web presentation and interaction contracts. Task and provider state remain with their owning systems.
+The UI system owns web presentation and interaction.
 
 ## Exclusions
 
-- Task behavior belongs to [Tasks](../tasks/README.md).
-- Agent profiles belong to [Agents](../agents/README.md).
-- Plugin contributions belong to [Plugins](../plugins/README.md).
-- Provider state and actions belong to [Integrations](../integrations/README.md).
+- Behavior and state belong to [Tasks](../tasks/README.md),
+  [Agents](../agents/README.md), [Plugins](../plugins/README.md), and
+  [Integrations](../integrations/README.md).
 
 ## Specification map
 
@@ -91,6 +90,7 @@ The UI system owns web presentation and interaction contracts. Task and provider
 - [Prompt Turn Duration on Message Hover](requirements/prompt-turn-duration.md)
 - [Published Docs Preview Reliability](requirements/published-docs-preview-reliability.md)
 - [Quick Chat elevation](requirements/quick-chat-elevation.md)
+- [Quick Chat viewport layout](requirements/quick-chat-viewport-layout.md)
 - [Quick Chat Idle Dot](requirements/quick-chat-idle-dot.md)
 - [Quick Chat and Terminal Tabs](requirements/quick-terminal.md)
 - [Relative Last Seen in Account Security](requirements/relative-last-seen.md)
@@ -164,6 +164,7 @@ The UI system owns web presentation and interaction contracts. Task and provider
 - [PR Task Status Summary](system-design/pr-task-status-summary.md)
 - [Prompt History Panel](system-design/prompt-history-panel.md)
 - [Quick Chat and terminal elevation](system-design/quick-chat-elevation.md)
+- [Quick Chat viewport layout](system-design/quick-chat-viewport-layout.md)
 - [Quick Chat and Terminal Tabs](system-design/quick-terminal.md)
 - [Responsive Plan Formatting](system-design/responsive-plan-formatting.md)
 - [Task Confirmation Warning Hierarchy](system-design/confirmation-warning-hierarchy.md)
