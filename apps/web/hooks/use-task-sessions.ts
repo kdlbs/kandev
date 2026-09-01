@@ -4,6 +4,7 @@ import { listTaskSessions } from "@/lib/api";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSession } from "@/lib/types/http";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
+import { captureTaskSessionActivityEpochs } from "@/lib/state/slices/session/activity-epochs";
 
 const EMPTY_SESSIONS: TaskSession[] = [];
 
@@ -25,11 +26,9 @@ async function hydrateTaskSessions({
   const stateAtRequestStart = getStoreState();
   const sessionsAtRequestStart = storedTaskSessions(() => stateAtRequestStart, taskId);
   const sessionIdsAtRequestStart = new Set(sessionsAtRequestStart.map((session) => session.id));
-  const activityEpochsAtRequestStart = Object.fromEntries(
-    sessionsAtRequestStart.map((session) => [
-      session.id,
-      stateAtRequestStart.taskSessions.activityEpochBySession?.[session.id] ?? 0,
-    ]),
+  const activityEpochsAtRequestStart = captureTaskSessionActivityEpochs(
+    stateAtRequestStart,
+    taskId,
   );
   try {
     const response = await listTaskSessions(taskId, { cache: "no-store" });

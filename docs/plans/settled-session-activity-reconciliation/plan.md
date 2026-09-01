@@ -45,8 +45,9 @@ existing backend-restart browser flow with the operator-visible outcome.
   `apps/web/lib/state/slices/session/types.ts` and `session-slice.ts`.
 - Increment the epoch whenever a partial session event explicitly carries
   `foreground_activity`, including repeated values and explicit clears.
-- Capture activity epochs in `apps/web/hooks/use-task-sessions.ts` when
-  `useTaskSessions` starts an authoritative list request.
+- Capture activity epochs through one shared helper whenever a client-side
+  asynchronous session-list loader starts an authoritative request, including
+  task hydration, task selection/removal, and Office task detail loading.
 - When the response arrives, normalize an omitted activity field to a clear if
   the session epoch is unchanged. If the epoch advanced, preserve the newer
   live projection (`foreground_activity`, `active_subagent_count`, and
@@ -93,7 +94,8 @@ Execution is sequential in the primary conversation. Task 02 depends on Task
 
 ## Verification results
 
-- Focused Vitest: 41 tests passed across the session slice and hydration hook.
+- Focused Vitest: 57 tests passed across the session slice, hydration hook,
+  task selection/removal loader, and Office task detail loader.
 - Web TypeScript typecheck passed.
 - Focused desktop Chromium restart E2E passed after demonstrating the expected
   timeout against the pre-fix merge behavior.

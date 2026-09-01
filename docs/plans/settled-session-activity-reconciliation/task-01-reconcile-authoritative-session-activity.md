@@ -57,6 +57,10 @@ cd apps/web && pnpm run typecheck
 - `apps/web/lib/state/slices/session/session-slice.upsert.test.ts`
 - `apps/web/hooks/use-task-sessions.ts`
 - `apps/web/hooks/use-task-sessions.test.ts`
+- `apps/web/hooks/use-task-removal.ts`
+- `apps/web/hooks/use-task-removal-session-loading.test.ts`
+- `apps/web/app/office/tasks/[id]/page.tsx`
+- `apps/web/app/office/tasks/[id]/page.test.tsx`
 
 ## Dependencies
 
@@ -89,7 +93,8 @@ together.
   activity event and are deleted with the session.
 - Complete list snapshots now clear omitted activity defaults, while partial
   events retain their omission-preserving merge behavior.
-- Hydration captures request-start epochs so a newer live activity projection
-  wins over an older response without blocking durable-field reconciliation.
-- The focused store and hydration suite passes all 41 tests, and web typecheck
+- A shared helper ensures every client-side asynchronous session-list loader
+  captures request-start epochs, so a newer live activity projection wins over
+  an older response without blocking durable-field reconciliation.
+- The focused store and loader suite passes all 57 tests, and web typecheck
   passes.

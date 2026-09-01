@@ -66,8 +66,10 @@ per-session client activity epoch. Applying an explicit activity projection
 from a WebSocket state or activity event increments that epoch, including when
 the value repeats or clears.
 
-The task-session hydration hook captures each existing session's epoch before
-starting the request. When the response arrives:
+Every client-side asynchronous session-list loader captures each existing
+session's epoch through the shared activity-epoch helper before starting its
+request. This includes normal task hydration, task-selection/removal loading,
+and Office task detail loading. When the response arrives:
 
 1. If the epoch did not advance, the complete response replaces the activity
    projection. An omitted `foreground_activity` clears the stored value.
@@ -77,9 +79,9 @@ starting the request. When the response arrives:
 3. A session first observed in the response adopts the response projection
    directly.
 
-Callers that apply a complete snapshot without an in-flight request token treat
-that snapshot as authoritative at application time. Removing a session also
-removes its client activity epoch.
+Synchronous callers that apply a complete snapshot without an in-flight
+request token treat that snapshot as authoritative at application time.
+Removing a session also removes its client activity epoch.
 
 This ordering rule protects the opt-in Claude background tier while allowing a
 post-restart snapshot to clear activity retained from the previous process.
@@ -112,11 +114,11 @@ replace that identity guard.
 ## Verification strategy
 
 Session-slice tests prove that a complete settled snapshot clears an omitted
-activity field while a partial event preserves it. Hook and slice tests hold a
-session-list request open, apply a newer activity event, and prove that the
-older response cannot erase the event projection. Existing explicit-value,
-explicit-null, cancellation-revision, route-generation, and newly-added-session
-tests remain green.
+activity field while a partial event preserves it. Hook, task-selection, Office
+detail, and slice tests hold a session-list request open, apply a newer activity
+event, and prove that the older response cannot erase the event projection.
+Existing explicit-value, explicit-null, cancellation-revision,
+route-generation, and newly-added-session tests remain green.
 
 A desktop Playwright case extends the backend-restart session-resume flow. It
 starts with a retained background projection, restarts the backend, opens or
