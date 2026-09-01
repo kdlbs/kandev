@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { toast } from "sonner";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { listSkills, updateAgentProfile } from "@/lib/api/domains/office-api";
@@ -181,5 +182,29 @@ describe("AgentSkillsTab save", () => {
         }),
       );
     });
+  });
+
+  it("re-enables the Save button and reports an error when the save request fails", async () => {
+    vi.mocked(updateAgentProfile).mockRejectedValueOnce(new Error("network error"));
+    vi.mocked(listSkills).mockResolvedValue({ skills: [skill] });
+    renderSkillsTab(agentDesiredOnly, [skill]);
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId(`skill-toggle-checkbox-${skill.slug}`).getAttribute(DATA_STATE),
+      ).toBe(CHECKED);
+    });
+
+    fireEvent.click(screen.getByTestId(`skill-toggle-checkbox-${skill.slug}`));
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("network error");
+    });
+    expect(toast.success).not.toHaveBeenCalled();
+    // The Save button must re-enable (saving cleared via `finally`) so the
+    // user can retry instead of getting stuck on a disabled control.
+    const saveButton = screen.getByRole("button", { name: /save/i }) as HTMLButtonElement;
+    expect(saveButton.disabled).toBe(false);
   });
 });
