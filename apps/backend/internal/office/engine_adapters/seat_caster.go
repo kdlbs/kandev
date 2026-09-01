@@ -14,21 +14,21 @@ import (
 // SeatCasterWorkflowRepo captures the workflow-repo subset the seat caster
 // needs: resolving the task's runner (REQ-OFFICE-REVIEW-SEATS-002's "the
 // task's runner" fallback and self-review comparison), and listing every
-// participant seat already recorded for the task, for the cross-step
-// exclusion in castFromCandidates. The caller supplies the immutable step
-// that the task entered, so this adapter does not re-read mutable task
-// state after the transition commits.
+// participant seat already recorded for the task's current workflow, for
+// the cross-step exclusion in castFromCandidates. The caller supplies the
+// immutable step that the task entered, so this adapter does not re-read
+// mutable task state after the transition commits.
 type SeatCasterWorkflowRepo interface {
 	ResolveCurrentRunner(ctx context.Context, stepID, taskID string) (string, error)
-	ListParticipantsForTaskAnyStep(ctx context.Context, taskID string) ([]*wfmodels.WorkflowStepParticipant, error)
+	ListParticipantsForTaskWorkflow(ctx context.Context, taskID, workflowID string) ([]*wfmodels.WorkflowStepParticipant, error)
 }
 
 // seatRolePools maps a participant role to the set of agent roles eligible
-// for its seat, per the D-B ruling (PLAN-next-steps.md, 2026-09-01, part 1):
-// approver draws from `ceo`; reviewer draws from `ceo` ∪ `specialist` — and
-// only those two. Any other participant role (watcher, collaborator, ...)
-// keeps today's ceo-only behavior; the ruling does not cover them, and the
-// pool must not be widened without a new ruling.
+// for its seat, per AC-OFFICE-REVIEW-SEATS-002.1: approver draws from `ceo`;
+// reviewer draws from `ceo` ∪ `specialist` — and only those two. Any other
+// participant role (watcher, collaborator, ...) keeps today's ceo-only
+// behavior; the AC does not cover them, and the pool must not be widened
+// without an amended AC.
 var seatRolePools = map[string]map[models.AgentRole]bool{
 	string(wfmodels.ParticipantRoleReviewer): {
 		models.AgentRoleCEO:        true,
@@ -62,11 +62,13 @@ func eligibleAgentRolesFor(role string) map[models.AgentRole]bool {
 //  2. Empty list: seat the task's runner (fallback provenance); no runner
 //     resolves is unfillable.
 //  3. Otherwise seat the first candidate that is neither the task's runner
-//     nor already holding another seat on this task (best-effort cross-step
-//     exclusion, D-B part 3) — this is what lets a reviewer and an approver
-//     land on different agents when the workspace shape allows it. If no
-//     such candidate exists, fall back to the original runner-only rule so
-//     a seat is never left empty.
+//     nor already holding another seat on this task's current workflow
+//     (best-effort cross-step exclusion, AC-OFFICE-REVIEW-SEATS-002.3) —
+//     this is what lets a reviewer and an approver land on different agents
+//     when the workspace shape allows it. If no such candidate exists, fall
+//     back to the runner-exclusion-only rule (skip the runner if any other
+//     candidate remains, otherwise seat the runner) so a seat is never left
+//     empty.
 //
 // The status exclusion is applied here, over ListAgentInstancesFiltered's
 // result, rather than by adding a filter to that shared method or changing
@@ -86,7 +88,7 @@ func NewSeatCasterAdapter(office OfficeRepo, workflow SeatCasterWorkflowRepo) *S
 
 // CastParticipantSeat satisfies engine.ParticipantSeatCaster.
 func (a *SeatCasterAdapter) CastParticipantSeat(
-	ctx context.Context, taskID, stepID, role string,
+	ctx context.Context, workflowID, taskID, stepID, role string,
 ) (engine.ParticipantSeatCastResult, error) {
 	if taskID == "" {
 		return engine.ParticipantSeatCastResult{}, fmt.Errorf("task_id is required to cast a participant seat")
@@ -112,7 +114,7 @@ func (a *SeatCasterAdapter) CastParticipantSeat(
 		return engine.ParticipantSeatCastResult{}, fmt.Errorf("list eligible candidates: %w", err)
 	}
 
-	return castFromCandidates(candidates, runner, a.alreadySeatedAgents(ctx, taskID), fields.WorkspaceID), nil
+	return castFromCandidates(candidates, runner, a.alreadySeatedAgents(ctx, taskID, workflowID), fields.WorkspaceID), nil
 }
 
 // eligibleCandidates returns the workspace's Office agents eligible for
@@ -155,15 +157,18 @@ func (a *SeatCasterAdapter) eligibleCandidates(
 }
 
 // alreadySeatedAgents returns the set of agent profile ids already holding a
-// participant seat anywhere on taskID, for castFromCandidates' best-effort
-// cross-step exclusion. A read failure is non-fatal: the exclusion signal is
-// optional and must never block casting a seat (D-B part 3,
-// AC-OFFICE-REVIEW-SEATS-002.3's best-effort clause), so this returns an
-// empty set instead of propagating the error, and the caller casts without
-// exclusion.
-func (a *SeatCasterAdapter) alreadySeatedAgents(ctx context.Context, taskID string) map[string]bool {
+// participant seat anywhere on taskID's current workflow (workflowID), for
+// castFromCandidates' best-effort cross-step exclusion. Scoping to workflowID
+// keeps rows left over from a workflow the task has since switched away from
+// (switch_workflow durably keeps them; see ListParticipantsForTaskWorkflow's
+// doc comment) from ever counting as already seated. A read failure is
+// non-fatal: the exclusion signal is optional and must never block casting a
+// seat (AC-OFFICE-REVIEW-SEATS-002.3's best-effort clause), so this returns
+// an empty set instead of propagating the error, and the caller casts
+// without exclusion.
+func (a *SeatCasterAdapter) alreadySeatedAgents(ctx context.Context, taskID, workflowID string) map[string]bool {
 	seated := map[string]bool{}
-	participants, err := a.Workflow.ListParticipantsForTaskAnyStep(ctx, taskID)
+	participants, err := a.Workflow.ListParticipantsForTaskWorkflow(ctx, taskID, workflowID)
 	if err != nil {
 		return seated
 	}
@@ -175,18 +180,20 @@ func (a *SeatCasterAdapter) alreadySeatedAgents(ctx context.Context, taskID stri
 	return seated
 }
 
-// castFromCandidates applies steps 2-3 of the casting resolution algorithm
+// castFromCandidates applies steps 2-5 of the casting resolution algorithm
 // to an already-ordered, already-filtered candidate list, a resolved runner
 // (which may be empty, meaning "does not resolve"), and the set of agent
-// profile ids already seated elsewhere on this task. workspaceID is stamped
-// onto every result, including an Unfillable one, so the caller can emit
-// AC-OFFICE-REVIEW-SEATS-004.1's warning record without a second lookup.
+// profile ids already seated elsewhere on this task's current workflow.
+// workspaceID is stamped onto every result, including an Unfillable one, so
+// the caller can emit AC-OFFICE-REVIEW-SEATS-004.1's warning record without
+// a second lookup.
 //
-// The cross-step exclusion is best-effort and never blocking (D-B part 3):
-// if every candidate is either the runner or already seated, the original
-// runner-only rule decides instead of leaving the seat empty. SelfReview is
-// then true for either reason, since both mean the chosen agent is already
-// participating in this task's review in some capacity.
+// The cross-step exclusion is best-effort and never blocking
+// (AC-OFFICE-REVIEW-SEATS-002.3): if every candidate is either the runner or
+// already seated, the runner-exclusion-only rule decides instead of leaving
+// the seat empty. SelfReview is then true for either reason, since both mean
+// the chosen agent is already participating in this task's review in some
+// capacity.
 func castFromCandidates(
 	candidates []*models.AgentInstance, runner string, alreadySeated map[string]bool, workspaceID string,
 ) engine.ParticipantSeatCastResult {

@@ -19,9 +19,10 @@ type fakeSeatCasterWorkflowRepo struct {
 	runner    string
 	runnerErr error
 
-	seatedAgentIDs     []string
-	participantsErr    error
-	gotParticipantsFor string
+	seatedAgentIDs       []string
+	participantsErr      error
+	gotParticipantsFor   string
+	gotParticipantsForWF string
 
 	gotRunnerStepID string
 	gotRunnerTaskID string
@@ -33,10 +34,11 @@ func (f *fakeSeatCasterWorkflowRepo) ResolveCurrentRunner(_ context.Context, ste
 	return f.runner, f.runnerErr
 }
 
-func (f *fakeSeatCasterWorkflowRepo) ListParticipantsForTaskAnyStep(
-	_ context.Context, taskID string,
+func (f *fakeSeatCasterWorkflowRepo) ListParticipantsForTaskWorkflow(
+	_ context.Context, taskID, workflowID string,
 ) ([]*wfmodels.WorkflowStepParticipant, error) {
 	f.gotParticipantsFor = taskID
+	f.gotParticipantsForWF = workflowID
 	if f.participantsErr != nil {
 		return nil, f.participantsErr
 	}
@@ -52,7 +54,7 @@ func TestSeatCasterAdapter_EmptyCandidateListFallsBackToRunner(t *testing.T) {
 	wf := &fakeSeatCasterWorkflowRepo{runner: "runner-agent"}
 	a := NewSeatCasterAdapter(office, wf)
 
-	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer")
+	got, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-1", "reviewer")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -78,7 +80,7 @@ func TestSeatCasterAdapter_EmptyCandidateListAndNoRunnerIsUnfillable(t *testing.
 	wf := &fakeSeatCasterWorkflowRepo{runner: ""}
 	a := NewSeatCasterAdapter(office, wf)
 
-	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer")
+	got, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-1", "reviewer")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -104,7 +106,7 @@ func TestSeatCasterAdapter_SingleCandidateIsRunnerRecordsSelfReview(t *testing.T
 	wf := &fakeSeatCasterWorkflowRepo{runner: "agent-A"}
 	a := NewSeatCasterAdapter(office, wf)
 
-	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer")
+	got, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-1", "reviewer")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -132,7 +134,7 @@ func TestSeatCasterAdapter_FirstCandidateIsRunnerSeatsSecond(t *testing.T) {
 	wf := &fakeSeatCasterWorkflowRepo{runner: "agent-A"}
 	a := NewSeatCasterAdapter(office, wf)
 
-	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer")
+	got, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-1", "reviewer")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -160,7 +162,7 @@ func TestSeatCasterAdapter_FirstCandidateNotRunnerSeatsFirstAsEligiblePool(t *te
 	wf := &fakeSeatCasterWorkflowRepo{runner: "someone-else"}
 	a := NewSeatCasterAdapter(office, wf)
 
-	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer")
+	got, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-1", "reviewer")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -188,7 +190,7 @@ func TestSeatCasterAdapter_ExcludesStoppedAndPendingApprovalCandidates(t *testin
 	wf := &fakeSeatCasterWorkflowRepo{runner: ""}
 	a := NewSeatCasterAdapter(office, wf)
 
-	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer")
+	got, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-1", "reviewer")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -220,7 +222,7 @@ func TestSeatCasterAdapter_OrdersCandidatesByCreatedAtThenIdentifier(t *testing.
 	wf := &fakeSeatCasterWorkflowRepo{runner: ""}
 	a := NewSeatCasterAdapter(office, wf)
 
-	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer")
+	got, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-1", "reviewer")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -231,7 +233,7 @@ func TestSeatCasterAdapter_OrdersCandidatesByCreatedAtThenIdentifier(t *testing.
 
 func TestSeatCasterAdapter_RejectsEmptyTaskID(t *testing.T) {
 	a := NewSeatCasterAdapter(&fakeOfficeRepo{}, &fakeSeatCasterWorkflowRepo{})
-	if _, err := a.CastParticipantSeat(context.Background(), "", "step-1", "reviewer"); err == nil {
+	if _, err := a.CastParticipantSeat(context.Background(), "wf-1", "", "step-1", "reviewer"); err == nil {
 		t.Fatal("expected error for empty task id")
 	}
 }
@@ -239,7 +241,7 @@ func TestSeatCasterAdapter_RejectsEmptyTaskID(t *testing.T) {
 func TestSeatCasterAdapter_PropagatesWorkspaceResolutionError(t *testing.T) {
 	office := &fakeOfficeRepo{fieldsErr: errors.New("boom")}
 	a := NewSeatCasterAdapter(office, &fakeSeatCasterWorkflowRepo{})
-	if _, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer"); err == nil {
+	if _, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-1", "reviewer"); err == nil {
 		t.Fatal("expected error")
 	}
 }
@@ -247,7 +249,7 @@ func TestSeatCasterAdapter_PropagatesWorkspaceResolutionError(t *testing.T) {
 func TestSeatCasterAdapter_PropagatesTaskWithNoWorkspaceAsError(t *testing.T) {
 	office := &fakeOfficeRepo{fields: &sqlite.TaskExecutionFields{ID: "t-1"}}
 	a := NewSeatCasterAdapter(office, &fakeSeatCasterWorkflowRepo{})
-	if _, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer"); err == nil {
+	if _, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-1", "reviewer"); err == nil {
 		t.Fatal("expected error for a task with no workspace")
 	}
 }
@@ -256,7 +258,7 @@ func TestSeatCasterAdapter_RejectsEmptyStepID(t *testing.T) {
 	office := &fakeOfficeRepo{fields: &sqlite.TaskExecutionFields{ID: "t-1", WorkspaceID: "ws-1"}}
 	wf := &fakeSeatCasterWorkflowRepo{}
 	a := NewSeatCasterAdapter(office, wf)
-	if _, err := a.CastParticipantSeat(context.Background(), "t-1", "", "reviewer"); err == nil {
+	if _, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "", "reviewer"); err == nil {
 		t.Fatal("expected error for empty step id")
 	}
 }
@@ -265,7 +267,7 @@ func TestSeatCasterAdapter_PropagatesRunnerResolutionError(t *testing.T) {
 	office := &fakeOfficeRepo{fields: &sqlite.TaskExecutionFields{ID: "t-1", WorkspaceID: "ws-1"}}
 	wf := &fakeSeatCasterWorkflowRepo{runnerErr: errors.New("boom")}
 	a := NewSeatCasterAdapter(office, wf)
-	if _, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer"); err == nil {
+	if _, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-1", "reviewer"); err == nil {
 		t.Fatal("expected error")
 	}
 }
@@ -277,7 +279,7 @@ func TestSeatCasterAdapter_PropagatesCandidateListingError(t *testing.T) {
 	}
 	wf := &fakeSeatCasterWorkflowRepo{runner: "runner-agent"}
 	a := NewSeatCasterAdapter(office, wf)
-	if _, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer"); err == nil {
+	if _, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-1", "reviewer"); err == nil {
 		t.Fatal("expected error")
 	}
 }
@@ -287,12 +289,33 @@ func TestSeatCasterAdapter_UsesEnteredStepToResolveRunner(t *testing.T) {
 	wf := &fakeSeatCasterWorkflowRepo{runner: "runner-agent"}
 	a := NewSeatCasterAdapter(office, wf)
 
-	if _, err := a.CastParticipantSeat(context.Background(), "t-1", "step-42", "reviewer"); err != nil {
+	if _, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-42", "reviewer"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if wf.gotRunnerStepID != "step-42" || wf.gotRunnerTaskID != "t-1" {
 		t.Errorf("ResolveCurrentRunner called with step=%q task=%q, want step-42/t-1",
 			wf.gotRunnerStepID, wf.gotRunnerTaskID)
+	}
+}
+
+// TestSeatCasterAdapter_ScopesExclusionReadToCallersWorkflow covers the P1
+// fix: the cross-step exclusion read must scope to the workflowID the
+// caller passes, not read task-wide across every workflow the task has ever
+// been on. A workflow the task switched away from durably keeps its
+// workflow_step_participants rows (switch_workflow), so an unscoped read
+// would count a stale row from that abandoned workflow as "already seated"
+// for the current one.
+func TestSeatCasterAdapter_ScopesExclusionReadToCallersWorkflow(t *testing.T) {
+	office := &fakeOfficeRepo{fields: &sqlite.TaskExecutionFields{ID: "t-1", WorkspaceID: "ws-1"}}
+	wf := &fakeSeatCasterWorkflowRepo{runner: "runner-agent"}
+	a := NewSeatCasterAdapter(office, wf)
+
+	if _, err := a.CastParticipantSeat(context.Background(), "wf-current", "t-1", "step-1", "reviewer"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if wf.gotParticipantsFor != "t-1" || wf.gotParticipantsForWF != "wf-current" {
+		t.Errorf("ListParticipantsForTaskWorkflow called with task=%q workflow=%q, want t-1/wf-current",
+			wf.gotParticipantsFor, wf.gotParticipantsForWF)
 	}
 }
 
@@ -317,7 +340,7 @@ func TestSeatCasterAdapter_ReviewerPoolIncludesSpecialists(t *testing.T) {
 	wf := &fakeSeatCasterWorkflowRepo{runner: ""}
 	a := NewSeatCasterAdapter(office, wf)
 
-	reviewer, err := a.CastParticipantSeat(context.Background(), "t-1", "step-review", "reviewer")
+	reviewer, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-review", "reviewer")
 	if err != nil {
 		t.Fatalf("reviewer cast: %v", err)
 	}
@@ -332,7 +355,7 @@ func TestSeatCasterAdapter_ReviewerPoolIncludesSpecialists(t *testing.T) {
 	}
 
 	wf.seatedAgentIDs = []string{reviewer.AgentProfileID}
-	approver, err := a.CastParticipantSeat(context.Background(), "t-1", "step-approve", "approver")
+	approver, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-approve", "approver")
 	if err != nil {
 		t.Fatalf("approver cast: %v", err)
 	}
@@ -365,7 +388,7 @@ func TestSeatCasterAdapter_ReviewerWidensToOlderSpecialist(t *testing.T) {
 	wf := &fakeSeatCasterWorkflowRepo{runner: ""}
 	a := NewSeatCasterAdapter(office, wf)
 
-	reviewer, err := a.CastParticipantSeat(context.Background(), "t-1", "step-review", "reviewer")
+	reviewer, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-review", "reviewer")
 	if err != nil {
 		t.Fatalf("reviewer cast: %v", err)
 	}
@@ -380,7 +403,7 @@ func TestSeatCasterAdapter_ReviewerWidensToOlderSpecialist(t *testing.T) {
 	}
 
 	wf.seatedAgentIDs = []string{reviewer.AgentProfileID}
-	approver, err := a.CastParticipantSeat(context.Background(), "t-1", "step-approve", "approver")
+	approver, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-approve", "approver")
 	if err != nil {
 		t.Fatalf("approver cast: %v", err)
 	}
@@ -421,7 +444,7 @@ func TestSeatCasterAdapter_ApproverPoolStaysCEOOnly(t *testing.T) {
 	wf := &fakeSeatCasterWorkflowRepo{runner: ""}
 	a := NewSeatCasterAdapter(office, wf)
 
-	reviewer, err := a.CastParticipantSeat(context.Background(), "t-1", "step-review", "reviewer")
+	reviewer, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-review", "reviewer")
 	if err != nil {
 		t.Fatalf("reviewer cast: %v", err)
 	}
@@ -430,7 +453,7 @@ func TestSeatCasterAdapter_ApproverPoolStaysCEOOnly(t *testing.T) {
 	}
 
 	wf.seatedAgentIDs = []string{reviewer.AgentProfileID}
-	approver, err := a.CastParticipantSeat(context.Background(), "t-1", "step-approve", "approver")
+	approver, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-approve", "approver")
 	if err != nil {
 		t.Fatalf("approver cast: %v", err)
 	}
@@ -458,7 +481,7 @@ func TestSeatCasterAdapter_ApproverPoolExcludesSpecialistsEvenWhenCEOPoolEmpty(t
 	wf := &fakeSeatCasterWorkflowRepo{runner: "runner-agent"}
 	a := NewSeatCasterAdapter(office, wf)
 
-	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-approve", "approver")
+	got, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-approve", "approver")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -470,9 +493,10 @@ func TestSeatCasterAdapter_ApproverPoolExcludesSpecialistsEvenWhenCEOPoolEmpty(t
 	}
 }
 
-// TestSeatCasterAdapter_ExclusionNeverEmptiesASeat covers D-B part 3's
-// never-blocking guarantee: the sole candidate is already seated at another
-// step on this task, and must be seated anyway rather than left unfillable.
+// TestSeatCasterAdapter_ExclusionNeverEmptiesASeat covers
+// AC-OFFICE-REVIEW-SEATS-002.3's never-blocking guarantee: the sole
+// candidate is already seated at another step on this task, and must be
+// seated anyway rather than left unfillable.
 func TestSeatCasterAdapter_ExclusionNeverEmptiesASeat(t *testing.T) {
 	t0 := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
 	office := &fakeOfficeRepo{
@@ -484,7 +508,7 @@ func TestSeatCasterAdapter_ExclusionNeverEmptiesASeat(t *testing.T) {
 	wf := &fakeSeatCasterWorkflowRepo{runner: "", seatedAgentIDs: []string{"ceo-1"}}
 	a := NewSeatCasterAdapter(office, wf)
 
-	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-approve", "approver")
+	got, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-approve", "approver")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -500,8 +524,9 @@ func TestSeatCasterAdapter_ExclusionNeverEmptiesASeat(t *testing.T) {
 }
 
 // TestSeatCasterAdapter_ExclusionReadFailureIsNonFatal covers
-// AC-OFFICE-REVIEW-SEATS-002.8: a failure reading the cross-step exclusion
-// signal must not fail the cast — it degrades to casting without exclusion.
+// AC-OFFICE-REVIEW-SEATS-002.3's best-effort clause: a failure reading the
+// cross-step exclusion signal must not fail the cast — it degrades to
+// casting without exclusion.
 func TestSeatCasterAdapter_ExclusionReadFailureIsNonFatal(t *testing.T) {
 	t1 := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
 	t2 := t1.Add(time.Minute)
@@ -515,7 +540,7 @@ func TestSeatCasterAdapter_ExclusionReadFailureIsNonFatal(t *testing.T) {
 	wf := &fakeSeatCasterWorkflowRepo{runner: "", participantsErr: errors.New("boom")}
 	a := NewSeatCasterAdapter(office, wf)
 
-	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-approve", "approver")
+	got, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-approve", "approver")
 	if err != nil {
 		t.Fatalf("expected the seat to still be cast when the exclusion read fails: %v", err)
 	}
@@ -546,7 +571,7 @@ func TestSeatCasterAdapter_PoolAllowlistIsPositiveNotADenylist(t *testing.T) {
 	a := NewSeatCasterAdapter(office, wf)
 
 	for _, role := range []string{"reviewer", "approver"} {
-		got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", role)
+		got, err := a.CastParticipantSeat(context.Background(), "wf-1", "t-1", "step-1", role)
 		if err != nil {
 			t.Fatalf("role %q: unexpected error: %v", role, err)
 		}
