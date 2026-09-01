@@ -324,6 +324,12 @@ func TestSeatCasterAdapter_ReviewerPoolIncludesSpecialists(t *testing.T) {
 	if reviewer.AgentProfileID != "ceo-1" {
 		t.Fatalf("reviewer = %q, want ceo-1 (earliest created_at)", reviewer.AgentProfileID)
 	}
+	// Pins the regression a reverted seat_caster.go:132 (Role: ceo) would
+	// reintroduce: the pool union can only be expressed by listing with no
+	// Role filter and applying the allowlist in Go (AC-OFFICE-REVIEW-SEATS-002.2).
+	if office.gotFilter.Role != "" {
+		t.Errorf("reviewer cast: filter role = %q, want empty (pool allowlist is applied in Go, not pushed to the shared listing)", office.gotFilter.Role)
+	}
 
 	wf.seatedAgentIDs = []string{reviewer.AgentProfileID}
 	approver, err := a.CastParticipantSeat(context.Background(), "t-1", "step-approve", "approver")
@@ -332,6 +338,9 @@ func TestSeatCasterAdapter_ReviewerPoolIncludesSpecialists(t *testing.T) {
 	}
 	if approver.AgentProfileID != "ceo-2" {
 		t.Fatalf("approver = %q, want ceo-2 (ceo-1 excluded; the approver pool never includes spec-1)", approver.AgentProfileID)
+	}
+	if office.gotFilter.Role != "" {
+		t.Errorf("approver cast: filter role = %q, want empty (pool allowlist is applied in Go, not pushed to the shared listing)", office.gotFilter.Role)
 	}
 	if reviewer.AgentProfileID == approver.AgentProfileID {
 		t.Fatal("expected reviewer and approver to be different agents")
@@ -363,6 +372,12 @@ func TestSeatCasterAdapter_ReviewerWidensToOlderSpecialist(t *testing.T) {
 	if reviewer.AgentProfileID != "spec-1" {
 		t.Fatalf("reviewer = %q, want spec-1 (earliest created_at across ceo ∪ specialist)", reviewer.AgentProfileID)
 	}
+	// Pins the regression a reverted seat_caster.go:132 (Role: ceo) would
+	// reintroduce: the pool union can only be expressed by listing with no
+	// Role filter and applying the allowlist in Go (AC-OFFICE-REVIEW-SEATS-002.2).
+	if office.gotFilter.Role != "" {
+		t.Errorf("reviewer cast: filter role = %q, want empty (pool allowlist is applied in Go, not pushed to the shared listing)", office.gotFilter.Role)
+	}
 
 	wf.seatedAgentIDs = []string{reviewer.AgentProfileID}
 	approver, err := a.CastParticipantSeat(context.Background(), "t-1", "step-approve", "approver")
@@ -371,6 +386,9 @@ func TestSeatCasterAdapter_ReviewerWidensToOlderSpecialist(t *testing.T) {
 	}
 	if approver.AgentProfileID != "ceo-1" {
 		t.Fatalf("approver = %q, want ceo-1 (the approver pool is ceo-only)", approver.AgentProfileID)
+	}
+	if office.gotFilter.Role != "" {
+		t.Errorf("approver cast: filter role = %q, want empty (pool allowlist is applied in Go, not pushed to the shared listing)", office.gotFilter.Role)
 	}
 	if reviewer.AgentProfileID == approver.AgentProfileID {
 		t.Fatal("expected reviewer and approver to be different agents")

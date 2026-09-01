@@ -156,10 +156,11 @@ func (a *SeatCasterAdapter) eligibleCandidates(
 
 // alreadySeatedAgents returns the set of agent profile ids already holding a
 // participant seat anywhere on taskID, for castFromCandidates' best-effort
-// cross-step exclusion (D-B part 3). A read failure is non-fatal: casting a
-// seat must never fail because this optional signal could not be read
-// (AC-OFFICE-REVIEW-SEATS-002.8), so this returns an empty set instead of
-// propagating the error, and the caller casts without exclusion.
+// cross-step exclusion. A read failure is non-fatal: the exclusion signal is
+// optional and must never block casting a seat (D-B part 3,
+// AC-OFFICE-REVIEW-SEATS-002.3's best-effort clause), so this returns an
+// empty set instead of propagating the error, and the caller casts without
+// exclusion.
 func (a *SeatCasterAdapter) alreadySeatedAgents(ctx context.Context, taskID string) map[string]bool {
 	seated := map[string]bool{}
 	participants, err := a.Workflow.ListParticipantsForTaskAnyStep(ctx, taskID)

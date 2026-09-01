@@ -275,10 +275,10 @@ Given workspace, task, step and role:
    is non-fatal, and if every member is excluded, casting falls back to the
    first member (second, if the first is the runner) as before. Self-review
    is recorded either way.
-5. Otherwise seat the first, recording the provenance as *eligible pool* rather
-   than *fallback* (`AC-OFFICE-REVIEW-SEATS-002.9`). This is the ordinary case,
-   and naming it is what makes the provenance counter's values exhaustive
-   rather than exceptional.
+5. Otherwise (exactly one candidate, not the runner) seat it, recording the
+   provenance as *eligible pool* rather than *fallback*, and recording
+   self-review if it is already seated in another role on the task
+   (`AC-OFFICE-REVIEW-SEATS-002.9`). Disjoint from step 4's domain.
 
 **The runner resolver does not work on Postgres, and is repaired here.** Step 2
 is the only path that seats anyone in a CEO-less workspace, and in this card's
