@@ -352,6 +352,49 @@ func (r *memoryRepository) ListBySession(_ context.Context, sessionID string) ([
 	return out, nil
 }
 
+// DisposeExact removes only unchanged exact entries under the session's memory lock.
+func (r *memoryRepository) DisposeExact(_ context.Context, sessionID string, claims []QueueEntryClaim) (*QueueDispositionResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	list := r.entries[sessionID]
+	result := &QueueDispositionResult{
+		BeforeCount: visibleQueueCount(list),
+		Outcomes:    make([]QueueDispositionOutcome, 0, len(claims)),
+	}
+	byID := make(map[string]*QueuedMessage, len(list))
+	remove := make(map[string]struct{}, len(claims))
+	for _, entry := range list {
+		byID[entry.ID] = entry
+	}
+	for _, claim := range claims {
+		outcome := QueueDispositionOutcome{ID: claim.ID, Status: QueueDispositionNotFound}
+		if entry := byID[claim.ID]; entry != nil {
+			outcome.Status = QueueDispositionChanged
+			if !entry.IsReservedInFlight() && queueSnapshotClaim(entry) == claim.Claim {
+				outcome.Status = QueueDispositionRemoved
+				remove[claim.ID] = struct{}{}
+			}
+		}
+		result.Outcomes = append(result.Outcomes, outcome)
+	}
+	if len(remove) > 0 {
+		kept := make([]*QueuedMessage, 0, len(list)-len(remove))
+		for _, entry := range list {
+			if _, ok := remove[entry.ID]; !ok {
+				kept = append(kept, entry)
+			}
+		}
+		if len(kept) == 0 {
+			delete(r.entries, sessionID)
+			delete(r.nextPosition, sessionID)
+		} else {
+			r.entries[sessionID] = kept
+		}
+	}
+	result.AfterCount = visibleQueueCount(r.entries[sessionID])
+	return result, nil
+}
+
 // CountBySession returns the number of entries for a session.
 func (r *memoryRepository) CountBySession(_ context.Context, sessionID string) (int, error) {
 	r.mu.Lock()

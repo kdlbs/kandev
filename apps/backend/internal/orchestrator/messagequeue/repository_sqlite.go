@@ -910,6 +910,81 @@ func (r *sqliteRepository) ListBySession(ctx context.Context, sessionID string) 
 	return out, rows.Err()
 }
 
+// DisposeExact removes only unchanged exact entries in one locked transaction.
+func (r *sqliteRepository) DisposeExact(ctx context.Context, sessionID string, claims []QueueEntryClaim) (*QueueDispositionResult, error) {
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin exact queue disposition: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
+	ordered, byID, err := r.listOrderedStoredSessionEntries(ctx, tx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	visible := make([]*QueuedMessage, 0, len(ordered))
+	for _, stored := range ordered {
+		visible = append(visible, stored.message)
+	}
+	result := &QueueDispositionResult{
+		BeforeCount: visibleQueueCount(visible),
+		Outcomes:    make([]QueueDispositionOutcome, 0, len(claims)),
+	}
+	for _, claim := range claims {
+		stored, found := byID[claim.ID]
+		status, disposeErr := r.disposeExactStoredClaim(ctx, tx, sessionID, claim, stored, found)
+		if disposeErr != nil {
+			return nil, disposeErr
+		}
+		result.Outcomes = append(result.Outcomes, QueueDispositionOutcome{ID: claim.ID, Status: status})
+	}
+	remaining, _, err := r.listOrderedStoredSessionEntries(ctx, tx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	visible = visible[:0]
+	for _, stored := range remaining {
+		visible = append(visible, stored.message)
+	}
+	result.AfterCount = visibleQueueCount(visible)
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (r *sqliteRepository) disposeExactStoredClaim(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+	claim QueueEntryClaim,
+	stored storedQueueEntry,
+	found bool,
+) (QueueDispositionStatus, error) {
+	if !found {
+		return QueueDispositionNotFound, nil
+	}
+	if stored.message.IsReservedInFlight() || queueSnapshotClaim(stored.message) != claim.Claim {
+		return QueueDispositionChanged, nil
+	}
+	res, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ? AND session_id = ?`), claim.ID, sessionID)
+	if err != nil {
+		return "", fmt.Errorf("dispose exact queue entry: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return "", err
+	}
+	if affected == 1 {
+		return QueueDispositionRemoved, nil
+	}
+	return QueueDispositionChanged, nil
+}
+
 // CountBySession returns the number of entries for a session.
 func (r *sqliteRepository) CountBySession(ctx context.Context, sessionID string) (int, error) {
 	var n int
