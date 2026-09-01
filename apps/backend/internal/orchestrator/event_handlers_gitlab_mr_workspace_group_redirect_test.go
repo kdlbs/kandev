@@ -64,7 +64,11 @@ func TestCheckSessionMRRedirectsToWorkspaceGroupOwner(t *testing.T) {
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	fake := &fakeGitLabMRLinkService{taskMRs: make(map[string][]*gitlab.TaskMR)}
 	fake.autoLinkFunc = func(_ context.Context, _, _, taskID, repositoryID, projectPath, branch string) (*gitlab.TaskMR, error) {
-		return &gitlab.TaskMR{TaskID: taskID, RepositoryID: repositoryID, ProjectPath: projectPath, MRIID: 3, HeadBranch: branch}, nil
+		tm := &gitlab.TaskMR{TaskID: taskID, RepositoryID: repositoryID, ProjectPath: projectPath, MRIID: 3, HeadBranch: branch}
+		fake.mu.Lock()
+		fake.taskMRs[taskID] = append(fake.taskMRs[taskID], tm)
+		fake.mu.Unlock()
+		return tm, nil
 	}
 	svc.SetGitLabMRLinkService(fake)
 

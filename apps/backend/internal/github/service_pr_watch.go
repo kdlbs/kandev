@@ -1578,6 +1578,14 @@ func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskI
 	if watch == nil || strings.TrimSpace(watch.WorkspaceID) == "" {
 		return nil, ErrGitHubWorkspaceRequired
 	}
+	// taskID is derived from the watch (callers fetch watches by task_id), so
+	// a numbered watch that found its PR before this fix existed still carries
+	// the observing member's task_id — watches are never re-pointed once they
+	// have a PR (see apps/backend/CLAUDE.md's "PR status sync coverage").
+	// Resolve the effective owner the same way associatePRWithTask does for
+	// the association write, so an on-demand sync keeps landing on the
+	// owner's github_task_prs row instead of silently updating nothing.
+	taskID = s.resolveEffectiveAssociationTaskID(ctx, taskID, watch.RepositoryID)
 	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, watch.Owner, watch.Repo)
 	if err != nil {
 		return nil, err

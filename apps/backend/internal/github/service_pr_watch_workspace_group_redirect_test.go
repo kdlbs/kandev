@@ -228,6 +228,11 @@ func TestAssociateExistingPRByURL_DoesNotRedirectURLLinkSource(t *testing.T) {
 
 	issueStore := newMultiTaskIssueStore()
 	issueStore.addTask(&taskmodels.Task{ID: "member1"}, "repo-canonical")
+	// owner1 must hold repo-canonical too — otherwise resolveEffectiveAssociationTaskID
+	// falls back to the observing task on its own (GetTask("owner1") errors), and the
+	// no-redirect assertion below would pass even if the source==TaskPRSourceWatch
+	// guard this test exists to cover were removed.
+	issueStore.addTask(&taskmodels.Task{ID: "owner1"}, "repo-canonical")
 	svc.SetTaskIssueStore(issueStore)
 	svc.SetWorkspaceGroupOwnerResolver(&fakeWorkspaceGroupOwnerResolver{ownerTaskID: "owner1"})
 
@@ -302,5 +307,79 @@ func TestAssociatePRByURL_WatchAndAssociationAgreeOnRedirectedOwner(t *testing.T
 	}
 	if len(memberWatches) != 0 {
 		t.Fatalf("got %d PR watches for member1, want 0 (watch must not be stranded under the observing member task): %+v", len(memberWatches), memberWatches)
+	}
+}
+
+// TestCheckSinglePRWatch_LegacyMemberWatchSyncsOwnersTaskPR covers a watch
+// that already carries a member task's ID — either written before this fix
+// existed, or (per apps/backend/CLAUDE.md's "PR status sync coverage") any
+// numbered watch, since a watch that has found a PR is never re-pointed once
+// created. Before this fix, poller.checkSinglePRWatch called
+// SyncTaskPR(ctx, watch.TaskID, ...) directly, so a legacy member-attributed
+// watch would look up the owner's github_task_prs row under the wrong task
+// ID, find nothing, and silently no-op forever — freezing the owner's PR
+// status at whatever it was when the redirect fix shipped. The watch itself
+// must stay under the member (watches are never re-pointed); only the sync
+// target is resolved.
+func TestCheckSinglePRWatch_LegacyMemberWatchSyncsOwnersTaskPR(t *testing.T) {
+	poller, svc, mockClient, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	issueStore := newMultiTaskIssueStore()
+	issueStore.addTask(&taskmodels.Task{ID: "owner1"}, "repo-canonical")
+	svc.SetTaskIssueStore(issueStore)
+	svc.SetWorkspaceGroupOwnerResolver(&fakeWorkspaceGroupOwnerResolver{ownerTaskID: "owner1"})
+
+	mockClient.AddPR(&PR{
+		Number: 42, Title: "Feature PR", State: prStateMerged,
+		HeadSHA: "abc123", HeadBranch: "feature-branch",
+		RepoOwner: "owner", RepoName: "repo",
+	})
+
+	// The watch itself keeps the observing member's task_id — simulating
+	// either a pre-fix row or one that predates the discovering session's own
+	// group membership. Never re-pointed; see CreatePRWatch's get-or-create
+	// semantics.
+	watch := &PRWatch{
+		SessionID: "sess-legacy", TaskID: "member1", RepositoryID: "repo-canonical",
+		Owner: "owner", Repo: "repo", PRNumber: 42, Branch: "feature-branch",
+	}
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+
+	// The association already correctly landed under the owner (e.g. via
+	// AssociatePRByURL or CheckSessionPR's own redirect).
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "owner1", RepositoryID: "repo-canonical",
+		Owner: "owner", Repo: "repo", PRNumber: 42,
+		PRURL: "https://github.com/owner/repo/pull/42", PRTitle: "Feature PR",
+		HeadBranch: "feature-branch", BaseBranch: "main", State: "open",
+	}); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+
+	poller.checkSinglePRWatch(ctx, watch)
+
+	ownerTP, err := store.GetTaskPRByRepoAndNumber(ctx, "owner1", "repo-canonical", 42)
+	if err != nil {
+		t.Fatalf("get owner task PR: %v", err)
+	}
+	if ownerTP == nil {
+		t.Fatal("expected owner1's task PR to still exist")
+	}
+	if ownerTP.State != prStateMerged {
+		t.Errorf("owner1 TaskPR.State = %q, want %q (sync must land on the owner despite the watch's stale task_id)", ownerTP.State, prStateMerged)
+	}
+	if ownerTP.LastSyncedAt == nil {
+		t.Error("expected owner1's TaskPR.LastSyncedAt to be set by the sync")
+	}
+
+	memberRows, err := store.ListTaskPRsByTask(ctx, "member1")
+	if err != nil {
+		t.Fatalf("list member PR associations: %v", err)
+	}
+	if len(memberRows) != 0 {
+		t.Fatalf("got %d PR associations for member1, want 0 (sync must not create a stranded row under the observing member): %+v", len(memberRows), memberRows)
 	}
 }
