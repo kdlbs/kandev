@@ -26,6 +26,7 @@ type Store struct {
 	deploymentAppPersistenceMu sync.Mutex
 	appLifecycleLocksMu        sync.Mutex
 	appLifecycleLocks          map[string]*appRegistrationLifecycleLock
+	prWatchMigration           *PRWatchMigrationStats
 }
 
 type appRegistrationLifecycleLock struct {
@@ -86,10 +87,17 @@ func (s *Store) lockAppRegistrationLifecycle(registrationID string) func() {
 // installs migrated from the single-repo schema get the column dropped to
 // `”` (empty) and the constraints rebuilt by `migratePRTablesForMultiRepo`.
 const createTablesSQL = `
+	-- github_pr_watches is task-owned (ADR 2026-08-31-task-owned-pr-watch-identity):
+	-- a searching watch (pr_number = 0) is canonical by (task_id, repository_id,
+	-- branch) and a discovered watch (pr_number != 0) is canonical by
+	-- (task_id, repository_id, pr_number). Both are enforced by the partial
+	-- unique indexes in applyIdempotentSchemaIndexes, not an inline UNIQUE
+	-- constraint here (SQLite can't express a partial UNIQUE inline).
+	-- session_id is optional provenance only - never a uniqueness component.
 	CREATE TABLE IF NOT EXISTS github_pr_watches (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL DEFAULT '',
-		session_id TEXT NOT NULL,
+		session_id TEXT NOT NULL DEFAULT '',
 		task_id TEXT NOT NULL,
 		repository_id TEXT NOT NULL DEFAULT '',
 		owner TEXT NOT NULL,
@@ -101,8 +109,7 @@ const createTablesSQL = `
 		last_check_status TEXT DEFAULT '',
 		last_review_state TEXT DEFAULT '',
 		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
-		UNIQUE(session_id, repository_id, branch)
+		updated_at DATETIME NOT NULL
 	);
 
 	CREATE TABLE IF NOT EXISTS github_task_prs (
@@ -669,6 +676,9 @@ func (s *Store) initSchemaData(legacyUpgrade bool) error {
 	if err := s.healTaskOwnedOrphans(); err != nil {
 		return err
 	}
+	if err := s.migratePRWatchesToTaskOwnership(); err != nil {
+		return fmt.Errorf("migrate PR watches to task ownership: %w", err)
+	}
 	if err := s.migrateTaskCIOptionsToPRScope(); err != nil {
 		return fmt.Errorf("migrate task CI options to PR scope: %w", err)
 	}
@@ -778,6 +788,18 @@ func (s *Store) applyIdempotentSchemaIndexes() {
 	// dedicated leading-key index so lookups by PR number stay index-backed.
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_github_task_prs_pr_number ON github_task_prs (pr_number)`)
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_github_task_ci_pr_state_task ON github_task_ci_pr_state (task_id)`)
+	// Canonical PR-watch identity (ADR 2026-08-31-task-owned-pr-watch-identity):
+	// a searching watch is unique per (task, repository, branch); a discovered
+	// watch is unique per (task, repository, pr_number). session_id never
+	// participates. Partial indexes because SQLite can't express a
+	// conditional UNIQUE inline in CREATE TABLE. Applied unconditionally on
+	// every boot (fresh installs and post-migration upgrades alike) - once
+	// migratePRWatchesToTaskOwnership has deduplicated any legacy rows, both
+	// creations are no-ops that just confirm the invariant holds.
+	_, _ = s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_github_pr_watches_searching
+		ON github_pr_watches (task_id, repository_id, branch) WHERE pr_number = 0`)
+	_, _ = s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_github_pr_watches_discovered
+		ON github_pr_watches (task_id, repository_id, pr_number) WHERE pr_number != 0`)
 }
 
 func (s *Store) resetUnpublishedGitHubAuthSchema() error {
@@ -1411,6 +1433,363 @@ func (s *Store) rebuildIfHasLegacyConstraint(table, legacyConstraint, createNew,
 	return tx.Commit()
 }
 
+// PRWatchMigrationStats reports the outcome of migratePRWatchesToTaskOwnership.
+// Populated only when the legacy session-scoped schema was detected; nil on a
+// fresh install or a database that has already been migrated. Callers (tests,
+// future health/metrics wiring) read this via Store.PRWatchMigrationStats
+// instead of relying on log scraping.
+type PRWatchMigrationStats struct {
+	RowsBefore        int
+	RowsAfter         int
+	OrphansRemoved    int
+	DuplicatesRemoved int
+}
+
+// PRWatchMigrationStats returns the aggregate counts from the most recent
+// canonical PR-watch migration performed during store initialization, or nil
+// when no legacy schema was found (fresh install / already migrated).
+func (s *Store) PRWatchMigrationStats() *PRWatchMigrationStats {
+	return s.prWatchMigration
+}
+
+// legacyPRWatchesUniqueConstraint is the pre-ADR-2026-08-31 constraint that
+// scoped watch identity to session_id instead of task_id. Its presence in
+// sqlite_master.sql is the idempotency trigger for
+// migratePRWatchesToTaskOwnership: a fresh install's createTablesSQL no
+// longer includes it, and a database that has already been migrated has had
+// it rebuilt away, so both cases skip the migration entirely.
+const legacyPRWatchesUniqueConstraint = "UNIQUE(session_id, repository_id, branch)"
+
+// migratePRWatchesToTaskOwnership makes github_pr_watches task-owned per
+// ADR-2026-08-31-task-owned-pr-watch-identity: a searching watch (pr_number =
+// 0) becomes canonical by (task_id, repository_id, branch) and a discovered
+// watch (pr_number != 0) becomes canonical by (task_id, repository_id,
+// pr_number), instead of the legacy (session_id, repository_id, branch).
+//
+// Idempotent and transactional: it only runs when the legacy UNIQUE
+// constraint is still present (checked via sqlite_master.sql), and either
+// fully commits or leaves every row untouched. It must run after this
+// process's pre-migration SnapshotSQLite backup (persistence.Provide runs
+// that backup before any repository store, including this one, opens its
+// schema - see internal/persistence/provider.go) so a failure here can
+// always be rolled back from the snapshot.
+//
+// Steps, in order: (1) clear session_id provenance for sessions that no
+// longer exist, (2) remove watches for tasks that no longer exist or whose
+// repository has been detached from the task (never polled - see
+// ListActivePRWatches - so safe to drop), (3) deduplicate remaining rows by
+// (task_id, repository_id, branch), preferring any discovered row and
+// merging the newest check/comment/review watermarks into the survivor, (4)
+// a second pass deduplicates by (task_id, repository_id, pr_number) in case
+// two different branches independently resolved to the same PR, and (5) the
+// table is rebuilt without the legacy constraint so the caller can install
+// the new partial unique indexes (applyIdempotentSchemaIndexes) without a
+// uniqueness violation.
+func (s *Store) migratePRWatchesToTaskOwnership() error {
+	hasLegacy, err := s.tableSQLContains("github_pr_watches", legacyPRWatchesUniqueConstraint)
+	if err != nil {
+		return fmt.Errorf("inspect github_pr_watches schema: %w", err)
+	}
+	if !hasLegacy {
+		return nil
+	}
+
+	// Resolve table existence up front, on the shared pool, before opening
+	// the transaction below: the SQLite writer pool is capped to a single
+	// connection, so calling s.tableExists (which borrows a pool connection
+	// via s.db) once a transaction already holds that one connection
+	// deadlocks forever waiting for a connection that will never free up.
+	hasSessions := s.tableExists("sessions")
+	hasTasks := s.tableExists("tasks")
+	hasTaskRepositories := s.tableExists("task_repositories")
+
+	tx, err := s.db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stats := &PRWatchMigrationStats{}
+	if err := tx.Get(&stats.RowsBefore, `SELECT COUNT(*) FROM github_pr_watches`); err != nil {
+		return fmt.Errorf("count PR watches before migration: %w", err)
+	}
+
+	if err := clearStalePRWatchSessionProvenance(tx, hasSessions); err != nil {
+		return err
+	}
+
+	orphansRemoved, err := removeOrphanedPRWatches(tx, hasTasks, hasTaskRepositories)
+	if err != nil {
+		return err
+	}
+	stats.OrphansRemoved = int(orphansRemoved)
+
+	var all []*PRWatch
+	if err := tx.Select(&all, `SELECT * FROM github_pr_watches`); err != nil {
+		return fmt.Errorf("load PR watches for dedup: %w", err)
+	}
+	toDelete, survivors := dedupPRWatchesForTaskOwnership(all)
+
+	if err := applyPRWatchDedup(tx, toDelete, survivors); err != nil {
+		return err
+	}
+	stats.DuplicatesRemoved = len(toDelete)
+
+	if err := rebuildPRWatchesTableForTaskOwnership(tx); err != nil {
+		return err
+	}
+
+	if err := tx.Get(&stats.RowsAfter, `SELECT COUNT(*) FROM github_pr_watches`); err != nil {
+		return fmt.Errorf("count PR watches after migration: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit PR watch task-ownership migration: %w", err)
+	}
+	s.prWatchMigration = stats
+	return nil
+}
+
+// clearStalePRWatchSessionProvenance clears session_id on rows whose session
+// no longer exists. session_id is provenance-only (ADR
+// 2026-08-31-task-owned-pr-watch-identity) so this never removes a row, it
+// only stops an already-gone session from being reported as the owner.
+func clearStalePRWatchSessionProvenance(tx *sqlx.Tx, hasSessions bool) error {
+	if !hasSessions {
+		return nil
+	}
+	if _, err := tx.Exec(`
+		UPDATE github_pr_watches SET session_id = ''
+		WHERE session_id <> '' AND NOT EXISTS (
+			SELECT 1 FROM sessions WHERE sessions.id = github_pr_watches.session_id
+		)`); err != nil {
+		return fmt.Errorf("clear stale PR watch session provenance: %w", err)
+	}
+	return nil
+}
+
+// removeOrphanedPRWatches deletes rows whose task no longer exists and rows
+// whose repository has been detached from their task, returning the total
+// number of rows removed. Either table may be absent in unit tests that
+// don't bring up the task package's schema, in which case that half of the
+// sweep is skipped.
+func removeOrphanedPRWatches(tx *sqlx.Tx, hasTasks, hasTaskRepositories bool) (int64, error) {
+	var removed int64
+	if hasTasks {
+		res, err := tx.Exec(`
+			DELETE FROM github_pr_watches
+			WHERE NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.id = github_pr_watches.task_id)`)
+		if err != nil {
+			return 0, fmt.Errorf("remove orphaned-task PR watches: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("count orphaned-task PR watches removed: %w", err)
+		}
+		removed += n
+	}
+	if hasTaskRepositories {
+		res, err := tx.Exec(`
+			DELETE FROM github_pr_watches
+			WHERE repository_id <> '' AND NOT EXISTS (
+				SELECT 1 FROM task_repositories tr
+				WHERE tr.task_id = github_pr_watches.task_id AND tr.repository_id = github_pr_watches.repository_id
+			)`)
+		if err != nil {
+			return 0, fmt.Errorf("remove detached-repository PR watches: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("count detached-repository PR watches removed: %w", err)
+		}
+		removed += n
+	}
+	return removed, nil
+}
+
+// dedupPRWatchesForTaskOwnership groups the given rows into their canonical
+// searching/discovered identities and decides which row in each group
+// survives. Pass 1 dedups by tracked branch (preferring a discovered row
+// over a still-searching one so a stale duplicate that never got promoted
+// does not outlive the row that actually found the PR). Pass 2 then
+// guarantees discovered uniqueness across branch groups - e.g. two
+// different branches (a rename) independently resolving to the same PR
+// number.
+func dedupPRWatchesForTaskOwnership(all []*PRWatch) (toDelete map[string]bool, survivors map[string]*PRWatch) {
+	toDelete = map[string]bool{}
+	survivors = map[string]*PRWatch{}
+
+	type branchKey struct{ taskID, repositoryID, branch string }
+	branchGroups := map[branchKey][]*PRWatch{}
+	for _, w := range all {
+		k := branchKey{w.TaskID, w.RepositoryID, w.Branch}
+		branchGroups[k] = append(branchGroups[k], w)
+	}
+	for _, group := range branchGroups {
+		mergePRWatchGroup(group, toDelete, survivors)
+	}
+
+	type prKey struct {
+		taskID, repositoryID string
+		prNumber             int
+	}
+	prGroups := map[prKey][]*PRWatch{}
+	for id, w := range survivors {
+		if toDelete[id] || w.PRNumber == 0 {
+			continue
+		}
+		k := prKey{w.TaskID, w.RepositoryID, w.PRNumber}
+		prGroups[k] = append(prGroups[k], w)
+	}
+	for _, group := range prGroups {
+		if len(group) < 2 {
+			continue
+		}
+		mergePRWatchGroup(group, toDelete, survivors)
+	}
+
+	return toDelete, survivors
+}
+
+// mergePRWatchGroup picks the survivor for one duplicate group (preferring a
+// discovered row when present), merges the group's watermarks onto it, and
+// marks every other member of the group for deletion.
+func mergePRWatchGroup(group []*PRWatch, toDelete map[string]bool, survivors map[string]*PRWatch) {
+	candidates := discoveredWatches(group)
+	if len(candidates) == 0 {
+		candidates = group
+	}
+	survivor := pickPRWatchSurvivor(candidates)
+	mergePRWatchWatermarks(survivor, group)
+	survivors[survivor.ID] = survivor
+	for _, w := range group {
+		if w.ID != survivor.ID {
+			toDelete[w.ID] = true
+		}
+	}
+}
+
+// applyPRWatchDedup deletes the losing rows from a dedup pass and persists
+// the winning rows' merged watermarks.
+func applyPRWatchDedup(tx *sqlx.Tx, toDelete map[string]bool, survivors map[string]*PRWatch) error {
+	for id := range toDelete {
+		if _, err := tx.Exec(`DELETE FROM github_pr_watches WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("remove duplicate PR watch %s: %w", id, err)
+		}
+	}
+	for id, w := range survivors {
+		if toDelete[id] {
+			continue
+		}
+		if _, err := tx.Exec(`
+			UPDATE github_pr_watches
+			SET last_checked_at = ?, last_comment_at = ?, last_check_status = ?, last_review_state = ?
+			WHERE id = ?`,
+			w.LastCheckedAt, w.LastCommentAt, w.LastCheckStatus, w.LastReviewState, id); err != nil {
+			return fmt.Errorf("merge PR watch watermark %s: %w", id, err)
+		}
+	}
+	return nil
+}
+
+// rebuildPRWatchesTableForTaskOwnership rebuilds github_pr_watches without
+// the legacy UNIQUE(session_id, repository_id, branch) constraint. SQLite
+// can't ALTER TABLE DROP CONSTRAINT, so this uses the standard
+// create-copy-drop-rename sequence (mirrors migratePRTablesForMultiRepo).
+func rebuildPRWatchesTableForTaskOwnership(tx *sqlx.Tx) error {
+	for _, stmt := range []string{
+		`CREATE TABLE github_pr_watches_new (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL DEFAULT '',
+			session_id TEXT NOT NULL DEFAULT '',
+			task_id TEXT NOT NULL,
+			repository_id TEXT NOT NULL DEFAULT '',
+			owner TEXT NOT NULL,
+			repo TEXT NOT NULL,
+			pr_number INTEGER NOT NULL,
+			branch TEXT NOT NULL,
+			last_checked_at DATETIME,
+			last_comment_at DATETIME,
+			last_check_status TEXT DEFAULT '',
+			last_review_state TEXT DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`,
+		`INSERT INTO github_pr_watches_new (
+			id, workspace_id, session_id, task_id, repository_id, owner, repo, pr_number, branch,
+			last_checked_at, last_comment_at, last_check_status, last_review_state, created_at, updated_at
+		) SELECT
+			id, COALESCE(workspace_id, ''), COALESCE(session_id, ''), task_id, COALESCE(repository_id, ''),
+			owner, repo, pr_number, branch,
+			last_checked_at, last_comment_at, last_check_status, last_review_state, created_at, updated_at
+		FROM github_pr_watches`,
+		`DROP TABLE github_pr_watches`,
+		`ALTER TABLE github_pr_watches_new RENAME TO github_pr_watches`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("rebuild github_pr_watches for task ownership: %w", err)
+		}
+	}
+	return nil
+}
+
+// tableSQLContains reports whether `table`'s stored CREATE statement in
+// sqlite_master contains the literal substring. Returns false (not an error)
+// when the table doesn't exist, matching rebuildIfHasLegacyConstraint's
+// tolerance for unexpected schema drift in tests.
+func (s *Store) tableSQLContains(table, substr string) (bool, error) {
+	var existingSQL string
+	err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&existingSQL)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return strings.Contains(existingSQL, substr), nil
+}
+
+// discoveredWatches returns the subset of watches that have found a PR
+// (pr_number != 0).
+func discoveredWatches(group []*PRWatch) []*PRWatch {
+	var out []*PRWatch
+	for _, w := range group {
+		if w.PRNumber != 0 {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// pickPRWatchSurvivor deterministically picks the most-recently-updated
+// watch from a duplicate group as the canonical row to keep.
+func pickPRWatchSurvivor(group []*PRWatch) *PRWatch {
+	best := group[0]
+	for _, w := range group[1:] {
+		if w.UpdatedAt.After(best.UpdatedAt) {
+			best = w
+		}
+	}
+	return best
+}
+
+// mergePRWatchWatermarks folds the newest last_comment_at across the group
+// into survivor, and the newest last_checked_at together with its paired
+// last_check_status/last_review_state (both observed at that same check) so
+// a duplicate that happened to poll more recently isn't silently discarded.
+func mergePRWatchWatermarks(survivor *PRWatch, group []*PRWatch) {
+	for _, w := range group {
+		if w.LastCommentAt != nil && (survivor.LastCommentAt == nil || w.LastCommentAt.After(*survivor.LastCommentAt)) {
+			survivor.LastCommentAt = w.LastCommentAt
+		}
+		if w.LastCheckedAt != nil && (survivor.LastCheckedAt == nil || w.LastCheckedAt.After(*survivor.LastCheckedAt)) {
+			survivor.LastCheckedAt = w.LastCheckedAt
+			survivor.LastCheckStatus = w.LastCheckStatus
+			survivor.LastReviewState = w.LastReviewState
+		}
+	}
+}
+
 // --- PR Watch operations ---
 
 // CreatePRWatch creates a new PR watch.
@@ -1482,6 +1861,38 @@ func (s *Store) GetPRWatchBySessionRepoAndBranch(ctx context.Context, sessionID,
 		`SELECT * FROM github_pr_watches
 		 WHERE session_id = ? AND repository_id = ? AND branch = ? LIMIT 1`,
 		sessionID, repositoryID, branch)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &w, err
+}
+
+// GetPRWatchByTaskRepoBranch returns the canonical searching watch (pr_number
+// = 0) for a (task, repository, branch) triple, or nil. This is the task-owned
+// identity lookup (ADR 2026-08-31-task-owned-pr-watch-identity): unlike
+// GetPRWatchBySessionRepoAndBranch, session identity plays no part, so it
+// finds an existing watch regardless of which session originally created it.
+func (s *Store) GetPRWatchByTaskRepoBranch(ctx context.Context, taskID, repositoryID, branch string) (*PRWatch, error) {
+	var w PRWatch
+	err := s.ro.GetContext(ctx, &w,
+		`SELECT * FROM github_pr_watches
+		 WHERE task_id = ? AND repository_id = ? AND branch = ? AND pr_number = 0 LIMIT 1`,
+		taskID, repositoryID, branch)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &w, err
+}
+
+// GetPRWatchByTaskRepoPRNumber returns the canonical discovered watch for a
+// (task, repository, pr_number) triple, or nil. Task-owned counterpart to
+// GetPRWatchByTaskRepoBranch for watches that have already found their PR.
+func (s *Store) GetPRWatchByTaskRepoPRNumber(ctx context.Context, taskID, repositoryID string, prNumber int) (*PRWatch, error) {
+	var w PRWatch
+	err := s.ro.GetContext(ctx, &w,
+		`SELECT * FROM github_pr_watches
+		 WHERE task_id = ? AND repository_id = ? AND pr_number = ? LIMIT 1`,
+		taskID, repositoryID, prNumber)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -1573,11 +1984,69 @@ func (s *Store) DeletePRWatchesByTaskID(ctx context.Context, taskID string) (int
 }
 
 // UpdatePRWatchPRNumber updates a PR watch's PR number after discovery.
+// UpdatePRWatchPRNumber updates a PR watch's PR number after discovery (or
+// resets it to 0 to re-search). Promoting to a non-zero PR number could
+// collide with the canonical discovered-watch identity (task_id,
+// repository_id, pr_number) if a sibling watch already tracks that PR - e.g.
+// two branches (a rename) independently resolving to the same PR. In that
+// case the source watch is redundant (the sibling already owns the PR's
+// state) and is dropped rather than left to trip the unique index.
 func (s *Store) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber int) error {
-	_, err := s.db.ExecContext(ctx,
+	if prNumber == 0 {
+		_, err := s.db.ExecContext(ctx,
+			`UPDATE github_pr_watches SET pr_number = 0, updated_at = ? WHERE id = ?`,
+			time.Now().UTC(), id)
+		return err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var taskID, repositoryID string
+	err = tx.QueryRowContext(ctx,
+		`SELECT task_id, repository_id FROM github_pr_watches WHERE id = ?`, id).
+		Scan(&taskID, &repositoryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return tx.Commit()
+	}
+	if err != nil {
+		return err
+	}
+
+	var probe int // existence probe only; value unused
+	err = tx.QueryRowContext(ctx,
+		`SELECT 1 FROM github_pr_watches
+		 WHERE task_id = ? AND repository_id = ? AND pr_number = ? AND id <> ?`,
+		taskID, repositoryID, prNumber, id).Scan(&probe)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err == nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM github_pr_watches WHERE id = ?`, id); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+
+	if _, err := tx.ExecContext(ctx,
 		`UPDATE github_pr_watches SET pr_number = ?, updated_at = ? WHERE id = ?`,
-		prNumber, time.Now().UTC(), id)
-	return err
+		prNumber, time.Now().UTC(), id); err != nil {
+		// Same belt-and-suspenders as UpdatePRWatchBranchIfSearching: an
+		// external writer could still race between the probe and this
+		// UPDATE. Treat a UNIQUE violation identically to the probe-found
+		// path.
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			if _, delErr := tx.ExecContext(ctx, `DELETE FROM github_pr_watches WHERE id = ?`, id); delErr != nil {
+				return delErr
+			}
+			return tx.Commit()
+		}
+		return err
+	}
+	return tx.Commit()
 }
 
 // UpdatePRWatchRepository repairs the provider repository identity after PR

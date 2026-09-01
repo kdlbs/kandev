@@ -47,12 +47,18 @@ func (s *Service) createPRWatch(
 	// from a prior auth failure should be re-probed immediately rather
 	// than held for the rest of the 10-min TTL.
 	s.evictRepoNegative(owner, repo)
-	existing, err := s.store.GetPRWatchBySessionRepoAndBranch(ctx, sessionID, repositoryID, branch)
+	// Task-owned identity (ADR 2026-08-31-task-owned-pr-watch-identity):
+	// look up the canonical watch by task/repository, not by session, so a
+	// resumed or concurrent session on the same task/branch reuses the
+	// existing watch instead of creating a duplicate. A non-zero prNumber
+	// (e.g. AssociatePRByURL, which already knows the PR) checks discovered
+	// identity; otherwise it checks searching identity.
+	existing, err := s.getExistingCanonicalPRWatch(ctx, taskID, repositoryID, prNumber, branch)
 	if err != nil {
 		return nil, err
 	}
 	if existing != nil {
-		return existing, nil // already watching this (session, repo, branch)
+		return existing, nil // already watching this (task, repo, branch/PR)
 	}
 	w := &PRWatch{
 		WorkspaceID:  workspaceID,
@@ -73,6 +79,21 @@ func (s *Service) createPRWatch(
 		zap.String("branch", branch),
 		zap.Int("pr_number", prNumber))
 	return w, nil
+}
+
+// getExistingCanonicalPRWatch resolves the task-owned canonical watch for a
+// prospective (task, repository, branch/PR) target: discovered identity
+// (task_id, repository_id, pr_number) when prNumber is known, otherwise
+// searching identity (task_id, repository_id, branch). Shared by
+// createPRWatch and ensurePRWatch so both dedupe against the same canonical
+// row regardless of which session is asking.
+func (s *Service) getExistingCanonicalPRWatch(
+	ctx context.Context, taskID, repositoryID string, prNumber int, branch string,
+) (*PRWatch, error) {
+	if prNumber != 0 {
+		return s.store.GetPRWatchByTaskRepoPRNumber(ctx, taskID, repositoryID, prNumber)
+	}
+	return s.store.GetPRWatchByTaskRepoBranch(ctx, taskID, repositoryID, branch)
 }
 
 // GetPRWatch returns one PR watch after authorizing its stored workspace.
@@ -264,7 +285,11 @@ func (s *Service) ensurePRWatch(
 	// rationale. The existing-watch early-return path must not inherit a
 	// stale "missing" verdict from a prior incarnation.
 	s.evictRepoNegative(owner, repo)
-	existing, err := s.store.GetPRWatchBySessionRepoAndBranch(ctx, sessionID, repositoryID, branch)
+	// Task-owned identity — see createPRWatch's getExistingCanonicalPRWatch
+	// comment. Reusing the canonical searching watch here is what stops a
+	// resumed/concurrent session from multiplying watches for the same
+	// task/repository/branch (ADR 2026-08-31-task-owned-pr-watch-identity).
+	existing, err := s.store.GetPRWatchByTaskRepoBranch(ctx, taskID, repositoryID, branch)
 	if err != nil {
 		return nil, err
 	}
@@ -284,8 +309,9 @@ func (s *Service) ensurePRWatch(
 	if err := s.store.CreatePRWatch(ctx, w); err != nil {
 		return nil, fmt.Errorf("ensure PR watch: %w", err)
 	}
-	s.logger.Info("created PR watch for session (will search for PR)",
+	s.logger.Info("created PR watch for task (will search for PR)",
 		zap.String("session_id", sessionID),
+		zap.String("task_id", taskID),
 		zap.String("repository_id", repositoryID),
 		zap.String("branch", branch))
 	return w, nil
@@ -994,7 +1020,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		)
 	}
 
-	return s.persistAndPublishTaskPRSync(ctx, tp, changed, status.OutcomeFieldsPopulated)
+	return s.persistAndPublishTaskPRSync(ctx, tp, changed, status.OutcomeFieldsPopulated, status.PR)
 }
 
 // persistAndPublishTaskPRSync writes the reconciled sync state and, on
@@ -1009,7 +1035,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 // what a subsequent read of the row returns (codex [P2]). Split out of
 // SyncTaskPR to keep that function within the repo's complexity limits and
 // to make the re-read-before-publish behavior directly testable.
-func (s *Service) persistAndPublishTaskPRSync(ctx context.Context, tp *TaskPR, changed, outcomeFieldsPopulated bool) error {
+func (s *Service) persistAndPublishTaskPRSync(ctx context.Context, tp *TaskPR, changed, outcomeFieldsPopulated bool, pr *PR) error {
 	// AC-38/AC-18c: the counter fires at the populated-ness decision point,
 	// before the write is attempted, and survives write failure — it
 	// measures what the sync observed, not whether the store call happened
@@ -1021,7 +1047,7 @@ func (s *Service) persistAndPublishTaskPRSync(ctx context.Context, tp *TaskPR, c
 	// Provider payloads carry the authoritative head/base repository identity
 	// and branch. Reconcile after the TaskPR write so a malformed or
 	// unmatchable payload never prevents the review association from persisting.
-	s.reconcileComparisonTargetFromSync(ctx, taskID, status.PR)
+	s.reconcileComparisonTargetFromSync(ctx, tp.TaskID, pr)
 
 	if changed && s.eventBus != nil {
 		published, err := s.store.GetTaskPRByID(ctx, tp.ID)
