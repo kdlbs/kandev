@@ -10,6 +10,12 @@ import {
 } from "./task-session-projection-actions";
 import { reconcileMessages } from "./message-signature";
 import {
+  buildPromptMessageActions,
+  fanOutTranscriptPrompts,
+  removePromptMessage,
+  updatePromptMessage,
+} from "./prompt-message-actions";
+import {
   migrateEnvKeyedData,
   purgeSessionRuntimeState,
 } from "@/lib/state/slices/session-runtime/session-runtime-slice";
@@ -33,6 +39,7 @@ function ensureMessageMeta(
     metaBySession[sessionId] = {
       isLoading: false,
       isLoadingMore: false,
+      historyInitialized: false,
       hasMore: false,
       oldestCursor: null,
     };
@@ -44,6 +51,7 @@ function applyMessageMeta(
   metaBySession: SessionSliceState["messages"]["metaBySession"],
   sessionId: string,
   meta: {
+    historyInitialized?: boolean;
     hasMore?: boolean;
     oldestCursor?: string | null;
     isLoading?: boolean;
@@ -51,6 +59,9 @@ function applyMessageMeta(
   },
 ) {
   ensureMessageMeta(metaBySession, sessionId);
+  if (meta.historyInitialized !== undefined) {
+    metaBySession[sessionId].historyInitialized = meta.historyInitialized;
+  }
   if (meta.hasMore !== undefined) metaBySession[sessionId].hasMore = meta.hasMore;
   if (meta.isLoading !== undefined) metaBySession[sessionId].isLoading = meta.isLoading;
   if (meta.isLoadingMore !== undefined) metaBySession[sessionId].isLoadingMore = meta.isLoadingMore;
@@ -248,6 +259,7 @@ function reconcileActiveTurnForIdleSession(draft: SessionSliceState, session: Ta
 
 export const defaultSessionState: SessionSliceState = {
   messages: { bySession: {}, metaBySession: {} },
+  messagePrompts: { bySession: {}, metaBySession: {}, generationBySession: {} },
   turns: {
     bySession: {},
     activeBySession: {},
@@ -286,7 +298,39 @@ export const defaultSessionState: SessionSliceState = {
 type ImmerSet = Parameters<typeof createSessionSlice>[0];
 type ImmerGet = () => SessionSlice;
 
-/** Create the message store actions (set, add, update, remove, merge, prepend, metadata) backed by the given Immer setter. */
+function buildSetMessagesLoading(set: ImmerSet) {
+  return (sessionId: string, loading: boolean) =>
+    set((draft) => {
+      applyMessageMeta(draft.messages.metaBySession, sessionId, { isLoading: loading });
+    });
+}
+function buildSetMessagesMetadata(set: ImmerSet) {
+  return (sessionId: string, meta: Parameters<SessionSlice["setMessagesMetadata"]>[1]) =>
+    set((draft) => {
+      applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
+    });
+}
+
+/** Builds the transcript update action and keeps the prompt cache in sync. */
+function buildUpdateMessage(set: ImmerSet) {
+  return (message: Parameters<SessionSlice["updateMessage"]>[0]) =>
+    set((draft) => {
+      const messages = draft.messages.bySession[message.session_id];
+      if (messages) {
+        const index = messages.findIndex((entry) => entry.id === message.id);
+        if (index !== -1) {
+          const merged = { ...messages[index] };
+          mergeMessageFields(
+            merged as unknown as Record<string, unknown>,
+            message as unknown as Record<string, unknown>,
+          );
+          messages[index] = merged;
+        }
+      }
+      updatePromptMessage(draft, message);
+    });
+}
+
 function buildMessageActions(set: ImmerSet) {
   return {
     setMessages: (
@@ -304,7 +348,7 @@ function buildMessageActions(set: ImmerSet) {
         const sessionId = message.session_id;
         if (!draft.messages.bySession[sessionId]) draft.messages.bySession[sessionId] = [];
         const existingIndex = draft.messages.bySession[sessionId].findIndex(
-          (m) => m.id === message.id,
+          (entry) => entry.id === message.id,
         );
         if (existingIndex === -1) {
           draft.messages.bySession[sessionId].push(message);
@@ -317,18 +361,15 @@ function buildMessageActions(set: ImmerSet) {
             message as unknown as Record<string, unknown>,
           );
         }
+        fanOutTranscriptPrompts(draft, [message]);
       }),
-    updateMessage: (message: Parameters<SessionSlice["updateMessage"]>[0]) =>
-      set((draft) => {
-        const messages = draft.messages.bySession[message.session_id];
-        if (!messages) return;
-        mergeMessageAtIndex(messages, message);
-      }),
+    updateMessage: buildUpdateMessage(set),
     updateMessages: (messages: Parameters<SessionSlice["updateMessages"]>[0]) =>
       set((draft) => {
         for (const message of messages) {
           const sessionMessages = draft.messages.bySession[message.session_id];
           if (sessionMessages) mergeMessageAtIndex(sessionMessages, message);
+          updatePromptMessage(draft, message);
         }
       }),
     removeMessage: (
@@ -337,8 +378,8 @@ function buildMessageActions(set: ImmerSet) {
     ) =>
       set((draft) => {
         const messages = draft.messages.bySession[sessionId];
-        if (!messages) return;
-        draft.messages.bySession[sessionId] = removeMessageByID(messages, messageId);
+        if (messages) draft.messages.bySession[sessionId] = removeMessageByID(messages, messageId);
+        removePromptMessage(draft, sessionId, messageId);
       }),
     mergeMessages: (
       sessionId: string,
@@ -358,6 +399,7 @@ function buildMessageActions(set: ImmerSet) {
         }
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
+        fanOutTranscriptPrompts(draft, messages);
       }),
     prependMessages: (
       sessionId: string,
@@ -372,25 +414,13 @@ function buildMessageActions(set: ImmerSet) {
           ...existing,
         ];
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
-        // isLoadingMore is owned by the shared pagination coordinator (raised
-        // on the session's first in-flight request, cleared only when the
-        // last one settles); a prepend must not clear it mid-flight.
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
+        fanOutTranscriptPrompts(draft, messages);
       }),
-    setMessagesMetadata: (
-      sessionId: string,
-      meta: Parameters<SessionSlice["setMessagesMetadata"]>[1],
-    ) =>
-      set((draft) => {
-        applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
-      }),
-    setMessagesLoading: (sessionId: string, loading: boolean) =>
-      set((draft) => {
-        applyMessageMeta(draft.messages.metaBySession, sessionId, { isLoading: loading });
-      }),
+    setMessagesMetadata: buildSetMessagesMetadata(set),
+    setMessagesLoading: buildSetMessagesLoading(set),
   };
 }
-
 /** Create the task-plan store actions (set, loading, saving, clear, seen, revisions, preview, compare) backed by the given Immer setter and getter. */
 function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
   return {
@@ -615,6 +645,10 @@ function buildTaskSessionActions(set: ImmerSet) {
         // Drop the conversation history owned by this session.
         delete draft.messages.bySession[sessionId];
         delete draft.messages.metaBySession[sessionId];
+        delete draft.messagePrompts.bySession[sessionId];
+        delete draft.messagePrompts.metaBySession[sessionId];
+        const generations = (draft.messagePrompts.generationBySession ??= {});
+        generations[sessionId] = (generations[sessionId] ?? 0) + 1;
         delete draft.turns.bySession[sessionId];
         delete draft.turns.activeBySession[sessionId];
         delete draft.turns.loadedBySession[sessionId];
@@ -684,6 +718,7 @@ export const createSessionSlice: StateCreator<
 > = (set, get) => ({
   ...defaultSessionState,
   ...buildMessageActions(set),
+  ...buildPromptMessageActions(set),
   ...buildTurnActions(set),
   ...buildTaskSessionActions(set),
   ...buildTaskSessionProjectionActions(set),

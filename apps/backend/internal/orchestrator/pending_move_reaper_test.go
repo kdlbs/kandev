@@ -18,9 +18,21 @@ type failOncePendingMoveDeleteRepository struct {
 	err error
 }
 
+type failPendingMoveReadRepository struct {
+	messagequeue.Repository
+	err error
+}
+
 type replaceBeforePendingMoveDeleteRepository struct {
 	messagequeue.Repository
 	replacement *messagequeue.PendingMove
+}
+
+func (r *failPendingMoveReadRepository) GetPendingMove(
+	context.Context,
+	string,
+) (*messagequeue.PendingMove, error) {
+	return nil, r.err
 }
 
 func (r *replaceBeforePendingMoveDeleteRepository) DeletePendingMoveIfMatch(
@@ -149,6 +161,78 @@ func TestPendingMove_ExpiredReplayRetriesAfterPromptRemovalFailure(t *testing.T)
 	}
 	if got := sc.svc.messageQueue.GetStatus(sc.ctx, sc.reviewSessionID).Count; got != len(entries) {
 		t.Fatalf("queue count after replay-time cleanup failure = %d, want %d", got, len(entries))
+	}
+
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load session after replay-time cleanup failure: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state after replay-time cleanup failure = %q, want %q",
+			session.State, models.TaskSessionStateWaitingForInput)
+	}
+}
+
+func TestPendingMove_ReadFailurePreservesTurnForRetry(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	queueRepo := &failPendingMoveReadRepository{
+		Repository: messagequeue.NewMemoryRepository(),
+		err:        errors.New("queue storage unavailable"),
+	}
+	sc.svc.messageQueue = messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
+
+	sc.svc.handleAgentReady(sc.ctx, watcherAgentReady(sc.reviewSessionID))
+
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("load task after pending-move read failure: %v", err)
+	}
+	if task.WorkflowStepID != stepInReviewID {
+		t.Fatalf("pending-move read failure advanced task to %q, want %q",
+			task.WorkflowStepID, stepInReviewID)
+	}
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load session after pending-move read failure: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state after pending-move read failure = %q, want %q",
+			session.State, models.TaskSessionStateWaitingForInput)
+	}
+}
+
+func TestPendingMove_ReplaysReplacementAfterClaimRace(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	queueRepo := messagequeue.NewMemoryRepository()
+	initialMove := &messagequeue.PendingMove{
+		MoveID:         "move-initial",
+		TaskID:         "task-1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: stepInProgressID,
+		QueuedAt:       time.Now().UTC().Add(-time.Minute),
+	}
+	replacement := *initialMove
+	replacement.MoveID = "move-replacement"
+	if err := queueRepo.SetPendingMove(sc.ctx, sc.reviewSessionID, initialMove); err != nil {
+		t.Fatalf("seed initial pending move: %v", err)
+	}
+	sc.svc.messageQueue = messagequeue.NewService(&replaceBeforePendingMoveDeleteRepository{
+		Repository:  queueRepo,
+		replacement: &replacement,
+	}, messagequeue.DefaultMaxPerSession, testLogger())
+
+	sc.svc.handleAgentReady(sc.ctx, watcherAgentReady(sc.reviewSessionID))
+
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("load task after pending-move claim race: %v", err)
+	}
+	if task.WorkflowStepID != stepInProgressID {
+		t.Fatalf("replacement pending move was not applied: workflow_step_id = %q, want %q",
+			task.WorkflowStepID, stepInProgressID)
+	}
+	if _, exists := sc.svc.messageQueue.GetPendingMove(sc.ctx, sc.reviewSessionID); exists {
+		t.Fatal("replacement pending move remained armed after replay")
 	}
 }
 

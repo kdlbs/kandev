@@ -202,7 +202,9 @@ func (e *Executor) tryReuseExistingSession(
 // createOfficeSession inserts a fresh task_sessions row for the given
 // (task, agent) pair with state CREATED. Mirrors PrepareSession's repo lookups
 // (primary repo, executor config, agent profile snapshot) but stores
-// agent_profile_id so the row participates in the office-session unique index.
+// agent_profile_id so the row can participate in office-session uniqueness
+// enforcement once it exists (no index currently constrains this pair — see
+// taskrepo.ErrOfficeSessionRaceConflict's doc comment).
 //
 // is_primary is left false: office sessions don't use the primary mechanism;
 // it stays for kanban / quick-chat advanced-mode resume.

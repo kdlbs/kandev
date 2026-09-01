@@ -10,7 +10,7 @@ import type { FileInfo } from "@/lib/state/store";
 import type { PRDiffFile } from "@/lib/types/github";
 import { normalizeFileChangeStatus, type FileChangeStatus } from "@/lib/utils/file-change-status";
 import type { PRChangedFile } from "./changes-panel-timeline";
-import type { CommitDetailTarget } from "./changes-diff-target";
+import type { ChangeLayer, CommitDetailTarget } from "./changes-diff-target";
 import type { CommitPresentation } from "./commit-row";
 
 export type ChangedFile = {
@@ -22,6 +22,7 @@ export type ChangedFile = {
   oldPath: string | undefined;
   /** Repository this file belongs to in multi-repo workspaces; empty for single-repo. */
   repositoryName?: string;
+  changeLayer?: ChangeLayer;
 };
 
 /**
@@ -62,6 +63,7 @@ export function mapToChangedFiles(files: FileInfo[]): ChangedFile[] {
     minus: file.deletions,
     oldPath: file.old_path,
     repositoryName: file.repository_name,
+    changeLayer: file.change_layer,
   }));
 }
 

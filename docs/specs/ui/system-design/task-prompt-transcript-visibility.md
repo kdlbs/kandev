@@ -8,124 +8,179 @@ owners:
   - kandev
 ---
 
-# Task Transcript History Visibility System Design
+# Task transcript history visibility system design
 
 ## Purpose and boundaries
 
-This design defines the visible start of a task transcript. The first user prompt is the visible start, even when internal rows exist before it.
+This design defines how the task transcript distinguishes a bounded newest
+window from the visible conversation start. It keeps task opening bounded,
+loads older history only after upward navigation, and preserves prompt `#1` as
+the visible start even when older internal rows remain on the backend.
 
-The design changes no backend query, message order, persistence rule, or API field. It uses the existing `prompt_index` message field.
+The design changes no backend query, persistence rule, message order, or API
+field. It keeps transcript pagination separate from Prompt History pagination:
+Prompt History can request user messages with the `author_type=user` filter,
+while transcript navigation can request an around window for a message that is
+not loaded. Both projections use the existing cursor metadata, message API,
+and `prompt_index` field.
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
-| `REQ-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001` | [Opening boundary](#opening-boundary), [Pagination boundary](#pagination-boundary), [Failure and compatibility](#failure-and-compatibility) |
+| Requirement                                    | Design sections                                                                                                                                                                                             |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REQ-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001` | [History state](#history-state), [Opening boundary](#opening-boundary), [Upward pagination](#upward-pagination), [Failure and recovery](#failure-and-recovery), [Responsive behavior](#responsive-behavior) |
 
 ## Components and responsibilities
 
-- `useLazyLoadMessages` owns the visible pagination boundary for transcript consumers.
-- The session message fetch owns one bounded initial request for the newest message window.
-- `messages.metaBySession[sessionId].hasMore` keeps the raw backend `has_more` value.
-- `messages.bySession[sessionId]` supplies the loaded messages and their prompt ordinals.
-- The native transcript and Prompt History panel consume the shared hook result.
-- The native transcript owns the upward-navigation intent and the visible top-boundary key.
+- The session message fetch owns one bounded newest-window request and records
+  when authoritative pagination metadata has initialized.
+- `messages.metaBySession[sessionId]` owns raw `hasMore`, `oldestCursor`,
+  initial/refetch loading, older-page loading, and history initialization.
+- `useSessionMessages` exposes the raw history state to chat composition.
+- `useProcessedMessages` filters and groups stored messages. It may synthesize
+  the task-description fallback only after the session start is known.
+- `useLazyLoadMessages` owns the prompt-`#1` visible boundary and older-page
+  requests. It keeps raw pagination available to explicit recovery consumers.
+- The native transcript consumes `useLazyLoadMessages`. Prompt History consumes
+  its own user-message request and pagination state.
+- The native transcript owns upward intent, committed sentinel geometry, scroll
+  restoration, and retry-control visibility.
 - `useLazyLoadSentinel` owns observer lifecycle and request serialization.
-- Transcript navigation uses only the messages that the transcript already loaded.
-- The hook also exposes an explicit raw-pagination loader for direct recovery consumers, such as session search.
-- `requestOlderMessages` keeps request coordination and raw cursor metadata unchanged.
+- Transcript navigation first uses loaded messages. When a selected prompt is
+  absent, it requests an around window and merges the result before scrolling.
+- `requestOlderMessages` keeps transcript request coordination and raw cursor
+  metadata unchanged. Prompt History has a separate request coordinator and
+  cursor metadata.
 
-The Prompt History panel already uses prompt `#1` as its terminal boundary. The transcript uses the same boundary through the shared hook.
+## History state
+
+The frontend distinguishes these facts:
+
+- **History initialized:** An authoritative newest-window response or boot
+  payload supplied pagination metadata for the session.
+- **Raw history remains:** The backend reported `has_more: true`.
+- **Visible start loaded:** A loaded user message has `prompt_index === 1`.
+- **History exhausted:** History is initialized and raw history does not remain.
+
+Default store values are not proof that history is exhausted. The session
+message metadata therefore records initialization separately from `hasMore`.
+Session deletion purges this state with the rest of the session transcript.
+
+The task-description fallback is eligible only when all of these conditions
+are true:
+
+1. History is initialized.
+2. Raw history is exhausted.
+3. No visible stored user message exists.
+4. The task description is non-empty.
+
+A tool-only newest window with `has_more: true` does not satisfy this contract.
+It renders only the stored rows in that window until the user navigates upward.
 
 ## Opening boundary
 
-The session message fetch requests only the newest bounded window when a task opens. A tool-only window does not start an automatic backfill.
+The session message fetch requests only the newest bounded window when a task
+opens. It does not paginate backward to locate a prompt. A live WebSocket row
+can join that contiguous newest window through the existing reconciliation
+rules.
 
-`TaskChatPanel` does not load older pages to find the last prompt. The last-prompt action becomes available after the prompt enters the loaded window.
+The latest-window reconciliation contract remains unchanged:
 
-If the newest window has no user message, the transcript shows the task-description fallback. Upward navigation then loads older pages through visible pagination.
+- An overlapping fetched suffix joins the cached contiguous window.
+- A disjoint cached prefix is removed before the fetched suffix becomes the
+  new authoritative window.
+- The oldest cursor always names the oldest row in the contiguous window.
 
-## Pagination boundary
+The absence of a user row in the newest window neither starts background
+pagination nor authorizes the task-description fallback.
 
-The frontend derives a visible `hasMore` value from two inputs:
+## Visible pagination boundary
 
-1. The raw backend value is true.
-2. No loaded user message has `prompt_index` equal to `1`.
+Transcript pagination remains available while raw history remains and loaded
+messages do not contain user prompt `#1`. Loading prompt `#1` immediately
+removes the transcript sentinel and retry control, even if raw backend history
+contains internal rows before that prompt.
 
-If both conditions are true, transcript consumers can request another page. If prompt `#1` is loaded, the shared hook reports no visible older history.
+Payloads without prompt ordinals use raw exhaustion as the compatibility
+boundary. Session search can continue through the explicit raw loader when a
+backend search hit precedes the visible transcript start.
 
-The hook applies this rule to its reactive return value. It also applies the rule after each joined or completed request.
+## Upward pagination
 
-This immediate update stops one multi-page load operation at prompt `#1`. It prevents an extra request for pre-prompt internal rows.
+The transcript starts a load cycle when the user reaches the oldest loaded
+edge. Before each request it captures a stable rendered-row anchor. After the
+page commits, scroll restoration keeps that anchor at the same visual position.
 
-The store keeps the raw backend value. Direct recovery code can use the hook's explicit raw-pagination loader when its contract requires the complete message stream. Session search uses this path because backend search can return a hit from before prompt `#1`. Transcript rendering and navigation continue to use visible pagination, so this recovery path does not restore the older-page control.
+Continuation uses committed sentinel geometry, not the identity of the oldest
+standalone row:
 
-## Upward load cycle
+1. Re-evaluate the sentinel against the transcript's preload region after
+   React layout and scroll restoration commit.
+2. Continue when the sentinel remains in that region and visible pagination
+   still has more history.
+3. Stop when inserted content moves the sentinel outside the region. A later
+   upward reach starts the next cycle through the normal observer path.
+4. Stop at prompt `#1`, raw exhaustion, a stale session, or no progress.
 
-An upward user action starts one transcript load cycle. The cycle starts when the reader reaches the oldest loaded boundary.
+This rule crosses both collapsed activity pages and short standalone pages. It
+also avoids cascading through content that has already moved above the user's
+current preload region. A stale IntersectionObserver entry is not sufficient
+to continue; the decision uses geometry from the current sentinel and current
+scroll root after commit.
 
-The transcript records the oldest standalone message key before each request. This key excludes the task-description fallback, transient status rows, and collapsed activity-group keys that can change when older tools join the group.
+## Failure and recovery
 
-After React commits the prepended page, the transcript compares the current key with the recorded key:
+A rejected request or a zero-row response with visible history still remaining
+sets a transcript-local recovery state. While that state is active, the normal
+automatic cycle is disarmed and the explicit older-page retry control is
+visible. A successful retry clears recovery state and resumes the geometry
+rule. Session changes, prompt `#1`, and raw exhaustion also clear it.
 
-- If the key changes, the page added a new visible top entry. The cycle stops until the reader reaches the new boundary.
-- If the key does not change, the page only extended the current collapsed activity group. The cycle can request the next page.
-- If the request fails, returns no rows, reaches prompt `#1`, or exhausts raw history, the cycle stops.
-
-The shared sentinel must not continue from a stale intersection value. A completed request must use the committed render boundary before it starts another request.
-
-Scroll restoration remains part of the same cycle. The transcript restores one stable row after each prepend. The restoration does not create new upward-navigation intent.
-
-## Control flow
-
-1. The initial message request stores one newest suffix and raw pagination metadata.
-2. The shared hook reports visible older history while prompt `#1` is absent.
-3. The user reaches the oldest loaded point.
-4. An older-page request prepends messages through the existing coordinator.
-5. The native transcript preserves a stable message-row position across the complete request.
-6. The transcript compares the committed visible top boundary with the request baseline.
-7. If the boundary changed, the current load cycle stops.
-8. If only a collapsed activity group changed, the same cycle can request another page.
-9. If the page contains prompt `#1`, the shared hook changes its visible value to false.
-10. The transcript removes its sentinel, loading state, and older-page control.
-11. Explicit reverse search uses raw pagination when it must backfill a backend search hit.
-
-## Failure and compatibility
-
-If a request fails before prompt `#1` is known, the explicit older-page control remains available. A zero-result response keeps the existing retry behavior.
-
-An initial tool-only window completes without an older-page request. The task-description fallback remains visible until upward pagination loads a stored user prompt.
-
-Older payloads can omit `prompt_index`. In this case, the shared hook uses raw `has_more` exhaustion as the compatibility fallback.
+Routine successful pagination does not render the retry control. The control
+keeps the existing localized label and has a coarse-pointer hit area of at
+least 44 pixels without increasing fine-pointer desktop density.
 
 ## Observability
 
-The `messages:pagination` debug namespace records one start event and one settle event for each older-page request.
-
-The events include the session ID, trigger, page count, visible boundary keys, scroll geometry, and the continuation reason. The events do not include message content.
-
-The settle reason distinguishes collapsed-group continuation from visible-boundary stop, exhaustion, no progress, and request error.
+The `messages:pagination` namespace records page start and settle events
+without message content. Settle events include the session, trigger, count,
+raw and visible boundaries, committed sentinel geometry, continuation, and
+stop reason. Recovery entry and exit use distinct reasons so a real request
+failure is distinguishable from leaving the preload region.
 
 ## Responsive behavior
 
-Desktop and mobile use the same native transcript and one vertical scroll owner. This change adds no mobile surface, control, or touch behavior.
+Desktop and mobile continue to use the existing full-height task Chat surface,
+shared store, shared hooks, and one vertical transcript scroll owner. Prompt
+History uses the same row selection callback on both surfaces. A selected
+prompt returns the phone to Chat and uses the around-window path when the row is
+not loaded. The recovery button uses the same placement on both surfaces with a
+coarse-pointer touch target.
 
-The existing full-height mobile task layout remains the nearest mobile exemplar. The mobile pagination scenario proves the same load-cycle boundary.
+## Around-window navigation
+
+The chat panel sends `GET /api/v1/task-sessions/:id/messages?around=<message-id>&sort=desc&limit=N` after it confirms that the target belongs to the active session. The backend returns the target and newer rows in newest-first order. The chat panel merges the response into `messages.bySession`, waits for the target row to render, and then scrolls to it. The target token is session-scoped and is cleared only after a successful scroll or a confirmed missing target. A stale response cannot consume a newer selection.
+
+The nearest mobile exemplar is `apps/web/components/task/task-layout.tsx` and
+the existing `mobile-message-pagination.spec.ts` flow. The mobile scenario
+must prove the same continuous loading, true-start fallback, recovery, and
+anchor behavior as desktop.
 
 ## Test boundaries
 
-- A hook test covers raw `has_more: true` with loaded prompt `#1`.
-- A hook test covers the compatibility path when the ordinal is absent.
-- A hook test proves that a multi-page load stops when a response adds prompt `#1`.
-- Hook and drain tests prove that explicit search backfill can continue through the raw boundary.
-- Desktop and mobile browser tests seed hidden pre-prompt rows and prove that no older-page control remains.
-- Desktop and mobile browser tests prove that task opening makes no request with an older-page cursor.
-- A message-fetch test proves that a tool-only initial window completes without automatic backfill.
-- Separate desktop and mobile browser tests preserve the prepend anchor while loading older pages.
-- Desktop and mobile browser tests prove that one upward action loads only one page when that page adds visible entries.
-- A collapsed-activity browser scenario proves that the same load cycle continues until a new visible top entry appears.
-- Sentinel unit tests prove that stale intersection state cannot start a second visible-page request.
-
-## Related design
-
-- [Prompt History Panel](prompt-history-panel.md) defines the `prompt_index` contract and its compatibility behavior.
+- Processed-message tests cover an uninitialized window, a tool-only window
+  with older history, exhausted legacy history, an empty description, and a
+  loaded stored prompt.
+- Session-state tests cover initialization through boot hydration, newest
+  fetch, purge, and refetch without inferring exhaustion from defaults.
+- Sentinel tests cover committed in-region continuation, out-of-region stop,
+  stale observer entries, no-progress recovery, successful retry, and session
+  reset.
+- Native transcript tests cover recovery-control visibility and prepend anchor
+  preservation.
+- Desktop and mobile browser tests seed more than twenty older pages between
+  the newest window and the latest user prompt. They prove that no synthetic
+  initial prompt or routine retry control appears and that one upward
+  navigation reaches the stored prompt without a click.
+- Existing prompt-`#1`, hidden pre-prompt, and inactive-session reconciliation
+  scenarios remain covered.

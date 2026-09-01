@@ -17,8 +17,8 @@ import {
   IconRobot,
 } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
-import { useSessionMessages } from "@/hooks/domains/session/use-session-messages";
-import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
+import { useSessionPrompts } from "@/hooks/domains/session/use-session-prompts";
+import { useLazyLoadPrompts } from "@/hooks/use-lazy-load-prompts";
 import { useLazyLoadSentinel } from "@/hooks/use-lazy-load-sentinel";
 import { useSessionTurnsState } from "@/hooks/domains/session/use-session-turns";
 import { useMessageFavorite } from "@/hooks/domains/session/use-message-favorite";
@@ -36,15 +36,51 @@ type PromptHistoryPanelContentProps = { onNavigateToPrompt?: (messageId: string)
 const SENTINEL_TEST_ID = "prompt-history-sentinel";
 const LOADING_OLDER_TEST_ID = "prompt-history-loading-older";
 const SCROLL_TEST_ID = "prompt-history-scroll";
-/** Older-page loads must accumulate at least this many new prompts per
- * trigger, so short message pages (agent replies dilute the user prompts) do
- * not trickle in a few rows at a time. */
-const MIN_OLDER_PROMPTS_PER_LOAD = 10;
 /** Minimum-display window for the loading message: after a page settles, keep
  * the message mounted for this long so the sentinel's re-arm loop (next page
  * firing right after a positive settle) renders a continuous indicator instead
  * of a per-page flash. */
 const LOADING_GRACE_MS = 400;
+
+function PromptHistoryLoadError({
+  rootRef,
+  onRetry,
+}: {
+  rootRef: RefObject<HTMLDivElement | null>;
+  onRetry: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <PanelRoot
+      ref={rootRef}
+      data-testid="prompt-history-panel"
+      className="flex flex-col items-center gap-3 p-4 text-sm text-muted-foreground"
+    >
+      <span>{t("task:error")}</span>
+      <Button
+        data-testid="prompt-history-retry"
+        className="min-h-11 md:min-h-0"
+        onClick={onRetry}
+        variant="outline"
+      >
+        {t("task:retry")}
+      </Button>
+    </PanelRoot>
+  );
+}
+
+function PromptHistoryPassthrough({ rootRef }: { rootRef: RefObject<HTMLDivElement | null> }) {
+  const { t } = useTranslation();
+  return (
+    <PanelRoot
+      ref={rootRef}
+      data-testid="prompt-history-panel"
+      className="p-4 text-sm text-muted-foreground"
+    >
+      {t("task:promptHistoryEmpty")}
+    </PanelRoot>
+  );
+}
 
 /** The prompt-history panel: builds entries from the session's messages and
  * turns and renders one expandable row per prompt. Older pages auto-load via
@@ -57,16 +93,19 @@ export function PromptHistoryPanelContent({ onNavigateToPrompt }: PromptHistoryP
   const rootRef = useRef<HTMLDivElement>(null);
   const sessionId = useAppStore((state) => state.tasks.activeSessionId);
   const session = useAppStore((state) => (sessionId ? state.taskSessions.items[sessionId] : null));
-  const { messages, isLoading: messagesLoading } = useSessionMessages(sessionId);
-  const { loadMore, hasMore, isLoadingMore } = useLazyLoadMessages(sessionId, {
-    minUserPromptsPerLoad: MIN_OLDER_PROMPTS_PER_LOAD,
-  });
+  const {
+    prompts,
+    isLoading: messagesLoading,
+    fetchFailed,
+    retryPrompts,
+  } = useSessionPrompts(sessionId);
+  const { loadMore, hasMore, isLoadingMore } = useLazyLoadPrompts(sessionId);
   const { turns, isHydrated: turnsHydrated } = useSessionTurnsState(sessionId);
   const entries = useMemo(() => {
-    const derived = buildPromptHistoryEntries(messages, turns);
+    const derived = buildPromptHistoryEntries(prompts, turns);
     if (turnsHydrated) return derived;
     return derived.map((entry) => ({ ...entry, durationSeconds: null }));
-  }, [messages, turns, turnsHydrated]);
+  }, [prompts, turns, turnsHydrated]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const maxHeight = usePanelRowMaxHeight(rootRef);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -79,9 +118,7 @@ export function PromptHistoryPanelContent({ onNavigateToPrompt }: PromptHistoryP
   // Minimum-display grace so consecutive auto-loads show one continuous
   // indicator instead of a per-page flash (scoped to the active session).
   const showLoadingGrace = useLoadingGrace(sessionId, isLoadingMore);
-  // The shared hook owns the visible transcript boundary. If payloads omit
-  // ordinals, it retains the raw hasMore compatibility behavior.
-  const shouldPaginate = hasMore;
+  const shouldPaginate = hasMore && !entries.some((entry) => entry.promptNumber === 1);
   const showLoading = shouldPaginate && (isLoadingMore || showLoadingGrace);
   const { sentinelRef, onUserGesture } = usePanelOlderPromptSentinel({
     scrollRef,
@@ -91,20 +128,11 @@ export function PromptHistoryPanelContent({ onNavigateToPrompt }: PromptHistoryP
     loadMore,
   });
 
-  // Passthrough: unconditional no-controls empty state (no rows, arrows,
-  // sentinel, or loading indicators), even when entries/hasMore exist.
-  if (session?.is_passthrough) {
-    return (
-      <PanelRoot
-        ref={rootRef}
-        data-testid="prompt-history-panel"
-        className="p-4 text-sm text-muted-foreground"
-      >
-        {t("task:promptHistoryEmpty")}
-      </PanelRoot>
-    );
-  }
+  if (session?.is_passthrough) return <PromptHistoryPassthrough rootRef={rootRef} />;
 
+  if (fetchFailed && entries.length === 0) {
+    return <PromptHistoryLoadError rootRef={rootRef} onRetry={retryPrompts} />;
+  }
   if (entries.length === 0) {
     // Keep PanelRoot as the stable top-level element in EVERY branch (same
     // element type at the same position) so the root element and its
@@ -542,6 +570,7 @@ function PromptHistoryRow({
         <div
           role="button"
           tabIndex={0}
+          data-message-id={entry.messageId}
           className={cn(
             "markdown-body markdown-body-user group relative flex min-h-11 cursor-pointer items-center overflow-hidden rounded-2xl px-3 py-1.5 md:min-h-0",
             isFavorite ? "bg-yellow-200/50 dark:bg-yellow-500/10" : "bg-primary/30",

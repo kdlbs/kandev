@@ -449,17 +449,18 @@ func spriteCreateInstanceRequest(req *ExecutorCreateRequest) agentctl.CreateInst
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
 		),
-		McpServers:               req.McpServers,
-		McpMode:                  req.McpMode,
-		McpProviders:             req.McpProviders,
-		McpProfile:               req.McpProfile,
-		RequiresProcessKill:      requiresProcessKillFromReq(req),
-		StripEnv:                 stripEnvFromReq(req),
-		BaseBranches:             getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-		RemoteContributions:      req.RemoteContributions,
-		ContributionDestinations: req.ContributionDestinations,
-		ComparisonTargets:        req.ComparisonTargets,
-		Env:                      cloneStringMap(req.Env),
+		McpServers:                 req.McpServers,
+		McpMode:                    req.McpMode,
+		McpProviders:               req.McpProviders,
+		McpProfile:                 req.McpProfile,
+		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
+		RequiresProcessKill:        requiresProcessKillFromReq(req),
+		StripEnv:                   stripEnvFromReq(req),
+		BaseBranches:               getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions:        req.RemoteContributions,
+		ContributionDestinations:   req.ContributionDestinations,
+		ComparisonTargets:          req.ComparisonTargets,
+		Env:                        cloneStringMap(req.Env),
 	}
 }
 
@@ -594,6 +595,16 @@ func requiresProcessKillFromReq(req *ExecutorCreateRequest) bool {
 		return false
 	}
 	return rt.RequiresProcessKill
+}
+
+// namespacesMCPToolsByServerFromReq returns the agent's MCP tool presentation
+// setting from its RuntimeConfig (false when unset).
+func namespacesMCPToolsByServerFromReq(req *ExecutorCreateRequest) bool {
+	if req == nil || req.AgentConfig == nil {
+		return false
+	}
+	rt := req.AgentConfig.Runtime()
+	return rt != nil && rt.NamespacesMCPToolsByServer
 }
 
 // stripEnvFromReq returns the agent's StripEnv list from its RuntimeConfig

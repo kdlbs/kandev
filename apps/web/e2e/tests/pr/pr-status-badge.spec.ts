@@ -706,9 +706,16 @@ test.describe("PR status badge", () => {
       mergeable_state: "dirty",
     });
     await expect(icon).toHaveAttribute("data-pr-count", "2", { timeout: 15_000 });
+    await taskRow.hover();
+    await expect(taskActions).toBeVisible();
+    await expect(menuSlot).toHaveCSS("width", "24px");
+    // Re-enter from a neutral point after the PR update to deliver a fresh hover transition.
+    await testPage.mouse.move(viewport!.width - 1, viewport!.height - 1);
     await icon.hover();
+    await icon.focus();
 
     const multiSummary = visibleTaskPRSummary(testPage);
+    await expect(multiSummary).toBeVisible();
     const entries = multiSummary.getByTestId("pr-task-status-entry");
     await expect(entries).toHaveCount(2);
     await expect(entries.nth(0).getByTestId("pr-task-status-number")).toHaveText("PR #2966");

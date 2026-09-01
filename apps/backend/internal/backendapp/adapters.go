@@ -120,6 +120,7 @@ var _ interface {
 	OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool
 	GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error)
 	CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error
+	PreparePassthroughRunning(sessionID string) (func(), error)
 } = (*lifecycleAdapter)(nil)
 
 // newLifecycleAdapter creates a new lifecycle adapter
@@ -223,6 +224,7 @@ func buildLifecycleLaunchRequest(
 		SessionID:                     req.SessionID,
 		TaskEnvironmentID:             req.TaskEnvironmentID,
 		WorkspaceReuseRequired:        req.WorkspaceReuseRequired,
+		AllowBranchReplacement:        req.AllowBranchReplacement,
 		TaskTitle:                     req.TaskTitle,
 		AgentProfileID:                officeProfileID,
 		ExecutionProfileID:            req.AgentProfileID,
@@ -266,6 +268,8 @@ func buildLifecycleLaunchRequest(
 		PullBeforeWorktree:            req.PullBeforeWorktree,
 		RemoteSyncHandled:             req.RemoteSyncHandled,
 		RefreshRepository:             req.RefreshRepository,
+		RefreshRepositoryWithState:    req.RefreshRepositoryWithState,
+		RemoteRefState:                req.RemoteRefState,
 		TaskDirName:                   req.TaskDirName,
 		RepoName:                      req.RepoName,
 		BranchSlug:                    req.BranchSlug,
@@ -310,30 +314,33 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 	specs := make([]lifecycle.RepoLaunchSpec, 0, len(repos))
 	for _, r := range repos {
 		specs = append(specs, lifecycle.RepoLaunchSpec{
-			TaskRepositoryID:        r.TaskRepositoryID,
-			RepositoryID:            r.RepositoryID,
-			RepositoryPath:          r.RepositoryPath,
-			RepositoryURL:           r.RepositoryURL,
-			RepoName:                r.RepoName,
-			BaseBranch:              r.BaseBranch,
-			DefaultBranch:           r.DefaultBranch,
-			CheckoutBranch:          r.CheckoutBranch,
-			PRNumber:                r.PRNumber,
-			RemoteContribution:      r.RemoteContribution,
-			ContributionDestination: r.ContributionDestination,
-			ComparisonTarget:        r.ComparisonTarget,
-			WorktreeID:              r.WorktreeID,
-			WorktreeBranchPrefix:    r.WorktreeBranchPrefix,
-			WorktreeBranchTemplate:  r.WorktreeBranchTemplate,
-			WorktreeBranchTicket:    r.WorktreeBranchTicket,
-			PullBeforeWorktree:      r.PullBeforeWorktree,
-			RemoteSyncHandled:       r.RemoteSyncHandled,
-			RefreshRepository:       r.RefreshRepository,
-			RepoSetupScript:         r.RepoSetupScript,
-			RepoCleanupScript:       r.RepoCleanupScript,
-			CopyFiles:               r.CopyFiles,
-			BranchSlug:              r.BranchSlug,
-			BranchIdentitySlug:      r.BranchIdentitySlug,
+			TaskRepositoryID:           r.TaskRepositoryID,
+			RepositoryID:               r.RepositoryID,
+			RepositoryPath:             r.RepositoryPath,
+			RepositoryURL:              r.RepositoryURL,
+			RepoName:                   r.RepoName,
+			BaseBranch:                 r.BaseBranch,
+			DefaultBranch:              r.DefaultBranch,
+			CheckoutBranch:             r.CheckoutBranch,
+			PRNumber:                   r.PRNumber,
+			RemoteContribution:         r.RemoteContribution,
+			ContributionDestination:    r.ContributionDestination,
+			ComparisonTarget:           r.ComparisonTarget,
+			WorktreeID:                 r.WorktreeID,
+			AllowBranchReplacement:     r.AllowBranchReplacement,
+			WorktreeBranchPrefix:       r.WorktreeBranchPrefix,
+			WorktreeBranchTemplate:     r.WorktreeBranchTemplate,
+			WorktreeBranchTicket:       r.WorktreeBranchTicket,
+			PullBeforeWorktree:         r.PullBeforeWorktree,
+			RemoteSyncHandled:          r.RemoteSyncHandled,
+			RefreshRepository:          r.RefreshRepository,
+			RefreshRepositoryWithState: r.RefreshRepositoryWithState,
+			RemoteRefState:             r.RemoteRefState,
+			RepoSetupScript:            r.RepoSetupScript,
+			RepoCleanupScript:          r.RepoCleanupScript,
+			CopyFiles:                  r.CopyFiles,
+			BranchSlug:                 r.BranchSlug,
+			BranchIdentitySlug:         r.BranchIdentitySlug,
 		})
 	}
 	return specs
@@ -653,6 +660,10 @@ func (a *lifecycleAdapter) MarkPassthroughRunning(sessionID string) error {
 	return a.mgr.MarkPassthroughRunning(sessionID)
 }
 
+func (a *lifecycleAdapter) PreparePassthroughRunning(sessionID string) (func(), error) {
+	return a.mgr.PreparePassthroughRunning(sessionID)
+}
+
 func (a *lifecycleAdapter) PollRemoteStatusForRecords(ctx context.Context, records []executor.RemoteStatusPollRequest) {
 	lcRecords := make([]lifecycle.RemoteStatusPollRecord, len(records))
 	for i, r := range records {
@@ -841,6 +852,43 @@ func (a githubTaskIssueStoreAdapter) UpdateTaskMetadata(ctx context.Context, tas
 		return nil, wrapGitHubTaskIssueStoreError(err)
 	}
 	return task, nil
+}
+
+func (a githubTaskIssueStoreAdapter) UpdateTaskRepositoryBaseBranch(
+	ctx context.Context, taskID, repositoryID, headBranch, baseBranch string,
+) error {
+	taskRepos, err := a.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	taskRepo, err := selectTaskRepositoryForPR(taskRepos, repositoryID, headBranch)
+	if err != nil {
+		return err
+	}
+	_, err = a.svc.UpdateRepositoryBaseBranch(ctx, taskservice.UpdateRepositoryBaseBranchRequest{
+		TaskID: taskID, TaskRepositoryID: taskRepo.ID, BaseBranch: baseBranch,
+	})
+	return err
+}
+
+func selectTaskRepositoryForPR(
+	taskRepos []*models.TaskRepository, repositoryID, headBranch string,
+) (*models.TaskRepository, error) {
+	matches := make([]*models.TaskRepository, 0, 1)
+	for _, taskRepo := range taskRepos {
+		if taskRepo != nil && taskRepo.RepositoryID == repositoryID {
+			matches = append(matches, taskRepo)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	for _, taskRepo := range matches {
+		if taskRepo.CheckoutBranch == headBranch {
+			return taskRepo, nil
+		}
+	}
+	return nil, fmt.Errorf("task repository for repository %q and branch %q not found", repositoryID, headBranch)
 }
 
 func wrapGitHubTaskIssueStoreError(err error) error {

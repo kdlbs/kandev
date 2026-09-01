@@ -74,6 +74,15 @@ type RecordDecisionInput struct {
 	DeciderID     string
 	Role          string
 	Comment       string
+	// SessionID, when non-empty, names the decider's own calling session.
+	// RecordDecision re-evaluates against this session instead of the
+	// task's most-recently-started ("active") session, so a reviewer/
+	// approver's decision is checked against the seats their own session
+	// occupies rather than whichever session happens to be newest.
+	// Callers only populate this behind features.officeSessionIdentity
+	// (see office/dashboard.DashboardService.SetOfficeSessionIdentity);
+	// leaving it empty preserves the existing resolveActiveSessionID path.
+	SessionID string
 }
 
 // RecordDecisionResult mirrors engine.RecordDecisionResult plus the
@@ -270,9 +279,15 @@ func (d *Dispatcher) RecordDecision(ctx context.Context, in RecordDecisionInput)
 	if in.TaskID == "" {
 		return RecordDecisionResult{}, fmt.Errorf("task_id is required")
 	}
-	sessionID, err := d.resolveActiveSessionID(ctx, in.TaskID)
+	var sessionID string
+	var err error
+	if in.SessionID != "" {
+		sessionID, err = d.resolveDeciderSessionID(ctx, in.TaskID, in.SessionID)
+	} else {
+		sessionID, err = d.resolveActiveSessionID(ctx, in.TaskID)
+	}
 	if err != nil {
-		return RecordDecisionResult{}, fmt.Errorf("resolve active session: %w", err)
+		return RecordDecisionResult{}, fmt.Errorf("resolve decider session: %w", err)
 	}
 	result, err := d.engine.RecordParticipantDecision(ctx, sessionID, engine.DecisionInfo{
 		TaskID:        in.TaskID,
@@ -368,9 +383,66 @@ func (d *Dispatcher) resolveActiveSessionID(ctx context.Context, taskID string) 
 	return session.ID, nil
 }
 
+// resolveDeciderSessionID validates the decider's own calling session
+// (RecordDecisionInput.SessionID) rather than resolving the task's active
+// session. It returns "" (session_unresolvable, not an error) when the
+// session is missing, belongs to a different task, or is not in one of the
+// active states — mirroring resolveActiveSessionID's own never-an-error
+// contract for "no session resolvable" (AC-16a) — so a stale or foreign
+// session id degrades to the same "skip re-evaluation" behavior an
+// unresolvable active session already gets, rather than rejecting the
+// decision outright.
+//
+// The active-state set mirrors GetActiveTaskSessionByTaskID's own query
+// (internal/task/repository/sqlite/session.go) — there is no shared
+// models-level predicate for that set, so this local copy must be kept in
+// sync with it.
+func (d *Dispatcher) resolveDeciderSessionID(ctx context.Context, taskID, sessionID string) (string, error) {
+	session, err := d.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, taskmodels.ErrTaskSessionNotFound) {
+			d.logSessionUnresolvable(taskID, sessionID, "not_found")
+			return "", nil
+		}
+		return "", err
+	}
+	if session == nil || session.TaskID != taskID {
+		d.logSessionUnresolvable(taskID, sessionID, "foreign")
+		return "", nil
+	}
+	if !isActiveSessionState(session.State) {
+		d.logSessionUnresolvable(taskID, sessionID, "terminal")
+		return "", nil
+	}
+	return session.ID, nil
+}
+
+func (d *Dispatcher) logSessionUnresolvable(taskID, sessionID, reason string) {
+	d.logger.Debug("resolveDeciderSessionID: session unresolvable, falling back to blank",
+		zap.String("task_id", taskID),
+		zap.String("supplied_session_id", sessionID),
+		zap.String("reason", reason))
+}
+
+func isActiveSessionState(state taskmodels.TaskSessionState) bool {
+	switch state {
+	case taskmodels.TaskSessionStateCreated,
+		taskmodels.TaskSessionStateStarting,
+		taskmodels.TaskSessionStateRunning,
+		taskmodels.TaskSessionStateWaitingForInput:
+		return true
+	default:
+		return false
+	}
+}
+
 // resolveLatestSessionID returns the F38 "any session" id (the task's
 // most recent session regardless of state), or "" when the task has never
-// had one.
+// had one. Like resolveActiveSessionID and resolveDeciderSessionID, this is
+// scoped to the given taskID — GetTaskSessionByTaskID's own query already
+// filters by task, so unlike resolveDeciderSessionID (which validates a
+// caller-supplied session id and must check task ownership itself), there
+// is no cross-task session id to smuggle in here.
 func (d *Dispatcher) resolveLatestSessionID(ctx context.Context, taskID string) (string, error) {
 	session, err := d.sessions.GetTaskSessionByTaskID(ctx, taskID)
 	if err != nil {

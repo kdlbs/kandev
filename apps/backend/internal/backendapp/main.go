@@ -669,7 +669,9 @@ func startAgentInfrastructure(
 	if services.GitHub != nil {
 		orchestratorSvc.SetGitHubService(services.GitHub)
 		services.GitHub.SetTaskDeleter(&taskDeleterAdapter{svc: services.Task})
-		services.GitHub.SetTaskIssueStore(githubTaskIssueStoreAdapter{svc: services.Task})
+		taskStoreAdapter := githubTaskIssueStoreAdapter{svc: services.Task}
+		services.GitHub.SetTaskIssueStore(taskStoreAdapter)
+		services.GitHub.SetTaskRepositoryBaseBranchUpdater(taskStoreAdapter)
 		services.GitHub.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
 		log.Info("GitHub service configured for orchestrator (PR auto-detection enabled)")
 
@@ -1274,6 +1276,7 @@ func initOfficeServices(
 		agentRegistry, log, services, cfg.Office.JWTSigningKey,
 	)
 	wireOfficeSvcsDependencies(services, repos, eventBus, orchestratorSvc, agentRegistry)
+	services.OfficeSvcs.Dashboard.SetOfficeSessionIdentity(cfg.Features.OfficeSessionIdentity)
 
 	// Reconcile using the new infra package.
 	reconciler := officeinfra.NewReconciler(repos.Office, log)

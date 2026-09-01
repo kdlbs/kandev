@@ -10,7 +10,10 @@ import { isDebugUI } from "@/lib/config";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
-import { EnsureSessionErrorBanner } from "@/components/task/ensure-session-error";
+import {
+  EnsureSessionErrorBanner,
+  SessionRecoveryFeedback,
+} from "@/components/task/ensure-session-error";
 import { TaskMoveErrorBanner } from "@/components/task/task-move-error-banner";
 import type { Layout } from "react-resizable-panels";
 import { TaskArchivedProvider } from "./task-archived-context";
@@ -330,6 +333,12 @@ export function TaskPageInner(props: TaskPageInnerProps) {
                 workspaceId={task?.workspace_id ?? null}
               />
             )}
+            <SessionRecoveryFeedback
+              error={props.resumption.error}
+              notice={props.resumption.notice}
+              onRetry={() => void props.resumption.resumeSession()}
+              workspaceId={task?.workspace_id ?? null}
+            />
             <TaskArchivedProvider value={archivedValue}>
               <TaskLaunchErrorProvider
                 value={{

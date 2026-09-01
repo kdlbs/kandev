@@ -515,7 +515,7 @@ export function resetSeedRepositoryCheckout(seedData: SeedData, tmpDir: string) 
   });
 }
 
-/** Points the seed repository at an empty remote whose HEAD cannot resolve. */
+/** Points the seed repository at a non-empty remote whose HEAD cannot resolve. */
 export function pointSeedRepositoryAtUnresolvedOrigin(seedData: SeedData, tmpDir: string) {
   const remoteDir = path.join(
     tmpDir,
@@ -527,6 +527,11 @@ export function pointSeedRepositoryAtUnresolvedOrigin(seedData: SeedData, tmpDir
     env: makeGitEnv(tmpDir),
     stdio: "ignore",
   });
+  execFileSync(
+    "git",
+    ["-C", seedData.repositoryPath, "push", "--no-verify", remoteDir, "main:refs/heads/unrelated"],
+    { env: makeGitEnv(tmpDir), stdio: "ignore" },
+  );
   try {
     execFileSync(
       "git",

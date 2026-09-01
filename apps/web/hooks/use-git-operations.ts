@@ -24,8 +24,25 @@ export interface PRCreateResult {
   provider?: string;
   output?: string;
   error?: string;
+  error_code?: string;
   linked?: boolean;
   association_error?: string;
+}
+
+export function getLocalizedGitOperationError(
+  errorCode?: string,
+  fallback?: string,
+): string | undefined {
+  switch (errorCode) {
+    case "empty_remote_remote_changed":
+      return t("common:emptyRemoteRemoteChanged");
+    case "empty_remote_base_publish_failed":
+      return t("common:emptyRemoteBasePublishFailed");
+    case "empty_remote_branch_publish_failed":
+      return t("common:emptyRemoteBranchPublishFailed");
+    default:
+      return fallback;
+  }
 }
 
 export function getChangeRequestTerminology(provider?: string) {

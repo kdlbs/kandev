@@ -170,15 +170,11 @@ export class WorkflowSettingsPage {
   /** Save every dirty workflow contributor through the route-level action. */
   async saveChanges(touch = false): Promise<void> {
     await this.submitSaveChanges(touch);
-    await expect
-      .poll(
-        async () =>
-          (await this.floatingSave.isVisible())
-            ? await this.floatingSave.getAttribute("data-dirty-contributors")
-            : null,
-        { timeout: 15_000 },
-      )
-      .toBeNull();
+    // The coordinator reports `saved` only after every contributor's save
+    // promise has settled. Waiting for that state avoids treating the
+    // contributor-id diagnostic attribute as a completion signal while a
+    // slow save is still in flight.
+    await expect(this.floatingSave).toHaveAttribute("data-status", "saved", { timeout: 30_000 });
   }
 
   /** The delete workflow button within a card. */

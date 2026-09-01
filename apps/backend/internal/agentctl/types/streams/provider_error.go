@@ -10,6 +10,9 @@ const (
 	// ProviderErrorSourceCodexACP marks a safe diagnostic reconstructed from
 	// Codex ACP metadata and its matching capacity message.
 	ProviderErrorSourceCodexACP = "codex_acp"
+	// ProviderErrorSourceCursorACP marks Cursor's bounded HTTP/2 stream-reset
+	// diagnostic reconstructed from its terminal ACP control chunk.
+	ProviderErrorSourceCursorACP = "cursor_acp"
 )
 
 // ProviderError is the bounded, sanitized provider diagnostic that may cross

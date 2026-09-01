@@ -26,6 +26,8 @@ import (
 // changed. Writes still happen immediately when the status hash changes.
 const gitSnapshotPersistInterval = 30 * time.Second
 
+const gitSnapshotTriggeredByAgentCompleted = "agent_completed"
+
 // gitSnapshotCacheMaxEntries bounds the in-memory throttle map so a long-lived
 // backend with many sessions can't grow it without limit. When the cache is
 // full and a new session arrives, the oldest entry by lastWrite is evicted.
@@ -42,9 +44,10 @@ type gitSnapshotCacheEntry struct {
 	lastWrite time.Time
 }
 
-// gitSnapshotCache throttles per-session writes to the live git snapshot cache
-// table. It is process-local — first event after a restart will rewrite the
-// row, which is fine because UpsertLatestLiveGitSnapshot is idempotent.
+// gitSnapshotCache throttles writes to the live git snapshot cache per
+// environment and repository. It is process-local — first event after a
+// restart will rewrite the row, which is fine because
+// UpsertLatestLiveGitSnapshot is idempotent.
 type gitSnapshotCache struct {
 	mu      sync.Mutex
 	byID    map[string]gitSnapshotCacheEntry
@@ -62,18 +65,23 @@ func newGitSnapshotCache() *gitSnapshotCache {
 // happen on hash change, or when the previous write is older than
 // gitSnapshotPersistInterval (defensive: makes the cache eventually consistent
 // even if hashing misses something).
-func (c *gitSnapshotCache) shouldWrite(sessionID, hash string, now time.Time) bool {
+func (c *gitSnapshotCache) shouldWrite(taskEnvironmentID, repositoryName, hash string, now time.Time) bool {
+	key := gitSnapshotCacheKey(taskEnvironmentID, repositoryName)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	prev, ok := c.byID[sessionID]
+	prev, ok := c.byID[key]
 	if ok && prev.hash == hash && now.Sub(prev.lastWrite) < gitSnapshotPersistInterval {
 		return false
 	}
 	if !ok && c.maxSize > 0 && len(c.byID) >= c.maxSize {
 		c.evictOldestLocked()
 	}
-	c.byID[sessionID] = gitSnapshotCacheEntry{hash: hash, lastWrite: now}
+	c.byID[key] = gitSnapshotCacheEntry{hash: hash, lastWrite: now}
 	return true
+}
+
+func gitSnapshotCacheKey(taskEnvironmentID, repositoryName string) string {
+	return taskEnvironmentID + "\x00" + repositoryName
 }
 
 // evictOldestLocked drops the entry with the oldest lastWrite. Caller must
@@ -93,13 +101,18 @@ func (c *gitSnapshotCache) evictOldestLocked() {
 	}
 }
 
-// forget removes a session's cached entry. Called when a session is deleted
-// so the cache doesn't retain stale state for sessions that will never
-// receive another git event.
-func (c *gitSnapshotCache) forget(sessionID string) {
+// forget removes every cached repository entry for an environment. Called
+// when an environment is deleted so the cache doesn't retain stale state for
+// workspaces that will never receive another git event.
+func (c *gitSnapshotCache) forget(taskEnvironmentID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.byID, sessionID)
+	prefix := taskEnvironmentID + "\x00"
+	for key := range c.byID {
+		if strings.HasPrefix(key, prefix) {
+			delete(c.byID, key)
+		}
+	}
 }
 
 func gitStatusHash(s *lifecycle.GitStatusData) string {
@@ -153,10 +166,13 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 			zap.String("task_id", data.TaskID))
 		return
 	}
+	if data.TaskEnvironmentID == "" {
+		data.TaskEnvironmentID, _ = s.resolveGitSnapshotEnvironmentID(ctx, data.SessionID)
+	}
 
 	// Forward status_update event to WebSocket subject for frontend
 	// The frontend uses this for real-time updates during active sessions
-	if s.eventBus != nil {
+	if s.eventBus != nil && data.TaskEnvironmentID != "" {
 		event := bus.NewEvent(events.GitWSEvent, "orchestrator", &data)
 		_ = s.eventBus.Publish(ctx, events.BuildGitWSEventSubject(data.SessionID), event)
 	}
@@ -174,7 +190,7 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 }
 
 // persistGitStatusSnapshot writes a single cached "live monitor" snapshot per
-// session, throttled by gitSnapshotCache. The cached row is read by
+// environment, throttled by gitSnapshotCache. The cached row is read by
 // appendDBSnapshotGitStatus when no live execution is available.
 func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.GitEventData) {
 	if s.repo == nil || data.SessionID == "" || data.Status == nil {
@@ -183,21 +199,30 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 	if s.gitSnapshotCache == nil {
 		return
 	}
+	taskEnvironmentID := data.TaskEnvironmentID
+	if taskEnvironmentID == "" {
+		var ok bool
+		taskEnvironmentID, ok = s.resolveGitSnapshotEnvironmentID(ctx, data.SessionID)
+		if !ok {
+			return
+		}
+	}
 	hash := gitStatusHash(data.Status)
-	if !s.gitSnapshotCache.shouldWrite(data.SessionID, hash, time.Now()) {
+	if !s.gitSnapshotCache.shouldWrite(taskEnvironmentID, data.Status.RepositoryName, hash, time.Now()) {
 		return
 	}
 
 	st := data.Status
 	snapshot := &models.GitSnapshot{
-		SessionID:    data.SessionID,
-		Branch:       st.Branch,
-		RemoteBranch: st.RemoteBranch,
-		HeadCommit:   st.HeadCommit,
-		BaseCommit:   st.BaseCommit,
-		Ahead:        st.Ahead,
-		Behind:       st.Behind,
-		Files:        nil, // intentional: badge only needs totals
+		TaskEnvironmentID: taskEnvironmentID,
+		SessionID:         data.SessionID,
+		Branch:            st.Branch,
+		RemoteBranch:      st.RemoteBranch,
+		HeadCommit:        st.HeadCommit,
+		BaseCommit:        st.BaseCommit,
+		Ahead:             st.Ahead,
+		Behind:            st.Behind,
+		Files:             nil, // intentional: badge only needs totals
 		Metadata: map[string]interface{}{
 			"repository_name":       st.RepositoryName,
 			"branch_additions":      st.BranchAdditions,
@@ -215,9 +240,28 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 	}
 	if err := s.repo.UpsertLatestLiveGitSnapshot(ctx, snapshot); err != nil {
 		s.logger.Debug("failed to persist live git snapshot",
+			zap.String("task_environment_id", taskEnvironmentID),
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
 	}
+}
+
+func (s *Service) resolveGitSnapshotEnvironmentID(ctx context.Context, sessionID string) (string, bool) {
+	if s.repo == nil || sessionID == "" {
+		return "", false
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Debug("failed to resolve git snapshot environment",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return "", false
+	}
+	if session == nil || session.TaskEnvironmentID == "" {
+		s.logger.Debug("skipping git snapshot without task environment",
+			zap.String("session_id", sessionID))
+		return "", false
+	}
+	return session.TaskEnvironmentID, true
 }
 
 // pushTrackerUnsynced is the pushTracker sentinel for "no upstream

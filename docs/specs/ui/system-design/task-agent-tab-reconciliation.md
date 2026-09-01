@@ -3,6 +3,7 @@ status: current
 system: ui
 requirements:
   - REQ-UI-TASK-AGENT-TAB-RECONCILIATION-001
+  - REQ-UI-TASK-AGENT-TAB-RECONCILIATION-002
 ---
 
 # Task Agent Tab Reconciliation System Design
@@ -19,6 +20,7 @@ the desktop workbench.
 | Requirement                                | Design section                                                                                                                                  |
 | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `REQ-UI-TASK-AGENT-TAB-RECONCILIATION-001` | [Components and responsibilities](#components-and-responsibilities), [Control flow](#control-flow), [Responsive behavior](#responsive-behavior) |
+| `REQ-UI-TASK-AGENT-TAB-RECONCILIATION-002` | [Inline rename event boundary](#inline-rename-event-boundary), [Responsive behavior](#responsive-behavior), [Verification design](#verification-design) |
 
 ## Components and responsibilities
 
@@ -34,6 +36,27 @@ the desktop workbench.
 - `runAutoSessionTabEffect` reads the current application state, removes stale
   Agent panels, ensures the active session panel, and adds current sibling
   session panels without activating them.
+- `SessionTab` owns the fine-pointer Agent-tab context menu and attaches the
+  shared Dockview maximize handler to the tab surface.
+- `TabRenameInput` owns the inline editor's pointer and keyboard event boundary.
+  It is shared with task terminal-tab rename mode.
+- `useTabMaximizeOnDoubleClick` owns maximize-or-restore behavior outside an
+  active inline editor.
+
+## Inline rename event boundary
+
+`SessionTab` renders `TabRenameInput` inside the same `ContextMenuTrigger` that
+receives tab-level double-clicks. Browsers dispatch `dblclick` as a separate
+bubbling event after the individual click events. Stopping only `mousedown` and
+`click` therefore does not isolate the editor from the tab-level maximize
+handler.
+
+The shared rename editor stops propagation of `mousedown`, `click`, and
+`dblclick`. Its `dblclick` boundary does not prevent the default browser action,
+so native input text selection remains available. The parent tab maximize
+handler remains unchanged and continues to own double-clicks that originate
+outside the editor. This boundary also protects the shared task terminal rename
+editor without changing terminal naming behavior.
 
 ## Data and contracts
 
@@ -69,7 +92,8 @@ the effect reads the latest session list.
 Desktop uses Dockview Agent tabs. Phone and tablet layouts do not mount the
 desktop Dockview workbench. Their existing session controls continue to read
 the same application-store membership. No mobile composition or touch target
-changes.
+changes. Inline rename event isolation applies only where the desktop Dockview
+tab and editor are mounted.
 
 ## Verification design
 
@@ -77,4 +101,8 @@ A React hook regression test hydrates a multi-session task while the Dockview
 API is null. The test publishes the API later and verifies reconciliation.
 Existing pure reconciliation tests continue to cover active-tab and sibling
 behavior. A Playwright scenario opens a multi-session task from Cmd+K and
-verifies that every Agent tab appears without a reload.
+verifies that every Agent tab appears without a reload. A focused desktop
+Playwright regression enters Agent-tab rename mode, double-clicks the input,
+and verifies that native text selection remains active while the Dockview group
+stays unmaximized. Mobile coverage is unchanged because phone and tablet do not
+mount the affected Dockview tab surface.

@@ -18,7 +18,11 @@ export function useEnvironmentSessionId(): string | null {
   const selector = useCallback((state: StoreSlice) => {
     const sid = state.tasks.activeSessionId;
     const envId = sid ? (state.environmentIdBySessionId[sid] ?? sid) : null;
-    if (envId === cacheRef.current.envId) return cacheRef.current.sessionId;
+    const cachedSessionId = cacheRef.current.sessionId;
+    const cachedSessionIsUsable =
+      cachedSessionId === sid ||
+      (cachedSessionId !== null && state.environmentIdBySessionId[cachedSessionId] === envId);
+    if (envId === cacheRef.current.envId && cachedSessionIsUsable) return cachedSessionId;
     cacheRef.current = { envId, sessionId: sid };
     return sid;
   }, []);
