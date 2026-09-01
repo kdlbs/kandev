@@ -360,12 +360,12 @@ func (s *Service) executeCIRunRequest(
 	request *CIRunRequest,
 	verified *verifiedCIRun,
 ) (*CIRunReceipt, error) {
-	latestBinding, latestPR, err := s.revalidateCIRunAdmission(ctx, client, request)
+	latestBinding, _, err := s.revalidateCIRunAdmission(ctx, client, request)
 	if err != nil {
 		return s.failCIRunAdmission(ctx, request, err)
 	}
 	verified, err = revalidateCIRunProviderSource(
-		ctx, client, latestBinding, request, latestPR, verified.Workflow,
+		ctx, client, latestBinding, request, verified.Workflow,
 	)
 	if err != nil {
 		return s.handleCIRunPreflightError(ctx, request, err)
@@ -419,7 +419,6 @@ func revalidateCIRunProviderSource(
 	client ciRunActionsClient,
 	binding *ciRunBinding,
 	request *CIRunRequest,
-	pr *PR,
 	expectedWorkflow *GitHubActionsWorkflow,
 ) (*verifiedCIRun, error) {
 	input := inputFromCIRunRequest(request)
@@ -437,13 +436,17 @@ func revalidateCIRunProviderSource(
 		workflow.Path != expectedWorkflow.Path {
 		return nil, &CIRunRequestError{Class: CIRunFailureSourceRunMismatch}
 	}
-	// Keep the source run as the final provider read before persisting and sending
-	// the rerun so a newly advanced attempt cannot reuse stale admission evidence.
+	// Re-read the source run before the PR so both identities are current at the
+	// provider mutation boundary.
 	run, err := client.GetActionsRun(ctx, binding.Owner, binding.Repo, request.SourceRunID)
 	if err != nil {
 		return nil, err
 	}
-	if !sourceRunMatches(run, pr, binding, input) || workflow.ID != run.WorkflowID ||
+	pr, err := revalidateCIRunPRAndSource(ctx, client, binding, request, run, input)
+	if err != nil {
+		return nil, err
+	}
+	if workflow.ID != run.WorkflowID ||
 		(run.WorkflowPath != "" && workflow.Path != run.WorkflowPath) {
 		return nil, &CIRunRequestError{Class: CIRunFailureSourceRunMismatch}
 	}
