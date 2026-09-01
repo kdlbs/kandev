@@ -680,6 +680,52 @@ describe("useClarificationGroup — losing a race, other call sites & fallback",
   });
 });
 
+// Regression: bundle A's request is still in flight (not yet settled) when
+// the swap to bundle B happens -- the reachable window in production, since
+// these POSTs run 60-75s and the panel can swap at any point during that.
+describe("useClarificationGroup — bundle swap while a request is in flight", () => {
+  beforeEach(setupFetchMock);
+
+  it("does not paint bundle A's late failure onto bundle B, and does not block B's own submit", async () => {
+    let resolveA: ((res: Response) => void) | null = null;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((r) => (resolveA = r)));
+    const msg = (id: string, p: string, q: string) => [
+      clarMessage({ id, pendingId: p, questionId: q, index: 0, total: 1 }),
+    ];
+    const bundleA = msg("m-a", "pA", "qA");
+    const bundleB = msg("m-b", "pB", "qB");
+    const { result, rerender } = renderHook(({ msgs }) => useClarificationGroup(msgs), {
+      initialProps: { msgs: bundleA },
+    });
+
+    let pendingASubmit!: Promise<void>; // A's submit never settles yet.
+    await act(async () => {
+      pendingASubmit = result.current.submitCollected({
+        qA: { question_id: "qA", selected_options: ["o1"] },
+      });
+    });
+    expect(result.current.submitState).toBe("submitting");
+
+    rerender({ msgs: bundleB }); // the next clarification streams in mid-flight
+    expect(result.current.submitState).toBe("idle");
+
+    // B must be submittable right away, not blocked by A's stale request.
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    await act(async () => {
+      await result.current.submitCollected({ qB: { question_id: "qB", selected_options: ["o2"] } });
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.submitState).toBe("ok");
+
+    // A's stale request finally fails -- must not clobber B's "ok" state.
+    await act(async () => {
+      resolveA?.(new Response("nope", { status: 500 }));
+      await pendingASubmit;
+    });
+    expect(result.current.submitState).toBe("ok");
+  });
+});
+
 describe("useClarificationGroup — inflight guard", () => {
   beforeEach(setupFetchMock);
 

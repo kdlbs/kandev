@@ -178,6 +178,13 @@ type RunClarificationRequestArgs = {
   ownStatus: ResolvedStatus;
   ownAnswers: Record<string, ClarificationAnswer>;
   bundle: readonly Message[];
+  // The pendingId this request was submitted for, captured at call time.
+  // Compared against activePendingIdRef when the POST resolves so a request
+  // that outlives its own bundle (the next clarification streamed in while
+  // this one was still in flight) can't paint its outcome onto the bundle
+  // that replaced it, or release a mutex a newer bundle's own request now owns.
+  requestPendingId: string;
+  activePendingIdRef: { current: string | null };
   inflightRef: { current: boolean };
   setSubmitState: (state: SubmitState) => void;
   updateMessage: (message: Message) => void;
@@ -187,13 +194,27 @@ type RunClarificationRequestArgs = {
 // optimistic update on success. Extracted so submitCollected and skipAll
 // (below) each stay a short wrapper around their own POST + own-answer shape.
 async function runClarificationRequest(args: RunClarificationRequestArgs) {
-  const { post, ownStatus, ownAnswers, bundle, inflightRef, setSubmitState, updateMessage } = args;
+  const {
+    post,
+    ownStatus,
+    ownAnswers,
+    bundle,
+    requestPendingId,
+    activePendingIdRef,
+    inflightRef,
+    setSubmitState,
+    updateMessage,
+  } = args;
   inflightRef.current = true;
   setSubmitState("submitting");
   try {
     const result = await post();
-    setSubmitState(result.state);
+    const isCurrentBundle = activePendingIdRef.current === requestPendingId;
+    if (isCurrentBundle) setSubmitState(result.state);
     if (result.state === "ok") {
+      // Applies against the submit-time bundle snapshot regardless of which
+      // bundle is now on screen -- this client's own messages really were
+      // resolved and the store must reflect that even after a swap.
       const { status, answersByQuestionId } = resolveOptimisticUpdate(
         result,
         ownStatus,
@@ -203,9 +224,12 @@ async function runClarificationRequest(args: RunClarificationRequestArgs) {
     }
   } catch (err) {
     console.error("Clarification request threw:", err);
-    setSubmitState("error");
+    if (activePendingIdRef.current === requestPendingId) setSubmitState("error");
   } finally {
-    inflightRef.current = false;
+    // Only release the mutex if it's still this request's to release -- a
+    // bundle swap already freed it for the new bundle's own submit, which may
+    // itself be in flight by the time this stale request settles.
+    if (activePendingIdRef.current === requestPendingId) inflightRef.current = false;
   }
 }
 
@@ -252,6 +276,7 @@ type UseClarificationSubmissionArgs = {
   questionIds: string[];
   answersRef: { current: Record<string, ClarificationAnswer> };
   submitBundleRef: { current: readonly Message[] };
+  activePendingIdRef: { current: string | null };
   inflightRef: { current: boolean };
   setSubmitState: (state: SubmitState) => void;
   updateMessage: (message: Message) => void;
@@ -269,6 +294,7 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
     questionIds,
     answersRef,
     submitBundleRef,
+    activePendingIdRef,
     inflightRef,
     setSubmitState,
     updateMessage,
@@ -296,6 +322,8 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
         ownStatus: "answered",
         ownAnswers: current,
         bundle: submitBundleRef.current.slice(),
+        requestPendingId: pendingId,
+        activePendingIdRef,
         inflightRef,
         setSubmitState,
         updateMessage,
@@ -306,6 +334,7 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
       questionIds,
       answersRef,
       submitBundleRef,
+      activePendingIdRef,
       inflightRef,
       setSubmitState,
       updateMessage,
@@ -323,12 +352,22 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
         ownStatus: "rejected",
         ownAnswers: {},
         bundle: submitBundleRef.current.slice(),
+        requestPendingId: pendingId,
+        activePendingIdRef,
         inflightRef,
         setSubmitState,
         updateMessage,
       });
     },
-    [pendingId, submitBundleRef, inflightRef, setSubmitState, updateMessage, defaultSkipReason],
+    [
+      pendingId,
+      submitBundleRef,
+      activePendingIdRef,
+      inflightRef,
+      setSubmitState,
+      updateMessage,
+      defaultSkipReason,
+    ],
   );
 
   const retry = useCallback(async () => {
@@ -407,6 +446,12 @@ export function useClarificationGroup(
   const submitBundleRef = useRef<readonly Message[]>([]);
   submitBundleRef.current = messages ?? [];
 
+  // Tracks which pendingId is currently on screen so a request whose bundle
+  // was swapped out while it was still in flight can tell it's no longer
+  // current (see runClarificationRequest).
+  const activePendingIdRef = useRef<string | null>(pendingId);
+  activePendingIdRef.current = pendingId;
+
   // i18n-exempt: the default reason is POSTed as the clarification answer and
   // reaches the agent verbatim; it is not rendered in the UI.
   const { submitCollected, skipAll, retry, resetLastAction } = useClarificationSubmission({
@@ -414,6 +459,7 @@ export function useClarificationGroup(
     questionIds,
     answersRef,
     submitBundleRef,
+    activePendingIdRef,
     inflightRef,
     setSubmitState,
     updateMessage: storeApi.getState().updateMessage,
@@ -425,7 +471,11 @@ export function useClarificationGroup(
   // action -- bundle-swap-without-unmount is a designed-for path (see
   // useCollapsedForBundle in clarification-panel-section.tsx), so without this
   // a stale "error"/"expired" banner (and Retry's recorded answers) would
-  // render against the live bundle and POST to the wrong pendingId.
+  // render against the live bundle and POST to the wrong pendingId. The old
+  // bundle's request, if still in flight, no longer owns the mutex once this
+  // runs (runClarificationRequest checks activePendingIdRef before touching
+  // it), so releasing it here is what lets the new bundle submit immediately
+  // instead of waiting out a request that's no longer for anything on screen.
   const lastPendingIdRef = useRef(pendingId);
   useEffect(() => {
     if (pendingId !== lastPendingIdRef.current) {
@@ -433,8 +483,9 @@ export function useClarificationGroup(
       setAnswers({});
       setSubmitState("idle");
       resetLastAction();
+      inflightRef.current = false;
     }
-  }, [pendingId, resetLastAction]);
+  }, [pendingId, resetLastAction, inflightRef]);
 
   return {
     pendingId,
