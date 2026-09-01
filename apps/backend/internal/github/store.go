@@ -502,7 +502,7 @@ const ciRunTablesSQL = `
 		updated_at DATETIME NOT NULL,
 		UNIQUE (actor_task_id, idempotency_hash),
 		UNIQUE (
-			workspace_id, target_task_id, workflow_id, workflow_step_id, repository_id,
+			workspace_id, target_task_id, workflow_id, repository_id,
 			pr_number, expected_head_sha, source_run_id, expected_source_attempt, evidence_kind
 		)
 	);
@@ -764,7 +764,8 @@ const legacyCIRunSemanticConstraint = "UNIQUE (target_task_id, repository_id, pr
 const legacyCIRunCallerConstraint = "UNIQUE (grant_id, actor_task_id, idempotency_hash)"
 const scopedCIRunCallerConstraint = "UNIQUE (actor_task_id, idempotency_hash)"
 
-const scopedCIRunSemanticConstraint = "UNIQUE (workspace_id, target_task_id, workflow_id, workflow_step_id, repository_id, pr_number, expected_head_sha, source_run_id, expected_source_attempt, evidence_kind)"
+const legacyScopedCIRunSemanticConstraint = "UNIQUE (workspace_id, target_task_id, workflow_id, workflow_step_id, repository_id, pr_number, expected_head_sha, source_run_id, expected_source_attempt, evidence_kind)"
+const scopedCIRunSemanticConstraint = "UNIQUE (workspace_id, target_task_id, workflow_id, repository_id, pr_number, expected_head_sha, source_run_id, expected_source_attempt, evidence_kind)"
 
 func (s *Store) migrateCIRunSemanticConstraint() error {
 	var existingSQL string
@@ -773,11 +774,14 @@ func (s *Store) migrateCIRunSemanticConstraint() error {
 		return fmt.Errorf("read github_ci_run_requests schema: %w", err)
 	}
 	if !strings.Contains(existingSQL, legacyCIRunSemanticConstraint) &&
+		!strings.Contains(existingSQL, legacyScopedCIRunSemanticConstraint) &&
 		!strings.Contains(existingSQL, legacyCIRunCallerConstraint) {
 		return nil
 	}
 	requestSchema := strings.Replace(existingSQL,
 		"github_ci_run_requests", "github_ci_run_requests_new", 1)
+	requestSchema = strings.Replace(requestSchema,
+		legacyScopedCIRunSemanticConstraint, scopedCIRunSemanticConstraint, 1)
 	requestSchema = strings.Replace(requestSchema,
 		legacyCIRunSemanticConstraint, scopedCIRunSemanticConstraint, 1)
 	requestSchema = strings.Replace(requestSchema,

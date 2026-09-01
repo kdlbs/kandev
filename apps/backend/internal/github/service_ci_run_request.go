@@ -76,8 +76,11 @@ func (s *Service) RequestFreshCIRun(
 		return nil, err
 	}
 	request := newCIRunRequest(binding, input, s.ciRunClock()())
-	claimed, created, err := s.store.ClaimCIRunRequest(ctx, request)
+	claimed, created, err := s.store.ClaimCIRunRequestWithAudit(ctx, request, s.newCIRunAuditEvent(request, "claimed", ""))
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &CIRunRequestError{Class: CIRunFailureNotAuthorized}
+		}
 		if errors.Is(err, ErrCIRunSemanticConflict) && claimed != nil {
 			receipt, continueErr := s.continueCIRunRequest(ctx, binding, claimed, input)
 			setCIRunIdempotencyStatus(receipt, "coalesced")
@@ -86,9 +89,6 @@ func (s *Service) RequestFreshCIRun(
 		if errors.Is(err, ErrCIRunIdempotencyConflict) {
 			return nil, &CIRunRequestError{Class: CIRunFailureIdempotencyConflict}
 		}
-		return nil, err
-	}
-	if err := s.ensureCIRunClaimAudit(ctx, claimed, created); err != nil {
 		return nil, err
 	}
 	receipt, continueErr := s.continueCIRunRequest(ctx, binding, claimed, input)
@@ -612,6 +612,7 @@ func (s *Service) completeCIRunAmbiguous(
 	return receiptFromCIRunRequest(request), &CIRunRequestError{Class: CIRunFailureProviderCallAmbiguous}
 }
 
+//nolint:cyclop // ordered provider identity gates are intentionally explicit
 func reconciledCIRunMatches(run *GitHubActionsRun, workflowID int64, request *CIRunRequest) bool {
 	if run == nil {
 		return false
@@ -625,10 +626,19 @@ func reconciledCIRunMatches(run *GitHubActionsRun, workflowID int64, request *CI
 		return run.ID == request.SourceRunID && run.Attempt == request.ExpectedSourceAttempt+1
 	}
 	return request.Operation == CIRunOperationWorkflowDispatch &&
+		acceptedCIRunProviderActor(run, request) &&
 		request.ProviderCallStartedAt != nil && !run.CreatedAt.IsZero() &&
 		!run.CreatedAt.Before(request.ProviderCallStartedAt.Truncate(time.Second)) &&
 		run.ID > request.ProviderRunWatermark &&
 		run.ID != request.SourceRunID && run.Attempt == 1 && run.Event == "workflow_dispatch"
+}
+
+func acceptedCIRunProviderActor(run *GitHubActionsRun, request *CIRunRequest) bool {
+	principal := decodeCIRunProviderPrincipal(request.ProviderPrincipalJSON)
+	if principal == nil || principal.Login == "" || run == nil {
+		return false
+	}
+	return strings.EqualFold(run.Actor, principal.Login) || strings.EqualFold(run.TriggeringActor, principal.Login)
 }
 
 func (s *Service) completeCIRunSuccess(

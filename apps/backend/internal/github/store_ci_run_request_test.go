@@ -108,7 +108,7 @@ func TestStoreMigratesCIRunSemanticConstraintWithoutLosingAudit(t *testing.T) {
 		}
 	}
 	legacyConstraint := `UNIQUE (target_task_id, repository_id, pr_number, source_run_id, expected_source_attempt, evidence_kind)`
-	scopedConstraint := "UNIQUE (\n\t\t\tworkspace_id, target_task_id, workflow_id, workflow_step_id, repository_id," +
+	scopedConstraint := "UNIQUE (\n\t\t\tworkspace_id, target_task_id, workflow_id, repository_id," +
 		"\n\t\t\tpr_number, expected_head_sha, source_run_id, expected_source_attempt, evidence_kind\n\t\t)"
 	legacySchema := strings.Replace(ciRunTablesSQL, scopedConstraint, legacyConstraint, 1)
 	legacySchema = strings.Replace(legacySchema, scopedCIRunCallerConstraint, legacyCIRunCallerConstraint, 1)
@@ -433,9 +433,6 @@ func TestStoreClaimCIRunRequestDoesNotCoalesceDifferentSemanticScope(t *testing.
 		}},
 		{name: "workflow", edit: func(request *CIRunRequest) {
 			request.WorkflowID = "workflow-2"
-		}},
-		{name: "workflow step", edit: func(request *CIRunRequest) {
-			request.WorkflowStepID = "ci-fixup-2"
 		}},
 	}
 	for index, tt := range tests {

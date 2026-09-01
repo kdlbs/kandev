@@ -61,20 +61,22 @@ func (e *CIRunProviderError) Error() string {
 }
 
 type GitHubActionsRun struct {
-	ID             int64
-	Attempt        int
-	WorkflowID     int64
-	WorkflowName   string
-	WorkflowPath   string
-	Event          string
-	Status         string
-	Conclusion     string
-	HeadSHA        string
-	HeadBranch     string
-	Repository     string
-	HeadRepository string
-	PullRequests   []int
-	CreatedAt      time.Time
+	ID              int64
+	Attempt         int
+	WorkflowID      int64
+	WorkflowName    string
+	WorkflowPath    string
+	Event           string
+	Status          string
+	Conclusion      string
+	HeadSHA         string
+	HeadBranch      string
+	Repository      string
+	HeadRepository  string
+	Actor           string
+	TriggeringActor string
+	PullRequests    []int
+	CreatedAt       time.Time
 }
 
 type GitHubActionsWorkflow struct {
@@ -102,6 +104,12 @@ type actionsRunResponse struct {
 	HeadRepository struct {
 		FullName string `json:"full_name"`
 	} `json:"head_repository"`
+	Actor struct {
+		Login string `json:"login"`
+	} `json:"actor"`
+	TriggeringActor struct {
+		Login string `json:"login"`
+	} `json:"triggering_actor"`
 	PullRequests []struct {
 		Number int `json:"number"`
 	} `json:"pull_requests"`
@@ -114,8 +122,9 @@ func projectActionsRun(raw actionsRunResponse) *GitHubActionsRun {
 		Status: raw.Status, Conclusion: raw.Conclusion, HeadSHA: raw.HeadSHA,
 		HeadBranch: raw.HeadBranch, Repository: raw.Repository.FullName,
 		HeadRepository: raw.HeadRepository.FullName,
-		CreatedAt:      raw.CreatedAt,
-		PullRequests:   make([]int, 0, len(raw.PullRequests)),
+		Actor:          raw.Actor.Login, TriggeringActor: raw.TriggeringActor.Login,
+		CreatedAt:    raw.CreatedAt,
+		PullRequests: make([]int, 0, len(raw.PullRequests)),
 	}
 	for _, pr := range raw.PullRequests {
 		run.PullRequests = append(run.PullRequests, pr.Number)

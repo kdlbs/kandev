@@ -25,20 +25,6 @@ func (s *Service) resumeExistingCIRunRequest(ctx context.Context, input RequestF
 	return receipt, true, err
 }
 
-func (s *Service) ensureCIRunClaimAudit(ctx context.Context, request *CIRunRequest, created bool) error {
-	if created {
-		return s.auditCIRun(ctx, request, "claimed", "")
-	}
-	hasAudit, err := s.store.HasCIRunAuditEvent(ctx, request.ID, "claimed")
-	if err != nil {
-		return err
-	}
-	if !hasAudit {
-		return s.auditCIRun(ctx, request, "claimed", "")
-	}
-	return nil
-}
-
 func sameCIRunInputIdentity(request *CIRunRequest, input RequestFreshCIRunInput) bool {
 	return request != nil && request.ActorTaskID == input.ActorTaskID &&
 		request.TargetTaskID == input.TargetTaskID && request.RepositoryID == input.RepositoryID &&
@@ -48,6 +34,5 @@ func sameCIRunInputIdentity(request *CIRunRequest, input RequestFreshCIRunInput)
 }
 
 func equalCIRunSHA(left, right string) bool {
-	return len(left) == len(right) && len(left) == 40 &&
-		(strings.EqualFold(left, right))
+	return len(left) == len(right) && len(left) == 40 && strings.EqualFold(left, right)
 }

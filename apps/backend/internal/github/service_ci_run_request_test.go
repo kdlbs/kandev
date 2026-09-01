@@ -1,3 +1,4 @@
+//nolint:revive // the shared service fixture intentionally keeps the full policy matrix together
 package github
 
 import (
@@ -66,7 +67,13 @@ func (f *fakeCIRunActionsClient) GetActionsRun(context.Context, string, string, 
 		f.runHook(f.runCalls)
 	}
 	if f.runCalls <= len(f.runSequence) {
+		if f.runSequence[f.runCalls-1].Actor == "" {
+			f.runSequence[f.runCalls-1].Actor = f.principal.Login
+		}
 		return f.runSequence[f.runCalls-1], nil
+	}
+	if f.run.Actor == "" {
+		f.run.Actor = f.principal.Login
 	}
 	return f.run, nil
 }
@@ -127,6 +134,11 @@ func (f *fakeCIRunActionsClient) ListActionsWorkflowRuns(context.Context, string
 	if f.dispatches == 0 && (f.reruns == 0 ||
 		ciRunFailureFromError(f.rerunErr) == CIRunFailureRerunIneligible) {
 		return f.preDispatchRuns, nil
+	}
+	for i := range f.runs {
+		if f.runs[i].Actor == "" {
+			f.runs[i].Actor = f.principal.Login
+		}
 	}
 	return f.runs, nil
 }
@@ -811,6 +823,7 @@ func setupCIRunServiceTest(t *testing.T, fork bool) (*Service, *fakeCIRunActions
 	}
 	headSHA := strings.Repeat("a", 40)
 	client := &fakeCIRunActionsClient{
+		principal: TokenPrincipal{Login: "kandev[bot]"},
 		pr: &PR{
 			Number: 42, State: "open", HeadSHA: headSHA, HeadBranch: "feature/x",
 			RepoOwner: "kdlbs", RepoName: "kandev", BaseRepoOwner: "kdlbs", BaseRepoName: "kandev",

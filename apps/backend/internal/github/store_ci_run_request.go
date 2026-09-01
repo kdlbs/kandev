@@ -206,10 +206,105 @@ func (s *Store) ClaimCIRunRequest(ctx context.Context, request *CIRunRequest) (*
 	return nil, false, errors.New("CI run request claim was not persisted")
 }
 
+// ClaimCIRunRequestWithAudit makes admission, the durable claim, and the
+// initial audit record one SQLite transaction. The admission predicate is
+// deliberately repeated here because the service's preflight reads may race
+// with grant revocation or a workflow-step transition.
+//
+//nolint:cyclop,funlen // durable admission keeps its failure gates together
+func (s *Store) ClaimCIRunRequestWithAudit(ctx context.Context, request *CIRunRequest, audit *CIRunAuditEvent) (*CIRunRequest, bool, error) {
+	if err := validateCIRunRequest(request); err != nil || audit == nil {
+		if err != nil {
+			return nil, false, err
+		}
+		return nil, false, errors.New("complete CI run claim audit is required")
+	}
+	if err := validateCIRunAuditDetails(audit.DetailsJSON); err != nil {
+		return nil, false, err
+	}
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var admitted int
+	err = tx.GetContext(ctx, &admitted, tx.Rebind(`SELECT COUNT(*) FROM github_ci_run_grants grant
+		JOIN tasks target ON target.id = ? AND target.workspace_id = grant.workspace_id
+		JOIN task_repositories attachment ON attachment.task_id = target.id AND attachment.repository_id = ?
+		JOIN repositories repository ON repository.id = attachment.repository_id
+		JOIN github_task_prs task_pr ON task_pr.task_id = target.id AND task_pr.repository_id = attachment.repository_id AND task_pr.pr_number = ?
+		WHERE grant.id = ? AND grant.generation = ? AND grant.workspace_id = ?
+			AND grant.actor_task_id = ? AND grant.target_task_id = target.id
+			AND grant.workflow_id = target.workflow_id AND grant.workflow_step_id = target.workflow_step_id
+			AND grant.repository_id = attachment.repository_id AND grant.revoked_at IS NULL
+			AND target.workflow_id = ? AND target.workflow_step_id = ?
+			AND repository.workspace_id = grant.workspace_id AND repository.provider = 'github'
+			AND LOWER(repository.provider_owner || '/' || repository.provider_name) = LOWER(?)
+			AND task_pr.detached_at IS NULL AND task_pr.state = ?
+			AND LOWER(task_pr.owner || '/' || task_pr.repo) = LOWER(?)`),
+		request.TargetTaskID, request.RepositoryID, request.PRNumber, request.GrantID, request.GrantGeneration,
+		request.WorkspaceID, request.ActorTaskID, request.WorkflowID, request.WorkflowStepID,
+		request.CanonicalRepository, defaultPRState, request.CanonicalRepository)
+	if err != nil {
+		return nil, false, err
+	}
+	if admitted != 1 {
+		return nil, false, sql.ErrNoRows
+	}
+	claimSQL := `INSERT INTO github_ci_run_requests (` + ciRunRequestColumns + `)
+		VALUES (` + strings.TrimSuffix(strings.Repeat("?,", len(ciRunRequestArgs(request))), ",") + `) ON CONFLICT DO NOTHING`
+	result, err := tx.ExecContext(ctx, tx.Rebind(claimSQL), ciRunRequestArgs(request)...)
+	if err != nil {
+		return nil, false, err
+	}
+	created := false
+	if affected, rowsErr := result.RowsAffected(); rowsErr == nil {
+		created = affected == 1
+	}
+	var loaded CIRunRequest
+	err = tx.GetContext(ctx, &loaded, tx.Rebind(`SELECT `+ciRunRequestColumns+` FROM github_ci_run_requests WHERE actor_task_id = ? AND idempotency_hash = ?`), request.ActorTaskID, request.IdempotencyHash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, errors.New("CI run request claim was not persisted")
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if !sameCIRunSemanticIdentity(&loaded, request) {
+		return &loaded, false, ErrCIRunIdempotencyConflict
+	}
+	if !created {
+		var semantic CIRunRequest
+		if err := tx.GetContext(ctx, &semantic, tx.Rebind(`SELECT `+ciRunRequestColumns+` FROM github_ci_run_requests
+			WHERE workspace_id = ? AND target_task_id = ? AND workflow_id = ? AND repository_id = ?
+			AND pr_number = ? AND expected_head_sha = ? AND source_run_id = ? AND expected_source_attempt = ? AND evidence_kind = ?`),
+			request.WorkspaceID, request.TargetTaskID, request.WorkflowID, request.RepositoryID, request.PRNumber,
+			request.ExpectedHeadSHA, request.SourceRunID, request.ExpectedSourceAttempt, request.EvidenceKind); err == nil && semantic.ID != loaded.ID {
+			return &semantic, false, ErrCIRunSemanticConflict
+		}
+	}
+	// A replay may be completing admission for a legacy row whose request ID
+	// differs from the newly constructed candidate. The persisted row owns the
+	// audit relationship.
+	audit.RequestID = loaded.ID
+	var auditCount int
+	if err := tx.GetContext(ctx, &auditCount, tx.Rebind(`SELECT COUNT(*) FROM github_ci_run_audit_events WHERE request_id = ? AND event_type = 'claimed'`), loaded.ID); err != nil {
+		return nil, false, err
+	}
+	if auditCount == 0 {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`INSERT INTO github_ci_run_audit_events (id, request_id, event_type, failure_class, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`), audit.ID, audit.RequestID, audit.EventType, audit.FailureClass, audit.DetailsJSON, audit.CreatedAt); err != nil {
+			return nil, false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	return &loaded, created, nil
+}
+
 func sameCIRunSemanticIdentity(left, right *CIRunRequest) bool {
 	return left != nil && right != nil && left.WorkspaceID == right.WorkspaceID &&
 		left.ActorTaskID == right.ActorTaskID && left.TargetTaskID == right.TargetTaskID &&
-		left.WorkflowID == right.WorkflowID && left.WorkflowStepID == right.WorkflowStepID &&
+		left.WorkflowID == right.WorkflowID &&
 		left.RepositoryID == right.RepositoryID && left.PRNumber == right.PRNumber &&
 		strings.EqualFold(left.ExpectedHeadSHA, right.ExpectedHeadSHA) &&
 		left.SourceRunID == right.SourceRunID &&
@@ -307,10 +402,10 @@ func (s *Store) getCIRunRequestBySemanticKey(ctx context.Context, r *CIRunReques
 	var loaded CIRunRequest
 	err := s.ro.GetContext(ctx, &loaded, s.ro.Rebind(`SELECT `+ciRunRequestColumns+`
 		FROM github_ci_run_requests
-		WHERE workspace_id = ? AND target_task_id = ? AND workflow_id = ? AND workflow_step_id = ?
+		WHERE workspace_id = ? AND target_task_id = ? AND workflow_id = ?
 			AND repository_id = ? AND pr_number = ? AND expected_head_sha = ?
 			AND source_run_id = ? AND expected_source_attempt = ? AND evidence_kind = ?`),
-		r.WorkspaceID, r.TargetTaskID, r.WorkflowID, r.WorkflowStepID,
+		r.WorkspaceID, r.TargetTaskID, r.WorkflowID,
 		r.RepositoryID, r.PRNumber, r.ExpectedHeadSHA, r.SourceRunID,
 		r.ExpectedSourceAttempt, r.EvidenceKind)
 	return &loaded, err
