@@ -1,6 +1,6 @@
 ---
 created: 2026-08-31
-status: in-progress
+status: completed
 requirements:
   - REQ-UI-SURFACE-TEXT-HIERARCHY-001
   - REQ-UI-TASK-CLEANUP-CONFIRMATION-001
@@ -107,7 +107,7 @@ the final composition.
 - [x] [Task 02: Normalize structured app confirmations](task-02-normalize-structured-app-confirmations.md) (completed)
 - [x] [Task 03: Refine task cleanup confirmations](task-03-refine-task-cleanup-confirmations.md) (completed)
 - [x] [Task 04: Normalize structured task confirmations](task-04-normalize-structured-task-confirmations.md) (completed)
-- [ ] [Task 05: Add responsive text hierarchy E2E](task-05-add-responsive-text-hierarchy-e2e.md)
+- [x] [Task 05: Add responsive text hierarchy E2E](task-05-add-responsive-text-hierarchy-e2e.md) (completed)
 
 ## Risks
 

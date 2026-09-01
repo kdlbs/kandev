@@ -1,7 +1,7 @@
 ---
 id: "05-add-responsive-text-hierarchy-e2e"
 title: "Add responsive text hierarchy E2E"
-status: pending
+status: completed
 wave: 3
 depends_on:
   - "02-normalize-structured-app-confirmations"
@@ -111,4 +111,28 @@ pnpm exec eslint e2e/tests/task/mobile-confirmation-text-hierarchy.spec.ts e2e/t
 
 ## Results
 
-Pending implementation.
+- RED baseline on the pre-fix base: the mobile suite had 3 of 4 tests fail on
+  missing balanced Drawer and Alert titles, and the desktop suite had 2 of 2
+  tests fail on missing pretty archive prose and balanced Dialog titles.
+- Integrated Task 04 RED: the mobile suite passed 4 tests, while the desktop
+  suite had 1 failure because the archive PopoverDescription computed
+  `text-wrap: wrap` instead of `pretty`. Task 04 added the narrow `wide`
+  popover contract fix before final verification.
+- Added six rendered tests across phone and desktop flows. They cover real
+  task deletion, archive, Alert, board Drawer, Dialog, and Delete surfaces
+  with long content, pseudo-localized copy, computed wrapping, structured
+  alignment, viewport and document containment, scroll ownership, action
+  geometry, semantic Delete styling, Cancel, and task survival.
+- GREEN: `pnpm e2e:run --project mobile-chrome
+tests/task/mobile-confirmation-text-hierarchy.spec.ts` (4 tests).
+- GREEN: `pnpm e2e:run --project chromium
+tests/task/confirmation-text-hierarchy.spec.ts` (2 tests).
+- GREEN: `pnpm e2e:run --project chromium
+tests/task/dialog-long-text-overflow.spec.ts
+tests/task/sidebar-delete-confirm.spec.ts` (2 tests).
+- GREEN: `pnpm run e2e:sleep-ratchet` and focused ESLint for both new specs.
+- Review remediation synchronized the completed parent plan and removed
+  redundant direct computed-style reads in favor of Playwright's retrying CSS
+  assertions. Final reruns remained green: mobile 4/4, desktop 2/2, and existing
+  long-dialog/delete regressions 2/2; focused lint, Prettier, the sleep ratchet,
+  diff checks, and specification lint also passed.
