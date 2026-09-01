@@ -234,7 +234,7 @@ func (r *sqliteRepository) exactCancelActorAuthorized(
 	actor PendingMoveCancellationActor,
 	match ExactPendingMoveMatch,
 ) (bool, error) {
-	if actor.Kind != "coordinator" || actor.ID == "" || actor.UserID == "" || actor.WorkspaceID == "" ||
+	if actor.Kind != pendingMoveActorKindCoordinator || actor.ID == "" || actor.UserID == "" || actor.WorkspaceID == "" ||
 		actor.CallerTaskID == "" || actor.CallerSessionID == "" || actor.CallerExecutionID == "" ||
 		actor.ID != actor.CallerTaskID || actor.CallerTaskID == match.TaskID || actor.CallerSessionID == match.SessionID {
 		return false, nil
@@ -380,7 +380,7 @@ func (r *memoryRepository) ExactCancelPendingMove(
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	stored, ok := r.pendingMoves[match.SessionID]
-	if actor.Kind != "coordinator" || actor.CallerTaskID == match.TaskID || !ok ||
+	if actor.Kind != pendingMoveActorKindCoordinator || actor.CallerTaskID == match.TaskID || !ok ||
 		stored.ID != match.PendingMoveID || stored.TaskID != match.TaskID || stored.MoveID != match.MoveID ||
 		stored.WorkflowID != match.WorkflowID || stored.WorkflowStepID != match.ExpectedTargetWorkflowStepID {
 		return nil, ErrPendingMoveNotFoundOrChanged

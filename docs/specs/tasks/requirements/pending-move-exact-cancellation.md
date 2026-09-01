@@ -16,6 +16,13 @@ task safely. Kandev therefore provides a narrow administrative operation that
 removes one reviewed `pending_moves` row only when its complete identity and
 workflow state still match.
 
+A Coordinator preparing that repair rarely already holds the row's exact
+identity: the seven predicates the cancellation requires are what it needs to
+discover safely first, without resuming or messaging the target session. Kandev
+therefore also provides a read-only companion that returns that exact identity,
+or an authoritative proof that no row is armed, under the same authorization
+boundary as the cancellation.
+
 The Tasks system owns this contract because the operation changes persisted task
 transition state. The shared Coordinator trust contract owns designation of the
 workspace Coordinator; this capability consumes that designation without
@@ -31,6 +38,11 @@ creating another role model.
 - **Designated Coordinator:** The live, server-attested Coordinator task and
   execution authorized for the target workspace by the shared Coordinator
   trust contract.
+- **Pending-move census:** The read-only companion result: either the exact
+  predicate tuple for one task's currently armed row (`found: true`), or an
+  authoritative `found: false` proving no row is armed. It is not the same as
+  a null or missing-permission response, which this capability never returns
+  for an authorized request.
 
 ## Requirements
 
@@ -114,6 +126,45 @@ secrets.
   orphan reaping shall remain owned by the existing TTL/reaper lifecycle; this
   operation shall neither duplicate nor weaken that policy.
 
+### REQ-TASKS-PENDING-MOVE-CANCELLATION-004: Exact pending-move read (census)
+
+**Intent:** Let a designated Coordinator safely discover the exact predicate
+tuple for one task's currently armed pending move — or an authoritative proof
+that none is armed — before deciding whether to call the exact cancellation,
+without resuming or messaging the target session and without mutating any
+pending-move or task state.
+
+#### Acceptance criteria
+
+- **AC-TASKS-PENDING-MOVE-CANCELLATION-004.1:** When a designated Coordinator submits
+  a target task ID and an armed pending-move row exists for a live, reachable,
+  same-workspace relation, the system shall return `found: true` with the exact
+  row/session/current-lane/target identity: pending-row ID, session ID, task
+  ID, move ID, workflow ID, current workflow-step ID, target workflow-step ID,
+  and queue timestamp.
+- **AC-TASKS-PENDING-MOVE-CANCELLATION-004.2:** When the same Coordinator request is
+  authorized but no pending-move row is armed for the target task, the system
+  shall return `found: false` as an authoritative, non-error result proving the
+  absence of a row. This response shall be distinguishable at the API from any
+  authorization or relation denial; a null or omitted projection alone shall
+  never stand in for this proof.
+- **AC-TASKS-PENDING-MOVE-CANCELLATION-004.3:** When the caller is not a live
+  designated Coordinator, the target is unreachable through the Coordinator's
+  named task tree, or the relation is cross-workspace or broken, the system
+  shall make no distinction based on whether a row exists and shall return the
+  same non-leaking not-found-or-changed result used by exact cancellation.
+- **AC-TASKS-PENDING-MOVE-CANCELLATION-004.4:** Missing or non-canonical public
+  identifiers shall be rejected before target lookup with the same stable
+  invalid-argument result used by exact cancellation.
+- **AC-TASKS-PENDING-MOVE-CANCELLATION-004.5:** The read shall never mutate
+  pending-move, task, session, or queue state; a row read this way shall remain
+  eligible for the exact cancellation using the identity the read returned,
+  subject to that operation's own freshness and predicate checks.
+- **AC-TASKS-PENDING-MOVE-CANCELLATION-004.6:** Every accepted, denied, or invalid
+  read attempt shall emit structured evidence in the same evidence store as
+  cancellation, distinguished by action, without prompts, credentials, or tool
+  payload logging.
+
 ## Out of scope
 
 - General-purpose pending-move deletion, bulk cancellation, or raw SQL access.
@@ -121,6 +172,8 @@ secrets.
 - Support-principal authorization in the first release.
 - Automatic TTL, orphan detection, queued-prompt cleanup, or reaper policy.
 - Applying the operation to a production row before reviewed live acceptance.
+- Listing or paginating pending moves across multiple tasks in one call; the
+  census is scoped to exactly one target task per request.
 
 ## System design
 

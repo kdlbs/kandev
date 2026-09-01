@@ -192,7 +192,8 @@ func (r *sqliteRepository) initSchema() error {
 		outcome                         TEXT NOT NULL,
 		changed                         INTEGER NOT NULL DEFAULT 0,
 		identifiers_present             INTEGER NOT NULL DEFAULT 1,
-		identifiers_canonical           INTEGER NOT NULL DEFAULT 1
+		identifiers_canonical           INTEGER NOT NULL DEFAULT 1,
+		action                          TEXT NOT NULL DEFAULT 'cancel'
 	);
 	CREATE INDEX IF NOT EXISTS idx_pending_move_cancellation_audit_occurred
 		ON pending_move_cancellation_audit(occurred_at);
@@ -236,6 +237,13 @@ func (r *sqliteRepository) initSchema() error {
 		return alterErr
 	}
 	if _, alterErr := r.db.Exec(`ALTER TABLE pending_moves ADD COLUMN move_id TEXT NOT NULL DEFAULT ''`); alterErr != nil && !internaldb.IsDuplicateColumnError(alterErr) {
+		return alterErr
+	}
+	// Existing installations recorded only cancellation attempts; fresh installs
+	// already get this column from CREATE TABLE above, so this replays as a
+	// duplicate-column error there. Read-only census attempts default no
+	// differently than historical rows, which were all cancellation attempts.
+	if _, alterErr := r.db.Exec(`ALTER TABLE pending_move_cancellation_audit ADD COLUMN action TEXT NOT NULL DEFAULT 'cancel'`); alterErr != nil && !internaldb.IsDuplicateColumnError(alterErr) {
 		return alterErr
 	}
 	return nil

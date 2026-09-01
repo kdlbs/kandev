@@ -87,3 +87,75 @@ reviewed exact mutation.
 
 Deferred until the shared trust contract defines a server-attested Support
 principal and review lifecycle with equivalent workspace scoping and audit.
+
+## Addendum: Read-Only Exact Pending-Move Census
+
+**Date:** current session
+**Area:** backend, protocol, security, workflow
+
+### Context
+
+The Coordinator surface exposed exact cancellation, but a caller preparing a
+recovery handoff had no authoritative way to learn whether a target task still
+had an armed pending move, or to obtain its exact seven-predicate tuple, without
+already holding it. A caller cannot construct `session_id`, `move_id`,
+`workflow_id`, or the two expected workflow-step IDs out of thin air, so the
+existing cancellation tool was unreachable for a task the caller had not
+directly instrumented. Falling back to a null/absent read carries no proof: an
+unauthorized caller and an authorized caller who happens to find nothing are
+otherwise indistinguishable, and that ambiguity is unsafe to build a resume
+decision on.
+
+### Decision
+
+Kandev adds `read_pending_move_kandev`, a companion automation Coordinator tool
+keyed only by `task_id`, reusing the exact same authorization transaction as
+cancellation (self-target and reachable-task-tree checks included) and the same
+`pending_move_cancellation_audit` table, discriminated by a new additive
+`action` column (`cancel` or `read`, default `cancel` for existing rows).
+
+The read diverges from cancellation's failure model in exactly one place:
+an authorized caller who finds no armed row receives a genuine, audited
+`found: false` success, not a denial. Every authorization or relation failure
+still collapses into the identical `pending_move_not_found_or_changed` used by
+cancellation, so an unauthorized caller can never distinguish "denied" from
+"empty" — the zero-row outcome is only observable once authorization has
+already been proven. The read never deletes, never touches `pending_moves`,
+and a row it surfaces remains cancellable afterward with the identifiers it
+returned.
+
+### Consequences
+
+- A Coordinator can now discover a target task's exact pending-move tuple
+  before attempting cancellation, closing the gap where cancellation's inputs
+  were otherwise undiscoverable for tasks the caller had not already tracked.
+- Zero-row and denied are provably distinct only to an authorized caller;
+  authorization is not weakened to make the census usable.
+- The read is a pure query: it takes no lock, blocks no concurrent
+  cancellation, and does not change what a subsequent cancellation call can
+  see or affect.
+- Sharing the audit table with an `action` column avoids a second evidence
+  store and second redaction/observability surface for what is otherwise the
+  same authorization and relation logic.
+- Rollback of the read-only tool leaves cancellation, its audit history, and
+  the shared `action` column untouched.
+
+### Alternatives Considered
+
+#### Return the same non-leaking miss for both denial and zero-row
+
+Rejected because it reproduces the exact ambiguity that motivated this
+addendum: an authorized caller could never trust a "nothing to cancel" result
+enough to resume a waiting session on it.
+
+#### A separate audit table for read operations
+
+Rejected because it duplicates the existing table's schema, indexes, and
+redaction handling for no additional isolation; the two operations already
+share one authorization and relation model.
+
+#### Return the full pending-move row to any authenticated caller
+
+Rejected because it would remove authorization from an operation that exposes
+task/session/workflow relationship data, undermining the same trust boundary
+cancellation enforces.

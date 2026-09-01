@@ -214,9 +214,23 @@ only that pending-move row; it does not message or resume the session, move the
 task, change tags, or remove queued prompts. Every attempt is audited without
 logging the request payload.
 
-Do not use this tool as routine cleanup. Automatic expiration and orphan reaping
-remain the normal lifecycle, and a live administrative cancellation should use
-identifiers captured during a reviewed readback.
+The same Coordinator also receives `read_pending_move_kandev`, a read-only
+companion that requires only the target `task_id`. It performs the identical
+authorization check as cancellation, then reports whether that task still has
+an armed pending move. An authorized caller with nothing to find receives an
+audited `found: false`, not an error; every authorization or relation failure
+still returns the same not-found-or-changed error cancellation uses, so an
+unauthorized caller cannot distinguish "denied" from "empty." A found result
+returns the exact row ID, move, workflow, session, and step identifiers needed
+to call `cancel_pending_move_kandev` next. The read never deletes anything, and
+a row it surfaces remains cancellable afterward with the identifiers it
+returned. Every call is audited the same way as cancellation, without logging
+the request payload.
+
+Do not use either tool as routine cleanup. Automatic expiration and orphan
+reaping remain the normal lifecycle, and a live administrative cancellation
+should use identifiers captured from `read_pending_move_kandev` or another
+reviewed readback.
 
 ## Export automations
 

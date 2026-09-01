@@ -118,6 +118,11 @@ var (
 	ErrPendingMoveInvalidArgument = errors.New("pending move cancellation requires canonical identifiers")
 	// ErrPendingMoveCancelFailed is the sanitized storage/audit failure sentinel.
 	ErrPendingMoveCancelFailed = errors.New("pending move cancellation failed")
+	// ErrPendingMoveReadFailed is the sanitized storage/audit failure sentinel
+	// for the read-only census. Authorization and relation failures use the
+	// same ErrPendingMoveNotFoundOrChanged as cancellation; this sentinel is
+	// reserved for storage/audit errors that never reach a caller decision.
+	ErrPendingMoveReadFailed = errors.New("pending move read failed")
 )
 
 // QueuedMessage represents a single FIFO entry queued for a session.
@@ -343,4 +348,43 @@ type PendingMoveCancellationAudit struct {
 	PriorTargetWorkflowStepID  string `db:"prior_target_workflow_step_id"`
 	Outcome                    string `db:"outcome"`
 	Changed                    bool   `db:"changed"`
+	Action                     string `db:"action"`
+}
+
+const (
+	// PendingMoveCensusOutcomeFound and PendingMoveCensusOutcomeZeroRow are
+	// both authorized, non-error outcomes: the first proves an armed row
+	// exists, the second authoritatively proves none does. Only an
+	// authorization or relation failure collapses into the shared
+	// PendingMoveCancellationOutcomeNotFoundOrChanged, matching the exact
+	// cancellation's non-leaking denial.
+	PendingMoveCensusOutcomeFound   = "found"
+	PendingMoveCensusOutcomeZeroRow = "zero_row"
+	// pendingMoveAuditActionCancel and pendingMoveAuditActionRead distinguish
+	// mutating cancellation attempts from read-only census attempts inside
+	// the shared pending_move_cancellation_audit evidence table.
+	pendingMoveAuditActionCancel = "cancel"
+	pendingMoveAuditActionRead   = "read"
+	// pendingMoveActorKindCoordinator is the only actor.Kind value accepted
+	// by exact cancellation or the read-only census.
+	pendingMoveActorKindCoordinator = "coordinator"
+)
+
+// PendingMoveCensusResult is the safe immutable read-only readback of one
+// task's currently armed pending move, if any. Found=false is an authorized,
+// authoritative "no row" answer — not a permission-masked null — so a caller
+// can distinguish a genuinely empty state from being denied.
+type PendingMoveCensusResult struct {
+	Found                 bool      `json:"found"`
+	CorrelationID         string    `json:"correlation_id"`
+	ActorKind             string    `json:"actor_kind"`
+	ActorID               string    `json:"actor_id"`
+	PendingMoveID         string    `json:"pending_move_id,omitempty"`
+	MoveID                string    `json:"move_id,omitempty"`
+	TaskID                string    `json:"task_id"`
+	SessionID             string    `json:"session_id,omitempty"`
+	WorkflowID            string    `json:"workflow_id,omitempty"`
+	CurrentWorkflowStepID string    `json:"current_workflow_step_id,omitempty"`
+	TargetWorkflowStepID  string    `json:"target_workflow_step_id,omitempty"`
+	QueuedAt              time.Time `json:"queued_at,omitempty"`
 }

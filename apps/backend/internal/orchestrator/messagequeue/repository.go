@@ -229,6 +229,19 @@ type Repository interface {
 	// AuditInvalidPendingMoveCancellation records only safe server-attested
 	// actor metadata and identifier shape flags; it never stores raw inputs.
 	AuditInvalidPendingMoveCancellation(ctx context.Context, actor PendingMoveCancellationActor, correlationID string, identifiersPresent, identifiersCanonical bool) error
+
+	// ReadPendingMoveCensus authorizes the caller identically to
+	// ExactCancelPendingMove but requires only the target task ID, since the
+	// exact tuple is what the caller is trying to discover safely before an
+	// exact cancellation. It never mutates state. An authorized query with no
+	// armed row returns a Found=false census, not an error; only
+	// authorization and relation failures return ErrPendingMoveNotFoundOrChanged.
+	ReadPendingMoveCensus(ctx context.Context, actor PendingMoveCancellationActor, taskID, correlationID string) (*PendingMoveCensusResult, error)
+
+	// AuditInvalidPendingMoveCensus records only safe server-attested actor
+	// metadata and identifier shape flags for a rejected read; it never
+	// stores raw inputs.
+	AuditInvalidPendingMoveCensus(ctx context.Context, actor PendingMoveCancellationActor, correlationID string, identifiersPresent, identifiersCanonical bool) error
 }
 
 // applyMetadataUpdates merges metadata key updates into current; a nil value removes the key.

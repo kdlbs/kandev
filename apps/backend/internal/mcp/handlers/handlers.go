@@ -217,6 +217,14 @@ type PendingMoveCanceller interface {
 	ExactCancelPendingMove(context.Context, messagequeue.PendingMoveCancellationActor, messagequeue.ExactPendingMoveMatch, string) (*messagequeue.PendingMoveCancellationResult, error)
 }
 
+// PendingMoveReader is the narrow privileged deferred-move read seam. It
+// authorizes identically to PendingMoveCanceller but never mutates state; it
+// is the safe way a Coordinator discovers the exact tuple a cancellation
+// requires before calling it.
+type PendingMoveReader interface {
+	ReadPendingMove(context.Context, messagequeue.PendingMoveCancellationActor, string, string) (*messagequeue.PendingMoveCensusResult, error)
+}
+
 // TaskTitleBranchRenamer performs the best-effort branch side effect after an
 // owner session accepts a prompt-first task title.
 type TaskTitleBranchRenamer interface {
@@ -325,6 +333,7 @@ type Handlers struct {
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
 	agentPermissionSvc   AgentPermissionService
 	pendingMoveCanceller PendingMoveCanceller
+	pendingMoveReader    PendingMoveReader
 }
 
 // NewHandlers creates new MCP handlers.
@@ -367,6 +376,9 @@ func NewHandlers(
 	if canceller, ok := messageQueue.(PendingMoveCanceller); ok {
 		h.pendingMoveCanceller = canceller
 	}
+	if reader, ok := messageQueue.(PendingMoveReader); ok {
+		h.pendingMoveReader = reader
+	}
 	return h
 }
 
@@ -398,6 +410,11 @@ func (h *Handlers) SetAgentPermissionService(svc AgentPermissionService) {
 // SetPendingMoveCanceller wires the exact administrative cancellation service.
 func (h *Handlers) SetPendingMoveCanceller(canceller PendingMoveCanceller) {
 	h.pendingMoveCanceller = canceller
+}
+
+// SetPendingMoveReader wires the exact administrative read-only census service.
+func (h *Handlers) SetPendingMoveReader(reader PendingMoveReader) {
+	h.pendingMoveReader = reader
 }
 
 // SetTaskTitleBranchRenamer wires the best-effort branch rename performed
@@ -487,6 +504,7 @@ func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPStopTask, h.handleStopTask)
 	d.RegisterFunc(ws.ActionMCPSpawnSession, h.handleSpawnSession)
 	d.RegisterFunc(ws.ActionMCPCancelPendingMove, h.handleCancelPendingMove)
+	d.RegisterFunc(ws.ActionMCPReadPendingMove, h.handleReadPendingMove)
 }
 
 func (h *Handlers) registerTaskPlanHandlers(d *guardedMCPDispatcher) {
