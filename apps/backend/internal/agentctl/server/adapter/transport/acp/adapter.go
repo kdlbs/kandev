@@ -513,7 +513,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion:    acp.ProtocolVersionNumber,
-		ClientCapabilities: clientCapabilitiesForAgent(a.agentID),
+		ClientCapabilities: clientCapabilitiesForAgent(a.agentID, a.cfg.ProviderGatewayAuth != nil),
 		ClientInfo: &acp.Implementation{
 			Name:    "kandev-agentctl",
 			Version: "1.0.0",
@@ -566,6 +566,32 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		AuthMethods:             authMethods,
 	})
 
+	if err := a.applyProviderGatewayAuth(ctx); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	return nil
+}
+
+// applyProviderGatewayAuth authenticates the agent against a Kandev-configured
+// OpenAI-compatible gateway (base URL + bearer key) right after initialize. It
+// is a no-op unless the launch carries provider gateway auth. A failure aborts
+// the connection rather than letting the agent silently fall back to its
+// built-in vendor endpoint.
+func (a *Adapter) applyProviderGatewayAuth(ctx context.Context) error {
+	gw := a.cfg.ProviderGatewayAuth
+	if gw == nil {
+		return nil
+	}
+	if _, err := a.acpConn.Authenticate(ctx, acp.AuthenticateRequest{
+		MethodId: acp.AuthMethodId(gw.MethodID),
+		Meta:     gw.Meta,
+	}); err != nil {
+		return fmt.Errorf("OpenAI-compatible provider authentication failed: %w", err)
+	}
+	a.logger.Info("authenticated against OpenAI-compatible provider gateway",
+		zap.String("auth_method", gw.MethodID))
 	return nil
 }
 

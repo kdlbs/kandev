@@ -295,5 +295,17 @@
   "dynamicRouteRetryDescription": "供應商發生錯誤後重試相同候選設定檔。適用於可能暫時恢復的故障。",
   "dynamicRouteTryNextDescription": "本次執行略過此候選設定檔，繼續使用下一個符合條件的設定檔。",
   "dynamicRouteStopDescription": "此候選設定檔失敗後停止路由。工作會等待手動恢復操作。",
-  "dynamicProfileSaved": "動態設定檔已儲存。"
+  "dynamicProfileSaved": "動態設定檔已儲存。",
+  "providerSectionTitle": "AI 供應方",
+  "providerSectionDescription": "讓此設定檔的模型呼叫透過你自建的 OpenAI 相容路由器，而不是代理程式內建的供應方。",
+  "providerKindLabel": "供應方",
+  "providerKindNative": "原生（代理程式預設）",
+  "providerKindOpenAICompatible": "OpenAI 相容供應方",
+  "providerKindHelp": "原生會保留代理程式 CLI 本身的供應方設定。OpenAI 相容會使用所選金鑰向下方的基礎 URL 送出請求，可搭配 9router、LiteLLM、vLLM 以及自建的 OpenRouter 使用。",
+  "providerBaseUrlLabel": "基礎 URL",
+  "providerBaseUrlHelp": "你的路由器的絕對 http 或 https 根位址。代理程式會附加 OpenAI 相容的路由路徑，例如 /chat/completions。",
+  "providerBaseUrlInvalid": "請輸入絕對的 http 或 https URL。",
+  "providerApiKeyLabel": "API 金鑰",
+  "providerApiKeyHelp": "保存傳送給供應方的持有者權杖的 Kandev 密鑰。若路由器不需驗證，可不設定。",
+  "providerModelSlash": "請移除模型名稱中的斜線：OpenAI 相容供應方需要的是不含前綴的模型 ID。"
 }

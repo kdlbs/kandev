@@ -24,6 +24,8 @@ import type { AgentProfileKind } from "@/lib/types/agent-profile";
 import { useAppStore } from "@/components/state-provider";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { useSecrets } from "@/hooks/domains/settings/use-secrets";
+import { providerConfigInvalidReasonKey } from "@/lib/settings/provider-config-validation";
 import { deleteAgentAction } from "@/app/actions/agents";
 import { SettingsRedirect } from "@/src/settings-route-helpers";
 import { saveNewAgent, saveExistingAgent, isProfileDirty } from "./agent-save-helpers";
@@ -361,6 +363,27 @@ function useProfileHandlers(
   };
 }
 
+/**
+ * First blocking provider-config i18n key across the agent's profiles, or
+ * undefined. Only relevant when the agent advertises provider support.
+ */
+function providerInvalidKey(
+  agent: DraftAgent,
+  providerSupported: boolean,
+): string | undefined {
+  if (!providerSupported) return undefined;
+  for (const profile of agent.profiles) {
+    const key = providerConfigInvalidReasonKey({
+      providerKind: profile.providerKind,
+      providerBaseUrl: profile.providerBaseUrl,
+      providerApiKeySecretId: profile.providerApiKeySecretId,
+      model: profile.model,
+    });
+    if (key) return key;
+  }
+  return undefined;
+}
+
 function areAgentProfilesValid(agent: DraftAgent): boolean {
   return agent.profiles.every((profile) => {
     if (!profile.name.trim()) return false;
@@ -393,6 +416,45 @@ function resolveSaveInvalidReason(
   return undefined;
 }
 
+/**
+ * Wires the agent form's dirty/validity state into the shared settings Save
+ * control. Extracted so AgentSetupForm stays within the file's
+ * function-length limit.
+ */
+function useAgentSaveContributor(params: {
+  draftAgent: DraftAgent;
+  savedAgent: Agent | null;
+  isCreateMode: boolean;
+  hasInvalidMcpConfig: boolean;
+  isAgentDirty: boolean;
+  handleSave: () => Promise<DraftAgent | undefined>;
+  t: (key: string) => string;
+}) {
+  const { draftAgent, savedAgent, isCreateMode, hasInvalidMcpConfig, isAgentDirty, handleSave, t } =
+    params;
+  const saveRevision = useAgentSaveRevision(draftAgent);
+  const profilesValid = areAgentProfilesValid(draftAgent);
+  const providerBlockKey = providerInvalidKey(
+    draftAgent,
+    (savedAgent?.profiles ?? []).some((p) => p.providerSupported),
+  );
+  const saveInvalidReason =
+    resolveSaveInvalidReason(t, profilesValid, hasInvalidMcpConfig, draftAgent.name === "dynamic") ??
+    (providerBlockKey ? t(providerBlockKey) : undefined);
+  useSettingsSaveContributor({
+    id: `agent:${draftAgent.id}`,
+    revision: saveRevision.revision,
+    isDirty: isCreateMode ? isAgentDirty : saveRevision.revision !== saveRevision.saved,
+    canSave: profilesValid && !hasInvalidMcpConfig && !providerBlockKey,
+    invalidReason: saveInvalidReason,
+    save: async () => {
+      const savedDraft = await handleSave();
+      if (savedDraft) saveRevision.setSaved(JSON.stringify(savedDraft));
+    },
+    discard: () => undefined,
+  });
+}
+
 function AgentSetupForm({
   initialAgent,
   savedAgent,
@@ -403,6 +465,7 @@ function AgentSetupForm({
   const { t } = useTranslation();
   const router = useRouter();
   const availableAgents = useAvailableAgents().items;
+  const { items: secrets } = useSecrets();
   const { upsertAgent } = useAgentStoreSync();
 
   const {
@@ -444,26 +507,14 @@ function AgentSetupForm({
     onToastError,
     replaceRoute: (path: string) => router.replace(path),
   });
-  const saveRevision = useAgentSaveRevision(draftAgent);
-  const handleCoordinatedSave = async () => {
-    const savedDraft = await handleSave();
-    if (savedDraft) saveRevision.setSaved(JSON.stringify(savedDraft));
-  };
-  const profilesValid = areAgentProfilesValid(draftAgent);
-  const saveInvalidReason = resolveSaveInvalidReason(
-    t,
-    profilesValid,
+  useAgentSaveContributor({
+    draftAgent,
+    savedAgent,
+    isCreateMode,
     hasInvalidMcpConfig,
-    draftAgent.name === "dynamic",
-  );
-  useSettingsSaveContributor({
-    id: `agent:${draftAgent.id}`,
-    revision: saveRevision.revision,
-    isDirty: isCreateMode ? isAgentDirty : saveRevision.revision !== saveRevision.saved,
-    canSave: profilesValid && !hasInvalidMcpConfig,
-    invalidReason: saveInvalidReason,
-    save: handleCoordinatedSave,
-    discard: () => undefined,
+    isAgentDirty,
+    handleSave,
+    t,
   });
 
   const displayName = draftAgent.profiles[0]?.agentDisplayName ?? draftAgent.name;
@@ -489,6 +540,7 @@ function AgentSetupForm({
         currentAgentModelConfig={currentAgentModelConfig}
         permissionSettings={permissionSettings}
         passthroughConfig={passthroughConfig}
+        secrets={secrets}
         onAddProfile={handleAddProfile}
         onProfileChange={handleProfileChange}
         onProfileMcpChange={handleProfileMcpChange}

@@ -41,6 +41,7 @@ const expectedCamelCaseProfile = {
   envVars: [sampleEnvVar],
   cliPassthrough: false,
   enabled: false,
+  providerSupported: false,
   workspaceId: WORKSPACE_ID,
   userModified: true,
   createdAt: "2026-01-01T00:00:00Z",
@@ -90,6 +91,28 @@ describe("normalizeAgentProfile", () => {
       command_prefix: SAMPLE_PREFIX,
     });
     expect(result.commandPrefix).toBe(SAMPLE_PREFIX);
+  });
+
+  it("maps the OpenAI-compatible provider fields both ways", () => {
+    const result = normalizeAgentProfile({
+      id: SAMPLE_ID,
+      name: "default",
+      provider_kind: "openai_compatible",
+      provider_base_url: "http://localhost:20128/v1",
+      provider_api_key_secret_id: "sec-1",
+      provider_supported: true,
+    });
+    expect(result.providerKind).toBe("openai_compatible");
+    expect(result.providerBaseUrl).toBe("http://localhost:20128/v1");
+    expect(result.providerApiKeySecretId).toBe("sec-1");
+    expect(result.providerSupported).toBe(true);
+
+    const payload = toAgentProfilePayload(result);
+    expect(payload.provider_kind).toBe("openai_compatible");
+    expect(payload.provider_base_url).toBe("http://localhost:20128/v1");
+    expect(payload.provider_api_key_secret_id).toBe("sec-1");
+    // provider_supported is computed server-side; it must never be sent back.
+    expect(payload).not.toHaveProperty("provider_supported");
   });
 
   it("accepts already-camelCase commandPrefix", () => {

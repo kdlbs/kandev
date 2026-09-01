@@ -523,6 +523,62 @@ describe("fallback model save payloads", () => {
   });
 });
 
+describe("provider config save payloads", () => {
+  const OPENAI_COMPATIBLE = "openai_compatible";
+  const BASE_URL = "http://localhost:20128/v1";
+
+  it("returns true when a provider field changes", () => {
+    const draft = draftFrom(baseProfile, {
+      providerKind: OPENAI_COMPATIBLE,
+      providerBaseUrl: BASE_URL,
+    });
+    expect(isProfileDirty(draft, baseProfile)).toBe(true);
+  });
+
+  it("includes provider fields when saving a dirty existing profile", async () => {
+    const savedAgent = agentWithProfiles([baseProfile]);
+    const draftProfile = draftFrom(baseProfile, {
+      providerKind: OPENAI_COMPATIBLE,
+      providerBaseUrl: BASE_URL,
+      providerApiKeySecretId: "sec_1",
+    });
+    const draftAgent = agentWithProfiles([draftProfile]);
+    const { callbacks } = createTestCallbacks(draftAgent);
+    vi.mocked(updateAgentProfileAction).mockResolvedValue({ ...baseProfile });
+
+    await saveExistingAgent(draftAgent, savedAgent, false, callbacks);
+
+    expect(updateAgentProfileAction).toHaveBeenCalledWith(
+      baseProfile.id,
+      expect.objectContaining({
+        provider_kind: OPENAI_COMPATIBLE,
+        provider_base_url: BASE_URL,
+        provider_api_key_secret_id: "sec_1",
+      }),
+    );
+  });
+
+  it("includes provider fields when adding a new profile to an existing agent", async () => {
+    const savedAgent = agentWithProfiles([baseProfile]);
+    const newProfile = draftFrom(baseProfile, {
+      id: toAgentProfileId("draft-new-profile"),
+      name: "New profile",
+      providerKind: OPENAI_COMPATIBLE,
+      providerBaseUrl: BASE_URL,
+    });
+    const draftAgent = agentWithProfiles([baseProfile, newProfile]);
+    const { callbacks } = createTestCallbacks(draftAgent);
+    vi.mocked(createAgentProfileAction).mockResolvedValue({ ...newProfile, id: PERSISTED_PROFILE_ID });
+
+    await saveExistingAgent(draftAgent, savedAgent, false, callbacks);
+
+    expect(createAgentProfileAction).toHaveBeenCalledWith(
+      savedAgent.id,
+      expect.objectContaining({ provider_kind: OPENAI_COMPATIBLE, provider_base_url: BASE_URL }),
+    );
+  });
+});
+
 function agentWithProfiles(profiles: DraftProfile[]): DraftAgent {
   return {
     id: "agent-1",

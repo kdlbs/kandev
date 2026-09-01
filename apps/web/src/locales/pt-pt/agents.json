@@ -295,5 +295,17 @@
   "dynamicRouteRetryDescription": "Tenta novamente o mesmo candidato depois de um erro do fornecedor. Use esta opção quando a falha puder ser temporária.",
   "dynamicRouteTryNextDescription": "Ignora este candidato nesta execução e continua com o próximo perfil elegível.",
   "dynamicRouteStopDescription": "Para o encaminhamento quando este candidato falha. A tarefa aguarda uma ação manual de recuperação.",
-  "dynamicProfileSaved": "Perfil dinâmico guardado."
+  "dynamicProfileSaved": "Perfil dinâmico guardado.",
+  "providerSectionTitle": "Fornecedor de IA",
+  "providerSectionDescription": "Encaminhe as chamadas de modelo deste perfil através de um router compatível com OpenAI alojado por si, em vez do fornecedor incorporado do agente.",
+  "providerKindLabel": "Fornecedor",
+  "providerKindNative": "Nativo (predefinição do agente)",
+  "providerKindOpenAICompatible": "Fornecedor compatível com OpenAI",
+  "providerKindHelp": "Nativo mantém a configuração de fornecedor do próprio CLI do agente. Compatível com OpenAI envia os pedidos para o URL base abaixo com a chave selecionada e funciona com 9router, LiteLLM, vLLM e OpenRouter alojado por si.",
+  "providerBaseUrlLabel": "URL base",
+  "providerBaseUrlHelp": "A raiz absoluta http ou https do seu router. O agente acrescenta os caminhos de rota compatíveis com OpenAI, como /chat/completions.",
+  "providerBaseUrlInvalid": "Introduza um URL http ou https absoluto.",
+  "providerApiKeyLabel": "Chave de API",
+  "providerApiKeyHelp": "Segredo do Kandev que contém o token de portador enviado ao fornecedor. Deixe por definir para um router que não precisa de autenticação.",
+  "providerModelSlash": "Remova a barra do nome do modelo: um fornecedor compatível com OpenAI espera um ID de modelo simples."
 }

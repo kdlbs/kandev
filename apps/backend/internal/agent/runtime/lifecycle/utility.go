@@ -98,9 +98,15 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 	if cfg == nil || !cfg.Supported {
 		return nil, fmt.Errorf("agent %q inference not supported", agentName)
 	}
+	agentConfig, _ := ia.(agents.Agent)
 	execution, err := m.GetOrEnsureExecution(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("no execution available for session %s: %w", sessionID, err)
+	}
+	gatewayAuth, providerKeyEnvVar, providerKey, err := m.resolveProviderGatewayAuth(
+		ctx, profile, agentConfig, execution.RuntimeName)
+	if err != nil {
+		return nil, err
 	}
 	client := execution.GetAgentCtlClient()
 	if client == nil {
@@ -126,6 +132,9 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 			env[value.Key] = value.Value
 		}
 	}
+	if providerKey != "" && providerKeyEnvVar != "" {
+		env[providerKeyEnvVar] = providerKey // profile-declared provider key wins
+	}
 	autoApprove := profile.AutoApprove
 	return client.InferencePrompt(ctx, &utility.PromptRequest{
 		Prompt: prompt, AgentID: agentName, Model: profile.Model, Mode: profile.Mode,
@@ -133,6 +142,7 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 		InferenceConfig: &utility.InferenceConfigDTO{
 			Command: cfg.Command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: execution.WorkspacePath,
 			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: flags, CommandPrefix: prefix,
+			ProviderGatewayAuth: gatewayAuth,
 		},
 	})
 }

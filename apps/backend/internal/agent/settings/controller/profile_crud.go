@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/profileconfig"
 	"github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/secrets"
 )
 
@@ -44,7 +45,12 @@ type CreateProfileRequest struct {
 	// CommandPrefix is an optional launcher prefix prepended to the agent
 	// command (e.g. "greywall --"). Shell-tokenised at launch time.
 	CommandPrefix string
-	Dynamic       *dto.DynamicAgentProfileDTO
+	// ProviderKind / ProviderBaseURL / ProviderAPIKeySecretID configure an
+	// injected OpenAI-compatible provider. Empty ProviderKind = native.
+	ProviderKind           string
+	ProviderBaseURL        string
+	ProviderAPIKeySecretID string
+	Dynamic                *dto.DynamicAgentProfileDTO
 }
 
 func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -82,27 +88,34 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		return nil, err
 	}
 	profile := &models.AgentProfile{
-		AgentID:          req.AgentID,
-		Name:             req.Name,
-		AgentDisplayName: displayName,
-		Model:            req.Model,
-		FallbackModel:    strings.TrimSpace(req.FallbackModel),
-		AutoFallback:     req.AutoFallback,
-		Mode:             req.Mode,
-		ConfigOptions:    profileconfig.SanitizeConfigOptions(req.ConfigOptions),
-		AllowIndexing:    req.AllowIndexing,
-		AutoApprove:      req.AutoApprove,
-		CLIPassthrough:   req.CLIPassthrough,
-		Enabled:          true,
-		CLIFlags:         cliFlags,
-		EnvVars:          envVarsFromDTO(req.EnvVars),
-		CommandPrefix:    strings.TrimSpace(req.CommandPrefix),
-		UserModified:     true,
+		AgentID:                req.AgentID,
+		Name:                   req.Name,
+		AgentDisplayName:       displayName,
+		Model:                  req.Model,
+		FallbackModel:          strings.TrimSpace(req.FallbackModel),
+		AutoFallback:           req.AutoFallback,
+		Mode:                   req.Mode,
+		ConfigOptions:          profileconfig.SanitizeConfigOptions(req.ConfigOptions),
+		AllowIndexing:          req.AllowIndexing,
+		AutoApprove:            req.AutoApprove,
+		CLIPassthrough:         req.CLIPassthrough,
+		Enabled:                true,
+		CLIFlags:               cliFlags,
+		EnvVars:                envVarsFromDTO(req.EnvVars),
+		CommandPrefix:          strings.TrimSpace(req.CommandPrefix),
+		ProviderKind:           req.ProviderKind,
+		ProviderBaseURL:        req.ProviderBaseURL,
+		ProviderAPIKeySecretID: req.ProviderAPIKeySecretID,
+		UserModified:           true,
+	}
+	if err := c.normalizeProviderConfig(ctx, profile, agent.Name); err != nil {
+		return nil, err
 	}
 	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 		return nil, err
 	}
 	result := toProfileDTO(profile)
+	c.decorateProviderSupport(agent.Name, &result)
 	return &result, nil
 }
 
@@ -341,8 +354,17 @@ type UpdateProfileRequest struct {
 	// CommandPrefix replaces the value when non-nil. Nil means "leave
 	// unchanged" — the UI always sends the desired value on save.
 	CommandPrefix *string
-	Dynamic       *dto.DynamicAgentProfileDTO
-	Force         bool
+	// Provider* replace their value when non-nil. When any of the three is
+	// non-nil the provider configuration is re-validated and normalized.
+	ProviderKind           *string
+	ProviderBaseURL        *string
+	ProviderAPIKeySecretID *string
+	Dynamic                *dto.DynamicAgentProfileDTO
+	Force                  bool
+}
+
+func (req UpdateProfileRequest) touchesProvider() bool {
+	return req.ProviderKind != nil || req.ProviderBaseURL != nil || req.ProviderAPIKeySecretID != nil
 }
 
 func enabledOnlyUpdate(req UpdateProfileRequest) bool {
@@ -350,7 +372,7 @@ func enabledOnlyUpdate(req UpdateProfileRequest) bool {
 		req.FallbackModel == nil && req.AutoFallback == nil && req.Mode == nil &&
 		req.ConfigOptions == nil && req.AllowIndexing == nil && req.AutoApprove == nil &&
 		req.CLIPassthrough == nil && req.CLIFlags == nil && req.EnvVars == nil &&
-		req.CommandPrefix == nil && req.Dynamic == nil
+		req.CommandPrefix == nil && !req.touchesProvider() && req.Dynamic == nil
 }
 
 func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -435,6 +457,7 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		}
 		profile.UpdatedAt = updatedAt
 		result := toProfileDTO(profile)
+		c.decorateProviderSupportByAgentID(ctx, &result)
 		return &result, nil
 	}
 	if req.CLIFlags != nil {
@@ -458,6 +481,9 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		}
 		profile.CommandPrefix = strings.TrimSpace(*req.CommandPrefix)
 	}
+	if err := c.applyProviderConfigUpdate(ctx, req, profile); err != nil {
+		return nil, err
+	}
 	profile.UserModified = true
 	if dynamic != nil {
 		result, handled, atomicErr := c.updateDynamicProfileAtomically(
@@ -479,6 +505,7 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		return nil, err
 	}
 	result := toProfileDTO(profile)
+	c.decorateProviderSupportByAgentID(ctx, &result)
 	if dynamicRepo != nil && dynamic != nil {
 		result.Dynamic, err = dynamicProfileDTO(dynamic, dynamicRoutes)
 		if err != nil {
@@ -486,6 +513,38 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		}
 	}
 	return &result, nil
+}
+
+// applyProviderConfigUpdate applies any provider-field overrides carried by req,
+// then re-normalizes the provider configuration when those fields changed or
+// when only the model changed on a profile that already routes through an
+// OpenAI-compatible provider. That last case matters because a model id
+// containing '/' otherwise slips back to the target CLI's built-in vendor
+// provider without ever being rejected.
+func (c *Controller) applyProviderConfigUpdate(
+	ctx context.Context, req UpdateProfileRequest, profile *models.AgentProfile,
+) error {
+	if req.touchesProvider() {
+		if req.ProviderKind != nil {
+			profile.ProviderKind = *req.ProviderKind
+		}
+		if req.ProviderBaseURL != nil {
+			profile.ProviderBaseURL = *req.ProviderBaseURL
+		}
+		if req.ProviderAPIKeySecretID != nil {
+			profile.ProviderAPIKeySecretID = *req.ProviderAPIKeySecretID
+		}
+	}
+	modelChangedOnProviderProfile := req.Model != nil &&
+		strings.TrimSpace(profile.ProviderKind) == models.ProviderKindOpenAICompatible
+	if !req.touchesProvider() && !modelChangedOnProviderProfile {
+		return nil
+	}
+	agentName := ""
+	if ag, agErr := c.repo.GetAgent(ctx, profile.AgentID); agErr == nil && ag != nil {
+		agentName = ag.Name
+	}
+	return c.normalizeProviderConfig(ctx, profile, agentName)
 }
 
 func (c *Controller) updateDynamicProfileAtomically(
@@ -581,6 +640,7 @@ func (c *Controller) DuplicateProfile(ctx context.Context, req DuplicateProfileR
 		})
 		if err == nil {
 			result := toProfileDTO(clone)
+			c.decorateProviderSupportByAgentID(ctx, &result)
 			return &result, nil
 		}
 		// A source deleted between the snapshot read and the transaction is a
@@ -638,6 +698,9 @@ func duplicateClone(source *models.AgentProfile) *models.AgentProfile {
 		CLIFlags:                   cloneCLIFlags(source.CLIFlags),
 		EnvVars:                    cloneEnvVars(source.EnvVars),
 		CommandPrefix:              source.CommandPrefix,
+		ProviderKind:               source.ProviderKind,
+		ProviderBaseURL:            source.ProviderBaseURL,
+		ProviderAPIKeySecretID:     source.ProviderAPIKeySecretID,
 		UserModified:               true,
 		Enabled:                    source.Enabled,
 		WorkspaceID:                source.WorkspaceID,
@@ -771,6 +834,58 @@ func validateCLIFlagDTOs(in []dto.CLIFlagDTO) error {
 func validateCommandPrefix(prefix string) error {
 	if err := cliflags.ValidateCommandPrefix(prefix); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidCommandPrefix, err)
+	}
+	return nil
+}
+
+// providerSupported reports whether the profile's agent advertises a generic
+// OpenAI-compatible provider (base URL + bearer key) that Kandev can inject.
+func (c *Controller) providerSupported(agentName string) bool {
+	if c.agentRegistry == nil {
+		return false
+	}
+	ag, ok := c.agentRegistry.Get(agentName)
+	if !ok {
+		return false
+	}
+	return agents.OpenAICompatibleProviderSpecFor(ag) != nil
+}
+
+// normalizeProviderConfig validates and normalizes the provider fields on a
+// profile in place. When the kind is not openai_compatible every provider field
+// is cleared so a stale base URL or secret ref can never linger active. When it
+// is openai_compatible the agent must support it, the base URL must be an
+// absolute http(s) URL, and the model id must not contain '/' (the target CLI
+// routes a slash-prefixed model to its built-in vendor provider). The secret
+// ref, when set, must resolve to a global secret, and the base URL must then be
+// https or a loopback host so the bearer key is never sent in cleartext.
+func (c *Controller) normalizeProviderConfig(ctx context.Context, p *models.AgentProfile, agentName string) error {
+	if strings.TrimSpace(p.ProviderKind) != models.ProviderKindOpenAICompatible {
+		p.ProviderKind = models.ProviderKindNative
+		p.ProviderBaseURL = ""
+		p.ProviderAPIKeySecretID = ""
+		return nil
+	}
+	p.ProviderKind = models.ProviderKindOpenAICompatible
+	if !c.providerSupported(agentName) {
+		return fmt.Errorf("%w: agent %q does not support an OpenAI-compatible provider", ErrInvalidProviderConfig, agentName)
+	}
+	p.ProviderBaseURL = strings.TrimSpace(p.ProviderBaseURL)
+	p.ProviderAPIKeySecretID = strings.TrimSpace(p.ProviderAPIKeySecretID)
+	validateBaseURL := acpprovider.ValidateBaseURL
+	if p.ProviderAPIKeySecretID != "" {
+		validateBaseURL = acpprovider.ValidateCredentialedBaseURL
+	}
+	if err := validateBaseURL(p.ProviderBaseURL); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidProviderConfig, err)
+	}
+	if strings.Contains(p.Model, "/") {
+		return fmt.Errorf("%w: model id %q must not contain '/'", ErrInvalidProviderConfig, p.Model)
+	}
+	if p.ProviderAPIKeySecretID != "" && c.secretStore != nil {
+		if err := secrets.ValidateGlobalReference(ctx, c.secretStore, p.ProviderAPIKeySecretID); err != nil {
+			return fmt.Errorf("%w: API key secret must be global", ErrInvalidProviderConfig)
+		}
 	}
 	return nil
 }
@@ -1119,28 +1234,50 @@ func (c *Controller) decorateAgentDTO(ctx context.Context, result *dto.AgentDTO)
 
 func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 	return dto.AgentProfileDTO{
-		ID:               profile.ID,
-		AgentID:          profile.AgentID,
-		Kind:             profileKind(profile),
-		Name:             profile.Name,
-		AgentDisplayName: profile.AgentDisplayName,
-		Model:            profile.Model,
-		FallbackModel:    profile.FallbackModel,
-		AutoFallback:     profile.AutoFallback,
-		Mode:             profile.Mode,
-		ConfigOptions:    profileconfig.SanitizeConfigOptions(profile.ConfigOptions),
-		AllowIndexing:    profile.AllowIndexing,
-		AutoApprove:      profile.AutoApprove,
-		CLIFlags:         cliFlagsToDTO(profile.CLIFlags),
-		EnvVars:          envVarsToDTO(profile.EnvVars),
-		CLIPassthrough:   profile.CLIPassthrough,
-		Enabled:          profile.Enabled,
-		CommandPrefix:    profile.CommandPrefix,
-		UserModified:     profile.UserModified,
-		WorkspaceID:      profile.WorkspaceID,
-		CreatedAt:        profile.CreatedAt,
-		UpdatedAt:        profile.UpdatedAt,
+		ID:                     profile.ID,
+		AgentID:                profile.AgentID,
+		Kind:                   profileKind(profile),
+		Name:                   profile.Name,
+		AgentDisplayName:       profile.AgentDisplayName,
+		Model:                  profile.Model,
+		FallbackModel:          profile.FallbackModel,
+		AutoFallback:           profile.AutoFallback,
+		Mode:                   profile.Mode,
+		ConfigOptions:          profileconfig.SanitizeConfigOptions(profile.ConfigOptions),
+		AllowIndexing:          profile.AllowIndexing,
+		AutoApprove:            profile.AutoApprove,
+		CLIFlags:               cliFlagsToDTO(profile.CLIFlags),
+		EnvVars:                envVarsToDTO(profile.EnvVars),
+		CLIPassthrough:         profile.CLIPassthrough,
+		Enabled:                profile.Enabled,
+		CommandPrefix:          profile.CommandPrefix,
+		ProviderKind:           profile.ProviderKind,
+		ProviderBaseURL:        profile.ProviderBaseURL,
+		ProviderAPIKeySecretID: profile.ProviderAPIKeySecretID,
+		UserModified:           profile.UserModified,
+		WorkspaceID:            profile.WorkspaceID,
+		CreatedAt:              profile.CreatedAt,
+		UpdatedAt:              profile.UpdatedAt,
 	}
+}
+
+// decorateProviderSupport sets the computed ProviderSupported flag on a single
+// profile DTO from the agent registry.
+func (c *Controller) decorateProviderSupport(agentName string, d *dto.AgentProfileDTO) {
+	d.ProviderSupported = c.providerSupported(agentName)
+}
+
+// decorateProviderSupportByAgentID resolves the profile's agent family from the
+// DTO's AgentID and sets the computed ProviderSupported flag. Mutation responses
+// (update, duplicate) run through this: the frontend swaps its cached profile
+// for the response, so an undecorated DTO hides the provider section until the
+// agent list is fetched again.
+func (c *Controller) decorateProviderSupportByAgentID(ctx context.Context, d *dto.AgentProfileDTO) {
+	ag, err := c.repo.GetAgent(ctx, d.AgentID)
+	if err != nil || ag == nil {
+		return
+	}
+	d.ProviderSupported = c.providerSupported(ag.Name)
 }
 
 func profileKind(profile *models.AgentProfile) string {

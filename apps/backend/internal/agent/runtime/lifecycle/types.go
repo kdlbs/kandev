@@ -1049,6 +1049,12 @@ type AgentProfileInfo struct {
 	// EnvVars are user-configured environment variables for this profile.
 	EnvVars []settingsmodels.ProfileEnvVar
 
+	// ProviderKind / ProviderBaseURL / ProviderAPIKeySecretID configure an
+	// injected OpenAI-compatible provider (empty ProviderKind = native).
+	ProviderKind           string
+	ProviderBaseURL        string
+	ProviderAPIKeySecretID string
+
 	// Deprecated: legacy permission fields, no longer consulted by the launch
 	// path. Kept so existing call sites compile during the transition.
 	AutoApprove                bool

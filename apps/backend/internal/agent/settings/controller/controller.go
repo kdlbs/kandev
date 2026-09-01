@@ -50,6 +50,7 @@ var (
 	ErrCommandRequired                      = errors.New("command is required")
 	ErrInvalidProfileEnvVars                = errors.New("invalid profile env vars")
 	ErrInvalidCommandPrefix                 = errors.New("invalid command prefix")
+	ErrInvalidProviderConfig                = errors.New("invalid OpenAI-compatible provider configuration")
 	ErrUnknownMCPStrategy                   = errors.New("unknown MCP strategy")
 	ErrNotCustomTUIAgent                    = errors.New("agent is not a custom TUI agent")
 	ErrDynamicAgentRoutingDisabled          = errors.New("dynamic agent routing is disabled")
