@@ -159,6 +159,22 @@ func TestAuditTaskTransferAttemptActionRecordsAuditWithoutTransfer(t *testing.T)
 	require.Len(t, transfer.audits, 1)
 }
 
+func TestAuditTaskTransferAttemptActionRecordsSchemaRejectedFieldTypes(t *testing.T) {
+	transfer := &recordingTaskTransferService{}
+	h := &Handlers{taskTransferSvc: transfer, logger: testLogger(t)}
+	message := makeWSMessage(t, ws.ActionMCPAuditTaskTransferAttempt, map[string]interface{}{
+		"task_id":                      42,
+		"expected_source_workspace_id": "ws-source",
+	})
+
+	response, err := h.handleAuditTaskTransferAttempt(context.Background(), message)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+	require.Empty(t, transfer.commands)
+	require.Len(t, transfer.audits, 1)
+	require.Equal(t, "ws-source", transfer.audits[0].ExpectedSourceWorkspaceID)
+}
+
 func TestAuditTaskTransferAttemptActionReturnsErrorWhenAuditFails(t *testing.T) {
 	transfer := &recordingTaskTransferService{auditErr: errors.New("audit unavailable")}
 	h := &Handlers{taskTransferSvc: transfer, logger: testLogger(t)}

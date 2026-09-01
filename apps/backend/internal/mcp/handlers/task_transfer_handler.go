@@ -106,8 +106,8 @@ func decodeTaskTransferRequest(payload []byte, request *taskTransferRequest) err
 }
 
 func (h *Handlers) handleAuditTaskTransferAttempt(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var request taskTransferRequest
-	if err := json.Unmarshal(msg.Payload, &request); err != nil {
+	request, err := decodeTaskTransferAuditRequest(msg.Payload)
+	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid task transfer audit payload", nil)
 	}
 	if err := h.recordRejectedTaskTransfer(ctx, request, "failed"); err != nil {
@@ -115,6 +115,26 @@ func (h *Handlers) handleAuditTaskTransferAttempt(ctx context.Context, msg *ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "task transfer audit failed", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"audited": true})
+}
+
+func decodeTaskTransferAuditRequest(payload []byte) (taskTransferRequest, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		return taskTransferRequest{}, err
+	}
+	return taskTransferRequest{
+		TaskID:                    jsonStringField(fields, "task_id"),
+		ExpectedSourceWorkspaceID: jsonStringField(fields, "expected_source_workspace_id"),
+		ExpectedSourceWorkflowID:  jsonStringField(fields, "expected_source_workflow_id"),
+		ExpectedSourceStepID:      jsonStringField(fields, "expected_source_workflow_step_id"),
+		ExpectedTaskUpdatedAt:     jsonStringField(fields, "expected_task_updated_at"),
+		DestinationWorkspaceID:    jsonStringField(fields, "destination_workspace_id"),
+		DestinationWorkflowID:     jsonStringField(fields, "destination_workflow_id"),
+		DestinationStepID:         jsonStringField(fields, "destination_workflow_step_id"),
+		DestinationStepName:       jsonStringField(fields, "destination_workflow_step_name"),
+		IdempotencyKey:            jsonStringField(fields, "idempotency_key"),
+		PreservationPolicy:        jsonStringField(fields, "preservation_policy"),
+	}, nil
 }
 
 func (h *Handlers) auditRejectedTaskTransfer(ctx context.Context, request taskTransferRequest, result string) {
