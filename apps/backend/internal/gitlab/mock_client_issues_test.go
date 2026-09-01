@@ -183,6 +183,52 @@ func TestMockClient_ListIssuesPaged_PageBeyondEndYieldsEmptyWithSameTotal(t *tes
 	}
 }
 
+// Scenario 16: 30 seeded issues, 26 in milestone "Next", per_page=25 pages
+// the filtered set (not the unfiltered 30), with TotalCount staying at the
+// filtered count on every page including the beyond-end one.
+func TestMockClient_ListIssuesPaged_PagesOverFilteredMilestoneSetAcrossMultiplePages(t *testing.T) {
+	c := NewMockClient(DefaultHost)
+	for i := 1; i <= 26; i++ {
+		c.SeedIssue("acme/repo", &Issue{IID: i, ProjectPath: "acme/repo", Milestone: "Next"})
+	}
+	for i := 27; i <= 30; i++ {
+		c.SeedIssue("acme/repo", &Issue{IID: i, ProjectPath: "acme/repo", Milestone: "Old"})
+	}
+
+	page1, err := c.ListIssuesPaged(t.Context(), "", "", "Next", 1, 25)
+	if err != nil {
+		t.Fatalf("ListIssuesPaged() error = %v", err)
+	}
+	if page1.TotalCount != 26 {
+		t.Errorf("page1 TotalCount = %d, want 26", page1.TotalCount)
+	}
+	if len(page1.Issues) != 25 {
+		t.Errorf("page1 len(Issues) = %d, want 25", len(page1.Issues))
+	}
+
+	page2, err := c.ListIssuesPaged(t.Context(), "", "", "Next", 2, 25)
+	if err != nil {
+		t.Fatalf("ListIssuesPaged() error = %v", err)
+	}
+	if page2.TotalCount != 26 {
+		t.Errorf("page2 TotalCount = %d, want 26", page2.TotalCount)
+	}
+	if len(page2.Issues) != 1 {
+		t.Errorf("page2 len(Issues) = %d, want 1", len(page2.Issues))
+	}
+
+	page3, err := c.ListIssuesPaged(t.Context(), "", "", "Next", 3, 25)
+	if err != nil {
+		t.Fatalf("ListIssuesPaged() error = %v", err)
+	}
+	if page3.TotalCount != 26 {
+		t.Errorf("page3 TotalCount = %d, want 26", page3.TotalCount)
+	}
+	if len(page3.Issues) != 0 {
+		t.Errorf("page3 len(Issues) = %d, want 0", len(page3.Issues))
+	}
+}
+
 func TestMockClient_ListIssuesPaged_NegativePageNormalisedToOne(t *testing.T) {
 	c := NewMockClient(DefaultHost)
 	seedMilestoneIssues(t, c)
@@ -213,6 +259,9 @@ func TestMockClient_ListIssuesPaged_NonPositivePerPageReturnsNoIssues(t *testing
 	if page.TotalCount != 4 {
 		t.Errorf("TotalCount = %d, want 4 (full filtered count, even with no results)", page.TotalCount)
 	}
+	if page.PerPage != 0 {
+		t.Errorf("PerPage = %d, want normalised to 0", page.PerPage)
+	}
 
 	negative, err := c.ListIssuesPaged(t.Context(), "", "", "", 1, -5)
 	if err != nil {
@@ -221,15 +270,35 @@ func TestMockClient_ListIssuesPaged_NonPositivePerPageReturnsNoIssues(t *testing
 	if len(negative.Issues) != 0 {
 		t.Errorf("len(Issues) = %d, want 0", len(negative.Issues))
 	}
+	if negative.PerPage != 0 {
+		t.Errorf("PerPage = %d, want normalised to 0", negative.PerPage)
+	}
 }
 
 // The HTTP layer's paginationFromQuery only floors page/perPage, it never
 // caps the upper bound (unlike PATClient's clampSearchPage), so an
 // out-of-range per_page can reach the mock directly. ListIssuesPaged must
 // not overflow its start/end arithmetic and panic on the resulting slice.
+// Spec (spec.md:736-747) authorizes only two normalisations — page < 1 and
+// perPage < 1 — so an extreme-but-positive perPage is echoed back as given,
+// not clamped to a page size the spec never mentions.
 func TestMockClient_ListIssuesPaged_ExtremePerPageDoesNotOverflowOrPanic(t *testing.T) {
 	c := NewMockClient(DefaultHost)
 	seedMilestoneIssues(t, c)
+
+	first, err := c.ListIssuesPaged(t.Context(), "", "", "", 1, math.MaxInt)
+	if err != nil {
+		t.Fatalf("ListIssuesPaged() error = %v", err)
+	}
+	if len(first.Issues) != 4 {
+		t.Errorf("len(Issues) = %d, want all 4 on page 1", len(first.Issues))
+	}
+	if first.PerPage != math.MaxInt {
+		t.Errorf("PerPage = %d, want echoed back as math.MaxInt, not clamped", first.PerPage)
+	}
+	if first.TotalCount != 4 {
+		t.Errorf("TotalCount = %d, want 4", first.TotalCount)
+	}
 
 	page, err := c.ListIssuesPaged(t.Context(), "", "", "", 2, math.MaxInt)
 	if err != nil {
@@ -239,15 +308,10 @@ func TestMockClient_ListIssuesPaged_ExtremePerPageDoesNotOverflowOrPanic(t *test
 		t.Errorf("TotalCount = %d, want 4", page.TotalCount)
 	}
 	if len(page.Issues) != 0 {
-		t.Errorf("len(Issues) = %d, want 0 (page 2 is beyond a clamped page size)", len(page.Issues))
+		t.Errorf("len(Issues) = %d, want 0 (page 2 is beyond the end of the unfiltered set)", len(page.Issues))
 	}
-
-	first, err := c.ListIssuesPaged(t.Context(), "", "", "", 1, math.MaxInt)
-	if err != nil {
-		t.Fatalf("ListIssuesPaged() error = %v", err)
-	}
-	if len(first.Issues) != 4 {
-		t.Errorf("len(Issues) = %d, want all 4 on page 1", len(first.Issues))
+	if page.PerPage != math.MaxInt {
+		t.Errorf("PerPage = %d, want echoed back as math.MaxInt, not clamped", page.PerPage)
 	}
 }
 

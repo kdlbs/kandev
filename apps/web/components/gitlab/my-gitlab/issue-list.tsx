@@ -89,7 +89,7 @@ function IssueRow({
               time: formatRelativeTime(issue.created_at),
             })}
           </span>
-          <IssueMilestoneChip milestone={issue.milestone} />
+          <IssueMilestoneChip milestone={issue.milestone ?? ""} />
           <IssueLabels labels={issue.labels} />
         </div>
       </div>

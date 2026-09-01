@@ -191,7 +191,7 @@ describe("useGitLabPageState", () => {
     expect(result.current.showMilestoneFilter).toBe(false);
   });
 
-  it("onCommitMilestone normalizes the visible input via the trim helper and resets to page 1", async () => {
+  it("onCommitMilestone normalizes the visible input via the trim helper, resets to page 1, and issues exactly one request (Scenario 7)", async () => {
     searchUserIssuesMock.mockResolvedValue(issuePage([]));
     const { result } = renderHook(() => useGitLabPageState(true, WORKSPACE_ID));
     act(() => result.current.onSelect({ kind: "issue", source: "preset", id: "assigned" }));
@@ -200,12 +200,26 @@ describe("useGitLabPageState", () => {
     act(() => result.current.search.setPage(3));
     await waitFor(() => expect(result.current.search.page).toBe(3));
 
+    const callsBeforeCommit = searchUserIssuesMock.mock.calls.length;
     act(() => result.current.setMilestone("  Next  "));
     act(() => result.current.onCommitMilestone());
 
     expect(result.current.milestone).toBe("Next");
     expect(result.current.committedMilestone).toBe("Next");
     await waitFor(() => expect(result.current.search.page).toBe(1));
+
+    // Committing and resetting the page together must fire exactly one
+    // request for the new value — adding milestone to the existing
+    // [preset, customQuery, kind] reset effect would instead fire twice
+    // (once for the stale page, once for page 1); see spec "Client
+    // function, and where trimming happens".
+    await waitFor(() => expect(searchUserIssuesMock).toHaveBeenCalledTimes(callsBeforeCommit + 1));
+    const lastCall = searchUserIssuesMock.mock.calls.at(-1)?.[0] as {
+      page: number;
+      milestone?: string;
+    };
+    expect(lastCall.page).toBe(1);
+    expect(lastCall.milestone).toBe("Next");
   });
 
   it("resets to page 1 when selecting a sidebar preset clears a committed milestone (Scenario 6, clause 3)", async () => {
@@ -238,6 +252,24 @@ describe("useGitLabPageState — saved query save", () => {
     act(() => result.current.onCommitMilestone());
     expect(result.current.canSaveCurrent).toBe(true);
     expect(result.current.suggestedLabel).toBe("Next");
+  });
+
+  it("suggestedLabel precedence ladder: custom query beats project filter beats milestone beats the default (Scenario 25)", async () => {
+    const { result } = renderHook(() => useGitLabPageState(true, WORKSPACE_ID));
+    act(() => result.current.onSelect({ kind: "issue", source: "preset", id: "assigned" }));
+    expect(result.current.suggestedLabel).toBe("Saved query");
+
+    act(() => result.current.setMilestone("Next"));
+    act(() => result.current.onCommitMilestone());
+    expect(result.current.suggestedLabel).toBe("Next");
+
+    act(() => result.current.setProjectFilter("group/app"));
+    expect(result.current.suggestedLabel).toBe("In group/app");
+
+    act(() => result.current.setCustomQuery("state=closed"));
+    act(() => result.current.commitCustomQuery());
+    await waitFor(() => expect(result.current.committedQuery).toBe("state=closed"));
+    expect(result.current.suggestedLabel).toBe("state=closed");
   });
 
   it("onConfirmSave writes the committed (trimmed) milestone and the effective preset, never the raw draft", async () => {

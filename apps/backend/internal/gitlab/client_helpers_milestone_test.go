@@ -53,6 +53,18 @@ func TestBuildIssueSearchQuery_CustomQueryWithMilestoneWins(t *testing.T) {
 	}
 }
 
+// Scenario 31, live-path clause: a custom query carrying a repeated
+// milestone key is forwarded upstream unchanged, both pairs included — the
+// live path never resolves which one wins, only the mock does (Get,
+// first-value).
+func TestBuildIssueSearchQuery_CustomQueryWithRepeatedMilestoneKeyForwardedUnchanged(t *testing.T) {
+	got := buildIssueSearchQuery("", "milestone=Old&milestone=Next", "Next")
+	want := "milestone=Old&milestone=Next"
+	if got != want {
+		t.Errorf("query = %q, want %q (both pairs forwarded verbatim)", got, want)
+	}
+}
+
 func TestBuildIssueSearchQuery_CustomQueryWithoutMilestoneIsExtended(t *testing.T) {
 	got := buildIssueSearchQuery("", "state=closed", "Next")
 	values, err := url.ParseQuery(got)
@@ -127,6 +139,25 @@ func TestBuildIssueSearchQuery_MilestoneEscapedExactlyOnce(t *testing.T) {
 	}
 	if len(values) != 2 {
 		t.Errorf("values = %v, want exactly state/milestone (no injected key)", values)
+	}
+}
+
+// Scenario 22: GitLab's predefined milestone values (None, Any, Upcoming)
+// are forwarded verbatim on "milestone" — kandev applies no special
+// handling and never translates any of them onto "milestone_id".
+func TestBuildIssueSearchQuery_PredefinedMilestoneValuesPassThroughUntranslated(t *testing.T) {
+	for _, value := range []string{"None", "Any", "Upcoming"} {
+		got := buildIssueSearchQuery("", "", value)
+		values, err := url.ParseQuery(got)
+		if err != nil {
+			t.Fatalf("ParseQuery(%q): %v", got, err)
+		}
+		if got := values.Get("milestone"); got != value {
+			t.Errorf("milestone = %q, want %q", got, value)
+		}
+		if values.Has("milestone_id") {
+			t.Errorf("query %q carries milestone_id, want it absent for value %q", got, value)
+		}
 	}
 }
 
