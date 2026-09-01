@@ -2331,7 +2331,7 @@ func (s *Service) markOrphanedInheritParentChild(ctx context.Context, archived, 
 	workspace, _ := child.Metadata["workspace"].(map[string]interface{})
 	stampOrphanedWorkspaceMetadata(workspace, archived.ID)
 
-	if err := s.tasks.UpdateTask(ctx, child); err != nil {
+	if err := s.updateTaskWorkspaceMetadata(ctx, child); err != nil {
 		s.logger.Warn("mark orphaned inherit_parent child failed",
 			zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID), zap.Error(err))
 		return
@@ -2339,6 +2339,17 @@ func (s *Service) markOrphanedInheritParentChild(ctx context.Context, archived, 
 	s.publishTaskEvent(ctx, events.TaskUpdated, child, nil)
 	s.logger.Info("marked inherit_parent child orphaned by parent archive",
 		zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID))
+}
+
+func (s *Service) updateTaskWorkspaceMetadata(ctx context.Context, task *models.Task) error {
+	if task == nil {
+		return nil
+	}
+	workspace, _ := task.Metadata["workspace"].(map[string]interface{})
+	if setter, ok := s.tasks.(taskMetadataKeySetter); ok {
+		return setter.SetTaskMetadataKey(ctx, task.ID, "workspace", workspace)
+	}
+	return s.tasks.UpdateTask(ctx, task)
 }
 
 // finalizeCancelledSessions finalizes an archived task's active sessions in

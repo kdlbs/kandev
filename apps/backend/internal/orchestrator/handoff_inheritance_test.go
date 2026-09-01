@@ -309,6 +309,46 @@ func TestInheritFromParentEnvironment_RetainedEnvironmentFromArchivedParentFails
 	}
 }
 
+func TestInheritFromParentEnvironment_RejectsEnvironmentOwnedByArchivedAncestor(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ctx := context.Background()
+	now := time.Now().UTC()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-nested", Name: "WS", CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-nested", WorkspaceID: "ws-nested", Name: "WF", CreatedAt: now, UpdatedAt: now})
+	ancestor := &models.Task{ID: "ancestor", WorkspaceID: "ws-nested", WorkflowID: "wf-nested", Title: "A", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateTask(ctx, ancestor)
+	_ = repo.ArchiveTask(ctx, ancestor.ID)
+	parent := &models.Task{ID: "parent", ParentID: ancestor.ID, WorkspaceID: "ws-nested", WorkflowID: "wf-nested", Title: "P", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateTask(ctx, parent)
+	child := &models.Task{ID: "child", ParentID: parent.ID, WorkspaceID: "ws-nested", WorkflowID: "wf-nested", Title: "C", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateTask(ctx, child)
+	_ = repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-ancestor", TaskID: ancestor.ID,
+		ExecutorType: string(models.ExecutorTypeLocalDocker), Status: models.TaskEnvironmentStatusReady,
+	})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "parent-session", TaskID: parent.ID, State: models.TaskSessionStateRunning,
+		IsPrimary: true, TaskEnvironmentID: "env-ancestor", StartedAt: now, UpdatedAt: now,
+	})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "child-session", TaskID: child.ID, State: models.TaskSessionStateRunning,
+		IsPrimary: true, StartedAt: now, UpdatedAt: now,
+	})
+
+	err := svc.inheritFromParentEnvironment(ctx, &v1.Task{ID: child.ID, ParentID: parent.ID}, "child-session")
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("inheritFromParentEnvironment error = %v, want workspace reuse unsafe", err)
+	}
+	got, getErr := repo.GetTaskSession(ctx, "child-session")
+	if getErr != nil || got == nil {
+		t.Fatalf("get child session: %v", getErr)
+	}
+	if got.TaskEnvironmentID != "" {
+		t.Fatalf("child session bound to ancestor environment %q", got.TaskEnvironmentID)
+	}
+}
+
 // REGRESSION: the workspace_group fallback branch of resolveInheritedEnvironment
 // used to hand back GetSharedGroupEnvironment's id without checking it still
 // names a live task_environments row — the exact dangling-id class the
@@ -370,6 +410,7 @@ func TestInheritFromSharedGroupEnvironment_BindsCanonicalEnvironment(t *testing.
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-shared", Name: "WS", CreatedAt: now, UpdatedAt: now})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-shared", WorkspaceID: "ws-shared", Name: "WF", CreatedAt: now, UpdatedAt: now})
 	_ = repo.CreateTask(ctx, &models.Task{ID: "member", WorkspaceID: "ws-shared", WorkflowID: "wf-shared", Title: "member", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{ID: "env-group", TaskID: "member", Status: models.TaskEnvironmentStatusReady})
 	_ = repo.CreateTaskSession(ctx, &models.TaskSession{ID: "member-session", TaskID: "member", State: models.TaskSessionStateCreated, StartedAt: now, UpdatedAt: now})
 
 	if err := svc.inheritFromSharedGroup(ctx, &v1.Task{ID: "member"}, "member-session"); err != nil {
@@ -387,5 +428,34 @@ func TestInheritFromSharedGroupEnvironment_MissingResolverFailsClosed(t *testing
 	err := svc.inheritFromSharedGroup(context.Background(), &v1.Task{ID: "member"}, "session")
 	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
 		t.Fatalf("shared group error = %v, want workspace reuse unsafe", err)
+	}
+}
+
+func TestInheritFromSharedGroupEnvironment_RejectsArchivedOwner(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ctx := context.Background()
+	now := time.Now().UTC()
+	archivedAt := now
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-shared-archived", Name: "WS", CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-shared-archived", WorkspaceID: "ws-shared-archived", Name: "WF", CreatedAt: now, UpdatedAt: now})
+	owner := &models.Task{ID: "owner", WorkspaceID: "ws-shared-archived", WorkflowID: "wf-shared-archived", Title: "owner", State: v1.TaskStateInProgress, ArchivedAt: &archivedAt, CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateTask(ctx, owner)
+	_ = repo.ArchiveTask(ctx, owner.ID)
+	_ = repo.CreateTask(ctx, &models.Task{ID: "member", WorkspaceID: "ws-shared-archived", WorkflowID: "wf-shared-archived", Title: "member", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{ID: "env-owner", TaskID: owner.ID, Status: models.TaskEnvironmentStatusReady})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{ID: "member-session", TaskID: "member", State: models.TaskSessionStateCreated, StartedAt: now, UpdatedAt: now})
+	svc.SetWorkspaceMaterializer(&stubMaterializer{envByTask: map[string]string{"member": "env-owner"}})
+
+	err := svc.inheritFromSharedGroup(ctx, &v1.Task{ID: "member"}, "member-session")
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("inheritFromSharedGroup error = %v, want workspace reuse unsafe", err)
+	}
+	got, getErr := repo.GetTaskSession(ctx, "member-session")
+	if getErr != nil || got == nil {
+		t.Fatalf("get member session: %v", getErr)
+	}
+	if got.TaskEnvironmentID != "" {
+		t.Fatalf("member session bound to archived owner environment %q", got.TaskEnvironmentID)
 	}
 }

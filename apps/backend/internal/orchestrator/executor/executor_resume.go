@@ -1134,7 +1134,7 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 
 	execConfig := e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
 
-	existingEnv, err := e.resolveResumeTaskEnvironment(ctx, task.ID, session)
+	existingEnv, err := e.resolveResumeTaskEnvironmentForTask(ctx, task, session)
 	if err != nil {
 		return nil, "", execConfig, nil, nil, err
 	}
@@ -1236,6 +1236,22 @@ func (e *Executor) configureResumeGitHubCredentials(
 }
 
 func (e *Executor) resolveResumeTaskEnvironment(ctx context.Context, taskID string, session *models.TaskSession) (*models.TaskEnvironment, error) {
+	taskModel, err := e.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("lookup task for environment resume: %w", err)
+	}
+	task := &v1.Task{ID: taskID}
+	if taskModel != nil {
+		task = taskModel.ToAPI()
+	}
+	return e.resolveResumeTaskEnvironmentForTask(ctx, task, session)
+}
+
+func (e *Executor) resolveResumeTaskEnvironmentForTask(ctx context.Context, task *v1.Task, session *models.TaskSession) (*models.TaskEnvironment, error) {
+	if task == nil || session == nil {
+		return nil, nil
+	}
+	taskID := task.ID
 	env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("lookup existing task environment: %w", err)
@@ -1262,7 +1278,13 @@ func (e *Executor) resolveResumeTaskEnvironment(ctx context.Context, taskID stri
 				return nil, fmt.Errorf("lookup inherited task environment: %w", inhErr)
 			}
 			if inherited != nil {
+				if err := e.validateInheritedEnvironmentOwner(ctx, task, inherited); err != nil {
+					return nil, err
+				}
 				return inherited, nil
+			}
+			if taskUsesInheritedWorkspace(task) {
+				return nil, fmt.Errorf("%w: inherited task environment %s no longer exists", models.ErrWorkspaceReuseUnsafe, session.TaskEnvironmentID)
 			}
 		}
 		return nil, nil

@@ -898,6 +898,7 @@ func TestLaunchPreparedSession_InheritsEnvFromSessionEnvironmentID(t *testing.T)
 		}},
 	}
 	repo.taskEnvironments[parentEnv.ID] = parentEnv
+	repo.tasks[parentEnv.TaskID] = &models.Task{ID: parentEnv.TaskID}
 
 	// Child session already points at the parent env (set earlier by
 	// propagateInheritedEnvironment in internal/orchestrator/handoff_inheritance.go).
@@ -1084,6 +1085,56 @@ func TestLaunchPreparedSession_RejectsRetainedInheritedEnvironmentFromArchivedPa
 	}
 	if len(repo.createTaskEnvironmentCalls) != 0 {
 		t.Fatalf("created %d task environments for a retained environment owned by an archived task", len(repo.createTaskEnvironmentCalls))
+	}
+}
+
+func TestLaunchPreparedSession_RejectsRetainedInheritedEnvironmentBeforeExistingRuntimeFastPath(t *testing.T) {
+	repo := newMockRepository()
+	archivedAt := time.Now()
+	repo.tasks["task-parent"] = &models.Task{ID: "task-parent", ArchivedAt: &archivedAt}
+	repo.taskEnvironments["env-parent"] = &models.TaskEnvironment{
+		ID:     "env-parent",
+		TaskID: "task-parent",
+		Status: models.TaskEnvironmentStatusReady,
+	}
+	session := &models.TaskSession{
+		ID:                "session-child",
+		TaskID:            "task-child",
+		AgentProfileID:    "profile-123",
+		TaskEnvironmentID: "env-parent",
+		State:             models.TaskSessionStateCreated,
+		StartedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+	}
+	repo.sessions[session.ID] = session
+	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
+		ID:               session.ID,
+		SessionID:        session.ID,
+		TaskID:           session.TaskID,
+		AgentExecutionID: "exec-existing",
+		Status:           "ready",
+	}
+
+	var startAgentCalled atomic.Bool
+	agentManager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "exec-existing", nil
+		},
+		startAgentProcessFunc: func(context.Context, string) error {
+			startAgentCalled.Store(true)
+			return nil
+		},
+	}
+	executor := newTestExecutor(t, agentManager, repo)
+
+	_, err := executor.LaunchPreparedSession(context.Background(),
+		&v1.Task{ID: session.TaskID, ParentID: "task-parent", WorkspaceID: "ws-1"}, session.ID,
+		LaunchOptions{AgentProfileID: session.AgentProfileID, Prompt: "test", StartAgent: true})
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("LaunchPreparedSession() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+	if startAgentCalled.Load() {
+		t.Fatal("existing agent process was started for an environment owned by an archived task")
 	}
 }
 

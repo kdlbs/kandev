@@ -25,6 +25,10 @@ const (
 	orphanedReasonParentArchived = "parent_archived"
 )
 
+type taskMetadataKeySetter interface {
+	SetTaskMetadataKey(ctx context.Context, taskID, key string, value interface{}) error
+}
+
 func stampOrphanedWorkspaceMetadata(workspace map[string]interface{}, parentID string) {
 	workspace[orphanedWorkspaceKey] = true
 	workspace[orphanedReasonWorkspaceKey] = orphanedReasonParentArchived
@@ -104,7 +108,7 @@ func (s *HandoffService) markOrphanedInheritParentChild(
 	workspace, _ := child.Metadata["workspace"].(map[string]interface{})
 	stampOrphanedWorkspaceMetadata(workspace, archived.ID)
 
-	if err := s.tasks.UpdateTask(ctx, child); err != nil {
+	if err := s.updateWorkspaceMetadata(ctx, child); err != nil {
 		s.logf().Warn("mark orphaned inherit_parent child failed",
 			zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID), zap.Error(err))
 		return
@@ -164,7 +168,7 @@ func (s *HandoffService) clearOrphanedInheritParentChild(ctx context.Context, pa
 		return
 	}
 
-	if err := s.tasks.UpdateTask(ctx, child); err != nil {
+	if err := s.updateWorkspaceMetadata(ctx, child); err != nil {
 		s.logf().Warn("clear orphaned inherit_parent child marker failed",
 			zap.String("task_id", child.ID), zap.String("parent_task_id", parentID), zap.Error(err))
 		return
@@ -174,4 +178,15 @@ func (s *HandoffService) clearOrphanedInheritParentChild(ctx context.Context, pa
 	}
 	s.logf().Info("cleared inherit_parent child orphan marker after parent unarchive",
 		zap.String("task_id", child.ID), zap.String("parent_task_id", parentID))
+}
+
+func (s *HandoffService) updateWorkspaceMetadata(ctx context.Context, task *models.Task) error {
+	if task == nil {
+		return nil
+	}
+	workspace, _ := task.Metadata["workspace"].(map[string]interface{})
+	if setter, ok := s.tasks.(taskMetadataKeySetter); ok {
+		return setter.SetTaskMetadataKey(ctx, task.ID, "workspace", workspace)
+	}
+	return s.tasks.UpdateTask(ctx, task)
 }
