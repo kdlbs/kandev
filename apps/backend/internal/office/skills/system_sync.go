@@ -5,12 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 
@@ -69,6 +71,12 @@ type SystemSyncRepo interface {
 	// slug-conflict pre-check (AC-003.3) and the user-skill slug
 	// normalization pass (AC-003.8/AC-003.9).
 	ListNonSystemSkills(ctx context.Context, workspaceID string) ([]*models.Skill, error)
+
+	// NormalizeSkillSlug atomically changes a non-system skill's slug and
+	// rewrites all matching agent desired_skills references. It returns
+	// false when the row no longer matches the supplied identity, which
+	// means another writer already handled or removed it.
+	NormalizeSkillSlug(ctx context.Context, workspaceID, skillID, oldSlug, newSlug string) (bool, error)
 
 	// Agent-profile access used to scrub a deleted system skill's ID
 	// out of every agent_profiles.skill_ids JSON array in the same
@@ -334,12 +342,28 @@ func retireOrphanedSystemSkills(
 	existingBySlug map[string]*models.Skill,
 	result *workspaceSyncResult,
 ) error {
-	for slug, cur := range existingBySlug {
+	// The map is a snapshot, but the order of retirement still matters when
+	// one retired slug names another as its replacement. Walk it in a stable
+	// order so the outcome does not depend on Go's map iteration seed.
+	slugs := make([]string, 0, len(existingBySlug))
+	for slug := range existingBySlug {
+		slugs = append(slugs, slug)
+	}
+	sort.Strings(slugs)
+	for _, slug := range slugs {
+		cur, present := existingBySlug[slug]
+		if !present {
+			continue
+		}
 		if _, kept := bundled[slug]; kept {
 			continue
 		}
 		replacementSlug, hasReplacement := retiredDefaultSkillReplacements[slug]
 		if hasReplacement {
+			if _, bundledReplacement := bundled[replacementSlug]; !bundledReplacement {
+				result.Blocked = append(result.Blocked, slug)
+				continue
+			}
 			replacement, found := existingBySlug[replacementSlug]
 			if !found {
 				result.Blocked = append(result.Blocked, slug)
@@ -370,13 +394,10 @@ func retireOrphanedSystemSkills(
 // (AC-003.9). A normalized value already held by another row is left
 // untouched on both sides and logged as a conflict.
 //
-// The agent-reference rewrite runs before the row itself is renamed,
-// so a failure at either step leaves the row at its original,
-// non-canonical slug: the canonical-slug gate above then retries the
-// whole sequence, including the reference rewrite, on the next pass.
-// Renaming the row first would let a later pass see it as already
-// canonical and skip it forever, stranding any reference the failed
-// rewrite never reached.
+// The repository performs the row rename and agent-reference rewrite in
+// one transaction. This prevents a concurrent writer from claiming the
+// canonical slug after the snapshot and leaving references pointed at a
+// different row, while also preserving retryability after a failed write.
 func normalizeUserSkillSlugs(
 	ctx context.Context,
 	repo SystemSyncRepo,
@@ -413,12 +434,16 @@ func normalizeUserSkillSlugs(
 			continue
 		}
 		oldSlug := row.Slug
-		if err := renameSkillSlugOnAgents(ctx, repo, wsID, oldSlug, normalized); err != nil {
-			return fmt.Errorf("rewrite desired_skills for %s: %w", oldSlug, err)
-		}
-		row.Slug = normalized
-		if err := repo.UpdateSkill(ctx, row); err != nil {
+		changed, err := repo.NormalizeSkillSlug(ctx, wsID, row.ID, oldSlug, normalized)
+		if err != nil {
+			if isSlugUniqueConstraintErr(err) {
+				result.Conflicted = append(result.Conflicted, oldSlug)
+				continue
+			}
 			return fmt.Errorf("normalize slug %s: %w", oldSlug, err)
+		}
+		if !changed {
+			continue
 		}
 		taken[normalized] = true
 		result.Normalized = append(result.Normalized, oldSlug+"->"+normalized)
@@ -426,39 +451,19 @@ func normalizeUserSkillSlugs(
 	return nil
 }
 
-// renameSkillSlugOnAgents rewrites every agent's desired_skills
-// reference from oldSlug to newSlug in the workspace. A slug
-// normalization preserves the row ID, so skill_ids needs no rewrite —
-// only the slug-keyed desired_skills array does.
-func renameSkillSlugOnAgents(ctx context.Context, repo SystemSyncRepo, wsID, oldSlug, newSlug string) error {
-	agents, err := repo.ListAgentInstances(ctx, wsID)
-	if err != nil {
-		return fmt.Errorf("list agents: %w", err)
-	}
-	for _, agent := range agents {
-		newDesired, changed := replaceJSONArrayValue(agent.DesiredSkills, oldSlug, newSlug)
-		if !changed {
-			continue
-		}
-		agent.DesiredSkills = newDesired
-		if err := repo.UpdateAgentInstance(ctx, agent); err != nil {
-			return fmt.Errorf("update agent %s: %w", agent.ID, err)
-		}
-	}
-	return nil
-}
-
-// isSlugUniqueConstraintErr reports whether err is a SQLite UNIQUE
-// constraint violation. The go-sqlite3 driver's typed error doesn't
-// surface outside its package, so string matching is the documented
-// work-around used elsewhere in the codebase (see
-// internal/office/repository/sqlite/wakeup_requests.go's
-// isUniqueConstraintErr). Used to classify a CreateSkill race against
-// a concurrently-inserted slug as the same "conflict, skip, continue"
-// outcome as the pre-check, rather than aborting the whole sync pass.
+// isSlugUniqueConstraintErr reports whether err is a UNIQUE constraint
+// violation for a skill slug. SQLite's driver requires string matching,
+// while pgx exposes a typed SQLSTATE 23505 error. The PostgreSQL
+// constraint-name check avoids treating an unrelated duplicate (for
+// example, a primary-key collision) as a slug conflict.
 func isSlugUniqueConstraintErr(err error) bool {
 	if err == nil {
 		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505" &&
+			(pgErr.ConstraintName == "" || pgErr.ConstraintName == "office_skills_workspace_id_slug_key")
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "UNIQUE constraint failed") ||

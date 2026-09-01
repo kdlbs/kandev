@@ -77,6 +77,9 @@ func (s *stubSyncRepo) GetSkillBySlug(
 }
 
 func (s *stubSyncRepo) CreateSkill(_ context.Context, skill *models.Skill) error {
+	if err := syncTestCreateSkillError(s, skill.Slug); err != nil {
+		return err
+	}
 	if _, ok := s.rows[skill.WorkspaceID]; !ok {
 		s.rows[skill.WorkspaceID] = map[string]*models.Skill{}
 	}

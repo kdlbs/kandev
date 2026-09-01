@@ -27,6 +27,7 @@ type skillRepo interface {
 	ListSkills(ctx context.Context, workspaceID string) ([]*models.Skill, error)
 	ListSystemSkills(ctx context.Context, workspaceID string) ([]*models.Skill, error)
 	ListNonSystemSkills(ctx context.Context, workspaceID string) ([]*models.Skill, error)
+	NormalizeSkillSlug(ctx context.Context, workspaceID, skillID, oldSlug, newSlug string) (bool, error)
 	UpdateSkill(ctx context.Context, skill *models.Skill) error
 	DeleteSkill(ctx context.Context, id string) error
 

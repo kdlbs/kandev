@@ -121,6 +121,68 @@ func TestSyncSystemSkills_RetirementBlockedWhenReplacementMissing(t *testing.T) 
 	}
 }
 
+// TestSyncSystemSkills_RetirementBlockedWhenReplacementIsNotBundled ensures
+// an old system row is not retired merely because a replacement row happens
+// to exist in the database. The replacement must be part of the current
+// bundle; otherwise this pass can delete both rows and strand references.
+func TestSyncSystemSkills_RetirementBlockedWhenReplacementIsNotBundled(t *testing.T) {
+	repo := newStubSyncRepo()
+	log := logger.Default()
+
+	const oldTasksID = "skill-old-tasks"
+	repo.rows["ws-1"] = map[string]*models.Skill{
+		"kandev-tasks": {
+			ID:          oldTasksID,
+			WorkspaceID: "ws-1",
+			Slug:        "kandev-tasks",
+			Name:        "Tasks",
+			IsSystem:    true,
+			SourceType:  skills.SourceTypeSystem,
+		},
+		"kandev-task-ops": {
+			ID:          "skill-task-ops",
+			WorkspaceID: "ws-1",
+			Slug:        "kandev-task-ops",
+			Name:        "Task operations",
+			IsSystem:    true,
+			SourceType:  skills.SourceTypeSystem,
+		},
+	}
+	repo.agents["ws-1"] = map[string]*settingsmodels.AgentProfile{
+		"agent-1": {
+			ID:            "agent-1",
+			WorkspaceID:   "ws-1",
+			SkillIDs:      mustJSONArray(t, []string{oldTasksID}),
+			DesiredSkills: mustJSONArray(t, []string{"kandev-tasks"}),
+		},
+	}
+
+	// Neither existing row is present in this pass's bundle. The configured
+	// replacement is therefore not a valid destination for retirement.
+	report, err := skills.SyncSystemSkills(
+		context.Background(), repo, []string{"ws-1"}, []skills.SystemSkillSpec{}, log,
+	)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if len(report.Blocked) != 1 || !strings.HasSuffix(report.Blocked[0], "kandev-tasks") {
+		t.Fatalf("expected kandev-tasks reported as blocked, got %v", report.Blocked)
+	}
+	if _, err := repo.GetSkillBySlug(context.Background(), "ws-1", "kandev-tasks"); err != nil {
+		t.Fatalf("blocked retired row must remain: %v", err)
+	}
+	if _, err := repo.GetSkillBySlug(context.Background(), "ws-1", "kandev-task-ops"); err == nil {
+		t.Fatal("unbundled replacement row should be retired independently")
+	}
+	agent1 := repo.agents["ws-1"]["agent-1"]
+	if got := decodeIDs(t, agent1.SkillIDs); len(got) != 1 || got[0] != oldTasksID {
+		t.Errorf("blocked retirement must leave agent skill_ids untouched, got %v", got)
+	}
+	if got := decodeIDs(t, agent1.DesiredSkills); len(got) != 1 || got[0] != "kandev-tasks" {
+		t.Errorf("blocked retirement must leave agent desired_skills untouched, got %v", got)
+	}
+}
+
 // TestSyncSystemSkills_BundledInsertConflictsWithExistingUserSkill pins
 // AC-003.3: a bundled slug not yet backed by a system row, but already
 // held by a non-system (user or provider-imported) row, must not be
