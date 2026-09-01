@@ -53,7 +53,7 @@ event-free fast path for ACP resumes that skip preparation.
 
 ```bash
 # From apps/backend:
-rtk go test ./internal/agent/runtime/lifecycle -run 'Test(Launch_(WorktreeResumePublishesPrepareCompleted|PublishesPrepareCompletedAfterRuntimeProgress)|PublishLaunchPrepareCompleted_SkipsResumeWithoutPreparation)' -count=1
+rtk go test ./internal/agent/runtime/lifecycle -run 'TestLaunch_(WorktreeResumePublishesPrepareCompleted|ResumeWithoutPreparationPublishesNoPrepareEvents|PublishesPrepareCompletedAfterRuntimeProgress|PublishesPrepareCompletionOnLegacyRouteEnvError)$' -count=1
 
 # From apps/web:
 rtk pnpm e2e:run tests/session/session-resume-recovery.spec.ts -- --retries=0
@@ -67,7 +67,7 @@ rtk git diff --check
 ## Files likely touched
 
 - `apps/backend/internal/agent/runtime/lifecycle/manager_launch.go`
-- `apps/backend/internal/agent/runtime/lifecycle/manager_launch_test.go`
+- `apps/backend/internal/agent/runtime/lifecycle/manager_launch_prepare_events_test.go`
 - `apps/web/e2e/pages/session-page.ts`
 - `apps/web/e2e/tests/session/session-resume-recovery.spec.ts`
 - `apps/web/e2e/tests/session/mobile-session-resume-recovery.spec.ts`
@@ -103,6 +103,6 @@ None.
   event for an ACP worktree resume before the fix.
 - Reused `shouldPrepareEnvironment` when deciding whether to suppress terminal
   events, which preserves the ordinary ACP resume fast path.
-- Added focused coverage for skipped preparation and extended desktop/mobile
-  branch-recovery E2E tests with idle-state assertions.
+- Added launch-level coverage for skipped preparation and terminal failure, and
+  extended desktop/mobile branch-recovery E2E tests with idle-state assertions.
 - All commands in **Verification** pass.

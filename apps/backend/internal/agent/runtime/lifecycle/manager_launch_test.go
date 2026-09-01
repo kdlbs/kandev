@@ -1253,66 +1253,6 @@ func TestLaunch_UsesPreparedWorkspacePathForWorktree(t *testing.T) {
 		"worktree runtime must receive the path returned by preparation")
 }
 
-func TestLaunch_WorktreeResumePublishesPrepareCompleted(t *testing.T) {
-	log := newTestLogger()
-	execRegistry := NewExecutorRegistry(log)
-	backend := &createInstanceExecutor{
-		MockExecutor: MockExecutor{name: executor.NameStandalone},
-		client:       newReadyAgentctlClient(t, log),
-	}
-	execRegistry.Register(backend)
-
-	eventBus := &MockEventBusWithTracking{}
-	profileResolver := &countingProfileResolver{info: &AgentProfileInfo{
-		ProfileID: "profile-worktree-resume",
-		AgentName: "auggie",
-	}}
-	mgr := NewManager(
-		newTestRegistry(), eventBus, execRegistry,
-		&MockCredentialsManager{}, profileResolver, nil,
-		ExecutorFallbackWarn, "", log,
-	)
-	mgr.preparerRegistry = NewPreparerRegistry(log)
-	mgr.preparerRegistry.Register(models.ExecutorTypeWorktree, &progressPreparer{})
-	cleanupManagerStopCh(t, mgr)
-
-	_, err := mgr.Launch(context.Background(), &LaunchRequest{
-		TaskID:         "task-worktree-resume",
-		SessionID:      "session-worktree-resume",
-		ACPSessionID:   "acp-session-worktree-resume",
-		AgentProfileID: "profile-worktree-resume",
-		ExecutorType:   string(models.ExecutorTypeWorktree),
-		RepositoryPath: "/tmp/repo",
-		UseWorktree:    true,
-		BaseBranch:     "main",
-	})
-	require.NoError(t, err)
-	require.NotEmpty(t, prepareProgressPayloads(eventBus))
-
-	completed := prepareCompletedPayloads(eventBus)
-	require.Len(t, completed, 1)
-	require.True(t, completed[0].Success)
-	requirePrepareStep(t, completed[0].Steps, "Validate Docker")
-}
-
-func TestPublishLaunchPrepareCompleted_SkipsResumeWithoutPreparation(t *testing.T) {
-	eventBus := &MockEventBusWithTracking{}
-	mgr := NewManager(
-		newTestRegistry(), eventBus, nil,
-		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
-		ExecutorFallbackWarn, "", newTestLogger(),
-	)
-	cleanupManagerStopCh(t, mgr)
-
-	mgr.publishLaunchPrepareCompleted(&LaunchRequest{
-		TaskID:       "task-resume-without-preparation",
-		SessionID:    "session-resume-without-preparation",
-		ACPSessionID: "acp-session-resume-without-preparation",
-	}, nil, newPrepareProgressRecorder(nil), "/tmp/workspace", true, nil)
-
-	require.Empty(t, prepareCompletedPayloads(eventBus))
-}
-
 func TestLaunch_PublishesPrepareCompletionOnLegacyRouteEnvError(t *testing.T) {
 	log := newTestLogger()
 	eventBus := &MockEventBusWithTracking{}
@@ -1348,19 +1288,6 @@ func prepareCompletedPayloads(eventBus *MockEventBusWithTracking) []*PrepareComp
 	var out []*PrepareCompletedEventPayload
 	for _, tracked := range eventBus.PublishedEvents {
 		payload, ok := tracked.Event.Data.(*PrepareCompletedEventPayload)
-		if ok {
-			out = append(out, payload)
-		}
-	}
-	return out
-}
-
-func prepareProgressPayloads(eventBus *MockEventBusWithTracking) []*PrepareProgressEventPayload {
-	eventBus.mu.Lock()
-	defer eventBus.mu.Unlock()
-	var out []*PrepareProgressEventPayload
-	for _, tracked := range eventBus.PublishedEvents {
-		payload, ok := tracked.Event.Data.(*PrepareProgressEventPayload)
 		if ok {
 			out = append(out, payload)
 		}

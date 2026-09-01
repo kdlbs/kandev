@@ -97,7 +97,8 @@ exemplar and provides the rendered mobile regression.
   zero completion events, then passed after terminal suppression was aligned
   with `shouldPrepareEnvironment`.
 - The focused lifecycle suite passes for resumed worktree preparation, ordered
-  runtime progress, and the event-free ACP resume fast path.
+  runtime progress, terminal error publication, and a launch-level event-free
+  ACP resume fast path.
 - The existing desktop and mobile branch-recovery flows pass with post-idle
   assertions for both stale preparation and false background work.
 - Specification lint and diff validation pass.
