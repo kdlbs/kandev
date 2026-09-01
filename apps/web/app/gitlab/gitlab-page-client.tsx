@@ -11,20 +11,12 @@ import { fetchGitLabStatus } from "@/lib/api/domains/gitlab-api";
 import type { GitLabStatus, Issue, MR } from "@/lib/types/gitlab";
 import { MRList } from "@/components/gitlab/my-gitlab/mr-list";
 import { IssueList } from "@/components/gitlab/my-gitlab/issue-list";
-import {
-  PresetsSidebar,
-  type SidebarSelection,
-} from "@/components/gitlab/my-gitlab/presets-sidebar";
+import type { SidebarSelection } from "@/components/gitlab/my-gitlab/presets-sidebar";
+import { PresetsSidebar } from "@/components/gitlab/my-gitlab/presets-sidebar";
 import { PresetsScopeBar } from "@/components/gitlab/my-gitlab/presets-scope-bar";
-import { MR_PRESETS, ISSUE_PRESETS, presetLabel } from "@/components/gitlab/my-gitlab/presets";
-import { useGitLabSearch } from "@/components/gitlab/my-gitlab/use-gitlab-search";
-import { useSavedPresets, type SavedPreset } from "@/components/gitlab/my-gitlab/use-saved-presets";
-import {
-  useKnownProjects,
-  resetKnownProjectsStore,
-} from "@/components/gitlab/my-gitlab/use-known-projects";
-import { useCommittedQuery } from "@/components/gitlab/my-gitlab/use-committed-query";
+import { resetKnownProjectsStore } from "@/components/gitlab/my-gitlab/use-known-projects";
 import { ListToolbar } from "@/components/gitlab/my-gitlab/list-toolbar";
+import { useGitLabPageState, type GitLabPageState } from "./use-gitlab-page-state";
 import { ResultsPagination } from "@/components/gitlab/my-gitlab/results-pagination";
 import { SavePresetDialog } from "@/components/gitlab/my-gitlab/save-preset-dialog";
 import { useMRKeyToTasks } from "@/hooks/domains/gitlab/use-mr-key-to-tasks";
@@ -64,23 +56,6 @@ function NotConnectedNotice({ reconnect }: { reconnect?: boolean }) {
         </Trans>
       </AlertDescription>
     </Alert>
-  );
-}
-
-function resolveTitle(
-  selection: SidebarSelection,
-  saved: SavedPreset[],
-  t: (key: string, values?: Record<string, unknown>) => string,
-): string {
-  if (selection.source === "saved") {
-    return saved.find((p) => p.id === selection.id)?.label ?? t("gitlab:savedQueryFallback");
-  }
-  const presets = selection.kind === "mr" ? MR_PRESETS : ISSUE_PRESETS;
-  return (
-    presetLabel(
-      t,
-      presets.find((p) => p.value === selection.id),
-    ) ?? (selection.kind === "mr" ? t("gitlab:titleMergeRequests") : t("gitlab:titleIssues"))
   );
 }
 
@@ -132,137 +107,6 @@ function ResultsList({
   );
 }
 
-type GitLabPageState = ReturnType<typeof useGitLabPageState>;
-
-function useProjectOptions(
-  selection: SidebarSelection,
-  committedQuery: string,
-  items: Array<MR | Issue>,
-  projectFilter: string,
-): string[] {
-  const pageProjects = useMemo(
-    () => items.filter((it) => !!it.project_path).map((it) => it.project_path),
-    [items],
-  );
-  const resetKey = `${selection.kind}:${selection.source}:${selection.id}:${committedQuery.trim()}`;
-  const knownProjects = useKnownProjects(resetKey, pageProjects);
-  return useMemo(() => {
-    const set = new Set(knownProjects);
-    if (projectFilter) set.add(projectFilter);
-    return Array.from(set).sort();
-  }, [knownProjects, projectFilter]);
-}
-
-/** Lifted out of `useGitLabPageState`, which is at the 100-line function cap. */
-function initialSelection(): SidebarSelection {
-  return { kind: "mr", source: "preset", id: MR_PRESETS[0]?.value ?? "" };
-}
-
-function useGitLabPageState(searchEnabled: boolean, workspaceId?: string) {
-  const { t } = useTranslation();
-  const [selection, setSelection] = useState<SidebarSelection>(initialSelection);
-  const {
-    draft: customQuery,
-    committed: committedQuery,
-    setDraft: setCustomQuery,
-    setImmediate: setQueryImmediate,
-    commit: commitCustomQuery,
-  } = useCommittedQuery("");
-  const [projectFilter, setProjectFilter] = useState("");
-  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
-  const {
-    presets: savedPresets,
-    save: saveSavedPreset,
-    remove: removeSavedPreset,
-  } = useSavedPresets();
-
-  const presets = selection.kind === "mr" ? MR_PRESETS : ISSUE_PRESETS;
-  const search = useGitLabSearch({
-    workspaceId: workspaceId ?? "",
-    kind: selection.kind,
-    presets,
-    preset: selection.source === "preset" ? selection.id : "",
-    customQuery: committedQuery,
-    projectFilter,
-    enabled: searchEnabled && Boolean(workspaceId),
-  });
-  const projectOptions = useProjectOptions(
-    selection,
-    committedQuery,
-    search.rawItems,
-    projectFilter,
-  );
-  const title = useMemo(
-    () => resolveTitle(selection, savedPresets, t),
-    [selection, savedPresets, t],
-  );
-
-  const onSelect = useCallback(
-    (s: SidebarSelection) => {
-      setSelection(s);
-      if (s.source === "saved") {
-        const found = savedPresets.find((p) => p.id === s.id);
-        setQueryImmediate(found?.customQuery ?? "");
-        setProjectFilter(found?.projectFilter ?? "");
-        return;
-      }
-      setQueryImmediate("");
-      setProjectFilter("");
-    },
-    [savedPresets, setQueryImmediate],
-  );
-
-  // Use committedQuery (not the unflushed draft) so the saved preset always
-  // matches what is currently displayed in the list.
-  const canSaveCurrent = committedQuery.trim().length > 0 || projectFilter.length > 0;
-  // i18n-exempt: persisted as the saved query's name, so it must not depend on the creating locale.
-  const suggestedLabel =
-    committedQuery.trim() || (projectFilter ? `In ${projectFilter}` : "Saved query");
-  const onOpenSaveDialog = () => {
-    if (canSaveCurrent) setSaveDialogOpen(true);
-  };
-  const onConfirmSave = (label: string) => {
-    const created = saveSavedPreset({
-      kind: selection.kind,
-      label,
-      customQuery: committedQuery,
-      projectFilter,
-    });
-    setSelection({ kind: selection.kind, source: "saved", id: created.id });
-  };
-  const onDeleteSaved = (id: string) => {
-    removeSavedPreset(id);
-    if (selection.source === "saved" && selection.id === id) {
-      const fallbackPresets = selection.kind === "mr" ? MR_PRESETS : ISSUE_PRESETS;
-      setSelection({ kind: selection.kind, source: "preset", id: fallbackPresets[0]?.value ?? "" });
-      setQueryImmediate("");
-      setProjectFilter("");
-    }
-  };
-
-  return {
-    selection,
-    customQuery,
-    committedQuery,
-    setCustomQuery,
-    commitCustomQuery,
-    projectFilter,
-    setProjectFilter,
-    savedPresets,
-    search,
-    projectOptions,
-    title,
-    onSelect,
-    canSaveCurrent,
-    suggestedLabel,
-    saveDialogOpen,
-    setSaveDialogOpen,
-    onOpenSaveDialog,
-    onConfirmSave,
-    onDeleteSaved,
-  };
-}
-
 function AuthenticatedLayout({
   workspaceId,
   state,
@@ -311,6 +155,11 @@ function AuthenticatedLayout({
         onProjectFilterChange={state.setProjectFilter}
         projectOptions={projectOptions}
         onRefresh={search.refresh}
+        showMilestoneFilter={state.showMilestoneFilter}
+        milestone={state.milestone}
+        committedMilestone={state.committedMilestone}
+        onMilestoneChange={state.setMilestone}
+        onCommitMilestone={state.onCommitMilestone}
       />
       <div className="flex-1 overflow-auto px-6 py-4">
         <ResultsList

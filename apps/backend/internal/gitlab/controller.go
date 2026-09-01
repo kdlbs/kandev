@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 
@@ -284,6 +286,7 @@ func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
 	page, perPage := paginationFromQuery(ctx)
 	filter := ctx.Query("filter")
 	customQuery := ctx.Query("custom_query")
+	milestone := trimGitLabWhitespace(ctx.Query("milestone"))
 	if customQuery == "" {
 		if filter == filterTokenReviewRequested {
 			ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "review_requested is not supported for issues"})
@@ -298,7 +301,7 @@ func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
 		return
 	}
 	result, err := client.ListIssuesPaged(
-		ctx.Request.Context(), filter, customQuery, page, perPage,
+		ctx.Request.Context(), filter, customQuery, milestone, page, perPage,
 	)
 	if err != nil {
 		writeWorkspaceClientActionError(ctx, err, "issue search")
@@ -335,6 +338,17 @@ func (c *Controller) translateMRFilter(ctx *gin.Context, filter string) (string,
 		username = u
 	}
 	return translateUserSearchFilter(filter, username), nil
+}
+
+// trimGitLabWhitespace trims Unicode White_Space plus U+FEFF (byte order
+// mark). strings.TrimSpace is deliberately not used here: its ASCII-derived
+// definition disagrees with Unicode White_Space on U+0085 (NEL) and never
+// touches U+FEFF, so a milestone name that is only a pasted BOM would survive
+// TrimSpace as a non-empty string and silently fail to match any milestone.
+func trimGitLabWhitespace(s string) string {
+	return strings.TrimFunc(s, func(r rune) bool {
+		return unicode.IsSpace(r) || r == '\uFEFF'
+	})
 }
 
 // paginationFromQuery reads ?page=&per_page= with the same clamps SearchMRsPaged

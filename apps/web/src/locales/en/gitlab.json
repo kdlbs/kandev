@@ -159,6 +159,7 @@
   "mergeRequestsAndIssues": "{{host}} · merge requests and issues",
   "mergeThisMergeRequest": "Merge this merge request?",
   "mergeability": "Mergeability",
+  "milestoneFilterLabel": "Filter by milestone",
   "mockTest": "Mock (test)",
   "mrs": "MRs",
   "name": "Name",

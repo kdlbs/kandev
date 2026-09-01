@@ -159,6 +159,7 @@
   "mergeRequestsAndIssues": "{{host}} · merge requests e issues",
   "mergeThisMergeRequest": "Fazer merge deste merge request?",
   "mergeability": "Possibilidade de merge",
+  "milestoneFilterLabel": "Filtrar por marco",
   "mockTest": "Mock (teste)",
   "mrs": "MRs",
   "name": "Nome",

@@ -159,6 +159,7 @@
   "mergeRequestsAndIssues": "{{host}} · 合并请求与议题",
   "mergeThisMergeRequest": "合并此合并请求？",
   "mergeability": "可合并性",
+  "milestoneFilterLabel": "按里程碑筛选",
   "mockTest": "模拟（测试）",
   "mrs": "MR",
   "name": "名称",
