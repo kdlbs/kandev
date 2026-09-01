@@ -63,7 +63,8 @@ func (s *Service) TransferTask(
 		return nil, err
 	}
 	if !receipt.IdempotentReplay {
-		s.publishTaskTransferred(ctx, receipt)
+		s.publishTaskTransferUpdate(ctx, receipt)
+		s.pullNextTaskOnVacate(ctx, receipt.SourceStepID, receipt.TaskID)
 	}
 	return receipt, nil
 }
@@ -126,7 +127,7 @@ func (s *Service) validateTaskTransferBoundary(
 	return source.OwnerID, nil
 }
 
-func (s *Service) publishTaskTransferred(ctx context.Context, receipt *models.TaskTransferReceipt) {
+func (s *Service) publishTaskTransferUpdate(ctx context.Context, receipt *models.TaskTransferReceipt) {
 	task, err := s.tasks.GetTask(ctx, receipt.TaskID)
 	if err != nil {
 		s.logger.Error("load transferred task for event")
@@ -139,5 +140,5 @@ func (s *Service) publishTaskTransferred(ctx context.Context, receipt *models.Ta
 		"source_step_id":        receipt.SourceStepID,
 		"preservation_digest":   receipt.PreservationDigest,
 	}
-	s.publishTaskEventWithExtra(ctx, events.TaskTransferred, task, nil, extra, receipt.SourceWorkflowID)
+	s.publishTaskEventWithExtra(ctx, events.TaskUpdated, task, nil, extra, receipt.SourceWorkflowID)
 }

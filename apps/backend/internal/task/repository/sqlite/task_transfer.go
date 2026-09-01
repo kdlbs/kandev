@@ -531,11 +531,11 @@ func (r *Repository) validateTransferInvariants(
 		placement, authorizedOwnerID); err != nil {
 		return err
 	}
-	if err := r.validateTransferLane(ctx, tx, placement, taskID, sourceStepID, destinationStepID); err != nil {
+	if err := r.validateTransferLane(ctx, tx, placement, sourceStepID, destinationStepID); err != nil {
 		return err
 	}
 	if placement.ProjectID != "" {
-		return fmt.Errorf("%w: destination project mapping is required", repoerrors.ErrTaskTransferConflict)
+		return fmt.Errorf("%w: source task is project-bound", repoerrors.ErrTaskTransferConflict)
 	}
 	if err := r.validateTransferCleanup(ctx, tx, taskID); err != nil {
 		return err
@@ -572,7 +572,7 @@ func (r *Repository) validateTransferLane(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	placement *transferTaskPlacement,
-	taskID, sourceStepID, destinationStepID string,
+	sourceStepID, destinationStepID string,
 ) error {
 	if dialect.IsPostgres(r.db.DriverName()) {
 		var lockedStepID string
@@ -591,9 +591,9 @@ func (r *Repository) validateTransferLane(
 	if placement.WIPAdmitted != 0 && destination.WIPLimit > 0 {
 		var occupants int
 		if err := tx.GetContext(ctx, &occupants, r.db.Rebind(`
-			SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ? AND id <> ?
+			SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ?
 				AND archived_at IS NULL AND is_ephemeral = 0 AND wip_admitted = 1
-				AND (queued_for_step_id = '' OR queued_for_step_id IS NULL)`), destinationStepID, taskID); err != nil {
+				AND (queued_for_step_id = '' OR queued_for_step_id IS NULL)`), destinationStepID); err != nil {
 			return err
 		}
 		if occupants >= destination.WIPLimit {

@@ -10,10 +10,11 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-func TestServiceTransferTaskAuthorizesBothWorkspacesAndPublishesOnlyTransfer(t *testing.T) {
+func TestServiceTransferTaskAuthorizesBothWorkspacesAndPublishesOneCanonicalUpdate(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	task := seedServiceTaskTransfer(t, repo, "owner-1")
 	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "owner-1", Role: authn.RoleMember})
@@ -38,19 +39,61 @@ func TestServiceTransferTaskAuthorizesBothWorkspacesAndPublishesOnlyTransfer(t *
 		t.Fatalf("ResolveTaskTransferReplayActor = %+v, found=%v, err=%v", replayActor, found, err)
 	}
 
-	var transferred, moved, updated int
+	var moved, updated int
 	for _, event := range eventBus.GetPublishedEvents() {
 		switch event.Type {
-		case events.TaskTransferred:
-			transferred++
 		case events.TaskMoved:
 			moved++
 		case events.TaskUpdated:
 			updated++
 		}
 	}
-	if transferred != 1 || moved != 0 || updated != 0 {
-		t.Fatalf("events transferred=%d moved=%d updated=%d", transferred, moved, updated)
+	if moved != 0 || updated != 1 {
+		t.Fatalf("events moved=%d updated=%d", moved, updated)
+	}
+}
+
+func TestServiceTransferTaskReconcilesVacatedSourceWIP(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	task := seedServiceTaskTransfer(t, repo, "owner-1")
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "owner-1", Role: authn.RoleMember})
+	if _, err := repo.DB().Exec(`UPDATE workflow_steps SET wip_limit = 1 WHERE id IN (?, ?)`,
+		"transfer-step-source", "transfer-step-destination"); err != nil {
+		t.Fatalf("set WIP limits: %v", err)
+	}
+	if _, err := repo.DB().Exec(`UPDATE tasks SET wip_admitted = 1, queued_for_step_id = '' WHERE id = ?`,
+		task.ID); err != nil {
+		t.Fatalf("admit transfer task: %v", err)
+	}
+	task, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask transfer task: %v", err)
+	}
+	queued := &models.Task{
+		ID: "transfer-queued-task", WorkspaceID: "transfer-ws-source", WorkflowID: "transfer-wf-source",
+		WorkflowStepID: "transfer-step-source", Title: "Queued", State: v1.TaskStateTODO,
+		QueuedForStepID: "transfer-step-source", WIPAdmitted: false,
+	}
+	if err := repo.CreateTask(ctx, queued); err != nil {
+		t.Fatalf("CreateTask queued: %v", err)
+	}
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"transfer-step-source": {
+			ID: "transfer-step-source", WorkflowID: "transfer-wf-source", Name: "Work", WIPLimit: 1,
+		},
+	}})
+
+	command := serviceTaskTransferCommand(task)
+	command.ExpectedTaskUpdatedAt = task.UpdatedAt
+	if _, err := svc.TransferTask(ctx, command); err != nil {
+		t.Fatalf("TransferTask: %v", err)
+	}
+	stored, err := repo.GetTask(ctx, queued.ID)
+	if err != nil {
+		t.Fatalf("GetTask queued: %v", err)
+	}
+	if !stored.WIPAdmitted || stored.QueuedForStepID != "" {
+		t.Fatalf("vacated source WIP was not reconciled: %+v", stored)
 	}
 }
 

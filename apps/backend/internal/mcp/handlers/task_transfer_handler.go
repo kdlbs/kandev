@@ -38,7 +38,6 @@ type taskTransferAttemptAuditor interface {
 }
 
 type taskTransferRequest struct {
-	AuditOnly                 bool   `json:"_audit_only"`
 	TaskID                    string `json:"task_id"`
 	ExpectedSourceWorkspaceID string `json:"expected_source_workspace_id"`
 	ExpectedSourceWorkflowID  string `json:"expected_source_workflow_id"`
@@ -59,10 +58,6 @@ func (h *Handlers) handleTransferTask(ctx context.Context, msg *ws.Message) (*ws
 	if err := json.Unmarshal(msg.Payload, &request); err != nil {
 		h.auditRejectedTaskTransfer(ctx, request, "failed")
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid task transfer payload", nil)
-	}
-	if request.AuditOnly {
-		h.auditRejectedTaskTransfer(ctx, request, "failed")
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "invalid task transfer request", nil)
 	}
 	if h.taskTransferSvc == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "task transfer unavailable", nil)
@@ -102,7 +97,15 @@ func (h *Handlers) auditRejectedTaskTransfer(ctx context.Context, request taskTr
 		return
 	}
 	updatedAt, _ := time.Parse(time.RFC3339Nano, request.ExpectedTaskUpdatedAt)
-	principal, _ := mcpscope.PrincipalFromContext(ctx)
+	principal, inSession := mcpscope.PrincipalFromContext(ctx)
+	actorID := principal.CallerTaskID
+	if !inSession {
+		identity, _ := authn.IdentityFromContext(ctx)
+		actorID = identity.UserID
+		if actorID == "" {
+			actorID = "local-human"
+		}
+	}
 	command := models.TaskTransferCommand{
 		TaskID: request.TaskID, ExpectedSourceWorkspaceID: request.ExpectedSourceWorkspaceID,
 		ExpectedSourceWorkflowID: request.ExpectedSourceWorkflowID, ExpectedSourceStepID: request.ExpectedSourceStepID,
@@ -110,7 +113,7 @@ func (h *Handlers) auditRejectedTaskTransfer(ctx context.Context, request taskTr
 		DestinationWorkflowID: request.DestinationWorkflowID, DestinationStepID: request.DestinationStepID,
 		DestinationStepName: request.DestinationStepName, IdempotencyKey: request.IdempotencyKey,
 		PreservationPolicy: request.PreservationPolicy, Actor: models.TaskTransferActor{
-			Kind: models.TaskTransferActorRejected, ID: principal.CallerTaskID, SessionID: principal.CallerSessionID,
+			Kind: models.TaskTransferActorRejected, ID: actorID, SessionID: principal.CallerSessionID,
 		},
 	}
 	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rejectedTaskTransferAuditTimeout)

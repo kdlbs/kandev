@@ -625,14 +625,17 @@ func TestTaskTransferSerializationBlocksConcurrentSQLiteRelationWriter(t *testin
 	if err := repo.lockTaskTransferRelations(context.Background(), tx, nil, nil, transferRelationInventory{}); err != nil {
 		t.Fatalf("lockTaskTransferRelations: %v", err)
 	}
+	writerStarted := make(chan struct{})
 	writerDone := make(chan error, 1)
 	go func() {
+		close(writerStarted)
 		_, writeErr := repo.db.Exec(`INSERT INTO pending_moves
 			(id, session_id, task_id, workflow_id, workflow_step_id, step_position, queued_at)
 			VALUES (?, ?, ?, ?, ?, 0, ?)`, "pending-race", "session-race", task.ID,
 			"wf-source", "step-source-blocked", time.Now().UTC())
 		writerDone <- writeErr
 	}()
+	<-writerStarted
 	select {
 	case writeErr := <-writerDone:
 		t.Fatalf("relation writer bypassed transfer serialization: %v", writeErr)

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -102,6 +103,38 @@ func TestHandleTransferTaskAuditsMalformedRequestAfterCancellation(t *testing.T)
 	require.Equal(t, ws.MessageTypeError, response.Type)
 	require.Len(t, transfer.audits, 1)
 	require.NoError(t, transfer.auditCtxErr[0])
+}
+
+func TestHandleTransferTaskAttributesRejectedHumanAttempt(t *testing.T) {
+	transfer := &recordingTaskTransferService{}
+	h := &Handlers{taskTransferSvc: transfer, logger: testLogger(t)}
+	response, err := h.handleTransferTask(
+		authn.WithIdentity(context.Background(), authn.Identity{UserID: "human-1"}),
+		&ws.Message{ID: "bad-json", Action: ws.ActionMCPTransferTask, Payload: []byte(`{"task_id":`)},
+	)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, response.Type)
+	require.Len(t, transfer.audits, 1)
+	require.Equal(t, "human-1", transfer.audits[0].Actor.ID)
+}
+
+func TestHandleTransferTaskIgnoresClientAuditOnlyField(t *testing.T) {
+	transfer := &recordingTaskTransferService{}
+	h := &Handlers{taskTransferSvc: transfer, logger: testLogger(t)}
+	message := transferTaskMessage(t)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(message.Payload, &payload))
+	payload["_audit_only"] = true
+	message = makeWSMessage(t, ws.ActionMCPTransferTask, payload)
+
+	response, err := h.handleTransferTask(
+		authn.WithIdentity(context.Background(), authn.Identity{UserID: "human-1"}),
+		message,
+	)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+	require.Len(t, transfer.commands, 1)
+	require.Empty(t, transfer.audits)
 }
 
 func TestHandleTransferTaskAllowsCoordinatorReplayFromDestinationWorkspace(t *testing.T) {

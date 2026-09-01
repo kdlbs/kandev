@@ -100,8 +100,8 @@ func TestTaskEventBroadcaster_TransferReconcilesSourceAndDestination(t *testing.
 		"workflow_id": "wf-destination", "source_workspace_id": "ws-source",
 		"source_workflow_id": "wf-source", "old_workflow_id": "wf-source",
 	}
-	_ = eventBus.Publish(ctx, events.TaskTransferred,
-		bus.NewEvent(events.TaskTransferred, "test", payload))
+	_ = eventBus.Publish(ctx, events.TaskUpdated,
+		bus.NewEvent(events.TaskUpdated, "test", payload))
 
 	message := <-hub.broadcast
 	if message.Action != ws.ActionTaskUpdated {
@@ -138,7 +138,7 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 	//
 	// Update this number when adding or removing event subscriptions in
 	// RegisterTaskNotifications — it is intentionally exact.
-	const wantSubscriptions = 71
+	const wantSubscriptions = 70
 	if got := len(b.subscriptions); got != wantSubscriptions {
 		t.Errorf("RegisterTaskNotifications created %d subscriptions, want %d — "+
 			"did an event get subscribed twice?", got, wantSubscriptions)
