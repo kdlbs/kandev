@@ -11,13 +11,9 @@ owners:
 
 ## Purpose and ownership
 
-The UI owns web presentation and interaction.
-
-## Exclusions
-
-- Domain behavior and state belong to [Tasks](../tasks/README.md),
-  [Agents](../agents/README.md), [Plugins](../plugins/README.md), and
-  [Integrations](../integrations/README.md).
+UI owns web interaction. Domain state stays with
+[Tasks](../tasks/README.md), [Agents](../agents/README.md),
+[Plugins](../plugins/README.md), and [Integrations](../integrations/README.md).
 
 ## Specification map
 
@@ -57,6 +53,7 @@ The UI owns web presentation and interaction.
 - [Executor settings card spacing](requirements/executor-settings-card-spacing.md)
 - [External VCS File Links](requirements/external-vcs-file-links.md)
 - [File Tree Chat Context](requirements/file-tree-chat-context.md)
+- [File Tree Keyboard Scope](requirements/file-tree-keyboard-scope.md)
 - [Reload Kandev after frozen-tab restore](requirements/fix-duplicated-tab-stale-data.md)
 - [GitHub PR Review Actions](requirements/github-pr-review-actions.md)
 - [GitHub Saved-Query Default Views](requirements/github-saved-query-defaults.md)
@@ -155,6 +152,7 @@ The UI owns web presentation and interaction.
 - [Task PR Automation Controls System Design Part 3](system-design/ci-pr-automation-03.md)
 - [Merge Queue Recovery Controls](system-design/ci-pr-merge-queue-recovery-controls.md)
 - [Entity Reference Composer](system-design/entity-reference-composer.md)
+- [File Tree Keyboard Scope](system-design/file-tree-keyboard-scope.md)
 - [Kandev MCP Tool Results](system-design/kandev-mcp-tool-results.md)
 - [Mobile Task Chrome](system-design/mobile-task-chrome.md)
 - [Persistent status motion](system-design/persistent-status-motion.md)
@@ -178,13 +176,8 @@ The UI owns web presentation and interaction.
 - [Task Transcript History Visibility](system-design/task-prompt-transcript-visibility.md)
 - [Transcript Auto-scroll Stability](system-design/transcript-auto-scroll.md)
 
-## Migration record
-
-Legacy source detail is still moving to the canonical requirement and
-system-design documents above.
-
 ## Related systems
 
-- [Tasks](../tasks/README.md): supplies task and workflow state.
-- [Plugins](../plugins/README.md): supplies plugin contributions.
-- [Platform](../platform/README.md): supplies shared runtime state.
+- [Tasks](../tasks/README.md)
+- [Plugins](../plugins/README.md)
+- [Platform](../platform/README.md)
