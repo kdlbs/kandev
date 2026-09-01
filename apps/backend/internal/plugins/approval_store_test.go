@@ -75,6 +75,18 @@ func TestApprovalLedgerGrantRejectsRevisionRegression(t *testing.T) {
 	}
 }
 
+func TestApprovalLedgerGrantRejectsZeroRevision(t *testing.T) {
+	dir := t.TempDir()
+	ledger := newApprovalLedger(dir)
+
+	if _, err := ledger.grant("inst-1", "ws-1", 0, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-1", time.Now().UTC()); err == nil {
+		t.Fatal("grant accepted revision zero")
+	}
+	if _, ok, err := ledger.get("inst-1", "ws-1"); err != nil || ok {
+		t.Fatalf("grant persisted revision zero approval: ok=%v err=%v", ok, err)
+	}
+}
+
 func TestApprovalLedgerTombstonePersistsAcrossReload(t *testing.T) {
 	dir := t.TempDir()
 	ledger := newApprovalLedger(dir)

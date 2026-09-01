@@ -136,6 +136,9 @@ func approvalKey(installationID, workspaceID string) string {
 }
 
 func (l *approvalLedger) grant(installationID, workspaceID string, revision uint64, manifestDigest string, capabilityIDs []string, actor, reason, auditID string, at time.Time) (CapabilityApproval, error) {
+	if revision == 0 {
+		return CapabilityApproval{}, ErrApprovalRevisionConflict
+	}
 	canonical, err := CanonicalCapabilityList(capabilityIDs)
 	if err != nil {
 		return CapabilityApproval{}, err
