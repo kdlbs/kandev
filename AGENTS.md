@@ -83,6 +83,8 @@ Static analysis runs in CI and pre-commit. Each subtree has its own thresholds:
 
 When you hit a limit: extract a helper function, custom hook, or sub-component. Prefer composition over growing a single function.
 
+Production comments state the invariant, not the argument for it: no `AC-NN` reference, no "Review round N", no "BLOCKING FINDING", no narration of a bug's history. That context belongs in the spec, the plan, or the PR body — a comment that has to argue the code is correct usually means the code is not constrained enough to be obviously correct.
+
 ### Testing
 
 Every code change must include tests for new or changed logic. Backend: `*_test.go` files alongside the source. Frontend: `*.test.ts` files for utility functions, hooks, API clients, and store slices. Exceptions: config files, generated code, React component markup. Use `/tdd` for test-driven development.

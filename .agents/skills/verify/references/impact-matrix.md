@@ -16,6 +16,8 @@ uncovered command.
 | `.github/workflows/**` | `python3 .github/scripts/lint-action-pinning_test.py` plus applicable harness lint |
 | `scripts/**`, `.github/scripts/**` | sibling syntax/test when obvious; otherwise `make test-scripts` |
 | `apps/backend/**` | `make fmt-backend`, `make test-backend`, `make lint-backend` |
+| A backend diff that adds or changes `ALTER TABLE`, `CREATE INDEX`, a `dialect.IsPostgres` branch, a table-rebuild/cutover migration, or SQLite-only `rowid`/JSON/date syntax | `KANDEV_TEST_POSTGRES_DSN=<dsn> make -C apps/backend test`, plus the changed package's own `*_postgres_test.go` by name (see `apps/backend/AGENTS.md` § Schema & migrations). No DSN available: record the gap explicitly instead of reporting a pass |
+| A backend diff that adds or changes an event-bus subscriber, or type-asserts `event.Data` | Exercise the NATS bus path for the changed subscriber; a bare `event.Data.(*T)` assertion is a finding, since NATS delivers a JSON-decoded map, not the typed pointer (worked example: `normalizeTaskPR` in `internal/automation/github_pr_merged_subscriber.go`) |
 | Eligible narrow pure helper in `apps/web/**` | changed-file Prettier/ESLint when uncovered, package-local typecheck, and the helper's colocated test file |
 | `apps/web/**` | generate web metadata, `make fmt-web`, `make typecheck-web`, `make test-web`, `make lint-web` |
 | `apps/cli/**` | workspace format, CLI TypeScript check/build, `make test-cli` |
@@ -28,7 +30,12 @@ safe row; the user requests it; delivery has no PR CI; or changes touch root
 build/toolchain/dependency lockfiles, Makefiles, profiles, generated contracts,
 release tooling, migrations/shared schemas, or unusually broad plan
 implementation. Multiple known rows are not automatically ambiguous: run their
-union when ownership and dependents are clear.
+union when ownership and dependents are clear. `mode=full` does not set
+`KANDEV_TEST_POSTGRES_DSN` either — a migrations/shared-schemas escalation still
+needs the dialect row above.
+
+A suite that self-skips (missing DSN, no NATS server) is not coverage: report it
+as not run, never as a pass.
 
 ## Narrow Pure Web Helper
 
