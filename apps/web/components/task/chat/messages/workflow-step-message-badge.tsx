@@ -51,9 +51,14 @@ export function workflowMessageInfoFromMetadata(
 type WorkflowStepMessageBadgeProps = {
   workflow: WorkflowStepMessageInfo;
   size?: "xs" | "sm";
+  tooltipI18nKey?: string;
 };
 
-export function WorkflowStepMessageBadge({ workflow, size = "sm" }: WorkflowStepMessageBadgeProps) {
+export function WorkflowStepMessageBadge({
+  workflow,
+  size = "sm",
+  tooltipI18nKey = "task:workflowStepMessageFrom",
+}: WorkflowStepMessageBadgeProps) {
   const { t } = useTranslation();
   const label = workflow.stepName || "workflow step";
   const sizeClass =
@@ -81,7 +86,7 @@ export function WorkflowStepMessageBadge({ workflow, size = "sm" }: WorkflowStep
     <TooltipProvider delayDuration={300}>
       <Tooltip>
         <TooltipTrigger asChild>{badge}</TooltipTrigger>
-        <TooltipContent>{t("task:workflowStepMessageFrom", { label })}</TooltipContent>
+        <TooltipContent>{t(tooltipI18nKey, { label })}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );

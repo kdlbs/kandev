@@ -963,6 +963,7 @@
   "planRevisionCharCount_other": "{{formatted}} 个字符",
   "planRevisionDeltaTooltip": "相比上一版本变化 {{delta}} 个字符",
   "planRevisionEdited": "已编辑",
+  "planRevisionWorkflowStepTooltip": "来自 {{label}} 的计划版本",
   "planYourImplementation": "规划你的实现",
   "pleaseTryAgain": "请重试。",
   "pluginTopBarActions": "插件顶栏操作",

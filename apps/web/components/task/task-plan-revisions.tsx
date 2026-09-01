@@ -570,6 +570,7 @@ function RevisionRowBody({
               stepColor: revision.workflow_step_color,
             }}
             size="xs"
+            tooltipI18nKey="task:planRevisionWorkflowStepTooltip"
           />
         )}
       </div>

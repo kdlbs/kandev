@@ -1007,6 +1007,7 @@
   "planRevisionCharCount_other": "{{formatted}} chars",
   "planRevisionDeltaTooltip": "{{delta}} characters vs. the previous version",
   "planRevisionEdited": "edited",
+  "planRevisionWorkflowStepTooltip": "Plan revision from {{label}}",
   "planYourImplementation": "Plan your implementation",
   "pleaseTryAgain": "Please try again.",
   "pluginTopBarActions": "Plugin top bar actions",
