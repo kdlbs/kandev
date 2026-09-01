@@ -11,6 +11,7 @@
 import type { TaskCreateDialogProps } from "@/components/task-create-dialog";
 import type { useTaskCreateDialogSetup } from "@/components/task-create-dialog-setup";
 import type { DialogFormBodyProps, DialogFormState } from "@/components/task-create-dialog-types";
+import { t } from "@/lib/i18n";
 
 export function computeHasAllBranches(fs: DialogFormState): boolean {
   if (fs.noRepository) return true;
@@ -18,7 +19,9 @@ export function computeHasAllBranches(fs: DialogFormState): boolean {
     const rows = fs.remoteRepos.filter((r) => r.url.trim() !== "");
     return rows.length > 0 && rows.every((r) => !!r.branch);
   }
-  return fs.repositories.length > 0 && fs.repositories.every((r) => !!r.branch);
+  return (
+    fs.repositories.length > 0 && fs.repositories.every((r) => Boolean(r.baseBranch || r.branch))
+  );
 }
 
 export function localRepositoryCreationEnabled(isCreateMode: boolean, repoLocked: boolean) {
@@ -134,7 +137,10 @@ export function buildDialogFooterProps(
     onUpdateWithoutAgent: submitHandlers.handleUpdateWithoutAgent,
     onCreateWithoutAgent: submitHandlers.handleCreateWithoutAgent,
     onCreateWithPlanMode: submitHandlers.handleCreateWithPlanMode,
-    submitBlockedReason: props.submitBlockedReason ?? pendingAttachmentUploadReason,
+    submitBlockedReason:
+      props.submitBlockedReason ??
+      pendingAttachmentUploadReason ??
+      (setup.hasUnavailableSavedBase ? t("task:repositorySetBaseUnavailable") : null),
     editDependenciesReady: setup.isEditMode ? setup.editDependencies.ready : undefined,
   };
 }

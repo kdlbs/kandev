@@ -78,11 +78,31 @@ type RepoChipsRowProps = {
     save?: {
       workspaceId: string;
       rows: TaskRepoRow[];
+      repositories: Repository[];
+      isLocalExecutor: boolean;
       open: boolean;
       setOpen: (open: boolean) => void;
     } | null;
   };
 };
+
+function useRepositoryCreationOpenChange(
+  chipRowRef: { current: HTMLDivElement | null },
+  creatingForRowKey: string | null,
+  setCreatingForRowKey: (value: string | null) => void,
+) {
+  return (open: boolean) => {
+    if (open || creatingForRowKey === null) return;
+    const rowKey = creatingForRowKey;
+    setCreatingForRowKey(null);
+    requestAnimationFrame(() => {
+      const row = Array.from(
+        chipRowRef.current?.querySelectorAll<HTMLElement>("[data-repo-row-key]") ?? [],
+      ).find((candidate) => candidate.dataset.repoRowKey === rowKey);
+      row?.querySelector<HTMLElement>("[data-testid='repo-chip-trigger']")?.focus();
+    });
+  };
+}
 
 export function RepoChipsRow({
   fs,
@@ -109,17 +129,11 @@ export function RepoChipsRow({
 }: RepoChipsRowProps) {
   const chipRowRef = useRef<HTMLDivElement>(null);
   const [creatingForRowKey, setCreatingForRowKey] = useState<string | null>(null);
-  const handleCreationOpenChange = (open: boolean) => {
-    if (open || creatingForRowKey === null) return;
-    const rowKey = creatingForRowKey;
-    setCreatingForRowKey(null);
-    requestAnimationFrame(() => {
-      const row = Array.from(
-        chipRowRef.current?.querySelectorAll<HTMLElement>("[data-repo-row-key]") ?? [],
-      ).find((candidate) => candidate.dataset.repoRowKey === rowKey);
-      row?.querySelector<HTMLElement>("[data-testid='repo-chip-trigger']")?.focus();
-    });
-  };
+  const handleCreationOpenChange = useRepositoryCreationOpenChange(
+    chipRowRef,
+    creatingForRowKey,
+    setCreatingForRowKey,
+  );
   // Local executor branch behavior:
   //   - chip is clickable (user can switch to any existing branch on disk)
   //   - row.branch seeds from the workspace's current branch (currentLocalBranch)
@@ -131,6 +145,15 @@ export function RepoChipsRow({
   //   - "Fork a new branch" toggle is a separate flow that creates a NEW branch
   //     from the selected base
   // Other executors: branch is fully editable (no special pre-fill).
+  const branchLocked = false;
+  const handleRowBranchChange = (key: string, value: string) => {
+    // A saved base is explicit state for worktree tasks. Local tasks use the
+    // row branch as checkout state and keep the saved base untouched.
+    if (!isLocalExecutor && fs.repositories.some((row) => row.key === key && row.baseBranch)) {
+      fs.updateRepository(key, { baseBranch: value });
+    }
+    onRowBranchChange(key, value);
+  };
   // No early returns above hooks. URL mode and started-state checks happen below.
   if (isTaskStarted) return null;
 
@@ -164,7 +187,7 @@ export function RepoChipsRow({
         freshBranchEnabled={freshBranchEnabled}
         branchPolicyDisabledReason={branchPolicyDisabledReason}
         onRowRepositoryChange={onRowRepositoryChange}
-        onRowBranchChange={onRowBranchChange}
+        onRowBranchChange={handleRowBranchChange}
         onRowPolicyChange={onRowPolicyChange}
         onPolicySelected={onPolicySelected}
         onToggleFreshBranch={onToggleFreshBranch}
@@ -236,6 +259,8 @@ function RepositorySetsSurface({
           onOpenChange={save.setOpen}
           workspaceId={save.workspaceId}
           rows={save.rows}
+          repositories={save.repositories}
+          isLocalExecutor={save.isLocalExecutor}
         />
       ) : null}
     </>

@@ -12,8 +12,9 @@ import type { TaskRepoRow } from "@/components/task-create-dialog-types";
  *   - a row the user configured is never discarded or reordered;
  *   - a member that no longer resolves to a live workspace repository is skipped
  *     and counted, so the UI can say how many were dropped and why;
- *   - branches are left empty for the dialog's per-row branch defaulting, because
- *     branch choice belongs to the task rather than to the set.
+ *   - a saved base is copied to baseBranch on the new row. The ordinary branch
+ *     field stays empty so a local executor can still autoselect the current
+ *     checkout branch without using the saved base as checkout state.
  *
  * Kept as a pure function so those rules are testable without rendering the
  * dialog.
@@ -63,7 +64,13 @@ export function applyRepositorySet({
       continue;
     }
     present.add(id);
-    added.push({ key: nextAppliedRowKey(takenKeys), repositoryId: id, branch: "" });
+    const savedBase = member.base_branch || undefined;
+    added.push({
+      key: nextAppliedRowKey(takenKeys),
+      repositoryId: id,
+      branch: "",
+      ...(savedBase ? { baseBranch: savedBase } : {}),
+    });
   }
 
   return {
@@ -127,4 +134,26 @@ export function selectedRepositoryIdsForSet(rows: TaskRepoRow[]): string[] {
     ids.push(id);
   }
   return ids;
+}
+
+/**
+ * Projects the current task rows into the ordered member shape used by the
+ * repository-set API. Local rows use the repository default as their effective
+ * base because their row branch is the checkout branch on disk.
+ */
+export function selectedRepositoryMembersForSet(
+  rows: TaskRepoRow[],
+  repositories: Repository[] = [],
+  isLocalExecutor = false,
+): Array<{ repositoryId: string; baseBranch: string }> {
+  const byId = new Map(repositories.map((repository) => [repository.id as string, repository]));
+  const seen = new Set<string>();
+  return rows.flatMap((row) => {
+    const repositoryId = row.repositoryId;
+    if (!repositoryId || seen.has(repositoryId)) return [];
+    seen.add(repositoryId);
+    const repositoryDefault = byId.get(repositoryId)?.default_branch ?? "";
+    const baseBranch = row.baseBranch || (isLocalExecutor ? repositoryDefault : row.branch) || "";
+    return [{ repositoryId, baseBranch }];
+  });
 }

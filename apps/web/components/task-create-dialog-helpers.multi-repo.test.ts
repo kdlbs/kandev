@@ -220,6 +220,40 @@ describe("buildRepositoriesPayload — local executor branch split (edge cases)"
       { repository_id: "repo-1", base_branch: "main", checkout_branch: undefined },
     ]);
   });
+
+  it("uses a copied saved base for worktree execution", () => {
+    const payload = buildRepositoriesPayload({
+      useRemote: false,
+      remoteRepos: [],
+      repositories: [{ key: "r0", repositoryId: "repo-1", branch: "", baseBranch: "develop" }],
+      discoveredRepositories: [],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      workspaceRepositories: [{ id: "repo-1", default_branch: "main" }] as any,
+      isLocalExecutor: false,
+    });
+
+    expect(payload).toEqual([
+      { repository_id: "repo-1", base_branch: "develop", checkout_branch: undefined },
+    ]);
+  });
+
+  it("keeps a copied base separate from local checkout state", () => {
+    const payload = buildRepositoriesPayload({
+      useRemote: false,
+      remoteRepos: [],
+      repositories: [
+        { key: "r0", repositoryId: "repo-1", branch: "feature/x", baseBranch: "develop" },
+      ],
+      discoveredRepositories: [],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      workspaceRepositories: [{ id: "repo-1", default_branch: "main" }] as any,
+      isLocalExecutor: true,
+    });
+
+    expect(payload).toEqual([
+      { repository_id: "repo-1", base_branch: "develop", checkout_branch: "feature/x" },
+    ]);
+  });
 });
 
 describe("buildRepositoriesPayload — single-row and URL mode (core)", () => {

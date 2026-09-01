@@ -1,13 +1,13 @@
 "use client";
 
 import { useMemo } from "react";
-import { IconPlus, IconX, IconCheck } from "@tabler/icons-react";
+import { IconX, IconCheck } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useBranches, type BranchSource } from "@/hooks/domains/workspace/use-repository-branches";
 import type { LocalRepository, Repository, RepositoryBranchPolicy } from "@/lib/types/http";
 import type { TaskRepoRow } from "@/components/task-create-dialog-types";
-import { cn, formatUserHomePath } from "@/lib/utils";
+import { formatUserHomePath } from "@/lib/utils";
 import { type PillOption } from "@/components/task-create-dialog-pill";
 import { branchToOption, sortBranches } from "@/components/branch-picker-options";
 import {
@@ -21,6 +21,7 @@ import {
   RepoChipRepositoryPill,
   useRepoChipBranchPicker,
 } from "@/components/task-create-dialog-repo-chip-parts";
+import { AddRepositoryButton } from "@/components/task-create-dialog-add-repository-button";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { RepositoryDiscoveryControls } from "@/components/repository-discovery-controls";
@@ -91,7 +92,6 @@ export function WorkspaceRepoChips({
   lastUsedBranch,
   userSettingsLoaded,
 }: WorkspaceRepoChipsProps) {
-  const { t } = useTranslation();
   return (
     <>
       {rows.map((row) => (
@@ -114,9 +114,12 @@ export function WorkspaceRepoChips({
           preferredDefaultBranchLoading={isLocalExecutor ? currentLocalBranchLoading : false}
           lastUsedBranch={lastUsedBranch}
           userSettingsLoaded={userSettingsLoaded}
+          isLocalExecutor={!!isLocalExecutor}
+          branchValue={isLocalExecutor ? row.branch : row.baseBranch || row.branch}
+          savedBaseBranch={row.baseBranch}
           branchIntent={computeBranchIntent({
             isLocalExecutor: !!isLocalExecutor,
-            rowBranch: row.branch,
+            rowBranch: isLocalExecutor ? row.branch : row.baseBranch || row.branch,
             currentLocalBranch: currentLocalBranch ?? "",
             freshBranchEnabled: !!freshBranchEnabled,
           })}
@@ -140,30 +143,12 @@ export function WorkspaceRepoChips({
         />
       ))}
       {freshBranchToggle}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="inline-flex" tabIndex={canAddMore ? undefined : 0}>
-            <button
-              type="button"
-              onClick={onAdd}
-              disabled={!canAddMore}
-              aria-label={t("task:addRepository")}
-              data-testid="add-repository"
-              className={cn(
-                "inline-flex items-center justify-center gap-1.5 rounded-md text-muted-foreground",
-                addLabel ? "h-11 px-2 text-xs md:h-9" : "h-11 w-11 md:h-7 md:w-7",
-                canAddMore
-                  ? "hover:bg-muted hover:text-foreground cursor-pointer"
-                  : "opacity-40 cursor-not-allowed",
-              )}
-            >
-              <IconPlus className="h-3.5 w-3.5" />
-              {addLabel ? <span>{addLabel}</span> : null}
-            </button>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>{addHint ?? t("task:addAnotherRepository")}</TooltipContent>
-      </Tooltip>
+      <AddRepositoryButton
+        canAddMore={canAddMore}
+        addHint={addHint}
+        addLabel={addLabel}
+        onAdd={onAdd}
+      />
     </>
   );
 }
@@ -246,6 +231,9 @@ type RepoChipProps = {
   preferredDefaultBranch?: string;
   lastUsedBranch?: string | null;
   userSettingsLoaded?: boolean;
+  isLocalExecutor?: boolean;
+  branchValue?: string;
+  savedBaseBranch?: string;
   /**
    * True while preferredDefaultBranch is being resolved. Renders a
    * "Loading branch…" placeholder so the chip doesn't briefly show an empty
@@ -278,6 +266,7 @@ function useRepoChipBranchData({
   row,
   workspaceId,
   onBranchChange,
+  branchValue,
   preferredDefaultBranch,
   preferredDefaultBranchLoading,
   lastUsedBranch,
@@ -287,10 +276,13 @@ function useRepoChipBranchData({
   | "row"
   | "workspaceId"
   | "onBranchChange"
+  | "branchValue"
   | "preferredDefaultBranch"
   | "preferredDefaultBranchLoading"
   | "lastUsedBranch"
   | "userSettingsLoaded"
+  | "savedBaseBranch"
+  | "isLocalExecutor"
 >) {
   const branchSource = useMemo<BranchSource | null>(() => {
     if (!workspaceId) return null;
@@ -306,19 +298,20 @@ function useRepoChipBranchData({
     branches,
     isLoading: branchesLoading,
     refresh: refreshBranches,
+    isLoaded: branchesLoaded,
   } = useBranches(branchSource, !!branchSource);
   useRepoBranchAutoselect({
     branchSource,
     branchesLoading,
     branches,
-    rowBranch: row.branch,
+    rowBranch: branchValue,
     onBranchChange,
     preferredDefaultBranch,
     preferredDefaultBranchLoading,
     lastUsedBranch,
     userSettingsLoaded,
   });
-  return { branches, branchesLoading, refreshBranches };
+  return { branches, branchesLoading, branchesLoaded, refreshBranches };
 }
 
 function useRepoChipData({
@@ -333,6 +326,9 @@ function useRepoChipData({
   preferredDefaultBranchLoading,
   lastUsedBranch,
   userSettingsLoaded,
+  branchValue,
+  savedBaseBranch,
+  isLocalExecutor,
 }: Pick<
   RepoChipProps,
   | "row"
@@ -346,6 +342,9 @@ function useRepoChipData({
   | "preferredDefaultBranchLoading"
   | "lastUsedBranch"
   | "userSettingsLoaded"
+  | "branchValue"
+  | "savedBaseBranch"
+  | "isLocalExecutor"
 >) {
   const filteredRepos = useMemo(
     () => repositories.filter((r) => !excludedRepoIds.has(r.id) || r.id === row.repositoryId),
@@ -364,10 +363,11 @@ function useRepoChipData({
         (!excludedRepoIds.has(r.path) || r.path === row.localPath),
     );
   }, [filteredRepos, discoveredRepositories, excludedRepoIds, row.localPath]);
-  const { branches, branchesLoading, refreshBranches } = useRepoChipBranchData({
+  const { branches, branchesLoading, branchesLoaded, refreshBranches } = useRepoChipBranchData({
     row,
     workspaceId,
     onBranchChange,
+    branchValue,
     preferredDefaultBranch,
     preferredDefaultBranchLoading,
     lastUsedBranch,
@@ -399,10 +399,18 @@ function useRepoChipData({
     ],
     [filteredRepos, filteredDiscovered, selectedElsewhere],
   );
-  const branchOptions: PillOption[] = useMemo(
-    () => sortBranches(branches).map(branchToOption),
-    [branches],
-  );
+  const branchOptions: PillOption[] = useMemo(() => {
+    const available = sortBranches(branches).map(branchToOption);
+    if (
+      isLocalExecutor ||
+      !savedBaseBranch ||
+      !branchesLoaded ||
+      available.some((option) => option.value === savedBaseBranch)
+    ) {
+      return available;
+    }
+    return [unavailableBranchToOption(savedBaseBranch), ...available];
+  }, [branches, branchesLoaded, savedBaseBranch, isLocalExecutor]);
   return { repoOptions, branchOptions, branches, branchesLoading, refreshBranches };
 }
 
@@ -421,6 +429,28 @@ function computeRepoChipDisplay(
   return { repoLabel, repoTooltip };
 }
 
+function unavailableBranchToOption(branch: string): PillOption {
+  return {
+    value: branch,
+    label: branch,
+    keywords: [branch],
+    group: "branches",
+    groupLabel: t("task:branchesGroup"),
+    disabled: true,
+    disabledReason: t("task:branchUnavailable"),
+    renderLabel: () => (
+      <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+        <span className="truncate" title={branch}>
+          {branch}
+        </span>
+        <Badge variant="outline" className="shrink-0 text-xs">
+          {t("task:branchUnavailableShort")}
+        </Badge>
+      </span>
+    ),
+  };
+}
+
 type RepoChipData = ReturnType<typeof useRepoChipData>;
 
 function RepoChip(props: RepoChipProps) {
@@ -437,6 +467,9 @@ function RepoChip(props: RepoChipProps) {
     preferredDefaultBranchLoading,
     lastUsedBranch,
     userSettingsLoaded,
+    isLocalExecutor,
+    branchValue,
+    savedBaseBranch,
   } = props;
   const data = useRepoChipData({
     row,
@@ -446,6 +479,9 @@ function RepoChip(props: RepoChipProps) {
     excludedRepoIds,
     selectedElsewhere,
     onBranchChange,
+    isLocalExecutor,
+    branchValue: branchValue ?? row.branch,
+    savedBaseBranch,
     preferredDefaultBranch,
     preferredDefaultBranchLoading,
     lastUsedBranch,
@@ -473,6 +509,9 @@ function RepoChipContent({
   repositories,
   discoveredRepositories,
   branchLocked,
+  branchValue,
+  isLocalExecutor,
+  savedBaseBranch,
   preferredDefaultBranchLoading,
   branchIntent,
   onRepositoryChange,
@@ -487,6 +526,7 @@ function RepoChipContent({
   showDiscoveryControls,
   workspaceId,
 }: RepoChipProps & { data: RepoChipData; branchPolicies: RepositoryBranchPolicy[] }) {
+  const { t } = useTranslation();
   const { repoOptions, branchOptions, branches, branchesLoading, refreshBranches } = data;
   const { repoLabel, repoTooltip } = computeRepoChipDisplay(
     row,
@@ -499,6 +539,7 @@ function RepoChipContent({
     branches,
     branchOptions,
     branchesLoading,
+    branchValue: branchValue ?? row.branch,
     preferredDefaultBranchLoading,
     policyDisabledReason: branchPolicyDisabledReason,
     onBranchChange,
@@ -534,6 +575,15 @@ function RepoChipContent({
         branchesLoading={branchesLoading}
         refreshBranches={refreshBranches}
       />
+      {isLocalExecutor && savedBaseBranch && savedBaseBranch !== row.branch ? (
+        <span
+          className="max-w-40 truncate px-1 text-[10px] text-muted-foreground"
+          data-testid="repo-chip-base-branch"
+          title={savedBaseBranch}
+        >
+          {t("task:repositorySetBaseForLocal", { base: savedBaseBranch })}
+        </span>
+      ) : null}
       <RepoChipRemoveButton onRemove={onRemove} />
     </span>
   );

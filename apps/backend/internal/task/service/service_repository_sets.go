@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
@@ -35,22 +36,31 @@ var (
 	ErrUnknownRepositorySetMembers = errors.New("unknown repository set members")
 )
 
-// CreateRepositorySetRequest creates a set. RepositoryIDs is ordered and defines
-// the apply order; it carries no branch, because branch choice belongs to a task.
+// RepositorySetMemberInput is the wire/service input for one ordered set
+// member. BaseBranch is optional; an empty value preserves task-form defaults.
+type RepositorySetMemberInput struct {
+	RepositoryID string `json:"repository_id"`
+	BaseBranch   string `json:"base_branch,omitempty"`
+}
+
+// CreateRepositorySetRequest creates a set. Repositories is the new ordered
+// member shape. RepositoryIDs remains the no-base compatibility input.
 type CreateRepositorySetRequest struct {
-	WorkspaceID   string   `json:"workspace_id"`
-	Name          string   `json:"name"`
-	Description   string   `json:"description"`
-	RepositoryIDs []string `json:"repository_ids"`
+	WorkspaceID   string                     `json:"workspace_id"`
+	Name          string                     `json:"name"`
+	Description   string                     `json:"description"`
+	RepositoryIDs []string                   `json:"repository_ids"`
+	Repositories  []RepositorySetMemberInput `json:"repositories"`
 }
 
 // UpdateRepositorySetRequest patches a set. Every field is optional; an absent
 // field is left alone. A supplied RepositoryIDs replaces the whole membership
 // list, which is also how reordering is expressed.
 type UpdateRepositorySetRequest struct {
-	Name          *string   `json:"name"`
-	Description   *string   `json:"description"`
-	RepositoryIDs *[]string `json:"repository_ids"`
+	Name          *string                     `json:"name"`
+	Description   *string                     `json:"description"`
+	RepositoryIDs *[]string                   `json:"repository_ids"`
+	Repositories  *[]RepositorySetMemberInput `json:"repositories"`
 }
 
 // CreateRepositorySet validates the whole request, then writes the set and its
@@ -69,14 +79,18 @@ func (s *Service) CreateRepositorySet(
 	if err := s.assertRepositorySetNameFree(ctx, req.WorkspaceID, name, ""); err != nil {
 		return nil, err
 	}
-	if err := s.validateRepositorySetMembers(ctx, req.WorkspaceID, req.RepositoryIDs); err != nil {
+	items, err := repositorySetItemsFromCreateRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.validateRepositorySetMembers(ctx, req.WorkspaceID, items); err != nil {
 		return nil, err
 	}
 	set := &models.RepositorySet{
 		WorkspaceID: req.WorkspaceID,
 		Name:        name,
 		Description: strings.TrimSpace(req.Description),
-		Items:       repositorySetItemsFor(req.RepositoryIDs),
+		Items:       items,
 	}
 	if err := s.repositorySets.CreateRepositorySet(ctx, set); err != nil {
 		return nil, err
@@ -125,7 +139,11 @@ func (s *Service) UpdateRepositorySet(
 	// One call, one transaction: a rename that lands while the membership
 	// replacement fails would leave the set renamed but still holding the old
 	// repositories, with this method reporting failure and publishing nothing.
-	if err := s.repositorySets.UpdateRepositorySet(ctx, set, req.RepositoryIDs); err != nil {
+	var repositoryItems *[]models.RepositorySetItem
+	if req.Repositories != nil || req.RepositoryIDs != nil {
+		repositoryItems = &set.Items
+	}
+	if err := s.repositorySets.UpdateRepositorySet(ctx, set, repositoryItems); err != nil {
 		return nil, err
 	}
 	updated, err := s.repositorySets.GetRepositorySet(ctx, set.ID)
@@ -156,10 +174,22 @@ func (s *Service) prepareRepositorySetUpdate(
 	if req.Description != nil {
 		set.Description = strings.TrimSpace(*req.Description)
 	}
-	if req.RepositoryIDs != nil {
-		if err := s.validateRepositorySetMembers(ctx, set.WorkspaceID, *req.RepositoryIDs); err != nil {
+	if req.Repositories != nil && req.RepositoryIDs != nil {
+		return fmt.Errorf("%w: repositories and repository_ids cannot both be provided", ErrInvalidRepositorySet)
+	}
+	if req.Repositories != nil {
+		items := repositorySetItemsForInputs(*req.Repositories)
+		if err := s.validateRepositorySetMembers(ctx, set.WorkspaceID, items); err != nil {
 			return err
 		}
+		set.Items = items
+	}
+	if req.RepositoryIDs != nil {
+		items := repositorySetItemsFor(*req.RepositoryIDs)
+		if err := s.validateRepositorySetMembers(ctx, set.WorkspaceID, items); err != nil {
+			return err
+		}
+		set.Items = items
 	}
 	return nil
 }
@@ -253,13 +283,14 @@ func (s *Service) assertRepositorySetNameFree(
 func (s *Service) validateRepositorySetMembers(
 	ctx context.Context,
 	workspaceID string,
-	repositoryIDs []string,
+	items []models.RepositorySetItem,
 ) error {
-	if len(repositoryIDs) == 0 {
+	if len(items) == 0 {
 		return fmt.Errorf("%w: at least one repository is required", ErrInvalidRepositorySet)
 	}
-	seen := make(map[string]struct{}, len(repositoryIDs))
-	for _, id := range repositoryIDs {
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		id := item.RepositoryID
 		if strings.TrimSpace(id) == "" {
 			return fmt.Errorf("%w: repository ids must not be blank", ErrInvalidRepositorySet)
 		}
@@ -267,6 +298,9 @@ func (s *Service) validateRepositorySetMembers(
 			return fmt.Errorf("%w: repository %q listed more than once", ErrInvalidRepositorySet, id)
 		}
 		seen[id] = struct{}{}
+		if item.BaseBranch != "" && !securityutil.IsValidBranchName(item.BaseBranch) {
+			return fmt.Errorf("%w: unsafe base branch for repository %q", ErrInvalidRepositorySet, id)
+		}
 	}
 	// One workspace listing rather than a lookup per id, and it already excludes
 	// soft-deleted rows and other workspaces.
@@ -281,15 +315,36 @@ func (s *Service) validateRepositorySetMembers(
 		}
 	}
 	unknown := make([]string, 0)
-	for _, id := range repositoryIDs {
-		if _, ok := available[id]; !ok {
-			unknown = append(unknown, id)
+	for _, item := range items {
+		if _, ok := available[item.RepositoryID]; !ok {
+			unknown = append(unknown, item.RepositoryID)
 		}
 	}
 	if len(unknown) > 0 {
 		return fmt.Errorf("%w: %s", ErrUnknownRepositorySetMembers, strings.Join(unknown, ", "))
 	}
 	return nil
+}
+
+func repositorySetItemsFromCreateRequest(req *CreateRepositorySetRequest) ([]models.RepositorySetItem, error) {
+	if len(req.Repositories) > 0 && len(req.RepositoryIDs) > 0 {
+		return nil, fmt.Errorf("%w: repositories and repository_ids cannot both be provided", ErrInvalidRepositorySet)
+	}
+	if len(req.Repositories) > 0 {
+		return repositorySetItemsForInputs(req.Repositories), nil
+	}
+	return repositorySetItemsFor(req.RepositoryIDs), nil
+}
+
+func repositorySetItemsForInputs(inputs []RepositorySetMemberInput) []models.RepositorySetItem {
+	items := make([]models.RepositorySetItem, 0, len(inputs))
+	for _, input := range inputs {
+		items = append(items, models.RepositorySetItem{
+			RepositoryID: input.RepositoryID,
+			BaseBranch:   input.BaseBranch,
+		})
+	}
+	return items
 }
 
 // repositorySetItemsFor turns an ordered id list into membership models. The
@@ -317,6 +372,7 @@ func (s *Service) publishRepositorySetEvent(
 		repositories = append(repositories, map[string]interface{}{
 			"repository_id": item.RepositoryID,
 			"position":      item.Position,
+			"base_branch":   item.BaseBranch,
 		})
 	}
 	data := map[string]interface{}{
