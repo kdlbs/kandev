@@ -108,4 +108,12 @@ describe("Graph2TaskPipeline — actions cluster stays reachable off-screen (def
 
     expect(screen.queryByTestId("pipeline-task-actions-sticky-task-1")).toBeNull();
   });
+
+  it("keeps the action trigger touch-sized on coarse pointers", () => {
+    renderPipeline();
+
+    const trigger = screen.getByTestId("pipeline-task-actions-trigger-task-1");
+    expect(trigger.className).toContain("[@media(pointer:coarse)]:h-11");
+    expect(trigger.className).toContain("[@media(pointer:coarse)]:w-11");
+  });
 });

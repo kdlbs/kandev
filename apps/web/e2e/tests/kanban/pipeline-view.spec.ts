@@ -247,6 +247,69 @@ test.describe("Pipeline view", () => {
     await expect(testPage.getByRole("menuitem", { name: "Delete task" })).toBeVisible();
   });
 
+  test("keeps the 3-dots actions trigger reachable on a coarse-pointer tablet", async ({
+    tabletTestPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Pipeline Tablet Overflow Workflow",
+    );
+    const targetStepCount = 9;
+    const steps: { id: string; title: string }[] = [];
+    for (let position = 0; position < targetStepCount; position++) {
+      const title = `Tablet Step ${position}`;
+      const step = await apiClient.createWorkflowStep(workflow.id, title, position);
+      steps.push({ id: step.id, title });
+    }
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+    });
+
+    const task = await apiClient.createTask(seedData.workspaceId, "Pipeline Tablet Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: steps[targetStepCount - 1].id,
+    });
+    const kanban = new KanbanPage(tabletTestPage);
+    await kanban.goto();
+    await kanban.switchToPipelineView();
+
+    const row = kanban.pipelineTask(task.id);
+    const scrollport = row
+      .locator(
+        'xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " overflow-x-auto ")]',
+      )
+      .first();
+    await expect
+      .poll(() => scrollport.evaluate((element) => element.scrollWidth > element.clientWidth))
+      .toBe(true);
+
+    const trigger = kanban.pipelineTaskActionsTrigger(task.id);
+    await expect(trigger).toBeVisible();
+    const box = await trigger.boundingBox();
+    const viewportSize = tabletTestPage.viewportSize();
+    expect(box).not.toBeNull();
+    expect(viewportSize).not.toBeNull();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(viewportSize!.width);
+
+    const hitTarget = await tabletTestPage.evaluate(
+      ({ x, y }) =>
+        document
+          .elementFromPoint(x, y)
+          ?.closest<HTMLElement>('[data-testid^="pipeline-task-actions-trigger-"]')?.dataset
+          .testid ?? null,
+      { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 },
+    );
+    expect(hitTarget).toBe(`pipeline-task-actions-trigger-${task.id}`);
+
+    await trigger.tap();
+    await expect(tabletTestPage.getByRole("menuitem", { name: "Delete task" })).toBeVisible();
+  });
+
   test("the current pill's right move chevron stays clickable when it is the last visible pill", async ({
     testPage,
     apiClient,

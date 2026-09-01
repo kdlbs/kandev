@@ -193,7 +193,7 @@ function TaskActions({
             ref={archiveAnchorRef}
             type="button"
             data-testid={`pipeline-task-actions-trigger-${task.id}`}
-            className="shrink-0 h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
+            className="shrink-0 h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
           >
             <IconDots className="h-3.5 w-3.5" />
           </button>
