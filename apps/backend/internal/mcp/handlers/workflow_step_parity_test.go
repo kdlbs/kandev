@@ -143,6 +143,8 @@ func TestWorkflowStepCreateEventParityAcrossSurfaces(t *testing.T) {
 		"name":                          "Review",
 		"color":                         "#abcdef",
 		"prompt":                        "review the diff",
+		"agent_profile_id":              "profile-parity",
+		"profile_session_policy":        "park_reuse",
 		"allow_manual_move":             true,
 		"show_in_command_panel":         true,
 		"auto_advance_requires_signal":  true,

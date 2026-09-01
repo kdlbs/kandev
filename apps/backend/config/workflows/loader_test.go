@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/models"
 	"gopkg.in/yaml.v3"
 )
@@ -78,6 +79,31 @@ func TestLoadTemplates_AllValid(t *testing.T) {
 		if len(tmpl.Steps) == 0 {
 			t.Errorf("template %q has no steps", tmpl.ID)
 		}
+	}
+}
+
+func TestConvertStep_PreservesAgentProfileAndSessionPolicy(t *testing.T) {
+	var raw templateYAML
+	if err := yaml.Unmarshal([]byte(`
+id: test
+name: Test
+steps:
+  - id: review
+    name: Review
+    agent_profile_id: profile-review
+    profile_session_policy: park_new
+`), &raw); err != nil {
+		t.Fatalf("unmarshal template: %v", err)
+	}
+	step, err := convertStep(raw.Steps[0])
+	if err != nil {
+		t.Fatalf("convertStep returned error: %v", err)
+	}
+	if step.AgentProfileID != "profile-review" {
+		t.Fatalf("agent profile ID = %q, want profile-review", step.AgentProfileID)
+	}
+	if step.ProfileSessionPolicy != taskmodels.WorkflowProfileSessionPolicyParkNew {
+		t.Fatalf("profile session policy = %q, want park_new", step.ProfileSessionPolicy)
 	}
 }
 

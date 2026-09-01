@@ -154,6 +154,8 @@ func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message
 		Position                   int                  `json:"position"`
 		Color                      string               `json:"color"`
 		Prompt                     string               `json:"prompt"`
+		AgentProfileID             *string              `json:"agent_profile_id"`
+		ProfileSessionPolicy       *string              `json:"profile_session_policy"`
 		IsStartStep                *bool                `json:"is_start_step"`
 		AllowManualMove            *bool                `json:"allow_manual_move"`
 		ShowInCommandPanel         *bool                `json:"show_in_command_panel"`
@@ -179,6 +181,8 @@ func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message
 		Position:                   req.Position,
 		Color:                      req.Color,
 		Prompt:                     req.Prompt,
+		AgentProfileID:             req.AgentProfileID,
+		ProfileSessionPolicy:       req.ProfileSessionPolicy,
 		IsStartStep:                req.IsStartStep,
 		ShowInCommandPanel:         req.ShowInCommandPanel,
 		AutoAdvanceRequiresSignal:  req.AutoAdvanceRequiresSignal,
@@ -207,6 +211,8 @@ func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message
 		Name                       *string              `json:"name"`
 		Color                      *string              `json:"color"`
 		Prompt                     *string              `json:"prompt"`
+		AgentProfileID             *string              `json:"agent_profile_id"`
+		ProfileSessionPolicy       *string              `json:"profile_session_policy"`
 		IsStartStep                *bool                `json:"is_start_step"`
 		AllowManualMove            *bool                `json:"allow_manual_move"`
 		ShowInCommandPanel         *bool                `json:"show_in_command_panel"`
@@ -229,6 +235,8 @@ func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message
 		Name:                       req.Name,
 		Color:                      req.Color,
 		Prompt:                     req.Prompt,
+		AgentProfileID:             req.AgentProfileID,
+		ProfileSessionPolicy:       req.ProfileSessionPolicy,
 		IsStartStep:                req.IsStartStep,
 		AllowManualMove:            req.AllowManualMove,
 		ShowInCommandPanel:         req.ShowInCommandPanel,

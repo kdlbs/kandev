@@ -196,8 +196,8 @@ type StepDefinition struct {
 	IsStartStep           bool                                    `json:"is_start_step"`
 	ShowInCommandPanel    bool                                    `json:"show_in_command_panel"`
 	AutoArchiveAfterHours int                                     `json:"auto_archive_after_hours,omitempty"`
-	AgentProfileID        string                                  `json:"agent_profile_id,omitempty"`
-	ProfileSessionPolicy  taskmodels.WorkflowProfileSessionPolicy `json:"profile_session_policy,omitempty"`
+	AgentProfileID        string                                  `json:"agent_profile_id,omitempty" yaml:"agent_profile_id,omitempty"`
+	ProfileSessionPolicy  taskmodels.WorkflowProfileSessionPolicy `json:"profile_session_policy,omitempty" yaml:"profile_session_policy,omitempty"`
 	WIPLimit              int                                     `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
 	PullFromStepID        string                                  `json:"pull_from_step_id,omitempty" yaml:"pull_from_step_id,omitempty"`
 	// StageType mirrors WorkflowStep.StageType for templates so the office

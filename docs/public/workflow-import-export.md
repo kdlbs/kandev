@@ -128,6 +128,7 @@ IDs, workspace ID, ordering among workflows, source/sync ownership, style, visib
   pull_from_step_position: 0
   agent_profile:
     agent_name: Claude Code
+  profile_session_policy: park_reuse
 ```
 
 | Field | Type | Exact behavior |
@@ -142,6 +143,7 @@ IDs, workspace ID, ordering among workflows, source/sync ownership, style, visib
 | `allow_manual_move` | boolean | Always exported. Missing input decodes as `false`. |
 | `auto_archive_after_hours` | integer | Omitted when `0`; `0` disables auto-archive. The portable validator currently does not reject negative values, so use only `0` or a positive value. |
 | `agent_profile` | object | Omitted when unset; exact-match behavior is below. |
+| `profile_session_policy` | enum | `complete`, `park_reuse`, or `park_new`; controls the source session when entering this step with a different agent profile. Missing or unknown values use `complete`. |
 | `auto_advance_requires_signal` | boolean | Always exported. `true` makes `on_turn_complete` transitions wait for `step_complete_kandev`; missing input is `false`. |
 | `cancel_triggers_turn_complete` | boolean | Always exported. `true` lets an explicit user cancellation run the step's normal `on_turn_complete` actions after the cancelled turn settles; missing input is `false`. Pending clarification and non-user interruption/failure paths are not eligible. |
 | `wip_limit` | integer | Omitted when `0`. Must be non-negative; `0` is unlimited. |
@@ -274,7 +276,7 @@ workflows:
         cancel_triggers_turn_complete: false
 ```
 
-After import, assign a workflow-level or Work-step agent profile if the destination did not produce an exact portable profile match. Create a disposable task, verify Backlog → Work pulling, the WIP rejection at capacity, explicit completion, and Review feedback before adopting it.
+After import, assign a workflow default or affected step agent profile if the destination did not produce an exact portable profile match. Create a disposable task, verify Backlog → Work pulling, the WIP rejection at capacity, explicit completion, and Review feedback before adopting it.
 
 </details>
 

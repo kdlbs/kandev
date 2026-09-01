@@ -454,6 +454,9 @@ func TestParkSessionForProfileSwitch_DelayedTerminalEventsConsumeClaim(t *testin
 			if !parked {
 				t.Fatalf("park before delayed %s event = false, want true", tt.name)
 			}
+			if !fixture.svc.hasExecutionTeardownOwner(fixture.current.ID, event.AgentExecutionID) {
+				t.Fatalf("park before delayed %s event did not claim exact execution teardown ownership", tt.name)
+			}
 
 			guard.Unlock()
 			guardHeld = false
@@ -666,6 +669,9 @@ func TestSwitchSessionForStep_ParkProfileSessionPolicyPreservesSourceWhenIntentW
 	}
 	if _, ok := source.Metadata[models.SessionMetaKeyWorkflowProfileSwitchStopIntent]; ok {
 		t.Fatal("failed intent write must not leave stop metadata")
+	}
+	if fixture.svc.hasExecutionTeardownOwner(fixture.current.ID, "execution-a") {
+		t.Fatal("failed intent write must release the exact execution teardown claim")
 	}
 	status := fixture.svc.messageQueue.GetStatus(ctx, fixture.current.ID)
 	if status.Count != 1 || status.Entries[0].Content != "queued handoff" {

@@ -240,15 +240,15 @@ func (r *Repository) seedDefaultWorkflowSteps() error {
 			if _, err := r.db.Exec(r.db.Rebind(`
 				INSERT INTO workflow_steps (
 					id, workflow_id, name, position, color,
-					prompt, events, allow_manual_move, is_start_step, show_in_command_panel, profile_session_policy, wip_limit, pull_from_step_id, auto_advance_requires_signal, cancel_triggers_turn_complete, created_at, updated_at
+					prompt, events, allow_manual_move, is_start_step, show_in_command_panel, agent_profile_id, profile_session_policy, wip_limit, pull_from_step_id, auto_advance_requires_signal, cancel_triggers_turn_complete, created_at, updated_at
 				) VALUES (
-					?, ?, ?, ?, ?, ?, ?, ?,
+					?, ?, ?, ?, ?, ?, ?, ?, ?,
 					?, ?, ?, ?, ?, ?, ?, ?, ?
 				)
 			`),
 				idMap[stepDef.ID], workflowID, stepDef.Name, stepDef.Position, stepDef.Color,
 				stepDef.Prompt, string(eventsJSON), dialect.BoolToInt(stepDef.AllowManualMove),
-				dialect.BoolToInt(stepDef.IsStartStep), dialect.BoolToInt(stepDef.ShowInCommandPanel), taskmodels.NormalizeWorkflowProfileSessionPolicy(string(stepDef.ProfileSessionPolicy)), stepDef.WIPLimit, models.RemapStepID(stepDef.PullFromStepID, idMap), dialect.BoolToInt(stepDef.AutoAdvanceRequiresSignal), dialect.BoolToInt(stepDef.CancelTriggersTurnComplete), now, now,
+				dialect.BoolToInt(stepDef.IsStartStep), dialect.BoolToInt(stepDef.ShowInCommandPanel), stepDef.AgentProfileID, taskmodels.NormalizeWorkflowProfileSessionPolicy(string(stepDef.ProfileSessionPolicy)), stepDef.WIPLimit, models.RemapStepID(stepDef.PullFromStepID, idMap), dialect.BoolToInt(stepDef.AutoAdvanceRequiresSignal), dialect.BoolToInt(stepDef.CancelTriggersTurnComplete), now, now,
 			); err != nil {
 				return err
 			}
@@ -610,6 +610,7 @@ func (r *Repository) CreateStepWithDemotedStartSteps(ctx context.Context, step *
 	now := time.Now().UTC()
 	step.CreatedAt = now
 	step.UpdatedAt = now
+	step.ProfileSessionPolicy = taskmodels.NormalizeWorkflowProfileSessionPolicy(string(step.ProfileSessionPolicy))
 
 	eventsJSON, err := json.Marshal(step.Events)
 	if err != nil {
@@ -739,6 +740,7 @@ func (r *Repository) UpdateStep(ctx context.Context, step *models.WorkflowStep) 
 // previously-start steps demoted as part of the same transaction.
 func (r *Repository) UpdateStepWithDemotedStartSteps(ctx context.Context, step *models.WorkflowStep) ([]*models.WorkflowStep, error) {
 	step.UpdatedAt = time.Now().UTC()
+	step.ProfileSessionPolicy = taskmodels.NormalizeWorkflowProfileSessionPolicy(string(step.ProfileSessionPolicy))
 
 	eventsJSON, err := json.Marshal(step.Events)
 	if err != nil {

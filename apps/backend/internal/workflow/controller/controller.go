@@ -129,6 +129,7 @@ type CreateStepRequest struct {
 	Color                      string             `json:"color"`
 	StageType                  *models.StageType  `json:"stage_type,omitempty"`
 	Prompt                     string             `json:"prompt,omitempty"`
+	AgentProfileID             *string            `json:"agent_profile_id,omitempty"`
 	Events                     *models.StepEvents `json:"events,omitempty"`
 	AllowManualMove            bool               `json:"allow_manual_move"`
 	IsStartStep                *bool              `json:"is_start_step,omitempty"`
@@ -171,6 +172,9 @@ func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*Ge
 		step.ShowInCommandPanel = *req.ShowInCommandPanel
 	} else {
 		step.ShowInCommandPanel = true // default to visible
+	}
+	if req.AgentProfileID != nil {
+		step.AgentProfileID = strings.TrimSpace(*req.AgentProfileID)
 	}
 	if req.ProfileSessionPolicy != nil {
 		step.ProfileSessionPolicy = taskmodels.NormalizeWorkflowProfileSessionPolicy(*req.ProfileSessionPolicy)

@@ -323,7 +323,9 @@ async function createMissingSteps(
       color: step.color,
       stage_type: step.stage_type ?? "custom",
       cancel_triggers_turn_complete: step.cancel_triggers_turn_complete ?? false,
+      agent_profile_id: step.agent_profile_id,
       profile_session_policy: normalizeWorkflowProfileSessionPolicy(step.profile_session_policy),
+      auto_advance_requires_signal: step.auto_advance_requires_signal ?? false,
     });
     mappings.set(step.id, created.id);
   }

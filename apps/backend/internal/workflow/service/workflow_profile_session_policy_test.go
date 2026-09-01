@@ -33,6 +33,10 @@ func TestImportWorkflowCarriesProfileSessionPolicyOnStep(t *testing.T) {
 				Name:                 "Todo",
 				Position:             0,
 				ProfileSessionPolicy: taskmodels.WorkflowProfileSessionPolicyParkReuse,
+			}, {
+				Name:                 "Review",
+				Position:             1,
+				ProfileSessionPolicy: taskmodels.WorkflowProfileSessionPolicyParkNew,
 			}},
 		}},
 	}
@@ -43,8 +47,9 @@ func TestImportWorkflowCarriesProfileSessionPolicyOnStep(t *testing.T) {
 	require.NoError(t, err)
 	steps, err := svc.repo.ListStepsByWorkflow(context.Background(), workflow.ID)
 	require.NoError(t, err)
-	require.Len(t, steps, 1)
+	require.Len(t, steps, 2)
 	require.Equal(t, taskmodels.WorkflowProfileSessionPolicyParkReuse, steps[0].ProfileSessionPolicy)
+	require.Equal(t, taskmodels.WorkflowProfileSessionPolicyParkNew, steps[1].ProfileSessionPolicy)
 }
 
 func TestApplySyncedWorkflowsNormalizesStepProfileSessionPolicy(t *testing.T) {

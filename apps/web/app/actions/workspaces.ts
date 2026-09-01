@@ -344,6 +344,7 @@ type BackendTemplateStep = {
   events?: StepEvents;
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
+  agent_profile_id?: StepDefinition["agent_profile_id"];
   profile_session_policy?: WorkflowStep["profile_session_policy"];
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
@@ -366,6 +367,7 @@ const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): WorkflowT
     events: step.events,
     is_start_step: step.is_start_step,
     show_in_command_panel: step.show_in_command_panel,
+    agent_profile_id: step.agent_profile_id,
     profile_session_policy: normalizeWorkflowProfileSessionPolicy(step.profile_session_policy),
     auto_advance_requires_signal: step.auto_advance_requires_signal,
     cancel_triggers_turn_complete: step.cancel_triggers_turn_complete,
@@ -471,7 +473,10 @@ export async function createWorkflowStepAction(payload: {
   prompt?: string;
   events?: StepEvents;
   is_start_step?: boolean;
+  show_in_command_panel?: boolean;
+  agent_profile_id?: string;
   allow_manual_move?: boolean;
+  auto_advance_requires_signal?: boolean;
   wip_limit?: number;
   pull_from_step_id?: string | null;
   stage_type?: WorkflowStep["stage_type"];
@@ -487,11 +492,14 @@ export async function createWorkflowStepAction(payload: {
     events: payload.events,
     allow_manual_move: payload.allow_manual_move ?? true,
     is_start_step: payload.is_start_step ?? false,
+    show_in_command_panel: payload.show_in_command_panel ?? true,
+    agent_profile_id: payload.agent_profile_id,
     wip_limit: payload.wip_limit ?? 0,
     pull_from_step_id: payload.pull_from_step_id ?? "",
     stage_type: payload.stage_type,
     cancel_triggers_turn_complete: payload.cancel_triggers_turn_complete ?? false,
     profile_session_policy: payload.profile_session_policy,
+    auto_advance_requires_signal: payload.auto_advance_requires_signal ?? false,
   };
   const response = await fetchJson<BackendWorkflowStep>(`${apiBaseUrl}/api/v1/workflow/steps`, {
     method: "POST",

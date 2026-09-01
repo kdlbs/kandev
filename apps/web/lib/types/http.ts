@@ -874,10 +874,17 @@ export type WorkflowExportData = {
   workflows: WorkflowPortable[];
 };
 
+export type AgentProfilePortable = {
+  agent_name: string;
+  model?: string;
+  mode?: string;
+};
+
 export type WorkflowPortable = {
   name: string;
   description?: string;
   prompt?: string;
+  agent_profile?: AgentProfilePortable;
   steps: StepPortable[];
 };
 
@@ -888,8 +895,13 @@ export type StepPortable = {
   prompt?: string;
   events: StepEvents;
   is_start_step: boolean;
+  show_in_command_panel: boolean;
   allow_manual_move: boolean;
   auto_archive_after_hours?: number;
+  agent_profile?: AgentProfilePortable;
+  profile_session_policy?: WorkflowProfileSessionPolicy;
+  auto_advance_requires_signal: boolean;
+  cancel_triggers_turn_complete: boolean;
   wip_limit?: number;
   pull_from_step_position?: number;
 };

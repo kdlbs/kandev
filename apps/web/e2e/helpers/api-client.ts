@@ -9,6 +9,7 @@ import type {
   MCPTaskAgentProfileDefault,
   RepositoryBranchPolicy,
   AgentProfileRecentUseApiRecord,
+  WorkflowProfileSessionPolicy,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
@@ -786,7 +787,8 @@ export class ApiClient {
     position: number,
     opts?: {
       is_start_step?: boolean;
-      profile_session_policy?: "complete" | "park_reuse" | "park_new";
+      agent_profile_id?: string;
+      profile_session_policy?: WorkflowProfileSessionPolicy;
       events?: {
         on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -799,6 +801,7 @@ export class ApiClient {
       name,
       position,
       ...(opts?.is_start_step != null ? { is_start_step: opts.is_start_step } : {}),
+      ...(opts?.agent_profile_id ? { agent_profile_id: opts.agent_profile_id } : {}),
       ...(opts?.profile_session_policy
         ? { profile_session_policy: opts.profile_session_policy }
         : {}),
@@ -1211,7 +1214,7 @@ export class ApiClient {
       pull_from_step_id?: string | null;
       cancel_triggers_turn_complete?: boolean;
       stage_type?: "work" | "review" | "approval" | "custom";
-      profile_session_policy?: "complete" | "park_reuse" | "park_new";
+      profile_session_policy?: WorkflowProfileSessionPolicy;
     },
   ): Promise<void> {
     await this.request("PUT", `/api/v1/workflow/steps/${stepId}`, { id: stepId, ...updates });

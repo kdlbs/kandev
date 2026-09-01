@@ -44,12 +44,23 @@ func TestWorkflowStepProfileSessionPolicyRoundTripAndDefault(t *testing.T) {
 	if err := repo.CreateStep(ctx, unknown); err != nil {
 		t.Fatalf("create unknown: %v", err)
 	}
+	if unknown.ProfileSessionPolicy != taskmodels.WorkflowProfileSessionPolicyComplete {
+		t.Fatalf("created step policy = %q, want normalized complete", unknown.ProfileSessionPolicy)
+	}
 	got, err := repo.GetStep(ctx, unknown.ID)
 	if err != nil {
 		t.Fatalf("get unknown: %v", err)
 	}
 	if got.ProfileSessionPolicy != taskmodels.WorkflowProfileSessionPolicyComplete {
 		t.Fatalf("unknown policy = %q, want complete", got.ProfileSessionPolicy)
+	}
+
+	got.ProfileSessionPolicy = taskmodels.WorkflowProfileSessionPolicy(" unsupported update ")
+	if err := repo.UpdateStep(ctx, got); err != nil {
+		t.Fatalf("normalize updated policy: %v", err)
+	}
+	if got.ProfileSessionPolicy != taskmodels.WorkflowProfileSessionPolicyComplete {
+		t.Fatalf("updated caller policy = %q, want normalized complete", got.ProfileSessionPolicy)
 	}
 
 	got.ProfileSessionPolicy = taskmodels.WorkflowProfileSessionPolicyParkReuse

@@ -1225,7 +1225,18 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 		return
 	}
-	if s.consumeParkedProfileSwitchStopIntent(ctx, data, session) {
+	parkedSwitchStop := s.consumeParkedProfileSwitchStopIntent(ctx, data, session)
+	if !parkedSwitchStop && s.hasGracefulExecutionTeardownOwner(data.SessionID, data.AgentExecutionID) {
+		// The park claim is the exact-execution ownership boundary. The durable
+		// intent is normally present as well, but the owner still wins if a
+		// metadata read or a delayed cleanup left that marker unavailable.
+		parkedSwitchStop = true
+		s.logger.Debug("ignoring agent.completed for explicitly owned teardown",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID))
+	}
+	if parkedSwitchStop {
 		s.logger.Debug("ignoring agent.completed caused by parked workflow profile switch",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
@@ -1543,6 +1554,27 @@ func (s *Service) claimExecutionTeardown(
 	}
 }
 
+// releaseExecutionTeardownClaim rolls back an exact execution claim made by a
+// lifecycle operation that failed before its durable state transition. The
+// caller must still hold the session guard, so another session-scoped teardown
+// cannot replace the claim between the load and compare-and-delete.
+func (s *Service) releaseExecutionTeardownClaim(sessionID, executionID string) {
+	if sessionID == "" || executionID == "" {
+		return
+	}
+	key := terminalExecutionKey(sessionID, executionID)
+	value, ok := s.executionTeardownClaims.Load(key)
+	if !ok {
+		return
+	}
+	claim, ok := value.(executionTeardownClaim)
+	if !ok {
+		s.executionTeardownClaims.Delete(key)
+		return
+	}
+	s.executionTeardownClaims.CompareAndDelete(key, claim)
+}
+
 // claimForcedExecutionCleanup serializes exact-execution cleanup arbitration
 // with coordinator cancellation. The caller performs blocking cleanup only
 // after this method releases the per-session guard.
@@ -1642,15 +1674,25 @@ func (s *Service) deleteExecutionTeardownClaimIfExpired(key string, expiresAt ti
 }
 
 func (s *Service) hasExecutionTeardownOwner(sessionID, executionID string) bool {
+	_, ok := s.executionTeardownClaimFor(sessionID, executionID)
+	return ok
+}
+
+func (s *Service) hasGracefulExecutionTeardownOwner(sessionID, executionID string) bool {
+	claim, ok := s.executionTeardownClaimFor(sessionID, executionID)
+	return ok && claim.intent == executionTeardownIntentGraceful
+}
+
+func (s *Service) executionTeardownClaimFor(sessionID, executionID string) (executionTeardownClaim, bool) {
 	if sessionID == "" || executionID == "" {
-		return false
+		return executionTeardownClaim{}, false
 	}
 	value, ok := s.executionTeardownClaims.Load(terminalExecutionKey(sessionID, executionID))
 	if !ok {
-		return false
+		return executionTeardownClaim{}, false
 	}
 	claim, ok := value.(executionTeardownClaim)
-	return ok && time.Now().Before(claim.expiresAt)
+	return claim, ok && time.Now().Before(claim.expiresAt)
 }
 
 // wasResumeAttempt checks whether the session's last execution used a resume token.

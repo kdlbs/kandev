@@ -141,8 +141,30 @@ func (s *Service) parkSessionForProfileSwitchClaimLocked(
 		return false, "", err
 	}
 
+	// Claim the exact runtime while the source session guard is still held.
+	// This is the linearization point shared with terminal callbacks: a
+	// callback that acquired the guard first marks the execution naturally
+	// complete and makes the candidate invalid, while a callback that arrives
+	// after this claim is an acknowledgement of the deliberate park stop.
+	// Keep the claim until the runtime teardown has had its chance to report a
+	// terminal event. Release it only when the durable park cannot be committed.
+	teardownClaimed := executionID != ""
+	if teardownClaimed && !s.claimExecutionTeardown(
+		currentSession.ID,
+		executionID,
+		executionTeardownIntentGraceful,
+	) {
+		return false, "", fmt.Errorf("cannot park workflow profile session %q: execution %q already has a teardown owner", currentSession.ID, executionID)
+	}
+	releaseTeardownClaim := func() {
+		if teardownClaimed {
+			s.releaseExecutionTeardownClaim(currentSession.ID, executionID)
+		}
+	}
+
 	intent, err := s.recordProfileSwitchStopIntent(ctx, currentSession.ID, executionID)
 	if err != nil {
+		releaseTeardownClaim()
 		return false, "", err
 	}
 
@@ -156,10 +178,12 @@ func (s *Service) parkSessionForProfileSwitchClaimLocked(
 	)
 	if err != nil {
 		s.clearParkedProfileSwitchIntent(ctx, currentSession.ID, intent.Stamp)
+		releaseTeardownClaim()
 		return false, "", fmt.Errorf("park workflow profile session %q: %w", currentSession.ID, err)
 	}
 	if !changed && finalState != models.TaskSessionStateWaitingForInput {
 		s.clearParkedProfileSwitchIntent(ctx, currentSession.ID, intent.Stamp)
+		releaseTeardownClaim()
 		return false, "", fmt.Errorf("park workflow profile session %q: state changed to %s", currentSession.ID, finalState)
 	}
 
