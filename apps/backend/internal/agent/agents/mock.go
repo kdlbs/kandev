@@ -246,16 +246,13 @@ func (a *MockAgent) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings
 }
 
-// FilesystemPolicyDescriptor lets the E2E mock exercise the same server-owned
-// session configuration contract as Codex without requiring the Codex binary.
-// The mock accepts the generated CODEX_CONFIG environment value but does not
-// interpret it, keeping the test double's filesystem behavior deterministic.
-func (a *MockAgent) FilesystemPolicyDescriptor() (*FilesystemPolicyDescriptor, bool) {
-	return &FilesystemPolicyDescriptor{
-		ConfigEnvKey: "CODEX_CONFIG",
-		Renderer:     codexACPFilesystemPolicyRenderer{},
-	}, true
+// ApplyFilesystemPolicy lets the E2E mock exercise Codex-compatible policy
+// rendering without requiring a Codex binary.
+func (a *MockAgent) ApplyFilesystemPolicy(env map[string]string, policy FilesystemPolicy) error {
+	return applyCodexFilesystemPolicy(env, policy)
 }
+
+func (a *MockAgent) FilesystemPolicyEnvironmentKeys() []string { return []string{"CODEX_CONFIG"} }
 
 // InferenceConfig enables one-shot inference via ACP. The mock-agent binary
 // advertises its available models in the session/new response, so the host

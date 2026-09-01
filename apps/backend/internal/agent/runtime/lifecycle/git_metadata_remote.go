@@ -2,7 +2,6 @@ package lifecycle
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -116,31 +115,32 @@ func validateRemoteGitMetadataRequest(req *ExecutorCreateRequest) error {
 		return unsupportedGitMetadataProjection("remote Git metadata policy is unavailable; start a new session with a supported executor")
 	}
 	if len(req.GitMetadataProjections) > 1 {
-		return unsupportedGitMetadataProjection("remote multi-repository Git metadata is not available; use local Docker or standalone Codex, or start a single-repository session")
+		return unsupportedGitMetadataProjection("remote multi-repository Git metadata is not available; use a local supported executor or start a single-repository session")
 	}
-	if _, err := remoteFilesystemPolicyDescriptor(req); err != nil {
-		return unsupportedGitMetadataProjection("remote Git metadata requires a compatible Codex ACP filesystem policy; update Codex or choose local Docker")
+	if err := validateRemoteFilesystemPolicyAgent(req); err != nil {
+		return fmt.Errorf("%s: %w", gitMetadataProjectionUnsupported, err)
 	}
 	return nil
 }
 
-func remoteFilesystemPolicyDescriptor(req *ExecutorCreateRequest) (*agents.FilesystemPolicyDescriptor, error) {
+func remoteFilesystemPolicyAgent(req *ExecutorCreateRequest) (agents.FilesystemPolicyAgent, error) {
 	policyAgent, ok := req.AgentConfig.(agents.FilesystemPolicyAgent)
 	if !ok {
 		return nil, errors.New("agent does not support filesystem policy")
 	}
-	descriptor, ok := policyAgent.FilesystemPolicyDescriptor()
-	if !ok || descriptor == nil || descriptor.ConfigEnvKey == "" || descriptor.Renderer == nil {
-		return nil, errors.New("agent filesystem policy is unavailable")
-	}
-	config, err := codexConfigFromEnvironment(req.Env, descriptor.ConfigEnvKey)
+	return policyAgent, nil
+}
+
+func validateRemoteFilesystemPolicyAgent(req *ExecutorCreateRequest) error {
+	policyAgent, err := remoteFilesystemPolicyAgent(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if hasLegacyCodexSandbox(config) {
-		return nil, errors.New("legacy Codex sandbox configuration conflicts with task filesystem policy")
+	env := make(map[string]string, len(req.Env))
+	for key, value := range req.Env {
+		env[key] = value
 	}
-	return descriptor, nil
+	return policyAgent.ApplyFilesystemPolicy(env, agents.FilesystemPolicy{Name: gitMetadataPolicyName})
 }
 
 // prepareRemoteRegularGitMetadataPolicy merges a server-authored filesystem
@@ -148,7 +148,7 @@ func remoteFilesystemPolicyDescriptor(req *ExecutorCreateRequest) (*agents.Files
 // remote resolver proves GitDir is the task checkout's non-symlink .git
 // directory before this function is called.
 func prepareRemoteRegularGitMetadataPolicy(req *ExecutorCreateRequest, metadata ...remoteRegularGitMetadata) error {
-	descriptor, err := remoteFilesystemPolicyDescriptor(req)
+	policyAgent, err := remoteFilesystemPolicyAgent(req)
 	if err != nil {
 		return err
 	}
@@ -160,35 +160,10 @@ func prepareRemoteRegularGitMetadataPolicy(req *ExecutorCreateRequest, metadata 
 			return errors.New("remote git metadata is invalid")
 		}
 	}
-	config, err := codexConfigFromEnvironment(req.Env, descriptor.ConfigEnvKey)
-	if err != nil {
-		return err
-	}
-	policy, err := descriptor.Renderer.Render(remoteRegularGitMetadataFilesystemPolicy(metadata...))
-	if err != nil {
-		return err
-	}
-	mergeCodexConfig(config, policy)
-	encoded, err := jsonMarshalFilesystemPolicy(config)
-	if err != nil {
-		return err
-	}
 	if req.Env == nil {
 		req.Env = make(map[string]string)
 	}
-	req.Env[descriptor.ConfigEnvKey] = encoded
-	return nil
-}
-
-// jsonMarshalFilesystemPolicy keeps the remote policy implementation from
-// exporting a second configuration serializer. It also makes errors returned
-// to remote executors independent of any host path.
-func jsonMarshalFilesystemPolicy(config map[string]any) (string, error) {
-	encoded, err := json.Marshal(config)
-	if err != nil {
-		return "", fmt.Errorf("encode agent filesystem policy: %w", err)
-	}
-	return string(encoded), nil
+	return policyAgent.ApplyFilesystemPolicy(req.Env, remoteRegularGitMetadataFilesystemPolicy(metadata...))
 }
 
 func remoteRegularGitMetadataFilesystemPolicy(metadata ...remoteRegularGitMetadata) agents.FilesystemPolicy {
@@ -204,15 +179,25 @@ func remoteRegularGitMetadataFilesystemPolicy(metadata ...remoteRegularGitMetada
 		seen[item.GitDir] = struct{}{}
 		rules = append(rules, agents.FilesystemPolicyRule{Path: item.GitDir, Access: agents.FilesystemAccessWrite})
 	}
-	return agents.FilesystemPolicy{Name: codexGitMetadataPolicyName, Rules: rules}
+	return agents.FilesystemPolicy{Name: gitMetadataPolicyName, Rules: rules}
 }
 
 func remoteGitMetadataRuntimeEnv(req *ExecutorCreateRequest) (map[string]string, error) {
-	descriptor, err := remoteFilesystemPolicyDescriptor(req)
+	_, err := remoteFilesystemPolicyAgent(req)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]string{descriptor.ConfigEnvKey: req.Env[descriptor.ConfigEnvKey]}, nil
+	keysAgent, ok := req.AgentConfig.(agents.FilesystemPolicyEnvironmentAgent)
+	if !ok {
+		return nil, errors.New("agent filesystem policy environment is unavailable")
+	}
+	env := make(map[string]string)
+	for _, key := range keysAgent.FilesystemPolicyEnvironmentKeys() {
+		if value := req.Env[key]; value != "" {
+			env[key] = value
+		}
+	}
+	return env, nil
 }
 
 func validRemoteRegularGitMetadata(metadata remoteRegularGitMetadata) bool {
@@ -240,11 +225,6 @@ gitdir=$(cd "$gitdir" && pwd -P)
 [ ! -L "$gitdir/objects" ]
 [ -f "$gitdir/HEAD" ]
 [ ! -L "$gitdir/HEAD" ]
-for config in "${CODEX_HOME:-$HOME/.codex}/config.toml" "$workspace/.codex/config.toml"; do
-  if [ -f "$config" ] && grep -Eq '^[[:space:]]*(sandbox_mode|sandbox_workspace_write)[[:space:]]*=' "$config"; then
-    exit 17
-  fi
-done
 ref=$(git -C "$workspace" symbolic-ref -q HEAD || true)
 case "$ref" in
   '') ;;

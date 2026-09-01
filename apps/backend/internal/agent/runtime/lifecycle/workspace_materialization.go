@@ -356,7 +356,9 @@ func (m *Manager) refreshCloneWorkspacePolicyAfterMaterialization(ctx context.Co
 
 func (m *Manager) configureCloneWorkspacePolicy(ctx context.Context, execution *AgentExecution, runtimeEnv map[string]string) error {
 	env := cloneStringMap(runtimeEnv)
-	m.mergeAgentProfileEnvForExecution(ctx, execution, env)
+	if err := m.mergeAgentProfileEnvForExecution(ctx, execution, env); err != nil {
+		return err
+	}
 	approvalPolicy, _ := m.resolveApprovalPolicyAndDisplayName(ctx, execution)
 	return execution.agentctl.ConfigureAgent(ctx, execution.AgentCommand, execution.AgentArgs, env, approvalPolicy, execution.ContinueCommand, execution.ContinueArgs)
 }

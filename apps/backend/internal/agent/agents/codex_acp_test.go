@@ -68,12 +68,8 @@ func TestCodexACPSessionDirTemplate(t *testing.T) {
 }
 
 func TestCodexACPRendersNarrowFilesystemPolicy(t *testing.T) {
-	policy, ok := NewCodexACP().FilesystemPolicyDescriptor()
-	if !ok {
-		t.Fatal("Codex ACP must advertise a filesystem-policy renderer")
-	}
-
-	config, err := policy.Renderer.Render(FilesystemPolicy{
+	env := map[string]string{"CODEX_CONFIG": `{"approval_policy":"never"}`}
+	err := NewCodexACP().ApplyFilesystemPolicy(env, FilesystemPolicy{
 		Name: "kandev_task_git_metadata",
 		Rules: []FilesystemPolicyRule{
 			{Path: ":minimal", Access: FilesystemAccessRead},
@@ -85,15 +81,11 @@ func TestCodexACPRendersNarrowFilesystemPolicy(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("Render() error = %v", err)
-	}
-	encoded, err := json.Marshal(config)
-	if err != nil {
-		t.Fatalf("marshal rendered policy: %v", err)
+		t.Fatalf("ApplyFilesystemPolicy() error = %v", err)
 	}
 
 	var decoded map[string]any
-	if err := json.Unmarshal(encoded, &decoded); err != nil {
+	if err := json.Unmarshal([]byte(env["CODEX_CONFIG"]), &decoded); err != nil {
 		t.Fatalf("unmarshal rendered policy: %v", err)
 	}
 	if got := decoded["default_permissions"]; got != "kandev_task_git_metadata" {

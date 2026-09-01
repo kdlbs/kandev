@@ -202,7 +202,7 @@ func TestRemoteRegularGitMetadataPolicyOnlyWritesTaskGitDir(t *testing.T) {
 	if err := json.Unmarshal([]byte(req.Env["CODEX_CONFIG"]), &config); err != nil {
 		t.Fatalf("decode CODEX_CONFIG: %v", err)
 	}
-	profile := config["permissions"].(map[string]any)[codexGitMetadataPolicyName].(map[string]any)
+	profile := config["permissions"].(map[string]any)[gitMetadataPolicyName].(map[string]any)
 	rules := profile["filesystem"].(map[string]any)
 	if got := rules[metadata.GitDir]; got != "write" {
 		t.Fatalf("remote GitDir permission = %#v, want write", got)
@@ -230,7 +230,7 @@ func TestRemoteRegularGitMetadataPolicyWritesOnlyAttestedCloneDirectories(t *tes
 	if err := json.Unmarshal([]byte(req.Env["CODEX_CONFIG"]), &config); err != nil {
 		t.Fatalf("decode CODEX_CONFIG: %v", err)
 	}
-	rules := config["permissions"].(map[string]any)[codexGitMetadataPolicyName].(map[string]any)["filesystem"].(map[string]any)
+	rules := config["permissions"].(map[string]any)[gitMetadataPolicyName].(map[string]any)["filesystem"].(map[string]any)
 	for _, item := range metadata {
 		if rules[item.GitDir] != "write" {
 			t.Fatalf("GitDir %q permission = %#v, want write", item.GitDir, rules[item.GitDir])
@@ -268,7 +268,7 @@ func TestRemoteGitMetadataRequestFailsClosed(t *testing.T) {
 			AgentConfig: agents.NewCodexACP(),
 			Env:         map[string]string{"CODEX_CONFIG": `{"sandbox_mode":"workspace-write"}`},
 		})
-		if err == nil || !strings.Contains(err.Error(), "compatible Codex ACP") {
+		if err == nil || !strings.Contains(err.Error(), gitMetadataProjectionUnsupported) {
 			t.Fatalf("validateRemoteGitMetadataRequest() error = %v, want legacy sandbox rejection", err)
 		}
 	})
@@ -296,13 +296,12 @@ func TestRemoteRegularGitMetadataParserRejectsEscapes(t *testing.T) {
 	}
 }
 
-func TestRemoteRegularGitMetadataProbeRejectsLegacyAndSymlinkedState(t *testing.T) {
+func TestRemoteRegularGitMetadataProbeRejectsSymlinkedState(t *testing.T) {
 	script := remoteRegularGitMetadataProbeScript("/remote/task")
 	for _, want := range []string{
 		"[ \"$gitdir\" = \"$workspace/.git\" ]",
 		"[ ! -L \"$gitdir\" ]",
 		"[ ! -L \"$gitdir/objects\" ]",
-		"sandbox_mode|sandbox_workspace_write",
 		"[ ! -L \"$gitdir/refs\" ]",
 		"[ ! -L \"$gitdir/logs\" ]",
 	} {
@@ -342,19 +341,6 @@ func TestRemoteRegularGitMetadataProbeRunsAgainstRealCheckout(t *testing.T) {
 	runContainerGit(t, workspace, "update-ref", "refs/heads/attested-lock-coverage", "HEAD")
 	if _, err := os.Stat(filepath.Join(workspace, ".git", "refs", "heads", "attested-lock-coverage")); err != nil {
 		t.Fatalf("attested clone ref update did not reach regular .git: %v", err)
-	}
-
-	if err := os.Mkdir(filepath.Join(workspace, ".codex"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(workspace, ".codex", "config.toml"), []byte(`sandbox_mode = "workspace-write"`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := runRemoteRegularGitMetadataProbe(t, workspace); err == nil {
-		t.Fatal("remote probe accepted a legacy Codex sandbox setting")
-	}
-	if err := os.Remove(filepath.Join(workspace, ".codex", "config.toml")); err != nil {
-		t.Fatal(err)
 	}
 
 	if runtime.GOOS == "windows" {

@@ -841,10 +841,10 @@ func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
 	// than a GitHub broker lease. Preserve that credential-free routing shape
 	// for the remote agentctl process as well.
 	copyIndexedGitConfig(req.Env, env)
-	if policyAgent, ok := req.AgentConfig.(agents.FilesystemPolicyAgent); ok {
-		if descriptor, supported := policyAgent.FilesystemPolicyDescriptor(); supported && descriptor != nil && descriptor.ConfigEnvKey != "" {
-			if value := req.Env[descriptor.ConfigEnvKey]; value != "" {
-				env[descriptor.ConfigEnvKey] = value
+	if policyAgent, ok := req.AgentConfig.(agents.FilesystemPolicyEnvironmentAgent); ok {
+		for _, key := range policyAgent.FilesystemPolicyEnvironmentKeys() {
+			if value := req.Env[key]; value != "" {
+				env[key] = value
 			}
 		}
 	}

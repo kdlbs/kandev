@@ -3,8 +3,14 @@ package agents
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
+
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
@@ -194,20 +200,43 @@ func (a *CodexACP) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings
 }
 
-// FilesystemPolicyDescriptor returns the Codex ACP bridge's supported session
-// configuration overlay. CODEX_CONFIG is parsed by the bridge as JSON and
-// merged into the Codex session configuration; the lifecycle renderer owns all
-// concrete paths and never relies on a repository-provided config file.
-func (a *CodexACP) FilesystemPolicyDescriptor() (*FilesystemPolicyDescriptor, bool) {
-	return &FilesystemPolicyDescriptor{
-		ConfigEnvKey: "CODEX_CONFIG",
-		Renderer:     codexACPFilesystemPolicyRenderer{},
-	}, true
+// ApplyFilesystemPolicy renders and validates Codex's native session
+// configuration. Lifecycle remains unaware of CODEX_CONFIG and Codex sandbox
+// keys so other agents can render the same neutral policy differently.
+func (a *CodexACP) ApplyFilesystemPolicy(env map[string]string, policy FilesystemPolicy) error {
+	return applyCodexFilesystemPolicy(env, policy)
 }
 
-type codexACPFilesystemPolicyRenderer struct{}
+func (a *CodexACP) FilesystemPolicyEnvironmentKeys() []string { return []string{"CODEX_CONFIG"} }
 
-func (codexACPFilesystemPolicyRenderer) Render(policy FilesystemPolicy) (map[string]any, error) {
+func applyCodexFilesystemPolicy(env map[string]string, policy FilesystemPolicy) error {
+	if env == nil {
+		return errors.New("filesystem policy environment is unavailable")
+	}
+	if err := rejectLegacyCodexSandbox(env); err != nil {
+		return err
+	}
+	config, err := codexConfigFromEnvironment(env)
+	if err != nil {
+		return err
+	}
+	if hasLegacyCodexSandbox(config) {
+		return errors.New("legacy Codex sandbox configuration conflicts with task filesystem policy")
+	}
+	overlay, err := renderCodexFilesystemPolicy(policy)
+	if err != nil {
+		return err
+	}
+	mergeCodexConfig(config, overlay)
+	encoded, err := json.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("encode Codex filesystem policy: %w", err)
+	}
+	env["CODEX_CONFIG"] = string(encoded)
+	return nil
+}
+
+func renderCodexFilesystemPolicy(policy FilesystemPolicy) (map[string]any, error) {
 	if policy.Name == "" {
 		return nil, fmt.Errorf("filesystem policy name is required")
 	}
@@ -232,6 +261,69 @@ func (codexACPFilesystemPolicyRenderer) Render(policy FilesystemPolicy) (map[str
 			},
 		},
 	}, nil
+}
+
+func rejectLegacyCodexSandbox(env map[string]string) error {
+	home := env["CODEX_HOME"]
+	if home == "" {
+		home = filepath.Join(env["HOME"], ".codex")
+	}
+	if home == "" {
+		return nil
+	}
+	contents, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return errors.New("unable to validate Codex sandbox configuration")
+	}
+	config := make(map[string]any)
+	if err := toml.Unmarshal(contents, &config); err != nil {
+		return errors.New("unable to validate Codex sandbox configuration")
+	}
+	if hasLegacyCodexSandbox(config) {
+		return errors.New("legacy Codex sandbox configuration conflicts with task filesystem policy")
+	}
+	return nil
+}
+
+func codexConfigFromEnvironment(env map[string]string) (map[string]any, error) {
+	config := make(map[string]any)
+	if env["CODEX_CONFIG"] == "" {
+		return config, nil
+	}
+	if err := json.Unmarshal([]byte(env["CODEX_CONFIG"]), &config); err != nil {
+		return nil, errors.New("unable to validate Codex session configuration")
+	}
+	return config, nil
+}
+
+func hasLegacyCodexSandbox(config map[string]any) bool {
+	_, sandboxMode := config["sandbox_mode"]
+	_, workspaceWrite := config["sandbox_workspace_write"]
+	return sandboxMode || workspaceWrite
+}
+
+func mergeCodexConfig(base, overlay map[string]any) {
+	for key, value := range overlay {
+		if key != "permissions" {
+			base[key] = value
+			continue
+		}
+		existing, _ := base[key].(map[string]any)
+		if existing == nil {
+			existing = make(map[string]any)
+			base[key] = existing
+		}
+		permissions, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		for name, profile := range permissions {
+			existing[name] = profile
+		}
+	}
 }
 
 // InferenceConfig returns configuration for one-shot inference using ACP.

@@ -122,26 +122,18 @@ type FilesystemPolicy struct {
 	Rules []FilesystemPolicyRule
 }
 
-// FilesystemPolicyRenderer renders a server-authored policy into the agent's
-// native session configuration. The returned value is encoded into the
-// descriptor's ConfigEnvKey for the subprocess; it must not contain paths the
-// renderer derived independently.
-type FilesystemPolicyRenderer interface {
-	Render(FilesystemPolicy) (map[string]any, error)
-}
-
-// FilesystemPolicyDescriptor identifies an agent-native policy renderer and
-// the environment variable through which its configuration is supplied.
-type FilesystemPolicyDescriptor struct {
-	ConfigEnvKey string
-	Renderer     FilesystemPolicyRenderer
-}
-
 // FilesystemPolicyAgent is an optional agent capability for runtimes that
 // require a narrow agent-side filesystem sandbox in addition to host or
-// container isolation.
+// container isolation. Each adapter owns its native configuration rendering
+// and validation; lifecycle supplies only the neutral server-authored policy.
 type FilesystemPolicyAgent interface {
-	FilesystemPolicyDescriptor() (*FilesystemPolicyDescriptor, bool)
+	ApplyFilesystemPolicy(env map[string]string, policy FilesystemPolicy) error
+}
+
+// FilesystemPolicyEnvironmentAgent optionally identifies the generated
+// environment entries that must be forwarded to a remote executor.
+type FilesystemPolicyEnvironmentAgent interface {
+	FilesystemPolicyEnvironmentKeys() []string
 }
 
 // PassthroughAgent is an optional capability for agents that support CLI passthrough mode.

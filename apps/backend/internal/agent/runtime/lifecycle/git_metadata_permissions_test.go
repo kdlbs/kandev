@@ -106,7 +106,7 @@ func TestStandaloneGitMetadataPreflightRendersCodexPolicy(t *testing.T) {
 	if _, ok := permissions["existing"]; !ok {
 		t.Fatalf("existing policy lost: %#v", permissions)
 	}
-	profile, ok := permissions[codexGitMetadataPolicyName].(map[string]any)
+	profile, ok := permissions[gitMetadataPolicyName].(map[string]any)
 	if !ok {
 		t.Fatalf("task metadata policy missing: %#v", permissions)
 	}
@@ -141,22 +141,8 @@ func TestStandaloneGitMetadataPreflightAllowsMockAgent(t *testing.T) {
 		t.Fatalf("decode CODEX_CONFIG: %v", err)
 	}
 	permissions, ok := config["permissions"].(map[string]any)
-	if !ok || permissions[codexGitMetadataPolicyName] == nil {
+	if !ok || permissions[gitMetadataPolicyName] == nil {
 		t.Fatalf("permissions = %#v, want task Git metadata policy", config["permissions"])
-	}
-}
-
-func TestMergeCodexConfigIgnoresMalformedPermissionsOverlay(t *testing.T) {
-	config := map[string]any{"approval_policy": "never"}
-
-	mergeCodexConfig(config, map[string]any{"permissions": "not-an-object"})
-
-	if got := config["approval_policy"]; got != "never" {
-		t.Fatalf("approval policy = %#v, want preserved value", got)
-	}
-	permissions, ok := config["permissions"].(map[string]any)
-	if !ok || len(permissions) != 0 {
-		t.Fatalf("permissions = %#v, want no malformed overlay entries", config["permissions"])
 	}
 }
 
