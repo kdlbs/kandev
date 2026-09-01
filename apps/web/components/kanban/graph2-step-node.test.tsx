@@ -7,16 +7,8 @@ import type { WorkflowStep } from "@/components/kanban-column";
 import type { ForegroundActivity, TaskPendingAction } from "@/lib/types/http";
 import { Graph2StepNode } from "./graph2-step-node";
 
-// Some legacy renders in this file still mount inside the SPA router mock;
-// harmless once the component no longer calls useRouter.
-const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
-vi.mock("@/lib/routing/client-router", () => ({
-  useRouter: () => ({ push: pushMock }),
-}));
-
 afterEach(() => {
   cleanup();
-  pushMock.mockClear();
 });
 
 const STEP_TITLE = "In Progress";
@@ -242,6 +234,5 @@ describe("Graph2StepNode — pill click routes through onOpenTask", () => {
     fireEvent.click(screen.getByRole("button", { name: STEP_TITLE }));
 
     expect(onOpenTask).toHaveBeenCalledWith(makeTask());
-    expect(pushMock).not.toHaveBeenCalled();
   });
 });

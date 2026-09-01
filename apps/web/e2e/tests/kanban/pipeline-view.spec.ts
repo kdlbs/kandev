@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 test.describe("Pipeline view", () => {
   test.beforeEach(async ({ testPage }) => {
@@ -130,7 +131,9 @@ test.describe("Pipeline view", () => {
       .click();
 
     // Preview panel opens in place (URL carries taskId=), not a full-page navigation to /t/:id.
-    await expect(testPage).toHaveURL(/taskId=/, { timeout: 10_000 });
+    // This is a synchronous client-side route update, not a backend round trip,
+    // so the default assertion timeout is enough - no hand-picked budget needed.
+    await expect(testPage).toHaveURL(/taskId=/);
     await expect(testPage.getByTestId("task-preview-panel")).toBeVisible();
 
     await apiClient.saveUserSettings({ enable_preview_on_click: false });
@@ -289,13 +292,14 @@ test.describe("Pipeline view", () => {
     // A plain click exercises Playwright's actionability check, which fails
     // if another element (the sticky actions wrapper) intercepts the pointer
     // event at the chevron's location - the exact F6 regression.
+    const moved = waitForHttp(testPage, "POST", /\/tasks\/[^/]+\/move$/);
     await moveChevron.click();
+    await moved;
 
     // The move actually landed: the task's current pill is now the
     // previously-hidden step, which is no longer empty and so no longer
-    // auto-hidden.
-    await expect(row.getByRole("button", { name: "Hidden Next" })).toBeVisible({
-      timeout: 10_000,
-    });
+    // auto-hidden. The backend round trip is already awaited above, so this
+    // needs no hand-picked budget beyond the default.
+    await expect(row.getByRole("button", { name: "Hidden Next" })).toBeVisible();
   });
 });
