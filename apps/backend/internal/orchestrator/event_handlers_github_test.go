@@ -67,18 +67,20 @@ type mockGitHubService struct {
 	lastAssociateRepositoryID   string
 	lastCreateWatchWorkspaceID  string
 	lastAssociateWorkspaceID    string
-	// lastCreateWatchTaskID/lastAssociateTaskID capture the taskID each
-	// ForWorkspace call actually wrote under, so tests can pin the
-	// workspace-group redirect (resolveEffectivePushTaskID) at the write
+	// lastCreateWatchTaskID/lastAssociateTaskID/lastEnsureWatchTaskID capture
+	// the taskID each ForWorkspace call actually wrote under, so tests can pin
+	// the workspace-group redirect (resolveEffectivePushTaskID) at the write
 	// funnel instead of only inferring it from call counts.
 	lastCreateWatchTaskID string
 	lastAssociateTaskID   string
-	// createWatchLog/associateLog record every call (not just the last), so
-	// multi-branch tests can assert each branch got its own watch/association
-	// scoped to the right repository, rather than only inspecting whichever
-	// call happened to run last.
+	lastEnsureWatchTaskID string
+	// createWatchLog/associateLog/ensureWatchLog record every call (not just
+	// the last), so multi-branch tests can assert each branch got its own
+	// watch/association scoped to the right repository, rather than only
+	// inspecting whichever call happened to run last.
 	createWatchLog []repoBranchCall
 	associateLog   []repoBranchCall
+	ensureWatchLog []repoBranchCall
 
 	// Review PR reservation tracking.
 	reserveCalls   int
@@ -377,9 +379,11 @@ func (m *mockGitHubService) MergePRForAutomation(
 	m.mergeExpectedHeadSHA = expectedHeadSHA
 	return m.MergePR(ctx, owner, repo, number, method)
 }
-func (m *mockGitHubService) EnsurePRWatch(_ context.Context, _, _, _, _, _, branch string) (*github.PRWatch, error) {
+func (m *mockGitHubService) EnsurePRWatch(_ context.Context, _, taskID, repositoryID, _, _, branch string) (*github.PRWatch, error) {
 	m.ensureWatchCalls++
 	m.ensureWatchBranch = branch
+	m.lastEnsureWatchTaskID = taskID
+	m.ensureWatchLog = append(m.ensureWatchLog, repoBranchCall{TaskID: taskID, RepositoryID: repositoryID, Branch: branch})
 	return &github.PRWatch{}, nil
 }
 

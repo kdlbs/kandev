@@ -211,6 +211,11 @@ func TestGitHubPushAssociationRedirectsToWorkspaceGroupOwner(t *testing.T) {
 	}
 	seedWorkspaceGroup(t, repo, "group1", "parent1", "parent1", "t1")
 	seedGitHubPushAssocFixture(t, repo, "feature-x")
+	// The owner shares the same physical checkout as its members (that's the
+	// whole premise of inherit_parent/shared_group), so it holds repo1 too —
+	// this is what makes the redirect below eligible under the F2 ownership
+	// guard, not just the group membership.
+	seedGroupOwnerTaskRepository(t, repo, "parent1", "repo1", "feature-x")
 
 	mockClient := github.NewMockClient()
 	mockClient.AddPR(&github.PR{
@@ -298,5 +303,169 @@ func TestGitHubPushAssociationRedirectsToWorkspaceGroupOwner(t *testing.T) {
 	}
 	if ghSvc.lastAssociateTaskID != "solo1" {
 		t.Fatalf("AssociatePRWithTask taskID = %q, want solo1 (no group, no redirect)", ghSvc.lastAssociateTaskID)
+	}
+}
+
+// seedGroupOwnerTaskRepository gives the workspace-group owner task its own
+// task_repositories row for repoID, matching the real inherit_parent/
+// shared_group scenario where the owner is checked out at the same physical
+// repository its members share. Without this, resolveEffectivePushTaskID's F2
+// fallback (the owner doesn't hold the repository) would fire and every
+// redirect-focused test below would silently degrade into the ungrouped-task
+// no-redirect path instead of exercising the redirect itself.
+func seedGroupOwnerTaskRepository(t *testing.T, repo *sqliterepo.Repository, taskID, repoID, checkoutBranch string) {
+	t.Helper()
+	now := time.Now().UTC()
+	if err := repo.CreateTaskRepository(context.Background(), &models.TaskRepository{
+		ID: "tr-" + taskID, TaskID: taskID, RepositoryID: repoID, CheckoutBranch: checkoutBranch,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create owner task repository: %v", err)
+	}
+}
+
+// TestEnsureSessionPRWatchRedirectsToWorkspaceGroupOwner covers Review Round
+// 1's F1 finding: resolveEffectivePushTaskID was only ever called from
+// dispatchPushDetection. ensureSessionPRWatch runs on every session start (see
+// task_operations.go's four call sites) and, before this fix, always created
+// its watch under the observing subtask's own taskID — so a shared-worktree
+// subtask got its own member-attributed watch the moment its session started,
+// independent of whether a push had even happened yet.
+func TestEnsureSessionPRWatchRedirectsToWorkspaceGroupOwner(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+
+	seedSession(t, repo, "t1", "s1", "step1")
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "parent1", WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: "step1",
+		Title: "Parent", Description: "Test", State: v1.TaskStateInProgress,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create parent task: %v", err)
+	}
+	seedWorkspaceGroup(t, repo, "group1", "parent1", "parent1", "t1")
+	seedGitHubPushAssocFixture(t, repo, "feature-x")
+	seedGroupOwnerTaskRepository(t, repo, "parent1", "repo1", "feature-x")
+
+	ghSvc := &mockGitHubService{client: github.NewMockClient()}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetGitHubService(ghSvc)
+
+	svc.ensureSessionPRWatch(ctx, "t1", "s1", "feature-x")
+
+	if ghSvc.ensureWatchCalls == 0 {
+		t.Fatalf("expected EnsurePRWatchForWorkspace to be called")
+	}
+	if ghSvc.lastEnsureWatchTaskID != "parent1" {
+		t.Fatalf("EnsurePRWatchForWorkspace taskID = %q, want parent1 (the group owner)", ghSvc.lastEnsureWatchTaskID)
+	}
+	for _, c := range ghSvc.ensureWatchLog {
+		if c.TaskID == "t1" {
+			t.Fatalf("subtask t1 got its own watch, want zero: %+v", ghSvc.ensureWatchLog)
+		}
+	}
+}
+
+// TestCheckSessionPRRedirectsToWorkspaceGroupOwner covers the second F1 gap:
+// CheckSessionPR is the frontend's on-demand alternative to push detection
+// (triggered by the user clicking "check for PR"), and before this fix wrote
+// both the watch and the association under the observing subtask's own
+// taskID, reproducing the multi-binding defect on demand instead of only on a
+// push.
+func TestCheckSessionPRRedirectsToWorkspaceGroupOwner(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+
+	seedSession(t, repo, "t1", "s1", "step1")
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "parent1", WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: "step1",
+		Title: "Parent", Description: "Test", State: v1.TaskStateInProgress,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create parent task: %v", err)
+	}
+	seedWorkspaceGroup(t, repo, "group1", "parent1", "parent1", "t1")
+	seedGitHubPushAssocFixture(t, repo, "feature-x")
+	seedGroupOwnerTaskRepository(t, repo, "parent1", "repo1", "feature-x")
+
+	mockClient := github.NewMockClient()
+	mockClient.AddPR(&github.PR{
+		Number: 9, Title: "On-demand check PR", HTMLURL: "https://github.com/myorg/kandev/pull/9",
+		RepoOwner: "myorg", RepoName: "kandev", HeadBranch: "feature-x", BaseBranch: "main",
+	})
+	ghSvc := &mockGitHubService{client: mockClient}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetGitHubService(ghSvc)
+
+	found, err := svc.CheckSessionPR(ctx, "t1", "s1")
+	if err != nil {
+		t.Fatalf("CheckSessionPR: %v", err)
+	}
+	if !found {
+		t.Fatalf("CheckSessionPR: expected a PR to be found")
+	}
+
+	if ghSvc.lastEnsureWatchTaskID != "parent1" {
+		t.Fatalf("EnsurePRWatchForWorkspace taskID = %q, want parent1 (the group owner)", ghSvc.lastEnsureWatchTaskID)
+	}
+	if ghSvc.lastAssociateTaskID != "parent1" {
+		t.Fatalf("AssociatePRWithTask taskID = %q, want parent1 (the group owner)", ghSvc.lastAssociateTaskID)
+	}
+	for _, c := range ghSvc.associateLog {
+		if c.TaskID == "t1" {
+			t.Fatalf("subtask t1 got its own association, want zero: %+v", ghSvc.associateLog)
+		}
+	}
+}
+
+// TestPushAssociationFallsBackWhenOwnerLacksRepository covers Review Round 1's
+// F2 finding: resolveEffectivePushTaskID must not redirect to a workspace
+// group owner that doesn't hold the observing task's repository in its own
+// task_repositories, since the downstream validateTaskRepositoryID guard would
+// then reject the write and the association would be dropped silently —
+// contradicting the "never drop the association silently" design principle.
+// The write must fall back to the observing task instead.
+func TestPushAssociationFallsBackWhenOwnerLacksRepository(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+
+	seedSession(t, repo, "t1", "s1", "step1")
+	// Parent owns the group but was never seeded with repo1 in its own
+	// task_repositories — e.g. it added the group after the member already
+	// had its own repository wired up.
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "parent1", WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: "step1",
+		Title: "Parent", Description: "Test", State: v1.TaskStateInProgress,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create parent task: %v", err)
+	}
+	seedWorkspaceGroup(t, repo, "group1", "parent1", "parent1", "t1")
+	seedGitHubPushAssocFixture(t, repo, "feature-x")
+
+	mockClient := github.NewMockClient()
+	mockClient.AddPR(&github.PR{
+		Number: 10, Title: "Fallback PR", HTMLURL: "https://github.com/myorg/kandev/pull/10",
+		RepoOwner: "myorg", RepoName: "kandev", HeadBranch: "feature-x", BaseBranch: "main",
+	})
+	ghSvc := &mockGitHubService{client: mockClient}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetGitHubService(ghSvc)
+
+	svc.dispatchPushDetection(ctx, "s1", "t1", "", "feature-x")
+
+	if ghSvc.lastCreateWatchTaskID != "t1" {
+		t.Fatalf("CreatePRWatch taskID = %q, want t1 (owner lacks repository, fall back to observing task)",
+			ghSvc.lastCreateWatchTaskID)
+	}
+	if ghSvc.lastAssociateTaskID != "t1" {
+		t.Fatalf("AssociatePRWithTask taskID = %q, want t1 (owner lacks repository, fall back to observing task)",
+			ghSvc.lastAssociateTaskID)
+	}
+	if len(ghSvc.associateLog) != 1 {
+		t.Fatalf("expected exactly one association (not silently dropped), got %+v", ghSvc.associateLog)
 	}
 }

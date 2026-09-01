@@ -8,14 +8,23 @@ import (
 
 // GetWorkspaceGroupOwnerTaskID returns the owner task ID of the active
 // (non-released) workspace group taskID belongs to, or "" if taskID is not a
-// member of any active group (including the common case where it is itself
-// the owner). task_workspace_groups/task_workspace_group_members are created
-// by internal/office/repository/sqlite (see createWorkspaceGroupTables), not
-// by this package's own schema init; both packages operate on the same
-// physical SQLite database, and session.go's bindReadySharedGroupEnvironment
-// already reads these tables directly for the same reason — avoiding an
+// member of any active group. The owner itself has its own 'owner'-role
+// member row (AddWorkspaceGroupMember is called for the owner too), so
+// calling this with the owner's own taskID returns that same ID rather than
+// "" — callers redirecting a write compare the result against their input
+// taskID rather than against "" to detect that no-op case.
+// task_workspace_groups/task_workspace_group_members are created by
+// internal/office/repository/sqlite (see createWorkspaceGroupTables), not by
+// this package's own schema init; both packages operate on the same physical
+// SQLite database, and session.go's bindReadySharedGroupEnvironment already
+// reads these tables directly for the same reason — avoiding an
 // internal/office import into internal/task/repository/sqlite (and, via it,
 // into internal/orchestrator).
+//
+// ORDER BY makes the choice deterministic when a task is (unreleased-)member
+// of more than one active group at once — AddWorkspaceGroupMember does not
+// constrain a task to a single group, and without an explicit order the
+// LIMIT 1 pick depends on SQLite's query plan. Earliest membership wins.
 func (r *Repository) GetWorkspaceGroupOwnerTaskID(ctx context.Context, taskID string) (string, error) {
 	var ownerTaskID string
 	err := r.ro.GetContext(ctx, &ownerTaskID, r.ro.Rebind(`
@@ -23,6 +32,7 @@ func (r *Repository) GetWorkspaceGroupOwnerTaskID(ctx context.Context, taskID st
 		FROM task_workspace_groups g
 		JOIN task_workspace_group_members m ON m.workspace_group_id = g.id
 		WHERE m.task_id = ? AND m.released_at IS NULL
+		ORDER BY m.created_at, g.id
 		LIMIT 1
 	`), taskID)
 	if errors.Is(err, sql.ErrNoRows) {
