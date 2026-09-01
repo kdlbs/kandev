@@ -13,7 +13,11 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
-import { readQuickChatViewportLayout, startQuickChatFromSetup } from "./quick-chat-helpers";
+import {
+  readQuickChatViewportLayout,
+  sendQuickChatMessage,
+  startQuickChatFromSetup,
+} from "./quick-chat-helpers";
 
 const TASK_LISTING_VIEW_STORAGE_KEY = "kandev.taskListing.view.v1";
 
@@ -33,6 +37,19 @@ test.describe("Quick Chat entry points on mobile", () => {
     expect(layout.contentBottom).toBeLessThanOrEqual(layout.dialogBottom + 1);
     expect(layout.dialogBottom - layout.contentBottom).toBeLessThanOrEqual(2);
     expect(layout.dialogScrollHeight).toBeLessThanOrEqual(layout.dialogClientHeight + 1);
+
+    await sendQuickChatMessage(dialog, testPage, "/e2e:bulk:20");
+    await expect(dialog.getByText(/Done\. Emitted 20 messages/)).toBeVisible({ timeout: 30_000 });
+
+    const longChatLayout = await readQuickChatViewportLayout(dialog);
+    expect(longChatLayout.messageScrollerScrollHeight).toBeGreaterThan(
+      longChatLayout.messageScrollerClientHeight,
+    );
+    expect(longChatLayout.composerBottom).toBeLessThanOrEqual(longChatLayout.dialogBottom + 1);
+    expect(longChatLayout.dialogBottom - longChatLayout.composerBottom).toBeLessThanOrEqual(8);
+    expect(longChatLayout.dialogScrollHeight).toBeLessThanOrEqual(
+      longChatLayout.dialogClientHeight + 1,
+    );
   });
 
   // @covers AC-UI-QUICK-CHAT-ELEVATION-001.4 AC-UI-QUICK-CHAT-ELEVATION-001.7

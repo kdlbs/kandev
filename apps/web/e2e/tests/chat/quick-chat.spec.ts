@@ -83,6 +83,18 @@ test.describe("Quick Chat", () => {
     expect(longChatLayout.dialogScrollHeight).toBeLessThanOrEqual(
       longChatLayout.dialogClientHeight + 1,
     );
+
+    await testPage.setViewportSize({ width: 1440, height: 600 });
+
+    const resizedLayout = await readQuickChatViewportLayout(dialog);
+    expect(resizedLayout.messageScrollerScrollHeight).toBeGreaterThan(
+      resizedLayout.messageScrollerClientHeight,
+    );
+    expect(resizedLayout.composerBottom).toBeLessThanOrEqual(resizedLayout.dialogBottom + 1);
+    expect(resizedLayout.dialogBottom - resizedLayout.composerBottom).toBeLessThanOrEqual(8);
+    expect(resizedLayout.dialogScrollHeight).toBeLessThanOrEqual(
+      resizedLayout.dialogClientHeight + 1,
+    );
   });
 
   // @covers AC-UI-QUICK-CHAT-ELEVATION-001.1 AC-UI-QUICK-CHAT-ELEVATION-001.2 AC-UI-QUICK-CHAT-ELEVATION-001.5 AC-UI-QUICK-CHAT-ELEVATION-001.6

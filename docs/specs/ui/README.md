@@ -11,11 +11,11 @@ owners:
 
 ## Purpose and ownership
 
-The UI system owns web presentation and interaction.
+The UI owns web presentation and interaction.
 
 ## Exclusions
 
-- Behavior and state belong to [Tasks](../tasks/README.md),
+- Domain behavior and state belong to [Tasks](../tasks/README.md),
   [Agents](../agents/README.md), [Plugins](../plugins/README.md), and
   [Integrations](../integrations/README.md).
 

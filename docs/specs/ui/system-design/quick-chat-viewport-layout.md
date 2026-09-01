@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: ui
 requirements:
   - REQ-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001
@@ -24,7 +24,7 @@ change state, APIs, persistence, or the shared dialog primitive.
 ## Components and responsibilities
 
 - [`QuickChatModal`](../../../../apps/web/components/quick-chat/quick-chat-modal.tsx)
-  owns the viewport-bound dialog. It uses `85dvh` on wider viewports and
+  owns the viewport-bound dialog. It uses `85vh` on wider viewports and
   `100dvh` on phone viewports.
 - [`QuickChatSessionView`](../../../../apps/web/components/quick-chat/quick-chat-session-view.tsx)
   owns the recovery notice and the remaining conversation slot.
@@ -81,9 +81,10 @@ not change.
 
 - A desktop Playwright scenario uses a laptop-height viewport. It checks the
   composer position before and after a bulk transcript fills the message area.
+- The desktop scenario shrinks the viewport and rechecks composer containment.
 - The desktop scenario checks that only the transcript gains vertical overflow.
-- A mobile Playwright scenario checks composer containment in the existing
-  full-height surface.
+- A mobile Playwright scenario checks composer containment and transcript
+  overflow in the existing full-height surface.
 - The focused web type check covers the React and TypeScript integration.
 
 ## Related decisions
