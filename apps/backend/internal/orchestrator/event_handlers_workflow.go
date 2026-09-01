@@ -2595,8 +2595,9 @@ func (s *Service) launchAfterOnEnterDispatch(
 		// autoStartStepPrompt sends the prompt directly via PromptTask.
 		effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
 		if err := s.autoStartStepPrompt(ctx, taskID, session, step, effectivePrompt, hasPlanMode, true); err != nil {
-			if errors.Is(err, errSessionReadinessRecoverySuperseded) {
-				s.logger.Info("workflow auto-start readiness recovery was superseded",
+			if errors.Is(err, errSessionReadinessRecoverySuperseded) ||
+				errors.Is(err, errSessionReadinessRecoveryTeardownIncomplete) {
+				s.logger.Info("workflow auto-start readiness recovery preserved its current state",
 					zap.String("task_id", taskID),
 					zap.String("session_id", sessionID))
 				return
@@ -3682,6 +3683,11 @@ func (s *Service) autoStartStepPrompt(
 			return nil
 		}
 		if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
+			requeueTaken()
+			return err
+		}
+		if errors.Is(err, errSessionReadinessRecoverySuperseded) ||
+			errors.Is(err, errSessionReadinessRecoveryTeardownIncomplete) {
 			requeueTaken()
 			return err
 		}

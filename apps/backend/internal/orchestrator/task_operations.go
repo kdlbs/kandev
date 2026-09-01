@@ -116,6 +116,11 @@ var errQueuedDispatchSuperseded = errors.New("queued dispatch superseded by a ne
 // fallback must not park the new owner based on the old execution's timeout.
 var errSessionReadinessRecoverySuperseded = errors.New("session readiness recovery superseded")
 
+// errSessionReadinessRecoveryTeardownIncomplete marks a timeout recovery whose
+// exact execution may still be active because runtime teardown failed.
+// Workflow fallback must preserve STARTING instead of parking or replacing it.
+var errSessionReadinessRecoveryTeardownIncomplete = errors.New("session readiness recovery teardown incomplete")
+
 var (
 	// Backend restart recovery can restore the session state before the ACP
 	// stream is promptable again. Keep this above CI's slow-start tail so a
@@ -2564,7 +2569,7 @@ func (s *Service) failOwnedExecutionAfterReadinessTimeout(
 		zap.Error(timeoutErr))
 	stopErr := s.executor.StopExecution(ctx, executionID, sessionReadinessRecoveryStopReason, true)
 	if stopErr != nil {
-		return stopErr
+		return fmt.Errorf("%w: %w", errSessionReadinessRecoveryTeardownIncomplete, stopErr)
 	}
 	s.markExecutionFailed(session.ID, executionID)
 	s.retireExecutionActivityAndPublish(ctx, session.TaskID, session.ID, executionID)

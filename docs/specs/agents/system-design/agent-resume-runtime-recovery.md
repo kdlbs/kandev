@@ -127,10 +127,10 @@ A terminal session or successor execution supersedes the timeout owner. The
 timeout path neither revives the terminal row nor stops or reconciles the
 successor. It returns an ordinary readiness error rather than the workflow
 terminalization sentinel, so workflow entry cannot create a replacement
-session. An internal supersession marker also prevents workflow fallback from
-parking a successor-owned session. Other workflow fallback reloads the
-authoritative row and publishes `WAITING_FOR_INPUT` only after that state is
-durable.
+session. Internal preserve-state markers also prevent workflow fallback from
+parking a successor-owned session or replacing an execution whose teardown
+failed. Other workflow fallback reloads the authoritative row and publishes
+`WAITING_FOR_INPUT` only after that state is durable.
 
 This recovery never synthesizes `agent.boot_ready`: that handler also drains
 queued prompts and would turn reconciliation into a second dispatch source.

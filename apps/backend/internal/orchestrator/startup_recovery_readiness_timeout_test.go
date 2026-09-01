@@ -11,6 +11,8 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/queue"
+	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -140,8 +142,15 @@ func newStartupRecoveryHarness(t *testing.T, promptReady bool) *startupRecoveryH
 	}
 	h.taskRepo = newMockTaskRepo()
 	h.taskRepo.tasks[h.task.ID] = &v1.Task{ID: h.task.ID, State: v1.TaskStateInProgress}
-	h.svc = createTestServiceWithAgent(h.repo, newMockStepGetter(), h.taskRepo, h.agentMgr)
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["blocked-step"] = &wfmodels.WorkflowStep{
+		ID: "blocked-step", WorkflowID: "wf1", Name: "Blocked", Prompt: "continue",
+	}
+	h.svc = createTestServiceWithAgent(h.repo, stepGetter, h.taskRepo, h.agentMgr)
 	h.svc.executor = executor.NewExecutor(h.agentMgr, h.repo, testLogger(), executor.ExecutorConfig{})
+	h.svc.scheduler = scheduler.NewScheduler(
+		queue.NewTaskQueue(10), h.svc.executor, h.taskRepo, testLogger(), scheduler.SchedulerConfig{},
+	)
 	return h
 }
 
@@ -383,6 +392,55 @@ func TestWorkflowAutoStart_ReadinessTimeoutDoesNotPublishWaitingOrCreateReplacem
 			if ok && data[metaKeyNewState] == string(models.TaskSessionStateWaitingForInput) {
 				t.Fatalf("published false WAITING_FOR_INPUT event: %+v", data)
 			}
+		}
+		h.assertStableIdentity(t)
+	})
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.6
+func TestWorkflowAutoStart_ReadinessTimeoutStopFailurePreservesRetryableSession(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newStartupRecoveryHarness(t, false)
+		h.agentMgr.stopAgentWithReasonErr = errors.New("runtime still active")
+		h.svc.registerBackgroundWork(h.session.ID, "background-live", "execution-resumed", "work-live")
+		eventBus := &mockEventBus{}
+		h.svc.eventBus = eventBus
+		step := &wfmodels.WorkflowStep{ID: "blocked-step", WorkflowID: "wf1", Name: "Blocked", Prompt: "continue"}
+
+		h.svc.launchAfterOnEnterDispatch(
+			h.ctx, h.task.ID, h.session, step, h.task.Description, false, true, false,
+		)
+
+		persisted, err := h.repo.GetTaskSession(h.ctx, h.session.ID)
+		if err != nil {
+			t.Fatalf("reload session: %v", err)
+		}
+		if persisted.State != models.TaskSessionStateStarting {
+			t.Fatalf("session state = %s, want retryable STARTING", persisted.State)
+		}
+		if got := h.taskRepo.stateWrites[h.task.ID]; got != 0 {
+			t.Fatalf("task state writes = %d, want 0 after stop failure", got)
+		}
+		for _, published := range eventBus.published() {
+			if published.Subject != events.TaskSessionStateChanged {
+				continue
+			}
+			data, ok := published.Event.Data.(map[string]interface{})
+			if ok && data[metaKeyNewState] == string(models.TaskSessionStateWaitingForInput) {
+				t.Fatalf("published false WAITING_FOR_INPUT event after stop failure: %+v", data)
+			}
+		}
+		if !h.svc.hasBackgroundTask(h.session.ID, "background-live") {
+			t.Fatal("stop failure retired activity still owned by the live execution")
+		}
+		if h.svc.isExecutionCompleted(h.session.ID, "execution-resumed") {
+			t.Fatal("stop failure terminal-marked a still-live execution")
+		}
+		h.agentMgr.mu.Lock()
+		stopCalls := append([]stopAgentCall(nil), h.agentMgr.stopAgentWithReasonArgs...)
+		h.agentMgr.mu.Unlock()
+		if len(stopCalls) != 1 || stopCalls[0].ExecutionID != "execution-resumed" {
+			t.Fatalf("stop calls = %+v, want one attempt for execution-resumed", stopCalls)
 		}
 		h.assertStableIdentity(t)
 	})
