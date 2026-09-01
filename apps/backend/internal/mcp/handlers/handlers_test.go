@@ -3177,6 +3177,9 @@ func TestHandleAskUserQuestion_Dedup_CreatesOnePendingBundle(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return len(store.ListPending()) == 1
 	}, time.Second, 5*time.Millisecond)
+	if got := store.ListPending()[0].PendingID; got != clarification.PendingIDForRequest(sess.ID, "test-id") {
+		t.Fatalf("pending ID = %q, want retry-stable identity %q", got, clarification.PendingIDForRequest(sess.ID, "test-id"))
+	}
 	store.CancelSession(sess.ID)
 	wg.Wait()
 

@@ -106,6 +106,13 @@ type SessionRepository interface {
 	SetSessionMetadataKeyIfAbsentOrDifferentStep(ctx context.Context, sessionID, key, stepID string, value interface{}) (bool, error)
 }
 
+// clarificationDurableReader is an optional repository extension used to
+// reconcile an interrupted ask_user_question retry with messages already
+// committed before its MCP wait was torn down.
+type clarificationDurableReader interface {
+	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*models.Message, error)
+}
+
 // stepCompletionTurnReader exposes the immutable workflow-step stamp on the
 // latest turn. Production SQLite implements this through the turn repository,
 // while small handler fakes can omit it and retain legacy behavior.
@@ -3744,19 +3751,39 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 
 	// Create the clarification request
 	clarificationReq := &clarification.Request{
+		PendingID: clarification.PendingIDForRequest(req.SessionID, msg.ID),
 		SessionID: req.SessionID,
 		TaskID:    taskID,
 		Questions: req.Questions,
 		Context:   req.Context,
 	}
 	pendingID, isNew := h.clarificationSvc.CreateRequest(clarificationReq)
+	// A transport retry may arrive after the durable question messages were
+	// committed but before the original MCP call returned. Reconcile that
+	// durable identity before creating messages so the retry cannot publish a
+	// second visible question bundle. Repositories without this optional
+	// extension retain the in-memory behavior used by lightweight test doubles.
+	durableMessagesExist := false
+	if pendingID != "" {
+		if reader, ok := h.sessionRepo.(clarificationDurableReader); ok {
+			messages, readErr := reader.FindMessagesByPendingID(ctx, pendingID)
+			if readErr != nil {
+				h.logger.Error("failed to reconcile clarification retry",
+					zap.String("pending_id", pendingID), zap.Error(readErr))
+				h.clarificationSvc.CancelRequest(pendingID)
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+					"failed to reconcile clarification retry", nil)
+			}
+			durableMessagesExist = len(messages) > 0
+		}
+	}
 
 	// Create one chat message per question (triggers WS events to frontend).
 	// If the create fails, the in-store pending entry must be cancelled too —
 	// otherwise the agent's WaitForResponse would block for the full 2-hour
 	// timeout while the user never sees clarification cards.
 	// When dedup fires (isNew=false) the messages already exist, so skip creation.
-	if isNew && h.messageCreator != nil {
+	if isNew && !durableMessagesExist && h.messageCreator != nil {
 		if _, err := h.messageCreator.CreateClarificationRequestMessages(
 			ctx, taskID, req.SessionID, pendingID, req.Questions, req.Context,
 		); err != nil {

@@ -746,6 +746,13 @@ Each returned bundle carries `pending_id`, `task_id`, `session_id`, `created_at`
 `context`, and an ordered `questions` array; each question carries `question_id`, `title`,
 `prompt`, `status`, and its `options` (`option_id`, `label`, `description`).
 
+The bundle's `pending_id` is the durable identity of the visible question group. If an agent's
+MCP transport closes or times out while `ask_user_question_kandev` is waiting, the question remains
+answerable and an exact retry is reconciled to the existing visible messages. Clients should retry
+the exact request rather than create a second question. A successful answer is recorded before the
+live agent waiter is released; a losing retry receives the recorded outcome and does not publish a
+duplicate answer or resume.
+
 After the person answers, pass the bundle's `pending_id` plus one entry per question to
 `answer_question_kandev`:
 

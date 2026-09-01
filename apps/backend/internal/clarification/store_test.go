@@ -49,6 +49,25 @@ func TestCreateRequest_PreservesExistingID(t *testing.T) {
 	}
 }
 
+func TestPendingIDForRequest_IsStablePerSessionAndRequest(t *testing.T) {
+	first := PendingIDForRequest("session-a", "transport-1")
+	if first == "" {
+		t.Fatal("expected a retry identity")
+	}
+	if got := PendingIDForRequest("session-a", "transport-1"); got != first {
+		t.Fatalf("retry identity changed: first=%q second=%q", first, got)
+	}
+	if got := PendingIDForRequest("session-b", "transport-1"); got == first {
+		t.Fatal("request identity must be scoped to the session")
+	}
+}
+
+func TestPendingIDForRequest_EmptyRequestIDUsesRandomStoreIdentity(t *testing.T) {
+	if got := PendingIDForRequest("session-a", ""); got != "" {
+		t.Fatalf("empty request ID = %q, want empty", got)
+	}
+}
+
 func TestGetRequest_Found(t *testing.T) {
 	s := NewStore(time.Minute)
 	id, _ := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "test?"}}})
