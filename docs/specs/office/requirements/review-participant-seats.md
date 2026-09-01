@@ -138,7 +138,9 @@ configured.
 #### Acceptance criteria
 
 - **AC-OFFICE-REVIEW-SEATS-002.1:** The system shall resolve the candidate list
-  for a participant role to the eligible agents of the task's workspace,
+  for a participant role to the task's workspace agents whose agent role is in
+  that participant role's pool — `ceo` and `specialist` for the reviewer role;
+  `ceo` alone for the approver role and for every other participant role —
   ordered by `created_at` ascending and then by agent profile identifier
   ascending.
 - **AC-OFFICE-REVIEW-SEATS-002.2:** The system shall exclude from the candidate
@@ -146,8 +148,11 @@ configured.
   and shall do so without changing the behavior of any other caller of the
   agent listing it uses.
 - **AC-OFFICE-REVIEW-SEATS-002.3:** When the candidate list holds more than one
-  eligible agent and its first member is the task's runner, the system shall
-  seat the next member instead.
+  eligible agent, the system shall seat the first member that is neither the
+  task's runner nor already seated in another participant role on the task.
+  This exclusion is best-effort and shall not leave the seat empty: when no
+  such member exists, the system shall fall back to seating the first member,
+  or the second member when the first is the task's runner.
 - **AC-OFFICE-REVIEW-SEATS-002.4:** When the candidate list holds exactly one
   eligible agent and that agent is the task's runner, the system shall seat
   that agent and shall record the self-review.

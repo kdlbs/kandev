@@ -165,6 +165,12 @@ const (
 // resolved for the role at all. WorkspaceID is populated on every result,
 // including Unfillable ones, so the AC-OFFICE-REVIEW-SEATS-004.1 warning
 // record can identify the workspace without a second lookup.
+//
+// SelfReview is true both when the chosen agent is the task's runner and
+// when it already holds another seat on this task (the office seat
+// caster's best-effort cross-step exclusion, D-B part 3, ran out of
+// alternatives). It is a counter label on RecordSeatProvenance, not a
+// persisted or user-visible field.
 type ParticipantSeatCastResult struct {
 	AgentProfileID string
 	WorkspaceID    string

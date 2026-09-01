@@ -3,12 +3,14 @@ package engine_adapters
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/workflow/engine"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // fakeSeatCasterWorkflowRepo is a minimal SeatCasterWorkflowRepo fake for
@@ -16,6 +18,10 @@ import (
 type fakeSeatCasterWorkflowRepo struct {
 	runner    string
 	runnerErr error
+
+	seatedAgentIDs     []string
+	participantsErr    error
+	gotParticipantsFor string
 
 	gotRunnerStepID string
 	gotRunnerTaskID string
@@ -25,6 +31,20 @@ func (f *fakeSeatCasterWorkflowRepo) ResolveCurrentRunner(_ context.Context, ste
 	f.gotRunnerStepID = stepID
 	f.gotRunnerTaskID = taskID
 	return f.runner, f.runnerErr
+}
+
+func (f *fakeSeatCasterWorkflowRepo) ListParticipantsForTaskAnyStep(
+	_ context.Context, taskID string,
+) ([]*wfmodels.WorkflowStepParticipant, error) {
+	f.gotParticipantsFor = taskID
+	if f.participantsErr != nil {
+		return nil, f.participantsErr
+	}
+	participants := make([]*wfmodels.WorkflowStepParticipant, 0, len(f.seatedAgentIDs))
+	for _, id := range f.seatedAgentIDs {
+		participants = append(participants, &wfmodels.WorkflowStepParticipant{AgentProfileID: id})
+	}
+	return participants, nil
 }
 
 func TestSeatCasterAdapter_EmptyCandidateListFallsBackToRunner(t *testing.T) {
@@ -273,6 +293,252 @@ func TestSeatCasterAdapter_UsesEnteredStepToResolveRunner(t *testing.T) {
 	if wf.gotRunnerStepID != "step-42" || wf.gotRunnerTaskID != "t-1" {
 		t.Errorf("ResolveCurrentRunner called with step=%q task=%q, want step-42/t-1",
 			wf.gotRunnerStepID, wf.gotRunnerTaskID)
+	}
+}
+
+// TestSeatCasterAdapter_ReviewerPoolIncludesSpecialists is proof shape (a)
+// from the task plan: 2 ceos + specialists. Reviewer is cast first with no
+// exclusions in play, so it seats the earliest candidate; approver's
+// narrower ceo-only pool then excludes that agent, landing on the other
+// ceo. Fails with the change reverted, since the old code seats ceo-1 for
+// both roles.
+func TestSeatCasterAdapter_ReviewerPoolIncludesSpecialists(t *testing.T) {
+	tCEO1 := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	tCEO2 := tCEO1.Add(time.Minute)
+	tSpec := tCEO1.Add(2 * time.Minute)
+	office := &fakeOfficeRepo{
+		fields: &sqlite.TaskExecutionFields{ID: "t-1", WorkspaceID: "ws-1"},
+		agents: []*models.AgentInstance{
+			{ID: "ceo-1", Role: models.AgentRoleCEO, Status: models.AgentStatusIdle, CreatedAt: tCEO1},
+			{ID: "ceo-2", Role: models.AgentRoleCEO, Status: models.AgentStatusIdle, CreatedAt: tCEO2},
+			{ID: "spec-1", Role: models.AgentRoleSpecialist, Status: models.AgentStatusIdle, CreatedAt: tSpec},
+		},
+	}
+	wf := &fakeSeatCasterWorkflowRepo{runner: ""}
+	a := NewSeatCasterAdapter(office, wf)
+
+	reviewer, err := a.CastParticipantSeat(context.Background(), "t-1", "step-review", "reviewer")
+	if err != nil {
+		t.Fatalf("reviewer cast: %v", err)
+	}
+	if reviewer.AgentProfileID != "ceo-1" {
+		t.Fatalf("reviewer = %q, want ceo-1 (earliest created_at)", reviewer.AgentProfileID)
+	}
+
+	wf.seatedAgentIDs = []string{reviewer.AgentProfileID}
+	approver, err := a.CastParticipantSeat(context.Background(), "t-1", "step-approve", "approver")
+	if err != nil {
+		t.Fatalf("approver cast: %v", err)
+	}
+	if approver.AgentProfileID != "ceo-2" {
+		t.Fatalf("approver = %q, want ceo-2 (ceo-1 excluded; the approver pool never includes spec-1)", approver.AgentProfileID)
+	}
+	if reviewer.AgentProfileID == approver.AgentProfileID {
+		t.Fatal("expected reviewer and approver to be different agents")
+	}
+}
+
+// TestSeatCasterAdapter_ReviewerWidensToOlderSpecialist is proof shape (b):
+// 1 ceo + 1 specialist, with the specialist older. Reviewer's widened pool
+// picks the specialist over the ceo by created_at; approver's ceo-only pool
+// never sees the specialist at all. Fails with the change reverted, since
+// the old code never considers the specialist for either role.
+func TestSeatCasterAdapter_ReviewerWidensToOlderSpecialist(t *testing.T) {
+	tSpec := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	tCEO := tSpec.Add(time.Minute)
+	office := &fakeOfficeRepo{
+		fields: &sqlite.TaskExecutionFields{ID: "t-1", WorkspaceID: "ws-1"},
+		agents: []*models.AgentInstance{
+			{ID: "spec-1", Role: models.AgentRoleSpecialist, Status: models.AgentStatusIdle, CreatedAt: tSpec},
+			{ID: "ceo-1", Role: models.AgentRoleCEO, Status: models.AgentStatusIdle, CreatedAt: tCEO},
+		},
+	}
+	wf := &fakeSeatCasterWorkflowRepo{runner: ""}
+	a := NewSeatCasterAdapter(office, wf)
+
+	reviewer, err := a.CastParticipantSeat(context.Background(), "t-1", "step-review", "reviewer")
+	if err != nil {
+		t.Fatalf("reviewer cast: %v", err)
+	}
+	if reviewer.AgentProfileID != "spec-1" {
+		t.Fatalf("reviewer = %q, want spec-1 (earliest created_at across ceo ∪ specialist)", reviewer.AgentProfileID)
+	}
+
+	wf.seatedAgentIDs = []string{reviewer.AgentProfileID}
+	approver, err := a.CastParticipantSeat(context.Background(), "t-1", "step-approve", "approver")
+	if err != nil {
+		t.Fatalf("approver cast: %v", err)
+	}
+	if approver.AgentProfileID != "ceo-1" {
+		t.Fatalf("approver = %q, want ceo-1 (the approver pool is ceo-only)", approver.AgentProfileID)
+	}
+	if reviewer.AgentProfileID == approver.AgentProfileID {
+		t.Fatal("expected reviewer and approver to be different agents")
+	}
+}
+
+// TestSeatCasterAdapter_ApproverPoolStaysCEOOnly pins the D-B ruling's
+// accepted non-divergence: a workspace with exactly one ceo (plus any
+// number of specialists) seats the same agent for both reviewer and
+// approver, because the approver pool never widens to specialists. This is
+// ruled behavior, not a regression — do not "fix" it by widening the
+// approver pool.
+func TestSeatCasterAdapter_ApproverPoolStaysCEOOnly(t *testing.T) {
+	t0 := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	agents := []*models.AgentInstance{
+		{ID: "ceo-1", Role: models.AgentRoleCEO, Status: models.AgentStatusIdle, CreatedAt: t0},
+	}
+	for i := 0; i < 4; i++ {
+		agents = append(agents, &models.AgentInstance{
+			ID:        fmt.Sprintf("spec-%d", i),
+			Role:      models.AgentRoleSpecialist,
+			Status:    models.AgentStatusIdle,
+			CreatedAt: t0.Add(time.Duration(i+1) * time.Minute),
+		})
+	}
+	office := &fakeOfficeRepo{
+		fields: &sqlite.TaskExecutionFields{ID: "t-1", WorkspaceID: "ws-1"},
+		agents: agents,
+	}
+	wf := &fakeSeatCasterWorkflowRepo{runner: ""}
+	a := NewSeatCasterAdapter(office, wf)
+
+	reviewer, err := a.CastParticipantSeat(context.Background(), "t-1", "step-review", "reviewer")
+	if err != nil {
+		t.Fatalf("reviewer cast: %v", err)
+	}
+	if reviewer.AgentProfileID != "ceo-1" {
+		t.Fatalf("reviewer = %q, want ceo-1 (earliest created_at)", reviewer.AgentProfileID)
+	}
+
+	wf.seatedAgentIDs = []string{reviewer.AgentProfileID}
+	approver, err := a.CastParticipantSeat(context.Background(), "t-1", "step-approve", "approver")
+	if err != nil {
+		t.Fatalf("approver cast: %v", err)
+	}
+	if approver.AgentProfileID != "ceo-1" {
+		t.Fatalf("approver = %q, want ceo-1 (the sole ceo; must not widen to specialists)", approver.AgentProfileID)
+	}
+	if !approver.SelfReview {
+		t.Error("expected SelfReview when the only approver candidate is already seated as reviewer")
+	}
+}
+
+// TestSeatCasterAdapter_ApproverPoolExcludesSpecialistsEvenWhenCEOPoolEmpty
+// covers AC-OFFICE-REVIEW-SEATS-002.5/002.6 for the narrower approver pool:
+// a workspace with specialists but no ceo still falls back to the runner
+// for an approver seat, rather than reaching into the specialist pool that
+// only reviewer is entitled to.
+func TestSeatCasterAdapter_ApproverPoolExcludesSpecialistsEvenWhenCEOPoolEmpty(t *testing.T) {
+	t0 := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	office := &fakeOfficeRepo{
+		fields: &sqlite.TaskExecutionFields{ID: "t-1", WorkspaceID: "ws-1"},
+		agents: []*models.AgentInstance{
+			{ID: "spec-1", Role: models.AgentRoleSpecialist, Status: models.AgentStatusIdle, CreatedAt: t0},
+		},
+	}
+	wf := &fakeSeatCasterWorkflowRepo{runner: "runner-agent"}
+	a := NewSeatCasterAdapter(office, wf)
+
+	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-approve", "approver")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.AgentProfileID != "runner-agent" {
+		t.Errorf("agent = %q, want runner-agent (approver pool is ceo-only and has no members here)", got.AgentProfileID)
+	}
+	if got.Provenance != engine.SeatProvenanceRunnerFallback {
+		t.Errorf("provenance = %q, want %q", got.Provenance, engine.SeatProvenanceRunnerFallback)
+	}
+}
+
+// TestSeatCasterAdapter_ExclusionNeverEmptiesASeat covers D-B part 3's
+// never-blocking guarantee: the sole candidate is already seated at another
+// step on this task, and must be seated anyway rather than left unfillable.
+func TestSeatCasterAdapter_ExclusionNeverEmptiesASeat(t *testing.T) {
+	t0 := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	office := &fakeOfficeRepo{
+		fields: &sqlite.TaskExecutionFields{ID: "t-1", WorkspaceID: "ws-1"},
+		agents: []*models.AgentInstance{
+			{ID: "ceo-1", Role: models.AgentRoleCEO, Status: models.AgentStatusIdle, CreatedAt: t0},
+		},
+	}
+	wf := &fakeSeatCasterWorkflowRepo{runner: "", seatedAgentIDs: []string{"ceo-1"}}
+	a := NewSeatCasterAdapter(office, wf)
+
+	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-approve", "approver")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Unfillable {
+		t.Fatal("expected the sole already-seated candidate to be seated anyway, not left unfillable")
+	}
+	if got.AgentProfileID != "ceo-1" {
+		t.Errorf("agent = %q, want ceo-1", got.AgentProfileID)
+	}
+	if !got.SelfReview {
+		t.Error("expected SelfReview when the only candidate already holds another seat on this task")
+	}
+}
+
+// TestSeatCasterAdapter_ExclusionReadFailureIsNonFatal covers
+// AC-OFFICE-REVIEW-SEATS-002.8: a failure reading the cross-step exclusion
+// signal must not fail the cast — it degrades to casting without exclusion.
+func TestSeatCasterAdapter_ExclusionReadFailureIsNonFatal(t *testing.T) {
+	t1 := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	t2 := t1.Add(time.Minute)
+	office := &fakeOfficeRepo{
+		fields: &sqlite.TaskExecutionFields{ID: "t-1", WorkspaceID: "ws-1"},
+		agents: []*models.AgentInstance{
+			{ID: "ceo-1", Role: models.AgentRoleCEO, Status: models.AgentStatusIdle, CreatedAt: t1},
+			{ID: "ceo-2", Role: models.AgentRoleCEO, Status: models.AgentStatusIdle, CreatedAt: t2},
+		},
+	}
+	wf := &fakeSeatCasterWorkflowRepo{runner: "", participantsErr: errors.New("boom")}
+	a := NewSeatCasterAdapter(office, wf)
+
+	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-approve", "approver")
+	if err != nil {
+		t.Fatalf("expected the seat to still be cast when the exclusion read fails: %v", err)
+	}
+	if got.AgentProfileID != "ceo-1" {
+		t.Errorf("agent = %q, want ceo-1 (cast without exclusion when the read errors)", got.AgentProfileID)
+	}
+}
+
+// TestSeatCasterAdapter_PoolAllowlistIsPositiveNotADenylist covers the
+// guard called out in the task plan: the empty-Role listing this adapter
+// now issues also returns worker/assistant/qa/security/devops and
+// empty-role agent profiles, and the Go allowlist must exclude them by not
+// naming their roles, not by naming roles to reject.
+func TestSeatCasterAdapter_PoolAllowlistIsPositiveNotADenylist(t *testing.T) {
+	t0 := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	office := &fakeOfficeRepo{
+		fields: &sqlite.TaskExecutionFields{ID: "t-1", WorkspaceID: "ws-1"},
+		agents: []*models.AgentInstance{
+			{ID: "worker-1", Role: models.AgentRoleWorker, Status: models.AgentStatusIdle, CreatedAt: t0},
+			{ID: "assistant-1", Role: models.AgentRoleAssistant, Status: models.AgentStatusIdle, CreatedAt: t0},
+			{ID: "qa-1", Role: models.AgentRoleQA, Status: models.AgentStatusIdle, CreatedAt: t0},
+			{ID: "security-1", Role: models.AgentRoleSecurity, Status: models.AgentStatusIdle, CreatedAt: t0},
+			{ID: "devops-1", Role: models.AgentRoleDevOps, Status: models.AgentStatusIdle, CreatedAt: t0},
+			{ID: "no-role-1", Role: "", Status: models.AgentStatusIdle, CreatedAt: t0},
+		},
+	}
+	wf := &fakeSeatCasterWorkflowRepo{runner: "runner-agent"}
+	a := NewSeatCasterAdapter(office, wf)
+
+	for _, role := range []string{"reviewer", "approver"} {
+		got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", role)
+		if err != nil {
+			t.Fatalf("role %q: unexpected error: %v", role, err)
+		}
+		if got.AgentProfileID != "runner-agent" {
+			t.Errorf("role %q: agent = %q, want runner-agent — none of worker/assistant/qa/security/devops/empty-role may be seated",
+				role, got.AgentProfileID)
+		}
+		if got.Provenance != engine.SeatProvenanceRunnerFallback {
+			t.Errorf("role %q: provenance = %q, want %q", role, got.Provenance, engine.SeatProvenanceRunnerFallback)
+		}
 	}
 }
 
