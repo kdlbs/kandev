@@ -247,7 +247,7 @@ func (e *Executor) tryReuseExistingSession(
 func (e *Executor) tryFlipIdleSessionToRunning(
 	ctx context.Context, session *models.TaskSession,
 ) (*models.TaskSession, reuseDecision) {
-	changed, _, err := e.repo.UpdateTaskSessionStateIfCurrent(
+	_, _, err := e.repo.UpdateTaskSessionStateIfCurrent(
 		ctx, session.ID, models.TaskSessionStateIdle, models.TaskSessionStateRunning, "",
 	)
 	if err != nil {
@@ -262,7 +262,7 @@ func (e *Executor) tryFlipIdleSessionToRunning(
 			zap.String("session_id", session.ID), zap.Error(err))
 		return nil, reuseDecisionTerminal
 	}
-	if !changed && isStopTerminalSessionState(fresh.State) {
+	if isStopTerminalSessionState(fresh.State) {
 		return nil, reuseDecisionTerminal
 	}
 	*session = *fresh

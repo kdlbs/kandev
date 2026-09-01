@@ -374,6 +374,44 @@ func TestTryReuseExistingSession_IdleCASMismatchDoesNotResurrectTerminalSession(
 	}
 }
 
+// TestTryReuseExistingSession_IdleCASSuccessThenTerminalReloadRequiresFreshSession
+// covers the second half of the IDLE->RUNNING race: another actor can terminate
+// the row after the CAS succeeds but before the follow-up reload returns. The
+// reloaded terminal state must still force a fresh-session decision.
+func TestTryReuseExistingSession_IdleCASSuccessThenTerminalReloadRequiresFreshSession(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	ctx := context.Background()
+
+	const taskID = "task-idle-cas-success-terminal"
+	const sessionID = "idle-cas-success-terminal"
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID: sessionID, TaskID: taskID, State: models.TaskSessionStateIdle,
+	}
+	repo.getTaskSessionFunc = func(_ context.Context, id string) (*models.TaskSession, error) {
+		if id != sessionID {
+			t.Fatalf("GetTaskSession id = %q, want %q", id, sessionID)
+		}
+		repo.mu.Lock()
+		defer repo.mu.Unlock()
+		repo.sessions[id].State = models.TaskSessionStateCompleted
+		return cloneMockTaskSession(repo.sessions[id]), nil
+	}
+
+	view := &models.TaskSession{ID: sessionID, TaskID: taskID, State: models.TaskSessionStateIdle}
+	result, decision := exec.tryReuseExistingSession(ctx, view)
+
+	if decision != reuseDecisionTerminal {
+		t.Fatalf("decision = %v, want reuseDecisionTerminal", decision)
+	}
+	if result != nil {
+		t.Fatalf("result = %#v, want nil when reload observes terminal state", result)
+	}
+	if stored := repo.sessions[sessionID].State; stored != models.TaskSessionStateCompleted {
+		t.Fatalf("stored session state = %v, want unchanged COMPLETED", stored)
+	}
+}
+
 // TestTryReuseExistingSession_IdleFlipsToRunningWhenStateStillMatches proves
 // the happy path still works with the CAS write: an IDLE row whose state has
 // not changed since the read flips to RUNNING and is returned as reused.
