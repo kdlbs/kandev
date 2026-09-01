@@ -284,6 +284,7 @@ type mockRepository struct {
 	createTaskSessionFunc              func(ctx context.Context, session *models.TaskSession) error
 	updateTaskSessionStateFunc         func(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
 	listActiveTaskSessionsByTaskIDFunc func(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	repairWorkspaceInventoryFunc       func(ctx context.Context, repair *models.WorkspaceInventoryRepair) (*models.WorkspaceInventoryRecoveryReceipt, error)
 	// Optional hook invoked at the top of UpdateTaskStateIfCurrentIn, before
 	// it reads task state/archived_at. Lets tests simulate the exact TOCTOU
 	// window this CAS closes: an earlier (non-transactional) archived-state
@@ -1203,6 +1204,12 @@ func (m *mockRepository) UpdateTaskEnvironmentRepo(_ context.Context, repo *mode
 	}
 	m.taskEnvironmentRepos[repo.TaskEnvironmentID] = append(rows, repo)
 	return nil
+}
+func (m *mockRepository) RepairWorkspaceInventory(ctx context.Context, repair *models.WorkspaceInventoryRepair) (*models.WorkspaceInventoryRecoveryReceipt, error) {
+	if m.repairWorkspaceInventoryFunc != nil {
+		return m.repairWorkspaceInventoryFunc(ctx, repair)
+	}
+	return nil, models.ErrWorkspaceInventoryRecoveryInvalid
 }
 
 // Task Plan operations

@@ -40,21 +40,6 @@ func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *L
 	// Reuse setup below consumes this same inventory, avoiding a second query
 	// and keeping cancellation attached to the caller's context.
 	env.Repos = rows
-	// Zero recorded rows means the canonical inventory was never captured at
-	// all (for example: a launch whose prepare step failed before writing
-	// any repo rows). That is recoverable — letting this launch through lets
-	// reuseExistingRepositoryWorktrees fall through its own empty-inventory
-	// check and rebuild fresh worktree/repo specs. A non-empty but wrong
-	// inventory below is the guard's actual purpose and must still refuse.
-	if len(rows) == 0 {
-		req.WorkspaceReuseRequired = workspaceReuseAllowed(
-			env,
-			req.ExecutorType,
-			req.WorkspaceReuseRequired,
-			e.taskIsRepoBacked(ctx, req.TaskID),
-		)
-		return nil
-	}
 	for _, spec := range specs {
 		if canonicalInventoryMatches(spec, rows, req.UseWorktree) != 1 {
 			return fmt.Errorf("%w: canonical workspace repository inventory has no matching entry for repository %q branch %q",

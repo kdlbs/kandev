@@ -57,6 +57,21 @@ Preserve the observable behavior documented for Agent Resume and Runtime Recover
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.8:** Other resume failures do not offer branch replacement. **Start fresh** keeps its current behavior and remains the only recovery action that intentionally clears the stored conversation identity.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.9:** Attach-only worktree preflight treats a branch as unrecoverable only after a bounded noninteractive probe confirms that the configured remote does not contain it. Authentication, network, timeout, and other probe failures remain ordinary recovery failures.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.10:** If replacement checkout creation succeeds but persistence of the existing task-environment repository record fails, Kandev removes the replacement checkout and its newly created branch. The prior record remains authoritative for retry.
+
+### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004: Preserved workspace inventory repair
+
+**Intent:** Recover a reusable checkout whose canonical inventory metadata drifted without changing the checkout.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.1:** Normal workspace reuse shall fail closed when any required repository and branch slot lacks exactly one active canonical inventory row.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.2:** An authorized recovery shall repair one missing or stale row only when server-owned task, workspace, environment, repository, session, runtime, path, and Git metadata prove one reciprocal checkout identity.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.3:** Recovery shall preserve Git objects, refs, index state, tracked modifications, and untracked files byte-for-byte and shall return hashes that attest to the before and after state.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.4:** The same task-scoped idempotency key and payload shall return the existing receipt; the same key with a different payload shall conflict without mutation.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.5:** Duplicate, conflicting, cross-task, cross-workspace, wrong-repository, wrong-branch, wrong-environment, deleted, failed, symlinked, or ambiguously dirty evidence shall return a stable non-leaking result and preserve every resource.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.6:** A committed repair shall permit at most one orchestrator-owned resume or start attempt, and concurrent calls shall not create duplicate rows, receipts, sessions, or live writers.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.7:** Recovery shall never delete, clean, reset, reseed, rematerialize, or broadly discover a checkout, and a post-repair launch failure shall remain retryable and audited.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.8:** Unauthorized and unrelated-task callers shall receive no repository path, worktree path, branch, or cross-workspace existence information.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.11:** Once explicit replacement has materialized, Kandev attempts warning persistence on every terminal resume path, including provider startup and readiness failures. A later retry can recover a warning after a failed message write.
 
 ## Migrated source detail

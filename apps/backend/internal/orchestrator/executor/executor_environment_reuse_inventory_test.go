@@ -8,15 +8,8 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// Regression coverage for the "failed prepare leaves a permanently bricked
-// workspace" defect: when a task_environments row was published ready with
-// zero task_environment_repos rows (the write-side bug, fixed separately),
-// validateReuseEnvironmentInventory used to treat that as a mismatch and
-// refuse every subsequent launch forever. Zero rows recorded means the
-// canonical inventory was never captured at all, which is recoverable by
-// letting the launch rebuild it — distinct from a non-empty but wrong
-// inventory, which must still be refused.
-func TestValidateReuseEnvironmentInventory_ZeroRowsIsRecoverable(t *testing.T) {
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.1
+func TestValidateReuseEnvironmentInventory_ZeroRowsFailsClosed(t *testing.T) {
 	repo := newMockRepository()
 	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1"}
 	e := newTestExecutor(t, &mockAgentManager{}, repo)
@@ -27,11 +20,12 @@ func TestValidateReuseEnvironmentInventory_ZeroRowsIsRecoverable(t *testing.T) {
 	}
 	env := &models.TaskEnvironment{ID: "env-1"}
 
-	if err := e.validateReuseEnvironmentInventory(context.Background(), req, env); err != nil {
-		t.Fatalf("validateReuseEnvironmentInventory() with zero recorded rows = %v, want nil (recoverable)", err)
+	err := e.validateReuseEnvironmentInventory(context.Background(), req, env)
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("validateReuseEnvironmentInventory() with zero recorded rows = %v, want ErrWorkspaceReuseUnsafe", err)
 	}
-	if req.WorkspaceReuseRequired {
-		t.Fatal("zero inventory kept WorkspaceReuseRequired=true, want fresh materialization")
+	if !req.WorkspaceReuseRequired {
+		t.Fatal("zero inventory disabled WorkspaceReuseRequired and authorized materialization")
 	}
 }
 

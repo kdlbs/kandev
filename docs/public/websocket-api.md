@@ -226,6 +226,30 @@ If `intent` is omitted, the backend infers it from those fields. That inference 
 
 A successful response contains `success`, `task_id`, `state`, and usually `session_id`; it can also contain `agent_execution_id`, `worktree_path`, and `worktree_branch`. Session states use uppercase values such as `CREATED`, `STARTING`, `RUNNING`, `WAITING_FOR_INPUT`, `COMPLETED`, `FAILED`, and `CANCELLED`.
 
+### Repair preserved workspace inventory
+
+`session.recover` accepts the task-scoped `repair_workspace_inventory` action when a Worktree resume fails because the canonical environment inventory is missing or has a stale branch-slot identity. This is a preservation-only recovery action, not a general database editor. The server derives the workspace, repository, environment, row, path, and branch from the authorized task and session; clients provide only `task_id`, `session_id`, `action`, and a non-empty retry-stable `idempotency_key`.
+
+```json
+{
+  "id": "repair-inventory-1",
+  "type": "request",
+  "action": "session.recover",
+  "payload": {
+    "task_id": "task-uuid",
+    "session_id": "session-uuid",
+    "action": "repair_workspace_inventory",
+    "idempotency_key": "incident-2026-09-01-attempt-1"
+  }
+}
+```
+
+The action succeeds only when Kandev proves one unmatched canonical slot, one server-owned managed checkout, the exact registered Git worktree and branch, an unchanged HEAD plus dirty/untracked content, current database revisions, and no competing task session. It then inserts or corrects only that environment-repository row and appends an audit receipt in one transaction. The unchanged checkout is inspected again before the resume proceeds through the normal fail-closed inventory validator.
+
+The response can include `workspace_inventory_recovery_receipt`. Its `result_code` is `repaired` for the first successful write or `deduplicated` when the same task, idempotency key, and request identity were already recorded. The receipt contains hashes and server identifiers but no host checkout path. Reusing a key for a different derived request returns a conflict.
+
+Invalid input returns a validation error. Ambiguous inventory, a path or branch mismatch, a symlinked checkout, a deleted or failed row, a user-owned local repository, a remote-only executor, revision drift, or a concurrent writer returns a conflict without rematerializing, resetting, cleaning, or deleting the workspace. Resolve those cases manually after preserving the checkout.
+
 ### Search work-item references over HTTP
 
 The structured chat composer's `#` search calls `GET /api/v1/workspaces/:workspaceId/mentions/search?q=<plain-text>&limit=<per-source-limit>&exclude_task_id=<optional-task-id>`. `q` is required after trimming and accepts 1–200 Unicode characters. `limit` defaults to 5 and is clamped to 1–10. When supplied, `exclude_task_id` must belong to the requested workspace.

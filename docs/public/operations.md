@@ -431,6 +431,14 @@ Before archive, delete, reset, or manual cleanup:
 
 Never delete a managed task directory merely because its database row looks terminal. A borrowed environment or pending asynchronous cleanup can still own it.
 
+### Recover a preserved Worktree inventory mismatch
+
+If a session resume reports that canonical workspace repository inventory is incomplete, first preserve the checkout exactly as it is. Record its branch and HEAD, and inspect tracked, dirty, untracked, and ignored files. Do not use **Reset Environment**, archive/delete cleanup, `git clean`, worktree removal, or a provider reset as an inventory repair.
+
+The task-scoped `repair_workspace_inventory` session recovery action is safe only for a Kandev-managed local Git worktree with exactly one missing or stale repository/branch slot. It performs read-only reciprocal Git inspection, hashes the checkout state, compares current database revisions, rejects another active session, changes only the proven inventory row, records an append-only receipt, verifies the checkout again, and resumes once through the ordinary validator. Retrying the same operation requires the same idempotency key. See [WebSocket API](websocket-api.md#repair-preserved-workspace-inventory) for the request and receipt contract.
+
+Stop and investigate manually when the action returns a conflict. Common causes are multiple unmatched rows, duplicate repository/branch attachments, a moved or symlinked path, a detached or unexpected branch, a missing Git worktree registration, a user-owned local repository, a Docker/SSH/Sprites-only checkout, another active session, or state that changed during inspection. A conflict is intentionally preservation-first: Kandev leaves checkout files and provider resources untouched and does not fall back to rematerialization.
+
 ## Updates
 
 Stable is the default update channel. It resolves signed releases from the public GitHub Releases

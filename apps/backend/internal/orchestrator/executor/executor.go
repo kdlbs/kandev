@@ -375,9 +375,12 @@ type LaunchAgentRequest struct {
 	// AllowBranchReplacement is granted only by the explicit new-branch recovery
 	// action. It permits lifecycle to replace a confirmed missing worktree branch.
 	AllowBranchReplacement bool
-	TaskTitle              string // Human-readable task title for semantic worktree naming
-	AgentProfileID         string
-	TurnID                 string // Durable Kandev turn for the initial prompt, when present
+	// WorkspaceInventoryRecoveryReceipt is an output populated only after the
+	// guarded, server-authorized preservation repair succeeds.
+	WorkspaceInventoryRecoveryReceipt *models.WorkspaceInventoryRecoveryReceipt
+	TaskTitle                         string // Human-readable task title for semantic worktree naming
+	AgentProfileID                    string
+	TurnID                            string // Durable Kandev turn for the initial prompt, when present
 	// OfficeAgentProfileID is the stable Office identity. AgentProfileID stays
 	// the concrete execution profile inside the executor for compatibility.
 	OfficeAgentProfileID string
@@ -637,7 +640,8 @@ type TaskExecution struct {
 	WorktreePath   string
 	WorktreeBranch string
 	// PrepareResult carries the env preparation result for deferred persistence
-	PrepareResult *lifecycle.EnvPrepareResult
+	PrepareResult                     *lifecycle.EnvPrepareResult
+	WorkspaceInventoryRecoveryReceipt *models.WorkspaceInventoryRecoveryReceipt
 }
 
 // FromTaskSession converts a models.TaskSession to TaskExecution

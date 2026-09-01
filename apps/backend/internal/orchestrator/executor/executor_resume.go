@@ -64,6 +64,7 @@ func isTerminalSessionState(state models.TaskSessionState) bool {
 // repoInfo holds resolved repository details for agent launch.
 type repoInfo struct {
 	TaskRepositoryID           string
+	TaskRepositoryUpdatedAt    time.Time
 	RepositoryID               string
 	RepositoryPath             string
 	BaseBranch                 string
@@ -166,12 +167,13 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 	ctx context.Context, sessionID string, tr *models.TaskRepository,
 ) (*repoInfo, error) {
 	info := &repoInfo{
-		TaskRepositoryID: tr.ID,
-		RepositoryID:     tr.RepositoryID,
-		BaseBranch:       tr.BaseBranch,
-		CheckoutBranch:   tr.CheckoutBranch,
-		PRNumber:         prNumberFromMetadata(tr.Metadata),
-		Position:         tr.Position,
+		TaskRepositoryID:        tr.ID,
+		TaskRepositoryUpdatedAt: tr.UpdatedAt,
+		RepositoryID:            tr.RepositoryID,
+		BaseBranch:              tr.BaseBranch,
+		CheckoutBranch:          tr.CheckoutBranch,
+		PRNumber:                prNumberFromMetadata(tr.Metadata),
+		Position:                tr.Position,
 	}
 	if binding, found, err := models.LoadRemoteContribution(tr.Metadata); err != nil {
 		return nil, fmt.Errorf("load remote contribution for task repository %q: %w", tr.ID, err)
@@ -742,7 +744,9 @@ func buildPrepareResultMetadata(result *lifecycle.EnvPrepareResult) map[string]i
 // Branch replacement is intentionally opt-in; ordinary resume preserves the
 // original worktree branch and reports when it is unrecoverable.
 type ResumeOptions struct {
-	AllowBranchReplacement bool
+	AllowBranchReplacement           bool
+	RepairWorkspaceInventory         bool
+	WorkspaceInventoryIdempotencyKey string
 }
 
 // ResumeSession restarts an existing task session using its stored worktree.
@@ -910,15 +914,16 @@ func (e *Executor) resumeSession(
 
 	now := time.Now().UTC()
 	execution := &TaskExecution{
-		TaskID:           task.ID,
-		AgentExecutionID: resp.AgentExecutionID,
-		AgentProfileID:   session.AgentProfileID,
-		StartedAt:        now,
-		SessionState:     v1.TaskSessionStateStarting,
-		LastUpdate:       now,
-		SessionID:        session.ID,
-		WorktreePath:     worktreePath,
-		WorktreeBranch:   worktreeBranch,
+		TaskID:                            task.ID,
+		AgentExecutionID:                  resp.AgentExecutionID,
+		AgentProfileID:                    session.AgentProfileID,
+		StartedAt:                         now,
+		SessionState:                      v1.TaskSessionStateStarting,
+		LastUpdate:                        now,
+		SessionID:                         session.ID,
+		WorktreePath:                      worktreePath,
+		WorktreeBranch:                    worktreeBranch,
+		WorkspaceInventoryRecoveryReceipt: req.WorkspaceInventoryRecoveryReceipt,
 	}
 
 	if startAgent {
@@ -1143,7 +1148,7 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 	req, metadata := newResumeLaunchRequest(task, session, startAgent, options)
 	execConfig := e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
 	repositoryID, existingEnv, allRepos, err := e.prepareResumeRepositorySettings(
-		ctx, task, session, req,
+		ctx, task, session, req, options,
 	)
 	if err != nil {
 		return nil, "", execConfig, existingEnv, nil, err
@@ -1216,6 +1221,7 @@ func (e *Executor) prepareResumeRepositorySettings(
 	task *v1.Task,
 	session *models.TaskSession,
 	req *LaunchAgentRequest,
+	options ResumeOptions,
 ) (string, *models.TaskEnvironment, []*repoInfo, error) {
 	existingEnv, err := e.resolveResumeTaskEnvironment(ctx, task.ID, session)
 	if err != nil {
@@ -1242,7 +1248,20 @@ func (e *Executor) prepareResumeRepositorySettings(
 	}
 	applyResumeRepositoryFlags(req, allRepos)
 	if err := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); err != nil {
-		return "", existingEnv, nil, err
+		if !options.RepairWorkspaceInventory {
+			return "", existingEnv, nil, err
+		}
+		receipt, repairErr := e.repairReuseEnvironmentInventory(
+			ctx, task, session, req, existingEnv, allRepos,
+			options.WorkspaceInventoryIdempotencyKey,
+		)
+		if repairErr != nil {
+			return "", existingEnv, nil, repairErr
+		}
+		req.WorkspaceInventoryRecoveryReceipt = receipt
+		if validateErr := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); validateErr != nil {
+			return "", existingEnv, nil, validateErr
+		}
 	}
 
 	e.reuseExistingEnvironment(ctx, req, existingEnv)

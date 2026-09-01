@@ -5,6 +5,7 @@ requirements:
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003
+  - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004
 ---
 
 # Agent resume and runtime recovery system design
@@ -29,6 +30,7 @@ that environment and does not acquire its own worktree lifecycle.
 | `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001` | [Session identity](#session-identity) |
 | `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002` | [Visible recovery errors](#visible-recovery-errors) |
 | `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003` | [Explicit branch replacement](#explicit-branch-replacement), [Warning persistence](#warning-persistence) |
+| `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004` | [Preserved inventory repair](#preserved-inventory-repair) |
 
 ## Current failure path
 
@@ -98,6 +100,50 @@ workspace preparation succeeds.
 The existing guarded transition to `STARTING`, resume lock, failure rollback,
 and successful token replacement rules remain unchanged. Only **Start fresh**
 can intentionally remove the stored provider identity before launch.
+
+## Preserved inventory repair
+
+`validateReuseEnvironmentInventory` remains the admission guard for every
+resume and additional-session launch. Zero rows and non-empty mismatches both
+return `ErrWorkspaceReuseUnsafe`; neither state falls through to materialize a
+new checkout.
+
+The explicit recovery request names only a task, session, action, and
+idempotency key. The orchestrator authorizes the task/session pair before any
+environment, repository, runtime, or filesystem read. It then derives the
+required repository slots from canonical task-repository records and resolves
+the environment from the session. Caller-provided paths, repository IDs,
+branches, and environment IDs are not accepted.
+
+For one mismatched slot, the executor builds a candidate from an existing stale
+environment row or the target session's `executors_running` snapshot. Local
+worktree recovery validates all of these facts:
+
+- task, workspace, environment, repository, and session ownership agree;
+- the candidate path is the canonical path owned by the environment and is not
+  a symlink;
+- `git worktree list --porcelain`, the checkout's common Git directory, HEAD,
+  symbolic branch, and repository path are reciprocal;
+- the expected branch slot and observed branch/ref identity agree;
+- no competing session or runtime claims a live writer.
+
+The inspector captures HEAD, ref containment, porcelain status counts and
+hash, a bounded content hash over tracked and untracked files, executor state,
+and source record revisions. Host paths remain internal; public receipts expose
+only a path hash.
+
+`workspace_inventory_recovery_receipts` is an append-only audit and
+idempotency table. The repair transaction locks and rechecks the source rows,
+uses their expected revisions, writes exactly one environment-repository row,
+and appends one receipt. A unique `(task_id, idempotency_key)` identity returns
+the receipt when its request hash matches and conflicts otherwise. An existing
+valid slot, stale revisions, or any ambiguous proof returns a typed result
+without changing inventory.
+
+After commit, the same orchestrator call performs one resume attempt while the
+existing resume lock remains held. Checkout inspection after the transaction
+must match the preservation hashes. Launch failure does not undo the repair or
+start another attempt; a later call reuses the durable receipt.
 
 ## Explicit branch replacement
 
@@ -280,3 +326,4 @@ size, keyboard reachability, and horizontal overflow.
 - [Keep Worktrees Owned by Task Environments](../../../decisions/2026-08-08-task-owned-worktree-lifetime.md)
 - [Configurable worktree branch names](../../../decisions/0032-configurable-worktree-branch-names.md)
 - [Require Explicit User Action Before Continuing a Session on a Replacement Branch](../../../decisions/2026-08-31-explicit-new-branch-session-recovery.md)
+- [Preserve checkouts during inventory repair](../../../decisions/2026-09-01-preserve-checkouts-during-inventory-repair.md)
