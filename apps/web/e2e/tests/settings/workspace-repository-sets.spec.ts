@@ -15,12 +15,14 @@ test.describe("Workspace repository sets settings", () => {
     apiClient,
     seedData,
     backend,
+    prCapture,
   }) => {
     const dir = path.join(backend.tmpDir, "repos", "settings-repository-sets");
     fs.mkdirSync(dir, { recursive: true });
     const gitEnv = makeGitEnv(backend.tmpDir);
     execSync("git init -b main", { cwd: dir, env: gitEnv });
     execSync('git commit --allow-empty -m "init"', { cwd: dir, env: gitEnv });
+    execSync("git branch develop", { cwd: dir, env: gitEnv });
     const second = await apiClient.createRepository(seedData.workspaceId, dir, "main", {
       name: SECOND_REPO_NAME,
     });
@@ -32,8 +34,17 @@ test.describe("Workspace repository sets settings", () => {
     const setName = `Settings set ${Date.now()}`;
     await testPage.getByTestId("repository-set-create").click();
     await testPage.getByTestId(EDITOR_NAME).fill(setName);
-    await testPage.getByTestId(`repository-set-member-${seedData.repositoryId}`).click();
-    await testPage.getByTestId(`repository-set-member-${second.id}`).click();
+    await testPage.getByTestId("repository-set-add-repository").click();
+    await testPage.getByRole("option", { name: /E2E Repo/ }).click();
+    await testPage.getByTestId("repository-set-add-repository").click();
+    await testPage.getByRole("option", { name: SECOND_REPO_NAME }).click();
+    await testPage.getByTestId(`repository-set-base-${second.id}`).click();
+    const develop = testPage.getByRole("option", { name: /develop/ });
+    await expect(develop).toBeVisible();
+    await develop.click();
+    await prCapture.screenshot("desktop-repository-set-editor", {
+      caption: "The desktop repository set editor assigns a saved base branch per member.",
+    });
     await testPage.getByTestId(EDITOR_SAVE).click();
 
     const rows = testPage.getByTestId(SET_ROW);
@@ -43,9 +54,11 @@ test.describe("Workspace repository sets settings", () => {
     await expect
       .poll(async () => {
         const listed = await apiClient.listRepositorySets(seedData.workspaceId);
-        return listed.repository_sets.find((entry) => entry.name === setName)?.repositories.length;
+        return listed.repository_sets
+          .find((entry) => entry.name === setName)
+          ?.repositories.find((member) => member.repository_id === second.id)?.base_branch;
       })
-      .toBe(2);
+      .toBe("develop");
 
     const createdId = (
       await apiClient.listRepositorySets(seedData.workspaceId)
@@ -53,7 +66,7 @@ test.describe("Workspace repository sets settings", () => {
 
     // Edit: drop one member. A supplied membership replaces the whole list.
     await testPage.getByTestId(`repository-set-edit-${createdId}`).click();
-    await testPage.getByTestId(`repository-set-member-${second.id}`).click();
+    await testPage.getByTestId(`repository-set-remove-${second.id}`).click();
     await testPage.getByTestId(EDITOR_SAVE).click();
 
     await expect(rows.first()).toHaveAttribute("data-member-count", "1");

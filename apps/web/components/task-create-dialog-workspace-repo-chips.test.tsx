@@ -155,6 +155,25 @@ describe("WorkspaceRepoChips branch policy preview", () => {
   });
 });
 
+describe("WorkspaceRepoChips saved base display", () => {
+  it("shows the saved base separately from a local executor checkout branch", () => {
+    renderChips({
+      rows: [
+        row({
+          key: "r0",
+          repositoryId: FRONTEND_ID,
+          branch: "feature/task",
+          baseBranch: "develop",
+        }),
+      ],
+      isLocalExecutor: true,
+    });
+
+    expect(screen.getByTestId("repo-chip-base-branch").textContent).toContain("develop");
+    expect(screen.getByTestId("branch-chip-trigger").textContent).toContain("feature/task");
+  });
+});
+
 describe("WorkspaceRepoChips workspace markers", () => {
   it("marks another task row's workspace repository while keeping it selectable", () => {
     const onRowRepositoryChange = vi.fn();

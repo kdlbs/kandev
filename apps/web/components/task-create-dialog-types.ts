@@ -119,6 +119,8 @@ export type TaskRepoRow = {
   /** On-machine repo path, when the user picked from discovered repos. */
   localPath?: string;
   branch: string;
+  /** Explicit effective base copied from a repository set or chosen in the form. */
+  baseBranch?: string;
   /** Saved repository policy selected for this row. */
   branchPolicyId?: string;
 };
@@ -636,6 +638,8 @@ export type DialogFormBodyProps = {
     save?: {
       workspaceId: string;
       rows: TaskRepoRow[];
+      repositories: Repository[];
+      isLocalExecutor: boolean;
       open: boolean;
       setOpen: (open: boolean) => void;
     } | null;

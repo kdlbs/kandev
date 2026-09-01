@@ -336,6 +336,7 @@ export function buildRepositoriesPayload(opts: {
       const branches = splitLocalExecutorBranches({
         rowBranch: row.branch,
         defaultBranch,
+        baseBranch: row.baseBranch,
         isLocalExecutor,
       });
       if (row.repositoryId) {
@@ -492,6 +493,7 @@ function resolveRowDefaultBranch(
 function splitLocalExecutorBranches(args: {
   rowBranch?: string;
   defaultBranch?: string;
+  baseBranch?: string;
   isLocalExecutor: boolean;
 }): { base_branch: string | undefined; checkout_branch: string | undefined } {
   // Without a known default_branch we can't anchor base_branch to the
@@ -501,11 +503,20 @@ function splitLocalExecutorBranches(args: {
   // unset default_branch is no worse off than before, and the backend's
   // resolveRepoInput probe will populate it on the next CreateRepository
   // call. Wait for that probe rather than synthesizing a guess here.
-  if (!args.isLocalExecutor || !args.defaultBranch) {
-    return { base_branch: args.rowBranch || undefined, checkout_branch: undefined };
+  if (!args.isLocalExecutor) {
+    return {
+      base_branch: args.baseBranch || args.rowBranch || undefined,
+      checkout_branch: undefined,
+    };
+  }
+  if (!args.defaultBranch) {
+    return {
+      base_branch: args.baseBranch || args.rowBranch || undefined,
+      checkout_branch: args.baseBranch ? args.rowBranch || undefined : undefined,
+    };
   }
   const base = args.defaultBranch;
   const checkout =
     args.rowBranch && args.rowBranch !== args.defaultBranch ? args.rowBranch : undefined;
-  return { base_branch: base, checkout_branch: checkout };
+  return { base_branch: args.baseBranch || base, checkout_branch: checkout };
 }

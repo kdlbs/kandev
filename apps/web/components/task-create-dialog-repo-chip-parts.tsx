@@ -128,6 +128,7 @@ function branchPolicyToOption(
 
 export function useRepoChipBranchPicker({
   row,
+  branchValue = row.branch,
   branchPolicies,
   branches,
   branchOptions,
@@ -139,6 +140,7 @@ export function useRepoChipBranchPicker({
   onPolicySelected,
 }: {
   row: TaskRepoRow;
+  branchValue?: string;
   branchPolicies: RepositoryBranchPolicy[];
   branches: Branch[];
   branchOptions: PillOption[];
@@ -151,7 +153,7 @@ export function useRepoChipBranchPicker({
 }) {
   const { t } = useTranslation();
   const hasRepo = !!(row.repositoryId || row.localPath);
-  const branchValue = preferredDefaultBranchLoading ? "" : row.branch;
+  const visibleBranchValue = preferredDefaultBranchLoading ? "" : branchValue;
   const selectedPolicy = branchPolicies.find((policy) => policy.id === row.branchPolicyId);
   const policyOptions = useMemo(
     () =>
@@ -162,13 +164,13 @@ export function useRepoChipBranchPicker({
     () => [...policyOptions, ...branchOptions],
     [branchOptions, policyOptions],
   );
-  const selectedBranchValue = selectedPolicy ? `policy:${selectedPolicy.id}` : branchValue;
+  const selectedBranchValue = selectedPolicy ? "policy:" + selectedPolicy.id : visibleBranchValue;
   const selectedBranchLabel = selectedPolicy
     ? t("task:branchPolicySelected", {
         name: selectedPolicy.name,
         base: selectedPolicy.base_branch,
       })
-    : branchValue;
+    : visibleBranchValue;
   const handleBranchSelect = (value: string) => {
     if (value.startsWith("policy:")) {
       const policy = branchPolicies.find((candidate) => `policy:${candidate.id}` === value);

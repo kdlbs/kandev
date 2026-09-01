@@ -74,8 +74,10 @@ describe("SaveRepositorySetDialog", () => {
     expect(mockCreateRepositorySet).toHaveBeenCalledWith("ws-1", {
       name: SET_NAME,
       description: "",
-      // Branches are deliberately not sent: a set holds repositories only.
-      repositoryIds: [REPO_WEB, REPO_GATEWAY],
+      repositories: [
+        { repositoryId: REPO_WEB, baseBranch: "main" },
+        { repositoryId: REPO_GATEWAY, baseBranch: "develop" },
+      ],
     });
   });
 
@@ -153,7 +155,9 @@ describe("SaveRepositorySetDialog", () => {
     fireEvent.click(screen.getByTestId(SUBMIT));
 
     await waitFor(() => expect(mockCreateRepositorySet).toHaveBeenCalledTimes(1));
-    expect(mockCreateRepositorySet.mock.calls[0][1].repositoryIds).toEqual([REPO_GATEWAY]);
+    expect(mockCreateRepositorySet.mock.calls[0][1].repositories).toEqual([
+      { repositoryId: REPO_GATEWAY, baseBranch: "main" },
+    ]);
     // The user is told which rows could not be included.
     expect(screen.queryByTestId("repository-set-save-excluded")).not.toBeNull();
   });

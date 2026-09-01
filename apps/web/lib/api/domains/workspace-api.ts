@@ -57,7 +57,12 @@ export async function listRepositorySets(workspaceId: string, options?: ApiReque
 
 export async function createRepositorySet(
   workspaceId: string,
-  payload: { name: string; description?: string; repositoryIds: string[] },
+  payload: {
+    name: string;
+    description?: string;
+    repositoryIds?: string[];
+    repositories?: Array<{ repositoryId: string; baseBranch?: string }>;
+  },
   options?: ApiRequestOptions,
 ) {
   return fetchJson<RepositorySet>(
@@ -66,11 +71,7 @@ export async function createRepositorySet(
       ...options,
       init: {
         method: "POST",
-        body: JSON.stringify({
-          name: payload.name,
-          description: payload.description ?? "",
-          repository_ids: payload.repositoryIds,
-        }),
+        body: JSON.stringify(repositorySetRequestBody(payload)),
         ...(options?.init ?? {}),
       },
     },
@@ -84,17 +85,48 @@ export async function createRepositorySet(
  */
 export async function updateRepositorySet(
   setId: string,
-  payload: { name?: string; description?: string; repositoryIds?: string[] },
+  payload: {
+    name?: string;
+    description?: string;
+    repositoryIds?: string[];
+    repositories?: Array<{ repositoryId: string; baseBranch?: string }>;
+  },
   options?: ApiRequestOptions,
 ) {
   const body: Record<string, unknown> = {};
   if (payload.name !== undefined) body.name = payload.name;
   if (payload.description !== undefined) body.description = payload.description;
   if (payload.repositoryIds !== undefined) body.repository_ids = payload.repositoryIds;
+  if (payload.repositories !== undefined) {
+    body.repositories = payload.repositories.map((member) => ({
+      repository_id: member.repositoryId,
+      base_branch: member.baseBranch ?? "",
+    }));
+  }
   return fetchJson<RepositorySet>(`/api/v1/repository-sets/${encodeURIComponent(setId)}`, {
     ...options,
     init: { method: "PATCH", body: JSON.stringify(body), ...(options?.init ?? {}) },
   });
+}
+
+function repositorySetRequestBody(payload: {
+  name: string;
+  description?: string;
+  repositoryIds?: string[];
+  repositories?: Array<{ repositoryId: string; baseBranch?: string }>;
+}) {
+  return {
+    name: payload.name,
+    description: payload.description ?? "",
+    ...(payload.repositories
+      ? {
+          repositories: payload.repositories.map((member) => ({
+            repository_id: member.repositoryId,
+            base_branch: member.baseBranch ?? "",
+          })),
+        }
+      : { repository_ids: payload.repositoryIds ?? [] }),
+  };
 }
 
 export async function deleteRepositorySet(setId: string, options?: ApiRequestOptions) {
