@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmoiron/sqlx"
-
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
@@ -71,42 +69,93 @@ func (r *Runner) recordFailure(ctx context.Context, workspaceID, errMsg string, 
 	_ = r.store.RecordSyncStatus(ctx, workspaceID, false, errMsg, warnings, "", time.Now().UTC())
 }
 
-// apply runs all four kinds' reconciliation passes plus the agent
-// reports_to second pass, and assembles the run's SyncResult. Kinds run in a
-// fixed order (agent, project, routine, skill); nothing in AC-003.5c's owned
-// fields lets one kind's apply depend on another's within a single run
-// except reports_to, which is why it runs as an explicit second pass after
-// the agent kind's own apply completes.
+// kindsFetch is every kind's collision-resolved fetched set and deletion-
+// sweep exemptions for one run, computed once up front so the forward and
+// reverse passes (AC-OFFICE-CONFIG-SYNC-003.9) can each iterate kinds in
+// their own required order without recomputing anything.
+type kindsFetch struct {
+	skill         []fetchedSkill
+	skillExempt   map[string]bool
+	agent         []fetchedEntity[sqlite.AgentInstanceConfigFields]
+	reportsTo     map[string]string
+	agentExempt   map[string]bool
+	agentCoarse   bool
+	project       []fetchedEntity[projectProjection]
+	projectExempt map[string]bool
+	projectCoarse bool
+	routine       []fetchedEntity[routineProjection]
+	routineExempt map[string]bool
+	routineCoarse bool
+}
+
+// kindsResult holds each kind's kindApplyResult across the forward and
+// reverse passes, so the reverse pass can append deletions to the same
+// object the forward pass's creates/updates were recorded on.
+type kindsResult struct {
+	skill, agent, project, routine *kindApplyResult
+}
+
+// buildKindsFetch parses every kind's files and computes its deletion-sweep
+// exemptions, recording walk/fetch/parse-phase warnings as it goes
+// (AC-OFFICE-CONFIG-SYNC-004.5c).
+func buildKindsFetch(root string, wr *walkResult, byKind map[string][]ManifestEntry, phases *phaseWarnings) kindsFetch {
+	var kf kindsFetch
+
+	var skillParseWarnings, skillFetchWarnings []string
+	kf.skill, skillParseWarnings = buildFetchedSkills(wr.skills)
+	skillFetchWarnings, kf.skillExempt = skillFetchWarningsAndExemptions(wr.skills)
+	phases.parse = append(phases.parse, skillParseWarnings...)
+	phases.fetch = append(phases.fetch, skillFetchWarnings...)
+
+	var agentParseWarnings, agentUnparsed []string
+	kf.agent, kf.reportsTo, agentParseWarnings, agentUnparsed = buildFetchedAgents(wr.agentFiles)
+	kf.agentExempt, kf.agentCoarse = kindExemptions(kindAgent, root, wr.unreadable, agentUnparsed, byKind[kindAgent])
+	phases.parse = append(phases.parse, agentParseWarnings...)
+	phases.fetch = append(phases.fetch, unreadableWarnings(kindAgent, root, wr.unreadable)...)
+
+	var projectParseWarnings, projectUnparsed []string
+	kf.project, projectParseWarnings, projectUnparsed = buildFetchedProjects(wr.projectFiles)
+	kf.projectExempt, kf.projectCoarse = kindExemptions(kindProject, root, wr.unreadable, projectUnparsed, byKind[kindProject])
+	phases.parse = append(phases.parse, projectParseWarnings...)
+	phases.fetch = append(phases.fetch, unreadableWarnings(kindProject, root, wr.unreadable)...)
+
+	var routineParseWarnings, routineUnparsed []string
+	kf.routine, routineParseWarnings, routineUnparsed = buildFetchedRoutines(wr.routineFiles)
+	kf.routineExempt, kf.routineCoarse = kindExemptions(kindRoutine, root, wr.unreadable, routineUnparsed, byKind[kindRoutine])
+	phases.parse = append(phases.parse, routineParseWarnings...)
+	phases.fetch = append(phases.fetch, unreadableWarnings(kindRoutine, root, wr.unreadable)...)
+
+	return kf
+}
+
+// apply runs every kind's reconciliation pass and assembles the run's
+// SyncResult. AC-OFFICE-CONFIG-SYNC-003.9 fixes the kind order for
+// determinism (no kind's definition actually depends on another's, per
+// 003.9a): creates/updates run skills, agents, projects, routines; deletions
+// run in reverse.
 func (r *Runner) apply(
 	ctx context.Context, workspaceID, root string, wr *walkResult, manifest []ManifestEntry,
 ) (*SyncResult, error) {
-	writer := r.repo.Writer()
 	byKind := manifestByKind(manifest)
 	phases := newPhaseWarnings()
-	result := &SyncResult{}
+	kf := buildKindsFetch(root, wr, byKind, phases)
 
-	agentFetched, reportsTo, agentParseWarnings, agentUnparsed := buildFetchedAgents(wr.agentFiles)
-	phases.parse = append(phases.parse, agentParseWarnings...)
-	agentExempt, agentCoarse := kindExemptions(kindAgent, root, wr.unreadable, agentUnparsed, byKind[kindAgent])
-	phases.fetch = append(phases.fetch, unreadableWarnings(kindAgent, root, wr.unreadable)...)
-	agentRes, err := applyKind(
-		ctx, writer, r.store, agentOps(ctx, r.repo, workspaceID), workspaceID,
-		agentFetched, byKind[kindAgent], agentExempt, agentCoarse)
+	kr, err := r.forwardPass(ctx, workspaceID, kf, byKind, phases)
 	if err != nil {
 		return nil, err
 	}
-	phases.apply = append(phases.apply, agentRes.Warnings...)
-	appendResult(result, agentRes)
-	phases.reference = append(phases.reference, resolveAgentReportsTo(ctx, r.repo, reportsTo, agentRes.IDsByKey)...)
+	if err := r.reversePass(ctx, workspaceID, kf, byKind, kr); err != nil {
+		return nil, err
+	}
 
-	if err := r.applyProjects(ctx, writer, workspaceID, root, wr, byKind, phases, result); err != nil {
-		return nil, err
-	}
-	if err := r.applyRoutines(ctx, writer, workspaceID, root, wr, byKind, phases, result); err != nil {
-		return nil, err
-	}
-	if err := r.applySkills(ctx, workspaceID, wr, byKind, phases, result); err != nil {
-		return nil, err
+	result := &SyncResult{}
+	// AC-OFFICE-CONFIG-SYNC-004.5a's within-phase tiebreak for warnings naming
+	// no file orders by the (kind, key) of the entity they name; kind order
+	// here is alphabetical (agent, project, routine, skill), independent of
+	// the 003.9 apply/delete kind order above.
+	for _, kres := range []*kindApplyResult{kr.agent, kr.project, kr.routine, kr.skill} {
+		phases.apply = append(phases.apply, kres.Warnings...)
+		appendResult(result, kres)
 	}
 
 	if !wr.kandevYAMLPresent {
@@ -120,55 +169,55 @@ func (r *Runner) apply(
 	return result, nil
 }
 
-func (r *Runner) applyProjects(
-	ctx context.Context, writer *sqlx.DB, workspaceID, root string, wr *walkResult,
-	byKind map[string][]ManifestEntry, phases *phaseWarnings, result *SyncResult,
-) error {
-	fetched, parseWarnings, unparsed := buildFetchedProjects(wr.projectFiles)
-	phases.parse = append(phases.parse, parseWarnings...)
-	exempt, coarse := kindExemptions(kindProject, root, wr.unreadable, unparsed, byKind[kindProject])
-	phases.fetch = append(phases.fetch, unreadableWarnings(kindProject, root, wr.unreadable)...)
-	res, err := applyKind(ctx, writer, r.store, projectOps(r.repo), workspaceID, fetched, byKind[kindProject], exempt, coarse)
-	if err != nil {
-		return err
+// forwardPass runs every kind's creates/updates in AC-OFFICE-CONFIG-SYNC-003.9
+// order (skills, agents, projects, routines), then resolves agent reports_to
+// (AC-OFFICE-CONFIG-SYNC-003.9b) — the one within-kind reference this run
+// must settle before anything else depends on agent IDs being final.
+func (r *Runner) forwardPass(
+	ctx context.Context, workspaceID string, kf kindsFetch, byKind map[string][]ManifestEntry, phases *phaseWarnings,
+) (*kindsResult, error) {
+	writer := r.repo.Writer()
+	kr := &kindsResult{}
+
+	var err error
+	if kr.skill, err = applySkillsCreatesOnly(ctx, r.repo, r.store, workspaceID, kf.skill, byKind[kindSkill]); err != nil {
+		return nil, err
 	}
-	phases.apply = append(phases.apply, res.Warnings...)
-	appendResult(result, res)
-	return nil
+	if kr.agent, err = applyKindCreatesOnly(ctx, writer, r.store, agentOps(ctx, r.repo, workspaceID), workspaceID, kf.agent, byKind[kindAgent]); err != nil {
+		return nil, err
+	}
+	phases.reference = append(phases.reference, resolveAgentReportsTo(ctx, r.repo, kf.reportsTo, kr.agent.IDsByKey)...)
+	if kr.project, err = applyKindCreatesOnly(ctx, writer, r.store, projectOps(r.repo), workspaceID, kf.project, byKind[kindProject]); err != nil {
+		return nil, err
+	}
+	if kr.routine, err = applyKindCreatesOnly(ctx, writer, r.store, routineOps(r.repo), workspaceID, kf.routine, byKind[kindRoutine]); err != nil {
+		return nil, err
+	}
+	return kr, nil
 }
 
-func (r *Runner) applyRoutines(
-	ctx context.Context, writer *sqlx.DB, workspaceID, root string, wr *walkResult,
-	byKind map[string][]ManifestEntry, phases *phaseWarnings, result *SyncResult,
-) error {
-	fetched, parseWarnings, unparsed := buildFetchedRoutines(wr.routineFiles)
-	phases.parse = append(phases.parse, parseWarnings...)
-	exempt, coarse := kindExemptions(kindRoutine, root, wr.unreadable, unparsed, byKind[kindRoutine])
-	phases.fetch = append(phases.fetch, unreadableWarnings(kindRoutine, root, wr.unreadable)...)
-	res, err := applyKind(ctx, writer, r.store, routineOps(r.repo), workspaceID, fetched, byKind[kindRoutine], exempt, coarse)
-	if err != nil {
-		return err
-	}
-	phases.apply = append(phases.apply, res.Warnings...)
-	appendResult(result, res)
-	return nil
-}
+// reversePass runs every kind's deletions in reverse kind order (routines,
+// projects, agents, skills), appending to the kindApplyResults forwardPass
+// already produced.
+func (r *Runner) reversePass(ctx context.Context, workspaceID string, kf kindsFetch, byKind map[string][]ManifestEntry, kr *kindsResult) error {
+	writer := r.repo.Writer()
 
-func (r *Runner) applySkills(
-	ctx context.Context, workspaceID string, wr *walkResult,
-	byKind map[string][]ManifestEntry, phases *phaseWarnings, result *SyncResult,
-) error {
-	fetched, parseWarnings := buildFetchedSkills(wr.skills)
-	phases.parse = append(phases.parse, parseWarnings...)
-	fetchWarnings, exempt := skillFetchWarningsAndExemptions(wr.skills)
-	phases.fetch = append(phases.fetch, fetchWarnings...)
-	res, err := applySkills(ctx, r.repo, r.store, workspaceID, fetched, byKind[kindSkill], exempt, false)
-	if err != nil {
+	if err := applyKindDeletesOnly(
+		ctx, writer, r.store, routineOps(r.repo), workspaceID, kf.routine, byKind[kindRoutine], kf.routineExempt, kf.routineCoarse, kr.routine,
+	); err != nil {
 		return err
 	}
-	phases.apply = append(phases.apply, res.Warnings...)
-	appendResult(result, res)
-	return nil
+	if err := applyKindDeletesOnly(
+		ctx, writer, r.store, projectOps(r.repo), workspaceID, kf.project, byKind[kindProject], kf.projectExempt, kf.projectCoarse, kr.project,
+	); err != nil {
+		return err
+	}
+	if err := applyKindDeletesOnly(
+		ctx, writer, r.store, agentOps(ctx, r.repo, workspaceID), workspaceID, kf.agent, byKind[kindAgent], kf.agentExempt, kf.agentCoarse, kr.agent,
+	); err != nil {
+		return err
+	}
+	return applySkillsDeletesOnly(ctx, r.repo, r.store, workspaceID, kf.skill, byKind[kindSkill], kf.skillExempt, false, kr.skill)
 }
 
 func appendResult(dst *SyncResult, src *kindApplyResult) {

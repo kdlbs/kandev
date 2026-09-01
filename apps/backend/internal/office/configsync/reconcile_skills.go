@@ -130,6 +130,57 @@ func applySkills(
 	return res, nil
 }
 
+// applySkillsCreatesOnly is applySkills's forward half, split out so the
+// orchestrator can run every kind's creates/updates before any kind's
+// deletions (AC-OFFICE-CONFIG-SYNC-003.9's fixed kind order — skills first).
+func applySkillsCreatesOnly(
+	ctx context.Context, repo *sqlite.Repository, store *Store, workspaceID string,
+	fetched []fetchedSkill, manifest []ManifestEntry,
+) (*kindApplyResult, error) {
+	existing, err := repo.ListSkills(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("list existing skill entities: %w", err)
+	}
+	existingByKey := make(map[string]*models.Skill, len(existing))
+	existingByID := make(map[string]*models.Skill, len(existing))
+	for _, s := range existing {
+		existingByKey[s.Slug] = s
+		existingByID[s.ID] = s
+	}
+	manifestByKey := make(map[string]ManifestEntry, len(manifest))
+	for _, m := range manifest {
+		manifestByKey[m.EntityKey] = m
+	}
+
+	res := newKindApplyResult()
+	if err := applySkillCreatesAndUpdates(ctx, repo, store, workspaceID, fetched, manifestByKey, existingByKey, existingByID, res); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// applySkillsDeletesOnly is applySkills's reverse half — the last kind to run
+// in AC-OFFICE-CONFIG-SYNC-003.9's reverse deletion order.
+func applySkillsDeletesOnly(
+	ctx context.Context, repo *sqlite.Repository, store *Store, workspaceID string,
+	fetched []fetchedSkill, manifest []ManifestEntry, exemptKeys map[string]bool, coarseExempt bool, res *kindApplyResult,
+) error {
+	existing, err := repo.ListSkills(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("list existing skill entities: %w", err)
+	}
+	existingByID := make(map[string]*models.Skill, len(existing))
+	for _, s := range existing {
+		existingByID[s.ID] = s
+	}
+	fetchedByKey := make(map[string]fetchedSkill, len(fetched))
+	for _, f := range fetched {
+		fetchedByKey[f.Key] = f
+	}
+	applySkillDeletions(ctx, repo, store, workspaceID, fetchedByKey, manifest, existingByID, exemptKeys, coarseExempt, res)
+	return nil
+}
+
 func applySkillCreatesAndUpdates(
 	ctx context.Context, repo *sqlite.Repository, store *Store, workspaceID string,
 	fetched []fetchedSkill, manifestByKey map[string]ManifestEntry,

@@ -176,6 +176,36 @@ func TestReconcile_UnreadableAgentFileExemptsOnlyThatEntityFromDeletion(t *testi
 	assert.Len(t, agents, 2, "both agents must survive: dev is exempt, ceo was never removed")
 }
 
+// TestApplyKindSplit_CreatesOnlyThenDeletesOnlyMatchesApplyKind guards the
+// AC-OFFICE-CONFIG-SYNC-003.9 refactor: applyKindCreatesOnly followed by
+// applyKindDeletesOnly (what the orchestrator calls, separated so every
+// kind's creates run before any kind's deletes) must behave identically to
+// the combined applyKind a single kind's own tests already exercise.
+func TestApplyKindSplit_CreatesOnlyThenDeletesOnlyMatchesApplyKind(t *testing.T) {
+	repo, store := newReconcileTestRepo(t)
+	ctx := context.Background()
+
+	fetched := []fetchedEntity[routineProjection]{{
+		Key: "Nightly", SourcePath: "routines/nightly.yml",
+		Projection: routineProjection{TaskTemplate: "run tests"},
+	}}
+	createRes, err := applyKindCreatesOnly(ctx, repo.Writer(), store, routineOps(repo), "ws-1", fetched, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Nightly"}, createRes.Created)
+
+	manifest, err := store.ListManifest(ctx, "ws-1")
+	require.NoError(t, err)
+
+	// Nothing fetched this pass: the manifest-only key must be deleted, same
+	// as applyKind's combined behavior (TestRoutineOps_RemovedUpstreamDeletesEntity).
+	require.NoError(t, applyKindDeletesOnly(ctx, repo.Writer(), store, routineOps(repo), "ws-1", nil, manifest, nil, false, createRes))
+	assert.Equal(t, []string{"Nightly"}, createRes.Deleted)
+
+	routines, err := repo.ListRoutines(ctx, "ws-1")
+	require.NoError(t, err)
+	assert.Empty(t, routines)
+}
+
 func TestCapWarnings_TruncatesAtLimitWithCountEntry(t *testing.T) {
 	warnings := make([]string, maxRecordedWarnings+10)
 	for i := range warnings {

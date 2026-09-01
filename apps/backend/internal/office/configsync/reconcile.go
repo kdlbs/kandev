@@ -101,6 +101,69 @@ func applyKind[P comparable](
 	return res, nil
 }
 
+// applyKindCreatesOnly runs the forward half of one kind's apply pass
+// (decisionNew, decisionExisting, decisionForeign). It exists so a caller
+// juggling all four kinds (AC-OFFICE-CONFIG-SYNC-003.9's fixed kind order:
+// skills, agents, projects, routines forward; reverse for deletions) can run
+// every kind's creates/updates before any kind's deletions, rather than
+// finishing one kind's full six-case pass before starting the next.
+func applyKindCreatesOnly[P comparable](
+	ctx context.Context, writer *sqlx.DB, store *Store, ops entityOps[P],
+	workspaceID string, fetched []fetchedEntity[P], manifest []ManifestEntry,
+) (*kindApplyResult, error) {
+	existing, err := ops.list(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("list existing %s entities: %w", ops.kind, err)
+	}
+	existingByKey := make(map[string]entityRow[P], len(existing))
+	existingByID := make(map[string]entityRow[P], len(existing))
+	for _, e := range existing {
+		existingByKey[e.Key] = e
+		existingByID[e.ID] = e
+	}
+	manifestByKey := make(map[string]ManifestEntry, len(manifest))
+	for _, m := range manifest {
+		manifestByKey[m.EntityKey] = m
+	}
+
+	res := newKindApplyResult()
+	if err := applyKindCreatesAndUpdates(
+		ctx, writer, store, ops, workspaceID, fetched, manifestByKey, existingByKey, existingByID, res,
+	); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// applyKindDeletesOnly runs the reverse half of one kind's apply pass
+// (decisionRemovedUpstream, decisionExempt, decisionGoneOutOfBand), appending
+// to a result a prior applyKindCreatesOnly call for the same kind produced.
+// It re-lists existing entities rather than reusing applyKindCreatesOnly's
+// snapshot: by the time deletions run for this kind, every other kind's
+// creates/updates in this run have already committed, and re-listing is the
+// only way to see a manifest entry's entity if this kind's own creates phase
+// just wrote it (AC-OFFICE-CONFIG-SYNC-003.9's ordering exists across kinds,
+// not to let this kind's own read go stale).
+func applyKindDeletesOnly[P comparable](
+	ctx context.Context, writer *sqlx.DB, store *Store, ops entityOps[P],
+	workspaceID string, fetched []fetchedEntity[P], manifest []ManifestEntry,
+	exemptKeys map[string]bool, coarseExempt bool, res *kindApplyResult,
+) error {
+	existing, err := ops.list(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("list existing %s entities: %w", ops.kind, err)
+	}
+	existingByID := make(map[string]entityRow[P], len(existing))
+	for _, e := range existing {
+		existingByID[e.ID] = e
+	}
+	fetchedByKey := make(map[string]fetchedEntity[P], len(fetched))
+	for _, f := range fetched {
+		fetchedByKey[f.Key] = f
+	}
+	return applyKindDeletions(ctx, writer, store, ops, workspaceID, fetchedByKey, manifest, existingByID, exemptKeys, coarseExempt, res)
+}
+
 // applyKindCreatesAndUpdates handles every fetched key (decisionNew,
 // decisionExisting, decisionForeign), in ascending source_path byte-wise
 // order (AC-OFFICE-CONFIG-SYNC-003.9d).
