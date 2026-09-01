@@ -603,15 +603,20 @@ func (s *Service) AssociatePRByURL(ctx context.Context, sessionID, taskID, repos
 	if branch == "" {
 		branch = pr.HeadBranch
 	}
-	if _, watchErr := s.CreatePRWatch(ctx, sessionID, taskID, repositoryID, owner, repo, prNumber, branch); watchErr != nil {
+	// Resolved once and reused for both writes below: the watch's task_id is
+	// its only sync handle (get-or-create, never re-pointed on a hit), so it
+	// must agree with the association's task_id or the redirected owner's
+	// row never syncs.
+	effectiveTaskID := s.resolveEffectiveAssociationTaskID(ctx, taskID, repositoryID)
+	if _, watchErr := s.CreatePRWatch(ctx, sessionID, effectiveTaskID, repositoryID, owner, repo, prNumber, branch); watchErr != nil {
 		s.logger.Error("failed to create PR watch after PR creation",
 			zap.String("session_id", sessionID), zap.Error(watchErr))
 	}
 
 	// Associate PR with task (persists + publishes WS event)
-	if _, assocErr := s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, true, true, TaskPRSourceWatch); assocErr != nil {
+	if _, assocErr := s.associatePRWithTask(ctx, "", effectiveTaskID, repositoryID, pr, true, true, TaskPRSourceWatch); assocErr != nil {
 		s.logger.Error("failed to associate PR with task after creation",
-			zap.String("task_id", taskID), zap.Error(assocErr))
+			zap.String("task_id", effectiveTaskID), zap.Error(assocErr))
 	}
 }
 
@@ -639,12 +644,17 @@ func (s *Service) AssociatePRByURLForWorkspace(
 	if branch == "" {
 		branch = pr.HeadBranch
 	}
+	// Resolved once and reused for both writes below: the watch's task_id is
+	// its only sync handle (get-or-create, never re-pointed on a hit), so it
+	// must agree with the association's task_id or the redirected owner's
+	// row never syncs.
+	effectiveTaskID := s.resolveEffectiveAssociationTaskID(ctx, taskID, repositoryID)
 	if _, err := s.CreatePRWatchForWorkspace(
-		ctx, workspaceID, sessionID, taskID, repositoryID, owner, repo, prNumber, branch,
+		ctx, workspaceID, sessionID, effectiveTaskID, repositoryID, owner, repo, prNumber, branch,
 	); err != nil {
 		return fmt.Errorf("create PR watch: %w", err)
 	}
-	if _, err := s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, true, true, TaskPRSourceWatch); err != nil {
+	if _, err := s.associatePRWithTask(ctx, workspaceID, effectiveTaskID, repositoryID, pr, true, true, TaskPRSourceWatch); err != nil {
 		return fmt.Errorf("associate PR with task: %w", err)
 	}
 	return nil

@@ -253,3 +253,54 @@ func TestAssociateExistingPRByURL_DoesNotRedirectURLLinkSource(t *testing.T) {
 		t.Fatalf("got %d PR associations for member1, want 1: %+v", len(rows), rows)
 	}
 }
+
+// TestAssociatePRByURL_WatchAndAssociationAgreeOnRedirectedOwner covers
+// Review Round 3's F-A finding: AssociatePRByURL created the PR watch under
+// the raw, unredirected observing task, then associated under the
+// workspace-group owner two lines later. createPRWatch is get-or-create and
+// never re-points task_id on a hit, so the watch was permanently stuck under
+// the member while the association correctly redirected to the owner. Every
+// subsequent poller/batched sync call keys off watch.TaskID, which then
+// resolved to zero rows for the owner and silently never synced. Both the
+// watch and the association must land under the same (redirected) task.
+func TestAssociatePRByURL_WatchAndAssociationAgreeOnRedirectedOwner(t *testing.T) {
+	_, svc, mockClient, store := setupPollerTest(t)
+
+	issueStore := newMultiTaskIssueStore()
+	issueStore.addTask(&taskmodels.Task{ID: "member1"}, "repo-canonical")
+	issueStore.addTask(&taskmodels.Task{ID: "owner1"}, "repo-canonical")
+	svc.SetTaskIssueStore(issueStore)
+	svc.SetWorkspaceGroupOwnerResolver(&fakeWorkspaceGroupOwnerResolver{ownerTaskID: "owner1"})
+
+	mockClient.AddPR(&PR{
+		Number: 42, RepoOwner: "org", RepoName: "repo",
+		HTMLURL: "https://github.com/org/repo/pull/42", HeadBranch: "feature-x", BaseBranch: "main",
+	})
+
+	ctx := context.Background()
+	svc.AssociatePRByURL(ctx, "session-1", "member1", "repo-canonical", "https://github.com/org/repo/pull/42", "")
+
+	ownerAssociations, err := store.ListTaskPRsByTask(ctx, "owner1")
+	if err != nil {
+		t.Fatalf("list owner PR associations: %v", err)
+	}
+	if len(ownerAssociations) != 1 {
+		t.Fatalf("got %d PR associations for owner1, want 1: %+v", len(ownerAssociations), ownerAssociations)
+	}
+
+	ownerWatches, err := store.ListPRWatchesByTask(ctx, "owner1")
+	if err != nil {
+		t.Fatalf("list owner PR watches: %v", err)
+	}
+	if len(ownerWatches) != 1 {
+		t.Fatalf("got %d PR watches for owner1, want 1 (watch must be created under the same redirected task as the association): %+v", len(ownerWatches), ownerWatches)
+	}
+
+	memberWatches, err := store.ListPRWatchesByTask(ctx, "member1")
+	if err != nil {
+		t.Fatalf("list member PR watches: %v", err)
+	}
+	if len(memberWatches) != 0 {
+		t.Fatalf("got %d PR watches for member1, want 0 (watch must not be stranded under the observing member task): %+v", len(memberWatches), memberWatches)
+	}
+}
