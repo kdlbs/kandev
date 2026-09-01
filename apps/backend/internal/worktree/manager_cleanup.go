@@ -306,6 +306,11 @@ func (m *Manager) removeWorktreeWithReceipt(
 	if wt == nil {
 		return receipt, errors.New("worktree cleanup requires a worktree")
 	}
+	// Cleanup runs after the inventory snapshot has been selected. Keep a
+	// private copy so a later session/path projection update cannot redirect
+	// the destructive operation or its reference release.
+	worktreeSnapshot := *wt
+	wt = &worktreeSnapshot
 	if strings.TrimSpace(wt.RepositoryPath) == "" || strings.TrimSpace(wt.Path) == "" {
 		return receipt, errors.New("worktree cleanup requires repository and worktree paths")
 	}
@@ -704,6 +709,12 @@ func (m *Manager) removeWorktreeDir(
 		}
 		if err := pathHandles[0].RemoveDirectory(ctx); err != nil {
 			return fmt.Errorf("remove audited worktree directory: %w", err)
+		}
+		// The parent cleanup is a separate path-based fallback. Revalidate the
+		// audited target immediately before it so a replacement cannot turn an
+		// otherwise safe cleanup into recursive deletion of another directory.
+		if err := pathHandles[0].VerifyPath(worktreePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("worktree path changed before parent cleanup: %w", err)
 		}
 		pruneCmd := newGitCommand(ctx, "worktree", "prune")
 		pruneCmd.Dir = repoPath

@@ -131,6 +131,7 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 		RunID:              execution.RunID,
 		TaskID:             execution.TaskID,
 		SessionID:          execution.SessionID,
+		TaskEnvironmentID:  execution.TaskEnvironmentID,
 		TurnID:             turnID,
 		AgentID:            execution.AgentID,
 		AgentProfileID:     execution.officeProfileID(),
@@ -336,11 +337,12 @@ func (p *EventPublisher) PublishGitEvent(payload *GitEventPayload) {
 // PublishGitStatus publishes a git status update event.
 func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *agentctl.GitStatusUpdate) {
 	p.PublishGitEvent(&GitEventPayload{
-		Type:      GitEventTypeStatusUpdate,
-		TaskID:    execution.TaskID,
-		SessionID: execution.SessionID,
-		AgentID:   execution.ID,
-		Timestamp: update.Timestamp.Format(time.RFC3339Nano),
+		Type:              GitEventTypeStatusUpdate,
+		TaskID:            execution.TaskID,
+		SessionID:         execution.SessionID,
+		TaskEnvironmentID: execution.TaskEnvironmentID,
+		AgentID:           execution.ID,
+		Timestamp:         update.Timestamp.Format(time.RFC3339Nano),
 		Status: &GitStatusData{
 			Branch:              update.Branch,
 			RemoteBranch:        update.RemoteBranch,

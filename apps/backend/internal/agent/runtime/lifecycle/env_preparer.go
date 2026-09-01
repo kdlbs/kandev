@@ -83,6 +83,9 @@ type RepoPrepareSpec struct {
 	// environment. It forbids worktree creation/recreation and all repository
 	// mutating setup paths.
 	WorkspaceReuseRequired bool
+	// AllowBranchReplacement is set only for the explicit user recovery action.
+	// It permits a missing persisted branch to be replaced with a fresh branch.
+	AllowBranchReplacement bool
 	WorktreeBranch         string
 	WorktreeBranchPrefix   string
 	WorktreeBranchTemplate string
@@ -135,6 +138,9 @@ type EnvPrepareRequest struct {
 	// in this request. RepoPrepareSpec carries the same value so multi-repo
 	// callers can retain it while requests are split.
 	WorkspaceReuseRequired bool
+	// AllowBranchReplacement permits the explicit new-branch recovery action to
+	// materialize a replacement while retaining the environment record.
+	AllowBranchReplacement bool
 
 	WorktreeBranchPrefix   string
 	WorktreeBranchTemplate string
@@ -188,6 +194,7 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		RemoteContribution:         r.RemoteContribution,
 		WorktreeID:                 r.WorktreeID,
 		WorkspaceReuseRequired:     r.WorkspaceReuseRequired,
+		AllowBranchReplacement:     r.AllowBranchReplacement,
 		WorktreeBranch:             r.WorktreeBranch,
 		WorktreeBranchPrefix:       r.WorktreeBranchPrefix,
 		WorktreeBranchTemplate:     r.WorktreeBranchTemplate,

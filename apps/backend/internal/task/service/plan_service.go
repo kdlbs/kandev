@@ -410,7 +410,8 @@ func (s *PlanService) DeletePlan(ctx context.Context, taskID string) error {
 	return nil
 }
 
-// ListRevisions returns plan revisions newest-first without content (metadata only).
+// ListRevisions returns every plan revision for a task, newest-first, each
+// including its full content.
 func (s *PlanService) ListRevisions(ctx context.Context, taskID string) ([]*models.TaskPlanRevision, error) {
 	if taskID == "" {
 		return nil, ErrTaskIDRequired
@@ -419,6 +420,20 @@ func (s *PlanService) ListRevisions(ctx context.Context, taskID string) ([]*mode
 		return nil, err
 	}
 	return s.repo.ListTaskPlanRevisions(ctx, taskID, 0)
+}
+
+// GetLatestRevision returns the most recent revision for a task, or nil if
+// none exist. Unlike ListRevisions, it fetches only the latest revision row
+// instead of every revision — callers that only need the latest revision
+// number (e.g. the plan write guard) should use this instead.
+func (s *PlanService) GetLatestRevision(ctx context.Context, taskID string) (*models.TaskPlanRevision, error) {
+	if taskID == "" {
+		return nil, ErrTaskIDRequired
+	}
+	if err := s.authorize(ctx, taskID); err != nil {
+		return nil, err
+	}
+	return s.repo.GetLatestTaskPlanRevision(ctx, taskID)
 }
 
 // GetRevision returns a single revision with content (for diff/preview).

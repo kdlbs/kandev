@@ -136,4 +136,13 @@ describe("setGitStatus change reporting (single deep compare)", () => {
         .setGitStatus(SESSION, status({ is_submodule: true, timestamp: NEWER_TIMESTAMP })),
     ).toBe(false);
   });
+
+  it("writes under the supplied environment without consulting the session map", () => {
+    store.getState().registerSessionEnvironment(SESSION, "mapped-env");
+
+    store.getState().setGitStatus("payload-env", status());
+
+    expect(store.getState().gitStatus.byEnvironmentRepo["payload-env"][""]).toBeDefined();
+    expect(store.getState().gitStatus.byEnvironmentRepo["mapped-env"]).toBeUndefined();
+  });
 });

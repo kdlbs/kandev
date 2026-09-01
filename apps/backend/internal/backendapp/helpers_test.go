@@ -116,7 +116,7 @@ func decodePayload(t *testing.T, raw json.RawMessage) map[string]interface{} {
 }
 
 func TestBuildGitStatusNotificationIncludesAncestryEvidence(t *testing.T) {
-	msg := buildGitStatusNotification("session-1", "web", client.GitStatusResult{
+	msg := buildGitStatusNotification("session-1", "env-1", "web", client.GitStatusResult{
 		Branch:           "feature/rewrite",
 		RemoteBranch:     "origin/feature/rewrite",
 		HeadCommit:       "local-head",
@@ -131,6 +131,9 @@ func TestBuildGitStatusNotificationIncludesAncestryEvidence(t *testing.T) {
 		t.Fatal("buildGitStatusNotification returned nil")
 	}
 	payload := decodePayload(t, msg.Payload)
+	if got := payload["task_environment_id"]; got != "env-1" {
+		t.Fatalf("task_environment_id = %#v, want env-1", got)
+	}
 	status, ok := payload["status"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("status payload = %#v, want an object", payload["status"])

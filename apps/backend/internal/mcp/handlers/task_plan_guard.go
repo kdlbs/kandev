@@ -107,13 +107,13 @@ type planWriteGuardResult struct {
 // A failure to fetch the current plan is non-fatal: the write proceeds
 // without a truncation warning, but it forces a new revision so a later
 // successful write cannot coalesce into an unknown prior revision. A failure
-// to list the revision history is handled differently:
-// truncation has already been detected from the plan content at that point,
-// so the guard still forces a new revision and still warns — it renders the
-// warning without a specific revision number (see planTruncationWarning)
-// instead of silently dropping the warning, because clearing
-// forceNewRevision here would let this destructive write coalesce into, and
-// overwrite, the only surviving copy of the pre-truncation content.
+// to fetch the latest revision is handled differently: truncation has
+// already been detected from the plan content at that point, so the guard
+// still forces a new revision and still warns — it renders the warning
+// without a specific revision number (see planTruncationWarning) instead of
+// silently dropping the warning, because clearing forceNewRevision here
+// would let this destructive write coalesce into, and overwrite, the only
+// surviving copy of the pre-truncation content.
 func (h *Handlers) evaluatePlanWriteGuard(ctx context.Context, taskID, newContent string) planWriteGuardResult {
 	existing, err := h.planService.GetPlan(ctx, taskID)
 	if err != nil {
@@ -127,8 +127,8 @@ func (h *Handlers) evaluatePlanWriteGuard(ctx context.Context, taskID, newConten
 	}
 
 	priorRevisionNumber := 0
-	if revisions, revErr := h.planService.ListRevisions(ctx, taskID); revErr == nil && len(revisions) > 0 {
-		priorRevisionNumber = revisions[0].RevisionNumber
+	if latest, revErr := h.planService.GetLatestRevision(ctx, taskID); revErr == nil && latest != nil {
+		priorRevisionNumber = latest.RevisionNumber
 	}
 
 	return planWriteGuardResult{

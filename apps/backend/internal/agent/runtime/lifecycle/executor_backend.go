@@ -467,7 +467,7 @@ type ExecutorCreateRequest struct {
 	// the final command.
 	ManagedRuntimeVersion string
 	PreviousExecutionID   string   // Non-empty when reconnecting to a previous execution
-	McpMode               string   // MCP tool mode: "task" (default), "config", or "office"
+	McpMode               string   // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
 	McpProviders          []string // Normalized provider capabilities attached to the task
 	McpProfile            *mcpprofile.Context
 	AuthToken             string // Previously handshaken agentctl token for reconnects

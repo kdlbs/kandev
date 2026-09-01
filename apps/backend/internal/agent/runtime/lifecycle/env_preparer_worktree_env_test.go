@@ -27,3 +27,21 @@ func TestBuildWorktreeCreateRequestForwardsProfileEnv(t *testing.T) {
 		t.Fatalf("CreateRequest.IntegrationRef = %q, want develop", got.IntegrationRef)
 	}
 }
+
+func TestBuildWorktreeCreateRequestAllowsExplicitBranchReplacement(t *testing.T) {
+	req := &EnvPrepareRequest{
+		WorkspaceReuseRequired: true,
+		AllowBranchReplacement: true,
+		RepositoryID:           "repo-1",
+		RepositoryPath:         "/repo",
+	}
+
+	got := buildWorktreeCreateRequest(req)
+
+	if !got.AllowBranchReplacement {
+		t.Fatal("CreateRequest.AllowBranchReplacement = false, want true")
+	}
+	if got.ReuseRequired {
+		t.Fatal("explicit branch replacement must not use attach-only ReuseRequired")
+	}
+}

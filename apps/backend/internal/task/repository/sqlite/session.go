@@ -877,6 +877,7 @@ func (r *Repository) CreateOfficeTaskSession(ctx context.Context, session *model
 	return tx.Commit()
 }
 
+// createTaskSession inserts a task session through the supplied database handle.
 func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExecutor, session *models.TaskSession) error {
 	if session.ID == "" {
 		session.ID = uuid.New().String()
@@ -916,10 +917,12 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 	if err != nil {
 		return fmt.Errorf("failed to serialize repository snapshot: %w", err)
 	}
-	// agent_profile_id is NULL-able. Empty string would defeat the partial
-	// unique index since SQLite treats two empty strings as equal — store NULL
-	// for kanban / quick-chat rows and a real value only for office sessions
-	// (per ADR 0005, kanban and office now share the same column).
+	// agent_profile_id is NULL-able and stored as NULL when empty. No unique
+	// index currently constrains (task_id, agent_profile_id) — see
+	// ErrOfficeSessionRaceConflict's doc comment (errors.go). Per ADR 0005,
+	// kanban and office share this column, and every row (kanban included)
+	// carries a non-NULL value in practice — nothing here scopes NULL to
+	// kanban specifically.
 	var agentProfileID interface{}
 	if session.AgentProfileID != "" {
 		agentProfileID = session.AgentProfileID
@@ -946,10 +949,12 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name)
 
-	if err != nil && strings.Contains(err.Error(), "uniq_office_task_session") {
+	if err != nil && isOfficeTaskSessionUniqueViolation(err) {
 		// Two callers raced past their SELECT-then-INSERT for the same
 		// (task_id, agent_profile_id) — surface a typed sentinel so callers
 		// can classify with errors.Is rather than driver-message matching.
+		// Currently unreachable: no index enforces this pair yet (see
+		// ErrOfficeSessionRaceConflict's doc comment).
 		return fmt.Errorf("%w: %w", ErrOfficeSessionRaceConflict, err)
 	}
 	return err
@@ -1208,9 +1213,11 @@ func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID st
 }
 
 // GetTaskSessionByTaskAndAgent retrieves the office task session for the given
-// (task_id, agent_profile_id) pair. The pair is unique across non-NULL
-// agent_profile_id rows, so at most one row matches. Returns nil, nil when
-// no session exists for the pair.
+// (task_id, agent_profile_id) pair. This pair is NOT unique at the schema
+// level — no index enforces it (see ErrOfficeSessionRaceConflict's doc
+// comment for why) — so both live and terminal rows can accumulate for the
+// same pair, and ORDER BY started_at DESC LIMIT 1 is load-bearing to pick the
+// most recent one. Returns nil, nil when no session exists for the pair.
 func (r *Repository) GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error) {
 	if taskID == "" || agentInstanceID == "" {
 		return nil, nil
@@ -1384,6 +1391,8 @@ func (r *Repository) updateTaskSession(
 	return nil
 }
 
+// updateTaskSessionWithStateGuard writes a full session row while an optional
+// expected state guard still matches the stored row.
 func (r *Repository) updateTaskSessionWithStateGuard(
 	ctx context.Context,
 	exec taskSessionExecutor,
@@ -1412,8 +1421,10 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 	// would clobber metadata set via those side-channel paths since the
 	// caller's in-memory copy may be stale.
 
-	// agent_profile_id is stored as NULL when empty so the partial unique
-	// index over (task_id, agent_profile_id) ignores kanban / quick-chat rows.
+	// agent_profile_id is stored as NULL when empty. No unique index
+	// currently constrains (task_id, agent_profile_id) — see
+	// ErrOfficeSessionRaceConflict's doc comment (errors.go) for why, and
+	// for what still guards this pair despite that.
 	var agentProfileID interface{}
 	if session.AgentProfileID != "" {
 		agentProfileID = session.AgentProfileID
@@ -1441,6 +1452,16 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 	}
 	result, err := exec.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
+		if isOfficeTaskSessionUniqueViolation(err) {
+			// A terminal-session resume (updateSessionStarting) or another
+			// full-row update raced another live row into the same
+			// (task_id, agent_profile_id) slot — same classification as the
+			// createTaskSession INSERT path, so callers can errors.Is this
+			// regardless of which write hit the constraint. Currently
+			// unreachable: no index enforces this pair yet (see
+			// ErrOfficeSessionRaceConflict's doc comment).
+			return false, fmt.Errorf("%w: %w", ErrOfficeSessionRaceConflict, err)
+		}
 		return false, err
 	}
 	rows, err := result.RowsAffected()

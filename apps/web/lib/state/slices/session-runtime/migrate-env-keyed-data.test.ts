@@ -75,7 +75,7 @@ describe("registerSessionEnvironment — migrateEnvKeyedData", () => {
     const state = store.getState();
     // Data should now live under the environmentId key
     expect(state.sessionCommits.byEnvironmentId["env-1"]).toEqual([{ commit_sha: "abc" }]);
-    expect(state.gitStatus.byEnvironmentId["env-1"]).toEqual({ branch: "main" });
+    expect(state.gitStatus.byEnvironmentId["env-1"]).toEqual({ branch: "main", files: {} });
     expect(state.shell.outputs["env-1"]).toBe("hello");
     // sessionId key should be cleaned up
     expect(state.sessionCommits.byEnvironmentId["sess-1"]).toBeUndefined();
@@ -106,7 +106,7 @@ describe("registerSessionEnvironment — migrateEnvKeyedData", () => {
     expect(state.sessionCommits.byEnvironmentId["env-1"]).toEqual([{ commit_sha: "existing" }]);
     expect(state.sessionCommits.byEnvironmentId["sess-2"]).toBeUndefined();
     // Git status: no env-1 data existed, so sess-2 data migrated
-    expect(state.gitStatus.byEnvironmentId["env-1"]).toEqual({ branch: "stale" });
+    expect(state.gitStatus.byEnvironmentId["env-1"]).toEqual({ branch: "stale", files: {} });
     expect(state.gitStatus.byEnvironmentId["sess-2"]).toBeUndefined();
   });
 
@@ -197,7 +197,7 @@ describe("setTaskSession — cross-slice migration", () => {
 
     const state = store.getState();
     expect(state.environmentIdBySessionId["sess-1"]).toBe("env-1");
-    expect(state.gitStatus.byEnvironmentId["env-1"]).toEqual({ branch: "main" });
+    expect(state.gitStatus.byEnvironmentId["env-1"]).toEqual({ branch: "main", files: {} });
     expect(state.gitStatus.byEnvironmentId["sess-1"]).toBeUndefined();
     expect(state.sessionCommits.byEnvironmentId["env-1"]).toEqual([{ commit_sha: "abc" }]);
     expect(state.sessionCommits.byEnvironmentId["sess-1"]).toBeUndefined();
@@ -218,7 +218,7 @@ describe("setTaskSession — cross-slice migration", () => {
 
     const state = store.getState();
     expect(state.environmentIdBySessionId["sess-2"]).toBeUndefined();
-    expect(state.gitStatus.byEnvironmentId["sess-2"]).toEqual({ branch: "dev" });
+    expect(state.gitStatus.byEnvironmentId["sess-2"]).toEqual({ branch: "dev", files: {} });
   });
 });
 
@@ -250,7 +250,7 @@ describe("setTaskSessionsForTask — bulk cross-slice migration", () => {
     ]);
 
     const state = store.getState();
-    expect(state.gitStatus.byEnvironmentId["env-x"]).toEqual({ branch: "a" });
+    expect(state.gitStatus.byEnvironmentId["env-x"]).toEqual({ branch: "a", files: {} });
     expect(state.gitStatus.byEnvironmentId["sess-a"]).toBeUndefined();
     expect(state.shell.outputs["env-y"]).toBe("hello");
     expect(state.shell.outputs["sess-b"]).toBeUndefined();
