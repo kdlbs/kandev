@@ -1278,6 +1278,7 @@ func TestPlanTools_DescriptionsDocumentCrossTaskBehavior(t *testing.T) {
 		"get_walkthrough_kandev",
 		"delete_walkthrough_kandev",
 		"publish_review_findings_kandev",
+		"list_review_findings_kandev",
 	} {
 		tool, ok := tools[name]
 		require.True(t, ok, "tool %q must be registered", name)
@@ -1304,6 +1305,7 @@ func TestTaskScopedTools_TaskIDIsOptional(t *testing.T) {
 		"get_walkthrough_kandev",
 		"delete_walkthrough_kandev",
 		"publish_review_findings_kandev",
+		"list_review_findings_kandev",
 	} {
 		tool, ok := tools[name]
 		require.True(t, ok, "tool %q must be registered", name)

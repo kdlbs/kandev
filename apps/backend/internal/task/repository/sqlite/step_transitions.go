@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -137,6 +138,26 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 	// trail; the ledger table itself is that audit trail.
 	steptelemetry.RecordLedgerRow(r.log, attribution.Trigger)
 	return id, nil
+}
+
+// CountStepEntries returns the number of committed task_step_transitions
+// rows whose to_workflow_step_id is stepID for taskID — the recorded entry
+// count REQ-TWS-001 floors at 1 to derive the step-entry number. Recorded
+// entries before the ledger's first row (2026-08-16) do not exist and cannot
+// be counted, so the result is a lower bound on the true entry count for a
+// task whose history predates the ledger. An empty taskID or stepID returns
+// (0, nil) without issuing a query: the ledger normalizes "" to NULL, so a
+// query would only ever be able to return 0.
+func (r *Repository) CountStepEntries(ctx context.Context, taskID, stepID string) (int, error) {
+	if taskID == "" || stepID == "" {
+		return 0, nil
+	}
+	const query = `SELECT COUNT(*) FROM task_step_transitions WHERE task_id = ? AND to_workflow_step_id = ?`
+	var count int
+	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), taskID, stepID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count step entries: %w", err)
+	}
+	return count, nil
 }
 
 // formatEntryID converts recordStepTransition's ledger identifier into the

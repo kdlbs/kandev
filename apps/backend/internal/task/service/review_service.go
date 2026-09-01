@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,6 +20,21 @@ import (
 // validation. The MCP publish path surfaces it as a client error so the agent
 // can correct and retry.
 var ErrInvalidReviewFinding = errors.New("invalid review finding")
+
+// ErrInvalidReviewFindingFilter is returned when a list_review_findings_kandev
+// status or severity filter names a value outside the accepted set.
+var ErrInvalidReviewFindingFilter = errors.New("invalid review finding filter")
+
+// ErrReviewAccessDenied wraps an authorizer's denial for a review-finding read.
+// It lets handlers distinguish "the caller cannot reach this task" from other
+// failure modes (via errors.As) while surfacing the authorizer's own message
+// verbatim, unlike PublishFindings which propagates the raw authorizer error.
+type ErrReviewAccessDenied struct {
+	Err error
+}
+
+func (e *ErrReviewAccessDenied) Error() string { return e.Err.Error() }
+func (e *ErrReviewAccessDenied) Unwrap() error { return e.Err }
 
 // ErrReviewRunNotFound / ErrReviewFindingNotFound re-export the model sentinels
 // so handlers in this package can match without importing models.
@@ -468,23 +484,81 @@ func buildReviewFinding(taskID, runID string, in ReviewFindingInput) (*models.Ta
 }
 
 // UpdateFindingStatus records the human's disposition of a finding. Moving to
-// resolved stamps resolved_at; returning to open clears it.
+// resolved stamps resolved_at; returning to open clears it. This is the UI
+// action's path and is deliberately unauthorized at this layer (task access
+// was already established to reach the finding through the UI).
 func (s *ReviewService) UpdateFindingStatus(ctx context.Context, findingID string, status models.ReviewFindingStatus) (*models.TaskReviewFinding, error) {
 	if findingID == "" {
 		return nil, fmt.Errorf("%w: finding id is required", ErrReviewFindingNotFound)
 	}
-	if !models.ValidReviewFindingStatus(status) {
-		return nil, fmt.Errorf("%w: unknown status %q", ErrInvalidReviewFinding, status)
-	}
-	var resolvedAt *time.Time
-	if status == models.ReviewFindingResolved || status == models.ReviewFindingDismissed {
-		now := time.Now().UTC()
-		resolvedAt = &now
-	}
-	if err := s.repo.UpdateTaskReviewFindingStatus(ctx, findingID, status, resolvedAt); err != nil {
+	if err := validateReviewFindingStatus(status); err != nil {
 		return nil, err
 	}
-	finding, err := s.repo.GetTaskReviewFinding(ctx, findingID)
+	existing, err := s.repo.GetTaskReviewFinding(ctx, findingID)
+	if err != nil {
+		return nil, err
+	}
+	return s.applyFindingStatus(ctx, existing, status)
+}
+
+// ResolveFindingRequest carries the resolve_review_finding_kandev tool args.
+type ResolveFindingRequest struct {
+	FindingID string
+	Status    models.ReviewFindingStatus
+}
+
+// ResolveFinding is the MCP tool's path: it authorizes against the finding's
+// own owning task (read from the row, never trusted from the caller) before
+// applying the status change. An unknown finding_id and a finding on a task
+// the caller cannot reach return the identical ErrReviewFindingNotFound, so
+// the response never confirms that a foreign finding_id exists.
+func (s *ReviewService) ResolveFinding(ctx context.Context, req ResolveFindingRequest) (*models.TaskReviewFinding, error) {
+	if req.FindingID == "" {
+		return nil, fmt.Errorf("%w: finding id is required", ErrReviewFindingNotFound)
+	}
+	if err := validateReviewFindingStatus(req.Status); err != nil {
+		return nil, err
+	}
+	existing, err := s.repo.GetTaskReviewFinding(ctx, req.FindingID)
+	if err != nil {
+		if errors.Is(err, ErrReviewFindingNotFound) {
+			return nil, ErrReviewFindingNotFound
+		}
+		return nil, err
+	}
+	if err := s.authorize(ctx, existing.TaskID); err != nil {
+		return nil, ErrReviewFindingNotFound
+	}
+	return s.applyFindingStatus(ctx, existing, req.Status)
+}
+
+// validateReviewFindingStatus rejects anything outside open/resolved/dismissed,
+// naming the accepted values, shared by UpdateFindingStatus and ResolveFinding.
+func validateReviewFindingStatus(status models.ReviewFindingStatus) error {
+	if !models.ValidReviewFindingStatus(status) {
+		return fmt.Errorf("%w: status must be one of open, resolved, dismissed (got %q)", ErrInvalidReviewFinding, status)
+	}
+	return nil
+}
+
+// applyFindingStatus persists a finding's new status, implementing the shared
+// idempotency rule: resubmitting the finding's current status leaves
+// resolved_at unchanged rather than re-stamping it. Shared by both
+// UpdateFindingStatus and ResolveFinding so the two entry points cannot drift.
+func (s *ReviewService) applyFindingStatus(ctx context.Context, existing *models.TaskReviewFinding, status models.ReviewFindingStatus) (*models.TaskReviewFinding, error) {
+	resolvedAt := existing.ResolvedAt
+	if status != existing.Status {
+		if status == models.ReviewFindingResolved || status == models.ReviewFindingDismissed {
+			now := time.Now().UTC()
+			resolvedAt = &now
+		} else {
+			resolvedAt = nil
+		}
+	}
+	if err := s.repo.UpdateTaskReviewFindingStatus(ctx, existing.ID, status, resolvedAt); err != nil {
+		return nil, err
+	}
+	finding, err := s.repo.GetTaskReviewFinding(ctx, existing.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -493,6 +567,133 @@ func (s *ReviewService) UpdateFindingStatus(ctx context.Context, findingID strin
 		rvFieldFinding: finding,
 	})
 	return finding, nil
+}
+
+// maxListedReviewFindings bounds a single list_review_findings_kandev response
+// (AC-TWS-003.8/003.9).
+const maxListedReviewFindings = 100
+
+// reviewFindingStatusAll is the status filter value that returns every status
+// rather than defaulting to open (AC-TWS-003.5).
+const reviewFindingStatusAll = "all"
+
+// ListFindingsRequest carries the list_review_findings_kandev filter args.
+type ListFindingsRequest struct {
+	TaskID   string
+	Status   string
+	Severity string
+}
+
+// ListFindingsResult is the outcome of a findings list, including truncation
+// bookkeeping so the caller can report how many findings matched in total.
+type ListFindingsResult struct {
+	Findings     []*models.TaskReviewFinding
+	TotalMatched int
+	Truncated    bool
+}
+
+// ListFindings returns a task's review findings, filtered by status (default
+// "open") and optionally by severity, ordered by repository/file/line/id and
+// truncated at maxListedReviewFindings (REQ-TWS-003).
+func (s *ReviewService) ListFindings(ctx context.Context, req ListFindingsRequest) (*ListFindingsResult, error) {
+	if req.TaskID == "" {
+		return nil, ErrTaskIDRequired
+	}
+	if err := s.authorize(ctx, req.TaskID); err != nil {
+		return nil, &ErrReviewAccessDenied{Err: err}
+	}
+
+	status, err := normalizeReviewFindingStatusFilter(req.Status)
+	if err != nil {
+		return nil, err
+	}
+	severity, err := normalizeReviewFindingSeverityFilter(req.Severity)
+	if err != nil {
+		return nil, err
+	}
+
+	all, err := s.repo.ListTaskReviewFindings(ctx, req.TaskID)
+	if err != nil {
+		s.logger.Error("list review findings", zap.String(rvFieldTaskID, req.TaskID), zap.Error(err))
+		return nil, fmt.Errorf("list review findings: %w", err)
+	}
+
+	matched := filterReviewFindings(all, status, severity)
+	sortReviewFindings(matched)
+
+	result := &ListFindingsResult{TotalMatched: len(matched)}
+	if len(matched) > maxListedReviewFindings {
+		result.Findings = matched[:maxListedReviewFindings]
+		result.Truncated = true
+	} else {
+		result.Findings = matched
+	}
+	if result.Findings == nil {
+		result.Findings = []*models.TaskReviewFinding{}
+	}
+	return result, nil
+}
+
+// normalizeReviewFindingStatusFilter trims and lowercases a status filter,
+// defaulting an empty value to "open" (AC-TWS-003.5) and rejecting anything
+// outside open/resolved/dismissed/all.
+func normalizeReviewFindingStatusFilter(raw string) (string, error) {
+	trimmed := strings.ToLower(strings.TrimSpace(raw))
+	if trimmed == "" {
+		return string(models.ReviewFindingOpen), nil
+	}
+	switch trimmed {
+	case string(models.ReviewFindingOpen), string(models.ReviewFindingResolved), string(models.ReviewFindingDismissed), reviewFindingStatusAll:
+		return trimmed, nil
+	default:
+		return "", fmt.Errorf("%w: status must be one of open, resolved, dismissed, all (got %q)", ErrInvalidReviewFindingFilter, raw)
+	}
+}
+
+// normalizeReviewFindingSeverityFilter trims and lowercases a severity filter.
+// An empty value means "no restriction" (AC-TWS-003.6), distinct from status's
+// empty-means-open default.
+func normalizeReviewFindingSeverityFilter(raw string) (string, error) {
+	trimmed := strings.ToLower(strings.TrimSpace(raw))
+	if trimmed == "" {
+		return "", nil
+	}
+	if !models.ValidReviewSeverity(models.ReviewSeverity(trimmed)) {
+		return "", fmt.Errorf("%w: severity must be one of blocker, major, minor, nit (got %q)", ErrInvalidReviewFindingFilter, raw)
+	}
+	return trimmed, nil
+}
+
+func filterReviewFindings(findings []*models.TaskReviewFinding, status, severity string) []*models.TaskReviewFinding {
+	out := make([]*models.TaskReviewFinding, 0, len(findings))
+	for _, f := range findings {
+		if status != reviewFindingStatusAll && string(f.Status) != status {
+			continue
+		}
+		if severity != "" && string(f.Severity) != severity {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// sortReviewFindings orders by repository_name, file_path, start_line, id
+// (AC-TWS-003.8) for a stable, reviewable listing.
+func sortReviewFindings(findings []*models.TaskReviewFinding) {
+	sort.Slice(findings, func(i, j int) bool {
+		a, b := findings[i], findings[j]
+		if a.RepositoryName != b.RepositoryName {
+			return a.RepositoryName < b.RepositoryName
+		}
+		if a.FilePath != b.FilePath {
+			return a.FilePath < b.FilePath
+		}
+		if a.StartLine != b.StartLine {
+			return a.StartLine < b.StartLine
+		}
+		return a.ID < b.ID
+	})
 }
 
 // TaskReview is the full review state for a task.
