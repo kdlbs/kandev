@@ -106,6 +106,11 @@ func TestResolveReviewFindingTool_RequiresFindingIDAndStatus(t *testing.T) {
 
 	missingStatus := callTool(t, s, "resolve_review_finding_kandev", map[string]interface{}{"finding_id": "f-1"})
 	assert.True(t, missingStatus.IsError)
+	missingStatusText, ok := missingStatus.Content[0].(mcplib.TextContent)
+	require.True(t, ok, "expected TextContent")
+	assert.Contains(t, missingStatusText.Text, "open")
+	assert.Contains(t, missingStatusText.Text, "resolved")
+	assert.Contains(t, missingStatusText.Text, "dismissed")
 }
 
 func TestResolveReviewFindingTool_ForwardsArgsAndEnvelope(t *testing.T) {

@@ -1222,7 +1222,7 @@ func (s *Server) resolveReviewFindingHandler() server.ToolHandlerFunc {
 		}
 		status, err := req.RequireString("status")
 		if err != nil {
-			return mcp.NewToolResultError("status is required"), nil
+			return mcp.NewToolResultError("status must be one of open, resolved, dismissed"), nil
 		}
 
 		payload := map[string]interface{}{
