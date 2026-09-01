@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -22,6 +23,7 @@ type startupRecoveryHarness struct {
 	repo                    *sqliterepo.Repository
 	svc                     *Service
 	agentMgr                *mockAgentManager
+	taskRepo                *mockTaskRepo
 	task                    *models.Task
 	session                 *models.TaskSession
 	launchCalls             atomic.Int32
@@ -136,9 +138,9 @@ func newStartupRecoveryHarness(t *testing.T, promptReady bool) *startupRecoveryH
 			return &executor.LaunchAgentResponse{AgentExecutionID: "execution-resumed"}, nil
 		},
 	}
-	taskRepo := newMockTaskRepo()
-	taskRepo.tasks[h.task.ID] = &v1.Task{ID: h.task.ID, State: v1.TaskStateInProgress}
-	h.svc = createTestServiceWithAgent(h.repo, newMockStepGetter(), taskRepo, h.agentMgr)
+	h.taskRepo = newMockTaskRepo()
+	h.taskRepo.tasks[h.task.ID] = &v1.Task{ID: h.task.ID, State: v1.TaskStateInProgress}
+	h.svc = createTestServiceWithAgent(h.repo, newMockStepGetter(), h.taskRepo, h.agentMgr)
 	h.svc.executor = executor.NewExecutor(h.agentMgr, h.repo, testLogger(), executor.ExecutorConfig{})
 	return h
 }
@@ -234,6 +236,38 @@ func TestEnsureSessionRunning_StartupRecoveryTerminalizesUnreadyExecutionAfterSe
 		h.agentMgr.mu.Unlock()
 		if len(stopCalls) != 1 || stopCalls[0].ExecutionID != "execution-resumed" {
 			t.Fatalf("stop calls = %+v, want one stop for execution-resumed", stopCalls)
+		}
+		h.assertStableIdentity(t)
+	})
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.6
+func TestEnsureSessionRunning_StartupRecoveryStopFailurePreservesRetryableSession(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newStartupRecoveryHarness(t, false)
+		h.agentMgr.stopAgentWithReasonErr = errors.New("runtime still active")
+
+		if err := h.svc.ensureSessionRunning(h.ctx, h.session.ID, h.session); err == nil {
+			t.Fatal("expected readiness teardown failure")
+		}
+		persisted, err := h.repo.GetTaskSession(h.ctx, h.session.ID)
+		if err != nil {
+			t.Fatalf("reload session: %v", err)
+		}
+		if persisted.State != models.TaskSessionStateStarting {
+			t.Fatalf("session state = %s, want retryable STARTING", persisted.State)
+		}
+		if got := h.taskRepo.updatedStates[h.task.ID]; got == v1.TaskStateFailed {
+			t.Fatal("stop failure marked task FAILED while its execution may still be active")
+		}
+		if got := h.taskRepo.stateWrites[h.task.ID]; got != 0 {
+			t.Fatalf("task state writes = %d, want 0 after stop failure", got)
+		}
+		h.agentMgr.mu.Lock()
+		stopCalls := append([]stopAgentCall(nil), h.agentMgr.stopAgentWithReasonArgs...)
+		h.agentMgr.mu.Unlock()
+		if len(stopCalls) != 1 || stopCalls[0].ExecutionID != "execution-resumed" {
+			t.Fatalf("stop calls = %+v, want one attempt for execution-resumed", stopCalls)
 		}
 		h.assertStableIdentity(t)
 	})
@@ -349,6 +383,64 @@ func TestWorkflowAutoStart_ReadinessTimeoutDoesNotPublishWaitingOrCreateReplacem
 			if ok && data[metaKeyNewState] == string(models.TaskSessionStateWaitingForInput) {
 				t.Fatalf("published false WAITING_FOR_INPUT event: %+v", data)
 			}
+		}
+		h.assertStableIdentity(t)
+	})
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.6
+func TestWorkflowAutoStart_ReadinessTimeoutDoesNotReconcileSuccessorExecution(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newStartupRecoveryHarness(t, true)
+		wrapped := &successorOnReadyCheckRepo{sessionExecutorStore: h.svc.repo, base: h.repo}
+		h.svc.repo = wrapped
+		launch := h.agentMgr.launchAgentFunc
+		h.agentMgr.launchAgentFunc = func(
+			ctx context.Context,
+			req *executor.LaunchAgentRequest,
+		) (*executor.LaunchAgentResponse, error) {
+			response, err := launch(ctx, req)
+			if err == nil {
+				wrapped.armed.Store(true)
+			}
+			return response, err
+		}
+		eventBus := &mockEventBus{}
+		h.svc.eventBus = eventBus
+		step := &wfmodels.WorkflowStep{ID: "blocked-step", WorkflowID: "wf1", Name: "Blocked", Prompt: "continue"}
+
+		h.svc.launchAfterOnEnterDispatch(
+			h.ctx, h.task.ID, h.session, step, h.task.Description, false, true, false,
+		)
+
+		persisted, err := h.repo.GetTaskSession(h.ctx, h.session.ID)
+		if err != nil {
+			t.Fatalf("reload session: %v", err)
+		}
+		if persisted.State != models.TaskSessionStateStarting {
+			t.Fatalf("session state = %s, want successor-owned STARTING", persisted.State)
+		}
+		running, err := h.repo.GetExecutorRunningBySessionID(h.ctx, h.session.ID)
+		if err != nil {
+			t.Fatalf("reload execution: %v", err)
+		}
+		if running.AgentExecutionID != "execution-successor" {
+			t.Fatalf("execution id = %q, want execution-successor", running.AgentExecutionID)
+		}
+		for _, published := range eventBus.published() {
+			if published.Subject != events.TaskSessionStateChanged {
+				continue
+			}
+			data, ok := published.Event.Data.(map[string]interface{})
+			if ok && data[metaKeyNewState] == string(models.TaskSessionStateWaitingForInput) {
+				t.Fatalf("published false WAITING_FOR_INPUT event for successor: %+v", data)
+			}
+		}
+		h.agentMgr.mu.Lock()
+		stopCalls := append([]stopAgentCall(nil), h.agentMgr.stopAgentWithReasonArgs...)
+		h.agentMgr.mu.Unlock()
+		if len(stopCalls) != 0 {
+			t.Fatalf("successor race issued stop calls: %+v", stopCalls)
 		}
 		h.assertStableIdentity(t)
 	})

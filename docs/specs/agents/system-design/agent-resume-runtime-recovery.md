@@ -117,16 +117,20 @@ that outcome directly instead of relying on event replay:
    existing state compare-and-set to park the same `STARTING` session at
    `WAITING_FOR_INPUT`.
 3. If the exact execution is not prompt-ready, claim teardown ownership, check
-   execution and terminal-session identity again, stop only that execution,
-   retire its activity, and use the existing guarded launch-failure path to
-   settle the old session at `FAILED`.
+   execution and terminal-session identity again, and stop only that
+   execution. A successful stop retires its activity and uses the existing
+   guarded launch-failure path to settle the old session at `FAILED`. A stop
+   failure returns the readiness and teardown errors while preserving the
+   retryable session state and live-execution activity.
 
 A terminal session or successor execution supersedes the timeout owner. The
 timeout path neither revives the terminal row nor stops or reconciles the
 successor. It returns an ordinary readiness error rather than the workflow
 terminalization sentinel, so workflow entry cannot create a replacement
-session. Workflow fallback reloads the authoritative row and publishes
-`WAITING_FOR_INPUT` only after that state is durable.
+session. An internal supersession marker also prevents workflow fallback from
+parking a successor-owned session. Other workflow fallback reloads the
+authoritative row and publishes `WAITING_FOR_INPUT` only after that state is
+durable.
 
 This recovery never synthesizes `agent.boot_ready`: that handler also drains
 queued prompts and would turn reconciliation into a second dispatch source.

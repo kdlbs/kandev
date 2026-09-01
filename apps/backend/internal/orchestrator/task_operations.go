@@ -111,6 +111,11 @@ var ErrSessionNotPromptable = errors.New("session not promptable")
 // trigger this.
 var errQueuedDispatchSuperseded = errors.New("queued dispatch superseded by a newer one for this session")
 
+// errSessionReadinessRecoverySuperseded marks a timeout recovery attempt that
+// lost ownership to a terminal session or a successor execution. Workflow
+// fallback must not park the new owner based on the old execution's timeout.
+var errSessionReadinessRecoverySuperseded = errors.New("session readiness recovery superseded")
+
 var (
 	// Backend restart recovery can restore the session state before the ACP
 	// stream is promptable again. Keep this above CI's slow-start tail so a
@@ -2531,15 +2536,26 @@ func (s *Service) failOwnedExecutionAfterReadinessTimeout(
 	timeoutErr error,
 ) error {
 	owned, err := s.sessionExecutionIsOwnedAndActive(ctx, session.ID, executionID)
-	if err != nil || !owned {
+	if err != nil {
 		return err
+	}
+	if !owned {
+		return fmt.Errorf("%w for session %s execution %s", errSessionReadinessRecoverySuperseded, session.ID, executionID)
 	}
 	if !s.claimForcedExecutionCleanup(session.ID, executionID) {
-		return fmt.Errorf("execution %s teardown is already owned for session %s", executionID, session.ID)
+		return fmt.Errorf(
+			"%w: execution %s teardown is already owned for session %s",
+			errSessionReadinessRecoverySuperseded,
+			executionID,
+			session.ID,
+		)
 	}
 	owned, err = s.sessionExecutionIsOwnedAndActive(ctx, session.ID, executionID)
-	if err != nil || !owned {
+	if err != nil {
 		return err
+	}
+	if !owned {
+		return fmt.Errorf("%w for session %s execution %s", errSessionReadinessRecoverySuperseded, session.ID, executionID)
 	}
 
 	s.logger.Warn("stopping session-unready execution after resume timeout",
@@ -2547,26 +2563,27 @@ func (s *Service) failOwnedExecutionAfterReadinessTimeout(
 		zap.String("agent_execution_id", executionID),
 		zap.Error(timeoutErr))
 	stopErr := s.executor.StopExecution(ctx, executionID, sessionReadinessRecoveryStopReason, true)
-	if stopErr == nil {
-		s.markExecutionFailed(session.ID, executionID)
-		s.retireExecutionActivityAndPublish(ctx, session.TaskID, session.ID, executionID)
+	if stopErr != nil {
+		return stopErr
 	}
+	s.markExecutionFailed(session.ID, executionID)
+	s.retireExecutionActivityAndPublish(ctx, session.TaskID, session.ID, executionID)
 
 	running, lookupErr := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
 	if lookupErr != nil {
-		return errors.Join(stopErr, fmt.Errorf("reload execution after readiness teardown: %w", lookupErr))
+		return fmt.Errorf("reload execution after readiness teardown: %w", lookupErr)
 	}
 	if running != nil && running.AgentExecutionID != "" && running.AgentExecutionID != executionID {
-		return stopErr
+		return fmt.Errorf("%w for session %s execution %s", errSessionReadinessRecoverySuperseded, session.ID, executionID)
 	}
 	latest, reloadErr := s.repo.GetTaskSession(ctx, session.ID)
 	if reloadErr != nil {
-		return errors.Join(stopErr, fmt.Errorf("reload session after readiness teardown: %w", reloadErr))
+		return fmt.Errorf("reload session after readiness teardown: %w", reloadErr)
 	}
 	if !isTerminalSessionState(latest.State) {
 		_ = s.handleSessionLaunchFailure(ctx, session.TaskID, session.ID, timeoutErr, latest)
 	}
-	return stopErr
+	return nil
 }
 
 func (s *Service) sessionExecutionMatches(ctx context.Context, sessionID, executionID string) (bool, error) {

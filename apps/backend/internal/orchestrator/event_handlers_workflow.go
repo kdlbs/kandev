@@ -2595,6 +2595,12 @@ func (s *Service) launchAfterOnEnterDispatch(
 		// autoStartStepPrompt sends the prompt directly via PromptTask.
 		effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
 		if err := s.autoStartStepPrompt(ctx, taskID, session, step, effectivePrompt, hasPlanMode, true); err != nil {
+			if errors.Is(err, errSessionReadinessRecoverySuperseded) {
+				s.logger.Info("workflow auto-start readiness recovery was superseded",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID))
+				return
+			}
 			if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
 				if workflowAutoStartWasCancelled(err) {
 					s.logger.Info("workflow auto-start cancelled before dispatch; not creating replacement",
