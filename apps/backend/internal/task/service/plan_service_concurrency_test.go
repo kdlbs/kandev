@@ -260,6 +260,66 @@ func TestDeletePlanHoldsLockAcrossConcurrentCreate(t *testing.T) {
 	}
 }
 
+// TestUpdatePlanHoldsLockAcrossConcurrentDelete is the mirror direction of
+// TestDeletePlanHoldsLockAcrossConcurrentCreate, mandated by AC-002.12's
+// Verification bullet: a plan *write* (UpdatePlan) held after its state read
+// but before its commit, with a concurrent DeletePlan for the same task
+// observed to queue rather than interleave. Confirms the per-task lock
+// serializes this direction too, not just delete-holds/create-queues.
+func TestUpdatePlanHoldsLockAcrossConcurrentDelete(t *testing.T) {
+	_, eventBus, repo := createTestService(t)
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-update-del")
+
+	if err := repo.CreateTaskPlan(ctx, &models.TaskPlan{
+		TaskID: "task-update-del", Title: "Plan", Content: "v0", CreatedBy: "agent",
+	}); err != nil {
+		t.Fatalf("seed CreateTaskPlan: %v", err)
+	}
+
+	writeStarted := make(chan struct{})
+	releaseWrite := make(chan struct{})
+	gated := &gatedWriteRepo{Repository: repo, writeStarted: writeStarted, proceed: releaseWrite}
+	svc := NewPlanService(gated, eventBus, log)
+
+	updateDone := make(chan error, 1)
+	go func() {
+		_, err := svc.UpdatePlan(ctx, UpdatePlanRequest{
+			TaskID: "task-update-del", Content: "v1", AuthorKind: "agent", AuthorName: "A",
+		})
+		updateDone <- err
+	}()
+	<-writeStarted // UpdatePlan now holds the per-task lock, blocked inside its write tx.
+
+	deleteDone := make(chan error, 1)
+	go func() {
+		deleteDone <- svc.DeletePlan(ctx, "task-update-del")
+	}()
+
+	select {
+	case err := <-deleteDone:
+		t.Fatalf("concurrent DeletePlan finished (err=%v) before the gated UpdatePlan released its lock", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(releaseWrite)
+	if err := <-updateDone; err != nil {
+		t.Fatalf("UpdatePlan: %v", err)
+	}
+	if err := <-deleteDone; err != nil {
+		t.Fatalf("DeletePlan: %v", err)
+	}
+
+	head, err := repo.GetTaskPlan(ctx, "task-update-del")
+	if err != nil {
+		t.Fatalf("GetTaskPlan: %v", err)
+	}
+	if head != nil {
+		t.Fatalf("expected the delete (queued behind, then run after the update committed) to remove the row, got %+v", head)
+	}
+}
+
 // TestUpdatePlanCancelledContextFailsAtWriteNotEarlierRead verifies AC-005.7:
 // a context cancelled before the call still lets the pre-write tri-state
 // read succeed (via context.WithoutCancel), and only the write transaction
@@ -290,6 +350,93 @@ func TestUpdatePlanCancelledContextFailsAtWriteNotEarlierRead(t *testing.T) {
 	}
 	if head == nil || head.Content != "v1" {
 		t.Fatalf("expected HEAD unchanged by the failed write, got %+v", head)
+	}
+}
+
+// TestUpdatePlanQueuedWriteCancelledWhileWaitingFailsAtItsOwnWriteAndDoesNotStrandTheLock
+// covers the "while queued" half of AC-005.7 that
+// TestUpdatePlanCancelledContextFailsAtWriteNotEarlierRead does not: writer A
+// holds the per-task lock (gated inside its write tx), writer B is started
+// concurrently and confirmed to be genuinely blocked waiting for that lock
+// (not yet running), B's own context is cancelled while it is still queued,
+// then A is released. B must still take its turn (its pre-write reads run on
+// context.WithoutCancel so they are unaffected) and fail only once it reaches
+// its own write transaction. A subsequent write to the same task must then
+// succeed, proving B's cancellation did not strand the lock.
+func TestUpdatePlanQueuedWriteCancelledWhileWaitingFailsAtItsOwnWriteAndDoesNotStrandTheLock(t *testing.T) {
+	_, eventBus, repo := createTestService(t)
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-queued-cancel")
+
+	if err := repo.CreateTaskPlan(ctx, &models.TaskPlan{
+		TaskID: "task-queued-cancel", Title: "Plan", Content: "v0", CreatedBy: "agent",
+	}); err != nil {
+		t.Fatalf("seed CreateTaskPlan: %v", err)
+	}
+
+	writeStarted := make(chan struct{})
+	releaseWrite := make(chan struct{})
+	gated := &gatedWriteRepo{Repository: repo, writeStarted: writeStarted, proceed: releaseWrite}
+	svc := NewPlanService(gated, eventBus, log)
+
+	aDone := make(chan error, 1)
+	go func() {
+		_, err := svc.UpdatePlan(ctx, UpdatePlanRequest{
+			TaskID: "task-queued-cancel", Content: "from-a", AuthorKind: "agent", AuthorName: "A",
+		})
+		aDone <- err
+	}()
+	<-writeStarted // A holds the per-task lock, blocked inside its write tx.
+
+	bCtx, cancelB := context.WithCancel(context.Background())
+	bDone := make(chan error, 1)
+	go func() {
+		_, err := svc.UpdatePlan(bCtx, UpdatePlanRequest{
+			TaskID: "task-queued-cancel", Content: "from-b", AuthorKind: "agent", AuthorName: "B",
+		})
+		bDone <- err
+	}()
+
+	select {
+	case err := <-bDone:
+		t.Fatalf("B returned (err=%v) before A released the lock - it was never genuinely queued", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	cancelB() // cancel while B is still queued behind A, before A's lock is released
+
+	select {
+	case err := <-bDone:
+		t.Fatalf("B returned (err=%v) immediately upon cancellation while still queued - it must wait its turn", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(releaseWrite)
+	if err := <-aDone; err != nil {
+		t.Fatalf("A's UpdatePlan: %v", err)
+	}
+
+	bErr := <-bDone
+	if bErr == nil {
+		t.Fatal("expected B's UpdatePlan to fail once it reached its own write transaction with an already-cancelled context")
+	}
+	if !errors.Is(bErr, context.Canceled) {
+		t.Fatalf("expected B's error to wrap context.Canceled (from its write transaction, not an earlier read), got: %v", bErr)
+	}
+
+	head, err := repo.GetTaskPlan(ctx, "task-queued-cancel")
+	if err != nil {
+		t.Fatalf("GetTaskPlan: %v", err)
+	}
+	if head == nil || head.Content != "from-a" {
+		t.Fatalf("expected HEAD to still reflect A's committed write (B's cancelled write must not have applied), got %+v", head)
+	}
+
+	if _, err := svc.UpdatePlan(ctx, UpdatePlanRequest{
+		TaskID: "task-queued-cancel", Content: "from-c", AuthorKind: "agent", AuthorName: "C",
+	}); err != nil {
+		t.Fatalf("expected a subsequent write to the same task to succeed (B's cancellation must not strand the lock), got: %v", err)
 	}
 }
 
@@ -420,6 +567,109 @@ func TestRevertPlanDoesNotAbortWhenOwnHeadReadFails(t *testing.T) {
 	}
 	if head == nil || head.Content != "v1" {
 		t.Fatalf("expected HEAD content v1 after revert, got %+v", head)
+	}
+}
+
+// TestRevertPlanQueuedBehindHeldWriteCancelledWhileWaitingFailsAtItsOwnWriteAndDoesNotStrandTheLock
+// is the RevertPlan-specific instance of AC-005.7's "while queued" shape:
+// RevertPlan is queued behind another writer holding the per-task lock, its
+// own context is cancelled while it waits, and it must still take its turn
+// and fail only at its own write transaction (per F38's context.WithoutCancel
+// placement on its target-revision fetch), leaving HEAD unchanged, with a
+// subsequent write to the same task succeeding afterward.
+func TestRevertPlanQueuedBehindHeldWriteCancelledWhileWaitingFailsAtItsOwnWriteAndDoesNotStrandTheLock(t *testing.T) {
+	_, eventBus, repo := createTestService(t)
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-revert-queued-cancel")
+
+	seedSvc := NewPlanService(repo, eventBus, log)
+	if _, err := seedSvc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-revert-queued-cancel", Content: "v1", AuthorKind: "agent", AuthorName: "Claude",
+	}); err != nil {
+		t.Fatalf("seed v1: %v", err)
+	}
+	if _, err := seedSvc.UpdatePlan(ctx, UpdatePlanRequest{
+		TaskID: "task-revert-queued-cancel", Content: "v2", AuthorKind: "agent", AuthorName: "Claude", ForceNewRevision: true,
+	}); err != nil {
+		t.Fatalf("seed v2: %v", err)
+	}
+	list, err := seedSvc.ListRevisions(ctx, "task-revert-queued-cancel")
+	if err != nil || len(list) != 2 {
+		t.Fatalf("ListRevisions: err=%v len=%d", err, len(list))
+	}
+	var v1ID string
+	for _, rev := range list {
+		if rev.RevisionNumber == 1 {
+			v1ID = rev.ID
+		}
+	}
+	if v1ID == "" {
+		t.Fatal("could not find revision 1")
+	}
+
+	writeStarted := make(chan struct{})
+	releaseWrite := make(chan struct{})
+	gated := &gatedWriteRepo{Repository: repo, writeStarted: writeStarted, proceed: releaseWrite}
+	svc := NewPlanService(gated, eventBus, log)
+
+	aDone := make(chan error, 1)
+	go func() {
+		_, err := svc.UpdatePlan(ctx, UpdatePlanRequest{
+			TaskID: "task-revert-queued-cancel", Content: "from-a", AuthorKind: "agent", AuthorName: "A", ForceNewRevision: true,
+		})
+		aDone <- err
+	}()
+	<-writeStarted // A holds the per-task lock, blocked inside its write tx.
+
+	revertCtx, cancelRevert := context.WithCancel(context.Background())
+	revertDone := make(chan error, 1)
+	go func() {
+		_, err := svc.RevertPlan(revertCtx, RevertPlanRequest{
+			TaskID: "task-revert-queued-cancel", TargetRevisionID: v1ID, AuthorName: "Reverter",
+		})
+		revertDone <- err
+	}()
+
+	select {
+	case err := <-revertDone:
+		t.Fatalf("RevertPlan returned (err=%v) before A released the lock - it was never genuinely queued", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	cancelRevert() // cancel while the revert is still queued behind A, before A's lock is released
+
+	select {
+	case err := <-revertDone:
+		t.Fatalf("RevertPlan returned (err=%v) immediately upon cancellation while still queued - it must wait its turn", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(releaseWrite)
+	if err := <-aDone; err != nil {
+		t.Fatalf("A's UpdatePlan: %v", err)
+	}
+
+	revertErr := <-revertDone
+	if revertErr == nil {
+		t.Fatal("expected the queued RevertPlan to fail once it reached its own write transaction with an already-cancelled context")
+	}
+	if !errors.Is(revertErr, context.Canceled) {
+		t.Fatalf("expected the revert's error to wrap context.Canceled (from its write transaction, not the target-revision/HEAD reads), got: %v", revertErr)
+	}
+
+	head, err := repo.GetTaskPlan(ctx, "task-revert-queued-cancel")
+	if err != nil {
+		t.Fatalf("GetTaskPlan: %v", err)
+	}
+	if head == nil || head.Content != "from-a" {
+		t.Fatalf("expected HEAD to still reflect A's committed write (the cancelled revert must not have applied), got %+v", head)
+	}
+
+	if _, err := svc.UpdatePlan(ctx, UpdatePlanRequest{
+		TaskID: "task-revert-queued-cancel", Content: "from-c", AuthorKind: "agent", AuthorName: "C", ForceNewRevision: true,
+	}); err != nil {
+		t.Fatalf("expected a subsequent write to the same task to succeed (the cancelled revert must not strand the lock), got: %v", err)
 	}
 }
 
