@@ -11,14 +11,13 @@ owners:
 
 ## Ownership
 
-The UI system owns reusable web presentation and responsive interaction.
-Feature state stays with its owner.
+UI owns reusable presentation and responsive interaction.
 
 ## Exclusions
 
-- Domain behavior and state belong to [Tasks](../tasks/README.md),
-  [Agents](../agents/README.md), [Plugins](../plugins/README.md), and
-  [Integrations](../integrations/README.md).
+[Tasks](../tasks/README.md), [Agents](../agents/README.md),
+[Plugins](../plugins/README.md), and [Integrations](../integrations/README.md)
+own feature behavior/state.
 
 ## Specification map
 
@@ -120,7 +119,7 @@ Feature state stays with its owner.
 - [Slash Command Composer Selection](requirements/slash-command-composer.md)
 - [Subagent Observability](requirements/subagent-observability.md)
 - [Nested Submodule Review](requirements/submodule-review.md)
-- [Confirmation surfaces](requirements/confirmation-warning-hierarchy.md)
+- [Confirmations](requirements/confirmation-warning-hierarchy.md)
 - [Task Layout Profiles](requirements/task-layout-profiles.md)
 - [Task Agent Tab Reconciliation](requirements/task-agent-tab-reconciliation.md)
 - [Task Listing Display Preferences](requirements/task-listing-display-preferences.md)
@@ -170,7 +169,7 @@ Feature state stays with its owner.
 - [Quick Chat viewport layout](system-design/quick-chat-viewport-layout.md)
 - [Quick Chat and Terminal Tabs](system-design/quick-terminal.md)
 - [Responsive Plan Formatting](system-design/responsive-plan-formatting.md)
-- [Confirmation surfaces](system-design/confirmation-warning-hierarchy.md)
+- [Confirmations](system-design/confirmation-warning-hierarchy.md)
 - [Resizable Markdown Table Columns](system-design/resizable-markdown-tables.md)
 - [Task Layout Profiles](system-design/task-layout-profiles.md)
 - [Task Agent Tab Reconciliation](system-design/task-agent-tab-reconciliation.md)
@@ -188,6 +187,6 @@ system-design documents above.
 
 ## Related systems
 
-- [Tasks](../tasks/README.md): task and workflow state.
-- [Plugins](../plugins/README.md): plugin contributions.
-- [Platform](../platform/README.md): shared runtime state.
+- [Tasks](../tasks/README.md): task state.
+- [Plugins](../plugins/README.md): contributions.
+- [Platform](../platform/README.md): runtime state.
