@@ -292,6 +292,28 @@ func (r *Repository) RecordWorkflowRouteOperation(ctx context.Context, operation
 	return tx.Commit()
 }
 
+// recordWorkflowRouteOperationTx upserts by operation ID. The identity gate
+// (the ON CONFLICT ... WHERE below) covers only the fields a producer is
+// expected to hold constant across every write of the same logical
+// operation: task/producer/expected_step/session/actor/external cause.
+// workspace_id, target_step_id, and turn_id are deliberately excluded from
+// that gate because real producers fill them progressively rather than
+// knowing them up front. step_complete is the concrete case:
+// handleStepComplete (handlers.go) writes a pending pre-record with
+// workspace_id and turn_id set but target_step_id still "" (the destination
+// isn't resolved until the workflow engine evaluates it at turn end), while
+// the turn-end commit (executeStepTransition/finishTurn in
+// event_handlers_workflow.go, and the deferred/workflow-engine paths in
+// workflow_store.go) reuses the same OperationID with the real
+// target_step_id but leaves workspace_id and turn_id unset in its context
+// — those callers only have the task ID at hand, not a loaded task, so
+// fetching the workspace just to stamp identity would be pure overhead for
+// a value task_id already determines. Gating identity on any of these three
+// fields would make that second write match zero rows and fail as
+// ErrOperationIdentityConflict, permanently blocking the primary
+// agent-signals-done auto-advance flow. All three use fill-once semantics
+// instead (first non-blank value wins and is never clobbered by a later
+// blank one), matching transition_id/effect_id below.
 func (r *Repository) recordWorkflowRouteOperationTx(
 	ctx context.Context,
 	tx stepTransitionTx,
@@ -312,19 +334,18 @@ func (r *Repository) recordWorkflowRouteOperationTx(
 			transition_id, effect_id, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
+			workspace_id = CASE WHEN workflow_route_operations.workspace_id = '' THEN excluded.workspace_id ELSE workflow_route_operations.workspace_id END,
 			observed_step_id = CASE WHEN workflow_route_operations.outcome = 'pending' THEN excluded.observed_step_id ELSE workflow_route_operations.observed_step_id END,
 			target_step_id = CASE WHEN workflow_route_operations.outcome = 'pending' THEN excluded.target_step_id ELSE workflow_route_operations.target_step_id END,
+			turn_id = COALESCE(workflow_route_operations.turn_id, excluded.turn_id),
 			outcome = CASE WHEN workflow_route_operations.outcome = 'pending' THEN excluded.outcome ELSE workflow_route_operations.outcome END,
 			transition_id = COALESCE(workflow_route_operations.transition_id, excluded.transition_id),
 			effect_id = COALESCE(workflow_route_operations.effect_id, excluded.effect_id),
 			updated_at = excluded.updated_at
 		WHERE workflow_route_operations.task_id = excluded.task_id
-			AND workflow_route_operations.workspace_id = excluded.workspace_id
 			AND workflow_route_operations.producer = excluded.producer
 			AND workflow_route_operations.expected_step_id = excluded.expected_step_id
-			AND workflow_route_operations.target_step_id = excluded.target_step_id
 			AND COALESCE(workflow_route_operations.session_id, '') = COALESCE(excluded.session_id, '')
-			AND COALESCE(workflow_route_operations.turn_id, '') = COALESCE(excluded.turn_id, '')
 			AND workflow_route_operations.actor_kind = excluded.actor_kind
 			AND COALESCE(workflow_route_operations.actor_id, '') = COALESCE(excluded.actor_id, '')
 			AND workflow_route_operations.external_cause = excluded.external_cause

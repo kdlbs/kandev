@@ -115,6 +115,52 @@ func TestPostgresTerminalRouteAtomicallySettlesStateAndPendingRow(t *testing.T) 
 	require.Zero(t, pending)
 }
 
+// TestPostgresWorkflowRouteOperationPendingToCommittedFillsIdentity mirrors
+// TestWorkflowRouteOperationPendingToCommittedFillsTurnAndTarget on
+// PostgreSQL: the real step_complete producer's pending pre-record (real
+// turn_id, placeholder target_step_id, task's real workspace_id) must still
+// upsert cleanly when the turn-end commit reuses the same OperationID with
+// the real target_step_id but an unset workspace_id/turn_id in its context.
+func TestPostgresWorkflowRouteOperationPendingToCommittedFillsIdentity(t *testing.T) {
+	repo := newWorkflowRoutesPostgresRepo(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "pg-two-phase-workspace", Name: "TwoPhase"}))
+	task := &models.Task{
+		ID: "pg-two-phase-task", WorkspaceID: "pg-two-phase-workspace",
+		WorkflowStepID: "pg-step-work", Title: "TwoPhase",
+	}
+	require.NoError(t, repo.CreateTask(ctx, task))
+
+	const opID = "pg-shared-step-complete-op"
+	const turnID = "pg-turn-123"
+
+	require.NoError(t, repo.RecordWorkflowRouteOperation(ctx, routing.Operation{
+		ID: opID, TaskID: task.ID, WorkspaceID: task.WorkspaceID,
+		Producer: routing.ProducerStepComplete, ExpectedStepID: "pg-step-work",
+		ObservedStepID: "pg-step-work", SessionID: "pg-session-route", TurnID: turnID,
+		ActorKind: "agent", ActorID: "pg-session-route", Outcome: routing.OutcomePending,
+	}))
+
+	task.WorkflowStepID = "pg-step-done"
+	require.NoError(t, repo.UpdateTask(routing.WithOperation(ctx, routing.Operation{
+		ID: opID, TaskID: task.ID, Producer: routing.ProducerStepComplete,
+		ExpectedStepID: "pg-step-work", TargetStepID: "pg-step-done",
+		SessionID: "pg-session-route", ActorKind: "agent", ActorID: "pg-session-route",
+	}), task))
+
+	readback, found, err := repo.GetWorkflowRouteOperation(ctx, opID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, routing.OutcomeCommitted, readback.Outcome)
+	require.Equal(t, "pg-step-done", readback.TargetStepID)
+	require.Equal(t, turnID, readback.TurnID, "the pending turn_id must survive the commit fill")
+	require.Equal(t, task.WorkspaceID, readback.WorkspaceID)
+
+	stored, err := repo.GetTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, "pg-step-done", stored.WorkflowStepID, "the task must actually advance, not roll back")
+}
+
 func TestPostgresWorkflowRouteEffectLeaseCanBeRenewed(t *testing.T) {
 	repo := newWorkflowRoutesPostgresRepo(t)
 	ctx := context.Background()

@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"sync"
 	"testing"
@@ -63,6 +64,61 @@ func TestWorkflowRoutingSchemaReplayAndCommittedReadback(t *testing.T) {
 	var effects int
 	require.NoError(t, repo.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM workflow_route_effects WHERE operation_id = ?`, operation.ID).Scan(&effects))
 	assert.Equal(t, 1, effects)
+}
+
+// TestWorkflowRouteOperationPendingToCommittedFillsTurnAndTarget reproduces
+// the real two-phase step_complete flow: handleStepComplete first records a
+// pending operation with a placeholder target_step_id (”) and the real
+// turn_id, then the turn-end engine commit records the *same* OperationID
+// with the real target_step_id but no turn_id (the committed-side context
+// never carries turn_id — see executeStepTransition/finishTurn in
+// event_handlers_workflow.go). Both writes must land on the same operation
+// row rather than failing the ON CONFLICT identity gate, or the primary
+// "agent signals done -> auto-advance" flow never commits.
+func TestWorkflowRouteOperationPendingToCommittedFillsTurnAndTarget(t *testing.T) {
+	repo := newStepTransitionsTestRepo(t)
+	ctx := context.Background()
+	task := createStepTransitionsTestTask(t, repo, "task-route-two-phase", "workflow-route", "step-work")
+
+	const opID = "shared-step-complete-op"
+	const turnID = "turn-123"
+
+	// Phase 1: handleStepComplete's pending pre-record (handlers.go). Real
+	// target is unknown yet, so TargetStepID stays "". TurnID is populated.
+	require.NoError(t, repo.RecordWorkflowRouteOperation(ctx, routing.Operation{
+		ID: opID, TaskID: task.ID, WorkspaceID: task.WorkspaceID,
+		Producer: routing.ProducerStepComplete, ExpectedStepID: "step-work",
+		ObservedStepID: "step-work", SessionID: "session-route", TurnID: turnID,
+		ActorKind: "agent", ActorID: "session-route", Outcome: routing.OutcomePending,
+	}))
+
+	// Phase 2: turn-end engine commit (executeStepTransition) reuses the same
+	// OperationID with the real TargetStepID, but its context never carries
+	// TurnID.
+	task.WorkflowStepID = "step-done"
+	require.NoError(t, repo.UpdateTask(routing.WithOperation(ctx, routing.Operation{
+		ID: opID, TaskID: task.ID, Producer: routing.ProducerStepComplete,
+		ExpectedStepID: "step-work", TargetStepID: "step-done",
+		SessionID: "session-route", ActorKind: "agent", ActorID: "session-route",
+	}), task))
+
+	var outcome, targetStepID string
+	var storedTurnID sql.NullString
+	var transitionID int64
+	require.NoError(t, repo.db.QueryRowContext(ctx, `
+		SELECT outcome, target_step_id, turn_id, transition_id
+		FROM workflow_route_operations WHERE id = ?
+	`, opID).Scan(&outcome, &targetStepID, &storedTurnID, &transitionID))
+	assert.Equal(t, string(routing.OutcomeCommitted), outcome)
+	assert.Equal(t, "step-done", targetStepID)
+	assert.Equal(t, turnID, storedTurnID.String, "the pending turn_id must survive the commit fill")
+	assert.NotZero(t, transitionID)
+
+	var moved int
+	require.NoError(t, repo.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM tasks WHERE id = ? AND workflow_step_id = 'step-done'
+	`, task.ID).Scan(&moved))
+	assert.Equal(t, 1, moved, "the task must actually advance, not roll back")
 }
 
 func TestWorkflowRouteEffectClaimAndCrashRecovery(t *testing.T) {
