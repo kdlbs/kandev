@@ -2,40 +2,12 @@ import { test, expect, type SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 import { dwell, watchWs } from "../../helpers/causal-waits";
-
-async function createProfiles(
-  apiClient: InstanceType<typeof import("../../helpers/api-client").ApiClient>,
-) {
-  const { agents } = await apiClient.listAgents();
-  if (agents.length === 0) throw new Error("no agents available in test fixtures");
-  const agentId = agents[0].id;
-  const profileA = await apiClient.createAgentProfile(agentId, "Profile A (fast)", {
-    model: "mock-fast",
-  });
-  const profileB = await apiClient.createAgentProfile(agentId, "Profile B (slow)", {
-    model: "mock-slow",
-  });
-  return { agentId, profileA, profileB };
-}
-
-async function pollSessions(
-  apiClient: InstanceType<typeof import("../../helpers/api-client").ApiClient>,
-  taskId: string,
-  expectedCount: number,
-  timeoutMs = 30_000,
-) {
-  let latest: Awaited<ReturnType<typeof apiClient.listTaskSessions>>["sessions"] = [];
-  await expect
-    .poll(
-      async () => {
-        latest = (await apiClient.listTaskSessions(taskId)).sessions;
-        return latest.length;
-      },
-      { timeout: timeoutMs, message: `task ${taskId} never reached ${expectedCount} session(s)` },
-    )
-    .toBeGreaterThanOrEqual(expectedCount);
-  return latest;
-}
+import {
+  createWorkflowAgentProfiles as createProfiles,
+  pollWorkflowTaskSessions as pollSessions,
+  waitForWorkflowProfileSession as waitForProfileSession,
+  type WorkflowTaskSessions,
+} from "./workflow-agent-switch-helpers";
 
 async function waitForSessionEnvironmentId(
   apiClient: InstanceType<typeof import("../../helpers/api-client").ApiClient>,
@@ -79,7 +51,7 @@ async function pollSessionsForEnvironmentInheritance(
   targetProfileId: string,
   timeoutMs = 30_000,
 ) {
-  let latestSessions: Awaited<ReturnType<typeof pollSessions>> = [];
+  let latestSessions: WorkflowTaskSessions = [];
   let lastRequestError: unknown;
   // Returns the last observed sessions either way: callers assert on the
   // inheritance themselves, so a timeout here must not throw.
@@ -192,36 +164,6 @@ async function configureProfileSessionWorkflow(
   return { workflow, inbox, stepA, stepB, stepAAgain, profileA, profileB };
 }
 
-async function waitForProfileSession(
-  apiClient: InstanceType<typeof import("../../helpers/api-client").ApiClient>,
-  taskId: string,
-  profileId: string,
-) {
-  let sessionId = "";
-  let details = "";
-  await expect
-    .poll(
-      async () => {
-        const { sessions } = await apiClient.listTaskSessions(taskId);
-        details = sessions
-          .map(
-            (session) =>
-              `${session.id}:${session.agent_profile_id}:${session.state}:${session.is_primary}`,
-          )
-          .join(", ");
-        const session = sessions.find((item) => item.agent_profile_id === profileId);
-        sessionId = session?.id ?? "";
-        return session?.state === "WAITING_FOR_INPUT";
-      },
-      { timeout: 30_000, message: `profile ${profileId} never became answerable` },
-    )
-    .toBe(true)
-    .catch((error: Error) => {
-      throw new Error(`${error.message}; last observed sessions: ${details}`);
-    });
-  return sessionId;
-}
-
 type ProfileSessionLifecycleScenario = {
   startPolicy: ProfileSessionStartPolicy;
   endPolicy: ProfileSessionEndPolicy;
@@ -233,6 +175,44 @@ const PROFILE_SESSION_LIFECYCLE_SCENARIOS: ProfileSessionLifecycleScenario[] = [
   { startPolicy: "new", endPolicy: "complete" },
   { startPolicy: "new", endPolicy: "park" },
 ];
+
+async function assertDesktopWorkflowSessionTabs({
+  testPage,
+  taskId,
+  sessions,
+  profileAId,
+  profileBId,
+  primarySessionId,
+}: {
+  testPage: Parameters<typeof SessionPage>[0];
+  taskId: string;
+  sessions: WorkflowTaskSessions;
+  profileAId: string;
+  profileBId: string;
+  primarySessionId: string;
+}) {
+  await testPage.goto(`/t/${taskId}`);
+  const details = new SessionPage(testPage);
+  await details.waitForLoad();
+
+  const assertTabs = async () => {
+    for (const taskSession of sessions) {
+      const tab = details.sessionTabBySessionId(taskSession.id);
+      expect([profileAId, profileBId]).toContain(taskSession.agent_profile_id);
+      await expect(tab).toBeVisible({ timeout: 30_000 });
+      await expect(tab).toContainText(
+        taskSession.agent_profile_id === profileAId ? "Mock Fast" : "Mock Slow",
+      );
+    }
+    await expect(details.primaryStarInSessionTab(primarySessionId)).toBeVisible();
+    expect(sessions.some((taskSession) => taskSession.agent_profile_id === profileBId)).toBe(true);
+  };
+
+  await assertTabs();
+  await testPage.reload();
+  await details.waitForLoad();
+  await assertTabs();
+}
 
 async function runProfileSessionLifecycleScenario(
   testPage: Parameters<typeof WorkflowSettingsPage>[0],
@@ -311,6 +291,15 @@ async function runProfileSessionLifecycleScenario(
     agent_profile_id: profileB.id,
     is_primary: false,
     state: endPolicy === "park" ? "WAITING_FOR_INPUT" : "COMPLETED",
+  });
+  expect(returnedA).toBeDefined();
+  await assertDesktopWorkflowSessionTabs({
+    testPage,
+    taskId: task.id,
+    sessions,
+    profileAId: profileA.id,
+    profileBId: profileB.id,
+    primarySessionId: returnedA!.id,
   });
 }
 
