@@ -496,23 +496,28 @@ func TestEvaluateStepQuorum_DoesNotRecordSlateEmptySideEffects(t *testing.T) {
 // sessionScopedStateStore mirrors production assembleMachineState
 // (orchestrator/event_handlers_workflow.go): CurrentStepID and WorkflowID are
 // derived from the TASK row and are therefore identical for every session,
-// while SessionID and Data are genuinely per-session — Data being loaded from
-// that session's own metadata["workflow_data"] bag.
+// while SessionID, SessionState and Data are genuinely per-session — Data
+// being loaded from that session's own metadata["workflow_data"] bag.
 type sessionScopedStateStore struct {
-	step       StepSpec
-	dataBySess map[string]map[string]any
-	loadedData []map[string]any
-	applied    map[string]bool
+	step         StepSpec
+	dataBySess   map[string]map[string]any
+	stateBySess  map[string]string
+	loadedData   []map[string]any
+	loadedStates []string
+	applied      map[string]bool
 }
 
 func (s *sessionScopedStateStore) LoadState(_ context.Context, taskID, sessionID string) (MachineState, error) {
 	data := s.dataBySess[sessionID]
+	sessionState := s.stateBySess[sessionID]
 	s.loadedData = append(s.loadedData, data)
+	s.loadedStates = append(s.loadedStates, sessionState)
 	return MachineState{
 		TaskID:        taskID,
 		SessionID:     sessionID,
 		WorkflowID:    "wf",
 		CurrentStepID: "review",
+		SessionState:  sessionState,
 		Data:          data,
 	}, nil
 }
@@ -575,11 +580,16 @@ func TestEvaluateStepQuorum_InsensitiveToWhichLiveSessionIsNewest(t *testing.T) 
 					},
 				},
 			},
-			// The two live sessions carry DIFFERENT per-session bags, so a
-			// guard that started reading Data would diverge between them.
+			// The two live sessions carry DIFFERENT per-session bags and
+			// states, so a guard that started reading either would diverge
+			// between them.
 			dataBySess: map[string]map[string]any{
 				"sess-runner":   {"owner": "runner", "attempts": 3},
 				"sess-reviewer": {"owner": "reviewer", "attempts": 1},
+			},
+			stateBySess: map[string]string{
+				"sess-runner":   "RUNNING",
+				"sess-reviewer": "WAITING_FOR_INPUT",
 			},
 			applied: map[string]bool{},
 		}
@@ -610,14 +620,21 @@ func TestEvaluateStepQuorum_InsensitiveToWhichLiveSessionIsNewest(t *testing.T) 
 	}
 
 	// Guard against a vacuous pass: if the fake ever stops handing the two
-	// runs genuinely different per-session bags, the comparison below proves
-	// nothing. Assert the divergence actually reached the engine.
+	// runs genuinely different per-session bags and states, the comparison
+	// below proves nothing. Assert the divergence actually reached the engine.
 	if len(runnerStore.loadedData) != 1 || len(reviewerStore.loadedData) != 1 {
 		t.Fatalf("expected exactly one LoadState per run, got %d and %d",
 			len(runnerStore.loadedData), len(reviewerStore.loadedData))
 	}
 	if reflect.DeepEqual(runnerStore.loadedData[0], reviewerStore.loadedData[0]) {
 		t.Fatalf("test is vacuous: both sessions loaded the same Data %v", runnerStore.loadedData[0])
+	}
+	if len(runnerStore.loadedStates) != 1 || len(reviewerStore.loadedStates) != 1 {
+		t.Fatalf("expected exactly one LoadState per run, got %d and %d states",
+			len(runnerStore.loadedStates), len(reviewerStore.loadedStates))
+	}
+	if runnerStore.loadedStates[0] == reviewerStore.loadedStates[0] {
+		t.Fatalf("test is vacuous: both sessions loaded the same SessionState %q", runnerStore.loadedStates[0])
 	}
 
 	// The snapshot must be identical despite that divergence.
