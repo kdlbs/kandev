@@ -298,6 +298,15 @@ export type OfficeInboxItemNotificationPayload = {
   body: string;
 };
 
+export type FileChangeFacet = {
+  status: "modified" | "added" | "deleted" | "untracked" | "renamed";
+  additions?: number;
+  deletions?: number;
+  old_path?: string;
+  diff?: string;
+  diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+};
+
 export type FileInfo = {
   path: string;
   status: "modified" | "added" | "deleted" | "untracked" | "renamed";
@@ -307,6 +316,8 @@ export type FileInfo = {
   old_path?: string;
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  staged_change?: FileChangeFacet;
+  unstaged_change?: FileChangeFacet;
 };
 
 // Executor and environment payload types (extracted to reduce file size)

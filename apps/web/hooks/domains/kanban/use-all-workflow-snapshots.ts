@@ -27,6 +27,12 @@ function hasNewerLivePlacement(existing: KanbanTask, fetchStart: KanbanTask | un
   );
 }
 
+function taskUpdatedAtMillis(task: KanbanTask): number {
+  if (!task.updatedAt) return 0;
+  const timestamp = Date.parse(task.updatedAt);
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
 function hasNewerLiveStatusSummary(
   existing: KanbanTask,
   fetchStart: KanbanTask | undefined,
@@ -85,6 +91,14 @@ function mergeFetchedTask(
     merged.workflowId = existing.workflowId;
     merged.workflowStepId = existing.workflowStepId;
     merged.position = existing.position;
+  }
+
+  if (taskUpdatedAtMillis(existing) > taskUpdatedAtMillis(mapped)) {
+    // Task lifecycle state and status-summary revision are independent
+    // projections. Keep a newer live lifecycle reading when an older workflow
+    // snapshot response arrives after it.
+    merged.state = existing.state;
+    merged.updatedAt = existing.updatedAt;
   }
 
   // Multiple mounted surfaces can refresh the same workflow at once.

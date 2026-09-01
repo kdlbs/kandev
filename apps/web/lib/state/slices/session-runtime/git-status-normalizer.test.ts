@@ -53,4 +53,10 @@ describe("normalizeGitStatusEntry", () => {
 
     expect(normalizeGitStatusEntry(entry)).toBe(entry);
   });
+
+  it("normalizes a missing file map to an empty object", () => {
+    const entry = { files: undefined } as unknown as GitStatusEntry;
+
+    expect(normalizeGitStatusEntry(entry).files).toEqual({});
+  });
 });

@@ -72,7 +72,7 @@ func TestHandleCompleteEventMarkState_ShutdownRaceMarksStopped(t *testing.T) {
 		Error: "-32603 peer disconnected before response",
 		Data:  map[string]any{"is_error": true},
 	}
-	mgr.handleCompleteEventMarkState(execution, errorEvent, true)
+	mgr.handleCompleteEventMarkState(execution, errorEvent, true, nil)
 
 	got, _ := mgr.GetExecution("exec-1")
 	if got.Status != v1.AgentStatusStopped {
@@ -103,7 +103,7 @@ func TestHandleCompleteEventMarkState_ErrorFailsWhenNotShuttingDown(t *testing.T
 		Error: "boom",
 		Data:  map[string]any{"is_error": true},
 	}
-	mgr.handleCompleteEventMarkState(execution, errorEvent, true)
+	mgr.handleCompleteEventMarkState(execution, errorEvent, true, nil)
 
 	got, _ := mgr.GetExecution("exec-1")
 	if got.Status != v1.AgentStatusFailed {

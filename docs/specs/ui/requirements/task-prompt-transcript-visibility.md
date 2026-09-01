@@ -5,113 +5,50 @@ created: 2026-08-22
 owners:
   - kandev
 ---
-# Task transcript history visibility Requirements
+
+# Task transcript history visibility requirements
 
 ## Overview
 
-The transcript can lose the original task prompt after a reload. Long activity groups can also make older history difficult to reach. An older page can add tool events only inside an existing collapsed row. The user then sees no new entry and must select **Load older messages** again.
+Task transcripts open on a bounded newest window and load older history as the
+user navigates upward. A bounded window is not the start of the conversation.
+The transcript must not substitute the task description for an unloaded user
+prompt, and upward navigation must not require routine use of a manual loader.
+
+## Terms
+
+- **Visible start:** The first stored user prompt, normally prompt `#1`.
+- **Task-description fallback:** A synthetic user row used only for legacy
+  history that contains no stored user prompt.
+- **Preload region:** The area near the oldest loaded edge where upward
+  pagination can continue without another user action.
 
 ## Requirements
 
 ### REQ-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001: Task transcript history visibility
 
-**Intent:** The transcript can lose the original task prompt after a reload. Long activity groups can also make older history difficult to reach. An older page can add tool events only inside an existing collapsed row. The user then sees no new entry and must select **Load older messages** again.
+**Intent:** Users can navigate continuously from the newest response to the
+first prompt without mistaking a bounded history window for the conversation
+start.
 
 #### Acceptance criteria
 
-- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.1:** When visible session history has no user-authored message, show the task description as the first user prompt.
-- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.2:** Keep the task description visible while agent or environment messages load.
-- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.3:** Treat a visible, stored user message as authoritative. Do not also show the task-description fallback in this case.
-- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.4:** When the user scrolls to the oldest loaded point, load older history without a separate button action.
-- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.5:** Continue automatic loading while older pages only extend a collapsed activity row.
-- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.6:** Do not require another user action before a new standalone transcript entry appears.
-- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.7:** Stop automatic loading in these cases:
-- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.8:** Older content moves the load boundary above the preload region.
-- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.9:** When the first user prompt of a session is loaded, the transcript shall not show an older-page control.
+- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.1:** When older session history remains and the loaded window contains no user-authored message, the transcript shall not show the task description as a user prompt.
+- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.2:** The transcript shall show each stored user prompt at its chronological position after that prompt is loaded.
+- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.3:** When prompt `#1` is loaded, the transcript shall treat it as the visible start and shall not expose older internal rows through transcript pagination or an older-page control.
+- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.4:** When persisted history is exhausted without a stored user prompt, the transcript shall show a non-empty task description as the first user prompt and shall not add an empty fallback.
+- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.5:** When the user reaches the oldest loaded edge, the transcript shall load older history without a separate button action.
+- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.6:** After an older page commits, the transcript shall continue loading while the oldest-page sentinel remains in the preload region, whether the page extends a collapsed activity group or adds a standalone row.
+- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.7:** Automatic older-history loading shall stop when the sentinel leaves the preload region, prompt `#1` is loaded, persisted history is exhausted, or a request fails to make progress.
+- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.8:** When an older-page request fails or makes no progress while older history remains, the transcript shall show a retry control. Routine successful pagination shall not show this control.
+- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.9:** The transcript shall keep the reader's current visual position stable while older content is inserted.
+- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.10:** Opening a task shall request only the bounded newest window until the user navigates upward.
+- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.11:** Desktop and mobile transcripts shall provide the same history boundary, continuous upward loading, recovery, and scroll-position behavior.
+- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.12:** When a previously opened session is revisited after more than one message page was persisted while it was inactive, the transcript shall reconcile to a contiguous newest window and upward pagination shall reach every persisted user prompt without gaps or duplicate rows.
 
-## Migrated source detail
+## Exclusions
 
-## Why
-
-The transcript can lose the original task prompt after a reload. Long activity
-groups can also make older history difficult to reach. An older page can add
-tool events only inside an existing collapsed row. The user then sees no new
-entry and must select **Load older messages** again.
-
-Users need continuous upward navigation from the latest response to the first
-prompt. This requirement includes sessions with more than 100 tool events.
-
-## What
-
-- When visible session history has no user-authored message, show the task
-  description as the first user prompt.
-- Keep the task description visible while agent or environment messages load.
-- Treat a visible, stored user message as authoritative. Do not also show the
-  task-description fallback in this case.
-- When the user scrolls to the oldest loaded point, load older history without
-  a separate button action.
-- Continue automatic loading while older pages only extend a collapsed activity
-  row.
-- Do not require another user action before a new standalone transcript entry
-  appears.
-- Stop automatic loading in these cases:
-  - Older content moves the load boundary above the preload region.
-  - The session start is reached.
-  - A request makes no progress.
-- Keep the current reading position stable as older content appears above it.
-- Keep the explicit load action as a fallback for an error or a no-progress
-  response.
-- Show the first prompt at the start after all older history is loaded.
-- Apply the same transcript rule on desktop and mobile.
-
-## Scenarios
-
-### Agent-only history
-
-- **GIVEN** a task has a description and visible agent or environment messages.
-- **GIVEN** the session has no visible user message.
-- **WHEN** the transcript loads or reloads.
-- **THEN** the task description remains the first message.
-- **THEN** the other visible messages follow it.
-
-### Stored user prompt
-
-- **GIVEN** a task has a description and a visible stored user message.
-- **WHEN** the transcript loads.
-- **THEN** the stored user message represents the prompt.
-- **THEN** the transcript does not show a duplicate task-description fallback.
-
-### Empty task description
-
-- **GIVEN** a task has no description and has agent-only history.
-- **WHEN** the transcript loads.
-- **THEN** the transcript does not add an empty fallback message.
-
-### Collapsed activity spans older pages
-
-- **GIVEN** a transcript has more than 100 tool events in one collapsed activity
-  row.
-- **GIVEN** older pages contain no standalone transcript entry.
-- **WHEN** the user scrolls to the oldest loaded point.
-- **THEN** the transcript loads additional pages without repeated button
-  actions.
-- **THEN** the current reading position remains stable.
-
-### First prompt after complete pagination
-
-- **GIVEN** the first prompt is older than the initial message window.
-- **WHEN** the user continues to scroll upward until the session start.
-- **THEN** the first prompt is visible at the start of the transcript.
-- **THEN** no older-page control remains.
-
-## Out of scope
-
-- Backfill or repair missing message records in the database.
-- Change message persistence, API contracts, or transcript ordering.
-- Expand activity groups by default.
-- Remove the explicit older-page fallback action.
-- Load the complete transcript before the user navigates upward.
-
-## Implementation plan
-
-See [the implementation plan](../../../plans/hide-redundant-older-messages-control/plan.md).
+- Backfill or repair of missing persisted message records.
+- Changes to backend message ordering or cursor contracts.
+- Loading the complete transcript before the user navigates upward.
+- Rendering internal rows that precede stored prompt `#1`.

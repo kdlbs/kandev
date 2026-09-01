@@ -1363,11 +1363,16 @@ export class ApiClient {
     await this.request("POST", "/api/v1/_test/messages", body);
   }
 
-  async seedToolCallMessages(sessionId: string, count: number): Promise<void> {
+  async seedToolCallMessages(
+    sessionId: string,
+    count: number,
+    metadata?: Record<string, unknown>,
+  ): Promise<void> {
     for (let i = 0; i < count; i++) {
       await this.seedSessionMessage(sessionId, {
         type: "tool_call",
         content: `synthetic tool call ${i + 1}`,
+        metadata,
       });
     }
   }
@@ -1907,6 +1912,8 @@ export class ApiClient {
       line?: number;
       side?: string;
       comment_type?: string;
+      html_url?: string;
+      in_reply_to?: number | null;
       created_at?: string;
       updated_at?: string;
     }>;

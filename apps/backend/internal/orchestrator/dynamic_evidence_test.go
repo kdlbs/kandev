@@ -44,6 +44,22 @@ func TestDynamicPreResultRequiresExplicitKnownEvidence(t *testing.T) {
 	}
 }
 
+func TestDynamicAttemptEvidenceRequiresLocalIdentityFence(t *testing.T) {
+	var service Service
+	got := service.withDynamicAttemptEvidence(watcher.AgentEventData{
+		SessionID:        "session-1",
+		AgentExecutionID: "execution-1",
+		PromptGeneration: 7,
+		EvidenceKnown:    true,
+	})
+	if got.EvidenceKnown {
+		t.Fatal("lifecycle evidence without a local attempt record was accepted")
+	}
+	if dynamicPreResultSafe(got) {
+		t.Fatal("lifecycle evidence without a local attempt record was treated as pre-result safe")
+	}
+}
+
 func TestDynamicAttemptEvidenceRejectsAmbiguousExecutionEvents(t *testing.T) {
 	var service Service
 	service.beginDynamicAttempt("session-1")

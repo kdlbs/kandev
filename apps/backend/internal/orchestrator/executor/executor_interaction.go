@@ -36,6 +36,46 @@ func (e *Executor) Stop(ctx context.Context, sessionID string, reason string, fo
 	return e.stopWithSession(ctx, session, reason, force)
 }
 
+// StopSessionSynchronously cancels a session and waits for its agent process to
+// stop. Durable task cleanup uses this optional capability before it removes a
+// worktree, so an agent cannot continue writing into the audited directory
+// after cleanup starts. Interactive callers keep the legacy asynchronous Stop
+// behavior.
+func (e *Executor) StopSessionSynchronously(ctx context.Context, sessionID, reason string, force bool) error {
+	session, err := e.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		if !errors.Is(err, models.ErrTaskSessionNotFound) {
+			return ErrExecutionNotFound
+		}
+		return e.stopMissingSessionSynchronously(ctx, sessionID, reason, force, err)
+	}
+	result, err := e.StopSessionDetailed(ctx, session, reason, force)
+	if err != nil {
+		return err
+	}
+	if result.ExecutionID == "" {
+		return nil
+	}
+	return e.StopExecution(ctx, result.ExecutionID, reason, force)
+}
+
+func (e *Executor) stopMissingSessionSynchronously(
+	ctx context.Context, sessionID, reason string, force bool, sessionErr error,
+) error {
+	// Task deletion can remove the session row before the durable cleanup
+	// worker runs. Still ask the lifecycle manager for the exact execution so a
+	// late process cannot keep writing to the worktree.
+	executionID, lookupErr := e.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	switch {
+	case lookupErr == nil && executionID != "":
+		return e.StopExecution(ctx, executionID, reason, force)
+	case executionID == "" || errors.Is(lookupErr, lifecycle.ErrNoExecutionForSession):
+		return fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, sessionErr)
+	default:
+		return fmt.Errorf("%w: lookup execution for session %q: %w", ErrExecutionNotFound, sessionID, lookupErr)
+	}
+}
+
 // SessionStopResult describes the synchronous, logical portion of a stop. A
 // true Changed value means CANCELLED was accepted and runtime teardown is ready
 // to be scheduled. FinalState is empty when no live execution exists.

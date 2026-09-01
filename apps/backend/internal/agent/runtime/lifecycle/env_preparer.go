@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -81,6 +82,9 @@ type RepoPrepareSpec struct {
 	// environment. It forbids worktree creation/recreation and all repository
 	// mutating setup paths.
 	WorkspaceReuseRequired bool
+	// AllowBranchReplacement is set only for the explicit user recovery action.
+	// It permits a missing persisted branch to be replaced with a fresh branch.
+	AllowBranchReplacement bool
 	WorktreeBranch         string
 	WorktreeBranchPrefix   string
 	WorktreeBranchTemplate string
@@ -89,9 +93,11 @@ type RepoPrepareSpec struct {
 	RemoteSyncHandled      bool
 	// RefreshRepository is an optional provider-authenticated refresh deferred
 	// until worktree materialization. A valid reusable worktree bypasses it.
-	RefreshRepository       func(context.Context) error
-	RepoSetupScript         string
-	ContributionDestination *models.ContributionDestination
+	RefreshRepository          func(context.Context) error
+	RefreshRepositoryWithState func(context.Context) (repoclone.RemoteRefState, error)
+	RemoteRefState             repoclone.RemoteRefState
+	RepoSetupScript            string
+	ContributionDestination    *models.ContributionDestination
 	// BranchSlug, when set, suffixes the worktree path as
 	// {RepoName}-{BranchSlug} so two specs sharing a RepositoryID don't collide
 	// on disk.
@@ -130,6 +136,9 @@ type EnvPrepareRequest struct {
 	// in this request. RepoPrepareSpec carries the same value so multi-repo
 	// callers can retain it while requests are split.
 	WorkspaceReuseRequired bool
+	// AllowBranchReplacement permits the explicit new-branch recovery action to
+	// materialize a replacement while retaining the environment record.
+	AllowBranchReplacement bool
 
 	WorktreeBranchPrefix   string
 	WorktreeBranchTemplate string
@@ -138,7 +147,9 @@ type EnvPrepareRequest struct {
 	RemoteSyncHandled      bool
 	// RefreshRepository is an optional provider-authenticated refresh deferred
 	// until worktree materialization. A valid reusable worktree bypasses it.
-	RefreshRepository func(context.Context) error
+	RefreshRepository          func(context.Context) error
+	RefreshRepositoryWithState func(context.Context) (repoclone.RemoteRefState, error)
+	RemoteRefState             repoclone.RemoteRefState
 
 	TaskDirName string // Per-task directory name within the workspace (e.g. "task-abc123")
 	RepoName    string // Repository slug used with TaskDirName to locate checkouts
@@ -169,28 +180,31 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		return nil
 	}
 	return []RepoPrepareSpec{{
-		TaskRepositoryID:        r.TaskRepositoryID,
-		RepositoryID:            r.RepositoryID,
-		RepositoryPath:          r.RepositoryPath,
-		RepoName:                r.RepoName,
-		BaseBranch:              r.BaseBranch,
-		DefaultBranch:           r.DefaultBranch,
-		CheckoutBranch:          r.CheckoutBranch,
-		PRNumber:                r.PRNumber,
-		RemoteContribution:      r.RemoteContribution,
-		WorktreeID:              r.WorktreeID,
-		WorkspaceReuseRequired:  r.WorkspaceReuseRequired,
-		WorktreeBranch:          r.WorktreeBranch,
-		WorktreeBranchPrefix:    r.WorktreeBranchPrefix,
-		WorktreeBranchTemplate:  r.WorktreeBranchTemplate,
-		WorktreeBranchTicket:    r.WorktreeBranchTicket,
-		PullBeforeWorktree:      r.PullBeforeWorktree,
-		RemoteSyncHandled:       r.RemoteSyncHandled,
-		RefreshRepository:       r.RefreshRepository,
-		RepoSetupScript:         r.RepoSetupScript,
-		BranchSlug:              r.BranchSlug,
-		BranchIdentitySlug:      r.BranchIdentitySlug,
-		ContributionDestination: r.ContributionDestination,
+		TaskRepositoryID:           r.TaskRepositoryID,
+		RepositoryID:               r.RepositoryID,
+		RepositoryPath:             r.RepositoryPath,
+		RepoName:                   r.RepoName,
+		BaseBranch:                 r.BaseBranch,
+		DefaultBranch:              r.DefaultBranch,
+		CheckoutBranch:             r.CheckoutBranch,
+		PRNumber:                   r.PRNumber,
+		RemoteContribution:         r.RemoteContribution,
+		WorktreeID:                 r.WorktreeID,
+		WorkspaceReuseRequired:     r.WorkspaceReuseRequired,
+		AllowBranchReplacement:     r.AllowBranchReplacement,
+		WorktreeBranch:             r.WorktreeBranch,
+		WorktreeBranchPrefix:       r.WorktreeBranchPrefix,
+		WorktreeBranchTemplate:     r.WorktreeBranchTemplate,
+		WorktreeBranchTicket:       r.WorktreeBranchTicket,
+		PullBeforeWorktree:         r.PullBeforeWorktree,
+		RemoteSyncHandled:          r.RemoteSyncHandled,
+		RefreshRepository:          r.RefreshRepository,
+		RefreshRepositoryWithState: r.RefreshRepositoryWithState,
+		RemoteRefState:             r.RemoteRefState,
+		RepoSetupScript:            r.RepoSetupScript,
+		BranchSlug:                 r.BranchSlug,
+		BranchIdentitySlug:         r.BranchIdentitySlug,
+		ContributionDestination:    r.ContributionDestination,
 	}}
 }
 

@@ -245,8 +245,8 @@ func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) (workspaceSta
 	}
 	state.diffFilesID = wt.buildDirtyFilesID(string(out))
 
-	// Check untracked files - git diff-files doesn't include them
-	// Use git ls-files to get untracked files, then check their mtimes
+	// Check eligible untracked files - git diff-files doesn't include them.
+	// The shared query excludes dependency trees before Git enumerates paths.
 	untrackedID, err := wt.getUntrackedFilesID(ctx)
 	if err != nil {
 		return state, err
@@ -287,20 +287,23 @@ func (wt *WorkspaceTracker) buildDirtyFilesID(diffFilesOutput string) string {
 // Uses file list + mtimes to detect when untracked files are added, removed, or modified.
 // Returns an error if the git command fails (e.g., timeout, index lock).
 func (wt *WorkspaceTracker) getUntrackedFilesID(ctx context.Context) (string, error) {
-	// Get list of untracked files (excluding ignored)
-	out, stderr, err := wt.runPollingGitOutputWithStderr(ctx, "ls-files", "--others", "--exclude-standard")
+	out, stderr, err := wt.runPollingGitOutputWithStderr(ctx, gitUntrackedFilesArgs...)
 	if err != nil {
 		return "", fmt.Errorf("git ls-files in %s: %w (stderr: %s)",
 			wt.workDir, err, stderr)
 	}
-	if len(out) == 0 {
+
+	files, err := parseGitUntrackedOutput(ctx, out)
+	if err != nil {
+		return "", err
+	}
+	if len(files) == 0 {
 		return "", nil // No untracked files is not an error
 	}
 
 	// Build a string from file paths + mtimes to detect any changes
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	var hashInput strings.Builder
-	for _, file := range lines {
+	for _, file := range files {
 		if file == "" {
 			continue
 		}

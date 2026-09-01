@@ -302,3 +302,129 @@ func TestDispatcher_EvaluateStepQuorum_PropagatesEngineError(t *testing.T) {
 		t.Fatalf("err = %v, want wrapped engine error", err)
 	}
 }
+
+// TestDispatcher_RecordDecision_UsesSuppliedSessionOverActiveSession is the
+// office-session-identity happy path: when RecordDecisionInput.SessionID is
+// populated, the dispatcher resolves and forwards THAT session rather than
+// the task's most-recently-started ("active") session — even when the two
+// differ, proving the decider's own session wins.
+func TestDispatcher_RecordDecision_UsesSuppliedSessionOverActiveSession(t *testing.T) {
+	eng := &fakeEngine{decisionResult: engine.RecordDecisionResult{DecisionID: "decision-1"}}
+	sessions := &fakeSessions{
+		// The "active" (most-recently-started) session is a different one
+		// than the decider's own — proves SessionID, not activeSession, wins.
+		activeSession: &taskmodels.TaskSession{ID: "sess-runner"},
+		byID: map[string]*taskmodels.TaskSession{
+			"sess-reviewer": {ID: "sess-reviewer", TaskID: "task-1", State: taskmodels.TaskSessionStateRunning},
+		},
+	}
+	d := New(eng, sessions, logger.Default())
+
+	_, err := d.RecordDecision(context.Background(), RecordDecisionInput{
+		TaskID: "task-1", StepID: "review", ParticipantID: "participant-1",
+		Decision: "approved", SessionID: "sess-reviewer",
+	})
+	if err != nil {
+		t.Fatalf("RecordDecision: %v", err)
+	}
+	if eng.decisionSession != "sess-reviewer" {
+		t.Errorf("session id = %q, want sess-reviewer (decider's own session, not the active one)", eng.decisionSession)
+	}
+}
+
+// TestDispatcher_RecordDecision_ForeignSessionFallsBackToUnresolvable
+// covers the "session_unresolvable, not an error" contract: a supplied
+// session that belongs to a different task must not leak cross-task state
+// into re-evaluation, but must also not fail the decision outright — it
+// degrades to the same blank-session-id "skip re-evaluation" behavior
+// AC-16a already gives an unresolvable active session.
+func TestDispatcher_RecordDecision_ForeignSessionFallsBackToUnresolvable(t *testing.T) {
+	eng := &fakeEngine{decisionResult: engine.RecordDecisionResult{DecisionID: "decision-1"}}
+	sessions := &fakeSessions{
+		byID: map[string]*taskmodels.TaskSession{
+			"sess-foreign": {ID: "sess-foreign", TaskID: "other-task", State: taskmodels.TaskSessionStateRunning},
+		},
+	}
+	d := New(eng, sessions, logger.Default())
+
+	_, err := d.RecordDecision(context.Background(), RecordDecisionInput{
+		TaskID: "task-1", StepID: "review", ParticipantID: "participant-1",
+		Decision: "approved", SessionID: "sess-foreign",
+	})
+	if err != nil {
+		t.Fatalf("RecordDecision: %v, want success (session_unresolvable, not an error)", err)
+	}
+	if !eng.decisionCalled {
+		t.Fatal("engine RecordParticipantDecision not invoked")
+	}
+	if eng.decisionSession != "" {
+		t.Errorf("session id = %q, want blank: foreign session must not be forwarded", eng.decisionSession)
+	}
+}
+
+// TestDispatcher_RecordDecision_TerminalSessionFallsBackToUnresolvable
+// covers the other session_unresolvable case: a supplied session that
+// belongs to the right task but is in a terminal (non-active) state.
+func TestDispatcher_RecordDecision_TerminalSessionFallsBackToUnresolvable(t *testing.T) {
+	eng := &fakeEngine{decisionResult: engine.RecordDecisionResult{DecisionID: "decision-1"}}
+	sessions := &fakeSessions{
+		byID: map[string]*taskmodels.TaskSession{
+			"sess-done": {ID: "sess-done", TaskID: "task-1", State: taskmodels.TaskSessionStateCompleted},
+		},
+	}
+	d := New(eng, sessions, logger.Default())
+
+	_, err := d.RecordDecision(context.Background(), RecordDecisionInput{
+		TaskID: "task-1", StepID: "review", ParticipantID: "participant-1",
+		Decision: "approved", SessionID: "sess-done",
+	})
+	if err != nil {
+		t.Fatalf("RecordDecision: %v, want success (session_unresolvable, not an error)", err)
+	}
+	if eng.decisionSession != "" {
+		t.Errorf("session id = %q, want blank: terminal session must not be forwarded", eng.decisionSession)
+	}
+}
+
+// TestDispatcher_RecordDecision_MissingSessionFallsBackToUnresolvable
+// covers the third session_unresolvable case: a supplied session id that
+// does not exist at all (e.g. a stale/deleted session).
+func TestDispatcher_RecordDecision_MissingSessionFallsBackToUnresolvable(t *testing.T) {
+	eng := &fakeEngine{decisionResult: engine.RecordDecisionResult{DecisionID: "decision-1"}}
+	sessions := &fakeSessions{} // byID is nil: GetTaskSession returns ErrTaskSessionNotFound
+	d := New(eng, sessions, logger.Default())
+
+	_, err := d.RecordDecision(context.Background(), RecordDecisionInput{
+		TaskID: "task-1", StepID: "review", ParticipantID: "participant-1",
+		Decision: "approved", SessionID: "sess-missing",
+	})
+	if err != nil {
+		t.Fatalf("RecordDecision: %v, want success (session_unresolvable, not an error)", err)
+	}
+	if eng.decisionSession != "" {
+		t.Errorf("session id = %q, want blank: missing session must not be forwarded", eng.decisionSession)
+	}
+}
+
+// TestDispatcher_RecordDecision_SessionLookupErrorPropagates proves a
+// genuine session-store failure while resolving the supplied SessionID is
+// not silently swallowed as session_unresolvable — mirroring
+// TestDispatcher_RecordDecision_PropagatesActiveSessionLookupError for the
+// resolveActiveSessionID path.
+func TestDispatcher_RecordDecision_SessionLookupErrorPropagates(t *testing.T) {
+	dbErr := errors.New("db down")
+	eng := &fakeEngine{}
+	sessions := &fakeSessions{byIDErr: dbErr}
+	d := New(eng, sessions, logger.Default())
+
+	_, err := d.RecordDecision(context.Background(), RecordDecisionInput{
+		TaskID: "task-1", StepID: "review", ParticipantID: "participant-1",
+		Decision: "approved", SessionID: "sess-1",
+	})
+	if !errors.Is(err, dbErr) {
+		t.Fatalf("err = %v, want wrapped db error", err)
+	}
+	if eng.decisionCalled {
+		t.Error("engine should not be called when session lookup fails")
+	}
+}

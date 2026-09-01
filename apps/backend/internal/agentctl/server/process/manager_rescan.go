@@ -190,7 +190,7 @@ func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string,
 
 	bareRoot := m.newTrackerForRepo(workDir, "")
 	m.configureTracker(bareRoot, "", roots)
-	m.prepareTrackerComparisonTarget(ctx, bareRoot)
+	m.prepareTrackerComparisonTarget(bareRoot)
 	bareRoot.Start(ctx)
 	for _, sub := range subs {
 		bareRoot.AttachWorkspaceStreamSubscriber(sub)
@@ -200,7 +200,7 @@ func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string,
 	for _, child := range children {
 		tracker := m.newTrackerForRepo(child.path, child.name)
 		m.configureTracker(tracker, child.name, roots)
-		m.prepareTrackerComparisonTarget(ctx, tracker)
+		m.prepareTrackerComparisonTarget(tracker)
 		tracker.Start(ctx)
 		for _, sub := range subs {
 			tracker.AttachWorkspaceStreamSubscriber(sub)
@@ -247,7 +247,7 @@ func (m *Manager) appendNewRepoTrackers(ctx context.Context, workDir string, chi
 			zap.String("path", child.path))
 		tracker := m.newTrackerForRepo(child.path, child.name)
 		m.configureTracker(tracker, child.name, roots)
-		m.prepareTrackerComparisonTarget(ctx, tracker)
+		m.prepareTrackerComparisonTarget(tracker)
 		tracker.Start(ctx)
 		for _, sub := range subs {
 			tracker.AttachWorkspaceStreamSubscriber(sub)
@@ -312,7 +312,7 @@ func (m *Manager) reconcileRepoTrackers(ctx context.Context, workDir string, chi
 		}
 		tracker := m.newTrackerForRepo(child.path, child.name)
 		m.configureTracker(tracker, child.name, roots)
-		m.prepareTrackerComparisonTarget(ctx, tracker)
+		m.prepareTrackerComparisonTarget(tracker)
 		tracker.Start(ctx)
 		for _, sub := range subs {
 			tracker.AttachWorkspaceStreamSubscriber(sub)

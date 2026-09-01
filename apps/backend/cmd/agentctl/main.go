@@ -30,6 +30,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/githubauth"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	"github.com/kandev/kandev/internal/profiles"
 	"github.com/kandev/kandev/pkg/agent"
@@ -210,10 +211,12 @@ func run(cfg *config.Config, log *logger.Logger) {
 
 		// Create MCP server using the channel-based backend client
 		var mcpSrv *mcpserver.Server
+		mcpNamePresentationOption := mcpserver.WithMCPToolNamespacingByServer(instCfg.NamespacesMCPToolsByServer)
 		if instCfg.McpProfile != nil {
-			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, *instCfg.McpProfile)
+			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, *instCfg.McpProfile, mcpNamePresentationOption)
 		} else {
-			mcpSrv = mcpserver.New(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, instCfg.McpMode, instCfg.McpProviders)
+			legacyProfile := mcpprofile.Legacy(instCfg.McpMode, instCfg.DisableAskQuestion, instCfg.McpProviders)
+			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, legacyProfile, mcpNamePresentationOption)
 		}
 		mcpSrv.SetAttachmentReporter(procMgr.PublishMCPAttachment)
 		instLog.Info("MCP server enabled (channel-based)",

@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -276,5 +277,30 @@ func TestPostgresPromptIndexConcurrentCreatesDistinct(t *testing.T) {
 		if stored.PromptIndex != msg.PromptIndex {
 			t.Errorf("reread ordinal %d != model ordinal %d for %s", stored.PromptIndex, msg.PromptIndex, msg.ID)
 		}
+	}
+}
+
+// TestPostgresListMessagesPaginatedAround exercises the PostgreSQL timestamp
+// cast path for target inclusion, descending ordering, and truncation.
+func TestPostgresListMessagesPaginatedAround(t *testing.T) {
+	repo := openPostgresRepo(t)
+	ctx := context.Background()
+	base := time.Date(2026, 8, 19, 16, 0, 0, 0, time.UTC)
+	seedPostgresSession(t, repo, "task-pg-around", "sess-pg-around", "turn-pg-around", base)
+	for index, id := range []string{"pg-m1", "pg-m2", "pg-m3", "pg-m4"} {
+		insertPromptRow(t, repo, id, "sess-pg-around", "turn-pg-around", "agent", id, base.Add(time.Duration(index)*time.Second))
+	}
+
+	page, hasMore, err := repo.ListMessagesPaginated(ctx, "sess-pg-around", models.ListMessagesOptions{
+		Around: "pg-m2", Limit: 2, Sort: "desc",
+	})
+	if err != nil {
+		t.Fatalf("ListMessagesPaginated around: %v", err)
+	}
+	if !hasMore {
+		t.Fatal("around page hasMore = false, want true")
+	}
+	if got := messageIDs(page); !reflect.DeepEqual(got, []string{"pg-m3", "pg-m2"}) {
+		t.Fatalf("around ids = %v, want [pg-m3 pg-m2]", got)
 	}
 }

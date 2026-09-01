@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/ports"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.opentelemetry.io/otel/trace"
@@ -373,6 +374,20 @@ func (e *AgentExecution) promptActivitySnapshot() (time.Time, bool, uint64) {
 	e.lastActivityAtMu.Lock()
 	defer e.lastActivityAtMu.Unlock()
 	return e.lastActivityAt, e.agentEventSincePrompt, e.promptActivityEpoch
+}
+
+// promptAttemptEvidenceSnapshot captures the replay-safety state before a
+// terminal completion handler marks that completion as activity. A genuine
+// turn-content event is deliberately conservative evidence of both output and
+// effects because lifecycle does not own the downstream persistence boundary.
+func (e *AgentExecution) promptAttemptEvidenceSnapshot() PromptAttemptEvidence {
+	e.lastActivityAtMu.Lock()
+	defer e.lastActivityAtMu.Unlock()
+	return PromptAttemptEvidence{
+		EvidenceKnown:  true,
+		OutputObserved: e.agentEventSincePrompt,
+		EffectObserved: e.agentEventSincePrompt,
+	}
 }
 
 func (e *AgentExecution) promptActivityEpochSnapshot() uint64 {
@@ -750,17 +765,20 @@ func (ae *AgentExecution) EndSessionSpan() {
 // the top level. When LaunchRequest.Repositories is set, each entry produces
 // one prepared worktree under the shared TaskDirName.
 type RepoLaunchSpec struct {
-	TaskRepositoryID       string
-	RepositoryID           string
-	RepositoryPath         string
-	RepositoryURL          string // Clone URL for remote executors that need to clone
-	RepoName               string // Repository name used as subdirectory inside TaskDirName
-	BaseBranch             string
-	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch         string
-	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution     *models.RemoteContribution
-	WorktreeID             string // Existing worktree ID to reuse (skip creation if set)
+	TaskRepositoryID   string
+	RepositoryID       string
+	RepositoryPath     string
+	RepositoryURL      string // Clone URL for remote executors that need to clone
+	RepoName           string // Repository name used as subdirectory inside TaskDirName
+	BaseBranch         string
+	DefaultBranch      string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch     string
+	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution *models.RemoteContribution
+	WorktreeID         string // Existing worktree ID to reuse (skip creation if set)
+	// AllowBranchReplacement permits the explicit new-branch recovery action for
+	// this repository while retaining its environment record.
+	AllowBranchReplacement bool
 	WorktreeBranchPrefix   string
 	WorktreeBranchTemplate string
 	WorktreeBranchTicket   string
@@ -768,12 +786,14 @@ type RepoLaunchSpec struct {
 	RemoteSyncHandled      bool
 	// RefreshRepository is an optional provider-authenticated refresh deferred
 	// until worktree materialization. A valid reusable worktree bypasses it.
-	RefreshRepository       func(context.Context) error
-	RepoSetupScript         string // Repository-level setup script (optional)
-	RepoCleanupScript       string // Repository-level cleanup script (optional)
-	CopyFiles               string // Comma-separated paths/globs to copy from the source repo (gitignored .env / config files)
-	ContributionDestination *models.ContributionDestination
-	ComparisonTarget        *models.ComparisonTarget
+	RefreshRepository          func(context.Context) error
+	RefreshRepositoryWithState func(context.Context) (repoclone.RemoteRefState, error)
+	RemoteRefState             repoclone.RemoteRefState
+	RepoSetupScript            string // Repository-level setup script (optional)
+	RepoCleanupScript          string // Repository-level cleanup script (optional)
+	CopyFiles                  string // Comma-separated paths/globs to copy from the source repo (gitignored .env / config files)
+	ContributionDestination    *models.ContributionDestination
+	ComparisonTarget           *models.ComparisonTarget
 	// BranchSlug, when set, suffixes the worktree directory as
 	// {RepoName}-{BranchSlug} so multi-branch tasks (same repo, multiple
 	// branches) don't collide.
@@ -832,6 +852,9 @@ type LaunchRequest struct {
 	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
 	// WorkspaceReuseRequired selects attach-only environment preparation.
 	WorkspaceReuseRequired bool
+	// AllowBranchReplacement is an explicit user-selected recovery permission.
+	// Normal resume leaves it false so a missing branch remains a visible error.
+	AllowBranchReplacement bool
 	TaskTitle              string // Human-readable task title for semantic worktree naming
 	// AgentProfileID is the stable Office identity for routed Office launches.
 	// For non-Office launches it is also the concrete execution profile.
@@ -878,7 +901,7 @@ type LaunchRequest struct {
 	ExecutorType        string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
 	ExecutorConfig      map[string]string // Executor config (docker_host, git_token, etc.)
 	PreviousExecutionID string            // Previous execution ID for runtime reconnect
-	McpMode             string            // MCP tool mode: "task" (default), "config", or "office"
+	McpMode             string            // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
 	McpProviders        []string          // Normalized provider capabilities attached to the task
 	McpProfile          *mcpprofile.Context
 
@@ -911,8 +934,10 @@ type LaunchRequest struct {
 	RemoteSyncHandled      bool   // Authenticated provider refresh already completed
 	// RefreshRepository is an optional provider-authenticated refresh deferred
 	// until worktree materialization. A valid reusable worktree bypasses it.
-	RefreshRepository       func(context.Context) error
-	ContributionDestination *models.ContributionDestination
+	RefreshRepository          func(context.Context) error
+	RefreshRepositoryWithState func(context.Context) (repoclone.RemoteRefState, error)
+	RemoteRefState             repoclone.RemoteRefState
+	ContributionDestination    *models.ContributionDestination
 
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
@@ -946,27 +971,30 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		return nil
 	}
 	return []RepoLaunchSpec{{
-		TaskRepositoryID:        r.TaskRepositoryID,
-		RepositoryID:            r.RepositoryID,
-		RepositoryPath:          r.RepositoryPath,
-		RepoName:                r.RepoName,
-		BaseBranch:              r.BaseBranch,
-		DefaultBranch:           r.DefaultBranch,
-		CheckoutBranch:          r.CheckoutBranch,
-		PRNumber:                r.PRNumber,
-		RemoteContribution:      r.RemoteContribution,
-		ComparisonTarget:        r.ComparisonTarget,
-		ContributionDestination: r.ContributionDestination,
-		WorktreeID:              r.WorktreeID,
-		WorktreeBranchPrefix:    r.WorktreeBranchPrefix,
-		WorktreeBranchTemplate:  r.WorktreeBranchTemplate,
-		WorktreeBranchTicket:    r.WorktreeBranchTicket,
-		PullBeforeWorktree:      r.PullBeforeWorktree,
-		RemoteSyncHandled:       r.RemoteSyncHandled,
-		RefreshRepository:       r.RefreshRepository,
-		CopyFiles:               r.CopyFiles,
-		BranchSlug:              r.BranchSlug,
-		BranchIdentitySlug:      r.BranchIdentitySlug,
+		TaskRepositoryID:           r.TaskRepositoryID,
+		RepositoryID:               r.RepositoryID,
+		RepositoryPath:             r.RepositoryPath,
+		RepoName:                   r.RepoName,
+		BaseBranch:                 r.BaseBranch,
+		DefaultBranch:              r.DefaultBranch,
+		CheckoutBranch:             r.CheckoutBranch,
+		PRNumber:                   r.PRNumber,
+		RemoteContribution:         r.RemoteContribution,
+		ComparisonTarget:           r.ComparisonTarget,
+		ContributionDestination:    r.ContributionDestination,
+		WorktreeID:                 r.WorktreeID,
+		AllowBranchReplacement:     r.AllowBranchReplacement,
+		WorktreeBranchPrefix:       r.WorktreeBranchPrefix,
+		WorktreeBranchTemplate:     r.WorktreeBranchTemplate,
+		WorktreeBranchTicket:       r.WorktreeBranchTicket,
+		PullBeforeWorktree:         r.PullBeforeWorktree,
+		RemoteSyncHandled:          r.RemoteSyncHandled,
+		RefreshRepository:          r.RefreshRepository,
+		RefreshRepositoryWithState: r.RefreshRepositoryWithState,
+		RemoteRefState:             r.RemoteRefState,
+		CopyFiles:                  r.CopyFiles,
+		BranchSlug:                 r.BranchSlug,
+		BranchIdentitySlug:         r.BranchIdentitySlug,
 	}}
 }
 

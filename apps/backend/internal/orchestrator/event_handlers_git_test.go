@@ -95,6 +95,36 @@ func TestGitStatusHashIncludesRepositoryName(t *testing.T) {
 	}
 }
 
+func TestHandleGitStatusUpdateResolvesEnvironmentForRecoveredEvent(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-recovered-git", "s-recovered-git", "step1")
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-recovered-git", TaskID: "t-recovered-git", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+		CreatedAt: now, UpdatedAt: now,
+	}))
+	session, err := repo.GetTaskSession(ctx, "s-recovered-git")
+	require.NoError(t, err)
+	session.TaskEnvironmentID = "env-recovered-git"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	eventBus := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eventBus
+	svc.handleGitStatusUpdate(ctx, watcher.GitEventData{
+		TaskID:    "t-recovered-git",
+		SessionID: "s-recovered-git",
+		Status:    &lifecycle.GitStatusData{RepositoryName: "root", Branch: "feature/recovered"},
+	})
+
+	require.Len(t, eventBus.events, 1)
+	payload, ok := eventBus.events[0].event.Data.(*watcher.GitEventData)
+	require.True(t, ok)
+	require.Equal(t, "env-recovered-git", payload.TaskEnvironmentID)
+}
+
 func TestHandleBranchSwitched_RepositoryScopedUpdateKeepsSiblingBranch(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
