@@ -112,6 +112,13 @@ type WorkspaceGroupOwnerResolver interface {
 	GetWorkspaceGroupOwnerTaskID(ctx context.Context, taskID string) (string, error)
 }
 
+// WorkspaceGroupOwnerSessionResolver resolves the owner for the exact group
+// bound to an observing session. It prevents a task with multiple active group
+// memberships from selecting an unrelated owner by task ID alone.
+type WorkspaceGroupOwnerSessionResolver interface {
+	GetWorkspaceGroupOwnerTaskIDForSession(ctx context.Context, taskID, sessionID string) (string, error)
+}
+
 // Service coordinates GitHub integration operations.
 type Service struct {
 	mu                          sync.Mutex

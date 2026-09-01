@@ -153,6 +153,7 @@ func seedWorkspaceGroup(t *testing.T, repo *sqliterepo.Repository, groupID, owne
 			workspace_id TEXT NOT NULL DEFAULT '',
 			owner_task_id TEXT NOT NULL,
 			materialized_kind TEXT NOT NULL DEFAULT '',
+			materialized_environment_id TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);

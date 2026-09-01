@@ -231,7 +231,9 @@ func (p *Poller) tryBatchedPRWatchCheck(ctx context.Context, watches []*PRWatch)
 		if r.Watch.PRNumber == 0 {
 			continue
 		}
-		effectiveTaskID := p.service.resolveEffectiveAssociationTaskID(ctx, r.Watch.TaskID, r.Watch.RepositoryID)
+		effectiveTaskID := p.service.reconcileTaskPROwnership(
+			ctx, r.Watch.SessionID, r.Watch.TaskID, r.Watch.RepositoryID, r.Watch.PRNumber,
+		)
 		pr := r.Status.PR
 		if pr != nil && (pr.State == prStateMerged || pr.State == prStateClosed) {
 			p.publishPRStatusEvent(ctx, r.Watch, effectiveTaskID, r.Status)
@@ -289,7 +291,9 @@ func (p *Poller) checkSinglePRWatch(ctx context.Context, watch *PRWatch) {
 	// Resolve the effective owner here, the same way associatePRWithTask does
 	// for the association write, so the background poller keeps syncing the
 	// owner's github_task_prs row instead of silently updating nothing.
-	effectiveTaskID := p.service.resolveEffectiveAssociationTaskID(ctx, watch.TaskID, watch.RepositoryID)
+	effectiveTaskID := p.service.reconcileTaskPROwnership(
+		ctx, watch.SessionID, watch.TaskID, watch.RepositoryID, watch.PRNumber,
+	)
 
 	// Always sync latest PR state to the task-PR record.
 	if syncErr := p.service.SyncTaskPR(ctx, effectiveTaskID, status); syncErr != nil {
@@ -379,7 +383,10 @@ func (p *Poller) detectPRForWatch(ctx context.Context, watch *PRWatch) {
 		return
 	}
 
-	if _, assocErr := p.service.AssociatePRWithTask(ctx, watch.TaskID, watch.RepositoryID, pr); assocErr != nil {
+	if _, assocErr := p.service.associatePRWithTaskForSession(
+		ctx, watch.WorkspaceID, watch.SessionID, watch.TaskID, watch.RepositoryID, pr,
+		false, false, TaskPRSourceWatch,
+	); assocErr != nil {
 		p.logger.Error("failed to associate detected PR with task",
 			zap.String("task_id", watch.TaskID),
 			zap.Int("pr_number", pr.Number),

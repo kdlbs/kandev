@@ -230,7 +230,7 @@ func (s *Service) CheckSessionMR(ctx context.Context, taskID, sessionID string) 
 	// without the redirect, checking from a shared-worktree subtask would
 	// write gitlab_task_mrs/gitlab_mr_watches under the member instead of the
 	// workspace-group owner, reproducing the multi-binding on demand.
-	effectiveTaskID := s.resolveEffectivePushTaskID(ctx, taskID, repositoryID)
+	effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sessionID, taskID, repositoryID)
 
 	branch := strings.TrimSpace(s.resolvePRWatchBranch(ctx, taskID, sessionID, ""))
 	if branch == "" {

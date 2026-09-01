@@ -131,3 +131,42 @@ func TestGetWorkspaceGroupOwnerTaskIDIgnoresReleasedMembership(t *testing.T) {
 		t.Fatalf("owner task ID = %q, want empty (only membership is released)", ownerTaskID)
 	}
 }
+
+func TestGetWorkspaceGroupOwnerTaskIDForSessionUsesBoundEnvironment(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-group-session-owner")
+	for _, taskID := range []string{"member1", "owner-early", "owner-late"} {
+		if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: "ws-group-session-owner", Title: taskID}); err != nil {
+			t.Fatalf("create task %s: %v", taskID, err)
+		}
+	}
+	seedWorkspaceGroupOwnerFixture(t, repo)
+	if _, err := repo.db.Exec(`ALTER TABLE task_workspace_groups ADD COLUMN materialized_environment_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		t.Fatalf("add materialized environment column: %v", err)
+	}
+
+	insertWorkspaceGroupMember(t, repo, "group-early", "owner-early", "member1", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	insertWorkspaceGroupMember(t, repo, "group-late", "owner-late", "member1", time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC))
+	if _, err := repo.db.Exec(`UPDATE task_workspace_groups SET materialized_environment_id = CASE id WHEN 'group-early' THEN 'env-early' ELSE 'env-late' END`); err != nil {
+		t.Fatalf("seed materialized environments: %v", err)
+	}
+	if _, err := repo.db.Exec(`INSERT INTO task_sessions (id, task_id, task_environment_id, started_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		"session-late", "member1", "env-late", time.Now().UTC(), time.Now().UTC()); err != nil {
+		t.Fatalf("seed bound session: %v", err)
+	}
+
+	resolver, ok := any(repo).(interface {
+		GetWorkspaceGroupOwnerTaskIDForSession(context.Context, string, string) (string, error)
+	})
+	if !ok {
+		t.Fatal("Repository does not implement session-bound workspace owner resolution")
+	}
+	ownerTaskID, err := resolver.GetWorkspaceGroupOwnerTaskIDForSession(ctx, "member1", "session-late")
+	if err != nil {
+		t.Fatalf("GetWorkspaceGroupOwnerTaskIDForSession: %v", err)
+	}
+	if ownerTaskID != "owner-late" {
+		t.Fatalf("owner task ID = %q, want owner-late for the session-bound group", ownerTaskID)
+	}
+}

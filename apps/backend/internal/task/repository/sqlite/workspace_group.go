@@ -43,3 +43,58 @@ func (r *Repository) GetWorkspaceGroupOwnerTaskID(ctx context.Context, taskID st
 	}
 	return ownerTaskID, nil
 }
+
+// GetWorkspaceGroupOwnerTaskIDForSession resolves the owner for the workspace
+// group that owns the observing session's materialized environment. A task can
+// retain active membership in more than one group, so the task-only lookup is
+// not safe when a session identifies the exact shared checkout.
+func (r *Repository) GetWorkspaceGroupOwnerTaskIDForSession(
+	ctx context.Context, taskID, sessionID string,
+) (string, error) {
+	if taskID == "" || sessionID == "" {
+		return "", nil
+	}
+	var environmentID string
+	err := r.ro.GetContext(ctx, &environmentID, r.ro.Rebind(`
+		SELECT COALESCE(task_environment_id, '')
+		FROM task_sessions
+		WHERE id = ? AND task_id = ?
+		LIMIT 1
+	`), sessionID, taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	// Sessions created before a shared environment is materialized do not yet
+	// carry an exact group identity. Preserve the existing task-only behavior
+	// until that binding is available; once an environment is present, the
+	// exact join below prevents a different active membership from winning.
+	if environmentID == "" {
+		return r.GetWorkspaceGroupOwnerTaskID(ctx, taskID)
+	}
+	var ownerTaskID string
+	err = r.ro.GetContext(ctx, &ownerTaskID, r.ro.Rebind(`
+		SELECT g.owner_task_id
+		FROM task_sessions s
+		JOIN task_workspace_groups g
+		  ON g.materialized_environment_id = s.task_environment_id
+		JOIN task_workspace_group_members m
+		  ON m.workspace_group_id = g.id
+		 AND m.task_id = s.task_id
+		 AND m.released_at IS NULL
+		WHERE s.id = ?
+		  AND s.task_id = ?
+		  AND s.task_environment_id <> ''
+		ORDER BY g.id
+		LIMIT 1
+	`), sessionID, taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return ownerTaskID, nil
+}

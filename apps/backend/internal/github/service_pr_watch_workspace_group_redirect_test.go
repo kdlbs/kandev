@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
@@ -381,5 +383,82 @@ func TestCheckSinglePRWatch_LegacyMemberWatchSyncsOwnersTaskPR(t *testing.T) {
 	}
 	if len(memberRows) != 0 {
 		t.Fatalf("got %d PR associations for member1, want 0 (sync must not create a stranded row under the observing member): %+v", len(memberRows), memberRows)
+	}
+}
+
+func TestCheckSinglePRWatch_MovesLegacyMemberTaskPRToOwner(t *testing.T) {
+	poller, svc, mockClient, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	issueStore := newMultiTaskIssueStore()
+	issueStore.addTask(&taskmodels.Task{ID: "member1"}, "repo-canonical")
+	issueStore.addTask(&taskmodels.Task{ID: "owner1"}, "repo-canonical")
+	svc.SetTaskIssueStore(issueStore)
+	svc.SetWorkspaceGroupOwnerResolver(&fakeWorkspaceGroupOwnerResolver{ownerTaskID: "owner1"})
+
+	now := time.Now().UTC()
+	mergedAt := now.Add(-time.Hour)
+	mockClient.AddPR(&PR{
+		Number: 42, Title: "Feature PR", State: prStateMerged,
+		HeadSHA: "abc123", HeadBranch: "feature-branch", BaseBranch: "main",
+		RepoOwner: "owner", RepoName: "repo", MergedAt: &mergedAt,
+	})
+	watch := &PRWatch{
+		SessionID: "sess-legacy", TaskID: "member1", RepositoryID: "repo-canonical",
+		Owner: "owner", Repo: "repo", PRNumber: 42, Branch: "feature-branch",
+	}
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+	legacy := &TaskPR{
+		TaskID: "member1", RepositoryID: "repo-canonical", Owner: "owner", Repo: "repo", PRNumber: 42,
+		PRURL: "https://github.com/owner/repo/pull/42", PRTitle: "Feature PR",
+		HeadBranch: "feature-branch", BaseBranch: "main", State: "open", CreatedAt: now.Add(-2 * time.Hour),
+	}
+	if err := store.CreateTaskPR(ctx, legacy); err != nil {
+		t.Fatalf("create legacy member task PR: %v", err)
+	}
+
+	seen := make(chan *TaskPR, 2)
+	sub, err := svc.eventBus.Subscribe(events.GitHubTaskPRUpdated, func(_ context.Context, event *bus.Event) error {
+		if tp, ok := event.Data.(*TaskPR); ok {
+			seen <- tp
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("subscribe to task PR updates: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+
+	poller.checkSinglePRWatch(ctx, watch)
+
+	select {
+	case eventPR := <-seen:
+		if eventPR.TaskID != "owner1" {
+			t.Fatalf("updated event task ID = %q, want owner1", eventPR.TaskID)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no owner task PR update event published")
+	}
+	select {
+	case eventPR := <-seen:
+		t.Fatalf("unexpected second task PR update for %q", eventPR.TaskID)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	ownerPR, err := store.GetTaskPRByRepoAndNumber(ctx, "owner1", "repo-canonical", 42)
+	if err != nil {
+		t.Fatalf("get owner task PR: %v", err)
+	}
+	if ownerPR == nil || ownerPR.State != prStateMerged {
+		t.Fatalf("owner task PR = %+v, want merged owner row", ownerPR)
+	}
+	memberRows, err := store.ListTaskPRsByTask(ctx, "member1")
+	if err != nil {
+		t.Fatalf("list member task PRs: %v", err)
+	}
+	if len(memberRows) != 0 {
+		t.Fatalf("member task PRs = %+v, want no active legacy member row", memberRows)
 	}
 }

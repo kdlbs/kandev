@@ -307,7 +307,7 @@ func (s *Service) applyBatchedNumberedWatch(
 	// Resolve the effective owner here, the same way associatePRWithTask does
 	// for the association write, so this loop keeps syncing the owner's
 	// github_task_prs row instead of silently updating nothing.
-	effectiveTaskID := s.resolveEffectiveAssociationTaskID(ctx, w.TaskID, w.RepositoryID)
+	effectiveTaskID := s.reconcileTaskPROwnership(ctx, w.SessionID, w.TaskID, w.RepositoryID, w.PRNumber)
 
 	// Gap-fill: a numbered watch can exist even when its exact task_pr row was
 	// never created. This targeted read is unconditional because the common
@@ -322,7 +322,10 @@ func (s *Service) applyBatchedNumberedWatch(
 			zap.Int("pr_number", w.PRNumber), zap.Error(err))
 		return PRWatchSyncResult{Watch: w, Status: status, Found: true, SyncFailed: true}
 	} else if existing == nil && status.PR != nil {
-		if _, assocErr := s.AssociatePRWithTaskForWorkspace(ctx, w.WorkspaceID, w.TaskID, w.RepositoryID, status.PR); assocErr != nil {
+		if _, assocErr := s.associatePRWithTaskForSession(
+			ctx, w.WorkspaceID, w.SessionID, w.TaskID, w.RepositoryID, status.PR,
+			false, false, TaskPRSourceWatch,
+		); assocErr != nil {
 			s.logger.Error("failed to associate numbered PR with task",
 				zap.String("task_id", w.TaskID), zap.Int("pr_number", w.PRNumber), zap.Error(assocErr))
 			return PRWatchSyncResult{Watch: w, Status: status, Found: true, SyncFailed: true}
@@ -435,7 +438,10 @@ func (s *Service) applyBatchedSearchingWatch(
 			zap.String("watch_id", w.ID), zap.Int("pr_number", status.PR.Number), zap.Error(err))
 		return PRWatchSyncResult{Watch: w, Status: status, Found: true}
 	}
-	if _, err := s.AssociatePRWithTaskForWorkspace(ctx, w.WorkspaceID, w.TaskID, w.RepositoryID, status.PR); err != nil {
+	if _, err := s.associatePRWithTaskForSession(
+		ctx, w.WorkspaceID, w.SessionID, w.TaskID, w.RepositoryID, status.PR,
+		false, false, TaskPRSourceWatch,
+	); err != nil {
 		s.logger.Error("failed to associate detected PR with task",
 			zap.String("task_id", w.TaskID), zap.Int("pr_number", status.PR.Number), zap.Error(err))
 		return PRWatchSyncResult{Watch: w, Status: status, Found: true}

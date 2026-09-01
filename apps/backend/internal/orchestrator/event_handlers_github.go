@@ -1035,7 +1035,7 @@ func (s *Service) ensureSessionPRWatch(ctx context.Context, taskID, sessionID, f
 	}
 	targets := s.resolveSessionWatchTargets(ctx, taskID, sessionID, fallbackBranch)
 	for _, t := range targets {
-		effectiveTaskID := s.resolveEffectivePushTaskID(ctx, taskID, t.RepositoryID)
+		effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sessionID, taskID, t.RepositoryID)
 		if _, err := s.githubService.EnsurePRWatchForWorkspace(
 			ctx, workspaceID, sessionID, effectiveTaskID, t.RepositoryID, t.Owner, t.Repo, t.Branch,
 		); err != nil {
@@ -1374,7 +1374,7 @@ func (s *Service) CheckSessionPR(ctx context.Context, taskID, sessionID string) 
 	// already-associated short-circuit only needs a repositoryID lookup, not
 	// a full owner/repo/branch resolution.
 	repositoryID := s.resolvePrimaryTaskRepositoryID(ctx, taskID)
-	effectiveTaskID := s.resolveEffectivePushTaskID(ctx, taskID, repositoryID)
+	effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sessionID, taskID, repositoryID)
 
 	// Check if a PR is already associated with the effective task.
 	existing, err := s.githubService.GetTaskPR(ctx, effectiveTaskID)
@@ -1472,7 +1472,7 @@ func (s *Service) buildTaskBranchList(ctx context.Context, store repoStore) ([]g
 			if watchedKeys[watchedSessionRepoKey(sess.SessionID, t.RepositoryID, t.Branch)] {
 				continue
 			}
-			effectiveTaskID := s.resolveEffectivePushTaskID(ctx, sess.TaskID, t.RepositoryID)
+			effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sess.SessionID, sess.TaskID, t.RepositoryID)
 			result = append(result, github.TaskBranchInfo{
 				WorkspaceID:  sess.WorkspaceID,
 				TaskID:       effectiveTaskID,

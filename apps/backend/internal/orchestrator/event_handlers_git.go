@@ -345,7 +345,7 @@ func (s *Service) dispatchPushDetection(ctx context.Context, sessionID, taskID, 
 	// the push (a subtask sharing a parent's worktree still has its own
 	// session row). Only the write destination below is redirected.
 	identity := s.resolvePushRepositoryIdentity(ctx, sessionID, taskID, repositoryName)
-	effectiveTaskID := s.resolveEffectivePushTaskID(ctx, taskID, identity.repositoryID)
+	effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sessionID, taskID, identity.repositoryID)
 	if identity.provider == gitlabProviderName {
 		s.detectPushAndAssociateMRWithIdentity(ctx, sessionID, effectiveTaskID, repositoryName, branch, identity)
 		return
@@ -381,7 +381,13 @@ func (s *Service) dispatchPushDetection(ctx context.Context, sessionID, taskID, 
 // member-attributed github_pr_watches row is ever created and the poller's
 // own AssociatePRWithTask(watch.TaskID, ...) writes under the
 // already-redirected task.
-func (s *Service) resolveEffectivePushTaskID(ctx context.Context, taskID, repositoryID string) string {
+type sessionWorkspaceGroupOwnerResolver interface {
+	GetWorkspaceGroupOwnerTaskIDForSession(ctx context.Context, taskID, sessionID string) (string, error)
+}
+
+func (s *Service) resolveEffectivePushTaskIDForSession(
+	ctx context.Context, sessionID, taskID, repositoryID string,
+) string {
 	if taskID == "" {
 		return taskID
 	}
@@ -389,7 +395,18 @@ func (s *Service) resolveEffectivePushTaskID(ctx context.Context, taskID, reposi
 	if !ok {
 		return taskID
 	}
-	ownerTaskID, err := store.GetWorkspaceGroupOwnerTaskID(ctx, taskID)
+	var ownerTaskID string
+	var err error
+	if sessionID != "" {
+		if sessionResolver, ok := any(store).(sessionWorkspaceGroupOwnerResolver); ok {
+			ownerTaskID, err = sessionResolver.GetWorkspaceGroupOwnerTaskIDForSession(ctx, taskID, sessionID)
+		} else {
+			// Keep compatibility with repository test doubles and older adapters.
+			ownerTaskID, err = store.GetWorkspaceGroupOwnerTaskID(ctx, taskID)
+		}
+	} else {
+		ownerTaskID, err = store.GetWorkspaceGroupOwnerTaskID(ctx, taskID)
+	}
 	if err != nil || ownerTaskID == "" || ownerTaskID == taskID {
 		return taskID
 	}
@@ -1127,7 +1144,7 @@ func (s *Service) resetPRWatchForBranchSwitch(ctx context.Context, taskID, sessi
 	if workspaceID == "" {
 		return
 	}
-	effectiveTaskID := s.resolveEffectivePushTaskID(ctx, taskID, repositoryID)
+	effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sessionID, taskID, repositoryID)
 	if _, err := s.githubService.EnsurePRWatchForWorkspace(
 		ctx, workspaceID, sessionID, effectiveTaskID, repositoryID, owner, repoName, newBranch,
 	); err != nil {
