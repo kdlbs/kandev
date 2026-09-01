@@ -25,8 +25,11 @@ const (
 	CIRunFailureSourceRunMismatch        CIRunFailureClass = "source_run_mismatch"
 	CIRunFailureRerunIneligible          CIRunFailureClass = "rerun_ineligible"
 	CIRunFailureDispatchDenied           CIRunFailureClass = "workflow_dispatch_denied"
+	CIRunFailureForkDispatchDisallowed   CIRunFailureClass = "fork_dispatch_disallowed"
+	CIRunFailureDispatchRefUnavailable   CIRunFailureClass = "dispatch_ref_unavailable"
 	CIRunFailureMergeEvidenceUnavailable CIRunFailureClass = "merge_evidence_unavailable"
-	CIRunFailureInstallationPermission   CIRunFailureClass = "installation_permission_denied"
+	CIRunFailureInstallationRequired     CIRunFailureClass = "installation_required"
+	CIRunFailureInstallationPermission   CIRunFailureClass = "installation_permission_missing"
 	CIRunFailureProviderRateLimited      CIRunFailureClass = "provider_rate_limited"
 	CIRunFailureProviderUnavailable      CIRunFailureClass = "provider_unavailable"
 	CIRunFailureProviderCallAmbiguous    CIRunFailureClass = "provider_call_ambiguous"
@@ -38,6 +41,13 @@ type CIRunProviderError struct {
 	StatusCode int
 	Retryable  bool
 	RetryAfter *time.Time
+	RequestID  string
+	URL        string
+}
+
+type GitHubRequestMetadata struct {
+	RequestID string
+	URL       string
 }
 
 func (e *CIRunProviderError) Error() string {
@@ -140,9 +150,16 @@ func (c *TokenClient) GetActionsWorkflow(
 func (c *TokenClient) RerunFailedActionsJobs(
 	ctx context.Context, owner, repo string, runID int64,
 ) error {
+	_, err := c.RerunFailedActionsJobsWithMetadata(ctx, owner, repo, runID)
+	return err
+}
+
+func (c *TokenClient) RerunFailedActionsJobsWithMetadata(
+	ctx context.Context, owner, repo string, runID int64,
+) (GitHubRequestMetadata, error) {
 	endpoint := fmt.Sprintf("/repos/%s/%s/actions/runs/%d/rerun-failed-jobs", owner, repo, runID)
-	err := c.postJSON(ctx, endpoint, []byte(`{}`), nil)
-	return classifyCIRunProviderError(err, true, true)
+	metadata, err := c.requestJSONWithMetadata(ctx, http.MethodPost, endpoint, []byte(`{}`), nil)
+	return metadata, classifyCIRunProviderError(err, true, true)
 }
 
 func (c *TokenClient) DispatchActionsWorkflow(
@@ -152,15 +169,27 @@ func (c *TokenClient) DispatchActionsWorkflow(
 	ref string,
 	inputs map[string]string,
 ) error {
+	_, err := c.DispatchActionsWorkflowWithMetadata(ctx, owner, repo, workflowID, ref, inputs)
+	return err
+}
+
+func (c *TokenClient) DispatchActionsWorkflowWithMetadata(
+	ctx context.Context,
+	owner, repo string,
+	workflowID int64,
+	ref string,
+	inputs map[string]string,
+) (GitHubRequestMetadata, error) {
 	payload, err := json.Marshal(struct {
 		Ref    string            `json:"ref"`
 		Inputs map[string]string `json:"inputs,omitempty"`
 	}{Ref: ref, Inputs: inputs})
 	if err != nil {
-		return err
+		return GitHubRequestMetadata{}, err
 	}
 	endpoint := fmt.Sprintf("/repos/%s/%s/actions/workflows/%d/dispatches", owner, repo, workflowID)
-	return classifyCIRunProviderError(c.postJSON(ctx, endpoint, payload, nil), true, false)
+	metadata, err := c.requestJSONWithMetadata(ctx, http.MethodPost, endpoint, payload, nil)
+	return metadata, classifyCIRunProviderError(err, true, false)
 }
 
 func (c *TokenClient) ListActionsWorkflowRuns(
@@ -188,6 +217,14 @@ func classifyCIRunProviderError(err error, mutation, rerun bool) error {
 	if err == nil {
 		return nil
 	}
+	return classifyNonNilCIRunProviderError(err, mutation, rerun)
+}
+
+func classifyNonNilCIRunProviderError(err error, mutation, rerun bool) error {
+	var existing *CIRunProviderError
+	if errors.As(err, &existing) {
+		return err
+	}
 	var apiErr *GitHubAPIError
 	if !errors.As(err, &apiErr) {
 		if mutation {
@@ -198,18 +235,23 @@ func classifyCIRunProviderError(err error, mutation, rerun bool) error {
 	body := strings.ToLower(apiErr.Body)
 	switch {
 	case rerun && apiErr.StatusCode == http.StatusUnprocessableEntity:
-		return &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: apiErr.StatusCode}
+		return &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: apiErr.StatusCode,
+			RequestID: apiErr.RequestID, URL: apiErr.URL}
 	case apiErr.StatusCode == http.StatusTooManyRequests ||
 		(apiErr.StatusCode == http.StatusForbidden && strings.Contains(body, "rate limit")):
 		return &CIRunProviderError{Class: CIRunFailureProviderRateLimited, StatusCode: apiErr.StatusCode,
-			Retryable: true, RetryAfter: apiErr.RetryAfter}
+			Retryable: true, RetryAfter: apiErr.RetryAfter, RequestID: apiErr.RequestID, URL: apiErr.URL}
 	case apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden:
-		return &CIRunProviderError{Class: CIRunFailureInstallationPermission, StatusCode: apiErr.StatusCode}
+		return &CIRunProviderError{Class: CIRunFailureInstallationPermission, StatusCode: apiErr.StatusCode,
+			RequestID: apiErr.RequestID, URL: apiErr.URL}
 	case mutation && apiErr.StatusCode >= http.StatusInternalServerError:
-		return &CIRunProviderError{Class: CIRunFailureProviderCallAmbiguous, StatusCode: apiErr.StatusCode}
+		return &CIRunProviderError{Class: CIRunFailureProviderCallAmbiguous, StatusCode: apiErr.StatusCode,
+			RequestID: apiErr.RequestID, URL: apiErr.URL}
 	case apiErr.StatusCode >= http.StatusInternalServerError:
-		return &CIRunProviderError{Class: CIRunFailureProviderUnavailable, StatusCode: apiErr.StatusCode, Retryable: true}
+		return &CIRunProviderError{Class: CIRunFailureProviderUnavailable, StatusCode: apiErr.StatusCode,
+			Retryable: true, RequestID: apiErr.RequestID, URL: apiErr.URL}
 	default:
-		return &CIRunProviderError{Class: CIRunFailureProviderRejected, StatusCode: apiErr.StatusCode}
+		return &CIRunProviderError{Class: CIRunFailureProviderRejected, StatusCode: apiErr.StatusCode,
+			RequestID: apiErr.RequestID, URL: apiErr.URL}
 	}
 }

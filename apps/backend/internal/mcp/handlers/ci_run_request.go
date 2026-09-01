@@ -40,9 +40,11 @@ func (h *Handlers) handleRequestFreshCIRun(
 	if err != nil {
 		var requestErr *github.CIRunRequestError
 		if errors.As(err, &requestErr) {
-			return ws.NewError(msg.ID, msg.Action, ciRunErrorCode(requestErr.Class), err.Error(), map[string]any{
-				"failure_class": requestErr.Class,
-			})
+			details := map[string]any{"failure_class": requestErr.Class}
+			if receipt != nil {
+				details["receipt"] = receipt
+			}
+			return ws.NewError(msg.ID, msg.Action, ciRunErrorCode(requestErr.Class), err.Error(), details)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"fresh CI run request failed", nil)
@@ -53,11 +55,12 @@ func (h *Handlers) handleRequestFreshCIRun(
 func ciRunErrorCode(class github.CIRunFailureClass) string {
 	switch class {
 	case github.CIRunFailureNotAuthorized, github.CIRunFailureCrossWorkspace,
-		github.CIRunFailureInstallationPermission:
+		github.CIRunFailureInstallationRequired, github.CIRunFailureInstallationPermission:
 		return ws.ErrorCodeForbidden
 	case github.CIRunFailureHeadDrift, github.CIRunFailureSourceRunMismatch,
 		github.CIRunFailureWorkflowStepMismatch, github.CIRunFailureIdempotencyConflict,
-		github.CIRunFailureDispatchDenied, github.CIRunFailureMergeEvidenceUnavailable:
+		github.CIRunFailureDispatchDenied, github.CIRunFailureForkDispatchDisallowed,
+		github.CIRunFailureDispatchRefUnavailable, github.CIRunFailureMergeEvidenceUnavailable:
 		return ws.ErrorCodeConflict
 	default:
 		return ws.ErrorCodeInternalError

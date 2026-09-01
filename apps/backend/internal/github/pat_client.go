@@ -34,6 +34,8 @@ type GitHubAPIError struct {
 	Endpoint   string
 	Body       string
 	RetryAfter *time.Time
+	RequestID  string
+	URL        string
 }
 
 func githubAPIRetryAfter(resp *http.Response) *time.Time {
@@ -912,31 +914,45 @@ func (c *PATClient) requestJSON(
 	body []byte,
 	result interface{},
 ) error {
+	_, err := c.requestJSONWithMetadata(ctx, method, endpoint, body, result)
+	return err
+}
+
+func (c *PATClient) requestJSONWithMetadata(
+	ctx context.Context,
+	method string,
+	endpoint string,
+	body []byte,
+	result interface{},
+) (GitHubRequestMetadata, error) {
 	u := githubAPIBase + endpoint
+	metadata := GitHubRequestMetadata{URL: u}
 	req, err := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return metadata, err
 	}
 	c.setGitHubHeaders(req)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("request %s %s: %w", method, endpoint, err)
+		return metadata, fmt.Errorf("request %s %s: %w", method, endpoint, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	metadata.RequestID = resp.Header.Get("X-GitHub-Request-Id")
 	c.recordRateHeaders(resp, endpoint)
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
-		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint,
-			Body: string(respBody), RetryAfter: githubAPIRetryAfter(resp)}
+		return metadata, &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint,
+			Body: string(respBody), RetryAfter: githubAPIRetryAfter(resp),
+			RequestID: metadata.RequestID, URL: metadata.URL}
 	}
 	if result == nil {
-		return nil
+		return metadata, nil
 	}
-	return json.NewDecoder(resp.Body).Decode(result)
+	return metadata, json.NewDecoder(resp.Body).Decode(result)
 }
 
 // delete sends a DELETE request. 2xx and 404 both return nil-or-typed-error per caller intent.

@@ -133,6 +133,7 @@ func TestRequestFreshCIRunKeepsRateLimitedReconciliationClosedToResend(t *testin
 	client.listErr = nil
 	client.runs = []GitHubActionsRun{*client.run}
 	client.runs[0].Attempt = input.ExpectedSourceAttempt + 1
+	service.ciRunNow = func() time.Time { return reset.Add(time.Second) }
 	receipt, err = service.RequestFreshCIRun(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)

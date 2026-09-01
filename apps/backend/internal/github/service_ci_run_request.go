@@ -69,6 +69,7 @@ func (s *Service) RequestFreshCIRun(
 	}
 	digest := sha256.Sum256([]byte(input.IdempotencyKey))
 	if receipt, handled, lookupErr := s.resumeExistingCIRunRequest(ctx, input, hex.EncodeToString(digest[:])); lookupErr != nil || handled {
+		setCIRunIdempotencyStatus(receipt, "replayed")
 		return receipt, lookupErr
 	}
 	binding, err := s.loadCIRunBinding(ctx, input)
@@ -79,7 +80,9 @@ func (s *Service) RequestFreshCIRun(
 	claimed, created, err := s.store.ClaimCIRunRequest(ctx, request)
 	if err != nil {
 		if errors.Is(err, ErrCIRunSemanticConflict) && claimed != nil {
-			return s.continueCIRunRequest(ctx, binding, claimed, input)
+			receipt, continueErr := s.continueCIRunRequest(ctx, binding, claimed, input)
+			setCIRunIdempotencyStatus(receipt, "coalesced")
+			return receipt, continueErr
 		}
 		if errors.Is(err, ErrCIRunIdempotencyConflict) {
 			return nil, &CIRunRequestError{Class: CIRunFailureIdempotencyConflict}
@@ -89,7 +92,13 @@ func (s *Service) RequestFreshCIRun(
 	if err := s.ensureCIRunClaimAudit(ctx, claimed, created); err != nil {
 		return nil, err
 	}
-	return s.continueCIRunRequest(ctx, binding, claimed, input)
+	receipt, continueErr := s.continueCIRunRequest(ctx, binding, claimed, input)
+	if created {
+		setCIRunIdempotencyStatus(receipt, "created")
+	} else {
+		setCIRunIdempotencyStatus(receipt, "replayed")
+	}
+	return receipt, continueErr
 }
 
 func (s *Service) continueCIRunRequest(
@@ -118,14 +127,19 @@ func (s *Service) continueCIRunRequest(
 	if input.EvidenceKind == CIRunEvidenceCurrentMerge {
 		return s.failCIRunRequest(ctx, request, CIRunFailureMergeEvidenceUnavailable)
 	}
-	client, err := s.resolveCIRunClientForPurpose(ctx, binding.WorkspaceID, binding.Owner, binding.Repo, request.Operation)
+	client, principal, err := s.resolveCIRunClientForPurpose(
+		ctx, binding.WorkspaceID, binding.Owner, binding.Repo, request.Operation,
+	)
 	if err != nil {
 		return s.handleCIRunPreflightError(ctx, request, err)
 	}
+	setCIRunProviderPrincipal(request, principal)
 	verified, err := verifyCIRunProviderBinding(ctx, client, binding, input)
 	if err != nil {
 		return s.handleCIRunPreflightError(ctx, request, err)
 	}
+	request.ObservedPRHeadSHA = verified.PR.HeadSHA
+	request.ProviderEvent = verified.Run.Event
 	if request.Operation == CIRunOperationWorkflowDispatch {
 		return s.executeCIRunDispatchFallback(ctx, client, binding, request, verified)
 	}
@@ -215,7 +229,8 @@ func newCIRunRequest(binding *ciRunBinding, input RequestFreshCIRunInput, now ti
 		ActorTaskID: input.ActorTaskID, ActorSessionID: input.ActorSessionID,
 		TargetTaskID: input.TargetTaskID, WorkflowID: binding.WorkflowID,
 		WorkflowStepID: binding.WorkflowStep, RepositoryID: input.RepositoryID,
-		PRNumber: input.PRNumber, ExpectedHeadSHA: strings.ToLower(input.ExpectedHeadSHA),
+		CanonicalRepository: binding.Owner + "/" + binding.Repo,
+		PRNumber:            input.PRNumber, ExpectedHeadSHA: strings.ToLower(input.ExpectedHeadSHA),
 		SourceRunID: input.SourceRunID, ExpectedSourceAttempt: input.ExpectedSourceAttempt,
 		EvidenceKind: input.EvidenceKind, IdempotencyHash: hex.EncodeToString(digest[:]),
 		Status: CIRunRequestPending, CreatedAt: now.UTC(), UpdatedAt: now.UTC(),
@@ -231,18 +246,19 @@ func (s *Service) ciRunClock() func() time.Time {
 
 func (s *Service) resolveCIRunClient(
 	ctx context.Context, workspaceID, owner, repo string,
-) (ciRunActionsClient, error) {
+) (ciRunActionsClient, AuthPrincipal, error) {
 	return s.resolveCIRunClientForPurpose(ctx, workspaceID, owner, repo, CIRunOperationRerunFailedJobs)
 }
 
 func (s *Service) resolveCIRunClientForPurpose(
 	ctx context.Context, workspaceID, owner, repo string, operation CIRunOperation,
-) (ciRunActionsClient, error) {
+) (ciRunActionsClient, AuthPrincipal, error) {
 	if s.ciRunClientResolver != nil {
-		return s.ciRunClientResolver(ctx, workspaceID, owner, repo)
+		client, err := s.ciRunClientResolver(ctx, workspaceID, owner, repo)
+		return client, ciRunPrincipalForClient(client, workspaceID), err
 	}
 	if s.resolver == nil {
-		return nil, &CIRunProviderError{Class: CIRunFailureInstallationPermission}
+		return nil, AuthPrincipal{}, &CIRunProviderError{Class: CIRunFailureInstallationRequired}
 	}
 	purpose := CredentialPurposeScopedActionsRerun
 	if operation == CIRunOperationWorkflowDispatch {
@@ -252,16 +268,19 @@ func (s *Service) resolveCIRunClientForPurpose(
 		WorkspaceID: workspaceID, Purpose: purpose,
 		RepoOwner: owner, RepoName: repo,
 	})
-	if err != nil || resolved == nil || resolved.Principal.Kind != AuthPrincipalApp ||
+	if err != nil {
+		return nil, AuthPrincipal{}, &CIRunProviderError{Class: ciRunInstallationFailure(err)}
+	}
+	if resolved == nil || resolved.Principal.Kind != AuthPrincipalApp ||
 		resolved.Principal.Source != ConnectionSourceGitHubAppInstallation ||
 		!resolved.Capabilities[CapabilityActionsWrite] {
-		return nil, &CIRunProviderError{Class: CIRunFailureInstallationPermission}
+		return nil, AuthPrincipal{}, &CIRunProviderError{Class: CIRunFailureInstallationPermission}
 	}
 	client, ok := resolved.Client.(ciRunActionsClient)
 	if !ok {
-		return nil, &CIRunProviderError{Class: CIRunFailureInstallationPermission}
+		return nil, AuthPrincipal{}, &CIRunProviderError{Class: CIRunFailureInstallationPermission}
 	}
-	return client, nil
+	return client, resolved.Principal, nil
 }
 
 type verifiedCIRun struct {
@@ -359,6 +378,9 @@ func (s *Service) executeCIRunRequest(
 	request.ProviderHeadRepo = verified.Run.HeadRepository
 	request.ProviderHeadRef = verified.Run.HeadBranch
 	request.ProviderHeadSHA = verified.Run.HeadSHA
+	request.ObservedPRHeadSHA = verified.PR.HeadSHA
+	request.ProviderEvent = verified.Run.Event
+	request.ProviderURL = ciRunRerunProviderURL(latestBinding.Owner, latestBinding.Repo, request.SourceRunID)
 	if err := s.auditCIRun(ctx, request, "provider_started", ""); err != nil {
 		return receiptFromCIRunRequest(request), err
 	}
@@ -370,7 +392,10 @@ func (s *Service) executeCIRunRequest(
 	}
 	request.ProviderCallStartedAt = &now
 	request.Status = CIRunRequestReconciling
-	err = client.RerunFailedActionsJobs(ctx, latestBinding.Owner, latestBinding.Repo, request.SourceRunID)
+	metadata, err := rerunFailedCIRunJobs(
+		ctx, client, latestBinding.Owner, latestBinding.Repo, request.SourceRunID,
+	)
+	applyCIRunProviderMetadata(request, metadata, err)
 	if err == nil {
 		return s.reconcileCIRunRequest(ctx, client, latestBinding, request, verified)
 	}
@@ -445,14 +470,20 @@ func (s *Service) executeCIRunDispatchFallback(
 	verified *verifiedCIRun,
 ) (*CIRunReceipt, error) {
 	if s.resolver != nil {
-		dispatchClient, resolveErr := s.resolveCIRunClientForPurpose(ctx, binding.WorkspaceID, binding.Owner, binding.Repo, CIRunOperationWorkflowDispatch)
+		dispatchClient, principal, resolveErr := s.resolveCIRunClientForPurpose(
+			ctx, binding.WorkspaceID, binding.Owner, binding.Repo, CIRunOperationWorkflowDispatch,
+		)
 		if resolveErr != nil {
 			return s.failCIRunRequest(ctx, request, ciRunFailureFromError(resolveErr))
 		}
 		client = dispatchClient
+		setCIRunProviderPrincipal(request, principal)
 	}
 	if !sameRepositoryPR(verified.PR, binding) {
-		return s.failCIRunRequest(ctx, request, CIRunFailureDispatchDenied)
+		return s.failCIRunRequest(ctx, request, CIRunFailureForkDispatchDisallowed)
+	}
+	if strings.TrimSpace(verified.PR.HeadBranch) == "" {
+		return s.failCIRunRequest(ctx, request, CIRunFailureDispatchRefUnavailable)
 	}
 	inputs, ok := reviewedWorkflowDispatchInputs(verified.Workflow.Path)
 	if !ok {
@@ -461,12 +492,7 @@ func (s *Service) executeCIRunDispatchFallback(
 	source, err := client.GetRepoFileContent(ctx, binding.Owner, binding.Repo,
 		verified.Workflow.Path, verified.PR.BaseBranch)
 	if err != nil {
-		class := ciRunFailureFromError(classifyCIRunProviderError(err, false, false))
-		if class == CIRunFailureProviderRateLimited || class == CIRunFailureProviderUnavailable ||
-			class == CIRunFailureInstallationPermission {
-			return s.failCIRunRequest(ctx, request, class)
-		}
-		return s.failCIRunRequest(ctx, request, CIRunFailureDispatchDenied)
+		return s.handleCIRunWorkflowContentReadError(ctx, request, err)
 	}
 	if !workflowDispatchDeclared(source) {
 		return s.failCIRunRequest(ctx, request, CIRunFailureDispatchDenied)
@@ -478,7 +504,7 @@ func (s *Service) executeCIRunDispatchFallback(
 	headSource, err := client.GetRepoFileContent(ctx, latestBinding.Owner, latestBinding.Repo,
 		verified.Workflow.Path, latestPR.HeadBranch)
 	if err != nil {
-		return s.failCIRunRequest(ctx, request, ciRunFailureFromError(err))
+		return s.handleCIRunWorkflowContentReadError(ctx, request, err)
 	}
 	if !bytes.Equal(source, headSource) {
 		return s.failCIRunRequest(ctx, request, CIRunFailureDispatchDenied)
@@ -500,6 +526,7 @@ func (s *Service) executeCIRunDispatchFallback(
 		return s.failCIRunRequest(ctx, request, CIRunFailureHeadDrift)
 	}
 	dispatchStartedAt := s.ciRunClock()().UTC()
+	request.ProviderURL = ciRunDispatchProviderURL(latestBinding.Owner, latestBinding.Repo, verified.Workflow.ID)
 	if err := s.auditCIRun(ctx, request, "provider_started", ""); err != nil {
 		return receiptFromCIRunRequest(request), err
 	}
@@ -510,8 +537,10 @@ func (s *Service) executeCIRunDispatchFallback(
 		return nil, err
 	}
 	request.ProviderCallStartedAt = &dispatchStartedAt
-	if err := client.DispatchActionsWorkflow(ctx, latestBinding.Owner, latestBinding.Repo,
-		verified.Workflow.ID, latestPR.HeadBranch, inputs); err != nil {
+	metadata, err := dispatchCIRunWorkflow(ctx, client, latestBinding.Owner, latestBinding.Repo,
+		verified.Workflow.ID, latestPR.HeadBranch, inputs)
+	applyCIRunProviderMetadata(request, metadata, err)
+	if err != nil {
 		return s.handleCIRunMutationError(ctx, request, err)
 	}
 	return s.reconcileCIRunRequest(ctx, client, latestBinding, request, verified)
@@ -577,7 +606,7 @@ func (s *Service) failCIRunAdmission(
 	if errors.As(err, &requestErr) {
 		return s.failCIRunRequest(ctx, request, requestErr.Class)
 	}
-	return s.failCIRunRequest(ctx, request, ciRunFailureFromError(err))
+	return s.handleCIRunPreflightError(ctx, request, err)
 }
 
 func sameRepositoryPR(pr *PR, binding *ciRunBinding) bool {
@@ -623,13 +652,17 @@ func (s *Service) resumeCIRunRequest(
 	if request.Status == CIRunRequestFailed {
 		return receiptFromCIRunRequest(request), &CIRunRequestError{Class: CIRunFailureClass(request.FailureClass)}
 	}
+	if request.ProviderRetryAfter != nil && s.ciRunClock()().UTC().Before(*request.ProviderRetryAfter) {
+		return receiptFromCIRunRequest(request), &CIRunRequestError{Class: CIRunFailureProviderRateLimited}
+	}
 	if request.ProviderCallStartedAt == nil {
 		return receiptFromCIRunRequest(request), nil
 	}
-	client, err := s.resolveCIRunClient(ctx, binding.WorkspaceID, binding.Owner, binding.Repo)
+	client, principal, err := s.resolveCIRunClient(ctx, binding.WorkspaceID, binding.Owner, binding.Repo)
 	if err != nil {
-		return nil, &CIRunRequestError{Class: ciRunFailureFromError(err)}
+		return receiptFromCIRunRequest(request), &CIRunRequestError{Class: ciRunFailureFromError(err)}
 	}
+	setCIRunProviderPrincipal(request, principal)
 	verified := &verifiedCIRun{Workflow: &GitHubActionsWorkflow{
 		ID: request.ProviderWorkflowID, Name: request.ProviderWorkflowName,
 		Path: request.ProviderWorkflowPath,
@@ -650,7 +683,7 @@ func (s *Service) reconcileCIRunRequest(
 	}
 	runs, err := client.ListActionsWorkflowRuns(ctx, binding.Owner, binding.Repo, workflowID, request.ExpectedHeadSHA)
 	if err != nil {
-		return receiptFromCIRunRequest(request), &CIRunRequestError{Class: ciRunFailureFromError(err)}
+		return s.handleCIRunReconciliationReadError(ctx, request, err)
 	}
 	var matched *GitHubActionsRun
 	for i := range runs {
@@ -671,7 +704,8 @@ func (s *Service) reconcileCIRunRequest(
 	request.Status = CIRunRequestReconciling
 	request.FailureClass = string(CIRunFailureProviderCallAmbiguous)
 	request.UpdatedAt = s.ciRunClock()().UTC()
-	if err := s.store.CompleteCIRunRequest(ctx, request); err != nil {
+	audit := s.newCIRunAuditEvent(request, "provider_ambiguous", CIRunFailureProviderCallAmbiguous)
+	if err := s.store.CompleteCIRunRequestWithAudit(ctx, request, audit); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return s.reloadCIRunResult(ctx, request)
 		}
@@ -717,9 +751,11 @@ func (s *Service) completeCIRunSuccess(
 	request.ProviderHeadRepo = verified.Run.HeadRepository
 	request.ProviderHeadRef = verified.Run.HeadBranch
 	request.ProviderHeadSHA = verified.Run.HeadSHA
+	request.ProviderEvent = verified.Run.Event
 	request.FailureClass = ""
 	request.UpdatedAt = s.ciRunClock()().UTC()
-	if err := s.store.CompleteCIRunRequest(ctx, request); err != nil {
+	audit := s.newCIRunAuditEvent(request, "succeeded", "")
+	if err := s.store.CompleteCIRunRequestWithAudit(ctx, request, audit); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return s.reloadCIRunResult(ctx, request)
 		}
@@ -728,9 +764,6 @@ func (s *Service) completeCIRunSuccess(
 	receipt := receiptFromCIRunRequest(request)
 	receipt.WorkflowName = verified.Workflow.Name
 	receipt.WorkflowPath = verified.Workflow.Path
-	if err := s.auditCIRun(ctx, request, "succeeded", ""); err != nil {
-		return receipt, err
-	}
 	return receipt, nil
 }
 
@@ -740,14 +773,12 @@ func (s *Service) failCIRunRequest(
 	request.Status = CIRunRequestFailed
 	request.FailureClass = string(class)
 	request.UpdatedAt = s.ciRunClock()().UTC()
-	if err := s.store.CompleteCIRunRequest(ctx, request); err != nil {
+	audit := s.newCIRunAuditEvent(request, "failed", class)
+	if err := s.store.CompleteCIRunRequestWithAudit(ctx, request, audit); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return s.reloadCIRunResult(ctx, request)
 		}
 		return nil, err
-	}
-	if err := s.auditCIRun(ctx, request, "failed", class); err != nil {
-		return receiptFromCIRunRequest(request), err
 	}
 	return receiptFromCIRunRequest(request), &CIRunRequestError{Class: class}
 }
@@ -763,13 +794,11 @@ func (s *Service) handleCIRunMutationError(
 		request.Status = CIRunRequestReconciling
 		request.FailureClass = string(class)
 		request.UpdatedAt = s.ciRunClock()().UTC()
-		if err := s.store.CompleteCIRunRequest(ctx, request); err != nil {
+		audit := s.newCIRunAuditEvent(request, "provider_ambiguous", class)
+		if err := s.store.CompleteCIRunRequestWithAudit(ctx, request, audit); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return s.reloadCIRunResult(ctx, request)
 			}
-			return nil, err
-		}
-		if err := s.auditCIRun(ctx, request, "provider_ambiguous", class); err != nil {
 			return nil, err
 		}
 		return receiptFromCIRunRequest(request), &CIRunRequestError{Class: class}
@@ -795,43 +824,4 @@ func (s *Service) reloadCIRunResult(
 		}
 	}
 	return receiptFromCIRunRequest(loaded), nil
-}
-
-func (s *Service) handleCIRunPreflightError(
-	ctx context.Context, request *CIRunRequest, err error,
-) (*CIRunReceipt, error) {
-	if ciRunFailureFromError(err) == CIRunFailureProviderRateLimited {
-		return s.deferCIRunForRateLimit(ctx, request, err)
-	}
-	return s.failCIRunRequest(ctx, request, ciRunFailureFromError(err))
-}
-
-func (s *Service) deferCIRunForRateLimit(
-	ctx context.Context, request *CIRunRequest, err error,
-) (*CIRunReceipt, error) {
-	now := s.ciRunClock()().UTC()
-	retryAfter := now.Add(ciRunDefaultRateLimitDelay)
-	var providerErr *CIRunProviderError
-	if errors.As(err, &providerErr) && providerErr.RetryAfter != nil && providerErr.RetryAfter.After(now) {
-		retryAfter = providerErr.RetryAfter.UTC()
-	}
-	if err := s.store.DeferCIRunForRateLimit(ctx, request, retryAfter, now); err != nil {
-		return nil, err
-	}
-	if err := s.auditCIRun(ctx, request, "provider_rate_limited", CIRunFailureProviderRateLimited); err != nil {
-		return nil, err
-	}
-	return receiptFromCIRunRequest(request), &CIRunRequestError{Class: CIRunFailureProviderRateLimited}
-}
-
-func ciRunFailureFromError(err error) CIRunFailureClass {
-	var requestErr *CIRunRequestError
-	if errors.As(err, &requestErr) {
-		return requestErr.Class
-	}
-	var providerErr *CIRunProviderError
-	if errors.As(err, &providerErr) {
-		return providerErr.Class
-	}
-	return CIRunFailureProviderUnavailable
 }

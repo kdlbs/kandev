@@ -16,7 +16,9 @@ time out after GitHub accepted them, making naive retry unsafe.
 
 Kandev owns a single purpose-built provider operation behind an authenticated
 server boundary. An administrator grants one coordinator task authority for
-one workspace, workflow, CI Fixup step, and task repository. Each request is
+one workspace, target task, workflow, CI Fixup step, and task repository. An
+exact-scope replacement atomically revokes the prior generation and creates the
+next one. Each request is
 then bound server-side to the calling session, current task and step, linked PR,
 canonical provider repository, exact unchanged head, trusted source run and
 attempt, and a closed evidence policy. The source must be a completed failed
@@ -31,19 +33,22 @@ workflow at the live PR ref must byte-match the trusted base-branch copy;
 fork dispatch and unverifiable `current_merge` evidence fail closed.
 
 Provider mutations use a durable two-key ledger: the caller idempotency key is
-unique in its actor/grant scope, while source run plus attempt is unique for the
+unique in its actor scope, while source run plus attempt is unique for the
 semantic operation. The row is committed before the provider call. Once the
 call is marked started, retries reconcile provider state rather than resending.
 Before that boundary, a short execution lease allows another caller to resume
 the same row after a worker crash; provider start is a compare-and-swap against
-the current lease owner. A definitive rate-limit response clears the start
-boundary and persists GitHub's reset time so the same row can retry only after
-that instant. Mutation timeouts, connection loss, and HTTP 5xx responses remain
-ambiguous and reconciliation-only.
+the current lease owner. A definitive rate-limit rejection before a mutation
+may have been accepted clears the start boundary and persists GitHub's reset
+time so the same row can retry only after that instant. A rate-limited read
+after provider start retains the marker and resumes read-only reconciliation
+after the reset. Mutation timeouts, connection loss, and HTTP 5xx responses
+remain ambiguous and reconciliation-only.
 Rerun reconciliation accepts only the exact next attempt; dispatch
 reconciliation accepts only one new first attempt created after the provider
 call began. Receipts and audit records contain only stable identities and
-classified error metadata.
+classified error metadata; terminal request state and its audit row commit in
+one transaction.
 
 ## Consequences
 

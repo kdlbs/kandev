@@ -57,6 +57,7 @@ type CIRunRequest struct {
 	WorkflowID            string             `json:"workflow_id" db:"workflow_id"`
 	WorkflowStepID        string             `json:"workflow_step_id" db:"workflow_step_id"`
 	RepositoryID          string             `json:"repository_id" db:"repository_id"`
+	CanonicalRepository   string             `json:"canonical_repository" db:"canonical_repository"`
 	PRNumber              int                `json:"pr_number" db:"pr_number"`
 	ExpectedHeadSHA       string             `json:"expected_head_sha" db:"expected_head_sha"`
 	SourceRunID           int64              `json:"source_run_id" db:"source_run_id"`
@@ -79,6 +80,11 @@ type CIRunRequest struct {
 	ProviderHeadRepo      string             `json:"provider_head_repo,omitempty" db:"provider_head_repo"`
 	ProviderHeadRef       string             `json:"provider_head_ref,omitempty" db:"provider_head_ref"`
 	ProviderHeadSHA       string             `json:"provider_head_sha,omitempty" db:"provider_head_sha"`
+	ObservedPRHeadSHA     string             `json:"observed_pr_head_sha,omitempty" db:"observed_pr_head_sha"`
+	ProviderEvent         string             `json:"provider_event,omitempty" db:"provider_event"`
+	ProviderPrincipalJSON string             `json:"-" db:"provider_principal_json"`
+	ProviderRequestID     string             `json:"provider_request_id,omitempty" db:"provider_request_id"`
+	ProviderURL           string             `json:"provider_url,omitempty" db:"provider_url"`
 	FailureClass          string             `json:"failure_class,omitempty" db:"failure_class"`
 	CreatedAt             time.Time          `json:"created_at" db:"created_at"`
 	UpdatedAt             time.Time          `json:"updated_at" db:"updated_at"`
@@ -94,27 +100,33 @@ type CIRunAuditEvent struct {
 }
 
 type CIRunReceipt struct {
-	RequestID       string             `json:"request_id"`
-	TaskID          string             `json:"task_id"`
-	RunID           int64              `json:"run_id"`
-	WorkflowID      int64              `json:"workflow_id"`
-	WorkflowName    string             `json:"workflow_name,omitempty"`
-	WorkflowPath    string             `json:"workflow_path,omitempty"`
-	HeadRepository  string             `json:"head_repository"`
-	HeadRef         string             `json:"head_ref"`
-	HeadSHA         string             `json:"head_sha"`
-	Attempt         int                `json:"attempt"`
-	Operation       CIRunOperation     `json:"operation"`
-	EvidenceKind    CIRunEvidenceKind  `json:"evidence_kind"`
-	Status          CIRunRequestStatus `json:"status"`
-	FailureClass    string             `json:"failure_class,omitempty"`
-	Repository      string             `json:"repository,omitempty"`
-	PRNumber        int                `json:"pr_number,omitempty"`
-	ExpectedHeadSHA string             `json:"expected_head_sha,omitempty"`
-	SourceRunID     int64              `json:"source_run_id,omitempty"`
-	SourceAttempt   int                `json:"source_attempt,omitempty"`
-	ProviderEvent   string             `json:"provider_event,omitempty"`
-	EvidenceVerdict string             `json:"evidence_verdict,omitempty"`
-	CreatedAt       time.Time          `json:"created_at"`
-	UpdatedAt       time.Time          `json:"updated_at"`
+	RequestID          string             `json:"request_id"`
+	TaskID             string             `json:"task_id"`
+	RunID              int64              `json:"run_id"`
+	WorkflowID         int64              `json:"workflow_id"`
+	WorkflowName       string             `json:"workflow_name,omitempty"`
+	WorkflowPath       string             `json:"workflow_path,omitempty"`
+	HeadRepository     string             `json:"head_repository"`
+	HeadRef            string             `json:"head_ref"`
+	HeadSHA            string             `json:"head_sha"`
+	Attempt            int                `json:"attempt"`
+	Operation          CIRunOperation     `json:"operation"`
+	EvidenceKind       CIRunEvidenceKind  `json:"evidence_kind"`
+	Status             CIRunRequestStatus `json:"status"`
+	FailureClass       string             `json:"failure_class,omitempty"`
+	IdempotencyStatus  string             `json:"idempotency_status,omitempty"`
+	ProviderRetryAfter *time.Time         `json:"provider_retry_after,omitempty"`
+	Repository         string             `json:"repository,omitempty"`
+	PRNumber           int                `json:"pr_number,omitempty"`
+	ExpectedHeadSHA    string             `json:"expected_head_sha,omitempty"`
+	SourceRunID        int64              `json:"source_run_id,omitempty"`
+	SourceAttempt      int                `json:"source_attempt,omitempty"`
+	ProviderEvent      string             `json:"provider_event,omitempty"`
+	ObservedPRHeadSHA  string             `json:"observed_pr_head_sha,omitempty"`
+	ProviderPrincipal  *AuthPrincipal     `json:"provider_principal,omitempty"`
+	ProviderRequestID  string             `json:"provider_request_id,omitempty"`
+	ProviderURL        string             `json:"provider_url,omitempty"`
+	EvidenceVerdict    string             `json:"evidence_verdict,omitempty"`
+	CreatedAt          time.Time          `json:"created_at"`
+	UpdatedAt          time.Time          `json:"updated_at"`
 }

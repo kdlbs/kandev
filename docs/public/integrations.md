@@ -270,9 +270,18 @@ Actions write does not give task agents a general Actions client. Kandev keeps
 the installation token server-side and exposes only the task-bound recovery
 operation described in [Automation and MCP](automation-and-mcp.md#request-a-fresh-ci-run-for-a-linked-pull-request).
 An existing App installation must approve the upgraded Actions permission
-before that operation can succeed. A missing permission is reported as
-`installation_permission_denied`; Kandev does not fall back to a PAT, GitHub
-CLI account, user token, or legacy shared credential.
+before that operation can succeed. A missing or unusable installation is
+reported as `installation_required`; an installation without Actions write is
+reported as `installation_permission_missing`. Kandev does not fall back to a
+PAT, GitHub CLI account, user token, or legacy shared credential.
+
+An authenticated workspace owner or administrator manages the capability at
+`/api/v1/github/ci-run-grants`. `POST` creates or atomically replaces the exact
+workspace, coordinator task, target task, workflow, CI Fixup step, and
+repository scope; `GET` lists grants for `workspace_id`; and
+`DELETE /api/v1/github/ci-run-grants/{grantId}?workspace_id={workspaceId}`
+revokes one.
+Task MCP cannot create, replace, list, or revoke these grants.
 
 Subscribe to `push` and `check_run`. GitHub sends `installation`, `installation_repositories`, and `github_app_authorization` lifecycle events automatically; they do not appear as selectable subscriptions. Kandev uses the lifecycle events to track installation suspension/deletion, repository access changes, and revoked personal authorizations. PR, issue, and review watches continue to poll and do not require their corresponding webhooks. GitHub's [registration guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app), [App permission reference](https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps), and [webhook guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/using-webhooks-with-github-apps) describe the provider-side settings.
 

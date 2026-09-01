@@ -10,51 +10,47 @@ import (
 )
 
 type fakeCIRunActionsClient struct {
-	mu              sync.Mutex
-	pr              *PR
-	prSequence      []*PR
-	prCalls         int
-	run             *GitHubActionsRun
-	runSequence     []*GitHubActionsRun
-	runCalls        int
-	workflow        *GitHubActionsWorkflow
-	workflowSource  []byte
-	workflowHead    []byte
-	workflowRefs    []string
-	workflowHook    func()
-	runHook         func(int)
-	listHook        func()
-	listErr         error
-	runs            []GitHubActionsRun
-	preDispatchRuns []GitHubActionsRun
-	rerunErr        error
-	dispatchErr     error
-	reruns          int
-	dispatches      int
-	dispatchRef     string
-	dispatchInputs  map[string]string
-}
-
-func TestValidateFreshCIRunInputRejectsNonHexHeadSHA(t *testing.T) {
-	input := RequestFreshCIRunInput{
-		ActorTaskID: "coordinator-1", ActorSessionID: "session-1", TargetTaskID: "target-1",
-		RepositoryID: "repository-1", PRNumber: 42, ExpectedHeadSHA: strings.Repeat("z", 40),
-		ExpectedWorkflowStepID: "ci-fixup", SourceRunID: 100, ExpectedSourceAttempt: 1,
-		EvidenceKind: CIRunEvidencePRHead, IdempotencyKey: "consumer-42-attempt-1",
-	}
-
-	if failure := validateFreshCIRunInput(input); failure != CIRunFailureTaskMismatch {
-		t.Fatalf("validateFreshCIRunInput() = %q, want %q", failure, CIRunFailureTaskMismatch)
-	}
+	mu               sync.Mutex
+	pr               *PR
+	prSequence       []*PR
+	prErrSequence    []error
+	prCalls          int
+	run              *GitHubActionsRun
+	runSequence      []*GitHubActionsRun
+	runCalls         int
+	workflow         *GitHubActionsWorkflow
+	workflowSource   []byte
+	workflowHead     []byte
+	workflowRefs     []string
+	workflowHook     func()
+	runHook          func(int)
+	listHook         func()
+	listErr          error
+	listErrSequence  []error
+	listCalls        int
+	runs             []GitHubActionsRun
+	preDispatchRuns  []GitHubActionsRun
+	rerunErr         error
+	dispatchErr      error
+	reruns           int
+	dispatches       int
+	dispatchRef      string
+	dispatchInputs   map[string]string
+	principal        TokenPrincipal
+	mutationMetadata GitHubRequestMetadata
 }
 
 func (f *fakeCIRunActionsClient) GetPR(context.Context, string, string, int) (*PR, error) {
 	f.prCalls++
+	if f.prCalls <= len(f.prErrSequence) && f.prErrSequence[f.prCalls-1] != nil {
+		return nil, f.prErrSequence[f.prCalls-1]
+	}
 	if f.prCalls <= len(f.prSequence) {
 		return f.prSequence[f.prCalls-1], nil
 	}
 	return f.pr, nil
 }
+
 func (f *fakeCIRunActionsClient) GetRepoFileContent(
 	_ context.Context, _, _, _, ref string,
 ) ([]byte, error) {
@@ -86,6 +82,14 @@ func (f *fakeCIRunActionsClient) RerunFailedActionsJobs(context.Context, string,
 	f.reruns++
 	return f.rerunErr
 }
+func (f *fakeCIRunActionsClient) RerunFailedActionsJobsWithMetadata(
+	context.Context, string, string, int64,
+) (GitHubRequestMetadata, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reruns++
+	return f.mutationMetadata, f.rerunErr
+}
 func (f *fakeCIRunActionsClient) DispatchActionsWorkflow(
 	_ context.Context, _, _ string, _ int64, ref string, inputs map[string]string,
 ) error {
@@ -96,11 +100,26 @@ func (f *fakeCIRunActionsClient) DispatchActionsWorkflow(
 	f.dispatchInputs = inputs
 	return f.dispatchErr
 }
+func (f *fakeCIRunActionsClient) DispatchActionsWorkflowWithMetadata(
+	_ context.Context, _, _ string, _ int64, ref string, inputs map[string]string,
+) (GitHubRequestMetadata, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dispatches++
+	f.dispatchRef = ref
+	f.dispatchInputs = inputs
+	return f.mutationMetadata, f.dispatchErr
+}
+func (f *fakeCIRunActionsClient) Principal() TokenPrincipal { return f.principal }
 func (f *fakeCIRunActionsClient) ListActionsWorkflowRuns(context.Context, string, string, int64, string) ([]GitHubActionsRun, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.listCalls++
 	if f.listHook != nil {
 		f.listHook()
+	}
+	if f.listCalls <= len(f.listErrSequence) && f.listErrSequence[f.listCalls-1] != nil {
+		return nil, f.listErrSequence[f.listCalls-1]
 	}
 	if f.listErr != nil {
 		return nil, f.listErr
@@ -647,7 +666,7 @@ func TestRequestFreshCIRunDeniesForkDispatchAndPreservesProviderClasses(t *testi
 	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
 	_, err := service.RequestFreshCIRun(context.Background(), input)
 	var ciErr *CIRunRequestError
-	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureDispatchDenied {
+	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureForkDispatchDisallowed {
 		t.Fatalf("fork fallback error = %#v", err)
 	}
 	if client.dispatches != 0 {
@@ -699,7 +718,7 @@ func TestRequestFreshCIRunIdempotencyIsActorScopedAcrossSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if receipt.Status != CIRunRequestSucceeded || client.reruns != 1 {
+	if receipt.Status != CIRunRequestSucceeded || receipt.IdempotencyStatus != "replayed" || client.reruns != 1 {
 		t.Fatalf("receipt = %+v, provider reruns = %d, want one", receipt, client.reruns)
 	}
 }

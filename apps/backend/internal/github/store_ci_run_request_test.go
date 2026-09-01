@@ -24,6 +24,8 @@ func TestStoreScopedCIRunSchema(t *testing.T) {
 			"provider_workflow_name", "provider_workflow_path",
 			"execution_owner", "execution_lease_expires_at", "provider_retry_after",
 			"provider_call_revision", "provider_run_watermark",
+			"canonical_repository", "observed_pr_head_sha", "provider_event",
+			"provider_principal_json", "provider_request_id", "provider_url",
 		},
 		"github_ci_run_audit_events": {
 			"request_id", "event_type", "failure_class", "details_json",

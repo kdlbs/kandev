@@ -52,7 +52,7 @@ runtime merge-SHA evidence; Kandev never fabricates a merge-ref check.
 ## Idempotency and races
 
 Every operation is durably claimed before the provider call. A caller key is
-unique within the actor/grant scope, and a second unique identity covers the
+unique within the actor scope, and a second unique identity covers the
 semantic source run attempt. Concurrent or retried claims return the same
 logical operation. Once `provider_call_started_at` is recorded, an interrupted
 or ambiguous call is reconciled from GitHub. It is never blindly sent again.
@@ -62,8 +62,10 @@ Recovery resumes that dispatch phase and does not submit the rejected rerun
 again.
 Before provider start, one execution lease owns the transition and an expired
 lease can be taken over after a worker crash. Provider start succeeds only for
-the current lease owner. A definitive rate-limit response records the reset
-time and makes the same row eligible again only after that time. Mutation
+the current lease owner. A definitive rate-limit response or reconciliation
+read records the reset time and makes the same row eligible again only after
+that time. A rate limit observed after provider start preserves that marker and
+resumes with read-only reconciliation. Mutation
 timeouts, connection loss, and HTTP 5xx responses remain ambiguous and may
 only reconcile.
 Rerun reconciliation accepts only the exact next attempt. Dispatch
@@ -74,25 +76,33 @@ ambiguous.
 
 ## Receipt and audit
 
-Success returns a non-secret receipt containing the Kandev request ID, task,
-provider run ID, workflow ID/name/path, provider head repository/ref/SHA,
-attempt, operation kind, and evidence kind. Failures expose stable classes such
-as `not_authorized`, `head_drift`, `source_run_mismatch`,
-`installation_permission_denied`, `provider_rate_limited`,
-`provider_unavailable`, `provider_call_ambiguous`, and
-`merge_evidence_unavailable`.
+Success returns a non-secret receipt containing the Kandev request and target
+task IDs, idempotency status, canonical repository and PR, expected and
+observed PR head, source run/attempt, result run/attempt, workflow ID/name/path,
+provider event and head repository/ref/SHA, operation and evidence verdict,
+App principal, provider request ID/URL, and timestamps. A typed failure returns
+the same durable receipt when a logical request exists. Failures expose stable
+classes such as `not_authorized`, `head_drift`, `source_run_mismatch`,
+`installation_required`, `installation_permission_missing`,
+`fork_dispatch_disallowed`, `dispatch_ref_unavailable`,
+`workflow_dispatch_denied`, `provider_rate_limited`, `provider_unavailable`,
+`provider_call_ambiguous`, and `merge_evidence_unavailable`.
 
 Audit rows record actor task/session, workspace, workflow/step, repository/PR,
-expected and observed head identities, source run/attempt, operation decision,
-provider receipt, failure class, timestamps, and idempotency hashes. They never
-contain tokens, App private keys, authorization headers, provider response
-bodies, or arbitrary caller input.
+expected and observed head identities, source and result run attempts,
+operation and evidence decisions, the non-secret App and provider request
+identities, failure class, and timestamps. A terminal request transition and
+its terminal audit row commit or roll back together. They never contain tokens,
+App private keys, authorization headers, provider response bodies, idempotency
+keys/hashes, or arbitrary caller input.
 
 ## Permissions
 
 Workspace administrators create and revoke exact grants through an authenticated
 server API. A grant identifies one coordinator task, workflow, allowed CI Fixup
-step, and task repository. Ordinary agents, sibling/child tasks, unrelated
+step, target task, and task repository. Replacing the same exact scope revokes
+the prior generation and inserts its monotonically increasing successor in one
+transaction. Ordinary agents, sibling/child tasks, unrelated
 coordinators, and other workspaces cannot use it.
 
 ## Acceptance fixtures

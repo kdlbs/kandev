@@ -12,15 +12,31 @@ import (
 
 const ciRunRequestColumns = `
 	id, grant_id, grant_generation, workspace_id, actor_task_id, actor_session_id, target_task_id,
-	workflow_id, workflow_step_id, repository_id, pr_number, expected_head_sha,
+	workflow_id, workflow_step_id, repository_id, canonical_repository, pr_number, expected_head_sha,
 	source_run_id, expected_source_attempt, evidence_kind, idempotency_hash,
 	status, execution_owner, execution_lease_expires_at, provider_retry_after,
 	operation, provider_call_started_at, provider_call_revision, provider_run_watermark, provider_run_id,
 	provider_workflow_id, provider_workflow_name, provider_workflow_path,
 	provider_attempt, provider_head_repo, provider_head_ref,
-	provider_head_sha, failure_class, created_at, updated_at`
+	provider_head_sha, observed_pr_head_sha, provider_event, provider_principal_json,
+	provider_request_id, provider_url, failure_class, created_at, updated_at`
 
 func (s *Store) UpsertCIRunGrant(ctx context.Context, grant *CIRunGrant) error {
+	if err := prepareCIRunGrant(grant); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		INSERT INTO github_ci_run_grants (
+			id, generation, workspace_id, actor_task_id, target_task_id, workflow_id,
+			workflow_step_id, repository_id, created_by_user_id, revoked_at, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		grant.ID, grant.Generation, grant.WorkspaceID, grant.ActorTaskID, grant.TargetTaskID, grant.WorkflowID,
+		grant.WorkflowStepID, grant.RepositoryID, grant.CreatedByUserID, grant.RevokedAt,
+		grant.CreatedAt, grant.UpdatedAt)
+	return err
+}
+
+func prepareCIRunGrant(grant *CIRunGrant) error {
 	if grant == nil || grant.ID == "" || grant.WorkspaceID == "" || grant.ActorTaskID == "" ||
 		grant.TargetTaskID == "" || grant.WorkflowID == "" || grant.WorkflowStepID == "" ||
 		grant.RepositoryID == "" || grant.CreatedByUserID == "" {
@@ -36,15 +52,47 @@ func (s *Store) UpsertCIRunGrant(ctx context.Context, grant *CIRunGrant) error {
 	if grant.Generation <= 0 {
 		grant.Generation = 1
 	}
-	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
-		INSERT INTO github_ci_run_grants (
-			id, generation, workspace_id, actor_task_id, target_task_id, workflow_id,
-			workflow_step_id, repository_id, created_by_user_id, revoked_at, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		grant.ID, grant.Generation, grant.WorkspaceID, grant.ActorTaskID, grant.TargetTaskID, grant.WorkflowID,
-		grant.WorkflowStepID, grant.RepositoryID, grant.CreatedByUserID, grant.RevokedAt,
-		grant.CreatedAt, grant.UpdatedAt)
-	return err
+	return nil
+}
+
+// ReplaceActiveCIRunGrant revokes the current exact-scope grant and inserts its
+// monotonically generated replacement in one transaction.
+func (s *Store) ReplaceActiveCIRunGrant(ctx context.Context, grant *CIRunGrant) error {
+	if err := prepareCIRunGrant(grant); err != nil {
+		return err
+	}
+	s.ciRunGrantMutationMu.Lock()
+	defer s.ciRunGrantMutationMu.Unlock()
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	scopeArgs := []any{grant.WorkspaceID, grant.ActorTaskID, grant.TargetTaskID,
+		grant.WorkflowID, grant.WorkflowStepID, grant.RepositoryID}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE github_ci_run_grants
+		SET revoked_at = ?, updated_at = ?
+		WHERE workspace_id = ? AND actor_task_id = ? AND target_task_id = ?
+			AND workflow_id = ? AND workflow_step_id = ? AND repository_id = ?
+			AND revoked_at IS NULL`), append([]any{grant.UpdatedAt, grant.UpdatedAt}, scopeArgs...)...); err != nil {
+		return err
+	}
+	if err := tx.GetContext(ctx, &grant.Generation, tx.Rebind(`SELECT COALESCE(MAX(generation), 0) + 1
+		FROM github_ci_run_grants
+		WHERE workspace_id = ? AND actor_task_id = ? AND target_task_id = ?
+			AND workflow_id = ? AND workflow_step_id = ? AND repository_id = ?`), scopeArgs...); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`INSERT INTO github_ci_run_grants (
+		id, generation, workspace_id, actor_task_id, target_task_id, workflow_id,
+		workflow_step_id, repository_id, created_by_user_id, revoked_at, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		grant.ID, grant.Generation, grant.WorkspaceID, grant.ActorTaskID, grant.TargetTaskID,
+		grant.WorkflowID, grant.WorkflowStepID, grant.RepositoryID, grant.CreatedByUserID,
+		grant.RevokedAt, grant.CreatedAt, grant.UpdatedAt); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) GetActiveCIRunGrant(
@@ -201,13 +249,14 @@ func allCIRunStringsPresent(values ...string) bool {
 func ciRunRequestArgs(r *CIRunRequest) []any {
 	return []any{
 		r.ID, r.GrantID, r.GrantGeneration, r.WorkspaceID, r.ActorTaskID, r.ActorSessionID, r.TargetTaskID,
-		r.WorkflowID, r.WorkflowStepID, r.RepositoryID, r.PRNumber, r.ExpectedHeadSHA,
+		r.WorkflowID, r.WorkflowStepID, r.RepositoryID, r.CanonicalRepository, r.PRNumber, r.ExpectedHeadSHA,
 		r.SourceRunID, r.ExpectedSourceAttempt, r.EvidenceKind, r.IdempotencyHash,
 		r.Status, r.ExecutionOwner, r.ExecutionLeaseExpires, r.ProviderRetryAfter,
 		r.Operation, r.ProviderCallStartedAt, r.ProviderCallRevision, r.ProviderRunWatermark,
 		r.ProviderRunID, r.ProviderWorkflowID,
 		r.ProviderWorkflowName, r.ProviderWorkflowPath, r.ProviderAttempt,
-		r.ProviderHeadRepo, r.ProviderHeadRef, r.ProviderHeadSHA,
+		r.ProviderHeadRepo, r.ProviderHeadRef, r.ProviderHeadSHA, r.ObservedPRHeadSHA,
+		r.ProviderEvent, r.ProviderPrincipalJSON, r.ProviderRequestID, r.ProviderURL,
 		r.FailureClass, r.CreatedAt, r.UpdatedAt,
 	}
 }
@@ -297,7 +346,9 @@ func (s *Store) MarkCIRunProviderCallStarted(
 			status = ?, operation = ?, failure_class = '', provider_retry_after = NULL,
 			provider_workflow_id = ?,
 			provider_workflow_name = ?, provider_workflow_path = ?, provider_head_repo = ?,
-			provider_head_ref = ?, provider_head_sha = ?, provider_run_watermark = ?, updated_at = ?
+			provider_head_ref = ?, provider_head_sha = ?, observed_pr_head_sha = ?,
+			provider_event = ?, provider_principal_json = ?, provider_request_id = ?,
+			provider_url = ?, provider_run_watermark = ?, updated_at = ?
 		WHERE id = ? AND execution_owner = ? AND status = ?
 			AND provider_call_started_at IS NULL AND provider_call_revision = ?
 			AND EXISTS (
@@ -318,7 +369,9 @@ func (s *Store) MarkCIRunProviderCallStarted(
 			)`),
 		at.UTC(), CIRunRequestReconciling, request.Operation, request.ProviderWorkflowID,
 		request.ProviderWorkflowName, request.ProviderWorkflowPath, request.ProviderHeadRepo,
-		request.ProviderHeadRef, request.ProviderHeadSHA, request.ProviderRunWatermark,
+		request.ProviderHeadRef, request.ProviderHeadSHA, request.ObservedPRHeadSHA,
+		request.ProviderEvent, request.ProviderPrincipalJSON, request.ProviderRequestID,
+		request.ProviderURL, request.ProviderRunWatermark,
 		at.UTC(), request.ID, request.ExecutionOwner, CIRunRequestPending,
 		request.ProviderCallRevision)
 	if err != nil {
@@ -347,10 +400,12 @@ func (s *Store) PrepareCIRunDispatchFallback(
 	result, err := s.db.ExecContext(ctx, s.db.Rebind(`UPDATE github_ci_run_requests
 		SET status = ?, operation = ?, provider_call_started_at = NULL,
 			provider_run_watermark = 0, failure_class = '', execution_owner = '',
-			execution_lease_expires_at = NULL, provider_retry_after = NULL, updated_at = ?
+			execution_lease_expires_at = NULL, provider_retry_after = NULL,
+			provider_request_id = ?, provider_url = ?, updated_at = ?
 		WHERE id = ? AND execution_owner = ? AND status = ? AND operation = ?
 			AND provider_call_started_at IS NOT NULL AND provider_call_revision = ?`),
-		CIRunRequestPending, CIRunOperationWorkflowDispatch, at, request.ID,
+		CIRunRequestPending, CIRunOperationWorkflowDispatch, request.ProviderRequestID,
+		request.ProviderURL, at, request.ID,
 		request.ExecutionOwner, CIRunRequestReconciling, CIRunOperationRerunFailedJobs,
 		request.ProviderCallRevision)
 	if err != nil {
@@ -386,9 +441,10 @@ func (s *Store) DeferCIRunForRateLimit(
 	result, err := s.db.ExecContext(ctx, s.db.Rebind(`UPDATE github_ci_run_requests
 		SET status = ?, provider_call_started_at = NULL, failure_class = ?,
 			execution_owner = '', execution_lease_expires_at = NULL,
-			provider_retry_after = ?, updated_at = ?
+			provider_retry_after = ?, provider_request_id = ?, provider_url = ?, updated_at = ?
 		WHERE id = ? AND execution_owner = ?`),
-		CIRunRequestPending, CIRunFailureProviderRateLimited, retryAfter, at,
+		CIRunRequestPending, CIRunFailureProviderRateLimited, retryAfter,
+		request.ProviderRequestID, request.ProviderURL, at,
 		request.ID, request.ExecutionOwner)
 	if err != nil {
 		return err
@@ -407,26 +463,100 @@ func (s *Store) DeferCIRunForRateLimit(
 	return nil
 }
 
+// DeferCIRunReconciliationForRateLimit preserves the provider-start marker so
+// recovery remains read-only while recording the retry boundary and audit row.
+func (s *Store) DeferCIRunReconciliationForRateLimit(
+	ctx context.Context,
+	request *CIRunRequest,
+	retryAfter time.Time,
+	at time.Time,
+	event *CIRunAuditEvent,
+) error {
+	if request == nil || request.ID == "" || request.ProviderCallStartedAt == nil ||
+		request.Operation == "" || event == nil || event.RequestID != request.ID {
+		return errors.New("complete CI run reconciliation retry identity is required")
+	}
+	if err := validateCIRunAuditDetails(event.DetailsJSON); err != nil {
+		return err
+	}
+	retryAfter = retryAfter.UTC()
+	at = at.UTC()
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE github_ci_run_requests
+		SET failure_class = ?, provider_retry_after = ?, provider_request_id = ?,
+			provider_url = ?, execution_owner = '', execution_lease_expires_at = NULL, updated_at = ?
+		WHERE id = ? AND status = ? AND operation = ? AND provider_call_revision = ?
+			AND provider_call_started_at IS NOT NULL`),
+		CIRunFailureProviderRateLimited, retryAfter, request.ProviderRequestID,
+		request.ProviderURL, at, request.ID, CIRunRequestReconciling,
+		request.Operation, request.ProviderCallRevision)
+	if err != nil {
+		return err
+	}
+	if err := requireOneAffectedRow(result); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`INSERT INTO github_ci_run_audit_events
+		(id, request_id, event_type, failure_class, details_json, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`), event.ID, event.RequestID, event.EventType,
+		event.FailureClass, event.DetailsJSON, event.CreatedAt); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	request.Status = CIRunRequestReconciling
+	request.FailureClass = string(CIRunFailureProviderRateLimited)
+	request.ExecutionOwner = ""
+	request.ExecutionLeaseExpires = nil
+	request.ProviderRetryAfter = &retryAfter
+	request.UpdatedAt = at
+	return nil
+}
+
 func (s *Store) CompleteCIRunRequest(ctx context.Context, request *CIRunRequest) error {
 	if request == nil || request.ID == "" {
 		return errors.New("CI run request is required")
+	}
+	query, args, err := completeCIRunRequestStatement(request)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(query), args...)
+	if err != nil {
+		return err
+	}
+	return requireOneAffectedRow(result)
+}
+
+func completeCIRunRequestStatement(request *CIRunRequest) (string, []any, error) {
+	if request == nil || request.ID == "" {
+		return "", nil, errors.New("CI run request is required")
 	}
 	query := `UPDATE github_ci_run_requests SET
 		status = ?, operation = ?, provider_run_id = ?, provider_workflow_id = ?,
 		provider_workflow_name = ?, provider_workflow_path = ?,
 		provider_attempt = ?, provider_head_repo = ?, provider_head_ref = ?,
-		provider_head_sha = ?, failure_class = ?, execution_owner = '',
+		provider_head_sha = ?, observed_pr_head_sha = ?, provider_event = ?,
+		provider_principal_json = ?, provider_request_id = ?, provider_url = ?,
+		failure_class = ?, execution_owner = '',
 		execution_lease_expires_at = NULL, provider_retry_after = NULL,
 		updated_at = ? WHERE id = ?`
 	args := []any{
 		request.Status, request.Operation, request.ProviderRunID, request.ProviderWorkflowID,
 		request.ProviderWorkflowName, request.ProviderWorkflowPath, request.ProviderAttempt,
 		request.ProviderHeadRepo, request.ProviderHeadRef,
-		request.ProviderHeadSHA, request.FailureClass, request.UpdatedAt, request.ID,
+		request.ProviderHeadSHA, request.ObservedPRHeadSHA, request.ProviderEvent,
+		request.ProviderPrincipalJSON, request.ProviderRequestID, request.ProviderURL,
+		request.FailureClass, request.UpdatedAt, request.ID,
 	}
 	if request.ProviderCallStartedAt == nil {
 		if request.ExecutionOwner == "" {
-			return errors.New("pre-provider completion owner is required")
+			return "", nil, errors.New("pre-provider completion owner is required")
 		}
 		query += ` AND status = ? AND execution_owner = ? AND provider_call_started_at IS NULL`
 		args = append(args, CIRunRequestPending, request.ExecutionOwner)
@@ -434,15 +564,52 @@ func (s *Store) CompleteCIRunRequest(ctx context.Context, request *CIRunRequest)
 		query += ` AND status = ? AND operation = ? AND provider_call_revision = ?`
 		args = append(args, CIRunRequestReconciling, request.Operation, request.ProviderCallRevision)
 	}
-	result, err := s.db.ExecContext(ctx, s.db.Rebind(query), args...)
-	if err != nil {
-		return err
-	}
+	return query, args, nil
+}
+
+func requireOneAffectedRow(result sql.Result) error {
 	affected, _ := result.RowsAffected()
 	if affected != 1 {
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+// CompleteCIRunRequestWithAudit commits a guarded request transition and its
+// matching terminal audit event together.
+func (s *Store) CompleteCIRunRequestWithAudit(
+	ctx context.Context, request *CIRunRequest, event *CIRunAuditEvent,
+) error {
+	if event == nil || request == nil || event.RequestID != request.ID ||
+		event.ID == "" || event.EventType == "" {
+		return errors.New("complete CI run terminal audit identity is required")
+	}
+	if err := validateCIRunAuditDetails(event.DetailsJSON); err != nil {
+		return err
+	}
+	query, args, err := completeCIRunRequestStatement(request)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, tx.Rebind(query), args...)
+	if err != nil {
+		return err
+	}
+	if err := requireOneAffectedRow(result); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`INSERT INTO github_ci_run_audit_events
+		(id, request_id, event_type, failure_class, details_json, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`), event.ID, event.RequestID, event.EventType,
+		event.FailureClass, event.DetailsJSON, event.CreatedAt); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) AppendCIRunAuditEvent(ctx context.Context, event *CIRunAuditEvent) error {

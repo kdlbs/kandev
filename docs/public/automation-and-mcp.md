@@ -591,19 +591,29 @@ GitHub's REST run record does not expose enough runtime merge-SHA evidence to
 prove that semantic safely. Kandev does not synthesize a check or relabel an old
 run. Other stable failures include `not_authorized`, `head_drift`,
 `source_run_mismatch`, `workflow_dispatch_denied`,
-`installation_permission_denied`, `provider_rate_limited`,
-`provider_unavailable`, and `provider_call_ambiguous`.
+`fork_dispatch_disallowed`, `dispatch_ref_unavailable`,
+`installation_required`, `installation_permission_missing`,
+`provider_rate_limited`, `provider_unavailable`, and
+`provider_call_ambiguous`.
 
 Each logical request is durably claimed before the provider mutation. Repeated
-or concurrent calls reuse the same receipt. A worker crash before provider
+or concurrent calls reuse the same receipt and report whether it was created,
+replayed, or coalesced. A worker crash before provider
 start can be taken over after its short execution lease expires. After provider
 start, timeouts, connection loss, and HTTP 5xx responses are reconciled from
 GitHub rather than blindly sent again. A definitive rate-limit response records
-GitHub's reset time and retries the same request only after that time. When
+GitHub's reset time and retries the same request only after that time. If a
+reconciliation read is rate-limited after the write may have happened, Kandev
+keeps the provider-start marker and performs only read-only reconciliation
+after the reset. When
 GitHub definitively rejects a rerun as ineligible, Kandev persists the fallback
 dispatch phase first; crash recovery resumes that phase without rerunning the
-rejected attempt. Receipts and audit events contain task/run/workflow/head
-identities and a failure class. A rerun
+rejected attempt. Receipts contain the canonical repository and PR, expected
+and observed PR head, source and result run attempts, workflow and provider
+head/event identities, evidence verdict, non-secret App principal, provider
+request ID/URL, retry reset, and timestamps. Typed errors include the same
+durable receipt when admission created a logical request. Audit events record
+the same identities and terminal state atomically with the request. A rerun
 receipt is successful only after Kandev observes the exact next attempt. A
 dispatch receipt is successful only after Kandev observes exactly one new run
 created after the provider call began and newer than the run-ID watermark

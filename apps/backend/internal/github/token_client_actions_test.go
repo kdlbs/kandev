@@ -112,6 +112,26 @@ func TestTokenClientActionsWritesUseClosedProviderInputs(t *testing.T) {
 	}
 }
 
+func TestTokenClientActionsWriteMetadataCarriesProviderRequestIdentity(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-GitHub-Request-Id", "github-request-1")
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+	client := newPATClientPointingAt(t, server.URL)
+
+	metadata, err := client.RerunFailedActionsJobsWithMetadata(
+		context.Background(), "kdlbs", "kandev", 100,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadata.RequestID != "github-request-1" ||
+		metadata.URL != githubAPIBase+"/repos/kdlbs/kandev/actions/runs/100/rerun-failed-jobs" {
+		t.Fatalf("metadata = %+v", metadata)
+	}
+}
+
 func TestTokenClientActionsProviderFailureClassesAreRedacted(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -121,7 +141,7 @@ func TestTokenClientActionsProviderFailureClassesAreRedacted(t *testing.T) {
 		wantRetry bool
 	}{
 		{name: "rerun ineligible", status: 422, body: `{"message":"This workflow run cannot be rerun"}`, want: CIRunFailureRerunIneligible},
-		{name: "permission", status: 403, body: `{"message":"Must have admin rights to Repository token-secret"}`, want: CIRunFailureInstallationPermission},
+		{name: "permission missing", status: 403, body: `{"message":"Must have admin rights to Repository token-secret"}`, want: CIRunFailureInstallationPermission},
 		{name: "rate limit", status: 429, body: `{"message":"rate limit exceeded"}`, want: CIRunFailureProviderRateLimited, wantRetry: true},
 		{name: "ambiguous mutation outage", status: 503, body: `private provider outage token-secret`, want: CIRunFailureProviderCallAmbiguous},
 	}

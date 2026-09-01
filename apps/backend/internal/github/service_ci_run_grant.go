@@ -35,22 +35,13 @@ func (s *Service) CreateCIRunGrant(
 		return nil, err
 	}
 	now := s.ciRunClock()().UTC()
-	generation := int64(1)
-	if previous, lookupErr := s.store.GetActiveCIRunGrant(ctx, input.WorkspaceID, input.ActorTaskID, input.TargetTaskID, input.WorkflowID, input.WorkflowStepID, input.RepositoryID); lookupErr != nil {
-		return nil, lookupErr
-	} else if previous != nil {
-		generation = previous.Generation + 1
-		if err := s.store.RevokeCIRunGrant(ctx, input.WorkspaceID, previous.ID, now); err != nil {
-			return nil, err
-		}
-	}
 	grant := &CIRunGrant{
-		ID: uuid.NewString(), Generation: generation, WorkspaceID: input.WorkspaceID, ActorTaskID: input.ActorTaskID,
+		ID: uuid.NewString(), WorkspaceID: input.WorkspaceID, ActorTaskID: input.ActorTaskID,
 		TargetTaskID: input.TargetTaskID, WorkflowID: input.WorkflowID,
 		WorkflowStepID: input.WorkflowStepID, RepositoryID: input.RepositoryID,
 		CreatedByUserID: userID, CreatedAt: now, UpdatedAt: now,
 	}
-	if err := s.store.UpsertCIRunGrant(ctx, grant); err != nil {
+	if err := s.store.ReplaceActiveCIRunGrant(ctx, grant); err != nil {
 		return nil, err
 	}
 	return grant, nil

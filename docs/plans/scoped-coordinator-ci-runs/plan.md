@@ -26,6 +26,9 @@ service, and MCP composition/documentation.
    injects caller task/session identity. Wire it into backend composition.
 5. Update public docs and coverage, run focused packages with `-race`, lint the
    touched backend packages, then commit the reviewed implementation.
+6. Remediate review findings for atomic grant replacement, atomic terminal
+   audit persistence, provider-read classification, and complete non-secret
+   receipt/audit identity.
 
 ## Verification
 
@@ -36,3 +39,16 @@ service, and MCP composition/documentation.
 No submodule changes or long-running runtime are required. Live consumer PRs
 are deliberately excluded from Work verification and remain queued for a
 reviewed rollout.
+
+## Results
+
+- Exact-scope grant replacement now revokes and increments its generation in
+  one transaction, including concurrent replacement and rollback coverage.
+- Terminal request/audit persistence is atomic. Provider read and mutation
+  errors preserve rate-reset, request, URL, and non-secret App principal
+  identities without reopening a possibly sent mutation.
+- MCP success and typed failure responses return the durable repository, PR,
+  head, source/result run, workflow, event, evidence, idempotency, provider,
+  and timing receipt.
+- Normal and race-focused backend suites, full backend lint, specification
+  lint, and all public documentation validators pass.

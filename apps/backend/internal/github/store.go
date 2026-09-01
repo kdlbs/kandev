@@ -24,6 +24,7 @@ type Store struct {
 	ro                         *sqlx.DB // reader
 	freshInstall               bool
 	deploymentAppPersistenceMu sync.Mutex
+	ciRunGrantMutationMu       sync.Mutex
 	appLifecycleLocksMu        sync.Mutex
 	appLifecycleLocks          map[string]*appRegistrationLifecycleLock
 }
@@ -468,6 +469,7 @@ const ciRunTablesSQL = `
 		workflow_id TEXT NOT NULL,
 		workflow_step_id TEXT NOT NULL,
 		repository_id TEXT NOT NULL,
+		canonical_repository TEXT NOT NULL DEFAULT '',
 		pr_number INTEGER NOT NULL,
 		expected_head_sha TEXT NOT NULL,
 		source_run_id BIGINT NOT NULL,
@@ -490,6 +492,11 @@ const ciRunTablesSQL = `
 		provider_head_repo TEXT NOT NULL DEFAULT '',
 		provider_head_ref TEXT NOT NULL DEFAULT '',
 		provider_head_sha TEXT NOT NULL DEFAULT '',
+		observed_pr_head_sha TEXT NOT NULL DEFAULT '',
+		provider_event TEXT NOT NULL DEFAULT '',
+		provider_principal_json TEXT NOT NULL DEFAULT '',
+		provider_request_id TEXT NOT NULL DEFAULT '',
+		provider_url TEXT NOT NULL DEFAULT '',
 		failure_class TEXT NOT NULL DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
@@ -728,6 +735,12 @@ var ciRunRecoveryColumnDDL = []struct {
 	{"provider_retry_after", "DATETIME"},
 	{"provider_call_revision", "BIGINT NOT NULL DEFAULT 0"},
 	{"provider_run_watermark", "BIGINT NOT NULL DEFAULT 0"},
+	{"canonical_repository", "TEXT NOT NULL DEFAULT ''"},
+	{"observed_pr_head_sha", "TEXT NOT NULL DEFAULT ''"},
+	{"provider_event", "TEXT NOT NULL DEFAULT ''"},
+	{"provider_principal_json", "TEXT NOT NULL DEFAULT ''"},
+	{"provider_request_id", "TEXT NOT NULL DEFAULT ''"},
+	{"provider_url", "TEXT NOT NULL DEFAULT ''"},
 }
 
 func (s *Store) addCIRunRecoveryColumns() error {
