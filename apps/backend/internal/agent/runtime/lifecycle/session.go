@@ -56,7 +56,7 @@ type SessionManager struct {
 	streamManager        *StreamManager
 	executionStore       *ExecutionStore
 	promptStarter        func(executionID string) (uint64, error)
-	initialPromptFailure func(executionID string)
+	initialPromptFailure func(failure InitialPromptFailure)
 	historyManager       *SessionHistoryManager
 	attachmentReader     AttachmentReader
 	stopCh               <-chan struct{} // For graceful shutdown coordination
@@ -70,6 +70,21 @@ type SessionManager struct {
 	// predecessor in the admitted-but-undispatched window so a racing steer's
 	// ordering can be observed deterministically.
 	beforePromptDispatchHook func()
+}
+
+// InitialPromptFailure captures the immutable prompt identity at the point
+// where initial delivery fails, before a successor can begin.
+type InitialPromptFailure struct {
+	ExecutionID      string
+	SessionID        string
+	PromptGeneration uint64
+	TurnID           string
+	Err              error
+}
+
+type sendPromptCallbacks struct {
+	onDispatched func()
+	onFailure    func(InitialPromptFailure)
 }
 
 // NewSessionManager creates a new SessionManager
@@ -99,7 +114,7 @@ func (sm *SessionManager) SetPromptStarter(starter func(executionID string) (uin
 	sm.promptStarter = starter
 }
 
-func (sm *SessionManager) SetInitialPromptFailureHandler(handler func(executionID string)) {
+func (sm *SessionManager) SetInitialPromptFailureHandler(handler func(failure InitialPromptFailure)) {
 	sm.initialPromptFailure = handler
 }
 
@@ -917,7 +932,16 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 		go func() {
 			promptCtx, cancel := appctx.Detached(ctx, sm.stopCh, 0)
 			defer cancel()
-			_, err := sm.SendPrompt(promptCtx, execution, effectivePrompt, false, acpAttachments, false)
+			_, err := sm.sendPrompt(
+				promptCtx,
+				execution,
+				effectivePrompt,
+				false,
+				acpAttachments,
+				false,
+				sendPromptCallbacks{onFailure: sm.initialPromptFailure},
+				false,
+			)
 			if err != nil {
 				// During graceful shutdown the agent subprocess is terminated,
 				// so an in-flight initial prompt fails with a transport death
@@ -932,9 +956,6 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 					sm.logger.Error("initial prompt failed",
 						zap.String("execution_id", execution.ID),
 						zap.Error(err))
-				}
-				if sm.initialPromptFailure != nil {
-					sm.initialPromptFailure(execution.ID)
 				}
 			}
 		}()
@@ -1147,7 +1168,7 @@ func (sm *SessionManager) SendPrompt(
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
 ) (*PromptResult, error) {
-	return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, dispatchOnly, nil, false)
+	return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, dispatchOnly, sendPromptCallbacks{}, false)
 }
 
 // SendPromptWithDispatchCallback reports the point at which agentctl accepted
@@ -1161,7 +1182,16 @@ func (sm *SessionManager) SendPromptWithDispatchCallback(
 	dispatchOnly bool,
 	onDispatched func(),
 ) (*PromptResult, error) {
-	return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, dispatchOnly, onDispatched, false)
+	return sm.sendPrompt(
+		ctx,
+		execution,
+		prompt,
+		validateStatus,
+		attachments,
+		dispatchOnly,
+		sendPromptCallbacks{onDispatched: onDispatched},
+		false,
+	)
 }
 
 // activePromptGeneration returns the dispatched, in-flight prompt generation a
@@ -1238,7 +1268,16 @@ func (sm *SessionManager) SendPromptSteerWithDispatchCallback(
 		return nil, err
 	}
 	if !steered {
-		return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, dispatchOnly, onDispatched, false)
+		return sm.sendPrompt(
+			ctx,
+			execution,
+			prompt,
+			validateStatus,
+			attachments,
+			dispatchOnly,
+			sendPromptCallbacks{onDispatched: onDispatched},
+			false,
+		)
 	}
 	if onDispatched != nil {
 		onDispatched()
@@ -1357,13 +1396,15 @@ func (sm *SessionManager) sendPrompt(
 	validateStatus bool,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	onDispatched func(),
+	callbacks sendPromptCallbacks,
 	steer bool,
 ) (*PromptResult, error) {
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	releaseClient()
 	if client == nil {
-		return nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
+		err := fmt.Errorf("execution %q has no agentctl client", execution.ID)
+		sm.reportPromptFailure(execution, 0, err, callbacks.onFailure)
+		return nil, err
 	}
 
 	// Agentctl acknowledges prompt dispatch before the adapter's session/prompt
@@ -1398,22 +1439,53 @@ func (sm *SessionManager) sendPrompt(
 
 	preparedCtx, effectivePrompt, promptGeneration, err := sm.preparePrompt(ctx, execution, prompt, validateStatus, attachments)
 	if err != nil {
+		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
 		return nil, err
 	}
 	materializedAttachments, err := sm.materializeAttachments(preparedCtx, execution, attachments)
 	if err != nil {
+		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
 		return nil, err
 	}
 	if sm.beforePromptDispatchHook != nil {
 		sm.beforePromptDispatchHook()
 	}
 	if err := sm.triggerPrompt(preparedCtx, execution, effectivePrompt, materializedAttachments, promptGeneration, steer); err != nil {
+		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
 		return nil, err
 	}
 	// The generation is now accepted by agentctl and in flight, so a concurrent
 	// steer may reuse it. (The steer path never marks — it reuses, not owns.)
 	sm.markPromptDispatched(execution, promptGeneration)
-	return sm.finishAcceptedPrompt(preparedCtx, execution, dispatchOnly, onDispatched, promptGeneration)
+	result, err := sm.finishAcceptedPrompt(
+		preparedCtx,
+		execution,
+		dispatchOnly,
+		callbacks.onDispatched,
+		promptGeneration,
+	)
+	if err != nil {
+		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
+	}
+	return result, err
+}
+
+func (sm *SessionManager) reportPromptFailure(
+	execution *AgentExecution,
+	promptGeneration uint64,
+	err error,
+	handler func(InitialPromptFailure),
+) {
+	if handler == nil {
+		return
+	}
+	handler(InitialPromptFailure{
+		ExecutionID:      execution.ID,
+		SessionID:        execution.SessionID,
+		PromptGeneration: promptGeneration,
+		TurnID:           execution.promptTurnIDSnapshot(),
+		Err:              err,
+	})
 }
 
 // materializeAttachments resolves claimed backend descriptors into the active

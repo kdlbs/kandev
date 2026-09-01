@@ -16,8 +16,9 @@ also defines visible recovery errors and explicit continuation after confirmed
 Git branch loss.
 
 The orchestrator owns recovery authorization, session identity, and warning
-persistence. The worktree manager owns branch verification and fresh branch
-creation. The web client owns error presentation and recovery choices.
+persistence. The agent lifecycle manager owns balanced preparation progress and
+completion publication. The worktree manager owns branch verification and fresh
+branch creation. The web client owns error presentation and recovery choices.
 
 The task environment remains the owner of worktrees. A task session refers to
 that environment and does not acquire its own worktree lifecycle.
@@ -26,7 +27,7 @@ that environment and does not acquire its own worktree lifecycle.
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001` | [Session identity](#session-identity) |
+| `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001` | [Session identity](#session-identity), [Resume preparation lifecycle](#resume-preparation-lifecycle) |
 | `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002` | [Visible recovery errors](#visible-recovery-errors) |
 | `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003` | [Explicit branch replacement](#explicit-branch-replacement), [Warning persistence](#warning-persistence) |
 
@@ -56,6 +57,31 @@ branch deletion.
 The web client currently converts WebSocket failures to a plain `Error` and
 several resume call sites then discard that error. Automatic resume also hides
 the resume error when read-only workspace restore succeeds.
+
+## Resume preparation lifecycle
+
+Native ACP resume normally reuses an already prepared workspace. A worktree
+resume is different: `shouldPrepareEnvironment` can re-enter environment and
+runtime preparation so Git recovery can validate, recreate, or replace the
+task-owned worktree.
+
+Preparation event publication follows one balanced lifecycle. If a launch path
+can publish `executor.prepare.progress`, it publishes exactly one terminal
+`executor.prepare.completed` event for that attempt after environment and
+runtime preparation succeeds or fails. The presence of an ACP session ID can
+skip both event kinds when no preparation runs; it cannot suppress only the
+terminal event after a worktree resume has emitted progress.
+
+The web preparation handler projects progress as `preparing` and the terminal
+event as `completed` or `failed`. `useSessionState` can treat live preparation
+as working while the durable session is temporarily `STARTING` or
+`WAITING_FOR_INPUT`, but that derived state ends with the terminal event. A
+resumed session that settles at `WAITING_FOR_INPUT` without foreground or
+detached activity therefore renders as idle and keeps the composer available.
+
+Session snapshots remain recovery evidence, not a substitute for balancing the
+live stream. They can hydrate a missing preparation projection, while a live
+in-flight projection remains authoritative until its matching terminal event.
 
 ## Recovery protocol
 
@@ -246,6 +272,9 @@ not translated strings. User-facing copy does not use a Unicode em dash.
 
 Backend tests start with the current failure:
 
+- An ACP worktree resume that publishes preparation progress also publishes one
+  terminal completion event. An ACP resume that skips preparation publishes
+  neither event.
 - Normal resume returns an error that matches `ErrBranchUnrecoverable` and does
   not mutate the branch.
 - Explicit replacement keeps the session and resume token, creates a unique

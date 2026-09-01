@@ -2,6 +2,7 @@
 status: active
 system: agents
 created: 2026-07-27
+updated: 2026-09-01
 owners:
   - Kandev
 ---
@@ -27,6 +28,7 @@ Preserve the observable behavior documented for Agent Resume and Runtime Recover
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.6:** A completed turn remains represented by the task's review state while its persisted response and session lifecycle state settle. After a backend restart and automatic resume, the prior transcript remains visible and the task returns to the Turn Finished review bucket once the session is again `WAITING_FOR_INPUT`; it does not settle in Backlog or Running.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.7:** The explicit managed-runtime update path may invalidate only the deterministic `_npx` execution directory for the selected built-in package after an initial update failure, then retry once and run the normal ACP capability probe.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.8:** **GIVEN** a valid OpenCode resume token, **WHEN** the OpenCode child exits before answering ACP `initialize`, **THEN** Kandev shows the normal recovery action and retains the same token for the next Resume attempt.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.9:** When a resumed session re-enters workspace preparation, Kandev shall publish a terminal preparation result after preparation finishes. A session that has returned to `WAITING_FOR_INPUT` without detached activity shall not remain visibly preparing or appear to have background work.
 
 ### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002: Visible resume failure feedback
 
@@ -113,6 +115,9 @@ without repairing it.
 - A confirmed missing branch offers explicit continuation on a new branch from
   the task base branch. The same conversation continues, but lost code does
   not return.
+- A resumed session that performs workspace preparation leaves the preparing
+  state when preparation finishes. An idle resumed session does not display
+  background activity that is not running.
 
 ## Persistence and security constraints
 
@@ -205,6 +210,10 @@ without repairing it.
 - **GIVEN** replacement materializes before provider startup or readiness fails,
   **WHEN** the resume attempt reaches a terminal path, **THEN** one warning is
   persisted or remains retryable without changing the session identity.
+- **GIVEN** an ACP worktree resume emits workspace preparation progress,
+  **WHEN** preparation and agent reconnection finish successfully, **THEN** the
+  preparation state becomes terminal and the idle chat shows neither
+  **Preparing workspace** nor **Background work is running**.
 
 ## Out of scope
 

@@ -128,6 +128,7 @@ signals, and task-scoped scheduling contracts.
 - [Passthrough Queued Prompt Dispatch](system-design/passthrough-queued-prompt-dispatch.md)
 - [Saved Prompt Delivery](system-design/saved-prompt-delivery.md)
 - [Passthrough Initial Prompt Turn Boundary](system-design/passthrough-initial-prompt-turn-boundary.md)
+- [Prompt attachments](system-design/prompt-attachments.md)
 - [Task Archive Confirmation](system-design/archive-confirmation.md)
 - [Task plan write consistency](system-design/plan-write-consistency.md)
 - [Task plan write lifecycle](system-design/plan-write-lifecycle.md)

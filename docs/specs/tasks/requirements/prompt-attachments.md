@@ -2,6 +2,7 @@
 status: draft
 system: tasks
 created: 2026-08-04
+updated: 2026-09-01
 owners:
   - Kandev team
 ---
@@ -20,6 +21,18 @@ This document is the migrated task-system source for the capability. The source 
 #### Acceptance criteria
 
 - **AC-TASKS-PROMPT-ATTACHMENTS-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.2:** When a session launch references
+  valid staged attachments, the system shall claim them for the authorized task
+  before it starts the agent or creates the prompt turn.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.3:** When a session launch references an
+  expired, unauthorized, missing, or conflicting attachment, the system shall
+  reject the launch without starting the agent or creating a prompt turn.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.4:** When a task-scoped attachment claim
+  reaches a later launch for the same task, the system shall accept that claim
+  without weakening cross-task or cross-session isolation.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.5:** When attachment materialization fails
+  before the initial prompt reaches the agent, the system shall show a durable
+  launch error and shall not present the session as active work.
 
 ## Migrated source detail
 
