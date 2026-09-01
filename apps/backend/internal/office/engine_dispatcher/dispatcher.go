@@ -455,8 +455,9 @@ func isActiveSessionState(state taskmodels.TaskSessionState) bool {
 // fields, so with several live sessions per task "newest" no longer names a
 // specific agent's session. That is latent, not live: none of the three is
 // read by the guard-evaluation path today (Data is written by
-// set_workflow_data through SetSessionMetadataKey and never read back), so
-// which session is chosen is unobservable today.
+// set_workflow_data through SetSessionMetadataKey and read back into
+// MachineState.Data on every state assembly, but never consumed by guard
+// evaluation), so which session is chosen is unobservable today.
 //
 // The first caller that genuinely needs per-session state must session-scope
 // its own call — pass the deciding session explicitly, as RecordDecision now

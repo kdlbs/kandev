@@ -555,20 +555,21 @@ func (s *sessionScopedStateStore) MarkOperationApplied(_ context.Context, op str
 // features.officeSessionIdentity gives each participant agent its own
 // session per task and a task therefore has SEVERAL live sessions.
 //
-// Today EvaluateStepQuorum reads only CurrentStepID and WorkflowID off the
-// loaded MachineState, and both are task-derived, so which session the
-// resolver happens to pick cannot change the answer. MachineState.Data is
-// the one genuinely per-session field, and nothing in internal/workflow/
-// reads it.
+// Today EvaluateStepQuorum's guard evaluation reads TaskID, CurrentStepID
+// and WorkflowID off the loaded MachineState, all task-derived, so which
+// session the resolver happens to pick cannot change the answer. SessionID,
+// SessionState and Data are the session-derived fields, and none of them is
+// read by guard evaluation.
 //
-// If a guard ever starts reading Data, that stops being true silently: the
-// resolver would hand the engine whichever agent's bag happened to be
-// newest, and a decision could be evaluated against another agent's state
-// with nothing failing. This test makes that regression loud. The fix at
-// that point is to session-scope the CALL SITE — pass the deciding session,
-// as RecordDecision does via resolveDeciderSessionID — not to add a
-// defensive check inside the task-scoped resolver, which would only make a
-// wrong-scoped read look safe.
+// If a guard ever starts reading SessionID, SessionState or Data, that
+// stops being true silently: the resolver would hand the engine whichever
+// agent's state happened to be newest, and a decision could be evaluated
+// against another agent's state with nothing failing. This test makes that
+// regression loud. The fix at that point is to session-scope the CALL SITE
+// — pass the deciding session, as RecordDecision does via
+// resolveDeciderSessionID — not to add a defensive check inside the
+// task-scoped resolver, which would only make a wrong-scoped read look
+// safe.
 func TestEvaluateStepQuorum_InsensitiveToWhichLiveSessionIsNewest(t *testing.T) {
 	newStore := func() *sessionScopedStateStore {
 		return &sessionScopedStateStore{
