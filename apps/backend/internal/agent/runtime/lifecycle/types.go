@@ -128,6 +128,9 @@ type AgentExecution struct {
 	passthroughLifecycleMu sync.Mutex
 	PassthroughProcessID   string    // Process ID in the interactive runner (empty if not in passthrough mode)
 	PassthroughStartedAt   time.Time // When the current passthrough process was launched; used to detect fast-fail exits and skip auto-restart loops
+	// passthroughInitialPromptProcessID identifies the fresh PTY process that
+	// still needs its initial task prompt through stdin.
+	passthroughInitialPromptProcessID string
 	// passthroughLaunchUsedResume is true if the current passthrough process was
 	// launched via ResumePassthroughSession with the resume flag attached. The
 	// fast-fail handler reads this to decide whether to retry once with a fresh

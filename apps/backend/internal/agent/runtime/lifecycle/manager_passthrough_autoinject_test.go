@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // fakePassthroughRunner is a minimal stub of the passthroughRunner seam used
@@ -113,8 +114,13 @@ func TestAutoInject_writes_without_auto_inject_flag(t *testing.T) {
 func TestAutoInject_skipped_when_PromptFlag_set(t *testing.T) {
 	mgr := newTestManager(t)
 	runner := &fakePassthroughRunner{}
+	execution := newAutoInjectExecution("do a thing")
+	execution.Status = v1.AgentStatusRunning
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
 
-	mgr.autoInjectInitialPromptWith(runner, newAutoInjectExecution("do a thing"), agents.PassthroughConfig{
+	mgr.autoInjectInitialPromptWith(runner, execution, agents.PassthroughConfig{
 		AutoInjectPrompt: true,
 		SubmitSequence:   "\r",
 		PromptFlag:       agents.NewParam("--prompt", "{prompt}"),
@@ -122,6 +128,11 @@ func TestAutoInject_skipped_when_PromptFlag_set(t *testing.T) {
 
 	if runner.writeCalled {
 		t.Fatalf("expected no stdin write when PromptFlag is set, got data=%q", runner.writtenData)
+	}
+
+	mgr.handlePassthroughTurnComplete(execution.SessionID, execution.PassthroughProcessID)
+	if execution.Status != v1.AgentStatusReady {
+		t.Fatalf("prompt-flag completion left status %q, want READY", execution.Status)
 	}
 }
 
@@ -165,11 +176,16 @@ func TestAutoInject_writes_description_plus_submit(t *testing.T) {
 func TestAutoInject_returns_when_wait_errors(t *testing.T) {
 	mgr := newTestManager(t)
 	runner := &fakePassthroughRunner{waitErr: context.DeadlineExceeded}
+	execution := newAutoInjectExecution("hello")
+	execution.Status = v1.AgentStatusRunning
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		mgr.autoInjectInitialPromptWith(runner, newAutoInjectExecution("hello"), agents.PassthroughConfig{
+		mgr.autoInjectInitialPromptWith(runner, execution, agents.PassthroughConfig{
 			AutoInjectPrompt: true,
 			SubmitSequence:   "\r",
 		})
@@ -183,6 +199,11 @@ func TestAutoInject_returns_when_wait_errors(t *testing.T) {
 
 	if runner.writeCalled {
 		t.Fatalf("expected no stdin write on wait timeout, got data=%q", runner.writtenData)
+	}
+
+	mgr.handlePassthroughTurnComplete(execution.SessionID, execution.PassthroughProcessID)
+	if execution.Status != v1.AgentStatusReady {
+		t.Fatalf("completion after aborted injection left status %q, want READY", execution.Status)
 	}
 }
 
