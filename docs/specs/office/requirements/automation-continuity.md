@@ -132,11 +132,12 @@ while preventing owner-wide access, self-targeting, and task-local questions.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-004.4:** Messages, stopping, spawning, and
   blocker discovery or resolution through `SurfaceAutomation` shall reject the
   automation's own hidden task and every session on it, as well as foreign
-  workspaces. Archiving is exempt from the self-target rejection: an
-  automation shall be able to archive its own hidden task, since that is its
-  normal end-of-run completion signal. Every other mutation on the
-  automation's own hidden task, and archiving of every other task and session
-  on it, remains rejected, as does any foreign-workspace target.
+  workspaces. Archiving shall be exempt from the self-target rejection so
+  that an automation can archive its own hidden task as its end-of-run
+  completion signal; a run bound to a specific target task shall still
+  archive only that bound target. Every other mutation on the automation's
+  own hidden task shall remain rejected, as shall any foreign-workspace
+  target.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-004.5:** A task spawned on another task
   shall receive that target task's normal profile and shall not inherit
   `SurfaceAutomation` from its caller.
