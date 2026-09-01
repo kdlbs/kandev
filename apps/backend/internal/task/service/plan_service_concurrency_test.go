@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -87,6 +88,20 @@ func (r *gatedDeleteRepo) DeleteTaskPlan(ctx context.Context, taskID string) err
 	return r.Repository.DeleteTaskPlan(ctx, taskID)
 }
 
+// newGuardedRelease returns a close-once function for a gated test's release
+// channel, registered via t.Cleanup. Without this, a t.Fatalf firing between
+// the gate opening and the test's intended release point exits the test
+// goroutine (via runtime.Goexit) before close() runs, leaving the gated
+// goroutine parked on <-r.proceed forever - holding the per-task lock and a
+// live DB connection for the rest of the test binary's run.
+func newGuardedRelease(t *testing.T, ch chan struct{}) func() {
+	t.Helper()
+	var once sync.Once
+	release := func() { once.Do(func() { close(ch) }) }
+	t.Cleanup(release)
+	return release
+}
+
 // TestConcurrentUpdatePlanForSameTaskIsMutuallyExclusive forces a specific
 // interleaving: writer 1 is gated inside its write transaction (already
 // holding the per-task lock) while writer 2 attempts a concurrent update on
@@ -109,6 +124,7 @@ func TestConcurrentUpdatePlanForSameTaskIsMutuallyExclusive(t *testing.T) {
 
 	writeStarted := make(chan struct{})
 	releaseWrite := make(chan struct{})
+	release := newGuardedRelease(t, releaseWrite)
 	gated := &gatedWriteRepo{Repository: repo, writeStarted: writeStarted, proceed: releaseWrite}
 	svc := NewPlanService(gated, eventBus, log)
 
@@ -135,7 +151,7 @@ func TestConcurrentUpdatePlanForSameTaskIsMutuallyExclusive(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	close(releaseWrite)
+	release()
 	if err := <-firstDone; err != nil {
 		t.Fatalf("first UpdatePlan: %v", err)
 	}
@@ -173,6 +189,7 @@ func TestConcurrentWritesToDifferentTasksDoNotBlockEachOther(t *testing.T) {
 
 	writeStarted := make(chan struct{})
 	releaseWrite := make(chan struct{})
+	release := newGuardedRelease(t, releaseWrite)
 	gated := &gatedWriteRepo{Repository: repo, writeStarted: writeStarted, proceed: releaseWrite}
 	svc := NewPlanService(gated, eventBus, log)
 
@@ -198,7 +215,7 @@ func TestConcurrentWritesToDifferentTasksDoNotBlockEachOther(t *testing.T) {
 		t.Fatal("write to an unrelated task (task-b) blocked behind task-a's held lock")
 	}
 
-	close(releaseWrite)
+	release()
 	if err := <-aDone; err != nil {
 		t.Fatalf("CreatePlan for task-a: %v", err)
 	}
@@ -216,6 +233,7 @@ func TestDeletePlanHoldsLockAcrossConcurrentCreate(t *testing.T) {
 
 	deleteStarted := make(chan struct{})
 	releaseDelete := make(chan struct{})
+	release := newGuardedRelease(t, releaseDelete)
 	gated := &gatedDeleteRepo{Repository: repo, deleteStarted: deleteStarted, proceed: releaseDelete}
 	svc := NewPlanService(gated, eventBus, log)
 
@@ -247,7 +265,7 @@ func TestDeletePlanHoldsLockAcrossConcurrentCreate(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	close(releaseDelete)
+	release()
 	if err := <-deleteDone; err != nil {
 		t.Fatalf("DeletePlan: %v", err)
 	}
@@ -280,6 +298,7 @@ func TestUpdatePlanHoldsLockAcrossConcurrentDelete(t *testing.T) {
 
 	writeStarted := make(chan struct{})
 	releaseWrite := make(chan struct{})
+	release := newGuardedRelease(t, releaseWrite)
 	gated := &gatedWriteRepo{Repository: repo, writeStarted: writeStarted, proceed: releaseWrite}
 	svc := NewPlanService(gated, eventBus, log)
 
@@ -303,7 +322,7 @@ func TestUpdatePlanHoldsLockAcrossConcurrentDelete(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	close(releaseWrite)
+	release()
 	if err := <-updateDone; err != nil {
 		t.Fatalf("UpdatePlan: %v", err)
 	}
@@ -377,6 +396,7 @@ func TestUpdatePlanQueuedWriteCancelledWhileWaitingFailsAtItsOwnWriteAndDoesNotS
 
 	writeStarted := make(chan struct{})
 	releaseWrite := make(chan struct{})
+	release := newGuardedRelease(t, releaseWrite)
 	gated := &gatedWriteRepo{Repository: repo, writeStarted: writeStarted, proceed: releaseWrite}
 	svc := NewPlanService(gated, eventBus, log)
 
@@ -412,7 +432,7 @@ func TestUpdatePlanQueuedWriteCancelledWhileWaitingFailsAtItsOwnWriteAndDoesNotS
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	close(releaseWrite)
+	release()
 	if err := <-aDone; err != nil {
 		t.Fatalf("A's UpdatePlan: %v", err)
 	}
@@ -610,6 +630,7 @@ func TestRevertPlanQueuedBehindHeldWriteCancelledWhileWaitingFailsAtItsOwnWriteA
 
 	writeStarted := make(chan struct{})
 	releaseWrite := make(chan struct{})
+	release := newGuardedRelease(t, releaseWrite)
 	gated := &gatedWriteRepo{Repository: repo, writeStarted: writeStarted, proceed: releaseWrite}
 	svc := NewPlanService(gated, eventBus, log)
 
@@ -645,7 +666,7 @@ func TestRevertPlanQueuedBehindHeldWriteCancelledWhileWaitingFailsAtItsOwnWriteA
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	close(releaseWrite)
+	release()
 	if err := <-aDone; err != nil {
 		t.Fatalf("A's UpdatePlan: %v", err)
 	}
@@ -880,6 +901,7 @@ func TestPlanService_ConcurrentTruncatingWriteReflectsCommittedPredecessor(t *te
 
 	writeStarted := make(chan struct{})
 	releaseWrite := make(chan struct{})
+	release := newGuardedRelease(t, releaseWrite)
 	gated := &gatedWriteRepo{Repository: repo, writeStarted: writeStarted, proceed: releaseWrite}
 	svc := NewPlanService(gated, eventBus, log)
 
@@ -915,7 +937,7 @@ func TestPlanService_ConcurrentTruncatingWriteReflectsCommittedPredecessor(t *te
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	close(releaseWrite)
+	release()
 	aOut := <-aDone
 	if aOut.err != nil {
 		t.Fatalf("write A: %v", aOut.err)
