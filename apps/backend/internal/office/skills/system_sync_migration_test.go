@@ -12,10 +12,12 @@ import (
 )
 
 // TestSyncSystemSkills_ReplacesRetiredMemorySkillReference pins the
-// concrete REQ-003 migration case this feature adds: the bundled
-// `memory` skill was renamed to `kandev-memory` for naming-scheme
-// consistency, so a workspace with the old row must retire it and end
-// up with the new canonical slug in its place.
+// concrete REQ-003 migration case this feature adds: once the bundled
+// `memory` skill is renamed to `kandev-memory` for naming-scheme
+// consistency (pending, tracked separately), a workspace with the old
+// row must retire it and end up with the new canonical slug in its
+// place. This test injects a synthetic bundled spec to exercise that
+// path ahead of the real rename.
 func TestSyncSystemSkills_ReplacesRetiredMemorySkillReference(t *testing.T) {
 	repo := newStubSyncRepo()
 	log := logger.Default()
