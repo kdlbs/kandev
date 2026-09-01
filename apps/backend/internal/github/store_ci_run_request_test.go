@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -405,6 +406,65 @@ func TestStoreClaimCIRunRequestIsIdempotentAndConcurrent(t *testing.T) {
 	idempotencyConflict.PRNumber = 43
 	if _, _, err := store.ClaimCIRunRequest(ctx, &idempotencyConflict); !errors.Is(err, ErrCIRunIdempotencyConflict) {
 		t.Fatalf("idempotency reuse error = %v", err)
+	}
+}
+
+func TestStoreClaimCIRunRequestWithAuditIsIdempotentAndConcurrent(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	grant := testCIRunGrant(now)
+	if err := store.UpsertCIRunGrant(ctx, grant); err != nil {
+		t.Fatal(err)
+	}
+	seedCIRunProviderStartScope(t, store, grant)
+	request := testCIRunRequest(grant, now)
+
+	const callers = 12
+	ids := make(chan string, callers)
+	errs := make(chan error, callers)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for index := range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			candidate := *request
+			audit := &CIRunAuditEvent{
+				ID: fmt.Sprintf("audit-concurrent-%d", index), EventType: "claimed",
+				DetailsJSON: `{}`, CreatedAt: now,
+			}
+			claimed, _, err := store.ClaimCIRunRequestWithAudit(ctx, &candidate, audit)
+			if err != nil {
+				errs <- err
+				return
+			}
+			ids <- claimed.ID
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(ids)
+	close(errs)
+	for err := range errs {
+		t.Errorf("claim with audit: %v", err)
+	}
+	for id := range ids {
+		if id != request.ID {
+			t.Errorf("claim ID = %q, want %q", id, request.ID)
+		}
+	}
+	var requestCount, auditCount int
+	if err := store.db.Get(&requestCount, `SELECT COUNT(*) FROM github_ci_run_requests`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.db.Get(&auditCount, `SELECT COUNT(*) FROM github_ci_run_audit_events
+		WHERE request_id = ? AND event_type = 'claimed'`, request.ID); err != nil {
+		t.Fatal(err)
+	}
+	if requestCount != 1 || auditCount != 1 {
+		t.Fatalf("request rows = %d, claimed audits = %d; want 1 and 1", requestCount, auditCount)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -87,8 +88,11 @@ func TestCIRunGrantEndpointsRejectMembersForEveryOperation(t *testing.T) {
 		request.Header.Set("Content-Type", "application/json")
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, request)
-		if recorder.Code == http.StatusOK || recorder.Code == http.StatusCreated {
-			t.Fatalf("member operation succeeded: method=%s status=%d body=%s", request.Method, recorder.Code, recorder.Body.String())
+		if recorder.Code != http.StatusForbidden {
+			t.Fatalf("member operation status: method=%s status=%d body=%s", request.Method, recorder.Code, recorder.Body.String())
+		}
+		if !strings.Contains(recorder.Body.String(), "authenticated workspace administrator authorization is required") {
+			t.Fatalf("member operation message: method=%s body=%s", request.Method, recorder.Body.String())
 		}
 	}
 }
@@ -119,7 +123,7 @@ func TestCIRunGrantEndpointsRejectSyntheticMissingAndForeignIdentities(t *testin
 	}{
 		{name: "synthetic", id: &authn.Identity{UserID: "owner-1", Role: authn.RoleAdmin, Synthetic: true}},
 		{name: "missing"},
-		{name: "foreign", id: &authn.Identity{UserID: "foreign-1", Role: authn.RoleMember}},
+		{name: "foreign", id: &authn.Identity{UserID: "foreign-1", Role: authn.RoleAdmin}},
 	}
 	for _, tc := range identities {
 		t.Run(tc.name, func(t *testing.T) {

@@ -275,10 +275,11 @@ reported as `installation_required`; an installation without Actions write is
 reported as `installation_permission_missing`. Kandev does not fall back to a
 PAT, GitHub CLI account, user token, or legacy shared credential.
 
-An authenticated workspace owner or administrator manages the capability at
-`/api/v1/github/ci-run-grants`. `POST` creates or atomically replaces the exact
-workspace, coordinator task, target task, workflow, CI Fixup step, and
-repository scope; `GET` lists grants for `workspace_id`; and
+An authenticated administrator who owns the workspace manages the capability
+at `/api/v1/github/ci-run-grants`. Administrator role does not bypass workspace
+ownership. `POST` creates or atomically replaces the exact workspace,
+coordinator task, target task, workflow, CI Fixup step, and repository scope;
+`GET` lists grants for `workspace_id`; and
 `DELETE /api/v1/github/ci-run-grants/{grantId}?workspace_id={workspaceId}`
 revokes one.
 Task MCP cannot create, replace, list, or revoke these grants.
