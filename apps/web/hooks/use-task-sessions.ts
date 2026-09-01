@@ -45,7 +45,13 @@ async function hydrateTaskSessions({
     return sessionsAddedDuringLoad.length > 0;
   } catch (error) {
     console.error("Failed to load task sessions:", error);
-    if (!force) setTaskSessionsForTask(taskId, storedTaskSessions(getStoreState, taskId));
+    if (!force) {
+      setTaskSessionsForTask(
+        taskId,
+        storedTaskSessions(getStoreState, taskId),
+        activityEpochsAtRequestStart,
+      );
+    }
     return false;
   }
 }
@@ -66,11 +72,12 @@ export function useTaskSessions(taskId: string | null) {
   const connectionStatus = useAppStore((state) => state.connection.status);
   const pendingForcedReloadRef = useRef(false);
   const pendingForcedReloadWaitersRef = useRef<Array<() => void>>([]);
+  const requestInFlightRef = useRef(false);
 
   const loadSessions = useCallback(
     async (force = false) => {
       if (!taskId) return;
-      if (isLoading) {
+      if (isLoading || requestInFlightRef.current) {
         if (force) {
           pendingForcedReloadRef.current = true;
           return new Promise<void>((resolve) => {
@@ -80,6 +87,7 @@ export function useTaskSessions(taskId: string | null) {
         return;
       }
       if (!force && isLoaded) return;
+      requestInFlightRef.current = true;
       setTaskSessionsLoading(taskId, true);
       try {
         const needsFollowUp = await hydrateTaskSessions({
@@ -90,6 +98,7 @@ export function useTaskSessions(taskId: string | null) {
         });
         if (needsFollowUp) pendingForcedReloadRef.current = true;
       } finally {
+        requestInFlightRef.current = false;
         setTaskSessionsLoading(taskId, false);
         if (force && !pendingForcedReloadRef.current) {
           const waiters = pendingForcedReloadWaitersRef.current.splice(0);

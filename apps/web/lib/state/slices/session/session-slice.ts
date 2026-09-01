@@ -217,7 +217,6 @@ function mergeTaskSessionSnapshot(
   incoming: TaskSession,
   currentActivityEpoch: number,
   requestActivityEpoch: number | undefined,
-  hasRequestBoundary: boolean,
 ): TaskSession {
   const snapshot = {
     ...incoming,
@@ -229,10 +228,9 @@ function mergeTaskSessionSnapshot(
 
   const merged = mergeTaskSession(existing, snapshot);
   const activityChangedDuringRequest =
-    hasRequestBoundary &&
-    (requestActivityEpoch === undefined
+    requestActivityEpoch === undefined
       ? currentActivityEpoch > 0
-      : currentActivityEpoch > requestActivityEpoch);
+      : currentActivityEpoch > requestActivityEpoch;
   if (!activityChangedDuringRequest) return merged;
 
   return {
@@ -636,7 +634,7 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
     setTaskSessionsForTask: (
       taskId: string,
       sessions: Parameters<SessionSlice["setTaskSessionsForTask"]>[1],
-      activityEpochsAtRequestStart?: Parameters<SessionSlice["setTaskSessionsForTask"]>[2],
+      activityEpochsAtRequestStart: Parameters<SessionSlice["setTaskSessionsForTask"]>[2],
     ) =>
       set((draft) => {
         const merged = sessions.map((session) => {
@@ -645,8 +643,7 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
             existing,
             session,
             draft.taskSessions.activityEpochBySession?.[session.id] ?? 0,
-            activityEpochsAtRequestStart?.[session.id],
-            activityEpochsAtRequestStart !== undefined,
+            activityEpochsAtRequestStart[session.id],
           );
         });
         draft.taskSessionsByTask.itemsByTaskId[taskId] = merged;

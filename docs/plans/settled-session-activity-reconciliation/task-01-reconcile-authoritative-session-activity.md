@@ -38,6 +38,8 @@ it, without allowing an older HTTP response to overwrite a newer live event.
 
 - A complete session-list record clears omitted activity, while a partial event
   continues to preserve omitted activity.
+- Every complete-snapshot call supplies its request-start activity epoch map,
+  and forced hydration calls serialize before loading-state rerenders.
 - An explicit event received after a list request starts wins as the complete
   activity projection, including when it repeats the stored value.
 - Session removal clears its activity epoch, and existing session merge guards
@@ -96,5 +98,5 @@ together.
 - A shared helper ensures every client-side asynchronous session-list loader
   captures request-start epochs, so a newer live activity projection wins over
   an older response without blocking durable-field reconciliation.
-- The focused store and loader suite passes all 57 tests, and web typecheck
+- The focused store and loader suite passes all 58 tests, and web typecheck
   passes.

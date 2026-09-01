@@ -109,7 +109,7 @@ describe("upsertTaskSessionFromEvent", () => {
         TASK_ID,
         makeSession({ workspace_path: "/task-root", worktree_path: "/task-root/kandev" }),
       );
-    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession()]);
+    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession()], {});
 
     const session = store.getState().taskSessions.items[SESSION_ID];
     expect(session.workspace_path).toBe("/task-root");
@@ -138,7 +138,7 @@ describe("upsertTaskSessionFromEvent", () => {
   it("invalidates a loaded list when an event introduces a partial session", () => {
     const store = makeStore();
     const existing = makeSession({ id: "session-existing", repository_id: "repo-1" });
-    store.getState().setTaskSessionsForTask(TASK_ID, [existing]);
+    store.getState().setTaskSessionsForTask(TASK_ID, [existing], {});
 
     store.getState().upsertTaskSessionFromEvent(TASK_ID, makeSession());
 
@@ -151,7 +151,9 @@ describe("upsertTaskSessionFromEvent", () => {
 
   it("keeps a loaded list authoritative when an event updates a known session", () => {
     const store = makeStore();
-    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession({ repository_id: "repo-1" })]);
+    store
+      .getState()
+      .setTaskSessionsForTask(TASK_ID, [makeSession({ repository_id: "repo-1" })], {});
 
     store.getState().upsertTaskSessionFromEvent(TASK_ID, makeSession({ state: "COMPLETED" }));
 
@@ -181,9 +183,11 @@ describe("cancellation revision ordering", () => {
     // not restore true after the newer live false event has settled.
     store
       .getState()
-      .setTaskSessionsForTask(TASK_ID, [
-        makeSession({ cancellation_pending: true, cancellation_revision: 1 }),
-      ]);
+      .setTaskSessionsForTask(
+        TASK_ID,
+        [makeSession({ cancellation_pending: true, cancellation_revision: 1 })],
+        {},
+      );
 
     const session = store.getState().taskSessions.items[SESSION_ID];
     expect(session.cancellation_pending).toBe(false);
@@ -204,7 +208,9 @@ describe("setTaskSessionsForTask preserves WS-seeded fields", () => {
       );
 
     // API hydration arrives next without task_environment_id (race window)
-    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession({ repository_id: "repo-1" })]);
+    store
+      .getState()
+      .setTaskSessionsForTask(TASK_ID, [makeSession({ repository_id: "repo-1" })], {});
 
     const session = store.getState().taskSessions.items[SESSION_ID];
     expect(session.task_environment_id).toBe("env-1");
@@ -216,11 +222,13 @@ describe("setTaskSessionsForTask preserves WS-seeded fields", () => {
   it("flips loadedByTaskId to true (unlike upsertTaskSessionFromEvent)", () => {
     const store = makeStore();
 
-    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession()]);
+    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession()], {});
 
     expect(store.getState().taskSessionsByTask.loadedByTaskId[TASK_ID]).toBe(true);
   });
+});
 
+describe("setTaskSessionsForTask reconciles active turns", () => {
   it("clears an orphaned active turn when an authoritative refresh reports WAITING_FOR_INPUT", () => {
     const store = makeStore();
     store.setState((draft) => {
@@ -229,9 +237,11 @@ describe("setTaskSessionsForTask preserves WS-seeded fields", () => {
 
     store
       .getState()
-      .setTaskSessionsForTask(TASK_ID, [
-        makeSession({ state: "WAITING_FOR_INPUT", updated_at: "2026-04-20T00:01:00Z" }),
-      ]);
+      .setTaskSessionsForTask(
+        TASK_ID,
+        [makeSession({ state: "WAITING_FOR_INPUT", updated_at: "2026-04-20T00:01:00Z" })],
+        {},
+      );
 
     expect(store.getState().turns.activeBySession[SESSION_ID]).toBeNull();
   });
@@ -274,9 +284,11 @@ describe("setTaskSessionsForTask preserves WS-seeded fields", () => {
 
     store
       .getState()
-      .setTaskSessionsForTask(TASK_ID, [
-        makeSession({ state: "RUNNING", updated_at: "2026-04-20T00:03:00Z" }),
-      ]);
+      .setTaskSessionsForTask(
+        TASK_ID,
+        [makeSession({ state: "RUNNING", updated_at: "2026-04-20T00:03:00Z" })],
+        {},
+      );
 
     expect(store.getState().turns.activeBySession[SESSION_ID]).toBe("turn-running");
   });
@@ -326,9 +338,11 @@ describe("session foreground activity reconciliation", () => {
 
     store
       .getState()
-      .setTaskSessionsForTask(TASK_ID, [
-        makeSession({ state: "WAITING_FOR_INPUT", repository_id: "repo-1" }),
-      ]);
+      .setTaskSessionsForTask(
+        TASK_ID,
+        [makeSession({ state: "WAITING_FOR_INPUT", repository_id: "repo-1" })],
+        { [SESSION_ID]: 0 },
+      );
 
     const session = store.getState().taskSessions.items[SESSION_ID];
     expect(session.foreground_activity).toBeNull();

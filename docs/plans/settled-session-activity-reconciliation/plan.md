@@ -48,6 +48,8 @@ existing backend-restart browser flow with the operator-visible outcome.
 - Capture activity epochs through one shared helper whenever a client-side
   asynchronous session-list loader starts an authoritative request, including
   task hydration, task selection/removal, and Office task detail loading.
+- Require the request-start epoch map in the complete-snapshot action contract
+  and serialize forced hydration calls before React rerenders loading state.
 - When the response arrives, normalize an omitted activity field to a clear if
   the session epoch is unchanged. If the epoch advanced, preserve the newer
   live projection (`foreground_activity`, `active_subagent_count`, and
@@ -94,7 +96,7 @@ Execution is sequential in the primary conversation. Task 02 depends on Task
 
 ## Verification results
 
-- Focused Vitest: 57 tests passed across the session slice, hydration hook,
+- Focused Vitest: 58 tests passed across the session slice, hydration hook,
   task selection/removal loader, and Office task detail loader.
 - Web TypeScript typecheck passed.
 - Focused desktop Chromium restart E2E passed after demonstrating the expected

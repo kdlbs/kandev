@@ -128,7 +128,10 @@ describe("useTaskSessions", () => {
         cache: "no-store",
       }),
     );
-    expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, liveSessions);
+    expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, liveSessions, {
+      existing: 0,
+      "live-upsert": 0,
+    });
     expect(consoleError).toHaveBeenCalledWith("Failed to load task sessions:", error);
   });
 
@@ -414,6 +417,31 @@ describe("useTaskSessions queued refreshes", () => {
       [session("old", "COMPLETED")],
       { old: 0 },
     );
+  });
+
+  it("serializes forced reloads started before loading state rerenders", async () => {
+    mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = [session("old", "RUNNING")];
+    mockState.taskSessionsByTask.loadedByTaskId[TASK_ID] = true;
+    mockState.setTaskSessionsLoading.mockImplementation((id: string, loading: boolean) => {
+      mockState.taskSessionsByTask.loadingByTaskId[id] = loading;
+    });
+    const firstResponse = deferred<{ sessions: TaskSession[] }>();
+    apiMock.listTaskSessions
+      .mockReturnValueOnce(firstResponse.promise)
+      .mockResolvedValueOnce({ sessions: [session("old", "COMPLETED")] });
+
+    const { result, rerender } = renderHook(() => useTaskSessions(TASK_ID));
+    const firstReload = result.current.loadSessions(true);
+    const secondReload = result.current.loadSessions(true);
+    expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(1);
+    rerender();
+
+    firstResponse.resolve({ sessions: [session("old", "RUNNING")] });
+    await firstReload;
+    rerender();
+
+    await secondReload;
+    expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -122,6 +122,8 @@ export async function seedActiveSessionForegroundActivity(
       if (!sessionId) throw new Error("No active session is available in the E2E store");
       const session = state.taskSessions.items[sessionId];
       if (!session) throw new Error(`Session ${sessionId} not found in store`);
+      // Intentionally skip the activity epoch: this stale projection predates
+      // the current backend process and its reconnect events.
       state.taskSessions.items[sessionId] = {
         ...session,
         foreground_activity: nextActivity,

@@ -79,9 +79,10 @@ and Office task detail loading. When the response arrives:
 3. A session first observed in the response adopts the response projection
    directly.
 
-Synchronous callers that apply a complete snapshot without an in-flight
-request token treat that snapshot as authoritative at application time.
-Removing a session also removes its client activity epoch.
+The complete-snapshot action requires a request-start epoch map. There is no
+unguarded asynchronous call shape; synchronous tests and utilities must also
+state their boundary explicitly. Removing a session also removes its client
+activity epoch.
 
 This ordering rule protects the opt-in Claude background tier while allowing a
 post-restart snapshot to clear activity retained from the previous process.
@@ -110,6 +111,10 @@ If a WebSocket event introduces a session that was absent when the request
 started, the existing added-during-load guard keeps that session and schedules
 a follow-up refresh. Activity epochs use the same request boundary and do not
 replace that identity guard.
+
+Forced task hydration also owns a synchronous in-flight guard. Two reloads
+started before React observes the loading-state update are serialized, so an
+older response cannot race a newer response into the store.
 
 ## Verification strategy
 

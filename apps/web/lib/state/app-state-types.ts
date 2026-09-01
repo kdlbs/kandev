@@ -464,7 +464,7 @@ export type AppState = KanbanSlice & {
   setTaskSessionsForTask: (
     taskId: string,
     sessions: TaskSession[],
-    activityEpochsAtRequestStart?: Readonly<Record<string, number>>,
+    activityEpochsAtRequestStart: Readonly<Record<string, number>>,
   ) => void;
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;
   setTaskSessionsLoading: (taskId: string, loading: boolean) => void;
