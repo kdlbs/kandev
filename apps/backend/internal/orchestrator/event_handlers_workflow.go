@@ -2629,8 +2629,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 				zap.String("session_id", sessionID),
 				zap.String("step_name", step.Name),
 				zap.Error(err))
-			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
-			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
+			s.parkWorkflowSessionAfterAutoStartFailure(ctx, taskID, sessionID, step.ID)
 		}
 
 	default:
@@ -2752,6 +2751,30 @@ func (s *Service) launchAfterOnEnterDispatch(
 		s.drainQueuedMessageForPromptableSession(ctx, sessionID)
 	}
 
+}
+
+func (s *Service) parkWorkflowSessionAfterAutoStartFailure(
+	ctx context.Context,
+	taskID, sessionID, stepID string,
+) {
+	latest, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to reload session after workflow auto-start failure",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if latest == nil || isTerminalSessionState(latest.State) {
+		return
+	}
+
+	s.setSessionWaitingForInput(ctx, taskID, sessionID, latest)
+	latest, err = s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || latest == nil || latest.State != models.TaskSessionStateWaitingForInput {
+		return
+	}
+	s.publishSessionWaitingEvent(ctx, taskID, sessionID, stepID, latest)
 }
 
 // dispatchEngineOwnedOnEnterAction executes an engine-owned on_enter action

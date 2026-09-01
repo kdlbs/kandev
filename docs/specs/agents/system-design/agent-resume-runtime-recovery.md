@@ -26,7 +26,7 @@ that environment and does not acquire its own worktree lifecycle.
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001` | [Session identity](#session-identity) |
+| `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001` | [Session identity](#session-identity), [Startup readiness convergence](#startup-readiness-convergence) |
 | `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002` | [Visible recovery errors](#visible-recovery-errors) |
 | `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003` | [Explicit branch replacement](#explicit-branch-replacement), [Warning persistence](#warning-persistence) |
 
@@ -98,6 +98,41 @@ workspace preparation succeeds.
 The existing guarded transition to `STARTING`, resume lock, failure rollback,
 and successful token replacement rules remain unchanged. Only **Start fresh**
 can intentionally remove the stored provider identity before launch.
+
+## Startup readiness convergence
+
+Synchronous startup recovery runs before the lifecycle watcher subscribes. This
+ordering remains intentional: lifecycle-token, work-in-progress, and dependency
+reconciliation must finish before watchers, scheduling, and API traffic begin.
+Consequently, a resumed execution can become prompt-ready before its one-shot
+`agent.boot_ready` event has a subscriber.
+
+The cold-resume owner retains the exact execution ID returned by
+`ResumeSession`. If the durable session-readiness wait expires, it reconciles
+that outcome directly instead of relying on event replay:
+
+1. Reload the active `executors_running` identity and require it to match the
+   execution launched by this resume.
+2. If that exact execution is prompt-ready, verify ownership again and use the
+   existing state compare-and-set to park the same `STARTING` session at
+   `WAITING_FOR_INPUT`.
+3. If the exact execution is not prompt-ready, claim teardown ownership, check
+   execution and terminal-session identity again, stop only that execution,
+   retire its activity, and use the existing guarded launch-failure path to
+   settle the old session at `FAILED`.
+
+A terminal session or successor execution supersedes the timeout owner. The
+timeout path neither revives the terminal row nor stops or reconciles the
+successor. It returns an ordinary readiness error rather than the workflow
+terminalization sentinel, so workflow entry cannot create a replacement
+session. Workflow fallback reloads the authoritative row and publishes
+`WAITING_FOR_INPUT` only after that state is durable.
+
+This recovery never synthesizes `agent.boot_ready`: that handler also drains
+queued prompts and would turn reconciliation into a second dispatch source.
+The workflow step, session ID, provider resume token, task environment, and
+worktree remain unchanged. A fresh session remains an explicit user or owner
+operation.
 
 ## Explicit branch replacement
 
