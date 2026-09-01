@@ -64,6 +64,8 @@ export type TurnsState = {
 
 export type TaskSessionsState = {
   items: Record<string, TaskSession>;
+  /** Monotonic client event generation used to order live activity against REST refreshes. */
+  activityEpochBySession?: Record<string, number>;
 };
 
 export type TaskSessionsByTaskState = {
@@ -326,7 +328,11 @@ export type SessionSliceActions = {
     revision?: TaskPendingActionRevision,
   ) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
-  setTaskSessionsForTask: (taskId: string, sessions: TaskSession[]) => void;
+  setTaskSessionsForTask: (
+    taskId: string,
+    sessions: TaskSession[],
+    activityEpochsAtRequestStart: Readonly<Record<string, number>>,
+  ) => void;
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;
   setTaskSessionsLoading: (taskId: string, loading: boolean) => void;
   setSessionAgentctlStatus: (sessionId: string, status: SessionAgentctlStatus) => void;

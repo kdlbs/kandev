@@ -93,7 +93,7 @@ async function setGitStatusForSession(testPage: Page, sessionId: string, changed
               options?: { allowEmpty?: boolean },
             ) => void;
             setGitStatus: (
-              sessionId: string,
+              taskEnvironmentId: string,
               status: {
                 branch: string;
                 remote_branch: string | null;
@@ -113,14 +113,16 @@ async function setGitStatusForSession(testPage: Page, sessionId: string, changed
       };
       const store = (window as StoreWindow).__KANDEV_E2E_STORE__;
       if (!store) throw new Error("E2E store bridge missing");
-      store.getState().setSessionCommits(sid, [], { allowEmpty: true });
+      const state = store.getState();
+      const taskEnvironmentId = state.environmentIdBySessionId[sid] ?? sid;
+      state.setSessionCommits(sid, [], { allowEmpty: true });
       const fileMap = Object.fromEntries(
         files.map((path): [string, FileInfo] => [
           path,
           { path, status: "untracked", staged: false, additions: 1, deletions: 0 },
         ]),
       );
-      store.getState().setGitStatus(sid, {
+      state.setGitStatus(taskEnvironmentId, {
         branch: "main",
         remote_branch: null,
         modified: [],

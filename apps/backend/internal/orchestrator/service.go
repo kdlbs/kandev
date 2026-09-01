@@ -63,6 +63,12 @@ type ServiceConfig struct {
 	// turn for an agent that advertised prompt queueing. Independent of
 	// ClaudeBackgroundPromptHandoff, which covers the foreground-idle handoff.
 	ClaudeMidTurnSteering bool
+
+	// OfficeSessionIdentity keys an Office task's session identity on the
+	// run's own agent instead of the task's runner seat. Off by default;
+	// enabling it exposes pre-existing duplicate (task_id, agent_profile_id)
+	// rows until the companion unique-index fix has shipped.
+	OfficeSessionIdentity bool
 }
 
 // AttachmentReader is the narrow attachment-store seam needed when the

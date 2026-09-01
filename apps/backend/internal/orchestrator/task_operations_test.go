@@ -173,7 +173,7 @@ func TestCreateStartSession_KanbanRunnerCreatesDistinctSession(t *testing.T) {
 	if isOffice {
 		t.Fatal("kanban task with a runner was classified as office-owned")
 	}
-	sessionID, _, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "", "", "")
+	sessionID, _, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "copilot-runner", "", "", "")
 	if err != nil {
 		t.Fatalf("create start session: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestCreateStartSession_OfficeRunnerReusesPersistentSession(t *testing.T) {
 	if !isOffice {
 		t.Fatal("office-owned assigned task was not classified as office")
 	}
-	sessionID, created, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "", "", "")
+	sessionID, created, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "copilot-runner", "", "", "")
 	if err != nil {
 		t.Fatalf("create start session: %v", err)
 	}
@@ -235,6 +235,177 @@ func TestCreateStartSession_OfficeRunnerReusesPersistentSession(t *testing.T) {
 	}
 	if sessionID != "existing-office-session" {
 		t.Fatalf("office launch session = %q, want existing-office-session", sessionID)
+	}
+}
+
+func TestCreateStartSession_OfficeUnassignedReusesResolvedProfileSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-office-unassigned", Name: "Office", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-office-unassigned", WorkspaceID: "ws-office-unassigned", Name: "Office", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := seedWorkflowStep(t, repo, "step-office-unassigned"); err != nil {
+		t.Fatalf("create workflow step: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-office-unassigned", WorkspaceID: "ws-office-unassigned", WorkflowID: "wf-office-unassigned", WorkflowStepID: "step-office-unassigned",
+		Title: "Office task", State: v1.TaskStateInProgress, ProjectID: "office-project",
+		Metadata:  map[string]interface{}{models.MetaKeyAgentProfileID: "ceo-reviewer"},
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	task, err := repo.GetTask(ctx, "task-office-unassigned")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if !task.IsFromOffice {
+		t.Fatal("office task was not projected as office-owned")
+	}
+	if task.AssigneeAgentProfileID != "" {
+		t.Fatalf("task unexpectedly has an assignee: %q", task.AssigneeAgentProfileID)
+	}
+
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	firstID, firstCreated, err := svc.createStartSession(ctx, task.ToAPI(), "ceo-reviewer", "", "", "", "")
+	if err != nil {
+		t.Fatalf("first create start session: %v", err)
+	}
+	if !firstCreated {
+		t.Fatal("first office launch should create a session")
+	}
+
+	secondID, secondCreated, err := svc.createStartSession(ctx, task.ToAPI(), "ceo-reviewer", "", "", "", "")
+	if err != nil {
+		t.Fatalf("second create start session: %v", err)
+	}
+	if secondCreated {
+		t.Fatal("second office launch should reuse the profile session")
+	}
+	if secondID != firstID {
+		t.Fatalf("reused session = %q, want first session %q", secondID, firstID)
+	}
+}
+
+// TestCreateStartSession_ReviewerRunFlagOff is the regression baseline: a
+// review run whose agent (ceo-reviewer) differs from the task's runner seat
+// (pm-runner) lands in the runner's session when features.officeSessionIdentity
+// is off (the default), reproducing the FORBIDDEN bug this task fixes —
+// record_step_decision_kandev resolves the session's AgentProfileID as the
+// decider identity, so the reviewer's own decision is checked against seats
+// the runner (not the reviewer) occupies.
+func TestCreateStartSession_ReviewerRunFlagOff(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-review", Name: "Review", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-review", WorkspaceID: "ws-review", Name: "Review", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := seedWorkflowStep(t, repo, "step-review-start"); err != nil {
+		t.Fatalf("create workflow step: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-review", WorkspaceID: "ws-review", WorkflowID: "wf-review", WorkflowStepID: "step-review-start",
+		Title: "Review task", State: v1.TaskStateInProgress, ProjectID: "office-project", AssigneeAgentProfileID: "pm-runner",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "runner-session", TaskID: "task-review", AgentProfileID: "pm-runner",
+		State: models.TaskSessionStateRunning, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create runner session: %v", err)
+	}
+
+	task, err := repo.GetTask(ctx, "task-review")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+
+	// A reviewer run: the run's own agent (ceo-reviewer) differs from the
+	// task's runner seat (pm-runner).
+	sessionID, _, err := svc.createStartSession(ctx, task.ToAPI(), "ceo-reviewer", "ceo-reviewer", "", "", "")
+	if err != nil {
+		t.Fatalf("create start session: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.AgentProfileID != "pm-runner" {
+		t.Fatalf("session owner = %q, want pm-runner (flag off preserves runner-keyed identity)", session.AgentProfileID)
+	}
+}
+
+// TestCreateStartSession_ReviewerRunFlagOnGetsOwnSession is the fix's green
+// case: with features.officeSessionIdentity on, the same reviewer run lands
+// in a session keyed on the run's own agent (ceo-reviewer), not the task's
+// runner seat (pm-runner).
+func TestCreateStartSession_ReviewerRunFlagOnGetsOwnSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-review2", Name: "Review2", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-review2", WorkspaceID: "ws-review2", Name: "Review2", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := seedWorkflowStep(t, repo, "step-review2-start"); err != nil {
+		t.Fatalf("create workflow step: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-review2", WorkspaceID: "ws-review2", WorkflowID: "wf-review2", WorkflowStepID: "step-review2-start",
+		Title: "Review task", State: v1.TaskStateInProgress, ProjectID: "office-project", AssigneeAgentProfileID: "pm-runner",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "runner-session2", TaskID: "task-review2", AgentProfileID: "pm-runner",
+		State: models.TaskSessionStateRunning, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create runner session: %v", err)
+	}
+
+	task, err := repo.GetTask(ctx, "task-review2")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	svc.config.OfficeSessionIdentity = true
+
+	sessionID, created, err := svc.createStartSession(ctx, task.ToAPI(), "ceo-reviewer", "ceo-reviewer", "", "", "")
+	if err != nil {
+		t.Fatalf("create start session: %v", err)
+	}
+	if !created {
+		t.Fatal("reviewer run should create its own session, not reuse the runner's")
+	}
+	if sessionID == "runner-session2" {
+		t.Fatal("reviewer run landed in the runner's session instead of its own")
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.AgentProfileID != "ceo-reviewer" {
+		t.Fatalf("session owner = %q, want ceo-reviewer", session.AgentProfileID)
 	}
 }
 

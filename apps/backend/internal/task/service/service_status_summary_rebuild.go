@@ -140,7 +140,8 @@ func (s *Service) rebuildMissingSummaries(
 		return summaries
 	}
 	prByTask, prObserved := s.loadSummaryPRs(ctx, taskIDs(missing))
-	gitBySession, gitObserved := s.loadSummaryGit(ctx, sessionIDsForTasks(missing, sessionsByTask))
+	environmentIDsByTask, environmentIDs := s.taskEnvironmentIDsForTasks(ctx, missing, sessionsByTask)
+	gitByEnvironment, gitObserved := s.loadSummaryGit(ctx, environmentIDs)
 	queuedByTask := s.loadQueuedSummaryCounts(ctx, taskIDs(missing))
 	activityAtByTask := activityByTask
 	now := time.Now().UTC()
@@ -149,8 +150,9 @@ func (s *Service) rebuildMissingSummaries(
 		s.rebuildMissingSummary(ctx, task, summaries, s.rebuildInput(
 			taskLaunchErrorSummary(task),
 			sessionsByTask[task.ID],
+			environmentIDsByTask[task.ID],
 			pendingBySession,
-			gitBySession,
+			gitByEnvironment,
 			gitObserved,
 			prByTask[task.ID],
 			prObserved,
@@ -460,25 +462,58 @@ func taskIDs(tasks []*models.Task) []string {
 	return ids
 }
 
-func sessionIDsForTasks(tasks []*models.Task, sessionsByTask map[string][]*models.TaskSession) []string {
+func (s *Service) taskEnvironmentIDsForTasks(
+	ctx context.Context,
+	tasks []*models.Task,
+	sessionsByTask map[string][]*models.TaskSession,
+) (map[string][]string, []string) {
 	seen := make(map[string]struct{})
+	seenByTask := make(map[string]map[string]struct{}, len(tasks))
+	idsByTask := make(map[string][]string, len(tasks))
 	ids := make([]string, 0)
+	add := func(taskID, environmentID string) {
+		if environmentID == "" {
+			return
+		}
+		taskSeen := seenByTask[taskID]
+		if taskSeen == nil {
+			taskSeen = make(map[string]struct{})
+			seenByTask[taskID] = taskSeen
+		}
+		if _, ok := taskSeen[environmentID]; ok {
+			return
+		}
+		taskSeen[environmentID] = struct{}{}
+		idsByTask[taskID] = append(idsByTask[taskID], environmentID)
+		if _, ok := seen[environmentID]; ok {
+			return
+		}
+		seen[environmentID] = struct{}{}
+		ids = append(ids, environmentID)
+	}
 	for _, task := range tasks {
 		if task == nil {
 			continue
 		}
+		if s != nil && s.taskEnvironments != nil {
+			environment, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, task.ID)
+			if err != nil {
+				if s.logger != nil {
+					s.logger.Warn("failed to load task environment for status summary repair",
+						zap.String("task_id", task.ID), zap.Error(err))
+				}
+			} else if environment != nil {
+				add(task.ID, environment.ID)
+			}
+		}
 		for _, session := range sessionsByTask[task.ID] {
-			if session == nil || session.ID == "" {
+			if session == nil || session.TaskEnvironmentID == "" {
 				continue
 			}
-			if _, ok := seen[session.ID]; ok {
-				continue
-			}
-			seen[session.ID] = struct{}{}
-			ids = append(ids, session.ID)
+			add(task.ID, session.TaskEnvironmentID)
 		}
 	}
-	return ids
+	return idsByTask, ids
 }
 
 func (s *Service) loadSummaryPRs(
@@ -500,26 +535,34 @@ func (s *Service) loadSummaryPRs(
 
 func (s *Service) loadSummaryGit(
 	ctx context.Context,
-	sessionIDs []string,
-) (map[string]*models.GitSnapshot, bool) {
-	if s.gitSnapshots == nil || len(sessionIDs) == 0 {
+	taskEnvironmentIDs []string,
+) (map[string][]*models.GitSnapshot, bool) {
+	if s.gitSnapshots == nil || len(taskEnvironmentIDs) == 0 {
 		return nil, false
 	}
-	snapshots, err := s.gitSnapshots.GetLatestGitSnapshotsBySessionIDs(ctx, sessionIDs)
+	snapshots, err := s.gitSnapshots.GetLatestGitStatusSnapshotsByTaskEnvironmentIDs(ctx, taskEnvironmentIDs)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn("failed to load Git state for status summary repair", zap.Error(err))
 		}
 		return nil, false
 	}
-	return snapshots, true
+	byEnvironment := make(map[string][]*models.GitSnapshot, len(taskEnvironmentIDs))
+	for _, snapshot := range snapshots {
+		if snapshot == nil || snapshot.TaskEnvironmentID == "" {
+			continue
+		}
+		byEnvironment[snapshot.TaskEnvironmentID] = append(byEnvironment[snapshot.TaskEnvironmentID], snapshot)
+	}
+	return byEnvironment, true
 }
 
 func (s *Service) rebuildInput(
 	taskError *statussummary.ActiveErrorSummary,
 	sessions []*models.TaskSession,
+	taskEnvironmentIDs []string,
 	pendingBySession map[string]models.TaskPendingAction,
-	gitBySession map[string]*models.GitSnapshot,
+	gitByEnvironment map[string][]*models.GitSnapshot,
 	gitObserved bool,
 	prs []statussummary.PullRequestInput,
 	prObserved bool,
@@ -583,9 +626,14 @@ func (s *Service) rebuildInput(
 		if action := string(pendingBySession[session.ID]); strings.TrimSpace(action) != "" {
 			input.PendingActions[session.ID] = action
 		}
-		if snapshot := gitBySession[session.ID]; snapshot != nil {
+	}
+	for _, environmentID := range taskEnvironmentIDs {
+		for _, snapshot := range gitByEnvironment[environmentID] {
+			if snapshot == nil {
+				continue
+			}
 			input.Git = append(input.Git, statussummary.RebuildGit{
-				Repository: snapshotRepositoryKey(snapshot, session.ID),
+				Repository: snapshotRepositoryKey(snapshot, ""),
 				Summary:    gitSummaryFromSnapshot(snapshot),
 			})
 		}

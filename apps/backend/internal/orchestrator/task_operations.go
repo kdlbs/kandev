@@ -322,7 +322,10 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 	// EnsureSessionForAgent so runs + advanced-mode reuse one row.
 	// prepareSessionForStart also propagates any inherited workspace
 	// environment (inherit_parent / shared_group) onto the new session.
-	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	// A manual prepare call has no scheduler-owned Office run identity. Keep the
+	// participant slot empty so createStartSession uses the task assignee, while
+	// agentProfileID remains the concrete execution profile.
+	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, "", executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		s.logger.Error("failed to prepare session",
 			zap.String("task_id", taskID),
@@ -1051,7 +1054,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// Prepare session first so we have the sessionID for config context injection.
 	// For office tasks, replace the per-launch PrepareSession with the per-(task,
 	// agent) EnsureSessionForAgent so runs reuse one row across turns.
-	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		return nil, err
 	}
@@ -1394,9 +1397,9 @@ func validateOfficeLaunchEnv(taskID string, env map[string]string) error {
 // propagateInheritedEnvironment is a no-op for tasks without a workspace policy.
 func (s *Service) prepareSessionForStart(
 	ctx context.Context, task *v1.Task,
-	agentProfileID, executorID, executorProfileID, workflowStepID string,
+	agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID string,
 ) (string, bool, error) {
-	sessionID, created, err := s.createStartSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	sessionID, created, err := s.createStartSession(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		return "", false, err
 	}
@@ -1585,25 +1588,60 @@ func (s *Service) recordDynamicRouteResolutionFailure(
 }
 
 // createStartSession picks the right session-creation path for the task:
-// Office tasks with an assignee use the per-(task, agent) EnsureSessionForAgent
-// (so runs reuse one row across turns); kanban / quick-chat fall through to
-// the per-launch PrepareSession used since day one.
+// Office tasks use the per-(task, agent) EnsureSessionForAgent path (so runs
+// reuse one row across turns); kanban / quick-chat fall through to the
+// per-launch PrepareSession used since day one. An Office task can be created
+// before its runner seat is projected, so the run's captured identity or its
+// resolved execution profile supplies the owner until the seat is assigned.
+//
+// The session-owner identity passed to EnsureSessionForAgentWithCreation is,
+// by default, the task's runner seat (dbTask.AssigneeAgentProfileID) — even
+// for a reviewer/approver run whose agent differs from the runner, which
+// wrongly binds that run's session (and later its decisions) to the runner's
+// identity. When features.officeSessionIdentity is on, officeAgentProfileID
+// (the run's own agent, captured by the caller before step/routing overrides
+// mutate agentProfileID) is used instead so each participant agent gets its
+// own session per task.
 func (s *Service) createStartSession(
 	ctx context.Context, task *v1.Task,
-	agentProfileID, executorID, executorProfileID, workflowStepID string,
+	agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID string,
 ) (string, bool, error) {
 	dbTask, err := s.repo.GetTask(ctx, task.ID)
-	if err == nil && dbTask != nil && dbTask.IsFromOffice && dbTask.AssigneeAgentProfileID != "" {
-		session, created, ensureErr := s.executor.EnsureSessionForAgentWithCreation(
-			ctx, task, dbTask.AssigneeAgentProfileID, agentProfileID, executorID, executorProfileID,
-		)
-		if ensureErr != nil {
-			return "", false, ensureErr
-		}
-		return session.ID, created, nil
+	if err != nil || dbTask == nil || !dbTask.IsFromOffice {
+		sessionID, prepareErr := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+		return sessionID, prepareErr == nil, prepareErr
 	}
-	sessionID, err := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
-	return sessionID, err == nil, err
+
+	sessionOwnerID := s.officeSessionOwnerID(dbTask, agentProfileID, officeAgentProfileID)
+	if sessionOwnerID == "" {
+		sessionID, prepareErr := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+		return sessionID, prepareErr == nil, prepareErr
+	}
+	session, created, ensureErr := s.executor.EnsureSessionForAgentWithCreation(
+		ctx, task, sessionOwnerID, agentProfileID, executorID, executorProfileID,
+	)
+	if ensureErr != nil {
+		return "", false, ensureErr
+	}
+	return session.ID, created, nil
+}
+
+// officeSessionOwnerID selects the stable identity for an Office session. A
+// projected runner wins by default. When identity separation is enabled, a
+// scheduler-captured participant identity wins for assigned runs. Before a
+// runner seat is projected, the captured identity or execution profile keeps
+// the session on the Office path instead of creating a generic workspace row.
+func (s *Service) officeSessionOwnerID(task *models.Task, agentProfileID, officeAgentProfileID string) string {
+	if task.AssigneeAgentProfileID == "" {
+		if officeAgentProfileID != "" {
+			return officeAgentProfileID
+		}
+		return agentProfileID
+	}
+	if s.config.OfficeSessionIdentity && officeAgentProfileID != "" {
+		return officeAgentProfileID
+	}
+	return task.AssigneeAgentProfileID
 }
 
 // moveTaskToWorkflowStep moves a task to the target workflow step if provided and different from current.
@@ -3197,10 +3235,11 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
 
-	// Drop the in-memory git snapshot throttle entry — the session will
-	// never receive another git event, so its cache slot is dead weight.
-	if s.gitSnapshotCache != nil {
-		s.gitSnapshotCache.forget(sessionID)
+	// Drop the in-memory git snapshot throttle entries for an environment only
+	// after its session has been removed. The cache is environment-scoped, so a
+	// session ID cannot identify the entries and must not be used as the key.
+	if s.gitSnapshotCache != nil && session.TaskEnvironmentID != "" {
+		s.gitSnapshotCache.forget(session.TaskEnvironmentID)
 	}
 	// Same reasoning for the push-detection tracker. Multi-repo sessions
 	// accumulate one entry per repo; pushTrackerForget walks them all.
@@ -3666,8 +3705,8 @@ func (s *Service) captureGitStatusSnapshot(ctx context.Context, sessionID string
 // captureGitStatusSnapshotWithRetry attempts a fresh capture with up to 3
 // retries at 1-second intervals if the first attempt returns stale 0/0 data
 // (caused by git lock contention between concurrent worktrees). Returns
-// immediately without retrying when no execution exists for the session
-// (returns nil,nil) or the agent genuinely has no file changes.
+// immediately without retrying when the environment or execution is missing,
+// or when the agent genuinely has no file changes.
 func (s *Service) captureGitStatusSnapshotWithRetry(ctx context.Context, sessionID string) {
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
@@ -3688,8 +3727,14 @@ func (s *Service) captureGitStatusSnapshotWithRetry(ctx context.Context, session
 // saveGitStatusSnapshot is the shared implementation for snapshot capture.
 // When fresh is true, it bypasses the workspace tracker's poll cache.
 // Returns (wrote, noExecution): wrote=true if a snapshot was persisted,
-// noExecution=true if the session has no active execution (nil status).
+// noExecution=true if the environment or active execution is unavailable.
 func (s *Service) saveGitStatusSnapshot(ctx context.Context, sessionID string, fresh bool) (wrote, noExecution bool) {
+	taskEnvironmentID, ok := s.resolveGitSnapshotEnvironmentID(ctx, sessionID)
+	if !ok {
+		// A snapshot cannot be captured without an environment. Stop the
+		// retry loop because another attempt cannot resolve this identity.
+		return false, true
+	}
 	var status *client.GitStatusResult
 	var err error
 	if fresh {
@@ -3734,17 +3779,18 @@ func (s *Service) saveGitStatusSnapshot(ctx context.Context, sessionID string, f
 	}
 
 	if err := s.repo.CreateGitSnapshot(ctx, &models.GitSnapshot{
-		SessionID:    sessionID,
-		SnapshotType: models.SnapshotTypeStatusUpdate,
-		Branch:       status.Branch,
-		RemoteBranch: status.RemoteBranch,
-		HeadCommit:   status.HeadCommit,
-		BaseCommit:   status.BaseCommit,
-		Ahead:        status.Ahead,
-		Behind:       status.Behind,
-		Files:        status.Files,
-		TriggeredBy:  "agent_completed",
-		Metadata:     metadata,
+		TaskEnvironmentID: taskEnvironmentID,
+		SessionID:         sessionID,
+		SnapshotType:      models.SnapshotTypeStatusUpdate,
+		Branch:            status.Branch,
+		RemoteBranch:      status.RemoteBranch,
+		HeadCommit:        status.HeadCommit,
+		BaseCommit:        status.BaseCommit,
+		Ahead:             status.Ahead,
+		Behind:            status.Behind,
+		Files:             status.Files,
+		TriggeredBy:       gitSnapshotTriggeredByAgentCompleted,
+		Metadata:          metadata,
 	}); err != nil {
 		s.logger.Warn("failed to save git status snapshot",
 			zap.String("session_id", sessionID),
@@ -3752,17 +3798,8 @@ func (s *Service) saveGitStatusSnapshot(ctx context.Context, sessionID string, f
 		return false, false
 	}
 
-	// Remove stale live_monitor snapshots so the authoritative agent_completed
-	// snapshot is always returned by GetLatestGitSnapshot. Without this, a
-	// live_monitor poll that raced with agent completion could persist a
-	// snapshot with a later timestamp but stale data.
-	if err := s.repo.DeleteLiveMonitorSnapshots(ctx, sessionID); err != nil {
-		s.logger.Debug("failed to clean up live monitor snapshots",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-	}
-
 	s.logger.Debug("saved git status snapshot",
+		zap.String("task_environment_id", taskEnvironmentID),
 		zap.String("session_id", sessionID),
 		zap.String("branch", status.Branch),
 		zap.Bool("fresh", fresh))
@@ -3772,6 +3809,10 @@ func (s *Service) saveGitStatusSnapshot(ctx context.Context, sessionID string, f
 // captureArchiveDiff fetches and saves the cumulative diff from baseCommit to the working tree
 // (including uncommitted/unstaged changes).
 func (s *Service) captureArchiveDiff(ctx context.Context, sessionID, baseCommit string) {
+	taskEnvironmentID, ok := s.resolveGitSnapshotEnvironmentID(ctx, sessionID)
+	if !ok {
+		return
+	}
 	diffResult, err := s.agentManager.GetCumulativeDiff(ctx, sessionID, baseCommit)
 	if err != nil {
 		s.logger.Warn("failed to capture cumulative diff for archive",
@@ -3784,11 +3825,12 @@ func (s *Service) captureArchiveDiff(ctx context.Context, sessionID, baseCommit 
 	}
 
 	snapshot := &models.GitSnapshot{
-		SessionID:    sessionID,
-		SnapshotType: models.SnapshotTypeArchive,
-		HeadCommit:   diffResult.HeadCommit,
-		BaseCommit:   diffResult.BaseCommit,
-		Files:        diffResult.Files,
+		TaskEnvironmentID: taskEnvironmentID,
+		SessionID:         sessionID,
+		SnapshotType:      models.SnapshotTypeArchive,
+		HeadCommit:        diffResult.HeadCommit,
+		BaseCommit:        diffResult.BaseCommit,
+		Files:             diffResult.Files,
 	}
 	status, statusErr := s.agentManager.GetGitStatusFresh(ctx, sessionID)
 	if statusErr != nil {
@@ -3811,6 +3853,7 @@ func (s *Service) captureArchiveDiff(ctx context.Context, sessionID, baseCommit 
 	}
 
 	s.logger.Debug("saved archive snapshot",
+		zap.String("task_environment_id", taskEnvironmentID),
 		zap.String("session_id", sessionID),
 		zap.String("head_commit", diffResult.HeadCommit),
 		zap.Int("total_commits", diffResult.TotalCommits))

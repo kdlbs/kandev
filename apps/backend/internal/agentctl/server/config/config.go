@@ -244,7 +244,8 @@ type InstanceConfig struct {
 	AssumeMcpHttp bool
 
 	// McpMode controls which MCP tools are registered for this instance.
-	// "task" (default), "config", and "office" select distinct tool surfaces.
+	// "task" (default), "task-title-pending", "config", "office", and
+	// "automation" select distinct tool surfaces.
 	McpMode string
 
 	// McpProviders limits task-mode review automation tools to attached providers.
