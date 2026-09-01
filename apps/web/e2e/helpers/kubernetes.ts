@@ -1,7 +1,8 @@
 import { expect } from "@playwright/test";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { KubernetesCluster, KubernetesPod, KubernetesPVC } from "../fixtures/kubernetes-tools";
 import type { ApiClient } from "./api-client";
 
@@ -198,22 +199,26 @@ export async function waitForTaskResourceCleanupAttempt(
   timeout = 60_000,
 ): Promise<{ attempts: number; last_error: string; state: string }> {
   const database = path.join(backendTmpDir, "kandev.db");
-  const escapedTaskId = taskId.replaceAll("'", "''");
   let result = { attempts: 0, last_error: "", state: "" };
   await expect
     .poll(
       () => {
-        const output = execFileSync(
-          "sqlite3",
-          [
-            "-json",
-            database,
-            `SELECT state, attempts, last_error FROM task_resource_cleanup_jobs WHERE task_id = '${escapedTaskId}' AND trigger IN ('archive', 'cascade_archive') ORDER BY created_at DESC LIMIT 1`,
-          ],
-          { encoding: "utf8", timeout: 5_000 },
-        );
-        const rows = JSON.parse(output || "[]") as Array<typeof result>;
-        result = rows[0] ?? { attempts: 0, last_error: "", state: "" };
+        const sqlite = new DatabaseSync(database, { readOnly: true });
+        try {
+          result =
+            (sqlite
+              .prepare(
+                `SELECT state, attempts, last_error
+                   FROM task_resource_cleanup_jobs
+                  WHERE task_id = ?
+                    AND trigger IN ('archive', 'cascade_archive')
+                  ORDER BY created_at DESC
+                  LIMIT 1`,
+              )
+              .get(taskId) as typeof result | undefined) ?? result;
+        } finally {
+          sqlite.close();
+        }
         return result.attempts > 0 && ["retry_wait", "failed"].includes(result.state)
           ? result.last_error
           : "";

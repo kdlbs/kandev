@@ -83,12 +83,19 @@ describe("Kubernetes E2E causal helpers", () => {
       sqlite.close();
     }
 
-    const cleanup = await waitForTaskResourceCleanupAttempt(
-      backendTmpDir,
-      "task-1",
-      /runtime stop operations failed/i,
-      2_000,
-    );
+    const originalPath = process.env.PATH;
+    process.env.PATH = "";
+    let cleanup;
+    try {
+      cleanup = await waitForTaskResourceCleanupAttempt(
+        backendTmpDir,
+        "task-1",
+        /runtime stop operations failed/i,
+        2_000,
+      );
+    } finally {
+      process.env.PATH = originalPath;
+    }
 
     expect(cleanup).toMatchObject({
       attempts: 1,
