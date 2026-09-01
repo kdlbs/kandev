@@ -4,6 +4,9 @@ import type { WorkflowStep } from "@/lib/types/http";
 import { WorkflowStepAgentProfileSelector } from "./workflow-step-agent-profile-selector";
 
 const breakpoint = { isMobile: false };
+const ARIA_PRESSED = "aria-pressed";
+const ARIA_TRUE = "true";
+const START_NEW_TEST_ID = "step-1-profile-session-start-new";
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => breakpoint,
@@ -88,8 +91,14 @@ describe("WorkflowStepAgentProfileSelector", () => {
     fireEvent.click(screen.getByTestId("step-1-profile-session-lifecycle-select"));
     expect(screen.getByText("When this step starts:")).toBeTruthy();
     expect(screen.getByText("When this step ends:")).toBeTruthy();
+    expect(
+      screen.getByTestId("step-1-profile-session-start-reuse").getAttribute(ARIA_PRESSED),
+    ).toBe(ARIA_TRUE);
+    expect(
+      screen.getByTestId("step-1-profile-session-end-complete").getAttribute(ARIA_PRESSED),
+    ).toBe(ARIA_TRUE);
 
-    fireEvent.click(screen.getByTestId("step-1-profile-session-start-new"));
+    fireEvent.click(screen.getByTestId(START_NEW_TEST_ID));
     fireEvent.click(screen.getByTestId("step-1-profile-session-end-park"));
 
     expect(onUpdate).toHaveBeenNthCalledWith(1, { profile_session_start_policy: "new" });
@@ -107,6 +116,10 @@ describe("WorkflowStepAgentProfileSelector", () => {
     expect(screen.getByRole("heading", { name: "Agent Profile" })).toBeTruthy();
     fireEvent.click(screen.getByTestId("step-1-profile-session-lifecycle-select"));
     expect(screen.getByRole("heading", { name: "Session lifecycle" })).toBeTruthy();
+    expect(screen.getByTestId(START_NEW_TEST_ID).getAttribute(ARIA_PRESSED)).toBe(ARIA_TRUE);
+    expect(screen.getByTestId("step-1-profile-session-end-park").getAttribute(ARIA_PRESSED)).toBe(
+      ARIA_TRUE,
+    );
   });
 
   it("keeps the current profile and policy visible while read-only", () => {
@@ -122,11 +135,21 @@ describe("WorkflowStepAgentProfileSelector", () => {
     expect(screen.getByTestId("agent-logo-codex")).toBeTruthy();
   });
 
-  it("keeps profile switching disabled when conditional session settings are configured", () => {
-    const { trigger } = renderSelector({
+  it("keeps lifecycle editing available when conditional session settings are configured", () => {
+    const { onUpdate, trigger } = renderSelector({
       events: { on_enter: [{ type: "configure_session", config: { rules: [] } }] },
     });
 
-    expect((trigger as HTMLButtonElement).disabled).toBe(true);
+    expect((trigger as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(trigger);
+    expect(screen.getByTestId("step-1-agent-profile-help")).toBeTruthy();
+    expect(
+      screen.getByTestId("step-1-profile-option-profile-b").getAttribute("data-disabled"),
+    ).toBe("true");
+
+    fireEvent.click(screen.getByTestId("step-1-profile-session-lifecycle-select"));
+    expect((screen.getByTestId(START_NEW_TEST_ID) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByTestId(START_NEW_TEST_ID));
+    expect(onUpdate).toHaveBeenCalledWith({ profile_session_start_policy: "new" });
   });
 });

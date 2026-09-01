@@ -781,7 +781,12 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 	// The claim removes the marker durably and a repository implementation may
 	// return a freshly materialized task on a later read; source ownership must
 	// be captured while this delivery still owns the descriptor.
-	sourceStep := s.loadQueuePromotionSourceStep(ctx, task)
+	sourceStep, sourceErr := s.loadQueuePromotionSourceStep(ctx, task)
+	if sourceErr != nil {
+		s.logger.Warn("task.queue_promoted: failed to load source step",
+			zap.String("task_id", task.ID), zap.Error(sourceErr))
+		return
+	}
 	if !s.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuePromotionPending) {
 		return
 	}
@@ -1151,20 +1156,29 @@ func hasQueuePromotionPending(task *models.Task) bool {
 	return pending
 }
 
-func (s *Service) loadQueuePromotionSourceStep(ctx context.Context, task *models.Task) *wfmodels.WorkflowStep {
+func (s *Service) loadWorkflowStepForLifecycle(ctx context.Context, stepID, role string) (*wfmodels.WorkflowStep, error) {
+	if stepID == "" {
+		return nil, fmt.Errorf("%s workflow step ID is empty", role)
+	}
+	if s.workflowStepGetter == nil {
+		return nil, fmt.Errorf("workflow step getter is unavailable for %s workflow step %q", role, stepID)
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, stepID)
+	if err != nil {
+		return nil, fmt.Errorf("load %s workflow step %q: %w", role, stepID, err)
+	}
+	if step == nil {
+		return nil, fmt.Errorf("%s workflow step %q was not found", role, stepID)
+	}
+	return step, nil
+}
+
+func (s *Service) loadQueuePromotionSourceStep(ctx context.Context, task *models.Task) (*wfmodels.WorkflowStep, error) {
 	sourceStepID := queuePromotionSourceStep(task)
-	if sourceStepID == "" || s.workflowStepGetter == nil {
-		return nil
+	if sourceStepID == "" {
+		return nil, nil
 	}
-	step, err := s.workflowStepGetter.GetStep(ctx, sourceStepID)
-	if err != nil || step == nil {
-		s.logger.Warn("failed to load source step for queue promotion",
-			zap.String("task_id", task.ID),
-			zap.String("source_step_id", sourceStepID),
-			zap.Error(err))
-		return nil
-	}
-	return step
+	return s.loadWorkflowStepForLifecycle(ctx, sourceStepID, "queue promotion source")
 }
 
 func queuePromotionSourceStep(task *models.Task) string {
@@ -1752,33 +1766,43 @@ func (s *Service) fromStepAndTargetForTaskMoved(
 		)
 		return
 	}
-	go s.processStepExitAndEnterWithSteps(
-		context.WithoutCancel(ctx), data.TaskID, session, fromStep, targetStep,
-		data.FromStepID, data.ToStepID, data.TaskDescription, data.QueuePromotion,
-	)
+	go func() {
+		if err := s.processStepExitAndEnterWithSteps(
+			context.WithoutCancel(ctx), data.TaskID, session, fromStep, targetStep,
+			data.FromStepID, data.ToStepID, data.TaskDescription, data.QueuePromotion,
+		); err != nil {
+			s.logger.Warn("task.moved: step exit and enter lifecycle failed",
+				zap.String("task_id", data.TaskID),
+				zap.String("from_step_id", data.FromStepID),
+				zap.String("to_step_id", data.ToStepID),
+				zap.Error(err))
+		}
+	}()
 }
 
 func (s *Service) processStepExit(ctx context.Context, taskID string, session *models.TaskSession, fromStepID string) {
-	fromStep, err := s.workflowStepGetter.GetStep(ctx, fromStepID)
-	if err != nil || fromStep == nil {
+	fromStep, err := s.loadWorkflowStepForLifecycle(ctx, fromStepID, "queued move source")
+	if err != nil {
 		s.logger.Warn("failed to load from-step for queued move on_exit",
 			zap.String("step_id", fromStepID), zap.Error(err))
 		return
 	}
-	s.processStepExitWithStep(ctx, taskID, session, fromStep, fromStepID)
+	if err := s.processStepExitWithStep(ctx, taskID, session, fromStep, fromStepID); err != nil {
+		s.logger.Warn("failed to process queued move on_exit",
+			zap.String("task_id", taskID), zap.String("step_id", fromStepID), zap.Error(err))
+	}
 }
 
-func (s *Service) processStepExitWithStep(ctx context.Context, taskID string, session *models.TaskSession, fromStep *wfmodels.WorkflowStep, fromStepID string) {
+func (s *Service) processStepExitWithStep(ctx context.Context, taskID string, session *models.TaskSession, fromStep *wfmodels.WorkflowStep, fromStepID string) error {
 	if fromStep == nil {
 		var err error
-		fromStep, err = s.workflowStepGetter.GetStep(ctx, fromStepID)
-		if err != nil || fromStep == nil {
-			s.logger.Warn("failed to load from-step for queued move on_exit",
-				zap.String("step_id", fromStepID), zap.Error(err))
-			return
+		fromStep, err = s.loadWorkflowStepForLifecycle(ctx, fromStepID, "queued move source")
+		if err != nil {
+			return err
 		}
 	}
 	s.processOnExit(ctx, taskID, session, fromStep)
+	return nil
 }
 
 // ensureQueuedMoveExitDescriptor records the source step on the durable
@@ -1887,7 +1911,11 @@ func (s *Service) processQueuedMoveExit(
 	if s.onQueuedMoveExitStart != nil {
 		s.onQueuedMoveExitStart()
 	}
-	s.processStepExitWithStep(ctx, taskID, session, fromStep, fromStepID)
+	if err := s.processStepExitWithStep(ctx, taskID, session, fromStep, fromStepID); err != nil {
+		s.logger.Warn("failed to process queued move on_exit",
+			zap.String("task_id", taskID), zap.String("step_id", fromStepID), zap.Error(err))
+		return
+	}
 	if !s.persistQueuedMoveExitCompletion(ctx, taskID) {
 		return
 	}
@@ -1990,10 +2018,15 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 	if s.onManualMoveLifecycleStart != nil {
 		s.onManualMoveLifecycleStart()
 	}
-	s.processStepExitAndEnterWithSteps(
+	if err := s.processStepExitAndEnterWithSteps(
 		ctx, taskID, session, fromStep, targetStep,
 		fromStepID, toStepID, taskDescription, false,
-	)
+	); err != nil {
+		s.logger.Warn("manual move lifecycle stopped before completion",
+			zap.String("task_id", taskID), zap.String("from_step_id", fromStepID),
+			zap.String("to_step_id", toStepID), zap.Error(err))
+		return
+	}
 	if !s.persistManualMoveLifecycleCompletion(ctx, taskID) {
 		return
 	}
@@ -2015,9 +2048,15 @@ func (s *Service) continueQueuedMoveLifecycle(ctx context.Context, taskID, vacat
 // processStepExitAndEnter runs the on_exit → clear review → reload session → on_enter
 // sequence for a step transition. Used by handleTaskMovedWithSession (where MoveTask
 // already persisted the step change in the DB).
-func (s *Service) processStepExitAndEnter(ctx context.Context, taskID string, session *models.TaskSession, fromStepID, toStepID, taskDescription string) {
+func (s *Service) processStepExitAndEnter(ctx context.Context, taskID string, session *models.TaskSession, fromStepID, toStepID, taskDescription string) error {
 	// Process on_exit for the step we're leaving
-	s.processStepExitAndEnterWithSteps(ctx, taskID, session, nil, nil, fromStepID, toStepID, taskDescription, false)
+	if err := s.processStepExitAndEnterWithSteps(ctx, taskID, session, nil, nil, fromStepID, toStepID, taskDescription, false); err != nil {
+		s.logger.Warn("step exit and enter lifecycle failed",
+			zap.String("task_id", taskID), zap.String("from_step_id", fromStepID),
+			zap.String("to_step_id", toStepID), zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 func (s *Service) processStepExitAndEnterWithSteps(
@@ -2026,36 +2065,38 @@ func (s *Service) processStepExitAndEnterWithSteps(
 	session *models.TaskSession,
 	fromStep, targetStep *wfmodels.WorkflowStep,
 	fromStepID, toStepID, taskDescription string, queuePromotion bool,
-) {
+) error {
 	if fromStep == nil {
 		var err error
-		fromStep, err = s.workflowStepGetter.GetStep(ctx, fromStepID)
-		if err != nil || fromStep == nil {
-			s.logger.Warn("failed to load from-step for on_exit",
-				zap.String("step_id", fromStepID),
-				zap.Error(err))
-		} else {
-			s.processOnExit(ctx, taskID, session, fromStep)
+		fromStep, err = s.loadWorkflowStepForLifecycle(ctx, fromStepID, "transition source")
+		if err != nil {
+			if queuePromotion {
+				s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, "task.moved source lookup")
+			}
+			return err
 		}
-	} else {
-		s.processOnExit(ctx, taskID, session, fromStep)
 	}
+	s.processOnExit(ctx, taskID, session, fromStep)
 
 	if targetStep == nil {
 		var err error
-		targetStep, err = s.workflowStepGetter.GetStep(ctx, toStepID)
-		if err != nil || targetStep == nil {
-			s.logger.Warn("failed to load target step for on_enter",
-				zap.String("step_id", toStepID),
-				zap.Error(err))
-			return
+		targetStep, err = s.loadWorkflowStepForLifecycle(ctx, toStepID, "transition target")
+		if err != nil {
+			if queuePromotion {
+				s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, "task.moved target lookup")
+			}
+			return err
 		}
 	}
 
 	clearReview := targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent)
-	if err := s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview, fromStep); err != nil && queuePromotion {
-		s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, "task.moved")
+	if err := s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview, fromStep); err != nil {
+		if queuePromotion {
+			s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, "task.moved")
+		}
+		return err
 	}
+	return nil
 }
 
 // finalizeStepEnter optionally clears review status, reloads the session, and
@@ -5238,14 +5279,15 @@ func (s *Service) applyEngineTransitionWithCommit(
 
 	terminalTarget := s.workflowStepIsTerminal(ctx, targetStep.ID)
 
-	fromStep, err := s.workflowStepGetter.GetStep(ctx, result.FromStepID)
+	fromStep, err := s.loadWorkflowStepForLifecycle(ctx, result.FromStepID, "transition source")
 	if err != nil {
 		s.logger.Warn("failed to load from-step for on_exit",
 			zap.String("step_id", result.FromStepID),
 			zap.Error(err))
-	} else {
-		s.processOnExit(ctx, taskID, session, fromStep)
+		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		return false
 	}
+	s.processOnExit(ctx, taskID, session, fromStep)
 
 	// A ResultHolder is only attached when this transition will actually
 	// trigger on_enter (triggerOnEnter) — an on_turn_start transition never

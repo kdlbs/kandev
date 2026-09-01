@@ -196,6 +196,7 @@ function LifecycleOptionList({
             disabled={readOnly}
             className="flex min-h-11 w-full cursor-pointer flex-col items-start justify-center rounded-md border border-transparent px-3 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[selected=true]:border-primary/40 data-[selected=true]:bg-primary/5"
             data-selected={selectedStart === option.value}
+            aria-pressed={selectedStart === option.value}
             data-testid={`${step.id}-profile-session-start-${option.value}`}
             onClick={() => onStartSelect(option.value)}
           >
@@ -217,6 +218,7 @@ function LifecycleOptionList({
             disabled={readOnly}
             className="flex min-h-11 w-full cursor-pointer flex-col items-start justify-center rounded-md border border-transparent px-3 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[selected=true]:border-primary/40 data-[selected=true]:bg-primary/5"
             data-selected={selectedEnd === option.value}
+            aria-pressed={selectedEnd === option.value}
             data-testid={`${step.id}-profile-session-end-${option.value}`}
             onClick={() => onEndSelect(option.value)}
           >
@@ -314,7 +316,7 @@ function SelectorSurface({
         </div>
         <LifecycleOptionList
           step={step}
-          readOnly={readOnly || hasConditionalSessionConfig}
+          readOnly={readOnly}
           onStartSelect={(profileSessionStartPolicy) =>
             onUpdate({ profile_session_start_policy: profileSessionStartPolicy })
           }
@@ -341,11 +343,7 @@ function SelectorSurface({
         onSelect={selectProfile}
       />
       <div className="border-t border-border p-2">
-        <LifecycleNavigation
-          step={step}
-          readOnly={readOnly || hasConditionalSessionConfig}
-          onOpen={() => setView("session")}
-        />
+        <LifecycleNavigation step={step} readOnly={readOnly} onOpen={() => setView("session")} />
       </div>
     </div>
   );
@@ -420,7 +418,7 @@ export function WorkflowStepAgentProfileSelector({
   const wasOpenRef = useRef(false);
   const selectedProfile = profiles.find((profile) => profile.id === step.agent_profile_id);
   const hasConditionalSessionConfig = hasOnEnterAction(step, "configure_session");
-  const disabled = readOnly || hasConditionalSessionConfig;
+  const disabled = readOnly;
   const dirty = isWorkflowStepValueDirty(step, savedStep, (item) =>
     JSON.stringify({
       agent_profile_id: item.agent_profile_id ?? "",

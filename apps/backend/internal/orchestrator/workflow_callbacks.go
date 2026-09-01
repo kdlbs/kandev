@@ -123,8 +123,11 @@ func switchWorkflowDispatcher(svc *Service) engine.DispatchTriggerFn {
 		if trigger == engine.TriggerOnEnter {
 			var err error
 			var sourceStep *wfmodels.WorkflowStep
-			if sourceStepID != "" && svc.workflowStepGetter != nil {
-				sourceStep, _ = svc.workflowStepGetter.GetStep(ctx, sourceStepID)
+			if sourceStepID != "" {
+				sourceStep, err = svc.loadWorkflowStepForLifecycle(ctx, sourceStepID, "workflow switch source")
+				if err != nil {
+					return err
+				}
 			}
 			sessionID, preloadedState, err = svc.prepareDirectWorkflowStepEntry(ctx, taskID, sessionID, sourceStep)
 			if err != nil {
