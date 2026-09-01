@@ -259,11 +259,6 @@ type Config struct {
 	// AutoApprove automatically approves permission requests
 	AutoApprove bool
 
-	// ApprovalPolicy controls when the agent requests approval.
-	// Valid values: "untrusted" (always), "on-failure", "on-request", "never".
-	// Defaults to "on-request" if empty.
-	ApprovalPolicy string
-
 	// McpServers is a list of MCP servers to configure for the agent
 	McpServers []McpServerConfig
 
@@ -323,7 +318,6 @@ func (c *Config) ToSharedConfig() *shared.Config {
 	return &shared.Config{
 		WorkDir:                   c.WorkDir,
 		AutoApprove:               c.AutoApprove,
-		ApprovalPolicy:            c.ApprovalPolicy,
 		McpServers:                mcpServers,
 		AgentID:                   c.AgentID,
 		AgentName:                 c.AgentName,

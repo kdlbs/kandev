@@ -256,17 +256,29 @@ func TestMCPPlanTruncationGuard_CreateOverExistingPlanWarns(t *testing.T) {
 	}
 }
 
-// failingRevisionsRepo wraps the real sqlite repository but forces
-// ListTaskPlanRevisions to always fail, simulating a transient lookup
+// failingRevisionsRepo wraps the real sqlite repository but can force
+// GetLatestTaskPlanRevision to fail on demand, simulating a transient lookup
 // failure (e.g. SQLITE_BUSY) that happens after GetPlan has already
-// succeeded.
+// succeeded. This is the call evaluatePlanWriteGuard actually makes to learn
+// the prior revision number (via PlanService.GetLatestRevision).
+//
+// GetLatestTaskPlanRevision is also called by upsertPlan itself (to decide
+// whether to coalesce) on every create/update, so failGetLatestRevision is a
+// single-shot flag rather than an unconditional failure: tests arm it
+// immediately before the call they want to fail, and it self-clears so the
+// write's own internal lookup (which runs after the guard's) still succeeds.
 type failingRevisionsRepo struct {
 	*sqlite.Repository
-	failGetPlan bool
+	failGetPlan           bool
+	failGetLatestRevision bool
 }
 
-func (r *failingRevisionsRepo) ListTaskPlanRevisions(context.Context, string, int) ([]*models.TaskPlanRevision, error) {
-	return nil, errors.New("simulated revision lookup failure")
+func (r *failingRevisionsRepo) GetLatestTaskPlanRevision(ctx context.Context, taskID string) (*models.TaskPlanRevision, error) {
+	if r.failGetLatestRevision {
+		r.failGetLatestRevision = false
+		return nil, errors.New("simulated revision lookup failure")
+	}
+	return r.Repository.GetLatestTaskPlanRevision(ctx, taskID)
 }
 
 func (r *failingRevisionsRepo) GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error) {
@@ -278,8 +290,8 @@ func (r *failingRevisionsRepo) GetTaskPlan(ctx context.Context, taskID string) (
 }
 
 // newMCPPlanTestHandlersWithFailingRevisionLookup builds Handlers like
-// newMCPPlanTestHandlers, but backed by a plan service whose ListRevisions
-// call always fails.
+// newMCPPlanTestHandlers, but backed by a plan service whose
+// GetLatestRevision call can be armed to fail once (single-shot).
 func newMCPPlanTestHandlersWithFailingRevisionLookup(t *testing.T) (*Handlers, *failingRevisionsRepo) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
@@ -338,14 +350,14 @@ func newMCPPlanTestHandlersWithFailingRevisionLookup(t *testing.T) (*Handlers, *
 // TestMCPPlanTruncationGuard_RevisionLookupFailureOmitsRevisionNumber pins
 // Review round 2 Finding 3: revision numbering starts at 1
 // (NextTaskPlanRevisionNumber), so "plan revision 0" can never be a real
-// revision. When ListRevisions fails after GetPlan has already detected a
+// revision. When GetLatestRevision fails after GetPlan has already detected a
 // truncating write, evaluatePlanWriteGuard must still force a new revision
 // and still warn — silently returning an empty guard here would let the
 // coalescing path overwrite the only surviving copy of the pre-truncation
 // content — but the rendered warning must not claim the content lives in
 // revision 0.
 func TestMCPPlanTruncationGuard_RevisionLookupFailureOmitsRevisionNumber(t *testing.T) {
-	h, _ := newMCPPlanTestHandlersWithFailingRevisionLookup(t)
+	h, repo := newMCPPlanTestHandlersWithFailingRevisionLookup(t)
 	ctx := context.Background()
 
 	large := strings.Repeat("x", 40000)
@@ -362,6 +374,7 @@ func TestMCPPlanTruncationGuard_RevisionLookupFailureOmitsRevisionNumber(t *test
 
 	// Check the guard directly before the write mutates the stored plan, so
 	// "existing" below is still the large content.
+	repo.failGetLatestRevision = true
 	guard := h.evaluatePlanWriteGuard(ctx, mcpPlanTaskID, small)
 	if !guard.forceNewRevision {
 		t.Error("forceNewRevision must stay true even when the revision lookup fails, " +
@@ -373,7 +386,15 @@ func TestMCPPlanTruncationGuard_RevisionLookupFailureOmitsRevisionNumber(t *test
 	if strings.Contains(guard.warning, "revision 0") {
 		t.Errorf("warning names a nonexistent revision 0 (revision numbering starts at 1): %q", guard.warning)
 	}
+	if guard.priorRevision != 0 {
+		t.Errorf("priorRevision must be 0 when the revision lookup fails, got %d", guard.priorRevision)
+	}
 
+	// Arm the failure again for the guard's own lookup inside the write path.
+	// It self-clears after firing once, so the write's own internal
+	// GetLatestTaskPlanRevision call (upsertPlan's coalesce decision) still
+	// succeeds and the update itself is not blocked.
+	repo.failGetLatestRevision = true
 	out, err := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan,
 		mustMarshalPlanPayload(t, map[string]any{
 			"task_id": mcpPlanTaskID,

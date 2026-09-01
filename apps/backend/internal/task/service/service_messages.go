@@ -352,17 +352,19 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 		return nil, false, err
 	}
 	limit := req.Limit
-	if limit <= 0 && (req.Before != "" || req.After != "") {
+	if limit <= 0 && (req.Before != "" || req.After != "" || req.Around != "" || req.AuthorType != "") {
 		limit = DefaultMessagesPageSize
 	}
 	if limit > MaxMessagesPageSize {
 		limit = MaxMessagesPageSize
 	}
 	return s.messages.ListMessagesPaginated(ctx, req.TaskSessionID, models.ListMessagesOptions{
-		Limit:  limit,
-		Before: req.Before,
-		After:  req.After,
-		Sort:   req.Sort,
+		Limit:      limit,
+		Before:     req.Before,
+		After:      req.After,
+		Sort:       req.Sort,
+		AuthorType: req.AuthorType,
+		Around:     req.Around,
 	})
 }
 

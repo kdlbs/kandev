@@ -453,6 +453,12 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		}
 		s.executeQueuedMessageWithReservation(data.SessionID, deferredLifecycleDispatch, deferredLifecycleReservation)
 	}()
+	var deferredPassthroughRunning func()
+	defer func() {
+		if deferredPassthroughRunning != nil {
+			deferredPassthroughRunning()
+		}
+	}()
 
 	if s.isSessionResetInProgress(data.SessionID) {
 		s.logger.Debug("ignoring agent.ready while session reset is in progress",
@@ -724,7 +730,20 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			return
 		}
 		if queuedMsg.Content != "" {
-			if err := s.deliverPassthroughPrompt(ctx, data.SessionID, queuedMsg.Content); err != nil {
+			var err error
+			if preparer, ok := s.agentManager.(passthroughRunningPreparer); ok {
+				deferredPassthroughRunning, err = preparer.PreparePassthroughRunning(data.SessionID)
+				if err != nil {
+					s.logger.Warn("failed to prepare passthrough as running before queued prompt",
+						zap.String("session_id", data.SessionID),
+						zap.Error(err))
+					return
+				}
+				err = s.writePassthroughPrompt(ctx, data.SessionID, queuedMsg.Content)
+			} else {
+				err = s.deliverPassthroughPrompt(ctx, data.SessionID, queuedMsg.Content)
+			}
+			if err != nil {
 				s.logger.Warn("failed to deliver queued message to passthrough",
 					zap.String("session_id", data.SessionID),
 					zap.Error(err))
@@ -1337,7 +1356,8 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 }
 
 func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.AgentEventData) {
-	data = s.withDynamicAttemptEvidence(data)
+	data = s.withPromptAttemptEvidence(data)
+	defer s.clearPromptAttemptEvidence(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
 	s.logger.Warn("handling agent failed",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),

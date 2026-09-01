@@ -12,6 +12,9 @@ var ErrWorkspaceNotFound = errors.New("workspace not found")
 // ErrTaskNotFound reports that no task row matched the supplied id.
 var ErrTaskNotFound = errors.New("task not found")
 
+// ErrMessageNotFound reports that no message row matched the supplied id.
+var ErrMessageNotFound = errors.New("message not found")
+
 // ErrTaskParentMismatch reports that a task no longer has the parent/workspace
 // relation a cross-task mutation was authorized against.
 var ErrTaskParentMismatch = errors.New("task parent relation no longer matches")

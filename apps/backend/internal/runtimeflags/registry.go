@@ -122,6 +122,23 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.officeSessionIdentity",
+			EnvVar:      "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY",
+			Kind:        KindFeature,
+			Label:       "Office per-agent session identity",
+			Description: "Keys an Office task's session identity on the run's own agent instead of the task's runner seat, and binds an agent's decision re-evaluation to its own calling session.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Changes durable Office session identity: each participant agent gets its own session per task instead of sharing the runner's, and existing session rows are not migrated. " +
+				"Enable only after the companion (task_id, agent_profile_id) unique-index fix has shipped, since pre-existing duplicate rows are otherwise exposed.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.OfficeSessionIdentity },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.OfficeSessionIdentity = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "debug.devMode",
 			EnvVar:      "KANDEV_DEBUG_DEV_MODE",
 			Kind:        KindDebug,

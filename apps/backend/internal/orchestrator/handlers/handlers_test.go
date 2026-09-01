@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -36,6 +37,26 @@ func TestWsRecoverSessionCancelRetryReportsServiceResult(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(response.Payload, &payload))
 	require.False(t, payload.Cancelled)
+}
+
+func TestBranchRecoveryConflictResponsePreservesRecoveryDetails(t *testing.T) {
+	msg := createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{})
+	err := &orchestrator.BranchRecoveryError{
+		Cause:          errors.New("branch is gone"),
+		SessionID:      "session-1",
+		RepositoryID:   "repo-1",
+		OriginalBranch: "feature/lost",
+		BaseBranch:     "main",
+	}
+
+	response, responseErr := branchRecoveryConflictResponse(msg, err)
+	require.NoError(t, responseErr)
+	require.NotNil(t, response)
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeConflict, payload.Code)
+	require.Equal(t, "feature/lost", payload.Details["original_branch"])
+	require.Equal(t, "main", payload.Details["base_branch"])
+	require.Equal(t, "resume_new_branch", payload.Details["recovery_action"])
 }
 
 func TestWsEnsureSessionRequestParsesAutoStartOverride(t *testing.T) {

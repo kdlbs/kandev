@@ -845,7 +845,7 @@ func (s *Service) handleTaskCreated(ctx context.Context, data watcher.TaskEventD
 		}
 		return
 	}
-	if task.IsFromOffice || !models.HasAutoStartOnCreateIntent(task.Metadata) {
+	if !autoStartOnCreateActionable(task) {
 		return
 	}
 	if !s.claimTaskEventMetadata(ctx, task, models.MetaKeyAutoStartOnCreate) {
@@ -926,6 +926,14 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 		s.logger.Warn("failed to list completed manual move lifecycle tokens for recovery", zap.Error(err))
 		return
 	}
+	autoStarts, err := lister.ListTasksWithMetadataKey(ctx, models.MetaKeyAutoStartOnCreate)
+	if err != nil {
+		s.logger.Warn("failed to list auto-start-on-create tokens for recovery", zap.Error(err))
+		return
+	}
+	// autoStarts is the raw, pre-filter list; only entries that pass
+	// autoStartOnCreateActionable below are added to jobs, so it is left out
+	// of this capacity hint rather than causing routine over-allocation.
 	jobs := make(map[string]struct{}, len(pending)+len(promotions)+len(manualPending)+len(manualCompleted))
 	for _, task := range pending {
 		if task != nil {
@@ -944,6 +952,15 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 	}
 	for _, task := range manualCompleted {
 		if task != nil {
+			jobs[task.ID] = struct{}{}
+		}
+	}
+	for _, task := range autoStarts {
+		// ListTasksWithMetadataKey matches key EXISTENCE, which is broader
+		// than what handleTaskCreated will act on. Rows it refuses keep their
+		// key forever, so admitting them would schedule work that can never
+		// converge, on every single startup.
+		if autoStartOnCreateActionable(task) {
 			jobs[task.ID] = struct{}{}
 		}
 	}
@@ -1054,12 +1071,16 @@ func (s *Service) recoverTaskLifecycleAttempt(ctx context.Context, taskID string
 	if _, pending := task.Metadata[models.MetaKeyQueuePromotionPending]; pending {
 		s.handleTaskQueuePromoted(ctx, watcher.TaskEventData{TaskID: taskID})
 	}
+	if autoStartOnCreateActionable(task) {
+		s.recoverAutoStartOnCreate(ctx, task)
+	}
 	latest, err := s.repo.GetTask(ctx, taskID)
 	if err != nil || latest == nil {
 		return false
 	}
 	return queuedMoveExitPending(latest) || manualMoveLifecyclePending(latest) ||
-		manualMoveLifecycleCompleted(latest) || hasQueuePromotionPending(latest)
+		manualMoveLifecycleCompleted(latest) || hasQueuePromotionPending(latest) ||
+		autoStartOnCreateActionable(latest)
 }
 
 func (s *Service) recoverQueuedMoveExit(ctx context.Context, task *models.Task) bool {
@@ -1121,6 +1142,62 @@ func hasQueuePromotionPending(task *models.Task) bool {
 	}
 	_, pending := task.Metadata[models.MetaKeyQueuePromotionPending]
 	return pending
+}
+
+// autoStartOnCreateActionable reports whether the startup sweep can still act
+// on a task's create-time auto-start opt-in (models.MetaKeyAutoStartOnCreate).
+//
+// It must stay identical to handleTaskCreated's own guard, because the sweep
+// both admits jobs and decides "retry" with it. ListTasksWithMetadataKey
+// matches key existence, but handleTaskCreated requires a positive bool and
+// skips office tasks, and it returns BEFORE claiming the key in either case.
+// Treating existence alone as "pending" therefore produced a token no code
+// path could clear: recovery saw it still present, reported retry, and burned
+// the whole attempt budget on every startup, with the row re-listed on the
+// next one indefinitely. Every other key in this sweep is cleared by its
+// handler, and docs/specs/startup-listener-before-recovery/spec.md attributes
+// a non-converging boot loop to lifecycle tokens that stay pending, so a token
+// class the sweep cannot drain is a regression rather than a cosmetic mismatch.
+func autoStartOnCreateActionable(task *models.Task) bool {
+	if task == nil || task.IsFromOffice {
+		return false
+	}
+	return models.HasAutoStartOnCreateIntent(task.Metadata)
+}
+
+// recoverAutoStartOnCreate replays a lost task.created delivery for a task that
+// still carries an actionable create-time opt-in.
+//
+// The opt-in is NOT proof that no launch happened. handleTaskCreated is the
+// only function that claims this key; a manual StartTask, a task.moved
+// auto-start and handleTaskQueuePromoted all launch without touching it. So
+// after a lost delivery — the very failure this sweep repairs — an operator
+// starting the task by hand leaves the token behind, and replaying it here
+// would launch a second agent onto a task that is already running or already
+// finished. Neither autoStartTaskForStep nor startTask has an existing-session
+// guard, so that launch would go all the way through.
+func (s *Service) recoverAutoStartOnCreate(ctx context.Context, task *models.Task) {
+	sessions, err := s.repo.ListTaskSessions(ctx, task.ID)
+	if err != nil {
+		// Leave the token untouched. The caller's exit check still sees it as
+		// actionable and spends one of its bounded attempts retrying.
+		s.logger.Warn("failed to check existing sessions before auto-start-on-create recovery",
+			zap.String("task_id", task.ID), zap.Error(err))
+		return
+	}
+	if len(sessions) > 0 {
+		// The task was started by one of those other paths, so this one-shot
+		// token is spent. Claim it rather than merely skipping, so the row
+		// converges instead of being re-scanned on every future startup.
+		if s.claimTaskEventMetadata(ctx, task, models.MetaKeyAutoStartOnCreate) {
+			s.logger.Info("discarded spent auto-start-on-create token: task already has a session",
+				zap.String("task_id", task.ID), zap.Int("session_count", len(sessions)))
+		}
+		return
+	}
+	// Re-enter handleTaskCreated exactly like a live delivery would, so the
+	// office/opt-in/claim guards run once, in one place.
+	s.handleTaskCreated(ctx, watcher.TaskEventData{TaskID: task.ID})
 }
 
 func waitForLifecycleRecovery(ctx context.Context) bool {
@@ -2204,6 +2281,11 @@ func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, cu
 	if err != nil {
 		return nil, fmt.Errorf("failed to get db task for session switch: %w", err)
 	}
+	if s.profileExecutionResolver != nil {
+		if err := s.profileExecutionResolver.ValidateProfile(ctx, newAgentProfileID); err != nil {
+			return nil, fmt.Errorf("failed to validate workflow replacement profile: %w", err)
+		}
+	}
 
 	// Create a new session with the new agent profile.
 	// Reuse the same executor profile from the current session.
@@ -2211,18 +2293,34 @@ func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, cu
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare new session: %w", err)
 	}
+	newSession, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get new session: %w", err)
+	}
+	launchProfileID, err := s.resolveDynamicLaunchExecution(ctx, newSession, newAgentProfileID, true)
+	if err != nil {
+		resolutionErr := fmt.Errorf("failed to resolve workflow replacement profile: %w", err)
+		if deleteErr := s.repo.DeleteTaskSession(ctx, sessionID); deleteErr != nil {
+			s.logger.Warn("failed to delete workflow replacement after profile resolution failure",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(deleteErr))
+			if terminalErr := s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, resolutionErr.Error()); terminalErr != nil {
+				s.logger.Warn("failed to terminalize workflow replacement after delete failure",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.Error(terminalErr))
+			}
+		}
+		return nil, resolutionErr
+	}
 	if _, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{
-		AgentProfileID: newAgentProfileID,
+		AgentProfileID: launchProfileID,
 		ExecutorID:     currentSession.ExecutorID,
 		WorkflowStepID: dbTask.WorkflowStepID,
 		StartAgent:     false,
 	}); err != nil {
 		return nil, fmt.Errorf("failed to attach workflow replacement workspace: %w", err)
-	}
-
-	newSession, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get new session: %w", err)
 	}
 
 	// Tag the session as workflow-spawned for provenance: its agent profile
@@ -2440,11 +2538,14 @@ dispatchLoop:
 				result.aborted = true
 				break dispatchLoop
 			}
-		case wfmodels.OnEnterQueueRun, wfmodels.OnEnterRunCodeReview:
-			// Engine-owned per the spec, but their on_enter dispatch (AC-A7/
-			// AC-A8) is explicitly deferred to a later Build round — see
-			// docs/specs/workflow-on-enter-action-dispatch/spec.md. This is a
-			// known, recognized type, not the AC-A6 default warning case.
+		case wfmodels.OnEnterQueueRun, wfmodels.OnEnterRunCodeReview, wfmodels.OnEnterEnsureParticipantSeat:
+			// Session-independent, ledger-owned: engine.DispatchStepEntry
+			// (internal/workflow/engine/entrydispatch.go) dispatches these
+			// synchronously after commit via every step-transition writer
+			// (Repository.dispatchStepEntry in step_entry_dispatch.go).
+			// processOnEnter must not also dispatch them here or they would
+			// run twice — see docs/specs/workflow-on-enter-action-dispatch/spec.md.
+			// This is a known, recognized type, not the AC-A6 default warning case.
 		default:
 			// AC-A6: a genuinely unrecognized on_enter action type. Warn
 			// instead of silently discarding it — this is the exact failure
@@ -3291,18 +3392,22 @@ func (s *Service) dispatchTakenQueuedMessage(ctx context.Context, sessionID stri
 	return true
 }
 
+type passthroughRunningPreparer interface {
+	PreparePassthroughRunning(sessionID string) (func(), error)
+}
+
 // deliverPassthroughPrompt writes a prompt to PTY stdin and marks the session as running.
 // Uses the per-agent PlanPassthroughStdinChunks so Claude's inter-chunk SubmitDelay is
 // honored here too (queued / workflow-auto-start path); other agents stay on the single
 // atomic write. Falls back to the simple "\r" append if config resolution fails so a
 // transient lookup error never silently swallows the prompt.
+//
+// Callers that already hold the per-session cancellation guard must use
+// PreparePassthroughRunning + writePassthroughPrompt instead (see handleAgentReady); this
+// function publishes agent.running synchronously and will re-enter the guard via the event
+// subscriber. Remaining callers: autoStartPassthroughPrompt (workflow auto-start) and the
+// legacy non-preparer fallback in handleAgentReady.
 func (s *Service) deliverPassthroughPrompt(ctx context.Context, sessionID, content string) error {
-	pt, cfgErr := s.agentManager.ResolvePassthroughConfig(ctx, sessionID)
-	if cfgErr != nil {
-		s.logger.Warn("failed to resolve passthrough config, falling back to \\r submit",
-			zap.String("session_id", sessionID),
-			zap.Error(cfgErr))
-	}
 	// Mark RUNNING before any writes so concurrent PromptTask / queued-message
 	// delivery is blocked by checkSessionPromptable during the inter-chunk
 	// SubmitDelay window (150ms for Claude). Mark error is non-fatal.
@@ -3310,6 +3415,19 @@ func (s *Service) deliverPassthroughPrompt(ctx context.Context, sessionID, conte
 		s.logger.Warn("failed to mark passthrough as running before prompt",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+	}
+	return s.writePassthroughPrompt(ctx, sessionID, content)
+}
+
+// writePassthroughPrompt writes a prompt to PTY stdin without changing runtime
+// state. The ready-event path uses this after preparing the running state so it
+// can publish the captured event after releasing the session guard.
+func (s *Service) writePassthroughPrompt(ctx context.Context, sessionID, content string) error {
+	pt, cfgErr := s.agentManager.ResolvePassthroughConfig(ctx, sessionID)
+	if cfgErr != nil {
+		s.logger.Warn("failed to resolve passthrough config, falling back to \\r submit",
+			zap.String("session_id", sessionID),
+			zap.Error(cfgErr))
 	}
 	if cfgErr != nil {
 		if err := s.agentManager.WritePassthroughStdin(ctx, sessionID, content+"\r"); err != nil {

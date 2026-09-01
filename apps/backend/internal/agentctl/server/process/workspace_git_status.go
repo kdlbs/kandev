@@ -786,23 +786,44 @@ func carryRemoteSnapshot(update *types.GitStatusUpdate, prior types.GitStatusUpd
 	update.RemoteBehind = prior.RemoteBehind
 }
 
-// parseGitStatusOutput runs git status --porcelain and populates the file lists and map.
+// parseGitStatusOutput collects tracked status and eligible untracked paths,
+// then populates the file lists and map.
 func (wt *WorkspaceTracker) parseGitStatusOutput(ctx context.Context, update *types.GitStatusUpdate) error {
-	// --untracked-files=all shows all files in untracked directories, not just
-	// the directory name. GIT_OPTIONAL_LOCKS=0 prevents the status read from
-	// taking .git/index.lock, while the carried observation class keeps fresh
-	// user requests interactive.
+	class := gitWorkClass(ctx)
+	indexSnapshot, cleanup, err := snapshotGitIndex(ctx, wt.gitIndexPath)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	statusCtx := withGitIndexFile(ctx, indexSnapshot)
+
+	// The tracked query must not receive the dependency-tree exclusion: tracked
+	// paths below node_modules remain part of the workspace status. The
+	// lockless read and carried observation class preserve the existing Git
+	// admission and index-lock behavior.
 	statusOut, err := wt.runGitOutputClass(
-		ctx,
-		gitWorkClass(ctx),
+		statusCtx,
+		class,
 		true,
-		"status", "--porcelain", "--untracked-files=all",
+		"status", "--porcelain", "--untracked-files=no",
 	)
 	if err != nil {
 		return err
 	}
 
-	return wt.applyPorcelainOutput(ctx, statusOut, update)
+	if err := wt.applyPorcelainOutput(ctx, statusOut, update); err != nil {
+		return err
+	}
+
+	if wt.gitStatusBetweenQueries != nil {
+		wt.gitStatusBetweenQueries()
+	}
+
+	untrackedOut, err := wt.runGitOutputClass(statusCtx, class, true, gitUntrackedFilesArgs...)
+	if err != nil {
+		return err
+	}
+	return wt.applyUntrackedOutput(ctx, untrackedOut, update)
 }
 
 func (wt *WorkspaceTracker) applyPorcelainOutput(

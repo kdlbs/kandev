@@ -148,6 +148,64 @@ func TestStop_MissingSessionReportsRuntimeNotFound(t *testing.T) {
 	})
 }
 
+func TestStopSessionSynchronouslyWaitsForAgentTeardown(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-sync"] = &models.TaskSession{
+		ID: "session-sync", TaskID: "task-sync", State: models.TaskSessionStateRunning,
+	}
+	stopCalls := make(chan string, 1)
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-sync", nil
+		},
+		stopAgentWithReasonFunc: func(_ context.Context, executionID, _ string, _ bool) error {
+			stopCalls <- executionID
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+
+	if err := exec.StopSessionSynchronously(context.Background(), "session-sync", "cleanup", true); err != nil {
+		t.Fatalf("StopSessionSynchronously: %v", err)
+	}
+	select {
+	case executionID := <-stopCalls:
+		if executionID != "execution-sync" {
+			t.Fatalf("stopped execution = %q, want execution-sync", executionID)
+		}
+	default:
+		t.Fatal("synchronous stop returned before agent teardown ran")
+	}
+	if got := repo.sessions["session-sync"].State; got != models.TaskSessionStateCancelled {
+		t.Fatalf("session state = %q, want CANCELLED", got)
+	}
+}
+
+func TestStopSessionSynchronouslyStopsLateExecutionAfterSessionDeletion(t *testing.T) {
+	repo := newMockRepository()
+	repo.getTaskSessionFunc = func(context.Context, string) (*models.TaskSession, error) {
+		return nil, fmt.Errorf("session deleted: %w", models.ErrTaskSessionNotFound)
+	}
+	stopCalls := make(chan string, 1)
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-late", nil
+		},
+		stopAgentWithReasonFunc: func(_ context.Context, executionID, _ string, _ bool) error {
+			stopCalls <- executionID
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+
+	if err := exec.StopSessionSynchronously(context.Background(), "session-deleted", "cleanup", true); err != nil {
+		t.Fatalf("StopSessionSynchronously: %v", err)
+	}
+	if got := <-stopCalls; got != "execution-late" {
+		t.Fatalf("stopped execution = %q, want execution-late", got)
+	}
+}
+
 func TestStopSessionDetailed_RejectsInvalidSession(t *testing.T) {
 	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
 

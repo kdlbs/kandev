@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { formatTimeDistance, useDateLocale } from "@/lib/i18n/date-locale";
-import { IconArchive, IconArrowRight, IconHammer, IconLoader2 } from "@tabler/icons-react";
+import { IconArrowRight, IconLoader2 } from "@tabler/icons-react";
 import { CommandEmpty, CommandGroup, CommandItem, CommandShortcut } from "@kandev/ui/command";
 import { Badge } from "@kandev/ui/badge";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
@@ -17,6 +17,11 @@ import type { FileSearchResult } from "@/lib/types/backend";
 import { FileIcon } from "@/components/ui/file-icon";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
 import { groupByRepositoryName, isSingleRepoGroup } from "@/lib/group-by-repo";
+import { getTaskStateIconLabelKey, TaskStateIcon } from "@/components/task/task-state-icon";
+import {
+  resolveTaskResultActivity,
+  type CommandPanelLiveTask,
+} from "@/lib/commands/task-result-activity";
 
 const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
 
@@ -96,13 +101,28 @@ type TaskResultItemProps = {
   task: Task;
   stepMap: StepMap;
   repoMap: Map<string, string>;
+  liveTasksById: Map<string, CommandPanelLiveTask>;
+  lastStepIdByWorkflowId: ReadonlyMap<string, string>;
   onSelect: (task: Task) => void;
 };
 
-function TaskResultItem({ task, stepMap, repoMap, onSelect }: TaskResultItemProps) {
+function TaskResultItem({
+  task,
+  stepMap,
+  repoMap,
+  liveTasksById,
+  lastStepIdByWorkflowId,
+  onSelect,
+}: TaskResultItemProps) {
+  const { t } = useTranslation();
   const locale = useDateLocale();
   const isArchived = ARCHIVED_STATES.has(task.state);
-  const step = stepMap.get(task.workflow_step_id);
+  const activity = resolveTaskResultActivity(
+    task,
+    liveTasksById.get(task.id),
+    lastStepIdByWorkflowId,
+  );
+  const step = stepMap.get(activity.workflowStepId);
   const stepHex = step ? STEP_COLOR_MAP[step.color] : undefined;
   const rawPath =
     task.primary_working_directory ??
@@ -123,11 +143,7 @@ function TaskResultItem({ task, stepMap, repoMap, onSelect }: TaskResultItemProp
       forceMount
     >
       <div className="flex items-center gap-2 min-w-0 w-full">
-        {isArchived ? (
-          <IconArchive className="size-3 shrink-0 text-muted-foreground" />
-        ) : (
-          <IconHammer className="size-3 shrink-0 text-muted-foreground" />
-        )}
+        <TaskStateIcon {...activity} accessibleLabel={t(getTaskStateIconLabelKey(activity))} />
         {/* The title identifies the row, so it takes the free space and the
             non-shrinking badge and metadata cannot squeeze it away. Metadata is
             secondary and steps aside entirely on a phone. */}
@@ -156,6 +172,8 @@ type TaskResultGroupProps = {
   search: string;
   stepMap: StepMap;
   repoMap: Map<string, string>;
+  liveTasksById: Map<string, CommandPanelLiveTask>;
+  lastStepIdByWorkflowId: ReadonlyMap<string, string>;
   onSelect: (task: Task) => void;
   testId?: string;
 };
@@ -165,6 +183,8 @@ function TaskResultGroup({
   search,
   stepMap,
   repoMap,
+  liveTasksById,
+  lastStepIdByWorkflowId,
   onSelect,
   testId,
 }: TaskResultGroupProps) {
@@ -182,6 +202,8 @@ function TaskResultGroup({
           task={task}
           stepMap={stepMap}
           repoMap={repoMap}
+          liveTasksById={liveTasksById}
+          lastStepIdByWorkflowId={lastStepIdByWorkflowId}
           onSelect={onSelect}
         />
       ))}
@@ -209,6 +231,8 @@ type CommandsListContentProps = {
   isSearching: boolean;
   stepMap: StepMap;
   repoMap: Map<string, string>;
+  liveTasksById: Map<string, CommandPanelLiveTask>;
+  lastStepIdByWorkflowId: ReadonlyMap<string, string>;
   onTaskSelect: (task: Task) => void;
 };
 
@@ -289,6 +313,8 @@ export function CommandsListContent({
   isSearching,
   stepMap,
   repoMap,
+  liveTasksById,
+  lastStepIdByWorkflowId,
   onTaskSelect,
 }: CommandsListContentProps) {
   const { t } = useTranslation();
@@ -302,6 +328,8 @@ export function CommandsListContent({
         search={search}
         stepMap={stepMap}
         repoMap={repoMap}
+        liveTasksById={liveTasksById}
+        lastStepIdByWorkflowId={lastStepIdByWorkflowId}
         onSelect={onTaskSelect}
         testId="command-panel-task-preview"
       />
@@ -327,6 +355,8 @@ type TaskSearchContentProps = {
   search: string;
   stepMap: StepMap;
   repoMap: Map<string, string>;
+  liveTasksById: Map<string, CommandPanelLiveTask>;
+  lastStepIdByWorkflowId: ReadonlyMap<string, string>;
   onSelect: (task: Task) => void;
 };
 
@@ -336,6 +366,8 @@ export function TaskSearchContent({
   search,
   stepMap,
   repoMap,
+  liveTasksById,
+  lastStepIdByWorkflowId,
   onSelect,
 }: TaskSearchContentProps) {
   const { t } = useTranslation();
@@ -353,6 +385,8 @@ export function TaskSearchContent({
       search={search}
       stepMap={stepMap}
       repoMap={repoMap}
+      liveTasksById={liveTasksById}
+      lastStepIdByWorkflowId={lastStepIdByWorkflowId}
       onSelect={onSelect}
       testId="command-panel-task-results"
     />

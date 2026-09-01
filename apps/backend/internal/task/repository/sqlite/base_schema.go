@@ -43,6 +43,7 @@ func (r *Repository) initSchema() error {
 		r.healDuplicateTaskEnvironments,
 		r.ensureTaskEnvironmentTaskUniqueIndex,
 		r.healSessionTaskEnvironmentIDs,
+		r.migrateGitSnapshotOwnership,
 		r.ensureWorkspaceIndexes,
 		r.ensureMessageMetadataIndexes,
 		r.ensurePromptOrderIndex,
@@ -165,15 +166,19 @@ func (r *Repository) ensureMessageMetadataIndexes() error {
 	return nil
 }
 
-// ensurePromptOrderIndex creates the additive expression index
-// (task_session_id, normalized_microsecond(created_at), id) that makes the
-// prompt-ordering window pass index-only. Read-time derived prompt ordinals
-// need no data-column or table-shape migration; this one additive index is
-// the only schema change.
+// ensurePromptOrderIndex creates additive expression indexes for prompt-order
+// reads. The user-only index also puts author_type before the ordering key, so
+// filtered prompt pages skip interleaved agent and tool rows.
 func (r *Repository) ensurePromptOrderIndex() error {
 	ddl := dialect.PromptOrderIndexDDL(r.db.DriverName(), "idx_messages_prompt_order", "task_session_messages")
 	if _, err := r.db.Exec(ddl); err != nil {
 		return fmt.Errorf("create prompt-order index: %w", err)
+	}
+	userDDL := dialect.PromptUserOrderIndexDDL(
+		r.db.DriverName(), "idx_messages_prompt_user_order", "task_session_messages",
+	)
+	if _, err := r.db.Exec(userDDL); err != nil {
+		return fmt.Errorf("create prompt-user-order index: %w", err)
 	}
 	return nil
 }
@@ -1012,7 +1017,8 @@ func (r *Repository) initGitSchema() error {
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS task_session_git_snapshots (
 		id TEXT PRIMARY KEY,
-		session_id TEXT NOT NULL,
+		task_environment_id TEXT NOT NULL,
+		session_id TEXT,
 		snapshot_type TEXT NOT NULL,
 		branch TEXT NOT NULL,
 		remote_branch TEXT DEFAULT '',
@@ -1024,7 +1030,8 @@ func (r *Repository) initGitSchema() error {
 		triggered_by TEXT DEFAULT '',
 		metadata TEXT DEFAULT '{}',
 		created_at TIMESTAMP NOT NULL,
-		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+		FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE,
+		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE SET NULL
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_git_snapshots_session ON task_session_git_snapshots(session_id, created_at DESC);

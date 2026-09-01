@@ -1601,6 +1601,14 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 	return execution, nil
 }
 
+func bindSessionToTaskEnvironment(session *models.TaskSession, env *models.TaskEnvironment) {
+	if session == nil || env == nil {
+		return
+	}
+	session.TaskEnvironmentID = env.ID
+	session.WorkspacePath = env.WorkspacePath
+}
+
 func assignLaunchTaskEnvironmentID(session *models.TaskSession, existingEnv *models.TaskEnvironment) {
 	if existingEnv != nil && existingEnv.ID != "" {
 		session.TaskEnvironmentID = existingEnv.ID
@@ -1768,20 +1776,22 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 	out := make([]RepoSpec, 0, len(allRepos))
 	for _, info := range allRepos {
 		spec := RepoSpec{
-			TaskRepositoryID:        info.TaskRepositoryID,
-			RepositoryID:            info.RepositoryID,
-			RepositoryPath:          info.RepositoryPath,
-			BaseBranch:              info.BaseBranch,
-			CheckoutBranch:          info.CheckoutBranch,
-			PRNumber:                info.PRNumber,
-			RemoteContribution:      info.RemoteContribution,
-			ContributionDestination: info.ContributionDestination,
-			ComparisonTarget:        info.ComparisonTarget,
-			WorktreeBranchPrefix:    info.WorktreeBranchPrefix,
-			WorktreeBranchTemplate:  info.WorktreeBranchTemplate,
-			PullBeforeWorktree:      info.PullBeforeWorktree,
-			RemoteSyncHandled:       info.RemoteSyncHandled,
-			RefreshRepository:       info.RefreshRepository,
+			TaskRepositoryID:           info.TaskRepositoryID,
+			RepositoryID:               info.RepositoryID,
+			RepositoryPath:             info.RepositoryPath,
+			BaseBranch:                 info.BaseBranch,
+			CheckoutBranch:             info.CheckoutBranch,
+			PRNumber:                   info.PRNumber,
+			RemoteContribution:         info.RemoteContribution,
+			ContributionDestination:    info.ContributionDestination,
+			ComparisonTarget:           info.ComparisonTarget,
+			WorktreeBranchPrefix:       info.WorktreeBranchPrefix,
+			WorktreeBranchTemplate:     info.WorktreeBranchTemplate,
+			PullBeforeWorktree:         info.PullBeforeWorktree,
+			RemoteSyncHandled:          info.RemoteSyncHandled,
+			RefreshRepository:          info.RefreshRepository,
+			RefreshRepositoryWithState: info.RefreshRepositoryWithState,
+			RemoteRefState:             info.RemoteRefState,
 		}
 		if info.Repository != nil {
 			spec.RepoName = info.Repository.Name
@@ -1853,6 +1863,8 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
 		req.RemoteSyncHandled = repoInfo.RemoteSyncHandled
 		req.RefreshRepository = repoInfo.RefreshRepository
+		req.RefreshRepositoryWithState = repoInfo.RefreshRepositoryWithState
+		req.RemoteRefState = repoInfo.RemoteRefState
 		if repoInfo.Repository != nil {
 			req.DefaultBranch = repoInfo.Repository.DefaultBranch
 			if req.UseWorktree {
@@ -2243,7 +2255,7 @@ func (e *Executor) persistTaskEnvironment(
 		// session elected to materialize a still-CREATING canonical environment
 		// (shared_group), which must run the normal finalize path below.
 		if existingEnv.TaskID != "" && existingEnv.TaskID != taskID && !isInitialMaterializer {
-			session.TaskEnvironmentID = existingEnv.ID
+			bindSessionToTaskEnvironment(session, existingEnv)
 			return nil
 		}
 		previousStatus := existingEnv.Status
@@ -2299,7 +2311,7 @@ func (e *Executor) persistTaskEnvironment(
 						zap.String("task_id", taskID), zap.String("env_id", existingEnv.ID), zap.Error(err))
 					return fmt.Errorf("finalize task environment materialization: %w", err)
 				}
-				session.TaskEnvironmentID = existingEnv.ID
+				bindSessionToTaskEnvironment(session, existingEnv)
 				e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
 				return nil
 			}
@@ -2351,7 +2363,7 @@ func (e *Executor) persistTaskEnvironment(
 				zap.Error(err))
 			return fmt.Errorf("update task environment: %w", err)
 		}
-		session.TaskEnvironmentID = existingEnv.ID
+		bindSessionToTaskEnvironment(session, existingEnv)
 		e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
 		return nil
 	}
@@ -2381,7 +2393,7 @@ func (e *Executor) persistTaskEnvironment(
 			zap.Error(err))
 		return fmt.Errorf("create task environment: %w", err)
 	}
-	session.TaskEnvironmentID = env.ID
+	bindSessionToTaskEnvironment(session, env)
 	e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
 	return nil
 }

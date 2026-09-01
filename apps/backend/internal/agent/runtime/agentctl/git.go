@@ -30,6 +30,7 @@ type PRCreateResult struct {
 	Provider     string `json:"provider,omitempty"`
 	Output       string `json:"output,omitempty"`
 	Error        string `json:"error,omitempty"`
+	ErrorCode    string `json:"error_code,omitempty"`
 }
 
 // GitPull performs a git pull operation on the worktree.

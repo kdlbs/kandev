@@ -390,6 +390,9 @@ type GitSnapshotRepository interface {
 	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	GetLatestGitSnapshotsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]*models.GitSnapshot, error)
+	GetLatestGitSnapshotByTaskEnvironmentID(ctx context.Context, taskEnvironmentID string) (*models.GitSnapshot, error)
+	GetLatestGitSnapshotsByTaskEnvironmentIDs(ctx context.Context, taskEnvironmentIDs []string) (map[string]*models.GitSnapshot, error)
+	GetLatestGitStatusSnapshotsByTaskEnvironmentIDs(ctx context.Context, taskEnvironmentIDs []string) ([]*models.GitSnapshot, error)
 	GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	GetGitSnapshotsBySession(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error)
 	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) (bool, error)

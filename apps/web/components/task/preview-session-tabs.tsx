@@ -13,7 +13,7 @@ import type { AgentProfileOption } from "@/lib/state/slices";
 import type { TaskSession } from "@/lib/types/http";
 import { sendMessageRequest } from "@/hooks/use-message-handler";
 import type { ChatSubmitPayload } from "./chat/chat-input-container";
-import { EnsureSessionErrorEmptyState } from "./ensure-session-error";
+import { EnsureSessionErrorEmptyState, SessionRecoveryFeedback } from "./ensure-session-error";
 import { PassthroughToolbar } from "./passthrough-toolbar";
 import { TaskChatPanel } from "./task-chat-panel";
 import {
@@ -71,7 +71,7 @@ export function PreviewSessionTabs({
   // Mirrors the full-page task view: ensure the backend execution for the
   // active session is ready (resumes / restores workspace after a kandev
   // restart where the session row is persisted but agentctl isn't alive).
-  useSessionResumption(taskId, activeSessionId);
+  const resumption = useSessionResumption(taskId, activeSessionId);
 
   const tabs = useMemo<SessionTab[]>(
     () =>
@@ -102,11 +102,19 @@ export function PreviewSessionTabs({
     }
     if (ensureSession?.status === "error") {
       return (
-        <EnsureSessionErrorEmptyState
-          error={ensureSession.error}
-          onRetry={ensureSession.retry}
-          workspaceId={workspaceId ?? null}
-        />
+        <>
+          <SessionRecoveryFeedback
+            error={resumption.error}
+            notice={resumption.notice}
+            onRetry={() => void resumption.resumeSession()}
+            workspaceId={workspaceId ?? null}
+          />
+          <EnsureSessionErrorEmptyState
+            error={ensureSession.error}
+            onRetry={ensureSession.retry}
+            workspaceId={workspaceId ?? null}
+          />
+        </>
       );
     }
     return <PreviewEmptyState />;
@@ -114,6 +122,12 @@ export function PreviewSessionTabs({
 
   return (
     <div className="flex h-full flex-col min-h-0" data-testid="preview-session-tabs">
+      <SessionRecoveryFeedback
+        error={resumption.error}
+        notice={resumption.notice}
+        onRetry={() => void resumption.resumeSession()}
+        workspaceId={workspaceId ?? null}
+      />
       <div className="border-b px-2 py-1">
         <SessionTabs
           tabs={tabs}
