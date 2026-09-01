@@ -322,11 +322,13 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 		waitCtx, cancel := appctx.Detached(ctx, m.stopCh, 60*time.Second)
 		defer cancel()
 
-		client := execution.GetAgentCtlClient()
+		client, releaseClient := execution.AcquireAgentCtlClient()
 		if client == nil {
 			return
 		}
-		if err := client.WaitForReady(waitCtx, 60*time.Second); err != nil {
+		err := client.WaitForReady(waitCtx, 60*time.Second)
+		releaseClient()
+		if err != nil {
 			m.logger.Error("agentctl not ready for workspace stream connection",
 				zap.String("execution_id", execution.ID),
 				zap.Error(err))
@@ -650,7 +652,10 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		}
 		return nil, err
 	}
-	m.publishCreatedExecution(ctx, runtimeInstance, execution, executionID, taskID)
+	if err := m.publishCreatedExecution(ctx, runtimeInstance, execution, executionID, taskID); err != nil {
+		m.rollbackRegisteredLaunch(rt, runtimeInstance, execution, "runtime secret persistence failed")
+		return nil, err
+	}
 
 	return execution, nil
 }
@@ -872,8 +877,9 @@ func (m *Manager) initializeCreatedExecution(
 	}
 	_, sessionSpan := tracing.TraceSessionStart(context.Background(), taskID, info.SessionID, executionID)
 	execution.SetSessionSpan(sessionSpan)
-	if client := execution.GetAgentCtlClient(); client != nil {
+	if client, releaseClient := execution.AcquireAgentCtlClient(); client != nil {
 		client.SetTraceContext(execution.SessionTraceContext())
+		releaseClient()
 	}
 	return execution
 }
@@ -884,13 +890,15 @@ func (m *Manager) publishCreatedExecution(
 	execution *AgentExecution,
 	executionID string,
 	taskID string,
-) {
+) error {
 	m.setRuntimeInterest(execution.SessionID, true)
 
 	// Persist agentctl auth token only after the execution is tracked, so a
 	// race-lost rollback never leaves an orphaned secret in the store.
 	if execution.RuntimeName != agentruntime.RuntimeKubernetes {
-		m.persistRuntimeSecrets(ctx, runtimeInstance, execution)
+		if err := m.persistRuntimeSecrets(ctx, runtimeInstance, execution); err != nil {
+			return err
+		}
 	}
 	go m.pollOneRemoteStatus(context.Background(), execution)
 
@@ -906,6 +914,7 @@ func (m *Manager) publishCreatedExecution(
 		zap.String("task_id", taskID),
 		zap.String("workspace_path", execution.WorkspacePath),
 		zap.Stringer("runtime", execution.RuntimeName))
+	return nil
 }
 
 func (m *Manager) reconcileWorkspaceWorktrees(ctx context.Context, taskID string, info *WorkspaceInfo) error {
@@ -967,7 +976,9 @@ func (m *Manager) rollbackRacedExecution(ctx context.Context, rt ExecutorBackend
 				zap.Error(stopErr))
 		}
 	}
-	if client := execution.GetAgentCtlClient(); client != nil {
+	execution.agentctlLifecycleMu.Lock()
+	defer execution.agentctlLifecycleMu.Unlock()
+	if client := execution.currentAgentCtlClient(); client != nil { // protected by agentctlLifecycleMu
 		client.Close()
 	}
 	execution.EndSessionSpan()
@@ -985,10 +996,47 @@ const (
 	MetadataKeyContainerControlAuthSecret = "env_secret_id_CONTAINER_AGENTCTL_CONTROL_TOKEN"
 )
 
-func (m *Manager) persistRuntimeSecrets(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
-	m.persistAuthToken(ctx, instance, execution)
-	m.persistBootstrapNonce(ctx, instance, execution)
-	m.persistContainerControlAuthToken(ctx, instance, execution)
+func (m *Manager) persistRuntimeSecrets(
+	ctx context.Context,
+	instance *ExecutorInstance,
+	execution *AgentExecution,
+) error {
+	if instance == nil || execution == nil {
+		return errors.New("persist runtime secrets: runtime identity is unavailable")
+	}
+	secretValues := []struct {
+		metadataKey string
+		namePrefix  string
+		value       string
+	}{
+		{MetadataKeyAuthTokenSecret, "agentctl-auth", instance.AuthToken},
+		{MetadataKeyBootstrapNonceSecret, "agentctl-bootstrap", instance.BootstrapNonce},
+	}
+	if instance.ContainerID != "" {
+		secretValues = append(secretValues, struct {
+			metadataKey string
+			namePrefix  string
+			value       string
+		}{MetadataKeyContainerControlAuthSecret, "agentctl-container-control", instance.AuthToken})
+	}
+	created := make(map[string]bool, len(secretValues))
+	for _, secretValue := range secretValues {
+		if secretValue.value == "" {
+			continue
+		}
+		wasCreated, err := m.persistRuntimeSecretResult(
+			ctx, instance, execution, secretValue.metadataKey, secretValue.namePrefix, secretValue.value,
+		)
+		created[secretValue.metadataKey] = wasCreated
+		if err != nil {
+			cleanupErr := m.deleteCreatedRuntimeSecrets(ctx, execution, created)
+			return errors.Join(
+				fmt.Errorf("persist runtime secret %s: %w", secretValue.metadataKey, err),
+				cleanupErr,
+			)
+		}
+	}
+	return nil
 }
 
 func (m *Manager) persistRequiredKubernetesRuntimeSecrets(

@@ -19,10 +19,11 @@ import (
 
 // inMemorySecretStore implements secrets.SecretStore for testing.
 type inMemorySecretStore struct {
-	mu        sync.RWMutex
-	store     map[string]*secrets.SecretWithValue
-	err       error
-	revealErr error
+	mu                  sync.RWMutex
+	store               map[string]*secrets.SecretWithValue
+	err                 error
+	revealErr           error
+	rejectCanceledCalls bool
 }
 
 type failNthCreateSecretStore struct {
@@ -60,7 +61,10 @@ func newInMemorySecretStore() *inMemorySecretStore {
 }
 
 // Create stores the secret, returning the injected error when set.
-func (s *inMemorySecretStore) Create(_ context.Context, secret *secrets.SecretWithValue) error {
+func (s *inMemorySecretStore) Create(ctx context.Context, secret *secrets.SecretWithValue) error {
+	if s.rejectCanceledCalls && ctx.Err() != nil {
+		return ctx.Err()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.err != nil {
@@ -74,7 +78,10 @@ func (s *inMemorySecretStore) Create(_ context.Context, secret *secrets.SecretWi
 }
 
 // Get returns the stored secret for the given ID, or an error when absent.
-func (s *inMemorySecretStore) Get(_ context.Context, id string) (*secrets.Secret, error) {
+func (s *inMemorySecretStore) Get(ctx context.Context, id string) (*secrets.Secret, error) {
+	if s.rejectCanceledCalls && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if sw, ok := s.store[id]; ok {
@@ -84,7 +91,10 @@ func (s *inMemorySecretStore) Get(_ context.Context, id string) (*secrets.Secret
 }
 
 // Reveal returns the plaintext value for the given ID, or an error when absent.
-func (s *inMemorySecretStore) Reveal(_ context.Context, id string) (string, error) {
+func (s *inMemorySecretStore) Reveal(ctx context.Context, id string) (string, error) {
+	if s.rejectCanceledCalls && ctx.Err() != nil {
+		return "", ctx.Err()
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.revealErr != nil {
@@ -97,7 +107,10 @@ func (s *inMemorySecretStore) Reveal(_ context.Context, id string) (string, erro
 }
 
 // Update changes the stored name/value.
-func (s *inMemorySecretStore) Update(_ context.Context, id string, req *secrets.UpdateSecretRequest) error {
+func (s *inMemorySecretStore) Update(ctx context.Context, id string, req *secrets.UpdateSecretRequest) error {
+	if s.rejectCanceledCalls && ctx.Err() != nil {
+		return ctx.Err()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	stored, ok := s.store[id]
@@ -114,7 +127,10 @@ func (s *inMemorySecretStore) Update(_ context.Context, id string, req *secrets.
 }
 
 // Delete removes a stored secret.
-func (s *inMemorySecretStore) Delete(_ context.Context, id string) error {
+func (s *inMemorySecretStore) Delete(ctx context.Context, id string) error {
+	if s.rejectCanceledCalls && ctx.Err() != nil {
+		return ctx.Err()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.store[id]; !ok {
@@ -513,6 +529,29 @@ func TestRegisterKubernetesExecutionPersistsRequiredSecretReferencesBeforeSucces
 	}
 }
 
+func TestRegisterNonKubernetesExecutionRollsBackWhenRuntimeSecretPersistenceFails(t *testing.T) {
+	store := newInMemorySecretStore()
+	store.err = errors.New("secret store unavailable")
+	mgr := newTestManager(t)
+	mgr.SetSecretStore(store)
+	execution := &AgentExecution{
+		ID: "execution-1", TaskID: "task-1", SessionID: "session-1",
+		AgentProfileID: "profile-1", RuntimeName: agentruntime.RuntimeDocker,
+		Status: v1.AgentStatusStarting, metadata: map[string]interface{}{},
+	}
+	instance := &ExecutorInstance{InstanceID: execution.ID, AuthToken: "agentctl-token"}
+	backend := &stopTrackingExecutor{MockExecutor: MockExecutor{name: executor.NameDocker}}
+
+	err := mgr.registerAndPublishExecution(
+		context.Background(), execution, backend, instance, execution.SessionID,
+	)
+
+	require.ErrorContains(t, err, "persist runtime secret")
+	require.Equal(t, 1, backend.stopCalls)
+	_, exists := mgr.executionStore.Get(execution.ID)
+	require.False(t, exists)
+}
+
 func TestRegisterKubernetesExecutionRollsBackCreatedSecretsOnPersistenceFailure(t *testing.T) {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	store := &failNthCreateSecretStore{inMemorySecretStore: newInMemorySecretStore(), failAt: 2}
@@ -649,6 +688,44 @@ func TestStopKubernetesExecutionDeletesRuntimeSecretsAfterTerminalCleanup(t *tes
 	if len(store.store) != 0 {
 		t.Fatalf("runtime secrets after cleanup = %#v, want none", store.store)
 	}
+}
+
+func TestStopKubernetesExecutionDeletesRuntimeSecretsAfterRequestCancellation(t *testing.T) {
+	store := newInMemorySecretStore()
+	for id, value := range map[string]string{
+		"kandev-runtime:execution-1:agentctl-auth":      "agentctl-token",
+		"kandev-runtime:execution-1:agentctl-bootstrap": "bootstrap-nonce",
+	} {
+		require.NoError(t, store.Create(context.Background(), &secrets.SecretWithValue{
+			Secret: secrets.Secret{ID: id, Name: id}, Value: value,
+		}))
+	}
+	store.rejectCanceledCalls = true
+	log := newTestLogger()
+	backend := &stopTrackingExecutor{MockExecutor: MockExecutor{name: executor.NameKubernetes}}
+	executors := NewExecutorRegistry(log)
+	executors.Register(backend)
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, executors, nil, nil, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	cleanupManagerStopCh(t, mgr)
+	mgr.SetSecretStore(store)
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID: "execution-1", TaskID: "task-1", SessionID: "session-1",
+		RuntimeName: agentruntime.RuntimeKubernetes, Status: v1.AgentStatusRunning,
+		metadata: map[string]interface{}{
+			MetadataKeyAuthTokenSecret:      "kandev-runtime:execution-1:agentctl-auth",
+			MetadataKeyBootstrapNonceSecret: "kandev-runtime:execution-1:agentctl-bootstrap",
+		},
+	}))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := mgr.StopAgentWithReason(ctx, "execution-1", StopReasonTaskDeleted, true)
+
+	require.NoError(t, err)
+	require.Empty(t, store.store)
 }
 
 func TestForceStopKubernetesExecutionDeletesRuntimeSecretsWithoutTerminalReason(t *testing.T) {

@@ -102,6 +102,20 @@ describe("Kubernetes settings API", () => {
     expect(new Headers(lastCall().init?.headers).get("X-Trace")).toBe("trace-1");
     expect(JSON.parse(String(lastCall().init?.body))).toEqual(request);
   });
+
+  it.each([
+    new Headers({ "X-Trace": "headers-object" }),
+    [["X-Trace", "tuple-list"]] as [string, string][],
+  ])("preserves every HeadersInit representation", async (headers) => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ success: true, steps: [], warnings: [] }));
+
+    await testKubernetesConnection({ config: { auth_mode: "in_cluster" } }, { init: { headers } });
+
+    expect(new Headers(lastCall().init?.headers).get("X-Trace")).toBe(
+      headers instanceof Headers ? "headers-object" : "tuple-list",
+    );
+    expect(new Headers(lastCall().init?.headers).get("Content-Type")).toBe("application/json");
+  });
 });
 
 describe("Kubernetes session API", () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStoreApi } from "@/components/state-provider";
 import {
   createExecutor,
   createExecutorProfile,
@@ -20,14 +20,14 @@ import type {
   KubernetesTestRequest,
   KubernetesTestResult,
 } from "@/lib/types/http-kubernetes";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 
 export { kubernetesExecutorSettingsPath } from "@/lib/settings/executor-settings-routes";
 
 const SESSION_REFRESH_INTERVAL_MS = 90_000;
 
 export function useKubernetesAdminAccess(): boolean {
-  const role = useAppStore((state) => state.auth.user?.role);
-  return role === undefined || role === "admin";
+  return useIsAdmin();
 }
 
 export function useKubernetesDiagnostics() {

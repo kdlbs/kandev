@@ -10,7 +10,9 @@ export function buildProfileEnvVars(
   isSprites: boolean,
   spritesSecretId: string | null,
 ): ProfileEnvVar[] {
-  const vars = rowsToEnvVars(rows).filter((envVar) => envVar.key !== SPRITES_TOKEN_KEY);
+  const vars = rowsToEnvVars(rows).filter(
+    (envVar) => !isSprites || envVar.key !== SPRITES_TOKEN_KEY,
+  );
   if (isSprites && spritesSecretId) {
     vars.push({ key: SPRITES_TOKEN_KEY, secret_id: spritesSecretId });
   }

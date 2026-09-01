@@ -1160,6 +1160,12 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 		if configErr != nil {
 			return nil, "", executorConfig{}, nil, existingRunning, configErr
 		}
+		if err := lifecycle.ValidateKubernetesResumeMetadata(
+			metadata, task.ID, session.ID, execConfig.ExecutorCfg,
+		); err != nil {
+			return nil, "", executorConfig{}, nil, existingRunning,
+				fmt.Errorf("validate recorded Kubernetes runtime for resume: %w", err)
+		}
 	} else {
 		execConfig = e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
 	}

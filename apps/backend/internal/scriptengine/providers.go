@@ -221,12 +221,12 @@ func agentctlProvider(agentctlPort int, workspacePath, binaryPath, startCommand 
 		if startCommand != "" {
 			startScript = fmt.Sprintf(
 				"nohup %s --port %s --workdir %s > /tmp/agentctl.log 2>&1 &\nsleep 1",
-				startCommand, portStr, workspacePath,
+				shellQuote(startCommand), portStr, shellQuote(workspacePath),
 			)
 		}
 		return map[string]string{
 			"kandev.agentctl.port":    portStr,
-			"kandev.agentctl.install": "chmod +x " + binaryPath,
+			"kandev.agentctl.install": "chmod +x " + shellQuote(binaryPath),
 			"kandev.agentctl.start":   startScript,
 		}
 	}

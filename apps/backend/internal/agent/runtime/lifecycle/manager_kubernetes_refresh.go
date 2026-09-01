@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
+	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func (m *Manager) refreshTrackedRemoteInstance(
@@ -31,11 +35,50 @@ func (m *Manager) refreshTrackedRemoteInstanceOnce(
 	if !exists || current != execution {
 		return nil
 	}
-	refresh, err := refresher.RefreshRemoteInstance(ctx, m.remoteStatusInstance(ctx, execution))
+	instance, err := m.kubernetesRefreshStatusInstance(ctx, execution)
+	if err != nil {
+		return err
+	}
+	refresh, err := refresher.RefreshRemoteInstance(ctx, instance)
 	if err != nil || refresh == nil {
 		return err
 	}
 	return m.applyTrackedRemoteRefresh(ctx, execution, refresh)
+}
+
+type kubernetesExecutorReader interface {
+	GetExecutor(ctx context.Context, id string) (*models.Executor, error)
+}
+
+func (m *Manager) kubernetesRefreshStatusInstance(
+	ctx context.Context,
+	execution *AgentExecution,
+) (*ExecutorInstance, error) {
+	instance := m.remoteStatusInstance(ctx, execution)
+	if execution == nil || execution.RuntimeName != agentruntime.RuntimeKubernetes {
+		return instance, nil
+	}
+	reader, ok := m.runningWriter.(kubernetesExecutorReader)
+	executorID := strings.TrimSpace(getMetadataString(instance.Metadata, "executor_id"))
+	if !ok || executorID == "" {
+		return instance, nil
+	}
+	current, err := reader.GetExecutor(ctx, executorID)
+	if err != nil {
+		return nil, fmt.Errorf("load current Kubernetes executor %q for refresh: %w", executorID, err)
+	}
+	if current == nil || current.Type != models.ExecutorTypeKubernetes {
+		return nil, fmt.Errorf("current executor %q is not a Kubernetes executor", executorID)
+	}
+	config, err := kubeexecutor.ParseExecutorConfig(current.Config)
+	if err != nil {
+		return nil, fmt.Errorf("parse current Kubernetes executor %q for refresh: %w", executorID, err)
+	}
+	for _, key := range kubernetesConnectionMetadataKeys {
+		instance.Metadata[key] = current.Config[key]
+	}
+	instance.Metadata[MetadataKeyKubernetesExecutorConfigHash] = kubernetesConfigHash(config)
+	return instance, nil
 }
 
 func (m *Manager) applyTrackedRemoteRefresh(
@@ -177,6 +220,9 @@ func (m *Manager) persistActiveKubernetesRefresh(
 	if m.secretStore == nil || m.runningWriter == nil {
 		return nil, errors.New("persist Kubernetes remote refresh: durable stores are unavailable")
 	}
+	persistCtx, cancelPersist := kubernetesDurableContext(ctx)
+	defer cancelPersist()
+	ctx = persistCtx
 	oldMetadata := execution.MetadataSnapshot()
 	authID := getMetadataString(oldMetadata, MetadataKeyAuthTokenSecret)
 	nonceID := getMetadataString(oldMetadata, MetadataKeyBootstrapNonceSecret)
@@ -197,18 +243,20 @@ func (m *Manager) persistActiveKubernetesRefresh(
 	if err := m.secretStore.Update(ctx, authID, &secrets.UpdateSecretRequest{Value: &instance.AuthToken}); err != nil {
 		return nil, fmt.Errorf("rotate Kubernetes auth token: %w", err)
 	}
-	execution.mergeMetadata(instance.Metadata)
+	rollbackMetadata := execution.mergeMetadataWithRollback(instance.Metadata)
 	if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
-		execution.replaceMetadataSnapshot(oldMetadata)
+		rollbackMetadata()
 		restoreErr := m.secretStore.Update(ctx, authID, &secrets.UpdateSecretRequest{Value: &oldToken})
 		return nil, errors.Join(fmt.Errorf("persist Kubernetes refreshed inventory: %w", err), restoreErr)
 	}
 	rollback := func(rollbackCtx context.Context) error {
-		execution.replaceMetadataSnapshot(oldMetadata)
+		rollbackMetadata()
+		durableRollbackCtx, cancelRollback := kubernetesDurableContext(rollbackCtx)
+		defer cancelRollback()
 		secretErr := m.secretStore.Update(
-			rollbackCtx, authID, &secrets.UpdateSecretRequest{Value: &oldToken},
+			durableRollbackCtx, authID, &secrets.UpdateSecretRequest{Value: &oldToken},
 		)
-		rowErr := m.persistExecutorRunningResult(rollbackCtx, execution)
+		rowErr := m.persistExecutorRunningResult(durableRollbackCtx, execution)
 		return errors.Join(secretErr, rowErr)
 	}
 	return rollback, nil

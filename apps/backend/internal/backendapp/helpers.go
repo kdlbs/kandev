@@ -373,7 +373,8 @@ func executionMatchesGitStatusSource(sources *gitStatusSources, execution *lifec
 }
 
 func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.AgentExecution, requestedSessionID, sourceSessionID, taskEnvironmentID string, log *logger.Logger) []*ws.Message {
-	agentClient := execution.GetAgentCtlClient()
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentClient == nil {
 		log.Debug("no agentctl client available for live git status",
 			zap.String("source_session_id", sourceSessionID))

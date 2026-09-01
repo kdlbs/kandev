@@ -30,7 +30,11 @@ afterEach(() => cleanup());
 vi.mock("@kandev/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipContent: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+    <div data-testid="tooltip-content" {...props}>
+      {children}
+    </div>
+  ),
 }));
 
 vi.mock("@/hooks/use-compact-task-chrome", () => ({
@@ -242,6 +246,20 @@ describe("RemoteCloudTooltip live status", () => {
 });
 
 describe("RemoteCloudTooltip shared status presentation", () => {
+  it("uses the pending tone for a waiting Kubernetes container", () => {
+    render(
+      <RemoteCloudTooltip
+        taskId="task-waiting"
+        executorType="k8s"
+        fallbackName="pod-waiting"
+        status={{ remote_state: "waiting", remote_checked_at: new Date().toISOString() }}
+      />,
+    );
+
+    const row = screen.getByTestId("remote-executor-status-state");
+    expect(row.querySelector("dd")?.className).toContain("text-amber-600");
+  });
+
   it("shares one eager request across duplicate exact-scope consumers", async () => {
     mocks.getKubernetesTaskSession.mockResolvedValue({
       task_id: "task-duplicate",
@@ -362,5 +380,29 @@ describe("RemoteCloudTooltip coarse-pointer disclosure", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(onParentClick).not.toHaveBeenCalled();
+  });
+
+  it("does not refresh repeatedly for auto-repeated activation keys", async () => {
+    mocks.touch = true;
+    mocks.getKubernetesTaskSession.mockResolvedValue({
+      task_id: "task-touch-repeat",
+      session_id: "session-touch-repeat",
+      pod_name: "pod-touch",
+      pod_phase: "Running",
+      restarts: 0,
+    });
+    render(
+      <RemoteCloudTooltip
+        taskId="task-touch-repeat"
+        sessionId="session-touch-repeat"
+        executorId="executor-touch-repeat"
+        executorType="k8s"
+      />,
+    );
+
+    await waitFor(() => expect(mocks.getKubernetesTaskSession).toHaveBeenCalledTimes(1));
+    const trigger = screen.getByTestId(STATUS_TRIGGER_ID);
+    fireEvent.keyDown(trigger, { key: "Enter", repeat: true });
+    expect(mocks.getKubernetesTaskSession).toHaveBeenCalledTimes(1);
   });
 });

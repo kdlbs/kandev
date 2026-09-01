@@ -1887,10 +1887,10 @@ func (s *Service) DeleteExecutorProfile(ctx context.Context, id string) error {
 		return err
 	}
 	executor, err := s.executors.GetExecutor(ctx, profile.ExecutorID)
-	if err != nil {
+	if err != nil && !errors.Is(err, models.ErrExecutorNotFound) {
 		return err
 	}
-	if executor.Type == models.ExecutorTypeKubernetes {
+	if executor != nil && executor.Type == models.ExecutorTypeKubernetes {
 		if err := requireKubernetesAdmin(ctx); err != nil {
 			return err
 		}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useKubernetesSessionImpact } from "@/hooks/domains/settings/use-kubernetes-settings";
 import { isKubernetesExecutorDirty, type KubernetesExecutorForm } from "../kubernetes-config";
@@ -18,6 +18,7 @@ type KubernetesProfilePageSaveOptions = {
   profilePayload: ExecutorProfileSavePayload;
   isRemote: boolean;
   gitIdentityLoaded: boolean;
+  connectionLoaded: boolean;
   canManage: boolean;
   invalidReason?: string;
   saveConnection: (form: KubernetesExecutorForm) => Promise<void>;
@@ -40,6 +41,7 @@ export function useKubernetesProfilePageSaveContributor({
   profilePayload,
   isRemote,
   gitIdentityLoaded,
+  connectionLoaded,
   canManage,
   invalidReason,
   saveConnection,
@@ -51,14 +53,16 @@ export function useKubernetesProfilePageSaveContributor({
   const profileRevision = serializeSettingsRevision(profilePayload);
   const connectionDirty = isKubernetesExecutorDirty(connectionForm, connectionBaseline);
   const [savedProfileRevision, setSavedProfileRevision] = useState(profileRevision);
-  const [baselineReady, setBaselineReady] = useState(!isRemote);
+  const [baselineReady, setBaselineReady] = useState(!isRemote && connectionLoaded);
+  const latestProfile = useRef({ payload: profilePayload, revision: profileRevision });
+  latestProfile.current = { payload: profilePayload, revision: profileRevision };
 
   useEffect(() => {
-    if (!baselineReady && gitIdentityLoaded) {
+    if (!baselineReady && connectionLoaded && gitIdentityLoaded) {
       setSavedProfileRevision(profileRevision);
       setBaselineReady(true);
     }
-  }, [baselineReady, gitIdentityLoaded, profileRevision]);
+  }, [baselineReady, connectionLoaded, gitIdentityLoaded, profileRevision]);
 
   const profileDirty = profileRevision !== savedProfileRevision;
   const revision = serializeSettingsRevision({
@@ -76,8 +80,9 @@ export function useKubernetesProfilePageSaveContributor({
       markConnectionSaved(connectionForm);
     }
     if (profileDirty) {
-      await saveProfile(profilePayload);
-      setSavedProfileRevision(profileRevision);
+      const latest = latestProfile.current;
+      await saveProfile(latest.payload);
+      setSavedProfileRevision(latest.revision);
     }
   };
 

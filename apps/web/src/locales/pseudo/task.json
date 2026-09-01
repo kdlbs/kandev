@@ -1125,6 +1125,7 @@
   "remoteCreatedLine": "Ćŕēàţēď: {{createdAt}}",
   "remoteExecutor": "Ŕēḿōţē ēxēćũţōŕ",
   "remoteExecutorStatus": "{{name}} ēxēćũţōŕ śţàţũś",
+  "remoteExecutorStatusUnavailable": "Ŕēḿōţē ēxēćũţōŕ śţàţũś ĩś ũńàvàĩĺàƀĺē.",
   "remoteLastCheck": "Ĺàśţ ćĥēćķ",
   "remoteLastCheckLine": "Ĺàśţ ćĥēćķ: {{checkedAt}}",
   "remoteRepository": "Ŕēḿōţē ŕēƥōśĩţōŕŷ",

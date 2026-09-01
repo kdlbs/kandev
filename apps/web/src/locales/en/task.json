@@ -1125,6 +1125,7 @@
   "remoteCreatedLine": "Created: {{createdAt}}",
   "remoteExecutor": "Remote executor",
   "remoteExecutorStatus": "{{name}} executor status",
+  "remoteExecutorStatusUnavailable": "Remote executor status is unavailable.",
   "remoteLastCheck": "Last check",
   "remoteLastCheckLine": "Last check: {{checkedAt}}",
   "remoteRepository": "Remote repository",

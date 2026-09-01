@@ -370,6 +370,56 @@ func TestKubernetesCreateNotFoundReconciliationPreservesOriginalCreateError(t *t
 	}
 }
 
+func TestKubernetesAmbiguousCreateReconciliationOutlivesCanceledCreateContext(t *testing.T) {
+	t.Run("Pod", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		resources := &fakeKubernetesResources{
+			createPodErr:              context.Canceled,
+			rejectCanceledGetContexts: true,
+			mutateCreatedPod:          func(*corev1.Pod) { cancel() },
+		}
+		req := validKubernetesCreateRequest()
+		profile, err := kubernetesProfileConfigFromMetadata(req.Metadata)
+		require.NoError(t, err)
+		identity, err := kubernetesIdentity(req)
+		require.NoError(t, err)
+		desired, err := composeKubernetesLifecyclePod(
+			profile, identity, "pod", "kandev-agents", "",
+		)
+		require.NoError(t, err)
+
+		created, running, err := createAndWaitKubernetesPod(
+			ctx, resources, desired, identity, profile.MainContainer, "Pod", nil,
+		)
+
+		require.NoError(t, err)
+		require.NotNil(t, created)
+		require.NotNil(t, running)
+	})
+
+	t.Run("PVC", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		resources := &fakeKubernetesResources{
+			createPVCErr:              context.Canceled,
+			rejectCanceledGetContexts: true,
+			mutateCreatedPVC:          func(*corev1.PersistentVolumeClaim) { cancel() },
+		}
+		workspace := kubeexecutor.WorkspaceConfig{
+			Mode: kubeexecutor.WorkspaceModeManagedPVC, Size: "1Gi",
+			AccessModes: []string{"ReadWriteOnce"},
+		}
+		identity, err := kubernetesIdentity(validKubernetesCreateRequest())
+		require.NoError(t, err)
+
+		provision, err := createManagedKubernetesWorkspacePVC(
+			ctx, resources, "kandev-agents", workspace, identity, "workspace", nil,
+		)
+
+		require.NoError(t, err)
+		require.NotNil(t, provision.claim)
+	})
+}
+
 func TestKubernetesCreateFreshRetainsCheckpointWhenRollbackFails(t *testing.T) {
 	deleteErr := errors.New("delete denied")
 	resources := &fakeKubernetesResources{
@@ -491,6 +541,27 @@ func TestCheckpointKubernetesRuntimeInventoryPersistsBeforeExecutionRegistration
 	require.Equal(t, "execution-1", writer.deletedExecutionID)
 }
 
+func TestKubernetesInventoryPersistenceOutlivesCanceledLaunchContext(t *testing.T) {
+	writer := &checkpointExecutorRunningWriter{rejectCanceledCalls: true}
+	mgr := &Manager{runningWriter: writer, logger: newTestRegistryLogger()}
+	req := &ExecutorCreateRequest{
+		InstanceID: "execution-1", TaskID: "task-1", SessionID: "session-1",
+		AgentProfileID: "agent-profile-1",
+		Metadata:       map[string]interface{}{"executor_id": "executor-1"},
+	}
+	runtimeMetadata := map[string]interface{}{
+		MetadataKeyKubernetesInventoryState: KubernetesInventoryStatePodCreated,
+		MetadataKeyKubernetesPodName:        "pod-1",
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	require.NoError(t, mgr.checkpointKubernetesRuntimeInventory(ctx, req, runtimeMetadata))
+	require.NotNil(t, writer.running)
+	require.NoError(t, mgr.releaseKubernetesRuntimeInventory(ctx, req))
+	require.Nil(t, writer.running)
+}
+
 func TestRollbackLaunchExecutionReleasesInventoryOnlyAfterRuntimeCleanup(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -566,9 +637,10 @@ func TestFreshKubernetesSiblingRollbackOwnsItsNewRuntime(t *testing.T) {
 }
 
 type checkpointExecutorRunningWriter struct {
-	running            *models.ExecutorRunning
-	deletedSessionID   string
-	deletedExecutionID string
+	running             *models.ExecutorRunning
+	deletedSessionID    string
+	deletedExecutionID  string
+	rejectCanceledCalls bool
 }
 
 type rollbackCheckpointWriter struct {
@@ -581,17 +653,23 @@ func (w *rollbackCheckpointWriter) DeleteExecutorRunningBySessionID(context.Cont
 }
 
 func (w *checkpointExecutorRunningWriter) UpsertExecutorRunning(
-	_ context.Context,
+	ctx context.Context,
 	running *models.ExecutorRunning,
 ) error {
+	if w.rejectCanceledCalls && ctx.Err() != nil {
+		return ctx.Err()
+	}
 	w.running = running
 	return nil
 }
 
 func (w *checkpointExecutorRunningWriter) GetExecutorRunningBySessionID(
-	context.Context,
-	string,
+	ctx context.Context,
+	_ string,
 ) (*models.ExecutorRunning, error) {
+	if w.rejectCanceledCalls && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if w.running == nil {
 		return nil, models.ErrExecutorRunningNotFound
 	}
@@ -616,11 +694,14 @@ func (*checkpointExecutorRunningWriter) RepairExecutorRunningDeadIfCurrent(
 }
 
 func (w *checkpointExecutorRunningWriter) DeleteExecutorRunningIfCurrent(
-	_ context.Context,
+	ctx context.Context,
 	sessionID string,
 	executionID string,
 	_ time.Time,
 ) error {
+	if w.rejectCanceledCalls && ctx.Err() != nil {
+		return ctx.Err()
+	}
 	w.deletedSessionID = sessionID
 	w.deletedExecutionID = executionID
 	w.running = nil

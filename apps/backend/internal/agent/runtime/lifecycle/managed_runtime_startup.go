@@ -30,7 +30,7 @@ func (m *Manager) managedRuntimeNpmStartupFailure(
 	if execution == nil || initErr == nil {
 		return nil
 	}
-	client, release := execution.acquireAgentctlClient()
+	client, release := execution.AcquireAgentCtlClient()
 	defer release()
 	if client == nil {
 		return nil
@@ -122,7 +122,12 @@ func (m *Manager) prepareManagedRuntimeStartupRetry(
 	initErr error,
 	agentConfig agents.Agent,
 ) (*managedRuntimeStartupRetry, bool) {
-	if execution == nil || !supportsManagedRuntimeCacheRepair(execution.RuntimeName) || execution.GetAgentCtlClient() == nil {
+	if execution == nil || !supportsManagedRuntimeCacheRepair(execution.RuntimeName) {
+		return nil, false
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	releaseClient()
+	if client == nil {
 		return nil, false
 	}
 	managed, ok := agentConfig.(agents.ManagedNPMRuntimeAgent)
@@ -162,7 +167,7 @@ func (m *Manager) stopAndRepairManagedRuntime(
 	execution *AgentExecution,
 	retry *managedRuntimeStartupRetry,
 ) (needsFailure bool, err error) {
-	client, release := execution.acquireAgentctlClient()
+	client, release := execution.AcquireAgentCtlClient()
 	defer release()
 	if client == nil {
 		return false, errors.New("managed runtime agentctl client is unavailable")
@@ -179,7 +184,7 @@ func (m *Manager) stopAndRepairManagedRuntime(
 		return false, aborted
 	}
 
-	if err := execution.agentctl.RepairManagedRuntimeCache(ctx, retry.packageSpec); err != nil {
+	if err := client.RepairManagedRuntimeCache(ctx, retry.packageSpec); err != nil {
 		if aborted := managedRuntimeRecoveryAborted(ctx, m); aborted != nil {
 			return false, aborted
 		}

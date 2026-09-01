@@ -65,11 +65,23 @@ func (h *Handler) sessionImpact(ctx context.Context, executorID string) (Session
 	}
 	impact := SessionImpact{}
 	for _, run := range runs {
-		if run != nil && run.Runtime == agentruntime.RuntimeKubernetes && run.ExecutorID == executorID {
+		if run != nil && run.Runtime == agentruntime.RuntimeKubernetes && run.ExecutorID == executorID &&
+			isActiveExecutorRunningStatus(run.Status) {
 			impact.ActiveSessionCount++
 		}
 	}
 	return impact, nil
+}
+
+func isActiveExecutorRunningStatus(status string) bool {
+	switch status {
+	case models.ExecutorRunningStatusFailed,
+		models.ExecutorRunningStatusStopped,
+		models.ExecutorRunningStatusComplete:
+		return false
+	default:
+		return true
+	}
 }
 
 func (h *Handler) listSessions(

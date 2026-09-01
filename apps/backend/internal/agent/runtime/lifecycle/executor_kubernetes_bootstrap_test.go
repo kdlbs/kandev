@@ -2,6 +2,9 @@ package lifecycle
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -28,7 +31,45 @@ func TestKubernetesWriteFileDoesNotOpenStdinForEmptySentinel(t *testing.T) {
 	require.Len(t, execs.requests, 1)
 	require.Nil(t, execs.requests[0].request.Stdin,
 		"empty start sentinel must not enable remotecommand stdin streaming")
-	require.Contains(t, strings.Join(execs.requests[0].request.Command, " "), ": > '/opt/kandev/start'")
+	command := strings.Join(execs.requests[0].request.Command, " ")
+	require.Contains(t, command, "temporary=$(mktemp")
+	require.Contains(t, command, "mv -f \"$temporary\" \"$destination\"")
+}
+
+func TestKubernetesWriteFileCommandRejectsSymlinkedAncestor(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "redirect")))
+	destination := filepath.ToSlash(filepath.Join(root, "redirect", "secret.json"))
+	command := exec.Command("sh", "-c", kubernetesWriteFileCommand(destination, 0o600, true))
+	command.Stdin = strings.NewReader("secret")
+
+	err := command.Run()
+
+	require.Error(t, err)
+	_, statErr := os.Stat(filepath.Join(outside, "secret.json"))
+	require.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestKubernetesPodFileUploaderNormalizesWindowsSeparators(t *testing.T) {
+	execs := &recordingKubernetesExec{}
+	uploader := kubernetesPodFileUploader{
+		streams: kubeexecutor.NewStreamOperations(execs, nil),
+		pod: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			Namespace: "kandev-agents", Name: "agent-pod",
+		}},
+		container: "kandev-agent",
+	}
+
+	err := uploader.WriteFile(
+		context.Background(), `\run\kandev\home\.codex\auth.json`, []byte("secret"), 0o600,
+	)
+
+	require.NoError(t, err)
+	require.Len(t, execs.requests, 1)
+	remoteCommand := strings.Join(execs.requests[0].request.Command, " ")
+	require.Contains(t, remoteCommand, "/run/kandev/home/.codex/auth.json")
+	require.NotContains(t, remoteCommand, `\run\kandev`)
 }
 
 func TestKubernetesBootstrapOwnsControlEnvironmentAndPreservesOfficeEnvironment(t *testing.T) {
@@ -123,7 +164,7 @@ func TestKubernetesPrepareScriptUsesManagedAgentctlPathWithoutStartingSecondProc
 	script, err := kubernetesPrepareScript(req)
 
 	require.NoError(t, err)
-	require.Contains(t, script, "chmod +x /opt/kandev/agentctl")
+	require.Contains(t, script, "chmod +x '/opt/kandev/agentctl'")
 	require.NotContains(t, script, "/usr/local/bin/agentctl")
 	require.NotContains(t, script, "nohup agentctl")
 }

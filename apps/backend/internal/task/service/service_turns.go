@@ -955,7 +955,7 @@ func (s *Service) applyWorkspaceExecutorRecord(
 	if exec.Type == models.ExecutorTypeSSH {
 		mergeExecutorConfigMetadata(info, exec.Config)
 	}
-	if recordedKubernetes {
+	if exec.Type == models.ExecutorTypeKubernetes {
 		mergeKubernetesExecutorConfigMetadata(info, exec.Config)
 	}
 	return nil

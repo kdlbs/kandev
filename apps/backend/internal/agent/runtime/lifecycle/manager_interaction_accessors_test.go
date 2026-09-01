@@ -455,7 +455,7 @@ func testPersistedKubernetesCleanupAfterRestart(t *testing.T, reason string, for
 			ID: "executor-1", Type: models.ExecutorTypeKubernetes,
 			Config: map[string]string{
 				MetadataKeyKubernetesAuthMode:              "in_cluster",
-				MetadataKeyKubernetesConfigNamespace:       "kandev-agents",
+				MetadataKeyKubernetesConfigNamespace:       "new-agents",
 				MetadataKeyKubernetesRequestTimeoutSeconds: "45",
 			},
 		}},
@@ -483,6 +483,7 @@ func testPersistedKubernetesCleanupAfterRestart(t *testing.T, reason string, for
 	require.Empty(t, cleanupConfig.KubeconfigPath)
 	require.Empty(t, cleanupConfig.KubeContext)
 	require.Equal(t, 45, cleanupConfig.RequestTimeoutSeconds)
+	require.Equal(t, "new-agents", cleanupConfig.Namespace)
 	require.Nil(t, store.running, "service cleanup owns row deletion after successful remote teardown")
 	require.Empty(t, runtimeSecrets.store, "destructive restart cleanup must remove recorded runtime secret refs")
 }

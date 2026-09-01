@@ -241,6 +241,9 @@ func TestHTTPSessionImpactCountsEveryExactKubernetesInventoryRowForAdmin(t *test
 		runs: []*models.ExecutorRunning{
 			{ExecutorID: "executor-1", Runtime: agentruntime.RuntimeKubernetes},
 			{ExecutorID: "executor-1", Runtime: agentruntime.RuntimeKubernetes, Metadata: map[string]interface{}{}},
+			{ExecutorID: "executor-1", Runtime: agentruntime.RuntimeKubernetes, Status: models.ExecutorRunningStatusFailed},
+			{ExecutorID: "executor-1", Runtime: agentruntime.RuntimeKubernetes, Status: models.ExecutorRunningStatusStopped},
+			{ExecutorID: "executor-1", Runtime: agentruntime.RuntimeKubernetes, Status: models.ExecutorRunningStatusComplete},
 			{ExecutorID: "executor-1", Runtime: agentruntime.RuntimeDocker},
 			{ExecutorID: "executor-other", Runtime: agentruntime.RuntimeKubernetes},
 			nil,

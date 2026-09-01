@@ -48,7 +48,8 @@ export function useKubernetesProfileConnection(executor: Executor, enabled: bool
     setBaseline(saved);
   }, []);
   const reset = useCallback(() => setForm({ ...baselineRef.current }), []);
-  return { form, setForm, baseline, save, markSaved, reset };
+  const ready = !enabled || (!resource.loading && resource.executor !== null);
+  return { form, setForm, baseline, save, markSaved, reset, ready };
 }
 
 type ProfileSettingsSaveOptions = {
@@ -107,6 +108,7 @@ export function useProfileSettingsSave({
     profilePayload: payload,
     isRemote,
     gitIdentityLoaded,
+    connectionLoaded: connection.ready,
     canManage: canManageKubernetes,
     invalidReason,
     saveConnection: connection.save,

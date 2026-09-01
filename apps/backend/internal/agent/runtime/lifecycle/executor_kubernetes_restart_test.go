@@ -114,6 +114,31 @@ func TestKubernetesRefreshRemoteInstanceRejectsFreshUnauthorizedOrForeignRuntime
 	}
 }
 
+func TestKubernetesRefreshRemoteInstanceLeavesMissingPodForStatusProjection(t *testing.T) {
+	controlPort := startKubernetesAgentctlServerWithToken(t, true, 41001, "initial-token")
+	instancePort := startKubernetesAgentctlServer(t, false, 0)
+	resources := &fakeKubernetesResources{}
+	executor := newFakeKubernetesExecutor(t, resources, &recordingKubernetesExec{}, map[uint16]uint16{
+		uint16(kubeexecutor.DefaultAgentctlPort): controlPort,
+		41001:                                    instancePort,
+	})
+	req := validKubernetesCreateRequest()
+	created, err := executor.CreateInstance(context.Background(), req)
+	require.NoError(t, err)
+	resources.mu.Lock()
+	resources.pod = nil
+	resources.mu.Unlock()
+	instance := kubernetesRefreshInstance(created, req.Metadata)
+
+	refresh, err := executor.RefreshRemoteInstance(context.Background(), instance)
+
+	require.NoError(t, err)
+	require.Nil(t, refresh)
+	status, err := executor.GetRemoteStatus(context.Background(), instance)
+	require.NoError(t, err)
+	require.Equal(t, "missing", status.State)
+}
+
 func copyFakeKubernetesResourceState(source *fakeKubernetesResources) *fakeKubernetesResources {
 	source.mu.Lock()
 	defer source.mu.Unlock()

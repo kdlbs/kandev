@@ -13,7 +13,33 @@ import (
 	"github.com/stretchr/testify/require"
 
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 )
+
+type kubernetesAmbiguousCreateControl struct {
+	createErr error
+	info      *agentctl.InstanceInfo
+	getErr    error
+	getCalls  int
+}
+
+func (c *kubernetesAmbiguousCreateControl) CreateInstance(
+	context.Context,
+	*agentctl.CreateInstanceRequest,
+) (*agentctl.CreateInstanceResponse, error) {
+	return nil, c.createErr
+}
+
+func (c *kubernetesAmbiguousCreateControl) GetInstance(
+	ctx context.Context,
+	_ string,
+) (*agentctl.InstanceInfo, error) {
+	c.getCalls++
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return c.info, c.getErr
+}
 
 func TestKubernetesCreateInstanceAcceptsCompleteTypedConfiguration(t *testing.T) {
 	executor := NewKubernetesExecutor(nil, newTestLogger())
@@ -21,6 +47,67 @@ func TestKubernetesCreateInstanceAcceptsCompleteTypedConfiguration(t *testing.T)
 	if errors.Is(err, errKubernetesLifecycleRequestIncomplete) {
 		t.Fatalf("CreateInstance() error = %v, complete typed configuration was not consumed", err)
 	}
+}
+
+func TestKubernetesAgentctlCreateReconcilesAmbiguousResponse(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	control := &kubernetesAmbiguousCreateControl{
+		createErr: context.Canceled,
+		info: &agentctl.InstanceInfo{
+			ID: "instance-1", Port: 41001, WorkspacePath: dockerWorkspacePath,
+		},
+	}
+	request := &agentctl.CreateInstanceRequest{ID: "instance-1", WorkspacePath: dockerWorkspacePath}
+
+	response, err := createOrReconcileKubernetesAgentctlInstance(ctx, control, request)
+
+	require.NoError(t, err)
+	require.Equal(t, &agentctl.CreateInstanceResponse{ID: "instance-1", Port: 41001}, response)
+	require.Equal(t, 1, control.getCalls)
+}
+
+func TestKubernetesAgentctlCreateRejectsMismatchedReconciliation(t *testing.T) {
+	control := &kubernetesAmbiguousCreateControl{
+		createErr: context.DeadlineExceeded,
+		info: &agentctl.InstanceInfo{
+			ID: "instance-1", Port: 41001, WorkspacePath: "/foreign",
+		},
+	}
+	request := &agentctl.CreateInstanceRequest{ID: "instance-1", WorkspacePath: dockerWorkspacePath}
+
+	_, err := createOrReconcileKubernetesAgentctlInstance(context.Background(), control, request)
+
+	require.ErrorContains(t, err, "workspace")
+}
+
+func TestKubernetesInstanceLockSerializesSameInstanceAndCleansUp(t *testing.T) {
+	executor := NewKubernetesExecutor(nil, newTestLogger())
+	firstUnlock := executor.lockInstance("instance-1")
+	secondAcquired := make(chan struct{})
+	secondReleased := make(chan struct{})
+	go func() {
+		secondUnlock := executor.lockInstance("instance-1")
+		close(secondAcquired)
+		secondUnlock()
+		close(secondReleased)
+	}()
+
+	select {
+	case <-secondAcquired:
+		t.Fatal("same-instance operation was not serialized")
+	default:
+	}
+	firstUnlock()
+	select {
+	case <-secondReleased:
+	case <-time.After(time.Second):
+		t.Fatal("same-instance waiter did not acquire the released lock")
+	}
+
+	executor.mu.Lock()
+	defer executor.mu.Unlock()
+	require.Empty(t, executor.locks)
 }
 
 func TestKubernetesCreateInstanceProvisionsBootstrapsAndForwardsAgentctl(t *testing.T) {
@@ -178,7 +265,7 @@ func TestKubernetesCreateInstanceUsesCurrentConnectionConfigOnReconnect(t *testi
 	require.NotEmpty(t, forwards.requests)
 }
 
-func TestKubernetesCreateInstanceRejectsChangedNamespaceOnReconnect(t *testing.T) {
+func TestKubernetesCreateInstanceUsesRecordedNamespaceAfterConnectionNamespaceChanges(t *testing.T) {
 	controlPort := startKubernetesAgentctlServer(t, true, 41001)
 	instancePort := startKubernetesAgentctlServer(t, false, 0)
 	resources := &fakeKubernetesResources{}
@@ -192,10 +279,12 @@ func TestKubernetesCreateInstanceRejectsChangedNamespaceOnReconnect(t *testing.T
 	reconnectRequest := kubernetesReconnectRequest(created)
 	reconnectRequest.Metadata[MetadataKeyKubernetesConfigNamespace] = "other-agents"
 
-	_, err = restarted.CreateInstance(context.Background(), reconnectRequest)
+	reconnected, err := restarted.CreateInstance(context.Background(), reconnectRequest)
 
-	require.ErrorContains(t, err, "recorded Pod inventory")
-	require.Empty(t, resources.getPodRequests)
+	require.NoError(t, err)
+	require.Equal(t, "other-agents", reconnected.Metadata[MetadataKeyKubernetesConfigNamespace])
+	require.Equal(t, "kandev-agents", reconnected.Metadata[MetadataKeyKubernetesNamespace])
+	require.Contains(t, resources.getPodRequests, "kandev-agents/"+created.Metadata[MetadataKeyKubernetesPodName].(string))
 }
 
 func TestKubernetesCreateInstanceRejectsIncompleteRecordedResourceIdentity(t *testing.T) {
@@ -308,6 +397,7 @@ func TestKubernetesCreateInstanceRebuildsLostPodAgainstVerifiedManagedPVC(t *tes
 	setManagedKubernetesWorkspace(initialRequest)
 	created, err := initial.CreateInstance(context.Background(), initialRequest)
 	require.NoError(t, err)
+	created.Metadata[MetadataKeyKubernetesContainerRestartCount] = "7"
 	resources.mu.Lock()
 	resources.pod = nil
 	resources.nextPodUID = "replacement-pod-uid"
@@ -334,6 +424,7 @@ func TestKubernetesCreateInstanceRebuildsLostPodAgainstVerifiedManagedPVC(t *tes
 
 	require.NoError(t, err)
 	require.Equal(t, "replacement-pod-uid", reconnected.Metadata[MetadataKeyKubernetesPodUID])
+	require.Equal(t, "0", reconnected.Metadata[MetadataKeyKubernetesContainerRestartCount])
 	require.Equal(t, "pvc-uid", reconnected.Metadata[MetadataKeyKubernetesPVCUID])
 	require.Len(t, resources.createdPVCs, 1, "resume must reuse the recorded PVC")
 	require.Len(t, resources.createdPods, 2)

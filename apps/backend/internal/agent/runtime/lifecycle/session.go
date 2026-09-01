@@ -465,7 +465,8 @@ func (sm *SessionManager) applyStartModelPolicyToEffectiveModel(
 	if runtimeModel != "" {
 		effective.model = runtimeModel
 	}
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if effective.model == "" || client == nil {
 		return effective
 	}
@@ -507,7 +508,7 @@ func (sm *SessionManager) initializeACPConnection(
 	)
 	execution.SetSessionSpan(sessionSpan)
 	ctx = trace.ContextWithSpan(ctx, sessionSpan)
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
 	if client != nil {
 		client.SetTraceContext(execution.SessionTraceContext())
 	} else {
@@ -517,8 +518,10 @@ func (sm *SessionManager) initializeACPConnection(
 	defer initSpan.End()
 
 	rt := agentConfig.Runtime()
+	agentctlURL := client.BaseURL()
+	releaseClient()
 	sm.logger.Info("initializing ACP session",
-		zap.String("execution_id", execution.ID), zap.String("agentctl_url", client.BaseURL()),
+		zap.String("execution_id", execution.ID), zap.String("agentctl_url", agentctlURL),
 		zap.String("agent_type", agentConfig.ID()), zap.String("existing_acp_session_id", execution.ACPSessionID),
 		zap.Bool("native_session_resume", rt.SessionConfig.NativeSessionResume))
 	if sm.streamManager != nil {
@@ -531,7 +534,12 @@ func (sm *SessionManager) initializeACPConnection(
 			return ctx, nil, fmt.Errorf("timeout waiting for agent stream to connect")
 		}
 	}
+	client, releaseClient = execution.AcquireAgentCtlClient()
+	if client == nil {
+		return ctx, nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
+	}
 	result, err := sm.InitializeSession(ctx, client, agentConfig, execution.ACPSessionID, execution.WorkspacePath, mcpServers)
+	releaseClient()
 	if err != nil {
 		// loadSession already logged the root cause. context.Canceled is
 		// caller teardown, so keep this outer boundary at WARN too —
@@ -562,7 +570,8 @@ func (sm *SessionManager) applyProfileSessionLayers(
 	modelPolicyHandled bool,
 	policyAppliedModel string,
 ) (string, string, string, map[string]string) {
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return "", "", "", nil
 	}
@@ -634,7 +643,8 @@ func (sm *SessionManager) applyRuntimeSessionLayers(
 	runtimeConfigOptions map[string]string,
 ) (string, []string) {
 	failed := make([]string, 0)
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return finalConfigID, failed
 	}
@@ -1214,7 +1224,9 @@ func (sm *SessionManager) SendPromptSteerWithDispatchCallback(
 	dispatchOnly bool,
 	onDispatched func(),
 ) (*PromptResult, error) {
-	if execution.GetAgentCtlClient() == nil {
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	releaseClient()
+	if client == nil {
 		return nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
 	if validateStatus && execution.Status != v1.AgentStatusRunning && execution.Status != v1.AgentStatusReady {
@@ -1348,7 +1360,9 @@ func (sm *SessionManager) sendPrompt(
 	onDispatched func(),
 	steer bool,
 ) (*PromptResult, error) {
-	if execution.GetAgentCtlClient() == nil {
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	releaseClient()
+	if client == nil {
 		return nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
 
@@ -1434,7 +1448,7 @@ func (sm *SessionManager) materializeAttachments(
 		if err != nil {
 			return nil, fmt.Errorf("open attachment %q: %w", attachment.AttachmentID, err)
 		}
-		client := execution.GetAgentCtlClient()
+		client, releaseClient := execution.AcquireAgentCtlClient()
 		if client == nil {
 			_ = reader.Close()
 			return nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
@@ -1448,6 +1462,7 @@ func (sm *SessionManager) materializeAttachments(
 			sizeBytes,
 			reader,
 		)
+		releaseClient()
 		closeErr := reader.Close()
 		if materializeErr != nil {
 			return nil, fmt.Errorf("materialize attachment %q: %w", attachment.AttachmentID, materializeErr)
@@ -1614,7 +1629,8 @@ func (sm *SessionManager) callAgentctlPrompt(
 	promptGeneration uint64,
 	steer bool,
 ) error {
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
@@ -1673,11 +1689,13 @@ func (sm *SessionManager) retryPromptAfterReconnect(
 
 	var lastErr error
 	for {
-		client := execution.GetAgentCtlClient()
+		client, releaseClient := execution.AcquireAgentCtlClient()
 		if client == nil {
 			return fmt.Errorf("execution %q has no agentctl client", execution.ID)
 		}
-		if !client.HasAgentStream() {
+		hasAgentStream := client.HasAgentStream()
+		releaseClient()
+		if !hasAgentStream {
 			ready := make(chan struct{})
 			sm.streamManager.connectUpdatesStreamAsync(execution, ready)
 
@@ -1691,7 +1709,13 @@ func (sm *SessionManager) retryPromptAfterReconnect(
 			}
 		}
 
-		if client.HasAgentStream() {
+		client, releaseClient = execution.AcquireAgentCtlClient()
+		if client == nil {
+			return fmt.Errorf("execution %q has no agentctl client", execution.ID)
+		}
+		hasAgentStream = client.HasAgentStream()
+		releaseClient()
+		if hasAgentStream {
 			if err := sm.callAgentctlPrompt(
 				reconnectCtx, execution, prompt, attachments, promptGeneration, steer,
 			); err == nil {

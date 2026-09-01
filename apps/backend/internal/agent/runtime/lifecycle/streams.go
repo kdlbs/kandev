@@ -233,12 +233,14 @@ func (sm *StreamManager) ReconnectAll(execution *AgentExecution) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
 	if client == nil {
 		sm.logger.Warn("agentctl unavailable for stream reconnection", zap.String("instance_id", execution.ID))
 		return
 	}
-	if err := client.WaitForReady(ctx, 10*time.Second); err != nil {
+	err := client.WaitForReady(ctx, 10*time.Second)
+	releaseClient()
+	if err != nil {
 		sm.logger.Warn("agentctl not ready for stream reconnection",
 			zap.String("instance_id", execution.ID),
 			zap.Error(err))
@@ -293,7 +295,7 @@ func (sm *StreamManager) streamContext(execution *AgentExecution) context.Contex
 func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready chan<- struct{}) {
 	ctx := sm.streamContext(execution)
 	startupGeneration := execution.startupAttemptSnapshot()
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
 	if client == nil {
 		if ready != nil {
 			close(ready)
@@ -312,6 +314,7 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 			sm.handleUpdatesDisconnectWithGeneration(execution, disconnectErr, startupGeneration)
 		}
 	})
+	releaseClient()
 
 	// Signal that the stream connection attempt is complete (success or failure)
 	// StreamUpdates returns immediately after establishing the WebSocket connection
@@ -368,7 +371,7 @@ func (sm *StreamManager) handleUpdatesDisconnectWithGeneration(
 // closing this stream is expected, not an error.
 func (sm *StreamManager) connectMCPStream(execution *AgentExecution) {
 	ctx := sm.streamContext(execution)
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
 	if client == nil {
 		return
 	}
@@ -379,6 +382,7 @@ func (sm *StreamManager) connectMCPStream(execution *AgentExecution) {
 				zap.Error(disconnectErr))
 		}
 	})
+	releaseClient()
 	if err != nil {
 		sm.logger.Error("failed to connect passthrough MCP stream",
 			zap.String("execution_id", execution.ID),
@@ -486,11 +490,12 @@ func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready
 		}
 
 		callbacks := sm.buildWorkspaceCallbacks(execution)
-		client := execution.GetAgentCtlClient()
+		client, releaseClient := execution.AcquireAgentCtlClient()
 		if client == nil {
 			return
 		}
 		ws, err := client.StreamWorkspace(ctx, callbacks)
+		releaseClient()
 		if err != nil {
 			sm.logger.Debug("workspace stream connection failed, retrying",
 				zap.String("instance_id", execution.ID),

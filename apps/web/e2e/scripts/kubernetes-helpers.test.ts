@@ -1,7 +1,7 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import type { KubernetesCluster, KubernetesPod } from "../fixtures/kubernetes-tools";
 import { waitForKubernetesPod, waitForTaskResourceCleanupAttempt } from "../helpers/kubernetes";
@@ -65,9 +65,9 @@ describe("Kubernetes E2E causal helpers", () => {
     const backendTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-cleanup-helper-"));
     tempRoots.push(backendTmpDir);
     const database = path.join(backendTmpDir, "kandev.db");
-    execFileSync("sqlite3", [
-      database,
-      `CREATE TABLE task_resource_cleanup_jobs (
+    const sqlite = new DatabaseSync(database);
+    try {
+      sqlite.exec(`CREATE TABLE task_resource_cleanup_jobs (
         task_id TEXT NOT NULL,
         trigger TEXT NOT NULL,
         state TEXT NOT NULL,
@@ -78,8 +78,10 @@ describe("Kubernetes E2E causal helpers", () => {
       INSERT INTO task_resource_cleanup_jobs VALUES
         ('task-1', 'archive', 'succeeded', 1, '', '2026-08-24T21:00:00Z'),
         ('task-1', 'cascade_archive', 'retry_wait', 1,
-         '1 runtime stop operations failed', '2026-08-24T22:00:00Z');`,
-    ]);
+         '1 runtime stop operations failed', '2026-08-24T22:00:00Z');`);
+    } finally {
+      sqlite.close();
+    }
 
     const cleanup = await waitForTaskResourceCleanupAttempt(
       backendTmpDir,

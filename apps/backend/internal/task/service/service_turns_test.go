@@ -1497,6 +1497,46 @@ func TestGetWorkspaceInfoForSession_KubernetesRunningRecordOwnsExecutorAndCurren
 	}
 }
 
+func TestGetWorkspaceInfoForSession_KubernetesWithoutRunningRowUsesCurrentConnection(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	if err := repo.CreateExecutor(ctx, &models.Executor{
+		ID: "kubernetes-executor", Name: "Kubernetes", Type: models.ExecutorTypeKubernetes,
+		Config: map[string]string{
+			lifecycle.MetadataKeyKubernetesAuthMode:              "kubeconfig",
+			lifecycle.MetadataKeyKubernetesKubeconfigPath:        "/etc/kandev/kubeconfig",
+			lifecycle.MetadataKeyKubernetesConfigNamespace:       "kandev-agents",
+			lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds: "45",
+		},
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-k8s", TaskID: "task-123", ExecutorID: "kubernetes-executor",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-k8s")
+
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession() error = %v", err)
+	}
+	if info.ExecutorType != string(models.ExecutorTypeKubernetes) {
+		t.Fatalf("ExecutorType = %q, want Kubernetes", info.ExecutorType)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyKubernetesKubeconfigPath]; got != "/etc/kandev/kubeconfig" {
+		t.Fatalf("kubeconfig path = %v, want current connection metadata", got)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyKubernetesConfigNamespace]; got != "kandev-agents" {
+		t.Fatalf("namespace = %v, want current connection metadata", got)
+	}
+}
+
 func TestGetWorkspaceInfoForSession_KubernetesRunningRecordFailsClosedWithoutExecutor(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

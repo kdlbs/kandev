@@ -108,7 +108,7 @@ describe("Kubernetes executor settings config", () => {
   });
 });
 
-describe("Kubernetes profile config parsing and serialization", () => {
+describe("Kubernetes profile config parsing", () => {
   it("parses dotted managed-PVC profile config and defaults access mode", () => {
     expect(
       parseKubernetesProfileConfig({
@@ -151,6 +151,18 @@ describe("Kubernetes profile config parsing and serialization", () => {
     });
   });
 
+  it("preserves unsupported persisted access modes and reports them as invalid", () => {
+    const parsed = parseKubernetesProfileConfig({
+      "workspace.mode": "managed_pvc",
+      "workspace.access_modes": '["UnsupportedMode"]',
+    });
+
+    expect(parsed.accessModes).toEqual(["UnsupportedMode"]);
+    expect(getKubernetesProfileValidationError(parsed)).toBe("access_mode_invalid");
+  });
+});
+
+describe("Kubernetes profile config serialization", () => {
   it("serializes managed PVC fields and JSON access modes", () => {
     expect(
       serializeKubernetesProfileConfig({
@@ -243,6 +255,9 @@ describe("Kubernetes settings baselines and validation", () => {
     expect(getKubernetesProfileValidationError(valid)).toBeNull();
     expect(getKubernetesProfileValidationError({ ...valid, mainContainer: " " })).toBe(
       "main_container_required",
+    );
+    expect(getKubernetesProfileValidationError({ ...valid, mainContainer: "NOT_VALID" })).toBe(
+      "main_container_invalid",
     );
     expect(getKubernetesProfileValidationError({ ...valid, podTemplateYaml: "" })).toBe(
       "pod_template_required",

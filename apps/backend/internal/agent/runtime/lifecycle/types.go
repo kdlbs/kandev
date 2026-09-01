@@ -486,8 +486,9 @@ func (e *AgentExecution) setPromptTurnID(turnID string) {
 	e.promptLifecycleMu.Unlock()
 }
 
-// GetAgentCtlClient returns the agentctl client for this execution
-func (ae *AgentExecution) GetAgentCtlClient() *agentctl.Client {
+// currentAgentCtlClient returns the unpinned client snapshot. Callers must
+// already hold agentctlLifecycleMu or be implementing the scoped lease.
+func (ae *AgentExecution) currentAgentCtlClient() *agentctl.Client {
 	if ae == nil {
 		return nil
 	}
@@ -497,16 +498,17 @@ func (ae *AgentExecution) GetAgentCtlClient() *agentctl.Client {
 	return ae.agentctl
 }
 
-// acquireAgentctlClient pins the current client for one bounded operation.
+// AcquireAgentCtlClient pins the current client for one bounded operation.
 // Remote replacement and terminal stop take the write side before publishing
 // or closing a client, so an in-flight operation never observes that client
-// being closed underneath it.
-func (ae *AgentExecution) acquireAgentctlClient() (*agentctl.Client, func()) {
+// being closed underneath it. Callers must invoke the returned release
+// function as soon as the bounded client operation finishes.
+func (ae *AgentExecution) AcquireAgentCtlClient() (*agentctl.Client, func()) {
 	if ae == nil {
 		return nil, func() {}
 	}
 	ae.agentctlLifecycleMu.RLock()
-	client := ae.GetAgentCtlClient()
+	client := ae.currentAgentCtlClient()
 	if client == nil {
 		ae.agentctlLifecycleMu.RUnlock()
 		return nil, func() {}
@@ -520,7 +522,7 @@ func (ae *AgentExecution) replaceAgentctlClient(client *agentctl.Client) *agentc
 	if ae == nil || client == nil {
 		return nil
 	}
-	previous := ae.GetAgentCtlClient()
+	previous := ae.currentAgentCtlClient()
 	ae.agentctlOverride.Store(client)
 	return previous
 }
@@ -539,7 +541,8 @@ func (ae *AgentExecution) IsAgentctlReady() bool {
 // execution. Returns an empty string when no agentctl client is set (e.g.
 // before the execution has been wired to an agentctl instance).
 func (ae *AgentExecution) AgentctlURL() string {
-	client := ae.GetAgentCtlClient()
+	client, release := ae.AcquireAgentCtlClient()
+	defer release()
 	if client == nil {
 		return ""
 	}

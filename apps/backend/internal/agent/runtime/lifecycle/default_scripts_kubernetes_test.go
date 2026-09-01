@@ -78,3 +78,48 @@ func TestDefaultPrepareScriptKubernetesReusesRetainedPVCWorkspace(t *testing.T) 
 		t.Fatalf("workspace branch = %q", output)
 	}
 }
+
+func TestDefaultPrepareScriptKubernetesRejectsRetainedWorkspaceFromDifferentRepository(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	workspace, _ := setupPostludeRepo(t, "main")
+	_, expectedOrigin := setupPostludeRepo(t, "main")
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	requireNoError(t, os.MkdirAll(home, 0o700))
+	marker := filepath.Join(workspace, "local-untracked.txt")
+	requireNoError(t, os.WriteFile(marker, []byte("preserve me"), 0o600))
+
+	script := strings.NewReplacer(
+		"{{git.identity_setup}}", ":",
+		"{{github.auth_setup}}", ":",
+		"{{repository.branch}}", shellQuote("main"),
+		"{{repository.clone_url}}", shellQuote(expectedOrigin),
+		"{{workspace.path}}", shellQuote(workspace),
+		"{{repository.setup_script}}", ":",
+		"{{kandev.agents.install}}", ":",
+		"/opt/kandev/.workspace-clone", filepath.Join(root, "runtime", "workspace-clone"),
+	).Replace(DefaultPrepareScript("k8s"))
+	cmd := exec.Command("sh", "-eu", "-c", script)
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	output, err := cmd.CombinedOutput()
+
+	if err == nil {
+		t.Fatalf("Kubernetes prepare unexpectedly reused a checkout from another repository")
+	}
+	if !strings.Contains(string(output), "origin does not match") {
+		t.Fatalf("prepare output = %q, want repository origin mismatch", output)
+	}
+	data, readErr := os.ReadFile(marker)
+	if readErr != nil || string(data) != "preserve me" {
+		t.Fatalf("retained workspace data = %q, %v", data, readErr)
+	}
+}
+
+func requireNoError(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}

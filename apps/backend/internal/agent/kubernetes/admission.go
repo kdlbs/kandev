@@ -325,6 +325,9 @@ func validateAdmittedContainer(container, desiredMain *corev1.Container, isMain 
 }
 
 func validateAdmittedContainerEnvironment(container *corev1.Container) error {
+	if len(container.EnvFrom) > 0 {
+		return errors.New("admitted Pod uses envFrom, which can inject reserved environment keys")
+	}
 	for _, env := range container.Env {
 		if isReservedEnvironmentKey(env.Name) {
 			return errors.New("admitted Pod added a reserved environment key")

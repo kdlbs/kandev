@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
@@ -117,10 +117,7 @@ function KubernetesExecutorView({
   const diagnostics = useKubernetesDiagnostics();
   const sessions = useKubernetesSessions(executor.id);
   const sessionImpact = useKubernetesSessionImpact(executor.id);
-  const initial = useMemo(
-    () => parseKubernetesExecutorConfig(executor.name, executor.config),
-    [executor.config, executor.name],
-  );
+  const initial = parseKubernetesExecutorConfig(executor.name, executor.config);
   const [baseline, setBaseline] = useState<KubernetesExecutorForm>(initial);
   const [form, setForm] = useState<KubernetesExecutorForm>(initial);
   const [error, setError] = useState<unknown>(null);
@@ -172,6 +169,7 @@ function KubernetesExecutorView({
       runWithNavigationBlockerBypassed(() => router.push(EXECUTORS_ROUTE));
     } catch (cause) {
       setError(cause);
+    } finally {
       setDeleting(false);
       setDeleteOpen(false);
     }

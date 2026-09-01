@@ -5,11 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+const kubernetesDurableWriteTimeout = time.Minute
+
+func kubernetesDurableContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), kubernetesDurableWriteTimeout)
+}
 
 // wireKubernetesInventoryPersistence installs lifecycle-owned callbacks only
 // for a fresh Kubernetes launch. Reconnect/replacement already has an
@@ -40,6 +50,9 @@ func (m *Manager) checkpointKubernetesRuntimeInventory(
 		strings.TrimSpace(req.SessionID) == "" || strings.TrimSpace(req.AgentProfileID) == "" {
 		return errors.New("checkpoint Kubernetes runtime inventory: launch identity is incomplete")
 	}
+	persistCtx, cancelPersist := kubernetesDurableContext(ctx)
+	defer cancelPersist()
+	ctx = persistCtx
 	metadata := cloneKubernetesMetadata(req.Metadata)
 	for key, value := range runtimeMetadata {
 		metadata[key] = value
@@ -81,6 +94,9 @@ func (m *Manager) releaseKubernetesRuntimeInventory(
 	if m.runningWriter == nil || req == nil {
 		return nil
 	}
+	persistCtx, cancelPersist := kubernetesDurableContext(ctx)
+	defer cancelPersist()
+	ctx = persistCtx
 	reader, hasReader := m.runningWriter.(executorRunningReader)
 	casWriter, hasCAS := m.runningWriter.(executorRunningCASWriter)
 	if !hasReader || !hasCAS {

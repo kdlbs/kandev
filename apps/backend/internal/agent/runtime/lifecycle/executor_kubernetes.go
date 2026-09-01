@@ -53,7 +53,12 @@ type KubernetesExecutor struct {
 
 	mu       sync.Mutex
 	sessions map[string]*kubernetesSession
-	locks    map[string]*sync.Mutex
+	locks    map[string]*kubernetesInstanceLock
+}
+
+type kubernetesInstanceLock struct {
+	mutex sync.Mutex
+	refs  int
 }
 
 type kubernetesSession struct {
@@ -79,7 +84,7 @@ func NewKubernetesExecutor(agentctlResolver *AgentctlResolver, log *logger.Logge
 		clientFactory:    newKubernetesRuntimeClient,
 		healthRetryDelay: agentctlHealthRetryDelay,
 		sessions:         make(map[string]*kubernetesSession),
-		locks:            make(map[string]*sync.Mutex),
+		locks:            make(map[string]*kubernetesInstanceLock),
 	}
 	if agentctlResolver != nil {
 		runtime.resolveBinary = func(platform kubeexecutor.Platform) ([]byte, error) {
@@ -332,6 +337,10 @@ func kubernetesDetachedRequestContext(ctx context.Context, requestTimeoutSeconds
 	)
 }
 
+func kubernetesAmbiguousCreateContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return kubernetesDetachedRequestContext(ctx, kubeexecutor.DefaultRequestTimeoutSeconds)
+}
+
 func kubernetesRequestContext(ctx context.Context, requestTimeoutSeconds int) (context.Context, context.CancelFunc) {
 	if requestTimeoutSeconds <= 0 {
 		requestTimeoutSeconds = kubeexecutor.DefaultRequestTimeoutSeconds
@@ -355,7 +364,8 @@ func (r *KubernetesExecutor) connectNewAgentctl(
 	if err != nil {
 		return nil, nil, "", 0, fmt.Errorf("kubernetes lifecycle: nonce handshake: %w", err)
 	}
-	createResponse, err := control.CreateInstance(ctx, buildReconnectCreateInstanceRequest(req, req.InstanceID))
+	createRequest := buildReconnectCreateInstanceRequest(req, req.InstanceID)
+	createResponse, err := createOrReconcileKubernetesAgentctlInstance(ctx, control, createRequest)
 	if err != nil {
 		return nil, nil, "", 0, fmt.Errorf("kubernetes lifecycle: create agentctl instance: %w", err)
 	}
@@ -374,6 +384,57 @@ func (r *KubernetesExecutor) connectNewAgentctl(
 		return nil, nil, "", 0, fmt.Errorf("kubernetes lifecycle: instance health: %w", err)
 	}
 	return client, forward, token, createResponse.Port, nil
+}
+
+type kubernetesAgentctlInstanceControl interface {
+	CreateInstance(context.Context, *agentctl.CreateInstanceRequest) (*agentctl.CreateInstanceResponse, error)
+	GetInstance(context.Context, string) (*agentctl.InstanceInfo, error)
+}
+
+func createOrReconcileKubernetesAgentctlInstance(
+	ctx context.Context,
+	control kubernetesAgentctlInstanceControl,
+	request *agentctl.CreateInstanceRequest,
+) (*agentctl.CreateInstanceResponse, error) {
+	response, createErr := control.CreateInstance(ctx, request)
+	if createErr == nil {
+		if err := validateKubernetesAgentctlInstanceResponse(response, request); err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
+	if !kubeexecutor.IsAmbiguousCreateError(createErr) {
+		return nil, createErr
+	}
+	reconcileCtx, cancel := kubernetesAmbiguousCreateContext(ctx)
+	defer cancel()
+	info, reconcileErr := control.GetInstance(reconcileCtx, request.ID)
+	if reconcileErr != nil {
+		return nil, errors.Join(createErr, fmt.Errorf("reconcile ambiguous agentctl create: %w", reconcileErr))
+	}
+	response = &agentctl.CreateInstanceResponse{ID: info.ID, Port: info.Port}
+	if err := validateKubernetesAgentctlInstanceResponse(response, request); err != nil {
+		return nil, errors.Join(createErr, fmt.Errorf("reconcile ambiguous agentctl create: %w", err))
+	}
+	if info.WorkspacePath != request.WorkspacePath {
+		return nil, errors.Join(createErr, errors.New(
+			"reconcile ambiguous agentctl create: existing instance workspace does not match request",
+		))
+	}
+	return response, nil
+}
+
+func validateKubernetesAgentctlInstanceResponse(
+	response *agentctl.CreateInstanceResponse,
+	request *agentctl.CreateInstanceRequest,
+) error {
+	if response == nil || request == nil || response.ID != request.ID {
+		return errors.New("kubernetes lifecycle: agentctl instance identity does not match request")
+	}
+	if response.Port < 1 || response.Port > 65535 {
+		return fmt.Errorf("kubernetes lifecycle: invalid agentctl instance port %d", response.Port)
+	}
+	return nil
 }
 
 func (r *KubernetesExecutor) connectHealthyKubernetesControl(
@@ -657,12 +718,21 @@ func (r *KubernetesExecutor) lockInstance(instanceID string) func() {
 	r.mu.Lock()
 	lock := r.locks[instanceID]
 	if lock == nil {
-		lock = &sync.Mutex{}
+		lock = &kubernetesInstanceLock{}
 		r.locks[instanceID] = lock
 	}
+	lock.refs++
 	r.mu.Unlock()
-	lock.Lock()
-	return lock.Unlock
+	lock.mutex.Lock()
+	return func() {
+		lock.mutex.Unlock()
+		r.mu.Lock()
+		lock.refs--
+		if lock.refs == 0 && r.locks[instanceID] == lock {
+			delete(r.locks, instanceID)
+		}
+		r.mu.Unlock()
+	}
 }
 
 func (r *KubernetesExecutor) replaceSession(instanceID string, session *kubernetesSession) {

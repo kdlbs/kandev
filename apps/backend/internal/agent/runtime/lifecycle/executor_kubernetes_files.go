@@ -32,6 +32,7 @@ func (u kubernetesPodFileUploader) WriteFile(
 	data []byte,
 	mode os.FileMode,
 ) error {
+	destination = strings.ReplaceAll(destination, "\\", "/")
 	if !kubernetesSafeAbsolutePath(destination) {
 		return fmt.Errorf("unsafe Kubernetes upload destination %q", destination)
 	}

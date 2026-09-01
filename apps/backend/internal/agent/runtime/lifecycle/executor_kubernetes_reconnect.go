@@ -22,7 +22,7 @@ func (r *KubernetesExecutor) reconnect(
 	req *ExecutorCreateRequest,
 	executorConfig kubeexecutor.ExecutorConfig,
 ) (*ExecutorInstance, error) {
-	recorded, identity, err := kubernetesRecordedInventory(req, executorConfig, true)
+	recorded, identity, err := kubernetesRecordedInventory(req, true)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +82,6 @@ type kubernetesRecordedState struct {
 
 func kubernetesRecordedInventory(
 	req *ExecutorCreateRequest,
-	executorConfig kubeexecutor.ExecutorConfig,
 	validateConnectionIdentity bool,
 ) (kubernetesRecordedState, kubeexecutor.ResourceIdentity, error) {
 	recorded, err := decodeKubernetesRecordedState(req.Metadata)
@@ -98,7 +97,7 @@ func kubernetesRecordedInventory(
 			"kubernetes lifecycle: recorded agentctl instance does not match resource identity",
 		)
 	}
-	if err := validateKubernetesRecordedPod(recorded, executorConfig); err != nil {
+	if err := validateKubernetesRecordedPod(recorded); err != nil {
 		return kubernetesRecordedState{}, kubeexecutor.ResourceIdentity{}, err
 	}
 	if err := validateKubernetesRecordedWorkspace(recorded); err != nil {
@@ -192,9 +191,8 @@ func kubernetesRequestWithRecordedIdentity(
 
 func validateKubernetesRecordedPod(
 	recorded kubernetesRecordedState,
-	executorConfig kubeexecutor.ExecutorConfig,
 ) error {
-	if recorded.namespace == "" || recorded.namespace != executorConfig.Namespace ||
+	if recorded.namespace == "" ||
 		recorded.podName == "" || recorded.podUID == "" || recorded.mainContainer == "" ||
 		recorded.agentctlInstanceID == "" {
 		return errors.New("kubernetes lifecycle: recorded Pod inventory is incomplete")
@@ -308,7 +306,8 @@ func (r *KubernetesExecutor) connectRestartedKubernetesAgentctl(
 	if err != nil {
 		return nil, nil, "", 0, fmt.Errorf("kubernetes lifecycle: restarted nonce handshake: %w", err)
 	}
-	response, err := control.CreateInstance(ctx, buildReconnectCreateInstanceRequest(req, remoteInstanceID))
+	createRequest := buildReconnectCreateInstanceRequest(req, remoteInstanceID)
+	response, err := createOrReconcileKubernetesAgentctlInstance(ctx, control, createRequest)
 	if err != nil {
 		return nil, nil, "", 0, fmt.Errorf("kubernetes lifecycle: recreate agentctl instance: %w", err)
 	}
@@ -421,6 +420,9 @@ func (r *KubernetesExecutor) recreateMissingKubernetesPod(
 	metadata := cloneKubernetesMetadata(req.Metadata)
 	metadata[MetadataKeyKubernetesPodUID] = string(pod.UID)
 	metadata[MetadataKeyKubernetesAgentctlRemotePort] = strconv.Itoa(remotePort)
+	metadata[MetadataKeyKubernetesContainerRestartCount] = strconv.FormatInt(
+		int64(kubernetesMainContainerRestartCount(pod, recorded.mainContainer)), 10,
+	)
 	metadata[MetadataKeyKubernetesExecutorConfigHash] = kubernetesConfigHash(executorConfig)
 	metadata[MetadataKeyKubernetesInventoryState] = KubernetesInventoryStateReady
 	metadata[MetadataKeyIsRemote] = true
@@ -498,12 +500,11 @@ func ValidateKubernetesResumeMetadata(
 	taskID, sessionID string,
 	executorConfigValues map[string]string,
 ) error {
-	executorConfig, err := kubeexecutor.ParseExecutorConfig(executorConfigValues)
-	if err != nil {
+	if _, err := kubeexecutor.ParseExecutorConfig(executorConfigValues); err != nil {
 		return fmt.Errorf("kubernetes lifecycle: validate current executor config: %w", err)
 	}
 	req := &ExecutorCreateRequest{TaskID: taskID, SessionID: sessionID, Metadata: metadata}
-	recorded, _, err := kubernetesRecordedInventory(req, executorConfig, true)
+	recorded, _, err := kubernetesRecordedInventory(req, true)
 	if err != nil {
 		return err
 	}

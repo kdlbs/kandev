@@ -226,7 +226,7 @@ func (m *Manager) buildPassthroughEnv(ctx context.Context, execution *AgentExecu
 // startPassthroughShell starts the shell session for a passthrough execution.
 // Non-fatal errors are logged with the provided warning message.
 func (m *Manager) startPassthroughShell(ctx context.Context, execution *AgentExecution, shellWarnMsg string) {
-	client, release := execution.acquireAgentctlClient()
+	client, release := execution.AcquireAgentCtlClient()
 	defer release()
 	if client == nil {
 		return
@@ -829,12 +829,15 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlReady, execution, "")
 	m.startPassthroughShell(ctx, execution, "failed to start shell for passthrough session")
 
-	if client := execution.GetAgentCtlClient(); m.streamManager != nil && client != nil {
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	hasAgentStream := client != nil && client.HasAgentStream()
+	releaseClient()
+	if m.streamManager != nil && client != nil {
 		m.streamManager.ConnectWorkspaceStream(execution, nil)
 		// Also open the agent updates stream so the agentctl instance can proxy
 		// kandev MCP tool calls to the backend (passthrough has no ACP stream
 		// otherwise, so MCP tool calls would hang).
-		if !client.HasAgentStream() {
+		if !hasAgentStream {
 			m.streamManager.ConnectMCPStream(execution)
 		}
 	}
@@ -1093,12 +1096,14 @@ func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expec
 
 	// Connect to workspace stream for shell/git/file features.
 	// Only connect if not already connected (process restart reuses the same agentctl).
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	hasAgentStream := client != nil && client.HasAgentStream()
+	releaseClient()
 	if m.streamManager != nil && client != nil && execution.GetWorkspaceStream() == nil {
 		m.streamManager.ConnectWorkspaceStream(execution, nil)
 	}
 	// Re-open the MCP proxy stream too (drains kandev MCP tool calls).
-	if m.streamManager != nil && client != nil && !client.HasAgentStream() {
+	if m.streamManager != nil && client != nil && !hasAgentStream {
 		m.streamManager.ConnectMCPStream(execution)
 	}
 
@@ -1429,11 +1434,13 @@ func (m *Manager) attemptResumeFallbackForProcess(execution *AgentExecution, run
 	// shell/git/file features come back too — without this the main terminal
 	// works but the user's shell session and workspace stream stay torn down.
 	m.startPassthroughShell(ctx, execution, "failed to start shell after passthrough resume fallback")
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	hasAgentStream := client != nil && client.HasAgentStream()
+	releaseClient()
 	if m.streamManager != nil && client != nil && execution.GetWorkspaceStream() == nil {
 		m.streamManager.ConnectWorkspaceStream(execution, nil)
 	}
-	if m.streamManager != nil && client != nil && !client.HasAgentStream() {
+	if m.streamManager != nil && client != nil && !hasAgentStream {
 		m.streamManager.ConnectMCPStream(execution)
 	}
 

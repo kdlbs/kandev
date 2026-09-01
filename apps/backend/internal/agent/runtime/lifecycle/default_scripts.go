@@ -158,6 +158,13 @@ if [ -n "$repository_url" ]; then
       echo 'kandev: retained workspace repository root does not match the mount root' >&2
       exit 1
     fi
+    workspace_origin=$(git -C "$workspace" remote get-url origin 2>/dev/null || true)
+    expected_origin=$(printf '%s\n' "$repository_url" | sed 's|^https://[^/@]*@github.com/|https://github.com/|')
+    retained_origin=$(printf '%s\n' "$workspace_origin" | sed 's|^https://[^/@]*@github.com/|https://github.com/|')
+    if [ -z "$workspace_origin" ] || [ "$retained_origin" != "$expected_origin" ]; then
+      echo 'kandev: retained workspace repository origin does not match the configured repository' >&2
+      exit 1
+    fi
   else
     # A fresh filesystem-backed PVC may contain only lost+found. Preserve it,
     # clone on the runtime emptyDir, then copy the checkout into the mount root.

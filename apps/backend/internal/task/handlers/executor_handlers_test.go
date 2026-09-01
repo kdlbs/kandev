@@ -509,7 +509,7 @@ func TestWSCreateExecutorRejectsInvalidMCPPolicy(t *testing.T) {
 	require.NoError(t, err)
 	payload := wsWorkflowError(t, resp)
 	require.Equal(t, string(ws.ErrorCodeValidation), payload.Code)
-	require.Contains(t, payload.Message, "mcp_policy must be valid JSON")
+	require.Equal(t, service.ErrInvalidExecutorConfig.Error(), payload.Message)
 	require.Empty(t, repo.created)
 }
 

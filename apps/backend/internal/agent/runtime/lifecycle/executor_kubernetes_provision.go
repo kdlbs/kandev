@@ -69,7 +69,9 @@ func createManagedKubernetesWorkspacePVC(
 		if !kubeexecutor.IsAmbiguousCreateError(err) {
 			return kubernetesWorkspaceProvision{claimName: claimName}, createErr
 		}
-		created, err = resources.GetPersistentVolumeClaim(ctx, namespace, desired.Name)
+		reconcileCtx, cancel := kubernetesAmbiguousCreateContext(ctx)
+		created, err = resources.GetPersistentVolumeClaim(reconcileCtx, namespace, desired.Name)
+		cancel()
 		if apierrors.IsNotFound(err) {
 			return kubernetesWorkspaceProvision{claimName: claimName}, createErr
 		}
@@ -147,7 +149,9 @@ func createAndWaitKubernetesPod(
 		if !kubeexecutor.IsAmbiguousCreateError(err) {
 			return nil, nil, createErr
 		}
-		created, err = resources.GetPod(ctx, desired.Namespace, desired.Name)
+		reconcileCtx, cancel := kubernetesAmbiguousCreateContext(ctx)
+		created, err = resources.GetPod(reconcileCtx, desired.Namespace, desired.Name)
+		cancel()
 		if apierrors.IsNotFound(err) {
 			return nil, nil, createErr
 		}

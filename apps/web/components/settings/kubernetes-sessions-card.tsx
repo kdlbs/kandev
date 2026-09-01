@@ -158,7 +158,11 @@ function SessionIdentityValue({ label, value }: { label: string; value: string }
 }
 
 function SessionStatus({ session }: { session: KubernetesSession }) {
-  const status = session.container_state || session.pod_phase || "unknown";
+  const status =
+    session.container_state?.toLowerCase() === "terminated" &&
+    session.pod_phase?.toLowerCase() === "succeeded"
+      ? session.pod_phase
+      : session.container_state || session.pod_phase || "unknown";
   const running = status.toLowerCase() === "running";
   return (
     <div className="flex flex-wrap items-center gap-2">

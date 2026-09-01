@@ -21,7 +21,12 @@ export function LegacyExecutorSettingsRoute({
   );
 
   if (executor?.type === "k8s") {
-    const destinationProfileId = profileId ?? executor.profiles?.[0]?.id;
+    const destinationProfileId = profileId
+      ? executor.profiles?.find((profile) => profile.id === profileId)?.id
+      : executor.profiles?.[0]?.id;
+    if (profileId && !destinationProfileId) {
+      return <ProfileDetailPage executorId={executorId} profileId={profileId} />;
+    }
     const destination = destinationProfileId
       ? executorProfileSettingsPath(executor, destinationProfileId)
       : executorConnectionSettingsPath(executor);

@@ -18,7 +18,7 @@ import (
 // newTestManagerForAggregator builds a minimal Manager with just the bits the
 // aggregator needs: an executionStore and a logger. We don't need the real
 // dependency graph because the aggregator only reads execution metadata and
-// dispatches to AgentExecution.GetAgentCtlClient (which we leave nil — pushAsync
+// acquires the AgentExecution agentctl client (which we leave nil — pushAsync
 // will then no-op, and the test inspects sessionModes/lastPushed directly).
 func newTestManagerForAggregator(t *testing.T) *Manager {
 	t.Helper()

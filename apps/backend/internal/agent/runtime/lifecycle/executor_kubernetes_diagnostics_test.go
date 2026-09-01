@@ -133,6 +133,40 @@ func TestKubernetesWaitForPodRunningRelistsAfterWatchCloses(t *testing.T) {
 	require.Equal(t, 2, watchCalls)
 }
 
+func TestKubernetesWaitForPodRunningBacksOffBeforeRelistingClosedWatch(t *testing.T) {
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "agent", Namespace: "agents", ResourceVersion: "1",
+	}, Status: corev1.PodStatus{Phase: corev1.PodPending}}
+	clientset := kubefake.NewSimpleClientset(pod)
+	watchCalls := 0
+	clientset.PrependWatchReactor("pods", func(clienttesting.Action) (bool, watch.Interface, error) {
+		watchCalls++
+		closedWatch := watch.NewRaceFreeFake()
+		closedWatch.Stop()
+		return true, closedWatch, nil
+	})
+	backoffEntered := make(chan struct{})
+	resources := &liveKubernetesResources{
+		client: &kubeexecutor.Client{Clientset: clientset},
+		watchRelistBackoff: func(ctx context.Context) error {
+			close(backoffEntered)
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := resources.WaitForPodRunning(ctx, "agents", "agent", "kandev-agent")
+		done <- err
+	}()
+	<-backoffEntered
+	cancel()
+
+	require.ErrorIs(t, <-done, context.Canceled)
+	require.Equal(t, 1, watchCalls, "closed watches must not trigger a tight relist loop")
+}
+
 func TestKubernetesPodReadyRejectsInitContainerImagePullFailure(t *testing.T) {
 	pod := &corev1.Pod{Status: corev1.PodStatus{
 		Phase: corev1.PodPending,

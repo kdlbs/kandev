@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -126,22 +127,51 @@ func kubernetesWriteFile(
 	data []byte,
 	mode os.FileMode,
 ) error {
-	directory := destination[:strings.LastIndex(destination, "/")]
-	writeCommand := ": > " + shellQuote(destination)
+	command := kubernetesWriteFileCommand(destination, mode, len(data) > 0)
 	var stdin io.Reader
 	if len(data) > 0 {
-		writeCommand = "cat > " + shellQuote(destination)
 		stdin = bytes.NewReader(data)
 	}
-	command := fmt.Sprintf(
-		"set -eu; umask 077; mkdir -p %s; %s; chmod %04o %s",
-		shellQuote(directory), writeCommand, mode.Perm(), shellQuote(destination),
-	)
 	return streams.Exec(ctx, kubeexecutor.ExecRequest{
 		Namespace: pod.Namespace, Pod: pod.Name, Container: container,
 		Command: []string{"sh", "-c", command}, Stdin: stdin,
 		Stdout: io.Discard, Stderr: io.Discard,
 	})
+}
+
+func kubernetesWriteFileCommand(destination string, mode os.FileMode, hasData bool) string {
+	directory := path.Dir(destination)
+	writeCommand := ":"
+	if hasData {
+		writeCommand = `cat > "$temporary"`
+	}
+	return fmt.Sprintf(`set -efu
+umask 077
+directory=%s
+destination=%s
+current=
+old_ifs=$IFS
+IFS=/
+set -- $directory
+IFS=$old_ifs
+for component in "$@"; do
+  [ -n "$component" ] || continue
+  current="$current/$component"
+  [ ! -L "$current" ] || exit 73
+  if [ -e "$current" ]; then
+    [ -d "$current" ] || exit 73
+  else
+    mkdir "$current"
+  fi
+done
+[ ! -L "$destination" ] || exit 73
+[ ! -d "$destination" ] || exit 73
+temporary=$(mktemp "$directory/.kandev-upload.XXXXXX")
+trap 'rm -f "$temporary"' EXIT HUP INT TERM
+%s
+chmod %04o "$temporary"
+mv -f "$temporary" "$destination"
+trap - EXIT HUP INT TERM`, shellQuote(directory), shellQuote(destination), writeCommand, mode.Perm())
 }
 
 func kubernetesWriteBootstrapFiles(

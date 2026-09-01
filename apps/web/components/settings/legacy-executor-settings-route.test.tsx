@@ -109,6 +109,13 @@ describe("LegacyExecutorSettingsRoute", () => {
     expect(screen.queryByTestId("legacy-profile")).toBeNull();
   });
 
+  it("does not redirect a Kubernetes executor to a profile owned by another executor", () => {
+    renderRoute(executor("k8s"), "profile/from-another-executor");
+
+    expect(screen.getByTestId("legacy-profile")).toBeTruthy();
+    expect(replace).not.toHaveBeenCalled();
+  });
+
   it.each([
     { profileId: undefined, testId: "legacy-executor" },
     { profileId: "profile/primary", testId: "legacy-profile" },

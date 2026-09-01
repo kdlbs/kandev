@@ -51,7 +51,7 @@ describe("remote executor status resource", () => {
     const resource = createRemoteExecutorStatusResource(requester);
 
     const failed = await resource.load(REQUEST);
-    expect(failed?.status?.remote_status_error).toBe("expired credential");
+    expect(failed?.status?.remote_status_error).toBe("Remote executor status is unavailable.");
 
     const recovered = await resource.load(REQUEST);
     expect(requester).toHaveBeenCalledTimes(2);
@@ -74,6 +74,18 @@ describe("remote executor status resource", () => {
     const recovered = await resource.load(REQUEST);
     expect(requester).toHaveBeenCalledTimes(2);
     expect(recovered?.status?.remote_name).toBe(RECOVERED_POD_NAME);
+  });
+
+  it("replaces non-Kubernetes backend diagnostics with translated safe copy", async () => {
+    const requester = vi.fn(async () => ({
+      ...healthyStatus("sprite-1"),
+      remote_status_error: "/home/operator/.config/provider?token=secret",
+    }));
+    const resource = createRemoteExecutorStatusResource(requester);
+
+    const failed = await resource.load({ ...REQUEST, executorType: "sprites" });
+
+    expect(failed?.status?.remote_status_error).toBe("Remote executor status is unavailable.");
   });
 
   it("does not issue malformed Kubernetes requests", () => {

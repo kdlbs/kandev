@@ -10,6 +10,8 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
 
+const loopbackAddress = "127.0.0.1"
+
 type ExecRequest struct {
 	Namespace string
 	Pod       string
@@ -107,10 +109,10 @@ func validateForwardRequest(forwarder PortForwarder, request *PortForwardRequest
 		return fieldError("port_forward.pod", "must be a valid Pod name")
 	}
 	if request.LocalAddress == "" {
-		request.LocalAddress = "127.0.0.1"
+		request.LocalAddress = loopbackAddress
 	}
-	if request.LocalAddress != "127.0.0.1" {
-		return fieldError("port_forward.local_address", "must be 127.0.0.1")
+	if request.LocalAddress != loopbackAddress {
+		return fieldError("port_forward.local_address", "must be "+loopbackAddress)
 	}
 	if request.RemotePort == 0 {
 		return fieldError("port_forward.remote_port", "must be non-zero")

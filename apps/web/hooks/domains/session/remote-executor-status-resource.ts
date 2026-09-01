@@ -52,10 +52,21 @@ function projectKubernetesStatus(session: KubernetesSession | null): RemoteExecu
   };
 }
 
-function statusError(error: unknown): RemoteExecutorStatusData {
+function statusError(): RemoteExecutorStatusData {
   return {
     remote_checked_at: new Date().toISOString(),
-    remote_status_error: error instanceof Error ? error.message : t("task:unknownError"),
+    remote_status_error: t("task:remoteExecutorStatusUnavailable"),
+  };
+}
+
+function publicRemoteStatus(
+  request: RemoteExecutorStatusRequest,
+  status: RemoteExecutorStatusData,
+): RemoteExecutorStatusData {
+  if (request.executorType === "k8s" || !status.remote_status_error) return status;
+  return {
+    ...status,
+    remote_status_error: t("task:remoteExecutorStatusUnavailable"),
   };
 }
 
@@ -148,11 +159,11 @@ export function createRemoteExecutorStatusResource(requester: Requester = reques
     const promise = pending
       .then(
         (status) => ({
-          snapshot: { status, loading: false },
+          snapshot: { status: publicRemoteStatus(request, status), loading: false },
           failed: Boolean(status.remote_status_error),
         }),
-        (error) => ({
-          snapshot: { status: statusError(error), loading: false },
+        () => ({
+          snapshot: { status: statusError(), loading: false },
           failed: true,
         }),
       )

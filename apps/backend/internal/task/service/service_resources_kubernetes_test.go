@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	agentkubernetes "github.com/kandev/kandev/internal/agent/kubernetes"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/auth/authn"
@@ -490,6 +492,16 @@ func TestDeleteKubernetesProfileRejectsMember(t *testing.T) {
 	if !errors.Is(err, ErrKubernetesAdminRequired) {
 		t.Fatalf("error = %v, want ErrKubernetesAdminRequired", err)
 	}
+}
+
+func TestDeleteExecutorProfileSucceedsAfterExecutorWasSoftDeleted(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	profile := createKubernetesProfile(t, svc)
+
+	require.NoError(t, svc.DeleteExecutor(kubernetesAdminContext(), profile.ExecutorID))
+	require.NoError(t, svc.DeleteExecutorProfile(kubernetesAdminContext(), profile.ID))
+	_, err := svc.GetExecutorProfile(context.Background(), profile.ID)
+	require.Error(t, err)
 }
 
 func TestKubernetesExecutorAndProfileReadsRemainAvailableToMembers(t *testing.T) {

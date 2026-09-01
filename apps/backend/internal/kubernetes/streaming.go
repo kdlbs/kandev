@@ -13,7 +13,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/httpstream"
 	kubeclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -137,7 +136,7 @@ func streamingRESTConfig(client *agentkubernetes.Client) (*rest.Config, error) {
 }
 
 func shouldFallbackStreaming(err error) bool {
-	return httpstream.IsUpgradeFailure(err) || httpstream.IsHTTPSProxyError(err)
+	return agentkubernetes.ShouldFallbackStream(err)
 }
 
 func (h *Handler) runStreamingStep(

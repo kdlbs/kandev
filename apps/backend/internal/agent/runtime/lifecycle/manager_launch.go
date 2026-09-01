@@ -1423,7 +1423,8 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		}
 		defer activityLease.Release()
 		if len(req.McpProviders) > 0 {
-			client := execution.GetAgentCtlClient()
+			client, releaseClient := execution.AcquireAgentCtlClient()
+			defer releaseClient()
 			if client == nil {
 				return nil, fmt.Errorf("execution %q has no agentctl client for MCP provider promotion", execution.ID)
 			}
@@ -1757,7 +1758,10 @@ func (m *Manager) registerAndPublishExecution(
 	m.setRuntimeInterest(execution.SessionID, true)
 
 	if !isKubernetes {
-		m.persistRuntimeSecrets(ctx, execInstance, execution)
+		if err := m.persistRuntimeSecrets(ctx, execInstance, execution); err != nil {
+			m.rollbackRegisteredLaunch(rt, execInstance, execution, "runtime secret persistence failed")
+			return err
+		}
 	}
 
 	go m.pollOneRemoteStatus(context.Background(), execution)
@@ -1904,6 +1908,10 @@ func (m *Manager) stopRegisteredLaunchRuntime(
 	execInstance *ExecutorInstance,
 	execution *AgentExecution,
 ) error {
+	execution.remoteInstanceLifecycleMu.Lock()
+	defer execution.remoteInstanceLifecycleMu.Unlock()
+	execution.agentctlLifecycleMu.Lock()
+	defer execution.agentctlLifecycleMu.Unlock()
 	if rt != nil && execInstance != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		retainedKubernetesResume := execution.RuntimeName == agentruntime.RuntimeKubernetes && execution.isResumedSession
@@ -1922,7 +1930,7 @@ func (m *Manager) stopRegisteredLaunchRuntime(
 			return err
 		}
 	}
-	if client := execution.GetAgentCtlClient(); client != nil {
+	if client := execution.currentAgentCtlClient(); client != nil { // protected by agentctlLifecycleMu
 		client.Close()
 	}
 	execution.EndSessionSpan()
@@ -1957,6 +1965,10 @@ func (m *Manager) finishRegisteredLaunchRollback(execution *AgentExecution, task
 }
 
 func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend, execInstance *ExecutorInstance, execution *AgentExecution, reason string) {
+	execution.remoteInstanceLifecycleMu.Lock()
+	defer execution.remoteInstanceLifecycleMu.Unlock()
+	execution.agentctlLifecycleMu.Lock()
+	defer execution.agentctlLifecycleMu.Unlock()
 	m.logger.Warn("rolling back launch execution",
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID),
@@ -1970,7 +1982,7 @@ func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend,
 				zap.Error(stopErr))
 		}
 	}
-	if client := execution.GetAgentCtlClient(); client != nil {
+	if client := execution.currentAgentCtlClient(); client != nil { // protected by agentctlLifecycleMu
 		client.Close()
 	}
 	execution.EndSessionSpan()
@@ -2036,7 +2048,8 @@ func (m *Manager) SetMcpMode(ctx context.Context, executionID string, mode strin
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
@@ -2058,7 +2071,8 @@ func (m *Manager) SetMcpProvidersForSession(ctx context.Context, sessionID strin
 			zap.String("session_id", sessionID))
 		return nil
 	}
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
@@ -2077,11 +2091,13 @@ func (m *Manager) SetPluginToolsForAllExecutions(ctx context.Context, snapshot p
 		if execution == nil {
 			continue
 		}
-		client := execution.GetAgentCtlClient()
+		client, releaseClient := execution.AcquireAgentCtlClient()
 		if client == nil {
 			continue
 		}
-		if err := client.SetPluginTools(ctx, snapshot); err != nil {
+		err := client.SetPluginTools(ctx, snapshot)
+		releaseClient()
+		if err != nil {
 			refreshErr = errors.Join(refreshErr, fmt.Errorf("refresh execution %s plugin tools: %w", execution.ID, err))
 		}
 	}
@@ -2142,7 +2158,7 @@ func (m *Manager) createBootMessage(ctx context.Context, execution *AgentExecuti
 		return nil, nil
 	}
 	bootStopCh := make(chan struct{})
-	go m.pollAgentStderr(execution, execution.GetAgentCtlClient(), bootMsg, bootStopCh)
+	go m.pollAgentStderr(execution, bootMsg, bootStopCh)
 	return bootMsg, bootStopCh
 }
 
@@ -2161,10 +2177,6 @@ func getAttachmentsFromMetadata(execution *AgentExecution) []MessageAttachment {
 // configureAndStartAgent configures the agent command and starts the agent subprocess.
 // Returns the effective boot command (full command with adapter args, or base command).
 func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentExecution, approvalPolicy string) (string, error) {
-	client := execution.GetAgentCtlClient()
-	if client == nil {
-		return "", fmt.Errorf("execution %q has no agentctl client", execution.ID)
-	}
 	env := execution.RuntimeEnvironment()
 	metadataEnv := runtimeEnvFromMetadata(execution.MetadataSnapshot())
 	if env == nil {
@@ -2183,6 +2195,11 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 	if err := spillLargeWakePayloadEnv(env, execution.WorkspacePath, m.logger.Zap()); err != nil {
 		m.updateExecutionError(execution.ID, "failed to prepare agent env: "+err.Error())
 		return "", fmt.Errorf("failed to prepare agent env: %w", err)
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if client == nil {
+		return "", fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
 
 	if err := client.ConfigureAgent(ctx, execution.AgentCommand, execution.AgentArgs, env, approvalPolicy, execution.ContinueCommand, execution.ContinueArgs); err != nil {
@@ -2226,20 +2243,19 @@ func runtimeEnvFromMetadata(metadata map[string]interface{}) map[string]string {
 // MCP servers. It finalizes the boot message on success or failure.
 func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentExecution, bootCommand, agentDisplayName, taskDescription, approvalPolicy string) error {
 	bootMsg, bootStopCh := m.createBootMessage(ctx, execution, bootCommand, agentDisplayName)
-	client := execution.GetAgentCtlClient()
 
 	// Give the agent process a moment to initialize
 	time.Sleep(500 * time.Millisecond)
 
 	agentConfig, err := m.getAgentConfigForExecution(execution)
 	if err != nil {
-		m.finalizeBootMessage(execution, bootMsg, bootStopCh, client, "failed")
+		m.finalizeBootMessage(execution, bootMsg, bootStopCh, "failed")
 		return fmt.Errorf("failed to get agent config: %w", err)
 	}
 
 	mcpServers, err := m.resolveMcpServers(ctx, execution, agentConfig)
 	if err != nil {
-		m.finalizeBootMessage(execution, bootMsg, bootStopCh, client, "failed")
+		m.finalizeBootMessage(execution, bootMsg, bootStopCh, "failed")
 		m.updateExecutionError(execution.ID, "failed to resolve MCP config: "+err.Error())
 		return fmt.Errorf("failed to resolve MCP config: %w", err)
 	}
@@ -2258,19 +2274,19 @@ func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentEx
 		)
 		if attempted {
 			if retryErr == nil {
-				m.finalizeBootMessage(execution, bootMsg, bootStopCh, client, containerStateExited)
+				m.finalizeBootMessage(execution, bootMsg, bootStopCh, containerStateExited)
 				return nil
 			}
 			err = retryErr
 		} else if retryErr != nil {
 			err = retryErr
 		}
-		m.finalizeBootMessage(execution, bootMsg, bootStopCh, client, "failed")
+		m.finalizeBootMessage(execution, bootMsg, bootStopCh, "failed")
 		m.updateExecutionError(execution.ID, "failed to initialize ACP: "+err.Error())
 		return fmt.Errorf("failed to initialize ACP: %w", err)
 	}
 
-	m.finalizeBootMessage(execution, bootMsg, bootStopCh, client, containerStateExited)
+	m.finalizeBootMessage(execution, bootMsg, bootStopCh, containerStateExited)
 	return nil
 }
 

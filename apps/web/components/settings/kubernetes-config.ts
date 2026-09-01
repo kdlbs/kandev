@@ -23,19 +23,22 @@ export type KubernetesProfileConfigForm = {
   workspaceMode: KubernetesWorkspaceMode;
   workspaceSize: string;
   storageClass: string;
-  accessModes: KubernetesAccessMode[];
+  accessModes: string[];
   claimName: string;
 };
 
 export type KubernetesProfileValidationError =
   | "main_container_required"
+  | "main_container_invalid"
   | "pod_template_required"
   | "pod_template_too_large"
   | "workspace_size_required"
   | "access_mode_required"
+  | "access_mode_invalid"
   | "claim_name_required";
 
 const MAX_POD_TEMPLATE_BYTES = 256 * 1024;
+const KUBERNETES_CONTAINER_NAME = /^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$/;
 
 // i18n-exempt: container image reference persisted in the Kubernetes PodTemplate.
 export const DEFAULT_KUBERNETES_IMAGE = "ghcr.io/kdlbs/kandev:latest";
@@ -188,6 +191,9 @@ export function getKubernetesProfileValidationError(
   form: KubernetesProfileConfigForm,
 ): KubernetesProfileValidationError | null {
   if (!form.mainContainer.trim()) return "main_container_required";
+  if (!KUBERNETES_CONTAINER_NAME.test(form.mainContainer.trim())) {
+    return "main_container_invalid";
+  }
   if (!form.podTemplateYaml.trim()) return "pod_template_required";
   if (new TextEncoder().encode(form.podTemplateYaml).byteLength > MAX_POD_TEMPLATE_BYTES) {
     return "pod_template_too_large";
@@ -197,6 +203,12 @@ export function getKubernetesProfileValidationError(
   }
   if (form.workspaceMode === "managed_pvc" && form.accessModes.length === 0) {
     return "access_mode_required";
+  }
+  if (
+    form.workspaceMode === "managed_pvc" &&
+    form.accessModes.some((mode) => !ACCESS_MODES.has(mode as KubernetesAccessMode))
+  ) {
+    return "access_mode_invalid";
   }
   if (form.workspaceMode === "existing_claim" && !form.claimName.trim()) {
     return "claim_name_required";
@@ -232,15 +244,12 @@ function parseWorkspaceMode(raw: string): KubernetesWorkspaceMode {
   return "managed_pvc";
 }
 
-function parseAccessModes(raw: string): KubernetesAccessMode[] {
+function parseAccessModes(raw: string): string[] {
   if (!raw.trim()) return [];
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (value): value is KubernetesAccessMode =>
-        typeof value === "string" && ACCESS_MODES.has(value as KubernetesAccessMode),
-    );
+    return parsed.filter((value): value is string => typeof value === "string");
   } catch {
     return [];
   }

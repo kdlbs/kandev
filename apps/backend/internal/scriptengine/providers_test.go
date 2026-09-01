@@ -66,8 +66,27 @@ func TestAgentctlProviderSupportsExecutorBinaryPath(t *testing.T) {
 		Start:      true,
 	})()
 
-	if got, want := vars["kandev.agentctl.install"], "chmod +x /opt/kandev/agentctl"; got != want {
+	if got, want := vars["kandev.agentctl.install"], "chmod +x '/opt/kandev/agentctl'"; got != want {
 		t.Fatalf("kandev.agentctl.install = %q, want %q", got, want)
+	}
+}
+
+func TestAgentctlProviderShellQuotesExecutorBinaryAndWorkspacePaths(t *testing.T) {
+	binaryPath := "/opt/kandev agentctl'$(touch /tmp/pwned)"
+	workspacePath := "/workspace/project name'$(touch /tmp/workspace-pwned)"
+	vars := AgentctlProviderWithOptions(8765, workspacePath, AgentctlProviderOptions{
+		BinaryPath: binaryPath,
+		Start:      true,
+	})()
+
+	if got, want := vars["kandev.agentctl.install"], "chmod +x "+shellQuote(binaryPath); got != want {
+		t.Fatalf("kandev.agentctl.install = %q, want %q", got, want)
+	}
+	wantStart := "nohup " + shellQuote(binaryPath) +
+		" --port 8765 --workdir " + shellQuote(workspacePath) +
+		" > /tmp/agentctl.log 2>&1 &\nsleep 1"
+	if got := vars["kandev.agentctl.start"]; got != wantStart {
+		t.Fatalf("kandev.agentctl.start = %q, want %q", got, wantStart)
 	}
 }
 
@@ -86,8 +105,8 @@ func TestAgentctlProviderPreservesLegacyExpansions(t *testing.T) {
 	got := AgentctlProvider(8765, "/workspace")()
 	want := map[string]string{
 		"kandev.agentctl.port":    "8765",
-		"kandev.agentctl.install": "chmod +x /usr/local/bin/agentctl",
-		"kandev.agentctl.start":   "nohup agentctl --port 8765 --workdir /workspace > /tmp/agentctl.log 2>&1 &\nsleep 1",
+		"kandev.agentctl.install": "chmod +x '/usr/local/bin/agentctl'",
+		"kandev.agentctl.start":   "nohup 'agentctl' --port 8765 --workdir '/workspace' > /tmp/agentctl.log 2>&1 &\nsleep 1",
 	}
 
 	if !reflect.DeepEqual(got, want) {

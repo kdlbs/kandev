@@ -373,10 +373,10 @@ func (h *ExecutorProfileHandlers) wsCreateProfile(ctx context.Context, msg *ws.M
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, err.Error(), nil)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
 		}
 		if errors.Is(err, service.ErrInvalidExecutorConfig) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, service.ErrInvalidExecutorConfig.Error(), nil)
 		}
 		h.logger.Error("failed to create executor profile", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create profile", nil)
@@ -431,10 +431,10 @@ func (h *ExecutorProfileHandlers) wsUpdateProfile(ctx context.Context, msg *ws.M
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, err.Error(), nil)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
 		}
 		if errors.Is(err, service.ErrInvalidExecutorConfig) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, service.ErrInvalidExecutorConfig.Error(), nil)
 		}
 		h.logger.Error("failed to update executor profile", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update profile", nil)
@@ -452,7 +452,7 @@ func (h *ExecutorProfileHandlers) wsDeleteProfile(ctx context.Context, msg *ws.M
 	}
 	if err := h.service.DeleteExecutorProfile(ctx, req.ID); err != nil {
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, err.Error(), nil)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
 		}
 		h.logger.Error("failed to delete executor profile", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete profile", nil)

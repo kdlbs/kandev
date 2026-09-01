@@ -183,6 +183,42 @@ func TestPollOneRemoteStatusProjectsExecutionIntoInstance(t *testing.T) {
 		"an unstamped status is stamped so the UI can show staleness")
 }
 
+func TestKubernetesRefreshStatusInstanceOverlaysCurrentConnectionSettings(t *testing.T) {
+	store := &restartKubernetesInventoryStore{
+		executors: map[string]*models.Executor{"executor-1": {
+			ID: "executor-1", Type: models.ExecutorTypeKubernetes,
+			Config: map[string]string{
+				MetadataKeyKubernetesAuthMode:              "kubeconfig",
+				MetadataKeyKubernetesKubeconfigPath:        "/etc/kandev/current.yaml",
+				MetadataKeyKubernetesKubeContext:           "current",
+				MetadataKeyKubernetesConfigNamespace:       "new-agents",
+				MetadataKeyKubernetesRequestTimeoutSeconds: "45",
+			},
+		}},
+	}
+	mgr := &Manager{runningWriter: store}
+	execution := &AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+		RuntimeName: agentruntime.RuntimeKubernetes,
+		metadata: map[string]interface{}{
+			"executor_id":                              "executor-1",
+			MetadataKeyKubernetesAuthMode:              "in_cluster",
+			MetadataKeyKubernetesConfigNamespace:       "old-agents",
+			MetadataKeyKubernetesNamespace:             "old-agents",
+			MetadataKeyKubernetesRequestTimeoutSeconds: "30",
+		},
+	}
+
+	instance, err := mgr.kubernetesRefreshStatusInstance(context.Background(), execution)
+
+	require.NoError(t, err)
+	require.Equal(t, "kubeconfig", instance.Metadata[MetadataKeyKubernetesAuthMode])
+	require.Equal(t, "/etc/kandev/current.yaml", instance.Metadata[MetadataKeyKubernetesKubeconfigPath])
+	require.Equal(t, "current", instance.Metadata[MetadataKeyKubernetesKubeContext])
+	require.Equal(t, "new-agents", instance.Metadata[MetadataKeyKubernetesConfigNamespace])
+	require.Equal(t, "old-agents", instance.Metadata[MetadataKeyKubernetesNamespace])
+}
+
 func TestPollOneRemoteStatusStoresProviderError(t *testing.T) {
 	provider := &statusProviderExecutor{
 		MockExecutor: MockExecutor{name: executor.NameSprites},
@@ -299,7 +335,9 @@ func TestPollOneRemoteStatusAtomicallyRefreshesRestartedKubernetesAgentctl(t *te
 	provider.mu.Unlock()
 	require.Equal(t, 1, refreshCalls, "concurrent polls must share one refresh")
 	require.True(t, committed)
-	require.Same(t, newClient, execution.GetAgentCtlClient())
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	require.Same(t, newClient, client)
+	releaseClient()
 	require.Equal(t, int32(1), configureCalls.Load())
 	require.Equal(t, int32(1), startCalls.Load())
 	revealed, err := store.Reveal(context.Background(), "kandev-runtime:exec-1:agentctl-auth")
@@ -386,9 +424,53 @@ func TestPollOneRemoteStatusReattachesKubernetesClientWithoutRestartingAgent(t *
 
 	mgr.pollOneRemoteStatus(context.Background(), execution)
 
-	require.Same(t, newClient, execution.GetAgentCtlClient())
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	require.Same(t, newClient, client)
+	releaseClient()
 	require.Zero(t, configureCalls.Load(), "local transport reattachment must not restart the remote agent")
 	require.Zero(t, startCalls.Load(), "local transport reattachment must not restart the remote agent")
+}
+
+func TestPersistActiveKubernetesRefreshOutlivesCanceledPollContext(t *testing.T) {
+	store := newInMemorySecretStore()
+	for id, value := range map[string]string{
+		"kandev-runtime:exec-1:agentctl-auth":      "old-token",
+		"kandev-runtime:exec-1:agentctl-bootstrap": "durable-nonce",
+	} {
+		require.NoError(t, store.Create(context.Background(), &secrets.SecretWithValue{
+			Secret: secrets.Secret{ID: id, Name: id}, Value: value,
+		}))
+	}
+	store.rejectCanceledCalls = true
+	mgr := newRemoteStatusManager(t, &MockExecutor{name: executor.NameKubernetes})
+	mgr.SetSecretStore(store)
+	mgr.SetExecutorRunningWriter(&captureExecutorRunningWriter{})
+	execution := &AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+		AgentProfileID: "profile-1", RuntimeName: agentruntime.RuntimeKubernetes,
+		Status: v1.AgentStatusRunning,
+		metadata: map[string]interface{}{
+			MetadataKeyAuthTokenSecret:      "kandev-runtime:exec-1:agentctl-auth",
+			MetadataKeyBootstrapNonceSecret: "kandev-runtime:exec-1:agentctl-bootstrap",
+		},
+	}
+	instance := &ExecutorInstance{
+		AuthToken: "rotated-token", BootstrapNonce: "durable-nonce",
+		Metadata: map[string]interface{}{MetadataKeyKubernetesAgentctlRemotePort: "41002"},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	rollback, err := mgr.persistActiveKubernetesRefresh(ctx, execution, instance)
+	require.NoError(t, err)
+	require.NotNil(t, rollback)
+	rotated, err := store.Reveal(context.Background(), "kandev-runtime:exec-1:agentctl-auth")
+	require.NoError(t, err)
+	require.Equal(t, "rotated-token", rotated)
+	require.NoError(t, rollback(ctx))
+	restored, err := store.Reveal(context.Background(), "kandev-runtime:exec-1:agentctl-auth")
+	require.NoError(t, err)
+	require.Equal(t, "old-token", restored)
 }
 
 func TestStopAgentSerializesWithActiveKubernetesRefresh(t *testing.T) {

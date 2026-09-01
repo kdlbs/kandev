@@ -116,3 +116,57 @@ func TestManagerExportACPDebugHoldsClientLeaseDuringRequest(t *testing.T) {
 	}
 	_ = got.body.Close()
 }
+
+func TestManagerExportACPDebugHoldsClientLeaseUntilBodyClose(t *testing.T) {
+	headersSent := make(chan struct{})
+	releaseBody := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		close(headersSent)
+		<-releaseBody
+		_, _ = w.Write([]byte("zip"))
+	}))
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution := &AgentExecution{
+		ID: "execution-1", SessionID: "task-session-1", ACPSessionID: "acp-session-1",
+		agentctl: agentctlclient.NewClient(parsed.Hostname(), port, log),
+	}
+	mgr := newTestManager(t)
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+
+	body, err := mgr.ExportACPDebug(context.Background(), "task-session-1", 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-headersSent
+	if execution.agentctlLifecycleMu.TryLock() {
+		execution.agentctlLifecycleMu.Unlock()
+		close(releaseBody)
+		_ = body.Close()
+		t.Fatal("agentctl replacement lease ended before the response body closed")
+	}
+	if err := body.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !execution.agentctlLifecycleMu.TryLock() {
+		close(releaseBody)
+		t.Fatal("agentctl replacement lease remained held after response body close")
+	}
+	execution.agentctlLifecycleMu.Unlock()
+	close(releaseBody)
+}

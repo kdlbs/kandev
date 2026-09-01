@@ -34,7 +34,12 @@ function statusPresentation(status: RemoteExecutorStatusData | null, loading: bo
   if (state === "running" || state === "ready" || state === "connected") {
     return { Icon: IconCheck, tone: "text-emerald-600 dark:text-emerald-400" };
   }
-  if (state === "pending" || state === "starting" || state === "provisioning") {
+  if (
+    state === "pending" ||
+    state === "starting" ||
+    state === "provisioning" ||
+    state === "waiting"
+  ) {
     return { Icon: IconClockHour4, tone: "text-amber-600 dark:text-amber-400" };
   }
   if (loading) return { Icon: IconLoader2, tone: "text-muted-foreground" };

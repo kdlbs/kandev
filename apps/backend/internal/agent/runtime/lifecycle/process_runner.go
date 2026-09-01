@@ -27,7 +27,7 @@ func (m *Manager) StartProcess(ctx context.Context, req StartProcessRequest) (*a
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrNoExecutionForSession, req.SessionID)
 	}
-	client, releaseClient := execution.acquireAgentctlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
 		return nil, fmt.Errorf("agentctl client not available for session %s", req.SessionID)
@@ -68,7 +68,7 @@ func (m *Manager) WaitForAgentctlReadyForSession(ctx context.Context, sessionID 
 	if !ok {
 		return fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 	}
-	client, releaseClient := execution.acquireAgentctlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
 		return fmt.Errorf("agentctl client not available for session %s", sessionID)
@@ -81,7 +81,7 @@ func (m *Manager) StopProcess(ctx context.Context, processID string) error {
 		return fmt.Errorf("process_id is required")
 	}
 	for _, exec := range m.executionStore.List() {
-		client, releaseClient := exec.acquireAgentctlClient()
+		client, releaseClient := exec.AcquireAgentCtlClient()
 		if client == nil {
 			releaseClient()
 			continue
@@ -135,7 +135,7 @@ func (m *Manager) StopProcessForSession(ctx context.Context, sessionID, processI
 	if !ok {
 		return fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 	}
-	client, releaseClient := execution.acquireAgentctlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
 		return fmt.Errorf("agentctl client not available for session %s", sessionID)
@@ -155,7 +155,7 @@ func (m *Manager) ListProcesses(ctx context.Context, sessionID string) ([]agentc
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 	}
-	client, releaseClient := execution.acquireAgentctlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
 		return nil, fmt.Errorf("agentctl client not available for session %s", sessionID)
@@ -168,7 +168,7 @@ func (m *Manager) GetProcess(ctx context.Context, processID string, includeOutpu
 		return nil, fmt.Errorf("process_id is required")
 	}
 	for _, exec := range m.executionStore.List() {
-		client, releaseClient := exec.acquireAgentctlClient()
+		client, releaseClient := exec.AcquireAgentCtlClient()
 		if client == nil {
 			releaseClient()
 			continue
@@ -187,7 +187,7 @@ func (m *Manager) StopAllProcesses(ctx context.Context) error {
 	executions := m.executionStore.List()
 	var errs []error
 	for _, exec := range executions {
-		client, releaseClient := exec.acquireAgentctlClient()
+		client, releaseClient := exec.AcquireAgentCtlClient()
 		if client == nil {
 			releaseClient()
 			continue

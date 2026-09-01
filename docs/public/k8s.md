@@ -267,7 +267,7 @@ Kandev's `executors_running` inventory is authoritative. It records exact Pod an
 
 Current connection configuration and recorded workload configuration serve different purposes:
 
-- Saved kubeconfig/in-cluster mode, kubeconfig path/context, namespace, and timeout are used for later status, reconnect, replacement, and cleanup. Changing credentials or context can restore or break access to an existing session. The configured namespace must still equal the recorded namespace.
+- Saved kubeconfig/in-cluster mode, kubeconfig path/context, and timeout are used for later status, reconnect, replacement, and cleanup. Changing credentials or context can restore or break access to an existing session. Retained sessions continue to target their recorded namespace; changing the saved namespace affects new sessions only.
 - Saved profile edits affect new sessions. An existing Pod is never live-mutated, and a missing-Pod replacement uses the recorded workload snapshot rather than the profile's current image, template, platform, main container, or storage fields.
 
 Ordinary Stop and backend shutdown close local clients and forwards but preserve the Pod and workspace. Agent or main-container restart keeps the Pod volumes; Kandev performs a new nonce handshake and local port-forward. If a Pod disappears, managed or existing PVC storage can support a replacement Pod after identity checks; `emptyDir` cannot.

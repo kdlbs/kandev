@@ -123,6 +123,11 @@ func TestValidateAdmittedPodRejectsOwnedMutations(t *testing.T) {
 		{name: "future kandev env", mutate: func(p *corev1.Pod) {
 			admittedMainContainer(p).Env = append(admittedMainContainer(p).Env, corev1.EnvVar{Name: "KANDEV_FUTURE", Value: "x"})
 		}},
+		{name: "main envFrom", mutate: func(p *corev1.Pod) {
+			admittedMainContainer(p).EnvFrom = []corev1.EnvFromSource{{
+				ConfigMapRef: &corev1.ConfigMapEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "runtime-env"}},
+			}}
+		}},
 		{name: "reserved mount", mutate: func(p *corev1.Pod) {
 			admittedMainContainer(p).VolumeMounts[0].MountPath = "/tmp/runtime"
 		}},

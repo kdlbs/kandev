@@ -296,7 +296,7 @@ func kubernetesRecordedCleanupInventory(
 ) (kubernetesRecordedState, kubeexecutor.ResourceIdentity, error) {
 	state := getMetadataString(req.Metadata, MetadataKeyKubernetesInventoryState)
 	if state == "" || state == KubernetesInventoryStateReady {
-		return kubernetesRecordedInventory(req, executorConfig, validateConnectionIdentity)
+		return kubernetesRecordedInventory(req, validateConnectionIdentity)
 	}
 	return kubernetesRecordedProvisionalInventory(req, executorConfig, validateConnectionIdentity, state)
 }

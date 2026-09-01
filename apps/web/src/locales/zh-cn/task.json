@@ -1073,6 +1073,7 @@
   "remoteCreatedLine": "创建：{{createdAt}}",
   "remoteExecutor": "远程执行器",
   "remoteExecutorStatus": "{{name}} 执行器状态",
+  "remoteExecutorStatusUnavailable": "远程执行器状态不可用。",
   "remoteLastCheck": "上次检查",
   "remoteLastCheckLine": "上次检查：{{checkedAt}}",
   "remoteRepository": "远程仓库",

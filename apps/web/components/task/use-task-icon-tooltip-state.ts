@@ -2,6 +2,13 @@
 
 import { useState, type FocusEvent, type PointerEvent } from "react";
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement &&
+    (target.matches("input, textarea, select") || target.isContentEditable)
+  );
+}
+
 /** Shared fine-pointer and keyboard disclosure behavior for compact task indicators. */
 export function useTaskIconTooltipState(onOpen?: () => void) {
   const [hovered, setHovered] = useState(false);
@@ -31,7 +38,8 @@ export function useTaskIconTooltipState(onOpen?: () => void) {
       setFocused(false);
       if (!hovered) setDismissed(false);
     },
-    onEscapeKeyDown() {
+    onEscapeKeyDown(event: Event) {
+      if (isEditableTarget(event.target)) return;
       setDismissed(true);
     },
   };

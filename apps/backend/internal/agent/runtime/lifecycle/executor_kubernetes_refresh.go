@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -105,6 +106,9 @@ func (r *KubernetesExecutor) inspectKubernetesRefresh(
 	}
 	pod, err := freshRuntime.resources.GetPod(ctx, recorded.namespace, recorded.podName)
 	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return kubernetesRefreshInspection{recorded: recorded, identity: identity}, false, nil
+		}
 		return kubernetesRefreshInspection{}, false, fmt.Errorf(
 			"kubernetes lifecycle: inspect active Pod for refresh: %w", err,
 		)

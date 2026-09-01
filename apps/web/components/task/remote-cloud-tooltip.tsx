@@ -144,7 +144,7 @@ function TouchStatusDisclosure({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLSpanElement>) {
-    if (event.key === "Enter" || event.key === " ") show(event);
+    if ((event.key === "Enter" || event.key === " ") && !event.repeat) show(event);
   }
 
   return (

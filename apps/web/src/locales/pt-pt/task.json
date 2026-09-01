@@ -1074,6 +1074,7 @@
   "remoteCreatedLine": "Criado: {{createdAt}}",
   "remoteExecutor": "Executor remoto",
   "remoteExecutorStatus": "Estado do executor {{name}}",
+  "remoteExecutorStatusUnavailable": "O estado do executor remoto não está disponível.",
   "remoteLastCheck": "Última verificação",
   "remoteLastCheckLine": "Última verificação: {{checkedAt}}",
   "remoteRepository": "Repositório remoto",

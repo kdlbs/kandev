@@ -206,6 +206,37 @@ func TestBuildResumeRequestFailsClosedWhenRecordedKubernetesExecutorChangedType(
 	}
 }
 
+func TestBuildResumeRequestFailsClosedWhenRecordedKubernetesInventoryIsIncomplete(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	session := repo.sessions["sess-1"]
+	session.ExecutorID = "recorded-kubernetes-executor"
+	repo.executors["recorded-kubernetes-executor"] = &models.Executor{
+		ID: "recorded-kubernetes-executor", Type: models.ExecutorTypeKubernetes, Resumable: true,
+		Config: map[string]string{
+			lifecycle.MetadataKeyKubernetesAuthMode:              "in_cluster",
+			lifecycle.MetadataKeyKubernetesConfigNamespace:       "kandev-agents",
+			lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds: "45",
+		},
+	}
+	incomplete := recordedKubernetesResumeMetadata()
+	delete(incomplete, lifecycle.MetadataKeyKubernetesPodUID)
+	repo.executorsRunning["sess-1"] = &models.ExecutorRunning{
+		ID: "sess-1", SessionID: "sess-1", TaskID: "task-1",
+		ExecutorID: "recorded-kubernetes-executor", Runtime: agentruntime.RuntimeKubernetes,
+		AgentExecutionID: "recorded-execution", Metadata: incomplete,
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	_, _, _, _, _, err := exec.buildResumeRequest(
+		context.Background(), &v1.Task{ID: "task-1", WorkspaceID: "workspace-1"}, session, true,
+	)
+
+	if err == nil || !strings.Contains(err.Error(), "validate recorded Kubernetes runtime") {
+		t.Fatalf("buildResumeRequest() error = %v, want incomplete inventory rejection", err)
+	}
+}
+
 func TestBuildResumeRequestFailsClosedWhenRuntimeInventoryReadFails(t *testing.T) {
 	repo := newMockRepository()
 	setupLiveResumeTestFixture(repo)

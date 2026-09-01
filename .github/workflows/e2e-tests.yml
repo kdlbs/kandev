@@ -117,7 +117,7 @@ jobs:
     # .github/docker/ci-base/Dockerfile. Uses the `build` tag (with Go)
     # because this job compiles the backend.
     container: ghcr.io/kdlbs/kandev-ci:build-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     # Container jobs default to `sh`; pin to bash for the few shell steps below.
     defaults:
       run:

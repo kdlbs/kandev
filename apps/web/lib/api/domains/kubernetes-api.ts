@@ -30,12 +30,14 @@ export async function testKubernetesConnection(
   request: KubernetesTestRequest,
   options?: ApiRequestOptions,
 ): Promise<KubernetesTestResult> {
+  const headers = new Headers(options?.init?.headers);
+  headers.set("Content-Type", "application/json");
   const response = await fetchJson<unknown>("/api/v1/kubernetes/test", {
     ...options,
     init: {
       ...(options?.init ?? {}),
       method: "POST",
-      headers: { ...(options?.init?.headers ?? {}), "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(request),
     },
   });

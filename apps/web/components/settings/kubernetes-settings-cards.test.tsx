@@ -1,4 +1,5 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KubernetesConnectionCard } from "./kubernetes-connection-card";
 import { KubernetesDiagnosticsCard } from "./kubernetes-diagnostics-card";
@@ -108,7 +109,9 @@ describe("Kubernetes settings cards", () => {
     expect(within(card).getByText("Task")).toBeTruthy();
     expect(within(card).getByText("Session")).toBeTruthy();
   });
+});
 
+describe("Kubernetes session status cards", () => {
   it("shows the sanitized failure reason beneath desktop session status", () => {
     responsive.isMobile = false;
     render(<KubernetesSessionsCard state={sessionsState()} />);
@@ -118,9 +121,27 @@ describe("Kubernetes settings cards", () => {
     const statusCell = within(row as HTMLTableRowElement).getByTestId("kubernetes-session-status");
     expect(within(statusCell).getByText("pods is forbidden: RBAC denied")).toBeTruthy();
   });
+
+  it("labels a successfully completed Pod as succeeded instead of terminated", () => {
+    responsive.isMobile = false;
+    const state = sessionsState();
+    state.sessions[0] = {
+      ...state.sessions[0],
+      pod_phase: "Succeeded",
+      container_state: "terminated",
+      failure_reason: undefined,
+    };
+
+    render(<KubernetesSessionsCard state={state} />);
+
+    expect(screen.getByText("Succeeded")).toBeTruthy();
+    expect(screen.queryByText("Terminated")).toBeNull();
+  });
 });
 
-function sessionsState() {
+type KubernetesSessionsState = ComponentProps<typeof KubernetesSessionsCard>["state"];
+
+function sessionsState(): KubernetesSessionsState {
   return {
     sessions: [
       {
@@ -138,5 +159,5 @@ function sessionsState() {
     loading: false,
     error: null,
     refresh: vi.fn(async () => []),
-  } as never;
+  };
 }

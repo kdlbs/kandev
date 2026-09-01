@@ -76,9 +76,12 @@ func kubernetesStreamingRESTConfig(apiConfig *rest.Config) *rest.Config {
 }
 
 type liveKubernetesResources struct {
-	client      *kubeexecutor.Client
-	watchClient kubernetesclient.Interface
+	client             *kubeexecutor.Client
+	watchClient        kubernetesclient.Interface
+	watchRelistBackoff func(context.Context) error
 }
+
+const kubernetesWatchRelistBackoff = 100 * time.Millisecond
 
 func (r *liveKubernetesResources) CreatePersistentVolumeClaim(
 	ctx context.Context,
@@ -161,9 +164,26 @@ func (r *liveKubernetesResources) WaitForPodRunning(
 		)
 		latestDiagnostic = outcome.latestDiagnostic
 		if outcome.relist {
+			if err := r.waitBeforeWatchRelist(ctx); err != nil {
+				return nil, kubernetesPodWaitError(ctx, err, latestDiagnostic)
+			}
 			continue
 		}
 		return outcome.pod, outcome.err
+	}
+}
+
+func (r *liveKubernetesResources) waitBeforeWatchRelist(ctx context.Context) error {
+	if r.watchRelistBackoff != nil {
+		return r.watchRelistBackoff(ctx)
+	}
+	timer := time.NewTimer(kubernetesWatchRelistBackoff)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

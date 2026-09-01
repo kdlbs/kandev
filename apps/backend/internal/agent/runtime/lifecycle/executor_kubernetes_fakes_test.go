@@ -148,6 +148,7 @@ type fakeKubernetesResources struct {
 	mutateCreatedPod             func(*corev1.Pod)
 	mutateCreatedPVC             func(*corev1.PersistentVolumeClaim)
 	waitForPodRunning            func(context.Context, string, string, string) (*corev1.Pod, error)
+	rejectCanceledGetContexts    bool
 }
 
 func (f *fakeKubernetesResources) CreatePersistentVolumeClaim(
@@ -179,12 +180,15 @@ func (f *fakeKubernetesResources) CreatePersistentVolumeClaim(
 }
 
 func (f *fakeKubernetesResources) GetPersistentVolumeClaim(
-	_ context.Context,
+	ctx context.Context,
 	namespace, name string,
 ) (*corev1.PersistentVolumeClaim, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.getPVCRequests = append(f.getPVCRequests, namespace+"/"+name)
+	if f.rejectCanceledGetContexts && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if f.pvcDeleteIssued && f.retainPVCAfterDelete && f.pvcPostDeleteGetsUntilAbsent >= 0 {
 		if f.pvcPostDeleteGetsUntilAbsent == 0 {
 			f.pvc = nil
@@ -258,10 +262,13 @@ func (f *fakeKubernetesResources) CreatePod(
 	return created, f.createPodErr
 }
 
-func (f *fakeKubernetesResources) GetPod(_ context.Context, namespace, name string) (*corev1.Pod, error) {
+func (f *fakeKubernetesResources) GetPod(ctx context.Context, namespace, name string) (*corev1.Pod, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.getPodRequests = append(f.getPodRequests, namespace+"/"+name)
+	if f.rejectCanceledGetContexts && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if f.podDeleteIssued && f.retainPodAfterDelete && f.podPostDeleteGetsUntilAbsent >= 0 {
 		if f.podPostDeleteGetsUntilAbsent == 0 {
 			f.pod = nil

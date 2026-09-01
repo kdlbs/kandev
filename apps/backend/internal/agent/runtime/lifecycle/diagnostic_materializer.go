@@ -20,7 +20,7 @@ func (m *Manager) MaterializeDiagnosticBundle(
 	if !exists || execution == nil {
 		return DiagnosticMaterialization{}, fmt.Errorf("active task execution not found")
 	}
-	client, release := execution.acquireAgentctlClient()
+	client, release := execution.AcquireAgentCtlClient()
 	defer release()
 	if client == nil {
 		return DiagnosticMaterialization{}, fmt.Errorf("active task execution not found")

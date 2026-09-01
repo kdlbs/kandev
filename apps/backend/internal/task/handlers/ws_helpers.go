@@ -34,7 +34,7 @@ func wsDeleteWithActiveSessionCheck(
 	}
 	if err := deleteFn(ctx, req.ID); err != nil {
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, err.Error(), nil)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
 		}
 		log.Error("failed to delete "+resourceName, zap.Error(err))
 		if errors.Is(err, service.ErrActiveTaskSessions) {
