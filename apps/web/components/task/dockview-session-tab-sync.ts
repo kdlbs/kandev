@@ -20,6 +20,29 @@ function isDifferentSessionPanel(panelId: string, activeSessionId: string | null
   return panelId.startsWith("session:") && panelId !== `session:${activeSessionId}`;
 }
 
+function adoptRestoredSessionTabSelection(
+  api: DockviewReadyEvent["api"],
+  appStore: StoreApi<AppState>,
+): void {
+  const selectedSessionIds = api.groups.flatMap((group) => {
+    const panelId = group.activePanel?.id;
+    return panelId?.startsWith("session:") ? [panelId.slice("session:".length)] : [];
+  });
+  if (selectedSessionIds.length !== 1) return;
+
+  const state = appStore.getState();
+  const sessionId = selectedSessionIds[0];
+  if (!state.tasks.activeTaskId || sessionId === state.tasks.activeSessionId) return;
+  if (state.taskSessions.items[sessionId]?.task_id !== state.tasks.activeTaskId) return;
+  const currentSessions = state.taskSessionsByTask.itemsByTaskId[state.tasks.activeTaskId] ?? [];
+  if (!currentSessions.some((session) => session.id === sessionId)) return;
+  const currentEnvironmentId = useDockviewStore.getState().currentLayoutEnvId;
+  if (!currentEnvironmentId || state.environmentIdBySessionId[sessionId] !== currentEnvironmentId) {
+    return;
+  }
+  state.setActiveSessionAuto(state.tasks.activeTaskId, sessionId);
+}
+
 /**
  * Sync `activeSessionId` in the store when the user explicitly activates a
  * session tab. Dockview can also activate panels internally while restoring
@@ -27,6 +50,7 @@ function isDifferentSessionPanel(panelId: string, activeSessionId: string | null
  * session or they create an app-level feedback loop.
  */
 export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: StoreApi<AppState>) {
+  adoptRestoredSessionTabSelection(api, appStore);
   return api.onDidActivePanelChange((panel) => {
     if (!panel) return;
     const isRestoring = useDockviewStore.getState().isRestoringLayout;

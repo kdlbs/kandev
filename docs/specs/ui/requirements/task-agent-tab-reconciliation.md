@@ -42,6 +42,10 @@ task workbench becomes usable.
 - **AC-UI-TASK-AGENT-TAB-RECONCILIATION-001.5:** Phone and tablet task surfaces
   shall continue to project the same task session membership through their
   existing session controls without mounting desktop workbench tabs.
+- **AC-UI-TASK-AGENT-TAB-RECONCILIATION-001.6:** When a desktop user selects an
+  Agent tab and reloads the same task, the selected current session shall remain
+  the effective active session and Agent tab. If that session is no longer
+  current, Kandev shall use the normal active-session fallback.
 
 ### REQ-UI-TASK-AGENT-TAB-RECONCILIATION-002: Agent Tab Rename Isolation
 
