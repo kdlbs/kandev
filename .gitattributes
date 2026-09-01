@@ -1,1 +1,2 @@
 scripts/release/update-homebrew-tap.sh linguist-language=Shell
+docs/specs/spec-lint-exceptions.tsv merge=union
