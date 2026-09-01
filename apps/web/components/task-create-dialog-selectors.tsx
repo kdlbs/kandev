@@ -143,6 +143,7 @@ type BranchSelectorProps = {
   testId?: string;
   dropdownTestId?: string;
   dropdownLabel?: string;
+  touchTarget?: boolean;
 };
 
 export const BranchSelector = memo(function BranchSelector({
@@ -163,6 +164,7 @@ export const BranchSelector = memo(function BranchSelector({
   testId = "branch-selector",
   dropdownTestId,
   dropdownLabel = t("task:baseBranch2"),
+  touchTarget = false,
 }: BranchSelectorProps) {
   const headerAction = onRefresh ? (
     <BranchRefreshButton
@@ -170,6 +172,7 @@ export const BranchSelector = memo(function BranchSelector({
       refreshing={refreshing}
       fetchedAt={fetchedAt}
       fetchError={fetchError}
+      touchTarget={touchTarget}
     />
   ) : undefined;
   return (
@@ -190,6 +193,7 @@ export const BranchSelector = memo(function BranchSelector({
       filter={scoreBranch}
       headerAction={headerAction}
       loading={loading}
+      touchTarget={touchTarget}
     />
   );
 });
