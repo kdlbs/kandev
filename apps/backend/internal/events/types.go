@@ -8,6 +8,7 @@ const (
 	TaskStateChanged               = "task.state_changed"
 	TaskDeleted                    = "task.deleted"
 	TaskMoved                      = "task.moved" // Manual step change via MoveTask
+	TaskTransferred                = "task.transferred"
 	TaskQueuePromoted              = "task.queue_promoted"
 	SessionWorkspaceSourcesUpdated = "session.workspace_sources.updated"
 	// TaskDependenciesResolved fires when a task's last unresolved dependency

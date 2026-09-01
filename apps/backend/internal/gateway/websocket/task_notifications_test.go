@@ -87,6 +87,33 @@ func TestTaskEventBroadcaster_OrdersLifecycleStateNotifications(t *testing.T) {
 	}
 }
 
+func TestTaskEventBroadcaster_TransferReconcilesSourceAndDestination(t *testing.T) {
+	log := testLogger()
+	eventBus := bus.NewMemoryEventBus(log)
+	hub := NewHub(nil, log)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = RegisterTaskNotifications(ctx, eventBus, hub, log)
+
+	payload := map[string]interface{}{
+		"task_id": "task-transfer", "workspace_id": "ws-destination",
+		"workflow_id": "wf-destination", "source_workspace_id": "ws-source",
+		"source_workflow_id": "wf-source", "old_workflow_id": "wf-source",
+	}
+	_ = eventBus.Publish(ctx, events.TaskTransferred,
+		bus.NewEvent(events.TaskTransferred, "test", payload))
+
+	message := <-hub.broadcast
+	if message.Action != ws.ActionTaskUpdated {
+		t.Fatalf("transfer action = %q, want task.updated", message.Action)
+	}
+	select {
+	case duplicate := <-hub.broadcast:
+		t.Fatalf("duplicate transfer action = %q", duplicate.Action)
+	default:
+	}
+}
+
 // TestTaskEventBroadcaster_NoDuplicateSubscriptions verifies that
 // RegisterTaskNotifications creates one subscription per routed subject (with
 // lifecycle state events intentionally sharing one ordered wildcard).
@@ -111,7 +138,7 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 	//
 	// Update this number when adding or removing event subscriptions in
 	// RegisterTaskNotifications — it is intentionally exact.
-	const wantSubscriptions = 70
+	const wantSubscriptions = 71
 	if got := len(b.subscriptions); got != wantSubscriptions {
 		t.Errorf("RegisterTaskNotifications created %d subscriptions, want %d — "+
 			"did an event get subscribed twice?", got, wantSubscriptions)

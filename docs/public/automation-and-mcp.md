@@ -564,6 +564,18 @@ When `create_task_kandev.repositories[].repository_url` is a canonical GitHub pu
 
 The task server runs inside agentctl's local runtime boundary. Its MCP routes do not use a separate bearer token. Do not expose agentctl ports; rely on the executor's process/network isolation and Kandev's session scoping.
 
+### Transfer a task between workspaces
+
+`transfer_task_kandev` moves one existing task identity across workspaces without stopping its running session or recreating its task data. It is available to configuration and external human clients, plus a server-attested Office CEO session. Regular Kanban agents and automation coordinators do not receive it.
+
+The request must bind the exact source workspace, workflow, lane, and current `updated_at` generation. It also supplies the destination workspace and workflow, either a stable destination lane ID or one unique exact lane name, a unique `idempotency_key`, and `preservation_policy: "preserve-task-identity-v1"`. Source and destination workspaces must have the same owner. The destination lane must have the same name, inherited workflow prompt, effective agent, events, participant slate, completion behavior, and capacity policy as the source lane.
+
+Kandev transfers the task UUID atomically and preserves its sessions and active turn, task environments and worktrees, repositories and branches, plans and messages, parent/dependency relations, pull-request associations, status summaries, pending move state, and history. Workspace-owned projections are rebound in the same transaction. For an authorized Office transfer, the CEO runner seat maps to the destination workspace's unique active CEO while any live session continues unchanged; a coordinator may map only its own runner seat. Other workspace-scoped participant profiles, incompatible labels, workspace groups, Office projects or tree holds without a destination mapping, active cleanup, ambiguous lane mapping, a full destination lane, stale placement, or stale generation fail closed without moving the task.
+
+Every attempt writes a redacted audit row. A successful receipt includes the operation ID, source and destination placement, committed task generation, step-transition ID, session census, preservation counts and digest, idempotency key, and policy. It never contains prompts, message bodies, secrets, or repository credentials. An exact retry by the bound actor and session returns the stored receipt after current task and destination-workspace access is confirmed; it does not depend on mutable workflow or lane configuration. Reusing the key for a changed request or actor returns a conflict. Destination-bound Office authorization is replay-only and cannot create a fresh transfer.
+
+The database migration is additive. Rolling back the application binary leaves transfer receipts and audit rows intact for a later upgrade; do not drop the transfer ledger tables during an application rollback.
+
 <details>
 <summary>Office MCP and runtime CLI</summary>
 
@@ -577,9 +589,10 @@ Office runs use a smaller MCP surface than regular task-mode sessions. The built
 - `list_task_documents_kandev`, `get_task_document_kandev`, and `write_task_document_kandev`.
 - `show_rich_output_kandev`;
 - `record_step_decision_kandev` records an `approved` or `rejected` verdict for the current workflow step. It requires a non-empty reason, and a later verdict supersedes the earlier one.
+- `transfer_task_kandev` is available only to a server-attested Office CEO session. It applies the atomic, audited transfer contract above.
 - `step_complete_kandev`, per ADR 0015: Kandev includes its completion instruction, and acts on its signal, only on Office steps whose auto-advance action explicitly requires that signal (office-default's `work` step is one such step).
 
-These tools cover human questions, the current task plan, related-task discovery, task documents, quorum decisions, and the step-completion signal. Office state changes use the injected `$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools are task-mode only and are not registered in Office mode.
+These tools cover human questions, the current task plan, related-task discovery, task documents, quorum decisions, the restricted transfer operation, and the step-completion signal. Other Office state changes use the injected `$KANDEV_CLI kandev ...` commands. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools are task-mode only and are not registered in Office mode.
 
 ### Runtime credentials
 

@@ -484,6 +484,7 @@ const (
 	ActionMCPDeleteExecutorProfile = "mcp.delete_executor_profile"
 
 	ActionMCPMoveTask                    = "mcp.move_task"
+	ActionMCPTransferTask                = "mcp.transfer_task"
 	ActionMCPDeleteTask                  = "mcp.delete_task"
 	ActionMCPArchiveTask                 = "mcp.archive_task"
 	ActionMCPUpdateTaskState             = "mcp.update_task_state"

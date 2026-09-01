@@ -319,6 +319,8 @@ type Handlers struct {
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
 	agentPermissionSvc AgentPermissionService
+	taskTransferSvc    TaskTransferService
+	transferAuthorizer TaskTransferCoordinatorAuthorizer
 }
 
 // NewHandlers creates new MCP handlers.
@@ -354,11 +356,18 @@ func NewHandlers(
 	}
 	if taskSvc != nil {
 		h.stopTaskGetter = taskSvc.GetTask
+		h.taskTransferSvc = taskSvc
 	}
 	if stopper, ok := sessionLauncher.(TaskStopper); ok {
 		h.taskStopper = stopper
 	}
 	return h
+}
+
+// SetTaskTransferCoordinatorAuthorizer wires server-side Office coordinator
+// attestation. Request payloads never supply coordinator identity.
+func (h *Handlers) SetTaskTransferCoordinatorAuthorizer(authorizer TaskTransferCoordinatorAuthorizer) {
+	h.transferAuthorizer = authorizer
 }
 
 // SetClarificationInputPauser wires the orchestrator-owned hard pause used when
@@ -558,6 +567,7 @@ func (h *Handlers) registerAgentHandlers(d *guardedMCPDispatcher) {
 
 func (h *Handlers) registerTaskConfigMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPMoveTask, h.handleMoveTask)
+	d.RegisterFunc(ws.ActionMCPTransferTask, h.handleTransferTask)
 	d.RegisterFunc(ws.ActionMCPDeleteTask, h.handleDeleteTask)
 	d.RegisterFunc(ws.ActionMCPArchiveTask, h.handleArchiveTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskState, h.handleUpdateTaskState)

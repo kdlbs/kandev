@@ -36,6 +36,8 @@ type BackendClient interface {
 	RequestPayload(ctx context.Context, action string, payload, result interface{}) error
 }
 
+const rejectedTransferToolAuditTimeout = 2 * time.Second
+
 // MCP mode constants control which tools are registered.
 const (
 	// ModeTask registers kanban, plan, and interaction tools (default for task-solving agents).
@@ -583,6 +585,9 @@ func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.
 		var result *mcp.CallToolResult
 		var err error
 		if validationErr != nil {
+			if toolName == "transfer_task_kandev" {
+				s.auditRejectedTransferTool(ctx, req.GetRawArguments())
+			}
 			result = mcp.NewToolResultError(validationErr.Error())
 		} else {
 			result, err = handler(ctx, validatedReq)
@@ -629,6 +634,21 @@ func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.
 		}
 
 		return result, err
+	}
+}
+
+func (s *Server) auditRejectedTransferTool(ctx context.Context, arguments any) {
+	payload := map[string]any{"_audit_only": true}
+	if provided, ok := arguments.(map[string]any); ok {
+		for key, value := range provided {
+			payload[key] = value
+		}
+	}
+	var ignored map[string]interface{}
+	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rejectedTransferToolAuditTimeout)
+	defer cancel()
+	if err := s.backend.RequestPayload(auditCtx, ws.ActionMCPTransferTask, payload, &ignored); err != nil {
+		s.logger.Warn("failed to audit rejected transfer tool call", zap.Error(err))
 	}
 }
 
@@ -991,6 +1011,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "configuration-prompts", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigPromptTools() }},
 		{name: "configuration-executors", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigExecutorTools() }},
 		{name: "configuration-tasks", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigTaskTools() }},
+		{name: "task-transfer", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) || office(ctx) }, register: func(s *Server) { s.registerTaskTransferTool() }},
 		{name: "external-create-task", enabled: external, register: func(s *Server) { s.registerCreateTaskTool() }},
 		{name: "external-questions", enabled: external, register: func(s *Server) { s.registerQuestionAnsweringTools() }},
 		{name: "external-agent-permissions", enabled: external, register: func(s *Server) { s.registerAgentPermissionTools() }},
@@ -1017,6 +1038,30 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "task-title", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityTaskTitle)), register: func(s *Server) { s.registerSetTaskTitleTool() }},
 		{name: "diagnostics", enabled: kanban, register: func(s *Server) { s.registerDiagnosticBundleTool() }},
 	}
+}
+
+func (s *Server) registerTaskTransferTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("transfer_task_kandev",
+			mcp.WithDescription("Atomically transfer one exact task identity to an authorized workspace and equivalent workflow lane. Requires the current source placement and generation, a unique idempotency key, and the preserve-task-identity-v1 policy. Ordinary task agents cannot access this tool."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("Exact task UUID to preserve")),
+			mcp.WithString("expected_source_workspace_id", mcp.Required()),
+			mcp.WithString("expected_source_workflow_id", mcp.Required()),
+			mcp.WithString("expected_source_workflow_step_id", mcp.Required()),
+			mcp.WithString("expected_task_updated_at", mcp.Required(), mcp.Description("Current task updated_at in RFC3339Nano format")),
+			mcp.WithString("destination_workspace_id", mcp.Required()),
+			mcp.WithString("destination_workflow_id", mcp.Required()),
+			mcp.WithString("destination_workflow_step_id", mcp.Description("Stable destination lane ID; provide this or destination_workflow_step_name")),
+			mcp.WithString("destination_workflow_step_name", mcp.Description("Exact destination lane name; accepted only when uniquely mapped")),
+			mcp.WithString("idempotency_key", mcp.Required()),
+			mcp.WithString("preservation_policy", mcp.Required(), mcp.Description("Must be preserve-task-identity-v1")),
+		),
+		s.wrapHandler("transfer_task_kandev", s.transferTaskHandler()),
+	)
 }
 
 func (s *Server) registerAgentPermissionTools() {

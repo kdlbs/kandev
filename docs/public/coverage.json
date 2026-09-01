@@ -139,6 +139,7 @@
         "set_task_title_kandev",
         "step_complete_kandev",
         "stop_task_kandev",
+        "transfer_task_kandev",
         "update_repository_base_branch_kandev",
         "update_task_kandev",
         "update_task_state_kandev"
