@@ -151,6 +151,52 @@ func TestPersistOfficeSessionFallbackIgnoresLiveSessionForDifferentAgentOnSameTa
 	}
 }
 
+// TestPersistOfficeSessionFallbackRefusesLiveForNonCanonicalLiveStates closes
+// Review entry 19's MUST-FIX 3 (Go fallback half): the fallback guard's
+// `!isStopTerminalSessionState(existing.State)` check must be driven by "not
+// terminal", not by an enumerated allow-list of whichever live states the
+// other fallback tests in this file happen to use (CREATED/RUNNING). STARTING
+// and WAITING_FOR_INPUT are live states none of them touch. If the check were
+// rewritten as an allow-list of just those two states, every other fallback
+// test here would stay green while a pair whose only row sits in STARTING or
+// WAITING_FOR_INPUT would wrongly allow a duplicate create.
+func TestPersistOfficeSessionFallbackRefusesLiveForNonCanonicalLiveStates(t *testing.T) {
+	for _, state := range []models.TaskSessionState{
+		models.TaskSessionStateStarting,
+		models.TaskSessionStateWaitingForInput,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			repo := newMockRepository()
+			exec := newTestExecutor(t, &mockAgentManager{}, repo)
+			ctx := context.Background()
+			taskID := "task-office-fallback-noncanonical-live-" + string(state)
+			agent := "agent-fallback-noncanonical-live"
+
+			repo.sessions["fallback-noncanonical-live-existing"] = &models.TaskSession{
+				ID: "fallback-noncanonical-live-existing", TaskID: taskID, AgentProfileID: agent,
+				State: state, StartedAt: time.Now().UTC(),
+			}
+
+			fresh := &models.TaskSession{
+				ID: "fallback-noncanonical-live-blocked", TaskID: taskID, AgentProfileID: agent,
+				State: models.TaskSessionStateCreated,
+			}
+			err := exec.persistOfficeSessionFallback(ctx, taskID, fresh)
+			if !errors.Is(err, taskrepo.ErrOfficeSessionRaceConflict) {
+				t.Fatalf("persistOfficeSessionFallback error = %v, want ErrOfficeSessionRaceConflict (a pair whose only row is %s must be treated as live)", err, state)
+			}
+
+			sessions, err := repo.ListTaskSessions(ctx, taskID)
+			if err != nil {
+				t.Fatalf("ListTaskSessions: %v", err)
+			}
+			if len(sessions) != 1 {
+				t.Fatalf("sessions for task = %d, want 1 (the refused create must not have written a row)", len(sessions))
+			}
+		})
+	}
+}
+
 // TestEnsureSessionForAgentWithCreation_ConcurrentCallersConvergeOnOneSession
 // is the executor-level convergence test: N concurrent callers for the same
 // (task, agent) pair, none of which observe an existing row at lookup time
@@ -284,6 +330,9 @@ func TestEnsureSessionForAgentWithCreation_NonConflictCreateFailureNotLaundered(
 	if errors.Is(err, taskrepo.ErrOfficeSessionRaceConflict) {
 		t.Fatalf("non-conflict failure %v must not classify as ErrOfficeSessionRaceConflict", err)
 	}
+	if len(repo.createTaskSessionCalls) != 1 {
+		t.Fatalf("CreateTaskSession calls = %d, want exactly 1 (a non-conflict failure must not spend a bounded-retry attempt, AC-003.7)", len(repo.createTaskSessionCalls))
+	}
 }
 
 // TestTryReuseExistingSession_IdleCASMismatchDoesNotResurrectTerminalSession
@@ -345,6 +394,90 @@ func TestTryReuseExistingSession_IdleFlipsToRunningWhenStateStillMatches(t *test
 	stored := repo.sessions[current.ID]
 	if stored.State != models.TaskSessionStateRunning {
 		t.Fatalf("stored session state = %v, want RUNNING", stored.State)
+	}
+}
+
+// TestTryReuseExistingSession_IdleFlipCASUpdateErrorTreatsOutcomeAsUnknown
+// closes Review entry 19's MUST-FIX 1 (CAS-update-error branch,
+// executor_office.go:244-249): a genuine backend error from
+// UpdateTaskSessionIfCurrentState — distinct from a CAS mismatch, which
+// already goes through the reload-and-recheck-terminal path — must not be
+// treated as "reused". The caller has no way to know whether the write
+// actually applied, so the outcome must come back unknown
+// (reuseDecisionTerminal, nil session) rather than handing back the
+// pre-transition row as if it were safe to use.
+func TestTryReuseExistingSession_IdleFlipCASUpdateErrorTreatsOutcomeAsUnknown(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	ctx := context.Background()
+
+	const taskID = "task-idle-cas-update-error"
+	const sessionID = "idle-flip-cas-update-error"
+	repo.sessions[sessionID] = &models.TaskSession{ID: sessionID, TaskID: taskID, State: models.TaskSessionStateIdle}
+
+	wantErr := errors.New("disk full")
+	repo.updateTaskSessionIfCurrentFailOn = 1
+	repo.updateTaskSessionIfCurrentFailErr = wantErr
+
+	view := &models.TaskSession{ID: sessionID, TaskID: taskID, State: models.TaskSessionStateIdle}
+	result, decision := exec.tryReuseExistingSession(ctx, view)
+
+	if decision != reuseDecisionTerminal {
+		t.Fatalf("decision = %v, want reuseDecisionTerminal", decision)
+	}
+	if result != nil {
+		t.Fatalf("result = %#v, want nil (unknown outcome must not be handed back as reusable)", result)
+	}
+	if repo.updateTaskSessionIfCurrentCalls != 1 {
+		t.Fatalf("UpdateTaskSessionIfCurrentState calls = %d, want 1", repo.updateTaskSessionIfCurrentCalls)
+	}
+	stored := repo.sessions[sessionID]
+	if stored.State != models.TaskSessionStateIdle {
+		t.Fatalf("stored session state = %v, want unchanged IDLE (a failed write must not silently apply)", stored.State)
+	}
+}
+
+// TestTryReuseExistingSession_IdleFlipReloadAfterMismatchErrorTreatsOutcomeAsUnknown
+// closes Review entry 19's MUST-FIX 1 (reload-error branch,
+// executor_office.go:255-260): the CAS write correctly detects a mismatch
+// (the row already moved off IDLE — here, to a genuine terminal state,
+// exactly the shape that produces this mismatch in production) and the
+// follow-up reload to see what it became then fails for an unrelated
+// reason. That reload failure must not be treated as "reused" either — the
+// caller never learned the row went terminal, so the outcome must come back
+// unknown rather than handing back the stale pre-transition view.
+func TestTryReuseExistingSession_IdleFlipReloadAfterMismatchErrorTreatsOutcomeAsUnknown(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	ctx := context.Background()
+
+	const taskID = "task-idle-reload-error"
+	const sessionID = "idle-flip-reload-error"
+	repo.sessions[sessionID] = &models.TaskSession{ID: sessionID, TaskID: taskID, State: models.TaskSessionStateCompleted}
+
+	wantErr := errors.New("db unavailable")
+	reloadCalls := 0
+	repo.getTaskSessionFunc = func(_ context.Context, id string) (*models.TaskSession, error) {
+		reloadCalls++
+		if id != sessionID {
+			t.Fatalf("GetTaskSession id = %q, want %q", id, sessionID)
+		}
+		return nil, wantErr
+	}
+
+	// The caller's view is stale: it read the row as IDLE just before the
+	// concurrent terminal transition (above) landed.
+	view := &models.TaskSession{ID: sessionID, TaskID: taskID, State: models.TaskSessionStateIdle}
+	result, decision := exec.tryReuseExistingSession(ctx, view)
+
+	if decision != reuseDecisionTerminal {
+		t.Fatalf("decision = %v, want reuseDecisionTerminal", decision)
+	}
+	if result != nil {
+		t.Fatalf("result = %#v, want nil (unknown outcome must not be handed back as reusable)", result)
+	}
+	if reloadCalls != 1 {
+		t.Fatalf("GetTaskSession calls = %d, want 1 (the mismatch must trigger exactly one reload attempt)", reloadCalls)
 	}
 }
 

@@ -255,6 +255,48 @@ func TestCreateOfficeTaskSessionRefusesLiveRowCreatedByNonOfficePath(t *testing.
 	require.Len(t, created, 1, "the refused office create must not have written a second row")
 }
 
+// TestCreateOfficeTaskSessionRefusesLiveForNonCanonicalLiveStates closes
+// Review entry 19's MUST-FIX 3 (SQLite half): AC-OFFICE-SESSION-IDENTITY-001.4
+// requires the guard to be the complement of the terminal set
+// (COMPLETED/FAILED/CANCELLED), not an enumerated allow-list of whichever
+// live states happen to be exercised elsewhere. Every other guard test in
+// this file seeds CREATED or RUNNING; STARTING and WAITING_FOR_INPUT are
+// live states none of them touch. If the guard's SQL predicate were rewritten
+// as `state IN ('CREATED','RUNNING')` instead of `state NOT IN (terminal
+// set)`, every other test here would stay green while a pair whose only row
+// sits in one of these two states would wrongly allow a duplicate create.
+func TestCreateOfficeTaskSessionRefusesLiveForNonCanonicalLiveStates(t *testing.T) {
+	for _, state := range []models.TaskSessionState{
+		models.TaskSessionStateStarting,
+		models.TaskSessionStateWaitingForInput,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			repo := newRepoForSessionTests(t)
+			ctx := context.Background()
+			taskID := "task-office-noncanonical-live-" + string(state)
+			require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Office non-canonical live state"}))
+
+			agent := "agent-noncanonical-live"
+			require.NoError(t, repo.CreateOfficeTaskSession(ctx, &models.TaskSession{
+				ID: "noncanonical-live-existing", TaskID: taskID, AgentProfileID: agent,
+				State: state,
+			}))
+
+			err := repo.CreateOfficeTaskSession(ctx, &models.TaskSession{
+				ID: "noncanonical-live-blocked", TaskID: taskID, AgentProfileID: agent,
+				State: models.TaskSessionStateCreated,
+			})
+			require.Error(t, err)
+			require.True(t, errors.Is(err, ErrOfficeSessionRaceConflict),
+				"a pair whose only row is %s must be treated as live, not terminal", state)
+
+			created, err := repo.ListTaskSessions(ctx, taskID)
+			require.NoError(t, err)
+			require.Len(t, created, 1, "the refused create must not have written a row")
+		})
+	}
+}
+
 // TestGetTaskSessionByTaskAndAgentPrefersLiveOverNewerTerminal is the
 // 62201cdb-shaped livelock regression test: a terminal row started AFTER a
 // live row must not shadow it. Before Change 2, ORDER BY started_at DESC

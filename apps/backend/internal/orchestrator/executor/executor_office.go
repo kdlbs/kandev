@@ -243,9 +243,9 @@ func (e *Executor) tryFlipIdleSessionToRunning(
 	updated.State = models.TaskSessionStateRunning
 	changed, err := e.repo.UpdateTaskSessionIfCurrentState(ctx, &updated, models.TaskSessionStateIdle)
 	if err != nil {
-		e.logger.Warn("failed to flip office session IDLE→RUNNING; returning row anyway",
+		e.logger.Warn("failed to flip office session IDLE→RUNNING; treating outcome as unknown",
 			zap.String("session_id", session.ID), zap.Error(err))
-		return session, reuseDecisionReused
+		return nil, reuseDecisionTerminal
 	}
 	if changed {
 		*session = updated
@@ -254,9 +254,9 @@ func (e *Executor) tryFlipIdleSessionToRunning(
 
 	fresh, err := e.repo.GetTaskSession(ctx, session.ID)
 	if err != nil || fresh == nil {
-		e.logger.Warn("failed to reload office session after IDLE→RUNNING race; returning stale row",
+		e.logger.Warn("failed to reload office session after IDLE→RUNNING race; treating outcome as unknown",
 			zap.String("session_id", session.ID), zap.Error(err))
-		return session, reuseDecisionReused
+		return nil, reuseDecisionTerminal
 	}
 	if isStopTerminalSessionState(fresh.State) {
 		return nil, reuseDecisionTerminal
