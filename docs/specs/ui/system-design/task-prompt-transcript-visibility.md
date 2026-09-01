@@ -40,7 +40,8 @@ and `prompt_index` field.
 - `useProcessedMessages` filters and groups stored messages. It may synthesize
   the task-description fallback only after the session start is known.
 - `useLazyLoadMessages` owns the prompt-`#1` visible boundary and older-page
-  requests. It keeps raw pagination available to explicit recovery consumers.
+  requests. It also owns opt-in per-consumer accumulation targets and keeps raw
+  pagination available to explicit recovery consumers.
 - The native transcript consumes `useLazyLoadMessages`. Prompt History consumes
   its own user-message request and pagination state.
 - `TaskChatPanel` supplies the native transcript with the host's real visibility
@@ -111,6 +112,30 @@ contains internal rows before that prompt.
 Payloads without prompt ordinals use raw exhaustion as the compatibility
 boundary. Session search can continue through the explicit raw loader when a
 backend search hit precedes the visible transcript start.
+
+## Text-aware load batches
+
+The backend pagination contract remains cursor-based and counts every persisted
+row. Each request still asks for 20 raw rows and prepends every returned row so
+tool activity remains available in the transcript.
+
+The native transcript opts into a 20-text-part target on
+`useLazyLoadMessages`. One `loadMore` invocation snapshots the loaded text-part
+count, requests consecutive raw pages, and returns only after the delta reaches
+the target or a normal stop condition applies. A text part has type `message`
+or `content`; a missing type counts for legacy compatibility. The predicate
+does not count tool, thinking, progress, status, or other activity rows, and it
+does not discard those rows from the store or renderer.
+
+The accumulation loop preserves the existing bounded pages-per-load safeguard.
+Prompt `#1`, raw exhaustion, a zero-result page, or the safeguard can end a
+batch before 20 text parts arrive. The returned progress count remains the
+total number of raw rows prepended so the sentinel's no-progress recovery
+contract is unchanged.
+
+Prompt History continues to use its separate user-prompt target. Raw search,
+drain, and backfill consumers retain their existing page semantics; text-aware
+batching is opt-in only for the native transcript.
 
 ## Upward pagination
 
@@ -212,10 +237,16 @@ anchor behavior as desktop.
   no-progress recovery, successful retry, and session reset.
 - Native transcript tests cover hidden-to-visible recovery, recovery-control
   visibility, and prepend anchor preservation.
+- Lazy-load hook tests cover mixed `message`, `content`, legacy, and tool rows,
+  the 20-text-part target, every early stop, and unchanged raw/single-page
+  consumers.
 - Desktop and mobile browser tests seed more than twenty older pages between
   the newest window and the latest user prompt. They prove that no synthetic
   initial prompt or routine retry control appears and that one upward
   navigation reaches the stored prompt without a click.
+- Desktop and mobile browser tests also place standalone tool activity ahead of
+  older text so the first raw page leaves the preload region. One upward reach
+  must still cross that page and reveal the targeted older text batch.
 - Existing prompt-`#1`, hidden pre-prompt, and inactive-session reconciliation
   scenarios remain covered.
 - A desktop browser test restores two session tabs with the target tab inactive,

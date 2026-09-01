@@ -227,7 +227,7 @@ function useScrollPositionOnPrepend(
   items: RenderItem[],
   isLoadingMore: boolean,
   isProgrammaticScrollLocked: () => boolean,
-) {
+): () => void {
   const scrollState = useRef<{
     scrollHeight: number;
     scrollTop: number;
@@ -242,6 +242,12 @@ function useScrollPositionOnPrepend(
   newestItemKeyRef.current = getNewestNonSyntheticItemKey(items);
   const prevItemCountRef = useRef(items.length);
   const prevFirstKeyRef = useRef<string | null>(getOldestNonSyntheticItemKey(items));
+  const beginOlderLoad = useCallback(() => {
+    if (olderLoadPendingRef.current) return;
+    const el = scrollRef.current;
+    if (el) scrollState.current = capturePrependScrollState(el, newestItemKeyRef.current);
+    olderLoadPendingRef.current = true;
+  }, [scrollRef]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -252,7 +258,7 @@ function useScrollPositionOnPrepend(
       // Native overflow anchoring can adjust scrollTop while the older page is
       // being inserted. Keep the pre-request baseline until our layout effect
       // has restored the visual position explicitly.
-      if (isLoadingMoreRef.current) return;
+      if (olderLoadPendingRef.current || isLoadingMoreRef.current) return;
       scrollState.current = capturePrependScrollState(el, newestItemKeyRef.current);
     };
     onScroll();
@@ -272,7 +278,7 @@ function useScrollPositionOnPrepend(
         nextFirstKey,
       });
     const olderLoadSettled = olderLoadPendingRef.current && !isLoadingMore;
-    const prepend = olderLoadSettled || (!olderLoadPendingRef.current && identityPrepend);
+    const prepend = olderLoadSettled || identityPrepend;
     prevItemCountRef.current = items.length;
     prevFirstKeyRef.current = nextFirstKey;
     if (olderLoadSettled) olderLoadPendingRef.current = false;
@@ -287,6 +293,8 @@ function useScrollPositionOnPrepend(
     }
     scrollState.current = capturePrependScrollState(el, newestItemKeyRef.current);
   }, [items, scrollRef, isLoadingMore, isProgrammaticScrollLocked]);
+
+  return beginOlderLoad;
 }
 
 function getOldestNonSyntheticItemKey(items: RenderItem[]): string | null {
@@ -426,6 +434,8 @@ function useLazyLoadSentinel(params: {
       rootMargin: TRANSCRIPT_SENTINEL_ROOT_MARGIN,
       rearmWhileIntersecting: true,
       shouldContinueWhileIntersecting,
+      // Continuation and lifecycle/input eligibility both require the
+      // sentinel to remain inside the transcript's current preload region.
       isCurrentGeometryEligible: shouldContinueWhileIntersecting,
       onLoadSettled: reportSettle,
       isRequestCurrent,
@@ -1042,7 +1052,16 @@ export function useNativeScrollManagement(params: {
     resyncIsNearBottom,
   );
   const handleScrollToMessage = useScrollToMessage(scrollRef, runGuardedScroll);
-  useScrollPositionOnPrepend(scrollRef, items, isLoadingMore, isProgrammaticScrollLocked);
+  const beginOlderLoad = useScrollPositionOnPrepend(
+    scrollRef,
+    items,
+    isLoadingMore,
+    isProgrammaticScrollLocked,
+  );
+  const loadMoreWithPrependBaseline = useCallback(() => {
+    beginOlderLoad();
+    return loadMore();
+  }, [beginOlderLoad, loadMore]);
   const {
     sentinelRef,
     onUserGesture,
@@ -1056,7 +1075,7 @@ export function useNativeScrollManagement(params: {
     hasMore,
     blocked: messagesLoading,
     isLoadingMore,
-    loadMore,
+    loadMore: loadMoreWithPrependBaseline,
   });
   useRetryPaginationOnUpwardScroll(scrollRef, onUserGesture, recheck, isProgrammaticScrollLocked);
   useRecheckPaginationOnVisible(isVisible, recheck);

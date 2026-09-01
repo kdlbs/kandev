@@ -103,7 +103,7 @@ the older-page path is never called.
 | `AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.10` | Existing no-eager-open browser assertion remains green |
 | `AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.11` | Existing mobile pagination suite remains green after the shared-path change |
 | `AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.12` | Existing inactive-session reconciliation coverage remains green |
-| `AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.13` | New hidden-to-visible unit regression and restored secondary-session desktop browser flow |
+| `AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.14` | New hidden-to-visible unit regression and restored secondary-session desktop browser flow |
 
 The red-first unit case mounts a transcript hidden with `hasMore: true`, makes
 it visible at restored `scrollTop = 0`, and expects exactly one older-page
@@ -148,13 +148,14 @@ top without changing `scrollTop` and expects the guarded retry path to run.
 
 ## Verification results
 
-- Focused Vitest: 73 tests passed across the shared sentinel, native transcript,
+- Focused Vitest: 87 tests passed across the shared sentinel, native transcript,
   and lazy-message pagination suites.
 - TypeScript typecheck, targeted ESLint, targeted Prettier, and the complete spec
   linter passed.
-- Desktop Chromium: all seven message-pagination cases passed, including the
+- Desktop Chromium: all eight message-pagination cases passed, including the
   restored inactive-session hard-top regression.
-- Mobile Chrome: all six mobile message-pagination cases passed.
+- Mobile Chrome: all eight mobile message-pagination cases passed, including
+  the hard-top touch recovery regression.
 - A fresh desktop PR screenshot was captured after the restored secondary chat
   loaded its older marker.
 

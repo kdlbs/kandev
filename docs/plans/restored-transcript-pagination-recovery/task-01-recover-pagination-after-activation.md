@@ -15,7 +15,7 @@ acceptance_criteria:
   - AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.10
   - AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.11
   - AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.12
-  - AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.13
+  - AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.14
 system_design:
   - ../../specs/ui/system-design/task-prompt-transcript-visibility.md
 ---
@@ -128,7 +128,7 @@ message cursor API, and pagination fixtures are inputs to this work.
 ## Inputs
 
 - `REQ-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001` acceptance criteria `.5`,
-  `.7` to `.13`.
+  `.7` to `.14`.
 - Upward pagination, failure and recovery, observability, and responsive
   sections of the paired system design.
 - Existing panel visibility, scroll restoration, sentinel, desktop pagination,
@@ -143,5 +143,5 @@ message cursor API, and pagination fixtures are inputs to this work.
   programmatic-scroll and explicit-recovery guards.
 - Added red-first unit regressions and a restored secondary-session Chromium
   regression that proves the older request includes a cursor.
-- Verified 73 focused unit tests, seven desktop pagination cases, six mobile
+- Verified 87 focused unit tests, eight desktop pagination cases, eight mobile
   pagination cases, typecheck, targeted lint/formatting, and spec lint.
