@@ -429,6 +429,39 @@ func (s *Service) StartCreatedSession(
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
 ) (*executor.TaskExecution, error) {
+	return s.startCreatedSession(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, "",
+	)
+}
+
+// StartCreatedSessionWithPromptContext starts a prepared session while
+// preserving the exact server-generated saved-prompt context prepared by the
+// message handler. Direct first turns need this narrow seam because the
+// session-start path canonicalizes the prompt again before dispatch.
+func (s *Service) StartCreatedSessionWithPromptContext(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+) (*executor.TaskExecution, error) {
+	return s.startCreatedSession(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+	)
+}
+
+//nolint:cyclop,funlen,gocognit // Existing complexity inherited from session-lifecycle handling.
+func (s *Service) startCreatedSession(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+) (*executor.TaskExecution, error) {
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
 
@@ -600,10 +633,13 @@ func (s *Service) StartCreatedSession(
 			return nil, fmt.Errorf("failed to claim first-turn task title: %w", err)
 		}
 	}
-	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
+	effectivePrompt, planModeActive, generatedPromptReferenceContext := s.applyWorkflowAndPlanMode(
 		ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
 		planMode, task.IsEphemeral, session.IsPassthrough,
 	)
+	if generatedPromptReferenceContext != "" {
+		promptReferenceContext = generatedPromptReferenceContext
+	}
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
 	if configMode {
@@ -1949,6 +1985,18 @@ func (s *Service) expandPromptReferencesWithContext(
 		zapLogger = s.logger.Zap()
 	}
 	return s.promptExpander.AppendReferenceExpansionsWithContext(ctx, prompt, zapLogger)
+}
+
+// PrepareDirectPrompt applies the same backend-owned saved-prompt expansion
+// used by workflow prompts to a direct user message. Message handlers call it
+// before persistence so the stored content and the first dispatched prompt
+// share one canonical representation.
+func (s *Service) PrepareDirectPrompt(
+	ctx context.Context,
+	prompt string,
+	isPassthrough bool,
+) (string, string) {
+	return s.expandPromptReferencesWithContext(ctx, prompt, isPassthrough)
 }
 
 // ResumeTaskSession restarts a specific task session using its stored worktree.

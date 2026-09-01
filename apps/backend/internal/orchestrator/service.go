@@ -239,6 +239,27 @@ type PromptReferenceExpander interface {
 	) (expandedPrompt, trustedContext string)
 }
 
+// DirectPromptPreparer canonicalizes a user-submitted structured prompt before
+// the task service persists it. The returned trusted context is the exact
+// server-generated content that may be preserved by system-context
+// canonicalization.
+type DirectPromptPreparer interface {
+	PrepareDirectPrompt(ctx context.Context, prompt string, isPassthrough bool) (string, string)
+}
+
+// DirectPromptStarter starts a prepared direct-message session while retaining
+// the trusted saved-prompt context prepared before message persistence.
+type DirectPromptStarter interface {
+	StartCreatedSessionWithPromptContext(
+		ctx context.Context,
+		taskID, sessionID, agentProfileID, prompt string,
+		skipMessageRecord, planMode, autoStart bool,
+		attachments []v1.MessageAttachment,
+		references []v1.EntityReference,
+		promptReferenceContext string,
+	) (*executor.TaskExecution, error)
+}
+
 // repoStore is the repository interface accepted by NewService.
 // It covers both the orchestrator's own needs (sessionExecutorStore) and
 // the executor package's needs (executor.executorStore).
