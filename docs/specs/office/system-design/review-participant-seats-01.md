@@ -281,9 +281,10 @@ Given workspace, task, step and role:
    (`AC-OFFICE-REVIEW-SEATS-002.9`). Disjoint from step 4's domain.
 
 **The runner resolver does not work on Postgres, and is repaired here.** Step 2
-is the only path that seats anyone in a CEO-less workspace, and in this card's
-scenario it runs: the task stands at `review`, its `runner` seat was written
-at `work`, and `review` declares no primary agent profile, so the resolver's
+is the path that seats the task's runner when the eligible pool is empty. In
+this card's no-eligible-candidate scenario it runs: the task stands at
+`review`, its `runner` seat was written at `work`, and `review` declares no
+primary agent profile, so the resolver's
 first two tiers miss and the third decides. That tier orders by `rowid`,
 absent on Postgres, so the call errors instead of returning an agent, routing
 to `AC-OFFICE-REVIEW-SEATS-002.6`: no seat, unfillable signal, task parked -

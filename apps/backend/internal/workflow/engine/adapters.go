@@ -181,8 +181,8 @@ type ParticipantSeatCastResult struct {
 
 // ParticipantSeatCaster resolves which agent should fill a role's seat when
 // none exists yet, per REQ-002's five-step deterministic algorithm. The
-// office package implements this against the workspace's CEO-role agent
-// roster; the engine treats the result as opaque.
+// office package implements this against role-specific workspace agent pools;
+// the engine treats the result as opaque.
 type ParticipantSeatCaster interface {
 	// stepID is the immutable workflow step that the task entered. Callers
 	// must pass this value instead of asking the adapter to re-read mutable

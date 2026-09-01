@@ -21,8 +21,8 @@ This capability makes those seats exist by default. When a task **enters** a
 step that declares it, the system resolves which Office agent should fill the
 step's participant role and writes a seat for that task at that step, before
 the step's own fan-out reads the slate. Casting is **derived**, not configured:
-the workspace CEO reviews, and the task's runner is the fallback when there is
-no CEO to seat.
+the reviewer pool uses `ceo` and `specialist`, while other roles use `ceo`.
+The runner is the fallback when the pool is empty.
 
 Seats are written for the step being **entered**, never for the step the task
 stands on when it is created; that distinction is the whole defect behind the
