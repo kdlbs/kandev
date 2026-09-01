@@ -273,6 +273,7 @@ type mockRepository struct {
 	executorsRunning     map[string]*models.ExecutorRunning
 	taskEnvironments     map[string]*models.TaskEnvironment
 	taskEnvironmentRepos map[string][]*models.TaskEnvironmentRepo // env_id → rows
+	plans                map[string]*models.TaskPlan              // task_id → plan
 
 	// Optional hook to inject behavior into GetTaskSession (e.g. simulate a
 	// transient DB error); if nil, the default map lookup is used.
@@ -372,6 +373,7 @@ func newMockRepository() *mockRepository {
 		executorsRunning:               make(map[string]*models.ExecutorRunning),
 		taskEnvironments:               make(map[string]*models.TaskEnvironment),
 		taskEnvironmentRepos:           make(map[string][]*models.TaskEnvironmentRepo),
+		plans:                          make(map[string]*models.TaskPlan),
 		updateTaskStateIfNotArchivedCh: make(chan struct{}, 8),
 	}
 }
@@ -1264,7 +1266,9 @@ func (m *mockRepository) UpdateTaskEnvironmentRepo(_ context.Context, repo *mode
 // Task Plan operations
 func (m *mockRepository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error { return nil }
 func (m *mockRepository) GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error) {
-	return nil, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.plans[taskID], nil
 }
 func (m *mockRepository) UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error { return nil }
 func (m *mockRepository) DeleteTaskPlan(ctx context.Context, taskID string) error         { return nil }
