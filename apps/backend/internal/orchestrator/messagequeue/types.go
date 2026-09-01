@@ -118,6 +118,15 @@ const DeliveryReservationTTL = 30 * time.Second
 // never mixes prompts issued by different agents.
 const MetadataSenderTaskID = "sender_task_id"
 
+// MetadataRoutineWake marks a message emitted by a trusted scheduled
+// automation run. Only these entries may use routine-wake coalescing.
+const MetadataRoutineWake = "routine_wake"
+
+// MetadataRoutineIdentity identifies the stable automation and trigger that
+// emitted a scheduled wake. The complete payload digest remains embedded in
+// MetadataCoalesceKey so materially different wakes never collide.
+const MetadataRoutineIdentity = "routine_identity"
+
 // MetadataDeferredMoveID identifies the hand-off prompt created for one
 // deferred workflow move. The orchestrator uses it to remove only stale move
 // prompts after a replay.
