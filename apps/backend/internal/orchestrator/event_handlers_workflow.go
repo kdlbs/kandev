@@ -2672,6 +2672,13 @@ func (s *Service) launchAfterOnEnterDispatch(
 		// autoStartStepPrompt sends the prompt directly via PromptTask.
 		effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
 		if err := s.autoStartStepPrompt(ctx, taskID, session, step, effectivePrompt, hasPlanMode, true); err != nil {
+			if errors.Is(err, errSessionReadinessRecoverySuperseded) ||
+				errors.Is(err, errSessionReadinessRecoveryTeardownIncomplete) {
+				s.logger.Info("workflow auto-start readiness recovery preserved its current state",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID))
+				return
+			}
 			if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
 				if workflowAutoStartWasCancelled(err) {
 					s.logger.Info("workflow auto-start cancelled before dispatch; not creating replacement",
@@ -2706,8 +2713,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 				zap.String("session_id", sessionID),
 				zap.String("step_name", step.Name),
 				zap.Error(err))
-			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
-			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
+			s.parkWorkflowSessionAfterAutoStartFailure(ctx, taskID, sessionID, step.ID)
 		}
 
 	default:
@@ -2829,6 +2835,30 @@ func (s *Service) launchAfterOnEnterDispatch(
 		s.drainQueuedMessageForPromptableSession(ctx, sessionID)
 	}
 
+}
+
+func (s *Service) parkWorkflowSessionAfterAutoStartFailure(
+	ctx context.Context,
+	taskID, sessionID, stepID string,
+) {
+	latest, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to reload session after workflow auto-start failure",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if latest == nil || isTerminalSessionState(latest.State) {
+		return
+	}
+
+	s.setSessionWaitingForInput(ctx, taskID, sessionID, latest)
+	latest, err = s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || latest == nil || latest.State != models.TaskSessionStateWaitingForInput {
+		return
+	}
+	s.publishSessionWaitingEvent(ctx, taskID, sessionID, stepID, latest)
 }
 
 // dispatchEngineOwnedOnEnterAction executes an engine-owned on_enter action
@@ -3730,6 +3760,11 @@ func (s *Service) autoStartStepPrompt(
 			return nil
 		}
 		if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
+			requeueTaken()
+			return err
+		}
+		if errors.Is(err, errSessionReadinessRecoverySuperseded) ||
+			errors.Is(err, errSessionReadinessRecoveryTeardownIncomplete) {
 			requeueTaken()
 			return err
 		}

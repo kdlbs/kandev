@@ -111,6 +111,16 @@ var ErrSessionNotPromptable = errors.New("session not promptable")
 // trigger this.
 var errQueuedDispatchSuperseded = errors.New("queued dispatch superseded by a newer one for this session")
 
+// errSessionReadinessRecoverySuperseded marks a timeout recovery attempt that
+// lost ownership to a terminal session or a successor execution. Workflow
+// fallback must not park the new owner based on the old execution's timeout.
+var errSessionReadinessRecoverySuperseded = errors.New("session readiness recovery superseded")
+
+// errSessionReadinessRecoveryTeardownIncomplete marks a timeout recovery whose
+// exact execution may still be active because runtime teardown failed.
+// Workflow fallback must preserve STARTING instead of parking or replacing it.
+var errSessionReadinessRecoveryTeardownIncomplete = errors.New("session readiness recovery teardown incomplete")
+
 var (
 	// Backend restart recovery can restore the session state before the ACP
 	// stream is promptable again. Keep this above CI's slow-start tail so a
@@ -122,6 +132,7 @@ var (
 const promptFailureCleanupTimeout = 5 * time.Second
 
 const promptReadinessRecoveryStopReason = "prompt readiness recovery"
+const sessionReadinessRecoveryStopReason = "session readiness timeout recovery"
 
 type agentPromptStreamRecoverer interface {
 	RecoverAgentPromptStream(ctx context.Context, sessionID string) error
@@ -2425,7 +2436,8 @@ func (s *Service) attemptColdResume(
 	// when the agent's ACP session initializes — that's what unblocks waitForSessionReady,
 	// no flag-tracking needed.
 	resumeCtx := context.WithoutCancel(ctx)
-	if _, launchErr := s.executor.ResumeSession(resumeCtx, session, true); launchErr != nil {
+	execution, launchErr := s.executor.ResumeSession(resumeCtx, session, true)
+	if launchErr != nil {
 		if errors.Is(launchErr, executor.ErrExecutionAlreadyRunning) {
 			s.recoverAgentPromptStreamIfNeeded(resumeCtx, sessionID)
 			if readyErr := s.waitForAgentPromptReady(resumeCtx, sessionID); readyErr != nil {
@@ -2454,7 +2466,26 @@ func (s *Service) attemptColdResume(
 	// own bounded timeouts (waitForSessionReady's AgentLaunchTimeout launch
 	// budget, and waitForAgentPromptReady's 30s below).
 	if err := s.waitForSessionReady(resumeCtx, sessionID); err != nil {
-		return false, fmt.Errorf("session not ready after resume: %w", err)
+		timeoutErr := fmt.Errorf("session not ready after resume: %w", err)
+		reconciled, reconcileErr := s.reconcilePromptReadySessionAfterReadinessTimeout(
+			resumeCtx, session, execution.AgentExecutionID,
+		)
+		if reconcileErr != nil {
+			s.logger.Warn("failed to reconcile prompt-ready session after readiness timeout",
+				zap.String("session_id", sessionID),
+				zap.String("agent_execution_id", execution.AgentExecutionID),
+				zap.Error(reconcileErr))
+		}
+		if reconciled {
+			return false, nil
+		}
+		cleanupErr := s.failOwnedExecutionAfterReadinessTimeout(
+			resumeCtx, session, execution.AgentExecutionID, timeoutErr,
+		)
+		if cleanupErr != nil {
+			return false, errors.Join(timeoutErr, cleanupErr)
+		}
+		return false, timeoutErr
 	}
 	readyErr := s.waitForAgentPromptReady(resumeCtx, sessionID)
 	if readyErr == nil {
@@ -2462,6 +2493,133 @@ func (s *Service) attemptColdResume(
 		return false, nil
 	}
 	return errors.Is(readyErr, ErrAgentNotReadyForPrompt), fmt.Errorf("agent not ready after resume: %w", readyErr)
+}
+
+func (s *Service) reconcilePromptReadySessionAfterReadinessTimeout(
+	ctx context.Context,
+	session *models.TaskSession,
+	executionID string,
+) (bool, error) {
+	if executionID == "" || s.agentManager == nil {
+		return false, nil
+	}
+	matches, err := s.sessionExecutionMatches(ctx, session.ID, executionID)
+	if err != nil || !matches {
+		return false, err
+	}
+	if !s.agentManager.IsAgentReadyForPrompt(ctx, session.ID) {
+		return false, nil
+	}
+	matches, err = s.sessionExecutionMatches(ctx, session.ID, executionID)
+	if err != nil || !matches {
+		return false, err
+	}
+
+	latest, err := s.repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		return false, fmt.Errorf("reload session for readiness reconciliation: %w", err)
+	}
+	if latest.State == models.TaskSessionStateWaitingForInput {
+		return true, nil
+	}
+	if latest.State != models.TaskSessionStateStarting {
+		return false, nil
+	}
+
+	s.setSessionWaitingForInput(ctx, session.TaskID, session.ID, latest)
+	latest, err = s.repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		return false, fmt.Errorf("reload reconciled session: %w", err)
+	}
+	return latest.State == models.TaskSessionStateWaitingForInput, nil
+}
+
+func (s *Service) failOwnedExecutionAfterReadinessTimeout(
+	ctx context.Context,
+	session *models.TaskSession,
+	executionID string,
+	timeoutErr error,
+) error {
+	owned, err := s.sessionExecutionIsOwnedAndActive(ctx, session.ID, executionID)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return fmt.Errorf("%w for session %s execution %s", errSessionReadinessRecoverySuperseded, session.ID, executionID)
+	}
+	if !s.claimForcedExecutionCleanup(session.ID, executionID) {
+		return fmt.Errorf(
+			"%w: execution %s teardown is already owned for session %s",
+			errSessionReadinessRecoverySuperseded,
+			executionID,
+			session.ID,
+		)
+	}
+	owned, err = s.sessionExecutionIsOwnedAndActive(ctx, session.ID, executionID)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return fmt.Errorf("%w for session %s execution %s", errSessionReadinessRecoverySuperseded, session.ID, executionID)
+	}
+
+	s.logger.Warn("stopping session-unready execution after resume timeout",
+		zap.String("session_id", session.ID),
+		zap.String("agent_execution_id", executionID),
+		zap.Error(timeoutErr))
+	stopErr := s.executor.StopExecution(ctx, executionID, sessionReadinessRecoveryStopReason, true)
+	if stopErr != nil {
+		return fmt.Errorf("%w: %w", errSessionReadinessRecoveryTeardownIncomplete, stopErr)
+	}
+	s.markExecutionFailed(session.ID, executionID)
+	s.retireExecutionActivityAndPublish(ctx, session.TaskID, session.ID, executionID)
+
+	running, lookupErr := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	if lookupErr != nil {
+		return fmt.Errorf("reload execution after readiness teardown: %w", lookupErr)
+	}
+	if running != nil && running.AgentExecutionID != "" && running.AgentExecutionID != executionID {
+		return fmt.Errorf("%w for session %s execution %s", errSessionReadinessRecoverySuperseded, session.ID, executionID)
+	}
+	latest, reloadErr := s.repo.GetTaskSession(ctx, session.ID)
+	if reloadErr != nil {
+		return fmt.Errorf("reload session after readiness teardown: %w", reloadErr)
+	}
+	if !isTerminalSessionState(latest.State) {
+		_ = s.handleSessionLaunchFailure(ctx, session.TaskID, session.ID, timeoutErr, latest)
+	}
+	return nil
+}
+
+func (s *Service) sessionExecutionMatches(ctx context.Context, sessionID, executionID string) (bool, error) {
+	if executionID == "" {
+		return false, nil
+	}
+	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return running != nil && running.AgentExecutionID == executionID, nil
+}
+
+func (s *Service) sessionExecutionIsOwnedAndActive(
+	ctx context.Context,
+	sessionID, executionID string,
+) (bool, error) {
+	matches, err := s.sessionExecutionMatches(ctx, sessionID, executionID)
+	if err != nil || !matches {
+		return false, err
+	}
+	terminal, err := s.sessionIsTerminal(ctx, sessionID)
+	return !terminal, err
+}
+
+func (s *Service) sessionIsTerminal(ctx context.Context, sessionID string) (bool, error) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return session != nil && isTerminalSessionState(session.State), nil
 }
 
 func (s *Service) recoverAgentPromptStreamIfNeeded(ctx context.Context, sessionID string) {
