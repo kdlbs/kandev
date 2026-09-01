@@ -1,0 +1,267 @@
+package configsync
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+
+	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/repository/sqlite"
+)
+
+const kindSkill = "skill"
+
+// fetchedSkill is one collision-resolved, successfully parsed skill
+// directory ready to apply.
+type fetchedSkill struct {
+	Key        string // directory name (AC-OFFICE-CONFIG-SYNC-003.1)
+	SourcePath string
+	Proj       SkillProjection
+}
+
+// buildFetchedSkills parses every skill directory the walk selected and
+// resolves AC-OFFICE-CONFIG-SYNC-003.3's collision rule. A skill directory
+// with no readable SKILL.md is not included here — walk.go already recorded
+// it as unreadable, which feeds AC-OFFICE-CONFIG-SYNC-003.6a/.12 instead.
+func buildFetchedSkills(dirs []skillFiles) (fetched []fetchedSkill, warnings []string) {
+	type parsed struct {
+		skill *parsedSkill
+		path  string
+	}
+	var ok []parsed
+	for _, sf := range dirs {
+		ps, err := parseSkill(sf)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("skill %q: %v; skipping", sf.dirPath, err))
+			continue
+		}
+		if ps == nil {
+			continue
+		}
+		ok = append(ok, parsed{skill: ps, path: ps.sourcePath})
+	}
+
+	keyed := make([]keyedPath, len(ok))
+	byPath := make(map[string]*parsedSkill, len(ok))
+	for i, p := range ok {
+		keyed[i] = keyedPath{Key: p.skill.dirName, Path: p.path}
+		byPath[p.path] = p.skill
+	}
+	winners, collisionWarnings := resolveKeyCollisions(kindSkill, keyed)
+	warnings = append(warnings, collisionWarnings...)
+
+	for key, winnerPath := range winners {
+		ps := byPath[winnerPath]
+		fetched = append(fetched, fetchedSkill{
+			Key:        key,
+			SourcePath: winnerPath,
+			Proj: SkillProjection{
+				Name:          ps.name,
+				Description:   ps.description,
+				SourceType:    models.SkillSourceTypeInline,
+				Content:       ps.content,
+				FileInventory: ps.fileInventory,
+			},
+		})
+	}
+	return fetched, warnings
+}
+
+// applySkills runs the six-case table for the skill kind. Skills use a
+// bespoke apply path rather than the generic engine because their writer
+// (skillwriter.go) needs a CAS guard on source_locator that the generic
+// entityOps.update signature has no room for (AC-OFFICE-CONFIG-SYNC-003.5d,
+// R5-F1), and because SkillProjection deliberately excludes content_hash and
+// source_locator from the change-comparison (AC-OFFICE-CONFIG-SYNC-003.5e).
+func applySkills(
+	ctx context.Context, repo *sqlite.Repository, store *Store, workspaceID string,
+	fetched []fetchedSkill, manifest []ManifestEntry, exemptKeys map[string]bool, coarseExempt bool,
+) (*kindApplyResult, error) {
+	existing, err := repo.ListSkills(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("list existing skill entities: %w", err)
+	}
+	existingByKey := make(map[string]*models.Skill, len(existing))
+	existingByID := make(map[string]*models.Skill, len(existing))
+	for _, s := range existing {
+		existingByKey[s.Slug] = s
+		existingByID[s.ID] = s
+	}
+	manifestByKey := make(map[string]ManifestEntry, len(manifest))
+	for _, m := range manifest {
+		manifestByKey[m.EntityKey] = m
+	}
+	fetchedByKey := make(map[string]fetchedSkill, len(fetched))
+	for _, f := range fetched {
+		fetchedByKey[f.Key] = f
+	}
+
+	res := newKindApplyResult()
+	if err := applySkillCreatesAndUpdates(ctx, repo, store, workspaceID, fetched, manifestByKey, existingByKey, existingByID, res); err != nil {
+		return nil, err
+	}
+	applySkillDeletions(ctx, repo, store, workspaceID, fetchedByKey, manifest, existingByID, exemptKeys, coarseExempt, res)
+	return res, nil
+}
+
+func applySkillCreatesAndUpdates(
+	ctx context.Context, repo *sqlite.Repository, store *Store, workspaceID string,
+	fetched []fetchedSkill, manifestByKey map[string]ManifestEntry,
+	existingByKey, existingByID map[string]*models.Skill, res *kindApplyResult,
+) error {
+	ordered := append([]fetchedSkill(nil), fetched...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].SourcePath < ordered[j].SourcePath })
+
+	for _, fs := range ordered {
+		manifestEntry, inManifest := manifestByKey[fs.Key]
+		manifestEntityExists := inManifest && existingByID[manifestEntry.EntityID] != nil
+		_, unmanagedRow := existingByKey[fs.Key]
+		unmanagedHoldsKey := unmanagedRow && !inManifest
+
+		switch decideKey(true, inManifest, manifestEntityExists, unmanagedHoldsKey, false) {
+		case decisionForeign:
+			res.Warnings = append(res.Warnings, fmt.Sprintf(
+				"skill %q: an unmanaged entity already uses this name; leaving both untouched", fs.Key))
+		case decisionNew:
+			id, err := createSkillEntity(ctx, repo, store, workspaceID, fs)
+			if err != nil {
+				return err
+			}
+			res.Created = append(res.Created, fs.Key)
+			res.IDsByKey[fs.Key] = id
+		case decisionExisting:
+			existingSkill := existingByID[manifestEntry.EntityID]
+			changed, warn, err := updateSkillEntityIfChanged(ctx, repo, store, workspaceID, fs, existingSkill, manifestEntry.SourcePath)
+			if err != nil {
+				return err
+			}
+			if warn != "" {
+				res.Warnings = append(res.Warnings, warn)
+			} else if changed {
+				res.Updated = append(res.Updated, fs.Key)
+			}
+			res.IDsByKey[fs.Key] = existingSkill.ID
+		}
+	}
+	return nil
+}
+
+func createSkillEntity(ctx context.Context, repo *sqlite.Repository, store *Store, workspaceID string, fs fetchedSkill) (string, error) {
+	tx, err := repo.Writer().BeginTxx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	id, err := CreateSkill(ctx, tx, repo.Writer(), workspaceID, fs.Key, fs.SourcePath, fs.Proj)
+	if err != nil {
+		return "", fmt.Errorf("create skill %q: %w", fs.Key, err)
+	}
+	if err := store.UpsertManifestEntryTx(ctx, tx, workspaceID, kindSkill, fs.Key, id, fs.SourcePath); err != nil {
+		return "", fmt.Errorf("record manifest for skill %q: %w", fs.Key, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// skillProjectionOf reads an existing skill row's owned-field projection —
+// the same shape SkillProjection uses — for change comparison.
+func skillProjectionOf(s *models.Skill) SkillProjection {
+	return SkillProjection{
+		Name:          s.Name,
+		Description:   s.Description,
+		SourceType:    s.SourceType,
+		Content:       s.Content,
+		FileInventory: s.FileInventory,
+	}
+}
+
+// updateSkillEntityIfChanged writes fs onto an existing skill only when its
+// owned projection differs. A CAS failure (ErrSkillLocatorChanged) is not an
+// error for the run: it returns a warning naming the skill and leaves the
+// row untouched for the next run to reconcile (AC-OFFICE-CONFIG-SYNC-003.5e).
+func updateSkillEntityIfChanged(
+	ctx context.Context, repo *sqlite.Repository, store *Store, workspaceID string,
+	fs fetchedSkill, existing *models.Skill, oldSourcePath string,
+) (changed bool, warning string, err error) {
+	changed = skillProjectionOf(existing) != fs.Proj
+	if !changed && oldSourcePath == fs.SourcePath {
+		return false, "", nil
+	}
+	tx, err := repo.Writer().BeginTxx(ctx, nil)
+	if err != nil {
+		return false, "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if changed {
+		if uerr := UpdateSkillProjection(ctx, tx, repo.Writer(), existing.ID, existing.SourceLocator, fs.Proj); uerr != nil {
+			if errors.Is(uerr, ErrSkillLocatorChanged) {
+				return false, fmt.Sprintf(
+					"skill %q: another writer changed it concurrently; leaving untouched this run", fs.Key), nil
+			}
+			return false, "", fmt.Errorf("update skill %q: %w", fs.Key, uerr)
+		}
+	}
+	if merr := store.UpsertManifestEntryTx(ctx, tx, workspaceID, kindSkill, fs.Key, existing.ID, fs.SourcePath); merr != nil {
+		return false, "", fmt.Errorf("refresh manifest for skill %q: %w", fs.Key, merr)
+	}
+	if cerr := tx.Commit(); cerr != nil {
+		return false, "", cerr
+	}
+	return changed, "", nil
+}
+
+func applySkillDeletions(
+	ctx context.Context, repo *sqlite.Repository, store *Store, workspaceID string,
+	fetchedByKey map[string]fetchedSkill, manifest []ManifestEntry,
+	existingByID map[string]*models.Skill, exemptKeys map[string]bool, coarseExempt bool, res *kindApplyResult,
+) {
+	ordered := append([]ManifestEntry(nil), manifest...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].EntityKey < ordered[j].EntityKey })
+
+	for _, m := range ordered {
+		if _, inFetched := fetchedByKey[m.EntityKey]; inFetched {
+			continue
+		}
+		_, manifestEntityExists := existingByID[m.EntityID]
+		exempt := coarseExempt || exemptKeys[m.EntityKey]
+
+		switch decideKey(false, true, manifestEntityExists, false, exempt) {
+		case decisionGoneOutOfBand:
+			if err := store.DeleteManifestEntry(ctx, workspaceID, kindSkill, m.EntityKey); err != nil {
+				res.Warnings = append(res.Warnings, fmt.Sprintf(
+					"skill %q: failed to drop stale manifest entry: %v", m.EntityKey, err))
+			}
+		case decisionExempt:
+			res.Warnings = append(res.Warnings, fmt.Sprintf(
+				"skill %q: could not confirm removal (an unreadable file may be a renamed or broken version of it); leaving it in place",
+				m.EntityKey))
+		case decisionRemovedUpstream:
+			if err := deleteSkillEntity(ctx, repo, store, workspaceID, m); err != nil {
+				res.Warnings = append(res.Warnings, fmt.Sprintf("skill %q: failed to delete: %v", m.EntityKey, err))
+				continue
+			}
+			res.Deleted = append(res.Deleted, m.EntityKey)
+		}
+	}
+}
+
+func deleteSkillEntity(ctx context.Context, repo *sqlite.Repository, store *Store, workspaceID string, m ManifestEntry) error {
+	tx, err := repo.Writer().BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := repo.DeleteSkillTx(ctx, tx, m.EntityID); err != nil {
+		return err
+	}
+	if err := store.DeleteManifestEntryTx(ctx, tx, workspaceID, kindSkill, m.EntityKey); err != nil {
+		return err
+	}
+	return tx.Commit()
+}

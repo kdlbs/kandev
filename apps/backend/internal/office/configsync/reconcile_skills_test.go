@@ -1,0 +1,181 @@
+package configsync
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/office/models"
+)
+
+func skillMDFile(path, content string) *fetchedFile {
+	return &fetchedFile{path: path, content: []byte(content)}
+}
+
+func TestBuildFetchedSkills_ReadsFrontmatterAndFallsBackNameToDirName(t *testing.T) {
+	dirs := []skillFiles{
+		{
+			dirName: "reviewer", dirPath: "skills/reviewer",
+			skillMD: skillMDFile("skills/reviewer/SKILL.md", "---\nname: Code Reviewer\ndescription: Reviews PRs\n---\nbody"),
+		},
+		{
+			dirName: "no-frontmatter", dirPath: "skills/no-frontmatter",
+			skillMD: skillMDFile("skills/no-frontmatter/SKILL.md", "just a body, no frontmatter"),
+		},
+	}
+	fetched, warnings := buildFetchedSkills(dirs)
+	require.Len(t, fetched, 2)
+	assert.Empty(t, warnings)
+
+	byKey := map[string]fetchedSkill{}
+	for _, f := range fetched {
+		byKey[f.Key] = f
+	}
+	require.Contains(t, byKey, "reviewer")
+	assert.Equal(t, "Code Reviewer", byKey["reviewer"].Proj.Name)
+	assert.Equal(t, "Reviews PRs", byKey["reviewer"].Proj.Description)
+	assert.Equal(t, models.SkillSourceTypeInline, byKey["reviewer"].Proj.SourceType)
+
+	require.Contains(t, byKey, "no-frontmatter")
+	assert.Equal(t, "no-frontmatter", byKey["no-frontmatter"].Proj.Name, "missing frontmatter name falls back to the directory name")
+}
+
+func TestBuildFetchedSkills_MissingSkillMDIsSilentlyExcluded(t *testing.T) {
+	dirs := []skillFiles{
+		{dirName: "empty-dir", dirPath: "skills/empty-dir", skillMD: nil},
+	}
+	fetched, warnings := buildFetchedSkills(dirs)
+	assert.Empty(t, fetched)
+	assert.Empty(t, warnings, "a directory with no readable SKILL.md is tracked via walk's unreadable set, not warned here")
+}
+
+func TestBuildFetchedSkills_KeyCollisionKeepsByteWiseFirstPath(t *testing.T) {
+	dirs := []skillFiles{
+		{dirName: "reviewer", dirPath: "skills/z/reviewer", skillMD: skillMDFile("skills/z/reviewer/SKILL.md", "---\nname: R\n---\n")},
+		{dirName: "reviewer", dirPath: "skills/a/reviewer", skillMD: skillMDFile("skills/a/reviewer/SKILL.md", "---\nname: R\n---\n")},
+	}
+	fetched, warnings := buildFetchedSkills(dirs)
+	require.Len(t, fetched, 1)
+	assert.Equal(t, "skills/a/reviewer", fetched[0].SourcePath)
+	assert.NotEmpty(t, warnings)
+}
+
+func TestApplySkills_CreateRecordsManifestAndInlineSourceType(t *testing.T) {
+	repo, store := newReconcileTestRepo(t)
+	ctx := context.Background()
+
+	fetched := []fetchedSkill{{
+		Key: "reviewer", SourcePath: "skills/reviewer",
+		Proj: SkillProjection{Name: "Reviewer", Description: "d", SourceType: models.SkillSourceTypeInline, Content: "body", FileInventory: "[]"},
+	}}
+	res, err := applySkills(ctx, repo, store, "ws-1", fetched, nil, nil, false)
+	require.NoError(t, err)
+	require.Equal(t, []string{"reviewer"}, res.Created)
+
+	skills, err := repo.ListSkills(ctx, "ws-1")
+	require.NoError(t, err)
+	require.Len(t, skills, 1)
+	assert.Equal(t, "reviewer", skills[0].Slug)
+	assert.Equal(t, models.SkillSourceTypeInline, skills[0].SourceType, "R5-F2: sync always writes inline, materializeInline ignores source_locator")
+	assert.Equal(t, "skills/reviewer", skills[0].SourceLocator)
+
+	entries, err := store.ListManifest(ctx, "ws-1")
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, skills[0].ID, entries[0].EntityID)
+}
+
+func TestApplySkills_UpdateOnlyWritesWhenProjectionChanges(t *testing.T) {
+	repo, store := newReconcileTestRepo(t)
+	ctx := context.Background()
+
+	fetched := []fetchedSkill{{
+		Key: "reviewer", SourcePath: "skills/reviewer",
+		Proj: SkillProjection{Name: "Reviewer", SourceType: models.SkillSourceTypeInline, Content: "old", FileInventory: "[]"},
+	}}
+	_, err := applySkills(ctx, repo, store, "ws-1", fetched, nil, nil, false)
+	require.NoError(t, err)
+	manifest, err := store.ListManifest(ctx, "ws-1")
+	require.NoError(t, err)
+
+	res, err := applySkills(ctx, repo, store, "ws-1", fetched, manifest, nil, false)
+	require.NoError(t, err)
+	assert.Empty(t, res.Updated, "identical content must not count as a write")
+
+	fetched[0].Proj.Content = "new"
+	res, err = applySkills(ctx, repo, store, "ws-1", fetched, manifest, nil, false)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"reviewer"}, res.Updated)
+
+	skills, err := repo.ListSkills(ctx, "ws-1")
+	require.NoError(t, err)
+	require.Len(t, skills, 1)
+	assert.Equal(t, "new", skills[0].Content)
+}
+
+// TestApplySkills_LocatorChangedConcurrentlyWarnsAndLeavesRowUntouched
+// exercises updateSkillEntityIfChanged directly with a deliberately stale
+// existing.SourceLocator. applySkills itself re-reads office_skills fresh at
+// the start of every call (via ListSkills), so within one synchronous call
+// there is no way for a real concurrent write to land between that read and
+// the guarded UPDATE — the race this CAS guards against spans two separate
+// sync runs (or a sync run and Office's own UI), not two lines of one call.
+func TestApplySkills_LocatorChangedConcurrentlyWarnsAndLeavesRowUntouched(t *testing.T) {
+	repo, store := newReconcileTestRepo(t)
+	ctx := context.Background()
+
+	fetched := []fetchedSkill{{
+		Key: "reviewer", SourcePath: "skills/reviewer",
+		Proj: SkillProjection{Name: "Old Name", SourceType: models.SkillSourceTypeInline, Content: "old", FileInventory: "[]"},
+	}}
+	res, err := applySkills(ctx, repo, store, "ws-1", fetched, nil, nil, false)
+	require.NoError(t, err)
+	id := res.IDsByKey["reviewer"]
+
+	// A writer outside this run (another sync run, or Office's own package
+	// materialization) moves the locator after this run's stale read below.
+	_, err = repo.ExecRaw(ctx, `UPDATE office_skills SET source_locator = ? WHERE id = ?`, "skills/moved", id)
+	require.NoError(t, err)
+
+	stale := &models.Skill{
+		ID: id, SourceLocator: "skills/reviewer",
+		Name: "Old Name", SourceType: models.SkillSourceTypeInline, Content: "old", FileInventory: "[]",
+	}
+	updated := fetchedSkill{
+		Key: "reviewer", SourcePath: "skills/reviewer",
+		Proj: SkillProjection{Name: "New Name", SourceType: models.SkillSourceTypeInline, Content: "new", FileInventory: "[]"},
+	}
+	changed, warning, err := updateSkillEntityIfChanged(ctx, repo, store, "ws-1", updated, stale, "skills/reviewer")
+	require.NoError(t, err)
+	assert.False(t, changed)
+	assert.NotEmpty(t, warning)
+
+	skills, err := repo.ListSkills(ctx, "ws-1")
+	require.NoError(t, err)
+	require.Len(t, skills, 1)
+	assert.Equal(t, "Old Name", skills[0].Name, "CAS failure must leave the row untouched for the next run")
+}
+
+func TestApplySkills_RemovedUpstreamDeletesEntity(t *testing.T) {
+	repo, store := newReconcileTestRepo(t)
+	ctx := context.Background()
+
+	fetched := []fetchedSkill{{
+		Key: "reviewer", SourcePath: "skills/reviewer",
+		Proj: SkillProjection{Name: "Reviewer", SourceType: models.SkillSourceTypeInline, FileInventory: "[]"},
+	}}
+	_, err := applySkills(ctx, repo, store, "ws-1", fetched, nil, nil, false)
+	require.NoError(t, err)
+	manifest, err := store.ListManifest(ctx, "ws-1")
+	require.NoError(t, err)
+
+	res, err := applySkills(ctx, repo, store, "ws-1", nil, manifest, nil, false)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"reviewer"}, res.Deleted)
+
+	skills, err := repo.ListSkills(ctx, "ws-1")
+	require.NoError(t, err)
+	assert.Empty(t, skills)
+}
