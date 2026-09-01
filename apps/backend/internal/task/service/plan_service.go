@@ -585,6 +585,7 @@ func (s *PlanService) DeletePlan(ctx context.Context, taskID string) error {
 		return err
 	}
 	release := s.locks.acquire(taskID)
+	defer release()
 	existing, err := s.repo.GetTaskPlan(ctx, taskID)
 	if err != nil {
 		release()

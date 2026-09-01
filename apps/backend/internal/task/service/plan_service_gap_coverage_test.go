@@ -251,3 +251,76 @@ func TestCreatePlanPostWriteReReadFindsNoRowStillReportsWrittenPlan(t *testing.T
 		t.Fatalf("expected the reported ID to match the actually-persisted row: saved=%+v reported=%+v", saved, result.Plan)
 	}
 }
+
+// panicOnDeleteRepo makes DeleteTaskPlan panic instead of returning, simulating
+// an unrecoverable failure (e.g. a driver bug or invariant violation) partway
+// through the delete that DeletePlan's own error-return branches cannot
+// anticipate.
+type panicOnDeleteRepo struct {
+	*sqliterepo.Repository
+}
+
+func (r *panicOnDeleteRepo) DeleteTaskPlan(ctx context.Context, taskID string) error {
+	panic("simulated panic inside DeleteTaskPlan")
+}
+
+// TestDeletePlanPanicDuringDeleteDoesNotStrandTheLock proves DeletePlan's
+// per-task lock is released even when it exits via panic rather than one of
+// its own return statements. DeletePlan's explicit release() calls sit only
+// on its named return paths, so a panic between acquiring the lock and
+// reaching any of them would previously skip every one of them and strand the
+// lock forever - every future write to that task queues indefinitely, with no
+// self-heal, since a panic inside an HTTP handler is typically recovered
+// per-request rather than crashing the process. Both the panicking call and
+// the follow-up write share the same PlanService instance, and therefore the
+// same per-task lock table entry, so a hang on the follow-up proves the
+// stranding.
+func TestDeletePlanPanicDuringDeleteDoesNotStrandTheLock(t *testing.T) {
+	_, eventBus, repo := createTestService(t)
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-delete-panic")
+
+	panicking := &panicOnDeleteRepo{Repository: repo}
+	svc := NewPlanService(panicking, eventBus, log)
+
+	if _, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-delete-panic", Content: "v1", AuthorKind: "agent", AuthorName: "A",
+	}); err != nil {
+		t.Fatalf("seed CreatePlan: %v", err)
+	}
+
+	recovered := make(chan any, 1)
+	func() {
+		defer func() { recovered <- recover() }()
+		_ = svc.DeletePlan(ctx, "task-delete-panic")
+	}()
+	if r := <-recovered; r == nil {
+		t.Fatal("expected DeletePlan to panic via the injected DeleteTaskPlan failure")
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.UpdatePlan(ctx, UpdatePlanRequest{
+			TaskID: "task-delete-panic", Content: "after-panic", AuthorKind: "agent", AuthorName: "A",
+		})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("write after a panicking delete: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("write after a panicking delete hung - the panic appears to have stranded the per-task lock")
+	}
+
+	plan, err := svc.GetPlan(ctx, "task-delete-panic")
+	if err != nil {
+		t.Fatalf("GetPlan: %v", err)
+	}
+	if plan == nil || plan.Content != "after-panic" {
+		t.Fatalf("expected the follow-up write to have committed, got %+v", plan)
+	}
+}
