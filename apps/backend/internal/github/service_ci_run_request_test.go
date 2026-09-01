@@ -735,6 +735,27 @@ func TestRequestFreshCIRunIdempotencyIsActorScopedAcrossSessions(t *testing.T) {
 	}
 }
 
+func TestRequestFreshCIRunCoalescesSemanticRequestWithDifferentIdempotencyKey(t *testing.T) {
+	service, client, input := setupCIRunServiceTest(t, false)
+	client.runs = []GitHubActionsRun{*client.run}
+	client.runs[0].Attempt = input.ExpectedSourceAttempt + 1
+	if _, err := service.RequestFreshCIRun(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+
+	input.IdempotencyKey = "consumer-42-attempt-1-retry"
+	receipt, err := service.RequestFreshCIRun(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Status != CIRunRequestSucceeded || receipt.IdempotencyStatus != "coalesced" {
+		t.Fatalf("receipt = %+v, want succeeded coalesced receipt", receipt)
+	}
+	if client.reruns != 1 {
+		t.Fatalf("provider reruns = %d, want one", client.reruns)
+	}
+}
+
 func TestRequestFreshCIRunAuditFailurePreventsProviderMutation(t *testing.T) {
 	service, client, input := setupCIRunServiceTest(t, false)
 	client.workflowHook = func() {

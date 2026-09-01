@@ -408,6 +408,35 @@ func TestStoreClaimCIRunRequestIsIdempotentAndConcurrent(t *testing.T) {
 	}
 }
 
+func TestStoreClaimCIRunRequestWithAuditCoalescesSemanticConflict(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	grant := testCIRunGrant(now)
+	if err := store.UpsertCIRunGrant(ctx, grant); err != nil {
+		t.Fatal(err)
+	}
+	seedCIRunProviderStartScope(t, store, grant)
+
+	original := testCIRunRequest(grant, now)
+	if _, _, err := store.ClaimCIRunRequest(ctx, original); err != nil {
+		t.Fatal(err)
+	}
+	candidate := *original
+	candidate.ID = "request-semantic-retry"
+	candidate.IdempotencyHash = strings.Repeat("b", 64)
+	audit := &CIRunAuditEvent{
+		ID: "audit-semantic-retry", EventType: "claimed", DetailsJSON: `{}`, CreatedAt: now,
+	}
+	claimed, created, err := store.ClaimCIRunRequestWithAudit(ctx, &candidate, audit)
+	if !errors.Is(err, ErrCIRunSemanticConflict) {
+		t.Fatalf("claim error = %v, want semantic conflict", err)
+	}
+	if created || claimed == nil || claimed.ID != original.ID {
+		t.Fatalf("claim = %#v, created %v; want original request and no new row", claimed, created)
+	}
+}
+
 func TestStoreClaimCIRunRequestDoesNotCoalesceDifferentSemanticScope(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

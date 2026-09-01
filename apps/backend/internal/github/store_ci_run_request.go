@@ -264,6 +264,18 @@ func (s *Store) ClaimCIRunRequestWithAudit(ctx context.Context, request *CIRunRe
 	var loaded CIRunRequest
 	err = tx.GetContext(ctx, &loaded, tx.Rebind(`SELECT `+ciRunRequestColumns+` FROM github_ci_run_requests WHERE actor_task_id = ? AND idempotency_hash = ?`), request.ActorTaskID, request.IdempotencyHash)
 	if errors.Is(err, sql.ErrNoRows) {
+		var semantic CIRunRequest
+		semanticErr := tx.GetContext(ctx, &semantic, tx.Rebind(`SELECT `+ciRunRequestColumns+` FROM github_ci_run_requests
+			WHERE workspace_id = ? AND target_task_id = ? AND workflow_id = ? AND repository_id = ?
+			AND pr_number = ? AND expected_head_sha = ? AND source_run_id = ? AND expected_source_attempt = ? AND evidence_kind = ?`),
+			request.WorkspaceID, request.TargetTaskID, request.WorkflowID, request.RepositoryID, request.PRNumber,
+			request.ExpectedHeadSHA, request.SourceRunID, request.ExpectedSourceAttempt, request.EvidenceKind)
+		if semanticErr == nil {
+			return &semantic, false, ErrCIRunSemanticConflict
+		}
+		if !errors.Is(semanticErr, sql.ErrNoRows) {
+			return nil, false, semanticErr
+		}
 		return nil, false, errors.New("CI run request claim was not persisted")
 	}
 	if err != nil {
