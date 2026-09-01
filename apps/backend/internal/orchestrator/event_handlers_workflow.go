@@ -2204,6 +2204,11 @@ func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, cu
 	if err != nil {
 		return nil, fmt.Errorf("failed to get db task for session switch: %w", err)
 	}
+	if s.profileExecutionResolver != nil {
+		if err := s.profileExecutionResolver.ValidateProfile(ctx, newAgentProfileID); err != nil {
+			return nil, fmt.Errorf("failed to validate workflow replacement profile: %w", err)
+		}
+	}
 
 	// Create a new session with the new agent profile.
 	// Reuse the same executor profile from the current session.
@@ -2211,18 +2216,34 @@ func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, cu
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare new session: %w", err)
 	}
+	newSession, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get new session: %w", err)
+	}
+	launchProfileID, err := s.resolveDynamicLaunchExecution(ctx, newSession, newAgentProfileID, true)
+	if err != nil {
+		resolutionErr := fmt.Errorf("failed to resolve workflow replacement profile: %w", err)
+		if deleteErr := s.repo.DeleteTaskSession(ctx, sessionID); deleteErr != nil {
+			s.logger.Warn("failed to delete workflow replacement after profile resolution failure",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(deleteErr))
+			if terminalErr := s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, resolutionErr.Error()); terminalErr != nil {
+				s.logger.Warn("failed to terminalize workflow replacement after delete failure",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.Error(terminalErr))
+			}
+		}
+		return nil, resolutionErr
+	}
 	if _, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{
-		AgentProfileID: newAgentProfileID,
+		AgentProfileID: launchProfileID,
 		ExecutorID:     currentSession.ExecutorID,
 		WorkflowStepID: dbTask.WorkflowStepID,
 		StartAgent:     false,
 	}); err != nil {
 		return nil, fmt.Errorf("failed to attach workflow replacement workspace: %w", err)
-	}
-
-	newSession, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get new session: %w", err)
 	}
 
 	// Tag the session as workflow-spawned for provenance: its agent profile

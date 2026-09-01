@@ -166,15 +166,19 @@ func (r *Repository) ensureMessageMetadataIndexes() error {
 	return nil
 }
 
-// ensurePromptOrderIndex creates the additive expression index
-// (task_session_id, normalized_microsecond(created_at), id) that makes the
-// prompt-ordering window pass index-only. Read-time derived prompt ordinals
-// need no data-column or table-shape migration; this one additive index is
-// the only schema change.
+// ensurePromptOrderIndex creates additive expression indexes for prompt-order
+// reads. The user-only index also puts author_type before the ordering key, so
+// filtered prompt pages skip interleaved agent and tool rows.
 func (r *Repository) ensurePromptOrderIndex() error {
 	ddl := dialect.PromptOrderIndexDDL(r.db.DriverName(), "idx_messages_prompt_order", "task_session_messages")
 	if _, err := r.db.Exec(ddl); err != nil {
 		return fmt.Errorf("create prompt-order index: %w", err)
+	}
+	userDDL := dialect.PromptUserOrderIndexDDL(
+		r.db.DriverName(), "idx_messages_prompt_user_order", "task_session_messages",
+	)
+	if _, err := r.db.Exec(userDDL); err != nil {
+		return fmt.Errorf("create prompt-user-order index: %w", err)
 	}
 	return nil
 }

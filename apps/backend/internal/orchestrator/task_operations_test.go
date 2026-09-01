@@ -4390,23 +4390,24 @@ func TestIssue1884_StepProfileSignalGateStaysInTaskMode(t *testing.T) {
 // mockMessageCreator implements MessageCreator for testing.
 // Only CreateUserMessage is tracked; all other methods are no-op stubs.
 type mockMessageCreator struct {
-	mu                 sync.Mutex
-	userMessages       []mockUserMessage
-	sessionMessages    []mockSessionMessage
-	sessionMessageDone chan struct{}
-	sessionMessageOnce sync.Once
-	sessionMessageErr  error
-	agentMessages      []mockAgentMessage
-	agentMessageWrites int
-	agentStreamWrites  int
-	thinkingWrites     int
-	toolCallWrites     int
-	toolUpdateWrites   int
-	userMessageErr     error
-	permissionClaimFn  func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
-	permissionFinishFn func(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
-	permissionAuditFn  func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error)
-	permissionUpdateFn func(context.Context, string, string, string, string, models.PermissionStatus) error
+	mu                     sync.Mutex
+	userMessages           []mockUserMessage
+	sessionMessages        []mockSessionMessage
+	sessionMessageAttempts int
+	sessionMessageDone     chan struct{}
+	sessionMessageOnce     sync.Once
+	sessionMessageErr      error
+	agentMessages          []mockAgentMessage
+	agentMessageWrites     int
+	agentStreamWrites      int
+	thinkingWrites         int
+	toolCallWrites         int
+	toolUpdateWrites       int
+	userMessageErr         error
+	permissionClaimFn      func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
+	permissionFinishFn     func(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
+	permissionAuditFn      func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error)
+	permissionUpdateFn     func(context.Context, string, string, string, string, models.PermissionStatus) error
 }
 
 type mockUserMessage struct {
@@ -4451,6 +4452,7 @@ func (m *mockMessageCreator) UpdateToolCallMessage(context.Context, string, stri
 func (m *mockMessageCreator) CreateSessionMessage(_ context.Context, taskID, content, sessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.sessionMessageAttempts++
 	if m.sessionMessageErr != nil {
 		return m.sessionMessageErr
 	}
@@ -5438,6 +5440,109 @@ func TestResumeTaskSession_FailedKeepsResumeToken(t *testing.T) {
 	}
 }
 
+// TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity proves
+// the service-level recovery action carries the explicit replacement permission
+// without turning it into a fresh session or provider conversation. Worktree
+// materialization itself is covered by the lifecycle tests; this boundary test
+// verifies the request that reaches that materializer.
+func TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+
+	var captured *executor.LaunchAgentRequest
+	startAgentProcessCalled := false
+	agentMgr := &sessionUpdatingAgentManager{
+		mockAgentManager: &mockAgentManager{
+			launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+				captured = req
+				return &executor.LaunchAgentResponse{
+					AgentExecutionID: "exec-recovered",
+					Status:           v1.AgentStatusStarting,
+				}, nil
+			},
+		},
+		repo:          repo,
+		sessionID:     "session-recover-new-branch",
+		taskID:        "task-recover-new-branch",
+		onStartCalled: &startAgentProcessCalled,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task-recover-new-branch", "session-recover-new-branch", models.TaskSessionStateFailed)
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateExecutor(ctx, &models.Executor{
+		ID:        "executor-recover-new-branch",
+		Name:      "Worktree",
+		Type:      models.ExecutorTypeWorktree,
+		Status:    models.ExecutorStatusActive,
+		Resumable: true,
+	}))
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+		ID:            "repo-recover-new-branch",
+		WorkspaceID:   "ws1",
+		Name:          "backend",
+		SourceType:    "local",
+		LocalPath:     t.TempDir(),
+		DefaultBranch: "main",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}))
+	require.NoError(t, repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID:           "task-repo-recover-new-branch",
+		TaskID:       "task-recover-new-branch",
+		RepositoryID: "repo-recover-new-branch",
+		BaseBranch:   "main",
+		Position:     0,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}))
+
+	session, err := repo.GetTaskSession(ctx, "session-recover-new-branch")
+	require.NoError(t, err)
+	session.AgentProfileID = "profile-recover-new-branch"
+	session.ExecutorID = "executor-recover-new-branch"
+	session.RepositoryID = "repo-recover-new-branch"
+	session.BaseBranch = "main"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "running-recover-new-branch",
+		SessionID:        "session-recover-new-branch",
+		TaskID:           "task-recover-new-branch",
+		AgentExecutionID: "exec-before-recovery",
+		ResumeToken:      "acp-session-recover-new-branch",
+		Resumable:        true,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}))
+
+	response, err := svc.RecoverSession(ctx, "task-recover-new-branch", "session-recover-new-branch", "resume_new_branch")
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	require.Equal(t, "task-recover-new-branch", response.TaskID)
+	require.Equal(t, "session-recover-new-branch", response.SessionID)
+	require.NotNil(t, captured)
+	require.Equal(t, "session-recover-new-branch", captured.SessionID)
+	require.Equal(t, "acp-session-recover-new-branch", captured.ACPSessionID)
+	require.True(t, captured.AllowBranchReplacement)
+	require.True(t, captured.UseWorktree)
+	require.Equal(t, "main", captured.Branch)
+	require.Equal(t, "main", captured.BaseBranch)
+	require.True(t, startAgentProcessCalled)
+
+	reloadedSession, err := repo.GetTaskSession(ctx, "session-recover-new-branch")
+	require.NoError(t, err)
+	require.Equal(t, session.ID, reloadedSession.ID)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, reloadedSession.State)
+	reloadedRunning, err := repo.GetExecutorRunningBySessionID(ctx, "session-recover-new-branch")
+	require.NoError(t, err)
+	require.Equal(t, "acp-session-recover-new-branch", reloadedRunning.ResumeToken)
+	sessions, err := repo.ListTaskSessions(ctx, "task-recover-new-branch")
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+}
+
 // TestResumeTaskSession_ArchiveCancelledSessionResumesSuccessfully is the
 // end-to-end regression for "Can't resume this un-archived task": a session
 // cancelled by an archive (Service.ArchiveTask / cascade archive) must resume
@@ -5659,6 +5764,78 @@ func TestResumeTaskSession_AlreadyFailedMissingRemoteRefCreatesNeutralRecoveryMe
 	defer taskRepo.mu.Unlock()
 	if taskRepo.stateWrites["task1"] != 0 {
 		t.Fatalf("already failed resume rewrote task state %d times", taskRepo.stateWrites["task1"])
+	}
+}
+
+func TestResumeTaskSession_PersistsBranchRecoveryWarningWhenPreparationFailsLater(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	seedTaskAndSession(t, repo, "task-partial-recovery", "session-partial-recovery", models.TaskSessionStateFailed)
+	now := time.Now().UTC()
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-partial-recovery", WorkspaceID: "ws1", Name: "backend", DefaultBranch: "main",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "task-repo-partial-recovery", TaskID: "task-partial-recovery", RepositoryID: "repo-partial-recovery",
+		BaseBranch: "main", Position: 0, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTaskRepository: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-partial-recovery", TaskID: "task-partial-recovery",
+		ExecutorType: string(models.ExecutorTypeWorktree), WorkspacePath: t.TempDir(), Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "env-repo-partial-recovery", RepositoryID: "repo-partial-recovery", BranchSlug: "backend",
+			WorktreeID: "worktree-partial-recovery", WorktreeBranch: "feature/lost", Position: 0,
+			CreatedAt: now, UpdatedAt: now,
+		}},
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-partial-recovery")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	session.AgentProfileID = "profile-partial-recovery"
+	session.TaskEnvironmentID = "env-partial-recovery"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("UpdateTaskSession: %v", err)
+	}
+
+	launchErr := errors.New("second repository preparation failed")
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			rows, err := repo.ListTaskEnvironmentRepos(ctx, "env-partial-recovery")
+			if err != nil {
+				return nil, err
+			}
+			rows[0].WorktreeBranch = "feature/replaced"
+			if err := repo.UpdateTaskEnvironmentRepo(ctx, rows[0]); err != nil {
+				return nil, err
+			}
+			return nil, launchErr
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+
+	_, err = svc.ResumeTaskSessionWithOptions(ctx, "task-partial-recovery", "session-partial-recovery", executor.ResumeOptions{
+		AllowBranchReplacement: true,
+	})
+	if !errors.Is(err, launchErr) {
+		t.Fatalf("ResumeTaskSessionWithOptions error = %v, want %v", err, launchErr)
+	}
+	if len(messages.sessionMessages) != 1 {
+		t.Fatalf("warning messages = %d, want one warning after partial preparation", len(messages.sessionMessages))
+	}
+	if got := messages.sessionMessages[0].metadata["kind"]; got != "branch_recreated" {
+		t.Fatalf("warning kind = %v, want branch_recreated", got)
 	}
 }
 

@@ -85,4 +85,23 @@ describe("updateMessages", () => {
     expect(store.getState().messages.bySession["session-2"]).toBe(otherSessionMessages);
     expect(store.getState().messages.bySession["session-2"][0]).toBe(otherSessionMessage);
   });
+
+  it("fans batched updates into the prompt cache", () => {
+    const store = makeStore();
+    store.getState().addMessage(
+      makeMessage("prompt", "before", SESSION, {
+        author_type: "user",
+        updated_at: "2026-08-27T00:00:00Z",
+      }),
+    );
+
+    store.getState().updateMessages([
+      makeMessage("prompt", "after", SESSION, {
+        author_type: "user",
+        updated_at: "2026-08-27T00:00:01Z",
+      }),
+    ]);
+
+    expect(store.getState().messagePrompts.bySession[SESSION][0].content).toBe("after");
+  });
 });

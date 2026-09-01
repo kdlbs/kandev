@@ -62,6 +62,7 @@ surface shared by task and Office consumers.
 
 ### System design
 
+- [Agent Resume and Runtime Recovery](system-design/agent-resume-runtime-recovery.md)
 - [Dynamic Agent Routing System Design Part 1](system-design/dynamic-agent-routing-01.md)
 - [Dynamic Agent Routing System Design Part 2](system-design/dynamic-agent-routing-02.md)
 - [Agent Profile Recent Use](system-design/profile-recent-use.md)

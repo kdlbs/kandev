@@ -11,7 +11,12 @@ import {
   RIGHT_BOTTOM_GROUP,
   setPinnedTarget,
 } from "@/lib/state/layout-manager";
-import { getManualRightWidth, setEnvLayout, setManualRightWidth } from "@/lib/local-storage";
+import {
+  getManualRightWidth,
+  setEnvLayout,
+  setEnvLayoutProfile,
+  setManualRightWidth,
+} from "@/lib/local-storage";
 import { resolveResponsiveRightWidth } from "@/lib/state/layout-manager/right-width";
 import { setSashDragging as setPinnedEnforcementSashDragging } from "@/lib/state/dockview-pinned-enforce";
 import { getDockviewElement, measureDockviewGridWidth } from "@/lib/state/dockview-measure";
@@ -388,6 +393,7 @@ export function setupLayoutPersistence(
       localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(json));
       if (envId) {
         setEnvLayout(envId, json);
+        setEnvLayoutProfile(envId, live.activeLayoutProfile);
       }
       if (isDebug()) {
         debugWidths(

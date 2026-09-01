@@ -371,6 +371,9 @@ type LaunchAgentRequest struct {
 	// WorkspaceReuseRequired selects attach-only preparation of an already-ready
 	// task environment. It must never be inferred from a sibling execution ID.
 	WorkspaceReuseRequired bool
+	// AllowBranchReplacement is granted only by the explicit new-branch recovery
+	// action. It permits lifecycle to replace a confirmed missing worktree branch.
+	AllowBranchReplacement bool
 	TaskTitle              string // Human-readable task title for semantic worktree naming
 	AgentProfileID         string
 	TurnID                 string // Durable Kandev turn for the initial prompt, when present
@@ -489,11 +492,13 @@ type RepoSpec struct {
 	ContributionDestination *models.ContributionDestination
 	ComparisonTarget        *models.ComparisonTarget
 	WorktreeID              string
-	WorktreeBranchPrefix    string
-	WorktreeBranchTemplate  string
-	WorktreeBranchTicket    string
-	PullBeforeWorktree      bool
-	RemoteSyncHandled       bool
+	// AllowBranchReplacement permits explicit branch replacement for this repo.
+	AllowBranchReplacement bool
+	WorktreeBranchPrefix   string
+	WorktreeBranchTemplate string
+	WorktreeBranchTicket   string
+	PullBeforeWorktree     bool
+	RemoteSyncHandled      bool
 	// RefreshRepository is an optional provider-authenticated refresh deferred
 	// until worktree materialization. A valid reusable worktree bypasses it.
 	RefreshRepository          func(context.Context) error
@@ -854,6 +859,7 @@ type Executor struct {
 	repoCloner                      RepoCloner
 	repoUpdater                     RepoUpdater
 	taskRepositoryBaseBranchUpdater TaskRepositoryBaseBranchUpdater
+	prBaseResolver                  PRBaseResolver
 }
 
 // taskEnvLock returns the per-task mutex for env persistence, creating one on
@@ -1012,6 +1018,11 @@ type TaskRepositoryBaseBranchUpdater interface {
 	UpdateTaskRepositoryBaseBranch(ctx context.Context, taskID, taskRepositoryID, baseBranch string) error
 }
 
+// PRBaseResolver returns the current base branch for one provider pull request.
+type PRBaseResolver interface {
+	ResolvePRBaseBranch(ctx context.Context, workspaceID, owner, repo string, number int) (string, error)
+}
+
 // ExecutorConfig holds configuration for the Executor
 type ExecutorConfig struct {
 	ShellPrefs  ShellPreferenceProvider
@@ -1104,6 +1115,11 @@ func (e *Executor) SetRepoCloner(cloner RepoCloner, updater RepoUpdater) {
 // successful worktree fallback self-healing.
 func (e *Executor) SetTaskRepositoryBaseBranchUpdater(updater TaskRepositoryBaseBranchUpdater) {
 	e.taskRepositoryBaseBranchUpdater = updater
+}
+
+// SetPRBaseResolver wires best-effort pull-request base resolution at launch.
+func (e *Executor) SetPRBaseResolver(resolver PRBaseResolver) {
+	e.prBaseResolver = resolver
 }
 
 // SetOnAgentStartFailed sets a callback for agent process start failures.
