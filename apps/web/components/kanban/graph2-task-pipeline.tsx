@@ -380,9 +380,9 @@ export function Graph2TaskPipeline({
         {!isMultiSelectMode && (
           <div
             data-testid={`pipeline-task-actions-sticky-${task.id}`}
-            className="sticky right-0 shrink-0 bg-background"
+            className="sticky right-0 z-20 shrink-0 self-stretch bg-background pl-3 -ml-3"
           >
-            <div className="group-hover:bg-muted/30 transition-colors">
+            <div className="flex h-full items-center group-hover:bg-muted/30 transition-colors">
               <TaskActions
                 task={task}
                 onDeleteTask={onDeleteTask}

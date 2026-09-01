@@ -89,13 +89,18 @@ describe("Graph2TaskPipeline — click routing (the regression that hid defect 1
 });
 
 describe("Graph2TaskPipeline — actions cluster stays reachable off-screen (defect 2)", () => {
-  it("wraps the actions cluster in a sticky, right-pinned, opaque container", () => {
+  it("wraps the actions cluster in a sticky, right-pinned, opaque, full-height, above-pill-controls container", () => {
     renderPipeline();
 
     const wrapper = screen.getByTestId("pipeline-task-actions-sticky-task-1");
     expect(wrapper.className).toContain("sticky");
     expect(wrapper.className).toContain("right-0");
     expect(wrapper.className).toContain("bg-background");
+    // z-20: must paint above the pill's z-10 move chevrons (F1).
+    expect(wrapper.className).toContain("z-20");
+    // self-stretch: must span the row's full content height, not just its own
+    // content height, so no pill edge peeks out above/below the patch (F2).
+    expect(wrapper.className).toContain("self-stretch");
   });
 
   it("does not render the sticky actions wrapper in multi-select mode", () => {
