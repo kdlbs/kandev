@@ -1,6 +1,6 @@
 # ADR-2026-08-31-generic-plugin-host-boundary: Generic plugin Host boundary and capability approvals
 
-**Status:** accepted
+**Status:** proposed
 **Date:** 2026-08-31
 **Area:** backend, frontend, protocol, security, workflow
 
@@ -58,8 +58,10 @@ role, principal, grant, setting, tool, or audit vocabulary.
 
 ### Exact DTOs and result vocabulary
 
-Every **new exact** Host request introduced by this ADR carries `request_id`,
-`workspace_id`, and `capability_revision`. Every new exact writer also carries `idempotency_key`, exact target
+Every **new exact** Host request introduced by this ADR carries `request_id`
+and `workspace_id`. Operations that need an explicit approval-generation
+precondition also carry `capability_revision`; ordinary calls use current
+Host-side authorization. Every new exact writer also carries `idempotency_key`, exact target
 resource versions, and a `PendingTransitionGuard` that is either
 `expect_none` or `{ pending_transition_id, resource_version }`. An
 agent-originated writer additionally carries `ManagedExecutionProvenance` with
@@ -113,6 +115,23 @@ parent state and retry model:
 Transport status codes may classify the same outcome, but clients branch on the
 typed result and tolerate unknown enum values as `UNSUPPORTED`.
 
+### H6 capability context bootstrap
+
+Before the first exact call, a plugin invokes `GetCapabilityContext` on its
+connection-bound Host. The request carries only `request_id`; the Host derives
+the installation identity from the plugin connection. The response reports the
+Host contract version, context revision, approved workspace capability
+revisions, capability IDs, manifest digest, and approval status. It grants no
+authority. Each exact operation still uses current Host-side authorization and
+supplies a capability revision when that operation requires an explicit
+approval-generation precondition.
+
+The Host emits `capability-context-changed` after an approval, reduction,
+revocation, upgrade, or policy change. A stale exact request returns
+`DENIED/STALE_CAPABILITY_REVISION`; the plugin constructs a new request rather
+than retrying the side effect. An empty workspace list is a valid degraded
+state.
+
 ### Legacy v1 compatibility fence
 
 The current `kandev.plugin.v1.Host` surface is a shipped, manifest-declaration
@@ -130,8 +149,9 @@ directive, consume a continuation, or gain a `host.v2.*` capability.
 
 No synthetic legacy revision exists. Existing installed plugins keep only the
 v1 behavior they already had, subject to their existing manifest declaration and
-ordinary lifecycle. This is deliberately not an H6 approval and cannot bypass
-the H6/C1/C2 safeguards.
+ordinary lifecycle. A new installation using a legacy v1 writer additionally
+requires a server-side compatibility grant scoped to that installation; the
+grant cannot authorize any new exact capability or bypass H6/C1/C2 safeguards.
 
 ### Public Host surface inventory
 
@@ -151,7 +171,7 @@ versions, idempotency identity, provenance when present, and the command result.
 | H2d exact change evidence | `Host.ChangeRequests` | `GetChangeRequestEvidenceExact`; `ListChangeRequestEvidenceExact` | Canonical provider, workspace, repository, base, head, immutable head/merge-ref identity, and `Page` for the result or a named nested collection | Exact checks/jobs, review, thread, mergeability, divergence, rate budget, and receipt projections described below | Snapshot/resource version binds provider, repository, base, immutable head, merge ref, provider connection generation, and nested cursors | `host.v2.read:change_requests` | `HostReadReceipt` plus provider read receipt | `ChangeEvidenceQuery`; H2d |
 | H2e terminal provenance | `Host.TerminalResources` | `GetTerminalResourceProvenanceExact` | Exact workspace/task, optional closure depth, and `Page` plus section key for every nested collection | Canonical change disposition, resources, consumers, closure, interactions, cleanup ownership, and prior receipts described below | One exact provenance `resource_version`; every nested page binds to it; no cleanup authority is implied | `host.v2.read:terminal_resources` | `HostReadReceipt`; no mutation event | `TerminalResourceQuery`; H2e |
 | H3a messaging and directives | `Host.Messages`, `Host.TaskDirectives` | `SendMessageExact`; `IssueTaskDirectiveExact`; `ResolveTaskDirectiveExact` | `SendMessageExactRequest`, `IssueTaskDirectiveExactRequest`, `ResolveTaskDirectiveExactRequest` | Common results; directive readback includes pending, resolved, revoked, expired, and generation-fenced states | Capability revision, idempotency, target/session versions, transition guard; agent origin adds managed execution provenance; directive semantics are frozen below | `host.v2.write:messages`, `host.v2.write:task_directives` | `HostAuditReceipt`; `message.dispatched`; `task_directive.issued\|resolved\|revoked` | `MessageCommand`, `TaskDirectiveCommand`; H3a |
-| H3b task writers | `Host.Tasks` | `CreateTaskExact`; `MoveTaskExact`; `UpdateTaskExact`; `SetTaskLabelsExact`; `SetTaskFlagsExact` | Exact create/placement, move, field-mask, label, and flag requests | Common results with authoritative task readback | Capability revision, idempotency, exact task/workflow/step versions as applicable, transition guard, optional managed execution provenance | `host.v2.write:tasks` | `HostAuditReceipt`; existing `task.*` events gain `audit_id` | `TaskCommand`; H3b |
+| H3b task writers | `Host.Tasks` | `CreateTaskExact`; `MoveTaskExact`; `UpdateTaskExact`; `SetTaskLabelsExact` | Exact create/placement, move, field-mask, and label requests | Common results with authoritative task readback | Capability revision when required, idempotency, exact task/workflow/step versions as applicable, transition guard, optional managed execution provenance | `host.v2.write:tasks` | `HostAuditReceipt`; existing `task.*` events gain `audit_id` | `TaskCommand`; H3b |
 | H3c relation writers | `Host.TaskRelations` | `AddTaskRelationExact`; `RemoveTaskRelationExact` | Exact workspace, source, target, relation kind, edge/endpoint versions | Common results with authoritative relation-graph readback | Capability revision, idempotency, endpoint and edge versions, transition guard, optional managed execution provenance | `host.v2.write:task_relations` | `HostAuditReceipt`; `task_relation.added\|removed` | `TaskRelationCommand`; H3c |
 | H3d provider actions | No Host writer is approved in H0 | No RPC or SDK method is reserved | None | `UNSUPPORTED` if a plugin assumes one | None | None | None | Deferred independently as recorded below; H3d |
 | H4 exact execution lifecycle | `Host.TaskRuns`, `Host.Sessions` | `EnsureTaskRunExact`; `RecoverSessionExact` | Exact task/workstep/session, desired execution identity, prompt/action digest, dispatch idempotency, expected versions | Common results plus one admissible `execution_generation_token` and authoritative run/session readback | Capability revision, idempotency, exact task/workstep/session/run versions, transition guard; replacement must fence the prior generation first | `host.v2.write:task_runs`, `host.v2.write:sessions` | `HostAuditReceipt`; `task_run.ensured`; `session.recovered`; generation-fenced lifecycle events | `TaskRunCommand`, `SessionRecoveryCommand`; H4 |
@@ -174,6 +194,18 @@ reset; notification receipts; provider-action receipts; snapshot/resource versio
 and provider read receipt. Aggregate green is never evidence that each causal job
 passed, and an updated head invalidates evidence and action receipts from the old
 head.
+
+### H1 result mapping
+
+H1-specific statuses are readback values, not additional `HostCommandResult`
+states. When an H1 operation cannot proceed, the common result uses the parent
+state and stable reason below.
+
+| H1 status | Parent state | Stable reason | Client behavior |
+| --- | --- | --- | --- |
+| `CONFIGURATION_REQUIRED` | `DENIED` | `HOST_CONFIGURATION_REQUIRED` | Park until the required Host configuration is present. |
+| `BUSY` | `CONFLICT` | `CONVERSATION_BUSY` | Read current status and construct a new operation after it is available. |
+| `FENCED` | `CONFLICT` | `EXECUTION_GENERATION_FENCED` | Stop the old generation and read the current generation before retry. |
 
 ### H2e terminal resource provenance
 

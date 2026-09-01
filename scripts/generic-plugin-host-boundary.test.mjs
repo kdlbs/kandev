@@ -79,6 +79,11 @@ test("freezes every H0 Host unit and correction", async () => {
 
   assert.match(adr, /Decision: \*\*`H6_REQUIRED`\*\*\./);
   assert.match(adr, /H3d is explicitly deferred\./);
+  assert.match(adr, /### H6 capability context bootstrap/);
+  assert.match(adr, /`GetCapabilityContext`/);
+  assert.match(adr, /capability-context-changed/);
+  assert.match(adr, /### H1 result mapping/);
+  assert.doesNotMatch(adr, /SetTaskFlagsExact|flag requests/);
 
   for (const contract of [
     "`PluginCapabilityApproval`",
@@ -205,7 +210,7 @@ test("fences legacy v1 calls from H6 exact authority", async () => {
     "api_read:<resource>",
     "api_write:<resource>",
     "No synthetic legacy revision exists.",
-    "cannot bypass\nthe H6/C1/C2 safeguards",
+    "cannot authorize any new exact capability or bypass H6/C1/C2 safeguards",
   ]) {
     assert.ok(legacy.includes(required), `missing legacy fence: ${required}`);
   }
