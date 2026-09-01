@@ -226,6 +226,15 @@ test.describe("Pipeline view", () => {
       shiftedPillBox!.y + shiftedPillBox!.height / 2,
     );
 
+    // Confirm the hover actually rendered the move chevron before clicking past
+    // it - otherwise this scenario would pass vacuously if the hover never
+    // registered, including under the exact regression (missing z-index) it
+    // exists to catch.
+    const nextStepTitle = steps[currentStepIndex + 1].title;
+    await expect(
+      kanban.pipelineTask(task.id).getByRole("button", { name: `Move to ${nextStepTitle}` }),
+    ).toBeVisible();
+
     const shiftedTriggerBox = await trigger.boundingBox();
     expect(shiftedTriggerBox).not.toBeNull();
     await testPage.mouse.click(
@@ -233,5 +242,60 @@ test.describe("Pipeline view", () => {
       shiftedTriggerBox!.y + shiftedTriggerBox!.height / 2,
     );
     await expect(testPage.getByRole("menuitem", { name: "Delete task" })).toBeVisible();
+  });
+
+  test("the current pill's right move chevron stays clickable when it is the last visible pill", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Auto-hide-empty-steps is the common configuration that makes a task's
+    // own pill the LAST VISIBLE pill while it still has a next move target:
+    // the trailing step has no tasks, so it is hidden from `steps` but
+    // remains in `moveTargetSteps`, which is exactly the hidden-destination-
+    // disclosure affordance (nextStepHidden). Dedicated workflow, not
+    // seedData.workflowId, so the auto-hide setting doesn't leak into other
+    // specs sharing this worker's seed data.
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Pipeline Last Visible Pill Workflow",
+    );
+    const currentStep = await apiClient.createWorkflowStep(workflow.id, "Current", 0);
+    await apiClient.createWorkflowStep(workflow.id, "Hidden Next", 1);
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      workflow_ids_with_auto_hide_empty_steps: [workflow.id],
+    });
+
+    const task = await apiClient.createTask(seedData.workspaceId, "Pipeline Last Pill Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: currentStep.id,
+    });
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.switchToPipelineView();
+
+    const row = kanban.pipelineTask(task.id);
+    const currentPill = row.getByRole("button", { name: "Current" });
+    await expect(currentPill).toBeVisible();
+    // Hidden Next never renders: it has no tasks and auto-hide is on.
+    await expect(row.getByRole("button", { name: "Hidden Next" })).toHaveCount(0);
+
+    await currentPill.hover();
+    const moveChevron = row.getByRole("button", { name: "Move to Hidden Next" });
+    await expect(moveChevron).toBeVisible();
+
+    // A plain click exercises Playwright's actionability check, which fails
+    // if another element (the sticky actions wrapper) intercepts the pointer
+    // event at the chevron's location - the exact F6 regression.
+    await moveChevron.click();
+
+    // The move actually landed: the task's current pill is now the
+    // previously-hidden step, which is no longer empty and so no longer
+    // auto-hidden.
+    await expect(row.getByRole("button", { name: "Hidden Next" })).toBeVisible({
+      timeout: 10_000,
+    });
   });
 });
