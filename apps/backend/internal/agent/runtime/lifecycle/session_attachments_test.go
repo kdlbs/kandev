@@ -24,12 +24,12 @@ func TestDispatchInitialPromptReportsDeliveryFailure(t *testing.T) {
 	}
 	sm := NewSessionManager(logger.Default(), nil)
 	wantErr := "has no agentctl client"
-	failures := make(chan error, 1)
-	sm.SetInitialPromptFailureHandler(func(executionID string, err error) {
-		if executionID != "execution-initial-prompt" {
-			t.Errorf("execution ID = %q", executionID)
+	failures := make(chan InitialPromptFailure, 1)
+	sm.SetInitialPromptFailureHandler(func(failure InitialPromptFailure) {
+		if failure.ExecutionID != "execution-initial-prompt" {
+			t.Errorf("execution ID = %q", failure.ExecutionID)
 		}
-		failures <- err
+		failures <- failure
 	})
 	execution := &AgentExecution{
 		ID:        "execution-initial-prompt",
@@ -47,9 +47,9 @@ func TestDispatchInitialPromptReportsDeliveryFailure(t *testing.T) {
 	)
 
 	select {
-	case err := <-failures:
-		if err == nil || !strings.Contains(err.Error(), wantErr) {
-			t.Fatalf("initial prompt error = %v, want %q", err, wantErr)
+	case failure := <-failures:
+		if failure.Err == nil || !strings.Contains(failure.Err.Error(), wantErr) {
+			t.Fatalf("initial prompt error = %v, want %q", failure.Err, wantErr)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for initial prompt failure callback")

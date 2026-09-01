@@ -57,9 +57,8 @@ make -C apps/backend test
 
 - `apps/backend/internal/agent/runtime/lifecycle/session.go`
 - `apps/backend/internal/agent/runtime/lifecycle/manager.go`
+- `apps/backend/internal/agent/runtime/lifecycle/activity_test.go`
 - `apps/backend/internal/agent/runtime/lifecycle/session_attachments_test.go`
-- `apps/backend/internal/agent/runtime/lifecycle/manager_lifecycle_test.go`
-- `apps/backend/internal/orchestrator/event_handlers_test.go`
 
 ## Dependencies
 

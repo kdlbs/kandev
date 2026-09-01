@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -195,6 +196,26 @@ func TestLaunchSession_RejectsAttachmentClaimBeforeStart(t *testing.T) {
 	}
 	if len(claimer.attachments) != 1 || claimer.attachments[0].AttachmentID != attachment.AttachmentID {
 		t.Fatalf("claimed attachments = %+v", claimer.attachments)
+	}
+}
+
+func TestLaunchSession_RejectsMismatchedTaskSessionBeforeAttachmentClaim(t *testing.T) {
+	claimer := &rejectingLaunchAttachmentClaimer{wantErr: errors.New("claimer must not run")}
+	service := &Service{repo: &pairStubRepo{sessionTaskID: "task-other"}}
+	service.SetLaunchAttachmentClaimer(claimer)
+
+	_, err := service.LaunchSession(context.Background(), &LaunchSessionRequest{
+		TaskID:      "task-1",
+		SessionID:   "session-1",
+		Intent:      IntentStartCreated,
+		Prompt:      "read the attachment",
+		Attachments: []v1.MessageAttachment{{AttachmentID: "attachment-1"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not belong to task") {
+		t.Fatalf("LaunchSession error = %v, want task/session mismatch", err)
+	}
+	if claimer.taskID != "" || len(claimer.attachments) != 0 {
+		t.Fatalf("attachment claimer ran for mismatched pair: %+v", claimer)
 	}
 }
 

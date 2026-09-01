@@ -156,10 +156,7 @@ func IsBenignLaunchTeardownErr(err error) bool {
 func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
 	// Every intent funnels through here. SessionID is empty when creating, so
 	// that case is carried by the task check alone.
-	if err := s.authorizeTask(ctx, req.TaskID); err != nil {
-		return nil, err
-	}
-	if err := s.authorizeSession(ctx, req.SessionID); err != nil {
+	if err := s.authorizeTaskSessionPair(ctx, req.TaskID, req.SessionID); err != nil {
 		return nil, err
 	}
 	if err := s.claimLaunchAttachments(ctx, req); err != nil {

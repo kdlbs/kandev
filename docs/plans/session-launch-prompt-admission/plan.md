@@ -100,9 +100,12 @@ persisted user-message attachment descriptor after a reload.
 `apps/web/e2e/tests/session/new-session-dialog.spec.ts` will contain
 `starts a second session with a staged attachment`.
 
-The test covers `AC-TASKS-PROMPT-ATTACHMENTS-001.2` and
-`AC-TASKS-PROMPT-ATTACHMENTS-001.5`. It must fail before the fix because the
-second session receives no agent output and does not settle.
+The test covers `AC-TASKS-PROMPT-ATTACHMENTS-001.2`. It must fail before the fix
+because the second session receives no agent output and does not settle.
+
+`TestDispatchInitialPromptReportsDeliveryFailure` and
+`TestInitialPromptFailureMarksExecutionFailedAndReleasesActivity` provide the
+failure-path evidence for `AC-TASKS-PROMPT-ATTACHMENTS-001.5`.
 
 ## Work orders
 

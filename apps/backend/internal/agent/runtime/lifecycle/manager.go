@@ -345,11 +345,25 @@ func NewManager(
 	return mgr
 }
 
-func (m *Manager) handleInitialPromptFailure(executionID string, _ error) {
-	if err := m.MarkCompleted(executionID, 1, "initial prompt delivery failed"); err != nil {
-		m.logger.Warn("failed to settle initial prompt delivery failure",
-			zap.String("execution_id", executionID),
-			zap.Error(err))
+func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
+	execution, exists := m.executionStore.Get(failure.ExecutionID)
+	if !exists {
+		m.logger.Debug("ignoring stale initial prompt delivery failure",
+			zap.String("execution_id", failure.ExecutionID),
+			zap.Uint64("prompt_generation", failure.PromptGeneration))
+		return
+	}
+	settled := m.handleErrorEvent(execution, agentctl.AgentEvent{
+		Type:             "error",
+		Error:            "initial prompt delivery failed",
+		SessionID:        failure.SessionID,
+		PromptGeneration: failure.PromptGeneration,
+		TurnID:           failure.TurnID,
+	})
+	if !settled {
+		m.logger.Debug("ignoring superseded initial prompt delivery failure",
+			zap.String("execution_id", failure.ExecutionID),
+			zap.Uint64("prompt_generation", failure.PromptGeneration))
 	}
 }
 
