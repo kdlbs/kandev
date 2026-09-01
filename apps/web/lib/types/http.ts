@@ -113,7 +113,8 @@ export type StepDefinition = {
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   agent_profile_id?: AgentProfileId;
-  profile_session_policy?: WorkflowProfileSessionPolicy;
+  profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+  profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
   execution_profile_id?: AgentProfileId;
   route_generation?: number;
   route_state?: string;
@@ -139,7 +140,8 @@ export type WorkflowStep = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
-  profile_session_policy?: WorkflowProfileSessionPolicy;
+  profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+  profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
   wip_limit?: number;
   pull_from_step_id?: string | null;
   /**
@@ -210,19 +212,19 @@ export type TaskPendingActionRevision = {
   sequence: number;
 };
 
-export type WorkflowProfileSessionPolicy = "complete" | "park_reuse" | "park_new";
+export type WorkflowProfileSessionStartPolicy = "reuse" | "new";
+export type WorkflowProfileSessionEndPolicy = "complete" | "park";
 
-export function normalizeWorkflowProfileSessionPolicy(
+export function normalizeWorkflowProfileSessionStartPolicy(
   value: unknown,
-): WorkflowProfileSessionPolicy {
-  switch (typeof value === "string" ? value.trim() : undefined) {
-    case "park_reuse":
-      return "park_reuse";
-    case "park_new":
-      return "park_new";
-    default:
-      return "complete";
-  }
+): WorkflowProfileSessionStartPolicy {
+  return typeof value === "string" && value.trim() === "new" ? "new" : "reuse";
+}
+
+export function normalizeWorkflowProfileSessionEndPolicy(
+  value: unknown,
+): WorkflowProfileSessionEndPolicy {
+  return typeof value === "string" && value.trim() === "park" ? "park" : "complete";
 }
 
 /**
@@ -478,6 +480,8 @@ export type WorkflowStepDTO = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: AgentProfileId;
+  profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+  profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
   stage_type?: "work" | "review" | "approval" | "custom";
   wip_limit?: number;
   pull_from_step_id?: string | null;
@@ -899,7 +903,8 @@ export type StepPortable = {
   allow_manual_move: boolean;
   auto_archive_after_hours?: number;
   agent_profile?: AgentProfilePortable;
-  profile_session_policy?: WorkflowProfileSessionPolicy;
+  profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+  profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
   auto_advance_requires_signal: boolean;
   cancel_triggers_turn_complete: boolean;
   wip_limit?: number;

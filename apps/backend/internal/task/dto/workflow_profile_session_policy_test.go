@@ -7,10 +7,11 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
-func TestFromWorkflowStepIncludesProfileSessionPolicy(t *testing.T) {
+func TestFromWorkflowStepIncludesProfileSessionPolicies(t *testing.T) {
 	payload, err := json.Marshal(FromWorkflowStep(&wfmodels.WorkflowStep{
-		ID:                   "step-1",
-		ProfileSessionPolicy: "park_reuse",
+		ID:                        "step-1",
+		ProfileSessionStartPolicy: "new",
+		ProfileSessionEndPolicy:   "park",
 	}))
 	if err != nil {
 		t.Fatalf("marshal workflow DTO: %v", err)
@@ -20,14 +21,17 @@ func TestFromWorkflowStepIncludesProfileSessionPolicy(t *testing.T) {
 	if err := json.Unmarshal(payload, &fields); err != nil {
 		t.Fatalf("decode workflow DTO: %v", err)
 	}
-	if got := fields["profile_session_policy"]; got != "park_reuse" {
-		t.Fatalf("profile_session_policy = %v, want park_reuse", got)
+	if got := fields["profile_session_start_policy"]; got != "new" {
+		t.Fatalf("profile_session_start_policy = %v, want new", got)
+	}
+	if got := fields["profile_session_end_policy"]; got != "park" {
+		t.Fatalf("profile_session_end_policy = %v, want park", got)
 	}
 }
 
-func TestFromWorkflowStepDefaultsMissingProfileSessionPolicy(t *testing.T) {
+func TestFromWorkflowStepDefaultsMissingProfileSessionPolicies(t *testing.T) {
 	step := FromWorkflowStep(&wfmodels.WorkflowStep{ID: "step-1"})
-	if step.ProfileSessionPolicy != "complete" {
-		t.Fatalf("profile_session_policy = %q, want complete", step.ProfileSessionPolicy)
+	if step.ProfileSessionStartPolicy != "reuse" || step.ProfileSessionEndPolicy != "complete" {
+		t.Fatalf("profile session policies = %q/%q, want reuse/complete", step.ProfileSessionStartPolicy, step.ProfileSessionEndPolicy)
 	}
 }

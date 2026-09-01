@@ -10,19 +10,21 @@ import (
 	"github.com/kandev/kandev/internal/workflow/models"
 )
 
-func TestStepFromPortableNormalizesProfileSessionPolicy(t *testing.T) {
+func TestStepFromPortableNormalizesProfileSessionPolicies(t *testing.T) {
 	svc, _ := setupTestService(t)
 
 	step := svc.stepFromPortableWithMatcher("workflow-1", models.StepPortable{
-		Name:                 "Review",
-		Position:             0,
-		ProfileSessionPolicy: taskmodels.WorkflowProfileSessionPolicy(" unsupported "),
+		Name:                      "Review",
+		Position:                  0,
+		ProfileSessionStartPolicy: taskmodels.WorkflowProfileSessionStartPolicy(" unsupported "),
+		ProfileSessionEndPolicy:   taskmodels.WorkflowProfileSessionEndPolicy(" unsupported "),
 	}, map[int]string{0: "step-1"}, nil, "")
 
-	require.Equal(t, taskmodels.WorkflowProfileSessionPolicyComplete, step.ProfileSessionPolicy)
+	require.Equal(t, taskmodels.WorkflowProfileSessionStartPolicyReuse, step.ProfileSessionStartPolicy)
+	require.Equal(t, taskmodels.WorkflowProfileSessionEndPolicyComplete, step.ProfileSessionEndPolicy)
 }
 
-func TestImportWorkflowCarriesProfileSessionPolicyOnStep(t *testing.T) {
+func TestImportWorkflowCarriesProfileSessionPoliciesOnStep(t *testing.T) {
 	svc, _, provider := setupTestServiceWithProvider(t)
 	export := &models.WorkflowExport{
 		Version: models.ExportVersion,
@@ -30,13 +32,15 @@ func TestImportWorkflowCarriesProfileSessionPolicyOnStep(t *testing.T) {
 		Workflows: []models.WorkflowPortable{{
 			Name: "Imported policy",
 			Steps: []models.StepPortable{{
-				Name:                 "Todo",
-				Position:             0,
-				ProfileSessionPolicy: taskmodels.WorkflowProfileSessionPolicyParkReuse,
+				Name:                      "Todo",
+				Position:                  0,
+				ProfileSessionStartPolicy: taskmodels.WorkflowProfileSessionStartPolicyReuse,
+				ProfileSessionEndPolicy:   taskmodels.WorkflowProfileSessionEndPolicyPark,
 			}, {
-				Name:                 "Review",
-				Position:             1,
-				ProfileSessionPolicy: taskmodels.WorkflowProfileSessionPolicyParkNew,
+				Name:                      "Review",
+				Position:                  1,
+				ProfileSessionStartPolicy: taskmodels.WorkflowProfileSessionStartPolicyNew,
+				ProfileSessionEndPolicy:   taskmodels.WorkflowProfileSessionEndPolicyComplete,
 			}},
 		}},
 	}
@@ -48,15 +52,18 @@ func TestImportWorkflowCarriesProfileSessionPolicyOnStep(t *testing.T) {
 	steps, err := svc.repo.ListStepsByWorkflow(context.Background(), workflow.ID)
 	require.NoError(t, err)
 	require.Len(t, steps, 2)
-	require.Equal(t, taskmodels.WorkflowProfileSessionPolicyParkReuse, steps[0].ProfileSessionPolicy)
-	require.Equal(t, taskmodels.WorkflowProfileSessionPolicyParkNew, steps[1].ProfileSessionPolicy)
+	require.Equal(t, taskmodels.WorkflowProfileSessionStartPolicyReuse, steps[0].ProfileSessionStartPolicy)
+	require.Equal(t, taskmodels.WorkflowProfileSessionEndPolicyPark, steps[0].ProfileSessionEndPolicy)
+	require.Equal(t, taskmodels.WorkflowProfileSessionStartPolicyNew, steps[1].ProfileSessionStartPolicy)
+	require.Equal(t, taskmodels.WorkflowProfileSessionEndPolicyComplete, steps[1].ProfileSessionEndPolicy)
 }
 
-func TestApplySyncedWorkflowsNormalizesStepProfileSessionPolicy(t *testing.T) {
+func TestApplySyncedWorkflowsNormalizesStepProfileSessionPolicies(t *testing.T) {
 	svc, provider, _ := setupSyncService(t)
 	wf := addSyncedWorkflow(provider, "workflow-sync-policy", "ws-1", "Policy", "flows/policy.yml")
 	portable := portableWorkflow("Policy", "Todo")
-	portable.Steps[0].ProfileSessionPolicy = taskmodels.WorkflowProfileSessionPolicyParkNew
+	portable.Steps[0].ProfileSessionStartPolicy = taskmodels.WorkflowProfileSessionStartPolicyNew
+	portable.Steps[0].ProfileSessionEndPolicy = taskmodels.WorkflowProfileSessionEndPolicyPark
 
 	result, err := svc.ApplySyncedWorkflows(context.Background(), "ws-1", []SyncFileExport{{
 		Path:   "flows/policy.yml",
@@ -67,9 +74,11 @@ func TestApplySyncedWorkflowsNormalizesStepProfileSessionPolicy(t *testing.T) {
 	steps, err := svc.repo.ListStepsByWorkflow(context.Background(), wf.ID)
 	require.NoError(t, err)
 	require.Len(t, steps, 1)
-	require.Equal(t, taskmodels.WorkflowProfileSessionPolicyParkNew, steps[0].ProfileSessionPolicy)
+	require.Equal(t, taskmodels.WorkflowProfileSessionStartPolicyNew, steps[0].ProfileSessionStartPolicy)
+	require.Equal(t, taskmodels.WorkflowProfileSessionEndPolicyPark, steps[0].ProfileSessionEndPolicy)
 
-	portable.Steps[0].ProfileSessionPolicy = taskmodels.WorkflowProfileSessionPolicy("unsupported")
+	portable.Steps[0].ProfileSessionStartPolicy = taskmodels.WorkflowProfileSessionStartPolicy("unsupported")
+	portable.Steps[0].ProfileSessionEndPolicy = taskmodels.WorkflowProfileSessionEndPolicy("unsupported")
 	_, err = svc.ApplySyncedWorkflows(context.Background(), "ws-1", []SyncFileExport{{
 		Path:   "flows/policy.yml",
 		Export: exportOf(portable),
@@ -77,5 +86,6 @@ func TestApplySyncedWorkflowsNormalizesStepProfileSessionPolicy(t *testing.T) {
 	require.NoError(t, err)
 	steps, err = svc.repo.ListStepsByWorkflow(context.Background(), wf.ID)
 	require.NoError(t, err)
-	require.Equal(t, taskmodels.WorkflowProfileSessionPolicyComplete, steps[0].ProfileSessionPolicy)
+	require.Equal(t, taskmodels.WorkflowProfileSessionStartPolicyReuse, steps[0].ProfileSessionStartPolicy)
+	require.Equal(t, taskmodels.WorkflowProfileSessionEndPolicyComplete, steps[0].ProfileSessionEndPolicy)
 }

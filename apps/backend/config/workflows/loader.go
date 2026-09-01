@@ -24,21 +24,22 @@ type templateYAML struct {
 
 // stepDefYAML is the YAML-friendly representation of a step definition.
 type stepDefYAML struct {
-	ID                         string                                  `yaml:"id"`
-	Name                       string                                  `yaml:"name"`
-	Position                   int                                     `yaml:"position"`
-	Color                      string                                  `yaml:"color"`
-	Prompt                     string                                  `yaml:"prompt,omitempty"`
-	StageType                  string                                  `yaml:"stage_type,omitempty"`
-	IsStartStep                bool                                    `yaml:"is_start_step,omitempty"`
-	ShowInCommandPanel         bool                                    `yaml:"show_in_command_panel,omitempty"`
-	AllowManualMove            bool                                    `yaml:"allow_manual_move,omitempty"`
-	AutoArchiveAfterHours      int                                     `yaml:"auto_archive_after_hours,omitempty"`
-	AgentProfileID             string                                  `yaml:"agent_profile_id,omitempty"`
-	ProfileSessionPolicy       taskmodels.WorkflowProfileSessionPolicy `yaml:"profile_session_policy,omitempty"`
-	AutoAdvanceRequiresSignal  bool                                    `yaml:"auto_advance_requires_signal,omitempty"`
-	CancelTriggersTurnComplete bool                                    `yaml:"cancel_triggers_turn_complete,omitempty"`
-	Events                     stepEventsYAML                          `yaml:"events,omitempty"`
+	ID                         string                                       `yaml:"id"`
+	Name                       string                                       `yaml:"name"`
+	Position                   int                                          `yaml:"position"`
+	Color                      string                                       `yaml:"color"`
+	Prompt                     string                                       `yaml:"prompt,omitempty"`
+	StageType                  string                                       `yaml:"stage_type,omitempty"`
+	IsStartStep                bool                                         `yaml:"is_start_step,omitempty"`
+	ShowInCommandPanel         bool                                         `yaml:"show_in_command_panel,omitempty"`
+	AllowManualMove            bool                                         `yaml:"allow_manual_move,omitempty"`
+	AutoArchiveAfterHours      int                                          `yaml:"auto_archive_after_hours,omitempty"`
+	AgentProfileID             string                                       `yaml:"agent_profile_id,omitempty"`
+	ProfileSessionStartPolicy  taskmodels.WorkflowProfileSessionStartPolicy `yaml:"profile_session_start_policy,omitempty"`
+	ProfileSessionEndPolicy    taskmodels.WorkflowProfileSessionEndPolicy   `yaml:"profile_session_end_policy,omitempty"`
+	AutoAdvanceRequiresSignal  bool                                         `yaml:"auto_advance_requires_signal,omitempty"`
+	CancelTriggersTurnComplete bool                                         `yaml:"cancel_triggers_turn_complete,omitempty"`
+	Events                     stepEventsYAML                               `yaml:"events,omitempty"`
 }
 
 // stepEventsYAML is the YAML-friendly representation of step events.
@@ -178,7 +179,8 @@ func convertStep(s stepDefYAML) (models.StepDefinition, error) {
 		ShowInCommandPanel:         s.ShowInCommandPanel,
 		AutoArchiveAfterHours:      s.AutoArchiveAfterHours,
 		AgentProfileID:             s.AgentProfileID,
-		ProfileSessionPolicy:       taskmodels.NormalizeWorkflowProfileSessionPolicy(string(s.ProfileSessionPolicy)),
+		ProfileSessionStartPolicy:  taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(s.ProfileSessionStartPolicy)),
+		ProfileSessionEndPolicy:    taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(s.ProfileSessionEndPolicy)),
 		AutoAdvanceRequiresSignal:  s.AutoAdvanceRequiresSignal,
 		CancelTriggersTurnComplete: s.CancelTriggersTurnComplete,
 		StageType:                  stage,

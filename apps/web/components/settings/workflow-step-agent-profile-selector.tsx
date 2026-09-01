@@ -20,37 +20,67 @@ import {
   DrawerTitle,
 } from "@kandev/ui/drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
-import type { WorkflowProfileSessionPolicy, WorkflowStep } from "@/lib/types/http";
-import { normalizeWorkflowProfileSessionPolicy } from "@/lib/types/http";
+import { AgentLogo } from "@/components/agent-logo";
+import type {
+  WorkflowProfileSessionEndPolicy,
+  WorkflowProfileSessionStartPolicy,
+  WorkflowStep,
+} from "@/lib/types/http";
+import {
+  normalizeWorkflowProfileSessionEndPolicy,
+  normalizeWorkflowProfileSessionStartPolicy,
+} from "@/lib/types/http";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useHealthyAgentProfiles } from "@/hooks/domains/settings/use-healthy-agent-profiles";
 import { settingsControlClassName } from "./settings-control";
 import { HelpTip, hasOnEnterAction } from "./workflow-pipeline-editor-helpers";
 import { isWorkflowStepValueDirty } from "./workflow-dirty-state";
 
-const POLICY_OPTIONS: Array<{
-  value: WorkflowProfileSessionPolicy;
+type StartOption = {
+  value: WorkflowProfileSessionStartPolicy;
   labelKey: string;
   descriptionKey: string;
-}> = [
+  shortLabelKey: string;
+};
+
+type EndOption = {
+  value: WorkflowProfileSessionEndPolicy;
+  labelKey: string;
+  descriptionKey: string;
+  shortLabelKey: string;
+};
+
+const START_OPTIONS: StartOption[] = [
   {
-    value: "complete",
-    labelKey: "workflows:profileSessionPolicyComplete",
-    descriptionKey: "workflows:profileSessionPolicyCompleteDescription",
+    value: "reuse",
+    labelKey: "workflows:profileSessionStartReuse",
+    descriptionKey: "workflows:profileSessionStartReuseDescription",
+    shortLabelKey: "workflows:profileSessionStartReuseShort",
   },
   {
-    value: "park_reuse",
-    labelKey: "workflows:profileSessionPolicyParkReuse",
-    descriptionKey: "workflows:profileSessionPolicyParkReuseDescription",
-  },
-  {
-    value: "park_new",
-    labelKey: "workflows:profileSessionPolicyParkNew",
-    descriptionKey: "workflows:profileSessionPolicyParkNewDescription",
+    value: "new",
+    labelKey: "workflows:profileSessionStartNew",
+    descriptionKey: "workflows:profileSessionStartNewDescription",
+    shortLabelKey: "workflows:profileSessionStartNewShort",
   },
 ];
 
-const PROFILE_SESSION_POLICY_KEY = "workflows:profileSessionPolicy";
+const END_OPTIONS: EndOption[] = [
+  {
+    value: "complete",
+    labelKey: "workflows:profileSessionEndComplete",
+    descriptionKey: "workflows:profileSessionEndCompleteDescription",
+    shortLabelKey: "workflows:profileSessionEndCompleteShort",
+  },
+  {
+    value: "park",
+    labelKey: "workflows:profileSessionEndPark",
+    descriptionKey: "workflows:profileSessionEndParkDescription",
+    shortLabelKey: "workflows:profileSessionEndParkShort",
+  },
+];
+
+const PROFILE_SESSION_LIFECYCLE_KEY = "workflows:profileSessionLifecycle";
 
 type SelectorView = "profiles" | "session";
 
@@ -61,9 +91,18 @@ type WorkflowStepAgentProfileSelectorProps = {
   readOnly: boolean;
 };
 
-function policyOption(value: unknown) {
-  const normalized = normalizeWorkflowProfileSessionPolicy(value);
-  return POLICY_OPTIONS.find((option) => option.value === normalized) ?? POLICY_OPTIONS[0];
+function startOption(value: unknown) {
+  const normalized = normalizeWorkflowProfileSessionStartPolicy(value);
+  return START_OPTIONS.find((option) => option.value === normalized) ?? START_OPTIONS[0];
+}
+
+function endOption(value: unknown) {
+  const normalized = normalizeWorkflowProfileSessionEndPolicy(value);
+  return END_OPTIONS.find((option) => option.value === normalized) ?? END_OPTIONS[0];
+}
+
+function lifecycleSummary(step: WorkflowStep, translate: (key: string) => string): string {
+  return `${translate(startOption(step.profile_session_start_policy).shortLabelKey)} · ${translate(endOption(step.profile_session_end_policy).shortLabelKey)}`;
 }
 
 function ProfileOptionList({
@@ -86,7 +125,7 @@ function ProfileOptionList({
         aria-label={t("agents:searchDynamicCandidates")}
       />
       <CommandList
-        className="max-h-[min(42vh,18rem)] overflow-y-auto overscroll-contain"
+        className="max-h-none !overflow-visible overscroll-contain"
         onWheel={(event) => event.stopPropagation()}
       >
         <CommandEmpty>{t("agents:profileNotFound")}</CommandEmpty>
@@ -98,8 +137,9 @@ function ProfileOptionList({
             data-checked={!step.agent_profile_id}
             data-testid={`${step.id}-profile-option-none`}
             onSelect={() => onSelect("")}
-            className="min-h-11 cursor-pointer sm:min-h-9"
+            className="min-h-11 cursor-pointer"
           >
+            <IconRobot className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             <span className="truncate">{t("workflows:noProfileOverride")}</span>
           </CommandItem>
           {profiles.map((profile) => (
@@ -111,8 +151,9 @@ function ProfileOptionList({
               data-checked={step.agent_profile_id === profile.id}
               data-testid={`${step.id}-profile-option-${profile.id}`}
               onSelect={() => onSelect(profile.id)}
-              className="min-h-11 cursor-pointer sm:min-h-9"
+              className="min-h-11 cursor-pointer"
             >
+              <AgentLogo agentName={profile.agent_name} className="shrink-0" />
               <span className="truncate">{profile.label}</span>
             </CommandItem>
           ))}
@@ -122,37 +163,75 @@ function ProfileOptionList({
   );
 }
 
-function SessionPolicyList({
+function LifecycleOptionList({
   step,
-  onSelect,
+  readOnly,
+  onStartSelect,
+  onEndSelect,
 }: {
   step: WorkflowStep;
-  onSelect: (policy: WorkflowProfileSessionPolicy) => void;
+  readOnly: boolean;
+  onStartSelect: (policy: WorkflowProfileSessionStartPolicy) => void;
+  onEndSelect: (policy: WorkflowProfileSessionEndPolicy) => void;
 }) {
   const { t } = useTranslation();
-  const selected = normalizeWorkflowProfileSessionPolicy(step.profile_session_policy);
+  const selectedStart = normalizeWorkflowProfileSessionStartPolicy(
+    step.profile_session_start_policy,
+  );
+  const selectedEnd = normalizeWorkflowProfileSessionEndPolicy(step.profile_session_end_policy);
+
   return (
-    <div className="space-y-2 p-2">
-      {POLICY_OPTIONS.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          className="flex min-h-11 w-full cursor-pointer flex-col items-start justify-center rounded-md border border-transparent px-3 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[selected=true]:border-primary/40 data-[selected=true]:bg-primary/5"
-          data-selected={selected === option.value}
-          data-testid={`${step.id}-profile-session-policy-${option.value}`}
-          onClick={() => onSelect(option.value)}
-        >
-          <span className="font-medium">{t(option.labelKey)}</span>
-          <span className="text-xs leading-relaxed text-muted-foreground">
-            {t(option.descriptionKey)}
-          </span>
-        </button>
-      ))}
+    <div className="space-y-4 p-3">
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        {t("workflows:profileSessionLifecycleIntro")}
+      </p>
+      <fieldset className="space-y-1">
+        <legend className="px-1 pb-1 text-xs font-medium text-muted-foreground">
+          {t("workflows:profileSessionStartHeading")}
+        </legend>
+        {START_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            disabled={readOnly}
+            className="flex min-h-11 w-full cursor-pointer flex-col items-start justify-center rounded-md border border-transparent px-3 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[selected=true]:border-primary/40 data-[selected=true]:bg-primary/5"
+            data-selected={selectedStart === option.value}
+            data-testid={`${step.id}-profile-session-start-${option.value}`}
+            onClick={() => onStartSelect(option.value)}
+          >
+            <span className="font-medium">{t(option.labelKey)}</span>
+            <span className="text-xs leading-relaxed text-muted-foreground">
+              {t(option.descriptionKey)}
+            </span>
+          </button>
+        ))}
+      </fieldset>
+      <fieldset className="space-y-1">
+        <legend className="px-1 pb-1 text-xs font-medium text-muted-foreground">
+          {t("workflows:profileSessionEndHeading")}
+        </legend>
+        {END_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            disabled={readOnly}
+            className="flex min-h-11 w-full cursor-pointer flex-col items-start justify-center rounded-md border border-transparent px-3 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[selected=true]:border-primary/40 data-[selected=true]:bg-primary/5"
+            data-selected={selectedEnd === option.value}
+            data-testid={`${step.id}-profile-session-end-${option.value}`}
+            onClick={() => onEndSelect(option.value)}
+          >
+            <span className="font-medium">{t(option.labelKey)}</span>
+            <span className="text-xs leading-relaxed text-muted-foreground">
+              {t(option.descriptionKey)}
+            </span>
+          </button>
+        ))}
+      </fieldset>
     </div>
   );
 }
 
-function SessionPolicyNavigation({
+function LifecycleNavigation({
   step,
   readOnly,
   onOpen,
@@ -162,20 +241,19 @@ function SessionPolicyNavigation({
   onOpen: () => void;
 }) {
   const { t } = useTranslation();
-  const selected = policyOption(step.profile_session_policy);
   return (
     <button
       type="button"
       className="flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-md border border-border/70 px-3 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
       disabled={readOnly}
-      data-testid={`${step.id}-profile-session-policy-select`}
+      data-testid={`${step.id}-profile-session-lifecycle-select`}
       onClick={onOpen}
     >
       <span className="min-w-0 flex-1">
         <span className="block text-xs font-medium text-muted-foreground">
-          {t(PROFILE_SESSION_POLICY_KEY)}
+          {t(PROFILE_SESSION_LIFECYCLE_KEY)}
         </span>
-        <span className="block truncate font-medium">{t(selected.labelKey)}</span>
+        <span className="block truncate font-medium">{lifecycleSummary(step, t)}</span>
       </span>
       <IconChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
     </button>
@@ -202,22 +280,16 @@ function SelectorSurface({
   mobile: boolean;
 }) {
   const { t } = useTranslation();
-  const selected = policyOption(step.profile_session_policy);
   const hasConditionalSessionConfig = hasOnEnterAction(step, "configure_session");
   const selectProfile = (profileId: string) => {
     if (readOnly || hasConditionalSessionConfig) return;
     onUpdate({ agent_profile_id: profileId });
     onClose();
   };
-  const selectPolicy = (policy: WorkflowProfileSessionPolicy) => {
-    if (readOnly) return;
-    onUpdate({ profile_session_policy: policy });
-    onClose();
-  };
 
   if (view === "session") {
     return (
-      <div className="min-w-0">
+      <div className="max-h-[min(70vh,32rem)] min-w-0 overflow-y-auto overscroll-contain">
         <div className="flex items-center gap-2 border-b border-border px-3 py-2">
           <Button
             type="button"
@@ -231,30 +303,35 @@ function SelectorSurface({
           </Button>
           <div className="min-w-0">
             {mobile ? (
-              <DrawerTitle>{t(PROFILE_SESSION_POLICY_KEY)}</DrawerTitle>
+              <DrawerTitle>{t(PROFILE_SESSION_LIFECYCLE_KEY)}</DrawerTitle>
             ) : (
-              <p className="font-medium">{t(PROFILE_SESSION_POLICY_KEY)}</p>
+              <p className="font-medium">{t(PROFILE_SESSION_LIFECYCLE_KEY)}</p>
             )}
-            {mobile ? (
-              <DrawerDescription className="truncate">
-                {t(selected.descriptionKey)}
-              </DrawerDescription>
-            ) : (
-              <p className="truncate text-xs text-muted-foreground">{t(selected.descriptionKey)}</p>
-            )}
+            <p className="truncate text-xs text-muted-foreground">
+              {t("workflows:profileSessionLifecycleIntro")}
+            </p>
           </div>
         </div>
-        <SessionPolicyList step={step} onSelect={selectPolicy} />
+        <LifecycleOptionList
+          step={step}
+          readOnly={readOnly || hasConditionalSessionConfig}
+          onStartSelect={(profileSessionStartPolicy) =>
+            onUpdate({ profile_session_start_policy: profileSessionStartPolicy })
+          }
+          onEndSelect={(profileSessionEndPolicy) =>
+            onUpdate({ profile_session_end_policy: profileSessionEndPolicy })
+          }
+        />
       </div>
     );
   }
 
   return (
-    <div className="min-w-0">
+    <div className="max-h-[min(70vh,32rem)] min-w-0 overflow-y-auto overscroll-contain">
       {mobile ? (
         <DrawerHeader className="border-b border-border px-4 pb-3 pt-2 text-left">
           <DrawerTitle>{t("workflows:agentProfile")}</DrawerTitle>
-          <DrawerDescription>{t(PROFILE_SESSION_POLICY_KEY)}</DrawerDescription>
+          <DrawerDescription>{t(PROFILE_SESSION_LIFECYCLE_KEY)}</DrawerDescription>
         </DrawerHeader>
       ) : null}
       <ProfileOptionList
@@ -264,14 +341,11 @@ function SelectorSurface({
         onSelect={selectProfile}
       />
       <div className="border-t border-border p-2">
-        <SessionPolicyNavigation
+        <LifecycleNavigation
           step={step}
-          readOnly={readOnly}
+          readOnly={readOnly || hasConditionalSessionConfig}
           onOpen={() => setView("session")}
         />
-        <p className="px-3 pt-2 text-xs leading-relaxed text-muted-foreground">
-          {t(selected.descriptionKey)}
-        </p>
       </div>
     </div>
   );
@@ -279,7 +353,7 @@ function SelectorSurface({
 
 type SelectorTriggerProps = {
   selectedProfile: ReturnType<typeof useHealthyAgentProfiles>[number] | undefined;
-  selectedPolicy: (typeof POLICY_OPTIONS)[number];
+  summary: string;
   open: boolean;
   disabled: boolean;
   dirty: boolean;
@@ -288,7 +362,7 @@ type SelectorTriggerProps = {
 
 const SelectorTrigger = forwardRef<HTMLButtonElement, SelectorTriggerProps>(
   function SelectorTrigger(
-    { selectedProfile, selectedPolicy, open, disabled, dirty, onOpen, onClick, ...triggerProps },
+    { selectedProfile, summary, open, disabled, dirty, onOpen, onClick, ...triggerProps },
     ref,
   ) {
     const { t } = useTranslation();
@@ -313,14 +387,16 @@ const SelectorTrigger = forwardRef<HTMLButtonElement, SelectorTriggerProps>(
         )}
       >
         <span className="flex min-w-0 items-center gap-2">
-          <IconRobot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          {selectedProfile ? (
+            <AgentLogo agentName={selectedProfile.agent_name} className="shrink-0" />
+          ) : (
+            <IconRobot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          )}
           <span className="min-w-0 truncate">
             <span className="block truncate">
               {selectedProfile?.label ?? t("workflows:noProfileOverride")}
             </span>
-            <span className="block truncate text-[0.65rem] text-muted-foreground">
-              {t(selectedPolicy.labelKey)}
-            </span>
+            <span className="block truncate text-[0.65rem] text-muted-foreground">{summary}</span>
           </span>
         </span>
         <IconSelector className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden="true" />
@@ -343,13 +419,17 @@ export function WorkflowStepAgentProfileSelector({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const wasOpenRef = useRef(false);
   const selectedProfile = profiles.find((profile) => profile.id === step.agent_profile_id);
-  const selectedPolicy = policyOption(step.profile_session_policy);
   const hasConditionalSessionConfig = hasOnEnterAction(step, "configure_session");
   const disabled = readOnly || hasConditionalSessionConfig;
   const dirty = isWorkflowStepValueDirty(step, savedStep, (item) =>
     JSON.stringify({
       agent_profile_id: item.agent_profile_id ?? "",
-      profile_session_policy: normalizeWorkflowProfileSessionPolicy(item.profile_session_policy),
+      profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
+        item.profile_session_start_policy,
+      ),
+      profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
+        item.profile_session_end_policy,
+      ),
     }),
   );
 
@@ -368,7 +448,7 @@ export function WorkflowStepAgentProfileSelector({
   const trigger = (
     <SelectorTrigger
       selectedProfile={selectedProfile}
-      selectedPolicy={selectedPolicy}
+      summary={lifecycleSummary(step, t)}
       open={open}
       disabled={disabled}
       dirty={dirty}
@@ -396,16 +476,14 @@ export function WorkflowStepAgentProfileSelector({
         <Drawer open={open} onOpenChange={handleOpenChange} shouldScaleBackground={false}>
           {trigger}
           <DrawerContent className="max-h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] overflow-hidden pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" data-vaul-no-drag>
-              {surface}
-            </div>
+            {surface}
           </DrawerContent>
         </Drawer>
       ) : (
         <Popover open={open} onOpenChange={handleOpenChange}>
           <PopoverTrigger asChild>{trigger}</PopoverTrigger>
           <PopoverContent
-            className="w-[min(24rem,calc(100vw-2rem))] p-0"
+            className="w-[min(24rem,calc(100vw-2rem))] overflow-hidden p-0"
             align="start"
             onWheel={(event) => event.stopPropagation()}
             onCloseAutoFocus={(event) => {

@@ -9,19 +9,20 @@ requirements:
 
 ## Purpose and boundaries
 
-The task and workflow system owns fixed-profile step routing and task-session
-lifecycle. This design makes the destination workflow step own both its agent
-profile override and its profile-session entry policy. The agent runtime still
-owns process launch, resume, and stop. The existing task environment remains
-shared across sessions.
+The task and workflow system owns fixed-profile routing and task-session
+lifecycle. Each workflow step owns its agent profile override and two lifecycle
+settings.
 
-This changes the data supplied to workflow step entry. It does not change the
-workflow engine's transition graph, action vocabulary, or transition evaluation.
-The orchestrator already receives the destination step before it prepares a
-session, so it can read the policy directly from that step.
+The destination step owns session selection. The source step owns session
+retirement. The agent runtime still owns process launch, resume, and stop. The
+task environment remains shared across sessions.
 
-Conditional original-session settings remain separate. They mutate one
-session's model-adjacent configuration without switching profiles.
+The workflow engine continues to select transitions and steps. This change does
+not add an action, event, or workflow state. The orchestrator integration must
+carry both source and destination step settings into the session handoff.
+
+Conditional original-session settings remain separate. They change one
+session's model settings without switching profiles.
 
 ## Requirement mapping
 
@@ -31,222 +32,227 @@ session's model-adjacent configuration without switching profiles.
 
 ## Components and responsibilities
 
-- `workflow/models.WorkflowStep` owns the normalized destination-step policy
-  beside `AgentProfileID`.
-- The workflow repository persists the policy with each `workflow_steps` row.
-- `workflow/models.StepPortable` carries the policy through export, import,
+- `workflow/models.WorkflowStep` owns `AgentProfileID`,
+  `ProfileSessionStartPolicy`, and `ProfileSessionEndPolicy`.
+- `workflow/models.StepDefinition` carries the same settings in templates.
+- The workflow repository persists both settings on each `workflow_steps` row.
+- `workflow/models.StepPortable` carries both settings through export, import,
   templates, and workflow sync.
-- Workflow step request and response DTOs carry the policy through create,
+- Workflow step request and response DTOs carry both settings through create,
   update, duplication, boot data, and WebSocket updates.
-- `orchestrator.Service.prepareWorkflowStepSession` reads the normalized policy
-  directly from the destination step and selects reuse or new-session behavior.
-- The profile-switch stop path completes or parks the source session and records
-  a stop-intent stamp before asking the agent runtime to stop it.
-- Agent completion and stopped handlers consume matching stop-intent stamps and
-  skip ordinary workflow advancement for that old execution.
-- The workflow step draft and coordinated save path own both the selected profile
-  and policy.
-- A dedicated combined selector presents profile choice and session behavior in
-  one configuration surface. It follows the interaction pattern of the chat
-  model selector without making agent profiles a model-specific abstraction.
+- The transition integration supplies the source and destination steps to the
+  orchestrator session handoff.
+- The destination start setting controls reusable-session lookup.
+- The source end setting controls completion or parking.
+- Completion and stopped handlers consume execution-stamped stop intents. They
+  skip ordinary workflow advancement for the retired execution.
+- The workflow step draft and coordinated save path own the profile and both
+  lifecycle settings.
+- `WorkflowStepAgentProfileSelector` shows the profile and lifecycle settings
+  in one surface.
 
 ## Data and contracts
 
-`workflow_steps.profile_session_policy` is a non-null text value with these
-canonical values:
+The step stores two independent enums:
 
-| Value | Source session | Destination entry |
+| Field | Value | Behavior |
 | --- | --- | --- |
-| `complete` | Set `COMPLETED`, then stop runtime | Reuse the newest independently eligible nonterminal matching session, or prepare a new one |
-| `park_reuse` | Set `WAITING_FOR_INPUT`, then stop runtime | Reuse the newest eligible nonterminal matching session |
-| `park_new` | Set `WAITING_FOR_INPUT`, then stop runtime | Prepare a new session |
+| `profile_session_start_policy` | `reuse` | Reuse the newest eligible nonterminal session. Create one when none is available. |
+| `profile_session_start_policy` | `new` | Always create a session with a fresh provider conversation. |
+| `profile_session_end_policy` | `complete` | Complete the source session before runtime stop. |
+| `profile_session_end_policy` | `park` | Keep the source session nonterminal and stop its runtime. |
 
-The schema default is `complete`. Domain constructors, repository scans,
-request updates, portable import validation, templates, and sync normalization
-also map an empty or unknown value to `complete`.
+The schema defaults are `reuse` and `complete`. Domain constructors,
+repository scans, request updates, templates, portable import, and sync use the
+same defaults for missing or unknown values.
 
-The portable step field uses the same `profile_session_policy` name and values.
-The workflow-level portable field is removed. The export version does not change
-because the step field is optional and older readers already ignore unknown
-fields. Omitted input preserves the compatibility default.
+These defaults preserve the actual compatibility behavior of the current
+`complete` policy. That policy looks for an eligible nonterminal destination
+session and completes the source session.
 
-No workflow-level policy is retained in the domain, API, persistence, portable
-format, or frontend state. The earlier workflow-level design was not released,
-so its unshipped column and mappings are replaced instead of creating two
-sources of truth.
+The unshipped `profile_session_policy` field and its three-value enum are
+removed from persistence, domain models, APIs, portable formats, frontend state,
+and tests. The implementation does not retain a precedence rule between the old
+field and the new fields.
+
+The portable step uses `profile_session_start_policy` and
+`profile_session_end_policy`. The export version does not change because both
+fields are optional. Older readers ignore unknown fields.
 
 A parked source session retains its session ID, task environment, executor
 profile, messages, ACP resume token, and workflow-switch provenance. Its
-`CompletedAt` remains unset. It is non-primary after the destination session is
-promoted.
+`CompletedAt` value remains empty. It becomes non-primary after destination
+promotion.
 
-Before a parked runtime stop, session metadata stores a workflow-switch stop
-intent containing the exact agent execution ID and a unique stamp. Matching
-completion and stopped handlers mark the intent consumed with stamped
-compare-and-set semantics and retain the durable tombstone. They do not use a
-generic session-state check or an unscoped boolean cancellation marker.
+Before runtime stop, session metadata stores a workflow-switch stop intent. The
+intent contains the exact agent execution ID and a unique stamp. Matching
+callbacks consume the intent with stamped compare-and-set semantics. The
+consumed tombstone remains durable.
 
 ## Control flow
 
-1. Resolve the destination step's effective profile using the existing step
-   override and workflow-default fallback.
-2. Normalize `destinationStep.ProfileSessionPolicy`.
+1. Obtain the source step and destination step for the transition.
+2. Resolve the destination step's effective profile.
 3. If the profile is empty or matches the active session, preserve the current
-   session. The destination policy has no effect.
-4. Preflight managed Git credentials before mutating session ownership.
-5. For `park_reuse`, select the newest nonterminal matching session, excluding
-   the source. For `complete`, retain today's nonterminal reuse behavior when
-   an independently eligible matching session already exists. For `park_new`,
-   do not perform a matching-session lookup.
-6. Prepare a destination session before changing the source. Promote the
-   destination and transfer pending queued state using the existing profile
-   switch ordering and failure checks.
-7. For `complete`, mark the source `COMPLETED` before runtime stop so the
-   current terminal guard suppresses the stop event.
-8. For either park policy, persist the execution-stamped stop intent and set
-   the source to `WAITING_FOR_INPUT` while holding the source session's
-   cancellation/teardown guard. Release that guard before asking the runtime
-   to stop. If the caller already owns the guard, schedule the stop after the
-   surrounding lifecycle operation returns. This allows a synchronous terminal
-   callback from the runtime to consume the durable intent without deadlocking.
-9. When the old execution emits completion or stopped, consume only its matching
-   stamp and retire its runtime activity. Skip turn completion, workflow
-   transition evaluation, and task-state reconciliation.
-10. A later prompt to a parked session uses the existing cold-resume path and
-    stored provider resume token. A new execution ID cannot match the consumed
-   or stale old stop intent. A parked source has no `CompletedAt` value.
+   session. Do not apply either lifecycle setting.
+4. Normalize the destination start setting and the source end setting.
+5. If the start setting is `reuse`, select the newest eligible nonterminal
+   matching session. Exclude the source session.
+6. If the start setting is `new`, do not perform a reusable-session lookup.
+7. Preflight managed Git credentials for the selected or new destination.
+8. Prepare and promote the destination session before source mutation.
+9. If the end setting is `complete`, mark the source `COMPLETED`. Then stop
+   its runtime.
+10. If the end setting is `park`, persist the execution-stamped stop intent.
+    Set the source to `WAITING_FOR_INPUT` and clear `CompletedAt`.
+11. Release the source lifecycle guard before runtime stop. If the caller owns
+    the guard, schedule the stop after the lifecycle operation returns.
+12. When the old execution emits a callback, consume only its matching stamp.
+    Skip turn completion, transition evaluation, and task-state reconciliation.
 
-The workflow engine still decides which step follows from the current step and
-actions. No new transition action, event, state, or evaluation branch is added.
-The only engine-adjacent change is that session preparation consumes a field
-already present on the resolved destination step instead of fetching workflow
-metadata for the policy.
+The existing helper that accepts one destination policy must split its inputs.
+Reusable-session lookup accepts the destination start setting. Source cleanup
+accepts the source end setting.
+
+Legacy transitions and manual moves already resolve both steps. They pass both
+steps to session preparation. Direct engine entry paths that currently retain
+only the destination must carry the source step ID or normalized end setting
+through the transition context or step-entry record.
+
+The workflow engine core remains unchanged. The engine integration and
+orchestrator handoff contract change because session routing now needs both sides
+of the transition.
 
 ## Failure and recovery
 
-Destination preparation and credential validation fail before source-session
-mutation. The current session remains primary and recoverable.
+Destination preparation and credential validation fail before source mutation.
+The current session remains primary and recoverable.
 
-If a park stop intent cannot be persisted, Kandev aborts the switch before
-stopping or completing the source session. It does not silently downgrade to
-`complete`. Any prepared but unpromoted destination remains eligible for
-ordinary session cleanup.
+If a park intent cannot be persisted, Kandev stops the switch before source
+retirement. It does not change the end setting to `complete`.
 
-If runtime stop fails after the parked state is committed, Kandev reports the
-failure and retains the execution-stamped intent. The switch still succeeds,
-and a retry can address the same execution without allowing its delayed
-completion to advance the destination step.
+If runtime stop fails after parking is committed, Kandev reports the error and
+retains the stamped intent. A retry can stop the same execution. A delayed
+callback cannot advance the destination step.
 
-A candidate that becomes terminal between lookup and primary promotion is not
-revived. `park_reuse` prepares a new destination, preserving the existing
-conditional-promotion guard.
+A reuse candidate that becomes terminal before promotion is not revived. The
+orchestrator creates a new destination when the start setting is `reuse`.
+Terminal sessions remain historical endpoints.
 
-Terminal sessions remain immutable historical endpoints for every policy.
-Changing a step policy affects later entries to that step only.
+Changing a step setting affects later transitions only.
 
 ## Persistence
 
-The workflow repository adds the replayable `workflow_steps` column migration
-for SQLite and PostgreSQL and includes the field in create, read, list, and
-update queries. Step export/import, templates, and synchronized YAML preserve
-the enum.
+The workflow repository replaces the unshipped step policy column with two
+replayable columns for SQLite and PostgreSQL. Create, read, list, and update
+queries include both fields.
 
-The stop-intent metadata is coordination state stored on the session so delayed
-callbacks can be matched safely. The matching callback marks it consumed and
-keeps the tombstone durable across delayed delivery and restart. A newer parked
-switch overwrites it with a new execution ID and stamp. A stale stamp after
-restart is harmless because a resumed execution has a different ID.
+Step export, import, templates, duplication, and synchronized YAML preserve both
+enums. Sync equality includes both fields.
+
+The stop-intent metadata remains on the session. Matching callbacks keep the
+consumed tombstone across delayed delivery and restart. A newer park operation
+writes a new execution ID and stamp.
 
 ## Combined step agent selector
 
-The simple step agent profile select becomes a dedicated
-`WorkflowStepAgentProfileSelector`. Its closed trigger shows the robot icon,
-the selected profile or workflow-default label, and a compact session-behavior
-summary. Dirty state is true when either the profile or the policy differs from
-the saved step.
+The selector keeps one entry point for the agent profile and session lifecycle.
+The closed trigger shows:
 
-Desktop interaction uses a field-style popover patterned after
-`ModelConfigSelector`:
+- The selected agent logo and profile label.
+- `Reuse on start · Complete on end`, or the applicable compact summary.
 
-1. The primary view contains a searchable profile list, including the workflow
-   default option.
-2. A separated **Session behavior** row shows the current value and opens a
-   nested view.
-3. The nested view has a back control and the three policy choices with visible
-   descriptions.
-4. Selecting a profile or policy updates the same step draft. The existing
-   workflow **Save changes** action persists both fields.
+When the step uses the workflow default, the trigger shows the generic agent
+icon. A selected profile uses `AgentLogo` with `profile.agent_name`. Profile
+rows use the same logo and label treatment as the new-task selector.
 
-Use the model selector as an interaction exemplar, not as the data model.
+The desktop popover has this hierarchy:
+
+1. The primary view contains the searchable profile list.
+2. A **Session lifecycle** row shows the compact start and end summary.
+3. The lifecycle view starts with this helper: **These settings apply when the
+   workflow changes agent profiles.**
+4. **When this step starts** offers:
+   - **Reuse an available session.** Continue the most recent available session
+     for this agent profile. If none is available, start a new session.
+   - **Start a new session.** Always start a new conversation for this step.
+5. **When this step ends** offers:
+   - **Complete the session.** Close this session. The workflow cannot reuse it
+     later.
+   - **Park the session.** Stop the agent but keep the conversation available
+     for reuse or manual follow-up.
+6. The Back control returns to the profile list.
+7. The existing **Save changes** action persists all three step settings.
+
+The component does not use the old combined labels, such as **Park and reuse the
+previous session**. Those labels mix source and destination behavior.
+
 Profile health, workflow-default fallback, conditional-session incompatibility,
-and step dirty tracking remain workflow-specific. Shared hierarchical selector
-primitives may be extracted only if they reduce duplication without coupling
-agent profiles to model configuration.
+and dirty tracking remain workflow-specific. The selector can reuse
+hierarchical picker primitives without using model-specific data types.
 
-When a step has an incompatible conditional `configure_session` action, the
-profile choice retains the existing disabled behavior and explanation. The
-session-policy value remains visible. Synced workflows render both values in the
-same selector but disable mutations.
+A synchronized workflow shows all settings and disables changes. When a step has
+an incompatible conditional `configure_session` action, the existing profile
+restriction remains visible.
 
 ## Mobile design contract
 
-- **Desktop outcome:** authors choose a step profile and configure its session
-  behavior from one popover in the step header.
-- **Mobile entry point:** the same combined trigger appears in the step card.
-- **Nearest shipped exemplar:** `ModelConfigSelector` supplies the nested
-  selection hierarchy. Existing responsive drawer-based selectors supply the
-  phone presentation.
-- **Hierarchy and primary action:** profile selection is the first view, and
-  **Session behavior** is a nested setting. The workflow's existing
-  **Save changes** action remains the only persistence action.
-- **Presentation rationale:** the control combines search and a nested setting,
-  so a phone inset bottom drawer is more usable than a short select menu.
-- **Geometry:** the trigger and rows have at least a 44 px active dimension on
-  touch viewports. The drawer uses `100dvh` constraints, one internal scroll
-  owner, safe-area bottom padding, wrapped descriptions, and no horizontal page
-  overflow.
-- **Navigation:** Back returns from policy choices to the profile list and
-  restores focus. Close returns focus to the trigger. The software keyboard does
-  not hide the active search or selected row.
-- **Shared logic:** desktop and mobile share profile filtering, normalization,
-  step-draft updates, dirty tracking, validation, and save behavior. Only the
-  presentation shell differs.
+- **Desktop outcome:** The step header opens a popover for the profile and both
+  lifecycle settings.
+- **Mobile entry point:** The same trigger appears in the step card.
+- **Nearest shipped exemplar:** The new-task profile selector supplies
+  `AgentLogo` treatment. `ModelConfigSelector` supplies nested navigation.
+- **Hierarchy:** The profile list is the first view. **Session lifecycle** opens
+  one focused view with the start and end groups.
+- **Presentation:** A phone uses an inset bottom drawer. A desktop uses a
+  popover.
+- **Geometry:** Each phone row has a 44 px active dimension. The drawer uses
+  `100dvh` constraints, one internal scroll region, and safe-area padding.
+- **Navigation:** Back returns to the profile list. Close returns focus to the
+  trigger. The keyboard does not cover profile search.
+- **Shared logic:** Both viewports share filtering, normalization, draft updates,
+  dirty tracking, and save behavior.
+- **Mobile evidence:** Playwright selects both lifecycle settings, saves,
+  reloads, and checks containment and horizontal overflow.
 
 ## Verification design
 
-Focused backend tests prove per-step persistence, portable import/export,
-template and sync round-trip, default normalization, and that two steps in one
-workflow retain different policies.
+Backend tests prove these four combinations:
 
-Orchestrator tests pass destination steps with each policy directly. They prove
-`A -> B -> A` identity, same-profile continuity, delayed callback suppression,
-durable consumed intent, stop failure, promotion races, and queue rollback. A
-focused assertion verifies that no workflow metadata lookup is required to
-resolve the policy.
+| Start | End | Expected result |
+| --- | --- | --- |
+| `reuse` | `complete` | Reuse an eligible destination and complete the source |
+| `new` | `complete` | Create a destination and complete the source |
+| `reuse` | `park` | Reuse an eligible destination and park the source |
+| `new` | `park` | Create a destination and park the source |
 
-Frontend tests prove profile search, nested policy navigation, trigger summary,
-combined dirty state, read-only behavior, conditional-session behavior, and
-desktop/popover versus mobile/drawer parity.
+Focused persistence tests prove separate defaults and round-trip behavior.
+Portable, template, duplication, and sync tests prove that each field remains on
+its step.
 
-Desktop Playwright coverage saves different policies on different steps,
-reloads, and proves runtime identity. Mobile Playwright coverage uses the
-combined drawer, saves and reloads, checks 44 px touch targets, focus return,
-safe-area containment, and absence of document horizontal overflow.
+Transition tests prove that the source end setting and destination start setting
+come from different steps. They cover legacy, manual, queued, and direct engine
+entry paths. Existing tests retain delayed callback, durable intent, stop error,
+promotion race, and queue rollback coverage.
+
+Frontend tests prove logos, profile search, separate start and end choices,
+compact summaries, dirty state, read-only behavior, and desktop/mobile parity.
+
+Desktop E2E saves different lifecycle combinations on multiple steps. Runtime
+identity proves reuse versus new session and complete versus park. Mobile E2E
+uses both choice groups and checks focus, touch size, safe areas, and overflow.
 
 ## Security
 
-The existing workflow authorization and read-only sync guard protect the new
-step field. Session selection stays task-scoped and profile-matched. Stop-intent
-metadata contains internal session and execution identifiers but no credentials
-or prompt content.
+Existing workflow authorization and sync read-only guards protect both fields.
+Session selection stays task-scoped and profile-matched. Stop-intent metadata
+contains internal identifiers but no credentials or prompt content.
 
 ## Observability
 
-Profile-switch logs add the normalized destination-step policy, step ID, source
-outcome (`completed` or `parked`), and destination outcome (`reused` or
-`created`). Stop-event suppression logs include the session and execution IDs
-and the stop-intent stamp. Failures use the existing workflow transition and
-session-state error surfaces.
+Profile-switch logs include source step ID, destination step ID, start setting,
+end setting, source outcome, and destination outcome. Stop-event suppression
+logs include session ID, execution ID, and intent stamp.
 
 ## Related decisions
 

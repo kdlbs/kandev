@@ -1,5 +1,10 @@
 import { type Locator, type Page, expect } from "@playwright/test";
 
+type StepProfileSessionLifecycle = {
+  startPolicy: "reuse" | "new";
+  endPolicy: "complete" | "park";
+};
+
 export class WorkflowSettingsPage {
   readonly page: Page;
   readonly addWorkflowButton: Locator;
@@ -249,33 +254,31 @@ export class WorkflowSettingsPage {
     return card.getByTestId("step-agent-profile-select");
   }
 
-  /** The nested session behavior entry in the selected step's profile selector. */
-  stepProfileSessionPolicySelect(): Locator {
+  /** The nested session lifecycle entry in the selected step's profile selector. */
+  stepProfileSessionLifecycleSelect(): Locator {
     // DrawerContent is portalled outside the workflow card on mobile. The
     // settings page has one open step selector at a time, so the suffix is
     // enough to address its nested navigation surface in either layout.
-    return this.page.locator('[data-testid$="-profile-session-policy-select"]');
+    return this.page.locator('[data-testid$="-profile-session-lifecycle-select"]');
   }
 
-  /** Set the destination step's profile-session policy through the combined selector. */
-  async setStepProfileSessionPolicy(
+  /** Set a step's independent session start and end behavior through its selector. */
+  async setStepProfileSessionLifecycle(
     card: Locator,
     stepName: string,
     stepId: string,
-    optionName: string,
+    lifecycle: StepProfileSessionLifecycle,
     touch = false,
   ) {
     await this.selectStep(card, stepName, touch);
     await this.activate(this.stepAgentProfileSelect(card), touch);
-    await this.activate(this.stepProfileSessionPolicySelect(), touch);
+    await this.activate(this.stepProfileSessionLifecycleSelect(), touch);
     await this.activate(
-      this.page
-        .getByTestId(
-          new RegExp(`^${stepId}-profile-session-policy-(complete|park_reuse|park_new)$`),
-        )
-        .filter({
-          hasText: optionName,
-        }),
+      this.page.getByTestId(`${stepId}-profile-session-start-${lifecycle.startPolicy}`),
+      touch,
+    );
+    await this.activate(
+      this.page.getByTestId(`${stepId}-profile-session-end-${lifecycle.endPolicy}`),
       touch,
     );
   }

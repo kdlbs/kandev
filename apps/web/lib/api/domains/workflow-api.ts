@@ -1,5 +1,9 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
-import { agentProfileId, normalizeWorkflowProfileSessionPolicy } from "@/lib/types/http";
+import {
+  agentProfileId,
+  normalizeWorkflowProfileSessionStartPolicy,
+  normalizeWorkflowProfileSessionEndPolicy,
+} from "@/lib/types/http";
 import type {
   ListWorkflowTemplatesResponse,
   ListWorkflowStepsResponse,
@@ -20,7 +24,8 @@ type BackendTemplateStep = {
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   agent_profile_id?: string;
-  profile_session_policy?: StepDefinition["profile_session_policy"];
+  profile_session_start_policy?: StepDefinition["profile_session_start_policy"];
+  profile_session_end_policy?: StepDefinition["profile_session_end_policy"];
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
@@ -44,7 +49,12 @@ export const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): Wo
     is_start_step: step.is_start_step,
     show_in_command_panel: step.show_in_command_panel,
     agent_profile_id: step.agent_profile_id ? agentProfileId(step.agent_profile_id) : undefined,
-    profile_session_policy: normalizeWorkflowProfileSessionPolicy(step.profile_session_policy),
+    profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
+      step.profile_session_start_policy,
+    ),
+    profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
+      step.profile_session_end_policy,
+    ),
     auto_advance_requires_signal: step.auto_advance_requires_signal,
     cancel_triggers_turn_complete: step.cancel_triggers_turn_complete,
     wip_limit: step.wip_limit,
@@ -88,7 +98,12 @@ export async function listWorkflowSteps(workflowId: string, options?: ApiRequest
     ...response,
     steps: response.steps.map((step) => ({
       ...step,
-      profile_session_policy: normalizeWorkflowProfileSessionPolicy(step.profile_session_policy),
+      profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
+        step.profile_session_start_policy,
+      ),
+      profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
+        step.profile_session_end_policy,
+      ),
     })),
   };
 }
@@ -97,7 +112,12 @@ export async function getWorkflowStep(stepId: string, options?: ApiRequestOption
   const step = await fetchJson<WorkflowStep>(`/api/v1/workflow/steps/${stepId}`, options);
   return {
     ...step,
-    profile_session_policy: normalizeWorkflowProfileSessionPolicy(step.profile_session_policy),
+    profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
+      step.profile_session_start_policy,
+    ),
+    profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
+      step.profile_session_end_policy,
+    ),
   };
 }
 
@@ -111,7 +131,8 @@ export async function createWorkflowStep(
     events?: StepEvents;
     cancel_triggers_turn_complete?: boolean;
     agent_profile_id?: string;
-    profile_session_policy?: StepDefinition["profile_session_policy"];
+    profile_session_start_policy?: StepDefinition["profile_session_start_policy"];
+    profile_session_end_policy?: StepDefinition["profile_session_end_policy"];
     wip_limit?: number;
     pull_from_step_id?: string | null;
   },
@@ -123,7 +144,12 @@ export async function createWorkflowStep(
   });
   return {
     ...step,
-    profile_session_policy: normalizeWorkflowProfileSessionPolicy(step.profile_session_policy),
+    profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
+      step.profile_session_start_policy,
+    ),
+    profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
+      step.profile_session_end_policy,
+    ),
   };
 }
 

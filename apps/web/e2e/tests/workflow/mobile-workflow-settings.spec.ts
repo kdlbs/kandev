@@ -227,7 +227,7 @@ test.describe("Workflow settings on mobile", () => {
     expect(hasDocumentOverflow).toBe(false);
   });
 
-  test("changes the profile session policy with touch-sized controls", async ({
+  test("changes both profile session lifecycle settings with touch-sized controls", async ({
     testPage,
     apiClient,
     seedData,
@@ -242,15 +242,17 @@ test.describe("Workflow settings on mobile", () => {
     await expect(policySelect).toBeVisible();
     await policySelect.tap();
 
-    const policyNavigation = page.stepProfileSessionPolicySelect();
-    await expect(policyNavigation).toBeVisible();
-    await policyNavigation.tap();
+    const lifecycleNavigation = page.stepProfileSessionLifecycleSelect();
+    await expect(lifecycleNavigation).toBeVisible();
+    await lifecycleNavigation.tap();
     const stepId = seedData.steps[0]!.id;
-    const option = testPage.getByTestId(`${stepId}-profile-session-policy-park_reuse`);
-    await expect(option).toBeVisible();
+    const startOption = testPage.getByTestId(`${stepId}-profile-session-start-new`);
+    const endOption = testPage.getByTestId(`${stepId}-profile-session-end-park`);
+    await expect(startOption).toBeVisible();
+    await expect(endOption).toBeVisible();
 
     const viewportWidth = await testPage.evaluate(() => window.innerWidth);
-    for (const control of [policySelect, option]) {
+    for (const control of [policySelect, startOption, endOption]) {
       const box = await control.boundingBox();
       expect(box).not.toBeNull();
       expect(box!.height).toBeGreaterThanOrEqual(44);
@@ -258,20 +260,22 @@ test.describe("Workflow settings on mobile", () => {
       expect(box!.x + box!.width).toBeLessThanOrEqual(viewportWidth);
     }
 
-    await option.tap();
+    await startOption.tap();
+    await endOption.tap();
+    await testPage.keyboard.press("Escape");
     await page.saveChanges(true);
 
     const savedStep = (await apiClient.listWorkflowSteps(seedData.workflowId)).steps.find(
       (step) => step.id === stepId,
     );
-    expect(savedStep?.profile_session_policy).toBe("park_reuse");
+    expect(savedStep?.profile_session_start_policy).toBe("new");
+    expect(savedStep?.profile_session_end_policy).toBe("park");
 
     await page.goto(seedData.workspaceId);
     const reloadedCard = await page.findWorkflowCard("E2E Workflow");
     await page.selectStep(reloadedCard, seedData.steps[0]!.name, true);
-    await expect(page.stepAgentProfileSelect(reloadedCard)).toContainText(
-      "Park and reuse the previous session",
-    );
+    await expect(page.stepAgentProfileSelect(reloadedCard)).toContainText("New on start");
+    await expect(page.stepAgentProfileSelect(reloadedCard)).toContainText("Park on end");
     expect(
       await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
     ).toBe(false);

@@ -136,7 +136,8 @@ type CreateStepRequest struct {
 	ShowInCommandPanel         *bool              `json:"show_in_command_panel,omitempty"`
 	AutoAdvanceRequiresSignal  *bool              `json:"auto_advance_requires_signal,omitempty"`
 	CancelTriggersTurnComplete *bool              `json:"cancel_triggers_turn_complete,omitempty"`
-	ProfileSessionPolicy       *string            `json:"profile_session_policy,omitempty"`
+	ProfileSessionStartPolicy  *string            `json:"profile_session_start_policy,omitempty"`
+	ProfileSessionEndPolicy    *string            `json:"profile_session_end_policy,omitempty"`
 	WIPLimit                   *int               `json:"wip_limit,omitempty"`
 	PullFromStepID             *string            `json:"pull_from_step_id,omitempty"`
 }
@@ -176,8 +177,11 @@ func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*Ge
 	if req.AgentProfileID != nil {
 		step.AgentProfileID = strings.TrimSpace(*req.AgentProfileID)
 	}
-	if req.ProfileSessionPolicy != nil {
-		step.ProfileSessionPolicy = taskmodels.NormalizeWorkflowProfileSessionPolicy(*req.ProfileSessionPolicy)
+	if req.ProfileSessionStartPolicy != nil {
+		step.ProfileSessionStartPolicy = taskmodels.NormalizeWorkflowProfileSessionStartPolicy(*req.ProfileSessionStartPolicy)
+	}
+	if req.ProfileSessionEndPolicy != nil {
+		step.ProfileSessionEndPolicy = taskmodels.NormalizeWorkflowProfileSessionEndPolicy(*req.ProfileSessionEndPolicy)
 	}
 	if req.AutoAdvanceRequiresSignal != nil {
 		step.AutoAdvanceRequiresSignal = *req.AutoAdvanceRequiresSignal
@@ -220,7 +224,8 @@ type UpdateStepRequest struct {
 	AgentProfileID             *string            `json:"agent_profile_id,omitempty"`
 	AutoAdvanceRequiresSignal  *bool              `json:"auto_advance_requires_signal,omitempty"`
 	CancelTriggersTurnComplete *bool              `json:"cancel_triggers_turn_complete,omitempty"`
-	ProfileSessionPolicy       *string            `json:"profile_session_policy,omitempty"`
+	ProfileSessionStartPolicy  *string            `json:"profile_session_start_policy,omitempty"`
+	ProfileSessionEndPolicy    *string            `json:"profile_session_end_policy,omitempty"`
 	WIPLimit                   *int               `json:"wip_limit,omitempty"`
 	PullFromStepID             *string            `json:"pull_from_step_id,omitempty"`
 }
@@ -270,8 +275,11 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 	if req.AgentProfileID != nil {
 		step.AgentProfileID = strings.TrimSpace(*req.AgentProfileID)
 	}
-	if req.ProfileSessionPolicy != nil {
-		step.ProfileSessionPolicy = taskmodels.NormalizeWorkflowProfileSessionPolicy(*req.ProfileSessionPolicy)
+	if req.ProfileSessionStartPolicy != nil {
+		step.ProfileSessionStartPolicy = taskmodels.NormalizeWorkflowProfileSessionStartPolicy(*req.ProfileSessionStartPolicy)
+	}
+	if req.ProfileSessionEndPolicy != nil {
+		step.ProfileSessionEndPolicy = taskmodels.NormalizeWorkflowProfileSessionEndPolicy(*req.ProfileSessionEndPolicy)
 	}
 	if req.AutoAdvanceRequiresSignal != nil {
 		step.AutoAdvanceRequiresSignal = *req.AutoAdvanceRequiresSignal

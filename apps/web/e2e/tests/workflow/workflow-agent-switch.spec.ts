@@ -112,66 +112,81 @@ async function pollSessionsForEnvironmentInheritance(
   return latestSessions;
 }
 
-const PROFILE_SESSION_POLICY_LABELS = {
-  park_reuse: "Park and reuse the previous session",
-  park_new: "Park and start a new session",
+const PROFILE_SESSION_START_LABELS = {
+  reuse: "Reuse on start",
+  new: "New on start",
 } as const;
 
-type ParkedProfileSessionPolicy = keyof typeof PROFILE_SESSION_POLICY_LABELS;
+const PROFILE_SESSION_END_LABELS = {
+  complete: "Complete on end",
+  park: "Park on end",
+} as const;
 
-async function configureProfileSessionPolicyWorkflow(
+type ProfileSessionStartPolicy = keyof typeof PROFILE_SESSION_START_LABELS;
+type ProfileSessionEndPolicy = keyof typeof PROFILE_SESSION_END_LABELS;
+
+async function configureProfileSessionWorkflow(
   apiClient: InstanceType<typeof import("../../helpers/api-client").ApiClient>,
   seedData: SeedData,
   page: WorkflowSettingsPage,
-  policy: ParkedProfileSessionPolicy,
+  startPolicy: ProfileSessionStartPolicy,
+  endPolicy: ProfileSessionEndPolicy,
 ) {
   const { profileA, profileB } = await createProfiles(apiClient);
   const workflow = await apiClient.createWorkflow(
     seedData.workspaceId,
-    `Profile Session Policy ${policy}`,
+    `Profile Session ${startPolicy}-${endPolicy}`,
   );
   const inbox = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
   const stepA = await apiClient.createWorkflowStep(workflow.id, "Profile A", 1);
   const stepB = await apiClient.createWorkflowStep(workflow.id, "Profile B", 2);
   const stepAAgain = await apiClient.createWorkflowStep(workflow.id, "Profile A Again", 3);
 
-  for (const [step, profileId] of [
-    [stepA, profileA.id],
-    [stepB, profileB.id],
-    [stepAAgain, profileA.id],
-  ] as const) {
-    await apiClient.updateWorkflowStep(step.id, {
-      agent_profile_id: profileId,
-      // The destination step controls how the source profile session is
-      // retained. Keep the first profile parked while entering Profile B;
-      // the UI below changes Profile A Again from the default to the policy
-      // under test.
-      profile_session_policy: step === stepB ? policy : "complete",
-      events: { on_enter: [{ type: "auto_start_agent" }] },
-    });
-  }
+  await apiClient.updateWorkflowStep(stepA.id, {
+    agent_profile_id: profileA.id,
+    profile_session_start_policy: "reuse",
+    profile_session_end_policy: "park",
+    events: { on_enter: [{ type: "auto_start_agent" }] },
+  });
+  await apiClient.updateWorkflowStep(stepB.id, {
+    agent_profile_id: profileB.id,
+    profile_session_start_policy: "reuse",
+    profile_session_end_policy: endPolicy,
+    events: { on_enter: [{ type: "auto_start_agent" }] },
+  });
+  await apiClient.updateWorkflowStep(stepAAgain.id, {
+    agent_profile_id: profileA.id,
+    // Seed the opposite values so every lifecycle combination exercises the
+    // shared draft, dirty, and save path, including the default pair.
+    profile_session_start_policy: startPolicy === "reuse" ? "new" : "reuse",
+    profile_session_end_policy: endPolicy === "complete" ? "park" : "complete",
+    events: { on_enter: [{ type: "auto_start_agent" }] },
+  });
 
   await page.goto(seedData.workspaceId);
-  const card = await page.findWorkflowCard(`Profile Session Policy ${policy}`);
+  const workflowName = `Profile Session ${startPolicy}-${endPolicy}`;
+  const card = await page.findWorkflowCard(workflowName);
   await expect(card).toBeVisible();
-  await page.setStepProfileSessionPolicy(
-    card,
-    "Profile A Again",
-    stepAAgain.id,
-    PROFILE_SESSION_POLICY_LABELS[policy],
-  );
+  await page.setStepProfileSessionLifecycle(card, "Profile A Again", stepAAgain.id, {
+    startPolicy,
+    endPolicy,
+  });
   await page.saveChanges();
 
   const savedStep = (await apiClient.listWorkflowSteps(workflow.id)).steps.find(
     (item) => item.id === stepAAgain.id,
   );
-  expect(savedStep?.profile_session_policy).toBe(policy);
+  expect(savedStep?.profile_session_start_policy).toBe(startPolicy);
+  expect(savedStep?.profile_session_end_policy).toBe(endPolicy);
 
   await page.goto(seedData.workspaceId);
-  const reloadedCard = await page.findWorkflowCard(`Profile Session Policy ${policy}`);
+  const reloadedCard = await page.findWorkflowCard(workflowName);
   await page.selectStep(reloadedCard, "Profile A Again");
   await expect(page.stepAgentProfileSelect(reloadedCard)).toContainText(
-    PROFILE_SESSION_POLICY_LABELS[policy],
+    PROFILE_SESSION_START_LABELS[startPolicy],
+  );
+  await expect(page.stepAgentProfileSelect(reloadedCard)).toContainText(
+    PROFILE_SESSION_END_LABELS[endPolicy],
   );
 
   return { workflow, inbox, stepA, stepB, stepAAgain, profileA, profileB };
@@ -207,106 +222,115 @@ async function waitForProfileSession(
   return sessionId;
 }
 
-test.describe("Workflow agent profile switching", () => {
-  test("profile session policy park_reuse saves, reloads, and reuses the original session", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(90_000);
-    const page = new WorkflowSettingsPage(testPage);
-    const { workflow, inbox, stepA, stepB, stepAAgain, profileA, profileB } =
-      await configureProfileSessionPolicyWorkflow(apiClient, seedData, page, "park_reuse");
+type ProfileSessionLifecycleScenario = {
+  startPolicy: ProfileSessionStartPolicy;
+  endPolicy: ProfileSessionEndPolicy;
+};
 
-    const task = await apiClient.createTask(seedData.workspaceId, "Park reuse runtime task", {
+const PROFILE_SESSION_LIFECYCLE_SCENARIOS: ProfileSessionLifecycleScenario[] = [
+  { startPolicy: "reuse", endPolicy: "complete" },
+  { startPolicy: "reuse", endPolicy: "park" },
+  { startPolicy: "new", endPolicy: "complete" },
+  { startPolicy: "new", endPolicy: "park" },
+];
+
+async function runProfileSessionLifecycleScenario(
+  testPage: Parameters<typeof WorkflowSettingsPage>[0],
+  apiClient: InstanceType<typeof import("../../helpers/api-client").ApiClient>,
+  seedData: SeedData,
+  startPolicy: ProfileSessionStartPolicy,
+  endPolicy: ProfileSessionEndPolicy,
+) {
+  const page = new WorkflowSettingsPage(testPage);
+  const { workflow, inbox, stepA, stepB, stepAAgain, profileA, profileB } =
+    await configureProfileSessionWorkflow(apiClient, seedData, page, startPolicy, endPolicy);
+
+  const task = await apiClient.createTask(
+    seedData.workspaceId,
+    `${endPolicy === "park" ? "Park" : "Complete"} ${startPolicy} runtime task`,
+    {
       workflow_id: workflow.id,
       workflow_step_id: inbox.id,
       agent_profile_id: profileA.id,
       repository_ids: [seedData.repositoryId],
-    });
-    await apiClient.moveTask(task.id, workflow.id, stepA.id);
-    const originalASessionId = await waitForProfileSession(apiClient, task.id, profileA.id);
+    },
+  );
+  await apiClient.moveTask(task.id, workflow.id, stepA.id);
+  const originalASessionId = await waitForProfileSession(apiClient, task.id, profileA.id);
 
-    await apiClient.moveTask(task.id, workflow.id, stepB.id);
-    await pollSessions(apiClient, task.id, 2);
-    await waitForProfileSession(apiClient, task.id, profileB.id);
+  await apiClient.moveTask(task.id, workflow.id, stepB.id);
+  await pollSessions(apiClient, task.id, 2);
+  await waitForProfileSession(apiClient, task.id, profileB.id);
 
-    await apiClient.moveTask(task.id, workflow.id, stepAAgain.id);
-    await expect
-      .poll(
-        async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions.some((item) => item.id === originalASessionId && item.is_primary);
-        },
-        { timeout: 30_000 },
-      )
-      .toBe(true);
+  await apiClient.moveTask(task.id, workflow.id, stepAAgain.id);
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        return startPolicy === "reuse"
+          ? sessions.some((item) => item.id === originalASessionId && item.is_primary)
+          : sessions.some(
+              (item) =>
+                item.agent_profile_id === profileA.id &&
+                item.id !== originalASessionId &&
+                item.is_primary,
+            );
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true);
+  await expect
+    .poll(async () => {
+      const { sessions } = await apiClient.listTaskSessions(task.id);
+      return sessions.find((item) => item.agent_profile_id === profileB.id)?.state;
+    })
+    .toBe(endPolicy === "park" ? "WAITING_FOR_INPUT" : "COMPLETED");
 
-    const { sessions } = await apiClient.listTaskSessions(task.id);
-    expect(sessions).toHaveLength(2);
-    const returnedA = sessions.find((item) => item.id === originalASessionId);
-    const parkedB = sessions.find((item) => item.agent_profile_id === profileB.id);
+  const { sessions } = await apiClient.listTaskSessions(task.id);
+  expect(sessions).toHaveLength(startPolicy === "reuse" ? 2 : 3);
+  const originalA = sessions.find((item) => item.id === originalASessionId);
+  const returnedA = sessions.find(
+    (item) => item.agent_profile_id === profileA.id && item.is_primary,
+  );
+  const parkedB = sessions.find((item) => item.agent_profile_id === profileB.id);
+  if (startPolicy === "reuse") {
     expect(returnedA).toMatchObject({
+      id: originalASessionId,
       agent_profile_id: profileA.id,
-      is_primary: true,
       state: "WAITING_FOR_INPUT",
     });
-    expect(parkedB).toMatchObject({ is_primary: false, state: "WAITING_FOR_INPUT" });
-  });
-
-  test("profile session policy park_new saves, reloads, and creates a fresh session on return", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(90_000);
-    const page = new WorkflowSettingsPage(testPage);
-    const { workflow, inbox, stepA, stepB, stepAAgain, profileA, profileB } =
-      await configureProfileSessionPolicyWorkflow(apiClient, seedData, page, "park_new");
-
-    const task = await apiClient.createTask(seedData.workspaceId, "Park new runtime task", {
-      workflow_id: workflow.id,
-      workflow_step_id: inbox.id,
+  } else {
+    expect(originalA).toMatchObject({
       agent_profile_id: profileA.id,
-      repository_ids: [seedData.repositoryId],
+      is_primary: false,
+      state: "WAITING_FOR_INPUT",
     });
-    await apiClient.moveTask(task.id, workflow.id, stepA.id);
-    const originalASessionId = await waitForProfileSession(apiClient, task.id, profileA.id);
-
-    await apiClient.moveTask(task.id, workflow.id, stepB.id);
-    await pollSessions(apiClient, task.id, 2);
-    await waitForProfileSession(apiClient, task.id, profileB.id);
-
-    await apiClient.moveTask(task.id, workflow.id, stepAAgain.id);
-    await expect
-      .poll(
-        async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions.some(
-            (item) =>
-              item.agent_profile_id === profileA.id &&
-              item.id !== originalASessionId &&
-              item.is_primary,
-          );
-        },
-        { timeout: 30_000 },
-      )
-      .toBe(true);
-
-    const { sessions } = await apiClient.listTaskSessions(task.id);
-    expect(sessions).toHaveLength(3);
-    const originalA = sessions.find((item) => item.id === originalASessionId);
-    const freshA = sessions.find(
-      (item) => item.agent_profile_id === profileA.id && item.id !== originalASessionId,
-    );
-    const parkedB = sessions.find((item) => item.agent_profile_id === profileB.id);
-    expect(originalA).toMatchObject({ is_primary: false, state: "WAITING_FOR_INPUT" });
-    expect(freshA).toMatchObject({
-      agent_profile_id: profileA.id,
-      is_primary: true,
-    });
-    expect(parkedB).toMatchObject({ is_primary: false, state: "WAITING_FOR_INPUT" });
+    expect(returnedA).toMatchObject({ agent_profile_id: profileA.id, is_primary: true });
+  }
+  expect(parkedB).toMatchObject({
+    agent_profile_id: profileB.id,
+    is_primary: false,
+    state: endPolicy === "park" ? "WAITING_FOR_INPUT" : "COMPLETED",
   });
+}
+
+test.describe("Workflow agent profile switching", () => {
+  for (const scenario of PROFILE_SESSION_LIFECYCLE_SCENARIOS) {
+    test(`${scenario.startPolicy} on start and ${scenario.endPolicy} on end saves, reloads, and applies independently`, async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      test.setTimeout(90_000);
+      await runProfileSessionLifecycleScenario(
+        testPage,
+        apiClient,
+        seedData,
+        scenario.startPolicy,
+        scenario.endPolicy,
+      );
+    });
+  }
 
   test("manual step move creates new session with step's agent profile", async ({
     apiClient,

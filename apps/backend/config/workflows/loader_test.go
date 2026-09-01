@@ -82,7 +82,7 @@ func TestLoadTemplates_AllValid(t *testing.T) {
 	}
 }
 
-func TestConvertStep_PreservesAgentProfileAndSessionPolicy(t *testing.T) {
+func TestConvertStep_PreservesAgentProfileAndSessionPolicies(t *testing.T) {
 	var raw templateYAML
 	if err := yaml.Unmarshal([]byte(`
 id: test
@@ -91,7 +91,8 @@ steps:
   - id: review
     name: Review
     agent_profile_id: profile-review
-    profile_session_policy: park_new
+    profile_session_start_policy: new
+    profile_session_end_policy: park
 `), &raw); err != nil {
 		t.Fatalf("unmarshal template: %v", err)
 	}
@@ -102,8 +103,11 @@ steps:
 	if step.AgentProfileID != "profile-review" {
 		t.Fatalf("agent profile ID = %q, want profile-review", step.AgentProfileID)
 	}
-	if step.ProfileSessionPolicy != taskmodels.WorkflowProfileSessionPolicyParkNew {
-		t.Fatalf("profile session policy = %q, want park_new", step.ProfileSessionPolicy)
+	if step.ProfileSessionStartPolicy != taskmodels.WorkflowProfileSessionStartPolicyNew {
+		t.Fatalf("profile session start policy = %q, want new", step.ProfileSessionStartPolicy)
+	}
+	if step.ProfileSessionEndPolicy != taskmodels.WorkflowProfileSessionEndPolicyPark {
+		t.Fatalf("profile session end policy = %q, want park", step.ProfileSessionEndPolicy)
 	}
 }
 

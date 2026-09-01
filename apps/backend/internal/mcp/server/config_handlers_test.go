@@ -134,16 +134,18 @@ func TestWorkflowStepTools_SchemaExposesCancelTriggersTurnComplete(t *testing.T)
 	assert.Contains(t, updateProps, "cancel_triggers_turn_complete")
 }
 
-func TestWorkflowStepTools_SchemaExposesProfileAndSessionPolicy(t *testing.T) {
+func TestWorkflowStepTools_SchemaExposesProfileAndSessionPolicies(t *testing.T) {
 	backend := &testBackend{}
 	s := newTestServer(t, backend)
 
 	createProps := toolInputProperties(t, s, "create_workflow_step_kandev")
 	updateProps := toolInputProperties(t, s, "update_workflow_step_kandev")
 	assert.Contains(t, createProps, "agent_profile_id")
-	assert.Contains(t, createProps, "profile_session_policy")
+	assert.Contains(t, createProps, "profile_session_start_policy")
+	assert.Contains(t, createProps, "profile_session_end_policy")
 	assert.Contains(t, updateProps, "agent_profile_id")
-	assert.Contains(t, updateProps, "profile_session_policy")
+	assert.Contains(t, updateProps, "profile_session_start_policy")
+	assert.Contains(t, updateProps, "profile_session_end_policy")
 }
 
 func TestCreateWorkflowHandler_Success(t *testing.T) {
@@ -311,7 +313,8 @@ func TestCreateWorkflowStepHandler_AllFields(t *testing.T) {
 		"color":                        "#22c55e",
 		"prompt":                       "Deploy prompt",
 		"agent_profile_id":             "profile-deploy",
-		"profile_session_policy":       "park_reuse",
+		"profile_session_start_policy": "reuse",
+		"profile_session_end_policy":   "park",
 		"is_start_step":                true,
 		"allow_manual_move":            true,
 		"show_in_command_panel":        true,
@@ -329,7 +332,8 @@ func TestCreateWorkflowStepHandler_AllFields(t *testing.T) {
 	assert.Equal(t, true, payload["allow_manual_move"])
 	assert.Equal(t, true, payload["show_in_command_panel"])
 	assert.Equal(t, "profile-deploy", payload["agent_profile_id"])
-	assert.Equal(t, "park_reuse", payload["profile_session_policy"])
+	assert.Equal(t, "reuse", payload["profile_session_start_policy"])
+	assert.Equal(t, "park", payload["profile_session_end_policy"])
 	assert.Equal(t, true, payload["auto_advance_requires_signal"])
 	assert.NotNil(t, payload["events"])
 }
@@ -397,7 +401,8 @@ func TestUpdateWorkflowStepHandler_AllFields(t *testing.T) {
 		"name":                         "In Review",
 		"color":                        "#3b82f6",
 		"agent_profile_id":             "profile-review",
-		"profile_session_policy":       "park_new",
+		"profile_session_start_policy": "new",
+		"profile_session_end_policy":   "complete",
 		"allow_manual_move":            true,
 		"show_in_command_panel":        true,
 		"auto_advance_requires_signal": false,
@@ -414,7 +419,8 @@ func TestUpdateWorkflowStepHandler_AllFields(t *testing.T) {
 	assert.Equal(t, true, payload["allow_manual_move"])
 	assert.Equal(t, true, payload["show_in_command_panel"])
 	assert.Equal(t, "profile-review", payload["agent_profile_id"])
-	assert.Equal(t, "park_new", payload["profile_session_policy"])
+	assert.Equal(t, "new", payload["profile_session_start_policy"])
+	assert.Equal(t, "complete", payload["profile_session_end_policy"])
 	assert.Equal(t, false, payload["auto_advance_requires_signal"])
 	assert.Equal(t, float64(48), payload["auto_archive_after_hours"])
 	assert.NotNil(t, payload["events"])

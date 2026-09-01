@@ -1013,28 +1013,42 @@ const (
 	WorkflowStyleCustom = "custom"
 )
 
-// WorkflowProfileSessionPolicy controls what happens to a session when a
-// fixed-profile workflow step switches to another agent profile.
-type WorkflowProfileSessionPolicy string
+// WorkflowProfileSessionStartPolicy controls how a fixed-profile workflow step
+// obtains a session when it starts after a profile switch.
+type WorkflowProfileSessionStartPolicy string
 
 const (
-	WorkflowProfileSessionPolicyComplete  WorkflowProfileSessionPolicy = "complete"
-	WorkflowProfileSessionPolicyParkReuse WorkflowProfileSessionPolicy = "park_reuse"
-	WorkflowProfileSessionPolicyParkNew   WorkflowProfileSessionPolicy = "park_new"
+	WorkflowProfileSessionStartPolicyReuse WorkflowProfileSessionStartPolicy = "reuse"
+	WorkflowProfileSessionStartPolicyNew   WorkflowProfileSessionStartPolicy = "new"
 )
 
-// NormalizeWorkflowProfileSessionPolicy returns the safe compatibility default
-// for empty and unknown workflow profile-session policy values.
-func NormalizeWorkflowProfileSessionPolicy(value string) WorkflowProfileSessionPolicy {
+// NormalizeWorkflowProfileSessionStartPolicy returns the safe default for empty
+// and unknown workflow step session-start policy values.
+func NormalizeWorkflowProfileSessionStartPolicy(value string) WorkflowProfileSessionStartPolicy {
 	value = strings.TrimSpace(value)
-	switch WorkflowProfileSessionPolicy(value) {
-	case WorkflowProfileSessionPolicyComplete,
-		WorkflowProfileSessionPolicyParkReuse,
-		WorkflowProfileSessionPolicyParkNew:
-		return WorkflowProfileSessionPolicy(value)
-	default:
-		return WorkflowProfileSessionPolicyComplete
+	if WorkflowProfileSessionStartPolicy(value) == WorkflowProfileSessionStartPolicyNew {
+		return WorkflowProfileSessionStartPolicyNew
 	}
+	return WorkflowProfileSessionStartPolicyReuse
+}
+
+// WorkflowProfileSessionEndPolicy controls what happens to a fixed-profile
+// workflow step's session when the workflow leaves it for another profile.
+type WorkflowProfileSessionEndPolicy string
+
+const (
+	WorkflowProfileSessionEndPolicyComplete WorkflowProfileSessionEndPolicy = "complete"
+	WorkflowProfileSessionEndPolicyPark     WorkflowProfileSessionEndPolicy = "park"
+)
+
+// NormalizeWorkflowProfileSessionEndPolicy returns the safe default for empty
+// and unknown workflow step session-end policy values.
+func NormalizeWorkflowProfileSessionEndPolicy(value string) WorkflowProfileSessionEndPolicy {
+	value = strings.TrimSpace(value)
+	if WorkflowProfileSessionEndPolicy(value) == WorkflowProfileSessionEndPolicyPark {
+		return WorkflowProfileSessionEndPolicyPark
+	}
+	return WorkflowProfileSessionEndPolicyComplete
 }
 
 // WorkflowSource values are persisted in workflows.source and record where a

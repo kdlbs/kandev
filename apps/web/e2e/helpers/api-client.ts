@@ -9,7 +9,8 @@ import type {
   MCPTaskAgentProfileDefault,
   RepositoryBranchPolicy,
   AgentProfileRecentUseApiRecord,
-  WorkflowProfileSessionPolicy,
+  WorkflowProfileSessionStartPolicy,
+  WorkflowProfileSessionEndPolicy,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
@@ -788,7 +789,8 @@ export class ApiClient {
     opts?: {
       is_start_step?: boolean;
       agent_profile_id?: string;
-      profile_session_policy?: WorkflowProfileSessionPolicy;
+      profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+      profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
       events?: {
         on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -802,8 +804,11 @@ export class ApiClient {
       position,
       ...(opts?.is_start_step != null ? { is_start_step: opts.is_start_step } : {}),
       ...(opts?.agent_profile_id ? { agent_profile_id: opts.agent_profile_id } : {}),
-      ...(opts?.profile_session_policy
-        ? { profile_session_policy: opts.profile_session_policy }
+      ...(opts?.profile_session_start_policy
+        ? { profile_session_start_policy: opts.profile_session_start_policy }
+        : {}),
+      ...(opts?.profile_session_end_policy
+        ? { profile_session_end_policy: opts.profile_session_end_policy }
         : {}),
       ...(opts?.events != null ? { events: opts.events } : {}),
     });
@@ -1214,7 +1219,8 @@ export class ApiClient {
       pull_from_step_id?: string | null;
       cancel_triggers_turn_complete?: boolean;
       stage_type?: "work" | "review" | "approval" | "custom";
-      profile_session_policy?: WorkflowProfileSessionPolicy;
+      profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+      profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
     },
   ): Promise<void> {
     await this.request("PUT", `/api/v1/workflow/steps/${stepId}`, { id: stepId, ...updates });

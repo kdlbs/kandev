@@ -28,6 +28,12 @@ vi.mock("@/hooks/domains/settings/use-healthy-agent-profiles", () => ({
   ],
 }));
 
+vi.mock("@/components/agent-logo", () => ({
+  AgentLogo: ({ agentName }: { agentName: string }) => (
+    <span data-testid={`agent-logo-${agentName}`} aria-hidden="true" />
+  ),
+}));
+
 const step = {
   id: "step-1",
   workflow_id: "workflow-1",
@@ -35,7 +41,8 @@ const step = {
   position: 0,
   color: "bg-blue-500",
   agent_profile_id: "profile-a",
-  profile_session_policy: "complete",
+  profile_session_start_policy: "reuse",
+  profile_session_end_policy: "complete",
   created_at: "",
   updated_at: "",
 } as WorkflowStep;
@@ -74,36 +81,45 @@ describe("WorkflowStepAgentProfileSelector", () => {
     await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 
-  it("uses nested session behavior navigation and reports the selected policy", () => {
+  it("uses nested lifecycle navigation and updates start and end independently", () => {
     const { onUpdate, trigger } = renderSelector();
 
     fireEvent.click(trigger);
-    fireEvent.click(screen.getByTestId("step-1-profile-session-policy-select"));
-    expect(screen.getByText("Park and reuse the previous session")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("step-1-profile-session-lifecycle-select"));
+    expect(screen.getByText("When this step starts:")).toBeTruthy();
+    expect(screen.getByText("When this step ends:")).toBeTruthy();
 
-    fireEvent.click(screen.getByTestId("step-1-profile-session-policy-park_new"));
+    fireEvent.click(screen.getByTestId("step-1-profile-session-start-new"));
+    fireEvent.click(screen.getByTestId("step-1-profile-session-end-park"));
 
-    expect(onUpdate).toHaveBeenCalledWith({ profile_session_policy: "park_new" });
+    expect(onUpdate).toHaveBeenNthCalledWith(1, { profile_session_start_policy: "new" });
+    expect(onUpdate).toHaveBeenNthCalledWith(2, { profile_session_end_policy: "park" });
   });
 
   it("renders the same nested surface in the mobile drawer", () => {
     breakpoint.isMobile = true;
-    const { trigger } = renderSelector({ profile_session_policy: "park_reuse" });
+    const { trigger } = renderSelector({
+      profile_session_start_policy: "new",
+      profile_session_end_policy: "park",
+    });
 
     fireEvent.click(trigger);
     expect(screen.getByRole("heading", { name: "Agent Profile" })).toBeTruthy();
-    fireEvent.click(screen.getByTestId("step-1-profile-session-policy-select"));
-    expect(
-      screen.getByRole("heading", { name: "Session handling when the profile changes" }),
-    ).toBeTruthy();
+    fireEvent.click(screen.getByTestId("step-1-profile-session-lifecycle-select"));
+    expect(screen.getByRole("heading", { name: "Session lifecycle" })).toBeTruthy();
   });
 
   it("keeps the current profile and policy visible while read-only", () => {
-    const { trigger } = renderSelector({ profile_session_policy: "park_reuse" }, true);
+    const { trigger } = renderSelector(
+      { profile_session_start_policy: "new", profile_session_end_policy: "park" },
+      true,
+    );
 
     expect((trigger as HTMLButtonElement).disabled).toBe(true);
     expect(trigger.textContent).toContain("Codex • Fast");
-    expect(trigger.textContent).toContain("Park and reuse the previous session");
+    expect(trigger.textContent).toContain("New on start");
+    expect(trigger.textContent).toContain("Park on end");
+    expect(screen.getByTestId("agent-logo-codex")).toBeTruthy();
   });
 
   it("keeps profile switching disabled when conditional session settings are configured", () => {

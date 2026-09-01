@@ -1,6 +1,7 @@
 import { generateUUID } from "@/lib/utils";
 import {
-  normalizeWorkflowProfileSessionPolicy,
+  normalizeWorkflowProfileSessionStartPolicy,
+  normalizeWorkflowProfileSessionEndPolicy,
   workflowId as toWorkflowId,
   type Workflow,
   type WorkflowStep,
@@ -78,7 +79,12 @@ function cloneWorkflowStep(
     show_in_command_panel: source.show_in_command_panel,
     auto_archive_after_hours: source.auto_archive_after_hours,
     agent_profile_id: source.agent_profile_id,
-    profile_session_policy: normalizeWorkflowProfileSessionPolicy(source.profile_session_policy),
+    profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
+      source.profile_session_start_policy,
+    ),
+    profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
+      source.profile_session_end_policy,
+    ),
     auto_advance_requires_signal: source.auto_advance_requires_signal,
     cancel_triggers_turn_complete: source.cancel_triggers_turn_complete,
     wip_limit: source.wip_limit,

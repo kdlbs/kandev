@@ -386,7 +386,8 @@ describe("persistWorkflowDraft cancellation policy", () => {
         ...step(CLIENT_STEP_ONE, "Todo", 0, true),
         workflow_id: draftWorkflow.id,
         cancel_triggers_turn_complete: true,
-        profile_session_policy: "park_new",
+        profile_session_start_policy: "new",
+        profile_session_end_policy: "park",
       },
     ] as WorkflowStep[];
     vi.mocked(createWorkflowAction).mockResolvedValue({
@@ -411,7 +412,8 @@ describe("persistWorkflowDraft cancellation policy", () => {
     expect(createWorkflowStepAction).toHaveBeenCalledWith(
       expect.objectContaining({
         cancel_triggers_turn_complete: true,
-        profile_session_policy: "park_new",
+        profile_session_start_policy: "new",
+        profile_session_end_policy: "park",
       }),
     );
   });

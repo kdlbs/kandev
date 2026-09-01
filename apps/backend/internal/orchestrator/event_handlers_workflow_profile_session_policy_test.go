@@ -44,15 +44,16 @@ func (r failProfileSwitchPromotionRepo) SetSessionPrimary(context.Context, strin
 }
 
 type profileSwitchFixture struct {
-	repo       *sqliterepo.Repository
-	svc        *Service
-	agentMgr   *mockAgentManager
-	stepGetter *mockStepGetter
-	current    *models.TaskSession
-	policy     models.WorkflowProfileSessionPolicy
+	repo        *sqliterepo.Repository
+	svc         *Service
+	agentMgr    *mockAgentManager
+	stepGetter  *mockStepGetter
+	current     *models.TaskSession
+	startPolicy models.WorkflowProfileSessionStartPolicy
+	endPolicy   models.WorkflowProfileSessionEndPolicy
 }
 
-func newProfileSwitchFixture(t *testing.T, policy models.WorkflowProfileSessionPolicy) *profileSwitchFixture {
+func newProfileSwitchFixture(t *testing.T, startPolicy models.WorkflowProfileSessionStartPolicy, endPolicy models.WorkflowProfileSessionEndPolicy) *profileSwitchFixture {
 	t.Helper()
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -110,7 +111,7 @@ func newProfileSwitchFixture(t *testing.T, policy models.WorkflowProfileSessionP
 		},
 	}
 	return &profileSwitchFixture{
-		repo: repo, stepGetter: stepGetter, current: current, agentMgr: agentMgr, policy: policy,
+		repo: repo, stepGetter: stepGetter, current: current, agentMgr: agentMgr, startPolicy: startPolicy, endPolicy: endPolicy,
 		svc: createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr),
 	}
 }
@@ -153,7 +154,7 @@ func newParkedProfileSwitchEventFixture(t *testing.T) (*sqliterepo.Repository, *
 	return repo, svc, turnID
 }
 
-func TestSwitchSessionForStep_ParkReuseProfileSessionPolicy(t *testing.T) {
+func TestSwitchSessionForStep_ReuseOnStartParkOnEnd(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	now := time.Now().UTC()
@@ -207,9 +208,11 @@ func TestSwitchSessionForStep_ParkReuseProfileSessionPolicy(t *testing.T) {
 		},
 	}
 	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
-	step := &wfmodels.WorkflowStep{ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionPolicy: models.WorkflowProfileSessionPolicyParkReuse}
+	step := &wfmodels.WorkflowStep{ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyReuse, ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark}
 
-	selected, switched, err := svc.prepareWorkflowStepSession(ctx, "t1", current, step)
+	selected, switched, err := svc.prepareWorkflowStepSession(ctx, "t1", current, step,
+		&wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark},
+	)
 	if err != nil {
 		t.Fatalf("prepareWorkflowStepSession: %v", err)
 	}
@@ -248,7 +251,7 @@ func TestSwitchSessionForStep_ParkReuseProfileSessionPolicy(t *testing.T) {
 	}
 }
 
-func TestHandleAgentCompleted_ProfileSessionPolicySuppressesParkedSwitch(t *testing.T) {
+func TestHandleAgentCompleted_ProfileSessionStopIntentSuppressesParkedSwitch(t *testing.T) {
 	ctx := context.Background()
 	repo, svc, turnID := newParkedProfileSwitchEventFixture(t)
 
@@ -276,7 +279,7 @@ func TestHandleAgentCompleted_ProfileSessionPolicySuppressesParkedSwitch(t *test
 	}
 }
 
-func TestHandleAgentStopped_ProfileSessionPolicySuppressesParkedSwitch(t *testing.T) {
+func TestHandleAgentStopped_ProfileSessionStopIntentSuppressesParkedSwitch(t *testing.T) {
 	ctx := context.Background()
 	repo, svc, turnID := newParkedProfileSwitchEventFixture(t)
 
@@ -304,7 +307,7 @@ func TestHandleAgentStopped_ProfileSessionPolicySuppressesParkedSwitch(t *testin
 	}
 }
 
-func TestHandleAgentCompleted_ProfileSessionPolicySuppressesParkedSwitchAfterRestart(t *testing.T) {
+func TestHandleAgentCompleted_ProfileSessionStopIntentSuppressesParkedSwitchAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	repo, svc, turnID := newParkedProfileSwitchEventFixture(t)
 	event := watcher.AgentEventData{
@@ -343,7 +346,7 @@ func TestHandleAgentCompleted_ProfileSessionPolicySuppressesParkedSwitchAfterRes
 	}
 }
 
-func TestHandleAgentCompleted_ProfileSessionPolicyAllowsDifferentExecution(t *testing.T) {
+func TestHandleAgentCompleted_ProfileSessionStopIntentAllowsDifferentExecution(t *testing.T) {
 	ctx := context.Background()
 	repo, svc, turnID := newParkedProfileSwitchEventFixture(t)
 
@@ -369,7 +372,7 @@ func TestHandleAgentCompleted_ProfileSessionPolicyAllowsDifferentExecution(t *te
 
 func TestParkSessionForProfileSwitch_RejectsNaturalCompletionBeforeClaim(t *testing.T) {
 	ctx := context.Background()
-	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionPolicyParkReuse)
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
 	event := watcher.AgentEventData{
 		TaskID:           "t1",
 		SessionID:        fixture.current.ID,
@@ -416,7 +419,7 @@ func TestParkSessionForProfileSwitch_DelayedTerminalEventsConsumeClaim(t *testin
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionPolicyParkReuse)
+			fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
 			event := watcher.AgentEventData{
 				TaskID:           "t1",
 				SessionID:        fixture.current.ID,
@@ -488,7 +491,7 @@ func TestParkSessionForProfileSwitch_DelayedTerminalEventsConsumeClaim(t *testin
 
 func TestParkSessionForProfileSwitch_StopsAfterReleasingGuard(t *testing.T) {
 	ctx := context.Background()
-	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionPolicyParkReuse)
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
 	event := watcher.AgentEventData{
 		TaskID:           "t1",
 		SessionID:        fixture.current.ID,
@@ -534,12 +537,14 @@ func TestParkSessionForProfileSwitch_StopsAfterReleasingGuard(t *testing.T) {
 	}
 }
 
-func TestSwitchSessionForStep_ParkReuseProfileSessionPolicyRoundTrip(t *testing.T) {
+func TestSwitchSessionForStep_ReuseOnStartParkOnEndRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionPolicyParkReuse)
-	stepB := &wfmodels.WorkflowStep{ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionPolicy: fixture.policy}
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	stepB := &wfmodels.WorkflowStep{ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionStartPolicy: fixture.startPolicy, ProfileSessionEndPolicy: fixture.endPolicy}
 
-	profileB, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, stepB)
+	profileB, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, stepB,
+		&wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", ProfileSessionEndPolicy: fixture.endPolicy},
+	)
 	if err != nil {
 		t.Fatalf("switch to profile-b: %v", err)
 	}
@@ -562,8 +567,10 @@ func TestSwitchSessionForStep_ParkReuseProfileSessionPolicyRoundTrip(t *testing.
 	}
 
 	fixture.stepGetter.workflowAgentProfileID = "profile-a"
-	stepA := &wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", Position: 2, ProfileSessionPolicy: fixture.policy}
-	profileA, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", profileB, stepA)
+	stepA := &wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", Position: 2, ProfileSessionStartPolicy: fixture.startPolicy, ProfileSessionEndPolicy: fixture.endPolicy}
+	profileA, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", profileB, stepA,
+		&wfmodels.WorkflowStep{ID: "step-b", WorkflowID: "wf1", ProfileSessionEndPolicy: fixture.endPolicy},
+	)
 	if err != nil {
 		t.Fatalf("switch back to profile-a: %v", err)
 	}
@@ -594,12 +601,14 @@ func TestSwitchSessionForStep_ParkReuseProfileSessionPolicyRoundTrip(t *testing.
 	}
 }
 
-func TestSwitchSessionForStep_ParkNewProfileSessionPolicyRoundTrip(t *testing.T) {
+func TestSwitchSessionForStep_NewOnStartParkOnEndRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionPolicyParkNew)
-	stepB := &wfmodels.WorkflowStep{ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionPolicy: fixture.policy}
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyNew, models.WorkflowProfileSessionEndPolicyPark)
+	stepB := &wfmodels.WorkflowStep{ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionStartPolicy: fixture.startPolicy, ProfileSessionEndPolicy: fixture.endPolicy}
 
-	profileB, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, stepB)
+	profileB, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, stepB,
+		&wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", ProfileSessionEndPolicy: fixture.endPolicy},
+	)
 	if err != nil {
 		t.Fatalf("switch to profile-b: %v", err)
 	}
@@ -608,8 +617,10 @@ func TestSwitchSessionForStep_ParkNewProfileSessionPolicyRoundTrip(t *testing.T)
 	}
 
 	fixture.stepGetter.workflowAgentProfileID = "profile-a"
-	stepA := &wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", Position: 2, ProfileSessionPolicy: fixture.policy}
-	profileA, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", profileB, stepA)
+	stepA := &wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", Position: 2, ProfileSessionStartPolicy: fixture.startPolicy, ProfileSessionEndPolicy: fixture.endPolicy}
+	profileA, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", profileB, stepA,
+		&wfmodels.WorkflowStep{ID: "step-b", WorkflowID: "wf1", ProfileSessionEndPolicy: fixture.endPolicy},
+	)
 	if err != nil {
 		t.Fatalf("switch back to profile-a: %v", err)
 	}
@@ -640,9 +651,92 @@ func TestSwitchSessionForStep_ParkNewProfileSessionPolicyRoundTrip(t *testing.T)
 	}
 }
 
-func TestSwitchSessionForStep_ParkProfileSessionPolicyPreservesSourceWhenIntentWriteFails(t *testing.T) {
+func TestSwitchSessionForStep_UsesDestinationStartAndSourceEndIndependently(t *testing.T) {
+	tests := []struct {
+		name            string
+		startPolicy     models.WorkflowProfileSessionStartPolicy
+		endPolicy       models.WorkflowProfileSessionEndPolicy
+		wantSourceState models.TaskSessionState
+		wantExistingID  bool
+	}{
+		{
+			name:            "reuse and complete",
+			startPolicy:     models.WorkflowProfileSessionStartPolicyReuse,
+			endPolicy:       models.WorkflowProfileSessionEndPolicyComplete,
+			wantSourceState: models.TaskSessionStateCompleted,
+			wantExistingID:  true,
+		},
+		{
+			name:            "reuse and park",
+			startPolicy:     models.WorkflowProfileSessionStartPolicyReuse,
+			endPolicy:       models.WorkflowProfileSessionEndPolicyPark,
+			wantSourceState: models.TaskSessionStateWaitingForInput,
+			wantExistingID:  true,
+		},
+		{
+			name:            "new and complete",
+			startPolicy:     models.WorkflowProfileSessionStartPolicyNew,
+			endPolicy:       models.WorkflowProfileSessionEndPolicyComplete,
+			wantSourceState: models.TaskSessionStateCompleted,
+			wantExistingID:  false,
+		},
+		{
+			name:            "new and park",
+			startPolicy:     models.WorkflowProfileSessionStartPolicyNew,
+			endPolicy:       models.WorkflowProfileSessionEndPolicyPark,
+			wantSourceState: models.TaskSessionStateWaitingForInput,
+			wantExistingID:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := newProfileSwitchFixture(t, tt.startPolicy, tt.endPolicy)
+			candidate := &models.TaskSession{
+				ID: "session-b-existing", TaskID: "t1", AgentProfileID: "profile-b",
+				ExecutorID: "exec-local", ExecutorProfileID: "ep1", State: models.TaskSessionStateWaitingForInput,
+				StartedAt: time.Now().UTC().Add(-time.Minute), UpdatedAt: time.Now().UTC().Add(-time.Minute),
+			}
+			require.NoError(t, fixture.repo.CreateTaskSession(ctx, candidate))
+
+			// Deliberately put the opposite end value on the destination. Only
+			// the source step is allowed to decide how session-a is retired.
+			targetEndPolicy := models.WorkflowProfileSessionEndPolicyComplete
+			if tt.endPolicy == models.WorkflowProfileSessionEndPolicyComplete {
+				targetEndPolicy = models.WorkflowProfileSessionEndPolicyPark
+			}
+			target := &wfmodels.WorkflowStep{
+				ID: "step-b", WorkflowID: "wf1", Position: 1,
+				AgentProfileID: "profile-b", ProfileSessionStartPolicy: tt.startPolicy,
+				ProfileSessionEndPolicy: targetEndPolicy,
+			}
+			source := &wfmodels.WorkflowStep{
+				ID: "step-a", WorkflowID: "wf1", Position: 0,
+				AgentProfileID: "profile-a", ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyNew,
+				ProfileSessionEndPolicy: tt.endPolicy,
+			}
+
+			selected, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, target, source)
+			require.NoError(t, err)
+			require.True(t, switched)
+			require.NotNil(t, selected)
+			if tt.wantExistingID {
+				require.Equal(t, candidate.ID, selected.ID)
+			} else {
+				require.NotEqual(t, candidate.ID, selected.ID)
+			}
+
+			sourceSession, err := fixture.repo.GetTaskSession(ctx, fixture.current.ID)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantSourceState, sourceSession.State)
+		})
+	}
+}
+
+func TestSwitchSessionForStep_ParkOnEndPreservesSourceWhenIntentWriteFails(t *testing.T) {
 	ctx := context.Background()
-	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionPolicyParkReuse)
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
 	if _, err := fixture.svc.messageQueue.QueueMessage(
 		ctx, fixture.current.ID, "t1", "queued handoff", "", messagequeue.QueuedByUser, false, nil,
 	); err != nil {
@@ -651,8 +745,8 @@ func TestSwitchSessionForStep_ParkProfileSessionPolicyPreservesSourceWhenIntentW
 	fixture.svc.repo = failParkIntentRepo{repoStore: fixture.repo, remover: fixture.repo, marker: fixture.repo}
 
 	_, _, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, &wfmodels.WorkflowStep{
-		ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionPolicy: fixture.policy,
-	})
+		ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionStartPolicy: fixture.startPolicy,
+	}, &wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", ProfileSessionEndPolicy: fixture.endPolicy})
 	if err == nil {
 		t.Fatal("parked profile switch error = nil, want stop-intent persistence failure")
 	}
@@ -679,10 +773,10 @@ func TestSwitchSessionForStep_ParkProfileSessionPolicyPreservesSourceWhenIntentW
 	}
 }
 
-func TestSwitchSessionForStep_ParkProfileSessionPolicyRestoresQueueAfterReuseParkingFails(t *testing.T) {
+func TestSwitchSessionForStep_ParkOnEndRestoresQueueAfterReuseParkingFails(t *testing.T) {
 	ctx := context.Background()
-	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionPolicyParkReuse)
-	stepB := &wfmodels.WorkflowStep{ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionPolicy: fixture.policy}
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	stepB := &wfmodels.WorkflowStep{ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionStartPolicy: fixture.startPolicy}
 
 	profileB, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, stepB)
 	if err != nil || !switched || profileB == nil {
@@ -701,8 +795,8 @@ func TestSwitchSessionForStep_ParkProfileSessionPolicyRestoresQueueAfterReusePar
 	fixture.svc.repo = failParkIntentRepo{repoStore: fixture.repo, remover: fixture.repo, marker: fixture.repo}
 	fixture.stepGetter.workflowAgentProfileID = "profile-a"
 	_, _, err = fixture.svc.prepareWorkflowStepSession(ctx, "t1", currentB, &wfmodels.WorkflowStep{
-		ID: "step-a", WorkflowID: "wf1", Position: 2, ProfileSessionPolicy: fixture.policy,
-	})
+		ID: "step-a", WorkflowID: "wf1", Position: 2, ProfileSessionStartPolicy: fixture.startPolicy,
+	}, &wfmodels.WorkflowStep{ID: "step-b", WorkflowID: "wf1", ProfileSessionEndPolicy: fixture.endPolicy})
 	if err == nil {
 		t.Fatal("reuse profile switch error = nil, want stop-intent persistence failure")
 	}
@@ -724,14 +818,14 @@ func TestSwitchSessionForStep_ParkProfileSessionPolicyRestoresQueueAfterReusePar
 	}
 }
 
-func TestSwitchSessionForStep_ParkProfileSessionPolicyContinuesWhenRuntimeStopFails(t *testing.T) {
+func TestSwitchSessionForStep_ParkOnEndContinuesWhenRuntimeStopFails(t *testing.T) {
 	ctx := context.Background()
-	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionPolicyParkReuse)
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
 	fixture.agentMgr.stopAgentErr = errors.New("runtime teardown failed")
 
 	selected, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, &wfmodels.WorkflowStep{
-		ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionPolicy: fixture.policy,
-	})
+		ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionStartPolicy: fixture.startPolicy,
+	}, &wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", ProfileSessionEndPolicy: fixture.endPolicy})
 	if err != nil {
 		t.Fatalf("profile switch with runtime stop failure: %v", err)
 	}
@@ -748,51 +842,5 @@ func TestSwitchSessionForStep_ParkProfileSessionPolicyContinuesWhenRuntimeStopFa
 	intent, ok := workflowProfileSwitchStopIntentFromMetadata(source.Metadata)
 	if !ok || intent.Consumed {
 		t.Fatalf("source stop intent after runtime stop failure = %#v, want active intent", source.Metadata[models.SessionMetaKeyWorkflowProfileSwitchStopIntent])
-	}
-}
-
-func TestSwitchSessionForStep_ParkProfileSessionPolicyPreservesSourceWhenPromotionFails(t *testing.T) {
-	ctx := context.Background()
-	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionPolicyParkReuse)
-	if _, err := fixture.svc.messageQueue.QueueMessage(
-		ctx, fixture.current.ID, "t1", "queued promotion handoff", "", messagequeue.QueuedByUser, false, nil,
-	); err != nil {
-		t.Fatalf("queue promotion handoff: %v", err)
-	}
-	fixture.svc.messageQueue.SetPendingMove(ctx, fixture.current.ID, &messagequeue.PendingMove{
-		TaskID:         "t1",
-		WorkflowID:     "wf1",
-		WorkflowStepID: "step-b",
-	})
-	promotionErr := errors.New("destination promotion failed")
-	fixture.svc.repo = failProfileSwitchPromotionRepo{repoStore: fixture.repo, err: promotionErr}
-
-	_, _, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, &wfmodels.WorkflowStep{
-		ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionPolicy: fixture.policy,
-	})
-	if !errors.Is(err, promotionErr) {
-		t.Fatalf("parked profile switch error = %v, want promotion failure", err)
-	}
-
-	source, err := fixture.repo.GetTaskSession(ctx, fixture.current.ID)
-	if err != nil {
-		t.Fatalf("reload source session: %v", err)
-	}
-	if source.State != models.TaskSessionStateRunning || !source.IsPrimary {
-		t.Fatalf("source after promotion failure = state %s primary %t, want running primary", source.State, source.IsPrimary)
-	}
-	if source.CompletedAt != nil {
-		t.Fatal("source after promotion failure must not be completed")
-	}
-	if _, ok := source.Metadata[models.SessionMetaKeyWorkflowProfileSwitchStopIntent]; ok {
-		t.Fatal("promotion failure must not leave stop metadata")
-	}
-	status := fixture.svc.messageQueue.GetStatus(ctx, fixture.current.ID)
-	if status.Count != 1 || status.Entries[0].Content != "queued promotion handoff" {
-		t.Fatalf("source queue after promotion failure = %+v, want queued promotion handoff preserved", status.Entries)
-	}
-	move, exists := fixture.svc.messageQueue.GetPendingMove(ctx, fixture.current.ID)
-	if !exists || move == nil || move.WorkflowStepID != "step-b" {
-		t.Fatalf("source pending move after promotion failure = %+v exists=%t, want step-b preserved", move, exists)
 	}
 }
