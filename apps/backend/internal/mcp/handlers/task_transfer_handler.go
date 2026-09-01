@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"time"
 
 	"github.com/kandev/kandev/internal/auth/authn"
@@ -55,7 +57,7 @@ const rejectedTaskTransferAuditTimeout = 2 * time.Second
 
 func (h *Handlers) handleTransferTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var request taskTransferRequest
-	if err := json.Unmarshal(msg.Payload, &request); err != nil {
+	if err := decodeTaskTransferRequest(msg.Payload, &request); err != nil {
 		h.auditRejectedTaskTransfer(ctx, request, "failed")
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid task transfer payload", nil)
 	}
@@ -89,6 +91,18 @@ func (h *Handlers) handleTransferTask(ctx context.Context, msg *ws.Message) (*ws
 	default:
 		return ws.NewResponse(msg.ID, msg.Action, receipt)
 	}
+}
+
+func decodeTaskTransferRequest(payload []byte, request *taskTransferRequest) error {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(request); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return errors.New("task transfer payload must contain one JSON value")
+	}
+	return nil
 }
 
 func (h *Handlers) auditRejectedTaskTransfer(ctx context.Context, request taskTransferRequest, result string) {

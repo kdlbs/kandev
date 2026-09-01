@@ -118,7 +118,7 @@ func TestHandleTransferTaskAttributesRejectedHumanAttempt(t *testing.T) {
 	require.Equal(t, "human-1", transfer.audits[0].Actor.ID)
 }
 
-func TestHandleTransferTaskIgnoresClientAuditOnlyField(t *testing.T) {
+func TestHandleTransferTaskRejectsClientAuditOnlyFieldWithoutTransfer(t *testing.T) {
 	transfer := &recordingTaskTransferService{}
 	h := &Handlers{taskTransferSvc: transfer, logger: testLogger(t)}
 	message := transferTaskMessage(t)
@@ -132,9 +132,9 @@ func TestHandleTransferTaskIgnoresClientAuditOnlyField(t *testing.T) {
 		message,
 	)
 	require.NoError(t, err)
-	require.Equal(t, ws.MessageTypeResponse, response.Type)
-	require.Len(t, transfer.commands, 1)
-	require.Empty(t, transfer.audits)
+	require.Equal(t, ws.MessageTypeError, response.Type)
+	require.Empty(t, transfer.commands)
+	require.Len(t, transfer.audits, 1)
 }
 
 func TestHandleTransferTaskAllowsCoordinatorReplayFromDestinationWorkspace(t *testing.T) {
