@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -625,21 +626,26 @@ func TestTaskTransferSerializationBlocksConcurrentSQLiteRelationWriter(t *testin
 	if err := repo.lockTaskTransferRelations(context.Background(), tx, nil, nil, transferRelationInventory{}); err != nil {
 		t.Fatalf("lockTaskTransferRelations: %v", err)
 	}
-	writerStarted := make(chan struct{})
+	waitCount := repo.db.Stats().WaitCount
 	writerDone := make(chan error, 1)
 	go func() {
-		close(writerStarted)
 		_, writeErr := repo.db.Exec(`INSERT INTO pending_moves
 			(id, session_id, task_id, workflow_id, workflow_step_id, step_position, queued_at)
 			VALUES (?, ?, ?, ?, ?, 0, ?)`, "pending-race", "session-race", task.ID,
 			"wf-source", "step-source-blocked", time.Now().UTC())
 		writerDone <- writeErr
 	}()
-	<-writerStarted
+	deadline := time.Now().Add(2 * time.Second)
+	for repo.db.Stats().WaitCount == waitCount && time.Now().Before(deadline) {
+		runtime.Gosched()
+	}
+	if repo.db.Stats().WaitCount == waitCount {
+		t.Fatal("relation writer never reached the held SQLite writer connection")
+	}
 	select {
 	case writeErr := <-writerDone:
 		t.Fatalf("relation writer bypassed transfer serialization: %v", writeErr)
-	case <-time.After(50 * time.Millisecond):
+	default:
 	}
 	if err := tx.Rollback(); err != nil {
 		t.Fatalf("Rollback: %v", err)

@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
+
+const taskTransferPostCommitTimeout = 10 * time.Second
 
 type taskTransferRepository interface {
 	TransferTask(context.Context, models.TaskTransferCommand) (*models.TaskTransferReceipt, error)
@@ -63,8 +66,10 @@ func (s *Service) TransferTask(
 		return nil, err
 	}
 	if !receipt.IdempotentReplay {
-		s.publishTaskTransferUpdate(ctx, receipt)
-		s.pullNextTaskOnVacate(ctx, receipt.SourceStepID, receipt.TaskID)
+		postCommitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), taskTransferPostCommitTimeout)
+		defer cancel()
+		s.publishTaskTransferUpdate(postCommitCtx, receipt)
+		s.pullNextTaskOnVacate(postCommitCtx, receipt.SourceStepID, receipt.TaskID)
 	}
 	return receipt, nil
 }

@@ -51,6 +51,26 @@ func TestServiceTransferTaskAuthorizesBothWorkspacesAndPublishesOneCanonicalUpda
 	if moved != 0 || updated != 1 {
 		t.Fatalf("events moved=%d updated=%d", moved, updated)
 	}
+	published := eventBus.GetPublishedEvents()
+	data, ok := published[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("task.updated data = %T, want map[string]interface{}", published[0].Data)
+	}
+	for key, want := range map[string]interface{}{
+		"workspace_id":          receipt.DestinationWorkspaceID,
+		"workflow_id":           receipt.DestinationWorkflowID,
+		"workflow_step_id":      receipt.DestinationStepID,
+		"old_workflow_id":       receipt.SourceWorkflowID,
+		"source_workspace_id":   receipt.SourceWorkspaceID,
+		"source_workflow_id":    receipt.SourceWorkflowID,
+		"source_step_id":        receipt.SourceStepID,
+		"transfer_operation_id": receipt.OperationID,
+		"preservation_digest":   receipt.PreservationDigest,
+	} {
+		if got := data[key]; got != want {
+			t.Fatalf("task.updated %s = %#v, want %#v", key, got, want)
+		}
+	}
 }
 
 func TestServiceTransferTaskReconcilesVacatedSourceWIP(t *testing.T) {
@@ -94,6 +114,84 @@ func TestServiceTransferTaskReconcilesVacatedSourceWIP(t *testing.T) {
 	}
 	if !stored.WIPAdmitted || stored.QueuedForStepID != "" {
 		t.Fatalf("vacated source WIP was not reconciled: %+v", stored)
+	}
+}
+
+type cancelAfterTaskTransferRepository struct {
+	*sqliterepo.Repository
+	cancel context.CancelFunc
+}
+
+func (r *cancelAfterTaskTransferRepository) TransferTask(
+	ctx context.Context,
+	command models.TaskTransferCommand,
+) (*models.TaskTransferReceipt, error) {
+	receipt, err := r.Repository.TransferTask(ctx, command)
+	if err == nil {
+		r.cancel()
+	}
+	return receipt, err
+}
+
+func TestServiceTransferTaskFinishesCommittedReconciliationAfterCancellation(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	task := seedServiceTaskTransfer(t, repo, "owner-1")
+	if _, err := repo.DB().Exec(`UPDATE workflow_steps SET wip_limit = 1 WHERE id IN (?, ?)`,
+		"transfer-step-source", "transfer-step-destination"); err != nil {
+		t.Fatalf("set WIP limits: %v", err)
+	}
+	if _, err := repo.DB().Exec(`UPDATE tasks SET wip_admitted = 1, queued_for_step_id = '' WHERE id = ?`,
+		task.ID); err != nil {
+		t.Fatalf("admit transfer task: %v", err)
+	}
+	task, err := repo.GetTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("GetTask transfer task: %v", err)
+	}
+	queued := &models.Task{
+		ID: "transfer-cancel-queued", WorkspaceID: "transfer-ws-source", WorkflowID: "transfer-wf-source",
+		WorkflowStepID: "transfer-step-source", Title: "Queued", State: v1.TaskStateTODO,
+		QueuedForStepID: "transfer-step-source", WIPAdmitted: false,
+	}
+	if err := repo.CreateTask(context.Background(), queued); err != nil {
+		t.Fatalf("CreateTask queued: %v", err)
+	}
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"transfer-step-source": {
+			ID: "transfer-step-source", WorkflowID: "transfer-wf-source", Name: "Work", WIPLimit: 1,
+		},
+	}})
+
+	identityCtx := authn.WithIdentity(
+		context.Background(),
+		authn.Identity{UserID: "owner-1", Role: authn.RoleMember},
+	)
+	ctx, cancel := context.WithCancel(identityCtx)
+	defer cancel()
+	svc.tasks = &cancelAfterTaskTransferRepository{Repository: repo, cancel: cancel}
+
+	command := serviceTaskTransferCommand(task)
+	command.ExpectedTaskUpdatedAt = task.UpdatedAt
+	if _, err := svc.TransferTask(ctx, command); err != nil {
+		t.Fatalf("TransferTask: %v", err)
+	}
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 3 || published[0].Type != events.TaskUpdated ||
+		published[1].Type != events.TaskUpdated || published[2].Type != events.TaskQueuePromoted {
+		t.Fatalf("post-commit events = %#v, want transfer update then queued-task update and promotion", published)
+	}
+	for index, wantTaskID := range []string{task.ID, queued.ID, queued.ID} {
+		data, ok := published[index].Data.(map[string]interface{})
+		if !ok || data["task_id"] != wantTaskID {
+			t.Fatalf("post-commit event %d data = %#v, want task_id %q", index, published[index].Data, wantTaskID)
+		}
+	}
+	stored, err := repo.GetTask(context.Background(), queued.ID)
+	if err != nil {
+		t.Fatalf("GetTask queued: %v", err)
+	}
+	if !stored.WIPAdmitted || stored.QueuedForStepID != "" {
+		t.Fatalf("cancelled request dropped source WIP reconciliation: %+v", stored)
 	}
 }
 
