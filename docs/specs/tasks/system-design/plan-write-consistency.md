@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: tasks
 requirements:
   - REQ-TASKS-PLAN-WRITE-CONSISTENCY-001
@@ -16,9 +16,9 @@ owners:
 
 ## Purpose and boundaries
 
-This design closes the window between the state a plan write reads and the state
-it commits against. It does not change the truncation thresholds, the warning
-text, the response shape of a non-truncating write, or the missing-task boundary
+This design closes the window between a plan read and its commit. It does not
+change the truncation thresholds, the response
+shape of a non-truncating write, or the missing-task boundary
 owned by `docs/specs/tasks/system-design/plan-write-lifecycle.md`.
 
 ## Requirement mapping
@@ -35,8 +35,6 @@ Ids below abbreviate `REQ-TASKS-PLAN-WRITE-CONSISTENCY-00N`.
 
 ## Current state
 
-Two writers exist; neither excludes the other.
-
 - Agent path: `internal/mcp/handlers.handleCreateTaskPlan` and
   `handleUpdateTaskPlan` call `evaluatePlanWriteGuard`, then
   `PlanService.CreatePlan` / `UpdatePlan` with `ForceNewRevision` from the guard.
@@ -52,9 +50,8 @@ happens later in `WritePlanRevision` on the single-connection writer pool.
 `SetMaxOpenConns(1)` serializes commits against each other but not a reader against a
 commit, so read(A), read(B), commit(B), commit(A) is unprevented.
 
-`PlanService` holds no lock. `WritePlanRevision` computes `max(revision_number) + 1`
-inside its transaction, so numbering is already safe; the coalesce target and the
-truncation decision are not.
+`WritePlanRevision` already computes `max(revision_number) + 1` in its transaction.
+The coalesce target and truncation decision are not safe.
 
 ## Chosen mechanism
 
@@ -129,8 +126,10 @@ caller selects it rather than performing it:
 - The write result carries what the caller needs to render a warning;
   `PlanWriteResult` below names the fields.
 - The MCP handler keeps ownership of the warning string. `planTruncationWarning`
-  stays in `internal/mcp/handlers` with its format string, wording and "revision 0
-  means unknown" convention unchanged. Its signature is not: it measures the code
+  stays in `internal/mcp/handlers` with its "revision 0 means unknown" convention.
+  An unknown number does not prove that history contains the replaced content.
+  Therefore, that warning does not claim preservation or recovery. Its signature
+  changes because it measures the code
   points itself today, but the handler no longer holds the replaced content, which
   exists only inside the critical section. It takes the counts instead,
   `(replacedRunes, newRunes, priorRevisionNumber int)`, and the measurement moves into
@@ -171,15 +170,8 @@ type PlanWriteResult struct {
 }
 ```
 
-Blast radius, counted: two service methods; four call
-sites, the create and update handlers in `internal/mcp/handlers/handlers.go`
-and the two WebSocket handlers in `internal/task/handlers/task_plan_handlers.go`;
-and 36 `.CreatePlan(` / `.UpdatePlan(` call sites across `*_test.go`. The two browser
-call sites read `.Plan` and are otherwise untouched, keeping
-`AC-TASKS-PLAN-WRITE-CONSISTENCY-004.1` and `003.2` true. Separately,
-`PlanRepository.WritePlanRevision` gains the metadata-preserve flags required by
-"Existing behavior that must change": one production implementation, two production
-call sites, three test fakes and roughly twenty test call sites.
+The two browser call sites read `.Plan` and are otherwise unchanged. This keeps
+`AC-TASKS-PLAN-WRITE-CONSISTENCY-004.1` and `003.2` true.
 
 ### Scope of the critical section
 
@@ -359,7 +351,9 @@ into the update branch alone,
 `title = CASE WHEN ? THEN task_plans.title ELSE excluded.title END` and likewise for
 `created_by`, so a task with no HEAD row still inserts the default while an existing
 row keeps its stored value. Only `content` and `updated_at` are written
-unconditionally.
+unconditionally. After the upsert, the same transaction reads the stored title and
+author. The repository returns these values in the HEAD object. It also uses the
+stored title in the new revision. Thus, a later revert cannot apply a fallback title.
 
 Two consequences. `WritePlanRevision` is on the exported `PlanRepository` interface,
 so this changes it and every implementation; "Where the decision moves" counts
@@ -427,7 +421,9 @@ adds `plan_write_warning` and, when established, `prior_revision_number`.
   pre-write HEAD read was itself unknown the service has no identity to report: the
   struct it handed the repository carries only the fabricated pair "Existing behavior
   that must change" describes. It clears both before returning, so the caller reads
-  the identity as unknown rather than as a row that does not exist
+  the identity as unknown rather than as a row that does not exist. The repository
+  has already resolved the stored title and author in the write transaction. The
+  fallback result and its event can report that metadata as authoritative.
   (`005.8`). This path cannot tell the insert branch apart, so it clears
   unconditionally. `RevertPlan` is governed by the same rule and
   needs no substitute: it returns the revision it wrote, whose id, number and
@@ -522,7 +518,12 @@ the stored title and `created_by` unchanged rather than substituting `Plan`; a
 post-write re-read that fails, and one that reports no row, each returning success
 with the revision durable and no plan identity rather than the pair `upsertPlanHead`
 generated in memory, once through a create or update and once through a revert; an
-update whose HEAD read returns absent fails rather than recreating the plan, while
+unknown-HEAD update that verifies the stored title in HEAD, the new revision, the
+write result, and a later revert; a divergent HEAD and latest revision that verifies
+the warning names no unverified revision; an environment-gated PostgreSQL case for
+the metadata-preservation branches; a queued cancellation that observes the waiter
+registration before it cancels the caller; an update whose HEAD read returns absent
+fails rather than recreating the plan, while
 one whose HEAD read is unknown proceeds; and a revert to the latest
 revision forced to interleave with a same-author
 coalescing write commits the target content, not the content that write merged in.

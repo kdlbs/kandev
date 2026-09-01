@@ -246,8 +246,8 @@ func (r *Repository) NextTaskPlanRevisionNumber(ctx context.Context, taskID stri
 // author, created_at) are preserved. When nil or empty, a new revision row is inserted with
 // revision_number = MAX(existing)+1 and populated from rev.
 //
-// On success, rev is mutated to reflect the persisted state (ID, RevisionNumber, CreatedAt,
-// UpdatedAt).
+// On success, head contains the authoritative persisted title and created_by values. The rev is
+// mutated to reflect the persisted state (ID, RevisionNumber, CreatedAt, UpdatedAt).
 //
 // preserveTitle and preserveCreatedBy apply only when an existing HEAD row is found (the
 // ON CONFLICT branch): true keeps the row's stored title / created_by instead of overwriting
@@ -269,6 +269,7 @@ func (r *Repository) WritePlanRevision(
 	if err := upsertPlanHead(ctx, tx, r.db, head, now, preserveTitle, preserveCreatedBy); err != nil {
 		return err
 	}
+	rev.Title = head.Title
 	if coalesceLatestID != nil && *coalesceLatestID != "" {
 		if err := mergeRevisionInTx(ctx, tx, r.db, rev, *coalesceLatestID, now); err != nil {
 			return err
@@ -351,6 +352,20 @@ func upsertPlanHead(
 			return fmt.Errorf("upsert task plan head for task %s: %w", head.TaskID, ErrTaskNotFound)
 		}
 		return fmt.Errorf("upsert task plan head: %w", err)
+	}
+	if preserveTitle || preserveCreatedBy {
+		var storedTitle, storedCreatedBy string
+		if err := tx.QueryRowContext(ctx, db.Rebind(`
+			SELECT title, created_by FROM task_plans WHERE task_id = ?
+		`), head.TaskID).Scan(&storedTitle, &storedCreatedBy); err != nil {
+			return fmt.Errorf("read preserved task plan metadata: %w", err)
+		}
+		if preserveTitle {
+			head.Title = storedTitle
+		}
+		if preserveCreatedBy {
+			head.CreatedBy = storedCreatedBy
+		}
 	}
 	return nil
 }

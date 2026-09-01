@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +18,25 @@ import (
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
+
+func waitForPlanLockWaiters(t *testing.T, locks *planLockTable, taskID string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		locks.mu.Lock()
+		entry := locks.entries[taskID]
+		got := 0
+		if entry != nil {
+			got = entry.waiters
+		}
+		locks.mu.Unlock()
+		if got >= want {
+			return
+		}
+		runtime.Gosched()
+	}
+	t.Fatalf("task %q did not register %d lock holders or waiters", taskID, want)
+}
 
 // newFlakyPlanService builds a PlanService backed by the given underlying
 // repository but wrapped so every GetTaskPlan call from callCount onward
@@ -417,12 +437,7 @@ func TestUpdatePlanQueuedWriteCancelledWhileWaitingFailsAtItsOwnWriteAndDoesNotS
 		})
 		bDone <- err
 	}()
-
-	select {
-	case err := <-bDone:
-		t.Fatalf("B returned (err=%v) before A released the lock - it was never genuinely queued", err)
-	case <-time.After(100 * time.Millisecond):
-	}
+	waitForPlanLockWaiters(t, svc.locks, "task-queued-cancel", 2)
 
 	cancelB() // cancel while B is still queued behind A, before A's lock is released
 
@@ -488,50 +503,6 @@ func TestCreatePlanPostWriteReReadFailureStillReportsWrittenPlan(t *testing.T) {
 	}
 	if saved == nil || saved.ID != result.Plan.ID {
 		t.Fatalf("expected the reported ID to match the actually-persisted row: saved=%+v reported=%+v", saved, result.Plan)
-	}
-}
-
-// TestUpdatePlanPostWriteReReadFailureClearsFabricatedIdentityWhenHeadWasUnknown
-// covers AC-005.8 for the unknown-head path: both the pre-write HEAD read and
-// the post-write re-read fail, so upsertPlan cannot tell whether its
-// freshly-generated ID was actually used (a real row already existed and the
-// write took the ON CONFLICT branch). The reported plan's ID/CreatedAt must
-// be cleared, but the write itself must still have committed correctly,
-// including preserving the existing title via preserveTitle (AC-001.9).
-func TestUpdatePlanPostWriteReReadFailureClearsFabricatedIdentityWhenHeadWasUnknown(t *testing.T) {
-	_, eventBus, repo := createTestService(t)
-	ctx := context.Background()
-	seedTask(t, ctx, repo, "task-flaky-update")
-
-	seeded := &models.TaskPlan{TaskID: "task-flaky-update", Title: "Original", Content: "v1", CreatedBy: "agent"}
-	if err := repo.CreateTaskPlan(ctx, seeded); err != nil {
-		t.Fatalf("seed CreateTaskPlan: %v", err)
-	}
-
-	svc := newFlakyPlanService(t, repo, eventBus, 1) // every GetTaskPlan call fails
-	result, err := svc.UpdatePlan(ctx, UpdatePlanRequest{TaskID: "task-flaky-update", Content: "v2", CreatedBy: "agent"})
-	if err != nil {
-		t.Fatalf("UpdatePlan: %v", err)
-	}
-	if result.Plan.ID != "" {
-		t.Errorf("expected a cleared (unknown) ID after both reads failed, got %q", result.Plan.ID)
-	}
-	if !result.Plan.CreatedAt.IsZero() {
-		t.Errorf("expected a cleared (unknown) CreatedAt, got %v", result.Plan.CreatedAt)
-	}
-	if result.Plan.Content != "v2" {
-		t.Errorf("expected the in-memory plan to still report the content actually written, got %q", result.Plan.Content)
-	}
-
-	saved, err := repo.GetTaskPlan(ctx, "task-flaky-update")
-	if err != nil {
-		t.Fatalf("verify GetTaskPlan: %v", err)
-	}
-	if saved == nil || saved.Content != "v2" {
-		t.Fatalf("expected the write to have committed despite unreadable state, got %+v", saved)
-	}
-	if saved.Title != "Original" {
-		t.Errorf("expected the existing title preserved when the request omitted one and HEAD state was unknown, got %q", saved.Title)
 	}
 }
 
@@ -651,12 +622,7 @@ func TestRevertPlanQueuedBehindHeldWriteCancelledWhileWaitingFailsAtItsOwnWriteA
 		})
 		revertDone <- err
 	}()
-
-	select {
-	case err := <-revertDone:
-		t.Fatalf("RevertPlan returned (err=%v) before A released the lock - it was never genuinely queued", err)
-	case <-time.After(100 * time.Millisecond):
-	}
+	waitForPlanLockWaiters(t, svc.locks, "task-revert-queued-cancel", 2)
 
 	cancelRevert() // cancel while the revert is still queued behind A, before A's lock is released
 

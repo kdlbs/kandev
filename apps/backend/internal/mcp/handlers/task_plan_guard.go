@@ -20,12 +20,11 @@ import (
 // content is not hypothetical. The plan service computes these counts inside
 // its write's critical section, off the content it actually replaced.
 //
-// priorRevisionNumber of 0 means the prior revision could not be established
-// (the revision-history lookup itself failed after truncation was already
-// detected off the plan content). Revision numbering starts at 1
-// (NextTaskPlanRevisionNumber), so 0 is never a real revision — in that case
-// the "in plan revision N" clause is omitted rather than naming a revision
-// that cannot exist.
+// priorRevisionNumber of 0 means the prior revision could not be established.
+// The revision lookup can fail, or the latest revision can differ from the
+// replaced HEAD because of historical divergence. Revision numbering starts
+// at 1 (NextTaskPlanRevisionNumber), so 0 is never a real revision. In that
+// case the warning does not make an unverified preservation claim.
 //
 // It deliberately does NOT tell the caller to "recover" the content by
 // calling an MCP tool: none of the four registered plan tools can read a
@@ -42,9 +41,16 @@ func planTruncationWarning(replacedRunes, newRunes, priorRevisionNumber int) str
 	dropped := replacedRunes - newRunes
 	droppedPct := float64(dropped) / float64(replacedRunes) * 100
 
-	preservedIn := "the task's plan revision history"
-	if priorRevisionNumber > 0 {
-		preservedIn = fmt.Sprintf("plan revision %d, in the task's plan revision history", priorRevisionNumber)
+	if priorRevisionNumber <= 0 {
+		return fmt.Sprintf(
+			"WARNING: this write replaced %d chars with %d (dropped %d chars, %.0f%%). "+
+				"Plan writes REPLACE THE ENTIRE DOCUMENT — there is no partial update or append "+
+				"mode. Kandev could not verify which prior revision contains the pre-write content. "+
+				"The MCP plan tools cannot fetch past revisions. If this drop was not intentional, "+
+				"stop and inspect the task's revision history in the Kandev UI rather than rewriting "+
+				"the plan from memory.",
+			replacedRunes, newRunes, dropped, droppedPct,
+		)
 	}
 
 	return fmt.Sprintf(
@@ -54,7 +60,8 @@ func planTruncationWarning(replacedRunes, newRunes, priorRevisionNumber int) str
 			"but NOT fetchable through the MCP plan tools (get_task_plan_kandev returns the "+
 			"current, now-truncated, content, not that revision). If this drop was not "+
 			"intentional, stop and surface the loss rather than rewriting the plan from memory.",
-		replacedRunes, newRunes, dropped, droppedPct, preservedIn,
+		replacedRunes, newRunes, dropped, droppedPct,
+		fmt.Sprintf("plan revision %d, in the task's plan revision history", priorRevisionNumber),
 	)
 }
 

@@ -300,7 +300,7 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest, req
 	if rb.truncationDetected {
 		result.ReplacedRunes = utf8.RuneCountInString(rb.replacedContent)
 		result.NewRunes = utf8.RuneCountInString(req.Content)
-		if latestState == planRevisionFound {
+		if latestState == planRevisionFound && latest.Content == rb.replacedContent {
 			result.PriorRevisionNumber = latest.RevisionNumber
 		}
 	}

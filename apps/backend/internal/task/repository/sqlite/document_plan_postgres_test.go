@@ -193,6 +193,31 @@ func TestPostgresWritePlanRevisionUpsertAndImplementationMarker(t *testing.T) {
 			gotHead.ImplementationStartedAt, startedAt)
 	}
 
+	// The dialect-sensitive preservation branches must return the stored metadata and use
+	// the stored title in the revision snapshot.
+	head.Title = "ignored title"
+	head.Content = "three"
+	head.CreatedBy = "user"
+	preserved := &models.TaskPlanRevision{
+		TaskID: "task-plan-pg", Title: "ignored title", Content: "three", AuthorKind: "agent", AuthorName: "claude",
+	}
+	if err := repo.WritePlanRevision(ctx, head, preserved, nil, true, true); err != nil {
+		t.Fatalf("WritePlanRevision(preserve): %v", err)
+	}
+	if head.Title != "Plan v2" || head.CreatedBy != authorKindAgent {
+		t.Errorf("preserved HEAD metadata = %q/%q, want Plan v2/%s", head.Title, head.CreatedBy, authorKindAgent)
+	}
+	if preserved.Title != "Plan v2" {
+		t.Errorf("preserved revision title = %q, want Plan v2", preserved.Title)
+	}
+	gotHead, err = repo.GetTaskPlan(ctx, "task-plan-pg")
+	if err != nil {
+		t.Fatalf("GetTaskPlan after preserve: %v", err)
+	}
+	if gotHead.Title != "Plan v2" || gotHead.CreatedBy != authorKindAgent || gotHead.Content != "three" {
+		t.Errorf("preserved HEAD = %+v, want Plan v2/%s/three", gotHead, authorKindAgent)
+	}
+
 	// The sentinel path on a task with no plan row.
 	if _, err := repo.MarkTaskPlanImplementationStarted(ctx, "task-plan-pg-absent", "s", "a"); !errors.Is(err, ErrTaskPlanNotFound) {
 		t.Errorf("error = %v, want ErrTaskPlanNotFound", err)

@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: tasks
 created: 2026-08-31
 owners:
@@ -10,13 +10,9 @@ owners:
 
 ## Overview
 
-A task plan write reads the task's current content and latest revision, decides two
-things from what it read, and commits in a separate transaction: whether the write
-looks like an accidental whole-document truncation (forcing a new revision and an
-agent-facing warning), and whether it may coalesce into the latest revision instead
-of appending. Those reads and that commit are not serialized, and two write paths
-exist that do not exclude one another, so a second write can commit in between. The
-first then decides, reports and persists against state that no longer exists.
+A task plan write reads the current content and latest revision. It decides if the
+write truncates content and if it can coalesce. These reads and the commit are not
+serialized, so another writer can change the state before the commit.
 
 This capability defines what a plan write must guarantee about the state it reports
 on and the state it commits against. The `tasks` system owns it because the durable
@@ -90,12 +86,14 @@ that I can report the real loss and a human can recover the real content.
   fail the write on that account.
 - **AC-TASKS-PLAN-WRITE-CONSISTENCY-001.7:** When truncation has been detected but
   the preceding revision number cannot be established, the system shall append a
-  new revision and emit the warning without naming a revision number.
+  new revision and emit the warning without naming a revision number. The warning
+  shall not claim that the pre-write content is preserved or recoverable.
 - **AC-TASKS-PLAN-WRITE-CONSISTENCY-001.8:** When a task has no plan, the system
   shall emit no truncation warning for the write that creates it.
 - **AC-TASKS-PLAN-WRITE-CONSISTENCY-001.9:** When the current plan content cannot be
   read and the request supplies no title or no author, the system shall leave the
-  stored title or author unchanged rather than substituting a default.
+  stored title or author unchanged rather than substituting a default. The new
+  revision, write result, and update event shall use the stored title and author.
 
 ### REQ-TASKS-PLAN-WRITE-CONSISTENCY-002: Revision history stays consistent under concurrent writes
 

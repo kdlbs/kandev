@@ -40,6 +40,17 @@ func revisionWithNumber(t *testing.T, revisions []*models.TaskPlanRevision, numb
 	return nil
 }
 
+func TestPlanTruncationWarningUnknownRevisionDoesNotClaimPreservation(t *testing.T) {
+	warning := planTruncationWarning(40000, 10000, 0)
+	lower := strings.ToLower(warning)
+	if strings.Contains(lower, "preserved") || strings.Contains(lower, "recoverable") {
+		t.Fatalf("warning claims unverified recovery when no prior revision was established: %q", warning)
+	}
+	if !strings.Contains(lower, "could not verify") {
+		t.Errorf("warning does not explain that prior-content preservation is unverified: %q", warning)
+	}
+}
+
 // TestMCPPlanTruncationGuard_WarnsAndPreservesHistory pins the defect this
 // card fixes: a write that drops the majority of a substantial plan today
 // returns plain success with no signal that anything shrank (WO-38, task

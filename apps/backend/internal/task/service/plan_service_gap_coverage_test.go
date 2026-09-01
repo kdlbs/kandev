@@ -3,14 +3,131 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
+
+// TestUpdatePlanPostWriteReReadFailureClearsFabricatedIdentityWhenHeadWasUnknown
+// covers AC-005.8 for the unknown-head path. The write must preserve and report
+// authoritative metadata even when both service-level HEAD reads fail.
+func TestUpdatePlanPostWriteReReadFailureClearsFabricatedIdentityWhenHeadWasUnknown(t *testing.T) {
+	_, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	const taskID = "task-flaky-update"
+	seedTask(t, ctx, repo, taskID)
+
+	seeded := &models.TaskPlan{TaskID: taskID, Title: "Original", Content: "v1", CreatedBy: "human"}
+	if err := repo.CreateTaskPlan(ctx, seeded); err != nil {
+		t.Fatalf("seed CreateTaskPlan: %v", err)
+	}
+
+	svc := newFlakyPlanService(t, repo, eventBus, 1)
+	result, err := svc.UpdatePlan(ctx, UpdatePlanRequest{TaskID: taskID, Content: "v2"})
+	if err != nil {
+		t.Fatalf("UpdatePlan: %v", err)
+	}
+	if result.Plan.ID != "" || !result.Plan.CreatedAt.IsZero() {
+		t.Errorf("expected unknown identity after both reads failed, got ID %q and CreatedAt %v", result.Plan.ID, result.Plan.CreatedAt)
+	}
+	if result.Plan.Content != "v2" || result.Plan.Title != "Original" || result.Plan.CreatedBy != "human" {
+		t.Errorf("write result = %+v, want v2 content and authoritative Original/human metadata", result.Plan)
+	}
+	assertPlanUpdateEventMetadata(t, eventBus, "Original", "human")
+
+	saved, err := repo.GetTaskPlan(ctx, taskID)
+	if err != nil {
+		t.Fatalf("verify GetTaskPlan: %v", err)
+	}
+	if saved == nil || saved.Content != "v2" || saved.Title != "Original" || saved.CreatedBy != "human" {
+		t.Fatalf("persisted plan = %+v, want v2 content and preserved Original/human metadata", saved)
+	}
+
+	revisions, err := repo.ListTaskPlanRevisions(ctx, taskID, 0)
+	if err != nil {
+		t.Fatalf("ListTaskPlanRevisions: %v", err)
+	}
+	if len(revisions) != 1 {
+		t.Fatalf("expected one revision, got %d", len(revisions))
+	}
+	revision, err := repo.GetTaskPlanRevision(ctx, revisions[0].ID)
+	if err != nil {
+		t.Fatalf("GetTaskPlanRevision: %v", err)
+	}
+	if revision.Title != "Original" {
+		t.Errorf("revision title = %q, want the transaction-preserved HEAD title", revision.Title)
+	}
+
+	if _, err := svc.RevertPlan(ctx, RevertPlanRequest{
+		TaskID: taskID, TargetRevisionID: revision.ID, AuthorName: "Agent",
+	}); err != nil {
+		t.Fatalf("RevertPlan: %v", err)
+	}
+	reverted, err := repo.GetTaskPlan(ctx, taskID)
+	if err != nil {
+		t.Fatalf("GetTaskPlan after revert: %v", err)
+	}
+	if reverted.Title != "Original" {
+		t.Errorf("revert changed title to %q, want Original", reverted.Title)
+	}
+}
+
+func assertPlanUpdateEventMetadata(t *testing.T, eventBus *MockEventBus, title, createdBy string) {
+	t.Helper()
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type != events.TaskPlanUpdated {
+			continue
+		}
+		payload, ok := event.Data.(map[string]interface{})
+		if !ok {
+			t.Fatalf("task plan update event payload has type %T", event.Data)
+		}
+		if payload["title"] != title || payload["created_by"] != createdBy {
+			t.Errorf("update event metadata = %q/%q, want %s/%s", payload["title"], payload["created_by"], title, createdBy)
+		}
+		return
+	}
+	t.Fatal("expected task.plan.updated event")
+}
+
+func TestPlanService_TruncationDoesNotNameAnUnverifiedPriorRevision(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	const taskID = "task-divergent-history"
+	seedTask(t, ctx, repo, taskID)
+
+	previousContent := strings.Repeat("a", planTruncationMinPriorChars)
+	if err := repo.CreateTaskPlan(ctx, &models.TaskPlan{
+		TaskID: taskID, Title: "Plan", Content: previousContent, CreatedBy: "agent",
+	}); err != nil {
+		t.Fatalf("seed CreateTaskPlan: %v", err)
+	}
+	if err := repo.InsertTaskPlanRevision(ctx, &models.TaskPlanRevision{
+		TaskID: taskID, RevisionNumber: 1, Title: "Plan", Content: "different content",
+		AuthorKind: "agent", AuthorName: "Seed",
+	}); err != nil {
+		t.Fatalf("seed divergent revision: %v", err)
+	}
+
+	result, err := svc.UpdatePlan(ctx, UpdatePlanRequest{
+		TaskID: taskID, Content: "short", EvaluateTruncation: true,
+	})
+	if err != nil {
+		t.Fatalf("UpdatePlan: %v", err)
+	}
+	if !result.TruncationDetected {
+		t.Fatal("expected the large content decrease to trigger truncation detection")
+	}
+	if result.PriorRevisionNumber != 0 {
+		t.Errorf("PriorRevisionNumber = %d, want 0 because revision 1 does not contain the replaced HEAD", result.PriorRevisionNumber)
+	}
+}
 
 // TestPlanService_CreateAfterDeleteAppendsRatherThanCoalescesWithSurvivingRevisions
 // covers AC-002.11: DeletePlan removes only the task_plans HEAD row, leaving

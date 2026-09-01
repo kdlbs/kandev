@@ -890,6 +890,21 @@ func TestWritePlanRevisionPreserveFlagsGateOnlyTheUpdateBranch(t *testing.T) {
 	if gotHead.Content != "two" {
 		t.Errorf("HEAD content = %q, want two (content is never preserved)", gotHead.Content)
 	}
+	if head.Title != "v1" || head.CreatedBy != "agent" {
+		t.Errorf("returned HEAD metadata = %q/%q, want authoritative preserved values v1/agent", head.Title, head.CreatedBy)
+	}
+
+	revisions, err := repo.ListTaskPlanRevisions(ctx, "task-writeplan-preserve", 0)
+	if err != nil {
+		t.Fatalf("ListTaskPlanRevisions: %v", err)
+	}
+	latest, err := repo.GetTaskPlanRevision(ctx, revisions[0].ID)
+	if err != nil {
+		t.Fatalf("GetTaskPlanRevision: %v", err)
+	}
+	if latest.Title != "v1" {
+		t.Errorf("revision title = %q, want authoritative preserved title v1", latest.Title)
+	}
 }
 
 func TestWritePlanRevisionPreserveFlagsIgnoredOnFreshInsert(t *testing.T) {
