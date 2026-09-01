@@ -395,12 +395,58 @@ func TestTryReuseExistingSession_IdleFlipsToRunningWhenStateStillMatches(t *test
 	if result == nil || result.State != models.TaskSessionStateRunning {
 		t.Fatalf("result = %#v, want non-nil session with State RUNNING", result)
 	}
-	if repo.updateTaskSessionIfCurrentCalls != 1 {
-		t.Fatalf("UpdateTaskSessionIfCurrentState calls = %d, want 1", repo.updateTaskSessionIfCurrentCalls)
+	if repo.updateTaskSessionStateIfCurrentCalls != 1 {
+		t.Fatalf("UpdateTaskSessionStateIfCurrent calls = %d, want 1", repo.updateTaskSessionStateIfCurrentCalls)
 	}
 	stored := repo.sessions[current.ID]
 	if stored.State != models.TaskSessionStateRunning {
 		t.Fatalf("stored session state = %v, want RUNNING", stored.State)
+	}
+}
+
+// TestTryReuseExistingSession_IdleFlipPreservesConcurrentFieldUpdate proves
+// the IDLE→RUNNING flip uses a narrow, state-only CAS rather than writing
+// the caller's full (possibly stale) in-memory copy: a concurrent update to
+// an unrelated field (AgentProfileSnapshot here) that lands on the stored
+// row after the caller's read but before the flip must survive the flip,
+// not be silently reverted to the caller's pre-update snapshot.
+func TestTryReuseExistingSession_IdleFlipPreservesConcurrentFieldUpdate(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	ctx := context.Background()
+
+	const taskID = "task-idle-flip-preserves-field"
+	const sessionID = "idle-flip-preserves-field"
+	stale := map[string]interface{}{"model": "stale-model"}
+	current := &models.TaskSession{
+		ID: sessionID, TaskID: taskID, State: models.TaskSessionStateIdle,
+		AgentProfileSnapshot: stale,
+	}
+	repo.sessions[sessionID] = current
+
+	// The caller's view was read before a concurrent writer updated the
+	// snapshot on the stored row.
+	view := &models.TaskSession{
+		ID: sessionID, TaskID: taskID, State: models.TaskSessionStateIdle,
+		AgentProfileSnapshot: stale,
+	}
+	fresh := map[string]interface{}{"model": "fresh-model"}
+	current.AgentProfileSnapshot = fresh
+
+	result, decision := exec.tryReuseExistingSession(ctx, view)
+
+	if decision != reuseDecisionReused {
+		t.Fatalf("decision = %v, want reuseDecisionReused", decision)
+	}
+	if result == nil || result.State != models.TaskSessionStateRunning {
+		t.Fatalf("result = %#v, want non-nil session with State RUNNING", result)
+	}
+	if result.AgentProfileSnapshot["model"] != "fresh-model" {
+		t.Fatalf("result.AgentProfileSnapshot = %#v, want the concurrently-written fresh-model snapshot to survive the flip", result.AgentProfileSnapshot)
+	}
+	stored := repo.sessions[sessionID]
+	if stored.AgentProfileSnapshot["model"] != "fresh-model" {
+		t.Fatalf("stored session AgentProfileSnapshot = %#v, want the concurrent update to survive the flip", stored.AgentProfileSnapshot)
 	}
 }
 
@@ -452,8 +498,8 @@ func TestTryReuseExistingSession_IdleFlipCASUpdateErrorTreatsOutcomeAsUnknown(t 
 	repo.sessions[sessionID] = &models.TaskSession{ID: sessionID, TaskID: taskID, State: models.TaskSessionStateIdle}
 
 	wantErr := errors.New("disk full")
-	repo.updateTaskSessionIfCurrentFailOn = 1
-	repo.updateTaskSessionIfCurrentFailErr = wantErr
+	repo.updateTaskSessionStateIfCurrentFailOn = 1
+	repo.updateTaskSessionStateIfCurrentFailErr = wantErr
 
 	view := &models.TaskSession{ID: sessionID, TaskID: taskID, State: models.TaskSessionStateIdle}
 	result, decision := exec.tryReuseExistingSession(ctx, view)
@@ -464,8 +510,8 @@ func TestTryReuseExistingSession_IdleFlipCASUpdateErrorTreatsOutcomeAsUnknown(t 
 	if result != nil {
 		t.Fatalf("result = %#v, want nil (unknown outcome must not be handed back as reusable)", result)
 	}
-	if repo.updateTaskSessionIfCurrentCalls != 1 {
-		t.Fatalf("UpdateTaskSessionIfCurrentState calls = %d, want 1", repo.updateTaskSessionIfCurrentCalls)
+	if repo.updateTaskSessionStateIfCurrentCalls != 1 {
+		t.Fatalf("UpdateTaskSessionStateIfCurrent calls = %d, want 1", repo.updateTaskSessionStateIfCurrentCalls)
 	}
 	stored := repo.sessions[sessionID]
 	if stored.State != models.TaskSessionStateIdle {

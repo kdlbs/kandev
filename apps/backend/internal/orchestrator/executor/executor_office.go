@@ -236,29 +236,33 @@ func (e *Executor) tryReuseExistingSession(
 // bounded-recovery re-read. A CAS mismatch means exactly that race
 // happened, so the fresh state — not the write's absence of an error — is
 // what decides the outcome.
+//
+// The CAS itself uses the narrow, state-only UpdateTaskSessionStateIfCurrent
+// rather than a full-row write: this session's in-memory copy was read
+// before the flip, so a concurrent update to any other field (profile
+// snapshot, routing, execution identifiers) between that read and this
+// write must not be reverted. The row is always reloaded after the CAS,
+// win or lose, so the caller observes the current stored values rather than
+// a stale local copy.
 func (e *Executor) tryFlipIdleSessionToRunning(
 	ctx context.Context, session *models.TaskSession,
 ) (*models.TaskSession, reuseDecision) {
-	updated := *session
-	updated.State = models.TaskSessionStateRunning
-	changed, err := e.repo.UpdateTaskSessionIfCurrentState(ctx, &updated, models.TaskSessionStateIdle)
+	changed, _, err := e.repo.UpdateTaskSessionStateIfCurrent(
+		ctx, session.ID, models.TaskSessionStateIdle, models.TaskSessionStateRunning, "",
+	)
 	if err != nil {
 		e.logger.Warn("failed to flip office session IDLE→RUNNING; treating outcome as unknown",
 			zap.String("session_id", session.ID), zap.Error(err))
 		return nil, reuseDecisionTerminal
 	}
-	if changed {
-		*session = updated
-		return session, reuseDecisionReused
-	}
 
 	fresh, err := e.repo.GetTaskSession(ctx, session.ID)
 	if err != nil || fresh == nil {
-		e.logger.Warn("failed to reload office session after IDLE→RUNNING race; treating outcome as unknown",
+		e.logger.Warn("failed to reload office session after IDLE→RUNNING attempt; treating outcome as unknown",
 			zap.String("session_id", session.ID), zap.Error(err))
 		return nil, reuseDecisionTerminal
 	}
-	if isStopTerminalSessionState(fresh.State) {
+	if !changed && isStopTerminalSessionState(fresh.State) {
 		return nil, reuseDecisionTerminal
 	}
 	*session = *fresh

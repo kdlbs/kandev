@@ -305,20 +305,23 @@ type mockRepository struct {
 	updateTaskStateIfNotArchivedCh chan struct{}
 
 	// Track calls for verification
-	createTaskSessionCalls            []*models.TaskSession
-	updateTaskSessionCalls            []*models.TaskSession
-	updateTaskSessionSnapshots        []*models.TaskSession
-	updateTaskSessionIfCurrentCalls   int
-	updateTaskSessionIfCurrentFailOn  int
-	updateTaskSessionIfCurrentFailErr error
-	setSessionMetadataKeyCalls        []setSessionMetadataKeyCall
-	setSessionPrimaryCalls            []string
-	createTaskEnvironmentCalls        []*models.TaskEnvironment
-	sharedWorkspaceBindingCalls       []sharedWorkspaceBindingCall
-	updateTaskEnvironmentCalls        []*models.TaskEnvironment
-	finalizeTaskEnvironmentCalls      []*models.TaskEnvironment
-	updateTaskStateIfCurrentInCalls   []updateTaskStateIfCurrentInCall
-	updateTaskStateIfNotArchivedCalls []updateTaskStateIfNotArchivedCall
+	createTaskSessionCalls                 []*models.TaskSession
+	updateTaskSessionCalls                 []*models.TaskSession
+	updateTaskSessionSnapshots             []*models.TaskSession
+	updateTaskSessionIfCurrentCalls        int
+	updateTaskSessionIfCurrentFailOn       int
+	updateTaskSessionIfCurrentFailErr      error
+	updateTaskSessionStateIfCurrentCalls   int
+	updateTaskSessionStateIfCurrentFailOn  int
+	updateTaskSessionStateIfCurrentFailErr error
+	setSessionMetadataKeyCalls             []setSessionMetadataKeyCall
+	setSessionPrimaryCalls                 []string
+	createTaskEnvironmentCalls             []*models.TaskEnvironment
+	sharedWorkspaceBindingCalls            []sharedWorkspaceBindingCall
+	updateTaskEnvironmentCalls             []*models.TaskEnvironment
+	finalizeTaskEnvironmentCalls           []*models.TaskEnvironment
+	updateTaskStateIfCurrentInCalls        []updateTaskStateIfCurrentInCall
+	updateTaskStateIfNotArchivedCalls      []updateTaskStateIfNotArchivedCall
 
 	// writeCallLog records the relative order of environment-row and
 	// environment-status writes (e.g. "create_repo", "update_env") so tests
@@ -464,6 +467,43 @@ func (m *mockRepository) UpdateTaskSessionIfCurrentState(
 	m.updateTaskSessionCalls = append(m.updateTaskSessionCalls, session)
 	m.sessions[session.ID] = session
 	return true, nil
+}
+
+// UpdateTaskSessionStateIfCurrent mirrors the production narrow-CAS
+// semantics: only state/error_message/completed_at/updated_at change, so a
+// concurrent update to any other field on the stored session survives.
+func (m *mockRepository) UpdateTaskSessionStateIfCurrent(
+	_ context.Context,
+	id string,
+	expected, status models.TaskSessionState,
+	errorMessage string,
+) (bool, time.Time, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, ok := m.sessions[id]
+	if !ok {
+		return false, time.Time{}, models.ErrTaskSessionNotFound
+	}
+	if current.State != expected {
+		return false, time.Time{}, nil
+	}
+	m.updateTaskSessionStateIfCurrentCalls++
+	if m.updateTaskSessionStateIfCurrentFailOn > 0 &&
+		m.updateTaskSessionStateIfCurrentCalls == m.updateTaskSessionStateIfCurrentFailOn {
+		return false, time.Time{}, m.updateTaskSessionStateIfCurrentFailErr
+	}
+	now := time.Now().UTC()
+	current.State = status
+	current.ErrorMessage = errorMessage
+	current.UpdatedAt = now
+	if status == models.TaskSessionStateCompleted ||
+		status == models.TaskSessionStateFailed ||
+		status == models.TaskSessionStateCancelled {
+		current.CompletedAt = &now
+	} else {
+		current.CompletedAt = nil
+	}
+	return true, now, nil
 }
 
 func (m *mockRepository) UpdateTaskSessionIfCurrentStateRemovingMetadataKeys(
