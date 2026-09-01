@@ -9,16 +9,15 @@ owners:
 
 # UI system
 
-## Purpose and ownership
+## Ownership
 
-The UI system owns web presentation and interaction contracts. Task and provider state remain with their owning systems.
+UI owns reusable presentation and responsive interaction.
 
 ## Exclusions
 
-- Task behavior belongs to [Tasks](../tasks/README.md).
-- Agent profiles belong to [Agents](../agents/README.md).
-- Plugin contributions belong to [Plugins](../plugins/README.md).
-- Provider state and actions belong to [Integrations](../integrations/README.md).
+[Tasks](../tasks/README.md), [Agents](../agents/README.md),
+[Plugins](../plugins/README.md), and [Integrations](../integrations/README.md)
+own feature behavior/state.
 
 ## Specification map
 
@@ -30,6 +29,7 @@ The UI system owns web presentation and interaction contracts. Task and provider
 - [Task Add-Panel PR Submenu](requirements/add-panel-pr-submenu.md)
 - [Agent Launch Prompt Composer](requirements/agent-launch-prompt-composer.md)
 - [Growing dialog content containment](requirements/dialog-content-containment.md)
+- [Surface text](requirements/surface-text-hierarchy.md)
 - [Agent-message inline comments](requirements/agent-message-comments.md)
 - [Agent Todo List Panel](requirements/agent-todo-list-panel.md)
 - [App Status Bar](requirements/app-status-bar.md)
@@ -91,6 +91,7 @@ The UI system owns web presentation and interaction contracts. Task and provider
 - [Prompt Turn Duration on Message Hover](requirements/prompt-turn-duration.md)
 - [Published Docs Preview Reliability](requirements/published-docs-preview-reliability.md)
 - [Quick Chat elevation](requirements/quick-chat-elevation.md)
+- [Quick Chat viewport layout](requirements/quick-chat-viewport-layout.md)
 - [Quick Chat Idle Dot](requirements/quick-chat-idle-dot.md)
 - [Quick Chat and Terminal Tabs](requirements/quick-terminal.md)
 - [Relative Last Seen in Account Security](requirements/relative-last-seen.md)
@@ -118,7 +119,7 @@ The UI system owns web presentation and interaction contracts. Task and provider
 - [Slash Command Composer Selection](requirements/slash-command-composer.md)
 - [Subagent Observability](requirements/subagent-observability.md)
 - [Nested Submodule Review](requirements/submodule-review.md)
-- [Task Confirmation Warning Hierarchy](requirements/confirmation-warning-hierarchy.md)
+- [Confirmations](requirements/confirmation-warning-hierarchy.md)
 - [Task Layout Profiles](requirements/task-layout-profiles.md)
 - [Task Agent Tab Reconciliation](requirements/task-agent-tab-reconciliation.md)
 - [Task Listing Display Preferences](requirements/task-listing-display-preferences.md)
@@ -142,6 +143,7 @@ The UI system owns web presentation and interaction contracts. Task and provider
 
 - [Clarification submit feedback](system-design/clarification-submit-feedback.md)
 - [Growing Dialog Content Containment](system-design/dialog-content-containment.md)
+- [Surface text](system-design/surface-text-hierarchy.md)
 - [Agent Todo List Panel](system-design/agent-todo-list-panel.md)
 - [App Status Bar](system-design/app-status-bar.md)
 - [Changes File Row Containment](system-design/changes-file-row-containment.md)
@@ -164,9 +166,10 @@ The UI system owns web presentation and interaction contracts. Task and provider
 - [PR Task Status Summary](system-design/pr-task-status-summary.md)
 - [Prompt History Panel](system-design/prompt-history-panel.md)
 - [Quick Chat and terminal elevation](system-design/quick-chat-elevation.md)
+- [Quick Chat viewport layout](system-design/quick-chat-viewport-layout.md)
 - [Quick Chat and Terminal Tabs](system-design/quick-terminal.md)
 - [Responsive Plan Formatting](system-design/responsive-plan-formatting.md)
-- [Task Confirmation Warning Hierarchy](system-design/confirmation-warning-hierarchy.md)
+- [Confirmations](system-design/confirmation-warning-hierarchy.md)
 - [Resizable Markdown Table Columns](system-design/resizable-markdown-tables.md)
 - [Task Layout Profiles](system-design/task-layout-profiles.md)
 - [Task Agent Tab Reconciliation](system-design/task-agent-tab-reconciliation.md)
@@ -184,6 +187,6 @@ system-design documents above.
 
 ## Related systems
 
-- [Tasks](../tasks/README.md): supplies task and workflow state.
-- [Plugins](../plugins/README.md): supplies plugin contributions.
-- [Platform](../platform/README.md): supplies shared runtime state.
+- [Tasks](../tasks/README.md): task state.
+- [Plugins](../plugins/README.md): contributions.
+- [Platform](../platform/README.md): runtime state.

@@ -142,6 +142,74 @@ test.describe("Multi-session UX", () => {
     });
   });
 
+  // @covers AC-UI-TASK-AGENT-TAB-RECONCILIATION-001.6
+  test("reload restores the selected Agent tab", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+
+    const { task, session } = await createTaskAndNavigate(
+      testPage,
+      apiClient,
+      seedData,
+      "Agent Tab Reload Focus Task",
+    );
+    const { sessions: initialSessions } = await apiClient.listTaskSessions(task.id);
+    const primarySessionId = initialSessions[0]?.id;
+    if (!primarySessionId) throw new Error("expected a primary session");
+
+    await session.openNewSessionDialog();
+    await session.newSessionPromptInput().fill("/e2e:simple-message");
+    await session.newSessionStartButton().click();
+
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions.find((item) => item.id !== primarySessionId)?.id ?? "";
+        },
+        { message: "Waiting for the secondary session" },
+      )
+      .not.toBe("");
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    const secondarySessionId = sessions.find((item) => item.id !== primarySessionId)?.id;
+    if (!secondarySessionId) throw new Error("expected a secondary session");
+
+    const secondaryTab = session.sessionTabBySessionId(secondarySessionId);
+    await expect(secondaryTab).toBeVisible();
+    await secondaryTab.click();
+    const secondaryTabWrapper = testPage.locator(".dv-tab", { has: secondaryTab });
+    await expect(secondaryTabWrapper).toHaveClass(/dv-active-tab/);
+
+    await expect
+      .poll(() =>
+        testPage.evaluate(() => {
+          const persist = (window as Window & { __persistDockviewLayout__?: () => void })
+            .__persistDockviewLayout__;
+          if (!persist) return false;
+          persist();
+          return true;
+        }),
+      )
+      .toBe(true);
+
+    await testPage.reload();
+    await session.waitForLoad();
+
+    const restoredSecondaryTab = session.sessionTabBySessionId(secondarySessionId);
+    await expect(restoredSecondaryTab).toBeVisible();
+    await expect(testPage.locator(".dv-tab", { has: restoredSecondaryTab })).toHaveClass(
+      /dv-active-tab/,
+    );
+    await expect(session.activeChat()).toBeVisible();
+    await prCapture.screenshot("agent-tab-reload-focus", {
+      caption: "The selected secondary Agent tab remains active after a full page reload",
+    });
+  });
+
   test("+ dropdown shows sessions with correct numbering", async ({
     testPage,
     apiClient,
