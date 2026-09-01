@@ -15,6 +15,24 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+type rejectingLaunchAttachmentClaimer struct {
+	wantErr     error
+	taskID      string
+	sessionID   string
+	attachments []v1.MessageAttachment
+}
+
+func (c *rejectingLaunchAttachmentClaimer) ClaimMessageAttachments(
+	_ context.Context,
+	taskID, sessionID string,
+	attachments []v1.MessageAttachment,
+) error {
+	c.taskID = taskID
+	c.sessionID = sessionID
+	c.attachments = attachments
+	return c.wantErr
+}
+
 func TestExecutionToLaunchResponseReportsAgentProfile(t *testing.T) {
 	response := executionToLaunchResponse("task-1", &executor.TaskExecution{
 		SessionID:        "session-1",
@@ -152,6 +170,31 @@ func TestResolveIntent(t *testing.T) {
 				t.Errorf("ResolveIntent() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestLaunchSession_RejectsAttachmentClaimBeforeStart(t *testing.T) {
+	wantErr := errors.New("attachment is not available")
+	claimer := &rejectingLaunchAttachmentClaimer{wantErr: wantErr}
+	service := &Service{}
+	service.SetLaunchAttachmentClaimer(claimer)
+
+	attachment := v1.MessageAttachment{AttachmentID: "attachment-1", Name: "notes.txt"}
+	_, err := service.LaunchSession(context.Background(), &LaunchSessionRequest{
+		TaskID:      "task-1",
+		SessionID:   "session-1",
+		Intent:      IntentStartCreated,
+		Prompt:      "read the attachment",
+		Attachments: []v1.MessageAttachment{attachment},
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("LaunchSession error = %v, want %v", err, wantErr)
+	}
+	if claimer.taskID != "task-1" || claimer.sessionID != "session-1" {
+		t.Fatalf("claim scope = (%q, %q), want (task-1, session-1)", claimer.taskID, claimer.sessionID)
+	}
+	if len(claimer.attachments) != 1 || claimer.attachments[0].AttachmentID != attachment.AttachmentID {
+		t.Fatalf("claimed attachments = %+v", claimer.attachments)
 	}
 }
 

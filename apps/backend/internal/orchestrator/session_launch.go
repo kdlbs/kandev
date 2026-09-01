@@ -162,6 +162,9 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	if err := s.authorizeSession(ctx, req.SessionID); err != nil {
 		return nil, err
 	}
+	if err := s.claimLaunchAttachments(ctx, req); err != nil {
+		return nil, fmt.Errorf("claim launch attachments: %w", err)
+	}
 	intent := ResolveIntent(req)
 	req.Prompt = strings.TrimSpace(req.Prompt)
 
@@ -181,6 +184,28 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	default:
 		return nil, fmt.Errorf("unknown intent: %s", intent)
 	}
+}
+
+func (s *Service) claimLaunchAttachments(ctx context.Context, req *LaunchSessionRequest) error {
+	hasDescriptor := false
+	for _, attachment := range req.Attachments {
+		if attachment.AttachmentID != "" {
+			hasDescriptor = true
+			break
+		}
+	}
+	if !hasDescriptor {
+		return nil
+	}
+	if s.launchAttachmentClaimer == nil {
+		return errors.New("launch attachment claimer is not configured")
+	}
+	return s.launchAttachmentClaimer.ClaimMessageAttachments(
+		ctx,
+		req.TaskID,
+		req.SessionID,
+		req.Attachments,
+	)
 }
 
 // launchPrepare creates a session entry without launching the agent.

@@ -334,6 +334,7 @@ func NewManager(
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
 	sessionManager.SetPromptStarter(mgr.BeginPrompt)
+	sessionManager.SetInitialPromptFailureHandler(mgr.handleInitialPromptFailure)
 
 	mgr.pollAggregator = newWorkspacePollAggregator(mgr)
 
@@ -342,6 +343,14 @@ func NewManager(
 	}
 
 	return mgr
+}
+
+func (m *Manager) handleInitialPromptFailure(executionID string, _ error) {
+	if err := m.MarkCompleted(executionID, 1, "initial prompt delivery failed"); err != nil {
+		m.logger.Warn("failed to settle initial prompt delivery failure",
+			zap.String("execution_id", executionID),
+			zap.Error(err))
+	}
 }
 
 // HandleSessionMode routes a session-level mode transition (from the gateway

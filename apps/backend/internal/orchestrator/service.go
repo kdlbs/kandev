@@ -79,6 +79,12 @@ type AttachmentReader interface {
 	OpenClaimed(ctx context.Context, id, taskID, sessionID string) (io.ReadCloser, string, string, int64, error)
 }
 
+// LaunchAttachmentClaimer is the narrow task-service seam used to bind staged
+// attachment descriptors to an authorized task/session before launch dispatch.
+type LaunchAttachmentClaimer interface {
+	ClaimMessageAttachments(ctx context.Context, taskID, sessionID string, attachments []v1.MessageAttachment) error
+}
+
 // DefaultServiceConfig returns default configuration
 func DefaultServiceConfig() ServiceConfig {
 	return ServiceConfig{
@@ -569,6 +575,10 @@ type Service struct {
 	// Task service owns the rich payload; orchestrator delegates.
 	taskEvents  TaskEventPublisher
 	feederPulls FeederPullReconciler
+
+	// launchAttachmentClaimer binds staged descriptors before any launch intent
+	// can dispatch them to the runtime. Inline attachments need no claim.
+	launchAttachmentClaimer LaunchAttachmentClaimer
 
 	// sessionAccessCheck enforces per-user workspace scoping on the
 	// session-keyed WS actions. Nil = unscoped. See SetSessionAccessChecker.
@@ -1409,6 +1419,12 @@ func (s *Service) SetSubagentContextRecorder(r SubagentContextRecorder) {
 // prompt delivery so claimed descriptors can be streamed into the workspace.
 func (s *Service) SetAttachmentReader(reader AttachmentReader) {
 	s.executor.SetAttachmentReader(reader)
+}
+
+// SetLaunchAttachmentClaimer wires staged-descriptor admission into the
+// unified session launch boundary.
+func (s *Service) SetLaunchAttachmentClaimer(claimer LaunchAttachmentClaimer) {
+	s.launchAttachmentClaimer = claimer
 }
 
 // SetOnPrimarySessionSet sets a callback on the executor for when the first session

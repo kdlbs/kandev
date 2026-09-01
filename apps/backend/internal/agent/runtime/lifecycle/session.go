@@ -56,7 +56,7 @@ type SessionManager struct {
 	streamManager        *StreamManager
 	executionStore       *ExecutionStore
 	promptStarter        func(executionID string) (uint64, error)
-	initialPromptFailure func(executionID string)
+	initialPromptFailure func(executionID string, err error)
 	historyManager       *SessionHistoryManager
 	attachmentReader     AttachmentReader
 	stopCh               <-chan struct{} // For graceful shutdown coordination
@@ -99,7 +99,7 @@ func (sm *SessionManager) SetPromptStarter(starter func(executionID string) (uin
 	sm.promptStarter = starter
 }
 
-func (sm *SessionManager) SetInitialPromptFailureHandler(handler func(executionID string)) {
+func (sm *SessionManager) SetInitialPromptFailureHandler(handler func(executionID string, err error)) {
 	sm.initialPromptFailure = handler
 }
 
@@ -918,7 +918,7 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 						zap.Error(err))
 				}
 				if sm.initialPromptFailure != nil {
-					sm.initialPromptFailure(execution.ID)
+					sm.initialPromptFailure(execution.ID, err)
 				}
 			}
 		}()
