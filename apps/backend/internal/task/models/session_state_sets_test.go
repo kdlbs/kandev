@@ -2,7 +2,9 @@ package models
 
 import "testing"
 
-func TestIsActiveSessionState(t *testing.T) {
+// TestIsTaskLookupActiveSessionState verifies the active-state contract used by
+// GetActiveTaskSessionByTaskID.
+func TestIsTaskLookupActiveSessionState(t *testing.T) {
 	want := map[TaskSessionState]bool{
 		TaskSessionStateCreated:         true,
 		TaskSessionStateStarting:        true,
@@ -40,8 +42,8 @@ func TestIsActiveSessionState(t *testing.T) {
 	for _, state := range AllTaskSessionStates {
 		t.Run(string(state), func(t *testing.T) {
 			wantActive := want[state]
-			if got := IsActiveSessionState(state); got != wantActive {
-				t.Errorf("IsActiveSessionState(%q) = %v, want %v", state, got, wantActive)
+			if got := IsTaskLookupActiveSessionState(state); got != wantActive {
+				t.Errorf("IsTaskLookupActiveSessionState(%q) = %v, want %v", state, got, wantActive)
 			}
 		})
 	}

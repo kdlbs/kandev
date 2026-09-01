@@ -9,7 +9,7 @@ import (
 )
 
 // TestActiveSessionStateMatchesSQLFilter cross-checks GetActiveTaskSessionByTaskID's
-// SQL state filter against models.IsActiveSessionState for every state in
+// SQL state filter against models.IsTaskLookupActiveSessionState for every state in
 // models.AllTaskSessionStates, the package's single canonical state list. Editing
 // the SQL filter without updating the predicate (or vice versa) fails this test
 // instead of only a stale comment — but only for states already present in
@@ -37,7 +37,7 @@ func TestActiveSessionStateMatchesSQLFilter(t *testing.T) {
 			}
 
 			got, err := repo.GetActiveTaskSessionByTaskID(ctx, taskID)
-			wantActive := models.IsActiveSessionState(state)
+			wantActive := models.IsTaskLookupActiveSessionState(state)
 
 			if wantActive {
 				if err != nil {
