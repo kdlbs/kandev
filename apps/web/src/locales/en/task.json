@@ -1092,6 +1092,8 @@
   "remoteContributionUsed": "PR version adopted. Recovery branch: {{branch}}",
   "remoteCreatedLine": "Created: {{createdAt}}",
   "remoteExecutor": "Remote executor",
+  "remoteExecutorStatus": "{{name}} executor status",
+  "remoteLastCheck": "Last check",
   "remoteLastCheckLine": "Last check: {{checkedAt}}",
   "remoteRepository": "Remote repository",
   "remoteStateLine": "State: {{state}}",

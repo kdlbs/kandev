@@ -3,10 +3,10 @@ import {
   IconBoxOff,
   IconCloud,
   IconCloudOff,
-  IconCube,
-  IconCubeOff,
   IconFolder,
   IconFolders,
+  IconPackage,
+  IconPackageOff,
   IconServer,
   IconServerOff,
   IconTerminal2,
@@ -21,7 +21,7 @@ export const EXECUTOR_ICON_MAP: Record<string, typeof IconFolder> = {
   remote_docker: IconBox,
   sprites: IconCloud,
   ssh: IconTerminal2,
-  k8s: IconCube,
+  k8s: IconPackage,
 };
 
 export function getExecutorIcon(type: string): typeof IconFolder {
@@ -87,7 +87,7 @@ export function getExecutorStatusIcon(
   }
   if (executorType === "k8s") {
     return {
-      Icon: hasError ? IconCubeOff : IconCube,
+      Icon: hasError ? IconPackageOff : IconPackage,
       testId: "executor-status-kubernetes-icon",
     };
   }

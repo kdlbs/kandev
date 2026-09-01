@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   IconBox,
   IconCloud,
-  IconCube,
-  IconCubeOff,
   IconFolder,
   IconFolders,
+  IconPackage,
+  IconPackageOff,
 } from "@tabler/icons-react";
 
 import {
@@ -33,10 +33,10 @@ describe("executor icons", () => {
     expect(getExecutorIcon("does-not-exist")).toBe(IconFolder);
   });
 
-  it("maps Kubernetes normal and error states to the Pod cube icons", () => {
-    expect(getExecutorIcon("k8s")).toBe(IconCube);
-    expect(getExecutorStatusIcon("k8s", false).Icon).toBe(IconCube);
-    expect(getExecutorStatusIcon("k8s", true).Icon).toBe(IconCubeOff);
+  it("maps Kubernetes normal and error states to the Pod package icons", () => {
+    expect(getExecutorIcon("k8s")).toBe(IconPackage);
+    expect(getExecutorStatusIcon("k8s", false).Icon).toBe(IconPackage);
+    expect(getExecutorStatusIcon("k8s", true).Icon).toBe(IconPackageOff);
   });
 
   it("returns human-readable labels for known executor types", () => {

@@ -1046,6 +1046,8 @@
   "remoteContributionUsed": "已采用 PR 版本。恢复分支：{{branch}}",
   "remoteCreatedLine": "创建：{{createdAt}}",
   "remoteExecutor": "远程执行器",
+  "remoteExecutorStatus": "{{name}} 执行器状态",
+  "remoteLastCheck": "上次检查",
   "remoteLastCheckLine": "上次检查：{{checkedAt}}",
   "remoteRepository": "远程仓库",
   "remoteStateLine": "状态：{{state}}",

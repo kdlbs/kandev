@@ -52,6 +52,7 @@ export function ExecutorSettingsButton({
     kubernetesLoaded,
     kubernetesError,
     loading,
+    refreshing,
     isResetting,
     reset,
     refresh,
@@ -85,7 +86,9 @@ export function ExecutorSettingsButton({
         kubernetesLoaded={kubernetesLoaded}
         kubernetesError={kubernetesError}
         loading={loading}
+        refreshing={refreshing}
         isResetting={isResetting}
+        touch={usesTouchDrawer}
         onRefresh={refresh}
         onReset={() => setResetDialogOpen(true)}
       />
@@ -144,9 +147,9 @@ function ExecutorDisclosureSurface({
           </DrawerTrigger>
           <DrawerContent
             data-testid="executor-settings-drawer"
-            className="max-h-[70dvh] pb-[env(safe-area-inset-bottom)]"
+            className="max-h-[78dvh] overflow-hidden pb-[env(safe-area-inset-bottom)]"
           >
-            <DrawerHeader className="flex flex-row items-center justify-between border-b py-2">
+            <DrawerHeader className="flex flex-row items-center justify-between border-b px-4 py-3">
               <div className="min-w-0 text-left">
                 <DrawerTitle className="text-sm">{t("task:executorSettings")}</DrawerTitle>
                 <DrawerDescription className="truncate text-xs">
@@ -176,7 +179,7 @@ function ExecutorDisclosureSurface({
         </HoverCardTrigger>
         <HoverCardContent
           align="start"
-          className="w-[340px] p-0 text-sm"
+          className="max-h-[70vh] w-[348px] max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain rounded-xl border-border/80 p-0 text-sm shadow-xl"
           data-testid="executor-settings-popover"
         >
           {content}

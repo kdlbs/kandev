@@ -17,6 +17,7 @@ export type ExecutorProfileSavePayload = {
 };
 
 type ExecutorProfileSaveContributorOptions = {
+  enabled?: boolean;
   executorId: string;
   profileId: string;
   payload: ExecutorProfileSavePayload;
@@ -30,6 +31,7 @@ type ExecutorProfileSaveContributorOptions = {
 };
 
 export function useExecutorProfileSaveContributor({
+  enabled = true,
   executorId,
   profileId,
   payload,
@@ -41,7 +43,7 @@ export function useExecutorProfileSaveContributor({
   save,
   discard,
 }: ExecutorProfileSaveContributorOptions): boolean {
-  const sessionImpact = useKubernetesSessionImpact(executorId, isKubernetes);
+  const sessionImpact = useKubernetesSessionImpact(executorId, enabled && isKubernetes);
   const revision = serializeSettingsRevision(payload);
   const [savedRevision, setSavedRevision] = useState(revision);
   const [baselineReady, setBaselineReady] = useState(!isRemote);
@@ -68,8 +70,8 @@ export function useExecutorProfileSaveContributor({
   useSettingsSaveContributor({
     id: `executor-profile:${profileId}`,
     revision,
-    isDirty: baselineReady && allowed && revision !== savedRevision,
-    canSave: baselineReady && allowed && !invalidReason,
+    isDirty: enabled && baselineReady && allowed && revision !== savedRevision,
+    canSave: enabled && baselineReady && allowed && !invalidReason,
     invalidReason,
     save: handleSave,
     discard,

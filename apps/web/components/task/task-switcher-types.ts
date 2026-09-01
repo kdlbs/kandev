@@ -33,6 +33,7 @@ export type TaskSwitcherItem = {
   repositoryLinks?: Array<{ repository_id: string; position?: number }>;
   diffStats?: { additions: number; deletions: number };
   isRemoteExecutor?: boolean;
+  remoteExecutorId?: string;
   remoteExecutorType?: string;
   remoteExecutorName?: string;
   updatedAt?: string;

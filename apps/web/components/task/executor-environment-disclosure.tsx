@@ -11,8 +11,12 @@ import type {
   SSHLiveStatus,
   TaskEnvironment,
 } from "@/lib/api/domains/task-environment-api";
-import { kubernetesExecutorSettingsPath } from "@/lib/settings/executor-settings-routes";
+import {
+  executorProfileSettingsPath,
+  kubernetesExecutorSettingsPath,
+} from "@/lib/settings/executor-settings-routes";
 import type { KubernetesSession } from "@/lib/types/http-kubernetes";
+import { cn } from "@/lib/utils";
 import { EnvironmentInfo } from "./executor-environment-info";
 
 type ExecutorEnvironmentDisclosureProps = {
@@ -23,7 +27,9 @@ type ExecutorEnvironmentDisclosureProps = {
   kubernetesLoaded: boolean;
   kubernetesError: string | null;
   loading: boolean;
+  refreshing: boolean;
   isResetting: boolean;
+  touch?: boolean;
   onRefresh: () => Promise<void>;
   onReset: () => void;
 };
@@ -36,7 +42,9 @@ export function ExecutorEnvironmentDisclosure({
   kubernetesLoaded,
   kubernetesError,
   loading,
+  refreshing,
   isResetting,
+  touch = false,
   onRefresh,
   onReset,
 }: ExecutorEnvironmentDisclosureProps) {
@@ -50,48 +58,86 @@ export function ExecutorEnvironmentDisclosure({
         kubernetesLoaded={kubernetesLoaded}
         kubernetesError={kubernetesError}
         loading={loading}
+        kubernetesActions={
+          env?.executor_type === "k8s" ? (
+            <KubernetesActions
+              env={env}
+              refreshing={refreshing}
+              touch={touch}
+              onRefresh={onRefresh}
+            />
+          ) : null
+        }
       />
-      {env?.executor_type === "k8s" ? (
-        <KubernetesActions env={env} loading={loading} onRefresh={onRefresh} />
-      ) : (
+      {env?.executor_type !== "k8s" ? (
         <ResetEnvironmentAction env={env} isResetting={isResetting} onReset={onReset} />
-      )}
+      ) : null}
     </>
   );
 }
 
 function KubernetesActions({
   env,
-  loading,
+  refreshing,
+  touch,
   onRefresh,
 }: {
   env: TaskEnvironment;
-  loading: boolean;
+  refreshing: boolean;
+  touch: boolean;
   onRefresh: () => Promise<void>;
 }) {
   const { t } = useTranslation();
+  const controlClassName = cn(
+    "cursor-pointer rounded-md text-muted-foreground hover:bg-muted hover:text-foreground active:scale-[0.96]",
+    touch ? "h-11 w-11" : "h-10 w-10",
+  );
+  const settingsPath = env.executor_profile_id
+    ? executorProfileSettingsPath(
+        { id: env.executor_id, type: env.executor_type },
+        env.executor_profile_id,
+      )
+    : kubernetesExecutorSettingsPath(env.executor_id);
   return (
-    <div className="flex items-center justify-end gap-1.5 border-t border-border px-2 py-1.5">
-      <Button
-        variant="ghost"
-        size="sm"
-        className="cursor-pointer text-xs"
-        disabled={loading}
-        data-testid="executor-settings-refresh"
-        onClick={() => void onRefresh()}
-      >
-        <IconRefresh className={`mr-1 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-        {t("task:refresh")}
-      </Button>
-      <Button variant="outline" size="sm" className="cursor-pointer text-xs" asChild>
-        <Link
-          href={kubernetesExecutorSettingsPath(env.executor_id)}
-          data-testid="executor-settings-link"
-        >
-          <IconSettings className="mr-1 h-3.5 w-3.5" />
-          {t("task:executorSettings")}
-        </Link>
-      </Button>
+    <div
+      className="flex shrink-0 items-center gap-0.5"
+      data-testid="executor-settings-kubernetes-actions"
+    >
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className={controlClassName}
+            disabled={refreshing}
+            aria-label={t("task:refresh")}
+            aria-busy={refreshing}
+            data-testid="executor-settings-refresh"
+            onClick={() => void onRefresh()}
+          >
+            <IconRefresh
+              className={cn("h-4 w-4", refreshing && "animate-spin")}
+              data-testid={refreshing ? "executor-settings-refresh-spinner" : undefined}
+            />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{t("task:refresh")}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon" className={controlClassName} asChild>
+            <Link
+              href={settingsPath}
+              aria-label={t("task:executorSettings")}
+              data-testid="executor-settings-link"
+            >
+              <IconSettings className="h-4 w-4" />
+            </Link>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{t("task:executorSettings")}</TooltipContent>
+      </Tooltip>
     </div>
   );
 }

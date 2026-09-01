@@ -56,7 +56,11 @@ describe("EnvironmentInfo Kubernetes details", () => {
       />,
     );
 
+    expect(screen.getByTestId("kubernetes-environment-summary")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Kubernetes Pod" })).toBeTruthy();
     expect(screen.getByText("kandev-pod-1")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy Pod" })).toBeTruthy();
+    expect(screen.getByTestId("kubernetes-restart-count").textContent).toBe("0");
     expect(screen.getAllByText("Running")).toHaveLength(2);
     expect(screen.getByText("running")).toBeTruthy();
     expect(screen.getByText("empty_dir")).toBeTruthy();

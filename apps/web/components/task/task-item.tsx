@@ -65,6 +65,7 @@ type TaskItemProps = {
   onSelect?: (e: React.MouseEvent | React.KeyboardEvent) => void;
   diffStats?: DiffStats;
   isRemoteExecutor?: boolean;
+  remoteExecutorId?: string;
   remoteExecutorType?: string;
   remoteExecutorName?: string;
   updatedAt?: string;
@@ -319,6 +320,7 @@ function TaskItemContent({
   autopilot,
   taskId,
   isRemoteExecutor,
+  remoteExecutorId,
   remoteExecutorType,
   remoteExecutorName,
   primarySessionId,
@@ -338,6 +340,7 @@ function TaskItemContent({
   autopilot?: boolean;
   taskId?: string;
   isRemoteExecutor?: boolean;
+  remoteExecutorId?: string;
   remoteExecutorType?: string;
   remoteExecutorName?: string;
   primarySessionId?: string | null;
@@ -373,9 +376,10 @@ function TaskItemContent({
           <RemoteCloudTooltip
             taskId={taskId ?? ""}
             sessionId={primarySessionId ?? null}
+            executorId={remoteExecutorId}
             executorType={remoteExecutorType}
             fallbackName={remoteExecutorName ?? remoteExecutorType}
-            iconClassName="h-3 w-3 text-muted-foreground/60"
+            iconClassName="h-3 w-3"
           />
         )}
         {isArchived && (
@@ -437,6 +441,7 @@ export const TaskItem = memo(function TaskItem({
   onSelect,
   diffStats,
   isRemoteExecutor,
+  remoteExecutorId,
   remoteExecutorType,
   remoteExecutorName,
   updatedAt,
@@ -497,6 +502,7 @@ export const TaskItem = memo(function TaskItem({
         autopilot={autopilot}
         taskId={taskId}
         isRemoteExecutor={isRemoteExecutor}
+        remoteExecutorId={remoteExecutorId}
         remoteExecutorType={remoteExecutorType}
         remoteExecutorName={remoteExecutorName}
         primarySessionId={primarySessionId}

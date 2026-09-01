@@ -84,6 +84,48 @@ async function stubSuccessfulDiagnostics(page: Page) {
   });
 }
 
+async function stubEmptySessions(page: Page) {
+  await page.route("**/api/v1/kubernetes/executors/*/sessions", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+}
+
+async function verifyLeadingProfileClusterExperience(page: Page, profileId: string) {
+  await page.goto(`/settings/executors/${profileId}`);
+  const clusterSection = page.getByTestId("kubernetes-profile-cluster-section");
+  const workloadCard = page.getByTestId("kubernetes-workload-card");
+  await expect(clusterSection).toBeVisible();
+  await expect(clusterSection.getByTestId("kubernetes-connection-card")).toBeVisible();
+  await expect(clusterSection.getByTestId("kubernetes-diagnostics-card")).toBeVisible();
+  await expect(clusterSection.getByTestId("kubernetes-sessions-card")).toBeVisible();
+  await expect(clusterSection.getByTestId("kubernetes-namespace")).toHaveValue("e2e-settings");
+  await expect(
+    clusterSection.getByRole("button", { name: /edit cluster connection/i }),
+  ).toHaveCount(0);
+  const clusterBox = await clusterSection.boundingBox();
+  const workloadBox = await workloadCard.boundingBox();
+  expect(clusterBox).not.toBeNull();
+  expect(workloadBox).not.toBeNull();
+  expect(clusterBox!.y).toBeLessThan(workloadBox!.y);
+
+  await clusterSection.getByTestId("kubernetes-namespace").fill("draft-profile-namespace");
+  await page.getByTestId("kubernetes-main-container").fill("draft-profile-agent");
+  const diagnosticRequest = page.waitForRequest(
+    (request) => request.url().endsWith("/api/v1/kubernetes/test") && request.method() === "POST",
+  );
+  await page
+    .getByTestId("kubernetes-profile-cluster-section")
+    .getByTestId("kubernetes-test-button")
+    .click();
+  expect((await diagnosticRequest).postDataJSON()).toMatchObject({
+    config: {
+      kubeconfig_path: "/tmp/e2e-settings.kubeconfig",
+      namespace: "draft-profile-namespace",
+    },
+    profile_config: { main_container: "draft-profile-agent" },
+  });
+}
+
 async function seedMemberBoundary(apiClient: ApiClient) {
   const executor = await apiClient.createExecutor("Member-visible Kubernetes", "k8s", {
     auth_mode: "kubeconfig",
@@ -114,6 +156,7 @@ test("administrator tests, saves, and reloads Kubernetes connection and profile 
   const { context, page } = await openContext(browser, backend);
   const name = "Persistent Kubernetes settings";
   await stubSuccessfulDiagnostics(page);
+  await stubEmptySessions(page);
   try {
     await openCreateFlow(page);
     await fillCreateForm(page, name);
@@ -145,12 +188,14 @@ test("administrator tests, saves, and reloads Kubernetes connection and profile 
     const saveBar = page.getByTestId("settings-floating-save");
     await expect(saveBar).toHaveAttribute("data-status", "dirty");
     await saveBar.getByRole("button", { name: /save changes/i }).click();
-    await expect(page).toHaveURL(/\/settings\/executors\/k8s\/[^/]+$/);
-
+    await expect(page).toHaveURL(/\/settings\/executors\/[^/]+$/);
+    const profileId = decodeURIComponent(new URL(page.url()).pathname.split("/").at(-1)!);
     const executor = (await apiClient.listExecutors()).executors.find((row) => row.name === name);
     expect(executor).toBeTruthy();
-    const profileId = executor!.profiles?.find((row) => row.name === "Settings profile")?.id;
-    expect(profileId).toBeTruthy();
+    await expect
+      .poll(async () => (await apiClient.getExecutorProfile(executor!.id, profileId)).name)
+      .toBe("Settings profile");
+    await expect(page).toHaveURL(`/settings/executors/${profileId}`);
 
     await page.reload();
     await expect(page.getByTestId("kubernetes-executor-name")).toHaveValue(name);
@@ -158,12 +203,15 @@ test("administrator tests, saves, and reloads Kubernetes connection and profile 
     await expect(page.getByTestId("kubernetes-kubeconfig-path")).toHaveValue(
       "/tmp/e2e-settings.kubeconfig",
     );
-    await page.goto(`/settings/executors/${profileId}`);
     await expect(page.getByTestId("kubernetes-pod-template")).toHaveValue(POD_TEMPLATE);
     await expect(page.getByTestId("kubernetes-workspace-size")).toHaveValue("2Gi");
     await expect(page.getByTestId("kubernetes-storage-class")).toHaveValue("standard");
     await page.reload();
     await expect(page.getByTestId("kubernetes-pod-template")).toHaveValue(POD_TEMPLATE);
+    await verifyLeadingProfileClusterExperience(page, profileId);
+
+    await page.goto(`/settings/executors/k8s/${executor!.id}`);
+    await expect(page).toHaveURL(`/settings/executors/${profileId}`);
   } finally {
     const executor = (await apiClient.listExecutors()).executors.find((row) => row.name === name);
     if (executor) await apiClient.deleteExecutor(executor.id).catch(() => undefined);
@@ -195,12 +243,14 @@ test("member sees Kubernetes settings but cannot test, mutate, save, or delete t
     await acceptInvite(memberContext, backend.baseUrl, token, MEMBER);
     const page = await memberContext.newPage();
     await initPage(page, backend);
+    await stubEmptySessions(page);
     await page.goto(`/settings/executors/k8s/${seeded.executor.id}`);
+    await expect(page).toHaveURL(`/settings/executors/${seeded.profile.id}`);
 
     await expect(page.getByTestId("kubernetes-read-only-notice")).toBeVisible();
     await expect(page.getByTestId("kubernetes-executor-name")).toBeDisabled();
     await expect(page.getByTestId("kubernetes-test-button")).toBeDisabled();
-    await expect(page.getByRole("button", { name: /delete executor/i })).toBeDisabled();
+    await expect(page.getByRole("button", { name: /delete profile/i })).toBeDisabled();
     await expect(page.getByTestId("settings-floating-save")).toHaveCount(0);
 
     const patchResponse = await memberContext.request.patch(
@@ -223,12 +273,45 @@ test("member sees Kubernetes settings but cannot test, mutate, save, or delete t
     );
     expect(testResponse.status()).toBe(403);
 
-    await page.goto(`/settings/executors/${seeded.profile.id}`);
-    await expect(page.getByTestId("kubernetes-read-only-notice")).toBeVisible();
     await expect(page.getByTestId("kubernetes-pod-template")).toBeDisabled();
+    const clusterSection = page.getByTestId("kubernetes-profile-cluster-section");
+    await expect(clusterSection.getByTestId("kubernetes-diagnostics-card")).toBeVisible();
+    await expect(clusterSection.getByTestId("kubernetes-sessions-card")).toBeVisible();
+    await expect(clusterSection.getByTestId("kubernetes-test-button")).toBeDisabled();
+    await expect(
+      clusterSection.getByRole("button", { name: /view cluster connection/i }),
+    ).toHaveCount(0);
   } finally {
     await adminContext.close();
     await memberContext.close();
     await backend.restart();
+  }
+});
+
+test("profile-less Kubernetes executors retain the standalone recovery page", async ({
+  browser,
+  backend,
+}) => {
+  const apiClient = new ApiClient(backend.baseUrl);
+  const executor = await apiClient.createExecutor("Orphan Kubernetes recovery", "k8s", {
+    auth_mode: "kubeconfig",
+    kubeconfig_path: "/tmp/orphan.kubeconfig",
+    namespace: "orphan-workloads",
+    request_timeout_seconds: "30",
+  });
+  const { context, page } = await openContext(browser, backend);
+  await stubEmptySessions(page);
+  try {
+    await page.goto(`/settings/executors/k8s/${executor.id}`);
+
+    await expect(page).toHaveURL(`/settings/executors/k8s/${executor.id}`);
+    await expect(page.getByTestId("kubernetes-executor-name")).toHaveValue(
+      "Orphan Kubernetes recovery",
+    );
+    await expect(page.getByTestId("kubernetes-namespace")).toHaveValue("orphan-workloads");
+    await expect(page.getByRole("button", { name: /delete executor/i })).toBeVisible();
+  } finally {
+    await apiClient.deleteExecutor(executor.id).catch(() => undefined);
+    await context.close();
   }
 });

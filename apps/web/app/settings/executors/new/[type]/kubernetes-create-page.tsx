@@ -32,9 +32,9 @@ import {
   useKubernetesAdminAccess,
   useKubernetesDiagnostics,
   useKubernetesExecutorResource,
-  kubernetesExecutorSettingsPath,
 } from "@/hooks/domains/settings/use-kubernetes-settings";
 import { getExecutorIcon, getExecutorLabel } from "@/lib/executor-icons";
+import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 const KubernetesIcon = getExecutorIcon("k8s");
@@ -70,7 +70,7 @@ export function KubernetesCreatePage() {
     try {
       const created = await resource.create(payload);
       runWithNavigationBlockerBypassed(() =>
-        router.push(kubernetesExecutorSettingsPath(created.executor.id)),
+        router.push(executorProfileSettingsPath(created.executor, created.profile.id)),
       );
     } catch (cause) {
       setError(cause);

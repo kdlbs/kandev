@@ -1,5 +1,6 @@
 "use client";
 
+import { useLayoutEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
@@ -33,10 +34,18 @@ export function KubernetesWorkloadCard({
   readOnly = false,
 }: KubernetesWorkloadCardProps) {
   const { t } = useTranslation();
+  const podTemplateRef = useRef<HTMLTextAreaElement>(null);
   const update = <K extends keyof KubernetesProfileConfigForm>(
     key: K,
     value: KubernetesProfileConfigForm[K],
   ) => onChange({ ...form, [key]: value });
+
+  useLayoutEffect(() => {
+    const textarea = podTemplateRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, [form.podTemplateYaml]);
 
   return (
     <SettingsCard
@@ -99,13 +108,14 @@ export function KubernetesWorkloadCard({
             labelProps={{ htmlFor: "kubernetes-pod-template" }}
           >
             <Textarea
+              ref={podTemplateRef}
               id="kubernetes-pod-template"
               data-testid="kubernetes-pod-template"
               value={form.podTemplateYaml}
               onChange={(event) => update("podTemplateYaml", event.target.value)}
               wrap="off"
               spellCheck={false}
-              className="min-h-80 w-full max-w-full resize-y overflow-x-auto whitespace-pre font-mono text-base md:text-xs"
+              className="field-sizing-fixed min-h-28 w-full max-w-full resize-none overflow-x-auto overflow-y-hidden whitespace-pre font-mono text-base md:text-xs"
             />
           </SettingsField>
           <p className="text-xs text-amber-700 dark:text-amber-300 md:col-span-2">

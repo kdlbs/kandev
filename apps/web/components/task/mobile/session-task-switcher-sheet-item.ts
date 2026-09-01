@@ -86,6 +86,7 @@ export function toSheetItem(
     workflowStepTitle: ctx.stepTitleById.get(task.workflowStepId),
     isArchived: task.isArchived === true,
     isRemoteExecutor: task.isRemoteExecutor,
+    remoteExecutorId: task.primaryExecutorId ?? undefined,
     remoteExecutorType: task.primaryExecutorType ?? undefined,
     remoteExecutorName: task.primaryExecutorName ?? undefined,
     queuedCount: task.statusSummary?.queued_prompt_count,

@@ -15,7 +15,11 @@ const BRANCH_PUSH_HINT =
 const SPRITES_ENV = { executor_type: "sprites", sandbox_id: "kandev-abc" };
 const SPRITES_WORKTREE_ENV = { ...SPRITES_ENV, worktree_path: "/tmp/worktree" };
 const DOCKER_ENV = { executor_type: "local_docker", container_id: "abcdef" };
-const KUBERNETES_ENV = { executor_type: "k8s", executor_id: "executor-1" };
+const KUBERNETES_ENV = {
+  executor_type: "k8s",
+  executor_id: "executor-1",
+  executor_profile_id: "profile-1",
+};
 
 type MockEnv = {
   executor_type: string;
@@ -23,6 +27,7 @@ type MockEnv = {
   container_id?: string;
   worktree_path?: string;
   executor_id?: string;
+  executor_profile_id?: string;
 };
 
 let mockPrepareState: SessionPrepareState | null = null;
@@ -253,9 +258,15 @@ describe("ExecutorSettingsButton Kubernetes disclosure", () => {
     hoverSettingsButton();
 
     expect(await screen.findByText(POD_NAME)).toBeTruthy();
-    expect(screen.getByTestId("executor-settings-refresh")).toBeTruthy();
+    const actions = screen.getByTestId("executor-settings-kubernetes-actions");
+    expect(screen.getByTestId("kubernetes-environment-summary").contains(actions)).toBe(true);
+    const refresh = screen.getByTestId("executor-settings-refresh");
+    expect(refresh.getAttribute("aria-label")).toBe("Refresh");
+    expect(refresh.className).toContain("h-10");
+    expect(refresh.className).toContain("w-10");
     const settings = screen.getByTestId("executor-settings-link");
-    expect(settings.getAttribute("href")).toBe("/settings/executors/k8s/executor-1");
+    expect(settings.getAttribute("href")).toBe("/settings/executors/profile-1");
+    expect(settings.getAttribute("aria-label")).toBe("Executor settings");
     expect(screen.queryByTestId("executor-settings-reset")).toBeNull();
   });
 
@@ -271,11 +282,13 @@ describe("ExecutorSettingsButton Kubernetes disclosure", () => {
 
     expect(await screen.findByTestId("executor-settings-drawer")).toBeTruthy();
     expect(await screen.findByText(POD_NAME)).toBeTruthy();
-    expect(screen.getByTestId("executor-settings-refresh")).toBeTruthy();
-    expect(screen.getByTestId("executor-settings-link")).toBeTruthy();
+    expect(screen.getByTestId("executor-settings-refresh").className).toContain("h-11");
+    expect(screen.getByTestId("executor-settings-refresh").className).toContain("w-11");
+    expect(screen.getByTestId("executor-settings-link").className).toContain("h-11");
+    expect(screen.getByTestId("executor-settings-link").className).toContain("w-11");
   });
 
-  it("uses the Pod-off cube when the exact Kubernetes row reports failure", async () => {
+  it("uses the Pod-off package when the exact Kubernetes row reports failure", async () => {
     mockEnv = KUBERNETES_ENV;
     mockKubernetesSession = {
       ...mockKubernetesSession,
@@ -287,6 +300,6 @@ describe("ExecutorSettingsButton Kubernetes disclosure", () => {
     renderButton();
 
     const icon = await screen.findByTestId("executor-status-kubernetes-icon");
-    expect(icon.classList.contains("tabler-icon-cube-off")).toBe(true);
+    expect(icon.classList.contains("tabler-icon-package-off")).toBe(true);
   });
 });

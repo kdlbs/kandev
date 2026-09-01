@@ -6,9 +6,138 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
 )
+
+func TestKubernetesRefreshRemoteInstanceUsesRotatedConnectionCredentials(t *testing.T) {
+	controlPort := startKubernetesAgentctlServerWithToken(t, true, 41001, "initial-token")
+	instancePort := startKubernetesAgentctlServer(t, false, 0)
+	resources := &fakeKubernetesResources{}
+	forwards := &recordingKubernetesForwarder{localPorts: map[uint16]uint16{
+		uint16(kubeexecutor.DefaultAgentctlPort): controlPort,
+		41001:                                    instancePort,
+	}}
+	executor := newFakeKubernetesExecutorWithForwarder(resources, &recordingKubernetesExec{}, forwards)
+	req := validKubernetesCreateRequest()
+	created, err := executor.CreateInstance(context.Background(), req)
+	require.NoError(t, err)
+
+	executor.mu.Lock()
+	initialSession := executor.sessions[created.InstanceID]
+	executor.mu.Unlock()
+	rotatedResources := copyFakeKubernetesResourceState(resources)
+	resources.mu.Lock()
+	resources.getPodErr = apierrors.NewUnauthorized("expired test credential")
+	resources.mu.Unlock()
+	var freshConfig kubeexecutor.ExecutorConfig
+	executor.clientFactory = func(config kubeexecutor.ExecutorConfig) (*kubernetesRuntimeClient, error) {
+		freshConfig = config
+		return &kubernetesRuntimeClient{resources: rotatedResources, streams: initialSession.runtime.streams}, nil
+	}
+	instance := kubernetesRefreshInstance(created, req.Metadata)
+	instance.Metadata[MetadataKeyKubernetesAuthMode] = string(kubeexecutor.AuthModeKubeconfig)
+	instance.Metadata[MetadataKeyKubernetesKubeconfigPath] = "/etc/kandev/rotated.yaml"
+	instance.Metadata[MetadataKeyKubernetesKubeContext] = "rotated"
+
+	refresh, err := executor.RefreshRemoteInstance(context.Background(), instance)
+
+	require.NoError(t, err)
+	require.Nil(t, refresh, "healthy agentctl should not be replaced for a credential-only refresh")
+	require.Equal(t, kubeexecutor.AuthModeKubeconfig, freshConfig.AuthMode)
+	require.Equal(t, "/etc/kandev/rotated.yaml", freshConfig.KubeconfigPath)
+	require.Equal(t, "rotated", freshConfig.KubeContext)
+	executor.mu.Lock()
+	current := executor.sessions[created.InstanceID]
+	executor.mu.Unlock()
+	require.Same(t, rotatedResources, current.runtime.resources)
+	require.Same(t, initialSession.forward, current.forward)
+	require.Same(t, initialSession.client, current.client)
+	require.Len(t, resources.createdPods, 1)
+	require.Len(t, forwards.remotePorts(), 2, "credential refresh must not replace either retained forward")
+	status, err := executor.GetRemoteStatus(context.Background(), instance)
+	require.NoError(t, err)
+	require.Equal(t, kubernetesStatusRunning, status.State)
+}
+
+func TestKubernetesRefreshRemoteInstanceRejectsFreshUnauthorizedOrForeignRuntime(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*fakeKubernetesResources)
+	}{
+		{
+			name: "unauthorized",
+			mutate: func(resources *fakeKubernetesResources) {
+				resources.getPodErr = apierrors.NewUnauthorized("still unauthorized")
+			},
+		},
+		{
+			name: "foreign exact-name Pod",
+			mutate: func(resources *fakeKubernetesResources) {
+				resources.pod.Labels["kandev.ai/session-id"] = "foreign-session"
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			controlPort := startKubernetesAgentctlServerWithToken(t, true, 41001, "initial-token")
+			instancePort := startKubernetesAgentctlServer(t, false, 0)
+			resources := &fakeKubernetesResources{}
+			executor := newFakeKubernetesExecutor(t, resources, &recordingKubernetesExec{}, map[uint16]uint16{
+				uint16(kubeexecutor.DefaultAgentctlPort): controlPort,
+				41001:                                    instancePort,
+			})
+			req := validKubernetesCreateRequest()
+			created, err := executor.CreateInstance(context.Background(), req)
+			require.NoError(t, err)
+			executor.mu.Lock()
+			initialRuntime := executor.sessions[created.InstanceID].runtime
+			executor.mu.Unlock()
+			freshResources := copyFakeKubernetesResourceState(resources)
+			test.mutate(freshResources)
+			executor.clientFactory = func(kubeexecutor.ExecutorConfig) (*kubernetesRuntimeClient, error) {
+				return &kubernetesRuntimeClient{resources: freshResources, streams: initialRuntime.streams}, nil
+			}
+
+			refresh, err := executor.RefreshRemoteInstance(
+				context.Background(), kubernetesRefreshInstance(created, req.Metadata),
+			)
+
+			require.Error(t, err)
+			require.Nil(t, refresh)
+			executor.mu.Lock()
+			currentRuntime := executor.sessions[created.InstanceID].runtime
+			executor.mu.Unlock()
+			require.Same(t, initialRuntime, currentRuntime, "failed validation must not publish the fresh runtime")
+		})
+	}
+}
+
+func copyFakeKubernetesResourceState(source *fakeKubernetesResources) *fakeKubernetesResources {
+	source.mu.Lock()
+	defer source.mu.Unlock()
+	copy := &fakeKubernetesResources{}
+	if source.pod != nil {
+		copy.pod = source.pod.DeepCopy()
+	}
+	if source.pvc != nil {
+		copy.pvc = source.pvc.DeepCopy()
+	}
+	return copy
+}
+
+func kubernetesRefreshInstance(created *ExecutorInstance, connection map[string]interface{}) *ExecutorInstance {
+	metadata := cloneKubernetesMetadata(connection)
+	for key, value := range created.Metadata {
+		metadata[key] = value
+	}
+	return &ExecutorInstance{
+		InstanceID: created.InstanceID, TaskID: created.TaskID, SessionID: created.SessionID,
+		RuntimeName: created.RuntimeName, Metadata: metadata,
+		AuthToken: created.AuthToken, BootstrapNonce: created.BootstrapNonce,
+	}
+}
 
 func TestKubernetesRefreshRemoteInstanceRehandshakesActiveRestart(t *testing.T) {
 	initialControlPort := startKubernetesAgentctlServerWithToken(t, true, 41001, "initial-token")
@@ -36,15 +165,9 @@ func TestKubernetesRefreshRemoteInstanceRehandshakesActiveRestart(t *testing.T) 
 	forwards.localPorts[41002] = restartedInstancePort
 	forwards.mu.Unlock()
 
-	refresh, err := executor.RefreshRemoteInstance(context.Background(), &ExecutorInstance{
-		InstanceID:     created.InstanceID,
-		TaskID:         created.TaskID,
-		SessionID:      created.SessionID,
-		RuntimeName:    created.RuntimeName,
-		Metadata:       created.Metadata,
-		AuthToken:      created.AuthToken,
-		BootstrapNonce: created.BootstrapNonce,
-	})
+	refresh, err := executor.RefreshRemoteInstance(
+		context.Background(), kubernetesRefreshInstance(created, req.Metadata),
+	)
 	require.NoError(t, err)
 	require.NotNil(t, refresh)
 	require.Equal(t, "rotated-token", refresh.Instance.AuthToken)
@@ -57,15 +180,8 @@ func TestKubernetesRefreshRemoteInstanceRehandshakesActiveRestart(t *testing.T) 
 	require.False(t, forwards.lastSession().isClosed())
 	require.Len(t, resources.createdPods, 1)
 
-	again, err := executor.RefreshRemoteInstance(context.Background(), &ExecutorInstance{
-		InstanceID:     created.InstanceID,
-		TaskID:         created.TaskID,
-		SessionID:      created.SessionID,
-		RuntimeName:    created.RuntimeName,
-		Metadata:       refresh.Instance.Metadata,
-		AuthToken:      refresh.Instance.AuthToken,
-		BootstrapNonce: refresh.Instance.BootstrapNonce,
-	})
+	againInstance := kubernetesRefreshInstance(refresh.Instance, req.Metadata)
+	again, err := executor.RefreshRemoteInstance(context.Background(), againInstance)
 	require.NoError(t, err)
 	require.Nil(t, again, "recorded restart count prevents duplicate re-handshakes")
 }
@@ -98,15 +214,9 @@ func TestKubernetesRefreshRemoteInstanceReattachesDeadLocalClientWithoutHandshak
 	forwards.localPorts[41002] = rotatedInstancePort
 	forwards.mu.Unlock()
 
-	refresh, err := executor.RefreshRemoteInstance(context.Background(), &ExecutorInstance{
-		InstanceID:     created.InstanceID,
-		TaskID:         created.TaskID,
-		SessionID:      created.SessionID,
-		RuntimeName:    created.RuntimeName,
-		Metadata:       created.Metadata,
-		AuthToken:      created.AuthToken,
-		BootstrapNonce: created.BootstrapNonce,
-	})
+	refresh, err := executor.RefreshRemoteInstance(
+		context.Background(), kubernetesRefreshInstance(created, req.Metadata),
+	)
 
 	require.NoError(t, err)
 	require.NotNil(t, refresh)
@@ -144,11 +254,9 @@ func TestKubernetesRefreshCommitDoesNotFailAfterInstallingReplacement(t *testing
 	forwards.localPorts[41002] = restartedInstancePort
 	forwards.mu.Unlock()
 
-	refresh, err := executor.RefreshRemoteInstance(context.Background(), &ExecutorInstance{
-		InstanceID: created.InstanceID, TaskID: created.TaskID, SessionID: created.SessionID,
-		RuntimeName: created.RuntimeName, Metadata: created.Metadata,
-		AuthToken: created.AuthToken, BootstrapNonce: created.BootstrapNonce,
-	})
+	refresh, err := executor.RefreshRemoteInstance(
+		context.Background(), kubernetesRefreshInstance(created, req.Metadata),
+	)
 	require.NoError(t, err)
 	require.NotNil(t, refresh)
 

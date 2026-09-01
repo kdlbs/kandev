@@ -22,6 +22,7 @@ import { KubernetesDiagnosticsCard } from "@/components/settings/kubernetes-diag
 import { KubernetesReadOnlyNotice } from "@/components/settings/kubernetes-read-only-notice";
 import { saveWithKubernetesSessionConfirmation } from "@/components/settings/kubernetes-save-confirmation";
 import { KubernetesSessionsCard } from "@/components/settings/kubernetes-sessions-card";
+import { useAppStore } from "@/components/state-provider";
 import {
   SettingsSaveCancelledError,
   useSettingsSaveContributor,
@@ -33,6 +34,7 @@ import {
   serializeKubernetesExecutorConfig,
   type KubernetesExecutorForm,
 } from "@/components/settings/kubernetes-config";
+import { kubernetesExecutorInvalidReason } from "@/components/settings/kubernetes-validation";
 import {
   useKubernetesAdminAccess,
   useKubernetesDiagnostics,
@@ -41,11 +43,30 @@ import {
   useKubernetesSessions,
 } from "@/hooks/domains/settings/use-kubernetes-settings";
 import { getExecutorIcon, getExecutorLabel } from "@/lib/executor-icons";
+import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
+import { SettingsRedirect } from "@/src/settings-route-helpers";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 const KubernetesIcon = getExecutorIcon("k8s");
 
 export default function KubernetesExecutorPage({ executorId }: { executorId: string }) {
+  const profileId = useAppStore(
+    (state) =>
+      state.executors.items.find(
+        (executor) => executor.id === executorId && executor.type === "k8s",
+      )?.profiles?.[0]?.id ?? null,
+  );
+  if (profileId) {
+    return (
+      <SettingsRedirect
+        to={executorProfileSettingsPath({ id: executorId, type: "k8s" }, profileId)}
+      />
+    );
+  }
+  return <KubernetesExecutorRecoveryPage executorId={executorId} />;
+}
+
+function KubernetesExecutorRecoveryPage({ executorId }: { executorId: string }) {
   const resource = useKubernetesExecutorResource(executorId);
   const { t } = useTranslation();
   if (resource.loading) return <ExecutorMessage message={t("executors:loadingExecutor")} />;
@@ -107,7 +128,7 @@ function KubernetesExecutorView({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const config = serializeKubernetesExecutorConfig(form);
   const revision = serializeSettingsRevision({ name: form.name.trim(), config });
-  const invalidReason = executorInvalidReason(form, canManage, t);
+  const invalidReason = kubernetesExecutorInvalidReason(form, canManage, t);
 
   const save = useCallback(async () => {
     setError(null);
@@ -296,21 +317,4 @@ function DeleteExecutorDialog({
       </DialogContent>
     </Dialog>
   );
-}
-
-function executorInvalidReason(
-  form: KubernetesExecutorForm,
-  canManage: boolean,
-  t: (key: string) => string,
-): string | undefined {
-  if (!canManage) return t("executors:kubernetesAdminSaveOnly");
-  if (!form.name.trim()) return t("executors:kubernetesExecutorNameRequired");
-  if (!form.namespace.trim()) return t("executors:kubernetesNamespaceRequired");
-  if (form.authMode === "kubeconfig" && !form.kubeconfigPath.trim()) {
-    return t("executors:kubernetesKubeconfigPathRequired");
-  }
-  const timeout = Number(form.requestTimeoutSeconds);
-  return Number.isInteger(timeout) && timeout >= 1 && timeout <= 300
-    ? undefined
-    : t("executors:kubernetesTimeoutInvalid");
 }

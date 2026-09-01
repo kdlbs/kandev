@@ -46,7 +46,11 @@ export function useTaskEnvironment(
   sessionId: string | null | undefined,
   active: boolean,
 ) {
-  const { state, loading, loadEnv, clear } = useLiveEnvironment(taskId, sessionId, active);
+  const { state, loading, refreshing, refresh, clear } = useLiveEnvironment(
+    taskId,
+    sessionId,
+    active,
+  );
   const { isResetting, reset } = useEnvironmentReset(taskId, clear);
   const { env, container, ssh } = state;
   const {
@@ -75,9 +79,10 @@ export function useTaskEnvironment(
     kubernetesLoaded,
     kubernetesError,
     loading,
+    refreshing,
     isResetting,
     reset,
-    refresh: loadEnv,
+    refresh,
     status,
   };
 }
@@ -89,10 +94,12 @@ function useLiveEnvironment(
 ) {
   const [state, setState] = useState<LiveEnvironmentState>(EMPTY_ENVIRONMENT_STATE);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const requestScope = `${taskId ?? ""}\u0000${sessionId ?? ""}`;
   const currentScopeRef = useRef(requestScope);
   currentScopeRef.current = requestScope;
-  const inFlightScopes = useRef(new Set<string>());
+  const inFlightRequests = useRef(new Map<string, Promise<void>>());
+  const manualRefreshGenerationRef = useRef(0);
   const lastStatusRef = useRef<EnvironmentStatusSnapshot | null>(null);
   // hasLoadedRef tracks "have we ever fetched successfully" so the spinner
   // only shows on the first open. Keeping it in a ref instead of state means
@@ -107,6 +114,8 @@ function useLiveEnvironment(
     lastStatusRef.current = null;
     setState(EMPTY_ENVIRONMENT_STATE);
     setLoading(false);
+    setRefreshing(false);
+    manualRefreshGenerationRef.current += 1;
   }, [requestScope]);
 
   const publish = useCallback((next: LiveEnvironmentState) => {
@@ -117,32 +126,54 @@ function useLiveEnvironment(
     setState(next);
   }, []);
 
-  const loadEnv = useCallback(async () => {
-    if (!taskId || inFlightScopes.current.has(requestScope)) return;
-    inFlightScopes.current.add(requestScope);
-    setLoading((prev) => prev || (active && !hasLoadedRef.current));
+  const loadEnv = useCallback((): Promise<void> => {
+    if (!taskId) return Promise.resolve();
+    const existing = inFlightRequests.current.get(requestScope);
+    if (existing) return existing;
+
+    const request = (async () => {
+      setLoading((prev) => prev || (active && !hasLoadedRef.current));
+      try {
+        const next = await fetchLiveEnvironment(taskId, sessionId);
+        if (currentScopeRef.current !== requestScope) return;
+        hasLoadedRef.current = true;
+        publish(next);
+      } catch (err) {
+        // Only treat 404 as "no environment yet" — a transient 500 / auth /
+        // network error should leave the last-known view in place rather than
+        // erase a valid environment and disable the Reset action.
+        if (
+          err instanceof ApiError &&
+          err.status === 404 &&
+          currentScopeRef.current === requestScope
+        ) {
+          hasLoadedRef.current = true;
+          publish(EMPTY_ENVIRONMENT_STATE);
+        }
+      } finally {
+        inFlightRequests.current.delete(requestScope);
+        if (currentScopeRef.current === requestScope) setLoading(false);
+      }
+    })();
+    inFlightRequests.current.set(requestScope, request);
+    return request;
+  }, [active, publish, requestScope, sessionId, taskId]);
+
+  const refresh = useCallback(async () => {
+    if (!taskId) return;
+    const generation = ++manualRefreshGenerationRef.current;
+    setRefreshing(true);
     try {
-      const next = await fetchLiveEnvironment(taskId, sessionId);
-      if (currentScopeRef.current !== requestScope) return;
-      hasLoadedRef.current = true;
-      publish(next);
-    } catch (err) {
-      // Only treat 404 as "no environment yet" — a transient 500 / auth /
-      // network error should leave the last-known view in place rather than
-      // erase a valid environment and disable the Reset action.
+      await loadEnv();
+    } finally {
       if (
-        err instanceof ApiError &&
-        err.status === 404 &&
+        generation === manualRefreshGenerationRef.current &&
         currentScopeRef.current === requestScope
       ) {
-        hasLoadedRef.current = true;
-        publish(EMPTY_ENVIRONMENT_STATE);
+        setRefreshing(false);
       }
-    } finally {
-      inFlightScopes.current.delete(requestScope);
-      if (currentScopeRef.current === requestScope) setLoading(false);
     }
-  }, [active, publish, requestScope, sessionId, taskId]);
+  }, [loadEnv, requestScope, taskId]);
 
   useEffect(() => {
     if (!taskId) return;
@@ -157,7 +188,7 @@ function useLiveEnvironment(
     setState(EMPTY_ENVIRONMENT_STATE);
   }, []);
 
-  return { state, loading, loadEnv, clear };
+  return { state, loading, refreshing, refresh, clear };
 }
 
 async function fetchLiveEnvironment(

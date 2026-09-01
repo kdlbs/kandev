@@ -59,12 +59,20 @@ describe("ProfileFormActions permissions", () => {
 });
 
 describe("Profile connection settings actions", () => {
-  it("keeps the Kubernetes action touch-visible and routes by executor identity", () => {
-    render(<ProfileConnectionSettingsAction executor={{ id: "executor/one", type: "k8s" }} />);
+  it("leaves Kubernetes connection access to the leading cluster section", () => {
+    const { container } = render(
+      <ProfileConnectionSettingsAction executor={{ id: "executor/one", type: "k8s" }} />,
+    );
 
-    const action = screen.getByRole("button", { name: "Cluster connection" });
+    expect(container.childElementCount).toBe(0);
+  });
+
+  it("keeps the SSH header action touch-visible and routes by executor identity", () => {
+    render(<ProfileConnectionSettingsAction executor={{ id: "executor/one", type: "ssh" }} />);
+
+    const action = screen.getByRole("button", { name: /connection settings/i });
     expect(action.className).toContain("min-h-11");
     fireEvent.click(action);
-    expect(push).toHaveBeenCalledWith("/settings/executors/k8s/executor%2Fone");
+    expect(push).toHaveBeenCalledWith("/settings/executors/ssh/executor%2Fone");
   });
 });

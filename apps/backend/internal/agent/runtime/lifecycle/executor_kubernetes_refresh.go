@@ -11,6 +11,7 @@ import (
 
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"go.uber.org/zap"
 )
 
@@ -30,15 +31,24 @@ func (r *KubernetesExecutor) RefreshRemoteInstance(
 	if current == nil || current.runtime == nil || current.client == nil || current.request == nil {
 		return nil, nil
 	}
-	inspection, refreshNeeded, err := r.inspectKubernetesRefresh(ctx, instance, current)
+	freshRuntime, err := r.newKubernetesRefreshRuntime(instance)
+	if err != nil {
+		return nil, err
+	}
+	inspection, refreshNeeded, err := r.inspectKubernetesRefresh(ctx, instance, current, freshRuntime)
 	if err != nil {
 		return nil, err
 	}
 	if !refreshNeeded {
+		if err := r.publishKubernetesRefreshRuntime(instance.InstanceID, current, freshRuntime); err != nil {
+			return nil, err
+		}
 		return nil, nil
 	}
 	req := kubernetesActiveRefreshRequest(current.request, instance, inspection.identity)
-	client, forward, token, remotePort, err := r.connectKubernetesRefresh(ctx, current, req, inspection)
+	client, forward, token, remotePort, err := r.connectKubernetesRefresh(
+		ctx, freshRuntime, current, req, inspection,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +58,7 @@ func (r *KubernetesExecutor) RefreshRemoteInstance(
 	metadata[MetadataKeyKubernetesInventoryState] = KubernetesInventoryStateReady
 	metadata[MetadataKeyIsRemote] = true
 	staged := &kubernetesSession{
-		runtime: current.runtime, forward: forward, client: client,
+		runtime: freshRuntime, forward: forward, client: client,
 		request: req, restartCount: inspection.restarts,
 	}
 	commit, abort := r.kubernetesRefreshFinalizers(instance.InstanceID, current, staged)
@@ -87,12 +97,13 @@ func (r *KubernetesExecutor) inspectKubernetesRefresh(
 	ctx context.Context,
 	instance *ExecutorInstance,
 	current *kubernetesSession,
+	freshRuntime *kubernetesRuntimeClient,
 ) (kubernetesRefreshInspection, bool, error) {
 	recorded, identity, err := kubernetesCleanupInventory(instance)
 	if err != nil {
 		return kubernetesRefreshInspection{}, false, err
 	}
-	pod, err := current.runtime.resources.GetPod(ctx, recorded.namespace, recorded.podName)
+	pod, err := freshRuntime.resources.GetPod(ctx, recorded.namespace, recorded.podName)
 	if err != nil {
 		return kubernetesRefreshInspection{}, false, fmt.Errorf(
 			"kubernetes lifecycle: inspect active Pod for refresh: %w", err,
@@ -101,7 +112,7 @@ func (r *KubernetesExecutor) inspectKubernetesRefresh(
 	if err := verifyRecordedPod(pod, recorded.namespace, recorded.podName, recorded.podUID, identity); err != nil {
 		return kubernetesRefreshInspection{}, false, err
 	}
-	if err := verifyKubernetesRecordedPVC(ctx, current.runtime.resources, recorded, identity); err != nil {
+	if err := verifyKubernetesRecordedPVC(ctx, freshRuntime.resources, recorded, identity); err != nil {
 		return kubernetesRefreshInspection{}, false, err
 	}
 	restarts := kubernetesMainContainerRestartCount(pod, recorded.mainContainer)
@@ -118,6 +129,42 @@ func (r *KubernetesExecutor) inspectKubernetesRefresh(
 		)
 	}
 	return inspection, true, nil
+}
+
+func (r *KubernetesExecutor) newKubernetesRefreshRuntime(
+	instance *ExecutorInstance,
+) (*kubernetesRuntimeClient, error) {
+	if r.clientFactory == nil {
+		return nil, errors.New("kubernetes lifecycle: refresh client factory is not configured")
+	}
+	config, err := kubernetesExecutorConfigFromMetadata(instance.Metadata)
+	if err != nil {
+		return nil, fmt.Errorf("kubernetes lifecycle: refresh configuration: %w", err)
+	}
+	runtime, err := r.clientFactory(config)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"kubernetes lifecycle: refresh client: %w", routingerr.SanitizeError(err),
+		)
+	}
+	if runtime == nil || runtime.resources == nil || runtime.streams == nil {
+		return nil, errors.New("kubernetes lifecycle: refresh client is incomplete")
+	}
+	return runtime, nil
+}
+
+func (r *KubernetesExecutor) publishKubernetesRefreshRuntime(
+	instanceID string,
+	current *kubernetesSession,
+	freshRuntime *kubernetesRuntimeClient,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.sessions[instanceID] != current {
+		return errors.New("kubernetes lifecycle: active session changed during credential refresh")
+	}
+	current.runtime = freshRuntime
+	return nil
 }
 
 func kubernetesActiveRefreshRequest(
@@ -138,17 +185,18 @@ func kubernetesActiveRefreshRequest(
 
 func (r *KubernetesExecutor) connectKubernetesRefresh(
 	ctx context.Context,
+	freshRuntime *kubernetesRuntimeClient,
 	current *kubernetesSession,
 	req *ExecutorCreateRequest,
 	inspection kubernetesRefreshInspection,
 ) (*agentctl.Client, kubeexecutor.PortForwardSession, string, int, error) {
 	if inspection.restarted {
 		return r.connectRestartedKubernetesAgentctl(
-			ctx, current.runtime, req, inspection.pod, inspection.recorded.agentctlInstanceID,
+			ctx, freshRuntime, req, inspection.pod, inspection.recorded.agentctlInstanceID,
 		)
 	}
 	client, forward, err := r.reattachKubernetesAgentctl(
-		ctx, current.runtime, req, inspection.pod, inspection.recorded,
+		ctx, freshRuntime, req, inspection.pod, inspection.recorded,
 	)
 	return client, forward, req.AuthToken, inspection.recorded.remotePort, err
 }

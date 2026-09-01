@@ -35,6 +35,18 @@ describe("Kubernetes active-session save confirmation", () => {
     expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/recorded workload snapshot/i));
   });
 
+  it("explains both reconnect credentials and recorded workload snapshots once", () => {
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal("confirm", confirm);
+
+    requireKubernetesSessionSaveConfirmation("connection_and_workload", 2);
+
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(confirm).toHaveBeenCalledWith(
+      expect.stringMatching(/connection.*reconnect.*workload snapshot/i),
+    );
+  });
+
   it("signals a silent coordinated-save cancellation when declined", () => {
     vi.stubGlobal(
       "confirm",

@@ -85,6 +85,16 @@ describe("LegacyExecutorSettingsRoute", () => {
     renderRoute(executor("k8s"));
 
     await waitFor(() =>
+      expect(replace).toHaveBeenCalledWith("/settings/executors/profile%2Fprimary"),
+    );
+    expect(screen.queryByTestId("legacy-executor")).toBeNull();
+  });
+
+  it("keeps an orphaned Kubernetes executor on the connection recovery page", async () => {
+    const orphan = { ...executor("k8s"), profiles: [] };
+    renderRoute(orphan);
+
+    await waitFor(() =>
       expect(replace).toHaveBeenCalledWith("/settings/executors/k8s/executor%2Fprimary"),
     );
     expect(screen.queryByTestId("legacy-executor")).toBeNull();

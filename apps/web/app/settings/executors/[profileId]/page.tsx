@@ -25,9 +25,7 @@ import {
 import {
   EnvVarsCard,
   useEnvVarRows,
-  rowsToEnvVars,
   envVarsToRows,
-  type EnvVarRow,
 } from "@/components/settings/profile-edit/env-vars-card";
 import { ProfileScriptCards } from "@/components/settings/profile-edit/profile-script-cards";
 import { SSHAgentReadinessCard } from "@/components/settings/ssh-agent-readiness-card";
@@ -49,10 +47,15 @@ import {
   type SaveStatus,
 } from "@/components/settings/profile-edit/profile-edit-page-chrome";
 import { ProfileConnectionSettingsAction } from "@/components/settings/profile-edit/profile-connection-settings-action";
+import type { ExecutorProfileSavePayload } from "@/components/settings/profile-edit/use-executor-profile-save-contributor";
 import {
-  useExecutorProfileSaveContributor,
-  type ExecutorProfileSavePayload,
-} from "@/components/settings/profile-edit/use-executor-profile-save-contributor";
+  useKubernetesProfileConnection,
+  useProfileSettingsSave,
+} from "@/components/settings/profile-edit/use-profile-settings-save";
+import {
+  buildProfileEnvVars,
+  profileSaveInvalidReason,
+} from "@/components/settings/profile-edit/profile-edit-form-helpers";
 import { useToast } from "@/components/toast-provider";
 import {
   deriveSpritesSecretId,
@@ -62,7 +65,7 @@ import {
   parseRemoteAuthSecrets,
   parseRemoteCredentials,
 } from "@/components/settings/profile-edit/executor-profile-baselines";
-import type { Executor, ExecutorProfile, ProfileEnvVar } from "@/lib/types/http";
+import type { Executor, ExecutorProfile } from "@/lib/types/http";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import { executorProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import {
@@ -71,27 +74,19 @@ import {
 } from "@/components/settings/profile-edit/serialize-executor-config";
 import { KubernetesProfileSections } from "@/components/settings/kubernetes-profile-sections";
 import { KubernetesReadOnlyNotice } from "@/components/settings/kubernetes-read-only-notice";
+import { KubernetesProfileClusterSection } from "@/components/settings/kubernetes-profile-cluster-section";
 import {
   parseKubernetesProfileConfig,
   replaceKubernetesProfileConfig,
 } from "@/components/settings/kubernetes-config";
-import { kubernetesProfileInvalidReason } from "@/components/settings/kubernetes-validation";
-import { useKubernetesAdminAccess } from "@/hooks/domains/settings/use-kubernetes-settings";
+import { kubernetesExecutorInvalidReason } from "@/components/settings/kubernetes-validation";
+import {
+  useKubernetesAdminAccess,
+  useKubernetesDiagnostics,
+  useKubernetesSessions,
+} from "@/hooks/domains/settings/use-kubernetes-settings";
 
 const EXECUTORS_ROUTE = "/settings/executors";
-const SPRITES_TOKEN_KEY = "SPRITES_API_TOKEN";
-
-function buildProfileEnvVars(
-  rows: EnvVarRow[],
-  isSprites: boolean,
-  spritesSecretId: string | null,
-): ProfileEnvVar[] {
-  const vars = rowsToEnvVars(rows).filter((envVar) => envVar.key !== SPRITES_TOKEN_KEY);
-  if (isSprites && spritesSecretId) {
-    vars.push({ key: SPRITES_TOKEN_KEY, secret_id: spritesSecretId });
-  }
-  return vars;
-}
 
 function useProfileFromStore(profileId: string) {
   const executor = useAppStore(
@@ -435,7 +430,6 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
       )}
       {form.isKubernetes && (
         <KubernetesProfileSections
-          executorConfig={executor.config ?? {}}
           form={form.kubernetesProfile}
           baseline={parseKubernetesProfileConfig(profile.config)}
           onChange={form.setKubernetesProfile}
@@ -533,9 +527,12 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
   const persistence = useProfilePersistence(executor, profile);
   const form = useProfileFormState(executor, profile);
   const canManageKubernetes = useKubernetesAdminAccess();
+  const connection = useKubernetesProfileConnection(executor, form.isKubernetes);
+  const diagnostics = useKubernetesDiagnostics();
+  const sessions = useKubernetesSessions(executor.id, form.isKubernetes);
   const relatedContainers = useDockerProfileContainers(profile.id, form.isDocker);
   const spritesTokenMissing = form.isSprites && !form.spritesSecretId;
-
+  const memberReadOnly = form.isKubernetes && !canManageKubernetes;
   const sharedConfig = buildSaveConfig(form, profile.config);
   const savePayload = {
     name: form.name.trim(),
@@ -547,18 +544,24 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
     cleanup_script: form.cleanupScript,
     env_vars: form.buildEnvVars(),
   };
-  const invalidReason = profileSaveInvalidReason(form, canManageKubernetes, t);
-  const baselineReady = useExecutorProfileSaveContributor({
+  const profileInvalidReason = profileSaveInvalidReason(form, canManageKubernetes, t);
+  const connectionInvalidReason = form.isKubernetes
+    ? kubernetesExecutorInvalidReason(connection.form, canManageKubernetes, t)
+    : undefined;
+  const invalidReason = connectionInvalidReason ?? profileInvalidReason;
+  const baselineReady = useProfileSettingsSave({
     executorId: executor.id,
     profileId: profile.id,
     payload: savePayload,
+    isKubernetes: form.isKubernetes,
     isRemote: form.isRemote,
     gitIdentityLoaded: form.gitIdentityLoaded,
-    isKubernetes: form.isKubernetes,
     canManageKubernetes,
     invalidReason,
-    save: persistence.save,
-    discard: form.reset,
+    saveProfile: persistence.save,
+    discardProfile: form.reset,
+    clearDiagnostics: diagnostics.clear,
+    connection,
   });
 
   const handleDelete = (options?: { removeRelatedDockerContainers?: boolean }) => {
@@ -581,13 +584,21 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
         description={getExecutorDescription(executor.type)}
         actions={<ProfileConnectionSettingsAction executor={executor} />}
       />
-      {form.isKubernetes && !canManageKubernetes && <KubernetesReadOnlyNotice />}
+      {memberReadOnly && <KubernetesReadOnlyNotice />}
+      {form.isKubernetes && (
+        <KubernetesProfileClusterSection
+          executor={executor}
+          form={form.kubernetesProfile}
+          connectionForm={connection.form}
+          connectionBaseline={connection.baseline}
+          onConnectionChange={connection.setForm}
+          canManage={canManageKubernetes}
+          diagnosticsState={diagnostics}
+          sessionsState={sessions}
+        />
+      )}
       <fieldset
-        disabled={
-          !baselineReady ||
-          persistence.saveStatus === "loading" ||
-          (form.isKubernetes && !canManageKubernetes)
-        }
+        disabled={!baselineReady || persistence.saveStatus === "loading" || memberReadOnly}
         className="min-w-0 space-y-8"
       >
         <ProfileEditSections executor={executor} profile={profile} form={form} secrets={secrets} />
@@ -598,7 +609,7 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       {persistence.error && <p className="text-sm text-destructive">{persistence.error}</p>}
       <ProfileFormActions
         onDelete={() => persistence.setDeleteDialogOpen(true)}
-        disabled={form.isKubernetes && !canManageKubernetes}
+        disabled={memberReadOnly}
       />
       <DeleteProfileDialog
         open={persistence.deleteDialogOpen}
@@ -609,18 +620,4 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       />
     </div>
   );
-}
-
-function profileSaveInvalidReason(
-  form: ReturnType<typeof useProfileFormState>,
-  canManageKubernetes: boolean,
-  t: (key: string) => string,
-): string | undefined {
-  if (form.isKubernetes && !canManageKubernetes) {
-    return t("executors:kubernetesAdminSaveOnly");
-  }
-  if (!form.name.trim()) return t("executors:profileNameIsRequired");
-  if (form.mcpPolicyErrorKey) return t(form.mcpPolicyErrorKey);
-  if (form.isSprites && !form.spritesSecretId) return t("executors:spritesTokenIsRequired");
-  return form.isKubernetes ? kubernetesProfileInvalidReason(form.kubernetesProfile, t) : undefined;
 }

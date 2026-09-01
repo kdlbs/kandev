@@ -28,6 +28,11 @@ template:
       - name: kandev-agent
         image: example.test/kandev-agent:e2e
 `;
+const SHORT_POD_TEMPLATE = "apiVersion: v1\nkind: PodTemplate\n";
+const TALL_POD_TEMPLATE = `${POD_TEMPLATE}${Array.from(
+  { length: 24 },
+  (_, index) => `# autosize-line-${index + 1}`,
+).join("\n")}`;
 
 async function initPage(page: Page, backend: BackendContext) {
   await page.addInitScript(
@@ -60,6 +65,66 @@ async function expectTouchLocator(locator: Locator, label: string) {
   expect(box!.height, `${label} must be at least 44px tall`).toBeGreaterThanOrEqual(44);
 }
 
+async function stubEmptySessions(page: Page) {
+  await page.route("**/api/v1/kubernetes/executors/*/sessions", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+}
+
+async function expectLeadingProfileClusterSection(page: Page, canManage: boolean) {
+  const section = page.getByTestId("kubernetes-profile-cluster-section");
+  const workload = page.getByTestId("kubernetes-workload-card");
+  await expect(section).toBeVisible();
+  await expect(section.getByTestId("kubernetes-connection-card")).toBeVisible();
+  await expect(section.getByTestId("kubernetes-diagnostics-card")).toBeVisible();
+  await expect(section.getByTestId("kubernetes-sessions-card")).toBeVisible();
+  const sectionBox = await section.boundingBox();
+  const workloadBox = await workload.boundingBox();
+  expect(sectionBox).not.toBeNull();
+  expect(workloadBox).not.toBeNull();
+  expect(sectionBox!.y).toBeLessThan(workloadBox!.y);
+  await expect(
+    section.getByRole("button", {
+      name: canManage ? /edit cluster connection/i : /view cluster connection/i,
+    }),
+  ).toHaveCount(0);
+  await expectTouchLocator(
+    section.getByTestId("kubernetes-namespace"),
+    "Kubernetes profile namespace field",
+  );
+  await expectTouchLocator(
+    section.getByTestId("kubernetes-test-button"),
+    "Kubernetes profile test button",
+  );
+  await expectTouchLocator(
+    section.getByTestId("kubernetes-sessions-card").getByRole("button", { name: /refresh/i }),
+    "Kubernetes sessions refresh button",
+  );
+}
+
+async function expectPodTemplateAutoSizes(page: Page, yaml: Locator) {
+  await yaml.fill(SHORT_POD_TEMPLATE);
+  await expect.poll(async () => (await yaml.boundingBox())?.height ?? 0).toBeLessThanOrEqual(140);
+  const shortHeight = (await yaml.boundingBox())!.height;
+
+  await yaml.fill(TALL_POD_TEMPLATE);
+  await expect
+    .poll(async () => (await yaml.boundingBox())?.height ?? 0)
+    .toBeGreaterThan(shortHeight + 100);
+  const tallHeight = (await yaml.boundingBox())!.height;
+  expect(await yaml.evaluate((element) => getComputedStyle(element).overflowY)).toBe("hidden");
+  expect(await yaml.evaluate((element) => element.scrollHeight <= element.clientHeight + 2)).toBe(
+    true,
+  );
+  expect(await yaml.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  await assertNoDocumentHorizontalOverflow(page, "mobile Kubernetes auto-sized YAML");
+
+  await yaml.fill(SHORT_POD_TEMPLATE);
+  await expect
+    .poll(async () => (await yaml.boundingBox())?.height ?? Number.POSITIVE_INFINITY)
+    .toBeLessThan(tallHeight);
+}
+
 async function seedMemberBoundary(apiClient: ApiClient) {
   const executor = await apiClient.createExecutor("Mobile member Kubernetes", "k8s", {
     auth_mode: "kubeconfig",
@@ -89,6 +154,7 @@ test("administrator creates, tests, saves, and reloads contained Kubernetes YAML
   const apiClient = new ApiClient(backend.baseUrl);
   const { context, page } = await openMobileContext(browser, backend);
   const name = "Mobile persistent Kubernetes";
+  await stubEmptySessions(page);
   await page.route("**/api/v1/kubernetes/test", async (route) => {
     await route.fulfill({
       status: 200,
@@ -147,23 +213,44 @@ test("administrator creates, tests, saves, and reloads contained Kubernetes YAML
     await expectTouchTarget(page, /^reset$/i);
     const saveButton = await expectTouchTarget(page, /save changes/i);
     await saveButton.tap();
-    await expect(page).toHaveURL(/\/settings\/executors\/k8s\/[^/]+$/);
-    await expectTouchTarget(page, /delete executor/i);
-    await expectTouchTarget(page, /back to executors/i);
-    await assertNoDocumentHorizontalOverflow(page, "mobile Kubernetes saved connection");
 
+    await expect(page).toHaveURL(/\/settings\/executors\/[^/]+$/);
+    const profileId = decodeURIComponent(new URL(page.url()).pathname.split("/").at(-1)!);
     const executor = (await apiClient.listExecutors()).executors.find((row) => row.name === name);
     expect(executor).toBeTruthy();
-    const profileId = executor!.profiles?.find((row) => row.name === "Mobile profile")?.id;
-    expect(profileId).toBeTruthy();
+    await expect
+      .poll(async () => (await apiClient.getExecutorProfile(executor!.id, profileId)).name)
+      .toBe("Mobile profile");
+    await expect(page).toHaveURL(`/settings/executors/${profileId}`);
+    await expectTouchTarget(page, /delete profile/i);
+    await assertNoDocumentHorizontalOverflow(page, "mobile Kubernetes saved profile");
     await page.reload();
     await expect(page.getByTestId("kubernetes-executor-name")).toHaveValue(name);
-    await page.goto(`/settings/executors/${profileId}`);
     await expect(page.getByTestId("kubernetes-pod-template")).toHaveValue(POD_TEMPLATE);
     await expect(page.getByTestId("kubernetes-workspace-size")).toHaveValue("3Gi");
+    await expectLeadingProfileClusterSection(page, true);
     await assertNoDocumentHorizontalOverflow(page, "mobile Kubernetes reloaded profile");
+
+    const clusterSection = page.getByTestId("kubernetes-profile-cluster-section");
+    await clusterSection.getByTestId("kubernetes-namespace").fill("mobile-draft-namespace");
+    await page.getByTestId("kubernetes-main-container").fill("mobile-draft-container");
+    const profileDiagnosticRequest = page.waitForRequest(
+      (request) => request.url().endsWith("/api/v1/kubernetes/test") && request.method() === "POST",
+    );
+    await page
+      .getByTestId("kubernetes-profile-cluster-section")
+      .getByTestId("kubernetes-test-button")
+      .tap();
+    expect((await profileDiagnosticRequest).postDataJSON()).toMatchObject({
+      config: {
+        namespace: "mobile-draft-namespace",
+        kubeconfig_path: "/tmp/mobile-e2e.kubeconfig",
+      },
+      profile_config: { main_container: "mobile-draft-container" },
+    });
     await page.reload();
     await expect(page.getByTestId("kubernetes-pod-template")).toHaveValue(POD_TEMPLATE);
+    await expectPodTemplateAutoSizes(page, page.getByTestId("kubernetes-pod-template"));
     await assertNoDocumentHorizontalOverflow(page, "mobile Kubernetes profile after reload");
   } finally {
     const executor = (await apiClient.listExecutors()).executors.find((row) => row.name === name);
@@ -196,20 +283,21 @@ test("member boundaries stay read-only and touch-visible on mobile", async ({
     await acceptInvite(memberContext, backend.baseUrl, token, MEMBER);
     const page = await memberContext.newPage();
     await initPage(page, backend);
+    await stubEmptySessions(page);
     expect((await page.viewportSize())?.width).toBe(393);
     await page.goto(`/settings/executors/k8s/${seeded.executor.id}`);
+    await expect(page).toHaveURL(`/settings/executors/${seeded.profile.id}`);
 
     await expect(page.getByTestId("kubernetes-read-only-notice")).toBeVisible();
     await expect(page.getByTestId("kubernetes-executor-name")).toBeDisabled();
     const testButton = page.getByTestId("kubernetes-test-button");
     await expect(testButton).toBeDisabled();
     await expectTouchLocator(testButton, "Disabled Kubernetes test button");
-    const deleteButton = page.getByRole("button", { name: /delete executor/i });
+    const deleteButton = page.getByRole("button", { name: /delete profile/i });
     await expect(deleteButton).toBeDisabled();
     await expectTouchLocator(deleteButton, "Disabled delete executor button");
-    await expectTouchTarget(page, /back to executors/i);
     await expect(page.getByTestId("settings-floating-save")).toHaveCount(0);
-    await assertNoDocumentHorizontalOverflow(page, "mobile Kubernetes member connection");
+    await assertNoDocumentHorizontalOverflow(page, "mobile Kubernetes member profile");
 
     const patchResponse = await memberContext.request.patch(
       `${backend.baseUrl}/api/v1/executors/${seeded.executor.id}`,
@@ -231,14 +319,18 @@ test("member boundaries stay read-only and touch-visible on mobile", async ({
     );
     expect(testResponse.status()).toBe(403);
 
-    await page.goto(`/settings/executors/${seeded.profile.id}`);
-    await expect(page.getByTestId("kubernetes-read-only-notice")).toBeVisible();
+    await expectLeadingProfileClusterSection(page, false);
     const yaml = page.getByTestId("kubernetes-pod-template");
     await expect(yaml).toBeDisabled();
     const yamlBox = await yaml.boundingBox();
     expect(yamlBox).not.toBeNull();
     expect(yamlBox!.x + yamlBox!.width).toBeLessThanOrEqual(393);
     await assertNoDocumentHorizontalOverflow(page, "mobile Kubernetes member profile");
+    await expect(
+      page
+        .getByTestId("kubernetes-profile-cluster-section")
+        .getByRole("button", { name: /view cluster connection/i }),
+    ).toHaveCount(0);
   } finally {
     await adminContext.close();
     await memberContext.close();

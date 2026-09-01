@@ -1,7 +1,7 @@
 ---
-status: shipped
+status: implemented
 created: 2026-08-24
-updated: 2026-08-26
+updated: 2026-09-01
 owner: Kandev
 ---
 
@@ -46,18 +46,71 @@ first-class Pod with an administrator-reviewed workload template.
   matching helper binary.
 - The settings experience exposes the same capabilities on desktop and mobile,
   with touch-visible actions and no page-level horizontal overflow.
-- Kubernetes is represented by a Pod-shaped cube glyph wherever an executor or
-  runtime icon is shown. It does not reuse the generic cloud-computing glyph.
+- Kubernetes is represented by a package-style Pod glyph wherever an executor
+  or runtime icon is shown. It does not reuse the generic cloud-computing or
+  plain cube glyph.
 - A Kubernetes task's executor disclosure shows the exact authorized session
   Pod status rather than falling back to the recorded task-environment
   `ready` value. It exposes the Pod identity, phase/container state, restart
   count, workspace mode, and sanitized failure reason when present.
-- The task disclosure provides explicit Refresh and Executor settings actions.
+- The task disclosure provides compact icon-only Refresh and Profile settings
+  actions in its summary header. The controls remain keyboard accessible,
+  labelled, and at least 44 px on touch layouts without becoming the visual
+  focus of the disclosure.
   On fine-pointer desktop it may use the existing compact popover; on a coarse
   pointer it is a named button that opens a Drawer with the same information and
   actions. Kubernetes does not expose the generic Reset environment action,
   because Pod/PVC cleanup remains owned by the session Stop/Resume and terminal
   Archive/Delete lifecycle.
+- The Kubernetes task disclosure presents one deliberate Pod summary: a
+  Pod-shaped identity header, a human-readable live status, grouped runtime
+  facts, and quiet corner controls for Refresh and Profile settings. Technical
+  identities use monospace typography; state, dates, labels, and actions do not.
+- Refreshing a task disclosure always has visible in-progress feedback. A click
+  made while background polling already owns the same request joins that request
+  instead of appearing to succeed without waiting or issuing a duplicate read.
+- Every Kubernetes profile page begins with the shared executor's connection
+  configuration, connection and permissions test, and executor-wide active
+  sessions before profile details, workload, workspace, credentials, or scripts.
+  Connection fields are edited inline on that profile page instead of through a
+  nested connection destination. The page states that connection values are
+  shared by every profile under the executor. Testing uses the current unsaved
+  connection, workload, and workspace values.
+- Kubernetes connection settings and profile settings remain separate persisted
+  resources, but one profile page coordinates their dirty state, validation,
+  active-session confirmation, save, and reset behavior as one settings
+  hierarchy. A partial API failure leaves the successfully saved resource clean
+  and the failed resource visibly dirty for retry.
+- The settings tree treats a configured Kubernetes executor as a profile group,
+  not as a second connection subpage. Task disclosure settings links target the
+  exact `executor_profile_id`. Legacy executor-level URLs redirect to a profile
+  when one exists and remain only as an orphan-executor recovery surface when no
+  profile exists.
+- Sidebar, Kanban, and task-page Kubernetes status surfaces converge on the same
+  current credential view. Rotating or repairing kubeconfig credentials must not
+  leave list/card chrome pinned to a launch-time `Unauthorized` result after the
+  current executor configuration can inspect the recorded Pod successfully.
+- Sidebar and Kanban executor indicators hydrate their exact task/session status
+  as soon as a valid indicator is rendered. The user does not need to hover the
+  icon before its healthy, failed, or unavailable tone becomes truthful. Exact
+  duplicate scopes share one in-flight read and one recent result; a later
+  hover or keyboard focus refreshes that scope without clearing the last known
+  facts while the refresh is pending.
+- A fine-pointer task-list or Kanban executor indicator uses the same compact,
+  structured disclosure language as the task Pull Request indicator: a
+  focusable icon trigger, a bounded summary surface, a clear identity header,
+  and aligned labelled status rows. It does not fall back to an unstructured
+  stack of sentences. Kubernetes rows include state, restart count, workspace
+  mode, creation time, last check, and a sanitized failure when present.
+- On a coarse pointer, the same compact executor indicator is tappable and
+  opens a bottom Drawer containing the same status facts. Its touch target is
+  at least 44 px without making dense task rows visually taller, and the Drawer
+  owns bounded scrolling plus safe-area padding. Hover is never the only way to
+  discover the status.
+- The raw PodTemplate YAML field grows and shrinks with its content from a compact
+  minimum height. It has no independent vertical scrollbar; the settings page is
+  the vertical scroll owner, while unwrapped YAML retains contained horizontal
+  scrolling without widening the document.
 
 Decision: [ADR-2026-08-24-kubernetes-executor-resource-ownership](../../decisions/2026-08-24-kubernetes-executor-resource-ownership.md).
 
@@ -255,11 +308,67 @@ identity check or inventory lookup stops cleanup without deleting anything.
   configures auth, template, and storage, **THEN** all required actions remain
   touch-visible, scroll within one vertical owner, and produce no document
   horizontal overflow.
+- **GIVEN** an administrator opens a Kubernetes profile from the Executors tree,
+  **WHEN** the profile page renders, **THEN** editable shared connection fields,
+  cluster diagnostics, and executor-wide active sessions are visible before the
+  editable profile sections without navigating to another settings page.
+- **GIVEN** a member opens that Kubernetes profile, **WHEN** cluster status
+  renders, **THEN** active sessions and the inline read-only connection fields
+  remain visible, while the connection test is visible, disabled, and explains
+  that administrator access is required.
+- **GIVEN** connection and workload values on one Kubernetes profile page are
+  both dirty, **WHEN** an administrator saves, **THEN** the page requests one
+  active-session confirmation, persists each resource in dependency order, and
+  leaves only a failed resource dirty if one API call fails.
+- **GIVEN** a configured Kubernetes executor has at least one profile, **WHEN**
+  the user selects the executor group or opens its legacy connection URL,
+  **THEN** settings resolve to a profile root rather than mounting a separate
+  connection editor.
+- **GIVEN** a Kubernetes profile has short or long PodTemplate YAML, **WHEN** the
+  value loads, is edited, or is reset, **THEN** the field shrinks or grows to the
+  content, the page remains the only vertical scroll owner, and long unwrapped
+  lines do not create document-level horizontal overflow.
 - **GIVEN** a task uses a running Kubernetes session, **WHEN** its executor
   disclosure opens, **THEN** the Pod-shaped Kubernetes icon, exact Pod name,
-  running state, restart count, and workspace mode are shown, and Refresh plus
-  Executor settings are visible controls instead of a generic `ready` badge and
-  empty-resource message.
+  running state, restart count, and workspace mode are shown, and compact
+  Refresh plus Profile settings icons are available in the summary header
+  instead of a generic `ready` badge and empty-resource message.
+- **GIVEN** that disclosure belongs to a Kubernetes profile, **WHEN** the user
+  selects its settings icon, **THEN** navigation opens the exact profile root
+  identified by `executor_profile_id`, not the executor-level connection route.
+- **GIVEN** a loaded Kubernetes task disclosure, **WHEN** the user selects
+  Refresh, **THEN** the control immediately reports an in-progress state, waits
+  for the exact task/session status read, and then publishes the refreshed Pod
+  facts without clearing the last known values during the request.
+- **GIVEN** background polling has already started that exact status read,
+  **WHEN** the user selects Refresh, **THEN** the visible refresh state remains
+  active until the shared request settles and no duplicate read is issued.
+- **GIVEN** a sidebar or Kanban executor hover previously observed an
+  `Unauthorized` status from launch-time credentials, **WHEN** current
+  kubeconfig credentials can inspect the exact recorded Pod and the indicator
+  mounts or its disclosure opens again, **THEN** the status is re-read, the
+  error clears, and the Pod icon uses the current healthy tone.
+- **GIVEN** Kanban renders a Kubernetes card with an executor, task, and primary
+  session identity, **WHEN** the card enters the document, **THEN** its exact Pod
+  status is requested before any hover and the Pod icon updates to the returned
+  semantic tone. Another mounted indicator for that exact scope joins the same
+  request instead of issuing a duplicate.
+- **GIVEN** an eager status read is already in flight, **WHEN** the user hovers
+  or keyboard-focuses the executor indicator, **THEN** the disclosure opens with
+  visible loading feedback, retains any last known facts, and joins the causal
+  read. A later open after settlement performs a fresh exact read.
+- **GIVEN** the rendered task has no primary session or lacks the executor
+  identity required by its status source, **WHEN** its indicator renders,
+  **THEN** no malformed request is sent and the icon plus disclosure report an
+  unavailable state rather than `ready`.
+- **GIVEN** a fine-pointer user opens a Kubernetes executor indicator in Kanban
+  or the task sidebar, **WHEN** the summary appears, **THEN** it uses a bounded
+  Pull Request-style identity header and aligned labelled rows for state,
+  restarts, workspace, created time, and last check, with the failure reason as
+  a distinct sanitized status row when present.
+- **GIVEN** the same indicator is rendered for a coarse pointer, **WHEN** the
+  user taps its 44 px target, **THEN** a safe-area-aware bottom Drawer presents
+  the same facts and can be dismissed without selecting or opening the task row.
 - **GIVEN** the recorded Kubernetes Pod is pending, failed, missing, or cannot
   be inspected, **WHEN** the task disclosure refreshes, **THEN** it shows the
   sanitized live state or unavailable/error state and never reports `ready`
@@ -282,8 +391,22 @@ identity check or inventory lookup stops cleanup without deleting anything.
   listener.
 - Direct Pod restart/delete controls in the task disclosure. Existing
   Stop/Resume and terminal Archive/Delete flows remain the lifecycle authority.
+- Merging executor connection settings and profile settings into one database
+  entity or API transaction. They remain separate resources even though one
+  profile page composes and coordinates both settings surfaces.
+- Profile-scoped active-session filtering. The status section deliberately shows
+  every sanitized active session using the shared executor.
+- Replacing the raw PodTemplate field with a syntax-highlighting YAML editor.
+- Persisting live Pod status in `TaskStatusSummary`, adding a Kanban-specific
+  backend batch endpoint, or changing the existing exact Kubernetes session and
+  non-Kubernetes `task.session.status` wire contracts.
 
 ## Implementation plan
 
-See [the Kubernetes executor implementation plan](../../plans/kubernetes-executor/plan.md)
-and the [task runtime disclosure repair plan](../../plans/kubernetes-executor-runtime-disclosure/plan.md).
+See [the Kubernetes executor implementation plan](../../plans/kubernetes-executor/plan.md),
+the [task runtime disclosure repair plan](../../plans/kubernetes-executor-runtime-disclosure/plan.md),
+and the [Kubernetes executor UX repair plan](../../plans/kubernetes-executor-ux-polish/plan.md).
+The follow-up status and settings hierarchy repair is tracked in the
+[Kubernetes executor status and settings repair plan](../../plans/kubernetes-executor-status-settings-repair/plan.md).
+The eager task-icon status and disclosure repair is tracked in the
+[Kubernetes executor task status preview repair plan](../../plans/kubernetes-executor-task-status-preview-repair/plan.md).

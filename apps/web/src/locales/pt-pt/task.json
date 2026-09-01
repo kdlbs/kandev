@@ -1047,6 +1047,8 @@
   "remoteContributionUsed": "A versão do PR foi adotada. Branch de recuperação: {{branch}}",
   "remoteCreatedLine": "Criado: {{createdAt}}",
   "remoteExecutor": "Executor remoto",
+  "remoteExecutorStatus": "Estado do executor {{name}}",
+  "remoteLastCheck": "Última verificação",
   "remoteLastCheckLine": "Última verificação: {{checkedAt}}",
   "remoteRepository": "Repositório remoto",
   "remoteStateLine": "Estado: {{state}}",

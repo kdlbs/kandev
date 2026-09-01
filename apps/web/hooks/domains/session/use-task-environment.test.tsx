@@ -37,6 +37,7 @@ const useEnvironmentWithSession = useTaskEnvironment as unknown as (
 ) => ReturnType<typeof useTaskEnvironment> & {
   kubernetes: KubernetesSession | null;
   kubernetesError: string | null;
+  refreshing: boolean;
 };
 
 const ENVIRONMENT: TaskEnvironment = {
@@ -61,6 +62,14 @@ const KUBERNETES_SESSION: KubernetesSession = {
   restarts: 0,
   workspace_kind: "empty_dir",
 };
+
+function deferred<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 afterEach(() => {
   cleanup();
@@ -133,5 +142,61 @@ describe("useTaskEnvironment Kubernetes status", () => {
     expect(result.current.kubernetesError).toBe("Failed to load Kubernetes sessions.");
     expect(result.current.kubernetesError).not.toContain("cluster.invalid");
     expect(result.current.status).toEqual({ label: "Error", tone: "error" });
+  });
+});
+
+describe("useTaskEnvironment explicit refresh", () => {
+  it("reports a distinct busy state while an explicit refresh keeps the last Pod visible", async () => {
+    mocks.fetchTaskEnvironmentLive.mockResolvedValueOnce({ environment: ENVIRONMENT });
+    mocks.getKubernetesTaskSession.mockResolvedValue(KUBERNETES_SESSION);
+    const { result } = renderHook(() => useEnvironmentWithSession(TASK_ONE, SESSION_ONE, true));
+    await waitFor(() => expect(result.current.kubernetes?.pod_name).toBe(POD_ONE));
+
+    const refreshResponse = deferred<{ environment: TaskEnvironment }>();
+    mocks.fetchTaskEnvironmentLive.mockImplementationOnce(() => refreshResponse.promise);
+    let refreshPromise: Promise<void> = Promise.resolve();
+    act(() => {
+      refreshPromise = result.current.refresh();
+    });
+
+    expect(result.current.refreshing).toBe(true);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.kubernetes?.pod_name).toBe(POD_ONE);
+
+    await act(async () => {
+      refreshResponse.resolve({ environment: ENVIRONMENT });
+      await refreshPromise;
+    });
+    expect(result.current.refreshing).toBe(false);
+  });
+
+  it("makes a duplicate refresh await the exact request already in flight", async () => {
+    mocks.fetchTaskEnvironmentLive.mockResolvedValueOnce({ environment: ENVIRONMENT });
+    mocks.getKubernetesTaskSession.mockResolvedValue(KUBERNETES_SESSION);
+    const { result } = renderHook(() => useEnvironmentWithSession(TASK_ONE, SESSION_ONE, true));
+    await waitFor(() => expect(result.current.kubernetes?.pod_name).toBe(POD_ONE));
+
+    const refreshResponse = deferred<{ environment: TaskEnvironment }>();
+    mocks.fetchTaskEnvironmentLive.mockImplementationOnce(() => refreshResponse.promise);
+    let firstRefresh: Promise<void> = Promise.resolve();
+    let joinedRefresh: Promise<void> = Promise.resolve();
+    let joinedSettled = false;
+    act(() => {
+      firstRefresh = result.current.refresh();
+      joinedRefresh = result.current.refresh();
+      void joinedRefresh.then(() => {
+        joinedSettled = true;
+      });
+    });
+    await act(async () => Promise.resolve());
+
+    expect(mocks.fetchTaskEnvironmentLive).toHaveBeenCalledTimes(2);
+    expect(joinedSettled).toBe(false);
+
+    await act(async () => {
+      refreshResponse.resolve({ environment: ENVIRONMENT });
+      await Promise.all([firstRefresh, joinedRefresh]);
+    });
+    expect(joinedSettled).toBe(true);
   });
 });

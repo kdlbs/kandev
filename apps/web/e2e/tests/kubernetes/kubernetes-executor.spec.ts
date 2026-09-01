@@ -212,11 +212,11 @@ test("launches through kubeconfig with Pod exec and a loopback-only agentctl for
   const settingsLink = disclosure.getByTestId("executor-settings-link");
   await expect(settingsLink).toHaveAttribute(
     "href",
-    `/settings/executors/k8s/${seedData.executorId}`,
+    `/settings/executors/${seedData.executorProfileId}`,
   );
   await settingsLink.click();
   await expect(testPage).toHaveURL(
-    (url) => url.pathname === `/settings/executors/k8s/${seedData.executorId}`,
+    (url) => url.pathname === `/settings/executors/${seedData.executorProfileId}`,
   );
   await expect(testPage.getByTestId("kubernetes-sessions-table")).toContainText(pod.metadata.name);
 });

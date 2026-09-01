@@ -1092,6 +1092,8 @@
   "remoteContributionUsed": "ƤŔ vēŕśĩōń àďōƥţēď. Ŕēćōvēŕŷ ƀŕàńćĥ: {{branch}}",
   "remoteCreatedLine": "Ćŕēàţēď: {{createdAt}}",
   "remoteExecutor": "Ŕēḿōţē ēxēćũţōŕ",
+  "remoteExecutorStatus": "{{name}} ēxēćũţōŕ śţàţũś",
+  "remoteLastCheck": "Ĺàśţ ćĥēćķ",
   "remoteLastCheckLine": "Ĺàśţ ćĥēćķ: {{checkedAt}}",
   "remoteRepository": "Ŕēḿōţē ŕēƥōśĩţōŕŷ",
   "remoteStateLine": "Śţàţē: {{state}}",
