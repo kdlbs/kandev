@@ -309,7 +309,7 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest, req
 	}
 
 	latest, latestState := s.readLatestRevision(readCtx, req.TaskID)
-	rb := s.buildRevision(req, headPlan, headState, latest, authorKind, authorName, title)
+	rb := s.buildRevision(readCtx, req, headPlan, headState, latest, authorKind, authorName, title)
 
 	if err := s.repo.WritePlanRevision(ctx, plan, rb.rev, rb.coalesceID, preserveTitle, preserveCreatedBy); err != nil {
 		s.logPlanWriteError(req.TaskID, err)
@@ -384,6 +384,7 @@ type revisionBuild struct {
 // buildRevision decides whether this write coalesces into the latest revision or appends a new
 // one, and assembles the revision row to persist.
 func (s *PlanService) buildRevision(
+	ctx context.Context,
 	req CreatePlanRequest,
 	headPlan *models.TaskPlan,
 	headState planHeadState,
