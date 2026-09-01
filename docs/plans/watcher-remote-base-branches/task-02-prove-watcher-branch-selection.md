@@ -88,7 +88,8 @@ selects `origin/main`, verifies the exact persisted API value, reloads the
 watcher, and verifies the qualified option remains selected. The mobile
 coverage also verifies touch interaction, dialog and popover containment,
 touch-sized options, internal scrolling, and no document horizontal overflow.
+The shared flow and temporary branch setup clean up only the records and
+branches they create, including when an assertion fails.
 
 Both verification commands passed after rebuilding the backend and frontend:
-the desktop scenario passed in 4.6 seconds and the mobile scenario passed in
-5.2 seconds.
+the desktop scenario passed and the mobile scenario passed.

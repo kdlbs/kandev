@@ -93,7 +93,7 @@ describe("WatcherRepositoryFields", () => {
     expect(screen.queryByRole("option", { name: /^origin\/main origin/ })).toBeTruthy();
   });
 
-  it("deduplicates exact projected refs, keeps provider branches short, and refreshes", () => {
+  it("deduplicates exact refs, keeps provider branches short, filters unsupported remotes, and refreshes", () => {
     const onBaseBranchChange = vi.fn();
     branchState.branches = [
       { name: "main", type: "local" },
@@ -110,14 +110,15 @@ describe("WatcherRepositoryFields", () => {
     expect(screen.getAllByRole("option", { name: /^main local/ })).toHaveLength(1);
     expect(screen.getAllByRole("option", { name: /^origin\/main origin/ })).toHaveLength(1);
     expect(screen.getByRole("option", { name: /^provider\/default remote/ })).toBeTruthy();
+    expect(
+      screen.queryByRole("option", { name: /^upstream\/release\/candidate upstream/ }),
+    ).toBeNull();
 
     fireEvent.change(screen.getByPlaceholderText("Search branches..."), {
-      target: { value: "candidate" },
+      target: { value: QUALIFIED_BRANCH },
     });
-    expect(
-      screen.getByRole("option", { name: /^upstream\/release\/candidate upstream/ }),
-    ).toBeTruthy();
-    expect(screen.queryByRole("option", { name: /^origin\/main origin/ })).toBeNull();
+    expect(screen.getByRole("option", { name: /^origin\/main origin/ })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: /^main local/ })).toBeNull();
 
     fireEvent.change(screen.getByPlaceholderText("Search branches..."), { target: { value: "" } });
     fireEvent.click(screen.getByRole("option", { name: /^origin\/main origin/ }));
@@ -137,7 +138,17 @@ describe("WatcherRepositoryFields", () => {
       QUALIFIED_BRANCH,
     );
     fireEvent.click(screen.getByRole("combobox", { name: BASE_BRANCH_LABEL }));
-    expect(screen.getByRole("option", { name: QUALIFIED_BRANCH })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /^origin\/main origin/ })).toBeTruthy();
+  });
+
+  it("associates the base branch label with its trigger", () => {
+    renderFields();
+
+    const label = screen.getByText(BASE_BRANCH_LABEL, { exact: true });
+    const trigger = screen.getByRole("combobox", { name: BASE_BRANCH_LABEL });
+
+    expect(label.getAttribute("for")).toBeTruthy();
+    expect(label.getAttribute("for")).toBe(trigger.getAttribute("id"));
   });
 
   it("maps the repository default choice back to an empty stored branch", () => {

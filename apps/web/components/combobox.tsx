@@ -66,6 +66,8 @@ interface ComboboxProps {
   loading?: boolean;
   /** When true, keep option and trigger hit areas touch-sized. */
   touchTarget?: boolean;
+  /** Optional id for associating a visible form label with the trigger. */
+  triggerId?: string;
   /** Ref for consumers that anchor a local confirmation to this trigger. */
   triggerRef?: Ref<HTMLButtonElement>;
 }
@@ -169,6 +171,7 @@ function ComboboxTrigger({
   placeholder,
   loading,
   testId,
+  triggerId,
   triggerRef,
 }: {
   options: ComboboxOption[];
@@ -182,12 +185,14 @@ function ComboboxTrigger({
   placeholder: string;
   loading: boolean;
   testId?: string;
+  triggerId?: string;
   triggerRef?: Ref<HTMLButtonElement>;
 }) {
   return (
     <PopoverTrigger asChild>
       <Button
         ref={triggerRef}
+        id={triggerId}
         variant="ghost"
         role="combobox"
         aria-label={ariaLabel}
@@ -241,6 +246,7 @@ export const Combobox = memo(function Combobox({
   headerAction,
   loading = false,
   touchTarget = false,
+  triggerId,
   triggerRef,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
@@ -268,6 +274,7 @@ export const Combobox = memo(function Combobox({
         placeholder={placeholder}
         loading={loading}
         testId={testId}
+        triggerId={triggerId}
         triggerRef={triggerRef}
       />
       <PopoverContent

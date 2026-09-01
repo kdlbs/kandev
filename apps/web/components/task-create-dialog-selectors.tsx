@@ -144,6 +144,7 @@ type BranchSelectorProps = {
   dropdownTestId?: string;
   dropdownLabel?: string;
   touchTarget?: boolean;
+  triggerId?: string;
 };
 
 export const BranchSelector = memo(function BranchSelector({
@@ -165,6 +166,7 @@ export const BranchSelector = memo(function BranchSelector({
   dropdownTestId,
   dropdownLabel = t("task:baseBranch2"),
   touchTarget = false,
+  triggerId,
 }: BranchSelectorProps) {
   const headerAction = onRefresh ? (
     <BranchRefreshButton
@@ -194,6 +196,7 @@ export const BranchSelector = memo(function BranchSelector({
       headerAction={headerAction}
       loading={loading}
       touchTarget={touchTarget}
+      triggerId={triggerId}
     />
   );
 });

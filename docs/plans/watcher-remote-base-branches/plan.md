@@ -14,17 +14,17 @@ legacy_specs:
 ## Overview
 
 Reuse the searchable New Task branch-picker stack in the shared watcher field,
-preserve remote identity, then prove the qualified value persists in Jira on
-desktop and phone. The backend already lists remote branches, accepts
-`origin/<branch>`, persists the value, and materializes it through the worktree
-refresh path, so implementation remains a frontend picker and regression
-change.
+preserve the supported `origin` remote identity, then prove the qualified value
+persists in Jira on desktop and phone. The backend already lists remote
+branches, accepts `origin/<branch>`, persists the value, and materializes it
+through the worktree refresh path, so implementation remains a frontend picker
+and regression change.
 
 ## Scope
 
 ### In scope
 
-- Show local and qualified remote refs as distinct watcher choices.
+- Show local and qualified `origin` refs as distinct watcher choices.
 - Provide branch search, refresh, preferred ordering, and local or remote
   badges through the existing shared picker behavior.
 - Preserve the selected qualified ref through watcher create, reload, and task
@@ -43,10 +43,11 @@ change.
 Replace the base-branch `PickSelect` in `WatcherRepositoryFields` with the
 existing full-width `BranchSelector`. Reuse `sortBranches`, `branchToOption`,
 and `scoreBranch` from the New Task branch-picker stack so search behavior,
-qualified values, ordering, and badges stay consistent. Keep the
-repository-default sentinel as a plain leading option, preserve a stored value
-with a fallback option when it is absent from the current branch response, and
-deduplicate only exact projected refs.
+qualified values, ordering, and badges stay consistent. Filter named remotes to
+the supported `origin` contract before projection. Keep the repository-default
+sentinel as a plain leading option, preserve a stored value with a fallback
+option when it is absent from the current branch response, and deduplicate only
+exact projected refs.
 
 Wire `useBranches.refresh` to the selector's existing refresh action. Reuse the
 combobox's bounded popover and add a narrowly scoped option-row class or prop so
@@ -62,8 +63,8 @@ branch picker; no surrounding dialog composition change is planned.
 
 - `AC-INTEGRATIONS-WATCHER-REMOTE-BASE-BRANCHES-001.1`, `.3`, and `.4`: focused
   component tests in `apps/web/components/watcher-repository-fields.test.tsx`
-  prove local, qualified remote, provider-only, default, and duplicate refs;
-  search filtering; badges; and refresh behavior.
+  prove local, qualified origin, provider-only, default, unsupported-remote, and
+  duplicate refs; search filtering; badges; and refresh behavior.
 - The existing branch-policy picker test remains the closest reuse regression
   and proves the same shared selector stack outside task creation.
 - Existing backend tests continue to prove `origin/main` validation and remote
@@ -88,11 +89,14 @@ branch picker; no surrounding dialog composition change is planned.
 
 ## Verification results
 
-Passed focused component verification (3 files, 25 tests), targeted TypeScript
+Passed focused component verification (3 files, 26 tests), targeted TypeScript
 and ESLint checks, rebuilt desktop Jira watcher E2E (1 passed), rebuilt mobile
 Jira watcher E2E (1 passed), and public-document validation (61 tests and 41
-published pages). A repository-wide E2E sleep audit still reports unrelated
-pre-existing violations outside the changed files.
+published pages). The watcher projection now omits named remotes outside the
+supported `origin` contract, associates the base-branch label with its
+trigger, and cleans up temporary Jira watchers in all E2E outcomes. A
+repository-wide E2E sleep audit still reports unrelated pre-existing
+violations outside the changed files.
 
 ## Risks
 

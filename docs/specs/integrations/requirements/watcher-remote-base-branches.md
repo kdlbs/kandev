@@ -46,8 +46,8 @@ the repository's remote-refresh policy instead of silently selecting local
   choice and local branch choices shall keep their current behavior.
 - **AC-INTEGRATIONS-WATCHER-REMOTE-BASE-BRANCHES-001.4:** The watcher
   base-branch selector shall provide branch search, an explicit refresh action,
-  and visible labels that distinguish local branches from each remote's
-  branches.
+  and visible labels that distinguish local branches from the supported
+  `origin` remote's branches.
 - **AC-INTEGRATIONS-WATCHER-REMOTE-BASE-BRANCHES-001.5:** Desktop and phone
   watcher dialogs shall provide the same qualified remote-ref choices and
   selector capabilities through controls that remain usable in their existing

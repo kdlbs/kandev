@@ -21,8 +21,8 @@ system_design:
 
 Replace the watcher base-branch select with the shared searchable branch
 picker used by New Task and repository branch-policy settings. Keep local
-`main` and remote `origin/main` distinct while preserving default, loading,
-disabled, stored-value, and provider-backed behavior.
+`main` and supported remote `origin/main` distinct while preserving default,
+loading, disabled, stored-value, and provider-backed behavior.
 
 ## In scope
 
@@ -46,8 +46,8 @@ disabled, stored-value, and provider-backed behavior.
 
 - Local and qualified remote refs with the same short name are separate values.
 - Only exact duplicate projected refs collapse.
-- Search, refresh, preferred ordering, and local or remote badges match the
-  existing shared branch-picker behavior.
+- Search, refresh, preferred ordering, and local or supported remote badges match
+  the existing shared branch-picker behavior.
 - Default, stored-value, and short-name fallback behavior remains unchanged.
 
 ## Verification
@@ -85,9 +85,12 @@ None.
 ## Results
 
 Reused the searchable `BranchSelector` option projection for watcher base
-branches. Qualified remote refs remain distinct from local refs, exact
-projected duplicates collapse, stored values remain selectable when a refresh
-does not return them, and refresh plus coarse-pointer sizing are wired through
-the shared selector.
+branches. Qualified `origin` refs remain distinct from local refs, unsupported
+named remotes are omitted because the backend launch contract supports
+`origin`, exact projected duplicates collapse, stored values remain selectable
+when a refresh does not return them, and refresh plus coarse-pointer sizing are
+wired through the shared selector. The base-branch label is associated with
+the combobox trigger, and stored fallback values use the standard local or
+remote badge renderer.
 
-The focused verification command passed 3 files and 25 tests.
+The focused verification command passed 3 files and 26 tests.

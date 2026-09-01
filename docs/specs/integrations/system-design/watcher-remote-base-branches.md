@@ -36,8 +36,8 @@ The runtime behavior of local and remote worktree bases remains defined by the
   remote values, expose search keywords, and render local or remote badges.
 - `BranchSelector` supplies the full-width searchable combobox and refresh
   action already reused by repository branch-policy settings.
-- `WatcherRepositoryFields` projects branch records into the shared watcher
-  selector used by Jira, Linear, Sentry, and GitLab watcher dialogs.
+- `WatcherRepositoryFields` projects supported branch records into the shared
+  watcher selector used by Jira, Linear, Sentry, and GitLab watcher dialogs.
 - Each integration service validates and persists its existing `baseBranch`
   field, and its watcher source copies that value into the generated task's
   repository binding.
@@ -48,9 +48,12 @@ The runtime behavior of local and remote worktree bases remains defined by the
 
 `WatcherRepositoryFields` reuses `sortBranches` and `branchToOption` from the
 New Task branch picker. Local branches use their short name. Remote branch
-records with a non-empty remote use `<remote>/<name>`. Exact projected refs are
-deduplicated after that shared mapping, so repeated records do not create
-duplicate combobox items while `main` and `origin/main` remain distinct.
+records from the supported `origin` remote use `origin/<name>`. Remote records
+with another named remote are omitted because the watcher launch contract only
+validates and refreshes `origin/<branch>` refs. Provider-backed records without
+a remote name keep their short value. Exact projected refs are deduplicated
+after that shared mapping, so repeated records do not create duplicate
+combobox items while `main` and `origin/main` remain distinct.
 
 A provider-backed branch record without a remote name keeps its short name.
 Provider-backed repositories do not combine that record with a local branch
@@ -63,8 +66,8 @@ keeps its existing select behavior. The base-branch field uses the shared
 `BranchSelector` and New Task branch options so it inherits:
 
 - path-aware search through `scoreBranch`;
-- the `local` badge for local refs and the remote name, such as `origin`, for
-  qualified remote refs;
+- the `local` badge for local refs and the `origin` badge for qualified remote
+  refs;
 - preferred ordering for `main`, `master`, and `develop`; and
 - the branch refresh action backed by `useBranches.refresh`.
 
@@ -92,7 +95,9 @@ task-specific because watcher dialogs need a labeled, full-width form field.
    owns refresh failure and fallback behavior.
 
 The existing `securityutil.IsValidBaseBranchRef` contract accepts
-`origin/<branch>` and continues to reject unsafe refs.
+`origin/<branch>` and continues to reject unsafe refs. The watcher selector
+does not offer other named remotes because the worktree refresh and launch
+contract is origin-specific.
 
 ## Compatibility
 
@@ -128,10 +133,10 @@ selection by the watcher UI.
 
 ## Test strategy
 
-- Focused component coverage proves local and remote records render as distinct
-  exact refs with badges; search filters them; refresh invokes the branch hook;
-  and duplicate exact refs collapse without regressing disabled, default, and
-  loading states.
+- Focused component coverage proves local and supported origin records render as
+  distinct exact refs with badges; unsupported named remotes stay hidden; search
+  filters the choices; refresh invokes the branch hook; and duplicate exact
+  refs collapse without regressing disabled, default, and loading states.
 - Desktop and mobile Playwright flows open the Jira watcher dialog, select and
   save `origin/main`, reload the settings page, and verify the qualified value
   remains selected. The mobile flow also verifies touch-sized branch rows,

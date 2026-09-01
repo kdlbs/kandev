@@ -4,11 +4,7 @@ import { useId, useMemo } from "react";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { BranchSelector } from "@/components/task-create-dialog-selectors";
-import {
-  branchToOption,
-  buildBranchKeywords,
-  sortBranches,
-} from "@/components/task-create-dialog-branch-options";
+import { branchToOption, sortBranches } from "@/components/task-create-dialog-branch-options";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useBranches } from "@/hooks/domains/workspace/use-repository-branches";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
@@ -58,12 +54,12 @@ function PickSelect(props: {
 }
 
 function storedBranchFallback(value: string) {
-  return {
-    value,
-    label: value,
-    keywords: buildBranchKeywords(value),
-    renderLabel: () => <span className="truncate">{value}</span>,
-  };
+  const isOriginRef = value.startsWith("origin/");
+  return branchToOption({
+    name: isOriginRef ? value.slice("origin/".length) : value,
+    type: isOriginRef ? "remote" : "local",
+    remote: isOriginRef ? "origin" : undefined,
+  });
 }
 
 /**
@@ -102,6 +98,7 @@ export function WatcherRepositoryFields({
     refresh,
   } = useBranches(branchSource, !!repositoryId);
   const touchTarget = useTouchDrawer();
+  const baseBranchId = useId();
   const noRepositoryLabel = t("common:noRepositoryOption");
   const defaultBranchLabel = t("common:repositoryDefaultBranchOption");
   const branchPlaceholderLabels = {
@@ -114,6 +111,7 @@ export function WatcherRepositoryFields({
   const branchOptions = useMemo(() => {
     const seenValues = new Set<string>();
     const available = sortBranches(branches)
+      .filter((branch) => branch.type !== "remote" || !branch.remote || branch.remote === "origin")
       .map(branchToOption)
       .filter((option) => {
         if (seenValues.has(option.value)) return false;
@@ -139,7 +137,7 @@ export function WatcherRepositoryFields({
         ]}
       />
       <div className="space-y-1.5">
-        <Label>{t("common:baseBranch")}</Label>
+        <Label htmlFor={baseBranchId}>{t("common:baseBranch")}</Label>
         <p className="text-xs text-muted-foreground">{t("common:theBaseBranchTheAgentStarts")}</p>
         <BranchSelector
           options={branchOptions}
@@ -155,6 +153,7 @@ export function WatcherRepositoryFields({
           refreshing={branchesLoading}
           loading={branchesLoading}
           touchTarget={touchTarget}
+          triggerId={baseBranchId}
           testId="watcher-base-branch-selector"
           dropdownTestId="watcher-base-branch-dropdown"
           triggerClassName="border border-input bg-background px-3 hover:bg-background"
