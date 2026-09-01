@@ -102,19 +102,6 @@ func (s *Service) parkSessionForProfileSwitch(
 	return true, nil
 }
 
-// parkSessionForProfileSwitchLocked performs only the durable park claim. It
-// intentionally does not stop the runtime: callers hold the session guard,
-// while StopAgent may synchronously wait for a terminal callback that needs
-// that same guard.
-func (s *Service) parkSessionForProfileSwitchLocked(
-	ctx context.Context,
-	taskID string,
-	session *models.TaskSession,
-) (bool, error) {
-	parked, _, err := s.parkSessionForProfileSwitchClaimLocked(ctx, taskID, session)
-	return parked, err
-}
-
 // parkSessionForProfileSwitchClaimLocked performs the park claim while the
 // source session's cancel-in-flight guard is held. Terminal lifecycle handlers
 // use the same guard, so the exact execution either reaches a terminal marker

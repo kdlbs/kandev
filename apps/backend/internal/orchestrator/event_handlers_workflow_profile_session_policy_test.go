@@ -446,7 +446,7 @@ func TestParkSessionForProfileSwitch_DelayedTerminalEventsConsumeClaim(t *testin
 			}()
 			coordinatorStopWaitForGuardRefs(t, fixture.svc, fixture.current.ID, 2)
 
-			parked, err := fixture.svc.parkSessionForProfileSwitchLocked(
+			parked, _, err := fixture.svc.parkSessionForProfileSwitchClaimLocked(
 				withWorkflowProfileSwitchGuardHeld(ctx, fixture.current.ID, ""),
 				"t1",
 				fixture.current,
@@ -778,7 +778,9 @@ func TestSwitchSessionForStep_ParkOnEndRestoresQueueAfterReuseParkingFails(t *te
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
 	stepB := &wfmodels.WorkflowStep{ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionStartPolicy: fixture.startPolicy}
 
-	profileB, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, stepB)
+	profileB, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, stepB, &wfmodels.WorkflowStep{
+		ID: "step-a", WorkflowID: "wf1", ProfileSessionEndPolicy: fixture.endPolicy,
+	})
 	if err != nil || !switched || profileB == nil {
 		t.Fatalf("initial switch to profile-b = session=%+v switched=%t err=%v", profileB, switched, err)
 	}

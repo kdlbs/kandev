@@ -162,7 +162,7 @@ func switchWorkflowDispatcher(svc *Service) engine.DispatchTriggerFn {
 
 func (s *Service) prepareDirectWorkflowStepEntry(
 	ctx context.Context, taskID, sessionID string,
-	sourceSteps ...*wfmodels.WorkflowStep,
+	sourceStep *wfmodels.WorkflowStep,
 ) (string, *engine.MachineState, error) {
 	ctx = withWorkflowMetaCache(ctx)
 	task, err := s.repo.GetTask(ctx, taskID)
@@ -186,7 +186,7 @@ func (s *Service) prepareDirectWorkflowStepEntry(
 	if err != nil {
 		return "", nil, fmt.Errorf("load session for workflow step entry: %w", err)
 	}
-	effectiveSession, _, err := s.prepareWorkflowStepSession(ctx, taskID, session, step, sourceSteps...)
+	effectiveSession, _, err := s.prepareWorkflowStepSession(ctx, taskID, session, step, sourceStep)
 	if err != nil {
 		return "", nil, fmt.Errorf("prepare session for workflow step entry: %w", err)
 	}
