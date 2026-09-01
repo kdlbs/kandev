@@ -5,11 +5,37 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+
+	"github.com/kandev/kandev/internal/auth/authn"
 )
+
+func TestCIRunGrantServiceRejectsNonAdminForCreateListAndRevoke(t *testing.T) {
+	service, _, input := setupCIRunServiceTest(t, false)
+	service.SetWorkspaceAuthorizer(func(context.Context, string) error { return nil })
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "member-1", Role: authn.RoleMember})
+	grantInput := CreateCIRunGrantInput{
+		WorkspaceID: "workspace-1", ActorTaskID: input.ActorTaskID, TargetTaskID: input.TargetTaskID,
+		WorkflowID: "workflow-1", WorkflowStepID: input.ExpectedWorkflowStepID, RepositoryID: input.RepositoryID,
+	}
+	if _, err := service.CreateCIRunGrant(ctx, "member-1", grantInput); !isCIRunGrantAdminDenial(err) {
+		t.Fatalf("CreateCIRunGrant() error = %v, want admin denial", err)
+	}
+	if _, err := service.ListCIRunGrants(ctx, "member-1", "workspace-1"); !isCIRunGrantAdminDenial(err) {
+		t.Fatalf("ListCIRunGrants() error = %v, want admin denial", err)
+	}
+	if err := service.RevokeCIRunGrant(ctx, "member-1", "workspace-1", "grant-1"); !isCIRunGrantAdminDenial(err) {
+		t.Fatalf("RevokeCIRunGrant() error = %v, want admin denial", err)
+	}
+}
+
+func isCIRunGrantAdminDenial(err error) bool {
+	requestErr, ok := err.(*CIRunRequestError)
+	return ok && requestErr.Class == CIRunFailureNotAuthorized
+}
 
 func TestCreateCIRunGrantReplacementRollsBackRevocationWhenInsertFails(t *testing.T) {
 	service, _, input := setupCIRunServiceTest(t, false)
-	ctx := context.Background()
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "admin-1", Role: authn.RoleAdmin})
 	before, err := service.store.GetActiveCIRunGrant(
 		ctx, "workspace-1", input.ActorTaskID, input.TargetTaskID,
 		"workflow-1", input.ExpectedWorkflowStepID, input.RepositoryID,
@@ -45,7 +71,7 @@ func TestCreateCIRunGrantReplacementRollsBackRevocationWhenInsertFails(t *testin
 
 func TestCreateCIRunGrantConcurrentReplacementsRemainMonotonic(t *testing.T) {
 	service, _, input := setupCIRunServiceTest(t, false)
-	ctx := context.Background()
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "admin-1", Role: authn.RoleAdmin})
 	before, err := service.store.GetActiveCIRunGrant(
 		ctx, "workspace-1", input.ActorTaskID, input.TargetTaskID,
 		"workflow-1", input.ExpectedWorkflowStepID, input.RepositoryID,

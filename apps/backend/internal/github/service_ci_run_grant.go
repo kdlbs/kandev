@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/auth/authn"
 )
 
 type CreateCIRunGrantInput struct {
@@ -23,6 +24,9 @@ func (s *Service) CreateCIRunGrant(
 	userID string,
 	input CreateCIRunGrantInput,
 ) (*CIRunGrant, error) {
+	if err := authorizeCIRunGrantAdmin(ctx); err != nil {
+		return nil, err
+	}
 	if userID == "" || input.WorkspaceID == "" || input.ActorTaskID == "" ||
 		input.TargetTaskID == "" || input.WorkflowID == "" || input.WorkflowStepID == "" ||
 		input.RepositoryID == "" {
@@ -71,6 +75,9 @@ func (s *Service) validateCIRunGrantScope(ctx context.Context, input CreateCIRun
 func (s *Service) RevokeCIRunGrant(
 	ctx context.Context, userID, workspaceID, grantID string,
 ) error {
+	if err := authorizeCIRunGrantAdmin(ctx); err != nil {
+		return err
+	}
 	if userID == "" || workspaceID == "" || grantID == "" {
 		return errors.New("grant, workspace, and user identity are required")
 	}
@@ -84,8 +91,11 @@ func (s *Service) RevokeCIRunGrant(
 	return err
 }
 
-// ListCIRunGrants returns grants visible to the authenticated workspace owner.
+// ListCIRunGrants returns grants visible to the authenticated workspace admin.
 func (s *Service) ListCIRunGrants(ctx context.Context, userID, workspaceID string) ([]CIRunGrant, error) {
+	if err := authorizeCIRunGrantAdmin(ctx); err != nil {
+		return nil, err
+	}
 	if userID == "" || workspaceID == "" {
 		return nil, errors.New("workspace and user identity are required")
 	}
@@ -93,4 +103,12 @@ func (s *Service) ListCIRunGrants(ctx context.Context, userID, workspaceID strin
 		return nil, err
 	}
 	return s.store.ListCIRunGrants(ctx, workspaceID)
+}
+
+func authorizeCIRunGrantAdmin(ctx context.Context) error {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.Synthetic || !identity.IsAdmin() {
+		return &CIRunRequestError{Class: CIRunFailureNotAuthorized}
+	}
+	return nil
 }

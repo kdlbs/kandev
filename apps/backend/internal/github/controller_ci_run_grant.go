@@ -11,7 +11,7 @@ import (
 
 func realCIRunGrantIdentity(ctx *gin.Context) (authn.Identity, bool) {
 	identity, ok := authn.FromGin(ctx)
-	return identity, ok && identity.UserID != "" && !identity.Synthetic
+	return identity, ok && identity.UserID != "" && !identity.Synthetic && identity.IsAdmin()
 }
 
 func (c *Controller) httpCreateCIRunGrant(ctx *gin.Context) {

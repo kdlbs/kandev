@@ -37,7 +37,7 @@ func TestCIRunGrantEndpointAllowsWorkspaceOwnerAndListsGrants(t *testing.T) {
 	memberRequest := httptest.NewRequest(http.MethodPost, "/api/v1/github/ci-run-grants", bytes.NewReader(body))
 	memberRequest.Header.Set("Content-Type", "application/json")
 	memberRequest = memberRequest.WithContext(authn.WithIdentity(context.Background(), authn.Identity{
-		UserID: "owner-1", Role: authn.RoleMember,
+		UserID: "owner-1", Role: authn.RoleAdmin,
 	}))
 	router.ServeHTTP(member, memberRequest)
 	if member.Code != http.StatusCreated {
@@ -46,7 +46,7 @@ func TestCIRunGrantEndpointAllowsWorkspaceOwnerAndListsGrants(t *testing.T) {
 
 	list := httptest.NewRecorder()
 	listRequest := httptest.NewRequest(http.MethodGet, "/api/v1/github/ci-run-grants?workspace_id=workspace-1", nil)
-	listRequest = listRequest.WithContext(authn.WithIdentity(context.Background(), authn.Identity{UserID: "owner-1", Role: authn.RoleMember}))
+	listRequest = listRequest.WithContext(authn.WithIdentity(context.Background(), authn.Identity{UserID: "owner-1", Role: authn.RoleAdmin}))
 	router.ServeHTTP(list, listRequest)
 	if list.Code != http.StatusOK {
 		t.Fatalf("list status = %d body=%s", list.Code, list.Body.String())
@@ -62,6 +62,34 @@ func TestCIRunGrantEndpointAllowsWorkspaceOwnerAndListsGrants(t *testing.T) {
 	if grant.ActorTaskID != "coordinator-1" || grant.TargetTaskID != "target-1" ||
 		grant.WorkflowStepID != "ci-fixup" || grant.RepositoryID != "repository-1" {
 		t.Fatalf("grant = %+v", grant)
+	}
+}
+
+func TestCIRunGrantEndpointsRejectMembersForEveryOperation(t *testing.T) {
+	service, _, _ := setupCIRunServiceTest(t, false)
+	service.SetWorkspaceAuthorizer(func(context.Context, string) error { return nil })
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	NewController(service, nil).RegisterHTTPRoutes(router)
+	body, _ := json.Marshal(CreateCIRunGrantInput{
+		WorkspaceID: "workspace-1", ActorTaskID: "coordinator-1", TargetTaskID: "target-1",
+		WorkflowID: "workflow-1", WorkflowStepID: "ci-fixup", RepositoryID: "repository-1",
+	})
+	memberContext := func(request *http.Request) *http.Request {
+		return request.WithContext(authn.WithIdentity(context.Background(), authn.Identity{UserID: "member-1", Role: authn.RoleMember}))
+	}
+	requests := []*http.Request{
+		memberContext(httptest.NewRequest(http.MethodPost, "/api/v1/github/ci-run-grants", bytes.NewReader(body))),
+		memberContext(httptest.NewRequest(http.MethodGet, "/api/v1/github/ci-run-grants?workspace_id=workspace-1", nil)),
+		memberContext(httptest.NewRequest(http.MethodDelete, "/api/v1/github/ci-run-grants/grant-1?workspace_id=workspace-1", nil)),
+	}
+	for _, request := range requests {
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		if recorder.Code == http.StatusOK || recorder.Code == http.StatusCreated {
+			t.Fatalf("member operation succeeded: method=%s status=%d body=%s", request.Method, recorder.Code, recorder.Body.String())
+		}
 	}
 }
 
