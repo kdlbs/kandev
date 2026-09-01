@@ -214,19 +214,30 @@ function useScopeActions({
         setQueryImmediate(found?.customQuery ?? "");
         setProjectFilter(found?.projectFilter ?? "");
         setMilestoneImmediate(found?.milestone ?? "");
+        setPage(1);
         return;
       }
       setQueryImmediate("");
       setProjectFilter("");
       setMilestoneImmediate("");
+      setPage(1);
     },
-    [savedPresets, setSelection, setQueryImmediate, setProjectFilter, setMilestoneImmediate],
+    [
+      savedPresets,
+      setSelection,
+      setQueryImmediate,
+      setProjectFilter,
+      setMilestoneImmediate,
+      setPage,
+    ],
   );
 
-  // Each of the milestone commit and the selected-saved-query delete calls
-  // setPage(1) from inside the same event handler that changes the milestone
-  // or clears the scope, so a stale later page is never left showing results
-  // for a filter that no longer applies.
+  // Every path that changes the committed milestone calls setPage(1) from
+  // inside the same event handler (commit, select, delete), so a stale later
+  // page is never left showing results for a filter that no longer applies —
+  // a saved query or sidebar preset can differ from the current state only
+  // in its milestone, in which case useGitLabSearch's own
+  // `[preset, customQuery, kind]` reset effect would not otherwise fire.
   const onCommitMilestone = useCallback(() => {
     setMilestoneImmediate(trimGitLabMilestone(milestone));
     setPage(1);

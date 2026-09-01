@@ -286,7 +286,6 @@ func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
 	page, perPage := paginationFromQuery(ctx)
 	filter := ctx.Query("filter")
 	customQuery := ctx.Query("custom_query")
-	milestone := trimGitLabWhitespace(ctx.Query("milestone"))
 	if customQuery == "" {
 		if filter == filterTokenReviewRequested {
 			ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "review_requested is not supported for issues"})
@@ -300,6 +299,7 @@ func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
 	if !ok {
 		return
 	}
+	milestone := trimGitLabWhitespace(ctx.Query("milestone"))
 	result, err := client.ListIssuesPaged(
 		ctx.Request.Context(), filter, customQuery, milestone, page, perPage,
 	)

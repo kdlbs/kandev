@@ -59,10 +59,13 @@ func (c *MockClient) ListIssues(_ context.Context, filter, customQuery, mileston
 }
 
 // ListIssuesPaged pages over ListIssues' filtered, sorted result. page < 1 is
-// normalised to 1; perPage < 1 normalises to 0 (no issues, any page). The
-// echoed Page/PerPage are the normalised values actually used, and
-// TotalCount is always the full filtered count, not the length of the
-// returned slice.
+// normalised to 1; perPage < 1 normalises to 0 (no issues, any page);
+// perPage above maxPageSize is clamped, mirroring PATClient's
+// clampSearchPage — the HTTP layer's paginationFromQuery only floors
+// page/perPage, it never caps the upper bound, so an out-of-range value can
+// reach here directly. The echoed Page/PerPage are the normalised values
+// actually used, and TotalCount is always the full filtered count, not the
+// length of the returned slice.
 func (c *MockClient) ListIssuesPaged(
 	ctx context.Context, filter, customQuery, milestone string, page, perPage int,
 ) (*IssueSearchPage, error) {
@@ -79,10 +82,19 @@ func (c *MockClient) ListIssuesPaged(
 	if normPerPage < 1 {
 		normPerPage = 0
 	}
+	if normPerPage > maxPageSize {
+		normPerPage = maxPageSize
+	}
 
-	start := (normPage - 1) * normPerPage
-	if start > len(issues) {
+	// Guard the multiplication itself: normPage is not bounded above, so
+	// (normPage-1)*normPerPage can overflow int before the "start >
+	// len(issues)" clamp below ever runs. Comparing via division first is
+	// safe from overflow and gives the same answer.
+	var start int
+	if normPerPage == 0 || normPage-1 > len(issues)/normPerPage {
 		start = len(issues)
+	} else {
+		start = (normPage - 1) * normPerPage
 	}
 	end := start + normPerPage
 	if end > len(issues) {

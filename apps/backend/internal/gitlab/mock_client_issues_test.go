@@ -1,6 +1,7 @@
 package gitlab
 
 import (
+	"math"
 	"testing"
 )
 
@@ -219,6 +220,34 @@ func TestMockClient_ListIssuesPaged_NonPositivePerPageReturnsNoIssues(t *testing
 	}
 	if len(negative.Issues) != 0 {
 		t.Errorf("len(Issues) = %d, want 0", len(negative.Issues))
+	}
+}
+
+// The HTTP layer's paginationFromQuery only floors page/perPage, it never
+// caps the upper bound (unlike PATClient's clampSearchPage), so an
+// out-of-range per_page can reach the mock directly. ListIssuesPaged must
+// not overflow its start/end arithmetic and panic on the resulting slice.
+func TestMockClient_ListIssuesPaged_ExtremePerPageDoesNotOverflowOrPanic(t *testing.T) {
+	c := NewMockClient(DefaultHost)
+	seedMilestoneIssues(t, c)
+
+	page, err := c.ListIssuesPaged(t.Context(), "", "", "", 2, math.MaxInt)
+	if err != nil {
+		t.Fatalf("ListIssuesPaged() error = %v", err)
+	}
+	if page.TotalCount != 4 {
+		t.Errorf("TotalCount = %d, want 4", page.TotalCount)
+	}
+	if len(page.Issues) != 0 {
+		t.Errorf("len(Issues) = %d, want 0 (page 2 is beyond a clamped page size)", len(page.Issues))
+	}
+
+	first, err := c.ListIssuesPaged(t.Context(), "", "", "", 1, math.MaxInt)
+	if err != nil {
+		t.Fatalf("ListIssuesPaged() error = %v", err)
+	}
+	if len(first.Issues) != 4 {
+		t.Errorf("len(Issues) = %d, want all 4 on page 1", len(first.Issues))
 	}
 }
 

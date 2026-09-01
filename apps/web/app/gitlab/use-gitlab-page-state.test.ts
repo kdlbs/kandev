@@ -32,6 +32,7 @@ import {
 afterEach(() => cleanup());
 
 const WORKSPACE_ID = "ws-1";
+const CREATED_AT = "2026-01-01T00:00:00Z";
 
 function fakeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -88,6 +89,30 @@ describe("trimGitLabMilestone", () => {
 
   it("returns empty for a whitespace-only value including a NEL", () => {
     expect(trimGitLabMilestone("   \u0085  ")).toBe("");
+  });
+
+  // Mirrors the Go side's TestTrimGitLabWhitespace_MatchesNormativeSet
+  // (client_helpers_milestone_test.go) code point for code point: the
+  // normative set is Unicode White_Space together with U+FEFF, on BOTH
+  // sides, and the two languages' own defaults disagree with it and with
+  // each other in both directions (Scenario 27). Asserting only a handful
+  // of ad-hoc cases on one side does not establish the cross-language
+  // agreement the spec requires.
+  it("matches the normative set for every code point in the Go-side conformance table", () => {
+    const trimmed = [
+      0x0009, 0x000a, 0x000b, 0x000c, 0x000d, 0x0020, 0x0085, 0x00a0, 0x1680, 0x2000, 0x2028,
+      0x2029, 0x202f, 0x205f, 0x3000, 0xfeff,
+    ];
+    for (const cp of trimmed) {
+      expect(trimGitLabMilestone(String.fromCodePoint(cp))).toBe("");
+    }
+
+    // Preserved: not part of Unicode White_Space or U+FEFF.
+    const preserved = [0x200b, 0x180e, 0x2060, 0x00b7];
+    for (const cp of preserved) {
+      const ch = String.fromCodePoint(cp);
+      expect(trimGitLabMilestone(ch)).toBe(ch);
+    }
   });
 });
 
@@ -182,9 +207,28 @@ describe("useGitLabPageState", () => {
     expect(result.current.committedMilestone).toBe("Next");
     await waitFor(() => expect(result.current.search.page).toBe(1));
   });
+
+  it("resets to page 1 when selecting a sidebar preset clears a committed milestone (Scenario 6, clause 3)", async () => {
+    searchUserIssuesMock.mockResolvedValue(issuePage([]));
+    const { result } = renderHook(() => useGitLabPageState(true, WORKSPACE_ID));
+    act(() => result.current.onSelect({ kind: "issue", source: "preset", id: "assigned" }));
+    act(() => result.current.setMilestone("Next"));
+    act(() => result.current.onCommitMilestone());
+    await waitFor(() => expect(result.current.committedMilestone).toBe("Next"));
+
+    act(() => result.current.search.setPage(3));
+    await waitFor(() => expect(result.current.search.page).toBe(3));
+
+    // Re-select the SAME preset: effectivePreset/customQuery/kind are all
+    // unchanged, so useGitLabSearch's `[preset, customQuery, kind]` reset
+    // effect will not fire on its own — only the milestone clears.
+    act(() => result.current.onSelect({ kind: "issue", source: "preset", id: "assigned" }));
+    expect(result.current.committedMilestone).toBe("");
+    await waitFor(() => expect(result.current.search.page).toBe(1));
+  });
 });
 
-describe("useGitLabPageState — saved query save/restore/delete", () => {
+describe("useGitLabPageState — saved query save", () => {
   it("canSaveCurrent and suggestedLabel consider the milestone alongside the query and project filter", async () => {
     const { result } = renderHook(() => useGitLabPageState(true, WORKSPACE_ID));
     act(() => result.current.onSelect({ kind: "issue", source: "preset", id: "assigned" }));
@@ -196,7 +240,32 @@ describe("useGitLabPageState — saved query save/restore/delete", () => {
     expect(result.current.suggestedLabel).toBe("Next");
   });
 
-  it("persists the milestone and the effective preset when saving, and restores both (including a preset-only query with no custom text) when the saved query is selected", async () => {
+  it("onConfirmSave writes the committed (trimmed) milestone and the effective preset, never the raw draft", async () => {
+    const { result } = renderHook(() => useGitLabPageState(true, WORKSPACE_ID));
+    act(() => result.current.onSelect({ kind: "issue", source: "preset", id: "assigned" }));
+    act(() => result.current.setMilestone("  Next  "));
+    act(() => result.current.onCommitMilestone());
+    await waitFor(() => expect(result.current.committedMilestone).toBe("Next"));
+
+    await act(async () => {
+      result.current.onConfirmSave("My saved query");
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(updateUserSettingsMock).toHaveBeenCalled());
+    const payload = updateUserSettingsMock.mock.calls.at(-1)?.[0] as {
+      gitlab_saved_presets: SavedPreset[];
+    };
+    const saved = payload.gitlab_saved_presets.at(-1);
+    expect(saved?.label).toBe("My saved query");
+    expect(saved?.milestone).toBe("Next");
+    expect(saved?.preset).toBe("assigned");
+    expect(saved?.customQuery).toBe("");
+  });
+});
+
+describe("useGitLabPageState — saved query restore", () => {
+  it("restores both the milestone and the effective preset (including a preset-only query with no custom text) when the saved query is selected", async () => {
     const created: SavedPreset = {
       id: "g_1",
       kind: "issue",
@@ -205,7 +274,7 @@ describe("useGitLabPageState — saved query save/restore/delete", () => {
       projectFilter: "",
       milestone: "Next",
       preset: "assigned",
-      createdAt: "2026-01-01T00:00:00Z",
+      createdAt: CREATED_AT,
     };
     fetchUserSettingsMock.mockResolvedValue({ settings: { gitlab_saved_presets: [created] } });
     searchUserIssuesMock.mockResolvedValue(issuePage([fakeIssue({ project_path: "acme/api" })]));
@@ -223,6 +292,38 @@ describe("useGitLabPageState — saved query save/restore/delete", () => {
     expect(lastCall.filter).toBe("assigned_to_me");
   });
 
+  it("resets to page 1 when selecting a saved query that differs from the current state only in its milestone (Scenario 6, clause 2)", async () => {
+    const created: SavedPreset = {
+      id: "g_1",
+      kind: "issue",
+      label: "Next sprint",
+      customQuery: "",
+      projectFilter: "",
+      milestone: "Next",
+      preset: "assigned",
+      createdAt: CREATED_AT,
+    };
+    fetchUserSettingsMock.mockResolvedValue({ settings: { gitlab_saved_presets: [created] } });
+
+    const { result } = renderHook(() => useGitLabPageState(true, WORKSPACE_ID));
+    await waitFor(() => expect(result.current.savedPresets).toHaveLength(1));
+
+    // Same effective preset ("assigned"), same empty custom query, same kind
+    // as the saved query below — only the milestone will differ, so the
+    // `[preset, customQuery, kind]` reset effect in useGitLabSearch will not
+    // fire on its own.
+    act(() => result.current.onSelect({ kind: "issue", source: "preset", id: "assigned" }));
+    await waitFor(() => expect(result.current.search.loading).toBe(false));
+    act(() => result.current.search.setPage(3));
+    await waitFor(() => expect(result.current.search.page).toBe(3));
+
+    act(() => result.current.onSelect({ kind: "issue", source: "saved", id: "g_1" }));
+    expect(result.current.committedMilestone).toBe("Next");
+    await waitFor(() => expect(result.current.search.page).toBe(1));
+  });
+});
+
+describe("useGitLabPageState — saved query delete", () => {
   it("clears milestone and resets to page 1 only when the deleted saved query was the active selection", async () => {
     const other: SavedPreset = {
       id: "g_other",
@@ -232,7 +333,7 @@ describe("useGitLabPageState — saved query save/restore/delete", () => {
       projectFilter: "",
       milestone: "",
       preset: "",
-      createdAt: "2026-01-01T00:00:00Z",
+      createdAt: CREATED_AT,
     };
     const selected: SavedPreset = {
       id: "g_selected",
@@ -242,7 +343,7 @@ describe("useGitLabPageState — saved query save/restore/delete", () => {
       projectFilter: "",
       milestone: "Next",
       preset: "assigned",
-      createdAt: "2026-01-01T00:00:00Z",
+      createdAt: CREATED_AT,
     };
     fetchUserSettingsMock.mockResolvedValue({
       settings: { gitlab_saved_presets: [other, selected] },
