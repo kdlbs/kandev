@@ -92,7 +92,7 @@ test.describe("Mobile file tree keyboard shortcuts", () => {
 
     const draftName = "mobile-draft.ts";
     await input.fill(draftName);
-    await input.press("Control+a");
+    await input.press("ControlOrMeta+a");
 
     await expect
       .poll(async () => ({
