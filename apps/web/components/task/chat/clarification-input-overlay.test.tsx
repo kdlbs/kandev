@@ -34,12 +34,14 @@ vi.mock("@kandev/ui/tooltip", () => ({
 
 const fetchMock = vi.fn();
 const TESTID_OPTION = "clarification-option";
+const TESTID_SUBMIT_ERROR = "clarification-submit-error";
 
 function clarMessage(opts: {
   id: string;
   questionId: string;
   index: number;
   total: number;
+  pendingId?: string;
 }): Message {
   return {
     id: opts.id,
@@ -50,7 +52,7 @@ function clarMessage(opts: {
     type: "clarification_request",
     created_at: "2026-05-04T00:00:00Z",
     metadata: {
-      pending_id: "p1",
+      pending_id: opts.pendingId ?? "p1",
       question_id: opts.questionId,
       question_index: opts.index,
       question_total: opts.total,
@@ -359,7 +361,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
 
-    await vi.waitFor(() => screen.getByTestId("clarification-submit-error"));
+    await vi.waitFor(() => screen.getByTestId(TESTID_SUBMIT_ERROR));
     expect(onResolved).not.toHaveBeenCalled();
     expect(screen.getByTestId(TESTID_OPTION).getAttribute("data-selected")).toBe("true");
 
@@ -368,7 +370,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
 
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     await vi.waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
-    expect(screen.queryByTestId("clarification-submit-error")).toBeNull();
+    expect(screen.queryByTestId(TESTID_SUBMIT_ERROR)).toBeNull();
   });
 
   it("shows a non-retryable expired banner when the bundle is no longer active", async () => {
@@ -387,6 +389,43 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     await vi.waitFor(() => screen.getByTestId("clarification-expired"));
     expect(onResolved).not.toHaveBeenCalled();
     expect(screen.queryByTestId("clarification-retry")).toBeNull();
+  });
+
+  // Regression: a new bundle (different pending_id) arriving after a failed
+  // submit must not render the previous bundle's stale banner over the live
+  // question, and must not let Retry POST the old bundle's answers to the new
+  // bundle's pendingId.
+  it("clears the stale error banner when a new bundle (different pending_id) replaces a failed one", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("nope", { status: 500 }));
+    const { scopeRef, onResolved, onDismiss, rerender } = renderOverlay([
+      clarMessage({ id: "m-a", questionId: "qA", index: 0, total: 1, pendingId: "pA" }),
+    ]);
+
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await vi.waitFor(() => screen.getByTestId(TESTID_SUBMIT_ERROR));
+
+    rerender(
+      <div ref={scopeRef} tabIndex={-1}>
+        <ClarificationInputOverlay
+          messages={[
+            clarMessage({ id: "m-b", questionId: "qB", index: 0, total: 1, pendingId: "pB" }),
+          ]}
+          onResolved={onResolved}
+          onDismiss={onDismiss}
+          shortcutScopeRef={scopeRef}
+        />
+      </div>,
+    );
+
+    expect(screen.queryByTestId(TESTID_SUBMIT_ERROR)).toBeNull();
+    expect(screen.getByTestId(TESTID_OPTION).getAttribute("data-selected")).not.toBe("true");
+
+    fetchMock.mockClear();
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe("https://api.test/api/v1/clarification/pB/respond");
   });
 });
 

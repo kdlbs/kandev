@@ -341,7 +341,11 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
     }
   }, [submitCollected, skipAll]);
 
-  return { submitCollected, skipAll, retry };
+  const resetLastAction = useCallback(() => {
+    lastActionRef.current = null;
+  }, []);
+
+  return { submitCollected, skipAll, retry, resetLastAction };
 }
 
 // useClarificationGroup tracks the per-question answers for a multi-question
@@ -405,7 +409,7 @@ export function useClarificationGroup(
 
   // i18n-exempt: the default reason is POSTed as the clarification answer and
   // reaches the agent verbatim; it is not rendered in the UI.
-  const { submitCollected, skipAll, retry } = useClarificationSubmission({
+  const { submitCollected, skipAll, retry, resetLastAction } = useClarificationSubmission({
     pendingId,
     questionIds,
     answersRef,
@@ -415,6 +419,22 @@ export function useClarificationGroup(
     updateMessage: storeApi.getState().updateMessage,
     defaultSkipReason: t("task:userSkippedClarification"),
   });
+
+  // A new bundle (different pendingId) replacing a still-pending one must not
+  // inherit the previous bundle's answers, submit/retry banner, or replayable
+  // action -- bundle-swap-without-unmount is a designed-for path (see
+  // useCollapsedForBundle in clarification-panel-section.tsx), so without this
+  // a stale "error"/"expired" banner (and Retry's recorded answers) would
+  // render against the live bundle and POST to the wrong pendingId.
+  const lastPendingIdRef = useRef(pendingId);
+  useEffect(() => {
+    if (pendingId !== lastPendingIdRef.current) {
+      lastPendingIdRef.current = pendingId;
+      setAnswers({});
+      setSubmitState("idle");
+      resetLastAction();
+    }
+  }, [pendingId, resetLastAction]);
 
   return {
     pendingId,

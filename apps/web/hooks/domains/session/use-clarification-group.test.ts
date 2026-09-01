@@ -342,6 +342,48 @@ describe("useClarificationGroup — retry", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  // Regression: a new bundle (different pendingId) replacing a still-failed one
+  // must not inherit the old bundle's error state, recorded answers, or
+  // replayable retry action -- otherwise the live question B renders bundle A's
+  // stale banner, and clicking Retry POSTs bundle A's answers to bundle B's
+  // pendingId.
+  it("resets submitState, answers, and the retry action when pendingId changes", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("nope", { status: 500 }));
+    const bundleA = [
+      clarMessage({ id: "m-a", pendingId: "pA", questionId: "qA", index: 0, total: 1 }),
+    ];
+    const bundleB = [
+      clarMessage({ id: "m-b", pendingId: "pB", questionId: "qB", index: 0, total: 1 }),
+    ];
+
+    const { result, rerender } = renderHook(({ msgs }) => useClarificationGroup(msgs), {
+      initialProps: { msgs: bundleA },
+    });
+
+    await act(async () => {
+      result.current.recordAnswer("qA", { question_id: "qA", selected_options: ["o1"] });
+    });
+    await act(async () => {
+      await result.current.submitCollected();
+    });
+    expect(result.current.submitState).toBe("error");
+    expect(result.current.answers["qA"]).toBeDefined();
+
+    rerender({ msgs: bundleB });
+
+    expect(result.current.pendingId).toBe("pB");
+    expect(result.current.submitState).toBe("idle");
+    expect(result.current.answers).toEqual({});
+
+    // retry() must be a no-op -- it must NOT replay bundle A's answers
+    // against bundle B's pendingId.
+    fetchMock.mockClear();
+    await act(async () => {
+      await result.current.retry();
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 // Silent WS dead-socket scenario: when the question has been hanging long enough

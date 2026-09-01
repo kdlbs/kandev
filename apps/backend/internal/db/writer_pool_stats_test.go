@@ -46,21 +46,14 @@ func TestRegisterWriterPoolStatsExposesDBStatsAtDebugVars(t *testing.T) {
 	if stats.MaxOpenConnections != 1 {
 		t.Fatalf("MaxOpenConnections = %d, want 1 (single-writer pool)", stats.MaxOpenConnections)
 	}
-}
 
-// TestRegisterWriterPoolStatsIsSafeToCallTwice guards the sync.Once: a
-// second call (e.g. a future second devMode wiring path) must not panic with
-// expvar's "Reuse of exported var name" error.
-func TestRegisterWriterPoolStatsIsSafeToCallTwice(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "writer-pool-stats-2.db")
-	conn, err := OpenSQLite(dbPath)
-	if err != nil {
-		t.Fatalf("OpenSQLite: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-	writer := sqlx.NewDb(conn, "sqlite3")
-	pool := NewPool(writer, writer)
-
-	RegisterWriterPoolStats(pool)
+	// Guards the sync.Once: a second call (e.g. a future second devMode
+	// wiring path) must not panic with expvar's "Reuse of exported var name"
+	// error. This has to be the same test as the first call above, not a
+	// separate one: expvar.Publish has no unpublish, so whichever test in
+	// this process registers "db_writer_pool_stats" first permanently
+	// consumes the package's sync.Once, and a same-named second test can
+	// only ever see it already consumed -- it would pass whether or not the
+	// guard actually works.
 	RegisterWriterPoolStats(pool)
 }
