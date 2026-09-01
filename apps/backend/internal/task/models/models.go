@@ -59,10 +59,12 @@ const (
 
 // ListMessagesOptions defines pagination options for listing messages
 type ListMessagesOptions struct {
-	Limit  int
-	Before string
-	After  string
-	Sort   string
+	Limit      int
+	Before     string
+	After      string
+	Sort       string
+	AuthorType string
+	Around     string
 }
 
 // SearchMessagesOptions defines options for searching a session's messages.

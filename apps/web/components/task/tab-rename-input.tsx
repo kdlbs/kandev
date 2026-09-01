@@ -40,6 +40,7 @@ export function TabRenameInput({
       className="flex h-full items-center gap-1 px-2"
       // Stop the click from selecting the tab while we type.
       onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
       {seqBadge != null && (

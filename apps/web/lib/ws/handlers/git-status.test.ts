@@ -61,10 +61,12 @@ function statusUpdateEvent(
   timestamp: string,
   diff = "-old\n+new",
   sessionId = SESSION,
+  taskEnvironmentId = sessionId,
 ): GitStatusUpdateEvent {
   return {
     type: "status_update",
     session_id: sessionId,
+    task_environment_id: taskEnvironmentId,
     timestamp,
     status: {
       branch: "main",
@@ -96,10 +98,12 @@ function repoStatusUpdateEvent(
   timestamp: string,
   repositoryName: string,
   modifiedPath: string,
+  taskEnvironmentId = SESSION,
 ): GitStatusUpdateEvent {
   return {
     type: "status_update",
     session_id: SESSION,
+    task_environment_id: taskEnvironmentId,
     timestamp,
     status: {
       branch: "main",
@@ -276,8 +280,8 @@ describe("git-status WS handler — shared environment ordering", () => {
     store.getState().registerSessionEnvironment(SESSION, "env-1");
     store.getState().registerSessionEnvironment("sess-2", "env-1");
 
-    handler(gitEvent(statusUpdateEvent(STATUS_TIME_2)));
-    const olderCleanEvent = statusUpdateEvent(STATUS_TIME_1, "", "sess-2");
+    handler(gitEvent(statusUpdateEvent(STATUS_TIME_2, "-old\n+new", SESSION, "env-1")));
+    const olderCleanEvent = statusUpdateEvent(STATUS_TIME_1, "", "sess-2", "env-1");
     olderCleanEvent.status = {
       ...olderCleanEvent.status,
       modified: [],
@@ -295,9 +299,9 @@ describe("git-status WS handler — shared environment ordering", () => {
     store.getState().registerSessionEnvironment(SESSION, "env-1");
     store.getState().registerSessionEnvironment("sess-2", "env-1");
 
-    handler(gitEvent(statusUpdateEvent(STATUS_TIME_1)));
+    handler(gitEvent(statusUpdateEvent(STATUS_TIME_1, "-old\n+new", SESSION, "env-1")));
     invalidateCumulativeDiffCacheMock.mockClear();
-    const undatedCleanEvent = statusUpdateEvent("not-a-timestamp", "", "sess-2");
+    const undatedCleanEvent = statusUpdateEvent("not-a-timestamp", "", "sess-2", "env-1");
     undatedCleanEvent.status = {
       ...undatedCleanEvent.status,
       modified: [],
@@ -313,12 +317,61 @@ describe("git-status WS handler — shared environment ordering", () => {
     const store = freshStore();
     const handler = gitStatusHandler(store);
 
-    handler(gitEvent(statusUpdateEvent(STATUS_TIME_1, "-old\n+new")));
-    handler(gitEvent(statusUpdateEvent(STATUS_TIME_1, "-old\n+newer")));
+    handler(gitEvent(statusUpdateEvent(STATUS_TIME_1, "-old\n+new", SESSION, "env-1")));
+    handler(gitEvent(statusUpdateEvent(STATUS_TIME_1, "-old\n+newer", SESSION, "env-1")));
 
-    expect(store.getState().gitStatus.byEnvironmentId[SESSION].files["a.ts"].diff).toBe(
+    expect(store.getState().gitStatus.byEnvironmentId["env-1"].files["a.ts"].diff).toBe(
       "-old\n+newer",
     );
     expect(invalidateCumulativeDiffCacheMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("git-status WS handler — delivered environment identity", () => {
+  it("routes status directly to the payload environment instead of the session mapping", () => {
+    const store = freshStore();
+    const handler = gitStatusHandler(store);
+    store.getState().registerSessionEnvironment(SESSION, "mapped-env");
+    const event = statusUpdateEvent(STATUS_TIME_1) as GitStatusUpdateEvent & {
+      task_environment_id: string;
+    };
+    event.task_environment_id = "payload-env";
+
+    handler(gitEvent(event));
+
+    expect(store.getState().gitStatus.byEnvironmentRepo["payload-env"][""]).toBeDefined();
+    expect(store.getState().gitStatus.byEnvironmentRepo["mapped-env"]).toBeUndefined();
+  });
+
+  it("ignores a status update without an environment identity", () => {
+    const store = freshStore();
+    const handler = gitStatusHandler(store);
+    store.getState().registerSessionEnvironment(SESSION, "mapped-env");
+    const event = { ...statusUpdateEvent(STATUS_TIME_1) } as Omit<
+      GitStatusUpdateEvent,
+      "task_environment_id"
+    > & {
+      task_environment_id?: string;
+    };
+    delete event.task_environment_id;
+
+    handler(gitEvent(event as unknown as GitStatusUpdateEvent));
+
+    expect(store.getState().gitStatus.byEnvironmentId).toEqual({});
+    expect(store.getState().gitStatus.byEnvironmentRepo).toEqual({});
+  });
+
+  it("normalizes a sparse status update with no file map", () => {
+    const store = freshStore();
+    const handler = gitStatusHandler(store);
+    const event = statusUpdateEvent(STATUS_TIME_1) as GitStatusUpdateEvent & {
+      task_environment_id: string;
+    };
+    event.task_environment_id = "payload-env";
+    delete (event.status as typeof event.status & { files?: unknown }).files;
+
+    handler(gitEvent(event));
+
+    expect(store.getState().gitStatus.byEnvironmentRepo["payload-env"][""].files).toEqual({});
   });
 });

@@ -9,23 +9,16 @@ owners:
 
 # UI system
 
-## Purpose
+## Purpose and ownership
 
-The UI system owns web presentation.
-
-## Ownership
-
-The UI system owns reusable navigation, settings, task/review, chat, visual
-feedback, and responsive interaction contracts. Provider and task state remain
-with their owning systems.
+The UI system owns web presentation and interaction contracts. Task and provider state remain with their owning systems.
 
 ## Exclusions
 
-- Durable task behavior belongs to the [task system](../tasks/README.md).
-- Agent profile behavior belongs to the [agent system](../agents/README.md).
-- Plugin contribution contracts belong to the [plugin system](../plugins/README.md).
-- Provider-specific state and actions belong to the
-  [integration system](../integrations/README.md).
+- Task behavior belongs to [Tasks](../tasks/README.md).
+- Agent profiles belong to [Agents](../agents/README.md).
+- Plugin contributions belong to [Plugins](../plugins/README.md).
+- Provider state and actions belong to [Integrations](../integrations/README.md).
 
 ## Specification map
 
@@ -50,6 +43,7 @@ with their owning systems.
 - [Clarification Shared Context](requirements/clarification-context.md)
 - [Clarification submit feedback](requirements/clarification-submit-feedback.md)
 - [Command-panel Sidebar Task Reveal](requirements/command-panel-sidebar-task-reveal.md)
+- [Command Panel Task Activity Icons](requirements/command-panel-task-activity-icons.md)
 - [Compact Workflow Step Navigation](requirements/compact-workflow-step-navigation.md)
 - [Comment Markdown Rendering](requirements/comment-markdown.md)
 - [Mention recency](requirements/composer-mention-recency.md)
@@ -177,6 +171,7 @@ with their owning systems.
 - [Task Layout Profiles](system-design/task-layout-profiles.md)
 - [Task Agent Tab Reconciliation](system-design/task-agent-tab-reconciliation.md)
 - [Command-panel Sidebar Task Reveal](system-design/command-panel-sidebar-task-reveal.md)
+- [Command Panel Task Activity Icons](system-design/command-panel-task-activity-icons.md)
 - [Terminal Rendering](system-design/terminal-rendering.md)
 - [Thinking Message Preview](system-design/thinking-message-preview.md)
 - [Task Transcript History Visibility](system-design/task-prompt-transcript-visibility.md)

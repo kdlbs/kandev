@@ -364,10 +364,10 @@ export const createSessionRuntimeSlice: StateCreator<
   // full diff string, so under a heavy rebase (thousands of files, frequent
   // updates) it must run at most once per event — not once here and again in
   // the caller.
-  setGitStatus: (sessionId, gitStatus) => {
+  setGitStatus: (taskEnvironmentId, gitStatus) => {
     let changed = false;
     set((draft) => {
-      changed = applyGitStatus(draft, sessionId, normalizeGitStatusEntry(gitStatus));
+      changed = applyGitStatus(draft, taskEnvironmentId, normalizeGitStatusEntry(gitStatus));
     });
     return changed;
   },

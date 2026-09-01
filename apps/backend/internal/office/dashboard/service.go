@@ -361,6 +361,18 @@ type DashboardService struct {
 	routingProvider  RoutingProvider                 // optional; nil disables /routing endpoints (503)
 	attemptLister    RouteAttemptLister              // optional; nil disables attempt embedding on run-detail responses
 	runResolver      RunResolver                     // optional; nil means status-change activity rows have no run_id
+	// officeSessionIdentity gates RecordAgentDecision's use of the caller's
+	// own session id. Defaults false (zero value); set via
+	// SetOfficeSessionIdentity, wired from features.officeSessionIdentity.
+	officeSessionIdentity bool
+}
+
+// SetOfficeSessionIdentity wires the features.officeSessionIdentity flag.
+// When true, RecordAgentDecision forwards the decider's own calling session
+// id so RecordDecision re-evaluates against it instead of the task's
+// most-recently-started ("active") session. Defaults false.
+func (s *DashboardService) SetOfficeSessionIdentity(enabled bool) {
+	s.officeSessionIdentity = enabled
 }
 
 // SetRoutingProvider wires the provider-routing seam used by the

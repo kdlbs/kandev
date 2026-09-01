@@ -160,6 +160,12 @@ type CreateRequest struct {
 	// recreate a worktree in this mode.
 	ReuseRequired bool
 
+	// AllowBranchReplacement explicitly permits recovery to create a new branch
+	// when the persisted worktree branch no longer exists. It is only set by the
+	// user-selected resume-new-branch action; ordinary resume keeps the original
+	// branch and returns ErrBranchUnrecoverable.
+	AllowBranchReplacement bool
+
 	// TaskTitle is the human-readable task title (optional).
 	// If provided, it will be used to generate semantic worktree/branch names.
 	// The title is sanitized and truncated to 20 characters.

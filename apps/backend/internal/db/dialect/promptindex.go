@@ -58,3 +58,19 @@ func PromptOrderIndexDDL(driver, indexName, table string) string {
 		indexName, table, NormalizedMicrosecond(driver, "created_at"),
 	)
 }
+
+// PromptUserOrderIndexDDL returns an index for filtered prompt pages. The
+// author_type prefix lets the database skip interleaved agent and tool rows
+// before it applies the normalized timestamp ordering expression.
+func PromptUserOrderIndexDDL(driver, indexName, table string) string {
+	if IsPostgres(driver) {
+		return fmt.Sprintf(
+			"CREATE INDEX IF NOT EXISTS %s ON %s(task_session_id, author_type, created_at, id)",
+			indexName, table,
+		)
+	}
+	return fmt.Sprintf(
+		"CREATE INDEX IF NOT EXISTS %s ON %s(task_session_id, author_type, (%s), id)",
+		indexName, table, NormalizedMicrosecond(driver, "created_at"),
+	)
+}

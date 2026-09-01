@@ -225,6 +225,36 @@ func TestCreateWorktree_ManagedRefreshDivergenceUsesLocalBaseWarning(t *testing.
 	}
 }
 
+// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.13
+func TestCreateWorktree_ManagedRefreshMissingBaseUsesConfiguredFallback(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	runGit(t, repoPath, "branch", "feature/deleted-parent")
+	mgr := newRecreateTestManager(t)
+
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:             "task-managed-missing-base",
+		SessionID:          "session-managed-missing-base",
+		RepositoryID:       "repo-managed-missing-base",
+		RepositoryPath:     repoPath,
+		BaseBranch:         "feature/deleted-parent",
+		FallbackBaseBranch: "main",
+		PullBeforeWorktree: true,
+		RemoteSyncHandled:  true,
+		TaskDirName:        "task-managed-missing-base",
+		RepoName:           "repo",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if wt.BaseBranch != "main" {
+		t.Fatalf("worktree BaseBranch = %q, want main", wt.BaseBranch)
+	}
+	if !strings.Contains(wt.BaseBranchFallbackWarning, "feature/deleted-parent") ||
+		!strings.Contains(wt.BaseBranchFallbackWarning, "main") {
+		t.Fatalf("fallback warning = %q, want old and new branches", wt.BaseBranchFallbackWarning)
+	}
+}
+
 func TestCreateWorktree_ManagedRefreshFailureUsesLocalBaseWarning(t *testing.T) {
 	repoPath, localHead := initGitRepoWithOriginAheadLocal(t)
 	mgr := newRecreateTestManager(t)
@@ -520,7 +550,7 @@ esac
 	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	req := CreateRequest{
-		RepositoryPath: repoPath, BaseBranch: "main", PullBeforeWorktree: true,
+		RepositoryPath: repoPath, BaseBranch: "main", FallbackBaseBranch: "develop", PullBeforeWorktree: true,
 	}
 	var events []SyncProgressEvent
 	req.OnSyncProgress = captureSyncProgress(&events)
