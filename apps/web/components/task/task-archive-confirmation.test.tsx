@@ -6,6 +6,9 @@ import { StateProvider } from "@/components/state-provider";
 const getSubtaskCountMock = vi.hoisted(() => vi.fn());
 const pointerState = vi.hoisted(() => ({ isFinePointer: false }));
 const CONFIRM_TEST_ID = "archive-task-confirm";
+const INLINE_CONFIRMATION_TEST_ID = "task-archive-inline-confirmation";
+const CLEANUP_EFFECTS_TEST_ID = "task-cleanup-effects";
+const CLEANUP_NOTES_TEST_ID = "task-cleanup-notes";
 
 vi.mock("@/lib/api", () => ({
   getSubtaskCount: (...args: unknown[]) => getSubtaskCountMock(...args),
@@ -90,10 +93,24 @@ describe("TaskArchiveConfirmation classification", () => {
 
     renderConfirmation();
 
-    const confirmation = await screen.findByTestId("task-archive-inline-confirmation");
+    const confirmation = await screen.findByTestId(INLINE_CONFIRMATION_TEST_ID);
     expect(confirmation).toBeTruthy();
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(screen.getByTestId(CONFIRM_TEST_ID).className).toContain("h-11");
+  });
+
+  it("uses the same semantic cleanup effect list and supporting notes as the dialog", async () => {
+    getSubtaskCountMock.mockResolvedValue({ count: 0 });
+
+    renderConfirmation();
+
+    await screen.findByTestId(INLINE_CONFIRMATION_TEST_ID);
+    expect(screen.getByTestId(CLEANUP_EFFECTS_TEST_ID).getAttribute("role")).toBe("list");
+    expect(
+      screen.getByTestId(CLEANUP_EFFECTS_TEST_ID).querySelectorAll('[role="listitem"]'),
+    ).toHaveLength(2);
+    expect(screen.getByTestId(CLEANUP_NOTES_TEST_ID).tagName).toBe("SPAN");
+    expect(screen.queryByText(/Are you sure/i)).toBeNull();
   });
 
   it("keeps descendants on the cascade dialog branch", async () => {
@@ -104,7 +121,7 @@ describe("TaskArchiveConfirmation classification", () => {
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog).toBeTruthy();
     expect(screen.getByTestId("archive-cascade-checkbox")).toBeTruthy();
-    expect(screen.queryByTestId("task-archive-inline-confirmation")).toBeNull();
+    expect(screen.queryByTestId(INLINE_CONFIRMATION_TEST_ID)).toBeNull();
   });
 
   it("keeps an unknown classification on the safe dialog branch", async () => {
@@ -120,7 +137,7 @@ describe("TaskArchiveConfirmation classification", () => {
     getSubtaskCountMock.mockResolvedValue({ count: 0 });
     let closedBeforeConfirm = false;
     const onConfirm = vi.fn(() => {
-      closedBeforeConfirm = screen.queryByTestId("task-archive-inline-confirmation") === null;
+      closedBeforeConfirm = screen.queryByTestId(INLINE_CONFIRMATION_TEST_ID) === null;
     });
 
     renderConfirmation(onConfirm);
@@ -128,5 +145,21 @@ describe("TaskArchiveConfirmation classification", () => {
 
     await waitFor(() => expect(onConfirm).toHaveBeenCalledOnce());
     expect(closedBeforeConfirm).toBe(true);
+  });
+});
+
+describe("TaskArchiveConfirmation cleanup copy", () => {
+  it("uses the same semantic cleanup effect list in the fine-pointer popover", async () => {
+    pointerState.isFinePointer = true;
+    getSubtaskCountMock.mockResolvedValue({ count: 0 });
+
+    renderConfirmation();
+
+    await screen.findByTestId("task-archive-confirm-popover");
+    expect(screen.getByTestId(CLEANUP_EFFECTS_TEST_ID).getAttribute("role")).toBe("list");
+    expect(
+      screen.getByTestId(CLEANUP_EFFECTS_TEST_ID).querySelectorAll('[role="listitem"]'),
+    ).toHaveLength(2);
+    expect(screen.getByTestId(CLEANUP_NOTES_TEST_ID).tagName).toBe("SPAN");
   });
 });

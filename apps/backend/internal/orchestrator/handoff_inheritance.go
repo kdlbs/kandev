@@ -88,9 +88,14 @@ func (s *Service) inheritFromParentEnvironment(ctx context.Context, task *v1.Tas
 	if task.ParentID == "" {
 		return fmt.Errorf("%w: inherit_parent task has no parent", models.ErrWorkspaceReuseUnsafe)
 	}
-	envID, source := s.resolveInheritedEnvironment(ctx, task)
+	envID, source, resolveErr := s.resolveInheritedEnvironmentChecked(ctx, task)
+	if resolveErr != nil {
+		return resolveErr
+	}
 	if envID == "" {
-		return fmt.Errorf("%w: parent workspace is unavailable", models.ErrWorkspaceReuseUnsafe)
+		parent, _ := s.repo.GetTask(ctx, task.ParentID)
+		return fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsafe,
+			models.DescribeInheritedEnvironmentUnavailable(task.ParentID, parent))
 	}
 	target, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || target == nil {
@@ -118,7 +123,44 @@ func (s *Service) inheritFromParentEnvironment(ctx context.Context, task *v1.Tas
 // what lets a child task re-launch after the parent's session has been
 // stopped — without it, the child would silently launch into a fresh env
 // and the workspace inheritance contract would break.
+//
+// The parent session's TaskEnvironmentID is a bare foreign-key-less string:
+// nothing stops the referenced task_environments row from being deleted out
+// from under it, and archiving the parent does NOT do this by itself —
+// archive preserves the task_environments row and only tears down its
+// runtime resources (worktree, container/sandbox), so an archived parent's
+// env row still exists but its worktree is gone. A definitively archived
+// parent is therefore rejected up front, before either branch below is even
+// attempted. Parent lookup errors also fail closed. The row can be deleted
+// outright by a DELETE cascade or an explicit ResetTaskEnvironment; that
+// case is caught by verifying the id against task_environments on both
+// branches below. A missing environment row then returns an empty result and
+// the caller reports a typed unsafe-reuse error. Without the second check,
+// the group branch would hand back exactly the id the parent_session branch
+// just rejected: an inherit_parent child is a member of the parent's
+// workspace group, and MarkOwnerSessionMaterialized records the parent as
+// that group's owner.
 func (s *Service) resolveInheritedEnvironment(ctx context.Context, task *v1.Task) (envID, source string) {
+	envID, source, _ = s.resolveInheritedEnvironmentChecked(ctx, task)
+	return envID, source
+}
+
+func (s *Service) resolveInheritedEnvironmentChecked(ctx context.Context, task *v1.Task) (envID, source string, err error) {
+	parent, err := s.repo.GetTask(ctx, task.ParentID)
+	if err != nil || parent == nil {
+		s.logger.Warn("inherit_parent: load parent task failed",
+			zap.String("task_id", task.ID),
+			zap.String("parent_task_id", task.ParentID),
+			zap.Error(err))
+		return "", "", fmt.Errorf("%w: parent task %s could not be verified", models.ErrWorkspaceReuseUnsafe, task.ParentID)
+	}
+	if parent.ArchivedAt != nil {
+		s.logger.Warn("inherit_parent: parent task is archived, environment inheritance unavailable",
+			zap.String("task_id", task.ID),
+			zap.String("parent_task_id", task.ParentID))
+		return "", "", fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsafe,
+			models.DescribeInheritedEnvironmentUnavailable(task.ParentID, parent))
+	}
 	parentSessions, err := s.repo.ListTaskSessions(ctx, task.ParentID)
 	if err != nil {
 		s.logger.Warn("inherit_parent: list parent sessions failed",
@@ -126,15 +168,59 @@ func (s *Service) resolveInheritedEnvironment(ctx context.Context, task *v1.Task
 			zap.String("parent_task_id", task.ParentID),
 			zap.Error(err))
 	} else if parent := findPrimarySession(parentSessions); parent != nil && parent.TaskEnvironmentID != "" {
-		return parent.TaskEnvironmentID, "parent_session"
+		available, validateErr := s.validateInheritedEnvironmentReference(ctx, task, parent.TaskEnvironmentID)
+		if validateErr != nil {
+			return "", "", validateErr
+		}
+		if available {
+			return parent.TaskEnvironmentID, "parent_session", nil
+		}
+		s.logger.Warn("inherit_parent: parent session environment no longer exists",
+			zap.String("task_id", task.ID),
+			zap.String("parent_task_id", task.ParentID),
+			zap.String("task_environment_id", parent.TaskEnvironmentID))
 	}
 	if s.workspaceMaterializer == nil {
-		return "", ""
+		return "", "", nil
 	}
 	if envID := s.workspaceMaterializer.GetSharedGroupEnvironment(ctx, task.ID); envID != "" {
-		return envID, "workspace_group"
+		available, validateErr := s.validateInheritedEnvironmentReference(ctx, task, envID)
+		if validateErr != nil {
+			return "", "", validateErr
+		}
+		if available {
+			return envID, "workspace_group", nil
+		}
+		s.logger.Warn("inherit_parent: workspace group environment no longer exists",
+			zap.String("task_id", task.ID),
+			zap.String("parent_task_id", task.ParentID),
+			zap.String("task_environment_id", envID))
 	}
-	return "", ""
+	return "", "", nil
+}
+
+// validateInheritedEnvironmentReference confirms that an inherited
+// environment still exists and that its owner is not archived. This check
+// covers nested handoffs where a live child still points at an environment
+// materialized by an archived ancestor. Owner lookup errors fail closed so a
+// new session cannot bind to an unverifiable worktree.
+func (s *Service) validateInheritedEnvironmentReference(ctx context.Context, task *v1.Task, envID string) (bool, error) {
+	env, err := s.repo.GetTaskEnvironment(ctx, envID)
+	if err != nil || env == nil {
+		return false, nil
+	}
+	if env.TaskID == "" || (task != nil && env.TaskID == task.ID) {
+		return true, nil
+	}
+	owner, err := s.repo.GetTask(ctx, env.TaskID)
+	if err != nil || owner == nil {
+		return false, fmt.Errorf("%w: inherited task environment owner %s could not be verified", models.ErrWorkspaceReuseUnsafe, env.TaskID)
+	}
+	if owner.ArchivedAt != nil {
+		return false, fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsafe,
+			models.DescribeInheritedEnvironmentUnavailable(env.TaskID, owner))
+	}
+	return true, nil
 }
 
 // inheritFromSharedGroup propagates the workspace group's materialized
@@ -149,6 +235,13 @@ func (s *Service) inheritFromSharedGroup(ctx context.Context, task *v1.Task, ses
 	envID := s.workspaceMaterializer.GetSharedGroupEnvironment(ctx, task.ID)
 	if envID == "" {
 		return fmt.Errorf("%w: shared workspace group has no canonical environment", models.ErrWorkspaceReuseUnsafe)
+	}
+	available, validateErr := s.validateInheritedEnvironmentReference(ctx, task, envID)
+	if validateErr != nil {
+		return validateErr
+	}
+	if !available {
+		return fmt.Errorf("%w: shared workspace group environment %s no longer exists", models.ErrWorkspaceReuseUnsafe, envID)
 	}
 	target, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || target == nil {

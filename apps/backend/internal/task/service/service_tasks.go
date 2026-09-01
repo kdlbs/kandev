@@ -2244,6 +2244,17 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 	// 5. Publish task.updated event so frontend removes from board
 	s.publishTaskEvent(finalizeCtx, events.TaskUpdated, task, nil)
+	// 5b. Archive cleanup tears down this task's runtime resources (worktree,
+	// container/sandbox) but preserves its task_environments row
+	// (deleteRow: false above) — the row is deleted only by a DELETE cascade
+	// or an explicit ResetTaskEnvironment, never by archive. An inherit_parent
+	// child that has not yet launched and still depends on this task's
+	// environment is therefore left pointing at a row that either dangles
+	// later (if something does delete it) or, more immediately, survives but
+	// now names a workspace whose worktree is gone. Mark those children now,
+	// while we still know which task was archived, instead of letting them
+	// silently strand.
+	s.markOrphanedInheritParentChildren(finalizeCtx, task)
 	s.pullNextTaskOnVacate(finalizeCtx, task.WorkflowStepID, task.ID)
 	s.logger.Info("task archived",
 		zap.String("task_id", id),
@@ -2261,6 +2272,84 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	}
 
 	return nil
+}
+
+// markOrphanedInheritParentChildren stamps an orphan marker on archived's
+// direct, non-archived inherit_parent children that have not materialized
+// their own workspace. Archive tears down archived's runtime resources
+// (worktree, container/sandbox) but deliberately preserves its own
+// task_environments row (deleteRow: false; the row is deleted only by a
+// DELETE cascade or an explicit ResetTaskEnvironment) — so a child's
+// session.TaskEnvironmentID (task_sessions.task_environment_id has no
+// foreign key) is left pointing at a row that either dangles later, if
+// something else deletes it, or survives but now names a workspace whose
+// worktree is gone. Before this, the child kept rendering as an ordinary
+// launchable CREATED card and only discovered the problem days later, at
+// launch time. The fail-closed check in internal/orchestrator's
+// resolveInheritedEnvironment covers the dangling-row case at launch time;
+// this covers detection at archive time so the card itself can be told
+// apart later, and the worktree-layer ownership-marker message (see
+// internal/worktree/manager_lifecycle.go) covers the live-but-useless case
+// this marker cannot detect on its own.
+// Markers land under the already-open metadata.workspace map (new keys
+// alongside the existing "mode") rather than a new mode value or DTO field,
+// so they stay inert for existing frontend consumers.
+func (s *Service) markOrphanedInheritParentChildren(ctx context.Context, archived *models.Task) {
+	if archived == nil {
+		return
+	}
+	children, err := s.tasks.ListChildren(ctx, archived.ID)
+	if err != nil {
+		s.logger.Warn("list children for orphan marking failed",
+			zap.String("task_id", archived.ID), zap.Error(err))
+		return
+	}
+	for _, child := range children {
+		s.markOrphanedInheritParentChild(ctx, archived, child)
+	}
+}
+
+// markOrphanedInheritParentChild marks a single child, skipping any child
+// that is not an unmaterialized inherit_parent workspace. A child that
+// already has its own task_environments row is not orphaned: the executor's
+// by-task-id environment lookup finds that row first and never falls
+// through to the (now-gone) inherited one.
+func (s *Service) markOrphanedInheritParentChild(ctx context.Context, archived, child *models.Task) {
+	if child == nil || taskWorkspaceMode(child.Metadata) != workspaceModeInheritParent {
+		return
+	}
+	ownEnv, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, child.ID)
+	if err != nil {
+		s.logger.Warn("check child task environment for orphan marking failed",
+			zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID), zap.Error(err))
+		return
+	}
+	if ownEnv != nil {
+		return
+	}
+
+	workspace, _ := child.Metadata["workspace"].(map[string]interface{})
+	stampOrphanedWorkspaceMetadata(workspace, archived.ID)
+
+	if err := s.updateTaskWorkspaceMetadata(ctx, child); err != nil {
+		s.logger.Warn("mark orphaned inherit_parent child failed",
+			zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID), zap.Error(err))
+		return
+	}
+	s.publishTaskEvent(ctx, events.TaskUpdated, child, nil)
+	s.logger.Info("marked inherit_parent child orphaned by parent archive",
+		zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID))
+}
+
+func (s *Service) updateTaskWorkspaceMetadata(ctx context.Context, task *models.Task) error {
+	if task == nil {
+		return nil
+	}
+	workspace, _ := task.Metadata["workspace"].(map[string]interface{})
+	if setter, ok := s.tasks.(taskMetadataKeySetter); ok {
+		return setter.SetTaskMetadataKey(ctx, task.ID, "workspace", workspace)
+	}
+	return s.tasks.UpdateTask(ctx, task)
 }
 
 // finalizeCancelledSessions finalizes an archived task's active sessions in

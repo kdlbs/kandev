@@ -507,6 +507,32 @@ func TestHandleArchiveTask_MissingTaskID(t *testing.T) {
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
 
+func TestHandleArchiveTask_UsesHandoffCascadeWhenConfigured(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-handoff", Name: "Handoff"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-handoff", WorkspaceID: "ws-handoff", Name: "Board"}))
+	task := &models.Task{ID: "handoff-archive", WorkspaceID: "ws-handoff", WorkflowID: "wf-handoff", Title: "Archive", State: v1.TaskStateTODO}
+	require.NoError(t, repo.CreateTask(ctx, task))
+
+	h := &Handlers{
+		taskSvc:    svc,
+		handoffSvc: service.NewHandoffService(repo, repo, nil, nil, nil, testLogger(t)),
+		logger:     testLogger(t).WithFields(),
+	}
+	msg := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{"task_id": task.ID})
+	resp, err := h.handleArchiveTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var cascadeID string
+	require.NoError(t, repo.DB().QueryRowContext(ctx,
+		`SELECT COALESCE(archived_by_cascade_id, '') FROM tasks WHERE id = ?`, task.ID).Scan(&cascadeID))
+	if cascadeID == "" {
+		t.Fatal("MCP archive did not use HandoffService cascade path")
+	}
+}
+
 func TestHandleArchiveTask_InvalidPayload(t *testing.T) {
 	h := &Handlers{}
 	msg := &ws.Message{

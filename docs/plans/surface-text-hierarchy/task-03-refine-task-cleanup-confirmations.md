@@ -1,7 +1,7 @@
 ---
 id: "03-refine-task-cleanup-confirmations"
 title: "Refine task cleanup confirmations"
-status: pending
+status: completed
 wave: 2
 depends_on:
   - "01-standardize-surface-typography-primitives"
@@ -124,4 +124,22 @@ pnpm run i18n:ratchet
 
 ## Results
 
-Pending implementation.
+- RED: The four focused suites failed 22 tests against the pre-change flat
+  cleanup-line model, prose-only markup, unconstrained dialog body, compact
+  phone actions, and non-semantic Delete styling.
+- GREEN: Replaced cleanup `lines` with ordered effects and supporting notes,
+  added one semantic renderer shared by full and compact archive/delete
+  surfaces, and preserved every executor-specific cleanup fact and callback.
+- Added dynamic-viewport body containment, persistent full-dialog footers,
+  full-width 44px phone actions with compact desktop sizing, and the semantic
+  destructive Delete variant.
+- Updated all five task catalogs with direct outcome, ordered effect, and
+  reassurance copy while preserving plural placeholders and locale parity.
+- Focused verification passed with 4 test files and 63 tests. Web typecheck,
+  focused ESLint with `--max-warnings 0`, `pnpm run i18n:check`, and
+  `pnpm run i18n:ratchet` also passed on the integrated stack.
+- The supported task-scoped Traditional Chinese generation command passed with
+  zero residuals for `zh-tw` and `zh-hk`; it produced no owned-key difference.
+  The repository-wide `pnpm run i18n:zh-hant` command still stops before any
+  write on two inherited `agents:dynamicProfileSettings` residuals, reproduced
+  unchanged on the exact Task 02 parent.

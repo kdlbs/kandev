@@ -13,6 +13,9 @@ export type LazyLoadSentinelOptions = {
    * observed exit/re-entry or a later user-gesture retry. Defaults to true
    * when re-arm is enabled. */
   shouldContinueWhileIntersecting?: () => boolean;
+  /** Measures whether the sentinel is currently inside the caller's preload
+   * region. Lifecycle retries use this instead of a stale observer entry. */
+  isCurrentGeometryEligible?: () => boolean;
   /** Reports one terminal outcome for each request that started. The
    * continuation value reflects the final firing guards, not only the
    * caller's boundary decision. */
@@ -64,6 +67,7 @@ type SentinelMutableRefs = {
     joinInFlightWhileLoading: boolean;
     stickToBottomWhileLoading: boolean;
     shouldContinueWhileIntersecting?: () => boolean;
+    isCurrentGeometryEligible?: () => boolean;
     onLoadSettled?: (result: LazyLoadSentinelSettleResult) => void;
     isRequestCurrent?: () => boolean;
   }>;
@@ -422,6 +426,7 @@ export function useLazyLoadSentinel(
   sentinelRef: (node: HTMLDivElement | null) => void;
   onUserGesture: () => void;
   retry: () => void;
+  recheck: () => void;
 } {
   const {
     rootMargin = "200px 0px 0px 0px",
@@ -429,6 +434,7 @@ export function useLazyLoadSentinel(
     joinInFlightWhileLoading = false,
     stickToBottomWhileLoading = false,
     shouldContinueWhileIntersecting,
+    isCurrentGeometryEligible,
     onLoadSettled,
     isRequestCurrent,
   } = options ?? {};
@@ -442,6 +448,7 @@ export function useLazyLoadSentinel(
     joinInFlightWhileLoading,
     stickToBottomWhileLoading,
     shouldContinueWhileIntersecting,
+    isCurrentGeometryEligible,
     onLoadSettled,
     isRequestCurrent,
   });
@@ -451,6 +458,7 @@ export function useLazyLoadSentinel(
       joinInFlightWhileLoading,
       stickToBottomWhileLoading,
       shouldContinueWhileIntersecting,
+      isCurrentGeometryEligible,
       onLoadSettled,
       isRequestCurrent,
     };
@@ -459,6 +467,7 @@ export function useLazyLoadSentinel(
     joinInFlightWhileLoading,
     stickToBottomWhileLoading,
     shouldContinueWhileIntersecting,
+    isCurrentGeometryEligible,
     onLoadSettled,
     isRequestCurrent,
   ]);
@@ -585,6 +594,19 @@ export function useLazyLoadSentinel(
     void fireLoad();
   }, [fireLoad]);
 
+  // A restored panel can become visible while the observer still holds an
+  // entry captured for zero-size hidden geometry. Measure current geometry
+  // without requiring the sentinel to leave and re-enter the preload region.
+  const recheck = useCallback(() => {
+    const { hasMore, blocked, isLoadingMore } = stateRef.current;
+    const { joinInFlightWhileLoading, isCurrentGeometryEligible } = optionsRef.current;
+    if (!hasMore || blocked || (isLoadingMore && !joinInFlightWhileLoading)) return;
+    const eligible = isCurrentGeometryEligible?.() ?? intersectingRef.current;
+    if (!eligible) return;
+    disarmedRef.current = false;
+    void fireLoad();
+  }, [fireLoad]);
+
   // Explicit recovery is allowed regardless of the sentinel's current
   // intersection. The user has supplied fresh pagination intent, so a
   // button click can retry a disarmed request even when the sentinel is just
@@ -598,5 +620,5 @@ export function useLazyLoadSentinel(
     void fireLoad();
   }, [fireLoad]);
 
-  return { sentinelRef, onUserGesture, retry };
+  return { sentinelRef, onUserGesture, retry, recheck };
 }
