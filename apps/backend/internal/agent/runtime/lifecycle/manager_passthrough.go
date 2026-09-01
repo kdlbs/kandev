@@ -837,7 +837,7 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 		}
 	}
 
-	go m.autoInjectInitialPrompt(execution, pt)
+	go m.autoInjectInitialPrompt(execution, pt, processInfo.ID)
 
 	return nil
 }
@@ -1434,7 +1434,7 @@ func (m *Manager) attemptResumeFallbackForProcess(execution *AgentExecution, run
 	}
 
 	// Fallback path is a fresh session (no --resume) — re-inject the prompt.
-	go m.autoInjectInitialPrompt(execution, pt)
+	go m.autoInjectInitialPrompt(execution, pt, processInfo.ID)
 }
 
 // attemptPassthroughRestart announces the restart on the terminal, waits the
@@ -1583,13 +1583,16 @@ func requiresPassthroughInitialPrompt(execution *AgentExecution, pt agents.Passt
 	return pt.PromptFlag.IsEmpty() && getTaskDescriptionFromMetadata(execution) != ""
 }
 
+// claimPassthroughInitialPrompt verifies that this goroutine is still
+// associated with the active PTY process before proceeding with injection.
+// startPassthroughSession pre-sets the marker; this check deliberately does
+// not claim a marker for a replacement process.
 func claimPassthroughInitialPrompt(execution *AgentExecution, processID string) bool {
 	execution.passthroughLifecycleMu.Lock()
 	defer execution.passthroughLifecycleMu.Unlock()
-	if execution.PassthroughProcessID != processID {
+	if execution.PassthroughProcessID != processID || execution.passthroughInitialPromptProcessID != processID {
 		return false
 	}
-	execution.passthroughInitialPromptProcessID = processID
 	return true
 }
 
@@ -1605,17 +1608,17 @@ func clearPassthroughInitialPrompt(execution *AgentExecution, processID string) 
 // passthrough agent without a PromptFlag is idle (ready for input). Called from
 // startPassthroughSession and attemptResumeFallback only — never from
 // ResumePassthroughSession (would duplicate the prompt in agent history).
-func (m *Manager) autoInjectInitialPrompt(execution *AgentExecution, pt agents.PassthroughConfig) {
+func (m *Manager) autoInjectInitialPrompt(execution *AgentExecution, pt agents.PassthroughConfig, processID string) {
 	runner := m.GetInteractiveRunner()
 	if runner == nil {
 		return
 	}
-	m.autoInjectInitialPromptWith(runner, execution, pt)
+	m.autoInjectInitialPromptWith(runner, execution, pt, processID)
 }
 
 // autoInjectInitialPromptWith is the testable inner of autoInjectInitialPrompt,
 // taking a runner seam so unit tests can avoid spawning a real PTY.
-func (m *Manager) autoInjectInitialPromptWith(runner passthroughRunner, execution *AgentExecution, pt agents.PassthroughConfig) {
+func (m *Manager) autoInjectInitialPromptWith(runner passthroughRunner, execution *AgentExecution, pt agents.PassthroughConfig, processID string) {
 	if !pt.PromptFlag.IsEmpty() {
 		// The agent already received the prompt as a CLI flag — no stdin
 		// delivery. This mirrors promptForPassthroughCommand, which only
@@ -1631,7 +1634,6 @@ func (m *Manager) autoInjectInitialPromptWith(runner passthroughRunner, executio
 		// take this exit and never receive spurious stdin.
 		return
 	}
-	processID := execution.PassthroughProcessID
 	if processID == "" {
 		m.logger.Warn("autoInjectInitialPrompt called without passthrough process",
 			zap.String("execution_id", execution.ID))
