@@ -39,8 +39,16 @@ var expansionBlockRegex = regexp.MustCompile(
 // compatibility metadata only; the backend replaces them with the current
 // saved prompt record before the message is persisted or dispatched.
 var browserPromptContextBlockRegex = regexp.MustCompile(
-	regexp.QuoteMeta(sysprompt.TagStart) + `(?:\r?\n)?` + regexp.QuoteMeta(browserPromptContextMarker) +
+	regexp.QuoteMeta(sysprompt.TagStart) + `\s*` + regexp.QuoteMeta(browserPromptContextMarker) +
 		`[\s\S]*?` + regexp.QuoteMeta(sysprompt.TagEnd) + `\s*(` + regexp.QuoteMeta(sysprompt.TagStart) + `|$)`,
+)
+
+// browserPromptContextUnclosedBlockRegex fails closed for a matching browser
+// block without an outer closing tag. The browser block is compatibility
+// metadata, so dropping it is safer than allowing forged content to reach
+// resolution or persistence.
+var browserPromptContextUnclosedBlockRegex = regexp.MustCompile(
+	regexp.QuoteMeta(sysprompt.TagStart) + `\s*` + regexp.QuoteMeta(browserPromptContextMarker) + `[\s\S]*$`,
 )
 
 // AppendReferenceExpansions resolves any "@name" saved-prompt references in
@@ -85,6 +93,11 @@ func (s *Service) AppendReferenceExpansionsWithContext(
 	cleanedPrompt := prompt
 	for {
 		replaced := browserPromptContextBlockRegex.ReplaceAllString(cleanedPrompt, "$1")
+		if replaced != cleanedPrompt {
+			cleanedPrompt = replaced
+			continue
+		}
+		replaced = browserPromptContextUnclosedBlockRegex.ReplaceAllString(cleanedPrompt, "")
 		if replaced == cleanedPrompt {
 			break
 		}

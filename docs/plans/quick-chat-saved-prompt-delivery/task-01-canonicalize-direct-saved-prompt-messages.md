@@ -55,7 +55,7 @@ canonicalization.
 
 ```bash
 cd apps/backend
-rtk go test ./internal/prompts/service ./internal/sysprompt ./internal/orchestrator ./internal/task/handlers -count=1
+rtk go test ./internal/prompts/service ./internal/sysprompt ./internal/orchestrator ./internal/task/handlers ./cmd/mock-agent -count=1
 ```
 
 ## Files likely touched
