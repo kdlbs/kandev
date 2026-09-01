@@ -23,9 +23,13 @@ type projectProjection struct {
 	ExecutorConfig string
 }
 
-// buildFetchedProjects parses every projects/*.yml file and resolves
-// AC-OFFICE-CONFIG-SYNC-003.2/.3.
-func buildFetchedProjects(files []fetchedFile) (fetched []fetchedEntity[projectProjection], warnings []string) {
+// buildFetchedProjects parses every projects/*.yml file, resolves
+// AC-OFFICE-CONFIG-SYNC-003.2/.3, and also returns the path of every file
+// that failed to parse — AC-OFFICE-CONFIG-SYNC-003.12's deletion-sweep
+// exemption input, resolved by the caller against the manifest.
+func buildFetchedProjects(files []fetchedFile) (
+	fetched []fetchedEntity[projectProjection], warnings, unparsed []string,
+) {
 	type parsed struct {
 		project *parsedProject
 		path    string
@@ -35,6 +39,7 @@ func buildFetchedProjects(files []fetchedFile) (fetched []fetchedEntity[projectP
 		pp, err := parseProjectFile(f.path, f.content)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("project file %q: %v; skipping", f.path, err))
+			unparsed = append(unparsed, f.path)
 			continue
 		}
 		if w := stemMismatchWarning(kindProject, f.path, pp.declaredName); w != "" {
@@ -66,7 +71,7 @@ func buildFetchedProjects(files []fetchedFile) (fetched []fetchedEntity[projectP
 			},
 		})
 	}
-	return fetched, warnings
+	return fetched, warnings, unparsed
 }
 
 // projectOps adapts the office repository's project CRUD to the generic

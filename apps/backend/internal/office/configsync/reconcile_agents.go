@@ -18,10 +18,13 @@ const kindAgent = "agent"
 // buildFetchedAgents parses every agents/*.yml file, resolves
 // AC-OFFICE-CONFIG-SYNC-003.2 filename-stem warnings and
 // AC-OFFICE-CONFIG-SYNC-003.3 key collisions, and returns the
-// collision-resolved fetched set keyed by declared name plus every
-// reports_to name declared (for the second pass) and any warnings.
+// collision-resolved fetched set keyed by declared name, every reports_to
+// name declared (for the second pass), any warnings, and the path of every
+// file that failed to parse — AC-OFFICE-CONFIG-SYNC-003.12's deletion-sweep
+// exemption input, resolved by the caller against the manifest.
 func buildFetchedAgents(files []fetchedFile) (
-	fetched []fetchedEntity[sqlite.AgentInstanceConfigFields], reportsTo map[string]string, warnings []string,
+	fetched []fetchedEntity[sqlite.AgentInstanceConfigFields], reportsTo map[string]string,
+	warnings, unparsed []string,
 ) {
 	type parsed struct {
 		agent *parsedAgent
@@ -32,6 +35,7 @@ func buildFetchedAgents(files []fetchedFile) (
 		pa, err := parseAgentFile(f.path, f.content)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("agent file %q: %v; skipping", f.path, err))
+			unparsed = append(unparsed, f.path)
 			continue
 		}
 		if w := stemMismatchWarning(kindAgent, f.path, pa.declaredName); w != "" {
@@ -68,7 +72,7 @@ func buildFetchedAgents(files []fetchedFile) (
 			reportsTo[key] = pa.reportsTo
 		}
 	}
-	return fetched, reportsTo, warnings
+	return fetched, reportsTo, warnings, unparsed
 }
 
 // normalizeJSONArrayForComparison mirrors the sqlite package's own

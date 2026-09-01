@@ -16,7 +16,7 @@ func TestBuildFetchedProjects_ParsesStemWarningsAndCollisions(t *testing.T) {
 		{path: "projects/mismatch.yml", content: []byte("name: Other\n")},
 		{path: "projects/broken.yml", content: []byte("name:\n  - not-a-string\n")},
 	}
-	fetched, warnings := buildFetchedProjects(files)
+	fetched, warnings, _ := buildFetchedProjects(files)
 
 	require.Len(t, fetched, 2)
 	byKey := map[string]fetchedEntity[projectProjection]{}
@@ -36,7 +36,7 @@ func TestBuildFetchedProjects_KeyCollisionKeepsByteWiseFirstPath(t *testing.T) {
 		{path: "projects/z-dup.yml", content: []byte("name: Website\n")},
 		{path: "projects/a-dup.yml", content: []byte("name: Website\n")},
 	}
-	fetched, warnings := buildFetchedProjects(files)
+	fetched, warnings, _ := buildFetchedProjects(files)
 	require.Len(t, fetched, 1)
 	assert.Equal(t, "projects/a-dup.yml", fetched[0].SourcePath)
 	assert.NotEmpty(t, warnings)

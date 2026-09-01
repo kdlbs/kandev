@@ -44,7 +44,7 @@ func TestBuildFetchedAgents_ParsesStemWarningsCollisionsAndReportsTo(t *testing.
 		{path: "agents/mismatch.yml", content: []byte("name: Other\nrole: contributor\n")},
 		{path: "agents/broken.yml", content: []byte("name:\n  - not-a-string\n")},
 	}
-	fetched, reportsTo, warnings := buildFetchedAgents(files)
+	fetched, reportsTo, warnings, _ := buildFetchedAgents(files)
 
 	require.Len(t, fetched, 3)
 	byKey := map[string]fetchedEntity[sqlite.AgentInstanceConfigFields]{}
@@ -78,7 +78,7 @@ func TestBuildFetchedAgents_KeyCollisionKeepsByteWiseFirstPath(t *testing.T) {
 		{path: "agents/z-dup.yml", content: []byte("name: CEO\nrole: manager\n")},
 		{path: "agents/a-dup.yml", content: []byte("name: CEO\nrole: manager\n")},
 	}
-	fetched, _, warnings := buildFetchedAgents(files)
+	fetched, _, warnings, _ := buildFetchedAgents(files)
 	require.Len(t, fetched, 1)
 	assert.Equal(t, "agents/a-dup.yml", fetched[0].SourcePath)
 	assert.NotEmpty(t, warnings)
@@ -119,7 +119,7 @@ func TestAgentOps_RerunWithSameProjectionIsIdempotent(t *testing.T) {
 	// exercises the same empty-string normalization real YAML parsing
 	// applies (AC-OFFICE-CONFIG-SYNC-003.11's idempotency requirement).
 	files := []fetchedFile{{path: "agents/ceo.yml", content: []byte("name: ceo\nrole: manager\n")}}
-	fetched, _, warnings := buildFetchedAgents(files)
+	fetched, _, warnings, _ := buildFetchedAgents(files)
 	require.Empty(t, warnings)
 	require.Len(t, fetched, 1)
 

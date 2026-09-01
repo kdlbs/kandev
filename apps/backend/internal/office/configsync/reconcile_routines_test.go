@@ -16,7 +16,7 @@ func TestBuildFetchedRoutines_ParsesStemWarningsAndConcurrencyPolicy(t *testing.
 		{path: "routines/mismatch.yml", content: []byte("name: Other\n")},
 		{path: "routines/broken.yml", content: []byte("name:\n  - not-a-string\n")},
 	}
-	fetched, warnings := buildFetchedRoutines(files)
+	fetched, warnings, _ := buildFetchedRoutines(files)
 
 	require.Len(t, fetched, 2)
 	byKey := map[string]fetchedEntity[routineProjection]{}
@@ -36,7 +36,7 @@ func TestBuildFetchedRoutines_KeyCollisionKeepsByteWiseFirstPath(t *testing.T) {
 		{path: "routines/z-dup.yml", content: []byte("name: Nightly\n")},
 		{path: "routines/a-dup.yml", content: []byte("name: Nightly\n")},
 	}
-	fetched, warnings := buildFetchedRoutines(files)
+	fetched, warnings, _ := buildFetchedRoutines(files)
 	require.Len(t, fetched, 1)
 	assert.Equal(t, "routines/a-dup.yml", fetched[0].SourcePath)
 	assert.NotEmpty(t, warnings)

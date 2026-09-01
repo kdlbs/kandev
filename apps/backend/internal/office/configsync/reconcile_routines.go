@@ -21,9 +21,13 @@ type routineProjection struct {
 	ConcurrencyPolicy models.RoutineConcurrencyPolicy
 }
 
-// buildFetchedRoutines parses every routines/*.yml file and resolves
-// AC-OFFICE-CONFIG-SYNC-003.2/.3.
-func buildFetchedRoutines(files []fetchedFile) (fetched []fetchedEntity[routineProjection], warnings []string) {
+// buildFetchedRoutines parses every routines/*.yml file, resolves
+// AC-OFFICE-CONFIG-SYNC-003.2/.3, and also returns the path of every file
+// that failed to parse — AC-OFFICE-CONFIG-SYNC-003.12's deletion-sweep
+// exemption input, resolved by the caller against the manifest.
+func buildFetchedRoutines(files []fetchedFile) (
+	fetched []fetchedEntity[routineProjection], warnings, unparsed []string,
+) {
 	type parsed struct {
 		routine *parsedRoutine
 		path    string
@@ -33,6 +37,7 @@ func buildFetchedRoutines(files []fetchedFile) (fetched []fetchedEntity[routineP
 		pr, err := parseRoutineFile(f.path, f.content)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("routine file %q: %v; skipping", f.path, err))
+			unparsed = append(unparsed, f.path)
 			continue
 		}
 		if w := stemMismatchWarning(kindRoutine, f.path, pr.declaredName); w != "" {
@@ -62,7 +67,7 @@ func buildFetchedRoutines(files []fetchedFile) (fetched []fetchedEntity[routineP
 			},
 		})
 	}
-	return fetched, warnings
+	return fetched, warnings, unparsed
 }
 
 // routineOps adapts the office repository's routine CRUD to the generic

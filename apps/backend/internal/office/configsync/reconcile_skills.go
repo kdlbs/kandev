@@ -68,6 +68,31 @@ func buildFetchedSkills(dirs []skillFiles) (fetched []fetchedSkill, warnings []s
 	return fetched, warnings
 }
 
+// skillFetchWarningsAndExemptions renders one
+// AC-OFFICE-CONFIG-SYNC-002.4a/002.6a warning per unreadable SKILL.md or
+// reference file, and exempts that skill's directory-name key from this
+// run's deletion sweep. Unlike the flat kinds, no path-matching against the
+// manifest is needed: walk.go already associates every unreadable file with
+// its owning skill directory (skillFiles.skillMDUnread/unreadableRefs), and
+// AC-002.6a treats an unreadable SKILL.md and an unreadable reference file
+// under the same skill as resolving to that one skill.
+func skillFetchWarningsAndExemptions(dirs []skillFiles) (warnings []string, exemptKeys map[string]bool) {
+	exemptKeys = map[string]bool{}
+	for _, sf := range dirs {
+		if sf.skillMDUnread != nil {
+			warnings = append(warnings, fmt.Sprintf(
+				"skill %q: SKILL.md unreadable (%s); leaving it untouched", sf.dirPath, sf.skillMDUnread.reason))
+			exemptKeys[sf.dirName] = true
+		}
+		for _, u := range sf.unreadableRefs {
+			warnings = append(warnings, fmt.Sprintf(
+				"skill %q: reference file %q unreadable (%s); leaving it untouched", sf.dirPath, u.path, u.reason))
+			exemptKeys[sf.dirName] = true
+		}
+	}
+	return warnings, exemptKeys
+}
+
 // applySkills runs the six-case table for the skill kind. Skills use a
 // bespoke apply path rather than the generic engine because their writer
 // (skillwriter.go) needs a CAS guard on source_locator that the generic
