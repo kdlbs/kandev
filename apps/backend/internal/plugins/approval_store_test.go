@@ -158,6 +158,55 @@ func TestAuthorizePluginCapabilityDeniesHumanReservedCapability(t *testing.T) {
 	}
 }
 
+func TestAuthorizePluginCapabilityDeniesMalformedRequest(t *testing.T) {
+	dir := t.TempDir()
+	svc := &Service{}
+	svc.SetPluginsDir(dir)
+
+	cases := []struct {
+		name           string
+		installationID string
+		workspaceID    string
+		requestDigest  string
+		methodDigest   string
+	}{
+		{"missing installation", "", "ws-1", "req", "method"},
+		{"missing workspace", "inst-1", "", "req", "method"},
+		{"missing request digest", "inst-1", "ws-1", "", "method"},
+		{"missing method digest", "inst-1", "ws-1", "req", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			decision := svc.authorizePluginCapability(tc.installationID, tc.workspaceID, "api_read:tasks", 1, tc.requestDigest, tc.methodDigest)
+			if decision.Allowed {
+				t.Fatalf("decision unexpectedly allowed: %#v", decision)
+			}
+			if decision.Reason != ApprovalDenyMalformedRequest {
+				t.Fatalf("reason = %q, want malformed_request", decision.Reason)
+			}
+		})
+	}
+}
+
+func TestAuthorizePluginCapabilityDeniesUnsupportedCapabilityID(t *testing.T) {
+	dir := t.TempDir()
+	svc := &Service{}
+	svc.SetPluginsDir(dir)
+	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-1"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+
+	for _, capabilityID := range []string{"", "api_read:*", "api_read:tas?s", " api_read:tasks"} {
+		decision := svc.authorizePluginCapability("inst-1", "ws-1", capabilityID, 1, "req", "method")
+		if decision.Allowed {
+			t.Fatalf("capability %q unexpectedly allowed", capabilityID)
+		}
+		if decision.Reason != ApprovalDenyUnsupportedCapability {
+			t.Fatalf("capability %q reason = %q, want unsupported_capability", capabilityID, decision.Reason)
+		}
+	}
+}
+
 func TestApprovalGrantRetryIsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	ledger := newApprovalLedger(dir)

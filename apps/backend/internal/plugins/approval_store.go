@@ -18,6 +18,15 @@ const (
 	ApprovalStateRevoked ApprovalState = "revoked"
 )
 
+// HumanPolicyVersionImmutable is the only Human-policy version H6 currently
+// admits. H0 defines the Human-reserved deny intersection (merge, deploy,
+// release, history rewrite, cross-workspace access, secret-scope expansion)
+// as an immutable, singular policy with no versioned variants yet. The field
+// is stored on every approval row so a future policy revision has a stable
+// place to record which policy an approval was granted under; it is not a
+// caller-configurable input today.
+const HumanPolicyVersionImmutable = "immutable"
+
 type CapabilityApproval struct {
 	InstallationID     string        `json:"installation_id"`
 	WorkspaceID        string        `json:"workspace_id"`
@@ -174,7 +183,7 @@ func (l *approvalLedger) grant(installationID, workspaceID string, revision uint
 		CapabilityIDs:      append([]string{}, capabilityIDs...),
 		State:              ApprovalStateActive,
 		HumanActor:         actor,
-		HumanPolicyVersion: "immutable",
+		HumanPolicyVersion: HumanPolicyVersionImmutable,
 		CreatedAt:          at,
 		UpdatedAt:          at,
 	}

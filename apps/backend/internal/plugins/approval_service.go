@@ -2,19 +2,16 @@ package plugins
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/plugins/store"
 )
 
+// approvalLedger returns the ledger wired by SetPluginsDir. Callers handle a
+// nil result (e.g. a Service constructed directly in tests without a plugins
+// directory).
 func (s *Service) approvalLedger() *approvalLedger {
-	if s.approvals != nil {
-		return s.approvals
-	}
-	if s.pluginsDir == "" {
-		return nil
-	}
-	s.approvals = newApprovalLedger(s.pluginsDir)
 	return s.approvals
 }
 
@@ -83,6 +80,10 @@ func (s *Service) authorizePluginCapability(installationID, workspaceID, capabil
 			ObservedAt:     time.Now().UTC(),
 		},
 	}
+	if reason, ok := malformedAuthorizationRequestReason(installationID, workspaceID, capabilityID, requestDigest, methodDigest); !ok {
+		decision.Reason = reason
+		return decision
+	}
 	if isHumanReservedCapability(capabilityID) {
 		decision.Reason = ApprovalDenyHumanReserved
 		return decision
@@ -96,24 +97,9 @@ func (s *Service) authorizePluginCapability(installationID, workspaceID, capabil
 		decision.Reason = ApprovalDenyMissingApproval
 		return decision
 	}
-	if current.InstallationID != installationID {
-		decision.Reason = ApprovalDenyForeignInstallation
+	if reason, ok := s.manifestIntersectionDenyReason(installationID, capabilityID, current); !ok {
+		decision.Reason = reason
 		return decision
-	}
-	if s.registry != nil {
-		installed := s.installedRecordByInstallationID(installationID)
-		if installed == nil {
-			decision.Reason = ApprovalDenyForeignInstallation
-			return decision
-		}
-		if current.ManifestDigest != ManifestCapabilityDigest(installed.Manifest) {
-			decision.Reason = ApprovalDenyUnavailableCapability
-			return decision
-		}
-		if !manifestDeclaresCapability(installed, capabilityID) {
-			decision.Reason = ApprovalDenyUndeclaredCapability
-			return decision
-		}
 	}
 	if current.State != ApprovalStateActive {
 		decision.Reason = ApprovalDenyRevokedApproval
@@ -134,6 +120,43 @@ func (s *Service) authorizePluginCapability(installationID, workspaceID, capabil
 	}
 	decision.Reason = ApprovalDenyUndeclaredCapability
 	return decision
+}
+
+// malformedAuthorizationRequestReason validates the structural shape of an
+// authorization request before any capability/approval semantics are
+// considered. ok is false when the request must be denied; reason is only
+// meaningful when ok is false.
+func malformedAuthorizationRequestReason(installationID, workspaceID, capabilityID, requestDigest, methodDigest string) (reason ApprovalDenyReason, ok bool) {
+	if strings.TrimSpace(installationID) == "" || strings.TrimSpace(workspaceID) == "" ||
+		strings.TrimSpace(requestDigest) == "" || strings.TrimSpace(methodDigest) == "" {
+		return ApprovalDenyMalformedRequest, false
+	}
+	if isUnsupportedCapabilityID(capabilityID) {
+		return ApprovalDenyUnsupportedCapability, false
+	}
+	return "", true
+}
+
+// manifestIntersectionDenyReason enforces that the current installed
+// manifest still declares capabilityID under the same digest the approval
+// was granted against. ok is false when the request must be denied; reason
+// is only meaningful when ok is false. A nil registry (e.g. a Service
+// constructed directly in tests) skips this check.
+func (s *Service) manifestIntersectionDenyReason(installationID, capabilityID string, current CapabilityApproval) (reason ApprovalDenyReason, ok bool) {
+	if s.registry == nil {
+		return "", true
+	}
+	installed := s.installedRecordByInstallationID(installationID)
+	if installed == nil {
+		return ApprovalDenyForeignInstallation, false
+	}
+	if current.ManifestDigest != ManifestCapabilityDigest(installed.Manifest) {
+		return ApprovalDenyUnavailableCapability, false
+	}
+	if !manifestDeclaresCapability(installed, capabilityID) {
+		return ApprovalDenyUndeclaredCapability, false
+	}
+	return "", true
 }
 
 func (s *Service) installedRecordByInstallationID(installationID string) *store.Record {
@@ -157,6 +180,18 @@ func manifestDeclaresCapability(record *store.Record, capabilityID string) bool 
 		}
 	}
 	return false
+}
+
+// isUnsupportedCapabilityID reports whether capabilityID cannot be an exact
+// admitted capability class: empty, containing leading/trailing whitespace,
+// or a wildcard/broad alias. This mirrors the canonicalization rejected at
+// grant time (CanonicalCapabilityList) so an authorization request cannot
+// bypass the same rule by presenting a broad identity directly.
+func isUnsupportedCapabilityID(capabilityID string) bool {
+	if capabilityID == "" || strings.TrimSpace(capabilityID) != capabilityID {
+		return true
+	}
+	return strings.ContainsAny(capabilityID, "*?")
 }
 
 func isHumanReservedCapability(capabilityID string) bool {

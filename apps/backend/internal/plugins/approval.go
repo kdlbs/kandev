@@ -30,12 +30,17 @@ type ApprovalDecision struct {
 // generic plugin approval layer.
 type ApprovalDenyReason string
 
+// A foreign workspace (an installation with no approval in the requested
+// workspace) intentionally reuses ApprovalDenyMissingApproval rather than a
+// distinct reason: returning a different, more specific reason for "wrong
+// workspace" than for "no approval at all" would itself disclose that the
+// installation exists in another workspace, violating the fail-closed,
+// no-target-disclosure requirement for cross-workspace lookups.
 const (
 	ApprovalDenyMissingApproval       ApprovalDenyReason = "missing_capability_approval"
 	ApprovalDenyStaleRevision         ApprovalDenyReason = "stale_capability_revision"
 	ApprovalDenyRevokedApproval       ApprovalDenyReason = "capability_revoked"
 	ApprovalDenyHumanReserved         ApprovalDenyReason = "human_reserved"
-	ApprovalDenyForeignWorkspace      ApprovalDenyReason = "foreign_workspace"
 	ApprovalDenyForeignInstallation   ApprovalDenyReason = "foreign_installation"
 	ApprovalDenyUnsupportedCapability ApprovalDenyReason = "unsupported_capability"
 	ApprovalDenyUndeclaredCapability  ApprovalDenyReason = "undeclared_capability"
