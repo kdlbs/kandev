@@ -303,13 +303,3 @@ export async function scrollToOldestLoadedEdge(
     };
   }, marker);
 }
-
-/** Applies a small upward movement after prepend restoration. */
-export async function scrollUpSlightly(list: Locator): Promise<number> {
-  return list.evaluate((element) => {
-    const previous = element.scrollTop;
-    element.scrollTop = Math.max(0, previous - 24);
-    element.dispatchEvent(new Event("scroll", { bubbles: true }));
-    return previous - element.scrollTop;
-  });
-}
