@@ -37,8 +37,9 @@ the user's current Agent-tab selection and projects it into task state.
   Agent panels, ensures the active session panel, and adds current sibling
   session panels without activating them.
 - `setupReadyDockview` restores the environment layout before it registers the
-  normal session-tab event listener. It adopts one valid restored Agent
-  selection through the automatic session-selection action.
+  normal session-tab event listener. It calls `setupSessionTabSync`, which
+  adopts one valid restored Agent selection initially and after a delayed
+  environment layout restoration completes.
 - `SessionTab` owns the fine-pointer Agent-tab context menu and attaches the
   shared Dockview maximize handler to the tab surface.
 - `TabRenameInput` owns the inline editor's pointer and keyboard event boundary.
@@ -91,6 +92,12 @@ Before normal tab-event synchronization starts, the UI resolves the selected
 Agent panel from the restored group state. It validates that panel against the
 active task, current session list, and current environment.
 
+If session-to-environment metadata arrives after Dockview is ready, the
+environment switch restores that saved layout later. Session-tab
+synchronization repeats the same adoption when the restore flag clears. Stale
+and unrelated selected panels are filtered before the UI decides whether the
+remaining valid selection is ambiguous.
+
 When one valid restored Agent selection exists, the UI applies it with
 `setActiveSessionAuto`. This action aligns the application store with the
 restored layout without creating a user pin. The existing explicit-intent guard
@@ -131,6 +138,7 @@ and verifies that native text selection remains active while the Dockview group
 stays unmaximized. Mobile coverage is unchanged because phone and tablet do not
 mount the affected Dockview tab surface.
 
-A restoration unit test covers a valid secondary Agent selection and invalid
-saved selections. A desktop Playwright regression selects the secondary Agent
-tab, reloads the task, and verifies that the same session remains active.
+A restoration unit test covers a valid secondary Agent selection, invalid
+saved selections, mixed stale and valid selections, and delayed environment
+layout restoration. A desktop Playwright regression selects the secondary
+Agent tab, reloads the task, and verifies that the same session remains active.

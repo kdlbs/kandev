@@ -44,6 +44,9 @@ type SessionTabSyncStore = {
 };
 
 type SessionTabSyncHarness = ReturnType<typeof makeSessionTabSyncHarness>;
+type SessionTabSyncDisposable = { dispose: () => void };
+
+const activeDisposables: SessionTabSyncDisposable[] = [];
 
 function makeSessionTabSyncHarness(args: {
   activeTaskId: string;
@@ -154,9 +157,11 @@ function makeDefaultSessionTabSyncHarness(args?: {
 }
 
 function startSessionTabSync(harness: SessionTabSyncHarness) {
-  setupSessionTabSync(
-    harness.api as unknown as DockviewReadyEvent["api"],
-    harness.appStore as unknown as StoreApi<AppState>,
+  activeDisposables.push(
+    setupSessionTabSync(
+      harness.api as unknown as DockviewReadyEvent["api"],
+      harness.appStore as unknown as StoreApi<AppState>,
+    ),
   );
 }
 
@@ -168,6 +173,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const disposable of activeDisposables.splice(0)) disposable.dispose();
   clearSessionTabUserActivationIntentsForTest();
   useDockviewStore.setState({ isRestoringLayout: false });
   vi.useRealTimers();
@@ -258,6 +264,28 @@ describe("setupSessionTabSync restored selection", () => {
     startSessionTabSync(harness);
 
     expect(harness.setActiveSessionAuto).not.toHaveBeenCalled();
+  });
+
+  it("adopts the only valid restored session when another selected panel is stale", () => {
+    const harness = makeDefaultSessionTabSyncHarness({
+      restoredSessionIds: ["missing-session", OTHER_SESSION_ID],
+    });
+
+    startSessionTabSync(harness);
+
+    expect(harness.setActiveSessionAuto).toHaveBeenCalledWith(TASK_ID, OTHER_SESSION_ID);
+  });
+
+  it("adopts the restored selection after late environment layout restoration", () => {
+    const harness = makeDefaultSessionTabSyncHarness();
+    useDockviewStore.setState({ currentLayoutEnvId: null });
+    startSessionTabSync(harness);
+
+    harness.api.groups = [{ activePanel: { id: OTHER_SESSION_PANEL_ID } }];
+    useDockviewStore.setState({ isRestoringLayout: true, currentLayoutEnvId: "env-A" });
+    useDockviewStore.setState({ isRestoringLayout: false });
+
+    expect(harness.setActiveSessionAuto).toHaveBeenCalledWith(TASK_ID, OTHER_SESSION_ID);
   });
 });
 

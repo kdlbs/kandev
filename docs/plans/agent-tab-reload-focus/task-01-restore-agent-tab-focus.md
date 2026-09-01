@@ -45,9 +45,9 @@ flow through the desktop UI.
 ## Verification
 
 ```bash
-cd apps/web && pnpm exec vitest run components/task/dockview-session-tab-sync.test.ts components/task/dockview-layout-restore.test.ts components/task/dockview-session-tab-activation.test.ts components/task/dockview-session-tabs.hook.test.tsx
-cd apps/web && pnpm run typecheck
-cd apps/web && pnpm e2e:run --host tests/session/multi-session-ux.spec.ts -- --grep "reload restores the selected Agent tab"
+(cd apps/web && pnpm exec vitest run components/task/dockview-session-tab-sync.test.ts components/task/dockview-layout-restore.test.ts components/task/dockview-session-tab-activation.test.ts components/task/dockview-session-tabs.hook.test.tsx)
+(cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm e2e:run --host tests/session/multi-session-ux.spec.ts -- --grep "reload restores the selected Agent tab")
 git diff --check
 ```
 
@@ -84,9 +84,12 @@ None.
 
 Completed.
 
-- Added restored Agent-selection adoption before normal Dockview tab-event synchronization.
+- Added restored Agent-selection adoption before normal Dockview tab-event synchronization
+  and after delayed environment-layout restoration.
 - Validated current task membership and environment ownership before changing the active session.
+- Filtered stale selected panels before deciding whether the valid selection is ambiguous.
 - Used `setActiveSessionAuto` so page restoration does not create a user pin.
-- Added unit coverage for valid, stale, cross-task, cross-environment, and ambiguous layouts.
+- Added unit coverage for valid, stale, cross-task, cross-environment, ambiguous,
+  mixed stale-and-valid, and delayed-restoration layouts.
 - Added a desktop Chromium reload regression and captured the restored secondary-tab state.
-- Verification passed: 45 focused unit tests, TypeScript typecheck, and one Chromium E2E test.
+- Verification passed: 47 focused unit tests, TypeScript typecheck, and one Chromium E2E test.

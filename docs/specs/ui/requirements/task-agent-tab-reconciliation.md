@@ -44,8 +44,10 @@ task workbench becomes usable.
   existing session controls without mounting desktop workbench tabs.
 - **AC-UI-TASK-AGENT-TAB-RECONCILIATION-001.6:** When a desktop user selects an
   Agent tab and reloads the same task, the selected current session shall remain
-  the effective active session and Agent tab. If that session is no longer
-  current, Kandev shall use the normal active-session fallback.
+  the effective active session and Agent tab without creating a user pin. The
+  restored selection must belong to the active task and current environment.
+  If the selection is invalid or ambiguous, Kandev shall use the normal
+  active-session fallback.
 
 ### REQ-UI-TASK-AGENT-TAB-RECONCILIATION-002: Agent Tab Rename Isolation
 

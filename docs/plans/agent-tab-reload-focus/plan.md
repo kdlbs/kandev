@@ -43,9 +43,10 @@ event and redirects it to the boot-selected session.
 ## Technical approach
 
 Add a restoration helper near `setupSessionTabSync`. The helper will inspect
-the restored Dockview groups before the normal listener is registered. It will
-accept only one group-selected `session:<id>` that belongs to the active task,
-current session list, and current environment.
+the restored Dockview groups before the normal listener is registered and
+whenever a delayed environment-layout restoration completes. It will filter
+out invalid selections, then accept only one group-selected `session:<id>` that
+belongs to the active task, current session list, and current environment.
 
 Call `setActiveSessionAuto` for a valid restored selection. This call updates
 the effective session and `lastSessionByTaskId` without creating a user pin.
@@ -88,13 +89,19 @@ Passed:
 
 ```text
 cd apps/web && pnpm exec vitest run components/task/dockview-session-tab-sync.test.ts components/task/dockview-layout-restore.test.ts components/task/dockview-session-tab-activation.test.ts components/task/dockview-session-tabs.hook.test.tsx
-Vitest: 45 tests passed in 4 files.
+Vitest: 47 tests passed in 4 files.
 
 cd apps/web && pnpm run typecheck
 TypeScript: passed.
 
 cd apps/web && CAPTURE_PR_ASSETS=true pnpm e2e:run --host tests/session/multi-session-ux.spec.ts -- --grep "reload restores the selected Agent tab"
 Playwright: 1 Chromium test passed.
+
+python3 scripts/lint-spec-files.py --all
+Specification lint: passed.
+
+git diff --check
+Whitespace validation: passed.
 ```
 
 ## Risks
