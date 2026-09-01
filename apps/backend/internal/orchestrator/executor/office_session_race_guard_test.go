@@ -530,3 +530,139 @@ func TestEnsureSessionForAgentWithCreation_RecoveryLookupFailurePropagatesAsItse
 		t.Fatalf("recovery lookup failure %v must not classify as ErrOfficeSessionRaceConflict", err)
 	}
 }
+
+// TestEnsureSessionForAgentWithCreation_RecoveryReReadFindsTerminalWinnerRetriesCreate
+// covers createOfficeSessionWithBoundedRecovery's terminal-retry arm
+// (executor_office.go), which had zero coverage: when the post-conflict
+// recovery re-read finds a row that has itself gone terminal by the time
+// tryReuseExistingSession inspects it, the loop must retry the create rather
+// than returning the terminal row. This is distinct from the already-covered
+// raced == nil shape (RecoveryStopsAfterTwoAttempts) and the lookup-error
+// shape (RecoveryLookupFailurePropagatesAsItself) above - here the re-read
+// itself succeeds and returns a real, terminal row.
+//
+// Left as-is, a regression collapsing `if decision != reuseDecisionTerminal {
+// return reused, false, nil }` to an unconditional return would leave this
+// package green while reproducing a reachable production nil-pointer panic:
+// task_operations.go:1601 dereferences the returned session without a nil
+// check on the (nil, false, nil) shape this arm would otherwise produce.
+func TestEnsureSessionForAgentWithCreation_RecoveryReReadFindsTerminalWinnerRetriesCreate(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	task := officeTestTask()
+
+	var createAttempts int
+	repo.createTaskSessionFunc = func(_ context.Context, session *models.TaskSession) error {
+		createAttempts++
+		if createAttempts == 1 {
+			return taskrepo.ErrOfficeSessionRaceConflict
+		}
+		repo.mu.Lock()
+		repo.sessions[session.ID] = session
+		repo.mu.Unlock()
+		return nil
+	}
+
+	terminalWinner := &models.TaskSession{
+		ID: "recovery-terminal-winner", TaskID: task.ID, AgentProfileID: "agent-recovery-terminal",
+		State: models.TaskSessionStateCompleted, StartedAt: time.Now().UTC(),
+	}
+	var lookups int
+	repo.getTaskSessionByTaskAndAgentFunc = func(_ context.Context, _, _ string) (*models.TaskSession, error) {
+		lookups++
+		if lookups == 1 {
+			// Initial lookup: no existing row, so it proceeds to create
+			// (which will lose the race below).
+			return nil, nil
+		}
+		// The bounded-recovery re-read after losing the create race: the
+		// winner has already gone terminal by the time we observe it.
+		return terminalWinner, nil
+	}
+
+	session, wasCreated, err := exec.EnsureSessionForAgentWithCreation(
+		context.Background(), task, "agent-recovery-terminal", "profile-1", "exec-1", "",
+	)
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if !wasCreated {
+		t.Fatal("wasCreated = false, want true (the loop must retry the create rather than reuse the terminal row)")
+	}
+	if session == nil || session.ID == terminalWinner.ID {
+		t.Fatalf("session = %#v, want a freshly created row distinct from the terminal winner %q", session, terminalWinner.ID)
+	}
+	if createAttempts != 2 {
+		t.Fatalf("create attempts = %d, want exactly 2 (first loses the race, second retries after the terminal re-read)", createAttempts)
+	}
+	if lookups != 2 {
+		t.Fatalf("recovery lookups = %d, want exactly 2 (initial lookup + post-conflict re-read)", lookups)
+	}
+}
+
+// TestEnsureSessionForAgentWithCreation_RecoveryReReadFindsLiveWinnerReusesWithoutRetry
+// is the mirror of the terminal-retry test above and closes two related
+// AC-003.7 gaps flagged by Review entry 13:
+//
+//  1. "No retry spent" is otherwise unasserted: the concurrent convergence
+//     test proves one creator and N-1 reusers but never asserts that a
+//     caller which reuses via the recovery re-read stops after exactly the
+//     one (failed) create attempt that lost the race, rather than looping to
+//     spend the bounded loop's second attempt as well.
+//  2. The concurrent convergence test doesn't reliably prove the
+//     bounded-recovery re-read path was traversed at all - sampling found
+//     roughly 1-in-5 runs where every goroutine happened to win or lose
+//     without any of them observing a live winner through the recovery
+//     re-read. This test drives that exact interleaving deterministically,
+//     independent of goroutine scheduling.
+func TestEnsureSessionForAgentWithCreation_RecoveryReReadFindsLiveWinnerReusesWithoutRetry(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	task := officeTestTask()
+
+	var createAttempts int
+	repo.createTaskSessionFunc = func(_ context.Context, _ *models.TaskSession) error {
+		createAttempts++
+		return taskrepo.ErrOfficeSessionRaceConflict
+	}
+
+	liveWinner := &models.TaskSession{
+		ID: "recovery-live-winner", TaskID: task.ID, AgentProfileID: "agent-recovery-live",
+		State: models.TaskSessionStateRunning, StartedAt: time.Now().UTC(),
+		// Matches the execution profile passed to EnsureSessionForAgentWithCreation
+		// below so rebindOfficeSessionExecutionProfile's no-op fast path (the
+		// row is already on the right profile) applies - this test targets
+		// tryReuseExistingSession's outcome, not the rebind CAS update, and the
+		// winner row was never written to the mock's session store.
+		ExecutionProfileID: "profile-1",
+	}
+	var lookups int
+	repo.getTaskSessionByTaskAndAgentFunc = func(_ context.Context, _, _ string) (*models.TaskSession, error) {
+		lookups++
+		if lookups == 1 {
+			return nil, nil
+		}
+		// The recovery re-read: the winner has already committed and is
+		// still live (not terminal), so this caller must reuse it.
+		return liveWinner, nil
+	}
+
+	session, wasCreated, err := exec.EnsureSessionForAgentWithCreation(
+		context.Background(), task, "agent-recovery-live", "profile-1", "exec-1", "",
+	)
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if wasCreated {
+		t.Fatal("wasCreated = true, want false (this caller reused the live winner, it did not create)")
+	}
+	if session == nil || session.ID != liveWinner.ID {
+		t.Fatalf("session = %#v, want the live winner row %q", session, liveWinner.ID)
+	}
+	if createAttempts != 1 {
+		t.Fatalf("create attempts = %d, want exactly 1 (reusing a live winner must not spend the bounded loop's second attempt)", createAttempts)
+	}
+	if lookups != 2 {
+		t.Fatalf("recovery lookups = %d, want exactly 2 (initial lookup + post-conflict re-read), proving the recovery branch was actually traversed", lookups)
+	}
+}

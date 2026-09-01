@@ -219,6 +219,42 @@ func TestCreateOfficeTaskSessionSkipsGuardForEmptyAgentProfileID(t *testing.T) {
 	require.Len(t, created, 2)
 }
 
+// TestCreateOfficeTaskSessionRefusesLiveRowCreatedByNonOfficePath is the
+// repository-layer half of AC-OFFICE-SESSION-IDENTITY-001.8: the guard
+// applies to any live row for the pair, including one created by a
+// non-office path such as a session spawned on an office task that inherited
+// the spawner's profile. Every other guard test in this file seeds its
+// pre-existing row through CreateOfficeTaskSession itself, so none of them
+// proves the guard also fires against a row that was never inserted through
+// the office path. `task_sessions` has no column distinguishing which path
+// created a row, so the plain CreateTaskSession call here stands in for that
+// non-office path: it produces a live row identical in shape to one the
+// office guard would itself have written.
+func TestCreateOfficeTaskSessionRefusesLiveRowCreatedByNonOfficePath(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-office-nonoffice-live-pair"
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Office guard vs non-office row"}))
+
+	agent := "agent-nonoffice-spawned"
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "nonoffice-spawned-1", TaskID: taskID, AgentProfileID: agent,
+		State: models.TaskSessionStateRunning,
+	}))
+
+	err := repo.CreateOfficeTaskSession(ctx, &models.TaskSession{
+		ID: "office-wakeup-1", TaskID: taskID, AgentProfileID: agent,
+		State: models.TaskSessionStateCreated,
+	})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrOfficeSessionRaceConflict),
+		"the office guard must refuse a live row for the pair even when that row was not created via CreateOfficeTaskSession")
+
+	created, err := repo.ListTaskSessions(ctx, taskID)
+	require.NoError(t, err)
+	require.Len(t, created, 1, "the refused office create must not have written a second row")
+}
+
 // TestGetTaskSessionByTaskAndAgentPrefersLiveOverNewerTerminal is the
 // 62201cdb-shaped livelock regression test: a terminal row started AFTER a
 // live row must not shadow it. Before Change 2, ORDER BY started_at DESC
