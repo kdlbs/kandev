@@ -120,7 +120,7 @@ func (h *ParentWakeReconciler) reconcileOne(
 		return
 	}
 
-	operationID := wakeOperationID(c.ParentTaskID, c.ChildSetKey)
+	operationID := wakeOperationID(c.ParentTaskID, c.ChildSetKey, c.NewestChildUpdatedAt)
 	accepted, err := svc.dispatchEngineTriggerForRecovery(
 		ctx,
 		c.ParentTaskID,
@@ -229,7 +229,11 @@ func (h *ParentWakeReconciler) recordReceipt(
 	svc.recordWakeEmitted(c.ParentTaskID, operationID)
 }
 
-func wakeOperationID(parentTaskID, childSetKey string) string {
-	sum := sha256.Sum256([]byte(parentTaskID + "\x00" + childSetKey))
+// wakeOperationID includes the child set's newest-update generation: two
+// completions of the same terminal child set otherwise hash identically, and
+// the engine's permanent operation ledger would treat the second as already
+// applied.
+func wakeOperationID(parentTaskID, childSetKey, generation string) string {
+	sum := sha256.Sum256([]byte(parentTaskID + "\x00" + childSetKey + "\x00" + generation))
 	return fmt.Sprintf("task_children_completed:%s:%s", parentTaskID, hex.EncodeToString(sum[:]))
 }

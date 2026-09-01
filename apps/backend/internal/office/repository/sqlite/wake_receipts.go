@@ -24,6 +24,13 @@ type StuckParentCandidate struct {
 	AssigneeAgentProfileID string `db:"assignee_agent_profile_id"`
 	WorkflowStepID         string `db:"workflow_step_id"`
 	ChildSetKey            string `db:"child_set_key"`
+	// NewestChildUpdatedAt is the latest updated_at among the parent's
+	// non-archived children. ChildSetKey alone cannot distinguish a child
+	// that completed, was reopened, and completed again with the same
+	// terminal state from one that was never touched — both produce the
+	// same id:state pairs. This timestamp is the generation that changes
+	// across a reopen/re-complete cycle even when ChildSetKey does not.
+	NewestChildUpdatedAt string `db:"newest_child_updated_at"`
 }
 
 // ListStuckParents finds parent tasks that look done from their children's
@@ -64,6 +71,15 @@ type StuckParentCandidate struct {
 //     contract; they require an explicit user retry and must not become a
 //     cron retry loop. A missing referenced run remains eligible because a
 //     cleanup or migration can remove the delivery evidence.
+//   - a third OR arm, newest_child_updated_at > delivered_at, re-admits a
+//     candidate whose child_set_key still matches the receipt exactly. A
+//     child that completes, is reopened, and completes again with the same
+//     terminal state produces a byte-identical child_set_key (it encodes
+//     "id:state" only), so the first two arms both stay false and the
+//     re-completion would otherwise never be swept. The edge-triggered path
+//     (cascadeChildrenCompleted) also cannot catch this: its idempotency key
+//     hashes child ids only, so an identical child set collides with the
+//     run it already persisted for the first completion.
 //   - the NOT EXISTS against runs drops a candidate with a queued or
 //     claimed task_children_completed run (still in flight, regardless of
 //     which child set it was requested for — wait for it to resolve rather
@@ -134,7 +150,8 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 			        AND c.state NOT IN ('COMPLETED', 'CANCELLED')
 			  )
 		)
-		SELECT s.parent_task_id, s.assignee_agent_profile_id, s.workflow_step_id, s.child_set_key
+		SELECT s.parent_task_id, s.assignee_agent_profile_id, s.workflow_step_id, s.child_set_key,
+		       s.newest_child_updated_at
 		FROM stuck s
 		LEFT JOIN parent_child_wake_receipts r ON r.parent_task_id = s.parent_task_id
 		INNER JOIN agent_profiles ap ON ap.id = s.assignee_agent_profile_id
@@ -149,6 +166,7 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 		          )
 		          AND COALESCE(r.delivery_operation_id, '') = ''
 		      )
+		      OR s.newest_child_updated_at > r.delivered_at
 		  )
 		  AND NOT EXISTS (
 		      SELECT 1 FROM runs w

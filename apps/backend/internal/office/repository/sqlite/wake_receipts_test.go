@@ -508,6 +508,73 @@ func TestListStuckParents_RecoversAfterChildSetChangesPastFinishedRun(t *testing
 	}
 }
 
+// TestListStuckParents_ReadmitsAfterChildReopenedAndRecompleted is the
+// reopened-child regression test: a child that completes, is moved back to a
+// non-terminal state, and completes again (a supported board action)
+// produces a byte-identical child_set_key (it encodes "id:state" only), so
+// neither the receipt-mismatch arm nor the missing-delivery-evidence arm
+// admits the parent. Only a receipt whose delivered_at now predates the
+// child's fresh updated_at can tell the two completions apart.
+func TestListStuckParents_ReadmitsAfterChildReopenedAndRecompleted(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	const (
+		parentID = "parent-1"
+		wsID     = "ws-1"
+		t0       = "2026-01-01 00:00:00"
+		deliverT = "2026-01-01 00:05:00"
+		t2       = "2026-01-01 00:10:00"
+	)
+
+	insertTaskAt(t, repo, ctx, parentID, wsID, t0)
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET project_id = 'office-project' WHERE id = ?`, parentID,
+	); err != nil {
+		t.Fatalf("mark parent as Office task: %v", err)
+	}
+	child0 := parentID + "-child-0"
+	insertTaskAt(t, repo, ctx, child0, wsID, t0)
+	setChildStateAt(t, repo, ctx, parentID, child0, "COMPLETED", t0)
+	seedWakeAgentProfile(t, repo, ctx, parentID+"-agent", "idle")
+	seedRunner(t, repo, ctx, parentID)
+
+	key := child0 + ":COMPLETED"
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO parent_child_wake_receipts (parent_task_id, child_set_key, delivered_run_id, delivery_operation_id, delivered_at)
+		VALUES (?, ?, '', 'op-1', ?)
+	`, parentID, key, deliverT); err != nil {
+		t.Fatalf("seed receipt: %v", err)
+	}
+
+	// Control: no child mutation since the receipt was delivered, so the
+	// parent must still be excluded.
+	before, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents (before reopen): %v", err)
+	}
+	if len(before) != 0 {
+		t.Fatalf("before reopen: candidates = %#v, want none (receipt already covers this child set)", before)
+	}
+
+	// The child is reopened and re-completed after the receipt's
+	// delivered_at. The resulting child_set_key is byte-identical to before
+	// (same "id:state"), but the mutation happened after the last delivery.
+	setChildStateAt(t, repo, ctx, parentID, child0, "IN_PROGRESS", t2)
+	setChildStateAt(t, repo, ctx, parentID, child0, "COMPLETED", t2)
+
+	after, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents (after reopen): %v", err)
+	}
+	if len(after) != 1 || after[0].ParentTaskID != parentID {
+		t.Fatalf("LOST WAKE NOT RECOVERABLE: after reopen+recomplete, ListStuckParents returned %#v; want exactly [%s]", after, parentID)
+	}
+	if after[0].NewestChildUpdatedAt != t2 {
+		t.Fatalf("NewestChildUpdatedAt = %q, want %q", after[0].NewestChildUpdatedAt, t2)
+	}
+}
+
 // TestListStuckParents_OrdersDeterministically is R2-C's regression test:
 // the capped query must not depend on incidental scan order.
 func TestListStuckParents_OrdersDeterministically(t *testing.T) {

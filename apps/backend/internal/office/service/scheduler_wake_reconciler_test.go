@@ -117,6 +117,51 @@ func TestParentWakeReconciler_EmitsRunForStuckParent(t *testing.T) {
 	}
 }
 
+// TestParentWakeReconciler_RedeliversAfterChildReopenedAndRecompleted is the
+// reopened-child regression test end-to-end: a child that completes, is
+// reopened, and completes again with the same terminal state produces a
+// byte-identical child_set_key, but the mutation happened after the first
+// wake's receipt was recorded. The reconciler must sweep it again on the
+// next tick, and the second dispatch's operation id must differ from the
+// first so the engine's permanent operation ledger does not swallow it as
+// already-applied.
+func TestParentWakeReconciler_RedeliversAfterChildReopenedAndRecompleted(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	dispatcher := &fakeDispatcher{}
+	svc.SetWorkflowEngineDispatcher(dispatcher)
+
+	adoptOffice(t, svc, "ws-1")
+	seedStuckParent(t, svc, "ws-1", "parent-1", "worker-1")
+
+	handler := service.NewParentWakeReconciler(service.NewSchedulerIntegration(svc, 0))
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	calls := dispatcher.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("want exactly one engine dispatch after tick 1, got %d: %#v", len(calls), calls)
+	}
+	firstOpID := calls[0].opID
+
+	// One of the terminal children is reopened and re-completed after the
+	// receipt from tick 1 was recorded — a supported board action.
+	svc.ExecSQL(t, `UPDATE tasks SET state = 'IN_PROGRESS', updated_at = '2099-01-01 00:00:00' WHERE id = ?`, "parent-1-child-0")
+	svc.ExecSQL(t, `UPDATE tasks SET state = 'COMPLETED', updated_at = '2099-01-01 00:00:01' WHERE id = ?`, "parent-1-child-0")
+
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	callsAfter := dispatcher.Calls()
+	if len(callsAfter) != 2 {
+		t.Fatalf("LOST WAKE NOT RECOVERABLE: want 2 engine dispatches after re-completion, got %d: %#v", len(callsAfter), callsAfter)
+	}
+	secondOpID := callsAfter[1].opID
+	if secondOpID == firstOpID {
+		t.Fatalf("second delivery reused the first operation id %q; the engine's permanent operation ledger would swallow it as already-applied", secondOpID)
+	}
+}
+
 func TestParentWakeReconciler_SkipsWithoutEngineDispatcher(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
