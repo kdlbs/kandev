@@ -12,10 +12,11 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// repoBranchCall records one (repositoryID, branch) pair observed by a
-// mockGitHubService call, so multi-branch tests can assert per-call scoping
-// instead of only the most recent call's arguments.
+// repoBranchCall records one (taskID, repositoryID, branch) triple observed
+// by a mockGitHubService call, so multi-branch tests can assert per-call
+// scoping instead of only the most recent call's arguments.
 type repoBranchCall struct {
+	TaskID       string
 	RepositoryID string
 	Branch       string
 }
@@ -66,6 +67,12 @@ type mockGitHubService struct {
 	lastAssociateRepositoryID   string
 	lastCreateWatchWorkspaceID  string
 	lastAssociateWorkspaceID    string
+	// lastCreateWatchTaskID/lastAssociateTaskID capture the taskID each
+	// ForWorkspace call actually wrote under, so tests can pin the
+	// workspace-group redirect (resolveEffectivePushTaskID) at the write
+	// funnel instead of only inferring it from call counts.
+	lastCreateWatchTaskID string
+	lastAssociateTaskID   string
 	// createWatchLog/associateLog record every call (not just the last), so
 	// multi-branch tests can assert each branch got its own watch/association
 	// scoped to the right repository, rather than only inspecting whichever
@@ -411,11 +418,12 @@ func (m *mockGitHubService) ListPRWatchesBySession(_ context.Context, _ string) 
 	}
 	return []*github.PRWatch{m.prWatch}, nil
 }
-func (m *mockGitHubService) CreatePRWatch(_ context.Context, _, _, repositoryID, _, _ string, _ int, branch string) (*github.PRWatch, error) {
+func (m *mockGitHubService) CreatePRWatch(_ context.Context, _, taskID, repositoryID, _, _ string, _ int, branch string) (*github.PRWatch, error) {
 	m.createWatchCalls++
 	m.createWatchBranch = branch
 	m.lastCreateWatchRepositoryID = repositoryID
-	m.createWatchLog = append(m.createWatchLog, repoBranchCall{RepositoryID: repositoryID, Branch: branch})
+	m.lastCreateWatchTaskID = taskID
+	m.createWatchLog = append(m.createWatchLog, repoBranchCall{TaskID: taskID, RepositoryID: repositoryID, Branch: branch})
 	return &github.PRWatch{}, nil
 }
 func (m *mockGitHubService) CreatePRWatchForWorkspace(
@@ -424,14 +432,15 @@ func (m *mockGitHubService) CreatePRWatchForWorkspace(
 	m.lastCreateWatchWorkspaceID = workspaceID
 	return m.CreatePRWatch(ctx, sessionID, taskID, repositoryID, owner, repo, prNumber, branch)
 }
-func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, _, repositoryID string, pr *github.PR) (*github.TaskPR, error) {
+func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, taskID, repositoryID string, pr *github.PR) (*github.TaskPR, error) {
 	m.associateCalls++
 	m.lastAssociateRepositoryID = repositoryID
+	m.lastAssociateTaskID = taskID
 	branch := ""
 	if pr != nil {
 		branch = pr.HeadBranch
 	}
-	m.associateLog = append(m.associateLog, repoBranchCall{RepositoryID: repositoryID, Branch: branch})
+	m.associateLog = append(m.associateLog, repoBranchCall{TaskID: taskID, RepositoryID: repositoryID, Branch: branch})
 	return &github.TaskPR{}, nil
 }
 func (m *mockGitHubService) AssociatePRWithTaskForWorkspace(

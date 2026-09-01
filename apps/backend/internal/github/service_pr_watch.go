@@ -306,7 +306,7 @@ func (s *Service) AssociatePRWithTask(ctx context.Context, taskID, repositoryID 
 	// pr here comes from branch-search discovery (poller.detectPRForWatch) or
 	// a batched status result of unknown populated-ness — never assert
 	// outcomeFieldsPopulated for this wrapper's callers (AC-11).
-	return s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, false, false)
+	return s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, false, false, TaskPRSourceWatch)
 }
 
 // AssociatePRWithTaskForWorkspace is the workspace-scoped variant of
@@ -317,7 +317,7 @@ func (s *Service) AssociatePRWithTaskForWorkspace(
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, ErrGitHubWorkspaceRequired
 	}
-	return s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, false, false)
+	return s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, false, false, TaskPRSourceWatch)
 }
 
 // associatePRWithTask creates the task-PR association. outcomeFieldsPopulated
@@ -325,9 +325,13 @@ func (s *Service) AssociatePRWithTaskForWorkspace(
 // direct GetPR-based callers in this file set it true; the two public
 // wrappers above always pass false, preserving their existing callers'
 // behavior exactly, because a branch-search or batched-status pr may not
-// carry real observations for these fields (AC-11).
+// carry real observations for these fields (AC-11). source is only applied
+// when this call creates a brand-new row (see TaskPRSourceWatch /
+// TaskPRSourceURLLink) — an existing or restored row keeps its original
+// source classification (no backfill).
 func (s *Service) associatePRWithTask(
-	ctx context.Context, workspaceID, taskID, repositoryID string, pr *PR, restoreDetached, outcomeFieldsPopulated bool,
+	ctx context.Context, workspaceID, taskID, repositoryID string, pr *PR,
+	restoreDetached, outcomeFieldsPopulated bool, source string,
 ) (*TaskPR, error) {
 	if err := s.validateTaskRepositoryID(ctx, taskID, repositoryID); err != nil {
 		return nil, err
@@ -388,6 +392,7 @@ func (s *Service) associatePRWithTask(
 		CreatedAt:    pr.CreatedAt,
 		MergedAt:     pr.MergedAt,
 		ClosedAt:     pr.ClosedAt,
+		Source:       source,
 	}
 	// ReplaceTaskPR upserts the row matching (task, repository, pr_number)
 	// and resolves the five outcome-attribution columns itself, inside its
@@ -447,7 +452,7 @@ func (s *Service) AssociateExistingPRByURL(ctx context.Context, taskID, reposito
 	if err != nil {
 		return nil, fmt.Errorf("fetch PR: %w", err)
 	}
-	tp, err := s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, true, true)
+	tp, err := s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, true, true, TaskPRSourceURLLink)
 	if err != nil {
 		return nil, fmt.Errorf("associate PR with task: %w", err)
 	}
@@ -477,7 +482,7 @@ func (s *Service) AssociateExistingPRByURLForWorkspace(
 	if err != nil {
 		return nil, fmt.Errorf("fetch PR: %w", err)
 	}
-	tp, err := s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, true, true)
+	tp, err := s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, true, true, TaskPRSourceURLLink)
 	if err != nil {
 		return nil, fmt.Errorf("associate PR with task: %w", err)
 	}
@@ -522,7 +527,7 @@ func (s *Service) AssociatePRByURL(ctx context.Context, sessionID, taskID, repos
 	}
 
 	// Associate PR with task (persists + publishes WS event)
-	if _, assocErr := s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, true, true); assocErr != nil {
+	if _, assocErr := s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, true, true, TaskPRSourceWatch); assocErr != nil {
 		s.logger.Error("failed to associate PR with task after creation",
 			zap.String("task_id", taskID), zap.Error(assocErr))
 	}
@@ -557,7 +562,7 @@ func (s *Service) AssociatePRByURLForWorkspace(
 	); err != nil {
 		return fmt.Errorf("create PR watch: %w", err)
 	}
-	if _, err := s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, true, true); err != nil {
+	if _, err := s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, true, true, TaskPRSourceWatch); err != nil {
 		return fmt.Errorf("associate PR with task: %w", err)
 	}
 	return nil

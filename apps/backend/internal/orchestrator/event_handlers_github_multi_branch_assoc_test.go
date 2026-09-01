@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // seedGitHubPushAssocFixture creates the repository, task_repository
@@ -133,5 +134,169 @@ func TestGitHubPushAssociationPassesRepositoryID(t *testing.T) {
 	}
 	if ghSvc.lastAssociateRepositoryID != "repo1" {
 		t.Fatalf("AssociatePRWithTask repositoryID = %q, want repo1", ghSvc.lastAssociateRepositoryID)
+	}
+}
+
+// seedWorkspaceGroup creates the task_workspace_groups /
+// task_workspace_group_members rows the workspace-group redirect reads. Those
+// tables are created by internal/office/repository/sqlite's schema init, not
+// this package's own — office's init never runs against an
+// orchestrator-package test DB, so the fixture creates them directly, the
+// same way internal/task/repository/sqlite/task_environment_test.go does for
+// its own package's group-binding tests. Only the columns the redirect query
+// actually reads (or that a foreign key requires) are populated.
+func seedWorkspaceGroup(t *testing.T, repo *sqliterepo.Repository, groupID, ownerTaskID string, memberTaskIDs ...string) {
+	t.Helper()
+	if _, err := repo.DB().Exec(`
+		CREATE TABLE IF NOT EXISTS task_workspace_groups (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL DEFAULT '',
+			owner_task_id TEXT NOT NULL,
+			materialized_kind TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE TABLE IF NOT EXISTS task_workspace_group_members (
+			workspace_group_id TEXT NOT NULL,
+			task_id TEXT NOT NULL,
+			released_at TIMESTAMP,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (workspace_group_id, task_id)
+		);
+	`); err != nil {
+		t.Fatalf("create workspace group tables: %v", err)
+	}
+	if _, err := repo.DB().Exec(
+		`INSERT INTO task_workspace_groups (id, owner_task_id) VALUES (?, ?)`, groupID, ownerTaskID,
+	); err != nil {
+		t.Fatalf("seed workspace group: %v", err)
+	}
+	for _, taskID := range memberTaskIDs {
+		if _, err := repo.DB().Exec(
+			`INSERT INTO task_workspace_group_members (workspace_group_id, task_id) VALUES (?, ?)`,
+			groupID, taskID,
+		); err != nil {
+			t.Fatalf("seed workspace group member %s: %v", taskID, err)
+		}
+	}
+}
+
+// TestGitHubPushAssociationRedirectsToWorkspaceGroupOwner covers the "one PR
+// gets bound to several tasks" defect: a subtask sharing its parent's
+// worktree via inherit_parent/shared_group workspace modes observes the same
+// git-status push as the parent, since they share one physical checkout. Push
+// detection must file the resulting watch/association under the group's
+// owner task, not the subtask that happened to be running when the push
+// landed — otherwise one PR ends up bound to every task in the group.
+func TestGitHubPushAssociationRedirectsToWorkspaceGroupOwner(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+
+	// seedSession creates the shared ws1/wf1 fixture plus the subtask's own
+	// task+session — its checkout, task_repository row, and
+	// session.RepositoryID all key off t1, exactly like a real
+	// inherit_parent/shared_group subtask that actually observed the push.
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	// The owner task lives in the same workspace/workflow; created directly
+	// (not via seedSession/seedTaskWithoutSession, which would try to
+	// recreate the ws1/wf1 rows seedSession already inserted above).
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "parent1", WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: "step1",
+		Title: "Parent", Description: "Test", State: v1.TaskStateInProgress,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create parent task: %v", err)
+	}
+	seedWorkspaceGroup(t, repo, "group1", "parent1", "parent1", "t1")
+	seedGitHubPushAssocFixture(t, repo, "feature-x")
+
+	mockClient := github.NewMockClient()
+	mockClient.AddPR(&github.PR{
+		Number: 7, Title: "Shared worktree PR", HTMLURL: "https://github.com/myorg/kandev/pull/7",
+		RepoOwner: "myorg", RepoName: "kandev", HeadBranch: "feature-x", BaseBranch: "main",
+	})
+	ghSvc := &mockGitHubService{client: mockClient}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetGitHubService(ghSvc)
+
+	svc.dispatchPushDetection(ctx, "s1", "t1", "", "feature-x")
+
+	if ghSvc.lastCreateWatchTaskID != "parent1" {
+		t.Fatalf("CreatePRWatch taskID = %q, want parent1 (the group owner)", ghSvc.lastCreateWatchTaskID)
+	}
+	if ghSvc.lastAssociateTaskID != "parent1" {
+		t.Fatalf("AssociatePRWithTask taskID = %q, want parent1 (the group owner)", ghSvc.lastAssociateTaskID)
+	}
+	for _, c := range ghSvc.associateLog {
+		if c.TaskID == "t1" {
+			t.Fatalf("subtask t1 got its own association, want zero: %+v", ghSvc.associateLog)
+		}
+	}
+
+	// Stable across a second push-detection run: rerunning must not flip the
+	// attribution back to the observing subtask.
+	svc.dispatchPushDetection(ctx, "s1", "t1", "", "feature-x")
+	if ghSvc.lastCreateWatchTaskID != "parent1" {
+		t.Fatalf("second run: CreatePRWatch taskID = %q, want parent1", ghSvc.lastCreateWatchTaskID)
+	}
+	if ghSvc.lastAssociateTaskID != "parent1" {
+		t.Fatalf("second run: AssociatePRWithTask taskID = %q, want parent1", ghSvc.lastAssociateTaskID)
+	}
+	for _, c := range ghSvc.associateLog {
+		if c.TaskID == "t1" {
+			t.Fatalf("subtask t1 got its own association after second run, want zero: %+v", ghSvc.associateLog)
+		}
+	}
+
+	// Negative control: a task with no workspace group keeps its own
+	// attribution — the redirect must not fire for ordinary, ungrouped tasks.
+	// Created directly (not via seedSession, which would try to recreate the
+	// shared ws1/wf1 rows already inserted above).
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "solo1", WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: "step1",
+		Title: "Solo", Description: "Test", State: v1.TaskStateInProgress,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create solo task: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "s-solo", TaskID: "solo1", State: models.TaskSessionStateRunning,
+		StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create solo session: %v", err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-solo", WorkspaceID: "ws1", Name: "kandev",
+		SourceType: "provider", Provider: "github",
+		ProviderOwner: "myorg", ProviderName: "kandev",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create solo repository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "tr-solo", TaskID: "solo1", RepositoryID: "repo-solo", CheckoutBranch: "solo-branch",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create solo task repository: %v", err)
+	}
+	soloSession, _ := repo.GetTaskSession(ctx, "s-solo")
+	soloSession.RepositoryID = "repo-solo"
+	if err := repo.UpdateTaskSession(ctx, soloSession); err != nil {
+		t.Fatalf("update solo session: %v", err)
+	}
+	mockClient.AddPR(&github.PR{
+		Number: 8, Title: "Solo PR", HTMLURL: "https://github.com/myorg/kandev/pull/8",
+		RepoOwner: "myorg", RepoName: "kandev", HeadBranch: "solo-branch", BaseBranch: "main",
+	})
+
+	svc.dispatchPushDetection(ctx, "s-solo", "solo1", "", "solo-branch")
+
+	if ghSvc.lastCreateWatchTaskID != "solo1" {
+		t.Fatalf("CreatePRWatch taskID = %q, want solo1 (no group, no redirect)", ghSvc.lastCreateWatchTaskID)
+	}
+	if ghSvc.lastAssociateTaskID != "solo1" {
+		t.Fatalf("AssociatePRWithTask taskID = %q, want solo1 (no group, no redirect)", ghSvc.lastAssociateTaskID)
 	}
 }

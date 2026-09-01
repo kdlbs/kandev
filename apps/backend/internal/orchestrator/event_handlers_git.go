@@ -335,17 +335,58 @@ func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitE
 // called verbatim for every non-GitLab (including unknown/legacy-empty
 // provider) repository — this passes the shared repository identity into the
 // existing provider-specific path. Extracted from trackPushAndAssociatePR to
-// keep that function inside the statement budget.
+// keep that function inside the statement budget. The taskID the write lands
+// under may be redirected away from the observing task; see
+// resolveEffectivePushTaskID.
 func (s *Service) dispatchPushDetection(ctx context.Context, sessionID, taskID, repositoryName, branch string) {
+	// Identity (owner/name/repositoryID) MUST resolve against the observing
+	// task, not the redirected one: the physical checkout, session, and
+	// task_repositories rows belong to whichever task's session actually saw
+	// the push (a subtask sharing a parent's worktree still has its own
+	// session row). Only the write destination below is redirected.
 	identity := s.resolvePushRepositoryIdentity(ctx, sessionID, taskID, repositoryName)
+	effectiveTaskID := s.resolveEffectivePushTaskID(ctx, taskID)
 	if identity.provider == gitlabProviderName {
-		s.detectPushAndAssociateMRWithIdentity(ctx, sessionID, taskID, repositoryName, branch, identity)
+		s.detectPushAndAssociateMRWithIdentity(ctx, sessionID, effectiveTaskID, repositoryName, branch, identity)
 		return
 	}
 	if s.githubService == nil {
 		return
 	}
-	s.detectPushAndAssociatePRWithIdentity(ctx, sessionID, taskID, repositoryName, branch, identity)
+	s.detectPushAndAssociatePRWithIdentity(ctx, sessionID, effectiveTaskID, repositoryName, branch, identity)
+}
+
+// resolveEffectivePushTaskID redirects a push-detected PR/MR association from
+// the observing task to its workspace-group owner task. A subtask sharing its
+// parent's worktree via inherit_parent/shared_group workspace modes observes
+// the SAME branch pushes as every other member of the group, so writing the
+// association under the observing task's own ID binds one PR/MR to several
+// unrelated tasks (the group owner plus whichever subtasks happened to be
+// running when the push landed). Falls back to the original taskID — leaving
+// the pre-fix behavior for that call — when there is no active group, the
+// repo doesn't support group lookups, the lookup fails, or the resolved owner
+// task can't be loaded or is archived (an archived owner is not a valid
+// association target).
+func (s *Service) resolveEffectivePushTaskID(ctx context.Context, taskID string) string {
+	if taskID == "" {
+		return taskID
+	}
+	store, ok := s.repo.(repoStore)
+	if !ok {
+		return taskID
+	}
+	ownerTaskID, err := store.GetWorkspaceGroupOwnerTaskID(ctx, taskID)
+	if err != nil || ownerTaskID == "" || ownerTaskID == taskID {
+		return taskID
+	}
+	ownerTask, err := s.repo.GetTask(ctx, ownerTaskID)
+	if err != nil || ownerTask == nil || ownerTask.ArchivedAt != nil {
+		return taskID
+	}
+	s.logger.Info("redirecting push-detected PR/MR association to workspace group owner",
+		zap.String("from_task_id", taskID),
+		zap.String("to_task_id", ownerTaskID))
+	return ownerTaskID
 }
 
 type pushRepositoryIdentity struct {
