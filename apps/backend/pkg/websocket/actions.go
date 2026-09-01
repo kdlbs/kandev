@@ -438,6 +438,8 @@ const (
 	ActionMCPGetWalkthrough             = "mcp.get_walkthrough"
 	ActionMCPDeleteWalkthrough          = "mcp.delete_walkthrough"
 	ActionMCPPublishReviewFindings      = "mcp.publish_review_findings"
+	ActionMCPListReviewFindings         = "mcp.list_review_findings"
+	ActionMCPResolveReviewFinding       = "mcp.resolve_review_finding"
 	ActionMCPClarificationTimeout       = "mcp.clarification_timeout"
 	ActionMCPSetTaskTitle               = "mcp.set_task_title"
 	ActionMCPGetDiagnosticBundle        = "mcp.get_diagnostic_bundle"

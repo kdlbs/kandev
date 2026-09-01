@@ -1968,6 +1968,7 @@ func (s *Service) buildWorkflowPromptWithTrustedContext(
 	// Build the prompt from step.Prompt template and base prompt
 	if step.Prompt != "" {
 		interpolatedPrompt := sysprompt.InterpolatePlaceholders(step.Prompt, taskID)
+		interpolatedPrompt = s.interpolateStepEntryNumberIfPresent(ctx, interpolatedPrompt, taskID, step.ID)
 		if strings.Contains(interpolatedPrompt, "{{task_prompt}}") {
 			// Replace placeholder with base prompt
 			combined := strings.Replace(interpolatedPrompt, "{{task_prompt}}", basePrompt, 1)
@@ -2012,7 +2013,9 @@ func (s *Service) workflowInstructionsBlock(ctx context.Context, step *wfmodels.
 	if prompt == "" {
 		return ""
 	}
-	interpolated := strings.TrimSpace(sysprompt.InterpolatePlaceholders(prompt, taskID))
+	interpolated := sysprompt.InterpolatePlaceholders(prompt, taskID)
+	interpolated = s.interpolateStepEntryNumberIfPresent(ctx, interpolated, taskID, step.ID)
+	interpolated = strings.TrimSpace(interpolated)
 	if interpolated == "" {
 		return ""
 	}
@@ -2024,6 +2027,54 @@ func (s *Service) workflowInstructionsBlock(ctx context.Context, step *wfmodels.
 		return ""
 	}
 	return workflowInstructionsHeading + "\n\n" + interpolated + "\n\n" + workflowInstructionsEnd
+}
+
+// stepEntryNumberToken is the exact literal REQ-TWS-001 substitutes in
+// workflow prompt templates.
+const stepEntryNumberToken = "{step_entry_number}"
+
+// stepEntryNumber resolves the 1-based ordinal of the task's current entry
+// into stepID from the append-only task_step_transitions ledger, floored at
+// 1: a task whose prompt is being built has entered the step at least once,
+// so 0 recorded rows (a zero-row task, or an empty taskID/stepID) means the
+// ledger under-counts, not that the task never entered. The result is
+// therefore a lower bound on the true entry count for a task whose history
+// predates the ledger's first row (2026-08-16).
+func (s *Service) stepEntryNumber(ctx context.Context, taskID, stepID string) (int, error) {
+	if taskID == "" || stepID == "" {
+		return 1, nil
+	}
+	count, err := s.repo.CountStepEntries(ctx, taskID, stepID)
+	if err != nil {
+		return 0, err
+	}
+	if count < 1 {
+		return 1, nil
+	}
+	return count, nil
+}
+
+// interpolateStepEntryNumberIfPresent substitutes every occurrence of
+// {step_entry_number} in template, issuing the count query only when the
+// token is present (NFR-1: a template that does not ask must not pay). A
+// count-query failure leaves the token verbatim and logs at warn rather than
+// failing prompt building, so an un-migrated prompt degrades visibly instead
+// of rendering an invented number.
+func (s *Service) interpolateStepEntryNumberIfPresent(ctx context.Context, template, taskID, stepID string) string {
+	if !strings.Contains(template, stepEntryNumberToken) {
+		return template
+	}
+	entryNumber, err := s.stepEntryNumber(ctx, taskID, stepID)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to compute step entry number for prompt interpolation",
+				zap.String("task_id", taskID),
+				zap.String("step_id", stepID),
+				zap.Error(err))
+		}
+		return template
+	}
+	return sysprompt.InterpolateStepEntryNumber(template, entryNumber)
 }
 
 // expandPromptReferences resolves "@name" saved-prompt references in prompt

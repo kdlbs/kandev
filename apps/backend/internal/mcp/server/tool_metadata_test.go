@@ -25,6 +25,8 @@ func TestCoreToolDescriptionsStayFocused(t *testing.T) {
 		"show_rich_output_kandev":              650,
 		"show_walkthrough_kandev":              650,
 		"publish_review_findings_kandev":       650,
+		"list_review_findings_kandev":          400,
+		"resolve_review_finding_kandev":        400,
 		"update_repository_base_branch_kandev": 500,
 		"add_task_dependency_kandev":           500,
 		"list_related_tasks_kandev":            500,
