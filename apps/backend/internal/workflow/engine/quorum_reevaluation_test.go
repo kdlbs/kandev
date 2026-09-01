@@ -496,28 +496,34 @@ func TestEvaluateStepQuorum_DoesNotRecordSlateEmptySideEffects(t *testing.T) {
 // sessionScopedStateStore mirrors production assembleMachineState
 // (orchestrator/event_handlers_workflow.go): CurrentStepID and WorkflowID are
 // derived from the TASK row and are therefore identical for every session,
-// while SessionID, SessionState and Data are genuinely per-session — Data
-// being loaded from that session's own metadata["workflow_data"] bag.
+// while SessionID, SessionState, Data and IsPassthrough are genuinely
+// per-session — Data being loaded from that session's own
+// metadata["workflow_data"] bag.
 type sessionScopedStateStore struct {
-	step         StepSpec
-	dataBySess   map[string]map[string]any
-	stateBySess  map[string]string
-	loadedData   []map[string]any
-	loadedStates []string
-	applied      map[string]bool
+	step              StepSpec
+	dataBySess        map[string]map[string]any
+	stateBySess       map[string]string
+	passthroughBySess map[string]bool
+	loadedData        []map[string]any
+	loadedStates      []string
+	loadedPassthrough []bool
+	applied           map[string]bool
 }
 
 func (s *sessionScopedStateStore) LoadState(_ context.Context, taskID, sessionID string) (MachineState, error) {
 	data := s.dataBySess[sessionID]
 	sessionState := s.stateBySess[sessionID]
+	isPassthrough := s.passthroughBySess[sessionID]
 	s.loadedData = append(s.loadedData, data)
 	s.loadedStates = append(s.loadedStates, sessionState)
+	s.loadedPassthrough = append(s.loadedPassthrough, isPassthrough)
 	return MachineState{
 		TaskID:        taskID,
 		SessionID:     sessionID,
 		WorkflowID:    "wf",
 		CurrentStepID: "review",
 		SessionState:  sessionState,
+		IsPassthrough: isPassthrough,
 		Data:          data,
 	}, nil
 }
@@ -558,10 +564,11 @@ func (s *sessionScopedStateStore) MarkOperationApplied(_ context.Context, op str
 // Today EvaluateStepQuorum's guard evaluation reads TaskID, CurrentStepID
 // and WorkflowID off the loaded MachineState, all task-derived, so which
 // session the resolver happens to pick cannot change the answer. SessionID,
-// SessionState and Data are the session-derived fields, and none of them is
-// read by guard evaluation.
+// SessionState, Data and IsPassthrough are the session-derived fields, and
+// none of them is read by guard evaluation.
 //
-// If a guard ever starts reading SessionID, SessionState or Data, that
+// If a guard ever starts reading SessionID, SessionState, Data or
+// IsPassthrough, that
 // stops being true silently: the resolver would hand the engine whichever
 // agent's state happened to be newest, and a decision could be evaluated
 // against another agent's state with nothing failing. This test makes that
@@ -591,6 +598,10 @@ func TestEvaluateStepQuorum_InsensitiveToWhichLiveSessionIsNewest(t *testing.T) 
 			stateBySess: map[string]string{
 				"sess-runner":   "RUNNING",
 				"sess-reviewer": "WAITING_FOR_INPUT",
+			},
+			passthroughBySess: map[string]bool{
+				"sess-runner":   true,
+				"sess-reviewer": false,
 			},
 			applied: map[string]bool{},
 		}
@@ -637,6 +648,14 @@ func TestEvaluateStepQuorum_InsensitiveToWhichLiveSessionIsNewest(t *testing.T) 
 	if runnerStore.loadedStates[0] == reviewerStore.loadedStates[0] {
 		t.Fatalf("test is vacuous: both sessions loaded the same SessionState %q", runnerStore.loadedStates[0])
 	}
+	if len(runnerStore.loadedPassthrough) != 1 || len(reviewerStore.loadedPassthrough) != 1 {
+		t.Fatalf("expected exactly one LoadState per run, got %d and %d passthrough values",
+			len(runnerStore.loadedPassthrough), len(reviewerStore.loadedPassthrough))
+	}
+	if runnerStore.loadedPassthrough[0] == reviewerStore.loadedPassthrough[0] {
+		t.Fatalf("test is vacuous: both sessions loaded the same IsPassthrough value %v",
+			runnerStore.loadedPassthrough[0])
+	}
 
 	// The snapshot must be identical despite that divergence.
 	if fromRunner.StepID != fromReviewer.StepID {
@@ -651,7 +670,7 @@ func TestEvaluateStepQuorum_InsensitiveToWhichLiveSessionIsNewest(t *testing.T) 
 			len(fromRunner.Guards), len(fromReviewer.Guards))
 	}
 	for i := range fromRunner.Guards {
-		if fromRunner.Guards[i] != fromReviewer.Guards[i] {
+		if !reflect.DeepEqual(fromRunner.Guards[i], fromReviewer.Guards[i]) {
 			t.Errorf("guard %d differs by session:\n  runner:   %#v\n  reviewer: %#v",
 				i, fromRunner.Guards[i], fromReviewer.Guards[i])
 		}

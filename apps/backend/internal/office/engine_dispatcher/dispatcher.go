@@ -451,10 +451,10 @@ func isActiveSessionState(state taskmodels.TaskSessionState) bool {
 // TaskID, CurrentStepID and WorkflowID, all derived from the task row
 // rather than the session (see orchestrator.assembleMachineState).
 //
-// MachineState.SessionID, SessionState and Data are the session-derived
-// fields, so with several live sessions per task "newest" no longer names a
-// specific agent's session. That is latent, not live: none of the three is
-// read by the guard-evaluation path today (Data is written by
+// MachineState.SessionID, SessionState, Data and IsPassthrough are the
+// session-derived fields, so with several live sessions per task "newest" no
+// longer names a specific agent's session. That is latent, not live: none of
+// the four is read by the guard-evaluation path today (Data is written by
 // set_workflow_data through SetSessionMetadataKey and read back into
 // MachineState.Data on every state assembly, but never consumed by guard
 // evaluation), so which session is chosen is unobservable today.
