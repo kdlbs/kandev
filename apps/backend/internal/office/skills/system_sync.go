@@ -320,6 +320,12 @@ func reconcileBundledSkills(
 // this pass (e.g. its insert was withheld by a slug conflict above),
 // the retired row is left in place and reported as blocked so a later
 // pass can retry once the conflict resolves.
+//
+// A retired row is removed from existingBySlug along with the DB row:
+// normalizeUserSkillSlugs runs after this pass and treats existingBySlug
+// as the set of slugs currently taken, so a stale entry for a slug this
+// same pass just freed would report a false conflict for a user skill
+// that could otherwise normalize onto it.
 func retireOrphanedSystemSkills(
 	ctx context.Context,
 	repo SystemSyncRepo,
@@ -349,6 +355,7 @@ func retireOrphanedSystemSkills(
 		if err := detachSkillFromAgents(ctx, repo, wsID, cur.ID); err != nil {
 			return fmt.Errorf("detach %s: %w", slug, err)
 		}
+		delete(existingBySlug, slug)
 		result.Removed = append(result.Removed, slug)
 	}
 	return nil
@@ -362,6 +369,14 @@ func retireOrphanedSystemSkills(
 // validation) is left untouched and logged, never normalized
 // (AC-003.9). A normalized value already held by another row is left
 // untouched on both sides and logged as a conflict.
+//
+// The agent-reference rewrite runs before the row itself is renamed,
+// so a failure at either step leaves the row at its original,
+// non-canonical slug: the canonical-slug gate above then retries the
+// whole sequence, including the reference rewrite, on the next pass.
+// Renaming the row first would let a later pass see it as already
+// canonical and skip it forever, stranding any reference the failed
+// rewrite never reached.
 func normalizeUserSkillSlugs(
 	ctx context.Context,
 	repo SystemSyncRepo,
@@ -398,12 +413,12 @@ func normalizeUserSkillSlugs(
 			continue
 		}
 		oldSlug := row.Slug
+		if err := renameSkillSlugOnAgents(ctx, repo, wsID, oldSlug, normalized); err != nil {
+			return fmt.Errorf("rewrite desired_skills for %s: %w", oldSlug, err)
+		}
 		row.Slug = normalized
 		if err := repo.UpdateSkill(ctx, row); err != nil {
 			return fmt.Errorf("normalize slug %s: %w", oldSlug, err)
-		}
-		if err := renameSkillSlugOnAgents(ctx, repo, wsID, oldSlug, normalized); err != nil {
-			return fmt.Errorf("rewrite desired_skills for %s: %w", oldSlug, err)
 		}
 		taken[normalized] = true
 		result.Normalized = append(result.Normalized, oldSlug+"->"+normalized)
@@ -515,13 +530,22 @@ func systemSkillUpToDate(cur *models.Skill, spec SystemSkillSpec) bool {
 		cur.SystemVersion == spec.Version
 }
 
+// replaceJSONArrayValue rewrites every occurrence of oldValue to
+// newValue in a JSON-array-encoded agent_profiles column, also
+// de-duplicating and dropping empties. raw may also be a legacy
+// comma-separated value (see ParseDesiredSlugs in injection.go, which
+// reads both formats); a legacy value is parsed the same way and, if
+// changed, re-encoded as the canonical JSON-array form — this is how
+// a legacy desired_skills column migrates format the next time a
+// rename or replacement touches one of its entries. An unchanged
+// legacy value is left exactly as found (no unnecessary rewrite).
 func replaceJSONArrayValue(raw, oldValue, newValue string) (string, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw == "null" {
 		return raw, false
 	}
-	var values []string
-	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+	values, ok := parseJSONOrLegacyCSVArray(raw)
+	if !ok {
 		return raw, false
 	}
 	out := make([]string, 0, len(values))
@@ -549,6 +573,28 @@ func replaceJSONArrayValue(raw, oldValue, newValue string) (string, bool) {
 		return raw, false
 	}
 	return string(encoded), true
+}
+
+// parseJSONOrLegacyCSVArray parses raw as a JSON string array, falling
+// back to splitting it as a legacy comma-separated value when raw
+// isn't a JSON array. Mirrors ParseDesiredSlugs's format detection
+// (injection.go) so both readers of these columns agree on what
+// counts as "legacy". Returns ok=false only for malformed JSON input
+// (a corrupt column stays a safe no-op for the caller).
+func parseJSONOrLegacyCSVArray(raw string) ([]string, bool) {
+	if strings.HasPrefix(raw, "[") {
+		var values []string
+		if err := json.Unmarshal([]byte(raw), &values); err != nil {
+			return nil, false
+		}
+		return values, true
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, len(parts))
+	for i, p := range parts {
+		out[i] = strings.TrimSpace(p)
+	}
+	return out, true
 }
 
 // removeIDFromJSONArray parses a JSON-array string, removes every

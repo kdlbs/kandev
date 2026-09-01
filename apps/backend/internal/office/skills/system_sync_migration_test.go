@@ -319,3 +319,194 @@ func TestSyncSystemSkills_LeavesConflictingNormalizedUserSlugUntouched(t *testin
 		t.Errorf("canonical row must be untouched, got %+v err=%v", b, err)
 	}
 }
+
+// TestSyncSystemSkills_NormalizationRetriesAfterFailedReferenceRewrite
+// pins the recovery contract in
+// docs/specs/agents/system-design/injected-skill-naming-migration.md
+// ("## Failure and recovery"): a normalization interrupted between the
+// row rename and the agent-reference rewrite must be fully retried on
+// the next pass, not silently left half-done. If the row were renamed
+// to its canonical slug before the agent-reference rewrite is
+// confirmed, a later pass would see the row as already canonical and
+// skip it forever, stranding the stale agent reference.
+func TestSyncSystemSkills_NormalizationRetriesAfterFailedReferenceRewrite(t *testing.T) {
+	repo := newStubSyncRepo()
+	log := logger.Default()
+
+	repo.rows["ws-1"] = map[string]*models.Skill{
+		"my-custom-skill": {
+			ID:          "user-skill-1",
+			WorkspaceID: "ws-1",
+			Slug:        "my-custom-skill",
+			Name:        "My Custom Skill",
+			IsSystem:    false,
+			SourceType:  "inline",
+		},
+	}
+	repo.agents["ws-1"] = map[string]*settingsmodels.AgentProfile{
+		"agent-1": {
+			ID:            "agent-1",
+			WorkspaceID:   "ws-1",
+			DesiredSkills: mustJSONArray(t, []string{"my-custom-skill"}),
+		},
+	}
+	repo.failUpdateAgentFor["agent-1"] = true
+
+	// SyncSystemSkills logs and continues past a per-workspace failure
+	// (so one bad workspace doesn't block the rest) rather than
+	// returning it, so the top-level call succeeds; the failure is
+	// checked via the row/agent state left behind instead.
+	report, err := skills.SyncSystemSkills(
+		context.Background(), repo, []string{"ws-1"}, []skills.SystemSkillSpec{}, log,
+	)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if len(report.Normalized) != 0 {
+		t.Fatalf("normalization must not be reported while the reference rewrite failed, got %v", report.Normalized)
+	}
+
+	// The row must NOT have been committed to its canonical slug: a
+	// half-done normalization (row renamed, reference not rewritten)
+	// is exactly the state the recovery contract forbids, because the
+	// canonical-slug gate would then skip this row on every later pass.
+	if _, err := repo.GetSkillBySlug(context.Background(), "ws-1", "my-custom-skill"); err != nil {
+		t.Fatalf("row must stay at its original slug after a failed rewrite, got err=%v", err)
+	}
+	if _, err := repo.GetSkillBySlug(context.Background(), "ws-1", "kandev-my-custom-skill"); err == nil {
+		t.Fatal("row must not be committed to its canonical slug before the reference rewrite succeeds")
+	}
+	agent1 := repo.agents["ws-1"]["agent-1"]
+	if got := decodeIDs(t, agent1.DesiredSkills); len(got) != 1 || got[0] != "my-custom-skill" {
+		t.Errorf("agent-1.desired_skills must stay untouched after a failed rewrite, got %v", got)
+	}
+
+	// A later pass, with the transient failure gone, must fully
+	// converge: this is the "next pass repeats the reference rewrite"
+	// half of the recovery contract.
+	repo.failUpdateAgentFor["agent-1"] = false
+	report, err = skills.SyncSystemSkills(
+		context.Background(), repo, []string{"ws-1"}, []skills.SystemSkillSpec{}, log,
+	)
+	if err != nil {
+		t.Fatalf("retry sync: %v", err)
+	}
+	if len(report.Normalized) != 1 || !strings.HasSuffix(report.Normalized[0], "my-custom-skill->kandev-my-custom-skill") {
+		t.Fatalf("expected my-custom-skill normalized on retry, got %v", report.Normalized)
+	}
+	if _, err := repo.GetSkillBySlug(context.Background(), "ws-1", "kandev-my-custom-skill"); err != nil {
+		t.Fatalf("row must be canonical after the retry succeeds: %v", err)
+	}
+	agent1 = repo.agents["ws-1"]["agent-1"]
+	if got := decodeIDs(t, agent1.DesiredSkills); len(got) != 1 || got[0] != "kandev-my-custom-skill" {
+		t.Errorf("agent-1.desired_skills = %v, want [kandev-my-custom-skill] after retry", got)
+	}
+}
+
+// TestSyncSystemSkills_RetiredSystemSlugFreedForSamePassNormalization
+// pins a sequencing edge in syncWorkspace: retireOrphanedSystemSkills
+// runs before normalizeUserSkillSlugs, and a system row it retires in
+// this same pass must not block a user skill from normalizing onto
+// that now-freed slug. Treating the just-deleted row as still "taken"
+// would report a false conflict for a slug that is actually free.
+func TestSyncSystemSkills_RetiredSystemSlugFreedForSamePassNormalization(t *testing.T) {
+	repo := newStubSyncRepo()
+	log := logger.Default()
+
+	repo.rows["ws-1"] = map[string]*models.Skill{
+		// A stale system row for a slug no longer in the bundle, with
+		// no configured replacement, so it retires outright this pass.
+		"kandev-legacy-widget": {
+			ID:          "system-skill-legacy",
+			WorkspaceID: "ws-1",
+			Slug:        "kandev-legacy-widget",
+			Name:        "Legacy Widget",
+			IsSystem:    true,
+			SourceType:  skills.SourceTypeSystem,
+		},
+		// A user skill whose canonical target is exactly the slug the
+		// system row above is retiring in this same pass.
+		"legacy-widget": {
+			ID:          "user-skill-1",
+			WorkspaceID: "ws-1",
+			Slug:        "legacy-widget",
+			Name:        "My Legacy Widget",
+			IsSystem:    false,
+			SourceType:  "inline",
+		},
+	}
+
+	report, err := skills.SyncSystemSkills(
+		context.Background(), repo, []string{"ws-1"}, []skills.SystemSkillSpec{}, log,
+	)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if len(report.Removed) != 1 || !strings.HasSuffix(report.Removed[0], "kandev-legacy-widget") {
+		t.Fatalf("expected kandev-legacy-widget retired, got removed=%v", report.Removed)
+	}
+	if len(report.Conflicted) != 0 {
+		t.Fatalf("slug freed by same-pass retirement must not be reported as conflicted, got %v", report.Conflicted)
+	}
+	if len(report.Normalized) != 1 || !strings.HasSuffix(report.Normalized[0], "legacy-widget->kandev-legacy-widget") {
+		t.Fatalf("expected legacy-widget normalized onto the freed slug, got %v", report.Normalized)
+	}
+	got, err := repo.GetSkillBySlug(context.Background(), "ws-1", "kandev-legacy-widget")
+	if err != nil {
+		t.Fatalf("normalized row missing: %v", err)
+	}
+	if got.ID != "user-skill-1" {
+		t.Errorf("normalization must preserve the user row's ID, got %s", got.ID)
+	}
+	if got.IsSystem {
+		t.Error("normalized user row must not become a system row")
+	}
+}
+
+// TestSyncSystemSkills_RenameRewritesLegacyCommaSeparatedDesiredSkills
+// pins a format gap in the agent-reference rewrite: desired_skills
+// predates the JSON-array persistence format on some rows and is
+// still a legacy comma-separated string (ParseDesiredSlugs reads
+// both; see injection.go). A slug rename must rewrite that legacy
+// value too — otherwise the agent is left holding a reference to a
+// slug that no longer exists once the row is renamed to its
+// canonical form.
+func TestSyncSystemSkills_RenameRewritesLegacyCommaSeparatedDesiredSkills(t *testing.T) {
+	repo := newStubSyncRepo()
+	log := logger.Default()
+
+	repo.rows["ws-1"] = map[string]*models.Skill{
+		"my-custom-skill": {
+			ID:          "user-skill-1",
+			WorkspaceID: "ws-1",
+			Slug:        "my-custom-skill",
+			Name:        "My Custom Skill",
+			IsSystem:    false,
+			SourceType:  "inline",
+		},
+	}
+	repo.agents["ws-1"] = map[string]*settingsmodels.AgentProfile{
+		"agent-1": {
+			ID:            "agent-1",
+			WorkspaceID:   "ws-1",
+			DesiredSkills: "my-custom-skill,other-skill",
+		},
+	}
+
+	report, err := skills.SyncSystemSkills(
+		context.Background(), repo, []string{"ws-1"}, []skills.SystemSkillSpec{}, log,
+	)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if len(report.Normalized) != 1 || !strings.HasSuffix(report.Normalized[0], "my-custom-skill->kandev-my-custom-skill") {
+		t.Fatalf("expected my-custom-skill normalized, got %v", report.Normalized)
+	}
+
+	agent1 := repo.agents["ws-1"]["agent-1"]
+	got := decodeIDs(t, agent1.DesiredSkills)
+	want := []string{"kandev-my-custom-skill", "other-skill"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("agent-1.desired_skills = %q (parsed %v), want %v", agent1.DesiredSkills, got, want)
+	}
+}

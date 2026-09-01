@@ -21,12 +21,19 @@ import (
 type stubSyncRepo struct {
 	rows   map[string]map[string]*models.Skill                // workspaceID → slug → row
 	agents map[string]map[string]*settingsmodels.AgentProfile // workspaceID → agentID → profile
+
+	// failUpdateAgentFor injects an error from UpdateAgentInstance for
+	// the named agent ID, so a test can simulate a mid-sequence failure
+	// (e.g. the agent-reference rewrite half of a slug normalization)
+	// without it actually persisting.
+	failUpdateAgentFor map[string]bool
 }
 
 func newStubSyncRepo() *stubSyncRepo {
 	return &stubSyncRepo{
-		rows:   map[string]map[string]*models.Skill{},
-		agents: map[string]map[string]*settingsmodels.AgentProfile{},
+		rows:               map[string]map[string]*models.Skill{},
+		agents:             map[string]map[string]*settingsmodels.AgentProfile{},
+		failUpdateAgentFor: map[string]bool{},
 	}
 }
 
@@ -114,13 +121,18 @@ func (s *stubSyncRepo) DeleteSkill(_ context.Context, id string) error {
 	return errors.New("not found for delete")
 }
 
+// ListAgentInstances returns copies, matching the real repository's
+// read-from-DB semantics: a caller mutating a returned profile (as
+// renameSkillSlugOnAgents does before its UpdateAgentInstance call)
+// must not silently affect stored state until that write succeeds.
 func (s *stubSyncRepo) ListAgentInstances(
 	_ context.Context, workspaceID string,
 ) ([]*settingsmodels.AgentProfile, error) {
 	ws := s.agents[workspaceID]
 	out := make([]*settingsmodels.AgentProfile, 0, len(ws))
 	for _, a := range ws {
-		out = append(out, a)
+		copy := *a
+		out = append(out, &copy)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
@@ -129,6 +141,9 @@ func (s *stubSyncRepo) ListAgentInstances(
 func (s *stubSyncRepo) UpdateAgentInstance(
 	_ context.Context, agent *settingsmodels.AgentProfile,
 ) error {
+	if s.failUpdateAgentFor[agent.ID] {
+		return errors.New("injected failure: agent update unavailable")
+	}
 	ws, ok := s.agents[agent.WorkspaceID]
 	if !ok {
 		return errors.New("workspace not found")

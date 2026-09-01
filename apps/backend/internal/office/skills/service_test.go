@@ -153,8 +153,8 @@ func TestValidateAndPrepareSkill_RejectsNotWellFormedSlug(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for not-well-formed slug")
 	}
-	if skill.Slug == "kandev-not a valid slug!" {
-		t.Errorf("slug was coerced into a well-formed value: %q", skill.Slug)
+	if skill.Slug != "not a valid slug!" {
+		t.Errorf("slug was coerced from its original input: %q", skill.Slug)
 	}
 }
 

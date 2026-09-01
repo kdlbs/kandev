@@ -117,8 +117,8 @@ func (r *Repository) ListSystemSkills(
 	return skills, nil
 }
 
-// ListNonSystemSkills returns all is_system = false (or NULL) skills
-// for a workspace, ordered by slug. Used by the system-skill sync's
+// ListNonSystemSkills returns all is_system = false skills for a
+// workspace, ordered by slug. Used by the system-skill sync's
 // slug-migration pass: user/provider-imported rows that need a
 // well-formed-but-non-canonical slug normalized to canonical, and the
 // conflict check before inserting a newly-bundled canonical slug.
