@@ -106,7 +106,8 @@ workflow, so that switching presentation does not risk my work.
 - **AC-UI-MARKDOWN-FILE-EDITING-002.8:** When Edit mode fails to initialize or
   update, the system shall keep the current content and offer Source mode.
 - **AC-UI-MARKDOWN-FILE-EDITING-002.9:** Preview and Edit modes shall show
-  visible table cell boundaries.
+  visible table cell boundaries. An active Edit-mode table shall use those
+  boundaries instead of painting Markdown pipe delimiters inside its cells.
 - **AC-UI-MARKDOWN-FILE-EDITING-002.10:** When a table is active in Edit mode,
   the system shall hide its table delimiter row while preserving the exact
   delimiter bytes in canonical source.
@@ -114,7 +115,8 @@ workflow, so that switching presentation does not risk my work.
   the system shall provide an insertion action after every visible row and
   column. Each action shall remain outside editable cells, apply one undoable
   canonical-source edit, and place the selection in the inserted row or
-  column.
+  column. On fine pointers, a compact dot shall become a blue plus action and
+  show the affected row or column edge on hover or keyboard focus.
 - **AC-UI-MARKDOWN-FILE-EDITING-002.12:** When a user resizes an Edit-mode
   table column by pointer, touch, or keyboard, the system shall update the
   visible column width without changing canonical source. The width shall

@@ -1,6 +1,36 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+function installTableGeometry(table: HTMLTableElement) {
+  const tableRect = { left: 48, top: 48, width: 240, height: 120, right: 288, bottom: 168 };
+  const wrapper = table.parentElement as HTMLDivElement;
+  Object.defineProperty(wrapper, "getBoundingClientRect", { value: () => tableRect });
+  Object.defineProperty(table, "getBoundingClientRect", { value: () => tableRect });
+  Array.from(table.rows).forEach((row, rowIndex) => {
+    Object.defineProperty(row, "getBoundingClientRect", {
+      value: () => ({
+        ...tableRect,
+        top: 48 + rowIndex * 40,
+        bottom: 88 + rowIndex * 40,
+        height: 40,
+      }),
+    });
+    Array.from(row.cells).forEach((cell, cellIndex) => {
+      Object.defineProperty(cell, "getBoundingClientRect", {
+        value: () => ({
+          ...tableRect,
+          left: 48 + cellIndex * 120,
+          right: 168 + cellIndex * 120,
+          width: 120,
+          top: 48 + rowIndex * 40,
+          bottom: 88 + rowIndex * 40,
+          height: 40,
+        }),
+      });
+    });
+  });
+}
+
 // The faithful upstream lifecycle mock keeps its model, view, and controller state together.
 // eslint-disable-next-line max-lines-per-function
 const upstream = vi.hoisted(() => {
@@ -147,6 +177,35 @@ const upstream = vi.hoisted(() => {
     }
   }
 
+  function setupActiveTable(
+    model: MockEditorModel,
+    view: MockEditorView,
+    source: string,
+    bodyRows: string,
+    columnCount = 2,
+  ) {
+    const table = {
+      kind: "table",
+      length: source.length,
+      headerRow: { cells: Array.from({ length: columnCount }, () => ({})) },
+    };
+    model.document.set({ content: [table] });
+    model.activeBlock.set(table);
+    const header = Array.from({ length: columnCount }, (_, index) => `<th>${index + 1}</th>`).join(
+      "",
+    );
+    const delimiter = Array.from({ length: columnCount }, () => "<td>---</td>").join("");
+    view.element.innerHTML = `
+      <div class="md-table-wrapper">
+        <table class="md-table md-block-active">
+          <tr>${header}</tr>
+          <tr class="md-table-delimiter-row">${delimiter}</tr>
+          ${bodyRows}
+        </table>
+      </div>`;
+    return table;
+  }
+
   return {
     state,
     EditorModel: MockEditorModel,
@@ -155,6 +214,7 @@ const upstream = vi.hoisted(() => {
     LocalHistoryStrategy: MockLocalHistoryStrategy,
     StringEdit: MockStringEdit,
     Selection: MockSelection,
+    setupActiveTable,
     createDefaultMonacoSyntaxHighlighter: vi.fn(() => {
       const highlighter = { dispose: vi.fn(), create: vi.fn() };
       state.syntaxHighlighters.push(highlighter);
@@ -173,6 +233,12 @@ vi.mock("@vscode/markdown-editor/editor.css", () => ({}));
 vi.mock("@vscode/markdown-editor/themes/default.css", () => ({}));
 
 import { HybridMarkdownEditor } from "./hybrid-markdown-editor";
+
+const TABLE_ROW_INSERT_0 = "markdown-table-row-insert-0";
+const TABLE_ROW_INSERT_1 = "markdown-table-row-insert-1";
+const TABLE_COLUMN_INSERT_0 = "markdown-table-column-insert-0";
+const TABLE_COLUMN_INSERT_1 = "markdown-table-column-insert-1";
+const TABLE_RESIZER_0 = "markdown-table-resizer-0";
 
 afterEach(cleanup);
 
@@ -272,40 +338,6 @@ describe("HybridMarkdownEditor lifecycle", () => {
 });
 
 describe("HybridMarkdownEditor contracts", () => {
-  it("appends rows and columns through local history when a table is active", async () => {
-    const source = "| A | B |\n| --- | --- |\n| 1 | 2 |\n";
-    const onChange = vi.fn();
-    render(<HybridMarkdownEditor content={source} readOnly={false} onChange={onChange} />);
-
-    const model = upstream.state.models[0];
-    const view = upstream.state.views[0];
-    const table = { kind: "table", length: source.length, headerRow: { cells: [{}, {}] } };
-    model.document.set({ content: [table] });
-    model.activeBlock.set(table);
-    view.element.innerHTML =
-      '<div class="md-table-wrapper"><table class="md-table md-block-active"></table></div>';
-
-    const addRow = await screen.findByRole("button", { name: "Add row below" });
-    fireEvent.click(addRow);
-
-    await waitFor(() =>
-      expect(onChange).toHaveBeenLastCalledWith("| A | B |\n| --- | --- |\n| 1 | 2 |\n|  |  |\n"),
-    );
-    expect(upstream.state.histories[0].record).toHaveBeenCalledOnce();
-
-    model.sourceText.set(new upstream.StringValue(source));
-    model.document.set({ content: [table] });
-    model.activeBlock.set(table);
-    fireEvent.click(screen.getByRole("button", { name: "Add column right" }));
-
-    await waitFor(() =>
-      expect(onChange).toHaveBeenLastCalledWith(
-        "| A | B |  |\n| --- | --- | --- |\n| 1 | 2 |  |\n",
-      ),
-    );
-    expect(upstream.state.histories[0].record).toHaveBeenCalledTimes(2);
-  });
-
   it("passes link, baseline, gutter, and comment contracts through the adapter", () => {
     const onOpenLink = vi.fn();
     const onComment = vi.fn();
@@ -373,5 +405,156 @@ describe("HybridMarkdownEditor contracts", () => {
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: "view failed" }));
     expect(onSourceFallback).toHaveBeenCalledOnce();
     expect(upstream.state.models[0].dispose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("HybridMarkdownEditor table edge insertion contracts", () => {
+  it("renders row and column actions in edge gutters and maps them to visible indices", async () => {
+    const source = "| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\n";
+    const onChange = vi.fn();
+    render(<HybridMarkdownEditor content={source} onChange={onChange} />);
+
+    const model = upstream.state.models[0];
+    const view = upstream.state.views[0];
+    upstream.setupActiveTable(
+      model,
+      view,
+      source,
+      "<tr><td>1</td><td>2</td></tr><tr><td>3</td><td>4</td></tr>",
+    );
+
+    const table = view.element.querySelector("table") as HTMLTableElement;
+    installTableGeometry(table);
+
+    await waitFor(() => expect(screen.queryByTestId(TABLE_ROW_INSERT_0)).not.toBeNull());
+    expect(screen.queryByTestId(TABLE_ROW_INSERT_1)).not.toBeNull();
+    expect(screen.queryByTestId(TABLE_COLUMN_INSERT_0)).not.toBeNull();
+    expect(screen.queryByTestId(TABLE_COLUMN_INSERT_1)).not.toBeNull();
+    expect(screen.getByTestId(TABLE_ROW_INSERT_0).closest("table")).toBeNull();
+
+    fireEvent.click(screen.getByTestId(TABLE_ROW_INSERT_0));
+
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith(
+        "| A | B |\n| --- | --- |\n|  |  |\n| 1 | 2 |\n| 3 | 4 |\n",
+      ),
+    );
+  });
+
+  it("maps a column edge action to one positional source edit", async () => {
+    const source = "| A | B |\n| --- | --- |\n| 1 | 2 |\n";
+    const onChange = vi.fn();
+    render(<HybridMarkdownEditor content={source} onChange={onChange} />);
+
+    const model = upstream.state.models[0];
+    const view = upstream.state.views[0];
+    upstream.setupActiveTable(model, view, source, "<tr><td>1</td><td>2</td></tr>");
+    const table = view.element.querySelector("table") as HTMLTableElement;
+    installTableGeometry(table);
+
+    await waitFor(() => expect(screen.queryByTestId(TABLE_COLUMN_INSERT_0)).not.toBeNull());
+    fireEvent.click(screen.getByTestId(TABLE_COLUMN_INSERT_0));
+
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith(
+        "| A |  | B |\n| --- | --- | --- |\n| 1 |  | 2 |\n",
+      ),
+    );
+    expect(upstream.state.histories[0].record).toHaveBeenCalledOnce();
+  });
+});
+
+describe("HybridMarkdownEditor table edge resize contracts", () => {
+  it("resizes a table boundary with the keyboard without changing Markdown source", async () => {
+    const source = "| A | B |\n| --- | --- |\n| 1 | 2 |\n";
+    const onChange = vi.fn();
+    render(<HybridMarkdownEditor content={source} onChange={onChange} />);
+
+    const model = upstream.state.models[0];
+    const view = upstream.state.views[0];
+    upstream.setupActiveTable(model, view, source, "<tr><td>1</td><td>2</td></tr>");
+
+    const table = view.element.querySelector("table") as HTMLTableElement;
+    installTableGeometry(table);
+
+    await waitFor(() => expect(screen.queryByTestId(TABLE_RESIZER_0)).not.toBeNull());
+    const resizer = screen.getByTestId(TABLE_RESIZER_0);
+    expect(resizer.getAttribute("role")).toBe("separator");
+    expect(
+      Number.parseFloat(resizer.getAttribute("style")?.match(/top:\s*([^;]+)/)?.[1] ?? "0"),
+    ).toBeLessThan(0);
+    expect(
+      Number.parseFloat(resizer.getAttribute("style")?.match(/height:\s*([^;]+)/)?.[1] ?? "0"),
+    ).toBeLessThan(table.getBoundingClientRect().height);
+    fireEvent.keyDown(resizer, { key: "ArrowRight" });
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(table.querySelector("colgroup")).not.toBeNull();
+    expect(table.querySelector("col")?.getAttribute("style")).toContain("128px");
+
+    table.querySelector("colgroup")?.remove();
+    await waitFor(() =>
+      expect(table.querySelector("col")?.getAttribute("style")).toContain("128px"),
+    );
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps row and column insertion available for one-column tables", async () => {
+    const source = "| A |\n| --- |\n| 1 |\n";
+    const onChange = vi.fn();
+    render(<HybridMarkdownEditor content={source} onChange={onChange} />);
+
+    const model = upstream.state.models[0];
+    const view = upstream.state.views[0];
+    upstream.setupActiveTable(model, view, source, "<tr><td>1</td></tr>", 1);
+    const table = view.element.querySelector("table") as HTMLTableElement;
+    installTableGeometry(table);
+
+    await waitFor(() => expect(screen.queryByTestId(TABLE_ROW_INSERT_0)).not.toBeNull());
+    expect(screen.queryByTestId(TABLE_ROW_INSERT_1)).not.toBeNull();
+    expect(screen.queryByTestId(TABLE_COLUMN_INSERT_0)).not.toBeNull();
+    expect(screen.queryByTestId(TABLE_RESIZER_0)).toBeNull();
+
+    fireEvent.click(screen.getByTestId(TABLE_COLUMN_INSERT_0));
+
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith("| A |  |\n| --- | --- |\n| 1 |  |\n"),
+    );
+  });
+});
+
+describe("HybridMarkdownEditor table edge pointer lifecycle", () => {
+  it("restores a drag when the browser reports lost pointer capture", async () => {
+    const source = "| A | B |\n| --- | --- |\n| 1 | 2 |\n";
+    const onChange = vi.fn();
+    render(<HybridMarkdownEditor content={source} onChange={onChange} />);
+
+    const model = upstream.state.models[0];
+    const view = upstream.state.views[0];
+    upstream.setupActiveTable(model, view, source, "<tr><td>1</td><td>2</td></tr>");
+    const table = view.element.querySelector("table") as HTMLTableElement;
+    installTableGeometry(table);
+
+    await waitFor(() => expect(screen.queryByTestId(TABLE_RESIZER_0)).not.toBeNull());
+    const resizer = screen.getByTestId(TABLE_RESIZER_0);
+    fireEvent.pointerDown(resizer, {
+      button: 0,
+      clientX: 168,
+      pointerId: 7,
+      pointerType: "touch",
+    });
+    fireEvent.pointerMove(resizer, {
+      clientX: 184,
+      pointerId: 7,
+      pointerType: "touch",
+    });
+    expect(table.querySelector("col")?.getAttribute("style")).toContain("136px");
+
+    fireEvent.lostPointerCapture(resizer, { pointerId: 7 });
+
+    await waitFor(() =>
+      expect(table.querySelector("col")?.getAttribute("style")).toContain("120px"),
+    );
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

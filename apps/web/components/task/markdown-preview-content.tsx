@@ -509,7 +509,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
       )}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-auto py-6 pe-6 ps-12"
+        className="flex-1 overflow-auto px-4 py-6"
         data-testid="markdown-preview-scroll-container"
       >
         <div ref={rootRef} className="markdown-body max-w-3xl" tabIndex={commentsEnabled ? 0 : -1}>

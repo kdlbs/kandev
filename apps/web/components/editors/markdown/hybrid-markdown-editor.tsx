@@ -1,10 +1,6 @@
 "use client";
 
-import { Button } from "@kandev/ui/button";
-import { IconColumnInsertRight, IconRowInsertBottom } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { useTranslation } from "react-i18next";
 import {
   CommentModeController,
   CommentsModel,
@@ -36,7 +32,11 @@ import { language as yamlLanguage } from "monaco-editor/esm/vs/basic-languages/y
 import { compile } from "monaco-editor/esm/vs/editor/standalone/common/monarch/monarchCompile.js";
 import { MonarchTokenizer } from "monaco-editor/esm/vs/editor/standalone/common/monarch/monarchLexer.js";
 import "@vscode/markdown-editor/editor.css";
-import { appendMarkdownTableColumn, appendMarkdownTableRow } from "./markdown-table-edit";
+import { insertMarkdownTableColumn, insertMarkdownTableRow } from "./markdown-table-edit";
+import {
+  HybridMarkdownTableEdgeChrome,
+  type HybridMarkdownTableEdgeChromeProps,
+} from "./hybrid-markdown-table-edge";
 import "./hybrid-markdown-editor.css";
 
 export type MarkdownSourceRange = {
@@ -147,7 +147,7 @@ export function HybridMarkdownEditor({
     gutterMarkers,
     comments,
   });
-  const tableControlsHost = useActiveTableControlsHost(rootRef, !readOnly);
+  const tableControlsHost = useActiveTableControlsHost(rootRef, !readOnly, lifecycleRef);
 
   return (
     <>
@@ -160,99 +160,92 @@ export function HybridMarkdownEditor({
         }
         data-testid="hybrid-markdown-editor"
       />
-      <MarkdownTableControls host={tableControlsHost} lifecycleRef={lifecycleRef} />
+      <HybridMarkdownTableEdgeChrome
+        host={tableControlsHost?.host ?? null}
+        tableKey={tableControlsHost?.tableKey ?? null}
+        onInsertRow={(rowIndex) => applyActiveTableEdit(lifecycleRef, "row", rowIndex)}
+        onInsertColumn={(columnIndex) => applyActiveTableEdit(lifecycleRef, "column", columnIndex)}
+      />
     </>
   );
 }
 
-function MarkdownTableControls({
-  host,
-  lifecycleRef,
-}: {
-  host: HTMLDivElement | null;
-  lifecycleRef: MutableRef<EditorLifecycle | null>;
-}) {
-  const { t } = useTranslation();
-  if (!host) return null;
+type ActiveTableControlsHost = Pick<HybridMarkdownTableEdgeChromeProps, "host" | "tableKey">;
 
-  return createPortal(
-    <div
-      className="kandev-markdown-table-controls"
-      role="toolbar"
-      aria-label={t("common:tableEditingActions")}
-    >
-      <Button
-        type="button"
-        variant="secondary"
-        size="icon-sm"
-        className="kandev-markdown-table-control cursor-pointer"
-        aria-label={t("common:addTableRowBelow")}
-        title={t("common:addTableRowBelow")}
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          applyActiveTableEdit(lifecycleRef, "row");
-        }}
-      >
-        <IconRowInsertBottom />
-      </Button>
-      <Button
-        type="button"
-        variant="secondary"
-        size="icon-sm"
-        className="kandev-markdown-table-control cursor-pointer"
-        aria-label={t("common:addTableColumnRight")}
-        title={t("common:addTableColumnRight")}
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          applyActiveTableEdit(lifecycleRef, "column");
-        }}
-      >
-        <IconColumnInsertRight />
-      </Button>
-    </div>,
-    host,
+const ACTIVE_TABLE_EDGE_WRAPPER_CLASS = "kandev-markdown-table-edge-wrapper";
+
+type ActiveTableHostWithWrapper = ActiveTableControlsHost & {
+  wrapper: HTMLElement;
+};
+
+function ensureActiveTableHost(
+  root: HTMLDivElement,
+  lifecycleRef: MutableRef<EditorLifecycle | null>,
+): ActiveTableHostWithWrapper | null {
+  const activeTable = root.querySelector<HTMLElement>(".md-table.md-block-active");
+  const wrapper = activeTable?.closest<HTMLElement>(".md-table-wrapper");
+  if (!wrapper || !root.contains(wrapper)) return null;
+
+  const existing = Array.from(wrapper.children).find(
+    (child): child is HTMLDivElement =>
+      child instanceof HTMLDivElement && child.dataset.kandevTableControls === "true",
   );
+  const host = existing ?? document.createElement("div");
+  if (!existing) {
+    host.dataset.kandevTableControls = "true";
+    host.className = "kandev-markdown-table-controls-host";
+    wrapper.prepend(host);
+  }
+
+  const activeBlock = lifecycleRef.current?.model.activeBlock.get();
+  const range =
+    activeBlock?.kind === "table" && lifecycleRef.current
+      ? findActiveTableRange(lifecycleRef.current.model, activeBlock as TableAstNode)
+      : undefined;
+  return { host, tableKey: range ? `table-${range.start}` : "active-table", wrapper };
 }
 
 function useActiveTableControlsHost(
   rootRef: MutableRef<HTMLDivElement | null>,
   enabled: boolean,
-): HTMLDivElement | null {
-  const [host, setHost] = useState<HTMLDivElement | null>(null);
+  lifecycleRef: MutableRef<EditorLifecycle | null>,
+): ActiveTableControlsHost | null {
+  const [hostState, setHostState] = useState<ActiveTableControlsHost | null>(null);
 
   useEffect(() => {
     const root = rootRef.current;
     if (!root || !enabled) {
-      setHost(null);
+      setHostState(null);
       return;
     }
 
     let currentHost: HTMLDivElement | null = null;
+    let currentWrapper: HTMLElement | null = null;
     const reconcile = () => {
-      const activeTable = root.querySelector<HTMLElement>(".md-table.md-block-active");
-      const wrapper = activeTable?.closest<HTMLElement>(".md-table-wrapper");
-      if (!wrapper || !root.contains(wrapper)) {
+      const next = ensureActiveTableHost(root, lifecycleRef);
+      if (!next) {
         currentHost?.remove();
+        currentWrapper?.classList.remove(ACTIVE_TABLE_EDGE_WRAPPER_CLASS);
         currentHost = null;
-        setHost(null);
+        currentWrapper = null;
+        setHostState(null);
         return;
       }
 
-      const existing = Array.from(wrapper.children).find(
-        (child): child is HTMLDivElement =>
-          child instanceof HTMLDivElement && child.dataset.kandevTableControls === "true",
-      );
-      const nextHost = existing ?? document.createElement("div");
-      if (!existing) {
-        nextHost.dataset.kandevTableControls = "true";
-        nextHost.className = "kandev-markdown-table-controls-host";
-        wrapper.prepend(nextHost);
+      if (currentWrapper && currentWrapper !== next.wrapper) {
+        currentWrapper.classList.remove(ACTIVE_TABLE_EDGE_WRAPPER_CLASS);
       }
-      if (currentHost && currentHost !== nextHost) currentHost.remove();
-      currentHost = nextHost;
-      setHost((current) => (current === nextHost ? current : nextHost));
+      if (currentHost && currentHost !== next.host) currentHost.remove();
+      if (!next.wrapper.classList.contains(ACTIVE_TABLE_EDGE_WRAPPER_CLASS)) {
+        next.wrapper.classList.add(ACTIVE_TABLE_EDGE_WRAPPER_CLASS);
+      }
+      currentHost = next.host;
+      currentWrapper = next.wrapper;
+      setHostState((current) =>
+        current?.host === next.host && current.tableKey === next.tableKey
+          ? current
+          : { host: next.host, tableKey: next.tableKey },
+      );
     };
 
     reconcile();
@@ -261,10 +254,11 @@ function useActiveTableControlsHost(
     return () => {
       observer.disconnect();
       currentHost?.remove();
+      currentWrapper?.classList.remove(ACTIVE_TABLE_EDGE_WRAPPER_CLASS);
     };
-  }, [enabled, rootRef]);
+  }, [enabled, lifecycleRef, rootRef]);
 
-  return host;
+  return hostState;
 }
 
 type LifecycleHookOptions = {
@@ -593,6 +587,7 @@ function createMarkdownSyntaxHighlighter(): MonacoSyntaxHighlighter {
 function applyActiveTableEdit(
   lifecycleRef: MutableRef<EditorLifecycle | null>,
   operation: "row" | "column",
+  index: number,
 ): void {
   const lifecycle = lifecycleRef.current;
   if (!lifecycle) return;
@@ -605,8 +600,8 @@ function applyActiveTableEdit(
   const tableSource = source.slice(range.start, range.endExclusive);
   const result =
     operation === "row"
-      ? appendMarkdownTableRow(tableSource, activeBlock.headerRow?.cells.length ?? 0)
-      : appendMarkdownTableColumn(tableSource);
+      ? insertMarkdownTableRow(tableSource, index)
+      : insertMarkdownTableColumn(tableSource, index);
   if (result.source === tableSource) return;
 
   const edit = StringEdit.replace(new OffsetRange(range.start, range.endExclusive), result.source);

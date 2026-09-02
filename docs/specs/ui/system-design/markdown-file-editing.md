@@ -236,14 +236,17 @@ not change.
 The same scoped theme gives active blocks a two-pixel radius. It restores a
 one-pixel themed border on every table cell in both active and inactive table
 states because the upstream active-table theme otherwise makes cell borders
-transparent. Preview continues to use the shared bordered Markdown table
-renderer.
+transparent. Active tables retain themed cell surfaces and a muted header
+instead of inheriting the upstream source-outline presentation or a block-wide
+highlight. Preview continues to use the shared bordered Markdown table renderer.
 
 The scoped Edit theme overrides the upstream active-table delimiter rule so
 `.md-table-delimiter-row` remains hidden. This is presentation-only: the AST,
 source offsets, history, and canonical delimiter bytes remain unchanged. The
 active header keeps normal cell padding so hiding the compact delimiter row
-does not leave a false editing gap.
+does not leave a false editing gap. Active table-cell glue spans also remain in
+the source mapping but are visually hidden, so Markdown pipe delimiters do not
+appear inside bordered cells.
 
 Unsupported blocks remain visible as editable source. Raw HTML never bypasses
 Kandev sanitization. Edit mode must not use arbitrary `innerHTML` for Markdown
@@ -271,12 +274,14 @@ Save, Delete, Reload, Comments, and external file actions.
 
 When a table is active, a table-local edge layer reserves a narrow top gutter
 above columns and a left gutter beside rows. Fine-pointer users see compact
-dots that reveal an insert action on hover or focus. Each row action inserts
-below its row; each column action inserts to the right of its column. The layer
-also places a draggable separator at every internal column boundary. Resize
-separators support Left and Right arrow keys after focus. The layer follows the
-table's local horizontal scroller, never creates a second file toolbar, and
-never overlaps editable cells.
+dots close to the table. Hover or keyboard focus turns a dot into a blue plus
+and draws a blue guide across the affected row or column edge. Each row action
+inserts below its row; each column action inserts to the right of its column.
+The layer also places a compact draggable separator at every internal column
+boundary. Its resize guide appears only while that separator is hovered,
+focused, or dragged. Resize separators support Left and Right arrow keys after
+focus. The layer follows the table's local horizontal scroller, never creates a
+second file toolbar, and never overlaps editable cells.
 
 ### Phone
 

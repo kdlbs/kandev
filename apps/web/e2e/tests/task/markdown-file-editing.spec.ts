@@ -438,9 +438,17 @@ const ready = true;
 
     await openFile(session, testPage, fileName);
     const editor = testPage.getByTestId("markdown-file-editor");
-    const previewCell = testPage.getByTestId("markdown-preview").locator("td").first();
+    const preview = testPage.getByTestId("markdown-preview");
+    const previewScroll = preview.getByTestId("markdown-preview-scroll-container");
+    const previewCell = preview.locator("td").first();
     await expect(previewCell).toBeVisible();
     expect(await previewCell.evaluate((cell) => getComputedStyle(cell).borderTopWidth)).toBe("1px");
+    expect(
+      await previewScroll.evaluate((element) => {
+        const styles = getComputedStyle(element);
+        return { left: styles.paddingLeft, right: styles.paddingRight };
+      }),
+    ).toEqual({ left: "16px", right: "16px" });
 
     await editor.getByTestId("markdown-mode-edit").click();
     const hybrid = testPage.getByTestId("hybrid-markdown-editor");
@@ -450,7 +458,10 @@ const ready = true;
     await expect(hybrid.locator(".md-code-block")).toHaveClass(/md-block-active/);
     await expect(keyword).toBeVisible();
     const table = hybrid.locator(".md-table");
-    await table.locator("td").first().click();
+    const firstCell = table.locator("tr:not(.md-table-delimiter-row) td").filter({
+      hasText: "Preview",
+    });
+    await firstCell.click();
     await expect(table).toHaveClass(/md-block-active/);
     expect(await table.evaluate((element) => getComputedStyle(element).borderRadius)).toBe("2px");
     expect(
@@ -460,8 +471,136 @@ const ready = true;
         .evaluate((cell) => getComputedStyle(cell).borderTopWidth),
     ).toBe("1px");
 
-    await testPage.getByRole("button", { name: "Add row below" }).click();
-    await testPage.getByRole("button", { name: "Add column right" }).click();
+    await expect(table.locator(".md-table-delimiter-row")).toBeHidden();
+    await expect(table.locator(".md-glue-tableCellGlue:visible")).toHaveCount(0);
+    const [headerBackground, bodyBackground] = await Promise.all([
+      table
+        .locator("tr")
+        .first()
+        .locator("td")
+        .first()
+        .evaluate((cell) => {
+          return getComputedStyle(cell).backgroundColor;
+        }),
+      firstCell.evaluate((cell) => getComputedStyle(cell).backgroundColor),
+    ]);
+    expect(bodyBackground).not.toBe("rgba(0, 0, 0, 0)");
+    expect(headerBackground).not.toBe(bodyBackground);
+    const rowAction = hybrid.getByTestId("markdown-table-row-insert-0");
+    const columnAction = hybrid.getByTestId("markdown-table-column-insert-1");
+    const rowGuide = hybrid.getByTestId("markdown-table-row-guide-0");
+    const columnGuide = hybrid.getByTestId("markdown-table-column-guide-1");
+    await expect(rowAction).toBeVisible();
+    await expect(columnAction).toBeVisible();
+    await expect(columnAction.locator("svg")).toHaveCount(1);
+    const [tableBox, rowActionBox, columnActionBox] = await Promise.all([
+      table.boundingBox(),
+      rowAction.boundingBox(),
+      columnAction.boundingBox(),
+    ]);
+    expect(tableBox).not.toBeNull();
+    expect(rowActionBox).not.toBeNull();
+    expect(columnActionBox).not.toBeNull();
+    expect(rowActionBox!.x + rowActionBox!.width).toBeLessThanOrEqual(tableBox!.x);
+    expect(columnActionBox!.y + columnActionBox!.height).toBeLessThanOrEqual(tableBox!.y);
+    expect(tableBox!.y - (columnActionBox!.y + columnActionBox!.height)).toBeLessThanOrEqual(16);
+
+    await testPage.mouse.move(2, 2);
+    expect(await rowGuide.evaluate((element) => getComputedStyle(element).opacity)).toBe("0");
+    expect(await columnGuide.evaluate((element) => getComputedStyle(element).opacity)).toBe("0");
+    const fineAffordance = await columnAction.evaluate((element) => {
+      const icon = element.querySelector("svg");
+      return {
+        dotContent: getComputedStyle(element, "::before").content,
+        dotOpacity: getComputedStyle(element, "::before").opacity,
+        iconOpacity: icon ? getComputedStyle(icon).opacity : "",
+        opacity: getComputedStyle(element).opacity,
+      };
+    });
+    expect(fineAffordance.opacity).toBe("1");
+    expect(fineAffordance.dotContent).not.toBe("none");
+    expect(fineAffordance.dotOpacity).toBe("1");
+    expect(fineAffordance.iconOpacity).toBe("0");
+    await columnAction.hover();
+    await expect
+      .poll(() =>
+        columnAction.evaluate((element) => {
+          const icon = element.querySelector("svg");
+          return icon ? getComputedStyle(icon).opacity : "";
+        }),
+      )
+      .toBe("1");
+    await expect
+      .poll(() => columnGuide.evaluate((element) => getComputedStyle(element).opacity))
+      .toBe("1");
+    const [columnGuideBox, currentTableBox, currentLastHeaderCellBox] = await Promise.all([
+      columnGuide.boundingBox(),
+      table.boundingBox(),
+      table.locator("tr").first().locator("td").last().boundingBox(),
+    ]);
+    expect(columnGuideBox).not.toBeNull();
+    expect(currentTableBox).not.toBeNull();
+    expect(currentLastHeaderCellBox).not.toBeNull();
+    expect(columnGuideBox!.x + columnGuideBox!.width / 2).toBeCloseTo(
+      currentLastHeaderCellBox!.x + currentLastHeaderCellBox!.width,
+      0,
+    );
+    expect(columnGuideBox!.y).toBeLessThanOrEqual(columnActionBox!.y + columnActionBox!.height / 2);
+    expect(columnGuideBox!.y + columnGuideBox!.height).toBeGreaterThanOrEqual(
+      currentTableBox!.y + currentTableBox!.height,
+    );
+
+    await testPage.mouse.move(2, 2);
+    await rowAction.hover();
+    await expect
+      .poll(() => rowGuide.evaluate((element) => getComputedStyle(element).opacity))
+      .toBe("1");
+    const [rowGuideBox, currentHeaderRowBox, currentRowTableBox] = await Promise.all([
+      rowGuide.boundingBox(),
+      table.locator("tr").first().boundingBox(),
+      table.boundingBox(),
+    ]);
+    expect(rowGuideBox).not.toBeNull();
+    expect(currentHeaderRowBox).not.toBeNull();
+    expect(currentRowTableBox).not.toBeNull();
+    expect(rowGuideBox!.y + rowGuideBox!.height / 2).toBeCloseTo(
+      currentHeaderRowBox!.y + currentHeaderRowBox!.height,
+      0,
+    );
+    expect(rowGuideBox!.x).toBeLessThanOrEqual(rowActionBox!.x + rowActionBox!.width / 2);
+    expect(rowGuideBox!.x + rowGuideBox!.width).toBeGreaterThanOrEqual(
+      currentRowTableBox!.x + currentRowTableBox!.width,
+    );
+
+    await clickAfterText(testPage, firstCell, "Preview");
+    await testPage.keyboard.insertText("!");
+    await expect(firstCell).toContainText("Preview!");
+
+    const resizer = hybrid.getByTestId("markdown-table-resizer-0");
+    await expect(resizer).toHaveAttribute("role", "separator");
+    await resizer.focus();
+    await testPage.keyboard.press("ArrowRight");
+    await expect(hybrid.locator("colgroup")).toHaveCount(1);
+    const resizerBox = await resizer.boundingBox();
+    expect(resizerBox).not.toBeNull();
+    expect(resizerBox!.y + resizerBox!.height).toBeLessThanOrEqual(tableBox!.y);
+    const resizerCenterY = resizerBox!.y + resizerBox!.height / 2;
+    await testPage.mouse.move(resizerBox!.x + resizerBox!.width / 2, resizerCenterY);
+    await testPage.mouse.down();
+    await testPage.mouse.move(resizerBox!.x + resizerBox!.width / 2 + 16, resizerCenterY);
+    await testPage.mouse.up();
+
+    const resizedWidth = await hybrid.locator("colgroup col").first().getAttribute("style");
+    await editor.getByTestId("markdown-mode-preview").click();
+    await expect(testPage.getByTestId("markdown-preview")).toBeVisible();
+    await editor.getByTestId("markdown-mode-edit").click();
+    await expect(hybrid).toBeVisible();
+    await expect
+      .poll(() => hybrid.locator("colgroup col").first().getAttribute("style"))
+      .toBe(resizedWidth);
+
+    await columnAction.click();
+    await rowAction.click();
     await editor.getByTestId("markdown-file-save").click();
 
     await expect
@@ -470,7 +609,7 @@ const ready = true;
     expect(fs.readFileSync(filePath, "utf8")).toBe(
       content.replace(
         "| Area | State |\n| --- | --- |\n| Preview | Ready |\n",
-        "| Area | State |  |\n| --- | --- | --- |\n| Preview | Ready |  |\n|  |  |  |\n",
+        "| Area | State |  |\n| --- | --- | --- |\n|  |  |  |\n| Preview! | Ready |  |\n",
       ),
     );
   });
