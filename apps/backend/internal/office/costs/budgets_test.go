@@ -61,19 +61,79 @@ func (s *budgetActivitySpy) count(action string) int {
 }
 
 // claimFaultRepo wraps a real *sqlite.Repository and overrides Claim to
-// fail for the named levels, so tests can drive AC-OFFICE-COSTS-002.5's and
-// AC-OFFICE-COSTS-002.14's claim-store-error paths deterministically
-// without a fault-injecting SQL driver.
+// fail (failLevels) or miss without error (missLevels) for the named
+// levels, so tests can drive AC-OFFICE-COSTS-002.5's, .14's and .14a's
+// claim-store outcomes deterministically without a fault-injecting SQL
+// driver. missLevels stands in for either an already-held claim or a
+// foreign-key-violation-as-miss (AC-OFFICE-COSTS-002.14a): both return
+// (false, nil), and the counter under test cannot and should not
+// distinguish them.
 type claimFaultRepo struct {
 	*sqlite.Repository
 	failLevels map[string]error
+	missLevels map[string]bool
 }
 
 func (r *claimFaultRepo) Claim(ctx context.Context, policyID, periodKey, level string) (bool, error) {
 	if err, ok := r.failLevels[level]; ok {
 		return false, err
 	}
+	if r.missLevels[level] {
+		return false, nil
+	}
 	return r.Repository.Claim(ctx, policyID, periodKey, level)
+}
+
+// callOrderRecorder records events in the order they occur, for tests that
+// must prove sequencing rather than just eventual outcome (AC-OFFICE-COSTS-002.5's
+// claim-then-emit ordering).
+type callOrderRecorder struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func (r *callOrderRecorder) record(event string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, event)
+}
+
+func (r *callOrderRecorder) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, len(r.events))
+	copy(out, r.events)
+	return out
+}
+
+// orderRecordingRepo wraps a real *sqlite.Repository and records each
+// Claim call's level into a shared callOrderRecorder.
+type orderRecordingRepo struct {
+	*sqlite.Repository
+	order *callOrderRecorder
+}
+
+func (r *orderRecordingRepo) Claim(ctx context.Context, policyID, periodKey, level string) (bool, error) {
+	claimed, err := r.Repository.Claim(ctx, policyID, periodKey, level)
+	r.order.record("claim:" + level)
+	return claimed, err
+}
+
+// orderRecordingActivity implements shared.ActivityLogger and records each
+// submitted action into the same callOrderRecorder as orderRecordingRepo,
+// so a test can assert the interleaving of claims and emissions.
+type orderRecordingActivity struct {
+	order *callOrderRecorder
+}
+
+func (a *orderRecordingActivity) LogActivity(_ context.Context, _, _, _, action, _, _, _ string) {
+	a.order.record("emit:" + action)
+}
+
+func (a *orderRecordingActivity) LogActivityWithRun(
+	ctx context.Context, wsID, actorType, actorID, action, targetType, targetID, details, _, _ string,
+) {
+	a.LogActivity(ctx, wsID, actorType, actorID, action, targetType, targetID, details)
 }
 
 // repoAgents adapts the office repository to shared.AgentReader +
