@@ -60,6 +60,18 @@ describe("useSessionResumption task navigation", () => {
     await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(2));
 
     await act(async () => {
+      oldRequest.resolve({
+        session_id: SESSION_ID,
+        task_id: PREVIOUS_TASK_ID,
+        state: "FAILED",
+        is_agent_running: false,
+        is_resumable: false,
+        needs_resume: false,
+        error: "session does not belong to task",
+        updated_at: "2026-01-03T00:00:00.000Z",
+      });
+    });
+    await act(async () => {
       currentRequest.resolve({
         session_id: SESSION_ID,
         task_id: TASK_ID,
@@ -70,20 +82,62 @@ describe("useSessionResumption task navigation", () => {
         updated_at: "2026-01-02T00:00:00.000Z",
       });
     });
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.sessionStatus?.task_id).toBe(TASK_ID);
+    expect(mockSetTaskSession).toHaveBeenCalledTimes(1);
+    expect(mockSetTaskSession).toHaveBeenCalledWith(
+      expect.objectContaining({ task_id: TASK_ID, state: "WAITING_FOR_INPUT" }),
+    );
+  });
+
+  // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.7
+  it("ignores an obsolete response when navigation returns to the same task and session", async () => {
+    const firstRequest = Promise.withResolvers<unknown>();
+    const middleRequest = Promise.withResolvers<unknown>();
+    const currentRequest = Promise.withResolvers<unknown>();
+    mockRequest
+      .mockReturnValueOnce(firstRequest.promise)
+      .mockReturnValueOnce(middleRequest.promise)
+      .mockReturnValueOnce(currentRequest.promise);
+
+    const { result, rerender } = renderHook(
+      ({ taskId }: { taskId: string }) => useSessionResumption(taskId, SESSION_ID),
+      { initialProps: { taskId: PREVIOUS_TASK_ID } },
+    );
+
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
+    rerender({ taskId: TASK_ID });
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(2));
+    rerender({ taskId: PREVIOUS_TASK_ID });
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(3));
+
     await act(async () => {
-      oldRequest.resolve({
+      currentRequest.resolve({
+        session_id: SESSION_ID,
+        task_id: PREVIOUS_TASK_ID,
+        state: "WAITING_FOR_INPUT",
+        is_agent_running: false,
+        is_resumable: false,
+        needs_resume: false,
+        updated_at: "2026-01-02T00:00:00.000Z",
+      });
+      firstRequest.resolve({
         session_id: SESSION_ID,
         task_id: PREVIOUS_TASK_ID,
         state: "FAILED",
         is_agent_running: false,
         is_resumable: false,
         needs_resume: false,
-        error: "session does not belong to task",
-        updated_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-03T00:00:00.000Z",
       });
     });
 
     expect(result.current.error).toBeNull();
-    expect(result.current.sessionStatus?.task_id).toBe(TASK_ID);
+    expect(result.current.sessionStatus?.task_id).toBe(PREVIOUS_TASK_ID);
+    expect(mockSetTaskSession).toHaveBeenCalledTimes(1);
+    expect(mockSetTaskSession).toHaveBeenCalledWith(
+      expect.objectContaining({ task_id: PREVIOUS_TASK_ID, state: "WAITING_FOR_INPUT" }),
+    );
   });
 });

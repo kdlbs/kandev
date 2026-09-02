@@ -42,7 +42,7 @@ Preserve the observable behavior documented for Agent Resume and Runtime Recover
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.4:** A user can select read-only workspace restore after a manual resume failure. Kandev does not silently replace a manual Resume request with read-only restore.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.5:** Desktop, narrow desktop, and mobile task views use the existing inline alert and chat recovery patterns. Recovery actions remain reachable by keyboard and touch without horizontal overflow.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.6:** A Retry recovery control is disabled while its recovery request is in flight on every recovery surface. A repeated attempt cannot create overlapping `session.recover` requests.
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.7:** When task navigation changes the active task while an automatic session-status or recovery request is in flight, the task view ignores the result owned by the prior task-session identity. An error from the prior identity does not appear on the newly selected task.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.7:** When task navigation changes the active task while an automatic session-status or recovery request is in flight, the task view ignores the result owned by the prior task-session identity. An error from the prior identity does not appear on the newly selected task. Each navigation cycle invalidates prior attempts even when the task-session pair later repeats.
 
 ### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003: Explicit continuation after branch loss
 
@@ -196,6 +196,10 @@ without repairing it.
   task's automatic session-status request remains unresolved, **WHEN** the
   prior result arrives after the current request starts, **THEN** the current
   task ignores the prior result and does not show its recovery error.
+- **GIVEN** navigation leaves a task-session pair and then returns to the same
+  pair while the first request remains unresolved, **WHEN** the first result
+  arrives after the return request starts, **THEN** the returned task ignores
+  the obsolete result and keeps the return request's state.
 - **GIVEN** the stored worktree branch is absent locally and on its configured
   remote, **WHEN** Resume fails, **THEN** the UI offers **Continue on a new
   branch** and does not run it automatically.

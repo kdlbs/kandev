@@ -54,10 +54,11 @@ a focused hook regression test.
 ## Technical approach
 
 Replace the session-only active-request reference in
-`useSessionResetAndCheck` with a task-session identity. Capture that identity
-when a status check begins and let guarded setters mutate error, notice,
-attempt, and status state only while the complete identity remains current.
-Keep the request and recovery protocol unchanged.
+`useSessionResetAndCheck` with a task-session identity and a monotonic
+navigation generation. Publish the identity during commit, capture it when a
+status check begins, and let guarded setters mutate error, notice, attempt,
+and status state only while the complete identity remains current. Keep the
+request and recovery protocol unchanged.
 
 Start with a failing regression in the existing stale-callback test group. The
 test rerenders the hook with a different task ID and the same session ID, lets
@@ -90,7 +91,10 @@ so the package is sequential.
 
 - A session-only check can reintroduce the race when two tasks reference the
   same route session during store convergence. Keep the complete identity in
-  one comparison boundary.
+  one comparison boundary and include a generation for repeated navigation to
+  the same pair.
+- Publishing the identity in a passive effect leaves a commit-to-effect race.
+  Update it in a layout effect before asynchronous callbacks can run.
 - An over-broad cancellation mechanism could discard a valid response for the
   current task. Test that the current request still updates state normally.
 - Updating only error setters would leave stale status or notice writes
@@ -104,12 +108,15 @@ the work order and update both plan statuses when verification passes.
 ## Results
 
 - Automatic status, recovery feedback, and delayed remote-status callbacks are
-  guarded by the complete task-session request key.
+  guarded by the complete task-session request key and a monotonic generation.
+- The active identity is published in a commit-phase layout effect, so a
+  previous callback cannot run through the passive-effect setup window.
 - Session status snapshots are also keyed by the complete identity, so a task
   change cannot reuse status merely because its session ID is unchanged.
-- The deterministic navigation regression failed before the production change
-  with `session does not belong to task` and passes after the change.
-- Both focused test files pass 20 tests. Targeted lint, web typecheck, Prettier,
+- The deterministic navigation regressions cover both task changes and
+  navigation that returns to the same task-session pair. The original test
+  failed before the production change with `session does not belong to task`.
+- Both focused test files pass 21 tests. Targeted lint, web typecheck, Prettier,
   specification lint, and `git diff --check` pass.
 - No Playwright test was added because the change normalizes shared state and
   does not alter layout, touch behavior, scrolling, navigation, or responsive

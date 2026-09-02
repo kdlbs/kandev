@@ -240,9 +240,13 @@ An automatic status or recovery attempt is owned by the complete task-session
 identity, not by the session ID alone. Task navigation can briefly present the
 new route session while the task store still contains the previously active
 task. Each callback therefore applies feedback and status only when both its
-captured task ID and session ID still match the current request identity. A
-late result from the prior task cannot set an error, notice, or status on the
-newly selected task.
+captured task ID and session ID still match the current request identity. The
+identity also carries a monotonic generation that changes on every committed
+navigation cycle, so returning to the same task-session pair still invalidates
+callbacks from the earlier cycle. The frontend publishes the identity during
+the commit phase, before passive effects can start or finish a request. A late
+result from the prior task or navigation cycle cannot set an error, notice, or
+status on the newly selected task.
 
 ## Frontend status rendering
 

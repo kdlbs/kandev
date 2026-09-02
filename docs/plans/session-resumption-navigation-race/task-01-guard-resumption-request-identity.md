@@ -26,7 +26,9 @@ when the old and current requests use the same session ID.
 - Rerender the hook with a new task ID while preserving the session ID.
 - Control both status promises so the stale old-task result arrives after the
   current request has started.
-- Make every request-owned setter validate the captured task ID and session ID.
+- Make every request-owned setter validate the captured task ID, session ID,
+  and monotonic navigation generation.
+- Publish the active request identity during commit before passive effects run.
 - Preserve current automatic resume, read-only fallback, and status behavior
   for the active identity.
 
@@ -42,6 +44,8 @@ when the old and current requests use the same session ID.
 - A result captured for the prior task cannot set recovery error, notice,
   attempt, or session-status state after the task ID changes.
 - The guard rejects the stale result when the session ID remains unchanged.
+- A repeated task-session pair receives a new generation, so an earlier
+  navigation cycle cannot update the returned task.
 - The current task-session request still updates state normally.
 - The focused hook suite, targeted lint, and web typecheck pass.
 
@@ -62,6 +66,7 @@ then the complete commands above.
 ## Files likely touched
 
 - `apps/web/hooks/domains/session/use-session-resumption.ts`
+- `apps/web/hooks/domains/session/use-session-resumption-request-guard.ts`
 - `apps/web/hooks/domains/session/use-session-resumption.test.ts`
 - `apps/web/hooks/domains/session/use-session-resumption.navigation.test.ts`
 - `docs/plans/session-resumption-navigation-race/plan.md`
@@ -92,9 +97,9 @@ to `implemented` only after all task checks pass.
 - RED: the exact navigation regression failed because the stale old-task
   response set `session does not belong to task` after the correct response.
 - GREEN: the exact regression passes after the task-session request-key guard.
-- GREEN: the two focused session-resumption test files pass 20 tests.
+- GREEN: the two focused session-resumption test files pass 21 tests.
 - GREEN: targeted ESLint completes with no warnings or errors, web typecheck
-  exits successfully, and both changed TypeScript files pass Prettier.
+  exits successfully, and all changed TypeScript files pass Prettier.
 - GREEN: all specification files pass their linter and `git diff --check`
   succeeds.
 - Mobile parity is preserved through the shared hook. No rendered or
