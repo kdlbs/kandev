@@ -567,6 +567,7 @@ func (s *Service) CancelTransientRetry(ctx context.Context, taskID, sessionID st
 		SessionID:        sessionID,
 		AgentExecutionID: execID,
 		ErrorMessage:     "Automatic provider retries cancelled. Resume or start fresh to continue.",
+		UserInitiated:    true,
 	})
 	return true
 }

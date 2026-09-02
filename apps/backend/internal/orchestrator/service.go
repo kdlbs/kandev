@@ -18,6 +18,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -647,6 +648,12 @@ type Service struct {
 	// Workflow engine for typed state-machine evaluation of step transitions
 	workflowEngine *engine.Engine
 	workflowStore  *workflowStore
+	// agentErrorDeps bundles the engine, callback registry and store the
+	// on_agent_error dispatch reads, published as one atomic value by
+	// initWorkflowEngine so a dispatch racing a Set* reinit never pairs a new
+	// engine with a stale registry or store (see agentErrorDispatchDeps' own
+	// doc comment).
+	agentErrorDeps atomic.Pointer[agentErrorDispatchDeps]
 	// childCompletionLocks serializes duplicate on_children_completed deliveries.
 	childCompletionLocksMu sync.Mutex
 	childCompletionLocks   map[string]*childCompletionOperationLock
@@ -1849,6 +1856,11 @@ func (s *Service) initWorkflowEngine() {
 	// dependencies those methods wire in after Service creation.
 	options := append([]engine.Option{engine.WithLogger(s.logger)}, s.engineOptions...)
 	s.workflowEngine = engine.New(store, callbacks, options...)
+	s.agentErrorDeps.Store(&agentErrorDispatchDeps{
+		engine:   s.workflowEngine,
+		registry: callbacks,
+		store:    store,
+	})
 }
 
 // SetEngineRunQueue wires the engine's RunQueueAdapter dependency. Used

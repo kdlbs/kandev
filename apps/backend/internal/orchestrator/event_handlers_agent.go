@@ -1435,7 +1435,7 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	// failure path.
 	errMsg := data.ErrorMessage
 	if errMsg == "" {
-		errMsg = "agent failed"
+		errMsg = defaultAgentFailedMessage
 	}
 	s.finalizeAutomationRun(ctx, data.TaskID, false, errMsg)
 
@@ -1821,12 +1821,16 @@ func (s *Service) handleRecoverableFailureLocked(ctx context.Context, data watch
 
 	// Clean up the agent execution.
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+
+	// Last action of terminal-failure handling (AC-A3): does not wait on the
+	// cleanup goroutine above nor assume it completed.
+	s.dispatchKanbanAgentErrorTrigger(ctx, data)
 }
 
 func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentEventData) {
 	errMsg := data.ErrorMessage
 	if errMsg == "" {
-		errMsg = "agent failed"
+		errMsg = defaultAgentFailedMessage
 	}
 	details := routingerr.Sanitize(data.FailureDetails)
 	// Keep this metadata until the user dismisses the UI notice locally or a
