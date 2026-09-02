@@ -1,7 +1,10 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import type { MockGitLabIssueSeed } from "../../helpers/api-client";
 import { GITLAB_PROJECT } from "../../helpers/gitlab";
 import { GitLabPage } from "../../pages/gitlab-page";
+
+const ISSUES_ENDPOINT = /^\/api\/v1\/gitlab\/user\/issues$/;
 
 function seededIssue(
   iid: number,
@@ -44,7 +47,9 @@ test.describe("GitLab issue milestone filter", () => {
     const gitlab = new GitLabPage(testPage);
     await gitlab.goto();
     const scopeBar = testPage.getByTestId("gitlab-presets-scope-bar");
+    const initialIssuesLoaded = waitForHttp(testPage, "GET", ISSUES_ENDPOINT);
     await scopeBar.getByRole("button", { name: "Issues", exact: true }).click();
+    await initialIssuesLoaded;
 
     await expect(gitlab.issueRow(501)).toBeVisible();
     await expect(gitlab.issueRow(502)).toBeVisible();
@@ -59,40 +64,50 @@ test.describe("GitLab issue milestone filter", () => {
     await milestoneInput.fill("Next");
     await expect(gitlab.issueRow(502)).toBeVisible();
 
+    const narrowed = waitForHttp(testPage, "GET", ISSUES_ENDPOINT);
     await milestoneInput.press("Enter");
+    await narrowed;
     await expect(gitlab.issueRow(501)).toBeVisible();
-    await expect(gitlab.issueRow(502)).toHaveCount(0, { timeout: 20_000 });
+    await expect(gitlab.issueRow(502)).toHaveCount(0);
 
     // No match renders the empty state, not an error.
+    const noMatch = waitForHttp(testPage, "GET", ISSUES_ENDPOINT);
     await milestoneInput.fill("Nonexistent");
     await milestoneInput.press("Enter");
-    await expect(testPage.getByText("No issues match this filter.", { exact: true })).toBeVisible({
-      timeout: 20_000,
-    });
+    await noMatch;
+    await expect(testPage.getByText("No issues match this filter.", { exact: true })).toBeVisible();
 
     // Clearing the milestone restores the unfiltered list.
+    const cleared = waitForHttp(testPage, "GET", ISSUES_ENDPOINT);
     await milestoneInput.fill("");
     await milestoneInput.press("Enter");
-    await expect(gitlab.issueRow(501)).toBeVisible({ timeout: 20_000 });
+    await cleared;
+    await expect(gitlab.issueRow(501)).toBeVisible();
     await expect(gitlab.issueRow(502)).toBeVisible();
 
+    const reNarrowed = waitForHttp(testPage, "GET", ISSUES_ENDPOINT);
     await milestoneInput.fill("Next");
     await milestoneInput.press("Enter");
-    await expect(gitlab.issueRow(502)).toHaveCount(0, { timeout: 20_000 });
+    await reNarrowed;
+    await expect(gitlab.issueRow(502)).toHaveCount(0);
 
     // Switching the sidebar preset clears the committed milestone.
+    const presetSwitched = waitForHttp(testPage, "GET", ISSUES_ENDPOINT);
     await scopeBar.getByRole("button", { name: "Created", exact: true }).click();
+    await presetSwitched;
     await expect(milestoneInput).toHaveValue("");
-    await expect(gitlab.issueRow(502)).toBeVisible({ timeout: 20_000 });
+    await expect(gitlab.issueRow(502)).toBeVisible();
 
     // Merge requests view never renders the milestone control and is unaffected.
     await scopeBar.getByRole("button", { name: "Merge requests", exact: true }).click();
     await expect(testPage.getByTestId("gitlab-milestone-filter")).toHaveCount(0);
 
     // Switching back to Issues shows an empty input over an unnarrowed list.
+    const backToIssues = waitForHttp(testPage, "GET", ISSUES_ENDPOINT);
     await scopeBar.getByRole("button", { name: "Issues", exact: true }).click();
+    await backToIssues;
     await expect(testPage.getByTestId("gitlab-milestone-filter")).toHaveValue("");
-    await expect(gitlab.issueRow(501)).toBeVisible({ timeout: 20_000 });
+    await expect(gitlab.issueRow(501)).toBeVisible();
     await expect(gitlab.issueRow(502)).toBeVisible();
   });
 
@@ -101,6 +116,10 @@ test.describe("GitLab issue milestone filter", () => {
     apiClient,
     seedData,
   }) => {
+    // Retained at its pre-existing value: the delete step below keeps its
+    // pre-existing bounded-timeout click (see comment there) rather than an
+    // armed wait, so this budget still needs to absorb that step's documented
+    // host-load variance, not just the causal-waited steps above it.
     test.setTimeout(180_000);
     await apiClient.configureGitLab(seedData.workspaceId);
     await apiClient.mockGitLabAddIssues(seedData.workspaceId, GITLAB_PROJECT, [
@@ -114,11 +133,13 @@ test.describe("GitLab issue milestone filter", () => {
     await scopeBar.getByRole("button", { name: "Issues", exact: true }).click();
 
     const milestoneInput = testPage.getByTestId("gitlab-milestone-filter");
+    const committed = waitForHttp(testPage, "GET", ISSUES_ENDPOINT);
     await milestoneInput.fill("  Sprint 42  ");
     await milestoneInput.press("Enter");
+    await committed;
     // Commit normalizes the visible input, not just the outgoing request.
     await expect(milestoneInput).toHaveValue("Sprint 42");
-    await expect(gitlab.issueRow(601)).toBeVisible({ timeout: 20_000 });
+    await expect(gitlab.issueRow(601)).toBeVisible();
     await expect(gitlab.issueRow(602)).toHaveCount(0);
 
     const savedMenu = testPage.getByTestId("gitlab-saved-queries-menu");
@@ -136,18 +157,31 @@ test.describe("GitLab issue milestone filter", () => {
     await expect(savedMenu).toContainText("Sprint 42");
 
     // Selecting a sidebar preset clears the milestone and widens the list again.
+    const presetSwitched = waitForHttp(testPage, "GET", ISSUES_ENDPOINT);
     await scopeBar.getByRole("button", { name: "Created", exact: true }).click();
+    await presetSwitched;
     await expect(milestoneInput).toHaveValue("");
-    await expect(gitlab.issueRow(602)).toBeVisible({ timeout: 20_000 });
+    await expect(gitlab.issueRow(602)).toBeVisible();
 
     // Reselecting the saved query restores its committed milestone.
     await savedMenu.click();
+    const reselected = waitForHttp(testPage, "GET", ISSUES_ENDPOINT);
     await testPage.getByRole("menuitem", { name: "Sprint 42", exact: true }).click();
+    await reselected;
     await expect(milestoneInput).toHaveValue("Sprint 42");
-    await expect(gitlab.issueRow(601)).toBeVisible({ timeout: 20_000 });
+    await expect(gitlab.issueRow(601)).toBeVisible();
     await expect(gitlab.issueRow(602)).toHaveCount(0);
 
     // Deleting the selected saved query clears the milestone in the same update.
+    // Unlike every other step above, this one keeps its pre-existing bounded
+    // timeout instead of an armed waitForHttp: the click target is the menu
+    // item being deleted, so it can detach from the DOM mid-click under load,
+    // and racing that against a concurrently-pending network wait risks an
+    // unhandled rejection if the click's own actionability retries outlast
+    // the wait's budget. This exact interaction is the test's documented,
+    // independently-investigated pre-existing flake (see task plan); the
+    // trailing assertions' own polling plus this timeout is the established
+    // mitigation, not a new one.
     await savedMenu.click();
     await testPage.getByRole("menuitem", { name: "Delete Sprint 42 saved query" }).click();
     await expect(milestoneInput).toHaveValue("");
@@ -171,21 +205,27 @@ test.describe("GitLab issue milestone filter", () => {
     const gitlab = new GitLabPage(testPage);
     await gitlab.goto();
     const scopeBar = testPage.getByTestId("gitlab-presets-scope-bar");
+    const initialIssuesLoaded = waitForHttp(testPage, "GET", ISSUES_ENDPOINT);
     await scopeBar.getByRole("button", { name: "Issues", exact: true }).click();
-    await expect(gitlab.issueRow(801)).toBeVisible({ timeout: 20_000 });
+    await initialIssuesLoaded;
+    await expect(gitlab.issueRow(801)).toBeVisible();
 
+    const page2Loaded = waitForHttp(testPage, "GET", ISSUES_ENDPOINT);
     await testPage.getByRole("link", { name: "2", exact: true }).click();
-    await expect(gitlab.issueRow(830)).toBeVisible({ timeout: 20_000 });
+    await page2Loaded;
+    await expect(gitlab.issueRow(830)).toBeVisible();
     await expect(testPage.getByRole("link", { name: "2", exact: true })).toHaveAttribute(
       "aria-current",
       "page",
     );
 
     const milestoneInput = testPage.getByTestId("gitlab-milestone-filter");
+    const filtered = waitForHttp(testPage, "GET", ISSUES_ENDPOINT);
     await milestoneInput.fill("Sprint 1");
     await milestoneInput.press("Enter");
+    await filtered;
 
-    await expect(gitlab.issueRow(801)).toBeVisible({ timeout: 20_000 });
+    await expect(gitlab.issueRow(801)).toBeVisible();
     await expect(testPage.getByRole("link", { name: "1", exact: true })).toHaveAttribute(
       "aria-current",
       "page",

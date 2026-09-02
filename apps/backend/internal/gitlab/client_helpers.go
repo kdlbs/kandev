@@ -516,20 +516,18 @@ func buildIssueSearchQuery(filter, customQuery, milestone string) string {
 	return values.Encode()
 }
 
-// foldMilestoneIntoQuery merges a milestone into an existing customQuery
-// string, mirroring appendLabelsToQuery's precedent: a custom query that
-// already names the `milestone` key wins (even if the value is empty), and
-// an unparseable custom query still gets the milestone appended rather than
-// silently dropping the user's filter selection.
+// foldMilestoneIntoQuery merges a milestone into an existing, non-empty
+// customQuery string, mirroring appendLabelsToQuery's precedent: a custom
+// query that already names the `milestone` key wins (even if the value is
+// empty), and an unparseable custom query still gets the milestone appended
+// rather than silently dropping the user's filter selection. The only caller,
+// buildIssueSearchQuery, guards both arguments non-empty before calling this,
+// so there is no empty-customQuery case to handle here.
 func foldMilestoneIntoQuery(customQuery, milestone string) string {
 	if parsed, err := url.ParseQuery(customQuery); err == nil && parsed.Has("milestone") {
 		return customQuery
 	}
-	encoded := url.QueryEscape(milestone)
-	if customQuery == "" {
-		return "milestone=" + encoded
-	}
-	return customQuery + "&milestone=" + encoded
+	return customQuery + "&milestone=" + url.QueryEscape(milestone)
 }
 
 // filterTokenReviewRequested is the /gitlab page tab value that maps to

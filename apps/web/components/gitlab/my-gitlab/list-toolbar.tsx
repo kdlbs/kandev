@@ -82,8 +82,7 @@ function MilestoneFilterInput({
       onBlur={() => {
         if (milestone !== committedMilestone) onCommitMilestone();
       }}
-      // eslint-disable-next-line i18next/no-literal-string -- example milestone title
-      placeholder="e.g. Sprint 42"
+      placeholder={t("gitlab:eGSprint42")}
       aria-label={t("gitlab:milestoneFilterLabel")}
       className="h-8 w-full md:w-[180px]"
       data-testid="gitlab-milestone-filter"
