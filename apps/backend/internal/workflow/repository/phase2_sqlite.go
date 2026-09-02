@@ -57,6 +57,9 @@ func (r *Repository) initPhase2Schema() error {
 		ALTER TABLE workflow_step_participants
 		ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
 	`)
+	if err := r.backfillParticipantsCreatedAtFromRowid(); err != nil {
+		return fmt.Errorf("failed to backfill workflow_step_participants.created_at: %w", err)
+	}
 	// provenance predates this column on any database that already had this
 	// table; the ADD COLUMN default backfills existing rows to "manual" so a
 	// pre-existing seat is never treated as claimable (AddTaskParticipant
@@ -126,6 +129,29 @@ func (r *Repository) initPhase2Schema() error {
 	}
 
 	return nil
+}
+
+// backfillParticipantsCreatedAtFromRowid maps every workflow_step_participants
+// row still at the ADD COLUMN default ('1970-01-01 00:00:00', see the
+// created_at migration above) onto its rowid insertion order, one second
+// apart. Before this column existed, RunnerProjection's task-scoped fallback
+// (office/repository/sqlite/base.go) ordered by rowid DESC to pick the most
+// recently assigned runner; without this backfill every legacy row ties on
+// created_at and the tiebreak (wsp.id ASC) picks an arbitrary UUID instead.
+// Idempotent: once backfilled a row's created_at no longer matches the
+// default, so re-running finds nothing to update. Postgres has no rowid and
+// needs no backfill — no legacy rows can exist there, since every query
+// inlining RunnerProjection errored outright before this fix.
+func (r *Repository) backfillParticipantsCreatedAtFromRowid() error {
+	if dialect.IsPostgres(r.db.DriverName()) {
+		return nil
+	}
+	_, err := r.db.Exec(`
+		UPDATE workflow_step_participants
+		SET created_at = datetime('1970-01-01 00:00:00', '+' || rowid || ' seconds')
+		WHERE created_at = '1970-01-01 00:00:00'
+	`)
+	return err
 }
 
 // dedupeActiveStepDecisionsBeforeUniqueIndex supersedes every active
