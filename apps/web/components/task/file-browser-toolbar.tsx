@@ -172,21 +172,21 @@ function CreateMenu({
       </Tooltip>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuItem
-          className="min-h-11 cursor-pointer gap-2 sm:min-h-8"
+          className="min-h-[44px] cursor-pointer gap-2 sm:min-h-8"
           onSelect={onStartCreate}
         >
           <IconFilePlus className="h-3.5 w-3.5" />
           {t("task:newFile")}
         </DropdownMenuItem>
         <DropdownMenuItem
-          className="min-h-11 cursor-pointer gap-2 sm:min-h-8"
+          className="min-h-[44px] cursor-pointer gap-2 sm:min-h-8"
           onSelect={() => onUploadFiles("files")}
         >
           <IconUpload className="h-3.5 w-3.5" />
           {t("task:uploadFiles")}
         </DropdownMenuItem>
         <DropdownMenuItem
-          className="min-h-11 cursor-pointer gap-2 sm:min-h-8"
+          className="min-h-[44px] cursor-pointer gap-2 sm:min-h-8"
           onSelect={() => onUploadFiles("folder")}
         >
           <IconFolderUp className="h-3.5 w-3.5" />

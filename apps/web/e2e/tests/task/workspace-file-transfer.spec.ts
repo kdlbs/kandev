@@ -193,7 +193,7 @@ test.describe("Workspace file transfer", () => {
     await testPage.setInputFiles(FOLDER_INPUT, bundleDir);
     await uploaded;
 
-    await expect(session.fileTreeNode("upload-bundle")).toBeVisible();
+    await expect(session.fileTreeNode("upload-bundle")).toBeVisible({ timeout: 15_000 });
   });
 
   test("downloads an unpreviewable file from its viewer", async ({

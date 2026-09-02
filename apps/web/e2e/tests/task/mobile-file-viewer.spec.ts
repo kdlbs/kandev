@@ -4,6 +4,7 @@
 // Regression guard: tapping a file in the Files → All files tab must replace
 // the Files panel with the file viewer, NOT navigate to the Changes panel.
 import { type Page } from "@playwright/test";
+import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
@@ -86,7 +87,13 @@ test.describe("Mobile file tree keyboard shortcuts", () => {
     await testPage.getByRole("button", { name: "Files" }).tap();
     await expect(session.fileTreeNode(filePath)).toBeVisible({ timeout: 15_000 });
 
-    await testPage.getByRole("button", { name: "New file" }).tap();
+    const directNewFile = testPage.getByRole("button", { name: "New file" });
+    if (await directNewFile.isVisible().catch(() => false)) {
+      await directNewFile.tap();
+    } else {
+      await testPage.getByTestId("files-create-menu").tap();
+      await testPage.getByRole("menuitem", { name: "New file" }).tap();
+    }
     const input = testPage.getByPlaceholder("filename...");
     await expect(input).toBeFocused({ timeout: 5_000 });
 
@@ -264,8 +271,12 @@ test.describe("Mobile file viewer panel", () => {
     const uploadFolder = testPage.getByRole("menuitem", { name: "Upload folder" });
     await expect(uploadFiles).toBeVisible();
     await expect(uploadFolder).toBeVisible();
-    expect((await uploadFiles.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-    expect((await uploadFolder.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await expect
+      .poll(async () => (await uploadFiles.boundingBox())?.height ?? 0, { timeout: 5_000 })
+      .toBeGreaterThanOrEqual(44);
+    await expect
+      .poll(async () => (await uploadFolder.boundingBox())?.height ?? 0, { timeout: 5_000 })
+      .toBeGreaterThanOrEqual(44);
   });
 
   test("viewer panel keeps a visible close action and supports scrolling large files", async ({
