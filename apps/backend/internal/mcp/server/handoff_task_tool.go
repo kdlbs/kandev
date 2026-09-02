@@ -28,7 +28,7 @@ func (s *Server) registerHandoffTaskTool() {
 			mcp.WithString("executor_profile_id", mcp.Required(), mcp.Description("Executor profile to run the delivery task. Must exist. Used exactly as supplied: no inheritance or defaulting.")),
 			mcp.WithString("repository_id", mcp.Description("Optional. Must already exist in target_workspace_id. When omitted the delivery task is created with no repositories — none is inherited from your own task.")),
 			mcp.WithString("base_branch", mcp.Description("Optional, and only valid together with repository_id. Defaults to that repository's default_branch when omitted.")),
-			mcp.WithBoolean("start_agent", mcp.Description("Whether to start the delivery agent immediately. Default: false, diverging from create_task_kandev.")),
+			mcp.WithBoolean("start_agent", mcp.Description("Whether to start the delivery agent immediately. Default: false, diverging from create_task_kandev. When true, this call blocks until the delivery agent is ready or times out (up to 22 minutes for containerized executors) — a truthful answer costs a long synchronous hold.")),
 			mcp.WithString("external_id", mcp.Description("A stable identifier from your own system (e.g. derived from the deciding artefact). Creating a handoff twice with the same external_id in target_workspace_id returns the existing delivery task instead of making a duplicate. Without it the call is not idempotent — do not derive one from title, which changes freely between attempts.")),
 		),
 		s.wrapHandler("handoff_task_kandev", s.handoffTaskHandler()),
