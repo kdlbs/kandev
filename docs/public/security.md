@@ -7,7 +7,7 @@ description: "Choose a safe Kandev deployment boundary, constrain agent access, 
 
 Kandev is a developer workbench that runs agents with access to repositories, tools, and credentials. Its local-first model lets an agent use the same Git host, issue tracker, editor, shell, and command-line access available to the Kandev process. That is useful, but it also means the operating-system account, executor, network, and agent profile are the security boundary.
 
-> Kandev does not currently provide a multi-user login, role-based access control, or an authorization boundary for its web UI, HTTP API, WebSocket, or external MCP routes. Treat anyone who can reach the backend as an operator with the potential to read or change developer data.
+> Kandev's multi-user login is opt-in: enabling the `features.auth` runtime flag (Settings > System > Feature Toggles, or `KANDEV_FEATURES_AUTH`) adds users, admin/member roles, per-user workspaces, session cookies, personal access tokens, and SSO login via plugins. With auth disabled, Kandev has no authorization boundary for its web UI, HTTP API, WebSocket, or external MCP routes: treat anyone who can reach the backend as an operator with the potential to read or change developer data. Even with auth enabled, the operating-system account, executor, network, and agent profile remain the security boundary for what agents can do.
 
 ## Quick checklist
 
