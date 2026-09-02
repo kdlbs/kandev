@@ -26,16 +26,36 @@ const (
 	budgetActionBlockNewTasks = "block_new_tasks"
 )
 
+// Claim levels. See docs/specs/office/requirements/costs.md#terminology.
+const (
+	claimLevelAlert    = "alert"
+	claimLevelExceeded = "exceeded"
+)
+
+// claimPeriodLifetime is the period_key for a policy whose spend window
+// never resets (periodCutoff's zero-time "no filter" answer). It is a
+// literal rather than the RFC3339 rendering of the zero time so a future
+// change to periodCutoff's zero value can never collide with it.
+const claimPeriodLifetime = "lifetime"
+
 // BudgetCheckResult describes the outcome of a budget check.
-// SpentSubcents / LimitSubcents are hundredths of a cent.
+// SpentSubcents / LimitSubcents are hundredths of a cent. AlertFired /
+// LimitExceed report whether spend reaches that level *now* (used for
+// gating); AlertSubmitted / ExceededSubmitted report whether *this*
+// evaluation handed that level's row to the activity logger (used for
+// assertions and for callers that want to react only to new crossings).
+// The two pairs are independent: holding a claim does not imply a
+// submission, and a submission does not imply a claim was held.
 type BudgetCheckResult struct {
-	PolicyID       string
-	ActionOnExceed string
-	SpentSubcents  int64
-	LimitSubcents  int64
-	AlertFired     bool
-	LimitExceed    bool
-	AgentPaused    bool
+	PolicyID          string
+	ActionOnExceed    string
+	SpentSubcents     int64
+	LimitSubcents     int64
+	AlertFired        bool
+	LimitExceed       bool
+	AlertSubmitted    bool
+	ExceededSubmitted bool
+	AgentPaused       bool
 }
 
 // CheckBudget evaluates all budget policies for the given agent and project.
@@ -95,7 +115,8 @@ func (s *CostService) evaluatePolicy(
 	workspaceID string,
 	policy *BudgetPolicy,
 ) (BudgetCheckResult, error) {
-	spent, err := s.getSpendForPolicy(ctx, workspaceID, policy)
+	boundary := periodCutoff(string(policy.Period), time.Now())
+	spent, err := s.getSpendForPolicy(ctx, workspaceID, policy, boundary)
 	if err != nil {
 		return BudgetCheckResult{}, err
 	}
@@ -108,21 +129,84 @@ func (s *CostService) evaluatePolicy(
 		LimitSubcents:  limit,
 	}
 
+	periodKey := periodKeyFor(boundary)
 	threshold := limit * int64(policy.AlertThresholdPct) / 100
-	if spent >= threshold && spent < limit {
-		result.AlertFired = true
-		s.logBudgetAlert(ctx, workspaceID, policy, spent)
-	}
 
-	if spent >= limit {
+	switch {
+	case spent >= limit:
 		result.LimitExceed = true
 		if policy.ActionOnExceed == budgetActionPauseAgent && policy.ScopeType == scopeAgent {
 			result.AgentPaused = s.pauseAgentForBudget(ctx, policy.ScopeID)
 		}
-		s.logBudgetExceeded(ctx, workspaceID, policy, spent)
+		result.ExceededSubmitted = s.claimAndEmit(ctx, workspaceID, policy, spent, periodKey, claimLevelExceeded)
+		// A spend that jumps straight from below the alert level to above
+		// the limit must also hold the alert-level claim, so a later
+		// evaluation that lands back in the alert band does not emit a
+		// budget.alert describing a reduction in spend. The outcome is
+		// discarded (claimed or already-claimed are equally fine here); a
+		// claim-store error is still logged and counted like any other.
+		s.claimCompanionAlert(ctx, policy, periodKey)
+	case spent >= threshold:
+		result.AlertFired = true
+		result.AlertSubmitted = s.claimAndEmit(ctx, workspaceID, policy, spent, periodKey, claimLevelAlert)
 	}
 
 	return result, nil
+}
+
+// claimAndEmit resolves the three outcomes of claiming (policy, periodKey,
+// level) and emits that level's activity row when the claim allows it.
+// Reports whether this evaluation submitted the row.
+func (s *CostService) claimAndEmit(
+	ctx context.Context,
+	workspaceID string,
+	policy *BudgetPolicy,
+	spent int64,
+	periodKey, level string,
+) bool {
+	claimed, err := s.repo.Claim(ctx, policy.ID, periodKey, level)
+	if err != nil {
+		s.recordClaimFailure(policy.ID, level, err)
+		s.emitLevel(ctx, workspaceID, policy, spent, level)
+		return true
+	}
+	if !claimed {
+		return false
+	}
+	s.emitLevel(ctx, workspaceID, policy, spent, level)
+	return true
+}
+
+// claimCompanionAlert records the alert-level claim alongside an
+// exceeded-level emission, so a spend that jumps straight past the limit
+// still de-escalates correctly. Its outcome never changes the
+// budget.exceeded emission; only a claim-store error is reported, exactly
+// like any other claim attempt.
+func (s *CostService) claimCompanionAlert(ctx context.Context, policy *BudgetPolicy, periodKey string) {
+	if _, err := s.repo.Claim(ctx, policy.ID, periodKey, claimLevelAlert); err != nil {
+		s.recordClaimFailure(policy.ID, claimLevelAlert, err)
+	}
+}
+
+func (s *CostService) emitLevel(
+	ctx context.Context, workspaceID string, policy *BudgetPolicy, spent int64, level string,
+) {
+	if level == claimLevelExceeded {
+		s.logBudgetExceeded(ctx, workspaceID, policy, spent)
+		return
+	}
+	s.logBudgetAlert(ctx, workspaceID, policy, spent)
+}
+
+// recordClaimFailure logs and counts a claim-store failure encountered
+// while evaluating a policy. Never called for a foreign-key violation (the
+// referenced policy no longer exists, not a store failure) or for a failed
+// claim discard during a policy update, both of which are reported through
+// different channels.
+func (s *CostService) recordClaimFailure(policyID, level string, err error) {
+	budgetClaimFailuresTotal.Add(budgetClaimFailureLabel, 1)
+	s.logger.Error("budget claim store failure",
+		zap.String("policy_id", policyID), zap.String("level", level), zap.Error(err))
 }
 
 // periodCutoff returns the time.Time at which the policy's spend window
@@ -135,12 +219,24 @@ func periodCutoff(period string, now time.Time) time.Time {
 	return time.Time{}
 }
 
+// periodKeyFor renders a period boundary as the claim's stored identity.
+// The layout is contract, not local style: a non-zero boundary is RFC3339 in
+// UTC, and periodCutoff's zero-time "lifetime" answer renders as the
+// literal "lifetime" rather than the RFC3339 zero time, so it can never be
+// mistaken for a real instant.
+func periodKeyFor(boundary time.Time) string {
+	if boundary.IsZero() {
+		return claimPeriodLifetime
+	}
+	return boundary.UTC().Format(time.RFC3339)
+}
+
 func (s *CostService) getSpendForPolicy(
 	ctx context.Context,
 	workspaceID string,
 	policy *BudgetPolicy,
+	since time.Time,
 ) (int64, error) {
-	since := periodCutoff(string(policy.Period), time.Now())
 	switch policy.ScopeType {
 	case scopeAgent:
 		return s.repo.GetCostForAgentSince(ctx, policy.ScopeID, since)
