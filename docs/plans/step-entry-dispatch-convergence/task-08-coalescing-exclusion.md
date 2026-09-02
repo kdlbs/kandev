@@ -33,6 +33,11 @@ persisted columns only.
   and `internal/workflow/engine`, which must stay identical.
 - The engine setting it for every run enqueued by a step-entry action, and
   `shouldCoalesceRun` returning false when it is set.
+- `runsServiceEngineAdapter.QueueRun` (`internal/backendapp/main.go`) copying
+  `EntryTriggered` from the engine's `QueueRunRequest` onto the runs-service
+  request — it currently copies every other field, so an unpropagated flag
+  here would silently discard the engine's exclusion before persistence ever
+  sees it.
 - The `r.migrate.Apply("runs.entry_triggered", ...)` ALTER in the office
   repository, the insert path writing it, and `CoalesceRun`'s subquery gaining
   `AND entry_triggered = 0`.
@@ -63,9 +68,11 @@ cd apps/backend && go test ./internal/runs/service/... ./internal/office/reposit
 
 - `apps/backend/internal/runs/service/service.go`
 - `apps/backend/internal/runs/service/service_test.go`
-- `apps/backend/internal/workflow/engine/types.go`
+- `apps/backend/internal/workflow/engine/adapters.go`
 - `apps/backend/internal/office/repository/sqlite/base.go`
 - `apps/backend/internal/office/repository/sqlite/runs_test.go`
+- `apps/backend/internal/backendapp/main.go` (`runsServiceEngineAdapter.QueueRun`
+  must copy `EntryTriggered` through)
 
 ## Dependencies
 
@@ -87,7 +94,7 @@ Task 03, which establishes which dispatcher enqueues an entry-triggered run.
 
 - System design, "Coalescing exclusion" and "Migrated columns are probed before
   use".
-- `runs.outcome` in `internal/office/repository/sqlite/base.go` as the
+- `runs.outcome` in `internal/office/repository/sqlite/run_outcome_activation.go` as the
   precedent for both the ALTER site and the probe shape.
 
 ## Results

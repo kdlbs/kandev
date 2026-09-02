@@ -270,9 +270,12 @@ barrier between them.
 
 - Moving ownership changes idempotency keys, so a deployment landing mid-round
   can duplicate one round's runs once. No migration is proposed.
-- Unconditional allocation adds one `workflow_step_entries` row per arrival at
-  a step declaring a marker-bearing kind, on routes that previously allocated
-  none.
+- Allocation runs on the pre-existing `on_turn_complete` route only this round
+  (Bounded-scope decision above), so the entry-row growth this PR ships is
+  limited to a route that already allocated. Extending unconditional
+  allocation to the other routes (manual move, WIP promotion, workflow
+  switch) — which would add a row on routes that previously allocated
+  none — is deferred to Task 04.
 - The task lock widens a critical section that currently admits concurrent
   sessions of one task, making contention visible where it was previously
   silent corruption.

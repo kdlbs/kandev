@@ -5,7 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/testutil"
+	"github.com/kandev/kandev/internal/workflow/stepentry"
 )
 
 // TestPostgresMarkerPositionsMigrationOnLegacyDB is the Postgres counterpart
@@ -62,5 +64,105 @@ func TestPostgresMarkerPositionsMigrationOnLegacyDB(t *testing.T) {
 	}
 	if markerPositions != "" {
 		t.Errorf("marker_positions = %q, want \"\" (column default after ADD COLUMN)", markerPositions)
+	}
+}
+
+// TestPostgresUpdateTaskAllocatesStepEntryAndPersistsMarkerPositions is the
+// Postgres counterpart to TestUpdateTaskAllocatesStepEntryWhenPendingAllocationPresent
+// and TestUpdateTaskPersistsAllocatedMarkerPositions (step_entries_test.go).
+// Unlike TestPostgresMarkerPositionsMigrationOnLegacyDB above, which only
+// replays the ADD COLUMN migration against a manually inserted row, this
+// drives allocateStepEntryIfPending's actual INSERT ... RETURNING through
+// the production UpdateTask write path, so it exercises this dialect-
+// sensitive method's transaction, Rebind translation, position
+// serialization, and AllocationResult propagation against real Postgres —
+// per apps/backend/AGENTS.md:265 ("schema replay is insufficient"). Skips
+// unless KANDEV_TEST_POSTGRES_DSN is set.
+func TestPostgresUpdateTaskAllocatesStepEntryAndPersistsMarkerPositions(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-pg-marker-alloc", Name: "PG Marker Alloc Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	task := &models.Task{
+		ID:             "task-pg-marker-alloc",
+		WorkspaceID:    "ws-pg-marker-alloc",
+		WorkflowID:     "wf-pg-marker-alloc",
+		WorkflowStepID: "step-a",
+		Title:          "PG Marker Alloc Task",
+		Priority:       "medium",
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	task.WorkflowStepID = "step-review"
+	holder := &stepentry.AllocationResult{}
+	allocCtx := stepentry.WithResultHolder(ctx, holder)
+	allocCtx = stepentry.WithPendingAllocation(allocCtx, stepentry.PendingAllocation{
+		StepID: "step-review",
+		Digest: "digest-pg-1",
+		Positions: []stepentry.EnginePosition{
+			{Position: 0, Kind: "clear_decisions"},
+			{Position: 2, Kind: "queue_run_for_each_participant"},
+		},
+	})
+	if err := repo.UpdateTask(allocCtx, task); err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+
+	if holder.EntryID == 0 {
+		t.Fatalf("expected holder.EntryID to be populated, got 0")
+	}
+	if holder.EntrySeq != 1 {
+		t.Fatalf("EntrySeq = %d, want 1", holder.EntrySeq)
+	}
+
+	var stepID, digest, markerPositions string
+	if err := db.QueryRowContext(ctx, db.Rebind(`
+		SELECT step_id, digest, marker_positions FROM workflow_step_entries WHERE id = ?
+	`), holder.EntryID).Scan(&stepID, &digest, &markerPositions); err != nil {
+		t.Fatalf("query allocated row: %v", err)
+	}
+	if stepID != "step-review" {
+		t.Errorf("step_id = %q, want step-review", stepID)
+	}
+	if digest != "digest-pg-1" {
+		t.Errorf("digest = %q, want digest-pg-1", digest)
+	}
+	if markerPositions != "0,2" {
+		t.Errorf("marker_positions = %q, want %q (the allocated position set, not the column default)", markerPositions, "0,2")
+	}
+
+	// A second entry into the same (task, step) increments entry_seq, the
+	// same RETURNING-id/COUNT(*) transaction Postgres exercises identically
+	// to SQLite's single-writer pool — this is the invariant genuine
+	// concurrent Postgres connections could break if the two statements
+	// were not on one transaction, which schema replay alone cannot prove.
+	// Move away first (plain UpdateTask, no pending allocation) so the
+	// re-entry below is a genuine second arrival at step-review.
+	task.WorkflowStepID = "step-b"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("UpdateTask (move away from step-review): %v", err)
+	}
+
+	holder2 := &stepentry.AllocationResult{}
+	allocCtx2 := stepentry.WithResultHolder(ctx, holder2)
+	allocCtx2 = stepentry.WithPendingAllocation(allocCtx2, stepentry.PendingAllocation{
+		StepID:    "step-review",
+		Digest:    "digest-pg-2",
+		Positions: []stepentry.EnginePosition{{Position: 0, Kind: "clear_decisions"}},
+	})
+	task.WorkflowStepID = "step-review"
+	if err := repo.UpdateTask(allocCtx2, task); err != nil {
+		t.Fatalf("UpdateTask (re-enter step-review): %v", err)
+	}
+	if holder2.EntrySeq != 2 {
+		t.Fatalf("second entry EntrySeq = %d, want 2", holder2.EntrySeq)
 	}
 }

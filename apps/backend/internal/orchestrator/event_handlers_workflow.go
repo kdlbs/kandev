@@ -2749,7 +2749,16 @@ func (s *Service) dispatchOnEnterActions(ctx context.Context, taskID string, ses
 				// owns this kind and already dispatches it synchronously after
 				// commit via every step-transition writer. Dispatching it here
 				// too would run it twice, so this dispatcher skips it without
-				// a warning or a marker.
+				// a warning or a marker. Debug-only (not Warn): this fires on
+				// every normal entry through a step declaring a ledger-owned
+				// kind, which is the shipped default — a Debug line still lets
+				// a config author confirm the split without noising Warn-level
+				// logs for the common case.
+				s.logger.Debug("processOnEnter: skipping ledger-owned action kind (dispatched via DispatchStepEntry)",
+					zap.String("task_id", taskID),
+					zap.String("step_id", step.ID),
+					zap.String("action_type", string(action.Type)),
+				)
 				continue
 			}
 			s.logger.Warn("processOnEnter: unrecognized on_enter action type",
@@ -3183,6 +3192,8 @@ func (s *Service) dispatchClearDecisionsAtomic(
 	ctx context.Context, taskID, stepID string, entryID int64, position int,
 ) (handled, failed bool, cause string) {
 	if _, ok := s.engineDecisions.(*workflowadapters.DecisionAdapter); !ok {
+		s.logger.Debug("DispatchStepEntry: clear_decisions falling back to non-atomic path (decisions store is not DecisionAdapter)",
+			zap.String("task_id", taskID), zap.String("step_id", stepID))
 		return false, false, ""
 	}
 	if _, err := s.repo.ClearStepDecisionsAndCompleteMarker(ctx, taskID, stepID, entryID, position, time.Now()); err != nil {
