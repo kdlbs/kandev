@@ -4,11 +4,8 @@ Collect `base...HEAD`, staged, unstaged, and untracked paths. Deduplicate the
 union, then run every matching row. Prefer package/suite targets over
 individual test names so changed dependents remain covered. For an
 `apps/backend/**` path, the path match alone does not select the dialect or
-event-bus rows below: the file path proves nothing, so also inspect what the
-diff TOUCHES — `ALTER TABLE`, `CREATE INDEX`, a `dialect.IsPostgres` branch, a
-table-rebuild/cutover migration, SQLite-only `rowid`/JSON/date syntax, a
-changed event-bus subscriber, or a type assertion on `event.Data` — and apply
-the matching row(s) whenever a predicate hits.
+event-bus rows below. Inspect the diff, then apply each specialized row whenever
+its predicate matches.
 
 When the planner supplies a last verified SHA and a `/commit` hook receipt,
 read [hook-evidence.md](hook-evidence.md). Eligible hook evidence removes the
@@ -22,7 +19,7 @@ uncovered command.
 | `.github/workflows/**` | `python3 .github/scripts/lint-action-pinning_test.py` plus applicable harness lint |
 | `scripts/**`, `.github/scripts/**` | sibling syntax/test when obvious; otherwise `make test-scripts` |
 | `apps/backend/**` | `make fmt-backend`, `make test-backend`, `make lint-backend` |
-| A backend diff that changes dialect-sensitive schema or SQL, including `CREATE TABLE`, `ALTER TABLE`, `CREATE INDEX`, PostgreSQL-specific types/operators/functions, a `dialect.IsPostgres` branch, a table-rebuild/cutover migration, or SQLite-only `rowid`/JSON/date syntax | `KANDEV_TEST_POSTGRES_DSN=<dsn> make -C apps/backend test`, plus the changed package's own `*_postgres_test.go` by name (see `apps/backend/AGENTS.md` § Schema & migrations). No DSN available: record the gap explicitly instead of reporting a pass |
+| A backend diff that changes dialect-sensitive schema or SQL, including `CREATE TABLE`, `ALTER TABLE`, `CREATE INDEX`, PostgreSQL-specific types/operators/functions, a `dialect.IsPostgres` branch, a table-rebuild/cutover migration, or SQLite-only `rowid`/JSON/date syntax | `KANDEV_TEST_POSTGRES_DSN=<dsn> make -C apps/backend test`, plus the changed package's focused PostgreSQL tests by test name with verbose output (see `apps/backend/AGENTS.md` § Schema & migrations). Confirm that the focused tests pass instead of skipping. No DSN available: record the gap explicitly instead of reporting a pass |
 | A backend diff that adds or changes an event-bus subscriber, or type-asserts `event.Data` | Add a decode-path unit test that marshals the payload to JSON, decodes into `interface{}`, and invokes the subscriber with the resulting wire-shaped value (pattern: `TestGitHubPRMergedSubscriberAcceptsJSONDecodedPayload` in `internal/automation/github_pr_merged_subscriber_test.go`); a bare `event.Data.(*T)` assertion is a finding, since JSON decoding may produce a map, scalar, or array depending on the payload, not the typed pointer (see how `normalizeTaskPR` in `internal/automation/github_pr_merged_subscriber.go` accepts all three representations) |
 | Eligible narrow pure helper in `apps/web/**` | changed-file Prettier/ESLint when uncovered, package-local typecheck, and the helper's colocated test file |
 | `apps/web/**` | generate web metadata, `make fmt-web`, `make typecheck-web`, `make test-web`, `make lint-web` |
