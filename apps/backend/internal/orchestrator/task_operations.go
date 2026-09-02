@@ -930,9 +930,15 @@ func (s *Service) wrapCreatedSessionPrompt(
 		}
 		return prompt
 	case isOfficeTask:
+		includeHandoff, handoffErr := s.executor.AgentHasHandoffPermission(ctx, session.AgentProfileID)
+		if handoffErr != nil {
+			s.logger.Warn("resolve handoff permission for office prompt failed",
+				zap.String("task_id", taskID), zap.Error(handoffErr))
+			includeHandoff = false
+		}
 		return sysprompt.InjectOfficeContextWithOptions(
 			taskID, sessionID, prompt,
-			s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
+			s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID), includeHandoff,
 			referenceContext, promptReferenceContext, pullRequestTargetContext,
 		)
 	default:
@@ -1617,6 +1623,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			includeCanvasGuidance:     includeCanvasGuidance,
 			autopilot:                 task.Autopilot,
 			includeParentQuestionTool: task.Autopilot && task.ParentID != "",
+			agentProfileID:            launchSession.AgentProfileID,
 			spawnOrigin:               opts.SpawnOrigin,
 		})
 	}
@@ -1711,6 +1718,7 @@ type launchPromptContext struct {
 	includeParentQuestionTool bool
 	referenceContext          string
 	spawnOrigin               *SpawnOrigin
+	agentProfileID            string
 }
 
 // applyLaunchPromptContext prepends the first-turn system context to a launch
@@ -1737,9 +1745,15 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 	// that whitelists it as trusted content.
 	prompt, spawnContext := applySpawnOriginContext(p.prompt, p.spawnOrigin)
 	if p.isOfficeTask {
+		includeHandoff, handoffErr := s.executor.AgentHasHandoffPermission(ctx, p.agentProfileID)
+		if handoffErr != nil {
+			s.logger.Warn("resolve handoff permission for office prompt failed",
+				zap.String("task_id", p.taskID), zap.Error(handoffErr))
+			includeHandoff = false
+		}
 		return sysprompt.InjectOfficeContextWithOptions(
 			p.taskID, p.sessionID, prompt,
-			s.StepRequiresCompletionSignal(ctx, p.taskID),
+			s.StepRequiresCompletionSignal(ctx, p.taskID), includeHandoff,
 			p.referenceContext, spawnContext, pullRequestTargetContext,
 		)
 	}
