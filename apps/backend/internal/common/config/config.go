@@ -497,6 +497,13 @@ type FeaturesConfig struct {
 	// exposes pre-existing duplicate (task_id, agent_profile_id) rows until the
 	// companion unique-index fix has shipped.
 	OfficeSessionIdentity bool `mapstructure:"office_session_identity" json:"officeSessionIdentity"`
+
+	// AgentSurvival lets a worktree or local-executor agent session survive a
+	// backend restart by adopting its still-running standalone control server
+	// instead of killing it. Off in every embedded profile, and unavailable on
+	// Windows (survival trades the platform's kill-on-job-close safeguard for
+	// an adoption handshake, which is untested there).
+	AgentSurvival bool `mapstructure:"agent_survival" json:"agentSurvival"`
 }
 
 // LoggingConfig holds logging configuration.
