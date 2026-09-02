@@ -116,10 +116,10 @@ test.describe("GitLab issue milestone filter", () => {
     apiClient,
     seedData,
   }) => {
-    // Retained at its pre-existing value: the delete step below keeps its
-    // pre-existing bounded-timeout click (see comment there) rather than an
-    // armed wait, so this budget still needs to absorb that step's documented
-    // host-load variance, not just the causal-waited steps above it.
+    // This test chains many sequential network round-trips (commit, save,
+    // preset switch, reselect, delete); give it headroom beyond the 60s
+    // project default rather than relying on causal waits to also outrun
+    // per-step host-load variance.
     test.setTimeout(180_000);
     await apiClient.configureGitLab(seedData.workspaceId);
     await apiClient.mockGitLabAddIssues(seedData.workspaceId, GITLAB_PROJECT, [
@@ -172,20 +172,24 @@ test.describe("GitLab issue milestone filter", () => {
     await expect(gitlab.issueRow(601)).toBeVisible();
     await expect(gitlab.issueRow(602)).toHaveCount(0);
 
+    // Selecting the item above closes the dropdown via Radix's own
+    // data-closed:animate-out exit transition (duration-100 in
+    // @kandev/ui/dropdown-menu.tsx); Radix keeps the outgoing menu instance
+    // mounted for that ~100ms while it animates out. Reopening the trigger
+    // before that finishes races the old instance's unmount and can leave
+    // the freshly reopened menu without content (root cause of this test's
+    // documented pre-existing flake — confirmed via a CI failure artifact
+    // showing the menu closed, not mid-click, at time of failure). Waiting
+    // for the menu to fully close first removes the race.
+    await expect(testPage.getByRole("menu")).toBeHidden();
+
     // Deleting the selected saved query clears the milestone in the same update.
-    // Unlike every other step above, this one keeps its pre-existing bounded
-    // timeout instead of an armed waitForHttp: the click target is the menu
-    // item being deleted, so it can detach from the DOM mid-click under load,
-    // and racing that against a concurrently-pending network wait risks an
-    // unhandled rejection if the click's own actionability retries outlast
-    // the wait's budget. This exact interaction is the test's documented,
-    // independently-investigated pre-existing flake (see task plan); the
-    // trailing assertions' own polling plus this timeout is the established
-    // mitigation, not a new one.
     await savedMenu.click();
+    const deleted = waitForHttp(testPage, "GET", ISSUES_ENDPOINT);
     await testPage.getByRole("menuitem", { name: "Delete Sprint 42 saved query" }).click();
+    await deleted;
     await expect(milestoneInput).toHaveValue("");
-    await expect(gitlab.issueRow(602)).toBeVisible({ timeout: 20_000 });
+    await expect(gitlab.issueRow(602)).toBeVisible();
   });
 
   test("resets pagination to page 1 when the committed milestone changes from page 2 (Scenario 6, clause 1)", async ({
