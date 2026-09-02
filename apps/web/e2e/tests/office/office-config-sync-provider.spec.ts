@@ -101,7 +101,12 @@ test.describe("Office config sync (provider)", () => {
       const skills = (await officeApi.listSkills(officeSeed.workspaceId)) as {
         skills: Array<{ slug: string; name: string; file_inventory: string }>;
       };
-      const syncedSkill = skills.skills.find((s) => s.slug === "e2e-skill");
+      // The list read itself triggers system-skill sync, which canonicalizes
+      // any well-formed but non-"kandev-"-prefixed slug (the shared naming
+      // rule in internal/common/skillslug) — so the row created from the
+      // repo's "e2e-skill" directory is already renamed by the time this
+      // response comes back.
+      const syncedSkill = skills.skills.find((s) => s.slug === "kandev-e2e-skill");
       expect(syncedSkill?.name).toBe("E2E Synced Skill");
       expect(syncedSkill?.file_inventory ?? "").toContain("notes.md");
 
