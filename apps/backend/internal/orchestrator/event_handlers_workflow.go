@@ -5389,9 +5389,13 @@ func (s *Service) applyEngineTransitionWithCommit(
 	if !triggerOnEnter {
 		// on_turn_start transitions: user is about to send a message, no on_enter needed.
 		// Guarded-transition (quorum re-evaluation) callers also land here — see
-		// applyGuardedTransitionLifecycle's doc comment. Either way we still need
-		// to switch the agent profile if the target step requires a different
-		// one — the next prompt should go to the correct agent.
+		// applyGuardedTransitionLifecycle's doc comment. For that path the "next
+		// prompt" actually goes to the assignee via office/dashboard's own
+		// reactivity, not through this session's continuation, so the profile
+		// switch below is a no-op whenever the target step carries no explicit
+		// agent_profile_id (the common office-workflow case). It still runs
+		// unconditionally for correctness, in case a future step configuration
+		// gives the target step its own profile.
 		effectiveSession, ok := s.maybySwitchSessionForProfile(ctx, taskID, session, targetStep, fromStep)
 		if !ok {
 			return false

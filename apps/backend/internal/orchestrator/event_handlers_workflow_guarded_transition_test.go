@@ -14,8 +14,9 @@ import (
 )
 
 // TestApplyGuardedTransitionLifecycle_OfficeRejectLeg_DoesNotPromptDeciderSession
-// is the two-session regression proof for the office reject leg (plan unit
-// 7). wait_for_quorum guards are exclusively an Office-workflow feature
+// is the regression proof, at the orchestrator layer, that the office reject
+// leg (plan unit 7) never continues the decider's session. wait_for_quorum
+// guards are exclusively an Office-workflow feature
 // (config/workflows/office-default.yml), and applyGuardedTransitionLifecycle
 // is reached only from the engine's guarded-transition re-evaluation
 // (quorum.go's applyFirstSatisfiedGuardedTransition -> ApplyTransitionIfAtStep),
@@ -30,8 +31,13 @@ import (
 // runReactivityForDecision) is the mechanism that correctly resolves and
 // wakes the assignee; this test proves the orchestrator's guarded-transition
 // bridge no longer also fires a second, wrongly-targeted prompt through
-// session continuation. With one session in play this failure mode is
-// unobservable — hence two distinct sessions (reviewer vs. assignee agent).
+// session continuation. It deliberately gives the task an assignee
+// (AssigneeAgentProfileID) distinct from the reviewer's own live session, so
+// a regression that continued the "wrong" session would be observable — it
+// does not create a second TaskSession row for the assignee, since
+// runReactivityForDecision (the assignee-wake path) lives outside
+// applyGuardedTransitionLifecycle and is covered separately by the two e2e
+// specs (workflow-quorum-transitions.spec.ts, approval-flow.spec.ts).
 func TestApplyGuardedTransitionLifecycle_OfficeRejectLeg_DoesNotPromptDeciderSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -116,6 +122,15 @@ func TestApplyGuardedTransitionLifecycle_OfficeRejectLeg_DoesNotPromptDeciderSes
 	// checking capturedPromptCalls so the assertion isn't racing the
 	// goroutine. Post-fix, on_enter is never dispatched for this path, so the
 	// channel never fires and the short timeout is the expected case.
+	//
+	// onEnterDone fires as soon as onProcessOnEnterComplete runs, which is
+	// right at the end of processOnEnter — before any PromptTask call it
+	// triggered has necessarily completed. So promptCalls could still read 0
+	// on a pre-fix regression where the goroutine fired but PromptTask itself
+	// failed or hadn't landed yet by the time this select returns. That's
+	// fine for this red/green proof (a fired goroutine is itself the
+	// regression this test targets), but promptCalls > 0 is not the only
+	// signal a future change to this test should rely on.
 	select {
 	case <-onEnterDone:
 	case <-time.After(300 * time.Millisecond):
