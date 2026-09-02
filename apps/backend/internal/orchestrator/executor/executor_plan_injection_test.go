@@ -275,3 +275,43 @@ func TestInjectHandoverIfNeededLogsNoReductionFieldsWhenPlanFits(t *testing.T) {
 		}
 	}
 }
+
+func TestMockRepositoryTaskPlanWritesRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	repo := newMockRepository()
+	plan := &models.TaskPlan{TaskID: "task-plan-write-round-trip", Title: "Plan", Content: "initial"}
+
+	if err := repo.CreateTaskPlan(ctx, plan); err != nil {
+		t.Fatalf("CreateTaskPlan: %v", err)
+	}
+	got, err := repo.GetTaskPlan(ctx, plan.TaskID)
+	if err != nil {
+		t.Fatalf("GetTaskPlan after create: %v", err)
+	}
+	if got == nil || got.TaskID != plan.TaskID || got.Title != plan.Title || got.Content != plan.Content {
+		t.Fatalf("GetTaskPlan after create = %#v, want the created plan", got)
+	}
+
+	plan.Content = "updated"
+	if err := repo.UpdateTaskPlan(ctx, plan); err != nil {
+		t.Fatalf("UpdateTaskPlan: %v", err)
+	}
+	got, err = repo.GetTaskPlan(ctx, plan.TaskID)
+	if err != nil {
+		t.Fatalf("GetTaskPlan after update: %v", err)
+	}
+	if got == nil || got.TaskID != plan.TaskID || got.Title != plan.Title || got.Content != "updated" {
+		t.Fatalf("GetTaskPlan after update = %#v, want updated plan", got)
+	}
+
+	if err := repo.DeleteTaskPlan(ctx, plan.TaskID); err != nil {
+		t.Fatalf("DeleteTaskPlan: %v", err)
+	}
+	got, err = repo.GetTaskPlan(ctx, plan.TaskID)
+	if err != nil {
+		t.Fatalf("GetTaskPlan after delete: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("GetTaskPlan after delete = %#v, want nil", got)
+	}
+}

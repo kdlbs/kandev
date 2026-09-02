@@ -6,7 +6,7 @@ owners:
   - nova28
 ---
 
-# Plan injection budget Requirements Part 1
+# Plan injection budget Requirements
 
 ## Overview
 
@@ -14,7 +14,7 @@ Kandev pastes a task's implementation plan into the prompt of a launching agent 
 at two independent sites. Neither bounds the plan against a stated budget, and both
 reduce it — when they reduce it at all — in a way that discards the newest part of the
 running record without telling the agent anything was lost. This capability introduces
-one shared, deterministic plan reducer, applies it at both sites, and requires that any
+one shared, deterministic plan-bounding policy, applies it at both sites, and requires that any
 reduction be declared in the injected text.
 
 The agent system owns this contract: both consumers are agent-runtime session-launch
@@ -23,26 +23,17 @@ already requires "a bounded continuation package" without defining the bound. Th
 and workflow system keeps the plan artifact, its write API, and its revision model;
 this capability only reads.
 
-Rationale, worked examples, and the algorithm's derivation live in the
-[system design](../system-design/plan-injection-budget-01.md); its measurement,
-prior-art receipts, and per-criterion notes — Appendices A, B and C, named throughout
-this file — are in
-[system design Part 2](../system-design/plan-injection-budget-02.md). This file states
-the contract. Criteria are cross-referenced as `AC-001.n` / `AC-002.n`.
-
-This part carries the reducer's own contract (REQ-001), the terminology every criterion
-in both parts judges against, and the measurement. The anti-drift requirement (REQ-002)
-and the exclusions common to both parts (`## Out of scope`) are in
-[Part 2](plan-injection-budget-02.md).
+Observable behavior is defined here. The paired [system design](../system-design/plan-injection-budget-01.md)
+records the components, control flow, implementation details, and rationale. Its
+measurement and prior-art notes are in [system design Part 2](../system-design/plan-injection-budget-02.md).
+The two requirements in this file cover the one plan-injection outcome.
 
 ## Terminology
 
-- **Plan document / composed document:** the exact text a call site would inject
-  today for a given plan, composed PER SITE and never normalised across the two: the
-  handover site takes `plan.Content` VERBATIM and does NOT trim it; the dynamic site
-  takes `TrimSpace(plan.Title + "\n" + plan.Content)`, as it does today. The reducer is
-  defined over this text — not over the database row, and not over the frame a site
-  wraps around the reducer's output (AC-002.5).
+- **Plan document / composed document:** the text prepared for injection by each
+  surface. Handover keeps the current content composition. Dynamic continuation
+  combines the title and content with its current whitespace handling. The budget
+  applies to this plan text, not to the surrounding prompt frame or prefix.
 - **Section:** a run of the plan document beginning at a line starting with `## ` and
   continuing to the line before the next such line, or to the end. Content before the
   first such line is the **preamble section**, and ONLY when there is such content: a
@@ -69,22 +60,12 @@ and the exclusions common to both parts (`## Out of scope`) are in
   ran, and empty otherwise.
 - **Inline cut marker:** the fixed literal `[Kandev: section truncated here]`, emitted
   only on the intra-section path.
-- **Notice reservation:** `len(notice)` rendered at its widest for the document in hand
-  — `{omitted}` and `{total}` both set to its total section count, `{shortened}` present
-  — PLUS ONE BYTE for the separator AC-001.6 may place before it. An upper bound on both
-  counts, computed once after splitting and before any section is retained.
-- **Marker reservation:** `len(marker)` PLUS ONE BYTE for the separator AC-001.6 may
-  place before it. Also an upper bound: each separator is conditional at assembly time,
-  so reserving it unconditionally can leave the output under budget but never over it.
-  Reserving the notice and marker WITHOUT their separators does not satisfy AC-001.2 —
-  worked in the design's Appendix C.
 - **Containment:** the transformation of AC-001.14. Not part of the reducer.
 
 ## Measurement
 
-Live Kandev SQLite database, read-only, 2026-09-01: **178 plans** — the corpus the
-criteria cite. The full table, and what each row decides, is in the design's
-Appendix A.
+The design's Appendix A records the read-only corpus measurement that informed the
+budgets and section policy.
 
 ## Requirements
 
@@ -112,16 +93,9 @@ context on a document I can fetch nor act on a silently truncated record as comp
   apply to it — and AC-001.13 governs a budget too small to emit anything at all. Where
   either applies it wins; everywhere else this criterion holds.
 - **AC-AGENTS-PLAN-INJECTION-BUDGET-001.2:** WHEN a plan document exceeds the budget,
-  THEN the reducer's output SHALL be at most the budget in bytes, counting the omission
-  notice and any inline cut marker. The bound SHALL hold for every input, the criterion
-  being the measured size of the final output. On the whole-section path it SHALL be
-  achieved by subtracting the notice reservation ([Terminology](#terminology)), which
-  THERE carries every generated byte assembly can add, separators included. On the
-  intra-section path of AC-001.7 the marker reservation SHALL be subtracted IN ADDITION:
-  that path also emits the cut marker, which the notice reservation does not carry, so
-  subtracting the notice reservation alone would exceed the budget by the marker's
-  length. Both reservations being upper bounds, no re-selection, eviction, or restart is
-  required or permitted.
+  THEN the reducer's output SHALL be at most the budget in bytes, including the
+  omission notice, inline cut marker, and any separator bytes. This bound SHALL hold
+  for every input.
 - **AC-AGENTS-PLAN-INJECTION-BUDGET-001.3:** WHEN the reducer drops any content, THEN
   the output SHALL end with the omission notice of [Terminology](#terminology). Its two
   facts are reported independently. `{omitted}` SHALL be the number of whole sections
@@ -142,47 +116,18 @@ context on a document I can fetch nor act on a silently truncated record as comp
   except as permitted by AC-001.7. Either run MAY be empty; retaining only a tail run is
   expected when the first section does not fit.
 - **AC-AGENTS-PLAN-INJECTION-BUDGET-001.6:** WHEN the reducer selects which sections
-  to retain, THEN it SHALL grow two runs — one from the end of the document and one
-  from the start — considering candidates alternately, tail run first. A candidate
-  SHALL be retained when it fits the budget remaining after subtracting the notice
-  reservation and the sections already retained. WHEN a candidate does not fit, THEN
-  that run SHALL be closed and no further section taken from it, keeping each run
-  contiguous per AC-001.5. Selection SHALL stop when both runs are closed or
-  the runs meet, and each section SHALL be considered at most once.
-  THE TRAVERSAL SHALL BE FULLY DETERMINED, so that two implementations cannot retain
-  different sections for the same input. Number the sections in document order; the head
-  run's next candidate is the lowest not yet considered, the tail run's the highest. THE
-  RUNS MEET when no unconsidered section remains between them, and only then. Turns
-  alternate, tail run first, a closed run forfeiting its turns to the other. WHILE A RUN
-  IS OPEN AND AN UNCONSIDERED SECTION REMAINS, that run SHALL consider its next candidate
-  on its turn: consideration is REQUIRED, not merely permitted, so no section may be
-  skipped by declaring the runs met while it is still unconsidered. A considered section
-  is consumed whether or not it was retained — that is what makes "at most once" exact —
-  and SHALL NOT be revisited by the other run; it could not be retained if it were, the
-  remaining budget only ever shrinking. Retained sections
-  SHALL be emitted in original document order; the reducer SHALL NOT reorder, merge,
-  deduplicate, or rewrite them.
-  ASSEMBLY SHALL BE EXACT: retained sections SHALL be concatenated with NO inserted
-  separator — every section but the document's LAST ends at a `## ` line and so already
-  carries its trailing newline, and the last one, which may not, can only land at the
-  end of the output where the next rule covers it. The notice — and, on the AC-001.7
-  path, the marker before it — SHALL each be preceded by a single `\n` only when the
-  text so far does not already end with `\n`; those two conditional bytes are what
-  [Terminology](#terminology)'s reservations hold room for. The output SHALL NOT end
-  with a trailing newline.
+  to retain, THEN it SHALL retain at most one contiguous run from the start and one
+  contiguous run from the end of the document. The tail run SHALL be considered first,
+  followed by alternating consideration of the two runs. A run SHALL close when its
+  next section does not fit. Retained sections SHALL remain in document order, and the
+  same input and budget SHALL always select the same sections.
+  The output SHALL preserve the selected section text without rewriting it and SHALL
+  not add separators between retained sections or end with a trailing newline.
 - **AC-AGENTS-PLAN-INJECTION-BUDGET-001.7:** WHEN the selection of AC-001.6 retains
-  no whole section, THEN and only then the reducer SHALL reduce within the document's
-  **first** section: it SHALL keep that section's leading whole lines while they fit the
-  budget remaining after reserving BOTH the notice reservation AND the marker
-  reservation ([Terminology](#terminology)), SHALL cut only at a line boundary, and
-  SHALL mark the cut with that marker. Each candidate line SHALL be measured as
-  Terminology defines a line, its terminator included. It
-  SHALL NOT cut mid-line, and SHALL NOT reduce intra-section in any other case. WHEN
-  not even one complete line fits after those reservations, THEN the reducer SHALL
-  return no plan text at all, per AC-001.13. The trigger is that nothing whole fits, NOT that
-  the first section is large: a document with an oversized first section but a small
-  last one retains that last section under AC-001.6 and never reaches this path
-  (design `#why-the-fallback-reduces-the-first-section`).
+  no whole section, THEN it SHALL retain leading complete lines from the first
+  section, add the inline cut marker, and end with the omission notice. It SHALL cut
+  only at line boundaries. If no complete line fits with the generated text, it SHALL
+  return no plan text. It SHALL NOT shorten a section when any whole section fits.
 - **AC-AGENTS-PLAN-INJECTION-BUDGET-001.8:** The reducer's output SHALL be valid
   UTF-8 for every input that is valid UTF-8. A cut SHALL NOT split a rune.
 - **AC-AGENTS-PLAN-INJECTION-BUDGET-001.9:** WHEN the reducer is called twice with
@@ -199,52 +144,71 @@ context on a document I can fetch nor act on a silently truncated record as comp
   it contains content before its first `## ` line, THEN that preamble SHALL be the
   first section, eligible for retention on the same terms as any other.
 - **AC-AGENTS-PLAN-INJECTION-BUDGET-001.12:** WHEN the plan is absent, or the site's
-  COMPOSED DOCUMENT is empty or only whitespace, THEN no plan text and no omission
+  composed document is empty or only whitespace, THEN no plan text and no omission
   notice SHALL be injected, and the launch SHALL proceed unchanged. Emptiness SHALL
-  be judged on the composed document — after containment, where it applies — and never
-  on the raw `content` column. One input splits the two sites: at the DYNAMIC site a
-  plan with a title and whitespace-only content composes to a NON-empty document and
-  SHALL still inject the bare title; at the HANDOVER site the composed document IS the
-  content, so that plan is empty here and no plan section SHALL be injected, changing
-  today's behaviour. That second case is a named exception in AC-002.3; both are worked
-  in the design (Failure and recovery, Appendix C).
+  be judged after the surface applies containment, where containment applies. A title
+  with whitespace-only content remains a title-only document on dynamic continuation;
+  handover treats whitespace-only content as empty. These are the two named exceptions
+  in AC-002.3.
 - **AC-AGENTS-PLAN-INJECTION-BUDGET-001.13:** WHEN the reducer cannot emit any plan
-  content within the budget, THEN it SHALL return no plan text at all — never a
-  notice with nothing attached, never a marker with nothing attached, never an output
-  over budget. This SHALL cover every such case, so the function is total: a
-  non-positive budget; a budget smaller than the notice reservation; a budget holding
-  the notice reservation but not it and the marker reservation together on the
-  intra-section path; and a budget holding both but not one complete line of the first
-  section. Every band is judged against [Terminology](#terminology)'s reservations,
-  separators included.
+  content within the budget, THEN it SHALL return no plan text at all. It SHALL NOT
+  return a notice or marker without plan text, and it SHALL NOT exceed the budget.
 - **AC-AGENTS-PLAN-INJECTION-BUDGET-001.14:** The injected plan text SHALL NOT be able
-  to terminate or forge the enclosing `<kandev-system>` block. Plan content is
-  agent-authored and untrusted here; one stored plan already carries a start tag, and
-  `StripTags` removes only the end tag (design `#security`).
-  MECHANISM: containment SHALL remove every occurrence of the exact literals
-  `<kandev-system>` and `</kandev-system>`. IT SHALL BE ONE COMBINED LOOP: every pass
-  SHALL remove occurrences of BOTH literals, and the loop SHALL terminate only when a
-  full scan finds NEITHER. A single pass is not enough — one pass over
-  `<kandev<kandev-system>-system>` reconstitutes a live tag — and TWO INDEPENDENT
-  PER-LITERAL LOOPS SHALL NOT BE USED, because removing one literal can construct the
-  other while a loop that rescans only for its own literal never sees it. NEITHER
-  ORDERING ESCAPES, so running the two loops the other way round is not a fix: given
-  `<kandev` + `</kandev-system>` + `-system>` a start-then-end pair leaves a live
-  `<kandev-system>`, and given the mirror input `</kandev` + `<kandev-system>` +
-  `-system>` an end-then-start pair leaves a live `</kandev-system>`. In each case the
-  first loop finds nothing to do and the second constructs the literal the first was
-  looking for, after it has stopped looking. Matching SHALL be case-sensitive and
-  exact-literal; no other text SHALL change.
-  SCOPE: containment SHALL apply at the HANDOVER SITE ONLY, before the reducer is
-  called. The dynamic site does not wrap plan text in that block, so containing there
-  would change injected bytes for no security gain.
-  ORDER: containment precedes reduction, so the reducer's guarantees hold over the
-  contained document and emptiness (AC-001.12) is judged after it — a plan of only tag
-  literals contains to empty and injects nothing.
+  to terminate or forge the enclosing `<kandev-system>` block. At handover, all
+  occurrences of the exact `<kandev-system>` and `</kandev-system>` literals SHALL be
+  removed, including literals exposed by earlier removals. Matching SHALL be
+  case-sensitive and exact-literal; no other text SHALL change. Containment SHALL
+  happen before reduction and only at handover. Dynamic continuation does not contain
+  these literals because it does not place plan text in that block.
 - **AC-AGENTS-PLAN-INJECTION-BUDGET-001.15:** The reducer SHALL hold no mutable shared
-  state, and concurrent calls for different tasks or the same task SHALL NOT affect each
-  other's output. Each call SHALL operate on the snapshot its caller already read; the
-  reducer SHALL NOT read the database.
+  state that can change another call's output. Concurrent calls with the same input and
+  budget SHALL produce the same result.
 - **AC-AGENTS-PLAN-INJECTION-BUDGET-001.16:** WHEN a plan is mutated between two
-  session launches, THEN each launch SHALL reflect the snapshot its own caller read.
-  The reducer SHALL NOT cache output across calls.
+  session launches, THEN each launch SHALL reflect the plan snapshot used for that
+  launch. A later mutation SHALL NOT change an already prepared injection.
+
+### REQ-AGENTS-PLAN-INJECTION-BUDGET-002: Consistent plan injection across surfaces
+
+**Intent:** Keep the bounded-plan contract consistent wherever Kandev injects plan
+context, so one surface does not silently lose the other surface's protections.
+
+**User story:** As an engineer changing plan context, I want both injection surfaces
+to follow the same contract, so their behavior does not drift.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-PLAN-INJECTION-BUDGET-002.1:** The handover and dynamic continuation
+  surfaces SHALL apply the same section retention, truncation, notice, and UTF-8
+  rules from REQ-001. Handover SHALL also apply the containment rule in AC-001.14;
+  dynamic continuation SHALL not apply containment.
+- **AC-AGENTS-PLAN-INJECTION-BUDGET-002.2:** An over-budget plan at either shipped
+  surface SHALL produce output within that surface's budget. When plan text can fit,
+  the output SHALL declare omitted content with the notice in the shared contract.
+- **AC-AGENTS-PLAN-INJECTION-BUDGET-002.3:** Each surface SHALL keep its current plan
+  composition. Under budget, injected plan bytes SHALL remain unchanged except for
+  these two handover cases: exact system-tag literals are removed, and whitespace-only
+  content produces no plan section. Dynamic continuation SHALL still inject a title
+  when its content is whitespace-only.
+- **AC-AGENTS-PLAN-INJECTION-BUDGET-002.4:** The dynamic plan excerpt SHALL fit within
+  the continuation field's current size limit without a second truncation changing
+  the reducer's output.
+- **AC-AGENTS-PLAN-INJECTION-BUDGET-002.5:** The handover budget SHALL be 12,000 bytes
+  and the dynamic continuation budget SHALL be 4,000 bytes. Each budget SHALL apply
+  to the plan document only, before the surrounding prompt frame or prefix.
+- **AC-AGENTS-PLAN-INJECTION-BUDGET-002.6:** WHEN plan content is reduced, the backend
+  SHALL write an `Info` log with `site`, `task_id`, `plan_input_bytes`,
+  `plan_output_bytes`, and `plan_sections_omitted`. The site value SHALL be
+  `handover` or `dynamic_continuation`. The log SHALL contain no plan text. WHEN no
+  reduction occurs, reduction fields SHALL be absent.
+
+## Out of scope
+
+- Selecting sections by relevance to the incoming workflow step.
+- The plan write API, revision model, and workflow prompt.
+- Containing case-variant or whitespace-variant tag forgeries.
+- Bounding continuation fields other than the plan summary.
+- Changing either surface's existing behavior when a plan read fails.
+- Making the budgets configurable.
+- Token counting or model-specific calibration.
+- Defining behavior for input that is not valid UTF-8.
+- Summarizing or rewriting plan content.

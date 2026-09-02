@@ -41,7 +41,7 @@ Contracts this design uses but does not own:
 | --- | --- |
 | **Plan reducer** (new, backend-only) | Split a composed plan document into sections, drop from the middle until it fits, append the omission notice when it dropped anything. Pure function; no I/O, no clock, no shared state. |
 | `injectHandoverIfNeeded` (`internal/orchestrator/executor/executor_execute.go`) | Compose the handover plan document from `plan.Content` VERBATIM (this site does not trim), apply containment, call the reducer with the handover budget, then wrap the reducer's output in the site's EXISTING frame — `"\nThe task has an implementation plan:\n\n%s\n"` — and pass that framed string as `planSection`, as it does today. The frame is outside the budget (AC-002.5). When the reducer returns nothing, `planSection` stays empty and no frame is emitted (AC-001.12). |
-| `addDynamicPlan` (`internal/orchestrator/dynamic_launch.go`) | Compose the dynamic plan document from `plan.Title`, a newline, and `plan.Content`, call the reducer with the dynamic budget, assign to `ContinuationInput.PlanSummary`. |
+| `addDynamicPlan` (`internal/orchestrator/dynamic_launch.go`) | Compose `strings.TrimSpace(plan.Title + "\n" + plan.Content)`, call the reducer with the dynamic budget, assign to `ContinuationInput.PlanSummary`. |
 | `bounded()` (`internal/agent/runtime/dynamic/conductor.go`) | Unchanged. Continues to bound every continuation field. For `PlanSummary` it is a no-op *given* two conditions the design must maintain — budget ≤ `continuationFieldLimit`, and no reducer-introduced surrounding whitespace — both asserted by the AC-002.4 test. |
 | **Tag containment** (new, alongside the reducer) | Remove `<kandev-system>` and `</kandev-system>` literals until stable (AC-001.14). Called by the handover site only, before the reducer. |
 
@@ -124,8 +124,8 @@ under-budget plan produces byte-identical output to today at both sites, without
 either site having to adopt the other's title handling.
 
 The handover site inserts one extra step between composing and reducing —
-containment (AC-001.14) — and the dynamic site does not. That asymmetry is the
-single documented exception to byte-identity, and is why AC-002.3 carries an
+containment (AC-001.14) — and the dynamic site does not. That asymmetry is one
+of two documented exceptions to byte-identity, and is why AC-002.3 carries an
 explicit carve-out rather than an unqualified guarantee. It is placed before the
 reducer so that every guarantee the reducer makes is stated over the text that is
 actually injected, and so that emptiness (AC-001.12) is judged after it.
@@ -158,6 +158,12 @@ claim that something is missing.
 ### The reduction algorithm
 
 Given a document and a budget:
+
+The implementation reserves space for generated text before it selects source
+sections. The notice reservation uses the widest notice for the document's section
+count and one possible preceding newline. The marker reservation uses the marker
+length and one possible preceding newline. These are upper bounds, so the final
+assembly remains within the budget even when a conditional newline is not needed.
 
 1. If the document is empty or only whitespace, return nothing at all — no text,
    no notice, no stats (AC-001.12).
@@ -321,8 +327,8 @@ is found.
 
 Containment is **not** a no-op on the measured corpus: it changes the injected
 bytes of exactly the one plan that carries the start tag. That is a deliberate
-carve-out, decided rather than assumed away. AC-002.3 records it as the single
-exception to byte-identity under budget, and AC-001.1 states byte-identity
+carve-out, decided rather than assumed away. AC-002.3 records it as one of two
+exceptions to byte-identity under budget, and AC-001.1 states byte-identity
 relative to the document the reducer receives, which on the handover path is the
 contained document.
 
@@ -428,4 +434,3 @@ whose single largest section exceeds the dynamic budget.
 
 No ADR is required. This design adds one internal pure function and changes no
 architecture, public contract, persistence boundary, or security boundary.
-

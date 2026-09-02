@@ -1264,14 +1264,29 @@ func (m *mockRepository) UpdateTaskEnvironmentRepo(_ context.Context, repo *mode
 }
 
 // Task Plan operations
-func (m *mockRepository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error { return nil }
+func (m *mockRepository) CreateTaskPlan(_ context.Context, plan *models.TaskPlan) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.plans[plan.TaskID] = plan
+	return nil
+}
 func (m *mockRepository) GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.plans[taskID], nil
 }
-func (m *mockRepository) UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error { return nil }
-func (m *mockRepository) DeleteTaskPlan(ctx context.Context, taskID string) error         { return nil }
+func (m *mockRepository) UpdateTaskPlan(_ context.Context, plan *models.TaskPlan) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.plans[plan.TaskID] = plan
+	return nil
+}
+func (m *mockRepository) DeleteTaskPlan(_ context.Context, taskID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.plans, taskID)
+	return nil
+}
 
 // Session File Review operations
 func (m *mockRepository) UpsertSessionFileReview(ctx context.Context, review *models.SessionFileReview) error {
