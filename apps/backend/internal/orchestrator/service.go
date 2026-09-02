@@ -662,6 +662,27 @@ type Service struct {
 	// queuedMoveLifecycleLocks serializes source-exit work per task. The
 	// completion marker remains durable so a restart can safely resume work.
 	queuedMoveLifecycleLocks sync.Map
+	// officeStalledSignals dedupes the Office stranded-signal surfacing so a
+	// still-stranded signal is reported once, not on every 30-second reaper
+	// tick. Keyed by session ID, step ID and the signal's SignaledAt, so a
+	// genuinely new signal on the same session reports again. Deliberately
+	// in-memory: the surfaced state is derived and cheap to recompute, and a
+	// backend restart re-reporting each stranded signal once is preferable to
+	// a schema migration. Pruned against the live session set at the end of
+	// every complete scan, so it cannot outgrow the active-session list.
+	officeStalledSignals sync.Map
+	// officeDecisionWaiting dedupes the Office decision-waiting surfacing on
+	// the same terms as officeStalledSignals above. Keyed by task ID and step
+	// ID, so a task that moves on and later returns to a decision step (a
+	// rejection round) is reported again while a task sitting still is
+	// reported once. Pruned against the live candidate set at the end of
+	// every complete scan.
+	officeDecisionWaiting sync.Map
+	// officeRunInFlight answers whether a task still has a queued or claimed
+	// run, the decision-waiting detector's false-positive guard. Nil until
+	// wired (SetOfficeRunInFlightReader); the detector reports nothing and
+	// counts a skip while it is.
+	officeRunInFlight officeRunInFlightReader
 	// engineOptions are applied each time initWorkflowEngine runs. Wired
 	// from cmd/kandev (Phase 3.2) to plug Phase 2 ADR-0004 dependencies
 	// — RunQueueAdapter, ParticipantStore, DecisionStore, and the CEO /
