@@ -193,6 +193,16 @@ func TestDispatch_EventCoalescingIntoQueuedCronRun_PromotesReason(t *testing.T) 
 	if err := h.dispatcher.Dispatch(context.Background(), "w-event"); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
+	gotReq, err := h.repo.GetWakeupRequest(context.Background(), "w-event")
+	if err != nil {
+		t.Fatalf("get wakeup request: %v", err)
+	}
+	if gotReq.Status != officesqlite.WakeupStatusCoalesced {
+		t.Errorf("status: got %q, want coalesced", gotReq.Status)
+	}
+	if gotReq.RunID != "run-cron" {
+		t.Errorf("run_id: got %q, want run-cron", gotReq.RunID)
+	}
 	run, err := h.repo.GetRunByID(context.Background(), "run-cron")
 	if err != nil {
 		t.Fatalf("get run: %v", err)
@@ -203,6 +213,12 @@ func TestDispatch_EventCoalescingIntoQueuedCronRun_PromotesReason(t *testing.T) 
 	if shared.IsPeriodicTasklessWake(run.Reason) {
 		t.Error("merged run must not classify as a periodic taskless wake — " +
 			"the idle-skip gate could silently swallow the event trigger")
+	}
+	if run.CoalescedCount != 2 {
+		t.Errorf("coalesced_count: got %d want 2", run.CoalescedCount)
+	}
+	if !strings.Contains(run.ContextSnapshot, `"routine_id":"r-1"`) {
+		t.Errorf("expected merged context snapshot, got %q", run.ContextSnapshot)
 	}
 }
 
@@ -224,6 +240,31 @@ func TestDispatch_CronCoalescingIntoQueuedEventRun_DoesNotDemote(t *testing.T) {
 	}
 	if run.Reason != shared.RunReasonRoutineDispatchEvent {
 		t.Errorf("run.Reason = %q, want unchanged %q (no demotion)", run.Reason, shared.RunReasonRoutineDispatchEvent)
+	}
+}
+
+// TestDispatch_PeriodicCoalescingIntoQueuedPeriodicRun_DoesNotPromote
+// pins the other half of the monotonicity rule: a periodic request
+// merging into an already periodic-classified run must not be
+// "promoted" either, even though both reasons are periodic-classified
+// (heartbeat vs. routine_dispatch_cron). The condition guarding
+// promotion short-circuits on inflight.Reason's classification before
+// ever checking the new request's, so this case is the only one that
+// exercises the `!IsPeriodicTasklessWake(reason)` clause at all.
+func TestDispatch_PeriodicCoalescingIntoQueuedPeriodicRun_DoesNotPromote(t *testing.T) {
+	h := newHarness(t, wakeup.PolicyCoalesceIfActive)
+	h.seedRunWithReason("run-heartbeat", "queued", shared.RunReasonHeartbeat)
+	h.seedWakeupWithReason("w-cron", wakeup.SourceRoutine, `{"routine_id":"r-1"}`, shared.RunReasonRoutineDispatchCron)
+
+	if err := h.dispatcher.Dispatch(context.Background(), "w-cron"); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	run, err := h.repo.GetRunByID(context.Background(), "run-heartbeat")
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if run.Reason != shared.RunReasonHeartbeat {
+		t.Errorf("run.Reason = %q, want unchanged %q (periodic->periodic is not a promotion)", run.Reason, shared.RunReasonHeartbeat)
 	}
 }
 
@@ -289,6 +330,16 @@ func TestDispatch_EmptyReasonFallsBackToSourceForPromotion(t *testing.T) {
 		t.Fatalf("dispatch: %v", err)
 	}
 
+	gotReq, err := h.repo.GetWakeupRequest(context.Background(), "w-1")
+	if err != nil {
+		t.Fatalf("get wakeup request: %v", err)
+	}
+	if gotReq.Status != officesqlite.WakeupStatusCoalesced {
+		t.Errorf("status: got %q, want coalesced", gotReq.Status)
+	}
+	if gotReq.RunID != "run-cron" {
+		t.Errorf("run_id: got %q, want run-cron", gotReq.RunID)
+	}
 	run, err := h.repo.GetRunByID(context.Background(), "run-cron")
 	if err != nil {
 		t.Fatalf("get run: %v", err)
@@ -298,6 +349,12 @@ func TestDispatch_EmptyReasonFallsBackToSourceForPromotion(t *testing.T) {
 	}
 	if shared.IsPeriodicTasklessWake(run.Reason) {
 		t.Error("merged run must not classify as a periodic taskless wake")
+	}
+	if run.CoalescedCount != 2 {
+		t.Errorf("coalesced_count: got %d want 2", run.CoalescedCount)
+	}
+	if !strings.Contains(run.ContextSnapshot, `"task_id":"t-1"`) {
+		t.Errorf("expected merged context snapshot, got %q", run.ContextSnapshot)
 	}
 }
 
@@ -407,6 +464,41 @@ func TestDispatch_Routine_NoLookupFallsBackToCoalesce(t *testing.T) {
 	got, _ := h.repo.GetWakeupRequest(context.Background(), "w-1")
 	if got.Status != officesqlite.WakeupStatusCoalesced {
 		t.Errorf("status = %q, want coalesced (default)", got.Status)
+	}
+}
+
+// TestDispatch_UnknownPolicy_FallsBackToCoalesceAndPromotes exercises
+// the unrecognized-policy branch (dispatcher.go's switch default),
+// which falls back to coalesce rather than skip or always_enqueue.
+// Using a periodic in-flight run + event-classified request also
+// forces that fallback through the same reason-promotion path as
+// PolicyCoalesceIfActive, so the branch cannot silently regress to a
+// bare MarkWakeupRequestCoalesced call without losing this assertion.
+func TestDispatch_UnknownPolicy_FallsBackToCoalesceAndPromotes(t *testing.T) {
+	h := newHarness(t, wakeup.PolicyCoalesceIfActive)
+	h.dispatcher.SetRoutineLookup(&fakeRoutineLookup{policy: "not_a_real_policy"})
+	h.seedRunWithReason("run-cron", "queued", shared.RunReasonRoutineDispatchCron)
+	h.seedWakeupWithReason("w-event", wakeup.SourceRoutine, `{"routine_id":"r-1"}`, shared.RunReasonRoutineDispatchEvent)
+
+	if err := h.dispatcher.Dispatch(context.Background(), "w-event"); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	gotReq, err := h.repo.GetWakeupRequest(context.Background(), "w-event")
+	if err != nil {
+		t.Fatalf("get wakeup request: %v", err)
+	}
+	if gotReq.Status != officesqlite.WakeupStatusCoalesced {
+		t.Errorf("status = %q, want coalesced (unknown policy falls back to coalesce)", gotReq.Status)
+	}
+	if gotReq.RunID != "run-cron" {
+		t.Errorf("run_id: %q, want run-cron", gotReq.RunID)
+	}
+	run, err := h.repo.GetRunByID(context.Background(), "run-cron")
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if run.Reason != shared.RunReasonRoutineDispatchEvent {
+		t.Errorf("run.Reason = %q, want promoted to %q", run.Reason, shared.RunReasonRoutineDispatchEvent)
 	}
 }
 
