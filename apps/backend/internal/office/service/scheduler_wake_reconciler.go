@@ -198,9 +198,12 @@ func (h *ParentWakeReconciler) buildPayload(
 	return engine.OnChildrenCompletedPayload{ChildSummaries: summaries}, nil
 }
 
-// childGenerationSecondLayout matches the text format tasks.updated_at is
-// written in by CURRENT_TIMESTAMP (see UpdateTaskState) — one-second
-// resolution, no sub-second component.
+// childGenerationSecondLayout matches the text format
+// sqlite.StuckParentCandidate.NewestChildUpdatedAt is always rendered in —
+// dialect.SecondPrecisionText, whole-second resolution, no sub-second
+// component — regardless of which database backs the query. Do not compare
+// against a raw tasks.updated_at value read any other way; only the
+// dialect-normalized text is guaranteed to match this layout on Postgres.
 const childGenerationSecondLayout = "2006-01-02 15:04:05"
 
 // recordReceipt stores the operation-backed receipt after the workflow engine
@@ -208,10 +211,11 @@ const childGenerationSecondLayout = "2006-01-02 15:04:05"
 // than one target, so a single delivered run id cannot represent this wake.
 //
 // It refuses to persist a receipt whose child_generation names a wall-clock
-// second that had not yet closed as of referenceInstant: tasks.updated_at has
-// only one-second resolution, so a reopen+recomplete landing anywhere in
-// that still-open second would write the identical string, making the
-// reopen indistinguishable from the generation already on file.
+// second that had not yet closed as of referenceInstant: this generation only
+// has one-second resolution (see dialect.SecondPrecisionText), so a
+// reopen+recomplete landing anywhere in that still-open second would write
+// the identical string, making the reopen indistinguishable from the
+// generation already on file.
 // referenceInstant must be captured once, before the candidate scan
 // (reconcile), and passed in here rather than re-read as "now" at commit
 // time: only an instant that predates the scan guarantees the scanned

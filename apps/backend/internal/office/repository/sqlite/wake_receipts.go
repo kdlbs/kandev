@@ -9,6 +9,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
@@ -25,11 +26,13 @@ type StuckParentCandidate struct {
 	WorkflowStepID         string `db:"workflow_step_id"`
 	ChildSetKey            string `db:"child_set_key"`
 	// NewestChildUpdatedAt is the latest updated_at among the parent's
-	// non-archived children. ChildSetKey alone cannot distinguish a child
-	// that completed, was reopened, and completed again with the same
+	// non-archived children, rendered via dialect.SecondPrecisionText so the
+	// same wall-clock second always produces the same text regardless of
+	// dialect (see ListStuckParents). ChildSetKey alone cannot distinguish a
+	// child that completed, was reopened, and completed again with the same
 	// terminal state from one that was never touched — both produce the
-	// same id:state pairs. This timestamp is the generation that changes
-	// across a reopen/re-complete cycle even when ChildSetKey does not.
+	// same id:state pairs. This is the generation that changes across a
+	// reopen/re-complete cycle even when ChildSetKey does not.
 	NewestChildUpdatedAt string `db:"newest_child_updated_at"`
 }
 
@@ -81,11 +84,19 @@ type StuckParentCandidate struct {
 //     hashes child ids only, so an identical child set collides with the
 //     run it already persisted for the first completion. child_generation
 //     is the newest_child_updated_at value recorded at delivery time, so
-//     this is an equality check between two tasks.updated_at values, not an
+//     this is an equality check between two rendered-text values, not an
 //     ordering comparison against delivered_at: tasks.updated_at is written
 //     by more than one producer in more than one text format (see
 //     recordReceipt), so ordering two differently-formatted strings is
 //     unreliable in a way equality between two same-format strings is not.
+//     Both newest_child_updated_at here and the comparison below against
+//     runs.requested_at go through dialect.SecondPrecisionText rather than
+//     comparing the raw TIMESTAMP columns as text: SQLite's CURRENT_TIMESTAMP
+//     only ever writes whole-second text, but Postgres defaults to
+//     microsecond precision, so an unnormalized comparison against
+//     child_generation (a plain TEXT column) is a type mismatch on Postgres,
+//     and reading the raw value into a Go string would carry driver-specific
+//     formatting the two dialects don't agree on.
 //   - the NOT EXISTS against runs drops a candidate with a queued or
 //     claimed task_children_completed run (still in flight, regardless of
 //     which child set it was requested for — wait for it to resolve rather
@@ -121,6 +132,9 @@ type StuckParentCandidate struct {
 // later (guardAgentStatus in the caller is exactly that — a cheap,
 // redundant closing of that race window, not the primary filter).
 func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit int) ([]StuckParentCandidate, error) {
+	driver := r.ro.DriverName()
+	newestChildUpdatedAtText := dialect.SecondPrecisionText(driver, "MAX(c.updated_at)")
+	requestedAtText := dialect.SecondPrecisionText(driver, "w.requested_at")
 	var rows []StuckParentCandidate
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
 		WITH stuck AS (
@@ -137,7 +151,7 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 					) c
 				), '') AS child_set_key,
 				(
-					SELECT MAX(c.updated_at) FROM tasks c
+					SELECT `+newestChildUpdatedAtText+` FROM tasks c
 					WHERE c.parent_id = p.id AND c.archived_at IS NULL
 				) AS newest_child_updated_at
 			FROM tasks p
@@ -164,7 +178,7 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 		WHERE s.assignee_agent_profile_id != ''
 		  AND ap.status NOT IN ('paused', 'stopped', 'pending_approval')
 		  AND (
-		      r.child_set_key IS NOT s.child_set_key
+		      r.child_set_key IS DISTINCT FROM s.child_set_key
 		      OR (
 		          NOT EXISTS (
 		              SELECT 1 FROM runs delivered
@@ -182,7 +196,7 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 		            w.status IN ('queued', 'claimed')
 		            OR (
 		                w.status IN ('finished', 'failed', 'cancelled')
-		                AND w.requested_at >= s.newest_child_updated_at
+		                AND `+requestedAtText+` >= s.newest_child_updated_at
 		            )
 		        )
 		  )
@@ -274,9 +288,16 @@ func (r *Repository) UpsertWakeReceiptTx(
 // regardless of generation.
 func (r *Repository) IncrementWakeDeliverySeq(ctx context.Context, parentTaskID string) (int64, error) {
 	var seq int64
+	// The SET expression must qualify seq with the table name: on Postgres,
+	// the bare "seq = seq + 1" form raises "column reference \"seq\" is
+	// ambiguous" (confirmed against a live PostgreSQL 15 instance) even
+	// though only one seq column is in scope — SQLite accepts the
+	// unqualified form, so this dialect difference is silent without a
+	// Postgres run.
 	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		INSERT INTO parent_wake_delivery_seq (parent_task_id, seq) VALUES (?, 1)
-		ON CONFLICT (parent_task_id) DO UPDATE SET seq = seq + 1
+		ON CONFLICT (parent_task_id) DO UPDATE
+			SET seq = parent_wake_delivery_seq.seq + 1
 		RETURNING seq
 	`), parentTaskID).Scan(&seq)
 	if err != nil {
