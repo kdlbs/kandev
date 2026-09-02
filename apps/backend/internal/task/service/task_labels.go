@@ -26,10 +26,13 @@ func EncodeTaskLabelsForUpdate(labels []string) string {
 // in-depth guard on write paths where raw label strings bypass
 // EncodeTaskLabels normalization.
 func ValidateTaskLabels(encoded string) error {
-	if encoded == "" || encoded == "[]" {
+	trimmed := strings.TrimSpace(encoded)
+	if trimmed == "" {
+		return fmt.Errorf("labels must be a JSON array, got %q", encoded)
+	}
+	if trimmed == "[]" {
 		return nil
 	}
-	trimmed := strings.TrimSpace(encoded)
 	if trimmed == "null" || !strings.HasPrefix(trimmed, "[") {
 		return fmt.Errorf("labels must be a JSON array, got %q", encoded)
 	}

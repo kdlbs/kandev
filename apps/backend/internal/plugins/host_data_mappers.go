@@ -2,10 +2,8 @@ package plugins
 
 import (
 	"context"
-	"encoding/json"
 	"net/url"
 	"sort"
-	"strings"
 	"time"
 
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
@@ -129,7 +127,7 @@ func taskModelToDTO(t *taskmodels.Task) pluginsdk.Task {
 		WorkflowStepID:         t.WorkflowStepID,
 		Position:               int32(t.Position),
 		AssigneeAgentProfileID: t.AssigneeAgentProfileID,
-		Labels:                 decodeTaskLabels(t.Labels),
+		Labels:                 taskmodels.DecodeTaskLabels(t.Labels),
 		Autopilot:              t.Autopilot,
 		WIPAdmitted:            t.WIPAdmitted,
 		QueuedForStepID:        t.QueuedForStepID,
@@ -145,23 +143,6 @@ func timePtrToRFC3339(t *time.Time) *string {
 	}
 	s := t.UTC().Format(time.RFC3339)
 	return &s
-}
-
-// decodeTaskLabels turns the model's JSON-array-string into a real slice.
-//
-// A MALFORMED VALUE YIELDS NO LABELS, NOT AN ERROR. Labels are decoration on a
-// read that must not fail because one row holds something unparseable; the
-// alternative is a whole task list refused over a cosmetic field.
-func decodeTaskLabels(raw string) []string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || raw == "[]" {
-		return nil
-	}
-	var out []string
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return nil
-	}
-	return out
 }
 
 // taskPRsToDTOs maps kandev's own PR rows onto the plugin contract. Review and

@@ -26,7 +26,7 @@ func TestValidateTaskLabels(t *testing.T) {
 		encoded string
 		wantErr string
 	}{
-		{name: "empty string", encoded: "", wantErr: ""},
+		{name: "empty string", encoded: "", wantErr: "labels must be a JSON array"},
 		{name: "empty array", encoded: "[]", wantErr: ""},
 		{name: "valid labels", encoded: `["bug","security"]`, wantErr: ""},
 		{name: "not JSON", encoded: "not-json", wantErr: "labels must be a JSON array"},

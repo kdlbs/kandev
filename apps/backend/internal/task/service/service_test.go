@@ -659,6 +659,18 @@ func TestService_UpdateTaskLabelsPreservesOmittedVersusClear(t *testing.T) {
 		t.Errorf("labels after omit = %q, want [\"bug\"]", updated.Labels)
 	}
 
+	empty := ""
+	if _, err := svc.UpdateTask(ctx, "task-labels", &UpdateTaskRequest{Labels: &empty}); err == nil {
+		t.Fatal("UpdateTask accepted an empty serialized labels value")
+	}
+	unchanged, err := repo.GetTask(ctx, "task-labels")
+	if err != nil {
+		t.Fatalf("GetTask after rejected label update: %v", err)
+	}
+	if unchanged.Labels != `["bug"]` {
+		t.Errorf("labels after rejected empty update = %q, want [\"bug\"]", unchanged.Labels)
+	}
+
 	clear := `[]`
 	updated, err = svc.UpdateTask(ctx, "task-labels", &UpdateTaskRequest{Labels: &clear})
 	if err != nil {

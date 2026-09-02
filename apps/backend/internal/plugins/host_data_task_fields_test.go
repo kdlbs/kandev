@@ -60,17 +60,6 @@ func TestTaskModelToDTOLeavesArchivedAtNilForALiveTask(t *testing.T) {
 	require.Nil(t, dto.QueuedAt)
 }
 
-// Labels are a JSON-array string on the model. A row holding something
-// unparseable must cost that row its labels, never the whole task read.
-func TestDecodeTaskLabelsToleratesEmptyAndMalformedValues(t *testing.T) {
-	require.Equal(t, []string{"a", "b"}, decodeTaskLabels(`["a","b"]`))
-	require.Nil(t, decodeTaskLabels(""))
-	require.Nil(t, decodeTaskLabels("[]"))
-	require.Nil(t, decodeTaskLabels("  "))
-	require.Nil(t, decodeTaskLabels("not json"))
-	require.Nil(t, decodeTaskLabels(`{"a":1}`))
-}
-
 // Review and check state ride along because kandev's PR watcher already syncs
 // them; a plugin asking "what can merge" would otherwise re-query the forge
 // once per pull request.

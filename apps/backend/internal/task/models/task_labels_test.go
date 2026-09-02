@@ -13,7 +13,7 @@ func TestDecodeTaskLabels(t *testing.T) {
 		want    []string
 	}{
 		{name: "valid array", encoded: `["bug","triage"]`, want: []string{"bug", "triage"}},
-		{name: "empty array", encoded: `[]`, want: []string{}},
+		{name: "empty array", encoded: `[]`, want: nil},
 		{name: "empty string", encoded: "", want: nil},
 		{name: "null", encoded: "null", want: nil},
 		{name: "non-array object", encoded: `{"a":"b"}`, want: nil},
