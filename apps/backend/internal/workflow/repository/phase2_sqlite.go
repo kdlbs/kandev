@@ -634,7 +634,7 @@ func (r *Repository) ResolveCurrentRunner(
 	err = r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT agent_profile_id FROM workflow_step_participants
 		WHERE task_id = ? AND role = 'runner'
-		ORDER BY created_at DESC, agent_profile_id ASC
+		ORDER BY created_at DESC, id ASC
 		LIMIT 1
 	`), taskID).Scan(&agentID)
 	if err == nil {
