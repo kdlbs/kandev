@@ -103,7 +103,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-29-quarantine-retention-override | [Make Quarantine Retention Overridable but Visible](2026-07-29-quarantine-retention-override.md) | accepted | backend, frontend | 2026-07-29 |
 | 2026-07-29-interactive-accent-surface-semantics | [Separate Brand Accent from Interactive Surface Fills](2026-07-29-interactive-accent-surface-semantics.md) | accepted | frontend | 2026-07-29 |
 | 2026-07-30-embedded-editor-executor-capabilities | [Derive Embedded Editor Availability from the Active Executor](2026-07-30-embedded-editor-executor-capabilities.md) | accepted | backend, frontend, protocol | 2026-07-30 |
-| 2026-07-30-session-owned-mcp-observability | [Keep MCP Attachment Evidence Session Owned](2026-07-30-session-owned-mcp-observability.md) | accepted | backend, frontend, protocol, security | 2026-07-30 |
+| 2026-07-30-session-owned-mcp-observability | [Keep MCP Attachment Evidence Session Owned](2026-07-30-session-owned-mcp-observability.md) | accepted (amended by 2026-08-30-dual-era-mcp-protocol) | backend, frontend, protocol, security | 2026-07-30 |
 | 2026-07-30-file-backed-diagnostic-bundles | [File-backed diagnostic bundles](2026-07-30-file-backed-diagnostic-bundles.md) | accepted (amended 2026-08-23; backend file retention amended by 2026-08-22) | backend, frontend, infra, protocol, workflow | 2026-07-30 |
 | 2026-07-30-runtime-task-state-before-running-event | [Publish Task State Before Running Session State](2026-07-30-runtime-task-state-before-running-event.md) | accepted | backend, frontend, protocol, workflow | 2026-07-30 |
 | 2026-07-31-authenticated-plugin-actions | [Authenticated Plugin Actions](2026-07-31-authenticated-plugin-actions.md) | accepted | backend, frontend, protocol, security | 2026-07-31 |
@@ -221,6 +221,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-30-context-reset-quiesces-active-turn | [Quiesce Active Turns Before Context Reset](2026-08-30-context-reset-quiesces-active-turn.md) | accepted | backend, workflow | 2026-08-30 |
 | 2026-08-30-empty-remote-bootstrap-publication | [Keep Empty Remote Bootstrap Local Until Publication](2026-08-30-empty-remote-bootstrap-publication.md) | accepted | backend, frontend, protocol, security | 2026-08-30 |
 | 2026-08-30-bound-untracked-dependency-enumeration | [Bound Untracked Dependency Enumeration](2026-08-30-bound-untracked-dependency-enumeration.md) | accepted | backend | 2026-08-30 |
+| 2026-08-30-dual-era-mcp-protocol | [Use One Dual-Era MCP Endpoint](2026-08-30-dual-era-mcp-protocol.md) | accepted | backend, agentctl, protocol, security | 2026-08-30 |
 | 2026-08-30-e2e-browser-cache | [Cache host-runner E2E browser provisioning](2026-08-30-e2e-browser-cache.md) | accepted | infra, workflow | 2026-08-30 |
 | 2026-08-31-generic-plugin-host-boundary | [Generic plugin Host boundary](2026-08-31-generic-plugin-host-boundary.md) | proposed | backend, frontend, protocol, security, workflow | 2026-08-31 |
 | 2026-08-30-environment-owned-git-status | [Persist Current Git Status with the Task Environment](2026-08-30-environment-owned-git-status.md) | accepted | backend, frontend, protocol | 2026-08-31 |
@@ -229,6 +230,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-31-revoke-merge-approval-after-untrusted-push | [Revoke merge approval after an untrusted pull-request push](2026-08-31-revoke-merge-approval-after-untrusted-push.md) | accepted | workflow, security | 2026-08-31 |
 | 2026-08-31-passthrough-running-publication | [Defer Passthrough Running Publication Until Guard Release](2026-08-31-passthrough-running-publication.md) | accepted | backend | 2026-08-31 |
 | 2026-08-31-agent-aware-mcp-tool-names | [Preserve Canonical MCP Tool Names Through Agent Namespacing](2026-08-31-agent-aware-mcp-tool-names.md) | accepted | backend, agentctl, protocol | 2026-08-31 |
+| 2026-08-31-workflow-profile-session-switch-policy | [Make Workflow Profile-Session Switching Explicit](2026-08-31-workflow-profile-session-switch-policy.md) | accepted | workflow | 2026-08-31 |
 | 2026-09-01-server-owned-saved-prompt-expansion | [Keep Saved-Prompt Expansion Server-Owned](2026-09-01-server-owned-saved-prompt-expansion.md) | accepted | backend, frontend, protocol, security | 2026-09-01 |
 | 2026-09-01-passthrough-initial-prompt-turn-boundary | [Keep Passthrough Initial Prompt State in Lifecycle](2026-09-01-passthrough-initial-prompt-turn-boundary.md) | accepted | backend, workflow | 2026-09-01 |
 | 2026-09-02-automation-self-archive | [Permit Automation Self-Archive as Terminal Completion](2026-09-02-automation-self-archive.md) | accepted | backend, agentctl, protocol, security, workflow | 2026-09-02 |

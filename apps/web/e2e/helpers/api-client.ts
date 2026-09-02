@@ -9,6 +9,8 @@ import type {
   MCPTaskAgentProfileDefault,
   RepositoryBranchPolicy,
   AgentProfileRecentUseApiRecord,
+  WorkflowProfileSessionStartPolicy,
+  WorkflowProfileSessionEndPolicy,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
@@ -791,6 +793,9 @@ export class ApiClient {
     position: number,
     opts?: {
       is_start_step?: boolean;
+      agent_profile_id?: string;
+      profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+      profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
       events?: {
         on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -803,6 +808,13 @@ export class ApiClient {
       name,
       position,
       ...(opts?.is_start_step != null ? { is_start_step: opts.is_start_step } : {}),
+      ...(opts?.agent_profile_id ? { agent_profile_id: opts.agent_profile_id } : {}),
+      ...(opts?.profile_session_start_policy
+        ? { profile_session_start_policy: opts.profile_session_start_policy }
+        : {}),
+      ...(opts?.profile_session_end_policy
+        ? { profile_session_end_policy: opts.profile_session_end_policy }
+        : {}),
       ...(opts?.events != null ? { events: opts.events } : {}),
     });
   }
@@ -1187,7 +1199,12 @@ export class ApiClient {
 
   async updateWorkflow(
     workflowId: string,
-    updates: { name?: string; description?: string; prompt?: string; agent_profile_id?: string },
+    updates: {
+      name?: string;
+      description?: string;
+      prompt?: string;
+      agent_profile_id?: string;
+    },
   ): Promise<Workflow> {
     return this.request("PATCH", `/api/v1/workflows/${workflowId}`, updates);
   }
@@ -1216,6 +1233,8 @@ export class ApiClient {
       pull_from_step_id?: string | null;
       cancel_triggers_turn_complete?: boolean;
       stage_type?: "work" | "review" | "approval" | "custom";
+      profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+      profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
     },
   ): Promise<void> {
     await this.request("PUT", `/api/v1/workflow/steps/${stepId}`, { id: stepId, ...updates });
@@ -2285,7 +2304,9 @@ export class ApiClient {
       executor_id?: string;
       executor_profile_id?: string;
       state: string;
+      is_primary: boolean;
       started_at: string;
+      completed_at?: string | null;
       task_environment_id?: string;
       workspace_path?: string;
       worktree_path?: string;

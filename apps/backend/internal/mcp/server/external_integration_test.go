@@ -112,6 +112,24 @@ func TestExternalMCP_ToolsCallDispatchesToBackend(t *testing.T) {
 	assert.Contains(t, jsonLine, "ws-1")
 }
 
+func TestExternalMCPRoutesPreserveHTTPAndSSEPaths(t *testing.T) {
+	srv := NewExternal(nil, newTestLogger(t), "")
+	router := gin.New()
+	srv.RegisterBackendRoutes(router)
+
+	wants := map[string]bool{
+		"GET /mcp/sse":      true,
+		"POST /mcp/message": true,
+		"POST /mcp":         true,
+	}
+	for _, route := range router.Routes() {
+		delete(wants, route.Method+" "+route.Path)
+	}
+	if len(wants) != 0 {
+		t.Fatalf("missing external MCP routes: %v", wants)
+	}
+}
+
 type httpResp struct {
 	statusCode int
 	body       string

@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
@@ -112,6 +114,62 @@ const CRASH_RECOVERY_TIMEOUT = 170_000;
 test.describe("Session recovery", () => {
   test.describe.configure({ retries: 1 });
 
+  test("session startup keeps the composer editable while submission waits", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    // Keep workspace preparation in STARTING long enough to exercise the
+    // startup gate. The backend fixture's git shim reads this file before
+    // fetching the worktree, matching a slow real-world preparation phase.
+    const delayFile = path.join(backend.tmpDir, "git-delay-ms");
+    fs.writeFileSync(delayFile, "5000");
+
+    try {
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Session startup composer readiness test",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+          executor_profile_id: seedData.worktreeExecutorProfileId,
+        },
+      );
+
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+
+      const starting = testPage.locator('[data-placeholder="Preparing workspace..."]');
+      const editor = session.activeChat().getByTestId("chat-input-editor");
+      const submit = session.submitButton();
+      await expect(starting).toBeVisible({ timeout: 15_000 });
+
+      // @covers AC-UI-SESSION-START-COMPOSER-READINESS-001.1
+      await expect(editor).toHaveAttribute("contenteditable", "true");
+      await editor.fill("draft during startup");
+
+      // @covers AC-UI-SESSION-START-COMPOSER-READINESS-001.2
+      await expect(submit).toBeDisabled();
+
+      await expect(starting).toBeHidden({ timeout: 60_000 });
+      // The initial task prompt may still be finishing after environment
+      // preparation. Wait for the same submit gate to clear, not a timer.
+      await expect(submit).toBeEnabled({ timeout: 60_000 });
+
+      // @covers AC-UI-SESSION-START-COMPOSER-READINESS-001.3
+      await expect(editor).toHaveText("draft during startup");
+    } finally {
+      if (fs.existsSync(delayFile)) fs.unlinkSync(delayFile);
+    }
+  });
+
   test("reset context hides stale usage until a fresh report arrives", async ({
     testPage,
     apiClient,
@@ -208,20 +266,13 @@ test.describe("Session recovery", () => {
 
     // Click "Resume session"
     await session.recoveryResumeButton().click();
-
-    // Recovery briefly exposes the idle placeholder before the resumed agent
-    // starts. Observe the starting phase before treating the composer as ready
-    // so that transient idle state cannot satisfy the assertion.
-    const resumeStarting = testPage.locator('[data-placeholder="Preparing workspace..."]');
-    await expect(resumeStarting).toBeVisible({ timeout: 30_000 });
-    await expect(resumeStarting).not.toBeVisible({ timeout: 30_000 });
-    await expect(testPage.getByTestId("chat-input-editor")).toHaveAttribute(
-      "contenteditable",
-      "true",
-      {
-        timeout: 30_000,
-      },
-    );
+    const editor = session.activeChat().getByTestId("chat-input-editor");
+    // The recovery endpoint waits until the resumed agent is prompt-ready
+    // before it resolves. The startup-specific composer gate is exercised by
+    // the slow-preparation test above; this flow verifies the recovered
+    // composer is usable afterwards.
+    await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+    await expect(session.submitButton()).toBeEnabled({ timeout: 30_000 });
 
     // The resume settles the session back to WAITING_FOR_INPUT (agent idle).
     // The recovery card must not reappear now that the resume is resolved —
@@ -247,7 +298,7 @@ test.describe("Session recovery", () => {
     await expect(session.recoveryResumeButton()).toHaveCount(0);
     await expect(session.recoveryFreshButton()).toHaveCount(0);
 
-    // Verify agent works after recovery
+    // Verify the resumed agent works after recovery.
     await session.sendMessage("/e2e:simple-message");
     await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
   });

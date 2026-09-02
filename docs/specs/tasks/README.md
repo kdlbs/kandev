@@ -96,6 +96,7 @@ signals, and task-scoped scheduling contracts.
 - [Workflow Cycle Guardrails](requirements/workflow-cycle-guardrails.md)
 - [Workflow Duplication](requirements/workflow-duplication.md)
 - [Explicit Workflow-Step Completion Signal](requirements/workflow-explicit-completion-signal.md)
+- [Workflow Profile Session Lifecycle](requirements/workflow-profile-session-lifecycle.md)
 - [Agent decision recording](requirements/workflow-quorum-decision-recording-agent-surface.md)
 - [Quorum ordering and concurrency](requirements/workflow-quorum-decision-recording-concurrency.md)
 - [Quorum diagnostics](requirements/workflow-quorum-decision-recording-diagnostics.md)
@@ -142,6 +143,7 @@ signals, and task-scoped scheduling contracts.
 - [Workflow quorum decision recording](system-design/workflow-quorum-decision-recording.md)
 - [Workflow Step Agent Start Ownership](system-design/workflow-step-agent-start-ownership.md)
 - [Workflow Step Fixed-Profile Routing](system-design/workflow-step-fixed-profile-routing.md)
+- [Workflow Profile Session Lifecycle](system-design/workflow-profile-session-lifecycle.md)
 - [Workflow task-step transition ledger](system-design/workflow-task-step-transition-ledger.md)
 
 ## Migration record

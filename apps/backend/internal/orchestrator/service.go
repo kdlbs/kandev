@@ -662,6 +662,30 @@ type Service struct {
 	// queuedMoveLifecycleLocks serializes source-exit work per task. The
 	// completion marker remains durable so a restart can safely resume work.
 	queuedMoveLifecycleLocks sync.Map
+	// officeStalledSignals dedupes the Office stranded-signal surfacing so a
+	// still-stranded signal is reported once, not on every 30-second reaper
+	// tick. Keyed by session ID, step ID and the signal's SignaledAt, so a
+	// genuinely new signal on the same session reports again. Deliberately
+	// in-memory: the surfaced state is derived and cheap to recompute, and a
+	// backend restart re-reporting each stranded signal once is preferable to
+	// a schema migration. Pruned against the live session set at the end of
+	// every complete scan, so it cannot outgrow the active-session list.
+	officeStalledSignals sync.Map
+	// officeDecisionWaiting dedupes the Office decision-waiting surfacing on
+	// the same terms as officeStalledSignals above. Keyed by task ID and step
+	// ID, so a task that moves on and later returns to a decision step (a
+	// rejection round) is reported again while a task sitting still is
+	// reported once. Pruned against the live candidate set at the end of
+	// every complete scan.
+	officeDecisionWaiting sync.Map
+	// officeStallDependenciesMu protects detector dependencies that are wired
+	// after Service.Start while the idle reaper can already read them.
+	officeStallDependenciesMu sync.RWMutex
+	// officeRunInFlight answers whether a task still has a queued or claimed
+	// run, the decision-waiting detector's false-positive guard. Nil until
+	// wired (SetOfficeRunInFlightReader); the detector reports nothing and
+	// counts a skip while it is.
+	officeRunInFlight officeRunInFlightReader
 	// engineOptions are applied each time initWorkflowEngine runs. Wired
 	// from cmd/kandev (Phase 3.2) to plug Phase 2 ADR-0004 dependencies
 	// — RunQueueAdapter, ParticipantStore, DecisionStore, and the CEO /
@@ -947,6 +971,11 @@ type Service struct {
 	// execution. Claims expire with the same bounded grace period used for
 	// completed-execution stream markers.
 	executionTeardownClaims sync.Map
+	// parkedProfileSwitchStops remembers exact executions whose deliberate
+	// parked-switch lifecycle event was already consumed. It is a short-lived
+	// duplicate-delivery optimization; the durable consumed tombstone lives in
+	// session metadata.
+	parkedProfileSwitchStops sync.Map
 
 	// steerInFlight tracks sessions with an unacknowledged mid-turn steer.
 	// The spec allows at most one in-flight steer per session; a second attempt
@@ -1102,6 +1131,16 @@ type Service struct {
 	ciAutomationCancel  context.CancelFunc
 	ciAutomationStopped bool
 	ciAutomationWorkers sync.WaitGroup
+}
+
+func (s *Service) officeStallDependencies() (
+	engine.ParticipantStore,
+	engine.DecisionStore,
+	officeRunInFlightReader,
+) {
+	s.officeStallDependenciesMu.RLock()
+	defer s.officeStallDependenciesMu.RUnlock()
+	return s.engineParticipants, s.engineDecisions, s.officeRunInFlight
 }
 
 type RouteAction string
@@ -1816,14 +1855,18 @@ func (s *Service) SetEngineRunQueue(adapter engine.RunQueueAdapter) {
 
 // SetEngineParticipantStore wires the engine's ParticipantStore.
 func (s *Service) SetEngineParticipantStore(store engine.ParticipantStore) {
+	s.officeStallDependenciesMu.Lock()
 	s.engineParticipants = store
+	s.officeStallDependenciesMu.Unlock()
 	s.engineOptions = append(s.engineOptions, engine.WithParticipantStore(store))
 	s.reinitWorkflowEngine()
 }
 
 // SetEngineDecisionStore wires the engine's DecisionStore.
 func (s *Service) SetEngineDecisionStore(store engine.DecisionStore) {
+	s.officeStallDependenciesMu.Lock()
 	s.engineDecisions = store
+	s.officeStallDependenciesMu.Unlock()
 	s.engineOptions = append(s.engineOptions, engine.WithDecisionStore(store))
 	s.reinitWorkflowEngine()
 }

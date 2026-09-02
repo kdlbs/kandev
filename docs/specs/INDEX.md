@@ -6,7 +6,7 @@ This catalog is the entry point for the system-oriented specification layout. Ea
 
 | System | Index | Migration | Canonical documents |
 | --- | --- | --- | --- |
-| Agents | [README](agents/README.md) | complete | 26 requirements, 16 designs |
+| Agents | [README](agents/README.md) | complete | 27 requirements, 17 designs |
 | Auth | [README](auth/README.md) | complete | 7 requirements, 2 designs |
 | CLI | [README](cli/README.md) | complete | 2 requirements, 0 designs |
 | Costs | [README](costs/README.md) | complete | 2 requirements, 0 designs |

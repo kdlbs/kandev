@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/review"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // ReviewRunner launches native code-review passes. Satisfied by
@@ -99,7 +100,7 @@ func workflowTargetStepResolver(
 // guaranteed by the time the closure runs (callbacks only execute after
 // HandleTrigger).
 func switchWorkflowDispatcher(svc *Service) engine.DispatchTriggerFn {
-	return func(ctx context.Context, taskID, sessionID string, trigger engine.Trigger, operationID string) error {
+	return func(ctx context.Context, taskID, sessionID string, trigger engine.Trigger, operationID, sourceStepID string) error {
 		eng := svc.workflowEngine
 		if eng == nil {
 			return nil // engine not initialised; treat as no-op
@@ -121,7 +122,14 @@ func switchWorkflowDispatcher(svc *Service) engine.DispatchTriggerFn {
 		var preloadedState *engine.MachineState
 		if trigger == engine.TriggerOnEnter {
 			var err error
-			sessionID, preloadedState, err = svc.prepareDirectWorkflowStepEntry(ctx, taskID, sessionID)
+			var sourceStep *wfmodels.WorkflowStep
+			if sourceStepID != "" {
+				sourceStep, err = svc.loadWorkflowStepForLifecycle(ctx, sourceStepID, "workflow switch source")
+				if err != nil {
+					return err
+				}
+			}
+			sessionID, preloadedState, err = svc.prepareDirectWorkflowStepEntry(ctx, taskID, sessionID, sourceStep)
 			if err != nil {
 				return err
 			}
@@ -154,6 +162,7 @@ func switchWorkflowDispatcher(svc *Service) engine.DispatchTriggerFn {
 
 func (s *Service) prepareDirectWorkflowStepEntry(
 	ctx context.Context, taskID, sessionID string,
+	sourceStep *wfmodels.WorkflowStep,
 ) (string, *engine.MachineState, error) {
 	ctx = withWorkflowMetaCache(ctx)
 	task, err := s.repo.GetTask(ctx, taskID)
@@ -177,7 +186,7 @@ func (s *Service) prepareDirectWorkflowStepEntry(
 	if err != nil {
 		return "", nil, fmt.Errorf("load session for workflow step entry: %w", err)
 	}
-	effectiveSession, _, err := s.prepareWorkflowStepSession(ctx, taskID, session, step)
+	effectiveSession, _, err := s.prepareWorkflowStepSession(ctx, taskID, session, step, sourceStep)
 	if err != nil {
 		return "", nil, fmt.Errorf("prepare session for workflow step entry: %w", err)
 	}
