@@ -57,6 +57,8 @@ type handoffFixture struct {
 	repo         *sqliterepo.Repository
 	workflowRepo *workflowrepo.Repository
 	agentStore   agentsettingsstore.Repository
+	db           *sqlx.DB
+	agentDB      *sqlx.DB
 	h            *Handlers
 
 	sourceWorkspaceID    string
@@ -73,6 +75,16 @@ type handoffFixture struct {
 
 func newHandoffAgentSettingsController(t *testing.T) (agentsettingsstore.Repository, *agentsettingscontroller.Controller) {
 	t.Helper()
+	repo, ctrl, _ := newHandoffAgentSettingsControllerDB(t)
+	return repo, ctrl
+}
+
+// newHandoffAgentSettingsControllerDB is newHandoffAgentSettingsController
+// plus the underlying *sqlx.DB, for tests that need to break the
+// agent_profiles table directly to force a genuine
+// AgentHasHandoffPermission read error.
+func newHandoffAgentSettingsControllerDB(t *testing.T) (agentsettingsstore.Repository, *agentsettingscontroller.Controller, *sqlx.DB) {
+	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "agent-settings.db"))
 	require.NoError(t, err)
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
@@ -81,7 +93,7 @@ func newHandoffAgentSettingsController(t *testing.T) (agentsettingsstore.Reposit
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = cleanup() })
 	ctrl := agentsettingscontroller.NewController(repo, nil, nil, nil, testLogger(t))
-	return repo, ctrl
+	return repo, ctrl, sqlxDB
 }
 
 func seedHandoffAgentProfile(
@@ -153,14 +165,16 @@ func newHandoffFixture(t *testing.T, callerRole agentsettingsmodels.AgentRole, c
 func newHandoffFixtureWithOwner(t *testing.T, callerRole agentsettingsmodels.AgentRole, callerPermissions string, launcher SessionLauncher, ownerID string) *handoffFixture {
 	t.Helper()
 	ctx := context.Background()
-	svc, repo, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
-	agentStore, agentCtrl := newHandoffAgentSettingsController(t)
+	svc, repo, workflowCtrl, workflowRepo, sqlxDB := newTestTaskServiceWithWorkflowDB(t)
+	agentStore, agentCtrl, agentSqlxDB := newHandoffAgentSettingsControllerDB(t)
 
 	f := &handoffFixture{
 		svc:                  svc,
 		repo:                 repo,
 		workflowRepo:         workflowRepo,
 		agentStore:           agentStore,
+		db:                   sqlxDB,
+		agentDB:              agentSqlxDB,
 		sourceWorkspaceID:    "ws-handoff-source",
 		targetWorkspaceID:    "ws-handoff-target",
 		sourceTaskID:         "task-handoff-source",

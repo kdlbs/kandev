@@ -100,6 +100,20 @@ func TestHandleHandoffTask_ActivityLogUsesResolvedRunID(t *testing.T) {
 	assert.Equal(t, f.targetWorkspaceID, targetEntry.WorkspaceID)
 	assert.Equal(t, result.TaskID, targetEntry.TargetID)
 	assert.Equal(t, "run-newest-abc", targetEntry.RunID)
+
+	// AC-19a: each side's Details payload must let a viewer of one workspace's
+	// activity feed navigate to the counterpart task on the other side.
+	var sourceDetails, targetDetails map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(sourceEntry.Details), &sourceDetails))
+	require.NoError(t, json.Unmarshal([]byte(targetEntry.Details), &targetDetails))
+
+	assert.Equal(t, result.TaskID, sourceDetails["counterpart_task_id"])
+	assert.Equal(t, f.targetWorkspaceID, sourceDetails["counterpart_workspace_id"])
+	assert.Equal(t, handoffOutcomeCreated, sourceDetails["outcome"])
+
+	assert.Equal(t, f.sourceTaskID, targetDetails["counterpart_task_id"])
+	assert.Equal(t, f.sourceWorkspaceID, targetDetails["counterpart_workspace_id"])
+	assert.Equal(t, handoffOutcomeCreated, targetDetails["outcome"])
 }
 
 func TestHandleHandoffTask_ActivityLogEmptyRunIDWhenCallerSessionNotNewest(t *testing.T) {

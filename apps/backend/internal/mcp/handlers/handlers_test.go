@@ -106,6 +106,18 @@ func newTestTaskServiceWithEventBus(t *testing.T) (*service.Service, *sqliterepo
 
 func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo.Repository, *workflowcontroller.Controller, *workflowrepo.Repository) {
 	t.Helper()
+	svc, repo, workflowCtrl, workflowRepo, _ := newTestTaskServiceWithWorkflowDB(t)
+	return svc, repo, workflowCtrl, workflowRepo
+}
+
+// newTestTaskServiceWithWorkflowDB is newTestTaskServiceWithWorkflow plus the
+// underlying shared *sqlx.DB, for tests that need to break one table
+// (workflow_steps, say) directly to force a genuine repository-layer error
+// without disturbing the rest of the fixture's tables.
+func newTestTaskServiceWithWorkflowDB(t *testing.T) (
+	*service.Service, *sqliterepo.Repository, *workflowcontroller.Controller, *workflowrepo.Repository, *sqlx.DB,
+) {
+	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
@@ -142,7 +154,7 @@ func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo
 	}, eventBus, log, service.RepositoryDiscoveryConfig{})
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
 	t.Cleanup(func() { _ = workflowSvc.Close() })
-	return svc, repo, workflowcontroller.NewController(workflowSvc), workflowRepo
+	return svc, repo, workflowcontroller.NewController(workflowSvc), workflowRepo, sqlxDB
 }
 
 func TestHandleListWorkspacesAutomationIsScopedToPrincipalWorkspace(t *testing.T) {
