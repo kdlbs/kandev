@@ -258,6 +258,33 @@ type TaskCreator interface {
 	CreateChildTask(ctx context.Context, parentTaskID string, spec ChildTaskSpec) (taskID string, err error)
 }
 
+// MarkerBearingStepEntryExecutor is the engine's contract for executing one
+// marker-bearing on_enter action (clear_decisions,
+// queue_run_for_each_participant) from within DispatchStepEntry's loop. The
+// implementation claims the action's step-entry marker before executing and
+// completes it after, so a redelivered arrival — or a concurrent dispatch
+// racing the same entry — is a safe no-op instead of a duplicate side effect
+// (AC-OFFICE-STEP-ENTRY-DISPATCH-002.3/.4). Wired by the orchestrator, which
+// owns both the marker CAS primitives (ClaimStepEntryMarker et al.) and the
+// Phase 2 callbacks these two kinds already use.
+//
+// abandon reports that a concurrent dispatch already holds this position's
+// marker in_progress — not a failure, but per AC-002.10 the caller must still
+// abandon the remainder of this entry's sequence, the same as a genuine
+// error. err is non-nil exactly when the action itself failed (including a
+// prior attempt's recorded failure surfacing on a CAS loss).
+//
+// Nil-safe like every other optional Engine dependency: when unset,
+// DispatchStepEntry executes a marker-bearing action directly and
+// unprotected, matching the pre-convergence behaviour for any write
+// chokepoint that has not allocated a step entry for this arrival
+// (markerEntryID == 0).
+type MarkerBearingStepEntryExecutor interface {
+	ExecuteMarkerBearingStepEntryAction(
+		ctx context.Context, taskID string, step StepSpec, action Action, position int, markerEntryID int64,
+	) (abandon bool, err error)
+}
+
 // WorkflowSwitcher is the engine's contract for in-place workflow swap.
 // Implementations mutate tasks.workflow_id and tasks.workflow_step_id and
 // return the resolved step id (defaulting blank stepID to the workflow's

@@ -71,8 +71,8 @@ type testStepEntryDispatcher struct {
 	eng *engine.Engine
 }
 
-func (d *testStepEntryDispatcher) DispatchStepEntry(ctx context.Context, taskID, workflowID, stepID, entryID string) {
-	d.eng.DispatchStepEntry(ctx, taskID, workflowID, stepID, entryID)
+func (d *testStepEntryDispatcher) DispatchStepEntry(ctx context.Context, taskID, workflowID, stepID, entryID string, markerEntryID int64) {
+	d.eng.DispatchStepEntry(ctx, taskID, workflowID, stepID, entryID, markerEntryID)
 }
 
 // reviewSeatsTestEnv wires a real task repository and a real workflow
