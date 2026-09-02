@@ -1,4 +1,4 @@
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync } from "../../helpers/node-sqlite";
 
 export function seedKubernetesTaskEnvironment(
   database: string,

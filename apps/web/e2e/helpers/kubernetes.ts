@@ -2,9 +2,9 @@ import { expect } from "@playwright/test";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import type { KubernetesCluster, KubernetesPod, KubernetesPVC } from "../fixtures/kubernetes-tools";
 import type { ApiClient } from "./api-client";
+import { DatabaseSync } from "./node-sqlite";
 
 type KubernetesList<T> = { items: T[] };
 
