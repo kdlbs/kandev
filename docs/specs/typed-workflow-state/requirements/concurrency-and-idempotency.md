@@ -8,11 +8,12 @@ owners:
 
 # Concurrency and idempotency requirements
 
-The concurrency and idempotency contract for both parts of the typed workflow
-review state system. Its acceptance criteria state **accepted** behaviour: they are
-satisfied by adding no lock, no retry and no reconciliation, and are verifiable by
-inspection rather than by a race test. System-wide terminology, non-functional
-constraints and exclusions are in [../README.md](../README.md).
+This document defines the concurrency and idempotency contract for both parts of
+the typed workflow review state system. Its acceptance criteria state **accepted**
+behaviour: they are satisfied by adding no lock, no retry and no reconciliation,
+and are verifiable by inspection rather than by a race test. System-wide
+terminology, non-functional constraints and exclusions are in
+[../README.md](../README.md).
 
 ## Requirements
 
