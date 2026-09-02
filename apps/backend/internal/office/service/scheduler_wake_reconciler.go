@@ -175,12 +175,32 @@ func (h *ParentWakeReconciler) buildPayload(
 	return engine.OnChildrenCompletedPayload{ChildSummaries: summaries}, nil
 }
 
+// childGenerationSecondLayout matches the text format tasks.updated_at is
+// written in by CURRENT_TIMESTAMP (see UpdateTaskState) — one-second
+// resolution, no sub-second component.
+const childGenerationSecondLayout = "2006-01-02 15:04:05"
+
 // recordReceipt stores the operation-backed receipt after the workflow engine
 // accepts the trigger. The engine owns run admission and can fan out to more
 // than one target, so a single delivered run id cannot represent this wake.
+//
+// It refuses to persist a receipt whose child_generation names a
+// wall-clock second that has not closed yet: tasks.updated_at has only
+// one-second resolution, so a reopen+recomplete landing later in that same
+// still-open second would write the identical string, making the reopen
+// indistinguishable from the generation already on file. Skipping the write
+// leaves the candidate re-checked on the next tick, by which point the
+// second has necessarily closed and can never be reproduced by a later
+// write.
 func (h *ParentWakeReconciler) recordReceipt(
 	ctx context.Context, svc *Service, c sqlite.StuckParentCandidate, operationID string,
 ) {
+	if c.NewestChildUpdatedAt >= time.Now().UTC().Format(childGenerationSecondLayout) {
+		h.logger.Debug("wake sweep: deferred receipt for still-open generation second",
+			zap.String("parent_task_id", c.ParentTaskID))
+		return
+	}
+
 	tx, err := svc.repo.Writer().BeginTxx(ctx, nil)
 	if err != nil {
 		if ctx.Err() != nil {

@@ -4,10 +4,24 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
 )
+
+// waitForNextWholeSecond blocks until the wall clock crosses into a new
+// second, so a CURRENT_TIMESTAMP write taken after it produces different
+// text than one taken before it. Mirrors the sqlite package's helper of the
+// same name (wake_receipts_test.go): that one proves ListStuckParents'
+// generation comparison itself; this one is needed because recordReceipt's
+// still-open-second guard runs against real wall-clock time, so tests that
+// care whether a receipt was (or was not) persisted need to control which
+// side of a second boundary they land on.
+func waitForNextWholeSecond(t *testing.T) {
+	t.Helper()
+	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(1100 * time.Millisecond)))
+}
 
 // adoptOffice satisfies HasOfficeAdoption via an office_projects row, the
 // same shape scheduler_recovery_test.go uses.
@@ -69,6 +83,14 @@ func TestParentWakeReconciler_EmitsRunForStuckParent(t *testing.T) {
 
 	adoptOffice(t, svc, "ws-1")
 	seedStuckParent(t, svc, "ws-1", "parent-1", "worker-1")
+
+	// The seeded children's updated_at defaults to CURRENT_TIMESTAMP at
+	// insert time, i.e. "now". recordReceipt refuses to persist a receipt
+	// for a still-open generation second (see
+	// TestParentWakeReconciler_RedeliversAfterSameSecondReopenAndRecomplete),
+	// so this test — which asserts the receipt lands synchronously after a
+	// single tick — needs the generation safely closed first.
+	waitForNextWholeSecond(t)
 
 	handler := service.NewParentWakeReconciler(service.NewSchedulerIntegration(svc, 0))
 	if err := handler.Tick(ctx); err != nil {
@@ -159,6 +181,74 @@ func TestParentWakeReconciler_RedeliversAfterChildReopenedAndRecompleted(t *test
 	secondOpID := callsAfter[1].opID
 	if secondOpID == firstOpID {
 		t.Fatalf("second delivery reused the first operation id %q; the engine's permanent operation ledger would swallow it as already-applied", secondOpID)
+	}
+}
+
+// TestParentWakeReconciler_RedeliversAfterSameSecondReopenAndRecomplete is
+// R2-F1's regression test. tasks.updated_at (CURRENT_TIMESTAMP) has only
+// one-second resolution, so a reopen+recomplete landing in the same
+// wall-clock second as a wake's delivery previously produced a
+// child_generation byte-identical to the reopened generation, permanently
+// hiding the parent from ListStuckParents (nothing else re-admits it: the
+// edge-triggered path's idempotency key collides on the same child set
+// too). recordReceipt now refuses to persist a receipt whose generation
+// names a still-open second, so this drives the exact same-second
+// collision through the full reconciler — not just ListStuckParents — via
+// the same CURRENT_TIMESTAMP writer UpdateTaskState uses, and asserts the
+// parent keeps getting redelivered instead of going silent.
+func TestParentWakeReconciler_RedeliversAfterSameSecondReopenAndRecomplete(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	dispatcher := &fakeDispatcher{}
+	svc.SetWorkflowEngineDispatcher(dispatcher)
+	const childID = "parent-1-child-0"
+
+	adoptOffice(t, svc, "ws-1")
+	// Align to the start of a fresh second so seed + tick 1 + reopen +
+	// recomplete + tick 2 below — all sub-millisecond work — have maximum
+	// room to land inside one shared wall-clock second, the collision
+	// window R2-F1 depends on.
+	waitForNextWholeSecond(t)
+	seedStuckParent(t, svc, "ws-1", "parent-1", "worker-1")
+
+	handler := service.NewParentWakeReconciler(service.NewSchedulerIntegration(svc, 0))
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	if got := len(dispatcher.Calls()); got != 1 {
+		t.Fatalf("want exactly one engine dispatch after tick 1, got %d: %#v", got, dispatcher.Calls())
+	}
+	if receipt, err := svc.GetWakeReceiptForTest(ctx, "parent-1"); err != nil {
+		t.Fatalf("get wake receipt after tick 1: %v", err)
+	} else if receipt != nil {
+		t.Fatalf("tick 1 persisted a receipt for a still-open generation second: %#v", receipt)
+	}
+
+	// The child is reopened and re-completed through the same
+	// CURRENT_TIMESTAMP write UpdateTaskState performs, landing in the same
+	// wall-clock second as tick 1 above.
+	svc.ExecSQL(t, `UPDATE tasks SET state = 'IN_PROGRESS', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, childID)
+	svc.ExecSQL(t, `UPDATE tasks SET state = 'COMPLETED', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, childID)
+
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	if got := len(dispatcher.Calls()); got != 2 {
+		t.Fatalf("LOST WAKE NOT RECOVERABLE: same-second reopen+recomplete must still be redelivered, got %d dispatches: %#v", got, dispatcher.Calls())
+	}
+
+	// Once real time moves past the generation's second, the deferred
+	// receipt finally persists, reflecting the reopened generation.
+	waitForNextWholeSecond(t)
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick 3: %v", err)
+	}
+	receipt, err := svc.GetWakeReceiptForTest(ctx, "parent-1")
+	if err != nil {
+		t.Fatalf("get wake receipt after tick 3: %v", err)
+	}
+	if receipt == nil || receipt.DeliveryOperationID == "" {
+		t.Fatalf("generation safely closed but no receipt was recorded: %#v", receipt)
 	}
 }
 
