@@ -525,7 +525,11 @@ func (h *Handlers) handleHandoffCreatedOutcome(
 	}
 
 	reverseLink := h.ensureHandoffReverseLink(ctx, principal.CallerTaskID, task.ID, args.TargetWorkspaceID, handedOffAtStr, false)
-	h.logHandoffActivity(ctx, principal, session, settledTask, args.TargetWorkspaceID, outcome)
+	// The activity log records task.ID (not settledTask), matching the
+	// reverse link and the response's task_id above: on the identity-lost
+	// path the caller is told to use task.ID, so the audit trail must name
+	// the same task rather than the survivor that kept the external_id.
+	h.logHandoffActivity(ctx, principal, session, task, args.TargetWorkspaceID, outcome)
 
 	started := false
 	var startError string
@@ -668,13 +672,21 @@ func (h *Handlers) ensureHandoffReverseLink(
 			return reverseLinkOutcome{errMsg: handoffReverseLinkUnreadableSuffix, handedOffAt: ""}
 		}
 
-		entries = append(entries, map[string]interface{}{
+		newEntryRaw, marshalErr := json.Marshal(map[string]interface{}{
 			keyTaskID:             deliveryTaskID,
 			"target_workspace_id": targetWorkspaceID,
 			handoffHandedOffAtKey: handedOffAtRaw,
 		})
+		if marshalErr != nil {
+			return reverseLinkOutcome{errMsg: "failed to encode the source task's reverse-link metadata", handedOffAt: respondValue}
+		}
+		entries = append(entries, handoffEntryRecord{raw: newEntryRaw, taskID: deliveryTaskID, handedOffAt: handedOffAtRaw})
 		sortHandoffEntries(entries)
-		newRaw, marshalErr := json.Marshal(entries)
+		rawEntries := make([]json.RawMessage, len(entries))
+		for i, e := range entries {
+			rawEntries[i] = e.raw
+		}
+		newRaw, marshalErr := json.Marshal(rawEntries)
 		if marshalErr != nil {
 			return reverseLinkOutcome{errMsg: "failed to encode the source task's reverse-link metadata", handedOffAt: respondValue}
 		}
@@ -715,10 +727,23 @@ func handoffReverseLinkWriteFailureMessage(err error) string {
 	return "failed to write the source task's reverse-link metadata"
 }
 
+// handoffEntryRecord pairs a handoffs-array entry's raw JSON bytes with the
+// two keys needed to validate and sort it. Keeping `raw` untouched (rather
+// than decoding into map[string]interface{} and re-marshaling) is what makes
+// unknown fields survive an append byte-for-byte, including additive numeric
+// fields outside float64's exact integer range (AC-27) that a decode/re-encode
+// round trip through map[string]interface{} would silently corrupt.
+type handoffEntryRecord struct {
+	raw         json.RawMessage
+	taskID      string
+	handedOffAt string
+}
+
 // parseHandoffEntries reads the source task's raw handoffs JSON, applying
 // AC-27's exhaustive corruption rules. An entry carrying additional unknown
-// fields is well-formed and preserved unchanged (returned as the full map).
-func parseHandoffEntries(raw, deliveryTaskID string) (entries []map[string]interface{}, alreadyPresent bool, corruptMsg string) {
+// fields is well-formed and preserved unchanged (returned as its original
+// raw bytes, untouched by decoding).
+func parseHandoffEntries(raw, deliveryTaskID string) (entries []handoffEntryRecord, alreadyPresent bool, corruptMsg string) {
 	const corruptMessage = "the source task's handoffs metadata is corrupt and cannot be safely appended to"
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -736,22 +761,23 @@ func parseHandoffEntries(raw, deliveryTaskID string) (entries []map[string]inter
 		return nil, false, corruptMessage
 	}
 	for _, re := range rawEntries {
-		var entry map[string]interface{}
-		if err := json.Unmarshal(re, &entry); err != nil {
+		var keys struct {
+			TaskID      string `json:"task_id"`
+			HandedOffAt string `json:"handed_off_at"`
+		}
+		if err := json.Unmarshal(re, &keys); err != nil {
 			return nil, false, corruptMessage
 		}
-		taskID, _ := entry[keyTaskID].(string)
-		handedOffAt, ok := entry[handoffHandedOffAtKey].(string)
-		if taskID == "" || !ok {
+		if keys.TaskID == "" {
 			return nil, false, corruptMessage
 		}
-		if _, err := time.Parse(time.RFC3339, handedOffAt); err != nil {
+		if _, err := time.Parse(time.RFC3339, keys.HandedOffAt); err != nil {
 			return nil, false, corruptMessage
 		}
-		if taskID == deliveryTaskID {
+		if keys.TaskID == deliveryTaskID {
 			alreadyPresent = true
 		}
-		entries = append(entries, entry)
+		entries = append(entries, handoffEntryRecord{raw: re, taskID: keys.TaskID, handedOffAt: keys.HandedOffAt})
 	}
 	return entries, alreadyPresent, ""
 }
@@ -759,14 +785,14 @@ func parseHandoffEntries(raw, deliveryTaskID string) (entries []map[string]inter
 // sortHandoffEntries is AC-28/R-F37(3): sorted by handed_off_at as a parsed
 // instant, task_id lexicographic as the tiebreak. Safe unconditionally
 // because every entry here already passed parseHandoffEntries.
-func sortHandoffEntries(entries []map[string]interface{}) {
+func sortHandoffEntries(entries []handoffEntryRecord) {
 	sort.SliceStable(entries, func(i, j int) bool {
-		ti, _ := time.Parse(time.RFC3339, entries[i][handoffHandedOffAtKey].(string))
-		tj, _ := time.Parse(time.RFC3339, entries[j][handoffHandedOffAtKey].(string))
+		ti, _ := time.Parse(time.RFC3339, entries[i].handedOffAt)
+		tj, _ := time.Parse(time.RFC3339, entries[j].handedOffAt)
 		if !ti.Equal(tj) {
 			return ti.Before(tj)
 		}
-		return entries[i][keyTaskID].(string) < entries[j][keyTaskID].(string)
+		return entries[i].taskID < entries[j].taskID
 	})
 }
 
