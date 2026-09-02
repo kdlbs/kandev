@@ -428,7 +428,8 @@ Composition, by whether `custom_query` is present:
      (with any value, including empty), the custom query is used **unchanged**
      and the `milestone` parameter is ignored. The custom query wins.
   3. Otherwise (parse succeeded without a `milestone` key, **or** parsing
-     failed) append `&milestone=<escaped>` to the custom query as-is.
+     failed) append `&milestone=<escaped>` before any `#` fragment. Malformed
+     values are rejected; direct builders also keep defensive append.
   This mirrors the established `appendLabelsToQuery` rule
   (`apps/backend/internal/gitlab/service_watches.go:840`), including its
   parse-failure branch, so the two folds behave identically.
@@ -456,7 +457,8 @@ a raw value into the custom-query concatenation would under-escape it. Each path
 takes the raw trimmed title and escapes once.
 
 Response shape is unchanged apart from the new optional `milestone` field on
-each issue. No new status codes. Upstream errors continue through
+each issue. Malformed values return HTTP 400 before lookup; upstream errors
+continue through
 `writeWorkspaceClientActionError(ctx, err, "issue search")`.
 
 ### Client function, and where trimming happens
@@ -517,7 +519,7 @@ named.
 draft into the committed value verbatim. It does not trim, and it SHALL NOT be
 taught to: the custom-query input shares that hook and its behaviour is out of
 scope. The milestone input SHALL therefore commit by calling
-`setImmediate(draft.trim())` rather than `commit()`. `setImmediate` writes the
+`setImmediate(trimGitLabMilestone(draft))` rather than `commit()`. `setImmediate` writes the
 draft and the committed value together, which gives both halves of the rule:
 
 - the committed value is trimmed at the instant of commit, as required above; and
@@ -836,7 +838,7 @@ affordances in one toolbar row for what is, to the user, one habit.
 | Milestone matches no issues | Empty result set, `total_count` 0, existing empty state rendered. Not an error. |
 | Milestone set while `filter=review_requested` | Existing 400 `review_requested is not supported for issues`, unchanged. Milestone never evaluated. |
 | `custom_query` already contains `milestone` | Custom query wins; the `milestone` parameter is silently ignored. No error, no warning. |
-| `custom_query` unparseable by `url.ParseQuery` | `&milestone=<escaped>` is appended anyway, matching `appendLabelsToQuery`. |
+| `custom_query` unparseable by `url.ParseQuery` | HTTP 400; no GitLab call. |
 | `filter` unparseable by `url.ParseQuery` (e.g. `filter=%zz`) | Today `appendFilter` returns early and the whole filter is silently dropped. That is unchanged and out of scope. The **milestone still applies**, because it is set on `url.Values` after `appendFilter` returns rather than concatenated into the `filter` string. A malformed filter therefore degrades to "no preset, milestone honoured", never to "milestone silently lost". |
 | Milestone title contains `&`, `=`, `#`, `%`, `+`, or spaces | Escaped once; reaches GitLab as one parameter value. No other parameter is added or altered. |
 | GitLab returns an error | Existing `writeWorkspaceClientActionError` path, unchanged. |
@@ -1072,10 +1074,9 @@ affordances in one toolbar row for what is, to the user, one habit.
     and the input become empty. GIVEN the user is mid-edit and has typed a
     leading space without committing, THEN that space is preserved in the draft.
 
-19. **A malformed custom query still receives the milestone.** GIVEN a custom
-    query of `%zz`, WHEN the milestone `Next` is committed, THEN parsing fails,
-    the fold appends, the upstream query is `%zz&milestone=Next`, and kandev
-    raises no error of its own.
+19. **A malformed custom query is rejected at the request boundary.** GIVEN
+    `%zz`, WHEN `Next` is committed, THEN HTTP 400 is returned, no upstream call
+    and the response reports an invalid `custom_query`.
 
 20. **A malformed filter cannot take the milestone down with it.** GIVEN
     `filter=%zz` and an empty custom query, WHEN the milestone `Next` is
@@ -1324,7 +1325,7 @@ exists.
   `useCommittedQuery` hook rather than adding a second mechanism, and SHALL use
   it **unmodified**. The hook supplies `draft`, `committed`, `setDraft`,
   `setImmediate` and `commit`; the trimming boundary is met by committing
-  through `setImmediate(draft.trim())` instead of through `commit()`, as
+  through `setImmediate(trimGitLabMilestone(draft))`, as
   specified under "Client function, and where trimming happens". `commit()`
   copies the draft verbatim and SHALL NOT be changed, because the custom-query
   input shares this hook.

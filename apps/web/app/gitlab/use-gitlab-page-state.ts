@@ -47,6 +47,21 @@ export type UseProjectOptionsArgs = {
   projectFilter: string;
 };
 
+/** Encode every reset-key component as a JSON tuple so user values cannot collide. */
+export function buildProjectOptionsResetKey(
+  selection: SidebarSelection,
+  committedQuery: string,
+  milestone: string,
+): string {
+  return JSON.stringify([
+    selection.kind,
+    selection.source,
+    selection.id,
+    committedQuery.trim(),
+    milestone,
+  ]);
+}
+
 export function useProjectOptions({
   selection,
   committedQuery,
@@ -55,7 +70,7 @@ export function useProjectOptions({
   loading,
   projectFilter,
 }: UseProjectOptionsArgs): string[] {
-  const resetKey = `${selection.kind}:${selection.source}:${selection.id}:${committedQuery.trim()}:${milestone}`;
+  const resetKey = buildProjectOptionsResetKey(selection, committedQuery, milestone);
 
   // `useKnownProjects`'s accumulator clears the instant `resetKey` changes and
   // immediately refills with whatever project list it is handed in that same

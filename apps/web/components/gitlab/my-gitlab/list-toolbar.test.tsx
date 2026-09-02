@@ -94,6 +94,17 @@ describe("MilestoneFilterInput", () => {
     expect(event).toBe(false);
   });
 
+  it("does not commit while an IME is composing a milestone candidate", () => {
+    const { onCommitMilestone } = renderToolbar({ milestone: "次", committedMilestone: "" });
+
+    fireEvent.keyDown(screen.getByTestId(MILESTONE_TEST_ID), {
+      key: "Enter",
+      isComposing: true,
+    });
+
+    expect(onCommitMilestone).not.toHaveBeenCalled();
+  });
+
   it("does not commit on keys other than Enter", () => {
     const { onCommitMilestone } = renderToolbar({ milestone: "Next", committedMilestone: "" });
 

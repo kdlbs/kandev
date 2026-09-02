@@ -74,7 +74,7 @@ function MilestoneFilterInput({
       value={milestone}
       onChange={(event) => onMilestoneChange(event.target.value)}
       onKeyDown={(event) => {
-        if (event.key === "Enter") {
+        if (event.key === "Enter" && !event.nativeEvent.isComposing && event.keyCode !== 229) {
           event.preventDefault();
           onCommitMilestone();
         }
@@ -84,7 +84,7 @@ function MilestoneFilterInput({
       }}
       placeholder={t("gitlab:eGSprint42")}
       aria-label={t("gitlab:milestoneFilterLabel")}
-      className="h-8 w-full md:w-[180px]"
+      className="h-11 w-full md:h-8 md:w-[180px]"
       data-testid="gitlab-milestone-filter"
     />
   );

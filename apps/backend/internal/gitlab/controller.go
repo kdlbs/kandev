@@ -3,6 +3,7 @@ package gitlab
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"unicode"
@@ -286,6 +287,12 @@ func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
 	page, perPage := paginationFromQuery(ctx)
 	filter := ctx.Query("filter")
 	customQuery := ctx.Query("custom_query")
+	if customQuery != "" {
+		if _, err := url.ParseQuery(customQuery); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "custom_query must be a valid URL query"})
+			return
+		}
+	}
 	if customQuery == "" {
 		if filter == filterTokenReviewRequested {
 			ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "review_requested is not supported for issues"})
@@ -341,10 +348,9 @@ func (c *Controller) translateMRFilter(ctx *gin.Context, filter string) (string,
 }
 
 // trimGitLabWhitespace trims Unicode White_Space plus U+FEFF (byte order
-// mark). strings.TrimSpace is deliberately not used here: its ASCII-derived
-// definition disagrees with Unicode White_Space on U+0085 (NEL) and never
-// touches U+FEFF, so a milestone name that is only a pasted BOM would survive
-// TrimSpace as a non-empty string and silently fail to match any milestone.
+// mark). strings.TrimSpace already covers Unicode White_Space, including
+// U+0085 (NEL), but it does not trim U+FEFF. The extra rune keeps a pasted BOM
+// from surviving as a non-empty milestone that cannot match.
 func trimGitLabWhitespace(s string) string {
 	return strings.TrimFunc(s, func(r rune) bool {
 		return unicode.IsSpace(r) || r == '\uFEFF'

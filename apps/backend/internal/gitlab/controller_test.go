@@ -448,3 +448,20 @@ func TestHttpSearchUserIssues_WhitespaceOnlyMilestoneOmitsKey(t *testing.T) {
 		t.Errorf("query = %v, want no milestone key for a whitespace-only value", req.Query)
 	}
 }
+
+func TestHttpSearchUserIssues_MalformedCustomQueryReturns400(t *testing.T) {
+	router, rec, stop := newControllerFixture(t, "alice")
+	defer stop()
+
+	resp := hit(
+		router,
+		"/api/v1/gitlab/user/issues?custom_query="+url.QueryEscape("%zz")+
+			"&milestone="+url.QueryEscape("Next"),
+	)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body: %s)", resp.Code, resp.Body.String())
+	}
+	if req := rec.findByPath("/api/v4/issues"); req != nil {
+		t.Errorf("/api/v4/issues was called with query %v — malformed custom query should be rejected", req.Query)
+	}
+}

@@ -516,6 +516,26 @@ func buildIssueSearchQuery(filter, customQuery, milestone string) string {
 	return values.Encode()
 }
 
+// appendQueryParam adds an escaped key/value pair to a raw query unless that
+// key already exists. URL fragments are kept at the end, outside the query.
+// This also preserves malformed-query behavior for callers that do not validate
+// their input at the HTTP boundary.
+func appendQueryParam(customQuery, key, value string) string {
+	if parsed, err := url.ParseQuery(customQuery); err == nil && parsed.Has(key) {
+		return customQuery
+	}
+	fragment := ""
+	if index := strings.IndexByte(customQuery, '#'); index >= 0 {
+		fragment = customQuery[index:]
+		customQuery = customQuery[:index]
+	}
+	encoded := url.QueryEscape(value)
+	if customQuery == "" {
+		return key + "=" + encoded + fragment
+	}
+	return customQuery + "&" + key + "=" + encoded + fragment
+}
+
 // foldMilestoneIntoQuery merges a milestone into an existing, non-empty
 // customQuery string, mirroring appendLabelsToQuery's precedent: a custom
 // query that already names the `milestone` key wins (even if the value is
@@ -524,10 +544,7 @@ func buildIssueSearchQuery(filter, customQuery, milestone string) string {
 // buildIssueSearchQuery, guards both arguments non-empty before calling this,
 // so there is no empty-customQuery case to handle here.
 func foldMilestoneIntoQuery(customQuery, milestone string) string {
-	if parsed, err := url.ParseQuery(customQuery); err == nil && parsed.Has("milestone") {
-		return customQuery
-	}
-	return customQuery + "&milestone=" + url.QueryEscape(milestone)
+	return appendQueryParam(customQuery, "milestone", milestone)
 }
 
 // filterTokenReviewRequested is the /gitlab page tab value that maps to

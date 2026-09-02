@@ -82,7 +82,18 @@ func TestBuildIssueSearchQuery_CustomQueryWithoutMilestoneIsExtended(t *testing.
 	}
 }
 
-func TestBuildIssueSearchQuery_MalformedCustomQueryStillReceivesMilestone(t *testing.T) {
+func TestBuildIssueSearchQuery_CustomQueryFragmentKeepsMilestoneInQuery(t *testing.T) {
+	got := buildIssueSearchQuery("", "state=closed#client-fragment", "Next")
+	want := "state=closed&milestone=Next#client-fragment"
+	if got != want {
+		t.Errorf("query = %q, want %q (milestone must precede the URL fragment)", got, want)
+	}
+}
+
+// The HTTP controller rejects malformed custom queries before this helper is
+// called. Keep this builder-level case to pin its defensive append behavior
+// for other callers that construct the query directly.
+func TestBuildIssueSearchQuery_MalformedCustomQueryAppendsMilestone(t *testing.T) {
 	got := buildIssueSearchQuery("", "%zz", "Next")
 	want := "%zz&milestone=Next"
 	if got != want {
@@ -178,9 +189,9 @@ func TestConvertRawIssue_NullMilestoneDecodesToEmptyString(t *testing.T) {
 }
 
 // trimGitLabWhitespace is the Go-side normative trim helper: Unicode
-// White_Space together with U+FEFF, never strings.TrimSpace (which disagrees
-// on U+0085 and U+FEFF; see spec "Client function, and where trimming
-// happens"). Scenario 27.
+// White_Space together with U+FEFF. strings.TrimSpace already covers the
+// Unicode White_Space set, including U+0085, but it does not cover U+FEFF.
+// Scenario 27.
 func TestTrimGitLabWhitespace_MatchesNormativeSet(t *testing.T) {
 	trimmed := []rune{
 		0x0009, 0x000A, 0x000B, 0x000C, 0x000D, 0x0020, 0x0085, 0x00A0,
@@ -209,9 +220,9 @@ func TestTrimGitLabWhitespace_MatchesNormativeSet(t *testing.T) {
 		t.Errorf("trimGitLabWhitespace(padded) = %q, want interior space preserved", got)
 	}
 
-	// The helper must not be strings.TrimSpace: TrimSpace keeps U+FEFF.
+	// The helper adds the one normative rune that TrimSpace does not trim.
 	bomOnly := string(rune(0xFEFF))
 	if got := trimGitLabWhitespace(bomOnly); got != "" {
-		t.Errorf("trimGitLabWhitespace(BOM alone) = %q, want empty (strings.TrimSpace keeps U+FEFF)", got)
+		t.Errorf("trimGitLabWhitespace(BOM alone) = %q, want empty (TrimSpace keeps U+FEFF)", got)
 	}
 }

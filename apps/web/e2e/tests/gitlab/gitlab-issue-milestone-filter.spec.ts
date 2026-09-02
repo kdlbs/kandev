@@ -1,36 +1,8 @@
 import { test, expect } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
-import type { MockGitLabIssueSeed } from "../../helpers/api-client";
 import { GITLAB_PROJECT } from "../../helpers/gitlab";
 import { GitLabPage } from "../../pages/gitlab-page";
-
-const ISSUES_ENDPOINT = /^\/api\/v1\/gitlab\/user\/issues$/;
-
-function seededIssue(
-  iid: number,
-  title: string,
-  overrides: { milestone?: string } = {},
-): MockGitLabIssueSeed {
-  const now = new Date().toISOString();
-  return {
-    id: iid + 20_000,
-    iid,
-    project_id: 101,
-    title,
-    body: `Body for ${title}`,
-    url: `https://gitlab.example.test/${GITLAB_PROJECT}/-/issues/${iid}`,
-    web_url: `https://gitlab.example.test/${GITLAB_PROJECT}/-/issues/${iid}`,
-    state: "opened",
-    author_username: "reporter",
-    project_namespace: "platform",
-    project_path: GITLAB_PROJECT,
-    labels: [],
-    assignees: [],
-    milestone: overrides.milestone ?? "",
-    created_at: now,
-    updated_at: now,
-  };
-}
+import { ISSUES_ENDPOINT, seededIssue } from "./gitlab-issue-milestone-filter-helpers";
 
 test.describe("GitLab issue milestone filter", () => {
   test("composes with a preset, narrows the list, and clears on preset/kind switch", async ({

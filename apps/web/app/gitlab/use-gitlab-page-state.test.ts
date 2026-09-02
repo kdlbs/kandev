@@ -24,6 +24,7 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
 }));
 
 import {
+  buildProjectOptionsResetKey,
   trimGitLabMilestone,
   useGitLabPageState,
   useProjectOptions,
@@ -113,6 +114,21 @@ describe("trimGitLabMilestone", () => {
       const ch = String.fromCodePoint(cp);
       expect(trimGitLabMilestone(ch)).toBe(ch);
     }
+  });
+});
+
+describe("buildProjectOptionsResetKey", () => {
+  it("keeps delimiter-containing query and milestone values distinct", () => {
+    const selection: SidebarSelection = { kind: "issue", source: "preset", id: "assigned" };
+
+    const queryWithDelimiter = buildProjectOptionsResetKey(selection, "labels=backend:v1", "Q2");
+    const milestoneWithDelimiter = buildProjectOptionsResetKey(
+      selection,
+      "labels=backend",
+      "v1:Q2",
+    );
+
+    expect(queryWithDelimiter).not.toBe(milestoneWithDelimiter);
   });
 });
 
