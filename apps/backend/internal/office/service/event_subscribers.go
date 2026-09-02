@@ -983,7 +983,11 @@ func (s *Service) finalizeDone(ctx context.Context, data *TaskMovedData) error {
 	}
 	if data.ParentID != "" {
 		if err := s.queueChildrenCompletedRun(ctx, data.ParentID); err != nil {
-			s.logger.Error("children completed run failed", zap.Error(err))
+			// Warn, not Error: ParentWakeReconciler is the documented
+			// recovery path for a parent whose wake didn't get queued
+			// here (including a transient GetChildSetKey failure), so
+			// this is expected to self-heal rather than page anyone.
+			s.logger.Warn("children completed run failed", zap.Error(err))
 		}
 	}
 	return nil

@@ -220,6 +220,12 @@ func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutco
 
 	row, err := s.insertRun(ctx, agentInstanceID, req, payload)
 	if err != nil {
+		// idx_run_idempotency has no time bound, so a conflict here can
+		// come from a row older than IdempotencyWindowHours, not just the
+		// windowed race CheckIdempotencyKey guards against above. Either
+		// way the existing row is definitionally the same operation this
+		// key identifies, so treat it as a no-op dedupe rather than a hard
+		// error (see errIdempotencyKeyConflict's doc comment).
 		if errors.Is(err, errIdempotencyKeyConflict) {
 			s.log.Debug("run skipped (idempotency index race)",
 				zap.String("key", req.IdempotencyKey))
