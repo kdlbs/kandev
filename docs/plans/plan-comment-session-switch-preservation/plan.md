@@ -1,6 +1,6 @@
 ---
 created: 2026-09-02
-status: draft
+status: complete
 requirements:
   - REQ-UI-PLAN-COMMENT-DRAFTS-001
 system_design:
@@ -96,14 +96,22 @@ to cover the unchanged Drawer/touch presentation.
 
 ## Work orders
 
-- [ ] [Task 01: Preserve plan comments across session switches](task-01-preserve-plan-comments.md)
+- [x] [Task 01: Preserve plan comments across session switches](task-01-preserve-plan-comments.md)
 
 ## Verification results
 
-Pending implementation. Diagnostic evidence:
-
-- `pnpm exec vitest run components/editors/tiptap/tiptap-plan-editor.test.tsx -t 'reports the previous session comment as deleted'` passed against current code, proving the destructive callback path.
-- Temporary reproduction removed after the run.
+- RED: the permanent projection regression observed
+  `onCommentDeleted(["primary-comment"])`, and the session-boundary regression
+  observed the stale textarea remain mounted.
+- RED browser proof: returning to the primary session found zero badges instead
+  of one in the production-built Chromium flow.
+- GREEN: the focused Vitest command passed all 7 tests across the editor and
+  session-boundary suites.
+- GREEN browser proof: the focused Chromium flow passed, restoring one badge
+  and the exact feedback text after primary to sibling to primary navigation.
+- `pnpm run typecheck` and focused ESLint passed. The implementation adds no
+  viewport-specific branch, so desktop and mobile share the repaired state and
+  transaction path; mobile layout and touch presentation remain unchanged.
 
 ## Risks
 

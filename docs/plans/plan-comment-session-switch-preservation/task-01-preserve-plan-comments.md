@@ -1,7 +1,7 @@
 ---
 id: "01-preserve-plan-comments"
 title: "Preserve plan comments across session switches"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -71,6 +71,7 @@ git diff --check
 - `apps/web/components/editors/tiptap/comment-mark.tsx`
 - `apps/web/components/editors/tiptap/tiptap-plan-editor.test.tsx`
 - `apps/web/components/task/task-plan-panel.tsx`
+- `apps/web/components/task/use-plan-selection.ts`
 - `apps/web/components/task/task-plan-panel.session-switch.test.tsx`
 - `apps/web/e2e/tests/session/multi-session-ux.spec.ts`
 - `docs/plans/plan-comment-session-switch-preservation/plan.md`
@@ -101,4 +102,20 @@ None.
 
 ## Results
 
-Pending.
+- Tagged every comment-mark projection transaction with private provenance and
+  limited orphan cleanup to IDs removed by untagged document transactions and
+  still absent from final document state.
+- Cleared local selection, browser selection, and global comment-edit identity
+  when `activeSessionId` changes.
+- RED unit evidence: projection replacement invoked the destructive callback;
+  session replacement left the old comment textarea open.
+- RED browser evidence: the primary-session badge count remained zero after a
+  primary to sibling to primary round trip.
+- GREEN unit command:
+  `cd apps/web && pnpm exec vitest run components/editors/tiptap/tiptap-plan-editor.test.tsx components/task/task-plan-panel.session-switch.test.tsx`
+  passed 7 tests in 2 files.
+- GREEN browser command:
+  `cd apps/web && pnpm e2e:run tests/session/multi-session-ux.spec.ts -- --grep "preserves pending plan comments across session switches"`
+  passed its Chromium scenario against the production build.
+- `cd apps/web && pnpm run typecheck` and focused ESLint passed. No backend,
+  API, schema, persistence-key, mobile layout, or touch behavior changed.

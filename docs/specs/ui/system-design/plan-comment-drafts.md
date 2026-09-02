@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: ui
 requirements:
   - REQ-UI-PLAN-COMMENT-DRAFTS-001
@@ -25,13 +25,13 @@ required. `PlanComment.sessionId` remains the delivery and persistence owner.
 a sibling Agent session replaces the editor's `comments` prop with that
 session's projection.
 
-`rehydrateCommentMarks` currently removes every Tiptap `commentMark` absent from
-the new projection. That programmatic document transaction reaches the
-`CommentMark` orphan detector. The detector compares old and new mark IDs,
-interprets the removed mark as a destructive edit, and calls
-`onOrphanedComments`. `TaskPlanPanel.handleCommentDeleted` then removes the
-comment from the Zustand store. `persistSessionComments` removes the owning
-session's `sessionStorage` key when no comments remain, making the loss
+Before this repair, `rehydrateCommentMarks` removed every Tiptap `commentMark`
+absent from the new projection without recording why. That programmatic
+document transaction reached the `CommentMark` orphan detector. The detector
+interpreted the removed mark as a destructive edit and called
+`onOrphanedComments`. `TaskPlanPanel.handleCommentDeleted` then removed the
+comment from the Zustand store. `persistSessionComments` removed the owning
+session's `sessionStorage` key when no comments remained, making the loss
 permanent.
 
 A focused temporary Vitest reproduction rendered one comment, rerendered the
@@ -86,10 +86,9 @@ and after that transaction, then reports only IDs still absent from the final
 document state. This keeps a real destructive edit authoritative without
 mistaking projection changes for user intent.
 
-Store-driven explicit deletion remains safe: the store entry is removed first,
-then tagged reconciliation removes its rendered mark without issuing a second
-delete callback. Tagged additions likewise restore marks without affecting
-store state.
+Explicit deletion remains safe: the UI removes the rendered mark and store
+entry as one user action, and any deferred orphan cleanup is idempotent. Tagged
+additions and removals from projection changes never affect store state.
 
 ## Session-switch flow
 

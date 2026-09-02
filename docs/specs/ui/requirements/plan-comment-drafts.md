@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: ui
 created: 2026-09-02
 owners:

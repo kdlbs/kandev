@@ -19,6 +19,7 @@ import type {
 import type { Editor } from "@tiptap/core";
 import { PanelSearchBar } from "@/components/search/panel-search-bar";
 import { usePlanFindShortcut } from "./use-plan-find-shortcut";
+import { usePlanSelection } from "./use-plan-selection";
 import { Trans, useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 
@@ -457,38 +458,6 @@ function usePlanDraft(
     handleEmptyStateClick,
     hasUnsavedChanges,
   };
-}
-
-/** Text selection state for comment popover */
-function usePlanSelection(
-  activeSessionId: string | null | undefined,
-  commentState: ReturnType<typeof usePlanComments>,
-) {
-  const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
-
-  const handleCommentHighlightClick = useCallback(
-    (id: string, position: { x: number; y: number }) => {
-      const comment = commentState.comments.find((c) => c.id === id);
-      if (comment) {
-        commentState.setEditingCommentId(id);
-        setTextSelection({
-          text: comment.selectedText,
-          from: comment.from,
-          to: comment.to,
-          position,
-        });
-      }
-    },
-    [commentState],
-  );
-
-  const handleSelectionClose = useCallback(() => {
-    setTextSelection(null);
-    commentState.setEditingCommentId(null);
-    window.getSelection()?.removeAllRanges();
-  }, [commentState]);
-
-  return { textSelection, setTextSelection, handleCommentHighlightClick, handleSelectionClose };
 }
 
 /** Ctrl+S save shortcut */
