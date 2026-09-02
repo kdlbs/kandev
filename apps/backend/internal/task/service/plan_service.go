@@ -209,6 +209,9 @@ func (s *PlanService) CreatePlan(ctx context.Context, req CreatePlanRequest) (Pl
 	if req.TaskID == "" {
 		return PlanWriteResult{}, ErrTaskIDRequired
 	}
+	if err := checkPlanContentSize(req.Content); err != nil {
+		return PlanWriteResult{}, err
+	}
 	if err := s.authorize(ctx, req.TaskID); err != nil {
 		return PlanWriteResult{}, err
 	}
@@ -240,6 +243,9 @@ type UpdatePlanRequest struct {
 func (s *PlanService) UpdatePlan(ctx context.Context, req UpdatePlanRequest) (PlanWriteResult, error) {
 	if req.TaskID == "" {
 		return PlanWriteResult{}, ErrTaskIDRequired
+	}
+	if err := checkPlanContentSize(req.Content); err != nil {
+		return PlanWriteResult{}, err
 	}
 	if err := s.authorize(ctx, req.TaskID); err != nil {
 		return PlanWriteResult{}, err

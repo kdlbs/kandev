@@ -498,6 +498,31 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.NotContains(t, tools, "reorder_workflow_steps_kandev")
 }
 
+// TestPlanWriteTools_DescribeContentCeiling pins
+// AC-TASKS-PLAN-CONTENT-SIZE-LIMIT-002.5: both plan write tools state the
+// byte ceiling in their registered description, so a caller can size its
+// document before its first write.
+func TestPlanWriteTools_DescribeContentCeiling(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
+	require.NotNil(t, s)
+
+	tools := s.mcpServer.ListTools()
+	for _, name := range []string{"create_task_plan_kandev", "update_task_plan_kandev"} {
+		tool, ok := tools[name]
+		require.Truef(t, ok, "%s not registered", name)
+		// The ceiling is stated on the "content" parameter's own schema
+		// description, not the tool-level Description, so marshal the whole
+		// tool the way a client would see it rather than checking one field.
+		raw, err := json.Marshal(tool.Tool)
+		require.NoError(t, err)
+		assert.Containsf(t, string(raw), "262,144", "%s does not state the byte ceiling anywhere in its schema", name)
+	}
+}
+
 func TestServerProfile_AutopilotChildHasOnlyParentQuestion(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)

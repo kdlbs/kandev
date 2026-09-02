@@ -1001,6 +1001,7 @@
   "plan": "Ƥĺàń",
   "planCommentCount_one": "{{count}} ƥĺàń ćōḿḿēńţ",
   "planCommentCount_other": "{{count}} ƥĺàń ćōḿḿēńţś",
+  "planContentTooLarge": "Ŷōũŕ ƥĺàń ĩś {{submitted}}, ōvēŕ ţĥē {{limit}} ĺĩḿĩţ. Śĥōŕţēń ţĥē ďōćũḿēńţ àńď śàvē àĝàĩń.",
   "planHistory": "Ƥĺàń ĥĩśţōŕŷ",
   "planIsEmpty": "Ƥĺàń ĩś ēḿƥţŷ",
   "planMode": "Ƥĺàń ḿōďē",

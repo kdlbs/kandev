@@ -957,6 +957,7 @@
   "plan": "計劃",
   "planCommentCount_one": "{{count}} 條計劃評論",
   "planCommentCount_other": "{{count}} 條計劃評論",
+  "planContentTooLarge": "您的計劃為 {{submitted}}，超過了 {{limit}} 的限制。請縮短文件後重新儲存。",
   "planHistory": "計劃歷史",
   "planIsEmpty": "計劃為空",
   "planMode": "計劃模式",

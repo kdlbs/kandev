@@ -1001,6 +1001,7 @@
   "plan": "Plan",
   "planCommentCount_one": "{{count}} plan comment",
   "planCommentCount_other": "{{count}} plan comments",
+  "planContentTooLarge": "Your plan is {{submitted}}, over the {{limit}} limit. Shorten the document and save again.",
   "planHistory": "Plan history",
   "planIsEmpty": "Plan is empty",
   "planMode": "Plan mode",

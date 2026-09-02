@@ -957,6 +957,7 @@
   "plan": "计划",
   "planCommentCount_one": "{{count}} 条计划评论",
   "planCommentCount_other": "{{count}} 条计划评论",
+  "planContentTooLarge": "您的计划为 {{submitted}}，超过了 {{limit}} 的限制。请缩短文档后重新保存。",
   "planHistory": "计划历史",
   "planIsEmpty": "计划为空",
   "planMode": "计划模式",

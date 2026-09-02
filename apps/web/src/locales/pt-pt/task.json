@@ -958,6 +958,7 @@
   "plan": "Plano",
   "planCommentCount_one": "{{count}} comentário ao plano",
   "planCommentCount_other": "{{count}} comentários ao plano",
+  "planContentTooLarge": "O seu plano tem {{submitted}}, acima do limite de {{limit}}. Reduza o documento e guarde novamente.",
   "planHistory": "Histórico do plano",
   "planIsEmpty": "O plano está vazio",
   "planMode": "Modo de plano",
