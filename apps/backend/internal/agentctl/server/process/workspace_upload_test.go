@@ -30,14 +30,15 @@ func (r *failingReader) Read(p []byte) (int, error) {
 
 func TestWriteFileStreamContainment(t *testing.T) {
 	cases := []struct {
-		name string
-		path string
+		name         string
+		path         string
+		absolutePath bool
 	}{
-		{"parent traversal", "../escaped.txt"},
-		{"deep traversal", "../../etc/passwd"},
-		{"absolute path", "/etc/passwd"},
-		{"interior traversal segment", "nested/../../escaped.txt"},
-		{"traversal through existing dir", "sub/../../escaped.txt"},
+		{name: "parent traversal", path: "../escaped.txt"},
+		{name: "deep traversal", path: "../../etc/passwd"},
+		{name: "absolute path", absolutePath: true},
+		{name: "interior traversal segment", path: "nested/../../escaped.txt"},
+		{name: "traversal through existing dir", path: "sub/../../escaped.txt"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -46,13 +47,21 @@ func TestWriteFileStreamContainment(t *testing.T) {
 				t.Fatalf("mkdir: %v", err)
 			}
 			parent := filepath.Dir(dir)
-
-			_, _, err := wt.WriteFileStream(tc.path, UploadResolutionNone, strings.NewReader("payload"))
-			if err == nil {
-				t.Fatalf("expected containment rejection for %q, got nil", tc.path)
+			requestPath := tc.path
+			outsidePath := filepath.Join(parent, "escaped.txt")
+			if tc.absolutePath {
+				// Use a platform-native absolute path. Unix accepts /etc/passwd,
+				// but Windows treats that spelling as a relative path.
+				requestPath = filepath.Join(parent, "escaped-absolute.txt")
+				outsidePath = requestPath
 			}
-			if _, statErr := os.Stat(filepath.Join(parent, "escaped.txt")); statErr == nil {
-				t.Fatalf("wrote outside the workspace for %q", tc.path)
+
+			_, _, err := wt.WriteFileStream(requestPath, UploadResolutionNone, strings.NewReader("payload"))
+			if err == nil {
+				t.Fatalf("expected containment rejection for %q, got nil", requestPath)
+			}
+			if _, statErr := os.Stat(outsidePath); statErr == nil {
+				t.Fatalf("wrote outside the workspace for %q", requestPath)
 			}
 		})
 	}
