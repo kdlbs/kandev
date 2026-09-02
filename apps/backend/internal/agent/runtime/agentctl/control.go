@@ -107,6 +107,10 @@ type InstanceInfo struct {
 	AgentCommand  string            `json:"agent_command"`
 	Env           map[string]string `json:"env,omitempty"`
 	CreatedAt     time.Time         `json:"created_at"`
+	// SessionID is the task session ID this instance was created for, if any.
+	SessionID string `json:"session_id,omitempty"`
+	// TaskID is the task ID this instance was created for, if any.
+	TaskID string `json:"task_id,omitempty"`
 }
 
 // ControlClientOption configures optional ControlClient settings.

@@ -243,6 +243,8 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		AgentCommand:  agentCmd,
 		Env:           req.Env,
 		CreatedAt:     time.Now(),
+		SessionID:     req.SessionID,
+		TaskID:        req.TaskID,
 		manager:       procMgr,
 	}
 	inst.MarkActivity()

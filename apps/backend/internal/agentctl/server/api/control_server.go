@@ -130,7 +130,7 @@ func (m *ControlServer) handleCreateInstance(c *gin.Context) {
 
 func (m *ControlServer) handleListInstances(c *gin.Context) {
 	instances := m.instMgr.ListInstances()
-	c.JSON(http.StatusOK, instances)
+	c.JSON(http.StatusOK, gin.H{"instances": instances})
 }
 
 func (m *ControlServer) handleGetInstance(c *gin.Context) {

@@ -607,34 +607,11 @@ func TestGetInstance_FailureModes(t *testing.T) {
 	}
 }
 
-func TestListInstances_UnwrapsInstancesEnvelope(t *testing.T) {
-	srv, got := captureServer(t, jsonResponder(http.StatusOK, `{
-		"instances":[
-			{"id":"a","port":1,"status":"running","workspace_path":"/w/a","agent_command":"cmd-a"},
-			{"id":"b","port":2,"status":"stopped","workspace_path":"/w/b","agent_command":"cmd-b"}
-		]
-	}`))
-
-	instances, err := newTestControlClient(t, srv).ListInstances(context.Background())
-	if err != nil {
-		t.Fatalf("ListInstances: %v", err)
-	}
-
-	if got.Method != http.MethodGet || got.Path != "/api/v1/instances" {
-		t.Errorf("request = %s %s, want GET /api/v1/instances", got.Method, got.Path)
-	}
-	if len(instances) != 2 {
-		t.Fatalf("instances = %d, want 2", len(instances))
-	}
-	if instances[0].ID != "a" || instances[0].Port != 1 ||
-		instances[0].Status != "running" || instances[0].WorkspacePath != "/w/a" ||
-		instances[0].AgentCommand != "cmd-a" {
-		t.Errorf("instances[0] = %+v", instances[0])
-	}
-	if instances[1].ID != "b" || instances[1].Port != 2 || instances[1].Status != "stopped" {
-		t.Errorf("instances[1] = %+v", instances[1])
-	}
-}
+// The envelope-decode + request method/path contract this used to pin with a
+// hand-written response fixture is now covered end to end (real handler, real
+// client) by TestListInstancesReturnsEnvelopeWithSessionAndTaskID in
+// internal/agentctl/server/api — a fixture here could assert an envelope
+// shape the real handler had stopped producing without ever failing.
 
 func TestListInstances_FailureModes(t *testing.T) {
 	tests := []struct {

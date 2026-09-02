@@ -42,6 +42,13 @@ type Instance struct {
 	// CreatedAt is the timestamp when this instance was created
 	CreatedAt time.Time
 
+	// SessionID is the task session ID this instance was created for, if any.
+	// Used to correlate a recovered instance back to its owning session.
+	SessionID string
+
+	// TaskID is the task ID this instance was created for, if any.
+	TaskID string
+
 	// manager is the process manager handling the agent subprocess (unexported)
 	manager processManager
 
@@ -228,6 +235,12 @@ type InstanceInfo struct {
 
 	// CreatedAt is the timestamp when this instance was created
 	CreatedAt time.Time `json:"created_at"`
+
+	// SessionID is the task session ID this instance was created for, if any.
+	SessionID string `json:"session_id,omitempty"`
+
+	// TaskID is the task ID this instance was created for, if any.
+	TaskID string `json:"task_id,omitempty"`
 }
 
 // Info returns a safe copy of the instance data for API serialization.
@@ -253,6 +266,8 @@ func (i *Instance) Info() *InstanceInfo {
 		AgentCommand:  i.AgentCommand,
 		Env:           envCopy,
 		CreatedAt:     i.CreatedAt,
+		SessionID:     i.SessionID,
+		TaskID:        i.TaskID,
 	}
 }
 
