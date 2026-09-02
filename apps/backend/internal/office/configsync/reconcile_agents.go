@@ -168,9 +168,14 @@ const maxReportsToHops = 50
 // self-reference or a cycle, must have a stale DB value cleared, not left in
 // place. A name outside idsByKey (an agent not managed by this run's fetched
 // set), a self-reference, or a cycle resolves to empty with a warning instead
-// of a target ID — allowExternalManagers is always false.
+// of a target ID — allowExternalManagers is always false. unappliedKeys is
+// buildKindsFetch's agent deletion-sweep exemption set (kindExemptions):
+// manifest entity keys whose file was unreadable or failed to parse this run,
+// reused here to distinguish that case from a target that names no agent at
+// all (AC-OFFICE-CONFIG-SYNC-003.10b).
 func resolveAgentReportsTo(
-	ctx context.Context, repo *sqlite.Repository, reportsTo map[string]string, idsByKey map[string]string,
+	ctx context.Context, repo *sqlite.Repository, reportsTo map[string]string,
+	idsByKey map[string]string, unappliedKeys map[string]bool,
 ) ([]string, error) {
 	keys := make([]string, 0, len(idsByKey))
 	for key := range idsByKey {
@@ -181,7 +186,7 @@ func resolveAgentReportsTo(
 	var warnings []string
 	for _, key := range keys {
 		id := idsByKey[key]
-		targetID, warning := resolveOneAgentReportsTo(key, reportsTo, idsByKey)
+		targetID, warning := resolveOneAgentReportsTo(key, reportsTo, idsByKey, unappliedKeys)
 		if warning != "" {
 			warnings = append(warnings, warning)
 		}
@@ -195,8 +200,11 @@ func resolveAgentReportsTo(
 // resolveOneAgentReportsTo resolves one agent's reports_to declaration
 // against this run's fetched set, returning the target entity ID to write
 // (empty when the field must be cleared) and, when clearing is not simply
-// "no declaration", the warning explaining why.
-func resolveOneAgentReportsTo(key string, reportsTo, idsByKey map[string]string) (targetID, warning string) {
+// "no declaration", the warning explaining why. AC-OFFICE-CONFIG-SYNC-003.10b
+// requires a target that was fetched but not applied (its file was unreadable
+// or failed to parse this run) to be warned distinctly from a target that
+// names no agent anywhere; unappliedKeys carries that signal.
+func resolveOneAgentReportsTo(key string, reportsTo, idsByKey map[string]string, unappliedKeys map[string]bool) (targetID, warning string) {
 	target, declared := reportsTo[key]
 	switch {
 	case !declared:
@@ -206,11 +214,15 @@ func resolveOneAgentReportsTo(key string, reportsTo, idsByKey map[string]string)
 	case detectReportsToCycle(key, target, reportsTo):
 		return "", fmt.Sprintf("agent %q: reports_to %q would create a cycle; leaving unset", key, target)
 	}
-	targetID, ok := idsByKey[target]
-	if !ok {
-		return "", fmt.Sprintf("agent %q: reports_to %q is not managed by this sync; leaving unset", key, target)
+	if targetID, ok := idsByKey[target]; ok {
+		return targetID, ""
 	}
-	return targetID, ""
+	if unappliedKeys[target] {
+		return "", fmt.Sprintf(
+			"agent %q: reports_to %q was fetched but not applied this run (its file was unreadable or failed to parse); leaving unset",
+			key, target)
+	}
+	return "", fmt.Sprintf("agent %q: reports_to %q is not managed by this sync; leaving unset", key, target)
 }
 
 // detectReportsToCycle walks the reports_to chain starting at target,

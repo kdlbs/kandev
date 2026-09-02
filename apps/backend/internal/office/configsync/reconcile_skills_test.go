@@ -42,13 +42,40 @@ func TestBuildFetchedSkills_ReadsFrontmatterAndFallsBackNameToDirName(t *testing
 	assert.Equal(t, "no-frontmatter", byKey["no-frontmatter"].Proj.Name, "missing frontmatter name falls back to the directory name")
 }
 
-func TestBuildFetchedSkills_MissingSkillMDIsSilentlyExcluded(t *testing.T) {
+func TestBuildFetchedSkills_MissingSkillMDIsExcludedButNotWarnedHere(t *testing.T) {
 	dirs := []skillFiles{
 		{dirName: "empty-dir", dirPath: "skills/empty-dir", skillMD: nil},
 	}
 	fetched, warnings := buildFetchedSkills(dirs)
 	assert.Empty(t, fetched)
-	assert.Empty(t, warnings, "a directory with no readable SKILL.md is tracked via walk's unreadable set, not warned here")
+	assert.Empty(t, warnings, "the walk-phase warning for a missing SKILL.md is emitted by skillMissingDefinitionWarnings, not here")
+}
+
+func TestSkillMissingDefinitionWarnings_NamesDirectoryWithNoSkillMD(t *testing.T) {
+	dirs := []skillFiles{
+		{dirName: "empty-dir", dirPath: "skills/empty-dir", skillMD: nil},
+	}
+	warnings := skillMissingDefinitionWarnings(dirs)
+	require.Len(t, warnings, 1)
+	assert.Contains(t, warnings[0], "skills/empty-dir")
+	assert.Contains(t, warnings[0], "SKILL.md")
+}
+
+func TestSkillMissingDefinitionWarnings_SilentWhenSkillMDPresent(t *testing.T) {
+	dirs := []skillFiles{
+		{dirName: "reviewer", dirPath: "skills/reviewer", skillMD: skillMDFile("skills/reviewer/SKILL.md", "body")},
+	}
+	assert.Empty(t, skillMissingDefinitionWarnings(dirs))
+}
+
+func TestSkillMissingDefinitionWarnings_SilentWhenSkillMDUnreadable(t *testing.T) {
+	dirs := []skillFiles{
+		{
+			dirName: "reviewer", dirPath: "skills/reviewer",
+			skillMDUnread: &unreadableFile{path: "skills/reviewer/SKILL.md", reason: "over size limit"},
+		},
+	}
+	assert.Empty(t, skillMissingDefinitionWarnings(dirs), "an unreadable SKILL.md is warned by skillFetchWarningsAndExemptions instead")
 }
 
 func TestBuildFetchedSkills_KeyCollisionKeepsByteWiseFirstPath(t *testing.T) {

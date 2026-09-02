@@ -332,8 +332,36 @@ func TestWalk_FileCapStopsFetchingBeforeExceedingLimit(t *testing.T) {
 	if ferr == nil || !ferr.capped {
 		t.Fatalf("Walk() error = %v, want a capped failure", ferr)
 	}
-	if fg.fetchCalls > limits.MaxFiles {
-		t.Errorf("fetchCalls = %d, want at most MaxFiles (%d): the cap must stop further fetches, not just fail after fetching everything", fg.fetchCalls, limits.MaxFiles)
+	if fg.fetchCalls != 0 {
+		t.Errorf("fetchCalls = %d, want 0: the cap is known from listing alone, so a capped run must issue no fetches at all", fg.fetchCalls)
+	}
+}
+
+// TestWalk_FileCapWarningNamesDroppedCount proves the file cap failure names
+// how many files were dropped, not just that the cap was exceeded.
+// AC-OFFICE-CONFIG-SYNC-002.5 requires the warning to say "how many ...
+// files ... were dropped", which requires knowing the total candidate count
+// before any fetch is issued.
+func TestWalk_FileCapWarningNamesDroppedCount(t *testing.T) {
+	fg := newFakeGitHub()
+	fg.dirs["cfg"] = []github.RepoContentEntry{}
+	limits := Limits{MaxSkills: 200, MaxFiles: 2}
+	fg.dirs["cfg/agents"] = []github.RepoContentEntry{
+		fileEntry("cfg/agents/a.yml"),
+		fileEntry("cfg/agents/b.yml"),
+		fileEntry("cfg/agents/c.yml"),
+	}
+	for _, p := range []string{"cfg/agents/a.yml", "cfg/agents/b.yml", "cfg/agents/c.yml"} {
+		fg.files[p] = []byte("name: a\n")
+	}
+	w := newWalker(fg, nil, limits)
+
+	_, ferr := w.Walk(context.Background(), testGitHubConfig())
+	if ferr == nil || !ferr.capped {
+		t.Fatalf("Walk() error = %v, want a capped failure", ferr)
+	}
+	if !strings.Contains(ferr.reason, "1 dropped") {
+		t.Errorf("Walk() error = %q, want it to name the dropped file count (3 found, limit 2, so 1 dropped)", ferr.reason)
 	}
 }
 

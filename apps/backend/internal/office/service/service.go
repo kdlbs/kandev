@@ -121,12 +121,17 @@ type WorkspaceGroupCleaner interface {
 // office_config_sync_manifest carry no FK/cascade onto the workspace row —
 // see the "Workspace deletion side tables" convention — so without this a
 // deleted workspace's poller keeps running and can resurrect entities into
-// it. This is a lock-free bulk delete, not the release-semantics unlink path:
-// the entities themselves are being deleted by this same workspace teardown,
-// so there is nothing to release them back to. Implemented by
-// *configsync.Service; declared locally so this package stays configsync-free.
+// it. This is not the release-semantics unlink path: the entities themselves
+// are being deleted by this same workspace teardown, so there is nothing to
+// release them back to. PurgeForWorkspaceDeletion returns the per-workspace
+// lock still held, via the returned unlock func: the caller must defer it
+// until the rest of this workspace's data has been deleted, so an in-flight
+// sync run queued behind the lock cannot write config sync rows back in
+// after teardown completes. A non-nil error returns a nil unlock func with
+// the lock already released. Implemented by *configsync.Service; declared
+// locally so this package stays configsync-free.
 type ConfigSyncCleaner interface {
-	PurgeForWorkspaceDeletion(ctx context.Context, workspaceID string) error
+	PurgeForWorkspaceDeletion(ctx context.Context, workspaceID string) (unlock func(), err error)
 }
 
 // TaskStarterFunc adapts a function to the TaskStarter interface.

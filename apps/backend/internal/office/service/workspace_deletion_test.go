@@ -217,14 +217,54 @@ func TestDeleteWorkspaceFailsWhenConfigSyncCleanupFails(t *testing.T) {
 	}
 }
 
+// TestDeleteWorkspaceReleasesConfigSyncLockAfterTeardownCompletes proves the
+// config sync lock PurgeForWorkspaceDeletion returns stays held across the
+// rest of DeleteWorkspace's teardown, not released immediately after the
+// purge call: an in-flight config sync run queued behind the lock must not
+// be able to write rows back in once DeleteWorkspaceData (which never
+// touches config sync's own tables) has already deleted the workspace's
+// other data.
+func TestDeleteWorkspaceReleasesConfigSyncLockAfterTeardownCompletes(t *testing.T) {
+	ctx := context.Background()
+	configSyncCleaner := &fakeConfigSyncCleaner{}
+	taskSvc := &fakeWorkspaceTaskService{
+		workspace:         &taskmodels.Workspace{ID: "ws-delete", Name: "default"},
+		tasks:             []*taskmodels.Task{{ID: "task-1", WorkspaceID: "ws-delete"}},
+		configSyncCleaner: configSyncCleaner,
+	}
+	svc := newTestService(t, service.ServiceOptions{
+		TaskWorkspace: taskSvc,
+		TaskCanceller: &fakeTaskCanceller{},
+	})
+	svc.SetConfigSyncCleaner(configSyncCleaner)
+
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("DeleteWorkspace: %v", err)
+	}
+	if configSyncCleaner.unlockedWhenWorkspaceRowDeleted {
+		t.Fatal("config sync lock was released before the workspace row was deleted, want it held until teardown completes")
+	}
+	if !configSyncCleaner.unlocked {
+		t.Fatal("config sync lock should be released once DeleteWorkspace completes")
+	}
+}
+
 type fakeConfigSyncCleaner struct {
 	workspaceID string
 	err         error
+	// unlocked and unlockedWhenWorkspaceRowDeleted let a test prove the
+	// returned unlock func is held across the rest of DeleteWorkspace's
+	// teardown rather than released immediately after the purge call.
+	unlocked                        bool
+	unlockedWhenWorkspaceRowDeleted bool
 }
 
-func (f *fakeConfigSyncCleaner) PurgeForWorkspaceDeletion(_ context.Context, workspaceID string) error {
+func (f *fakeConfigSyncCleaner) PurgeForWorkspaceDeletion(_ context.Context, workspaceID string) (func(), error) {
 	f.workspaceID = workspaceID
-	return f.err
+	if f.err != nil {
+		return nil, f.err
+	}
+	return func() { f.unlocked = true }, nil
 }
 
 type fakeWorkspaceTaskService struct {
@@ -233,6 +273,10 @@ type fakeWorkspaceTaskService struct {
 	deletedTasks         []string
 	deletedTaskDeadlines []time.Time
 	deletedWorkspace     string
+	// configSyncCleaner, when set, lets DeleteWorkspace record whether the
+	// config sync lock had already been released by the time the workspace
+	// row itself is deleted (a later teardown step than the purge call).
+	configSyncCleaner *fakeConfigSyncCleaner
 }
 
 func (f *fakeWorkspaceTaskService) GetWorkspace(context.Context, string) (*taskmodels.Workspace, error) {
@@ -245,6 +289,9 @@ func (f *fakeWorkspaceTaskService) ListWorkspaces(context.Context) ([]*taskmodel
 
 func (f *fakeWorkspaceTaskService) DeleteWorkspace(_ context.Context, id string) error {
 	f.deletedWorkspace = id
+	if f.configSyncCleaner != nil {
+		f.configSyncCleaner.unlockedWhenWorkspaceRowDeleted = f.configSyncCleaner.unlocked
+	}
 	return nil
 }
 

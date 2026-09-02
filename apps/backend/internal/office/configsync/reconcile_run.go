@@ -127,6 +127,7 @@ func buildKindsFetch(root string, wr *walkResult, byKind map[string][]ManifestEn
 	var skillParseWarnings, skillFetchWarnings []string
 	kf.skill, skillParseWarnings = buildFetchedSkills(wr.skills)
 	skillFetchWarnings, kf.skillExempt = skillFetchWarningsAndExemptions(wr.skills)
+	phases.walk = append(phases.walk, skillMissingDefinitionWarnings(wr.skills)...)
 	phases.parse = append(phases.parse, skillParseWarnings...)
 	phases.fetch = append(phases.fetch, skillFetchWarnings...)
 
@@ -226,7 +227,7 @@ func (r *Runner) forwardPass(
 	if kr.agent, err = applyKindCreatesOnly(ctx, writer, r.store, agentOps(ctx, r.repo, workspaceID), workspaceID, kf.agent, byKind[kindAgent]); err != nil {
 		return kr, err
 	}
-	reportsToWarnings, reportsToErr := resolveAgentReportsTo(ctx, r.repo, kf.reportsTo, kr.agent.IDsByKey)
+	reportsToWarnings, reportsToErr := resolveAgentReportsTo(ctx, r.repo, kf.reportsTo, kr.agent.IDsByKey, kf.agentExempt)
 	phases.reference = append(phases.reference, reportsToWarnings...)
 	if reportsToErr != nil {
 		return kr, reportsToErr

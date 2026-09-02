@@ -2,6 +2,7 @@ package configsync
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -44,7 +45,7 @@ func TestBuildFetchedAgents_ParsesStemWarningsCollisionsAndReportsTo(t *testing.
 		{path: "agents/mismatch.yml", content: []byte("name: Other\nrole: contributor\n")},
 		{path: "agents/broken.yml", content: []byte("name:\n  - not-a-string\n")},
 	}
-	fetched, reportsTo, warnings, _ := buildFetchedAgents(files)
+	fetched, reportsTo, warnings, unparsed := buildFetchedAgents(files)
 
 	require.Len(t, fetched, 3)
 	byKey := map[string]fetchedEntity[sqlite.AgentInstanceConfigFields]{}
@@ -63,14 +64,13 @@ func TestBuildFetchedAgents_ParsesStemWarningsCollisionsAndReportsTo(t *testing.
 		if w == stemMismatchWarning(kindAgent, "agents/mismatch.yml", "Other") {
 			sawStemWarning = true
 		}
-	}
-	for _, w := range warnings {
-		if len(w) > 0 {
-			sawParseFailureWarning = sawParseFailureWarning || w != ""
+		if strings.Contains(w, "agents/broken.yml") {
+			sawParseFailureWarning = true
 		}
 	}
 	assert.True(t, sawStemWarning, "declared name not matching filename stem must warn")
-	assert.True(t, sawParseFailureWarning)
+	assert.True(t, sawParseFailureWarning, "a file that fails to parse must warn naming it")
+	assert.Equal(t, []string{"agents/broken.yml"}, unparsed, "a file that fails to parse must be reported as unparsed")
 }
 
 func TestBuildFetchedAgents_KeyCollisionKeepsByteWiseFirstPath(t *testing.T) {
@@ -146,7 +146,7 @@ func TestResolveAgentReportsTo_ResolvesWithinThisRunsFetchedSet(t *testing.T) {
 	require.NoError(t, err)
 
 	reportsTo := map[string]string{"Dev": "CEO"}
-	warnings, err := resolveAgentReportsTo(ctx, repo, reportsTo, res.IDsByKey)
+	warnings, err := resolveAgentReportsTo(ctx, repo, reportsTo, res.IDsByKey, nil)
 	require.NoError(t, err)
 	assert.Empty(t, warnings)
 
@@ -167,7 +167,7 @@ func TestResolveAgentReportsTo_ClearsWhenDeclarationRemoved(t *testing.T) {
 	require.NoError(t, err)
 
 	// First run: Dev declares reports_to: CEO.
-	warnings, err := resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "CEO"}, res.IDsByKey)
+	warnings, err := resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "CEO"}, res.IDsByKey, nil)
 	require.NoError(t, err)
 	assert.Empty(t, warnings)
 	dev, err := repo.GetAgentInstance(ctx, res.IDsByKey["Dev"])
@@ -175,7 +175,7 @@ func TestResolveAgentReportsTo_ClearsWhenDeclarationRemoved(t *testing.T) {
 	require.Equal(t, res.IDsByKey["CEO"], dev.ReportsTo)
 
 	// Second run: dev.yml no longer declares reports_to at all.
-	warnings, err = resolveAgentReportsTo(ctx, repo, map[string]string{}, res.IDsByKey)
+	warnings, err = resolveAgentReportsTo(ctx, repo, map[string]string{}, res.IDsByKey, nil)
 	require.NoError(t, err)
 	assert.Empty(t, warnings)
 	dev, err = repo.GetAgentInstance(ctx, res.IDsByKey["Dev"])
@@ -194,12 +194,12 @@ func TestResolveAgentReportsTo_ClearsOnNewlyUnresolvableReference(t *testing.T) 
 	res, err := applyKind(ctx, repo.Writer(), store, agentOps(ctx, repo, "ws-1"), "ws-1", fetched, nil, nil, false)
 	require.NoError(t, err)
 
-	warnings, err := resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "CEO"}, res.IDsByKey)
+	warnings, err := resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "CEO"}, res.IDsByKey, nil)
 	require.NoError(t, err)
 	assert.Empty(t, warnings)
 
 	// Second run: dev.yml now declares a self-reference instead.
-	warnings, err = resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "Dev"}, res.IDsByKey)
+	warnings, err = resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "Dev"}, res.IDsByKey, nil)
 	require.NoError(t, err)
 	require.Len(t, warnings, 1)
 	dev, err := repo.GetAgentInstance(ctx, res.IDsByKey["Dev"])
@@ -217,13 +217,29 @@ func TestResolveAgentReportsTo_TargetOutsideThisRunLeavesUnsetWithWarning(t *tes
 	res, err := applyKind(ctx, repo.Writer(), store, agentOps(ctx, repo, "ws-1"), "ws-1", fetched, nil, nil, false)
 	require.NoError(t, err)
 
-	warnings, err := resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "NotManaged"}, res.IDsByKey)
+	warnings, err := resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "NotManaged"}, res.IDsByKey, nil)
 	require.NoError(t, err)
 	require.Len(t, warnings, 1)
 
 	dev, err := repo.GetAgentInstance(ctx, res.IDsByKey["Dev"])
 	require.NoError(t, err)
 	assert.Empty(t, dev.ReportsTo)
+}
+
+// TestResolveOneAgentReportsTo_DistinguishesFetchedButNotAppliedFromAppearsNowhere
+// covers AC-OFFICE-CONFIG-SYNC-003.10b: a reports_to target present in the
+// fetched set but not applied this run (its file was unreadable or failed to
+// parse) must warn distinctly from a target naming no agent anywhere.
+func TestResolveOneAgentReportsTo_DistinguishesFetchedButNotAppliedFromAppearsNowhere(t *testing.T) {
+	idsByKey := map[string]string{}
+	reportsTo := map[string]string{"dev": "ghost"}
+
+	_, appearsNowhere := resolveOneAgentReportsTo("dev", reportsTo, idsByKey, nil)
+	assert.Contains(t, appearsNowhere, "not managed by this sync")
+
+	_, fetchedNotApplied := resolveOneAgentReportsTo("dev", reportsTo, idsByKey, map[string]bool{"ghost": true})
+	assert.Contains(t, fetchedNotApplied, "fetched but not applied")
+	assert.NotEqual(t, appearsNowhere, fetchedNotApplied, "the two unresolved reasons must produce distinguishable warnings")
 }
 
 func TestResolveAgentReportsTo_WriteDatabaseFailureIsReturnedNotWarned(t *testing.T) {
@@ -246,7 +262,7 @@ func TestResolveAgentReportsTo_WriteDatabaseFailureIsReturnedNotWarned(t *testin
 	`)
 	require.NoError(t, err)
 
-	_, err = resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "CEO"}, res.IDsByKey)
+	_, err = resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "CEO"}, res.IDsByKey, nil)
 	require.Error(t, err, "a real DB failure writing reports_to must be a run failure, not a swallowed warning")
 
 	dev, err := repo.GetAgentInstance(ctx, res.IDsByKey["Dev"])

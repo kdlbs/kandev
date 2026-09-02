@@ -22,8 +22,12 @@ type fetchedSkill struct {
 
 // buildFetchedSkills parses every skill directory the walk selected and
 // resolves AC-OFFICE-CONFIG-SYNC-003.3's collision rule. A skill directory
-// with no readable SKILL.md is not included here — walk.go already recorded
-// it as unreadable, which feeds AC-OFFICE-CONFIG-SYNC-003.6a/.12 instead.
+// with no readable SKILL.md is not included here: one whose SKILL.md was
+// present but unreadable is warned by skillFetchWarningsAndExemptions
+// instead (AC-OFFICE-CONFIG-SYNC-003.6a/.12), and one with no SKILL.md at
+// all is warned by skillMissingDefinitionWarnings — a separate function
+// because AC-OFFICE-CONFIG-SYNC-004.5c places that warning in the walk
+// phase, not this function's parse phase.
 func buildFetchedSkills(dirs []skillFiles) (fetched []fetchedSkill, warnings []string) {
 	type parsed struct {
 		skill *parsedSkill
@@ -91,6 +95,22 @@ func skillFetchWarningsAndExemptions(dirs []skillFiles) (warnings []string, exem
 		}
 	}
 	return warnings, exemptKeys
+}
+
+// skillMissingDefinitionWarnings renders one AC-OFFICE-CONFIG-SYNC-003.2a
+// walk-phase warning per skill directory with no SKILL.md at all. A
+// directory whose SKILL.md exists but could not be read is not named here —
+// skillFetchWarningsAndExemptions already warns that case in the fetch
+// phase.
+func skillMissingDefinitionWarnings(dirs []skillFiles) []string {
+	var warnings []string
+	for _, sf := range dirs {
+		if sf.skillMD == nil && sf.skillMDUnread == nil {
+			warnings = append(warnings, fmt.Sprintf(
+				"skill directory %q: no %s found; defining no skill for it", sf.dirPath, skillDefinitionName))
+		}
+	}
+	return warnings
 }
 
 // applySkills runs the six-case table for the skill kind. Skills use a

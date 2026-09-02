@@ -127,18 +127,24 @@ func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID stri
 // sync would otherwise walk one at a time, so a release pass here only adds
 // per-row writes ahead of DeleteWorkspaceData wiping the same rows.
 //
-// It still takes the per-workspace lock: an in-flight SyncWorkspace run holds
-// that lock for its whole duration and writes entity and manifest rows as it
-// goes, so a lock-free purge could complete while that write is still
-// happening and let it land after DeleteWorkspaceData, resurrecting rows
-// under a workspace_id that no longer exists. Taking the lock bounds the wait
-// to whatever is left of that run's own AC-OFFICE-CONFIG-SYNC-004.4a
-// deadline, which is cheap next to the alternative.
-func (s *Service) PurgeForWorkspaceDeletion(ctx context.Context, workspaceID string) error {
+// It takes the per-workspace lock and returns it still held, via the
+// returned unlock func, rather than releasing it before returning: an
+// in-flight SyncWorkspace run holds that lock for its whole duration and
+// writes entity and manifest rows as it goes, and DeleteWorkspaceData (the
+// caller's next step) never touches config sync's own tables, so releasing
+// the lock here would let a queued run land its writes after
+// DeleteWorkspaceData has already run, resurrecting rows under a
+// workspace_id that no longer exists. The caller must defer the returned
+// unlock until its own teardown of this workspace's data is complete. A
+// non-nil error returns a nil unlock func with the lock already released.
+func (s *Service) PurgeForWorkspaceDeletion(ctx context.Context, workspaceID string) (unlock func(), err error) {
 	lock := s.workspaceLock(workspaceID)
 	lock.Lock()
-	defer lock.Unlock()
-	return s.store.DeleteConfigForWorkspace(ctx, workspaceID)
+	if err := s.store.DeleteConfigForWorkspace(ctx, workspaceID); err != nil {
+		lock.Unlock()
+		return nil, err
+	}
+	return lock.Unlock, nil
 }
 
 // release deletes every manifest row for workspaceID one at a time, in

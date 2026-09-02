@@ -114,27 +114,44 @@ type walkFailure struct {
 
 func (f *walkFailure) Error() string { return f.reason }
 
-// fileBudget tracks how many files one Walk call has fetched against
-// Limits.MaxFiles, so AC-OFFICE-CONFIG-SYNC-002.5's file cap stops the walk
-// from issuing further fetches once it is reached, rather than only being
-// checked in an aggregate count after every fetch has already happened.
-type fileBudget struct {
-	limit    int
-	selected int
+// kindPlan is one flat kind directory's (agents/, projects/, routines/)
+// selected file paths, found while listing round 1, before any content fetch
+// is issued. dest is where fetchFlatKinds writes the resulting fetchedFiles.
+type kindPlan struct {
+	dest  *[]fetchedFile
+	paths []string
 }
 
-// reserve claims budget for one more fetch, or returns a capped walkFailure
-// when the limit has already been reached.
-func (b *fileBudget) reserve() *walkFailure {
-	if b.selected >= b.limit {
-		return &walkFailure{
-			reason: fmt.Sprintf(
-				"file cap exceeded: more than %d files selected; stopping before fetching further", b.limit),
-			capped: true,
-		}
+// skillPlan is one skill directory's selected file paths, found while
+// listing round 2, before any content fetch is issued. skillMDPath is empty
+// when the directory has no SKILL.md.
+type skillPlan struct {
+	dirName     string
+	dirPath     string
+	skillMDPath string
+	refPaths    []string
+}
+
+// candidateCount is the total number of files planFlatKinds and planSkills
+// selected across every directory, known once listing is complete and before
+// any fetch is issued — which is what lets the file cap
+// (AC-OFFICE-CONFIG-SYNC-002.5) report an exact dropped count instead of
+// only "more than N selected": listing calls are cheap and already bounded by
+// their own budget, so counting candidates this way costs nothing extra and
+// never re-introduces round 3's runaway-fetch bug (which paid for fetching
+// content just to count it).
+func candidateCount(kindPlans []kindPlan, skillPlans []skillPlan) int {
+	total := 0
+	for _, kp := range kindPlans {
+		total += len(kp.paths)
 	}
-	b.selected++
-	return nil
+	for _, sp := range skillPlans {
+		if sp.skillMDPath != "" {
+			total++
+		}
+		total += len(sp.refPaths)
+	}
+	return total
 }
 
 // walker drives the bounded multi-round directory walk over one provider,
@@ -162,13 +179,29 @@ func (w *walker) Walk(ctx context.Context, cfg *Config) (*walkResult, *walkFailu
 		return nil, &walkFailure{reason: fmt.Sprintf("list configured path %q: %v", displayPath(root), err)}
 	}
 	result := &walkResult{kandevYAMLPresent: hasKandevYAML(rootEntries)}
-	budget := &fileBudget{limit: w.limits.MaxFiles}
 
-	if ferr := w.walkFlatKinds(ctx, cfg, root, result, budget); ferr != nil {
+	kindPlans, ferr := w.planFlatKinds(ctx, cfg, root, result)
+	if ferr != nil {
+		return nil, ferr
+	}
+	skillPlans, ferr := w.planSkills(ctx, cfg, path.Join(root, "skills"))
+	if ferr != nil {
 		return nil, ferr
 	}
 
-	skills, ferr := w.walkSkills(ctx, cfg, path.Join(root, "skills"), budget)
+	if total := candidateCount(kindPlans, skillPlans); total > w.limits.MaxFiles {
+		return nil, &walkFailure{
+			reason: fmt.Sprintf(
+				"file cap exceeded: %d files found, limit is %d (%d dropped); stopping before fetching further",
+				total, w.limits.MaxFiles, total-w.limits.MaxFiles),
+			capped: true,
+		}
+	}
+
+	if ferr := w.fetchFlatKinds(ctx, cfg, kindPlans, result); ferr != nil {
+		return nil, ferr
+	}
+	skills, ferr := w.fetchSkills(ctx, cfg, skillPlans)
 	if ferr != nil {
 		return nil, ferr
 	}
@@ -187,7 +220,12 @@ func hasKandevYAML(entries []DirEntry) bool {
 	return false
 }
 
-func (w *walker) walkFlatKinds(ctx context.Context, cfg *Config, root string, result *walkResult, budget *fileBudget) *walkFailure {
+// planFlatKinds lists the three flat kind directories (agents/, projects/,
+// routines/) and selects every *.yml/*.yaml entry directly in each, without
+// fetching any content yet. AC-OFFICE-CONFIG-SYNC-002.3: not-found beneath
+// the root is an absent directory, contributing no files. Any other listing
+// failure fails the run.
+func (w *walker) planFlatKinds(ctx context.Context, cfg *Config, root string, result *walkResult) ([]kindPlan, *walkFailure) {
 	kinds := []struct {
 		dir  string
 		dest *[]fetchedFile
@@ -196,78 +234,68 @@ func (w *walker) walkFlatKinds(ctx context.Context, cfg *Config, root string, re
 		{"projects", &result.projectFiles},
 		{"routines", &result.routineFiles},
 	}
+	plans := make([]kindPlan, 0, len(kinds))
 	for _, k := range kinds {
-		res, ferr := w.walkFlatKind(ctx, cfg, path.Join(root, k.dir), budget)
-		if ferr != nil {
-			return ferr
+		dir := path.Join(root, k.dir)
+		entries, err := w.list(ctx, cfg, dir)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				plans = append(plans, kindPlan{dest: k.dest})
+				continue
+			}
+			return nil, &walkFailure{reason: fmt.Sprintf("list %s: %v", dir, err)}
 		}
-		*k.dest = res.files
-		result.unreadable = append(result.unreadable, res.unreadable...)
+		var paths []string
+		for _, e := range entries {
+			if e.IsFile && isYAMLFile(e.Name) {
+				paths = append(paths, e.Path)
+			}
+		}
+		plans = append(plans, kindPlan{dest: k.dest, paths: paths})
+	}
+	return plans, nil
+}
+
+// fetchFlatKinds fetches every file planFlatKinds selected. An unavailable
+// fetch fails the run; a not-found or unreadable-content fetch is recorded in
+// result.unreadable instead.
+func (w *walker) fetchFlatKinds(ctx context.Context, cfg *Config, plans []kindPlan, result *walkResult) *walkFailure {
+	for _, kp := range plans {
+		for _, p := range kp.paths {
+			content, unread, ferr := w.fetchContent(ctx, cfg, p)
+			if ferr != nil {
+				return ferr
+			}
+			if unread != nil {
+				result.unreadable = append(result.unreadable, *unread)
+				continue
+			}
+			*kp.dest = append(*kp.dest, fetchedFile{path: p, content: content})
+		}
 	}
 	return nil
 }
 
-// kindResult is one flat kind directory's selected files and any that could
-// not be read.
-type kindResult struct {
-	files      []fetchedFile
-	unreadable []unreadableFile
-}
-
-// walkFlatKind lists one flat kind directory (agents/, projects/, routines/)
-// and fetches every *.yml/*.yaml entry directly in it.
-// AC-OFFICE-CONFIG-SYNC-002.3: not-found beneath the root is an absent
-// directory, contributing no files. Any other listing failure fails the run.
-func (w *walker) walkFlatKind(ctx context.Context, cfg *Config, dir string, budget *fileBudget) (kindResult, *walkFailure) {
-	entries, err := w.list(ctx, cfg, dir)
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return kindResult{}, nil
-		}
-		return kindResult{}, &walkFailure{reason: fmt.Sprintf("list %s: %v", dir, err)}
-	}
-	var res kindResult
-	for _, e := range entries {
-		if !e.IsFile || !isYAMLFile(e.Name) {
-			continue
-		}
-		content, ferr := w.fetchOne(ctx, cfg, e.Path, &res, budget)
-		if ferr != nil {
-			return kindResult{}, ferr
-		}
-		if content != nil {
-			res.files = append(res.files, fetchedFile{path: e.Path, content: content})
-		}
-	}
-	return res, nil
-}
-
-// fetchOne fetches one selected file. An unavailable fetch fails the run; a
-// not-found or unreadable-content fetch appends to res.unreadable and
-// returns (nil, nil) so the caller continues. budget.reserve is checked
-// before the fetch so the file cap stops issuing fetches rather than only
-// being noticed afterward.
-func (w *walker) fetchOne(ctx context.Context, cfg *Config, filePath string, res *kindResult, budget *fileBudget) ([]byte, *walkFailure) {
-	if ferr := budget.reserve(); ferr != nil {
-		return nil, ferr
-	}
+// fetchContent fetches one selected file's content. An unavailable fetch
+// fails the run; a not-found or unreadable-content fetch is returned as an
+// unreadableFile instead of failing.
+func (w *walker) fetchContent(ctx context.Context, cfg *Config, filePath string) ([]byte, *unreadableFile, *walkFailure) {
 	content, err := w.fetch(ctx, cfg, filePath)
 	if err == nil {
-		return content, nil
+		return content, nil, nil
 	}
 	if errors.Is(err, ErrUnavailable) {
-		return nil, &walkFailure{reason: fmt.Sprintf("fetch %s: %v", filePath, err)}
+		return nil, nil, &walkFailure{reason: fmt.Sprintf("fetch %s: %v", filePath, err)}
 	}
-	res.unreadable = append(res.unreadable, unreadableFile{path: filePath, reason: err.Error()})
-	return nil, nil
+	return nil, &unreadableFile{path: filePath, reason: err.Error()}, nil
 }
 
-// walkSkills lists the skills/ directory and, for every subdirectory (up to
-// the skill cap), fetches its SKILL.md and references/ files.
-// AC-OFFICE-CONFIG-SYNC-002.5: the skill cap is evaluated here, before any
-// round-2 request, so a repository exceeding it produces the same message on
-// every run.
-func (w *walker) walkSkills(ctx context.Context, cfg *Config, skillsDir string, budget *fileBudget) ([]skillFiles, *walkFailure) {
+// planSkills lists the skills/ directory and, for every subdirectory (up to
+// the skill cap), selects its SKILL.md and references/ files without
+// fetching any content yet. AC-OFFICE-CONFIG-SYNC-002.5: the skill cap is
+// evaluated here, before any round-2 request, so a repository exceeding it
+// produces the same message on every run.
+func (w *walker) planSkills(ctx context.Context, cfg *Config, skillsDir string) ([]skillPlan, *walkFailure) {
 	entries, err := w.list(ctx, cfg, skillsDir)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -288,80 +316,74 @@ func (w *walker) walkSkills(ctx context.Context, cfg *Config, skillsDir string, 
 			capped: true,
 		}
 	}
-	skills := make([]skillFiles, 0, len(dirs))
+	plans := make([]skillPlan, 0, len(dirs))
 	for _, d := range dirs {
-		sf, ferr := w.walkOneSkill(ctx, cfg, d, budget)
+		sp, ferr := w.planOneSkill(ctx, cfg, d)
 		if ferr != nil {
 			return nil, ferr
 		}
-		skills = append(skills, sf)
+		plans = append(plans, sp)
 	}
-	return skills, nil
+	return plans, nil
 }
 
-func (w *walker) walkOneSkill(ctx context.Context, cfg *Config, dir DirEntry, budget *fileBudget) (skillFiles, *walkFailure) {
-	sf := skillFiles{dirName: dir.Name, dirPath: dir.Path}
+func (w *walker) planOneSkill(ctx context.Context, cfg *Config, dir DirEntry) (skillPlan, *walkFailure) {
+	sp := skillPlan{dirName: dir.Name, dirPath: dir.Path}
 
 	entries, err := w.list(ctx, cfg, dir.Path)
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		return skillFiles{}, &walkFailure{reason: fmt.Sprintf("list %s: %v", dir.Path, err)}
+		return skillPlan{}, &walkFailure{reason: fmt.Sprintf("list %s: %v", dir.Path, err)}
 	}
 	for _, e := range entries {
 		if e.IsFile && e.Name == skillDefinitionName {
-			if ferr := w.fetchSkillMD(ctx, cfg, e.Path, &sf, budget); ferr != nil {
-				return skillFiles{}, ferr
-			}
+			sp.skillMDPath = e.Path
 		}
 	}
 
 	refDir := path.Join(dir.Path, "references")
 	refEntries, err := w.list(ctx, cfg, refDir)
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		return skillFiles{}, &walkFailure{reason: fmt.Sprintf("list %s: %v", refDir, err)}
+		return skillPlan{}, &walkFailure{reason: fmt.Sprintf("list %s: %v", refDir, err)}
 	}
 	for _, e := range refEntries {
-		if !e.IsFile {
-			continue
-		}
-		if ferr := w.fetchReference(ctx, cfg, e.Path, &sf, budget); ferr != nil {
-			return skillFiles{}, ferr
+		if e.IsFile {
+			sp.refPaths = append(sp.refPaths, e.Path)
 		}
 	}
-	return sf, nil
+	return sp, nil
 }
 
-func (w *walker) fetchSkillMD(ctx context.Context, cfg *Config, filePath string, sf *skillFiles, budget *fileBudget) *walkFailure {
-	if ferr := budget.reserve(); ferr != nil {
-		return ferr
+// fetchSkills fetches every file planSkills selected, per skill directory.
+func (w *walker) fetchSkills(ctx context.Context, cfg *Config, plans []skillPlan) ([]skillFiles, *walkFailure) {
+	skills := make([]skillFiles, 0, len(plans))
+	for _, sp := range plans {
+		sf := skillFiles{dirName: sp.dirName, dirPath: sp.dirPath}
+		if sp.skillMDPath != "" {
+			content, unread, ferr := w.fetchContent(ctx, cfg, sp.skillMDPath)
+			if ferr != nil {
+				return nil, ferr
+			}
+			if unread != nil {
+				sf.skillMDUnread = unread
+			} else {
+				f := fetchedFile{path: sp.skillMDPath, content: content}
+				sf.skillMD = &f
+			}
+		}
+		for _, rp := range sp.refPaths {
+			content, unread, ferr := w.fetchContent(ctx, cfg, rp)
+			if ferr != nil {
+				return nil, ferr
+			}
+			if unread != nil {
+				sf.unreadableRefs = append(sf.unreadableRefs, *unread)
+				continue
+			}
+			sf.references = append(sf.references, fetchedFile{path: rp, content: content})
+		}
+		skills = append(skills, sf)
 	}
-	content, err := w.fetch(ctx, cfg, filePath)
-	if err == nil {
-		f := fetchedFile{path: filePath, content: content}
-		sf.skillMD = &f
-		return nil
-	}
-	if errors.Is(err, ErrUnavailable) {
-		return &walkFailure{reason: fmt.Sprintf("fetch %s: %v", filePath, err)}
-	}
-	u := unreadableFile{path: filePath, reason: err.Error()}
-	sf.skillMDUnread = &u
-	return nil
-}
-
-func (w *walker) fetchReference(ctx context.Context, cfg *Config, filePath string, sf *skillFiles, budget *fileBudget) *walkFailure {
-	if ferr := budget.reserve(); ferr != nil {
-		return ferr
-	}
-	content, err := w.fetch(ctx, cfg, filePath)
-	if err == nil {
-		sf.references = append(sf.references, fetchedFile{path: filePath, content: content})
-		return nil
-	}
-	if errors.Is(err, ErrUnavailable) {
-		return &walkFailure{reason: fmt.Sprintf("fetch %s: %v", filePath, err)}
-	}
-	sf.unreadableRefs = append(sf.unreadableRefs, unreadableFile{path: filePath, reason: err.Error()})
-	return nil
+	return skills, nil
 }
 
 // list dispatches a directory listing to the configured provider and

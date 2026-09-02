@@ -180,9 +180,14 @@ func TestService_PurgeForWorkspaceDeletion_SerializesAgainstInFlightRun(t *testi
 	lock := svc.workspaceLock("ws-1")
 	lock.Lock()
 
-	purgeDone := make(chan error, 1)
+	type purgeResult struct {
+		unlock func()
+		err    error
+	}
+	purgeDone := make(chan purgeResult, 1)
 	go func() {
-		purgeDone <- svc.PurgeForWorkspaceDeletion(context.Background(), "ws-1")
+		unlock, err := svc.PurgeForWorkspaceDeletion(context.Background(), "ws-1")
+		purgeDone <- purgeResult{unlock: unlock, err: err}
 	}()
 
 	select {
@@ -194,16 +199,59 @@ func TestService_PurgeForWorkspaceDeletion_SerializesAgainstInFlightRun(t *testi
 
 	lock.Unlock()
 
+	var res purgeResult
 	select {
-	case purgeErr := <-purgeDone:
-		require.NoError(t, purgeErr)
+	case res = <-purgeDone:
+		require.NoError(t, res.err)
 	case <-time.After(2 * time.Second):
 		t.Fatal("PurgeForWorkspaceDeletion did not complete after the lock was released")
 	}
+	require.NotNil(t, res.unlock)
+	res.unlock()
 
 	cfg, err := svc.GetConfigForWorkspace(ctx, "ws-1")
 	require.NoError(t, err)
 	assert.Nil(t, cfg)
+}
+
+// TestService_PurgeForWorkspaceDeletion_ReturnsLockStillHeld proves the lock
+// PurgeForWorkspaceDeletion takes is not released until the caller invokes
+// the returned unlock func, so a caller can extend the lock's scope across
+// its own later teardown steps — exactly what office/service.DeleteWorkspace
+// does to keep an in-flight sync run from writing rows back in after it
+// deletes the workspace's other data.
+func TestService_PurgeForWorkspaceDeletion_ReturnsLockStillHeld(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.SetConfigForWorkspace(ctx, "ws-1", testSetConfigRequest("cfg"))
+	require.NoError(t, err)
+
+	unlock, err := svc.PurgeForWorkspaceDeletion(ctx, "ws-1")
+	require.NoError(t, err)
+	require.NotNil(t, unlock)
+
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := svc.PurgeForWorkspaceDeletion(context.Background(), "ws-1")
+		secondDone <- err
+	}()
+
+	select {
+	case <-secondDone:
+		t.Fatal("a second PurgeForWorkspaceDeletion call returned before the first call's unlock was invoked")
+	case <-time.After(100 * time.Millisecond):
+		// Still blocked, as expected.
+	}
+
+	unlock()
+
+	select {
+	case err := <-secondDone:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("second PurgeForWorkspaceDeletion did not complete after unlock was called")
+	}
 }
 
 func TestService_SyncDueConfigs_SkipsPollDisabledAndNotDue(t *testing.T) {
