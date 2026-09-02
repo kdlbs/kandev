@@ -58,7 +58,7 @@ own feature behavior/state.
 - [Executor settings card spacing](requirements/executor-settings-card-spacing.md)
 - [External VCS File Links](requirements/external-vcs-file-links.md)
 - [File Tree Chat Context](requirements/file-tree-chat-context.md)
-- [Reload Kandev after frozen-tab restore](requirements/fix-duplicated-tab-stale-data.md)
+- [Frozen-tab reload](requirements/fix-duplicated-tab-stale-data.md)
 - [GitHub PR Review Actions](requirements/github-pr-review-actions.md)
 - [GitHub Saved-Query Default Views](requirements/github-saved-query-defaults.md)
 - [Kandev MCP Tool Results](requirements/kandev-mcp-tool-results.md)
@@ -68,16 +68,17 @@ own feature behavior/state.
 - [Mermaid Rendering](requirements/mermaid-rendering.md)
 - [Message favorite star mobile sizing](requirements/message-favorite-star-mobile-size.md)
 - [Message metadata dialog scroll containment](requirements/message-metadata-overflow.md)
-- [Automatically Merge Consecutive Queued Messages](requirements/message-queue-auto-merge.md)
+- [Message queue auto-merge](requirements/message-queue-auto-merge.md)
 - [Manage Pending Message Queues](requirements/message-queue-management.md)
 - [Merge Enqueued Messages Individually](requirements/message-queue-merge.md)
 - [Pin the Message Queue Panel](requirements/message-queue-pin.md)
 - [Reorder Queued Messages](requirements/message-queue-reorder.md)
 - [Control Pending Message Auto-run](requirements/message-queue-run.md)
 - [Send Queued Messages Now](requirements/message-queue-send-now.md)
-- [Mobile Workspace Topbar Actions](requirements/mobile-quick-chat-topbar.md)
+- [Mobile workspace topbar](requirements/mobile-quick-chat-topbar.md)
 - [Mobile Task Chrome](requirements/mobile-task-chrome.md)
 - [Mobile Task Navigation](requirements/mobile-task-navigation.md)
+- [Plan comments](requirements/plan-comment-drafts.md)
 - [Task-scoped port-forwarding discovery](requirements/port-forwarding-discovery.md)
 - [Open proxy URLs in the browser panel](requirements/port-proxy-browser-panel.md)
 - [Responsive PR Detail Header](requirements/pr-detail-header-width.md)
@@ -87,8 +88,8 @@ own feature behavior/state.
 - [Preview Sprites Transient Retry](requirements/preview-sprites-transient-retry.md)
 - [Persistent status motion](requirements/persistent-status-motion.md)
 - [Prompt History Panel](requirements/prompt-history-panel.md)
-- [Render Nerd Font glyphs pasted from a styled terminal](requirements/prompt-paste-nerd-font-glyphs.md)
-- [Prompt Turn Duration on Message Hover](requirements/prompt-turn-duration.md)
+- [Prompt paste: Nerd Font glyphs](requirements/prompt-paste-nerd-font-glyphs.md)
+- [Prompt turn duration](requirements/prompt-turn-duration.md)
 - [Published Docs Preview Reliability](requirements/published-docs-preview-reliability.md)
 - [Quick Chat elevation](requirements/quick-chat-elevation.md)
 - [Quick Chat viewport layout](requirements/quick-chat-viewport-layout.md)
@@ -168,6 +169,7 @@ own feature behavior/state.
 - [Quick Chat and terminal elevation](system-design/quick-chat-elevation.md)
 - [Quick Chat viewport layout](system-design/quick-chat-viewport-layout.md)
 - [Quick Chat and Terminal Tabs](system-design/quick-terminal.md)
+- [Plan comments](system-design/plan-comment-drafts.md)
 - [Responsive Plan Formatting](system-design/responsive-plan-formatting.md)
 - [Confirmations](system-design/confirmation-warning-hierarchy.md)
 - [Resizable Markdown Table Columns](system-design/resizable-markdown-tables.md)
@@ -182,8 +184,7 @@ own feature behavior/state.
 
 ## Migration record
 
-Legacy source detail is still moving to the canonical requirement and
-system-design documents above.
+Legacy sources are still migrating to these documents.
 
 ## Related systems
 
