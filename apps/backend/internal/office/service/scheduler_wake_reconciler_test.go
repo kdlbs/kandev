@@ -214,6 +214,16 @@ func TestParentWakeReconciler_RedeliversAfterPersistedReceiptInvalidatedByReopen
 	}
 }
 
+// seedTerminalChildrenCompletedRun inserts a finished
+// task_children_completed run for parentTaskID at requestedAt.
+func seedTerminalChildrenCompletedRun(t *testing.T, svc *service.Service, runID, agentID, parentTaskID, requestedAt string) {
+	t.Helper()
+	svc.ExecSQL(t, `
+		INSERT INTO runs (id, agent_profile_id, reason, payload, status, requested_at)
+		VALUES (?, ?, 'task_children_completed', ?, 'finished', ?)
+	`, runID, agentID, `{"task_id":"`+parentTaskID+`"}`, requestedAt)
+}
+
 // TestParentWakeReconciler_SameSecondReopenSuppressedByEdgePathRun and
 // TestParentWakeReconciler_LaterSecondReopenRedeliveredAfterEdgePathRun pin
 // the accepted residual: ListStuckParents' NOT EXISTS runs arm
@@ -223,18 +233,10 @@ func TestParentWakeReconciler_RedeliversAfterPersistedReceiptInvalidatedByReopen
 // edge path (cascadeChildrenCompleted) always writes exactly this kind of
 // run for the parent's first completion, so a reopen+recomplete landing in
 // that same second is not recovered by this reconciler — only a later
-// second is. Both ticks below seed a real runs row rather than using
+// second is. Both tests below seed a real runs row rather than using
 // fakeDispatcher's no-run defaults, closing the coverage gap that hid this
 // behind R6-F1/R6-F2: every other reconciler test leaves the runs table
 // empty, so the NOT EXISTS arm was never exercised.
-func seedTerminalChildrenCompletedRun(t *testing.T, svc *service.Service, runID, agentID, parentTaskID, requestedAt string) {
-	t.Helper()
-	svc.ExecSQL(t, `
-		INSERT INTO runs (id, agent_profile_id, reason, payload, status, requested_at)
-		VALUES (?, ?, 'task_children_completed', ?, 'finished', ?)
-	`, runID, agentID, `{"task_id":"`+parentTaskID+`"}`, requestedAt)
-}
-
 func TestParentWakeReconciler_SameSecondReopenSuppressedByEdgePathRun(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()

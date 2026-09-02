@@ -186,6 +186,11 @@ func TestPostgresWakeReceiptMigrations_ApplyAndReplay(t *testing.T) {
 	if _, err := repo.IncrementWakeDeliverySeq(ctx, "pg-migration-parent"); err != nil {
 		t.Fatalf("increment wake delivery seq after replay: %v", err)
 	}
+	// Proves parent_child_wake_receipts.child_generation exists: this SELECT
+	// names the column explicitly (GetWakeReceipt, wake_receipts.go).
+	if _, err := repo.GetWakeReceipt(ctx, "pg-migration-parent"); err != nil {
+		t.Fatalf("read wake receipt after replay: %v", err)
+	}
 }
 
 // TestPostgresIncrementWakeDeliverySeq_Monotonic is
