@@ -2,9 +2,12 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"expvar"
 	"testing"
 )
+
+type invokeHandlerContextKey struct{}
 
 // snapshotPanicCounter returns the current value of subscriberPanicTotal for
 // key, or 0 if the key has never been incremented.
@@ -54,5 +57,47 @@ func TestInvokeHandler_PanicIncrementsPatternLabelledCounter(t *testing.T) {
 	if got := snapshotPanicCounter(t, subjectKey); got != 0 {
 		t.Fatalf("subscriberPanicTotal incremented a subject-labelled key %q (value %d); "+
 			"the label must be pattern-based only, never the concrete per-session subject", subjectKey, got)
+	}
+}
+
+// TestInvokeHandler_PassesThroughHandlerError is reviewer-requested contract
+// coverage. This behavior already exists on the current head: invokeHandler
+// must forward the context and event unchanged, call the handler once, return
+// its exact error, and leave the panic counter unchanged.
+func TestInvokeHandler_PassesThroughHandlerError(t *testing.T) {
+	log := newTestLogger(t)
+	const pattern = "test.safe_handler.error"
+	const subject = "test.safe_handler.error.session-abc123"
+	patternKey := metricLabel("pattern", pattern, "mode", "regular")
+	before := snapshotPanicCounter(t, patternKey)
+	sentinel := errors.New("sentinel handler error")
+	ctx := context.WithValue(context.Background(), invokeHandlerContextKey{}, "marker")
+	event := NewEvent("test.type", "test-source", nil)
+	var calls int
+	var gotCtx context.Context
+	var gotEvent *Event
+
+	err := invokeHandler(ctx, log, "regular", subject, pattern, event,
+		func(handlerCtx context.Context, handlerEvent *Event) error {
+			calls++
+			gotCtx = handlerCtx
+			gotEvent = handlerEvent
+			return sentinel
+		})
+
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("invokeHandler error = %v, want sentinel %v", err, sentinel)
+	}
+	if calls != 1 {
+		t.Fatalf("handler calls = %d, want 1", calls)
+	}
+	if gotCtx != ctx {
+		t.Fatal("invokeHandler did not forward the original context")
+	}
+	if gotEvent != event {
+		t.Fatal("invokeHandler did not forward the original event")
+	}
+	if after := snapshotPanicCounter(t, patternKey); after != before {
+		t.Fatalf("subscriberPanicTotal[%q] = %d, want unchanged value %d", patternKey, after, before)
 	}
 }
