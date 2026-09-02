@@ -38,7 +38,7 @@ func TestComputeDigestDeterministicAndPositionSensitive(t *testing.T) {
 	}
 }
 
-func TestIsEngineOwnedOnEnter(t *testing.T) {
+func TestIsMarkerBearing(t *testing.T) {
 	cases := map[wfmodels.OnEnterActionType]bool{
 		wfmodels.OnEnterClearDecisions:             true,
 		wfmodels.OnEnterQueueRunForEachParticipant: true,
@@ -50,8 +50,8 @@ func TestIsEngineOwnedOnEnter(t *testing.T) {
 		wfmodels.OnEnterSetSessionMode:             false,
 	}
 	for kind, want := range cases {
-		if got := IsEngineOwnedOnEnter(kind); got != want {
-			t.Errorf("IsEngineOwnedOnEnter(%s) = %v, want %v", kind, got, want)
+		if got := IsMarkerBearing(kind); got != want {
+			t.Errorf("IsMarkerBearing(%s) = %v, want %v", kind, got, want)
 		}
 	}
 }
