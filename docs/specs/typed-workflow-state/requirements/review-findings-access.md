@@ -38,11 +38,8 @@ reach rule that governs publishing.
   always be present, so a caller never infers truncation from a length. `findings`
   shall be rendered as an empty JSON array `[]` when nothing matched, never as
   `null`. Go marshals a nil slice as `null` and `ListTaskReviewFindings` returns a
-  nil slice for zero rows, so the direct implementation emits `null` and forces
-  every caller to handle two encodings of "no findings"; AC-TWS-003.9 requires an
-  empty list, and this pins what empty looks like on the wire. For each returned
-  finding the response shall carry `id`,
-  `run_id`, `repository_name`, `file_path`, `start_line`, `end_line`, `side`,
+  nil slice for zero rows, so the direct implementation emits `null`. For each
+  returned finding the response shall carry `id`, `run_id`, `repository_name`, `file_path`, `start_line`, `end_line`, `side`,
   `severity`, `category`, `title`, `body`, `suggestion`, `status`, `resolved_at`,
   `created_at`. A finding published through `publish_review_findings_kandev` shall
   round-trip every field it set. A `line_end` the publisher defaulted to the start
@@ -54,16 +51,13 @@ reach rule that governs publishing.
   every result under the AC-TWS-003.5 default of `open`. `resolved_at` shall be
   rendered as JSON `null` when the finding carries no resolution timestamp, never
   omitted, **so that every finding carries the same key set whatever its status**.
-  Stable shape is the whole reason, and it is sufficient on its own: a caller reads
-  `resolved_at` and compares it to `null` rather than testing whether the key exists
-  and branching on a schema that shifts under it. It is explicitly **not** a
-  distinguishability rule — a finding reopened under AC-TWS-004.5 has its
-  `resolved_at` cleared, so it is indistinguishable here from one never resolved, and
-  `updated_at` is deliberately outside this field set. Telling those two apart is not
-  a capability this tool offers and no AC requires it. `created_at`, and
-  `resolved_at` when non-null, shall be
-  rendered as RFC 3339 strings — the encoding Go's `encoding/json` already gives
-  `time.Time`, named here because declaring a spec-defined shape otherwise leaves the
+  It is explicitly **not** a distinguishability rule — a finding reopened under
+  AC-TWS-004.5 has its `resolved_at` cleared, so it is indistinguishable here from
+  one never resolved, and `updated_at` is deliberately outside this field set.
+  Telling those two apart is not a capability this tool offers and no AC requires
+  it. `created_at`, and `resolved_at` when non-null, shall be
+  rendered as RFC 3339 strings — the encoding Go's `encoding/json` already
+  gives `time.Time`, named because a spec-defined shape otherwise leaves the
   format to the implementer.
 - **AC-TWS-003.5:** An optional `status` argument shall accept `open`,
   `resolved`, `dismissed`, or `all`. It shall default to **`open`**, because the
@@ -74,12 +68,15 @@ reach rule that governs publishing.
 - **AC-TWS-003.7:** `status` and `severity` shall be normalised before matching by
   trimming surrounding whitespace and lower-casing, matching
   `review.NormalizeFindingInput`. A value absent, JSON `null`, or empty after
-  trimming shall be treated as **omitted**, so the AC-TWS-003.5 default applies. A
-  non-empty value unrecognised after normalisation shall be **rejected with a
-  validation error naming the accepted values**. Such a value shall not be ignored
-  and shall not fall back to the default: a typo that silently widened the result
-  set would return resolved findings to a caller asking for open ones. This does not
-  override the omitted-value rule above.
+  trimming shall be treated as **omitted** for the argument it was given for, and
+  what omission means then differs per argument: an omitted `status` takes the
+  AC-TWS-003.5 default of `open`, whereas an omitted `severity` has no default and
+  shall simply not restrict, per AC-TWS-003.6. Blank `severity` never narrows to
+  `open` or to any severity. A non-empty value unrecognised after normalisation
+  shall be **rejected with a validation error naming the accepted values**. Such a
+  value shall not be ignored and shall not fall back to either omitted behaviour,
+  which would silently widen the result set. This does not override the
+  omitted-value rule above.
 - **AC-TWS-003.8:** Findings shall be returned ordered by `repository_name`, then
   `file_path`, then `start_line`, then `id` — every component a named column,
   matching `ListTaskReviewFindings`. `id` is a UUID, so rows identical on the first
@@ -97,29 +94,23 @@ reach rule that governs publishing.
   **false** and `total_matched` shall be that same match count, which absent a
   concurrent publish is the length of `findings`. AC-TWS-005.4 accepts a skew
   between the total and the page under a publish committing mid-call and is not
-  weakened here. Both directions are stated because AC-TWS-003.4 promises that a
-  caller never infers truncation from a length: that promise holds only if
-  `truncated` is authoritative when false as well as when true. Left one-way, an
-  implementation that set `truncated` unconditionally would violate no rule while
-  breaking exactly the guarantee the key exists to give. Truncation shall never be
-  silent.
+  weakened here. Truncation shall never be silent, in either
+  direction: AC-TWS-003.4's promise that a caller never infers truncation from a
+  length holds only if `truncated` is authoritative when false as well as true.
+- **AC-TWS-003.11:** Findings for the whole task shall be returned, across every
+  review run — the store is task-scoped and a caller wants all of them, not one
+  run's.
 - **AC-TWS-003.12:** An explicitly empty `task_id` shall be treated as omitted and
   resolved to the calling session's task, matching `publish_review_findings_kandev`
   (`resolveTaskID`). With no `task_id` and no session task, the call shall fail with
   the same `task_id is required` validation error the publisher returns.
-- **AC-TWS-003.11:** Findings for the whole task shall be returned, across every
-  review run — the store is task-scoped and a caller wants all of them, not one
-  run's.
 - **AC-TWS-003.13:** The **successful** text result of **both** tools in this group
   shall be the JSON document alone, with **no leading prose and no trailing prose**,
   so that the whole text result parses as JSON. Rendering shall otherwise match
   `publish_review_findings_kandev` — indented JSON in a text result — but the
   absence of a prefix is a deliberate **departure** from it: that tool prefixes
   `"Review findings published:\n"` because it returns a two-key acknowledgement
-  nobody parses, whereas these two return the data the consuming step acts on, and a
-  prefix would make every caller strip a fixed string before decoding. This AC exists
-  because "rendered as the publisher renders its own" is ambiguous between the
-  mechanism and the prefix, and the two readings produce different tests. It governs
+  nobody parses, whereas these two return the data the consuming step acts on. It governs
   **success results only**: the error results required by AC-TWS-003.3,
   AC-TWS-003.7, AC-TWS-003.14, AC-TWS-004.8 and AC-TWS-004.12 are human-readable
   messages and shall not be forced into JSON.
@@ -144,7 +135,8 @@ substrate this card exists to leave.
   registered in the same `review` group, taking a required `finding_id` and a
   required `status` whose accepted values are exactly `open`, `resolved` and
   `dismissed`. The tool's schema enum and AC-TWS-004.8's validation error shall
-  name those three and no others.
+  name those three and no others. The enum is a **declaration** surface for tool
+  discovery; AC-TWS-004.8 owns rejection and its wording.
 - **AC-TWS-004.2:** `open` shall be accepted, so a finding closed in error can be
   reopened; refusing it would make an incorrect resolution unrecoverable through
   MCP.
@@ -168,10 +160,22 @@ substrate this card exists to leave.
   `resolved_at` records when the disposition was made; a retried call is not a new
   disposition, and a retry must not move a timestamp.
 - **AC-TWS-004.7:** The tool shall resolve exactly one finding per call.
-- **AC-TWS-004.8:** An empty `finding_id`, a missing `status`, or a `status`
-  outside `open` / `resolved` / `dismissed` shall be rejected with a validation
-  error naming the accepted values, mirroring AC-TWS-003.7. No such call shall
-  reach persistence.
+- **AC-TWS-004.8:** `finding_id` and `status` shall be **normalised before any
+  validation**: both trimmed of surrounding whitespace, `status` additionally
+  lower-cased, so `" RESOLVED "` resolves as `resolved`. AC-TWS-003.7 states the
+  same normalisation but is scoped to the list tool's filters, so it is restated
+  here rather than referenced. A `status` absent, JSON `null`, or empty after
+  trimming is **missing**; unlike AC-TWS-003.5's `status` it takes no default,
+  because AC-TWS-004.1 requires it. The normalised value is the one every later
+  AC sees, so AC-TWS-004.5's stamping and AC-TWS-004.6's already-has comparison
+  are made against it.
+  A missing `status`, a `finding_id` empty after trimming, or a `status` still
+  outside `open` / `resolved` / `dismissed` after normalisation shall be rejected
+  with a validation error **naming the accepted values**. Normalisation and that
+  check shall both precede schema validation, so AC-TWS-004.1's enum never
+  rejects a value on its own: were it to, the caller would receive the schema
+  layer's generic enum error, which names none of the three and defeats this AC.
+  No such call shall reach persistence.
 - **AC-TWS-004.9:** A successful resolution shall publish the existing
   `TaskReviewFindingUpdated` event, exactly as the UI update path does, so the
   Review panel converges without a reload. The tool shall go through
@@ -183,19 +187,15 @@ substrate this card exists to leave.
   shared `ReviewService.UpdateFindingStatus`, not to a parallel method. That method
   stamps `resolved_at` on every call today, so this **deliberately changes the
   browser action `task.review.finding.update` as well**: a second UI resolve of an
-  already-resolved finding stops moving the timestamp. Re-stamping was wrong on both
-  surfaces, and forking the method would leave two stamping rules to keep in step.
-  This authorises no change to that action's authorisation (Out of scope 8).
+  already-resolved finding stops moving the timestamp. Forking the method would leave two
+  stamping rules to keep in step. This authorises no change to that action's authorisation (Out of scope 8).
 - **AC-TWS-004.11:** A successful resolve shall return the finding using the
   AC-TWS-003.4 field set **and its representation rules**, `resolved_at` included as
   `null` rather than omitted, so one shape describes a finding across this tool
   group. The result shall be a JSON object whose single key `finding` holds that
   object — the same envelope the existing `task.review.finding.update` action already
   returns, rather than the finding bare — and shall be rendered into the tool's text
-  result under AC-TWS-003.13, which governs both tools in this group. Naming the key
-  leaves room for a sibling key later; a bare object does not, and the two shapes are
-  both already present in the tree, so leaving the choice open would decide it
-  arbitrarily.
+  result under AC-TWS-003.13, which governs both tools in this group.
 - **AC-TWS-004.12:** A **persistence failure** shall be reported as such and shall
   **not** be folded into AC-TWS-004.4's not-found. The not-found result is reserved
   for two conditions and no others: the finding row does not exist, or it exists on
@@ -212,9 +212,7 @@ substrate this card exists to leave.
   Without this rule, AC-TWS-004.4's requirement that unknown and unreachable
   identifiers be indistinguishable pushes the implementation toward a catch-all on
   any read failure, which would tell an agent a finding does not exist whenever the
-  store is unavailable — and an agent acting on that would treat a live finding as
-  gone. The catch-all is the natural way to satisfy AC-TWS-004.4, which is exactly
-  why the narrower rule has to be stated. This rule covers the **repository** only.
+  store is unavailable. This rule covers the **repository** only.
   The task authorizer is a `func(ctx, taskID) error` seam that returns one
   undifferentiated error for a denial and for its own infrastructure failure, so any
   error from it shall continue to be treated as a reach denial and mapped to
@@ -292,4 +290,8 @@ One line per case; the cited AC is authoritative for the expected value.
     runs in one response, asserted on the `run_id` values present rather than on the
     count alone, so an implementation scoped to the latest run — or to any single
     run — fails the case (003.11).
+21. Resolve accepts `"RESOLVED"` and `" resolved "` as `resolved`, and a
+    whitespace-padded `finding_id`. A non-empty unrecognised status is rejected
+    with an error naming all three statuses — asserted on the message, so the
+    schema layer's generic enum error fails the case (004.8, 004.1).
 
