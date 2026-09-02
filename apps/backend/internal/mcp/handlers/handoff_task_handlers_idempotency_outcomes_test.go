@@ -13,6 +13,7 @@ import (
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -129,6 +130,77 @@ func TestHandleHandoffCreatedOutcome_IdentityLostSkipsStartAndReportsMessage(t *
 	assert.Nil(t, launcher.getRequest(), "LaunchSession must never be called")
 	assert.Contains(t, result.Message, externalID)
 	assert.Contains(t, result.Message, "record task_id rather than replaying")
+}
+
+// --- AC-24d: created_identity_lost reports the settlement survivor, not the stale created row ---
+
+func TestHandleHandoffCreatedOutcome_IdentityLostReportsSurvivorWorkflowStep(t *testing.T) {
+	launcher := newHandoffFakeLauncher(nil)
+	f := newHandoffFixture(t, agentsettingsmodels.AgentRoleCEO, "", launcher)
+	const externalID = "ext-identity-lost-survivor"
+	handedOffAt := formatHandoffTimestamp(time.Now().UTC())
+
+	created, err := f.svc.CreateTask(context.Background(), &service.CreateTaskRequest{
+		WorkspaceID:    f.targetWorkspaceID,
+		WorkflowID:     f.targetWorkflowID,
+		WorkflowStepID: f.targetStepID,
+		Title:          "Deliver the thing",
+		Description:    "Do the work",
+		ExternalID:     externalID,
+		Metadata:       handoffSourceMetadata(f, handedOffAt),
+	})
+	require.NoError(t, err)
+	// Captured before the step move below: this is the stale in-memory row
+	// the handler must NOT trust for WorkflowStepID once settlement reports
+	// a different survivor.
+	task := created.Task
+
+	releasedTask, err := f.repo.ReleaseTaskExternalID(context.Background(), f.targetWorkspaceID, externalID)
+	require.NoError(t, err)
+	require.NotNil(t, releasedTask)
+
+	// Move the task to a different step in the DB between this handler's own
+	// create and its settlement call, simulating AC-24d's "different rows"
+	// case: the settlement reload must observe the move even though `task`
+	// (captured above) still names the original step.
+	movedStep := seedWorkflowStep(t, context.Background(), f.workflowRepo, &workflowmodels.WorkflowStep{
+		WorkflowID: f.targetWorkflowID, Name: "Moved", Position: 2, AllowManualMove: true,
+	})
+	moved, err := f.repo.GetTask(context.Background(), task.ID)
+	require.NoError(t, err)
+	moved.WorkflowStepID = movedStep.ID
+	require.NoError(t, f.repo.UpdateTask(context.Background(), moved))
+	require.NotEqual(t, task.WorkflowStepID, movedStep.ID, "precondition: the captured task and the DB row must now disagree")
+
+	principal := mcpscope.Principal{
+		WorkspaceID:     f.sourceWorkspaceID,
+		CallerTaskID:    f.sourceTaskID,
+		CallerSessionID: f.sourceSessionID,
+		Surface:         mcpprofile.SurfaceOfficeTask,
+	}
+	session, err := f.repo.GetTaskSession(context.Background(), f.sourceSessionID)
+	require.NoError(t, err)
+	args := &handoffTaskArgs{
+		TargetWorkspaceID: f.targetWorkspaceID,
+		WorkflowID:        f.targetWorkflowID,
+		Title:             "Deliver the thing",
+		Prompt:            "Do the work",
+		AgentProfileID:    f.targetAgentProfileID,
+		ExecutorProfileID: f.targetExecProfileID,
+		StartAgent:        true,
+		ExternalID:        externalID,
+	}
+	resolved := &handoffResolvedResources{WorkflowStepID: f.targetStepID}
+	msg := makeWSMessage(t, ws.ActionMCPHandoffTask, f.validPayload(nil))
+
+	resp, err := f.h.handleHandoffCreatedOutcome(f.ctx(), msg, principal, session, args, resolved, task, handedOffAt)
+	require.NoError(t, err)
+	result := decodeHandoffResult(t, resp)
+
+	assert.Equal(t, handoffOutcomeCreatedIdentityLost, result.Outcome)
+	assert.Equal(t, task.ID, result.TaskID, "the task id itself is unaffected by the step move")
+	assert.Equal(t, movedStep.ID, result.WorkflowStepID,
+		"AC-24d: response must report the settlement survivor's step, not the stale created-row's step")
 }
 
 // --- AC-24d/R-F39: a genuine SettleExternalID failure halts D3b entirely ---
