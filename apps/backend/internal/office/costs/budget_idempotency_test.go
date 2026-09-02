@@ -246,6 +246,49 @@ func TestCheckBudget_ClaimStoreFault_EmitsAndReportsSubmittedTrue(t *testing.T) 
 	}
 }
 
+// TestCheckBudget_ClaimStoreFault_ExceededPath_EmitsAndCountsTwicePerEval
+// extends TestCheckBudget_ClaimStoreFault_EmitsAndReportsSubmittedTrue to the
+// exceeded level: claimAndEmit's afterClaim hook claims the alert-level
+// companion right after the exceeded-level claim, so a broken store fails
+// both claim attempts once per evaluation (AC-OFFICE-COSTS-002.14).
+func TestCheckBudget_ClaimStoreFault_ExceededPath_EmitsAndCountsTwicePerEval(t *testing.T) {
+	repo, _, execSQL := newBudgetTestRepo(t)
+	ctx := context.Background()
+	createBudgetTestAgent(t, repo, "ws-1", "agent-fault-exc")
+	injected := errors.New("injected claim store failure")
+	faulty := &claimFaultRepo{Repository: repo, failLevels: map[string]error{
+		"alert":    injected,
+		"exceeded": injected,
+	}}
+	agents := &repoAgents{repo: repo}
+	spy := &budgetActivitySpy{}
+	svc := costs.NewCostService(faulty, logger.Default(), spy, agents, agents)
+
+	policy := newIdempotencyTestPolicy("agent-fault-exc", 500)
+	if err := svc.CreateBudgetPolicy(ctx, policy); err != nil {
+		t.Fatalf("create policy: %v", err)
+	}
+	insertBudgetTestCostEvent(t, execSQL, "agent-fault-exc", "task-1", 600) // >= limit
+
+	before := claimFailureCount(t)
+	for i := 0; i < 2; i++ {
+		results, err := svc.CheckBudget(ctx, "ws-1", "agent-fault-exc", "proj-1")
+		if err != nil {
+			t.Fatalf("CheckBudget[%d]: %v", i, err)
+		}
+		if !results[0].ExceededSubmitted {
+			t.Fatalf("eval %d: ExceededSubmitted=false, want true (fail-open)", i)
+		}
+	}
+	if got := spy.count("budget.exceeded"); got != 2 {
+		t.Fatalf("budget.exceeded = %d, want 2 (duplicates permitted under broken store)", got)
+	}
+	// exceeded claim + companion alert claim both fail => 2 increments per evaluation.
+	if delta := claimFailureCount(t) - before; delta != 4 {
+		t.Fatalf("budget_claim_failures_total delta = %d, want 4 (2 per exceeded eval)", delta)
+	}
+}
+
 // TestCheckBudget_AlreadyClaimedMiss_NoFailureCounterDelta covers the
 // AC-OFFICE-COSTS-002.14a half of the failure counter: a Claim call
 // returning (claimed=false, err=nil) — whether because an earlier

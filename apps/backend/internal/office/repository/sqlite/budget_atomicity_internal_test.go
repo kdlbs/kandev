@@ -24,6 +24,10 @@ func TestUpdateBudgetPolicy_FailedUpdateRollsBackDiscard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	// Pin all work to one connection: each SQLite :memory: connection is a
+	// separate empty database, so a pooled second connection would miss the
+	// tables/rows the first one created.
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
 		t.Fatalf("pragma fk: %v", err)
