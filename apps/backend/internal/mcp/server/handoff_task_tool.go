@@ -41,13 +41,12 @@ func (s *Server) handoffTaskHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("handoff_task_kandev requires a bound task and session"), nil
 		}
 		args := req.GetArguments()
-		payload := map[string]interface{}{
-			mcpKeyTaskID:    s.taskID,
-			mcpKeySessionID: s.sessionID,
-		}
+		payload := make(map[string]interface{}, len(args)+2)
 		for key, value := range args {
 			payload[key] = value
 		}
+		payload[mcpKeyTaskID] = s.taskID
+		payload[mcpKeySessionID] = s.sessionID
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPHandoffTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
