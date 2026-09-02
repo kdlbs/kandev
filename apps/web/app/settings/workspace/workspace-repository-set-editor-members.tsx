@@ -1,17 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { IconArrowDown, IconArrowUp, IconRefresh, IconX } from "@tabler/icons-react";
-import { Badge } from "@kandev/ui/badge";
+import { IconArrowDown, IconArrowUp, IconGitBranch, IconRefresh, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
 
-import { BranchSelector } from "@/components/task-create-dialog-selectors";
-import { branchToOption, sortBranches } from "@/components/task-create-dialog-branch-options";
+import { Pill } from "@/components/task-create-dialog-pill";
+import { buildBaseBranchOptions } from "@/components/task-create-dialog-repo-base-branch";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { useBranches } from "@/hooks/domains/workspace/use-repository-branches";
+import { scoreBranch } from "@/lib/utils/branch-filter";
 import type { Repository } from "@/lib/types/http";
 import type { RepositorySetDraft, RepositorySetDraftMember } from "./use-workspace-repository-sets";
 
@@ -295,41 +294,6 @@ function RepositorySetMemberRow({
   );
 }
 
-function taskDefaultOption(repository: Repository, t: TFunction) {
-  const label = t("workspaces:repositorySetsTaskDefault", {
-    branch: repository.default_branch,
-  });
-  return {
-    value: "",
-    label,
-    keywords: [label, repository.default_branch].filter(Boolean),
-    renderLabel: () => <span className="truncate">{label}</span>,
-    renderTriggerLabel: () => <span className="truncate">{label}</span>,
-  } satisfies ComboboxOption;
-}
-
-function unavailableBranchOption(
-  branch: string,
-  unavailableLabel: string,
-  unavailableReason: string,
-): ComboboxOption {
-  return {
-    value: branch,
-    label: branch,
-    keywords: [branch, unavailableLabel],
-    disabled: true,
-    disabledReason: unavailableReason,
-    renderLabel: () => (
-      <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-        <span className="truncate">{branch}</span>
-        <Badge variant="destructive" className="shrink-0 text-xs">
-          {unavailableLabel}
-        </Badge>
-      </span>
-    ),
-  };
-}
-
 function RepositorySetBaseBranchPicker({
   workspaceId,
   member,
@@ -348,46 +312,36 @@ function RepositorySetBaseBranchPicker({
     branchOpen,
   );
   const options = useMemo(() => {
-    const available = sortBranches(branches).map(branchToOption);
-    const defaultOption = taskDefaultOption(repository, t);
-    const savedBaseAvailable = available.some((option) => option.value === member.baseBranch);
-    if (member.baseBranch && !savedBaseAvailable) {
-      const savedBaseOption = isLoaded
-        ? unavailableBranchOption(
-            member.baseBranch,
-            t("workspaces:repositorySetsBranchUnavailable"),
-            t("workspaces:repositorySetsBranchUnavailableReason"),
-          )
-        : {
-            value: member.baseBranch,
-            label: member.baseBranch,
-            keywords: [member.baseBranch],
-          };
-      return [savedBaseOption, defaultOption, ...available];
-    }
-    return [defaultOption, ...available];
-  }, [branches, isLoaded, member.baseBranch, repository, t]);
+    return buildBaseBranchOptions({
+      branches,
+      branchesLoaded: isLoaded,
+      savedBaseBranch: member.baseBranch,
+      defaultBranch: repository.default_branch ?? "",
+    });
+  }, [branches, isLoaded, member.baseBranch, repository.default_branch]);
+  const taskDefaultLabel =
+    options.find((option) => option.value === "")?.label ??
+    t("workspaces:repositorySetsTaskDefaultNoBranch");
 
   return (
-    <BranchSelector
+    <Pill
+      icon={<IconGitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />}
+      value={member.baseBranch || taskDefaultLabel}
+      selectedValue={member.baseBranch}
       options={options}
-      value={member.baseBranch}
-      onValueChange={onChange}
+      onSelect={onChange}
       disabled={false}
-      placeholder={t("workspaces:repositorySetsTaskDefault", {
-        branch: repository.default_branch,
-      })}
+      placeholder={taskDefaultLabel}
       searchPlaceholder={t("task:searchBranches")}
       emptyMessage={t("task:noBranches")}
       onRefresh={refresh ? () => void refresh() : undefined}
       refreshing={isLoading}
-      loading={isLoading}
       ariaLabel={t("workspaces:repositorySetsBaseBranchFor", { name: repository.name })}
-      dropdownLabel={t("workspaces:repositorySetsBaseBranchLabel")}
       testId={`repository-set-base-${member.repositoryId}`}
       dropdownTestId={`repository-set-base-dropdown-${member.repositoryId}`}
-      triggerClassName="min-h-11 border border-input bg-background px-3 hover:bg-background"
+      triggerClassName="h-11 min-h-11 w-full justify-between border border-input bg-background px-3 hover:bg-background"
       onOpenChange={setBranchOpen}
+      filter={scoreBranch}
     />
   );
 }

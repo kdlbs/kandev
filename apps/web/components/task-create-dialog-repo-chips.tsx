@@ -115,7 +115,7 @@ function applyRowBranchChange(
   const hasSavedWorktreeBase =
     !isLocalExecutor && fs.repositories.some((row) => row.key === key && row.baseBranch);
   if (hasSavedWorktreeBase) {
-    fs.updateRepository(key, { baseBranch: value });
+    fs.updateRepository(key, { baseBranch: value || undefined });
     return;
   }
   onRowBranchChange(key, value);

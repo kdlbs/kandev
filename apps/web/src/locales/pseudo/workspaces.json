@@ -169,6 +169,7 @@
   "repositorySetsNoMembersSelected": "Ńō ŕēƥōśĩţōŕĩēś śēĺēćţēď ŷēţ.",
   "repositorySetsResetBases": "Ŕēśēţ ƀàśēś",
   "repositorySetsTaskDefault": "Ţàśķ ďēƒàũĺţ ({{branch}})",
+  "repositorySetsTaskDefaultNoBranch": "Ţàśķ ďēƒàũĺţ",
   "repositorySetsBaseBranchLabel": "Śàvēď ƀàśē ƀŕàńćĥ",
   "repositorySetsBaseBranchFor": "Śàvēď ƀàśē ƀŕàńćĥ ƒōŕ {{name}}",
   "repositorySetsBranchUnavailable": "Ũńàvàĩĺàƀĺē",

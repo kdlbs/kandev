@@ -7,6 +7,7 @@ import { repositoryId, workspaceId } from "@/lib/types/ids";
 import type { RepositorySetDraft } from "./use-workspace-repository-sets";
 
 const mockUseBranches = vi.fn();
+const mockRefresh = vi.fn();
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile: false }),
@@ -38,6 +39,7 @@ const repository: Repository = {
   created_at: "2026-08-17T09:00:00Z",
   updated_at: "2026-08-17T09:00:00Z",
 };
+const repositoryWithoutDefaultBranch: Repository = { ...repository, default_branch: "" };
 const BASE_BRANCH_TEST_ID = "repository-set-base-repo-web";
 
 function draft(baseBranch = ""): RepositorySetDraft {
@@ -49,13 +51,17 @@ function draft(baseBranch = ""): RepositorySetDraft {
   };
 }
 
-function renderEditor(currentDraft = draft(), onChange = vi.fn()) {
+function renderEditor(
+  currentDraft = draft(),
+  onChange = vi.fn(),
+  currentRepository: Repository = repository,
+) {
   return render(
     <TooltipProvider>
       <RepositorySetEditorDialog
         workspaceId="ws-1"
         draft={currentDraft}
-        repositories={[repository]}
+        repositories={[currentRepository]}
         error={null}
         saving={false}
         onClose={vi.fn()}
@@ -68,16 +74,18 @@ function renderEditor(currentDraft = draft(), onChange = vi.fn()) {
 
 beforeEach(() => {
   mockUseBranches.mockReset();
+  mockRefresh.mockReset();
   mockUseBranches.mockImplementation((_source: unknown, enabled: boolean) => ({
     branches: enabled
       ? [
           { name: "main", type: "local", remote: "" },
           { name: "develop", type: "local", remote: "" },
+          { name: "main", type: "remote", remote: "origin" },
         ]
       : [],
     isLoaded: enabled,
     isLoading: false,
-    refresh: vi.fn(),
+    refresh: mockRefresh,
   }));
 });
 
@@ -121,6 +129,35 @@ describe("RepositorySetEditorDialog base branch picker", () => {
     expect(unavailable).toBeDefined();
     expect(unavailable?.getAttribute("aria-disabled")).toBe("true");
     expect(screen.getByTestId(BASE_BRANCH_TEST_ID).textContent).toContain("retired");
+  });
+
+  it("shares the New Task grouped branch picker search, origin labels, and refresh", () => {
+    renderEditor();
+
+    fireEvent.click(screen.getByTestId(BASE_BRANCH_TEST_ID));
+
+    expect(screen.getByPlaceholderText("Search branches...")).toBeTruthy();
+    expect(screen.getByText("Branches")).toBeTruthy();
+    expect(screen.getByText("origin/main")).toBeTruthy();
+    expect(screen.getByText("origin")).toBeTruthy();
+    expect(screen.getAllByText("local").length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getByPlaceholderText("Search branches..."), {
+      target: { value: "origin" },
+    });
+    expect(screen.getByText("origin/main")).toBeTruthy();
+    expect(screen.queryByText("develop")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("branch-refresh-button"));
+    expect(mockRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("uses a no-branch Task default label when the repository has no default", () => {
+    renderEditor(draft(), vi.fn(), repositoryWithoutDefaultBranch);
+
+    expect(screen.getByTestId(BASE_BRANCH_TEST_ID).textContent).toBe("Task default");
+    fireEvent.click(screen.getByTestId(BASE_BRANCH_TEST_ID));
+    expect(screen.getByRole("option", { name: "Task default" })).toBeTruthy();
   });
 
   it("disables reordering while the member list is filtered", () => {

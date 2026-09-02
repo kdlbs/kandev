@@ -169,6 +169,7 @@
   "repositorySetsNoMembersSelected": "No repositories selected yet.",
   "repositorySetsResetBases": "Reset bases",
   "repositorySetsTaskDefault": "Task default ({{branch}})",
+  "repositorySetsTaskDefaultNoBranch": "Task default",
   "repositorySetsBaseBranchLabel": "Saved base branch",
   "repositorySetsBaseBranchFor": "Saved base branch for {{name}}",
   "repositorySetsBranchUnavailable": "Unavailable",

@@ -169,6 +169,7 @@
   "repositorySetsNoMembersSelected": "Ainda não existem repositórios selecionados.",
   "repositorySetsResetBases": "Repor ramos base",
   "repositorySetsTaskDefault": "Predefinição da tarefa ({{branch}})",
+  "repositorySetsTaskDefaultNoBranch": "Predefinição da tarefa",
   "repositorySetsBaseBranchLabel": "Ramo base guardado",
   "repositorySetsBaseBranchFor": "Ramo base guardado para {{name}}",
   "repositorySetsBranchUnavailable": "Indisponível",

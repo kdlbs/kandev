@@ -15,7 +15,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Pill, type PillAction, type PillOption } from "@/components/task-create-dialog-pill";
 import type { Branch, RepositoryBranchPolicy } from "@/lib/types/http";
 import type { TaskRepoRow } from "@/components/task-create-dialog-types";
-import { computeBranchPlaceholder } from "@/components/branch-picker-options";
+import {
+  branchOptionValue,
+  computeBranchPlaceholder,
+} from "@/components/branch-picker-options";
 import {
   computeBranchDisabledReason,
   computeBranchPrefix,
@@ -81,10 +84,9 @@ function branchPolicyToOption(
   branches: Branch[],
   policyDisabledReason?: string,
 ): PillOption {
-  const baseBranchAvailable = branches.some((branch) => {
-    if (branch.name === policy.base_branch) return true;
-    return branch.type === "remote" && `${branch.remote}/${branch.name}` === policy.base_branch;
-  });
+  const baseBranchAvailable = branches.some(
+    (branch) => branchOptionValue(branch) === policy.base_branch,
+  );
   const unavailableReason =
     policyDisabledReason ?? (baseBranchAvailable ? undefined : t("task:branchPolicyUnavailable"));
   const summary = t("workspaces:branchPolicySummary", {

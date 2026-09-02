@@ -169,6 +169,7 @@
   "repositorySetsNoMembersSelected": "尚未选择仓库。",
   "repositorySetsResetBases": "重置基础分支",
   "repositorySetsTaskDefault": "任务默认值（{{branch}}）",
+  "repositorySetsTaskDefaultNoBranch": "任务默认值",
   "repositorySetsBaseBranchLabel": "保存的基础分支",
   "repositorySetsBaseBranchFor": "{{name}} 的保存基础分支",
   "repositorySetsBranchUnavailable": "不可用",

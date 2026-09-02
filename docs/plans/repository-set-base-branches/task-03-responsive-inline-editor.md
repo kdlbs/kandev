@@ -100,7 +100,7 @@ pnpm run i18n:check
 
 - `REQ-WORKSPACES-REPOSITORY-SETS-002`
 - Mobile design contract in the repository-set system design
-- New Task `BranchSelector`, `branchToOption`, and `sortBranches`
+- New Task `Pill`, `branchOptionValue`, `branchToOption`, and `sortBranches`
 - Repository branch-policy dialog and drawer patterns
 
 ## Results

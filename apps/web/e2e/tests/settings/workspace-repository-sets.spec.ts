@@ -18,11 +18,16 @@ test.describe("Workspace repository sets settings", () => {
     prCapture,
   }) => {
     const dir = path.join(backend.tmpDir, "repos", "settings-repository-sets");
+    const remoteDir = path.join(backend.tmpDir, "repos", "settings-repository-sets-origin.git");
     fs.mkdirSync(dir, { recursive: true });
     const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync(`git init --bare -b main "${remoteDir}"`, { env: gitEnv });
     execSync("git init -b main", { cwd: dir, env: gitEnv });
     execSync('git commit --allow-empty -m "init"', { cwd: dir, env: gitEnv });
     execSync("git branch develop", { cwd: dir, env: gitEnv });
+    execSync(`git remote add origin "file://${remoteDir}"`, { cwd: dir, env: gitEnv });
+    execSync("git push origin main", { cwd: dir, env: gitEnv });
+    execSync("git update-ref refs/remotes/origin/main HEAD", { cwd: dir, env: gitEnv });
     const second = await apiClient.createRepository(seedData.workspaceId, dir, "main", {
       name: SECOND_REPO_NAME,
     });
@@ -38,8 +43,25 @@ test.describe("Workspace repository sets settings", () => {
     await testPage.getByRole("option", { name: /E2E Repo/ }).click();
     await testPage.getByTestId("repository-set-add-repository").click();
     await testPage.getByRole("option", { name: SECOND_REPO_NAME }).click();
-    await testPage.getByTestId(`repository-set-base-${second.id}`).click();
-    const develop = testPage.getByRole("option", { name: /develop/ });
+    const basePicker = testPage.getByTestId(`repository-set-base-${second.id}`);
+    await basePicker.click();
+    const dropdown = testPage.getByTestId(`repository-set-base-dropdown-${second.id}`);
+    await expect(dropdown).toBeVisible();
+    await expect(dropdown.getByPlaceholder("Search branches...")).toBeVisible();
+    await expect(dropdown.getByText("Branches")).toBeVisible();
+    await expect(dropdown.getByRole("option", { name: /^main local/ })).toBeVisible();
+    await expect(dropdown.getByRole("option", { name: /^origin\/main origin/ })).toBeVisible();
+    await expect(dropdown.getByText("origin", { exact: true })).toBeVisible();
+
+    const search = dropdown.getByPlaceholder("Search branches...");
+    await search.fill("origin");
+    await expect(dropdown.getByRole("option", { name: /^origin\/main origin/ })).toBeVisible();
+    await expect(dropdown.getByRole("option", { name: /^main local/ })).toHaveCount(0);
+    await dropdown.getByTestId("branch-refresh-button").click();
+    await expect(dropdown.getByRole("option", { name: /^origin\/main origin/ })).toBeVisible();
+
+    await search.fill("");
+    const develop = dropdown.getByRole("option", { name: /^develop local/ });
     await expect(develop).toBeVisible();
     await develop.click();
     await prCapture.screenshot("desktop-repository-set-editor", {

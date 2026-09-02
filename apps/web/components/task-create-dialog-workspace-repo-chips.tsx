@@ -8,10 +8,7 @@ import type { LocalRepository, Repository, RepositoryBranchPolicy } from "@/lib/
 import type { TaskRepoRow } from "@/components/task-create-dialog-types";
 import { type PillOption } from "@/components/task-create-dialog-pill";
 import { branchToOption, sortBranches } from "@/components/branch-picker-options";
-import {
-  buildRepoBaseBranchData,
-  unavailableBranchToOption,
-} from "@/components/task-create-dialog-repo-base-branch";
+import { buildRepoBaseBranchData } from "@/components/task-create-dialog-repo-base-branch";
 import {
   buildRepoOptions,
   computeRepoChipDisplay,
@@ -390,18 +387,6 @@ function useRepoChipData({
     () => buildRepoOptions(filteredRepos, filteredDiscovered, selectedElsewhere),
     [filteredRepos, filteredDiscovered, selectedElsewhere],
   );
-  const branchOptions: PillOption[] = useMemo(() => {
-    const available = sortBranches(branches).map(branchToOption);
-    if (
-      isLocalExecutor ||
-      !savedBaseBranch ||
-      !branchesLoaded ||
-      available.some((option) => option.value === savedBaseBranch)
-    ) {
-      return available;
-    }
-    return [unavailableBranchToOption(savedBaseBranch), ...available];
-  }, [branches, branchesLoaded, savedBaseBranch, isLocalExecutor]);
   const { baseBranchOptions, defaultBranch } = useMemo(
     () =>
       buildRepoBaseBranchData({
@@ -414,6 +399,10 @@ function useRepoChipData({
       }),
     [branches, branchesLoaded, discoveredRepositories, repositories, row, savedBaseBranch],
   );
+  const branchOptions: PillOption[] = useMemo(() => {
+    if (!isLocalExecutor && savedBaseBranch) return baseBranchOptions;
+    return sortBranches(branches).map(branchToOption);
+  }, [baseBranchOptions, branches, isLocalExecutor, savedBaseBranch]);
   return {
     repoOptions,
     branchOptions,

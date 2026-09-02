@@ -96,9 +96,12 @@ pnpm e2e:raw --project=mobile-chrome e2e/tests/settings/mobile-workspace-reposit
 
 - Desktop settings and task-create coverage verifies saved-base editing,
   application, task persistence, idempotence, and Save as set behavior.
+- Desktop settings coverage opens the shared New Task branch picker and verifies
+  grouped search, refresh, local and remote-qualified values, and origin badges.
 - Phone settings coverage verifies the full-height drawer, internal scroll,
-  safe-area action footer, touch targets, and no document overflow.
+  safe-area action footer, touch targets, picker search/refresh, remote badges,
+  viewport containment, and no document overflow.
 - Phone task-create coverage verifies the same saved base reaches the created
   task repository.
-- Verification: `make build-web`, desktop E2E (7 tests), and mobile E2E (3
+- Verification: `make build-web`, desktop E2E (8 tests), and mobile E2E (4
   tests) pass.
