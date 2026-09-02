@@ -66,18 +66,28 @@ func TestApplyGuardedTransitionLifecycle_OfficeRejectLeg_DoesNotPromptDeciderSes
 	reviewerSession := &models.TaskSession{
 		ID: "reviewer-sess", TaskID: "t1", AgentProfileID: "reviewer-agent",
 		AgentExecutionID: "reviewer-exec",
-		State:            models.TaskSessionStateWaitingForInput, IsPrimary: true,
+		State:            models.TaskSessionStateRunning, IsPrimary: true,
 		StartedAt: now, UpdatedAt: now,
 	}
 	if err := repo.CreateTaskSession(ctx, reviewerSession); err != nil {
 		t.Fatalf("create reviewer session: %v", err)
 	}
 	seedExecutorRunning(t, repo, reviewerSession.ID, "t1", reviewerSession.AgentExecutionID)
+	targetSession := &models.TaskSession{
+		ID: "target-sess", TaskID: "t1", AgentProfileID: "target-agent",
+		AgentExecutionID: "target-exec",
+		State:            models.TaskSessionStateWaitingForInput, IsPrimary: false,
+		StartedAt: now, UpdatedAt: now,
+	}
+	if err := repo.CreateTaskSession(ctx, targetSession); err != nil {
+		t.Fatalf("create target session: %v", err)
+	}
+	seedExecutorRunning(t, repo, targetSession.ID, "t1", targetSession.AgentExecutionID)
 
 	stepGetter := newMockStepGetter()
 	stepGetter.steps["review"] = &wfmodels.WorkflowStep{ID: "review", WorkflowID: "wf1", Position: 1}
 	stepGetter.steps["work"] = &wfmodels.WorkflowStep{
-		ID: "work", WorkflowID: "wf1", Position: 0,
+		ID: "work", WorkflowID: "wf1", Position: 0, AgentProfileID: "target-agent",
 		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}}},
 	}
 	taskRepo := newMockTaskRepo()
@@ -117,23 +127,28 @@ func TestApplyGuardedTransitionLifecycle_OfficeRejectLeg_DoesNotPromptDeciderSes
 		t.Fatalf("workflow_step_id = %q, want work", storedTask.WorkflowStepID)
 	}
 
-	// If on_enter was dispatched (pre-fix behavior), processOnEnter runs in a
-	// detached goroutine and signals completion here; wait for it before
-	// checking capturedPromptCalls so the assertion isn't racing the
-	// goroutine. Post-fix, on_enter is never dispatched for this path, so the
-	// channel never fires and the short timeout is the expected case.
-	//
-	// onEnterDone fires as soon as onProcessOnEnterComplete runs, which is
-	// right at the end of processOnEnter — before any PromptTask call it
-	// triggered has necessarily completed. So promptCalls could still read 0
-	// on a pre-fix regression where the goroutine fired but PromptTask itself
-	// failed or hadn't landed yet by the time this select returns. That's
-	// fine for this red/green proof (a fired goroutine is itself the
-	// regression this test targets), but promptCalls > 0 is not the only
-	// signal a future change to this test should rely on.
 	select {
 	case <-onEnterDone:
+		t.Fatal("guarded transition dispatched session-shaped on_enter actions")
 	case <-time.After(300 * time.Millisecond):
+	}
+
+	storedReviewer, err := repo.GetTaskSession(ctx, reviewerSession.ID)
+	if err != nil {
+		t.Fatalf("get reviewer session: %v", err)
+	}
+	if storedReviewer.State != models.TaskSessionStateRunning || !storedReviewer.IsPrimary {
+		t.Fatalf("reviewer session changed during guarded transition: %#v", storedReviewer)
+	}
+	if storedReviewer.AgentProfileID != reviewerSession.AgentProfileID || storedReviewer.AgentExecutionID != reviewerSession.AgentExecutionID {
+		t.Fatalf("reviewer session identity changed during guarded transition: %#v", storedReviewer)
+	}
+	storedTarget, err := repo.GetTaskSession(ctx, targetSession.ID)
+	if err != nil {
+		t.Fatalf("get target session: %v", err)
+	}
+	if storedTarget.State != targetSession.State || storedTarget.IsPrimary != targetSession.IsPrimary {
+		t.Fatalf("target session changed during guarded transition: %#v", storedTarget)
 	}
 
 	agentMgr.mu.Lock()

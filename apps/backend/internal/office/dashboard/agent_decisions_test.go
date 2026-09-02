@@ -3,6 +3,7 @@ package dashboard_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/dashboard"
@@ -138,6 +139,9 @@ func TestRecordAgentDecision_RejectedQueuesAssigneeRunWithReason(t *testing.T) {
 	}
 	if got.DecisionComment != "tests fail on the happy path" {
 		t.Errorf("comment lost: %q", got.DecisionComment)
+	}
+	if got.IdempotencyKey == "" || !strings.HasPrefix(got.IdempotencyKey, "decision:") {
+		t.Errorf("idempotency key = %q, want a decision-scoped key", got.IdempotencyKey)
 	}
 }
 
