@@ -1,4 +1,5 @@
 export {
+  branchOptionValue,
   branchToOption,
   buildBranchKeywords,
   computeBranchPlaceholder,

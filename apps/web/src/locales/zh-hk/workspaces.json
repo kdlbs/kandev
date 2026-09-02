@@ -169,6 +169,7 @@
   "repositorySetsNoMembersSelected": "尚未選擇儲存庫。",
   "repositorySetsResetBases": "重置基礎分支",
   "repositorySetsTaskDefault": "任務預設值（{{branch}}）",
+  "repositorySetsTaskDefaultNoBranch": "任務預設值",
   "repositorySetsBaseBranchLabel": "儲存的基礎分支",
   "repositorySetsBaseBranchFor": "{{name}} 的儲存基礎分支",
   "repositorySetsBranchUnavailable": "不可用",

@@ -63,7 +63,7 @@ The service accepts ordered member inputs with `repository_id` and optional
 
 - Each repository is live and belongs to the set workspace.
 - Each repository occurs once.
-- Each non-empty base passes `securityutil.IsValidBranchName`.
+- Each non-empty base passes `securityutil.IsValidBaseBranchRef`.
 
 The service does not query Git during a write. Branch existence can change
 after any check, and Git access can require credentials that are not available
@@ -125,27 +125,29 @@ branch lists.
 
 ## Shared branch selector
 
-The set editor reuses `BranchSelector` from
-`task-create-dialog-selectors.tsx`. It does not create a settings-only branch
-selector.
+The set editor reuses the `Pill` popover/list primitive from
+`task-create-dialog-pill.tsx`, the same primitive rendered by New Task's
+`RepoChipBranchPill`. It does not create a settings-only branch selector or a
+second lookalike popover.
 
-The editor builds branch options with `sortBranches` and `branchToOption` from
-`task-create-dialog-branch-options.tsx`. This shared option model supplies these
-behaviors:
+The editor builds branch options with `sortBranches`, `branchOptionValue`, and
+`branchToOption` from `task-create-dialog-branch-options.tsx`. This shared
+option model supplies these behaviors:
 
 - Search uses the same branch scoring and keywords as New Task.
 - Remote branches keep qualified names such as `origin/main`.
 - Local branches show the `local` badge.
 - Remote branches show the remote name, such as `origin` or `followup`.
 - Provider branches without a remote name show the `remote` badge.
-- The selector header keeps the existing refresh action and status behavior.
+- The shared popover keeps search and refresh in one row, groups branches under
+  `Branches`, and preserves the New Task keyboard, pointer, and portal behavior.
 
-`Task default` is a synthetic first option for settings. It does not change the
-shared mapping, search terms, ordering, badges, or selected-branch display.
+`Task default` is a synthetic first option for base pickers. It does not change
+the shared mapping, search terms, ordering, badges, or selected-branch display.
 
-If lazy loading needs open state, extend `BranchSelector` and `Combobox` with an
-optional open-state callback. New Task keeps its current behavior when the
-callback is absent.
+The shared `Pill` accepts an optional open-state callback for settings' lazy
+branch loading. New Task keeps its current behavior when the callback is
+absent.
 
 ## Branch loading
 
@@ -159,8 +161,8 @@ The editor enables `useBranches` only while a row selector is open. This rule
 prevents an immediate request for every member in a large set.
 
 After the list loads, the selector compares the saved base with all available
-branch option values. A missing value remains in the selector as a disabled
-fallback option with an unavailable marker.
+branch option values from `branchOptionValue`. A missing value remains in the
+selector as a disabled fallback option with an unavailable marker.
 
 The frontend can save an unchanged unavailable value. A user cannot select a
 new value that is absent from the current list. The backend still validates the
@@ -179,9 +181,9 @@ Each member row stacks its repository label above a full-width base selector on
 phones. Add, remove, move, reset, save, and cancel actions have touch targets of
 at least 44 CSS pixels.
 
-The phone editor uses the same searchable `BranchSelector` popover as New Task.
-The popover stays inside the viewport and owns the temporary option-list scroll.
-It keeps the origin badges, refresh action, focus return, and keyboard behavior.
+The phone editor uses the same searchable `Pill` popover as New Task. The
+popover stays inside the viewport and owns the temporary option-list scroll. It
+keeps the origin badges, refresh action, focus return, and keyboard behavior.
 
 The domain draft, validation, mutations, and branch option mapping are shared
 between desktop and phone layouts. Only the surface composition changes.
@@ -203,7 +205,8 @@ keeps repeated or overlapping set application idempotent.
 
 The task branch selector shows the effective base. If a copied saved base is
 unavailable, the row shows the value and blocks submission. The user must select
-an available base or `Task default`.
+an available branch or `Task default`. Selecting `Task default` clears the
+copied base so normal task-form branch autoselection runs again.
 
 `Save as set` sends ordered member objects. It captures each workspace
 repository and the effective base in the draft. A `Task default` choice sends

@@ -52,7 +52,7 @@ Replace ordered ID slices inside the service with ordered member inputs. Keep
 `repository_ids` at the handler boundary for compatibility. Reject requests
 that contain both member fields.
 
-Use `securityutil.IsValidBranchName` for each non-empty base. Do not query Git
+Use `securityutil.IsValidBaseBranchRef` for each non-empty base. Do not query Git
 inside set mutations.
 
 ### Task-draft behavior
@@ -75,7 +75,7 @@ repository picker. Keep explicit move actions for order.
 Each row shows `Task default` or its saved base. Enable `useBranches` only
 while that row selector is open. Keep an unavailable saved value visible.
 
-Reuse New Task `BranchSelector`, `sortBranches`, and `branchToOption` without a
+Reuse New Task `Pill`, `sortBranches`, `branchOptionValue`, and `branchToOption` without a
 settings-only fork. Preserve branch search, refresh, remote-qualified names,
 and origin badges.
 

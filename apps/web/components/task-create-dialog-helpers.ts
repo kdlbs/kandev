@@ -10,6 +10,7 @@ import type {
 import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
 import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import { selectPreferredBranch } from "@/lib/utils";
+import { branchOptionValue } from "@/components/branch-picker-options";
 import { createDebugLogger } from "@/lib/debug/log";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { linkToTask } from "@/lib/links";
@@ -84,13 +85,7 @@ export function autoSelectBranch(
 }
 
 function isBranchSelectable(branchList: Branch[], value: string | null | undefined) {
-  return Boolean(value && branchList.some((branch) => branchDisplayName(branch) === value));
-}
-
-function branchDisplayName(branch: Branch) {
-  return branch.type === "remote" && branch.remote
-    ? `${branch.remote}/${branch.name}`
-    : branch.name;
+  return Boolean(value && branchList.some((branch) => branchOptionValue(branch) === value));
 }
 
 export function computePassthroughProfile(
