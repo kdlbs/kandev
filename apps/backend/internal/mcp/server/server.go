@@ -1838,6 +1838,7 @@ func (s *Server) registerReviewTools() {
 			mcp.WithDescription("Resolve, dismiss, or reopen one review finding by id. Authorized against the finding's own task, not any task_id you supply."),
 			mcp.WithString("finding_id", mcp.Required(), mcp.Description("The finding to update.")),
 			mcp.WithString("status",
+				mcp.Required(),
 				mcp.Enum("open", "resolved", "dismissed"),
 				mcp.Description("The new disposition, required. One of open, resolved, dismissed. Use open to reopen a finding closed in error."),
 			),

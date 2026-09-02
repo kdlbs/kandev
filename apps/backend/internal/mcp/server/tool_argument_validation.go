@@ -162,9 +162,17 @@ func validationInstancePath(tokens []string) string {
 }
 
 func normalizeToolArguments(toolName string, arguments any) (any, error) {
-	if toolName != "create_task_kandev" {
+	switch toolName {
+	case "create_task_kandev":
+		return normalizeCreateTaskArguments(arguments)
+	case "resolve_review_finding_kandev":
+		return normalizeResolveReviewFindingArguments(arguments)
+	default:
 		return arguments, nil
 	}
+}
+
+func normalizeCreateTaskArguments(arguments any) (any, error) {
 	args, ok := arguments.(map[string]any)
 	if !ok {
 		return arguments, nil
@@ -172,7 +180,7 @@ func normalizeToolArguments(toolName string, arguments any) (any, error) {
 	_, hasPrompt := args["prompt"]
 	description, hasDescription := args["description"]
 	if hasPrompt && hasDescription {
-		return nil, fmt.Errorf("invalid arguments for %s: provide either prompt or description, not both", toolName)
+		return nil, fmt.Errorf("invalid arguments for create_task_kandev: provide either prompt or description, not both")
 	}
 	if !hasDescription {
 		return args, nil
@@ -185,4 +193,55 @@ func normalizeToolArguments(toolName string, arguments any) (any, error) {
 	normalized["prompt"] = description
 	delete(normalized, "description")
 	return normalized, nil
+}
+
+// reviewFindingStatuses are resolve_review_finding_kandev's accepted
+// dispositions, in the order AC-TWS-004.1 declares them.
+var reviewFindingStatuses = []string{"open", "resolved", "dismissed"}
+
+// normalizeResolveReviewFindingArguments implements AC-TWS-004.8: finding_id
+// and status are trimmed (status also lower-cased) before any validation, so
+// a differently-cased or whitespace-padded status is accepted rather than
+// rejected by the schema layer's enum check, which names none of the
+// accepted values. A finding_id empty after trimming, or a status missing or
+// still unrecognised after normalisation, is rejected here — before schema
+// validation ever runs — with a message naming the accepted values.
+func normalizeResolveReviewFindingArguments(arguments any) (any, error) {
+	args, _ := arguments.(map[string]any)
+	normalized := make(map[string]any, len(args))
+	for key, value := range args {
+		normalized[key] = value
+	}
+
+	findingID := strings.TrimSpace(toolArgumentString(args["finding_id"]))
+	if findingID == "" {
+		return nil, fmt.Errorf("invalid arguments for resolve_review_finding_kandev: finding_id is required")
+	}
+	normalized["finding_id"] = findingID
+
+	status := strings.ToLower(strings.TrimSpace(toolArgumentString(args["status"])))
+	if !isReviewFindingStatus(status) {
+		return nil, fmt.Errorf("invalid arguments for resolve_review_finding_kandev: status must be one of %s",
+			strings.Join(reviewFindingStatuses, ", "))
+	}
+	normalized["status"] = status
+
+	return normalized, nil
+}
+
+// toolArgumentString reads a raw MCP argument as a string, treating an
+// absent key, JSON null, or a non-string value alike as empty rather than
+// panicking on the type assertion.
+func toolArgumentString(value any) string {
+	s, _ := value.(string)
+	return s
+}
+
+func isReviewFindingStatus(status string) bool {
+	for _, v := range reviewFindingStatuses {
+		if status == v {
+			return true
+		}
+	}
+	return false
 }
