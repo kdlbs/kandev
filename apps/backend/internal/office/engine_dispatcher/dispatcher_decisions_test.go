@@ -364,25 +364,37 @@ func TestDispatcher_RecordDecision_ForeignSessionFallsBackToUnresolvable(t *test
 
 // TestDispatcher_RecordDecision_TerminalSessionFallsBackToUnresolvable
 // covers the other session_unresolvable case: a supplied session that
-// belongs to the right task but is in a terminal (non-active) state.
+// belongs to the right task but is in a terminal (non-active) state. Table
+// covers every terminal state; exhaustiveness against the full
+// TaskSessionState set is proved once, per-state, by
+// TestIsTaskLookupActiveSessionState.
 func TestDispatcher_RecordDecision_TerminalSessionFallsBackToUnresolvable(t *testing.T) {
-	eng := &fakeEngine{decisionResult: engine.RecordDecisionResult{DecisionID: "decision-1"}}
-	sessions := &fakeSessions{
-		byID: map[string]*taskmodels.TaskSession{
-			"sess-done": {ID: "sess-done", TaskID: "task-1", State: taskmodels.TaskSessionStateCompleted},
-		},
+	terminalStates := []taskmodels.TaskSessionState{
+		taskmodels.TaskSessionStateCompleted,
+		taskmodels.TaskSessionStateFailed,
+		taskmodels.TaskSessionStateCancelled,
 	}
-	d := New(eng, sessions, logger.Default())
+	for _, state := range terminalStates {
+		t.Run(string(state), func(t *testing.T) {
+			eng := &fakeEngine{decisionResult: engine.RecordDecisionResult{DecisionID: "decision-1"}}
+			sessions := &fakeSessions{
+				byID: map[string]*taskmodels.TaskSession{
+					"sess-done": {ID: "sess-done", TaskID: "task-1", State: state},
+				},
+			}
+			d := New(eng, sessions, logger.Default())
 
-	_, err := d.RecordDecision(context.Background(), RecordDecisionInput{
-		TaskID: "task-1", StepID: "review", ParticipantID: "participant-1",
-		Decision: "approved", SessionID: "sess-done",
-	})
-	if err != nil {
-		t.Fatalf("RecordDecision: %v, want success (session_unresolvable, not an error)", err)
-	}
-	if eng.decisionSession != "" {
-		t.Errorf("session id = %q, want blank: terminal session must not be forwarded", eng.decisionSession)
+			_, err := d.RecordDecision(context.Background(), RecordDecisionInput{
+				TaskID: "task-1", StepID: "review", ParticipantID: "participant-1",
+				Decision: "approved", SessionID: "sess-done",
+			})
+			if err != nil {
+				t.Fatalf("RecordDecision: %v, want success (session_unresolvable, not an error)", err)
+			}
+			if eng.decisionSession != "" {
+				t.Errorf("session id = %q, want blank: terminal session must not be forwarded", eng.decisionSession)
+			}
+		})
 	}
 }
 
