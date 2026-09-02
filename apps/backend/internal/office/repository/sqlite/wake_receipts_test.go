@@ -516,6 +516,10 @@ func TestListStuckParents_RecoversAfterChildSetChangesPastFinishedRun(t *testing
 // time.Time (microsecond precision) and a CURRENT_TIMESTAMP write (second
 // precision) — a real gap is needed on one side of the comparison for the
 // collision on the other side to be observable at all.
+//
+// testing/synctest cannot be used here because the gap is needed in
+// SQLite's own CURRENT_TIMESTAMP writer — fake-time advancement only
+// applies to Go's time package, not to the database's clock.
 func waitForNextWholeSecond(t *testing.T) {
 	t.Helper()
 	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(1100 * time.Millisecond)))

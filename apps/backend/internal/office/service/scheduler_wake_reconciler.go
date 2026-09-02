@@ -222,6 +222,18 @@ func (h *ParentWakeReconciler) recordReceipt(
 		return
 	}
 
+	// c.NewestChildUpdatedAt is the sweep-time MAX(tasks.updated_at) across
+	// this parent's children (ListStuckParents), not just the ones that
+	// completed — any later edit to a terminal child (title, description,
+	// labels, metadata) with no state change bumps that same column, so the
+	// next tick sees newest_child_updated_at != child_generation again and
+	// re-admits the parent for one extra wake even though nothing completed.
+	// This is bounded and self-correcting (recordReceipt persists the same
+	// value that triggered the re-admit, so the tick after that sees them
+	// equal and stops), and follows the same duplicate-over-missed bias
+	// already accepted for wakeOperationID below. A real fix needs a
+	// completion-specific generation distinct from generic updated_at — see
+	// follow-up task fc871ca9-bcb2-4db5-915d-52c92c7bd1ad.
 	deliveredAt := time.Now().UTC()
 	if err := svc.repo.UpsertWakeReceiptTx(
 		ctx, tx, c.ParentTaskID, c.ChildSetKey, "", operationID, c.NewestChildUpdatedAt, deliveredAt,

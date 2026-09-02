@@ -291,19 +291,19 @@ func TestPostgresSecondPrecisionText_RenderedTextIsStableAndPortable(t *testing.
 // dialect.SecondPrecisionText itself) would show up here. Skips unless
 // KANDEV_TEST_POSTGRES_DSN is set.
 //
-// Currently also unconditionally skipped: ListStuckParents inlines
-// RunnerProjection (base.go), whose runner-resolution fallback does
-// `ORDER BY wsp.rowid DESC` — SQLite's implicit rowid pseudo-column, which
-// does not exist on Postgres ("column wsp.rowid does not exist",
-// SQLSTATE 42703, confirmed against a live Postgres 15 instance). That bug
-// predates this fix (RunnerProjection is untouched by this diff) and is a
-// shared primitive used well beyond this one query, so it is out of scope
+// This test is new in this diff. It is currently unconditionally skipped:
+// ListStuckParents inlines RunnerProjection (base.go), whose
+// runner-resolution fallback does `ORDER BY wsp.rowid DESC` — SQLite's
+// implicit rowid pseudo-column, which does not exist on Postgres ("column
+// wsp.rowid does not exist", SQLSTATE 42703, confirmed against a live
+// Postgres 15 instance). That underlying bug predates this fix
+// (RunnerProjection itself is untouched by this diff) and is a shared
+// primitive used well beyond this one query, so fixing it is out of scope
 // here — see follow-up task 50e55223-8981-40f6-bd35-f81d83a3e392. The rest
 // of this test, including the dialect fixes this diff makes, was verified
 // to pass locally once that dependency is stubbed out; un-skip once the
 // follow-up lands.
 func TestPostgresListStuckParents_ReadmitsAfterChildReopenedAndRecompleted(t *testing.T) {
-	testutil.PostgresDSNFromEnv(t) // still skips on its own terms when unset
 	t.Skip("blocked on pre-existing RunnerProjection Postgres bug — see follow-up task 50e55223-8981-40f6-bd35-f81d83a3e392")
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo := newPostgresSearchTestRepo(t, db)
