@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/shared"
 )
 
 // TestUpdateRunReasonIfQueued_QueuedRow_Promotes is the WO-46.1 R2-F1
@@ -16,13 +17,13 @@ func TestUpdateRunReasonIfQueued_QueuedRow_Promotes(t *testing.T) {
 	ctx := context.Background()
 	run := mustCreateRun(t, repo, &models.Run{
 		AgentProfileID: "a1",
-		Reason:         "routine_dispatch_cron",
+		Reason:         shared.RunReasonRoutineDispatchCron,
 		Payload:        "{}",
 		Status:         "queued",
 		CoalescedCount: 1,
 	})
 
-	promoted, err := repo.UpdateRunReasonIfQueued(ctx, run.ID, "routine_dispatch_event")
+	promoted, err := repo.UpdateRunReasonIfQueued(ctx, run.ID, shared.RunReasonRoutineDispatchEvent)
 	if err != nil {
 		t.Fatalf("UpdateRunReasonIfQueued: %v", err)
 	}
@@ -30,7 +31,7 @@ func TestUpdateRunReasonIfQueued_QueuedRow_Promotes(t *testing.T) {
 		t.Fatal("expected promoted=true for a still-queued run")
 	}
 	got := mustGetRun(t, repo, run.ID)
-	if got.Reason != "routine_dispatch_event" {
+	if got.Reason != shared.RunReasonRoutineDispatchEvent {
 		t.Errorf("reason = %q, want promoted value", got.Reason)
 	}
 }
@@ -47,14 +48,14 @@ func TestUpdateRunReasonIfQueued_ClaimedRow_LeavesReasonUntouched(t *testing.T) 
 	ctx := context.Background()
 	run := mustCreateRun(t, repo, &models.Run{
 		AgentProfileID: "a1",
-		Reason:         "routine_dispatch_cron",
+		Reason:         shared.RunReasonRoutineDispatchCron,
 		Payload:        "{}",
 		Status:         "queued",
 		CoalescedCount: 1,
 	})
 	setStatus(t, repo, run.ID, "claimed", timePtr(time.Now().UTC()), nil)
 
-	promoted, err := repo.UpdateRunReasonIfQueued(ctx, run.ID, "routine_dispatch_event")
+	promoted, err := repo.UpdateRunReasonIfQueued(ctx, run.ID, shared.RunReasonRoutineDispatchEvent)
 	if err != nil {
 		t.Fatalf("UpdateRunReasonIfQueued: %v", err)
 	}
@@ -62,7 +63,7 @@ func TestUpdateRunReasonIfQueued_ClaimedRow_LeavesReasonUntouched(t *testing.T) 
 		t.Fatal("expected promoted=false for an already-claimed run")
 	}
 	got := mustGetRun(t, repo, run.ID)
-	if got.Reason != "routine_dispatch_cron" {
+	if got.Reason != shared.RunReasonRoutineDispatchCron {
 		t.Errorf("reason = %q, want unchanged (claimed rows must not be mutated)", got.Reason)
 	}
 }

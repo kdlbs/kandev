@@ -467,11 +467,14 @@ func TestDispatch_Routine_NoLookupFallsBackToCoalesce(t *testing.T) {
 	}
 }
 
-// TestDispatch_UnknownPolicy_FallsBackToCoalesceAndPromotes exercises
-// the unrecognized-policy branch (dispatcher.go's switch default),
-// which falls back to coalesce rather than skip or always_enqueue.
-// Using a periodic in-flight run + event-classified request also
-// forces that fallback through the same reason-promotion path as
+// TestDispatch_UnknownPolicy_FallsBackToCoalesceAndPromotes exercises an
+// unrecognized routine policy value. normaliseRoutinePolicy's own
+// default maps it to PolicyCoalesceIfActive before Dispatch's switch
+// ever sees it, so this runs the same `case PolicyCoalesceIfActive`
+// path as an explicit coalesce_if_active policy — not dispatcher.go's
+// switch default, which unknown *routine* policies never reach. Using
+// a periodic in-flight run + event-classified request also forces that
+// path through the same reason-promotion logic as an explicit
 // PolicyCoalesceIfActive, so the branch cannot silently regress to a
 // bare MarkWakeupRequestCoalesced call without losing this assertion.
 func TestDispatch_UnknownPolicy_FallsBackToCoalesceAndPromotes(t *testing.T) {
