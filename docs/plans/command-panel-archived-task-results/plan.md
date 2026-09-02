@@ -29,7 +29,7 @@ One work order owns this vertical UI change and its focused desktop and phone ev
 ### Out of scope
 
 - Backend, API, archive-state, or task-detail changes.
-- Search matching, result limits, or ranking within each archive group.
+- Search matching semantics or changes to the shared task-list API contract.
 - Command-panel geometry, scrolling, or touch-target changes.
 - Changes to task-state icons on other surfaces.
 
@@ -37,9 +37,9 @@ One work order owns this vertical UI change and its focused desktop and phone ev
 
 ### Archive classification and ordering
 
-Update `apps/web/hooks/use-command-panel-task-results.ts`. Replace both `ARCHIVED_STATES` checks with `task.archived_at != null`.
+Update `apps/web/hooks/use-command-panel-task-results.ts`. Use `task.archived_at == null` for the unarchived preview and `task.archived_at != null` for search-result grouping.
 
-Keep the current stable sort behavior. Non-archived matches remain first, and backend order stays intact within each group.
+Page through the archived search response while fewer than the requested number of non-archived matches has been collected, or until the response total is exhausted. Then use the current stable sort behavior. Non-archived matches remain first, backend order stays intact within each group, and the display limit is applied after grouping.
 
 Add hook cases for an archived in-progress task and an unarchived terminal task.
 
@@ -68,7 +68,7 @@ This change replaces one icon and one badge. It does not change composition, nav
 | Acceptance criteria | Evidence |
 | --- | --- |
 | `AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.1` to `.4` | Component tests cover the badge, icon, accessible label, and muted semantic classes. |
-| `AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.5` and `.6` | Hook tests prove `archived_at` classification and ordering. |
+| `AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.5` and `.6` | Hook tests prove `archived_at` classification and ordering, including a later page with an unarchived match. |
 | `AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.7` | A component test invokes the existing selection callback for an archived result. |
 | `AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.8` | Desktop and phone Playwright tests cover visible cues, title space, and overflow. |
 
@@ -84,7 +84,7 @@ Extend `apps/web/e2e/tests/search/mobile-command-palette-scopes.spec.ts`. Assert
 
 ## Verification results
 
-- GREEN focused unit suite: `cd apps/web && pnpm exec vitest run hooks/use-command-panel-task-results.test.ts components/command-panel-task-activity.test.tsx` - 2 files, 15 tests passed.
+- GREEN focused unit suite: `cd apps/web && pnpm exec vitest run hooks/use-command-panel-task-results.test.ts components/command-panel-task-activity.test.tsx` - 2 files, 16 tests passed.
 - GREEN typecheck: `cd apps/web && pnpm run typecheck` - passed.
 - GREEN targeted ESLint: `cd apps/web && pnpm exec eslint --max-warnings 0 hooks/use-command-panel-task-results.ts components/command-panel-results.tsx hooks/use-command-panel-task-results.test.ts components/command-panel-task-activity.test.tsx` - passed.
 - GREEN i18n checks: `cd apps/web && pnpm run i18n:check` - all catalogs and copy guards passed.
@@ -93,9 +93,10 @@ Extend `apps/web/e2e/tests/search/mobile-command-palette-scopes.spec.ts`. Assert
 - GREEN specification lint: `python3 scripts/lint-spec-files.py --all` - passed.
 - GREEN whitespace check: `git diff --check -- docs/specs docs/plans apps/web` - passed.
 - GREEN rendered evidence: disposable managed E2E capture produced validated 1440x900 desktop and 393x852 phone PNGs; the temporary capture spec was removed and the assets remain ignored for PR publication.
+- Review remediation: search results now page through the existing task-list response before grouping and applying the display limit. A regression covers archived first-page results followed by an unarchived match.
 
 ## Risks
 
-- Terminal workflow states currently act as archive state in two locations. Both checks must change together.
+- The task-list API paginates before the command panel groups archive results. The hook must collect enough pages before applying its display limit.
 - Row opacity can hide the selected state. The implementation must use semantic muted colors instead.
 - The archived badge must replace the workflow-step badge so phone title space does not decrease.

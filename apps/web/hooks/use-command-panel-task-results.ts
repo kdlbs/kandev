@@ -73,14 +73,35 @@ async function fetchMatchingTasks(
   resultLimit: number,
   signal: AbortSignal,
 ): Promise<Task[]> {
-  const res = await listTasksByWorkspace(
+  const pageSize = Math.max(resultLimit, TASK_SCOPE_PAGE_SIZE);
+  const firstPage = await listTasksByWorkspace(
     workspaceId,
-    { query, page: 1, pageSize: resultLimit, includeArchived: true },
+    { query, page: 1, pageSize, includeArchived: true },
     { init: { signal } },
   );
-  const tasks = res.tasks ?? [];
+  const tasks = [...(firstPage.tasks ?? [])];
+  let total = firstPage.total ?? tasks.length;
+  let unarchivedCount = tasks.filter((task) => task.archived_at == null).length;
+  let page = 1;
+
+  // The API applies pagination before returning rows. Continue until the
+  // non-archived group is full or every matching row has been collected.
+  while (tasks.length < total && unarchivedCount < resultLimit) {
+    page += 1;
+    const nextPage = await listTasksByWorkspace(
+      workspaceId,
+      { query, page, pageSize, includeArchived: true },
+      { init: { signal } },
+    );
+    const nextTasks = nextPage.tasks ?? [];
+    if (nextTasks.length === 0) break;
+    tasks.push(...nextTasks);
+    total = nextPage.total ?? total;
+    unarchivedCount += nextTasks.filter((task) => task.archived_at == null).length;
+  }
+
   tasks.sort((a, b) => (a.archived_at != null ? 1 : 0) - (b.archived_at != null ? 1 : 0));
-  return tasks;
+  return tasks.slice(0, resultLimit);
 }
 
 export function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {

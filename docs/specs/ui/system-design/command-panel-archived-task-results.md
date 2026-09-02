@@ -21,7 +21,7 @@ The workspace task-list response already includes `archived_at`. No backend, Web
 
 ## Components and responsibilities
 
-- `useInlineTaskSearchEffect` requests archived search results and orders them after active results.
+- `useInlineTaskSearchEffect` requests archived search results, pages as needed, and orders them after active results.
 - `TaskResultItem` derives archive presentation from the HTTP task result.
 - The existing task-list `Archived` translation supplies the visible and accessible label.
 - The existing command item remains the only interactive element in the result row.
@@ -30,7 +30,7 @@ The workspace task-list response already includes `archived_at`. No backend, Web
 
 `Task.archived_at` is the only archive source for command-panel task results. Terminal workflow states do not mean that a task is archived.
 
-`fetchMatchingTasks` groups results by the presence of `archived_at`. It keeps the backend order within the non-archived group and the archived group.
+The task-list API applies its page limit before returning rows. `fetchMatchingTasks` continues to later pages while fewer than the requested number of non-archived matches has been collected, or until the response total is exhausted. It then groups results by the presence of `archived_at`, keeps backend order within each group, and applies the display limit. An active match therefore remains visible when newer archived matches fill the first page.
 
 The empty-query task preview continues to request active tasks only. Its defensive filter also uses `archived_at` and does not exclude terminal states.
 
@@ -64,7 +64,7 @@ If an archived task is selected, the existing task route shows the archived deta
 
 ## Tests
 
-Hook tests cover archive ordering and prove that terminal workflow state does not imply archive state.
+Hook tests cover archive ordering, pagination before the display limit, and prove that terminal workflow state does not imply archive state.
 
 Component tests cover the archive icon, accessible label, badge replacement, muted classes, and unchanged selection callback.
 

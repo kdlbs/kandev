@@ -134,4 +134,30 @@ describe("useInlineTaskSearchEffect", () => {
       expect(setTaskResults).toHaveBeenCalledWith([unarchivedCompleted, archivedInProgress]),
     );
   });
+
+  it("pages past archived matches before applying the result limit", async () => {
+    const archivedTasks = Array.from({ length: 20 }, (_, index) =>
+      task(`archived-${index}`, `Archived ${index}`, {
+        archived_at: `2026-08-24T09:${String(index).padStart(2, "0")}:00Z`,
+      }),
+    );
+    const unarchivedTask = task("unarchived-match", "Unarchived match", {
+      state: "COMPLETED",
+    });
+    listTasksByWorkspace.mockImplementation((_workspaceId: string, params: { page?: number }) =>
+      Promise.resolve(
+        params.page === 1
+          ? { tasks: archivedTasks, total: 21 }
+          : { tasks: [unarchivedTask], total: 21 },
+      ),
+    );
+    const setTaskResults = vi.fn();
+
+    harness(setTaskResults, vi.fn(), "match");
+
+    await waitFor(() =>
+      expect(setTaskResults).toHaveBeenCalledWith([unarchivedTask, ...archivedTasks.slice(0, 4)]),
+    );
+    expect(listTasksByWorkspace).toHaveBeenCalledTimes(2);
+  });
 });

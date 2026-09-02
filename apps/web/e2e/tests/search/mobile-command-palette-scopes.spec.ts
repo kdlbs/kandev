@@ -75,16 +75,6 @@ test("@search archived task results keep their cues and title space on a phone",
   apiClient,
   seedData,
 }) => {
-  const unarchivedCompleted = await apiClient.createTask(
-    seedData.workspaceId,
-    "Mobile unarchived completed",
-    {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-    },
-  );
-  await apiClient.updateTaskState(unarchivedCompleted.id, "COMPLETED");
-
   const archivedInProgress = await apiClient.createTask(
     seedData.workspaceId,
     "Mobile archived in progress",
