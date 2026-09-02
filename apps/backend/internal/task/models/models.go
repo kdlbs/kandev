@@ -1747,9 +1747,8 @@ type RepositoryBranchPolicy struct {
 // RepositorySet is a named, reusable group of workspace repositories that fills
 // the task-creation repository picker in one action.
 //
-// A set deliberately stores no branch. Branch choice belongs to a task and is
-// already modelled on TaskRepository; a branch cached here would go stale
-// against the repository's real refs.
+// A set stores an optional base branch for each member. The task draft copies
+// that preference when the set is applied; checkout state remains task-owned.
 type RepositorySet struct {
 	ID          string `json:"id"`
 	WorkspaceID string `json:"workspace_id"`
@@ -1768,6 +1767,7 @@ type RepositorySetItem struct {
 	RepositorySetID string    `json:"repository_set_id"`
 	RepositoryID    string    `json:"repository_id"`
 	Position        int       `json:"position"`
+	BaseBranch      string    `json:"base_branch"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }

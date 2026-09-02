@@ -208,7 +208,10 @@ func TestReplaceRepositorySetItemsRewritesOrderContiguously(t *testing.T) {
 	}
 
 	// Reorder and drop one member in a single replace.
-	members := []string{"repo-orders", "repo-web"}
+	members := []models.RepositorySetItem{
+		{RepositoryID: "repo-orders"},
+		{RepositoryID: "repo-web"},
+	}
 	if err := repo.UpdateRepositorySet(ctx, set, &members); err != nil {
 		t.Fatalf("UpdateRepositorySet: %v", err)
 	}

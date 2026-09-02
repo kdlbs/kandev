@@ -41,11 +41,18 @@ export function buildBranchKeywords(name: string, remote?: string): string[] {
   return Array.from(out);
 }
 
+/** Returns the exact value used by branch picker options and form state. */
+export function branchOptionValue(branch: Pick<Branch, "name" | "type" | "remote">): string {
+  return branch.type === "remote" && branch.remote
+    ? `${branch.remote}/${branch.name}`
+    : branch.name;
+}
+
 export function branchToOption(b: Branch): PillOption {
   // Remote branches keep their "origin/" prefix so they're distinguishable
   // from local branches with the same short name (e.g. "main" vs "origin/main").
   // Without the prefix, the dropdown shows two indistinguishable rows.
-  const display = b.type === "remote" && b.remote ? `${b.remote}/${b.name}` : b.name;
+  const display = branchOptionValue(b);
   // `||` (not `??`) so an empty-string `remote` falls back too. Provider-backed
   // workspace repos (URL-added) list branches without a tracking remote, so the
   // backend sends `remote: ""`; `??` would render an invisible empty badge.

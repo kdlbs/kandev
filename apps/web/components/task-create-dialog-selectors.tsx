@@ -5,7 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState, memo, useCallback, useMem
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconPaperclip } from "@tabler/icons-react";
-import { Combobox } from "./combobox";
+import { Combobox, type ComboboxOption } from "./combobox";
 import { scoreBranch } from "@/lib/utils/branch-filter";
 import { BranchRefreshButton } from "./branch-refresh-button";
 import { formatBytes } from "@/lib/utils/format-bytes";
@@ -118,12 +118,7 @@ export const RepositorySelector = memo(function RepositorySelector({
   );
 });
 
-type BranchOption = {
-  value: string;
-  label: string;
-  keywords?: string[];
-  renderLabel?: () => React.ReactNode;
-};
+type BranchOption = ComboboxOption;
 
 type BranchSelectorProps = {
   options: BranchOption[];
@@ -143,6 +138,7 @@ type BranchSelectorProps = {
   testId?: string;
   dropdownTestId?: string;
   dropdownLabel?: string;
+  onOpenChange?: (open: boolean) => void;
 };
 
 export const BranchSelector = memo(function BranchSelector({
@@ -163,6 +159,7 @@ export const BranchSelector = memo(function BranchSelector({
   testId = "branch-selector",
   dropdownTestId,
   dropdownLabel = t("task:baseBranch2"),
+  onOpenChange,
 }: BranchSelectorProps) {
   const headerAction = onRefresh ? (
     <BranchRefreshButton
@@ -190,6 +187,7 @@ export const BranchSelector = memo(function BranchSelector({
       filter={scoreBranch}
       headerAction={headerAction}
       loading={loading}
+      onOpenChange={onOpenChange}
     />
   );
 });

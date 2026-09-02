@@ -16,7 +16,7 @@ func TestFromRepositorySetCarriesOrderedMembership(t *testing.T) {
 		Name:        "Full-stack",
 		Description: "web + gateway",
 		Items: []models.RepositorySetItem{
-			{ID: "item-1", RepositorySetID: "set-1", RepositoryID: "repo-web", Position: 0},
+			{ID: "item-1", RepositorySetID: "set-1", RepositoryID: "repo-web", Position: 0, BaseBranch: "develop"},
 			{ID: "item-2", RepositorySetID: "set-1", RepositoryID: "repo-gateway", Position: 1},
 		},
 		CreatedAt: created,
@@ -36,6 +36,9 @@ func TestFromRepositorySetCarriesOrderedMembership(t *testing.T) {
 	}
 	if got.Repositories[0].RepositoryID != "repo-web" || got.Repositories[0].Position != 0 {
 		t.Fatalf("first member = %+v", got.Repositories[0])
+	}
+	if got.Repositories[0].BaseBranch != "develop" {
+		t.Fatalf("first member base branch = %q, want %q", got.Repositories[0].BaseBranch, "develop")
 	}
 	if got.Repositories[1].RepositoryID != "repo-gateway" || got.Repositories[1].Position != 1 {
 		t.Fatalf("second member = %+v", got.Repositories[1])

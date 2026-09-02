@@ -66,6 +66,8 @@ interface ComboboxProps {
   loading?: boolean;
   /** Ref for consumers that anchor a local confirmation to this trigger. */
   triggerRef?: Ref<HTMLButtonElement>;
+  /** Notifies consumers when the popover opens or closes. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 function TriggerLabel({
@@ -153,6 +155,91 @@ function OptionsList({
   );
 }
 
+function handleComboboxOpenChange(
+  next: boolean,
+  value: string,
+  setOpen: (open: boolean) => void,
+  setHighlighted: (value: string) => void,
+  onOpenChange?: (open: boolean) => void,
+) {
+  setOpen(next);
+  if (next) setHighlighted(value);
+  onOpenChange?.(next);
+}
+
+function selectComboboxOption({
+  selectedValue,
+  currentValue,
+  onValueChange,
+  setOpen,
+  onOpenChange,
+}: {
+  selectedValue: string;
+  currentValue: string;
+  onValueChange: (value: string) => void;
+  setOpen: (open: boolean) => void;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const nextValue = selectedValue === currentValue ? "" : selectedValue;
+  onValueChange(nextValue);
+  setOpen(false);
+  onOpenChange?.(false);
+}
+
+function ComboboxTrigger({
+  options,
+  value,
+  plainTrigger,
+  placeholder,
+  triggerRef,
+  disabled,
+  ariaLabel,
+  open,
+  triggerClassName,
+  testId,
+  loading,
+}: {
+  options: ComboboxOption[];
+  value: string;
+  plainTrigger: boolean;
+  placeholder: string;
+  triggerRef?: Ref<HTMLButtonElement>;
+  disabled: boolean;
+  ariaLabel?: string;
+  open: boolean;
+  triggerClassName?: string;
+  testId?: string;
+  loading: boolean;
+}) {
+  return (
+    <PopoverTrigger asChild>
+      <Button
+        ref={triggerRef}
+        variant="ghost"
+        role="combobox"
+        aria-label={ariaLabel}
+        aria-expanded={open}
+        className={cn("w-full justify-between", !disabled && "cursor-pointer", triggerClassName)}
+        disabled={disabled}
+        data-testid={testId}
+      >
+        <div className="flex min-w-0 flex-1 items-center">
+          <TriggerLabel
+            selectedOption={options.find((option) => option.value === value)}
+            plainTrigger={plainTrigger}
+            placeholder={placeholder}
+          />
+        </div>
+        {loading ? (
+          <IconLoader2 className="ml-2 h-4 w-4 shrink-0 animate-spin opacity-50" />
+        ) : (
+          <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        )}
+      </Button>
+    </PopoverTrigger>
+  );
+}
+
 export const Combobox = memo(function Combobox({
   options,
   value,
@@ -176,6 +263,7 @@ export const Combobox = memo(function Combobox({
   headerAction,
   loading = false,
   triggerRef,
+  onOpenChange,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
   const portalContainer = useTaskCreateDialogPopoverContainer();
@@ -185,36 +273,23 @@ export const Combobox = memo(function Combobox({
   return (
     <Popover
       open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (next) setHighlighted(value);
-      }}
+      onOpenChange={(next) =>
+        handleComboboxOpenChange(next, value, setOpen, setHighlighted, onOpenChange)
+      }
     >
-      <PopoverTrigger asChild>
-        <Button
-          ref={triggerRef}
-          variant="ghost"
-          role="combobox"
-          aria-label={ariaLabel}
-          aria-expanded={open}
-          className={cn("w-full justify-between", !disabled && "cursor-pointer", triggerClassName)}
-          disabled={disabled}
-          data-testid={testId}
-        >
-          <div className="flex min-w-0 flex-1 items-center">
-            <TriggerLabel
-              selectedOption={options.find((option) => option.value === value)}
-              plainTrigger={plainTrigger}
-              placeholder={placeholder}
-            />
-          </div>
-          {loading ? (
-            <IconLoader2 className="ml-2 h-4 w-4 shrink-0 animate-spin opacity-50" />
-          ) : (
-            <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-          )}
-        </Button>
-      </PopoverTrigger>
+      <ComboboxTrigger
+        options={options}
+        value={value}
+        plainTrigger={plainTrigger}
+        placeholder={placeholder}
+        triggerRef={triggerRef}
+        disabled={disabled}
+        ariaLabel={ariaLabel}
+        open={open}
+        triggerClassName={triggerClassName}
+        testId={testId}
+        loading={loading}
+      />
       <PopoverContent
         className={cn(
           "w-[var(--radix-popover-trigger-width)] min-w-[min(300px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] p-0 max-h-[var(--radix-popover-content-available-height)] pointer-events-auto",
@@ -244,10 +319,15 @@ export const Combobox = memo(function Combobox({
             <OptionsList
               options={options}
               value={value}
-              onSelect={(v) => {
-                onValueChange(v === value ? "" : v);
-                setOpen(false);
-              }}
+              onSelect={(v) =>
+                selectComboboxOption({
+                  selectedValue: v,
+                  currentValue: value,
+                  onValueChange,
+                  setOpen,
+                  onOpenChange,
+                })
+              }
             />
           </CommandList>
         </Command>

@@ -228,7 +228,7 @@ export type RepositorySetPayload = {
   workspace_id: string;
   name?: string;
   description?: string;
-  repositories?: Array<{ repository_id: string; position: number }>;
+  repositories?: Array<{ repository_id: string; position: number; base_branch?: string }>;
   created_at?: string;
   updated_at?: string;
 };

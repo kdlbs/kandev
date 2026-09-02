@@ -1,6 +1,7 @@
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskCreateDialogProps } from "./task-create-dialog";
+import type { RepositoryBranchesState } from "@/lib/state/slices/workspace/types";
 
 const mocks = vi.hoisted(() => ({
   agentGeneratedTaskTitles: false,
@@ -134,7 +135,7 @@ vi.mock("@/components/task-create-dialog-state", () => ({
   useSessionRepoName: () => null,
 }));
 
-import { useTaskCreateDialogSetup } from "./task-create-dialog-setup";
+import { hasUnavailableSavedBase, useTaskCreateDialogSetup } from "./task-create-dialog-setup";
 
 const props: TaskCreateDialogProps = {
   open: true,
@@ -171,4 +172,26 @@ it("forwards the selected dependencies to the submit handlers", () => {
   // hop itself, not just the leaf.
   renderHook(() => useTaskCreateDialogSetup({ ...props, mode: "create" }));
   expect(mocks.submitDeps.blockedBy).toEqual(["dep-1"]);
+});
+
+it("validates saved bases against qualified branch option values", () => {
+  const repositoryBranches = {
+    itemsByRepositoryId: {
+      "repo-1": [{ name: "main", type: "remote", remote: "origin" }],
+    },
+    loadedByRepositoryId: { "repo-1": true },
+  } as unknown as RepositoryBranchesState;
+
+  expect(
+    hasUnavailableSavedBase(
+      [{ key: "r0", repositoryId: "repo-1", branch: "", baseBranch: "main" }],
+      repositoryBranches,
+    ),
+  ).toBe(true);
+  expect(
+    hasUnavailableSavedBase(
+      [{ key: "r0", repositoryId: "repo-1", branch: "", baseBranch: "origin/main" }],
+      repositoryBranches,
+    ),
+  ).toBe(false);
 });

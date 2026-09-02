@@ -18,7 +18,9 @@ export function computeHasAllBranches(fs: DialogFormState): boolean {
     const rows = fs.remoteRepos.filter((r) => r.url.trim() !== "");
     return rows.length > 0 && rows.every((r) => !!r.branch);
   }
-  return fs.repositories.length > 0 && fs.repositories.every((r) => !!r.branch);
+  return (
+    fs.repositories.length > 0 && fs.repositories.every((r) => Boolean(r.baseBranch || r.branch))
+  );
 }
 
 export function localRepositoryCreationEnabled(isCreateMode: boolean, repoLocked: boolean) {
@@ -119,6 +121,9 @@ export function buildDialogFooterProps(
     onUpdateWithoutAgent: submitHandlers.handleUpdateWithoutAgent,
     onCreateWithoutAgent: submitHandlers.handleCreateWithoutAgent,
     onCreateWithPlanMode: submitHandlers.handleCreateWithPlanMode,
-    submitBlockedReason: props.submitBlockedReason ?? pendingAttachmentUploadReason,
+    submitBlockedReason:
+      props.submitBlockedReason ??
+      pendingAttachmentUploadReason ??
+      setup.savedBaseSubmitBlockedReason,
   };
 }

@@ -10,6 +10,7 @@ import type {
 import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
 import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import { selectPreferredBranch } from "@/lib/utils";
+import { branchOptionValue } from "@/components/task-create-dialog-branch-options";
 import { createDebugLogger } from "@/lib/debug/log";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { linkToTask } from "@/lib/links";
@@ -84,13 +85,7 @@ export function autoSelectBranch(
 }
 
 function isBranchSelectable(branchList: Branch[], value: string | null | undefined) {
-  return Boolean(value && branchList.some((branch) => branchDisplayName(branch) === value));
-}
-
-function branchDisplayName(branch: Branch) {
-  return branch.type === "remote" && branch.remote
-    ? `${branch.remote}/${branch.name}`
-    : branch.name;
+  return Boolean(value && branchList.some((branch) => branchOptionValue(branch) === value));
 }
 
 export function computePassthroughProfile(
@@ -334,6 +329,10 @@ export function buildRepositoriesPayload(opts: {
       const branches = splitLocalExecutorBranches({
         rowBranch: row.branch,
         defaultBranch,
+        // Fresh-branch mode uses row.branch as the fork base. A saved set base
+        // is checkout metadata for the ordinary local-executor flow and must
+        // not override the branch the user picked to fork from.
+        baseBranch: opts.freshBranch ? undefined : row.baseBranch,
         isLocalExecutor,
       });
       if (row.repositoryId) {
@@ -490,6 +489,7 @@ function resolveRowDefaultBranch(
 function splitLocalExecutorBranches(args: {
   rowBranch?: string;
   defaultBranch?: string;
+  baseBranch?: string;
   isLocalExecutor: boolean;
 }): { base_branch: string | undefined; checkout_branch: string | undefined } {
   // Without a known default_branch we can't anchor base_branch to the
@@ -499,11 +499,19 @@ function splitLocalExecutorBranches(args: {
   // unset default_branch is no worse off than before, and the backend's
   // resolveRepoInput probe will populate it on the next CreateRepository
   // call. Wait for that probe rather than synthesizing a guess here.
-  if (!args.isLocalExecutor || !args.defaultBranch) {
-    return { base_branch: args.rowBranch || undefined, checkout_branch: undefined };
+  if (!args.isLocalExecutor) {
+    return {
+      base_branch: args.baseBranch || args.rowBranch || undefined,
+      checkout_branch: undefined,
+    };
   }
-  const base = args.defaultBranch;
-  const checkout =
-    args.rowBranch && args.rowBranch !== args.defaultBranch ? args.rowBranch : undefined;
-  return { base_branch: base, checkout_branch: checkout };
+  if (!args.defaultBranch) {
+    return {
+      base_branch: args.baseBranch || args.rowBranch || undefined,
+      checkout_branch: args.baseBranch ? args.rowBranch || undefined : undefined,
+    };
+  }
+  const base = args.baseBranch || args.defaultBranch;
+  const checkout = args.rowBranch && args.rowBranch !== base ? args.rowBranch : undefined;
+  return { base_branch: args.baseBranch || base, checkout_branch: checkout };
 }

@@ -60,6 +60,7 @@ func (r *Repository) runMigrations() error {
 	if err := r.ensureRepositorySetsSchema(); err != nil {
 		return err
 	}
+	r.migrate.Apply("repository_set_items.base_branch", `ALTER TABLE repository_set_items ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`)
 	if err := r.ensureRepositoryBranchPoliciesSchema(); err != nil {
 		return err
 	}

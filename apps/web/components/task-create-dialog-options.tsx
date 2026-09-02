@@ -33,7 +33,7 @@ import { getExecutorIcon } from "@/lib/executor-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { getCapabilityWarning } from "@/lib/capability-warning";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
-import { buildBranchKeywords } from "./task-create-dialog-branch-options";
+import { branchOptionValue, buildBranchKeywords } from "./task-create-dialog-branch-options";
 import {
   ensureAgentProfileRecentUseLoaded,
   orderAgentProfilesByRecentUse,
@@ -155,10 +155,7 @@ export function useRepositoryOptions(
 export function useBranchOptions(branchOptionsRaw: Branch[]) {
   return useMemo(() => {
     return branchOptionsRaw.map((branchObj: Branch) => {
-      const displayName =
-        branchObj.type === "remote" && branchObj.remote
-          ? `${branchObj.remote}/${branchObj.name}`
-          : branchObj.name;
+      const displayName = branchOptionValue(branchObj);
       // Keywords give the scorer extra surfaces to match against: the leaf
       // branch name, every path segment, and (for remotes) the remote name.
       const keywords = buildBranchKeywords(branchObj.name, branchObj.remote);

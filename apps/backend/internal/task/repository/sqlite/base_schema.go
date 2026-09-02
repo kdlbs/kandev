@@ -476,9 +476,9 @@ func (r *Repository) initTaskSchema() error {
 // repositorySetsSchemaDDL declares the repository-set tables. It runs after
 // initCoreSchema so `workspaces` and `repositories` exist for the foreign keys.
 //
-// Membership positions are contiguous from zero and carry no branch: branch
-// choice belongs to a task (task_repositories), which is exactly what the user
-// still decides after applying a set.
+// Membership positions are contiguous from zero. A saved base branch is an
+// optional task-form default; checkout and task branch choices remain task
+// state.
 const repositorySetsSchemaDDL = `
 	CREATE TABLE IF NOT EXISTS repository_sets (
 		id TEXT PRIMARY KEY,
@@ -496,6 +496,7 @@ const repositorySetsSchemaDDL = `
 		repository_set_id TEXT NOT NULL,
 		repository_id TEXT NOT NULL,
 		position INTEGER NOT NULL DEFAULT 0,
+		base_branch TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (repository_set_id) REFERENCES repository_sets(id) ON DELETE CASCADE,

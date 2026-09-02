@@ -302,8 +302,8 @@ export type RepositorySecretBinding = {
  * A named, reusable group of workspace repositories. Applying one fills the
  * task-creation repository picker in a single action.
  *
- * A set deliberately carries no branch: branch choice belongs to the task, and
- * the picker's existing per-row defaulting fills it after a set is applied.
+ * A set stores an optional base branch for each member. Applying a set copies
+ * that value into the task draft; it never creates a live link to the set.
  */
 export type RepositorySet = {
   id: string;
@@ -319,6 +319,8 @@ export type RepositorySet = {
 export type RepositorySetItem = {
   repository_id: RepositoryId;
   position: number;
+  /** Empty or absent means that the task form should use its normal default. */
+  base_branch?: string;
 };
 
 export type RepositoryScript = {

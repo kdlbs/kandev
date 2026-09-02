@@ -265,8 +265,20 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
       const wasLocalPath = Boolean(fs.repositories.find((row) => row.key === key)?.localPath);
       const isLocalPath = !isWorkspaceRepo && Boolean(value);
       const patch: Partial<TaskRepoRow> = isWorkspaceRepo
-        ? { repositoryId: value, localPath: undefined, branch: "", branchPolicyId: undefined }
-        : { repositoryId: undefined, localPath: value, branch: "", branchPolicyId: undefined };
+        ? {
+            repositoryId: value,
+            localPath: undefined,
+            branch: "",
+            baseBranch: undefined,
+            branchPolicyId: undefined,
+          }
+        : {
+            repositoryId: undefined,
+            localPath: value,
+            branch: "",
+            baseBranch: undefined,
+            branchPolicyId: undefined,
+          };
       fs.updateRepository(key, patch);
       if (wasLocalPath !== isLocalPath) {
         fs.setExecutorId("");
@@ -294,7 +306,11 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
 
   const handleRowPolicyChange = useCallback(
     (key: string, policyId: string, baseBranch: string) => {
-      fs.updateRepository(key, { branch: baseBranch, branchPolicyId: policyId });
+      fs.updateRepository(key, {
+        branch: baseBranch,
+        baseBranch,
+        branchPolicyId: policyId,
+      });
       syncTaskCreateLastUsed({ branch: baseBranch });
     },
     [fs],
