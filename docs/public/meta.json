@@ -50,6 +50,7 @@
     "plugins-manifest",
     "---Office---",
     "office-provider-routing",
+    "office-config-sync",
     "---Protocol Reference---",
     "websocket-api"
   ]
