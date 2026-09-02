@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 /**
@@ -64,4 +65,58 @@ test("@search the palette scope strip wraps below the field on a phone", async (
   await expect(taskRow.getByRole("img", { name: "In progress" })).toBeVisible();
   const titleBox = (await taskRow.getByText("Mobile palette scopes").first().boundingBox())!;
   expect(titleBox.width).toBeGreaterThan(60);
+});
+
+// @covers AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.1, AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.2,
+// AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.3, AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.4,
+// AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.8
+test("@search archived task results keep their cues and title space on a phone", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const unarchivedCompleted = await apiClient.createTask(
+    seedData.workspaceId,
+    "Mobile unarchived completed",
+    {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    },
+  );
+  await apiClient.updateTaskState(unarchivedCompleted.id, "COMPLETED");
+
+  const archivedInProgress = await apiClient.createTask(
+    seedData.workspaceId,
+    "Mobile archived in progress",
+    {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    },
+  );
+  await apiClient.archiveTask(archivedInProgress.id);
+
+  await new KanbanPage(testPage).goto();
+  await testPage.keyboard.press(`${MODIFIER}+k`);
+  const dialog = testPage.getByRole("dialog");
+  await expect(dialog).toBeVisible({ timeout: 10_000 });
+
+  const input = dialog.getByRole("combobox");
+  await input.fill("Mobile archived");
+  const taskResults = dialog.getByTestId("command-panel-task-preview");
+  await expect(taskResults).toBeVisible({ timeout: 10_000 });
+
+  const archivedOption = taskResults
+    .getByRole("option")
+    .filter({ hasText: archivedInProgress.title });
+  await expect(archivedOption).toBeVisible();
+  await expect(archivedOption.getByTestId("task-state-archived")).toBeVisible();
+  await expect(archivedOption.getByRole("img", { name: "Archived" })).toBeVisible();
+  await expect(archivedOption.getByText("Archived", { exact: true })).toBeVisible();
+
+  const titleBox = (await archivedOption.getByText(archivedInProgress.title).boundingBox())!;
+  expect(titleBox.width).toBeGreaterThan(60);
+  const overflows = await testPage.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  );
+  expect(overflows).toBe(false);
 });

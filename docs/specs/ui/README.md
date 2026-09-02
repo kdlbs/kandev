@@ -11,10 +11,10 @@ owners:
 
 ## Ownership
 
-UI owns reusable presentation and responsive interaction.
+UI owns presentation and responsive interaction.
 [Tasks](../tasks/README.md), [Agents](../agents/README.md),
-[Plugins](../plugins/README.md), and [Integrations](../integrations/README.md) own
-feature behavior and state.
+[Plugins](../plugins/README.md), [Integrations](../integrations/README.md), and
+[Platform](../platform/README.md) own behavior and state.
 
 ## Specification map
 
@@ -39,8 +39,9 @@ feature behavior and state.
 - [Merge Queue Recovery Controls](requirements/ci-pr-merge-queue-recovery-controls.md)
 - [Clarification Shared Context](requirements/clarification-context.md)
 - [Clarification submit feedback](requirements/clarification-submit-feedback.md)
-- [Command-panel Sidebar Task Reveal](requirements/command-panel-sidebar-task-reveal.md)
-- [Command Panel Task Activity Icons](requirements/command-panel-task-activity-icons.md)
+- [Sidebar Task Reveal](requirements/command-panel-sidebar-task-reveal.md)
+- [Archived Task Results](requirements/command-panel-archived-task-results.md)
+- [Task Activity Icons](requirements/command-panel-task-activity-icons.md)
 - [Compact Workflow Step Navigation](requirements/compact-workflow-step-navigation.md)
 - [Comment Markdown Rendering](requirements/comment-markdown.md)
 - [Mention recency](requirements/composer-mention-recency.md)
@@ -125,7 +126,7 @@ feature behavior and state.
 - [Task transcript history visibility](requirements/task-prompt-transcript-visibility.md)
 - [Task Review Shortcut Switcher](requirements/task-review-shortcut.md)
 - [Task surface refresh and mobile create](requirements/task-surface-refresh.md)
-- [Task Workspace Content Search](requirements/task-workspace-content-search.md)
+- [Workspace Content Search](requirements/task-workspace-content-search.md)
 - [Terminal close feedback](requirements/terminal-close-feedback.md)
 - [Terminal Rendering](requirements/terminal-rendering.md)
 - [Thinking Message Preview](requirements/thinking-message-preview.md)
@@ -174,15 +175,10 @@ feature behavior and state.
 - [Resizable Markdown Table Columns](system-design/resizable-markdown-tables.md)
 - [Task Layout Profiles](system-design/task-layout-profiles.md)
 - [Task Agent Tab Reconciliation](system-design/task-agent-tab-reconciliation.md)
-- [Command-panel Sidebar Task Reveal](system-design/command-panel-sidebar-task-reveal.md)
-- [Command Panel Task Activity Icons](system-design/command-panel-task-activity-icons.md)
+- [Sidebar Task Reveal](system-design/command-panel-sidebar-task-reveal.md)
+- [Archived Task Results](system-design/command-panel-archived-task-results.md)
+- [Task Activity Icons](system-design/command-panel-task-activity-icons.md)
 - [Terminal Rendering](system-design/terminal-rendering.md)
 - [Thinking Message Preview](system-design/thinking-message-preview.md)
 - [Task Transcript History Visibility](system-design/task-prompt-transcript-visibility.md)
 - [Transcript Auto-scroll Stability](system-design/transcript-auto-scroll.md)
-
-## Related systems
-
-- [Tasks](../tasks/README.md)
-- [Plugins](../plugins/README.md)
-- [Platform](../platform/README.md)
