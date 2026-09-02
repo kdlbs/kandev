@@ -186,6 +186,9 @@ func validateMainContainerFields(container *corev1.Container, path string) error
 }
 
 func validateContainerReservedFields(container *corev1.Container, path string) error {
+	if len(container.EnvFrom) > 0 {
+		return reservedField(path + ".envFrom")
+	}
 	for i, env := range container.Env {
 		if isReservedEnvironmentKey(env.Name) {
 			return reservedField(fmt.Sprintf("%s.env[%d].name", path, i))

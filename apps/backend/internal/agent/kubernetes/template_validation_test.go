@@ -137,6 +137,44 @@ func TestProfileConfigValidateRejectsReservedPodFields(t *testing.T) {
 	}
 }
 
+func TestProfileConfigValidateRejectsEnvFromForEveryContainerKind(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		yaml string
+		path string
+	}{
+		{
+			name: "main container",
+			yaml: validMainContainerTemplate("        envFrom:\n          - configMapRef:\n              name: app-env\n"),
+			path: "config.pod_template_yaml.template.spec.containers[0].envFrom",
+		},
+		{
+			name: "sidecar",
+			yaml: "apiVersion: v1\nkind: PodTemplate\ntemplate:\n  spec:\n    containers:\n      - name: kandev-agent\n        image: example/agent:latest\n      - name: sidecar\n        image: example/sidecar:latest\n        envFrom:\n          - secretRef:\n              name: sidecar-env\n",
+			path: "config.pod_template_yaml.template.spec.containers[1].envFrom",
+		},
+		{
+			name: "init container",
+			yaml: "apiVersion: v1\nkind: PodTemplate\ntemplate:\n  spec:\n    initContainers:\n      - name: init\n        image: example/init:latest\n        envFrom:\n          - configMapRef:\n              name: init-env\n    containers:\n      - name: kandev-agent\n        image: example/agent:latest\n",
+			path: "config.pod_template_yaml.template.spec.initContainers[0].envFrom",
+		},
+		{
+			name: "ephemeral container",
+			yaml: "apiVersion: v1\nkind: PodTemplate\ntemplate:\n  spec:\n    containers:\n      - name: kandev-agent\n        image: example/agent:latest\n    ephemeralContainers:\n      - name: debug\n        image: example/debug:latest\n        envFrom:\n          - secretRef:\n              name: debug-env\n",
+			path: "config.pod_template_yaml.template.spec.ephemeralContainers[0].envFrom",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assertFieldPath(t, validProfile(tt.yaml).Validate(), tt.path)
+		})
+	}
+}
+
 func validProfile(template string) ProfileConfig {
 	return ProfileConfig{
 		Platform: PlatformLinuxAMD64, MainContainer: "kandev-agent",
