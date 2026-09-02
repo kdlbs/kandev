@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -81,6 +82,78 @@ func TestHandleHandoffTask_WorkflowInInvisibleWorkspaceGivesSameResponseAsMissin
 	assert.NotContains(t, epInvisible.Message, foreignOwnerID)
 }
 
+// --- AC-11: under real per-user workspace scoping, a target_workspace_id
+// that exists but whose owner the caller cannot see must be refused through
+// the exact same code path and message template as a target_workspace_id
+// that does not exist at all. This is the workspace-level sibling of
+// TestHandleHandoffTask_WorkflowInInvisibleWorkspaceGivesSameResponseAsMissing
+// above, which only covers a foreign-owned workflow nested inside a
+// caller-visible workspace. The message necessarily echoes back the
+// target_workspace_id the caller itself supplied (not a leak, since the
+// caller already knows it), so unlike the workflow_id sibling this asserts
+// template equivalence rather than literal string equality.
+
+func TestHandleHandoffTask_TargetWorkspaceInvisibleGivesSameResponseAsMissing(t *testing.T) {
+	const ownerID = "owner-handoff-scoped-ws"
+	const foreignOwnerID = "owner-handoff-foreign-ws"
+	f := newHandoffFixtureWithOwner(t, agentsettingsmodels.AgentRoleCEO, "", nil, ownerID)
+	ctx := authn.WithIdentity(f.ctx(), authn.Identity{UserID: ownerID})
+
+	const missingWorkspaceID = "ws-does-not-exist"
+	payloadMissing := f.validPayload(map[string]interface{}{handoffFieldTargetWorkspaceID: missingWorkspaceID})
+	respMissing, err := f.h.handleHandoffTask(ctx, makeWSMessage(t, ws.ActionMCPHandoffTask, payloadMissing))
+	require.NoError(t, err)
+	assertWSError(t, respMissing, ws.ErrorCodeNotFound)
+
+	const foreignWorkspaceID = "ws-handoff-foreign-target"
+	seedHandoffWorkspace(t, f.repo, foreignWorkspaceID, foreignOwnerID)
+
+	// The foreign workspace's visibility check (D3a step 4) runs before
+	// workflow_id is ever resolved (D3a step 5), so a workflow_id that
+	// doesn't exist anywhere still exercises exactly the same code path.
+	payloadInvisible := f.validPayload(map[string]interface{}{
+		handoffFieldTargetWorkspaceID: foreignWorkspaceID,
+		handoffFieldWorkflowID:        "wf-does-not-exist-either",
+	})
+	respInvisible, err := f.h.handleHandoffTask(ctx, makeWSMessage(t, ws.ActionMCPHandoffTask, payloadInvisible))
+	require.NoError(t, err)
+	assertWSError(t, respInvisible, ws.ErrorCodeNotFound)
+
+	var epMissing, epInvisible ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(respMissing.Payload, &epMissing))
+	require.NoError(t, json.Unmarshal(respInvisible.Payload, &epInvisible))
+	assert.Equal(t,
+		strings.Replace(epMissing.Message, missingWorkspaceID, foreignWorkspaceID, 1), epInvisible.Message,
+		"both must follow the same not-found message template, differing only in the caller's own echoed input")
+	assert.NotContains(t, epInvisible.Message, foreignOwnerID, "must never leak the foreign workspace's owner")
+}
+
+// --- D3a step 4/step 5: a genuine repository-layer read failure on either
+// the target workspace or the workflow lookup is an InternalError, not
+// treated as (and never conflated with) a not-found refusal ---
+
+func TestHandleHandoffTask_TargetWorkspaceReadFailureIsInternalError(t *testing.T) {
+	f := newHandoffFixture(t, agentsettingsmodels.AgentRoleCEO, "", nil)
+	_, err := f.db.Exec("DROP TABLE workspaces")
+	require.NoError(t, err, "precondition: must be able to break the workspaces table out from under the fixture")
+
+	resp, err := f.h.handleHandoffTask(f.ctx(), makeWSMessage(t, ws.ActionMCPHandoffTask, f.validPayload(nil)))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	assertWSErrorContains(t, resp, "failed to validate target_workspace_id")
+}
+
+func TestHandleHandoffTask_WorkflowReadFailureIsInternalError(t *testing.T) {
+	f := newHandoffFixture(t, agentsettingsmodels.AgentRoleCEO, "", nil)
+	_, err := f.db.Exec("DROP TABLE workflows")
+	require.NoError(t, err, "precondition: must be able to break the workflows table out from under the fixture")
+
+	resp, err := f.h.handleHandoffTask(f.ctx(), makeWSMessage(t, ws.ActionMCPHandoffTask, f.validPayload(nil)))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	assertWSErrorContains(t, resp, "failed to validate workflow_id")
+}
+
 // --- AC-12c: workflow_id naming the target workspace's own office workflow
 // is refused, distinctly from an ordinary not-a-member workflow ---
 
@@ -113,7 +186,11 @@ func TestHandleHandoffTask_NoResolvableDestinationStepIsValidation(t *testing.T)
 	assertWSErrorContains(t, resp, "no resolvable destination step")
 }
 
-func TestHandleHandoffTask_StepListingFailureIsInternalError(t *testing.T) {
+// TestHandleHandoffTask_NilWorkflowControllerIsInternalError covers the
+// defensive nil-controller guard at the top of resolveHandoffDestinationStep
+// (a wiring bug, not a runtime failure): a *Handlers built without a
+// workflowCtrl must fail closed rather than panic.
+func TestHandleHandoffTask_NilWorkflowControllerIsInternalError(t *testing.T) {
 	f := newHandoffFixture(t, agentsettingsmodels.AgentRoleCEO, "", nil)
 	f.h.workflowCtrl = nil
 
@@ -121,6 +198,23 @@ func TestHandleHandoffTask_StepListingFailureIsInternalError(t *testing.T) {
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeInternalError)
 	assertWSErrorContains(t, resp, "workflow steps are not available")
+}
+
+// TestHandleHandoffTask_StepListingFailureIsInternalError drives a genuine
+// ListStepsByWorkflow error (workflow_id validation has already passed, so
+// the query for that specific workflow's steps is the only thing that can
+// still fail) by dropping the workflow_steps table out from under the
+// shared fixture DB right before the call, distinct from the nil-controller
+// wiring guard covered above.
+func TestHandleHandoffTask_StepListingFailureIsInternalError(t *testing.T) {
+	f := newHandoffFixture(t, agentsettingsmodels.AgentRoleCEO, "", nil)
+	_, err := f.db.Exec("DROP TABLE workflow_steps")
+	require.NoError(t, err, "precondition: must be able to break the steps table out from under the fixture")
+
+	resp, err := f.h.handleHandoffTask(f.ctx(), makeWSMessage(t, ws.ActionMCPHandoffTask, f.validPayload(nil)))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	assertWSErrorContains(t, resp, "failed to resolve destination step")
 }
 
 // --- AC-14b: an agent profile with no WorkspaceID (global) is accepted for

@@ -130,3 +130,62 @@ func TestHandleHandoffCreatedOutcome_IdentityLostSkipsStartAndReportsMessage(t *
 	assert.Contains(t, result.Message, externalID)
 	assert.Contains(t, result.Message, "record task_id rather than replaying")
 }
+
+// --- AC-24d/R-F39: a genuine SettleExternalID failure halts D3b entirely ---
+
+func TestHandleHandoffCreatedOutcome_SettlementErrorHaltsWithNoReverseLinkActivityOrLaunch(t *testing.T) {
+	launcher := newHandoffFakeLauncher(nil)
+	f := newHandoffFixture(t, agentsettingsmodels.AgentRoleCEO, "", launcher)
+	dashSvc, activityRepo, _ := newHandoffDashboardService(t, "")
+	f.h.SetDashboardService(dashSvc)
+	const externalID = "ext-settle-fails"
+	handedOffAt := formatHandoffTimestamp(time.Now().UTC())
+
+	created, err := f.svc.CreateTask(context.Background(), &service.CreateTaskRequest{
+		WorkspaceID:    f.targetWorkspaceID,
+		WorkflowID:     f.targetWorkflowID,
+		WorkflowStepID: f.targetStepID,
+		Title:          "Deliver the thing",
+		Description:    "Do the work",
+		ExternalID:     externalID,
+		Metadata:       handoffSourceMetadata(f, handedOffAt),
+	})
+	require.NoError(t, err)
+	task := created.Task
+
+	principal := mcpscope.Principal{
+		WorkspaceID:     f.sourceWorkspaceID,
+		CallerTaskID:    f.sourceTaskID,
+		CallerSessionID: f.sourceSessionID,
+		Surface:         mcpprofile.SurfaceOfficeTask,
+	}
+	session, err := f.repo.GetTaskSession(context.Background(), f.sourceSessionID)
+	require.NoError(t, err)
+	args := &handoffTaskArgs{
+		TargetWorkspaceID: f.targetWorkspaceID,
+		WorkflowID:        f.targetWorkflowID,
+		Title:             "Deliver the thing",
+		Prompt:            "Do the work",
+		AgentProfileID:    f.targetAgentProfileID,
+		ExecutorProfileID: f.targetExecProfileID,
+		StartAgent:        true,
+		ExternalID:        externalID,
+	}
+	resolved := &handoffResolvedResources{WorkflowStepID: f.targetStepID}
+	msg := makeWSMessage(t, ws.ActionMCPHandoffTask, f.validPayload(nil))
+
+	// The settlement UPDATE (task_external_id.go's SettleTaskExternalID) is
+	// the only thing handleHandoffCreatedOutcome does before the R-F39 halt
+	// point, so breaking the tasks table here forces a genuine settlement
+	// error without needing a fake/mock service seam.
+	_, err = f.db.Exec("DROP TABLE tasks")
+	require.NoError(t, err, "precondition: must be able to break the tasks table out from under the fixture")
+
+	resp, err := f.h.handleHandoffCreatedOutcome(f.ctx(), msg, principal, session, args, resolved, task, handedOffAt)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	assertWSErrorContains(t, resp, task.ID)
+
+	assert.Empty(t, activityRepo.entries, "R-F39: a settlement error must skip activity logging entirely")
+	assert.Nil(t, launcher.getRequest(), "R-F39: a settlement error must skip the launch entirely")
+}
