@@ -49,14 +49,17 @@ func TestHandleHandoffTask_ConcurrentSameExternalIDProducesOneTaskBothCallersGet
 
 	responses := make([]*ws.Message, 2)
 	errs := make([]error, 2)
+	start := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(2)
 	for i := range 2 {
 		go func(i int) {
 			defer wg.Done()
+			<-start
 			responses[i], errs[i] = f.h.handleHandoffTask(f.ctx(), msg)
 		}(i)
 	}
+	close(start)
 	wg.Wait()
 
 	require.NoError(t, errs[0])
@@ -92,16 +95,20 @@ func TestHandleHandoffTask_ConcurrentDifferentHandoffsFromSameSourceBothAppear(t
 
 	var respA, respB *ws.Message
 	var errA, errB error
+	start := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
+		<-start
 		respA, errA = f.h.handleHandoffTask(f.ctx(), msgA)
 	}()
 	go func() {
 		defer wg.Done()
+		<-start
 		respB, errB = f.h.handleHandoffTask(f.ctx(), msgB)
 	}()
+	close(start)
 	wg.Wait()
 
 	require.NoError(t, errA)
@@ -134,17 +141,21 @@ func TestHandleHandoffTask_ConcurrentWriteToDifferentMetadataKeyDoesNotConflict(
 
 	var resp *ws.Message
 	var handleErr, writeErr error
+	start := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
+		<-start
 		resp, handleErr = f.h.handleHandoffTask(f.ctx(), msg)
 	}()
 	go func() {
 		defer wg.Done()
+		<-start
 		_, _, writeErr = f.repo.SetTaskMetadataKeyIfDifferentStamp(
 			context.Background(), f.sourceTaskID, "some_other_key", "distinct-stamp", "bar")
 	}()
+	close(start)
 	wg.Wait()
 
 	require.NoError(t, handleErr)

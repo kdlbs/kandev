@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,8 +28,9 @@ type fakeRunResolverCall struct {
 
 // fakeRunResolver lets tests control ResolveRunForTaskAndSession's answer
 // directly, rather than re-exercising the real "which run is newest" logic
-// (already covered where RunResolver is implemented) — this only proves the
-// handler wires the call correctly.
+// (covered by TestResolveRunForTaskAndSession_MatchesNewestClaimedRunsSession
+// in internal/office/service) — this only proves the handler wires the call
+// correctly.
 type fakeRunResolver struct {
 	mu    sync.Mutex
 	runID string
@@ -176,6 +176,24 @@ func setDeliveryHandoffSource(
 	require.NoError(t, err)
 }
 
+// setDeliveryHandoffSourceMissingTimestampKey is setDeliveryHandoffSource's
+// sibling for AC-25b's fourth shape: handoff_source with no handed_off_at key
+// at all, distinct from a present-but-empty or present-but-unparseable value.
+func setDeliveryHandoffSourceMissingTimestampKey(
+	t *testing.T, svc *service.Service, deliveryTaskID, sourceTaskID, sourceWorkspaceID, sourceSessionID, callerAgentProfileID string,
+) {
+	t.Helper()
+	_, err := svc.UpdateTaskMetadata(context.Background(), deliveryTaskID, map[string]interface{}{
+		models.MetaKeyHandoffSource: map[string]interface{}{
+			handoffSourceTaskIDKey:    sourceTaskID,
+			"source_workspace_id":     sourceWorkspaceID,
+			"source_session_id":       sourceSessionID,
+			"source_agent_profile_id": callerAgentProfileID,
+		},
+	})
+	require.NoError(t, err)
+}
+
 // --- AC-25: a replay repair reuses the stored timestamp, not the replay's clock ---
 
 func TestHandleHandoffTask_ReplayRepairUsesStoredTimestampNotReplayClock(t *testing.T) {
@@ -187,7 +205,12 @@ func TestHandleHandoffTask_ReplayRepairUsesStoredTimestampNotReplayClock(t *test
 	result1 := decodeHandoffResult(t, resp1)
 
 	clearHandoffsMetadata(t, f.repo, f.sourceTaskID)
-	time.Sleep(1100 * time.Millisecond)
+	// A stored timestamp far from "now" makes the discriminating assertion
+	// below (result2.HandedOffAt == storedTimestamp) fail loudly if the repair
+	// ever regresses to stamping the replay's own clock instead of reusing
+	// the delivery task's stored handoff_source.handed_off_at.
+	const storedTimestamp = "2020-01-01T00:00:00.000Z"
+	setDeliveryHandoffSource(t, f.svc, result1.TaskID, f.sourceTaskID, f.sourceWorkspaceID, f.sourceSessionID, f.callerAgentProfileID, storedTimestamp)
 
 	resp2, err := f.h.handleHandoffTask(f.ctx(), makeWSMessage(t, ws.ActionMCPHandoffTask, payload))
 	require.NoError(t, err)
@@ -195,18 +218,14 @@ func TestHandleHandoffTask_ReplayRepairUsesStoredTimestampNotReplayClock(t *test
 
 	assert.Equal(t, handoffOutcomeFoundSettled, result2.Outcome)
 	assert.True(t, result2.ReverseLinkRecorded)
-	assert.Equal(t, result1.HandedOffAt, result2.HandedOffAt, "the repair must reuse the original stored timestamp")
-
-	parsed, err := time.Parse(time.RFC3339, result2.HandedOffAt)
-	require.NoError(t, err)
-	assert.Greater(t, time.Since(parsed), 900*time.Millisecond, "must not have been reset to the replay's own clock")
+	assert.Equal(t, storedTimestamp, result2.HandedOffAt, "the repair must reuse the delivery task's stored handoff_source timestamp, not the replay's own clock")
 
 	raw, err := f.repo.GetTaskHandoffsRaw(context.Background(), f.sourceTaskID)
 	require.NoError(t, err)
 	var entries []map[string]interface{}
 	require.NoError(t, json.Unmarshal([]byte(raw), &entries))
 	require.Len(t, entries, 1)
-	assert.Equal(t, result1.HandedOffAt, entries[0][handoffHandedOffAtKey])
+	assert.Equal(t, storedTimestamp, entries[0][handoffHandedOffAtKey])
 }
 
 // --- AC-25b: three shapes of an unreadable stored timestamp ---
@@ -215,10 +234,12 @@ func TestHandleHandoffTask_UnreadableStoredTimestampSurfacesPartialFailure(t *te
 	cases := []struct {
 		name        string
 		handedOffAt interface{}
+		omitKey     bool
 	}{
-		{"empty_string", ""},
-		{"not_rfc3339", "not-a-timestamp"},
-		{"wrong_json_type", 20260101},
+		{name: "empty_string", handedOffAt: ""},
+		{name: "not_rfc3339", handedOffAt: "not-a-timestamp"},
+		{name: "wrong_json_type", handedOffAt: 20260101},
+		{name: "absent_key", omitKey: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -231,7 +252,11 @@ func TestHandleHandoffTask_UnreadableStoredTimestampSurfacesPartialFailure(t *te
 			require.True(t, result1.ReverseLinkRecorded)
 
 			clearHandoffsMetadata(t, f.repo, f.sourceTaskID)
-			setDeliveryHandoffSource(t, f.svc, result1.TaskID, f.sourceTaskID, f.sourceWorkspaceID, f.sourceSessionID, f.callerAgentProfileID, tc.handedOffAt)
+			if tc.omitKey {
+				setDeliveryHandoffSourceMissingTimestampKey(t, f.svc, result1.TaskID, f.sourceTaskID, f.sourceWorkspaceID, f.sourceSessionID, f.callerAgentProfileID)
+			} else {
+				setDeliveryHandoffSource(t, f.svc, result1.TaskID, f.sourceTaskID, f.sourceWorkspaceID, f.sourceSessionID, f.callerAgentProfileID, tc.handedOffAt)
+			}
 
 			resp2, err := f.h.handleHandoffTask(f.ctx(), makeWSMessage(t, ws.ActionMCPHandoffTask, payload))
 			require.NoError(t, err)

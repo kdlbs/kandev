@@ -103,11 +103,11 @@ func seedHandoffAgentProfile(
 	require.NoError(t, repo.CreateAgentProfile(ctx, profile))
 }
 
-func seedHandoffWorkspace(t *testing.T, repo *sqliterepo.Repository, id string) {
+func seedHandoffWorkspace(t *testing.T, repo *sqliterepo.Repository, id, ownerID string) {
 	t.Helper()
 	now := time.Now().UTC()
 	require.NoError(t, repo.CreateWorkspace(context.Background(), &models.Workspace{
-		ID: id, Name: id, CreatedAt: now, UpdatedAt: now,
+		ID: id, Name: id, OwnerID: ownerID, CreatedAt: now, UpdatedAt: now,
 	}))
 }
 
@@ -142,6 +142,16 @@ func seedHandoffExecutorProfile(t *testing.T, repo *sqliterepo.Repository, id st
 // exercise start_agent.
 func newHandoffFixture(t *testing.T, callerRole agentsettingsmodels.AgentRole, callerPermissions string, launcher SessionLauncher) *handoffFixture {
 	t.Helper()
+	return newHandoffFixtureWithOwner(t, callerRole, callerPermissions, launcher, "")
+}
+
+// newHandoffFixtureWithOwner is newHandoffFixture with the source and target
+// workspaces owned by ownerID, so a caller can attach a real (non-synthetic)
+// authn.Identity to the request context and exercise per-user workspace
+// scoping (callerScope/workspaceVisibleTo) rather than the default unscoped
+// path every other fixture-based test runs under.
+func newHandoffFixtureWithOwner(t *testing.T, callerRole agentsettingsmodels.AgentRole, callerPermissions string, launcher SessionLauncher, ownerID string) *handoffFixture {
+	t.Helper()
 	ctx := context.Background()
 	svc, repo, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
 	agentStore, agentCtrl := newHandoffAgentSettingsController(t)
@@ -162,8 +172,8 @@ func newHandoffFixture(t *testing.T, callerRole agentsettingsmodels.AgentRole, c
 		targetRepositoryID:   "repo-handoff-target",
 	}
 
-	seedHandoffWorkspace(t, repo, f.sourceWorkspaceID)
-	seedHandoffWorkspace(t, repo, f.targetWorkspaceID)
+	seedHandoffWorkspace(t, repo, f.sourceWorkspaceID, ownerID)
+	seedHandoffWorkspace(t, repo, f.targetWorkspaceID, ownerID)
 
 	seedHandoffAgentProfile(t, agentStore, f.callerAgentProfileID, callerRole, "", callerPermissions)
 	seedHandoffSourceTaskAndSession(t, repo, f.sourceWorkspaceID, f.sourceTaskID, f.sourceSessionID, f.callerAgentProfileID)
