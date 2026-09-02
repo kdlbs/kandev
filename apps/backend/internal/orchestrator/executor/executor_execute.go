@@ -98,7 +98,29 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	if allowTitleTool && surface == mcpprofile.SurfaceKanbanTask && models.IsAgentTitleOwner(task.Metadata, session.ID) {
 		capabilities = append(capabilities, mcpprofile.CapabilityTaskTitle)
 	}
+	if surface == mcpprofile.SurfaceOfficeTask {
+		granted, err := e.AgentHasHandoffPermission(ctx, session.AgentProfileID)
+		if err != nil {
+			e.logger.Warn("resolve handoff permission for MCP profile failed",
+				zap.String("task_id", taskID), zap.Error(err))
+		} else if granted {
+			capabilities = append(capabilities, mcpprofile.CapabilityHandoffTask)
+		}
+	}
 	return mcpprofile.New(surface, capabilities, nil), nil
+}
+
+// AgentHasHandoffPermission reports whether the agent profile has the
+// can_handoff_tasks permission, via the wired HandoffPermissionResolver.
+// Returns false, nil when no resolver is wired (the seam is optional). Public
+// so orchestrator.Service can expose the same check to non-launch call sites
+// that decide whether to advertise handoff_task_kandev in the first-turn
+// prompt (AC-3), without duplicating the resolver call.
+func (e *Executor) AgentHasHandoffPermission(ctx context.Context, agentProfileID string) (bool, error) {
+	if e.handoffPerms == nil {
+		return false, nil
+	}
+	return e.handoffPerms.AgentHasHandoffPermission(ctx, agentProfileID)
 }
 
 // isContainerizedExecutor returns true for executor types that run agents in

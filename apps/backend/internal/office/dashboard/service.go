@@ -161,6 +161,11 @@ type ProjectBudgetEvaluator interface {
 // activity row is logged with an empty run_id. Mirrors channels.RunResolver.
 type RunResolver interface {
 	ResolveRunForTask(ctx context.Context, taskID string) string
+	// ResolveRunForTaskAndSession is like ResolveRunForTask but additionally
+	// requires the claimed run's own session id to match sessionID, so a
+	// caller acting on behalf of one session never gets attributed to a
+	// different agent's in-flight run on the same task.
+	ResolveRunForTaskAndSession(ctx context.Context, taskID, sessionID string) string
 }
 
 // TaskCanceller hard-cancels a task's active execution. Used by the
@@ -496,6 +501,31 @@ func (s *DashboardService) SetRunResolver(r RunResolver) {
 // when unset, UpdateTaskProjectID does not check budgets.
 func (s *DashboardService) SetProjectBudgetEvaluator(e ProjectBudgetEvaluator) {
 	s.projectBudget = e
+}
+
+// ResolveRunForTaskAndSession passes through to the wired RunResolver,
+// returning "" when no resolver is wired or no matching claimed run exists.
+// Exposed so MCP handlers (which only hold a *DashboardService reference,
+// not the underlying office service) can attribute activity rows they log
+// from a tool call to the calling agent's own in-flight run.
+func (s *DashboardService) ResolveRunForTaskAndSession(ctx context.Context, taskID, sessionID string) string {
+	if s.runResolver == nil {
+		return ""
+	}
+	return s.runResolver.ResolveRunForTaskAndSession(ctx, taskID, sessionID)
+}
+
+// LogActivityWithRun passes through to the wired activity logger. A no-op
+// when no logger is wired. Exposed for the same reason as
+// ResolveRunForTaskAndSession above.
+func (s *DashboardService) LogActivityWithRun(
+	ctx context.Context,
+	workspaceID, actorType, actorID, action, targetType, targetID, details, runID, sessionID string,
+) {
+	if s.activity == nil {
+		return
+	}
+	s.activity.LogActivityWithRun(ctx, workspaceID, actorType, actorID, action, targetType, targetID, details, runID, sessionID)
 }
 
 // LogTaskStateChange records a task state transition for Office tasks before

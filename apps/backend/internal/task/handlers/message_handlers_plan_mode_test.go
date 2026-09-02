@@ -113,6 +113,10 @@ func (o *planModeRecordingOrchestrator) SteerTask(_ context.Context, _, sessionI
 	return &orchestrator.PromptResult{}, nil
 }
 
+func (*planModeRecordingOrchestrator) AgentHasHandoffPermission(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 func (o *planModeRecordingOrchestrator) StartCreatedSession(_ context.Context, _, sessionID, _, _ string, _, _, _ bool, _ []v1.MessageAttachment, _ []v1.EntityReference) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()

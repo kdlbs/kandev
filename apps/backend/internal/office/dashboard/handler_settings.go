@@ -164,6 +164,12 @@ func allPermissionMeta() []PermissionMeta {
 			Type:        "bool",
 		},
 		{
+			Key:         shared.PermCanHandoffTasks,
+			Label:       "Hand off tasks",
+			Description: "Allow this agent to hand off work to another workspace",
+			Type:        "bool",
+		},
+		{
 			Key:         shared.PermMaxSubtaskDepth,
 			Label:       "Max subtask depth",
 			Description: "Maximum depth of subtasks this agent can create",
