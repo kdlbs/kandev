@@ -205,6 +205,8 @@
   "configSyncRemoved": "Sincronização de configuração removida",
   "configSyncRemoveFailed": "Falha ao remover a sincronização de configuração: {{error}}",
   "configSyncActiveGuardReason": "A sincronização de configuração é a origem ativa da configuração deste espaço de trabalho.",
+  "configSyncWarningsRemainder_one": "Mais {{count}} aviso",
+  "configSyncWarningsRemainder_other": "Mais {{count}} avisos",
   "configuration": "Configuração",
   "configure": "Configurar",
   "configured": "Configurado",

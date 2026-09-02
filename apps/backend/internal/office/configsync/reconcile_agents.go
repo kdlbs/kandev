@@ -3,6 +3,7 @@ package configsync
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -159,41 +160,57 @@ func agentOps(ctx context.Context, repo *sqlite.Repository, workspaceID string) 
 const maxReportsToHops = 50
 
 // resolveAgentReportsTo runs config sync's second pass
-// (AC-OFFICE-CONFIG-SYNC-003.9a/.9b/.9c, .10/.10b): after every fetched
-// agent in this run has been created or confirmed existing (idsByKey),
-// resolve each declared reports_to name to its target's ID and write it. A
-// name outside idsByKey (an agent not managed by this run's fetched set), a
-// self-reference, or a cycle is left unset with a warning instead of
-// resolved — allowExternalManagers is always false.
+// (AC-OFFICE-CONFIG-SYNC-003.9a/.9b/.9c, .10/.10b): reports_to is owned by
+// sync like any other field on an applied agent (AC-OFFICE-CONFIG-SYNC-003.5d),
+// so every agent this run created or confirmed existing (idsByKey) gets its
+// field resolved and written, not only the ones with a currently non-empty
+// declaration — an agent whose file dropped the field, or replaced it with a
+// self-reference or a cycle, must have a stale DB value cleared, not left in
+// place. A name outside idsByKey (an agent not managed by this run's fetched
+// set), a self-reference, or a cycle resolves to empty with a warning instead
+// of a target ID — allowExternalManagers is always false.
 func resolveAgentReportsTo(
 	ctx context.Context, repo *sqlite.Repository, reportsTo map[string]string, idsByKey map[string]string,
 ) []string {
+	keys := make([]string, 0, len(idsByKey))
+	for key := range idsByKey {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
 	var warnings []string
-	for key, target := range reportsTo {
-		id, ok := idsByKey[key]
-		if !ok {
-			continue
-		}
-		switch {
-		case target == key:
-			warnings = append(warnings, fmt.Sprintf("agent %q: reports_to is a self-reference; leaving unset", key))
-			continue
-		case detectReportsToCycle(key, target, reportsTo):
-			warnings = append(warnings, fmt.Sprintf(
-				"agent %q: reports_to %q would create a cycle; leaving unset", key, target))
-			continue
-		}
-		targetID, ok := idsByKey[target]
-		if !ok {
-			warnings = append(warnings, fmt.Sprintf(
-				"agent %q: reports_to %q is not managed by this sync; leaving unset", key, target))
-			continue
+	for _, key := range keys {
+		id := idsByKey[key]
+		targetID, warning := resolveOneAgentReportsTo(key, reportsTo, idsByKey)
+		if warning != "" {
+			warnings = append(warnings, warning)
 		}
 		if err := repo.UpdateAgentReportsTo(ctx, id, targetID); err != nil {
 			warnings = append(warnings, fmt.Sprintf("agent %q: failed to set reports_to: %v", key, err))
 		}
 	}
 	return warnings
+}
+
+// resolveOneAgentReportsTo resolves one agent's reports_to declaration
+// against this run's fetched set, returning the target entity ID to write
+// (empty when the field must be cleared) and, when clearing is not simply
+// "no declaration", the warning explaining why.
+func resolveOneAgentReportsTo(key string, reportsTo, idsByKey map[string]string) (targetID, warning string) {
+	target, declared := reportsTo[key]
+	switch {
+	case !declared:
+		return "", ""
+	case target == key:
+		return "", fmt.Sprintf("agent %q: reports_to is a self-reference; leaving unset", key)
+	case detectReportsToCycle(key, target, reportsTo):
+		return "", fmt.Sprintf("agent %q: reports_to %q would create a cycle; leaving unset", key, target)
+	}
+	targetID, ok := idsByKey[target]
+	if !ok {
+		return "", fmt.Sprintf("agent %q: reports_to %q is not managed by this sync; leaving unset", key, target)
+	}
+	return targetID, ""
 }
 
 // detectReportsToCycle walks the reports_to chain starting at target,

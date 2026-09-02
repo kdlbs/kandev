@@ -1,8 +1,10 @@
 package configsync
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"net/url"
 
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
@@ -45,10 +47,20 @@ func classifyFetchErr(err error) error {
 	if errors.As(err, &glErr) {
 		return classifyStatusCode(glErr.StatusCode, err)
 	}
-	// A transport-level failure (DNS, timeout, connection reset) or any
-	// other error shape the client returned bare. Neither "not found" nor
-	// obviously an auth/rate-limit condition, so it falls to the residue
-	// class rather than being guessed at.
+	// AC-OFFICE-CONFIG-SYNC-002.4a: a timeout or transport failure (DNS,
+	// connection reset, TLS, a context deadline) is Unavailable, not residue
+	// — the repository could not be reached at all. Both PAT clients' get()
+	// wraps a bare http.Client.Do failure in *url.Error, which is what this
+	// checks for, rather than matching net.Error's Timeout() alone: a
+	// connection-refused error has no timeout but is equally "could not
+	// reach the provider".
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return joinNeutral(ErrUnavailable, err)
+	}
+	// Any other error shape the client returned bare — most commonly a
+	// response body it received but could not decode. The repository WAS
+	// reached, so this is residue rather than Unavailable.
 	return joinNeutral(ErrUnreadable, err)
 }
 

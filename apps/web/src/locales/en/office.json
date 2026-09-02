@@ -205,6 +205,8 @@
   "configSyncRemoved": "Config sync removed",
   "configSyncRemoveFailed": "Failed to remove config sync: {{error}}",
   "configSyncActiveGuardReason": "Config sync is the active configuration source for this workspace.",
+  "configSyncWarningsRemainder_one": "{{count}} more warning",
+  "configSyncWarningsRemainder_other": "{{count}} more warnings",
   "configuration": "Configuration",
   "configure": "Configure",
   "configured": "Configured",

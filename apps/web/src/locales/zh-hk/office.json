@@ -205,6 +205,8 @@
   "configSyncRemoved": "設定同步已移除",
   "configSyncRemoveFailed": "移除設定同步失敗：{{error}}",
   "configSyncActiveGuardReason": "設定同步是此工作區目前的活動設定來源。",
+  "configSyncWarningsRemainder_one": "另有 {{count}} 條警告",
+  "configSyncWarningsRemainder_other": "另有 {{count}} 條警告",
   "configuration": "設定",
   "configure": "設定",
   "configured": "已設定",

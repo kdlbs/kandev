@@ -146,6 +146,34 @@ describe("OfficeConfigSyncStatusCard — sync status and warnings", () => {
     expect(screen.getByText("skipped bad-agent.yaml: invalid identity")).toBeTruthy();
   });
 
+  it("caps rendered warnings at 10 and reports the remainder count", () => {
+    const warnings = Array.from({ length: 13 }, (_, i) => `warning ${i + 1}`);
+    render(
+      <OfficeConfigSyncStatusCard
+        config={config({ last_warnings: warnings })}
+        syncing={false}
+        onSyncNow={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("warning 1")).toBeTruthy();
+    expect(screen.getByText("warning 10")).toBeTruthy();
+    expect(screen.queryByText("warning 11")).toBeNull();
+    expect(screen.getByText("3 more warnings")).toBeTruthy();
+  });
+
+  it("does not render a remainder note when there are 10 or fewer warnings", () => {
+    const warnings = Array.from({ length: 10 }, (_, i) => `warning ${i + 1}`);
+    render(
+      <OfficeConfigSyncStatusCard
+        config={config({ last_warnings: warnings })}
+        syncing={false}
+        onSyncNow={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("warning 10")).toBeTruthy();
+    expect(screen.queryByText(/more warning/)).toBeNull();
+  });
+
   it("disables Sync now while a sync is already in flight", () => {
     render(<OfficeConfigSyncStatusCard config={config()} syncing={true} onSyncNow={vi.fn()} />);
     expect((screen.getByTestId("office-config-sync-now") as HTMLButtonElement).disabled).toBe(true);

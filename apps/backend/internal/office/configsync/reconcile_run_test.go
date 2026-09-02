@@ -2,11 +2,17 @@ package configsync
 
 import (
 	"context"
+	"strings"
 	"testing"
 
-	"github.com/kandev/kandev/internal/github"
+	"github.com/jmoiron/sqlx"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
 // seedTestConfig creates the config row Reconcile's RecordSyncStatus writes
@@ -141,6 +147,90 @@ func TestReconcile_WalkFailureRecordsFailureAndReturnsError(t *testing.T) {
 	require.NotNil(t, cfg)
 	assert.False(t, cfg.LastOk)
 	assert.NotEmpty(t, cfg.LastError)
+}
+
+func TestReconcile_FailureIsRecordedEvenWhenCallerContextAlreadyExpired(t *testing.T) {
+	// AC-OFFICE-CONFIG-SYNC-004.4a: a run abandoned at its deadline must
+	// still be recorded as a failure. The status write cannot reuse the
+	// run's own (expired) context, or the write itself fails silently.
+	repo, store := newReconcileTestRepo(t)
+	seedTestConfig(t, store, "ws-1", "cfg")
+
+	fg := newFakeGitHub() // no "cfg" dir registered: root listing 404s.
+	runner := NewRunner(fg, nil, repo, store)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // expired/canceled before Reconcile does any work
+
+	result, err := runner.Reconcile(ctx, newRunnerTestConfig("ws-1", "cfg"))
+	require.Error(t, err)
+	assert.Nil(t, result)
+
+	cfg, getErr := store.GetConfigForWorkspace(context.Background(), "ws-1")
+	require.NoError(t, getErr)
+	require.NotNil(t, cfg)
+	assert.False(t, cfg.LastOk)
+	assert.NotEmpty(t, cfg.LastError, "the failure must be recorded even though the caller's context was already done")
+}
+
+func TestReconcile_ApplyFailureRecordsWarningsAccumulatedBeforeIt(t *testing.T) {
+	// AC-OFFICE-CONFIG-SYNC-004.5b: when a later kind's write fails mid-apply,
+	// warnings already produced by prior parse/fetch phases must still be
+	// recorded with the failure, not discarded.
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	require.NoError(t, err)
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+	_, _, err = settingsstore.Provide(db, db, nil)
+	require.NoError(t, err)
+	repo, err := sqlite.NewWithDB(db, db, nil)
+	require.NoError(t, err)
+	store, err := NewStore(db, db)
+	require.NoError(t, err)
+
+	// Simulates a write failure for one specific agent name, so the run
+	// fails partway through the agent kind after another agent file has
+	// already produced a parse-phase warning during buildKindsFetch.
+	_, err = db.Exec(`
+		CREATE TRIGGER fail_agent_boom BEFORE INSERT ON agent_profiles
+		WHEN NEW.name = 'boom'
+		BEGIN
+			SELECT RAISE(FAIL, 'forced failure for test');
+		END;
+	`)
+	require.NoError(t, err)
+
+	seedTestConfig(t, store, "ws-1", "cfg")
+
+	fg := newFakeGitHub()
+	fg.dirs["cfg"] = []github.RepoContentEntry{}
+	fg.dirs["cfg/agents"] = []github.RepoContentEntry{
+		fileEntry("cfg/agents/other.yml"),
+		fileEntry("cfg/agents/boom.yml"),
+	}
+	fg.files["cfg/agents/other.yml"] = []byte("name: Mismatch\nrole: manager\n")
+	fg.files["cfg/agents/boom.yml"] = []byte("name: boom\nrole: contributor\n")
+
+	runner := NewRunner(fg, nil, repo, store)
+	ctx := context.Background()
+
+	result, reconcileErr := runner.Reconcile(ctx, newRunnerTestConfig("ws-1", "cfg"))
+	require.Error(t, reconcileErr)
+	assert.Nil(t, result)
+
+	cfg, getErr := store.GetConfigForWorkspace(ctx, "ws-1")
+	require.NoError(t, getErr)
+	require.NotNil(t, cfg)
+	assert.False(t, cfg.LastOk)
+	require.NotEmpty(t, cfg.LastWarnings, "the parse-phase warning produced before the failing kind must survive")
+
+	found := false
+	for _, w := range cfg.LastWarnings {
+		if strings.Contains(w, "other.yml") {
+			found = true
+		}
+	}
+	assert.True(t, found, "expected the stem-mismatch warning for other.yml among recorded warnings, got %v", cfg.LastWarnings)
 }
 
 func TestReconcile_UnreadableAgentFileExemptsOnlyThatEntityFromDeletion(t *testing.T) {

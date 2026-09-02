@@ -80,7 +80,8 @@ type Config struct {
 // workflow sync's Normalize, which rewrites both onto a non-empty default
 // and so can never address a repository root.
 type SetConfigRequest struct {
-	// Provider is optional; an empty value means ProviderGitHub.
+	// Provider is required and must be ProviderGitHub or ProviderGitLab; an
+	// omitted value is rejected rather than defaulted.
 	Provider        string  `json:"provider"`
 	RepoOwner       string  `json:"repo_owner"`
 	RepoName        string  `json:"repo_name"`
@@ -133,7 +134,7 @@ func hasValidBranchRunes(branch string) bool {
 func (r *SetConfigRequest) normalizeTarget() error {
 	r.Provider = strings.TrimSpace(r.Provider)
 	if r.Provider == "" {
-		r.Provider = ProviderGitHub
+		return fmt.Errorf("%w: provider is required and must be %q or %q", ErrInvalidConfig, ProviderGitHub, ProviderGitLab)
 	}
 	r.RepoOwner = strings.TrimSpace(r.RepoOwner)
 	r.RepoName = strings.TrimSpace(r.RepoName)

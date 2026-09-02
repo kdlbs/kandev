@@ -26,7 +26,7 @@ func TestPostgresNewStore_SchemaInit(t *testing.T) {
 	store, err := NewStore(db, db)
 	require.NoError(t, err)
 
-	req := &SetConfigRequest{RepoOwner: "acme", RepoName: "kandev-config"}
+	req := &SetConfigRequest{Provider: ProviderGitHub, RepoOwner: "acme", RepoName: "kandev-config"}
 	require.NoError(t, req.Normalize())
 
 	cfg, err := store.UpsertConfigForWorkspace(ctx, "pg-ws-1", req)

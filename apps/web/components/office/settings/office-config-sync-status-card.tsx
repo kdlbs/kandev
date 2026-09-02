@@ -66,8 +66,16 @@ function MetadataLine({ config }: { config: OfficeConfigSyncConfig }) {
   return <p className="text-xs text-muted-foreground">{parts.join(" · ")}</p>;
 }
 
+// MAX_VISIBLE_WARNINGS caps the rendered warning list (AC-OFFICE-CONFIG-SYNC-006.3):
+// at most the first 10, in the recorded order, with a count of any beyond
+// that rather than an unbounded list.
+const MAX_VISIBLE_WARNINGS = 10;
+
 function WarningsAlert({ warnings }: { warnings: string[] }) {
+  const { t } = useTranslation();
   if (warnings.length === 0) return null;
+  const visible = warnings.slice(0, MAX_VISIBLE_WARNINGS);
+  const remainder = warnings.length - visible.length;
   return (
     <Alert
       data-testid="office-config-sync-warnings"
@@ -76,12 +84,17 @@ function WarningsAlert({ warnings }: { warnings: string[] }) {
       <IconAlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
       <AlertDescription className="text-sm">
         <ul className="list-disc pl-4 space-y-0.5">
-          {warnings.map((warning, index) => (
+          {visible.map((warning, index) => (
             // Warnings are free-form backend sentences with no stable id;
             // include the index so repeated sentences keep unique keys.
             <li key={`${index}-${warning}`}>{warning}</li>
           ))}
         </ul>
+        {remainder > 0 && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t("office:configSyncWarningsRemainder", { count: remainder })}
+          </p>
+        )}
       </AlertDescription>
     </Alert>
   );

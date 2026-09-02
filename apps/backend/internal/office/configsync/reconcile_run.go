@@ -17,6 +17,21 @@ import (
 // grow the warnings column without bound.
 const maxRecordedWarnings = 100
 
+// recordWriteTimeout bounds the status-recording write derived from a
+// caller context that may already be canceled or past its deadline.
+const recordWriteTimeout = 5 * time.Second
+
+// recordWriteContext detaches the status-recording write from ctx's own
+// cancellation and deadline. By the time a run's outcome is known, ctx may
+// already be past the AC-OFFICE-CONFIG-SYNC-004.4a run deadline or canceled
+// by its caller — reusing it for the write that records that very outcome
+// would make the write fail immediately and silently, leaving the deadline
+// or cancellation unrecorded. context.WithoutCancel keeps ctx's values
+// (tracing, etc.) without its Done/Err.
+func recordWriteContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), recordWriteTimeout)
+}
+
 // Runner executes config sync runs: walk the configured repository, parse
 // and reconcile every kind, and record the outcome.
 type Runner struct {
@@ -51,14 +66,20 @@ func (r *Runner) Reconcile(ctx context.Context, cfg *Config) (*SyncResult, error
 		return nil, err
 	}
 
-	result, err := r.apply(ctx, cfg.WorkspaceID, normalizePathFrame(cfg.Path), wr, manifest)
-	if err != nil {
-		r.recordFailure(ctx, cfg.WorkspaceID, err.Error(), nil)
-		return nil, err
+	result, applyErr := r.apply(ctx, cfg.WorkspaceID, normalizePathFrame(cfg.Path), wr, manifest)
+	if applyErr != nil {
+		var warnings []string
+		if result != nil {
+			warnings = result.Warnings
+		}
+		r.recordFailure(ctx, cfg.WorkspaceID, applyErr.Error(), capWarnings(append(warnings, applyErr.Error())))
+		return nil, applyErr
 	}
 
+	writeCtx, cancel := recordWriteContext(ctx)
+	defer cancel()
 	if err := r.store.RecordSyncStatus(
-		ctx, cfg.WorkspaceID, true, "", result.Warnings, computeRunHash(wr), time.Now().UTC(),
+		writeCtx, cfg.WorkspaceID, true, "", result.Warnings, computeRunHash(wr), time.Now().UTC(),
 	); err != nil {
 		return nil, err
 	}
@@ -66,7 +87,9 @@ func (r *Runner) Reconcile(ctx context.Context, cfg *Config) (*SyncResult, error
 }
 
 func (r *Runner) recordFailure(ctx context.Context, workspaceID, errMsg string, warnings []string) {
-	_ = r.store.RecordSyncStatus(ctx, workspaceID, false, errMsg, warnings, "", time.Now().UTC())
+	writeCtx, cancel := recordWriteContext(ctx)
+	defer cancel()
+	_ = r.store.RecordSyncStatus(writeCtx, workspaceID, false, errMsg, warnings, "", time.Now().UTC())
 }
 
 // kindsFetch is every kind's collision-resolved fetched set and deletion-
@@ -142,10 +165,10 @@ func (r *Runner) apply(
 
 	kr, err := r.forwardPass(ctx, workspaceID, kf, byKind, phases)
 	if err != nil {
-		return nil, err
+		return &SyncResult{Warnings: partialWarnings(phases, kr)}, err
 	}
 	if err := r.reversePass(ctx, workspaceID, kf, byKind, kr); err != nil {
-		return nil, err
+		return &SyncResult{Warnings: partialWarnings(phases, kr)}, err
 	}
 
 	result := &SyncResult{}
@@ -169,6 +192,23 @@ func (r *Runner) apply(
 	return result, nil
 }
 
+// partialWarnings assembles the warnings accumulated so far when
+// forwardPass or reversePass fails mid-apply (AC-OFFICE-CONFIG-SYNC-004.5b):
+// phases already holds every walk/fetch/parse-phase warning, and kr — even
+// when forwardPass returns it alongside an error — holds whichever kinds'
+// apply-phase warnings were produced before the failing kind. kr is nil only
+// when the very first kind (skills) failed before producing a result.
+func partialWarnings(phases *phaseWarnings, kr *kindsResult) []string {
+	if kr != nil {
+		for _, kres := range []*kindApplyResult{kr.agent, kr.project, kr.routine, kr.skill} {
+			if kres != nil {
+				phases.apply = append(phases.apply, kres.Warnings...)
+			}
+		}
+	}
+	return capWarnings(phases.all())
+}
+
 // forwardPass runs every kind's creates/updates in AC-OFFICE-CONFIG-SYNC-003.9
 // order (skills, agents, projects, routines), then resolves agent reports_to
 // (AC-OFFICE-CONFIG-SYNC-003.9b) — the one within-kind reference this run
@@ -181,17 +221,17 @@ func (r *Runner) forwardPass(
 
 	var err error
 	if kr.skill, err = applySkillsCreatesOnly(ctx, r.repo, r.store, workspaceID, kf.skill, byKind[kindSkill]); err != nil {
-		return nil, err
+		return kr, err
 	}
 	if kr.agent, err = applyKindCreatesOnly(ctx, writer, r.store, agentOps(ctx, r.repo, workspaceID), workspaceID, kf.agent, byKind[kindAgent]); err != nil {
-		return nil, err
+		return kr, err
 	}
 	phases.reference = append(phases.reference, resolveAgentReportsTo(ctx, r.repo, kf.reportsTo, kr.agent.IDsByKey)...)
 	if kr.project, err = applyKindCreatesOnly(ctx, writer, r.store, projectOps(r.repo), workspaceID, kf.project, byKind[kindProject]); err != nil {
-		return nil, err
+		return kr, err
 	}
 	if kr.routine, err = applyKindCreatesOnly(ctx, writer, r.store, routineOps(r.repo), workspaceID, kf.routine, byKind[kindRoutine]); err != nil {
-		return nil, err
+		return kr, err
 	}
 	return kr, nil
 }

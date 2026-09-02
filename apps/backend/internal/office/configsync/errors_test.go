@@ -1,8 +1,11 @@
 package configsync
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/kandev/kandev/internal/github"
@@ -58,14 +61,42 @@ func TestClassifyFetchErr_GitLab(t *testing.T) {
 	}
 }
 
-func TestClassifyFetchErr_TransportErrorIsResidue(t *testing.T) {
-	src := errors.New("dial tcp: connection refused")
+func TestClassifyFetchErr_TransportFailureIsUnavailable(t *testing.T) {
+	// Both PAT clients' get() wraps a bare http.Client.Do failure (DNS,
+	// connection refused, TLS, timeout) as fmt.Errorf("request %s: %w", ...)
+	// around the *url.Error http.Client.Do itself returns. Reproduce that
+	// exact shape rather than a bare errors.New, so this test would have
+	// caught the misclassification it once let through.
+	urlErr := &url.Error{Op: "Get", URL: "https://api.github.com/x", Err: errors.New("dial tcp: connection refused")}
+	src := fmt.Errorf("request %s: %w", "/repos/o/r/contents/x", urlErr)
 	got := classifyFetchErr(src)
-	if !errors.Is(got, ErrUnreadable) {
-		t.Fatalf("classifyFetchErr(transport) = %v, want ErrUnreadable", got)
+	if !errors.Is(got, ErrUnavailable) {
+		t.Fatalf("classifyFetchErr(transport) = %v, want ErrUnavailable", got)
 	}
 	if !errors.Is(got, src) {
 		t.Errorf("classifyFetchErr(transport) lost the underlying cause via Unwrap")
+	}
+}
+
+func TestClassifyFetchErr_ContextDeadlineIsUnavailable(t *testing.T) {
+	urlErr := &url.Error{Op: "Get", URL: "https://gitlab.example.com/x", Err: context.DeadlineExceeded}
+	got := classifyFetchErr(fmt.Errorf("request %s: %w", "/projects/1/repository/tree", urlErr))
+	if !errors.Is(got, ErrUnavailable) {
+		t.Fatalf("classifyFetchErr(deadline) = %v, want ErrUnavailable", got)
+	}
+}
+
+func TestClassifyFetchErr_UntypedDecodeFailureIsResidue(t *testing.T) {
+	// A response body the provider client returns but cannot decode (e.g. a
+	// malformed JSON payload) is an untyped error too, but the repository
+	// WAS reached — this must stay ErrUnreadable, not ErrUnavailable.
+	src := errors.New("invalid character 'x' looking for beginning of value")
+	got := classifyFetchErr(src)
+	if !errors.Is(got, ErrUnreadable) {
+		t.Fatalf("classifyFetchErr(decode failure) = %v, want ErrUnreadable", got)
+	}
+	if !errors.Is(got, src) {
+		t.Errorf("classifyFetchErr(decode failure) lost the underlying cause via Unwrap")
 	}
 }
 

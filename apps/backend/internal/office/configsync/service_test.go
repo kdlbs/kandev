@@ -75,6 +75,31 @@ func TestService_SyncWorkspace_NotConfiguredReturnsError(t *testing.T) {
 	assert.Nil(t, result)
 }
 
+func TestService_SyncWorkspace_AbandonedRunIsRecordedWhenContextAlreadyExpired(t *testing.T) {
+	// AC-OFFICE-CONFIG-SYNC-004.4a: a run abandoned before Runner.Reconcile
+	// ever starts (the caller's context expired while queued behind the
+	// per-workspace lock, or was already done on entry) must still be
+	// recorded as a failure, not silently return nothing.
+	svc, _, _ := newTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.SetConfigForWorkspace(ctx, "ws-1", testSetConfigRequest("cfg"))
+	require.NoError(t, err)
+
+	canceledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+
+	result, syncErr := svc.SyncWorkspace(canceledCtx, "ws-1")
+	require.Error(t, syncErr)
+	assert.Nil(t, result)
+
+	cfg, getErr := svc.GetConfigForWorkspace(ctx, "ws-1")
+	require.NoError(t, getErr)
+	require.NotNil(t, cfg)
+	assert.False(t, cfg.LastOk)
+	assert.NotEmpty(t, cfg.LastError, "an abandoned run must still be recorded as a failure")
+}
+
 func TestService_SyncWorkspace_HappyPathCreatesEntities(t *testing.T) {
 	svc, repo, fg := newTestService(t)
 	ctx := context.Background()

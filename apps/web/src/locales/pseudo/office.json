@@ -205,6 +205,8 @@
   "configSyncRemoved": "Ćōńƒĩĝ śŷńć ŕēḿōvēď",
   "configSyncRemoveFailed": "Ƒàĩĺēď ţō ŕēḿōvē ćōńƒĩĝ śŷńć: {{error}}",
   "configSyncActiveGuardReason": "Ćōńƒĩĝ śŷńć ĩś ţĥē àćţĩvē ćōńƒĩĝũŕàţĩōń śōũŕćē ƒōŕ ţĥĩś ŵōŕķśƥàćē.",
+  "configSyncWarningsRemainder_one": "{{count}} ḿōŕē ŵàŕńĩńĝ",
+  "configSyncWarningsRemainder_other": "{{count}} ḿōŕē ŵàŕńĩńĝś",
   "configuration": "Ćōńƒĩĝũŕàţĩōń",
   "configure": "Ćōńƒĩĝũŕē",
   "configured": "Ćōńƒĩĝũŕēď",

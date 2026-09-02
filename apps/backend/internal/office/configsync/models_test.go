@@ -7,8 +7,15 @@ import (
 
 func boolPtr(b bool) *bool { return &b }
 
-func TestSetConfigRequestNormalize_DefaultsToGitHub(t *testing.T) {
+func TestSetConfigRequestNormalize_RejectsOmittedProvider(t *testing.T) {
 	req := &SetConfigRequest{RepoOwner: "acme", RepoName: "kandev-config"}
+	if err := req.Normalize(); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("Normalize() error = %v, want ErrInvalidConfig", err)
+	}
+}
+
+func TestSetConfigRequestNormalize_FillsDefaultsWhenProviderGiven(t *testing.T) {
+	req := &SetConfigRequest{Provider: ProviderGitHub, RepoOwner: "acme", RepoName: "kandev-config"}
 	if err := req.Normalize(); err != nil {
 		t.Fatalf("Normalize() error = %v", err)
 	}
@@ -34,11 +41,11 @@ func TestSetConfigRequestNormalize_GitHubRequiresOwnerAndName(t *testing.T) {
 		name string
 		req  SetConfigRequest
 	}{
-		{"missing owner", SetConfigRequest{RepoName: "repo"}},
-		{"missing name", SetConfigRequest{RepoOwner: "owner"}},
-		{"owner with slash", SetConfigRequest{RepoOwner: "a/b", RepoName: "repo"}},
-		{"name with space", SetConfigRequest{RepoOwner: "owner", RepoName: "a b"}},
-		{"project_path set on github", SetConfigRequest{RepoOwner: "o", RepoName: "r", ProjectPath: "g/p"}},
+		{"missing owner", SetConfigRequest{Provider: ProviderGitHub, RepoName: "repo"}},
+		{"missing name", SetConfigRequest{Provider: ProviderGitHub, RepoOwner: "owner"}},
+		{"owner with slash", SetConfigRequest{Provider: ProviderGitHub, RepoOwner: "a/b", RepoName: "repo"}},
+		{"name with space", SetConfigRequest{Provider: ProviderGitHub, RepoOwner: "owner", RepoName: "a b"}},
+		{"project_path set on github", SetConfigRequest{Provider: ProviderGitHub, RepoOwner: "o", RepoName: "r", ProjectPath: "g/p"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -85,7 +92,7 @@ func TestSetConfigRequestNormalize_UnknownProvider(t *testing.T) {
 }
 
 func TestSetConfigRequestNormalize_NilPathMeansRepositoryRoot(t *testing.T) {
-	req := &SetConfigRequest{RepoOwner: "o", RepoName: "r", Path: nil}
+	req := &SetConfigRequest{Provider: ProviderGitHub, RepoOwner: "o", RepoName: "r", Path: nil}
 	if err := req.Normalize(); err != nil {
 		t.Fatalf("Normalize() error = %v", err)
 	}
@@ -114,7 +121,7 @@ func TestSetConfigRequestNormalize_PathValidation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := &SetConfigRequest{RepoOwner: "o", RepoName: "r", Path: &tt.path}
+			req := &SetConfigRequest{Provider: ProviderGitHub, RepoOwner: "o", RepoName: "r", Path: &tt.path}
 			err := req.Normalize()
 			if tt.wantErr && !errors.Is(err, ErrInvalidConfig) {
 				t.Fatalf("Normalize() error = %v, want ErrInvalidConfig", err)
@@ -140,7 +147,7 @@ func TestSetConfigRequestNormalize_IntervalBounds(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := &SetConfigRequest{RepoOwner: "o", RepoName: "r", IntervalSeconds: tt.interval}
+			req := &SetConfigRequest{Provider: ProviderGitHub, RepoOwner: "o", RepoName: "r", IntervalSeconds: tt.interval}
 			err := req.Normalize()
 			if tt.wantErr && !errors.Is(err, ErrInvalidConfig) {
 				t.Fatalf("Normalize() error = %v, want ErrInvalidConfig", err)
@@ -153,7 +160,7 @@ func TestSetConfigRequestNormalize_IntervalBounds(t *testing.T) {
 }
 
 func TestSetConfigRequestNormalize_PollEnabledExplicitFalse(t *testing.T) {
-	req := &SetConfigRequest{RepoOwner: "o", RepoName: "r", PollEnabled: boolPtr(false)}
+	req := &SetConfigRequest{Provider: ProviderGitHub, RepoOwner: "o", RepoName: "r", PollEnabled: boolPtr(false)}
 	if err := req.Normalize(); err != nil {
 		t.Fatalf("Normalize() error = %v", err)
 	}
@@ -163,7 +170,7 @@ func TestSetConfigRequestNormalize_PollEnabledExplicitFalse(t *testing.T) {
 }
 
 func TestSetConfigRequestNormalize_InvalidBranchName(t *testing.T) {
-	req := &SetConfigRequest{RepoOwner: "o", RepoName: "r", Branch: "-flag-looking"}
+	req := &SetConfigRequest{Provider: ProviderGitHub, RepoOwner: "o", RepoName: "r", Branch: "-flag-looking"}
 	if err := req.Normalize(); !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("Normalize() error = %v, want ErrInvalidConfig", err)
 	}

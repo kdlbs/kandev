@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -97,6 +98,67 @@ func TestDeleteWorkspaceUsesFreshDataDeletionTimeoutAfterGroupCleanup(t *testing
 		t.Fatalf("task deletion deadline = %v, want after group cleanup deadline %v",
 			taskSvc.deletedTaskDeadlines[0], groupCleaner.deadline)
 	}
+}
+
+// TestDeleteWorkspaceCleansUpConfigSyncData guards against config sync's own
+// tables (office_config_sync_configs, office_config_sync_manifest) surviving
+// a workspace delete: they carry no FK/cascade onto the workspace row, so
+// without this call a deleted workspace's poller would keep running and
+// could resurrect entities into it.
+func TestDeleteWorkspaceCleansUpConfigSyncData(t *testing.T) {
+	ctx := context.Background()
+	taskSvc := &fakeWorkspaceTaskService{
+		workspace: &taskmodels.Workspace{ID: "ws-delete", Name: "default"},
+		tasks:     []*taskmodels.Task{{ID: "task-1", WorkspaceID: "ws-delete"}},
+	}
+	configSyncCleaner := &fakeConfigSyncCleaner{}
+	svc := newTestService(t, service.ServiceOptions{
+		TaskWorkspace: taskSvc,
+		TaskCanceller: &fakeTaskCanceller{},
+	})
+	svc.SetConfigSyncCleaner(configSyncCleaner)
+
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("DeleteWorkspace: %v", err)
+	}
+	if configSyncCleaner.workspaceID != "ws-delete" {
+		t.Fatalf("config sync cleaner workspace = %q, want ws-delete", configSyncCleaner.workspaceID)
+	}
+}
+
+// TestDeleteWorkspaceFailsWhenConfigSyncCleanupFails asserts a config sync
+// cleanup failure aborts the deletion rather than being ignored, leaving the
+// workspace row (and the config sync rows the failed call couldn't clear)
+// in place for a retry.
+func TestDeleteWorkspaceFailsWhenConfigSyncCleanupFails(t *testing.T) {
+	ctx := context.Background()
+	taskSvc := &fakeWorkspaceTaskService{
+		workspace: &taskmodels.Workspace{ID: "ws-delete", Name: "default"},
+		tasks:     []*taskmodels.Task{{ID: "task-1", WorkspaceID: "ws-delete"}},
+	}
+	configSyncCleaner := &fakeConfigSyncCleaner{err: errors.New("boom")}
+	svc := newTestService(t, service.ServiceOptions{
+		TaskWorkspace: taskSvc,
+		TaskCanceller: &fakeTaskCanceller{},
+	})
+	svc.SetConfigSyncCleaner(configSyncCleaner)
+
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); err == nil {
+		t.Fatal("DeleteWorkspace: want error when config sync cleanup fails")
+	}
+	if taskSvc.deletedWorkspace != "" {
+		t.Fatalf("workspace row should not be deleted when config sync cleanup fails, got deletedWorkspace=%q", taskSvc.deletedWorkspace)
+	}
+}
+
+type fakeConfigSyncCleaner struct {
+	workspaceID string
+	err         error
+}
+
+func (f *fakeConfigSyncCleaner) DeleteConfigForWorkspace(_ context.Context, workspaceID string) error {
+	f.workspaceID = workspaceID
+	return f.err
 }
 
 type fakeWorkspaceTaskService struct {

@@ -205,6 +205,8 @@
   "configSyncRemoved": "配置同步已移除",
   "configSyncRemoveFailed": "移除配置同步失败：{{error}}",
   "configSyncActiveGuardReason": "配置同步是此工作区当前的活动配置来源。",
+  "configSyncWarningsRemainder_one": "另有 {{count}} 条警告",
+  "configSyncWarningsRemainder_other": "另有 {{count}} 条警告",
   "configuration": "配置",
   "configure": "配置",
   "configured": "已配置",

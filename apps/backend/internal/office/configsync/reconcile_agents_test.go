@@ -154,6 +154,54 @@ func TestResolveAgentReportsTo_ResolvesWithinThisRunsFetchedSet(t *testing.T) {
 	assert.Equal(t, res.IDsByKey["CEO"], dev.ReportsTo)
 }
 
+func TestResolveAgentReportsTo_ClearsWhenDeclarationRemoved(t *testing.T) {
+	repo, store := newReconcileTestRepo(t)
+	ctx := context.Background()
+
+	fetched := []fetchedEntity[sqlite.AgentInstanceConfigFields]{
+		{Key: "CEO", SourcePath: "agents/ceo.yml", Projection: sqlite.AgentInstanceConfigFields{Role: "manager", DesiredSkills: "[]"}},
+		{Key: "Dev", SourcePath: "agents/dev.yml", Projection: sqlite.AgentInstanceConfigFields{Role: "contributor", DesiredSkills: "[]"}},
+	}
+	res, err := applyKind(ctx, repo.Writer(), store, agentOps(ctx, repo, "ws-1"), "ws-1", fetched, nil, nil, false)
+	require.NoError(t, err)
+
+	// First run: Dev declares reports_to: CEO.
+	warnings := resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "CEO"}, res.IDsByKey)
+	assert.Empty(t, warnings)
+	dev, err := repo.GetAgentInstance(ctx, res.IDsByKey["Dev"])
+	require.NoError(t, err)
+	require.Equal(t, res.IDsByKey["CEO"], dev.ReportsTo)
+
+	// Second run: dev.yml no longer declares reports_to at all.
+	warnings = resolveAgentReportsTo(ctx, repo, map[string]string{}, res.IDsByKey)
+	assert.Empty(t, warnings)
+	dev, err = repo.GetAgentInstance(ctx, res.IDsByKey["Dev"])
+	require.NoError(t, err)
+	assert.Empty(t, dev.ReportsTo, "removing reports_to from the file must clear the DB field")
+}
+
+func TestResolveAgentReportsTo_ClearsOnNewlyUnresolvableReference(t *testing.T) {
+	repo, store := newReconcileTestRepo(t)
+	ctx := context.Background()
+
+	fetched := []fetchedEntity[sqlite.AgentInstanceConfigFields]{
+		{Key: "CEO", SourcePath: "agents/ceo.yml", Projection: sqlite.AgentInstanceConfigFields{Role: "manager", DesiredSkills: "[]"}},
+		{Key: "Dev", SourcePath: "agents/dev.yml", Projection: sqlite.AgentInstanceConfigFields{Role: "contributor", DesiredSkills: "[]"}},
+	}
+	res, err := applyKind(ctx, repo.Writer(), store, agentOps(ctx, repo, "ws-1"), "ws-1", fetched, nil, nil, false)
+	require.NoError(t, err)
+
+	warnings := resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "CEO"}, res.IDsByKey)
+	assert.Empty(t, warnings)
+
+	// Second run: dev.yml now declares a self-reference instead.
+	warnings = resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "Dev"}, res.IDsByKey)
+	require.Len(t, warnings, 1)
+	dev, err := repo.GetAgentInstance(ctx, res.IDsByKey["Dev"])
+	require.NoError(t, err)
+	assert.Empty(t, dev.ReportsTo, "a self-reference on a later run must clear a previously-resolved value")
+}
+
 func TestResolveAgentReportsTo_TargetOutsideThisRunLeavesUnsetWithWarning(t *testing.T) {
 	repo, store := newReconcileTestRepo(t)
 	ctx := context.Background()

@@ -2,6 +2,7 @@ package configsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -154,8 +155,22 @@ func (s *Service) SyncWorkspace(ctx context.Context, workspaceID string) (*SyncR
 	lock.Lock()
 	defer lock.Unlock()
 
+	// The run may already have been abandoned by the time the lock was
+	// acquired (queued behind another workspace's run past the deadline, or
+	// the caller's own context was already done on entry). Runner.Reconcile
+	// is never reached in that case, so nothing else records this outcome —
+	// without this check the run's failure vanishes silently instead of
+	// being recorded on the config row (AC-OFFICE-CONFIG-SYNC-004.4a).
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		s.recordAbandonedRun(ctx, workspaceID, ctxErr)
+		return nil, fmt.Errorf("config sync run for workspace %q abandoned: %w", workspaceID, ctxErr)
+	}
+
 	cfg, err := s.store.GetConfigForWorkspace(ctx, workspaceID)
 	if err != nil {
+		if isContextErr(err) {
+			s.recordAbandonedRun(ctx, workspaceID, err)
+		}
 		return nil, err
 	}
 	if cfg == nil {
@@ -165,6 +180,25 @@ func (s *Service) SyncWorkspace(ctx context.Context, workspaceID string) (*SyncR
 	result, err := s.runner.Reconcile(ctx, cfg)
 	recordSyncMetrics(s.logger, workspaceID, cfg.Provider, result, err)
 	return result, err
+}
+
+// isContextErr reports whether err is (or wraps) a context cancellation or
+// deadline error.
+func isContextErr(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+}
+
+// recordAbandonedRun records a failure for a run that never reached
+// Runner.Reconcile, using a write-safe context so the write itself does not
+// fail for the same reason the run was abandoned.
+func (s *Service) recordAbandonedRun(ctx context.Context, workspaceID string, cause error) {
+	writeCtx, cancel := recordWriteContext(ctx)
+	defer cancel()
+	msg := fmt.Sprintf("config sync run abandoned before it started: %v", cause)
+	if err := s.store.RecordSyncStatus(writeCtx, workspaceID, false, msg, nil, "", time.Now().UTC()); err != nil {
+		s.logger.Warn("failed to record abandoned config sync run",
+			zap.String("workspace_id", workspaceID), zap.Error(err))
+	}
 }
 
 // SyncDueConfigs runs a sync for every workspace whose poll interval has

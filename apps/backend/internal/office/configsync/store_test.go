@@ -27,7 +27,7 @@ func setupTestStore(t *testing.T) *Store {
 }
 
 func testRequest() *SetConfigRequest {
-	req := &SetConfigRequest{RepoOwner: "acme", RepoName: "kandev-config"}
+	req := &SetConfigRequest{Provider: ProviderGitHub, RepoOwner: "acme", RepoName: "kandev-config"}
 	if err := req.Normalize(); err != nil {
 		panic(err)
 	}
@@ -71,7 +71,7 @@ func TestStore_UpsertConfigForWorkspace_ResetsStatusOnReplace(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, store.RecordSyncStatus(ctx, "ws-1", true, "", nil, "hash-1", time.Now().UTC()))
 
-	req2 := &SetConfigRequest{RepoOwner: "acme", RepoName: "other-repo"}
+	req2 := &SetConfigRequest{Provider: ProviderGitHub, RepoOwner: "acme", RepoName: "other-repo"}
 	require.NoError(t, req2.Normalize())
 	cfg, err := store.UpsertConfigForWorkspace(ctx, "ws-1", req2)
 	require.NoError(t, err)
