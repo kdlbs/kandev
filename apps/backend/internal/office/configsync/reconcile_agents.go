@@ -171,7 +171,7 @@ const maxReportsToHops = 50
 // of a target ID — allowExternalManagers is always false.
 func resolveAgentReportsTo(
 	ctx context.Context, repo *sqlite.Repository, reportsTo map[string]string, idsByKey map[string]string,
-) []string {
+) ([]string, error) {
 	keys := make([]string, 0, len(idsByKey))
 	for key := range idsByKey {
 		keys = append(keys, key)
@@ -186,10 +186,10 @@ func resolveAgentReportsTo(
 			warnings = append(warnings, warning)
 		}
 		if err := repo.UpdateAgentReportsTo(ctx, id, targetID); err != nil {
-			warnings = append(warnings, fmt.Sprintf("agent %q: failed to set reports_to: %v", key, err))
+			return warnings, fmt.Errorf("agent %q: set reports_to: %w", key, err)
 		}
 	}
-	return warnings
+	return warnings, nil
 }
 
 // resolveOneAgentReportsTo resolves one agent's reports_to declaration

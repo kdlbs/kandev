@@ -182,8 +182,12 @@ func applyKindCreatesAndUpdates[P comparable](
 			_, ok := existingByID[manifestEntry.EntityID]
 			return ok
 		}()
-		_, unmanagedRow := existingByKey[fe.Key]
-		unmanagedHoldsKey := unmanagedRow && !inManifest
+		existingRow, hasExistingRow := existingByKey[fe.Key]
+		var trackedID string
+		if inManifest {
+			trackedID = manifestEntry.EntityID
+		}
+		unmanagedHoldsKey := hasExistingRow && existingRow.ID != trackedID
 
 		switch decideKey(true, inManifest, manifestEntityExists, unmanagedHoldsKey, false) {
 		case decisionForeign:

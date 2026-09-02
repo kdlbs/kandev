@@ -291,6 +291,34 @@ func TestApplyKind_KeyBothFetchedAndManifestedButEntityGoneIsTreatedAsNew(t *tes
 	assert.Equal(t, res.IDsByKey["ceo"], entries[0].EntityID)
 }
 
+func TestApplyKind_KeyBothFetchedAndManifestedButEntityGoneAndUnmanagedRowHoldsKeyIsForeign(t *testing.T) {
+	store, db := setupReconcileTestStore(t)
+	entities := newFakeEntities()
+	ctx := context.Background()
+
+	// The manifest still names an entity that no longer exists (deleted out
+	// of band), and a *different*, unmanaged entity was separately created
+	// under the same key. The manifest's stale pointer must not blind the
+	// collision check: this is AC-OFFICE-CONFIG-SYNC-003.7's Foreign case,
+	// not a fresh create.
+	unmanagedID := entities.seed("ceo", testProj{Value: "human-made"})
+	require.NoError(t, store.UpsertManifestEntry(ctx, "ws-1", "widget", "ceo", "ghost-id", "agents/ceo.yml"))
+	manifest, err := store.ListManifest(ctx, "ws-1")
+	require.NoError(t, err)
+
+	fetched := []fetchedEntity[testProj]{{Key: "ceo", SourcePath: "agents/ceo.yml", Projection: testProj{Value: "v1"}}}
+	res, err := applyKind(ctx, db, store, entities.ops(), "ws-1", fetched, manifest, nil, false)
+	require.NoError(t, err)
+
+	assert.Empty(t, res.Created, "must not silently create a duplicate")
+	require.Len(t, res.Warnings, 1)
+	assert.Contains(t, res.Warnings[0], "ceo")
+	assert.Len(t, entities.byID, 1, "the unmanaged row must be the only row left")
+	unmanagedRow, stillPresent := entities.byID[unmanagedID]
+	assert.True(t, stillPresent)
+	assert.Equal(t, testProj{Value: "human-made"}, unmanagedRow.Projection, "must not be adopted or modified")
+}
+
 func TestApplyKind_MultipleFetchedKeysAppliedInSourcePathOrder(t *testing.T) {
 	store, db := setupReconcileTestStore(t)
 	entities := newFakeEntities()

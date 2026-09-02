@@ -179,7 +179,7 @@ export function useOfficeConfigSync(workspaceId: string) {
               provider: "gitlab",
               project_path: form.project_path.trim(),
               branch: form.branch.trim(),
-              path: form.path.trim(),
+              path: form.path,
               interval_seconds: form.interval_seconds,
               poll_enabled: form.poll_enabled,
             }
@@ -188,7 +188,7 @@ export function useOfficeConfigSync(workspaceId: string) {
               repo_owner: form.repo_owner.trim(),
               repo_name: form.repo_name.trim(),
               branch: form.branch.trim(),
-              path: form.path.trim(),
+              path: form.path,
               interval_seconds: form.interval_seconds,
               poll_enabled: form.poll_enabled,
             };

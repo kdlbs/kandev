@@ -158,6 +158,74 @@ func TestApplySkills_LocatorChangedConcurrentlyWarnsAndLeavesRowUntouched(t *tes
 	assert.Equal(t, "Old Name", skills[0].Name, "CAS failure must leave the row untouched for the next run")
 }
 
+func TestApplySkills_StaleManifestAndUnmanagedRowHoldingKeyIsForeign(t *testing.T) {
+	repo, store := newReconcileTestRepo(t)
+	ctx := context.Background()
+
+	// A different, unmanaged skill already occupies the "reviewer" slug —
+	// created directly, never through sync (no manifest entry).
+	tx, err := repo.Writer().BeginTxx(ctx, nil)
+	require.NoError(t, err)
+	unmanagedID, err := CreateSkill(ctx, tx, repo.Writer(), "ws-1", "reviewer", "",
+		SkillProjection{Name: "Human Made", SourceType: models.SkillSourceTypeInline, Content: "human", FileInventory: "[]"})
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+
+	// The manifest still names an entity that no longer exists (deleted out
+	// of band), separate from the unmanaged row above.
+	require.NoError(t, store.UpsertManifestEntry(ctx, "ws-1", kindSkill, "reviewer", "ghost-id", "skills/reviewer"))
+	manifest, err := store.ListManifest(ctx, "ws-1")
+	require.NoError(t, err)
+
+	fetched := []fetchedSkill{{
+		Key: "reviewer", SourcePath: "skills/reviewer",
+		Proj: SkillProjection{Name: "Synced Name", SourceType: models.SkillSourceTypeInline, Content: "synced", FileInventory: "[]"},
+	}}
+	res, err := applySkills(ctx, repo, store, "ws-1", fetched, manifest, nil, false)
+	require.NoError(t, err)
+
+	assert.Empty(t, res.Created, "must not silently create a duplicate")
+	require.Len(t, res.Warnings, 1)
+	assert.Contains(t, res.Warnings[0], "reviewer")
+
+	skills, err := repo.ListSkills(ctx, "ws-1")
+	require.NoError(t, err)
+	require.Len(t, skills, 1)
+	assert.Equal(t, unmanagedID, skills[0].ID)
+	assert.Equal(t, "Human Made", skills[0].Name, "must not be adopted or modified")
+}
+
+func TestApplySkills_DeletionDatabaseFailureIsReturnedNotWarned(t *testing.T) {
+	repo, store := newReconcileTestRepo(t)
+	ctx := context.Background()
+
+	fetched := []fetchedSkill{{
+		Key: "reviewer", SourcePath: "skills/reviewer",
+		Proj: SkillProjection{Name: "Reviewer", SourceType: models.SkillSourceTypeInline, FileInventory: "[]"},
+	}}
+	_, err := applySkills(ctx, repo, store, "ws-1", fetched, nil, nil, false)
+	require.NoError(t, err)
+	manifest, err := store.ListManifest(ctx, "ws-1")
+	require.NoError(t, err)
+
+	_, err = repo.ExecRaw(ctx, `
+		CREATE TRIGGER fail_skill_delete BEFORE DELETE ON office_skills
+		WHEN OLD.slug = 'reviewer'
+		BEGIN
+			SELECT RAISE(FAIL, 'forced deletion failure for test');
+		END;
+	`)
+	require.NoError(t, err)
+
+	res, err := applySkills(ctx, repo, store, "ws-1", nil, manifest, nil, false)
+	require.Error(t, err, "a real DB failure deleting a managed skill must be a run failure, not a swallowed warning")
+	assert.Empty(t, res.Deleted)
+
+	skills, listErr := repo.ListSkills(ctx, "ws-1")
+	require.NoError(t, listErr)
+	require.Len(t, skills, 1, "the row must still exist since the delete never committed")
+}
+
 func TestApplySkills_RemovedUpstreamDeletesEntity(t *testing.T) {
 	repo, store := newReconcileTestRepo(t)
 	ctx := context.Background()

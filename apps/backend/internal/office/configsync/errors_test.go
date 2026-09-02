@@ -66,7 +66,10 @@ func TestClassifyFetchErr_TransportFailureIsUnavailable(t *testing.T) {
 	// connection refused, TLS, timeout) as fmt.Errorf("request %s: %w", ...)
 	// around the *url.Error http.Client.Do itself returns. Reproduce that
 	// exact shape rather than a bare errors.New, so this test would have
-	// caught the misclassification it once let through.
+	// caught the misclassification it once let through. This covers only the
+	// PAT-client transport shape — the gh-CLI client reports the same class
+	// of failure differently (see
+	// TestClassifyFetchErr_GHClientTransportFailureIsUnavailable below).
 	urlErr := &url.Error{Op: "Get", URL: "https://api.github.com/x", Err: errors.New("dial tcp: connection refused")}
 	src := fmt.Errorf("request %s: %w", "/repos/o/r/contents/x", urlErr)
 	got := classifyFetchErr(src)
@@ -75,6 +78,25 @@ func TestClassifyFetchErr_TransportFailureIsUnavailable(t *testing.T) {
 	}
 	if !errors.Is(got, src) {
 		t.Errorf("classifyFetchErr(transport) lost the underlying cause via Unwrap")
+	}
+}
+
+func TestClassifyFetchErr_GHClientTransportFailureIsUnavailable(t *testing.T) {
+	// GHClient.runGH wraps a non-timeout `gh` CLI failure bare (not as a
+	// *url.Error): fmt.Errorf("gh %s: %w: %s", firstArg(args), runErr,
+	// stderr.String()). A real network failure has no "HTTP nnn" / "status:
+	// nnn" text for ghClassifyContentsErr to match, so ListRepoDirectory and
+	// GetRepoFileContent fall back to this bare shape, and the stderr text is
+	// where the network-failure signal actually lives.
+	runErr := errors.New("exit status 1")
+	src := fmt.Errorf("gh %s: %w: %s", "repos/o/r/contents/agents", runErr,
+		"dial tcp: lookup api.github.com: no such host")
+	got := classifyFetchErr(src)
+	if !errors.Is(got, ErrUnavailable) {
+		t.Fatalf("classifyFetchErr(gh-CLI transport) = %v, want ErrUnavailable", got)
+	}
+	if !errors.Is(got, src) {
+		t.Errorf("classifyFetchErr(gh-CLI transport) lost the underlying cause via Unwrap")
 	}
 }
 

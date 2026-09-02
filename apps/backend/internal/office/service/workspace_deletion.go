@@ -79,7 +79,7 @@ func (s *Service) DeleteWorkspace(ctx context.Context, workspaceID string) error
 	}
 	if s.configSyncCleaner != nil {
 		configSyncCleanupCtx, cancelConfigSyncCleanup := workspaceDeletionPhaseContext(cleanupBaseCtx)
-		if err := s.configSyncCleaner.DeleteConfigForWorkspace(configSyncCleanupCtx, workspaceID); err != nil {
+		if err := s.configSyncCleaner.PurgeForWorkspaceDeletion(configSyncCleanupCtx, workspaceID); err != nil {
 			cancelConfigSyncCleanup()
 			return fmt.Errorf("clean config sync data: %w", err)
 		}

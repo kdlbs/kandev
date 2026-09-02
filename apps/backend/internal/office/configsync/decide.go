@@ -34,17 +34,21 @@ const (
 )
 
 // decideKey classifies one (kind, key) pair. manifestEntityExists is
-// meaningless when inManifest is false. unmanagedHoldsKey is meaningless
-// unless inFetched && !inManifest. exempt is meaningless unless
-// !inFetched && inManifest && manifestEntityExists.
+// meaningless when inManifest is false. unmanagedHoldsKey means some
+// existing entity other than the manifest's own tracked one already holds
+// this key; it is meaningless unless inFetched && (!inManifest ||
+// !manifestEntityExists). exempt is meaningless unless !inFetched &&
+// inManifest && manifestEntityExists.
 //
 // A key both fetched and manifest-recorded whose manifest entity no longer
 // exists is not one of the specification's six rows — that combination
 // requires an out-of-band delete of an entity a file *still defines* this
 // run, which the requirements do not name. This function folds it into
-// decisionNew: the stale manifest row is simply replaced by a freshly
-// created entity, the same net effect as a decisionGoneOutOfBand drop
-// immediately followed by a decisionNew in the same run.
+// decisionGoneOutOfBand immediately followed by re-evaluating the key as
+// unmanifested: if a different existing entity now holds the key, that is
+// AC-OFFICE-CONFIG-SYNC-003.7's Foreign collision, not a fresh create.
+// Otherwise the stale manifest row is simply replaced by a freshly created
+// entity.
 func decideKey(inFetched, inManifest, manifestEntityExists, unmanagedHoldsKey, exempt bool) applyDecision {
 	switch {
 	case inFetched && !inManifest:
@@ -54,6 +58,9 @@ func decideKey(inFetched, inManifest, manifestEntityExists, unmanagedHoldsKey, e
 		return decisionNew
 	case inFetched && inManifest:
 		if !manifestEntityExists {
+			if unmanagedHoldsKey {
+				return decisionForeign
+			}
 			return decisionNew
 		}
 		return decisionExisting

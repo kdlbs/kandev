@@ -123,6 +123,25 @@ describe("useOfficeConfigSync — save/delete", () => {
     expect(mockToastSuccess).toHaveBeenCalled();
   });
 
+  it("handleSave sends path verbatim, without trimming whitespace", async () => {
+    getOfficeConfigSyncConfigMock.mockResolvedValue(null);
+    setOfficeConfigSyncConfigMock.mockRejectedValue(new Error("path must not be blank"));
+    const { result } = renderHook(() => useOfficeConfigSync("ws-1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => result.current.update("repo_owner", "kdlbs"));
+    act(() => result.current.update("repo_name", REPO_NAME));
+    act(() => result.current.update("path", "  office/ "));
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    expect(setOfficeConfigSyncConfigMock).toHaveBeenCalledWith(
+      "ws-1",
+      expect.objectContaining({ path: "  office/ " }),
+    );
+  });
+
   it("handleDelete clears config, resets the form, and refreshes the router", async () => {
     getOfficeConfigSyncConfigMock.mockResolvedValue(makeConfig());
     deleteOfficeConfigSyncConfigMock.mockResolvedValue({ deleted: true });

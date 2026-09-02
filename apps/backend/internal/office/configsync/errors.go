@@ -58,6 +58,13 @@ func classifyFetchErr(err error) error {
 	if errors.As(err, &urlErr) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return joinNeutral(ErrUnavailable, err)
 	}
+	// The gh-CLI client reports the same class of failure differently: a
+	// non-zero `gh` exit with no HTTP status in stderr, wrapped bare (not as
+	// a *url.Error) by GHClient.runGH. github.IsConnectivityError matches
+	// that shape by the network-failure text gh CLI prints to stderr.
+	if github.IsConnectivityError(err) {
+		return joinNeutral(ErrUnavailable, err)
+	}
 	// Any other error shape the client returned bare — most commonly a
 	// response body it received but could not decode. The repository WAS
 	// reached, so this is residue rather than Unavailable.

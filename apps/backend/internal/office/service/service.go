@@ -115,16 +115,18 @@ type WorkspaceGroupCleaner interface {
 	CleanupWorkspaceGroups(ctx context.Context, workspaceID string) error
 }
 
-// ConfigSyncCleaner releases config sync's ownership rows for a workspace
+// ConfigSyncCleaner removes config sync's ownership rows for a workspace
 // before DeleteWorkspace wipes the office repository (which owns every
 // entity config sync manages). office_config_sync_configs and
 // office_config_sync_manifest carry no FK/cascade onto the workspace row —
 // see the "Workspace deletion side tables" convention — so without this a
 // deleted workspace's poller keeps running and can resurrect entities into
-// it. Implemented by *configsync.Service; declared locally so this package
-// stays configsync-free.
+// it. This is a lock-free bulk delete, not the release-semantics unlink path:
+// the entities themselves are being deleted by this same workspace teardown,
+// so there is nothing to release them back to. Implemented by
+// *configsync.Service; declared locally so this package stays configsync-free.
 type ConfigSyncCleaner interface {
-	DeleteConfigForWorkspace(ctx context.Context, workspaceID string) error
+	PurgeForWorkspaceDeletion(ctx context.Context, workspaceID string) error
 }
 
 // TaskStarterFunc adapts a function to the TaskStarter interface.

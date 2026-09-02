@@ -146,7 +146,8 @@ func TestResolveAgentReportsTo_ResolvesWithinThisRunsFetchedSet(t *testing.T) {
 	require.NoError(t, err)
 
 	reportsTo := map[string]string{"Dev": "CEO"}
-	warnings := resolveAgentReportsTo(ctx, repo, reportsTo, res.IDsByKey)
+	warnings, err := resolveAgentReportsTo(ctx, repo, reportsTo, res.IDsByKey)
+	require.NoError(t, err)
 	assert.Empty(t, warnings)
 
 	dev, err := repo.GetAgentInstance(ctx, res.IDsByKey["Dev"])
@@ -166,14 +167,16 @@ func TestResolveAgentReportsTo_ClearsWhenDeclarationRemoved(t *testing.T) {
 	require.NoError(t, err)
 
 	// First run: Dev declares reports_to: CEO.
-	warnings := resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "CEO"}, res.IDsByKey)
+	warnings, err := resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "CEO"}, res.IDsByKey)
+	require.NoError(t, err)
 	assert.Empty(t, warnings)
 	dev, err := repo.GetAgentInstance(ctx, res.IDsByKey["Dev"])
 	require.NoError(t, err)
 	require.Equal(t, res.IDsByKey["CEO"], dev.ReportsTo)
 
 	// Second run: dev.yml no longer declares reports_to at all.
-	warnings = resolveAgentReportsTo(ctx, repo, map[string]string{}, res.IDsByKey)
+	warnings, err = resolveAgentReportsTo(ctx, repo, map[string]string{}, res.IDsByKey)
+	require.NoError(t, err)
 	assert.Empty(t, warnings)
 	dev, err = repo.GetAgentInstance(ctx, res.IDsByKey["Dev"])
 	require.NoError(t, err)
@@ -191,11 +194,13 @@ func TestResolveAgentReportsTo_ClearsOnNewlyUnresolvableReference(t *testing.T) 
 	res, err := applyKind(ctx, repo.Writer(), store, agentOps(ctx, repo, "ws-1"), "ws-1", fetched, nil, nil, false)
 	require.NoError(t, err)
 
-	warnings := resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "CEO"}, res.IDsByKey)
+	warnings, err := resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "CEO"}, res.IDsByKey)
+	require.NoError(t, err)
 	assert.Empty(t, warnings)
 
 	// Second run: dev.yml now declares a self-reference instead.
-	warnings = resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "Dev"}, res.IDsByKey)
+	warnings, err = resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "Dev"}, res.IDsByKey)
+	require.NoError(t, err)
 	require.Len(t, warnings, 1)
 	dev, err := repo.GetAgentInstance(ctx, res.IDsByKey["Dev"])
 	require.NoError(t, err)
@@ -212,10 +217,39 @@ func TestResolveAgentReportsTo_TargetOutsideThisRunLeavesUnsetWithWarning(t *tes
 	res, err := applyKind(ctx, repo.Writer(), store, agentOps(ctx, repo, "ws-1"), "ws-1", fetched, nil, nil, false)
 	require.NoError(t, err)
 
-	warnings := resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "NotManaged"}, res.IDsByKey)
+	warnings, err := resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "NotManaged"}, res.IDsByKey)
+	require.NoError(t, err)
 	require.Len(t, warnings, 1)
 
 	dev, err := repo.GetAgentInstance(ctx, res.IDsByKey["Dev"])
 	require.NoError(t, err)
 	assert.Empty(t, dev.ReportsTo)
+}
+
+func TestResolveAgentReportsTo_WriteDatabaseFailureIsReturnedNotWarned(t *testing.T) {
+	repo, store := newReconcileTestRepo(t)
+	ctx := context.Background()
+
+	fetched := []fetchedEntity[sqlite.AgentInstanceConfigFields]{
+		{Key: "CEO", SourcePath: "agents/ceo.yml", Projection: sqlite.AgentInstanceConfigFields{Role: "manager", DesiredSkills: "[]"}},
+		{Key: "Dev", SourcePath: "agents/dev.yml", Projection: sqlite.AgentInstanceConfigFields{Role: "contributor", DesiredSkills: "[]"}},
+	}
+	res, err := applyKind(ctx, repo.Writer(), store, agentOps(ctx, repo, "ws-1"), "ws-1", fetched, nil, nil, false)
+	require.NoError(t, err)
+
+	_, err = repo.ExecRaw(ctx, `
+		CREATE TRIGGER fail_reports_to_write BEFORE UPDATE OF reports_to ON agent_profiles
+		WHEN NEW.id = '`+res.IDsByKey["Dev"]+`'
+		BEGIN
+			SELECT RAISE(FAIL, 'forced reports_to write failure for test');
+		END;
+	`)
+	require.NoError(t, err)
+
+	_, err = resolveAgentReportsTo(ctx, repo, map[string]string{"Dev": "CEO"}, res.IDsByKey)
+	require.Error(t, err, "a real DB failure writing reports_to must be a run failure, not a swallowed warning")
+
+	dev, err := repo.GetAgentInstance(ctx, res.IDsByKey["Dev"])
+	require.NoError(t, err)
+	assert.Empty(t, dev.ReportsTo, "the write never committed, so the field must remain unset")
 }

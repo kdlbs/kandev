@@ -12,6 +12,7 @@ func TestDecideKey(t *testing.T) {
 		{"foreign: fetched only, unmanaged entity holds key", true, false, false, true, false, decisionForeign},
 		{"existing: fetched and manifested, entity present", true, true, true, false, false, decisionExisting},
 		{"new: fetched and manifested but manifest entity gone", true, true, false, false, false, decisionNew},
+		{"foreign: fetched and manifested but manifest entity gone, unmanaged row holds key", true, true, false, true, false, decisionForeign},
 		{"gone out of band: manifested only, entity gone", false, true, false, false, false, decisionGoneOutOfBand},
 		{"exempt: manifested only, entity present, exempt", false, true, true, false, true, decisionExempt},
 		{"removed upstream: manifested only, entity present, not exempt", false, true, true, false, false, decisionRemovedUpstream},

@@ -226,7 +226,11 @@ func (r *Runner) forwardPass(
 	if kr.agent, err = applyKindCreatesOnly(ctx, writer, r.store, agentOps(ctx, r.repo, workspaceID), workspaceID, kf.agent, byKind[kindAgent]); err != nil {
 		return kr, err
 	}
-	phases.reference = append(phases.reference, resolveAgentReportsTo(ctx, r.repo, kf.reportsTo, kr.agent.IDsByKey)...)
+	reportsToWarnings, reportsToErr := resolveAgentReportsTo(ctx, r.repo, kf.reportsTo, kr.agent.IDsByKey)
+	phases.reference = append(phases.reference, reportsToWarnings...)
+	if reportsToErr != nil {
+		return kr, reportsToErr
+	}
 	if kr.project, err = applyKindCreatesOnly(ctx, writer, r.store, projectOps(r.repo), workspaceID, kf.project, byKind[kindProject]); err != nil {
 		return kr, err
 	}

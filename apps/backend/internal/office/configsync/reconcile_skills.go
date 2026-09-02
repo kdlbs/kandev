@@ -126,7 +126,9 @@ func applySkills(
 	if err := applySkillCreatesAndUpdates(ctx, repo, store, workspaceID, fetched, manifestByKey, existingByKey, existingByID, res); err != nil {
 		return nil, err
 	}
-	applySkillDeletions(ctx, repo, store, workspaceID, fetchedByKey, manifest, existingByID, exemptKeys, coarseExempt, res)
+	if err := applySkillDeletions(ctx, repo, store, workspaceID, fetchedByKey, manifest, existingByID, exemptKeys, coarseExempt, res); err != nil {
+		return res, err
+	}
 	return res, nil
 }
 
@@ -177,8 +179,7 @@ func applySkillsDeletesOnly(
 	for _, f := range fetched {
 		fetchedByKey[f.Key] = f
 	}
-	applySkillDeletions(ctx, repo, store, workspaceID, fetchedByKey, manifest, existingByID, exemptKeys, coarseExempt, res)
-	return nil
+	return applySkillDeletions(ctx, repo, store, workspaceID, fetchedByKey, manifest, existingByID, exemptKeys, coarseExempt, res)
 }
 
 func applySkillCreatesAndUpdates(
@@ -192,8 +193,12 @@ func applySkillCreatesAndUpdates(
 	for _, fs := range ordered {
 		manifestEntry, inManifest := manifestByKey[fs.Key]
 		manifestEntityExists := inManifest && existingByID[manifestEntry.EntityID] != nil
-		_, unmanagedRow := existingByKey[fs.Key]
-		unmanagedHoldsKey := unmanagedRow && !inManifest
+		existingSkillRow, hasExistingRow := existingByKey[fs.Key]
+		var trackedID string
+		if inManifest {
+			trackedID = manifestEntry.EntityID
+		}
+		unmanagedHoldsKey := hasExistingRow && existingSkillRow.ID != trackedID
 
 		switch decideKey(true, inManifest, manifestEntityExists, unmanagedHoldsKey, false) {
 		case decisionForeign:
@@ -295,7 +300,7 @@ func applySkillDeletions(
 	ctx context.Context, repo *sqlite.Repository, store *Store, workspaceID string,
 	fetchedByKey map[string]fetchedSkill, manifest []ManifestEntry,
 	existingByID map[string]*models.Skill, exemptKeys map[string]bool, coarseExempt bool, res *kindApplyResult,
-) {
+) error {
 	ordered := append([]ManifestEntry(nil), manifest...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].EntityKey < ordered[j].EntityKey })
 
@@ -309,8 +314,7 @@ func applySkillDeletions(
 		switch decideKey(false, true, manifestEntityExists, false, exempt) {
 		case decisionGoneOutOfBand:
 			if err := store.DeleteManifestEntry(ctx, workspaceID, kindSkill, m.EntityKey); err != nil {
-				res.Warnings = append(res.Warnings, fmt.Sprintf(
-					"skill %q: failed to drop stale manifest entry: %v", m.EntityKey, err))
+				return fmt.Errorf("drop stale manifest entry for skill %q: %w", m.EntityKey, err)
 			}
 		case decisionExempt:
 			res.Warnings = append(res.Warnings, fmt.Sprintf(
@@ -318,12 +322,12 @@ func applySkillDeletions(
 				m.EntityKey))
 		case decisionRemovedUpstream:
 			if err := deleteSkillEntity(ctx, repo, store, workspaceID, m); err != nil {
-				res.Warnings = append(res.Warnings, fmt.Sprintf("skill %q: failed to delete: %v", m.EntityKey, err))
-				continue
+				return fmt.Errorf("delete skill %q: %w", m.EntityKey, err)
 			}
 			res.Deleted = append(res.Deleted, m.EntityKey)
 		}
 	}
+	return nil
 }
 
 func deleteSkillEntity(ctx context.Context, repo *sqlite.Repository, store *Store, workspaceID string, m ManifestEntry) error {

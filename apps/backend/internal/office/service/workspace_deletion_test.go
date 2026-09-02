@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/office/configsync"
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -126,6 +128,62 @@ func TestDeleteWorkspaceCleansUpConfigSyncData(t *testing.T) {
 	}
 }
 
+// TestDeleteWorkspaceReallyDeletesConfigSyncData wires the real
+// configsync.Service (not a fake) as the ConfigSyncCleaner, seeds an actual
+// config row and manifest entries, and asserts they are gone from the
+// database after DeleteWorkspace — proving the bulk delete actually runs
+// rather than only proving a cleaner interface was invoked.
+func TestDeleteWorkspaceReallyDeletesConfigSyncData(t *testing.T) {
+	ctx := context.Background()
+	taskSvc := &fakeWorkspaceTaskService{
+		workspace: &taskmodels.Workspace{ID: "ws-delete", Name: "default"},
+		tasks:     []*taskmodels.Task{{ID: "task-1", WorkspaceID: "ws-delete"}},
+	}
+	svc := newTestService(t, service.ServiceOptions{
+		TaskWorkspace: taskSvc,
+		TaskCanceller: &fakeTaskCanceller{},
+	})
+
+	repo := svc.RepoForTest()
+	store, err := configsync.NewStore(repo.Writer(), repo.Writer())
+	if err != nil {
+		t.Fatalf("new config sync store: %v", err)
+	}
+	configSync := configsync.NewService(nil, store, logger.Default())
+	svc.SetConfigSyncCleaner(configSync)
+
+	path := "office"
+	pollEnabled := true
+	if _, err := configSync.SetConfigForWorkspace(ctx, "ws-delete", &configsync.SetConfigRequest{
+		Provider: "github", RepoOwner: "acme", RepoName: "kandev", Path: &path,
+		Branch: "main", PollEnabled: &pollEnabled, IntervalSeconds: 300,
+	}); err != nil {
+		t.Fatalf("seed config sync config: %v", err)
+	}
+	if err := store.UpsertManifestEntry(ctx, "ws-delete", "agent", "ceo", "agent-delete", "agents/ceo.yml"); err != nil {
+		t.Fatalf("seed config sync manifest entry: %v", err)
+	}
+
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("DeleteWorkspace: %v", err)
+	}
+
+	cfg, err := store.GetConfigForWorkspace(ctx, "ws-delete")
+	if err != nil {
+		t.Fatalf("get config sync config after delete: %v", err)
+	}
+	if cfg != nil {
+		t.Fatalf("config sync config should be deleted, got %#v", cfg)
+	}
+	manifest, err := store.ListManifest(ctx, "ws-delete")
+	if err != nil {
+		t.Fatalf("list config sync manifest after delete: %v", err)
+	}
+	if len(manifest) != 0 {
+		t.Fatalf("config sync manifest should be empty, got %#v", manifest)
+	}
+}
+
 // TestDeleteWorkspaceFailsWhenConfigSyncCleanupFails asserts a config sync
 // cleanup failure aborts the deletion rather than being ignored, leaving the
 // workspace row (and the config sync rows the failed call couldn't clear)
@@ -156,7 +214,7 @@ type fakeConfigSyncCleaner struct {
 	err         error
 }
 
-func (f *fakeConfigSyncCleaner) DeleteConfigForWorkspace(_ context.Context, workspaceID string) error {
+func (f *fakeConfigSyncCleaner) PurgeForWorkspaceDeletion(_ context.Context, workspaceID string) error {
 	f.workspaceID = workspaceID
 	return f.err
 }

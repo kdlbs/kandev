@@ -105,7 +105,10 @@ var releaseOrder = map[string]int{kindRoutine: 0, kindProject: 1, kindAgent: 2, 
 // workspace back to unmanaged ownership, then removes the config
 // (AC-OFFICE-CONFIG-SYNC-004.9). A release failure leaves the config and
 // remaining manifest rows in place so the caller can retry
-// (AC-OFFICE-CONFIG-SYNC-004.9b/004.9c).
+// (AC-OFFICE-CONFIG-SYNC-004.9b/004.9c). This is the user-facing "unlink
+// config sync" path, where the entities are staying put and must survive as
+// regular unmanaged rows; workspace teardown uses PurgeForWorkspaceDeletion
+// instead.
 func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID string) error {
 	lock := s.workspaceLock(workspaceID)
 	lock.Lock()
@@ -113,6 +116,18 @@ func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID stri
 	if err := s.release(ctx, workspaceID); err != nil {
 		return fmt.Errorf("failed to release synced entities: %w", err)
 	}
+	return s.store.DeleteConfigForWorkspace(ctx, workspaceID)
+}
+
+// PurgeForWorkspaceDeletion removes the workspace's config and manifest rows
+// directly, with no per-workspace lock and no per-entity release walk
+// (system-design/config-sync.md: "Deleting a workspace removes its config and
+// manifest rows with the workspace's other Office state; no release runs,
+// because the entities are going away too"). Workspace deletion already
+// deletes every entity config sync would otherwise walk one at a time, so a
+// release pass here only adds up to the run deadline of lock contention and
+// per-row writes ahead of DeleteWorkspaceData wiping the same rows.
+func (s *Service) PurgeForWorkspaceDeletion(ctx context.Context, workspaceID string) error {
 	return s.store.DeleteConfigForWorkspace(ctx, workspaceID)
 }
 
