@@ -7,7 +7,7 @@ import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTaskSubtasks, type TaskSubtask } from "@/hooks/domains/kanban/use-task-subtasks";
 import { useHoverPopover } from "@/components/integrations/use-hover-popover";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { cn } from "@/lib/utils";
 import { TaskSubtaskRow } from "./task-subtask-row";
 
@@ -58,10 +58,7 @@ function DescriptionSection({ description }: { description?: string }) {
 
 function ParentSection({ parentTaskId }: { parentTaskId?: string | null }) {
   const { t } = useTranslation();
-  const parentTitle = useAppStore((s) => {
-    if (!parentTaskId) return null;
-    return s.kanban.tasks.find((task) => task.id === parentTaskId)?.title ?? null;
-  });
+  const parentTitle = useTaskById(parentTaskId)?.title ?? null;
   if (!parentTaskId) return null;
   // Matches KanbanCardRelationship's fallback (kanban-card-status-strip.tsx)
   // so the two "show the parent relationship" surfaces don't diverge when the

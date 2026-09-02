@@ -87,9 +87,7 @@ export type StepAdjacency = {
 
 export type StepMoveTargets = StepAdjacency & {
   prevStepTitle?: string;
-  prevStepHidden: boolean;
   nextStepTitle?: string;
-  nextStepHidden: boolean;
 };
 
 /**
@@ -120,20 +118,16 @@ export function getStepAdjacencyForStep(
 }
 
 export function getStepMoveTargets(
-  visibleSteps: WorkflowStep[],
   moveTargetSteps: WorkflowStep[],
   stepId: string,
 ): StepMoveTargets {
   const adjacency = getStepAdjacencyForStep(moveTargetSteps, stepId);
-  const visibleStepIds = new Set(visibleSteps.map((step) => step.id));
   const prevStep = moveTargetSteps.find((step) => step.id === adjacency.prevStepId);
   const nextStep = moveTargetSteps.find((step) => step.id === adjacency.nextStepId);
   return {
     ...adjacency,
     prevStepTitle: prevStep?.title,
-    prevStepHidden: !!adjacency.prevStepId && !visibleStepIds.has(adjacency.prevStepId),
     nextStepTitle: nextStep?.title,
-    nextStepHidden: !!adjacency.nextStepId && !visibleStepIds.has(adjacency.nextStepId),
   };
 }
 
@@ -143,7 +137,6 @@ function PipelineStepNodes({
   currentStepIndex,
   task,
   onMoveTask,
-  onPreviewTask,
   isMoving,
   atTerminus,
 }: {
@@ -152,7 +145,6 @@ function PipelineStepNodes({
   currentStepIndex: number;
   task: Task;
   onMoveTask: (task: Task, targetStepId: string) => void;
-  onPreviewTask: (task: Task) => void;
   isMoving?: boolean;
   atTerminus: boolean;
 }) {
@@ -183,7 +175,7 @@ function PipelineStepNodes({
           ? getConnectorType(phase, getStepPhase(index + 1, currentStepIndex))
           : null;
 
-        const moveTargets = getStepMoveTargets(steps, moveTargetSteps, step.id);
+        const moveTargets = getStepMoveTargets(moveTargetSteps, step.id);
 
         return (
           <div key={step.id} className="flex items-center">
@@ -198,7 +190,6 @@ function PipelineStepNodes({
               prevStepTitle={moveTargets.prevStepTitle}
               nextStepTitle={moveTargets.nextStepTitle}
               onMoveTask={onMoveTask}
-              onPreviewTask={onPreviewTask}
               isMoving={isMoving}
             />
 
@@ -224,11 +215,10 @@ function RowMenuTrigger({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const effectiveOpen = open || Boolean(isProcessing);
 
   return (
     <DropdownMenu
-      open={effectiveOpen}
+      open={open}
       onOpenChange={(next) => {
         if (!next && isProcessing) return;
         setOpen(next);
@@ -326,7 +316,6 @@ type PipelineRowProps = {
   onPreviewTask: (task: Task) => void;
   onToggleSelect?: (taskId: string) => void;
   onRangeSelect?: (taskId: string) => void;
-  onOpenTask: (task: Task) => void;
   isMoving?: boolean;
   isDeleting?: boolean;
   isArchiving?: boolean;
@@ -346,7 +335,6 @@ function PipelineRow({
   onPreviewTask,
   onToggleSelect,
   onRangeSelect,
-  onOpenTask,
   isMoving,
   isDeleting,
   isArchiving,
@@ -357,11 +345,15 @@ function PipelineRow({
   const showCheckbox = isMultiSelectMode || !!isSelected;
   const overflowStage = usePipelineOverflowStage<HTMLDivElement, HTMLDivElement>();
 
+  // Preview-aware: matches the Kanban card's own body-click wiring
+  // (onClick={onPreviewTask} in virtualized-column-task-list.tsx). Falls back
+  // to full-page navigation when "Open preview on click" is off — see
+  // useKanbanNavigation's handleCardClick.
   const handleClick = (e: React.MouseEvent) =>
     dispatchKanbanCardClick(e, task.id, task, {
       onToggleSelect,
       onRangeSelect,
-      onClick: onOpenTask,
+      onClick: onPreviewTask,
       isMultiSelectMode,
     });
 
@@ -418,7 +410,6 @@ function PipelineRow({
           currentStepIndex={currentStepIndex}
           task={task}
           onMoveTask={onMoveTask}
-          onPreviewTask={onPreviewTask}
           isMoving={isMoving}
           atTerminus={overflowStage.atTerminus}
         />
@@ -500,7 +491,6 @@ export function Graph2TaskPipeline({
   repositories,
   onMoveTask,
   onPreviewTask,
-  onOpenTask,
   onEditTask,
   onDeleteTask,
   onArchiveTask,
@@ -550,7 +540,6 @@ export function Graph2TaskPipeline({
       onPreviewTask={onPreviewTask}
       onToggleSelect={onToggleSelect}
       onRangeSelect={onRangeSelect}
-      onOpenTask={onOpenTask}
       isMoving={isMoving}
       isDeleting={isDeleting}
       isArchiving={isArchiving}

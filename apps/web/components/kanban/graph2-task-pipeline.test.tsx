@@ -213,21 +213,90 @@ describe("Graph2TaskPipeline — row-local in-flight move guard (AC-UI-PIPELINE-
 });
 
 describe("Graph2TaskPipeline — the row has exactly one activation decision", () => {
-  it("routes a plain click on the labelled current-step pill through the row's own handler exactly once, not the pill's own onPreviewTask", () => {
+  it("routes a plain click on the labelled current-step pill through the row's own handler exactly once, preview-aware like the Kanban card's body click", () => {
     const onOpenTask = vi.fn();
     const onPreviewTask = vi.fn();
     renderPipeline(makeTask("step-2"), STEPS, { onOpenTask, onPreviewTask });
 
     fireEvent.click(screen.getByRole("button", { name: IN_PROGRESS_TITLE }));
 
-    expect(onOpenTask).toHaveBeenCalledTimes(1);
-    // The pill must not independently navigate or preview: activation is the
-    // row's decision alone (system-design.md § "The one integration point").
-    // `onPreviewTask` is threaded through as a prop but must never be called
-    // directly by the pill — reintroducing its old local click handler is
-    // exactly the regression this test exists to catch.
-    expect(onPreviewTask).not.toHaveBeenCalled();
+    // The row's single activation decision calls the preview-aware callback —
+    // matching the Kanban card's own body-click wiring
+    // (onClick={onPreviewTask} in virtualized-column-task-list.tsx) so "Open
+    // preview on click" is respected. `onOpenTask` is reserved for the
+    // explicit full-page action offered elsewhere (e.g. a future menu entry),
+    // never called directly from the pill or row body.
+    expect(onPreviewTask).toHaveBeenCalledTimes(1);
+    expect(onOpenTask).not.toHaveBeenCalled();
     expect(routerPush).not.toHaveBeenCalled();
+  });
+});
+
+describe("Graph2TaskPipeline — row menu open state (isProcessing does not force-open)", () => {
+  it("does not pop the row's own menu open when a delete/archive starts from elsewhere (e.g. the context menu)", () => {
+    const { rerender } = renderPipeline(makeTask("step-2"), STEPS, { isDeleting: false });
+
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    // Deletion starting from outside this row's dropdown (context menu,
+    // multi-select bulk action) flips isDeleting without the user ever
+    // clicking this row's own trigger.
+    rerender(
+      <StateProvider>
+        <ToastProvider>
+          <TooltipProvider delayDuration={0}>
+            <Graph2TaskPipeline
+              task={makeTask("step-2")}
+              steps={STEPS}
+              moveTargetSteps={STEPS}
+              workspaceId={null}
+              externalLinkAvailability={{ jira: false, linear: false, sentry: false }}
+              repositories={[]}
+              onMoveTask={() => undefined}
+              onPreviewTask={() => undefined}
+              onOpenTask={() => undefined}
+              onDeleteTask={() => undefined}
+              isDeleting
+            />
+          </TooltipProvider>
+        </ToastProvider>
+      </StateProvider>,
+    );
+
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("keeps the menu open through processing once the user did open it", async () => {
+    const { rerender } = renderPipeline(makeTask("step-2"), STEPS, { isDeleting: false });
+
+    const trigger = screen.getByRole("button", { name: moreOptionsLabel() });
+    fireEvent.pointerDown(trigger, { button: 0, pointerId: 1 });
+    fireEvent.click(trigger);
+    await waitFor(() => expect(screen.getAllByRole("menuitem").length).toBeGreaterThan(0));
+
+    rerender(
+      <StateProvider>
+        <ToastProvider>
+          <TooltipProvider delayDuration={0}>
+            <Graph2TaskPipeline
+              task={makeTask("step-2")}
+              steps={STEPS}
+              moveTargetSteps={STEPS}
+              workspaceId={null}
+              externalLinkAvailability={{ jira: false, linear: false, sentry: false }}
+              repositories={[]}
+              onMoveTask={() => undefined}
+              onPreviewTask={() => undefined}
+              onOpenTask={() => undefined}
+              onDeleteTask={() => undefined}
+              isDeleting
+            />
+          </TooltipProvider>
+        </ToastProvider>
+      </StateProvider>,
+    );
+
+    expect(screen.getAllByRole("menuitem").length).toBeGreaterThan(0);
   });
 });
 

@@ -90,19 +90,21 @@ async function openMenuAndSnapshot() {
  * unaffected by badge-driving task state (blocked, queued, review, repos,
  * plugins) — not just that a menu renders.
  */
-const EXPECTED_MENU_ENTRIES = [
-  { text: t("common:edit"), disabled: true, destructive: false },
-  { text: t("kanban:link"), disabled: false, destructive: false },
-  { text: t("kanban:archive"), disabled: true, destructive: false },
-  { text: t("kanban:delete"), disabled: false, destructive: true },
-];
+function expectedMenuEntries() {
+  return [
+    { text: t("common:edit"), disabled: true, destructive: false },
+    { text: t("kanban:link"), disabled: false, destructive: false },
+    { text: t("kanban:archive"), disabled: true, destructive: false },
+    { text: t("kanban:delete"), disabled: false, destructive: true },
+  ];
+}
 
 describe("KanbanCard regression — AC-UI-PIPELINE-ROW-002.6 fixture matrix", () => {
   it("bare task: renders the base menu and no status badges or repo chips", async () => {
     const { container } = renderCard(baseTask());
 
     const entries = await openMenuAndSnapshot();
-    expect(entries).toEqual(EXPECTED_MENU_ENTRIES);
+    expect(entries).toEqual(expectedMenuEntries());
 
     expect(container.querySelector('[data-testid="kanban-card-blocked-badge"]')).toBeNull();
     expect(container.querySelector('[data-testid="task-repo-chip"]')).toBeNull();
@@ -127,7 +129,7 @@ describe("KanbanCard regression — AC-UI-PIPELINE-ROW-002.6 fixture matrix", ()
 
     expect(screen.getAllByTestId("task-repo-chip")).toHaveLength(2);
     expect(screen.getByText("+1")).not.toBeNull();
-    expect(await openMenuAndSnapshot()).toEqual(EXPECTED_MENU_ENTRIES);
+    expect(await openMenuAndSnapshot()).toEqual(expectedMenuEntries());
   });
 
   it("blocked by a failed predecessor: shows the failed-styled blocked badge and the base menu", async () => {
@@ -142,7 +144,7 @@ describe("KanbanCard regression — AC-UI-PIPELINE-ROW-002.6 fixture matrix", ()
     const badge = screen.getByTestId("kanban-card-blocked-badge");
     expect(badge.textContent).toBe(t("kanban:blockedFailed"));
     expect(badge.className).toContain("border-red-500/40");
-    expect(await openMenuAndSnapshot()).toEqual(EXPECTED_MENU_ENTRIES);
+    expect(await openMenuAndSnapshot()).toEqual(expectedMenuEntries());
   });
 
   it("queued for a step: shows the queued-for-step badge with the step title and the base menu", async () => {
@@ -151,7 +153,7 @@ describe("KanbanCard regression — AC-UI-PIPELINE-ROW-002.6 fixture matrix", ()
     renderCard(task);
 
     expect(screen.getByText(t("kanban:queuedForStep", { step: "Done" }))).not.toBeNull();
-    expect(await openMenuAndSnapshot()).toEqual(EXPECTED_MENU_ENTRIES);
+    expect(await openMenuAndSnapshot()).toEqual(expectedMenuEntries());
   });
 
   it("review state and more than one session: shows both the changes-requested badge and the session count, and the base menu", async () => {
@@ -161,7 +163,7 @@ describe("KanbanCard regression — AC-UI-PIPELINE-ROW-002.6 fixture matrix", ()
 
     expect(screen.getByText(t("kanban:changesRequested"))).not.toBeNull();
     expect(screen.getByText(t("kanban:sessionCount", { count: 2 }))).not.toBeNull();
-    expect(await openMenuAndSnapshot()).toEqual(EXPECTED_MENU_ENTRIES);
+    expect(await openMenuAndSnapshot()).toEqual(expectedMenuEntries());
   });
 
   it("both plugin slots contributing: renders the registered indicator and tags components, and the base menu", async () => {
@@ -180,7 +182,7 @@ describe("KanbanCard regression — AC-UI-PIPELINE-ROW-002.6 fixture matrix", ()
 
       expect(screen.getByTestId("regression-indicator")).not.toBeNull();
       expect(screen.getByTestId("regression-tags")).not.toBeNull();
-      expect(await openMenuAndSnapshot()).toEqual(EXPECTED_MENU_ENTRIES);
+      expect(await openMenuAndSnapshot()).toEqual(expectedMenuEntries());
     } finally {
       pluginRegistry.unregisterPlugin(PLUGIN_ID);
     }

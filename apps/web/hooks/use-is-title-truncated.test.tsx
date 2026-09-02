@@ -48,8 +48,8 @@ function fireResize(element: Element) {
 
 const TRUNCATED_ATTR = "data-truncated";
 
-function TestTitle() {
-  const { ref, isTruncated } = useIsTitleTruncated<HTMLSpanElement>();
+function TestTitle({ text }: { text?: string } = {}) {
+  const { ref, isTruncated } = useIsTitleTruncated<HTMLSpanElement>(text);
   return <span ref={ref} data-testid="title" data-truncated={isTruncated} />;
 }
 
@@ -93,6 +93,20 @@ describe("useIsTitleTruncated", () => {
     fireResize(el);
 
     expect(el.getAttribute(TRUNCATED_ATTR)).toBe("false");
+  });
+
+  it("recomputes when the title text changes without a resize event (fixed line-height keeps the box size constant)", () => {
+    const { rerender } = render(<TestTitle text="Short" />);
+    const el = screen.getByTestId("title");
+    // The box's own size never changes: only the content clips differently.
+    setGeometry(el, { scrollHeight: 18, clientHeight: 18 });
+    fireResize(el);
+    expect(el.getAttribute(TRUNCATED_ATTR)).toBe("false");
+
+    setGeometry(el, { scrollHeight: 88, clientHeight: 18 });
+    rerender(<TestTitle text="A much longer title that now clips at the same box size" />);
+
+    expect(el.getAttribute(TRUNCATED_ATTR)).toBe("true");
   });
 
   it("disconnects the observer on unmount", () => {

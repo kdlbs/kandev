@@ -45,6 +45,50 @@ test.describe("Pipeline view", () => {
     await expect(kanban.pipelineTaskRepoName(task.id)).toHaveCount(0);
   });
 
+  test("clicking the row opens the preview panel when 'Open preview on click' is on", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.saveUserSettings({ enable_preview_on_click: true });
+
+    const task = await apiClient.createTask(seedData.workspaceId, "Pipeline Preview Task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.switchToPipelineView();
+
+    await kanban.pipelineTaskTitle(task.id).click();
+
+    // Preview panel opens in place (URL carries taskId=), not a full-page
+    // navigation to /t/:id. This is a synchronous client-side route update,
+    // not a backend round trip, so the default assertion timeout is enough.
+    await expect(testPage).toHaveURL(/taskId=/);
+    await expect(testPage.getByTestId("task-preview-panel")).toBeVisible();
+
+    await apiClient.saveUserSettings({ enable_preview_on_click: false });
+  });
+
+  test("clicking the row navigates to the full task page when 'Open preview on click' is off", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "Pipeline Full Nav Task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.switchToPipelineView();
+
+    await kanban.pipelineTaskTitle(task.id).click();
+
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}`));
+  });
+
   test("multi-select checkbox appears and toolbar reflects the selection", async ({
     testPage,
     apiClient,

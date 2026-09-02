@@ -13,6 +13,7 @@ const LONG_TITLE = "A very long parent task title that should render in full";
 const FIRST_SUBTASK_TITLE = "First subtask";
 const HOVER_CARD_TEST_ID = "task-title-hover-card";
 const PREVIEW_TRIGGER_TEST_ID = "task-title-preview-trigger";
+const PARENT_SECTION_TEST_ID = "task-title-hover-parent";
 
 function makeTask(overrides: Partial<KanbanState["tasks"][number]>): KanbanState["tasks"][number] {
   return {
@@ -359,7 +360,7 @@ describe("TaskTitleHoverCard — description and parent content (AC-UI-PIPELINE-
 
     expect(screen.getByTestId(PREVIEW_TRIGGER_TEST_ID)).not.toBeNull();
     await openCard();
-    const parentSection = screen.getAllByTestId("task-title-hover-parent")[0];
+    const parentSection = screen.getAllByTestId(PARENT_SECTION_TEST_ID)[0];
     expect(parentSection.textContent).toContain("Root task");
   });
 
@@ -367,8 +368,37 @@ describe("TaskTitleHoverCard — description and parent content (AC-UI-PIPELINE-
     renderTitleCard([makeTask({ id: "parent-1" })], { parentTaskId: "missing-root" });
 
     await openCard();
-    const parentSection = screen.getAllByTestId("task-title-hover-parent")[0];
+    const parentSection = screen.getAllByTestId(PARENT_SECTION_TEST_ID)[0];
     expect(parentSection.textContent).toContain(t("task:subtask"));
+  });
+
+  it("resolves the parent title from a loaded cross-workflow snapshot when the parent isn't in the active board (Pipeline view)", async () => {
+    render(
+      <StateProvider
+        initialState={{
+          kanban: { workflowId: "wf-1", steps: [], tasks: [makeTask({ id: "parent-1" })] },
+          kanbanMulti: {
+            snapshots: {
+              "wf-2": {
+                workflowId: "wf-2",
+                workflowName: "Other workflow",
+                steps: [],
+                tasks: [makeTask({ id: "root-1", workflowId: "wf-2", title: "Root task" })],
+              },
+            },
+            isLoading: false,
+          },
+        }}
+      >
+        <TaskTitleHoverCard taskId="parent-1" title="Parent" parentTaskId="root-1">
+          <span data-testid="trigger">Parent</span>
+        </TaskTitleHoverCard>
+      </StateProvider>,
+    );
+
+    await openCard();
+    const parentSection = screen.getAllByTestId(PARENT_SECTION_TEST_ID)[0];
+    expect(parentSection.textContent).toContain("Root task");
   });
 
   it("mounts a trigger when the title is visually truncated, even with no description, parent or subtasks", () => {
@@ -396,7 +426,7 @@ describe("TaskTitleHoverCard — description and parent content (AC-UI-PIPELINE-
 
     const card = screen.getAllByTestId(HOVER_CARD_TEST_ID)[0];
     const descIndex = card.innerHTML.indexOf("Desc text");
-    const parentIndex = card.innerHTML.indexOf("task-title-hover-parent");
+    const parentIndex = card.innerHTML.indexOf(PARENT_SECTION_TEST_ID);
     const subtasksIndex = card.innerHTML.indexOf("task-title-hover-subtasks");
     expect(descIndex).toBeGreaterThan(-1);
     expect(parentIndex).toBeGreaterThan(descIndex);

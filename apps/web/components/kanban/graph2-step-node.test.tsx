@@ -36,7 +36,6 @@ function renderCurrentNode(foregroundActivity?: ForegroundActivity | null) {
         hasPrev={false}
         hasNext={false}
         onMoveTask={() => undefined}
-        onPreviewTask={() => undefined}
       />
     </StateProvider>,
   );
@@ -79,7 +78,6 @@ describe("Graph2StepNode — auto-start-failed marker", () => {
             hasPrev={false}
             hasNext={false}
             onMoveTask={() => undefined}
-            onPreviewTask={() => undefined}
           />
         </TooltipProvider>
       </StateProvider>,
@@ -131,7 +129,6 @@ describe("Graph2StepNode — waiting-for-input variants", () => {
           hasPrev={false}
           hasNext={false}
           onMoveTask={() => undefined}
-          onPreviewTask={() => undefined}
         />
       </StateProvider>,
     );
@@ -168,7 +165,6 @@ describe("Graph2StepNode — collapsed step markers (AC-UI-PIPELINE-ROW-001)", (
             hasPrev={false}
             hasNext={false}
             onMoveTask={onMoveTask}
-            onPreviewTask={() => undefined}
           />
         </TooltipProvider>
       </StateProvider>,
@@ -247,7 +243,6 @@ describe("Graph2StepNode — move-control destination disclosure", () => {
             nextStepId="step-done"
             nextStepTitle="Done"
             onMoveTask={() => undefined}
-            onPreviewTask={() => undefined}
           />
         </TooltipProvider>
       </StateProvider>,
@@ -276,7 +271,6 @@ describe("Graph2StepNode — move-control destination disclosure", () => {
             nextStepId="step-done"
             nextStepTitle="Done"
             onMoveTask={() => undefined}
-            onPreviewTask={() => undefined}
           />
         </TooltipProvider>
       </StateProvider>,

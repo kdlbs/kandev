@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { IconAlertCircle, IconLock, IconSubtask } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { cn } from "@/lib/utils";
 import type { RepositoryChip, Task } from "@/components/kanban-card";
 
@@ -71,13 +71,13 @@ export function RepoChipRow({ chips }: { chips: RepositoryChip[] }) {
 
 export function KanbanCardRelationship({ task }: { task: Task }) {
   const { t } = useTranslation();
-  const parentTitle = useAppStore((s) => {
-    if (!task.parentTaskId) return null;
-    return s.kanban.tasks.find((t) => t.id === task.parentTaskId)?.title ?? null;
-  });
+  const parentTitle = useTaskById(task.parentTaskId)?.title ?? null;
 
   if (!task.parentTaskId) return null;
-  const relationshipTitle = parentTitle ?? "Subtask";
+  // Matches ParentSection's fallback (task-title-hover-card.tsx) so the two
+  // "show the parent relationship" surfaces don't diverge when the parent
+  // title isn't resolvable from the store.
+  const relationshipTitle = parentTitle ?? t("task:subtask");
 
   return (
     <div

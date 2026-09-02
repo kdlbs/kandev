@@ -23,7 +23,6 @@ export type Graph2StepNodeProps = {
   hasPrev: boolean;
   hasNext: boolean;
   onMoveTask: (task: Task, targetStepId: string) => void;
-  onPreviewTask: (task: Task) => void;
   prevStepId?: string;
   nextStepId?: string;
   prevStepTitle?: string;

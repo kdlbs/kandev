@@ -6,7 +6,7 @@ import type { Task } from "@/components/kanban-card";
 
 /** The kanban card's title, optionally wrapped in the full-title/subtasks hover card. */
 export function CardTitle({ task, enableTitleHover }: { task: Task; enableTitleHover?: boolean }) {
-  const { ref, isTruncated } = useIsTitleTruncated<HTMLParagraphElement>();
+  const { ref, isTruncated } = useIsTitleTruncated<HTMLParagraphElement>(task.title);
   const title = (
     <p
       ref={ref}

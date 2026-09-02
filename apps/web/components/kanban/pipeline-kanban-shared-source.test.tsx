@@ -200,17 +200,19 @@ describe("Shared-source parity — task menu (AC-UI-PIPELINE-ROW-002.4)", () => 
  * *this* subsequence renders in the *same relative order* on both, not that
  * either surface's absolute layout matches the other.
  */
-const INDICATOR_SELECTORS: Array<{ id: string; selector: string }> = [
-  { id: "pr", selector: `[data-testid="pr-task-icon-${TASK.id}"]` },
-  { id: "blocked", selector: '[data-testid="kanban-card-blocked-badge"]' },
-  { id: "queued", selector: `text:${t("kanban:queuedForStep", { step: "Done" })}` },
-  { id: "session-count", selector: `text:${t("kanban:sessionCount", { count: 2 })}` },
-  { id: "review-state", selector: `text:${t("kanban:changesRequested")}` },
-];
+function indicatorSelectors(): Array<{ id: string; selector: string }> {
+  return [
+    { id: "pr", selector: `[data-testid="pr-task-icon-${TASK.id}"]` },
+    { id: "blocked", selector: '[data-testid="kanban-card-blocked-badge"]' },
+    { id: "queued", selector: `text:${t("kanban:queuedForStep", { step: "Done" })}` },
+    { id: "session-count", selector: `text:${t("kanban:sessionCount", { count: 2 })}` },
+    { id: "review-state", selector: `text:${t("kanban:changesRequested")}` },
+  ];
+}
 
 /** Resolves each selector against `container` and returns the ids present, ordered by DOM position. */
 function orderedIndicatorIds(container: HTMLElement): string[] {
-  const found = INDICATOR_SELECTORS.flatMap(({ id, selector }) => {
+  const found = indicatorSelectors().flatMap(({ id, selector }) => {
     const element = selector.startsWith("text:")
       ? Array.from(container.querySelectorAll("*")).find(
           (el) => el.textContent === selector.slice("text:".length) && el.children.length === 0,

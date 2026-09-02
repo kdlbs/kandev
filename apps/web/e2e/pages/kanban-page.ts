@@ -231,6 +231,10 @@ export class KanbanPage {
     return this.pipelineTask(taskId).getByTestId("task-repo-chip");
   }
 
+  pipelineTaskTitle(taskId: string): Locator {
+    return this.pipelineTask(taskId).getByTestId("pipeline-row-title");
+  }
+
   pipelineOverflowRegion(taskId: string): Locator {
     return this.pipelineTask(taskId).getByTestId("pipeline-row-overflow-region");
   }
