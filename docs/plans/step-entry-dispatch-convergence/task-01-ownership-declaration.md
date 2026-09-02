@@ -1,7 +1,7 @@
 ---
 id: "01-ownership-declaration"
 title: "Ownership declaration for step-entry action kinds"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -89,4 +89,24 @@ None.
 
 ## Results
 
-Pending.
+Shipped in Build round 1 (`92755673f` + `02f5a1b1e`). The ten-row `ownershipTable`
+landed in `internal/workflow/stepentry/stepentry.go`, with `Owner`/`OwnedByLedger`/
+`OwnedByMarker`/`MarkerBearing`/`KnownKinds` as its exported accessors.
+`Engine.DispatchStepEntry` (`entrydispatch.go`) reads the table via
+`isSessionIndependentActionKind`/`isSessionShapedActionKind`, both delegating to
+`stepentry.OwnedByLedger`/`OwnedByMarker`. `dispatchOnEnterActions`
+(`event_handlers_workflow.go`) initially kept a private hardcoded switch-case list of
+ledger-owned kinds instead of reading the table — a violation of this task's own
+acceptance criterion ("Neither dispatcher retains a private kind list") that
+Review round 2 caught (4/4 independent legs agreed) and Build round 4 fixed by
+branching on `stepentry.OwnedByLedger(string(action.Type))` in the default case,
+with a new completeness test (`TestProcessOnEnter_EveryLedgerOwnedKind_DoesNotWarn`)
+iterating `stepentry.KnownKinds(stepentry.DispatcherLedger)` so a future table
+addition is covered without a hand-written case. `TestOwnershipTableMatchesDesign`
+(`stepentry_test.go`) also gained a `len(ownershipTable) != len(cases)` check in Build
+round 4, closing a drift-detection gap test-supervisor's mutation testing exposed
+(a kind added to the production table without a matching test-literal update
+previously passed silently). Verification: `go test ./internal/workflow/stepentry/...
+./internal/workflow/engine/... ./internal/orchestrator/...` passes; both new-this-round
+checks were independently mutation-tested (bogus table entry / reverted switch-case)
+and confirmed to fail before the fix and pass after.

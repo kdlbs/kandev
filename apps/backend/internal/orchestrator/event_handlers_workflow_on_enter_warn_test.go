@@ -236,3 +236,66 @@ func TestProcessOnEnter_LedgerOwnedKinds_DoNotWarnAndWriteNoMarker(t *testing.T)
 		}
 	}
 }
+
+// TestProcessOnEnter_EveryLedgerOwnedKind_DoesNotWarn iterates
+// stepentry.KnownKinds(stepentry.DispatcherLedger) directly instead of a
+// hand-written literal, so a kind added to ownershipTable in the future is
+// covered here automatically — mirroring
+// entrydispatch_test.go's engine-side
+// TestSessionShapedAndSessionIndependentKindsPartitionCompiledOnEnterKinds.
+// TestProcessOnEnter_LedgerOwnedKinds_DoNotWarnAndWriteNoMarker (above) is a
+// fixed-membership regression test for the four kinds that motivated this
+// dispatch; this test is the drift guard that keeps a fifth or sixth
+// ledger-owned kind from silently regressing to the AC-A6 warning path.
+func TestProcessOnEnter_EveryLedgerOwnedKind_DoesNotWarn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-all-ledger", "session-all-ledger", "step-all-ledger")
+
+	session, err := repo.GetTaskSession(ctx, "session-all-ledger")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+
+	agent := &mockAgentManager{isAgentRunning: true}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
+
+	core, logs := observer.New(zapcore.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("build observed logger: %v", err)
+	}
+	svc.logger = log
+
+	ledgerKinds := stepentry.KnownKinds(stepentry.DispatcherLedger)
+	if len(ledgerKinds) == 0 {
+		t.Fatalf("expected at least one ledger-owned kind to test against")
+	}
+	actions := make([]wfmodels.OnEnterAction, 0, len(ledgerKinds)+1)
+	for _, kind := range ledgerKinds {
+		actions = append(actions, wfmodels.OnEnterAction{Type: wfmodels.OnEnterActionType(kind)})
+	}
+	actions = append(actions, wfmodels.OnEnterAction{Type: wfmodels.OnEnterActionType("totally_bogus_action")})
+
+	step := &wfmodels.WorkflowStep{
+		ID:         "step-all-ledger",
+		WorkflowID: "wf-all-ledger",
+		Name:       "All Ledger-Owned Kinds Step",
+		Events:     wfmodels.StepEvents{OnEnter: actions},
+	}
+
+	svc.processOnEnter(ctx, "task-all-ledger", session, step, "", 0)
+
+	var warnings []observer.LoggedEntry
+	for _, e := range logs.All() {
+		if e.Message == "processOnEnter: unrecognized on_enter action type" {
+			warnings = append(warnings, e)
+		}
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("got %d WARNING(s), want exactly 1 (only the bogus type; every ledger-owned kind must not warn) (all entries: %+v)", len(warnings), logs.All())
+	}
+	if fields := warnings[0].ContextMap(); fields["action_type"] != "totally_bogus_action" {
+		t.Errorf("warning action_type = %v, want %q", fields["action_type"], "totally_bogus_action")
+	}
+}

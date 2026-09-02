@@ -1,7 +1,7 @@
 ---
 id: "03-ledger-ownership"
 title: "Converge dispatch onto the ledger dispatcher"
-status: pending
+status: done
 wave: 3
 depends_on: ["01-ownership-declaration", "02-marker-positions"]
 plan: "plan.md"
@@ -93,4 +93,26 @@ Tasks 01 and 02.
 
 ## Results
 
-Pending.
+Shipped in Build round 1 (`92755673f` + `02f5a1b1e`). `clear_decisions` and
+`queue_run_for_each_participant` now execute exclusively via
+`Engine.DispatchStepEntry`, claiming through `ExecuteMarkerBearingStepEntryAction`
+before executing; the marker dispatcher (`dispatchOnEnterActions`) no longer
+executes either kind. The two-branch `idempotencyKey` selects its input from the
+ownership declaration's marker-bearing column. The AC-002.10 abandon-remainder
+stop rule (`if abandon { break }` / `if execErr != nil { break }` in
+`DispatchStepEntry`) is scoped to marker-bearing positions, so a failing
+`ensure_participant_seat` still lets the sequence continue. Testing round 1 found
+the production-shape empty-queue assertion (one arrival enqueues exactly one
+fan-out) and the idempotency-key-inequality assertion (AC-008.2, keys not just
+call count) were missing; Build round 2 (`1ee2eb149`) added both, using a
+buffered channel to await the async marker-path dispatch for the empty-queue
+case. Review round 1 found the stop rule vulnerable to the same position-index
+divergence as Task 02; Build round 3 (`9c27351f2`) closed it via
+`Action.DeclaredPosition`. Review rounds 1 and 2 both independently
+re-confirmed (against merge-base `646ff0063`) that the unprotected
+`markerEntryID==0` fallback on the 6 of 9 `dispatchStepEntry` call sites that do
+not yet allocate an entry is pre-existing and unchanged by this diff — strictly
+improved, not regressed — and is disclosed in `plan.md`'s Bounded-scope decision
+as deferred to Task 04, not a defect of this task.
+Verification: `go test ./internal/orchestrator/... ./internal/workflow/engine/...
+./internal/task/repository/sqlite/...` passes, including `-race`.

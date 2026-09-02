@@ -2743,24 +2743,15 @@ func (s *Service) dispatchOnEnterActions(ctx context.Context, taskID string, ses
 		case wfmodels.OnEnterResetAgentContext, wfmodels.OnEnterConfigureSession:
 			// Already handled earlier in processOnEnter (context reset must run
 			// before auto_start_agent; session config runs right after it).
-		case wfmodels.OnEnterClearDecisions, wfmodels.OnEnterQueueRunForEachParticipant,
-			wfmodels.OnEnterQueueRun, wfmodels.OnEnterRunCodeReview, wfmodels.OnEnterEnsureParticipantSeat:
-			// Session-independent, ledger-owned (AC-OFFICE-STEP-ENTRY-DISPATCH-002.1):
-			// engine.DispatchStepEntry (internal/workflow/engine/entrydispatch.go)
-			// dispatches every one of these synchronously after commit via
-			// every step-transition writer (Repository.dispatchStepEntry in
-			// step_entry_dispatch.go) — clear_decisions and
-			// queue_run_for_each_participant with marker CAS protection via
-			// (*Service).ExecuteMarkerBearingStepEntryAction, the other three
-			// unprotected (never marker-bearing). processOnEnter must not
-			// also dispatch any of them here or they would run twice — see
-			// docs/specs/office/system-design/step-entry-dispatch-convergence.md.
-			// This is a known, recognized set of types, not the AC-A6 default
-			// warning case.
 		default:
-			// AC-A6: a genuinely unrecognized on_enter action type. Warn
-			// instead of silently discarding it — this is the exact failure
-			// mode the step-entry dispatch fix exists to close.
+			if stepentry.OwnedByLedger(string(action.Type)) {
+				// engine.DispatchStepEntry (internal/workflow/engine/entrydispatch.go)
+				// owns this kind and already dispatches it synchronously after
+				// commit via every step-transition writer. Dispatching it here
+				// too would run it twice, so this dispatcher skips it without
+				// a warning or a marker.
+				continue
+			}
 			s.logger.Warn("processOnEnter: unrecognized on_enter action type",
 				zap.String("task_id", taskID),
 				zap.String("step_id", step.ID),
