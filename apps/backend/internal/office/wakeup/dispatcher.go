@@ -160,13 +160,17 @@ func (d *Dispatcher) Dispatch(ctx context.Context, requestID string) error {
 // periodic request coalescing into an already event-classified run
 // never demotes it back to periodic.
 //
-// A claimed inflight run is already in the scheduler's hands: processRun
-// evaluates checkIdleSkip against the *models.Run it captured at claim
-// time and never re-reads Reason, so promoting the persisted row here
-// would race a decision already in flight and could still let the
-// event trigger be silently idle-skipped. Route the event to its own
-// fresh run instead — the only status a promotion can safely land on
-// is 'queued', where the eventual claim reads the promoted reason.
+// The inflight run's Status field reflects a read taken before this
+// call, not the row's current state: the scheduler can claim it
+// concurrently. processRun evaluates checkIdleSkip against the
+// *models.Run it captured at claim time and never re-reads Reason, so
+// promoting a row the scheduler already claimed would race a decision
+// already in flight and could still let the event trigger be silently
+// idle-skipped. UpdateRunReasonIfQueued makes the claim itself the
+// check — its conditional UPDATE only lands while the row is still
+// 'queued', and the affected-row count tells us whether it did. When
+// it didn't (claimed out from under us), route the event to its own
+// fresh run instead of trusting the stale in-memory status.
 func (d *Dispatcher) coalesceIntoInflightRun(
 	ctx context.Context, req *officesqlite.WakeupRequest, inflight *models.Run,
 ) error {
@@ -174,11 +178,12 @@ func (d *Dispatcher) coalesceIntoInflightRun(
 	if reason != "" &&
 		shared.IsPeriodicTasklessWake(inflight.Reason) &&
 		!shared.IsPeriodicTasklessWake(reason) {
-		if inflight.Status == models.RunStatusClaimed {
-			return d.createFreshRun(ctx, req)
-		}
-		if err := d.repo.UpdateRunReason(ctx, inflight.ID, reason); err != nil {
+		promoted, err := d.repo.UpdateRunReasonIfQueued(ctx, inflight.ID, reason)
+		if err != nil {
 			return fmt.Errorf("promote run reason for %s: %w", inflight.ID, err)
+		}
+		if !promoted {
+			return d.createFreshRun(ctx, req)
 		}
 	}
 	return d.repo.MarkWakeupRequestCoalesced(ctx, req.ID, inflight.ID)
