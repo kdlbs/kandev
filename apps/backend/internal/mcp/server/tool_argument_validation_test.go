@@ -355,6 +355,58 @@ func TestNormalizeCreateTaskArguments(t *testing.T) {
 	})
 }
 
+// TestNormalizeResolveReviewFindingArguments pins AC-TWS-004.8: finding_id
+// and status are trimmed (status also lower-cased) before schema validation
+// ever runs, and a status left invalid after normalisation is rejected with
+// a message naming all three accepted values rather than the schema layer's
+// generic enum error.
+func TestNormalizeResolveReviewFindingArguments(t *testing.T) {
+	t.Run("trims finding_id and lower-cases status", func(t *testing.T) {
+		arguments := map[string]any{
+			"finding_id": "  f-1  ",
+			"status":     " RESOLVED ",
+		}
+
+		normalized, err := normalizeToolArguments("resolve_review_finding_kandev", arguments)
+
+		require.NoError(t, err)
+		normalizedArguments, ok := normalized.(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "f-1", normalizedArguments["finding_id"])
+		assert.Equal(t, "resolved", normalizedArguments["status"])
+	})
+
+	t.Run("rejects a missing status naming the accepted values", func(t *testing.T) {
+		arguments := map[string]any{"finding_id": "f-1"}
+
+		_, err := normalizeToolArguments("resolve_review_finding_kandev", arguments)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "open")
+		assert.Contains(t, err.Error(), "resolved")
+		assert.Contains(t, err.Error(), "dismissed")
+	})
+
+	t.Run("rejects an unrecognised status naming the accepted values", func(t *testing.T) {
+		arguments := map[string]any{"finding_id": "f-1", "status": "bogus"}
+
+		_, err := normalizeToolArguments("resolve_review_finding_kandev", arguments)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "open")
+		assert.Contains(t, err.Error(), "resolved")
+		assert.Contains(t, err.Error(), "dismissed")
+	})
+
+	t.Run("rejects a finding_id empty after trimming", func(t *testing.T) {
+		arguments := map[string]any{"finding_id": "   ", "status": "resolved"}
+
+		_, err := normalizeToolArguments("resolve_review_finding_kandev", arguments)
+
+		require.Error(t, err)
+	})
+}
+
 func waitForCondition(t *testing.T, description string, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
