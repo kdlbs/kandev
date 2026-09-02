@@ -37,6 +37,7 @@ func (r *Repository) healBuiltinWorkflowStepOnAgentError() error {
 	}
 	for _, tmpl := range templates {
 		for _, step := range tmpl.Steps {
+			r.warnNonQueueRunAgentErrorActions(tmpl.ID, step)
 			for _, action := range templateAgentErrorActions(step) {
 				if err := r.healStepOnAgentErrorAction(tmpl.ID, step.Name, action); err != nil {
 					return fmt.Errorf("heal on_agent_error action for template %s step %s: %w", tmpl.ID, step.Name, err)
@@ -45,6 +46,26 @@ func (r *Repository) healBuiltinWorkflowStepOnAgentError() error {
 		}
 	}
 	return nil
+}
+
+// warnNonQueueRunAgentErrorActions logs any on_agent_error action this
+// healer does not reconcile (everything but queue_run, per
+// templateAgentErrorActions) so a future template adding a different action
+// type doesn't leave materialized rows silently un-reconciled.
+func (r *Repository) warnNonQueueRunAgentErrorActions(templateID string, step wfmodels.StepDefinition) {
+	if r.log == nil {
+		return
+	}
+	for _, action := range step.Events.OnAgentError {
+		if action.Type == wfmodels.GenericActionQueueRun {
+			continue
+		}
+		r.log.Warn("on_agent_error healer only reconciles queue_run actions; skipping",
+			zap.String("template_id", templateID),
+			zap.String("step_name", step.Name),
+			zap.String("action_type", string(action.Type)),
+		)
+	}
 }
 
 // templateAgentErrorActions returns the distinct on_agent_error actions

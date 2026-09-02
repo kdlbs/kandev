@@ -233,3 +233,45 @@ func TestTemplateAgentErrorActions_SkipsEmptyTargetAndDedupes(t *testing.T) {
 		t.Errorf("templateAgentErrorActions[0] target = %q, want workspace.ceo_agent", target)
 	}
 }
+
+func TestWarnNonQueueRunAgentErrorActions_LogsSkippedActionTypes(t *testing.T) {
+	repo := newRepoForBuiltinWorkflowTests(t)
+	core, logs := observer.New(zap.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	repo.log = log
+
+	step := wfmodels.StepDefinition{
+		Name: "Review",
+		Events: wfmodels.StepEvents{
+			OnAgentError: []wfmodels.GenericAction{
+				{Type: wfmodels.GenericActionQueueRun, Config: map[string]interface{}{"target": "workspace.ceo_agent", "reason": "agent_error"}},
+				{Type: wfmodels.GenericActionMoveToStep, Config: map[string]interface{}{"step_id": "done"}},
+			},
+		},
+	}
+	repo.warnNonQueueRunAgentErrorActions("office-default", step)
+
+	if logs.Len() != 1 {
+		t.Fatalf("expected exactly one warning for the non-queue_run action, got %d", logs.Len())
+	}
+	fields := logs.All()[0].ContextMap()
+	if fields["step_name"] != "Review" || fields["action_type"] != string(wfmodels.GenericActionMoveToStep) {
+		t.Errorf("warning fields = %+v, want step_name=Review action_type=%s", fields, wfmodels.GenericActionMoveToStep)
+	}
+}
+
+func TestWarnNonQueueRunAgentErrorActions_NilLoggerNoop(t *testing.T) {
+	repo := newRepoForBuiltinWorkflowTests(t)
+	step := wfmodels.StepDefinition{
+		Name: "Review",
+		Events: wfmodels.StepEvents{
+			OnAgentError: []wfmodels.GenericAction{
+				{Type: wfmodels.GenericActionMoveToStep, Config: map[string]interface{}{"step_id": "done"}},
+			},
+		},
+	}
+	repo.warnNonQueueRunAgentErrorActions("office-default", step)
+}
