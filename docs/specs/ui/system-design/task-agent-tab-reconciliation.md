@@ -12,8 +12,8 @@ requirements:
 
 This design makes desktop Agent-tab reconciliation depend on both task session
 state and Dockview readiness. The task system remains authoritative for session
-membership and the active session. This UI design only projects that state into
-the desktop workbench.
+membership and the normal active-session fallback. The desktop workbench owns
+the user's current Agent-tab selection and projects it into task state.
 
 ## Requirement mapping
 
@@ -36,6 +36,10 @@ the desktop workbench.
 - `runAutoSessionTabEffect` reads the current application state, removes stale
   Agent panels, ensures the active session panel, and adds current sibling
   session panels without activating them.
+- `setupReadyDockview` restores the environment layout before it registers the
+  normal session-tab event listener. It calls `setupSessionTabSync`, which
+  adopts one valid restored Agent selection initially and after a delayed
+  environment layout restoration completes.
 - `SessionTab` owns the fine-pointer Agent-tab context menu and attaches the
   shared Dockview maximize handler to the tab surface.
 - `TabRenameInput` owns the inline editor's pointer and keyboard event boundary.
@@ -64,6 +68,11 @@ No new API, persisted value, or store field is required. The existing
 `taskSessionsByTask.itemsByTaskId` collection is the session-membership source.
 The existing Dockview store `api` value is the readiness source.
 
+The environment-scoped Dockview layout already stores the selected panel for
+each group in browser `sessionStorage`. A restored `session:<id>` value is a
+selection hint. It is not session-membership authority. The UI accepts the hint
+only when the session belongs to the active task and current environment.
+
 ## Control flow
 
 1. Route loading and application-store hydration can finish before or after
@@ -77,6 +86,23 @@ The existing Dockview store `api` value is the readiness source.
    valid non-Agent focus, and adds all sibling session panels as inactive tabs.
 6. Later membership or active-session changes use the same path.
 
+During a full reload, the boot payload supplies the normal primary-session
+fallback. The workbench then restores the environment-scoped Dockview layout.
+Before normal tab-event synchronization starts, the UI resolves the selected
+Agent panel from the restored group state. It validates that panel against the
+active task, current session list, and current environment.
+
+If session-to-environment metadata arrives after Dockview is ready, the
+environment switch restores that saved layout later. Session-tab
+synchronization repeats the same adoption when the restore flag clears. Stale
+and unrelated selected panels are filtered before the UI decides whether the
+remaining valid selection is ambiguous.
+
+When one valid restored Agent selection exists, the UI applies it with
+`setActiveSessionAuto`. This action aligns the application store with the
+restored layout without creating a user pin. The existing explicit-intent guard
+continues to reject unrelated Dockview activation events.
+
 The readiness change is an event source, not a second copy of session state.
 The effect always reads current application state when it runs.
 
@@ -86,6 +112,11 @@ A null Dockview API is a temporary no-op. API readiness causes deterministic
 reconciliation, so recovery does not depend on a timer, route retry, or page
 reload. A session that disappears before readiness is not materialized because
 the effect reads the latest session list.
+
+The UI ignores a restored Agent selection when it is stale, cross-task,
+cross-environment, or ambiguous. The boot-selected active session remains the
+fallback. This rule prevents saved layout data from overriding current task
+membership.
 
 ## Responsive behavior
 
@@ -106,3 +137,8 @@ Playwright regression enters Agent-tab rename mode, double-clicks the input,
 and verifies that native text selection remains active while the Dockview group
 stays unmaximized. Mobile coverage is unchanged because phone and tablet do not
 mount the affected Dockview tab surface.
+
+A restoration unit test covers a valid secondary Agent selection, invalid
+saved selections, mixed stale and valid selections, and delayed environment
+layout restoration. A desktop Playwright regression selects the secondary
+Agent tab, reloads the task, and verifies that the same session remains active.

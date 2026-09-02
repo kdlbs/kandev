@@ -163,6 +163,42 @@ func TestDeleteTaskTreePreparedCleanupDeletesEnvironmentRow(t *testing.T) {
 	}
 }
 
+func TestDeleteTaskTree_NoCascadeNormalizesInheritedChildren(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("child", "root", "ws-1")
+	tasks.tasks["child"].Metadata = map[string]interface{}{
+		"workspace": map[string]interface{}{
+			"mode":     workspaceModeInheritParent,
+			"group_id": "group-1",
+		},
+		"keep": "this field",
+	}
+
+	svc := NewHandoffService(&fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}, nil, nil, nil, nil, nil)
+	if _, err := svc.DeleteTaskTree(context.Background(), "root", false); err != nil {
+		t.Fatalf("DeleteTaskTree: %v", err)
+	}
+
+	child, err := tasks.GetTask(context.Background(), "child")
+	if err != nil {
+		t.Fatalf("GetTask(child): %v", err)
+	}
+	if child == nil {
+		t.Fatal("no-cascade delete removed the child")
+	}
+	if child.ParentID != "" {
+		t.Fatalf("child parent_id = %q, want root", child.ParentID)
+	}
+	workspace, _ := child.Metadata["workspace"].(map[string]interface{})
+	if workspace["mode"] != workspaceModeSharedGroup {
+		t.Fatalf("child workspace mode = %#v, want %q", workspace["mode"], workspaceModeSharedGroup)
+	}
+	if workspace["group_id"] != "group-1" || child.Metadata["keep"] != "this field" {
+		t.Fatalf("child metadata was not preserved: %#v", child.Metadata)
+	}
+}
+
 func (c *recordingCleanupCoordinator) StartPreparedTaskResourceCleanup(_ context.Context, operationID string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -297,6 +333,42 @@ func TestArchiveTaskTree_StampsCascadeAcrossDescendants(t *testing.T) {
 		if got.ArchivedByCascadeID != out.CascadeID {
 			t.Errorf("%s cascade id = %q, want %q", id, got.ArchivedByCascadeID, out.CascadeID)
 		}
+	}
+}
+
+func TestArchiveTaskTree_TransfersSharedEnvironmentFromDepartingOwner(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("child", "root", "ws-1")
+	tasks.taskEnvironments = map[string]*models.TaskEnvironment{
+		"env-shared": {ID: "env-shared", TaskID: "root"},
+	}
+	groups := newCascadeWSGroupRepo()
+	groups.groups["g1"] = &orchmodels.WorkspaceGroup{
+		ID: "g1", WorkspaceID: "ws-1", OwnerTaskID: "root",
+		MaterializedEnvironmentID: "env-shared",
+		OwnedByKandev:             true,
+		CleanupPolicy:             orchmodels.WorkspaceCleanupPolicyDeleteWhenLastMemberArchivedOrDel,
+		CleanupStatus:             orchmodels.WorkspaceCleanupStatusActive,
+	}
+	groups.members["g1"] = map[string]string{
+		"root":  orchmodels.WorkspaceMemberRoleOwner,
+		"child": orchmodels.WorkspaceMemberRoleMember,
+	}
+	svc := newCascadeService(t, tasks, groups)
+
+	if _, err := svc.ArchiveTaskTree(context.Background(), "root", false); err != nil {
+		t.Fatalf("ArchiveTaskTree: %v", err)
+	}
+	env, err := tasks.GetTaskEnvironment(context.Background(), "env-shared")
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if env.TaskID != "child" {
+		t.Fatalf("shared environment owner = %q, want surviving child", env.TaskID)
+	}
+	if status := groups.cleanupStatuses["g1"]; status != "" {
+		t.Fatalf("group cleanup status = %q, want unchanged while child remains active", status)
 	}
 }
 

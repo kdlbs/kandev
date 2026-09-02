@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, memo, forwardRef, useImperativeHandle } fro
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { RenderItem } from "@/hooks/use-processed-messages";
-import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
+import { OLDER_PAGE_LIMIT, useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
 import { MessageListFooter } from "./message-list-footer";
 import { useNativeScrollManagement } from "./message-list-native-scroll";
@@ -93,6 +93,7 @@ type NativeMessageListScrollParams = {
   onFirstMessageHiddenChange: ((isHidden: boolean) => void) | undefined;
   /** Changes when transcript status rows can add/remove space above messages. */
   scrollLayoutKey: string;
+  isVisible: boolean;
 };
 
 type ScrollToDividerOptions = {
@@ -120,6 +121,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     firstMessageId,
     onFirstMessageHiddenChange,
     scrollLayoutKey,
+    isVisible,
   } = params;
   const { handleScrollToMessage, sentinelRef, markNotNearBottom, retryLoadMore, showRecovery } =
     useNativeScrollManagement({
@@ -134,6 +136,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
       hasMore,
       isLoadingMore,
       loadMore,
+      isVisible,
     });
   const anchoredBarOffsetPx = anchoredBarScrollOffsetPx(anchoredBarHeight);
   useEffect(() => {
@@ -471,6 +474,7 @@ export const NativeMessageList = memo(
       stickyPromptBar,
       dividerBeforeItemKey,
       anchoredBarHeight,
+      isVisible = true,
     }: MessageListProps,
     ref,
   ) {
@@ -482,7 +486,9 @@ export const NativeMessageList = memo(
       isWorking,
       sessionState,
     });
-    const { loadMore, hasMore, isLoadingMore } = useLazyLoadMessages(sessionId);
+    const { loadMore, hasMore, isLoadingMore } = useLazyLoadMessages(sessionId, {
+      minTextPartsPerLoad: OLDER_PAGE_LIMIT,
+    });
     const { activeTurnId } = useSessionTurn(sessionId);
     const effectiveActiveTurnId = getEffectiveActiveTurnId(activeTurnId, isWorking);
     const streamingMessageId = getStreamingAgentMessageId(messages);
@@ -515,6 +521,7 @@ export const NativeMessageList = memo(
           hasMore,
           isWorking,
         ].join(":"),
+        isVisible,
       });
 
     return (

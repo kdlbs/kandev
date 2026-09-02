@@ -38,14 +38,16 @@ changes backend behaviour without touching a single `.go` file. Excluded are `bi
 and the gitignored Go outputs that land in the source tree (`coverage.out`, `*.test`,
 `coverage.html`) so that `make -C apps/backend test-coverage` does not ask for a rebuild.
 
-Skip all freshness checks with `KANDEV_E2E_SKIP_FRESHNESS=1` (both E2E CI jobs set
-this because they stage artifacts after their own checkout). `KANDEV_E2E_BIN`
-selects a custom backend binary. The setup still checks the local mock agent and
-other required artifacts.
+Skip all freshness checks locally with `KANDEV_E2E_SKIP_FRESHNESS=1` only when
+you deliberately accept stale artifacts. CI does not use that bypass: the build
+job records its checkout revision and SHA-256 for every required backend/helper
+artifact, and each shard validates that immutable identity after download.
+`KANDEV_E2E_BIN` selects a custom backend binary. The setup still checks the
+local mock agent and other required artifacts.
 
 ## Playwright projects
 
-The suite is split into five projects. Pick one with `--project=<name>`.
+The suite is split into six projects. Pick one with `--project=<name>`.
 
 ### `routing`
 
@@ -88,11 +90,12 @@ Same as `chromium` but on Playwright's Pixel-5 viewport, gated on `tests/**/mobi
 
 - **Docker executor tests** (`tests/docker/*.spec.ts`) — verify kandev launches real `kandev-agent:e2e` containers, recovers them across backend restarts, cleans them up on archive/delete, etc.
 - **SSH executor tests** (`tests/ssh/*.spec.ts`) — verify kandev SSHes into a real `kandev-sshd:e2e` container, uploads agentctl, runs an agent end-to-end, recovers across backend restarts, etc. The SSH executor's _remote target_ is a Docker container in tests, even though the SSH connection itself is a real SSH connection.
+- **Kubernetes executor tests** (`tests/kubernetes/*.spec.ts`) — create a disposable Kind cluster, launch real agent Pods through kubeconfig and in-cluster authentication, and exercise reconnect, restart, storage, ownership, and causal failure behavior.
 
 This project:
 
 - **Skips entirely** when no Docker daemon is reachable. Contributors without Docker can still run `chromium` + `mobile-chrome`.
-- **Builds container images on demand.** First run builds `kandev-agent:e2e` (slim Node base + git) and `kandev-sshd:e2e` (Alpine + openssh-server + git + pre-baked mock-agent). Subsequent runs hit Docker's layer cache.
+- **Builds container images on demand.** First run builds `kandev-agent:e2e` (slim Node base + git), `kandev-sshd:e2e` (Alpine + openssh-server + git + pre-baked mock-agent), and the Kubernetes runtime/backend image. Subsequent runs hit Docker's layer cache.
 - **Has a longer per-test timeout** (180s vs 60s) because container starts + agent setup are slow.
 
 How to run it locally (requires Docker running):
@@ -106,6 +109,66 @@ Or a single spec:
 ```sh
 KANDEV_E2E_CONTAINERS=1 pnpm e2e:raw --project=containers tests/ssh/launch-task.spec.ts
 ```
+
+Run the Kind coverage through the managed runner so backend/web artifacts and
+Linux helpers are built before the cluster starts:
+
+```sh
+KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --project containers tests/kubernetes
+```
+
+Host mode is required because Kind creates sibling Docker containers through
+the host daemon; the E2E runner's own Docker mode does not expose that daemon.
+
+The full lifecycle fixture pins Kind `v0.32.0`, kubectl/Kubernetes `v1.36.1`, and
+`kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5`.
+On Linux x64 it downloads Kind and kubectl into the worker's disposable
+temporary directory and verifies their SHA-256 checksums. To use already
+verified binaries, set `KANDEV_E2E_KIND_BIN` and `KANDEV_E2E_KUBECTL_BIN` to
+absolute paths. `KANDEV_E2E_KIND_CLUSTER_NAME` may set an exact cluster name;
+otherwise every worker generates a unique one.
+
+Cleanup is deliberately narrow: each worker deletes only its named Kind
+cluster, and per-test cleanup operates only inside that cluster's dedicated
+`kandev-e2e-workloads` namespace. The fixture performs cleanup on success,
+failure, and setup errors; CI repeats the exact-name `kind delete cluster` in
+an `always()` step. It never sweeps unrelated host clusters or namespaces.
+
+Until timing history exists for a new Kubernetes test, the duration-aware
+shard planner budgets 180 seconds per test (instead of the generic 20-second
+container fallback) so the Kind file lands on an appropriately sized shard.
+
+### `kubernetes-compat` — **Docker required, API-only**
+
+This separate project runs one small real-cluster smoke rather than duplicating
+the 12-case browser lifecycle suite. It proves Kubernetes discovery, Pod-template
+admission, exec and port-forward transport, a real task launch, and an agentctl
+message round-trip. It does not request Playwright's Page or browser fixtures.
+
+CI runs it against the supported boundary matrix with Kind `v0.32.0`:
+
+- Kubernetes/kubectl `v1.34.8`, node
+  `kindest/node:v1.34.8@sha256:02722c2dedddcfc00febf5d27fbeb9b7b2c14294c82109ff4a85d89ac9ba3256`,
+  kubectl amd64 SHA-256
+  `f6249132865c13abe3c9dd5038f5da65849cb86eee1608c001831504e481aa8c`.
+- Kubernetes/kubectl `v1.36.1`, node
+  `kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5`,
+  kubectl amd64 SHA-256
+  `629d3f410e09bf49b64ae7079f7f0bda1191efed311f7d37fdbab0ad5b0ec2b7`.
+
+Select the server pin with `KANDEV_E2E_KUBERNETES_VERSION` and pass the matching
+verified kubectl binary. For example:
+
+```sh
+KANDEV_E2E_KUBERNETES_VERSION=v1.34.8 \
+KANDEV_E2E_KUBECTL_BIN=/path/to/kubectl-v1.34.8 \
+KANDEV_E2E_CONTAINERS=1 \
+pnpm e2e:run --host --project kubernetes-compat tests/kubernetes-compat
+```
+
+The compatibility fixture uses the same exact-name ownership marker, narrow
+teardown, foreign-image refusal, and credential-redacted diagnostics as the full
+suite. Unsupported version selectors fail before provisioning.
 
 ### Remote-executor fixture contracts
 
@@ -121,16 +184,17 @@ This project used to be named `docker`. It was renamed to `containers` once SSH 
 
 `e2e:raw`, `e2e:run`, and `e2e:ui` are defined only in `apps/web/package.json`. Run them from `apps/web` (or `pnpm --filter @kandev/web e2e:run` from elsewhere). From the repo root you get `ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND`.
 
-| Command                                | What it does                                     |
-| -------------------------------------- | ------------------------------------------------ |
-| `pnpm e2e:raw`                         | Run the default (chromium) project headless.     |
-| `pnpm e2e:ui`                          | Open Playwright's UI mode for interactive runs.  |
-| `pnpm e2e:headed`                      | Run headless project but with a visible browser. |
-| `pnpm e2e:raw --project=containers`    | Run container-backed tests (needs Docker).       |
-| `pnpm e2e:raw --project=mobile-chrome` | Run mobile responsive tests.                     |
-| `pnpm e2e:raw --project=routing`       | Run provider-mutating Office routing tests.      |
-| `pnpm e2e:raw --project=auth`          | Run auth-isolated tests.                         |
-| `E2E_DEBUG=1 pnpm e2e:raw`             | Surface Docker build output + extra logging.     |
+| Command                                    | What it does                                     |
+| ------------------------------------------ | ------------------------------------------------ |
+| `pnpm e2e:raw`                             | Run the default (chromium) project headless.     |
+| `pnpm e2e:ui`                              | Open Playwright's UI mode for interactive runs.  |
+| `pnpm e2e:headed`                          | Run headless project but with a visible browser. |
+| `pnpm e2e:raw --project=containers`        | Run container-backed tests (needs Docker).       |
+| `pnpm e2e:raw --project=kubernetes-compat` | Run the API-only Kubernetes compatibility smoke. |
+| `pnpm e2e:raw --project=mobile-chrome`     | Run mobile responsive tests.                     |
+| `pnpm e2e:raw --project=routing`           | Run provider-mutating Office routing tests.      |
+| `pnpm e2e:raw --project=auth`              | Run auth-isolated tests.                         |
+| `E2E_DEBUG=1 pnpm e2e:raw`                 | Surface Docker build output + extra logging.     |
 
 Common flags: `--shard=1/4`, `-g "fragment of test name"`, `--repeat-each=3` (flake hunting).
 
@@ -138,7 +202,8 @@ Common flags: `--shard=1/4`, `-g "fragment of test name"`, `--repeat-each=3` (fl
 
 CI creates an ephemeral manifest for each cohort from the current test catalog.
 The normal cohort has 14 shards and runs `chromium` plus `mobile-chrome`; the
-container cohort has 6 shards and runs `containers`. The manifest assigns
+container cohort has 6 shards and runs `containers`. The independent
+`kubernetes-compat` matrix is deliberately excluded from both catalogs. The manifest assigns
 project/file units with a deterministic longest-processing-time planner. Matrix
 jobs pass the assigned files to `run-planned-shard.sh`; they do not use ordinal
 Playwright `--shard` selection.
@@ -289,9 +354,9 @@ storage reporting are filtered by the process-scoped ownership label.
 ## Mocked vs real
 
 - **Mocked**: Azure DevOps (`KANDEV_MOCK_AZURE_DEVOPS=true`), Jira (`KANDEV_MOCK_JIRA=true`), Linear (`KANDEV_MOCK_LINEAR=true`), GitHub (`KANDEV_MOCK_GITHUB=true`), and the agent process itself (`KANDEV_MOCK_AGENT=only`). These are third-party services or external processes we don't want CI to depend on.
-- **Real**: Everything inside the kandev backend — orchestrator, lifecycle manager, agentctl, SSH/SFTP, Docker SDK, git, worktree manager. The point of e2e is to exercise the real code paths.
+- **Real**: Everything inside the kandev backend — orchestrator, lifecycle manager, agentctl, SSH/SFTP, Docker SDK, Kubernetes API/exec/port-forward, git, and worktree manager. The point of e2e is to exercise the real code paths.
 
-The SSH executor specifically has no mock controller. Tests use a real Docker-hosted sshd as the remote target, and fault-injection (host-key rotation, dropped traffic, killed pids) is done by operating on the container itself.
+The SSH and Kubernetes executors have no mock controller. SSH tests use a real Docker-hosted sshd target. Kubernetes tests use a real Kind API server, node, scheduler, storage provisioner, Pod exec, and port-forward; fault injection operates on those resources directly.
 
 ## Waiting: name the cause, don't budget for the effect
 
@@ -625,7 +690,7 @@ report zero collected, which at a glance is indistinguishable from a clean run.
 
 **Wrong Playwright project.** `mobile-*.spec.ts` exists only under
 `mobile-chrome`, `tests/auth/**` under `auth`, `office-routing-*` under
-`routing`, and `tests/{docker,ssh}/**` under `containers`. Selecting one under
+`routing`, and `tests/{docker,ssh,kubernetes}/**` under `containers`. Selecting one under
 `chromium` matches nothing, prints `No tests found`, and **exits non-zero** — so
 the failure is real. What hides it is the idiom: `playwright test … | tail`
 reports `tail`'s exit status, not Playwright's. **Never pipe a gate.** Derive the
@@ -648,11 +713,12 @@ for a result it could never receive.
 ## Adding a new spec
 
 1. Pick a directory under `tests/` (or create one for a new feature).
-2. Decide which project it belongs to. Anything that needs Docker → `tests/docker/` or `tests/ssh/` (lands in `containers`). Auth-isolated specs belong in `tests/auth/` and need `--project=auth`; provider-mutating Office routing specs use `routing`. Anything mobile-specific → name it `mobile-*.spec.ts`. Otherwise it joins `chromium` automatically.
+2. Decide which project it belongs to. Anything that needs Docker → `tests/docker/`, `tests/ssh/`, or `tests/kubernetes/` (lands in `containers`). Auth-isolated specs belong in `tests/auth/` and need `--project=auth`; provider-mutating Office routing specs use `routing`. Anything mobile-specific → name it `mobile-*.spec.ts`. Otherwise it joins `chromium` automatically.
 3. Import the right test base:
    - `import { test, expect } from "../../fixtures/test-base";` for normal tests.
    - `import { test, expect } from "../../fixtures/docker-test-base";` for Docker executor tests.
    - `import { test, expect } from "../../fixtures/ssh-test-base";` for SSH executor tests.
+   - `import { test, expect } from "../../fixtures/kubernetes-test-base";` for Kind-backed Kubernetes executor tests.
 4. Use `getByTestId` for selectors. If the surface you're testing lacks stable testids, add them — drift-prone CSS / text selectors are not worth the maintenance cost.
 5. Wait on causal signals, not timeout budgets — see [Waiting](#waiting-name-the-cause-dont-budget-for-the-effect). Reach for `{ timeout: N }` only when you can say what the number is for.
 
@@ -662,7 +728,10 @@ for a result it could never receive.
 
 - `e2e` — a 14-entry matrix executing the generated normal manifests.
 - `e2e-containers` — a 6-entry matrix executing the generated container
-  manifests and requiring Docker.
+  manifests and requiring Docker. A shard assigned `tests/kubernetes/**`
+  installs checksum-pinned Kind/kubectl, then performs exact-name teardown.
+- `e2e-kubernetes-compatibility` — a two-version matrix running the single
+  API-only compatibility smoke on Kubernetes `v1.34.8` and `v1.36.1`.
 - `e2e-report` — merges blob reports, publishes timing/retry artifacts, and
   writes the flake rate and its trend to the job summary.
 

@@ -172,7 +172,7 @@ progress.
 
 ### Multiple repositories
 
-A task can include several local or remote repository rows. Multi-repository creation supports **Worktree**, **Local Docker**, **SSH**, and **Sprites**. Local/Local PC creation remains unavailable until its initial-launch path can materialize sibling repositories, and Remote Docker is not implemented. Public GitHub and GitLab repositories can be cloned and fetched anonymously. Private repositories and authenticated browse/write features need credentials that can access the selected base branch.
+A task can include several local or remote repository rows. Multi-repository creation supports **Worktree**, **Local Docker**, **Kubernetes**, **SSH**, and **Sprites**. Local/Local PC creation remains unavailable until its initial-launch path can materialize sibling repositories, and Remote Docker is not implemented. Public GitHub and GitLab repositories can be cloned and fetched anonymously. Private repositories and authenticated browse/write features need credentials that can access the selected base branch.
 
 If Kandev cannot resolve a pasted remote URL or its branch, the repository row keeps the URL and shows the provider error. Use **Retry** after correcting the URL or when a transient provider failure has cleared.
 
@@ -259,10 +259,10 @@ carry over. The intentional restart is not shown as a previous agent error.
 
 The host rebind stops open task terminals, dev servers, the task editor server, and other
 agentctl-managed workspace processes, so save unsaved work and restart those processes afterward.
-Local Docker, SSH, and Sprites attach repository siblings to the current remote workspace and rescan
+Local Docker, Kubernetes, SSH, and Sprites attach repository siblings to the current remote workspace and rescan
 without restarting the agent or changing its CWD.
 
-Folders are live host paths and are available only to **Local/Local PC** and **Worktree** tasks. Repository sources are supported for **Worktree**, **Local/Local PC**, **Local Docker**, **SSH**, and **Sprites**. Local Git rows need a cloneable origin on Docker, SSH, and Sprites; Worktree and Local/Local PC can use the host repository directly. See [Executors](executors.md#workspace-sources) and [Coordinate work](coordination.md#add-sources-after-creation) for runtime limits and recovery behavior.
+Folders are live host paths and are available only to **Local/Local PC** and **Worktree** tasks. Repository sources are supported for **Worktree**, **Local/Local PC**, **Local Docker**, **Kubernetes**, **SSH**, and **Sprites**. Local Git rows need a cloneable origin on Docker, Kubernetes, SSH, and Sprites; Worktree and Local/Local PC can use the host repository directly. See [Executors](executors.md#workspace-sources) and [Coordinate work](coordination.md#add-sources-after-creation) for runtime limits and recovery behavior.
 
 ### Attachments and local-change consent
 
@@ -597,6 +597,7 @@ Archive records the task as archived and removes it from active views immediatel
 | Local         | Attempts to stop the agent runtime; leaves the local folder, files, and branch untouched.                                                                                                       |
 | Git worktree  | Attempts to remove the Kandev-owned worktree directory. It keeps the local task branch and leaves any existing remote branch untouched. Shared or borrowed worktrees can remain until their last active user is gone. |
 | Local Docker  | Attempts to stop and remove the container; the host repository remains.                                                                                                                         |
+| Kubernetes    | Deletes only the recorded Pod and Kandev-managed PVC after exact UID and ownership checks. An existing claim is retained.                                                                       |
 | Remote Docker | Runtime create and stop are not implemented. This executor is in progress and cannot currently start a task, so it has no supported archive-cleanup flow.                                       |
 | Sprites       | Attempts to destroy the sandbox; if cleanup succeeds, uncommitted sandbox work is lost.                                                                                                         |
 | SSH           | Attempts to stop the remote session runtime, but the remote task directory remains. Audit and remove retained task directories manually after confirming that no session needs them.            |

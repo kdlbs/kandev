@@ -79,6 +79,12 @@ type AttachmentReader interface {
 	OpenClaimed(ctx context.Context, id, taskID, sessionID string) (io.ReadCloser, string, string, int64, error)
 }
 
+// LaunchAttachmentClaimer is the narrow task-service seam used to bind staged
+// attachment descriptors to an authorized task/session before launch dispatch.
+type LaunchAttachmentClaimer interface {
+	ClaimMessageAttachments(ctx context.Context, taskID, sessionID string, attachments []v1.MessageAttachment) error
+}
+
 // DefaultServiceConfig returns default configuration
 func DefaultServiceConfig() ServiceConfig {
 	return ServiceConfig{
@@ -239,6 +245,27 @@ type PromptReferenceExpander interface {
 	) (expandedPrompt, trustedContext string)
 }
 
+// DirectPromptPreparer canonicalizes a user-submitted structured prompt before
+// the task service persists it. The returned trusted context is the exact
+// server-generated content that may be preserved by system-context
+// canonicalization.
+type DirectPromptPreparer interface {
+	PrepareDirectPrompt(ctx context.Context, prompt string, isPassthrough bool) (string, string)
+}
+
+// DirectPromptStarter starts a prepared direct-message session while retaining
+// the trusted saved-prompt context prepared before message persistence.
+type DirectPromptStarter interface {
+	StartCreatedSessionWithPromptContext(
+		ctx context.Context,
+		taskID, sessionID, agentProfileID, prompt string,
+		skipMessageRecord, planMode, autoStart bool,
+		attachments []v1.MessageAttachment,
+		references []v1.EntityReference,
+		promptReferenceContext string,
+	) (*executor.TaskExecution, error)
+}
+
 // repoStore is the repository interface accepted by NewService.
 // It covers both the orchestrator's own needs (sessionExecutorStore) and
 // the executor package's needs (executor.executorStore).
@@ -272,6 +299,9 @@ type repoStore interface {
 	UpdateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
 	// Session history + plan (for context handover)
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
+	// GetWorkspaceGroupOwnerTaskID resolves push-detected PR/MR associations
+	// to the workspace-group owner task; see resolveEffectivePushTaskID.
+	GetWorkspaceGroupOwnerTaskID(ctx context.Context, taskID string) (string, error)
 }
 
 // sessionExecutorStore is the minimal repository interface needed by the orchestrator service.
@@ -285,6 +315,7 @@ type sessionExecutorStore interface {
 	RenameTaskSession(ctx context.Context, id, name string) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionIfCurrentState(ctx context.Context, session *models.TaskSession, expected models.TaskSessionState) (bool, error)
+	UpdateTaskSessionStateIfCurrent(ctx context.Context, id string, expected, status models.TaskSessionState, errorMessage string) (bool, time.Time, error)
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	ClaimPromptableTaskSessionIfActive(ctx context.Context, id string) (models.PromptableTaskSessionClaim, error)
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
@@ -545,6 +576,10 @@ type Service struct {
 	// Task service owns the rich payload; orchestrator delegates.
 	taskEvents  TaskEventPublisher
 	feederPulls FeederPullReconciler
+
+	// launchAttachmentClaimer binds staged descriptors before any launch intent
+	// can dispatch them to the runtime. Inline attachments need no claim.
+	launchAttachmentClaimer LaunchAttachmentClaimer
 
 	// sessionAccessCheck enforces per-user workspace scoping on the
 	// session-keyed WS actions. Nil = unscoped. See SetSessionAccessChecker.
@@ -1385,6 +1420,12 @@ func (s *Service) SetSubagentContextRecorder(r SubagentContextRecorder) {
 // prompt delivery so claimed descriptors can be streamed into the workspace.
 func (s *Service) SetAttachmentReader(reader AttachmentReader) {
 	s.executor.SetAttachmentReader(reader)
+}
+
+// SetLaunchAttachmentClaimer wires staged-descriptor admission into the
+// unified session launch boundary.
+func (s *Service) SetLaunchAttachmentClaimer(claimer LaunchAttachmentClaimer) {
+	s.launchAttachmentClaimer = claimer
 }
 
 // SetOnPrimarySessionSet sets a callback on the executor for when the first session
@@ -2590,6 +2631,7 @@ func (s *Service) reconcileExecutorSessionsOnStartup(ctx context.Context) {
 	for _, running := range runningExecutors {
 		if models.IsRemoteExecutorType(models.ExecutorType(running.Runtime)) {
 			remoteRecords = append(remoteRecords, executor.RemoteStatusPollRequest{
+				TaskID:           running.TaskID,
 				SessionID:        running.SessionID,
 				Runtime:          running.Runtime,
 				AgentExecutionID: running.AgentExecutionID,

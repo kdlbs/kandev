@@ -75,6 +75,60 @@ func TestStopAgentWithReason_MissingExecutionIsClassified(t *testing.T) {
 	require.ErrorIs(t, err, ErrExecutionNotFound)
 }
 
+func TestStopAgentWithReasonReleasesAgentctlBeforeStoppedEventSnapshot(t *testing.T) {
+	mgr := newTestManager(t)
+	execution := &AgentExecution{
+		ID:        "exec-stop-lock-order",
+		SessionID: "session-stop-lock-order",
+		agentctl:  agentctl.NewClient("127.0.0.1", 12345, newTestLogger()),
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	// Hold the prompt lock so stop reaches the stopped-event snapshot and waits.
+	// It must release and detach agentctl first; prompt operations may need an
+	// agentctl read lease while this event snapshot is pending.
+	stopDone := make(chan error, 1)
+	execution.promptLifecycleMu.Lock()
+	promptLocked := true
+	stopJoined := false
+	defer func() {
+		if promptLocked {
+			execution.promptLifecycleMu.Unlock()
+		}
+		if !stopJoined {
+			select {
+			case <-stopDone:
+			case <-time.After(time.Second):
+			}
+		}
+	}()
+	go func() {
+		stopDone <- mgr.StopAgentWithReason(
+			context.Background(), execution.ID, StopReasonTaskDeleted, true,
+		)
+	}()
+
+	require.Eventually(t, func() bool {
+		_, exists := mgr.executionStore.Get(execution.ID)
+		return !exists
+	}, time.Second, time.Millisecond)
+
+	agentctlUnlocked := execution.agentctlLifecycleMu.TryRLock()
+	var currentClient *agentctl.Client
+	if agentctlUnlocked {
+		currentClient = execution.currentAgentCtlClient()
+		execution.agentctlLifecycleMu.RUnlock()
+	}
+	execution.promptLifecycleMu.Unlock()
+	promptLocked = false
+
+	stopErr := <-stopDone
+	stopJoined = true
+	require.NoError(t, stopErr)
+	require.True(t, agentctlUnlocked, "agentctl lifecycle lock remained held while publishing the stopped event")
+	require.Nil(t, currentClient, "terminal stop must detach the closed agentctl client")
+}
+
 func TestWaitForFreshSessionModelStateWaitsForAdvertisedCatalog(t *testing.T) {
 	execution := &AgentExecution{ID: "exec-model-catalog"}
 	execution.SetModelState(&CachedModelState{CurrentModelID: "mock-fast"})

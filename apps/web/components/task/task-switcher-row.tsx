@@ -164,6 +164,7 @@ function TaskRowItem({
       diffStats={task.diffStats}
       comparisonUnavailable={task.comparisonUnavailable}
       isRemoteExecutor={task.isRemoteExecutor}
+      remoteExecutorId={task.remoteExecutorId}
       remoteExecutorType={task.remoteExecutorType}
       remoteExecutorName={task.remoteExecutorName}
       taskId={task.id}

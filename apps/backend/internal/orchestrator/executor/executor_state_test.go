@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -135,5 +136,81 @@ func TestResolveExecutorConfig_PassthroughKeys_DontClobberTaskMetadata(t *testin
 
 	if got, _ := cfg.Metadata["git_user_name"].(string); got != "Task Author" {
 		t.Fatalf("metadata[git_user_name] = %q, want task value to survive empty profile", got)
+	}
+}
+
+func TestResolveExecutorConfig_KubernetesProfileConfigClobbersTaskMetadata(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	repo.executors["exec-k8s"] = &models.Executor{ID: "exec-k8s", Type: models.ExecutorTypeKubernetes}
+	profileConfig := map[string]string{
+		lifecycle.MetadataKeyKubernetesProfilePlatform:       "linux/arm64",
+		lifecycle.MetadataKeyKubernetesProfileMainContainer:  "trusted-agent",
+		lifecycle.MetadataKeyKubernetesPodTemplateYAML:       "trusted pod template",
+		lifecycle.MetadataKeyKubernetesWorkspaceMode:         "existing_claim",
+		lifecycle.MetadataKeyKubernetesWorkspaceSize:         "",
+		lifecycle.MetadataKeyKubernetesWorkspaceStorageClass: "",
+		lifecycle.MetadataKeyKubernetesWorkspaceAccessModes:  "",
+		lifecycle.MetadataKeyKubernetesWorkspaceClaimName:    "trusted-claim",
+	}
+	repo.executorProfiles["profile-k8s"] = &models.ExecutorProfile{
+		ID: "profile-k8s", ExecutorID: "exec-k8s", Config: profileConfig,
+	}
+	metadata := map[string]interface{}{"executor_profile_id": "profile-k8s"}
+	for key := range profileConfig {
+		metadata[key] = "hostile-task-override"
+	}
+
+	cfg := exec.resolveExecutorConfig(context.Background(), "exec-k8s", "ws-1", metadata)
+	got := make(map[string]string, len(profileConfig))
+	for key := range profileConfig {
+		got[key], _ = cfg.Metadata[key].(string)
+	}
+
+	if !reflect.DeepEqual(got, profileConfig) {
+		t.Fatalf("Kubernetes launch metadata = %#v, want authoritative profile config %#v", got, profileConfig)
+	}
+}
+
+func TestResolveExecutorConfig_KubernetesProfileKeysDoNotClobberNonKubernetesMetadata(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	repo.executors["exec-docker"] = &models.Executor{ID: "exec-docker", Type: models.ExecutorTypeLocalDocker}
+	profileConfig := map[string]string{
+		lifecycle.MetadataKeyKubernetesProfilePlatform:       "linux/arm64",
+		lifecycle.MetadataKeyKubernetesProfileMainContainer:  "profile-agent",
+		lifecycle.MetadataKeyKubernetesPodTemplateYAML:       "profile pod template",
+		lifecycle.MetadataKeyKubernetesWorkspaceMode:         "empty_dir",
+		lifecycle.MetadataKeyKubernetesWorkspaceSize:         "",
+		lifecycle.MetadataKeyKubernetesWorkspaceStorageClass: "",
+		lifecycle.MetadataKeyKubernetesWorkspaceAccessModes:  "",
+		lifecycle.MetadataKeyKubernetesWorkspaceClaimName:    "",
+	}
+	repo.executorProfiles["profile-docker"] = &models.ExecutorProfile{
+		ID: "profile-docker", ExecutorID: "exec-docker", Config: profileConfig,
+	}
+	want := map[string]string{
+		lifecycle.MetadataKeyKubernetesProfilePlatform:       "task-platform",
+		lifecycle.MetadataKeyKubernetesProfileMainContainer:  "task-container",
+		lifecycle.MetadataKeyKubernetesPodTemplateYAML:       "task pod template",
+		lifecycle.MetadataKeyKubernetesWorkspaceMode:         "task-mode",
+		lifecycle.MetadataKeyKubernetesWorkspaceSize:         "task-size",
+		lifecycle.MetadataKeyKubernetesWorkspaceStorageClass: "task-storage-class",
+		lifecycle.MetadataKeyKubernetesWorkspaceAccessModes:  "task-access-modes",
+		lifecycle.MetadataKeyKubernetesWorkspaceClaimName:    "task-claim",
+	}
+	metadata := map[string]interface{}{"executor_profile_id": "profile-docker"}
+	for key, value := range want {
+		metadata[key] = value
+	}
+
+	cfg := exec.resolveExecutorConfig(context.Background(), "exec-docker", "ws-1", metadata)
+	got := make(map[string]string, len(want))
+	for key := range want {
+		got[key], _ = cfg.Metadata[key].(string)
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("non-Kubernetes launch metadata = %#v, want task metadata unchanged %#v", got, want)
 	}
 }
