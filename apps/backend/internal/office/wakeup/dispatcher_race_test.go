@@ -15,10 +15,10 @@ import (
 )
 
 // TestCoalesceIntoInflightRun_ClaimedBetweenReadAndPromote pins the
-// TOCTOU this package's UpdateRunReasonIfQueued-based promotion exists
-// to close: coalesceIntoInflightRun must consult the affected-row
-// count from the conditional UPDATE, not the in-memory Status captured
-// by the earlier FindInflightRunForAgent read.
+// TOCTOU this package's atomic promotion and coalesce transaction exists
+// to close: coalesceIntoInflightRun must consult the affected-row count
+// from the conditional UPDATE, not the in-memory Status captured by the
+// earlier FindInflightRunForAgent read.
 //
 // Reverting coalesceIntoInflightRun to a stale in-memory check (`if
 // inflight.Status != "queued" { createFreshRun }` followed by an

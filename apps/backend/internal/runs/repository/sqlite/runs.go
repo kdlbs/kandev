@@ -607,29 +607,6 @@ func (r *Repository) FindInflightRunForAgent(
 	return &run, nil
 }
 
-// UpdateRunReasonIfQueued promotes a run's reason only while it is
-// still queued. Used by the wakeup dispatcher to promote an in-flight
-// run's reason when an event-classified wakeup-request coalesces into
-// it, so a periodic classification never survives merging in a
-// manual/webhook trigger. Returns false when the row is no longer
-// queued (the scheduler already claimed it between the dispatcher's
-// read and this write) — the caller must not treat that run as
-// promoted, since whatever claimed it already captured the
-// pre-promotion reason and will not re-read this column.
-func (r *Repository) UpdateRunReasonIfQueued(ctx context.Context, runID, reason string) (bool, error) {
-	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE runs SET reason = ? WHERE id = ? AND status = 'queued'
-	`), reason, runID)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return n > 0, nil
-}
-
 // ListRunsForAgentPaged returns runs for an agent ordered by
 // (requested_at DESC, id DESC), starting strictly after the given
 // cursor. Pass cursor.IsZero() == true to fetch the first page.

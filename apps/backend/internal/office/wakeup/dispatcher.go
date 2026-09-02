@@ -166,11 +166,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, requestID string) error {
 // *models.Run it captured at claim time and never re-reads Reason, so
 // promoting a row the scheduler already claimed would race a decision
 // already in flight and could still let the event trigger be silently
-// idle-skipped. UpdateRunReasonIfQueued makes the claim itself the
-// check — its conditional UPDATE only lands while the row is still
-// 'queued', and the affected-row count tells us whether it did. When
-// it didn't (claimed out from under us), route the event to its own
-// fresh run instead of trusting the stale in-memory status.
+// idle-skipped. PromoteRunAndCoalesceWakeupIfQueued makes the run
+// status update, request transition, count increment, and payload merge
+// one transaction. Its conditional UPDATE only lands while the row is
+// still 'queued'. When it does not land (claimed out from under us),
+// route the event to its own fresh run instead of trusting the stale
+// in-memory status.
 func (d *Dispatcher) coalesceIntoInflightRun(
 	ctx context.Context, req *officesqlite.WakeupRequest, inflight *models.Run,
 ) error {
@@ -178,13 +179,16 @@ func (d *Dispatcher) coalesceIntoInflightRun(
 	if reason != "" &&
 		shared.IsPeriodicTasklessWake(inflight.Reason) &&
 		!shared.IsPeriodicTasklessWake(reason) {
-		promoted, err := d.repo.UpdateRunReasonIfQueued(ctx, inflight.ID, reason)
+		promoted, err := d.repo.PromoteRunAndCoalesceWakeupIfQueued(
+			ctx, req.ID, inflight.ID, reason,
+		)
 		if err != nil {
-			return fmt.Errorf("promote run reason for %s: %w", inflight.ID, err)
+			return fmt.Errorf("promote run and coalesce wakeup into %s: %w", inflight.ID, err)
 		}
 		if !promoted {
 			return d.createFreshRun(ctx, req)
 		}
+		return nil
 	}
 	return d.repo.MarkWakeupRequestCoalesced(ctx, req.ID, inflight.ID)
 }
