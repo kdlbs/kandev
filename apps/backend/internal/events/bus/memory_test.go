@@ -814,6 +814,10 @@ func TestMemoryEventBus_QueuePanicSubscriberDoesNotEscapePublish(t *testing.T) {
 	}
 	defer func() { _ = sub.Unsubscribe() }()
 
+	patternKey := metricLabel("pattern", "test.queue.panic", "mode", "queue")
+	queueKeyLabel := metricLabel("pattern", "workers:test.queue.panic", "mode", "queue")
+	before := snapshotPanicCounter(t, patternKey)
+
 	publishReturnedNormally := func() (ok bool) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -828,6 +832,14 @@ func TestMemoryEventBus_QueuePanicSubscriberDoesNotEscapePublish(t *testing.T) {
 
 	if !publishReturnedNormally {
 		t.Fatal("Publish panicked into its caller instead of being contained")
+	}
+
+	if after := snapshotPanicCounter(t, patternKey); after != before+1 {
+		t.Fatalf("subscriberPanicTotal[%q] = %d, want %d (before %d + 1)", patternKey, after, before+1, before)
+	}
+	if got := snapshotPanicCounter(t, queueKeyLabel); got != 0 {
+		t.Fatalf("subscriberPanicTotal incremented a queueKey-labelled key %q (value %d); "+
+			"the label must be the bare subscription pattern, never queue+\":\"+pattern", queueKeyLabel, got)
 	}
 }
 

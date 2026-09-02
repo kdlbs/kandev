@@ -384,7 +384,7 @@ func (b *MemoryEventBus) publishToQueue(ctx context.Context, queueKey, subject s
 	}
 
 	// Deliver synchronously to preserve ordering.
-	if err := invokeHandler(ctx, b.logger, "queue", subject, queueKey, event, selected.handler); err != nil {
+	if err := invokeHandler(ctx, b.logger, "queue", subject, selected.subject, event, selected.handler); err != nil {
 		b.logger.Error("Queue event handler error",
 			zap.String("subject", subject),
 			zap.String("queue", queueKey),
