@@ -68,9 +68,9 @@ func TestHasInFlightRunForTask_EmptyTaskIDIsNotInFlight(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	// A run whose payload carries no task_id must not make the empty task ID
-	// look busy: json_extract returns NULL there, and NULL = '' is NULL rather
-	// than true, but the early return makes that independent of the dialect.
+	// An empty task ID names no task, so it must never be considered in flight.
+	// HasInFlightRunForTask returns false before the query runs, making this
+	// independent of the dialect; this test pins that early return.
 	seedCancelRun(t, repo, "", "queued", nil, nil)
 
 	got, err := repo.HasInFlightRunForTask(ctx, "")

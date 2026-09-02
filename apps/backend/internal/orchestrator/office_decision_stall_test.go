@@ -462,6 +462,52 @@ func TestDetectOfficeDecisionWaitingOnce_PrunesResolvedTasks(t *testing.T) {
 	}
 }
 
+// A task whose decision is recorded, then superseded by a fresh requirement,
+// must be reported again even though tasks.updated_at never moves and the
+// task never leaves the cheap SQL candidate window: recording a decision
+// must clear the dedupe key, not merely suppress the tick it was recorded on
+// (regression for the "live" set tracking the SQL prefilter instead of the
+// full predicate).
+func TestDetectOfficeDecisionWaitingOnce_RestallAfterDecisionIsReportedAgain(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedDecisionWaitingTask(t, repo, "t1", "step1")
+	decisions := &stallDecisionStore{}
+	svc := decisionWaitingService(t, repo,
+		&stallParticipantStore{participants: decidingSeat()}, decisions,
+		&stallRunReader{})
+	ctx := context.Background()
+
+	before := officeDecisionWaitingCount()
+	svc.detectOfficeDecisionWaitingOnce(ctx)
+	if got := officeDecisionWaitingCount() - before; got != 1 {
+		t.Fatalf("first scan counter delta = %d, want 1", got)
+	}
+
+	// The reviewer decides. tasks.updated_at is untouched, so the task stays
+	// in the cheap SQL candidate window even though the full predicate no
+	// longer holds.
+	decisions.decisions = []engine.DecisionInfo{{
+		ID: "d1", TaskID: "t1", StepID: "step1", Decision: "reject",
+	}}
+	svc.detectOfficeDecisionWaitingOnce(ctx)
+	if _, seen := svc.officeDecisionWaiting.Load(officeDecisionWaitingKey("t1", "step1")); seen {
+		t.Fatal("dedupe entry survived a scan in which the decision was recorded")
+	}
+
+	// Rework: a fresh requirement supersedes the old decision, still at the
+	// same step, still with the same stale tasks.updated_at.
+	supersededAt := time.Now().UTC()
+	decisions.decisions = []engine.DecisionInfo{{
+		ID: "d1", TaskID: "t1", StepID: "step1", Decision: "reject",
+		SupersededAt: &supersededAt,
+	}}
+	svc.detectOfficeDecisionWaitingOnce(ctx)
+	if got := officeDecisionWaitingCount() - before; got != 2 {
+		t.Fatalf("counter delta after rework = %d, want 2 — the rework stall must be reported again", got)
+	}
+}
+
 // AC-003.1 through AC-003.3: surfacing is the entire action. No decision row,
 // no queued run, no step transition — forging any of those would manufacture
 // the quorum the Office gates exist to require.

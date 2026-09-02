@@ -112,40 +112,57 @@ func (s *Service) detectOfficeDecisionWaitingOnce(ctx context.Context) {
 			// reached. Mirrors reclaimStuckSignalSessionsOnce.
 			return
 		}
-		live[officeDecisionWaitingKey(candidate.TaskID, candidate.StepID)] = struct{}{}
-		s.evaluateOfficeDecisionWaiting(scanCtx, candidate, now)
+		if s.evaluateOfficeDecisionWaiting(scanCtx, candidate, now) {
+			live[officeDecisionWaitingKey(candidate.TaskID, candidate.StepID)] = struct{}{}
+		}
 	}
 	s.pruneOfficeDecisionWaiting(live)
 }
 
 // evaluateOfficeDecisionWaiting applies the remaining predicate to one
-// candidate and reports it if every clause holds. The order is deliberate:
+// candidate, reports it if every clause holds, and reports whether the
+// candidate should stay live for pruning purposes. The order is deliberate:
 // the cheapest, most-selective reads run first and the runs-table read runs
 // last, because most candidates are rejected before reaching it.
 //
+// Live must track the full predicate, not just the cheap SQL prefilter that
+// produced the candidate: the query has no way to see a recorded decision or
+// an in-flight run, so a resolved task keeps matching it for as long as
+// tasks.updated_at stays quiet. Marking it live from the SQL match alone
+// would keep its dedupe key past resolution, and a rework round that
+// re-stalls the same task at the same step — without ever touching
+// updated_at — would then find the old key already present and be silently
+// swallowed by surfaceOfficeDecisionWaiting's LoadOrStore, contradicting
+// officeDecisionWaitingKey's own "returns to this one after a rejection
+// round — is reported again" contract.
+//
 // Every unreadable input fails closed to "do not report" and is counted. A
 // detector that guessed on missing input would report healthy tasks, and the
-// only thing this feature produces is reports.
+// only thing this feature produces is reports. Failing closed here also
+// means an unreadable input is not live, so a transient read failure costs at
+// most one duplicate report on a later successful tick rather than risking a
+// permanently swallowed one.
 func (s *Service) evaluateOfficeDecisionWaiting(
 	ctx context.Context, candidate models.OfficeDecisionWaitCandidate, now time.Time,
-) {
+) bool {
 	if !s.officeStepAwaitsDecision(ctx, candidate) {
-		return
+		return false
 	}
 	reader := s.officeRunInFlight
 	if reader == nil {
 		officeStallSkipped(officeStallSkipRunReaderUnwired)
-		return
+		return false
 	}
 	inFlight, err := reader.HasInFlightRunForTask(ctx, candidate.TaskID)
 	if err != nil {
 		officeStallSkipped(officeStallSkipRunReaderError)
-		return
+		return false
 	}
 	if inFlight {
-		return
+		return false
 	}
 	s.surfaceOfficeDecisionWaiting(candidate, now)
+	return true
 }
 
 // officeStepAwaitsDecision reports whether the candidate's current step holds
