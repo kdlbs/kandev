@@ -228,7 +228,7 @@ export function buildStoppedBannerProps(p: StoppedBannerSource) {
     return p.sessionErrorMessage ? { message: p.sessionErrorMessage } : {};
   }
   return {
-    message: t("task:executorEnvironmentIsUnavailable"),
+    message: p.sessionErrorMessage ?? t("task:executorEnvironmentIsUnavailable"),
     detail: p.executorUnavailableReason,
     resumeLabel: t("task:restart"),
     resumingLabel: t("task:restarting"),

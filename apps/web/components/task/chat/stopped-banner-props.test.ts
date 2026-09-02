@@ -69,4 +69,21 @@ describe("stopped-session error propagation", () => {
       }),
     ).toEqual({ message: errorMessage });
   });
+
+  it("keeps the causal session error when its executor is also unavailable", () => {
+    const errorMessage = "pod scheduling failed: 0/1 nodes matched";
+
+    expect(
+      buildStoppedBannerProps({
+        executorUnavailable: true,
+        executorUnavailableReason: "failed",
+        sessionErrorMessage: errorMessage,
+      }),
+    ).toEqual({
+      message: errorMessage,
+      detail: "failed",
+      resumeLabel: "Restart",
+      resumingLabel: "Restarting...",
+    });
+  });
 });
