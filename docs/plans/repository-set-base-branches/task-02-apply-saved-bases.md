@@ -63,7 +63,7 @@ pnpm exec vitest run lib/api/domains/repository-sets-api.test.ts lib/ws/handlers
 - `apps/web/lib/types/backend.ts`
 - `apps/web/lib/api/domains/workspace-api.ts`
 - `apps/web/lib/ws/handlers/repository-sets.ts`
-- `apps/web/lib/state/slices/workspace/repository-sets-slice.ts`
+- `apps/web/lib/state/slices/workspace/workspace-slice.ts`
 - `apps/web/components/task-create-dialog-types.ts`
 - `apps/web/components/task-create-dialog-repository-sets.ts`
 - `apps/web/components/task-create-dialog-repository-sets-apply.ts`
