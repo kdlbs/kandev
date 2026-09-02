@@ -38,15 +38,16 @@ generating and asserts the agent receives the file contents.
 
 - The scenario fails before Task 01 because the attachment resolves empty.
 - The scenario passes after Task 01.
-- The scenario does not depend on wall-clock sleeps for turn timing.
+- The shared helper keeps the mock turn open for 60 seconds by default, which
+  leaves setup headroom under CI load before the steer is submitted.
 
 ## Verification
 
 ```bash
-cd apps/web && pnpm run lint
+(cd apps/web && pnpm run lint)
 make -C apps/backend build
-cd apps/web && pnpm run build:e2e
-cd apps/web && pnpm e2e:run tests/chat/mid-turn-attachment.spec.ts
+(cd apps/web && pnpm run build:e2e)
+(cd apps/web && pnpm e2e:run tests/chat/mid-turn-attachment.spec.ts)
 ```
 
 ## Files likely touched

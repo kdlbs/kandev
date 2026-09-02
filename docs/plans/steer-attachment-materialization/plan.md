@@ -33,8 +33,9 @@ that message instead of silently degrading.
 ### In scope
 
 - Materialize claimed descriptors before a steer dispatch.
-- Keep the ordinary prompt fallback from materializing the same bytes twice.
+- Route a lost steer race through ordinary prompt admission.
 - Return a durable error when materialization fails on the steer route.
+- Release the steer slot and retry queued draining after a pre-dispatch failure.
 - Backend regression coverage in the lifecycle package.
 - One Playwright scenario for a mid-turn attachment.
 
@@ -97,15 +98,18 @@ Return the materialization error to the caller. Do not dispatch and do not fall
 back to an ordinary prompt, because the fallback would deliver the same
 unresolved descriptors.
 
-### Avoid double materialization on fallback
+### Return lost races to ordinary admission
 
-`sendPrompt` materializes unconditionally. Add an explicit
-`attachmentsMaterialized bool` parameter so the steer fallback passes already
-resolved descriptors through untouched.
+Check for an active generation before uploading. If the generation ends during
+materialization, return a typed no-dispatch error instead of calling
+`sendPrompt` directly. The orchestrator maps this result to its existing
+ordinary prompt fallback, so foreground claims and prompt-cycle state stay in
+one owner.
 
-Thread `false` from the two existing `sendPrompt` callers. Prefer the explicit
-parameter over inferring resolution from descriptor shape, which would couple
-correctness to a field-emptiness convention.
+Wrap materialization failures with a separate pre-dispatch identity. The
+orchestrator releases `steerInFlight` and retries the queued-message drain
+after this failure, so a completion that raced with the upload cannot strand a
+successor.
 
 ### Regression coverage
 
@@ -122,8 +126,9 @@ specs in `apps/web/e2e/tests/chat/`.
 | Acceptance criterion | Evidence |
 | --- | --- |
 | `AC-TASKS-PROMPT-ATTACHMENTS-001.6` | `TestSendPromptSteer_MaterializesAttachmentsBeforeDispatch` in `apps/backend/internal/agent/runtime/lifecycle/session_steer_test.go` |
-| `AC-TASKS-PROMPT-ATTACHMENTS-001.6` | `TestSendPromptSteer_FallbackMaterializesExactlyOnce` in `apps/backend/internal/agent/runtime/lifecycle/session_steer_test.go` |
+| `AC-TASKS-PROMPT-ATTACHMENTS-001.6` | `TestSendPrompt_MaterializesAttachmentsExactlyOnce` in `apps/backend/internal/agent/runtime/lifecycle/session_steer_test.go` |
 | `AC-TASKS-PROMPT-ATTACHMENTS-001.7` | `TestSendPromptSteer_MaterializationFailureDoesNotDispatch` in `apps/backend/internal/agent/runtime/lifecycle/session_steer_test.go` |
+| `AC-TASKS-PROMPT-ATTACHMENTS-001.7` | `TestSendPromptSteer_DoesNotFallbackOutsideAdmission` and `TestSteerTask_PreDispatchFailureDrainsSuccessor` cover lost-generation admission and queue recovery. |
 | `AC-TASKS-PROMPT-ATTACHMENTS-001.6` | `sends an attachment into a generating turn` in `apps/web/e2e/tests/chat/mid-turn-attachment.spec.ts` |
 
 ## E2E tests
@@ -158,8 +163,8 @@ directory.
 
 - `promptLifecycleMu` bounds steer latency. Materializing inside it would let a
   large upload block the lifecycle lock for the length of a network write.
-- The steer route can lose its race and fall back. The fallback must not upload
-  the same bytes twice, which would double agentctl storage for one message.
+- The steer route can lose its race while an upload is in progress. The
+  orchestrator must own the replacement prompt and its admission checks.
 - `materializeAttachments` requires a non-empty `ACPSessionID`. A steer implies
   a live turn, but the error must stay a returned error rather than a panic.
 - Making a steer materialization failure terminal changes an existing silent

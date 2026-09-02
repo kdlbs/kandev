@@ -32,6 +32,16 @@ const (
 	pendingDispatchedPromptWaitTimeout = 10 * time.Second
 )
 
+// ErrSteerNotDispatched reports that a steer found no active prompt generation
+// to reuse. The orchestrator must run the ordinary prompt admission path when
+// it receives this result because a new turn may have become promptable.
+var ErrSteerNotDispatched = errors.New("steer was not dispatched")
+
+// ErrSteerAttachmentMaterialization wraps an attachment delivery failure that
+// happened before agentctl accepted the steer. The orchestrator uses this
+// identity to release the steer slot and retry a queued successor drain.
+var ErrSteerAttachmentMaterialization = errors.New("steer attachment materialization failed")
+
 // PendingDispatchedPromptTimeoutError reports that a successor prompt could
 // not observe completion of an earlier dispatch-only prompt within the
 // bounded admission interval. The pending gate remains set so cancellation
@@ -923,7 +933,6 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 				false,
 				acpAttachments,
 				false,
-				false,
 				sendPromptCallbacks{onFailure: sm.initialPromptFailure},
 				false,
 			)
@@ -1153,7 +1162,7 @@ func (sm *SessionManager) SendPrompt(
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
 ) (*PromptResult, error) {
-	return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, false, dispatchOnly, sendPromptCallbacks{}, false)
+	return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, dispatchOnly, sendPromptCallbacks{}, false)
 }
 
 // SendPromptWithDispatchCallback reports the point at which agentctl accepted
@@ -1173,7 +1182,6 @@ func (sm *SessionManager) SendPromptWithDispatchCallback(
 		prompt,
 		validateStatus,
 		attachments,
-		false,
 		dispatchOnly,
 		sendPromptCallbacks{onDispatched: onDispatched},
 		false,
@@ -1229,8 +1237,9 @@ func (sm *SessionManager) markPromptDispatched(execution *AgentExecution, genera
 //
 // Delivery is opportunistic: with no live turn to fold into (idle, a turn that
 // was admitted but not yet dispatched, one that already completed, or a
-// disconnected stream) there is nothing to steer, so it falls back to an
-// ordinary prompt delivered in submission order rather than dropping the message.
+// disconnected stream) there is nothing to steer. The orchestrator receives
+// ErrSteerNotDispatched and re-enters ordinary prompt admission in submission
+// order rather than sending around the queue.
 func (sm *SessionManager) SendPromptSteerWithDispatchCallback(
 	ctx context.Context,
 	execution *AgentExecution,
@@ -1247,6 +1256,13 @@ func (sm *SessionManager) SendPromptSteerWithDispatchCallback(
 		return nil, fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
 	}
 
+	// Avoid an upload when there is no generation to steer into. This is only an
+	// optimization; the lock-guarded dispatch below remains authoritative for
+	// the race where the active generation completes during materialization.
+	if sm.activePromptGeneration(execution) == 0 {
+		return nil, ErrSteerNotDispatched
+	}
+
 	// Resolve claimed descriptors before the steer takes promptLifecycleMu.
 	// Materialization streams file bytes to agentctl and dispatchSteerLocked holds
 	// that lock under a bounded timeout, so uploading inside it would let a large
@@ -1257,7 +1273,7 @@ func (sm *SessionManager) SendPromptSteerWithDispatchCallback(
 	// reference to bytes that are absent from the session.
 	materialized, err := sm.materializeAttachments(ctx, execution, attachments)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrSteerAttachmentMaterialization, err)
 	}
 
 	steered, err := sm.tryDispatchSteer(ctx, execution, prompt, materialized)
@@ -1265,17 +1281,7 @@ func (sm *SessionManager) SendPromptSteerWithDispatchCallback(
 		return nil, err
 	}
 	if !steered {
-		return sm.sendPrompt(
-			ctx,
-			execution,
-			prompt,
-			validateStatus,
-			materialized,
-			true,
-			dispatchOnly,
-			sendPromptCallbacks{onDispatched: onDispatched},
-			false,
-		)
+		return nil, ErrSteerNotDispatched
 	}
 	if onDispatched != nil {
 		onDispatched()
@@ -1291,8 +1297,8 @@ func (sm *SessionManager) SendPromptSteerWithDispatchCallback(
 // round-trip (agentctl acks before it runs the prompt), but sendStreamRequest has
 // no deadline of its own, so a half-open connection could otherwise pin the lock
 // — wedging this execution's completion claims and new prompts — until the stream
-// tears down. A timeout lands on the error path, which is send-safe under the
-// no-resend fallback. Exposed as a var so tests can shorten it.
+// tears down. A timeout lands on the error path without retrying the steer.
+// Exposed as a var so tests can shorten it.
 var steerDispatchTimeout = 5 * time.Second
 
 // tryDispatchSteer selects the active dispatched generation and issues the steer
@@ -1311,7 +1317,8 @@ var steerDispatchTimeout = 5 * time.Second
 // stalled connection, and the history append is done after the lock is released.
 //
 // Returns (false, nil) when there is nothing to steer into — no live generation,
-// or the stream is not connected — so the caller degrades to an ordinary prompt.
+// or the stream is not connected — so the orchestrator can admit an ordinary
+// prompt.
 // It deliberately uses the single fast RPC, not dispatchPrompt's reconnect path:
 // a disconnected stream means there is no live turn to fold into, and reconnect
 // can block for seconds, which must not run under the lifecycle lock.
@@ -1369,9 +1376,8 @@ func (sm *SessionManager) dispatchSteerLocked(
 }
 
 // recordSteerActivity mirrors the ordinary prompt path's history append and
-// activity-timestamp bump for a steer that actually dispatched. Kept off the
-// fallback path so a steer that degrades to an ordinary prompt is not recorded
-// twice.
+// activity-timestamp bump for a steer that actually dispatched. A no-dispatch
+// result never reaches this method, so ordinary fallback is not recorded twice.
 //
 // Deliberately does not touch agentEventSincePrompt: a steer is user input
 // injected into an already-running turn, not agent output, so it must not
@@ -1393,7 +1399,6 @@ func (sm *SessionManager) sendPrompt(
 	prompt string,
 	validateStatus bool,
 	attachments []v1.MessageAttachment,
-	attachmentsMaterialized bool,
 	dispatchOnly bool,
 	callbacks sendPromptCallbacks,
 	steer bool,
@@ -1439,17 +1444,10 @@ func (sm *SessionManager) sendPrompt(
 		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
 		return nil, err
 	}
-	// A steer that degraded to an ordinary prompt has already streamed its bytes
-	// to agentctl. Re-materializing here would upload the same file twice for one
-	// message, so the caller states which it is rather than inferring it from
-	// descriptor shape.
-	materializedAttachments := attachments
-	if !attachmentsMaterialized {
-		materializedAttachments, err = sm.materializeAttachments(preparedCtx, execution, attachments)
-		if err != nil {
-			sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
-			return nil, err
-		}
+	materializedAttachments, err := sm.materializeAttachments(preparedCtx, execution, attachments)
+	if err != nil {
+		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
+		return nil, err
 	}
 	if sm.beforePromptDispatchHook != nil {
 		sm.beforePromptDispatchHook()

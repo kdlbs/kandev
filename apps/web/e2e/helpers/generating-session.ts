@@ -28,7 +28,7 @@ export async function seedRunningGeneratingSession(
   title: string,
   options: SeedRunningGeneratingSessionOptions = {},
 ): Promise<{ session: SessionPage; taskId: string; sessionId: string }> {
-  const { sleepSeconds = 20, predecessorPrompt } = options;
+  const { sleepSeconds = 60, predecessorPrompt } = options;
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,

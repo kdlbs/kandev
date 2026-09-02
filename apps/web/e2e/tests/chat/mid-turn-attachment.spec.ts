@@ -84,7 +84,8 @@ test.describe.serial("mid-turn attachment delivery", () => {
     await typeWhileBusy(testPage, editor, "read the attached file");
     await testPage.getByTestId("submit-message-button").click();
 
-    // Delivered into the running turn rather than queued.
+    // The user message is persisted immediately. The file assertion below
+    // proves that the claimed bytes reached the session working copy.
     await expect(
       session.activeChat().getByTestId("user-message-bubble").filter({
         hasText: "read the attached file",
