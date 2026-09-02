@@ -1274,7 +1274,8 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		p.router, p.gateway.Dispatcher, p.taskSvc,
 		&orchestratorWrapper{svc: p.orchestratorSvc}, p.log, referenceValidators...,
 	)
-	taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
+	processHandlers := taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
+	taskhandlers.RegisterWorkspaceFileRoutes(p.router, processHandlers)
 	analyticshandlers.RegisterStatsRoutes(p.router, p.analyticsRepo, p.taskSvc, p.log)
 	agenthandlers.RegisterShellRoutes(p.router, p.lifecycleMgr, p.log)
 	if p.services.Share != nil {

@@ -1916,5 +1916,22 @@
   "branchPolicyOptionSummary": "从 {{base}} 到 {{target}}",
   "branchPolicySelected": "{{name}}（从 {{base}}）",
   "branchPolicyUnavailable": "基础分支不可用。请刷新分支或编辑此策略。",
-  "branchPolicyRequiresSingleRepository": "使用本地执行器时，分支策略需要单个仓库。"
+  "branchPolicyRequiresSingleRepository": "使用本地执行器时，分支策略需要单个仓库。",
+  "uploadConflictTitle_one": "{{count}} 个文件已存在",
+  "uploadConflictTitle_other": "{{count}} 个文件已存在",
+  "uploadConflictBody": "请选择如何处理每个文件。确认之前不会上传任何内容。",
+  "uploadConflictApplyToAll": "应用于全部",
+  "uploadConflictKeepBoth": "两者都保留",
+  "uploadConflictReplace": "替换",
+  "uploadConflictSkip": "跳过",
+  "uploadConflictConfirm": "上传",
+  "uploadFiles": "上传文件",
+  "uploadFolder": "上传文件夹",
+  "uploadFilesHere": "上传文件到此处",
+  "uploadComplete_one": "已上传 {{count}} 个文件",
+  "uploadComplete_other": "已上传 {{count}} 个文件",
+  "uploadedTo": "已上传至 {{path}}",
+  "failedToUploadFile": "上传文件失败",
+  "uploadPartiallyFailed_one": "{{count}} 个文件上传失败",
+  "uploadPartiallyFailed_other": "{{count}} 个文件上传失败"
 }

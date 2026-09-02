@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { FileEditorContent } from "./file-editor-content";
 import { FileImageViewer } from "./file-image-viewer";
@@ -16,7 +16,8 @@ import { calculateHash } from "@/lib/utils/file-diff";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { syncOpenFileFromWorkspace } from "@/hooks/file-editors-sync";
 import { buildRepoScopedItemId } from "@/lib/state/dockview-panel-actions";
-import { FileViewerExternalLink } from "./file-viewer-header";
+import { FileViewerDownloadButton, FileViewerExternalLink } from "./file-viewer-header";
+import { triggerFileDownload } from "@/lib/utils/file-download";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { useTranslation } from "react-i18next";
 
@@ -64,6 +65,24 @@ type StaticFilePanelProps = {
   repositoryName?: string;
 };
 
+/**
+ * Download the open file from the copy already in the dockview store.
+ *
+ * The viewer only renders after `useFileLoader` resolves, so the bytes are
+ * always in hand here and no refetch is needed. Binary content is base64,
+ * matching the `workspace.file.get` contract `triggerFileDownload` expects.
+ */
+function useOpenFileDownload(fileKey: string, path: string): (() => void) | undefined {
+  const hasFile = useDockviewStore((s) => s.openFiles.has(fileKey));
+  const content = useDockviewStore((s) => s.openFiles.get(fileKey)?.content ?? "");
+  const isBinary = useDockviewStore((s) => s.openFiles.get(fileKey)?.isBinary ?? false);
+
+  return useMemo(() => {
+    if (!hasFile) return undefined;
+    return () => triggerFileDownload({ fileName: path, content, isBinary });
+  }, [hasFile, path, content, isBinary]);
+}
+
 function StaticFilePanel({
   category,
   fileKey,
@@ -74,14 +93,18 @@ function StaticFilePanel({
   repositoryId,
   repositoryName,
 }: StaticFilePanelProps) {
+  const onDownload = useOpenFileDownload(fileKey, path);
   const headerActions = (
-    <FileViewerExternalLink
-      path={path}
-      sessionId={sessionId}
-      taskId={taskId}
-      repositoryId={repositoryId}
-      repositoryName={repositoryName}
-    />
+    <>
+      <FileViewerExternalLink
+        path={path}
+        sessionId={sessionId}
+        taskId={taskId}
+        repositoryId={repositoryId}
+        repositoryName={repositoryName}
+      />
+      <FileViewerDownloadButton onDownload={onDownload} />
+    </>
   );
   if (category === "image") {
     return (
@@ -321,6 +344,12 @@ export const FileEditorPanel = memo(function FileEditorPanel({
     [applyRemoteUpdate, path, repo],
   );
   const onDelete = useCallback(() => deleteFile(path, repo), [deleteFile, path, repo]);
+  // The editor already holds the loaded buffer, so download it from memory
+  // rather than refetching. Binary content stays base64 for triggerFileDownload.
+  const onDownload = useMemo(
+    () => (hasFile ? () => triggerFileDownload({ fileName: path, content, isBinary }) : undefined),
+    [hasFile, path, content, isBinary],
+  );
   const onToggleMarkdownPreview = useCallback(
     () => updateFileState(fileKey, { markdownPreview: !markdownPreview }),
     [updateFileState, fileKey, markdownPreview],
@@ -373,6 +402,7 @@ export const FileEditorPanel = memo(function FileEditorPanel({
           onSave={onSave}
           onReloadFromAgent={onReloadFromAgent}
           onDelete={onDelete}
+          onDownload={onDownload}
         />
       </PanelBody>
     </PanelRoot>

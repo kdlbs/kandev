@@ -1916,5 +1916,22 @@
   "branchPolicyOptionSummary": "de {{base}} para {{target}}",
   "branchPolicySelected": "{{name}} (de {{base}})",
   "branchPolicyUnavailable": "O branch base não está disponível. Atualize os branches ou edite esta política.",
-  "branchPolicyRequiresSingleRepository": "As políticas de branches requerem um único repositório com o executor local."
+  "branchPolicyRequiresSingleRepository": "As políticas de branches requerem um único repositório com o executor local.",
+  "uploadConflictTitle_one": "{{count}} ficheiro já existe",
+  "uploadConflictTitle_other": "{{count}} ficheiros já existem",
+  "uploadConflictBody": "Escolha o que fazer com cada um. Nada é carregado até confirmar.",
+  "uploadConflictApplyToAll": "Aplicar a todos",
+  "uploadConflictKeepBoth": "Manter ambos",
+  "uploadConflictReplace": "Substituir",
+  "uploadConflictSkip": "Ignorar",
+  "uploadConflictConfirm": "Carregar",
+  "uploadFiles": "Carregar ficheiros",
+  "uploadFolder": "Carregar pasta",
+  "uploadFilesHere": "Carregar ficheiros aqui",
+  "uploadComplete_one": "{{count}} ficheiro carregado",
+  "uploadComplete_other": "{{count}} ficheiros carregados",
+  "uploadedTo": "Carregado para {{path}}",
+  "failedToUploadFile": "Falha ao carregar o ficheiro",
+  "uploadPartiallyFailed_one": "Falha ao carregar {{count}} ficheiro",
+  "uploadPartiallyFailed_other": "Falha ao carregar {{count}} ficheiros"
 }

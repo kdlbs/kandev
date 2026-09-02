@@ -55,6 +55,7 @@ type TreeNodeRowProps = {
   onDeleteFile?: (path: string) => Promise<boolean>;
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onDownloadFile?: (path: string) => Promise<boolean>;
+  onUploadFilesHere?: (path: string) => void;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
   isSelectedFn?: (path: string) => boolean;
   onSelect?: (path: string, e: React.MouseEvent) => boolean;
@@ -236,6 +237,7 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
     onDeleteFile,
     onRenameFile,
     onDownloadFile,
+    onUploadFilesHere,
     setTree,
     showTouchActions,
     onAddToChatContext,
@@ -313,6 +315,7 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
       onDeleteFile={onDeleteFile}
       onRenameFile={onRenameFile}
       onDownloadFile={onDownloadFile}
+      onUploadFilesHere={onUploadFilesHere}
       onStartRename={rename.handleStartRename}
       onAddToChatContext={onAddToChatContext}
       selectedCount={props.selectedCount}
@@ -436,6 +439,7 @@ type FileBrowserContentAreaProps = {
   onDeleteFile?: (path: string) => Promise<boolean>;
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onDownloadFile?: (path: string) => Promise<boolean>;
+  onUploadFilesHere?: (path: string) => void;
   onCreateFileSubmit: (parentPath: string, name: string) => void;
   onCancelCreate: () => void;
   onRetry: () => void;
@@ -468,6 +472,7 @@ function rowToItemProps(props: FileBrowserContentAreaProps, row: FileBrowserRow)
     onDeleteFile: props.onDeleteFile,
     onRenameFile: props.onRenameFile,
     onDownloadFile: props.onDownloadFile,
+    onUploadFilesHere: props.onUploadFilesHere,
     setTree: props.setTree,
     isSelectedFn: props.isSelectedFn,
     onSelect: props.onSelect,

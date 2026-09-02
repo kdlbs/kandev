@@ -26,6 +26,7 @@ export type FileEditorContentProps = {
   onSave: () => void;
   onReloadFromAgent?: () => void;
   onDelete?: () => void;
+  onDownload?: () => void;
 };
 
 export const FileEditorContent = memo(function FileEditorContent(props: FileEditorContentProps) {

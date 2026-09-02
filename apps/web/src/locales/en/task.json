@@ -1916,5 +1916,22 @@
   "branchPolicyOptionSummary": "from {{base}} to {{target}}",
   "branchPolicySelected": "{{name}} (from {{base}})",
   "branchPolicyUnavailable": "Base branch unavailable. Refresh branches or edit this policy.",
-  "branchPolicyRequiresSingleRepository": "Branch policies require a single repository with the local executor."
+  "branchPolicyRequiresSingleRepository": "Branch policies require a single repository with the local executor.",
+  "uploadConflictTitle_one": "{{count}} file already exists",
+  "uploadConflictTitle_other": "{{count}} files already exist",
+  "uploadConflictBody": "Choose what to do with each one. Nothing is uploaded until you confirm.",
+  "uploadConflictApplyToAll": "Apply to all",
+  "uploadConflictKeepBoth": "Keep both",
+  "uploadConflictReplace": "Replace",
+  "uploadConflictSkip": "Skip",
+  "uploadConflictConfirm": "Upload",
+  "uploadFiles": "Upload files",
+  "uploadFolder": "Upload folder",
+  "uploadFilesHere": "Upload files here",
+  "uploadComplete_one": "Uploaded {{count}} file",
+  "uploadComplete_other": "Uploaded {{count}} files",
+  "uploadedTo": "Uploaded to {{path}}",
+  "failedToUploadFile": "Failed to upload file",
+  "uploadPartiallyFailed_one": "{{count}} file failed to upload",
+  "uploadPartiallyFailed_other": "{{count}} files failed to upload"
 }
