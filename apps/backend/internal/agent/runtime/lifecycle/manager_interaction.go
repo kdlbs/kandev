@@ -948,8 +948,6 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
-	execution.agentctlLifecycleMu.Lock()
-	defer execution.agentctlLifecycleMu.Unlock()
 	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStopping)
 	if err != nil {
 		return err
@@ -984,6 +982,14 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		}
 	}
 
+	// The runtime is now terminal. Detach agentctl under its own short critical
+	// section before any cleanup or event snapshot can acquire prompt state.
+	// Failed runtime stops intentionally retain the closed-but-reusable client so
+	// a later retry can issue the agentctl stop request again.
+	execution.agentctlLifecycleMu.Lock()
+	execution.detachAgentctlClient()
+	execution.agentctlLifecycleMu.Unlock()
+
 	// Update execution status and remove from tracking
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
 		exec.Status = v1.AgentStatusStopped
@@ -1013,6 +1019,8 @@ func (m *Manager) stopExecutionAgentctl(
 	execution *AgentExecution,
 	force bool,
 ) bool {
+	execution.agentctlLifecycleMu.Lock()
+	defer execution.agentctlLifecycleMu.Unlock()
 	client := execution.currentAgentCtlClient() // protected by agentctlLifecycleMu
 	if client == nil {
 		return false

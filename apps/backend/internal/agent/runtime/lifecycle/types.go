@@ -499,10 +499,11 @@ func (ae *AgentExecution) currentAgentCtlClient() *agentctl.Client {
 }
 
 // AcquireAgentCtlClient pins the current client for one bounded operation.
-// Remote replacement and terminal stop take the write side before publishing
-// or closing a client, so an in-flight operation never observes that client
-// being closed underneath it. Callers must invoke the returned release
-// function as soon as the bounded client operation finishes.
+// Remote replacement takes the write side before publishing a client, while
+// terminal stop takes it while closing and detaching the client. An in-flight
+// operation therefore never observes its client being closed underneath it.
+// Callers must invoke the returned release function as soon as the bounded
+// client operation finishes.
 func (ae *AgentExecution) AcquireAgentCtlClient() (*agentctl.Client, func()) {
 	if ae == nil {
 		return nil, func() {}
@@ -525,6 +526,16 @@ func (ae *AgentExecution) replaceAgentctlClient(client *agentctl.Client) *agentc
 	previous := ae.currentAgentCtlClient()
 	ae.agentctlOverride.Store(client)
 	return previous
+}
+
+// detachAgentctlClient clears every lookup tier after terminal teardown.
+// Callers must hold agentctlLifecycleMu for writing.
+func (ae *AgentExecution) detachAgentctlClient() {
+	if ae == nil {
+		return
+	}
+	ae.agentctl = nil
+	ae.agentctlOverride.Store(nil)
 }
 
 // MarkAgentctlReady records that agentctl passed its startup health check.
