@@ -14,6 +14,8 @@ import type {
   WorkflowAgentOverrideOption,
   WorkflowAgentOverrideRow,
 } from "@/components/task-create-dialog-workflow-agent-overrides";
+import { MCPSelectionPicker } from "@/components/mcp/mcp-selection-picker";
+import type { MCPInheritedSelection, MCPServerDefinition } from "@/lib/types/http-mcp";
 import { cn } from "@/lib/utils";
 import type { TaskPriority } from "@/lib/types/http";
 
@@ -33,6 +35,11 @@ type TaskCreateAdvancedSettingsProps = {
   onWorkflowAgentOverrideChange?: (sourceProfileId: string, replacementProfileId: string) => void;
   onResetWorkflowAgentOverrides?: () => void;
   onRetryWorkflowAgentOverrides?: () => void;
+  mcpDefinitions?: MCPServerDefinition[];
+  mcpDefinitionsLoading?: boolean;
+  mcpSelectionIds?: string[];
+  onMcpSelectionIdsChange?: (ids: string[]) => void;
+  mcpInheritedSelections?: MCPInheritedSelection[];
 };
 
 function replacementOptionsForRow(
@@ -103,6 +110,44 @@ function TaskCreateWorkflowAgentOverrideRow({
           </p>
         )}
       </div>
+    </div>
+  );
+}
+
+function TaskCreateMCPSettingRow({
+  definitions,
+  loading,
+  selectedIds,
+  onSelectedIdsChange,
+  inherited,
+  disabled,
+}: {
+  definitions: MCPServerDefinition[];
+  loading: boolean;
+  selectedIds: string[];
+  onSelectedIdsChange: (ids: string[]) => void;
+  inherited: MCPInheritedSelection[];
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="min-w-0 md:col-span-2" data-testid="task-create-mcp-setting-row">
+      {loading ? (
+        <p className="min-h-11 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          {t("settings:mcpLoading")}
+        </p>
+      ) : (
+        <MCPSelectionPicker
+          definitions={definitions}
+          selectedIds={selectedIds}
+          onSelectedIdsChange={onSelectedIdsChange}
+          inherited={inherited}
+          disabled={disabled}
+          label={t("settings:mcpServers")}
+          description={t("settings:mcpSelectionDescription")}
+          testId="task-create-mcp-selection"
+        />
+      )}
     </div>
   );
 }
@@ -246,6 +291,11 @@ function TaskCreateAdvancedSettingsContent({
   onWorkflowAgentOverrideChange = () => undefined,
   onResetWorkflowAgentOverrides = () => undefined,
   onRetryWorkflowAgentOverrides = () => undefined,
+  mcpDefinitions = [],
+  mcpDefinitionsLoading = false,
+  mcpSelectionIds = [],
+  onMcpSelectionIdsChange = () => undefined,
+  mcpInheritedSelections = [],
 }: AdvancedSettingsContentProps) {
   const { t } = useTranslation();
   const hasWorkflowAgentOverrides =
@@ -299,6 +349,14 @@ function TaskCreateAdvancedSettingsContent({
         >
           <TaskCreatePrioritySelect value={priority} onChange={onPriorityChange} />
         </div>
+        <TaskCreateMCPSettingRow
+          definitions={mcpDefinitions}
+          loading={mcpDefinitionsLoading}
+          selectedIds={mcpSelectionIds}
+          onSelectedIdsChange={onMcpSelectionIdsChange}
+          inherited={mcpInheritedSelections}
+          disabled={dependenciesDisabled}
+        />
       </div>
       {hasWorkflowAgentOverrides && (
         <TaskCreateWorkflowAgentOverridesSection
@@ -333,6 +391,11 @@ export function TaskCreateAdvancedSettings({
   onWorkflowAgentOverrideChange = () => undefined,
   onResetWorkflowAgentOverrides = () => undefined,
   onRetryWorkflowAgentOverrides = () => undefined,
+  mcpDefinitions = [],
+  mcpDefinitionsLoading = false,
+  mcpSelectionIds = [],
+  onMcpSelectionIdsChange = () => undefined,
+  mcpInheritedSelections = [],
 }: TaskCreateAdvancedSettingsProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -378,6 +441,11 @@ export function TaskCreateAdvancedSettings({
           onWorkflowAgentOverrideChange={onWorkflowAgentOverrideChange}
           onResetWorkflowAgentOverrides={onResetWorkflowAgentOverrides}
           onRetryWorkflowAgentOverrides={onRetryWorkflowAgentOverrides}
+          mcpDefinitions={mcpDefinitions}
+          mcpDefinitionsLoading={mcpDefinitionsLoading}
+          mcpSelectionIds={mcpSelectionIds}
+          onMcpSelectionIdsChange={onMcpSelectionIdsChange}
+          mcpInheritedSelections={mcpInheritedSelections}
         />
       </CollapsibleContent>
     </Collapsible>

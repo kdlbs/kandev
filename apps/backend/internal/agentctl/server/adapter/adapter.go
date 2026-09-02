@@ -114,6 +114,14 @@ type StderrLineSanitizer interface {
 	SanitizeStderrLine(line string) (safeLine string, keep bool)
 }
 
+// SessionCapabilityProvider exposes capabilities negotiated by ACP initialize.
+// It is optional so adapters and focused tests that do not expose capability
+// details retain the existing AgentAdapter contract.
+type SessionCapabilityProvider interface {
+	SupportsSessionResume() bool
+	SupportsSessionLoad() bool
+}
+
 // StderrProviderSetter is an optional interface implemented by adapters that can use
 // stderr output for error context. The process manager checks for this interface
 // and calls SetStderrProvider if available.

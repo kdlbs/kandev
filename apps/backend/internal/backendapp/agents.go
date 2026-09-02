@@ -134,6 +134,10 @@ func provideLifecycleManager(
 		cfg.ResolvedHomeDir(),
 		log,
 	)
+	configureMCPResolver(lifecycleMgr, agentSettingsRepo, mcpService, secretStores.runtime)
+	if stateRepo, ok := agentSettingsRepo.(mcpconfig.SessionMCPSelectionStateRepository); ok {
+		lifecycleMgr.SetMCPSelectionStateRepository(stateRepo)
+	}
 
 	// Persistence writer for executors_running, wired before Start runs its
 	// recovery pass: Start reads ListLiveStandaloneExecutorsRunning to build
@@ -279,6 +283,41 @@ func registerKubernetesBackend(
 func registerKubernetesPreparer(registry *lifecycle.PreparerRegistry, log *logger.Logger) {
 	registry.Register(models.ExecutorTypeKubernetes, lifecycle.NewKubernetesPreparer(log))
 	log.Info("Kubernetes preparer registered")
+}
+
+func configureMCPResolver(
+	lifecycleMgr *lifecycle.Manager,
+	agentSettingsRepo settingsstore.Repository,
+	mcpService *mcpconfig.Service,
+	secretStore secrets.SecretStore,
+) {
+	catalogRepo, ok := agentSettingsRepo.(mcpconfig.CatalogRepository)
+	if !ok {
+		return
+	}
+	selectionRepo, ok := agentSettingsRepo.(mcpconfig.SelectionRepository)
+	if !ok {
+		return
+	}
+	mcpResolver := mcpconfig.NewResolver(catalogRepo, selectionRepo)
+	var importStates mcpconfig.LegacyImportStateReader
+	if stateRepo, ok := agentSettingsRepo.(mcpconfig.LegacyImportStateReader); ok {
+		importStates = stateRepo
+	}
+	mcpResolver.SetLegacyProvider(mcpService, importStates)
+	if secretStore != nil {
+		mcpResolver.SetSecretResolver(mcpSecretResolver(secretStore))
+	}
+	lifecycleMgr.SetMCPResolver(mcpResolver)
+}
+
+func mcpSecretResolver(store secrets.SecretStore) mcpconfig.MCPSecretResolver {
+	return func(ctx context.Context, secretID, workspaceID string) (string, error) {
+		if scoped, ok := store.(secrets.ScopedSecretStore); ok {
+			return scoped.RevealForWorkspace(ctx, secretID, workspaceID)
+		}
+		return store.Reveal(ctx, secretID)
+	}
 }
 
 func credentialFilePath(cfg *config.Config) string {

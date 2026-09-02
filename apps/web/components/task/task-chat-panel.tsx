@@ -65,6 +65,7 @@ import { WipQueueStatus } from "./wip-queue-status";
 import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
 import { JumpToLatestButton } from "./chat/jump-to-latest-button";
 import { ConversationUsageDisplay } from "./chat/conversation-usage-display";
+import { TaskSessionMCPSettings } from "./task-session-mcp-settings";
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -699,6 +700,7 @@ type TaskChatPanelProps = {
   onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult;
   sessionId?: string | null;
   taskId?: string | null;
+  workspaceId?: string | null;
   /**
    * Task this panel belongs to, independent of whether it has a session yet.
    * Only the status row uses it, so a task with no session still shows its
@@ -1130,6 +1132,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   onSend,
   sessionId = null,
   taskId: taskIdHint = null,
+  workspaceId = null,
   statusTaskId = null,
   onOpenFile,
   showRequestChangesTooltip = false,
@@ -1259,6 +1262,16 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const showScrollToLastPrompt = useAppStore((state) => state.userSettings.showScrollToLastPrompt);
   const showScrollToStart = useAppStore((state) => state.userSettings.showScrollToStart);
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const mcpWorkspaceId = useAppStore((state) => {
+    const currentTaskId = taskId ?? taskIdHint;
+    if (!currentTaskId) return null;
+    return (
+      workspaceId ??
+      state.kanban.tasks.find((item) => item.id === currentTaskId)?.workspaceId ??
+      state.workspaces.activeId ??
+      null
+    );
+  });
   // The anchored bar is a desktop-only, fine-pointer affordance; coarse
   // pointers use the compact scroll control instead.
   const showAnchoredBar = isFinePointer && !isMobile && showAnchoredPromptBar;
@@ -1376,6 +1389,14 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       >
         {!hideLaunchQueueStatus && <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />}
         {!hideWipQueueStatus && <WipQueueStatus taskId={summaryTaskId} />}
+        {resolvedSessionId && taskId && (
+          <TaskSessionMCPSettings
+            sessionId={resolvedSessionId}
+            taskId={taskId}
+            workspaceId={mcpWorkspaceId}
+            profileId={session?.agent_profile_id}
+          />
+        )}
         <PanelBody
           padding={false}
           scroll={false}

@@ -142,6 +142,9 @@ export function buildDialogFormBodyProps(
     onRetryWorkflowAgentOverrides: () => setup.refreshWorkspaceSnapshots(true),
     runnerEditable: computeRunnerEditable(setup.isEditMode, props.editingTask),
     runnerIneligibleReason: computeRunnerIneligibleReason(props.editingTask),
+    mcpDefinitions: setup.mcpDefinitions,
+    mcpDefinitionsLoading: setup.mcpDefinitionsLoading,
+    mcpInheritedSelections: setup.mcpInheritedSelections,
   };
 }
 

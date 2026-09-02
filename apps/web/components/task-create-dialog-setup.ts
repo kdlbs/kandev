@@ -32,6 +32,8 @@ import { useResolvedTaskCreateWorkflowContext } from "@/components/task-create-d
 import { truncateRemoteTaskTitle } from "@/lib/task-title";
 import { t } from "@/lib/i18n";
 import { listRepositoryBranchPolicies } from "@/lib/api";
+import { useTaskCreateDialogMCPSetup } from "@/components/task-create-dialog-mcp";
+import { useMCPSelectionEditor } from "@/hooks/domains/workspace/use-mcp-selection-editor";
 import { useTaskEditDialogDependencies } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
 import {
   buildWorkflowAgentOverrideValidation,
@@ -145,6 +147,7 @@ type SubmitWiringArgs = {
   refreshBranchPolicies: () => Promise<void>;
   preserveQueuedLastUsedOnClose: () => void;
   workflowAgentOverridesBlockedReason?: string;
+  mcpSelectionEditor: ReturnType<typeof useMCPSelectionEditor>;
 };
 
 function useSubmitHandlersWiring({
@@ -160,6 +163,7 @@ function useSubmitHandlersWiring({
   refreshBranchPolicies,
   preserveQueuedLastUsedOnClose,
   workflowAgentOverridesBlockedReason,
+  mcpSelectionEditor,
 }: SubmitWiringArgs) {
   const {
     workspaceId,
@@ -212,6 +216,8 @@ function useSubmitHandlersWiring({
     setRemoteRepos: fs.setRemoteRepos,
     setAgentProfileId: fs.setAgentProfileId,
     setExecutorId: fs.setExecutorId,
+    setMcpServerIds: fs.setMcpServerIds,
+    setMcpServerIdsDirty: fs.setMcpServerIdsDirty,
     setSelectedWorkflowId: fs.setSelectedWorkflowId,
     setFetchedSteps: fs.setFetchedSteps,
     clearDraft: fs.clearDraft,
@@ -225,6 +231,12 @@ function useSubmitHandlersWiring({
     workflowAgentOverridesBlockedReason,
     blockedBy: fs.blockedBy,
     editDependencies,
+    mcpServerIds: fs.mcpServerIds,
+    mcpServerIdsDirty: fs.mcpServerIdsDirty,
+    saveTaskMCPSelections:
+      !isSessionMode && taskId && workspaceId
+        ? (definitionIds: string[]) => mcpSelectionEditor.save(definitionIds)
+        : undefined,
   });
 }
 
@@ -464,6 +476,16 @@ export function useTaskCreateDialogSetup(
   );
   const workflowAgentOverridesBlockedReason =
     mode === "create" ? workflowAgentOverrideValidation.blockedReason : undefined;
+  const mcp = useTaskCreateDialogMCPSetup({
+    open: resolvedProps.open,
+    workspaceId,
+    isSessionMode,
+    taskId: resolvedProps.taskId,
+    effectiveAgentProfileId: computed.effectiveAgentProfileId,
+    repositories: fs.repositories,
+    mcpServerIdsDirty: fs.mcpServerIdsDirty,
+    setMcpServerIds: fs.setMcpServerIds,
+  });
   const submitHandlers = useSubmitHandlersWiring({
     props: resolvedProps,
     fs,
@@ -477,6 +499,7 @@ export function useTaskCreateDialogSetup(
     refreshBranchPolicies,
     preserveQueuedLastUsedOnClose: options.preserveQueuedLastUsedOnClose ?? (() => undefined),
     workflowAgentOverridesBlockedReason,
+    mcpSelectionEditor: mcp.editor,
   });
   const { guardedHandleSubmit, handleKeyDown } = useDialogSubmitShortcut(
     submitHandlers.handleSubmit,
@@ -517,6 +540,9 @@ export function useTaskCreateDialogSetup(
     editDependencies,
     savedBaseSubmitBlockedReason,
     workflowAgentOverrideValidation,
+    mcpDefinitions: mcp.definitions,
+    mcpDefinitionsLoading: mcp.definitionsLoading,
+    mcpInheritedSelections: mcp.inheritedSelections,
   };
 }
 

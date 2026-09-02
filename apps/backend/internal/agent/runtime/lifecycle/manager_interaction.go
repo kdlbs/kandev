@@ -2363,6 +2363,9 @@ func (m *Manager) markReadyEventForExecution(
 	} else {
 		m.eventPublisher.publishAgentEventPayload(ctx, eventType, payload)
 	}
+	if eventType == events.AgentReady || eventType == events.AgentBootReady {
+		m.RequestSessionMCPReconfiguration(context.WithoutCancel(ctx), updated.SessionID)
+	}
 	return nil
 }
 

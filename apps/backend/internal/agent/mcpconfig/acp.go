@@ -7,37 +7,43 @@ import "github.com/kandev/kandev/internal/agentctl/types"
 func ToACPServers(resolved []ResolvedServer) []types.McpServer {
 	servers := make([]types.McpServer, 0, len(resolved))
 	for _, server := range resolved {
+		base := types.McpServer{
+			Name: server.Name, DefinitionID: server.DefinitionID,
+			DefinitionRevision: server.DefinitionRevision,
+			Origins:            acpOrigins(server.Origins),
+		}
 		switch server.Type {
 		case ServerTypeStdio:
-			servers = append(servers, types.McpServer{
-				Name:    server.Name,
-				Type:    "stdio",
-				Command: server.Command,
-				Args:    append([]string{}, server.Args...),
-				Env:     cloneStringMap(server.Env),
-			})
+			base.Type = "stdio"
+			base.Command = server.Command
+			base.Args = append([]string{}, server.Args...)
+			base.Env = cloneStringMap(server.Env)
 		case ServerTypeSSE:
-			servers = append(servers, types.McpServer{
-				Name:    server.Name,
-				Type:    "sse",
-				URL:     server.URL,
-				Headers: cloneStringMap(server.Headers),
-			})
+			base.Type = "sse"
+			base.URL = server.URL
+			base.Headers = cloneStringMap(server.Headers)
 		case ServerTypeHTTP:
-			servers = append(servers, types.McpServer{
-				Name:    server.Name,
-				Type:    "http",
-				URL:     server.URL,
-				Headers: cloneStringMap(server.Headers),
-			})
+			base.Type = "http"
+			base.URL = server.URL
+			base.Headers = cloneStringMap(server.Headers)
 		case ServerTypeStreamableHTTP:
-			servers = append(servers, types.McpServer{
-				Name:    server.Name,
-				Type:    "streamable_http",
-				URL:     server.URL,
-				Headers: cloneStringMap(server.Headers),
-			})
+			base.Type = "streamable_http"
+			base.URL = server.URL
+			base.Headers = cloneStringMap(server.Headers)
+		default:
+			continue
 		}
+		servers = append(servers, base)
 	}
 	return servers
+}
+
+func acpOrigins(origins []SelectionOrigin) []types.McpServerOrigin {
+	result := make([]types.McpServerOrigin, 0, len(origins))
+	for _, origin := range origins {
+		result = append(result, types.McpServerOrigin{
+			Scope: string(origin.Scope), WorkspaceID: origin.WorkspaceID, OwnerID: origin.OwnerID,
+		})
+	}
+	return result
 }

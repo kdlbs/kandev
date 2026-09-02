@@ -695,6 +695,60 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	return nil
 }
 
+// ResumeSession reconnects an existing ACP session without requesting history
+// replay. It is used for idle MCP reconfiguration when initialize advertised
+// sessionCapabilities.resume.
+func (a *Adapter) ResumeSession(ctx context.Context, sessionID string, mcpServers []types.McpServer) error {
+	a.mu.Lock()
+	conn := a.acpConn
+	supportsResume := a.capabilities.SessionCapabilities.Resume != nil
+	a.mu.Unlock()
+	if conn == nil {
+		return fmt.Errorf("adapter not initialized")
+	}
+	if !supportsResume {
+		return fmt.Errorf("agent does not support session resume (resume capability is false)")
+	}
+	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
+	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
+	for _, decision := range decisions {
+		kind := streams.MCPAttachmentEvidenceDelivered
+		if !decision.Included {
+			kind = streams.MCPAttachmentEvidenceFiltered
+		}
+		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
+	}
+	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.resume")
+	defer span.End()
+	_, err := conn.ResumeSession(ctx, acp.ResumeSessionRequest{
+		SessionId: acp.SessionId(sessionID), Cwd: a.cfg.WorkDir,
+		McpServers: toACPMcpServers(filteredServers),
+	})
+	if err != nil {
+		for _, server := range filteredServers {
+			a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceExplicitError, "session_resume_failed", err.Error())
+		}
+		span.RecordError(err)
+		return fmt.Errorf("failed to resume session: %w", err)
+	}
+	for _, server := range filteredServers {
+		a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceSessionAccepted, "", "")
+	}
+	a.mu.Lock()
+	a.sessionID = sessionID
+	a.configGeneration++
+	a.mu.Unlock()
+	a.attachMgr.SetSessionID(sessionID)
+	span.SetAttributes(attribute.String("session_id", sessionID))
+	a.logger.Info("resumed session", zap.String("session_id", sessionID))
+	a.sendUpdate(AgentEvent{
+		Type: streams.EventTypeSessionStatus, SessionID: sessionID,
+		SessionStatus: streams.SessionStatusResumed,
+		Data:          map[string]any{"session_status": streams.SessionStatusResumed, "init": true},
+	})
+	return nil
+}
+
 // ResetSession creates a new session on the existing connection, effectively resetting
 // the agent's conversation context without restarting the subprocess. This is much faster
 // than a full process restart since the ACP protocol supports multiple sessions per connection.

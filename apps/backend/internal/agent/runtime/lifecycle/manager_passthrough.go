@@ -458,7 +458,7 @@ func (m *Manager) passthroughMCPServers(
 		Type: string(mcpconfig.ServerTypeHTTP),
 		URL:  m.agentMCPURL(execution, port, "/mcp"),
 	}}
-	profileServers, err := m.resolveMcpServersWithParams(ctx, execution.AgentProfileID, execution.MetadataSnapshot(), agentConfig)
+	profileServers, err := m.resolveMcpServers(ctx, execution, agentConfig)
 	if err != nil {
 		return nil, err
 	}

@@ -38,6 +38,7 @@ export type LaunchSessionRequest = {
   auto_start?: boolean;
   attachments?: MessageAttachment[];
   activation_source?: LaunchActivationSource;
+  mcp_server_ids?: string[];
 };
 
 export type LaunchSessionResponse = {
