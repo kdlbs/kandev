@@ -713,8 +713,15 @@ func handoffReverseLinkWriteFailureMessage(err error) string {
 func parseHandoffEntries(raw, deliveryTaskID string) (entries []map[string]interface{}, alreadyPresent bool, corruptMsg string) {
 	const corruptMessage = "the source task's handoffs metadata is corrupt and cannot be safely appended to"
 	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" || trimmed == "null" {
+	if trimmed == "" {
 		return nil, false, ""
+	}
+	if trimmed == "null" {
+		// A genuinely absent handoffs key is reported by handoffsRawValue as
+		// "" (handled above), so a literal "null" here means the key is
+		// *present* with an explicit null value — one of AC-27's exhaustive
+		// corrupt shapes ("present but not an array"), not an empty array.
+		return nil, false, corruptMessage
 	}
 	var rawEntries []json.RawMessage
 	if err := json.Unmarshal([]byte(trimmed), &rawEntries); err != nil {
@@ -793,7 +800,11 @@ func (h *Handlers) logHandoffActivity(
 
 // dispatchHandoffLaunch is AC-32: the launch is dispatched synchronously and
 // its error observed, bounded by constants.AgentLaunchTimeout — deliberately
-// not launchAutoStartTask, which is fire-and-forget.
+// not launchAutoStartTask, which is fire-and-forget. ProfileExplicit is set
+// per AC-14a: agent_profile_id is used exactly as supplied to this tool, with
+// no inheritance or defaulting from the destination workflow step or
+// workflow default — without it, the orchestrator's resolveEffectiveAgentProfile
+// would silently substitute the step's pinned profile.
 func (h *Handlers) dispatchHandoffLaunch(ctx context.Context, task *models.Task, agentProfileID, executorID, executorProfileID string) error {
 	if h.sessionLauncher == nil {
 		return errors.New("no session launcher is configured")
@@ -804,6 +815,7 @@ func (h *Handlers) dispatchHandoffLaunch(ctx context.Context, task *models.Task,
 		TaskID:            task.ID,
 		Intent:            orchestrator.IntentStart,
 		AgentProfileID:    agentProfileID,
+		ProfileExplicit:   true,
 		ExecutorID:        executorID,
 		ExecutorProfileID: executorProfileID,
 		WorkflowStepID:    task.WorkflowStepID,

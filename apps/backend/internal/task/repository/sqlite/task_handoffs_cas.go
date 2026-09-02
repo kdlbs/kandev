@@ -105,7 +105,14 @@ func (r *Repository) lockTaskRowForHandoffs(ctx context.Context, tx *sqlx.Tx, ta
 }
 
 // handoffsRawValue extracts the raw JSON bytes stored under MetaKeyHandoffs
-// from a task's metadata JSON blob, returning "" when absent or null.
+// from a task's metadata JSON blob, returning "" only when the key is
+// genuinely absent (including when the whole metadata blob is absent or
+// null). Per AC-27, an absent key compares equal to the empty array, but a
+// key that is *present* with an explicit null value is a distinct, corrupt
+// shape ("present but not an array") — so a present null is returned as the
+// literal string "null" rather than being collapsed into the same "" that
+// means "absent", letting the caller (parseHandoffEntries) tell the two
+// apart.
 func handoffsRawValue(metadataJSON string) (string, error) {
 	if strings.TrimSpace(metadataJSON) == "" || strings.TrimSpace(metadataJSON) == jsonNull {
 		return "", nil
@@ -115,7 +122,7 @@ func handoffsRawValue(metadataJSON string) (string, error) {
 		return "", fmt.Errorf("failed to parse metadata: %w", err)
 	}
 	raw, ok := metadata[models.MetaKeyHandoffs]
-	if !ok || string(raw) == jsonNull {
+	if !ok {
 		return "", nil
 	}
 	return string(raw), nil

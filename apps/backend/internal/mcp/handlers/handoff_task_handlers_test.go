@@ -572,6 +572,35 @@ func TestHandleHandoffTask_CorruptHandoffsMetadataStillCreatesTask(t *testing.T)
 	assert.Equal(t, corrupted, raw, "the corrupt metadata must be left byte-identical, not repaired or dropped")
 }
 
+// TestHandleHandoffTask_PresentNullHandoffsIsCorruptNotAbsent covers AC-27's
+// exhaustive corruption rule: "the handoffs value is present but not an
+// array" is corrupt. A present `"handoffs": null` must NOT be treated the
+// same as an absent handoffs key (AC-27 makes an absent key compare equal to
+// the empty array) — collapsing the two meant a source task with an
+// explicitly-null handoffs value (reachable via the generic task metadata
+// PATCH path) silently accepted a fresh reverse-link array overwrite instead
+// of failing per AC-29's partial-failure contract.
+func TestHandleHandoffTask_PresentNullHandoffsIsCorruptNotAbsent(t *testing.T) {
+	f := newHandoffFixture(t, agentsettingsmodels.AgentRoleCEO, "", nil)
+	stored, _, err := f.repo.SetTaskHandoffsIfUnchanged(context.Background(), f.sourceTaskID, "", "null")
+	require.NoError(t, err)
+	require.True(t, stored, "precondition: seeding the fresh task's handoffs metadata with null must succeed")
+
+	payload := f.validPayload(map[string]interface{}{handoffFieldExternalID: "ext-null-handoffs-1"})
+	resp, err := f.h.handleHandoffTask(f.ctx(), makeWSMessage(t, ws.ActionMCPHandoffTask, payload))
+	require.NoError(t, err)
+	result := decodeHandoffResult(t, resp)
+
+	assert.Equal(t, handoffOutcomeCreated, result.Outcome)
+	assert.True(t, result.CreationComplete)
+	assert.False(t, result.ReverseLinkRecorded)
+	assert.NotEmpty(t, result.ReverseLinkError)
+
+	raw, err := f.repo.GetTaskHandoffsRaw(context.Background(), f.sourceTaskID)
+	require.NoError(t, err)
+	assert.Equal(t, "null", raw, "a present null handoffs value must be left byte-identical, not overwritten with a fresh array")
+}
+
 // --- 11. AC-32 start_agent launch outcome ---
 
 func TestHandleHandoffTask_StartAgentLaunchFailureStillSucceeds(t *testing.T) {
@@ -601,4 +630,17 @@ func TestHandleHandoffTask_StartAgentLaunchSuccessReportsStarted(t *testing.T) {
 	assert.Equal(t, handoffOutcomeCreated, result.Outcome)
 	assert.True(t, result.Started)
 	assert.Empty(t, result.StartError)
+
+	// AC-14a: agent_profile_id and executor_profile_id are used exactly as
+	// supplied, with no inheritance or defaulting from the destination
+	// workflow step or workflow default. ProfileExplicit is the orchestrator
+	// signal that suppresses that inheritance chain (task_operations.go's
+	// resolveEffectiveAgentProfile gate) — without it, a destination step
+	// pinning a different agent profile would silently override the caller's
+	// choice, which AC-14a explicitly forbids for this tool.
+	req := launcher.getRequest()
+	require.NotNil(t, req, "LaunchSession must have been called")
+	assert.True(t, req.ProfileExplicit, "handoff launch must mark the supplied profile explicit so it is never overridden by a workflow step")
+	assert.Equal(t, f.targetAgentProfileID, req.AgentProfileID)
+	assert.Equal(t, f.targetExecProfileID, req.ExecutorProfileID)
 }
