@@ -8,9 +8,10 @@ import (
 )
 
 var (
-	ErrEnvLocked   = errors.New("runtime flag is controlled by environment")
-	ErrStoreUnset  = errors.New("runtime flag store is not configured")
-	ErrUnknownFlag = errors.New("unknown runtime flag")
+	ErrEnvLocked       = errors.New("runtime flag is controlled by environment")
+	ErrStoreUnset      = errors.New("runtime flag store is not configured")
+	ErrUnknownFlag     = errors.New("unknown runtime flag")
+	ErrFlagUnavailable = errors.New("runtime flag is unavailable on this host")
 )
 
 type Options struct {
@@ -60,6 +61,9 @@ func (s *Service) SetOverride(ctx context.Context, key string, value *bool) ([]R
 	if s.isEnvLocked(def) {
 		return nil, ErrEnvLocked
 	}
+	if value != nil && *value && !s.isAvailable(def) {
+		return nil, ErrFlagUnavailable
+	}
 	if value == nil {
 		if err := s.store.DeleteOverride(ctx, key); err != nil {
 			return nil, err
@@ -91,6 +95,17 @@ func (s *Service) stateFor(def RuntimeFlagDefinition, overrides map[string]bool)
 		source = SourceDefault
 	}
 
+	var availability *RuntimeFlagAvailability
+	if def.Available != nil {
+		if available, reasonCode := def.Available(); !available {
+			// An unavailable flag behaves as disabled whatever its stored
+			// value, so an admin override cannot leave a host claiming a
+			// capability it cannot honour.
+			effectiveValue = false
+			availability = &RuntimeFlagAvailability{Available: false, ReasonCode: reasonCode}
+		}
+	}
+
 	return RuntimeFlagState{
 		Key:                    def.Key,
 		Kind:                   def.Kind,
@@ -108,12 +123,21 @@ func (s *Service) stateFor(def RuntimeFlagDefinition, overrides map[string]bool)
 		RestartRequired:        def.RestartRequired,
 		RequiresRestartToApply: def.RestartRequired && effectiveValue != runtimeValue,
 		Mutable:                def.Mutable,
+		Availability:           availability,
 	}
 }
 
 func (s *Service) isEnvLocked(def RuntimeFlagDefinition) bool {
 	_, locked := s.envLockedValue(def, false)
 	return locked
+}
+
+func (s *Service) isAvailable(def RuntimeFlagDefinition) bool {
+	if def.Available == nil {
+		return true
+	}
+	available, _ := def.Available()
+	return available
 }
 
 func (s *Service) envLockedValue(def RuntimeFlagDefinition, fallback bool) (bool, bool) {
