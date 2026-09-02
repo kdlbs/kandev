@@ -148,13 +148,22 @@ func (r *Repository) migrateParentWakeIndexes() {
 }
 
 // migrateParentWakeReceiptColumns adds operation identity for receipts
-// created by workflow-engine dispatch. Existing direct-run receipts keep
-// their delivered_run_id and receive the empty operation id default.
+// created by workflow-engine dispatch, and the child generation a receipt
+// was delivered against. Existing rows receive the empty default for both;
+// an existing receipt with an empty child_generation is treated by
+// ListStuckParents' third OR arm as not matching any non-empty generation,
+// so it is re-admitted once on the next tick after upgrade rather than
+// silently trusted as current.
 func (r *Repository) migrateParentWakeReceiptColumns() {
 	r.migrate.Apply(
 		"parent_child_wake_receipts.delivery_operation_id",
 		`ALTER TABLE parent_child_wake_receipts
 		 ADD COLUMN delivery_operation_id TEXT NOT NULL DEFAULT ''`,
+	)
+	r.migrate.Apply(
+		"parent_child_wake_receipts.child_generation",
+		`ALTER TABLE parent_child_wake_receipts
+		 ADD COLUMN child_generation TEXT NOT NULL DEFAULT ''`,
 	)
 }
 

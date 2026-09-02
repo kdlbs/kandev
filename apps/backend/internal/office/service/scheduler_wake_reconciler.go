@@ -207,7 +207,7 @@ func (h *ParentWakeReconciler) recordReceipt(
 
 	deliveredAt := time.Now().UTC()
 	if err := svc.repo.UpsertWakeReceiptTx(
-		ctx, tx, c.ParentTaskID, c.ChildSetKey, "", operationID, deliveredAt,
+		ctx, tx, c.ParentTaskID, c.ChildSetKey, "", operationID, c.NewestChildUpdatedAt, deliveredAt,
 	); err != nil {
 		if ctx.Err() != nil {
 			return

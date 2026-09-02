@@ -71,15 +71,21 @@ type StuckParentCandidate struct {
 //     contract; they require an explicit user retry and must not become a
 //     cron retry loop. A missing referenced run remains eligible because a
 //     cleanup or migration can remove the delivery evidence.
-//   - a third OR arm, newest_child_updated_at > delivered_at, re-admits a
-//     candidate whose child_set_key still matches the receipt exactly. A
+//   - a third OR arm, newest_child_updated_at != child_generation, re-admits
+//     a candidate whose child_set_key still matches the receipt exactly. A
 //     child that completes, is reopened, and completes again with the same
 //     terminal state produces a byte-identical child_set_key (it encodes
 //     "id:state" only), so the first two arms both stay false and the
 //     re-completion would otherwise never be swept. The edge-triggered path
 //     (cascadeChildrenCompleted) also cannot catch this: its idempotency key
 //     hashes child ids only, so an identical child set collides with the
-//     run it already persisted for the first completion.
+//     run it already persisted for the first completion. child_generation
+//     is the newest_child_updated_at value recorded at delivery time, so
+//     this is an equality check between two tasks.updated_at values, not an
+//     ordering comparison against delivered_at: tasks.updated_at is written
+//     by more than one producer in more than one text format (see
+//     recordReceipt), so ordering two differently-formatted strings is
+//     unreliable in a way equality between two same-format strings is not.
 //   - the NOT EXISTS against runs drops a candidate with a queued or
 //     claimed task_children_completed run (still in flight, regardless of
 //     which child set it was requested for — wait for it to resolve rather
@@ -166,7 +172,7 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 		          )
 		          AND COALESCE(r.delivery_operation_id, '') = ''
 		      )
-		      OR s.newest_child_updated_at > r.delivered_at
+		      OR s.newest_child_updated_at != COALESCE(r.child_generation, '')
 		  )
 		  AND NOT EXISTS (
 		      SELECT 1 FROM runs w
@@ -200,6 +206,10 @@ type WakeReceipt struct {
 	DeliveredRunID      string    `db:"delivered_run_id"`
 	DeliveryOperationID string    `db:"delivery_operation_id"`
 	DeliveredAt         time.Time `db:"delivered_at"`
+	// ChildGeneration is the newest_child_updated_at value that was current
+	// when this receipt was recorded. It is the value ListStuckParents'
+	// third OR arm compares against, not DeliveredAt.
+	ChildGeneration string `db:"child_generation"`
 }
 
 // GetWakeReceipt returns the receipt for a parent task, or nil if none
@@ -208,7 +218,7 @@ func (r *Repository) GetWakeReceipt(ctx context.Context, parentTaskID string) (*
 	var rec WakeReceipt
 	err := r.ro.GetContext(ctx, &rec, r.ro.Rebind(`
 		SELECT parent_task_id, child_set_key, delivered_run_id,
-		       delivery_operation_id, delivered_at
+		       delivery_operation_id, delivered_at, child_generation
 		FROM parent_child_wake_receipts
 		WHERE parent_task_id = ?
 	`), parentTaskID)
@@ -225,23 +235,27 @@ func (r *Repository) GetWakeReceipt(ctx context.Context, parentTaskID string) (*
 // parent task's current child set, using a transaction the caller owns.
 // deliveredRunID is populated by legacy direct-run callers. The workflow
 // engine path uses deliveryOperationID because one trigger can fan out to
-// several runs and the engine owns their admission.
+// several runs and the engine owns their admission. childGeneration is the
+// newest_child_updated_at value the caller admitted this candidate against;
+// ListStuckParents compares it for equality against the parent's current
+// newest_child_updated_at to detect a same-child-set reopen.
 func (r *Repository) UpsertWakeReceiptTx(
 	ctx context.Context, tx *sqlx.Tx,
-	parentTaskID, childSetKey, deliveredRunID, deliveryOperationID string,
+	parentTaskID, childSetKey, deliveredRunID, deliveryOperationID, childGeneration string,
 	deliveredAt time.Time,
 ) error {
 	_, err := tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO parent_child_wake_receipts (
 			parent_task_id, child_set_key, delivered_run_id,
-			delivery_operation_id, delivered_at
-		) VALUES (?, ?, ?, ?, ?)
+			delivery_operation_id, delivered_at, child_generation
+		) VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT (parent_task_id) DO UPDATE SET
 			child_set_key = excluded.child_set_key,
 			delivered_run_id = excluded.delivered_run_id,
 			delivery_operation_id = excluded.delivery_operation_id,
-			delivered_at = excluded.delivered_at
-	`), parentTaskID, childSetKey, deliveredRunID, deliveryOperationID, deliveredAt)
+			delivered_at = excluded.delivered_at,
+			child_generation = excluded.child_generation
+	`), parentTaskID, childSetKey, deliveredRunID, deliveryOperationID, deliveredAt, childGeneration)
 	return err
 }
 
