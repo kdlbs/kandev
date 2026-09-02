@@ -27,7 +27,8 @@ apps/backend/
 │   │   ├── registry/     # Agent type registry and defaults
 │   │   ├── settings/     # Agent settings
 │   │   ├── mcpconfig/    # MCP server configuration
-│   │   └── remoteauth/   # Remote auth catalog and method IDs for remote executors/UI
+│   │   ├── remoteauth/   # Remote auth catalog and method IDs for remote executors/UI
+│   │   └── planinjection/ # Bounds a task plan document before session-handover/dynamic-continuation injection
 │   ├── auth/             # Opt-in auth, per-user scoping, middleware, API, store
 │   ├── agentctl/
 │   │   └── server/       # agentctl HTTP server
@@ -282,8 +283,7 @@ Prefer stable error codes for new output so the frontend translates it. See `doc
 ## Code-quality limits
 
 Enforced by `apps/backend/.golangci.yml` (errors on new code only):
-- Functions: ≤80 lines, ≤50 statements · Cyclomatic complexity: ≤15 · Cognitive complexity: ≤30
-- Nesting depth: ≤5 · Naked returns only in functions ≤30 lines · No duplicated blocks (≥150 tokens) · Repeated strings → constants (≥3 occurrences) · Revive's 800-effective-line file limit also applies to test files; put new tests in a new file instead of appending to an already-large test file.
+- Functions: ≤80 lines, ≤50 statements · Cyclomatic complexity: ≤15 · Cognitive complexity: ≤30 · Nesting depth: ≤5 · Naked returns only in functions ≤30 lines · No duplicated blocks (≥150 tokens) · Repeated strings → constants (≥3 occurrences) · Revive's 800-effective-line file limit also applies to test files; put new tests in a new file instead of appending to an already-large test file.
 
 When a PR fixup touches backend code, run the CI-style changed-file linter locally from `apps/backend` with the PR base SHA before pushing, because CI enforces changed-file complexity thresholds:
 

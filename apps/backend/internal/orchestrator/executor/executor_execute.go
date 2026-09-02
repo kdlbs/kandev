@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agent/planinjection"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/constants"
@@ -2232,17 +2233,33 @@ func (e *Executor) injectHandoverIfNeeded(ctx context.Context, taskID, currentSe
 		return prompt
 	}
 
-	// Build the plan section if a plan exists.
+	// Build the plan section if a plan exists. The composed document is the
+	// content verbatim (this site does not trim it); containment runs before
+	// the reducer so the reducer's guarantees hold over the contained text.
 	var planSection string
-	plan, err := e.repo.GetTaskPlan(ctx, taskID)
-	if err == nil && plan != nil && plan.Content != "" {
-		planSection = fmt.Sprintf("\nThe task has an implementation plan:\n\n%s\n", plan.Content)
-	}
-
-	e.logger.Info("injecting session handover context",
+	logFields := []zap.Field{
 		zap.String("task_id", taskID),
 		zap.String("session_id", currentSessionID),
-		zap.Int("previous_sessions", previousCount))
+		zap.Int("previous_sessions", previousCount),
+	}
+	plan, err := e.repo.GetTaskPlan(ctx, taskID)
+	if err == nil && plan != nil {
+		composed := planinjection.ContainTags(plan.Content)
+		reducedPlan, reduced, omitted := planinjection.Reduce(composed, planinjection.HandoverBudget)
+		if reducedPlan != "" {
+			planSection = fmt.Sprintf("\nThe task has an implementation plan:\n\n%s\n", reducedPlan)
+		}
+		if reduced {
+			logFields = append(logFields,
+				zap.String("site", "handover"),
+				zap.Int("plan_input_bytes", len(composed)),
+				zap.Int("plan_output_bytes", len(reducedPlan)),
+				zap.Int("plan_sections_omitted", omitted),
+			)
+		}
+	}
+
+	e.logger.Info("injecting session handover context", logFields...)
 
 	return sysprompt.InjectSessionHandover(previousCount, planSection, prompt)
 }

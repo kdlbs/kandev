@@ -44,7 +44,9 @@ import (
 // (handleRecoverableFailureLocked, PR #2963): only a session holding a
 // signal for the task's current step is touched. A long turn that never
 // signalled at all is out of scope and keeps running. Office sessions are
-// excluded — this path must not advance an Office task's step. Passthrough
+// excluded from the reclaim — this path must not advance an Office task's
+// step — but are still reported; see stuckSignalDispositionFor and
+// surfaceOfficeStalledSignal. Passthrough
 // (PTY) sessions are excluded too, mirroring the guard
 // flipStaleRunningToWaiting and markIdleAfterReset already apply
 // (event_handlers_workflow.go): a passthrough session manages its own
@@ -108,18 +110,28 @@ func (s *Service) reclaimStuckSignalSessionsOnce(ctx context.Context) {
 	scanCtx, cancel := context.WithTimeout(ctx, stuckSignalScanBudget)
 	defer cancel()
 	now := time.Now().UTC()
+	live := make(map[string]struct{}, len(sessions))
 	for i, session := range sessions {
 		if scanCtx.Err() != nil {
 			s.logger.Warn("stuck-signal watchdog: per-tick scan budget exceeded; deferring remaining candidates to the next tick",
 				zap.Int("candidates_scanned", i),
 				zap.Int("candidates_deferred", len(sessions)-i))
+			// Deliberately no prune: `live` is incomplete for a scan cut
+			// short here, and pruning against it would re-report signals on
+			// the sessions this tick never reached.
 			return
+		}
+		if session != nil {
+			if signal, ok := models.LoadPendingStepSignal(session.Metadata); ok {
+				live[officeStalledSignalKey(session.ID, signal)] = struct{}{}
+			}
 		}
 		if s.reconcileWaitingStuckSignalSessionIfDue(scanCtx, session, now) {
 			continue
 		}
 		s.reclaimStuckSignalSessionIfDue(scanCtx, session, now)
 	}
+	s.pruneOfficeStalledSignals(live)
 }
 
 // reconcileWaitingStuckSignalSessionIfDue retries an accepted signal after a
@@ -135,7 +147,29 @@ func (s *Service) reconcileWaitingStuckSignalSessionIfDue(ctx context.Context, s
 		return false
 	}
 	task, err := s.repo.GetTask(ctx, session.TaskID)
-	if err != nil || task == nil || task.WorkflowStepID != signal.StepID || task.IsFromOffice || session.IsPassthrough {
+	if err != nil || task == nil {
+		return false
+	}
+	switch stuckSignalDispositionFor(task, session, signal) {
+	case stuckSignalSurfaceOnly:
+		guard := s.lockCancelInFlightGuard(session.ID)
+		defer guard.release()
+		if s.isCancelInFlight(session.ID) {
+			return true
+		}
+		latest, latestSignal, stillPending := s.stuckSignalWaitingStillPending(ctx, session.ID, signal)
+		if !stillPending {
+			return true
+		}
+		latestTask, err := s.repo.GetTask(ctx, latest.TaskID)
+		if err != nil || latestTask == nil ||
+			stuckSignalDispositionFor(latestTask, latest, latestSignal) != stuckSignalSurfaceOnly {
+			return true
+		}
+		s.surfaceOfficeStalledSignal(latestTask, latest, latestSignal, stuckSignalGateWaiting, now)
+		return true
+	case stuckSignalReclaimable:
+	default:
 		return false
 	}
 	guard := s.lockCancelInFlightGuard(session.ID)
@@ -143,7 +177,7 @@ func (s *Service) reconcileWaitingStuckSignalSessionIfDue(ctx context.Context, s
 	if s.isCancelInFlight(session.ID) {
 		return true
 	}
-	_, stillPending := s.stuckSignalWaitingStillPending(ctx, session.ID, signal.StepID)
+	_, _, stillPending := s.stuckSignalWaitingStillPending(ctx, session.ID, signal)
 	if !stillPending {
 		return true
 	}
@@ -151,16 +185,20 @@ func (s *Service) reconcileWaitingStuckSignalSessionIfDue(ctx context.Context, s
 	return true
 }
 
-func (s *Service) stuckSignalWaitingStillPending(ctx context.Context, sessionID, stepID string) (*models.TaskSession, bool) {
+func (s *Service) stuckSignalWaitingStillPending(
+	ctx context.Context,
+	sessionID string,
+	expected models.PendingStepCompletionSignal,
+) (*models.TaskSession, models.PendingStepCompletionSignal, bool) {
 	latest, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || latest == nil || latest.State != models.TaskSessionStateWaitingForInput {
-		return nil, false
+		return nil, models.PendingStepCompletionSignal{}, false
 	}
 	signal, ok := models.LoadPendingStepSignal(latest.Metadata)
-	if !ok || signal.StepID != stepID {
-		return nil, false
+	if !ok || officeStalledSignalKey(sessionID, signal) != officeStalledSignalKey(sessionID, expected) {
+		return nil, models.PendingStepCompletionSignal{}, false
 	}
-	return latest, true
+	return latest, signal, true
 }
 
 // reclaimStuckSignalSessionIfDue filters a single session against the
@@ -357,13 +395,10 @@ func (s *Service) prepareStuckSignalCancellation(
 }
 
 // stuckSignalCandidate applies the unguarded eligibility filter: RUNNING or
-// STARTING state, a pending signal older than stuckSignalWatchdogThreshold,
-// matching the task's CURRENT step, on a non-Office, non-passthrough task.
-// Office sessions go FAILED, not WAITING_FOR_INPUT, and must not advance
-// their step from this path — same exclusion PR #2963 applies to
-// handleRecoverableFailureLocked's reconciliation hook. Passthrough sessions
-// are excluded because this watchdog's inactivity gate cannot see them (see
-// the package doc and stuckSignalInactiveLongEnough).
+// STARTING state, plus a pending signal older than
+// stuckSignalWatchdogThreshold that stuckSignalDispositionFor classifies as
+// reclaimable. See that function for why Office and passthrough sessions never
+// reach the reclaim path.
 func (s *Service) stuckSignalCandidate(
 	ctx context.Context, session *models.TaskSession, now time.Time,
 ) (*models.Task, models.PendingStepCompletionSignal, bool) {
@@ -381,14 +416,145 @@ func (s *Service) stuckSignalCandidate(
 	if err != nil || task == nil {
 		return nil, models.PendingStepCompletionSignal{}, false
 	}
-	// Only a signal that matches the task's CURRENT step is this watchdog's
-	// job. A stale signal (step already moved on) is left for the ordinary
-	// signal-consuming paths, which clear a bag entry that no longer
-	// matches the current step.
-	if task.WorkflowStepID != signal.StepID || task.IsFromOffice || session.IsPassthrough {
+	switch stuckSignalDispositionFor(task, session, signal) {
+	case stuckSignalSurfaceOnly:
+		// Signal age alone is not inactivity (see stuckSignalWatchdogThreshold's
+		// comment above): an Office agent can still be mid-tool-call when its
+		// signal clears this gate. The waiting gate needs no equivalent check —
+		// that session is WAITING_FOR_INPUT, not running — but this gate's
+		// session is RUNNING/STARTING, so it is read here exactly as the
+		// reclaim path below would read it, just without registering a
+		// reclaim.
+		if _, inactive := s.stuckSignalInactiveLongEnough(ctx, session.ID, now); inactive {
+			s.surfaceOfficeStalledSignal(task, session, signal, stuckSignalGateCandidate, now)
+		}
+		return nil, models.PendingStepCompletionSignal{}, false
+	case stuckSignalReclaimable:
+		return task, signal, true
+	default:
 		return nil, models.PendingStepCompletionSignal{}, false
 	}
-	return task, signal, true
+}
+
+// stuckSignalDisposition is the verdict both watchdog gate sites consult. It
+// exists so the Office boundary is expressed exactly once: the two gates
+// (reconcileWaitingStuckSignalSessionIfDue and stuckSignalCandidate) carried
+// near-identical inline predicates, and a change applied to one of them
+// silently left the other as a second, divergent gate.
+type stuckSignalDisposition int
+
+const (
+	// stuckSignalNotCandidate: this watchdog has no business with the
+	// session at all.
+	stuckSignalNotCandidate stuckSignalDisposition = iota
+	// stuckSignalReclaimable: the session may be reclaimed - cancel the
+	// execution, force-close the turn, and apply the signalled transition.
+	stuckSignalReclaimable
+	// stuckSignalSurfaceOnly: the stuck state is real and worth reporting,
+	// but this watchdog must not act on it. Office tasks only.
+	stuckSignalSurfaceOnly
+)
+
+// stuckSignalDispositionFor classifies a session holding a pending signal.
+//
+// Office tasks are stuckSignalSurfaceOnly, never stuckSignalReclaimable. Both
+// gate sites lead to recovery: passing the
+// reconcileWaitingStuckSignalSessionIfDue gate falls through to
+// reconcileStepCompletionSignalLocked, which applies the step transition the
+// agent asked for, and passing the stuckSignalCandidate gate leads to
+// reclaimStuckSignalSessionOwned, which cancels the execution and force-closes
+// the turn before doing the same. Advancing an Office step from here would
+// record the transition without the decisions the step's quorum gate requires -
+// the forged approval those gates exist to prevent. Office therefore stays
+// excluded from recovery, and is lifted only for detection.
+//
+// Passthrough (PTY) sessions are stuckSignalNotCandidate regardless of Office
+// status: none of the ACP-only lastActivityAt writers ever run for one, so
+// there is no activity signal to distinguish a stuck passthrough session from a
+// busy one. Excluding them from detection as well as recovery keeps this
+// watchdog from reporting a state it cannot actually observe.
+func stuckSignalDispositionFor(
+	task *models.Task, session *models.TaskSession, signal models.PendingStepCompletionSignal,
+) stuckSignalDisposition {
+	if task == nil || session == nil {
+		return stuckSignalNotCandidate
+	}
+	// A stale signal (step already moved on) is left for the ordinary
+	// signal-consuming paths, which clear a bag entry that no longer matches
+	// the current step. Checked before the Office branch so a stale Office
+	// signal is not reported as a stall.
+	if task.WorkflowStepID != signal.StepID {
+		return stuckSignalNotCandidate
+	}
+	if session.IsPassthrough {
+		return stuckSignalNotCandidate
+	}
+	if task.IsFromOffice {
+		return stuckSignalSurfaceOnly
+	}
+	return stuckSignalReclaimable
+}
+
+// stuckSignalGate names which of the two watchdog gate sites observed a
+// stranded signal, so the report says where it was seen.
+type stuckSignalGate string
+
+const (
+	stuckSignalGateWaiting   stuckSignalGate = "waiting_reconcile"
+	stuckSignalGateCandidate stuckSignalGate = "candidate"
+)
+
+// officeStalledSignalKey identifies one stranded signal for dedupe purposes.
+// SignaledAt is part of the key so a genuinely new signal on the same session
+// and step is reported again rather than suppressed by its predecessor.
+func officeStalledSignalKey(sessionID string, signal models.PendingStepCompletionSignal) string {
+	return sessionID + "\x00" + signal.StepID + "\x00" + signal.SignaledAt.UTC().Format(time.RFC3339Nano)
+}
+
+// surfaceOfficeStalledSignal reports an Office task holding a stranded
+// completion signal, and does nothing else. No session write, no turn close,
+// no step transition, no decision row, no queued run — surfacing this state is
+// the whole action, because repairing it would apply a step transition the
+// task's quorum gate never approved.
+func (s *Service) surfaceOfficeStalledSignal(
+	task *models.Task,
+	session *models.TaskSession,
+	signal models.PendingStepCompletionSignal,
+	gate stuckSignalGate,
+	now time.Time,
+) {
+	if task == nil || session == nil {
+		return
+	}
+	if _, seen := s.officeStalledSignals.LoadOrStore(officeStalledSignalKey(session.ID, signal), struct{}{}); seen {
+		return
+	}
+	officeStallStrandedSignalTotal.Add(officeStallLabel("gate", string(gate)), 1)
+	s.logger.Warn("office stall watchdog: Office task holds a stranded completion signal",
+		zap.String("task_id", task.ID),
+		zap.String("session_id", session.ID),
+		zap.String("step_id", signal.StepID),
+		zap.Duration("signal_age", now.Sub(signal.SignaledAt)),
+		zap.String("gate", string(gate)))
+}
+
+// pruneOfficeStalledSignals drops dedupe entries for signals that are no
+// longer present on any active session, bounding the map by the active-session
+// list. Only ever called after a scan that visited every session: a scan cut
+// short by the budget has an incomplete live set, and pruning against it would
+// re-report signals that are still stranded.
+func (s *Service) pruneOfficeStalledSignals(live map[string]struct{}) {
+	s.officeStalledSignals.Range(func(key, _ any) bool {
+		k, ok := key.(string)
+		if !ok {
+			s.officeStalledSignals.Delete(key)
+			return true
+		}
+		if _, stillLive := live[k]; !stillLive {
+			s.officeStalledSignals.Delete(k)
+		}
+		return true
+	})
 }
 
 // stuckSignalStillPending re-reads the session under the cancelInFlight

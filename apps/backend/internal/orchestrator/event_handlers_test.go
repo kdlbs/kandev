@@ -320,6 +320,9 @@ type mockAgentManager struct {
 	// steerAgentWithDispatchCallback capability.
 	capturedSteerCalls []promptCall
 	steerErr           error
+	steerStarted       chan struct{}
+	steerRelease       chan struct{}
+	steerStartOnce     sync.Once
 	// Optional: closed once on the first PromptAgent call so tests can wait
 	// deterministically without polling. Tests opt in by initializing the channel.
 	promptDone chan struct{}
@@ -513,7 +516,15 @@ func (m *mockAgentManager) SteerAgentWithDispatchCallback(_ context.Context, exe
 	m.mu.Lock()
 	m.capturedSteerCalls = append(m.capturedSteerCalls, promptCall{ExecutionID: executionID, Prompt: prompt, DispatchOnly: dispatchOnly})
 	steerErr := m.steerErr
+	steerStarted := m.steerStarted
+	steerRelease := m.steerRelease
 	m.mu.Unlock()
+	if steerStarted != nil {
+		m.steerStartOnce.Do(func() { close(steerStarted) })
+	}
+	if steerRelease != nil {
+		<-steerRelease
+	}
 	if steerErr != nil {
 		return nil, steerErr
 	}

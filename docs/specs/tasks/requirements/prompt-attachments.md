@@ -2,7 +2,7 @@
 status: draft
 system: tasks
 created: 2026-08-04
-updated: 2026-09-01
+updated: 2026-09-02
 owners:
   - Kandev team
 ---
@@ -33,6 +33,14 @@ This document is the migrated task-system source for the capability. The source 
 - **AC-TASKS-PROMPT-ATTACHMENTS-001.5:** When attachment materialization fails
   before the initial prompt reaches the agent, the system shall show a durable
   launch error and shall not present the session as active work.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.6:** When a message carrying claimed
+  attachments is delivered into a turn that is already generating, the system
+  shall materialize those attachments into the active session before the agent
+  receives the message, on the same terms as a message that starts a new turn.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.7:** When materialization fails for a
+  message delivered into a generating turn, the system shall surface a durable
+  error for that message and shall not deliver an attachment reference whose
+  bytes are absent from the session.
 
 ## Migrated source detail
 
@@ -74,6 +82,8 @@ move files into a workspace manually or strip useful evidence.
 - Path-delivered files are materialized in the active execution beneath the
   session's `.kandev/attachments/<session-id>/` directory before the agent is
   prompted. Existing native-prompt and path delivery choices remain available.
+  This holds for every delivery route, including a message folded into a turn
+  that is already generating.
 - Desktop and mobile expose the same upload, retry, removal, submission, and
   size-error outcomes through their existing prompt composers.
 

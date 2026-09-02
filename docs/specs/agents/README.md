@@ -60,6 +60,7 @@ surface shared by task and Office consumers.
 - [Spawn Session Effective Agent Profile](requirements/spawn-session-effective-profile.md)
 - [Subagent context persistence](requirements/subagent-context-persistence.md)
 - [Profile-backed Utility Agents](requirements/utility-agent-profiles.md)
+- [Plan injection budget](requirements/plan-injection-budget-01.md)
 
 ### System design
 
@@ -83,6 +84,8 @@ surface shared by task and Office consumers.
 - [Subagent context persistence System Design Part 7](system-design/subagent-context-persistence-07.md)
 - [Subagent context persistence System Design Part 8](system-design/subagent-context-persistence-08.md)
 - [Profile-backed Utility Agents](system-design/utility-agent-profiles.md)
+- [Plan injection budget System Design Part 1](system-design/plan-injection-budget-01.md)
+- [Plan injection budget System Design Part 2](system-design/plan-injection-budget-02.md)
 
 ## Migration record
 

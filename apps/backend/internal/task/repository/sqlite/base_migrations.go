@@ -107,6 +107,7 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 	r.migrate.Apply("idx_tasks_queued_for_step", `CREATE INDEX IF NOT EXISTS idx_tasks_queued_for_step ON tasks(queued_for_step_id, queued_at)`)
+	r.migrate.Apply("idx_tasks_updated_at_id", `CREATE INDEX IF NOT EXISTS idx_tasks_updated_at_id ON tasks(updated_at, id)`)
 	// Remove deprecated workflow_step_id column from task_sessions
 	if err := r.migrateSessionsRemoveWorkflowStepID(); err != nil {
 		return err

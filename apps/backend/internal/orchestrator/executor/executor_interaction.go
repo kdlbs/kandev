@@ -286,6 +286,15 @@ const stopReasonPassthrough = "passthrough_dispatched"
 
 var ErrPromptDispatchCallbackUnsupported = errors.New("agent manager does not support prompt dispatch callback")
 
+// ErrSteerNotDispatched reports that no active prompt generation accepted a
+// steer. The orchestrator must route this outcome through ordinary admission.
+var ErrSteerNotDispatched = lifecycle.ErrSteerNotDispatched
+
+// ErrSteerAttachmentMaterialization identifies a steer attachment failure that
+// happened before agentctl accepted the request. The orchestrator uses it to
+// retry queued draining after it releases the steer slot.
+var ErrSteerAttachmentMaterialization = lifecycle.ErrSteerAttachmentMaterialization
+
 // Prompt sends a follow-up prompt to a running agent for a task
 // Returns PromptResult indicating if the agent needs input
 // Attachments (images) are passed to the agent if provided.
