@@ -100,8 +100,12 @@ func (ss *SchedulerService) escalateFailure(
 	return nil
 }
 
-// queueCEOAgentError finds the CEO agent in the workspace and queues
-// an agent_error run for it.
+// queueCEOAgentError finds the CEO agent in the workspace and queues an
+// agent_error run for it. When the failing run's agent IS the CEO, the
+// escalation is skipped rather than re-queuing the CEO to handle its own
+// failure — the run failure and inbox activity are already recorded by the
+// caller, so skipping here loses no visibility, only the self-escalation
+// loop. Kept in sync with service.queueCEOAgentError.
 func (ss *SchedulerService) queueCEOAgentError(
 	ctx context.Context, agent *models.AgentInstance,
 	run *models.Run, errMsg string,
@@ -109,6 +113,12 @@ func (ss *SchedulerService) queueCEOAgentError(
 	ceos, err := ss.svc.ListAgentInstancesFiltered(ctx, agent.WorkspaceID,
 		service.AgentListFilter{Role: string(models.AgentRoleCEO)})
 	if err != nil || len(ceos) == 0 {
+		return
+	}
+	if run.AgentProfileID == ceos[0].ID {
+		ss.logger.Warn("skipped agent_error self-escalation for CEO's own failure",
+			zap.String("run_id", run.ID),
+			zap.String("ceo_agent_id", ceos[0].ID))
 		return
 	}
 	payload := mustJSON(map[string]string{
