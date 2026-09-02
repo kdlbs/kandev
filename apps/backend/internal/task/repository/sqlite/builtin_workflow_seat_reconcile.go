@@ -78,29 +78,10 @@ func templateSeatRoles(step wfmodels.StepDefinition) []string {
 // transactional retry loop below never runs with an open read cursor over
 // the same table.
 func (r *Repository) healStepParticipantSeatRole(templateID, stepName, role string) error {
-	rows, err := r.db.Query(r.db.Rebind(`
-		SELECT ws.id, ws.workflow_id FROM workflow_steps ws
-		JOIN workflows w ON w.id = ws.workflow_id
-		WHERE w.is_system = 1 AND w.workflow_template_id = ? AND ws.name = ?
-	`), templateID, stepName)
+	targets, err := r.findSystemOwnedWorkflowSteps(templateID, stepName)
 	if err != nil {
-		return fmt.Errorf("find system-owned step rows: %w", err)
+		return err
 	}
-	type seatStepRow struct{ stepID, workflowID string }
-	var targets []seatStepRow
-	for rows.Next() {
-		var row seatStepRow
-		if scanErr := rows.Scan(&row.stepID, &row.workflowID); scanErr != nil {
-			_ = rows.Close()
-			return fmt.Errorf("scan step row: %w", scanErr)
-		}
-		targets = append(targets, row)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return fmt.Errorf("iterate step rows: %w", err)
-	}
-	_ = rows.Close()
 
 	for _, target := range targets {
 		if err := r.healParticipantSeatRowWithRetry(target.stepID, target.workflowID, templateID, stepName, role); err != nil {

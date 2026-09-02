@@ -205,7 +205,7 @@ func TestOfficeDefaultWorkflow_OnAgentErrorEscalatesFromEveryStep(t *testing.T) 
 	tmpl := loadEmbeddedTemplate(t, "office-default")
 	steps := compileWorkflow(tmpl)
 
-	for _, stepName := range []string{"work", "review", "approval"} {
+	for _, stepName := range []string{"work", "review", "approval", "done"} {
 		t.Run(stepName, func(t *testing.T) {
 			store := newSmokeStore(steps)
 			queue := &fakeRunQueue{}

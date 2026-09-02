@@ -69,8 +69,14 @@ type Repository struct {
 	// single-connection test repositories (SetMaxOpenConns(1) serializes
 	// all writes), so this stands in for one.
 	failParticipantSeatReconcileAttempts int
-	failUsageEventRollupAttempts         int
-	failUsageEventRollupErr              error
+	// failAgentErrorReconcileAttempts is a test-only failpoint for the
+	// on_agent_error reconciler's bounded retry loop (WO-05-2): while > 0,
+	// tryHealAgentErrorRow reports a synthetic concurrent-modification retry
+	// without touching the database, and decrements the counter. Same
+	// rationale as failParticipantSeatReconcileAttempts above.
+	failAgentErrorReconcileAttempts int
+	failUsageEventRollupAttempts    int
+	failUsageEventRollupErr         error
 	// usageEventPreRollupHook is a test-only synchronization seam, called (if
 	// set) inside insertUsageEventAndRollup's transaction at the same point as
 	// the failUsageEventRollup* failpoint - after the ledger row insert

@@ -39,6 +39,7 @@ func (r *Repository) initSchema() error {
 		r.hideBuiltinWorkflows,
 		r.healBuiltinWorkflowStepFlags,
 		r.healBuiltinWorkflowStepParticipantSeats,
+		r.healBuiltinWorkflowStepOnAgentError,
 		r.normalizeTaskWorktreeOwnership,
 		r.healDuplicateTaskEnvironments,
 		r.ensureTaskEnvironmentTaskUniqueIndex,
