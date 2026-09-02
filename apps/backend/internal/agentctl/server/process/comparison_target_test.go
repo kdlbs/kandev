@@ -98,6 +98,9 @@ func TestWorkspaceTrackerComparisonResolutionNeverFallsBackWhenTargetUnavailable
 	target := comparisonTargetProcessTestTarget()
 	tracker.SetComparisonTarget(&target)
 	resolution := tracker.ComparisonResolution()
+	if resolution.Ready() {
+		t.Fatalf("pending resolution unexpectedly ready: %#v", resolution)
+	}
 	if !resolution.Explicit || resolution.Status != comparisonTargetStatusUnavailable || resolution.ErrorCode != comparisonTargetErrorPending {
 		t.Fatalf("pending resolution = %#v, want explicit unavailable pending", resolution)
 	}
@@ -107,6 +110,9 @@ func TestWorkspaceTrackerComparisonResolutionNeverFallsBackWhenTargetUnavailable
 
 	tracker.SetComparisonTargetUnavailable(&target, comparisonTargetErrorFetch)
 	resolution = tracker.ComparisonResolution()
+	if resolution.Ready() {
+		t.Fatalf("unavailable resolution unexpectedly ready: %#v", resolution)
+	}
 	if !resolution.Explicit || resolution.Status != comparisonTargetStatusUnavailable || resolution.ErrorCode != comparisonTargetErrorFetch {
 		t.Fatalf("unavailable resolution = %#v, want explicit fetch failure", resolution)
 	}
@@ -118,6 +124,19 @@ func TestWorkspaceTrackerComparisonResolutionNeverFallsBackWhenTargetUnavailable
 	resolution = tracker.ComparisonResolution()
 	if !resolution.Explicit || resolution.Status != comparisonTargetStatusReady || resolution.Ref != target.ComparisonRef() {
 		t.Fatalf("ready resolution = %#v, want explicit target ref", resolution)
+	}
+	if !resolution.Ready() {
+		t.Fatalf("ready resolution reported unavailable: %#v", resolution)
+	}
+}
+
+func TestComparisonResolutionReadyRequiresMaterializedReference(t *testing.T) {
+	resolution := ComparisonResolution{
+		Explicit: true,
+		Status:   comparisonTargetStatusReady,
+	}
+	if resolution.Ready() {
+		t.Fatalf("resolution without ref unexpectedly ready: %#v", resolution)
 	}
 }
 

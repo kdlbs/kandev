@@ -193,6 +193,7 @@ export function useMonacoEditorLsp(opts: UseMonacoLspOpts) {
     status: lspStatus,
     progress: lspProgress,
     lspLanguage,
+    taskId: lspTaskId,
     toggle: toggleLsp,
   } = useLsp(lspSessionId, language);
   const hasLspActive = lspStatus.state === "ready";
@@ -286,7 +287,7 @@ export function useMonacoEditorLsp(opts: UseMonacoLspOpts) {
     }
   }, [lspStateForToast, lspReasonForToast, lspSetupHintForToast, t, toast]);
 
-  return { lspStatus, lspProgress, lspLanguage, toggleLsp, monacoPath };
+  return { lspStatus, lspProgress, lspLanguage, lspTaskId, toggleLsp, monacoPath };
 }
 
 // ---------------------------------------------------------------------------

@@ -3,10 +3,101 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestDockerContainerAuthRecoverySerializesOneShotHandshake(t *testing.T) {
+	executor := &DockerExecutor{}
+	var handshakes atomic.Int32
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	connect := func(authToken string) (reconnectAgentctlConn, error) {
+		if authToken == "stale-token" {
+			if handshakes.Add(1) != 1 {
+				return reconnectAgentctlConn{}, errors.New("one-shot handshake was attempted more than once")
+			}
+			close(entered)
+			<-release
+			authToken = "rotated-token"
+		}
+		return reconnectAgentctlConn{authToken: authToken}, nil
+	}
+
+	results := make(chan string, 2)
+	errorsCh := make(chan error, 2)
+	var callers sync.WaitGroup
+	for range 2 {
+		callers.Add(1)
+		go func() {
+			defer callers.Done()
+			result, err := executor.withContainerAuth("container-1", "stale-token", connect)
+			errorsCh <- err
+			results <- result.authToken
+		}()
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("first auth recovery did not enter handshake")
+	}
+	close(release)
+	callers.Wait()
+	close(errorsCh)
+	close(results)
+	for err := range errorsCh {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for token := range results {
+		if token != "rotated-token" {
+			t.Fatalf("serialized reconnect token = %q", token)
+		}
+	}
+	if handshakes.Load() != 1 {
+		t.Fatalf("handshake count = %d, want 1", handshakes.Load())
+	}
+}
+
+func TestDockerContainerAuthEvictionWaitsForInFlightRecovery(t *testing.T) {
+	executor := &DockerExecutor{}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	connectDone := make(chan error, 1)
+	go func() {
+		_, err := executor.withContainerAuth("container-1", "stale-token", func(string) (reconnectAgentctlConn, error) {
+			close(entered)
+			<-release
+			return reconnectAgentctlConn{authToken: "rotated-token"}, nil
+		})
+		connectDone <- err
+	}()
+	<-entered
+	forgetDone := make(chan struct{})
+	go func() {
+		executor.forgetContainerAuth("container-1")
+		close(forgetDone)
+	}()
+	select {
+	case <-forgetDone:
+		t.Fatal("auth state was evicted while credential recovery still owned it")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	if err := <-connectDone; err != nil {
+		t.Fatal(err)
+	}
+	<-forgetDone
+	executor.containerAuthMu.Lock()
+	_, exists := executor.containerAuthStates["container-1"]
+	executor.containerAuthMu.Unlock()
+	if exists {
+		t.Fatal("removed container retained auth state after in-flight recovery drained")
+	}
+}
 
 // stubHostPortLookup satisfies hostPortLookup for resolveDockerEndpoint
 // tests without needing a real docker daemon.

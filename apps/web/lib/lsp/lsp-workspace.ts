@@ -4,6 +4,7 @@ import type { LspReadyWorkspace, ManagedLspConnection } from "./lsp-client-types
 export type WorkspaceMetadata = {
   uri: string;
   repositorySubpaths: Set<string>;
+  sessionIds: Set<string>;
 };
 
 export function configureLspWorkspace(
@@ -16,6 +17,7 @@ export function configureLspWorkspace(
   return {
     uri: connection.workspaceUri,
     repositorySubpaths: new Set(connection.repositorySubpaths),
+    sessionIds: new Set(connection.sessionRefCounts.keys()),
   };
 }
 
@@ -50,12 +52,12 @@ export function workspaceUriForSession(
   sessionId: string,
 ): string | null {
   for (const connection of connections) {
-    if (connection.key.startsWith(`${sessionId}:`) && connection.workspaceUri) {
+    if (connection.sessionRefCounts.has(sessionId) && connection.workspaceUri) {
       return connection.workspaceUri;
     }
   }
-  for (const [key, workspace] of workspaceMetadata) {
-    if (key.startsWith(`${sessionId}:`)) return workspace.uri;
+  for (const workspace of workspaceMetadata.values()) {
+    if (workspace.sessionIds.has(sessionId)) return workspace.uri;
   }
   return null;
 }
@@ -67,11 +69,11 @@ export function repositorySubpathsForSession(
 ): string[] {
   const repositories = new Set<string>();
   for (const connection of connections) {
-    if (!connection.key.startsWith(`${sessionId}:`)) continue;
+    if (!connection.sessionRefCounts.has(sessionId)) continue;
     for (const repository of connection.repositorySubpaths) repositories.add(repository);
   }
-  for (const [key, workspace] of workspaceMetadata) {
-    if (!key.startsWith(`${sessionId}:`)) continue;
+  for (const workspace of workspaceMetadata.values()) {
+    if (!workspace.sessionIds.has(sessionId)) continue;
     for (const repository of workspace.repositorySubpaths) repositories.add(repository);
   }
   return [...repositories];

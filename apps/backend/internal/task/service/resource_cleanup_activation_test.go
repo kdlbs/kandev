@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +17,33 @@ type transientStartCleanupRepository struct {
 	mu       sync.Mutex
 	failures int
 	calls    int
+}
+
+type transientCancelCleanupRepository struct {
+	repository.TaskResourceCleanupRepository
+	mu       sync.Mutex
+	failures int
+	calls    int
+}
+
+func (r *transientCancelCleanupRepository) CompleteTaskResourceCleanupJob(
+	ctx context.Context,
+	id string,
+	state models.TaskResourceCleanupState,
+	lastError string,
+	nextAttemptAt *time.Time,
+) error {
+	r.mu.Lock()
+	r.calls++
+	if r.failures > 0 {
+		r.failures--
+		r.mu.Unlock()
+		return errors.New("transient prepared cleanup cancellation failure")
+	}
+	r.mu.Unlock()
+	return r.TaskResourceCleanupRepository.CompleteTaskResourceCleanupJob(
+		ctx, id, state, lastError, nextAttemptAt,
+	)
 }
 
 type failOnceResetCleanupRepository struct {
@@ -148,6 +176,157 @@ func TestStartPreparedCleanupUsesDetachedContextAndRetriesTransientFailure(t *te
 	}
 	if job.State == models.TaskResourceCleanupStatePrepared {
 		t.Fatal("cleanup remained prepared after committed lifecycle mutation")
+	}
+}
+
+func TestPrepareTaskResourceCleanupCancelsBarrierWhenInventoryCaptureFails(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	const taskID = "task-prepare-failure"
+	seedCleanupTaskAndSession(t, repo, taskID, "session-before-failure")
+	inventoryErr := errors.New("injected session inventory failure")
+	taskSvc.sessions = failingListTaskSessionsRepo{
+		SessionRepository: repo,
+		err:               inventoryErr,
+	}
+	const operationID = "cascade-delete:prepare-failure"
+
+	err := taskSvc.PrepareTaskResourceCleanup(
+		ctx, taskID, models.TaskResourceCleanupTriggerCascadeDelete, operationID, true,
+	)
+	if !errors.Is(err, inventoryErr) {
+		t.Fatalf("prepare cleanup error = %v, want inventory failure", err)
+	}
+	job, err := repo.GetTaskResourceCleanupJobByOperationID(ctx, operationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.State != models.TaskResourceCleanupStateCancelled {
+		t.Fatalf("failed preparation state = %q, want cancelled", job.State)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-after-failure", TaskID: taskID, State: models.TaskSessionStateCreated,
+	}); err != nil {
+		t.Fatalf("create session after failed preparation: %v", err)
+	}
+}
+
+func TestCancelPreparedCleanupUsesDetachedContextAndRetriesTransientFailure(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	const taskID = "task-cancel-retry"
+	seedCleanupTaskAndSession(t, repo, taskID, "session-cancel-retry")
+	const operationID = "cascade-delete:cancel-retry"
+	if err := taskSvc.PrepareTaskResourceCleanup(
+		ctx, taskID, models.TaskResourceCleanupTriggerCascadeDelete, operationID, true,
+	); err != nil {
+		t.Fatalf("PrepareTaskResourceCleanup: %v", err)
+	}
+	transient := &transientCancelCleanupRepository{
+		TaskResourceCleanupRepository: taskSvc.resourceCleanups,
+		failures:                      1,
+	}
+	taskSvc.resourceCleanups = transient
+	cancelledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+
+	if err := taskSvc.CancelPreparedTaskResourceCleanup(cancelledCtx, operationID); err != nil {
+		t.Fatalf("CancelPreparedTaskResourceCleanup: %v", err)
+	}
+	transient.mu.Lock()
+	calls := transient.calls
+	transient.mu.Unlock()
+	if calls != 2 {
+		t.Fatalf("prepared cancellation attempts = %d, want 2", calls)
+	}
+	job, err := repo.GetTaskResourceCleanupJobByOperationID(ctx, operationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.State != models.TaskResourceCleanupStateCancelled {
+		t.Fatalf("prepared cancellation state = %q, want cancelled", job.State)
+	}
+}
+
+func TestAbandonedPreparedCleanupIsRecoveredByPeriodicReconciliation(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		lastError string
+	}{
+		{name: "durable inventory marker", lastError: taskResourceCleanupPreparationInProgress},
+		{name: "marker persistence also failed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			taskSvc, repo := setupOfficeTest(t)
+			ctx := context.Background()
+			taskID := "task-cancel-durable-recovery-" + strings.ReplaceAll(test.name, " ", "-")
+			operationID := "cascade-delete:" + taskID
+			seedCleanupTaskAndSession(t, repo, taskID, "session-before-durable-recovery")
+			if _, err := taskSvc.persistTaskResourceCleanupWithLastError(
+				ctx, taskID, models.TaskResourceCleanupTriggerCascadeDelete, operationID,
+				nil, nil, nil, taskEnvironmentCleanup{}, true, test.lastError,
+			); err != nil {
+				t.Fatalf("persist abandoned preparation: %v", err)
+			}
+			old := time.Now().UTC().Add(-preparedCleanupAbandonmentDelay - time.Minute)
+			if _, err := repo.DB().ExecContext(ctx, `
+				UPDATE task_resource_cleanup_jobs SET updated_at = ? WHERE operation_id = ?
+			`, old, operationID); err != nil {
+				t.Fatal(err)
+			}
+			if err := taskSvc.processDueTaskResourceCleanupJobs(ctx); err != nil {
+				t.Fatalf("periodic reconciliation: %v", err)
+			}
+			job, err := repo.GetTaskResourceCleanupJobByOperationID(ctx, operationID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if job.State != models.TaskResourceCleanupStateCancelled {
+				t.Fatalf("abandoned preparation state = %q, want cancelled", job.State)
+			}
+			if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+				ID: "session-after-durable-recovery", TaskID: taskID,
+				State: models.TaskSessionStateCreated,
+			}); err != nil {
+				t.Fatalf("create session after durable barrier recovery: %v", err)
+			}
+		})
+	}
+}
+
+func TestPeriodicReconciliationPreservesLocallyOwnedStalePreparation(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	const (
+		taskID      = "task-live-stale-preparation"
+		operationID = "cascade-delete:live-stale-preparation"
+	)
+	seedCleanupTaskAndSession(t, repo, taskID, "session-live-stale-preparation")
+	job, err := taskSvc.reservePreparedTaskResourceCleanup(
+		ctx, taskID, models.TaskResourceCleanupTriggerCascadeDelete, operationID,
+	)
+	if err != nil {
+		t.Fatalf("reserve prepared cleanup: %v", err)
+	}
+	old := time.Now().UTC().Add(-preparedCleanupAbandonmentDelay - time.Minute)
+	if _, err := repo.DB().ExecContext(ctx, `
+		UPDATE task_resource_cleanup_jobs SET updated_at = ? WHERE operation_id = ?
+	`, old, operationID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := taskSvc.processDueTaskResourceCleanupJobs(ctx); err != nil {
+		t.Fatalf("periodic reconciliation: %v", err)
+	}
+	got, err := repo.GetTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != models.TaskResourceCleanupStatePrepared {
+		t.Fatalf("live preparation state = %q, want prepared", got.State)
+	}
+	if err := taskSvc.CancelPreparedTaskResourceCleanup(ctx, operationID); err != nil {
+		t.Fatalf("cancel prepared cleanup: %v", err)
 	}
 }
 

@@ -18,7 +18,9 @@ export type PublishDiagnosticsParams = {
 
 export type ManagedLspConnection = LSPConnection & {
   key: string;
+  taskId: string;
   sessionId: string;
+  sessionRefCounts: Map<string, number>;
   ownerId: string;
   configuration: Record<string, unknown>;
   protocolInitialized: boolean;
@@ -40,24 +42,36 @@ export type LspReadyWorkspace = {
   repositorySubpaths: string[];
 };
 
-export function createManagedLspConnection(
-  key: string,
-  sessionId: string,
-  generation: number,
-  ws: WebSocket,
-  configuration: Record<string, unknown>,
-): ManagedLspConnection {
+type ManagedLspConnectionOptions = {
+  key: string;
+  taskId: string;
+  sessionId: string;
+  generation: number;
+  ws: WebSocket;
+  configuration: Record<string, unknown>;
+  sessionRefCounts: Map<string, number>;
+};
+
+export function createManagedLspConnection({
+  key,
+  taskId,
+  sessionId,
+  generation,
+  ws,
+  configuration,
+  sessionRefCounts,
+}: ManagedLspConnectionOptions): ManagedLspConnection {
   return {
     key,
+    taskId,
     sessionId,
+    sessionRefCounts,
     ownerId: `${key}:${generation}`,
     configuration,
     protocolInitialized: false,
     ws,
     rpc: null,
     initialized: false,
-    refCount: 1,
-    idleTimer: null,
     openDocuments: new Map(),
     diagnosticsByUri: new Map(),
     progress: EMPTY_LSP_PROGRESS,

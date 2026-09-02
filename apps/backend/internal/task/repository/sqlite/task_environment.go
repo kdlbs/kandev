@@ -63,14 +63,16 @@ func (r *Repository) CreateTaskEnvironment(ctx context.Context, env *models.Task
 			id, task_id, executor_type, executor_id, executor_profile_id,
 			control_port, status, materialization_session_id,
 			workspace_path,
-			container_id, container_bootstrap_nonce_secret_id, container_control_auth_token_secret_id, sandbox_id, task_dir_name,
+			container_id, container_bootstrap_nonce_secret_id, container_control_auth_token_secret_id,
+			sandbox_id, agentctl_auth_secret_id, agentctl_bootstrap_secret_id, task_dir_name,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		env.ID, env.TaskID, env.ExecutorType, env.ExecutorID, env.ExecutorProfileID,
 		env.ControlPort, string(env.Status), env.MaterializationSessionID,
 		env.WorkspacePath,
-		env.ContainerID, env.ContainerBootstrapNonceSecretID, env.ContainerControlAuthTokenSecretID, env.SandboxID, env.TaskDirName,
+		env.ContainerID, env.ContainerBootstrapNonceSecretID, env.ContainerControlAuthTokenSecretID,
+		env.SandboxID, env.AgentctlAuthSecretID, env.AgentctlBootstrapSecretID, env.TaskDirName,
 		env.CreatedAt, env.UpdatedAt,
 	); err != nil {
 		return err
@@ -95,14 +97,16 @@ func (r *Repository) GetTaskEnvironment(ctx context.Context, id string) (*models
 		SELECT id, task_id, executor_type, executor_id, executor_profile_id,
 			control_port, status, materialization_session_id,
 			workspace_path,
-			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''), sandbox_id, COALESCE(task_dir_name, ''),
+			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''),
+			sandbox_id, COALESCE(agentctl_auth_secret_id, ''), COALESCE(agentctl_bootstrap_secret_id, ''), COALESCE(task_dir_name, ''),
 			created_at, updated_at
 		FROM task_environments WHERE id = ?
 	`), id).Scan(
 		&env.ID, &env.TaskID, &env.ExecutorType, &env.ExecutorID, &env.ExecutorProfileID,
 		&env.ControlPort, &status, &env.MaterializationSessionID,
 		&env.WorkspacePath,
-		&env.ContainerID, &env.ContainerBootstrapNonceSecretID, &env.ContainerControlAuthTokenSecretID, &env.SandboxID, &env.TaskDirName,
+		&env.ContainerID, &env.ContainerBootstrapNonceSecretID, &env.ContainerControlAuthTokenSecretID,
+		&env.SandboxID, &env.AgentctlAuthSecretID, &env.AgentctlBootstrapSecretID, &env.TaskDirName,
 		&env.CreatedAt, &env.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -131,14 +135,16 @@ func (r *Repository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID stri
 		SELECT id, task_id, executor_type, executor_id, executor_profile_id,
 			control_port, status, materialization_session_id,
 			workspace_path,
-			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''), sandbox_id, COALESCE(task_dir_name, ''),
+			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''),
+			sandbox_id, COALESCE(agentctl_auth_secret_id, ''), COALESCE(agentctl_bootstrap_secret_id, ''), COALESCE(task_dir_name, ''),
 			created_at, updated_at
 		FROM task_environments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1
 	`), taskID).Scan(
 		&env.ID, &env.TaskID, &env.ExecutorType, &env.ExecutorID, &env.ExecutorProfileID,
 		&env.ControlPort, &status, &env.MaterializationSessionID,
 		&env.WorkspacePath,
-		&env.ContainerID, &env.ContainerBootstrapNonceSecretID, &env.ContainerControlAuthTokenSecretID, &env.SandboxID, &env.TaskDirName,
+		&env.ContainerID, &env.ContainerBootstrapNonceSecretID, &env.ContainerControlAuthTokenSecretID,
+		&env.SandboxID, &env.AgentctlAuthSecretID, &env.AgentctlBootstrapSecretID, &env.TaskDirName,
 		&env.CreatedAt, &env.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -183,14 +189,16 @@ func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.Task
 			executor_type = ?, executor_id = ?, executor_profile_id = ?,
 			control_port = ?, status = ?, materialization_session_id = ?,
 			workspace_path = ?,
-			container_id = ?, container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?, sandbox_id = ?, task_dir_name = ?,
+			container_id = ?, container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?,
+			sandbox_id = ?, agentctl_auth_secret_id = ?, agentctl_bootstrap_secret_id = ?, task_dir_name = ?,
 			updated_at = ?
 		WHERE id = ?
 	`),
 		env.ExecutorType, env.ExecutorID, env.ExecutorProfileID,
 		env.ControlPort, string(env.Status), env.MaterializationSessionID,
 		env.WorkspacePath,
-		env.ContainerID, env.ContainerBootstrapNonceSecretID, env.ContainerControlAuthTokenSecretID, env.SandboxID, env.TaskDirName,
+		env.ContainerID, env.ContainerBootstrapNonceSecretID, env.ContainerControlAuthTokenSecretID,
+		env.SandboxID, env.AgentctlAuthSecretID, env.AgentctlBootstrapSecretID, env.TaskDirName,
 		env.UpdatedAt,
 		env.ID,
 	)
@@ -302,14 +310,16 @@ func (r *Repository) FinalizeTaskEnvironmentMaterialization(
 			control_port = ?, status = ?, materialization_session_id = '',
 			workspace_path = ?, container_id = ?,
 			container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?,
-			sandbox_id = ?, task_dir_name = ?, updated_at = ?
+			sandbox_id = ?, agentctl_auth_secret_id = ?, agentctl_bootstrap_secret_id = ?,
+			task_dir_name = ?, updated_at = ?
 		WHERE id = ? AND status = ? AND materialization_session_id = ?
 	`),
 		env.ExecutorType, env.ExecutorID, env.ExecutorProfileID,
 		env.ControlPort, string(models.TaskEnvironmentStatusReady),
 		env.WorkspacePath, env.ContainerID,
 		env.ContainerBootstrapNonceSecretID, env.ContainerControlAuthTokenSecretID,
-		env.SandboxID, env.TaskDirName, env.UpdatedAt,
+		env.SandboxID, env.AgentctlAuthSecretID, env.AgentctlBootstrapSecretID,
+		env.TaskDirName, env.UpdatedAt,
 		env.ID, string(models.TaskEnvironmentStatusCreating), materializationSessionID,
 	)
 	if err != nil {
@@ -330,6 +340,31 @@ func (r *Repository) taskHasRepositoriesTx(ctx context.Context, tx *sqlx.Tx, tas
 		return false, err
 	}
 	return count > 0, nil
+}
+
+// UpdateTaskEnvironmentRuntimeSecretRefs rotates task-owned encrypted secret
+// references without rewriting workspace or executor lifecycle fields. Empty
+// inputs preserve the current reference, allowing auth-token rotation to keep
+// the stable bootstrap nonce owner intact.
+func (r *Repository) UpdateTaskEnvironmentRuntimeSecretRefs(
+	ctx context.Context,
+	environmentID, authSecretID, bootstrapSecretID string,
+) error {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_environments SET
+			agentctl_auth_secret_id = COALESCE(NULLIF(?, ''), agentctl_auth_secret_id),
+			agentctl_bootstrap_secret_id = COALESCE(NULLIF(?, ''), agentctl_bootstrap_secret_id),
+			updated_at = ?
+		WHERE id = ?
+	`), authSecretID, bootstrapSecretID, time.Now().UTC(), environmentID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, environmentID)
+	}
+	return nil
 }
 
 func (r *Repository) TransferTaskEnvironmentToTask(ctx context.Context, envID, taskID string) error {

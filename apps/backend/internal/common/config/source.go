@@ -20,9 +20,11 @@ import (
 // file selected by its launcher. It is process wiring, not an operator-facing
 // configuration variable, and is intentionally excluded from the catalog.
 const (
-	InternalConfigFileEnv     = "KANDEV_INTERNAL_CONFIG_FILE"
-	InternalConfigHomeFileEnv = "KANDEV_INTERNAL_CONFIG_HOME_FILE"
-	windowsOS                 = "windows"
+	InternalConfigFileEnv      = "KANDEV_INTERNAL_CONFIG_FILE"
+	InternalConfigHomeFileEnv  = "KANDEV_INTERNAL_CONFIG_HOME_FILE"
+	windowsOS                  = "windows"
+	taskLSPMaxServersConfigKey = "limits.lspMaxServers"
+	legacyLSPMaxConnectionsKey = "limits.lspMaxConnections"
 )
 
 // ConfigSource records configuration provenance without retaining any decoded
@@ -70,7 +72,7 @@ var yamlOnlyStartupKeys = map[string]struct{}{
 	"credentials.file":                   {},
 	"limits.ghMaxConcurrent":             {},
 	"limits.gitMaxConcurrent":            {},
-	"limits.lspMaxConnections":           {},
+	taskLSPMaxServersConfigKey:           {},
 	"messageQueue.maxPerSession":         {},
 	"agentctl.idleTimeout":               {},
 	"agentctl.idleReaperInterval":        {},
@@ -286,7 +288,7 @@ func applyStartupDefaults(cfg *Config, yamlKeys map[string]bool, profileDefaults
 	}
 	setDefaultInt("limits.ghMaxConcurrent", &cfg.Limits.GHMaxConcurrent, 8)
 	setDefaultInt("limits.gitMaxConcurrent", &cfg.Limits.GitMaxConcurrent, 12)
-	setDefaultInt("limits.lspMaxConnections", &cfg.Limits.LSPMaxConnections, 8)
+	setDefaultInt(taskLSPMaxServersConfigKey, &cfg.Limits.LSPMaxServers, 8)
 	setDefaultInt("messageQueue.maxPerSession", &cfg.MessageQueue.MaxPerSession, 10)
 	setDefaultDuration("agentctl.idleTimeout", &cfg.Agentctl.IdleTimeout, time.Hour)
 	setDefaultDuration("agentctl.idleReaperInterval", &cfg.Agentctl.IdleReaperInterval, time.Minute)
@@ -309,7 +311,7 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 	applyStringEnvAllowEmpty("credentials.file", &cfg.Credentials.File, envSnapshot, sources)
 	applyPositiveIntEnv("limits.ghMaxConcurrent", &cfg.Limits.GHMaxConcurrent, 8, envSnapshot, sources)
 	applyPositiveIntEnv("limits.gitMaxConcurrent", &cfg.Limits.GitMaxConcurrent, 12, envSnapshot, sources)
-	applyPositiveIntEnv("limits.lspMaxConnections", &cfg.Limits.LSPMaxConnections, 8, envSnapshot, sources)
+	applyPositiveIntEnv(taskLSPMaxServersConfigKey, &cfg.Limits.LSPMaxServers, 8, envSnapshot, sources)
 	applyNonNegativeIntEnv("messageQueue.maxPerSession", &cfg.MessageQueue.MaxPerSession, 10, envSnapshot, sources)
 	applyNonNegativeDurationEnv("agentctl.idleTimeout", &cfg.Agentctl.IdleTimeout, time.Hour, envSnapshot, sources)
 	applyDurationEnv("agentctl.idleReaperInterval", &cfg.Agentctl.IdleReaperInterval, time.Minute, envSnapshot, sources)

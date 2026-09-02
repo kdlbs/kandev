@@ -858,6 +858,6 @@ Routing is an efficiency mechanism, not an access-control boundary. The server d
 - **Large attachment disconnects:** keep the complete JSON frame under 32 MiB and obey the action's lower attachment-count and data-size validation too.
 - **Responses arrive in the wrong order:** this is normal concurrent dispatch. Match by unique `id`, never arrival order.
 
-Dedicated `/terminal/*target` and `/lsp/:sessionId` WebSockets, plus `/vscode/:sessionId/*path` and `/port-proxy/:sessionId/:port/*path` proxies, are separate protocols. They do not use this JSON envelope and should not be sent `/ws` actions.
+Dedicated `/terminal/*target` and `/lsp/tasks/:taskId/:language/attach` WebSockets, plus `/vscode/:sessionId/*path` and `/port-proxy/:sessionId/:port/*path` proxies, are separate protocols. They do not use this JSON envelope and should not be sent `/ws` actions. The LSP route is a non-owning task/language attachment: authorization and lifecycle controls remain task-scoped, and closing it does not stop the server.
 
 Related guides: [Configuration](configuration.md), [Executors](executors.md), [Git Operations](git-operations.md), [Operations](operations.md), [Workflow Import / Export](workflow-import-export.md), and [Workflow Sync](workflow-sync.md).

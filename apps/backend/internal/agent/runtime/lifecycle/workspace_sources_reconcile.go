@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"go.uber.org/zap"
 
@@ -158,6 +159,7 @@ func workspaceRepositorySpecsFromLaunch(req *LaunchRequest) []WorkspaceRepositor
 	for _, spec := range specs {
 		result = append(result, WorkspaceRepositorySpec{
 			RepositoryID: spec.RepositoryID, RepositoryPath: spec.RepositoryPath, RepoName: spec.RepoName,
+			Position:   spec.Position,
 			BaseBranch: spec.BaseBranch, DefaultBranch: spec.DefaultBranch, CheckoutBranch: spec.CheckoutBranch,
 			ComparisonTarget: spec.ComparisonTarget,
 			WorktreeID:       spec.WorktreeID, WorktreeBranchPrefix: spec.WorktreeBranchPrefix,
@@ -170,7 +172,30 @@ func workspaceRepositorySpecsFromLaunch(req *LaunchRequest) []WorkspaceRepositor
 }
 
 func workspaceSourceRoots(folders []WorkspaceFolderSpec, repositories []WorkspaceRepositorySpec) []string {
-	roots := make([]string, 0, len(folders)+len(repositories))
+	type sourceRoot struct {
+		path     string
+		position int
+		ordinal  int
+	}
+	candidates := make([]sourceRoot, 0, len(folders)+len(repositories))
+	for _, folder := range folders {
+		candidates = append(candidates, sourceRoot{
+			path: folder.LocalPath, position: folder.Position, ordinal: len(candidates),
+		})
+	}
+	for _, repository := range repositories {
+		candidates = append(candidates, sourceRoot{
+			path: repository.RepositoryPath, position: repository.Position, ordinal: len(candidates),
+		})
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].position != candidates[j].position {
+			return candidates[i].position < candidates[j].position
+		}
+		return candidates[i].ordinal < candidates[j].ordinal
+	})
+
+	roots := make([]string, 0, len(candidates))
 	seen := make(map[string]struct{}, cap(roots))
 	add := func(path string) {
 		resolved, err := filepath.EvalSymlinks(filepath.Clean(path))
@@ -187,11 +212,8 @@ func workspaceSourceRoots(folders []WorkspaceFolderSpec, repositories []Workspac
 		seen[resolved] = struct{}{}
 		roots = append(roots, resolved)
 	}
-	for _, folder := range folders {
-		add(folder.LocalPath)
-	}
-	for _, repository := range repositories {
-		add(repository.RepositoryPath)
+	for _, candidate := range candidates {
+		add(candidate.path)
 	}
 	return roots
 }

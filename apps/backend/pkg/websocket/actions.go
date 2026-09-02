@@ -183,6 +183,7 @@ const (
 	ActionTaskUpdated                    = "task.updated"
 	ActionTaskDeleted                    = "task.deleted"
 	ActionTaskStateChanged               = "task.state_changed"
+	ActionTaskLSPChanged                 = "task.lsp.changed"
 	ActionSessionWorkspaceSourcesUpdated = "session.workspace_sources.updated"
 	ActionTaskPlanCreated                = "task.plan.created"
 	ActionTaskPlanUpdated                = "task.plan.updated"

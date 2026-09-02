@@ -23,6 +23,22 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// agentSecretStores keeps user-selected credentials behind the public filter
+// while allowing the lifecycle owner to persist deterministic runtime-only
+// control credentials. Mixing these stores makes Docker startup fail because
+// the user-visible wrapper deliberately treats runtime:* IDs as nonexistent.
+type agentSecretStores struct {
+	userVisible secrets.SecretStore
+	runtime     secrets.SecretStore
+}
+
+func newAgentSecretStores(runtime secrets.SecretStore) agentSecretStores {
+	return agentSecretStores{
+		userVisible: secrets.NewUserVisibleStore(runtime),
+		runtime:     runtime,
+	}
+}
+
 func provideLifecycleManager(
 	ctx context.Context,
 	cfg *config.Config,
@@ -30,7 +46,7 @@ func provideLifecycleManager(
 	eventBus bus.EventBus,
 	agentSettingsRepo settingsstore.Repository,
 	agentRegistry *registry.Registry,
-	secretStore secrets.SecretStore,
+	secretStores agentSecretStores,
 	baseBranchProvider lifecycle.BaseBranchProvider,
 	comparisonTargetProvider lifecycle.ComparisonTargetProvider,
 	managedRuntimeSelections managedruntime.SelectionReader,
@@ -80,18 +96,18 @@ func provideLifecycleManager(
 
 	// Register Sprites runtime (remote sandboxes via Sprites.dev)
 	agentctlResolver := lifecycle.NewAgentctlResolver(log)
-	spritesExec := lifecycle.NewSpritesExecutor(secretStore, agentRegistry, agentctlResolver, 8765, log)
+	spritesExec := lifecycle.NewSpritesExecutor(secretStores.userVisible, agentRegistry, agentctlResolver, 8765, log)
 	executorRegistry.Register(spritesExec)
 	log.Info("Sprites runtime registered")
 
 	// Register SSH runtime (run an agent on any Linux box reachable over SSH).
-	sshExec := lifecycle.NewSSHExecutor(secretStore, agentRegistry, agentctlResolver, log)
+	sshExec := lifecycle.NewSSHExecutor(secretStores.userVisible, agentRegistry, agentctlResolver, log)
 	executorRegistry.Register(sshExec)
 	log.Info("SSH runtime registered")
 
 	credsMgr := credentials.NewManager(log)
-	if secretStore != nil {
-		credsMgr.AddProvider(secrets.NewSecretStoreProvider(secretStore))
+	if secretStores.userVisible != nil {
+		credsMgr.AddProvider(secrets.NewSecretStoreProvider(secretStores.userVisible))
 	}
 	credsMgr.AddProvider(credentials.NewEnvProvider("KANDEV_"))
 	credsMgr.AddProvider(credentials.NewAugmentSessionProvider())
@@ -126,7 +142,8 @@ func provideLifecycleManager(
 	preparerRegistry.Register(models.ExecutorTypeSprites, lifecycle.NewSpritesPreparer(log))
 	preparerRegistry.Register(models.ExecutorTypeSSH, lifecycle.NewSSHPreparer(log))
 	lifecycleMgr.SetPreparerRegistry(preparerRegistry)
-	lifecycleMgr.SetSecretStore(secretStore)
+	lifecycleMgr.SetSecretStore(secretStores.userVisible)
+	lifecycleMgr.SetRuntimeSecretStore(secretStores.runtime)
 	if err := lifecycleMgr.SetAgentctlStartupConfig(cfg.ManagedAgentctlStartupConfig()); err != nil {
 		return nil, fmt.Errorf("configure managed agentctl startup: %w", err)
 	}

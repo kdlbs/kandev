@@ -68,8 +68,11 @@ type CredentialsConfig struct {
 
 // LimitsConfig contains process and protocol capacity limits.
 type LimitsConfig struct {
-	GHMaxConcurrent   int `mapstructure:"ghMaxConcurrent"`
-	GitMaxConcurrent  int `mapstructure:"gitMaxConcurrent"`
+	GHMaxConcurrent  int `mapstructure:"ghMaxConcurrent"`
+	GitMaxConcurrent int `mapstructure:"gitMaxConcurrent"`
+	LSPMaxServers    int `mapstructure:"lspMaxServers"`
+	// LSPMaxConnections retains the deprecated YAML alias for migration.
+	// Runtime consumers use LSPMaxServers after source resolution.
 	LSPMaxConnections int `mapstructure:"lspMaxConnections"`
 }
 
@@ -763,6 +766,10 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 			return nil, fmt.Errorf("error unmarshaling config file %q: %w", selection.path, err)
 		}
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
+	}
+	if !yamlKeys[taskLSPMaxServersConfigKey] && v.InConfig(legacyLSPMaxConnectionsKey) {
+		cfg.Limits.LSPMaxServers = cfg.Limits.LSPMaxConnections
+		yamlKeys[taskLSPMaxServersConfigKey] = true
 	}
 	sources := applyStartupDefaultsAndEnvironment(&cfg, yamlKeys, profileDefaults, envSnapshot)
 	warnings := inspectSecretPermissions(selection, v)

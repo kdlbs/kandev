@@ -87,9 +87,13 @@ func (h *TaskHandlers) httpResetTaskEnvironment(c *gin.Context) {
 	switch {
 	case err == nil:
 		c.JSON(http.StatusOK, gin.H{responseKeySuccess: true})
+	case isNotFound(err):
+		c.JSON(http.StatusNotFound, gin.H{"error": "task environment not found"})
 	case errors.Is(err, service.ErrNoEnvironment):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 	case errors.Is(err, service.ErrSessionRunning):
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	case errors.Is(err, service.ErrEnvironmentShared):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	default:
 		// Log the underlying error for operators; respond with a generic

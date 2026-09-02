@@ -13,7 +13,13 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/hooks/use-lsp", () => ({
-  useLsp: () => ({ status: { state: "disabled" }, lspLanguage: null, toggle: vi.fn() }),
+  useLsp: () => ({
+    status: { state: "disabled" },
+    progress: { initializingSince: null, active: [], completed: null, hasReportedProgress: false },
+    lspLanguage: null,
+    taskId: "task-a",
+    toggle: vi.fn(),
+  }),
 }));
 
 vi.mock("@/lib/lsp/lsp-client-manager", () => ({
@@ -47,6 +53,7 @@ describe("useMonacoEditorLsp model identity", () => {
     const documentUri = "file:///workspace/src/Target.java";
 
     expect(result.current.monacoPath).toBe(modelUriForDocument(documentUri, "session"));
+    expect(result.current.lspTaskId).toBe("task-a");
     expect(mocks.promoteDocumentModel).toHaveBeenCalledWith(
       "session",
       documentUri,

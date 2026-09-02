@@ -73,6 +73,7 @@ type UpdateUserSettingsRequest struct {
 	ReleaseNotesLastSeenVersion       *string
 	LspAutoStartLanguages             *[]string
 	LspAutoInstallLanguages           *[]string
+	LspStatusHiddenLanguages          *[]string
 	LspServerConfigs                  *map[string]map[string]interface{}
 	LspStatusLocation                 *string
 	SavedLayouts                      *[]models.SavedLayout
@@ -729,6 +730,12 @@ func applyLSPSettings(settings *models.UserSettings, req *UpdateUserSettingsRequ
 		}
 		settings.LspAutoInstallLanguages = *req.LspAutoInstallLanguages
 	}
+	if req.LspStatusHiddenLanguages != nil {
+		if err := validateLSPLanguages(*req.LspStatusHiddenLanguages); err != nil {
+			return fmt.Errorf("lsp_status_hidden_languages: %w", err)
+		}
+		settings.LspStatusHiddenLanguages = *req.LspStatusHiddenLanguages
+	}
 	if req.LspServerConfigs != nil {
 		settings.LspServerConfigs = *req.LspServerConfigs
 	}
@@ -946,6 +953,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"release_notes_last_seen_version":          settings.ReleaseNotesLastSeenVersion,
 		"lsp_auto_start_languages":                 settings.LspAutoStartLanguages,
 		"lsp_auto_install_languages":               settings.LspAutoInstallLanguages,
+		"lsp_status_hidden_languages":              settings.LspStatusHiddenLanguages,
 		"lsp_server_configs":                       settings.LspServerConfigs,
 		"lsp_status_location":                      models.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		"saved_layouts":                            settings.SavedLayouts,

@@ -11,6 +11,7 @@ func TestStartOrchestratorAndAutomationConsumersOrder(t *testing.T) {
 
 	err := startOrchestratorAndAutomationConsumers(
 		func() error { order = append(order, "bind"); return nil },
+		func() error { order = append(order, "task-lsp"); return nil },
 		func() error {
 			order = append(order, "orchestrator")
 			return nil
@@ -22,7 +23,7 @@ func TestStartOrchestratorAndAutomationConsumersOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start sequence returned error: %v", err)
 	}
-	want := []string{"bind", "orchestrator", "automation", "github"}
+	want := []string{"bind", "task-lsp", "orchestrator", "automation", "github"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("start order = %v, want %v", order, want)
 	}
@@ -33,6 +34,7 @@ func TestStartOrchestratorAndAutomationConsumersStopsAfterOrchestratorFailure(t 
 	var automationStarted, githubStarted bool
 
 	err := startOrchestratorAndAutomationConsumers(
+		func() error { return nil },
 		func() error { return nil },
 		func() error { return startErr },
 		func() { automationStarted = true },
@@ -47,6 +49,27 @@ func TestStartOrchestratorAndAutomationConsumersStopsAfterOrchestratorFailure(t 
 	}
 }
 
+func TestStartOrchestratorAndAutomationConsumersStopsAfterTaskLSPFailure(t *testing.T) {
+	startErr := errors.New("task LSP recovery unavailable")
+	var orchestratorStarted, automationStarted, githubStarted bool
+
+	err := startOrchestratorAndAutomationConsumers(
+		func() error { return nil },
+		func() error { return startErr },
+		func() error { orchestratorStarted = true; return nil },
+		func() { automationStarted = true },
+		func() { githubStarted = true },
+	)
+
+	if !errors.Is(err, startErr) {
+		t.Fatalf("start sequence error = %v, want %v", err, startErr)
+	}
+	if orchestratorStarted || automationStarted || githubStarted {
+		t.Fatalf("downstream consumers started after task LSP failure: orchestrator=%v automation=%v github=%v",
+			orchestratorStarted, automationStarted, githubStarted)
+	}
+}
+
 // TestStartOrchestratorAndAutomationConsumersStopsAfterBindFailure pins the
 // bind-before-startup ordering invariant (docs/plans/startup-listener-before-
 // recovery/task-03-ordering-guard.md): a bind failure must short-circuit
@@ -54,10 +77,11 @@ func TestStartOrchestratorAndAutomationConsumersStopsAfterOrchestratorFailure(t 
 // like an orchestrator-start failure does today.
 func TestStartOrchestratorAndAutomationConsumersStopsAfterBindFailure(t *testing.T) {
 	bindErr := errors.New("bind unavailable")
-	var orchestratorStarted, automationStarted, githubStarted bool
+	var taskLSPStarted, orchestratorStarted, automationStarted, githubStarted bool
 
 	err := startOrchestratorAndAutomationConsumers(
 		func() error { return bindErr },
+		func() error { taskLSPStarted = true; return nil },
 		func() error { orchestratorStarted = true; return nil },
 		func() { automationStarted = true },
 		func() { githubStarted = true },
@@ -66,9 +90,9 @@ func TestStartOrchestratorAndAutomationConsumersStopsAfterBindFailure(t *testing
 	if !errors.Is(err, bindErr) {
 		t.Fatalf("start sequence error = %v, want %v", err, bindErr)
 	}
-	if orchestratorStarted || automationStarted || githubStarted {
-		t.Fatalf("downstream steps started after bind failure: orchestrator=%v automation=%v github=%v",
-			orchestratorStarted, automationStarted, githubStarted)
+	if taskLSPStarted || orchestratorStarted || automationStarted || githubStarted {
+		t.Fatalf("downstream steps started after bind failure: task-lsp=%v orchestrator=%v automation=%v github=%v",
+			taskLSPStarted, orchestratorStarted, automationStarted, githubStarted)
 	}
 }
 

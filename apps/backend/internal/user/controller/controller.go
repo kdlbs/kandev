@@ -113,6 +113,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		ReleaseNotesLastSeenVersion:       req.ReleaseNotesLastSeenVersion,
 		LspAutoStartLanguages:             req.LspAutoStartLanguages,
 		LspAutoInstallLanguages:           req.LspAutoInstallLanguages,
+		LspStatusHiddenLanguages:          req.LspStatusHiddenLanguages,
 		LspServerConfigs:                  req.LspServerConfigs,
 		LspStatusLocation:                 req.LspStatusLocation,
 		SavedLayouts:                      req.SavedLayouts,

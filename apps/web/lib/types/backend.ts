@@ -39,6 +39,7 @@ import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import type { AgentProfileRecentUseApiRecord } from "@/lib/types/http-agent-profile-recent-use";
 import type { SystemMetricsSnapshot } from "./system";
+import type { TaskLspLanguageSnapshot } from "./http-lsp";
 import type { AgentRuntimeAvailability } from "./agent-runtime";
 import type {
   ExecutorPayload,
@@ -390,6 +391,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "task.updated": BackendMessage<"task.updated", TaskEventPayload>;
     "task.deleted": BackendMessage<"task.deleted", TaskEventPayload>;
     "task.state_changed": BackendMessage<"task.state_changed", TaskEventPayload>;
+    "task.lsp.changed": BackendMessage<"task.lsp.changed", TaskLspLanguageSnapshot>;
     "task.status_summary.updated": BackendMessage<
       "task.status_summary.updated",
       TaskStatusSummaryUpdatedPayload

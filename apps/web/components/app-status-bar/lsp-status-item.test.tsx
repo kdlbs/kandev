@@ -1,62 +1,46 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { TooltipProvider } from "@kandev/ui/tooltip";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { LspStatusItem } from "./lsp-status-item";
 
-const lsp = vi.hoisted(() => ({
-  status: { state: "starting" } as const,
-  progress: {
-    initializingSince: 2_000,
-    active: [],
-    completed: null,
-    hasReportedProgress: false,
-  },
-  toggle: vi.fn(),
+vi.mock("@/components/lsp/task-lsp-control", () => ({
+  TaskLspControl: ({ taskId, placement }: { taskId: string; placement: string }) => (
+    <div data-testid="mock-task-lsp-control" data-task-id={taskId} data-placement={placement} />
+  ),
+  TaskLspDisclosure: ({
+    taskId,
+    touch,
+    focusLanguage,
+  }: {
+    taskId: string;
+    touch: boolean;
+    focusLanguage?: string | null;
+  }) => (
+    <div
+      data-testid="mock-task-lsp-disclosure"
+      data-task-id={taskId}
+      data-touch={String(touch)}
+      data-language={focusLanguage}
+    />
+  ),
 }));
 
-vi.mock("@/hooks/use-lsp", () => ({
-  useLspStatus: () => ({
-    status: lsp.status,
-    progress: lsp.progress,
-    toggle: lsp.toggle,
-  }),
-}));
+afterEach(cleanup);
 
 describe("LspStatusItem", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(67_000);
-    lsp.toggle.mockReset();
+  it("renders the task-scoped compact controller in the application status bar", () => {
+    render(<LspStatusItem taskId="task-1" presentation="bar" />);
+
+    const control = screen.getByTestId("mock-task-lsp-control");
+    expect(control.getAttribute("data-task-id")).toBe("task-1");
+    expect(control.getAttribute("data-placement")).toBe("status-bar");
   });
 
-  afterEach(() => {
-    cleanup();
-    vi.useRealTimers();
-  });
+  it("embeds the shared touch disclosure in the existing status drawer", () => {
+    render(<LspStatusItem taskId="task-1" presentation="mobile-drawer" focusLanguage="kotlin" />);
 
-  it("shows the active language and live initialize summary", () => {
-    render(
-      <TooltipProvider>
-        <LspStatusItem sessionId="session-1" monacoLanguage="kotlin" />
-      </TooltipProvider>,
-    );
-
-    expect(screen.getByTestId("app-status-lsp").textContent).toContain("Kotlin");
-    expect(screen.getByTestId("app-status-lsp").textContent).toContain(
-      "Server process started · 1 min 05 sec",
-    );
-  });
-
-  it("opens the shared details and lifecycle action", () => {
-    render(
-      <TooltipProvider>
-        <LspStatusItem sessionId="session-1" monacoLanguage="kotlin" />
-      </TooltipProvider>,
-    );
-
-    fireEvent.click(screen.getByTestId("app-status-lsp"));
-    expect(screen.getByTestId("lsp-progress-details")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("lsp-lifecycle-action"));
-    expect(lsp.toggle).toHaveBeenCalledOnce();
+    const disclosure = screen.getByTestId("mock-task-lsp-disclosure");
+    expect(disclosure.getAttribute("data-task-id")).toBe("task-1");
+    expect(disclosure.getAttribute("data-touch")).toBe("true");
+    expect(disclosure.getAttribute("data-language")).toBe("kotlin");
   });
 });

@@ -76,6 +76,7 @@ import type {
   PluginsSliceActions,
   ReviewSliceActions,
   KanbanSlice,
+  LspSlice,
 } from "./slices";
 import type {
   AvailableCommand,
@@ -610,7 +611,8 @@ export type AppState = KanbanSlice & {
   AuthSliceActions &
   AutomationsSliceActions &
   PluginsSliceActions &
-  ReviewSliceActions;
+  ReviewSliceActions &
+  LspSlice;
 
 // Most callers hydrate a fully-shaped slice per top-level key (see
 // mergeInitialState / hydrateState), but `system` is a grab-bag of many

@@ -36,15 +36,61 @@ type languageConfig struct {
 	binary      string
 	args        []string
 	autoInstall bool
+	fileNames   []string
+	extensions  []string
 }
 
 // languages is the single source of truth for supported LSP languages.
 var languages = map[string]languageConfig{
-	languageTypeScript: {binary: typeScriptLanguageServer, args: []string{stdioArgument}, autoInstall: true},
-	languageGo:         {binary: goLanguageServer, args: []string{"serve"}, autoInstall: true},
-	languageRust:       {binary: rustLanguageServer, autoInstall: true},
-	languagePython:     {binary: pythonLanguageServer, args: []string{stdioArgument}, autoInstall: true},
-	languageKotlin:     {binary: "kotlin-lsp", args: []string{stdioArgument}},
+	languageTypeScript: {
+		binary: typeScriptLanguageServer, args: []string{stdioArgument}, autoInstall: true,
+		fileNames:  []string{"jsconfig.json", "package.json", "tsconfig.json"},
+		extensions: []string{".cjs", ".cts", ".js", ".jsx", ".mjs", ".mts", ".ts", ".tsx"},
+	},
+	languageGo: {
+		binary: goLanguageServer, args: []string{"serve"}, autoInstall: true,
+		fileNames: []string{"go.mod", "go.work"}, extensions: []string{".go"},
+	},
+	languageRust: {
+		binary: rustLanguageServer, autoInstall: true,
+		fileNames: []string{"cargo.toml"}, extensions: []string{".rs"},
+	},
+	languagePython: {
+		binary: pythonLanguageServer, args: []string{stdioArgument}, autoInstall: true,
+		fileNames:  []string{"pipfile", "pyproject.toml", "requirements.txt", "setup.cfg", "setup.py"},
+		extensions: []string{".py", ".pyi"},
+	},
+	languageKotlin: {
+		binary: "kotlin-lsp", args: []string{stdioArgument},
+		fileNames: []string{"build.gradle.kts", "settings.gradle.kts"}, extensions: []string{".kt", ".kts"},
+	},
+}
+
+type DiscoverySignal struct {
+	Language   string
+	FileNames  []string
+	Extensions []string
+}
+
+// DiscoverySignals returns deterministic, read-only file-name metadata for
+// every registered language. Callers inspect names only; no manifest content
+// or project-controlled executable is involved.
+func DiscoverySignals() []DiscoverySignal {
+	languageIDs := make([]string, 0, len(languages))
+	for language := range languages {
+		languageIDs = append(languageIDs, language)
+	}
+	sort.Strings(languageIDs)
+	result := make([]DiscoverySignal, 0, len(languageIDs))
+	for _, language := range languageIDs {
+		cfg := languages[language]
+		result = append(result, DiscoverySignal{
+			Language:   language,
+			FileNames:  append([]string(nil), cfg.fileNames...),
+			Extensions: append([]string(nil), cfg.extensions...),
+		})
+	}
+	return result
 }
 
 // SupportedLanguages returns the set of supported LSP language identifiers.

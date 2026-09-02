@@ -839,12 +839,12 @@ func (r *Repository) loadInitialSessionRuntimeSeedTx(
 }
 
 // CreateOfficeTaskSession creates an Office session and atomically marks it as
-// the task's initial session when no earlier session exists. The task row lock
-// serializes callers across PostgreSQL connections; SQLite's single writer
-// connection serializes the transaction. Within that same transaction it also
-// enforces office-session uniqueness for the (task_id, agent_profile_id) pair:
-// if a live row already exists for the pair, the insert is refused with
-// ErrOfficeSessionRaceConflict rather than creating a second live session.
+// the task's initial session when no earlier session exists. The cleanup
+// admission and task-row locks serialize callers across PostgreSQL connections;
+// SQLite's single writer connection serializes the transaction. Within that
+// transaction it also enforces office-session uniqueness for the
+// (task_id, agent_profile_id) pair: if a live row already exists for the pair,
+// the insert is refused with ErrOfficeSessionRaceConflict.
 func (r *Repository) CreateOfficeTaskSession(ctx context.Context, session *models.TaskSession) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -852,13 +852,8 @@ func (r *Repository) CreateOfficeTaskSession(ctx context.Context, session *model
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if dialect.IsPostgres(r.db.DriverName()) {
-		var lockedTaskID string
-		if err := tx.QueryRowContext(ctx, r.db.Rebind(
-			`SELECT id FROM tasks WHERE id = ? FOR UPDATE`,
-		), session.TaskID).Scan(&lockedTaskID); err != nil {
-			return fmt.Errorf("lock task for office session: %w", err)
-		}
+	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
+		return err
 	}
 
 	var sessionCount int
@@ -2658,6 +2653,27 @@ func (r *Repository) HasActiveTaskSessionsByTaskEnvironmentExcludingTask(ctx con
 	return err == nil, err
 }
 
+// HasLiveTaskSessionsByTaskEnvironmentExcludingTask reports durable borrowers
+// even when their latest session is terminal. A task-level keep-warm LSP can
+// outlive that session state, so physical environment reset must treat every
+// non-archived borrowing task as live.
+func (r *Repository) HasLiveTaskSessionsByTaskEnvironmentExcludingTask(ctx context.Context, taskEnvironmentID, taskID string) (bool, error) {
+	var exists int
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT 1
+		FROM task_sessions ts
+		INNER JOIN tasks t ON t.id = ts.task_id
+		WHERE ts.task_environment_id = ?
+			AND ts.task_id != ?
+			AND t.archived_at IS NULL
+		LIMIT 1
+	`), taskEnvironmentID, taskID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func (r *Repository) FindActiveTaskSessionTaskIDByTaskEnvironmentExcludingTask(ctx context.Context, taskEnvironmentID, taskID string) (string, error) {
 	var borrowerTaskID string
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
@@ -2672,6 +2688,55 @@ func (r *Repository) FindActiveTaskSessionTaskIDByTaskEnvironmentExcludingTask(c
 		return "", nil
 	}
 	return borrowerTaskID, err
+}
+
+// FindLiveTaskSessionTaskIDByTaskEnvironmentExcludingTask selects a durable
+// non-archived borrower even when its latest session is terminal. Task-level
+// keep-warm services outlive session activity and need a surviving task owner.
+func (r *Repository) FindLiveTaskSessionTaskIDByTaskEnvironmentExcludingTask(ctx context.Context, taskEnvironmentID, taskID string) (string, error) {
+	var borrowerTaskID string
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT ts.task_id
+		FROM task_sessions ts
+		INNER JOIN tasks t ON t.id = ts.task_id
+		WHERE ts.task_environment_id = ?
+			AND ts.task_id != ?
+			AND t.archived_at IS NULL
+		ORDER BY ts.updated_at DESC, ts.task_id
+		LIMIT 1
+	`), taskEnvironmentID, taskID).Scan(&borrowerTaskID)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return borrowerTaskID, err
+}
+
+func (r *Repository) ListLiveTaskSessionTaskIDsByTaskEnvironment(
+	ctx context.Context,
+	taskEnvironmentID string,
+) ([]string, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT ts.task_id
+		FROM task_sessions ts
+		INNER JOIN tasks t ON t.id = ts.task_id
+		WHERE ts.task_environment_id = ?
+			AND t.archived_at IS NULL
+		GROUP BY ts.task_id
+		ORDER BY MAX(ts.updated_at) DESC, ts.task_id
+	`), taskEnvironmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var taskIDs []string
+	for rows.Next() {
+		var taskID string
+		if err := rows.Scan(&taskID); err != nil {
+			return nil, err
+		}
+		taskIDs = append(taskIDs, taskID)
+	}
+	return taskIDs, rows.Err()
 }
 
 func (r *Repository) HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {

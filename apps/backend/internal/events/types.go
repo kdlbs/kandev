@@ -6,6 +6,7 @@ const (
 	TaskCreated                    = "task.created"
 	TaskUpdated                    = "task.updated"
 	TaskStateChanged               = "task.state_changed"
+	TaskLSPStateChanged            = "task.lsp_state_changed"
 	TaskDeleted                    = "task.deleted"
 	TaskMoved                      = "task.moved" // Manual step change via MoveTask
 	TaskQueuePromoted              = "task.queue_promoted"

@@ -49,6 +49,8 @@ func finalTaskEnvironmentsDDL(tableName string) string {
 			container_bootstrap_nonce_secret_id TEXT DEFAULT '',
 			container_control_auth_token_secret_id TEXT DEFAULT '',
 			sandbox_id TEXT DEFAULT '',
+			agentctl_auth_secret_id TEXT DEFAULT '',
+			agentctl_bootstrap_secret_id TEXT DEFAULT '',
 			task_dir_name TEXT DEFAULT '',
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,

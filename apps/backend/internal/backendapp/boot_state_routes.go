@@ -646,6 +646,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"releaseNotesLastSeenVersion":       nullString(settings.ReleaseNotesLastSeenVersion),
 		"lspAutoStartLanguages":             stringSlice(settings.LspAutoStartLanguages),
 		"lspAutoInstallLanguages":           stringSlice(settings.LspAutoInstallLanguages),
+		"lspStatusHiddenLanguages":          stringSlice(settings.LspStatusHiddenLanguages),
 		"lspServerConfigs":                  mapStringMap(settings.LspServerConfigs),
 		"lspStatusLocation":                 usermodels.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		"savedLayouts":                      settings.SavedLayouts,

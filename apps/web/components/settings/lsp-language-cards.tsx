@@ -18,8 +18,11 @@ type LspLanguageCardsProps = {
   lspAutoInstallLanguages: string[];
   baselineLspAutoStart: string[];
   baselineLspAutoInstall: string[];
+  lspStatusHiddenLanguages: string[];
+  baselineLspStatusHiddenLanguages: string[];
   toggleAutoStart: (langId: string, checked: boolean) => void;
   toggleAutoInstall: (langId: string, checked: boolean) => void;
+  toggleStatusVisibility: (langId: string, visible: boolean) => void;
 };
 
 function LspLanguageCard({
@@ -29,8 +32,11 @@ function LspLanguageCard({
   lspAutoInstallLanguages,
   baselineLspAutoStart,
   baselineLspAutoInstall,
+  lspStatusHiddenLanguages,
+  baselineLspStatusHiddenLanguages,
   toggleAutoStart,
   toggleAutoInstall,
+  toggleStatusVisibility,
 }: LspLanguageCardsProps & {
   language: (typeof LSP_LANGUAGE_OPTIONS)[number];
   preferenceLanguages: readonly string[];
@@ -43,11 +49,14 @@ function LspLanguageCard({
   const autoInstallDirty =
     autoInstallConfigurable &&
     lspAutoInstallLanguages.includes(language.id) !== baselineLspAutoInstall.includes(language.id);
+  const statusVisibilityDirty =
+    lspStatusHiddenLanguages.includes(language.id) !==
+    baselineLspStatusHiddenLanguages.includes(language.id);
 
   return (
     <div
       className="rounded-lg border border-border/60 bg-background px-4 py-3 space-y-2.5"
-      data-settings-dirty={autoStartDirty || autoInstallDirty}
+      data-settings-dirty={autoStartDirty || autoInstallDirty || statusVisibilityDirty}
       data-testid={`lsp-language-card-${language.id}`}
     >
       <div>
@@ -62,6 +71,16 @@ function LspLanguageCard({
           data-settings-dirty={autoStartDirty}
           data-testid={`lsp-auto-start-${language.id}`}
           aria-label={t("settings:autoStartLanguageServer", { language: languageLabel })}
+        />
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs text-muted-foreground">{t("settings:showInTaskStatus")}</span>
+        <Switch
+          checked={!lspStatusHiddenLanguages.includes(language.id)}
+          onCheckedChange={(checked) => toggleStatusVisibility(language.id, checked === true)}
+          data-settings-dirty={statusVisibilityDirty}
+          data-testid={`lsp-status-visible-${language.id}`}
+          aria-label={t("settings:showLanguageInTaskStatus", { language: languageLabel })}
         />
       </div>
       <div className="flex items-center gap-2">
@@ -122,6 +141,12 @@ export function LspLanguageCards(props: LspLanguageCardsProps) {
             repository setup scripts) to avoid missing type errors.
           </Trans>
         </div>
+        <p
+          className="mt-1 text-[11px] leading-relaxed text-muted-foreground"
+          data-testid="lsp-status-visibility-description"
+        >
+          {t("settings:lspStatusVisibilityDescription")}
+        </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {LSP_LANGUAGE_OPTIONS.map((language) => (

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentruntime"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -57,6 +59,186 @@ func TestRescanWorkspaceForSessionRestoresRootsOnFailure(t *testing.T) {
 	}
 	if !sameStrings(execution.WorkspaceSourceRoots, []string{"/old"}) {
 		t.Fatalf("roots after failed rescan = %v, want old roots", execution.WorkspaceSourceRoots)
+	}
+}
+
+func TestRescanWorkspaceForTaskHostUsesCurrentEnvironmentWorkspace(t *testing.T) {
+	var gotPath string
+	var gotRoots []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/workspace/rescan" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		var request struct {
+			WorkDir              string   `json:"work_dir"`
+			WorkspaceSourceRoots []string `json:"workspace_source_roots"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		gotPath = request.WorkDir
+		gotRoots = request.WorkspaceSourceRoots
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldRoot := t.TempDir()
+	newRoot := filepath.Dir(oldRoot)
+	sourceB := t.TempDir()
+	sourceA := t.TempDir()
+	execution := &AgentExecution{
+		ID: "task-host", SessionID: taskHostRuntimeSessionPrefix + "env-1",
+		TaskEnvironmentID: "env-1", IsTaskHost: true, WorkspacePath: oldRoot,
+		WorkspaceSourceRoots: []string{sourceA},
+		agentctl:             agentctl.NewClient(parsed.Hostname(), port, newTestLogger()),
+	}
+	execution.MarkAgentctlReady()
+	store := NewExecutionStore()
+	if err := store.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{
+		executionStore: store,
+		logger:         newTestLogger(),
+		workspaceInfoProvider: &mockWorkspaceInfoProvider{envInfos: map[string]*WorkspaceInfo{
+			"env-1": {
+				TaskID: "task-1", TaskEnvironmentID: "env-1", WorkspacePath: newRoot,
+				WorkspaceRepositories: []WorkspaceRepositorySpec{
+					{RepositoryPath: sourceB, Position: 1},
+					{RepositoryPath: sourceA, Position: 2},
+				},
+			},
+		}},
+	}
+	if err := manager.RescanWorkspaceForTaskHost(context.Background(), "task-1", "env-1"); err != nil {
+		t.Fatalf("RescanWorkspaceForTaskHost: %v", err)
+	}
+	if gotPath != newRoot || !sameStrings(gotRoots, []string{sourceB, sourceA}) {
+		t.Fatalf("task-host rescan path=%q roots=%v", gotPath, gotRoots)
+	}
+	if execution.WorkspacePath != newRoot || !sameStrings(execution.WorkspaceSourceRoots, gotRoots) {
+		t.Fatalf("task-host execution path=%q roots=%v", execution.WorkspacePath, execution.WorkspaceSourceRoots)
+	}
+}
+
+func TestRescanWorkspaceForDockerTaskHostUsesRuntimeWorkspace(t *testing.T) {
+	var gotPath string
+	var gotRoots []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			WorkDir              string   `json:"work_dir"`
+			WorkspaceSourceRoots []string `json:"workspace_source_roots"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		gotPath = request.WorkDir
+		gotRoots = request.WorkspaceSourceRoots
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution := &AgentExecution{
+		ID: "task-host", SessionID: taskHostRuntimeSessionPrefix + "env-1",
+		TaskEnvironmentID: "env-1", IsTaskHost: true, RuntimeName: agentruntime.RuntimeDocker,
+		WorkspacePath: dockerWorkspacePath, WorkspaceSourceRoots: []string{dockerWorkspacePath},
+		agentctl: agentctl.NewClient(parsed.Hostname(), port, newTestLogger()),
+	}
+	execution.MarkAgentctlReady()
+	store := NewExecutionStore()
+	if err := store.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{
+		executionStore: store,
+		logger:         newTestLogger(),
+		workspaceInfoProvider: &mockWorkspaceInfoProvider{envInfos: map[string]*WorkspaceInfo{
+			"env-1": {
+				TaskID: "task-1", TaskEnvironmentID: "env-1", WorkspacePath: t.TempDir(),
+				WorkspaceRepositories: []WorkspaceRepositorySpec{
+					{RepositoryPath: t.TempDir(), RepoName: "primary", BaseBranch: "main", Position: 0},
+					{RepositoryPath: t.TempDir(), RepoName: "API", CheckoutBranch: "feature/add-source", Position: 1},
+				},
+			},
+		}},
+	}
+	if err := manager.RescanWorkspaceForTaskHost(context.Background(), "task-1", "env-1"); err != nil {
+		t.Fatalf("RescanWorkspaceForTaskHost: %v", err)
+	}
+	wantRoots := []string{dockerWorkspacePath, filepath.Join(dockerWorkspacePath, "API-feature-add-source")}
+	if gotPath != dockerWorkspacePath || !sameStrings(gotRoots, wantRoots) {
+		t.Fatalf("Docker task-host rescan path=%q roots=%v, want path=%q roots=%v", gotPath, gotRoots, dockerWorkspacePath, wantRoots)
+	}
+	if execution.WorkspacePath != dockerWorkspacePath || !sameStrings(execution.WorkspaceSourceRoots, wantRoots) {
+		t.Fatalf("Docker task-host execution path=%q roots=%v, want runtime paths", execution.WorkspacePath, execution.WorkspaceSourceRoots)
+	}
+}
+
+type taskScopedWorkspaceInfoProvider struct {
+	*mockWorkspaceInfoProvider
+	taskInfos map[string]*WorkspaceInfo
+}
+
+func (p *taskScopedWorkspaceInfoProvider) GetWorkspaceInfoForTaskLSP(
+	_ context.Context,
+	taskID, _ string,
+) (*WorkspaceInfo, error) {
+	return p.taskInfos[taskID], nil
+}
+
+func TestTaskLSPWorkspaceProjectionDoesNotRebindSharedTaskHost(t *testing.T) {
+	physicalRoot := t.TempDir()
+	childRoot := t.TempDir()
+	execution := &AgentExecution{
+		ID: "task-host", SessionID: taskHostRuntimeSessionPrefix + "env-1",
+		TaskEnvironmentID: "env-1", IsTaskHost: true, RuntimeName: agentruntime.RuntimeStandalone,
+		WorkspacePath: physicalRoot, WorkspaceSourceRoots: []string{physicalRoot},
+	}
+	execution.MarkAgentctlReady()
+	store := NewExecutionStore()
+	if err := store.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{
+		executionStore: store,
+		logger:         newTestLogger(),
+		workspaceInfoProvider: &taskScopedWorkspaceInfoProvider{
+			mockWorkspaceInfoProvider: &mockWorkspaceInfoProvider{},
+			taskInfos: map[string]*WorkspaceInfo{
+				"task-child": {
+					TaskID: "task-child", TaskEnvironmentID: "env-1", WorkspacePath: childRoot,
+					WorkspaceRepositories: []WorkspaceRepositorySpec{{RepositoryPath: childRoot}},
+				},
+			},
+		},
+	}
+	projection, err := manager.TaskLSPWorkspaceForTaskHost(
+		context.Background(), "task-child", "env-1",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projection.WorkspacePath != childRoot || !sameStrings(projection.WorkspaceRoots, []string{childRoot}) {
+		t.Fatalf("child projection = %#v", projection)
+	}
+	if execution.WorkspacePath != physicalRoot || !sameStrings(execution.WorkspaceSourceRoots, []string{physicalRoot}) {
+		t.Fatalf("physical task host was rebound: path=%q roots=%v", execution.WorkspacePath, execution.WorkspaceSourceRoots)
 	}
 }
 

@@ -16,6 +16,7 @@ import {
   defaultAutomationsState,
   defaultSystemState,
   defaultReviewState,
+  defaultLspState,
 } from "./slices";
 import { mergeHydratedQuickChatSessions } from "@/lib/state/slices/ui/quick-chat-sync";
 import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
@@ -62,6 +63,7 @@ export const defaultState = {
   taskPlans: defaultSessionState.taskPlans,
   walkthroughs: defaultSessionState.walkthroughs,
   taskReview: defaultReviewState.taskReview,
+  taskLsp: defaultLspState.taskLsp,
   queue: defaultSessionState.queue,
   terminal: defaultSessionRuntimeState.terminal,
   shell: defaultSessionRuntimeState.shell,
@@ -299,6 +301,19 @@ function mergeTaskPRState(initialState: HydrationState) {
   };
 }
 
+function mergeTaskLspState(initialState: HydrationState): DefaultState["taskLsp"] {
+  return {
+    byTaskId: {
+      ...defaultState.taskLsp.byTaskId,
+      ...initialState.taskLsp?.byTaskId,
+    },
+    pendingByKey: {
+      ...defaultState.taskLsp.pendingByKey,
+      ...initialState.taskLsp?.pendingByKey,
+    },
+  };
+}
+
 /**
  * Merges the turns slice for initial (SSR/boot) hydration. The server-side
  * turn lists are complete per-session snapshots, so every session the payload
@@ -385,6 +400,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     activeModel: { ...defaultState.activeModel, ...initialState.activeModel },
     taskPlans: { ...defaultState.taskPlans, ...initialState.taskPlans },
     ...mergeAgentReviewArtifacts(initialState),
+    taskLsp: mergeTaskLspState(initialState),
     queue: { ...defaultState.queue, ...initialState.queue },
     terminal: { ...defaultState.terminal, ...initialState.terminal },
     shell: { ...defaultState.shell, ...initialState.shell },

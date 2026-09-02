@@ -131,10 +131,14 @@ export class LspClientEditorState {
     const monaco = getMonacoInstance();
     if (!monaco) return;
 
-    const targetModel = monaco.editor
+    const targetModels = monaco.editor
       .getModels()
-      .find((model: monacoEditor.ITextModel) => connectionModelMatchesUri(model, uri, connection));
-    if (targetModel) this.applyDiagnostics(connection.ownerId, targetModel, canonicalParams);
+      .filter((model: monacoEditor.ITextModel) =>
+        connectionModelMatchesUri(model, uri, connection),
+      );
+    for (const model of targetModels) {
+      this.applyDiagnostics(connection.ownerId, model, canonicalParams);
+    }
   }
 
   applyCachedDiagnostics(connection: ManagedLspConnection, model: monacoEditor.ITextModel): void {

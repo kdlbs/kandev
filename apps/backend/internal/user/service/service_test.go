@@ -372,6 +372,45 @@ func TestApplyLSPSettingsAcceptsTaskHostAutoInstallPreference(t *testing.T) {
 	}
 }
 
+func TestApplyLSPSettingsStatusVisibility(t *testing.T) {
+	t.Run("omission preserves hidden languages", func(t *testing.T) {
+		settings := &models.UserSettings{LspStatusHiddenLanguages: []string{"go"}}
+		if err := applyLSPSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
+			t.Fatalf("apply LSP settings: %v", err)
+		}
+		if !slices.Equal(settings.LspStatusHiddenLanguages, []string{"go"}) {
+			t.Fatalf("LspStatusHiddenLanguages = %v, want [go]", settings.LspStatusHiddenLanguages)
+		}
+	})
+
+	t.Run("registered languages are accepted", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		hidden := []string{"go", "kotlin"}
+		if err := applyLSPSettings(settings, &UpdateUserSettingsRequest{
+			LspStatusHiddenLanguages: &hidden,
+		}); err != nil {
+			t.Fatalf("apply LSP settings: %v", err)
+		}
+		if !slices.Equal(settings.LspStatusHiddenLanguages, hidden) {
+			t.Fatalf("LspStatusHiddenLanguages = %v, want %v", settings.LspStatusHiddenLanguages, hidden)
+		}
+	})
+
+	t.Run("unknown language is rejected without mutation", func(t *testing.T) {
+		settings := &models.UserSettings{LspStatusHiddenLanguages: []string{"go"}}
+		hidden := []string{"go", "brainfuck"}
+		err := applyLSPSettings(settings, &UpdateUserSettingsRequest{
+			LspStatusHiddenLanguages: &hidden,
+		})
+		if err == nil || !strings.Contains(err.Error(), "lsp_status_hidden_languages") {
+			t.Fatalf("apply invalid visibility error = %v, want field validation", err)
+		}
+		if !slices.Equal(settings.LspStatusHiddenLanguages, []string{"go"}) {
+			t.Fatalf("LspStatusHiddenLanguages = %v after invalid patch, want [go]", settings.LspStatusHiddenLanguages)
+		}
+	})
+}
+
 // TestApplyLspStatusLocation verifies LspStatusLocation is preserved when omitted, applied when valid, and rejected when invalid.
 func TestApplyLspStatusLocation(t *testing.T) {
 	t.Run("omission preserves saved value", func(t *testing.T) {

@@ -50,6 +50,13 @@ func newConfigStubAgent() *configStubAgent {
 	}
 }
 
+func TestBuildContainerConfigRejectsMissingAgentRuntime(t *testing.T) {
+	cm := newCMTest(t)
+	if _, err := cm.buildContainerConfig(ContainerConfig{}); err == nil {
+		t.Fatal("buildContainerConfig accepted a missing agent runtime")
+	}
+}
+
 func TestBuildContainerConfig_ExpandsWorkingDirPlaceholder(t *testing.T) {
 	cm := newCMTest(t)
 	cfg := ContainerConfig{

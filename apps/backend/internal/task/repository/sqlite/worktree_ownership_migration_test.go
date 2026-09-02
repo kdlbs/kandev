@@ -36,9 +36,11 @@ const legacyEnvDDL = `
 		worktree_path TEXT DEFAULT '',
 		worktree_branch TEXT DEFAULT '',
 		workspace_path TEXT DEFAULT '',
-		container_id TEXT DEFAULT '',
-		sandbox_id TEXT DEFAULT '',
-		task_dir_name TEXT DEFAULT '',
+	container_id TEXT DEFAULT '',
+	sandbox_id TEXT DEFAULT '',
+	agentctl_auth_secret_id TEXT DEFAULT '',
+	agentctl_bootstrap_secret_id TEXT DEFAULT '',
+	task_dir_name TEXT DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
@@ -369,6 +371,11 @@ func TestCutover_NormalizesLegacyFlatEnvironment(t *testing.T) {
 	seedLegacyTask(t, db, seed, now)
 	seedLegacySessionWorktree(t, db, "sess-1", "wt-1", "repo-1", "", "/tasks/t-1/kandev", "feature/x", "active", now)
 	seedLegacyFlatEnv(t, db, seed, "wt-1", "/tasks/t-1/kandev", "feature/x", now)
+	if _, err := db.Exec(`UPDATE task_environments
+		SET agentctl_auth_secret_id = 'runtime-auth', agentctl_bootstrap_secret_id = 'runtime-bootstrap'
+		WHERE id = 'env-1'`); err != nil {
+		t.Fatalf("seed task-owned runtime secrets: %v", err)
+	}
 
 	repo, err := NewWithDB(db, db, nil)
 	if err != nil {
@@ -382,6 +389,9 @@ func TestCutover_NormalizesLegacyFlatEnvironment(t *testing.T) {
 	env, err := repo.GetTaskEnvironment(ctx, "env-1")
 	if err != nil {
 		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if env.AgentctlAuthSecretID != "runtime-auth" || env.AgentctlBootstrapSecretID != "runtime-bootstrap" {
+		t.Fatalf("runtime secret refs = %q/%q", env.AgentctlAuthSecretID, env.AgentctlBootstrapSecretID)
 	}
 	if len(env.Repos) != 1 {
 		t.Fatalf("env repos = %d, want 1", len(env.Repos))

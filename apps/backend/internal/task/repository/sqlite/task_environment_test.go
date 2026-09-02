@@ -20,6 +20,48 @@ func TestDeleteTaskEnvironmentMissingReturnsSentinel(t *testing.T) {
 	}
 }
 
+func TestTaskEnvironmentRuntimeSecretRefsRoundTripAndRotateIndependently(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-runtime-secrets")
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-runtime-secrets", WorkspaceID: "workspace-runtime-secrets", Title: "Task",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	environment := &models.TaskEnvironment{
+		ID: "env-runtime-secrets", TaskID: "task-runtime-secrets",
+		ExecutorType: string(models.ExecutorTypeLocalDocker), Status: models.TaskEnvironmentStatusReady,
+		AgentctlAuthSecretID: "auth-old", AgentctlBootstrapSecretID: "nonce-stable",
+	}
+	if err := repo.CreateTaskEnvironment(ctx, environment); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateTaskEnvironmentRuntimeSecretRefs(ctx, environment.ID, "auth-new", ""); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.GetTaskEnvironment(ctx, environment.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AgentctlAuthSecretID != "auth-new" || stored.AgentctlBootstrapSecretID != "nonce-stable" {
+		t.Fatalf("runtime secret refs = %#v", stored)
+	}
+	stored.AgentctlAuthSecretID = ""
+	stored.AgentctlBootstrapSecretID = ""
+	stored.Status = models.TaskEnvironmentStatusStopped
+	if err := repo.UpdateTaskEnvironment(ctx, stored); err != nil {
+		t.Fatal(err)
+	}
+	stored, err = repo.GetTaskEnvironment(ctx, environment.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AgentctlAuthSecretID != "auth-new" || stored.AgentctlBootstrapSecretID != "nonce-stable" {
+		t.Fatalf("general environment update clobbered runtime secret refs: %#v", stored)
+	}
+}
+
 func TestTaskEnvironmentRepoUpdateDeleteAndBulkCleanup(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()

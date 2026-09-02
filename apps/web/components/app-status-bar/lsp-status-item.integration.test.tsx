@@ -3,31 +3,57 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice";
-import { useDockviewStore, type FileEditorState } from "@/lib/state/dockview-store";
-import { buildRepoScopedItemId } from "@/lib/state/dockview-panel-actions";
-import { useEditorResolverStore } from "@/lib/state/editor-resolver-store";
+import { useDockviewStore } from "@/lib/state/dockview-store";
+import type { TaskLspLanguageSnapshot } from "@/lib/types/http-lsp";
 import { AppStatusBar } from "./app-status-bar";
 import { APP_STATUS_LSP_ID } from "./app-status-bar-order";
 
-const ACTIVE_KOTLIN_PATH = "src/Main.kt";
+const TEST_TIME = "2026-08-05T12:00:00Z";
+
+const kotlin: TaskLspLanguageSnapshot = {
+  task_id: "task-1",
+  language: "kotlin",
+  policy: "keep_warm",
+  detected: true,
+  detection_state: "complete",
+  detection_truncated: false,
+  phase: "initializing",
+  generation: 2,
+  revision: 4,
+  last_transition_at: TEST_TIME,
+  last_action: "start",
+  last_action_at: TEST_TIME,
+  last_initiator: "user",
+  restart_required: false,
+  created_at: TEST_TIME,
+  updated_at: TEST_TIME,
+  effective_policy: "keep_warm",
+  activity: "server_work",
+  progress: [
+    {
+      token: "gradle",
+      title: "Importing Kotlin project",
+      started_at: TEST_TIME,
+    },
+  ],
+};
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
-  useResponsiveBreakpoint: () => ({
-    isFinePointer: true,
-    isMobile: false,
-  }),
+  useResponsiveBreakpoint: () => ({ isFinePointer: true, isMobile: false }),
 }));
 
-vi.mock("@/hooks/use-lsp", () => ({
-  useLspStatus: () => ({
-    status: { state: "disabled" },
-    progress: {
-      initializingSince: null,
-      active: [],
-      completed: null,
-      hasReportedProgress: false,
-    },
-    toggle: vi.fn(),
+vi.mock("@/hooks/domains/lsp/use-task-lsp", () => ({
+  useTaskLsp: () => ({
+    languages: [kotlin],
+    pending: {},
+    loaded: true,
+    loading: false,
+    error: null,
+    capacity: { active: 1, queued: 0, limit: 4 },
+    start: vi.fn(),
+    stop: vi.fn(),
+    restart: vi.fn(),
+    setPolicy: vi.fn(),
   }),
 }));
 
@@ -39,53 +65,16 @@ afterEach(() => {
     activePanelComponent: null,
     openFiles: new Map(),
   });
-  useEditorResolverStore.setState((state) => ({
-    providers: { ...state.providers, "code-editor": "monaco" },
-  }));
 });
 
-function activateFile(
-  path: string,
-  {
-    repo = "app",
-    component = "file-editor",
-    loaded = true,
-    classified = true,
-    isBinary = false,
-  }: {
-    repo?: string;
-    component?: string;
-    loaded?: boolean;
-    classified?: boolean;
-    isBinary?: boolean;
-  } = {},
-) {
-  const file: FileEditorState = {
-    path,
-    repo,
-    name: path.split("/").pop() ?? path,
-    content: "fun main() = Unit",
-    originalContent: "fun main() = Unit",
-    originalHash: "hash",
-    isDirty: false,
-    ...(classified ? { isBinary } : {}),
-  };
-  useDockviewStore.setState({
-    activeFilePath: path,
-    activeFileRepo: repo,
-    activePanelComponent: component,
-    openFiles: loaded ? new Map([[buildRepoScopedItemId(path, repo), file]]) : new Map(),
-  });
-}
-
-function renderBar(location: "toolbar" | "status_bar") {
+function renderBar({ taskId = "task-1" }: { taskId?: string | null } = {}) {
   return render(
     <StateProvider
       initialState={{
         userSettings: {
           ...defaultSettingsState.userSettings,
           appStatusBarEnabled: true,
-          lspStatusLocation: location,
+          lspStatusLocation: "toolbar",
         },
       }}
     >
@@ -93,7 +82,7 @@ function renderBar(location: "toolbar" | "status_bar") {
         <AppStatusBar
           pathname="/tasks/task-1"
           activeWorkspaceId="workspace-1"
-          activeTaskId="task-1"
+          activeTaskId={taskId}
           activeSessionId="session-1"
           density="full"
         />
@@ -102,59 +91,37 @@ function renderBar(location: "toolbar" | "status_bar") {
   );
 }
 
-describe("active-editor LSP status item integration", () => {
-  it("renders the supported active file only for status-bar placement", () => {
-    activateFile(ACTIVE_KOTLIN_PATH);
-    renderBar("status_bar");
-
-    expect(document.querySelector(`[data-status-item-id="${APP_STATUS_LSP_ID}"]`)).toBeTruthy();
-    expect(screen.getByTestId("app-status-lsp").textContent).toContain("Kotlin");
-  });
-
-  it("hides for toolbar placement and when the active panel becomes unsupported", () => {
-    activateFile(ACTIVE_KOTLIN_PATH);
-    const rendered = renderBar("toolbar");
-    expect(document.querySelector(`[data-status-item-id="${APP_STATUS_LSP_ID}"]`)).toBeNull();
-
-    rendered.unmount();
-    activateFile("README.md");
-    renderBar("status_bar");
-    expect(document.querySelector(`[data-status-item-id="${APP_STATUS_LSP_ID}"]`)).toBeNull();
-  });
-
-  it("hides when CodeMirror owns the active supported file", () => {
-    useEditorResolverStore.setState((state) => ({
-      providers: { ...state.providers, "code-editor": "codemirror" },
-    }));
-    activateFile(ACTIVE_KOTLIN_PATH);
-
-    renderBar("status_bar");
-
-    expect(document.querySelector(`[data-status-item-id="${APP_STATUS_LSP_ID}"]`)).toBeNull();
-  });
-
-  it("tracks whether the active panel has mounted a Monaco text editor", () => {
-    activateFile(ACTIVE_KOTLIN_PATH, { loaded: false });
-    renderBar("status_bar");
+describe("task-scoped LSP status item integration", () => {
+  it("stays visible while an unsupported file or non-editor panel is active", () => {
+    renderBar();
     const lspItem = () => document.querySelector(`[data-status-item-id="${APP_STATUS_LSP_ID}"]`);
 
-    expect(lspItem()).toBeNull();
+    expect(lspItem()).toBeTruthy();
+    expect(screen.getByTestId("app-status-lsp").textContent).toContain("Kotlin");
+    expect(screen.getByTestId("app-status-lsp").textContent).toContain("Importing Kotlin project");
 
-    act(() => activateFile(ACTIVE_KOTLIN_PATH));
+    act(() => {
+      useDockviewStore.setState({
+        activeFilePath: "README.md",
+        activeFileRepo: "app",
+        activePanelComponent: "file-editor",
+      });
+    });
     expect(lspItem()).toBeTruthy();
 
-    act(() => activateFile(ACTIVE_KOTLIN_PATH, { isBinary: true }));
-    expect(lspItem()).toBeNull();
-
-    act(() => activateFile(ACTIVE_KOTLIN_PATH, { component: "diff-viewer" }));
-    expect(lspItem()).toBeNull();
+    act(() => {
+      useDockviewStore.setState({ activePanelComponent: "terminal" });
+    });
+    expect(lspItem()).toBeTruthy();
   });
 
-  it("hides while a restored file is waiting for text-or-binary classification", () => {
-    activateFile(ACTIVE_KOTLIN_PATH, { classified: false });
+  it("ignores the retired per-user placement setting", () => {
+    renderBar();
+    expect(document.querySelector(`[data-status-item-id="${APP_STATUS_LSP_ID}"]`)).toBeTruthy();
+  });
 
-    renderBar("status_bar");
-
+  it("does not render task controls without an active task", () => {
+    renderBar({ taskId: null });
     expect(document.querySelector(`[data-status-item-id="${APP_STATUS_LSP_ID}"]`)).toBeNull();
   });
 });

@@ -71,6 +71,12 @@ function sessionSubscribeRequest(socket: FakeWebSocket, index = 0) {
   return request;
 }
 
+function taskSubscribeRequest(socket: FakeWebSocket, index = 0) {
+  const request = socket.sent.filter((message) => message.action === "task.subscribe")[index];
+  if (!request) throw new Error("No task.subscribe request was sent");
+  return request;
+}
+
 function acknowledge(socket: FakeWebSocket, request: SentRequest) {
   socket.receive({
     id: request.id,
@@ -200,6 +206,75 @@ describe("request errors", () => {
         original_branch: "feature/lost",
       },
     });
+  });
+});
+
+describe("task subscription readiness", () => {
+  it("resolves only after the server acknowledges the registration", async () => {
+    const { client, socket } = connectClient();
+    const subscription = client.subscribeTaskWithReady("task-1");
+    const request = taskSubscribeRequest(socket);
+    let ready = false;
+
+    void subscription.ready.then(() => {
+      ready = true;
+    });
+    await Promise.resolve();
+    expect(ready).toBe(false);
+
+    acknowledge(socket, request);
+
+    await expect(subscription.ready).resolves.toBeUndefined();
+    expect(ready).toBe(true);
+    subscription.unsubscribe();
+  });
+
+  it("tracks a fresh acknowledgement after reconnect", async () => {
+    vi.useFakeTimers();
+    const { client, socket } = connectClient({ enabled: true, initialDelay: 0, maxAttempts: 1 });
+    const initial = client.subscribeTaskWithReady("task-1");
+    acknowledge(socket, taskSubscribeRequest(socket));
+    await expect(initial.ready).resolves.toBeUndefined();
+
+    socket.close();
+    vi.advanceTimersByTime(0);
+    const reconnectedSocket = FakeWebSocket.latest();
+    reconnectedSocket.open();
+
+    const reconnected = client.subscribeTaskWithReady("task-1");
+    const reconnectRequest = taskSubscribeRequest(reconnectedSocket);
+    expect(reconnected.ready).not.toBe(initial.ready);
+
+    acknowledge(reconnectedSocket, reconnectRequest);
+    await expect(reconnected.ready).resolves.toBeUndefined();
+    initial.unsubscribe();
+    reconnected.unsubscribe();
+  });
+
+  it("exposes reconnect readiness without acquiring another task lease", async () => {
+    vi.useFakeTimers();
+    const { client, socket } = connectClient({ enabled: true, initialDelay: 0, maxAttempts: 1 });
+    const lease = client.subscribeTaskWithReady("task-1");
+    acknowledge(socket, taskSubscribeRequest(socket));
+    await expect(lease.ready).resolves.toBeUndefined();
+
+    socket.close();
+    vi.advanceTimersByTime(0);
+    const reconnectedSocket = FakeWebSocket.latest();
+    reconnectedSocket.open();
+
+    const readiness = client.getTaskSubscriptionReadiness("task-1");
+    const reconnectRequests = reconnectedSocket.sent.filter(
+      (message) => message.action === "task.subscribe",
+    );
+    expect(reconnectRequests).toHaveLength(1);
+    acknowledge(reconnectedSocket, reconnectRequests[0]);
+    await expect(readiness).resolves.toBeUndefined();
+
+    lease.unsubscribe();
+    expect(
+      reconnectedSocket.sent.filter((message) => message.action === "task.unsubscribe"),
+    ).toHaveLength(1);
   });
 });
 

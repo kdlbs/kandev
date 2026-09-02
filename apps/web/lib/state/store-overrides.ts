@@ -36,6 +36,7 @@ export function buildStateOverrides(m: DefaultState) {
     sessionWorktreesBySessionId: m.sessionWorktreesBySessionId,
     pendingModel: m.pendingModel,
     activeModel: m.activeModel,
+    taskLsp: m.taskLsp,
     queue: m.queue,
     terminal: m.terminal,
     shell: m.shell,

@@ -6,6 +6,7 @@ import { IconActivity } from "@tabler/icons-react";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
 import { cn } from "@kandev/ui/lib/utils";
 import { useAppStatusItems, type AppStatusItem } from "./app-status-items";
+import { APP_STATUS_LSP_ID } from "./app-status-bar-order";
 import { useAppStatusBarOrder } from "./use-app-status-bar-order";
 
 type AppStatusDrawerProps = {
@@ -16,6 +17,7 @@ type AppStatusDrawerProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   connectionOnly?: boolean;
+  focusLspLanguage?: string | null;
 };
 
 export function AppStatusDrawer({
@@ -26,6 +28,7 @@ export function AppStatusDrawer({
   open,
   onOpenChange,
   connectionOnly = false,
+  focusLspLanguage,
 }: AppStatusDrawerProps) {
   const { t } = useTranslation();
   const context = useMemo(
@@ -36,9 +39,10 @@ export function AppStatusDrawer({
   const { projected } = useAppStatusBarOrder(activeItems);
   const orderedItems = [...projected.left, ...projected.right];
   let drawerHeight = "h-[min(32rem,calc(100dvh-16px-env(safe-area-inset-bottom,0px)))]";
-  if (orderedItems.length <= 1) {
+  const hasTaskLsp = orderedItems.some((item) => item.id === APP_STATUS_LSP_ID);
+  if (!hasTaskLsp && orderedItems.length <= 1) {
     drawerHeight = "h-[min(15rem,calc(100dvh-16px-env(safe-area-inset-bottom,0px)))]";
-  } else if (orderedItems.length === 2) {
+  } else if (!hasTaskLsp && orderedItems.length === 2) {
     drawerHeight = "h-[min(20rem,calc(100dvh-16px-env(safe-area-inset-bottom,0px)))]";
   }
 
@@ -74,11 +78,17 @@ export function AppStatusDrawer({
           </DrawerHeader>
           <div
             data-testid="app-status-drawer-scroll-region"
+            data-vaul-no-drag
             className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3"
           >
             <section className="space-y-2" aria-label={t("sidebar:applicationStatusItems")}>
               {orderedItems.map((item) => (
-                <DrawerStatusItem key={item.id} item={item} open={open} />
+                <DrawerStatusItem
+                  key={item.id}
+                  item={item}
+                  open={open}
+                  focusLspLanguage={focusLspLanguage}
+                />
               ))}
             </section>
           </div>
@@ -88,13 +98,26 @@ export function AppStatusDrawer({
   );
 }
 
-function DrawerStatusItem({ item, open }: { item: AppStatusItem; open: boolean }) {
+function DrawerStatusItem({
+  item,
+  open,
+  focusLspLanguage,
+}: {
+  item: AppStatusItem;
+  open: boolean;
+  focusLspLanguage?: string | null;
+}) {
   return (
     <div
-      className="flex min-h-11 w-full min-w-0 items-center rounded-lg bg-muted/50 px-3 py-2 shadow-[0_1px_2px_rgb(0_0_0_/_0.03),0_0_0_1px_rgb(0_0_0_/_0.04)] transition-[background-color,box-shadow] duration-150 ease-out hover:bg-muted/80 focus-within:bg-muted/80 focus-within:shadow-[0_1px_2px_rgb(0_0_0_/_0.06),0_0_0_1px_rgb(0_0_0_/_0.06)] empty:hidden dark:shadow-[0_0_0_1px_rgb(255_255_255_/_0.06)]"
+      className="min-h-11 w-full min-w-0 rounded-lg bg-muted/50 px-3 py-2 shadow-[0_1px_2px_rgb(0_0_0_/_0.03),0_0_0_1px_rgb(0_0_0_/_0.04)] transition-[background-color,box-shadow] duration-150 ease-out hover:bg-muted/80 focus-within:bg-muted/80 focus-within:shadow-[0_1px_2px_rgb(0_0_0_/_0.06),0_0_0_1px_rgb(0_0_0_/_0.06)] empty:hidden dark:shadow-[0_0_0_1px_rgb(255_255_255_/_0.06)]"
       data-status-item-id={item.id}
     >
-      {item.render({ presentation: "mobile-drawer", density: "full", drawerOpen: open })}
+      {item.render({
+        presentation: "mobile-drawer",
+        density: "full",
+        drawerOpen: open,
+        focusLspLanguage,
+      })}
     </div>
   );
 }

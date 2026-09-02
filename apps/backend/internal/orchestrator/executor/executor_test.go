@@ -722,6 +722,94 @@ func TestLaunchPreparedSession_PersistsResolvedExecutorID(t *testing.T) {
 	}
 }
 
+func TestLaunchPreparedSession_CreatesDockerEnvironmentBeforeLifecycleLaunch(t *testing.T) {
+	repo := newMockRepository()
+	now := time.Now().UTC()
+	repo.sessions["session-docker"] = &models.TaskSession{
+		ID: "session-docker", TaskID: "task-docker", AgentProfileID: "profile-123",
+		State: models.TaskSessionStateCreated, StartedAt: now, UpdatedAt: now,
+	}
+	repo.executors[models.ExecutorIDLocalDocker] = &models.Executor{
+		ID: models.ExecutorIDLocalDocker, Type: models.ExecutorTypeLocalDocker, Status: models.ExecutorStatusActive,
+	}
+
+	manager := &mockAgentManager{launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+		environment, err := repo.GetTaskEnvironmentByTaskID(ctx, req.TaskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if environment == nil || environment.ID != req.TaskEnvironmentID {
+			t.Fatalf("environment during lifecycle launch = %#v, want %q", environment, req.TaskEnvironmentID)
+		}
+		if environment.Status != models.TaskEnvironmentStatusCreating {
+			t.Fatalf("environment status during lifecycle launch = %q, want creating", environment.Status)
+		}
+		return &LaunchAgentResponse{
+			AgentExecutionID: "execution-docker", ContainerID: "container-docker",
+			WorkspacePath: "/workspace", Status: v1.AgentStatusStarting,
+		}, nil
+	}}
+	executor := newTestExecutor(t, manager, repo)
+
+	if _, err := executor.LaunchPreparedSession(context.Background(), &v1.Task{
+		ID: "task-docker", WorkspaceID: "workspace-123",
+	}, "session-docker", LaunchOptions{
+		AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDLocalDocker,
+	}); err != nil {
+		t.Fatalf("LaunchPreparedSession: %v", err)
+	}
+
+	environment, err := repo.GetTaskEnvironmentByTaskID(context.Background(), "task-docker")
+	if err != nil || environment == nil {
+		t.Fatalf("final environment = %#v, %v", environment, err)
+	}
+	if environment.Status != models.TaskEnvironmentStatusReady || environment.ContainerID != "container-docker" {
+		t.Fatalf("final environment = %#v, want ready Docker container", environment)
+	}
+	if len(repo.createTaskEnvironmentCalls) != 1 {
+		t.Fatalf("CreateTaskEnvironment calls = %d, want one reservation", len(repo.createTaskEnvironmentCalls))
+	}
+}
+
+func TestLaunchPreparedSession_DockerLaunchFailureRemovesReservationAndRuntimeSecrets(t *testing.T) {
+	repo := newMockRepository()
+	now := time.Now().UTC()
+	repo.sessions["session-docker"] = &models.TaskSession{
+		ID: "session-docker", TaskID: "task-docker", AgentProfileID: "profile-123",
+		State: models.TaskSessionStateCreated, StartedAt: now, UpdatedAt: now,
+	}
+	repo.executors[models.ExecutorIDLocalDocker] = &models.Executor{
+		ID: models.ExecutorIDLocalDocker, Type: models.ExecutorTypeLocalDocker, Status: models.ExecutorStatusActive,
+	}
+	launchErr := errors.New("Docker runtime failed")
+	var deletedEnvironmentID string
+	manager := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return nil, launchErr
+		},
+		deleteRuntimeSecretsFunc: func(_ context.Context, environmentID, _, _ string) error {
+			deletedEnvironmentID = environmentID
+			return nil
+		},
+	}
+	executor := newTestExecutor(t, manager, repo)
+
+	_, err := executor.LaunchPreparedSession(context.Background(), &v1.Task{
+		ID: "task-docker", WorkspaceID: "workspace-123",
+	}, "session-docker", LaunchOptions{
+		AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDLocalDocker,
+	})
+	if !errors.Is(err, launchErr) {
+		t.Fatalf("LaunchPreparedSession error = %v, want launch failure", err)
+	}
+	if deletedEnvironmentID == "" {
+		t.Fatal("reserved environment runtime secrets were not deleted")
+	}
+	if environment, getErr := repo.GetTaskEnvironmentByTaskID(context.Background(), "task-docker"); getErr != nil || environment != nil {
+		t.Fatalf("environment after failed launch = %#v, %v; want removed", environment, getErr)
+	}
+}
+
 func TestLaunchPreparedSession_AbortsWhenStartingPersistenceFails(t *testing.T) {
 	repo := newMockRepository()
 	session := &models.TaskSession{

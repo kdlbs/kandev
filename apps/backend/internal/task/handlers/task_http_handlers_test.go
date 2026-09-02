@@ -1924,7 +1924,13 @@ func TestCommitFreshBranchRollsBackTaskWhenPersistedRepositoriesCannotBeLoaded(t
 // canonicalTempDir returns t.TempDir() with symlinks resolved, matching how production canonicalizes local paths.
 func canonicalTempDir(t *testing.T) string {
 	t.Helper()
-	resolved, err := filepath.EvalSymlinks(t.TempDir())
+	tempDir := t.TempDir()
+	// Go 1.26 creates numbered t.TempDir children with 0777 before umask,
+	// while repository initialization correctly rejects shared-writable roots.
+	if err := os.Chmod(tempDir, 0o700); err != nil {
+		t.Fatalf("Chmod temp dir: %v", err)
+	}
+	resolved, err := filepath.EvalSymlinks(tempDir)
 	if err != nil {
 		t.Fatalf("EvalSymlinks: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -207,6 +208,88 @@ func TestConnectedClientSubscriptionRoundTrips(t *testing.T) {
 	if resp := cc.request(t, "6", ws.ActionRunUnsubscribe, RunSubscribeRequest{RunID: "run-1"}); resp.Type != ws.MessageTypeResponse {
 		t.Fatalf("run.unsubscribe response = %+v", resp)
 	}
+}
+
+func TestReadPumpPreservesTaskSubscriptionMutationOrder(t *testing.T) {
+	cc := newConnectedClient(t)
+	subscribeEntered := make(chan struct{})
+	releaseSubscribe := make(chan struct{})
+	var enteredOnce sync.Once
+	cc.hub.setAuthPolicy(AuthPolicy{Subscriptions: SubscriptionAccessPolicy{
+		Task: func(context.Context, string) error {
+			enteredOnce.Do(func() { close(subscribeEntered) })
+			<-releaseSubscribe
+			return nil
+		},
+	}})
+
+	writeRequest := func(id, action string) {
+		t.Helper()
+		raw, err := json.Marshal(ws.Message{
+			ID: id, Type: ws.MessageTypeRequest, Action: action,
+			Payload: mustJSON(t, SubscribeRequest{TaskID: "task-ordered"}),
+		})
+		if err != nil {
+			t.Fatalf("marshal %s: %v", action, err)
+		}
+		if err := cc.browser.WriteMessage(gorillaws.TextMessage, raw); err != nil {
+			t.Fatalf("write %s: %v", action, err)
+		}
+	}
+
+	writeRequest("subscribe", ws.ActionTaskSubscribe)
+	select {
+	case <-subscribeEntered:
+	case <-time.After(wsTestTimeout):
+		t.Fatal("task subscribe did not reach authorization")
+	}
+	writeRequest("unsubscribe", ws.ActionTaskUnsubscribe)
+
+	responses := make(chan ws.Message, 2)
+	readErr := make(chan error, 1)
+	go func() {
+		if err := cc.browser.SetReadDeadline(time.Now().Add(wsTestTimeout)); err != nil {
+			readErr <- err
+			return
+		}
+		for range 2 {
+			_, data, err := cc.browser.ReadMessage()
+			if err != nil {
+				readErr <- err
+				return
+			}
+			var response ws.Message
+			if err := json.Unmarshal(data, &response); err != nil {
+				readErr <- err
+				return
+			}
+			responses <- response
+		}
+	}()
+
+	select {
+	case response := <-responses:
+		close(releaseSubscribe)
+		t.Fatalf("received %s before the earlier subscribe completed", response.ID)
+	case err := <-readErr:
+		close(releaseSubscribe)
+		t.Fatalf("read response before release: %v", err)
+	case <-time.After(100 * time.Millisecond):
+		close(releaseSubscribe)
+	}
+
+	seen := map[string]bool{}
+	for len(seen) < 2 {
+		select {
+		case response := <-responses:
+			seen[response.ID] = true
+		case err := <-readErr:
+			t.Fatalf("read ordered responses: %v", err)
+		case <-time.After(wsTestTimeout):
+			t.Fatal("timed out waiting for ordered subscription responses")
+		}
+	}
+	cc.assertTaskSubscribed(t, "task-ordered", false)
 }
 
 // A browser disconnect must unwind both pumps and drop the client from the hub,

@@ -41,6 +41,11 @@ import (
 	"go.uber.org/zap"
 )
 
+// ErrProcessNotFound means the runner no longer owns the requested process.
+// Callers holding a PipedProcess can still use WaitCleanup to distinguish an
+// already-reaped exit from lost cleanup ownership.
+var ErrProcessNotFound = errors.New("process not found")
+
 // StartProcessRequest contains parameters for starting a new background process.
 type StartProcessRequest struct {
 	SessionID      string            `json:"session_id"`                 // Required: Agent session owning this process
@@ -435,7 +440,7 @@ func (r *ProcessRunner) startAndActivate(
 func (r *ProcessRunner) Stop(ctx context.Context, req StopProcessRequest) error {
 	proc, ok := r.get(req.ProcessID)
 	if !ok {
-		return fmt.Errorf("process not found: %s", req.ProcessID)
+		return fmt.Errorf("%w: %s", ErrProcessNotFound, req.ProcessID)
 	}
 	return r.stopProcess(ctx, proc)
 }

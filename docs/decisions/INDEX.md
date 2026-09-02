@@ -151,6 +151,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-05-server-owned-quick-terminal-descriptors | [Server-Owned Quick Terminal Descriptors](2026-08-05-server-owned-quick-terminal-descriptors.md) | accepted | backend, frontend, protocol, security | 2026-08-05 |
 | 2026-08-05-nested-submodules-as-repository-scopes | [Model Nested Submodules as Repository Scopes](2026-08-05-nested-submodules-as-repository-scopes.md) | accepted | backend, frontend, protocol | 2026-08-05 |
 | 2026-08-05-homebrew-remote-helper-audit | [Preserve Remote Helpers in Homebrew Installs](2026-08-05-homebrew-remote-helper-audit.md) | accepted | infra, workflow | 2026-08-05 |
+| 2026-08-05-task-scoped-lsp-ownership | [Own Language Servers by Task and Language](2026-08-05-task-scoped-lsp-ownership.md) | accepted | backend, frontend, protocol, security | 2026-08-05 |
 | 2026-08-07-model-aware-provider-capability-resolution | [Model-aware provider capability resolution](2026-08-07-model-aware-provider-capability-resolution.md) | accepted | backend, frontend, protocol | 2026-08-07 |
 | 2026-08-07-claude-allowlist-label-bridge | [Use the Claude Allowlist as a Trusted Preview Gate](2026-08-07-claude-allowlist-label-bridge.md) | accepted (amended by 2026-08-24-unified-fork-approval-label) | infra, workflow, security | 2026-08-07 |
 | 2026-08-08-task-autopilot-contract | [Make Task Autopilot a Creation-Time Runtime Contract](2026-08-08-task-autopilot-contract.md) | accepted | backend, agentctl, frontend, protocol, workflow | 2026-08-08 |

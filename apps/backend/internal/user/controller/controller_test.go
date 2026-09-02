@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -100,6 +101,26 @@ func TestUpdateUserSettingsMapsLspStatusLocation(t *testing.T) {
 	}
 	if response.Settings.LspStatusLocation != want {
 		t.Fatalf("LspStatusLocation = %q, want %q", response.Settings.LspStatusLocation, want)
+	}
+}
+
+func TestUpdateUserSettingsMapsLspStatusHiddenLanguages(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	repo := &settingsRepository{settings: &models.UserSettings{}}
+	controller := NewController(service.NewService(repo, nil, log))
+	hidden := []string{"go", "kotlin"}
+
+	response, err := controller.UpdateUserSettings(context.Background(), dto.UpdateUserSettingsRequest{
+		LspStatusHiddenLanguages: &hidden,
+	})
+	if err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+	if !slices.Equal(response.Settings.LspStatusHiddenLanguages, hidden) {
+		t.Fatalf("LspStatusHiddenLanguages = %v, want %v", response.Settings.LspStatusHiddenLanguages, hidden)
 	}
 }
 

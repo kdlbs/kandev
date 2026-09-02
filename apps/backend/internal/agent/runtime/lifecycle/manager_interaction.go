@@ -916,7 +916,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		zap.Bool("force", force),
 		zap.Stringer("runtime", execution.RuntimeName))
 
-	// Try to gracefully stop via agentctl first, then always close connections
+	// Try to gracefully stop via agentctl first. Task hosts retain their live
+	// control connection and ownership index until runtime teardown succeeds so
+	// cleanup can retry without losing the only handle to a process tree.
 	agentStopFailed := false
 	if execution.agentctl != nil {
 		if !force {
@@ -935,7 +937,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 				}
 			}
 		}
-		execution.agentctl.Close()
+		if !execution.IsTaskHost {
+			execution.agentctl.Close()
+		}
 	}
 
 	// Stop the agent execution via the runtime that created it. A failed stop
@@ -943,6 +947,14 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// an unobservable orphan process.
 	if err := m.stopAgentViaBackend(ctx, executionID, execution, reason, force, agentStopFailed); err != nil {
 		return fmt.Errorf("stop runtime for execution %q: %w", executionID, err)
+	}
+	if reason != StopReasonBackendShutdown {
+		if err := m.deleteExecutionRuntimeSecrets(ctx, execution); err != nil {
+			return fmt.Errorf("delete execution runtime secrets: %w", err)
+		}
+	}
+	if execution.IsTaskHost && execution.agentctl != nil {
+		execution.agentctl.Close()
 	}
 
 	// Update execution status and remove from tracking
@@ -952,18 +964,23 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		exec.FinishedAt = &now
 	})
 
-	// End session trace span
-	execution.EndSessionSpan()
+	if !execution.IsTaskHost {
+		// Task hosts have no session trace or session-facing lifecycle state.
+		execution.EndSessionSpan()
+	}
 
 	m.RemoveExecution(executionID)
-	m.clearRemoteStatus(execution.SessionID)
+	if !execution.IsTaskHost {
+		m.clearRemoteStatus(execution.SessionID)
+	}
 
 	m.logger.Info("agent stopped and removed from tracking",
 		zap.String("execution_id", executionID),
 		zap.String("task_id", execution.TaskID))
 
-	// Publish stopped event
-	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
+	if !execution.IsTaskHost {
+		m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
+	}
 
 	return nil
 }
@@ -2075,11 +2092,15 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 		InstanceID:           execution.ID,
 		TaskID:               execution.TaskID,
 		ContainerID:          execution.ContainerID,
+		ContainerIP:          execution.ContainerIP,
 		StandaloneInstanceID: execution.standaloneInstanceID,
 		StandalonePort:       execution.standalonePort,
 		Metadata:             execution.MetadataSnapshot(),
 		StopReason:           reason,
 		AgentStopFailed:      agentStopFailed,
+	}
+	if execution.agentctl != nil {
+		runtimeInstance.AuthToken = execution.agentctl.AuthToken()
 	}
 	if err := rt.StopInstance(ctx, runtimeInstance, force); err != nil {
 		// During shutdown the runtime instance may already be stopping or
@@ -2093,7 +2114,7 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 				zap.String("execution_id", executionID),
 				zap.Error(err))
 		}
-		return err
+		return fmt.Errorf("stop runtime instance: %w", err)
 	}
 	return nil
 }

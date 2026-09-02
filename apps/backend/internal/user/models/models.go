@@ -115,6 +115,7 @@ type UserSettings struct {
 	ReleaseNotesLastSeenVersion       string                            `json:"release_notes_last_seen_version"`
 	LspAutoStartLanguages             []string                          `json:"lsp_auto_start_languages"`
 	LspAutoInstallLanguages           []string                          `json:"lsp_auto_install_languages"`
+	LspStatusHiddenLanguages          []string                          `json:"lsp_status_hidden_languages"`
 	LspServerConfigs                  map[string]map[string]interface{} `json:"lsp_server_configs"`
 	LspStatusLocation                 string                            `json:"lsp_status_location"`
 	SavedLayouts                      []SavedLayout                     `json:"saved_layouts"`

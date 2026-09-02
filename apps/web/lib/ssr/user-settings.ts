@@ -52,6 +52,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     releaseNotesLastSeenVersion: null,
     lspAutoStartLanguages: [],
     lspAutoInstallLanguages: [],
+    lspStatusHiddenLanguages: [],
     lspServerConfigs: {},
     lspStatusLocation: "toolbar",
     savedLayouts: [],
@@ -353,6 +354,7 @@ export function buildLspFields(
   return {
     lspAutoStartLanguages: s?.lsp_auto_start_languages ?? current.lspAutoStartLanguages,
     lspAutoInstallLanguages: s?.lsp_auto_install_languages ?? current.lspAutoInstallLanguages,
+    lspStatusHiddenLanguages: s?.lsp_status_hidden_languages ?? current.lspStatusHiddenLanguages,
     lspServerConfigs: s?.lsp_server_configs ?? current.lspServerConfigs,
     lspStatusLocation:
       s?.lsp_status_location === undefined

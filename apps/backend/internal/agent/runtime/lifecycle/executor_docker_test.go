@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -18,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 )
@@ -118,6 +120,29 @@ func TestDockerExecutor_RecoverInstances(t *testing.T) {
 	}
 }
 
+func TestDockerTaskHostWaitsForExistingTaskContainer(t *testing.T) {
+	dockerDaemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead && r.URL.Path == "/_ping" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		t.Fatalf("task host attempted Docker provisioning: %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(dockerDaemon.Close)
+
+	dockerExec := NewDockerExecutor(config.DockerConfig{
+		Host: "tcp://" + strings.TrimPrefix(dockerDaemon.URL, "http://"),
+	}, "", newTestDockerLogger())
+	t.Cleanup(func() { require.NoError(t, dockerExec.Close()) })
+
+	_, err := dockerExec.CreateInstance(context.Background(), &ExecutorCreateRequest{
+		InstanceID: "task-host-env-1", TaskEnvironmentID: "env-1", IsTaskHost: true,
+	})
+	if !errors.Is(err, ErrSessionWorkspaceNotReady) {
+		t.Fatalf("CreateInstance error = %v, want workspace-not-ready", err)
+	}
+}
+
 func TestDockerExecutor_GetInteractiveRunner(t *testing.T) {
 	log := newTestDockerLogger()
 	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
@@ -134,6 +159,7 @@ func TestDockerStopInstancePreservesContainerOnPlainStop(t *testing.T) {
 		t.Fatal("plain stop should not initialize docker client")
 		return nil, nil
 	}
+	exec.rememberContainerAuth("container-1", "warm-token")
 
 	if err := exec.StopInstance(context.Background(), &ExecutorInstance{
 		InstanceID:  "inst-1",
@@ -141,6 +167,10 @@ func TestDockerStopInstancePreservesContainerOnPlainStop(t *testing.T) {
 		StopReason:  "stopped via API",
 	}, false); err != nil {
 		t.Fatalf("StopInstance: %v", err)
+	}
+	state := exec.containerAuthStates["container-1"]
+	if state == nil || state.authToken != "warm-token" {
+		t.Fatal("plain stop evicted auth state for preserved container")
 	}
 }
 
@@ -224,6 +254,115 @@ func TestRollbackLaunchExecutionForceKillsAndRemovesUnregisteredDockerContainer(
 	requireDockerRequest(t, got, http.MethodDelete, "/containers/failed-container")
 }
 
+func TestDockerTaskHostRollbackUsesEffectiveReconnectCredential(t *testing.T) {
+	const (
+		authToken          = "unchanged-container-token"
+		taskHostPort       = 41001
+		taskHostInstanceID = "task-host-1"
+	)
+	authenticatedDelete := make(chan struct{}, 1)
+	controlServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer "+authToken {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/health":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/instances/"+taskHostInstanceID:
+			http.NotFound(w, r)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/instances":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = fmt.Fprintf(w, `{"id":%q,"port":%d}`, taskHostInstanceID, taskHostPort)
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/instances/"+taskHostInstanceID:
+			authenticatedDelete <- struct{}{}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(controlServer.Close)
+	controlHost, controlPortString, err := net.SplitHostPort(strings.TrimPrefix(controlServer.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	destructiveDockerRequest := make(chan string, 2)
+	dockerDaemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead && r.URL.Path == "/_ping" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/containers/container-1/json") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w,
+				`{"Id":"container-1","State":{"Status":"running"},`+
+					`"NetworkSettings":{"Ports":{"%d/tcp":[{"HostIp":%q,"HostPort":%q}],`+
+					`"%d/tcp":[{"HostIp":%q,"HostPort":%q}]},`+
+					`"Networks":{"bridge":{"IPAddress":"172.17.0.2"}}}}`,
+				AgentCtlPort,
+				controlHost,
+				controlPortString,
+				taskHostPort,
+				controlHost,
+				controlPortString,
+			)
+			return
+		}
+		if r.Method == http.MethodPost || r.Method == http.MethodDelete {
+			destructiveDockerRequest <- r.Method + " " + r.URL.Path
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(dockerDaemon.Close)
+	dockerExec := NewDockerExecutor(config.DockerConfig{
+		Host: "tcp://" + strings.TrimPrefix(dockerDaemon.URL, "http://"),
+	}, "", newTestDockerLogger())
+	t.Cleanup(func() { require.NoError(t, dockerExec.Close()) })
+
+	runtimeInstance, err := dockerExec.reconnectToContainer(context.Background(), dockerExec.Client(), &ExecutorCreateRequest{
+		InstanceID: taskHostInstanceID, PreviousExecutionID: taskHostInstanceID,
+		TaskID: "task-1", TaskEnvironmentID: "env-1", IsTaskHost: true, AuthToken: authToken,
+		Metadata: map[string]interface{}{MetadataKeyContainerID: "container-1"},
+	})
+	if err != nil {
+		t.Fatalf("reconnectToContainer: %v", err)
+	}
+	if !getMetadataBool(runtimeInstance.Metadata, "task_host") {
+		t.Fatal("reconnected task-host runtime lost its task-host ownership marker")
+	}
+	if runtimeInstance.ControlAuthToken != authToken {
+		t.Fatalf("ControlAuthToken = %q, want unchanged reconnect token", runtimeInstance.ControlAuthToken)
+	}
+
+	manager := &Manager{executionStore: NewExecutionStore(), logger: newTestLogger()}
+	execution := &AgentExecution{
+		ID: taskHostInstanceID, TaskID: "task-1", TaskEnvironmentID: "env-1",
+		RuntimeName: agentruntime.RuntimeDocker, IsTaskHost: true,
+	}
+	if err := manager.executionStore.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.rollbackTaskHostExecution(dockerExec, runtimeInstance, execution, "readiness failed"); err != nil {
+		t.Fatalf("rollbackTaskHostExecution: %v", err)
+	}
+	select {
+	case <-authenticatedDelete:
+	default:
+		t.Fatal("rollback did not authenticate task-host instance deletion")
+	}
+	if _, exists := manager.executionStore.Get(execution.ID); exists {
+		t.Fatal("successful rollback retained task-host execution")
+	}
+	select {
+	case request := <-destructiveDockerRequest:
+		t.Fatalf("task-host rollback mutated the shared container: %s", request)
+	default:
+	}
+}
+
 func TestDockerStopInstanceStopsAndRemovesContainerOnTaskArchive(t *testing.T) {
 	requests := make(chan string, 2)
 	dockerDaemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -240,6 +379,7 @@ func TestDockerStopInstanceStopsAndRemovesContainerOnTaskArchive(t *testing.T) {
 		Host: "tcp://" + strings.TrimPrefix(dockerDaemon.URL, "http://"),
 	}, "", newTestDockerLogger())
 	t.Cleanup(func() { require.NoError(t, dockerExec.Close()) })
+	dockerExec.rememberContainerAuth("archive-container", "archive-token")
 
 	require.NoError(t, dockerExec.StopInstance(context.Background(), &ExecutorInstance{
 		InstanceID:  "archive-instance",
@@ -250,6 +390,41 @@ func TestDockerStopInstanceStopsAndRemovesContainerOnTaskArchive(t *testing.T) {
 	got := []string{<-requests, <-requests}
 	requireDockerRequest(t, got, http.MethodPost, "/containers/archive-container/stop")
 	requireDockerRequest(t, got, http.MethodDelete, "/containers/archive-container")
+	if _, exists := dockerExec.containerAuthStates["archive-container"]; exists {
+		t.Fatal("removed container retained auth state")
+	}
+}
+
+func TestDockerStopInstanceRetainsAuthStateWhenContainerRemovalFails(t *testing.T) {
+	dockerDaemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead && r.URL.Path == "/_ping" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.Method == http.MethodDelete {
+			http.Error(w, "remove failed", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(dockerDaemon.Close)
+
+	dockerExec := NewDockerExecutor(config.DockerConfig{
+		Host: "tcp://" + strings.TrimPrefix(dockerDaemon.URL, "http://"),
+	}, "", newTestDockerLogger())
+	t.Cleanup(func() { require.NoError(t, dockerExec.Close()) })
+	dockerExec.rememberContainerAuth("failed-container", "retained-token")
+
+	err := dockerExec.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID: "failed-instance", ContainerID: "failed-container", StopReason: StopReasonTaskArchived,
+	}, false)
+	if err == nil {
+		t.Fatal("container removal failure was ignored")
+	}
+	state := dockerExec.containerAuthStates["failed-container"]
+	if state == nil || state.authToken != "retained-token" {
+		t.Fatal("uncertain container removal discarded the only cached auth state")
+	}
 }
 
 func TestDockerCleanupContextIgnoresCanceledParentAfterAgentStopFailed(t *testing.T) {
@@ -416,9 +591,13 @@ func TestDockerExecutor_Client_ReturnsClientOnSuccess(t *testing.T) {
 func TestDockerExecutor_Close_BeforeInit(t *testing.T) {
 	log := newTestDockerLogger()
 	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
+	exec.rememberContainerAuth("container-1", "token-1")
 
 	if err := exec.Close(); err != nil {
 		t.Errorf("expected nil error, got: %v", err)
+	}
+	if len(exec.containerAuthStates) != 0 {
+		t.Fatalf("Close retained container auth state: %#v", exec.containerAuthStates)
 	}
 }
 
@@ -762,8 +941,11 @@ func TestBuildReconnectCreateInstanceRequestOmitsAutoApproveOverrideWhenUnset(t 
 }
 
 type recordingReconnectControl struct {
-	methods []string
-	created *agentctl.CreateInstanceRequest
+	methods   []string
+	created   *agentctl.CreateInstanceRequest
+	deleted   string
+	getErr    error
+	deleteErr error
 }
 
 func (c *recordingReconnectControl) GetInstance(
@@ -771,12 +953,16 @@ func (c *recordingReconnectControl) GetInstance(
 	_ string,
 ) (*agentctl.InstanceInfo, error) {
 	c.methods = append(c.methods, "GET")
+	if c.getErr != nil {
+		return nil, c.getErr
+	}
 	return &agentctl.InstanceInfo{ID: "instance-1", Port: 41001}, nil
 }
 
-func (c *recordingReconnectControl) DeleteInstance(_ context.Context, _ string) error {
+func (c *recordingReconnectControl) DeleteInstance(_ context.Context, instanceID string) error {
 	c.methods = append(c.methods, "DELETE")
-	return nil
+	c.deleted = instanceID
+	return c.deleteErr
 }
 
 func (c *recordingReconnectControl) CreateInstance(
@@ -786,6 +972,23 @@ func (c *recordingReconnectControl) CreateInstance(
 	c.methods = append(c.methods, "POST")
 	c.created = req
 	return &agentctl.CreateInstanceResponse{ID: "instance-1", Port: 41002}, nil
+}
+
+func TestDeleteDockerTaskHostInstanceDeletesDedicatedAgentctlInstance(t *testing.T) {
+	control := &recordingReconnectControl{}
+
+	err := deleteDockerTaskHostInstance(context.Background(), control, "task-host-1")
+	if err != nil {
+		t.Fatalf("deleteDockerTaskHostInstance: %v", err)
+	}
+	if control.deleted != "task-host-1" {
+		t.Fatalf("deleted instance = %q, want task-host-1", control.deleted)
+	}
+
+	control.deleteErr = agentctl.ErrInstanceNotFound
+	if err := deleteDockerTaskHostInstance(context.Background(), control, "task-host-1"); err != nil {
+		t.Fatalf("idempotent delete returned: %v", err)
+	}
 }
 
 func TestDockerManagedBrokerReconnectRecreatesInstanceWithFreshLease(t *testing.T) {
@@ -881,6 +1084,26 @@ func TestDockerExplicitTokenReconnectDoesNotReplaceInstance(t *testing.T) {
 	}
 	if got, want := strings.Join(control.methods, ","), "GET"; got != want {
 		t.Fatalf("control methods = %s, want %s", got, want)
+	}
+}
+
+func TestDockerExistingOnlyReconnectNeverCreatesMissingTaskHostInstance(t *testing.T) {
+	control := &recordingReconnectControl{getErr: agentctl.ErrInstanceNotFound}
+	req := &ExecutorCreateRequest{
+		InstanceID: "task-host-1", PreviousExecutionID: "task-host-1",
+		IsTaskHost: true, RequireExistingInstance: true,
+	}
+	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+
+	_, _, err := dockerExec.findExistingInstance(
+		context.Background(), stubHostPortLookup{host: "127.0.0.1", port: 1}, control,
+		req, "container-1", "172.17.0.2", "task-host-1", "",
+	)
+	if !errors.Is(err, errTaskHostRuntimeNotFound) {
+		t.Fatalf("existing-only error = %v, want task-host absence", err)
+	}
+	if control.created != nil || strings.Join(control.methods, ",") != "GET" {
+		t.Fatalf("existing-only methods=%v created=%#v", control.methods, control.created)
 	}
 }
 

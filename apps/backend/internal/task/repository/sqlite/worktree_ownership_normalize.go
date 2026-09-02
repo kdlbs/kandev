@@ -45,7 +45,7 @@ type legacyEnv struct {
 	controlPort                                                                     int
 	status, worktreeID, worktreePath, worktreeBranch, workspacePath                 string
 	containerID, containerBootstrapNonceSecretID, containerControlAuthTokenSecretID string
-	sandboxID, taskDirName                                                          string
+	sandboxID, authSecretID, bootstrapSecretID, taskDirName                         string
 	createdAt, updatedAt                                                            time.Time
 }
 
@@ -98,6 +98,8 @@ func (c *worktreeCutover) loadLegacyEnvs(tx *sqlx.Tx, columns map[string]bool) e
 			executor_profile_id, control_port, status,
 			%s, %s, %s, COALESCE(workspace_path, ''),
 			COALESCE(container_id, ''), %s, %s, COALESCE(sandbox_id, ''),
+			COALESCE(agentctl_auth_secret_id, ''),
+			COALESCE(agentctl_bootstrap_secret_id, ''),
 			COALESCE(task_dir_name, ''), created_at, updated_at
 		FROM task_environments`,
 		legacyEnvColumnExpr(columns, "repository_id"),
@@ -116,7 +118,8 @@ func (c *worktreeCutover) loadLegacyEnvs(tx *sqlx.Tx, columns map[string]bool) e
 			&env.executorID, &env.executorProfileID, &env.controlPort, &env.status,
 			&env.worktreeID, &env.worktreePath, &env.worktreeBranch, &env.workspacePath,
 			&env.containerID, &env.containerBootstrapNonceSecretID, &env.containerControlAuthTokenSecretID,
-			&env.sandboxID, &env.taskDirName, &env.createdAt, &env.updatedAt); err != nil {
+			&env.sandboxID, &env.authSecretID, &env.bootstrapSecretID,
+			&env.taskDirName, &env.createdAt, &env.updatedAt); err != nil {
 			return fmt.Errorf("cutover: scan legacy environment: %w", err)
 		}
 		c.envs[env.id] = env

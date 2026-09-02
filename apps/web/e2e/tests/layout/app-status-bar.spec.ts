@@ -155,6 +155,18 @@ test.describe("App status bar", () => {
     await expect(testPage.getByTestId("app-status-drawer")).toBeVisible();
   });
 
+  test("keeps the status drawer reachable on a coarse-pointer tablet outside tasks", async ({
+    tabletTestPage,
+  }) => {
+    await tabletTestPage.goto("/stats");
+
+    await expect(tabletTestPage.getByTestId("app-status-bar")).toHaveCount(0);
+    const trigger = tabletTestPage.getByTestId("app-status-drawer-trigger");
+    await expect(trigger).toBeVisible();
+    await trigger.click();
+    await expect(tabletTestPage.getByTestId("app-status-drawer")).toBeVisible();
+  });
+
   test("persists a modifier-mouse move across the spacer", async ({ testPage }) => {
     await testPage.goto("/");
     await setConnectionIssueSeverity(testPage, "unstable");

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -721,6 +722,30 @@ func TestMarshalUserSettingsLspStatusLocation(t *testing.T) {
 	}
 	if got := payload["lsp_status_location"]; got != models.LspStatusLocationStatusBar {
 		t.Fatalf("lsp_status_location = %#v, want status_bar", got)
+	}
+}
+
+func TestUserSettingsLspStatusHiddenLanguagesDefaultsAndRoundTrips(t *testing.T) {
+	defaults, err := scanUserSettings(settingsScanner{raw: `{}`}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan defaults: %v", err)
+	}
+	if defaults.LspStatusHiddenLanguages == nil || len(defaults.LspStatusHiddenLanguages) != 0 {
+		t.Fatalf("default hidden languages = %#v, want non-nil empty list", defaults.LspStatusHiddenLanguages)
+	}
+
+	raw, err := marshalUserSettingsPayload(&models.UserSettings{
+		LspStatusHiddenLanguages: []string{"go", "kotlin"},
+	})
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	loaded, err := scanUserSettings(settingsScanner{raw: string(raw)}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan saved settings: %v", err)
+	}
+	if !slices.Equal(loaded.LspStatusHiddenLanguages, []string{"go", "kotlin"}) {
+		t.Fatalf("hidden languages = %v, want [go kotlin]", loaded.LspStatusHiddenLanguages)
 	}
 }
 

@@ -80,6 +80,11 @@ worktree creation serialize on the task row and refuse creation while that
 prepared lifecycle barrier is active. The barrier transaction commits before
 the cleanup worker takes repository or filesystem locks, preserving the existing
 Git lock order and avoiding a database/Git lock inversion.
+If inventory capture fails after reservation, the service durably cancels that
+prepared job before returning the failure; cascade coordination also includes
+the currently failing reservation when it cancels the prepared range. These
+terminal transitions use a bounded context detached from the failed request so
+a cancelled client cannot strand the creation barrier.
 
 Additional sessions are attach-only consumers of this same ownership graph.
 Before their session row is committed, the launcher must bind the ready

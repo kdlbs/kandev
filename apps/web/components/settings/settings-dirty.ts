@@ -25,6 +25,8 @@ type EditorsDirtyState = {
   baselineLspAutoStart: readonly string[];
   lspAutoInstallLanguages: readonly string[];
   baselineLspAutoInstall: readonly string[];
+  lspStatusHiddenLanguages: readonly string[];
+  baselineLspStatusHiddenLanguages: readonly string[];
   lspStatusLocation: LspStatusLocation;
   baselineLspStatusLocation: LspStatusLocation;
   lspConfigStrings: Readonly<Record<string, string>>;
@@ -36,6 +38,7 @@ export function isEditorsSettingsDirty(state: EditorsDirtyState): boolean {
     state.defaultEditorId !== state.baselineDefaultId ||
     isSetMembershipDirty(state.lspAutoStartLanguages, state.baselineLspAutoStart) ||
     isSetMembershipDirty(state.lspAutoInstallLanguages, state.baselineLspAutoInstall) ||
+    isSetMembershipDirty(state.lspStatusHiddenLanguages, state.baselineLspStatusHiddenLanguages) ||
     state.lspStatusLocation !== state.baselineLspStatusLocation ||
     JSON.stringify(state.lspConfigStrings) !== JSON.stringify(state.baselineLspConfigStrings)
   );

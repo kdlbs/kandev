@@ -278,6 +278,31 @@ func TestManagerStopAllAgentsPassesBackendShutdownReason(t *testing.T) {
 		t.Fatalf("StopInstance reason = %q, want %q", mock.stopReason, StopReasonBackendShutdown)
 	}
 }
+
+func TestManagerStopAllAgentsDetachesTaskHostWithoutStoppingRuntime(t *testing.T) {
+	log := newTestRegistryLogger()
+	execRegistry := NewExecutorRegistry(log)
+	mock := &mockStopTracker{name: "standalone"}
+	execRegistry.Register(mock)
+	mgr := NewManager(nil, &MockEventBus{}, execRegistry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+	host := &AgentExecution{
+		ID: "task-host-1", TaskID: "task-1", TaskEnvironmentID: "env-1",
+		RuntimeName: "standalone", IsTaskHost: true,
+	}
+	if err := mgr.executionStore.Add(host); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.StopAllAgents(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if mock.stopCalled {
+		t.Fatal("backend shutdown stopped task-host runtime instead of preserving it for reattachment")
+	}
+	if _, exists := mgr.executionStore.Get(host.ID); exists {
+		t.Fatal("detached task host remains in backend memory")
+	}
+}
 func (m *mockStopTracker) RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error) {
 	return nil, nil
 }

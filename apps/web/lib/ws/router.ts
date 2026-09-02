@@ -37,6 +37,7 @@ import { registerGitHubHandlers } from "@/lib/ws/handlers/github";
 import { registerGitLabHandlers } from "@/lib/ws/handlers/gitlab";
 import { registerOfficeHandlers } from "@/lib/ws/handlers/office";
 import { registerRunHandlers } from "@/lib/ws/handlers/run";
+import { registerLspHandlers } from "@/lib/ws/handlers/lsp";
 
 export function registerWsHandlers(store: StoreApi<AppState>) {
   const messages = createMessagesHandlerRegistration(store);
@@ -78,6 +79,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerGitLabHandlers(store),
     ...registerOfficeHandlers(store),
     ...registerRunHandlers(),
+    ...registerLspHandlers(store),
   };
   return { handlers, dispose: messages.dispose };
 }

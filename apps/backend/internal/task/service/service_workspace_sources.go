@@ -597,6 +597,12 @@ func (s *Service) commitWorkspaceSourceBatch(ctx context.Context, task *models.T
 	}
 	succeeded = true
 	result.Changed = true
+	if s.taskLSP != nil {
+		if err := s.taskLSP.WorkspaceSourcesChanged(context.WithoutCancel(ctx), task.ID); err != nil {
+			s.logger.Warn("failed to refresh task language-server workspace roots",
+				zap.String("task_id", task.ID), zap.Error(err))
+		}
+	}
 	return result, nil
 }
 

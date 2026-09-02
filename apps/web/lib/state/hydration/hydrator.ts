@@ -409,6 +409,28 @@ function hydrateSession(
   if (state.activeModel) deepMerge(draft.activeModel, state.activeModel);
 }
 
+/** Merge task LSP state without allowing a late REST/SSR snapshot to rewind live events. */
+function hydrateTaskLsp(draft: Draft<AppState>, state: HydrationState): void {
+  if (!state.taskLsp) return;
+  for (const [taskId, incomingTask] of Object.entries(state.taskLsp.byTaskId)) {
+    const currentTask = draft.taskLsp.byTaskId[taskId];
+    if (!currentTask) {
+      draft.taskLsp.byTaskId[taskId] = incomingTask;
+      continue;
+    }
+    for (const [language, incoming] of Object.entries(incomingTask.languages)) {
+      const current = currentTask.languages[language];
+      if (!current || incoming.revision >= current.revision) {
+        currentTask.languages[language] = incoming;
+      }
+    }
+    currentTask.capacity = incomingTask.capacity;
+    currentTask.loaded ||= incomingTask.loaded;
+    currentTask.loading = incomingTask.loading;
+    currentTask.error = incomingTask.error;
+  }
+}
+
 /** Hydrate session runtime slices (volatile state). */
 function hydrateSessionRuntime(
   draft: Draft<AppState>,
@@ -585,6 +607,7 @@ export function hydrateState(
   hydrateKanbanAndWorkspace(draft, state);
   hydrateSettings(draft, state);
   hydrateSession(draft, state, activeSessionId, forceMergeSessionId);
+  hydrateTaskLsp(draft, state);
 
   if (!skipSessionRuntime) {
     hydrateSessionRuntime(draft, state, activeSessionId, forceMergeSessionId);

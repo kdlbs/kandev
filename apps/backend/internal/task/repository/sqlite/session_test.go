@@ -2598,6 +2598,27 @@ func TestTaskEnvironmentSharingGuardsSeeOnlyActiveForeignSessions(t *testing.T) 
 	if borrowerID != "" {
 		t.Errorf("borrower = %q, want an empty string when nothing matches", borrowerID)
 	}
+
+	// Task-scoped services can outlive terminal sessions. The live variants
+	// therefore retain a non-archived COMPLETED borrower and drop it only once
+	// its task is archived.
+	liveBorrowerID, err := repo.FindLiveTaskSessionTaskIDByTaskEnvironmentExcludingTask(
+		ctx, "env-batch-solo", "task-batch-1",
+	)
+	if err != nil || liveBorrowerID != "task-batch-3" {
+		t.Fatalf("terminal live borrower = %q, err=%v, want task-batch-3", liveBorrowerID, err)
+	}
+	liveTaskIDs, err := repo.ListLiveTaskSessionTaskIDsByTaskEnvironment(ctx, "env-batch-solo")
+	if err != nil || len(liveTaskIDs) != 1 || liveTaskIDs[0] != "task-batch-3" {
+		t.Fatalf("terminal live borrowers = %v, err=%v, want task-batch-3", liveTaskIDs, err)
+	}
+	if err := repo.ArchiveTask(ctx, "task-batch-3"); err != nil {
+		t.Fatal(err)
+	}
+	liveTaskIDs, err = repo.ListLiveTaskSessionTaskIDsByTaskEnvironment(ctx, "env-batch-solo")
+	if err != nil || len(liveTaskIDs) != 0 {
+		t.Fatalf("archived live borrowers = %v, err=%v, want none", liveTaskIDs, err)
+	}
 }
 
 func TestGetTaskSessionByTaskIDReturnsNewestWhileActiveVariantFiltersState(t *testing.T) {

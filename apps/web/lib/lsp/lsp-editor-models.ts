@@ -13,7 +13,7 @@ export function connectionDocumentUri(
   model: monacoEditor.ITextModel,
   connection: ManagedLspConnection,
 ): string | null {
-  const uri = documentUriForModel(model.uri.toString(), connection.sessionId);
+  const uri = connectionSessionDocumentUri(model.uri.toString(), connection);
   if (!uri || !connection.workspaceUri) return null;
   return resolveFileUriInWorkspace(uri, connection.workspaceUri, connection.repositorySubpaths)
     ? uri
@@ -43,8 +43,19 @@ export function connectionModelMatchesUri(
   documentUri: string,
   connection: ManagedLspConnection,
 ): boolean {
-  const modelDocumentUri = documentUriForModel(model.uri.toString(), connection.sessionId);
+  const modelDocumentUri = connectionSessionDocumentUri(model.uri.toString(), connection);
   return modelDocumentUri !== null && fileUrisEqual(modelDocumentUri, documentUri);
+}
+
+function connectionSessionDocumentUri(
+  modelUri: string,
+  connection: ManagedLspConnection,
+): string | null {
+  for (const sessionId of connection.sessionRefCounts.keys()) {
+    const uri = documentUriForModel(modelUri, sessionId);
+    if (uri) return uri;
+  }
+  return documentUriForModel(modelUri, connection.sessionId);
 }
 
 export function diagnosticMarkers(params: PublishDiagnosticsParams): monacoEditor.IMarkerData[] {

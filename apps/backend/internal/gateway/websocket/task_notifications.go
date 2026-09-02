@@ -42,6 +42,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.AgentProfileDeleted, ws.ActionAgentProfileDeleted)
 	b.subscribe(eventBus, events.TaskCreated, ws.ActionTaskCreated)
 	b.subscribe(eventBus, events.TaskUpdated, ws.ActionTaskUpdated)
+	b.subscribe(eventBus, events.TaskLSPStateChanged, ws.ActionTaskLSPChanged)
 	b.subscribe(eventBus, events.SessionWorkspaceSourcesUpdated, ws.ActionSessionWorkspaceSourcesUpdated)
 	b.subscribe(eventBus, events.TaskDeleted, ws.ActionTaskDeleted)
 	b.subscribeLifecycleStateEvents(eventBus)
@@ -262,6 +263,11 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 		// the owning workspace's user when auth is enabled.
 		b.hub.BroadcastToWorkspace(workspaceID, msg)
 		return nil
+	case ws.ActionTaskLSPChanged:
+		if taskID := extractTaskID(data); taskID != "" {
+			b.hub.BroadcastToTask(taskID, msg)
+		}
+		return nil
 	case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated, ws.ActionSessionMessageDeleted:
 		if sessionID != "" {
 			b.hub.BroadcastToSession(sessionID, msg)
@@ -311,6 +317,16 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 	// environments, agent profiles — instance-wide resources) stay global.
 	b.hub.BroadcastToWorkspace(workspaceID, msg)
 	return nil
+}
+
+func extractTaskID(data interface{}) string {
+	if id := extractStringField(data, "task_id"); id != "" {
+		return id
+	}
+	if provider, ok := data.(interface{ GetTaskID() string }); ok {
+		return provider.GetTaskID()
+	}
+	return ""
 }
 
 // extractWorkspaceID pulls a workspace ID from event payloads (map- or

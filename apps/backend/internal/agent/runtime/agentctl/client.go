@@ -32,6 +32,7 @@ type Client struct {
 	executionID           string
 	sessionID             string
 	authToken             string // shared secret for Bearer auth
+	authTransport         *authTransport
 
 	// Optional trace context for session-scoped spans in background goroutines.
 	// When set, stream read loops use this as parent context for tracing instead of context.Background().
@@ -179,11 +180,13 @@ func NewClient(host string, port int, log *logger.Logger, opts ...ClientOption) 
 	for _, opt := range opts {
 		opt(c)
 	}
-	// Install auth transport after options are applied so WithAuthToken takes effect.
-	if c.authToken != "" {
-		c.httpClient.Transport = &authTransport{token: c.authToken, base: c.httpClient.Transport}
-		c.longRunningHTTPClient.Transport = &authTransport{token: c.authToken, base: c.longRunningHTTPClient.Transport}
-	}
+	// Keep one mutable transport shared by both HTTP clients. Docker agentctl
+	// handshakes can rotate the task-environment credential while sibling
+	// session/task-host clients remain alive; replacing http.Client.Transport
+	// concurrently is unsafe, so SetAuthToken updates this stable wrapper.
+	c.authTransport = &authTransport{token: c.authToken}
+	c.httpClient.Transport = c.authTransport
+	c.longRunningHTTPClient.Transport = c.authTransport
 	// Stamp every outgoing request with the execution/instance ID so the
 	// agentctl-server's middleware can reject stale clients whose port
 	// was recycled to a new instance. The header is informational —
@@ -197,18 +200,36 @@ func NewClient(host string, port int, log *logger.Logger, opts ...ClientOption) 
 
 // authTransport is an http.RoundTripper that injects an Authorization header.
 type authTransport struct {
+	mu    sync.RWMutex
 	token string
 	base  http.RoundTripper
 }
 
 func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	r := req.Clone(req.Context())
-	r.Header.Set("Authorization", "Bearer "+t.token)
+	t.mu.RLock()
+	token := t.token
+	t.mu.RUnlock()
+	if token != "" {
+		r.Header.Set("Authorization", "Bearer "+token)
+	}
 	base := t.base
 	if base == nil {
 		base = http.DefaultTransport
 	}
 	return base.RoundTrip(r)
+}
+
+func (t *authTransport) setToken(token string) {
+	t.mu.Lock()
+	t.token = token
+	t.mu.Unlock()
+}
+
+func (t *authTransport) tokenValue() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.token
 }
 
 // instanceIDTransport is an http.RoundTripper that injects the
@@ -231,15 +252,19 @@ func (t *instanceIDTransport) RoundTrip(req *http.Request) (*http.Response, erro
 
 // wsAuthHeaders returns HTTP headers for WebSocket dial calls.
 func (c *Client) wsAuthHeaders() http.Header {
-	if c.authToken == "" && c.executionID == "" {
+	authToken := c.currentAuthToken()
+	c.mu.RLock()
+	executionID := c.executionID
+	c.mu.RUnlock()
+	if authToken == "" && executionID == "" {
 		return nil
 	}
 	h := http.Header{}
-	if c.authToken != "" {
-		h.Set("Authorization", "Bearer "+c.authToken)
+	if authToken != "" {
+		h.Set("Authorization", "Bearer "+authToken)
 	}
-	if c.executionID != "" {
-		h.Set("X-Instance-ID", c.executionID)
+	if executionID != "" {
+		h.Set("X-Instance-ID", executionID)
 	}
 	return h
 }
@@ -750,7 +775,32 @@ func (c *Client) BaseURL() string {
 // AuthToken returns the Bearer token used for authenticating requests to agentctl.
 // Returns empty string if no token is configured.
 func (c *Client) AuthToken() string {
-	return c.authToken
+	return c.currentAuthToken()
+}
+
+func (c *Client) currentAuthToken() string {
+	c.mu.RLock()
+	transport := c.authTransport
+	fallback := c.authToken
+	c.mu.RUnlock()
+	if transport != nil {
+		return transport.tokenValue()
+	}
+	return fallback
+}
+
+// SetAuthToken atomically adopts a rotated task-environment credential for
+// future HTTP and WebSocket requests without replacing transports in flight.
+func (c *Client) SetAuthToken(token string) {
+	c.mu.Lock()
+	transport := c.authTransport
+	if transport == nil {
+		c.authToken = token
+	}
+	c.mu.Unlock()
+	if transport != nil {
+		transport.setToken(token)
+	}
 }
 
 // Host returns the host portion (without port) of the agentctl client URL.

@@ -1,4 +1,7 @@
 {
+  "lspStatusVisibilityDescription": "Escolha as linguagens apresentadas no estado da tarefa. Ocultar uma linguagem não inicia nem para o respetivo servidor, não altera a política da tarefa e não remove o atalho do editor.",
+  "showInTaskStatus": "Mostrar no estado da tarefa",
+  "showLanguageInTaskStatus": "Mostrar {{language}} no estado da tarefa",
   "aSecretNameAndValueAreRequired": "São obrigatórios um nome e um valor para o segredo.",
   "aSecretNameIsRequired": "É obrigatório um nome para o segredo.",
   "aboutAffectedKandevMcpTools": "Sobre as ferramentas MCP do Kandev afetadas",

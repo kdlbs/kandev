@@ -160,6 +160,42 @@ func TestWorkspaceScopingTasksAndWorkflows(t *testing.T) {
 	}
 }
 
+func TestTaskEnvironmentRuntimeAccessRejectsForeignTaskOwner(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedScopedWorkspaces(t, repo)
+	if err := repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
+		ID: "env-b", TaskID: "task-b", ExecutorType: string(models.ExecutorTypeLocalDocker),
+		ContainerID: "container-b", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("create task environment: %v", err)
+	}
+
+	checks := map[string]func(context.Context) error{
+		"environment": func(ctx context.Context) error {
+			_, err := svc.GetTaskEnvironmentByTaskID(ctx, "task-b")
+			return err
+		},
+		"container live status": func(ctx context.Context) error {
+			_, err := svc.GetTaskEnvironmentLiveStatus(ctx, "task-b")
+			return err
+		},
+		"ssh live status": func(ctx context.Context) error {
+			_, err := svc.GetSSHLiveStatus(ctx, "task-b")
+			return err
+		},
+		"reset": func(ctx context.Context) error {
+			return svc.ResetTaskEnvironment(ctx, "task-b", ResetOptions{})
+		},
+	}
+	for name, check := range checks {
+		t.Run(name, func(t *testing.T) {
+			if err := check(ctxAs("user-a")); !errors.Is(err, repoerrors.ErrTaskNotFound) {
+				t.Fatalf("foreign runtime access error = %v, want ErrTaskNotFound", err)
+			}
+		})
+	}
+}
+
 func TestCreateWorkspaceStampsOwner(t *testing.T) {
 	svc, _, _ := createTestService(t)
 

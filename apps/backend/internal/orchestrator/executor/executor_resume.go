@@ -795,6 +795,14 @@ func (e *Executor) resumeSession(
 		}
 	}
 
+	// Resume can be the first runtime launch for a task after a backend restart
+	// or a failed initial launch. Keep environment discovery, Docker reservation,
+	// lifecycle launch, and durable finalization in the same task-scoped critical
+	// section so sibling sessions cannot create duplicate task runtimes.
+	taskEnvironmentLock := e.taskEnvLock(task.ID)
+	taskEnvironmentLock.Lock()
+	defer taskEnvironmentLock.Unlock()
+
 	resumeStatePersisted := false
 	var beforeCredentialLease func() error
 	if startAgent {
@@ -840,37 +848,9 @@ func (e *Executor) resumeSession(
 
 	req.Env = e.applyPreferredShellEnv(ctx, req.ExecutorType, req.Env)
 
-	resp, err := e.agentManager.LaunchAgent(ctx, req)
-	if err != nil && isAgentAlreadyRunningError(err) {
-		// "already has an agent running" fires both for live executions (a concurrent
-		// resume raced us) and stale ones (agent never started or exited without
-		// cleanup). Probe liveness before deciding what to do — otherwise we'd kill a
-		// healthy agent mid-prompt. For terminal states the agent is dead by definition,
-		// so skip the probe and go straight to cleanup+retry — this avoids a silent
-		// regression to ErrExecutionAlreadyRunning if the preemptive cleanup above
-		// failed and agentctl still reports a stale "starting" status.
-		if !wasTerminalResume && e.agentManager.IsAgentRunningForSession(ctx, session.ID) {
-			e.logger.Info("resume race: agent already running for session, returning ErrExecutionAlreadyRunning",
-				zap.String("task_id", task.ID),
-				zap.String("session_id", session.ID))
-			if startAgent {
-				e.rollbackResumeStateAfterFailure(
-					ctx, task.ID, session.ID, resumeInitialState, err,
-					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
-				)
-			}
-			return nil, ErrExecutionAlreadyRunning
-		}
-		e.logger.Info("cleaning up stale execution and retrying launch",
-			zap.String("task_id", task.ID),
-			zap.String("session_id", session.ID))
-		if cleanupErr := e.agentManager.CleanupStaleExecutionBySessionID(ctx, session.ID); cleanupErr != nil {
-			e.logger.Warn("failed to clean up stale execution",
-				zap.String("session_id", session.ID),
-				zap.Error(cleanupErr))
-		}
-		resp, err = e.agentManager.LaunchAgent(ctx, req)
-	}
+	resp, existingEnv, reservedEnvironment, err := e.launchResumeRequest(
+		ctx, task.ID, session, req, execCfg, existingEnv, wasTerminalResume,
+	)
 	if err != nil {
 		if startAgent {
 			e.rollbackResumeStateAfterFailure(
@@ -878,25 +858,41 @@ func (e *Executor) resumeSession(
 				resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
 			)
 		}
-		e.logger.Error("failed to relaunch agent for session",
-			zap.String("task_id", task.ID),
-			zap.String("session_id", session.ID),
-			zap.Error(err))
+		if !errors.Is(err, ErrExecutionAlreadyRunning) {
+			e.logger.Error("failed to relaunch agent for session",
+				zap.String("task_id", task.ID),
+				zap.String("session_id", session.ID),
+				zap.Error(err))
+		}
 		return nil, err
 	}
 
 	if !startAgent {
 		if err := e.persistResumeState(ctx, task.ID, session, false); err != nil {
-			e.cleanupUnstartedExecutionAfterPersistError(ctx, session.ID, resp.AgentExecutionID, err)
+			if reservedEnvironment {
+				err = errors.Join(err, e.rollbackTaskEnvironmentReservation(
+					context.WithoutCancel(ctx), existingEnv, resp.AgentExecutionID,
+				))
+			} else {
+				e.cleanupUnstartedExecutionAfterPersistError(ctx, session.ID, resp.AgentExecutionID, err)
+			}
 			return nil, err
 		}
 	}
-	if err := e.persistTaskEnvironment(ctx, task.ID, session, existingEnv, req, resp, execCfg); err != nil {
-		e.cleanupUnstartedExecutionAfterPersistError(ctx, session.ID, resp.AgentExecutionID, err)
-		e.markTaskEnvironmentMaterializationFailed(ctx, existingEnv, session.ID)
+	if err := e.persistTaskEnvironmentLocked(ctx, task.ID, session, existingEnv, req, resp, execCfg); err != nil {
+		if reservedEnvironment {
+			err = errors.Join(err, e.rollbackTaskEnvironmentReservation(
+				context.WithoutCancel(ctx), existingEnv, resp.AgentExecutionID,
+			))
+		} else {
+			e.cleanupUnstartedExecutionAfterPersistError(ctx, session.ID, resp.AgentExecutionID, err)
+			e.markTaskEnvironmentMaterializationFailed(ctx, existingEnv, session.ID)
+		}
 		if startAgent {
-			e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeInitialState, err,
-				resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot))
+			e.rollbackResumeStateAfterFailure(
+				ctx, task.ID, session.ID, resumeInitialState, err,
+				resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
+			)
 		}
 		return nil, err
 	}
@@ -926,6 +922,66 @@ func (e *Executor) resumeSession(
 	}
 
 	return execution, nil
+}
+
+func (e *Executor) launchResumeRequest(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+	execCfg executorConfig,
+	existingEnv *models.TaskEnvironment,
+	wasTerminalResume bool,
+) (*LaunchAgentResponse, *models.TaskEnvironment, bool, error) {
+	assignLaunchTaskEnvironmentID(session, existingEnv)
+	req.TaskEnvironmentID = session.TaskEnvironmentID
+
+	reservedEnvironment := false
+	resolvedExecutorType, _ := taskEnvironmentExecutorIdentity(req, execCfg)
+	if existingEnv == nil && resolvedExecutorType == string(models.ExecutorTypeLocalDocker) {
+		var err error
+		existingEnv, err = e.createTaskEnvironmentReservation(ctx, taskID, session, req, execCfg)
+		if err != nil {
+			return nil, existingEnv, false, err
+		}
+		reservedEnvironment = true
+	}
+
+	resp, err := e.agentManager.LaunchAgent(ctx, req)
+	if isAgentAlreadyRunningError(err) {
+		resp, err = e.retryResumeLaunchAfterAlreadyRunning(
+			ctx, taskID, session.ID, req, wasTerminalResume,
+		)
+	}
+	if err != nil && reservedEnvironment {
+		err = errors.Join(err, e.rollbackTaskEnvironmentReservation(
+			context.WithoutCancel(ctx), existingEnv, "",
+		))
+	}
+	return resp, existingEnv, reservedEnvironment, err
+}
+
+func (e *Executor) retryResumeLaunchAfterAlreadyRunning(
+	ctx context.Context,
+	taskID, sessionID string,
+	req *LaunchAgentRequest,
+	wasTerminalResume bool,
+) (*LaunchAgentResponse, error) {
+	if !wasTerminalResume && e.agentManager.IsAgentRunningForSession(ctx, sessionID) {
+		e.logger.Info("resume race: agent already running for session, returning ErrExecutionAlreadyRunning",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return nil, ErrExecutionAlreadyRunning
+	}
+	e.logger.Info("cleaning up stale execution and retrying launch",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID))
+	if cleanupErr := e.agentManager.CleanupStaleExecutionBySessionID(ctx, sessionID); cleanupErr != nil {
+		e.logger.Warn("failed to clean up stale execution",
+			zap.String("session_id", sessionID),
+			zap.Error(cleanupErr))
+	}
+	return e.agentManager.LaunchAgent(ctx, req)
 }
 
 // restoreResumeCredentialSnapshotIfStarting restores the prior non-secret Git
@@ -1293,7 +1349,7 @@ func (e *Executor) applyResumeWorkspaceFolders(
 	for _, folder := range folders {
 		if folder != nil {
 			req.WorkspaceFolders = append(req.WorkspaceFolders, WorkspaceFolderSpec{
-				Name: folder.DisplayName, LocalPath: folder.LocalPath,
+				Name: folder.DisplayName, LocalPath: folder.LocalPath, Position: folder.Position,
 			})
 		}
 	}
@@ -1338,6 +1394,12 @@ func (e *Executor) resolveResumeTaskEnvironmentForTask(ctx context.Context, task
 	env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("lookup existing task environment: %w", err)
+	}
+	if env == nil && session != nil && session.TaskEnvironmentID != "" {
+		env, err = e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+		if err != nil {
+			return nil, fmt.Errorf("lookup inherited task environment: %w", err)
+		}
 	}
 	if env == nil {
 		// Inherited-environment fallback: a child task created by an office

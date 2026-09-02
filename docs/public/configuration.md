@@ -175,7 +175,7 @@ startup setting, not a database or Settings value.
 | `credentials.file` | `KANDEV_CREDENTIALS_FILE` | path, empty | Optional fallback JSON credential file. The file is read lazily and must be restricted to the Kandev service account. |
 | `limits.ghMaxConcurrent` | `KANDEV_GH_MAX_CONCURRENT` | positive integer, `8` | Process-wide `gh` subprocess admission cap. |
 | `limits.gitMaxConcurrent` | `KANDEV_GIT_MAX_CONCURRENT` | positive integer, `12` | Process-wide `git` subprocess admission cap. |
-| `limits.lspMaxConnections` | `KANDEV_LSP_MAX_CONNECTIONS` | positive integer, `8` | Active browser-to-task-host language-server connection cap. |
+| `limits.lspMaxServers` | `KANDEV_LSP_MAX_SERVERS` (`KANDEV_LSP_MAX_CONNECTIONS` fallback) | positive integer, `8` | Process-wide cap for actual task/language servers. Browser attachments and editor mounts do not consume slots. |
 | `messageQueue.maxPerSession` | `KANDEV_QUEUE_MAX_PER_SESSION` | integer `>= 0`, `10` | Per-session pending-message cap. Zero means unlimited. A non-negative YAML or environment value locks capacity in Settings; a negative environment value means unlimited, and invalid environment input falls through to the lower-precedence source. |
 | `agentctl.idleTimeout` | `KANDEV_ACP_IDLE_TIMEOUT` | Go duration, `1h` | Idle managed-agent reaping timeout. Zero disables reaping. |
 | `agentctl.idleReaperInterval` | `KANDEV_ACP_IDLE_REAPER_INTERVAL` | Go duration, `1m` | Interval between idle-agent scans. |
@@ -409,7 +409,7 @@ credentials:
 limits:
   ghMaxConcurrent: 8
   gitMaxConcurrent: 12
-  lspMaxConnections: 8
+  lspMaxServers: 8
 
 messageQueue:
   maxPerSession: 10
@@ -533,7 +533,7 @@ overrides.
 |---|---|---:|---|
 | `limits.ghMaxConcurrent` | `KANDEV_GH_MAX_CONCURRENT` | `8` | Positive integer process-wide cap for `gh` subprocesses; invalid/non-positive uses default. |
 | `limits.gitMaxConcurrent` | `KANDEV_GIT_MAX_CONCURRENT` | `12` | Positive integer process-wide cap for `git` subprocesses; invalid/non-positive uses default. |
-| `limits.lspMaxConnections` | `KANDEV_LSP_MAX_CONNECTIONS` | `8` | Positive integer cap for active browser-to-task-host language-server streams; invalid/non-positive uses default. |
+| `limits.lspMaxServers` | `KANDEV_LSP_MAX_SERVERS` | `8` | Positive integer process-wide cap for actual task/language servers; invalid/non-positive environment input uses `8`. Browser attachments and editor mounts do not consume slots. The deprecated YAML key `limits.lspMaxConnections` and environment variable `KANDEV_LSP_MAX_CONNECTIONS` remain fallbacks only when their canonical replacements are unset. |
 | `messageQueue.maxPerSession` | `KANDEV_QUEUE_MAX_PER_SESSION` | `10` | Pending messages per session. A non-negative YAML value locks the saved UI capacity; a valid environment value overrides YAML and locks it; a negative environment value means unlimited; malformed environment input falls through to YAML, the saved setting, or default. |
 | `agentctl.idleTimeout` | `KANDEV_ACP_IDLE_TIMEOUT` | `1h` | Go duration after which idle managed agentctl instances are reaped; `0` disables. Invalid uses default. |
 | `agentctl.idleReaperInterval` | `KANDEV_ACP_IDLE_REAPER_INTERVAL` | `1m` | Go duration between idle scans. |

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -411,6 +412,9 @@ func (cm *ContainerManager) StopContainer(ctx context.Context, containerID strin
 // buildContainerConfig builds the Docker container configuration
 func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker.ContainerConfig, error) {
 	ag := config.AgentConfig
+	if ag == nil || ag.Runtime() == nil {
+		return docker.ContainerConfig{}, errors.New("docker container launch requires an agent runtime configuration")
+	}
 	rt := ag.Runtime()
 
 	// Build image name with tag. A profile-level image_tag override (e.g. a

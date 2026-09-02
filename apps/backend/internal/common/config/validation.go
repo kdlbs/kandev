@@ -11,7 +11,7 @@ func validateStartupSettings(cfg *Config) error {
 	errs = append(errs, configuredValidation(cfg, "tasks.preparationTimeout", cfg.Tasks.PreparationTimeout <= 0, "tasks.preparationTimeout must be positive")...)
 	errs = append(errs, configuredValidation(cfg, "limits.ghMaxConcurrent", cfg.Limits.GHMaxConcurrent <= 0, "limits.ghMaxConcurrent must be positive")...)
 	errs = append(errs, configuredValidation(cfg, "limits.gitMaxConcurrent", cfg.Limits.GitMaxConcurrent <= 0, "limits.gitMaxConcurrent must be positive")...)
-	errs = append(errs, configuredValidation(cfg, "limits.lspMaxConnections", cfg.Limits.LSPMaxConnections <= 0, "limits.lspMaxConnections must be positive")...)
+	errs = append(errs, configuredValidation(cfg, taskLSPMaxServersConfigKey, cfg.Limits.LSPMaxServers <= 0, "limits.lspMaxServers must be positive")...)
 	errs = append(errs, configuredValidation(cfg, "messageQueue.maxPerSession", cfg.MessageQueue.MaxPerSession < 0, "messageQueue.maxPerSession must be zero or greater")...)
 	errs = append(errs, configuredValidation(cfg, "agentctl.idleTimeout", cfg.Agentctl.IdleTimeout < 0, "agentctl.idleTimeout must be zero or greater")...)
 	errs = append(errs, configuredValidation(cfg, "agentctl.idleReaperInterval", cfg.Agentctl.IdleReaperInterval <= 0, "agentctl.idleReaperInterval must be positive")...)

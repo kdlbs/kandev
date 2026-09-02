@@ -68,6 +68,9 @@ launcher:
 	if got := nestedField(t, cfg, "Limits", "LSPMaxConnections"); got.Int() != 21 {
 		t.Fatalf("limits.lspMaxConnections = %d", got.Int())
 	}
+	if got := nestedField(t, cfg, "Limits", "LSPMaxServers"); got.Int() != 21 {
+		t.Fatalf("limits.lspMaxServers legacy fallback = %d", got.Int())
+	}
 	if got := nestedField(t, cfg, "MessageQueue", "MaxPerSession"); got.Int() != 14 {
 		t.Fatalf("messageQueue.maxPerSession = %d", got.Int())
 	}
@@ -179,6 +182,67 @@ func TestConfigPrecedenceEnvironmentOverYAML(t *testing.T) {
 	}
 	if got := cfg.SourceFor("messageQueue.maxPerSession"); got != SourceEnvironment {
 		t.Fatalf("messageQueue.maxPerSession source = %q, want %q", got, SourceEnvironment)
+	}
+}
+
+func TestTaskLSPServerCapacityUsesCanonicalStartupConfig(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(dir, "config.yaml"),
+		[]byte("limits:\n  lspMaxServers: 3\n"),
+		0o600,
+	); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("KANDEV_LSP_MAX_SERVERS", "")
+	t.Setenv("KANDEV_LSP_MAX_CONNECTIONS", "")
+
+	cfg, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if got := nestedField(t, cfg, "Limits", "LSPMaxServers"); got.Int() != 3 {
+		t.Fatalf("limits.lspMaxServers = %d, want 3", got.Int())
+	}
+	if got := cfg.SourceFor("limits.lspMaxServers"); got != SourceConfiguration {
+		t.Fatalf("limits.lspMaxServers source = %q, want %q", got, SourceConfiguration)
+	}
+}
+
+func TestTaskLSPServerCapacityEnvironmentPrefersCanonicalAlias(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(dir, "config.yaml"),
+		[]byte("limits:\n  lspMaxServers: 3\n"),
+		0o600,
+	); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("KANDEV_LSP_MAX_SERVERS", "5")
+	t.Setenv("KANDEV_LSP_MAX_CONNECTIONS", "7")
+
+	cfg, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if cfg.Limits.LSPMaxServers != 5 {
+		t.Fatalf("limits.lspMaxServers = %d, want preferred environment value 5", cfg.Limits.LSPMaxServers)
+	}
+	if got := cfg.SourceFor("limits.lspMaxServers"); got != SourceEnvironment {
+		t.Fatalf("limits.lspMaxServers source = %q, want %q", got, SourceEnvironment)
+	}
+}
+
+func TestTaskLSPServerCapacityFallsBackToLegacyEnvironmentAlias(t *testing.T) {
+	t.Setenv("KANDEV_LSP_MAX_SERVERS", "")
+	t.Setenv("KANDEV_LSP_MAX_CONNECTIONS", "7")
+
+	cfg, err := LoadWithPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if cfg.Limits.LSPMaxServers != 7 {
+		t.Fatalf("limits.lspMaxServers = %d, want legacy environment value 7", cfg.Limits.LSPMaxServers)
 	}
 }
 

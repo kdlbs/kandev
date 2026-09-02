@@ -101,7 +101,7 @@ environment-only settings gain YAML keys:
 | `credentials.file` | File path string. Empty disables the provider. | Empty | `KANDEV_CREDENTIALS_FILE` |
 | `limits.ghMaxConcurrent` | Positive integer | `8` | `KANDEV_GH_MAX_CONCURRENT` |
 | `limits.gitMaxConcurrent` | Positive integer | `12` | `KANDEV_GIT_MAX_CONCURRENT` |
-| `limits.lspMaxConnections` | Positive integer | `8` | `KANDEV_LSP_MAX_CONNECTIONS` |
+| `limits.lspMaxServers` | Positive integer | `8` | `KANDEV_LSP_MAX_SERVERS`; deprecated `KANDEV_LSP_MAX_CONNECTIONS` fallback |
 | `messageQueue.maxPerSession` | Integer of zero or greater. Zero disables the cap. | `10` | `KANDEV_QUEUE_MAX_PER_SESSION` |
 | `agentctl.idleTimeout` | Nonnegative Go duration string. Zero disables reaping. | `1h` | `KANDEV_ACP_IDLE_TIMEOUT` |
 | `agentctl.idleReaperInterval` | Positive Go duration string | `1m` | `KANDEV_ACP_IDLE_REAPER_INTERVAL` |

@@ -3,6 +3,7 @@ package process
 import (
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"testing"
 	"time"
@@ -103,5 +104,27 @@ func TestProcessRunnerStartPipedRoundTripAndStop(t *testing.T) {
 	}
 	if _, ok := runner.Get(proc.ID, false); ok {
 		t.Fatal("piped process remains tracked after stop")
+	}
+}
+
+func TestPipedProcessWaitCleanupReportsReapFailureWithoutNormalExitError(t *testing.T) {
+	done := make(chan struct{})
+	close(done)
+	exitErr := errors.New("process exited non-zero")
+	reapErr := errors.New("process descendants remain alive")
+	proc := &PipedProcess{
+		Done: done,
+		process: &commandProcess{
+			waitErr: exitErr,
+			reapErr: reapErr,
+		},
+	}
+
+	err := proc.WaitCleanup(context.Background())
+	if !errors.Is(err, reapErr) {
+		t.Fatalf("WaitCleanup() error = %v, want reap error", err)
+	}
+	if errors.Is(err, exitErr) {
+		t.Fatalf("WaitCleanup() included ordinary process exit error: %v", err)
 	}
 }

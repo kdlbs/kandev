@@ -77,10 +77,12 @@ func provideWorktreeManager(dbPool *db.Pool, cfg *config.Config, log *logger.Log
 	}
 	taskSvc.SetWorktreeCleanup(manager)
 	if lifecycleMgr != nil {
-		taskSvc.SetEnvironmentDestroyer(&environmentDestroyerAdapter{
+		destroyer := &environmentDestroyerAdapter{
 			lifecycle: lifecycleMgr,
 			worktrees: manager,
-		})
+		}
+		taskSvc.SetEnvironmentDestroyer(destroyer)
+		taskSvc.SetTaskEnvironmentRuntimeSecretDeleter(destroyer)
 	}
 	taskSvc.SetSSHTaskDirReclaimer(newSSHTaskDirReclaimerAdapter(log))
 
@@ -123,6 +125,13 @@ func (a *environmentDestroyerAdapter) DestroySandbox(ctx context.Context, sandbo
 func (a *environmentDestroyerAdapter) DestroyWorktree(ctx context.Context, worktreeID string) error {
 	// removeBranch=false: preserve the branch so unpushed work isn't lost.
 	return a.worktrees.RemoveByID(ctx, worktreeID, false)
+}
+
+func (a *environmentDestroyerAdapter) DeleteTaskEnvironmentRuntimeSecrets(
+	ctx context.Context,
+	taskEnvironmentID, authSecretID, bootstrapSecretID string,
+) error {
+	return a.lifecycle.DeleteTaskEnvironmentRuntimeSecrets(ctx, taskEnvironmentID, authSecretID, bootstrapSecretID)
 }
 
 func (a *environmentDestroyerAdapter) GetContainerLiveStatus(ctx context.Context, containerID string) (*taskservice.ContainerLiveStatus, error) {

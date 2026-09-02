@@ -155,11 +155,23 @@ func (c *Client) ReadPump(_ context.Context) {
 			continue
 		}
 
-		// Process the message in a goroutine to avoid blocking the read pump
-		// This allows concurrent message handling so long-running handlers
-		// (like orchestrator.prompt) don't block other requests (like workspace.tree.get)
+		// Task subscription mutations are an ordered control stream. Handling
+		// subscribe/unsubscribe concurrently can acknowledge a later subscribe
+		// before an earlier unsubscribe removes the final membership.
+		if orderedTaskSubscriptionMutation(msg.Action) {
+			c.handleMessage(&msg)
+			continue
+		}
+
+		// Process ordinary requests in a goroutine to avoid blocking the read
+		// pump. This lets long-running handlers (like orchestrator.prompt) run
+		// alongside independent requests (like workspace.tree.get).
 		go c.handleMessage(&msg)
 	}
+}
+
+func orderedTaskSubscriptionMutation(action string) bool {
+	return action == ws.ActionTaskSubscribe || action == ws.ActionTaskUnsubscribe
 }
 
 // handleMessage processes an incoming message.

@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -1234,6 +1235,19 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		primaryRepo = &repoInfo{}
 	}
 
+	// Environment creation and its first runtime launch are one task-scoped
+	// critical section. A second session that passed the earlier fast path waits
+	// here, then observes and reuses the first session's durable environment.
+	taskEnvironmentLock := e.taskEnvLock(task.ID)
+	taskEnvironmentLock.Lock()
+	defer taskEnvironmentLock.Unlock()
+
+	// Resolve and owner-validate the canonical environment before launch so the
+	// in-memory execution is environment-scoped from its first runtime request.
+	existingEnv, err = e.resolveLaunchTaskEnvironment(ctx, task, session)
+	if err != nil {
+		return nil, err
+	}
 	assignLaunchTaskEnvironmentID(session, existingEnv)
 
 	// A sibling can be prepared while the elected materializer is still
@@ -1328,6 +1342,15 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if err := e.resolveLaunchEnvironment(ctx, req, execCfg.ProfileEnvVars, allRepos); err != nil {
 		return nil, err
 	}
+	reservedEnvironment := false
+	resolvedExecutorType, _ := taskEnvironmentExecutorIdentity(req, execCfg)
+	if existingEnv == nil && resolvedExecutorType == string(models.ExecutorTypeLocalDocker) {
+		existingEnv, err = e.createTaskEnvironmentReservation(ctx, task.ID, session, req, execCfg)
+		if err != nil {
+			return nil, e.handleLaunchFailure(ctx, task.ID, sessionID, "", "", err)
+		}
+		reservedEnvironment = true
+	}
 
 	// Call the AgentManager to launch the container
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
@@ -1335,7 +1358,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		if err == nil {
 			err = errors.New("agent launch returned no response")
 		}
-		if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusCreating && existingEnv.MaterializationSessionID == session.ID {
+		if reservedEnvironment {
+			err = errors.Join(err, e.rollbackTaskEnvironmentReservation(context.WithoutCancel(ctx), existingEnv, ""))
+		} else if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusCreating && existingEnv.MaterializationSessionID == session.ID {
 			existingEnv.Status = models.TaskEnvironmentStatusFailed
 			existingEnv.MaterializationSessionID = ""
 			if updateErr := e.repo.UpdateTaskEnvironment(ctx, existingEnv); updateErr != nil {
@@ -1348,9 +1373,13 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	}
 
 	// Create or update the task environment with launch results
-	if err := e.persistTaskEnvironment(ctx, task.ID, session, existingEnv, req, resp, execCfg); err != nil {
-		e.cleanupUnstartedExecutionAfterPersistError(ctx, sessionID, resp.AgentExecutionID, err)
-		e.markTaskEnvironmentMaterializationFailed(ctx, existingEnv, session.ID)
+	if err := e.persistTaskEnvironmentLocked(ctx, task.ID, session, existingEnv, req, resp, execCfg); err != nil {
+		if reservedEnvironment {
+			err = errors.Join(err, e.rollbackTaskEnvironmentReservation(context.WithoutCancel(ctx), existingEnv, resp.AgentExecutionID))
+		} else {
+			e.cleanupUnstartedExecutionAfterPersistError(ctx, sessionID, resp.AgentExecutionID, err)
+			e.markTaskEnvironmentMaterializationFailed(ctx, existingEnv, session.ID)
+		}
 		repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
 		return nil, e.handleLaunchFailure(ctx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
 	}
@@ -1634,6 +1663,9 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 				zap.Error(err))
 		}
 	}
+	if e.onTaskEnvironmentReady != nil {
+		e.onTaskEnvironmentReady(context.WithoutCancel(ctx), task.ID)
+	}
 
 	e.logger.Info("agent launched for prepared session",
 		zap.String("task_id", task.ID),
@@ -1762,7 +1794,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	} else {
 		for _, f := range folders {
 			if f != nil {
-				req.WorkspaceFolders = append(req.WorkspaceFolders, WorkspaceFolderSpec{Name: f.DisplayName, LocalPath: f.LocalPath})
+				req.WorkspaceFolders = append(req.WorkspaceFolders, WorkspaceFolderSpec{
+					Name: f.DisplayName, LocalPath: f.LocalPath, Position: f.Position,
+				})
 			}
 		}
 	}
@@ -1838,6 +1872,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			TaskRepositoryID:           info.TaskRepositoryID,
 			RepositoryID:               info.RepositoryID,
 			RepositoryPath:             info.RepositoryPath,
+			Position:                   info.Position,
 			BaseBranch:                 info.BaseBranch,
 			CheckoutBranch:             info.CheckoutBranch,
 			PRNumber:                   info.PRNumber,
@@ -2259,6 +2294,65 @@ func computeWorkspacePath(req *LaunchAgentRequest, resp *LaunchAgentResponse) st
 	return req.RepositoryPath
 }
 
+func (e *Executor) createTaskEnvironmentReservation(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+	execCfg executorConfig,
+) (*models.TaskEnvironment, error) {
+	executorType, executorID := taskEnvironmentExecutorIdentity(req, execCfg)
+	environment := &models.TaskEnvironment{
+		ID:                       session.TaskEnvironmentID,
+		TaskID:                   taskID,
+		ExecutorType:             executorType,
+		ExecutorID:               executorID,
+		ExecutorProfileID:        session.ExecutorProfileID,
+		Status:                   models.TaskEnvironmentStatusCreating,
+		MaterializationSessionID: session.ID,
+		WorkspacePath:            req.WorkspacePath,
+		TaskDirName:              req.TaskDirName,
+	}
+	if err := e.repo.CreateTaskEnvironment(ctx, environment); err != nil {
+		return nil, fmt.Errorf("reserve task environment before runtime launch: %w", err)
+	}
+	session.TaskEnvironmentID = environment.ID
+	req.TaskEnvironmentID = environment.ID
+	return environment, nil
+}
+
+type taskEnvironmentRuntimeSecretDeleter interface {
+	DeleteTaskEnvironmentRuntimeSecrets(context.Context, string, string, string) error
+}
+
+func (e *Executor) rollbackTaskEnvironmentReservation(
+	ctx context.Context,
+	environment *models.TaskEnvironment,
+	executionID string,
+) error {
+	if environment == nil || environment.ID == "" {
+		return nil
+	}
+	if executionID != "" {
+		if err := e.agentManager.StopAgentWithReason(ctx, executionID, "task environment finalization failed", true); err != nil &&
+			!errors.Is(err, lifecycle.ErrExecutionNotFound) {
+			return fmt.Errorf("stop runtime after environment finalization failure: %w", err)
+		}
+	}
+	deleter, ok := e.agentManager.(taskEnvironmentRuntimeSecretDeleter)
+	if !ok {
+		return fmt.Errorf("runtime secret cleanup is not configured")
+	}
+	if err := deleter.DeleteTaskEnvironmentRuntimeSecrets(ctx, environment.ID, "", ""); err != nil {
+		return fmt.Errorf("delete reserved environment runtime secrets: %w", err)
+	}
+	if err := e.repo.DeleteTaskEnvironment(ctx, environment.ID); err != nil &&
+		!errors.Is(err, taskrepo.ErrTaskEnvironmentNotFound) {
+		return fmt.Errorf("delete reserved task environment: %w", err)
+	}
+	return nil
+}
+
 // persistTaskEnvironment creates or updates the task environment record after a successful launch.
 // It also links the session to the environment via TaskEnvironmentID. For
 // multi-repo launches it additionally writes one TaskEnvironmentRepo row per repo.
@@ -2280,6 +2374,18 @@ func (e *Executor) persistTaskEnvironment(
 	mu := e.taskEnvLock(taskID)
 	mu.Lock()
 	defer mu.Unlock()
+	return e.persistTaskEnvironmentLocked(ctx, taskID, session, existingEnv, req, resp, execCfg)
+}
+
+func (e *Executor) persistTaskEnvironmentLocked(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	existingEnv *models.TaskEnvironment,
+	req *LaunchAgentRequest,
+	resp *LaunchAgentResponse,
+	execCfg executorConfig,
+) error {
 
 	// Re-fetch under the lock — a sibling launch for the same task may have
 	// just created the env and released the lock. Without this we'd still
@@ -2296,142 +2402,162 @@ func (e *Executor) persistTaskEnvironment(
 	}
 
 	workspacePath := computeWorkspacePath(req, resp)
+	resolvedExecutorType, resolvedExecutorID := taskEnvironmentExecutorIdentity(req, execCfg)
 
 	if existingEnv != nil {
-		materializationSessionID := existingEnv.MaterializationSessionID
-		isInitialMaterializer := existingEnv.Status == models.TaskEnvironmentStatusCreating && materializationSessionID == session.ID
-		// A session attaching to an environment owned by a *different* task is a
-		// guest: office inherit_parent / shared_group bind every member session
-		// to one canonical environment (see handoff_inheritance.go), and the
-		// members share the owner's worktree rather than owning any
-		// task_environment_repos rows of their own. The owner already
-		// materialized (or will materialize) that inventory, so a guest must not
-		// rewrite the owner's repo rows or re-evaluate its ready status. Doing so
-		// on resume tripped "ready status requires repository inventory": the
-		// guest's request carries no repo specs (repos empty) and, when the
-		// owner's canonical inventory is empty, the repo-backed guard below failed
-		// a resume the guest has no authority to fix. The one exception is a guest
-		// session elected to materialize a still-CREATING canonical environment
-		// (shared_group), which must run the normal finalize path below.
-		if existingEnv.TaskID != "" && existingEnv.TaskID != taskID && !isInitialMaterializer {
-			bindSessionToTaskEnvironment(session, existingEnv)
-			return nil
-		}
-		previousStatus := existingEnv.Status
-		previousMaterializationSessionID := existingEnv.MaterializationSessionID
-		repos := environmentReposForLaunch(req, resp)
-		// agent_execution_id is no longer stored on task_environments — the column
-		// is being dropped (executors_running is the single source of truth).
-		// Status, workspace, and container fields are still env-row-owned; the
-		// physical worktree lives on task_environment_repos. Status is decided
-		// per branch below rather than forced here: the initial materializer
-		// always transitions to ready (its inventory publishes atomically in
-		// the same call), but a non-materializing sibling must not force ready
-		// onto an environment whose canonical inventory turned out empty for a
-		// repo-backed task — that permanently bricks reuse (see
-		// validateReuseEnvironmentInventory).
-		// Refresh workspace + container/sandbox fields. The original update
-		// branch only touched AgentExecutionID/Status, so envs created with
-		// empty paths (e.g. before the worktree resolved) stayed permanently
-		// broken. Sandbox ID gets refreshed too in case a fallback created a
-		// new sprite.
-		if workspacePath != "" {
-			existingEnv.WorkspacePath = workspacePath
-		}
-		if resp.ContainerID != "" {
-			existingEnv.ContainerID = resp.ContainerID
-		}
-		if bootstrapSecretID := extractContainerBootstrapNonceSecretID(resp.Metadata); bootstrapSecretID != "" {
-			existingEnv.ContainerBootstrapNonceSecretID = bootstrapSecretID
-		}
-		if controlSecretID := extractContainerControlAuthTokenSecretID(resp.Metadata); controlSecretID != "" {
-			existingEnv.ContainerControlAuthTokenSecretID = controlSecretID
-		}
-		if sandboxID := extractSandboxID(resp.Metadata); sandboxID != "" {
-			existingEnv.SandboxID = sandboxID
-		}
-		// Refresh TaskDirName when the request carries a new value — covers
-		// resume-after-failure where the original env row was stamped with an
-		// empty task_dir_name and the resume regenerates it.
-		if req.TaskDirName != "" {
-			existingEnv.TaskDirName = req.TaskDirName
-		}
-		if isInitialMaterializer {
-			// The initial materializer must publish its full repository inventory
-			// in the same transaction as the ready transition. Otherwise a sibling
-			// can bind to a ready environment whose canonical rows are incomplete.
-			if finalizer, ok := e.repo.(taskEnvironmentMaterializationFinalizer); ok {
-				existingEnv.Status = models.TaskEnvironmentStatusReady
-				existingEnv.MaterializationSessionID = ""
-				if err := finalizer.FinalizeTaskEnvironmentMaterialization(ctx, existingEnv, repos, materializationSessionID); err != nil {
-					existingEnv.Status = previousStatus
-					existingEnv.MaterializationSessionID = previousMaterializationSessionID
-					e.logger.Warn("failed to finalize task environment materialization",
-						zap.String("task_id", taskID), zap.String("env_id", existingEnv.ID), zap.Error(err))
-					return fmt.Errorf("finalize task environment materialization: %w", err)
-				}
-				bindSessionToTaskEnvironment(session, existingEnv)
-				e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
-				return nil
-			}
-		}
-		// Persist per-repo rows for launches that didn't have them yet *before*
-		// the environment can be marked ready below. The environment-repository
-		// rows are the only physical-worktree record, so single-repo launches
-		// write one row here too. Ordering matters: writing status=ready first
-		// and these rows second leaves a window where a crash or a concurrent
-		// reader observes a ready environment with an empty inventory for a
-		// repo-backed task — exactly the state the guards elsewhere in this PR
-		// exist to prevent (see validateReuseEnvironmentInventory).
-		if err := e.persistTaskEnvironmentRepos(ctx, existingEnv.ID, repos); err != nil {
-			existingEnv.Status = previousStatus
-			existingEnv.MaterializationSessionID = previousMaterializationSessionID
-			return err
-		}
-		repoBacked := e.taskIsRepoBacked(ctx, taskID)
-		// A sibling can finish while the initial materializer still owns a
-		// CREATING environment. In that case the owner remains responsible for
-		// publishing (or failing) the inventory, so leave the claim untouched
-		// instead of turning the sibling's empty result into a launch error. Once
-		// the claim is no longer CREATING, an empty repo-backed inventory is a
-		// persistence failure and must fail the launch rather than publish an
-		// unusable READY/STOPPED environment.
-		if len(repos) == 0 && len(existingEnv.Repos) == 0 && repoBacked && previousStatus != models.TaskEnvironmentStatusCreating {
-			existingEnv.Status = previousStatus
-			existingEnv.MaterializationSessionID = previousMaterializationSessionID
-			return fmt.Errorf("persist task environment: ready status requires repository inventory")
-		}
-		// A non-materializing sibling only advances the environment to ready
-		// when inventory is present: already recorded before this launch,
-		// about to be written by this launch, or not required because the
-		// task has no configured repositories at all. A launch whose prepare
-		// step failed produces an empty repos slice here — leaving the
-		// environment's existing status untouched (it can only already be
-		// ready or stopped by the time this branch runs) keeps that launch
-		// from bricking future reuse instead of silently corrupting the row.
-		if len(repos) > 0 || len(existingEnv.Repos) > 0 || !repoBacked {
-			existingEnv.Status = models.TaskEnvironmentStatusReady
-		}
-		existingEnv.MaterializationSessionID = ""
-		if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
-			existingEnv.Status = previousStatus
-			existingEnv.MaterializationSessionID = previousMaterializationSessionID
-			e.logger.Warn("failed to update task environment",
-				zap.String("task_id", taskID),
-				zap.String("env_id", existingEnv.ID),
-				zap.Error(err))
-			return fmt.Errorf("update task environment: %w", err)
-		}
+		return e.updateTaskEnvironmentLocked(
+			ctx, taskID, session, existingEnv, req, resp,
+			workspacePath, resolvedExecutorType, resolvedExecutorID,
+		)
+	}
+	return e.createTaskEnvironmentLocked(
+		ctx, taskID, session, req, resp,
+		workspacePath, resolvedExecutorType, resolvedExecutorID,
+	)
+}
+
+func (e *Executor) updateTaskEnvironmentLocked(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	existingEnv *models.TaskEnvironment,
+	req *LaunchAgentRequest,
+	resp *LaunchAgentResponse,
+	workspacePath, resolvedExecutorType, resolvedExecutorID string,
+) error {
+	materializationSessionID := existingEnv.MaterializationSessionID
+	isInitialMaterializer := existingEnv.Status == models.TaskEnvironmentStatusCreating && materializationSessionID == session.ID
+	// A session attaching to an environment owned by a *different* task is a
+	// guest: office inherit_parent / shared_group bind every member session
+	// to one canonical environment (see handoff_inheritance.go), and the
+	// members share the owner's worktree rather than owning any
+	// task_environment_repos rows of their own. The owner already materialized
+	// (or will materialize) that inventory, so a guest must not rewrite it.
+	if existingEnv.TaskID != "" && existingEnv.TaskID != taskID && !isInitialMaterializer {
 		bindSessionToTaskEnvironment(session, existingEnv)
-		e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
 		return nil
 	}
+
+	previousStatus := existingEnv.Status
+	previousMaterializationSessionID := existingEnv.MaterializationSessionID
+	repos := environmentReposForLaunch(req, resp)
+	refreshTaskEnvironmentLaunchFields(
+		existingEnv, session, req, resp, workspacePath, resolvedExecutorType, resolvedExecutorID,
+	)
+
+	if isInitialMaterializer {
+		// The initial materializer must publish its full repository inventory
+		// in the same transaction as the ready transition. Otherwise a sibling
+		// can bind to a ready environment whose canonical rows are incomplete.
+		if finalizer, ok := e.repo.(taskEnvironmentMaterializationFinalizer); ok {
+			existingEnv.Status = models.TaskEnvironmentStatusReady
+			existingEnv.MaterializationSessionID = ""
+			if err := finalizer.FinalizeTaskEnvironmentMaterialization(ctx, existingEnv, repos, materializationSessionID); err != nil {
+				existingEnv.Status = previousStatus
+				existingEnv.MaterializationSessionID = previousMaterializationSessionID
+				e.logger.Warn("failed to finalize task environment materialization",
+					zap.String("task_id", taskID), zap.String("env_id", existingEnv.ID), zap.Error(err))
+				return fmt.Errorf("finalize task environment materialization: %w", err)
+			}
+			bindSessionToTaskEnvironment(session, existingEnv)
+			e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
+			return nil
+		}
+	}
+
+	// Persist repository rows before the environment can become ready. The
+	// repository rows are the only durable physical-worktree inventory.
+	if err := e.persistTaskEnvironmentRepos(ctx, existingEnv.ID, repos); err != nil {
+		existingEnv.Status = previousStatus
+		existingEnv.MaterializationSessionID = previousMaterializationSessionID
+		return err
+	}
+	repoBacked := e.taskIsRepoBacked(ctx, taskID)
+	if taskEnvironmentMissingRequiredInventory(existingEnv, repos, repoBacked, previousStatus) {
+		existingEnv.Status = previousStatus
+		existingEnv.MaterializationSessionID = previousMaterializationSessionID
+		return fmt.Errorf("persist task environment: ready status requires repository inventory")
+	}
+	if taskEnvironmentHasReadyInventory(existingEnv, repos, repoBacked) {
+		existingEnv.Status = models.TaskEnvironmentStatusReady
+	}
+	existingEnv.MaterializationSessionID = ""
+	if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
+		existingEnv.Status = previousStatus
+		existingEnv.MaterializationSessionID = previousMaterializationSessionID
+		e.logger.Warn("failed to update task environment",
+			zap.String("task_id", taskID),
+			zap.String("env_id", existingEnv.ID),
+			zap.Error(err))
+		return fmt.Errorf("update task environment: %w", err)
+	}
+	bindSessionToTaskEnvironment(session, existingEnv)
+	e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
+	return nil
+}
+
+func taskEnvironmentMissingRequiredInventory(
+	environment *models.TaskEnvironment,
+	repos []*models.TaskEnvironmentRepo,
+	repoBacked bool,
+	previousStatus models.TaskEnvironmentStatus,
+) bool {
+	return len(repos) == 0 && len(environment.Repos) == 0 && repoBacked &&
+		previousStatus != models.TaskEnvironmentStatusCreating
+}
+
+func taskEnvironmentHasReadyInventory(
+	environment *models.TaskEnvironment,
+	repos []*models.TaskEnvironmentRepo,
+	repoBacked bool,
+) bool {
+	return len(repos) > 0 || len(environment.Repos) > 0 || !repoBacked
+}
+
+func refreshTaskEnvironmentLaunchFields(
+	environment *models.TaskEnvironment,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+	resp *LaunchAgentResponse,
+	workspacePath, resolvedExecutorType, resolvedExecutorID string,
+) {
+	environment.ExecutorType = resolvedExecutorType
+	environment.ExecutorID = resolvedExecutorID
+	environment.ExecutorProfileID = session.ExecutorProfileID
+	if workspacePath != "" {
+		environment.WorkspacePath = workspacePath
+	}
+	if resp.ContainerID != "" {
+		environment.ContainerID = resp.ContainerID
+	}
+	if secretID := extractContainerBootstrapNonceSecretID(resp.Metadata); secretID != "" {
+		environment.ContainerBootstrapNonceSecretID = secretID
+	}
+	if secretID := extractContainerControlAuthTokenSecretID(resp.Metadata); secretID != "" {
+		environment.ContainerControlAuthTokenSecretID = secretID
+	}
+	if sandboxID := extractSandboxID(resp.Metadata); sandboxID != "" {
+		environment.SandboxID = sandboxID
+	}
+	if req.TaskDirName != "" {
+		environment.TaskDirName = req.TaskDirName
+	}
+}
+
+func (e *Executor) createTaskEnvironmentLocked(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+	resp *LaunchAgentResponse,
+	workspacePath, resolvedExecutorType, resolvedExecutorID string,
+) error {
 
 	env := &models.TaskEnvironment{
 		ID:                session.TaskEnvironmentID,
 		TaskID:            taskID,
-		ExecutorType:      req.ExecutorType,
-		ExecutorID:        execCfg.ExecutorID,
+		ExecutorType:      resolvedExecutorType,
+		ExecutorID:        resolvedExecutorID,
 		ExecutorProfileID: session.ExecutorProfileID,
 		// AgentExecutionID is intentionally not set here — see executors_running
 		// for the active execution per session.
@@ -2506,6 +2632,21 @@ func (e *Executor) persistRecoveredBaseBranch(
 			zap.String("base_branch", resolvedBranch),
 			zap.Error(err))
 	}
+}
+
+func taskEnvironmentExecutorIdentity(req *LaunchAgentRequest, execCfg executorConfig) (string, string) {
+	executorType := req.ExecutorType
+	if executorType == "" {
+		executorType = execCfg.ExecutorType
+	}
+	executorID := execCfg.ExecutorID
+	if executorType == "" {
+		executorType = string(models.ExecutorTypeLocal)
+		if executorID == "" {
+			executorID = models.ExecutorIDLocal
+		}
+	}
+	return executorType, executorID
 }
 
 // environmentReposForLaunch returns the environment-repository rows for a

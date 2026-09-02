@@ -2034,6 +2034,10 @@ type TaskEnvironment struct {
 	// deliberately separate from a session's agent runtime/auth metadata.
 	ContainerControlAuthTokenSecretID string `json:"-"`
 	SandboxID                         string `json:"sandbox_id,omitempty"`
+	// These are references into the encrypted global secret store. They are
+	// internal transport state and must never be exposed through task APIs.
+	AgentctlAuthSecretID      string `json:"-"`
+	AgentctlBootstrapSecretID string `json:"-"`
 
 	// TaskDirName is the semantic directory name for the task (e.g. "fix-bug_ab12").
 	// Set when the task uses the multi-repo task-directory layout
