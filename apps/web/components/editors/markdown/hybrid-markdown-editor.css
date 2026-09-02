@@ -41,7 +41,7 @@
   max-width: 48rem;
   margin-inline: 0;
   padding-block: 1.5rem 0;
-  padding-inline: var(--md-editor-content-inline-start-padding) 1.5rem;
+  padding-inline: 1rem;
 }
 
 .kandev-hybrid-markdown-editor .md-heading {
@@ -54,6 +54,18 @@
 
 .kandev-hybrid-markdown-editor .md-document > .md-heading:first-child {
   margin-top: 0;
+}
+
+/* A compact document gutter cannot contain longer ATX markers. Keep revealed
+   heading source inline so every marker remains visible without moving the
+   document's normal reading edge away from Preview. */
+.kandev-hybrid-markdown-editor .md-heading.md-block-active > .md-marker-headingMarker:first-child {
+  position: static;
+  display: inline;
+  height: auto;
+  font-size: 0.85em;
+  line-height: inherit;
+  transform: none;
 }
 
 .kandev-hybrid-markdown-editor h1.md-heading {
@@ -416,7 +428,7 @@
 
 @media (max-width: 640px) {
   .kandev-hybrid-markdown-editor .md-editor-content {
-    padding-inline: var(--md-editor-content-inline-start-padding) 1rem;
+    padding-inline: 1rem;
   }
 }
 
