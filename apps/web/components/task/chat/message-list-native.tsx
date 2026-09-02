@@ -29,6 +29,8 @@ import {
   isElementFullyVisible,
 } from "./message-list-shared";
 
+const DIVIDER_SETTLING_WINDOW_MS = 4000;
+
 /** Notifies `onLastPromptEdgeChange`/`onFirstMessageHiddenChange` whenever the
  * last-prompt or first message crosses the container's viewport edges, so
  * the composer's scroll buttons and the anchored-bar affordance know when to
@@ -287,7 +289,7 @@ type NativeMessageListBodyProps = {
  *   by BOTH of: the reader hasn't started scrolling yet (isUserScrolling
  *   — wheel/touchstart/keydown, since a plain 'scroll' event can't tell
  *   user intent apart from our own programmatic writes), AND still being
- *   within a short settling window since mount (isWithinSettlingWindow).
+ *   within a short settling window since activation (isWithinSettlingWindow).
  *   The window exists so a live message arriving long after the visit has
  *   genuinely settled — with no wheel/touch/key event to catch, e.g. a
  *   scrollbar drag — can never re-trigger a correction; once either gate
@@ -321,20 +323,29 @@ export function useScrollToDividerOrBottom(
   const isUserScrollingRef = useDividerUserScrolling(scrollRef);
 
   // Bounds how long the divider correction below can keep re-asserting
-  // itself after mount, independent of user interaction: a scrollbar drag
+  // itself after activation, independent of user interaction: a scrollbar drag
   // (no wheel/touch/key event) or a live message arriving long after the
   // visit has settled must never be able to re-trigger it. 4s comfortably
   // covers the slowest observed multi-wave initial load (WS backfill
   // continuing after the REST fetch) without lingering into the range
   // where the user has plausibly started reading and scrolling normally.
-  const mountedAtRef = useRef<number | null>(null);
-  if (mountedAtRef.current === null) mountedAtRef.current = Date.now();
-  const isWithinSettlingWindow = () => Date.now() - (mountedAtRef.current ?? 0) < 4000;
+  const previousVisibleForSettlingRef = useRef(isVisible);
+  const settlingDeadlineRef = useRef<number | null>(null);
+  const isWithinSettlingWindow = () =>
+    settlingDeadlineRef.current !== null && Date.now() < settlingDeadlineRef.current;
 
   const didInitialScroll = useRef(false);
   const didScrollToDivider = useRef(false);
   useEffect(() => {
-    if (!isVisible) return;
+    const becameVisible = isVisible && !previousVisibleForSettlingRef.current;
+    previousVisibleForSettlingRef.current = isVisible;
+    if (!isVisible) {
+      settlingDeadlineRef.current = null;
+      return;
+    }
+    if (settlingDeadlineRef.current === null || becameVisible) {
+      settlingDeadlineRef.current = Date.now() + DIVIDER_SETTLING_WINDOW_MS;
+    }
     const el = scrollRef.current;
     if (!el || itemCount === 0) return;
 

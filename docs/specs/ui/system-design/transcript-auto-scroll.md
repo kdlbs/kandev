@@ -59,6 +59,12 @@ becomes visible after an inactive mount, its placement runs after the generic
 animation frames because that generic restore uses one frame after its
 `ResizeObserver` reports non-zero geometry.
 
+The unread-divider settling deadline starts when the transcript is first
+visible and resets for each hidden-to-visible activation. Time spent in an
+inactive persistent portal does not consume the four-second reassertion window.
+The deadline remains fixed during that visit, so later layout changes can
+reconcile the divider only while the activation is still settling.
+
 `SessionPanelContent` remains a generic panel component. Its queued restore
 captures the element's `scrollTop` when scheduled and applies the saved offset
 only if that value is unchanged when the frame runs. This cooperative stale-

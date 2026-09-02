@@ -137,8 +137,11 @@ refresh and activation. A transcript that received hidden agent output reopened
 ## Verification strategy
 
 - TDD regressions were added for hidden activation, hidden updates, competing
-  scroll owners, and bounded-frame cancellation before the implementation was
-  completed.
+  scroll owners, bounded-frame cancellation, and the activation-scoped
+  unread-divider settling window before the implementation was completed.
+- A focused `SessionPanelContent` component test controls `ResizeObserver` and
+  `requestAnimationFrame` to prove both guarded restore outcomes: unchanged
+  `scrollTop` is restored, while a newer scroll remains authoritative.
 - Focused native transcript unit tests, TypeScript typecheck, and targeted
   ESLint passed.
 - The desktop multi-session scenario and the existing mobile auto-scroll suite
@@ -171,6 +174,8 @@ Implemented visibility-aware transcript placement, hidden-update catch-up,
 reader-position preservation, and the cooperative generic panel restore guard.
 The fixup pass centralized the shared activation-transition lifecycle, retained
 the last visible disabled-reader offset through hidden cleanup, and covered
-immediate activation-frame cancellation. Focused unit tests (83 passing),
-typecheck, targeted ESLint, desktop and mobile Playwright coverage,
-specification lint, and diff checks all passed.
+immediate activation-frame cancellation. The divider settling deadline now
+starts at first visibility and resets on each hidden-to-visible activation.
+Focused unit tests, the direct shared-panel restore regression, typecheck,
+targeted ESLint, desktop and mobile Playwright coverage, specification lint,
+and diff checks all passed.

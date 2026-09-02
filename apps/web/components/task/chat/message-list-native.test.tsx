@@ -807,6 +807,65 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
     }
   });
 
+  it("starts and bounds the divider settling window at hidden-session activation", () => {
+    vi.useFakeTimers();
+    let currentTime = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => currentTime);
+    const frames: Array<FrameRequestCallback> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    try {
+      const { rerender } = render(
+        <Harness itemCount={2} anchoredBarOffsetPx={0} isVisible={false} scrollHeight={1000} />,
+      );
+      const scrollContainer = screen.getByTestId(DIVIDER_SCROLL_CONTAINER_TEST_ID) as HTMLElement;
+
+      vi.advanceTimersByTime(4001);
+      currentTime = 4001;
+
+      rerender(<Harness itemCount={2} anchoredBarOffsetPx={0} isVisible scrollHeight={1000} />);
+      act(() => {
+        let frame = frames.shift();
+        while (frame) {
+          frame(0);
+          frame = frames.shift();
+        }
+      });
+      // The deadline starts at activation, so the divider still wins even
+      // though the persistent hidden portal was mounted for more than 4s.
+      expect(scrollContainer.scrollTop).toBe(150);
+
+      rerender(
+        <Harness
+          itemCount={2}
+          anchoredBarOffsetPx={76}
+          isVisible
+          scrollHeight={1000}
+          scrollLayoutKey="activation-window"
+        />,
+      );
+      expect(scrollContainer.scrollTop).toBe(74);
+
+      vi.advanceTimersByTime(4001);
+      currentTime = 8002;
+      rerender(
+        <Harness
+          itemCount={2}
+          anchoredBarOffsetPx={100}
+          isVisible
+          scrollHeight={1000}
+          scrollLayoutKey="settled"
+        />,
+      );
+      expect(scrollContainer.scrollTop).toBe(74);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
   it("does not replace a pending layout restore with activation placement", () => {
     const frames: Array<FrameRequestCallback> = [];
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {

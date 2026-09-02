@@ -36,6 +36,12 @@ Add focused cases to `message-list-native.test.tsx` before production changes:
    through the same inactive-to-active transition.
 4. Require scheduled activation work to cancel when visibility changes again or
    when another scroll owner becomes active.
+5. Mount a hidden transcript, let the original settling interval elapse, then
+   activate it with an unread divider and prove the activation-scoped
+   reassertion window still gives the divider priority.
+6. Exercise `SessionPanelContent` with controllable `ResizeObserver` and
+   `requestAnimationFrame` delivery to prove unchanged offsets restore and
+   newer scroll positions win.
 
 The current code consumes the hidden initial latch and writes against hidden
 geometry, so the first two cases must fail before the repair.
@@ -51,6 +57,7 @@ geometry, so the first two cases must fail before the repair.
 - Add desktop two-session Playwright regressions for refresh activation, hidden
   live content, and disabled-position preservation.
 - Run the existing mobile auto-scroll Playwright suite.
+- Add direct coverage for the shared `SessionPanelContent` restore guard.
 - Keep the generic panel restore from overwriting a newer transcript or user
   scroll scheduled in the same visibility transition.
 - Update plan/work-order results and statuses after implementation.
@@ -92,6 +99,7 @@ git diff --check -- docs/specs docs/plans apps/web/components/task/chat apps/web
 - `apps/web/components/task/chat/transcript-auto-scroll.test.ts`
 - `apps/web/components/task/task-chat-panel.tsx`
 - `apps/packages/ui/src/pannel-session.tsx`
+- `apps/web/components/task/session-panel-content.test.tsx`
 - `apps/web/e2e/tests/chat/auto-scroll-toggle.spec.ts`
 - `docs/specs/ui/requirements/transcript-auto-scroll.md`
 - `docs/specs/ui/system-design/transcript-auto-scroll.md`
@@ -127,8 +135,9 @@ None.
 ## Results
 
 Implemented visibility-aware native placement, two-frame activation
-reconciliation, hidden-update catch-up, reader-position preservation, and the
-cooperative stale generic-restore guard.
+reconciliation, hidden-update catch-up, reader-position preservation, the
+activation-scoped divider settling window, and the cooperative stale
+generic-restore guard.
 
 The PR fixup pass added the shared `useActivationPending` lifecycle helper,
 preserved the last visible disabled-reader offset through immediate hide and
@@ -136,7 +145,8 @@ unmount cleanup, and covered cancellation before the first activation frame.
 
 Checks passed:
 
-- 83 focused Vitest tests.
+- Focused Vitest tests, including the hidden-activation settling-window
+  regression and direct shared-panel restore coverage.
 - Web TypeScript typecheck.
 - Targeted ESLint for changed web files.
 - Desktop inactive-session Playwright regression, 1 passed.
