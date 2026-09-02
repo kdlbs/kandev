@@ -220,6 +220,25 @@ func BuildPendingAllocation(stepID string, actions []wfmodels.OnEnterAction) (Pe
 	}, true
 }
 
+// SerializePositions encodes an ordered list of marker-bearing positions as
+// the comma-separated string workflow_step_entries.marker_positions stores —
+// the allocated position set an entry's markers were actually claimed for,
+// persisted once at allocation time rather than re-derived later from the
+// step's current (possibly since-edited) on_enter declaration. Empty when
+// positions is empty (a step with no marker-bearing on_enter action is never
+// allocated an entry at all — see BuildPendingAllocation — so this only
+// happens for a caller that skips that guard).
+func SerializePositions(positions []EnginePosition) string {
+	if len(positions) == 0 {
+		return ""
+	}
+	parts := make([]string, len(positions))
+	for i, p := range positions {
+		parts[i] = strconv.Itoa(p.Position)
+	}
+	return strings.Join(parts, ",")
+}
+
 // ComputeDigest returns a stable digest of a step's full on_enter
 // declaration (every action, not just the engine-owned ones), so a
 // mid-flight template edit can eventually be detected by comparing an
