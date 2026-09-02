@@ -47,7 +47,7 @@ Office supplies autonomous run producers and Office-specific maintenance. The pe
 A SQLite-persisted queue of "wake this agent up" requests. Every periodic, event-driven, and reactive trigger flows through this queue before becoming an agent run. Each request:
 
 - Has a `source` discriminator (see table below) plus a typed payload.
-- Carries an `idempotency_key` for source-level dedup within a 24-hour window.
+- Carries an `idempotency_key` for source-level dedup. The queue checks recent rows within 24 hours and the persisted key remains unique for its lifetime.
 - Is coalesced into an in-flight run when one exists for the same agent (claim-time merge).
 - Produces exactly one `runs` row on successful claim; the run is the execution record, the wakeup-request is the dispatch record.
 

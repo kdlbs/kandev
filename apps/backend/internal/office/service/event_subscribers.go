@@ -944,8 +944,8 @@ func (s *Service) queueTaskAssignedRun(
 }
 
 // handleTaskMoved keeps the legacy named-step activity fallback and queues
-// downstream blocker / children-completed runs when a task lands in a
-// terminal step. Canonical task-state activity is written by the task service
+// downstream blocker / children-completed runs when a task enters a terminal
+// step. Canonical task-state activity is written by the task service
 // before task.state_changed is published, so the workflow move path is durable
 // before any WebSocket refetch can run. Stage progression itself is owned by
 // the workflow engine (the orchestrator subscribes to TaskMoved and fires
@@ -968,14 +968,15 @@ func (s *Service) handleTaskMoved(ctx context.Context, event *bus.Event) error {
 			runID, data.SessionID)
 	}
 
-	if categorizeStep(data.ToStepName) == stepCategoryDone {
+	if categorizeStep(data.ToStepName) == stepCategoryDone &&
+		categorizeStep(data.FromStepName) != stepCategoryDone {
 		return s.finalizeDone(ctx, data)
 	}
 	return nil
 }
 
-// finalizeDone resolves blockers and notifies parents when a task lands
-// in a terminal step. Both side-effects route through the engine via
+// finalizeDone resolves blockers and notifies parents when a task enters
+// a terminal step. Both side-effects route through the engine via
 // dispatchEngineTrigger (on_blocker_resolved / on_children_completed).
 func (s *Service) finalizeDone(ctx context.Context, data *TaskMovedData) error {
 	if err := s.queueBlockersResolvedRuns(ctx, data.TaskID); err != nil {
