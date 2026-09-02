@@ -750,14 +750,25 @@ func isParticipantsNaturalKeyViolation(err error) bool {
 
 const participantsLockNamespace = "workflow-participant-role-seat:"
 
-// ParticipantRoleSeatLockKey derives the shared advisory-lock key both
-// automatic casting (EnsureRoleSeat) and manual registration (office
-// AddTaskParticipant) acquire before mutating a role's seat slate for a
-// task. One exported function, not an exported namespace constant, so no
-// caller reassembles the key itself — a drift in separator or field order
+// ParticipantRoleSeatLockKey derives the shared advisory-lock key
+// automatic casting (EnsureRoleSeat), manual registration (office
+// AddTaskParticipant), and decision recording (recordStepDecisionTx)
+// acquire before mutating or reading a role's seat slate for a task. One
+// exported function, not an exported namespace constant, so no caller
+// reassembles the key itself — a drift in separator or field order
 // between two reassemblies would produce two keys that look identical in
 // review and hash apart, closing nothing (system-design "The shared
 // exclusion").
+//
+// recordStepDecisionTx additionally serializing on this key (rather than
+// only its own decisionLockNamespace) is load-bearing, not defensive:
+// without it, a decision committing between AddTaskParticipant's
+// claimAutoSeat read and its conditional UPDATE is invisible to that
+// UPDATE's NOT EXISTS guard under PostgreSQL's READ COMMITTED isolation —
+// the guard only ever sees already-committed state, so an interleaved,
+// not-yet-committed decision insert does not block the claim. The two
+// writers previously locked on disjoint namespaces (participantsLockNamespace
+// vs decisionLockNamespace) and never actually contended.
 //
 // Keyed on task and role only, deliberately narrower than the namespace,
 // task, workflow and role EnsureRoleSeat locked on before this change.
@@ -1052,6 +1063,20 @@ func (r *Repository) recordStepDecisionTx(ctx context.Context, d *models.Workflo
 		lockKey := strings.Join([]string{decisionLockNamespace, d.TaskID, d.StepID, lockIdentity}, "|")
 		if _, err := tx.ExecContext(ctx, r.db.Rebind("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))"), lockKey); err != nil {
 			return fmt.Errorf("lock active decision identity: %w", err)
+		}
+		// Also serialize on the participant-seat exclusion so a claim or
+		// promotion racing this decision under READ COMMITTED cannot
+		// interleave between its own read and write — see
+		// ParticipantRoleSeatLockKey's doc comment. Always held second,
+		// after decisionLockNamespace above and before any row write in
+		// this transaction, so the two lock acquisitions never order
+		// against each other in reverse across concurrent callers. Skipped
+		// when the role is unknown: nothing to serialize against.
+		if d.Role != "" {
+			seatLockKey := ParticipantRoleSeatLockKey(d.TaskID, d.Role)
+			if _, err := tx.ExecContext(ctx, r.db.Rebind("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))"), seatLockKey); err != nil {
+				return fmt.Errorf("lock participant role seat: %w", err)
+			}
 		}
 	}
 

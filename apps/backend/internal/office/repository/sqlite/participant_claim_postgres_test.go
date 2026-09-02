@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/testutil"
@@ -97,6 +98,13 @@ func TestPostgresAddTaskParticipant_ClaimDoesNotOverwriteAConcurrentDecision(t *
 	db := openIsolatedPostgresMultiConnForClaimRace(t, dsn, 4)
 	ctx := context.Background()
 
+	// AddTaskParticipant's identity probe (agentProfileExistsTx) reads
+	// agent_profiles, owned by the settings store schema — bring it up
+	// before the office schema, matching NewWithDB's ordering contract.
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("init settings store: %v", err)
+	}
+
 	if _, err := taskrepo.NewWithDB(db, db, nil); err != nil {
 		t.Fatalf("init task repo: %v", err)
 	}
@@ -122,6 +130,25 @@ func TestPostgresAddTaskParticipant_ClaimDoesNotOverwriteAConcurrentDecision(t *
 		t.Fatalf("create step: %v", err)
 	}
 
+	// Both raced agents must be live agent_profiles rows (with a
+	// satisfied agents(id) foreign key) for the identity probe to
+	// treat them as real — Postgres enforces that FK where SQLite's
+	// default connection does not.
+	for _, agentID := range []string{"agent-auto", "agent-claiming"} {
+		if _, err := db.ExecContext(ctx, db.Rebind(`
+			INSERT INTO agents (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)
+		`), agentID, agentID, now, now); err != nil {
+			t.Fatalf("seed agent %s: %v", agentID, err)
+		}
+		if _, err := db.ExecContext(ctx, db.Rebind(`
+			INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, workspace_id, role, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 'ws-claim-race', '', ?, ?)
+		`), agentID, agentID, agentID, agentID, now, now); err != nil {
+			t.Fatalf("seed agent profile %s: %v", agentID, err)
+		}
+	}
+
+	claimedTotal, notClaimedTotal := 0, 0
 	for i := 0; i < iterations; i++ {
 		taskID := fmt.Sprintf("task-claim-race-%d", i)
 		seatID := fmt.Sprintf("seat-claim-race-%d", i)
@@ -135,19 +162,20 @@ func TestPostgresAddTaskParticipant_ClaimDoesNotOverwriteAConcurrentDecision(t *
 		if _, err := db.ExecContext(ctx, db.Rebind(`
 			INSERT INTO workflow_step_participants
 				(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
-			VALUES (?, ?, ?, 'reviewer', 'agent-auto', true, 0, 'auto')
+			VALUES (?, ?, ?, 'reviewer', 'agent-auto', 1, 0, 'auto')
 		`), seatID, step.ID, taskID); err != nil {
 			t.Fatalf("iteration %d: seed auto seat: %v", i, err)
 		}
 
 		start := make(chan struct{})
 		var wg sync.WaitGroup
+		var claimResult sqlite.ParticipantWriteResult
 		var claimErr, decisionErr error
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
 			<-start
-			_, claimErr = officeRepo.AddTaskParticipant(ctx, taskID, "agent-claiming", "reviewer")
+			claimResult, claimErr = officeRepo.AddTaskParticipant(ctx, taskID, "agent-claiming", "reviewer")
 		}()
 		go func() {
 			defer wg.Done()
@@ -166,6 +194,24 @@ func TestPostgresAddTaskParticipant_ClaimDoesNotOverwriteAConcurrentDecision(t *
 		if decisionErr != nil {
 			t.Fatalf("iteration %d: RecordStepDecision: %v", i, decisionErr)
 		}
+
+		// AC-002.5 protects a decision already on file when the claim
+		// examines the seat — it does not promise anything about a decision
+		// recorded afterward for an agent a claim has since, legitimately,
+		// displaced (RecordAgentDecision's own ResolveParticipantRole
+		// pre-check is what keeps a genuinely displaced agent from
+		// reaching RecordStepDecision in production; this repository-level
+		// test drives RecordStepDecision directly and race-times it against
+		// the claim on purpose). So this assertion only applies to the
+		// branch where the claim did NOT win: if it had, ParticipantRoleSeatLockKey's
+		// shared exclusion (both writers now serialize on it, closing the
+		// window claimAutoSeat's NOT EXISTS guard alone could not) guarantees
+		// no decision existed yet when the claim's guard ran.
+		if claimResult.Outcome == sqlite.ParticipantWriteOutcomeClaimed {
+			claimedTotal++
+			continue
+		}
+		notClaimedTotal++
 
 		var decisionCount int
 		if err := db.GetContext(ctx, &decisionCount, db.Rebind(
@@ -187,4 +233,12 @@ func TestPostgresAddTaskParticipant_ClaimDoesNotOverwriteAConcurrentDecision(t *
 			)
 		}
 	}
+
+	// Logged, not asserted: which branch wins each iteration is scheduler
+	// noise (both goroutines start from the same close(start) signal with
+	// no forced ordering), so a run landing all-claimed or all-not-claimed
+	// is possible and is not itself a defect. The correctness check inside
+	// the loop above is what actually proves SR21 on every "not claimed"
+	// iteration; this is just visibility into how the 15 iterations split.
+	t.Logf("claimed=%d not-claimed=%d", claimedTotal, notClaimedTotal)
 }
