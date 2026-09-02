@@ -11,7 +11,13 @@ import (
 )
 
 // subscriberPanicTotal counts subscriber panics recovered during event
-// delivery, labelled by subject and delivery mode (regular, queue, nats).
+// delivery, labelled by subscription pattern and delivery mode (regular,
+// queue, nats). The pattern is the string a subscriber registered with
+// (Subscribe/QueueSubscribe), so its cardinality is bounded by the number of
+// distinct subscription call sites in the codebase — unlike the concrete
+// delivery subject, which embeds per-session/per-run identifiers (see
+// events.BuildGitWSEventSubject and friends) and would otherwise grow this
+// never-evicted expvar.Map by one key per session for the process lifetime.
 var subscriberPanicTotal = expvar.NewMap("events_subscriber_panic_total")
 
 // invokeHandler calls handler and recovers a panic so that one bad
@@ -26,7 +32,7 @@ var subscriberPanicTotal = expvar.NewMap("events_subscriber_panic_total")
 func invokeHandler(ctx context.Context, log *logger.Logger, mode, subject, pattern string, event *Event, handler EventHandler) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			subscriberPanicTotal.Add(metricLabel("subject", subject, "mode", mode), 1)
+			subscriberPanicTotal.Add(metricLabel("pattern", pattern, "mode", mode), 1)
 			var eventID, eventType string
 			if event != nil {
 				eventID, eventType = event.ID, event.Type
@@ -49,8 +55,9 @@ func invokeHandler(ctx context.Context, log *logger.Logger, mode, subject, patte
 // metricLabel builds a "k1=v1;k2=v2;..." label string for an expvar map key,
 // matching the convention in internal/workflow/signalmetrics/metrics_vars.go
 // so a downstream Prometheus translation layer can split on the same
-// delimiters. Keys are intentionally NOT escaped — callers control the
-// inputs (subject strings, the fixed mode constants).
+// delimiters. Keys are intentionally NOT escaped — callers must only pass
+// bounded-cardinality values (subscription patterns, the fixed mode
+// constants), never a concrete per-session/per-run subject.
 func metricLabel(pairs ...string) string {
 	label := ""
 	for i := 0; i+1 < len(pairs); i += 2 {
