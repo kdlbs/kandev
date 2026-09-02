@@ -1,14 +1,13 @@
 ---
 title: "Mobile Remote Access"
 description: "Use Kandev from a phone through Tailscale, Cloudflare Tunnel, or a private VPN."
-status: experimental
 ---
 
 # Use Kandev from a Phone
 
 This how-to guide connects a phone to Kandev through Tailscale, Cloudflare Tunnel, or a private VPN.
 
-Anyone who can reach an unauthenticated Kandev origin has administrator access. This access includes the web app, API, WebSockets, terminals, previews, and MCP routes.
+Anyone who can reach an unauthenticated Kandev origin has administrator access. Use a protected network boundary.
 
 ## How a phone request reaches an agent
 
@@ -32,7 +31,8 @@ flowchart LR
     Kandev --> Session --> Executor --> Repo
 ```
 
-The access path protects the Kandev origin. Kandev authentication remains a separate user and workspace boundary.
+The access path protects the Kandev origin. Each path reaches the same Kandev web app and task features.
+Kandev authentication remains a separate user and workspace boundary.
 
 ## Choose an access boundary
 
@@ -164,27 +164,11 @@ Only one `cloudflared` service can run on a host. If one exists, add the Kandev 
 11. Open `https://kandev.example.com` on the phone.
 12. Complete the Cloudflare Access sign-in.
 
-Keep the HTTP Host header unchanged. Kandev compares the browser `Origin` hostname with the request `Host` hostname.
+Keep the default HTTP Host header so browser requests use the public hostname.
 
 [Cloudflare Tunnel supports WebSockets](https://developers.cloudflare.com/cloudflare-one/faq/cloudflare-tunnels-faq/#does-cloudflare-tunnel-support-websockets). The web app, composers, live updates, and terminal connections can use the same protected hostname.
 
 Read the [Cloudflare Tunnel guide](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/) for connector installation and network requirements.
-
-### Preserve the client IP display
-
-By default, Kandev does not trust forwarded client-address headers. It can record the loopback connector address for authenticated sessions.
-
-If `cloudflared` uses the configured IPv4 loopback URL, trust only that proxy address:
-
-```yaml
-server:
-  trustedProxies:
-    - "127.0.0.1"
-```
-
-Add this setting to the Kandev configuration file. Then restart Kandev.
-
-Do not trust a broad subnet or every proxy. A broad trusted-proxy range lets an untrusted client spoof its address.
 
 ## Connect directly through a VPN
 
@@ -206,58 +190,10 @@ KANDEV_SERVER_HOST=0.0.0.0 KANDEV_BACKEND_PORT=38429 kandev
 
 If you use this bind, permit port `38429` only on the VPN interface in the host firewall. Reject that port on every other interface.
 
-For direct Tailscale access without Serve, change the grant port from `tcp:443` to `tcp:38429`. This path uses HTTP inside the encrypted tailnet. It skips the HTTPS endpoint provided by Tailscale Serve. Use it only for a trusted single-user tailnet. Then open `http://<magic-dns-name>:38429` on the phone.
-
 If more than one person can reach the VPN endpoint, use [Kandev authentication](authentication.md) and TLS.
 
-Kandev authentication does not replace HTTPS. For single-user access on an encrypted VPN, the VPN tunnel provides transport encryption. This includes WireGuard, OpenVPN, and Tailscale. Plain HTTP inside that tunnel is acceptable.
-
-## Know which phone flows work
-
-Private-network transport does not make a desktop flow phone-safe. This table describes the current web interface.
-
-| Flow | Authentication required | Phone status |
-| --- | --- | --- |
-| Kanban read and write | No, for a trusted single-user network | Supported in the web app |
-| ACP agent composer | No, for a trusted single-user network | Supported through the WebSocket composer |
-| File tree, Git changes, diff, and file editor | No, for a trusted single-user network | Supported, with the layout history listed below |
-| Passthrough composer | No, for a trusted single-user network | Limited. Basic prompts work. [#2809](https://github.com/kdlbs/kandev/issues/2809) tracks incomplete phone UX and device coverage |
-| Passthrough terminal scrollback | No, for a trusted single-user network | Not phone-safe. [#2808](https://github.com/kdlbs/kandev/issues/2808) tracks touch scrolling |
-| Accounts, users, browser sessions, and personal access tokens | Yes | Enable `KANDEV_FEATURES_AUTH=true` or **Authentication & users** |
-
-The passthrough composer sends the submitted text to the agent PTY. The submission includes the Enter key. Kandev does not currently provide dedicated phone controls for `Ctrl+C` or `Esc`.
-
-## Understand the session IP display
-
-This limitation applies only when Kandev authentication is enabled.
-
-Kandev records a session IP at sign-in. It refreshes the value when a request from a new address touches the session. The displayed value updates within the session touch interval.
-
-The stored IP is display data. Kandev does not use it to bind the session to one address.
-
-A roaming phone can continue to use its session. **Settings > Account > Security** can show the old address briefly. The value updates after the next throttled session touch.
-
-Choose one workaround:
-
-- Keep the same tailnet address.
-- Accept the brief delay before the display updates.
-- Sign out. Then sign in again to create a new session record.
-
-Review [proxy configuration](authentication.md#multiple-instances-on-one-host) before you trust forwarded client addresses.
-
-## Track known phone limitations
-
-The linked issues are the source for current status. Closed issues remain useful regression history.
-
-| Issue | Current issue state | What to expect |
-| --- | --- | --- |
-| [#1031](https://github.com/kdlbs/kandev/issues/1031) | Closed | A passthrough TUI could disappear after a mobile remount |
-| [#1035](https://github.com/kdlbs/kandev/issues/1035) | Closed | Earlier touch-scroll work closed. [#2808](https://github.com/kdlbs/kandev/issues/2808) tracks the current limitation |
-| [#1634](https://github.com/kdlbs/kandev/issues/1634) | Closed | The phone workspace picker was missing |
-| [#1843](https://github.com/kdlbs/kandev/issues/1843) | Closed | The task layout could remain incorrect until a browser resize |
-| [#2188](https://github.com/kdlbs/kandev/issues/2188) | Closed | Kanban could return to the first workflow step after task navigation |
-| [#2808](https://github.com/kdlbs/kandev/issues/2808) | Open | Passthrough terminal scrollback does not support reliable touch scrolling |
-| [#2809](https://github.com/kdlbs/kandev/issues/2809) | Open | Passthrough composer phone UX and real-device coverage are incomplete |
+Kandev authentication does not replace HTTPS. For single-user access on an encrypted VPN, the VPN tunnel provides transport encryption.
+Plain HTTP inside that tunnel is acceptable.
 
 ## Add Kandev to the home screen
 
