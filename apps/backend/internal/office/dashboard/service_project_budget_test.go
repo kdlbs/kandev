@@ -4,14 +4,19 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
+
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 // projectBudgetEvaluatorSpy implements dashboard.ProjectBudgetEvaluator and
 // records every call, so UpdateTaskProjectID tests can assert whether (and
 // with what arguments) the reassignment budget hook fired.
 type projectBudgetEvaluatorSpy struct {
-	calls []projectBudgetEvaluatorCall
-	err   error
+	calls      []projectBudgetEvaluatorCall
+	err        error
+	onEvaluate func()
 }
 
 type projectBudgetEvaluatorCall struct {
@@ -21,8 +26,42 @@ type projectBudgetEvaluatorCall struct {
 
 func (s *projectBudgetEvaluatorSpy) EvaluateProjectBudget(_ context.Context, workspaceID, projectID string) error {
 	s.calls = append(s.calls, projectBudgetEvaluatorCall{workspaceID: workspaceID, projectID: projectID})
+	if s.onEvaluate != nil {
+		s.onEvaluate()
+	}
 	return s.err
 }
+
+// projectAssignmentOrderingEventBus records whether the reassignment budget
+// hook ran before the task-updated event was published.
+type projectAssignmentOrderingEventBus struct {
+	evaluated          *bool
+	published          bool
+	evaluatedAtPublish bool
+}
+
+func (b *projectAssignmentOrderingEventBus) Publish(_ context.Context, subject string, _ *bus.Event) error {
+	if subject == events.OfficeTaskUpdated {
+		b.published = true
+		b.evaluatedAtPublish = *b.evaluated
+	}
+	return nil
+}
+
+func (b *projectAssignmentOrderingEventBus) Subscribe(string, bus.EventHandler) (bus.Subscription, error) {
+	return nil, nil
+}
+
+func (b *projectAssignmentOrderingEventBus) QueueSubscribe(string, string, bus.EventHandler) (bus.Subscription, error) {
+	return nil, nil
+}
+
+func (b *projectAssignmentOrderingEventBus) Request(context.Context, string, *bus.Event, time.Duration) (*bus.Event, error) {
+	return nil, nil
+}
+
+func (b *projectAssignmentOrderingEventBus) Close()            {}
+func (b *projectAssignmentOrderingEventBus) IsConnected() bool { return true }
 
 func insertTestProject(t *testing.T, deps *testDeps, id, wsID string) {
 	t.Helper()
@@ -138,5 +177,28 @@ func TestUpdateTaskProjectID_EvaluatorErrorDoesNotFailReassignment(t *testing.T)
 	}
 	if task.ProjectID != "proj-1" {
 		t.Errorf("project_id = %q, want proj-1 (write must persist despite evaluator error)", task.ProjectID)
+	}
+}
+
+func TestUpdateTaskProjectID_EvaluatesBeforePublishingTaskUpdated(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "task-order", "ws-1", "Task", "todo", 1)
+	insertTestProject(t, deps, "proj-order", "ws-1")
+
+	evaluated := false
+	spy := &projectBudgetEvaluatorSpy{onEvaluate: func() { evaluated = true }}
+	eventsBus := &projectAssignmentOrderingEventBus{evaluated: &evaluated}
+	deps.svc.SetProjectBudgetEvaluator(spy)
+	deps.svc.SetEventBus(eventsBus)
+
+	if err := deps.svc.UpdateTaskProjectID(context.Background(), "task-order", "proj-order"); err != nil {
+		t.Fatalf("UpdateTaskProjectID: %v", err)
+	}
+
+	if !eventsBus.published {
+		t.Fatal("expected office.task.updated to be published")
+	}
+	if !eventsBus.evaluatedAtPublish {
+		t.Fatal("budget evaluation must complete before office.task.updated is published")
 	}
 }

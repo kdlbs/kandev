@@ -76,10 +76,10 @@ func (s *DashboardService) UpdateTaskProjectID(ctx context.Context, taskID, proj
 	if err := s.repo.UpdateTaskProjectID(ctx, taskID, projectID); err != nil {
 		return err
 	}
-	s.publishTaskUpdated(ctx, taskID, []string{"project_id"})
 	// Best-effort: the write above has already committed, so an evaluation
 	// error here is logged, not returned. Mirrors event_subscribers.go's
-	// post-cost-event budget check.
+	// post-cost-event budget check. Evaluate before publishing the task event
+	// so a client's refetch can observe any activity row created by the check.
 	if needsChangeCheck && (prevErr != nil || prevProjectID != projectID) {
 		if err := s.projectBudget.EvaluateProjectBudget(ctx, taskWS, projectID); err != nil {
 			s.logger.Warn("project budget evaluation failed on reassignment",
@@ -88,6 +88,7 @@ func (s *DashboardService) UpdateTaskProjectID(ctx context.Context, taskID, proj
 				zap.Error(err))
 		}
 	}
+	s.publishTaskUpdated(ctx, taskID, []string{"project_id"})
 	return nil
 }
 
