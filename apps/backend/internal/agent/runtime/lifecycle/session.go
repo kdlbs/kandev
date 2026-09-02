@@ -923,6 +923,7 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 				false,
 				acpAttachments,
 				false,
+				false,
 				sendPromptCallbacks{onFailure: sm.initialPromptFailure},
 				false,
 			)
@@ -1152,7 +1153,7 @@ func (sm *SessionManager) SendPrompt(
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
 ) (*PromptResult, error) {
-	return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, dispatchOnly, sendPromptCallbacks{}, false)
+	return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, false, dispatchOnly, sendPromptCallbacks{}, false)
 }
 
 // SendPromptWithDispatchCallback reports the point at which agentctl accepted
@@ -1172,6 +1173,7 @@ func (sm *SessionManager) SendPromptWithDispatchCallback(
 		prompt,
 		validateStatus,
 		attachments,
+		false,
 		dispatchOnly,
 		sendPromptCallbacks{onDispatched: onDispatched},
 		false,
@@ -1245,7 +1247,20 @@ func (sm *SessionManager) SendPromptSteerWithDispatchCallback(
 		return nil, fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
 	}
 
-	steered, err := sm.tryDispatchSteer(ctx, execution, prompt, attachments)
+	// Resolve claimed descriptors before the steer takes promptLifecycleMu.
+	// Materialization streams file bytes to agentctl and dispatchSteerLocked holds
+	// that lock under a bounded timeout, so uploading inside it would let a large
+	// attachment block the lifecycle lock for the length of a network write.
+	//
+	// A failure here returns instead of falling back: the ordinary prompt route
+	// would carry the same unresolved descriptor, and the agent would receive a
+	// reference to bytes that are absent from the session.
+	materialized, err := sm.materializeAttachments(ctx, execution, attachments)
+	if err != nil {
+		return nil, err
+	}
+
+	steered, err := sm.tryDispatchSteer(ctx, execution, prompt, materialized)
 	if err != nil {
 		return nil, err
 	}
@@ -1255,7 +1270,8 @@ func (sm *SessionManager) SendPromptSteerWithDispatchCallback(
 			execution,
 			prompt,
 			validateStatus,
-			attachments,
+			materialized,
+			true,
 			dispatchOnly,
 			sendPromptCallbacks{onDispatched: onDispatched},
 			false,
@@ -1377,6 +1393,7 @@ func (sm *SessionManager) sendPrompt(
 	prompt string,
 	validateStatus bool,
 	attachments []v1.MessageAttachment,
+	attachmentsMaterialized bool,
 	dispatchOnly bool,
 	callbacks sendPromptCallbacks,
 	steer bool,
@@ -1422,10 +1439,17 @@ func (sm *SessionManager) sendPrompt(
 		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
 		return nil, err
 	}
-	materializedAttachments, err := sm.materializeAttachments(preparedCtx, execution, attachments)
-	if err != nil {
-		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
-		return nil, err
+	// A steer that degraded to an ordinary prompt has already streamed its bytes
+	// to agentctl. Re-materializing here would upload the same file twice for one
+	// message, so the caller states which it is rather than inferring it from
+	// descriptor shape.
+	materializedAttachments := attachments
+	if !attachmentsMaterialized {
+		materializedAttachments, err = sm.materializeAttachments(preparedCtx, execution, attachments)
+		if err != nil {
+			sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
+			return nil, err
+		}
 	}
 	if sm.beforePromptDispatchHook != nil {
 		sm.beforePromptDispatchHook()
