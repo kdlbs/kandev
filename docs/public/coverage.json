@@ -430,6 +430,7 @@
       "stability": "stable",
       "docs": [
         "security",
+        "mobile-remote-access",
         "configuration",
         "executors",
         "automation-and-mcp",
