@@ -195,3 +195,24 @@ func TestResolveParticipantRole_StepPreferredTransitionFires(t *testing.T) {
 		t.Fatalf("unexpected transition endpoints: %#v", result)
 	}
 }
+
+// TestResolveParticipantRole_NeitherSeatAtStep_ApproverWins is AC-4's
+// fallback case: a caller holding both seats, with neither seat's StepID
+// matching the step being queried, still resolves under approver-wins —
+// the step-preference added for the Review re-entry bug only kicks in
+// when the approver seat itself sits at the queried step.
+func TestResolveParticipantRole_NeitherSeatAtStep_ApproverWins(t *testing.T) {
+	participants := scopedParticipants{perTask: []ParticipantInfo{
+		{ID: "seat-reviewer", TaskID: "task-1", StepID: "review-1", Role: "reviewer", AgentProfileID: "agent-a", DecisionRequired: true},
+		{ID: "seat-approver", TaskID: "task-1", StepID: "approval-1", Role: "approver", AgentProfileID: "agent-a", DecisionRequired: true},
+	}}
+	eng := quorumEngine(nil, participants)
+
+	role, participantID, err := eng.ResolveParticipantRole(context.Background(), "task-1", "review-2", "agent-a")
+	if err != nil {
+		t.Fatalf("ResolveParticipantRole: %v", err)
+	}
+	if role != "approver" || participantID != "seat-approver" {
+		t.Errorf("role/participantID = %q/%q, want approver/seat-approver", role, participantID)
+	}
+}
