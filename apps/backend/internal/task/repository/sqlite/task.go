@@ -474,9 +474,9 @@ func upsertRunnerInTx(ctx context.Context, tx *sql.Tx, rebind func(string) strin
 	}
 	id := uuid.New().String()
 	_, ierr := tx.ExecContext(ctx, rebind(`INSERT INTO workflow_step_participants
-		(id, step_id, task_id, role, agent_profile_id, decision_required, position)
-		VALUES (?, ?, ?, 'runner', ?, 0, 0)`),
-		id, stepID, taskID, agentProfileID)
+		(id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at)
+		VALUES (?, ?, ?, 'runner', ?, 0, 0, ?)`),
+		id, stepID, taskID, agentProfileID, time.Now().UTC())
 	return ierr
 }
 
