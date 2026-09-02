@@ -341,6 +341,84 @@ func TestReduceAssemblyInsertsNoSeparatorBetweenRetainedSections(t *testing.T) {
 	}
 }
 
+// TestReduceSelectionPrefersTailWhenOnlyOneRunCanFit is the AC-001.6
+// tail-first discriminator: a document shaped so exactly one of the head or
+// tail section can be retained, never both. A head-first implementation
+// would retain the opposite section here while still passing every other
+// committed assertion (staying under budget, emitting a well-formed notice,
+// being deterministic and idempotent) — verified by hand: flipping this
+// package's tail-first tie-break to head-first left the rest of this file
+// green.
+func TestReduceSelectionPrefersTailWhenOnlyOneRunCanFit(t *testing.T) {
+	head := "## Framing\n" + strings.Repeat("h", 10) + "\n"
+	mid := "## Working notes\n" + strings.Repeat("m", 4000) + "\n"
+	tail := "## Current state\n" + strings.Repeat("t", 40) + "\n"
+	doc := head + mid + tail
+
+	total := 3
+	noticeReservation := len(renderNotice(total, total, true)) + 1
+	// Sized to hold exactly one of the two small sections plus the notice,
+	// never both: the tail-first tie-break is what decides which.
+	budget := noticeReservation + len(tail)
+
+	out, reduced, omitted := Reduce(doc, budget)
+	if !reduced {
+		t.Fatal("reduced = false, want true")
+	}
+	if !strings.HasPrefix(out, tail) {
+		t.Fatalf("output does not retain the tail section first, contrary to AC-001.6's tail-first rule: %q", out)
+	}
+	if strings.Contains(out, "Framing") {
+		t.Fatalf("output retains the head section instead of the tail: %q", out)
+	}
+	if omitted != 2 {
+		t.Fatalf("omitted = %d, want 2 (head and the oversized middle)", omitted)
+	}
+	if len(out) > budget {
+		t.Fatalf("len(out) = %d, exceeds budget %d", len(out), budget)
+	}
+}
+
+// TestReduceAssemblyConcatenatesMultiSectionHeadAndTailInDocumentOrder covers
+// what TestReduceAssemblyInsertsNoSeparatorBetweenRetainedSections's name
+// promises but its single-retained-section fixture cannot show: two
+// sections in the head run and two in the tail run, both non-empty, with an
+// oversized section dropped from the middle. AC-001.6 requires the retained
+// sections to be concatenated in original document order with no inserted
+// separator.
+func TestReduceAssemblyConcatenatesMultiSectionHeadAndTailInDocumentOrder(t *testing.T) {
+	s0 := "## H1\nh1\n"
+	s1 := "## H2\nh2\n"
+	mid := "## Mid\n" + strings.Repeat("m", 5000) + "\n"
+	s3 := "## T1\nt1\n"
+	s4 := "## T2\nt2\n"
+	doc := s0 + s1 + mid + s3 + s4
+
+	total := 5
+	noticeReservation := len(renderNotice(total, total, true)) + 1
+	// Exactly enough for the four small sections plus the notice; the
+	// oversized middle cannot fit alongside them.
+	budget := noticeReservation + len(s0) + len(s1) + len(s3) + len(s4)
+
+	out, reduced, omitted := Reduce(doc, budget)
+	if !reduced {
+		t.Fatal("reduced = false, want true")
+	}
+	if omitted != 1 {
+		t.Fatalf("omitted = %d, want 1 (only the oversized middle section)", omitted)
+	}
+	want := s0 + s1 + s3 + s4
+	if !strings.HasPrefix(out, want) {
+		t.Fatalf("retained sections are not concatenated in document order with no separator: got %q, want prefix %q", out, want)
+	}
+	if strings.Contains(out, "Mid") {
+		t.Fatalf("output retains the oversized middle section: %q", out)
+	}
+	if len(out) > budget {
+		t.Fatalf("len(out) = %d, exceeds budget %d", len(out), budget)
+	}
+}
+
 func TestReduceInvariantsAcrossShapesAndBudgets(t *testing.T) {
 	budgets := []int{-5, 0, 50, 100, 161, 194, 200, 500, 4000, 12000}
 	sectionCounts := []int{1, 2, 3, 10, 11, 100, 101, 150}
