@@ -90,6 +90,13 @@ type reviewSeatsTestEnv struct {
 	workflowID   string
 	workStepID   string
 	reviewStepID string
+	// onEnterDone receives once per completed asynchronous processOnEnter
+	// goroutine (launchProcessOnEnter runs it via `go func() {...}()` off the
+	// on_turn_complete route) — see assertReviewerSeatQueued's use of it to
+	// wait out that goroutine before checking the run queue is otherwise
+	// empty. Buffered so a completion racing ahead of a waiting receiver
+	// doesn't block the goroutine's own defer.
+	onEnterDone chan struct{}
 }
 
 func newReviewSeatsTestEnv(t *testing.T) *reviewSeatsTestEnv {
@@ -170,6 +177,9 @@ func newReviewSeatsTestEnv(t *testing.T) *reviewSeatsTestEnv {
 
 	taskRepo.SetStepEntryDispatcher(&testStepEntryDispatcher{eng: svc.WorkflowEngine()})
 
+	onEnterDone := make(chan struct{}, 1)
+	svc.onProcessOnEnterComplete = func() { onEnterDone <- struct{}{} }
+
 	return &reviewSeatsTestEnv{
 		taskRepo:     taskRepo,
 		workflowRepo: workflowRepo,
@@ -180,6 +190,7 @@ func newReviewSeatsTestEnv(t *testing.T) *reviewSeatsTestEnv {
 		workflowID:   workflowID,
 		workStepID:   workStepID,
 		reviewStepID: reviewStepID,
+		onEnterDone:  onEnterDone,
 	}
 }
 
@@ -220,6 +231,24 @@ func assertReviewerSeatQueued(t *testing.T, ctx context.Context, env *reviewSeat
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for reviewer run to be queued (AC-OFFICE-REVIEW-SEATS-005.2)")
+	}
+
+	// AC-OFFICE-STEP-ENTRY-DISPATCH-002.2/.5: exactly one run for this
+	// arrival, counted across every dispatcher. On the product route,
+	// on_turn_complete's marker-path dispatch (processOnEnter) runs
+	// asynchronously (launchProcessOnEnter) after the synchronous ledger
+	// dispatch that queued the run above, so wait for it to finish — a
+	// duplicate it enqueued could otherwise still be in flight when this
+	// check runs. The manual route never launches that goroutine, so this
+	// wait times out harmlessly there.
+	select {
+	case <-env.onEnterDone:
+	case <-time.After(300 * time.Millisecond):
+	}
+	select {
+	case extra := <-env.runQueue.calls:
+		t.Fatalf("unexpected second queued run (duplicate dispatch): %+v", extra)
+	default:
 	}
 }
 

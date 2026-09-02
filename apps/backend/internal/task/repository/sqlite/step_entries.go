@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/workflow/stepentry"
@@ -138,6 +139,10 @@ func (r *Repository) allocateStepEntryIfPending(ctx context.Context, tx stepTran
 		SELECT COUNT(*) FROM workflow_step_entries WHERE task_id = ? AND step_id = ?
 	`), taskID, pending.StepID).Scan(&seqCount)
 	if err != nil {
+		if r.log != nil {
+			r.log.Error("step entry allocation failed: count prior entries",
+				zap.String("task_id", taskID), zap.String("step_id", pending.StepID), zap.Error(err))
+		}
 		return 0, fmt.Errorf("count prior step entries: %w", err)
 	}
 	entrySeq := seqCount + 1
@@ -150,6 +155,10 @@ func (r *Repository) allocateStepEntryIfPending(ctx context.Context, tx stepTran
 		RETURNING id
 	`), taskID, pending.StepID, entrySeq, pending.Digest, markerPositions, occurredAt).Scan(&entryID)
 	if err != nil {
+		if r.log != nil {
+			r.log.Error("step entry allocation failed: insert entry row",
+				zap.String("task_id", taskID), zap.String("step_id", pending.StepID), zap.Error(err))
+		}
 		return 0, fmt.Errorf("allocate step entry: %w", err)
 	}
 

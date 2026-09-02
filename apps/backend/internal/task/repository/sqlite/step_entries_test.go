@@ -19,7 +19,10 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	dbutil "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/stepentry"
@@ -492,6 +495,115 @@ func TestClearStepDecisionsAndCompleteMarkerRejectsMissingIDs(t *testing.T) {
 	state, _ := stepEntryMarkerState(t, repo, entryID, 0)
 	if state != string(StepEntryMarkerInProgress) {
 		t.Fatalf("marker state = %q, want %q (untouched)", state, StepEntryMarkerInProgress)
+	}
+}
+
+// TestUpdateTaskStepEntryAllocationFailureFailsTransitionAsUnitAndLogsError
+// injects a failure inside allocateStepEntryIfPending's INSERT (a trigger
+// that aborts exactly the sentinel digest this test uses) and asserts the
+// whole UpdateTask write — the task's step column, its step-transition
+// record, and the entry row — rolls back as one unit, and that the failure
+// is diagnosable: an ERROR record naming task_id and step_id.
+func TestUpdateTaskStepEntryAllocationFailureFailsTransitionAsUnitAndLogsError(t *testing.T) {
+	repo := newStepEntriesTestRepo(t)
+	core, logs := observer.New(zap.ErrorLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	repo.log = log
+
+	task := createStepEntriesTestTask(t, repo, "task-14", "wf-1", "step-a")
+
+	if _, err := repo.db.Exec(`
+		CREATE TRIGGER fail_step_entry_allocation
+		BEFORE INSERT ON workflow_step_entries
+		WHEN NEW.digest = 'FORCE_ALLOCATION_FAILURE'
+		BEGIN
+			SELECT RAISE(ABORT, 'injected failure');
+		END;
+	`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	task.WorkflowStepID = "step-review"
+	ctx := stepentry.WithPendingAllocation(context.Background(), stepentry.PendingAllocation{
+		StepID: "step-review",
+		Digest: "FORCE_ALLOCATION_FAILURE",
+		Positions: []stepentry.EnginePosition{
+			{Position: 0, Kind: "clear_decisions"},
+		},
+	})
+
+	if err := repo.UpdateTask(ctx, task); err == nil {
+		t.Fatalf("expected UpdateTask to fail when step entry allocation fails")
+	}
+
+	rows := stepEntryRowsForTask(t, repo, "task-14")
+	if len(rows) != 0 {
+		t.Fatalf("entry rows = %d, want 0 (allocation failure must not leave a partial row)", len(rows))
+	}
+
+	reloaded, err := repo.GetTask(context.Background(), "task-14")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if reloaded.WorkflowStepID != "step-a" {
+		t.Fatalf("task step = %q, want unchanged %q (AC-OFFICE-STEP-ENTRY-DISPATCH-008.3: allocation failure fails the transition as a unit)",
+			reloaded.WorkflowStepID, "step-a")
+	}
+
+	if logs.Len() != 1 {
+		t.Fatalf("expected exactly one ERROR record, got %d", logs.Len())
+	}
+	fields := logs.All()[0].ContextMap()
+	if fields["task_id"] != "task-14" || fields["step_id"] != "step-review" {
+		t.Fatalf("error fields = %+v, want task_id=task-14 step_id=step-review", fields)
+	}
+}
+
+// TestClearStepDecisionsAndCompleteMarkerRollsBackDeleteOnMarkerUpdateFailure
+// injects a failure into the marker-completion UPDATE (a trigger that aborts
+// exactly the transition to 'done') and asserts the decision delete rolls
+// back with it — a non-atomic implementation (delete committed independently
+// of the marker write) would leave the delete applied and this assertion
+// would fail. AC-OFFICE-STEP-ENTRY-DISPATCH-008.1 requires exactly this
+// distinguishing power, which the happy-path test above cannot provide.
+func TestClearStepDecisionsAndCompleteMarkerRollsBackDeleteOnMarkerUpdateFailure(t *testing.T) {
+	repo := newStepEntriesTestRepo(t)
+	seedWorkflowStepDecisionsTable(t, repo)
+	entryID := allocateOneStepEntry(t, repo, "task-13", "step-review")
+	ctx := context.Background()
+
+	insertStepDecision(t, repo, "dec-1", "task-13", "step-review")
+	insertStepDecision(t, repo, "dec-2", "task-13", "step-review")
+
+	if _, err := repo.ClaimStepEntryMarker(ctx, entryID, 0, "clear_decisions", "op-1", time.Now().UTC()); err != nil {
+		t.Fatalf("ClaimStepEntryMarker: %v", err)
+	}
+
+	if _, err := repo.db.Exec(`
+		CREATE TRIGGER fail_marker_complete
+		BEFORE UPDATE ON workflow_step_entry_markers
+		WHEN NEW.state = 'done'
+		BEGIN
+			SELECT RAISE(ABORT, 'injected failure');
+		END;
+	`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	if _, err := repo.ClearStepDecisionsAndCompleteMarker(ctx, "task-13", "step-review", entryID, 0, time.Now().UTC()); err == nil {
+		t.Fatalf("expected an error from the injected marker-update failure")
+	}
+
+	if n := countStepDecisions(t, repo, "task-13", "step-review"); n != 2 {
+		t.Fatalf("remaining decisions = %d, want 2 (delete must roll back with the failed marker update — AC-OFFICE-STEP-ENTRY-DISPATCH-008.1)", n)
+	}
+
+	state, _ := stepEntryMarkerState(t, repo, entryID, 0)
+	if state != string(StepEntryMarkerInProgress) {
+		t.Fatalf("marker state = %q, want %q (must not have committed done)", state, StepEntryMarkerInProgress)
 	}
 }
 
