@@ -1,5 +1,6 @@
 import { type Locator, type Page, expect } from "@playwright/test";
 import { FileTreePage } from "./file-tree-page";
+import { NewSessionDialogPage } from "./new-session-dialog-page";
 import { dwell } from "../helpers/causal-waits";
 
 function escapeRegExp(value: string): string {
@@ -25,6 +26,7 @@ export class SessionPage {
   readonly stepper: Locator;
   readonly passthroughTerminal: Locator;
   readonly fileTree: FileTreePage;
+  readonly newSessionDialogPage: NewSessionDialogPage;
 
   constructor(private readonly page: Page) {
     this.chat = page.getByTestId("session-chat");
@@ -36,6 +38,7 @@ export class SessionPage {
     this.stepper = page.getByTestId("workflow-stepper");
     this.passthroughTerminal = page.getByTestId("passthrough-terminal");
     this.fileTree = new FileTreePage(page, this.files, () => this.activeChat());
+    this.newSessionDialogPage = new NewSessionDialogPage(page);
   }
 
   // Port forward dialog locators
@@ -519,6 +522,11 @@ export class SessionPage {
     return this.page.getByTestId("clarification-skip");
   }
 
+  /** Header status shown while a clarification answer is being submitted. */
+  clarificationSubmittingStatus(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-submitting-status");
+  }
+
   /** Custom text input on the clarification overlay. */
   clarificationInput(): Locator {
     return this.page.getByTestId("clarification-input");
@@ -649,6 +657,31 @@ export class SessionPage {
   /** "Resume session" button shown after agent crash. */
   recoveryResumeButton(): Locator {
     return this.page.getByTestId("recovery-resume-button");
+  }
+
+  /** Error returned by a manual session recovery action. */
+  recoveryError(): Locator {
+    return this.activeChat().getByTestId("session-recovery-error");
+  }
+
+  /** Explicit action for continuing a conversation on a replacement branch. */
+  recoveryNewBranchButton(): Locator {
+    return this.activeChat().getByTestId("recovery-new-branch-button");
+  }
+
+  /** Read-only workspace restore action shown after a recovery failure. */
+  recoveryRestoreWorkspaceButton(): Locator {
+    return this.activeChat().getByTestId("recovery-restore-workspace-button");
+  }
+
+  /** Non-blocking notice shown after automatic read-only workspace restore. */
+  recoveryReadOnlyNotice(): Locator {
+    return this.activeChat().getByTestId("session-recovery-notice");
+  }
+
+  /** Persisted warning shown after the original branch is replaced. */
+  branchRecreatedWarning(): Locator {
+    return this.activeChat().getByTestId("branch-recreated-warning");
   }
 
   /** "Start fresh session" button shown after agent crash. */
@@ -1342,6 +1375,46 @@ export class SessionPage {
     await expect(this.sidebar).toBeVisible();
     await expect(this.chat).not.toBeVisible({ timeout: 5_000 });
     await expect(this.files).not.toBeVisible({ timeout: 5_000 });
+  }
+
+  /**
+   * Move the task to a workflow step through whichever stepper presentation
+   * the responsive top bar selected. Narrow layouts expose the target in the
+   * compact disclosure instead of rendering every step in the top bar.
+   */
+  async moveToWorkflowStep(step: { id: string; name: string }): Promise<void> {
+    const fullStep = this.page
+      .locator(`[data-testid=${JSON.stringify(`workflow-step-${step.name}`)}]:visible`)
+      .first();
+    const compactStepper = this.page.getByTestId("workflow-stepper-minimal");
+    let presentation: "full" | "compact" | undefined;
+    await expect
+      .poll(
+        async () => {
+          if (await fullStep.isVisible()) {
+            presentation = "full";
+            return true;
+          }
+          if (await compactStepper.isVisible()) {
+            presentation = "compact";
+            return true;
+          }
+          return false;
+        },
+        { timeout: 10_000, message: `Waiting for workflow step presentation for ${step.name}` },
+      )
+      .toBe(true);
+
+    if (presentation === "full") {
+      await fullStep.hover();
+      await this.page.getByRole("button", { name: "Move here", exact: true }).click();
+      return;
+    }
+
+    await compactStepper.click();
+    const moveButton = this.page.getByTestId(`workflow-step-disclosure-move-${step.id}`);
+    await expect(moveButton).toBeVisible();
+    await moveButton.click();
   }
 
   /**

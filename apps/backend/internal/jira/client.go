@@ -20,6 +20,7 @@ type Client interface {
 	ListProjects(ctx context.Context) ([]JiraProject, error)
 	ListProjectStatuses(ctx context.Context, projectKey string) ([]JiraStatus, error)
 	SearchTickets(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error)
+	SearchTicketsForWatch(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error)
 }
 
 // APIError captures an upstream non-2xx response so handlers can surface a

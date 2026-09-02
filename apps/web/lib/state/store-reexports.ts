@@ -31,6 +31,8 @@ export type {
   SettingsDataState,
   SleepInhibitionStoreState,
   UserSettingsState,
+  AgentProfileRecentUseState,
+  AgentProfileRecentUseRecord,
   MessagesState,
   TurnsState,
   TaskSessionsState,

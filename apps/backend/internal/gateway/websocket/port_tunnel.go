@@ -200,7 +200,8 @@ func (m *TunnelManager) resolveAndBind(sessionID string, tunnelPort int) (*url.U
 		return nil, "", nil, fmt.Errorf("session not found or no active execution")
 	}
 
-	agentctlClient := execution.GetAgentCtlClient()
+	agentctlClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentctlClient == nil {
 		return nil, "", nil, fmt.Errorf("agentctl client not available")
 	}

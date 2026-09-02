@@ -12,10 +12,11 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// repoBranchCall records one (repositoryID, branch) pair observed by a
-// mockGitHubService call, so multi-branch tests can assert per-call scoping
-// instead of only the most recent call's arguments.
+// repoBranchCall records one (taskID, repositoryID, branch) triple observed
+// by a mockGitHubService call, so multi-branch tests can assert per-call
+// scoping instead of only the most recent call's arguments.
 type repoBranchCall struct {
+	TaskID       string
 	RepositoryID string
 	Branch       string
 }
@@ -66,12 +67,20 @@ type mockGitHubService struct {
 	lastAssociateRepositoryID   string
 	lastCreateWatchWorkspaceID  string
 	lastAssociateWorkspaceID    string
-	// createWatchLog/associateLog record every call (not just the last), so
-	// multi-branch tests can assert each branch got its own watch/association
-	// scoped to the right repository, rather than only inspecting whichever
-	// call happened to run last.
+	// lastCreateWatchTaskID/lastAssociateTaskID/lastEnsureWatchTaskID capture
+	// the taskID each ForWorkspace call actually wrote under, so tests can pin
+	// the workspace-group redirect (resolveEffectivePushTaskID) at the write
+	// funnel instead of only inferring it from call counts.
+	lastCreateWatchTaskID string
+	lastAssociateTaskID   string
+	lastEnsureWatchTaskID string
+	// createWatchLog/associateLog/ensureWatchLog record every call (not just
+	// the last), so multi-branch tests can assert each branch got its own
+	// watch/association scoped to the right repository, rather than only
+	// inspecting whichever call happened to run last.
 	createWatchLog []repoBranchCall
 	associateLog   []repoBranchCall
+	ensureWatchLog []repoBranchCall
 
 	// Review PR reservation tracking.
 	reserveCalls   int
@@ -108,8 +117,10 @@ type mockGitHubService struct {
 	fixAttempts          []github.TaskCIFixAttempt
 	fixCheckpointRefresh []github.TaskCIFixAttempt
 	mergeAttempts        []github.TaskCIMergeAttempt
+	mergeAttemptErr      error
 	mergeCalls           int
 	mergeErr             error
+	mergeExpectedHeadSHA string
 	ciErrors             []github.TaskCIPRAutomationState
 	ciExhausted          []github.TaskCIPRAutomationState
 	lifecyclePrompts     []github.TaskPRLifecyclePrompt
@@ -217,7 +228,40 @@ func (m *mockGitHubService) RefreshTaskCIFixCheckpoint(_ context.Context, taskID
 	return nil
 }
 func (m *mockGitHubService) RecordTaskCIMergeAttempt(_ context.Context, attempt github.TaskCIMergeAttempt) error {
+	if m.mergeAttemptErr != nil {
+		return m.mergeAttemptErr
+	}
+	if m.ciPRState != nil && m.ciPRState.LastMergeSignature == attempt.Signature && !m.ciPRState.MergeRetryPending {
+		return github.ErrTaskCIMergeAttemptAlreadyReserved
+	}
 	m.mergeAttempts = append(m.mergeAttempts, attempt)
+	if m.ciPRState == nil {
+		m.ciPRState = &github.TaskCIPRAutomationState{
+			TaskID: attempt.TaskID, RepositoryID: attempt.RepositoryID, PRNumber: attempt.PRNumber,
+		}
+	}
+	m.ciPRState.LastMergeSignature = attempt.Signature
+	m.ciPRState.LastMergeResult = github.TaskCIMergeResultInFlight
+	m.ciPRState.MergeRetryPending = false
+	m.ciPRState.LastMergeAttemptAt = &attempt.AttemptedAt
+	return nil
+}
+func (m *mockGitHubService) RecordTaskCIMergeAttemptResult(
+	_ context.Context, taskID, repositoryID string, prNumber int, signature, result, message string,
+) error {
+	if m.ciPRState == nil {
+		m.ciPRState = &github.TaskCIPRAutomationState{
+			TaskID: taskID, RepositoryID: repositoryID, PRNumber: prNumber,
+		}
+	}
+	if m.ciPRState.LastMergeSignature != "" && m.ciPRState.LastMergeSignature != signature {
+		return github.ErrTaskCIMergeAttemptNotFound
+	}
+	m.ciPRState.LastMergeResult = result
+	if result == github.TaskCIMergeResultFailed {
+		m.ciPRState.LastError = &message
+		m.ciPRState.LastErrorKind = github.TaskCIErrorKindAutoMerge
+	}
 	return nil
 }
 func (m *mockGitHubService) RecordTaskCIMergeQueueObservation(_ context.Context, observation github.TaskCIMergeQueueObservation) error {
@@ -228,6 +272,13 @@ func (m *mockGitHubService) RecordTaskCIMergeQueueObservation(_ context.Context,
 	}
 	if observation.ActiveQueueHeadSHA != "" {
 		m.ciPRState.LastQueueAttemptHeadSHA = observation.ActiveQueueHeadSHA
+	}
+	if observation.ActiveQueueHeadSHA != "" || observation.Accepted {
+		m.ciPRState.LastMergeResult = github.TaskCIMergeResultAccepted
+		if m.ciPRState.LastErrorKind == github.TaskCIErrorKindAutoMerge {
+			m.ciPRState.LastError = nil
+			m.ciPRState.LastErrorKind = ""
+		}
 	}
 	if observation.RemovalCause != "" {
 		m.ciPRState.LastQueueRemovalCause = observation.RemovalCause
@@ -243,6 +294,13 @@ func (m *mockGitHubService) RecordTaskCIError(_ context.Context, taskID, reposit
 	})
 	return nil
 }
+func (m *mockGitHubService) RecordTaskCIAutoMergeError(_ context.Context, taskID, repositoryID string, prNumber int, message string) error {
+	m.ciErrors = append(m.ciErrors, github.TaskCIPRAutomationState{
+		TaskID: taskID, RepositoryID: repositoryID, PRNumber: prNumber,
+		LastError: &message, LastErrorKind: github.TaskCIErrorKindAutoMerge,
+	})
+	return nil
+}
 func (m *mockGitHubService) MarkTaskCIAutoFixExhausted(_ context.Context, taskID, repositoryID string, prNumber int, message string) error {
 	now := time.Now().UTC()
 	m.ciExhausted = append(m.ciExhausted, github.TaskCIPRAutomationState{
@@ -251,6 +309,7 @@ func (m *mockGitHubService) MarkTaskCIAutoFixExhausted(_ context.Context, taskID
 		PRNumber:           prNumber,
 		AutoFixExhaustedAt: &now,
 		LastError:          &message,
+		LastErrorKind:      github.TaskCIErrorKindAutoFix,
 	})
 	return nil
 }
@@ -315,13 +374,16 @@ func (m *mockGitHubService) MergePR(context.Context, string, string, int, string
 }
 
 func (m *mockGitHubService) MergePRForAutomation(
-	ctx context.Context, _, owner, repo string, number int, method string,
+	ctx context.Context, _, owner, repo string, number int, method, expectedHeadSHA string,
 ) error {
+	m.mergeExpectedHeadSHA = expectedHeadSHA
 	return m.MergePR(ctx, owner, repo, number, method)
 }
-func (m *mockGitHubService) EnsurePRWatch(_ context.Context, _, _, _, _, _, branch string) (*github.PRWatch, error) {
+func (m *mockGitHubService) EnsurePRWatch(_ context.Context, _, taskID, repositoryID, _, _, branch string) (*github.PRWatch, error) {
 	m.ensureWatchCalls++
 	m.ensureWatchBranch = branch
+	m.lastEnsureWatchTaskID = taskID
+	m.ensureWatchLog = append(m.ensureWatchLog, repoBranchCall{TaskID: taskID, RepositoryID: repositoryID, Branch: branch})
 	return &github.PRWatch{}, nil
 }
 
@@ -360,11 +422,12 @@ func (m *mockGitHubService) ListPRWatchesBySession(_ context.Context, _ string) 
 	}
 	return []*github.PRWatch{m.prWatch}, nil
 }
-func (m *mockGitHubService) CreatePRWatch(_ context.Context, _, _, repositoryID, _, _ string, _ int, branch string) (*github.PRWatch, error) {
+func (m *mockGitHubService) CreatePRWatch(_ context.Context, _, taskID, repositoryID, _, _ string, _ int, branch string) (*github.PRWatch, error) {
 	m.createWatchCalls++
 	m.createWatchBranch = branch
 	m.lastCreateWatchRepositoryID = repositoryID
-	m.createWatchLog = append(m.createWatchLog, repoBranchCall{RepositoryID: repositoryID, Branch: branch})
+	m.lastCreateWatchTaskID = taskID
+	m.createWatchLog = append(m.createWatchLog, repoBranchCall{TaskID: taskID, RepositoryID: repositoryID, Branch: branch})
 	return &github.PRWatch{}, nil
 }
 func (m *mockGitHubService) CreatePRWatchForWorkspace(
@@ -373,14 +436,15 @@ func (m *mockGitHubService) CreatePRWatchForWorkspace(
 	m.lastCreateWatchWorkspaceID = workspaceID
 	return m.CreatePRWatch(ctx, sessionID, taskID, repositoryID, owner, repo, prNumber, branch)
 }
-func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, _, repositoryID string, pr *github.PR) (*github.TaskPR, error) {
+func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, taskID, repositoryID string, pr *github.PR) (*github.TaskPR, error) {
 	m.associateCalls++
 	m.lastAssociateRepositoryID = repositoryID
+	m.lastAssociateTaskID = taskID
 	branch := ""
 	if pr != nil {
 		branch = pr.HeadBranch
 	}
-	m.associateLog = append(m.associateLog, repoBranchCall{RepositoryID: repositoryID, Branch: branch})
+	m.associateLog = append(m.associateLog, repoBranchCall{TaskID: taskID, RepositoryID: repositoryID, Branch: branch})
 	return &github.TaskPR{}, nil
 }
 func (m *mockGitHubService) AssociatePRWithTaskForWorkspace(

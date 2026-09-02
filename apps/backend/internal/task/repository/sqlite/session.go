@@ -216,17 +216,21 @@ func (r *Repository) GetTurn(ctx context.Context, id string) (*models.Turn, erro
 	return scanTurnRow(row)
 }
 
-// GetActiveTurnBySessionID gets the currently active (non-completed) turn for a session
+// GetActiveTurnBySessionID gets the currently active (non-completed) turn for
+// a session. This is not the same query as "current turn": it keeps its own
+// completed_at IS NULL filter alongside currentTurnAuthority's predicate and
+// ordering (D10) so AbandonOpenTurns' re-bury loop keeps working.
 func (r *Repository) GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error) {
+	predicate, orderBy := currentTurnAuthority(r.ro.DriverName(), "turn_row")
 	query := fmt.Sprintf(`
 		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns turn_row
 		WHERE turn_row.task_session_id = ?
 		  AND turn_row.completed_at IS NULL
 		  AND %s
-		ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
+		ORDER BY %s
 		LIMIT 1
-	`, turnAuthorityPredicate(r.ro.DriverName(), "turn_row"))
+	`, predicate, orderBy)
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID)
 	return scanTurnRow(row)
 }
@@ -837,7 +841,10 @@ func (r *Repository) loadInitialSessionRuntimeSeedTx(
 // CreateOfficeTaskSession creates an Office session and atomically marks it as
 // the task's initial session when no earlier session exists. The task row lock
 // serializes callers across PostgreSQL connections; SQLite's single writer
-// connection serializes the transaction.
+// connection serializes the transaction. Within that same transaction it also
+// enforces office-session uniqueness for the (task_id, agent_profile_id) pair:
+// if a live row already exists for the pair, the insert is refused with
+// ErrOfficeSessionRaceConflict rather than creating a second live session.
 func (r *Repository) CreateOfficeTaskSession(ctx context.Context, session *models.TaskSession) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -867,12 +874,27 @@ func (r *Repository) CreateOfficeTaskSession(ctx context.Context, session *model
 		session.Metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
 	}
 
+	if session.AgentProfileID != "" {
+		var liveCount int
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT COUNT(*) FROM task_sessions
+			WHERE task_id = ? AND agent_profile_id = ?
+			  AND state NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')
+		`), session.TaskID, session.AgentProfileID).Scan(&liveCount); err != nil {
+			return fmt.Errorf("check live office session for pair: %w", err)
+		}
+		if liveCount > 0 {
+			return ErrOfficeSessionRaceConflict
+		}
+	}
+
 	if err := r.createTaskSession(ctx, tx, session); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
+// createTaskSession inserts a task session through the supplied database handle.
 func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExecutor, session *models.TaskSession) error {
 	if session.ID == "" {
 		session.ID = uuid.New().String()
@@ -912,10 +934,12 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 	if err != nil {
 		return fmt.Errorf("failed to serialize repository snapshot: %w", err)
 	}
-	// agent_profile_id is NULL-able. Empty string would defeat the partial
-	// unique index since SQLite treats two empty strings as equal — store NULL
-	// for kanban / quick-chat rows and a real value only for office sessions
-	// (per ADR 0005, kanban and office now share the same column).
+	// agent_profile_id is NULL-able and stored as NULL when empty. No unique
+	// index currently constrains (task_id, agent_profile_id) — see
+	// ErrOfficeSessionRaceConflict's doc comment (errors.go). Per ADR 0005,
+	// kanban and office share this column, and every row (kanban included)
+	// carries a non-NULL value in practice — nothing here scopes NULL to
+	// kanban specifically.
 	var agentProfileID interface{}
 	if session.AgentProfileID != "" {
 		agentProfileID = session.AgentProfileID
@@ -942,12 +966,6 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name)
 
-	if err != nil && strings.Contains(err.Error(), "uniq_office_task_session") {
-		// Two callers raced past their SELECT-then-INSERT for the same
-		// (task_id, agent_profile_id) — surface a typed sentinel so callers
-		// can classify with errors.Is rather than driver-message matching.
-		return fmt.Errorf("%w: %w", ErrOfficeSessionRaceConflict, err)
-	}
 	return err
 }
 
@@ -1204,9 +1222,16 @@ func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID st
 }
 
 // GetTaskSessionByTaskAndAgent retrieves the office task session for the given
-// (task_id, agent_profile_id) pair. The pair is unique across non-NULL
-// agent_profile_id rows, so at most one row matches. Returns nil, nil when
-// no session exists for the pair.
+// (task_id, agent_profile_id) pair. This pair is NOT unique at the schema
+// level — the office creation guard (CreateOfficeTaskSession) constrains it
+// only at the moment of insert, so legacy duplicate-pair data and rows
+// created outside that guard can still leave multiple rows for the same
+// pair. The ORDER BY therefore prefers a live row over a terminal one
+// regardless of which is newer — a terminal row created after a live row
+// (e.g. a stale duplicate resolving while the real session is still running)
+// must not shadow the live one — then falls back to started_at DESC, then id
+// DESC as a total tiebreak. Returns nil, nil when no session exists for the
+// pair.
 func (r *Repository) GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error) {
 	if taskID == "" || agentInstanceID == "" {
 		return nil, nil
@@ -1214,7 +1239,11 @@ func (r *Repository) GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, a
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
 		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+`
 		 WHERE ts.task_id = ? AND ts.agent_profile_id = ?
-		 ORDER BY ts.started_at DESC LIMIT 1`,
+		 ORDER BY
+		   CASE WHEN ts.state IN ('COMPLETED', 'FAILED', 'CANCELLED') THEN 1 ELSE 0 END,
+		   ts.started_at DESC,
+		   ts.id DESC
+		 LIMIT 1`,
 	), taskID, agentInstanceID)
 	session, err := r.scanTaskSession(ctx, row, "task_sessions: no matching row")
 	if errors.Is(err, models.ErrTaskSessionNotFound) {
@@ -1380,6 +1409,8 @@ func (r *Repository) updateTaskSession(
 	return nil
 }
 
+// updateTaskSessionWithStateGuard writes a full session row while an optional
+// expected state guard still matches the stored row.
 func (r *Repository) updateTaskSessionWithStateGuard(
 	ctx context.Context,
 	exec taskSessionExecutor,
@@ -1408,8 +1439,10 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 	// would clobber metadata set via those side-channel paths since the
 	// caller's in-memory copy may be stale.
 
-	// agent_profile_id is stored as NULL when empty so the partial unique
-	// index over (task_id, agent_profile_id) ignores kanban / quick-chat rows.
+	// agent_profile_id is stored as NULL when empty. No unique index
+	// constrains (task_id, agent_profile_id) at this UPDATE path — office
+	// session-uniqueness enforcement lives only in CreateOfficeTaskSession's
+	// in-transaction guard (see ErrOfficeSessionRaceConflict's doc comment).
 	var agentProfileID interface{}
 	if session.AgentProfileID != "" {
 		agentProfileID = session.AgentProfileID
@@ -2382,6 +2415,64 @@ func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*mo
 	return r.loadWorktreesBatch(ctx, sessions)
 }
 
+// ListTaskSessionsByTaskEnvironment returns every session bound to an
+// environment, including inherited sessions whose task differs from the
+// environment owner's task. The environment binding, rather than task row
+// ownership, is the source-selection boundary for shared workspaces.
+func (r *Repository) ListTaskSessionsByTaskEnvironment(ctx context.Context, environmentID string) ([]*models.TaskSession, error) {
+	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTaskSessionsByTaskEnvironment")
+	defer span.End()
+	if environmentID == "" {
+		return []*models.TaskSession{}, nil
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(
+		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+` WHERE ts.task_environment_id = ? ORDER BY ts.started_at DESC`,
+	), environmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	sessions, err := r.scanTaskSessions(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	return r.loadWorktreesBatch(ctx, sessions)
+}
+
+// GetTaskSessionWorkspacePathsByTaskEnvironment returns only the raw workspace
+// paths recorded on session rows bound to an environment. It deliberately does
+// not use the effective environment projection because an empty or historical
+// session path must remain distinguishable from the canonical path.
+func (r *Repository) GetTaskSessionWorkspacePathsByTaskEnvironment(ctx context.Context, environmentID string) (map[string]string, error) {
+	paths := make(map[string]string)
+	if environmentID == "" {
+		return paths, nil
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT id, workspace_path
+		FROM task_sessions
+		WHERE task_environment_id = ?
+	`), environmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var sessionID string
+		var workspacePath sql.NullString
+		if err := rows.Scan(&sessionID, &workspacePath); err != nil {
+			return nil, err
+		}
+		paths[sessionID] = workspacePath.String
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return paths, nil
+}
+
 // ListActiveTaskSessions returns all active agent sessions across all tasks
 func (r *Repository) ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListActiveTaskSessions")
@@ -3137,22 +3228,37 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 // (`SELECT ... FOR UPDATE`) before touching its sessions, so a second
 // concurrent promotion for the same task blocks until the first commits.
 func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) error {
+	_, err := r.setSessionPrimary(ctx, sessionID, false)
+	return err
+}
+
+// SetSessionPrimaryIfNonterminal marks a session primary only while it remains
+// nonterminal. It is used by workflow profile switching so a completed agent
+// cannot be promoted from a stale lookup and have its ACP conversation resumed.
+func (r *Repository) SetSessionPrimaryIfNonterminal(ctx context.Context, sessionID string) (bool, error) {
+	return r.setSessionPrimary(ctx, sessionID, true)
+}
+
+func (r *Repository) setSessionPrimary(ctx context.Context, sessionID string, requireNonterminal bool) (bool, error) {
 	now := time.Now().UTC()
 
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// First, get the task_id for this session
+	// First, get the task_id for this session. Do not lock the target row here:
+	// every primary promotion must take the owning task lock first so concurrent
+	// promotions keep one lock order.
 	var taskID string
-	err = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_sessions WHERE id = ?`), sessionID).Scan(&taskID)
+	query := `SELECT task_id FROM task_sessions WHERE id = ?`
+	err = tx.QueryRowContext(ctx, r.db.Rebind(query), sessionID).Scan(&taskID)
 	if err == sql.ErrNoRows {
-		return fmt.Errorf("session not found: %s", sessionID)
+		return primarySessionNotPromoted(sessionID, requireNonterminal)
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Serialize concurrent promotions for the same task across Postgres
@@ -3162,7 +3268,20 @@ func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) er
 		var lockedTaskID string
 		err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT id FROM tasks WHERE id = ? FOR UPDATE`), taskID).Scan(&lockedTaskID)
 		if err != nil && err != sql.ErrNoRows {
-			return err
+			return false, err
+		}
+	}
+
+	// Once the task lock is held, lock and validate the target row before
+	// promoting it. This serializes the nonterminal check with a concurrent
+	// state transition without reversing the task -> session lock order above.
+	if requireNonterminal {
+		valid, err := r.lockNonterminalPrimarySession(ctx, tx, sessionID)
+		if err != nil {
+			return false, err
+		}
+		if !valid {
+			return false, nil
 		}
 	}
 
@@ -3171,20 +3290,25 @@ func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) er
 		UPDATE task_sessions SET is_primary = 0, updated_at = ? WHERE task_id = ?
 	`), now, taskID)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Set primary flag on the specified session
-	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_sessions SET is_primary = 1, updated_at = ? WHERE id = ?
-	`), now, sessionID)
+	promoteQuery := `UPDATE task_sessions SET is_primary = 1, updated_at = ? WHERE id = ?`
+	if requireNonterminal {
+		promoteQuery += ` AND state IN ('CREATED', 'STARTING', 'RUNNING', 'IDLE', 'WAITING_FOR_INPUT')`
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(promoteQuery), now, sessionID)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("session not found: %s", sessionID)
+		return primarySessionNotPromoted(sessionID, requireNonterminal)
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }

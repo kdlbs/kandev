@@ -26,6 +26,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/plugins"
+	promptmodels "github.com/kandev/kandev/internal/prompts/models"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -59,6 +60,8 @@ type workspaceSourceJSON struct {
 	GitHubURL      string `json:"github_url"`
 	RemoteURL      string `json:"remote_url"`
 	Provider       string `json:"provider"`
+	ProviderHost   string `json:"provider_host"`
+	ProviderScope  string `json:"provider_scope"`
 	ProviderRepoID string `json:"provider_repo_id"`
 	ProviderOwner  string `json:"provider_owner"`
 	ProviderName   string `json:"provider_name"`
@@ -144,6 +147,9 @@ type TaskRepository interface {
 // exists. Implementations must return only server-authored identity data.
 type RemoteContributionService interface {
 	Resolve(ctx context.Context, workspaceID, userID, rawURL string) (*models.RemoteContributionResolution, bool, error)
+	// Associate's repositoryID is repositories.ID — the repository_id COLUMN
+	// on the task's task_repositories row, not that row's own id. Callers
+	// must pass task.Repositories[i].RepositoryID, never .ID.
 	Associate(ctx context.Context, workspaceID, userID, taskID, repositoryID string, resolution *models.RemoteContributionResolution) error
 }
 
@@ -236,6 +242,13 @@ type PromptReferenceResolver interface {
 	ResolvePromptReferences(ctx context.Context, content string) ([]promptservice.PromptReferenceExpansion, error)
 }
 
+// PromptReader provides the read-only saved prompt access exposed by
+// configuration and external MCP surfaces.
+type PromptReader interface {
+	ListPrompts(ctx context.Context) ([]*promptmodels.Prompt, error)
+	GetPromptByName(ctx context.Context, name string) (*promptmodels.Prompt, error)
+}
+
 // UserSettingsProvider supplies the single portable preference used when an
 // MCP-created task omits agent_profile_id.
 type UserSettingsProvider interface {
@@ -261,6 +274,7 @@ type Handlers struct {
 	stopTaskGetter       func(context.Context, string) (*models.Task, error)
 	messageQueue         MessageQueuer
 	promptResolver       PromptReferenceResolver
+	promptReader         PromptReader
 	userSettingsProvider UserSettingsProvider
 	logger               *logger.Logger
 
@@ -355,6 +369,11 @@ func (h *Handlers) SetClarificationInputPauser(pauser ClarificationInputPauser) 
 
 func (h *Handlers) SetPromptReferenceResolver(resolver PromptReferenceResolver) {
 	h.promptResolver = resolver
+}
+
+// SetPromptReader wires read-only saved prompt access into config-mode MCP.
+func (h *Handlers) SetPromptReader(reader PromptReader) {
+	h.promptReader = reader
 }
 
 // SetTaskStopper wires the orchestrator-owned halt operation.
@@ -483,6 +502,9 @@ func (h *Handlers) registerTaskQuestionHandlers(d *guardedMCPDispatcher) {
 }
 
 func (h *Handlers) registerConfigModeHandlers(d *guardedMCPDispatcher) {
+	if h.promptReader != nil {
+		h.registerPromptHandlers(d)
+	}
 	if h.workflowSvc != nil {
 		h.registerWorkflowHandlers(d)
 	}
@@ -907,7 +929,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			}
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach remote contribution: task repository is missing", nil)
 		}
-		if err := h.remoteContributionSvc.Associate(ctx, req.WorkspaceID, identity.UserID, task.ID, task.Repositories[index].ID, resolution); err != nil {
+		if err := h.remoteContributionSvc.Associate(ctx, req.WorkspaceID, identity.UserID, task.ID, task.Repositories[index].RepositoryID, resolution); err != nil {
 			h.logger.Error("associate remote contribution; rolling back task creation",
 				zap.String("task_id", task.ID), zap.Error(err))
 			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
@@ -999,6 +1021,12 @@ func classifyCreateTaskError(err error) string {
 	case errors.Is(err, service.ErrSubtaskDepthExceeded),
 		errors.Is(err, service.ErrInvalidTaskWorkflow),
 		errors.Is(err, service.ErrExternalIDInvalid),
+		// A reference the caller supplied that does not resolve is a
+		// validation failure, not an internal one. Classifying it as
+		// INTERNAL_ERROR discarded err.Error() and left the caller with a
+		// bare "Failed to create task" naming neither the field nor the
+		// offending value — the cause reached the backend log and nowhere else.
+		errors.Is(err, service.ErrTaskReferenceNotFound),
 		isMCPWorkflowNotFoundError(err):
 		return ws.ErrorCodeValidation
 	default:
@@ -2071,7 +2099,7 @@ func parseWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSourceInpu
 		allowed := map[string]bool{"kind": true, "local_path": true}
 		switch kind {
 		case string(service.WorkspaceSourceRepository):
-			for _, key := range []string{"repository_id", "remote_url", "github_url", "provider", "provider_repo_id", "provider_owner", "provider_name", "base_branch", "checkout_branch"} {
+			for _, key := range []string{"repository_id", "remote_url", "github_url", "provider", "provider_host", "provider_scope", "provider_repo_id", "provider_owner", "provider_name", "base_branch", "checkout_branch"} {
 				allowed[key] = true
 			}
 		case string(service.WorkspaceSourceFolder):
@@ -2088,7 +2116,7 @@ func parseWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSourceInpu
 		if err := json.Unmarshal(item, &source); err != nil {
 			return nil, err
 		}
-		sources = append(sources, service.WorkspaceSourceInput{Kind: service.WorkspaceSourceKind(source.Kind), RepositoryID: source.RepositoryID, LocalPath: source.LocalPath, GitHubURL: source.GitHubURL, RemoteURL: source.RemoteURL, Provider: source.Provider, ProviderRepoID: source.ProviderRepoID, ProviderOwner: source.ProviderOwner, ProviderName: source.ProviderName, BaseBranch: source.BaseBranch, CheckoutBranch: source.CheckoutBranch, DisplayName: source.DisplayName})
+		sources = append(sources, service.WorkspaceSourceInput{Kind: service.WorkspaceSourceKind(source.Kind), RepositoryID: source.RepositoryID, LocalPath: source.LocalPath, GitHubURL: source.GitHubURL, RemoteURL: source.RemoteURL, Provider: source.Provider, ProviderHost: source.ProviderHost, ProviderScope: source.ProviderScope, ProviderRepoID: source.ProviderRepoID, ProviderOwner: source.ProviderOwner, ProviderName: source.ProviderName, BaseBranch: source.BaseBranch, CheckoutBranch: source.CheckoutBranch, DisplayName: source.DisplayName})
 	}
 	return sources, nil
 }
@@ -4010,19 +4038,22 @@ func (h *Handlers) handleCreateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		createdBy = "agent"
 	}
 
-	guard := h.evaluatePlanWriteGuard(ctx, req.TaskID, req.Content)
-	plan, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
-		TaskID:           req.TaskID,
-		Title:            req.Title,
-		Content:          req.Content,
-		CreatedBy:        createdBy,
-		ForceNewRevision: guard.forceNewRevision,
+	result, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
+		TaskID:             req.TaskID,
+		Title:              req.Title,
+		Content:            req.Content,
+		CreatedBy:          createdBy,
+		EvaluateTruncation: true,
 	})
 	if err != nil {
 		return planws.CreateError(msg, err)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(plan), guard))
+	warning := ""
+	if result.TruncationDetected {
+		warning = planTruncationWarning(result.ReplacedRunes, result.NewRunes, result.PriorRevisionNumber)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(result.Plan), warning, result.PriorRevisionNumber))
 }
 
 // handleGetTaskPlan retrieves a task plan.
@@ -4064,19 +4095,22 @@ func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		createdBy = "agent"
 	}
 
-	guard := h.evaluatePlanWriteGuard(ctx, req.TaskID, req.Content)
-	plan, err := h.planService.UpdatePlan(ctx, service.UpdatePlanRequest{
-		TaskID:           req.TaskID,
-		Title:            req.Title,
-		Content:          req.Content,
-		CreatedBy:        createdBy,
-		ForceNewRevision: guard.forceNewRevision,
+	result, err := h.planService.UpdatePlan(ctx, service.UpdatePlanRequest{
+		TaskID:             req.TaskID,
+		Title:              req.Title,
+		Content:            req.Content,
+		CreatedBy:          createdBy,
+		EvaluateTruncation: true,
 	})
 	if err != nil {
 		return planws.UpdateError(msg, err)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(plan), guard))
+	warning := ""
+	if result.TruncationDetected {
+		warning = planTruncationWarning(result.ReplacedRunes, result.NewRunes, result.PriorRevisionNumber)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(result.Plan), warning, result.PriorRevisionNumber))
 }
 
 // handleDeleteTaskPlan deletes a task plan.

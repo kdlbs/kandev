@@ -15,6 +15,11 @@ import (
 )
 
 const (
+	// RootRepositoryKey identifies the root repository in summary rebuilds when
+	// a snapshot has no repository_name metadata. It is intentionally stable
+	// across sessions and process restarts.
+	RootRepositoryKey = "default"
+
 	// MaxActiveErrorPreviewBytes keeps an error decoration safe to send with
 	// every task row without turning it into a message-stream transport.
 	MaxActiveErrorPreviewBytes  = 512
@@ -78,13 +83,15 @@ type GitSummary struct {
 // PullRequestSummary is intentionally an aggregate plus one representative
 // identity. It is not a list of PR records.
 type PullRequestSummary struct {
-	Count          int    `json:"count,omitempty"`
-	OpenCount      int    `json:"open_count,omitempty"`
-	Attention      bool   `json:"attention,omitempty"`
-	AggregateState string `json:"aggregate_state,omitempty"`
-	State          string `json:"state,omitempty"`
-	Number         int    `json:"number,omitempty"`
-	URL            string `json:"url,omitempty"`
+	Count            int    `json:"count,omitempty"`
+	OpenCount        int    `json:"open_count,omitempty"`
+	Attention        bool   `json:"attention,omitempty"`
+	AutoFixEnabled   bool   `json:"auto_fix_enabled,omitempty"`
+	AutoMergeEnabled bool   `json:"auto_merge_enabled,omitempty"`
+	AggregateState   string `json:"aggregate_state,omitempty"`
+	State            string `json:"state,omitempty"`
+	Number           int    `json:"number,omitempty"`
+	URL              string `json:"url,omitempty"`
 }
 
 // StoredTaskStatusSummary is the persistence boundary for one task. The

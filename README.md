@@ -36,6 +36,7 @@ Open source, multi-provider, no telemetry, not tied to any cloud.
 - **Integrated workspace** - Built-in terminal, code editor with LSP, git changes panel, embedded vscode and chat in one IDE-like view
 - **Kanban task management** - Drag-and-drop boards, columns, and workflow automation
 - **Agentic workflows** - Multi-step pipelines that mix-and-match agents per step - for example, Claude Code Opus to design a plan, GitHub Copilot Sonnet to implement it, and Codex GPT 5.4 to review the changes. See [docs/workflow-tips.md](docs/workflow-tips.md)
+- **Automations** - Trigger agent tasks on schedules or webhooks, with configurable run destinations, context, and concurrency
 - **Sub-tasks** - Agents can spawn sub-tasks that resume from the parent task's session. Useful for splitting a task that has grown too big, or producing several PRs from the same starting point.
 - **CLI passthrough** - Drop into raw agent CLI mode for direct terminal interaction with agents that support it, leveraging their full native TUI
 - **Workspace isolation** - Git worktrees prevent concurrent agents from conflicting
@@ -44,6 +45,7 @@ Open source, multi-provider, no telemetry, not tied to any cloud.
 - **Runtime settings** - Executor profiles, secrets, custom prompts, utility agents, and resource metrics are configurable from Settings
 - **Task-agent MCP** - Agents can create subtasks, target sibling repos, attach extra branches for multiple PRs, message other tasks, read conversations, and inspect related tasks
 - **External MCP** - Manage Kandev from outside coding agents over streamable HTTP or SSE, with copyable config snippets for popular agent CLIs
+- **Plugin marketplace and management** - Browse, install, update, enable, disable, and configure plugins from Settings, including MCP Explorer and the [Bitbucket plugin](https://github.com/kdlbs/kandev-plugin-bitbucket)
 - **Workflow portability** - Export and import workflows as portable YAML across workspaces or Kandev installs
 - **Session management** - Resume and review agent conversations
 - **Shareable task snapshots** - Publish redacted task conversation snapshots as secret GitHub Gists, with preview and revoke controls
@@ -63,10 +65,11 @@ We're working on **Office mode**, a feature-flagged autonomy layer for persisten
   <a href="https://linear.app/"><img src="https://img.shields.io/badge/Linear-5E6AD2?style=for-the-badge&logo=linear&logoColor=white" alt="Linear"></a>
   <a href="https://sentry.io/"><img src="https://img.shields.io/badge/Sentry-362D59?style=for-the-badge&logo=sentry&logoColor=white" alt="Sentry"></a>
   <a href="https://gitlab.com/"><img src="https://img.shields.io/badge/GitLab-FC6D26?style=for-the-badge&logo=gitlab&logoColor=white" alt="GitLab"></a>
+  <a href="https://azure.microsoft.com/products/devops"><img src="https://img.shields.io/badge/Azure%20DevOps-0078D7?style=for-the-badge&logo=azuredevops&logoColor=white" alt="Azure DevOps"></a>
   <a href="https://slack.com/"><img src="https://img.shields.io/badge/Slack-4A154B?style=for-the-badge&logo=slack&logoColor=white" alt="Slack"></a>
 </p>
 
-Connect Kandev to the tools your team already uses — pull issues into the kanban, link tasks to PRs, and surface review activity inline.
+Connect Kandev to GitHub, GitLab, Jira, Linear, Sentry, and Azure DevOps to pull issues into the kanban, link tasks to PRs, and surface review activity inline. Bitbucket support is available through the [Bitbucket plugin](https://github.com/kdlbs/kandev-plugin-bitbucket).
 
 ## Supported ACP Agents
 

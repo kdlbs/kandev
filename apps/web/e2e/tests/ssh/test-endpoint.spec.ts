@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/ssh-test-base";
 import { execInContainer } from "../../helpers/ssh";
+import { waitForSessionDone } from "../../helpers/session";
 
 /**
  * HTTP contract for POST /api/v1/ssh/test. The endpoint dials the host with a
@@ -161,6 +162,14 @@ test.describe("ssh test-endpoint contract", () => {
         { message: "SSH agentctl should be cached after the initial launch", timeout: 60_000 },
       )
       .toBe("cached");
+
+    if (!task.session_id) throw new Error("SSH cache priming task did not return a session_id");
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      task.session_id,
+      "SSH cache priming task should finish before teardown",
+    );
   });
 
   // F6 — WS dispatcher returns the same shape as the HTTP route. Doesn't

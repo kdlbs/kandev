@@ -32,6 +32,7 @@ import {
 import { resolveExecutorType } from "./automation-repository-selection";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useAutomationTriggerDrafts } from "./automation-trigger-drafts";
+import { AutomationDeleteConfirmDialog } from "./automation-delete-confirm-dialog";
 import {
   CreatedWebhookDialogHost,
   EditorFooter,
@@ -380,6 +381,52 @@ function useEditorDirtyState(
   return { dirtyBaseline, triggersDirty };
 }
 
+function AutomationDeleteControls({
+  saving,
+  isNew,
+  automationName,
+  onDelete,
+}: {
+  saving: boolean;
+  isNew: boolean;
+  automationName: string;
+  onDelete: () => Promise<void>;
+}) {
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleConfirm = useCallback(async () => {
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      await onDelete();
+    } catch {
+      // onDelete already reports the deletion error to the user.
+    } finally {
+      setDeleting(false);
+    }
+  }, [deleting, onDelete]);
+
+  return (
+    <>
+      <EditorFooter
+        saving={saving || deleting}
+        isNew={isNew}
+        onDelete={() => setConfirmationOpen(true)}
+      />
+      <AutomationDeleteConfirmDialog
+        open={confirmationOpen}
+        automationName={automationName}
+        isDeleting={deleting}
+        onOpenChange={(open) => {
+          if (!deleting) setConfirmationOpen(open);
+        }}
+        onConfirm={handleConfirm}
+      />
+    </>
+  );
+}
+
 export function AutomationEditor({ workspaceId, automationId }: AutomationEditorProps) {
   const router = useRouter();
   const { create, update, remove } = useAutomations(workspaceId);
@@ -466,7 +513,12 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
       <SettingsSection form={form} savedForm={dirtyBaseline} updateField={updateField} />
       <Separator />
       <RunsSection automationId={currentId} workspaceId={workspaceId} />
-      <EditorFooter saving={saving} isNew={isNew} onDelete={handleRemove} />
+      <AutomationDeleteControls
+        saving={saving}
+        isNew={isNew}
+        automationName={savedForm.name}
+        onDelete={handleRemove}
+      />
       <CreatedWebhookDialogHost
         details={createdWebhook}
         onClose={() => {

@@ -20,6 +20,34 @@ function isDifferentSessionPanel(panelId: string, activeSessionId: string | null
   return panelId.startsWith("session:") && panelId !== `session:${activeSessionId}`;
 }
 
+function adoptRestoredSessionTabSelection(
+  api: DockviewReadyEvent["api"],
+  appStore: StoreApi<AppState>,
+): void {
+  const state = appStore.getState();
+  const activeTaskId = state.tasks.activeTaskId;
+  const currentEnvironmentId = useDockviewStore.getState().currentLayoutEnvId;
+  if (!activeTaskId || !currentEnvironmentId) return;
+
+  const currentSessionIds = new Set<string>(
+    (state.taskSessionsByTask.itemsByTaskId[activeTaskId] ?? []).map((session) => session.id),
+  );
+  const selectedSessionIds = api.groups.flatMap((group) => {
+    const panelId = group.activePanel?.id;
+    if (!panelId?.startsWith("session:")) return [];
+    const sessionId = panelId.slice("session:".length);
+    if (state.taskSessions.items[sessionId]?.task_id !== activeTaskId) return [];
+    if (!currentSessionIds.has(sessionId)) return [];
+    if (state.environmentIdBySessionId[sessionId] !== currentEnvironmentId) return [];
+    return [sessionId];
+  });
+  if (selectedSessionIds.length !== 1) return;
+
+  const sessionId = selectedSessionIds[0];
+  if (sessionId === state.tasks.activeSessionId) return;
+  state.setActiveSessionAuto(activeTaskId, sessionId);
+}
+
 /**
  * When the activated panel is not a session panel and the previous active
  * session panel is no longer visible (closed by the user), find any remaining
@@ -65,7 +93,13 @@ function handleNonSessionSuccessor(
  * session or they create an app-level feedback loop.
  */
 export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: StoreApi<AppState>) {
-  return api.onDidActivePanelChange((panel) => {
+  adoptRestoredSessionTabSelection(api, appStore);
+  const unsubscribeLayoutRestore = useDockviewStore.subscribe((state, previousState) => {
+    if (previousState.isRestoringLayout && !state.isRestoringLayout) {
+      adoptRestoredSessionTabSelection(api, appStore);
+    }
+  });
+  const activePanelDisposable = api.onDidActivePanelChange((panel) => {
     if (!panel) return;
     const isRestoring = useDockviewStore.getState().isRestoringLayout;
     if (isDebug()) {
@@ -121,4 +155,10 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
     }
     state.setActiveSession(target.taskId, target.sessionId);
   });
+  return {
+    dispose: () => {
+      unsubscribeLayoutRestore();
+      activePanelDisposable.dispose();
+    },
+  };
 }

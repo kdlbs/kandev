@@ -523,19 +523,36 @@ func (c *MockController) setPRCommitsFailures(ctx *gin.Context) {
 
 func (c *MockController) setMergeOutcome(ctx *gin.Context) {
 	var req struct {
-		Owner   string       `json:"owner"`
-		Repo    string       `json:"repo"`
-		Number  int          `json:"number"`
-		Outcome MergeOutcome `json:"outcome"`
+		Owner   string `json:"owner"`
+		Repo    string `json:"repo"`
+		Number  int    `json:"number"`
+		Outcome string `json:"outcome"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Owner) == "" ||
-		strings.TrimSpace(req.Repo) == "" || req.Number <= 0 ||
-		(req.Outcome != MergeOutcomeMerged && req.Outcome != MergeOutcomeQueued) {
+		strings.TrimSpace(req.Repo) == "" || req.Number <= 0 || !validMockMergeOutcome(req.Outcome) {
 		respondInvalidPayload(ctx)
 		return
 	}
-	c.mock.SetMergeOutcome(req.Owner, req.Repo, req.Number, req.Outcome)
+	switch req.Outcome {
+	case "failed":
+		c.mock.SetMergeFailure(req.Owner, req.Repo, req.Number, "mock merge provider unavailable")
+	case "pending":
+		c.mock.SetMergeFailure(req.Owner, req.Repo, req.Number, "mock merge request remained pending")
+	case "head_mismatch":
+		c.mock.SetMergeFailure(req.Owner, req.Repo, req.Number, "mock merge head mismatch")
+	default:
+		c.mock.SetMergeOutcome(req.Owner, req.Repo, req.Number, MergeOutcome(req.Outcome))
+	}
 	ctx.JSON(http.StatusOK, gin.H{"outcome": req.Outcome})
+}
+
+func validMockMergeOutcome(outcome string) bool {
+	switch outcome {
+	case string(MergeOutcomeMerged), string(MergeOutcomeQueued), "failed", "pending", "head_mismatch":
+		return true
+	default:
+		return false
+	}
 }
 
 type mockMergeQueueTransitionRequest struct {

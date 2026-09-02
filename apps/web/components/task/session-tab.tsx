@@ -17,10 +17,14 @@ import { ContextMenu, ContextMenuTrigger } from "@kandev/ui/context-menu";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { renameSession } from "@/lib/api/domains/session-api";
-import { useSessionActions } from "@/hooks/domains/session/use-session-actions";
+import {
+  useSessionActions,
+  isSessionDeletable as isDeletable,
+} from "@/hooks/domains/session/use-session-actions";
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
 import type { HandoffPreset } from "@/components/task/new-session-dialog";
 import { usableConfigOptions } from "@/components/model-config-selector";
+import type { SessionId } from "@/lib/types/ids";
 import { SessionContextMenuItems, SessionTabDialogs } from "./session-tab-menu";
 import type { TaskSessionState } from "@/lib/types/http";
 import {
@@ -33,6 +37,7 @@ import { TabRenameInput } from "./tab-rename-input";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import { SessionTabCloseAction } from "./session-tab-close-action";
 import { clearHiddenSessionPanel, hideSessionPanel } from "./dockview-session-tabs";
+import { useSessionTabDelete } from "./use-session-tab-delete";
 import { useTranslation } from "react-i18next";
 
 function useSessionTabState(sessionId: string | undefined) {
@@ -173,6 +178,10 @@ function useSessionTabActions(
   api: IDockviewPanelHeaderProps["api"],
   containerApi: IDockviewPanelHeaderProps["containerApi"],
 ) {
+  const taskSessionIds = useAppStore((state) =>
+    taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? []).map((s) => s.id) : [],
+  );
+  const taskSessionIdSet = new Set(taskSessionIds);
   const removePanelAfterDelete = useCallback(() => {
     const panel = containerApi.getPanel(api.id);
     if (!panel) return;
@@ -185,8 +194,11 @@ function useSessionTabActions(
     // runAutoSessionTabEffect to recreate it.
     const isActive = panel.api.isActive;
     if (isActive) {
-      const siblingSessionPanel = containerApi.panels.find(
-        (p) => p.id !== api.id && p.id.startsWith("session:"),
+      const siblingSessionPanel = api.group.panels.find(
+        (p) =>
+          p.id !== api.id &&
+          p.id.startsWith("session:") &&
+          taskSessionIdSet.has(p.id.slice("session:".length) as SessionId),
       );
       if (siblingSessionPanel) {
         siblingSessionPanel.api.setActive();
@@ -194,7 +206,7 @@ function useSessionTabActions(
     }
 
     containerApi.removePanel(panel);
-  }, [api.id, containerApi]);
+  }, [api.group.panels, api.id, containerApi, taskSessionIdSet]);
 
   const {
     setPrimary: handleSetPrimary,
@@ -269,34 +281,6 @@ function useDockviewTabActiveState(api: IDockviewPanelHeaderProps["api"]) {
   return isActive;
 }
 
-function countVisibleSessionPanels(
-  containerApi: IDockviewPanelHeaderProps["containerApi"],
-  removedPanelId?: string,
-): number {
-  return containerApi.panels.filter(
-    (panel) => panel.id !== removedPanelId && panel.id.startsWith("session:"),
-  ).length;
-}
-
-function useVisibleSessionPanelCount(
-  containerApi: IDockviewPanelHeaderProps["containerApi"],
-): number {
-  const [count, setCount] = useState(() => countVisibleSessionPanels(containerApi));
-  useEffect(() => {
-    const addDisposable = containerApi.onDidAddPanel(() => {
-      setCount(countVisibleSessionPanels(containerApi));
-    });
-    const removeDisposable = containerApi.onDidRemovePanel((panel) => {
-      setCount(countVisibleSessionPanels(containerApi, panel.id));
-    });
-    return () => {
-      addDisposable.dispose();
-      removeDisposable.dispose();
-    };
-  }, [containerApi]);
-  return count;
-}
-
 function SessionTabTriggerContent({
   props,
   sessionId,
@@ -306,7 +290,8 @@ function SessionTabTriggerContent({
   agentName,
   sessionState,
   isActive,
-  showCloseAction,
+  showDeleteOnClose,
+  isDeleting,
   onCloseTab,
 }: {
   props: IDockviewPanelHeaderProps;
@@ -317,7 +302,8 @@ function SessionTabTriggerContent({
   agentName: string | null;
   sessionState: TaskSessionState | null;
   isActive: boolean;
-  showCloseAction: boolean;
+  showDeleteOnClose: boolean;
+  isDeleting: boolean;
   onCloseTab: () => void;
 }) {
   return (
@@ -343,7 +329,9 @@ function SessionTabTriggerContent({
           />
         ))}
       <DockviewDefaultTab {...props} hideClose />
-      {showCloseAction && <SessionTabCloseAction sessionId={sessionId} onClose={onCloseTab} />}
+      {showDeleteOnClose && (
+        <SessionTabCloseAction sessionId={sessionId} isDeleting={isDeleting} onClose={onCloseTab} />
+      )}
     </div>
   );
 }
@@ -384,17 +372,6 @@ function useSessionMenuDelete(
 ) {
   const handleMenuDelete = useCallback(
     (_event: Event) => {
-      // The popover anchor ref is the trigger element so it stays connected
-      // throughout the confirmation flow. The trigger ref is always up-to-date
-      // because React updates it on each commit; passing a snapshot (e.g.
-      // triggerRef.current copied here) would point to a stale disconnected
-      // element if React replaces the trigger DOM node during a later render.
-      // The focus boundary is also the trigger element (not the context menu
-      // content) so the popover stays open when the context menu closes and
-      // focuses the trigger. Without this, Radix's default
-      // ContextMenu onCloseAutoFocus focuses the trigger, which fires
-      // onFocusOutside on the popover, and the disconnected context-menu-content
-      // boundary ref would fail the contains() check, closing the popover.
       openMenuDelete();
     },
     [openMenuDelete, triggerRef],
@@ -429,7 +406,8 @@ function SessionTabBody({
   agentName: string | null;
   sessionState: TaskSessionState | null;
   isActive: boolean;
-  showCloseAction: boolean;
+  showDeleteOnClose: boolean;
+  isDeleting: boolean;
   onCloseTab: () => void;
 }) {
   if (isRenaming) {
@@ -461,8 +439,7 @@ function useSessionTabTitleSync(api: IDockviewPanelHeaderProps["api"], tabTitle:
 
 type SessionTabDialogHostProps = {
   dialogs: ReturnType<typeof useSessionTabDialogState>;
-  onDeleteDialogOpenChange: (open: boolean) => void;
-  onConfirmDelete: () => void | Promise<void>;
+  deleteState: ReturnType<typeof useSessionTabDelete>;
   menuDeleteAnchorRef: RefObject<HTMLElement | null>;
   menuDeleteFocusBoundaryRef: RefObject<HTMLElement | null>;
   isPrimary: boolean;
@@ -475,8 +452,7 @@ type SessionTabDialogHostProps = {
 
 function SessionTabDialogHost({
   dialogs,
-  onDeleteDialogOpenChange,
-  onConfirmDelete,
+  deleteState,
   menuDeleteAnchorRef,
   menuDeleteFocusBoundaryRef,
   isPrimary,
@@ -488,14 +464,14 @@ function SessionTabDialogHost({
 }: SessionTabDialogHostProps) {
   return (
     <SessionTabDialogs
-      confirmDelete={false}
-      menuDeleteOpen={dialogs.confirmDelete}
+      confirmDelete={dialogs.confirmDelete && deleteState.deleteOrigin === "tab"}
+      menuDeleteOpen={dialogs.confirmDelete && deleteState.deleteOrigin === "menu"}
       menuDeleteAnchorRef={menuDeleteAnchorRef}
       menuDeleteFocusBoundaryRef={menuDeleteFocusBoundaryRef}
-      setConfirmDelete={onDeleteDialogOpenChange}
+      setConfirmDelete={deleteState.handleDeleteDialogOpenChange}
       isPrimary={isPrimary}
       sessionCount={sessionCount}
-      onConfirmDelete={onConfirmDelete}
+      onConfirmDelete={deleteState.handleConfirmDelete}
       targetName={targetName}
       taskId={taskId}
       sessionId={sessionId}
@@ -534,25 +510,17 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
     dialogs.setIsRenaming(false),
   );
   const isActive = useDockviewTabActiveState(api);
-  const visibleSessionPanelCount = useVisibleSessionPanelCount(containerApi);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
 
   useSessionTabTitleSync(api, tabTitle);
 
   const showMultiSessionBadges = sessionCount > 1;
-  const showCloseAction = visibleSessionPanelCount > 1;
-  const handleDeleteDialogOpenChange = useCallback(
-    (open: boolean) => dialogs.setConfirmDelete(open),
-    [dialogs],
-  );
-  const handleConfirmDelete = useCallback(async () => {
-    dialogs.setConfirmDelete(false);
-    await actions.handleDelete({ feedback: "toast" });
-  }, [actions.handleDelete, dialogs]);
+  const showDeleteOnClose = sessionCount > 1 && !!sessionState && isDeletable(sessionState);
+  const deleteState = useSessionTabDelete(dialogs.setConfirmDelete, actions.handleDelete);
   const triggerRef = useRef<HTMLElement>(null);
   const { menuDeleteAnchorRef, menuDeleteFocusBoundaryRef, handleMenuDelete } =
-    useSessionMenuDelete(triggerRef, () => dialogs.setConfirmDelete(true));
+    useSessionMenuDelete(triggerRef, deleteState.handleMenuDelete);
   const { handlePointerDownCapture, handleKeyDownCapture } = useSessionTabUserActivationIntent(
     sessionId,
     activeSessionId,
@@ -584,8 +552,9 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
             agentName={agentName}
             sessionState={sessionState}
             isActive={isActive}
-            showCloseAction={showCloseAction}
-            onCloseTab={actions.hideSessionPanel}
+            showDeleteOnClose={showDeleteOnClose}
+            isDeleting={deleteState.isDeletingFromTab}
+            onCloseTab={deleteState.handleCloseTab}
           />
         </ContextMenuTrigger>
         <SessionContextMenuItems
@@ -603,8 +572,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
       </ContextMenu>
       <SessionTabDialogHost
         dialogs={dialogs}
-        onDeleteDialogOpenChange={handleDeleteDialogOpenChange}
-        onConfirmDelete={handleConfirmDelete}
+        deleteState={deleteState}
         menuDeleteAnchorRef={menuDeleteAnchorRef}
         menuDeleteFocusBoundaryRef={menuDeleteFocusBoundaryRef}
         isPrimary={isPrimary}

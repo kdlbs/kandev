@@ -22,6 +22,7 @@ import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
 import type { HydrationState } from "./store";
 import { seedSettledSessionBoundaries } from "@/lib/state/slices/session/turn-actions";
 import { migrateSidebarViewDraft, migrateView } from "./slices/ui/ui-slice";
+import { mergeAgentProfileRecentUseState } from "@/lib/agent-profile-recent-use";
 
 export const defaultState = {
   kanban: defaultKanbanState.kanban,
@@ -47,6 +48,7 @@ export const defaultState = {
   settingsData: defaultSettingsState.settingsData,
   sleepInhibition: defaultSettingsState.sleepInhibition,
   userSettings: defaultSettingsState.userSettings,
+  agentProfileRecentUse: defaultSettingsState.agentProfileRecentUse,
   messages: defaultSessionState.messages,
   turns: defaultSessionState.turns,
   taskSessions: defaultSessionState.taskSessions,
@@ -56,6 +58,7 @@ export const defaultState = {
   sessionWorktreesBySessionId: defaultSessionState.sessionWorktreesBySessionId,
   pendingModel: defaultSessionState.pendingModel,
   activeModel: defaultSessionState.activeModel,
+  messagePrompts: defaultSessionState.messagePrompts,
   taskPlans: defaultSessionState.taskPlans,
   walkthroughs: defaultSessionState.walkthroughs,
   taskReview: defaultReviewState.taskReview,
@@ -255,6 +258,18 @@ function mergeAgentReviewArtifacts(initialState: HydrationState) {
   };
 }
 
+/** Merges the independently hydrated Prompt History projection. */
+function mergePromptHistoryState(initialState: HydrationState) {
+  return {
+    ...defaultState.messagePrompts,
+    ...initialState.messagePrompts,
+    generationBySession: {
+      ...defaultState.messagePrompts.generationBySession,
+      ...initialState.messagePrompts?.generationBySession,
+    },
+  };
+}
+
 /** Merges the GitHub slices for initial (SSR/boot) hydration. */
 /** Merges the GitHub slices for initial (SSR/boot) hydration. */
 function mergeGitHubState(initialState: HydrationState) {
@@ -317,6 +332,7 @@ function mergeTurnsState(
  * per-slice (kanban, turns, settings, ...) so partial payloads never clobber
  * the client's live defaults.
  */
+// eslint-disable-next-line max-lines-per-function -- merges every hydrated state slice in one place.
 export function mergeInitialState(initialState?: HydrationState): DefaultState {
   if (!initialState) return defaultState;
   return {
@@ -350,7 +366,12 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     settingsData: { ...defaultState.settingsData, ...initialState.settingsData },
     sleepInhibition: { ...defaultState.sleepInhibition, ...initialState.sleepInhibition },
     userSettings: { ...defaultState.userSettings, ...initialState.userSettings },
+    agentProfileRecentUse: mergeAgentProfileRecentUseState(
+      defaultState.agentProfileRecentUse,
+      initialState.agentProfileRecentUse ?? {},
+    ),
     messages: { ...defaultState.messages, ...initialState.messages },
+    messagePrompts: mergePromptHistoryState(initialState),
     turns: mergeTurnsState(defaultState.turns, initialState.turns, initialState.taskSessions),
     taskSessions: { ...defaultState.taskSessions, ...initialState.taskSessions },
     taskSessionsByTask: { ...defaultState.taskSessionsByTask, ...initialState.taskSessionsByTask },

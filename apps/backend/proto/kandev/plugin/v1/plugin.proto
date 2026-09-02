@@ -130,6 +130,11 @@ service Host {
   // session is running, resume/start it otherwise).
   rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
   rpc UpdateTask(UpdateTaskRequest) returns (UpdateTaskResponse);
+  // MoveTask transitions a task to a workflow step through the same path the
+  // board's own move uses (validation, WIP admission, task.moved publication,
+  // auto-start gates, queue reconciliation) — unlike UpdateTask, which rejects
+  // workflow_step_id. Requires api_write:tasks.
+  rpc MoveTask(MoveTaskRequest) returns (MoveTaskResponse);
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
   rpc PreviewPluginOwnedTaskTree(PreviewPluginOwnedTaskTreeRequest) returns (PreviewPluginOwnedTaskTreeResponse);
   rpc DeletePluginOwnedTaskTree(DeletePluginOwnedTaskTreeRequest) returns (DeletePluginOwnedTaskTreeResponse);
@@ -518,14 +523,13 @@ message WorkflowStep {
   // The on_enter action TYPES configured on this step, as authored
   // (e.g. "auto_start_agent", "queue_run"), so a plugin can describe this
   // step's intent instead of guessing from the step name or stage_type.
-  // This lists what is configured, not a guarantee that every listed type
-  // executes on every transition path: an ordinary task move currently runs
-  // only a subset (auto_start_agent, configure_session, enable_plan_mode,
-  // set_session_mode, reset_agent_context); queue_run,
-  // queue_run_for_each_participant, clear_decisions, and run_code_review
-  // currently execute only via engine-driven triggers (e.g. Office). Action
-  // config is deliberately not exposed: it carries target task ids, payloads
-  // and profile ids. Plugins must ignore action types they do not recognize.
+  // A type appearing here means it is configured, not a guarantee of when
+  // or whether it fires. Session-independent actions use step-entry dispatch,
+  // while session-shaped actions use route-specific session handling. Some
+  // auto_start_agent paths create the required session instead of requiring
+  // one to already exist. Action config is deliberately not exposed: it
+  // carries target task ids, payloads and profile ids. Plugins must ignore
+  // action types they do not recognize.
   repeated string on_enter_action_types = 10;
 }
 message ListWorkflowStepsRequest {
@@ -859,6 +863,28 @@ message UpdateTaskRequest {
 }
 message UpdateTaskResponse {
   Task task = 1;
+}
+// MoveTask transitions a task to a workflow step. workflow_id is optional:
+// omitted inherits the task's current workflow, present-empty is rejected.
+// position is not optional: an omitted position and a position of zero are
+// the same request, both placing the task at the top of the target step.
+message MoveTaskRequest {
+  string task_id = 1;
+  string workflow_step_id = 2;
+  optional string workflow_id = 3;
+  int32 position = 4;
+}
+// transitioned reports whether a ledger row was written for this move
+// (false when the task was already on the target step). queued_for_step_id
+// is the sole admission discriminator, reported on both values of
+// transitioned: absent means admitted (when transitioned) or not applicable
+// (when not), present means queued for that step holding no WIP slot.
+// from_step_id is the step the task left; empty when transitioned is false.
+message MoveTaskResponse {
+  Task task = 1;
+  bool transitioned = 2;
+  optional string queued_for_step_id = 3;
+  string from_step_id = 4;
 }
 // SendMessage delivers a prompt to a task session (api_write:messages). The
 // server records a user message stamped source = "plugin:<id>" and dispatches

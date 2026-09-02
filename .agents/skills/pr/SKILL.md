@@ -71,6 +71,18 @@ explicitly requests task tracking.
    when the user explicitly requests separate PRs. Use `--draft` if requested,
    otherwise create as ready-for-review.
 
+   **Architecture and scope gate:** Before running any PR creation command, verify
+   the authenticated actor's repository permission. On GitHub, query
+   `gh api repos/{owner}/{repo}/collaborators/{login}/permission`; `push`,
+   `maintain`, and `admin` permissions are write-authorized, so those actors may
+   open large or architectural PRs directly. On other hosts, use the equivalent
+   repository permission check. For an actor without write access, require a
+   linked issue with maintainer discussion before opening a large or architectural
+   PR. If that issue or discussion is missing, stop and report the blocker. Do not
+   open a PR to start the discussion. Prefer one logical change and the smallest
+   practical diff; split unrelated cleanup, refactoring, and feature work into
+   separate PRs.
+
    **PR title** must follow Conventional Commits format (see `/commit` for full rules). CI validates via `pr-title.yml` — the PR title becomes the squash-merge commit used for release notes.
 
    **PR body** must be built from `.github/pull_request_template.md`; fail fast if it is missing. Read the whole template before writing the body. Treat HTML comments as authoring instructions for the agent, not as output:

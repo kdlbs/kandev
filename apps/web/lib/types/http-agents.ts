@@ -372,9 +372,17 @@ export type TaskPlanRevision = {
   revision_number: number;
   title: string;
   content?: string;
+  // Character count of `content`, computed server-side so it survives even
+  // when list/WS payloads omit `content` for size.
+  content_length?: number;
   author_kind: "agent" | "user";
   author_name: string;
   revert_of_revision_id?: string | null;
+  // Workflow step snapshot at write time; empty for revisions written before
+  // this stamping existed.
+  workflow_step_id?: string;
+  workflow_step_name?: string;
+  workflow_step_color?: string;
   coalesced?: boolean;
   created_at: string;
   updated_at: string;

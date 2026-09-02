@@ -94,18 +94,37 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		return
 	}
 	switch eventType {
-	case "message_streaming", "thinking_streaming", agentEventComplete:
-		s.observeDynamicAttempt(
+	case "message_streaming":
+		s.observePromptAttempt(
 			payload.SessionID,
-			payload.ExecutionID,
+			eventExecutionID,
+			payload.Data.PromptGeneration,
+			strings.TrimSpace(payload.Data.Text) != "",
+			false,
+		)
+	case "thinking_streaming":
+		s.observePromptAttempt(
+			payload.SessionID,
+			eventExecutionID,
+			payload.Data.PromptGeneration,
 			strings.TrimSpace(payload.Data.Text) != "",
 			false,
 		)
 	case agentEventToolCall, agentEventToolUpdate:
-		s.observeDynamicAttempt(payload.SessionID, payload.ExecutionID, false, true)
+		s.observePromptAttempt(
+			payload.SessionID,
+			eventExecutionID,
+			payload.Data.PromptGeneration,
+			false,
+			true,
+		)
 	}
 	if eventType == agentEventComplete {
-		defer s.clearDynamicAttemptEvidence(payload.SessionID, payload.ExecutionID)
+		defer s.clearPromptAttemptEvidence(
+			payload.SessionID,
+			eventExecutionID,
+			payload.Data.PromptGeneration,
+		)
 	}
 
 	if !terminalCompleteStream {
@@ -303,19 +322,24 @@ func (s *Service) completeTurnForStreamEvent(
 func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
+	executionID := payload.ExecutionID
+	if executionID == "" {
+		executionID = payload.AgentID
+	}
 	if sessionID != "" {
 		failure := watcher.AgentEventData{
 			TaskID:           taskID,
 			SessionID:        sessionID,
-			AgentExecutionID: payload.ExecutionID,
+			AgentExecutionID: executionID,
 			AgentID:          payload.AgentID,
+			PromptGeneration: payload.Data.PromptGeneration,
 			ErrorMessage:     payload.Data.Error,
 			ProviderError:    payload.Data.ProviderError,
 		}
 		if failure.ErrorMessage == "" {
 			failure.ErrorMessage = payload.Data.Text
 		}
-		failure = s.withDynamicAttemptEvidence(failure)
+		failure = s.withPromptAttemptEvidence(failure)
 		if s.routeDynamicAgentFailure(ctx, failure, classifyKanbanFailure(failure)) {
 			return
 		}

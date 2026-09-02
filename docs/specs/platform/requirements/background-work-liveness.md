@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-07-21
-updated: 2026-08-01
+updated: 2026-09-01
 owners:
   - kandev
 ---
@@ -28,6 +28,7 @@ ACP providers do not yet expose a consistent, accountable lifecycle for subagent
 - **AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.6:** Adapter attestation is accounting evidence only unless the `features.claudeBackgroundPromptHandoff` experiment is enabled for a `claude-acp` session.
 - **AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.7:** When that experiment is enabled, all Claude modes covered by ADR-0049 retain their fine-grained behavior: subagents, `run_in_background` shells, and Monitor watches may expose background activity and a generation-matched foreground handoff may admit the next prompt.
 - **AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.8:** Non-Claude providers remain coarse even when the experiment is enabled.
+- **AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.9:** After a backend restart or reconnect, opening or refreshing a settled session removes any pre-restart background-work status retained by the client. A live activity event received after a refresh starts remains authoritative over the older refresh snapshot.
 
 ## Migrated source detail
 
@@ -64,6 +65,9 @@ lifecycle unless a deployment deliberately enables the Claude-only experiment.
   Monitor watches may expose background activity and a generation-matched
   foreground handoff may admit the next prompt.
 - Non-Claude providers remain coarse even when the experiment is enabled.
+- After a backend restart or reconnect, a settled session cannot retain a
+  background-work status from the previous backend process. A newer live
+  activity event still wins over an older session-list response.
 - The experiment is off in every embedded profile, high risk,
   restart-required, and available through
   `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF`.
@@ -150,6 +154,13 @@ truth for prompt admission and operator-visible activity.
   the corresponding question or shield-question indicator.
 - **GIVEN** an execution terminates with orphaned tool ownership and background
   work, **WHEN** teardown runs, **THEN** its owned accounting state is released.
+- **GIVEN** the client retained `background` for a session before the backend
+  restarted, **WHEN** the resumed session is settled and its authoritative
+  session record omits `foreground_activity`, **THEN** opening or refreshing
+  the task clears the stale background-work status.
+- **GIVEN** a session-list request is in flight, **WHEN** a newer activity event
+  reaches the client before the response is applied, **THEN** the response does
+  not overwrite that newer activity projection.
 
 ## Out of scope
 
@@ -169,6 +180,12 @@ truth for prompt admission and operator-visible activity.
 supersedes the operator policy in
 [ADR 0049 — Fine-grained foreground-idle busy signal](../../../decisions/0049-fine-grained-foreground-idle-busy-signal.md).
 
+## System design
+
+[Background Work Liveness System Design](../system-design/background-work-liveness.md)
+
 ## Implementation plan
 
 [Coarse running busy signal fix plan](../../../plans/coarse-running-busy-signal/plan.md)
+
+[Settled session activity reconciliation fix plan](../../../plans/settled-session-activity-reconciliation/plan.md)

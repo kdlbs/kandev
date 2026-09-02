@@ -31,6 +31,37 @@ export function formatRelativeCompact(dateStr: string, now: number = Date.now())
 }
 
 /**
+ * Sidebar-only elapsed time with a stable, direction-free visual shape. Unlike
+ * `formatRelativeTime`, this deliberately uses floor-based elapsed buckets and
+ * catalog-backed unit tokens so task rows stay compact and aligned.
+ */
+export function formatSidebarElapsedTime(dateStr: string, now: number = Date.now()): string {
+  if (!dateStr) return "";
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const elapsedSeconds = Math.max(0, Math.floor((now - date.getTime()) / 1000));
+  if (elapsedSeconds < 60) return t("common:sidebarSeconds", { count: elapsedSeconds });
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) return t("common:sidebarMinutes", { count: elapsedMinutes });
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return t("common:sidebarHours", { count: elapsedHours });
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  if (elapsedDays < 7) return t("common:sidebarDays", { count: elapsedDays });
+
+  const elapsedWeeks = Math.floor(elapsedDays / 7);
+  if (elapsedDays < 365) return t("common:sidebarWeeks", { count: elapsedWeeks });
+
+  const elapsedYears = Math.floor(elapsedDays / 365);
+  return elapsedYears > 99
+    ? t("common:sidebarYearsMax")
+    : t("common:sidebarYears", { count: elapsedYears });
+}
+
+/**
  * Compact relative time. Behavior-compatible with the former
  * `lib/utils/time.ts` `timeAgo` under `en`: "" for empty/invalid input,
  * "just now" (<60s), "{n}m ago" (<60m), "{n}h ago" (<24h), "{n}d ago" else.

@@ -30,6 +30,7 @@ async function seedTaskWithPR(
   await apiClient.mockGitHubAssociateTaskPR({
     task_id: task.id,
     workspace_id: seedData.workspaceId,
+    repository_id: seedData.repositoryId,
     owner: OWNER,
     repo: REPO,
     pr_number: PR_NUMBER,
@@ -376,6 +377,83 @@ test.describe("PR CI automation options", () => {
     await expect(popover.getByRole("alert")).toContainText(
       "Lifecycle prompt could not be delivered to a task session.",
     );
+    await expect(popover.getByRole("button", { name: "Refresh" })).toBeVisible();
+  });
+
+  test("desktop retries one failed automatic merge for the reviewed head", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const headSHA = "head-auto-merge-retry-desktop";
+    const taskId = await seedTaskWithPR(apiClient, seedData, "CI auto-merge retry desktop", {
+      head_sha: headSHA,
+      checks_state: "success",
+      checks_total: 1,
+      checks_passing: 1,
+      unresolved_review_threads: 0,
+      mergeable_state: "clean",
+    });
+    await apiClient.mockGitHubSetMergeOutcome(OWNER, REPO, PR_NUMBER, "failed");
+    await apiClient.updateTaskCIAutomationOptions(taskId, {
+      repository_id: seedData.repositoryId,
+      pr_number: PR_NUMBER,
+      auto_merge_enabled: true,
+    });
+
+    await expect
+      .poll(async () => {
+        const options = await apiClient.getTaskCIAutomationOptions(taskId);
+        const state = options.pr_states.find((item) => item.pr_number === PR_NUMBER);
+        return { kind: state?.last_error_kind, result: state?.last_merge_result };
+      })
+      .toEqual({ kind: "auto_merge", result: "failed" });
+    await expect.poll(() => apiClient.mockGitHubGetMergeAttempts()).toHaveLength(1);
+
+    // An unchanged provider event reevaluates the PR but cannot repeat the
+    // failed signature without an explicit retry authorization.
+    await apiClient.mockGitHubTransitionMergeQueue({
+      task_id: taskId,
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      head_sha: headSHA,
+      merge_queue_state: "",
+      checks: [{ name: "required", status: "completed", conclusion: "success" }],
+    });
+    await expect.poll(() => apiClient.mockGitHubGetMergeAttempts()).toHaveLength(1);
+
+    const session = await openTask(testPage, taskId);
+    const popover = session.prTopbarPopover();
+    const retry = popover.getByRole("button", { name: "Retry" });
+    await expect(retry).toBeVisible();
+    await apiClient.mockGitHubSetMergeOutcome(OWNER, REPO, PR_NUMBER, "queued");
+    await retry.click();
+
+    await expect.poll(() => apiClient.mockGitHubGetMergeAttempts()).toHaveLength(2);
+    const attempts = await apiClient.mockGitHubGetMergeAttempts();
+    expect(attempts).toEqual([
+      expect.objectContaining({
+        owner: OWNER,
+        repo: REPO,
+        number: PR_NUMBER,
+        expected_head_sha: headSHA,
+      }),
+      expect.objectContaining({
+        owner: OWNER,
+        repo: REPO,
+        number: PR_NUMBER,
+        expected_head_sha: headSHA,
+      }),
+    ]);
+    await expect
+      .poll(async () => {
+        const options = await apiClient.getTaskCIAutomationOptions(taskId);
+        const state = options.pr_states.find((item) => item.pr_number === PR_NUMBER);
+        return { error: state?.last_error ?? null, result: state?.last_merge_result };
+      })
+      .toEqual({ error: null, result: "accepted" });
   });
 
   test("desktop merge queue recovery proves repair and new-head requeue", async ({

@@ -156,13 +156,21 @@ func (r *idleSessionReaper) runLoop(ctx context.Context, tick func(ctx context.C
 
 // startIdleSessionReaper wires the reaper into Service.Start. The
 // reaper captures the canonical fail-closed reclaim primitive so
-// the per-tick work is a thin scan + loop, not a new policy.
+// the per-tick work is a thin scan + loop, not a new policy. The tick also
+// drives reclaimStuckSignalSessionsOnce (stuck_signal_watchdog.go) and
+// reapStalePendingMovesOnce (pending_move_reaper.go) — further scans
+// sharing this ticker rather than background goroutines of their own,
+// preserving the reaper's single-goroutine-owner invariant. The 30s
+// cadence is far finer than either of those needs; they are here for the
+// goroutine budget, not for the interval.
 func (s *Service) startIdleSessionReaper(ctx context.Context) {
 	if s.idleReaper == nil {
 		return
 	}
 	if !s.idleReaper.start(ctx, func(tickCtx context.Context) {
 		s.reclaimIdleSessionsOnce(tickCtx)
+		s.reclaimStuckSignalSessionsOnce(tickCtx)
+		s.reapStalePendingMovesOnce(tickCtx)
 	}) {
 		return
 	}

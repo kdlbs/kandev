@@ -141,6 +141,7 @@ type UserSettings struct {
 	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                              `json:"app_status_bar_enabled"`
 	AppStatusBarOrder                 AppStatusBarOrder                 `json:"app_status_bar_order"`
+	QuickChatTabOrderByWorkspace      map[string][]string               `json:"quick_chat_tab_order_by_workspace"`
 	KanbanHiddenStepIDs               map[string][]string               `json:"kanban_hidden_step_ids"`
 	WorkflowIDsWithAutoHideEmptySteps []string                          `json:"workflow_ids_with_auto_hide_empty_steps"`
 	Revision                          int64                             `json:"revision"`
@@ -232,4 +233,55 @@ type TaskCreateLastUsed struct {
 	AgentProfileID         string            `json:"agent_profile_id"`
 	ExecutorProfileID      string            `json:"executor_profile_id"`
 	WorkflowIDsByWorkspace map[string]string `json:"workflow_ids_by_workspace"`
+}
+
+// AgentProfileRecentUseContext identifies an operational selector whose
+// profile order is remembered independently from user settings.
+type AgentProfileRecentUseContext string
+
+const (
+	AgentProfileRecentUseTaskCreate  AgentProfileRecentUseContext = "task_create"
+	AgentProfileRecentUseTaskSession AgentProfileRecentUseContext = "task_session"
+	AgentProfileRecentUseQuickChat   AgentProfileRecentUseContext = "quick_chat"
+	AgentProfileRecentUseConfigChat  AgentProfileRecentUseContext = "config_chat"
+)
+
+const (
+	AgentProfileRecentUseMaxProfiles       = 10
+	AgentProfileRecentUseMaxContexts       = 4
+	AgentProfileRecentUseMaxProfileIDBytes = 255
+)
+
+// SupportedAgentProfileRecentUseContexts returns the closed set of contexts
+// that may be persisted for a user.
+func SupportedAgentProfileRecentUseContexts() []AgentProfileRecentUseContext {
+	return []AgentProfileRecentUseContext{
+		AgentProfileRecentUseTaskCreate,
+		AgentProfileRecentUseTaskSession,
+		AgentProfileRecentUseQuickChat,
+		AgentProfileRecentUseConfigChat,
+	}
+}
+
+// IsAgentProfileRecentUseContext reports whether context is supported.
+func IsAgentProfileRecentUseContext(context AgentProfileRecentUseContext) bool {
+	switch context {
+	case AgentProfileRecentUseTaskCreate,
+		AgentProfileRecentUseTaskSession,
+		AgentProfileRecentUseQuickChat,
+		AgentProfileRecentUseConfigChat:
+		return true
+	default:
+		return false
+	}
+}
+
+// AgentProfileRecentUse is the persisted move-to-front history for one user
+// and operational selector context.
+type AgentProfileRecentUse struct {
+	UserID     string                       `json:"user_id"`
+	Context    AgentProfileRecentUseContext `json:"context"`
+	ProfileIDs []string                     `json:"profile_ids"`
+	Revision   int64                        `json:"revision"`
+	UpdatedAt  time.Time                    `json:"updated_at"`
 }

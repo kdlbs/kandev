@@ -208,6 +208,19 @@ type Repository interface {
 	// TakePendingMove returns and removes the deferred move for a session.
 	// Returns nil, nil if absent.
 	TakePendingMove(ctx context.Context, sessionID string) (*PendingMove, error)
+
+	// ListPendingMoves returns every armed deferred move, keyed by session.
+	// TakePendingMove can only reach a move whose session still emits
+	// agent.ready, so the sweep needs a session-independent view to find rows
+	// nothing will ever replay.
+	ListPendingMoves(ctx context.Context) ([]PendingMoveRecord, error)
+
+	// DeletePendingMoveIfMatch removes the deferred move only when the stored
+	// row still matches the exact record previously returned by
+	// ListPendingMoves. When handoffEntryID is non-empty, the correlated queue
+	// entry is removed in the same transaction. Reports whether the move row was
+	// removed; a missing or replaced row is a successful no-op, not an error.
+	DeletePendingMoveIfMatch(ctx context.Context, expected PendingMoveRecord, handoffEntryID string) (bool, error)
 }
 
 // applyMetadataUpdates merges metadata key updates into current; a nil value removes the key.

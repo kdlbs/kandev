@@ -18,6 +18,16 @@ const SETTLED_SESSION_STATES = new Set([
 ]);
 const ACTIVE_SESSION_STATES = new Set(["STARTING", "RUNNING"]);
 
+export function quickChatTabReferences(dialog: Locator): Promise<string[]> {
+  return dialog
+    .getByTestId("quick-chat-sortable-tab")
+    .evaluateAll((tabs) =>
+      tabs
+        .map((tab) => tab.getAttribute("data-tab-reference"))
+        .filter((reference): reference is string => Boolean(reference)),
+    );
+}
+
 /**
  * Establish a backend-confirmed settle point before arming waits for the next
  * turn. The WS watcher does not replay notifications, so the startup settle
@@ -136,4 +146,40 @@ export async function sendQuickChatMessage(dialog: Locator, page: Page, text: st
     await dialog.getByTestId("submit-message-button").click({ timeout: 1_000 });
     await expect(editor).toHaveText("", { timeout: 2_000 });
   }).toPass({ timeout: 30_000, intervals: [250, 500, 1_000] });
+}
+
+export async function readQuickChatViewportLayout(dialog: Locator) {
+  return dialog.evaluate(async (element) => {
+    const animations = element.getAnimations({ subtree: true }).filter((animation) => {
+      const iterations = animation.effect?.getComputedTiming().iterations;
+      return typeof iterations === "number" && Number.isFinite(iterations);
+    });
+    await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
+
+    const content = element.querySelector<HTMLElement>('[data-testid="quick-chat-content"]');
+    const messages = element.querySelector<HTMLElement>('[data-testid="quick-chat-messages"]');
+    const composer = element.querySelector<HTMLElement>('[data-testid="chat-input-area"]');
+    const messageScroller = messages?.querySelector<HTMLElement>(
+      ".session-panel-content-wrapper > div",
+    );
+    if (!content || !composer || !messageScroller) {
+      throw new Error("Quick Chat viewport layout elements are unavailable");
+    }
+
+    const dialogBounds = element.getBoundingClientRect();
+    const contentBounds = content.getBoundingClientRect();
+    const composerBounds = composer.getBoundingClientRect();
+    return {
+      dialogTop: dialogBounds.top,
+      dialogBottom: dialogBounds.bottom,
+      dialogClientHeight: element.clientHeight,
+      dialogScrollHeight: element.scrollHeight,
+      contentTop: contentBounds.top,
+      contentBottom: contentBounds.bottom,
+      composerTop: composerBounds.top,
+      composerBottom: composerBounds.bottom,
+      messageScrollerClientHeight: messageScroller.clientHeight,
+      messageScrollerScrollHeight: messageScroller.scrollHeight,
+    };
+  });
 }

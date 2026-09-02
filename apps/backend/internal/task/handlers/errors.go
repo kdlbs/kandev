@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
 
@@ -28,6 +29,10 @@ const (
 func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback string) {
 	if isClientDisconnect(err) {
 		abortClientDisconnect(c)
+		return
+	}
+	if status, ok := repositorySelectionHTTPStatus(err); ok {
+		c.JSON(status, taskErrorBody(err))
 		return
 	}
 	if isNotFound(err) {
@@ -55,10 +60,48 @@ func taskErrorBody(err error) gin.H {
 }
 
 func taskErrorDetails(err error) map[string]interface{} {
+	var selectionErr *service.RepositorySelectionError
+	if errors.As(err, &selectionErr) {
+		return map[string]interface{}{"error_code": string(selectionErr.Code)}
+	}
 	if errors.Is(err, service.ErrRepositoryBranchPolicyStale) {
 		return map[string]interface{}{"error_code": service.BranchPolicyStaleErrorCode}
 	}
 	return nil
+}
+
+func repositorySelectionHTTPStatus(err error) (int, bool) {
+	var selectionErr *service.RepositorySelectionError
+	if !errors.As(err, &selectionErr) {
+		return 0, false
+	}
+	switch selectionErr.Code {
+	case service.RepositorySelectionErrorInvalid:
+		return http.StatusBadRequest, true
+	case service.RepositorySelectionErrorNotFound:
+		return http.StatusNotFound, true
+	case service.RepositorySelectionErrorUnavailable:
+		return http.StatusServiceUnavailable, true
+	default:
+		return http.StatusInternalServerError, true
+	}
+}
+
+func repositorySelectionWSCode(err error) (string, bool) {
+	var selectionErr *service.RepositorySelectionError
+	if !errors.As(err, &selectionErr) {
+		return "", false
+	}
+	switch selectionErr.Code {
+	case service.RepositorySelectionErrorInvalid:
+		return ws.ErrorCodeValidation, true
+	case service.RepositorySelectionErrorNotFound:
+		return ws.ErrorCodeNotFound, true
+	case service.RepositorySelectionErrorUnavailable:
+		return ws.ErrorCodeUnavailable, true
+	default:
+		return ws.ErrorCodeInternalError, true
+	}
 }
 
 func handleSelectedMoveError(c *gin.Context, log *logger.Logger, err error) {

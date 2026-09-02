@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable max-lines -- this component composes the complete transcript surface. */
+
 import { useCallback, useEffect, useMemo, useRef, useState, memo, type RefObject } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
@@ -32,10 +34,12 @@ import { findUnreadDividerItemId, lastRenderedMessageId } from "@/lib/session-un
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useSessionReadTracking } from "./chat/use-session-read-tracking";
 import { useDrainOlderMessages } from "@/components/task/chat/use-drain-older-messages";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { routePanelMouseDown } from "./chat/route-panel-mouse-down";
 import { useTranslation } from "react-i18next";
+
+import { loadMessageWindowAround } from "@/hooks/domains/session/load-message-window";
 import { TaskChatLaunchError } from "./simple/components/task-chat-launch-error";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
@@ -54,24 +58,104 @@ function useClarificationKey(agentMessageCount: number) {
 }
 
 /** Scrolls a non-Dockview host target after the message row becomes rendered. */
-function usePendingMessageScroll(
-  messageListRef: RefObject<MessageListHandle | null>,
-  messageId: string | null | undefined,
-  onConsumed: ((messageId: string) => void) | undefined,
-  readinessKey: string,
-) {
+type PendingMessageScrollOptions = {
+  messageListRef: RefObject<MessageListHandle | null>;
+  sessionId: string | null;
+  messageId: string | null | undefined;
+  onConsumed: ((messageId: string) => void) | undefined;
+  readinessKey: string;
+  isInitialMessagesLoading: boolean;
+};
+
+// eslint-disable-next-line max-lines-per-function -- coordinates the target lifecycle, request guard, and retry state.
+export function usePendingMessageScroll({
+  messageListRef,
+  sessionId,
+  messageId,
+  onConsumed,
+  readinessKey,
+  isInitialMessagesLoading,
+}: PendingMessageScrollOptions) {
+  const store = useAppStoreApi();
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const [retryVersion, setRetryVersion] = useState(0);
+  const requestedTargetRef = useRef<string | null>(null);
+  const activeRequestRef = useRef<string | null>(null);
+  const targetIdentityRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
+  const retry = useCallback(() => setRetryVersion((version) => version + 1), []);
+
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
+  );
+
   useEffect(() => {
-    if (!messageId) return;
+    if (!sessionId || !messageId) {
+      targetIdentityRef.current = null;
+      requestedTargetRef.current = null;
+      setIsLoading(false);
+      setHasError(false);
+      return;
+    }
+    const targetIdentity = `${sessionId}\u0000${messageId}`;
+    if (targetIdentityRef.current !== targetIdentity) {
+      targetIdentityRef.current = targetIdentity;
+      requestedTargetRef.current = null;
+    }
+    setHasError(false);
     let attempts = 0;
     let frame = 0;
+    const isCurrentTarget = () =>
+      mountedRef.current && targetIdentityRef.current === targetIdentity;
     const attemptScroll = () => {
+      if (!isCurrentTarget()) return;
       if (
         messageListRef.current?.scrollToMessage(messageId, {
           align: "start",
           behavior: "auto",
         })
       ) {
+        requestedTargetRef.current = null;
         onConsumed?.(messageId);
+        return;
+      }
+      if (isInitialMessagesLoading) return;
+      const loaded = store
+        .getState()
+        .messages.bySession[sessionId]?.some((message) => message.id === messageId);
+      if (!loaded && requestedTargetRef.current !== messageId) {
+        requestedTargetRef.current = messageId;
+        activeRequestRef.current = targetIdentity;
+        setIsLoading(true);
+        void loadMessageWindowAround(
+          sessionId,
+          messageId,
+          () => isCurrentTarget() && requestedTargetRef.current === messageId,
+          store,
+        )
+          .then((result) => {
+            if (!isCurrentTarget() || activeRequestRef.current !== targetIdentity) return;
+            if (result.kind === "deleted-target") {
+              requestedTargetRef.current = null;
+              onConsumed?.(messageId);
+            }
+          })
+          .catch(() => {
+            if (isCurrentTarget() && activeRequestRef.current === targetIdentity) {
+              requestedTargetRef.current = null;
+              setHasError(true);
+            }
+          })
+          .finally(() => {
+            if (activeRequestRef.current === targetIdentity) {
+              activeRequestRef.current = null;
+              if (mountedRef.current) setIsLoading(false);
+            }
+          });
         return;
       }
       attempts += 1;
@@ -79,7 +163,17 @@ function usePendingMessageScroll(
     };
     frame = requestAnimationFrame(attemptScroll);
     return () => cancelAnimationFrame(frame);
-  }, [messageId, messageListRef, onConsumed, readinessKey]);
+  }, [
+    isInitialMessagesLoading,
+    messageId,
+    messageListRef,
+    onConsumed,
+    readinessKey,
+    retryVersion,
+    sessionId,
+    store,
+  ]);
+  return { isLoading, hasError, retry };
 }
 
 /** Computes the render-item key the unread "New" divider should appear
@@ -268,6 +362,9 @@ export function useScrollTargetConsumption({
   const scrollTarget = useDockviewStore((state) => state.scrollTarget);
   const clearScrollTarget = useDockviewStore((state) => state.clearScrollTarget);
   const clearScrollTargetForOwner = useDockviewStore((state) => state.clearScrollTargetForOwner);
+  const appStore = useAppStoreApi();
+  const [jumpLoading, setJumpLoading] = useState(false);
+  const jumpRequestCount = useRef(0);
   const previousSessionId = useRef<string | null>(null);
 
   useEffect(() => {
@@ -313,11 +410,35 @@ export function useScrollTargetConsumption({
         if (!latest || latest.token !== scrollTarget.token) return;
         if (messageListRef.current?.scrollToMessage(scrollTarget.messageId, { align: "start" })) {
           clearScrollTarget(scrollTarget.token);
+          return;
         }
+        const loaded = appStore
+          .getState()
+          .messages.bySession[
+            scrollTarget.sessionId
+          ]?.some((message) => message.id === scrollTarget.messageId);
+        if (loaded) return;
+        jumpRequestCount.current += 1;
+        setJumpLoading(true);
+        void loadMessageWindowAround(
+          scrollTarget.sessionId,
+          scrollTarget.messageId,
+          () => useDockviewStore.getState().scrollTarget?.token === scrollTarget.token,
+          appStore,
+        )
+          .then((result) => {
+            if (result.kind !== "merged") clearScrollTarget(scrollTarget.token);
+          })
+          .catch(() => clearScrollTarget(scrollTarget.token))
+          .finally(() => {
+            jumpRequestCount.current -= 1;
+            setJumpLoading(jumpRequestCount.current > 0);
+          });
       });
     });
     return () => cancelAnimationFrame(frame);
   }, [
+    appStore,
     clearScrollTarget,
     isInitialMessagesLoading,
     isVisible,
@@ -327,6 +448,7 @@ export function useScrollTargetConsumption({
     resolvedSessionId,
     scrollTarget,
   ]);
+  return jumpLoading;
 }
 
 // eslint-disable-next-line complexity, max-lines-per-function -- composes many sub-panels; each concern already factored into its own hook
@@ -353,6 +475,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     launchErrorContext?.statusSummary,
   );
 
+  const { t } = useTranslation();
   useSettingsData(true);
   const panelState = useChatPanelState({
     sessionId,
@@ -377,12 +500,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     pendingClarification,
     pendingClarificationGroup,
   } = panelState;
-  const dividerBeforeItemKey = useUnreadDividerBeforeItemKey(
-    resolvedSessionId,
-    isVisible,
-    groupedItems,
-    isInitialMessagesLoading,
-  );
   const showAgentStartHint = useComposerAgentStartHint(
     resolvedSessionId,
     session?.state,
@@ -394,7 +511,13 @@ export const TaskChatPanel = memo(function TaskChatPanel({
 
   const panelRef = useRef<HTMLDivElement>(null);
   const messageListRef = useRef<MessageListHandle>(null);
-  useScrollTargetConsumption({
+  const dividerBeforeItemKey = useUnreadDividerBeforeItemKey(
+    resolvedSessionId,
+    isVisible,
+    groupedItems,
+    isInitialMessagesLoading,
+  );
+  const isDockviewJumpLoading = useScrollTargetConsumption({
     resolvedSessionId,
     isVisible,
     panelId,
@@ -402,12 +525,19 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     isInitialMessagesLoading,
     renderedMessageCount: allMessages.length,
   });
-  usePendingMessageScroll(
+  const {
+    isLoading: isPendingJumpLoading,
+    hasError: hasPendingJumpError,
+    retry: retryPendingJump,
+  } = usePendingMessageScroll({
     messageListRef,
-    pendingScrollToMessageId,
-    onPendingScrollConsumed,
-    `${allMessages.length}:${isInitialMessagesLoading}`,
-  );
+    sessionId: resolvedSessionId,
+    messageId: pendingScrollToMessageId,
+    onConsumed: onPendingScrollConsumed,
+    readinessKey: `${allMessages.length}:${isInitialMessagesLoading}`,
+    isInitialMessagesLoading,
+  });
+  const isJumpLoading = isDockviewJumpLoading || isPendingJumpLoading;
   const lastPromptMessageId = useMemo(() => getLastUserMessageId(allMessages), [allMessages]);
   const lastPromptMessage = useMemo(
     () =>
@@ -521,6 +651,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           firstMessageId={firstMessageId}
           onFirstMessageHiddenChange={setIsFirstMessageHidden}
           anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
+          isVisible={isVisible}
           stickyPromptBar={
             showAnchoredBar && lastPromptMessage ? (
               <AnchoredLastPromptBar
@@ -533,6 +664,26 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             ) : undefined
           }
         />
+        {isJumpLoading && (
+          <div
+            data-testid="transcript-jump-loading"
+            role="status"
+            aria-live="polite"
+            className="absolute right-3 top-3 rounded-md bg-background px-2 py-1 text-xs text-muted-foreground shadow"
+          >
+            {t("task:loading")}
+          </div>
+        )}
+        {hasPendingJumpError && (
+          <button
+            type="button"
+            data-testid="transcript-jump-retry"
+            className="absolute right-3 top-3 min-h-11 rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground shadow"
+            onClick={retryPendingJump}
+          >
+            {t("task:retry")}
+          </button>
+        )}
         <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
       </PanelBody>
       {!isArchived && (

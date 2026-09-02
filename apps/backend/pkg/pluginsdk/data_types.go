@@ -509,11 +509,8 @@ type WorkflowStep struct {
 	WIPLimit       int32 // 0 means unlimited
 	AgentProfileID string
 	// OnEnterActionTypes lists the on_enter action types configured on this
-	// step, as authored. This lists what is configured, not a guarantee that
-	// every listed type executes on every transition path. The ordinary move
-	// path handles auto_start_agent, configure_session, enable_plan_mode,
-	// set_session_mode and reset_agent_context. Other action types can run only
-	// on applicable workflow-engine paths. Config maps are deliberately not
+	// step, as authored. A type appearing here means it is configured, not a
+	// guarantee of when or whether it fires. Config maps are deliberately not
 	// exposed. Nil when the step has no on_enter actions, never an empty
 	// non-nil slice. Callers must ignore action types they do not recognize.
 	OnEnterActionTypes []string
@@ -1198,8 +1195,13 @@ func pluginTaskLaunchOptionsFromProto(p *pluginv1.PluginTaskLaunchOptions) *Plug
 // UpdateTaskInput is the Go-native mirror of
 // kandev.plugin.v1.UpdateTaskRequest. Every field except ID is optional: a nil
 // pointer leaves that field untouched, a non-nil pointer overwrites it. The
-// conservative field surface (title/description/state/workflow_step_id) is the
-// documented plugin-writable mask.
+// conservative field surface (title/description/state) is the documented
+// plugin-writable mask. WorkflowStepID is rejected when non-nil — it exists
+// on this struct only for wire-shape symmetry with UpdateTaskRequest; use
+// TaskReader.Move (see host.go) to transition a task between workflow steps,
+// which routes through the same validation, WIP admission, task.moved
+// publication, auto-start gates, and queue reconciliation the board's own
+// move uses.
 type UpdateTaskInput struct {
 	ID             string
 	Title          *string
@@ -1229,6 +1231,88 @@ func updateTaskInputFromProto(p *pluginv1.UpdateTaskRequest) UpdateTaskInput {
 		State:          p.State,
 		WorkflowStepID: p.WorkflowStepId,
 	}
+}
+
+// MoveTaskInput is the Go-native mirror of kandev.plugin.v1.MoveTaskRequest.
+// Unlike Update, Move transitions the task through the same path the board's
+// own move uses, so on_enter actions (auto-start included) actually fire.
+// WorkflowID is optional: nil inherits the task's current workflow; a
+// pointer to "" is rejected rather than treated as inherit. Position is not
+// optional: an omitted position and a position of zero are the same
+// request, both placing the task at the top of the target step.
+type MoveTaskInput struct {
+	TaskID         string
+	WorkflowStepID string
+	WorkflowID     *string
+	Position       int32
+}
+
+func (in MoveTaskInput) toProto() *pluginv1.MoveTaskRequest {
+	return &pluginv1.MoveTaskRequest{
+		TaskId:         in.TaskID,
+		WorkflowStepId: in.WorkflowStepID,
+		WorkflowId:     in.WorkflowID,
+		Position:       in.Position,
+	}
+}
+
+func moveTaskInputFromProto(p *pluginv1.MoveTaskRequest) MoveTaskInput {
+	if p == nil {
+		return MoveTaskInput{}
+	}
+	return MoveTaskInput{
+		TaskID:         p.GetTaskId(),
+		WorkflowStepID: p.GetWorkflowStepId(),
+		WorkflowID:     p.WorkflowId,
+		Position:       p.GetPosition(),
+	}
+}
+
+// MoveTaskOutcome is the Go-native mirror of kandev.plugin.v1.MoveTaskResponse.
+// Transitioned reports whether a ledger row was written for this move (false
+// when the task was already on the target step). QueuedForStepID is the sole
+// admission discriminator, reported on both values of Transitioned: nil means
+// admitted (when Transitioned) or not applicable (when not); non-nil means
+// queued for that step holding no WIP slot. FromStepID is the step the task
+// left; empty when Transitioned is false.
+type MoveTaskOutcome struct {
+	Task            *Task
+	Transitioned    bool
+	QueuedForStepID *string
+	FromStepID      string
+}
+
+func (o MoveTaskOutcome) toProto() (*pluginv1.MoveTaskResponse, error) {
+	var protoTask *pluginv1.Task
+	if o.Task != nil {
+		var err error
+		protoTask, err = o.Task.toProto()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &pluginv1.MoveTaskResponse{
+		Task:            protoTask,
+		Transitioned:    o.Transitioned,
+		QueuedForStepId: o.QueuedForStepID,
+		FromStepId:      o.FromStepID,
+	}, nil
+}
+
+func moveTaskOutcomeFromProto(p *pluginv1.MoveTaskResponse) (*MoveTaskOutcome, error) {
+	if p == nil {
+		return nil, nil
+	}
+	task, err := taskFromProto(p.GetTask())
+	if err != nil {
+		return nil, err
+	}
+	return &MoveTaskOutcome{
+		Task:            &task,
+		Transitioned:    p.GetTransitioned(),
+		QueuedForStepID: p.QueuedForStepId,
+		FromStepID:      p.GetFromStepId(),
+	}, nil
 }
 
 // MessageDispatch is the Go-native mirror of

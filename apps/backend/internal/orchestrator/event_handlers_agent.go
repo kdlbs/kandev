@@ -453,6 +453,12 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		}
 		s.executeQueuedMessageWithReservation(data.SessionID, deferredLifecycleDispatch, deferredLifecycleReservation)
 	}()
+	var deferredPassthroughRunning func()
+	defer func() {
+		if deferredPassthroughRunning != nil {
+			deferredPassthroughRunning()
+		}
+	}()
 
 	if s.isSessionResetInProgress(data.SessionID) {
 		s.logger.Debug("ignoring agent.ready while session reset is in progress",
@@ -665,8 +671,15 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// avoid racing on_enter against the running turn. Apply it now: the move
 	// is the explicit transition the agent requested, so skip the regular
 	// on_turn_complete evaluation against the (still old) step.
-	if pendingMove, exists := s.messageQueue.TakePendingMove(ctx, data.SessionID); exists {
-		s.applyPendingMove(ctx, data.TaskID, data.SessionID, session, pendingMove)
+	//
+	// A move that has been armed longer than the TTL is not applied: the board
+	// state it was authored against is long gone, and applying it would
+	// relocate the card behind the user's back. discardStalePendingMove drops
+	// it (and its hand-off prompt), so this turn falls through to the normal
+	// on_turn_complete handling below, exactly as if no move had been armed.
+	// Fresh moves are claimed with an exact-row comparison before application.
+	// See pending_move_reaper.go.
+	if s.handlePendingMoveAtAgentReady(ctx, data.TaskID, data.SessionID, session) {
 		return
 	}
 
@@ -717,7 +730,20 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			return
 		}
 		if queuedMsg.Content != "" {
-			if err := s.deliverPassthroughPrompt(ctx, data.SessionID, queuedMsg.Content); err != nil {
+			var err error
+			if preparer, ok := s.agentManager.(passthroughRunningPreparer); ok {
+				deferredPassthroughRunning, err = preparer.PreparePassthroughRunning(data.SessionID)
+				if err != nil {
+					s.logger.Warn("failed to prepare passthrough as running before queued prompt",
+						zap.String("session_id", data.SessionID),
+						zap.Error(err))
+					return
+				}
+				err = s.writePassthroughPrompt(ctx, data.SessionID, queuedMsg.Content)
+			} else {
+				err = s.deliverPassthroughPrompt(ctx, data.SessionID, queuedMsg.Content)
+			}
+			if err != nil {
 				s.logger.Warn("failed to deliver queued message to passthrough",
 					zap.String("session_id", data.SessionID),
 					zap.Error(err))
@@ -1330,7 +1356,8 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 }
 
 func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.AgentEventData) {
-	data = s.withDynamicAttemptEvidence(data)
+	data = s.withPromptAttemptEvidence(data)
+	defer s.clearPromptAttemptEvidence(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
 	s.logger.Warn("handling agent failed",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
@@ -1419,7 +1446,7 @@ func (s *Service) shouldDropSessionFailure(
 		return dropWhenUnavailable, ""
 	}
 	if isTerminalSessionState(session.State) {
-		s.resetTransientRetry(data.SessionID)
+		s.resetTransientRetryWithContext(ctx, data.SessionID, true)
 		s.logger.Debug("dropping session failure for terminal session",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
@@ -1540,7 +1567,10 @@ func (s *Service) RegisterExecutionStopOwner(sessionID, executionID string, forc
 		return
 	}
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
-	lock.Lock()
+	if !lock.TryLock() {
+		release()
+		return
+	}
 	defer func() {
 		lock.Unlock()
 		release()

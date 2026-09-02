@@ -79,6 +79,7 @@ func (r *Repository) LoadTaskLastActivity(ctx context.Context, taskIDs []string)
 
 	for _, chunk := range chunkIDs(taskIDs, sqliteMaxHostParams/6) {
 		placeholders, ids := buildInPlaceholders(chunk)
+		lifecycleOnlyPredicate := turnLifecycleOnlyPredicate(r.ro.DriverName(), "task_session_turns")
 		query := `
 			WITH activity AS (
 				SELECT id AS task_id, created_at AS activity_at
@@ -103,11 +104,13 @@ func (r *Repository) LoadTaskLastActivity(ctx context.Context, taskIDs []string)
 				FROM task_session_turns
 				WHERE task_id IN (` + placeholders + `)
 				  AND started_at IS NOT NULL
+				  AND NOT (` + lifecycleOnlyPredicate + `)
 				UNION ALL
 				SELECT task_id, completed_at AS activity_at
 				FROM task_session_turns
 				WHERE task_id IN (` + placeholders + `)
 				  AND completed_at IS NOT NULL
+				  AND NOT (` + lifecycleOnlyPredicate + `)
 			)
 			SELECT task_id, MAX(activity_at) AS activity_at
 			FROM activity

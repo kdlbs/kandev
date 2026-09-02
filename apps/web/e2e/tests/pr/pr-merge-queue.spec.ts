@@ -34,7 +34,15 @@ test("adds an eligible GitHub PR to its merge queue", async ({ testPage, apiClie
   const popover = session.prTopbarPopover();
   const compactMerge = popover.getByRole("button", { name: "Merge PR" });
   await expect(compactMerge).toBeVisible({ timeout: 15_000 });
-  await session.prDetailTab().click();
+  // The persisted layout can reopen the detail panel as a dock tab, but a
+  // reload is also allowed to leave it closed. The topbar button is the
+  // canonical fallback for opening the same panel.
+  const detailTab = session.prDetailTab();
+  if (await detailTab.isVisible()) {
+    await detailTab.click();
+  } else {
+    await session.prTopbarButton().click();
+  }
   await seedEligiblePR(apiClient, task.id);
 
   const detail = testPage.getByTestId("change-request-detail");

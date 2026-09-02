@@ -35,6 +35,7 @@ export type TaskSwitcherItem = {
   diffStats?: { additions: number; deletions: number };
   comparisonUnavailable?: boolean;
   isRemoteExecutor?: boolean;
+  remoteExecutorId?: string;
   remoteExecutorType?: string;
   remoteExecutorName?: string;
   updatedAt?: string;

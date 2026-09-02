@@ -2,7 +2,7 @@
 status: draft
 system: tasks
 created: 2026-06-22
-updated: 2026-08-24
+updated: 2026-08-31
 owners:
   - cfl
 ---
@@ -32,3 +32,5 @@ and safe when runtimes or task rows are already gone.
   cleanup removed its physical worktree, resuming the task shall recreate or
   reactivate the recoverable task-owned worktree instead of requiring
   attach-only reuse of the deleted workspace.
+- **AC-TASKS-RUNTIME-CLEANUP-001.8:** When dead-row repair loses its compare-and-set to a newer execution, reconciliation shall preserve the newer row without a warning. Other repair errors shall remain warnings.
+- **AC-TASKS-RUNTIME-CLEANUP-001.9:** When task deletion reclaims a Git worktree, the system shall verify the exact recorded path, branch, and commit before mutation; preserve a checkout with tracked or untracked changes; preserve a clean local branch with commits not contained by the recorded base or repository default; recover idempotently when the checkout path is already absent; and keep failed registration or branch cleanup retryable.

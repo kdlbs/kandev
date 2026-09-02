@@ -2,9 +2,11 @@
 status: active
 system: platform
 created: 2026-07-30
+updated: 2026-08-27
 owners:
   - tbd
 ---
+
 # Diagnostic logging Requirements
 
 ## Overview
@@ -27,6 +29,10 @@ Users can see frontend failures that leave no backend evidence, and support cann
 - **AC-PLATFORM-DIAGNOSTIC-LOGGING-001.6:** `logging.level` / `KANDEV_LOG_LEVEL` remains the supported override for the file threshold, and `logging.format` remains supported. `logging.outputPath`, `logging.maxSizeMb`, `logging.maxBackups`, `logging.maxAgeDays`, and `logging.compress` are removed; the diagnostic path and daily retention policy are not configurable.
 - **AC-PLATFORM-DIAGNOSTIC-LOGGING-001.7:** `backend-logs.log` represents the current UTC calendar day. At UTC midnight, the backend atomically rolls it to `backend-logs-YYYY-MM-DD.log` and creates a new owner-readable, owner-writable active file.
 - **AC-PLATFORM-DIAGNOSTIC-LOGGING-001.8:** A restart during the same UTC day appends to `backend-logs.log`. On the first startup after a day boundary, the previous active file is rolled to the date it represents before new entries are written.
+- **AC-PLATFORM-DIAGNOSTIC-LOGGING-001.9:** A browser debug diagnostic
+  that scans a growing application collection shall compute and emit at most
+  one latest-state sample per 250 ms while that collection changes
+  continuously.
 
 ## System design
 

@@ -101,16 +101,12 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 }
 
 // isContainerizedExecutor returns true for executor types that run agents in
-// containers or remote sandboxes (Docker variants + Sprites). These are the
-// same executors that need explicitly configured remote credentials and the
-// kandev-managed feature branch propagated through env metadata.
+// containers or remote sandboxes (Docker variants, Sprites, and Kubernetes).
+// These are the same executors that need explicitly configured remote
+// credentials and the kandev-managed feature branch propagated through env
+// metadata.
 func isContainerizedExecutor(executorType string) bool {
-	switch models.ExecutorType(executorType) {
-	case models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker, models.ExecutorTypeSprites:
-		return true
-	default:
-		return false
-	}
+	return models.IsContainerizedExecutorType(models.ExecutorType(executorType))
 }
 
 // executorNeedsResolvedCredentials reports whether an executor runs the agent
@@ -1026,6 +1022,65 @@ func taskUsesDeferredEnvironmentInheritance(metadata map[string]interface{}) boo
 	return mode == "inherit_parent"
 }
 
+func taskUsesInheritedWorkspace(task *v1.Task) bool {
+	if task == nil {
+		return false
+	}
+	workspace, ok := task.Metadata["workspace"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	mode, _ := workspace["mode"].(string)
+	return mode == "inherit_parent" || mode == "shared_group"
+}
+
+func (e *Executor) resolveLaunchTaskEnvironment(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+) (*models.TaskEnvironment, error) {
+	existingEnv, err := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
+	if err != nil {
+		return nil, fmt.Errorf("lookup existing task environment: %w", err)
+	}
+	if existingEnv != nil || session == nil || session.TaskEnvironmentID == "" {
+		return existingEnv, nil
+	}
+
+	// Child tasks created by office task-handoffs may have had
+	// session.TaskEnvironmentID rewritten to point at the parent's or shared
+	// group's environment. The by-task-id lookup misses that row because it
+	// indexes by the child task id, so validate the inherited row's owner before
+	// allowing any launch path to reuse it.
+	inherited, envErr := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+	if envErr != nil || inherited == nil {
+		return nil, fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsafe, e.describeInheritedEnvironmentUnavailable(ctx, task))
+	}
+	if err := e.validateInheritedEnvironmentOwner(ctx, task, inherited); err != nil {
+		return nil, err
+	}
+	return inherited, nil
+}
+
+func (e *Executor) validateInheritedEnvironmentOwner(
+	ctx context.Context,
+	task *v1.Task,
+	env *models.TaskEnvironment,
+) error {
+	if env == nil || env.TaskID == "" || (task != nil && env.TaskID == task.ID) {
+		return nil
+	}
+	owner, err := e.repo.GetTask(ctx, env.TaskID)
+	if err != nil || owner == nil {
+		return fmt.Errorf("%w: inherited task environment owner %s could not be verified", models.ErrWorkspaceReuseUnsafe, env.TaskID)
+	}
+	if owner.ArchivedAt != nil {
+		return fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsafe,
+			models.DescribeInheritedEnvironmentUnavailable(env.TaskID, owner))
+	}
+	return nil
+}
+
 func sharedWorkspaceGroupID(metadata map[string]interface{}) string {
 	workspace, ok := metadata["workspace"].(map[string]interface{})
 	if !ok {
@@ -1100,6 +1155,13 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if session.TaskID != task.ID {
 		return nil, fmt.Errorf("session does not belong to task")
 	}
+	if strings.TrimSpace(executorID) == "" {
+		// PrepareSession already persisted the selected executor. Launch calls
+		// that omit the option must retain that selection so the authoritative
+		// connection config reaches lifecycle instead of falling back to the
+		// workspace default (or an empty config).
+		executorID = strings.TrimSpace(session.ExecutorID)
+	}
 	if opts.McpMode == "" {
 		opts.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session, opts.StartAgent)
 		if err != nil {
@@ -1114,7 +1176,10 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		opts.McpProfile = &profileContext
 	}
 
-	running, _ := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	running, runningErr := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
+		return nil, fmt.Errorf("load runtime inventory for session %q: %w", sessionID, runningErr)
+	}
 	if running != nil && running.ExecutionProfileID != "" &&
 		running.ExecutionProfileID != agentProfileID {
 		if running.AgentExecutionID != "" {
@@ -1133,13 +1198,30 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// Inject session handover context if there are previous sessions for this task.
 	prompt = e.injectHandoverIfNeeded(ctx, task.ID, sessionID, prompt)
 
+	allRepos, err := e.resolveAllRepoInfoForSession(ctx, task.ID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Resolve and validate the environment before the existing-runtime fast
+	// path. A persisted executor row can outlive the parent task that owns an
+	// inherited environment, so returning through that path without this check
+	// would restart an agent in a workspace that is no longer valid.
+	existingEnv, err := e.resolveLaunchTaskEnvironment(ctx, task, session)
+	if err != nil {
+		return nil, err
+	}
+
 	// Fast path: workspace already launched (executors_running row exists).
 	// Only start the agent subprocess if requested; otherwise return early.
 	// If startAgentOnExistingWorkspace returns ErrStaleExecution, the in-memory
 	// execution was lost (e.g. backend restart). The full LaunchAgent path below
 	// will create a new execution and lifecycle.persistExecutorRunning will
 	// overwrite the stale row.
-	hasRunning, _ := e.repo.HasExecutorRunningRow(ctx, sessionID)
+	hasRunning, hasRunningErr := e.repo.HasExecutorRunningRow(ctx, sessionID)
+	if hasRunningErr != nil {
+		return nil, fmt.Errorf("check runtime inventory for session %q: %w", sessionID, hasRunningErr)
+	}
 	if hasRunning {
 		result, err := e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode, opts.Env, opts.TurnID)
 		if !errors.Is(err, ErrStaleExecution) && !errors.Is(err, ErrAgentCommandMissing) {
@@ -1151,10 +1233,6 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 			zap.Error(err))
 	}
 
-	allRepos, err := e.resolveAllRepoInfoForSession(ctx, task.ID, sessionID)
-	if err != nil {
-		return nil, err
-	}
 	// Primary = first by Position. For repo-less tasks (e.g. quick chat), allRepos
 	// is empty and primary is a zero-value placeholder; downstream code already
 	// handles the missing-repo path.
@@ -1165,32 +1243,6 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		primaryRepo = &repoInfo{}
 	}
 
-	// Resolve the env ID before LaunchAgent so the in-memory AgentExecution
-	// is env-scoped from the first shell/layout request, not only after DB
-	// persistence succeeds. GetTaskEnvironmentByTaskID returns (nil, nil)
-	// when no row exists; a real DB error must propagate so the launch
-	// fails closed instead of silently launching a fresh environment that
-	// orphans the existing container/sandbox/worktree.
-	existingEnv, err := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
-	if err != nil {
-		return nil, fmt.Errorf("lookup existing task environment: %w", err)
-	}
-	// Child tasks created by office task-handoffs may have had
-	// session.TaskEnvironmentID rewritten to point at the parent's /
-	// shared group's env (see internal/orchestrator/handoff_inheritance.go).
-	// The by-task-id lookup misses that row because it indexes by the
-	// child task id, so without this fallback the launch path creates a
-	// fresh worktree and the inheritance contract silently breaks.
-	if existingEnv == nil && session.TaskEnvironmentID != "" {
-		inherited, err := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
-		if err != nil {
-			return nil, fmt.Errorf("%w: inherited task environment is unavailable", models.ErrWorkspaceReuseUnsafe)
-		}
-		if inherited == nil {
-			return nil, fmt.Errorf("%w: inherited task environment is unavailable", models.ErrWorkspaceReuseUnsafe)
-		}
-		existingEnv = inherited
-	}
 	assignLaunchTaskEnvironmentID(session, existingEnv)
 
 	// A sibling can be prepared while the elected materializer is still
@@ -1600,6 +1652,31 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 	return execution, nil
 }
 
+func bindSessionToTaskEnvironment(session *models.TaskSession, env *models.TaskEnvironment) {
+	if session == nil || env == nil {
+		return
+	}
+	session.TaskEnvironmentID = env.ID
+	session.WorkspacePath = env.WorkspacePath
+}
+
+// describeInheritedEnvironmentUnavailable builds a diagnostic reason for a
+// missing inherited task_environments row (session.TaskEnvironmentID no
+// longer resolves). For an inherit_parent task it names the parent and, when
+// the parent was archived, calls that out explicitly — archive tears down
+// the parent's runtime resources (worktree, container/sandbox) but
+// preserves its own task_environments row, and leaves the parent's
+// session.TaskEnvironmentID pointer in place either way, so a child that
+// inherited it only finds out here. shared_group members have no single
+// parent to name, so they get a generic message instead.
+func (e *Executor) describeInheritedEnvironmentUnavailable(ctx context.Context, task *v1.Task) string {
+	if task == nil || task.ParentID == "" {
+		return "inherited task environment is unavailable: shared workspace group environment could not be resolved"
+	}
+	parent, _ := e.repo.GetTask(ctx, task.ParentID)
+	return models.DescribeInheritedEnvironmentUnavailable(task.ParentID, parent)
+}
+
 func assignLaunchTaskEnvironmentID(session *models.TaskSession, existingEnv *models.TaskEnvironment) {
 	if existingEnv != nil && existingEnv.ID != "" {
 		session.TaskEnvironmentID = existingEnv.ID
@@ -1767,20 +1844,22 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 	out := make([]RepoSpec, 0, len(allRepos))
 	for _, info := range allRepos {
 		spec := RepoSpec{
-			TaskRepositoryID:        info.TaskRepositoryID,
-			RepositoryID:            info.RepositoryID,
-			RepositoryPath:          info.RepositoryPath,
-			BaseBranch:              info.BaseBranch,
-			CheckoutBranch:          info.CheckoutBranch,
-			PRNumber:                info.PRNumber,
-			RemoteContribution:      info.RemoteContribution,
-			ContributionDestination: info.ContributionDestination,
-			ComparisonTarget:        info.ComparisonTarget,
-			WorktreeBranchPrefix:    info.WorktreeBranchPrefix,
-			WorktreeBranchTemplate:  info.WorktreeBranchTemplate,
-			PullBeforeWorktree:      info.PullBeforeWorktree,
-			RemoteSyncHandled:       info.RemoteSyncHandled,
-			RefreshRepository:       info.RefreshRepository,
+			TaskRepositoryID:           info.TaskRepositoryID,
+			RepositoryID:               info.RepositoryID,
+			RepositoryPath:             info.RepositoryPath,
+			BaseBranch:                 info.BaseBranch,
+			CheckoutBranch:             info.CheckoutBranch,
+			PRNumber:                   info.PRNumber,
+			RemoteContribution:         info.RemoteContribution,
+			ContributionDestination:    info.ContributionDestination,
+			ComparisonTarget:           info.ComparisonTarget,
+			WorktreeBranchPrefix:       info.WorktreeBranchPrefix,
+			WorktreeBranchTemplate:     info.WorktreeBranchTemplate,
+			PullBeforeWorktree:         info.PullBeforeWorktree,
+			RemoteSyncHandled:          info.RemoteSyncHandled,
+			RefreshRepository:          info.RefreshRepository,
+			RefreshRepositoryWithState: info.RefreshRepositoryWithState,
+			RemoteRefState:             info.RemoteRefState,
 		}
 		if info.Repository != nil {
 			spec.RepoName = info.Repository.Name
@@ -1852,6 +1931,8 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
 		req.RemoteSyncHandled = repoInfo.RemoteSyncHandled
 		req.RefreshRepository = repoInfo.RefreshRepository
+		req.RefreshRepositoryWithState = repoInfo.RefreshRepositoryWithState
+		req.RemoteRefState = repoInfo.RemoteRefState
 		if repoInfo.Repository != nil {
 			req.DefaultBranch = repoInfo.Repository.DefaultBranch
 			if req.UseWorktree {
@@ -2174,27 +2255,17 @@ func (e *Executor) injectHandoverIfNeeded(ctx context.Context, taskID, currentSe
 // to the task root via filepath.Dir would diverge hot vs cold cwd and break
 // resume with -32002 Resource not found.
 //
-// resp.WorktreePath here already mirrors what executor_standalone.go writes
-// into metadata["worktree_path"] (= req.WorkspacePath from the env preparer),
-// which is also what becomes cmd.Dir of the agent process. So persisting it
-// as-is keeps a single source of truth.
+// resp.WorkspacePath is the lifecycle execution's actual working directory and
+// is therefore authoritative. WorktreePath remains a compatibility fallback
+// for lifecycle responses that only expose the preparer's legacy metadata.
 func computeWorkspacePath(req *LaunchAgentRequest, resp *LaunchAgentResponse) string {
-	// SSH materializes repositories on the remote host. RepositoryPath still
-	// identifies the source checkout on this host, so persisting it would make a
-	// later sibling attach to a different remote directory. The lifecycle
-	// response is the canonical remote task-directory handle.
-	if req.ExecutorType == string(models.ExecutorTypeSSH) && resp.WorkspacePath != "" {
+	if resp.WorkspacePath != "" {
 		return resp.WorkspacePath
 	}
 	if resp.WorktreePath != "" {
 		return resp.WorktreePath
 	}
-	if req.RepositoryPath != "" {
-		return req.RepositoryPath
-	}
-	// Quick-chat sessions have no worktree/repo but the lifecycle manager
-	// creates a workspace directory — use it as fallback.
-	return resp.WorkspacePath
+	return req.RepositoryPath
 }
 
 // persistTaskEnvironment creates or updates the task environment record after a successful launch.
@@ -2238,6 +2309,23 @@ func (e *Executor) persistTaskEnvironment(
 	if existingEnv != nil {
 		materializationSessionID := existingEnv.MaterializationSessionID
 		isInitialMaterializer := existingEnv.Status == models.TaskEnvironmentStatusCreating && materializationSessionID == session.ID
+		// A session attaching to an environment owned by a *different* task is a
+		// guest: office inherit_parent / shared_group bind every member session
+		// to one canonical environment (see handoff_inheritance.go), and the
+		// members share the owner's worktree rather than owning any
+		// task_environment_repos rows of their own. The owner already
+		// materialized (or will materialize) that inventory, so a guest must not
+		// rewrite the owner's repo rows or re-evaluate its ready status. Doing so
+		// on resume tripped "ready status requires repository inventory": the
+		// guest's request carries no repo specs (repos empty) and, when the
+		// owner's canonical inventory is empty, the repo-backed guard below failed
+		// a resume the guest has no authority to fix. The one exception is a guest
+		// session elected to materialize a still-CREATING canonical environment
+		// (shared_group), which must run the normal finalize path below.
+		if existingEnv.TaskID != "" && existingEnv.TaskID != taskID && !isInitialMaterializer {
+			bindSessionToTaskEnvironment(session, existingEnv)
+			return nil
+		}
 		previousStatus := existingEnv.Status
 		previousMaterializationSessionID := existingEnv.MaterializationSessionID
 		repos := environmentReposForLaunch(req, resp)
@@ -2291,7 +2379,7 @@ func (e *Executor) persistTaskEnvironment(
 						zap.String("task_id", taskID), zap.String("env_id", existingEnv.ID), zap.Error(err))
 					return fmt.Errorf("finalize task environment materialization: %w", err)
 				}
-				session.TaskEnvironmentID = existingEnv.ID
+				bindSessionToTaskEnvironment(session, existingEnv)
 				e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
 				return nil
 			}
@@ -2343,7 +2431,7 @@ func (e *Executor) persistTaskEnvironment(
 				zap.Error(err))
 			return fmt.Errorf("update task environment: %w", err)
 		}
-		session.TaskEnvironmentID = existingEnv.ID
+		bindSessionToTaskEnvironment(session, existingEnv)
 		e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
 		return nil
 	}
@@ -2373,7 +2461,7 @@ func (e *Executor) persistTaskEnvironment(
 			zap.Error(err))
 		return fmt.Errorf("create task environment: %w", err)
 	}
-	session.TaskEnvironmentID = env.ID
+	bindSessionToTaskEnvironment(session, env)
 	e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
 	return nil
 }

@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
 created: 2026-08-08
-updated: 2026-08-17
+updated: 2026-08-31
 owners:
   - Kandev
 ---
@@ -18,7 +18,7 @@ This design preserves the technical source detail for `REQ-PLATFORM-PROVIDER-ERR
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Migrated source detail](#migrated-source-detail), [Cursor normal-completion failure projection](#cursor-normal-completion-failure-projection), [Cursor retry-safety semantics](#cursor-retry-safety-semantics), [Interactive transient retry notice lifecycle](#interactive-transient-retry-notice-lifecycle) |
 
 ## Migrated source detail
 
@@ -72,6 +72,60 @@ workspace modes.
 - Classification is deterministic in this version. Calling a model to classify
   an error or extract timing data is deferred.
 
+#### Cursor normal-completion failure projection
+
+`cursor-agent` can report an upstream HTTP/2 stream reset as an ordinary
+`agent_message_chunk`. It can later return a successful `session/prompt`
+response. The ACP transport therefore owns a Cursor-specific evidence
+projection that mirrors the existing Codex capacity projection. It does not add
+generic content scanning to orchestration.
+
+The observer runs in the ordered ACP notification worker and applies these
+checks in order:
+
+1. The adapter identity is `cursor-acp`.
+2. The normalized event is a non-empty assistant message chunk for a non-zero
+   prompt generation that matches the active turn.
+3. After trimming leading and trailing whitespace, the chunk begins with
+   `Error: RetriableError:`.
+4. A case-insensitive bounded match finds `RetriableError` and either
+   `http/2 stream closed` or `CANCEL (0x8)`.
+
+The identity, event-type, and prefix checks precede the full fingerprint. The
+prefix check uses `strings.HasPrefix(strings.TrimSpace(text), ...)`, so ordinary
+per-token traffic does not allocate a normalized copy. Prose that mentions the
+error after other text, a partial `RetriableError`, a stale generation, and the
+same text from another adapter do not match.
+
+A match sets pending evidence on the active `promptTurnState` under its existing
+evidence mutex. The observer suppresses the control chunk. A later non-empty
+assistant or thought chunk clears the marker for the same generation. A new
+tool call also clears it. This activity proves that Cursor resumed its own
+attempt. A later matching control chunk sets the marker again. Updates for an
+in-flight tool do not clear it. Such updates can arrive during error settlement
+without proving renewed provider generation.
+
+After `session/prompt` returns, `sendPrompt` drains the notification queue. Then
+it examines the turn. If the Cursor marker is pending, the adapter cancels the
+async completion owner. It emits exactly one `EventTypeError` instead of the
+ordinary complete event. The error carries this bounded constant diagnostic:
+`Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)`.
+The valid `ProviderError` uses source `cursor_acp`, provider ID `cursor-acp`, and
+a UTC occurrence time. The adapter does not copy raw assistant text into the
+structured diagnostic.
+
+The deterministic catalogue adds the dedicated rule
+`cursor.retriable_stream_reset.v1` before the generic transport-loss rule. The
+rule requires the complete normalized Cursor diagnostic
+`Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)`
+(with the existing bracketed `canceled` decoration allowed). It maps to
+`agent_transport_lost` with high confidence and class `transient`.
+It retains the existing `AutoRetryable` invariant. The rule applies the shared
+context-cancellation veto. Cursor's `[canceled]` token does not satisfy that
+veto. It lacks `context canceled`, `context deadline exceeded`, or
+`cancel escalated`. The deliberately narrow `transportLostRe` remains
+unchanged.
+
 ### Error classes
 
 The policy layer has two configurable classes:
@@ -110,6 +164,52 @@ Classification does not by itself authorize retry or switching.
 - User configuration cannot override this gate. An unsafe transient or hard
   failure stops for manual recovery even when its class policy requests retry
   or skip.
+
+#### Cursor retry-safety semantics
+
+The Cursor label `RetriableError` is evidence about the upstream transport. It
+is not permission for Kandev to repeat a turn. The following rules define the
+Cursor recovery choices. They preserve the provider-neutral safety boundary in
+[ADR-2026-08-08-provider-neutral-agent-error-recovery](../../../decisions/2026-08-08-provider-neutral-agent-error-recovery.md):
+
+1. **Safe point.** A terminal marker is automatically replayable only when its
+   prompt-generation-correlated evidence is known and records neither assistant
+   output nor tool activity. Thoughts, message output, a pending or completed
+   tool call, and missing evidence all fail closed. The observed incident had
+   thoughts and a `Read File` call in flight, so it enters manual recovery even
+   though its classification is transient.
+2. **Continuation mode.** An eligible concrete-profile retry retains the
+   selected execution profile. It uses the existing provider-native resume
+   identity before it sends the cached original prompt again. It does not create
+   a fresh provider route or switch providers. This replay is allowed only at
+   the safe point above. An unsafe turn exposes the existing manual Resume and
+   Start fresh choices. The user, not the classifier, chooses continuation.
+3. **Cursor-owned retry.** Kandev does not schedule while the original
+   `session/prompt` RPC remains open. Provider progress after a marker clears
+   the pending marker. Only a later terminal marker can re-arm it. The prompt
+   barrier then proves that Cursor's internal retry has either resumed or
+   finished before Kandev chooses recovery. This prevents overlapping Cursor
+   and Kandev retry loops.
+4. **Budget and delay.** Eligible concrete-profile recovery reuses the single
+   orchestrator-owned retry entry, `transientMaxAttempts`, and
+   `transientRetryDelayFor`. There is no Cursor-specific nested counter, timer,
+   or backoff. Exhaustion uses the existing manual recovery path.
+
+The orchestrator records replay evidence for every interactive prompt, not only
+dynamic route attempts. The evidence remains scoped by session, execution, and
+prompt generation. Lifecycle snapshots the current prompt's evidence before it
+marks a terminal completion as activity and carries that immutable snapshot on
+`agent.failed`. This prevents separate NATS subscriptions for `agent.stream.*`
+and `agent.failed` from changing the replay decision based on delivery order.
+The concrete-profile `handleTransientFailure` path requires the same known,
+no-output, no-tool condition before scheduling. A missing record is unsafe.
+Dynamic profiles retain `dynamicPreResultSafe` and their configured policy
+owner. A model-switch restart reserves the cached prompt and replay identity
+before `StartAgentProcess` can dispatch the replacement prompt, then binds the
+identity to the replacement execution. `agent_transport_lost` remains
+same-provider recovery evidence and does not gain permission to switch
+candidates merely because Cursor supplied the new fingerprint. No orchestration
+branch inspects `cursor-acp`, `cursor_acp`, or the raw diagnostic.
 
 ### Per-class policy
 
@@ -191,6 +291,59 @@ not write legacy rule shapes.
   controls the current route response; circuit state prevents concurrent
   sessions from creating a retry herd. Expired circuits recover through one
   exclusive probe.
+
+### Interactive transient retry notice lifecycle
+
+Concrete-profile task chat persists one status message for each scheduled
+retry attempt. The message metadata contains `retrying: true`; its visible
+content includes the safe reason, provider, attempt ordinal, absolute deadline,
+and Cancel action. The backend timer owns the retry. The persisted message is a
+transcript projection of that ownership, not an independent retry state.
+
+The orchestrator attempts to resolve every outstanding transient-retry status
+message for a session whenever retry ownership ends through success, exhaustion,
+a terminal event, coordinator stop, explicit cancellation, an ordinary session
+stop, or shutdown. It lists the session transcript through the task service,
+selects every message whose metadata has the boolean value `retrying: true`, and
+deletes each selected message through the task service. Task-service deletion
+remains the single mutation path and publishes `session.message.deleted`;
+connected clients remove each successfully deleted message from their stores,
+while reload and task switching read a transcript that no longer contains any
+notice whose cleanup succeeded. Listing or deletion failures are logged and
+swallowed, leaving a later authorized cleanup to retry remaining notices.
+
+Normal successful turns perform this durable lookup only when the orchestrator
+still owns an in-memory retry entry. Explicit stop, terminal, and Cancel paths
+force the lookup so a persisted notice can still be retired after its timer or
+process has already disappeared.
+
+Deletion is intentional. Changing only `retrying` to `false` would make the
+current task-chat renderer treat the old retry message as a generic settled
+warning, preserving stale retry text and its Cancel action. The retry attempts
+remain observable through agent output and recovery history without retaining
+an actionable status projection after ownership ends.
+
+Advancing from attempt N to attempt N+1 only cancels the superseded in-memory
+timer. It does not run the retry-ending reset and therefore does not retire the
+current attempt's notice prematurely. Durable message operations do not run
+while the orchestrator's runtime-state mutex is held.
+
+`CancelTransientRetry` authorizes the task-session pair before reading or
+mutating retry state. After authorization it always retires outstanding retry
+notices. If a retry loop is active, cancellation also disarms its timer and
+creates the existing manual recovery message with Resume and Start fresh
+actions. If no loop remains, cancellation is an idempotent cleanup: it reports
+no active cancellation and creates no recovery message. Denied and foreign
+pairs remain indistinguishable.
+
+Transcript listing or individual deletion failures are logged and swallowed.
+The resolver continues after an individual deletion failure so one corrupt or
+racing message cannot prevent other notices from being retired. This cleanup
+does not turn an otherwise successful agent transition into a failure.
+
+Desktop and mobile use the same inline retry card and Cancel action. This
+change does not add a separate mobile composition; both layouts consume the
+same deletion event and must stop rendering the notice durably.
 
 ### Use across Kanban, utility calls, and Office
 
@@ -308,6 +461,10 @@ stored in policy or route state.
   exhaustive registry tests fail and runtime classification is unclassified.
 - If many sessions share an open resource circuit, one probe owns recovery and
   the rest continue waiting or evaluate other candidates without stampede.
+- If transient-retry transcript cleanup cannot list or delete a message, the
+  orchestrator logs the failure without failing the successful, terminal, or
+  cancellation transition. A later authorized cleanup can retry remaining
+  notices.
 
 ## Persistence guarantees
 
@@ -318,6 +475,11 @@ stored in policy or route state.
 - Absolute deadlines are stored in UTC. Browser clocks affect countdown display
   only.
 - A restart never repeats a dispatch whose completion is ambiguous.
+- A completed, exhausted, stopped, terminal, or cancelled interactive retry has
+  no outstanding `retrying: true` transcript message after successful cleanup.
+  Each successful deletion is broadcast to all viewers through the task-service
+  event bus. A failed cleanup is best effort and remains eligible for a later
+  authorized cleanup.
 
 ## Scenarios
 
@@ -348,6 +510,14 @@ stored in policy or route state.
   candidate policy and route transition.
 - **GIVEN** a phone viewport, **WHEN** a user edits both class policies, **THEN**
   all controls remain usable in one column with no horizontal page overflow.
+- **GIVEN** an interactive transient retry succeeds, **WHEN** its session later
+  becomes idle or its task is reloaded, **THEN** no retry notice is rendered.
+- **GIVEN** an authorized user selects Cancel after the retry loop has already
+  ended, **WHEN** a stale retry notice remains, **THEN** the notice is retired
+  without creating a manual recovery message.
+- **GIVEN** an authorized user selects Cancel while a retry loop is active,
+  **WHEN** cancellation completes, **THEN** the retry notice is retired and the
+  manual Resume and Start fresh recovery message is rendered.
 
 ## Out of scope
 

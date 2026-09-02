@@ -31,6 +31,7 @@ feedback.
 
 
 
+- [Backup location and action guidance](requirements/backup-location-actions.md)
 - [Storage Maintenance](requirements/storage-maintenance.md)
 - [Storage maintenance scan, capacity, and dependency cleanup](requirements/storage-overview-parallel-scan.md)
 - [System pages](requirements/system-page.md)
@@ -39,6 +40,7 @@ feedback.
 
 
 
+- [Backup location and action guidance](system-design/backup-location-actions.md)
 - [Storage Maintenance System Design Part 1](system-design/storage-maintenance-01.md)
 - [Storage Maintenance System Design Part 2](system-design/storage-maintenance-02.md)
 - [Storage Maintenance System Design Part 3](system-design/storage-maintenance-03.md)

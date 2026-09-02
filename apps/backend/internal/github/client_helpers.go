@@ -314,6 +314,7 @@ func convertRawComments(raw []ghComment) []PRComment {
 	for i, c := range raw {
 		comments[i] = PRComment{
 			ID:           c.ID,
+			HTMLURL:      c.HTMLURL,
 			Author:       c.User.Login,
 			AuthorAvatar: c.User.AvatarURL,
 			AuthorIsBot:  isGitHubBot(c.User.Type),
@@ -333,6 +334,7 @@ func convertRawComments(raw []ghComment) []PRComment {
 // ghIssueComment is the JSON shape for issue comments from the GitHub API.
 type ghIssueComment struct {
 	ID        int64     `json:"id"`
+	HTMLURL   string    `json:"html_url"`
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -349,6 +351,7 @@ func convertRawIssueComments(raw []ghIssueComment) []PRComment {
 	for i, c := range raw {
 		comments[i] = PRComment{
 			ID:           c.ID,
+			HTMLURL:      c.HTMLURL,
 			Author:       c.User.Login,
 			AuthorAvatar: c.User.AvatarURL,
 			AuthorIsBot:  isGitHubBot(c.User.Type),

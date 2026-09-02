@@ -26,6 +26,60 @@ function userSettingsMessage(
   };
 }
 
+function recentUseMessage(
+  payload: Partial<BackendMessageMap["user.agent_profile_recent_use.updated"]["payload"]>,
+): BackendMessageMap["user.agent_profile_recent_use.updated"] {
+  return {
+    type: "notification",
+    action: "user.agent_profile_recent_use.updated",
+    payload: {
+      context: "task_create",
+      profile_ids: [],
+      revision: 1,
+      updated_at: "2026-08-27T12:00:00Z",
+      ...payload,
+    },
+  };
+}
+
+describe("agent profile recent-use websocket sync", () => {
+  it("keeps newer context revisions and accepts independent contexts", () => {
+    const store = makeStore();
+    store.setState((state) => ({
+      ...state,
+      agentProfileRecentUse: {
+        loaded: true,
+        records: {
+          task_create: { profileIds: ["profile-new"], revision: 2, updatedAt: "later" },
+        },
+      },
+    }));
+
+    const handler = registerUsersHandlers(store)["user.agent_profile_recent_use.updated"];
+    handler?.(
+      recentUseMessage({
+        profile_ids: ["profile-old"],
+        revision: 1,
+        updated_at: "older",
+      }),
+    );
+    expect(store.getState().agentProfileRecentUse.records.task_create?.profileIds).toEqual([
+      "profile-new",
+    ]);
+
+    handler?.(
+      recentUseMessage({
+        context: "quick_chat",
+        profile_ids: ["profile-chat"],
+        revision: 1,
+      }),
+    );
+    expect(store.getState().agentProfileRecentUse.records.quick_chat?.profileIds).toEqual([
+      "profile-chat",
+    ]);
+  });
+});
+
 describe("startup page websocket sync", () => {
   it("applies startup page preferences and normalizes unknown values", () => {
     const store = makeStore();

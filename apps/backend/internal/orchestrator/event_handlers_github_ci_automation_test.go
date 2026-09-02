@@ -82,7 +82,7 @@ func (s *autoMergeFailureThenReviewRequestService) MergePRForAutomation(
 	_ string,
 	owner, repo string,
 	number int,
-	method string,
+	method, _ string,
 ) error {
 	return s.MergePR(ctx, owner, repo, number, method)
 }
@@ -91,8 +91,20 @@ func (s *storeBackedLifecycleGitHubService) GetTaskCIPRState(ctx context.Context
 	return s.store.GetTaskCIPRState(ctx, taskID, repositoryID, prNumber)
 }
 
+func (s *storeBackedLifecycleGitHubService) RecordTaskCIMergeAttemptResult(
+	ctx context.Context, taskID, repositoryID string, prNumber int, signature, result, message string,
+) error {
+	return s.store.RecordTaskCIMergeAttemptResult(ctx, taskID, repositoryID, prNumber, signature, result, message)
+}
+
 func (s *storeBackedLifecycleGitHubService) RecordTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error {
 	return s.store.RecordTaskCIError(ctx, taskID, repositoryID, prNumber, message)
+}
+
+func (s *storeBackedLifecycleGitHubService) RecordTaskCIAutoMergeError(
+	ctx context.Context, taskID, repositoryID string, prNumber int, message string,
+) error {
+	return s.store.RecordTaskCIAutoMergeError(ctx, taskID, repositoryID, prNumber, message)
 }
 
 func (s *storeBackedLifecycleGitHubService) ClearTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int) error {
@@ -1228,6 +1240,7 @@ func TestHandleTaskPRCIAutomationAutoMergeUsesFreshSync(t *testing.T) {
 	fresh.ChecksState = "success"
 	fresh.ReviewState = "approved"
 	fresh.MergeableState = "clean"
+	fresh.HeadSHA = "reviewed-head"
 	now := time.Now().UTC()
 	fresh.LastSyncedAt = &now
 	ghSvc := &mockGitHubService{
@@ -1248,6 +1261,9 @@ func TestHandleTaskPRCIAutomationAutoMergeUsesFreshSync(t *testing.T) {
 	if ghSvc.mergeCalls != 1 {
 		t.Fatalf("expected merge from fresh synced PR state, got %d", ghSvc.mergeCalls)
 	}
+	if ghSvc.mergeExpectedHeadSHA != "reviewed-head" {
+		t.Fatalf("expected head SHA = %q, want reviewed-head", ghSvc.mergeExpectedHeadSHA)
+	}
 }
 
 func TestHandleTaskPRCIAutomationAutoMergeUsesPartialSyncMatch(t *testing.T) {
@@ -1266,6 +1282,7 @@ func TestHandleTaskPRCIAutomationAutoMergeUsesPartialSyncMatch(t *testing.T) {
 		ChecksState:    "success",
 		ReviewState:    "approved",
 		MergeableState: "clean",
+		HeadSHA:        "head-a",
 		LastSyncedAt:   &now,
 	}
 	ghSvc := &mockGitHubService{
@@ -1322,6 +1339,9 @@ func TestHandleTaskPRCIAutomationAutoMergeRequiresFreshSync(t *testing.T) {
 	}
 	if len(ghSvc.ciErrors) != 1 || ghSvc.ciErrors[0].LastError == nil || !strings.Contains(*ghSvc.ciErrors[0].LastError, "not freshly synced") {
 		t.Fatalf("expected stale sync error to be recorded, got %+v", ghSvc.ciErrors)
+	}
+	if ghSvc.ciErrors[0].LastErrorKind != github.TaskCIErrorKindAutoMerge {
+		t.Fatalf("error kind = %q, want auto_merge", ghSvc.ciErrors[0].LastErrorKind)
 	}
 }
 
@@ -2496,6 +2516,36 @@ func TestCIAutomationMergeSignatureIgnoresVolatileUpdatedAt(t *testing.T) {
 	}
 }
 
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.3
+func TestCIAutomationMergeSignatureIncludesEveryReadinessGate(t *testing.T) {
+	required := 1
+	base := github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42, HeadSHA: "head-a",
+		ChecksState: "success", ReviewState: "approved", MergeableState: "clean",
+		ReviewCount: 1, RequiredReviews: &required, ChecksTotal: 2, ChecksPassing: 2,
+	}
+	before := ciAutomationMergeSignature(&base)
+	tests := []struct {
+		name   string
+		mutate func(*github.TaskPR)
+	}{
+		{name: "PR lifecycle state", mutate: func(pr *github.TaskPR) { pr.State = "closed" }},
+		{name: "pending reviews", mutate: func(pr *github.TaskPR) { pr.PendingReviewCount++ }},
+		{name: "required review presence", mutate: func(pr *github.TaskPR) { pr.RequiredReviews = nil }},
+		{name: "required review value", mutate: func(pr *github.TaskPR) { value := 2; pr.RequiredReviews = &value }},
+		{name: "pending check count", mutate: func(pr *github.TaskPR) { pr.ChecksPassing-- }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			changed := base
+			test.mutate(&changed)
+			if after := ciAutomationMergeSignature(&changed); after == before {
+				t.Fatalf("signature did not change for %s", test.name)
+			}
+		})
+	}
+}
+
 func TestHandleTaskPRCIAutomationRecordsErrorWhenNoPromptableSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -2617,7 +2667,7 @@ func TestHandleTaskPRCIAutomationMergesWhenStateReadFails(t *testing.T) {
 	}
 }
 
-func TestHandleTaskPRCIAutomationRetriesMergeAfterTransientFailure(t *testing.T) {
+func TestHandleTaskPRCIAutomationDoesNotRetryUnchangedMergeAfterFailure(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
@@ -2640,6 +2690,7 @@ func TestHandleTaskPRCIAutomationRetriesMergeAfterTransientFailure(t *testing.T)
 		ChecksState:    "success",
 		ReviewState:    "approved",
 		MergeableState: "clean",
+		HeadSHA:        "head-a",
 	}
 	now := time.Now().UTC()
 	pr.LastSyncedAt = &now
@@ -2651,16 +2702,147 @@ func TestHandleTaskPRCIAutomationRetriesMergeAfterTransientFailure(t *testing.T)
 	if ghSvc.mergeCalls != 1 {
 		t.Fatalf("expected one merge call, got %d", ghSvc.mergeCalls)
 	}
-	if len(ghSvc.mergeAttempts) != 0 {
-		t.Fatalf("expected failed merge not to record dedupe signature, got %+v", ghSvc.mergeAttempts)
+	if len(ghSvc.mergeAttempts) != 1 {
+		t.Fatalf("expected failed merge to keep one reservation, got %+v", ghSvc.mergeAttempts)
 	}
 
 	ghSvc.mergeErr = nil
 	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
 		t.Fatalf("retry auto-merge: %v", err)
 	}
-	if ghSvc.mergeCalls != 2 || len(ghSvc.mergeAttempts) != 1 {
-		t.Fatalf("expected retry to merge and record one attempt, calls=%d attempts=%d", ghSvc.mergeCalls, len(ghSvc.mergeAttempts))
+	if ghSvc.mergeCalls != 1 || len(ghSvc.mergeAttempts) != 1 {
+		t.Fatalf("expected unchanged failure to remain blocked, calls=%d attempts=%d", ghSvc.mergeCalls, len(ghSvc.mergeAttempts))
+	}
+
+	pr.HeadSHA = "head-b"
+	ghSvc.triggerPRSyncAllPRs = []*github.TaskPR{pr}
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("merge changed head: %v", err)
+	}
+	if ghSvc.mergeCalls != 2 || len(ghSvc.mergeAttempts) != 2 {
+		t.Fatalf("expected changed head to rearm once, calls=%d attempts=%d", ghSvc.mergeCalls, len(ghSvc.mergeAttempts))
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.5
+func TestRecordTaskPRMergeQueueObservationReconcilesMergedPR(t *testing.T) {
+	svc := &Service{}
+	message := "merge PR: provider status was lost"
+	ghSvc := &mockGitHubService{ciPRState: &github.TaskCIPRAutomationState{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+		LastMergeResult: github.TaskCIMergeResultFailed,
+		LastError:       &message, LastErrorKind: github.TaskCIErrorKindAutoMerge,
+	}}
+	svc.SetGitHubService(ghSvc)
+	svc.recordTaskPRMergeQueueObservation(context.Background(), &github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+		State: githubPRStateMerged, HeadSHA: "head-a",
+	})
+
+	if ghSvc.ciPRState.LastMergeResult != github.TaskCIMergeResultAccepted ||
+		ghSvc.ciPRState.LastError != nil || ghSvc.ciPRState.LastErrorKind != "" {
+		t.Fatalf("merged reconciliation state = %+v", ghSvc.ciPRState)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.4
+func TestHandleTaskPRCIAutomationConsumesExplicitMergeRetryAuthorization(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	now := time.Now().UTC()
+	pr := &github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		State: "open", ChecksState: "success", ReviewState: "approved", MergeableState: "clean",
+		HeadSHA: "head-a", LastSyncedAt: &now,
+	}
+	ghSvc := &mockGitHubService{
+		ciOptionsResp:       &github.TaskCIOptionsResponse{TaskID: "task-1", AutoMergeEnabled: true},
+		triggerPRSyncAllPRs: []*github.TaskPR{pr},
+		ciPRState: &github.TaskCIPRAutomationState{
+			TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+			LastMergeSignature:      ciAutomationMergeSignature(pr),
+			LastMergeResult:         github.TaskCIMergeResultFailed,
+			LastQueueAttemptHeadSHA: pr.HeadSHA,
+			MergeRetryPending:       true,
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle explicit merge retry: %v", err)
+	}
+	if ghSvc.mergeCalls != 1 || len(ghSvc.mergeAttempts) != 1 {
+		t.Fatalf("merge calls = %d attempts = %d, want one", ghSvc.mergeCalls, len(ghSvc.mergeAttempts))
+	}
+	if ghSvc.ciPRState.MergeRetryPending {
+		t.Fatal("explicit retry authorization was not consumed")
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.2
+func TestHandleTaskPRCIAutomationExpiresStaleInFlightMergeWithoutResubmission(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	now := time.Now().UTC()
+	pr := &github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		State: "open", ChecksState: "success", ReviewState: "approved", MergeableState: "clean",
+		HeadSHA: "head-a", LastSyncedAt: &now,
+	}
+	staleAttempt := now.Add(-ciAutomationDetachedTimeout - time.Second)
+	ghSvc := &mockGitHubService{
+		ciOptionsResp:       &github.TaskCIOptionsResponse{TaskID: "task-1", AutoMergeEnabled: true},
+		triggerPRSyncAllPRs: []*github.TaskPR{pr},
+		ciPRState: &github.TaskCIPRAutomationState{
+			TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+			LastMergeSignature: ciAutomationMergeSignature(pr),
+			LastMergeResult:    github.TaskCIMergeResultInFlight, LastMergeAttemptAt: &staleAttempt,
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle stale in-flight merge: %v", err)
+	}
+	if ghSvc.mergeCalls != 0 {
+		t.Fatalf("merge calls = %d, want no resubmission", ghSvc.mergeCalls)
+	}
+	if ghSvc.ciPRState.LastMergeResult != github.TaskCIMergeResultFailed {
+		t.Fatalf("merge result = %q, want failed", ghSvc.ciPRState.LastMergeResult)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.6
+func TestHandleTaskPRCIAutomationReservationFailurePreventsProviderCall(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	now := time.Now().UTC()
+	pr := &github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		State: "open", ChecksState: "success", ReviewState: "approved", MergeableState: "clean",
+		HeadSHA: "head-a", LastSyncedAt: &now,
+	}
+	ghSvc := &mockGitHubService{
+		ciOptionsResp:       &github.TaskCIOptionsResponse{TaskID: "task-1", AutoMergeEnabled: true},
+		triggerPRSyncAllPRs: []*github.TaskPR{pr},
+		mergeAttemptErr:     errors.New("state store unavailable"),
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+		t.Fatalf("handle reservation failure: %v", err)
+	}
+	if ghSvc.mergeCalls != 0 {
+		t.Fatalf("merge calls = %d, want zero", ghSvc.mergeCalls)
+	}
+	if len(ghSvc.ciErrors) != 1 || ghSvc.ciErrors[0].LastErrorKind != github.TaskCIErrorKindAutoMerge {
+		t.Fatalf("typed retryable error = %+v", ghSvc.ciErrors)
 	}
 }
 
@@ -2698,10 +2880,10 @@ func TestHandlePRFeedbackStartsAutomationForMatchingPR(t *testing.T) {
 	if ghSvc.lastExactPRLookup.Owner != "acme" || ghSvc.lastExactPRLookup.Repo != "back" || ghSvc.lastExactPRLookup.PRNumber != 2 {
 		t.Fatalf("unexpected exact lookup: %+v", ghSvc.lastExactPRLookup)
 	}
-	if _, loaded := svc.ciAutomationInFlight.Load("task-1|repo-back|2"); !loaded {
+	if !svc.ciAutomationInFlight.Has("task-1|repo-back|2") {
 		t.Fatal("expected automation to run for matching repo-back PR")
 	}
-	if _, loaded := svc.ciAutomationInFlight.Load("task-1|repo-front|1"); loaded {
+	if svc.ciAutomationInFlight.Has("task-1|repo-front|1") {
 		t.Fatal("unexpected automation for non-matching repo-front PR")
 	}
 	close(block)
@@ -2734,10 +2916,10 @@ func TestHandleTaskCIOptionsUpdatedStartsAutomationForTaskPRs(t *testing.T) {
 		t.Fatalf("handle CI options updated: %v", err)
 	}
 	<-started
-	if _, loaded := svc.ciAutomationInFlight.Load("task-1|repo-front|1"); !loaded {
+	if !svc.ciAutomationInFlight.Has("task-1|repo-front|1") {
 		t.Fatal("expected automation to run for repo-front PR")
 	}
-	if _, loaded := svc.ciAutomationInFlight.Load("task-1|repo-back|2"); !loaded {
+	if !svc.ciAutomationInFlight.Has("task-1|repo-back|2") {
 		t.Fatal("expected automation to run for repo-back PR")
 	}
 	close(block)
@@ -2839,7 +3021,7 @@ func TestHandleTaskCIOptionsUpdatedStartsAutomationForPartialSyncResults(t *test
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("timed out waiting for CI automation to start")
 	}
-	if _, loaded := svc.ciAutomationInFlight.Load("task-1|repo-1|42"); !loaded {
+	if !svc.ciAutomationInFlight.Has("task-1|repo-1|42") {
 		t.Fatal("expected automation to run for partial sync result")
 	}
 	if len(ghSvc.ciErrors) != 0 {
@@ -2948,7 +3130,7 @@ func waitForCIAutomationIdle(t *testing.T, svc *Service, key string, timeout tim
 	ticker := time.NewTicker(time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if _, loaded := svc.ciAutomationInFlight.Load(key); !loaded {
+		if !svc.ciAutomationInFlight.Has(key) {
 			return
 		}
 		select {

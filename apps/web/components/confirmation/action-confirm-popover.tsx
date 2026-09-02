@@ -29,7 +29,6 @@ export type ActionConfirmPopoverProps = {
   anchorRef: RefObject<HTMLElement | null>;
   focusReturnRef?: RefObject<HTMLElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
-  shouldPreventOutsideInteraction?: (target: EventTarget | null) => boolean;
   title: ReactNode;
   description?: ReactNode;
   cancelLabel: ReactNode;
@@ -58,7 +57,6 @@ export function ActionConfirmPopover({
   anchorRef,
   focusReturnRef,
   focusBoundaryRef,
-  shouldPreventOutsideInteraction,
   title,
   description,
   cancelLabel,
@@ -135,7 +133,6 @@ export function ActionConfirmPopover({
         cancelRef={cancelRef}
         focusReturnRef={focusReturnRef}
         focusBoundaryRef={focusBoundaryRef}
-        shouldPreventOutsideInteraction={shouldPreventOutsideInteraction}
         confirmedRef={confirmedRef}
         anchorRef={anchorRef}
         onCancel={handleCancel}
@@ -162,7 +159,6 @@ type ActionConfirmPopoverContentProps = {
   cancelRef: RefObject<HTMLButtonElement | null>;
   focusReturnRef?: RefObject<HTMLElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
-  shouldPreventOutsideInteraction?: (target: EventTarget | null) => boolean;
   confirmedRef: { current: boolean };
   anchorRef: RefObject<HTMLElement | null>;
   onCancel: () => void;
@@ -186,7 +182,6 @@ const ActionConfirmPopoverContent = memo(function ActionConfirmPopoverContent({
   cancelRef,
   focusReturnRef,
   focusBoundaryRef,
-  shouldPreventOutsideInteraction,
   confirmedRef,
   anchorRef,
   onCancel,
@@ -205,19 +200,11 @@ const ActionConfirmPopoverContent = memo(function ActionConfirmPopoverContent({
       className={cn("gap-3 p-3", size === "wide" ? "w-72 max-w-[calc(100vw-1rem)]" : "w-64")}
       onOpenAutoFocus={(event) => preventAndFocusCancel(event, cancelRef)}
       onFocusOutside={(event) => {
-        if (shouldPreventOutsideInteraction?.(event.target)) {
-          event.preventDefault();
-          return;
-        }
         // A replaced boundary fails contains(), so the live trigger ref stays correct.
         if (focusBoundaryRef?.current?.contains(event.target as Node)) event.preventDefault();
       }}
       onInteractOutside={(event) => {
         const target = event.target as Node;
-        if (shouldPreventOutsideInteraction?.(target)) {
-          event.preventDefault();
-          return;
-        }
         // If the interaction target is no longer in the DOM (e.g., the context
         // menu content was just removed), it's a stale event from a preceding
         // close — prevent it from closing the popover.
@@ -242,7 +229,12 @@ const ActionConfirmPopoverContent = memo(function ActionConfirmPopoverContent({
       <PopoverHeader>
         <PopoverTitle id={titleId}>{title}</PopoverTitle>
         {description ? (
-          <PopoverDescription id={descriptionId}>{description}</PopoverDescription>
+          <PopoverDescription
+            id={descriptionId}
+            className={size === "wide" ? "text-pretty" : undefined}
+          >
+            {description}
+          </PopoverDescription>
         ) : null}
       </PopoverHeader>
       <div className="flex justify-end gap-2">

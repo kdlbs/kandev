@@ -15,6 +15,7 @@ const RENAMED_TITLE = "Renamed task";
 const ORIGINAL_PROMPT = "Original prompt";
 const UPDATED_PROMPT = "Updated prompt";
 const ORIGINAL_TITLE = "Original title";
+const RAW_REPOSITORY_PROVIDER_FAILURE = "raw repository provider failure";
 const MAIN_BRANCH = "main";
 const TODO_STATE = "TODO" as const;
 vi.mock("@/lib/routing/client-router", () => ({
@@ -28,7 +29,16 @@ vi.mock("@/components/toast-provider", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: unknown) => unknown) =>
-    selector({ setActiveDocument: vi.fn(), setPlanMode: vi.fn() }),
+    selector({
+      setActiveDocument: vi.fn(),
+      setPlanMode: vi.fn(),
+      applyAgentProfileRecentUse: vi.fn(),
+    }),
+}));
+
+const recordRecentUseMock = vi.fn();
+vi.mock("@/lib/agent-profile-recent-use", () => ({
+  recordAgentProfileRecentUseBestEffort: (...args: unknown[]) => recordRecentUseMock(...args),
 }));
 
 const updateTaskMock = vi.fn();
@@ -107,7 +117,7 @@ vi.mock("@/components/task-create-dialog-fresh-branch-consent", () => ({
   }),
 }));
 
-import { useTaskSubmitHandlers } from "./task-create-dialog-submit";
+import { taskSubmitErrorMessage, useTaskSubmitHandlers } from "./task-create-dialog-submit";
 import {
   readQueuedTaskCreateLastUsedState,
   resetTaskCreateLastUsedSync,
@@ -191,6 +201,7 @@ beforeEach(() => {
   launchSessionMock.mockClear();
   pushMock.mockClear();
   toastMock.mockClear();
+  recordRecentUseMock.mockClear();
 });
 
 // eslint-disable-next-line max-lines-per-function -- grouped edit regressions share one fixture.
@@ -367,6 +378,91 @@ describe("useTaskSubmitHandlers — started task edits", () => {
   });
 });
 
+describe("useTaskSubmitHandlers — repository selection edit failures", () => {
+  const failures = [
+    {
+      code: "repository_selection_invalid",
+      description: "The selected repository could not be verified.",
+    },
+    {
+      code: "repository_selection_not_found",
+      description: "The selected repository was not found.",
+    },
+    {
+      code: "repository_selection_unavailable",
+      description: "The repository provider is unavailable. Check the connection and try again.",
+    },
+  ] as const;
+
+  for (const failure of failures) {
+    it(`keeps the dialog open for ${failure.code} in the edit submit handler`, async () => {
+      const onOpenChange = vi.fn();
+      updateTaskMock.mockRejectedValueOnce(
+        new ApiError(RAW_REPOSITORY_PROVIDER_FAILURE, 400, {
+          error: RAW_REPOSITORY_PROVIDER_FAILURE,
+          error_code: failure.code,
+        }),
+      );
+      const deps = makeDeps({
+        isEditMode: true,
+        taskName: ORIGINAL_TITLE,
+        editingTask: {
+          id: TASK_ID,
+          title: ORIGINAL_TITLE,
+          description: ORIGINAL_PROMPT,
+          workflowStepId: "step-1",
+          state: TODO_STATE,
+        },
+        descriptionInputRef: makeRef(ORIGINAL_PROMPT),
+        onOpenChange,
+      });
+      const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+      await act(async () => {
+        await result.current.handleSubmit({ preventDefault: () => {} } as never);
+      });
+
+      expect(onOpenChange).not.toHaveBeenCalled();
+      expect(toastMock).toHaveBeenCalledWith(
+        expect.objectContaining({ description: failure.description }),
+      );
+    });
+
+    it(`keeps the dialog open for ${failure.code} in the update-only handler`, async () => {
+      const onOpenChange = vi.fn();
+      updateTaskMock.mockRejectedValueOnce(
+        new ApiError(RAW_REPOSITORY_PROVIDER_FAILURE, 400, {
+          error: RAW_REPOSITORY_PROVIDER_FAILURE,
+          error_code: failure.code,
+        }),
+      );
+      const deps = makeDeps({
+        isEditMode: true,
+        taskName: ORIGINAL_TITLE,
+        editingTask: {
+          id: TASK_ID,
+          title: ORIGINAL_TITLE,
+          description: ORIGINAL_PROMPT,
+          workflowStepId: "step-1",
+          state: TODO_STATE,
+        },
+        descriptionInputRef: makeRef(ORIGINAL_PROMPT),
+        onOpenChange,
+      });
+      const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+      await act(async () => {
+        await result.current.handleUpdateWithoutAgent();
+      });
+
+      expect(onOpenChange).not.toHaveBeenCalled();
+      expect(toastMock).toHaveBeenCalledWith(
+        expect.objectContaining({ description: failure.description }),
+      );
+    });
+  }
+});
+
 // eslint-disable-next-line max-lines-per-function -- create-mode parity cases share transport setup.
 describe("useTaskSubmitHandlers — handleCreateSubmit (CLI-mode parity)", () => {
   it("refreshes stale policy options and keeps the dialog open", async () => {
@@ -395,7 +491,11 @@ describe("useTaskSubmitHandlers — handleCreateSubmit (CLI-mode parity)", () =>
   });
 
   it("uses the create-mode transport override", async () => {
-    const createTask = vi.fn().mockResolvedValue({ id: TASK_ID, session_id: "session-plugin" });
+    const createTask = vi.fn().mockResolvedValue({
+      id: TASK_ID,
+      session_id: "session-plugin",
+      agent_profile_id: "agent-effective",
+    });
     const deps = makeDeps({
       createTask,
       descriptionInputRef: makeRef("inspect the pull request"),
@@ -413,6 +513,11 @@ describe("useTaskSubmitHandlers — handleCreateSubmit (CLI-mode parity)", () =>
       }),
     );
     expect(createTaskRetryMock).not.toHaveBeenCalled();
+    expect(recordRecentUseMock).not.toHaveBeenCalledWith(
+      "task_create",
+      expect.anything(),
+      expect.any(Function),
+    );
   });
 
   it("skips create when prompt is empty even with cli_passthrough=true (prompt is now required)", async () => {
@@ -532,5 +637,22 @@ describe("useTaskSubmitHandlers — handleCreateWithoutAgent", () => {
     expect(buildCreateTaskPayloadMock).toHaveBeenCalledWith(
       expect.objectContaining({ withAgent: false }),
     );
+  });
+});
+
+describe("taskSubmitErrorMessage", () => {
+  it("uses localized copy for repository selection error codes", () => {
+    expect(
+      taskSubmitErrorMessage(
+        new ApiError("raw upstream provider failure", 503, {
+          error: "raw upstream provider failure",
+          error_code: "repository_selection_unavailable",
+        }),
+      ),
+    ).toBe("The repository provider is unavailable. Check the connection and try again.");
+  });
+
+  it("preserves non-repository error messages", () => {
+    expect(taskSubmitErrorMessage(new Error("ordinary failure"))).toBe("ordinary failure");
   });
 });

@@ -12,6 +12,9 @@ var ErrWorkspaceNotFound = errors.New("workspace not found")
 // ErrTaskNotFound reports that no task row matched the supplied id.
 var ErrTaskNotFound = errors.New("task not found")
 
+// ErrMessageNotFound reports that no message row matched the supplied id.
+var ErrMessageNotFound = errors.New("message not found")
+
 // ErrTaskParentMismatch reports that a task no longer has the parent/workspace
 // relation a cross-task mutation was authorized against.
 var ErrTaskParentMismatch = errors.New("task parent relation no longer matches")
@@ -47,3 +50,12 @@ var ErrExternalIDConflict = errors.New("external_id already claimed by another t
 // task. Creation races resolve by rejecting the late comer; the cleanup
 // inventory was captured under the same barrier.
 var ErrTaskCleanupInProgress = errors.New("task cleanup in progress")
+
+// ErrWorkflowResolutionConflict reports that a caller's expected current
+// workflow (passed to guard a write against a concurrent reassignment) no
+// longer matches the task's persisted workflow_id, checked atomically inside
+// the write transaction immediately before the row is updated. The write is
+// rejected rather than silently reverting whatever the concurrent move just
+// did. See task/service.MoveTaskOptions.ExpectedWorkflowID for the caller
+// contract.
+var ErrWorkflowResolutionConflict = errors.New("task workflow changed since resolution")

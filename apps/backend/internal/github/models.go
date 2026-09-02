@@ -340,6 +340,7 @@ type PRReview struct {
 // PRComment represents a review comment on specific code.
 type PRComment struct {
 	ID           int64     `json:"id"`
+	HTMLURL      string    `json:"html_url,omitempty"`
 	Author       string    `json:"author"`
 	AuthorAvatar string    `json:"author_avatar"`
 	AuthorIsBot  bool      `json:"author_is_bot"`
@@ -475,6 +476,17 @@ type PRWatch struct {
 	UpdatedAt       time.Time  `json:"updated_at" db:"updated_at"`
 }
 
+// TaskPR "source" values, recording which write path created the
+// association. Empty ("") is the default for rows written before this
+// column existed and is never backfilled.
+const (
+	// TaskPRSourceWatch is a PR observed via push detection or discovered by
+	// a PR watch (branch-based association).
+	TaskPRSourceWatch = "watch"
+	// TaskPRSourceURLLink is a PR the user explicitly linked by URL.
+	TaskPRSourceURLLink = "url_link"
+)
+
 // TaskPR associates a PR with a task. RepositoryID identifies which task
 // repository this PR belongs to (multi-repo tasks can have one PR per repo).
 // Empty for legacy rows persisted before multi-repo support.
@@ -522,6 +534,11 @@ type TaskPR struct {
 	LastSyncedAt            *time.Time `json:"last_synced_at,omitempty" db:"last_synced_at"`
 	DetachedAt              *time.Time `json:"-" db:"detached_at"`
 	UpdatedAt               time.Time  `json:"updated_at" db:"updated_at"`
+
+	// Source records which write path created this association: see
+	// TaskPRSourceWatch / TaskPRSourceURLLink. Empty on rows written before
+	// this column existed; never backfilled.
+	Source string `json:"source" db:"source"`
 
 	// --- PR outcome attribution (five nullable columns, never backfilled) ---
 	//
@@ -730,6 +747,8 @@ type TaskCIPRAutomationState struct {
 	AutoFixExhaustedAt       *time.Time `json:"auto_fix_exhausted_at" db:"auto_fix_exhausted_at"`
 	LastMergeSignature       string     `json:"last_merge_signature" db:"last_merge_signature"`
 	LastMergeAttemptAt       *time.Time `json:"last_merge_attempt_at,omitempty" db:"last_merge_attempt_at"`
+	LastMergeResult          string     `json:"last_merge_result" db:"last_merge_result"`
+	MergeRetryPending        bool       `json:"-" db:"merge_retry_pending"`
 	LastQueueAttemptHeadSHA  string     `json:"last_queue_attempt_head_sha" db:"last_queue_attempt_head_sha"`
 	LastQueueFixEventID      string     `json:"last_queue_fix_event_id" db:"last_queue_fix_event_id"`
 	LastQueueRemovalCause    string     `json:"last_queue_removal_cause" db:"last_queue_removal_cause"`
@@ -740,9 +759,18 @@ type TaskCIPRAutomationState struct {
 	LastLifecyclePromptAt    *time.Time `json:"last_lifecycle_prompt_at,omitempty" db:"last_lifecycle_prompt_at"`
 	LastLifecycleSessionID   *string    `json:"last_lifecycle_session_id,omitempty" db:"last_lifecycle_session_id"`
 	LastError                *string    `json:"last_error,omitempty" db:"last_error"`
+	LastErrorKind            string     `json:"last_error_kind" db:"last_error_kind"`
 	CreatedAt                time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt                time.Time  `json:"updated_at" db:"updated_at"`
 }
+
+const (
+	TaskCIMergeResultInFlight = "in_flight"
+	TaskCIMergeResultFailed   = "failed"
+	TaskCIMergeResultAccepted = "accepted"
+	TaskCIErrorKindAutoMerge  = "auto_merge"
+	TaskCIErrorKindAutoFix    = "auto_fix"
+)
 
 // TaskCIFixAttempt records an auto-fix prompt attempt for a task PR.
 type TaskCIFixAttempt struct {
@@ -779,6 +807,7 @@ type TaskCIMergeQueueObservation struct {
 	RemovalEventID         string
 	RemovalCause           string
 	RemovalObservedHeadSHA string
+	Accepted               bool
 }
 
 // TaskPRLifecyclePrompt records an accepted lifecycle prompt checkpoint.

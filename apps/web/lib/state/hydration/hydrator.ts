@@ -7,6 +7,7 @@ import {
   reconcileQuickTerminalTabs,
 } from "@/lib/state/slices/ui/quick-chat-sync";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
+import { mergeAgentProfileRecentUseState } from "@/lib/agent-profile-recent-use";
 import {
   mergeTurnRows,
   parseTurnTimestamp,
@@ -134,6 +135,12 @@ function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
   mergeWithLoading(draft.notificationProviders, state.notificationProviders);
   if (state.settingsData) deepMerge(draft.settingsData, state.settingsData);
   if (state.sleepInhibition) deepMerge(draft.sleepInhibition, state.sleepInhibition);
+  if (state.agentProfileRecentUse) {
+    draft.agentProfileRecentUse = mergeAgentProfileRecentUseState(
+      draft.agentProfileRecentUse as unknown as AppState["agentProfileRecentUse"],
+      state.agentProfileRecentUse,
+    ) as unknown as Draft<AppState["agentProfileRecentUse"]>;
+  }
   if (state.userSettings && shouldHydrateUserSettings(draft.userSettings, state.userSettings)) {
     deepMerge(draft.userSettings, state.userSettings);
     bridgeSidebarViewsFromUserSettings(draft, state.userSettings);

@@ -3,6 +3,7 @@
 package workspaces
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -116,6 +117,22 @@ func (h *windowsDirectoryHandle) VerifyPath(path string) error {
 func (h *windowsDirectoryHandle) IsValidWorktree() bool {
 	content, err := h.ReadFile(".git")
 	return err == nil && strings.HasPrefix(string(content), "gitdir:")
+}
+
+// RemoveDirectory removes the pinned directory through its native handle. It
+// never resolves the directory again from its lexical path, so a rename or
+// replacement cannot redirect deletion to a different workspace.
+func (h *windowsDirectoryHandle) RemoveDirectory(ctx context.Context) error {
+	if h == nil || h.targetHandle == 0 {
+		return errors.New("directory handle is closed")
+	}
+	if err := removeWindowsDependencyContents(ctx, h.targetHandle); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return markWindowsDependencyForDelete(h.targetHandle)
 }
 
 func (h *windowsDirectoryHandle) ReadFile(name string) ([]byte, error) {

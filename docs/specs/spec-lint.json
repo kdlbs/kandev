@@ -8,8 +8,5 @@
     "system-design": 32768,
     "system-index": 12288,
     "template": 8192
-  },
-  "legacy_size_exceptions": {
-    "docs/specs/task-cost-ledger/spec.md": 91931
   }
 }

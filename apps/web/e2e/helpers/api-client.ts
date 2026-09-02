@@ -8,6 +8,7 @@ import type {
   TaskCreateLastUsedApi,
   MCPTaskAgentProfileDefault,
   RepositoryBranchPolicy,
+  AgentProfileRecentUseApiRecord,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
@@ -40,6 +41,11 @@ import type {
   SSHTestRequest,
   SSHTestResult,
 } from "../../lib/types/http-ssh";
+import type {
+  KubernetesSession,
+  KubernetesTestRequest,
+  KubernetesTestResult,
+} from "../../lib/types/http-kubernetes";
 import { loadInterimSettingsInterlockToken } from "./interim-settings-interlock";
 import { dwell } from "./causal-waits";
 
@@ -548,6 +554,10 @@ export class ApiClient {
     await this.request("DELETE", `/api/v1/agent-profiles/${profileId}${qs}`);
   }
 
+  async listAgentProfileRecentUse(): Promise<AgentProfileRecentUseApiRecord[]> {
+    return this.request("GET", "/api/v1/user/agent-profile-recent-use");
+  }
+
   /**
    * Delete kanban-only agent profiles except the ones in keepIds.
    *
@@ -997,8 +1007,17 @@ export class ApiClient {
   async createExecutor(
     name: string,
     type: string,
+    config?: Record<string, string>,
   ): Promise<{ id: string; name: string; type: string }> {
-    return this.request("POST", "/api/v1/executors", { name, type });
+    return this.request("POST", "/api/v1/executors", { name, type, config });
+  }
+
+  async testKubernetesConnection(request: KubernetesTestRequest): Promise<KubernetesTestResult> {
+    return this.request("POST", "/api/v1/kubernetes/test", request);
+  }
+
+  async listKubernetesSessions(executorId: string): Promise<KubernetesSession[]> {
+    return this.request("GET", `/api/v1/kubernetes/executors/${executorId}/sessions`);
   }
 
   async updateWorkspace(
@@ -1324,6 +1343,13 @@ export class ApiClient {
    * metadata dialog's `turn_metadata` field. `authorType` defaults to agent;
    * "user" seeds a prompt row whose prompt_index is computed server-side.
    * `createdAt` (RFC3339) pins the row's timestamp for deterministic ordering.
+   *
+   * `newTurn` creates a brand-new turn for this message instead of reusing
+   * the session's active turn, so a spec can hold a real open turn on the
+   * session while seeding a second, independently-timed turn alongside it
+   * (e.g. a lifecycle-shaped turn that must not shadow the open one).
+   * `turnStartedAt`/`turnCompletedAt` (RFC3339) set that new turn's
+   * timestamps; both are ignored unless `newTurn` is true.
    */
   async seedSessionMessage(
     sessionId: string,
@@ -1334,6 +1360,9 @@ export class ApiClient {
       turnMetadata?: Record<string, unknown>;
       authorType?: "user" | "agent";
       createdAt?: string;
+      newTurn?: boolean;
+      turnStartedAt?: string;
+      turnCompletedAt?: string;
     },
   ): Promise<void> {
     const body: Record<string, unknown> = { session_id: sessionId, type: opts.type };
@@ -1342,14 +1371,22 @@ export class ApiClient {
     if (opts.turnMetadata !== undefined) body.turn_metadata = opts.turnMetadata;
     if (opts.authorType !== undefined) body.author_type = opts.authorType;
     if (opts.createdAt !== undefined) body.created_at = opts.createdAt;
+    if (opts.newTurn !== undefined) body.new_turn = opts.newTurn;
+    if (opts.turnStartedAt !== undefined) body.turn_started_at = opts.turnStartedAt;
+    if (opts.turnCompletedAt !== undefined) body.turn_completed_at = opts.turnCompletedAt;
     await this.request("POST", "/api/v1/_test/messages", body);
   }
 
-  async seedToolCallMessages(sessionId: string, count: number): Promise<void> {
+  async seedToolCallMessages(
+    sessionId: string,
+    count: number,
+    metadata?: Record<string, unknown>,
+  ): Promise<void> {
     for (let i = 0; i < count; i++) {
       await this.seedSessionMessage(sessionId, {
         type: "tool_call",
         content: `synthetic tool call ${i + 1}`,
+        metadata,
       });
     }
   }
@@ -1534,7 +1571,7 @@ export class ApiClient {
     owner: string,
     repo: string,
     number: number,
-    outcome: "merged" | "queued",
+    outcome: "merged" | "queued" | "failed" | "pending" | "head_mismatch",
   ): Promise<void> {
     await this.request("PUT", "/api/v1/github/mock/merge-outcomes", {
       owner,
@@ -1572,10 +1609,22 @@ export class ApiClient {
   }
 
   async mockGitHubGetMergeAttempts(): Promise<
-    Array<{ owner: string; repo: string; number: number; merge_method: string }>
+    Array<{
+      owner: string;
+      repo: string;
+      number: number;
+      merge_method: string;
+      expected_head_sha: string;
+    }>
   > {
     const response = await this.request<{
-      attempts?: Array<{ owner: string; repo: string; number: number; merge_method: string }>;
+      attempts?: Array<{
+        owner: string;
+        repo: string;
+        number: number;
+        merge_method: string;
+        expected_head_sha: string;
+      }>;
     }>("GET", "/api/v1/github/mock/merge-attempts");
     return response.attempts ?? [];
   }
@@ -1877,6 +1926,8 @@ export class ApiClient {
       line?: number;
       side?: string;
       comment_type?: string;
+      html_url?: string;
+      in_reply_to?: number | null;
       created_at?: string;
       updated_at?: string;
     }>;
@@ -2404,10 +2455,10 @@ export class ApiClient {
   async launchSession(
     payload: {
       task_id: string;
-      agent_profile_id: string;
+      agent_profile_id?: string;
       executor_id?: string;
       executor_profile_id?: string;
-      prompt: string;
+      prompt?: string;
       intent?: string;
       session_id?: string;
       workflow_step_id?: string;

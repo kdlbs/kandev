@@ -163,6 +163,42 @@ func TestDeleteTaskTreePreparedCleanupDeletesEnvironmentRow(t *testing.T) {
 	}
 }
 
+func TestDeleteTaskTree_NoCascadeNormalizesInheritedChildren(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("child", "root", "ws-1")
+	tasks.tasks["child"].Metadata = map[string]interface{}{
+		"workspace": map[string]interface{}{
+			"mode":     workspaceModeInheritParent,
+			"group_id": "group-1",
+		},
+		"keep": "this field",
+	}
+
+	svc := NewHandoffService(&fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}, nil, nil, nil, nil, nil)
+	if _, err := svc.DeleteTaskTree(context.Background(), "root", false); err != nil {
+		t.Fatalf("DeleteTaskTree: %v", err)
+	}
+
+	child, err := tasks.GetTask(context.Background(), "child")
+	if err != nil {
+		t.Fatalf("GetTask(child): %v", err)
+	}
+	if child == nil {
+		t.Fatal("no-cascade delete removed the child")
+	}
+	if child.ParentID != "" {
+		t.Fatalf("child parent_id = %q, want root", child.ParentID)
+	}
+	workspace, _ := child.Metadata["workspace"].(map[string]interface{})
+	if workspace["mode"] != workspaceModeSharedGroup {
+		t.Fatalf("child workspace mode = %#v, want %q", workspace["mode"], workspaceModeSharedGroup)
+	}
+	if workspace["group_id"] != "group-1" || child.Metadata["keep"] != "this field" {
+		t.Fatalf("child metadata was not preserved: %#v", child.Metadata)
+	}
+}
+
 func (c *recordingCleanupCoordinator) StartPreparedTaskResourceCleanup(_ context.Context, operationID string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -300,6 +336,42 @@ func TestArchiveTaskTree_StampsCascadeAcrossDescendants(t *testing.T) {
 	}
 }
 
+func TestArchiveTaskTree_TransfersSharedEnvironmentFromDepartingOwner(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("child", "root", "ws-1")
+	tasks.taskEnvironments = map[string]*models.TaskEnvironment{
+		"env-shared": {ID: "env-shared", TaskID: "root"},
+	}
+	groups := newCascadeWSGroupRepo()
+	groups.groups["g1"] = &orchmodels.WorkspaceGroup{
+		ID: "g1", WorkspaceID: "ws-1", OwnerTaskID: "root",
+		MaterializedEnvironmentID: "env-shared",
+		OwnedByKandev:             true,
+		CleanupPolicy:             orchmodels.WorkspaceCleanupPolicyDeleteWhenLastMemberArchivedOrDel,
+		CleanupStatus:             orchmodels.WorkspaceCleanupStatusActive,
+	}
+	groups.members["g1"] = map[string]string{
+		"root":  orchmodels.WorkspaceMemberRoleOwner,
+		"child": orchmodels.WorkspaceMemberRoleMember,
+	}
+	svc := newCascadeService(t, tasks, groups)
+
+	if _, err := svc.ArchiveTaskTree(context.Background(), "root", false); err != nil {
+		t.Fatalf("ArchiveTaskTree: %v", err)
+	}
+	env, err := tasks.GetTaskEnvironment(context.Background(), "env-shared")
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if env.TaskID != "child" {
+		t.Fatalf("shared environment owner = %q, want surviving child", env.TaskID)
+	}
+	if status := groups.cleanupStatuses["g1"]; status != "" {
+		t.Fatalf("group cleanup status = %q, want unchanged while child remains active", status)
+	}
+}
+
 // REGRESSION: an unarchive cascade must NOT resurrect descendants that
 // the user manually archived before the cascade ran. Phase 6 scopes
 // restoration to tasks tagged with the same cascade ID.
@@ -433,6 +505,107 @@ func (f *fakeRunCanceller) CancelTaskExecution(_ context.Context, taskID, _ stri
 	return f.failOn[taskID]
 }
 
+type cancellableCascadeSessionReader struct {
+	*fakeSessionReader
+	cancelCalls  []string
+	cancelReason []string
+}
+
+func (f *cancellableCascadeSessionReader) CancelActiveTaskSessionsByTaskID(
+	_ context.Context,
+	taskID, reason string,
+) ([]*models.TaskSession, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cancelCalls = append(f.cancelCalls, taskID)
+	f.cancelReason = append(f.cancelReason, reason)
+
+	now := time.Now().UTC()
+	var cancelled []*models.TaskSession
+	for _, session := range f.sessions[taskID] {
+		if session == nil {
+			continue
+		}
+		switch session.State {
+		case models.TaskSessionStateCreated,
+			models.TaskSessionStateStarting,
+			models.TaskSessionStateRunning,
+			models.TaskSessionStateWaitingForInput:
+			session.State = models.TaskSessionStateCancelled
+			session.ErrorMessage = reason
+			session.CompletedAt = &now
+			session.UpdatedAt = now
+			cancelled = append(cancelled, session)
+		}
+	}
+	return cancelled, nil
+}
+
+func TestArchiveTaskTree_FinalizesActiveSessionWhenRuntimeCancelFails(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	sessions := &cancellableCascadeSessionReader{fakeSessionReader: newFakeSessionReader()}
+	sessions.sessions["root"] = []*models.TaskSession{
+		{ID: "session-root", TaskID: "root", State: models.TaskSessionStateRunning},
+	}
+
+	tr := newCascadeRepo(tasks)
+	svc := NewHandoffService(tr, nil, nil, nil, newCascadeWSGroupRepo(), nil)
+	svc.SetSessionReader(sessions)
+	svc.SetRunCanceller(&fakeRunCanceller{
+		failOn: map[string]error{"root": errors.New("runtime missing")},
+	})
+
+	if _, err := svc.ArchiveTaskTree(context.Background(), "root", false); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+
+	if got := sessions.sessions["root"][0].State; got != models.TaskSessionStateCancelled {
+		t.Fatalf("session state = %q, want CANCELLED", got)
+	}
+	if len(sessions.cancelCalls) != 1 || sessions.cancelCalls[0] != "root" {
+		t.Fatalf("cancel calls = %v, want [root]", sessions.cancelCalls)
+	}
+	if len(sessions.cancelReason) != 1 || sessions.cancelReason[0] != models.SessionArchiveTreeCancelReason {
+		t.Fatalf("cancel reasons = %v, want [%q]", sessions.cancelReason, models.SessionArchiveTreeCancelReason)
+	}
+}
+
+type archiveErrorCascadeRepo struct {
+	*fakeCascadeRepo
+	err error
+}
+
+func (r *archiveErrorCascadeRepo) ArchiveTaskIfActive(context.Context, string, string) (bool, error) {
+	return false, r.err
+}
+
+func TestArchiveTaskTree_DoesNotFinalizeSessionWhenArchiveFails(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	sessions := &cancellableCascadeSessionReader{fakeSessionReader: newFakeSessionReader()}
+	sessions.sessions["root"] = []*models.TaskSession{
+		{ID: "session-root", TaskID: "root", State: models.TaskSessionStateRunning},
+	}
+
+	archiveErr := errors.New("archive unavailable")
+	svc := NewHandoffService(&archiveErrorCascadeRepo{
+		fakeCascadeRepo: newCascadeRepo(tasks),
+		err:             archiveErr,
+	}, nil, nil, nil, newCascadeWSGroupRepo(), nil)
+	svc.SetSessionReader(sessions)
+
+	if _, err := svc.ArchiveTaskTree(context.Background(), "root", false); !errors.Is(err, archiveErr) {
+		t.Fatalf("archive error = %v, want %v", err, archiveErr)
+	}
+	if got := sessions.sessions["root"][0].State; got != models.TaskSessionStateRunning {
+		t.Fatalf("session state = %q, want RUNNING after failed archive", got)
+	}
+	if len(sessions.cancelCalls) != 0 {
+		t.Fatalf("cancel calls = %v, want none after failed archive", sessions.cancelCalls)
+	}
+}
+
 // fakeDeleteRepo extends fakeCascadeRepo with DeleteTask support so the
 // delete cascade test can verify rows are actually removed.
 type fakeDeleteRepo struct {
@@ -448,6 +621,41 @@ func (r *fakeDeleteRepo) DeleteTask(_ context.Context, id string) error {
 
 func (r *fakeDeleteRepo) DeleteExpiredQuickChatTask(context.Context, string, time.Time) (bool, error) {
 	panic("DeleteExpiredQuickChatTask should not be used by delete cascade tests")
+}
+
+type deleteErrorCascadeRepo struct {
+	*fakeDeleteRepo
+	err error
+}
+
+func (r *deleteErrorCascadeRepo) DeleteTask(context.Context, string) error {
+	return r.err
+}
+
+func TestDeleteTaskTree_DoesNotFinalizeSessionWhenDeleteFails(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	sessions := &cancellableCascadeSessionReader{fakeSessionReader: newFakeSessionReader()}
+	sessions.sessions["root"] = []*models.TaskSession{
+		{ID: "session-root", TaskID: "root", State: models.TaskSessionStateRunning},
+	}
+
+	deleteErr := errors.New("delete unavailable")
+	svc := NewHandoffService(&deleteErrorCascadeRepo{
+		fakeDeleteRepo: &fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)},
+		err:            deleteErr,
+	}, nil, nil, nil, nil, nil)
+	svc.SetSessionReader(sessions)
+
+	if _, err := svc.DeleteTaskTree(context.Background(), "root", false); !errors.Is(err, deleteErr) {
+		t.Fatalf("delete error = %v, want %v", err, deleteErr)
+	}
+	if got := sessions.sessions["root"][0].State; got != models.TaskSessionStateRunning {
+		t.Fatalf("session state = %q, want RUNNING after failed delete", got)
+	}
+	if len(sessions.cancelCalls) != 0 {
+		t.Fatalf("cancel calls = %v, want none after failed delete", sessions.cancelCalls)
+	}
 }
 
 // REGRESSION (post-review #4): a parent with already-archived children

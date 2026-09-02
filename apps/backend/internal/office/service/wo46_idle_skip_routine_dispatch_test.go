@@ -10,10 +10,11 @@ import (
 )
 
 // TestIdleSkip_RoutineDispatchNoTasks_Skipped is the WO-46 regression test.
-// Production routine dispatch (internal/office/routines) queues runs with
-// reason "routine_dispatch", not RunReasonHeartbeat — checkIdleSkip must
-// recognize that reason too, or the idle-skip gate is unreachable in
-// production even though the existing RunReasonHeartbeat-driven tests pass.
+// Production cron-driven routine dispatch (internal/office/routines) queues
+// runs with reason "routine_dispatch_cron", not RunReasonHeartbeat —
+// checkIdleSkip must recognize that reason too, or the idle-skip gate is
+// unreachable in production even though the existing
+// RunReasonHeartbeat-driven tests pass.
 func TestIdleSkip_RoutineDispatchNoTasks_Skipped(t *testing.T) {
 	mock := &mockTaskStarter{}
 	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
@@ -31,7 +32,7 @@ func TestIdleSkip_RoutineDispatchNoTasks_Skipped(t *testing.T) {
 	}
 	// Worker defaults to skip_idle_runs=true, no tasks assigned.
 
-	if err := svc.QueueRun(ctx, agent.ID, shared.RunReasonRoutineDispatch, `{}`, ""); err != nil {
+	if err := svc.QueueRun(ctx, agent.ID, shared.RunReasonRoutineDispatchCron, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -65,7 +66,7 @@ func TestIdleSkip_RoutineDispatchNoTasks_Skipped(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("expected run_idle_skipped activity entry for reason=routine_dispatch")
+		t.Error("expected run_idle_skipped activity entry for reason=routine_dispatch_cron")
 	}
 }
 
@@ -73,8 +74,8 @@ func TestIdleSkip_RoutineDispatchNoTasks_Skipped(t *testing.T) {
 // case to TestIdleSkip_RoutineDispatchNoTasks_Skipped (PR #2973 review
 // round 1, github-actions suggestion): a coordinator (CEO role) defaults to
 // SkipIdleRuns=false because its heartbeat purpose is self-directed and
-// does not require a directly assigned task, so a routine_dispatch fire for
-// one must never be idle-skipped. checkIdleSkip's guard order happens to
+// does not require a directly assigned task, so a routine_dispatch_cron fire
+// for one must never be idle-skipped. checkIdleSkip's guard order happens to
 // check the reason before SkipIdleRuns, so this passes today, but nothing
 // pinned the coordinator side of the contract — a future reorder of the
 // guards in checkIdleSkip would silently break it without this test.
@@ -97,7 +98,7 @@ func TestIdleSkip_RoutineDispatch_CoordinatorNotSkipped(t *testing.T) {
 		t.Fatalf("CEO role should default to SkipIdleRuns=false")
 	}
 
-	if err := svc.QueueRun(ctx, agent.ID, shared.RunReasonRoutineDispatch, `{}`, ""); err != nil {
+	if err := svc.QueueRun(ctx, agent.ID, shared.RunReasonRoutineDispatchCron, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
