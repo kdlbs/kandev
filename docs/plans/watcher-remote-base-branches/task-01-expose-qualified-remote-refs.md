@@ -20,16 +20,18 @@ system_design:
 ## Summary
 
 Replace the watcher base-branch select with the shared searchable branch
-picker used by New Task and repository branch-policy settings. Keep local
-`main` and supported remote `origin/main` distinct while preserving default,
-loading, disabled, stored-value, and provider-backed behavior.
+picker used by New Task and repository branch-policy settings. Keep the
+reusable selector and branch option projection in neutral component modules,
+with task-create modules retaining only compatibility re-exports where needed.
+Keep local `main` and supported remote `origin/main` distinct while preserving
+default, loading, disabled, stored-value, and provider-backed behavior.
 
 ## In scope
 
 - Add failing component coverage for qualified refs, search, badges, refresh,
   exact deduplication, and selector states.
-- Reuse `BranchSelector`, `sortBranches`, and `branchToOption` in
-  `WatcherRepositoryFields`.
+- Reuse neutral `BranchSelector`, `sortBranches`, and `branchToOption` modules
+  in `WatcherRepositoryFields` and repository branch-policy consumers.
 - Keep the repository-default sentinel first and retain a missing stored value
   as a fallback option.
 - Wire `useBranches.refresh` to the picker without changing selection.
@@ -60,6 +62,8 @@ cd apps/web && pnpm test -- --run components/watcher-repository-fields.test.tsx 
 
 - `apps/web/components/watcher-repository-fields.tsx`
 - `apps/web/components/watcher-repository-fields.test.tsx`
+- `apps/web/components/branch-selector.tsx`
+- `apps/web/components/branch-picker-options.tsx`
 - `apps/web/components/task-create-dialog-selectors.tsx`
 - `apps/web/components/combobox.tsx`
 
@@ -85,12 +89,17 @@ None.
 ## Results
 
 Reused the searchable `BranchSelector` option projection for watcher base
-branches. Qualified `origin` refs remain distinct from local refs, unsupported
-named remotes are omitted because the backend launch contract supports
-`origin`, exact projected duplicates collapse, stored values remain selectable
-when a refresh does not return them, and refresh plus coarse-pointer sizing are
-wired through the shared selector. The base-branch label is associated with
-the combobox trigger, and stored fallback values use the standard local or
-remote badge renderer.
+branches. The selector and projection now live in neutral modules so watcher
+and repository settings consumers do not depend on task-create-owned files;
+task-create compatibility re-exports preserve existing internal imports.
+Qualified `origin` refs remain distinct from local refs, unsupported named
+remotes are omitted because the backend launch contract supports `origin`,
+exact projected duplicates collapse, stored values remain selectable when a
+refresh does not return them, and refresh plus coarse-pointer sizing are wired
+through the shared selector. The base-branch label is associated with the
+combobox trigger, and stored fallback values use the standard local or remote
+badge renderer.
 
-The focused verification command passed 3 files and 26 tests.
+The focused verification command passed 3 files and 26 tests. The expanded
+branch-picker verification passed 5 files and 51 tests, including a module
+boundary regression test.

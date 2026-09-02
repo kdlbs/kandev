@@ -41,10 +41,13 @@ and regression change.
 ## Technical approach
 
 Replace the base-branch `PickSelect` in `WatcherRepositoryFields` with the
-existing full-width `BranchSelector`. Reuse `sortBranches`, `branchToOption`,
-and `scoreBranch` from the New Task branch-picker stack so search behavior,
-qualified values, ordering, and badges stay consistent. Filter named remotes to
-the supported `origin` contract before projection. Keep the repository-default
+existing full-width `BranchSelector`. Keep the reusable selector and branch
+option projection in neutral `components/branch-selector.tsx` and
+`components/branch-picker-options.tsx` modules; task-create filenames may only
+provide compatibility re-exports. Reuse `sortBranches`, `branchToOption`, and
+`scoreBranch` from that shared branch-picker stack so search behavior, qualified
+values, ordering, and badges stay consistent. Filter named remotes to the
+supported `origin` contract before projection. Keep the repository-default
 sentinel as a plain leading option, preserve a stored value with a fallback
 option when it is absent from the current branch response, and deduplicate only
 exact projected refs.
@@ -89,9 +92,10 @@ branch picker; no surrounding dialog composition change is planned.
 
 ## Verification results
 
-Passed focused component verification (3 files, 26 tests), targeted TypeScript
-and ESLint checks, rebuilt desktop Jira watcher E2E (1 passed), rebuilt mobile
-Jira watcher E2E (1 passed), and public-document validation (61 tests and 41
+Passed focused component verification (5 files, 51 tests), including the
+shared branch-picker module-boundary regression, targeted TypeScript and ESLint
+checks, rebuilt desktop Jira watcher E2E (1 passed), rebuilt mobile Jira
+watcher E2E (1 passed), and public-document validation (61 tests and 41
 published pages). The watcher projection now omits named remotes outside the
 supported `origin` contract, associates the base-branch label with its
 trigger, and cleans up temporary Jira watchers in all E2E outcomes. A

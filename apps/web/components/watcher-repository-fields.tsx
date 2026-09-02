@@ -3,8 +3,8 @@
 import { useId, useMemo } from "react";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { BranchSelector } from "@/components/task-create-dialog-selectors";
-import { branchToOption, sortBranches } from "@/components/task-create-dialog-branch-options";
+import { BranchSelector } from "@/components/branch-selector";
+import { branchToOption, sortBranches } from "@/components/branch-picker-options";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useBranches } from "@/hooks/domains/workspace/use-repository-branches";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
