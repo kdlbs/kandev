@@ -41,7 +41,7 @@ function TargetFields({ form, update }: FieldsProps) {
         <Label htmlFor="office-config-sync-project-path">{t("office:configSyncProjectPath")}</Label>
         <Input
           id="office-config-sync-project-path"
-          placeholder="group/project"
+          placeholder={t("office:configSyncProjectPathPlaceholder")}
           value={form.project_path}
           onChange={(e) => update("project_path", e.target.value)}
         />
@@ -54,7 +54,7 @@ function TargetFields({ form, update }: FieldsProps) {
         <Label htmlFor="office-config-sync-repo-owner">{t("office:configSyncRepoOwner")}</Label>
         <Input
           id="office-config-sync-repo-owner"
-          placeholder="kdlbs"
+          placeholder={t("office:configSyncRepoOwnerPlaceholder")}
           value={form.repo_owner}
           onChange={(e) => update("repo_owner", e.target.value)}
         />
@@ -63,7 +63,7 @@ function TargetFields({ form, update }: FieldsProps) {
         <Label htmlFor="office-config-sync-repo-name">{t("office:configSyncRepoName")}</Label>
         <Input
           id="office-config-sync-repo-name"
-          placeholder="kandev-office-config"
+          placeholder={t("office:configSyncRepoNamePlaceholder")}
           value={form.repo_name}
           onChange={(e) => update("repo_name", e.target.value)}
         />
@@ -80,7 +80,7 @@ function BranchDirectoryFields({ form, update }: FieldsProps) {
         <Label htmlFor="office-config-sync-branch">{t("office:configSyncBranchLabel")}</Label>
         <Input
           id="office-config-sync-branch"
-          placeholder="main"
+          placeholder={t("office:configSyncBranchPlaceholder")}
           value={form.branch}
           onChange={(e) => update("branch", e.target.value)}
         />
