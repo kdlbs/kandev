@@ -47,7 +47,9 @@ and are stated here once rather than repeated per document.
 
 - **NFR-1:** The count query adds at most one indexed read **per template that
   contains the token** (AC-TWS-001.6). Because `workflowInstructionsBlock` is
-  called from inside `buildWorkflowPromptWithContext`, one prompt build renders two
+  called from inside `buildWorkflowPromptWithTrustedContext` — the function
+  `buildWorkflowPromptWithContext` delegates to, and the one that also interpolates
+  the step prompt — one prompt build renders two
   templates, so a build in which both carry the token performs two reads. That is
   the bound. No cross-call-site cache is required and none shall be added: the read
   is a per-task indexed count, and memoising it would buy one saved query at the

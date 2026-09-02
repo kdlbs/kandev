@@ -76,7 +76,10 @@ the server substitutes it. The agent never counts.
 ### REQ-TWS-002: The entry number degrades visibly, never silently
 
 Every failure mode leaves evidence rather than a plausible wrong number, because
-a fabricated value silently disables a cap.
+a fabricated value silently disables a cap. AC-TWS-002.1 to AC-TWS-002.5 are
+observable at runtime. **AC-TWS-002.6 alone is verifiable by inspection** — it
+constrains a doc comment rather than behaviour — and Verification case 16 records
+that, so its absence from a runtime assertion is a stated carve-out, not a gap.
 
 - **AC-TWS-002.1:** When the count query returns an error, the token
   `{step_entry_number}` shall be left in the prompt **verbatim**, and the failure
@@ -132,4 +135,10 @@ One line per case; the cited AC is authoritative for the expected value.
 14. A leave-and-return yields the next number, not the previous (005.1).
 15. Both templates carrying the token in one build issue one query each and the
     build completes — the bound NFR-1 states (001.5, .6, 005.2).
+16. The doc comment on the function that computes the count states the value is a
+    **lower bound**. Checked by reading that comment, not by a runtime assertion:
+    the ledger's first row (2026-08-16) is a fact about this database's history
+    that no fixture reproduces, so there is nothing to assert against. This case
+    exists so the requirement is discharged explicitly rather than by silence
+    (002.6).
 
