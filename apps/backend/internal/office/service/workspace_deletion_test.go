@@ -130,9 +130,14 @@ func TestDeleteWorkspaceCleansUpConfigSyncData(t *testing.T) {
 
 // TestDeleteWorkspaceReallyDeletesConfigSyncData wires the real
 // configsync.Service (not a fake) as the ConfigSyncCleaner, seeds an actual
-// config row and manifest entries, and asserts they are gone from the
-// database after DeleteWorkspace — proving the bulk delete actually runs
-// rather than only proving a cleaner interface was invoked.
+// config row and several manifest entries, and asserts they are all gone
+// from the database after DeleteWorkspace. This proves the observable
+// end-state; it does not by itself distinguish a bulk delete from a
+// per-entity release loop, since both leave the same rows gone — that
+// distinction (PurgeForWorkspaceDeletion serializes against an in-flight run
+// via the per-workspace lock, the same lock DeleteConfigForWorkspace's
+// release loop takes) is covered directly in
+// configsync.TestService_PurgeForWorkspaceDeletion_SerializesAgainstInFlightRun.
 func TestDeleteWorkspaceReallyDeletesConfigSyncData(t *testing.T) {
 	ctx := context.Background()
 	taskSvc := &fakeWorkspaceTaskService{
@@ -162,6 +167,9 @@ func TestDeleteWorkspaceReallyDeletesConfigSyncData(t *testing.T) {
 	}
 	if err := store.UpsertManifestEntry(ctx, "ws-delete", "agent", "ceo", "agent-delete", "agents/ceo.yml"); err != nil {
 		t.Fatalf("seed config sync manifest entry: %v", err)
+	}
+	if err := store.UpsertManifestEntry(ctx, "ws-delete", "skill", "onboarding", "skill-delete", "skills/onboarding/SKILL.md"); err != nil {
+		t.Fatalf("seed second config sync manifest entry: %v", err)
 	}
 
 	if err := svc.DeleteWorkspace(ctx, "ws-delete"); err != nil {

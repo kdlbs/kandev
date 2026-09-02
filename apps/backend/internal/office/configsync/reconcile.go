@@ -130,7 +130,7 @@ func applyKindCreatesOnly[P comparable](
 	if err := applyKindCreatesAndUpdates(
 		ctx, writer, store, ops, workspaceID, fetched, manifestByKey, existingByKey, existingByID, res,
 	); err != nil {
-		return nil, err
+		return res, err
 	}
 	return res, nil
 }

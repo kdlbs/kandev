@@ -3,6 +3,7 @@ package configsync
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -162,6 +163,47 @@ func TestService_DeleteConfigForWorkspace_ReleasesManifestButKeepsEntities(t *te
 	projects, err := repo.ListProjects(ctx, "ws-1")
 	require.NoError(t, err)
 	assert.Len(t, projects, 1)
+}
+
+// TestService_PurgeForWorkspaceDeletion_SerializesAgainstInFlightRun proves
+// PurgeForWorkspaceDeletion waits for the per-workspace lock rather than
+// racing an in-flight run: a SyncWorkspace-shaped holder of the lock blocks
+// the purge until it releases, so a run's writes can never land after the
+// bulk delete it should have been serialized behind.
+func TestService_PurgeForWorkspaceDeletion_SerializesAgainstInFlightRun(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.SetConfigForWorkspace(ctx, "ws-1", testSetConfigRequest("cfg"))
+	require.NoError(t, err)
+
+	lock := svc.workspaceLock("ws-1")
+	lock.Lock()
+
+	purgeDone := make(chan error, 1)
+	go func() {
+		purgeDone <- svc.PurgeForWorkspaceDeletion(context.Background(), "ws-1")
+	}()
+
+	select {
+	case <-purgeDone:
+		t.Fatal("PurgeForWorkspaceDeletion returned while the workspace lock was held by an in-flight run")
+	case <-time.After(100 * time.Millisecond):
+		// Still blocked, as expected.
+	}
+
+	lock.Unlock()
+
+	select {
+	case purgeErr := <-purgeDone:
+		require.NoError(t, purgeErr)
+	case <-time.After(2 * time.Second):
+		t.Fatal("PurgeForWorkspaceDeletion did not complete after the lock was released")
+	}
+
+	cfg, err := svc.GetConfigForWorkspace(ctx, "ws-1")
+	require.NoError(t, err)
+	assert.Nil(t, cfg)
 }
 
 func TestService_SyncDueConfigs_SkipsPollDisabledAndNotDue(t *testing.T) {

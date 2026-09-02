@@ -16,6 +16,10 @@ type fakeGitHub struct {
 	dirErr  map[string]error
 	files   map[string][]byte
 	fileErr map[string]error
+	// fetchCalls counts GetRepoFileContentForWorkspace invocations, letting
+	// tests assert the walk stopped issuing fetches once a cap was reached
+	// instead of only checking the cap after fetching everything.
+	fetchCalls int
 }
 
 func newFakeGitHub() *fakeGitHub {
@@ -43,6 +47,7 @@ func (f *fakeGitHub) ListRepoDirectoryForWorkspace(
 func (f *fakeGitHub) GetRepoFileContentForWorkspace(
 	_ context.Context, _, _, _, path, _ string,
 ) ([]byte, error) {
+	f.fetchCalls++
 	if err, ok := f.fileErr[path]; ok {
 		return nil, err
 	}
@@ -300,6 +305,35 @@ func TestWalk_FileCountOverCapFailsRun(t *testing.T) {
 	}
 	if !strings.Contains(ferr.reason, "file cap") {
 		t.Errorf("Walk() error = %q, want it to name the file cap", ferr.reason)
+	}
+}
+
+// TestWalk_FileCapStopsFetchingBeforeExceedingLimit proves the file cap is
+// enforced while the walk is selecting files, not only in an aggregate check
+// after everything has already been fetched. AC-OFFICE-CONFIG-SYNC-002.5
+// bounds a run to fetching at most MaxFiles files specifically so a
+// pathological repository can't make the run pay for fetching far more than
+// the cap before failing; a check that only runs once at the end defeats
+// that purpose.
+func TestWalk_FileCapStopsFetchingBeforeExceedingLimit(t *testing.T) {
+	fg := newFakeGitHub()
+	fg.dirs["cfg"] = []github.RepoContentEntry{}
+	limits := Limits{MaxSkills: 200, MaxFiles: 2}
+	var entries []github.RepoContentEntry
+	for i := 0; i < 5; i++ {
+		p := "cfg/agents/a" + strings.Repeat("x", i+1) + ".yml"
+		entries = append(entries, fileEntry(p))
+		fg.files[p] = []byte("name: a\n")
+	}
+	fg.dirs["cfg/agents"] = entries
+	w := newWalker(fg, nil, limits)
+
+	_, ferr := w.Walk(context.Background(), testGitHubConfig())
+	if ferr == nil || !ferr.capped {
+		t.Fatalf("Walk() error = %v, want a capped failure", ferr)
+	}
+	if fg.fetchCalls > limits.MaxFiles {
+		t.Errorf("fetchCalls = %d, want at most MaxFiles (%d): the cap must stop further fetches, not just fail after fetching everything", fg.fetchCalls, limits.MaxFiles)
 	}
 }
 

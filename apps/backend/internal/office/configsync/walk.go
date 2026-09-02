@@ -114,6 +114,29 @@ type walkFailure struct {
 
 func (f *walkFailure) Error() string { return f.reason }
 
+// fileBudget tracks how many files one Walk call has fetched against
+// Limits.MaxFiles, so AC-OFFICE-CONFIG-SYNC-002.5's file cap stops the walk
+// from issuing further fetches once it is reached, rather than only being
+// checked in an aggregate count after every fetch has already happened.
+type fileBudget struct {
+	limit    int
+	selected int
+}
+
+// reserve claims budget for one more fetch, or returns a capped walkFailure
+// when the limit has already been reached.
+func (b *fileBudget) reserve() *walkFailure {
+	if b.selected >= b.limit {
+		return &walkFailure{
+			reason: fmt.Sprintf(
+				"file cap exceeded: more than %d files selected; stopping before fetching further", b.limit),
+			capped: true,
+		}
+	}
+	b.selected++
+	return nil
+}
+
 // walker drives the bounded multi-round directory walk over one provider,
 // built only from each provider's existing non-recursive listing call.
 type walker struct {
@@ -139,24 +162,17 @@ func (w *walker) Walk(ctx context.Context, cfg *Config) (*walkResult, *walkFailu
 		return nil, &walkFailure{reason: fmt.Sprintf("list configured path %q: %v", displayPath(root), err)}
 	}
 	result := &walkResult{kandevYAMLPresent: hasKandevYAML(rootEntries)}
+	budget := &fileBudget{limit: w.limits.MaxFiles}
 
-	if ferr := w.walkFlatKinds(ctx, cfg, root, result); ferr != nil {
+	if ferr := w.walkFlatKinds(ctx, cfg, root, result, budget); ferr != nil {
 		return nil, ferr
 	}
 
-	skills, ferr := w.walkSkills(ctx, cfg, path.Join(root, "skills"))
+	skills, ferr := w.walkSkills(ctx, cfg, path.Join(root, "skills"), budget)
 	if ferr != nil {
 		return nil, ferr
 	}
 	result.skills = skills
-
-	if total := countSelectedFiles(result); total > w.limits.MaxFiles {
-		return nil, &walkFailure{
-			reason: fmt.Sprintf("file cap exceeded: %d files selected, limit is %d (%d dropped)",
-				total, w.limits.MaxFiles, total-w.limits.MaxFiles),
-			capped: true,
-		}
-	}
 
 	sortWalkResult(result)
 	return result, nil
@@ -171,7 +187,7 @@ func hasKandevYAML(entries []DirEntry) bool {
 	return false
 }
 
-func (w *walker) walkFlatKinds(ctx context.Context, cfg *Config, root string, result *walkResult) *walkFailure {
+func (w *walker) walkFlatKinds(ctx context.Context, cfg *Config, root string, result *walkResult, budget *fileBudget) *walkFailure {
 	kinds := []struct {
 		dir  string
 		dest *[]fetchedFile
@@ -181,7 +197,7 @@ func (w *walker) walkFlatKinds(ctx context.Context, cfg *Config, root string, re
 		{"routines", &result.routineFiles},
 	}
 	for _, k := range kinds {
-		res, ferr := w.walkFlatKind(ctx, cfg, path.Join(root, k.dir))
+		res, ferr := w.walkFlatKind(ctx, cfg, path.Join(root, k.dir), budget)
 		if ferr != nil {
 			return ferr
 		}
@@ -202,7 +218,7 @@ type kindResult struct {
 // and fetches every *.yml/*.yaml entry directly in it.
 // AC-OFFICE-CONFIG-SYNC-002.3: not-found beneath the root is an absent
 // directory, contributing no files. Any other listing failure fails the run.
-func (w *walker) walkFlatKind(ctx context.Context, cfg *Config, dir string) (kindResult, *walkFailure) {
+func (w *walker) walkFlatKind(ctx context.Context, cfg *Config, dir string, budget *fileBudget) (kindResult, *walkFailure) {
 	entries, err := w.list(ctx, cfg, dir)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -215,7 +231,7 @@ func (w *walker) walkFlatKind(ctx context.Context, cfg *Config, dir string) (kin
 		if !e.IsFile || !isYAMLFile(e.Name) {
 			continue
 		}
-		content, ferr := w.fetchOne(ctx, cfg, e.Path, &res)
+		content, ferr := w.fetchOne(ctx, cfg, e.Path, &res, budget)
 		if ferr != nil {
 			return kindResult{}, ferr
 		}
@@ -228,8 +244,13 @@ func (w *walker) walkFlatKind(ctx context.Context, cfg *Config, dir string) (kin
 
 // fetchOne fetches one selected file. An unavailable fetch fails the run; a
 // not-found or unreadable-content fetch appends to res.unreadable and
-// returns (nil, nil) so the caller continues.
-func (w *walker) fetchOne(ctx context.Context, cfg *Config, filePath string, res *kindResult) ([]byte, *walkFailure) {
+// returns (nil, nil) so the caller continues. budget.reserve is checked
+// before the fetch so the file cap stops issuing fetches rather than only
+// being noticed afterward.
+func (w *walker) fetchOne(ctx context.Context, cfg *Config, filePath string, res *kindResult, budget *fileBudget) ([]byte, *walkFailure) {
+	if ferr := budget.reserve(); ferr != nil {
+		return nil, ferr
+	}
 	content, err := w.fetch(ctx, cfg, filePath)
 	if err == nil {
 		return content, nil
@@ -246,7 +267,7 @@ func (w *walker) fetchOne(ctx context.Context, cfg *Config, filePath string, res
 // AC-OFFICE-CONFIG-SYNC-002.5: the skill cap is evaluated here, before any
 // round-2 request, so a repository exceeding it produces the same message on
 // every run.
-func (w *walker) walkSkills(ctx context.Context, cfg *Config, skillsDir string) ([]skillFiles, *walkFailure) {
+func (w *walker) walkSkills(ctx context.Context, cfg *Config, skillsDir string, budget *fileBudget) ([]skillFiles, *walkFailure) {
 	entries, err := w.list(ctx, cfg, skillsDir)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -269,7 +290,7 @@ func (w *walker) walkSkills(ctx context.Context, cfg *Config, skillsDir string) 
 	}
 	skills := make([]skillFiles, 0, len(dirs))
 	for _, d := range dirs {
-		sf, ferr := w.walkOneSkill(ctx, cfg, d)
+		sf, ferr := w.walkOneSkill(ctx, cfg, d, budget)
 		if ferr != nil {
 			return nil, ferr
 		}
@@ -278,7 +299,7 @@ func (w *walker) walkSkills(ctx context.Context, cfg *Config, skillsDir string) 
 	return skills, nil
 }
 
-func (w *walker) walkOneSkill(ctx context.Context, cfg *Config, dir DirEntry) (skillFiles, *walkFailure) {
+func (w *walker) walkOneSkill(ctx context.Context, cfg *Config, dir DirEntry, budget *fileBudget) (skillFiles, *walkFailure) {
 	sf := skillFiles{dirName: dir.Name, dirPath: dir.Path}
 
 	entries, err := w.list(ctx, cfg, dir.Path)
@@ -287,7 +308,7 @@ func (w *walker) walkOneSkill(ctx context.Context, cfg *Config, dir DirEntry) (s
 	}
 	for _, e := range entries {
 		if e.IsFile && e.Name == skillDefinitionName {
-			if ferr := w.fetchSkillMD(ctx, cfg, e.Path, &sf); ferr != nil {
+			if ferr := w.fetchSkillMD(ctx, cfg, e.Path, &sf, budget); ferr != nil {
 				return skillFiles{}, ferr
 			}
 		}
@@ -302,14 +323,17 @@ func (w *walker) walkOneSkill(ctx context.Context, cfg *Config, dir DirEntry) (s
 		if !e.IsFile {
 			continue
 		}
-		if ferr := w.fetchReference(ctx, cfg, e.Path, &sf); ferr != nil {
+		if ferr := w.fetchReference(ctx, cfg, e.Path, &sf, budget); ferr != nil {
 			return skillFiles{}, ferr
 		}
 	}
 	return sf, nil
 }
 
-func (w *walker) fetchSkillMD(ctx context.Context, cfg *Config, filePath string, sf *skillFiles) *walkFailure {
+func (w *walker) fetchSkillMD(ctx context.Context, cfg *Config, filePath string, sf *skillFiles, budget *fileBudget) *walkFailure {
+	if ferr := budget.reserve(); ferr != nil {
+		return ferr
+	}
 	content, err := w.fetch(ctx, cfg, filePath)
 	if err == nil {
 		f := fetchedFile{path: filePath, content: content}
@@ -324,7 +348,10 @@ func (w *walker) fetchSkillMD(ctx context.Context, cfg *Config, filePath string,
 	return nil
 }
 
-func (w *walker) fetchReference(ctx context.Context, cfg *Config, filePath string, sf *skillFiles) *walkFailure {
+func (w *walker) fetchReference(ctx context.Context, cfg *Config, filePath string, sf *skillFiles, budget *fileBudget) *walkFailure {
+	if ferr := budget.reserve(); ferr != nil {
+		return ferr
+	}
 	content, err := w.fetch(ctx, cfg, filePath)
 	if err == nil {
 		sf.references = append(sf.references, fetchedFile{path: filePath, content: content})
@@ -400,17 +427,6 @@ func (w *walker) fetch(ctx context.Context, cfg *Config, filePath string) ([]byt
 		return nil, fmt.Errorf("%w: file exceeds %d byte limit", ErrUnreadable, MaxFileBytes)
 	}
 	return content, nil
-}
-
-func countSelectedFiles(result *walkResult) int {
-	total := len(result.agentFiles) + len(result.projectFiles) + len(result.routineFiles)
-	for _, sf := range result.skills {
-		if sf.skillMD != nil {
-			total++
-		}
-		total += len(sf.references)
-	}
-	return total
 }
 
 // sortWalkResult orders every file slice by full repository path, ascending

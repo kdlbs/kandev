@@ -156,7 +156,7 @@ func applySkillsCreatesOnly(
 
 	res := newKindApplyResult()
 	if err := applySkillCreatesAndUpdates(ctx, repo, store, workspaceID, fetched, manifestByKey, existingByKey, existingByID, res); err != nil {
-		return nil, err
+		return res, err
 	}
 	return res, nil
 }

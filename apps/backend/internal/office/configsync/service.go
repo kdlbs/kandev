@@ -120,14 +120,24 @@ func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID stri
 }
 
 // PurgeForWorkspaceDeletion removes the workspace's config and manifest rows
-// directly, with no per-workspace lock and no per-entity release walk
-// (system-design/config-sync.md: "Deleting a workspace removes its config and
-// manifest rows with the workspace's other Office state; no release runs,
-// because the entities are going away too"). Workspace deletion already
-// deletes every entity config sync would otherwise walk one at a time, so a
-// release pass here only adds up to the run deadline of lock contention and
+// directly, with no per-entity release walk (system-design/config-sync.md:
+// "Deleting a workspace removes its config and manifest rows with the
+// workspace's other Office state; no release runs, because the entities are
+// going away too"). Workspace deletion already deletes every entity config
+// sync would otherwise walk one at a time, so a release pass here only adds
 // per-row writes ahead of DeleteWorkspaceData wiping the same rows.
+//
+// It still takes the per-workspace lock: an in-flight SyncWorkspace run holds
+// that lock for its whole duration and writes entity and manifest rows as it
+// goes, so a lock-free purge could complete while that write is still
+// happening and let it land after DeleteWorkspaceData, resurrecting rows
+// under a workspace_id that no longer exists. Taking the lock bounds the wait
+// to whatever is left of that run's own AC-OFFICE-CONFIG-SYNC-004.4a
+// deadline, which is cheap next to the alternative.
 func (s *Service) PurgeForWorkspaceDeletion(ctx context.Context, workspaceID string) error {
+	lock := s.workspaceLock(workspaceID)
+	lock.Lock()
+	defer lock.Unlock()
 	return s.store.DeleteConfigForWorkspace(ctx, workspaceID)
 }
 
