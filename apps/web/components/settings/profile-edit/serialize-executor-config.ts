@@ -1,4 +1,20 @@
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
+import type { ExecutorType } from "@/lib/types/http";
+
+export function getExecutorProfileRuntimeFlags(executorType: ExecutorType) {
+  const isRemote =
+    executorType === "local_docker" ||
+    executorType === "remote_docker" ||
+    executorType === "sprites" ||
+    executorType === "ssh" ||
+    executorType === "k8s";
+  return {
+    isRemote,
+    isDocker: executorType === "local_docker" || executorType === "remote_docker",
+    isSprites: executorType === "sprites",
+    isKubernetes: executorType === "k8s",
+  };
+}
 
 export type ExecutorProfileConfigForm = {
   isSprites: boolean;

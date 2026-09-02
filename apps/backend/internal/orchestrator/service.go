@@ -2631,6 +2631,7 @@ func (s *Service) reconcileExecutorSessionsOnStartup(ctx context.Context) {
 	for _, running := range runningExecutors {
 		if models.IsRemoteExecutorType(models.ExecutorType(running.Runtime)) {
 			remoteRecords = append(remoteRecords, executor.RemoteStatusPollRequest{
+				TaskID:           running.TaskID,
 				SessionID:        running.SessionID,
 				Runtime:          running.Runtime,
 				AgentExecutionID: running.AgentExecutionID,

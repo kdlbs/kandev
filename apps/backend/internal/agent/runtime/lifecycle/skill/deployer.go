@@ -11,10 +11,9 @@ import (
 )
 
 // MetadataKeySkillManifestJSON mirrors lifecycle.MetadataKeySkillManifestJSON
-// to avoid an import cycle. It carries the JSON-serialised Manifest the
-// Sprites executor consumes during post-create setup to upload skill +
-// instruction files into the sprite. The lifecycle test suite asserts
-// the same string value.
+// to avoid an import cycle. It carries the JSON-serialised Manifest that
+// remote workspace executors consume during setup to upload skill and
+// instruction files. The lifecycle test suite asserts the same string value.
 const MetadataKeySkillManifestJSON = "skill_manifest_json"
 
 // Config holds Deployer dependencies. All fields except Logger are

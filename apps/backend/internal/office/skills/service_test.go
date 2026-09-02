@@ -13,6 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -34,6 +35,10 @@ func newTestSkillService(t *testing.T) *skills.SkillService {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("provide settings store: %v", err)
+	}
 
 	repo, err := sqlite.NewWithDB(db, db, nil)
 	if err != nil {
@@ -86,8 +91,92 @@ func TestValidateAndPrepareSkill_AutoGeneratesSlug(t *testing.T) {
 	if err := svc.ValidateAndPrepareSkill(ctx, skill); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
-	if skill.Slug != "code-review" {
-		t.Errorf("slug = %q, want %q", skill.Slug, "code-review")
+	if skill.Slug != "kandev-code-review" {
+		t.Errorf("slug = %q, want %q", skill.Slug, "kandev-code-review")
+	}
+}
+
+// TestValidateAndPrepareSkill_NormalizesExplicitSlugToCanonical covers
+// AC-001.12: a well-formed but non-canonical caller-supplied slug is
+// normalized to canonical before persisting.
+func TestValidateAndPrepareSkill_NormalizesExplicitSlugToCanonical(t *testing.T) {
+	svc := newTestSkillService(t)
+	ctx := context.Background()
+
+	skill := &models.Skill{
+		WorkspaceID: "ws-1",
+		Name:        "My Skill",
+		Slug:        "my-skill",
+		SourceType:  "inline",
+	}
+	if err := svc.ValidateAndPrepareSkill(ctx, skill); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if skill.Slug != "kandev-my-skill" {
+		t.Errorf("slug = %q, want %q", skill.Slug, "kandev-my-skill")
+	}
+}
+
+// TestValidateAndPrepareSkill_CanonicalSlugUnchanged covers AC-001.6: a
+// slug that is already canonical is left byte-identical.
+func TestValidateAndPrepareSkill_CanonicalSlugUnchanged(t *testing.T) {
+	svc := newTestSkillService(t)
+	ctx := context.Background()
+
+	skill := &models.Skill{
+		WorkspaceID: "ws-1",
+		Name:        "Already Canonical",
+		Slug:        "kandev-already-canonical",
+		SourceType:  "inline",
+	}
+	if err := svc.ValidateAndPrepareSkill(ctx, skill); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if skill.Slug != "kandev-already-canonical" {
+		t.Errorf("slug = %q, want %q", skill.Slug, "kandev-already-canonical")
+	}
+}
+
+// TestValidateAndPrepareSkill_RejectsNotWellFormedSlug covers AC-001.11: a
+// not-well-formed caller-supplied slug is rejected outright, never coerced.
+func TestValidateAndPrepareSkill_RejectsNotWellFormedSlug(t *testing.T) {
+	svc := newTestSkillService(t)
+	ctx := context.Background()
+
+	skill := &models.Skill{
+		WorkspaceID: "ws-1",
+		Name:        "Bad Slug",
+		Slug:        "not a valid slug!",
+		SourceType:  "inline",
+	}
+	err := svc.ValidateAndPrepareSkill(ctx, skill)
+	if err == nil {
+		t.Fatal("expected error for not-well-formed slug")
+	}
+	if skill.Slug != "not a valid slug!" {
+		t.Errorf("slug was coerced from its original input: %q", skill.Slug)
+	}
+}
+
+// TestValidateAndPrepareSkill_UniquenessCheckedOnCanonicalValue covers the
+// second half of AC-001.12: a request whose canonical slug already exists
+// is rejected, even when the request itself supplied the non-canonical
+// form.
+func TestValidateAndPrepareSkill_UniquenessCheckedOnCanonicalValue(t *testing.T) {
+	svc := newTestSkillService(t)
+	ctx := context.Background()
+
+	existing := &models.Skill{WorkspaceID: "ws-1", Name: "Existing", Slug: "kandev-my-skill", SourceType: "inline"}
+	if err := svc.ValidateAndPrepareSkill(ctx, existing); err != nil {
+		t.Fatalf("validate existing: %v", err)
+	}
+	if err := svc.CreateSkill(ctx, existing); err != nil {
+		t.Fatalf("create existing: %v", err)
+	}
+
+	colliding := &models.Skill{WorkspaceID: "ws-1", Name: "Colliding", Slug: "my-skill", SourceType: "inline"}
+	if err := svc.ValidateAndPrepareSkill(ctx, colliding); err == nil {
+		t.Fatal("expected duplicate slug error against the canonical form")
 	}
 }
 
@@ -143,6 +232,47 @@ func TestValidateAndPrepareSkill_RejectsSameSlugInSameWorkspace(t *testing.T) {
 	}
 }
 
+// --- ValidateSkillUpdate tests ---
+
+func TestValidateSkillUpdate_NormalizesWellFormedSlugToCanonical(t *testing.T) {
+	svc := newTestSkillService(t)
+	ctx := context.Background()
+
+	skill := &models.Skill{WorkspaceID: "ws-1", Name: "Existing", Slug: "kandev-existing", SourceType: "inline"}
+	if err := svc.ValidateAndPrepareSkill(ctx, skill); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if err := svc.CreateSkill(ctx, skill); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	skill.Slug = "renamed"
+	if err := svc.ValidateSkillUpdate(ctx, skill); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if skill.Slug != "kandev-renamed" {
+		t.Errorf("slug = %q, want %q", skill.Slug, "kandev-renamed")
+	}
+}
+
+func TestValidateSkillUpdate_RejectsNotWellFormedSlug(t *testing.T) {
+	svc := newTestSkillService(t)
+	ctx := context.Background()
+
+	skill := &models.Skill{WorkspaceID: "ws-1", Name: "Existing", Slug: "kandev-existing", SourceType: "inline"}
+	if err := svc.ValidateAndPrepareSkill(ctx, skill); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if err := svc.CreateSkill(ctx, skill); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	skill.Slug = "not a valid slug!"
+	if err := svc.ValidateSkillUpdate(ctx, skill); err == nil {
+		t.Fatal("expected error for not-well-formed slug")
+	}
+}
+
 func TestValidateAndPrepareSkill_RejectsInvalidSourceType(t *testing.T) {
 	svc := newTestSkillService(t)
 	ctx := context.Background()
@@ -167,24 +297,27 @@ func TestListSkillsWithUsage(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	// The lazy system-skill sync fires on the first ListSkills call
-	// for a workspace, populating bundled system rows alongside the
-	// user skill created above. The test asserts the *user* skill
-	// appears with the correct usage count; the system rows are
-	// validated separately in system_sync_test.go.
+	// The lazy system-skill sync fires on the first ListSkills call for
+	// a workspace, populating bundled system rows alongside the user
+	// skill created above. It also normalizes the well-formed but
+	// non-canonical "my-skill" slug to "kandev-my-skill" (AC-003.8),
+	// so the test looks for the row under its normalized slug. The
+	// normalization mechanics themselves are covered in
+	// system_sync_migration_test.go; this test only asserts the *user*
+	// skill survives sync with the correct usage count.
 	list, err := svc.ListSkillsWithUsage(ctx, "ws-1")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	var userRow *skills.SkillWithUsage
 	for _, row := range list {
-		if row.Slug == "my-skill" {
+		if row.Slug == "kandev-my-skill" {
 			userRow = row
 			break
 		}
 	}
 	if userRow == nil {
-		t.Fatalf("user skill not found in list of %d rows", len(list))
+		t.Fatalf("normalized user skill not found in list of %d rows", len(list))
 	}
 	if userRow.UsedByCount != 0 {
 		t.Errorf("used_by_count = %d, want 0", userRow.UsedByCount)

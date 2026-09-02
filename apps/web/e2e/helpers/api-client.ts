@@ -41,6 +41,11 @@ import type {
   SSHTestRequest,
   SSHTestResult,
 } from "../../lib/types/http-ssh";
+import type {
+  KubernetesSession,
+  KubernetesTestRequest,
+  KubernetesTestResult,
+} from "../../lib/types/http-kubernetes";
 import { loadInterimSettingsInterlockToken } from "./interim-settings-interlock";
 import { dwell } from "./causal-waits";
 
@@ -1002,8 +1007,17 @@ export class ApiClient {
   async createExecutor(
     name: string,
     type: string,
+    config?: Record<string, string>,
   ): Promise<{ id: string; name: string; type: string }> {
-    return this.request("POST", "/api/v1/executors", { name, type });
+    return this.request("POST", "/api/v1/executors", { name, type, config });
+  }
+
+  async testKubernetesConnection(request: KubernetesTestRequest): Promise<KubernetesTestResult> {
+    return this.request("POST", "/api/v1/kubernetes/test", request);
+  }
+
+  async listKubernetesSessions(executorId: string): Promise<KubernetesSession[]> {
+    return this.request("GET", `/api/v1/kubernetes/executors/${executorId}/sessions`);
   }
 
   async updateWorkspace(
@@ -2441,10 +2455,10 @@ export class ApiClient {
   async launchSession(
     payload: {
       task_id: string;
-      agent_profile_id: string;
+      agent_profile_id?: string;
       executor_id?: string;
       executor_profile_id?: string;
-      prompt: string;
+      prompt?: string;
       intent?: string;
       session_id?: string;
       workflow_step_id?: string;

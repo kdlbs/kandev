@@ -1,6 +1,6 @@
 ---
 title: "Executors"
-description: "Choose and configure local, worktree, Docker, SSH, or Sprites task environments."
+description: "Choose and configure local, worktree, Docker, Kubernetes, SSH, or Sprites task environments."
 ---
 
 # Executors
@@ -11,7 +11,7 @@ An executor determines where Kandev creates a task environment and runs `agentct
 
 1. Choose **Worktree** for normal isolated Git work.
 2. Choose **Local** only when sharing the selected checkout is intentional.
-3. Choose Docker, SSH, or Sprites when the host boundary or remote location is part of the requirement.
+3. Choose Docker, Kubernetes, SSH, or Sprites when the host boundary or remote location is part of the requirement.
 4. Review credentials, scripts, mounts, and network policy as part of the executor trust boundary.
 
 ## Current support
@@ -21,6 +21,7 @@ An executor determines where Kandev creates a task environment and runs `agentct
 | Worktree      | Supported; normal default                                                       | Dedicated Git worktree on the Kandev host                               | Parallel coding on a trusted machine                                     |
 | Local         | Supported                                                                       | The selected checkout, or an explicit folder for a repository-free task | One controlled task must work in that exact folder                       |
 | Local Docker  | Supported when the global Docker runtime is enabled and its daemon is reachable | `/workspace` in a new Docker container                                  | You need a repeatable container boundary                                 |
+| Kubernetes    | Dependency-bound on cluster access, namespaced RBAC, admission, storage, and streaming support | `/workspace` in one Pod per task session | You need sessions scheduled inside an administrator-managed cluster boundary |
 | Sprites.dev   | Supported, provider-dependent                                                   | `/workspace` in a provider sandbox                                      | You need remote compute and accept provider lifecycle/billing            |
 | SSH           | Supported for repository sources on a trusted host                              | A task folder on a trusted SSH host                                     | You need a remote host with SSH, SFTP, forwarding, and clone credentials |
 | Remote Docker | **Not implemented**                                                             | None                                                                    | Do not select or create this type                                        |
@@ -34,13 +35,13 @@ Remote Docker deserves explicit treatment: the backend registers the runtime typ
 **VS Code (Embedded)** starts code-server inside the active task environment, so its availability
 follows that session's executor rather than the operating system of the browser or desktop app.
 It is available for Local and Worktree sessions on Linux or macOS, and for Linux-backed Local
-Docker, Sprites, and supported SSH sessions. Native Windows Local and Worktree sessions do not
+Docker, Kubernetes, Sprites, and supported SSH sessions. Native Windows Local and Worktree sessions do not
 offer it. See [Developer tools](developer-tools.md#files-and-editor-integrations) for code-server network and
 download requirements.
 
 ## Create and select a profile
 
-Open **Settings > Executors**, then choose **Local**, **Worktree**, **Docker**, **Sprites.dev**, or **SSH** under **Create New Profile**. Local and Worktree profiles already exist in a new database.
+Open **Settings > Executors**, then choose **Local**, **Worktree**, **Docker**, **Kubernetes**, **Sprites.dev**, or **SSH** under **Create New Profile**. Local and Worktree profiles already exist in a new database.
 
 ![Settings > Executors showing existing Local, Worktree, and Sprites profiles plus Local, Worktree, Docker, Sprites.dev, and SSH profile creation options.](../screenshots/settings-executors.png)
 
@@ -64,7 +65,7 @@ Literal environment values are stored with the profile. Use secret references fo
 
 The MCP editor checks only that the value is a JSON object. Its presets cover stdio, HTTP, and SSE transport allowances, server allowlists, and URL rewrites. Test restrictive policies with the actual MCP servers the agent needs; see [Automation and MCP](automation-and-mcp.md).
 
-Profile edits apply when Kandev provisions a launch, but a Docker container or Sprite resume can reconnect to the already provisioned process, image, environment, credentials, and files. Use **Reset Environment** or explicitly destroy the resource when a change must take effect on a fresh environment. Deleting or editing a profile does not tear down an already-running resource.
+Profile edits apply when Kandev provisions a launch, but a Docker container or Sprite resume can reconnect to the already provisioned process, image, environment, credentials, and files. Kubernetes records a separate workload snapshot for each session; changing its profile affects new sessions, while an existing session and any replacement Pod keep that snapshot. Use **Reset Environment** or explicitly destroy the resource when a change must take effect on a fresh environment. Deleting or editing a profile does not tear down an already-running resource.
 
 ### Repository environment secrets
 
@@ -76,7 +77,7 @@ SSH has an additional forwarding boundary. Remote agent and terminal instances r
 
 ### Portable agent configuration
 
-Local Docker, SSH, and Sprites profiles can copy selected agent configuration
+Local Docker, Kubernetes, SSH, and Sprites profiles can copy selected agent configuration
 bundles. Open an agent row in the remote credentials settings to choose that
 agent's authentication files and configuration bundles independently.
 Kandev owns the allowlist. You cannot enter an arbitrary host path or copy a
@@ -120,10 +121,11 @@ Do not treat the two script fields as universal hooks:
 | ---------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Local / Worktree | Runs on the host during preparation, with the common `KANDEV_TASK_PREPARATION_TIMEOUT` limit (`10m` by default). A failure is shown but is non-fatal, so the agent can still start for diagnosis. | Not executed by the executor runtime. Repository-level worktree cleanup is a separate repository setting.                                                                                                                                                               |
 | Local Docker     | Runs inside the container before `agentctl`, with the common preparation limit. Failure is logged but `agentctl` still starts.                           | Not executed.                                                                                                                                                                                                                                                           |
+| Kubernetes       | Runs in the main container before `agentctl`. The default is idempotent for a retained PVC; a failure aborts launch. Kandev injects the script and helper through Pod exec rather than requiring them in the image. | Runs in the verified main container only for terminal task/session archive or delete cleanup. Failure is logged but does not prevent exact Pod/PVC deletion. Plain Stop and backend restart preserve the Pod and workspace and skip cleanup. |
 | Sprites          | Runs inside a newly created sandbox, with the common preparation limit. Failure aborts the launch and destroys that new sandbox.                         | Runs, with a 60-second limit, only when a live execution is stopped with a task/session archived or deleted reason; failure does not prevent the subsequent destroy attempt. Plain Stop, **Reset Environment**, and profile-page direct destroy do not run this script. |
 | SSH              | Runs on the target before `agentctl`, with the common preparation limit. An empty profile script uses the SSH default, which materializes the primary repository at the task-workspace root, reuses a matching checkout, runs repository setup, and selects the Kandev branch. A non-zero exit, timeout, missing checkout, or conflicting origin aborts the launch. | Runs on the target, with a 60-second limit, only for task/session archive or delete stops. Failure is logged but does not prevent controller teardown. Plain Stop and backend restart preserve the task workspace and skip cleanup. |
 
-Keep working prepare scripts noninteractive and idempotent. Kandev resolves supported placeholders and appends its managed branch checkout for Docker, Sprites, and SSH after the user script. A profile cleanup script must never remove paths outside the environment it owns.
+Keep working prepare scripts noninteractive and idempotent. Kandev resolves supported placeholders and appends its managed branch checkout for Docker, Kubernetes, Sprites, and SSH after the user script. A profile cleanup script must never remove paths outside the environment it owns.
 
 The common preparation limit is configured through
 `KANDEV_TASK_PREPARATION_TIMEOUT`; see [Configuration](configuration.md#setup-and-launch-timing)
@@ -140,7 +142,7 @@ The workspace's GitHub connection and the task's Git transport policy are separa
 workspace credentials** is the default and provides the broker behavior below. Select **Inherit
 executor Git credentials** in the workspace GitHub settings to leave Git and `gh` to the host or
 selected executor; Kandev then injects no GitHub broker helper or shim. Local and Worktree use
-host-visible Git/SSH credentials, while Docker, SSH, and cloud require executor-configured
+host-visible Git/SSH credentials, while Docker, Kubernetes, SSH, and cloud require executor-configured
 credentials. An explicit executor-profile `GH_TOKEN` or `GITHUB_TOKEN` overrides the managed
 workspace route.
 
@@ -162,7 +164,7 @@ receives a bearer token with all scopes and repositories granted by GitHub. An e
 `GITHUB_TOKEN` or `GH_TOKEN` bypasses managed broker selection entirely and is the operator's
 unmanaged grant. Personal GitHub tokens and App registration private keys never enter executors.
 
-Managed Docker, Sprites, and SSH launches probe the exact credential-resolution route from inside
+Managed Docker, Kubernetes, Sprites, and SSH launches probe the exact credential-resolution route from inside
 the executor before clone or agent startup and require its `204 No Content` readiness response.
 Network failures, redirects, proxy routing errors, and broker server errors stop launch instead of
 falling back to another GitHub credential.
@@ -223,7 +225,7 @@ Use Local for an intentionally shared checkout, a controlled single task, or a r
 
 ## Workspace sources
 
-An idle, non-archived repository-backed task can add sources from its **Files** panel. Repository sources (saved workspace repository, local Git repository, or remote Git repository) are supported on **Worktree**, **Local/Local PC**, **Local Docker**, **SSH**, and **Sprites**. Worktree materializes Remote Git from Kandev's owned host cache. Docker, SSH, and Sprites clone local Git sources and therefore require a cloneable origin; Worktree and Local/Local PC can use the host repository directly.
+An idle, non-archived repository-backed task can add sources from its **Files** panel. Repository sources (saved workspace repository, local Git repository, or remote Git repository) are supported on **Worktree**, **Local/Local PC**, **Local Docker**, **Kubernetes**, **SSH**, and **Sprites**. Worktree materializes Remote Git from Kandev's owned host cache. Docker, Kubernetes, SSH, and Sprites clone local Git sources and therefore require a cloneable origin; Worktree and Local/Local PC can use the host repository directly.
 
 Every repository row records a base branch. Worktree, Docker, SSH, and Sprites may also materialize an existing checkout branch for repository rows. Local/Local PC always uses the repository's current checkout and does not offer or perform a branch switch.
 
@@ -288,6 +290,38 @@ docker ps -a --filter label=kandev.managed=true
 ```
 
 </details>
+
+## Kubernetes
+
+> **Cluster authority:** A Kubernetes profile is an administrator-authored Pod template. It can request powerful workload settings, and every injected task credential is available to the main container. Use admission policy, a dedicated namespace, a narrowly scoped API identity, and a separate workload service account.
+
+Kubernetes maps one task session to one namespaced Pod and reaches the injected `agentctl` through a process-local `127.0.0.1` port-forward. The backend can authenticate from an absolute kubeconfig path on the Kandev host or from its own in-cluster service account. It never falls back to a local executor when cluster configuration, admission, exec, or port-forward fails.
+
+The current experimental matrix validates API and `agentctl` connectivity on Kubernetes 1.34.8 and 1.36.1 and runs the full lifecycle suite on 1.36.1. Other server versions have not yet been validated.
+
+Choose **Settings > Executors > Kubernetes**. Only an administrator can create, change, delete, or test a Kubernetes executor or profile. Members can view and select configured profiles, start or resume their own authorized sessions, and read the sanitized session inventory. Administrator change and deletion confirmations use a global impact count without exposing cross-user task or session identities.
+
+Opening a saved Kubernetes profile puts the shared cluster connection editor, connection test, and executor-wide active sessions before workload settings. The test uses current unsaved connection and profile values. Administrators edit both resources through one Save/Reset flow, while members see the same hierarchy read-only. Configured executor rows and task settings icons open the selected profile directly; the standalone connection route remains only for an executor with no profiles.
+
+Kubernetes Pod glyphs on Kanban cards and in task lists hydrate from the exact task/session status when they render, before any hover. Fine-pointer hover or keyboard focus shows a compact structured Pod summary; touch opens the same summary in a bottom Drawer without activating the task row. Duplicate indicators for the same session share the current read instead of issuing parallel requests.
+
+Each executor fixes one namespace and connection configuration. Each profile supplies one strict `core/v1` `PodTemplate`, a main-container name, `linux/amd64` or `linux/arm64`, and one workspace mode:
+
+| Workspace mode | Persistence and ownership |
+|---|---|
+| Managed PVC | Kandev creates one claim for the session, preserves it across ordinary stop, backend restart, and Pod replacement, then deletes it only during terminal or forced cleanup after exact identity checks. |
+| `emptyDir` | Fast Pod-scoped storage. It survives a main-container restart but is lost with the Pod, so a missing Pod cannot be recovered. No PVC permission is required. |
+| Existing claim | Kandev verifies and mounts the named claim in the executor namespace. It never creates or deletes that claim. Concurrent-access safety depends on the claim and application. |
+
+The starter template uses `ghcr.io/kdlbs/kandev:latest`, which is a moving tag. Pin a released `ghcr.io/kdlbs/kandev:X.Y.Z` tag or immutable digest for controlled environments. A custom main-container image must match the selected Linux architecture and provide `sh`, `sleep`, `git`, Node.js, npm, the selected agent CLI or its installation prerequisites, CA trust, and any repository build tools. It must also allow the runtime user to write `/opt/kandev`, `/run/kandev/home`, and `/workspace`; set a compatible user/group or Pod `fsGroup` when the storage driver requires it.
+
+Ordinary Stop, agent restart, main-container restart, and backend restart preserve the Pod and workspace. Resume verifies the recorded name, UID, and complete ownership-label identity, creates a new local port-forward, and reconnects. Every managed create also carries a fresh 256-bit request nonce so an ambiguous API response cannot make Kandev adopt or delete a copied-label object. Archive/delete terminal cleanup or an explicit force cleanup deletes only the exact recorded Pod and, for managed storage, the exact Kandev-created PVC. A same-name object with another UID, ownership identity, or create nonce is left untouched and cleanup fails closed.
+
+Saved executor connection settings are different from the recorded workload snapshot. Current kubeconfig/in-cluster credentials, context, and timeout are used to reach an existing session; changing them can restore or break reconnect and cleanup. Existing sessions continue to target their recorded namespace even if the saved namespace changes, and the saved namespace affects new sessions only. Current Pod template, image, platform, main container, and storage settings also affect new sessions only. If Kandev must replace a missing Pod, it uses the recorded namespace and workload snapshot rather than the edited profile.
+
+An executor cannot be deleted or changed into or out of Kubernetes while runtime inventory still references it. Clear the sessions through normal terminal cleanup first; deleting a profile does not mutate or destroy a retained workload.
+
+See [Kubernetes](k8s.md#configure-the-kubernetes-executor) for kubeconfig and in-cluster setup, the opt-in namespaced RBAC manifest, exact ownership labels, diagnostics, template rules, and recovery guidance.
 
 ## Sprites.dev
 
@@ -369,9 +403,9 @@ Stop attempts to kill the session's remote `agentctl` and remove only the remote
 
 ## Lifecycle and cleanup
 
-The task environment reports `creating`, `ready`, `stopped`, or `failed`; individual execution records have finer states. Stop is deliberately not synonymous with destroy for resumable Docker and Sprites environments.
+The task environment reports `creating`, `ready`, `stopped`, or `failed`; individual execution records have finer states. Stop is deliberately not synonymous with destroy for resumable Docker, Kubernetes, and Sprites environments.
 
-Use a task's **Reset Environment** action when you need a clean materialization. Kandev blocks reset while a task session is starting or running, can optionally push the current branch, and requests teardown of the recorded worktree/container/sandbox. It normally keeps the environment record when teardown returns an error. The current Sprites credential-context limitation described above can instead report success while leaving the provider sandbox, so verify it separately. SSH task directories are intentionally retained; use the profile cleanup script for terminal hook work and remove the directory manually only after confirming no session needs it.
+Use a task's **Reset Environment** action when you need a clean materialization. Kandev blocks reset while a task session is starting or running, can optionally push the current branch, and requests teardown of the recorded worktree, container, Pod/managed PVC, or sandbox. It normally keeps the environment record when teardown returns an error. Kubernetes keeps an existing claim and refuses deletion when recorded UID or ownership identity is ambiguous. The current Sprites credential-context limitation described above can instead report success while leaving the provider sandbox, so verify it separately. SSH task directories are intentionally retained; use the profile cleanup script for terminal hook work and remove the directory manually only after confirming no session needs it.
 
 Before deleting any environment, push or otherwise preserve uncommitted work. Profile deletion and provider/daemon-side deletion can bypass normal lifecycle safeguards.
 
@@ -381,6 +415,9 @@ Before deleting any environment, push or otherwise preserve uncommitted work. Pr
 - **Prepare reports failure but agent starts:** expected for Local, Worktree, and Docker; inspect the failed step output and retry commands inside the same environment.
 - **Docker unavailable:** verify global `docker.enabled`, effective `docker.host`, daemon permission, image existence, and the released Linux helper path.
 - **Docker clone fails:** test the clone URL, base branch, DNS, CA trust, and token scope from inside the selected image.
+- **Kubernetes test fails at streaming:** check `pods/exec` and `pods/portforward` `get/create`, API proxy WebSocket/SPDY upgrades, probe-Pod scheduling, and image support for `sh`/`sleep`.
+- **Kubernetes session cannot resume or clean up:** restore cluster credentials and context that can reach the recorded namespace, then compare the recorded Pod/PVC UID and complete ownership labels. Do not delete a same-name object.
+- **Kubernetes workspace fails:** inspect StorageClass, quota, claim binding/access mode, volume permissions, runtime user, and Pod `fsGroup`; an `emptyDir` workspace cannot survive a missing Pod.
 - **Sprite cannot resume:** check provider token, quota, sandbox existence, expiration, and network policy; a missing sandbox triggers fresh provisioning.
 - **SSH handshake fails:** test ssh-agent/key access, host fingerprint, bastion trust, SFTP, TCP forwarding, and remote OS/architecture.
 - **SSH agent is missing:** run the reported `command -v` check through the configured login shell and install the agent on that host.

@@ -104,6 +104,7 @@ type Manager struct {
 
 	// singleflight deduplicates concurrent GetOrEnsureExecution calls for the same session
 	ensureExecutionGroup singleflight.Group
+	remoteRefreshGroup   singleflight.Group
 
 	// Background remote status polling
 	remoteStatusPollInterval time.Duration

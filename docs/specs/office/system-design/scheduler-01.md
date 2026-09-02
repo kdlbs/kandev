@@ -89,7 +89,7 @@ Coalescing happens entirely at the wakeup-request layer; the runs table is the e
    - `task_assigned:<task_id>:<agent_instance_id>` for task creation/assignment events.
    Duplicate inserts in the same window are rejected silently. Handles webhook re-delivery, event-bus replay, and restart recovery.
 
-2. **Claim-time merge.** When the dispatcher processes a wakeup-request, it looks for an in-flight run for the same agent (`queued` -> `scheduled-retry` -> `running`, in that order). If one exists: insert the new request with `status="coalesced"`, `run_id=<existing>`, merge the new request's payload into the existing run's `context_snapshot`, and increment `coalesced_count` on the in-flight wakeup-request. The agent sees the merged context when it actually runs. If none exists: insert the wakeup-request with `status="queued"` and create the corresponding `runs` row.
+2. **Claim-time merge.** The source first persists the wakeup-request with `status="queued"`. The dispatcher then looks for an in-flight run for the same agent (`queued` or `claimed`). If one exists **and it is still `queued`**: mark the persisted request with `status="coalesced"` and `run_id=<existing>`, merge its payload into the existing run's `context_snapshot`, increment the run's `coalesced_count`, and — if the existing run is periodic-classified (see "Idle wakeup skip" below) while the new request is event-classified — promote the run's `reason` to the new request's classification (monotonic: periodic -> event only, never the reverse). The promotion, request transition, count update, and payload merge use one transaction, so the scheduler cannot claim a partially updated run. The agent sees the merged context and the promoted reason when it actually runs. If the in-flight run is already **`claimed`** *and the promotion above would otherwise be required* (the run is periodic-classified and the new request is event-classified): it is not promoted or merged into — the scheduler has already read its `reason` into memory for the idle-skip decision and never re-reads the row, so mutating it afterward would race a decision already in flight. The new request instead creates its own fresh `runs` row and is marked `claimed` against it, exactly as if no in-flight run existed. A `claimed` run that needs no promotion (the existing run is already event-classified, or the new request is itself periodic-classified) is coalesced into exactly as before. If no in-flight run exists at all: create the corresponding `runs` row and mark the persisted request as `claimed` against it.
 
 3. **`runs.idempotency_key`** is kept as a defensive secondary key. Rarely tripped now (the wakeup-request layer handles the common case), but useful for the rare "two cron processes fired the same tick from different leaders" scenario during a leadership change.
 
@@ -189,7 +189,8 @@ Coordinator agents default to `false` because their heartbeat purpose is self-di
 
 | Source | Skippable? |
 |--------|-----------|
-| `routine` (lightweight, heartbeat-style) | Yes |
+| `routine`, cron-triggered (lightweight, heartbeat-style) | Yes |
+| `routine`, manual "Fire now" or webhook-triggered | No |
 | `task_assigned`, `comment`, `task_blockers_resolved`, `task_children_completed`, `approval_resolved`, `agent_error`, `budget_alert`, `self`, `user` | No |
 
 Skipped wakeups are not silently discarded:

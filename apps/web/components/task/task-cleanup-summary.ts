@@ -7,7 +7,14 @@ export type CleanupSummary = {
 };
 
 // mock_remote is test-only and intentionally falls through to the generic effect.
-type KnownExecutor = "local" | "worktree" | "local_docker" | "remote_docker" | "sprites" | "ssh";
+type KnownExecutor =
+  | "local"
+  | "worktree"
+  | "local_docker"
+  | "remote_docker"
+  | "sprites"
+  | "ssh"
+  | "k8s";
 
 type CleanupCopy = {
   effectKey?: string;
@@ -34,6 +41,7 @@ const SINGLE_COPIES: Record<KnownExecutor, CleanupCopy> = {
     effectKey: "task:cleanupSingleSsh",
     noteKey: "task:cleanupSingleSshNote",
   },
+  k8s: { effectKey: "task:cleanupSingleKubernetes" },
 };
 
 const GENERIC_EFFECT_KEY = "task:cleanupAgentSessionsStopped";
@@ -77,6 +85,7 @@ const BULK_COPIES: Record<KnownExecutor, CleanupCopy> = {
     effectKey: "task:cleanupBulkSsh",
     noteKey: "task:cleanupBulkSshNote",
   },
+  k8s: { effectKey: "task:cleanupBulkKubernetes" },
 };
 
 /** Bulk variant. Groups known tasks by executor type and preserves display order. */
@@ -96,6 +105,7 @@ export function getBulkCleanupSummary(
     "remote_docker",
     "sprites",
     "ssh",
+    "k8s",
     "local",
   ];
   const effects: string[] = [];

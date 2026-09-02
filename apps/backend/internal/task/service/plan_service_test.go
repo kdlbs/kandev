@@ -6,8 +6,10 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -34,6 +36,22 @@ func seedTask(t *testing.T, ctx context.Context, repo *sqliterepo.Repository, ta
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	})
+}
+
+func seedWorkflowStep(t *testing.T, repo *sqliterepo.Repository, taskID, stepID, name, color string) {
+	t.Helper()
+	now := time.Now().UTC()
+	if _, err := repo.DB().ExecContext(context.Background(), `
+		INSERT INTO workflow_steps (id, workflow_id, name, position, color, created_at, updated_at)
+		VALUES (?, 'wf-plan', ?, 0, ?, ?, ?)
+	`, stepID, name, color, now, now); err != nil {
+		t.Fatalf("insert workflow step %s: %v", stepID, err)
+	}
+	if _, err := repo.DB().ExecContext(context.Background(), `
+		UPDATE tasks SET workflow_step_id = ? WHERE id = ?
+	`, stepID, taskID); err != nil {
+		t.Fatalf("set task workflow step %s: %v", stepID, err)
+	}
 }
 
 func seedSession(t *testing.T, ctx context.Context, repo *sqliterepo.Repository, taskID, sessionID string) {
@@ -719,5 +737,189 @@ func TestPlanService_RevertMissingRevision(t *testing.T) {
 	})
 	if err != ErrRevisionNotFound {
 		t.Errorf("expected ErrRevisionNotFound, got %v", err)
+	}
+}
+
+// fakePlanWorkflowStepGetter is a minimal PlanWorkflowStepGetter test double
+// keyed by step ID.
+type fakePlanWorkflowStepGetter struct {
+	steps map[string]*wfmodels.WorkflowStep
+}
+
+func (f *fakePlanWorkflowStepGetter) GetStep(_ context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+	return f.steps[stepID], nil
+}
+
+func TestPlanService_StampsWorkflowStepAtWriteTime(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-step")
+	seedWorkflowStep(t, repo, "task-step", "step-build", "Build", "bg-blue-500")
+	svc.SetWorkflowStepGetter(&fakePlanWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-build": {ID: "step-build", Name: "Build", Color: "bg-blue-500"},
+	}})
+
+	_, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-step", Content: "v1", AuthorKind: "agent", AuthorName: "Claude",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	list, _ := svc.ListRevisions(ctx, "task-step")
+	if len(list) != 1 {
+		t.Fatalf("expected 1 revision, got %d", len(list))
+	}
+	rev := list[0]
+	if rev.WorkflowStepID != "step-build" || rev.WorkflowStepName != "Build" || rev.WorkflowStepColor != "bg-blue-500" {
+		t.Errorf("expected workflow step stamp, got %+v", rev)
+	}
+}
+
+// TestPlanService_NilWorkflowStepGetterIsSafe pins the "nil getter must be
+// safe" requirement: a plan service without SetWorkflowStepGetter wired
+// (the common case for callers that don't need this metadata) must still
+// write revisions successfully, with the step fields left empty.
+func TestPlanService_NilWorkflowStepGetterIsSafe(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-nogetter")
+
+	_, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-nogetter", Content: "v1", AuthorKind: "agent", AuthorName: "Claude",
+	})
+	if err != nil {
+		t.Fatalf("create with nil getter: %v", err)
+	}
+
+	list, _ := svc.ListRevisions(ctx, "task-nogetter")
+	if len(list) != 1 {
+		t.Fatalf("expected 1 revision, got %d", len(list))
+	}
+	if list[0].WorkflowStepID != "" || list[0].WorkflowStepName != "" || list[0].WorkflowStepColor != "" {
+		t.Errorf("expected empty workflow step fields with no getter wired, got %+v", list[0])
+	}
+}
+
+// TestPlanService_CoalescePreservesOriginalWorkflowStep pins the "coalesce
+// attributes to the original write" rule for the new stamp columns, matching
+// the pre-existing author+number preservation: a coalesced write must not
+// re-stamp the row with whatever step the task has moved to since.
+func TestPlanService_CoalescePreservesOriginalWorkflowStep(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-co-step")
+	svc.coalesceWindow = 10 * time.Minute
+	getter := &fakePlanWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-build":  {ID: "step-build", Name: "Build", Color: "bg-blue-500"},
+		"step-review": {ID: "step-review", Name: "Review", Color: "bg-purple-500"},
+	}}
+	svc.SetWorkflowStepGetter(getter)
+	seedWorkflowStep(t, repo, "task-co-step", "step-build", "Build", "bg-blue-500")
+	if _, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-co-step", Content: "v1", AuthorKind: "agent", AuthorName: "Claude",
+	}); err != nil {
+		t.Fatalf("create v1: %v", err)
+	}
+
+	// Task moves to a new step before the coalescing second write arrives.
+	seedWorkflowStep(t, repo, "task-co-step", "step-review", "Review", "bg-purple-500")
+	if _, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-co-step", Content: "v2", AuthorKind: "agent", AuthorName: "Claude",
+	}); err != nil {
+		t.Fatalf("create v2 (coalesced): %v", err)
+	}
+
+	list, _ := svc.ListRevisions(ctx, "task-co-step")
+	if len(list) != 1 {
+		t.Fatalf("expected coalesced to 1 revision, got %d", len(list))
+	}
+	if list[0].WorkflowStepID != "step-build" || list[0].WorkflowStepName != "Build" {
+		t.Errorf("expected coalesced revision to keep original step-build stamp, got %+v", list[0])
+	}
+}
+
+// TestPlanService_RevisionEventCarriesContentLengthAndWorkflowStep pins the
+// live WebSocket path to the same metadata the HTTP list/get paths already
+// expose: a client with the task panel open, relying solely on
+// task_plan.revision.created pushes, must still see content_length and the
+// workflow step stamp without a refetch.
+func TestPlanService_RevisionEventCarriesContentLengthAndWorkflowStep(t *testing.T) {
+	svc, eventBus, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-ws-meta")
+	seedWorkflowStep(t, repo, "task-ws-meta", "step-build", "Build", "bg-blue-500")
+	svc.SetWorkflowStepGetter(&fakePlanWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-build": {ID: "step-build", Name: "Build", Color: "bg-blue-500"},
+	}})
+
+	if _, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-ws-meta", Content: "hello", AuthorKind: "agent", AuthorName: "Claude",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	var payload map[string]interface{}
+	for _, evt := range eventBus.GetPublishedEvents() {
+		if evt.Type == events.TaskPlanRevisionCreated {
+			payload, _ = evt.Data.(map[string]interface{})
+		}
+	}
+	if payload == nil {
+		t.Fatalf("expected a %s event, got %#v", events.TaskPlanRevisionCreated, eventBus.GetPublishedEvents())
+	}
+	if payload["content_length"] != 5 {
+		t.Errorf("expected content_length 5 (len of \"hello\"), got %#v", payload["content_length"])
+	}
+	if payload["workflow_step_id"] != "step-build" {
+		t.Errorf("expected workflow_step_id step-build, got %#v", payload["workflow_step_id"])
+	}
+	if payload["workflow_step_name"] != "Build" {
+		t.Errorf("expected workflow_step_name Build, got %#v", payload["workflow_step_name"])
+	}
+	if payload["workflow_step_color"] != "bg-blue-500" {
+		t.Errorf("expected workflow_step_color bg-blue-500, got %#v", payload["workflow_step_color"])
+	}
+}
+
+// TestPlanService_RevertPlanStampsWorkflowStep pins the fix for RevertPlan
+// bypassing upsertPlan's currentWorkflowStepStamp call: a revert performed
+// while the task sits on a workflow step must produce a revision row with
+// that step's badge, not an empty one, matching its non-revert neighbours.
+func TestPlanService_RevertPlanStampsWorkflowStep(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-revert-step")
+	svc.SetWorkflowStepGetter(&fakePlanWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-review": {ID: "step-review", Name: "Review", Color: "bg-purple-500"},
+	}})
+
+	_, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-revert-step", Content: "v1", AuthorKind: "agent", AuthorName: "Claude",
+	})
+	if err != nil {
+		t.Fatalf("create v1: %v", err)
+	}
+	list, _ := svc.ListRevisions(ctx, "task-revert-step")
+	v1 := list[0]
+
+	seedWorkflowStep(t, repo, "task-revert-step", "step-review", "Review", "bg-purple-500")
+
+	if _, err := svc.RevertPlan(ctx, RevertPlanRequest{
+		TaskID: "task-revert-step", TargetRevisionID: v1.ID, AuthorName: "Alice",
+	}); err != nil {
+		t.Fatalf("revert: %v", err)
+	}
+
+	list, _ = svc.ListRevisions(ctx, "task-revert-step")
+	if len(list) != 2 {
+		t.Fatalf("expected 2 revisions (original + revert), got %d", len(list))
+	}
+	revertRev := list[0]
+	if revertRev.RevertOfRevisionID == nil {
+		t.Fatalf("expected the newest revision to be the revert, got %+v", revertRev)
+	}
+	if revertRev.WorkflowStepID != "step-review" || revertRev.WorkflowStepName != "Review" {
+		t.Errorf("expected revert-created revision to carry the current step-review stamp, got %+v", revertRev)
 	}
 }
