@@ -170,7 +170,6 @@ function ConfigureForm({
   const { t } = useTranslation();
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">{t("office:configSyncDescription")}</p>
       <div className="space-y-1.5">
         <Label>{t("office:configSyncProviderLabel")}</Label>
         <div className="overflow-hidden rounded-md border">
