@@ -55,7 +55,9 @@ type MarkdownCodeProps = {
 
 export type MarkdownFileLinkContextValue = {
   worktreePath?: string | null;
+  currentFilePath?: string;
   onOpenFile?: (path: string) => void;
+  onOpenLink?: (url: string) => boolean | void;
 };
 
 export const MarkdownFileLinkContext = createContext<MarkdownFileLinkContextValue>({});
@@ -75,7 +77,7 @@ function looksLikeFilePath(path: string): boolean {
   return !WEB_TLD_EXTENSIONS.has(extension.toLowerCase());
 }
 
-function isExternalHref(href: string): boolean {
+export function isExternalMarkdownHref(href: string): boolean {
   return /^[a-z][a-z\d+.-]*:/i.test(href) || href.startsWith("//");
 }
 
@@ -99,10 +101,6 @@ function decodeHrefPath(href: string): string | null {
   }
 }
 
-function hasParentTraversal(path: string): boolean {
-  return path.split("/").includes("..");
-}
-
 function looksLikeHostAbsolutePath(path: string): boolean {
   return /^\/(?:[A-Za-z]:|Users|home|root|tmp|var|etc|usr|opt|mnt|Volumes)\//i.test(path);
 }
@@ -112,9 +110,39 @@ function firstAbsoluteSegment(path: string): string | null {
   return first || null;
 }
 
+function normalizeRepositoryPath(
+  path: string,
+  baseSegments: readonly string[] = [],
+): string | null {
+  const normalizedSegments: string[] = [];
+  for (const segment of [...baseSegments, ...path.replace(/\\/g, "/").split("/")]) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") {
+      if (normalizedSegments.length === 0) return null;
+      normalizedSegments.pop();
+      continue;
+    }
+    normalizedSegments.push(segment);
+  }
+  return normalizedSegments.length > 0 ? normalizedSegments.join("/") : null;
+}
+
+function normalizeAbsolutePath(path: string): string | null {
+  const normalized = path.replace(/\\/g, "/");
+  if (!normalized.startsWith("/")) return normalizeRepositoryPath(normalized);
+  const repositoryPath = normalizeRepositoryPath(normalized);
+  return repositoryPath ? `/${repositoryPath}` : null;
+}
+
 function resolveAbsoluteMarkdownFileHref(path: string, worktreePath: string | null | undefined) {
-  const normalizedRoot = worktreePath?.replace(/\\/g, "/").replace(/\/$/, "");
-  const normalizedPath = path.replace(/\\/g, "/");
+  const normalizedRoot = worktreePath ? normalizeAbsolutePath(worktreePath) : null;
+  const normalizedPath = normalizeAbsolutePath(path);
+  if (!normalizedPath) return null;
+
+  if (normalizedRoot === "/") {
+    const relativePath = normalizedPath.replace(/^\/+/, "");
+    return looksLikeFilePath(relativePath) ? relativePath : null;
+  }
   if (normalizedRoot && normalizedPath.startsWith(`${normalizedRoot}/`)) {
     const relativePath = normalizedPath.slice(normalizedRoot.length + 1);
     return looksLikeFilePath(relativePath) ? relativePath : null;
@@ -130,22 +158,28 @@ function resolveAbsoluteMarkdownFileHref(path: string, worktreePath: string | nu
   return looksLikeFilePath(rootRelativePath) ? rootRelativePath : null;
 }
 
-function resolveMarkdownFileHref(
+function resolveRelativeMarkdownPath(path: string, currentFilePath?: string): string | null {
+  const currentSegments = currentFilePath?.replace(/\\/g, "/").split("/") ?? [];
+  if (currentFilePath) currentSegments.pop();
+  return normalizeRepositoryPath(path, currentSegments);
+}
+
+export function resolveMarkdownFileHref(
   href: string | undefined,
   worktreePath: string | null | undefined,
+  currentFilePath?: string,
 ) {
-  if (!href || href.startsWith("#") || isExternalHref(href)) return null;
+  if (!href || href.startsWith("#") || isExternalMarkdownHref(href)) return null;
 
   const path = decodeHrefPath(href);
-  if (!path || path.startsWith("~/") || hasParentTraversal(path)) return null;
+  if (!path || path.startsWith("~/")) return null;
 
   if (path.startsWith("/")) {
     return resolveAbsoluteMarkdownFileHref(path, worktreePath);
   }
 
-  const normalizedPath = path.replace(/\\/g, "/").replace(/^\.\//, "");
-  if (normalizedPath.startsWith("../")) return null;
-  return looksLikeFilePath(normalizedPath) ? normalizedPath : null;
+  const resolvedPath = resolveRelativeMarkdownPath(path, currentFilePath);
+  return resolvedPath && looksLikeFilePath(resolvedPath) ? resolvedPath : null;
 }
 
 type MarkdownLinkProps = {
@@ -157,20 +191,30 @@ function MarkdownFileAnchor({
   href,
   children,
   worktreePath,
+  currentFilePath,
   openFile,
+  onOpenLink,
 }: MarkdownLinkProps & {
   worktreePath: string | null | undefined;
+  currentFilePath?: string;
   openFile: (path: string) => void;
+  onOpenLink?: (url: string) => boolean | void;
 }) {
-  const filePath = resolveMarkdownFileHref(href, worktreePath);
+  const filePath = resolveMarkdownFileHref(href, worktreePath, currentFilePath);
   const isInternal = !!filePath || href?.startsWith("/") || href?.startsWith("#");
 
-  const handleClick = filePath
-    ? (event: MouseEvent<HTMLAnchorElement>) => {
-        event.preventDefault();
-        openFile(filePath);
-      }
-    : undefined;
+  let handleClick: ((event: MouseEvent<HTMLAnchorElement>) => void) | undefined;
+  if (onOpenLink && href && !href.startsWith("#")) {
+    handleClick = (event) => {
+      if (onOpenLink(href) === false) return;
+      event.preventDefault();
+    };
+  } else if (filePath) {
+    handleClick = (event) => {
+      event.preventDefault();
+      openFile(filePath);
+    };
+  }
 
   return (
     <a
@@ -184,25 +228,51 @@ function MarkdownFileAnchor({
   );
 }
 
-function MarkdownFallbackLink(props: MarkdownLinkProps) {
+function MarkdownFallbackLink({
+  currentFilePath,
+  worktreePath: providedWorktreePath,
+  ...props
+}: MarkdownLinkProps & {
+  currentFilePath?: string;
+  worktreePath?: string | null;
+}) {
   const { openFile } = usePanelActions();
   const worktreePath = useAppStore((state) => {
+    if (providedWorktreePath !== undefined) return providedWorktreePath;
     const sessionId = state.tasks.activeSessionId;
     if (!sessionId) return null;
     return getSessionWorkspacePath(state.taskSessions.items[sessionId]);
   });
 
-  return <MarkdownFileAnchor {...props} worktreePath={worktreePath} openFile={openFile} />;
+  return (
+    <MarkdownFileAnchor
+      {...props}
+      worktreePath={worktreePath}
+      currentFilePath={currentFilePath}
+      openFile={openFile}
+    />
+  );
 }
 
 function MarkdownLink(props: MarkdownLinkProps) {
   const linkContext = useContext(MarkdownFileLinkContext);
-  if (linkContext.onOpenFile) {
+  if (linkContext.onOpenLink || linkContext.onOpenFile) {
     return (
       <MarkdownFileAnchor
         {...props}
         worktreePath={linkContext.worktreePath}
-        openFile={linkContext.onOpenFile}
+        currentFilePath={linkContext.currentFilePath}
+        openFile={linkContext.onOpenFile ?? (() => undefined)}
+        onOpenLink={linkContext.onOpenLink}
+      />
+    );
+  }
+  if (linkContext.currentFilePath || linkContext.worktreePath !== undefined) {
+    return (
+      <MarkdownFallbackLink
+        {...props}
+        currentFilePath={linkContext.currentFilePath}
+        worktreePath={linkContext.worktreePath}
       />
     );
   }

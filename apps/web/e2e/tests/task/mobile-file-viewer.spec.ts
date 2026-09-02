@@ -168,7 +168,7 @@ test.describe("Mobile file viewer panel", () => {
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");
     await expect(viewer).toBeVisible({ timeout: 5_000 });
 
-    await viewer.getByRole("button", { name: "Close" }).tap();
+    await viewer.getByRole("button", { name: "Back" }).tap();
     await expect(viewer).not.toBeVisible({ timeout: 5_000 });
     await expect(fileNode).toBeVisible();
   });
@@ -228,7 +228,7 @@ test.describe("Mobile file viewer panel", () => {
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");
     await expect(viewer).toBeVisible({ timeout: 5_000 });
 
-    const closeButton = viewer.getByRole("button", { name: "Close" });
+    const closeButton = viewer.getByRole("button", { name: "Back" });
     await expect(closeButton).toBeVisible();
     await expect(closeButton).toBeInViewport();
 
@@ -321,7 +321,7 @@ test.describe("Mobile file viewer panel", () => {
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");
     await expect(viewer).toBeVisible({ timeout: 5_000 });
 
-    await viewer.getByTestId("markdown-preview-toggle").tap();
+    await viewer.getByTestId("mobile-markdown-mode-preview").tap();
     await expect(viewer.getByTestId("markdown-preview")).toBeVisible();
     await expect(viewer.locator('div[align="center"]')).toContainText("Embedded HTML body");
 
@@ -387,7 +387,7 @@ test.describe("Mobile file viewer panel", () => {
 
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");
     await expect(viewer).toBeVisible({ timeout: 5_000 });
-    await viewer.getByTestId("markdown-preview-toggle").tap();
+    await viewer.getByTestId("mobile-markdown-mode-preview").tap();
 
     const preview = viewer.getByTestId("markdown-preview");
     const table = preview.locator("table", { hasText: marker });

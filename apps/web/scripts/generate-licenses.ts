@@ -44,6 +44,34 @@ const MAX_LICENSE_TEXT_BYTES = 64 * 1024; // 64 KiB guard
 // SPDX-ish identifiers that mean "we don't know" — normalize them.
 const UNKNOWN_LICENSE = "UNKNOWN";
 
+// The package is published from Microsoft's private vscode-packages repository
+// without a LICENSE file in its npm tarball. Microsoft provides this notice
+// verbatim in VS Code's public cglicenses.json override manifest.
+const NPM_LICENSE_TEXT_OVERRIDES: Readonly<Record<string, string>> = {
+  "@vscode/markdown-editor": `MIT License
+
+Copyright (c) Microsoft Corporation.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+`,
+};
+
 const THIRD_PARTY_SOURCE_NOTICES: LicenseEntry[] = [
   {
     name: "Orca status-bar reference",
@@ -142,6 +170,13 @@ function readLicenseText(pkgPath: string | undefined): string | undefined {
   return readSafe(licensePath);
 }
 
+export function resolveNpmLicenseText(
+  packageName: string,
+  pkgPath: string | undefined,
+): string | undefined {
+  return readLicenseText(pkgPath) ?? NPM_LICENSE_TEXT_OVERRIDES[packageName];
+}
+
 interface PnpmPackage {
   name: string;
   versions?: string[];
@@ -200,7 +235,7 @@ function flattenPnpmPackage(pkg: PnpmPackage, fallbackLicense: string): LicenseE
     const version = versions[i];
     const pkgPath = paths[i] ?? paths[0];
     const repo = pkgPath ? repoFromPackageJson(pkgPath) : undefined;
-    const licenseText = readLicenseText(pkgPath);
+    const licenseText = resolveNpmLicenseText(pkg.name, pkgPath);
     results.push({
       name: pkg.name,
       version,

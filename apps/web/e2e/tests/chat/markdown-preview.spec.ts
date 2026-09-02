@@ -62,7 +62,7 @@ async function seedTaskWithSession(
   return { session, sessionId: task.session_id };
 }
 
-/** Open a markdown file from the Files panel and enable preview mode. */
+/** Open a markdown file from the Files panel in its default Preview mode. */
 async function openFileInPreview(
   testPage: Page,
   session: SessionPage,
@@ -77,14 +77,14 @@ async function openFileInPreview(
   const editorTab = testPage.locator(`.dv-default-tab:has-text('${fileName}')`);
   await expect(editorTab).toBeVisible({ timeout: 10_000 });
 
-  const previewToggle = testPage.getByTestId("markdown-preview-toggle").first();
-  await expect(previewToggle).toBeVisible({ timeout: 10_000 });
-  await previewToggle.click();
+  await expect(testPage.getByTestId("markdown-mode-preview").first()).toBeVisible({
+    timeout: 10_000,
+  });
 
   await expect(testPage.getByTestId("markdown-preview")).toBeVisible({ timeout: 5_000 });
 }
 
-/** Open a markdown file from the Files panel and leave it in code mode. */
+/** Open a markdown file from the Files panel and switch it to Source mode. */
 async function openFileInCode(
   testPage: Page,
   session: SessionPage,
@@ -98,6 +98,7 @@ async function openFileInCode(
 
   const editorTab = testPage.locator(`.dv-default-tab:has-text('${fileName}')`);
   await expect(editorTab).toBeVisible({ timeout: 10_000 });
+  await testPage.getByTestId("markdown-mode-source").first().click();
   await expect(testPage.locator(".monaco-editor").first()).toBeVisible({ timeout: 10_000 });
 }
 
@@ -134,12 +135,10 @@ test.describe("Markdown preview", () => {
     const editorTab = testPage.locator(".dv-default-tab:has-text('readme.md')");
     await expect(editorTab).toBeVisible({ timeout: 10_000 });
 
-    // The preview toggle button should be visible (only for markdown files)
-    const previewToggle = testPage.getByTestId("markdown-preview-toggle").first();
-    await expect(previewToggle).toBeVisible({ timeout: 10_000 });
-
-    // Click to enable markdown preview
-    await previewToggle.click();
+    // New Markdown files open in Preview mode with an explicit Edit action.
+    await expect(testPage.getByTestId("markdown-mode-edit").first()).toBeVisible({
+      timeout: 10_000,
+    });
 
     // The markdown preview should be visible with rendered content
     const preview = testPage.getByTestId("markdown-preview");
@@ -154,9 +153,8 @@ test.describe("Markdown preview", () => {
       caption: "Markdown file rendered in preview mode",
     });
 
-    // Toggle back to code view
-    const codeToggle = testPage.getByTestId("markdown-preview-toggle").first();
-    await codeToggle.click();
+    // Switch back to exact source view.
+    await testPage.getByTestId("markdown-mode-source").first().click();
 
     // Preview should be gone
     await expect(preview).not.toBeVisible({ timeout: 5_000 });
@@ -296,7 +294,7 @@ test.describe("Markdown preview", () => {
       "Persist Test",
     );
 
-    // Verify the markdownPreview flag is in sessionStorage
+    // Verify the explicit Markdown mode is in sessionStorage.
     const storedTabs = await testPage.evaluate((sid) => {
       const raw = window.sessionStorage.getItem(`kandev.openFiles.${sid}`);
       return raw ? JSON.parse(raw) : null;
@@ -304,7 +302,7 @@ test.describe("Markdown preview", () => {
     expect(storedTabs).not.toBeNull();
     const mdTab = storedTabs.find((t: { path: string }) => t.path.endsWith("persist-test.md"));
     expect(mdTab).toBeTruthy();
-    expect(mdTab.markdownPreview).toBe(true);
+    expect(mdTab.markdownMode).toBe("preview");
 
     // No settle needed before the reload: the assertions above already read
     // the flag back out of sessionStorage, so the write has demonstrably

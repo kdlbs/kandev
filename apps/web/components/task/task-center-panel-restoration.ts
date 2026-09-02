@@ -15,6 +15,8 @@ import { useToast } from "@/components/toast-provider";
 import { t } from "@/lib/i18n";
 import { getFileTabKey } from "./task-center-panel-file-tabs";
 import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
+import { isMarkdownFile } from "@/lib/utils/file-types";
+import { resolveStoredMarkdownFileMode } from "./markdown-file-mode";
 
 export type FileTabRestorationOptions = {
   activeSessionId: string | null;
@@ -43,6 +45,9 @@ export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFile
     try {
       const response = await requestFileContent(client, sessionId, savedTab.path, savedTab.repo);
       const hash = await calculateHash(response.content);
+      const markdownMode = isMarkdownFile(savedTab.path)
+        ? resolveStoredMarkdownFileMode(savedTab)
+        : undefined;
       loadedTabs.push({
         path: savedTab.path,
         name: savedTab.name,
@@ -52,7 +57,7 @@ export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFile
         isDirty: false,
         isBinary: response.is_binary,
         repo: savedTab.repo,
-        markdownPreview: savedTab.markdownPreview,
+        ...(markdownMode ? { markdownMode } : {}),
       });
     } catch {
       /* skip failed tabs */

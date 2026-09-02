@@ -2,7 +2,7 @@
 
 /* eslint-disable max-lines -- this file intentionally owns the complete mobile session composition. */
 
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { SessionMobileTopBar } from "./session-mobile-top-bar";
 import { SessionMobileBottomNav } from "./session-mobile-bottom-nav";
 import { SessionTaskSwitcherSheet } from "./session-task-switcher-sheet";
@@ -20,11 +20,22 @@ import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import { useSessionLayoutState } from "@/hooks/use-session-layout-state";
 import { useVisualViewportOffset } from "@/hooks/use-visual-viewport-offset";
 import { useToast } from "@/components/toast-provider";
+import { DiscardLocalChangesDialog } from "@/components/discard-local-changes-dialog";
 import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
 import { fetchAndOpenFile } from "../file-browser-hooks";
 import { MobileReviewPanel } from "./mobile-review-panel";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import type { OpenFileTab } from "@/lib/types/backend";
+import type { MarkdownFileMode } from "@/lib/types/workspace-files";
+import { isMarkdownFile } from "@/lib/utils/file-types";
+import { defaultMarkdownFileMode } from "../markdown-file-mode";
+import { getMobileFileIdentity, type MobileFileSavedSnapshot } from "./mobile-selected-file-state";
+import {
+  useMobileFileSessionLifecycle,
+  useMobileSelectedFileReload,
+  useMobileSelectedFileWorkspaceSync,
+  useSelectedMobileFileCallbacks,
+} from "./mobile-selected-file-state";
 import { useAppStore } from "@/components/state-provider";
 import { useNormalizedTaskReviewsState } from "../review-panel-provider";
 import type { ReviewItemSummary } from "@/lib/plugins/types";
@@ -72,6 +83,7 @@ export function resolveMobileReviewSource(
 
 const TOP_NAV_HEIGHT = "3.5rem";
 const BOTTOM_NAV_HEIGHT = "3.25rem";
+type MobileNavigationAction = () => void | Promise<void>;
 
 type SessionMobileLayoutProps = {
   workspaceId: string | null;
@@ -147,11 +159,15 @@ type MobilePanelAreaProps = {
   isPassthroughMode: boolean;
   effectiveSessionId: string | null;
   selectedFile: OpenFileTab | null;
-  selectedFilePreview: boolean;
+  selectedFileMode?: MarkdownFileMode;
   selectedDiff: { path: string; content?: string } | null;
   handleOpenFileFromChat: (path: string, repo?: string, preview?: boolean) => void;
   handleClearSelectedDiff: () => void;
   handleOpenFile: (file: OpenFileTab) => void;
+  handleSelectedFileChange?: (content: string) => void;
+  handleSelectedFileSaved?: (snapshot: MobileFileSavedSnapshot) => void;
+  handleSelectedFileModeChange?: (mode: MarkdownFileMode) => void;
+  handleSelectedFileReload?: () => void;
   handlePanelChangeAndClearSheet: (panel: MobileSessionPanel) => void;
   onNavigateToPrompt: (messageId: string) => void;
   onScrollTargetConsumed?: (messageId: string) => void;
@@ -162,6 +178,85 @@ type MobilePanelAreaProps = {
   selectedReview: ReviewItemSummary | null;
   onSelectReview: (review: ReviewItemSummary) => void;
 };
+
+export type PendingMobileNavigation = {
+  panel: MobileSessionPanel;
+  filePath: string;
+  fileIdentity: string;
+  nextFile?: OpenFileTab;
+  nextMarkdownMode?: MarkdownFileMode;
+  action?: MobileNavigationAction;
+};
+
+function useMobileNavigationRequest(
+  selectedFileRef: React.MutableRefObject<OpenFileTab | null>,
+  setPendingNavigation: React.Dispatch<React.SetStateAction<PendingMobileNavigation | null>>,
+) {
+  return useCallback(
+    (action: MobileNavigationAction) => {
+      const current = selectedFileRef.current;
+      if (current?.isDirty) {
+        setPendingNavigation({
+          panel: "files",
+          filePath: current.path,
+          fileIdentity: getMobileFileIdentity(current),
+          action,
+        });
+        return;
+      }
+      void action();
+    },
+    [selectedFileRef, setPendingNavigation],
+  );
+}
+
+type MobileFilesPanelProps = Pick<
+  MobilePanelAreaProps,
+  | "selectedFile"
+  | "selectedFileMode"
+  | "effectiveSessionId"
+  | "handleOpenFileFromChat"
+  | "handleOpenFile"
+  | "handleSelectedFileChange"
+  | "handleSelectedFileSaved"
+  | "handleSelectedFileModeChange"
+  | "handleSelectedFileReload"
+  | "handlePanelChangeAndClearSheet"
+>;
+
+function MobileFilesPanel({
+  selectedFile,
+  selectedFileMode,
+  effectiveSessionId,
+  handleOpenFileFromChat,
+  handleOpenFile,
+  handleSelectedFileChange,
+  handleSelectedFileSaved,
+  handleSelectedFileModeChange,
+  handleSelectedFileReload,
+  handlePanelChangeAndClearSheet,
+}: MobileFilesPanelProps) {
+  return (
+    <div className="flex-1 min-h-0 flex flex-col">
+      {selectedFile ? (
+        <MobileFileViewerPanel
+          key={`${selectedFile.repo ?? ""}\u0000${selectedFile.path}`}
+          file={selectedFile}
+          sessionId={effectiveSessionId}
+          initialMarkdownMode={selectedFileMode}
+          onFileChange={handleSelectedFileChange}
+          onFileSaved={handleSelectedFileSaved}
+          onModeChange={handleSelectedFileModeChange}
+          onReloadFromAgent={handleSelectedFileReload}
+          onOpenFile={(path, repo) => handleOpenFileFromChat(path, repo, true)}
+          onClose={() => handlePanelChangeAndClearSheet("files")}
+        />
+      ) : (
+        <TaskFilesPanel onOpenFile={handleOpenFile} />
+      )}
+    </div>
+  );
+}
 
 /** Keeps terminal content's visible bottom glued to the keybar top. When the
  *  keyboard is up, the content area already pads for the bottom nav (which
@@ -183,11 +278,15 @@ export function MobilePanelArea({
   isPassthroughMode,
   effectiveSessionId,
   selectedFile,
-  selectedFilePreview,
+  selectedFileMode,
   selectedDiff,
   handleOpenFileFromChat,
   handleClearSelectedDiff,
   handleOpenFile,
+  handleSelectedFileChange = () => {},
+  handleSelectedFileSaved = () => {},
+  handleSelectedFileModeChange = () => {},
+  handleSelectedFileReload = () => {},
   handlePanelChangeAndClearSheet,
   onNavigateToPrompt,
   onScrollTargetConsumed = () => {},
@@ -239,19 +338,18 @@ export function MobilePanelArea({
         </div>
       )}
       {currentMobilePanel === "files" && (
-        <div className="flex-1 min-h-0 flex flex-col">
-          {selectedFile ? (
-            <MobileFileViewerPanel
-              key={`${selectedFile.repo ?? ""}\u0000${selectedFile.path}`}
-              file={selectedFile}
-              sessionId={effectiveSessionId}
-              initialMarkdownPreview={selectedFilePreview}
-              onClose={() => handlePanelChangeAndClearSheet("files")}
-            />
-          ) : (
-            <TaskFilesPanel onOpenFile={handleOpenFile} />
-          )}
-        </div>
+        <MobileFilesPanel
+          selectedFile={selectedFile}
+          selectedFileMode={selectedFileMode}
+          effectiveSessionId={effectiveSessionId}
+          handleOpenFileFromChat={handleOpenFileFromChat}
+          handleOpenFile={handleOpenFile}
+          handleSelectedFileChange={handleSelectedFileChange}
+          handleSelectedFileSaved={handleSelectedFileSaved}
+          handleSelectedFileModeChange={handleSelectedFileModeChange}
+          handleSelectedFileReload={handleSelectedFileReload}
+          handlePanelChangeAndClearSheet={handlePanelChangeAndClearSheet}
+        />
       )}
       {currentMobilePanel === "terminal" && (
         <div
@@ -414,6 +512,127 @@ function MobileTopBarSticky(props: MobileTopBarStickyProps) {
   );
 }
 
+type MobilePanelNavigationOptions = {
+  effectiveSessionId: string | null;
+  handlePanelChange: (panel: MobileSessionPanel) => void;
+  selectedFileRef: React.MutableRefObject<OpenFileTab | null>;
+  setSelectedFile: React.Dispatch<React.SetStateAction<OpenFileTab | null>>;
+  setSelectedFileMode: React.Dispatch<React.SetStateAction<MarkdownFileMode | undefined>>;
+  latestRequestIdRef: React.MutableRefObject<number>;
+  openFileAbortRef: React.MutableRefObject<AbortController | null>;
+};
+
+function useMobilePanelNavigation({
+  effectiveSessionId,
+  handlePanelChange,
+  selectedFileRef,
+  setSelectedFile,
+  setSelectedFileMode,
+  latestRequestIdRef,
+  openFileAbortRef,
+}: MobilePanelNavigationOptions) {
+  const [pendingNavigation, setPendingNavigation] = useState<PendingMobileNavigation | null>(null);
+
+  const clearSelectedFileAndChange = useCallback(
+    (panel: MobileSessionPanel) => {
+      latestRequestIdRef.current += 1;
+      openFileAbortRef.current?.abort();
+      openFileAbortRef.current = null;
+      setSelectedFile(null);
+      setSelectedFileMode(undefined);
+      handlePanelChange(panel);
+    },
+    [handlePanelChange, latestRequestIdRef, openFileAbortRef, setSelectedFile, setSelectedFileMode],
+  );
+
+  const commitFileOpen = useCallback(
+    (file: OpenFileTab, markdownMode?: MarkdownFileMode) => {
+      latestRequestIdRef.current += 1;
+      openFileAbortRef.current?.abort();
+      openFileAbortRef.current = null;
+      setSelectedFile(markdownMode ? { ...file, markdownMode } : file);
+      setSelectedFileMode(markdownMode);
+      handlePanelChange("files");
+    },
+    [handlePanelChange, latestRequestIdRef, openFileAbortRef, setSelectedFile, setSelectedFileMode],
+  );
+
+  const requestFileOpen = useCallback(
+    (file: OpenFileTab, markdownMode?: MarkdownFileMode) => {
+      const current = selectedFileRef.current;
+      if (current?.isDirty) {
+        setPendingNavigation({
+          panel: "files",
+          filePath: current.path,
+          fileIdentity: getMobileFileIdentity(current),
+          nextFile: file,
+          nextMarkdownMode: markdownMode,
+        });
+        return;
+      }
+      commitFileOpen(file, markdownMode);
+    },
+    [commitFileOpen, selectedFileRef],
+  );
+
+  const requestPanelChange = useCallback(
+    (panel: MobileSessionPanel) => {
+      const current = selectedFileRef.current;
+      if (current?.isDirty) {
+        setPendingNavigation({
+          panel,
+          filePath: current.path,
+          fileIdentity: getMobileFileIdentity(current),
+        });
+        return;
+      }
+      clearSelectedFileAndChange(panel);
+    },
+    [clearSelectedFileAndChange, selectedFileRef],
+  );
+
+  const requestNavigation = useMobileNavigationRequest(selectedFileRef, setPendingNavigation);
+
+  const cancelPendingNavigation = useCallback(() => {
+    setPendingNavigation(null);
+  }, []);
+
+  const confirmPendingNavigation = useCallback(() => {
+    const pending = pendingNavigation;
+    if (!pending) return;
+
+    const current = selectedFileRef.current;
+    if (!current || getMobileFileIdentity(current) !== pending.fileIdentity) {
+      setPendingNavigation(null);
+      return;
+    }
+
+    setPendingNavigation(null);
+    if (pending.action) {
+      void pending.action();
+      return;
+    }
+    if (pending.nextFile) {
+      commitFileOpen(pending.nextFile, pending.nextMarkdownMode);
+      return;
+    }
+    clearSelectedFileAndChange(pending.panel);
+  }, [clearSelectedFileAndChange, commitFileOpen, pendingNavigation, selectedFileRef]);
+
+  useEffect(() => {
+    setPendingNavigation(null);
+  }, [effectiveSessionId]);
+
+  return {
+    pendingNavigation,
+    requestFileOpen,
+    requestPanelChange,
+    requestNavigation,
+    confirmPendingNavigation,
+    cancelPendingNavigation,
+  };
+}
+
 export function useMobilePanelHandlers({
   effectiveSessionId,
   handlePanelChange,
@@ -423,32 +642,23 @@ export function useMobilePanelHandlers({
 }) {
   const { toast } = useToast();
   const [selectedFile, setSelectedFile] = useState<OpenFileTab | null>(null);
-  const [selectedFilePreview, setSelectedFilePreview] = useState(false);
-  const [trackedSessionId, setTrackedSessionId] = useState<string | null>(effectiveSessionId);
-  const latestRequestIdRef = useRef(0);
-  const openFileAbortRef = useRef<AbortController | null>(null);
-
-  // Reset viewer when switching sessions — adjust state during render per
-  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
-  if (trackedSessionId !== effectiveSessionId) {
-    setTrackedSessionId(effectiveSessionId);
-    setSelectedFile(null);
-    setSelectedFilePreview(false);
-  }
-
-  useLayoutEffect(() => {
-    latestRequestIdRef.current += 1;
-    openFileAbortRef.current?.abort();
-    openFileAbortRef.current = null;
-  }, [effectiveSessionId]);
-
-  useEffect(
-    () => () => {
-      openFileAbortRef.current?.abort();
-      openFileAbortRef.current = null;
-    },
-    [],
+  const [selectedFileMode, setSelectedFileMode] = useState<MarkdownFileMode | undefined>(undefined);
+  const selectedFileRef = useRef<OpenFileTab | null>(selectedFile);
+  selectedFileRef.current = selectedFile;
+  const { latestRequestIdRef, openFileAbortRef } = useMobileFileSessionLifecycle(
+    effectiveSessionId,
+    setSelectedFile,
+    setSelectedFileMode,
   );
+  const navigation = useMobilePanelNavigation({
+    effectiveSessionId,
+    handlePanelChange,
+    selectedFileRef,
+    setSelectedFile,
+    setSelectedFileMode,
+    latestRequestIdRef,
+    openFileAbortRef,
+  });
 
   const handleOpenFileFromChat = useCallback(
     (path: string, repo?: string, preview = false) => {
@@ -463,9 +673,9 @@ export function useMobilePanelHandlers({
           path,
           (file) => {
             if (requestId !== latestRequestIdRef.current || controller.signal.aborted) return;
-            setSelectedFile(file);
-            setSelectedFilePreview(preview);
-            handlePanelChange("files");
+            let markdownMode: MarkdownFileMode | undefined;
+            if (isMarkdownFile(file.path)) markdownMode = preview ? "preview" : "source";
+            navigation.requestFileOpen(file, markdownMode);
           },
           toast,
           { repo, signal: controller.signal },
@@ -476,39 +686,41 @@ export function useMobilePanelHandlers({
         }
       });
     },
-    [effectiveSessionId, handlePanelChange, toast],
+    [effectiveSessionId, latestRequestIdRef, navigation.requestFileOpen, openFileAbortRef, toast],
   );
 
   const handleOpenFile = useCallback(
     (file: OpenFileTab) => {
-      latestRequestIdRef.current += 1;
-      openFileAbortRef.current?.abort();
-      openFileAbortRef.current = null;
-      setSelectedFile(file);
-      setSelectedFilePreview(false);
-      handlePanelChange("files");
+      const markdownMode = file.markdownMode ?? defaultMarkdownFileMode(file.path);
+      navigation.requestFileOpen(file, markdownMode);
     },
-    [handlePanelChange],
+    [navigation.requestFileOpen],
   );
 
   const handlePanelChangeAndClearSheet = useCallback(
-    (panel: MobileSessionPanel) => {
-      latestRequestIdRef.current += 1;
-      openFileAbortRef.current?.abort();
-      openFileAbortRef.current = null;
-      setSelectedFile(null);
-      setSelectedFilePreview(false);
-      handlePanelChange(panel);
-    },
-    [handlePanelChange],
+    (panel: MobileSessionPanel) => navigation.requestPanelChange(panel),
+    [navigation.requestPanelChange],
   );
+
+  const { handleSelectedFileChange, handleSelectedFileSaved, handleSelectedFileModeChange } =
+    useSelectedMobileFileCallbacks(effectiveSessionId, setSelectedFile, setSelectedFileMode);
+  const handleSelectedFileReload = useMobileSelectedFileReload(selectedFile, setSelectedFile);
+  useMobileSelectedFileWorkspaceSync(effectiveSessionId, selectedFileRef, setSelectedFile);
 
   return {
     selectedFile,
-    selectedFilePreview,
+    selectedFileMode,
     handleOpenFileFromChat,
     handleOpenFile,
+    handleSelectedFileChange,
+    handleSelectedFileSaved,
+    handleSelectedFileModeChange,
+    handleSelectedFileReload,
     handlePanelChangeAndClearSheet,
+    requestNavigation: navigation.requestNavigation,
+    pendingNavigation: navigation.pendingNavigation,
+    confirmPendingNavigation: navigation.confirmPendingNavigation,
+    cancelPendingNavigation: navigation.cancelPendingNavigation,
   };
 }
 
@@ -595,10 +807,18 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
   } = useSessionLayoutState({ sessionId: props.sessionId });
   const {
     selectedFile,
-    selectedFilePreview,
+    selectedFileMode,
     handleOpenFileFromChat,
     handleOpenFile,
+    handleSelectedFileChange,
+    handleSelectedFileSaved,
+    handleSelectedFileModeChange,
+    handleSelectedFileReload,
     handlePanelChangeAndClearSheet,
+    requestNavigation,
+    pendingNavigation,
+    confirmPendingNavigation,
+    cancelPendingNavigation,
   } = useMobilePanelHandlers({ effectiveSessionId, handlePanelChange });
   const [mobileScrollTarget, setMobileScrollTarget] = useState<string | null>(null);
   useEffect(() => {
@@ -637,11 +857,15 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         isPassthroughMode={isPassthroughMode}
         effectiveSessionId={effectiveSessionId}
         selectedFile={selectedFile}
-        selectedFilePreview={selectedFilePreview}
+        selectedFileMode={selectedFileMode}
         selectedDiff={selectedDiff}
         handleOpenFileFromChat={handleOpenFileFromChat}
         handleClearSelectedDiff={handleClearSelectedDiff}
         handleOpenFile={handleOpenFile}
+        handleSelectedFileChange={handleSelectedFileChange}
+        handleSelectedFileSaved={handleSelectedFileSaved}
+        handleSelectedFileModeChange={handleSelectedFileModeChange}
+        handleSelectedFileReload={handleSelectedFileReload}
         handlePanelChangeAndClearSheet={handlePanelChangeAndClearSheet}
         onNavigateToPrompt={handleNavigateToPrompt}
         onScrollTargetConsumed={handleMobileScrollTargetConsumed}
@@ -667,11 +891,21 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         workspaceId={props.workspaceId}
         workflowId={props.workflowId}
         presentation="drawer"
+        onRequestNavigation={requestNavigation}
       />
       <SessionMobileReviewDialog
         sessionId={effectiveSessionId}
         taskId={activeTaskId}
         onOpenFile={handleOpenFileFromChat}
+      />
+      <DiscardLocalChangesDialog
+        open={pendingNavigation !== null}
+        onOpenChange={(open) => {
+          if (!open) cancelPendingNavigation();
+        }}
+        dirtyFiles={pendingNavigation ? [pendingNavigation.filePath] : []}
+        onConfirm={confirmPendingNavigation}
+        onCancel={cancelPendingNavigation}
       />
     </div>
   );

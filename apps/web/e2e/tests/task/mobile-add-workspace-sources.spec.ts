@@ -305,7 +305,7 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   const viewer = testPage.getByTestId("mobile-file-viewer-panel");
   await expect(viewer).toBeVisible({ timeout: 15_000 });
   await expect(viewer.locator(".cm-line").filter({ hasText: "repository source" })).toBeVisible();
-  await expect(viewer.getByRole("button", { name: "Close" })).toBeVisible();
+  await expect(viewer.getByRole("button", { name: "Back" })).toBeVisible();
   await expect(
     viewer.getByText("mobile-local-repository-main/mobile-repository.txt"),
   ).toBeVisible();

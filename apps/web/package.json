@@ -65,6 +65,7 @@
     "@tabler/icons-react": "^3.36.1",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.14.10",
+    "@vscode/markdown-editor": "0.0.2-84",
     "@tiptap/core": "^3.19.0",
     "@tiptap/extension-bubble-menu": "^3.19.0",
     "@tiptap/extension-code": "^3.19.0",

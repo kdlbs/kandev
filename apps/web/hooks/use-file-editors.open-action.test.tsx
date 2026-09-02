@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => {
     originalHash: string;
     isDirty: boolean;
     isBinary?: boolean;
-    markdownPreview?: boolean;
+    markdownMode?: "preview" | "edit" | "source";
   };
 
   type DockState = {
@@ -203,7 +203,7 @@ describe("useFileEditors open actions", () => {
 
     expect(mocks.getDockState().openFiles.get(FIRST_PATH)).toMatchObject({
       content: "first",
-      markdownPreview: true,
+      markdownMode: "preview",
     });
     expect(mocks.addFileEditorPanel).toHaveBeenCalledWith(FIRST_PATH, "first.ts", {
       repo: undefined,

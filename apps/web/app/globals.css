@@ -1121,7 +1121,7 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
 
 .markdown-body th,
 .markdown-body td {
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in oklab, var(--border) 70%, var(--foreground));
   padding: 0.25rem 0.5rem;
   font-size: 13px;
   vertical-align: top;

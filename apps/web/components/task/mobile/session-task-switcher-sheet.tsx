@@ -46,6 +46,7 @@ type SessionTaskSwitcherSheetProps = {
   workspaceId: string | null;
   workflowId: string | null;
   presentation?: "sheet" | "drawer";
+  onRequestNavigation?: (action: () => void | Promise<void>) => void;
 };
 export function useTaskSheetSelectionController() {
   const [selectionController] = useState(createTaskSheetSelectionController);
@@ -483,6 +484,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   workspaceId,
   workflowId,
   presentation = "sheet",
+  onRequestNavigation,
 }: SessionTaskSwitcherSheetProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [subtaskTarget, setSubtaskTarget] = useState<{ id: string; title: string } | null>(null);
@@ -492,7 +494,12 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     (nextOpen: boolean) => handleTaskSheetOpenChange(selectionController, nextOpen, onOpenChange),
     [onOpenChange, selectionController],
   );
-  const actions = useSheetActions(workspaceId, handleOpenChange, selectionController);
+  const actions = useSheetActions(
+    workspaceId,
+    handleOpenChange,
+    selectionController,
+    onRequestNavigation,
+  );
   const rename = useMobileTaskRename();
   const edit = useSidebarTaskEdit();
   const linking = useMobileTaskLinking(workspaceId);

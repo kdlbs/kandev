@@ -266,10 +266,13 @@ export async function readSessionModelSnapshots(
   }, fileName);
 }
 
+export type DesktopFileSurface = "monaco" | "markdown-preview";
+
 export async function openDesktopFile(
   page: Page,
   session: SessionPage,
   filePath: string,
+  options: { expectedSurface?: DesktopFileSurface } = {},
 ): Promise<void> {
   const pathSegments = filePath.split("/");
   const fileNode = session.fileTreeNode(filePath);
@@ -305,7 +308,11 @@ export async function openDesktopFile(
   await expect(page.locator(".dv-default-tab", { hasText: path.basename(filePath) })).toBeVisible({
     timeout: 10_000,
   });
-  await expect(page.locator(".monaco-editor:visible")).toBeVisible({ timeout: 15_000 });
+  if (options.expectedSurface === "markdown-preview") {
+    await expect(page.getByTestId("markdown-preview")).toBeVisible({ timeout: 15_000 });
+  } else {
+    await expect(page.locator(".monaco-editor:visible")).toBeVisible({ timeout: 15_000 });
+  }
 }
 
 export async function openLspStatus(page: Page): Promise<Locator> {

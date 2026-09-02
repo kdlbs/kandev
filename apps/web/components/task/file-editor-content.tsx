@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import { useEditorProvider } from "@/hooks/use-editor-resolver";
 import { MonacoCodeEditor } from "@/components/editors/monaco/monaco-code-editor";
 import { CodeMirrorCodeEditor } from "@/components/editors/codemirror/codemirror-code-editor";
@@ -22,6 +22,7 @@ export type FileEditorContentProps = {
   enableComments?: boolean;
   markdownPreview?: boolean;
   onToggleMarkdownPreview?: () => void;
+  toolbarModeControl?: ReactNode;
   onChange: (newContent: string) => void;
   onSave: () => void;
   onReloadFromAgent?: () => void;
@@ -43,6 +44,7 @@ export const FileEditorContent = memo(function FileEditorContent(props: FileEdit
         repositoryName={props.repo}
         enableComments={props.enableComments}
         onTogglePreview={props.onToggleMarkdownPreview}
+        toolbarModeControl={props.toolbarModeControl}
       />
     );
   }

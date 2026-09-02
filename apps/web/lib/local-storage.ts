@@ -1,6 +1,15 @@
 import { setWalkthroughLastSeen } from "@/lib/walkthrough-notification-storage";
 import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
-import type { LayoutProfileIdentity } from "@/lib/layout/layout-profiles";
+import { isMarkdownFile } from "@/lib/utils/file-types";
+import { resolveStoredMarkdownFileMode } from "@/components/task/markdown-file-mode";
+import type { MarkdownFileMode } from "@/lib/types/workspace-files";
+import {
+  getEnvLayoutProfile,
+  removeEnvLayoutProfile,
+  setEnvLayoutProfile,
+} from "./local-storage-layout-profile";
+
+export { getEnvLayoutProfile, removeEnvLayoutProfile, setEnvLayoutProfile };
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
@@ -290,11 +299,6 @@ export function setFilesPanelScrollPosition(sessionId: string, position: number)
 // `apps/web/e2e/helpers/dockview-persistence.ts`; bump both together.
 const DOCKVIEW_ENV_LAYOUT_PREFIX = "kandev.dockview.env-layout-v3.";
 
-// The active profile is persisted separately from Dockview's serialized layout.
-// A copied Default profile can retain Default's group IDs, so the layout shape
-// alone cannot identify whether Changes auto-focus is allowed.
-const DOCKVIEW_ENV_LAYOUT_PROFILE_PREFIX = "kandev.dockview.env-layout-profile-v1.";
-
 // A serialized Dockview layout is geometry, not evidence of an intentional
 // pixel preference. Keep that preference separately so automatic restores can
 // recompute responsive defaults while genuine sash drags remain per-env.
@@ -323,35 +327,6 @@ export function setEnvLayout(envId: string, layout: object): void {
   } catch {
     // Ignore write failures (storage full, blocked, etc.)
   }
-}
-
-function isLayoutProfileIdentity(value: unknown): value is LayoutProfileIdentity {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const profile = value as { kind?: unknown; id?: unknown };
-  return (
-    (profile.kind === "built-in" || profile.kind === "custom") &&
-    typeof profile.id === "string" &&
-    profile.id.length > 0
-  );
-}
-
-/** Read the profile identity saved with a task environment's layout. */
-export function getEnvLayoutProfile(envId: string): LayoutProfileIdentity | null {
-  const profile = getSessionStorage<LayoutProfileIdentity | null>(
-    `${DOCKVIEW_ENV_LAYOUT_PROFILE_PREFIX}${envId}`,
-    null,
-  );
-  return isLayoutProfileIdentity(profile) ? profile : null;
-}
-
-/** Save the profile identity that produced a task environment's layout. */
-export function setEnvLayoutProfile(envId: string, profile: LayoutProfileIdentity): void {
-  setSessionStorage(`${DOCKVIEW_ENV_LAYOUT_PROFILE_PREFIX}${envId}`, profile);
-}
-
-/** Remove the profile identity saved for a task environment. */
-export function removeEnvLayoutProfile(envId: string): void {
-  removeSessionStorage(`${DOCKVIEW_ENV_LAYOUT_PROFILE_PREFIX}${envId}`);
 }
 
 /** Read the manually-dragged right-panel width for a task env, or `null` if
@@ -529,8 +504,19 @@ export interface StoredFileTab {
   /** Multi-repo subpath (repository_name) so a restored tab re-fetches its
    *  content under the right repository after a refresh. */
   repo?: string;
+  markdownMode?: MarkdownFileMode;
+  /** Legacy input accepted for one-way migration. Writers must omit it. */
   markdownPreview?: boolean;
   pinned?: boolean;
+}
+
+function normalizeStoredFileTab(tab: StoredFileTab): StoredFileTab {
+  const { markdownMode, markdownPreview, ...rest } = tab;
+  if (!isMarkdownFile(tab.path)) {
+    return rest;
+  }
+  const mode = resolveStoredMarkdownFileMode({ markdownMode, markdownPreview });
+  return { ...rest, markdownMode: mode };
 }
 
 /**
@@ -554,8 +540,9 @@ export function getOpenFileTabs(sessionId: string): StoredFileTab[] {
     let previewSeen = false;
     const normalized: StoredFileTab[] = [];
     for (let i = parsed.length - 1; i >= 0; i--) {
-      const t = parsed[i];
-      if (!t) continue;
+      const rawTab = parsed[i];
+      if (!rawTab) continue;
+      const t = normalizeStoredFileTab(rawTab);
       const isPinned = t.pinned === true || t.pinned === undefined;
       if (isPinned) {
         normalized.unshift({ ...t, pinned: true });
@@ -575,7 +562,7 @@ export function setOpenFileTabs(sessionId: string, tabs: StoredFileTab[]): void 
   if (typeof window === "undefined") return;
   try {
     const key = `${OPEN_FILES_KEY}.${sessionId}`;
-    window.sessionStorage.setItem(key, JSON.stringify(tabs));
+    window.sessionStorage.setItem(key, JSON.stringify(tabs.map(normalizeStoredFileTab)));
   } catch {
     // Ignore write failures
   }

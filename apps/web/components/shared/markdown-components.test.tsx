@@ -50,6 +50,7 @@ import {
   MarkdownTaskContext,
   markdownComponents,
   normalizeMarkdown,
+  resolveMarkdownFileHref,
   remarkPlugins,
 } from "./markdown-components";
 
@@ -243,6 +244,26 @@ describe("markdownComponents workspace roots", () => {
 
     expect(openFile).toHaveBeenNthCalledWith(1, "kandev/docs/specs/native/spec.md");
     expect(openFile).toHaveBeenNthCalledWith(2, "plugin/ui/bundle.js");
+  });
+});
+
+describe("resolveMarkdownFileHref", () => {
+  it("normalizes parent-relative links against the current Markdown directory", () => {
+    expect(resolveMarkdownFileHref("../guide.md", undefined, "docs/nested/readme.md")).toBe(
+      "docs/guide.md",
+    );
+  });
+
+  it("rejects links whose normalized path escapes the repository root", () => {
+    expect(
+      resolveMarkdownFileHref("../../../../guide.md", undefined, "docs/nested/readme.md"),
+    ).toBe(null);
+  });
+
+  it("normalizes dot segments without rejecting a path that stays in the repository", () => {
+    expect(resolveMarkdownFileHref("./../guide.md", undefined, "docs/nested/readme.md")).toBe(
+      "docs/guide.md",
+    );
   });
 });
 

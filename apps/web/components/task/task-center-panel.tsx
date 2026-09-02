@@ -37,6 +37,7 @@ import { useNormalizedTaskReviews } from "./review-panel-provider";
 import { useReviewItemSelection } from "./review-selection";
 import { getFileTabKey, upsertOpenFileTab } from "./task-center-panel-file-tabs";
 import { TaskCenterReviewContent } from "./task-center-review-content";
+import { defaultMarkdownFileMode, type MarkdownFileMode } from "./markdown-file-mode";
 
 import type { SelectedDiff } from "./task-layout";
 import { useTranslation } from "react-i18next";
@@ -173,6 +174,7 @@ function useFileTabOperations({
           originalHash: hash,
           isDirty: false,
           isBinary: response.is_binary,
+          markdownMode: defaultMarkdownFileMode(filePath),
         });
       } catch (error) {
         toast({
@@ -207,12 +209,10 @@ function useFileTabOperations({
     [setOpenFileTabs],
   );
 
-  const handleMarkdownPreviewToggle = useCallback(
-    (fileKey: string) => {
+  const handleMarkdownModeChange = useCallback(
+    (fileKey: string, markdownMode: MarkdownFileMode) => {
       setOpenFileTabs((prev) =>
-        prev.map((tab) =>
-          getFileTabKey(tab) === fileKey ? { ...tab, markdownPreview: !tab.markdownPreview } : tab,
-        ),
+        prev.map((tab) => (getFileTabKey(tab) === fileKey ? { ...tab, markdownMode } : tab)),
       );
     },
     [setOpenFileTabs],
@@ -230,7 +230,7 @@ function useFileTabOperations({
     handleOpenFileFromChat,
     handleCloseFileTab,
     handleFileChange,
-    handleMarkdownPreviewToggle,
+    handleMarkdownModeChange,
     handleFileSave,
     handleFileDelete,
     addFileTab,
@@ -300,11 +300,11 @@ function usePersistOpenFileTabs(activeSessionId: string | null, openFileTabs: Op
     if (!activeSessionId) return;
     saveOpenFileTabs(
       activeSessionId,
-      openFileTabs.map(({ path, name, repo, markdownPreview }) => ({
+      openFileTabs.map(({ path, name, repo, markdownMode }) => ({
         path,
         name,
         repo,
-        markdownPreview,
+        ...(markdownMode ? { markdownMode } : {}),
       })),
     );
   }, [activeSessionId, openFileTabs]);
@@ -438,7 +438,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
   const {
     handleOpenFileFromChat,
     handleFileChange,
-    handleMarkdownPreviewToggle,
+    handleMarkdownModeChange,
     handleFileSave,
     handleFileDelete,
   } = fileTabOps;
@@ -491,7 +491,8 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
             onFileChange={handleFileChange}
             onFileSave={handleFileSave}
             onFileDelete={handleFileDelete}
-            onToggleMarkdownPreview={() => handleMarkdownPreviewToggle(getFileTabKey(tab))}
+            onOpenFile={handleOpenFileFromChat}
+            onMarkdownModeChange={(mode) => handleMarkdownModeChange(getFileTabKey(tab), mode)}
           />
         ))}
       </SessionTabs>

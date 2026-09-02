@@ -338,7 +338,9 @@ test.describe("LSP file intelligence", () => {
       await expect(testPage.getByText("Binary file", { exact: true })).toBeVisible();
       await expect(statusItem).toHaveCount(0);
 
-      await openDesktopFile(testPage, task.session, task.filePaths[1]);
+      await openDesktopFile(testPage, task.session, task.filePaths[1], {
+        expectedSurface: "markdown-preview",
+      });
       await expect(statusItem).toHaveCount(0);
       await task.session.clickSessionChatTab();
       await expect(statusItem).toHaveCount(0);

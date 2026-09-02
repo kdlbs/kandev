@@ -264,10 +264,10 @@ describe("open file tabs storage", () => {
   it("round-trips the multi-repo repo subpath so a restored tab refetches under the right repo", () => {
     setOpenFileTabs("sess-1", [
       {
-        path: "src/foo.ts",
-        name: "foo.ts",
+        path: "src/foo.md",
+        name: "foo.md",
         repo: "enrichment-commons",
-        markdownPreview: true,
+        markdownMode: "preview",
         pinned: true,
       },
     ]);
@@ -275,10 +275,10 @@ describe("open file tabs storage", () => {
     const tabs = getOpenFileTabs("sess-1");
     expect(tabs).toHaveLength(1);
     expect(tabs[0]).toEqual({
-      path: "src/foo.ts",
-      name: "foo.ts",
+      path: "src/foo.md",
+      name: "foo.md",
       repo: "enrichment-commons",
-      markdownPreview: true,
+      markdownMode: "preview",
       pinned: true,
     });
   });
@@ -286,6 +286,28 @@ describe("open file tabs storage", () => {
   it("leaves repo undefined for single-repo tabs", () => {
     setOpenFileTabs("sess-1", [{ path: "src/foo.ts", name: "foo.ts", pinned: true }]);
     expect(getOpenFileTabs("sess-1")[0].repo).toBeUndefined();
+  });
+
+  it("migrates legacy Markdown preview flags to an explicit mode", () => {
+    const previewPath = "preview.md";
+    const sourcePath = "source.md";
+    const missingPath = "missing.md";
+    const pinned = true;
+
+    window.sessionStorage.setItem(
+      "kandev.openFiles.sess-legacy",
+      JSON.stringify([
+        { path: previewPath, name: previewPath, markdownPreview: true, pinned },
+        { path: sourcePath, name: sourcePath, markdownPreview: false, pinned },
+        { path: missingPath, name: missingPath, pinned },
+      ]),
+    );
+
+    expect(getOpenFileTabs("sess-legacy")).toEqual([
+      { path: previewPath, name: previewPath, markdownMode: "preview", pinned },
+      { path: sourcePath, name: sourcePath, markdownMode: "source", pinned },
+      { path: missingPath, name: missingPath, markdownMode: "source", pinned },
+    ]);
   });
 });
 

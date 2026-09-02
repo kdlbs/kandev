@@ -188,6 +188,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-18-never-started-agent-stall-terminal | [Treat Never-Started Agent Stalls as Terminal](2026-08-18-never-started-agent-stall-terminal.md) | accepted | backend, frontend, protocol | 2026-08-18 |
 | 2026-08-18-plugin-task-row-metadata | [Keep Task Row Plugin Metadata Generic](2026-08-18-plugin-task-row-metadata.md) | accepted | frontend | 2026-08-18 |
 | 2026-08-20-settings-prompt-editor-provider-ownership | [Settings Prompt Editors Own Monaco Completion Providers](2026-08-20-settings-prompt-editor-provider-ownership.md) | accepted | frontend | 2026-08-20 |
+| 2026-08-27-source-preserving-hybrid-markdown-engine | [Use a Source-Preserving Hybrid Markdown Engine](2026-08-27-source-preserving-hybrid-markdown-engine.md) | proposed | frontend | 2026-08-27 |
 | 2026-08-14-kandev-native-agent-rich-output | [Keep Agent Rich Output Host Native](2026-08-14-kandev-native-agent-rich-output.md) | accepted | backend, frontend, protocol, security | 2026-08-14 |
 | 2026-08-24-kubernetes-executor-resource-ownership | [Kubernetes Executor Resource Ownership](2026-08-24-kubernetes-executor-resource-ownership.md) | accepted | backend, frontend, infra, security | 2026-08-24 |
 | 2026-08-19-repository-qualified-comparison-targets | [Qualify Git Comparison Targets by Repository](2026-08-19-repository-qualified-comparison-targets.md) | accepted | backend, agentctl, frontend, protocol, GitHub, GitLab | 2026-08-19 |

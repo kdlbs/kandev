@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import type { EditorView } from "@codemirror/view";
 import { Button } from "@kandev/ui/button";
@@ -55,6 +55,7 @@ type FileEditorContentProps = {
   repo?: string;
   enableComments?: boolean;
   onToggleMarkdownPreview?: () => void;
+  toolbarModeControl?: ReactNode;
   onChange: (newContent: string) => void;
   onSave: () => void;
   onReloadFromAgent?: () => void;
@@ -235,6 +236,7 @@ function CodeMirrorToolbar({
   onReloadFromAgent,
   onDelete,
   onToggleMarkdownPreview,
+  toolbarModeControl,
 }: {
   path: string;
   worktreePath?: string;
@@ -254,10 +256,12 @@ function CodeMirrorToolbar({
   onReloadFromAgent?: () => void;
   onDelete?: () => void;
   onToggleMarkdownPreview?: () => void;
+  toolbarModeControl?: ReactNode;
 }) {
   const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
   return (
     <PanelHeaderBarSplit
+      className={toolbarModeControl ? "markdown-file-toolbar" : undefined}
       left={
         <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
           <ScrollOnOverflow className="min-w-0 font-mono">
@@ -272,6 +276,7 @@ function CodeMirrorToolbar({
       }
       right={
         <div className="flex items-center gap-1">
+          {toolbarModeControl}
           <CodeMirrorCommentBadge
             enableComments={enableComments}
             sessionId={sessionId}
@@ -405,6 +410,7 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
     repo,
     enableComments = false,
     onToggleMarkdownPreview,
+    toolbarModeControl,
     onSave,
     onReloadFromAgent,
     onDelete,
@@ -433,6 +439,7 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
         onReloadFromAgent={onReloadFromAgent}
         onDelete={onDelete}
         onToggleMarkdownPreview={onToggleMarkdownPreview}
+        toolbarModeControl={toolbarModeControl}
       />
       <div ref={editorAreaRef} className="flex-1 overflow-hidden relative">
         <CodeMirror

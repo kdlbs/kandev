@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Button } from "@kandev/ui/button";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -254,6 +255,7 @@ interface MonacoEditorToolbarProps {
   onReloadFromAgent?: () => void;
   onDelete?: () => void;
   onToggleMarkdownPreview?: () => void;
+  toolbarModeControl?: ReactNode;
 }
 
 export function MonacoEditorToolbar({
@@ -281,10 +283,12 @@ export function MonacoEditorToolbar({
   onReloadFromAgent,
   onDelete,
   onToggleMarkdownPreview,
+  toolbarModeControl,
 }: MonacoEditorToolbarProps) {
   const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
   return (
     <PanelHeaderBarSplit
+      className={toolbarModeControl ? "markdown-file-toolbar" : undefined}
       left={
         <ToolbarLeft
           path={path}
@@ -295,6 +299,7 @@ export function MonacoEditorToolbar({
       }
       right={
         <div className="flex items-center gap-1">
+          {toolbarModeControl}
           <CommentCountBadge
             enableComments={enableComments}
             sessionId={sessionId}
