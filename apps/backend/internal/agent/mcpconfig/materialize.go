@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+const managedPackageCommand = "npx"
+
 // ManagedPackageCommand returns the executor-side stdio command for a pinned
 // npm package. The package/version is always exact; the executor owns the
 // package cache used by its Node runtime.
@@ -30,5 +32,5 @@ func ManagedPackageCommand(configuration MCPServerConfiguration) (string, []stri
 	args = append(args, configuration.PackageRuntimeArguments...)
 	args = append(args, executable)
 	args = append(args, configuration.PackageArguments...)
-	return "npx", args, nil
+	return managedPackageCommand, args, nil
 }

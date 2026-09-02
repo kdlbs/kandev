@@ -23,8 +23,8 @@ func TestManagedPackageCommandUsesScopedPackageExecutableAndArguments(t *testing
 		"--registry", "https://registry.example.test", "--runtime-flag",
 		"mcp-server", "--stdio",
 	}
-	if command != "npx" || !reflect.DeepEqual(args, wantArgs) {
-		t.Fatalf("managed command = %q %#v, want npx %#v", command, args, wantArgs)
+	if command != managedPackageCommand || !reflect.DeepEqual(args, wantArgs) {
+		t.Fatalf("managed command = %q %#v, want %q %#v", command, args, managedPackageCommand, wantArgs)
 	}
 }
 
