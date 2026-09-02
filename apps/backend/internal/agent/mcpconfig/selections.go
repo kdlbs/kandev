@@ -240,9 +240,13 @@ func (s *SelectionService) replaceSessionSelections(
 	state.FailureCode = ""
 	state.FailureSummary = ""
 	if atomic := atomicSessionMCPSelectionRepository(s.repo); atomic != nil {
-		return atomic.ReplaceMCPSelectionsAndState(
+		if err := atomic.ReplaceMCPSelectionsAndState(
 			ctx, SelectionScopeTaskSession, workspaceID, sessionID, ids, state,
-		)
+		); err != nil {
+			return err
+		}
+		s.notifySessionMCPChange(ctx, sessionID)
+		return nil
 	}
 	previous, listErr := s.repo.ListMCPSelections(
 		ctx, SelectionScopeTaskSession, workspaceID, sessionID,
@@ -261,10 +265,14 @@ func (s *SelectionService) replaceSessionSelections(
 		)
 		return err
 	}
+	s.notifySessionMCPChange(ctx, sessionID)
+	return nil
+}
+
+func (s *SelectionService) notifySessionMCPChange(ctx context.Context, sessionID string) {
 	if s.stateNotifier != nil {
 		s.stateNotifier(context.WithoutCancel(ctx), sessionID)
 	}
-	return nil
 }
 
 func atomicSessionMCPSelectionRepository(repo SelectionRepository) AtomicSessionMCPSelectionRepository {

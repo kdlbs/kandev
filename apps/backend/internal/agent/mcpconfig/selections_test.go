@@ -11,6 +11,12 @@ type selectionRepositoryFake struct {
 	replaceCalls int
 }
 
+type sessionSelectionRepositoryFake struct {
+	*selectionRepositoryFake
+	states      map[string]SessionMCPSelectionState
+	atomicCalls int
+}
+
 func newSelectionRepositoryFake() *selectionRepositoryFake {
 	return &selectionRepositoryFake{values: make(map[string][]string)}
 }
@@ -34,6 +40,41 @@ func (r *selectionRepositoryFake) SelectionImpact(context.Context, string, strin
 }
 
 func (r *selectionRepositoryFake) DeleteMCPSelectionsForDefinition(context.Context, string, string) error {
+	return nil
+}
+
+func newSessionSelectionRepositoryFake() *sessionSelectionRepositoryFake {
+	return &sessionSelectionRepositoryFake{
+		selectionRepositoryFake: newSelectionRepositoryFake(),
+		states:                  make(map[string]SessionMCPSelectionState),
+	}
+}
+
+func (r *sessionSelectionRepositoryFake) GetMCPSelectionState(_ context.Context, sessionID string) (SessionMCPSelectionState, error) {
+	state, ok := r.states[sessionID]
+	if !ok {
+		return SessionMCPSelectionState{}, ErrMCPSelectionStateNotFound
+	}
+	return state, nil
+}
+
+func (r *sessionSelectionRepositoryFake) SaveMCPSelectionState(_ context.Context, sessionID string, state SessionMCPSelectionState) error {
+	r.states[sessionID] = state
+	return nil
+}
+
+func (r *sessionSelectionRepositoryFake) ReplaceMCPSelectionsAndState(
+	ctx context.Context,
+	scope SelectionScope,
+	workspaceID, sessionID string,
+	definitionIDs []string,
+	state SessionMCPSelectionState,
+) error {
+	r.atomicCalls++
+	if err := r.ReplaceMCPSelections(ctx, scope, workspaceID, sessionID, definitionIDs); err != nil {
+		return err
+	}
+	r.states[sessionID] = state
 	return nil
 }
 
@@ -122,5 +163,44 @@ func TestSelectionServiceDeduplicatesIDsBeforeAtomicReplace(t *testing.T) {
 	selected, _ := repo.ListMCPSelections(context.Background(), SelectionScopeTask, "workspace-1", "task-1")
 	if len(selected) != 1 || selected[0] != definition.ID || repo.replaceCalls != 1 {
 		t.Fatalf("selected = %#v, replace calls = %d", selected, repo.replaceCalls)
+	}
+}
+
+func TestSelectionServiceNotifiesAfterAtomicSessionReplace(t *testing.T) {
+	catalogRepo := newCatalogRepositoryFake()
+	catalog := NewCatalogService(catalogRepo)
+	definition, err := catalog.Create(context.Background(), CreateDefinitionInput{
+		WorkspaceID: "workspace-1", RuntimeName: "tools", DisplayName: "Tools",
+		ExecutionMode: ExecutionModeExistingExecutable, Transport: ServerTypeStdio,
+		Configuration: MCPServerConfiguration{Command: "tools"},
+	})
+	if err != nil {
+		t.Fatalf("create definition: %v", err)
+	}
+	repo := newSessionSelectionRepositoryFake()
+	service := NewSelectionService(repo, catalogRepo)
+	service.SetSessionMCPStateRepository(repo)
+	var notifiedSessionID string
+	service.SetSessionMCPChangeNotifier(func(_ context.Context, sessionID string) {
+		notifiedSessionID = sessionID
+	})
+
+	if err := service.Replace(
+		context.Background(), SelectionScopeTaskSession, "workspace-1", "session-1", []string{definition.ID},
+	); err != nil {
+		t.Fatalf("replace session selections: %v", err)
+	}
+	if repo.atomicCalls != 1 {
+		t.Fatalf("atomic replace calls = %d, want 1", repo.atomicCalls)
+	}
+	if notifiedSessionID != "session-1" {
+		t.Fatalf("notified session ID = %q, want %q", notifiedSessionID, "session-1")
+	}
+	state, err := repo.GetMCPSelectionState(context.Background(), "session-1")
+	if err != nil {
+		t.Fatalf("get session state: %v", err)
+	}
+	if state.DesiredRevision != 1 || state.ApplyState != SessionMCPApplyStatePendingIdle {
+		t.Fatalf("session state = %#v, want revision 1 pending idle", state)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -78,6 +79,61 @@ func TestApplyPendingSessionMCPDefersWhileTurnIsActive(t *testing.T) {
 	state, _ := stateRepo.GetMCPSelectionState(context.Background(), execution.SessionID)
 	if state.ApplyState != mcpconfig.SessionMCPApplyStatePendingIdle || state.AppliedRevision != 1 {
 		t.Fatalf("state = %#v, want pending idle with prior revision", state)
+	}
+}
+
+func TestCompletedTurnReappliesPendingSessionMCP(t *testing.T) {
+	client, actions, cleanup := newSessionMCPClient(t, false, false, true)
+	defer cleanup()
+	mgr := newTestManager(t)
+	mgr.mcpResolver = &sessionMCPResolverFake{}
+	stateRepo := newSessionMCPStateFake()
+	stateRepo.state["session-1"] = mcpconfig.SessionMCPSelectionState{
+		DesiredRevision: 1, AppliedRevision: 0, ApplyState: mcpconfig.SessionMCPApplyStatePendingIdle,
+	}
+	mgr.SetMCPSelectionStateRepository(stateRepo)
+	execution := newSessionMCPExecution(client)
+	execution.Status = v1.AgentStatusRunning
+	execution.promptDoneCh = make(chan PromptCompletionSignal, 1)
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	generation, err := mgr.executionStore.BeginPrompt(execution.ID)
+	if err != nil {
+		t.Fatalf("begin prompt: %v", err)
+	}
+
+	if !mgr.handleCompleteEvent(execution, &agentctl.AgentEvent{
+		Type:             "complete",
+		SessionID:        execution.SessionID,
+		PromptGeneration: generation,
+		Data:             map[string]any{"stop_reason": "end_turn"},
+	}) {
+		t.Fatal("completed turn was not accepted")
+	}
+	if got := <-actions; got != "agent.initialize" {
+		t.Fatalf("first action = %q, want initialize", got)
+	}
+	select {
+	case got := <-actions:
+		if got != "agent.session.load" {
+			t.Fatalf("second action = %q, want session.load", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("completed turn did not retry pending session MCP configuration")
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		state, _ := stateRepo.GetMCPSelectionState(context.Background(), execution.SessionID)
+		if state.ApplyState == mcpconfig.SessionMCPApplyStateApplied && state.AppliedRevision == 1 {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("state = %#v, want applied revision 1", state)
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 
