@@ -92,7 +92,7 @@ func (h *Handler) listSessions(
 	if filter.SessionID != "" && filter.TaskID == "" {
 		return nil, errTaskIDRequired
 	}
-	config, client, runs, err := h.sessionStatusSource(ctx, executorID)
+	_, client, runs, err := h.sessionStatusSource(ctx, executorID)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +101,7 @@ func (h *Handler) listSessions(
 		if !filter.matches(run) {
 			continue
 		}
-		row, visible, rowErr := h.sessionRow(ctx, client, config, executorID, run)
+		row, visible, rowErr := h.sessionRow(ctx, client, executorID, run)
 		if rowErr != nil {
 			return nil, rowErr
 		}
@@ -160,7 +160,6 @@ func (h *Handler) sessionStatusSource(
 func (h *Handler) sessionRow(
 	ctx context.Context,
 	client kubeclient.Interface,
-	config agentkubernetes.ExecutorConfig,
 	executorID string,
 	run *models.ExecutorRunning,
 ) (SessionRow, bool, error) {
@@ -187,11 +186,12 @@ func (h *Handler) sessionRow(
 		return SessionRow{}, false, err
 	}
 	row := newInventorySessionRow(run)
-	if inventoryFailure := validateSessionInventory(run, executorID, config, row); inventoryFailure != "" {
+	if inventoryFailure := validateSessionInventory(run, executorID, row); inventoryFailure != "" {
 		row.FailureReason = inventoryFailure
 		return row, true, nil
 	}
-	pod, err := client.CoreV1().Pods(config.Namespace).Get(ctx, row.PodName, metav1.GetOptions{})
+	namespace := metadataString(run.Metadata, metadataNamespace)
+	pod, err := client.CoreV1().Pods(namespace).Get(ctx, row.PodName, metav1.GetOptions{})
 	if err != nil {
 		row.FailureReason = podLookupFailure(err)
 		return row, true, nil
@@ -220,14 +220,12 @@ func newInventorySessionRow(run *models.ExecutorRunning) SessionRow {
 func validateSessionInventory(
 	run *models.ExecutorRunning,
 	executorID string,
-	config agentkubernetes.ExecutorConfig,
 	row SessionRow,
 ) string {
 	identity, validIdentity := recordedResourceIdentity(run.Metadata)
 	if !validIdentity || run.ID != run.SessionID || run.ExecutorID != executorID ||
 		identity.ExecutorID != executorID || identity.TaskID != run.TaskID ||
-		identity.SessionID != run.SessionID ||
-		metadataString(run.Metadata, metadataNamespace) != config.Namespace ||
+		identity.SessionID != run.SessionID || metadataString(run.Metadata, metadataNamespace) == "" ||
 		row.PodName == "" || metadataString(run.Metadata, metadataPodUID) == "" ||
 		metadataString(run.Metadata, metadataMainContainer) == "" || row.WorkspaceKind == "" {
 		return "Kubernetes runtime inventory is incomplete"

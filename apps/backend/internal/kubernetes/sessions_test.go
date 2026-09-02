@@ -635,10 +635,7 @@ func TestValidateSessionInventoryRequiresEntireRecordedIdentity(t *testing.T) {
 			delete(run.Metadata, key)
 			session := kubernetesTaskSession("session-1", "task-1", "executor-1", "profile-1")
 
-			failure := validateSessionInventory(
-				run, session.ExecutorID, agentkubernetes.ExecutorConfig{Namespace: "kandev"},
-				newInventorySessionRow(run),
-			)
+			failure := validateSessionInventory(run, session.ExecutorID, newInventorySessionRow(run))
 
 			require.Equal(t, "Kubernetes runtime inventory is incomplete", failure)
 		})
