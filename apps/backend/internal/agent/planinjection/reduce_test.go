@@ -517,7 +517,7 @@ func TestReduceInvariantsAcrossShapesAndBudgets(t *testing.T) {
 			for _, budget := range budgets {
 				name := fmt.Sprintf("n=%d/body=%d/budget=%d", n, bodyLen, budget)
 				t.Run(name, func(t *testing.T) {
-					out, reduced, _ := Reduce(doc, budget)
+					out, reduced, omitted := Reduce(doc, budget)
 
 					if budget >= 0 && len(out) > budget {
 						t.Fatalf("len(out)=%d exceeds budget=%d", len(out), budget)
@@ -536,7 +536,7 @@ func TestReduceInvariantsAcrossShapesAndBudgets(t *testing.T) {
 					}
 
 					out2, reduced2, omitted2 := Reduce(doc, budget)
-					if out2 != out || reduced2 != reduced {
+					if out2 != out || reduced2 != reduced || omitted2 != omitted {
 						t.Fatal("Reduce is not deterministic across repeat calls")
 					}
 
@@ -546,7 +546,6 @@ func TestReduceInvariantsAcrossShapesAndBudgets(t *testing.T) {
 							t.Fatalf("Reduce is not idempotent on its own output: %q -> %q", out, out3)
 						}
 					}
-					_ = omitted2
 				})
 			}
 		}

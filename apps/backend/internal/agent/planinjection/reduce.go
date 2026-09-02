@@ -94,8 +94,19 @@ func Reduce(document string, budget int) (output string, reduced bool, omittedSe
 // candidate is retained when it fits avail minus the sections already
 // retained; when it does not, that run closes permanently. A closed run
 // forfeits all its remaining turns to the other. Selection stops when both
-// runs are closed or no unconsidered section remains between them.
+// runs are closed or no unconsidered section remains between them. A
+// non-positive avail retains nothing; the caller never reaches this today
+// (Reduce guards budget <= 0 before the reservation arithmetic that could
+// drive avail negative), but the invariant is made explicit so the function
+// stays safe if reused.
 func selectSections(sections []string, avail int) (headRetain, tailRetain []int) {
+	if avail <= 0 {
+		return nil, nil
+	}
+	return selectSectionsRun(sections, avail)
+}
+
+func selectSectionsRun(sections []string, avail int) (headRetain, tailRetain []int) {
 	lo, hi := 0, len(sections)-1
 	headOpen, tailOpen := true, true
 	nextIsTail := true

@@ -378,6 +378,9 @@ func (s *Service) addDynamicPlan(ctx context.Context, taskID string, input *dyna
 	}
 
 	composed := strings.TrimSpace(plan.Title + "\n" + plan.Content)
+	// ContainTags is not called here: PlanSummary lands in the plain-text
+	// continuation package (ContinuationPrompt), not in a <kandev-system>
+	// block. If that ever changes, add ContainTags(composed) before Reduce.
 	reducedPlan, reduced, omitted := planinjection.Reduce(composed, planinjection.DynamicBudget)
 	input.PlanSummary = reducedPlan
 	if reduced {
