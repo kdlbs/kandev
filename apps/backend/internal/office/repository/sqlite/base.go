@@ -64,6 +64,12 @@ type Repository struct {
 	ro      *sqlx.DB // reader
 	log     *logger.Logger
 	migrate *db.MigrateLogger
+
+	// failBudgetPolicyUpdateErr is a test-only failpoint: when set,
+	// updateBudgetPolicyTx returns it after the claim discard has run but
+	// before the policy row update, so a test can prove the two are
+	// transactional without a fault-injecting driver.
+	failBudgetPolicyUpdateErr error
 }
 
 // NewWithDB creates a new office repository with existing database connections.
@@ -321,6 +327,23 @@ func (r *Repository) createCostTables() error {
 		action_on_exceed TEXT DEFAULT 'notify_only',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
+	);
+
+	-- office_budget_claims must be created after office_budget_policies:
+	-- its foreign key references that table, and PostgreSQL rejects a
+	-- forward reference at CREATE TABLE time even though SQLite tolerates
+	-- it. One row per (policy, evaluation period, level) that has already
+	-- produced its budget.alert / budget.exceeded notification; the
+	-- primary key is the concurrency control for a claim attempt.
+	-- ON DELETE CASCADE removes a policy's claims on every deletion path
+	-- without a matching code change at any of them.
+	CREATE TABLE IF NOT EXISTS office_budget_claims (
+		policy_id TEXT NOT NULL,
+		period_key TEXT NOT NULL,
+		level TEXT NOT NULL,
+		claimed_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (policy_id, period_key, level),
+		FOREIGN KEY (policy_id) REFERENCES office_budget_policies(id) ON DELETE CASCADE
 	);
 	`)
 	return err
