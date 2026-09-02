@@ -298,7 +298,7 @@ func (s *Service) validateRepositorySetMembers(
 			return fmt.Errorf("%w: repository %q listed more than once", ErrInvalidRepositorySet, id)
 		}
 		seen[id] = struct{}{}
-		if item.BaseBranch != "" && !securityutil.IsValidBranchName(item.BaseBranch) {
+		if item.BaseBranch != "" && !securityutil.IsValidBaseBranchRef(item.BaseBranch) {
 			return fmt.Errorf("%w: unsafe base branch for repository %q", ErrInvalidRepositorySet, id)
 		}
 	}
@@ -327,7 +327,7 @@ func (s *Service) validateRepositorySetMembers(
 }
 
 func repositorySetItemsFromCreateRequest(req *CreateRepositorySetRequest) ([]models.RepositorySetItem, error) {
-	if len(req.Repositories) > 0 && len(req.RepositoryIDs) > 0 {
+	if req.Repositories != nil && req.RepositoryIDs != nil {
 		return nil, fmt.Errorf("%w: repositories and repository_ids cannot both be provided", ErrInvalidRepositorySet)
 	}
 	if len(req.Repositories) > 0 {

@@ -54,11 +54,16 @@ test.describe("Workspace repository sets settings", () => {
     await expect
       .poll(async () => {
         const listed = await apiClient.listRepositorySets(seedData.workspaceId);
-        return listed.repository_sets
-          .find((entry) => entry.name === setName)
-          ?.repositories.find((member) => member.repository_id === second.id)?.base_branch;
+        const stored = listed.repository_sets.find((entry) => entry.name === setName);
+        return (
+          stored?.repositories.length === 2 &&
+          stored.repositories.some((member) => member.repository_id === seedData.repositoryId) &&
+          stored.repositories.some((member) => member.repository_id === second.id) &&
+          stored.repositories.find((member) => member.repository_id === second.id)?.base_branch ===
+            "develop"
+        );
       })
-      .toBe("develop");
+      .toBe(true);
 
     const createdId = (
       await apiClient.listRepositorySets(seedData.workspaceId)

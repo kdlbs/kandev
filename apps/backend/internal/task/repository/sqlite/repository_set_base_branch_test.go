@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"reflect"
 	"testing"
 	"time"
 
@@ -41,12 +40,7 @@ func TestRepositorySetRoundTripsSavedBaseBranch(t *testing.T) {
 	seedWorkspace(t, repo, "ws-base")
 	seedSetRepository(t, repo, "ws-base", "repo-base")
 
-	item := models.RepositorySetItem{RepositoryID: "repo-base"}
-	baseBranch := reflect.ValueOf(&item).Elem().FieldByName("BaseBranch")
-	if !baseBranch.IsValid() {
-		t.Fatal("RepositorySetItem is missing BaseBranch")
-	}
-	baseBranch.SetString("develop")
+	item := models.RepositorySetItem{RepositoryID: "repo-base", BaseBranch: "develop"}
 
 	set := &models.RepositorySet{
 		WorkspaceID: "ws-base",
@@ -61,7 +55,7 @@ func TestRepositorySetRoundTripsSavedBaseBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRepositorySet: %v", err)
 	}
-	got := reflect.ValueOf(loaded.Items[0]).FieldByName("BaseBranch").String()
+	got := loaded.Items[0].BaseBranch
 	if got != "develop" {
 		t.Fatalf("saved base branch = %q, want %q", got, "develop")
 	}

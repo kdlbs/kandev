@@ -59,9 +59,25 @@ func TestPostgresRepositorySetBaseBranchMigrationPreservesItems(t *testing.T) {
 	if err := repo.runMigrations(); err != nil {
 		t.Fatalf("run base-branch migration: %v", err)
 	}
+	assertBaseBranchColumn := func(stage string) {
+		var count int
+		err := repo.db.Get(&count, repo.db.Rebind(`
+			SELECT COUNT(*)
+			FROM information_schema.columns
+			WHERE table_name = ? AND column_name = ?
+		`), "repository_set_items", "base_branch")
+		if err != nil {
+			t.Fatalf("inspect base_branch column after %s migration: %v", stage, err)
+		}
+		if count != 1 {
+			t.Fatalf("base_branch column count after %s migration = %d, want 1", stage, count)
+		}
+	}
+	assertBaseBranchColumn("first")
 	if err := repo.runMigrations(); err != nil {
 		t.Fatalf("replay base-branch migration: %v", err)
 	}
+	assertBaseBranchColumn("replayed")
 	loaded, err := repo.GetRepositorySet(ctx, set.ID)
 	if err != nil {
 		t.Fatalf("GetRepositorySet after migration: %v", err)

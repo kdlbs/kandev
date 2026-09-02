@@ -168,7 +168,7 @@ export function buildDialogFooterProps(
     submitBlockedReason:
       props.submitBlockedReason ??
       pendingAttachmentUploadReason ??
-      (setup.hasUnavailableSavedBase ? t("task:repositorySetBaseUnavailable") : null),
+      setup.savedBaseSubmitBlockedReason,
     editDependenciesReady: setup.isEditMode ? setup.editDependencies.ready : undefined,
   };
 }

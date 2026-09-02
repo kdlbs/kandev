@@ -59,6 +59,26 @@ func TestRepositorySetRejectsUnsafeBaseWithoutWriting(t *testing.T) {
 	}
 }
 
+func TestRepositorySetRejectsMalformedBaseRefWithoutWriting(t *testing.T) {
+	for _, baseBranch := range []string{"main/", "a//b"} {
+		t.Run(baseBranch, func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			seedSetWorkspace(t, svc, repo)
+
+			_, err := svc.CreateRepositorySet(context.Background(), &CreateRepositorySetRequest{
+				WorkspaceID: "ws-1",
+				Name:        "Malformed base",
+				Repositories: []RepositorySetMemberInput{
+					{RepositoryID: "repo-web", BaseBranch: baseBranch},
+				},
+			})
+			if !errors.Is(err, ErrInvalidRepositorySet) {
+				t.Fatalf("malformed base error = %v, want ErrInvalidRepositorySet", err)
+			}
+		})
+	}
+}
+
 func TestRepositorySetUpdateReplacesBasesAtomically(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	seedSetWorkspace(t, svc, repo)
@@ -107,6 +127,16 @@ func TestRepositorySetRejectsConflictingMemberInputs(t *testing.T) {
 	})
 	if !errors.Is(err, ErrInvalidRepositorySet) {
 		t.Fatalf("conflicting create error = %v, want ErrInvalidRepositorySet", err)
+	}
+
+	_, err = svc.CreateRepositorySet(context.Background(), &CreateRepositorySetRequest{
+		WorkspaceID:   "ws-1",
+		Name:          "Conflict empty members",
+		RepositoryIDs: ids,
+		Repositories:  []RepositorySetMemberInput{},
+	})
+	if !errors.Is(err, ErrInvalidRepositorySet) {
+		t.Fatalf("conflicting create with empty members error = %v, want ErrInvalidRepositorySet", err)
 	}
 
 	set := createFullStackSet(t, svc)

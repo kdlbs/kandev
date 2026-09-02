@@ -172,6 +172,30 @@ describe("WorkspaceRepoChips saved base display", () => {
     expect(screen.getByTestId("repo-chip-base-branch").textContent).toContain("develop");
     expect(screen.getByTestId("branch-chip-trigger").textContent).toContain("feature/task");
   });
+
+  it("edits the local executor saved base without changing checkout state", () => {
+    const onRowBaseBranchChange = vi.fn();
+    const onRowBranchChange = vi.fn();
+    renderChips({
+      rows: [
+        row({
+          key: "r0",
+          repositoryId: FRONTEND_ID,
+          branch: "feature/task",
+          baseBranch: "develop",
+        }),
+      ],
+      isLocalExecutor: true,
+      onRowBaseBranchChange,
+      onRowBranchChange,
+    });
+
+    fireEvent.click(screen.getByTestId("repo-chip-base-branch"));
+    fireEvent.click(screen.getByRole("option", { name: /Task default/ }));
+
+    expect(onRowBaseBranchChange).toHaveBeenCalledWith("r0", "");
+    expect(onRowBranchChange).not.toHaveBeenCalledWith("r0", "");
+  });
 });
 
 describe("WorkspaceRepoChips workspace markers", () => {

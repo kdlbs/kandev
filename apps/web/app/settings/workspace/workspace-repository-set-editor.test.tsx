@@ -38,6 +38,7 @@ const repository: Repository = {
   created_at: "2026-08-17T09:00:00Z",
   updated_at: "2026-08-17T09:00:00Z",
 };
+const BASE_BRANCH_TEST_ID = "repository-set-base-repo-web";
 
 function draft(baseBranch = ""): RepositorySetDraft {
   return {
@@ -95,7 +96,7 @@ describe("RepositorySetEditorDialog base branch picker", () => {
       true,
     );
 
-    fireEvent.click(screen.getByTestId("repository-set-base-repo-web"));
+    fireEvent.click(screen.getByTestId(BASE_BRANCH_TEST_ID));
 
     expect(mockUseBranches).toHaveBeenCalledWith(
       { kind: "id", workspaceId: "ws-1", repositoryId: "repo-web" },
@@ -103,16 +104,43 @@ describe("RepositorySetEditorDialog base branch picker", () => {
     );
   });
 
+  it("keeps a saved branch visible before the lazy branch request settles", () => {
+    renderEditor(draft("retired"));
+
+    expect(screen.getByTestId(BASE_BRANCH_TEST_ID).textContent).toContain("retired");
+  });
+
   it("keeps an unavailable saved branch visible and disabled after loading", () => {
     renderEditor(draft("retired"));
 
-    fireEvent.click(screen.getByTestId("repository-set-base-repo-web"));
+    fireEvent.click(screen.getByTestId(BASE_BRANCH_TEST_ID));
 
     const unavailable = screen
       .getAllByRole("option")
       .find((option) => option.textContent?.includes("retired"));
     expect(unavailable).toBeDefined();
     expect(unavailable?.getAttribute("aria-disabled")).toBe("true");
-    expect(screen.getByTestId("repository-set-base-repo-web").textContent).toContain("retired");
+    expect(screen.getByTestId(BASE_BRANCH_TEST_ID).textContent).toContain("retired");
+  });
+
+  it("disables reordering while the member list is filtered", () => {
+    renderEditor({
+      ...draft(),
+      members: [
+        { repositoryId: "repo-web", baseBranch: "" },
+        { repositoryId: "repo-missing", baseBranch: "retired" },
+      ],
+    });
+
+    fireEvent.change(screen.getByTestId("repository-set-member-search"), {
+      target: { value: "retired" },
+    });
+
+    expect(
+      (screen.getByTestId("repository-set-move-up-repo-missing") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByTestId("repository-set-move-down-repo-missing") as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 });
