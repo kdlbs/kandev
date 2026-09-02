@@ -214,14 +214,17 @@ test.describe("Session recovery", () => {
     // so that transient idle state cannot satisfy the assertion.
     const resumeStarting = testPage.locator('[data-placeholder="Preparing workspace..."]');
     await expect(resumeStarting).toBeVisible({ timeout: 30_000 });
+    const editor = session.activeChat().getByTestId("chat-input-editor");
+    // @covers AC-UI-SESSION-START-COMPOSER-READINESS-001.1
+    await expect(editor).toHaveAttribute("contenteditable", "true");
+    await editor.fill("/e2e:simple-message");
+    await expect(editor).toHaveText("/e2e:simple-message");
+    // @covers AC-UI-SESSION-START-COMPOSER-READINESS-001.2
+    await expect(session.submitButton()).toBeDisabled();
     await expect(resumeStarting).not.toBeVisible({ timeout: 30_000 });
-    await expect(testPage.getByTestId("chat-input-editor")).toHaveAttribute(
-      "contenteditable",
-      "true",
-      {
-        timeout: 30_000,
-      },
-    );
+    // @covers AC-UI-SESSION-START-COMPOSER-READINESS-001.3
+    await expect(editor).toHaveText("/e2e:simple-message");
+    await expect(session.submitButton()).toBeEnabled();
 
     // The resume settles the session back to WAITING_FOR_INPUT (agent idle).
     // The recovery card must not reappear now that the resume is resolved —
@@ -247,8 +250,9 @@ test.describe("Session recovery", () => {
     await expect(session.recoveryResumeButton()).toHaveCount(0);
     await expect(session.recoveryFreshButton()).toHaveCount(0);
 
-    // Verify agent works after recovery
-    await session.sendMessage("/e2e:simple-message");
+    // Verify the draft typed during startup still works after recovery.
+    await expect(editor).toHaveText("/e2e:simple-message");
+    await session.clickSubmitWhenReady();
     await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
   });
 
