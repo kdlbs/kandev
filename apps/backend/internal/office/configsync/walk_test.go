@@ -270,6 +270,61 @@ func TestWalk_SkillWithoutSkillMDHasNilSkillMD(t *testing.T) {
 	}
 }
 
+func TestWalk_UnreadableFlatFilesAreSortedByPath(t *testing.T) {
+	// AC-OFFICE-CONFIG-SYNC-004.5a: two runs over the same repository must
+	// record warnings in the same order, which requires result.unreadable
+	// itself to be in path order regardless of provider listing order.
+	fg := newFakeGitHub()
+	fg.dirs["cfg"] = []github.RepoContentEntry{}
+	fg.dirs["cfg/agents"] = []github.RepoContentEntry{
+		fileEntry("cfg/agents/b.yml"),
+		fileEntry("cfg/agents/a.yml"),
+	}
+	// Neither has content registered: both 404 on fetch (listed but gone).
+	w := newWalker(fg, nil, DefaultLimits)
+	result, ferr := w.Walk(context.Background(), testGitHubConfig())
+	if ferr != nil {
+		t.Fatalf("Walk() error = %v, want nil", ferr)
+	}
+	if len(result.unreadable) != 2 {
+		t.Fatalf("unreadable = %+v, want 2 entries", result.unreadable)
+	}
+	if result.unreadable[0].path != "cfg/agents/a.yml" || result.unreadable[1].path != "cfg/agents/b.yml" {
+		t.Errorf("unreadable not sorted ascending by path: %+v", result.unreadable)
+	}
+}
+
+func TestWalk_SkillUnreadableReferencesAreSortedByPath(t *testing.T) {
+	fg := newFakeGitHub()
+	fg.dirs["cfg"] = []github.RepoContentEntry{}
+	fg.dirs["cfg/skills"] = []github.RepoContentEntry{dirEntry("cfg/skills/reviewer")}
+	fg.dirs["cfg/skills/reviewer"] = []github.RepoContentEntry{
+		fileEntry("cfg/skills/reviewer/SKILL.md"),
+		dirEntry("cfg/skills/reviewer/references"),
+	}
+	fg.files["cfg/skills/reviewer/SKILL.md"] = []byte("# Reviewer\n")
+	fg.dirs["cfg/skills/reviewer/references"] = []github.RepoContentEntry{
+		fileEntry("cfg/skills/reviewer/references/z.md"),
+		fileEntry("cfg/skills/reviewer/references/a.md"),
+	}
+	// Neither reference file has content registered: both 404 on fetch.
+	w := newWalker(fg, nil, DefaultLimits)
+	result, ferr := w.Walk(context.Background(), testGitHubConfig())
+	if ferr != nil {
+		t.Fatalf("Walk() error = %v, want nil", ferr)
+	}
+	if len(result.skills) != 1 {
+		t.Fatalf("skills = %+v, want 1 entry", result.skills)
+	}
+	unreadableRefs := result.skills[0].unreadableRefs
+	if len(unreadableRefs) != 2 {
+		t.Fatalf("unreadableRefs = %+v, want 2 entries", unreadableRefs)
+	}
+	if unreadableRefs[0].path != "cfg/skills/reviewer/references/a.md" || unreadableRefs[1].path != "cfg/skills/reviewer/references/z.md" {
+		t.Errorf("unreadableRefs not sorted ascending by path: %+v", unreadableRefs)
+	}
+}
+
 func TestWalk_SkillCountOverCapFailsRunBeforeRound2(t *testing.T) {
 	fg := newFakeGitHub()
 	fg.dirs["cfg"] = []github.RepoContentEntry{}

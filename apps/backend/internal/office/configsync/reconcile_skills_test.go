@@ -25,7 +25,7 @@ func TestBuildFetchedSkills_ReadsFrontmatterAndFallsBackNameToDirName(t *testing
 			skillMD: skillMDFile("skills/no-frontmatter/SKILL.md", "just a body, no frontmatter"),
 		},
 	}
-	fetched, warnings := buildFetchedSkills(dirs)
+	fetched, warnings, _ := buildFetchedSkills(dirs)
 	require.Len(t, fetched, 2)
 	assert.Empty(t, warnings)
 
@@ -46,7 +46,7 @@ func TestBuildFetchedSkills_MissingSkillMDIsExcludedButNotWarnedHere(t *testing.
 	dirs := []skillFiles{
 		{dirName: "empty-dir", dirPath: "skills/empty-dir", skillMD: nil},
 	}
-	fetched, warnings := buildFetchedSkills(dirs)
+	fetched, warnings, _ := buildFetchedSkills(dirs)
 	assert.Empty(t, fetched)
 	assert.Empty(t, warnings, "the walk-phase warning for a missing SKILL.md is emitted by skillMissingDefinitionWarnings, not here")
 }
@@ -75,7 +75,7 @@ func TestSkillMissingDefinitionWarnings_SilentWhenSkillMDUnreadable(t *testing.T
 			skillMDUnread: &unreadableFile{path: "skills/reviewer/SKILL.md", reason: "over size limit"},
 		},
 	}
-	assert.Empty(t, skillMissingDefinitionWarnings(dirs), "an unreadable SKILL.md is warned by skillFetchWarningsAndExemptions instead")
+	assert.Empty(t, skillMissingDefinitionWarnings(dirs), "an unreadable SKILL.md is warned by skillFetchWarnings instead")
 }
 
 func TestBuildFetchedSkills_KeyCollisionKeepsByteWiseFirstPath(t *testing.T) {
@@ -83,7 +83,7 @@ func TestBuildFetchedSkills_KeyCollisionKeepsByteWiseFirstPath(t *testing.T) {
 		{dirName: "reviewer", dirPath: "skills/z/reviewer", skillMD: skillMDFile("skills/z/reviewer/SKILL.md", "---\nname: R\n---\n")},
 		{dirName: "reviewer", dirPath: "skills/a/reviewer", skillMD: skillMDFile("skills/a/reviewer/SKILL.md", "---\nname: R\n---\n")},
 	}
-	fetched, warnings := buildFetchedSkills(dirs)
+	fetched, warnings, _ := buildFetchedSkills(dirs)
 	require.Len(t, fetched, 1)
 	assert.Equal(t, "skills/a/reviewer", fetched[0].SourcePath)
 	assert.NotEmpty(t, warnings)

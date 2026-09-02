@@ -23,12 +23,14 @@ type fetchedSkill struct {
 // buildFetchedSkills parses every skill directory the walk selected and
 // resolves AC-OFFICE-CONFIG-SYNC-003.3's collision rule. A skill directory
 // with no readable SKILL.md is not included here: one whose SKILL.md was
-// present but unreadable is warned by skillFetchWarningsAndExemptions
-// instead (AC-OFFICE-CONFIG-SYNC-003.6a/.12), and one with no SKILL.md at
-// all is warned by skillMissingDefinitionWarnings — a separate function
-// because AC-OFFICE-CONFIG-SYNC-004.5c places that warning in the walk
-// phase, not this function's parse phase.
-func buildFetchedSkills(dirs []skillFiles) (fetched []fetchedSkill, warnings []string) {
+// present but unreadable is warned by skillFetchWarnings instead
+// (AC-OFFICE-CONFIG-SYNC-003.6a/.12), and one with no SKILL.md at all is
+// warned by skillMissingDefinitionWarnings — a separate function because
+// AC-OFFICE-CONFIG-SYNC-004.5c places that warning in the walk phase, not
+// this function's parse phase. unparsedDirs names every directory whose
+// SKILL.md was readable but failed to parse, for skillDeletionExemptions'
+// manifest lookup (AC-OFFICE-CONFIG-SYNC-003.12).
+func buildFetchedSkills(dirs []skillFiles) (fetched []fetchedSkill, warnings, unparsedDirs []string) {
 	type parsed struct {
 		skill *parsedSkill
 		path  string
@@ -38,6 +40,7 @@ func buildFetchedSkills(dirs []skillFiles) (fetched []fetchedSkill, warnings []s
 		ps, err := parseSkill(sf)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("skill %q: %v; skipping", sf.dirPath, err))
+			unparsedDirs = append(unparsedDirs, sf.dirPath)
 			continue
 		}
 		if ps == nil {
@@ -69,39 +72,65 @@ func buildFetchedSkills(dirs []skillFiles) (fetched []fetchedSkill, warnings []s
 			},
 		})
 	}
-	return fetched, warnings
+	return fetched, warnings, unparsedDirs
 }
 
-// skillFetchWarningsAndExemptions renders one
-// AC-OFFICE-CONFIG-SYNC-002.4a/002.6a warning per unreadable SKILL.md or
-// reference file, and exempts that skill's directory-name key from this
-// run's deletion sweep. Unlike the flat kinds, no path-matching against the
-// manifest is needed: walk.go already associates every unreadable file with
-// its owning skill directory (skillFiles.skillMDUnread/unreadableRefs), and
-// AC-002.6a treats an unreadable SKILL.md and an unreadable reference file
-// under the same skill as resolving to that one skill.
-func skillFetchWarningsAndExemptions(dirs []skillFiles) (warnings []string, exemptKeys map[string]bool) {
-	exemptKeys = map[string]bool{}
+// skillFetchWarnings renders one AC-OFFICE-CONFIG-SYNC-002.4a/002.6a warning
+// per unreadable SKILL.md or reference file.
+func skillFetchWarnings(dirs []skillFiles) []string {
+	var warnings []string
 	for _, sf := range dirs {
 		if sf.skillMDUnread != nil {
 			warnings = append(warnings, fmt.Sprintf(
 				"skill %q: SKILL.md unreadable (%s); leaving it untouched", sf.dirPath, sf.skillMDUnread.reason))
-			exemptKeys[sf.dirName] = true
 		}
 		for _, u := range sf.unreadableRefs {
 			warnings = append(warnings, fmt.Sprintf(
 				"skill %q: reference file %q unreadable (%s); leaving it untouched", sf.dirPath, u.path, u.reason))
-			exemptKeys[sf.dirName] = true
 		}
 	}
-	return warnings, exemptKeys
+	return warnings
+}
+
+// skillDeletionExemptions implements AC-OFFICE-CONFIG-SYNC-003.6a/003.12 for
+// skills, mirroring kindExemptions' manifest-source_path lookup: an
+// unreadable-or-unparsed skill directory whose path matches a manifest
+// entry's source_path exempts just that entity; one that matches no manifest
+// entry exempts every skill's deletion sweep this run, since an unreadable
+// directory's contents cannot say which entity — possibly renamed since the
+// last run — it defines. Matching by the directory's own current path (as
+// the prior, narrower exemption did) misses exactly that rename case: the
+// old manifest entry's path is gone from the listing and the new directory's
+// path was never recorded, so neither end matches without this coarse
+// fallback.
+func skillDeletionExemptions(dirs []skillFiles, unparsedDirs []string, manifestForKind []ManifestEntry) (exemptKeys map[string]bool, coarseExempt bool) {
+	byPath := make(map[string]string, len(manifestForKind))
+	for _, m := range manifestForKind {
+		byPath[normalizePathFrame(m.SourcePath)] = m.EntityKey
+	}
+	exemptKeys = map[string]bool{}
+	check := func(p string) {
+		if key, ok := byPath[normalizePathFrame(p)]; ok {
+			exemptKeys[key] = true
+			return
+		}
+		coarseExempt = true
+	}
+	for _, sf := range dirs {
+		if sf.skillMDUnread != nil || len(sf.unreadableRefs) > 0 {
+			check(sf.dirPath)
+		}
+	}
+	for _, p := range unparsedDirs {
+		check(p)
+	}
+	return exemptKeys, coarseExempt
 }
 
 // skillMissingDefinitionWarnings renders one AC-OFFICE-CONFIG-SYNC-003.2a
 // walk-phase warning per skill directory with no SKILL.md at all. A
 // directory whose SKILL.md exists but could not be read is not named here —
-// skillFetchWarningsAndExemptions already warns that case in the fetch
-// phase.
+// skillFetchWarnings already warns that case in the fetch phase.
 func skillMissingDefinitionWarnings(dirs []skillFiles) []string {
 	var warnings []string
 	for _, sf := range dirs {

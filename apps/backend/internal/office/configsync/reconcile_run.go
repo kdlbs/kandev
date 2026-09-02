@@ -99,6 +99,7 @@ func (r *Runner) recordFailure(ctx context.Context, workspaceID, errMsg string, 
 type kindsFetch struct {
 	skill         []fetchedSkill
 	skillExempt   map[string]bool
+	skillCoarse   bool
 	agent         []fetchedEntity[sqlite.AgentInstanceConfigFields]
 	reportsTo     map[string]string
 	agentExempt   map[string]bool
@@ -124,12 +125,12 @@ type kindsResult struct {
 func buildKindsFetch(root string, wr *walkResult, byKind map[string][]ManifestEntry, phases *phaseWarnings) kindsFetch {
 	var kf kindsFetch
 
-	var skillParseWarnings, skillFetchWarnings []string
-	kf.skill, skillParseWarnings = buildFetchedSkills(wr.skills)
-	skillFetchWarnings, kf.skillExempt = skillFetchWarningsAndExemptions(wr.skills)
+	var skillParseWarnings, skillUnparsed []string
+	kf.skill, skillParseWarnings, skillUnparsed = buildFetchedSkills(wr.skills)
+	kf.skillExempt, kf.skillCoarse = skillDeletionExemptions(wr.skills, skillUnparsed, byKind[kindSkill])
 	phases.walk = append(phases.walk, skillMissingDefinitionWarnings(wr.skills)...)
 	phases.parse = append(phases.parse, skillParseWarnings...)
-	phases.fetch = append(phases.fetch, skillFetchWarnings...)
+	phases.fetch = append(phases.fetch, skillFetchWarnings(wr.skills)...)
 
 	var agentParseWarnings, agentUnparsed []string
 	kf.agent, kf.reportsTo, agentParseWarnings, agentUnparsed = buildFetchedAgents(wr.agentFiles)
@@ -262,7 +263,7 @@ func (r *Runner) reversePass(ctx context.Context, workspaceID string, kf kindsFe
 	); err != nil {
 		return err
 	}
-	return applySkillsDeletesOnly(ctx, r.repo, r.store, workspaceID, kf.skill, byKind[kindSkill], kf.skillExempt, false, kr.skill)
+	return applySkillsDeletesOnly(ctx, r.repo, r.store, workspaceID, kf.skill, byKind[kindSkill], kf.skillExempt, kf.skillCoarse, kr.skill)
 }
 
 func appendResult(dst *SyncResult, src *kindApplyResult) {

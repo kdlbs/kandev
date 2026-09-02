@@ -458,10 +458,20 @@ func sortWalkResult(result *walkResult) {
 	sortFiles(result.agentFiles)
 	sortFiles(result.projectFiles)
 	sortFiles(result.routineFiles)
+	sortUnreadable(result.unreadable)
 	sort.Slice(result.skills, func(i, j int) bool { return result.skills[i].dirPath < result.skills[j].dirPath })
 	for i := range result.skills {
 		sortFiles(result.skills[i].references)
+		sortUnreadable(result.skills[i].unreadableRefs)
 	}
+}
+
+// sortUnreadable orders unreadable-file records by path, ascending and
+// byte-wise, matching sortFiles for the files that were readable
+// (AC-OFFICE-CONFIG-SYNC-004.5a): warning order must not depend on provider
+// listing order.
+func sortUnreadable(files []unreadableFile) {
+	sort.Slice(files, func(i, j int) bool { return files[i].path < files[j].path })
 }
 
 func sortFiles(files []fetchedFile) {

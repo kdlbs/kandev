@@ -266,6 +266,44 @@ func TestReconcile_UnreadableAgentFileExemptsOnlyThatEntityFromDeletion(t *testi
 	assert.Len(t, agents, 2, "both agents must survive: dev is exempt, ceo was never removed")
 }
 
+func TestReconcile_RenamedSkillDirectoryWithUnreadableFileIsCoarseExemptNotDeleted(t *testing.T) {
+	// AC-OFFICE-CONFIG-SYNC-003.6a: a file both moved and made unreadable
+	// since the last run has a new path the manifest never recorded and an
+	// old path the listing no longer contains, so neither end matches and
+	// the entity must not be deleted for a failure that is not a removal.
+	repo, store := newReconcileTestRepo(t)
+	seedTestConfig(t, store, "ws-1", "cfg")
+
+	fg := newFakeGitHub()
+	fg.dirs["cfg"] = []github.RepoContentEntry{}
+	fg.dirs["cfg/skills"] = []github.RepoContentEntry{dirEntry("cfg/skills/old-name")}
+	fg.dirs["cfg/skills/old-name"] = []github.RepoContentEntry{fileEntry("cfg/skills/old-name/SKILL.md")}
+	fg.files["cfg/skills/old-name/SKILL.md"] = []byte("---\nname: old-name\n---\nBody.\n")
+
+	runner := NewRunner(fg, nil, repo, store)
+	ctx := context.Background()
+	result, err := runner.Reconcile(ctx, newRunnerTestConfig("ws-1", "cfg"))
+	require.NoError(t, err)
+	require.Equal(t, []string{"old-name"}, result.Created)
+
+	// The directory is renamed and its SKILL.md becomes unreadable in the
+	// same commit: the old manifest entry's path is gone from the listing,
+	// and the new directory's path was never recorded in the manifest.
+	fg.dirs["cfg/skills"] = []github.RepoContentEntry{dirEntry("cfg/skills/new-name")}
+	fg.dirs["cfg/skills/new-name"] = []github.RepoContentEntry{fileEntry("cfg/skills/new-name/SKILL.md")}
+	// No content registered for cfg/skills/new-name/SKILL.md: 404 on fetch.
+
+	result, err = runner.Reconcile(ctx, newRunnerTestConfig("ws-1", "cfg"))
+	require.NoError(t, err)
+	assert.Empty(t, result.Deleted, "the still-existing skill must not be deleted for an unreadable file that may be its renamed self")
+	assert.NotEmpty(t, result.Warnings)
+
+	skills, err := repo.ListSkills(ctx, "ws-1")
+	require.NoError(t, err)
+	require.Len(t, skills, 1)
+	assert.Equal(t, "old-name", skills[0].Slug, "the entity must survive under its original identity")
+}
+
 // TestApplyKindSplit_CreatesOnlyThenDeletesOnlyMatchesApplyKind guards the
 // AC-OFFICE-CONFIG-SYNC-003.9 refactor: applyKindCreatesOnly followed by
 // applyKindDeletesOnly (what the orchestrator calls, separated so every
