@@ -76,6 +76,7 @@ type Repository interface {
 	UpdateTaskAssignee(ctx context.Context, taskID, assigneeID string) error
 	UpdateTaskPriority(ctx context.Context, taskID, priority string) error
 	UpdateTaskProjectID(ctx context.Context, taskID, projectID string) error
+	GetTaskProjectID(ctx context.Context, taskID string) (string, error)
 	UpdateTaskParentID(ctx context.Context, taskID, parentID string) error
 	GetProjectWorkspaceID(ctx context.Context, projectID string) (string, error)
 	GetTaskWorkspaceID(ctx context.Context, taskID string) (string, error)

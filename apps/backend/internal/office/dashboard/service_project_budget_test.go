@@ -78,6 +78,32 @@ func TestUpdateTaskProjectID_ClearingProjectSkipsEvaluation(t *testing.T) {
 	}
 }
 
+// TestUpdateTaskProjectID_UnchangedProjectSkipsEvaluation covers a no-op
+// reassignment (PATCH project_id to the project the task is already in):
+// nothing crossed a threshold, so the budget evaluator must not fire. Without
+// this guard every retried/duplicate PATCH would write a fresh budget.alert
+// activity row for an already over-threshold project.
+func TestUpdateTaskProjectID_UnchangedProjectSkipsEvaluation(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "task-1", "ws-1", "Task", "todo", 1)
+	insertTestProject(t, deps, "proj-1", "ws-1")
+
+	if err := deps.svc.UpdateTaskProjectID(context.Background(), "task-1", "proj-1"); err != nil {
+		t.Fatalf("UpdateTaskProjectID (initial assign): %v", err)
+	}
+
+	spy := &projectBudgetEvaluatorSpy{}
+	deps.svc.SetProjectBudgetEvaluator(spy)
+
+	if err := deps.svc.UpdateTaskProjectID(context.Background(), "task-1", "proj-1"); err != nil {
+		t.Fatalf("UpdateTaskProjectID (no-op reassign): %v", err)
+	}
+
+	if len(spy.calls) != 0 {
+		t.Errorf("expected no evaluator calls for a no-op reassignment, got %+v", spy.calls)
+	}
+}
+
 // TestUpdateTaskProjectID_NoEvaluatorWired covers the default (unwired)
 // dependency: reassignment must still succeed when no evaluator is set.
 func TestUpdateTaskProjectID_NoEvaluatorWired(t *testing.T) {

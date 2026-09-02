@@ -42,8 +42,7 @@ func (a *repoAgents) UpdateAgentStatusFields(ctx context.Context, agentID, statu
 
 func newBudgetTestService(t *testing.T) (*costs.CostService, *sqlite.Repository, func(string, ...interface{})) {
 	t.Helper()
-	svc, repo, execSQL, _ := newBudgetTestServiceWithActivity(t, &noopActivity{})
-	return svc, repo, execSQL
+	return newBudgetTestServiceWithActivity(t, &noopActivity{})
 }
 
 // newBudgetTestServiceWithActivity is the same setup as newBudgetTestService
@@ -51,7 +50,7 @@ func newBudgetTestService(t *testing.T) (*costs.CostService, *sqlite.Repository,
 // budget.alert / budget.exceeded rows fire.
 func newBudgetTestServiceWithActivity(
 	t *testing.T, activity shared.ActivityLogger,
-) (*costs.CostService, *sqlite.Repository, func(string, ...interface{}), *sqlx.DB) {
+) (*costs.CostService, *sqlite.Repository, func(string, ...interface{})) {
 	t.Helper()
 	db, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -91,7 +90,7 @@ func newBudgetTestServiceWithActivity(
 			t.Fatalf("exec sql: %v", err)
 		}
 	}
-	return svc, repo, execSQL, db
+	return svc, repo, execSQL
 }
 
 // insertBudgetTestTask inserts a minimal task row carrying a project_id, so
@@ -390,7 +389,7 @@ func TestCheckPreExecutionBudget_PauseAgentBlocks(t *testing.T) {
 // directly, without waiting for a future cost event or agent launch.
 func TestEvaluateProjectBudget_AlertAtThreshold(t *testing.T) {
 	spy := &budgetActivitySpy{}
-	svc, _, execSQL, _ := newBudgetTestServiceWithActivity(t, spy)
+	svc, _, execSQL := newBudgetTestServiceWithActivity(t, spy)
 	ctx := context.Background()
 
 	policy := &models.BudgetPolicy{
@@ -420,7 +419,7 @@ func TestEvaluateProjectBudget_AlertAtThreshold(t *testing.T) {
 // TestEvaluateProjectBudget_ExceededAtLimit covers the limit-exceeded branch.
 func TestEvaluateProjectBudget_ExceededAtLimit(t *testing.T) {
 	spy := &budgetActivitySpy{}
-	svc, _, execSQL, _ := newBudgetTestServiceWithActivity(t, spy)
+	svc, _, execSQL := newBudgetTestServiceWithActivity(t, spy)
 	ctx := context.Background()
 
 	policy := &models.BudgetPolicy{
@@ -455,7 +454,7 @@ func TestEvaluateProjectBudget_ExceededAtLimit(t *testing.T) {
 // that mistakenly treated ScopeID as an agent ID would find and pause it.
 func TestEvaluateProjectBudget_PauseAgentPolicyDoesNotPause(t *testing.T) {
 	spy := &budgetActivitySpy{}
-	svc, repo, execSQL, _ := newBudgetTestServiceWithActivity(t, spy)
+	svc, repo, execSQL := newBudgetTestServiceWithActivity(t, spy)
 	ctx := context.Background()
 
 	createBudgetTestAgent(t, repo, "ws-1", "proj-1")
@@ -494,7 +493,7 @@ func TestEvaluateProjectBudget_PauseAgentPolicyDoesNotPause(t *testing.T) {
 // every reassignment in an already over-budget workspace.
 func TestEvaluateProjectBudget_WorkspacePoliciesNotEvaluated(t *testing.T) {
 	spy := &budgetActivitySpy{}
-	svc, _, execSQL, _ := newBudgetTestServiceWithActivity(t, spy)
+	svc, _, execSQL := newBudgetTestServiceWithActivity(t, spy)
 	ctx := context.Background()
 
 	policy := &models.BudgetPolicy{
@@ -525,7 +524,7 @@ func TestEvaluateProjectBudget_WorkspacePoliciesNotEvaluated(t *testing.T) {
 // (projectID=="") — there is no destination to evaluate.
 func TestEvaluateProjectBudget_EmptyProjectIDSkips(t *testing.T) {
 	spy := &budgetActivitySpy{}
-	svc, _, execSQL, _ := newBudgetTestServiceWithActivity(t, spy)
+	svc, _, execSQL := newBudgetTestServiceWithActivity(t, spy)
 	ctx := context.Background()
 
 	policy := &models.BudgetPolicy{

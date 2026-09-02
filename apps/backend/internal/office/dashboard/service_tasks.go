@@ -59,6 +59,20 @@ func (s *DashboardService) UpdateTaskProjectID(ctx context.Context, taskID, proj
 			return fmt.Errorf("project %s belongs to a different workspace", projectID)
 		}
 	}
+	// Read the pre-write project so a no-op PATCH (destination == current)
+	// doesn't trigger a budget re-evaluation below: nothing crossed a
+	// threshold, so evaluatePolicy's unconditional alert/exceeded logging
+	// would otherwise write a fresh activity row on every retry. A read
+	// error is treated as "changed" (fail open to evaluating, the prior
+	// behavior) rather than silently skipping. Only read when a
+	// reassignment could actually trigger an evaluation.
+	needsChangeCheck := projectID != "" && s.projectBudget != nil
+	var prevProjectID string
+	var prevErr error
+	if needsChangeCheck {
+		prevProjectID, prevErr = s.repo.GetTaskProjectID(ctx, taskID)
+	}
+
 	if err := s.repo.UpdateTaskProjectID(ctx, taskID, projectID); err != nil {
 		return err
 	}
@@ -66,7 +80,7 @@ func (s *DashboardService) UpdateTaskProjectID(ctx context.Context, taskID, proj
 	// Best-effort: the write above has already committed, so an evaluation
 	// error here is logged, not returned. Mirrors event_subscribers.go's
 	// post-cost-event budget check.
-	if projectID != "" && s.projectBudget != nil {
+	if needsChangeCheck && (prevErr != nil || prevProjectID != projectID) {
 		if err := s.projectBudget.EvaluateProjectBudget(ctx, taskWS, projectID); err != nil {
 			s.logger.Warn("project budget evaluation failed on reassignment",
 				zap.String("task_id", taskID),
