@@ -130,9 +130,13 @@ Implemented visibility-aware native placement, two-frame activation
 reconciliation, hidden-update catch-up, reader-position preservation, and the
 cooperative stale generic-restore guard.
 
+The PR fixup pass added the shared `useActivationPending` lifecycle helper,
+preserved the last visible disabled-reader offset through immediate hide and
+unmount cleanup, and covered cancellation before the first activation frame.
+
 Checks passed:
 
-- 80 focused Vitest tests.
+- 83 focused Vitest tests.
 - Web TypeScript typecheck.
 - Targeted ESLint for changed web files.
 - Desktop inactive-session Playwright regression, 1 passed.

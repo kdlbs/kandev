@@ -1,3 +1,4 @@
+import { renderHook } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   hasTranscriptProgressedPastView,
@@ -6,6 +7,7 @@ import {
   resolveNativeInitialScrollTop,
   isPrependUpdate,
   createFrameCoalescer,
+  useActivationPending,
   scheduleAfterPanelRestore,
 } from "./transcript-auto-scroll";
 
@@ -425,5 +427,38 @@ describe("scheduleAfterPanelRestore", () => {
 
     runPendingFrame(pendingOrder, frameCallbacks);
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it("cancels before the first activation frame", () => {
+    const run = vi.fn();
+    const cancel = scheduleAfterPanelRestore(run);
+    cancel();
+
+    while (pendingOrder.length > 0) runPendingFrame(pendingOrder, frameCallbacks);
+
+    expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe("useActivationPending", () => {
+  it("tracks hidden-to-visible transitions until the activation owner consumes them", () => {
+    const { result, rerender } = renderHook(
+      ({ isVisible }: { isVisible: boolean }) => useActivationPending(isVisible),
+      { initialProps: { isVisible: false } },
+    );
+
+    expect(result.current.activationPendingRef.current).toBe(false);
+
+    rerender({ isVisible: true });
+
+    expect(result.current.isVisibleRef.current).toBe(true);
+    expect(result.current.activationPendingRef.current).toBe(true);
+
+    result.current.activationPendingRef.current = false;
+    rerender({ isVisible: false });
+    expect(result.current.activationPendingRef.current).toBe(false);
+
+    rerender({ isVisible: true });
+    expect(result.current.activationPendingRef.current).toBe(true);
   });
 });

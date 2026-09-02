@@ -20,6 +20,7 @@ import {
   resolveNativeInitialScrollTop,
   createFrameCoalescer,
   scheduleAfterPanelRestore,
+  useActivationPending,
 } from "./transcript-auto-scroll";
 import { scheduleClampedScrollRestore } from "./clamped-scroll-restore";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
@@ -533,19 +534,14 @@ function useRetryPaginationOnUpwardScroll(
  * Two frames place this after SessionPanelContent's one-frame restore without
  * treating the initial visible mount as pagination intent. */
 function useRecheckPaginationOnVisible(isVisible: boolean, recheck: () => void) {
-  const previousVisibleRef = useRef(isVisible);
+  const { isVisibleRef, activationPendingRef } = useActivationPending(isVisible);
   useEffect(() => {
-    const becameVisible = !previousVisibleRef.current && isVisible;
-    previousVisibleRef.current = isVisible;
-    if (!becameVisible) return;
-    let secondFrame: number | null = null;
-    const firstFrame = requestAnimationFrame(() => {
-      secondFrame = requestAnimationFrame(recheck);
+    if (!isVisible || !activationPendingRef.current) return;
+    return scheduleAfterPanelRestore(() => {
+      if (!isVisibleRef.current) return;
+      activationPendingRef.current = false;
+      recheck();
     });
-    return () => {
-      cancelAnimationFrame(firstFrame);
-      if (secondFrame !== null) cancelAnimationFrame(secondFrame);
-    };
   }, [isVisible, recheck]);
 }
 
@@ -644,7 +640,6 @@ export function useAutoScroll(params: {
     scrollRef,
     isVisible,
     isNearBottomRef,
-    isVisibleRef,
     enabledRef,
     hasUnreadDividerRef,
     sessionIdRef,
@@ -682,8 +677,10 @@ function usePersistedTranscriptScroll({
     /** Persists the container's current scrollTop for the session (used when
      * auto-scroll is disabled). */
     const captureScrollTop = () => {
-      if (sessionId && isVisibleRef.current) {
-        storeApi.getState().setTranscriptScrollTop(sessionId, el.scrollTop);
+      if (sessionId && (isVisibleRef.current || frozenScrollTopRef.current !== null)) {
+        storeApi
+          .getState()
+          .setTranscriptScrollTop(sessionId, frozenScrollTopRef.current ?? el.scrollTop);
       }
     };
     // Coalesce persisted writes to at most one per animation frame — native
@@ -797,7 +794,6 @@ function useCatchUpOnVisible({
   scrollRef,
   isVisible,
   isNearBottomRef,
-  isVisibleRef,
   enabledRef,
   hasUnreadDividerRef,
   sessionIdRef,
@@ -806,27 +802,24 @@ function useCatchUpOnVisible({
   scrollRef: React.RefObject<HTMLDivElement | null>;
   isVisible: boolean;
   isNearBottomRef: React.RefObject<boolean>;
-  isVisibleRef: React.RefObject<boolean>;
   enabledRef: React.RefObject<boolean>;
   hasUnreadDividerRef: React.RefObject<boolean>;
   sessionIdRef: React.RefObject<string | null>;
   isProgrammaticScrollLockedRef: React.RefObject<() => boolean>;
 }) {
-  const previousVisibleRef = useRef(isVisible);
+  const { isVisibleRef, activationPendingRef } = useActivationPending(isVisible);
   useEffect(() => {
-    const becameVisible = !previousVisibleRef.current && isVisible;
-    previousVisibleRef.current = isVisible;
-    if (!becameVisible) return;
+    if (!isVisible || !activationPendingRef.current) return;
     return scheduleAfterPanelRestore(() => {
+      if (!isVisibleRef.current) return;
+      activationPendingRef.current = false;
       if (
-        !isVisibleRef.current ||
         !enabledRef.current ||
         hasUnreadDividerRef.current ||
         !isNearBottomRef.current ||
         (isProgrammaticScrollLockedRef.current?.() ?? false)
-      ) {
+      )
         return;
-      }
       const dockviewState = useDockviewStore.getState();
       if (
         dockviewState.pendingChatScrollTop !== null ||
@@ -1104,16 +1097,9 @@ function useInitialScrollPosition({
 }) {
   const storeApi = useAppStoreApi();
   const didInitialScroll = useRef(false);
-  const isVisibleRef = useRef(isVisible);
-  const previousVisibleRef = useRef(isVisible);
-  const activationPendingRef = useRef(false);
-  isVisibleRef.current = isVisible;
+  const { isVisibleRef, activationPendingRef } = useActivationPending(isVisible);
   useEffect(() => {
-    const becameVisible = !previousVisibleRef.current && isVisible;
-    previousVisibleRef.current = isVisible;
-    if (becameVisible) activationPendingRef.current = true;
     if (!isVisible) {
-      activationPendingRef.current = false;
       return;
     }
     if (didInitialScroll.current || itemCount === 0) return;

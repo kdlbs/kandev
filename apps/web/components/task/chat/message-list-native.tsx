@@ -8,7 +8,7 @@ import { OLDER_PAGE_LIMIT, useLazyLoadMessages } from "@/hooks/use-lazy-load-mes
 import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
 import { MessageListFooter } from "./message-list-footer";
 import { useNativeScrollManagement } from "./message-list-native-scroll";
-import { scheduleAfterPanelRestore } from "./transcript-auto-scroll";
+import { scheduleAfterPanelRestore, useActivationPending } from "./transcript-auto-scroll";
 import { useTranscriptAutoScrollEnabled } from "./use-transcript-auto-scroll-enabled";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import {
@@ -317,7 +317,7 @@ export function useScrollToDividerOrBottom(
     isProgrammaticScrollLocked = () => false,
     isVisible = true,
   } = options;
-  const { isVisibleRef, activationPendingRef } = useDividerVisibility(isVisible);
+  const { isVisibleRef, activationPendingRef } = useActivationPending(isVisible);
   const isUserScrollingRef = useDividerUserScrolling(scrollRef);
 
   // Bounds how long the divider correction below can keep re-asserting
@@ -406,20 +406,6 @@ export function useScrollToDividerOrBottom(
     isVisible,
     scrollRef,
   ]);
-}
-
-function useDividerVisibility(isVisible: boolean) {
-  const isVisibleRef = useRef(isVisible);
-  const previousVisibleRef = useRef(isVisible);
-  const activationPendingRef = useRef(false);
-  isVisibleRef.current = isVisible;
-  useEffect(() => {
-    const becameVisible = !previousVisibleRef.current && isVisible;
-    previousVisibleRef.current = isVisible;
-    if (becameVisible) activationPendingRef.current = true;
-    if (!isVisible) activationPendingRef.current = false;
-  }, [isVisible]);
-  return { isVisibleRef, activationPendingRef };
 }
 
 function useDividerUserScrolling(scrollRef: React.RefObject<HTMLDivElement | null>) {

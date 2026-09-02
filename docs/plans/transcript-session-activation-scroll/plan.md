@@ -169,5 +169,8 @@ refresh and activation. A transcript that received hidden agent output reopened
 
 Implemented visibility-aware transcript placement, hidden-update catch-up,
 reader-position preservation, and the cooperative generic panel restore guard.
-Focused unit tests, typecheck, targeted ESLint, desktop and mobile Playwright
-coverage, specification lint, and diff checks all passed.
+The fixup pass centralized the shared activation-transition lifecycle, retained
+the last visible disabled-reader offset through hidden cleanup, and covered
+immediate activation-frame cancellation. Focused unit tests (83 passing),
+typecheck, targeted ESLint, desktop and mobile Playwright coverage,
+specification lint, and diff checks all passed.

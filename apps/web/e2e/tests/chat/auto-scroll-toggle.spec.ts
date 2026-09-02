@@ -212,16 +212,24 @@ test.describe("Transcript auto-scroll toggle", () => {
       content: INACTIVE_SESSION_MARKER,
       authorType: "agent",
     });
-    await testPage.waitForFunction(
-      ({ sid, marker }) => {
-        const store = (window as E2EMessageStoreWindow).__KANDEV_E2E_STORE__;
-        return store
-          ?.getState()
-          .messages.bySession[sid]?.some((message) => message.content === marker);
-      },
-      { sid: firstSessionId, marker: INACTIVE_SESSION_MARKER },
-      { message: "hidden message should arrive in the inactive transcript cache" },
-    );
+    await expect
+      .poll(
+        async () =>
+          testPage.evaluate(
+            ({ sid, marker }) => {
+              const store = (window as E2EMessageStoreWindow).__KANDEV_E2E_STORE__;
+              return store
+                ?.getState()
+                .messages.bySession[sid]?.some((message) => message.content === marker);
+            },
+            { sid: firstSessionId, marker: INACTIVE_SESSION_MARKER },
+          ),
+        {
+          timeout: 15_000,
+          message: "hidden message should arrive in the inactive transcript cache",
+        },
+      )
+      .toBe(true);
 
     await refreshedSession.sessionTabBySessionId(firstSessionId).click();
     await waitForStableActiveSession(testPage, firstSessionId);

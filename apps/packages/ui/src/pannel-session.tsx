@@ -95,9 +95,11 @@ export const SessionPanelContent = forwardRef<HTMLDivElement, SessionPanelConten
             const saved = savedScrollTopRef.current;
             const scrollTopAtSchedule = el.scrollTop;
             requestAnimationFrame(() => {
-              // A transcript can reconcile its position in the same restore
-              // window. Do not overwrite a newer app or user scroll with the
-              // stale offset captured before the panel was shown.
+              // A transcript can reconcile its position in the expected
+              // restore window. Do not overwrite a newer app or user scroll
+              // with the stale offset captured before the panel was shown.
+              // This guard also protects against a later-than-expected
+              // generic restore delivery.
               if (el.scrollTop === scrollTopAtSchedule) el.scrollTop = saved;
             });
           }
