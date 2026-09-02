@@ -225,10 +225,14 @@ func TestProcessOnEnter_QueueRunForEachParticipant_SingleReviewerEntry_QueuesExa
 }
 
 // TestProcessOnEnter_QueueRunForEachParticipant_SecondEntryAfterRejection_QueuesAnotherRun
-// covers AC-D4: after a rejection round sends the task back to Work and it
-// re-enters Review, the step-entry CAS marker for the *new* entry has never
-// been claimed, so a further run is queued — the at-most-once guarantee is
-// per step-entry, not a blanket suppression of repeat dispatch.
+// covers AC-D4 and AC-OFFICE-STEP-ENTRY-DISPATCH-008.2: after a rejection
+// round sends the task back to Work and it re-enters Review, the step-entry
+// CAS marker for the *new* entry has never been claimed, so a further run is
+// queued — the at-most-once guarantee is per step-entry, not a blanket
+// suppression of repeat dispatch. Call count alone would pass even if both
+// runs carried the same idempotency key (they would collide and the queue
+// would silently coalesce them in production), so AC-008.2 requires the two
+// runs' keys to differ, not just to both exist.
 func TestProcessOnEnter_QueueRunForEachParticipant_SecondEntryAfterRejection_QueuesAnotherRun(t *testing.T) {
 	ctx := context.Background()
 	f := newReviewLoopFixture(t)
@@ -258,6 +262,15 @@ func TestProcessOnEnter_QueueRunForEachParticipant_SecondEntryAfterRejection_Que
 
 	if got := f.runQueue.callCount(); got != 2 {
 		t.Fatalf("queued run count after second Review entry = %d, want 2 (AC-D4: not suppressed)", got)
+	}
+
+	firstKey := f.runQueue.calls[0].IdempotencyKey
+	secondKey := f.runQueue.calls[1].IdempotencyKey
+	if firstKey == "" || secondKey == "" {
+		t.Fatalf("expected non-empty idempotency keys, got %q and %q", firstKey, secondKey)
+	}
+	if firstKey == secondKey {
+		t.Fatalf("AC-008.2: two distinct step entries must produce different idempotency keys, both got %q", firstKey)
 	}
 }
 

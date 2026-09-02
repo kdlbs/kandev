@@ -355,6 +355,42 @@ func TestDispatchStepEntry_MarkerBearingFailureAbandonsRemainingSequence(t *test
 	assert.Equal(t, int64(42), executor.calls[0].MarkerEntryID)
 }
 
+// TestDispatchStepEntry_MarkerPositionMatchesDeclaredPositionAcrossNonCompilingAction
+// covers AC-OFFICE-STEP-ENTRY-DISPATCH-002.1: the position a marker-bearing
+// action claims must match the position stepentry.BuildPendingAllocation
+// allocated for it — both must count from the step's raw declared on_enter
+// list, not from whatever survives compilation. configure_session has no
+// CompileOnEnterAction case, so it is silently dropped from the compiled
+// action list; a naive loop index over the compiled list would then claim
+// position 0 for clear_decisions even though it was declared at raw
+// position 1, disagreeing with the allocation built from the raw list.
+func TestDispatchStepEntry_MarkerPositionMatchesDeclaredPositionAcrossNonCompilingAction(t *testing.T) {
+	executor := &fakeMarkerExecutor{outcomes: map[ActionKind]struct {
+		abandon bool
+		err     error
+	}{}}
+	wfStep := &wfmodels.WorkflowStep{
+		ID: "step-1",
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{
+				{Type: wfmodels.OnEnterConfigureSession}, // raw position 0, does not compile
+				{Type: wfmodels.OnEnterClearDecisions},   // raw position 1
+			},
+		},
+	}
+	step := CompileStep(wfStep)
+	require.Len(t, step.Events[TriggerOnEnter], 1, "configure_session must not survive compilation")
+
+	e := New(&fakeEntryDispatchStore{step: step}, MapRegistry{}, WithMarkerBearingStepEntryExecutor(executor))
+
+	e.DispatchStepEntry(context.Background(), "task-1", "wf-1", "step-1", "entry-1", 42)
+
+	require.Len(t, executor.calls, 1)
+	assert.Equal(t, ActionClearDecisions, executor.calls[0].Kind)
+	assert.Equal(t, 1, executor.calls[0].Position,
+		"claimed position must match the raw declared position (1), matching what stepentry.BuildPendingAllocation allocates from the same raw list")
+}
+
 // TestDispatchStepEntry_MarkerBearingAbandonStopsSequenceWithoutRecordingResult
 // covers the abandon (claim-loss) branch of the same stop rule: a concurrent
 // dispatch already owns the marker, which is a normal race outcome, not a

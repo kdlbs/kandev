@@ -77,7 +77,7 @@ func (e *Engine) DispatchStepEntry(ctx context.Context, taskID, workflowID, step
 	state := MachineState{TaskID: taskID, WorkflowID: workflowID, CurrentStepID: stepID}
 	results := make([]StepEntryActionResult, 0, len(actions))
 	seenParticipantRoles := map[string]bool{}
-	for i, action := range actions {
+	for _, action := range actions {
 		if !isSessionIndependentActionKind(action.Kind) {
 			// Exclusion is the contract, not an anomaly: session-shaped
 			// kinds (and any kind not yet classified) are silently
@@ -95,7 +95,7 @@ func (e *Engine) DispatchStepEntry(ctx context.Context, taskID, workflowID, step
 			continue
 		}
 		if e.markerExecutor != nil && markerEntryID != 0 && stepentry.MarkerBearing(string(action.Kind)) {
-			abandon, execErr := e.markerExecutor.ExecuteMarkerBearingStepEntryAction(ctx, taskID, step, action, i, markerEntryID)
+			abandon, execErr := e.markerExecutor.ExecuteMarkerBearingStepEntryAction(ctx, taskID, step, action, action.DeclaredPosition, markerEntryID)
 			if abandon {
 				break
 			}

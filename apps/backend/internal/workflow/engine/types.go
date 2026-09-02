@@ -84,6 +84,16 @@ type Action struct {
 	Kind             ActionKind
 	RequiresApproval bool
 
+	// DeclaredPosition is this action's 0-based index in the step's raw
+	// on_enter declaration, set by compileOnEnter. It differs from a
+	// position derived by counting compiled actions whenever an earlier
+	// declared action does not compile (e.g. configure_session, or
+	// set_session_mode with no target mode) — DispatchStepEntry's
+	// marker-bearing claim must use this value, not a loop index over the
+	// compiled slice, so it agrees with stepentry.BuildPendingAllocation's
+	// position (also counted over the raw declaration).
+	DeclaredPosition int
+
 	// Guard, when non-nil, gates a transition action on a condition that the
 	// engine evaluates before resolving the transition target. Today only
 	// wait_for_quorum is supported. Non-transition actions ignore Guard.
@@ -310,8 +320,9 @@ func CompileStep(step *wfmodels.WorkflowStep) StepSpec {
 
 func compileOnEnter(step *wfmodels.WorkflowStep) []Action {
 	actions := make([]Action, 0, len(step.Events.OnEnter))
-	for _, action := range step.Events.OnEnter {
+	for i, action := range step.Events.OnEnter {
 		if compiled, ok := CompileOnEnterAction(action); ok {
+			compiled.DeclaredPosition = i
 			actions = append(actions, compiled)
 		}
 	}

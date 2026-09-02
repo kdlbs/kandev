@@ -132,6 +132,43 @@ func TestUpdateTaskAllocatesStepEntryWhenPendingAllocationPresent(t *testing.T) 
 	}
 }
 
+// TestUpdateTaskPersistsAllocatedMarkerPositions covers
+// AC-OFFICE-STEP-ENTRY-DISPATCH-002.1/.9: the only existing coverage of
+// marker_positions (the legacy-replay migration tests) asserts solely the
+// column's "" backfill default, which a SerializePositions that always
+// returned "" would also satisfy. This asserts a real allocation with
+// non-contiguous positions persists the actual encoded set.
+func TestUpdateTaskPersistsAllocatedMarkerPositions(t *testing.T) {
+	repo := newStepEntriesTestRepo(t)
+	task := createStepEntriesTestTask(t, repo, "task-marker-positions", "wf-1", "step-a")
+
+	task.WorkflowStepID = "step-review"
+	holder := &stepentry.AllocationResult{}
+	ctx := stepentry.WithResultHolder(context.Background(), holder)
+	ctx = stepentry.WithPendingAllocation(ctx, stepentry.PendingAllocation{
+		StepID: "step-review",
+		Digest: "digest-positions",
+		Positions: []stepentry.EnginePosition{
+			{Position: 0, Kind: "clear_decisions"},
+			{Position: 2, Kind: "queue_run_for_each_participant"},
+		},
+	})
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+
+	var markerPositions string
+	err := repo.db.QueryRowContext(context.Background(), repo.db.Rebind(`
+		SELECT marker_positions FROM workflow_step_entries WHERE id = ?
+	`), holder.EntryID).Scan(&markerPositions)
+	if err != nil {
+		t.Fatalf("query marker_positions: %v", err)
+	}
+	if markerPositions != "0,2" {
+		t.Fatalf("marker_positions = %q, want %q (the allocated position set, not the column default)", markerPositions, "0,2")
+	}
+}
+
 func TestUpdateTaskWithoutPendingAllocationAllocatesNothing(t *testing.T) {
 	repo := newStepEntriesTestRepo(t)
 	task := createStepEntriesTestTask(t, repo, "task-2", "wf-1", "step-a")
