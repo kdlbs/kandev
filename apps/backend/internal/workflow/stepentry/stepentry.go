@@ -98,16 +98,106 @@ func ResultHolderFromContext(ctx context.Context) (*AllocationResult, bool) {
 	return r, ok
 }
 
-// IsEngineOwnedOnEnter reports whether an on_enter action kind is dispatched
-// by the step-entry marker system as of this Build round. See the package
-// doc's scope note for the kinds deliberately excluded for now.
+// IsEngineOwnedOnEnter reports whether an on_enter action kind carries a
+// step-entry marker. Delegates to MarkerBearing, the single declaration
+// AC-OFFICE-STEP-ENTRY-DISPATCH-002.1 requires — see Ownership's doc comment
+// for why this must not be reseeded independently.
 func IsEngineOwnedOnEnter(t wfmodels.OnEnterActionType) bool {
-	switch t {
-	case wfmodels.OnEnterClearDecisions, wfmodels.OnEnterQueueRunForEachParticipant:
-		return true
-	default:
-		return false
+	return MarkerBearing(string(t))
+}
+
+// Dispatcher identifies which of the two step-entry dispatchers owns an
+// action kind.
+type Dispatcher string
+
+const (
+	// DispatcherLedger is Repository.dispatchStepEntry -> Engine.DispatchStepEntry,
+	// which runs synchronously after every registered step-transition
+	// writer's own commit, on every route.
+	DispatcherLedger Dispatcher = "ledger"
+	// DispatcherMarker is processOnEnter -> dispatchOnEnterActions, which
+	// runs only on the on_turn_complete route.
+	DispatcherMarker Dispatcher = "marker"
+)
+
+// Ownership records, for one action kind, which dispatcher owns it and
+// whether it is marker-bearing. The two properties are independent and must
+// not be conflated (AC-OFFICE-STEP-ENTRY-DISPATCH-002.1): a kind can be
+// owned and carry no marker, as three ledger-owned kinds already do.
+type Ownership struct {
+	Dispatcher    Dispatcher
+	MarkerBearing bool
+}
+
+// ownershipTable is the single declaration both dispatchers read instead of
+// keeping a private list (AC-OFFICE-STEP-ENTRY-DISPATCH-002.1). Ownership is
+// seeded from the pre-convergence sessionIndependentActionKinds membership
+// (the five kinds Engine.DispatchStepEntry already executes); marker-bearing
+// is seeded from the pre-convergence IsEngineOwnedOnEnter membership (the two
+// kinds the marker system already records). The two seeds are different
+// functions over different histories and are not interchangeable: seeding
+// ownership from the marker-bearing seed would silently drop queue_run,
+// run_code_review and ensure_participant_seat; seeding marker-bearing from
+// the ownership seed would promise a marker for three kinds that have never
+// carried one. configure_session is written in by hand — CompileOnEnterAction
+// has no case for it, so no engine ActionKind ever reaches this table for it,
+// but AC-OFFICE-STEP-ENTRY-DISPATCH-002.1 still requires it classified in
+// both columns as one of the five session-shaped kinds Out of scope names.
+var ownershipTable = map[string]Ownership{
+	string(wfmodels.OnEnterClearDecisions):             {Dispatcher: DispatcherLedger, MarkerBearing: true},
+	string(wfmodels.OnEnterQueueRunForEachParticipant): {Dispatcher: DispatcherLedger, MarkerBearing: true},
+	string(wfmodels.OnEnterQueueRun):                   {Dispatcher: DispatcherLedger, MarkerBearing: false},
+	string(wfmodels.OnEnterRunCodeReview):              {Dispatcher: DispatcherLedger, MarkerBearing: false},
+	string(wfmodels.OnEnterEnsureParticipantSeat):      {Dispatcher: DispatcherLedger, MarkerBearing: false},
+	string(wfmodels.OnEnterEnablePlanMode):             {Dispatcher: DispatcherMarker, MarkerBearing: false},
+	string(wfmodels.OnEnterAutoStartAgent):             {Dispatcher: DispatcherMarker, MarkerBearing: false},
+	string(wfmodels.OnEnterResetAgentContext):          {Dispatcher: DispatcherMarker, MarkerBearing: false},
+	string(wfmodels.OnEnterSetSessionMode):             {Dispatcher: DispatcherMarker, MarkerBearing: false},
+	string(wfmodels.OnEnterConfigureSession):           {Dispatcher: DispatcherMarker, MarkerBearing: false},
+}
+
+// Owner returns the declared ownership for kind and false when kind is not
+// classified in the table (neither dispatcher reaches it).
+func Owner(kind string) (Ownership, bool) {
+	o, ok := ownershipTable[kind]
+	return o, ok
+}
+
+// OwnedByLedger reports whether kind's owning dispatcher is the ledger
+// dispatcher. False for a kind the table does not classify.
+func OwnedByLedger(kind string) bool {
+	o, ok := ownershipTable[kind]
+	return ok && o.Dispatcher == DispatcherLedger
+}
+
+// OwnedByMarker reports whether kind's owning dispatcher is the marker
+// dispatcher. False for a kind the table does not classify.
+func OwnedByMarker(kind string) bool {
+	o, ok := ownershipTable[kind]
+	return ok && o.Dispatcher == DispatcherMarker
+}
+
+// MarkerBearing reports whether kind is marker-bearing, per the single
+// declaration this package owns (AC-OFFICE-STEP-ENTRY-DISPATCH-002.1). False
+// for a kind the table does not classify.
+func MarkerBearing(kind string) bool {
+	o, ok := ownershipTable[kind]
+	return ok && o.MarkerBearing
+}
+
+// KnownKinds returns every action kind the ownership table classifies,
+// filtered to dispatcher (pass "" for every kind regardless of dispatcher).
+// Exported for tests that need to assert the table's membership stays in
+// sync with what the engine actually compiles, without reaching into this
+// package's private map.
+func KnownKinds(dispatcher Dispatcher) []string {
+	kinds := make([]string, 0, len(ownershipTable))
+	for kind, o := range ownershipTable {
+		if dispatcher == "" || o.Dispatcher == dispatcher {
+			kinds = append(kinds, kind)
+		}
 	}
+	return kinds
 }
 
 // BuildPendingAllocation inspects a step's on_enter declaration and returns

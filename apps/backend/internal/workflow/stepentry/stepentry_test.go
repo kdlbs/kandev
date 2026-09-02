@@ -56,6 +56,60 @@ func TestIsEngineOwnedOnEnter(t *testing.T) {
 	}
 }
 
+// TestOwnershipTableMatchesDesign asserts the ownership declaration's
+// membership matches the system design's table exactly, both dispatcher and
+// marker-bearing columns classified independently for every reachable kind.
+func TestOwnershipTableMatchesDesign(t *testing.T) {
+	cases := map[wfmodels.OnEnterActionType]Ownership{
+		wfmodels.OnEnterClearDecisions:             {Dispatcher: DispatcherLedger, MarkerBearing: true},
+		wfmodels.OnEnterQueueRunForEachParticipant: {Dispatcher: DispatcherLedger, MarkerBearing: true},
+		wfmodels.OnEnterQueueRun:                   {Dispatcher: DispatcherLedger, MarkerBearing: false},
+		wfmodels.OnEnterRunCodeReview:              {Dispatcher: DispatcherLedger, MarkerBearing: false},
+		wfmodels.OnEnterEnsureParticipantSeat:      {Dispatcher: DispatcherLedger, MarkerBearing: false},
+		wfmodels.OnEnterEnablePlanMode:             {Dispatcher: DispatcherMarker, MarkerBearing: false},
+		wfmodels.OnEnterAutoStartAgent:             {Dispatcher: DispatcherMarker, MarkerBearing: false},
+		wfmodels.OnEnterResetAgentContext:          {Dispatcher: DispatcherMarker, MarkerBearing: false},
+		wfmodels.OnEnterSetSessionMode:             {Dispatcher: DispatcherMarker, MarkerBearing: false},
+		wfmodels.OnEnterConfigureSession:           {Dispatcher: DispatcherMarker, MarkerBearing: false},
+	}
+	for kind, want := range cases {
+		got, ok := Owner(string(kind))
+		if !ok {
+			t.Errorf("Owner(%s): expected a classification, found none", kind)
+			continue
+		}
+		if got != want {
+			t.Errorf("Owner(%s) = %+v, want %+v", kind, got, want)
+		}
+		if OwnedByLedger(string(kind)) != (want.Dispatcher == DispatcherLedger) {
+			t.Errorf("OwnedByLedger(%s) disagrees with Owner", kind)
+		}
+		if OwnedByMarker(string(kind)) != (want.Dispatcher == DispatcherMarker) {
+			t.Errorf("OwnedByMarker(%s) disagrees with Owner", kind)
+		}
+		if MarkerBearing(string(kind)) != want.MarkerBearing {
+			t.Errorf("MarkerBearing(%s) disagrees with Owner", kind)
+		}
+	}
+	if len(cases) != 10 {
+		t.Fatalf("expected exactly 10 classified kinds (the design's table), got %d", len(cases))
+	}
+}
+
+// TestOwnershipTableUnclassifiedKind asserts an unknown kind is classified by
+// neither accessor, rather than defaulting to either dispatcher.
+func TestOwnershipTableUnclassifiedKind(t *testing.T) {
+	if _, ok := Owner("move_to_next"); ok {
+		t.Fatalf("expected move_to_next (a transition action, not an entry action) to be unclassified")
+	}
+	if OwnedByLedger("move_to_next") || OwnedByMarker("move_to_next") {
+		t.Fatalf("expected an unclassified kind to be owned by neither dispatcher")
+	}
+	if MarkerBearing("move_to_next") {
+		t.Fatalf("expected an unclassified kind to be non-marker-bearing")
+	}
+}
+
 func TestBuildPendingAllocationNoEngineOwnedActions(t *testing.T) {
 	actions := []wfmodels.OnEnterAction{
 		{Type: wfmodels.OnEnterEnablePlanMode},

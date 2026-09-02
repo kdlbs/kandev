@@ -10,6 +10,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/stepentry"
 )
 
 // TestSessionShapedAndSessionIndependentKindsPartitionCompiledOnEnterKinds
@@ -38,13 +41,20 @@ func TestSessionShapedAndSessionIndependentKindsPartitionCompiledOnEnterKinds(t 
 			"compiled on_enter kind %q is classified in both sessionShapedActionKinds and sessionIndependentActionKinds", kind)
 	}
 
-	for kind := range sessionShapedActionKinds {
-		assert.Contains(t, compiled, kind,
-			"sessionShapedActionKinds lists %q, which CompileOnEnterAction no longer emits", kind)
+	// configure_session is deliberately excluded: it is a marker-owned kind
+	// written into the ownership table by hand (system design, "Ownership
+	// declaration"), but CompileOnEnterAction has no case for it, so it can
+	// never appear in `compiled`. Every other marker-owned kind must.
+	for _, kind := range stepentry.KnownKinds(stepentry.DispatcherMarker) {
+		if kind == string(wfmodels.OnEnterConfigureSession) {
+			continue
+		}
+		assert.Contains(t, compiled, ActionKind(kind),
+			"the ownership table lists %q as marker-owned, which CompileOnEnterAction no longer emits", kind)
 	}
-	for kind := range sessionIndependentActionKinds {
-		assert.Contains(t, compiled, kind,
-			"sessionIndependentActionKinds lists %q, which CompileOnEnterAction no longer emits", kind)
+	for _, kind := range stepentry.KnownKinds(stepentry.DispatcherLedger) {
+		assert.Contains(t, compiled, ActionKind(kind),
+			"the ownership table lists %q as ledger-owned, which CompileOnEnterAction no longer emits", kind)
 	}
 }
 

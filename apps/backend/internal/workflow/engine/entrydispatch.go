@@ -3,39 +3,29 @@ package engine
 import (
 	"context"
 	"strings"
+
+	"github.com/kandev/kandev/internal/workflow/stepentry"
 )
 
-// sessionShapedActionKinds are the step-entry action kinds a route with a
-// live arriving session already executes today — through the orchestrator's
-// own inline entry handler on most routes, and through
-// HandleTriggerSessionShapedOnly on the workflow-switch route. DispatchStepEntry
-// never runs these: running them a second time would launch or prompt an
-// agent twice (AC-OFFICE-STEP-ENTRY-001.3, .5).
-var sessionShapedActionKinds = map[ActionKind]bool{
-	ActionEnablePlanMode:    true,
-	ActionAutoStartAgent:    true,
-	ActionResetAgentContext: true,
-	ActionSetSessionMode:    true,
-}
-
-// sessionIndependentActionKinds are the step-entry action kinds
-// DispatchStepEntry executes. None of them reads or mutates the arriving
-// session, so every one is safe to run for an arrival with no live session
-// (AC-OFFICE-STEP-ENTRY-001.1).
-var sessionIndependentActionKinds = map[ActionKind]bool{
-	ActionClearDecisions:             true,
-	ActionQueueRunForEachParticipant: true,
-	ActionQueueRun:                   true,
-	ActionRunCodeReview:              true,
-	ActionEnsureParticipantSeat:      true,
-}
-
+// isSessionShapedActionKind reports whether kind is one of the step-entry
+// action kinds a route with a live arriving session already executes today —
+// through the orchestrator's own inline entry handler on most routes, and
+// through HandleTriggerSessionShapedOnly on the workflow-switch route.
+// DispatchStepEntry never runs these: running them a second time would
+// launch or prompt an agent twice (AC-OFFICE-STEP-ENTRY-001.3, .5). Reads
+// the single ownership declaration (AC-OFFICE-STEP-ENTRY-DISPATCH-002.1)
+// instead of keeping a private list.
 func isSessionShapedActionKind(kind ActionKind) bool {
-	return sessionShapedActionKinds[kind]
+	return stepentry.OwnedByMarker(string(kind))
 }
 
+// isSessionIndependentActionKind reports whether kind is one of the
+// step-entry action kinds DispatchStepEntry executes. None of them reads or
+// mutates the arriving session, so every one is safe to run for an arrival
+// with no live session (AC-OFFICE-STEP-ENTRY-001.1). Reads the single
+// ownership declaration instead of keeping a private list.
 func isSessionIndependentActionKind(kind ActionKind) bool {
-	return sessionIndependentActionKinds[kind]
+	return stepentry.OwnedByLedger(string(kind))
 }
 
 // StepEntryActionResult records the outcome of one action DispatchStepEntry
