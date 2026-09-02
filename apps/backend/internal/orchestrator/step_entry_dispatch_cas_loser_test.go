@@ -165,7 +165,17 @@ func TestProcessOnEnter_ConcurrentDispatchLosesLiveClaim_AbandonsEntryWithoutSki
 
 	// The concurrent, would-be-loser dispatch: same entry, same session,
 	// racing while the winner above is still parked inside clear_decisions.
-	f.svc.WorkflowEngine().DispatchStepEntry(ctx, "t1", reviewStep.WorkflowID, reviewStep.ID, "loser-entry", entryID)
+	// A LoadStep failure would return a non-empty results slice with Err
+	// set instead of the abandon path's empty slice, looking identical to a
+	// correct claim-loss abandon by side effects alone (no run queued, no
+	// warning log) — check the results themselves so this actually verifies
+	// the CAS-loser path rather than only its absence of side effects.
+	loserResults := f.svc.WorkflowEngine().DispatchStepEntry(ctx, "t1", reviewStep.WorkflowID, reviewStep.ID, "loser-entry", entryID)
+	for _, r := range loserResults {
+		if r.Err != nil {
+			t.Errorf("loser DispatchStepEntry returned error: %v", r.Err)
+		}
+	}
 	if got := f.runQueue.callCount(); got != 0 {
 		t.Fatalf("queued run count after losing a live claim = %d, want 0 (AC-F1: loser must not skip ahead to queue_run_for_each_participant)", got)
 	}

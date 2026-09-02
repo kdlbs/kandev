@@ -96,11 +96,14 @@ func ResultHolderFromContext(ctx context.Context) (*AllocationResult, bool) {
 	return r, ok
 }
 
-// IsEngineOwnedOnEnter reports whether an on_enter action kind carries a
+// IsMarkerBearing reports whether an on_enter action kind carries a
 // step-entry marker. Delegates to MarkerBearing, the single declaration
 // AC-OFFICE-STEP-ENTRY-DISPATCH-002.1 requires — see Ownership's doc comment
-// for why this must not be reseeded independently.
-func IsEngineOwnedOnEnter(t wfmodels.OnEnterActionType) bool {
+// for why this must not be reseeded independently. Named distinctly from
+// "engine-owned"/"ledger-owned" (OwnedByLedger): marker-bearing and
+// ledger-owned are different, independent sets — three ledger-owned kinds
+// (queue_run, run_code_review, ensure_participant_seat) carry no marker.
+func IsMarkerBearing(t wfmodels.OnEnterActionType) bool {
 	return MarkerBearing(string(t))
 }
 
@@ -131,7 +134,7 @@ type Ownership struct {
 // keeping a private list (AC-OFFICE-STEP-ENTRY-DISPATCH-002.1). Ownership is
 // seeded from the pre-convergence sessionIndependentActionKinds membership
 // (the five kinds Engine.DispatchStepEntry already executes); marker-bearing
-// is seeded from the pre-convergence IsEngineOwnedOnEnter membership (the two
+// is seeded from the pre-convergence IsMarkerBearing membership (the two
 // kinds the marker system already records). The two seeds are different
 // functions over different histories and are not interchangeable: seeding
 // ownership from the marker-bearing seed would silently drop queue_run,
@@ -204,7 +207,7 @@ func KnownKinds(dispatcher Dispatcher) []string {
 func BuildPendingAllocation(stepID string, actions []wfmodels.OnEnterAction) (PendingAllocation, bool) {
 	positions := make([]EnginePosition, 0, len(actions))
 	for i, action := range actions {
-		if IsEngineOwnedOnEnter(action.Type) {
+		if IsMarkerBearing(action.Type) {
 			positions = append(positions, EnginePosition{Position: i, Kind: string(action.Type)})
 		}
 	}
