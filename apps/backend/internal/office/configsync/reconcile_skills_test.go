@@ -89,6 +89,58 @@ func TestBuildFetchedSkills_KeyCollisionKeepsByteWiseFirstPath(t *testing.T) {
 	assert.NotEmpty(t, warnings)
 }
 
+func TestSkillDeletionExemptions_UnreadableRefsAloneDoNotExemptAnything(t *testing.T) {
+	// AC-OFFICE-CONFIG-SYNC-003.6a's ambiguity does not exist when SKILL.md
+	// itself is readable: the directory's identity is known regardless of
+	// whether its reference files could be read. Only skillMDUnread and a
+	// parse failure (unparsedDirs) create the ambiguity that justifies
+	// exempting anything.
+	dirs := []skillFiles{{
+		dirName: "known", dirPath: "skills/known",
+		skillMD:        skillMDFile("skills/known/SKILL.md", "---\nname: known\n---\n"),
+		unreadableRefs: []unreadableFile{{path: "skills/known/references/big.md", reason: "over size limit"}},
+	}}
+	exemptKeys, coarse := skillDeletionExemptions(dirs, nil, nil)
+	assert.False(t, coarse, "a known-identity skill's unreadable reference file must not trigger the whole-kind fallback")
+	assert.Empty(t, exemptKeys)
+}
+
+func TestSkillDeletionExemptions_UnreadableSkillMDMatchingManifestExemptsOnlyThatKey(t *testing.T) {
+	dirs := []skillFiles{{
+		dirName: "flaky", dirPath: "skills/flaky",
+		skillMDUnread: &unreadableFile{path: "skills/flaky/SKILL.md", reason: "network error"},
+	}}
+	manifest := []ManifestEntry{{EntityKey: "flaky", SourcePath: "skills/flaky"}}
+	exemptKeys, coarse := skillDeletionExemptions(dirs, nil, manifest)
+	assert.False(t, coarse)
+	assert.True(t, exemptKeys["flaky"])
+}
+
+func TestSkillDeletionExemptions_UnreadableSkillMDMatchingNoManifestEntryIsCoarse(t *testing.T) {
+	dirs := []skillFiles{{
+		dirName: "new-name", dirPath: "skills/new-name",
+		skillMDUnread: &unreadableFile{path: "skills/new-name/SKILL.md", reason: "network error"},
+	}}
+	manifest := []ManifestEntry{{EntityKey: "old-name", SourcePath: "skills/old-name"}}
+	exemptKeys, coarse := skillDeletionExemptions(dirs, nil, manifest)
+	assert.True(t, coarse)
+	assert.Empty(t, exemptKeys)
+}
+
+func TestSkillDeletionExemptions_UnparsedDirMatchingManifestExemptsOnlyThatKey(t *testing.T) {
+	manifest := []ManifestEntry{{EntityKey: "broken", SourcePath: "skills/broken"}}
+	exemptKeys, coarse := skillDeletionExemptions(nil, []string{"skills/broken"}, manifest)
+	assert.False(t, coarse)
+	assert.True(t, exemptKeys["broken"])
+}
+
+func TestSkillDeletionExemptions_UnparsedDirMatchingNoManifestEntryIsCoarse(t *testing.T) {
+	manifest := []ManifestEntry{{EntityKey: "old-name", SourcePath: "skills/old-name"}}
+	exemptKeys, coarse := skillDeletionExemptions(nil, []string{"skills/new-name"}, manifest)
+	assert.True(t, coarse)
+	assert.Empty(t, exemptKeys)
+}
+
 func TestApplySkills_CreateRecordsManifestAndInlineSourceType(t *testing.T) {
 	repo, store := newReconcileTestRepo(t)
 	ctx := context.Background()

@@ -96,13 +96,20 @@ func skillFetchWarnings(dirs []skillFiles) []string {
 // skills, mirroring kindExemptions' manifest-source_path lookup: an
 // unreadable-or-unparsed skill directory whose path matches a manifest
 // entry's source_path exempts just that entity; one that matches no manifest
-// entry exempts every skill's deletion sweep this run, since an unreadable
-// directory's contents cannot say which entity — possibly renamed since the
-// last run — it defines. Matching by the directory's own current path (as
-// the prior, narrower exemption did) misses exactly that rename case: the
-// old manifest entry's path is gone from the listing and the new directory's
-// path was never recorded, so neither end matches without this coarse
-// fallback.
+// entry exempts every skill's deletion sweep this run, since a directory
+// whose definition cannot be read cannot say which entity — possibly renamed
+// since the last run — it defines. Matching by the directory's own current
+// path (as the prior, narrower exemption did) misses exactly that rename
+// case: the old manifest entry's path is gone from the listing and the new
+// directory's path was never recorded, so neither end matches without this
+// coarse fallback.
+//
+// Only an unreadable or unparseable SKILL.md creates that ambiguity. An
+// unreadable reference file under a directory whose SKILL.md parsed fine
+// does not: the directory's identity is already known and it is applied
+// normally this run, so it is not a deletion candidate regardless of
+// exemption state, and treating it as one would exempt unrelated,
+// genuinely-removed skills for as long as the reference stays unreadable.
 func skillDeletionExemptions(dirs []skillFiles, unparsedDirs []string, manifestForKind []ManifestEntry) (exemptKeys map[string]bool, coarseExempt bool) {
 	byPath := make(map[string]string, len(manifestForKind))
 	for _, m := range manifestForKind {
@@ -117,7 +124,7 @@ func skillDeletionExemptions(dirs []skillFiles, unparsedDirs []string, manifestF
 		coarseExempt = true
 	}
 	for _, sf := range dirs {
-		if sf.skillMDUnread != nil || len(sf.unreadableRefs) > 0 {
+		if sf.skillMDUnread != nil {
 			check(sf.dirPath)
 		}
 	}

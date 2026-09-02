@@ -1,6 +1,7 @@
 package configsync
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -302,6 +303,124 @@ func TestReconcile_RenamedSkillDirectoryWithUnreadableFileIsCoarseExemptNotDelet
 	require.NoError(t, err)
 	require.Len(t, skills, 1)
 	assert.Equal(t, "old-name", skills[0].Slug, "the entity must survive under its original identity")
+}
+
+func TestReconcile_UnreadableReferenceOnKnownSkillDoesNotBlockUnrelatedDeletion(t *testing.T) {
+	// AC-OFFICE-CONFIG-SYNC-003.6a's coarse fallback exists because an
+	// unreadable file's contents cannot say which entity it defines. That
+	// ambiguity is absent when a skill's SKILL.md parses fine: the skill's
+	// identity is already known and it applies normally, so an unreadable
+	// reference file under it must not suppress deletion of an unrelated
+	// skill genuinely removed upstream.
+	repo, store := newReconcileTestRepo(t)
+	seedTestConfig(t, store, "ws-1", "cfg")
+
+	fg := newFakeGitHub()
+	fg.dirs["cfg"] = []github.RepoContentEntry{}
+	fg.dirs["cfg/skills"] = []github.RepoContentEntry{dirEntry("cfg/skills/keep-me")}
+	fg.dirs["cfg/skills/keep-me"] = []github.RepoContentEntry{fileEntry("cfg/skills/keep-me/SKILL.md")}
+	fg.files["cfg/skills/keep-me/SKILL.md"] = []byte("---\nname: keep-me\n---\nBody.\n")
+
+	runner := NewRunner(fg, nil, repo, store)
+	ctx := context.Background()
+	result, err := runner.Reconcile(ctx, newRunnerTestConfig("ws-1", "cfg"))
+	require.NoError(t, err)
+	require.Equal(t, []string{"keep-me"}, result.Created)
+
+	// keep-me is genuinely removed upstream. A brand-new, unrelated skill
+	// arrives whose SKILL.md parses fine but whose one reference file is
+	// oversized (unreadable).
+	fg.dirs["cfg/skills"] = []github.RepoContentEntry{dirEntry("cfg/skills/new-skill")}
+	fg.dirs["cfg/skills/new-skill"] = []github.RepoContentEntry{
+		fileEntry("cfg/skills/new-skill/SKILL.md"),
+		dirEntry("cfg/skills/new-skill/references"),
+	}
+	fg.files["cfg/skills/new-skill/SKILL.md"] = []byte("---\nname: new-skill\n---\nBody.\n")
+	fg.dirs["cfg/skills/new-skill/references"] = []github.RepoContentEntry{
+		fileEntry("cfg/skills/new-skill/references/big.md"),
+	}
+	fg.files["cfg/skills/new-skill/references/big.md"] = bytes.Repeat([]byte("x"), MaxFileBytes+1)
+
+	result, err = runner.Reconcile(ctx, newRunnerTestConfig("ws-1", "cfg"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"keep-me"}, result.Deleted, "keep-me was genuinely removed and is unrelated to new-skill's unreadable reference file")
+	assert.Equal(t, []string{"new-skill"}, result.Created)
+
+	skills, err := repo.ListSkills(ctx, "ws-1")
+	require.NoError(t, err)
+	require.Len(t, skills, 1)
+	assert.Equal(t, "new-skill", skills[0].Slug)
+}
+
+func TestReconcile_UnreadableSkillMDExemptsOnlyThatEntityFromDeletionWhenPathMatchesManifest(t *testing.T) {
+	// Narrow (per-entity) exemption must still work for skills after
+	// AC-OFFICE-CONFIG-SYNC-003.6a's coarse fallback was added: an
+	// unreadable SKILL.md at a path the manifest already carries must
+	// exempt only that skill, not suppress deletion of an unrelated,
+	// genuinely removed skill in the same run.
+	repo, store := newReconcileTestRepo(t)
+	seedTestConfig(t, store, "ws-1", "cfg")
+
+	fg := newFakeGitHub()
+	fg.dirs["cfg"] = []github.RepoContentEntry{}
+	fg.dirs["cfg/skills"] = []github.RepoContentEntry{
+		dirEntry("cfg/skills/flaky"),
+		dirEntry("cfg/skills/removed"),
+	}
+	fg.dirs["cfg/skills/flaky"] = []github.RepoContentEntry{fileEntry("cfg/skills/flaky/SKILL.md")}
+	fg.files["cfg/skills/flaky/SKILL.md"] = []byte("---\nname: flaky\n---\nBody.\n")
+	fg.dirs["cfg/skills/removed"] = []github.RepoContentEntry{fileEntry("cfg/skills/removed/SKILL.md")}
+	fg.files["cfg/skills/removed/SKILL.md"] = []byte("---\nname: removed\n---\nBody.\n")
+
+	runner := NewRunner(fg, nil, repo, store)
+	ctx := context.Background()
+	result, err := runner.Reconcile(ctx, newRunnerTestConfig("ws-1", "cfg"))
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"flaky", "removed"}, result.Created)
+
+	// flaky's SKILL.md stays listed at its known path but becomes
+	// unreadable-content; removed's directory disappears entirely.
+	delete(fg.files, "cfg/skills/flaky/SKILL.md")
+	fg.dirs["cfg/skills"] = []github.RepoContentEntry{dirEntry("cfg/skills/flaky")}
+
+	result, err = runner.Reconcile(ctx, newRunnerTestConfig("ws-1", "cfg"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"removed"}, result.Deleted, "removed must still be deleted; flaky's unreadable SKILL.md must exempt only flaky")
+
+	skills, err := repo.ListSkills(ctx, "ws-1")
+	require.NoError(t, err)
+	require.Len(t, skills, 1)
+	assert.Equal(t, "flaky", skills[0].Slug)
+}
+
+func TestReconcile_OrdinarySkillDeletionIsNotSuppressedByDefault(t *testing.T) {
+	// Negative control: with zero unreadable/unparsed skill files anywhere,
+	// skillCoarse must default to false and a genuinely removed skill must
+	// still delete. Guards against a regression that always suppresses
+	// skill deletion regardless of cause.
+	repo, store := newReconcileTestRepo(t)
+	seedTestConfig(t, store, "ws-1", "cfg")
+
+	fg := newFakeGitHub()
+	fg.dirs["cfg"] = []github.RepoContentEntry{}
+	fg.dirs["cfg/skills"] = []github.RepoContentEntry{
+		dirEntry("cfg/skills/keep"),
+		dirEntry("cfg/skills/remove"),
+	}
+	fg.dirs["cfg/skills/keep"] = []github.RepoContentEntry{fileEntry("cfg/skills/keep/SKILL.md")}
+	fg.files["cfg/skills/keep/SKILL.md"] = []byte("---\nname: keep\n---\nBody.\n")
+	fg.dirs["cfg/skills/remove"] = []github.RepoContentEntry{fileEntry("cfg/skills/remove/SKILL.md")}
+	fg.files["cfg/skills/remove/SKILL.md"] = []byte("---\nname: remove\n---\nBody.\n")
+
+	runner := NewRunner(fg, nil, repo, store)
+	ctx := context.Background()
+	_, err := runner.Reconcile(ctx, newRunnerTestConfig("ws-1", "cfg"))
+	require.NoError(t, err)
+
+	fg.dirs["cfg/skills"] = []github.RepoContentEntry{dirEntry("cfg/skills/keep")}
+	result, err := runner.Reconcile(ctx, newRunnerTestConfig("ws-1", "cfg"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"remove"}, result.Deleted)
 }
 
 // TestApplyKindSplit_CreatesOnlyThenDeletesOnlyMatchesApplyKind guards the
