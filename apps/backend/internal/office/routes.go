@@ -7,6 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/office/approvals"
 	"github.com/kandev/kandev/internal/office/channels"
 	"github.com/kandev/kandev/internal/office/config"
+	"github.com/kandev/kandev/internal/office/configsync"
 	"github.com/kandev/kandev/internal/office/costs"
 	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/office/labels"
@@ -62,6 +63,11 @@ func RegisterAllRoutes(router *gin.RouterGroup, svcs *Services, handoff *taskser
 
 	configHandler := config.NewHandler(svcs.Config, log)
 	config.RegisterRoutes(router, configHandler)
+
+	if svcs.ConfigSync != nil {
+		configSyncHandler := configsync.NewHandler(svcs.ConfigSync, log)
+		configsync.RegisterRoutes(router, configSyncHandler)
+	}
 
 	dashboard.RegisterRoutes(router, svcs.Dashboard, svcs.Repo, svcs.GitManager, handoff, log)
 
