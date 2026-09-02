@@ -156,17 +156,39 @@ func TestReduceOmittedCountOnSingleSectionFallbackIsZero(t *testing.T) {
 	}
 }
 
+// buildTightFirstSectionDoc returns a document with n sections: the first
+// built from many 1-byte lines so the greedy fill in reduceFirstSection can
+// exhaust the available budget almost exactly, and n-1 trailing sections
+// each too large to be retained whole, forcing AC-001.7's fallback. The
+// near-zero slack this leaves is what lets a reservation-arithmetic defect
+// be observed at all; buildDoc's two-line sections leave tens of bytes of
+// unspent budget, which a one-byte or few-byte reservation error hides in.
+func buildTightFirstSectionDoc(n int) string {
+	var sb strings.Builder
+	sb.WriteString("## First\n")
+	sb.WriteString(strings.Repeat("\n", 5000))
+	for i := 2; i <= n; i++ {
+		fmt.Fprintf(&sb, "## Section %d\n", i)
+		sb.WriteString(strings.Repeat("x", 5000))
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
 func TestReduceNeverExceedsBudgetAtNarrowSectionCounts(t *testing.T) {
 	// N=10 and N=100 hide the missing-separator defect on the intra-section
-	// path; N=2, 3, 11 do not, because the reserved and rendered notice
+	// path; N=2, 3, 11, 101 do not, because the reserved and rendered notice
 	// widths coincide only at powers of ten.
-	for _, n := range []int{2, 3, 11} {
+	for _, n := range []int{2, 3, 11, 101} {
 		n := n
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
-			doc := buildDoc(n, 5000)
+			doc := buildTightFirstSectionDoc(n)
 			out, reduced, omitted := Reduce(doc, 300)
 			if !reduced {
 				t.Fatal("reduced = false, want true")
+			}
+			if !strings.Contains(out, wantCutMarker) {
+				t.Fatal("expected the intra-section fallback to have run")
 			}
 			if len(out) > 300 {
 				t.Fatalf("len(out) = %d, exceeds budget 300 at n=%d", len(out), n)
@@ -179,14 +201,22 @@ func TestReduceNeverExceedsBudgetAtNarrowSectionCounts(t *testing.T) {
 }
 
 func TestReduceNeverExceedsBudgetAtWideSectionCount(t *testing.T) {
-	// A three-digit section count exposes a fixed-width notice reservation.
-	doc := buildDoc(150, 30)
-	out, reduced, _ := Reduce(doc, 400)
+	// A three-digit section count exposes a fixed-width notice reservation;
+	// the tight first section leaves no slack for the wider rendered count
+	// to hide in.
+	doc := buildTightFirstSectionDoc(150)
+	out, reduced, omitted := Reduce(doc, 400)
 	if !reduced {
 		t.Fatal("reduced = false, want true")
 	}
+	if !strings.Contains(out, wantCutMarker) {
+		t.Fatal("expected the intra-section fallback to have run")
+	}
 	if len(out) > 400 {
 		t.Fatalf("len(out) = %d, exceeds budget 400", len(out))
+	}
+	if omitted != 149 {
+		t.Fatalf("omitted = %d, want 149", omitted)
 	}
 }
 
@@ -253,12 +283,33 @@ func TestSplitSectionsGivesNoZeroLengthPreambleWhenDocStartsWithHeading(t *testi
 	}
 }
 
+// TestReduceOutputIsValidUTF8ForMultibyteInput exercises reduceFirstSection's
+// line-boundary cut, not just the empty-output shadow path: the multibyte
+// content is spread across many short lines, so at this budget the greedy
+// fill retains several whole lines and stops mid-body, forcing the output to
+// actually contain multibyte runes. A single 9000-byte line (the previous
+// fixture) never fits even one line after reservations, so Reduce returns
+// "" under AC-001.13 and utf8.ValidString("") trivially passes regardless of
+// whether the cut logic is rune-safe.
 func TestReduceOutputIsValidUTF8ForMultibyteInput(t *testing.T) {
 	rune3byte := "中" // a 3-byte UTF-8 rune
-	doc := "## Section\n" + strings.Repeat(rune3byte, 3000) + "\n"
-	out, reduced, _ := Reduce(doc, 200)
+	var body strings.Builder
+	for i := 0; i < 2000; i++ {
+		body.WriteString(strings.Repeat(rune3byte, 10))
+		body.WriteString("\n")
+	}
+	doc := "## Section\n" + body.String() +
+		"## Oversized\n" + strings.Repeat("x", 90000) + "\n"
+
+	out, reduced, _ := Reduce(doc, 400)
 	if !reduced {
 		t.Fatal("reduced = false, want true")
+	}
+	if out == "" {
+		t.Fatal("fixture did not exercise the line-boundary cut; strengthen it")
+	}
+	if !strings.Contains(out, rune3byte) {
+		t.Fatal("fixture did not retain any multibyte content; strengthen it")
 	}
 	if !utf8.ValidString(out) {
 		t.Fatalf("output is not valid UTF-8: %q", out)
@@ -416,6 +467,41 @@ func TestReduceAssemblyConcatenatesMultiSectionHeadAndTailInDocumentOrder(t *tes
 	}
 	if len(out) > budget {
 		t.Fatalf("len(out) = %d, exceeds budget %d", len(out), budget)
+	}
+}
+
+// TestReduceSelectionClosesRunInsteadOfSkippingNonFittingSection is the
+// AC-001.5/AC-001.6 contiguity discriminator: a document shaped [small,
+// oversized, small, oversized] where a fitting section sits *behind* a
+// non-fitting one within the same run. AC-001.6 requires that run to close
+// permanently the moment a candidate does not fit, never skip past it to try
+// a smaller one behind it — skipping would retain the second small section
+// too, producing a "patchwork" whose hole a reader cannot locate.
+// TestReduceAssemblyConcatenatesMultiSectionHeadAndTailInDocumentOrder can't
+// catch a skip-instead-of-close regression: its dropped section sits at the
+// head/tail boundary, where skipping and closing produce identical output.
+func TestReduceSelectionClosesRunInsteadOfSkippingNonFittingSection(t *testing.T) {
+	s0 := "## Small1\nfits\n"
+	s1 := "## Big1\n" + strings.Repeat("a", 5000) + "\n"
+	s2 := "## Small2\nalso\n"
+	s3 := "## Big2\n" + strings.Repeat("b", 5000) + "\n"
+	doc := s0 + s1 + s2 + s3
+
+	out, reduced, omitted := Reduce(doc, 250)
+	if !reduced {
+		t.Fatal("reduced = false, want true")
+	}
+	if !strings.HasPrefix(out, s0) {
+		t.Fatalf("output does not retain the head section: %q", out)
+	}
+	if strings.Contains(out, "Small2") {
+		t.Fatalf("output retains a section from behind a non-fitting one in the same run: %q", out)
+	}
+	if omitted != 3 {
+		t.Fatalf("omitted = %d, want 3 (only the head section retained)", omitted)
+	}
+	if len(out) > 250 {
+		t.Fatalf("len(out) = %d, exceeds budget 250", len(out))
 	}
 }
 
