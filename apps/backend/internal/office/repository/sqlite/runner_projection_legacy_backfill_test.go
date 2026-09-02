@@ -36,6 +36,7 @@ func TestGetTaskAssignee_LegacyEpochRowsResolveToLaterInserted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	defer func() { _ = db.Close() }()
 
 	taskRepo, err := taskrepo.NewWithDB(db, db, nil)
