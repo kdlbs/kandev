@@ -97,11 +97,12 @@ through them before executing a kind that requires durability.
 
 This keeps one entry identity **where there is one**. For a step declaring at
 least one marker-bearing kind, the `workflow_step_entries` row is the entry
-identity for markers and for idempotency keys on every route, and the ledger row
-id is not used as a key input. For a step declaring none, no entry is allocated
+identity for markers and idempotency keys on the three `updateTaskTx` sites
+with a result holder; the other six still key off the ledger row id. For a
+step declaring none, no entry is allocated
 and its runs keep deriving their key from the
 step-transition row id as they do today - the `work` step's
-`auto_start_agent`-only sequence is the shipped example. `idempotencyKey`
+`auto_start_agent`-only sequence. `idempotencyKey`
 therefore keeps both branches rather than collapsing to `EntryID`, and which
 branch applies is read from the ownership declaration's marker-bearing column,
 not from whether an entry row happens to exist
@@ -484,7 +485,7 @@ change.
 An earlier draft moved the tiebreak to the participant row id; that is
 **withdrawn**. `review-participant-seats.md` AC-OFFICE-REVIEW-SEATS-003.3 binds
 this same fan-out to ascending `position` then ascending **agent profile
-identifier**, it is in force, and nothing here amends it. The swap would have
+identifier**; that binding stands. The swap would have
 violated that sibling contract wherever row-creation and agent-profile-id order
 diverge, and the existing fixture is lexically pre-sorted so it would not have
 caught the change - hence AC-OFFICE-STEP-ENTRY-DISPATCH-007.9's fixture whose

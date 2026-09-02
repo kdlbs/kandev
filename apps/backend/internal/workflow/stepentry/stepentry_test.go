@@ -148,6 +148,38 @@ func TestBuildPendingAllocationTracksDeclaredPositions(t *testing.T) {
 	}
 }
 
+// TestSerializePositions covers AC-OFFICE-STEP-ENTRY-DISPATCH-002.1/.9: the
+// encoding allocateStepEntryIfPending persists into
+// workflow_step_entries.marker_positions must actually carry the allocated
+// positions, in order — a version that always returned "" would otherwise
+// pass every other test in this package (BuildPendingAllocation's own
+// callers never re-parse it).
+func TestSerializePositions(t *testing.T) {
+	cases := []struct {
+		name      string
+		positions []EnginePosition
+		want      string
+	}{
+		{name: "empty", positions: nil, want: ""},
+		{name: "single", positions: []EnginePosition{{Position: 0, Kind: "clear_decisions"}}, want: "0"},
+		{
+			name: "multi preserves order",
+			positions: []EnginePosition{
+				{Position: 0, Kind: "clear_decisions"},
+				{Position: 2, Kind: "queue_run_for_each_participant"},
+			},
+			want: "0,2",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SerializePositions(tc.positions); got != tc.want {
+				t.Fatalf("SerializePositions(%+v) = %q, want %q", tc.positions, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestPendingAllocationContextRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	if _, ok := FromContext(ctx); ok {
