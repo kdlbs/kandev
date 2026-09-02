@@ -2,11 +2,9 @@
 package sqlite
 
 import (
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"time"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -27,8 +25,8 @@ const maxAgentErrorReconcileAttempts = 5
 // template, for every step, for every on_agent_error action that step's
 // template declares, it finds every system-owned workflow_steps row
 // materialized from that (template, step name) and appends the action if
-// and only if an action targeting the same (target, reason) isn't already
-// present — preserving every other declared action and leaving
+// and only if the same normalized action isn't already present — preserving
+// every other declared action and leaving
 // user-created or user-customised workflows (is_system = 0) alone.
 func (r *Repository) healBuiltinWorkflowStepOnAgentError() error {
 	templates, err := workflowcfg.LoadTemplates()
@@ -68,28 +66,23 @@ func (r *Repository) warnNonQueueRunAgentErrorActions(templateID string, step wf
 	}
 }
 
-// templateAgentErrorActions returns the distinct on_agent_error actions
-// step's template declares, keyed by (target, reason) so a duplicate
-// declaration in the template only reconciles once. A queue_run action with
-// an empty target is a malformed template declaration, not this
-// reconciler's concern, so it is skipped.
+// templateAgentErrorActions returns the distinct queue_run on_agent_error
+// actions the step's template declares. The key includes the full normalized
+// action config so actions that target different tasks or carry different
+// payloads are not collapsed. Empty target and task_id values are normalized
+// to the same defaults used by the workflow engine.
 func templateAgentErrorActions(step wfmodels.StepDefinition) []wfmodels.GenericAction {
 	var actions []wfmodels.GenericAction
-	seen := map[string]bool{}
+	seen := map[string]struct{}{}
 	for _, action := range step.Events.OnAgentError {
 		if action.Type != wfmodels.GenericActionQueueRun {
 			continue
 		}
-		target, _ := action.Config["target"].(string)
-		if target == "" {
+		key := agentErrorActionKey(action)
+		if _, ok := seen[key]; ok {
 			continue
 		}
-		reason, _ := action.Config["reason"].(string)
-		key := target + "\x00" + reason
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
+		seen[key] = struct{}{}
 		actions = append(actions, action)
 	}
 	return actions
@@ -146,8 +139,8 @@ func (r *Repository) healAgentErrorRowWithRetry(stepID, workflowID, templateID, 
 
 // tryHealAgentErrorRow makes one read-modify-write attempt for stepID. It
 // reads the stored events blob, appends the on_agent_error action if no
-// existing action already targets the same (target, reason), and writes
-// back only if the row's events column still matches what was read — the
+// equivalent normalized action already exists, and writes back only if the
+// row's events column still matches what was read — the
 // read value doubles as the optimistic-concurrency guard. applied is true
 // when the row already had the action or the write succeeded (both are
 // "nothing left to do" outcomes); retry is true only when a concurrent
@@ -158,82 +151,78 @@ func (r *Repository) tryHealAgentErrorRow(stepID string, action wfmodels.Generic
 		return false, true, nil
 	}
 
-	tx, err := r.db.Beginx()
-	if err != nil {
-		return false, false, fmt.Errorf("begin agent-error reconciliation tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	var rawEvents sql.NullString
-	if err := tx.QueryRow(tx.Rebind(`SELECT events FROM workflow_steps WHERE id = ?`), stepID).Scan(&rawEvents); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return true, false, nil
+	return r.tryHealWorkflowStepEvents(stepID, "agent-error", func(events *wfmodels.StepEvents) bool {
+		if hasAgentErrorEscalation(events.OnAgentError, action) {
+			return true
 		}
-		return false, false, fmt.Errorf("read step events: %w", err)
-	}
-
-	var events wfmodels.StepEvents
-	if rawEvents.String != "" {
-		if err := json.Unmarshal([]byte(rawEvents.String), &events); err != nil {
-			return false, false, fmt.Errorf("parse step events: %w", err)
-		}
-	}
-
-	target, _ := action.Config["target"].(string)
-	reason, _ := action.Config["reason"].(string)
-	if hasAgentErrorEscalation(events.OnAgentError, target, reason) {
-		return true, false, nil
-	}
-	events.OnAgentError = append(events.OnAgentError, action)
-
-	updated, err := json.Marshal(events)
-	if err != nil {
-		return false, false, fmt.Errorf("marshal step events: %w", err)
-	}
-
-	// events is TEXT and nullable; NULL requires "IS NULL" on both dialects
-	// since neither treats a bound parameter after IS/= as NULL-matching.
-	guardClause := "events = ?"
-	guardArg := any(rawEvents.String)
-	if !rawEvents.Valid {
-		guardClause = "events IS NULL"
-		guardArg = nil
-	}
-	args := []any{string(updated), time.Now().UTC(), stepID}
-	if guardArg != nil {
-		args = append(args, guardArg)
-	}
-	res, err := tx.Exec(tx.Rebind(`
-		UPDATE workflow_steps SET events = ?, updated_at = ?
-		WHERE id = ? AND `+guardClause), args...)
-	if err != nil {
-		return false, false, fmt.Errorf("write step events: %w", err)
-	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return false, false, fmt.Errorf("check agent-error reconciliation write: %w", err)
-	}
-	if affected == 0 {
-		return false, true, nil
-	}
-	if err := tx.Commit(); err != nil {
-		return false, false, fmt.Errorf("commit agent-error reconciliation: %w", err)
-	}
-	return true, false, nil
+		events.OnAgentError = append(events.OnAgentError, action)
+		return false
+	})
 }
 
-// hasAgentErrorEscalation reports whether actions already declares a
-// queue_run on_agent_error action targeting (target, reason).
-func hasAgentErrorEscalation(actions []wfmodels.GenericAction, target, reason string) bool {
+// hasAgentErrorEscalation reports whether actions already declares the same
+// normalized queue_run on_agent_error action as wanted.
+func hasAgentErrorEscalation(actions []wfmodels.GenericAction, wanted wfmodels.GenericAction) bool {
+	wantedKey := agentErrorActionKey(wanted)
 	for _, action := range actions {
 		if action.Type != wfmodels.GenericActionQueueRun {
 			continue
 		}
-		existingTarget, _ := action.Config["target"].(string)
-		existingReason, _ := action.Config["reason"].(string)
-		if existingTarget == target && existingReason == reason {
+		if agentErrorActionKey(action) == wantedKey {
 			return true
 		}
 	}
 	return false
+}
+
+const (
+	// These defaults must stay aligned with engine.readQueueRunConfig. The
+	// reconciler does not import the engine package because the repository
+	// layer must not depend on its runtime implementation.
+	defaultAgentErrorTarget = "primary"
+	defaultAgentErrorTaskID = "this"
+)
+
+// agentErrorActionKey returns a stable representation of the queue_run action
+// as the engine evaluates it. JSON gives map keys a deterministic order and
+// normalizes YAML/JSON numeric values across template materialization.
+func agentErrorActionKey(action wfmodels.GenericAction) string {
+	normalized := action
+	config := make(map[string]interface{}, len(action.Config)+4)
+	for key, value := range action.Config {
+		config[key] = value
+	}
+
+	target, _ := config["target"].(string)
+	target = strings.TrimSpace(target)
+	if target == "" {
+		target = defaultAgentErrorTarget
+	}
+	config["target"] = target
+
+	taskID, _ := config["task_id"].(string)
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		taskID = defaultAgentErrorTaskID
+	}
+	config["task_id"] = taskID
+
+	reason, _ := config["reason"].(string)
+	config["reason"] = reason
+
+	if payload, ok := config["payload"].(map[string]interface{}); ok {
+		config["payload"] = payload
+	} else {
+		config["payload"] = nil
+	}
+	normalized.Config = config
+
+	encoded, err := json.Marshal(normalized)
+	if err == nil {
+		return string(encoded)
+	}
+	// Template and persisted configs are JSON-compatible. Keep a deterministic
+	// fallback for malformed in-memory values so one bad action cannot stop
+	// startup reconciliation.
+	return fmt.Sprintf("%s:%#v", normalized.Type, normalized.Config)
 }

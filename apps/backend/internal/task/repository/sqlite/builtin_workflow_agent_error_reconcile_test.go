@@ -205,32 +205,73 @@ func TestHasAgentErrorEscalation(t *testing.T) {
 	actions := []wfmodels.GenericAction{
 		{Type: wfmodels.GenericActionQueueRun, Config: map[string]interface{}{"target": "workspace.ceo_agent", "reason": "agent_error"}},
 	}
-	if !hasAgentErrorEscalation(actions, "workspace.ceo_agent", "agent_error") {
-		t.Error("hasAgentErrorEscalation(workspace.ceo_agent, agent_error) = false, want true")
+	if !hasAgentErrorEscalation(actions, wfmodels.GenericAction{
+		Type:   wfmodels.GenericActionQueueRun,
+		Config: map[string]interface{}{"target": "workspace.ceo_agent", "reason": "agent_error"},
+	}) {
+		t.Error("hasAgentErrorEscalation did not find an equivalent queue_run action")
 	}
-	if hasAgentErrorEscalation(actions, "primary", "agent_error") {
-		t.Error("hasAgentErrorEscalation(primary, agent_error) = true, want false (different target)")
+	if hasAgentErrorEscalation(actions, wfmodels.GenericAction{
+		Type:   wfmodels.GenericActionQueueRun,
+		Config: map[string]interface{}{"target": "primary", "reason": "agent_error"},
+	}) {
+		t.Error("hasAgentErrorEscalation treated a different target as equivalent")
 	}
 }
 
-func TestTemplateAgentErrorActions_SkipsEmptyTargetAndDedupes(t *testing.T) {
+func TestHasAgentErrorEscalation_NormalizesDefaultsAndDistinguishesActionConfig(t *testing.T) {
+	actions := []wfmodels.GenericAction{
+		{
+			Type: wfmodels.GenericActionQueueRun,
+			Config: map[string]interface{}{
+				"target":  "primary",
+				"task_id": "this",
+				"reason":  "agent_error",
+				"payload": map[string]interface{}{"source": "template"},
+			},
+		},
+	}
+
+	if !hasAgentErrorEscalation(actions, wfmodels.GenericAction{
+		Type:   wfmodels.GenericActionQueueRun,
+		Config: map[string]interface{}{"reason": "agent_error", "payload": map[string]interface{}{"source": "template"}},
+	}) {
+		t.Error("hasAgentErrorEscalation did not normalize omitted target and task_id defaults")
+	}
+	if hasAgentErrorEscalation(actions, wfmodels.GenericAction{
+		Type:   wfmodels.GenericActionQueueRun,
+		Config: map[string]interface{}{"target": "primary", "task_id": "child", "reason": "agent_error", "payload": map[string]interface{}{"source": "template"}},
+	}) {
+		t.Error("hasAgentErrorEscalation ignored a distinct task_id")
+	}
+	if hasAgentErrorEscalation(actions, wfmodels.GenericAction{
+		Type:   wfmodels.GenericActionQueueRun,
+		Config: map[string]interface{}{"target": "primary", "task_id": "this", "reason": "agent_error", "payload": map[string]interface{}{"source": "other"}},
+	}) {
+		t.Error("hasAgentErrorEscalation ignored a distinct payload")
+	}
+}
+
+func TestTemplateAgentErrorActions_DedupesByNormalizedFullAction(t *testing.T) {
 	step := wfmodels.StepDefinition{
 		Events: wfmodels.StepEvents{
 			OnAgentError: []wfmodels.GenericAction{
-				{Type: wfmodels.GenericActionQueueRun, Config: map[string]interface{}{"target": "workspace.ceo_agent", "reason": "agent_error"}},
-				{Type: wfmodels.GenericActionQueueRun, Config: map[string]interface{}{"target": "workspace.ceo_agent", "reason": "agent_error"}},
-				{Type: wfmodels.GenericActionQueueRun, Config: map[string]interface{}{"target": ""}},
-				{Type: wfmodels.GenericActionQueueRun},
+				{Type: wfmodels.GenericActionQueueRun, Config: map[string]interface{}{"target": "workspace.ceo_agent", "task_id": "this", "reason": "agent_error", "payload": map[string]interface{}{"mode": "one"}}},
+				{Type: wfmodels.GenericActionQueueRun, Config: map[string]interface{}{"target": "workspace.ceo_agent", "task_id": "this", "reason": "agent_error", "payload": map[string]interface{}{"mode": "one"}}},
+				{Type: wfmodels.GenericActionQueueRun, Config: map[string]interface{}{"target": "workspace.ceo_agent", "task_id": "child", "reason": "agent_error", "payload": map[string]interface{}{"mode": "one"}}},
+				{Type: wfmodels.GenericActionQueueRun, Config: map[string]interface{}{"target": "workspace.ceo_agent", "task_id": "this", "reason": "agent_error", "payload": map[string]interface{}{"mode": "two"}}},
+				{Type: wfmodels.GenericActionQueueRun, Config: map[string]interface{}{"reason": "agent_error"}},
+				{Type: wfmodels.GenericActionQueueRun, Config: map[string]interface{}{"target": "primary", "task_id": "this", "reason": "agent_error"}},
 				{Type: wfmodels.GenericActionMoveToStep, Config: map[string]interface{}{"step_id": "done"}},
 			},
 		},
 	}
 	actions := templateAgentErrorActions(step)
-	if len(actions) != 1 {
-		t.Fatalf("templateAgentErrorActions len = %d, want 1: %+v", len(actions), actions)
+	if len(actions) != 4 {
+		t.Fatalf("templateAgentErrorActions len = %d, want 4: %+v", len(actions), actions)
 	}
-	if target, _ := actions[0].Config["target"].(string); target != "workspace.ceo_agent" {
-		t.Errorf("templateAgentErrorActions[0] target = %q, want workspace.ceo_agent", target)
+	if target, _ := actions[3].Config["target"].(string); target != "" {
+		t.Errorf("templateAgentErrorActions kept the default-target declaration as target %q, want it unchanged", target)
 	}
 }
 
