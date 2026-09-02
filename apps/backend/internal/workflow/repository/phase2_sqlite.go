@@ -750,6 +750,29 @@ func isParticipantsNaturalKeyViolation(err error) bool {
 
 const participantsLockNamespace = "workflow-participant-role-seat:"
 
+// ParticipantRoleSeatLockKey derives the shared advisory-lock key both
+// automatic casting (EnsureRoleSeat) and manual registration (office
+// AddTaskParticipant) acquire before mutating a role's seat slate for a
+// task. One exported function, not an exported namespace constant, so no
+// caller reassembles the key itself — a drift in separator or field order
+// between two reassemblies would produce two keys that look identical in
+// review and hash apart, closing nothing (system-design "The shared
+// exclusion").
+//
+// Keyed on task and role only, deliberately narrower than the namespace,
+// task, workflow and role EnsureRoleSeat locked on before this change.
+// Registration cannot know the task's workflow before it has resolved the
+// task's current step, and that step must be resolved inside the
+// exclusion — keeping the workflow in the key would force a provisional
+// read before the lock, a re-read inside it, and a retry when the two
+// disagree, which a shared exclusion is meant to avoid. A task belongs to
+// one workflow at a time, so every pair of writers that contended under
+// the four-part key still contends under this one; the change only adds
+// contention, never removes it.
+func ParticipantRoleSeatLockKey(taskID, role string) string {
+	return strings.Join([]string{participantsLockNamespace, taskID, role}, "|")
+}
+
 // ensureRoleSeatMaxAttempts bounds EnsureRoleSeat's retry loop. Mirrors
 // recordStepDecisionMaxAttempts: one retry resolves the race the unique
 // index exists for (a second concurrent entry's check now observes the
@@ -812,7 +835,8 @@ func (r *Repository) HasRoleSeatForTaskWorkflow(ctx context.Context, workflowID,
 //
 // Returns the seat (existing or newly written) and whether this call
 // inserted it. On PostgreSQL, an advisory transaction lock keyed on
-// (workflow, task, role) serializes concurrent callers before the SELECT,
+// (task, role) — ParticipantRoleSeatLockKey, shared with office's
+// AddTaskParticipant — serializes concurrent callers before the SELECT,
 // matching recordStepDecisionTx's pattern — SQLite's single-writer lock
 // already provides that serialization.
 func (r *Repository) EnsureRoleSeat(
@@ -853,7 +877,7 @@ func (r *Repository) ensureRoleSeatTx(
 	defer func() { _ = tx.Rollback() }()
 
 	if dialect.IsPostgres(r.db.DriverName()) {
-		lockKey := strings.Join([]string{participantsLockNamespace, workflowID, taskID, role}, "|")
+		lockKey := ParticipantRoleSeatLockKey(taskID, role)
 		if _, err := tx.ExecContext(ctx, r.db.Rebind("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))"), lockKey); err != nil {
 			return nil, false, fmt.Errorf("lock role seat identity: %w", err)
 		}
